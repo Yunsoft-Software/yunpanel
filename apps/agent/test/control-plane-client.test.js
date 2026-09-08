@@ -57,6 +57,8 @@ test('first control plane connection enrolls, protects identity and sends heartb
       fetchImpl,
       inspect: async () => ({ hostname: 'yun-test-01', memory: { totalBytes: 100 } }),
       inspectServices: async () => ({ nginx: { active: true } }),
+      inspectDocker: async () => ({ installed: true, reachable: true, containers: [{ name: 'api' }] }),
+      inspectNginx: async () => ({ installed: true, configs: [{ name: 'app.conf' }] }),
       logger: { info() {}, error() {} },
     });
 
@@ -71,6 +73,8 @@ test('first control plane connection enrolls, protects identity and sends heartb
 
     const heartbeatRequest = JSON.parse(calls[1].options.body);
     assert.equal(heartbeatRequest.inventory.hostname, 'yun-test-01');
+    assert.equal(heartbeatRequest.inventory.docker.containers[0].name, 'api');
+    assert.equal(heartbeatRequest.inventory.nginx.configs[0].name, 'app.conf');
     assert.equal(heartbeatRequest.services.nginx.active, true);
     assert.equal(calls[1].options.headers.authorization, 'Bearer agent-token-value-that-is-long-enough');
 
@@ -102,6 +106,13 @@ test('stored identity is reused without replaying enrollment token', async () =>
     return jsonResponse(200, { data: { id: 'server-002', connectivity: 'online' } });
   };
 
+  const emptyInspectors = {
+    inspect: async () => ({}),
+    inspectServices: async () => ({}),
+    inspectDocker: async () => ({}),
+    inspectNginx: async () => ({}),
+  };
+
   try {
     const first = await startControlPlaneLink({
       controlPlaneUrl: 'http://127.0.0.1:3001',
@@ -110,8 +121,7 @@ test('stored identity is reused without replaying enrollment token', async () =>
       heartbeatMs: 10_000,
       mode: 'development',
       fetchImpl: initialFetch,
-      inspect: async () => ({}),
-      inspectServices: async () => ({}),
+      ...emptyInspectors,
       logger: { info() {}, error() {} },
     });
     first.stop();
@@ -125,8 +135,7 @@ test('stored identity is reused without replaying enrollment token', async () =>
         calls.push({ url, options });
         return jsonResponse(200, { data: { id: 'server-002', connectivity: 'online' } });
       },
-      inspect: async () => ({}),
-      inspectServices: async () => ({}),
+      ...emptyInspectors,
       logger: { info() {}, error() {} },
     });
     second.stop();
