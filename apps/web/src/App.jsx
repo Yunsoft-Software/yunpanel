@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import DomainList from './DomainList.jsx';
 
 const navigation = [
   'Dashboard',
@@ -47,6 +48,8 @@ function App() {
   const [agentState, setAgentState] = useState({ status: 'checking', hostname: null });
   const [servers, setServers] = useState([]);
   const [serverAccess, setServerAccess] = useState('checking');
+  const [domains, setDomains] = useState([]);
+  const [domainAccess, setDomainAccess] = useState('checking');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -60,9 +63,10 @@ function App() {
         const apiPayload = await apiResponse.json();
         setApiState({ status: apiPayload.status ?? 'ok', version: apiPayload.version ?? null });
 
-        const [agentResult, serverResult] = await Promise.allSettled([
+        const [agentResult, serverResult, domainResult] = await Promise.allSettled([
           fetch('/api/dev/agent/inspect', { signal: controller.signal }),
           fetch('/api/dev/servers', { signal: controller.signal }),
+          fetch('/api/dev/domains', { signal: controller.signal }),
         ]);
 
         if (agentResult.status === 'fulfilled') {
@@ -97,11 +101,28 @@ function App() {
         } else if (serverResult.reason?.name !== 'AbortError') {
           setServerAccess('error');
         }
+
+        if (domainResult.status === 'fulfilled') {
+          const response = domainResult.value;
+          if (response.status === 404) {
+            setDomainAccess('protected');
+            setDomains([]);
+          } else if (response.ok) {
+            const payload = await response.json();
+            setDomains(Array.isArray(payload.data) ? payload.data : []);
+            setDomainAccess('ready');
+          } else {
+            setDomainAccess('error');
+          }
+        } else if (domainResult.reason?.name !== 'AbortError') {
+          setDomainAccess('error');
+        }
       } catch (error) {
         if (error.name !== 'AbortError') {
           setApiState({ status: 'offline', version: null });
           setAgentState({ status: 'offline', hostname: null });
           setServerAccess('error');
+          setDomainAccess('error');
         }
       }
     }
@@ -118,6 +139,7 @@ function App() {
   const summaryCards = useMemo(() => {
     const online = servers.filter((server) => server.connectivity === 'online').length;
     const offline = servers.filter((server) => server.connectivity === 'offline').length;
+    const activeDomains = domains.filter((domain) => domain.state === 'active').length;
 
     return [
       {
@@ -125,11 +147,15 @@ function App() {
         value: String(servers.length),
         note: servers.length ? `${online} online · ${offline} offline` : 'No enrolled servers yet',
       },
-      { label: 'Applications', value: '0', note: 'Static, Node and Docker' },
-      { label: 'Failed jobs', value: '0', note: 'Nothing requires attention' },
-      { label: 'SSL warnings', value: '0', note: 'No certificates tracked yet' },
+      {
+        label: 'Domains',
+        value: String(domains.length),
+        note: domains.length ? `${activeDomains} active · ${domains.length - activeDomains} pending` : 'No desired state yet',
+      },
+      { label: 'Failed jobs', value: '0', note: 'Job queue comes next' },
+      { label: 'SSL warnings', value: '0', note: 'ACME tracking not enabled yet' },
     ];
-  }, [servers]);
+  }, [domains, servers]);
 
   return (
     <div className="app-shell">
@@ -230,6 +256,17 @@ function App() {
               <StatusRow label="Job queue" status="pending" detail="Not initialized" />
             </div>
           </article>
+        </section>
+
+        <section className="panel domain-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Desired state</p>
+              <h2>Domains</h2>
+            </div>
+            <span className="panel-meta">{domainAccess}</span>
+          </div>
+          <DomainList domains={domains} access={domainAccess} />
         </section>
       </main>
     </div>
