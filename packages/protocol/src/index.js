@@ -1,4 +1,9 @@
-import { ApplicationValidationError, assertUuid, normalizeStaticApplicationSpec } from '@yunpanel/shared';
+import {
+  ApplicationValidationError,
+  assertUuid,
+  normalizeNodeApplicationSpec,
+  normalizeStaticApplicationSpec,
+} from '@yunpanel/shared';
 
 export const AGENT_PROTOCOL_VERSION = 1;
 
@@ -13,6 +18,7 @@ export const OPERATIONS = Object.freeze({
   SSL_RENEW: 'ssl.renew',
   APP_STATIC_DEPLOY: 'app.static.deploy',
   APP_STATIC_ROLLBACK: 'app.static.rollback',
+  APP_NODE_DEPLOY: 'app.node.deploy',
 });
 
 export const READ_ONLY_OPERATIONS = Object.freeze([
@@ -105,6 +111,14 @@ function validateMutationPayload(operation, payload, errors) {
       assertUuid(payload.releaseId, 'releaseId');
     } catch (error) {
       errors.push(error instanceof ApplicationValidationError ? error.message : 'app.static.rollback payload is invalid');
+    }
+  }
+
+  if (operation === OPERATIONS.APP_NODE_DEPLOY) {
+    try {
+      normalizeNodeApplicationSpec(payload);
+    } catch (error) {
+      errors.push(error instanceof ApplicationValidationError ? error.message : 'app.node.deploy payload is invalid');
     }
   }
 }
