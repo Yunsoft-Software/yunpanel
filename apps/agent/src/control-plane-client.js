@@ -108,6 +108,8 @@ export async function startControlPlaneLink({
   fetchImpl = fetch,
   inspect = () => executeOperation('server.inspect', {}),
   inspectServices = () => executeOperation('server.services', {}),
+  inspectDocker = () => executeOperation('server.docker', {}),
+  inspectNginx = () => executeOperation('server.nginx', {}),
   logger = console,
 } = {}) {
   const baseUrl = normalizeControlPlaneUrl(controlPlaneUrl, mode);
@@ -143,7 +145,13 @@ export async function startControlPlaneLink({
     heartbeatRunning = true;
 
     try {
-      const [inventory, services] = await Promise.all([inspect(), inspectServices()]);
+      const [baseInventory, services, docker, nginx] = await Promise.all([
+        inspect(),
+        inspectServices(),
+        inspectDocker(),
+        inspectNginx(),
+      ]);
+      const inventory = { ...baseInventory, docker, nginx };
       await sendHeartbeat({ baseUrl, identity, inventory, services, fetchImpl });
     } catch (error) {
       logger.error(`[yun-agent] heartbeat failed: ${error.code ?? error.message}`);
