@@ -202,7 +202,7 @@ export function createServerRegistry({
     };
   }
 
-  async function heartbeat({ serverId, agentToken, agentVersion = null, inventory = null, services = null }) {
+  async function authenticateAgent({ serverId, agentToken }) {
     await ensureInitialized();
 
     const server = state.servers.find((candidate) => candidate.id === serverId);
@@ -210,10 +210,18 @@ export function createServerRegistry({
       throw new RegistryError('invalid_agent_credentials', 'Agent credentials are invalid', 401);
     }
 
+    return publicServer(server, now(), offlineAfterMs);
+  }
+
+  async function heartbeat({ serverId, agentToken, agentVersion = null, inventory = null, services = null }) {
+    await ensureInitialized();
+    const authenticatedServer = await authenticateAgent({ serverId, agentToken });
+
     if (agentVersion != null && (typeof agentVersion !== 'string' || agentVersion.length > 40)) {
       throw new RegistryError('invalid_agent_version', 'agentVersion must be a string up to 40 characters');
     }
 
+    const server = state.servers.find((candidate) => candidate.id === authenticatedServer.id);
     const timestamp = new Date(now()).toISOString();
     server.lastSeenAt = timestamp;
     server.agentVersion = agentVersion ?? server.agentVersion;
@@ -240,6 +248,7 @@ export function createServerRegistry({
     init,
     issueEnrollmentToken,
     enrollServer,
+    authenticateAgent,
     heartbeat,
     listServers,
     getServer,
