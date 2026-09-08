@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { assertUuid, normalizeNodeRuntimeConfig } from '@yunpanel/shared';
+import {
+  assertUuid,
+  normalizeApplicationEnvironmentBundle,
+  normalizeNodeRuntimeConfig,
+} from '@yunpanel/shared';
 
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const NODE_PATHS = new Set(['/usr/bin/node', '/usr/local/bin/node']);
@@ -49,6 +53,25 @@ function validateNpmPath(value) {
     throw new SystemdTemplateError('invalid_npm_path', 'npm executable path is not allowlisted');
   }
   return value;
+}
+
+function quoteEnvironmentValue(value) {
+  return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+}
+
+export function renderNodeEnvironmentFile({ applicationId, runtime, environment = {} }) {
+  const appId = assertUuid(applicationId, 'applicationId');
+  const normalizedRuntime = normalizeNodeRuntimeConfig(runtime);
+  const customEnvironment = normalizeApplicationEnvironmentBundle(environment);
+  const values = {
+    NODE_ENV: 'production',
+    HOST: '127.0.0.1',
+    PORT: String(normalizedRuntime.port),
+    YUNPANEL_APPLICATION_ID: appId,
+  };
+
+  for (const key of Object.keys(customEnvironment).sort()) values[key] = customEnvironment[key];
+  return `${Object.entries(values).map(([key, value]) => `${key}=${quoteEnvironmentValue(value)}`).join('\n')}\n`;
 }
 
 export function renderNodeSystemdUnit({ applicationId, user, nodePath, npmPath = null, runtime }) {
