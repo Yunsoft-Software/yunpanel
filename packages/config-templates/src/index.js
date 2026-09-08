@@ -9,5 +9,6 @@ export {
   SystemdTemplateError,
   nodeApplicationUser,
   nodeServiceName,
+  renderNodeEnvironmentFile,
   renderNodeSystemdUnit,
 } from './systemd.js';
