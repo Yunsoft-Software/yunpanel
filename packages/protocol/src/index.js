@@ -1,3 +1,5 @@
+import { ApplicationValidationError, normalizeStaticApplicationSpec } from '@yunpanel/shared';
+
 export const AGENT_PROTOCOL_VERSION = 1;
 
 export const OPERATIONS = Object.freeze({
@@ -9,6 +11,7 @@ export const OPERATIONS = Object.freeze({
   DOMAIN_ACTIVATE: 'domain.activate',
   SSL_ISSUE: 'ssl.issue',
   SSL_RENEW: 'ssl.renew',
+  APP_STATIC_DEPLOY: 'app.static.deploy',
 });
 
 export const READ_ONLY_OPERATIONS = Object.freeze([
@@ -104,6 +107,14 @@ function validateMutationPayload(operation, payload, errors) {
     }
     if (payload.dryRun !== undefined && typeof payload.dryRun !== 'boolean') {
       errors.push('ssl.renew dryRun must be boolean');
+    }
+  }
+
+  if (operation === OPERATIONS.APP_STATIC_DEPLOY) {
+    try {
+      normalizeStaticApplicationSpec(payload);
+    } catch (error) {
+      errors.push(error instanceof ApplicationValidationError ? error.message : 'app.static.deploy payload is invalid');
     }
   }
 }
