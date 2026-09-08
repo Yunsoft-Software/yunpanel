@@ -34,7 +34,16 @@ async function activeCertificate(registry, {
     email: 'admin@example.com',
     staging,
   });
-  await registry.markActive(certificate.id, metadata(certName, validTo));
+  if (staging) {
+    await registry.markValidated(certificate.id, {
+      certName,
+      domains: [certName],
+      status: 'validated',
+      staging: true,
+    });
+  } else {
+    await registry.markActive(certificate.id, metadata(certName, validTo));
+  }
   return registry.getCertificate(certificate.id);
 }
 

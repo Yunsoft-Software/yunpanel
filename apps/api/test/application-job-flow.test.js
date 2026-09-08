@@ -234,6 +234,6 @@ test('cancelling a queued static deployment clears the application deployment lo
     const state = await context.applicationRegistry.getApplication(application.id);
     assert.equal(state.activeDeploymentId, null);
     assert.equal(state.state, 'error');
-    assert.equal(state.lastError, 'deployment_cancelled');
+    assert.equal(state.lastError, 'operation_cancelled');
   });
 });

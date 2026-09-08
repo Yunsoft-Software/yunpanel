@@ -145,7 +145,7 @@ test('Node application deploy reconciles a healthy systemd release and proxy tar
       token: adminToken,
     });
     assert.equal(rollback.response.status, 409);
-    assert.equal(rollback.payload.error.code, 'rollback_not_supported');
+    assert.equal(rollback.payload.error.code, 'rollback_release_required');
   });
 });
 
