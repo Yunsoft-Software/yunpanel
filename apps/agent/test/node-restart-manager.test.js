@@ -24,14 +24,25 @@ function restartSpec() {
   };
 }
 
-function createHarness({ currentRelease = RELEASE_ID, healthy = true, restartFails = false } = {}) {
+function createHarness({
+  currentRelease = RELEASE_ID,
+  healthResults = [true],
+  failFirstRestart = false,
+  failAllRestarts = false,
+} = {}) {
   const commands = [];
   const environments = [];
+  let healthIndex = 0;
+  let restartCalls = 0;
+  let restores = 0;
+  let commits = 0;
+
   const run = async (file, args) => {
     commands.push({ file, args });
     if (file === '/usr/bin/systemctl' && args[0] === '--version') return { stdout: 'systemd 255\n' };
     if (file === '/usr/bin/systemctl' && args[0] === 'restart') {
-      if (restartFails) {
+      restartCalls += 1;
+      if (failAllRestarts || (failFirstRestart && restartCalls === 1)) {
         const error = new Error('restart failed');
         error.code = 1;
         throw error;
@@ -46,13 +57,27 @@ function createHarness({ currentRelease = RELEASE_ID, healthy = true, restartFai
     run,
     systemctlPaths: ['/usr/bin/systemctl'],
     readlinkFn: async () => `releases/${currentRelease}`,
-    waitForHealth: async () => healthy,
-    writeEnvironment: async (input) => environments.push(input),
+    waitForHealth: async () => healthResults[Math.min(healthIndex++, healthResults.length - 1)],
+    writeEnvironment: async (input) => {
+      environments.push(input);
+      return {
+        restore: async () => { restores += 1; },
+        commit: () => { commits += 1; },
+      };
+    },
   });
-  return { manager, commands, environments };
+  return {
+    manager,
+    commands,
+    environments,
+    counts: {
+      get restores() { return restores; },
+      get commits() { return commits; },
+    },
+  };
 }
 
-test('healthy Node restart materializes desired environment before restarting the current release', async () => {
+test('healthy Node restart materializes and commits desired environment', async () => {
   const harness = createHarness();
   const result = await harness.manager.restartNode({
     ...restartSpec(),
@@ -67,6 +92,8 @@ test('healthy Node restart materializes desired environment before restarting th
   assert.ok(result.serviceName.startsWith('yunpanel-node-'));
   assert.equal(harness.environments.length, 1);
   assert.deepEqual(harness.environments[0].environment, { API_TOKEN: 'secret-value' });
+  assert.equal(harness.counts.restores, 0);
+  assert.equal(harness.counts.commits, 1);
   assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 1);
 });
 
@@ -81,23 +108,37 @@ test('Node restart rejects release drift before touching environment or systemd'
   assert.equal(harness.commands.length, 0);
 });
 
-test('Node restart reports failed health checks after systemd restart', async () => {
-  const harness = createHarness({ healthy: false });
+test('failed health check restores previous environment and service before reporting failure', async () => {
+  const harness = createHarness({ healthResults: [false, true] });
 
   await assert.rejects(
     harness.manager.restartNode(restartSpec()),
     (error) => error instanceof NodeRestartError && error.code === 'node_restart_health_failed',
   );
   assert.equal(harness.environments.length, 1);
-  assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 1);
+  assert.equal(harness.counts.restores, 1);
+  assert.equal(harness.counts.commits, 0);
+  assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 2);
 });
 
-test('Node restart wraps systemd command failures without leaking command details', async () => {
-  const harness = createHarness({ restartFails: true });
+test('systemd command failure restores previous environment and restarts service', async () => {
+  const harness = createHarness({ failFirstRestart: true, healthResults: [true] });
 
   await assert.rejects(
     harness.manager.restartNode(restartSpec()),
     (error) => error instanceof NodeRestartError && error.code === 'node_restart_command_failed',
   );
-  assert.equal(harness.environments.length, 1);
+  assert.equal(harness.counts.restores, 1);
+  assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 2);
+});
+
+test('reports restore failure if previous environment cannot recover a healthy service', async () => {
+  const harness = createHarness({ healthResults: [false, false] });
+
+  await assert.rejects(
+    harness.manager.restartNode(restartSpec()),
+    (error) => error instanceof NodeRestartError && error.code === 'node_restart_restore_failed',
+  );
+  assert.equal(harness.counts.restores, 1);
+  assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 2);
 });
