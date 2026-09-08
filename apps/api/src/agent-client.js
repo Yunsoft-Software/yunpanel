@@ -6,10 +6,8 @@ const DEV_TOKEN = 'development-only-token';
 
 function resolveAgentToken() {
   if (process.env.YUN_AGENT_TOKEN) return process.env.YUN_AGENT_TOKEN;
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('YUN_AGENT_TOKEN is required in production');
-  }
-  return DEV_TOKEN;
+  if (process.env.NODE_ENV === 'development') return DEV_TOKEN;
+  throw new Error('YUN_AGENT_TOKEN is required outside development mode');
 }
 
 export async function inspectLocalAgent({ agentUrl = process.env.YUN_AGENT_URL ?? DEFAULT_AGENT_URL } = {}) {

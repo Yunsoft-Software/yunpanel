@@ -27,6 +27,13 @@ test('health endpoint returns API status', async () => {
   });
 });
 
+test('development agent endpoint is hidden outside development mode', async () => {
+  await withServer(createApp({ environment: 'production' }), async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/dev/agent/inspect`);
+    assert.equal(response.status, 404);
+  });
+});
+
 test('development agent endpoint returns the inspected agent payload', async () => {
   const inspectAgent = async () => ({
     requestId: 'request-0001',
@@ -34,7 +41,7 @@ test('development agent endpoint returns the inspected agent payload', async () 
     result: { hostname: 'local-dev' },
   });
 
-  await withServer(createApp({ inspectAgent }), async (baseUrl) => {
+  await withServer(createApp({ inspectAgent, environment: 'development' }), async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/dev/agent/inspect`);
     assert.equal(response.status, 200);
     const body = await response.json();
@@ -48,7 +55,7 @@ test('agent errors are returned as a safe gateway error', async () => {
     throw new Error('agent is offline');
   };
 
-  await withServer(createApp({ inspectAgent }), async (baseUrl) => {
+  await withServer(createApp({ inspectAgent, environment: 'development' }), async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/dev/agent/inspect`);
     assert.equal(response.status, 502);
     const body = await response.json();

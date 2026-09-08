@@ -8,7 +8,7 @@ const DEVELOPMENT_TOKEN = 'development-only-token';
 
 function resolveAgentToken() {
   if (process.env.YUN_AGENT_TOKEN) return process.env.YUN_AGENT_TOKEN;
-  if ((process.env.YUN_AGENT_MODE ?? 'development') === 'development') return DEVELOPMENT_TOKEN;
+  if (process.env.YUN_AGENT_MODE === 'development') return DEVELOPMENT_TOKEN;
   throw new Error('YUN_AGENT_TOKEN is required outside development mode');
 }
 
@@ -61,7 +61,7 @@ export function createAgentServer({ token = resolveAgentToken(), execute = execu
       return sendJson(response, 200, {
         status: 'ok',
         service: 'yun-agent',
-        mode: process.env.YUN_AGENT_MODE ?? 'development',
+        mode: process.env.YUN_AGENT_MODE ?? 'protected',
       });
     }
 

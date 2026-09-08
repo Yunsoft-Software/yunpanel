@@ -3,7 +3,7 @@ import { inspectLocalAgent } from './agent-client.js';
 
 export const API_VERSION = '0.0.1';
 
-export function createApp({ inspectAgent = inspectLocalAgent } = {}) {
+export function createApp({ inspectAgent = inspectLocalAgent, environment = process.env.NODE_ENV } = {}) {
   const app = express();
 
   app.disable('x-powered-by');
@@ -18,7 +18,7 @@ export function createApp({ inspectAgent = inspectLocalAgent } = {}) {
   });
 
   app.get('/api/dev/agent/inspect', async (request, response) => {
-    if (process.env.NODE_ENV === 'production') {
+    if (environment !== 'development') {
       return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
     }
 
