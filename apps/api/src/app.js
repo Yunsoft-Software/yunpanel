@@ -46,6 +46,7 @@ async function reconcileApplicationJob(applicationRegistry, job) {
       deploymentId: job.id,
       releaseId: job.result.releaseId,
       commitSha: job.result.commitSha,
+      previousReleaseId: job.result.previousReleaseId,
       artifactFiles: job.result.artifactFiles,
       artifactBytes: job.result.artifactBytes,
     });
@@ -57,6 +58,7 @@ async function reconcileApplicationJob(applicationRegistry, job) {
     await applicationRegistry.markRolledBack(job.resourceId, {
       operationId: job.id,
       releaseId: job.result.releaseId,
+      previousReleaseId: job.result.previousReleaseId,
     });
   }
 }
