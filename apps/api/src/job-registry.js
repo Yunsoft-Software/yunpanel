@@ -1,11 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { createOperationEnvelope, isKnownOperation } from '@yunpanel/protocol';
+import { createOperationEnvelope, OPERATIONS } from '@yunpanel/protocol';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
 const RESOURCE_TYPES = new Set(['domain', 'server', 'application', 'certificate', 'backup', 'database']);
+const ASYNC_OPERATIONS = new Set([
+  OPERATIONS.DOMAIN_STAGE,
+  OPERATIONS.DOMAIN_ACTIVATE,
+]);
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 export class JobRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -44,6 +49,48 @@ function validateError(error) {
     code: typeof error.code === 'string' ? error.code.slice(0, 120) : 'job_failed',
     message: typeof error.message === 'string' ? error.message.slice(0, 500) : 'Agent job failed',
   };
+}
+
+function sanitizeResult(job, result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
+  }
+
+  if (job.operation === OPERATIONS.DOMAIN_STAGE) {
+    if (typeof result.checksum !== 'string' || !SHA256_PATTERN.test(result.checksum)) {
+      throw new JobRegistryError('invalid_job_result', 'Domain staging result requires a SHA-256 checksum');
+    }
+    if (typeof result.configName !== 'string' || result.configName.length < 1 || result.configName.length > 300) {
+      throw new JobRegistryError('invalid_job_result', 'Domain staging result configName is invalid');
+    }
+    if (!Number.isInteger(result.bytes) || result.bytes < 1 || result.bytes > 2 * 1024 * 1024) {
+      throw new JobRegistryError('invalid_job_result', 'Domain staging result byte size is invalid');
+    }
+    return {
+      checksum: result.checksum,
+      configName: result.configName,
+      bytes: result.bytes,
+    };
+  }
+
+  if (job.operation === OPERATIONS.DOMAIN_ACTIVATE) {
+    if (typeof result.checksum !== 'string' || !SHA256_PATTERN.test(result.checksum)) {
+      throw new JobRegistryError('invalid_job_result', 'Domain activation result requires a SHA-256 checksum');
+    }
+    if (typeof result.configName !== 'string' || result.configName.length < 1 || result.configName.length > 300) {
+      throw new JobRegistryError('invalid_job_result', 'Domain activation result configName is invalid');
+    }
+    if (result.active !== true) {
+      throw new JobRegistryError('invalid_job_result', 'Domain activation result must confirm active state');
+    }
+    return {
+      checksum: result.checksum,
+      configName: result.configName,
+      active: true,
+    };
+  }
+
+  throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
 }
 
 export function createJobRegistry({ filePath = null, now = () => Date.now() } = {}) {
@@ -91,7 +138,7 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
 
     if (typeof serverId !== 'string' || !serverId) throw new JobRegistryError('invalid_server', 'serverId is required');
     if (typeof type !== 'string' || type.length < 1 || type.length > 80) throw new JobRegistryError('invalid_job_type', 'Job type is invalid');
-    if (!isKnownOperation(operation)) throw new JobRegistryError('invalid_operation', 'Agent operation is not allowlisted');
+    if (!ASYNC_OPERATIONS.has(operation)) throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new JobRegistryError('invalid_payload', 'Job payload must be an object');
     if (!RESOURCE_TYPES.has(resourceType)) throw new JobRegistryError('invalid_resource_type', 'Job resource type is invalid');
     if (typeof resourceId !== 'string' || !resourceId) throw new JobRegistryError('invalid_resource_id', 'Job resource id is required');
@@ -165,7 +212,7 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
 
     job.status = status;
     job.finishedAt = new Date(now()).toISOString();
-    job.result = status === 'succeeded' ? result : null;
+    job.result = status === 'succeeded' ? sanitizeResult(job, result) : null;
     job.error = status === 'failed' ? validateError(error) : null;
     await persist();
     return publicJob(job);
