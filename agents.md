@@ -220,6 +220,10 @@ Test çalıştırmak için GitHub Actions kullanılmayacak; testler lokal veya p
 - `todo.md`, bu geliştirme ortamında doğrudan yapılamayan, gerçek Plesk/sunucu erişimi gerektiren veya kullanıcı/Codex tarafından production ortamında uygulanması/test edilmesi gereken işleri içerir.
 - Bu ortamda yapılamayan bir server/Plesk işi fark edildiğinde `todo.md` güncellenmelidir.
 - Yapılabilecek kod işi sırf kolaylık olsun diye `todo.md`'ye atılmamalıdır.
+- **`plan.md` ve `todo.md` geliştirmeden sonra topluca güncellenen rapor dosyaları değildir; geliştirmeyle paralel yaşayan kaynaklardır.**
+- Bir plan maddesi kodla tamamlandığı veya kapsamı değiştiği anda aynı çalışma turunda `plan.md` güncellenmelidir.
+- Gerçek sunucu/Plesk testi gerektiği fark edildiği anda aynı çalışma turunda `todo.md` maddesi eklenmeli; test yapıldığında sonuç, tarih ve durum yine aynı turda işlenmelidir.
+- Kod ile `plan.md`/`todo.md` arasında bilinen bir uyumsuzluk bırakıp bir sonraki geliştirme işine geçmek yasaktır.
 
 ## 13. Kapsam kontrolü
 
@@ -244,7 +248,9 @@ Her değişiklikte şu sıra izlenmelidir:
 3. Değişikliği uygula.
 4. Mümkün olan test/validation işlemlerini yap.
 5. Küçük commit oluştur.
-6. Server/Plesk üzerinde yapılması gereken harici adım oluştuysa `todo.md`'ye ekle.
-7. Bir sonraki bağımsız işe geç.
+6. Tamamlanan/değişen geliştirme durumunu aynı turda `plan.md`'ye işle.
+7. Server/Plesk üzerinde yapılması gereken harici adım oluştuysa aynı turda `todo.md`'ye ekle; yapılmışsa sonucu işaretle ve doğrulama notunu yaz.
+8. `plan.md`, `todo.md` ve kodun birbirini anlattığını kontrol et.
+9. Bir sonraki bağımsız işe geç.
 
 YunPanel'in hedefi çok özellikli görünmek değil; Yunsoft'un production sunucularını güvenli, öngörülebilir ve hızlı yönetmektir.
