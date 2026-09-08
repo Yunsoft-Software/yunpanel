@@ -18,6 +18,10 @@ test('known operations are explicitly allowlisted', () => {
   assert.equal(isReadOnlyOperation(OPERATIONS.SERVER_NGINX), true);
   assert.equal(isKnownOperation(OPERATIONS.DOMAIN_STAGE), true);
   assert.equal(isReadOnlyOperation(OPERATIONS.DOMAIN_STAGE), false);
+  assert.equal(isKnownOperation(OPERATIONS.SSL_ISSUE), true);
+  assert.equal(isReadOnlyOperation(OPERATIONS.SSL_ISSUE), false);
+  assert.equal(isKnownOperation(OPERATIONS.SSL_RENEW), true);
+  assert.equal(isReadOnlyOperation(OPERATIONS.SSL_RENEW), false);
   assert.equal(isKnownOperation('shell.exec'), false);
   assert.equal(isReadOnlyOperation('shell.exec'), false);
 });
@@ -67,4 +71,48 @@ test('validates domain mutation payloads before they reach the agent handler', (
   });
   assert.equal(invalidActivation.ok, false);
   assert.match(invalidActivation.errors.join(' '), /SHA-256/);
+});
+
+test('validates certificate issue and renewal payloads', () => {
+  const validIssue = validateOperationEnvelope({
+    id: 'request-0005',
+    operation: OPERATIONS.SSL_ISSUE,
+    payload: {
+      domains: ['example.com', 'www.example.com'],
+      email: 'admin@example.com',
+      staging: true,
+    },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(validIssue.ok, true);
+
+  const wildcardIssue = validateOperationEnvelope({
+    id: 'request-0006',
+    operation: OPERATIONS.SSL_ISSUE,
+    payload: {
+      domains: ['*.example.com'],
+      email: 'admin@example.com',
+    },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(wildcardIssue.ok, false);
+
+  const badEmail = validateOperationEnvelope({
+    id: 'request-0007',
+    operation: OPERATIONS.SSL_ISSUE,
+    payload: {
+      domains: ['example.com'],
+      email: 'not-an-email',
+    },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(badEmail.ok, false);
+
+  const validRenew = validateOperationEnvelope({
+    id: 'request-0008',
+    operation: OPERATIONS.SSL_RENEW,
+    payload: { certName: 'example.com', dryRun: true },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(validRenew.ok, true);
 });
