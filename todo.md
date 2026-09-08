@@ -23,12 +23,12 @@ Her tamamlanan maddede mümkünse sonuç, tarih ve kısa doğrulama notu bırak�
 
 ## 2026-09-09 test sunucusu erişim durumu
 
-- [ ] **Sağlanan YunPanel test sunucusuna SSH erişimini tekrar doğrula.**
-  - 2026-09-09 tarihinde mevcut geliştirme runner'ından yapılan TCP kontrolünde SSH portu `connection refused` döndürdü; SSH authentication aşamasına geçilemedi.
-  - Aynı runner imajında `ssh` client binary'si bulunmuyor ve paket repository/DNS erişimi olmadığı için bu oturumda client kurulamadı.
+- [x] **Sağlanan YunPanel test sunucusuna SSH erişimini tekrar doğrula.**
+  - 2026-09-09 tarihinde 22/TCP bağlantısı, SSH host-key doğrulaması ve root parola authentication akışı başarıyla tamamlandı.
+  - Sunucu `Ubuntu 22.04.5 LTS`, systemd 249 ve x86_64 olarak doğrulandı; projenin Ubuntu 24.04 LTS destek hedefini karşılamadığı için 24.04 exit validation maddeleri henüz tamamlanmış sayılmamalıdır.
+  - İlk salt-okunur envanterde Plesk, Nginx, Apache, Passenger, Node.js, Docker, MySQL/MariaDB, Certbot ve mail stack kurulu değildi; yalnızca SSH ilgili servisler arasında aktifti ve UFW inaktifti.
   - Sunucu IP'si, root parolası veya başka credential değerleri bu dosyaya/Git geçmişine yazılmamalıdır.
-  - Sonraki denemede önce sunucu tarafında SSH servisinin 22/TCP üzerinde dinlediği ve firewall/provider ACL'in erişime izin verdiği doğrulanmalı.
-  - Erişim sağlanınca aşağıdaki Ubuntu/systemd testleri bekletilmeden yürütülüp sonuçları bu dosyaya işlenmeli.
+  - Kimlik bilgileri yalnızca Git tarafından ignore edilen, `0600` izinli yerel dosyada tutulmaktadır.
 
 ---
 
@@ -38,6 +38,7 @@ Her tamamlanan maddede mümkünse sonuç, tarih ve kısa doğrulama notu bırak�
   - Production Plesk sunucusunda ilk geliştirme/test yapılmamalı.
   - Minimum olarak public/private IP, SSH erişimi ve sudo/root yetkisi sağlanmalı.
   - Test sunucusu mümkünse production'a benzer Node/Docker/MySQL koşullarına sahip olmalı.
+  - 2026-09-09: Sağlanan boş test hostuna erişim doğrulandı ancak host Ubuntu 22.04.5 LTS çalıştırdığı için bu madde açık bırakıldı; in-place distribution upgrade güvenli test ortamı provisioning'i ile eşdeğer kabul edilmedi.
 
 - [ ] **Mevcut Plesk sunucusunun tam servis envanterini çıkar.**
   - Ubuntu sürümü.

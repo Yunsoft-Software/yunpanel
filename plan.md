@@ -47,9 +47,10 @@ Current implementation checkpoint — 2026-09-09:
 - static release/deploy/rollback foundations are implemented,
 - Node/systemd deployment, guarded rollback, guarded restart and process-status flows are implemented,
 - normalized Node runtime state is idempotent so custom startup files/scripts survive control-plane round trips,
+- managed deploy/restart/rollback locks return their cleanup-tracked promises so failed operations do not leak unhandled rejections, and failed Node rollback restores the previous environment transaction only once,
 - protected Node runtime environments are implemented with a separate AES-256-GCM store, masked admin metadata, authenticated just-in-time agent delivery and atomic root-protected systemd EnvironmentFile materialization,
 - secure log transport/redaction and the environment/log operator UI remain active Milestone 4 work,
-- real Ubuntu/systemd validation remains an external test requirement tracked in `todo.md`; the provided test host refused TCP/22 from the current development runner on 2026-09-09.
+- real Ubuntu 24.04/systemd validation remains an external test requirement tracked in `todo.md`; the provided test host became reachable over SSH on 2026-09-09 but runs Ubuntu 22.04.5 LTS, so target-platform exit validation remains open.
 
 ---
 
