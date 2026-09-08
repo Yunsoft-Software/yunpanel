@@ -96,3 +96,15 @@ export function normalizeNodeApplicationSpec(value) {
     retention: Number.isInteger(value.retention) && value.retention >= 2 && value.retention <= 20 ? value.retention : 5,
   };
 }
+
+export function normalizeNodeRollbackSpec(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ApplicationValidationError('invalid_node_rollback', 'Node rollback spec must be an object');
+  }
+
+  return {
+    applicationId: assertUuid(value.applicationId, 'applicationId'),
+    releaseId: assertUuid(value.releaseId, 'releaseId'),
+    runtime: normalizeNodeRuntimeConfig(value.runtime),
+  };
+}

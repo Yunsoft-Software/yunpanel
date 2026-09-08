@@ -10,6 +10,7 @@ export {
 
 export {
   normalizeNodeApplicationSpec,
+  normalizeNodeRollbackSpec,
   normalizeNodeRuntimeConfig,
 } from './node-application.js';
 
