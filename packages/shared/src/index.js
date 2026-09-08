@@ -13,6 +13,7 @@ export {
   normalizeNodeRestartSpec,
   normalizeNodeRollbackSpec,
   normalizeNodeRuntimeConfig,
+  normalizeNodeStatusSpec,
 } from './node-application.js';
 
 export {
