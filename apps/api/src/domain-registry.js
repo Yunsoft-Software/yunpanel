@@ -6,6 +6,7 @@ import { DomainValidationError, normalizeDomainSet } from '@yunpanel/shared';
 const STORE_VERSION = 1;
 const TARGET_TYPES = new Set(['static', 'proxy']);
 const HTTPS_MODES = new Set(['off', 'managed']);
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 export class DomainRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -67,6 +68,12 @@ function normalizeDomains(primaryDomain, aliases) {
 
 function ownedNames(domain) {
   return [domain.primaryDomain, ...domain.aliases];
+}
+
+function requireDomain(state, domainId) {
+  const domain = state.domains.find((candidate) => candidate.id === domainId);
+  if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+  return domain;
 }
 
 export function createDomainRegistry({
@@ -151,6 +158,10 @@ export function createDomainRegistry({
       certificateId: null,
       state: 'draft',
       desiredRevision: 1,
+      stagedRevision: 0,
+      stagedChecksum: null,
+      stagedConfigName: null,
+      lastStagedAt: null,
       appliedRevision: 0,
       lastAppliedAt: null,
       lastError: null,
@@ -174,10 +185,39 @@ export function createDomainRegistry({
     return domain ? publicDomain(domain) : null;
   }
 
-  async function markApplied(domainId) {
+  async function markStaged(domainId, { checksum, configName }) {
     await ensureInitialized();
-    const domain = state.domains.find((candidate) => candidate.id === domainId);
-    if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+    const domain = requireDomain(state, domainId);
+
+    if (typeof checksum !== 'string' || !SHA256_PATTERN.test(checksum)) {
+      throw new DomainRegistryError('invalid_staged_checksum', 'Staged domain checksum is invalid');
+    }
+    if (typeof configName !== 'string' || configName.length < 1 || configName.length > 300) {
+      throw new DomainRegistryError('invalid_staged_config', 'Staged domain config name is invalid');
+    }
+
+    const timestamp = new Date(now()).toISOString();
+    domain.stagedRevision = domain.desiredRevision;
+    domain.stagedChecksum = checksum;
+    domain.stagedConfigName = configName;
+    domain.lastStagedAt = timestamp;
+    domain.state = 'staged';
+    domain.lastError = null;
+    domain.updatedAt = timestamp;
+    await persist();
+    return publicDomain(domain);
+  }
+
+  async function markApplied(domainId, { checksum } = {}) {
+    await ensureInitialized();
+    const domain = requireDomain(state, domainId);
+
+    if (domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum) {
+      throw new DomainRegistryError('staged_revision_required', 'Current desired domain revision has not been staged', 409);
+    }
+    if (checksum !== domain.stagedChecksum) {
+      throw new DomainRegistryError('staged_checksum_mismatch', 'Activated checksum does not match staged desired state', 409);
+    }
 
     const timestamp = new Date(now()).toISOString();
     domain.appliedRevision = domain.desiredRevision;
@@ -191,8 +231,7 @@ export function createDomainRegistry({
 
   async function markFailed(domainId, errorCode) {
     await ensureInitialized();
-    const domain = state.domains.find((candidate) => candidate.id === domainId);
-    if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+    const domain = requireDomain(state, domainId);
 
     domain.state = 'error';
     domain.lastError = typeof errorCode === 'string' ? errorCode.slice(0, 120) : 'apply_failed';
@@ -206,6 +245,7 @@ export function createDomainRegistry({
     createDomain,
     listDomains,
     getDomain,
+    markStaged,
     markApplied,
     markFailed,
   };
