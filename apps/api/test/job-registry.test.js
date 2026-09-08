@@ -37,15 +37,49 @@ test('agent jobs move through queued, running and succeeded states exactly once'
     serverId: 'server-1',
     jobId: job.id,
     status: 'succeeded',
-    result: { checksum: 'a'.repeat(64) },
+    result: {
+      checksum: 'a'.repeat(64),
+      configName: 'yunpanel-example.com.conf',
+      bytes: 512,
+      unsafeExtra: 'ignored',
+    },
   });
   assert.equal(completed.status, 'succeeded');
   assert.equal(completed.result.checksum, 'a'.repeat(64));
+  assert.equal(completed.result.configName, 'yunpanel-example.com.conf');
+  assert.equal('unsafeExtra' in completed.result, false);
 
   await assert.rejects(
     registry.complete({ serverId: 'server-1', jobId: job.id, status: 'succeeded' }),
     (error) => error instanceof JobRegistryError && error.code === 'job_not_running',
   );
+});
+
+test('invalid successful result does not transition a running job', async () => {
+  const registry = createJobRegistry();
+  const job = await registry.enqueue({
+    serverId: 'server-1',
+    type: 'domain.stage',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: { primaryDomain: 'example.com', aliases: [], targetType: 'proxy', target: { upstreamPort: 3008 } },
+    resourceType: 'domain',
+    resourceId: 'domain-1',
+  });
+  await registry.claimNext('server-1');
+
+  await assert.rejects(
+    registry.complete({
+      serverId: 'server-1',
+      jobId: job.id,
+      status: 'succeeded',
+      result: { checksum: '../invalid' },
+    }),
+    (error) => error instanceof JobRegistryError && error.code === 'invalid_job_result',
+  );
+
+  const unchanged = await registry.getJob(job.id);
+  assert.equal(unchanged.status, 'running');
+  assert.equal(unchanged.result, null);
 });
 
 test('failed job results keep only bounded safe error metadata', async () => {
@@ -79,7 +113,7 @@ test('failed job results keep only bounded safe error metadata', async () => {
   assert.equal('secret' in failed.error, false);
 });
 
-test('job registry rejects non-allowlisted operations and invalid payloads', async () => {
+test('job registry only accepts explicitly supported async mutation operations', async () => {
   const registry = createJobRegistry();
 
   await assert.rejects(
@@ -88,6 +122,18 @@ test('job registry rejects non-allowlisted operations and invalid payloads', asy
       type: 'shell',
       operation: 'shell.exec',
       payload: { command: 'id' },
+      resourceType: 'server',
+      resourceId: 'server-1',
+    }),
+    (error) => error instanceof JobRegistryError && error.code === 'invalid_operation',
+  );
+
+  await assert.rejects(
+    registry.enqueue({
+      serverId: 'server-1',
+      type: 'inspection',
+      operation: OPERATIONS.SERVER_INSPECT,
+      payload: {},
       resourceType: 'server',
       resourceId: 'server-1',
     }),
