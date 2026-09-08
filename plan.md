@@ -35,6 +35,21 @@ Initial support target:
 - Postfix + Dovecot + Rspamd,
 - Roundcube.
 
+## Living-plan rule
+
+`plan.md` and `todo.md` are living engineering sources. They must be updated in the same development cycle as the code they describe. Completed code, newly discovered external validation work, failed real-server validation and scope changes must not be left for a later documentation cleanup pass.
+
+Current implementation checkpoint — 2026-09-09:
+
+- repository/control-plane/agent foundations are implemented,
+- read-only server inventory and enrollment flows are implemented in code,
+- domain/Nginx/ACME control-plane flows are implemented in code,
+- static release/deploy/rollback foundations are implemented,
+- Node/systemd deployment, guarded rollback, guarded restart and process-status flows are implemented,
+- normalized Node runtime state is idempotent so custom startup files/scripts survive control-plane round trips,
+- Node environment secret management, secure log transport/redaction and environment UI remain active Milestone 4 work,
+- real Ubuntu/systemd validation remains an external test requirement tracked in `todo.md`; the provided test host refused TCP/22 from the current development runner on 2026-09-09.
+
 ---
 
 # 2. Core architectural principles
@@ -418,6 +433,14 @@ Release flow:
 10. stop previous release where applicable,
 11. rollback automatically on failure.
 
+Current runtime safety additions:
+
+- release/service identities are derived and validated rather than supplied as arbitrary commands,
+- manual restart is bound to the expected active release and followed by localhost health verification,
+- manual rollback atomically changes `current`, restarts the deterministic service and restores the prior release if the target is unhealthy,
+- process status reads only deterministic YunPanel Node units and returns bounded systemd/process metadata,
+- stale `current` symlink state is treated as drift instead of silently operating on the wrong release.
+
 ## 7.3 Passenger compatibility
 
 This exists to migrate existing Plesk-managed applications with minimal friction.
@@ -594,6 +617,12 @@ Requirements:
 - exports must require explicit privileged action,
 - deployment logs must redact known secrets.
 
+Current status:
+
+- generated systemd services already consume a root-protected per-application `EnvironmentFile`,
+- deploy currently materializes only YunPanel-owned baseline variables such as `NODE_ENV`, `HOST`, `PORT` and application identity,
+- user-defined environment values and secrets must be added through a dedicated protected secret store/materialization flow; they must not be placed in normal application registry state or generic job results.
+
 ---
 
 # 13. Cron and scheduled jobs
@@ -639,7 +668,9 @@ Security:
 
 - redact configured secrets,
 - enforce per-resource permission checks,
-- prevent arbitrary filesystem log reads.
+- prevent arbitrary filesystem log reads,
+- do not persist raw application/journal output inside generic job results because application logs may contain credentials or tokens,
+- design log transport as bounded, resource-scoped and redacted before exposing it to the control plane/UI.
 
 ---
 
@@ -812,6 +843,8 @@ Application health:
 - recent failures,
 - restart count where available.
 
+Node process status implementation currently exposes bounded deterministic metadata only: expected release/service identity, systemd load/active/sub state, restart count, main PID and localhost health result. Raw journal/env output is deliberately excluded.
+
 Infrastructure health:
 
 - Nginx,
@@ -836,6 +869,7 @@ Job types:
 - rollback,
 - build,
 - restart,
+- status refresh,
 - backup,
 - restore,
 - SSL issue/renew,
@@ -861,6 +895,7 @@ Concurrency control:
 
 - one destructive deploy per app,
 - avoid concurrent restore + deploy,
+- avoid conflicting application deploy/restart/rollback/status snapshots,
 - avoid conflicting domain config writes,
 - serialized Nginx config activation,
 - serialized package/system mutations where necessary.
@@ -1009,15 +1044,15 @@ Tasks:
 
 - [x] Create `agents.md`.
 - [x] Create `plan.md`.
-- [ ] Create `todo.md`.
-- [ ] Create monorepo folder structure.
-- [ ] Initialize root package workspace.
-- [ ] Create React frontend in JavaScript/JSX.
-- [ ] Create Node.js API skeleton.
-- [ ] Create agent skeleton.
-- [ ] Create shared operation protocol package.
-- [ ] Add local lint/test scripts without GitHub Actions.
-- [ ] Add basic developer setup documentation.
+- [x] Create `todo.md`.
+- [x] Create monorepo folder structure.
+- [x] Initialize root package workspace.
+- [x] Create React frontend in JavaScript/JSX.
+- [x] Create Node.js API skeleton.
+- [x] Create agent skeleton.
+- [x] Create shared operation protocol package.
+- [x] Add local lint/test scripts without GitHub Actions.
+- [x] Add basic developer setup documentation.
 
 Exit criteria:
 
@@ -1033,18 +1068,18 @@ Goal: safely connect a server and inspect it before adding mutation capabilities
 
 Tasks:
 
-- [ ] server model,
-- [ ] secure enrollment token flow,
-- [ ] agent authentication,
-- [ ] server heartbeat,
-- [ ] CPU/RAM/disk/load inventory,
-- [ ] installed service/runtime detection,
-- [ ] systemd service state inspection,
-- [ ] Docker/container inventory,
-- [ ] Nginx site inventory,
-- [ ] MySQL/MariaDB detection,
-- [ ] dashboard server cards,
-- [ ] connectivity/error states.
+- [x] server model,
+- [x] secure enrollment token flow,
+- [x] agent authentication,
+- [x] server heartbeat,
+- [x] CPU/RAM/disk/load inventory,
+- [x] installed service/runtime detection,
+- [x] systemd service state inspection,
+- [x] Docker/container inventory,
+- [x] Nginx site inventory,
+- [x] MySQL/MariaDB detection,
+- [x] dashboard server cards,
+- [x] connectivity/error states.
 
 Exit criteria:
 
@@ -1052,25 +1087,27 @@ Exit criteria:
 - dashboard accurately displays its state,
 - no arbitrary shell endpoint exists.
 
+Real Ubuntu exit validation remains tracked in `todo.md` until a reachable test host is available.
+
 ## Milestone 2 — Domains, Nginx and SSL
 
 Goal: safely host a basic site through YunPanel.
 
 Tasks:
 
-- [ ] domain model,
-- [ ] Nginx adapter,
-- [ ] Nginx templates,
-- [ ] config staging,
-- [ ] config validation,
-- [ ] atomic activation,
-- [ ] domain UI,
-- [ ] redirects/aliases,
-- [ ] ACME adapter,
-- [ ] Let's Encrypt issuance,
-- [ ] expiry monitor,
-- [ ] auto-renew job,
-- [ ] rollback config on failure.
+- [x] domain model,
+- [x] Nginx adapter,
+- [x] Nginx templates,
+- [x] config staging,
+- [x] config validation,
+- [x] atomic activation,
+- [x] domain UI,
+- [x] redirects/aliases foundations,
+- [x] ACME adapter,
+- [x] Let's Encrypt issuance flow,
+- [x] expiry monitor,
+- [x] auto-renew job,
+- [x] rollback/protection against invalid config activation.
 
 Exit criteria:
 
@@ -1079,23 +1116,25 @@ Exit criteria:
 - HTTPS works,
 - invalid config cannot replace working config.
 
+Real DNS/Nginx/ACME exit validation remains tracked in `todo.md`.
+
 ## Milestone 3 — Static deployments
 
 Goal: migrate first low-risk production sites away from Plesk.
 
 Tasks:
 
-- [ ] application model,
-- [ ] Git repository fields,
-- [ ] release directory model,
-- [ ] install/build commands,
-- [ ] static output validation,
-- [ ] atomic current symlink,
-- [ ] deployment jobs,
+- [x] application model,
+- [x] Git repository fields,
+- [x] release directory model,
+- [x] structured install/build configuration,
+- [x] static output validation,
+- [x] atomic current symlink,
+- [x] deployment jobs,
 - [ ] deployment logs,
-- [ ] rollback,
-- [ ] health checks,
-- [ ] React application UI.
+- [x] rollback,
+- [x] health/output checks,
+- [x] React application UI foundation.
 
 Exit criteria:
 
@@ -1103,23 +1142,25 @@ Exit criteria:
 - failed deploy leaves previous release serving,
 - one-click rollback works.
 
+Real server end-to-end exit validation remains tracked in `todo.md`.
+
 ## Milestone 4 — Node.js/systemd deployments
 
 Goal: replace most Plesk Passenger usage for new apps.
 
 Tasks:
 
-- [ ] Node runtime settings,
-- [ ] systemd adapter,
-- [ ] generated units,
-- [ ] runtime environment,
-- [ ] process status,
-- [ ] safe restart,
-- [ ] reverse proxy integration,
-- [ ] health-check-based deployment,
-- [ ] logs,
+- [x] Node runtime settings,
+- [x] systemd adapter,
+- [x] generated units,
+- [ ] runtime environment / user secret store (baseline YunPanel-owned EnvironmentFile exists),
+- [x] process status backend,
+- [x] safe restart,
+- [x] reverse proxy integration foundation,
+- [x] health-check-based deployment,
+- [ ] logs with bounded secret redaction/transport,
 - [ ] environment UI,
-- [ ] deployment rollback.
+- [x] deployment rollback.
 
 Exit criteria:
 
@@ -1127,6 +1168,8 @@ Exit criteria:
 - current release survives failed new release,
 - logs are visible,
 - env secrets are protected.
+
+Code-level deploy/restart/rollback/status flows are implemented; real Ubuntu/systemd exit validation and the remaining secret/log/UI work are tracked continuously in `todo.md` and this milestone.
 
 ## Milestone 5 — Passenger compatibility
 
