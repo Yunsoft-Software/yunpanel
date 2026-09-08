@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApp } from '../src/app.js';
+import { createServerRegistry } from '../src/server-registry.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -60,5 +61,86 @@ test('agent errors are returned as a safe gateway error', async () => {
     assert.equal(response.status, 502);
     const body = await response.json();
     assert.equal(body.error.code, 'agent_unavailable');
+  });
+});
+
+test('management routes fail closed when bootstrap authentication is not configured', async () => {
+  await withServer(createApp({ environment: 'production', adminToken: null }), async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/servers`);
+    assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(body.error.code, 'bootstrap_admin_not_configured');
+  });
+});
+
+test('server enrollment and heartbeat use separate one-time and agent credentials', async () => {
+  const registry = createServerRegistry();
+  const adminToken = 'test-bootstrap-admin-token';
+
+  await withServer(createApp({ registry, environment: 'production', adminToken }), async (baseUrl) => {
+    const unauthorizedIssue = await fetch(`${baseUrl}/api/servers/enrollment-tokens`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ label: 'unauthorized' }),
+    });
+    assert.equal(unauthorizedIssue.status, 401);
+
+    const issueResponse = await fetch(`${baseUrl}/api/servers/enrollment-tokens`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ label: 'ubuntu-test', ttlMinutes: 10 }),
+    });
+    assert.equal(issueResponse.status, 201);
+    const issueBody = await issueResponse.json();
+    assert.ok(issueBody.data.token.length >= 32);
+
+    const enrollResponse = await fetch(`${baseUrl}/api/servers/enroll`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        token: issueBody.data.token,
+        hostname: 'yun-test-01',
+        displayName: 'Yun Test 01',
+      }),
+    });
+    assert.equal(enrollResponse.status, 201);
+    const enrollBody = await enrollResponse.json();
+    assert.equal(enrollBody.data.server.connectivity, 'pending');
+    assert.ok(enrollBody.data.agentToken.length >= 32);
+
+    const replayResponse = await fetch(`${baseUrl}/api/servers/enroll`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: issueBody.data.token, hostname: 'yun-test-02' }),
+    });
+    assert.equal(replayResponse.status, 401);
+
+    const heartbeatResponse = await fetch(`${baseUrl}/api/servers/${enrollBody.data.server.id}/heartbeat`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${enrollBody.data.agentToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        agentVersion: '0.0.1',
+        inventory: { hostname: 'yun-test-01', os: { name: 'Ubuntu', version: '24.04' } },
+        services: { nginx: { active: true } },
+      }),
+    });
+    assert.equal(heartbeatResponse.status, 200);
+    const heartbeatBody = await heartbeatResponse.json();
+    assert.equal(heartbeatBody.data.connectivity, 'online');
+
+    const listResponse = await fetch(`${baseUrl}/api/servers`, {
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(listResponse.status, 200);
+    const listBody = await listResponse.json();
+    assert.equal(listBody.data.length, 1);
+    assert.equal(listBody.data[0].hostname, 'yun-test-01');
+    assert.equal(listBody.data[0].connectivity, 'online');
   });
 });
