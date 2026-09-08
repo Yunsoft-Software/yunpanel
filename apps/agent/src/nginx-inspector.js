@@ -14,7 +14,7 @@ function unique(values) {
 
 function directiveValues(content, directive) {
   const values = [];
-  const pattern = new RegExp(`(^|\\n)\\s*${directive}\\s+([^;]+);`, 'g');
+  const pattern = new RegExp(`(^|[;{}\\n])\\s*${directive}\\s+([^;{}]+);`, 'g');
   let match;
   while ((match = pattern.exec(content)) !== null) {
     const value = match[2].replace(/\s+#.*$/, '').trim();
