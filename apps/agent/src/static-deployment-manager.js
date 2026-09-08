@@ -51,6 +51,8 @@ function safeEnvironment(home) {
     PATH: '/usr/local/bin:/usr/bin:/bin',
     CI: '1',
     LANG: 'C.UTF-8',
+    GIT_TERMINAL_PROMPT: '0',
+    NPM_CONFIG_UPDATE_NOTIFIER: 'false',
   };
 }
 
@@ -116,6 +118,7 @@ export function createStaticDeploymentManager({
   }
 
   async function ensureAppUser(username, appBuildRoot) {
+    await mkdirFn(path.dirname(appBuildRoot), { recursive: true, mode: 0o755 });
     try {
       await runRoot(ID_PATH, ['-u', username], { timeout: 5_000 });
     } catch {
@@ -217,9 +220,7 @@ export function createStaticDeploymentManager({
         await runAsUser(username, appBuildRoot, npmPath, ['run', spec.build.buildScript], { cwd: worktreePath, timeout: 15 * 60 * 1000 });
       }
 
-      const requestedOutput = spec.build.outputDir === '.'
-        ? worktreePath
-        : path.join(worktreePath, spec.build.outputDir);
+      const requestedOutput = spec.build.outputDir === '.' ? worktreePath : path.join(worktreePath, spec.build.outputDir);
       let outputPath;
       try {
         outputPath = await realpathFn(requestedOutput);
@@ -296,9 +297,11 @@ export function createStaticDeploymentManager({
     const key = spec?.applicationId ?? 'invalid';
     const previous = deploymentLocks.get(key) ?? Promise.resolve();
     const runDeployment = previous.catch(() => {}).then(() => deployUnlocked(spec));
-    deploymentLocks.set(key, runDeployment.finally(() => {
-      if (deploymentLocks.get(key) === runDeployment) deploymentLocks.delete(key);
-    }));
+    let tracked;
+    tracked = runDeployment.finally(() => {
+      if (deploymentLocks.get(key) === tracked) deploymentLocks.delete(key);
+    });
+    deploymentLocks.set(key, tracked);
     return runDeployment;
   }
 
