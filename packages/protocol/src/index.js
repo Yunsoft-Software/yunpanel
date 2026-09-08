@@ -2,6 +2,7 @@ import {
   ApplicationValidationError,
   assertUuid,
   normalizeNodeApplicationSpec,
+  normalizeNodeRestartSpec,
   normalizeNodeRollbackSpec,
   normalizeStaticApplicationSpec,
 } from '@yunpanel/shared';
@@ -21,6 +22,7 @@ export const OPERATIONS = Object.freeze({
   APP_STATIC_ROLLBACK: 'app.static.rollback',
   APP_NODE_DEPLOY: 'app.node.deploy',
   APP_NODE_ROLLBACK: 'app.node.rollback',
+  APP_NODE_RESTART: 'app.node.restart',
 });
 
 export const READ_ONLY_OPERATIONS = Object.freeze([
@@ -129,6 +131,14 @@ function validateMutationPayload(operation, payload, errors) {
       normalizeNodeRollbackSpec(payload);
     } catch (error) {
       errors.push(error instanceof ApplicationValidationError ? error.message : 'app.node.rollback payload is invalid');
+    }
+  }
+
+  if (operation === OPERATIONS.APP_NODE_RESTART) {
+    try {
+      normalizeNodeRestartSpec(payload);
+    } catch (error) {
+      errors.push(error instanceof ApplicationValidationError ? error.message : 'app.node.restart payload is invalid');
     }
   }
 }
