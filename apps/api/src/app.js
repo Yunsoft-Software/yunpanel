@@ -1,6 +1,7 @@
 import express from 'express';
 import { inspectLocalAgent } from './agent-client.js';
 import { createBootstrapAdminGuard, resolveBootstrapAdminToken } from './bootstrap-auth.js';
+import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 
 export const API_VERSION = '0.0.1';
@@ -14,6 +15,7 @@ export function createApp({
   inspectAgent = inspectLocalAgent,
   environment = process.env.NODE_ENV,
   registry = createServerRegistry(),
+  domainRegistry = createDomainRegistry(),
   adminToken,
 } = {}) {
   const app = express();
@@ -60,6 +62,15 @@ export function createApp({
     return response.json({ data: servers });
   });
 
+  app.get('/api/dev/domains', async (request, response) => {
+    if (environment !== 'development') {
+      return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
+    }
+
+    const domains = await domainRegistry.listDomains();
+    return response.json({ data: domains });
+  });
+
   app.get('/api/servers', requireBootstrapAdmin, async (request, response) => {
     const servers = await registry.listServers();
     return response.json({ data: servers });
@@ -104,6 +115,31 @@ export function createApp({
     return response.json({ data: server });
   });
 
+  app.get('/api/domains', requireBootstrapAdmin, async (request, response) => {
+    const domains = await domainRegistry.listDomains();
+    return response.json({ data: domains });
+  });
+
+  app.get('/api/domains/:domainId', requireBootstrapAdmin, async (request, response) => {
+    const domain = await domainRegistry.getDomain(request.params.domainId);
+    if (!domain) {
+      return response.status(404).json({ error: { code: 'domain_not_found', message: 'Domain not found' } });
+    }
+    return response.json({ data: domain });
+  });
+
+  app.post('/api/domains', requireBootstrapAdmin, async (request, response) => {
+    const domain = await domainRegistry.createDomain({
+      serverId: request.body?.serverId,
+      primaryDomain: request.body?.primaryDomain,
+      aliases: request.body?.aliases ?? [],
+      targetType: request.body?.targetType,
+      target: request.body?.target,
+      httpsMode: request.body?.httpsMode ?? 'off',
+    });
+    return response.status(201).json({ data: domain });
+  });
+
   app.use((request, response) => {
     response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
   });
@@ -111,7 +147,7 @@ export function createApp({
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
 
-    if (error instanceof RegistryError) {
+    if (error instanceof RegistryError || error instanceof DomainRegistryError) {
       return response.status(error.status).json({
         error: {
           code: error.code,
