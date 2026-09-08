@@ -142,15 +142,25 @@ export function createAcmeManager({
       '--cert-name', certName,
     ];
 
-    if (staging) args.push('--test-cert');
+    if (staging) args.push('--dry-run');
     for (const domain of normalizedDomains) args.push('-d', domain);
 
     await runCertbot(args);
-    const metadata = await inspectCertificateFn(certName);
+
+    if (staging) {
+      return {
+        certName,
+        domains: normalizedDomains,
+        staging: true,
+        status: 'validated',
+      };
+    }
+
     return {
-      ...metadata,
+      ...(await inspectCertificateFn(certName)),
       domains: normalizedDomains,
-      staging: Boolean(staging),
+      staging: false,
+      status: 'issued',
     };
   }
 
