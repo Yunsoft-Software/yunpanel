@@ -17,16 +17,20 @@ function certificateMetadata(certName) {
   };
 }
 
-test('certificate issue uses fixed certbot binary and webroot arguments without shell strings', async () => {
+test('certificate validation uses certbot dry-run and does not inspect persisted certificate files', async () => {
   const calls = [];
   const directories = [];
+  let inspected = false;
   const manager = createAcmeManager({
     certbotPaths: ['/usr/bin/certbot'],
     accessFn: async (candidate) => {
       assert.equal(candidate, '/usr/bin/certbot');
     },
     mkdirFn: async (directory, options) => directories.push({ directory, options }),
-    inspectCertificateFn: async (certName) => certificateMetadata(certName),
+    inspectCertificateFn: async () => {
+      inspected = true;
+      return certificateMetadata('example.com');
+    },
     run: async (file, args) => calls.push({ file, args }),
   });
 
@@ -47,13 +51,45 @@ test('certificate issue uses fixed certbot binary and webroot arguments without 
     '--agree-tos',
     '--email', 'admin@example.com',
     '--cert-name', 'example.com',
-    '--test-cert',
+    '--dry-run',
     '-d', 'example.com',
     '-d', 'www.example.com',
   ]);
+  assert.deepEqual(result, {
+    certName: 'example.com',
+    domains: ['example.com', 'www.example.com'],
+    staging: true,
+    status: 'validated',
+  });
+  assert.equal(inspected, false);
+});
+
+test('production issue inspects certificate metadata after certbot succeeds', async () => {
+  const calls = [];
+  let inspected = 0;
+  const manager = createAcmeManager({
+    certbotPaths: ['/usr/bin/certbot'],
+    accessFn: async () => {},
+    mkdirFn: async () => {},
+    inspectCertificateFn: async (certName) => {
+      inspected += 1;
+      return certificateMetadata(certName);
+    },
+    run: async (file, args) => calls.push({ file, args }),
+  });
+
+  const result = await manager.issueCertificate({
+    domains: ['example.com'],
+    email: 'admin@example.com',
+    staging: false,
+  });
+
+  assert.equal(calls[0].args.includes('--dry-run'), false);
+  assert.equal(calls[0].args.includes('--test-cert'), false);
+  assert.equal(inspected, 1);
   assert.equal(result.certName, 'example.com');
-  assert.deepEqual(result.domains, ['example.com', 'www.example.com']);
-  assert.equal(result.staging, true);
+  assert.equal(result.staging, false);
+  assert.equal(result.status, 'issued');
 });
 
 test('certificate issue rejects wildcard and invalid email before certbot runs', async () => {
