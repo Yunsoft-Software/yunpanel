@@ -38,6 +38,28 @@ test('normalizes structured Node runtime profiles without arbitrary commands', (
   assert.equal(npmRuntime.buildScript, 'build:prod');
 });
 
+test('normalized Node runtime profiles can be normalized again without losing startup state', () => {
+  const nodeRuntime = normalizeNodeRuntimeConfig({
+    nodeMajor: 24,
+    installMode: 'ci',
+    buildScript: 'build',
+    startMode: 'node',
+    entryFile: 'dist/server.js',
+    port: 3100,
+    healthPath: '/healthz',
+  });
+  assert.deepEqual(normalizeNodeRuntimeConfig(nodeRuntime), nodeRuntime);
+
+  const npmRuntime = normalizeNodeRuntimeConfig({
+    nodeMajor: 24,
+    installMode: 'install',
+    startMode: 'npm',
+    startScript: 'serve:production',
+    port: 4100,
+  });
+  assert.deepEqual(normalizeNodeRuntimeConfig(npmRuntime), npmRuntime);
+});
+
 test('rejects shell fragments, unsafe entry files, ports and health URLs', () => {
   const invalidProfiles = [
     { port: 3000, startMode: 'npm', startScript: 'start && id' },
@@ -45,6 +67,7 @@ test('rejects shell fragments, unsafe entry files, ports and health URLs', () =>
     { port: 80 },
     { port: 3000, healthPath: 'https://example.com/health' },
     { port: 3000, healthPath: '/health?token=x' },
+    { port: 3000, start: 'node server.js' },
   ];
 
   for (const profile of invalidProfiles) {
