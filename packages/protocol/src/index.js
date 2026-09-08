@@ -3,11 +3,15 @@ export const AGENT_PROTOCOL_VERSION = 1;
 export const OPERATIONS = Object.freeze({
   SERVER_INSPECT: 'server.inspect',
   SERVER_SERVICES: 'server.services',
+  SERVER_DOCKER: 'server.docker',
+  SERVER_NGINX: 'server.nginx',
 });
 
 export const READ_ONLY_OPERATIONS = Object.freeze([
   OPERATIONS.SERVER_INSPECT,
   OPERATIONS.SERVER_SERVICES,
+  OPERATIONS.SERVER_DOCKER,
+  OPERATIONS.SERVER_NGINX,
 ]);
 
 const KNOWN_OPERATIONS = new Set(Object.values(OPERATIONS));
