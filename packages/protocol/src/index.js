@@ -5,6 +5,8 @@ export const OPERATIONS = Object.freeze({
   SERVER_SERVICES: 'server.services',
   SERVER_DOCKER: 'server.docker',
   SERVER_NGINX: 'server.nginx',
+  DOMAIN_STAGE: 'domain.stage',
+  DOMAIN_ACTIVATE: 'domain.activate',
 });
 
 export const READ_ONLY_OPERATIONS = Object.freeze([
@@ -15,6 +17,7 @@ export const READ_ONLY_OPERATIONS = Object.freeze([
 ]);
 
 const KNOWN_OPERATIONS = new Set(Object.values(OPERATIONS));
+const DOMAIN_CHECKSUM = /^[a-f0-9]{64}$/;
 
 export function isKnownOperation(operation) {
   return typeof operation === 'string' && KNOWN_OPERATIONS.has(operation);
@@ -22,6 +25,32 @@ export function isKnownOperation(operation) {
 
 export function isReadOnlyOperation(operation) {
   return READ_ONLY_OPERATIONS.includes(operation);
+}
+
+function validateMutationPayload(operation, payload, errors) {
+  if (operation === OPERATIONS.DOMAIN_STAGE) {
+    if (typeof payload.primaryDomain !== 'string' || payload.primaryDomain.length < 3 || payload.primaryDomain.length > 253) {
+      errors.push('domain.stage primaryDomain is invalid');
+    }
+    if (payload.aliases !== undefined && (!Array.isArray(payload.aliases) || payload.aliases.length > 20)) {
+      errors.push('domain.stage aliases must be an array with at most 20 entries');
+    }
+    if (!['static', 'proxy'].includes(payload.targetType)) {
+      errors.push('domain.stage targetType must be static or proxy');
+    }
+    if (!payload.target || typeof payload.target !== 'object' || Array.isArray(payload.target)) {
+      errors.push('domain.stage target must be an object');
+    }
+  }
+
+  if (operation === OPERATIONS.DOMAIN_ACTIVATE) {
+    if (typeof payload.primaryDomain !== 'string' || payload.primaryDomain.length < 3 || payload.primaryDomain.length > 253) {
+      errors.push('domain.activate primaryDomain is invalid');
+    }
+    if (typeof payload.checksum !== 'string' || !DOMAIN_CHECKSUM.test(payload.checksum)) {
+      errors.push('domain.activate checksum must be a SHA-256 hex digest');
+    }
+  }
 }
 
 export function validateOperationEnvelope(value) {
@@ -41,6 +70,8 @@ export function validateOperationEnvelope(value) {
 
   if (!value.payload || typeof value.payload !== 'object' || Array.isArray(value.payload)) {
     errors.push('payload must be an object');
+  } else if (isKnownOperation(value.operation)) {
+    validateMutationPayload(value.operation, value.payload, errors);
   }
 
   if (value.protocolVersion !== AGENT_PROTOCOL_VERSION) {
