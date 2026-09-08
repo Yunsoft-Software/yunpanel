@@ -212,7 +212,8 @@ export function createApplicationRegistry({
     const application = hydrateApplication(requireApplication(state, applicationId));
     const normalizedDeploymentId = normalizeUuid(deploymentId, 'deploymentId');
     const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
-    const normalizedPreviousReleaseId = normalizeNullableUuid(previousReleaseId ?? application.currentReleaseId, 'previousReleaseId');
+    const previousValue = previousReleaseId === undefined ? application.currentReleaseId : previousReleaseId;
+    const normalizedPreviousReleaseId = normalizeNullableUuid(previousValue, 'previousReleaseId');
 
     if (application.activeDeploymentId !== normalizedDeploymentId) throw new ApplicationRegistryError('deployment_mismatch', 'Deployment result does not match active application deployment', 409);
     if (normalizedReleaseId !== normalizedDeploymentId) throw new ApplicationRegistryError('release_mismatch', 'Static release must match deployment identity', 409);
@@ -268,7 +269,8 @@ export function createApplicationRegistry({
     const application = hydrateApplication(requireApplication(state, applicationId));
     const normalizedOperationId = normalizeUuid(operationId, 'operationId');
     const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
-    const normalizedPreviousReleaseId = normalizeNullableUuid(previousReleaseId ?? application.currentReleaseId, 'previousReleaseId');
+    const previousValue = previousReleaseId === undefined ? application.currentReleaseId : previousReleaseId;
+    const normalizedPreviousReleaseId = normalizeNullableUuid(previousValue, 'previousReleaseId');
 
     if (application.activeDeploymentId !== normalizedOperationId || application.pendingRollbackReleaseId !== normalizedReleaseId) throw new ApplicationRegistryError('rollback_mismatch', 'Rollback result does not match active application rollback', 409);
     if (normalizedPreviousReleaseId !== application.currentReleaseId) throw new ApplicationRegistryError('release_state_drift', 'Managed server current release does not match control-plane rollback state', 409);
