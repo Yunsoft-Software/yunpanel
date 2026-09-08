@@ -30,6 +30,13 @@ async function resolveDomainTls(domain, certificateRegistry) {
   return { fullchainPath: certificate.fullchainPath, privateKeyPath: certificate.privateKeyPath };
 }
 
+async function latestNodeStatusJob(jobRegistry, applicationId) {
+  const jobs = await jobRegistry.listJobs({ resourceType: 'application', resourceId: applicationId });
+  return jobs
+    .filter((job) => job.operation === OPERATIONS.APP_NODE_STATUS)
+    .sort((left, right) => Date.parse(right.createdAt ?? 0) - Date.parse(left.createdAt ?? 0))[0] ?? null;
+}
+
 async function reconcileApplicationJob(applicationRegistry, job) {
   const application = await applicationRegistry.getApplication(job.resourceId);
   if (!application) return;
@@ -329,6 +336,34 @@ export function createApp({
       serverId: application.serverId,
       type: 'app.node.restart',
       operation: OPERATIONS.APP_NODE_RESTART,
+      payload: {
+        applicationId: application.id,
+        releaseId: application.currentReleaseId,
+        runtime: application.runtime,
+      },
+      resourceType: 'application',
+      resourceId: application.id,
+    });
+    return response.status(202).json({ data: job });
+  });
+  app.get('/api/applications/:applicationId/status', requireBootstrapAdmin, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    if (application.type !== 'node') throw new ApplicationRegistryError('status_not_supported', 'Process status is only supported for Node applications', 409);
+    return response.json({ data: await latestNodeStatusJob(jobRegistry, application.id) });
+  });
+  app.post('/api/applications/:applicationId/status/refresh', requireBootstrapAdmin, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    if (application.type !== 'node') throw new ApplicationRegistryError('status_not_supported', 'Process status is only supported for Node applications', 409);
+    if (!application.currentReleaseId) throw new ApplicationRegistryError('application_not_deployed', 'Application has no active release to inspect', 409);
+    await ensureResourceJobIdle(jobRegistry, 'application', application.id);
+    if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
+
+    const job = await jobRegistry.enqueue({
+      serverId: application.serverId,
+      type: 'app.node.status',
+      operation: OPERATIONS.APP_NODE_STATUS,
       payload: {
         applicationId: application.id,
         releaseId: application.currentReleaseId,
