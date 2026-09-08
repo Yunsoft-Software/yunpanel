@@ -122,7 +122,7 @@ export function createNodeDeploymentManager({
   systemctlPaths = SYSTEMCTL_PATHS,
 } = {}) {
   const deploymentLocks = new Map();
-  const environmentWriter = createNodeEnvironmentWriter({ envRoot, mkdirFn, renameFn, writeFileFn });
+  const environmentWriter = createNodeEnvironmentWriter({ envRoot, mkdirFn, renameFn, rmFn, writeFileFn });
 
   async function runSafe(file, args, options = {}) {
     try {
@@ -216,6 +216,7 @@ export function createNodeDeploymentManager({
     let releaseCreated = false;
     let newReleaseActive = false;
     let previousReleaseId = null;
+    let environmentTransaction = null;
 
     const nodePath = await findExecutable(nodePaths, run);
     if (!nodePath) throw new NodeDeploymentError('node_not_installed', 'An allowlisted Node.js runtime is not installed');
@@ -282,7 +283,7 @@ export function createNodeDeploymentManager({
       await mkdirFn(systemdRoot, { recursive: true, mode: 0o755 });
 
       try {
-        await environmentWriter.writeEnvironment({
+        environmentTransaction = await environmentWriter.writeEnvironment({
           applicationId: spec.applicationId,
           runtime: spec.runtime,
           environment: rawSpec.environment ?? {},
@@ -334,6 +335,7 @@ export function createNodeDeploymentManager({
           if (previousReleaseId) {
             await switchCurrent(currentPath, previousReleaseId, 'rollback');
             newReleaseActive = false;
+            await environmentTransaction.restore();
             await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
             const rollbackHealthy = await waitForHealth({
               port: spec.runtime.port,
@@ -343,6 +345,7 @@ export function createNodeDeploymentManager({
             if (!rollbackHealthy) throw new Error('previous release failed health check');
           } else {
             newReleaseActive = false;
+            await environmentTransaction.restore();
             await runSafe(systemctlPath, ['stop', serviceName], { timeout: 30_000 }).catch(() => {});
             await runSafe(systemctlPath, ['disable', serviceName], { timeout: 30_000 }).catch(() => {});
             await rmFn(currentPath, { force: true });
@@ -353,6 +356,7 @@ export function createNodeDeploymentManager({
         throw activationError;
       }
 
+      environmentTransaction.commit();
       await cleanupOldReleases({
         releasesDirectory,
         currentReleaseId: spec.deploymentId,
@@ -371,6 +375,7 @@ export function createNodeDeploymentManager({
         healthy: true,
       };
     } catch (error) {
+      if (environmentTransaction) await environmentTransaction.restore().catch(() => {});
       if (!newReleaseActive && releaseCreated) {
         await rmFn(releaseDirectory, { recursive: true, force: true }).catch(() => {});
       }
