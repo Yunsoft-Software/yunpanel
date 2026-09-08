@@ -64,6 +64,14 @@ export function normalizeRelativeBuildPath(value, { allowDot = false } = {}) {
   return value;
 }
 
+function normalizeHealthFile(value) {
+  const normalized = normalizeRelativeBuildPath(value ?? 'index.html');
+  if (normalized.endsWith('/')) {
+    throw new ApplicationValidationError('invalid_health_file', 'Static health file must point to a file');
+  }
+  return normalized;
+}
+
 export function normalizeStaticBuildConfig(value = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ApplicationValidationError('invalid_build_config', 'Build config must be an object');
@@ -74,12 +82,14 @@ export function normalizeStaticBuildConfig(value = {}) {
     throw new ApplicationValidationError('invalid_build_mode', 'Static build mode must be npm or none');
   }
 
+  const healthFile = normalizeHealthFile(value.healthFile);
   if (mode === 'none') {
     return {
       mode: 'none',
       installMode: null,
       buildScript: null,
       outputDir: normalizeRelativeBuildPath(value.outputDir ?? '.', { allowDot: true }),
+      healthFile,
     };
   }
 
@@ -97,6 +107,7 @@ export function normalizeStaticBuildConfig(value = {}) {
     installMode,
     buildScript,
     outputDir: normalizeRelativeBuildPath(value.outputDir ?? 'dist'),
+    healthFile,
   };
 }
 
