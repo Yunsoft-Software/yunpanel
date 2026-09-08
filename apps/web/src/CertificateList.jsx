@@ -1,6 +1,7 @@
-function formatExpiry(value) {
-  if (!value) return 'Waiting for certificate';
-  const date = new Date(value);
+function formatExpiry(certificate) {
+  if (certificate.staging && certificate.state === 'validated') return 'Validation passed';
+  if (!certificate.validTo) return certificate.staging ? 'No certificate saved' : 'Waiting for certificate';
+  const date = new Date(certificate.validTo);
   if (Number.isNaN(date.getTime())) return 'Unknown expiry';
   const days = Math.ceil((date.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
   if (days < 0) return `Expired ${Math.abs(days)}d ago`;
@@ -15,7 +16,7 @@ export default function CertificateList({ certificates, access }) {
         <span>
           {access === 'protected'
             ? 'Certificate state will appear after authenticated control-plane access is enabled.'
-            : 'Managed HTTPS certificates will appear after an active HTTP domain completes ACME issuance.'}
+            : 'ACME validation and managed HTTPS certificate records will appear here.'}
         </span>
       </div>
     );
@@ -26,10 +27,10 @@ export default function CertificateList({ certificates, access }) {
       {certificates.map((certificate) => (
         <article className="domain-row" key={certificate.id}>
           <div className="domain-primary">
-            <span className={`status-dot ${certificate.state === 'active' ? 'online' : certificate.state === 'error' ? 'failed' : 'pending'}`} />
+            <span className={`status-dot ${certificate.state === 'active' || certificate.state === 'validated' ? 'online' : certificate.state === 'error' ? 'failed' : 'pending'}`} />
             <div>
               <strong>{certificate.certName}</strong>
-              <span>{certificate.staging ? 'Let’s Encrypt staging' : 'Production ACME'}</span>
+              <span>{certificate.staging ? 'ACME dry-run validation' : 'Production ACME certificate'}</span>
             </div>
           </div>
           <div className="domain-cell">
@@ -37,15 +38,15 @@ export default function CertificateList({ certificates, access }) {
             <strong>{certificate.state}</strong>
           </div>
           <div className="domain-cell">
-            <span>Expiry</span>
-            <strong>{formatExpiry(certificate.validTo)}</strong>
+            <span>{certificate.staging ? 'Validation' : 'Expiry'}</span>
+            <strong>{formatExpiry(certificate)}</strong>
           </div>
           <div className="domain-cell">
             <span>Domains</span>
             <strong>{certificate.domains?.length ?? 0}</strong>
           </div>
-          <div className={`domain-state ${certificate.state === 'active' ? 'active' : certificate.state === 'error' ? 'error' : 'draft'}`}>
-            {certificate.staging ? 'staging' : 'managed'}
+          <div className={`domain-state ${certificate.state === 'active' || certificate.state === 'validated' ? 'active' : certificate.state === 'error' ? 'error' : 'draft'}`}>
+            {certificate.staging ? 'validation' : 'managed'}
           </div>
         </article>
       ))}
