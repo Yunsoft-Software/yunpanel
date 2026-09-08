@@ -7,6 +7,8 @@ export const OPERATIONS = Object.freeze({
   SERVER_NGINX: 'server.nginx',
   DOMAIN_STAGE: 'domain.stage',
   DOMAIN_ACTIVATE: 'domain.activate',
+  SSL_ISSUE: 'ssl.issue',
+  SSL_RENEW: 'ssl.renew',
 });
 
 export const READ_ONLY_OPERATIONS = Object.freeze([
@@ -18,6 +20,8 @@ export const READ_ONLY_OPERATIONS = Object.freeze([
 
 const KNOWN_OPERATIONS = new Set(Object.values(OPERATIONS));
 const DOMAIN_CHECKSUM = /^[a-f0-9]{64}$/;
+const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function isKnownOperation(operation) {
   return typeof operation === 'string' && KNOWN_OPERATIONS.has(operation);
@@ -25,6 +29,23 @@ export function isKnownOperation(operation) {
 
 export function isReadOnlyOperation(operation) {
   return READ_ONLY_OPERATIONS.includes(operation);
+}
+
+function validateDomainList(domains, fieldName, errors) {
+  if (!Array.isArray(domains) || domains.length < 1 || domains.length > 21) {
+    errors.push(`${fieldName} must contain between 1 and 21 domains`);
+    return;
+  }
+
+  const normalized = new Set();
+  for (const domain of domains) {
+    if (typeof domain !== 'string' || !DOMAIN_PATTERN.test(domain) || domain.includes('*')) {
+      errors.push(`${fieldName} contains an invalid domain`);
+      continue;
+    }
+    if (normalized.has(domain)) errors.push(`${fieldName} contains duplicate domains`);
+    normalized.add(domain);
+  }
 }
 
 function validateMutationPayload(operation, payload, errors) {
@@ -49,6 +70,25 @@ function validateMutationPayload(operation, payload, errors) {
     }
     if (typeof payload.checksum !== 'string' || !DOMAIN_CHECKSUM.test(payload.checksum)) {
       errors.push('domain.activate checksum must be a SHA-256 hex digest');
+    }
+  }
+
+  if (operation === OPERATIONS.SSL_ISSUE) {
+    validateDomainList(payload.domains, 'ssl.issue domains', errors);
+    if (typeof payload.email !== 'string' || payload.email.length > 254 || !EMAIL_PATTERN.test(payload.email)) {
+      errors.push('ssl.issue email is invalid');
+    }
+    if (payload.staging !== undefined && typeof payload.staging !== 'boolean') {
+      errors.push('ssl.issue staging must be boolean');
+    }
+  }
+
+  if (operation === OPERATIONS.SSL_RENEW) {
+    if (typeof payload.certName !== 'string' || !DOMAIN_PATTERN.test(payload.certName) || payload.certName.includes('*')) {
+      errors.push('ssl.renew certName is invalid');
+    }
+    if (payload.dryRun !== undefined && typeof payload.dryRun !== 'boolean') {
+      errors.push('ssl.renew dryRun must be boolean');
     }
   }
 }
