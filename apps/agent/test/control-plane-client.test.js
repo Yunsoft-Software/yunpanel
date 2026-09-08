@@ -213,6 +213,66 @@ test('claimed command executes once and reports a structured successful result',
   assert.equal(resultBody.result.checksum, 'a'.repeat(64));
 });
 
+test('Node mutations fetch environment just in time without placing secrets in result reporting', async () => {
+  const identity = { serverId: 'server-005', agentToken: 'agent-token-long-enough' };
+  const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
+  const releaseId = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
+  const claimed = {
+    job: { id: '123e4567-e89b-12d3-a456-426614174005' },
+    envelope: {
+      id: '123e4567-e89b-12d3-a456-426614174005',
+      operation: OPERATIONS.APP_NODE_RESTART,
+      payload: {
+        applicationId,
+        releaseId,
+        runtime: { port: 3100 },
+      },
+      protocolVersion: AGENT_PROTOCOL_VERSION,
+    },
+  };
+
+  const calls = [];
+  const completion = await executeClaimedCommand({
+    claimed,
+    baseUrl: 'http://127.0.0.1:3001',
+    identity,
+    execute: async (operation, payload) => {
+      assert.equal(operation, OPERATIONS.APP_NODE_RESTART);
+      assert.deepEqual(payload.environment, {
+        API_TOKEN: 'private-token-value',
+        PUBLIC_URL: 'https://example.test',
+      });
+      return {
+        releaseId,
+        serviceName: 'yunpanel-node-test.service',
+        port: 3100,
+        healthPath: '/health',
+        healthy: true,
+        restarted: true,
+      };
+    },
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url, options });
+      if (url.endsWith(`/api/servers/${identity.serverId}/applications/${applicationId}/environment`)) {
+        assert.equal(options.headers.authorization, `Bearer ${identity.agentToken}`);
+        return jsonResponse(200, {
+          data: {
+            API_TOKEN: 'private-token-value',
+            PUBLIC_URL: 'https://example.test',
+          },
+        });
+      }
+      return jsonResponse(200, { data: { status: 'succeeded' } });
+    },
+    sleepFn: async () => {},
+  });
+
+  assert.equal(completion.status, 'succeeded');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].url.includes('/commands/'), true);
+  assert.equal(calls[1].options.body.includes('private-token-value'), false);
+});
+
 test('failed command reports bounded safe error metadata without stack or secret fields', async () => {
   const identity = { serverId: 'server-004', agentToken: 'agent-token-long-enough' };
   const claimed = {
