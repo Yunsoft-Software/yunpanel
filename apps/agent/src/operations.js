@@ -1,6 +1,7 @@
 import { access, readFile, statfs } from 'node:fs/promises';
 import os from 'node:os';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { inspectAllowlistedServices } from './systemd-inspector.js';
 
 const CAPABILITIES = Object.freeze({
   systemd: ['/usr/bin/systemctl', '/bin/systemctl'],
@@ -190,17 +191,9 @@ async function inspectServer() {
   };
 }
 
-function inspectServices() {
-  return {
-    services: [],
-    source: 'development-placeholder',
-    note: 'systemd service state inspection is implemented separately in Milestone 1',
-  };
-}
-
 export const operationHandlers = Object.freeze({
   [OPERATIONS.SERVER_INSPECT]: inspectServer,
-  [OPERATIONS.SERVER_SERVICES]: inspectServices,
+  [OPERATIONS.SERVER_SERVICES]: inspectAllowlistedServices,
 });
 
 export async function executeOperation(operation, payload) {
