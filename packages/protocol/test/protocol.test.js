@@ -10,18 +10,26 @@ import {
 } from '../src/index.js';
 
 test('known operations are explicitly allowlisted', () => {
-  assert.equal(isKnownOperation(OPERATIONS.SERVER_INSPECT), true);
-  assert.equal(isReadOnlyOperation(OPERATIONS.SERVER_INSPECT), true);
-  assert.equal(isKnownOperation(OPERATIONS.SERVER_DOCKER), true);
-  assert.equal(isReadOnlyOperation(OPERATIONS.SERVER_DOCKER), true);
-  assert.equal(isKnownOperation(OPERATIONS.SERVER_NGINX), true);
-  assert.equal(isReadOnlyOperation(OPERATIONS.SERVER_NGINX), true);
-  assert.equal(isKnownOperation(OPERATIONS.DOMAIN_STAGE), true);
-  assert.equal(isReadOnlyOperation(OPERATIONS.DOMAIN_STAGE), false);
-  assert.equal(isKnownOperation(OPERATIONS.SSL_ISSUE), true);
-  assert.equal(isReadOnlyOperation(OPERATIONS.SSL_ISSUE), false);
-  assert.equal(isKnownOperation(OPERATIONS.SSL_RENEW), true);
-  assert.equal(isReadOnlyOperation(OPERATIONS.SSL_RENEW), false);
+  for (const operation of [
+    OPERATIONS.SERVER_INSPECT,
+    OPERATIONS.SERVER_DOCKER,
+    OPERATIONS.SERVER_NGINX,
+  ]) {
+    assert.equal(isKnownOperation(operation), true);
+    assert.equal(isReadOnlyOperation(operation), true);
+  }
+
+  for (const operation of [
+    OPERATIONS.DOMAIN_STAGE,
+    OPERATIONS.SSL_ISSUE,
+    OPERATIONS.SSL_RENEW,
+    OPERATIONS.APP_STATIC_DEPLOY,
+    OPERATIONS.APP_STATIC_ROLLBACK,
+  ]) {
+    assert.equal(isKnownOperation(operation), true);
+    assert.equal(isReadOnlyOperation(operation), false);
+  }
+
   assert.equal(isKnownOperation('shell.exec'), false);
   assert.equal(isReadOnlyOperation('shell.exec'), false);
 });
@@ -115,4 +123,42 @@ test('validates certificate issue and renewal payloads', () => {
     protocolVersion: AGENT_PROTOCOL_VERSION,
   });
   assert.equal(validRenew.ok, true);
+});
+
+test('validates static deploy and rollback payloads', () => {
+  const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
+  const deploymentId = 'ff830043-9752-4640-83b4-3a1998de78a0';
+  const releaseId = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
+
+  const deploy = validateOperationEnvelope({
+    id: deploymentId,
+    operation: OPERATIONS.APP_STATIC_DEPLOY,
+    payload: {
+      applicationId,
+      deploymentId,
+      repositoryUrl: 'https://github.com/example/site',
+      branch: 'main',
+      build: { mode: 'npm', outputDir: 'dist', healthFile: 'index.html' },
+      retention: 5,
+    },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(deploy.ok, true);
+
+  const rollback = validateOperationEnvelope({
+    id: 'request-rollback-0001',
+    operation: OPERATIONS.APP_STATIC_ROLLBACK,
+    payload: { applicationId, releaseId },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(rollback.ok, true);
+
+  const invalidRollback = validateOperationEnvelope({
+    id: 'request-rollback-0002',
+    operation: OPERATIONS.APP_STATIC_ROLLBACK,
+    payload: { applicationId, releaseId: '../../etc' },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(invalidRollback.ok, false);
+  assert.match(invalidRollback.errors.join(' '), /releaseId/);
 });
