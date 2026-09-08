@@ -36,7 +36,7 @@ async function requestJson(url, { method = 'GET', token, body } = {}) {
   };
 }
 
-function certificateResult(certName, domains) {
+function certificateResult(certName, domains, { staging = true } = {}) {
   return {
     certName,
     domains,
@@ -49,21 +49,26 @@ function certificateResult(certName, domains) {
     validFrom: '2026-09-08T20:00:00.000Z',
     validTo: '2026-12-07T20:00:00.000Z',
     fingerprint256: Array.from({ length: 32 }, () => 'AA').join(':'),
-    staging: true,
+    staging,
   };
 }
 
-test('certificate issuance requires active HTTP domain and reconciles agent metadata', async () => {
-  const adminToken = 'certificate-admin-token';
+async function createTestContext(hostname) {
   const serverRegistry = createServerRegistry();
-  const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'cert-test' });
-  const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'cert-host' });
-
+  const enrollment = await serverRegistry.issueEnrollmentToken({ label: hostname });
+  const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname });
   const domainRegistry = createDomainRegistry({
     serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
   });
   const jobRegistry = createJobRegistry();
   const certificateRegistry = createCertificateRegistry();
+  return { serverRegistry, enrolled, domainRegistry, jobRegistry, certificateRegistry };
+}
+
+test('certificate issuance requires active HTTP domain and reconciles agent metadata', async () => {
+  const adminToken = 'certificate-admin-token';
+  const context = await createTestContext('cert-host');
+  const { serverRegistry, enrolled, domainRegistry, jobRegistry, certificateRegistry } = context;
   const app = createApp({
     environment: 'production',
     registry: serverRegistry,
@@ -131,6 +136,7 @@ test('certificate issuance requires active HTTP domain and reconciles agent meta
     assert.equal(active.payload.data.certName, 'secure.example.com');
     assert.equal(active.payload.data.privateKeyPath, '/etc/letsencrypt/live/secure.example.com/privkey.pem');
     assert.equal(active.payload.data.lastError, null);
+    assert.equal((await domainRegistry.getDomain(domain.id)).certificateId, null);
 
     const dryRun = await requestJson(`${baseUrl}/api/certificates/${certificate.id}/renew`, {
       method: 'POST',
@@ -193,5 +199,79 @@ test('certificate issuance requires active HTTP domain and reconciles agent meta
     assert.equal(finalCertificate.state, 'active');
     assert.equal(finalCertificate.validTo, '2026-12-30T00:00:00.000Z');
     assert.ok(finalCertificate.lastRenewedAt);
+  });
+});
+
+test('production certificate attaches to domain and the next stage job contains managed TLS paths', async () => {
+  const adminToken = 'production-certificate-admin-token';
+  const context = await createTestContext('production-cert-host');
+  const { serverRegistry, enrolled, domainRegistry, jobRegistry, certificateRegistry } = context;
+  const app = createApp({
+    environment: 'production',
+    registry: serverRegistry,
+    domainRegistry,
+    jobRegistry,
+    certificateRegistry,
+    adminToken,
+  });
+
+  const domain = await domainRegistry.createDomain({
+    serverId: enrolled.server.id,
+    primaryDomain: 'prod.example.com',
+    aliases: [],
+    targetType: 'static',
+    target: { root: '/var/lib/yunpanel/apps/prod/current' },
+    httpsMode: 'managed',
+  });
+  await domainRegistry.markStaged(domain.id, {
+    checksum: 'b'.repeat(64),
+    configName: 'prod.example.com.conf',
+  });
+  await domainRegistry.markApplied(domain.id, { checksum: 'b'.repeat(64) });
+
+  await withServer(app, async (baseUrl) => {
+    const issued = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/issue`, {
+      method: 'POST',
+      token: adminToken,
+      body: { email: 'admin@example.com', staging: false },
+    });
+    assert.equal(issued.response.status, 202);
+    const certificate = issued.payload.data.certificate;
+
+    const claimedIssue = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
+      token: enrolled.agentToken,
+    });
+    await requestJson(
+      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${claimedIssue.payload.data.job.id}/result`,
+      {
+        method: 'POST',
+        token: enrolled.agentToken,
+        body: {
+          status: 'succeeded',
+          result: certificateResult(certificate.certName, certificate.domains, { staging: false }),
+        },
+      },
+    );
+
+    const attachedDomain = await domainRegistry.getDomain(domain.id);
+    assert.equal(attachedDomain.certificateId, certificate.id);
+    assert.equal(attachedDomain.desiredRevision, 2);
+    assert.equal(attachedDomain.appliedRevision, 1);
+    assert.equal(attachedDomain.state, 'draft');
+
+    const staged = await requestJson(`${baseUrl}/api/domains/${domain.id}/stage`, {
+      method: 'POST',
+      token: adminToken,
+    });
+    assert.equal(staged.response.status, 202);
+
+    const claimedStage = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
+      token: enrolled.agentToken,
+    });
+    assert.equal(claimedStage.payload.data.envelope.operation, OPERATIONS.DOMAIN_STAGE);
+    assert.deepEqual(claimedStage.payload.data.envelope.payload.tls, {
+      fullchainPath: '/etc/letsencrypt/live/prod.example.com/fullchain.pem',
+      privateKeyPath: '/etc/letsencrypt/live/prod.example.com/privkey.pem',
+    });
   });
 });
