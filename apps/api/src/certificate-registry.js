@@ -176,9 +176,10 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
 
   async function setState(certificateId, nextState) {
     await ensureInitialized();
-    if (!CERT_STATES.has(nextState)) throw new CertificateRegistryError('invalid_certificate_state', 'Certificate state is invalid');
     const certificate = requireCertificate(state, certificateId);
-    certificate.state = nextState;
+    const normalizedState = certificate.staging && nextState === 'issuing' ? 'validating' : nextState;
+    if (!CERT_STATES.has(normalizedState)) throw new CertificateRegistryError('invalid_certificate_state', 'Certificate state is invalid');
+    certificate.state = normalizedState;
     certificate.updatedAt = new Date(now()).toISOString();
     await persist();
     return publicCertificate(certificate);
@@ -208,7 +209,7 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
     await ensureInitialized();
     const certificate = requireCertificate(state, certificateId);
     if (certificate.staging) {
-      throw new CertificateRegistryError('production_certificate_required', 'Validation records cannot become active certificates', 409);
+      return markValidated(certificateId, result);
     }
     assertResultIdentity(certificate, result);
 
