@@ -82,9 +82,12 @@ function createHarness({ healthResults = [true], failFirstRestart = false } = {}
   return { manager, commands, links, removals, writes };
 }
 
-test('healthy Node deployment creates hardened service state and keeps the new release active', async () => {
+test('healthy Node deployment creates hardened service state and materializes custom environment', async () => {
   const harness = createHarness({ healthResults: [true] });
-  const result = await harness.manager.deployNode(deploymentSpec());
+  const result = await harness.manager.deployNode({
+    ...deploymentSpec(),
+    environment: { API_TOKEN: 'secret-value', PUBLIC_URL: 'https://example.test' },
+  });
 
   assert.equal(result.releaseId, DEPLOYMENT_ID);
   assert.equal(result.previousReleaseId, PREVIOUS_RELEASE);
@@ -96,8 +99,10 @@ test('healthy Node deployment creates hardened service state and keeps the new r
   const currentSwitch = harness.links.find((entry) => entry.target === `releases/${DEPLOYMENT_ID}`);
   assert.ok(currentSwitch);
   const environmentWrite = harness.writes.find((entry) => entry.target.startsWith('/env/'));
-  assert.match(environmentWrite.content, /HOST=127\.0\.0\.1/);
-  assert.match(environmentWrite.content, /PORT=3100/);
+  assert.match(environmentWrite.content, /HOST="127\.0\.0\.1"/);
+  assert.match(environmentWrite.content, /PORT="3100"/);
+  assert.match(environmentWrite.content, /API_TOKEN="secret-value"/);
+  assert.match(environmentWrite.content, /PUBLIC_URL="https:\/\/example\.test"/);
   assert.equal(environmentWrite.options.mode, 0o600);
 
   const unitWrite = harness.writes.find((entry) => entry.target.startsWith('/systemd/'));
