@@ -25,6 +25,8 @@ test('known operations are explicitly allowlisted', () => {
     OPERATIONS.SSL_RENEW,
     OPERATIONS.APP_STATIC_DEPLOY,
     OPERATIONS.APP_STATIC_ROLLBACK,
+    OPERATIONS.APP_NODE_DEPLOY,
+    OPERATIONS.APP_NODE_ROLLBACK,
   ]) {
     assert.equal(isKnownOperation(operation), true);
     assert.equal(isReadOnlyOperation(operation), false);
@@ -161,4 +163,37 @@ test('validates static deploy and rollback payloads', () => {
   });
   assert.equal(invalidRollback.ok, false);
   assert.match(invalidRollback.errors.join(' '), /releaseId/);
+});
+
+test('validates Node rollback payloads with desired runtime state', () => {
+  const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
+  const releaseId = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
+  const runtime = {
+    nodeMajor: 24,
+    installMode: 'ci',
+    buildScript: 'build',
+    startMode: 'node',
+    entryFile: 'dist/server.js',
+    port: 3100,
+    healthPath: '/health',
+    healthTimeoutSeconds: 10,
+    restartPolicy: 'on-failure',
+  };
+
+  const rollback = validateOperationEnvelope({
+    id: 'request-node-rollback-0001',
+    operation: OPERATIONS.APP_NODE_ROLLBACK,
+    payload: { applicationId, releaseId, runtime },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(rollback.ok, true);
+
+  const invalidRollback = validateOperationEnvelope({
+    id: 'request-node-rollback-0002',
+    operation: OPERATIONS.APP_NODE_ROLLBACK,
+    payload: { applicationId, releaseId, runtime: { ...runtime, port: 80 } },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(invalidRollback.ok, false);
+  assert.match(invalidRollback.errors.join(' '), /port/);
 });
