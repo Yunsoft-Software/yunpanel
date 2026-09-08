@@ -108,3 +108,14 @@ export function normalizeNodeRollbackSpec(value) {
     runtime: normalizeNodeRuntimeConfig(value.runtime),
   };
 }
+
+export function normalizeNodeRestartSpec(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ApplicationValidationError('invalid_node_restart', 'Node restart spec must be an object');
+  }
+
+  return {
+    applicationId: assertUuid(value.applicationId, 'applicationId'),
+    runtime: normalizeNodeRuntimeConfig(value.runtime),
+  };
+}
