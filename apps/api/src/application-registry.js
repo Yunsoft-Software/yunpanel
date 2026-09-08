@@ -360,7 +360,7 @@ export function createApplicationRegistry({
   async function markRollingBack(applicationId, operationId, releaseId) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
-    if (application.type !== 'static') throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
+    if (!['static', 'node'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
     if (!application.currentReleaseId) throw new ApplicationRegistryError('application_not_deployed', 'Application has no active release to roll back', 409);
     const normalizedOperationId = normalizeUuid(operationId, 'operationId');
@@ -376,10 +376,18 @@ export function createApplicationRegistry({
     return publicApplication(application);
   }
 
-  async function markRolledBack(applicationId, { operationId, releaseId, previousReleaseId }) {
+  async function markRolledBack(applicationId, {
+    operationId,
+    releaseId,
+    previousReleaseId,
+    serviceName = null,
+    port = null,
+    healthPath = null,
+    healthy = null,
+  }) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
-    if (application.type !== 'static') throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
+    if (!['static', 'node'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
     const normalizedOperationId = normalizeUuid(operationId, 'operationId');
     const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
     const previousValue = previousReleaseId === undefined ? application.currentReleaseId : previousReleaseId;
@@ -389,6 +397,19 @@ export function createApplicationRegistry({
     if (normalizedPreviousReleaseId !== application.currentReleaseId) throw new ApplicationRegistryError('release_state_drift', 'Managed server current release does not match control-plane rollback state', 409);
     const target = application.releases.find((release) => release.releaseId === normalizedReleaseId);
     if (!target) throw new ApplicationRegistryError('rollback_release_unknown', 'Rollback release is not in retained application history', 409);
+
+    if (application.type === 'node') {
+      const expectedService = expectedNodeServiceName(application.id);
+      if (typeof serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(serviceName) || serviceName !== expectedService) {
+        throw new ApplicationRegistryError('invalid_node_service', 'Node rollback service identity is invalid');
+      }
+      if (!Number.isInteger(port) || port !== application.runtime?.port) {
+        throw new ApplicationRegistryError('invalid_node_port', 'Node rollback port does not match application state');
+      }
+      if (typeof healthPath !== 'string' || healthPath !== application.runtime?.healthPath || healthy !== true) {
+        throw new ApplicationRegistryError('invalid_node_health', 'Node rollback health result does not match application state');
+      }
+    }
 
     const timestamp = new Date(now()).toISOString();
     application.previousReleaseId = application.currentReleaseId;
@@ -400,6 +421,12 @@ export function createApplicationRegistry({
     application.lastRolledBackAt = timestamp;
     application.lastError = null;
     application.updatedAt = timestamp;
+    if (application.type === 'node') {
+      application.serviceName = serviceName;
+      application.servicePort = port;
+      application.healthPath = healthPath;
+      application.proxyTarget = { host: '127.0.0.1', port };
+    }
     trimReleaseHistory(application);
     await persist();
     return publicApplication(application);
