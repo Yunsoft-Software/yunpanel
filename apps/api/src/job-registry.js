@@ -16,11 +16,13 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.APP_NODE_DEPLOY,
   OPERATIONS.APP_NODE_ROLLBACK,
   OPERATIONS.APP_NODE_RESTART,
+  OPERATIONS.APP_NODE_STATUS,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const NODE_SERVICE_PATTERN = /^yunpanel-node-[a-f0-9]{16}\.service$/;
+const SYSTEMD_STATE_PATTERN = /^[a-z0-9-]{1,40}$/;
 const MAX_ARTIFACT_FILES = 100_000;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024;
 
@@ -162,6 +164,25 @@ function expectedNodeServiceName(applicationId) {
   return `yunpanel-node-${digest}.service`;
 }
 
+function validateManagedNodeResult(job, result, action) {
+  const releaseId = normalizeUuid(result.releaseId);
+  const expectedReleaseId = normalizeUuid(job.payload?.releaseId);
+  const expectedService = expectedNodeServiceName(job.payload?.applicationId);
+  if (!releaseId || releaseId !== expectedReleaseId) {
+    throw new JobRegistryError('invalid_job_result', `Node ${action} release state does not match the queued operation`);
+  }
+  if (!expectedService || typeof result.serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(result.serviceName) || result.serviceName !== expectedService) {
+    throw new JobRegistryError('invalid_job_result', `Node ${action} service identity is invalid`);
+  }
+  if (!Number.isInteger(result.port) || result.port !== job.payload?.runtime?.port) {
+    throw new JobRegistryError('invalid_job_result', `Node ${action} port does not match desired state`);
+  }
+  if (typeof result.healthPath !== 'string' || result.healthPath !== job.payload?.runtime?.healthPath) {
+    throw new JobRegistryError('invalid_job_result', `Node ${action} health path does not match desired state`);
+  }
+  return { releaseId, serviceName: result.serviceName, port: result.port, healthPath: result.healthPath };
+}
+
 function sanitizeNodeDeploymentResult(job, result) {
   const identity = sanitizeReleaseIdentity(job, result);
   const expectedService = expectedNodeServiceName(job.payload?.applicationId);
@@ -200,66 +221,54 @@ function sanitizeStaticRollbackResult(job, result) {
 }
 
 function sanitizeNodeRollbackResult(job, result) {
-  const releaseId = normalizeUuid(result.releaseId);
-  const expectedReleaseId = normalizeUuid(job.payload?.releaseId);
+  const managed = validateManagedNodeResult(job, result, 'rollback');
   const previousReleaseId = normalizeUuid(result.previousReleaseId);
-  const expectedService = expectedNodeServiceName(job.payload?.applicationId);
-
-  if (!releaseId || releaseId !== expectedReleaseId || !previousReleaseId || previousReleaseId === releaseId) {
-    throw new JobRegistryError('invalid_job_result', 'Node rollback release state does not match the queued rollback');
-  }
-  if (!expectedService || typeof result.serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(result.serviceName) || result.serviceName !== expectedService) {
-    throw new JobRegistryError('invalid_job_result', 'Node rollback service identity is invalid');
-  }
-  if (!Number.isInteger(result.port) || result.port !== job.payload?.runtime?.port) {
-    throw new JobRegistryError('invalid_job_result', 'Node rollback port does not match desired state');
-  }
-  if (typeof result.healthPath !== 'string' || result.healthPath !== job.payload?.runtime?.healthPath) {
-    throw new JobRegistryError('invalid_job_result', 'Node rollback health path does not match desired state');
+  if (!previousReleaseId || previousReleaseId === managed.releaseId) {
+    throw new JobRegistryError('invalid_job_result', 'Node rollback previous release state is invalid');
   }
   if (result.healthy !== true || result.active !== true) {
     throw new JobRegistryError('invalid_job_result', 'Node rollback must confirm healthy active state');
   }
-
-  return {
-    releaseId,
-    previousReleaseId,
-    serviceName: result.serviceName,
-    port: result.port,
-    healthPath: result.healthPath,
-    healthy: true,
-    active: true,
-  };
+  return { ...managed, previousReleaseId, healthy: true, active: true };
 }
 
 function sanitizeNodeRestartResult(job, result) {
-  const releaseId = normalizeUuid(result.releaseId);
-  const expectedReleaseId = normalizeUuid(job.payload?.releaseId);
-  const expectedService = expectedNodeServiceName(job.payload?.applicationId);
-
-  if (!releaseId || releaseId !== expectedReleaseId) {
-    throw new JobRegistryError('invalid_job_result', 'Node restart release state does not match the queued restart');
-  }
-  if (!expectedService || typeof result.serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(result.serviceName) || result.serviceName !== expectedService) {
-    throw new JobRegistryError('invalid_job_result', 'Node restart service identity is invalid');
-  }
-  if (!Number.isInteger(result.port) || result.port !== job.payload?.runtime?.port) {
-    throw new JobRegistryError('invalid_job_result', 'Node restart port does not match desired state');
-  }
-  if (typeof result.healthPath !== 'string' || result.healthPath !== job.payload?.runtime?.healthPath) {
-    throw new JobRegistryError('invalid_job_result', 'Node restart health path does not match desired state');
-  }
+  const managed = validateManagedNodeResult(job, result, 'restart');
   if (result.healthy !== true || result.restarted !== true) {
     throw new JobRegistryError('invalid_job_result', 'Node restart must confirm a healthy restarted service');
   }
+  return { ...managed, healthy: true, restarted: true };
+}
 
+function sanitizeNodeStatusResult(job, result) {
+  const managed = validateManagedNodeResult(job, result, 'status');
+  for (const [field, value] of [
+    ['loadState', result.loadState],
+    ['activeState', result.activeState],
+    ['subState', result.subState],
+  ]) {
+    if (typeof value !== 'string' || !SYSTEMD_STATE_PATTERN.test(value)) {
+      throw new JobRegistryError('invalid_job_result', `Node status ${field} is invalid`);
+    }
+  }
+  if (!Number.isSafeInteger(result.restartCount) || result.restartCount < 0) {
+    throw new JobRegistryError('invalid_job_result', 'Node status restart count is invalid');
+  }
+  if (!Number.isSafeInteger(result.mainPid) || result.mainPid < 0) {
+    throw new JobRegistryError('invalid_job_result', 'Node status main PID is invalid');
+  }
+  if (typeof result.healthy !== 'boolean' || typeof result.inspectionError !== 'boolean') {
+    throw new JobRegistryError('invalid_job_result', 'Node status health metadata is invalid');
+  }
   return {
-    releaseId,
-    serviceName: result.serviceName,
-    port: result.port,
-    healthPath: result.healthPath,
-    healthy: true,
-    restarted: true,
+    ...managed,
+    loadState: result.loadState,
+    activeState: result.activeState,
+    subState: result.subState,
+    restartCount: result.restartCount,
+    mainPid: result.mainPid,
+    healthy: result.healthy,
+    inspectionError: result.inspectionError,
   };
 }
 
@@ -299,8 +308,9 @@ function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.APP_STATIC_DEPLOY) return sanitizeStaticDeploymentResult(job, result);
   if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK) return sanitizeStaticRollbackResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_DEPLOY) return sanitizeNodeDeploymentResult(job, result);
-  if (job.operation === OPERATIONS.APP_NODE_ROLLBACK) return sanitizeNodeRollbackResult(job, result);
+  if (job.operation === OPERATIONS.APP_NODE_ROLLACK) return sanitizeNodeRollbackResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_RESTART) return sanitizeNodeRestartResult(job, result);
+  if (job.operation === OPERATIONS.APP_NODE_STATUS) return sanitizeNodeStatusResult(job, result);
   throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
 }
 
