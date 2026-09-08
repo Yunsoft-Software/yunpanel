@@ -118,8 +118,9 @@ export function createNodeRestartManager({
     const systemctlPath = await findSystemctl();
     if (!systemctlPath) throw new NodeRestartError('systemd_not_available', 'systemctl is not available on the managed server');
 
+    let environmentTransaction;
     try {
-      await writeEnvironment({
+      environmentTransaction = await writeEnvironment({
         applicationId: spec.applicationId,
         runtime: spec.runtime,
         environment: rawSpec.environment ?? {},
@@ -130,18 +131,43 @@ export function createNodeRestartManager({
       }
       throw error;
     }
-
-    const serviceName = nodeServiceName(spec.applicationId);
-    await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
-    const healthy = await waitForHealth({
-      port: spec.runtime.port,
-      healthPath: spec.runtime.healthPath,
-      timeoutSeconds: spec.runtime.healthTimeoutSeconds,
-    });
-    if (!healthy) {
-      throw new NodeRestartError('node_restart_health_failed', 'Node service restart completed but the application failed health checks');
+    if (!environmentTransaction || typeof environmentTransaction.restore !== 'function' || typeof environmentTransaction.commit !== 'function') {
+      throw new NodeRestartError('node_environment_write_failed', 'Node environment writer did not return a transaction');
     }
 
+    const serviceName = nodeServiceName(spec.applicationId);
+    let restartError = null;
+    try {
+      await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
+      const healthy = await waitForHealth({
+        port: spec.runtime.port,
+        healthPath: spec.runtime.healthPath,
+        timeoutSeconds: spec.runtime.healthTimeoutSeconds,
+      });
+      if (!healthy) {
+        restartError = new NodeRestartError('node_restart_health_failed', 'Node service restart completed but the application failed health checks');
+      }
+    } catch (error) {
+      restartError = error;
+    }
+
+    if (restartError) {
+      try {
+        await environmentTransaction.restore();
+        await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
+        const restoredHealthy = await waitForHealth({
+          port: spec.runtime.port,
+          healthPath: spec.runtime.healthPath,
+          timeoutSeconds: spec.runtime.healthTimeoutSeconds,
+        });
+        if (!restoredHealthy) throw new Error('previous environment failed health check');
+      } catch {
+        throw new NodeRestartError('node_restart_restore_failed', 'Node restart failed and the previous environment could not be restored safely');
+      }
+      throw restartError;
+    }
+
+    environmentTransaction.commit();
     return {
       releaseId: currentReleaseId,
       serviceName,
