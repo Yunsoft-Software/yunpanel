@@ -4,6 +4,7 @@ import path from 'node:path';
 const MAX_FILES = 100_000;
 const MAX_BYTES = 2 * 1024 * 1024 * 1024;
 const EXCLUDED_NAMES = new Set(['.git']);
+const SAFE_RELATIVE_PATH = /^[A-Za-z0-9._/-]+$/;
 
 function safeEntryName(name) {
   return name !== '.'
@@ -13,7 +14,18 @@ function safeEntryName(name) {
     && !name.includes('\\');
 }
 
-export async function copyStaticArtifact({ sourceDir, targetDir }) {
+function normalizeHealthFile(value = 'index.html') {
+  if (typeof value !== 'string' || !SAFE_RELATIVE_PATH.test(value) || value.startsWith('/')) {
+    throw new Error('Artifact health file is invalid');
+  }
+  const segments = value.split('/');
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) {
+    throw new Error('Artifact health file is invalid');
+  }
+  return value;
+}
+
+export async function copyStaticArtifact({ sourceDir, targetDir, healthFile = 'index.html' }) {
   const stats = { files: 0, directories: 0, bytes: 0 };
 
   async function copyDirectory(source, target) {
@@ -49,13 +61,25 @@ export async function copyStaticArtifact({ sourceDir, targetDir }) {
   if (!sourceInfo.isDirectory() || sourceInfo.isSymbolicLink()) throw new Error('Artifact source must be a real directory');
   await copyDirectory(sourceDir, targetDir);
   if (stats.files < 1) throw new Error('Artifact output is empty');
-  return stats;
+
+  const normalizedHealthFile = normalizeHealthFile(healthFile);
+  let healthInfo;
+  try {
+    healthInfo = await lstat(path.join(targetDir, normalizedHealthFile));
+  } catch {
+    throw new Error('Artifact health file is missing');
+  }
+  if (!healthInfo.isFile() || healthInfo.isSymbolicLink() || healthInfo.size < 1) {
+    throw new Error('Artifact health file is invalid');
+  }
+
+  return { ...stats, healthFile: normalizedHealthFile };
 }
 
 async function main() {
-  const [sourceDir, targetDir] = process.argv.slice(2);
+  const [sourceDir, targetDir, healthFile] = process.argv.slice(2);
   if (!sourceDir || !targetDir) throw new Error('sourceDir and targetDir are required');
-  const result = await copyStaticArtifact({ sourceDir, targetDir });
+  const result = await copyStaticArtifact({ sourceDir, targetDir, healthFile: healthFile ?? 'index.html' });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
