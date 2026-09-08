@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { createApp } from './app.js';
+import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { startCertificateRenewalScheduler } from './certificate-renewal-scheduler.js';
 import { createDomainRegistry } from './domain-registry.js';
@@ -12,6 +13,7 @@ const serverStorePath = process.env.YUNPANEL_SERVER_STORE ?? path.resolve('.data
 const domainStorePath = process.env.YUNPANEL_DOMAIN_STORE ?? path.resolve('.data/domain-registry.json');
 const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-registry.json');
 const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.resolve('.data/certificate-registry.json');
+const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.resolve('.data/application-registry.json');
 const certificateRenewalIntervalMs = Number.parseInt(
   process.env.YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS ?? `${6 * 60 * 60 * 1000}`,
   10,
@@ -40,6 +42,12 @@ await jobRegistry.init();
 const certificateRegistry = createCertificateRegistry({ filePath: certificateStorePath });
 await certificateRegistry.init();
 
+const applicationRegistry = createApplicationRegistry({
+  filePath: applicationStorePath,
+  serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+});
+await applicationRegistry.init();
+
 const renewalScheduler = startCertificateRenewalScheduler({
   certificateRegistry,
   jobRegistry,
@@ -47,13 +55,20 @@ const renewalScheduler = startCertificateRenewalScheduler({
   renewBeforeMs: certificateRenewBeforeMs,
 });
 
-const app = createApp({ registry, domainRegistry, jobRegistry, certificateRegistry });
+const app = createApp({
+  registry,
+  domainRegistry,
+  jobRegistry,
+  certificateRegistry,
+  applicationRegistry,
+});
 const server = app.listen(port, host, () => {
   console.log(`[yunpanel-api] listening on http://${host}:${port}`);
   console.log(`[yunpanel-api] server store=${serverStorePath}`);
   console.log(`[yunpanel-api] domain store=${domainStorePath}`);
   console.log(`[yunpanel-api] job store=${jobStorePath}`);
   console.log(`[yunpanel-api] certificate store=${certificateStorePath}`);
+  console.log(`[yunpanel-api] application store=${applicationStorePath}`);
 });
 
 function shutdown(signal) {
