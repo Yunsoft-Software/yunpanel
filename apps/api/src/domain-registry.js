@@ -103,7 +103,7 @@ export function createDomainRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = JSON.parse(await readFile(filePath, 'utf8');
         if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.domains)) {
           throw new Error('unsupported or invalid domain registry state');
         }
@@ -185,6 +185,30 @@ export function createDomainRegistry({
     return domain ? publicDomain(domain) : null;
   }
 
+  async function attachCertificate(domainId, certificateId) {
+    await ensureInitialized();
+    const domain = requireDomain(state, domainId);
+    if (domain.httpsMode !== 'managed') {
+      throw new DomainRegistryError('https_not_managed', 'Certificate can only be attached to a managed HTTPS domain', 409);
+    }
+    if (typeof certificateId !== 'string' || !certificateId) {
+      throw new DomainRegistryError('invalid_certificate', 'certificateId is required');
+    }
+    if (domain.certificateId === certificateId) return publicDomain(domain);
+
+    domain.certificateId = certificateId;
+    domain.desiredRevision += 1;
+    domain.stagedRevision = 0;
+    domain.stagedChecksum = null;
+    domain.stagedConfigName = null;
+    domain.lastStagedAt = null;
+    domain.state = 'draft';
+    domain.lastError = null;
+    domain.updatedAt = new Date(now()).toISOString();
+    await persist();
+    return publicDomain(domain);
+  }
+
   async function markStaged(domainId, { checksum, configName }) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
@@ -245,6 +269,7 @@ export function createDomainRegistry({
     createDomain,
     listDomains,
     getDomain,
+    attachCertificate,
     markStaged,
     markApplied,
     markFailed,
