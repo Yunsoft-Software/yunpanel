@@ -1,6 +1,7 @@
 import express from 'express';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { inspectLocalAgent } from './agent-client.js';
+import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
 import { createBootstrapAdminGuard, resolveBootstrapAdminToken } from './bootstrap-auth.js';
 import { createCertificateRegistry, CertificateRegistryError } from './certificate-registry.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
@@ -36,13 +37,39 @@ async function resolveDomainTls(domain, certificateRegistry) {
   };
 }
 
-async function reconcileAgentJob({ domainRegistry, certificateRegistry, job }) {
+async function reconcileApplicationJob(applicationRegistry, job) {
+  if (job.operation !== OPERATIONS.APP_STATIC_DEPLOY) return;
+
+  const application = await applicationRegistry.getApplication(job.resourceId);
+  if (!application) return;
+
+  if (job.status === 'failed') {
+    if (application.activeDeploymentId !== job.id) return;
+    await applicationRegistry.markFailed(job.resourceId, job.id, job.error?.code ?? 'deployment_failed');
+    return;
+  }
+
+  if (application.activeDeploymentId == null && application.currentReleaseId === job.result?.releaseId) return;
+  await applicationRegistry.markDeployed(job.resourceId, {
+    deploymentId: job.id,
+    releaseId: job.result.releaseId,
+    commitSha: job.result.commitSha,
+    artifactFiles: job.result.artifactFiles,
+    artifactBytes: job.result.artifactBytes,
+  });
+}
+
+async function reconcileAgentJob({ domainRegistry, certificateRegistry, applicationRegistry, job }) {
+  if (job.resourceType === 'application') {
+    await reconcileApplicationJob(applicationRegistry, job);
+    return;
+  }
+
   if (job.resourceType === 'domain') {
     if (job.status === 'failed') {
       await domainRegistry.markFailed(job.resourceId, job.error?.code ?? 'agent_job_failed');
       return;
     }
-
     if (job.operation === OPERATIONS.DOMAIN_STAGE) {
       await domainRegistry.markStaged(job.resourceId, {
         checksum: job.result.checksum,
@@ -50,7 +77,6 @@ async function reconcileAgentJob({ domainRegistry, certificateRegistry, job }) {
       });
       return;
     }
-
     if (job.operation === OPERATIONS.DOMAIN_ACTIVATE) {
       await domainRegistry.markApplied(job.resourceId, { checksum: job.result.checksum });
     }
@@ -62,15 +88,11 @@ async function reconcileAgentJob({ domainRegistry, certificateRegistry, job }) {
       await certificateRegistry.markFailed(job.resourceId, job.error?.code ?? 'certificate_operation_failed');
       return;
     }
-
     if (job.operation === OPERATIONS.SSL_ISSUE) {
       const certificate = await certificateRegistry.markActive(job.resourceId, job.result, { renewal: false });
-      if (!certificate.staging) {
-        await domainRegistry.attachCertificate(certificate.domainId, certificate.id);
-      }
+      if (!certificate.staging) await domainRegistry.attachCertificate(certificate.domainId, certificate.id);
       return;
     }
-
     if (job.operation === OPERATIONS.SSL_RENEW) {
       if (job.result.dryRun === true) {
         await certificateRegistry.setState(job.resourceId, 'active');
@@ -88,6 +110,7 @@ export function createApp({
   domainRegistry = createDomainRegistry(),
   jobRegistry = createJobRegistry(),
   certificateRegistry = createCertificateRegistry(),
+  applicationRegistry = createApplicationRegistry(),
   adminToken,
 } = {}) {
   const app = express();
@@ -104,9 +127,7 @@ export function createApp({
   });
 
   app.get('/api/dev/agent/inspect', async (request, response) => {
-    if (environment !== 'development') {
-      return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
-    }
+    if (environment !== 'development') return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
     try {
       return response.json(await inspectAgent());
     } catch (error) {
@@ -132,6 +153,11 @@ export function createApp({
   app.get('/api/dev/certificates', async (request, response) => {
     if (environment !== 'development') return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
     return response.json({ data: await certificateRegistry.listCertificates() });
+  });
+
+  app.get('/api/dev/applications', async (request, response) => {
+    if (environment !== 'development') return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
+    return response.json({ data: await applicationRegistry.listApplications() });
   });
 
   app.get('/api/servers', requireBootstrapAdmin, async (request, response) => {
@@ -189,15 +215,72 @@ export function createApp({
     });
 
     try {
-      await reconcileAgentJob({ domainRegistry, certificateRegistry, job });
+      await reconcileAgentJob({ domainRegistry, certificateRegistry, applicationRegistry, job });
     } catch (error) {
       if (job.resourceType === 'domain') {
         await domainRegistry.markFailed(job.resourceId, `reconcile_${error.code ?? 'failed'}`);
       } else if (job.resourceType === 'certificate') {
         await certificateRegistry.markFailed(job.resourceId, `reconcile_${error.code ?? 'failed'}`);
+      } else if (job.resourceType === 'application') {
+        const application = await applicationRegistry.getApplication(job.resourceId);
+        if (application?.activeDeploymentId === job.id) {
+          await applicationRegistry.markFailed(job.resourceId, job.id, `reconcile_${error.code ?? 'failed'}`);
+        }
       }
     }
     return response.json({ data: job });
+  });
+
+  app.get('/api/applications', requireBootstrapAdmin, async (request, response) => {
+    return response.json({ data: await applicationRegistry.listApplications() });
+  });
+
+  app.get('/api/applications/:applicationId', requireBootstrapAdmin, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    return response.json({ data: application });
+  });
+
+  app.post('/api/applications', requireBootstrapAdmin, async (request, response) => {
+    const application = await applicationRegistry.createApplication({
+      serverId: request.body?.serverId,
+      name: request.body?.name,
+      repositoryUrl: request.body?.repositoryUrl,
+      branch: request.body?.branch ?? 'main',
+      build: request.body?.build ?? {},
+      retention: request.body?.retention ?? 5,
+    });
+    return response.status(201).json({ data: application });
+  });
+
+  app.post('/api/applications/:applicationId/deploy', requireBootstrapAdmin, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    await ensureResourceJobIdle(jobRegistry, 'application', application.id);
+    if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active deployment', 409);
+
+    const job = await jobRegistry.enqueue({
+      serverId: application.serverId,
+      type: 'app.static.deploy',
+      operation: OPERATIONS.APP_STATIC_DEPLOY,
+      payload: {
+        applicationId: application.id,
+        repositoryUrl: application.repositoryUrl,
+        branch: application.branch,
+        build: application.build,
+        retention: application.retention,
+      },
+      resourceType: 'application',
+      resourceId: application.id,
+    });
+
+    try {
+      const deploying = await applicationRegistry.markDeploying(application.id, job.id);
+      return response.status(202).json({ data: { application: deploying, job } });
+    } catch (error) {
+      await jobRegistry.cancel(job.id).catch(() => {});
+      throw error;
+    }
   });
 
   app.get('/api/domains', requireBootstrapAdmin, async (request, response) => {
@@ -227,7 +310,6 @@ export function createApp({
     if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
     await ensureResourceJobIdle(jobRegistry, 'domain', domain.id);
     const tls = await resolveDomainTls(domain, certificateRegistry);
-
     const payload = {
       primaryDomain: domain.primaryDomain,
       aliases: domain.aliases,
@@ -269,9 +351,7 @@ export function createApp({
   app.post('/api/domains/:domainId/certificates/issue', requireBootstrapAdmin, async (request, response) => {
     const domain = await domainRegistry.getDomain(request.params.domainId);
     if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
-    if (domain.httpsMode !== 'managed') {
-      throw new CertificateRegistryError('https_not_managed', 'Domain must use managed HTTPS before requesting a certificate', 409);
-    }
+    if (domain.httpsMode !== 'managed') throw new CertificateRegistryError('https_not_managed', 'Domain must use managed HTTPS before requesting a certificate', 409);
     if (domain.state !== 'active' || domain.appliedRevision !== domain.desiredRevision) {
       throw new CertificateRegistryError('http_domain_not_active', 'Current domain revision must be active before HTTP-01 certificate issuance', 409);
     }
@@ -314,9 +394,7 @@ export function createApp({
   app.post('/api/certificates/:certificateId/renew', requireBootstrapAdmin, async (request, response) => {
     const certificate = await certificateRegistry.getCertificate(request.params.certificateId);
     if (!certificate) throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
-    if (certificate.state !== 'active') {
-      throw new CertificateRegistryError('certificate_not_active', 'Only active certificates can be renewed', 409);
-    }
+    if (certificate.state !== 'active') throw new CertificateRegistryError('certificate_not_active', 'Only active certificates can be renewed', 409);
     await ensureResourceJobIdle(jobRegistry, 'certificate', certificate.id);
 
     const dryRun = request.body?.dryRun === true;
@@ -349,7 +427,14 @@ export function createApp({
   });
 
   app.post('/api/jobs/:jobId/cancel', requireBootstrapAdmin, async (request, response) => {
-    return response.json({ data: await jobRegistry.cancel(request.params.jobId) });
+    const job = await jobRegistry.cancel(request.params.jobId);
+    if (job.resourceType === 'application' && job.operation === OPERATIONS.APP_STATIC_DEPLOY) {
+      const application = await applicationRegistry.getApplication(job.resourceId);
+      if (application?.activeDeploymentId === job.id) {
+        await applicationRegistry.markFailed(job.resourceId, job.id, 'deployment_cancelled');
+      }
+    }
+    return response.json({ data: job });
   });
 
   app.use((request, response) => {
@@ -364,6 +449,7 @@ export function createApp({
       || error instanceof DomainRegistryError
       || error instanceof JobRegistryError
       || error instanceof CertificateRegistryError
+      || error instanceof ApplicationRegistryError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }
