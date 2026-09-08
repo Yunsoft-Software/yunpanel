@@ -6,6 +6,7 @@ import { inspectDocker } from './docker-inspector.js';
 import { inspectNginx } from './nginx-inspector.js';
 import { nginxManager } from './nginx-manager.js';
 import { staticDeploymentManager } from './static-deployment-manager.js';
+import { staticRollbackManager } from './static-rollback-manager.js';
 import { inspectAllowlistedServices } from './systemd-inspector.js';
 
 const CAPABILITIES = Object.freeze({
@@ -30,7 +31,6 @@ const CAPABILITIES = Object.freeze({
 
 function parseOsRelease(content) {
   const values = {};
-
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
@@ -41,7 +41,6 @@ function parseOsRelease(content) {
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
     values[key] = value;
   }
-
   return {
     id: values.ID ?? os.platform(),
     name: values.NAME ?? values.ID ?? os.platform(),
@@ -153,6 +152,7 @@ export const operationHandlers = Object.freeze({
   [OPERATIONS.SSL_ISSUE]: (payload) => acmeManager.issueCertificate(payload),
   [OPERATIONS.SSL_RENEW]: (payload) => acmeManager.renewCertificate(payload),
   [OPERATIONS.APP_STATIC_DEPLOY]: (payload) => staticDeploymentManager.deployStatic(payload),
+  [OPERATIONS.APP_STATIC_ROLLBACK]: (payload) => staticRollbackManager.rollbackStatic(payload),
 });
 
 export async function executeOperation(operation, payload) {
