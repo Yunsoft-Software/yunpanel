@@ -9,6 +9,7 @@ import {
   renderNodeSystemdUnit,
 } from '@yunpanel/config-templates';
 import { normalizeNodeApplicationSpec } from '@yunpanel/shared';
+import { createNodeEnvironmentWriter, NodeEnvironmentWriteError } from './node-environment-writer.js';
 
 const execFileAsync = promisify(execFile);
 const APP_ROOT = '/var/lib/yunpanel/apps';
@@ -121,6 +122,7 @@ export function createNodeDeploymentManager({
   systemctlPaths = SYSTEMCTL_PATHS,
 } = {}) {
   const deploymentLocks = new Map();
+  const environmentWriter = createNodeEnvironmentWriter({ envRoot, mkdirFn, renameFn, writeFileFn });
 
   async function runSafe(file, args, options = {}) {
     try {
@@ -210,7 +212,6 @@ export function createNodeDeploymentManager({
     const releaseDirectory = path.join(releasesDirectory, spec.deploymentId);
     const currentPath = path.join(applicationDirectory, 'current');
     const dataDirectory = path.join(dataRoot, spec.applicationId);
-    const environmentPath = path.join(envRoot, `${spec.applicationId}.env`);
     const unitPath = path.join(systemdRoot, serviceName);
     let releaseCreated = false;
     let newReleaseActive = false;
@@ -278,17 +279,20 @@ export function createNodeDeploymentManager({
       }
 
       await rmFn(path.join(releaseDirectory, '.git'), { recursive: true, force: true });
-      await mkdirFn(envRoot, { recursive: true, mode: 0o700 });
       await mkdirFn(systemdRoot, { recursive: true, mode: 0o755 });
 
-      const environment = [
-        'NODE_ENV=production',
-        'HOST=127.0.0.1',
-        `PORT=${spec.runtime.port}`,
-        `YUNPANEL_APPLICATION_ID=${spec.applicationId}`,
-        '',
-      ].join('\n');
-      await atomicWrite(environmentPath, environment, 0o600);
+      try {
+        await environmentWriter.writeEnvironment({
+          applicationId: spec.applicationId,
+          runtime: spec.runtime,
+          environment: rawSpec.environment ?? {},
+        });
+      } catch (error) {
+        if (error instanceof NodeEnvironmentWriteError) {
+          throw new NodeDeploymentError(error.code, error.message);
+        }
+        throw error;
+      }
 
       const unit = renderNodeSystemdUnit({
         applicationId: spec.applicationId,
