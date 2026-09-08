@@ -4,3 +4,10 @@ export {
   renderProxySiteConfig,
   renderStaticSiteConfig,
 } from './nginx.js';
+
+export {
+  SystemdTemplateError,
+  nodeApplicationUser,
+  nodeServiceName,
+  renderNodeSystemdUnit,
+} from './systemd.js';
