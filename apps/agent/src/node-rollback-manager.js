@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { nodeServiceName } from '@yunpanel/config-templates';
 import { normalizeNodeRollbackSpec } from '@yunpanel/shared';
+import { nodeEnvironmentWriter, NodeEnvironmentWriteError } from './node-environment-writer.js';
 
 const execFileAsync = promisify(execFile);
 const APP_ROOT = '/var/lib/yunpanel/apps';
@@ -69,6 +70,7 @@ export function createNodeRollbackManager({
   rmFn = rm,
   symlinkFn = symlink,
   waitForHealth = defaultWaitForHealth,
+  writeEnvironment = (input) => nodeEnvironmentWriter.writeEnvironment(input),
   systemctlPaths = SYSTEMCTL_PATHS,
 } = {}) {
   const rollbackLocks = new Map();
@@ -145,6 +147,19 @@ export function createNodeRollbackManager({
 
     const systemctlPath = await findSystemctl();
     if (!systemctlPath) throw new NodeRollbackError('systemd_not_available', 'systemctl is not available on the managed server');
+
+    try {
+      await writeEnvironment({
+        applicationId: spec.applicationId,
+        runtime: spec.runtime,
+        environment: rawSpec.environment ?? {},
+      });
+    } catch (error) {
+      if (error instanceof NodeEnvironmentWriteError) {
+        throw new NodeRollbackError(error.code, error.message);
+      }
+      throw error;
+    }
 
     await switchCurrent(currentPath, spec.releaseId, 'rollback');
 
