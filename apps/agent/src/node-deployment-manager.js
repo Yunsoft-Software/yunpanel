@@ -213,7 +213,7 @@ export function createNodeDeploymentManager({
     const environmentPath = path.join(envRoot, `${spec.applicationId}.env`);
     const unitPath = path.join(systemdRoot, serviceName);
     let releaseCreated = false;
-    let switched = false;
+    let newReleaseActive = false;
     let previousReleaseId = null;
 
     const nodePath = await findExecutable(nodePaths, run);
@@ -306,34 +306,47 @@ export function createNodeDeploymentManager({
       }
 
       await switchCurrent(currentPath, spec.deploymentId);
-      switched = true;
-      await runSafe(systemctlPath, ['daemon-reload'], { timeout: 30_000 });
-      await runSafe(systemctlPath, ['enable', serviceName], { timeout: 30_000 });
-      await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
+      newReleaseActive = true;
 
-      const healthy = await waitForHealth({
-        port: spec.runtime.port,
-        healthPath: spec.runtime.healthPath,
-        timeoutSeconds: spec.runtime.healthTimeoutSeconds,
-      });
-      if (!healthy) {
-        if (previousReleaseId) {
-          await switchCurrent(currentPath, previousReleaseId, 'rollback');
-          await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
-          const rollbackHealthy = await waitForHealth({
-            port: spec.runtime.port,
-            healthPath: spec.runtime.healthPath,
-            timeoutSeconds: spec.runtime.healthTimeoutSeconds,
-          });
-          if (!rollbackHealthy) {
-            throw new NodeDeploymentError('node_rollback_failed', 'New Node release failed health checks and the previous release could not be confirmed healthy');
-          }
-        } else {
-          await runSafe(systemctlPath, ['stop', serviceName], { timeout: 30_000 }).catch(() => {});
-          await rmFn(currentPath, { force: true });
+      let activationError = null;
+      try {
+        await runSafe(systemctlPath, ['daemon-reload'], { timeout: 30_000 });
+        await runSafe(systemctlPath, ['enable', serviceName], { timeout: 30_000 });
+        await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
+        const healthy = await waitForHealth({
+          port: spec.runtime.port,
+          healthPath: spec.runtime.healthPath,
+          timeoutSeconds: spec.runtime.healthTimeoutSeconds,
+        });
+        if (!healthy) {
+          activationError = new NodeDeploymentError('node_health_failed', 'New Node release failed health checks and was not kept active');
         }
-        switched = false;
-        throw new NodeDeploymentError('node_health_failed', 'New Node release failed health checks and was not kept active');
+      } catch (error) {
+        activationError = error;
+      }
+
+      if (activationError) {
+        try {
+          if (previousReleaseId) {
+            await switchCurrent(currentPath, previousReleaseId, 'rollback');
+            newReleaseActive = false;
+            await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
+            const rollbackHealthy = await waitForHealth({
+              port: spec.runtime.port,
+              healthPath: spec.runtime.healthPath,
+              timeoutSeconds: spec.runtime.healthTimeoutSeconds,
+            });
+            if (!rollbackHealthy) throw new Error('previous release failed health check');
+          } else {
+            newReleaseActive = false;
+            await runSafe(systemctlPath, ['stop', serviceName], { timeout: 30_000 }).catch(() => {});
+            await runSafe(systemctlPath, ['disable', serviceName], { timeout: 30_000 }).catch(() => {});
+            await rmFn(currentPath, { force: true });
+          }
+        } catch {
+          throw new NodeDeploymentError('node_rollback_failed', 'Node activation failed and the previous service state could not be restored');
+        }
+        throw activationError;
       }
 
       await cleanupOldReleases({
@@ -354,7 +367,7 @@ export function createNodeDeploymentManager({
         healthy: true,
       };
     } catch (error) {
-      if (!switched && releaseCreated) {
+      if (!newReleaseActive && releaseCreated) {
         await rmFn(releaseDirectory, { recursive: true, force: true }).catch(() => {});
       }
       if (error instanceof NodeDeploymentError) throw error;
