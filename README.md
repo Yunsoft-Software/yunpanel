@@ -21,10 +21,14 @@ The repository has progressed beyond the initial read-only skeleton. Current imp
 - guarded Node manual restart,
 - bounded Node process-status inspection,
 - release/state drift validation between control plane and managed server,
+- separate AES-256-GCM application environment storage,
+- masked secret metadata in normal admin reads,
+- authenticated just-in-time secret delivery to the assigned server agent,
+- atomic root-protected systemd EnvironmentFile materialization for Node deploy/restart/rollback,
 - local tests and repository policy validation,
 - no GitHub Actions.
 
-Active Node Milestone 4 work is focused on protected user environment/secrets, safe redacted log transport and the environment/log UI. Real Ubuntu/systemd validation is tracked continuously in `todo.md` rather than being treated as completed by code-only tests.
+Active Node Milestone 4 work is now focused on safe redacted log transport plus the environment/log operator UI. Real Ubuntu/systemd validation, secret master-key operations and filesystem permission verification are tracked continuously in `todo.md` rather than being treated as completed by code-only tests.
 
 ## Requirements
 
