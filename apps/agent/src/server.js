@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
-import { validateOperationEnvelope } from '@yunpanel/protocol';
+import { isReadOnlyOperation, validateOperationEnvelope } from '@yunpanel/protocol';
 import { executeOperation } from './operations.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -85,6 +85,15 @@ export function createAgentServer({ token = resolveAgentToken(), execute = execu
             code: 'invalid_operation',
             message: 'Operation request failed validation',
             details: validation.errors,
+          },
+        });
+      }
+
+      if (!isReadOnlyOperation(envelope.operation)) {
+        return sendJson(response, 403, {
+          error: {
+            code: 'mutation_requires_control_plane',
+            message: 'Mutating operations are only accepted through the outbound control-plane job channel',
           },
         });
       }
