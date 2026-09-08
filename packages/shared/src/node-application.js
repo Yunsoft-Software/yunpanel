@@ -85,6 +85,17 @@ export function normalizeNodeRuntimeConfig(value = {}) {
   };
 }
 
+function normalizeManagedNodeSpec(value, code, message) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ApplicationValidationError(code, message);
+  }
+  return {
+    applicationId: assertUuid(value.applicationId, 'applicationId'),
+    releaseId: assertUuid(value.releaseId, 'releaseId'),
+    runtime: normalizeNodeRuntimeConfig(value.runtime),
+  };
+}
+
 export function normalizeNodeApplicationSpec(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ApplicationValidationError('invalid_application_spec', 'Node application spec must be an object');
@@ -101,25 +112,13 @@ export function normalizeNodeApplicationSpec(value) {
 }
 
 export function normalizeNodeRollbackSpec(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new ApplicationValidationError('invalid_node_rollback', 'Node rollback spec must be an object');
-  }
-
-  return {
-    applicationId: assertUuid(value.applicationId, 'applicationId'),
-    releaseId: assertUuid(value.releaseId, 'releaseId'),
-    runtime: normalizeNodeRuntimeConfig(value.runtime),
-  };
+  return normalizeManagedNodeSpec(value, 'invalid_node_rollback', 'Node rollback spec must be an object');
 }
 
 export function normalizeNodeRestartSpec(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new ApplicationValidationError('invalid_node_restart', 'Node restart spec must be an object');
-  }
+  return normalizeManagedNodeSpec(value, 'invalid_node_restart', 'Node restart spec must be an object');
+}
 
-  return {
-    applicationId: assertUuid(value.applicationId, 'applicationId'),
-    releaseId: assertUuid(value.releaseId, 'releaseId'),
-    runtime: normalizeNodeRuntimeConfig(value.runtime),
-  };
+export function normalizeNodeStatusSpec(value) {
+  return normalizeManagedNodeSpec(value, 'invalid_node_status', 'Node status spec must be an object');
 }
