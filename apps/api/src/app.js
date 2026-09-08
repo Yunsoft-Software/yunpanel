@@ -57,12 +57,16 @@ async function reconcileApplicationJob(applicationRegistry, job) {
     return;
   }
 
-  if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK) {
+  if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK || job.operation === OPERATIONS.APP_NODE_ROLLBACK) {
     if (application.activeDeploymentId == null && application.currentReleaseId === job.result?.releaseId) return;
     await applicationRegistry.markRolledBack(job.resourceId, {
       operationId: job.id,
       releaseId: job.result.releaseId,
       previousReleaseId: job.result.previousReleaseId,
+      serviceName: job.result.serviceName ?? null,
+      port: job.result.port ?? null,
+      healthPath: job.result.healthPath ?? null,
+      healthy: job.result.healthy ?? null,
     });
   }
 }
@@ -288,18 +292,21 @@ export function createApp({
   app.post('/api/applications/:applicationId/rollback', requireBootstrapAdmin, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
-    if (application.type !== 'static') throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
+    if (!['static', 'node'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
 
     const releaseId = request.body?.releaseId ?? application.previousReleaseId;
     if (!releaseId) throw new ApplicationRegistryError('rollback_release_required', 'No previous release is available for rollback', 409);
 
+    const nodeRollback = application.type === 'node';
     const job = await jobRegistry.enqueue({
       serverId: application.serverId,
-      type: 'app.static.rollback',
-      operation: OPERATIONS.APP_STATIC_ROLLBACK,
-      payload: { applicationId: application.id, releaseId },
+      type: nodeRollback ? 'app.node.rollback' : 'app.static.rollback',
+      operation: nodeRollback ? OPERATIONS.APP_NODE_ROLLBACK : OPERATIONS.APP_STATIC_ROLLBACK,
+      payload: nodeRollback
+        ? { applicationId: application.id, releaseId, runtime: application.runtime }
+        : { applicationId: application.id, releaseId },
       resourceType: 'application',
       resourceId: application.id,
     });
