@@ -27,6 +27,7 @@ function rollbackSpec() {
 function createHarness({ healthResults = [true], failFirstRestart = false } = {}) {
   const commands = [];
   const links = [];
+  const environments = [];
   let healthIndex = 0;
   let restartCalls = 0;
 
@@ -58,14 +59,18 @@ function createHarness({ healthResults = [true], failFirstRestart = false } = {}
     rmFn: async () => {},
     symlinkFn: async (target, linkPath) => links.push({ target, linkPath }),
     waitForHealth: async () => healthResults[Math.min(healthIndex++, healthResults.length - 1)],
+    writeEnvironment: async (input) => environments.push(input),
   });
 
-  return { manager, commands, links };
+  return { manager, commands, links, environments };
 }
 
-test('healthy Node rollback activates the retained release and restarts the managed service', async () => {
+test('healthy Node rollback materializes desired environment before activating the retained release', async () => {
   const harness = createHarness({ healthResults: [true] });
-  const result = await harness.manager.rollbackNode(rollbackSpec());
+  const result = await harness.manager.rollbackNode({
+    ...rollbackSpec(),
+    environment: { API_TOKEN: 'secret-value' },
+  });
 
   assert.equal(result.releaseId, TARGET_RELEASE);
   assert.equal(result.previousReleaseId, CURRENT_RELEASE);
@@ -74,6 +79,8 @@ test('healthy Node rollback activates the retained release and restarts the mana
   assert.equal(result.healthy, true);
   assert.equal(result.active, true);
   assert.ok(result.serviceName.startsWith('yunpanel-node-'));
+  assert.equal(harness.environments.length, 1);
+  assert.deepEqual(harness.environments[0].environment, { API_TOKEN: 'secret-value' });
   assert.ok(harness.links.some((entry) => entry.target === `releases/${TARGET_RELEASE}`));
   assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 1);
 });
@@ -86,6 +93,7 @@ test('unhealthy rollback restores the previously active release before reporting
     (error) => error instanceof NodeRollbackError && error.code === 'node_rollback_health_failed',
   );
 
+  assert.equal(harness.environments.length, 1);
   assert.ok(harness.links.some((entry) => entry.target === `releases/${TARGET_RELEASE}`));
   assert.ok(harness.links.some((entry) => entry.target === `releases/${CURRENT_RELEASE}`));
   assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 2);
@@ -99,6 +107,7 @@ test('failed service restart restores the previous release', async () => {
     (error) => error instanceof NodeRollbackError && error.code === 'node_rollback_command_failed',
   );
 
+  assert.equal(harness.environments.length, 1);
   assert.ok(harness.links.some((entry) => entry.target === `releases/${CURRENT_RELEASE}`));
   assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 2);
 });
@@ -110,4 +119,5 @@ test('reports restore failure if both target and previous releases are unhealthy
     harness.manager.rollbackNode(rollbackSpec()),
     (error) => error instanceof NodeRollbackError && error.code === 'node_rollback_restore_failed',
   );
+  assert.equal(harness.environments.length, 1);
 });
