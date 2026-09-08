@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { nodeServiceName } from '@yunpanel/config-templates';
 import { normalizeNodeRestartSpec } from '@yunpanel/shared';
+import { nodeEnvironmentWriter, NodeEnvironmentWriteError } from './node-environment-writer.js';
 
 const execFileAsync = promisify(execFile);
 const APP_ROOT = '/var/lib/yunpanel/apps';
@@ -65,6 +66,7 @@ export function createNodeRestartManager({
   }),
   readlinkFn = readlink,
   waitForHealth = defaultWaitForHealth,
+  writeEnvironment = (input) => nodeEnvironmentWriter.writeEnvironment(input),
   systemctlPaths = SYSTEMCTL_PATHS,
 } = {}) {
   const restartLocks = new Map();
@@ -115,6 +117,19 @@ export function createNodeRestartManager({
 
     const systemctlPath = await findSystemctl();
     if (!systemctlPath) throw new NodeRestartError('systemd_not_available', 'systemctl is not available on the managed server');
+
+    try {
+      await writeEnvironment({
+        applicationId: spec.applicationId,
+        runtime: spec.runtime,
+        environment: rawSpec.environment ?? {},
+      });
+    } catch (error) {
+      if (error instanceof NodeEnvironmentWriteError) {
+        throw new NodeRestartError(error.code, error.message);
+      }
+      throw error;
+    }
 
     const serviceName = nodeServiceName(spec.applicationId);
     await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
