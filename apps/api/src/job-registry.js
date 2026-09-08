@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createOperationEnvelope, OPERATIONS } from '@yunpanel/protocol';
@@ -13,10 +13,12 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.SSL_RENEW,
   OPERATIONS.APP_STATIC_DEPLOY,
   OPERATIONS.APP_STATIC_ROLLBACK,
+  OPERATIONS.APP_NODE_DEPLOY,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const NODE_SERVICE_PATTERN = /^yunpanel-node-[a-f0-9]{16}\.service$/;
 const MAX_ARTIFACT_FILES = 100_000;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024;
 
@@ -114,20 +116,30 @@ function sanitizeCertificateMetadata(result) {
   return sanitized;
 }
 
-function sanitizeStaticDeploymentResult(job, result) {
+function sanitizeReleaseIdentity(job, result) {
   const deploymentId = normalizeUuid(result.deploymentId);
   const releaseId = normalizeUuid(result.releaseId);
   const expectedDeploymentId = normalizeUuid(job.payload?.deploymentId);
   if (!deploymentId || !releaseId || deploymentId !== expectedDeploymentId || releaseId !== deploymentId) {
-    throw new JobRegistryError('invalid_job_result', 'Static deployment result identity does not match the queued deployment');
-  }
-  if (typeof result.commitSha !== 'string' || !COMMIT_PATTERN.test(result.commitSha)) {
-    throw new JobRegistryError('invalid_job_result', 'Static deployment result commit SHA is invalid');
+    throw new JobRegistryError('invalid_job_result', 'Deployment result identity does not match the queued deployment');
   }
   const previousReleaseId = result.previousReleaseId == null ? null : normalizeUuid(result.previousReleaseId);
   if (result.previousReleaseId != null && !previousReleaseId) {
-    throw new JobRegistryError('invalid_job_result', 'Static deployment previous release identity is invalid');
+    throw new JobRegistryError('invalid_job_result', 'Deployment previous release identity is invalid');
   }
+  if (typeof result.commitSha !== 'string' || !COMMIT_PATTERN.test(result.commitSha)) {
+    throw new JobRegistryError('invalid_job_result', 'Deployment commit SHA is invalid');
+  }
+  return {
+    deploymentId,
+    releaseId,
+    previousReleaseId,
+    commitSha: result.commitSha.toLowerCase(),
+  };
+}
+
+function sanitizeStaticDeploymentResult(job, result) {
+  const identity = sanitizeReleaseIdentity(job, result);
   if (!Number.isInteger(result.artifactFiles) || result.artifactFiles < 1 || result.artifactFiles > MAX_ARTIFACT_FILES) {
     throw new JobRegistryError('invalid_job_result', 'Static deployment artifact file count is invalid');
   }
@@ -135,12 +147,40 @@ function sanitizeStaticDeploymentResult(job, result) {
     throw new JobRegistryError('invalid_job_result', 'Static deployment artifact byte size is invalid');
   }
   return {
-    deploymentId,
-    releaseId,
-    commitSha: result.commitSha.toLowerCase(),
-    previousReleaseId,
+    ...identity,
     artifactFiles: result.artifactFiles,
     artifactBytes: result.artifactBytes,
+  };
+}
+
+function expectedNodeServiceName(applicationId) {
+  const normalizedId = normalizeUuid(applicationId);
+  if (!normalizedId) return null;
+  const digest = createHash('sha256').update(normalizedId).digest('hex').slice(0, 16);
+  return `yunpanel-node-${digest}.service`;
+}
+
+function sanitizeNodeDeploymentResult(job, result) {
+  const identity = sanitizeReleaseIdentity(job, result);
+  const expectedService = expectedNodeServiceName(job.payload?.applicationId);
+  if (!expectedService || typeof result.serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(result.serviceName) || result.serviceName !== expectedService) {
+    throw new JobRegistryError('invalid_job_result', 'Node deployment service identity is invalid');
+  }
+  if (!Number.isInteger(result.port) || result.port !== job.payload?.runtime?.port) {
+    throw new JobRegistryError('invalid_job_result', 'Node deployment port does not match desired state');
+  }
+  if (typeof result.healthPath !== 'string' || result.healthPath !== job.payload?.runtime?.healthPath) {
+    throw new JobRegistryError('invalid_job_result', 'Node deployment health path does not match desired state');
+  }
+  if (result.healthy !== true) {
+    throw new JobRegistryError('invalid_job_result', 'Node deployment must confirm healthy state');
+  }
+  return {
+    ...identity,
+    serviceName: result.serviceName,
+    port: result.port,
+    healthPath: result.healthPath,
+    healthy: true,
   };
 }
 
@@ -192,6 +232,7 @@ function sanitizeResult(job, result) {
 
   if (job.operation === OPERATIONS.APP_STATIC_DEPLOY) return sanitizeStaticDeploymentResult(job, result);
   if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK) return sanitizeStaticRollbackResult(job, result);
+  if (job.operation === OPERATIONS.APP_NODE_DEPLOY) return sanitizeNodeDeploymentResult(job, result);
   throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
 }
 
@@ -242,7 +283,8 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     if (typeof resourceId !== 'string' || !resourceId) throw new JobRegistryError('invalid_resource_id', 'Job resource id is required');
 
     const id = randomUUID();
-    const effectivePayload = operation === OPERATIONS.APP_STATIC_DEPLOY ? { ...payload, deploymentId: id } : payload;
+    const deploymentOperation = operation === OPERATIONS.APP_STATIC_DEPLOY || operation === OPERATIONS.APP_NODE_DEPLOY;
+    const effectivePayload = deploymentOperation ? { ...payload, deploymentId: id } : payload;
     try {
       createOperationEnvelope({ id, operation, payload: effectivePayload });
     } catch (error) {
