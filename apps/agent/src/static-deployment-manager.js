@@ -1,17 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import {
-  access,
-  chmod,
-  lstat,
-  mkdir,
-  readlink,
-  realpath,
-  readdir,
-  rename,
-  rm,
-  symlink,
-} from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, readlink, realpath, readdir, rename, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -30,7 +19,7 @@ const GIT_PATH = '/usr/bin/git';
 const NPM_PATHS = Object.freeze(['/usr/bin/npm', '/usr/local/bin/npm']);
 const ARTIFACT_WORKER_PATH = fileURLToPath(new URL('./static-artifact-worker.js', import.meta.url));
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
-const UUID_PATTERN = /^[0-9a-f-]{36}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class StaticDeploymentError extends Error {
   constructor(code, message) {
@@ -111,10 +100,7 @@ export function createStaticDeploymentManager({
   }
 
   async function runAsUser(username, home, file, args, options = {}) {
-    return runRoot(RUNUSER_PATH, ['-u', username, '--', file, ...args], {
-      ...options,
-      env: safeEnvironment(home),
-    });
+    return runRoot(RUNUSER_PATH, ['-u', username, '--', file, ...args], { ...options, env: safeEnvironment(home) });
   }
 
   async function ensureAppUser(username, appBuildRoot) {
@@ -123,15 +109,9 @@ export function createStaticDeploymentManager({
       await runRoot(ID_PATH, ['-u', username], { timeout: 5_000 });
     } catch {
       await runRoot(USERADD_PATH, [
-        '--system',
-        '--user-group',
-        '--home-dir', appBuildRoot,
-        '--create-home',
-        '--shell', '/usr/sbin/nologin',
-        username,
+        '--system', '--user-group', '--home-dir', appBuildRoot, '--create-home', '--shell', '/usr/sbin/nologin', username,
       ], { timeout: 15_000 });
     }
-
     await runRoot(INSTALL_PATH, ['-d', '-o', username, '-g', username, '-m', '0750', appBuildRoot]);
     await runRoot(INSTALL_PATH, ['-d', '-o', username, '-g', username, '-m', '0750', path.join(appBuildRoot, 'worktrees')]);
   }
@@ -166,6 +146,32 @@ export function createStaticDeploymentManager({
     await runRoot(CHOWN_PATH, ['--recursive', '--no-dereference', 'root:root', directory], { timeout: 60_000 });
   }
 
+  async function cleanupOldReleases({ releasesPath, currentReleaseId, previousReleaseId, retention }) {
+    try {
+      const entries = await readdirFn(releasesPath, { withFileTypes: true });
+      const releases = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory() || !UUID_PATTERN.test(entry.name)) continue;
+        const releasePath = path.join(releasesPath, entry.name);
+        const info = await lstatFn(releasePath);
+        if (!info.isDirectory() || info.isSymbolicLink()) continue;
+        releases.push({ id: entry.name.toLowerCase(), path: releasePath, mtimeMs: Number.isFinite(info.mtimeMs) ? info.mtimeMs : 0 });
+      }
+
+      releases.sort((left, right) => right.mtimeMs - left.mtimeMs);
+      const keep = new Set([currentReleaseId, previousReleaseId].filter(Boolean));
+      for (const release of releases) {
+        if (keep.size >= retention) break;
+        keep.add(release.id);
+      }
+      for (const release of releases) {
+        if (!keep.has(release.id)) await rmFn(release.path, { recursive: true, force: true });
+      }
+    } catch {
+      // Retention cleanup is best effort and must never roll back a successful atomic switch.
+    }
+  }
+
   async function deployUnlocked(rawSpec) {
     let spec;
     try {
@@ -193,29 +199,21 @@ export function createStaticDeploymentManager({
         await accessFn(path.join(repositoryPath, '.git'));
         await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'remote', 'set-url', 'origin', spec.repositoryUrl]);
       } catch {
-        await runAsUser(username, appBuildRoot, GIT_PATH, ['clone', '--no-checkout', spec.repositoryUrl, repositoryPath], {
-          timeout: 5 * 60 * 1000,
-        });
+        await runAsUser(username, appBuildRoot, GIT_PATH, ['clone', '--no-checkout', spec.repositoryUrl, repositoryPath], { timeout: 5 * 60 * 1000 });
       }
 
-      await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'fetch', '--prune', '--no-tags', 'origin', spec.branch], {
-        timeout: 5 * 60 * 1000,
-      });
+      await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'fetch', '--prune', '--no-tags', 'origin', spec.branch], { timeout: 5 * 60 * 1000 });
       const revision = await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'rev-parse', '--verify', 'FETCH_HEAD^{commit}']);
       const commitSha = String(revision.stdout ?? '').trim().toLowerCase();
       if (!COMMIT_PATTERN.test(commitSha)) throw new StaticDeploymentError('invalid_git_revision', 'Git returned an invalid commit revision');
 
-      await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'worktree', 'add', '--detach', worktreePath, commitSha], {
-        timeout: 60_000,
-      });
+      await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'worktree', 'add', '--detach', worktreePath, commitSha], { timeout: 60_000 });
       worktreeCreated = true;
 
       if (spec.build.mode === 'npm') {
         const npmPath = await findExecutable(npmPaths, accessFn);
         if (!npmPath) throw new StaticDeploymentError('npm_not_installed', 'npm is not installed on the managed server');
-        const installArgs = spec.build.installMode === 'ci'
-          ? ['ci', '--no-audit', '--no-fund']
-          : ['install', '--no-audit', '--no-fund'];
+        const installArgs = spec.build.installMode === 'ci' ? ['ci', '--no-audit', '--no-fund'] : ['install', '--no-audit', '--no-fund'];
         await runAsUser(username, appBuildRoot, npmPath, installArgs, { cwd: worktreePath, timeout: 15 * 60 * 1000 });
         await runAsUser(username, appBuildRoot, npmPath, ['run', spec.build.buildScript], { cwd: worktreePath, timeout: 15 * 60 * 1000 });
       }
@@ -228,30 +226,35 @@ export function createStaticDeploymentManager({
         throw new StaticDeploymentError('build_output_missing', 'Static build output directory does not exist');
       }
       const safePrefix = `${worktreePath}${path.sep}`;
-      if (outputPath !== worktreePath && !outputPath.startsWith(safePrefix)) {
-        throw new StaticDeploymentError('build_output_escape', 'Static build output resolves outside the deployment worktree');
-      }
+      if (outputPath !== worktreePath && !outputPath.startsWith(safePrefix)) throw new StaticDeploymentError('build_output_escape', 'Static build output resolves outside the deployment worktree');
       const outputInfo = await lstatFn(outputPath);
-      if (!outputInfo.isDirectory() || outputInfo.isSymbolicLink()) {
-        throw new StaticDeploymentError('invalid_build_output', 'Static build output must be a real directory');
-      }
+      if (!outputInfo.isDirectory() || outputInfo.isSymbolicLink()) throw new StaticDeploymentError('invalid_build_output', 'Static build output must be a real directory');
 
       await mkdirFn(releasesPath, { recursive: true, mode: 0o755 });
       await mkdirFn(servedReleasePath, { recursive: false, mode: 0o755 });
       artifactCreated = true;
       await runRoot(CHOWN_PATH, [`${username}:${username}`, servedReleasePath], { timeout: 10_000 });
 
-      const artifactCopy = await runAsUser(username, appBuildRoot, nodePath, [artifactWorkerPath, outputPath, servedReleasePath], {
-        timeout: 5 * 60 * 1000,
-        maxBuffer: 1024 * 1024,
-      });
+      const artifactCopy = await runAsUser(
+        username,
+        appBuildRoot,
+        nodePath,
+        [artifactWorkerPath, outputPath, servedReleasePath, spec.build.healthFile],
+        { timeout: 5 * 60 * 1000, maxBuffer: 1024 * 1024 },
+      );
       let artifact;
       try {
         artifact = JSON.parse(String(artifactCopy.stdout ?? '').trim());
       } catch {
         throw new StaticDeploymentError('invalid_artifact_manifest', 'Artifact copier returned invalid metadata');
       }
-      if (!Number.isInteger(artifact.files) || artifact.files < 1 || !Number.isFinite(artifact.bytes) || artifact.bytes < 0) {
+      if (
+        !Number.isInteger(artifact.files)
+        || artifact.files < 1
+        || !Number.isFinite(artifact.bytes)
+        || artifact.bytes < 0
+        || artifact.healthFile !== spec.build.healthFile
+      ) {
         throw new StaticDeploymentError('invalid_artifact_manifest', 'Artifact copier returned invalid metadata');
       }
 
@@ -268,6 +271,12 @@ export function createStaticDeploymentManager({
       await rmFn(temporaryCurrentPath, { force: true });
       await symlinkFn(path.join('releases', spec.deploymentId), temporaryCurrentPath);
       await renameFn(temporaryCurrentPath, currentPath);
+      await cleanupOldReleases({
+        releasesPath,
+        currentReleaseId: spec.deploymentId,
+        previousReleaseId,
+        retention: spec.retention,
+      });
 
       return {
         deploymentId: spec.deploymentId,
