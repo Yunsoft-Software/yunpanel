@@ -19,15 +19,17 @@ test('normalizes supported GitHub repositories and npm static build profiles', (
     installMode: 'ci',
     buildScript: 'build',
     outputDir: 'dist',
+    healthFile: 'index.html',
   });
 });
 
 test('plain static profile can serve repository root without executing npm', () => {
-  assert.deepEqual(normalizeStaticBuildConfig({ mode: 'none', outputDir: '.' }), {
+  assert.deepEqual(normalizeStaticBuildConfig({ mode: 'none', outputDir: '.', healthFile: 'public/index.html' }), {
     mode: 'none',
     installMode: null,
     buildScript: null,
     outputDir: '.',
+    healthFile: 'public/index.html',
   });
 });
 
@@ -48,6 +50,10 @@ test('rejects credentials, non-GitHub URLs, branch option injection and output t
     () => normalizeStaticBuildConfig({ outputDir: '../secret' }),
     (error) => error instanceof ApplicationValidationError && error.code === 'invalid_build_path',
   );
+  assert.throws(
+    () => normalizeStaticBuildConfig({ healthFile: '../outside.html' }),
+    (error) => error instanceof ApplicationValidationError && error.code === 'invalid_build_path',
+  );
 });
 
 test('normalizes complete static deployment specs', () => {
@@ -63,4 +69,5 @@ test('normalizes complete static deployment specs', () => {
   assert.equal(spec.repositoryUrl, 'https://github.com/example/site.git');
   assert.equal(spec.retention, 7);
   assert.equal(spec.build.outputDir, 'dist');
+  assert.equal(spec.build.healthFile, 'index.html');
 });
