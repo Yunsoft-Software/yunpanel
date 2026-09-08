@@ -103,7 +103,7 @@ export function createDomainRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8');
+        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
         if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.domains)) {
           throw new Error('unsupported or invalid domain registry state');
         }
