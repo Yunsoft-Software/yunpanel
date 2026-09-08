@@ -208,6 +208,12 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
 
     const job = state.jobs.find((candidate) => candidate.id === jobId && candidate.serverId === serverId);
     if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
+
+    if (job.status === 'succeeded' || job.status === 'failed') {
+      if (job.status === status) return publicJob(job);
+      throw new JobRegistryError('job_already_completed', 'Job is already completed with a different status', 409);
+    }
+
     if (job.status !== 'running') throw new JobRegistryError('job_not_running', 'Only running jobs may be completed', 409);
 
     const sanitizedResult = status === 'succeeded' ? sanitizeResult(job, result) : null;
