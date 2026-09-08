@@ -179,10 +179,20 @@ SSL kodu hazırlandıktan sonra gerçek DNS gerektiren işler:
 
 # P1 — Node.js/systemd gerçek sunucu testleri
 
-Node deployment hazırlandıktan sonra:
+Node deployment ve protected runtime-environment backend'i hazırlandıktan sonra:
 
 - [ ] Düşük riskli bir Node.js uygulaması seç.
 - [ ] Plesk env değerlerini güvenli şekilde YunPanel secret store'a taşı.
+- [ ] Production control plane için güçlü `YUNPANEL_SECRET_MASTER_KEY` üret, repo dışında güvenli secret store'a yerleştir ve recovery kopyasının nerede tutulacağını belirle.
+- [ ] Master key olmadan secret write'ın fail-closed davrandığını gerçek API sürecinde doğrula.
+- [ ] Secret registry state dosyasında plaintext secret bulunmadığını ve dosya permissionının `0600` olduğunu doğrula.
+- [ ] Agent'ın yalnızca kendi server'ına bağlı Node uygulamanın environment bundle'ını alabildiğini gerçek iki-server/enrollment senaryosunda doğrula.
+- [ ] Production agent-control plane hattında environment fetch'in HTTPS üzerinden gittiğini doğrula.
+- [ ] `/etc/yunpanel/apps` dizininin `0700`, `<application-id>.env` dosyasının `0600` olduğunu gerçek filesystem üzerinde doğrula.
+- [ ] Secret'ın systemd unit textine, process command line'a, generic job payload/result/history'ye veya normal admin environment listesine plaintext düşmediğini doğrula.
+- [ ] Environment variable değiştirip manual restart sonrası yeni değerin process tarafından görüldüğünü doğrula.
+- [ ] Environment variable değiştirip yeni deploy ve manual rollback sırasında aynı desired environment'ın atomik biçimde materialize edildiğini doğrula.
+- [ ] Master key yedekleme/rotation/recovery prosedürünü production öncesi yaz ve test et; key kaybının mevcut ciphertext'i okunamaz hale getirdiği kabul edilmeli ve recovery yolu kanıtlanmalı.
 - [ ] Doğru Node.js runtime sürümünü test sunucusunda kur/doğrula.
 - [ ] systemd unit'i gerçek sunucuda oluştur ve çalıştır.
 - [ ] Uygulamanın dedicated Unix user altında çalıştığını doğrula.
@@ -450,6 +460,7 @@ Aşağıdaki değerler gerektiğinde kullanıcı/Plesk/sunucu tarafında hazırl
 - DNS provider API tokens,
 - ACME DNS challenge tokens,
 - YunPanel agent bootstrap/enrollment secrets,
+- YunPanel `YUNPANEL_SECRET_MASTER_KEY` ve recovery kopyası,
 - mTLS private keys.
 
 ---
