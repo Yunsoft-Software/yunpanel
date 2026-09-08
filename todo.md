@@ -19,6 +19,17 @@ Bir madde buraya ancak aşağıdaki nedenlerden biriyle girer:
 
 Her tamamlanan maddede mümkünse sonuç, tarih ve kısa doğrulama notu bırakılmalıdır.
 
+`todo.md`, geliştirme bittikten sonra topluca düzenlenen bir liste değildir. Kod geliştirmesi sırasında harici doğrulama ihtiyacı oluştuğu anda aynı çalışma turunda buraya eklenmeli; doğrulama denendiğinde başarı/başarısızlık sonucu ve tarih aynı turda işlenmelidir. `plan.md`, `todo.md` ve gerçek kod durumu bilinçli olarak birbirinden kopuk bırakılmamalıdır.
+
+## 2026-09-09 test sunucusu erişim durumu
+
+- [ ] **Sağlanan YunPanel test sunucusuna SSH erişimini tekrar doğrula.**
+  - 2026-09-09 tarihinde mevcut geliştirme runner'ından yapılan TCP kontrolünde SSH portu `connection refused` döndürdü; SSH authentication aşamasına geçilemedi.
+  - Aynı runner imajında `ssh` client binary'si bulunmuyor ve paket repository/DNS erişimi olmadığı için bu oturumda client kurulamadı.
+  - Sunucu IP'si, root parolası veya başka credential değerleri bu dosyaya/Git geçmişine yazılmamalıdır.
+  - Sonraki denemede önce sunucu tarafında SSH servisinin 22/TCP üzerinde dinlediği ve firewall/provider ACL'in erişime izin verdiği doğrulanmalı.
+  - Erişim sağlanınca aşağıdaki Ubuntu/systemd testleri bekletilmeden yürütülüp sonuçları bu dosyaya işlenmeli.
+
 ---
 
 # P0 — İlk envanter ve güvenli test ortamı
@@ -180,8 +191,13 @@ Node deployment hazırlandıktan sonra:
 - [ ] Uygulamayı reboot sonrası otomatik başlatma testinden geçir.
 - [ ] Process crash sonrası restart policy davranışını test et.
 - [ ] Health check başarısız yeni deploy'da eski release'in servis vermeye devam ettiğini doğrula.
-- [ ] Manual rollback yap.
+- [ ] Manual rollback yap ve target release health-check başarısızsa önceki release'in geri geldiğini doğrula.
+- [ ] Manual restart yap ve restart sonrası localhost health doğrulamasını kontrol et.
+- [ ] Control-plane current release ile sunucu `current` symlink'i farklıyken restart/rollback/status operasyonlarının drift hatası verdiğini doğrula.
+- [ ] Node process status sorgusunda systemd active/sub state, PID, restart count ve health sonucunun doğru döndüğünü doğrula.
+- [ ] Custom startup file ve npm start script kullanan uygulamada deploy/restart/rollback boyunca runtime ayarlarının korunmasını doğrula.
 - [ ] Journal/application loglarının YunPanel'e güvenli aktarıldığını doğrula.
+- [ ] Secret içeren örnek loglarla redaction davranışını doğrula; plaintext secret generic job result/audit kayıtlarına düşmemeli.
 
 ---
 
