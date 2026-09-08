@@ -23,24 +23,43 @@ const summaryCards = [
 
 function App() {
   const [apiState, setApiState] = useState({ status: 'checking', version: null });
+  const [agentState, setAgentState] = useState({ status: 'checking', hostname: null });
 
   useEffect(() => {
     const controller = new AbortController();
 
-    async function checkApi() {
+    async function checkControlPlane() {
+      let apiOnline = false;
+
       try {
-        const response = await fetch('/api/health', { signal: controller.signal });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload = await response.json();
-        setApiState({ status: payload.status ?? 'ok', version: payload.version ?? null });
+        const apiResponse = await fetch('/api/health', { signal: controller.signal });
+        if (!apiResponse.ok) throw new Error(`HTTP ${apiResponse.status}`);
+
+        const apiPayload = await apiResponse.json();
+        apiOnline = true;
+        setApiState({ status: apiPayload.status ?? 'ok', version: apiPayload.version ?? null });
+
+        const agentResponse = await fetch('/api/dev/agent/inspect', { signal: controller.signal });
+        if (agentResponse.status === 404) {
+          setAgentState({ status: 'protected', hostname: null });
+          return;
+        }
+        if (!agentResponse.ok) throw new Error(`Agent HTTP ${agentResponse.status}`);
+
+        const agentPayload = await agentResponse.json();
+        setAgentState({
+          status: agentPayload.status === 'succeeded' ? 'running' : 'offline',
+          hostname: agentPayload.result?.hostname ?? null,
+        });
       } catch (error) {
         if (error.name !== 'AbortError') {
-          setApiState({ status: 'offline', version: null });
+          if (!apiOnline) setApiState({ status: 'offline', version: null });
+          setAgentState({ status: 'offline', hostname: null });
         }
       }
     }
 
-    checkApi();
+    checkControlPlane();
     return () => controller.abort();
   }, []);
 
@@ -125,7 +144,11 @@ function App() {
             <div className="status-list">
               <StatusRow label="Web interface" status="running" detail="React" />
               <StatusRow label="Control API" status={apiState.status === 'ok' ? 'running' : apiState.status} detail="Node.js" />
-              <StatusRow label="yun-agent" status="pending" detail="Development mode" />
+              <StatusRow
+                label="yun-agent"
+                status={agentState.status}
+                detail={agentState.hostname ? `Local agent · ${agentState.hostname}` : 'Development connection'}
+              />
               <StatusRow label="Job queue" status="pending" detail="Not initialized" />
             </div>
           </article>
