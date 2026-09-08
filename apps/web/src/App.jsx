@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 const navigation = [
   'Dashboard',
@@ -14,54 +14,122 @@ const navigation = [
   'Settings',
 ];
 
-const summaryCards = [
-  { label: 'Servers', value: '0', note: 'No enrolled servers yet' },
-  { label: 'Applications', value: '0', note: 'Static, Node and Docker' },
-  { label: 'Failed jobs', value: '0', note: 'Nothing requires attention' },
-  { label: 'SSL warnings', value: '0', note: 'No certificates tracked yet' },
-];
+function formatBytes(value) {
+  if (!Number.isFinite(value) || value < 0) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let amount = value;
+  let index = 0;
+  while (amount >= 1024 && index < units.length - 1) {
+    amount /= 1024;
+    index += 1;
+  }
+  const digits = index >= 3 ? 1 : 0;
+  return `${amount.toFixed(digits)} ${units[index]}`;
+}
+
+function percentage(used, total) {
+  if (!Number.isFinite(used) || !Number.isFinite(total) || total <= 0) return null;
+  return Math.max(0, Math.min(100, (used / total) * 100));
+}
+
+function formatPercent(value) {
+  return Number.isFinite(value) ? `${Math.round(value)}%` : '—';
+}
+
+function formatLastSeen(value) {
+  if (!value) return 'Waiting for first heartbeat';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Unknown heartbeat time' : date.toLocaleString();
+}
 
 function App() {
   const [apiState, setApiState] = useState({ status: 'checking', version: null });
   const [agentState, setAgentState] = useState({ status: 'checking', hostname: null });
+  const [servers, setServers] = useState([]);
+  const [serverAccess, setServerAccess] = useState('checking');
 
   useEffect(() => {
     const controller = new AbortController();
+    let timer;
 
-    async function checkControlPlane() {
-      let apiOnline = false;
-
+    async function refreshControlPlane() {
       try {
         const apiResponse = await fetch('/api/health', { signal: controller.signal });
         if (!apiResponse.ok) throw new Error(`HTTP ${apiResponse.status}`);
 
         const apiPayload = await apiResponse.json();
-        apiOnline = true;
         setApiState({ status: apiPayload.status ?? 'ok', version: apiPayload.version ?? null });
 
-        const agentResponse = await fetch('/api/dev/agent/inspect', { signal: controller.signal });
-        if (agentResponse.status === 404) {
-          setAgentState({ status: 'protected', hostname: null });
-          return;
-        }
-        if (!agentResponse.ok) throw new Error(`Agent HTTP ${agentResponse.status}`);
+        const [agentResult, serverResult] = await Promise.allSettled([
+          fetch('/api/dev/agent/inspect', { signal: controller.signal }),
+          fetch('/api/dev/servers', { signal: controller.signal }),
+        ]);
 
-        const agentPayload = await agentResponse.json();
-        setAgentState({
-          status: agentPayload.status === 'succeeded' ? 'running' : 'offline',
-          hostname: agentPayload.result?.hostname ?? null,
-        });
+        if (agentResult.status === 'fulfilled') {
+          const response = agentResult.value;
+          if (response.status === 404) {
+            setAgentState({ status: 'protected', hostname: null });
+          } else if (response.ok) {
+            const payload = await response.json();
+            setAgentState({
+              status: payload.status === 'succeeded' ? 'running' : 'offline',
+              hostname: payload.result?.hostname ?? null,
+            });
+          } else {
+            setAgentState({ status: 'offline', hostname: null });
+          }
+        } else if (agentResult.reason?.name !== 'AbortError') {
+          setAgentState({ status: 'offline', hostname: null });
+        }
+
+        if (serverResult.status === 'fulfilled') {
+          const response = serverResult.value;
+          if (response.status === 404) {
+            setServerAccess('protected');
+            setServers([]);
+          } else if (response.ok) {
+            const payload = await response.json();
+            setServers(Array.isArray(payload.data) ? payload.data : []);
+            setServerAccess('ready');
+          } else {
+            setServerAccess('error');
+          }
+        } else if (serverResult.reason?.name !== 'AbortError') {
+          setServerAccess('error');
+        }
       } catch (error) {
         if (error.name !== 'AbortError') {
-          if (!apiOnline) setApiState({ status: 'offline', version: null });
+          setApiState({ status: 'offline', version: null });
           setAgentState({ status: 'offline', hostname: null });
+          setServerAccess('error');
         }
       }
     }
 
-    checkControlPlane();
-    return () => controller.abort();
+    refreshControlPlane();
+    timer = setInterval(refreshControlPlane, 15_000);
+
+    return () => {
+      clearInterval(timer);
+      controller.abort();
+    };
   }, []);
+
+  const summaryCards = useMemo(() => {
+    const online = servers.filter((server) => server.connectivity === 'online').length;
+    const offline = servers.filter((server) => server.connectivity === 'offline').length;
+
+    return [
+      {
+        label: 'Servers',
+        value: String(servers.length),
+        note: servers.length ? `${online} online · ${offline} offline` : 'No enrolled servers yet',
+      },
+      { label: 'Applications', value: '0', note: 'Static, Node and Docker' },
+      { label: 'Failed jobs', value: '0', note: 'Nothing requires attention' },
+      { label: 'SSL warnings', value: '0', note: 'No certificates tracked yet' },
+    ];
+  }, [servers]);
 
   return (
     <div className="app-shell">
@@ -122,15 +190,25 @@ function App() {
                 <p className="eyebrow">Managed infrastructure</p>
                 <h2>Servers</h2>
               </div>
-              <button className="text-button" type="button">View all</button>
+              <span className="panel-meta">{serverAccess === 'ready' ? '15s refresh' : serverAccess}</span>
             </div>
 
-            <div className="empty-state">
-              <div className="empty-icon">01</div>
-              <h3>No server enrolled</h3>
-              <p>Milestone 1 will connect Ubuntu 24.04 servers through the read-only yun-agent enrollment flow.</p>
-              <button className="secondary-button" type="button">Enrollment not enabled yet</button>
-            </div>
+            {servers.length > 0 ? (
+              <div className="server-list">
+                {servers.map((server) => <ServerCard server={server} key={server.id} />)}
+              </div>
+            ) : (
+              <div className="empty-state">
+                <div className="empty-icon">01</div>
+                <h3>{serverAccess === 'protected' ? 'Server list protected' : 'No server enrolled'}</h3>
+                <p>
+                  {serverAccess === 'protected'
+                    ? 'Production server inventory will be shown after user authentication and RBAC are enabled.'
+                    : 'Create a one-time enrollment token, start yun-agent on Ubuntu 24.04 and its first heartbeat will appear here.'}
+                </p>
+                <button className="secondary-button" type="button">Enrollment via control API</button>
+              </div>
+            )}
           </article>
 
           <article className="panel">
@@ -154,6 +232,63 @@ function App() {
           </article>
         </section>
       </main>
+    </div>
+  );
+}
+
+function ServerCard({ server }) {
+  const inventory = server.inventory ?? {};
+  const memory = inventory.memory ?? {};
+  const filesystem = inventory.filesystem ?? {};
+  const memoryPercent = percentage(memory.usedBytes, memory.totalBytes);
+  const diskPercent = percentage(filesystem.usedBytes, filesystem.totalBytes);
+  const capabilities = Object.entries(inventory.capabilities ?? {})
+    .filter(([, value]) => value?.installed)
+    .map(([name]) => name)
+    .slice(0, 6);
+
+  return (
+    <article className="server-card">
+      <div className="server-card-heading">
+        <div className="server-title">
+          <span className={`status-dot ${server.connectivity}`} />
+          <div>
+            <strong>{server.name}</strong>
+            <span>{server.hostname}</span>
+          </div>
+        </div>
+        <span className={`connectivity-badge ${server.connectivity}`}>{server.connectivity}</span>
+      </div>
+
+      <div className="server-facts">
+        <Metric label="CPU" value={formatPercent(inventory.cpu?.usagePercent)} detail={`${inventory.cpu?.count ?? '—'} cores`} />
+        <Metric label="Memory" value={formatPercent(memoryPercent)} detail={`${formatBytes(memory.usedBytes)} / ${formatBytes(memory.totalBytes)}`} />
+        <Metric label="Disk" value={formatPercent(diskPercent)} detail={`${formatBytes(filesystem.usedBytes)} / ${formatBytes(filesystem.totalBytes)}`} />
+      </div>
+
+      <div className="server-meta-row">
+        <span>{inventory.operatingSystem?.prettyName ?? 'Waiting for inventory'}</span>
+        <span>{inventory.runtimes?.node?.version ? `Node ${inventory.runtimes.node.version}` : 'Node unknown'}</span>
+        <span>Agent {server.agentVersion ?? 'pending'}</span>
+      </div>
+
+      {capabilities.length > 0 && (
+        <div className="capability-list">
+          {capabilities.map((capability) => <span key={capability}>{capability}</span>)}
+        </div>
+      )}
+
+      <div className="server-last-seen">Last heartbeat · {formatLastSeen(server.lastSeenAt)}</div>
+    </article>
+  );
+}
+
+function Metric({ label, value, detail }) {
+  return (
+    <div className="metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
     </div>
   );
 }
