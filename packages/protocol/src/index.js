@@ -4,6 +4,7 @@ import {
   normalizeNodeApplicationSpec,
   normalizeNodeRestartSpec,
   normalizeNodeRollbackSpec,
+  normalizeNodeStatusSpec,
   normalizeStaticApplicationSpec,
 } from '@yunpanel/shared';
 
@@ -23,6 +24,7 @@ export const OPERATIONS = Object.freeze({
   APP_NODE_DEPLOY: 'app.node.deploy',
   APP_NODE_ROLLBACK: 'app.node.rollback',
   APP_NODE_RESTART: 'app.node.restart',
+  APP_NODE_STATUS: 'app.node.status',
 });
 
 export const READ_ONLY_OPERATIONS = Object.freeze([
@@ -30,6 +32,7 @@ export const READ_ONLY_OPERATIONS = Object.freeze([
   OPERATIONS.SERVER_SERVICES,
   OPERATIONS.SERVER_DOCKER,
   OPERATIONS.SERVER_NGINX,
+  OPERATIONS.APP_NODE_STATUS,
 ]);
 
 const KNOWN_OPERATIONS = new Set(Object.values(OPERATIONS));
@@ -139,6 +142,14 @@ function validateMutationPayload(operation, payload, errors) {
       normalizeNodeRestartSpec(payload);
     } catch (error) {
       errors.push(error instanceof ApplicationValidationError ? error.message : 'app.node.restart payload is invalid');
+    }
+  }
+
+  if (operation === OPERATIONS.APP_NODE_STATUS) {
+    try {
+      normalizeNodeStatusSpec(payload);
+    } catch (error) {
+      errors.push(error instanceof ApplicationValidationError ? error.message : 'app.node.status payload is invalid');
     }
   }
 }
