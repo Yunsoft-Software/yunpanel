@@ -15,6 +15,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.APP_STATIC_ROLLBACK,
   OPERATIONS.APP_NODE_DEPLOY,
   OPERATIONS.APP_NODE_ROLLBACK,
+  OPERATIONS.APP_NODE_RESTART,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
@@ -231,6 +232,37 @@ function sanitizeNodeRollbackResult(job, result) {
   };
 }
 
+function sanitizeNodeRestartResult(job, result) {
+  const releaseId = normalizeUuid(result.releaseId);
+  const expectedReleaseId = normalizeUuid(job.payload?.releaseId);
+  const expectedService = expectedNodeServiceName(job.payload?.applicationId);
+
+  if (!releaseId || releaseId !== expectedReleaseId) {
+    throw new JobRegistryError('invalid_job_result', 'Node restart release state does not match the queued restart');
+  }
+  if (!expectedService || typeof result.serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(result.serviceName) || result.serviceName !== expectedService) {
+    throw new JobRegistryError('invalid_job_result', 'Node restart service identity is invalid');
+  }
+  if (!Number.isInteger(result.port) || result.port !== job.payload?.runtime?.port) {
+    throw new JobRegistryError('invalid_job_result', 'Node restart port does not match desired state');
+  }
+  if (typeof result.healthPath !== 'string' || result.healthPath !== job.payload?.runtime?.healthPath) {
+    throw new JobRegistryError('invalid_job_result', 'Node restart health path does not match desired state');
+  }
+  if (result.healthy !== true || result.restarted !== true) {
+    throw new JobRegistryError('invalid_job_result', 'Node restart must confirm a healthy restarted service');
+  }
+
+  return {
+    releaseId,
+    serviceName: result.serviceName,
+    port: result.port,
+    healthPath: result.healthPath,
+    healthy: true,
+    restarted: true,
+  };
+}
+
 function sanitizeResult(job, result) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
@@ -268,6 +300,7 @@ function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK) return sanitizeStaticRollbackResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_DEPLOY) return sanitizeNodeDeploymentResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_ROLLBACK) return sanitizeNodeRollbackResult(job, result);
+  if (job.operation === OPERATIONS.APP_NODE_RESTART) return sanitizeNodeRestartResult(job, result);
   throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
 }
 
