@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -6,11 +6,13 @@ import {
   assertUuid,
   normalizeGithubRepositoryUrl,
   normalizeGitBranch,
+  normalizeNodeRuntimeConfig,
   normalizeStaticBuildConfig,
 } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
+const NODE_SERVICE_PATTERN = /^yunpanel-node-[a-f0-9]{16}\.service$/;
 
 export class ApplicationRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -32,18 +34,41 @@ function validateName(value) {
   return value.trim();
 }
 
-function normalizeConfig({ repositoryUrl, branch, build, retention }) {
+function normalizeRetention(value) {
+  return Number.isInteger(value) && value >= 2 && value <= 20 ? value : 5;
+}
+
+function normalizeStaticConfig({ repositoryUrl, branch, build, retention }) {
   try {
     return {
       repositoryUrl: normalizeGithubRepositoryUrl(repositoryUrl),
       branch: normalizeGitBranch(branch ?? 'main'),
       build: normalizeStaticBuildConfig(build),
-      retention: Number.isInteger(retention) && retention >= 2 && retention <= 20 ? retention : 5,
+      retention: normalizeRetention(retention),
     };
   } catch (error) {
     if (error instanceof ApplicationValidationError) throw new ApplicationRegistryError(error.code, error.message);
     throw error;
   }
+}
+
+function normalizeNodeConfig({ repositoryUrl, branch, runtime, retention }) {
+  try {
+    return {
+      repositoryUrl: normalizeGithubRepositoryUrl(repositoryUrl),
+      branch: normalizeGitBranch(branch ?? 'main'),
+      runtime: normalizeNodeRuntimeConfig(runtime),
+      retention: normalizeRetention(retention),
+    };
+  } catch (error) {
+    if (error instanceof ApplicationValidationError) throw new ApplicationRegistryError(error.code, error.message);
+    throw error;
+  }
+}
+
+function expectedNodeServiceName(applicationId) {
+  const digest = createHash('sha256').update(applicationId).digest('hex').slice(0, 16);
+  return `yunpanel-node-${digest}.service`;
 }
 
 function publicApplication(application) {
@@ -72,9 +97,18 @@ function normalizeNullableUuid(value, fieldName) {
 }
 
 function hydrateApplication(application) {
+  if (!application.type) application.type = 'static';
   if (!Array.isArray(application.releases)) application.releases = [];
   if (application.pendingRollbackReleaseId === undefined) application.pendingRollbackReleaseId = null;
   if (application.lastRolledBackAt === undefined) application.lastRolledBackAt = null;
+  if (application.serviceName === undefined) application.serviceName = null;
+  if (application.servicePort === undefined) application.servicePort = application.runtime?.port ?? null;
+  if (application.healthPath === undefined) application.healthPath = application.runtime?.healthPath ?? null;
+  if (application.proxyTarget === undefined) {
+    application.proxyTarget = application.type === 'node' && application.runtime?.port
+      ? { host: '127.0.0.1', port: application.runtime.port }
+      : null;
+  }
 
   if (
     application.currentReleaseId
@@ -105,6 +139,36 @@ function trimReleaseHistory(application) {
     if (!retained.some((entry) => entry.releaseId === release.releaseId)) retained.push(release);
   }
   application.releases = retained.slice(0, application.retention);
+}
+
+function baseApplication({ id, serverId, name, type, repositoryUrl, branch, retention, timestamp }) {
+  return {
+    id,
+    serverId,
+    name,
+    type,
+    repositoryUrl,
+    branch,
+    retention,
+    state: 'draft',
+    desiredRevision: 1,
+    currentReleaseId: null,
+    previousReleaseId: null,
+    currentCommitSha: null,
+    releases: [],
+    activeDeploymentId: null,
+    pendingRollbackReleaseId: null,
+    lastDeploymentId: null,
+    lastDeployedAt: null,
+    lastRolledBackAt: null,
+    lastError: null,
+    serviceName: null,
+    servicePort: null,
+    healthPath: null,
+    proxyTarget: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
 }
 
 export function createApplicationRegistry({
@@ -148,37 +212,60 @@ export function createApplicationRegistry({
     if (!initialized) await init();
   }
 
-  async function createApplication({ serverId, name, repositoryUrl, branch = 'main', build = {}, retention = 5 }) {
-    await ensureInitialized();
+  async function ensureServer(serverId) {
     if (typeof serverId !== 'string' || !serverId) throw new ApplicationRegistryError('invalid_server', 'serverId is required');
     if (!(await serverExists(serverId))) throw new ApplicationRegistryError('server_not_found', 'Target server does not exist', 404);
-    const config = normalizeConfig({ repositoryUrl, branch, build, retention });
+  }
+
+  async function createApplication({ serverId, name, repositoryUrl, branch = 'main', build = {}, retention = 5 }) {
+    await ensureInitialized();
+    await ensureServer(serverId);
+    const config = normalizeStaticConfig({ repositoryUrl, branch, build, retention });
     const id = randomUUID();
     const timestamp = new Date(now()).toISOString();
     const application = {
-      id,
-      serverId,
-      name: validateName(name),
-      type: 'static',
-      repositoryUrl: config.repositoryUrl,
-      branch: config.branch,
+      ...baseApplication({
+        id,
+        serverId,
+        name: validateName(name),
+        type: 'static',
+        repositoryUrl: config.repositoryUrl,
+        branch: config.branch,
+        retention: config.retention,
+        timestamp,
+      }),
       build: config.build,
-      retention: config.retention,
+      runtime: null,
       webRoot: `/var/www/yunpanel/apps/${id}/current`,
-      state: 'draft',
-      desiredRevision: 1,
-      currentReleaseId: null,
-      previousReleaseId: null,
-      currentCommitSha: null,
-      releases: [],
-      activeDeploymentId: null,
-      pendingRollbackReleaseId: null,
-      lastDeploymentId: null,
-      lastDeployedAt: null,
-      lastRolledBackAt: null,
-      lastError: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
+    };
+    state.applications.push(application);
+    await persist();
+    return publicApplication(application);
+  }
+
+  async function createNodeApplication({ serverId, name, repositoryUrl, branch = 'main', runtime, retention = 5 }) {
+    await ensureInitialized();
+    await ensureServer(serverId);
+    const config = normalizeNodeConfig({ repositoryUrl, branch, runtime, retention });
+    const id = randomUUID();
+    const timestamp = new Date(now()).toISOString();
+    const application = {
+      ...baseApplication({
+        id,
+        serverId,
+        name: validateName(name),
+        type: 'node',
+        repositoryUrl: config.repositoryUrl,
+        branch: config.branch,
+        retention: config.retention,
+        timestamp,
+      }),
+      build: null,
+      runtime: config.runtime,
+      webRoot: null,
+      servicePort: config.runtime.port,
+      healthPath: config.runtime.healthPath,
+      proxyTarget: { host: '127.0.0.1', port: config.runtime.port },
     };
     state.applications.push(application);
     await persist();
@@ -207,6 +294,10 @@ export function createApplicationRegistry({
     previousReleaseId,
     artifactFiles = null,
     artifactBytes = null,
+    serviceName = null,
+    port = null,
+    healthPath = null,
+    healthy = null,
   }) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
@@ -216,11 +307,24 @@ export function createApplicationRegistry({
     const normalizedPreviousReleaseId = normalizeNullableUuid(previousValue, 'previousReleaseId');
 
     if (application.activeDeploymentId !== normalizedDeploymentId) throw new ApplicationRegistryError('deployment_mismatch', 'Deployment result does not match active application deployment', 409);
-    if (normalizedReleaseId !== normalizedDeploymentId) throw new ApplicationRegistryError('release_mismatch', 'Static release must match deployment identity', 409);
+    if (normalizedReleaseId !== normalizedDeploymentId) throw new ApplicationRegistryError('release_mismatch', 'Application release must match deployment identity', 409);
     if (normalizedPreviousReleaseId !== application.currentReleaseId) throw new ApplicationRegistryError('release_state_drift', 'Managed server previous release does not match control-plane state', 409);
     if (typeof commitSha !== 'string' || !COMMIT_PATTERN.test(commitSha)) throw new ApplicationRegistryError('invalid_commit_sha', 'Deployment commit SHA is invalid');
     if (artifactFiles != null && (!Number.isInteger(artifactFiles) || artifactFiles < 1 || artifactFiles > 100_000)) throw new ApplicationRegistryError('invalid_artifact_metadata', 'Artifact file count is invalid');
     if (artifactBytes != null && (!Number.isInteger(artifactBytes) || artifactBytes < 0 || artifactBytes > 2 * 1024 * 1024 * 1024)) throw new ApplicationRegistryError('invalid_artifact_metadata', 'Artifact byte size is invalid');
+
+    if (application.type === 'node') {
+      const expectedService = expectedNodeServiceName(application.id);
+      if (typeof serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(serviceName) || serviceName !== expectedService) {
+        throw new ApplicationRegistryError('invalid_node_service', 'Node deployment service identity is invalid');
+      }
+      if (!Number.isInteger(port) || port !== application.runtime?.port) {
+        throw new ApplicationRegistryError('invalid_node_port', 'Node deployment port does not match application state');
+      }
+      if (typeof healthPath !== 'string' || healthPath !== application.runtime?.healthPath || healthy !== true) {
+        throw new ApplicationRegistryError('invalid_node_health', 'Node deployment health result does not match application state');
+      }
+    }
 
     const timestamp = new Date(now()).toISOString();
     application.previousReleaseId = application.currentReleaseId;
@@ -232,6 +336,13 @@ export function createApplicationRegistry({
     application.lastDeployedAt = timestamp;
     application.lastError = null;
     application.updatedAt = timestamp;
+    if (application.type === 'node') {
+      application.serviceName = serviceName;
+      application.servicePort = port;
+      application.healthPath = healthPath;
+      application.proxyTarget = { host: '127.0.0.1', port };
+    }
+
     application.releases = application.releases.filter((release) => release.releaseId !== normalizedReleaseId);
     application.releases.unshift({
       releaseId: normalizedReleaseId,
@@ -249,6 +360,7 @@ export function createApplicationRegistry({
   async function markRollingBack(applicationId, operationId, releaseId) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
+    if (application.type !== 'static') throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
     if (!application.currentReleaseId) throw new ApplicationRegistryError('application_not_deployed', 'Application has no active release to roll back', 409);
     const normalizedOperationId = normalizeUuid(operationId, 'operationId');
@@ -267,6 +379,7 @@ export function createApplicationRegistry({
   async function markRolledBack(applicationId, { operationId, releaseId, previousReleaseId }) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
+    if (application.type !== 'static') throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
     const normalizedOperationId = normalizeUuid(operationId, 'operationId');
     const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
     const previousValue = previousReleaseId === undefined ? application.currentReleaseId : previousReleaseId;
@@ -316,5 +429,16 @@ export function createApplicationRegistry({
     return state.applications.map((application) => publicApplication(hydrateApplication(application)));
   }
 
-  return { init, createApplication, markDeploying, markDeployed, markRollingBack, markRolledBack, markFailed, getApplication, listApplications };
+  return {
+    init,
+    createApplication,
+    createNodeApplication,
+    markDeploying,
+    markDeployed,
+    markRollingBack,
+    markRolledBack,
+    markFailed,
+    getApplication,
+    listApplications,
+  };
 }
