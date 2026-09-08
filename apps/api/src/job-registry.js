@@ -12,6 +12,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.SSL_ISSUE,
   OPERATIONS.SSL_RENEW,
   OPERATIONS.APP_STATIC_DEPLOY,
+  OPERATIONS.APP_STATIC_ROLLBACK,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
@@ -62,6 +63,10 @@ function boundedString(value, maxLength) {
   return typeof value === 'string' && value.length > 0 && value.length <= maxLength ? value : null;
 }
 
+function normalizeUuid(value) {
+  return typeof value === 'string' && UUID_PATTERN.test(value) ? value.toLowerCase() : null;
+}
+
 function sanitizeDomainArray(domains) {
   if (!Array.isArray(domains) || domains.length < 1 || domains.length > 21 || domains.some((domain) => !boundedString(domain, 253))) {
     throw new JobRegistryError('invalid_job_result', 'Certificate job result domains are invalid');
@@ -102,7 +107,6 @@ function sanitizeCertificateMetadata(result) {
     issuer: boundedString(result.issuer, 500),
     subjectAltName: boundedString(result.subjectAltName, 2000),
   };
-
   if (Array.isArray(result.domains)) sanitized.domains = sanitizeDomainArray(result.domains);
   if (typeof result.staging === 'boolean') sanitized.staging = result.staging;
   if (typeof result.status === 'string') sanitized.status = result.status.slice(0, 40);
@@ -111,21 +115,17 @@ function sanitizeCertificateMetadata(result) {
 }
 
 function sanitizeStaticDeploymentResult(job, result) {
-  const deploymentId = typeof result.deploymentId === 'string' && UUID_PATTERN.test(result.deploymentId)
-    ? result.deploymentId.toLowerCase()
-    : null;
-  const releaseId = typeof result.releaseId === 'string' && UUID_PATTERN.test(result.releaseId)
-    ? result.releaseId.toLowerCase()
-    : null;
-  const expectedDeploymentId = typeof job.payload?.deploymentId === 'string' ? job.payload.deploymentId.toLowerCase() : null;
-
+  const deploymentId = normalizeUuid(result.deploymentId);
+  const releaseId = normalizeUuid(result.releaseId);
+  const expectedDeploymentId = normalizeUuid(job.payload?.deploymentId);
   if (!deploymentId || !releaseId || deploymentId !== expectedDeploymentId || releaseId !== deploymentId) {
     throw new JobRegistryError('invalid_job_result', 'Static deployment result identity does not match the queued deployment');
   }
   if (typeof result.commitSha !== 'string' || !COMMIT_PATTERN.test(result.commitSha)) {
     throw new JobRegistryError('invalid_job_result', 'Static deployment result commit SHA is invalid');
   }
-  if (result.previousReleaseId != null && (typeof result.previousReleaseId !== 'string' || !UUID_PATTERN.test(result.previousReleaseId))) {
+  const previousReleaseId = result.previousReleaseId == null ? null : normalizeUuid(result.previousReleaseId);
+  if (result.previousReleaseId != null && !previousReleaseId) {
     throw new JobRegistryError('invalid_job_result', 'Static deployment previous release identity is invalid');
   }
   if (!Number.isInteger(result.artifactFiles) || result.artifactFiles < 1 || result.artifactFiles > MAX_ARTIFACT_FILES) {
@@ -134,15 +134,27 @@ function sanitizeStaticDeploymentResult(job, result) {
   if (!Number.isInteger(result.artifactBytes) || result.artifactBytes < 0 || result.artifactBytes > MAX_ARTIFACT_BYTES) {
     throw new JobRegistryError('invalid_job_result', 'Static deployment artifact byte size is invalid');
   }
-
   return {
     deploymentId,
     releaseId,
     commitSha: result.commitSha.toLowerCase(),
-    previousReleaseId: result.previousReleaseId?.toLowerCase() ?? null,
+    previousReleaseId,
     artifactFiles: result.artifactFiles,
     artifactBytes: result.artifactBytes,
   };
+}
+
+function sanitizeStaticRollbackResult(job, result) {
+  const releaseId = normalizeUuid(result.releaseId);
+  const expectedReleaseId = normalizeUuid(job.payload?.releaseId);
+  const previousReleaseId = normalizeUuid(result.previousReleaseId);
+  if (!releaseId || releaseId !== expectedReleaseId || !previousReleaseId || result.active !== true) {
+    throw new JobRegistryError('invalid_job_result', 'Static rollback result does not match the queued rollback');
+  }
+  if (previousReleaseId === releaseId) {
+    throw new JobRegistryError('invalid_job_result', 'Static rollback previous release cannot equal the target release');
+  }
+  return { releaseId, previousReleaseId, active: true };
 }
 
 function sanitizeResult(job, result) {
@@ -179,6 +191,7 @@ function sanitizeResult(job, result) {
   }
 
   if (job.operation === OPERATIONS.APP_STATIC_DEPLOY) return sanitizeStaticDeploymentResult(job, result);
+  if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK) return sanitizeStaticRollbackResult(job, result);
   throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
 }
 
@@ -229,10 +242,7 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     if (typeof resourceId !== 'string' || !resourceId) throw new JobRegistryError('invalid_resource_id', 'Job resource id is required');
 
     const id = randomUUID();
-    const effectivePayload = operation === OPERATIONS.APP_STATIC_DEPLOY
-      ? { ...payload, deploymentId: id }
-      : payload;
-
+    const effectivePayload = operation === OPERATIONS.APP_STATIC_DEPLOY ? { ...payload, deploymentId: id } : payload;
     try {
       createOperationEnvelope({ id, operation, payload: effectivePayload });
     } catch (error) {
@@ -256,7 +266,6 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
       result: null,
       error: null,
     };
-
     state.jobs.push(job);
     await persist();
     return publicJob(job);
@@ -280,7 +289,6 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
   async function complete({ serverId, jobId, status, result = null, error = null }) {
     await ensureInitialized();
     if (!['succeeded', 'failed'].includes(status)) throw new JobRegistryError('invalid_completion_status', 'Agent completion status must be succeeded or failed');
-
     const job = state.jobs.find((candidate) => candidate.id === jobId && candidate.serverId === serverId);
     if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
     if (job.status === 'succeeded' || job.status === 'failed') {
