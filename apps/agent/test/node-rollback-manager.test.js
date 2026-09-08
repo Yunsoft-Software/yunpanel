@@ -30,6 +30,8 @@ function createHarness({ healthResults = [true], failFirstRestart = false } = {}
   const environments = [];
   let healthIndex = 0;
   let restartCalls = 0;
+  let restores = 0;
+  let commits = 0;
 
   const run = async (file, args) => {
     commands.push({ file, args });
@@ -59,13 +61,28 @@ function createHarness({ healthResults = [true], failFirstRestart = false } = {}
     rmFn: async () => {},
     symlinkFn: async (target, linkPath) => links.push({ target, linkPath }),
     waitForHealth: async () => healthResults[Math.min(healthIndex++, healthResults.length - 1)],
-    writeEnvironment: async (input) => environments.push(input),
+    writeEnvironment: async (input) => {
+      environments.push(input);
+      return {
+        restore: async () => { restores += 1; },
+        commit: () => { commits += 1; },
+      };
+    },
   });
 
-  return { manager, commands, links, environments };
+  return {
+    manager,
+    commands,
+    links,
+    environments,
+    counts: {
+      get restores() { return restores; },
+      get commits() { return commits; },
+    },
+  };
 }
 
-test('healthy Node rollback materializes desired environment before activating the retained release', async () => {
+test('healthy Node rollback materializes and commits desired environment', async () => {
   const harness = createHarness({ healthResults: [true] });
   const result = await harness.manager.rollbackNode({
     ...rollbackSpec(),
@@ -81,11 +98,13 @@ test('healthy Node rollback materializes desired environment before activating t
   assert.ok(result.serviceName.startsWith('yunpanel-node-'));
   assert.equal(harness.environments.length, 1);
   assert.deepEqual(harness.environments[0].environment, { API_TOKEN: 'secret-value' });
+  assert.equal(harness.counts.restores, 0);
+  assert.equal(harness.counts.commits, 1);
   assert.ok(harness.links.some((entry) => entry.target === `releases/${TARGET_RELEASE}`));
   assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 1);
 });
 
-test('unhealthy rollback restores the previously active release before reporting failure', async () => {
+test('unhealthy rollback restores previous release and previous environment before reporting failure', async () => {
   const harness = createHarness({ healthResults: [false, true] });
 
   await assert.rejects(
@@ -94,12 +113,14 @@ test('unhealthy rollback restores the previously active release before reporting
   );
 
   assert.equal(harness.environments.length, 1);
+  assert.equal(harness.counts.restores, 1);
+  assert.equal(harness.counts.commits, 0);
   assert.ok(harness.links.some((entry) => entry.target === `releases/${TARGET_RELEASE}`));
   assert.ok(harness.links.some((entry) => entry.target === `releases/${CURRENT_RELEASE}`));
   assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 2);
 });
 
-test('failed service restart restores the previous release', async () => {
+test('failed service restart restores previous release and environment', async () => {
   const harness = createHarness({ healthResults: [true], failFirstRestart: true });
 
   await assert.rejects(
@@ -107,17 +128,17 @@ test('failed service restart restores the previous release', async () => {
     (error) => error instanceof NodeRollbackError && error.code === 'node_rollback_command_failed',
   );
 
-  assert.equal(harness.environments.length, 1);
+  assert.equal(harness.counts.restores, 1);
   assert.ok(harness.links.some((entry) => entry.target === `releases/${CURRENT_RELEASE}`));
   assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 2);
 });
 
-test('reports restore failure if both target and previous releases are unhealthy', async () => {
+test('reports restore failure if both target and restored previous release are unhealthy', async () => {
   const harness = createHarness({ healthResults: [false, false] });
 
   await assert.rejects(
     harness.manager.rollbackNode(rollbackSpec()),
     (error) => error instanceof NodeRollbackError && error.code === 'node_rollback_restore_failed',
   );
-  assert.equal(harness.environments.length, 1);
+  assert.equal(harness.counts.restores, 1);
 });
