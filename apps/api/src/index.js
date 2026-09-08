@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { createApp } from './app.js';
+import { createApplicationEnvironmentRegistry } from './application-environment-registry.js';
 import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { startCertificateRenewalScheduler } from './certificate-renewal-scheduler.js';
@@ -14,6 +15,7 @@ const domainStorePath = process.env.YUNPANEL_DOMAIN_STORE ?? path.resolve('.data
 const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-registry.json');
 const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.resolve('.data/certificate-registry.json');
 const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.resolve('.data/application-registry.json');
+const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRONMENT_STORE ?? path.resolve('.data/application-environment-registry.json');
 const certificateRenewalIntervalMs = Number.parseInt(
   process.env.YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS ?? `${6 * 60 * 60 * 1000}`,
   10,
@@ -48,6 +50,13 @@ const applicationRegistry = createApplicationRegistry({
 });
 await applicationRegistry.init();
 
+const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
+  filePath: applicationEnvironmentStorePath,
+  masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+  applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
+});
+await applicationEnvironmentRegistry.init();
+
 const renewalScheduler = startCertificateRenewalScheduler({
   certificateRegistry,
   jobRegistry,
@@ -61,6 +70,7 @@ const app = createApp({
   jobRegistry,
   certificateRegistry,
   applicationRegistry,
+  applicationEnvironmentRegistry,
 });
 const server = app.listen(port, host, () => {
   console.log(`[yunpanel-api] listening on http://${host}:${port}`);
@@ -69,6 +79,8 @@ const server = app.listen(port, host, () => {
   console.log(`[yunpanel-api] job store=${jobStorePath}`);
   console.log(`[yunpanel-api] certificate store=${certificateStorePath}`);
   console.log(`[yunpanel-api] application store=${applicationStorePath}`);
+  console.log(`[yunpanel-api] application environment store=${applicationEnvironmentStorePath}`);
+  console.log(`[yunpanel-api] secret store=${applicationEnvironmentRegistry.secretStoreConfigured ? 'configured' : 'not configured'}`);
 });
 
 function shutdown(signal) {
