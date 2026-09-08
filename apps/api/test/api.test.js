@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApp } from '../src/app.js';
+import { createDomainRegistry } from '../src/domain-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 
 async function withServer(app, callback) {
@@ -142,5 +143,66 @@ test('server enrollment and heartbeat use separate one-time and agent credential
     assert.equal(listBody.data.length, 1);
     assert.equal(listBody.data[0].hostname, 'yun-test-01');
     assert.equal(listBody.data[0].connectivity, 'online');
+  });
+});
+
+test('domain API stores desired state and rejects duplicate ownership', async () => {
+  const registry = createServerRegistry();
+  const enrollment = await registry.issueEnrollmentToken();
+  const enrolled = await registry.enrollServer({ token: enrollment.token, hostname: 'yun-domain-test-01' });
+  const domainRegistry = createDomainRegistry({
+    serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+  });
+  const adminToken = 'test-domain-admin-token';
+
+  await withServer(createApp({
+    registry,
+    domainRegistry,
+    environment: 'production',
+    adminToken,
+  }), async (baseUrl) => {
+    const createResponse = await fetch(`${baseUrl}/api/domains`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        serverId: enrolled.server.id,
+        primaryDomain: 'Example.COM',
+        aliases: ['www.example.com'],
+        targetType: 'proxy',
+        target: { upstreamPort: 3008, websocket: true },
+      }),
+    });
+
+    assert.equal(createResponse.status, 201);
+    const createBody = await createResponse.json();
+    assert.equal(createBody.data.primaryDomain, 'example.com');
+    assert.equal(createBody.data.state, 'draft');
+
+    const conflictResponse = await fetch(`${baseUrl}/api/domains`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        serverId: enrolled.server.id,
+        primaryDomain: 'www.example.com',
+        targetType: 'proxy',
+        target: { upstreamPort: 3010 },
+      }),
+    });
+    assert.equal(conflictResponse.status, 409);
+    const conflictBody = await conflictResponse.json();
+    assert.equal(conflictBody.error.code, 'domain_conflict');
+
+    const listResponse = await fetch(`${baseUrl}/api/domains`, {
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(listResponse.status, 200);
+    const listBody = await listResponse.json();
+    assert.equal(listBody.data.length, 1);
   });
 });
