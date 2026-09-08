@@ -123,6 +123,7 @@ test('Node rollback queues desired runtime state and reconciles a healthy retain
     assert.equal(claimed.response.status, 200);
     assert.equal(claimed.payload.data.envelope.operation, OPERATIONS.APP_NODE_ROLLBACK);
     assert.equal(claimed.payload.data.envelope.payload.releaseId, releaseOne);
+    assert.equal(claimed.payload.data.envelope.payload.currentReleaseId, releaseTwo);
     assert.equal(claimed.payload.data.envelope.payload.runtime.port, 3100);
     assert.equal(claimed.payload.data.envelope.payload.runtime.healthPath, '/health');
 

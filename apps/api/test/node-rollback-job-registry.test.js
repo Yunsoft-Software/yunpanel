@@ -32,7 +32,12 @@ async function queuedRollback(registry) {
     serverId: 'server-1',
     type: 'app.node.rollback',
     operation: OPERATIONS.APP_NODE_ROLLBACK,
-    payload: { applicationId: APPLICATION_ID, releaseId: TARGET_RELEASE, runtime: runtime() },
+    payload: {
+      applicationId: APPLICATION_ID,
+      releaseId: TARGET_RELEASE,
+      currentReleaseId: CURRENT_RELEASE,
+      runtime: runtime(),
+    },
     resourceType: 'application',
     resourceId: APPLICATION_ID,
   });
@@ -45,6 +50,7 @@ test('Node rollback jobs preserve only validated managed service state', async (
 
   assert.equal(claimed.envelope.operation, OPERATIONS.APP_NODE_ROLLBACK);
   assert.equal(claimed.envelope.payload.releaseId, TARGET_RELEASE);
+  assert.equal(claimed.envelope.payload.currentReleaseId, CURRENT_RELEASE);
 
   const completed = await registry.complete({
     serverId: 'server-1',

@@ -141,6 +141,9 @@ export function createNodeRollbackManager({
     if (!previousReleaseId) {
       throw new NodeRollbackError('rollback_current_missing', 'Managed Node application does not have a valid active release');
     }
+    if (previousReleaseId !== spec.currentReleaseId) {
+      throw new NodeRollbackError('node_rollback_release_drift', 'Managed Node current release does not match control-plane state');
+    }
     if (previousReleaseId === spec.releaseId) {
       throw new NodeRollbackError('rollback_target_current', 'Requested rollback release is already active');
     }

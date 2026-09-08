@@ -168,6 +168,7 @@ test('validates static deploy and rollback payloads', () => {
 test('validates Node rollback payloads with desired runtime state', () => {
   const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
   const releaseId = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
+  const currentReleaseId = 'ff830043-9752-4640-83b4-3a1998de78a0';
   const runtime = {
     nodeMajor: 24,
     installMode: 'ci',
@@ -183,7 +184,7 @@ test('validates Node rollback payloads with desired runtime state', () => {
   const rollback = validateOperationEnvelope({
     id: 'request-node-rollback-0001',
     operation: OPERATIONS.APP_NODE_ROLLBACK,
-    payload: { applicationId, releaseId, runtime },
+    payload: { applicationId, releaseId, currentReleaseId, runtime },
     protocolVersion: AGENT_PROTOCOL_VERSION,
   });
   assert.equal(rollback.ok, true);
@@ -191,9 +192,18 @@ test('validates Node rollback payloads with desired runtime state', () => {
   const invalidRollback = validateOperationEnvelope({
     id: 'request-node-rollback-0002',
     operation: OPERATIONS.APP_NODE_ROLLBACK,
-    payload: { applicationId, releaseId, runtime: { ...runtime, port: 80 } },
+    payload: { applicationId, releaseId, currentReleaseId, runtime: { ...runtime, port: 80 } },
     protocolVersion: AGENT_PROTOCOL_VERSION,
   });
   assert.equal(invalidRollback.ok, false);
   assert.match(invalidRollback.errors.join(' '), /port/);
+
+  const invalidCurrentRelease = validateOperationEnvelope({
+    id: 'request-node-rollback-0003',
+    operation: OPERATIONS.APP_NODE_ROLLBACK,
+    payload: { applicationId, releaseId, currentReleaseId: '../bad', runtime },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(invalidCurrentRelease.ok, false);
+  assert.match(invalidCurrentRelease.errors.join(' '), /currentReleaseId/);
 });

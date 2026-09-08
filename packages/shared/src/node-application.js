@@ -112,7 +112,10 @@ export function normalizeNodeApplicationSpec(value) {
 }
 
 export function normalizeNodeRollbackSpec(value) {
-  return normalizeManagedNodeSpec(value, 'invalid_node_rollback', 'Node rollback spec must be an object');
+  return {
+    ...normalizeManagedNodeSpec(value, 'invalid_node_rollback', 'Node rollback spec must be an object'),
+    currentReleaseId: assertUuid(value.currentReleaseId, 'currentReleaseId'),
+  };
 }
 
 export function normalizeNodeRestartSpec(value) {

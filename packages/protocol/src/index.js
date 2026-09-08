@@ -8,7 +8,7 @@ import {
   normalizeStaticApplicationSpec,
 } from '@yunpanel/shared';
 
-export const AGENT_PROTOCOL_VERSION = 1;
+export const AGENT_PROTOCOL_VERSION = 2;
 
 export const OPERATIONS = Object.freeze({
   SERVER_INSPECT: 'server.inspect',

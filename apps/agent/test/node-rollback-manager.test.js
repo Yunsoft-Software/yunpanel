@@ -10,6 +10,7 @@ function rollbackSpec() {
   return {
     applicationId: APPLICATION_ID,
     releaseId: TARGET_RELEASE,
+    currentReleaseId: CURRENT_RELEASE,
     runtime: {
       nodeMajor: 24,
       installMode: 'ci',
@@ -24,7 +25,7 @@ function rollbackSpec() {
   };
 }
 
-function createHarness({ healthResults = [true], failFirstRestart = false } = {}) {
+function createHarness({ healthResults = [true], failFirstRestart = false, currentRelease = CURRENT_RELEASE } = {}) {
   const commands = [];
   const links = [];
   const environments = [];
@@ -56,7 +57,7 @@ function createHarness({ healthResults = [true], failFirstRestart = false } = {}
       isDirectory: () => true,
       isSymbolicLink: () => false,
     }),
-    readlinkFn: async () => `releases/${CURRENT_RELEASE}`,
+    readlinkFn: async () => `releases/${currentRelease}`,
     renameFn: async () => {},
     rmFn: async () => {},
     symlinkFn: async (target, linkPath) => links.push({ target, linkPath }),
@@ -81,6 +82,19 @@ function createHarness({ healthResults = [true], failFirstRestart = false } = {}
     },
   };
 }
+
+test('rollback rejects release drift before environment or systemd mutation', async () => {
+  const harness = createHarness({ currentRelease: '7ae0477d-2381-4e24-b4d6-007bbd05202f' });
+
+  await assert.rejects(
+    harness.manager.rollbackNode(rollbackSpec()),
+    (error) => error instanceof NodeRollbackError && error.code === 'node_rollback_release_drift',
+  );
+
+  assert.equal(harness.environments.length, 0);
+  assert.equal(harness.commands.length, 0);
+  assert.equal(harness.links.length, 0);
+});
 
 test('healthy Node rollback materializes and commits desired environment', async () => {
   const harness = createHarness({ healthResults: [true] });

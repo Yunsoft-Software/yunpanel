@@ -352,7 +352,12 @@ export function createApp({
       type: nodeRollback ? 'app.node.rollback' : 'app.static.rollback',
       operation: nodeRollback ? OPERATIONS.APP_NODE_ROLLBACK : OPERATIONS.APP_STATIC_ROLLBACK,
       payload: nodeRollback
-        ? { applicationId: application.id, releaseId, runtime: application.runtime }
+        ? {
+            applicationId: application.id,
+            releaseId,
+            currentReleaseId: application.currentReleaseId,
+            runtime: application.runtime,
+          }
         : { applicationId: application.id, releaseId },
       resourceType: 'application',
       resourceId: application.id,
