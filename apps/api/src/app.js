@@ -317,6 +317,28 @@ export function createApp({
       throw error;
     }
   });
+  app.post('/api/applications/:applicationId/restart', requireBootstrapAdmin, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    if (application.type !== 'node') throw new ApplicationRegistryError('restart_not_supported', 'Restart is only supported for Node applications', 409);
+    if (!application.currentReleaseId) throw new ApplicationRegistryError('application_not_deployed', 'Application has no active release to restart', 409);
+    await ensureResourceJobIdle(jobRegistry, 'application', application.id);
+    if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
+
+    const job = await jobRegistry.enqueue({
+      serverId: application.serverId,
+      type: 'app.node.restart',
+      operation: OPERATIONS.APP_NODE_RESTART,
+      payload: {
+        applicationId: application.id,
+        releaseId: application.currentReleaseId,
+        runtime: application.runtime,
+      },
+      resourceType: 'application',
+      resourceId: application.id,
+    });
+    return response.status(202).json({ data: job });
+  });
 
   app.get('/api/domains', requireBootstrapAdmin, async (request, response) => response.json({ data: await domainRegistry.listDomains() }));
   app.get('/api/domains/:domainId', requireBootstrapAdmin, async (request, response) => {
