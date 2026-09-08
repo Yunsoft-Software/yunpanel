@@ -21,6 +21,9 @@ export function normalizeNodeRuntimeConfig(value = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ApplicationValidationError('invalid_node_runtime', 'Node runtime config must be an object');
   }
+  if (value.start !== undefined && (!value.start || typeof value.start !== 'object' || Array.isArray(value.start))) {
+    throw new ApplicationValidationError('invalid_node_start', 'Node start config must be an object');
+  }
 
   const nodeMajor = value.nodeMajor ?? 24;
   if (!Number.isInteger(nodeMajor) || nodeMajor < 20 || nodeMajor > 40) {
@@ -33,7 +36,7 @@ export function normalizeNodeRuntimeConfig(value = {}) {
   }
 
   const buildScript = normalizeScriptName(value.buildScript ?? null, 'buildScript', { nullable: true });
-  const startMode = value.startMode ?? 'node';
+  const startMode = value.startMode ?? value.start?.mode ?? 'node';
   if (!['node', 'npm'].includes(startMode)) {
     throw new ApplicationValidationError('invalid_start_mode', 'Node startMode must be node or npm');
   }
@@ -41,13 +44,13 @@ export function normalizeNodeRuntimeConfig(value = {}) {
   const start = startMode === 'node'
     ? {
         mode: 'node',
-        entryFile: normalizeRelativeBuildPath(value.entryFile ?? 'server.js'),
+        entryFile: normalizeRelativeBuildPath(value.entryFile ?? value.start?.entryFile ?? 'server.js'),
         script: null,
       }
     : {
         mode: 'npm',
         entryFile: null,
-        script: normalizeScriptName(value.startScript ?? 'start', 'startScript'),
+        script: normalizeScriptName(value.startScript ?? value.start?.script ?? 'start', 'startScript'),
       };
 
   const port = value.port;
