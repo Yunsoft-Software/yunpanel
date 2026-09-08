@@ -57,6 +57,26 @@ function boundedString(value, maxLength) {
   return typeof value === 'string' && value.length > 0 && value.length <= maxLength ? value : null;
 }
 
+function sanitizeDomainArray(domains) {
+  if (!Array.isArray(domains) || domains.length < 1 || domains.length > 21 || domains.some((domain) => !boundedString(domain, 253))) {
+    throw new JobRegistryError('invalid_job_result', 'Certificate job result domains are invalid');
+  }
+  return [...domains];
+}
+
+function sanitizeCertificateValidation(result) {
+  const certName = boundedString(result.certName, 253);
+  if (!certName || result.staging !== true || result.status !== 'validated') {
+    throw new JobRegistryError('invalid_job_result', 'Certificate validation result is invalid');
+  }
+  return {
+    certName,
+    domains: sanitizeDomainArray(result.domains),
+    staging: true,
+    status: 'validated',
+  };
+}
+
 function sanitizeCertificateMetadata(result) {
   const certName = boundedString(result.certName, 253);
   const certificatePath = boundedString(result.certificatePath, 500);
@@ -83,12 +103,7 @@ function sanitizeCertificateMetadata(result) {
     subjectAltName: boundedString(result.subjectAltName, 2000),
   };
 
-  if (Array.isArray(result.domains)) {
-    if (result.domains.length < 1 || result.domains.length > 21 || result.domains.some((domain) => !boundedString(domain, 253))) {
-      throw new JobRegistryError('invalid_job_result', 'Certificate job result domains are invalid');
-    }
-    sanitized.domains = [...result.domains];
-  }
+  if (Array.isArray(result.domains)) sanitized.domains = sanitizeDomainArray(result.domains);
   if (typeof result.staging === 'boolean') sanitized.staging = result.staging;
   if (typeof result.status === 'string') sanitized.status = result.status.slice(0, 40);
   if (typeof result.dryRun === 'boolean') sanitized.dryRun = result.dryRun;
@@ -135,6 +150,7 @@ function sanitizeResult(job, result) {
   }
 
   if (job.operation === OPERATIONS.SSL_ISSUE) {
+    if (result.staging === true) return sanitizeCertificateValidation(result);
     return sanitizeCertificateMetadata(result);
   }
 
