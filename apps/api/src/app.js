@@ -21,6 +21,21 @@ async function ensureResourceJobIdle(jobRegistry, resourceType, resourceId) {
   }
 }
 
+async function resolveDomainTls(domain, certificateRegistry) {
+  if (!domain.certificateId) return null;
+  const certificate = await certificateRegistry.getCertificate(domain.certificateId);
+  if (!certificate || certificate.state !== 'active') {
+    throw new CertificateRegistryError('certificate_not_active', 'Attached certificate is not active', 409);
+  }
+  if (certificate.staging) {
+    throw new CertificateRegistryError('staging_certificate_not_allowed', 'Staging certificates cannot be attached to production HTTPS config', 409);
+  }
+  return {
+    fullchainPath: certificate.fullchainPath,
+    privateKeyPath: certificate.privateKeyPath,
+  };
+}
+
 async function reconcileAgentJob({ domainRegistry, certificateRegistry, job }) {
   if (job.resourceType === 'domain') {
     if (job.status === 'failed') {
@@ -37,9 +52,7 @@ async function reconcileAgentJob({ domainRegistry, certificateRegistry, job }) {
     }
 
     if (job.operation === OPERATIONS.DOMAIN_ACTIVATE) {
-      await domainRegistry.markApplied(job.resourceId, {
-        checksum: job.result.checksum,
-      });
+      await domainRegistry.markApplied(job.resourceId, { checksum: job.result.checksum });
     }
     return;
   }
@@ -51,7 +64,10 @@ async function reconcileAgentJob({ domainRegistry, certificateRegistry, job }) {
     }
 
     if (job.operation === OPERATIONS.SSL_ISSUE) {
-      await certificateRegistry.markActive(job.resourceId, job.result, { renewal: false });
+      const certificate = await certificateRegistry.markActive(job.resourceId, job.result, { renewal: false });
+      if (!certificate.staging) {
+        await domainRegistry.attachCertificate(certificate.domainId, certificate.id);
+      }
       return;
     }
 
@@ -84,56 +100,37 @@ export function createApp({
   app.use(express.json({ limit: '256kb' }));
 
   app.get('/api/health', (request, response) => {
-    response.json({
-      status: 'ok',
-      service: 'yunpanel-api',
-      version: API_VERSION,
-    });
+    response.json({ status: 'ok', service: 'yunpanel-api', version: API_VERSION });
   });
 
   app.get('/api/dev/agent/inspect', async (request, response) => {
     if (environment !== 'development') {
       return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
     }
-
     try {
-      const result = await inspectAgent();
-      return response.json(result);
+      return response.json(await inspectAgent());
     } catch (error) {
-      return response.status(502).json({
-        error: {
-          code: 'agent_unavailable',
-          message: error.message,
-        },
-      });
+      return response.status(502).json({ error: { code: 'agent_unavailable', message: error.message } });
     }
   });
 
   app.get('/api/dev/servers', async (request, response) => {
-    if (environment !== 'development') {
-      return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
-    }
+    if (environment !== 'development') return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
     return response.json({ data: await registry.listServers() });
   });
 
   app.get('/api/dev/domains', async (request, response) => {
-    if (environment !== 'development') {
-      return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
-    }
+    if (environment !== 'development') return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
     return response.json({ data: await domainRegistry.listDomains() });
   });
 
   app.get('/api/dev/jobs', async (request, response) => {
-    if (environment !== 'development') {
-      return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
-    }
+    if (environment !== 'development') return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
     return response.json({ data: await jobRegistry.listJobs() });
   });
 
   app.get('/api/dev/certificates', async (request, response) => {
-    if (environment !== 'development') {
-      return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
-    }
+    if (environment !== 'development') return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
     return response.json({ data: await certificateRegistry.listCertificates() });
   });
 
@@ -175,22 +172,14 @@ export function createApp({
   });
 
   app.get('/api/servers/:serverId/commands/next', async (request, response) => {
-    await registry.authenticateAgent({
-      serverId: request.params.serverId,
-      agentToken: bearerToken(request),
-    });
-
+    await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
     const claimed = await jobRegistry.claimNext(request.params.serverId);
     if (!claimed) return response.status(204).end();
     return response.json({ data: claimed });
   });
 
   app.post('/api/servers/:serverId/commands/:jobId/result', async (request, response) => {
-    await registry.authenticateAgent({
-      serverId: request.params.serverId,
-      agentToken: bearerToken(request),
-    });
-
+    await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
     const job = await jobRegistry.complete({
       serverId: request.params.serverId,
       jobId: request.params.jobId,
@@ -208,7 +197,6 @@ export function createApp({
         await certificateRegistry.markFailed(job.resourceId, `reconcile_${error.code ?? 'failed'}`);
       }
     }
-
     return response.json({ data: job });
   });
 
@@ -238,17 +226,21 @@ export function createApp({
     const domain = await domainRegistry.getDomain(request.params.domainId);
     if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
     await ensureResourceJobIdle(jobRegistry, 'domain', domain.id);
+    const tls = await resolveDomainTls(domain, certificateRegistry);
+
+    const payload = {
+      primaryDomain: domain.primaryDomain,
+      aliases: domain.aliases,
+      targetType: domain.targetType,
+      target: domain.target,
+    };
+    if (tls) payload.tls = tls;
 
     const job = await jobRegistry.enqueue({
       serverId: domain.serverId,
       type: 'domain.stage',
       operation: OPERATIONS.DOMAIN_STAGE,
-      payload: {
-        primaryDomain: domain.primaryDomain,
-        aliases: domain.aliases,
-        targetType: domain.targetType,
-        target: domain.target,
-      },
+      payload,
       resourceType: 'domain',
       resourceId: domain.id,
     });
@@ -267,10 +259,7 @@ export function createApp({
       serverId: domain.serverId,
       type: 'domain.activate',
       operation: OPERATIONS.DOMAIN_ACTIVATE,
-      payload: {
-        primaryDomain: domain.primaryDomain,
-        checksum: domain.stagedChecksum,
-      },
+      payload: { primaryDomain: domain.primaryDomain, checksum: domain.stagedChecksum },
       resourceType: 'domain',
       resourceId: domain.id,
     });
@@ -280,6 +269,9 @@ export function createApp({
   app.post('/api/domains/:domainId/certificates/issue', requireBootstrapAdmin, async (request, response) => {
     const domain = await domainRegistry.getDomain(request.params.domainId);
     if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+    if (domain.httpsMode !== 'managed') {
+      throw new CertificateRegistryError('https_not_managed', 'Domain must use managed HTTPS before requesting a certificate', 409);
+    }
     if (domain.state !== 'active' || domain.appliedRevision !== domain.desiredRevision) {
       throw new CertificateRegistryError('http_domain_not_active', 'Current domain revision must be active before HTTP-01 certificate issuance', 409);
     }
@@ -297,11 +289,7 @@ export function createApp({
         serverId: domain.serverId,
         type: 'ssl.issue',
         operation: OPERATIONS.SSL_ISSUE,
-        payload: {
-          domains: certificate.domains,
-          email: certificate.email,
-          staging: certificate.staging,
-        },
+        payload: { domains: certificate.domains, email: certificate.email, staging: certificate.staging },
         resourceType: 'certificate',
         resourceId: certificate.id,
       });
@@ -377,12 +365,7 @@ export function createApp({
       || error instanceof JobRegistryError
       || error instanceof CertificateRegistryError
     ) {
-      return response.status(error.status).json({
-        error: {
-          code: error.code,
-          message: error.message,
-        },
-      });
+      return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }
 
     const isJsonSyntaxError = error instanceof SyntaxError && error.status === 400;
