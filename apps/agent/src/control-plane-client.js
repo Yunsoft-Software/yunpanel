@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
-import { validateOperationEnvelope } from '@yunpanel/protocol';
+import { OPERATIONS, validateOperationEnvelope } from '@yunpanel/protocol';
+import { normalizeApplicationEnvironmentBundle } from '@yunpanel/shared';
 import { executeOperation } from './operations.js';
 import { loadAgentIdentity, saveAgentIdentity } from './identity-store.js';
 
@@ -8,6 +9,11 @@ export const AGENT_VERSION = '0.0.1';
 const DEFAULT_HEARTBEAT_MS = 30_000;
 const DEFAULT_COMMAND_POLL_MS = 5_000;
 const RESULT_REPORT_ATTEMPTS = 3;
+const ENVIRONMENT_OPERATIONS = new Set([
+  OPERATIONS.APP_NODE_DEPLOY,
+  OPERATIONS.APP_NODE_RESTART,
+  OPERATIONS.APP_NODE_ROLLBACK,
+]);
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -136,6 +142,26 @@ export async function fetchNextCommand({ baseUrl, identity, fetchImpl = fetch })
   return claimed;
 }
 
+export async function fetchApplicationEnvironment({
+  baseUrl,
+  identity,
+  applicationId,
+  fetchImpl = fetch,
+}) {
+  const response = await fetchImpl(
+    `${baseUrl}/api/servers/${identity.serverId}/applications/${applicationId}/environment`,
+    { headers: { authorization: agentAuthorization(identity) } },
+  );
+  const body = await readJsonResponse(response, 'Application environment');
+  try {
+    return normalizeApplicationEnvironmentBundle(body?.data ?? {});
+  } catch {
+    const error = new Error('Control plane returned an invalid application environment bundle');
+    error.code = 'invalid_environment_bundle';
+    throw error;
+  }
+}
+
 export async function reportCommandResult({
   baseUrl,
   identity,
@@ -180,7 +206,17 @@ export async function executeClaimedCommand({
   let completion;
 
   try {
-    const result = await execute(claimed.envelope.operation, claimed.envelope.payload);
+    let executionPayload = claimed.envelope.payload;
+    if (ENVIRONMENT_OPERATIONS.has(claimed.envelope.operation)) {
+      const environment = await fetchApplicationEnvironment({
+        baseUrl,
+        identity,
+        applicationId: claimed.envelope.payload.applicationId,
+        fetchImpl,
+      });
+      executionPayload = { ...executionPayload, environment };
+    }
+    const result = await execute(claimed.envelope.operation, executionPayload);
     completion = { status: 'succeeded', result };
   } catch (error) {
     completion = { status: 'failed', error: safeCommandError(error) };
