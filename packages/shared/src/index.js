@@ -9,6 +9,11 @@ export {
 } from './application.js';
 
 export {
+  normalizeNodeApplicationSpec,
+  normalizeNodeRuntimeConfig,
+} from './node-application.js';
+
+export {
   DomainValidationError,
   assertDomainName,
   normalizeDomainName,
