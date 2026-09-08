@@ -14,6 +14,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.APP_STATIC_DEPLOY,
   OPERATIONS.APP_STATIC_ROLLBACK,
   OPERATIONS.APP_NODE_DEPLOY,
+  OPERATIONS.APP_NODE_ROLLBACK,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
@@ -197,6 +198,39 @@ function sanitizeStaticRollbackResult(job, result) {
   return { releaseId, previousReleaseId, active: true };
 }
 
+function sanitizeNodeRollbackResult(job, result) {
+  const releaseId = normalizeUuid(result.releaseId);
+  const expectedReleaseId = normalizeUuid(job.payload?.releaseId);
+  const previousReleaseId = normalizeUuid(result.previousReleaseId);
+  const expectedService = expectedNodeServiceName(job.payload?.applicationId);
+
+  if (!releaseId || releaseId !== expectedReleaseId || !previousReleaseId || previousReleaseId === releaseId) {
+    throw new JobRegistryError('invalid_job_result', 'Node rollback release state does not match the queued rollback');
+  }
+  if (!expectedService || typeof result.serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(result.serviceName) || result.serviceName !== expectedService) {
+    throw new JobRegistryError('invalid_job_result', 'Node rollback service identity is invalid');
+  }
+  if (!Number.isInteger(result.port) || result.port !== job.payload?.runtime?.port) {
+    throw new JobRegistryError('invalid_job_result', 'Node rollback port does not match desired state');
+  }
+  if (typeof result.healthPath !== 'string' || result.healthPath !== job.payload?.runtime?.healthPath) {
+    throw new JobRegistryError('invalid_job_result', 'Node rollback health path does not match desired state');
+  }
+  if (result.healthy !== true || result.active !== true) {
+    throw new JobRegistryError('invalid_job_result', 'Node rollback must confirm healthy active state');
+  }
+
+  return {
+    releaseId,
+    previousReleaseId,
+    serviceName: result.serviceName,
+    port: result.port,
+    healthPath: result.healthPath,
+    healthy: true,
+    active: true,
+  };
+}
+
 function sanitizeResult(job, result) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
@@ -233,6 +267,7 @@ function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.APP_STATIC_DEPLOY) return sanitizeStaticDeploymentResult(job, result);
   if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK) return sanitizeStaticRollbackResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_DEPLOY) return sanitizeNodeDeploymentResult(job, result);
+  if (job.operation === OPERATIONS.APP_NODE_ROLLBACK) return sanitizeNodeRollbackResult(job, result);
   throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
 }
 
