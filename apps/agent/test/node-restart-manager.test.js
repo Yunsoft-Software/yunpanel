@@ -26,6 +26,7 @@ function restartSpec() {
 
 function createHarness({ currentRelease = RELEASE_ID, healthy = true, restartFails = false } = {}) {
   const commands = [];
+  const environments = [];
   const run = async (file, args) => {
     commands.push({ file, args });
     if (file === '/usr/bin/systemctl' && args[0] === '--version') return { stdout: 'systemd 255\n' };
@@ -46,13 +47,17 @@ function createHarness({ currentRelease = RELEASE_ID, healthy = true, restartFai
     systemctlPaths: ['/usr/bin/systemctl'],
     readlinkFn: async () => `releases/${currentRelease}`,
     waitForHealth: async () => healthy,
+    writeEnvironment: async (input) => environments.push(input),
   });
-  return { manager, commands };
+  return { manager, commands, environments };
 }
 
-test('healthy Node restart is bound to the current managed release', async () => {
+test('healthy Node restart materializes desired environment before restarting the current release', async () => {
   const harness = createHarness();
-  const result = await harness.manager.restartNode(restartSpec());
+  const result = await harness.manager.restartNode({
+    ...restartSpec(),
+    environment: { API_TOKEN: 'secret-value' },
+  });
 
   assert.equal(result.releaseId, RELEASE_ID);
   assert.equal(result.port, 3100);
@@ -60,16 +65,19 @@ test('healthy Node restart is bound to the current managed release', async () =>
   assert.equal(result.healthy, true);
   assert.equal(result.restarted, true);
   assert.ok(result.serviceName.startsWith('yunpanel-node-'));
+  assert.equal(harness.environments.length, 1);
+  assert.deepEqual(harness.environments[0].environment, { API_TOKEN: 'secret-value' });
   assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 1);
 });
 
-test('Node restart rejects release drift before touching systemd', async () => {
+test('Node restart rejects release drift before touching environment or systemd', async () => {
   const harness = createHarness({ currentRelease: OTHER_RELEASE });
 
   await assert.rejects(
     harness.manager.restartNode(restartSpec()),
     (error) => error instanceof NodeRestartError && error.code === 'node_restart_release_drift',
   );
+  assert.equal(harness.environments.length, 0);
   assert.equal(harness.commands.length, 0);
 });
 
@@ -80,6 +88,7 @@ test('Node restart reports failed health checks after systemd restart', async ()
     harness.manager.restartNode(restartSpec()),
     (error) => error instanceof NodeRestartError && error.code === 'node_restart_health_failed',
   );
+  assert.equal(harness.environments.length, 1);
   assert.equal(harness.commands.filter((entry) => entry.args[0] === 'restart').length, 1);
 });
 
@@ -90,4 +99,5 @@ test('Node restart wraps systemd command failures without leaking command detail
     harness.manager.restartNode(restartSpec()),
     (error) => error instanceof NodeRestartError && error.code === 'node_restart_command_failed',
   );
+  assert.equal(harness.environments.length, 1);
 });
