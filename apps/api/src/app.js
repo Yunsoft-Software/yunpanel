@@ -51,6 +51,15 @@ export function createApp({
     }
   });
 
+  app.get('/api/dev/servers', async (request, response) => {
+    if (environment !== 'development') {
+      return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
+    }
+
+    const servers = await registry.listServers();
+    return response.json({ data: servers });
+  });
+
   app.get('/api/servers', requireBootstrapAdmin, async (request, response) => {
     const servers = await registry.listServers();
     return response.json({ data: servers });
