@@ -11,8 +11,13 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DOMAIN_ACTIVATE,
   OPERATIONS.SSL_ISSUE,
   OPERATIONS.SSL_RENEW,
+  OPERATIONS.APP_STATIC_DEPLOY,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_ARTIFACT_FILES = 100_000;
+const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024;
 
 export class JobRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -110,6 +115,43 @@ function sanitizeCertificateMetadata(result) {
   return sanitized;
 }
 
+function sanitizeStaticDeploymentResult(job, result) {
+  const deploymentId = typeof result.deploymentId === 'string' && UUID_PATTERN.test(result.deploymentId)
+    ? result.deploymentId.toLowerCase()
+    : null;
+  const releaseId = typeof result.releaseId === 'string' && UUID_PATTERN.test(result.releaseId)
+    ? result.releaseId.toLowerCase()
+    : null;
+  const expectedDeploymentId = typeof job.payload?.deploymentId === 'string'
+    ? job.payload.deploymentId.toLowerCase()
+    : null;
+
+  if (!deploymentId || !releaseId || deploymentId !== expectedDeploymentId || releaseId !== deploymentId) {
+    throw new JobRegistryError('invalid_job_result', 'Static deployment result identity does not match the queued deployment');
+  }
+  if (typeof result.commitSha !== 'string' || !COMMIT_PATTERN.test(result.commitSha)) {
+    throw new JobRegistryError('invalid_job_result', 'Static deployment result commit SHA is invalid');
+  }
+  if (result.previousReleaseId != null && (typeof result.previousReleaseId !== 'string' || !UUID_PATTERN.test(result.previousReleaseId))) {
+    throw new JobRegistryError('invalid_job_result', 'Static deployment previous release identity is invalid');
+  }
+  if (!Number.isInteger(result.artifactFiles) || result.artifactFiles < 1 || result.artifactFiles > MAX_ARTIFACT_FILES) {
+    throw new JobRegistryError('invalid_job_result', 'Static deployment artifact file count is invalid');
+  }
+  if (!Number.isInteger(result.artifactBytes) || result.artifactBytes < 0 || result.artifactBytes > MAX_ARTIFACT_BYTES) {
+    throw new JobRegistryError('invalid_job_result', 'Static deployment artifact byte size is invalid');
+  }
+
+  return {
+    deploymentId,
+    releaseId,
+    commitSha: result.commitSha.toLowerCase(),
+    previousReleaseId: result.previousReleaseId?.toLowerCase() ?? null,
+    artifactFiles: result.artifactFiles,
+    artifactBytes: result.artifactBytes,
+  };
+}
+
 function sanitizeResult(job, result) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
@@ -125,11 +167,7 @@ function sanitizeResult(job, result) {
     if (!Number.isInteger(result.bytes) || result.bytes < 1 || result.bytes > 2 * 1024 * 1024) {
       throw new JobRegistryError('invalid_job_result', 'Domain staging result byte size is invalid');
     }
-    return {
-      checksum: result.checksum,
-      configName: result.configName,
-      bytes: result.bytes,
-    };
+    return { checksum: result.checksum, configName: result.configName, bytes: result.bytes };
   }
 
   if (job.operation === OPERATIONS.DOMAIN_ACTIVATE) {
@@ -142,11 +180,7 @@ function sanitizeResult(job, result) {
     if (result.active !== true) {
       throw new JobRegistryError('invalid_job_result', 'Domain activation result must confirm active state');
     }
-    return {
-      checksum: result.checksum,
-      configName: result.configName,
-      active: true,
-    };
+    return { checksum: result.checksum, configName: result.configName, active: true };
   }
 
   if (job.operation === OPERATIONS.SSL_ISSUE) {
@@ -161,6 +195,10 @@ function sanitizeResult(job, result) {
       return { certName, dryRun: true, status: 'validated' };
     }
     return sanitizeCertificateMetadata(result);
+  }
+
+  if (job.operation === OPERATIONS.APP_STATIC_DEPLOY) {
+    return sanitizeStaticDeploymentResult(job, result);
   }
 
   throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
@@ -260,11 +298,7 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
 
       return {
         job: publicJob(job),
-        envelope: createOperationEnvelope({
-          id: job.id,
-          operation: job.operation,
-          payload: job.payload,
-        }),
+        envelope: createOperationEnvelope({ id: job.id, operation: job.operation, payload: job.payload }),
       };
     });
 
@@ -286,7 +320,6 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
       if (job.status === status) return publicJob(job);
       throw new JobRegistryError('job_already_completed', 'Job is already completed with a different status', 409);
     }
-
     if (job.status !== 'running') throw new JobRegistryError('job_not_running', 'Only running jobs may be completed', 409);
 
     const sanitizedResult = status === 'succeeded' ? sanitizeResult(job, result) : null;
