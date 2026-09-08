@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@yunpanel/protocol": "*",
+    "@yunpanel/shared": "*",
     "express": "5.2.1"
   }
 }
