@@ -74,12 +74,7 @@ function sanitizeCertificateValidation(result) {
   if (!certName || result.staging !== true || result.status !== 'validated') {
     throw new JobRegistryError('invalid_job_result', 'Certificate validation result is invalid');
   }
-  return {
-    certName,
-    domains: sanitizeDomainArray(result.domains),
-    staging: true,
-    status: 'validated',
-  };
+  return { certName, domains: sanitizeDomainArray(result.domains), staging: true, status: 'validated' };
 }
 
 function sanitizeCertificateMetadata(result) {
@@ -122,9 +117,7 @@ function sanitizeStaticDeploymentResult(job, result) {
   const releaseId = typeof result.releaseId === 'string' && UUID_PATTERN.test(result.releaseId)
     ? result.releaseId.toLowerCase()
     : null;
-  const expectedDeploymentId = typeof job.payload?.deploymentId === 'string'
-    ? job.payload.deploymentId.toLowerCase()
-    : null;
+  const expectedDeploymentId = typeof job.payload?.deploymentId === 'string' ? job.payload.deploymentId.toLowerCase() : null;
 
   if (!deploymentId || !releaseId || deploymentId !== expectedDeploymentId || releaseId !== deploymentId) {
     throw new JobRegistryError('invalid_job_result', 'Static deployment result identity does not match the queued deployment');
@@ -158,28 +151,16 @@ function sanitizeResult(job, result) {
   }
 
   if (job.operation === OPERATIONS.DOMAIN_STAGE) {
-    if (typeof result.checksum !== 'string' || !SHA256_PATTERN.test(result.checksum)) {
-      throw new JobRegistryError('invalid_job_result', 'Domain staging result requires a SHA-256 checksum');
-    }
-    if (typeof result.configName !== 'string' || result.configName.length < 1 || result.configName.length > 300) {
-      throw new JobRegistryError('invalid_job_result', 'Domain staging result configName is invalid');
-    }
-    if (!Number.isInteger(result.bytes) || result.bytes < 1 || result.bytes > 2 * 1024 * 1024) {
-      throw new JobRegistryError('invalid_job_result', 'Domain staging result byte size is invalid');
-    }
+    if (typeof result.checksum !== 'string' || !SHA256_PATTERN.test(result.checksum)) throw new JobRegistryError('invalid_job_result', 'Domain staging result requires a SHA-256 checksum');
+    if (typeof result.configName !== 'string' || result.configName.length < 1 || result.configName.length > 300) throw new JobRegistryError('invalid_job_result', 'Domain staging result configName is invalid');
+    if (!Number.isInteger(result.bytes) || result.bytes < 1 || result.bytes > 2 * 1024 * 1024) throw new JobRegistryError('invalid_job_result', 'Domain staging result byte size is invalid');
     return { checksum: result.checksum, configName: result.configName, bytes: result.bytes };
   }
 
   if (job.operation === OPERATIONS.DOMAIN_ACTIVATE) {
-    if (typeof result.checksum !== 'string' || !SHA256_PATTERN.test(result.checksum)) {
-      throw new JobRegistryError('invalid_job_result', 'Domain activation result requires a SHA-256 checksum');
-    }
-    if (typeof result.configName !== 'string' || result.configName.length < 1 || result.configName.length > 300) {
-      throw new JobRegistryError('invalid_job_result', 'Domain activation result configName is invalid');
-    }
-    if (result.active !== true) {
-      throw new JobRegistryError('invalid_job_result', 'Domain activation result must confirm active state');
-    }
+    if (typeof result.checksum !== 'string' || !SHA256_PATTERN.test(result.checksum)) throw new JobRegistryError('invalid_job_result', 'Domain activation result requires a SHA-256 checksum');
+    if (typeof result.configName !== 'string' || result.configName.length < 1 || result.configName.length > 300) throw new JobRegistryError('invalid_job_result', 'Domain activation result configName is invalid');
+    if (result.active !== true) throw new JobRegistryError('invalid_job_result', 'Domain activation result must confirm active state');
     return { checksum: result.checksum, configName: result.configName, active: true };
   }
 
@@ -197,10 +178,7 @@ function sanitizeResult(job, result) {
     return sanitizeCertificateMetadata(result);
   }
 
-  if (job.operation === OPERATIONS.APP_STATIC_DEPLOY) {
-    return sanitizeStaticDeploymentResult(job, result);
-  }
-
+  if (job.operation === OPERATIONS.APP_STATIC_DEPLOY) return sanitizeStaticDeploymentResult(job, result);
   throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
 }
 
@@ -215,7 +193,6 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     const snapshot = JSON.stringify(state, null, 2);
     const directory = path.dirname(filePath);
     const temporaryPath = `${filePath}.${process.pid}.tmp`;
-
     writeChain = writeChain.then(async () => {
       await mkdir(directory, { recursive: true });
       await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
@@ -229,9 +206,7 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.jobs)) {
-          throw new Error('unsupported or invalid job registry state');
-        }
+        if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.jobs)) throw new Error('unsupported or invalid job registry state');
         state = parsed;
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
@@ -246,7 +221,6 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
 
   async function enqueue({ serverId, type, operation, payload, resourceType, resourceId }) {
     await ensureInitialized();
-
     if (typeof serverId !== 'string' || !serverId) throw new JobRegistryError('invalid_server', 'serverId is required');
     if (typeof type !== 'string' || type.length < 1 || type.length > 80) throw new JobRegistryError('invalid_job_type', 'Job type is invalid');
     if (!ASYNC_OPERATIONS.has(operation)) throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
@@ -255,8 +229,12 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     if (typeof resourceId !== 'string' || !resourceId) throw new JobRegistryError('invalid_resource_id', 'Job resource id is required');
 
     const id = randomUUID();
+    const effectivePayload = operation === OPERATIONS.APP_STATIC_DEPLOY
+      ? { ...payload, deploymentId: id }
+      : payload;
+
     try {
-      createOperationEnvelope({ id, operation, payload });
+      createOperationEnvelope({ id, operation, payload: effectivePayload });
     } catch (error) {
       throw new JobRegistryError('invalid_operation_payload', error.message);
     }
@@ -267,7 +245,7 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
       serverId,
       type,
       operation,
-      payload,
+      payload: effectivePayload,
       resourceType,
       resourceId,
       status: 'queued',
@@ -286,49 +264,35 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
 
   async function claimNext(serverId) {
     await ensureInitialized();
-
     const claim = claimChain.catch(() => {}).then(async () => {
       const job = state.jobs.find((candidate) => candidate.serverId === serverId && candidate.status === 'queued');
       if (!job) return null;
-
       job.status = 'running';
       job.startedAt = new Date(now()).toISOString();
       job.attempts += 1;
       await persist();
-
-      return {
-        job: publicJob(job),
-        envelope: createOperationEnvelope({ id: job.id, operation: job.operation, payload: job.payload }),
-      };
+      return { job: publicJob(job), envelope: createOperationEnvelope({ id: job.id, operation: job.operation, payload: job.payload }) };
     });
-
     claimChain = claim;
     return claim;
   }
 
   async function complete({ serverId, jobId, status, result = null, error = null }) {
     await ensureInitialized();
-
-    if (!['succeeded', 'failed'].includes(status)) {
-      throw new JobRegistryError('invalid_completion_status', 'Agent completion status must be succeeded or failed');
-    }
+    if (!['succeeded', 'failed'].includes(status)) throw new JobRegistryError('invalid_completion_status', 'Agent completion status must be succeeded or failed');
 
     const job = state.jobs.find((candidate) => candidate.id === jobId && candidate.serverId === serverId);
     if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
-
     if (job.status === 'succeeded' || job.status === 'failed') {
       if (job.status === status) return publicJob(job);
       throw new JobRegistryError('job_already_completed', 'Job is already completed with a different status', 409);
     }
     if (job.status !== 'running') throw new JobRegistryError('job_not_running', 'Only running jobs may be completed', 409);
 
-    const sanitizedResult = status === 'succeeded' ? sanitizeResult(job, result) : null;
-    const sanitizedError = status === 'failed' ? validateError(error) : null;
-
+    job.result = status === 'succeeded' ? sanitizeResult(job, result) : null;
+    job.error = status === 'failed' ? validateError(error) : null;
     job.status = status;
     job.finishedAt = new Date(now()).toISOString();
-    job.result = sanitizedResult;
-    job.error = sanitizedError;
     await persist();
     return publicJob(job);
   }
@@ -338,7 +302,6 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     const job = state.jobs.find((candidate) => candidate.id === jobId);
     if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
     if (job.status !== 'queued') throw new JobRegistryError('job_not_cancellable', 'Only queued jobs may be cancelled', 409);
-
     job.status = 'cancelled';
     job.finishedAt = new Date(now()).toISOString();
     await persist();
@@ -354,7 +317,6 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
   async function listJobs({ serverId = null, resourceType = null, resourceId = null, status = null } = {}) {
     await ensureInitialized();
     if (status && !JOB_STATUSES.has(status)) throw new JobRegistryError('invalid_status', 'Job status filter is invalid');
-
     return state.jobs
       .filter((job) => !serverId || job.serverId === serverId)
       .filter((job) => !resourceType || job.resourceType === resourceType)
@@ -363,13 +325,5 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
       .map(publicJob);
   }
 
-  return {
-    init,
-    enqueue,
-    claimNext,
-    complete,
-    cancel,
-    getJob,
-    listJobs,
-  };
+  return { init, enqueue, claimNext, complete, cancel, getJob, listJobs };
 }
