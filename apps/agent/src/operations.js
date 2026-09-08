@@ -8,6 +8,7 @@ import { nginxManager } from './nginx-manager.js';
 import { nodeDeploymentManager } from './node-deployment-manager.js';
 import { nodeRestartManager } from './node-restart-manager.js';
 import { nodeRollbackManager } from './node-rollback-manager.js';
+import { nodeStatusInspector } from './node-status-inspector.js';
 import { staticDeploymentManager } from './static-deployment-manager.js';
 import { staticRollbackManager } from './static-rollback-manager.js';
 import { inspectAllowlistedServices } from './systemd-inspector.js';
@@ -159,6 +160,7 @@ export const operationHandlers = Object.freeze({
   [OPERATIONS.APP_NODE_DEPLOY]: (payload) => nodeDeploymentManager.deployNode(payload),
   [OPERATIONS.APP_NODE_ROLLBACK]: (payload) => nodeRollbackManager.rollbackNode(payload),
   [OPERATIONS.APP_NODE_RESTART]: (payload) => nodeRestartManager.restartNode(payload),
+  [OPERATIONS.APP_NODE_STATUS]: (payload) => nodeStatusInspector.inspectNodeStatus(payload),
 });
 
 export async function executeOperation(operation, payload) {
