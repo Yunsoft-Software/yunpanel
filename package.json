@@ -1,0 +1,23 @@
+{
+  "name": "yunpanel",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Yunsoft-focused hosting and server management panel",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
+  },
+  "scripts": {
+    "dev:web": "npm run dev --workspace @yunpanel/web",
+    "dev:api": "npm run dev --workspace @yunpanel/api",
+    "dev:agent": "npm run dev --workspace @yunpanel/agent",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  }
+}
