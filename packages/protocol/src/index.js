@@ -22,6 +22,7 @@ const KNOWN_OPERATIONS = new Set(Object.values(OPERATIONS));
 const DOMAIN_CHECKSUM = /^[a-f0-9]{64}$/;
 const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SAFE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._/-]+$/;
 
 export function isKnownOperation(operation) {
   return typeof operation === 'string' && KNOWN_OPERATIONS.has(operation);
@@ -48,6 +49,12 @@ function validateDomainList(domains, fieldName, errors) {
   }
 }
 
+function validateSafePath(value, fieldName, errors) {
+  if (typeof value !== 'string' || value.length > 500 || !SAFE_ABSOLUTE_PATH.test(value) || value.includes('/../') || value.endsWith('/..')) {
+    errors.push(`${fieldName} is invalid`);
+  }
+}
+
 function validateMutationPayload(operation, payload, errors) {
   if (operation === OPERATIONS.DOMAIN_STAGE) {
     if (typeof payload.primaryDomain !== 'string' || payload.primaryDomain.length < 3 || payload.primaryDomain.length > 253) {
@@ -61,6 +68,14 @@ function validateMutationPayload(operation, payload, errors) {
     }
     if (!payload.target || typeof payload.target !== 'object' || Array.isArray(payload.target)) {
       errors.push('domain.stage target must be an object');
+    }
+    if (payload.tls !== undefined && payload.tls !== null) {
+      if (!payload.tls || typeof payload.tls !== 'object' || Array.isArray(payload.tls)) {
+        errors.push('domain.stage tls must be an object');
+      } else {
+        validateSafePath(payload.tls.fullchainPath, 'domain.stage tls.fullchainPath', errors);
+        validateSafePath(payload.tls.privateKeyPath, 'domain.stage tls.privateKeyPath', errors);
+      }
     }
   }
 
