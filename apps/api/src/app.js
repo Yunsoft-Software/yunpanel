@@ -40,15 +40,19 @@ async function reconcileApplicationJob(applicationRegistry, job) {
     return;
   }
 
-  if (job.operation === OPERATIONS.APP_STATIC_DEPLOY) {
+  if (job.operation === OPERATIONS.APP_STATIC_DEPLOY || job.operation === OPERATIONS.APP_NODE_DEPLOY) {
     if (application.activeDeploymentId == null && application.currentReleaseId === job.result?.releaseId) return;
     await applicationRegistry.markDeployed(job.resourceId, {
       deploymentId: job.id,
       releaseId: job.result.releaseId,
       commitSha: job.result.commitSha,
       previousReleaseId: job.result.previousReleaseId,
-      artifactFiles: job.result.artifactFiles,
-      artifactBytes: job.result.artifactBytes,
+      artifactFiles: job.result.artifactFiles ?? null,
+      artifactBytes: job.result.artifactBytes ?? null,
+      serviceName: job.result.serviceName ?? null,
+      port: job.result.port ?? null,
+      healthPath: job.result.healthPath ?? null,
+      healthy: job.result.healthy ?? null,
     });
     return;
   }
@@ -208,14 +212,29 @@ export function createApp({
     return response.json({ data: application });
   });
   app.post('/api/applications', requireBootstrapAdmin, async (request, response) => {
-    const application = await applicationRegistry.createApplication({
-      serverId: request.body?.serverId,
-      name: request.body?.name,
-      repositoryUrl: request.body?.repositoryUrl,
-      branch: request.body?.branch ?? 'main',
-      build: request.body?.build ?? {},
-      retention: request.body?.retention ?? 5,
-    });
+    const type = request.body?.type ?? 'static';
+    let application;
+    if (type === 'static') {
+      application = await applicationRegistry.createApplication({
+        serverId: request.body?.serverId,
+        name: request.body?.name,
+        repositoryUrl: request.body?.repositoryUrl,
+        branch: request.body?.branch ?? 'main',
+        build: request.body?.build ?? {},
+        retention: request.body?.retention ?? 5,
+      });
+    } else if (type === 'node') {
+      application = await applicationRegistry.createNodeApplication({
+        serverId: request.body?.serverId,
+        name: request.body?.name,
+        repositoryUrl: request.body?.repositoryUrl,
+        branch: request.body?.branch ?? 'main',
+        runtime: request.body?.runtime,
+        retention: request.body?.retention ?? 5,
+      });
+    } else {
+      throw new ApplicationRegistryError('invalid_application_type', 'Application type must be static or node');
+    }
     return response.status(201).json({ data: application });
   });
   app.post('/api/applications/:applicationId/deploy', requireBootstrapAdmin, async (request, response) => {
@@ -224,17 +243,38 @@ export function createApp({
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
 
-    const job = await jobRegistry.enqueue({
-      serverId: application.serverId,
-      type: 'app.static.deploy',
-      operation: OPERATIONS.APP_STATIC_DEPLOY,
-      payload: {
+    let operation;
+    let type;
+    let payload;
+    if (application.type === 'static') {
+      operation = OPERATIONS.APP_STATIC_DEPLOY;
+      type = 'app.static.deploy';
+      payload = {
         applicationId: application.id,
         repositoryUrl: application.repositoryUrl,
         branch: application.branch,
         build: application.build,
         retention: application.retention,
-      },
+      };
+    } else if (application.type === 'node') {
+      operation = OPERATIONS.APP_NODE_DEPLOY;
+      type = 'app.node.deploy';
+      payload = {
+        applicationId: application.id,
+        repositoryUrl: application.repositoryUrl,
+        branch: application.branch,
+        runtime: application.runtime,
+        retention: application.retention,
+      };
+    } else {
+      throw new ApplicationRegistryError('unsupported_application_type', 'Application type is not deployable', 409);
+    }
+
+    const job = await jobRegistry.enqueue({
+      serverId: application.serverId,
+      type,
+      operation,
+      payload,
       resourceType: 'application',
       resourceId: application.id,
     });
@@ -248,6 +288,7 @@ export function createApp({
   app.post('/api/applications/:applicationId/rollback', requireBootstrapAdmin, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    if (application.type !== 'static') throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
 
@@ -273,7 +314,7 @@ export function createApp({
   app.get('/api/domains', requireBootstrapAdmin, async (request, response) => response.json({ data: await domainRegistry.listDomains() }));
   app.get('/api/domains/:domainId', requireBootstrapAdmin, async (request, response) => {
     const domain = await domainRegistry.getDomain(request.params.domainId);
-    if (!domain) return response.status(404).json({ error: { code: 'domain_not_found', message: 'Domain not found' } });
+    if (!domain) return response.status(404).json({ error: { code: 'domain_not_found', message: 'Not found' } });
     return response.json({ data: domain });
   });
   app.post('/api/domains', requireBootstrapAdmin, async (request, response) => {
