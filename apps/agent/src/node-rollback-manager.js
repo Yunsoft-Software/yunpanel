@@ -148,8 +148,9 @@ export function createNodeRollbackManager({
     const systemctlPath = await findSystemctl();
     if (!systemctlPath) throw new NodeRollbackError('systemd_not_available', 'systemctl is not available on the managed server');
 
+    let environmentTransaction;
     try {
-      await writeEnvironment({
+      environmentTransaction = await writeEnvironment({
         applicationId: spec.applicationId,
         runtime: spec.runtime,
         environment: rawSpec.environment ?? {},
@@ -160,49 +161,65 @@ export function createNodeRollbackManager({
       }
       throw error;
     }
-
-    await switchCurrent(currentPath, spec.releaseId, 'rollback');
-
-    let activationError = null;
-    try {
-      await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
-      const healthy = await waitForHealth({
-        port: spec.runtime.port,
-        healthPath: spec.runtime.healthPath,
-        timeoutSeconds: spec.runtime.healthTimeoutSeconds,
-      });
-      if (!healthy) {
-        activationError = new NodeRollbackError('node_rollback_health_failed', 'Rollback release failed health checks and was not kept active');
-      }
-    } catch (error) {
-      activationError = error;
+    if (!environmentTransaction || typeof environmentTransaction.restore !== 'function' || typeof environmentTransaction.commit !== 'function') {
+      throw new NodeRollbackError('node_environment_write_failed', 'Node environment writer did not return a transaction');
     }
 
-    if (activationError) {
+    try {
+      await switchCurrent(currentPath, spec.releaseId, 'rollback');
+
+      let activationError = null;
       try {
-        await switchCurrent(currentPath, previousReleaseId, 'restore');
         await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
-        const restoredHealthy = await waitForHealth({
+        const healthy = await waitForHealth({
           port: spec.runtime.port,
           healthPath: spec.runtime.healthPath,
           timeoutSeconds: spec.runtime.healthTimeoutSeconds,
         });
-        if (!restoredHealthy) throw new Error('previous release failed health check');
-      } catch {
-        throw new NodeRollbackError('node_rollback_restore_failed', 'Rollback failed and the previous Node release could not be restored');
+        if (!healthy) {
+          activationError = new NodeRollbackError('node_rollback_health_failed', 'Rollback release failed health checks and was not kept active');
+        }
+      } catch (error) {
+        activationError = error;
       }
-      throw activationError;
-    }
 
-    return {
-      releaseId: spec.releaseId,
-      previousReleaseId,
-      serviceName,
-      port: spec.runtime.port,
-      healthPath: spec.runtime.healthPath,
-      healthy: true,
-      active: true,
-    };
+      if (activationError) {
+        try {
+          await switchCurrent(currentPath, previousReleaseId, 'restore');
+          await environmentTransaction.restore();
+          await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
+          const restoredHealthy = await waitForHealth({
+            port: spec.runtime.port,
+            healthPath: spec.runtime.healthPath,
+            timeoutSeconds: spec.runtime.healthTimeoutSeconds,
+          });
+          if (!restoredHealthy) throw new Error('previous release failed health check');
+        } catch {
+          throw new NodeRollbackError('node_rollback_restore_failed', 'Rollback failed and the previous Node release/environment could not be restored');
+        }
+        throw activationError;
+      }
+
+      environmentTransaction.commit();
+      return {
+        releaseId: spec.releaseId,
+        previousReleaseId,
+        serviceName,
+        port: spec.runtime.port,
+        healthPath: spec.runtime.healthPath,
+        healthy: true,
+        active: true,
+      };
+    } catch (error) {
+      try {
+        await environmentTransaction.restore();
+      } catch {
+        if (!(error instanceof NodeRollbackError && error.code === 'node_rollback_restore_failed')) {
+          throw new NodeRollbackError('node_rollback_restore_failed', 'Rollback failed and the previous Node environment could not be restored');
+        }
+      }
+      throw error;
+    }
   }
 
   function rollbackNode(spec) {
