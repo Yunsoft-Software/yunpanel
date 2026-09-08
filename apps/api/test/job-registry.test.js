@@ -49,9 +49,17 @@ test('agent jobs move through queued, running and succeeded states exactly once'
   assert.equal(completed.result.configName, 'yunpanel-example.com.conf');
   assert.equal('unsafeExtra' in completed.result, false);
 
+  const replayed = await registry.complete({
+    serverId: 'server-1',
+    jobId: job.id,
+    status: 'succeeded',
+    result: { checksum: 'f'.repeat(64), configName: 'ignored.conf', bytes: 1 },
+  });
+  assert.deepEqual(replayed, completed);
+
   await assert.rejects(
-    registry.complete({ serverId: 'server-1', jobId: job.id, status: 'succeeded' }),
-    (error) => error instanceof JobRegistryError && error.code === 'job_not_running',
+    registry.complete({ serverId: 'server-1', jobId: job.id, status: 'failed', error: { code: 'late_failure' } }),
+    (error) => error instanceof JobRegistryError && error.code === 'job_already_completed',
   );
 });
 
