@@ -10,5 +10,6 @@ npm-debug.log*
 .DS_Store
 .vscode/
 .idea/
+.local/
 .tmp/
 tmp/
