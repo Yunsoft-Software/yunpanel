@@ -1,0 +1,14 @@
+{
+  "name": "@yunpanel/agent",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "YUN_AGENT_MODE=development node --watch src/index.js",
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@yunpanel/protocol": "*"
+  }
+}
