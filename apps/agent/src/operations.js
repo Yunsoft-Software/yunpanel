@@ -6,6 +6,7 @@ import { inspectDocker } from './docker-inspector.js';
 import { inspectNginx } from './nginx-inspector.js';
 import { nginxManager } from './nginx-manager.js';
 import { nodeDeploymentManager } from './node-deployment-manager.js';
+import { nodeRollbackManager } from './node-rollback-manager.js';
 import { staticDeploymentManager } from './static-deployment-manager.js';
 import { staticRollbackManager } from './static-rollback-manager.js';
 import { inspectAllowlistedServices } from './systemd-inspector.js';
@@ -155,6 +156,7 @@ export const operationHandlers = Object.freeze({
   [OPERATIONS.APP_STATIC_DEPLOY]: (payload) => staticDeploymentManager.deployStatic(payload),
   [OPERATIONS.APP_STATIC_ROLLBACK]: (payload) => staticRollbackManager.rollbackStatic(payload),
   [OPERATIONS.APP_NODE_DEPLOY]: (payload) => nodeDeploymentManager.deployNode(payload),
+  [OPERATIONS.APP_NODE_ROLLBACK]: (payload) => nodeRollbackManager.rollbackNode(payload),
 });
 
 export async function executeOperation(operation, payload) {
