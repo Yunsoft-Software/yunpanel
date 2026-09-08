@@ -1,10 +1,17 @@
 import os from 'node:os';
 import path from 'node:path';
+import { validateOperationEnvelope } from '@yunpanel/protocol';
 import { executeOperation } from './operations.js';
 import { loadAgentIdentity, saveAgentIdentity } from './identity-store.js';
 
 export const AGENT_VERSION = '0.0.1';
 const DEFAULT_HEARTBEAT_MS = 30_000;
+const DEFAULT_COMMAND_POLL_MS = 5_000;
+const RESULT_REPORT_ATTEMPTS = 3;
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
 export function normalizeControlPlaneUrl(rawUrl, mode = process.env.YUN_AGENT_MODE) {
   if (!rawUrl) return null;
@@ -51,6 +58,17 @@ async function readJsonResponse(response, operationName) {
   return body;
 }
 
+function agentAuthorization(identity) {
+  return `Bearer ${identity.agentToken}`;
+}
+
+function safeCommandError(error) {
+  return {
+    code: typeof error?.code === 'string' ? error.code.slice(0, 120) : 'operation_failed',
+    message: typeof error?.message === 'string' ? error.message.slice(0, 500) : 'Agent operation failed',
+  };
+}
+
 export async function enrollWithControlPlane({
   baseUrl,
   enrollmentToken,
@@ -85,7 +103,7 @@ export async function sendHeartbeat({
   const response = await fetchImpl(`${baseUrl}/api/servers/${identity.serverId}/heartbeat`, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${identity.agentToken}`,
+      authorization: agentAuthorization(identity),
       'content-type': 'application/json',
     },
     body: JSON.stringify({
@@ -99,17 +117,101 @@ export async function sendHeartbeat({
   return body.data;
 }
 
+export async function fetchNextCommand({ baseUrl, identity, fetchImpl = fetch }) {
+  const response = await fetchImpl(`${baseUrl}/api/servers/${identity.serverId}/commands/next`, {
+    headers: { authorization: agentAuthorization(identity) },
+  });
+
+  if (response.status === 204) return null;
+  const body = await readJsonResponse(response, 'Command claim');
+  const claimed = body?.data;
+  const validation = validateOperationEnvelope(claimed?.envelope);
+
+  if (!claimed?.job || claimed.job.id !== claimed.envelope?.id || !validation.ok) {
+    const error = new Error('Control plane returned an invalid command envelope');
+    error.code = 'invalid_command_envelope';
+    throw error;
+  }
+
+  return claimed;
+}
+
+export async function reportCommandResult({
+  baseUrl,
+  identity,
+  jobId,
+  completion,
+  fetchImpl = fetch,
+}) {
+  const response = await fetchImpl(`${baseUrl}/api/servers/${identity.serverId}/commands/${jobId}/result`, {
+    method: 'POST',
+    headers: {
+      authorization: agentAuthorization(identity),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(completion),
+  });
+
+  const body = await readJsonResponse(response, 'Command result');
+  return body.data;
+}
+
+async function reportCommandResultWithRetry({ sleepFn = sleep, ...options }) {
+  let lastError;
+  for (let attempt = 1; attempt <= RESULT_REPORT_ATTEMPTS; attempt += 1) {
+    try {
+      return await reportCommandResult(options);
+    } catch (error) {
+      lastError = error;
+      if (attempt < RESULT_REPORT_ATTEMPTS) await sleepFn(attempt * 250);
+    }
+  }
+  throw lastError;
+}
+
+export async function executeClaimedCommand({
+  claimed,
+  execute = executeOperation,
+  baseUrl,
+  identity,
+  fetchImpl = fetch,
+  sleepFn = sleep,
+}) {
+  let completion;
+
+  try {
+    const result = await execute(claimed.envelope.operation, claimed.envelope.payload);
+    completion = { status: 'succeeded', result };
+  } catch (error) {
+    completion = { status: 'failed', error: safeCommandError(error) };
+  }
+
+  await reportCommandResultWithRetry({
+    baseUrl,
+    identity,
+    jobId: claimed.job.id,
+    completion,
+    fetchImpl,
+    sleepFn,
+  });
+
+  return completion;
+}
+
 export async function startControlPlaneLink({
   controlPlaneUrl = process.env.YUNPANEL_CONTROL_PLANE_URL,
   enrollmentToken = process.env.YUNPANEL_ENROLLMENT_TOKEN,
   identityFile,
   heartbeatMs = Number.parseInt(process.env.YUN_AGENT_HEARTBEAT_MS ?? `${DEFAULT_HEARTBEAT_MS}`, 10),
+  commandPollMs = Number.parseInt(process.env.YUN_AGENT_COMMAND_POLL_MS ?? `${DEFAULT_COMMAND_POLL_MS}`, 10),
   mode = process.env.YUN_AGENT_MODE,
   fetchImpl = fetch,
   inspect = () => executeOperation('server.inspect', {}),
   inspectServices = () => executeOperation('server.services', {}),
   inspectDocker = () => executeOperation('server.docker', {}),
   inspectNginx = () => executeOperation('server.nginx', {}),
+  execute = executeOperation,
+  sleepFn = sleep,
   logger = console,
 } = {}) {
   const baseUrl = normalizeControlPlaneUrl(controlPlaneUrl, mode);
@@ -117,6 +219,9 @@ export async function startControlPlaneLink({
 
   if (!Number.isInteger(heartbeatMs) || heartbeatMs < 10_000 || heartbeatMs > 5 * 60 * 1000) {
     throw new Error('YUN_AGENT_HEARTBEAT_MS must be between 10000 and 300000 milliseconds');
+  }
+  if (!Number.isInteger(commandPollMs) || commandPollMs < 1_000 || commandPollMs > 60_000) {
+    throw new Error('YUN_AGENT_COMMAND_POLL_MS must be between 1000 and 60000 milliseconds');
   }
 
   const resolvedIdentityFile = identityFile ?? resolveIdentityFile(mode);
@@ -137,8 +242,10 @@ export async function startControlPlaneLink({
   }
 
   let stopped = false;
-  let timer = null;
+  let heartbeatTimer = null;
+  let commandTimer = null;
   let heartbeatRunning = false;
+  let commandRunning = false;
 
   async function heartbeat() {
     if (stopped || heartbeatRunning) return;
@@ -160,9 +267,35 @@ export async function startControlPlaneLink({
     }
   }
 
+  async function pollCommands() {
+    if (stopped || commandRunning) return;
+    commandRunning = true;
+
+    try {
+      const claimed = await fetchNextCommand({ baseUrl, identity, fetchImpl });
+      if (claimed) {
+        await executeClaimedCommand({
+          claimed,
+          execute,
+          baseUrl,
+          identity,
+          fetchImpl,
+          sleepFn,
+        });
+      }
+    } catch (error) {
+      logger.error(`[yun-agent] command polling failed: ${error.code ?? error.message}`);
+    } finally {
+      commandRunning = false;
+    }
+  }
+
   await heartbeat();
-  timer = setInterval(heartbeat, heartbeatMs);
-  timer.unref?.();
+  await pollCommands();
+  heartbeatTimer = setInterval(heartbeat, heartbeatMs);
+  commandTimer = setInterval(pollCommands, commandPollMs);
+  heartbeatTimer.unref?.();
+  commandTimer.unref?.();
 
   return {
     enabled: true,
@@ -170,9 +303,13 @@ export async function startControlPlaneLink({
     async heartbeatNow() {
       await heartbeat();
     },
+    async pollCommandsNow() {
+      await pollCommands();
+    },
     stop() {
       stopped = true;
-      if (timer) clearInterval(timer);
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (commandTimer) clearInterval(commandTimer);
     },
   };
 }
