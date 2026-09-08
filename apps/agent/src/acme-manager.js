@@ -67,7 +67,7 @@ function certificatePaths(liveRoot, certName) {
   };
 }
 
-async function inspectCertificate({ liveRoot, certName, readFileFn = readFile }) {
+async function inspectCertificateFile({ liveRoot, certName, readFileFn = readFile }) {
   const paths = certificatePaths(liveRoot, certName);
   let pem;
   try {
@@ -101,6 +101,7 @@ export function createAcmeManager({
   accessFn = access,
   mkdirFn = mkdir,
   readFileFn = readFile,
+  inspectCertificateFn = (certName) => inspectCertificateFile({ liveRoot, certName, readFileFn }),
   run = (file, args) => execFileAsync(file, args, {
     timeout: 10 * 60 * 1000,
     maxBuffer: 1024 * 1024,
@@ -145,7 +146,7 @@ export function createAcmeManager({
     for (const domain of normalizedDomains) args.push('-d', domain);
 
     await runCertbot(args);
-    const metadata = await inspectCertificate({ liveRoot, certName, readFileFn });
+    const metadata = await inspectCertificateFn(certName);
     return {
       ...metadata,
       domains: normalizedDomains,
@@ -164,7 +165,7 @@ export function createAcmeManager({
     }
 
     return {
-      ...(await inspectCertificate({ liveRoot, certName: normalizedName, readFileFn })),
+      ...(await inspectCertificateFn(normalizedName)),
       dryRun: false,
       status: 'renewed',
     };
@@ -173,7 +174,7 @@ export function createAcmeManager({
   return {
     issueCertificate,
     renewCertificate,
-    inspectCertificate: (certName) => inspectCertificate({ liveRoot, certName, readFileFn }),
+    inspectCertificate: inspectCertificateFn,
   };
 }
 
