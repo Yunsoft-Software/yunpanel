@@ -90,6 +90,23 @@ function hydrateApplication(application) {
   return application;
 }
 
+function trimReleaseHistory(application) {
+  const protectedIds = new Set([application.currentReleaseId, application.previousReleaseId].filter(Boolean));
+  const retained = [];
+
+  for (const release of application.releases) {
+    if (protectedIds.has(release.releaseId) && !retained.some((entry) => entry.releaseId === release.releaseId)) {
+      retained.push(release);
+    }
+  }
+  for (const release of application.releases) {
+    if (retained.length >= application.retention) break;
+    if (!retained.some((entry) => entry.releaseId === release.releaseId)) retained.push(release);
+  }
+
+  application.releases = retained.slice(0, application.retention);
+}
+
 export function createApplicationRegistry({
   filePath = null,
   now = () => Date.now(),
@@ -200,21 +217,11 @@ export function createApplicationRegistry({
     const normalizedDeploymentId = normalizeUuid(deploymentId, 'deploymentId');
     const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
 
-    if (application.activeDeploymentId !== normalizedDeploymentId) {
-      throw new ApplicationRegistryError('deployment_mismatch', 'Deployment result does not match active application deployment', 409);
-    }
-    if (normalizedReleaseId !== normalizedDeploymentId) {
-      throw new ApplicationRegistryError('release_mismatch', 'Static release must match deployment identity', 409);
-    }
-    if (typeof commitSha !== 'string' || !COMMIT_PATTERN.test(commitSha)) {
-      throw new ApplicationRegistryError('invalid_commit_sha', 'Deployment commit SHA is invalid');
-    }
-    if (artifactFiles != null && (!Number.isInteger(artifactFiles) || artifactFiles < 1 || artifactFiles > 100_000)) {
-      throw new ApplicationRegistryError('invalid_artifact_metadata', 'Artifact file count is invalid');
-    }
-    if (artifactBytes != null && (!Number.isInteger(artifactBytes) || artifactBytes < 0 || artifactBytes > 2 * 1024 * 1024 * 1024)) {
-      throw new ApplicationRegistryError('invalid_artifact_metadata', 'Artifact byte size is invalid');
-    }
+    if (application.activeDeploymentId !== normalizedDeploymentId) throw new ApplicationRegistryError('deployment_mismatch', 'Deployment result does not match active application deployment', 409);
+    if (normalizedReleaseId !== normalizedDeploymentId) throw new ApplicationRegistryError('release_mismatch', 'Static release must match deployment identity', 409);
+    if (typeof commitSha !== 'string' || !COMMIT_PATTERN.test(commitSha)) throw new ApplicationRegistryError('invalid_commit_sha', 'Deployment commit SHA is invalid');
+    if (artifactFiles != null && (!Number.isInteger(artifactFiles) || artifactFiles < 1 || artifactFiles > 100_000)) throw new ApplicationRegistryError('invalid_artifact_metadata', 'Artifact file count is invalid');
+    if (artifactBytes != null && (!Number.isInteger(artifactBytes) || artifactBytes < 0 || artifactBytes > 2 * 1024 * 1024 * 1024)) throw new ApplicationRegistryError('invalid_artifact_metadata', 'Artifact byte size is invalid');
 
     const timestamp = new Date(now()).toISOString();
     application.previousReleaseId = application.currentReleaseId;
@@ -236,7 +243,7 @@ export function createApplicationRegistry({
       artifactBytes,
       deployedAt: timestamp,
     });
-    application.releases = application.releases.slice(0, application.retention);
+    trimReleaseHistory(application);
 
     await persist();
     return publicApplication(application);
@@ -250,12 +257,8 @@ export function createApplicationRegistry({
 
     const normalizedOperationId = normalizeUuid(operationId, 'operationId');
     const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
-    if (normalizedReleaseId === application.currentReleaseId) {
-      throw new ApplicationRegistryError('rollback_target_current', 'Requested rollback release is already active', 409);
-    }
-    if (!application.releases.some((release) => release.releaseId === normalizedReleaseId)) {
-      throw new ApplicationRegistryError('rollback_release_unknown', 'Rollback release is not in retained application history', 409);
-    }
+    if (normalizedReleaseId === application.currentReleaseId) throw new ApplicationRegistryError('rollback_target_current', 'Requested rollback release is already active', 409);
+    if (!application.releases.some((release) => release.releaseId === normalizedReleaseId)) throw new ApplicationRegistryError('rollback_release_unknown', 'Rollback release is not in retained application history', 409);
 
     application.state = 'rolling_back';
     application.activeDeploymentId = normalizedOperationId;
@@ -289,6 +292,7 @@ export function createApplicationRegistry({
     application.lastRolledBackAt = timestamp;
     application.lastError = null;
     application.updatedAt = timestamp;
+    trimReleaseHistory(application);
     await persist();
     return publicApplication(application);
   }
