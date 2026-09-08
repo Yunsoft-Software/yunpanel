@@ -116,6 +116,7 @@ export function normalizeNodeRestartSpec(value) {
 
   return {
     applicationId: assertUuid(value.applicationId, 'applicationId'),
+    releaseId: assertUuid(value.releaseId, 'releaseId'),
     runtime: normalizeNodeRuntimeConfig(value.runtime),
   };
 }
