@@ -47,7 +47,8 @@ Current implementation checkpoint — 2026-09-09:
 - static release/deploy/rollback foundations are implemented,
 - Node/systemd deployment, guarded rollback, guarded restart and process-status flows are implemented,
 - normalized Node runtime state is idempotent so custom startup files/scripts survive control-plane round trips,
-- Node environment secret management, secure log transport/redaction and environment UI remain active Milestone 4 work,
+- protected Node runtime environments are implemented with a separate AES-256-GCM store, masked admin metadata, authenticated just-in-time agent delivery and atomic root-protected systemd EnvironmentFile materialization,
+- secure log transport/redaction and the environment/log operator UI remain active Milestone 4 work,
 - real Ubuntu/systemd validation remains an external test requirement tracked in `todo.md`; the provided test host refused TCP/22 from the current development runner on 2026-09-09.
 
 ---
@@ -439,7 +440,10 @@ Current runtime safety additions:
 - manual restart is bound to the expected active release and followed by localhost health verification,
 - manual rollback atomically changes `current`, restarts the deterministic service and restores the prior release if the target is unhealthy,
 - process status reads only deterministic YunPanel Node units and returns bounded systemd/process metadata,
-- stale `current` symlink state is treated as drift instead of silently operating on the wrong release.
+- stale `current` symlink state is treated as drift instead of silently operating on the wrong release,
+- custom application environment values are validated separately from runtime-owned keys,
+- secret environment values are encrypted at rest and are not embedded in generic job payload/history,
+- deploy/restart/rollback fetch the effective environment just in time through the authenticated agent channel and atomically rewrite the root-protected systemd EnvironmentFile before service activation.
 
 ## 7.3 Passenger compatibility
 
@@ -619,9 +623,14 @@ Requirements:
 
 Current status:
 
-- generated systemd services already consume a root-protected per-application `EnvironmentFile`,
-- deploy currently materializes only YunPanel-owned baseline variables such as `NODE_ENV`, `HOST`, `PORT` and application identity,
-- user-defined environment values and secrets must be added through a dedicated protected secret store/materialization flow; they must not be placed in normal application registry state or generic job results.
+- application environment names/values have a bounded shared validation policy and YunPanel-owned runtime keys cannot be overridden,
+- secret variables are stored in a separate AES-256-GCM registry using a control-plane master key; normal application/job registries do not contain plaintext secrets,
+- normal admin list responses expose secret metadata without returning the plaintext value,
+- enrolled agents may materialize environment only for Node applications assigned to their own server,
+- production agent-to-control-plane transport requires HTTPS,
+- Node deploy/restart/rollback fetch the effective environment just in time so secret values are not persisted in command envelopes or generic job history,
+- systemd services consume `/etc/yunpanel/apps/<application-id>.env`; the directory is `0700`, the file is atomically written as `0600`, and secrets are not embedded in unit text or command arguments,
+- environment operator UI, edit-history/audit metadata, apply/restart indication and production master-key rotation/recovery procedures remain to be completed/validated.
 
 ---
 
@@ -891,6 +900,8 @@ Each job should store:
 - error code/message,
 - log reference.
 
+Secret material must not be embedded in generic job payload/result/history records. Operations that require protected environment values should resolve them through a dedicated authenticated secret-delivery path at execution time.
+
 Concurrency control:
 
 - one destructive deploy per app,
@@ -1153,7 +1164,7 @@ Tasks:
 - [x] Node runtime settings,
 - [x] systemd adapter,
 - [x] generated units,
-- [ ] runtime environment / user secret store (baseline YunPanel-owned EnvironmentFile exists),
+- [x] protected runtime environment / user secret store backend and agent materialization,
 - [x] process status backend,
 - [x] safe restart,
 - [x] reverse proxy integration foundation,
@@ -1169,7 +1180,7 @@ Exit criteria:
 - logs are visible,
 - env secrets are protected.
 
-Code-level deploy/restart/rollback/status flows are implemented; real Ubuntu/systemd exit validation and the remaining secret/log/UI work are tracked continuously in `todo.md` and this milestone.
+Code-level deploy/restart/rollback/status and protected runtime-environment flows are implemented. Real Ubuntu/systemd permission/secret validation, production master-key lifecycle, logs and environment UI remain tracked continuously in `todo.md` and this milestone.
 
 ## Milestone 5 — Passenger compatibility
 
