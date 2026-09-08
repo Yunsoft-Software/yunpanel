@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import CertificateList from './CertificateList.jsx';
 import DomainList from './DomainList.jsx';
+import JobList from './JobList.jsx';
 
 const navigation = [
   'Dashboard',
@@ -14,6 +16,8 @@ const navigation = [
   'Audit Log',
   'Settings',
 ];
+
+const EXPIRY_WARNING_MS = 30 * 24 * 60 * 60 * 1000;
 
 function formatBytes(value) {
   if (!Number.isFinite(value) || value < 0) return '—';
@@ -43,6 +47,36 @@ function formatLastSeen(value) {
   return Number.isNaN(date.getTime()) ? 'Unknown heartbeat time' : date.toLocaleString();
 }
 
+function certificateNeedsAttention(certificate) {
+  if (certificate.state === 'error') return true;
+  if (certificate.staging || certificate.state !== 'active' || !certificate.validTo) return false;
+  const expiry = Date.parse(certificate.validTo);
+  return Number.isFinite(expiry) && expiry - Date.now() <= EXPIRY_WARNING_MS;
+}
+
+function readCollectionResult(result, setItems, setAccess) {
+  if (result.status !== 'fulfilled') {
+    if (result.reason?.name !== 'AbortError') setAccess('error');
+    return;
+  }
+
+  const response = result.value;
+  if (response.status === 404) {
+    setAccess('protected');
+    setItems([]);
+    return;
+  }
+  if (!response.ok) {
+    setAccess('error');
+    return;
+  }
+
+  response.json().then((payload) => {
+    setItems(Array.isArray(payload.data) ? payload.data : []);
+    setAccess('ready');
+  }).catch(() => setAccess('error'));
+}
+
 function App() {
   const [apiState, setApiState] = useState({ status: 'checking', version: null });
   const [agentState, setAgentState] = useState({ status: 'checking', hostname: null });
@@ -50,6 +84,10 @@ function App() {
   const [serverAccess, setServerAccess] = useState('checking');
   const [domains, setDomains] = useState([]);
   const [domainAccess, setDomainAccess] = useState('checking');
+  const [jobs, setJobs] = useState([]);
+  const [jobAccess, setJobAccess] = useState('checking');
+  const [certificates, setCertificates] = useState([]);
+  const [certificateAccess, setCertificateAccess] = useState('checking');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -63,10 +101,12 @@ function App() {
         const apiPayload = await apiResponse.json();
         setApiState({ status: apiPayload.status ?? 'ok', version: apiPayload.version ?? null });
 
-        const [agentResult, serverResult, domainResult] = await Promise.allSettled([
+        const [agentResult, serverResult, domainResult, jobResult, certificateResult] = await Promise.allSettled([
           fetch('/api/dev/agent/inspect', { signal: controller.signal }),
           fetch('/api/dev/servers', { signal: controller.signal }),
           fetch('/api/dev/domains', { signal: controller.signal }),
+          fetch('/api/dev/jobs', { signal: controller.signal }),
+          fetch('/api/dev/certificates', { signal: controller.signal }),
         ]);
 
         if (agentResult.status === 'fulfilled') {
@@ -86,43 +126,18 @@ function App() {
           setAgentState({ status: 'offline', hostname: null });
         }
 
-        if (serverResult.status === 'fulfilled') {
-          const response = serverResult.value;
-          if (response.status === 404) {
-            setServerAccess('protected');
-            setServers([]);
-          } else if (response.ok) {
-            const payload = await response.json();
-            setServers(Array.isArray(payload.data) ? payload.data : []);
-            setServerAccess('ready');
-          } else {
-            setServerAccess('error');
-          }
-        } else if (serverResult.reason?.name !== 'AbortError') {
-          setServerAccess('error');
-        }
-
-        if (domainResult.status === 'fulfilled') {
-          const response = domainResult.value;
-          if (response.status === 404) {
-            setDomainAccess('protected');
-            setDomains([]);
-          } else if (response.ok) {
-            const payload = await response.json();
-            setDomains(Array.isArray(payload.data) ? payload.data : []);
-            setDomainAccess('ready');
-          } else {
-            setDomainAccess('error');
-          }
-        } else if (domainResult.reason?.name !== 'AbortError') {
-          setDomainAccess('error');
-        }
+        readCollectionResult(serverResult, setServers, setServerAccess);
+        readCollectionResult(domainResult, setDomains, setDomainAccess);
+        readCollectionResult(jobResult, setJobs, setJobAccess);
+        readCollectionResult(certificateResult, setCertificates, setCertificateAccess);
       } catch (error) {
         if (error.name !== 'AbortError') {
           setApiState({ status: 'offline', version: null });
           setAgentState({ status: 'offline', hostname: null });
           setServerAccess('error');
           setDomainAccess('error');
+          setJobAccess('error');
+          setCertificateAccess('error');
         }
       }
     }
@@ -136,26 +151,54 @@ function App() {
     };
   }, []);
 
-  const summaryCards = useMemo(() => {
-    const online = servers.filter((server) => server.connectivity === 'online').length;
-    const offline = servers.filter((server) => server.connectivity === 'offline').length;
+  const operationalSummary = useMemo(() => {
+    const onlineServers = servers.filter((server) => server.connectivity === 'online').length;
+    const offlineServers = servers.filter((server) => server.connectivity === 'offline').length;
     const activeDomains = domains.filter((domain) => domain.state === 'active').length;
+    const failedJobs = jobs.filter((job) => job.status === 'failed').length;
+    const runningJobs = jobs.filter((job) => job.status === 'running').length;
+    const queuedJobs = jobs.filter((job) => job.status === 'queued').length;
+    const sslWarnings = certificates.filter(certificateNeedsAttention).length;
 
-    return [
-      {
-        label: 'Servers',
-        value: String(servers.length),
-        note: servers.length ? `${online} online · ${offline} offline` : 'No enrolled servers yet',
-      },
-      {
-        label: 'Domains',
-        value: String(domains.length),
-        note: domains.length ? `${activeDomains} active · ${domains.length - activeDomains} pending` : 'No desired state yet',
-      },
-      { label: 'Failed jobs', value: '0', note: 'Job queue comes next' },
-      { label: 'SSL warnings', value: '0', note: 'ACME tracking not enabled yet' },
-    ];
-  }, [domains, servers]);
+    return {
+      failedJobs,
+      runningJobs,
+      queuedJobs,
+      sslWarnings,
+      cards: [
+        {
+          label: 'Servers',
+          value: String(servers.length),
+          note: servers.length ? `${onlineServers} online · ${offlineServers} offline` : 'No enrolled servers yet',
+        },
+        {
+          label: 'Domains',
+          value: String(domains.length),
+          note: domains.length ? `${activeDomains} active · ${domains.length - activeDomains} pending` : 'No desired state yet',
+        },
+        {
+          label: 'Failed jobs',
+          value: String(failedJobs),
+          note: runningJobs || queuedJobs ? `${runningJobs} running · ${queuedJobs} queued` : 'No active jobs',
+        },
+        {
+          label: 'SSL warnings',
+          value: String(sslWarnings),
+          note: certificates.length ? `${certificates.length} certificate records` : 'No certificates tracked yet',
+        },
+      ],
+    };
+  }, [certificates, domains, jobs, servers]);
+
+  const jobRuntimeStatus = operationalSummary.failedJobs > 0
+    ? 'failed'
+    : operationalSummary.runningJobs > 0
+      ? 'running'
+      : operationalSummary.queuedJobs > 0
+        ? 'pending'
+        : jobAccess === 'ready'
+          ? 'running'
+          : jobAccess;
 
   return (
     <div className="app-shell">
@@ -200,7 +243,7 @@ function App() {
         </header>
 
         <section className="summary-grid" aria-label="Infrastructure summary">
-          {summaryCards.map((card) => (
+          {operationalSummary.cards.map((card) => (
             <article className="summary-card" key={card.label}>
               <span>{card.label}</span>
               <strong>{card.value}</strong>
@@ -253,7 +296,11 @@ function App() {
                 status={agentState.status}
                 detail={agentState.hostname ? `Local agent · ${agentState.hostname}` : 'Development connection'}
               />
-              <StatusRow label="Job queue" status="pending" detail="Not initialized" />
+              <StatusRow
+                label="Job queue"
+                status={jobRuntimeStatus}
+                detail={`${operationalSummary.runningJobs} running · ${operationalSummary.queuedJobs} queued`}
+              />
             </div>
           </article>
         </section>
@@ -267,6 +314,28 @@ function App() {
             <span className="panel-meta">{domainAccess}</span>
           </div>
           <DomainList domains={domains} access={domainAccess} />
+        </section>
+
+        <section className="panel domain-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">ACME / TLS</p>
+              <h2>Certificates</h2>
+            </div>
+            <span className="panel-meta">{certificateAccess}</span>
+          </div>
+          <CertificateList certificates={certificates} access={certificateAccess} />
+        </section>
+
+        <section className="panel domain-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Operations</p>
+              <h2>Recent jobs</h2>
+            </div>
+            <span className="panel-meta">{jobAccess}</span>
+          </div>
+          <JobList jobs={jobs} access={jobAccess} />
         </section>
       </main>
     </div>
