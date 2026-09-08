@@ -12,6 +12,10 @@ import {
 test('known operations are explicitly allowlisted', () => {
   assert.equal(isKnownOperation(OPERATIONS.SERVER_INSPECT), true);
   assert.equal(isReadOnlyOperation(OPERATIONS.SERVER_INSPECT), true);
+  assert.equal(isKnownOperation(OPERATIONS.SERVER_DOCKER), true);
+  assert.equal(isReadOnlyOperation(OPERATIONS.SERVER_DOCKER), true);
+  assert.equal(isKnownOperation(OPERATIONS.SERVER_NGINX), true);
+  assert.equal(isReadOnlyOperation(OPERATIONS.SERVER_NGINX), true);
   assert.equal(isKnownOperation('shell.exec'), false);
   assert.equal(isReadOnlyOperation('shell.exec'), false);
 });
