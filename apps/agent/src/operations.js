@@ -3,6 +3,7 @@ import os from 'node:os';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { inspectDocker } from './docker-inspector.js';
 import { inspectNginx } from './nginx-inspector.js';
+import { nginxManager } from './nginx-manager.js';
 import { inspectAllowlistedServices } from './systemd-inspector.js';
 
 const CAPABILITIES = Object.freeze({
@@ -198,6 +199,8 @@ export const operationHandlers = Object.freeze({
   [OPERATIONS.SERVER_SERVICES]: inspectAllowlistedServices,
   [OPERATIONS.SERVER_DOCKER]: inspectDocker,
   [OPERATIONS.SERVER_NGINX]: inspectNginx,
+  [OPERATIONS.DOMAIN_STAGE]: (payload) => nginxManager.stageDomain(payload),
+  [OPERATIONS.DOMAIN_ACTIVATE]: (payload) => nginxManager.activateDomain(payload),
 });
 
 export async function executeOperation(operation, payload) {
