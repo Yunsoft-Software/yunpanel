@@ -9,6 +9,13 @@ export {
 } from './application.js';
 
 export {
+  applicationEnvironmentPolicy,
+  normalizeApplicationEnvironmentBundle,
+  normalizeEnvironmentKey,
+  normalizeEnvironmentValue,
+} from './application-environment.js';
+
+export {
   normalizeNodeApplicationSpec,
   normalizeNodeRestartSpec,
   normalizeNodeRollbackSpec,
