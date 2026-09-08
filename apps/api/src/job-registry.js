@@ -9,6 +9,8 @@ const RESOURCE_TYPES = new Set(['domain', 'server', 'application', 'certificate'
 const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DOMAIN_STAGE,
   OPERATIONS.DOMAIN_ACTIVATE,
+  OPERATIONS.SSL_ISSUE,
+  OPERATIONS.SSL_RENEW,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -51,6 +53,48 @@ function validateError(error) {
   };
 }
 
+function boundedString(value, maxLength) {
+  return typeof value === 'string' && value.length > 0 && value.length <= maxLength ? value : null;
+}
+
+function sanitizeCertificateMetadata(result) {
+  const certName = boundedString(result.certName, 253);
+  const certificatePath = boundedString(result.certificatePath, 500);
+  const fullchainPath = boundedString(result.fullchainPath, 500);
+  const privateKeyPath = boundedString(result.privateKeyPath, 500);
+  const validFrom = boundedString(result.validFrom, 80);
+  const validTo = boundedString(result.validTo, 80);
+  const fingerprint256 = boundedString(result.fingerprint256, 160);
+
+  if (!certName || !certificatePath || !fullchainPath || !privateKeyPath || !validFrom || !validTo || !fingerprint256) {
+    throw new JobRegistryError('invalid_job_result', 'Certificate job result metadata is incomplete');
+  }
+
+  const sanitized = {
+    certName,
+    certificatePath,
+    fullchainPath,
+    privateKeyPath,
+    validFrom,
+    validTo,
+    fingerprint256,
+    subject: boundedString(result.subject, 500),
+    issuer: boundedString(result.issuer, 500),
+    subjectAltName: boundedString(result.subjectAltName, 2000),
+  };
+
+  if (Array.isArray(result.domains)) {
+    if (result.domains.length < 1 || result.domains.length > 21 || result.domains.some((domain) => !boundedString(domain, 253))) {
+      throw new JobRegistryError('invalid_job_result', 'Certificate job result domains are invalid');
+    }
+    sanitized.domains = [...result.domains];
+  }
+  if (typeof result.staging === 'boolean') sanitized.staging = result.staging;
+  if (typeof result.status === 'string') sanitized.status = result.status.slice(0, 40);
+  if (typeof result.dryRun === 'boolean') sanitized.dryRun = result.dryRun;
+  return sanitized;
+}
+
 function sanitizeResult(job, result) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
@@ -88,6 +132,19 @@ function sanitizeResult(job, result) {
       configName: result.configName,
       active: true,
     };
+  }
+
+  if (job.operation === OPERATIONS.SSL_ISSUE) {
+    return sanitizeCertificateMetadata(result);
+  }
+
+  if (job.operation === OPERATIONS.SSL_RENEW) {
+    if (result.dryRun === true && result.status === 'validated') {
+      const certName = boundedString(result.certName, 253);
+      if (!certName) throw new JobRegistryError('invalid_job_result', 'Certificate dry-run result certName is invalid');
+      return { certName, dryRun: true, status: 'validated' };
+    }
+    return sanitizeCertificateMetadata(result);
   }
 
   throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
