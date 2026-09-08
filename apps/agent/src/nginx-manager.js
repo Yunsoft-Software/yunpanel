@@ -48,6 +48,7 @@ function renderDomainConfig(spec) {
   const common = {
     primaryDomain: spec.primaryDomain,
     aliases: spec.aliases ?? [],
+    tls: spec.tls ?? null,
   };
 
   if (spec.targetType === 'static') {
