@@ -311,7 +311,7 @@ export function createStaticDeploymentManager({
       if (deploymentLocks.get(key) === tracked) deploymentLocks.delete(key);
     });
     deploymentLocks.set(key, tracked);
-    return runDeployment;
+    return tracked;
   }
 
   return { deployStatic };

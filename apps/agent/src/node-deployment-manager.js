@@ -217,6 +217,7 @@ export function createNodeDeploymentManager({
     let newReleaseActive = false;
     let previousReleaseId = null;
     let environmentTransaction = null;
+    let environmentRestored = false;
 
     const nodePath = await findExecutable(nodePaths, run);
     if (!nodePath) throw new NodeDeploymentError('node_not_installed', 'An allowlisted Node.js runtime is not installed');
@@ -336,6 +337,7 @@ export function createNodeDeploymentManager({
             await switchCurrent(currentPath, previousReleaseId, 'rollback');
             newReleaseActive = false;
             await environmentTransaction.restore();
+            environmentRestored = true;
             await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
             const rollbackHealthy = await waitForHealth({
               port: spec.runtime.port,
@@ -346,6 +348,7 @@ export function createNodeDeploymentManager({
           } else {
             newReleaseActive = false;
             await environmentTransaction.restore();
+            environmentRestored = true;
             await runSafe(systemctlPath, ['stop', serviceName], { timeout: 30_000 }).catch(() => {});
             await runSafe(systemctlPath, ['disable', serviceName], { timeout: 30_000 }).catch(() => {});
             await rmFn(currentPath, { force: true });
@@ -375,7 +378,7 @@ export function createNodeDeploymentManager({
         healthy: true,
       };
     } catch (error) {
-      if (environmentTransaction) await environmentTransaction.restore().catch(() => {});
+      if (environmentTransaction && !environmentRestored) await environmentTransaction.restore().catch(() => {});
       if (!newReleaseActive && releaseCreated) {
         await rmFn(releaseDirectory, { recursive: true, force: true }).catch(() => {});
       }
@@ -393,7 +396,7 @@ export function createNodeDeploymentManager({
       if (deploymentLocks.get(key) === tracked) deploymentLocks.delete(key);
     });
     deploymentLocks.set(key, tracked);
-    return runDeployment;
+    return tracked;
   }
 
   return { deployNode };

@@ -149,6 +149,7 @@ export function createNodeRollbackManager({
     if (!systemctlPath) throw new NodeRollbackError('systemd_not_available', 'systemctl is not available on the managed server');
 
     let environmentTransaction;
+    let environmentRestored = false;
     try {
       environmentTransaction = await writeEnvironment({
         applicationId: spec.applicationId,
@@ -187,6 +188,7 @@ export function createNodeRollbackManager({
         try {
           await switchCurrent(currentPath, previousReleaseId, 'restore');
           await environmentTransaction.restore();
+          environmentRestored = true;
           await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
           const restoredHealthy = await waitForHealth({
             port: spec.runtime.port,
@@ -211,11 +213,13 @@ export function createNodeRollbackManager({
         active: true,
       };
     } catch (error) {
-      try {
-        await environmentTransaction.restore();
-      } catch {
-        if (!(error instanceof NodeRollbackError && error.code === 'node_rollback_restore_failed')) {
-          throw new NodeRollbackError('node_rollback_restore_failed', 'Rollback failed and the previous Node environment could not be restored');
+      if (!environmentRestored) {
+        try {
+          await environmentTransaction.restore();
+        } catch {
+          if (!(error instanceof NodeRollbackError && error.code === 'node_rollback_restore_failed')) {
+            throw new NodeRollbackError('node_rollback_restore_failed', 'Rollback failed and the previous Node environment could not be restored');
+          }
         }
       }
       throw error;
@@ -231,7 +235,7 @@ export function createNodeRollbackManager({
       if (rollbackLocks.get(key) === tracked) rollbackLocks.delete(key);
     });
     rollbackLocks.set(key, tracked);
-    return operation;
+    return tracked;
   }
 
   return { rollbackNode };

@@ -187,7 +187,7 @@ export function createNodeRestartManager({
       if (restartLocks.get(key) === tracked) restartLocks.delete(key);
     });
     restartLocks.set(key, tracked);
-    return operation;
+    return tracked;
   }
 
   return { restartNode };
