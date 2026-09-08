@@ -1,0 +1,133 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { createNodeDeploymentManager, NodeDeploymentError } from '../src/node-deployment-manager.js';
+
+const APPLICATION_ID = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
+const DEPLOYMENT_ID = 'ff830043-9752-4640-83b4-3a1998de78a0';
+const PREVIOUS_RELEASE = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
+
+function deploymentSpec() {
+  return {
+    applicationId: APPLICATION_ID,
+    deploymentId: DEPLOYMENT_ID,
+    repositoryUrl: 'https://github.com/example/node-app',
+    branch: 'main',
+    runtime: {
+      nodeMajor: 24,
+      installMode: 'ci',
+      buildScript: 'build',
+      startMode: 'node',
+      entryFile: 'dist/server.js',
+      port: 3100,
+      healthPath: '/health',
+      healthTimeoutSeconds: 10,
+      restartPolicy: 'on-failure',
+    },
+    retention: 5,
+  };
+}
+
+function createHarness({ healthResults = [true], failFirstRestart = false } = {}) {
+  const commands = [];
+  const links = [];
+  const removals = [];
+  const writes = [];
+  let restartCalls = 0;
+  let healthIndex = 0;
+
+  const run = async (file, args, options = {}) => {
+    commands.push({ file, args, options });
+    if (file === '/usr/bin/node' && args[0] === '--version') return { stdout: 'v24.8.0\n' };
+    if (file === '/usr/bin/npm' && args[0] === '--version') return { stdout: '11.6.0\n' };
+    if (file === '/usr/bin/systemctl' && args[0] === '--version') return { stdout: 'systemd 255\n' };
+    if (file === '/usr/bin/systemctl' && args[0] === 'restart') {
+      restartCalls += 1;
+      if (failFirstRestart && restartCalls === 1) {
+        const error = new Error('restart failed');
+        error.code = 1;
+        throw error;
+      }
+      return { stdout: '' };
+    }
+    if (file === '/usr/sbin/runuser' && args.includes('rev-parse')) return { stdout: 'a'.repeat(40) + '\n' };
+    return { stdout: '' };
+  };
+
+  const manager = createNodeDeploymentManager({
+    appRoot: '/apps',
+    dataRoot: '/data',
+    envRoot: '/env',
+    systemdRoot: '/systemd',
+    run,
+    nodePaths: ['/usr/bin/node'],
+    npmPaths: ['/usr/bin/npm'],
+    systemctlPaths: ['/usr/bin/systemctl'],
+    mkdirFn: async () => {},
+    lstatFn: async () => ({
+      isFile: () => true,
+      isDirectory: () => true,
+      isSymbolicLink: () => false,
+      mtimeMs: Date.now(),
+    }),
+    realpathFn: async (value) => value,
+    readlinkFn: async () => `releases/${PREVIOUS_RELEASE}`,
+    readdirFn: async () => [],
+    renameFn: async () => {},
+    rmFn: async (value, options) => removals.push({ value, options }),
+    symlinkFn: async (target, linkPath) => links.push({ target, linkPath }),
+    writeFileFn: async (target, content, options) => writes.push({ target, content, options }),
+    waitForHealth: async () => healthResults[Math.min(healthIndex++, healthResults.length - 1)],
+  });
+
+  return { manager, commands, links, removals, writes };
+}
+
+test('healthy Node deployment creates hardened service state and keeps the new release active', async () => {
+  const harness = createHarness({ healthResults: [true] });
+  const result = await harness.manager.deployNode(deploymentSpec());
+
+  assert.equal(result.releaseId, DEPLOYMENT_ID);
+  assert.equal(result.previousReleaseId, PREVIOUS_RELEASE);
+  assert.equal(result.commitSha, 'a'.repeat(40));
+  assert.equal(result.port, 3100);
+  assert.equal(result.healthy, true);
+  assert.ok(result.serviceName.startsWith('yunpanel-node-'));
+
+  const currentSwitch = harness.links.find((entry) => entry.target === `releases/${DEPLOYMENT_ID}`);
+  assert.ok(currentSwitch);
+  const environmentWrite = harness.writes.find((entry) => entry.target.startsWith('/env/'));
+  assert.match(environmentWrite.content, /HOST=127\.0\.0\.1/);
+  assert.match(environmentWrite.content, /PORT=3100/);
+  assert.equal(environmentWrite.options.mode, 0o600);
+
+  const unitWrite = harness.writes.find((entry) => entry.target.startsWith('/systemd/'));
+  assert.match(unitWrite.content, /ProtectSystem=strict/);
+  assert.match(unitWrite.content, /NoNewPrivileges=true/);
+  assert.equal(unitWrite.options.mode, 0o644);
+});
+
+test('failed health check restores the previous release before reporting failure', async () => {
+  const harness = createHarness({ healthResults: [false, true] });
+
+  await assert.rejects(
+    harness.manager.deployNode(deploymentSpec()),
+    (error) => error instanceof NodeDeploymentError && error.code === 'node_health_failed',
+  );
+
+  assert.ok(harness.links.some((entry) => entry.target === `releases/${DEPLOYMENT_ID}`));
+  assert.ok(harness.links.some((entry) => entry.target === `releases/${PREVIOUS_RELEASE}`));
+  assert.ok(harness.removals.some((entry) => entry.value === `/apps/${APPLICATION_ID}/releases/${DEPLOYMENT_ID}`));
+});
+
+test('systemd restart failure also restores the previous release', async () => {
+  const harness = createHarness({ healthResults: [true], failFirstRestart: true });
+
+  await assert.rejects(
+    harness.manager.deployNode(deploymentSpec()),
+    (error) => error instanceof NodeDeploymentError && error.code === 'node_deployment_command_failed',
+  );
+
+  assert.ok(harness.links.some((entry) => entry.target === `releases/${PREVIOUS_RELEASE}`));
+  const restarts = harness.commands.filter((entry) => entry.file === '/usr/bin/systemctl' && entry.args[0] === 'restart');
+  assert.equal(restarts.length, 2);
+});
