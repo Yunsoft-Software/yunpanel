@@ -5,7 +5,7 @@ import { normalizeDomainSet } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
-const CERT_STATES = new Set(['pending', 'issuing', 'active', 'renewing', 'error']);
+const CERT_STATES = new Set(['pending', 'validating', 'validated', 'issuing', 'active', 'renewing', 'error']);
 
 export class CertificateRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -68,6 +68,20 @@ function validateDate(value, fieldName) {
   return new Date(value).toISOString();
 }
 
+function assertResultIdentity(certificate, result) {
+  if (!result || typeof result !== 'object') {
+    throw new CertificateRegistryError('invalid_certificate_result', 'Certificate result is invalid');
+  }
+  if (result.certName !== certificate.certName) {
+    throw new CertificateRegistryError('certificate_name_mismatch', 'Certificate name does not match desired state', 409);
+  }
+
+  const returnedDomains = normalizeDomains(result.domains ?? certificate.domains);
+  if (returnedDomains.join('\n') !== certificate.domains.join('\n')) {
+    throw new CertificateRegistryError('certificate_domain_mismatch', 'Certificate domains do not match desired state', 409);
+  }
+}
+
 export function createCertificateRegistry({ filePath = null, now = () => Date.now() } = {}) {
   let state = emptyState();
   let initialized = false;
@@ -114,8 +128,19 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
 
     const normalizedDomains = normalizeDomains(domains);
     const certName = normalizedDomains[0];
-    const existing = state.certificates.find((certificate) => certificate.domainId === domainId && certificate.state !== 'error');
-    if (existing) throw new CertificateRegistryError('certificate_exists', 'Domain already has a managed certificate record', 409);
+    const isValidation = Boolean(staging);
+    const existing = state.certificates.find((certificate) => {
+      if (certificate.domainId !== domainId || certificate.state === 'error') return false;
+      if (!isValidation) return certificate.staging === false;
+      return certificate.staging === true && ['pending', 'validating'].includes(certificate.state);
+    });
+    if (existing) {
+      throw new CertificateRegistryError(
+        isValidation ? 'certificate_validation_in_progress' : 'certificate_exists',
+        isValidation ? 'A certificate validation is already in progress' : 'Domain already has a managed production certificate record',
+        409,
+      );
+    }
 
     const timestamp = new Date(now()).toISOString();
     const certificate = {
@@ -125,7 +150,7 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
       certName,
       domains: normalizedDomains,
       email: validateEmail(email),
-      staging: Boolean(staging),
+      staging: isValidation,
       state: 'pending',
       certificatePath: null,
       fullchainPath: null,
@@ -136,6 +161,7 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
       validFrom: null,
       validTo: null,
       fingerprint256: null,
+      lastValidatedAt: null,
       lastIssuedAt: null,
       lastRenewedAt: null,
       lastError: null,
@@ -158,20 +184,33 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
     return publicCertificate(certificate);
   }
 
+  async function markValidated(certificateId, result) {
+    await ensureInitialized();
+    const certificate = requireCertificate(state, certificateId);
+    if (!certificate.staging) {
+      throw new CertificateRegistryError('validation_record_required', 'Only validation records can be marked validated', 409);
+    }
+    assertResultIdentity(certificate, result);
+    if (result.status !== 'validated' || result.staging !== true) {
+      throw new CertificateRegistryError('invalid_validation_result', 'ACME validation result is invalid');
+    }
+
+    const timestamp = new Date(now()).toISOString();
+    certificate.state = 'validated';
+    certificate.lastValidatedAt = timestamp;
+    certificate.lastError = null;
+    certificate.updatedAt = timestamp;
+    await persist();
+    return publicCertificate(certificate);
+  }
+
   async function markActive(certificateId, result, { renewal = false } = {}) {
     await ensureInitialized();
     const certificate = requireCertificate(state, certificateId);
-    if (!result || typeof result !== 'object') {
-      throw new CertificateRegistryError('invalid_certificate_result', 'Certificate result is invalid');
+    if (certificate.staging) {
+      throw new CertificateRegistryError('production_certificate_required', 'Validation records cannot become active certificates', 409);
     }
-    if (result.certName !== certificate.certName) {
-      throw new CertificateRegistryError('certificate_name_mismatch', 'Issued certificate name does not match desired state', 409);
-    }
-
-    const returnedDomains = normalizeDomains(result.domains ?? certificate.domains);
-    if (returnedDomains.join('\n') !== certificate.domains.join('\n')) {
-      throw new CertificateRegistryError('certificate_domain_mismatch', 'Issued certificate domains do not match desired state', 409);
-    }
+    assertResultIdentity(certificate, result);
 
     const validFrom = validateDate(result.validFrom, 'validFrom');
     const validTo = validateDate(result.validTo, 'validTo');
@@ -232,6 +271,7 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
     init,
     createForDomain,
     setState,
+    markValidated,
     markActive,
     markFailed,
     getCertificate,
