@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import ApplicationList from './ApplicationList.jsx';
 import CertificateList from './CertificateList.jsx';
 import DomainList from './DomainList.jsx';
 import JobList from './JobList.jsx';
@@ -82,6 +83,8 @@ function App() {
   const [agentState, setAgentState] = useState({ status: 'checking', hostname: null });
   const [servers, setServers] = useState([]);
   const [serverAccess, setServerAccess] = useState('checking');
+  const [applications, setApplications] = useState([]);
+  const [applicationAccess, setApplicationAccess] = useState('checking');
   const [domains, setDomains] = useState([]);
   const [domainAccess, setDomainAccess] = useState('checking');
   const [jobs, setJobs] = useState([]);
@@ -101,9 +104,10 @@ function App() {
         const apiPayload = await apiResponse.json();
         setApiState({ status: apiPayload.status ?? 'ok', version: apiPayload.version ?? null });
 
-        const [agentResult, serverResult, domainResult, jobResult, certificateResult] = await Promise.allSettled([
+        const [agentResult, serverResult, applicationResult, domainResult, jobResult, certificateResult] = await Promise.allSettled([
           fetch('/api/dev/agent/inspect', { signal: controller.signal }),
           fetch('/api/dev/servers', { signal: controller.signal }),
+          fetch('/api/dev/applications', { signal: controller.signal }),
           fetch('/api/dev/domains', { signal: controller.signal }),
           fetch('/api/dev/jobs', { signal: controller.signal }),
           fetch('/api/dev/certificates', { signal: controller.signal }),
@@ -127,6 +131,7 @@ function App() {
         }
 
         readCollectionResult(serverResult, setServers, setServerAccess);
+        readCollectionResult(applicationResult, setApplications, setApplicationAccess);
         readCollectionResult(domainResult, setDomains, setDomainAccess);
         readCollectionResult(jobResult, setJobs, setJobAccess);
         readCollectionResult(certificateResult, setCertificates, setCertificateAccess);
@@ -135,6 +140,7 @@ function App() {
           setApiState({ status: 'offline', version: null });
           setAgentState({ status: 'offline', hostname: null });
           setServerAccess('error');
+          setApplicationAccess('error');
           setDomainAccess('error');
           setJobAccess('error');
           setCertificateAccess('error');
@@ -144,7 +150,6 @@ function App() {
 
     refreshControlPlane();
     timer = setInterval(refreshControlPlane, 15_000);
-
     return () => {
       clearInterval(timer);
       controller.abort();
@@ -154,6 +159,7 @@ function App() {
   const operationalSummary = useMemo(() => {
     const onlineServers = servers.filter((server) => server.connectivity === 'online').length;
     const offlineServers = servers.filter((server) => server.connectivity === 'offline').length;
+    const activeApplications = applications.filter((application) => application.state === 'active').length;
     const activeDomains = domains.filter((domain) => domain.state === 'active').length;
     const failedJobs = jobs.filter((job) => job.status === 'failed').length;
     const runningJobs = jobs.filter((job) => job.status === 'running').length;
@@ -172,6 +178,11 @@ function App() {
           note: servers.length ? `${onlineServers} online · ${offlineServers} offline` : 'No enrolled servers yet',
         },
         {
+          label: 'Applications',
+          value: String(applications.length),
+          note: applications.length ? `${activeApplications} active · ${applications.length - activeApplications} pending` : 'No managed applications yet',
+        },
+        {
           label: 'Domains',
           value: String(domains.length),
           note: domains.length ? `${activeDomains} active · ${domains.length - activeDomains} pending` : 'No desired state yet',
@@ -188,7 +199,7 @@ function App() {
         },
       ],
     };
-  }, [certificates, domains, jobs, servers]);
+  }, [applications, certificates, domains, jobs, servers]);
 
   const jobRuntimeStatus = operationalSummary.failedJobs > 0
     ? 'failed'
@@ -303,6 +314,17 @@ function App() {
               />
             </div>
           </article>
+        </section>
+
+        <section className="panel domain-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Deployments</p>
+              <h2>Applications</h2>
+            </div>
+            <span className="panel-meta">{applicationAccess}</span>
+          </div>
+          <ApplicationList applications={applications} access={applicationAccess} />
         </section>
 
         <section className="panel domain-panel">
