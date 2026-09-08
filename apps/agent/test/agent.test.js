@@ -41,7 +41,7 @@ test('operation endpoint requires the agent token', async () => {
   });
 });
 
-test('allowlisted operation is executed', async () => {
+test('allowlisted read-only operation is executed', async () => {
   const execute = async (operation) => ({ hostname: operation === OPERATIONS.SERVER_INSPECT ? 'test-host' : null });
   const server = createAgentServer({ token: TEST_TOKEN, execute });
 
@@ -66,7 +66,7 @@ test('allowlisted operation is executed', async () => {
   });
 });
 
-test('arbitrary shell operation is rejected before execution', async () => {
+test('allowlisted mutation is still rejected by the local operation API', async () => {
   let executed = false;
   const execute = async () => {
     executed = true;
@@ -82,6 +82,40 @@ test('arbitrary shell operation is rejected before execution', async () => {
       },
       body: JSON.stringify({
         id: 'request-0002',
+        operation: OPERATIONS.DOMAIN_STAGE,
+        payload: {
+          primaryDomain: 'example.com',
+          aliases: [],
+          targetType: 'proxy',
+          target: { upstreamPort: 3008 },
+        },
+        protocolVersion: AGENT_PROTOCOL_VERSION,
+      }),
+    });
+
+    assert.equal(response.status, 403);
+    const body = await response.json();
+    assert.equal(body.error.code, 'mutation_requires_control_plane');
+    assert.equal(executed, false);
+  });
+});
+
+test('arbitrary shell operation is rejected before execution', async () => {
+  let executed = false;
+  const execute = async () => {
+    executed = true;
+  };
+  const server = createAgentServer({ token: TEST_TOKEN, execute });
+
+  await withAgentServer(server, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/v1/operations`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${TEST_TOKEN}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        id: 'request-0003',
         operation: 'shell.exec',
         payload: { command: 'whoami' },
         protocolVersion: AGENT_PROTOCOL_VERSION,
