@@ -1,6 +1,10 @@
 import express from 'express';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { inspectLocalAgent } from './agent-client.js';
+import {
+  createApplicationEnvironmentRegistry,
+  ApplicationEnvironmentRegistryError,
+} from './application-environment-registry.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
 import { createBootstrapAdminGuard, resolveBootstrapAdminToken } from './bootstrap-auth.js';
 import { createCertificateRegistry, CertificateRegistryError } from './certificate-registry.js';
@@ -125,6 +129,9 @@ export function createApp({
   jobRegistry = createJobRegistry(),
   certificateRegistry = createCertificateRegistry(),
   applicationRegistry = createApplicationRegistry(),
+  applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
+    applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
+  }),
   adminToken,
 } = {}) {
   const app = express();
@@ -191,6 +198,14 @@ export function createApp({
     if (!claimed) return response.status(204).end();
     return response.json({ data: claimed });
   });
+  app.get('/api/servers/:serverId/applications/:applicationId/environment', async (request, response) => {
+    await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application || application.serverId !== request.params.serverId || application.type !== 'node') {
+      throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    }
+    return response.json({ data: await applicationEnvironmentRegistry.materialize(application.id) });
+  });
   app.post('/api/servers/:serverId/commands/:jobId/result', async (request, response) => {
     await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
     const job = await jobRegistry.complete({
@@ -221,6 +236,31 @@ export function createApp({
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     return response.json({ data: application });
+  });
+  app.get('/api/applications/:applicationId/environment', requireBootstrapAdmin, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    return response.json({
+      data: await applicationEnvironmentRegistry.listVariables(application.id),
+      secretStoreConfigured: applicationEnvironmentRegistry.secretStoreConfigured,
+    });
+  });
+  app.put('/api/applications/:applicationId/environment/:key', requireBootstrapAdmin, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const variable = await applicationEnvironmentRegistry.setVariable({
+      applicationId: application.id,
+      key: request.params.key,
+      value: request.body?.value,
+      secret: request.body?.secret === true,
+    });
+    return response.json({ data: variable });
+  });
+  app.delete('/api/applications/:applicationId/environment/:key', requireBootstrapAdmin, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    await applicationEnvironmentRegistry.deleteVariable(application.id, request.params.key);
+    return response.status(204).end();
   });
   app.post('/api/applications', requireBootstrapAdmin, async (request, response) => {
     const type = request.body?.type ?? 'static';
@@ -503,6 +543,7 @@ export function createApp({
       || error instanceof JobRegistryError
       || error instanceof CertificateRegistryError
       || error instanceof ApplicationRegistryError
+      || error instanceof ApplicationEnvironmentRegistryError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }
