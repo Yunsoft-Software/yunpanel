@@ -210,10 +210,13 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
     if (job.status !== 'running') throw new JobRegistryError('job_not_running', 'Only running jobs may be completed', 409);
 
+    const sanitizedResult = status === 'succeeded' ? sanitizeResult(job, result) : null;
+    const sanitizedError = status === 'failed' ? validateError(error) : null;
+
     job.status = status;
     job.finishedAt = new Date(now()).toISOString();
-    job.result = status === 'succeeded' ? sanitizeResult(job, result) : null;
-    job.error = status === 'failed' ? validateError(error) : null;
+    job.result = sanitizedResult;
+    job.error = sanitizedError;
     await persist();
     return publicJob(job);
   }
