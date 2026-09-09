@@ -2,18 +2,19 @@
 
 Bu dosyada yalnız bu oturumda güvenilir biçimde çalıştırılamayan gerçek ortam doğrulamaları tutulur. Ürün/kod işleri `plan.md`, bağlayıcı kurallar `agents.md` içindedir. Doğrudan `main` üzerinde küçük commitler kullan; GitHub Actions kullanma. Secret, parola, cookie, MFA secretı veya kişisel veriyi repo/log/screenshot içine yazma.
 
-Bu oturumdaki odaklı Read Only policy/HTTP/client testleri Node 22.16.0 kaynak alt kümesinde 11/11 geçti. Bu sonuç Node 24 tam workspace, native auth, React production build, gerçek browser veya canlı HTTPS kabulü değildir. Master-key rotation testleri repoya eklendi fakat gerekli Node 24/full dependency ortamında henüz çalıştırılmadı.
+Bu oturumdaki odaklı Read Only policy/HTTP/client testleri Node 22.16.0 kaynak alt kümesinde 11/11 geçti. Bootstrap/in-process bearer kaldırıldıktan sonra `panel-access` + `panel-http-guard` saf policy seti ayrıca Node 22.16.0 üzerinde 7/7 geçti. Bu sonuçlar Node 24 tam workspace, native auth, gerçek Express entry-point regresyonu, React production build, gerçek browser veya canlı HTTPS kabulü değildir. Master-key rotation testleri repoya eklendi fakat gerekli Node 24/full dependency ortamında henüz çalıştırılmadı.
 
 ## T-RUNTIME — P0: Desteklenen runtime ve tam repo kabulü
 
 - [ ] Node 24.11.1+ ve npm 11+ ile temiz dependency install yap; workspace manifestlerini ve native dependencies'i doğrula.
 - [ ] Filtre olmadan `npm run check`, bütün workspace testleri ve production build çalıştır. Test/build hatasını runtime gereksinimini düşürerek veya test atlayarak çözme.
+- [ ] Güncel `panel-http-guard.test.js`, `authenticated-core-boundary.test.js` ve request-auth fixture'a taşınan core/deploy/rollback/ACME/Node/package flow testlerini birlikte çalıştır. Raw `createApp()` + eski/admin Bearer management erişimi 401 kalmalı; authenticated listener gerçek core'a yalnız server-derived `request.auth` ile geçmeli; legacy agent claim/result/environment rotaları kendi agent credential'larını korumalı.
 - [ ] API/web/package entry pointlerinin aynı committen geldiğini doğrula. Mixed web/API build durumunda privileged UI fail-closed kalmalı.
 - [ ] `.github/workflows` ekleme/değiştirme; doğrulamaları yerel/test hostunda çalıştır.
 
 ## T-ACCESS — P0: Read Only gerçek kabulü
 
-- [ ] Yeni `panel-access`, owner-MFA capability, Read Only HTTP ve owner-access testlerini tam Node 24 workspace içinde mevcut auth/core testleriyle birlikte çalıştır.
+- [ ] Yeni `panel-access`, `panel-http-guard`, owner-MFA capability, Read Only HTTP ve owner-access testlerini tam Node 24 workspace içinde mevcut auth/core testleriyle birlikte çalıştır.
 - [ ] Gerçek browserda Read Only hesabıyla Dashboard, Web Siteleri, site detail ve Sunucular ekranlarının açıldığını doğrula. Jobs, Users, Settings, Applications management, Domains management, create ekranları ve diğer mutation yüzeyleri görünmemeli/mount edilmemeli.
 - [ ] Network panelinde Read Only oturumunun yalnız izin verilen `GET/HEAD /api/{servers,applications,domains,certificates}` list/detail isteklerini yaptığını doğrula. `/jobs`, `/users`, application env/status, nested system inspection veya herhangi bir mutation otomatik/polling olarak üretilmemeli.
 - [ ] Raw API'de Read Only ile jobs/users/env/status/system inspection ve bütün mutation isteklerinin core management handlerına ulaşmadan `403` kaldığını doğrula. URL yazarak veya client payload değiştirerek izin genişletilememeli.
