@@ -3,6 +3,9 @@ import { constants, lstatSync, mkdirSync, openSync, closeSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
+import { AuthError, safeEqual } from './auth-error.js';
+import { createMfaStore } from './mfa-store.js';
+export { AuthError, safeEqual } from './auth-error.js';
 
 const derive = promisify(argon2);
 const PASSWORD_PREFIX = '$argon2id$v=19$m=65536,t=3,p=1$';
@@ -10,15 +13,6 @@ const digest = (value) => createHash('sha256').update(value).digest('hex');
 const token = () => randomBytes(32).toString('base64url');
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 let activeHashes = 0;
-
-export class AuthError extends Error {
-  constructor(code, message, status = 400, retryAfter = null) {
-    super(message);
-    this.code = code;
-    this.status = status;
-    this.retryAfter = retryAfter;
-  }
-}
 
 export function validatePassword(password) {
   if (typeof password !== 'string' || [...password].length < 12 || Buffer.byteLength(password) > 1024) {
@@ -68,19 +62,12 @@ export function csrfForSession(rawToken) {
   return createHmac('sha256', rawToken).update('yunpanel:csrf:v1').digest('base64url');
 }
 
-export function safeEqual(left, right) {
-  if (typeof left !== 'string' || typeof right !== 'string') return false;
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 export function defaultAuthPath() {
   return process.env.YUNPANEL_AUTH_DB ?? path.resolve('.data/auth/auth.sqlite');
 }
 
 /** One SQLite transaction per mutation also coordinates the API with the local recovery CLI. */
-export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, idleMs = 30 * 60_000, absoluteMs = 12 * 60 * 60_000 } = {}) {
+export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, idleMs = 30 * 60_000, absoluteMs = 12 * 60 * 60_000, masterKey = process.env.YUNPANEL_SECRET_MASTER_KEY ?? null } = {}) {
   if (![idleMs, absoluteMs].every((value) => Number.isSafeInteger(value) && value > 0) || idleMs > absoluteMs) {
     throw new Error('Invalid authentication session lifetime');
   }
@@ -102,7 +89,7 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
   const db = new DatabaseSync(filePath);
   db.exec('PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
   const version = db.prepare('PRAGMA user_version').get().user_version;
-  if (version !== 0 && version !== 1) { db.close(); throw new Error('Unsupported auth database version'); }
+  if (![0, 1, 2].includes(version)) { db.close(); throw new Error('Unsupported auth database version'); }
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
@@ -117,7 +104,6 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
     CREATE TABLE IF NOT EXISTS setup (id INTEGER PRIMARY KEY CHECK(id = 1), token_hash TEXT NOT NULL, expires_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS auth_limits (key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, expires_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS auth_events (id INTEGER PRIMARY KEY, actor_id TEXT, action TEXT NOT NULL, created_at INTEGER NOT NULL);
-    PRAGMA user_version = 1;
   `);
   let dummyHash;
   const publicUser = (row) => ({ id: row.id, username: row.username, role: row.role });
@@ -168,7 +154,13 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
     return { token: rawToken, session: getSession(rawToken) };
   }
 
+  let mfa;
+  try {
+    mfa = createMfaStore({ db, now, masterKey, getSession, verifyPassword, createSession, transaction, rateLimit, audit: event });
+  } catch (error) { db.close(); throw error; }
+
   return {
+    mfa,
     close: () => db.close(),
     configured: () => Boolean(db.prepare('SELECT 1 FROM users LIMIT 1').get()),
     issueSetupToken() {
@@ -212,6 +204,10 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
         const current = user && db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
         if (!valid || !current?.active || current.password_hash !== expected) return null;
         if (typeof previousToken === 'string' && TOKEN_PATTERN.test(previousToken)) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(digest(previousToken));
+        if (mfa.enabled(current.id)) {
+          event(current.id, 'login.password_verified');
+          return mfa.createLoginChallenge(current.id);
+        }
         db.prepare('DELETE FROM auth_limits WHERE key = ?').run(`login:user:${digest(name)}`);
         const result = createSession(current.id);
         event(current.id, 'login.succeeded');
@@ -239,6 +235,7 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
       if (!current) throw invalid();
       transaction(() => {
         db.prepare('DELETE FROM sessions WHERE user_id = ?').run(current.user.id);
+        mfa.invalidateUser(current.user.id);
         event(current.user.id, 'sessions.revoked');
       });
     },
@@ -253,6 +250,7 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
         if (!getSession(rawToken) || db.prepare('SELECT password_hash FROM users WHERE id = ?').get(user.id)?.password_hash !== user.password_hash) throw invalid();
         db.prepare('UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?').run(encoded, now(), user.id);
         db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
+        mfa.invalidateUser(user.id);
         event(user.id, 'password.changed');
       });
     },
@@ -265,6 +263,7 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
         db.prepare('UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?').run(encoded, now(), user.id);
         db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
         db.prepare('DELETE FROM auth_limits').run();
+        mfa.invalidateUser(user.id);
         event(user.id, 'password.recovered_locally');
       });
     },
