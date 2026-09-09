@@ -1,12 +1,15 @@
 # YunPanel — Yapılacaklar
 
-Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan ve doğrulanan alt maddeler listeden çıkarılacak; geçmiş Git commitlerinde kalacak. Kod tamamlanıp gerçek sunucu doğrulaması bekleyen işler `todo.md` içinde açık tutulacak. Bağlayıcı kurallar `agents.md`, mevcut authentication kurulumu ve sınırları `docs/authentication.md` içindedir.
+Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan ve doğrulanan alt maddeler listeden çıkarılacak; geçmiş Git commitlerinde kalacak. Kod tamamlanıp gerçek sunucu doğrulaması bekleyen işler `todo.md` içinde açık tutulacak. Bağlayıcı kurallar `agents.md`, mevcut authentication kurulumu ve sınırları `docs/authentication.md`, MFA taslağının kapsamı ve test sınırları `docs/mfa.md` içindedir.
 
 Öncelik: domain/subdomain hiyerarşisi bulunan, Plesk benzeri site detaylarından yönetilen enterprise bir panel. Ayrı sunucu agent'ı kaldırılacak; yerel sunucunun tam yönetim yetkisi panel backend'inde olacak. Enterprise UI çalışması bekletilmeyecek; ancak tam yetkili backend ve terminal, kalan authentication yayın kapısı geçilmeden dış erişime açılmayacak.
 
 ## A. P0 — Kalan authentication ve erişim işleri
 
-- [ ] TOTP kurulumu/doğrulaması, tek kullanımlık kurtarma kodları, MFA değiştirme ve güvenli yerel MFA kurtarma akışını geliştir. Root yönetiminin dış erişim sürümünde MFA bulunmalı; normal her işlem için tekrar parola istenmemeli.
+- [ ] Hazır `LoginForm.jsx` ve `MfaPanel.jsx` bileşenlerini `AuthGate.jsx` içine bağla; MFA-required 202 cevabını tam kullanıcı oturumu sayma. `mfa.css`, oturum yenileme callback'i, güncel session listesi ve tek sefer gösterilen recovery kodlarının güvenle kapatılması birlikte çalışmalı. Backend TOTP/recovery/yerel kurtarma akışını yeniden yazma; kalan iş arayüz bağlantısıdır. Bu bağlantının GitHub yazımı bu turda araç tarafından engellendi; bağlanmış sayılmaz.
+- [ ] Eski oturumdan gelen gecikmiş HTTP yanıtının yeni cookie'yi silmesi yarışını çöz ve regresyon testi ekle. `auth-http.js` içindeki yetkisiz cevapların cookie yenileme/iptal sözleşmesini incele; JavaScript generation kontrolü tarayıcının uyguladığı `Set-Cookie` etkisini geri alamaz. Bu takip düzeltmesinin yazımı da engellendi; yalnız istemci testlerini uçtan uca çözüm sayma.
+- [ ] Root/terminal dış erişim sürümü için Owner MFA enrollment zorunluluğunu ve kontrollü istisna/kurtarma politikasını backend'de uygula. Mevcut MFA yalnızca kayıtlı doğrulayıcısı olan hesapta zorunludur. Normal her işlem için tekrar parola istenmemeli.
+- [ ] MFA arayüzünde gerçek tarayıcı testlerini tamamla: kurulum, yanlış/tekrar kullanılan kod, süre dolumu, recovery kullanımı/yenileme, kaldırma, oturum rotasyonu ve kaybolan yanıt. QR eklenirse secret'ı üçüncü tarafa göndermeden yerel üret; hazır bileşen şimdilik manuel anahtar girişidir. Schema v2 ve anahtar kurtarma kabulü `todo.md` içinde kalır.
 - [ ] Ek Owner oluşturma, kullanıcı düzenleme/devre dışı bırakma ve gerekiyorsa kaynak bazlı Read Only rolünü backend + UI ile geliştir. Son aktif Owner silinememeli/devre dışı bırakılamamalı; rol değişimi mevcut oturumlarda etkili olmalı. Read Only için mevcut kapalı yönetim sınırını yalnızca açık kaynak/işlem izinleriyle genişlet.
 - [ ] Kullanıcıya idle/absolute süre dolmadan anlaşılır uyarı ve oturumu uzatma kontrolü ekle. Gerçek React tarayıcı testleriyle iki sekme, çıkış sırasında bekleyen istek, eski yanıtın yeni girişi etkilemesi, sayfa geri yükleme ve hesap penceresi/focus davranışını kapsa.
 - [ ] Kalan core HTTP handler'larında `bootstrap-auth.js` / in-process uyumluluk tokenını kaldırıp doğrulanmış kullanıcı bağlamını doğrudan kullan. Ağ listener'ını atlayan yeni `createApp().listen()` yolu ekleme. Agentsiz geçişte eski enrollment/agent rotalarını ve credential'larını da kaldır.
@@ -14,7 +17,7 @@ Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan ve doğrulanan
 - [ ] IP allowlist'i güvenlik kabulü sonrası isteğe bağlı ek ağ kontrolüne dönüştür. Açık trusted-proxy sözleşmesi, gerçek istemciye göre rate limit ve proxy header spoof testlerini ekle; bu geçiş doğrulanmadan mevcut ağ kısıtını kaldırma.
 - [ ] Auth eventlerini tam audit modeline ve ekranına bağla; kullanıcı yönetimi ve tüm yönetim/job işlemlerinde actor/resource/result kayıtlarını tamamla. Parola, cookie, env değeri veya ham terminal çıktısı kaydetme.
 
-**Kabul:** Gerçek HTTPS ve tarayıcı kabulü `todo.md` T1/T1a üzerinden tamamlanmalı. MFA, kullanıcı yaşam döngüsü ve ileride canlı bağlantı iptali doğrulanmadan root/terminal public sürümü açılmamalı. Kodun test edilmesi canlı deployment kanıtı sayılmayacak.
+**Kabul:** MFA taslağı, AuthGate bağlantısı ve cookie yarışının çözümü olmadan birleştirilmemeli/dağıtılmamalı. Gerçek HTTPS ve tarayıcı kabulü `todo.md` T-MFA/T1/T1a üzerinden tamamlanmalı. Kullanıcı yaşam döngüsü ve ileride canlı bağlantı iptali doğrulanmadan root/terminal public sürümü açılmamalı. Kodun test edilmesi canlı deployment kanıtı sayılmayacak.
 
 ## B. P1 — Ayrı agent'ı kaldır, tam yetkili yerel panel backend'ine geç
 
@@ -74,7 +77,7 @@ Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan ve doğrulanan
 
 - [ ] xterm.js arayüzü + backend PTY ile gerçek interaktif terminal oluştur; sahte komut çıktısı veya tek satırlık HTTP exec ekranı yapma. Site terminali site kullanıcısı ve doğru çalışma dizininde, Sunucu terminali Owner için root olarak açılsın. Ekranda host, kullanıcı ve dizin net görünsün.
 - [ ] WebSocket upgrade sırasında oturum, rol ve Origin kontrolü yap; süreli tek kullanımlık terminal yetkilendirmesini oturuma bağla. URL query'sine kalıcı credential koyma. Authenticated root terminalde normal shell kullanımını agent operasyon listesiyle sınırlama.
-- [ ] Resize, Ctrl+C, Ctrl+D, kopyala/yapıştır, Unicode, fullscreen uygulamalar, çoklu sekme ve kopma durumlarını destekle. Yeniden bağlanma eski yetkiyi taşımamalı; başka kullanıcı terminal oturumunu devralamamalı.
+- [ ] Resize, Ctrl+C, Ctrl+D, kopyala/yapıştır, Unicode, fullscreen uygulamalar, çoklu sekme ve kopma durumlarını destekle. Yeniden bağlanma eski yetkiyi taşımamalı; başka kullanıcı terminal oturumunu devralamayacak.
 - [ ] Logout, oturum iptali ve kullanıcı kapatmada WebSocket/PTY erişimini derhal kes; process-group cleanup, idle timeout, maksimum oturum ve çıktı backpressure limitlerini uygula. Uzun deploy/backup işleri terminal bağlantısından bağımsız job olarak devam etmeli.
 - [ ] Root terminal açılış/kapanışını audit'e yaz; ham tuş vuruşlarını, terminal çıktısını veya shell geçmişini varsayılan olarak merkezi loglama. Terminal çıktısını HTML olarak çalıştırma; link/clipboard entegrasyonlarını güvenli tut.
 - [ ] Site dosya yöneticisine listeleme, yükleme/indirme, dizin oluşturma, rename, güvenli metin düzenleme, owner/izin gösterimi ve teyitli silme ekle. Site görünümünde path traversal/symlink kaçışını engelle. Owner'ın host dosyaları üzerindeki tam yetkili işlemleri açık Sunucu bağlamında kalmalı; gerekirse owner-only sistem dosyası düzenleyicisi ekle.
@@ -116,7 +119,7 @@ Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan ve doğrulanan
 
 ## J. P0–P3 — Kalan test, geçiş ve yayın kapıları
 
-- [ ] Yeni MFA/kullanıcı yönetimi, WebSocket yetkisi, hierarchy migration, kaynak bazlı read-only ve yeni secret yüzeylerinin testlerini ekle; mevcut deploy/rollback/ACME/job testlerini agentsiz yapıya taşı. Gerçek core Express handler + oturum sınırı + entry point entegrasyonunu tam workspace'te testlerle kapsa.
+- [ ] Kalan MFA UI/politika, kullanıcı yönetimi, WebSocket yetkisi, hierarchy migration, kaynak bazlı read-only ve yeni secret yüzeylerinin testlerini ekle; mevcut deploy/rollback/ACME/job testlerini agentsiz yapıya taşı. Gerçek core Express handler + oturum sınırı + entry point entegrasyonunu tam workspace'te testlerle kapsa. MFA'nın odaklı testlerini yeniden yazmak yerine native Node 24 ve tam regresyon kabulünü tamamla.
 - [ ] UI component ve tarayıcı testleri ekle: login -> site -> subdomain -> Node -> SSL -> mail -> terminal. Loading/empty/error/permission/missing-dependency hallerini, uzun domainleri, çok kayıtlı tabloları ve form sırasında refresh'i kapsa.
 - [ ] Mevcut APT kurulumunu yeniden geliştirmek yerine agentsiz paket yükseltmesi, schema migration, PTY bağımlılıkları ve geri dönüşü test et. Job sürerken self-update, restart sonrası reconciliation ve disk-full durumlarını kapsa. Auth paketinin gerçek install/upgrade kabulünü `todo.md` T1a'da tamamla.
 - [ ] Master-key rotation/recovery, backup hedefi outage, başarısız restore, eşzamanlı işler, kaynak tükenmesi ve panel kesintisi tatbikatlarını tamamla. Test kanıtı olmayan güvenlik veya görsel kalite iddiası yazma.
