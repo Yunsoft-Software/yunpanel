@@ -1,256 +1,110 @@
-# YunPanel Agent Rules
+# YunPanel — Geliştirici ve Kodlama Ajanı Kuralları
 
-Bu dosya YunPanel reposunda çalışan tüm geliştiriciler ve kodlama ajanları için bağlayıcı proje kurallarını tanımlar.
+Bu dosya repoda çalışan geliştirici ve kodlama ajanlarının kurallarını tanımlar. Dosyanın adı, kaldırılacak `yun-agent` sunucu daemon'ıyla karıştırılmamalıdır.
 
-## 1. Projenin amacı
+## 1. Ürün hedefi ve karar önceliği
 
-YunPanel, Yunsoft'un kendi sunucularında Plesk bağımlılığını zamanla azaltmak ve mümkün olan yerlerde ortadan kaldırmak için geliştirilen bir hosting/server yönetim panelidir.
+YunPanel, Yunsoft'un Ubuntu sunucularını Plesk'e bağımlı olmadan yöneteceği site merkezli hosting/server panelidir. Kullanıcı bir web sitesine girdiğinde Node.js, Git/deploy, domain/subdomain, SSL, mail, dosya, veritabanı, log, cron, yedek ve terminal işlemlerini o bağlamdan yapabilmelidir.
 
-İlk hedef genel amaçlı ticari bir Plesk klonu yapmak değildir. Öncelik Yunsoft'un gerçek kullanım senaryolarıdır:
+2026-09-09 ürün kararı: gerçek kullanıcı authentication, enterprise UI/UX, kalıcı domain/subdomain hiyerarşisi ve agentsiz, tam yetkili yerel yönetim backend'i uygulanacaktır. Bu karar eski planın ayrı privileged agent, non-root yönetim backend'i ve terminal yasağı hükümlerinin yerine geçer. Mevcut kodun henüz bu mimariye taşınmış olduğu varsayılmayacaktır.
 
-- Node.js uygulamaları,
-- Passenger uyumlu mevcut uygulamalar,
-- systemd ile çalışan Node.js uygulamaları,
-- React/Vite gibi statik build çıktıları,
-- Docker ve Docker Compose projeleri,
-- domain ve reverse proxy yönetimi,
-- Let's Encrypt SSL,
-- MySQL/MariaDB,
-- Git tabanlı deploy,
-- environment variable yönetimi,
-- cron/scheduled jobs,
-- loglar,
-- backup/restore,
-- mail hesapları ve Roundcube,
-- temel sunucu monitoring ve güvenlik işlemleri.
+Kapsam Yunsoft'un gerçek kullanım ihtiyaçlarıdır; reseller, faturalama, hosting paketleri, tüm dağıtımlara destek ve Plesk'in bütün özellikleri bu değişikliğin önkoşulu değildir.
 
-## 2. Teknoloji kuralları
+## 2. Teknoloji ve destek matrisi
 
-### Frontend
+- Frontend React, JavaScript/JSX olacak. TypeScript, `.ts` veya `.tsx` eklenmeyecek.
+- Backend Node.js olacak; mevcut workspace/adapter/test altyapısı mümkün olduğunca kullanılacak.
+- Ubuntu 24.04 LTS, Nginx, Node.js LTS ve systemd ilk destek hedefidir. Çalışan projenin Node/npm sürüm gereksinimleri doğrulanmadan düşürülmeyecek.
+- Docker Engine/Compose, MySQL/MariaDB, ACME, Postfix/Dovecot/Rspamd ve Roundcube ilgili modüller kapsamında desteklenecek. Passenger, eski uygulamalar için compatibility adapter'ıdır.
+- Yeni dependency yalnızca somut ihtiyaçla eklenecek; terminal ve auth gibi alanlarda bakımı yapılan uygun kütüphaneler değerlendirilecek. Güvenlik mekanizmaları sırf dependency azaltmak için el yordamıyla icat edilmeyecek.
 
-- Frontend React ile geliştirilecek.
-- TypeScript KULLANILMAYACAK.
-- `.ts` ve `.tsx` dosyaları eklenmeyecek.
-- Frontend kaynakları JavaScript/JSX olacak.
-- Gereksiz frontend framework veya ağır bağımlılıklar eklenmeyecek.
-- UI, hosting ve server operasyonlarını hızlı ve anlaşılır hale getirmeye odaklanacak.
+## 3. Agentsiz yönetim mimarisi
 
-### Backend
+- Hedef kurulum sunucu başına yerel paneldir. Yönetim backend'i host üzerinde root yetkili systemd servisi olarak çalışacak; ayrı `yun-agent` servisi olmayacak.
+- Nginx/systemd/ACME/deploy/env/backup/mail/paket operasyonları aynı panel backend'inin dahili adapter ve job katmanında yürütülecek. Farklı isim altında ikinci bir privileged daemon veya yeniden agent enrollment/credential exchange kurulmayacak.
+- Kurulum Owner'a tüm sunucu yönetim yetkilerini hazır sunacak. Normal yönetim için her operasyonda ayrı sudoers/polkit/agent capability onayı istenmeyecek.
+- Root yetkisi frontend'e veya barındırılan uygulamalara verilmez. React arayüzü yalnızca authenticated backend'i çağırır. Public reverse proxy/static serving katmanı root yapmak zorunlu değildir.
+- Node/static build, npm lifecycle scriptleri, Git hook'ları, uygulama süreçleri, site cron'u ve site terminali dedicated site kullanıcısıyla çalışacak. Owner Sunucu terminalinde root shell kullanabilecek.
+- API oturum/yetki doğrulaması, girdilerin doğrulanması, secret koruması, config testleri ve kaynak kilitleri kaldırılmayacak. Bunlar agent'a tek tek yetki verme mekanizması değildir.
+- Root backend'in ele geçirilmesinin hostun ele geçirilmesi anlamına geldiği kabul edilerek auth, bağımlılıklar, ağ yüzeyi ve dosya yazma yolları gözden geçirilecek. Authentication kapısı geçilmeden full yetkili sürüm/terminal public olarak yayınlanmayacak.
 
-- Backend Node.js tabanlı olacak.
-- Yönetim API'si ile ayrıcalıklı sunucu işlemleri birbirinden ayrılacak.
-- Panel web/backend süreci root olarak çalıştırılmayacak.
-- Root gerektiren işlemler ayrı bir `yun-agent`/privileged agent katmanından geçirilecek.
-- Arbitrary shell command çalıştırma API'si oluşturulmayacak.
-- Agent sadece açıkça tanımlanmış ve doğrulanmış operasyonları kabul edecek.
+## 4. Geçiş ve veri koruma
 
-Örnek operasyon isimleri:
+- Çalışan Nginx/ACME/static/Node/deploy/rollback algoritmaları sırf agent taşınıyor diye yeniden yazılmayacak. Transport bağımlılığı ayrılacak, yöneticiler dahili modüllere ve testleri uygun workspace'e taşınacak.
+- Job queue, resource lock, reconciliation, secret store ve deterministic release/service kimlikleri korunacak. Servis restartında işlemin iki kez uygulanması veya sessiz kaybolması engellenecek.
+- `/etc/yunpanel`, `/var/lib/yunpanel`, master key, uygulama release'leri, Unix kullanıcıları, vhost ve sertifikalar korunacak. Var olan server/application/domain kimlikleri sebepsiz değiştirilmeyecek.
+- State migration sürümlü ve yeniden çalıştırılabilir olacak; gerçek değişiklikten önce doğrulanmış yedek ve rollback yolu bulunacak. Yerel olmayan eski server kayıtları yanlışlıkla bu hosta atanmayacak.
+- Eski agent ancak işler durultulduktan ve yeni yürütücü doğrulandıktan sonra durdurulup devre dışı bırakılacak. Paket/unit/env/install/dev dokümanı aynı değişimle uyumlu hale getirilecek.
+- `chmod -R 777`, genel sahiplik değişikliği veya güvenlik kontrollerini topluca kapatma çözüm kabul edilmez. Gereken sistem yetkisi servis kurulumuyla sağlanırken uygulama izolasyonu korunur.
 
-- `server.inspect`
-- `domain.create`
-- `domain.update`
-- `domain.delete`
-- `ssl.issue`
-- `ssl.renew`
-- `app.deploy`
-- `app.restart`
-- `app.rollback`
-- `docker.deploy`
-- `database.create`
-- `database.backup`
-- `mailbox.create`
-- `backup.run`
+## 5. Kullanıcı girişi ve güvenlik sınırı
 
-## 3. Destek matrisi
+- İlk kullanıcı Owner olacak; public kayıt ve varsayılan parola olmayacak. İlk kurulum sadece yerel sunucu yöneticisinin başlattığı, süreli ve tek kullanımlık akışla yapılacak.
+- Kullanıcı oturumu IP allowlist veya ortak bootstrap bearer token ile ikame edilmeyecek. Bootstrap normal yönetim API'sinde kalıcı arka kapı olarak tutulmayacak.
+- Bütün veri/işlem API'leri, log akışları ve terminal WebSocket'leri backend'de authenticated olacak. Frontend route guard yeterli değildir. Development veya alternatif port/rota aynı korumayı atlayamayacak.
+- Parolalar Argon2id ile hash'lenecek; oturumlar sunucu tarafında, cookie'ler `HttpOnly`, `Secure`, açık `SameSite` ve host-only kapsamıyla yönetilecek. CSRF, login rate limit, oturum yenileme/iptali ve trusted proxy politikası uygulanacak.
+- TOTP ve recovery akışı root yönetiminin dış erişim sürümünde bulunacak. Owner her sıradan işlem için tekrar giriş yapmayacak; yetkili yönetim kullanılabilir kalacak.
+- Owner tüm yönetim işlemlerini yapabilir. Ek kısıtlı roller gerekirse backend'de uygulanır; normal kullanıcıya UI butonu gizleyerek yetki kontrolü yapıldığı varsayılmaz. Son aktif Owner silinemez.
+- Secrets loglara, URL'lere, localStorage'a, frontend bundle'a ve genel job kayıtlarına yazılmaz. Şifreleme anahtarı repo dışında tutulur; restore/rotation yolu test edilir.
+- Etkisi büyük silme/restore işlemlerinde hedef ve veri kaybı açıkça gösterilir. Root terminale komut allowlist'i getirilmez; bu terminal yalnızca authenticated Owner'a açılır.
 
-İlk sürüm gereksiz uyumluluk yükü almamalıdır.
+## 6. Website, domain ve subdomain modeli
 
-Başlangıç hedefi:
+- Website kaynak kimliği ile hostname ayrı kavramlardır. Domain, subdomain ve alias türleri; açık parent ve hedef referanslarıyla modellenir.
+- Subdomain bağımsız runtime, document root, env, SSL ve loglara sahip olabilir. Alias başka siteye işaret eder; otomatik bağımsız uygulama veya mailbox oluşturmaz.
+- Parent son iki domain parçasını keserek tahmin edilmez. FQDN/IDN normalizasyonu, label sınırı, duplicate hostname ve döngü kontrolleri uygulanır.
+- DNS hosting, web hostname ve mail domaini ayrı yaşam döngüleridir. Panelde domain yaratılması dış DNS'in değiştiği veya mailin hazır olduğu anlamına gelmez.
+- Domain/subdomain silmede bağımlılıklar ve etki gösterilir; örtülü cascade yapılmaz. Migration mevcut trafik ve sertifika ilişkilerini bozmamalıdır.
 
-- Ubuntu 24.04 LTS
-- Nginx
-- Node.js LTS
-- systemd
-- isteğe bağlı Passenger compatibility
-- Docker Engine + Docker Compose plugin
-- MySQL/MariaDB
-- Let's Encrypt / ACME
-- Postfix + Dovecot + Rspamd tabanlı mail stack
-- Roundcube webmail
+## 7. Enterprise UI/UX standardı
 
-Başka Linux dağıtımları veya hosting stack'leri yalnızca planlı bir milestone kapsamında eklenebilir.
+- Günlük giriş noktası Web Siteleri ve domain ağacıdır. Site detaylarında breadcrumb, kalıcı başlık, hızlı eylemler ve runtime'a uygun sekmeler bulunur.
+- Gerçek URL routing, deep link, reload ve tarayıcı geri/ileri desteklenir. Tek `activeView` state'ine bağlı tüm-uygulama bileşeni büyütülmez.
+- Ortak tasarım tokenları ve erişilebilir bileşenler kullanılır. Kompakt ama okunabilir tablolar; arama, filtreleme, sıralama ve sayfalama sunar. Uzun domain ve mobil görünüm test edilir.
+- Loading, empty, authentication, authorization, missing dependency, unimplemented feature ve runtime error ayrı durumlardır. `404` genel olarak “protected” diye çevrilmez; bilinmeyen ölçüm 0 gösterilmez.
+- Bir ekranın veri hatası diğer ekranın verisini silmez. Arka plan refresh açık formu/sekmesini bozmaz. Form doğrulama hatasında girişler korunur.
+- İnert buton, placeholder veya sahte verili ekran tamamlanmış modül sayılmaz. Eksik servis için gerçek teşhis/kurulum; kodu olmayan özellik için dürüst durum gösterilir.
+- Browser `prompt`/`alert` ile ana yönetim akışı yapılmaz. Uzun işlem job drawer/progress üzerinden izlenir; 202 kabul cevabı başarı diye sunulmaz.
 
-## 4. Git ve commit kuralları
+## 8. Terminal ve dosya erişimi
 
-- HER ZAMAN küçük commitlerle ilerle.
-- Bir commit mümkün olduğunca tek mantıksal değişiklik içermelidir.
-- Büyük, alakasız değişiklikleri tek commit altında toplama.
-- Refactor ile özellik geliştirmeyi mümkünse ayrı commitlerde tut.
-- Commit mesajları kısa, açıklayıcı ve değişikliğin amacını belirtecek şekilde yazılmalıdır.
-- Mevcut çalışan özellikleri sırf temizlik amacıyla gereksiz yere yeniden yazma.
-- İlgisiz dosyalara dokunma.
+- Terminal gerçek PTY + xterm.js olacak. WebSocket oturum ve Origin kontrolünden geçecek; başka kullanıcı/oturum terminali devralamayacak.
+- Site terminali site kullanıcısı ve dizininde; Sunucu terminali Owner için root olarak çalışacak. Host/kullanıcı/dizin bağlamı görünür olacak.
+- Resize, kontrol karakterleri, Unicode ve interaktif programlar desteklenecek. Idle/output/session limitleri ve process-group temizliği uygulanacak.
+- Logout, oturum iptali ve kullanıcı kapatma açık bağlantının yetkisini kaldıracak. Uzun deploy/backup işlemleri terminal yerine kalıcı job ile yürütülecek.
+- Terminal çıktısı güvenilmeyen içeriktir; HTML olarak işlenmez. Ham keystroke, çıktı ve shell history varsayılan olarak merkezi audit'e yazılmaz; oturum açılış/kapanış metadata'sı yazılır.
+- Site dosya görünümünde path traversal ve symlink kaçışı engellenir. Host dosyalarına erişim Owner'ın açık Sunucu bağlamında yapılır; uygulama kullanıcılarına yayılmaz.
 
-Örnek commit mesajları:
+## 9. Operasyon, konfigürasyon ve audit
 
-- `docs: define project agent rules`
-- `feat: add server inventory endpoint`
-- `feat: add static app deployment model`
-- `fix: prevent duplicate nginx host creation`
-- `test: cover failed deployment rollback`
+- Deploy, build, SSL, backup/restore, Docker ve paket işlemleri kalıcı async job modeliyle yürütülür; queued/running/succeeded/failed/cancelled durumları korunur.
+- Aynı kaynağa zarar verecek işler kilitlenir. Nginx activation ve paket değişimi gerektiğinde serialize edilir; tekrar deneme idempotency dikkate alınarak yapılır.
+- Nginx/systemd/mail konfigürasyonları adapter/template üzerinden üretilir. Uygulanmadan test edilir; başarısız reload/health durumunda önceki çalışan config/sürüm geri alınır.
+- Normal formlar shell string birleştirmez; doğrulanmış argümanlar kullanır. Yetkili interaktif shell ayrı, kasıtlı bir özelliktir; onu sağlamak form inputlarını shell'e birleştirmeyi meşru kılmaz.
+- Audit actor, action, resource, zaman ve güvenli sonuç metadata'sı tutar. Parola/token/env değerleri ve ham terminal kayıtları audit'e kopyalanmaz.
+- Panel kesilince hosted uygulamalar, Nginx ve mail servisleri çalışmayı sürdürmelidir.
 
-## 5. GitHub Actions kesinlikle yasak
+## 10. Git, test ve otomasyon
 
-- GitHub Actions KULLANILMAYACAK.
-- `.github/workflows/` altında workflow oluşturma.
-- Test, build, deploy, release veya başka herhangi bir amaçla GitHub Actions ekleme.
-- Var olmayan bir Actions altyapısını projeye dahil etme.
-- Otomasyon gerekiyorsa YunPanel'in kendi deploy/job sistemi, yerel scriptler veya açıkça seçilmiş harici altyapı kullanılmalıdır.
+- Küçük, tek amaçlı commitlerle ilerle; refactor ve özellik geliştirmesini mümkün olduğunca ayır. İlgisiz dosyaları değiştirme; eşzamanlı kullanıcı değişikliklerini ezme.
+- GitHub Actions KULLANILMAYACAK. `.github/workflows/` eklenmeyecek. Test/build/deploy yerel komutlar veya YunPanel job sistemiyle yürütülecek.
+- Auth/session/CSRF, WebSocket yetkisi, site izolasyonu, domain hiyerarşisi/migration, config validation, deploy state, rollback, secret masking, duplicate resource, concurrency ve destructive işlemler test edilir.
+- UI için tarayıcı, responsive, klavye ve deep-link akışları doğrulanır. Gerçek host bağımlı testler `todo.md` içinde takip edilir.
+- Çalıştırılmayan test, açılmayan canlı site ve uygulanmayan migration yapılmış gibi raporlanmaz. Kod testi gerçek Ubuntu/DNS/mail/restore kanıtının yerine geçmez.
 
-## 6. Güvenlik kuralları
+## 11. `plan.md` ve `todo.md`
 
-YunPanel yüksek yetkili sunucu operasyonları yaptığı için güvenlik özellik değil, çekirdek gereksinimdir.
+- `plan.md` yalnızca kalan ürün/kod işlerini ve kabul kriterlerini içerir. Tamamlanan alt maddeler çıkarılır; geçmiş Git'te kalır. Bitmiş milestone, `[x]` listesi veya eski başarı raporu tutulmaz.
+- `todo.md` bu ortamda yapılamayan gerçek sunucu/SSH, DNS/provider, Plesk, private credential, production-like tarayıcı ve uçtan uca doğrulama işlerini içerir. Normal geliştirilebilir kod işleri `plan.md` içinde kalır.
+- Kod bitip dış doğrulama bekleniyorsa kod maddesi buna göre daraltılır ve kalan doğrulama `todo.md` içinde tutulur. Kısmen biten maddede sadece açık alt işler bırakılır.
+- Tamamlanan dış test maddesi `todo.md` listesinden çıkarılır; güvenli kanıt/tarih commit mesajı veya uygun test raporuyla kaydedilir. Secret'lar rapora alınmaz.
+- İki belge kodla aynı çalışma turunda güncellenir. Hedef mimari ile halen çalışan eski mimari açıkça ayrılır; plan değişikliği kod tamamlanması sayılmaz.
 
-- Panel backend'i root olarak çalıştırılmayacak.
-- Root yetkili agent minimum izinle tasarlanacak.
-- Shell injection'a açık string birleştirme yapılmayacak.
-- Komut argümanları allowlist ve schema doğrulamasından geçirilecek.
-- Domain, path, username, service name ve environment inputları doğrulanacak.
-- Path traversal engellenecek.
-- Secrets loglara yazılmayacak.
-- Environment variable değerleri maskelenebilir olmalı.
-- Şifreler geri döndürülemez biçimde hash'lenmeli.
-- API tokenları güvenli biçimde saklanmalı.
-- Hassas işlemler audit log'a yazılmalı.
-- Destructive işlemler açık ve doğrulanabilir olmalı.
-- Backup olmadan geri dönüşü zor destructive migration yapılmamalı.
-- Uygulamalar birbirinin dosyalarına erişemeyecek şekilde kullanıcı/izin izolasyonu hedeflenmeli.
+## 12. Her işin uygulanma sırası
 
-## 7. Deploy kuralları
-
-YunPanel ilk sürümde üç ana application type destekleyecek:
-
-### Static
-
-Örnek akış:
-
-`git clone/pull -> install -> build -> release directory -> nginx root switch -> health check`
-
-### Node.js
-
-Öncelikli yeni uygulama akışı:
-
-`git clone/pull -> install -> build -> release directory -> systemd service -> nginx reverse proxy -> health check`
-
-Mevcut Plesk uygulamaları için Passenger compatibility sonradan/ayrı adapter olarak korunabilir.
-
-### Docker
-
-Örnek akış:
-
-`git clone/pull -> validate compose -> pull/build -> compose up -> health check -> proxy switch`
-
-Deploy sistemi mümkün olduğunca atomik ve rollback edilebilir olmalıdır.
-
-## 8. Konfigürasyon yönetimi
-
-- Nginx, systemd, mail ve diğer servis konfigürasyonları template/adapter katmanından üretilmeli.
-- Doğrudan birçok yerde string halinde config üretme.
-- Üretilen konfigürasyon uygulanmadan önce validate edilmeli.
-- Nginx değişikliğinde önce `nginx -t` benzeri doğrulama yapılmalı, sonra reload uygulanmalı.
-- Servis reload/restart başarısız olursa önceki çalışan config korunmalı veya geri yüklenmeli.
-
-## 9. Veri modeli ilkeleri
-
-Temel domain modelleri en az şunları kapsamalıdır:
-
-- servers
-- users
-- roles
-- applications
-- deployments
-- domains
-- certificates
-- databases
-- database_users
-- environment_variables
-- cron_jobs
-- backups
-- backup_targets
-- mail_domains
-- mailboxes
-- aliases
-- docker_projects
-- audit_logs
-- jobs
-- service_events
-
-Veri modeli UI ekranlarına göre değil, gerçek server state ve lifecycle'a göre tasarlanmalıdır.
-
-## 10. Async job yaklaşımı
-
-Deploy, backup, restore, certificate issuance, Docker build ve benzeri uzun işlemler HTTP request içinde bloklanmamalıdır.
-
-- İşler job queue üzerinden yürütülmeli.
-- Job durumları tutulmalı: `queued`, `running`, `succeeded`, `failed`, `cancelled`.
-- Log stream veya job log kayıtları bulunmalı.
-- Aynı kaynağa zarar verebilecek çakışan operasyonlar lock edilmelidir.
-
-## 11. Test yaklaşımı
-
-Özellikle aşağıdaki alanlar testsiz bırakılmamalıdır:
-
-- permission kontrolleri,
-- privileged agent validation,
-- nginx config generation,
-- systemd unit generation,
-- path validation,
-- deploy state transitions,
-- rollback,
-- backup manifest,
-- destructive operations,
-- secret masking,
-- duplicate resource prevention.
-
-Test çalıştırmak için GitHub Actions kullanılmayacak; testler lokal veya proje tarafından yönetilen runner/sunucu üzerinde çalıştırılacaktır.
-
-## 12. `plan.md` ve `todo.md` kullanımı
-
-- `plan.md` ürünün ve mimarinin ana geliştirme planıdır.
-- Tamamlanan plan maddeleri güncellenebilir ancak geçmiş hedefler sebepsiz silinmemelidir.
-- `todo.md`, bu geliştirme ortamında doğrudan yapılamayan, gerçek Plesk/sunucu erişimi gerektiren veya kullanıcı/Codex tarafından production ortamında uygulanması/test edilmesi gereken işleri içerir.
-- Bu ortamda yapılamayan bir server/Plesk işi fark edildiğinde `todo.md` güncellenmelidir.
-- Yapılabilecek kod işi sırf kolaylık olsun diye `todo.md`'ye atılmamalıdır.
-- **`plan.md` ve `todo.md` geliştirmeden sonra topluca güncellenen rapor dosyaları değildir; geliştirmeyle paralel yaşayan kaynaklardır.**
-- Bir plan maddesi kodla tamamlandığı veya kapsamı değiştiği anda aynı çalışma turunda `plan.md` güncellenmelidir.
-- Gerçek sunucu/Plesk testi gerektiği fark edildiği anda aynı çalışma turunda `todo.md` maddesi eklenmeli; test yapıldığında sonuç, tarih ve durum yine aynı turda işlenmelidir.
-- Kod ile `plan.md`/`todo.md` arasında bilinen bir uyumsuzluk bırakıp bir sonraki geliştirme işine geçmek yasaktır.
-
-## 13. Kapsam kontrolü
-
-İlk sürümde şu özellikler ana hedef değildir:
-
-- reseller sistemi,
-- müşteri faturalama,
-- hosting paketleri,
-- shared hosting quota ürünleştirmesi,
-- çok sayıda Linux dağıtımı,
-- WordPress Toolkit benzeri özel ekosistemler,
-- cPanel/Plesk'in tüm historical compatibility davranışları.
-
-Bu özellikler ancak Yunsoft'un gerçek ihtiyacı oluşursa veya YunPanel ticari ürüne dönüştürülürse ayrı milestone olarak ele alınmalıdır.
-
-## 14. Çalışma prensibi
-
-Her değişiklikte şu sıra izlenmelidir:
-
-1. İlgili mevcut kodu ve dokümanı oku.
-2. En küçük mantıksal değişikliği belirle.
-3. Değişikliği uygula.
-4. Mümkün olan test/validation işlemlerini yap.
-5. Küçük commit oluştur.
-6. Tamamlanan/değişen geliştirme durumunu aynı turda `plan.md`'ye işle.
-7. Server/Plesk üzerinde yapılması gereken harici adım oluştuysa aynı turda `todo.md`'ye ekle; yapılmışsa sonucu işaretle ve doğrulama notunu yaz.
-8. `plan.md`, `todo.md` ve kodun birbirini anlattığını kontrol et.
-9. Bir sonraki bağımsız işe geç.
-
-YunPanel'in hedefi çok özellikli görünmek değil; Yunsoft'un production sunucularını güvenli, öngörülebilir ve hızlı yönetmektir.
+1. Güncel branch, ilgili kod, bu kurallar, `plan.md` ve `todo.md` okunur.
+2. En küçük mantıksal değişiklik ve test/kabul koşulu belirlenir.
+3. Değişiklik uygulanır; mümkün olan testler çalıştırılır.
+4. Aynı turda tamamlanan plan alt maddeleri çıkarılır; yeni dış bağımlılık/kontrol `todo.md` dosyasına eklenir.
+5. Küçük commit oluşturulur; çalıştırılan/çalıştırılamayan kontroller açıkça raporlanır.
+6. Kod, paket, doküman ve yeni mimari uyumu kontrol edilerek sonraki işe geçilir.
