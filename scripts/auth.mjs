@@ -29,16 +29,23 @@ async function readPassword() {
 const [command, username, ...extra] = process.argv.slice(2);
 let store;
 try {
-  if (extra.length || !['setup-token', 'reset-password'].includes(command) || (command === 'setup-token' && username) || (command === 'reset-password' && !username)) {
-    throw new Error('Usage: node scripts/auth.mjs setup-token | reset-password <username> (password via hidden prompt or stdin, never argv)');
+  const valid = (command === 'setup-token' && !username && extra.length === 0)
+    || (command === 'reset-password' && username && extra.length === 0)
+    || (command === 'reset-mfa' && username && extra.length === 1 && extra[0] === '--confirm');
+  if (!valid) {
+    throw new Error('Usage: node scripts/auth.mjs setup-token | reset-password <username> | reset-mfa <username> --confirm (password via hidden prompt or stdin, never argv)');
   }
   const serverStore = process.env.YUNPANEL_SERVER_STORE ?? path.resolve('.data/server-registry.json');
   const filePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStore), 'auth', 'auth.sqlite');
-  store = createAuthStore({ filePath });
+  // Local recovery does not need to decrypt any factor. A lost/malformed key must not prevent it.
+  store = createAuthStore({ filePath, ...(command === 'reset-mfa' ? { masterKey: null } : {}) });
   if (command === 'setup-token') {
     const setup = store.issueSetupToken();
     console.log(`One-time setup token (expires ${new Date(setup.expiresAt).toISOString()}):`);
     console.log(setup.token);
+  } else if (command === 'reset-mfa') {
+    store.mfa.resetLocal(username);
+    console.log('MFA removed; recovery codes, sessions and login challenges revoked. Password unchanged. Re-enroll the authenticator after signing in.');
   } else {
     await store.resetPassword(username, await readPassword());
     console.log('Password updated; all sessions for this user have been revoked.');
