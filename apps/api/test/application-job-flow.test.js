@@ -7,6 +7,7 @@ import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -59,7 +60,6 @@ async function createContext() {
 }
 
 test('static application deploy moves through queue and reconciles the active release', async () => {
-  const adminToken = 'static-application-admin-token';
   const context = await createContext();
   const {
     serverRegistry,
@@ -70,20 +70,18 @@ test('static application deploy moves through queue and reconciles the active re
     certificateRegistry,
   } = context;
 
-  const app = createApp({
+  const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
     applicationRegistry,
     domainRegistry,
     jobRegistry,
     certificateRegistry,
-    adminToken,
-  });
+  }));
 
   await withServer(app, async (baseUrl) => {
     const created = await requestJson(`${baseUrl}/api/applications`, {
       method: 'POST',
-      token: adminToken,
       body: {
         serverId: enrolled.server.id,
         name: 'Marketing Site',
@@ -107,7 +105,6 @@ test('static application deploy moves through queue and reconciles the active re
 
     const deploy = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, {
       method: 'POST',
-      token: adminToken,
     });
     assert.equal(deploy.response.status, 202);
     assert.equal(deploy.payload.data.job.operation, OPERATIONS.APP_STATIC_DEPLOY);
@@ -116,7 +113,6 @@ test('static application deploy moves through queue and reconciles the active re
 
     const duplicate = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, {
       method: 'POST',
-      token: adminToken,
     });
     assert.equal(duplicate.response.status, 409);
     assert.equal(duplicate.payload.error.code, 'application_job_conflict');
@@ -154,7 +150,7 @@ test('static application deploy moves through queue and reconciles the active re
     assert.equal(completed.payload.data.result.commitSha, 'a'.repeat(40));
     assert.equal('stdout' in completed.payload.data.result, false);
 
-    const active = await requestJson(`${baseUrl}/api/applications/${application.id}`, { token: adminToken });
+    const active = await requestJson(`${baseUrl}/api/applications/${application.id}`);
     assert.equal(active.payload.data.state, 'active');
     assert.equal(active.payload.data.currentReleaseId, firstReleaseId);
     assert.equal(active.payload.data.previousReleaseId, null);
@@ -163,7 +159,6 @@ test('static application deploy moves through queue and reconciles the active re
 
     const secondDeploy = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, {
       method: 'POST',
-      token: adminToken,
     });
     assert.equal(secondDeploy.response.status, 202);
 
@@ -198,17 +193,15 @@ test('static application deploy moves through queue and reconciles the active re
 });
 
 test('cancelling a queued static deployment clears the application deployment lock', async () => {
-  const adminToken = 'static-cancel-admin-token';
   const context = await createContext();
-  const app = createApp({
+  const app = withPanelContext(createApp({
     environment: 'production',
     registry: context.serverRegistry,
     applicationRegistry: context.applicationRegistry,
     domainRegistry: context.domainRegistry,
     jobRegistry: context.jobRegistry,
     certificateRegistry: context.certificateRegistry,
-    adminToken,
-  });
+  }));
 
   const application = await context.applicationRegistry.createApplication({
     serverId: context.enrolled.server.id,
@@ -220,13 +213,11 @@ test('cancelling a queued static deployment clears the application deployment lo
   await withServer(app, async (baseUrl) => {
     const deploy = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, {
       method: 'POST',
-      token: adminToken,
     });
     const jobId = deploy.payload.data.job.id;
 
     const cancelled = await requestJson(`${baseUrl}/api/jobs/${jobId}/cancel`, {
       method: 'POST',
-      token: adminToken,
     });
     assert.equal(cancelled.response.status, 200);
     assert.equal(cancelled.payload.data.status, 'cancelled');
