@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import { AuthError, safeEqual } from './auth-error.js';
 import { createMfaStore } from './mfa-store.js';
+import { createUserAdminStore } from './user-admin-store.js';
 export { AuthError, safeEqual } from './auth-error.js';
 
 const derive = promisify(argon2);
@@ -155,12 +156,15 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
   }
 
   let mfa;
+  let users;
   try {
     mfa = createMfaStore({ db, now, masterKey, getSession, verifyPassword, createSession, transaction, rateLimit, audit: event });
+    users = createUserAdminStore({ db, now, transaction, getSession, hashPassword, normalizeUsername: username, mfa, audit: event });
   } catch (error) { db.close(); throw error; }
 
   return {
     mfa,
+    users,
     close: () => db.close(),
     configured: () => Boolean(db.prepare('SELECT 1 FROM users LIMIT 1').get()),
     issueSetupToken() {
@@ -194,7 +198,9 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
     async login({ username: input, password, peer = 'local', previousToken = null }) {
       const name = typeof input === 'string' ? input.trim().toLowerCase().slice(0, 128) : '';
       rateLimit([['login:global', 120], [`login:peer:${digest(peer)}`, 40], [`login:user:${digest(name)}`, 10]]);
-      const user = db.prepare('SELECT * FROM users WHERE username = ?').get(name);
+      const user = db.prepare(`SELECT u.*, COALESCE(r.revision, 1) AS admin_revision
+        FROM users u LEFT JOIN auth_user_revisions r ON r.user_id = u.id WHERE u.username = ?`).get(name);
+      const userRevision = user?.admin_revision ?? null;
       // Unknown users still pay the same KDF cost; no username-existence response.
       dummyHash ??= hashPassword(token()).catch((error) => { dummyHash = null; throw error; });
       const fallback = await dummyHash;
@@ -202,7 +208,8 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
       const valid = await verifyPassword(password, expected);
       const result = transaction(() => {
         const current = user && db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-        if (!valid || !current?.active || current.password_hash !== expected) return null;
+        // Revocation must also win against a password login already in flight.
+        if (!valid || !current?.active || current.password_hash !== expected || users.revision(current.id) !== userRevision) return null;
         if (typeof previousToken === 'string' && TOKEN_PATTERN.test(previousToken)) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(digest(previousToken));
         if (mfa.enabled(current.id)) {
           event(current.id, 'login.password_verified');

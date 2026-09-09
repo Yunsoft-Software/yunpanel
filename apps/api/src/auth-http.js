@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { AuthError, safeEqual } from './auth-error.js';
 import { createOwnerMfaPolicy } from './owner-mfa-policy.js';
+import { handleUserAdmin } from './user-admin-http.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
 const AGENT_ROUTES = [
@@ -213,6 +214,9 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
     const authorized = ownerPolicy.requireManagement(store.getSession(rawToken));
     if (!SAFE_METHODS.has(request.method)) store.getSession(rawToken, { touch: true });
     request.auth = authorized;
+    if (pathname === '/api/users' || pathname.startsWith('/api/users/')) {
+      return handleUserAdmin({ request, response, pathname, query: url.searchParams, store, rawToken, requireManagement: ownerPolicy.requireManagement, readJson, json });
+    }
     request.headers.authorization = `Bearer ${internalToken}`;
     return handler(request, response);
   }
