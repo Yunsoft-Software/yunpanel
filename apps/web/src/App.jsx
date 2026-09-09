@@ -3,6 +3,7 @@ import ApplicationList from './ApplicationList.jsx';
 import CertificateList from './CertificateList.jsx';
 import DomainList from './DomainList.jsx';
 import JobList from './JobList.jsx';
+import SystemUpdatePanel from './SystemUpdatePanel.jsx';
 
 const navigation = [
   'Dashboard',
@@ -19,6 +20,7 @@ const navigation = [
 ];
 
 const EXPIRY_WARNING_MS = 30 * 24 * 60 * 60 * 1000;
+const COLLECTION_ROOT = import.meta.env.DEV ? '/api/dev' : '/api/panel';
 
 function formatBytes(value) {
   if (!Number.isFinite(value) || value < 0) return '—';
@@ -104,31 +106,13 @@ function App() {
         const apiPayload = await apiResponse.json();
         setApiState({ status: apiPayload.status ?? 'ok', version: apiPayload.version ?? null });
 
-        const [agentResult, serverResult, applicationResult, domainResult, jobResult, certificateResult] = await Promise.allSettled([
-          fetch('/api/dev/agent/inspect', { signal: controller.signal }),
-          fetch('/api/dev/servers', { signal: controller.signal }),
-          fetch('/api/dev/applications', { signal: controller.signal }),
-          fetch('/api/dev/domains', { signal: controller.signal }),
-          fetch('/api/dev/jobs', { signal: controller.signal }),
-          fetch('/api/dev/certificates', { signal: controller.signal }),
+        const [serverResult, applicationResult, domainResult, jobResult, certificateResult] = await Promise.allSettled([
+          fetch(`${COLLECTION_ROOT}/servers`, { signal: controller.signal }),
+          fetch(`${COLLECTION_ROOT}/applications`, { signal: controller.signal }),
+          fetch(`${COLLECTION_ROOT}/domains`, { signal: controller.signal }),
+          fetch(`${COLLECTION_ROOT}/jobs`, { signal: controller.signal }),
+          fetch(`${COLLECTION_ROOT}/certificates`, { signal: controller.signal }),
         ]);
-
-        if (agentResult.status === 'fulfilled') {
-          const response = agentResult.value;
-          if (response.status === 404) {
-            setAgentState({ status: 'protected', hostname: null });
-          } else if (response.ok) {
-            const payload = await response.json();
-            setAgentState({
-              status: payload.status === 'succeeded' ? 'running' : 'offline',
-              hostname: payload.result?.hostname ?? null,
-            });
-          } else {
-            setAgentState({ status: 'offline', hostname: null });
-          }
-        } else if (agentResult.reason?.name !== 'AbortError') {
-          setAgentState({ status: 'offline', hostname: null });
-        }
 
         readCollectionResult(serverResult, setServers, setServerAccess);
         readCollectionResult(applicationResult, setApplications, setApplicationAccess);
@@ -155,6 +139,14 @@ function App() {
       controller.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (serverAccess !== 'ready') return;
+    const online = servers.find((server) => server.connectivity === 'online');
+    setAgentState(online
+      ? { status: 'running', hostname: online.hostname }
+      : { status: servers.length ? 'offline' : 'checking', hostname: null });
+  }, [serverAccess, servers]);
 
   const operationalSummary = useMemo(() => {
     const onlineServers = servers.filter((server) => server.connectivity === 'online').length;
@@ -262,6 +254,8 @@ function App() {
             </article>
           ))}
         </section>
+
+        {!import.meta.env.DEV && <SystemUpdatePanel server={servers[0] ?? null} />}
 
         <section className="content-grid">
           <article className="panel wide-panel">
