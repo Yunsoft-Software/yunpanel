@@ -72,15 +72,15 @@ Bu dosyada yalnız güvenilir biçimde çalıştırılamayan gerçek ortam doğr
 
 ## T-LIVE — P0/P1: Canlı panel, package ve rollback kapısı
 
-- [x] `cryptoraichu.website` üzerinde deploy edilen `0.3.0-2` paketini, source API/agent `0.3.0` sürümlerini, Nginx/web/API/agent unitlerini, journal durumunu ve mevcut erişim korumasını gerçek hosttan doğrula.
+- [x] `cryptoraichu.website` üzerinde deploy edilen `0.3.0-3` paketini, source API/agent `0.3.0` sürümlerini, Nginx/web/API/agent unitlerini, journal durumunu ve mevcut erişim korumasını gerçek hosttan doğrula.
 - [ ] Owner/MFA kurulumundan sonra management menülerini ve browser console/network durumunu canlıda tamamla.
 - [x] Production değişikliğinden önce `/etc/yunpanel`, `/var/lib/yunpanel`, auth alanı, master key config, package/unit, Nginx/vhost, cert ve release state için checksum doğrulamalı geri dönüş arşivi al.
 - [ ] Geri dönüş arşivinin restore'unu ayrı test hostunda kanıtla.
 - [x] Aday `.deb` install/upgrade çalıştır; required Node/native dependencies, auth CLI, rotation CLI/runbook, systemd ownership/sandbox ve service restart davranışını doğrula.
-- [ ] `0.3.0-2` paket rollback + eşleşen state/config geri dönüşünü izole test hostunda prova et.
+- [ ] `0.3.0-3` paket rollback + eşleşen state/config geri dönüşünü izole test hostunda prova et.
 - [x] Hosted Node/static sitelerin panel restart/upgrade sırasında çalışmaya devam ettiğini 50 ardışık `200/200` örneğiyle doğrula.
 
-2026-09-09 canlı kabul notu: `cryptoraichu.website` Ubuntu 24.04.5 test hostunda APT ile `0.2.0-1 -> 0.3.0-1 -> 0.3.0-2` yükseltildi. Son paket ve aday eşit, `dpkg -V` temiz, failed unit/pending update/reboot gereksinimi sıfır, API/web/agent journal warning sayısı sıfır ve ajan heartbeat sürümü `0.3.0`. Auth schema 2, DB/dizin izinleri `0600/0700`, eski bootstrap bearer kaldırılmış, anonim management `401`, yanlış istemci ve cross-origin mutation `403`. İlk Owner henüz oluşturulmadı; kullanıcı adı/parola/MFA/recovery-code ve oturum gerektiren kabul maddeleri bu nedenle açık bırakıldı. Geri dönüş arşivi `/root/yunpanel-backups/yunpanel-pre-0.3.0-20260909T203159Z.tar.gz` altında checksum ve tar okunabilirliğiyle doğrulandı; ayrı host restore provası yapılmadı.
+2026-09-09 canlı kabul notu: `cryptoraichu.website` Ubuntu 24.04.5 test hostunda APT ile `0.2.0-1 -> 0.3.0-1 -> 0.3.0-2 -> 0.3.0-3` yükseltildi. Son paket ve aday eşit, `dpkg -V` temiz, failed unit/pending update/reboot gereksinimi sıfır, API/web/agent journal warning sayısı sıfır ve ajan heartbeat sürümü `0.3.0`. Auth schema 2, DB/dizin izinleri `0600/0700`, eski bootstrap bearer kaldırılmış, anonim management `401`, yanlış istemci ve cross-origin mutation `403`. İlk Owner henüz oluşturulmadı; kullanıcı adı/parola/MFA/recovery-code ve oturum gerektiren kabul maddeleri bu nedenle açık bırakıldı. Geri dönüş arşivi `/root/yunpanel-backups/yunpanel-pre-0.3.0-20260909T203159Z.tar.gz` altında checksum ve tar okunabilirliğiyle doğrulandı; ayrı host restore provası yapılmadı.
 
 ## T-MIGRATION — P1+: Agentless / Website / Plesk gerçek ortam kabulü
 
