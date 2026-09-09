@@ -4,9 +4,9 @@ Yalnızca kalan dış ortam işleri ve doğrulamalar burada tutulur. Ürün/kod 
 
 ## Çalışma sınırı ve Codex başlangıcı
 
-Canlı `cryptoraichu.website` için bu ortamda görsel/interaktif doğrulama, SSH erişimi veya deployment yapılmadı. Depo incelemesi canlı servis yapılandırmasını kanıtlamaz. Authentication kodunun kurulum ve test sınırları `docs/authentication.md` içindedir; tam workspace/build ve gerçek tarayıcı kabulü aşağıda açık kalır.
+Canlı `cryptoraichu.website` için bu ortamda görsel/interaktif doğrulama, SSH erişimi veya deployment yapılmadı. Depo incelemesi canlı servis yapılandırmasını kanıtlamaz. Authentication kodunun kurulum ve test sınırları `docs/authentication.md`, domain parent/ağaç/form değişikliğinin sınırları `docs/domain-hierarchy.md` içindedir; tam workspace/build ve gerçek tarayıcı kabulü aşağıda açık kalır.
 
-Codex önce güncel branch'i ve üç planlama dosyasını okumalı; kod işlerini `plan.md` sırasıyla küçük commitlerle uygulamalıdır. Bu dosya normal kod işlerini ertelemek için kullanılmaz. Hedef mimari geçişi doğrulamalarında tekrar istenen eski akışlar, yeni agentsiz backend için regresyon testidir; eski testin yapılmadığı anlamına gelmez. Authentication eklenmesi ayrı agent'ın kaldırıldığı veya root terminalin hazır olduğu anlamına gelmez.
+Codex önce güncel branch'i ve üç planlama dosyasını okumalı; kod işlerini `plan.md` sırasıyla küçük commitlerle uygulamalıdır. Bu dosya normal kod işlerini ertelemek için kullanılmaz. Hedef mimari geçişi doğrulamalarında tekrar istenen eski akışlar, yeni agentsiz backend için regresyon testidir; eski testin yapılmadığı anlamına gelmez. Authentication veya domain ağacının eklenmesi ayrı agent'ın kaldırıldığı, root terminalin hazır olduğu veya tam Website modeline geçildiği anlamına gelmez.
 
 ## T0 — P0: Canlı paneli doğrula ve geçici erişimi koru
 
@@ -44,6 +44,16 @@ Codex önce güncel branch'i ve üç planlama dosyasını okumalı; kod işlerin
 - [ ] Yeni kurulumda API/PTY/config izinleri gerçek operasyonları engelliyorsa hatalı unit/sandbox/ownership ayarını düzelt; global chmod/chown veya tüm korumaları kapatma kullanma. Servis kullanıcısı değişiminde auth dosyaları ve CLI kullanıcısını kontrollü taşı.
 - [ ] Yükseltme sırasında/sonrasında job drain, servis restartı, yarım kalan işin reconciliation'ı ve duplicate execution korumasını doğrula. Eski paket/state/unit'e rollback'i ayrı test alanında uygula.
 - [ ] Reboot sonrası backend, Nginx ve managed uygulamaların açıldığını; panel durdurulunca hosted trafiğin devam ettiğini doğrula. Bu kontroller agentsiz mimari için yeniden yapılmalı.
+
+## T3a — P1: Parent, domain ağacı ve form değişikliğinin yayın kabulü
+
+- [ ] `docs/domain-hierarchy.md` içindeki dört test dosyasını desteklenen Node 24.11.1+ ortamında yeniden çalıştır; ardından tam `npm run check` uygula. Bu turdaki 29 odaklı test Node 22.16.0 altında kısmi workspace ile çalıştı; tüm uygulama/Express/Vite uyumluluğu kanıtlanmadı.
+- [ ] Gerçek `index.js` -> `createAuthenticatedApi` -> `app.js`/`core-app.js` bileşimi üzerinden Owner ile ana domain/subdomain POST ve listeleme akışını test et. Eksik parent 404, geçersiz parent ilişkisi 400, farklı sunucu 409 vermeli; anonim erişim 401, yetkisiz rol 403 ve CSRF reddi korunmalı. Doğrudan korumasız test listenerını production kabulü sayma. Mevcut SSL renewal dry-run ve deploy/rollback testlerini de çalıştır.
+- [ ] Paket içinde yeni `core-app.js`, `domain-http.js` ve güncel frontend assetlerinin birlikte bulunduğunu doğrula. Eski API ile yeni frontend'i karıştırma; yeni paketi kabul etmeden canlıya yükseltme. Mevcut auth/IP korumasını değiştirme.
+- [ ] Gerçek React tarayıcısında domain satırından Add subdomain -> otomatik parent -> prefix -> farklı hedef/HTTPS -> oluştur akışını tamamla. Çoklu sunucu fixture'ında çocuğun ilk sunucuya değil parent sunucusuna yazıldığını doğrula. Hatalı istek sonrası formun kaldığını, focus ve yüklenme durumlarını kontrol et.
+- [ ] Ağaç araması, alias eşleşmesi, üst kayıtların görünmesi, aç/kapat ve arama temizlenince önceki collapse durumunu test et. Uzun adları ve 1440×900, 1920×1080, 1280×800, 390×844 görünümlerini dene; sözdizimi kontrolünü görsel/erişilebilirlik kabulü sayma.
+- [ ] Yedeklenmiş version-1 registry kopyasıyla eski kayıtlara parent tahmin edilmediğini ve salt okumada dosyanın değişmediğini doğrula. Yeni explicit parent, ID, alias, target ve certificate bağları servis yeniden başladığında korunmalı. Paket rollback'ini kopyada test et; eski kodun yeni parent kontrollerini uygulamadığını hesaba kat.
+- [ ] Test domaini üzerinde child stage/activate ve bağımsız TLS hedefini doğrula; mevcut ana domain vhost/sertifikası ve diğer sitelerin trafiği değişmemeli. Kayıt oluşturulmasının DNS veya mailbox yaratmadığını doğrula. Tam Website migration, IDN ve site sekmelerinin hazır olduğunu varsayma; bunlar plan C/D kapsamında kalır.
 
 ## T3 — P1: Domain/subdomain migration ve enterprise ekranlar — plan C/D
 
