@@ -32,7 +32,7 @@ The repository has progressed beyond the initial read-only skeleton. Current imp
 - local tests and repository policy validation,
 - no GitHub Actions.
 
-Active Node Milestone 4 work is now focused on safe redacted log transport plus the environment/log operator UI. Real Ubuntu/systemd validation, secret master-key operations and filesystem permission verification are tracked continuously in `todo.md` rather than being treated as completed by code-only tests.
+Active Node Milestone 4 work is now focused on safe redacted log transport and its operator UI. Real Ubuntu/systemd validation, secret master-key operations and filesystem permission verification are tracked continuously in `todo.md` rather than being treated as completed by code-only tests.
 
 ## Requirements
 
@@ -65,7 +65,7 @@ On an Ubuntu 24.04 build host with Node.js 24 and `dpkg-deb` available:
 ```bash
 npm install
 npm run build
-./scripts/build-deb.sh 0.1.0-1
+./scripts/build-deb.sh 0.2.0-1
 ```
 
 The package keeps runtime state under `/var/lib/yunpanel` and configuration/secrets under `/etc/yunpanel`; package upgrades replace application code and systemd units without overwriting those persistent paths. `scripts/publish-local-apt.sh` can publish a built package into a host-local APT repository for controlled validation.

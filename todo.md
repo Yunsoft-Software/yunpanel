@@ -122,8 +122,8 @@ Her tamamlanan maddede mümkünse sonuç, tarih ve kısa doğrulama notu bırak�
 
 Bu maddeler agent kodu hazırlandıktan sonra test Ubuntu sunucusunda yapılacak.
 
-- [ ] YunPanel `.deb` paketini test sunucusundaki APT repository üzerinden kur ve mevcut `/etc/yunpanel` ile `/var/lib/yunpanel` durumunun korunduğunu doğrula.
-- [ ] Paneldeki `system.upgrade` akışıyla daha yeni YunPanel paketine geç; job sonucu, gecikmeli servis restartı, yeni sürüm ve mevcut domain/application sağlığını doğrula.
+- [x] YunPanel `.deb` paketini test sunucusundaki APT repository üzerinden kur ve mevcut `/etc/yunpanel` ile `/var/lib/yunpanel` durumunun korunduğunu doğrula.
+- [x] Paneldeki `system.upgrade` akışıyla daha yeni YunPanel paketine geç; job sonucu, gecikmeli servis restartı, yeni sürüm ve mevcut domain/application sağlığını doğrula.
 
 - [x] YunPanel için dedicated Linux system user/group oluştur.
 - [x] `yun-agent` için systemd service kur.
@@ -137,6 +137,8 @@ Bu maddeler agent kodu hazırlandıktan sonra test Ubuntu sunucusunda yapılacak
 - [ ] Agent credential rotation prosedürünü gerçek sunucuda test et.
 
 2026-09-09 doğrulaması: control plane `yunpanel` kullanıcısıyla, ayrıcalıklı ajan root ile ayrı systemd servislerinde çalıştırıldı. API `127.0.0.1:3001`, ajan `127.0.0.1:4010` üzerinde dinliyor; dışarıya ajan portu açılmadı. Ajan identity/config dizini `0700`, dosyaları `0600`; uygulama environment dizini `0700`, dosyası `0600` doğrulandı. Ajan ve API reboot sonrasında otomatik başladı ve enrollment identity yeniden kullanıldı. Bu test separation'ı kanıtlar; ajanı root yerine sınırlı sudo/polkit yetkilerine indirme maddesi halen açıktır. Hostta UFW inaktif olduğundan "network erişimi" yalnızca gerekli loopback akışı ile dışarıdan erişilen SSH/HTTP portlarının çalıştığını ifade eder, kalıcı firewall policy doğrulaması değildir.
+
+2026-09-09 paket/yükseltme doğrulaması: test hostundaki yerel APT deposundan `yunpanel 0.1.0-1` kuruldu; `/etc/yunpanel` yapılandırması ile `/var/lib/yunpanel` uygulama/domain/job durumu korundu. Canlı panelin sabit kapsamlı `system.upgrade` işlemiyle `0.2.0-1` adayına geçildi ve job başarılı tamamlandı. Gecikmeli API/web/agent restartı sonrasında üç servis ile Nginx active/enabled, API ve ajan sürümü `0.2.0`, `dpkg -V yunpanel` temiz, dört mevcut test vhost'u HTTP 200, `cryptoraichu.website` aktif ve TLS sağlıklı, failed systemd unit/pending APT update/reboot gereksinimi sıfır olarak doğrulandı.
 
 ---
 

@@ -52,11 +52,12 @@ Current implementation checkpoint — 2026-09-09:
 - ACME issuance explicitly restores the shared challenge-root mode after creation so the agent's restrictive umask cannot make HTTP-01 files unreadable by Nginx,
 - externally observed completed job state is held behind the in-process reconciliation barrier so the related domain/application/certificate state is settled before API job reads return,
 - protected Node runtime environments are implemented with a separate AES-256-GCM store, masked admin metadata, authenticated just-in-time agent delivery and atomic root-protected systemd EnvironmentFile materialization,
-- secure log transport/redaction and the environment/log operator UI remain active Milestone 4 work,
+- secure log transport/redaction and its operator UI remain active Milestone 4 work; masked environment management is available in the application view,
 - the dedicated test host was backed up and upgraded from Ubuntu 22.04.5 LTS to Ubuntu 24.04.5 LTS; network persistence, reboot recovery, Nginx, Node.js, systemd, control-plane, agent and managed application/vhost health were revalidated on the target platform,
 - `cryptoraichu.website` is active through the real YunPanel domain workflow with an externally trusted Let's Encrypt certificate, HTTP-to-HTTPS redirect and successful ACME staging plus renewal dry-runs; a client-IP-restricted loopback gateway exposes the current dashboard without exposing privileged admin API routes.
 - Debian package infrastructure now installs versioned YunPanel code, web assets and hardened systemd units while preserving `/etc/yunpanel` configuration and `/var/lib/yunpanel` runtime state; fixed-scope protocol/API/agent jobs inspect the `yunpanel` APT candidate and upgrade only that package before scheduling a delayed API/web/agent restart.
 - the existing dashboard visual language now has functional view navigation without a UI redesign: implemented server, application, domain/TLS, job and package-update capabilities expose their real control-plane operations, protected environment values stay masked, browser-native prompts are not used, and unsupported menu areas render an explicit capability status instead of inert controls.
+- the test host was first installed from the host-local APT repository as `yunpanel 0.1.0-1`, then upgraded from the live panel to `0.2.0-1`; the upgrade job succeeded, its delayed restart completed, package verification reported no modified packaged files, and the API, web, agent, Nginx, managed applications, vhosts and persistent configuration/state remained healthy.
 
 ---
 
