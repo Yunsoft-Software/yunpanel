@@ -69,10 +69,10 @@ export function mountManagedServiceRoutes(app, { registry, jobRegistry }) {
   app.get('/api/servers/:serverId/services', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const server = await requireServer(registry, request.params.serverId);
     const latest = await latestServiceSnapshot(jobRegistry, server.id);
-    return response.json({
-      data: latest?.result ?? null,
+    return response.json({ data: {
+      services: latest?.result ?? null,
       snapshot: latest ? { jobId: latest.id, refreshedAt: latest.finishedAt ?? latest.createdAt } : null,
-    });
+    } });
   }));
 
   app.post('/api/servers/:serverId/services/inspect', requirePanelRouteAccess, asyncRoute(async (request, response) => {

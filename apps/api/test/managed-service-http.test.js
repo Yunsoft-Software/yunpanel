@@ -129,7 +129,7 @@ test('service control validates action confirmation and serializes server system
   assert.equal((await conflict.json()).error.code, 'system_job_conflict');
 });
 
-test('latest successful full inspection is readable without exposing queued payloads', async (t) => {
+test('latest successful full inspection is readable inside the standard data envelope', async (t) => {
   const { request, jobRegistry, serverId } = await fixture(t);
   const queued = await jobRegistry.enqueue({
     serverId,
@@ -150,9 +150,9 @@ test('latest successful full inspection is readable without exposing queued payl
   const response = await request(`/api/servers/${serverId}/services`);
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.data.length, MANAGED_SERVICE_IDS.length);
-  assert.equal(body.snapshot.jobId, queued.id);
-  assert.equal(Object.hasOwn(body.snapshot, 'payload'), false);
+  assert.equal(body.data.services.length, MANAGED_SERVICE_IDS.length);
+  assert.equal(body.data.snapshot.jobId, queued.id);
+  assert.equal(Object.hasOwn(body.data.snapshot, 'payload'), false);
 });
 
 test('Read Only cannot enter nested service management routes', async (t) => {
