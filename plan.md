@@ -1,120 +1,107 @@
 # YunPanel — Yapılacaklar
 
-Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan alt maddeler çıkarılır; geçmiş Git commitlerinde kalır. Kod hazır olup gerçek ortam kabulü bekleyen işler `todo.md` içinde açık tutulur. Bağlayıcı kurallar `agents.md`; authentication, MFA, kullanıcı yönetimi, domain ve yeni arayüzün uygulanmış kapsamı `docs/authentication.md`, `docs/owner-mfa-policy.md`, `docs/user-administration.md`, `docs/domain-hierarchy.md`, `docs/website-workspace.md` ve `docs/ui-runtime.md` içindedir.
+Bu dosya yalnızca kalan geliştirme işlerini içerir. Tamamlanan işler geçmiş Git commitlerinde kalır; kodu tamamlanıp gerçek Node 24 / tarayıcı / Ubuntu / canlı servis kabulü bekleyen maddeler `todo.md` içine taşınır. Bağlayıcı geliştirme kuralları `agents.md` içindedir.
 
-Hedef: site merkezli enterprise panel, açık domain/subdomain hiyerarşisi ve ayrı sunucu agent'ı yerine tam yetkili yerel backend. Yeni arayüzü tamamlanmış hosting backend'i sayma. Kullanıcı açıkça başka branch istemedikçe doğrudan `main` üzerinde küçük commitlerle ilerle; GitHub Actions kullanma. Root backend ve terminal kalan güvenlik/yayın kabulünden önce public açılmayacak.
+Hedef: site merkezli enterprise hosting paneli, açık domain/subdomain hiyerarşisi ve ayrı privileged agent yerine host üzerinde çalışan tam yetkili yerel backend. Kullanıcı ayrıca istemedikçe doğrudan `main` üzerinde küçük commitlerle ilerle; GitHub Actions kullanma. Root backend ve terminal güvenlik/yayın kabulü tamamlanmadan public açılmayacak.
 
-## A. P0 — Kalan authentication ve erişim işleri
+## A. P0 — Authentication ve erişim sınırında kalan işler
 
-- [ ] Read Only için kaynak/işlem bazlı izinleri backend + UI ile uygula. Mevcut rol yalnız kendi hesap ayarlarına erişebilir; kaynak görüntüleme iznini örtülü biçimde genişletme. Kullanıcı yönetimi mevcut Owner MFA sınırında kalmalı; frontend buton gizlemek backend yetkilendirmesi değildir. Kullanıcı yaşam döngüsünün kalan native/tam workspace/tarayıcı kabulü `todo.md` T-USER içinde.
-- [ ] MFA/oturum için gerçek React tarayıcı otomasyonu ekle: iki sekme, gecikmiş istek, kayıp MFA yanıtı, geri yüklenen sayfa, recovery kodlarını onaylama, modal/focus ve süre uzatma. MFA master-key değişimi için uygulama secretlarıyla uyumlu, geri alınabilir rotation aracını geliştir.
-- [ ] `core-app.js` ve domain route bileşiminde kalan `bootstrap-auth.js` / in-process uyumluluk tokenını kaldırıp doğrulanmış kullanıcı bağlamını doğrudan kullan. Authentication listener'ını atlayan alternatif `createApp().listen()` yolu ekleme. Agentsiz geçişte eski enrollment/agent rotalarını ve credential'larını kaldır.
-- [ ] WebSocket/SSE/terminal eklendiğinde HTTP ile aynı oturum, rol, Origin ve Owner MFA kontrolünü uygula. Loopback geliştirme istisnasını public root/terminal yoluna taşıma. Logout, parola/MFA/rol değişimi ve kullanıcı iptalinde açık bağlantı/PTY yetkisini derhal kaldır.
-- [ ] IP allowlist'i güvenlik kabulü sonrası isteğe bağlı ek ağ kontrolüne dönüştür. Açık trusted-proxy sözleşmesi, gerçek istemciye göre rate limit ve spoof testleri ekle; doğrulanmadan mevcut ağ kısıtını kaldırma.
-- [ ] Auth eventlerini tam audit modeline/ekranına bağla; kullanıcı yönetimi ve yönetim/job işlemlerinde actor/resource/result kayıtlarını tamamla. Parola, cookie, env değeri ve ham terminal çıktısı kaydetme.
+- [ ] MFA/oturum için gerçek React tarayıcı otomasyonu ekle: iki sekme, gecikmiş istek, kayıp MFA cevabı, geri yüklenen sayfa, recovery kodu onayı, modal/focus, idle/absolute süre ve keep-alive davranışını kapsa.
+- [ ] `core-app.js` ve domain route bileşimindeki `bootstrap-auth.js` / in-process uyumluluk bearer tokenını kaldır. Browser management route'ları yalnız authentication listener tarafından server-side eklenen doğrulanmış `request.auth` bağlamını kullansın; doğrudan raw `createApp().listen()` management erişimi fail-closed kalsın. Agent rotalarının ayrı credential'ları B geçişinde kaldırılacak.
+- [ ] WebSocket/SSE/terminal eklendiğinde HTTP ile aynı session, rol, Origin ve Owner MFA sınırını uygula. Logout, parola/MFA/rol değişimi, kullanıcı disable/delete ve session revoke açık bağlantı/PTY yetkisini derhal düşürsün.
+- [ ] IP allowlist'i ancak gerçek HTTPS/proxy kabulünden sonra isteğe bağlı ek ağ kontrolüne dönüştür. Trusted-proxy sözleşmesi, gerçek istemci IP'sine göre rate limit ve spoof testleri olmadan mevcut korumayı kaldırma.
+- [ ] Auth eventlerini ortak audit modeline bağla; kullanıcı yönetimi ve management/job işlemlerinde actor/resource/action/result kaydı üret. Parola, cookie, env değeri, MFA secretı ve ham terminal çıktısı audit'e yazılmayacak.
 
-**Kabul:** `todo.md` T-USER/T1/T1a/T1b/T1c. Gerçek HTTPS, kullanıcı yaşam döngüsü, tam workspace ve ileride canlı bağlantı iptali doğrulanmadan root/terminal public sürümü açılmaz.
+**Kabul:** Kalan native/browser/canlı kabul işleri `todo.md` içinde. Güvenlik zinciri doğrulanmadan root/terminal public sürümü açılmaz.
 
 ## B. P1 — Ayrı agent'ı kaldır, tam yetkili yerel backend'e geç
 
-- [ ] Sunucu başına yerel panel kurulumunu uygula. Yönetim backend'i host üzerinde root yetkili systemd servisi; root terminali aynı backend'in PTY oturumu olacak. Ayrı `yun-agent`, enrollment, heartbeat, credential exchange veya işlem başına sudo/polkit izin akışı olmayacak.
-- [ ] `apps/agent/src` içindeki Nginx, ACME, systemd, deploy, rollback, envanter ve paket yöneticilerini panelin dahili adapter/host-service katmanına taşı. Çalışan algoritmaları yeniden yazma; transport bağımlılıklarını ayır ve testlerini taşı. Başka isim altında ikinci privileged daemon kurma.
-- [ ] `agent-client.js`, agent endpointleri, job claim/report ve secret-delivery akışlarını yerel yürütücüye geçir. Kuyruk, resource lock, reconciliation, hata/rollback ve servis yeniden başlatılınca işlerin kaybolmaması/iki kez yürütülmemesi korunmalı.
-- [ ] Yerel server kaydını kurulumda otomatik oluştur; mevcut server/application/domain kimliklerini ve bağlantılarını koru. Lokal olduğu doğrulanmayan eski kayıtları bu sunucuya sessizce bağlama. Uzak çoklu sunucu yönetimi geçişin önkoşulu değil.
-- [ ] Root yetkisini uygulamalara yayma. Node/static build, npm lifecycle scriptleri, Git hook'ları, uygulama süreçleri/cron'u/site terminali dedicated site kullanıcısıyla çalışacak. Owner Sunucu terminalinde root kullanabilecek.
-- [ ] Systemd unitleri, Debian maintainer scriptleri, installer, paket listesi, workspace, env örnekleri ve dev komutlarını agentsiz yapıya geçir. Sandbox/ownership gerçek yönetim ve PTY'yi engellememeli; `chmod -R 777`, genel sahiplik değişimi veya güvenliği topluca kapatma kullanma.
-- [ ] Yedek -> job drain -> versioned state migration -> yeni backend health -> eski agent'ı durdur/devre dışı bırak sırasını ve eski paket/unit/state'e rollback'i uygula. `/etc/yunpanel`, `/var/lib/yunpanel`, auth SQLite, master key, vhost, sertifika, release ve kullanıcıları koru. Servis kullanıcısı değişince auth dosyası/CLI ownership geçişini açıkça yap.
-- [ ] Geçiş tamamlanınca arayüzde korunan eski enrollment araçlarını ve agent mesajlarını kaldır. Eksik servis, gerçek OS hatası, kullanıcı yetkisi, yanlış config ve uygulanmamış modül durumlarını ayrı göster.
+- [ ] Sunucu başına yerel panel mimarisini uygula. Yönetim backend'i host üzerinde root yetkili systemd servisi olsun; ayrı `yun-agent`, enrollment, heartbeat, credential exchange veya işlem başına sudo/polkit izin akışı kalmasın.
+- [ ] `apps/agent/src` içindeki çalışan Nginx, ACME, systemd, deploy, rollback, envanter ve paket yönetimi algoritmalarını panel backend'inin dahili host-service/adapter katmanına taşı. Transport bağımlılıklarını ayır; çalışan algoritmaları gereksiz yeniden yazma.
+- [ ] `agent-client.js`, command claim/result, heartbeat ve secret-delivery akışlarını yerel executor'a geçir. Job queue, resource lock, reconciliation, hata/rollback ve restart sonrası idempotency korunmalı.
+- [ ] Yerel server kaydını kurulum/migration sırasında açıkça oluştur veya mevcut local kayıtla eşleştir. Mevcut server/application/domain kimliklerini ve ilişkilerini koru; doğrulanmamış uzak kaydı bu hosta sessizce bağlama.
+- [ ] Root yetkisini site uygulamalarına yayma. Node/static build, npm lifecycle, Git hook, cron ve site terminali dedicated site Unix kullanıcısıyla çalışsın; Owner Sunucu terminali root olabilir.
+- [ ] Systemd unitleri, Debian maintainer scriptleri, installer, package listesi, workspace/env örnekleri ve dev komutlarını agentsiz yapıya geçir. Gerçek management/PTy işlemlerini engelleyen sandbox'ları bilinçli daralt; `chmod -R 777` veya genel ownership değişimi kullanma.
+- [ ] Migration sırası: yedek -> job drain -> sürümlü state migration -> yeni backend health -> eski agent durdur/devre dışı -> doğrulama. `/etc/yunpanel`, `/var/lib/yunpanel`, auth SQLite, master key, vhost, sertifika, release ve kullanıcıları koru; rollback eski paket/unit/state'e dönebilsin.
+- [ ] Geçiş tamamlanınca enrollment UI/agent mesajlarını kaldır ve eksik servis, gerçek OS hatası, kullanıcı yetkisi, yanlış config ve uygulanmamış modül durumlarını ayrı göster.
 
-**Kabul:** Agent çalışmazken envanter, Nginx test/reload, Node deploy/restart/rollback, SSL ve paket işlemleri çalışmalı. Owner root terminal açabilmeli; panel durunca hosted servisler çalışmaya devam etmeli.
+**Kabul:** Agent çalışmadan envanter, Nginx test/reload, Node deploy/restart/rollback, SSL ve paket işlemleri çalışmalı; Owner root terminal açabilmeli; panel dursa hosted servisler çalışmaya devam etmeli.
 
-## C. P1 — Kalıcı Website modeli ve hiyerarşi
+## C. P1 — Kalıcı Website modeli ve domain hiyerarşisi
 
-- [ ] Kalıcı website kimliği ile hostname kaydını ayır. Website sunucu, uygulama/runtime, document root ve Unix kullanıcı bağlarını taşımalı; domain kaydı website bağlantısı, açık parent ve ayrı alias hedefi taşımalı. Mevcut `primaryDomain`, `aliases`, `parentDomainId`, sertifika ve release ilişkilerini koru.
-- [ ] Yeni `/websites/:websiteId` uyumluluk ekranını gerçek Website kaynağına taşı. Şimdilik kullanılan domain ID ve aynı sunucu/porttan uygulama aday eşleştirmesini kalıcı atama sayma. Node/static/Docker uygulama bağlama, runtime/env/log/dosya/yedek ilişkilerini açık backend referanslarıyla tamamla. Alias bağımsız uygulama/mail alanı yaratmamalı.
-- [ ] Shared FQDN doğrulamasına IDN/punycode desteği; mevcut kayıtlar için açık parent seçimi/reparent önizlemesi ekle. Son iki parçadan parent tahmin etme. Taşıma/migration yollarında nokta sınırı, duplicate hostname, aynı sunucu ve cycle kontrollerini koru.
-- [ ] Mevcut site oluşturma formuna aynı akışta yeni uygulama oluşturma, Docker/yönlendirme, otomatik document root ve çakışmasız port tahsisi ekle. Var olan parent/prefix, isimden sunucu/uygulama seçimi ve HTTPS adımlarını yeniden yazma. `www` alias mı bağımsız site mi açık seçilsin.
-- [ ] Mail domaini, website ve DNS hosting yaşam döngülerini ayır. Ana domain mailbox'larını subdomainlere otomatik kopyalama; subdomain mail alanı bilinçli seçim olmalı.
-- [ ] Silme/taşıma önizlemesinde child domain, uygulama, mailbox, sertifika ve yedek etkisini göster. Varsayılan davranış bağımlı kaynak varken silmeyi durdurmak; örtülü cascade veya başka sitenin verisini silmek yok.
-- [ ] Düz domain/application kayıtlarından sürümlü, tekrar çalıştırılabilir, yedekli Website migration ve rollback geliştir. Salt okumada parent atama; mevcut trafik, ID, secret ve sertifika ilişkilerini bozma.
+- [ ] Kalıcı `Website` kimliğini hostname/domain kaydından ayır. Website: server, application/runtime, document root ve Unix user ilişkilerini; domain: website linki, explicit parent ve alias/canonical ilişkisini taşısın.
+- [ ] `/websites/:websiteId` ekranını gerçek Website kaynağına geçir. Mevcut domain ID ve aynı server/porttan uygulama tahminini kalıcı bağ sayma; Node/static/Docker, env/log/files/backup ilişkileri açık backend foreign key'leriyle tutulmalı.
+- [ ] Shared FQDN doğrulamasına IDN/punycode ekle. Reparent preview/migration'da duplicate hostname, nokta sınırı, same-server ve cycle kontrollerini koru; parent'i son iki label'dan tahmin etme.
+- [ ] Site oluşturma akışında existing/new app, static/Node/Docker/reverse proxy, otomatik document root ve çakışmasız port tahsisi ekle. `www` alias mı bağımsız website mı kullanıcı açıkça seçsin.
+- [ ] Website, DNS hosting ve mail-domain lifecycle'larını ayır. Subdomain mail alanını veya mailbox'ları parent'tan otomatik kopyalama.
+- [ ] Silme/taşıma preview'unda child domain, application, mailbox, certificate ve backup etkisini göster; bağımlı kaynak varken varsayılan silme fail-closed olsun, örtülü cascade olmasın.
+- [ ] Mevcut domain/application kayıtlarından sürümlü, tekrar çalıştırılabilir, yedekli Website migration + rollback geliştir. Mevcut trafik, IDs, secrets, cert ve release ilişkilerini koru.
 
-**Kabul:** Ana domain, iki bağımsız subdomain ve alias doğru ağaçta, ayrı kalıcı kaynak ilişkileriyle çalışmalı. Port aday eşleştirmesi migration kabulünün yerine geçmez; `todo.md` T3/T3a/T-UI.
+## D. P1 — Enterprise arayüzde kalan geliştirme
 
-## D. P1 — Kalan enterprise arayüz ve kullanılabilirlik işleri
+- [ ] Route başına daha dar backend endpointleri, backend pagination, lazy module yükleme ve gerektiğinde virtualization ekle. Mevcut request-generation/stale-response/session guard'larını koru.
+- [ ] Ortak data-table, field validation, Skeleton ve kalıcı notification center bileşenlerini tamamla. Eski gelişmiş formları aynı UX sözleşmesine taşı; dirty-form guard'ı domain quick-add, server enrollment/bakım gibi kalan formlara genişlet.
+- [ ] Domain listesine kalıcı kolon/collapse tercihleri, application listesine ölçeklenebilir pagination ekle. URL arama/filtre/sort ve parent/child grubunu bozmayan pagination korunmalı.
+- [ ] Site detail'in uygulama seçimini C'deki kalıcı Website binding'e geçir; runtime'a göre yalnız ilgili sekme/eylemleri göster. Static deploy bağlantısı ve Docker runtime yüzeyini tamamla.
+- [ ] Global site switcher, notification center ve resource-linked audit detail ekle. Mail/DB modülleri geldikçe global görünümden site bağlamına geçişi bağla.
+- [ ] Mail/files/DB/cron/backup/terminal placeholder'larını yalnız gerçek backend ve UI akışı tamamlandıktan sonra kaldır. Job history'yi canlı Node/Nginx logu gibi sunma.
 
-- [ ] Yeni routed workspace'i gerçek React/Vite ve HTTPS ortamında test et; `todo.md` T-UI'daki masaüstü/mobil, klavye, focus, modal, geri/ileri ve doğrudan URL sorunlarını düzelt. Sadece JSX/CSS sözdizimi kontrolüne dayanarak tasarım/erişilebilirlik kabulü verme. Gövde/etiket okunurluğunu, kontrastı ve uzun alan adlarını gerçek render üzerinden düzelt.
-- [ ] Sayfaya göre veri talebini daha dar kaynak endpointleri, backend sayfalama, lazy modül yükleme ve gerektiğinde sanallaştırmayla tamamla. Mevcut route-demand, kaynak/istek nesli kontrolü, tek in-flight istek ve session-aware istemciyi koru; etkin veya izlenen işlerin sayfa değişiminde takibi sürmeli.
-- [ ] Ortak tablo, alan doğrulaması, Skeleton ve bildirim merkezi bileşenlerini tamamla; görsel olarak uyarlanmış eski gelişmiş formları aynı bileşen sözleşmesine taşı. Yeni form/route dirty guard'ını eski domain quick-add, sunucu kayıt ve bakım formlarına da yay. Başarısız istek, polling veya bağlam değişimi yazılanları sessizce silmemeli.
-- [ ] Domain listesine kalıcı aç/kapat ve kolon tercihleri; uygulama listesine ölçeklenebilir sayfalama ekle. Mevcut rahat/sık yoğunluk, 10/25/50 grup boyutu, URL arama/filtre/sıralama ve parent grubunu bozmayan sayfalama korunmalı. Gerçek site disk/traffic/son olay ölçümleri backend gelince eklenmeli; eksik değerleri sıfır gösterme.
-- [ ] Site detayındaki uyumluluk uygulama seçimini C'deki kalıcı bağlama geçir; runtime'a göre ilgili sekmeler/eylemler göster. Yeni uygulama/site tek akışı ve gelişmiş ayarları tamamla; teknik ID/token ezberletme. Statik uygulamaların site içi deploy bağlantısını ve Docker runtime yüzeyini tamamla.
-- [ ] Global site değiştirici, kalıcı bildirim merkezi ve kaynak linkli tam audit detaylarını ekle. Mevcut site aramasını ve işlem durumu penceresini yeniden yazma. Mail/DB modülleri gelince global görünümden site bağlamına geçişi bağla.
-- [ ] Mail, dosyalar, DB, cron, yedek ve terminal sekmelerindeki uygulanmamış durumları ancak ilgili backend ve gerçek UI akışları tamamlandığında kaldır. Placeholder veya menü varlığını bitmiş modül sayma. Log sekmesindeki job geçmişini canlı Node/Nginx logu gibi sunma.
+Gerçek render, responsive, keyboard/focus ve route kabulü `todo.md` içindedir.
 
-**Kabul:** 1440×900, 1920×1080, 1280×800, 390×844. Ana domain -> child -> Node/SSL/mail işlemleri bağlam kaybetmeden tamamlanmalı; gerçek back/forward/reload/dirty-form ve erişim iptali testi yapılmalı. Yeni görünümün mevcut kapsamı `docs/website-workspace.md` içinde.
+## E. P2 — Site içi Node.js, static ve Git yönetimi
 
-## E. P2 — Kalan site içi Node.js, static ve Git yönetimi
-
-- [ ] Yeni site Node/Git ekranlarına backend'i eksik kontrolleri ekle: etkinleştir/devre dışı bırak, başlat/durdur, runtime düzenleme, uygulama/document root, startup file/npm script, package manager ve çalışma modu. Bağlanan mevcut deploy/restart/status/rollback işlemlerini yeniden geliştirme.
-- [ ] Kurulu Node sürümlerini gerçek hosttan göster; panelden eksik runtime kurulumu ve site sürüm seçimi sağla. Panelin kendi Node sürümünü değiştirme. Çakışmasız otomatik port tahsisi, gerektiğinde gelişmiş manuel seçenek ekle.
-- [ ] Site içinden bağımlılık kurma, build, repository/branch/commit seçimini tamamla. Private Git deploy key/token yönetimi ekle; bütün build/deploy scriptleri site kullanıcısıyla çalışmalı.
-- [ ] Env editörüne import doğrulaması, değişiklik metadata'sı ve kalıcı kaydedildi/çalışan sürece uygulandı ayrımı ekle. Mevcut masked editör, silme teyidi ve restart/deploy uyarısını koru. Startup seçimi deploy/restart/rollback boyunca korunmalı; şifreleme altyapısını yeniden yazma.
-- [ ] Node stdout/stderr, systemd, Nginx ve deploy loglarını site bağlamında canlı izleme, arama, filtre ve sınırlı indirmeye bağla. Redaction ve akış sınırları uygula; hassas çıktıyı genel job result/audit'e kopyalama.
-- [ ] Static/SPA ve Docker runtime'larını aynı site kabuğunda uygun kontrollere bağla. Passenger compatibility adapter'ını gerçek Plesk örnekleriyle tamamla; yeni Node uygulamalarında systemd varsayılanını koru.
-- [ ] Git webhook deploy'u imza doğrulaması, replay/duplicate kontrolü ve kaynak kilitleriyle YunPanel job sistemine bağla; GitHub Actions ekleme.
-
-**Kabul:** Custom startup tercihi bütün yaşam döngüsünde korunmalı; unhealthy release veya build hatası çalışan sürümü bozmamalı. İşin sonucu ve güvenli logu aynı site bağlamında görülebilmeli.
+- [ ] Node/Git ekranlarına enable/disable, start/stop, runtime, app/document root, startup file/npm script, package manager ve çalışma modu yönetimini ekle. Mevcut deploy/restart/status/rollback akışlarını yeniden yazma.
+- [ ] Kurulu Node sürümlerini hosttan okuyup eksik runtime kurma ve site runtime seçimini ekle. Panelin kendi Node runtime'ını değiştirme; port tahsisi çakışmasız otomatik olsun, manuel seçenek advanced kalsın.
+- [ ] Dependency install/build, repository/branch/commit seçimi ve private Git deploy key/token yönetimini tamamla. Bütün build/deploy scriptleri site Unix user'ıyla çalışsın.
+- [ ] Env editörüne import validation, change metadata ve “diskte kaydedildi / çalışan sürece uygulandı” ayrımını ekle. Mevcut masking, typed delete confirm ve restart/deploy uyarısını koru.
+- [ ] Node stdout/stderr, systemd, Nginx ve deploy loglarını site bağlamında bounded canlı izleme/arama/filtre/download ile bağla; redaction uygula.
+- [ ] Static/SPA ve Docker runtime'larını aynı site kabuğuna bağla. Passenger compatibility adapter'ını gerçek Plesk örnekleriyle tamamla; yeni Node app varsayılanı systemd kalsın.
+- [ ] Git webhook deploy'u signature doğrulaması, replay/duplicate koruması ve resource lock ile YunPanel job sistemine bağla; GitHub Actions ekleme.
 
 ## F. P2 — Entegre terminal ve dosya yöneticisi
 
-- [ ] xterm.js + backend PTY ile gerçek interaktif terminal geliştir. Site terminali dedicated site kullanıcısı/doğru dizinde, Sunucu terminali Owner için root olarak çalışmalı; host/kullanıcı/dizin görünür olmalı. Sahte çıktı veya HTTP tek satırlık exec ekranı yapma.
-- [ ] WebSocket upgrade'de oturum, rol, Origin ve Owner MFA kontrolü; oturuma bağlı süreli/tek kullanımlık terminal yetkilendirmesi ekle. URL query'sine kalıcı credential koyma. Owner root terminaline agent komut allowlist'i dayatma.
-- [ ] Resize, Ctrl+C/Ctrl+D, kopyala/yapıştır, Unicode, fullscreen program, çoklu sekme ve kopma durumlarını destekle. Yeniden bağlanma yetkiyi yeniden doğrulamalı; başka kullanıcı terminali devralamamalı.
-- [ ] Logout, iptal, kullanıcı kapatma ve rol/parola/MFA değişiminde WebSocket/PTY erişimini derhal kes. Process-group cleanup, idle timeout, session/output/backpressure limitleri uygula. Uzun deploy/backup işi terminalden bağımsız kalıcı job olmalı.
-- [ ] Root terminal açılış/kapanış metadata'sını audit'e yaz; ham tuş/çıktı/shell geçmişini varsayılan merkezi loglama. Çıktıyı HTML çalıştırma; link/clipboard entegrasyonlarını güvenli tut.
-- [ ] Site dosyalarında listeleme, upload/download, mkdir, rename, metin düzenleme, owner/izin gösterimi ve teyitli silme ekle. Path traversal/symlink kaçışını engelle. Owner'ın host dosyası işlemleri açık Sunucu bağlamında kalmalı; gerekiyorsa owner-only sistem editörü ekle.
+- [ ] xterm.js + backend PTY ile gerçek interaktif terminal geliştir. Site terminali dedicated site user/doğru cwd; Server terminali Owner için root olmalı. Sahte terminal veya tek-shot HTTP exec yapma.
+- [ ] WebSocket upgrade'de session/role/Origin/Owner-MFA doğrula; terminal capability süreli ve session-bound olsun. Kalıcı credential URL/query içine koyma.
+- [ ] Resize, Ctrl+C/Ctrl+D, copy/paste, Unicode, fullscreen TUI, multi-tab ve disconnect/reconnect davranışlarını tamamla.
+- [ ] Logout/session revoke/user disable-delete/role-password-MFA değişiminde WS/PTy derhal kapansın. Process-group cleanup, idle timeout, session/output/backpressure limitleri olsun.
+- [ ] Root terminal open/close metadata'sını audit'e yaz; raw keystroke/output/history merkezi audit'e varsayılan olarak yazılmasın.
+- [ ] Site file manager: list/upload/download/mkdir/rename/text-edit/permission display/confirmed delete. Path traversal ve symlink escape engellensin; host dosya düzenleme ayrı Owner/Server bağlamında kalsın.
 
-**Kabul:** Gerçek Ubuntu/TLS proxy altında interaktif kullanım ve resize çalışmalı. Logout/rol iptali sonrası komut gönderilememeli ve yetim PTY kalmamalı.
+## G. P2 — Domain, DNS, Nginx ve SSL
 
-## G. P2 — Kalan domain, DNS, Nginx ve SSL işleri
-
-- [ ] Site Domainler/SSL sekmelerine alias/canonical düzenleme, HTTPS redirect, otomatik yenileme yönetimi ve eyleme dönük son hata teşhisini ekle. Bağlanan stage/activate, ACME issue/test ve renewal/dry-run işlemlerini yeniden yazma.
-- [ ] Subdomain/alias için bağımsız veya uygun mevcut sertifika seçimini doğrula; yanlış hostname'e sertifika bağlama. Custom certificate yükleme/key eşleşmesi ve DNS-01/wildcard desteğini tamamla; apex/wildcard kapsamını ayrı değerlendir.
-- [ ] Gerçek resolver ile A/AAAA/CNAME ve ACME readiness göster. Dış DNS kullanıldığında hostname oluşturmayı DNS yayını sayma; provider adapter'ıyla kayıt yazmayı ayrı yetkilendirilmiş özellik olarak ekle.
-- [ ] Site bazlı upload size, proxy timeout, WebSocket, SPA fallback, cache/header ve redirect ayarlarını ekle. Gelişmiş Nginx editöründe preview/diff, syntax test ve başarısız değişiklikte rollback kullan.
-- [ ] DNS/expired/invalid certificate ve post-renew reload hatalarını gerçek teşhisle bağla. Özel anahtarları API listesi/frontend'e döndürme; hatalı config başka siteleri bozmamalı.
-
-**Kabul:** Her hostname doğru hedef/sertifikayı sunmalı; hatalı Nginx/SSL değişikliği geri alınabilmeli ve diğer siteler korunmalı.
+- [ ] Site Domain/SSL ekranına alias/canonical edit, HTTPS redirect, renewal yönetimi ve actionable son-hata teşhisi ekle. Mevcut stage/activate, ACME issue/test/renew işlerini yeniden yazma.
+- [ ] Hostname kapsamına uygun mevcut/custom certificate seçimi, certificate/key match, DNS-01 ve wildcard desteği ekle; apex/wildcard kapsamını ayrı değerlendir.
+- [ ] Gerçek resolver ile A/AAAA/CNAME ve ACME readiness göster. Dış DNS'i YunPanel yönetiyorsa provider adapter üzerinden ayrı yetkili mutation kullan; hostname oluşturmayı DNS yayını sayma.
+- [ ] Site bazlı upload size, proxy timeout, WebSocket, SPA fallback, cache/header/redirect ayarları ve advanced Nginx preview/diff/test/rollback ekle.
+- [ ] DNS/certificate/reload hatalarını gerçek teşhisle bağla. Private key API listesine/frontend'e çıkmamalı; hatalı vhost değişimi diğer siteleri bozmamalı.
 
 ## H. P2 — Mail ve Roundcube
 
-- [ ] Postfix, Dovecot, Rspamd, Roundcube detection/kurulum/config adapter'ları ve sağlık ekranı geliştir. Uygulanmamış kod, eksik servis ve izin hatasını ayır.
-- [ ] Site Mail sekmesinde mail domaini enable/disable, mailbox create/delete, parola, kota/kullanım, alias/forwarding akışlarını backend + UI ile tamamla. Ana/subdomain mail kapsamını açık seçtir.
-- [ ] MX/SPF/DKIM/DMARC ve PTR/rDNS'i beklenen/mevcut/değişiklik gereken halinde göster. Provider port kısıtlarını teşhis et; dış işlemi yapmadan tamamlandı deme.
-- [ ] SMTP/IMAP TLS, kuyruk, log ve servis yönetimini bağla. Kimlik doğrulamasız relay'i engelle; SMTP kabulünü inbox teslim garantisi sunma.
-- [ ] Roundcube'u gerçek webmail adresine bağla. Panel oturumu ile mailbox parolasını karıştırma; ayrı SSO tasarlanana kadar standart login kullan.
-- [ ] Mailbox/domain silmede veri etkisi, yedek ve geri dönüş uygula. Mail dosyaları/metadata ve restore'u backup modeline dahil et.
-
-**Kabul:** Gerçek test domaininde mailbox, TLS send/receive, alias/kota/Roundcube, DNS doğrulamaları ve mail restore tamamlanmalı.
+- [ ] Postfix, Dovecot, Rspamd ve Roundcube detection/install/config/health adapter'larını geliştir.
+- [ ] Site Mail sekmesinde mail-domain enable/disable, mailbox create/delete, password, quota/usage, alias/forwarding lifecycle'ını tamamla; parent/subdomain mail kapsamını kullanıcı seçsin.
+- [ ] MX/SPF/DKIM/DMARC ve PTR/rDNS için expected/current/action-needed teşhisi göster; provider port kısıtlarını ayrı raporla.
+- [ ] SMTP/IMAP TLS, queue, logs ve service management'i bağla; unauthenticated relay engellensin.
+- [ ] Roundcube'u gerçek webmail URL'sine bağla; panel session ile mailbox credential'ını karıştırma.
+- [ ] Mailbox/domain delete için impact/backup/restore uygula; mail data/metadata backup modeline dahil olsun.
 
 ## I. P3 — Kalan operasyon modülleri
 
-- [ ] MySQL/MariaDB site ilişkisi, database/user create/delete, grant/revoke, password rotation, boyut/durum, dump/restore ve bağlantı bilgisi ekranlarını tamamla. Provisioning secret sunucuda kalmalı; uygulama DB kullanıcısı gereksiz yetki almamalı.
-- [ ] Docker/Compose config doğrulama, build/pull, start/stop/restart, env/registry credential, log/health, Nginx hedefi ve deploy history geliştir. Named volume/bind mount envanteri ve backup politikasını göster; yeniden deploy persistent veri kaybetmemeli.
-- [ ] Şifreli application/config/env/DB/volume/mail yedeği, local/S3-compatible hedef, retention/checksum, restore preview/progress, pre-restore yedeği ve hata bildirimleri geliştir. Restic değerlendirmesi/adapter seçimini tamamla; SSH/SFTP'yi gerçek ihtiyaçla ekle.
-- [ ] Site cron'u için kullanıcı, dizin, env, timezone, enable/disable, son çalışma ve çıktı ekle. Site işleri site kullanıcısıyla, Owner sistem işleri açık Sunucu bağlamında çalışmalı.
-- [ ] Gerçek metrik geçmişi, inode/disk eşikleri, uygulama/servis olayları, başarısız deploy/backup/SSL bildirimleri ve bounded log indirme ekle. Mevcut envanter kartlarını yeniden yazma; bilinmeyen/stale veriyi belirt.
-- [ ] Tam audit ve iş detaylarında actor, kaynak linki, aşama, güvenli hata/log, arama/filtre, iptal/tekrar deneme davranışlarını tamamla. Mevcut job listesi/dialogunu koru; riskli retry'da idempotency/kaynak kilidi uygula.
-- [ ] Plesk salt-okunur envanter/importer, external-managed kaynak durumu, Passenger/static/Node/DB/Docker/domain/cron/mail migration ve kaynak başına rollback araçlarını tamamla. Mail taşımasını DNS/restore doğrulamasından sonra yap.
+- [ ] MySQL/MariaDB site binding, DB/user CRUD, grants, password rotation, size/status, dump/restore ve connection-info akışlarını tamamla; uygulama DB user'ı minimum privilege alsın.
+- [ ] Docker/Compose validation, build/pull/start/stop/restart, env/registry credentials, logs/health, Nginx target ve deploy history ekle; volume/bind inventory + backup politikasını göster.
+- [ ] Şifreli application/config/env/DB/volume/mail backup, local/S3-compatible target, retention/checksum, restore preview/progress, pre-restore backup ve outage handling geliştir.
+- [ ] Site cron: user/cwd/env/timezone/enable-disable/last-run/output. Site işleri site user, sistem işleri açık Owner/Server bağlamında çalışsın.
+- [ ] Gerçek metric history, inode/disk threshold, service/app events, deploy/backup/SSL notifications ve bounded log download ekle. Unknown/stale metric sıfır veya yeşil gösterilmesin.
+- [ ] Audit/job detail: actor, resource link, stage, safe error/log, search/filter, cancel/retry. Riskli retry idempotency + lock şartıyla çalışsın.
+- [ ] Plesk read-only importer, external-managed state ve Passenger/static/Node/DB/Docker/domain/cron/mail migration + per-resource rollback araçlarını tamamla.
 
-**Kabul:** Her modül gerçek lifecycle işlemlerini yapmalı; application/DB/volume/mail restore testleri geçmeden production migration yok.
+## J. P0–P3 — Test, migration ve yayın kapıları
 
-## J. P0–P3 — Kalan test, geçiş ve yayın kapıları
+- [ ] Bootstrap-token temizliği ve agentsiz mimari ilerledikçe mevcut core/deploy/rollback/ACME/job testlerini yeni authorization/local-executor sınırına taşı; test-only network backdoor ekleme.
+- [ ] Website migration, resource-scoped access, WebSocket/PTy ve yeni secret yüzeyleri için native/process/browser testleri ekle.
+- [ ] Yeni routed UI için component + gerçek browser testleri yaz: login -> site -> child -> Node -> SSL -> mail -> terminal; loading/empty/error/permission/dirty-form/refresh/long-table durumlarını kapsa.
+- [ ] Agentsiz package upgrade, schema migration, PTY dependency, restart reconciliation, job-running self-update ve disk-full rollback senaryolarını tamamla.
+- [ ] Master-key/backup/restore/resource-exhaustion/panel-outage tatbikatlarını gerçek desteklenen runtime ve test hostunda çalıştır; çalıştırılmayan testi geçmiş sayma.
+- [ ] Agentsiz mimari uygulandıkça install/package/dev docs'taki eski agent varsayımlarını temizle; hedef mimariyi uygulanmış davranış gibi belgeleme.
+- [ ] `todo.md` içindeki Node 24, browser, HTTPS, package, Ubuntu/DNS/Plesk ve canlı rollback kabulünü tamamlamadan production-ready etiketi verme.
 
-- [ ] Kullanıcı/Owner/MFA testlerini native uçtan uca ve ayrı-process eşzamanlılık senaryolarıyla genişlet; WebSocket, Website migration, kaynak bazlı read-only ve yeni secret yüzeylerinin testlerini ekle. Mevcut deploy/rollback/ACME/job testlerini agentsiz yapıya taşı. Gerçek core Express + domain route + session boundary + entry point entegrasyonunu tam workspace'te doğrula.
-- [ ] Yeni routed UI'nin component ve tarayıcı testlerini yaz: login -> site -> subdomain -> Node -> SSL -> mail -> terminal. Loading/empty/error/permission/missing-dependency, uzun domainler, çok kayıtlı tablolar, dirty-form ve refresh'i kapsa. Saf modellerin testini render kabulü sayma.
-- [ ] Mevcut APT altyapısı üzerinde agentsiz upgrade, schema migration, PTY dependency ve rollback testlerini tamamla. Job sürerken self-update, restart reconciliation ve disk-full durumlarını kapsa. Yeni router dahil tam bağımlılık kurulumu ve frontend build'i aday paketle birlikte doğrulanmalı.
-- [ ] Master-key rotation/recovery, backup target outage, başarısız restore, eşzamanlı işler, kaynak tükenmesi ve panel kesintisi tatbikatlarını tamamla. Çalıştırılmayan güvenlik veya görsel testi geçmiş sayma.
-- [ ] Agentsiz mimari uygulandıkça docs/install/package/dev komutlarındaki eski agent varsayımlarını temizle. Hedef mimariyi mevcut davranış gibi belgeleme.
-- [ ] `todo.md` içindeki T-USER/T-UI ve gerçek Ubuntu/DNS/Plesk/browser kabulünü tamamla. Production verisine dokunmadan yedek/rollback kapısı işlet; GitHub Actions kullanma.
-
-**Yayın sırası:** Kalan A güvenlik işleri -> B agentsiz geçiş -> C/D kalıcı site modeli ve arayüz kabulü -> E/F/G günlük hosting -> H mail -> I kalan modüller. Arayüz geliştirmesi paralel yürüyebilir; yeni görünüm tek başına root/backend veya production-ready kabulü değildir.
+**Yayın sırası:** A güvenlik sınırı -> B agentsiz root backend -> C kalıcı Website modeli -> D UI olgunlaştırma -> E/F/G günlük hosting -> H mail -> I kalan modüller. Arayüz geliştirmesi paralel ilerleyebilir; UI tek başına root/backend veya production-ready kabulü değildir.
