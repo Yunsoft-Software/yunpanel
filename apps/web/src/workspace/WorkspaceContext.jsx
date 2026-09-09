@@ -1,20 +1,24 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router';
 import { panelRequest } from '../api.js';
 import { useCollection } from './useCollection.js';
 import { jobActive, jobFromResponse } from './site-model.js';
 import { newerJob, trackJob } from './job-tracking.js';
+import { workspaceResources } from './workspace-resources.js';
 
 const WorkspaceContext = createContext(null);
 export function WorkspaceProvider({ children }) {
-  const domains = useCollection('/domains');
-  const applications = useCollection('/applications');
-  const certificates = useCollection('/certificates');
-  const servers = useCollection('/servers');
-  const jobs = useCollection('/jobs');
+  const { pathname } = useLocation();
   const [tracked, setTracked] = useState({});
   const [observedId, setObservedId] = useState(null);
   const [jobOpen, setJobOpen] = useState(false);
   const [notice, setNotice] = useState(null);
+  const demand = workspaceResources(pathname, { observingJob: jobOpen, activeJob: Object.values(tracked).some(jobActive) });
+  const domains = useCollection('/domains', { enabled: demand.domains });
+  const applications = useCollection('/applications', { enabled: demand.applications });
+  const certificates = useCollection('/certificates', { enabled: demand.certificates });
+  const servers = useCollection('/servers', { enabled: demand.servers });
+  const jobs = useCollection('/jobs', { enabled: demand.jobs });
   const requests = useRef(null);
   const submitting = useRef(new Set());
   useEffect(() => { const controller = new AbortController(); requests.current = controller; return () => controller.abort(); }, []);
