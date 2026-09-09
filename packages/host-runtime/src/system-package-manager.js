@@ -45,7 +45,7 @@ function normalizeRestartUnits(value) {
     throw new Error('restartUnits must contain 1 to 10 YunPanel service units');
   }
   const units = [...new Set(value)];
-  if (units.length !== value.length || units.some((unit) => typeof unit !== 'string' || !UNIT_PATTERN.test(unit))) {
+  if (units.length !== value.length || units.some((unit) => typeof unit !== 'string' || (unit !== 'yun-agent.service' && !UNIT_PATTERN.test(unit)))) {
     throw new Error('restartUnits contains an unsupported service unit');
   }
   return units;
