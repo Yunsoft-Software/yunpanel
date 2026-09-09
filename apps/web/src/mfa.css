@@ -1,0 +1,10 @@
+.auth-form select, .auth-dialog select { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #bec9d8; border-radius: 7px; background: #fff; color: #17233b; font: inherit; box-sizing: border-box; }
+.auth-secondary { padding: 10px 14px; min-height: 42px; border: 1px solid #bec9d8; border-radius: 7px; background: #fff; color: #27364e; font: inherit; font-size: 14px; cursor: pointer; }
+.auth-secondary:focus-visible, .auth-form select:focus-visible, .auth-dialog select:focus-visible, .mfa-recovery textarea:focus-visible { outline: 3px solid #a6c4ff; outline-offset: 2px; }
+.mfa-settings { border-top: 1px solid #e0e7f0; padding-top: 24px; margin-top: 24px; min-width: 0; }
+.mfa-settings form { display: grid; gap: 12px; }
+.mfa-settings h4 { margin: 12px 0; font-size: 16px; }
+.mfa-secret, .mfa-recovery textarea { font-family: ui-monospace, monospace !important; }
+.mfa-recovery textarea { width: 100%; min-height: 260px; resize: vertical; padding: 12px; margin: 0 0 16px; line-height: 1.8; font-size: 12px; border: 1px solid #bec9d8; border-radius: 7px; box-sizing: border-box; background: #f7f9fc; color: #17233b; overflow-wrap: anywhere; }
+.auth-expiry { margin: 12px 24px; padding: 12px 16px; border: 1px solid #c9a95f; background: #fffaf0; border-radius: 7px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; color: #6c4914; }
+@media (max-width: 480px) { .mfa-recovery textarea { font-size: 10px; } .auth-expiry { margin-inline: 16px; } }
