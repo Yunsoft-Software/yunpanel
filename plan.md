@@ -49,6 +49,7 @@ Current implementation checkpoint — 2026-09-09:
 - normalized Node runtime state is idempotent so custom startup files/scripts survive control-plane round trips,
 - managed deploy/restart/rollback locks return their cleanup-tracked promises so failed operations do not leak unhandled rejections, failed Node rollback restores the previous environment transaction only once, and both static and Node rollback are bound to the control-plane current release before any server mutation,
 - static deployments explicitly restore traversable shared build/web directory modes after creation so the privileged agent's restrictive umask cannot lock out dedicated application users or Nginx,
+- ACME issuance explicitly restores the shared challenge-root mode after creation so the agent's restrictive umask cannot make HTTP-01 files unreadable by Nginx,
 - externally observed completed job state is held behind the in-process reconciliation barrier so the related domain/application/certificate state is settled before API job reads return,
 - protected Node runtime environments are implemented with a separate AES-256-GCM store, masked admin metadata, authenticated just-in-time agent delivery and atomic root-protected systemd EnvironmentFile materialization,
 - secure log transport/redaction and the environment/log operator UI remain active Milestone 4 work,

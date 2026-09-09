@@ -20,12 +20,14 @@ function certificateMetadata(certName) {
 test('certificate validation uses certbot dry-run and does not inspect persisted certificate files', async () => {
   const calls = [];
   const directories = [];
+  const modes = [];
   let inspected = false;
   const manager = createAcmeManager({
     certbotPaths: ['/usr/bin/certbot'],
     accessFn: async (candidate) => {
       assert.equal(candidate, '/usr/bin/certbot');
     },
+    chmodFn: async (directory, mode) => modes.push({ directory, mode }),
     mkdirFn: async (directory, options) => directories.push({ directory, options }),
     inspectCertificateFn: async () => {
       inspected = true;
@@ -41,6 +43,7 @@ test('certificate validation uses certbot dry-run and does not inspect persisted
   });
 
   assert.equal(directories[0].directory, '/var/lib/yunpanel/acme');
+  assert.deepEqual(modes, [{ directory: '/var/lib/yunpanel/acme', mode: 0o755 }]);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].file, '/usr/bin/certbot');
   assert.deepEqual(calls[0].args, [
@@ -70,6 +73,7 @@ test('production issue inspects certificate metadata after certbot succeeds', as
   const manager = createAcmeManager({
     certbotPaths: ['/usr/bin/certbot'],
     accessFn: async () => {},
+    chmodFn: async () => {},
     mkdirFn: async () => {},
     inspectCertificateFn: async (certName) => {
       inspected += 1;
@@ -96,6 +100,7 @@ test('certificate issue rejects wildcard and invalid email before certbot runs',
   let runs = 0;
   const manager = createAcmeManager({
     accessFn: async () => {},
+    chmodFn: async () => {},
     mkdirFn: async () => {},
     inspectCertificateFn: async () => certificateMetadata('example.com'),
     run: async () => { runs += 1; },
@@ -147,6 +152,7 @@ test('renewal selects one certificate and supports dry-run without reading priva
 test('certbot execution errors are sanitized', async () => {
   const manager = createAcmeManager({
     accessFn: async () => {},
+    chmodFn: async () => {},
     mkdirFn: async () => {},
     run: async () => {
       const error = new Error('stderr contains sensitive server details');

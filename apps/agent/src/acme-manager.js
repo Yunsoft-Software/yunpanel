@@ -1,6 +1,6 @@
 import { X509Certificate } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { access, mkdir, readFile } from 'node:fs/promises';
+import { access, chmod, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { normalizeDomainSet } from '@yunpanel/shared';
@@ -99,6 +99,7 @@ export function createAcmeManager({
   acmeRoot = DEFAULT_ACME_ROOT,
   liveRoot = DEFAULT_LIVE_ROOT,
   accessFn = access,
+  chmodFn = chmod,
   mkdirFn = mkdir,
   readFileFn = readFile,
   inspectCertificateFn = (certName) => inspectCertificateFile({ liveRoot, certName, readFileFn }),
@@ -130,6 +131,7 @@ export function createAcmeManager({
     const normalizedDomains = normalizeDomains(domains);
     const accountEmail = validateEmail(email);
     await mkdirFn(acmeRoot, { recursive: true, mode: 0o755 });
+    await chmodFn(acmeRoot, 0o755);
 
     const certName = normalizedDomains[0];
     const args = [
