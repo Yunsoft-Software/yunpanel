@@ -34,6 +34,7 @@ test('enrollment tokens are one-time and persisted only as hashes', async () => 
 
     assert.equal(enrolled.server.hostname, 'yun-test-01.example.local');
     assert.equal(enrolled.server.connectivity, 'pending');
+    assert.equal(enrolled.server.executionMode, 'agent');
     assert.ok(enrolled.agentToken.length >= 32);
 
     const persistedAfterEnrollment = await readFile(filePath, 'utf8');
@@ -91,5 +92,67 @@ test('duplicate hostnames and invalid hostnames are rejected', async () => {
       registry.enrollServer({ token: third.token, hostname: '../etc/passwd' }),
       (error) => error instanceof RegistryError && error.code === 'invalid_hostname',
     );
+  });
+});
+
+test('local execution binding is explicit, hostname-bound and blocks the legacy agent channel', async () => {
+  await withRegistry(async ({ registry, filePath }) => {
+    const token = await registry.issueEnrollmentToken();
+    const enrolled = await registry.enrollServer({ token: token.token, hostname: 'local-runtime-host' });
+
+    await assert.rejects(
+      registry.bindLocalServer({ serverId: enrolled.server.id, hostname: 'different-host' }),
+      (error) => error instanceof RegistryError && error.code === 'local_server_hostname_mismatch',
+    );
+    assert.equal((await registry.getServer(enrolled.server.id)).executionMode, 'agent');
+
+    const bound = await registry.bindLocalServer({ serverId: enrolled.server.id, hostname: 'LOCAL-RUNTIME-HOST' });
+    assert.equal(bound.executionMode, 'local');
+    assert.ok(bound.localBoundAt);
+    assert.equal(bound.agentVersion, null);
+
+    await assert.rejects(
+      registry.authenticateAgent({ serverId: enrolled.server.id, agentToken: enrolled.agentToken }),
+      (error) => error instanceof RegistryError && error.code === 'server_managed_locally',
+    );
+
+    const snapshot = await registry.updateLocalSnapshot({
+      serverId: enrolled.server.id,
+      hostname: 'local-runtime-host',
+      runtimeVersion: '0.2.0',
+      inventory: { hostname: 'local-runtime-host', operatingSystem: { prettyName: 'Ubuntu 24.04' } },
+      services: { nginx: { active: true } },
+    });
+    assert.equal(snapshot.connectivity, 'online');
+    assert.equal(snapshot.localRuntimeVersion, '0.2.0');
+    assert.equal(snapshot.inventory.operatingSystem.prettyName, 'Ubuntu 24.04');
+
+    const persisted = JSON.parse(await readFile(filePath, 'utf8'));
+    const stored = persisted.servers.find((server) => server.id === enrolled.server.id);
+    assert.equal(stored.executionMode, 'local');
+    assert.equal(stored.localRuntimeVersion, '0.2.0');
+  });
+});
+
+test('local execution mode can roll back to the original enrolled agent credential', async () => {
+  await withRegistry(async ({ registry }) => {
+    const token = await registry.issueEnrollmentToken();
+    const enrolled = await registry.enrollServer({ token: token.token, hostname: 'rollback-runtime-host' });
+    await registry.bindLocalServer({ serverId: enrolled.server.id, hostname: 'rollback-runtime-host' });
+    await registry.updateLocalSnapshot({ serverId: enrolled.server.id, hostname: 'rollback-runtime-host', runtimeVersion: '0.2.0' });
+
+    const released = await registry.releaseLocalServer({ serverId: enrolled.server.id, hostname: 'rollback-runtime-host' });
+    assert.equal(released.executionMode, 'agent');
+    assert.equal(released.localBoundAt, null);
+    assert.equal(released.localRuntimeVersion, null);
+
+    const heartbeat = await registry.heartbeat({
+      serverId: enrolled.server.id,
+      agentToken: enrolled.agentToken,
+      agentVersion: 'legacy-agent',
+    });
+    assert.equal(heartbeat.executionMode, 'agent');
+    assert.equal(heartbeat.agentVersion, 'legacy-agent');
+    assert.equal(heartbeat.connectivity, 'online');
   });
 });
