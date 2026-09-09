@@ -27,6 +27,7 @@ install -d "$package_root/usr/lib/yunpanel/packages"
 install -d "$package_root/usr/lib/yunpanel/scripts"
 install -d "$package_root/usr/lib/systemd/system"
 install -d "$package_root/usr/share/yunpanel/web"
+install -d "$package_root/usr/share/doc/yunpanel"
 
 sed "s/@VERSION@/$version/" packaging/debian/control >"$package_root/DEBIAN/control"
 install -m 0755 packaging/debian/preinst "$package_root/DEBIAN/preinst"
@@ -35,6 +36,12 @@ install -m 0755 packaging/debian/postrm "$package_root/DEBIAN/postrm"
 install -m 0644 packaging/systemd/*.service "$package_root/usr/lib/systemd/system/"
 install -m 0644 scripts/auth.mjs "$package_root/usr/lib/yunpanel/scripts/auth.mjs"
 install -m 0644 scripts/rotate-secret-master-key.mjs "$package_root/usr/lib/yunpanel/scripts/rotate-secret-master-key.mjs"
+install -m 0644 .env.example README.md \
+  docs/authentication.md \
+  docs/mfa.md \
+  docs/owner-mfa-policy.md \
+  docs/secret-master-key-rotation.md \
+  "$package_root/usr/share/doc/yunpanel/"
 
 cp -a package.json "$package_root/usr/lib/yunpanel/"
 cp -a apps/api apps/agent apps/web "$package_root/usr/lib/yunpanel/apps/"
