@@ -59,6 +59,6 @@ function Shell() {
     <div className="ws-main" inert={narrow && menuOpen}>
       <div className="ws-toolbar"><Button className="ws-mobile-menu" icon="menu" aria-label="Ana menüyü aç" aria-expanded={menuOpen} aria-controls="workspace-navigation" onClick={() => setMenuOpen(true)} /><form className="ws-search" onSubmit={(event) => { event.preventDefault(); navigate(`/websites${query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''}`); }}><Icon name="search" /><label className="ws-sr-only" htmlFor="workspace-search">Web sitelerinde ara</label><input id="workspace-search" ref={search} type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Alan adı veya alias ara…" maxLength={253} /><kbd>Ctrl K</kbd></form>{canManage && <LinkButton to="/websites/new" variant="primary" icon="plus">Site ekle</LinkButton>}</div>
       <main id="workspace-main" ref={content} className="ws-content" tabIndex={-1}>{notice && <div className="ws-notice" role="status"><div>{notice}</div><Button icon="close" aria-label="Bildirimi kapat" onClick={() => setNotice(null)} /></div>}<Outlet /></main>
-    </div><JobDrawer />
+    </div>{canManage && <JobDrawer />}
   </div>;
 }
