@@ -7,7 +7,6 @@ Hedef: site merkezli enterprise hosting paneli, açık domain/subdomain hiyerar�
 ## A. P0 — Authentication ve erişim sınırında kalan işler
 
 - [ ] MFA/oturum için gerçek React tarayıcı otomasyonu ekle: iki sekme, gecikmiş istek, kayıp MFA cevabı, geri yüklenen sayfa, recovery kodu onayı, modal/focus, idle/absolute süre ve keep-alive davranışını kapsa.
-- [ ] `core-app.js` ve domain route bileşimindeki `bootstrap-auth.js` / in-process uyumluluk bearer tokenını kaldır. Browser management route'ları yalnız authentication listener tarafından server-side eklenen doğrulanmış `request.auth` bağlamını kullansın; doğrudan raw `createApp().listen()` management erişimi fail-closed kalsın. Agent rotalarının ayrı credential'ları B geçişinde kaldırılacak.
 - [ ] WebSocket/SSE/terminal eklendiğinde HTTP ile aynı session, rol, Origin ve Owner MFA sınırını uygula. Logout, parola/MFA/rol değişimi, kullanıcı disable/delete ve session revoke açık bağlantı/PTY yetkisini derhal düşürsün.
 - [ ] IP allowlist'i ancak gerçek HTTPS/proxy kabulünden sonra isteğe bağlı ek ağ kontrolüne dönüştür. Trusted-proxy sözleşmesi, gerçek istemci IP'sine göre rate limit ve spoof testleri olmadan mevcut korumayı kaldırma.
 - [ ] Auth eventlerini ortak audit modeline bağla; kullanıcı yönetimi ve management/job işlemlerinde actor/resource/action/result kaydı üret. Parola, cookie, env değeri, MFA secretı ve ham terminal çıktısı audit'e yazılmayacak.
@@ -96,7 +95,7 @@ Gerçek render, responsive, keyboard/focus ve route kabulü `todo.md` içindedir
 
 ## J. P0–P3 — Test, migration ve yayın kapıları
 
-- [ ] Bootstrap-token temizliği ve agentsiz mimari ilerledikçe mevcut core/deploy/rollback/ACME/job testlerini yeni authorization/local-executor sınırına taşı; test-only network backdoor ekleme.
+- [ ] Agentsiz mimari ilerledikçe mevcut core/deploy/rollback/ACME/job testlerini local-executor sınırına taşı; test-only network backdoor ekleme.
 - [ ] Website migration, resource-scoped access, WebSocket/PTy ve yeni secret yüzeyleri için native/process/browser testleri ekle.
 - [ ] Yeni routed UI için component + gerçek browser testleri yaz: login -> site -> child -> Node -> SSL -> mail -> terminal; loading/empty/error/permission/dirty-form/refresh/long-table durumlarını kapsa.
 - [ ] Agentsiz package upgrade, schema migration, PTY dependency, restart reconciliation, job-running self-update ve disk-full rollback senaryolarını tamamla.
