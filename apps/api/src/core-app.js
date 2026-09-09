@@ -6,10 +6,10 @@ import {
   ApplicationEnvironmentRegistryError,
 } from './application-environment-registry.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
-import { createBootstrapAdminGuard, resolveBootstrapAdminToken } from './bootstrap-auth.js';
 import { createCertificateRegistry, CertificateRegistryError } from './certificate-registry.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
+import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 
 export const API_VERSION = '0.2.0';
@@ -132,12 +132,9 @@ export function createApp({
   applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
     applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
   }),
-  adminToken,
 } = {}) {
   const app = express();
   const reconciliationJobs = new Map();
-  const resolvedAdminToken = adminToken === undefined ? resolveBootstrapAdminToken({ environment }) : adminToken;
-  const requireBootstrapAdmin = createBootstrapAdminGuard({ token: resolvedAdminToken });
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
@@ -163,13 +160,13 @@ export function createApp({
   app.get('/api/dev/certificates', developmentList(() => certificateRegistry.listCertificates()));
   app.get('/api/dev/applications', developmentList(() => applicationRegistry.listApplications()));
 
-  app.get('/api/servers', requireBootstrapAdmin, async (request, response) => response.json({ data: await registry.listServers() }));
-  app.get('/api/servers/:serverId', requireBootstrapAdmin, async (request, response) => {
+  app.get('/api/servers', requirePanelRouteAccess, async (request, response) => response.json({ data: await registry.listServers() }));
+  app.get('/api/servers/:serverId', requirePanelRouteAccess, async (request, response) => {
     const server = await registry.getServer(request.params.serverId);
     if (!server) return response.status(404).json({ error: { code: 'server_not_found', message: 'Server not found' } });
     return response.json({ data: server });
   });
-  app.post('/api/servers/:serverId/system/packages/inspect', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/servers/:serverId/system/packages/inspect', requirePanelRouteAccess, async (request, response) => {
     const server = await registry.getServer(request.params.serverId);
     if (!server) throw new RegistryError('server_not_found', 'Server not found', 404);
     await ensureResourceJobIdle(jobRegistry, 'system', server.id);
@@ -183,7 +180,7 @@ export function createApp({
     });
     return response.status(202).json({ data: job });
   });
-  app.post('/api/servers/:serverId/system/upgrade', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/servers/:serverId/system/upgrade', requirePanelRouteAccess, async (request, response) => {
     const server = await registry.getServer(request.params.serverId);
     if (!server) throw new RegistryError('server_not_found', 'Server not found', 404);
     if (request.body?.confirmation !== 'upgrade-yunpanel') {
@@ -200,7 +197,7 @@ export function createApp({
     });
     return response.status(202).json({ data: job });
   });
-  app.post('/api/servers/enrollment-tokens', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/servers/enrollment-tokens', requirePanelRouteAccess, async (request, response) => {
     const ttlMinutes = request.body?.ttlMinutes;
     const options = { label: request.body?.label ?? null };
     if (ttlMinutes !== undefined) options.ttlMs = Number(ttlMinutes) * 60 * 1000;
@@ -273,13 +270,13 @@ export function createApp({
     }
   });
 
-  app.get('/api/applications', requireBootstrapAdmin, async (request, response) => response.json({ data: await applicationRegistry.listApplications() }));
-  app.get('/api/applications/:applicationId', requireBootstrapAdmin, async (request, response) => {
+  app.get('/api/applications', requirePanelRouteAccess, async (request, response) => response.json({ data: await applicationRegistry.listApplications() }));
+  app.get('/api/applications/:applicationId', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     return response.json({ data: application });
   });
-  app.get('/api/applications/:applicationId/environment', requireBootstrapAdmin, async (request, response) => {
+  app.get('/api/applications/:applicationId/environment', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     return response.json({
@@ -287,7 +284,7 @@ export function createApp({
       secretStoreConfigured: applicationEnvironmentRegistry.secretStoreConfigured,
     });
   });
-  app.put('/api/applications/:applicationId/environment/:key', requireBootstrapAdmin, async (request, response) => {
+  app.put('/api/applications/:applicationId/environment/:key', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     const variable = await applicationEnvironmentRegistry.setVariable({
@@ -298,13 +295,13 @@ export function createApp({
     });
     return response.json({ data: variable });
   });
-  app.delete('/api/applications/:applicationId/environment/:key', requireBootstrapAdmin, async (request, response) => {
+  app.delete('/api/applications/:applicationId/environment/:key', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     await applicationEnvironmentRegistry.deleteVariable(application.id, request.params.key);
     return response.status(204).end();
   });
-  app.post('/api/applications', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/applications', requirePanelRouteAccess, async (request, response) => {
     const type = request.body?.type ?? 'static';
     let application;
     if (type === 'static') {
@@ -330,7 +327,7 @@ export function createApp({
     }
     return response.status(201).json({ data: application });
   });
-  app.post('/api/applications/:applicationId/deploy', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/applications/:applicationId/deploy', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
@@ -378,7 +375,7 @@ export function createApp({
       throw error;
     }
   });
-  app.post('/api/applications/:applicationId/rollback', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/applications/:applicationId/rollback', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     if (!['static', 'node'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
@@ -415,7 +412,7 @@ export function createApp({
       throw error;
     }
   });
-  app.post('/api/applications/:applicationId/restart', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/applications/:applicationId/restart', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     if (application.type !== 'node') throw new ApplicationRegistryError('restart_not_supported', 'Restart is only supported for Node applications', 409);
@@ -437,13 +434,13 @@ export function createApp({
     });
     return response.status(202).json({ data: job });
   });
-  app.get('/api/applications/:applicationId/status', requireBootstrapAdmin, async (request, response) => {
+  app.get('/api/applications/:applicationId/status', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     if (application.type !== 'node') throw new ApplicationRegistryError('status_not_supported', 'Process status is only supported for Node applications', 409);
     return response.json({ data: await latestNodeStatusJob(jobRegistry, application.id) });
   });
-  app.post('/api/applications/:applicationId/status/refresh', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/applications/:applicationId/status/refresh', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     if (application.type !== 'node') throw new ApplicationRegistryError('status_not_supported', 'Process status is only supported for Node applications', 409);
@@ -466,13 +463,13 @@ export function createApp({
     return response.status(202).json({ data: job });
   });
 
-  app.get('/api/domains', requireBootstrapAdmin, async (request, response) => response.json({ data: await domainRegistry.listDomains() }));
-  app.get('/api/domains/:domainId', requireBootstrapAdmin, async (request, response) => {
+  app.get('/api/domains', requirePanelRouteAccess, async (request, response) => response.json({ data: await domainRegistry.listDomains() }));
+  app.get('/api/domains/:domainId', requirePanelRouteAccess, async (request, response) => {
     const domain = await domainRegistry.getDomain(request.params.domainId);
     if (!domain) return response.status(404).json({ error: { code: 'domain_not_found', message: 'Not found' } });
     return response.json({ data: domain });
   });
-  app.post('/api/domains', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/domains', requirePanelRouteAccess, async (request, response) => {
     const domain = await domainRegistry.createDomain({
       serverId: request.body?.serverId,
       primaryDomain: request.body?.primaryDomain,
@@ -483,7 +480,7 @@ export function createApp({
     });
     return response.status(201).json({ data: domain });
   });
-  app.post('/api/domains/:domainId/stage', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/domains/:domainId/stage', requirePanelRouteAccess, async (request, response) => {
     const domain = await domainRegistry.getDomain(request.params.domainId);
     if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
     await ensureResourceJobIdle(jobRegistry, 'domain', domain.id);
@@ -493,7 +490,7 @@ export function createApp({
     const job = await jobRegistry.enqueue({ serverId: domain.serverId, type: 'domain.stage', operation: OPERATIONS.DOMAIN_STAGE, payload, resourceType: 'domain', resourceId: domain.id });
     return response.status(202).json({ data: job });
   });
-  app.post('/api/domains/:domainId/activate', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/domains/:domainId/activate', requirePanelRouteAccess, async (request, response) => {
     const domain = await domainRegistry.getDomain(request.params.domainId);
     if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
     if (domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum) throw new DomainRegistryError('staged_revision_required', 'Current desired domain revision must be staged before activation', 409);
@@ -508,7 +505,7 @@ export function createApp({
     });
     return response.status(202).json({ data: job });
   });
-  app.post('/api/domains/:domainId/certificates/issue', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/domains/:domainId/certificates/issue', requirePanelRouteAccess, async (request, response) => {
     const domain = await domainRegistry.getDomain(request.params.domainId);
     if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
     if (domain.httpsMode !== 'managed') throw new CertificateRegistryError('https_not_managed', 'Domain must use managed HTTPS before requesting a certificate', 409);
@@ -538,13 +535,13 @@ export function createApp({
     }
   });
 
-  app.get('/api/certificates', requireBootstrapAdmin, async (request, response) => response.json({ data: await certificateRegistry.listCertificates() }));
-  app.get('/api/certificates/:certificateId', requireBootstrapAdmin, async (request, response) => {
+  app.get('/api/certificates', requirePanelRouteAccess, async (request, response) => response.json({ data: await certificateRegistry.listCertificates() }));
+  app.get('/api/certificates/:certificateId', requirePanelRouteAccess, async (request, response) => {
     const certificate = await certificateRegistry.getCertificate(request.params.certificateId);
     if (!certificate) throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
     return response.json({ data: certificate });
   });
-  app.post('/api/certificates/:certificateId/renew', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/certificates/:certificateId/renew', requirePanelRouteAccess, async (request, response) => {
     const certificate = await certificateRegistry.getCertificate(request.params.certificateId);
     if (!certificate) throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
     if (certificate.state !== 'active') throw new CertificateRegistryError('certificate_not_active', 'Only active certificates can be renewed', 409);
@@ -562,7 +559,7 @@ export function createApp({
     return response.status(202).json({ data: job });
   });
 
-  app.get('/api/jobs', requireBootstrapAdmin, async (request, response) => {
+  app.get('/api/jobs', requirePanelRouteAccess, async (request, response) => {
     await Promise.allSettled(reconciliationJobs.values());
     const jobs = await jobRegistry.listJobs({
       serverId: request.query.serverId || null,
@@ -572,13 +569,13 @@ export function createApp({
     });
     return response.json({ data: jobs });
   });
-  app.get('/api/jobs/:jobId', requireBootstrapAdmin, async (request, response) => {
+  app.get('/api/jobs/:jobId', requirePanelRouteAccess, async (request, response) => {
     await reconciliationJobs.get(request.params.jobId)?.catch(() => {});
     const job = await jobRegistry.getJob(request.params.jobId);
     if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
     return response.json({ data: job });
   });
-  app.post('/api/jobs/:jobId/cancel', requireBootstrapAdmin, async (request, response) => {
+  app.post('/api/jobs/:jobId/cancel', requirePanelRouteAccess, async (request, response) => {
     const job = await jobRegistry.cancel(request.params.jobId);
     if (job.resourceType === 'application') {
       const application = await applicationRegistry.getApplication(job.resourceId);
