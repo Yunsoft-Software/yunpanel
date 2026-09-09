@@ -42,7 +42,9 @@ export default function UsersPage() {
         : 'Hesap kaydedildi. Değişiklik yapıldıysa kullanıcının mevcut oturumları kapatıldı.');
     refresh();
   }
-  const locked = dialog !== null || page.status !== 'ready';
+  const ready = page.status === 'ready' && page.data?.offset === (number - 1) * LIMIT;
+  const visible = ready ? page.data : null;
+  const locked = dialog !== null || !ready;
   return <>
     <nav className="ws-breadcrumb" aria-label="Sayfa yolu"><Link to="/settings">Ayarlar</Link><span>/ Kullanıcılar</span></nav>
     <PageHeading title="Kullanıcılar" description="Panel hesaplarını ve yönetim erişimini yönetin." actions={<>
@@ -51,12 +53,12 @@ export default function UsersPage() {
     </>} />
     {notice && <div className="ws-notice" role="status">{notice}</div>}
     <Section title="Hesaplar" description="Owner tüm mevcut yönetim işlemlerine erişir. Read Only hesapları şu an yalnız kendi hesap ayarlarına erişebilir; kaynak görüntüleme izinleri henüz uygulanmadı.">
-      {page.status === 'loading' && <div className="ws-loading" role="status"><span className="ws-spinner" />Hesaplar doğrulanıyor…</div>}
+      {(page.status === 'loading' || (page.status === 'ready' && !ready)) && <div className="ws-loading" role="status"><span className="ws-spinner" />Hesaplar doğrulanıyor…</div>}
       {page.status === 'error' && <div className="ws-section-body"><ErrorNotice error={userAdminMessage(page.error)} /><Button disabled={dialog !== null} onClick={refresh}>Listeyi yeniden yükle</Button></div>}
-      {page.status === 'ready' && (page.data.users.length ? <div className="ws-table-scroll"><table className="ws-table">
+      {ready && (visible.users.length ? <div className="ws-table-scroll"><table className="ws-table">
         <caption className="ws-muted">Panel kullanıcıları; her sayfada en fazla {LIMIT} hesap.</caption>
         <thead><tr><th scope="col">Kullanıcı adı</th><th scope="col">Rol</th><th scope="col">Durum</th><th scope="col">MFA</th><th scope="col">İşlemler</th></tr></thead>
-        <tbody>{page.data.users.map((user) => <tr key={user.id}>
+        <tbody>{visible.users.map((user) => <tr key={user.id}>
           <th scope="row" style={{ overflowWrap: 'anywhere' }}>{user.username}</th>
           <td>{user.role === 'owner' ? 'Owner' : 'Read Only'}</td>
           <td><Badge state={user.active ? 'active' : 'off'}>{user.active ? 'Aktif' : 'Devre dışı'}</Badge></td>
@@ -65,9 +67,9 @@ export default function UsersPage() {
             <Button disabled={locked} variant="danger" aria-label={`${user.username} hesabını sil`} onClick={() => { setNotice(''); setDialog({ type: 'delete', user }); }}>Sil</Button></div></td>
         </tr>)}</tbody>
       </table></div> : <EmptyState title="Bu sayfada hesap yok" detail="Önceki sayfaya dönün veya listeyi yenileyin." icon="user" />)}
-      <footer className="ws-pagination"><span>{page.data ? `${page.data.total} hesap` : 'Hesap sayısı doğrulanıyor'}</span><div className="ws-actions">
-        <Button disabled={locked || number <= 1} onClick={() => setNumber((value) => value - 1)}>Önceki</Button><span aria-live="polite">Sayfa {number}{page.data ? ` / ${totalPages}` : ''}</span>
-        <Button disabled={locked || !page.data || number >= totalPages} onClick={() => setNumber((value) => value + 1)}>Sonraki</Button>
+      <footer className="ws-pagination"><span>{visible ? `${visible.total} hesap` : 'Hesap sayısı doğrulanıyor'}</span><div className="ws-actions">
+        <Button disabled={locked || number <= 1} onClick={() => setNumber((value) => value - 1)}>Önceki</Button><span aria-live="polite">Sayfa {number}{visible ? ` / ${totalPages}` : ''}</span>
+        <Button disabled={locked || !visible || number >= totalPages} onClick={() => setNumber((value) => value + 1)}>Sonraki</Button>
       </div></footer>
     </Section>
     {dialog && <UserDialog key={`${dialog.type}:${dialog.user?.id ?? 'new'}`} mode={dialog.type} user={dialog.user} onClose={closeDialog} onSave={save} />}
