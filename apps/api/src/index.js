@@ -45,7 +45,7 @@ const listener = createAuthenticatedApi({
   store: authStore,
   publicOrigin: process.env.YUNPANEL_PUBLIC_ORIGIN ?? (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:5173' : undefined),
   development: process.env.NODE_ENV === 'development',
-  createHandler: ({ adminToken }) => createApp({ registry, domainRegistry, jobRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry, adminToken }),
+  createHandler: () => createApp({ registry, domainRegistry, jobRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry }),
 });
 const renewalScheduler = startCertificateRenewalScheduler({ certificateRegistry, jobRegistry, intervalMs: certificateRenewalIntervalMs, renewBeforeMs: certificateRenewBeforeMs });
 const server = http.createServer({ headersTimeout: 15_000, requestTimeout: 30_000 }, listener);
