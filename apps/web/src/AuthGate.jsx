@@ -6,6 +6,7 @@ import LoginForm from './LoginForm.jsx';
 import AccountDialog from './AccountDialog.jsx';
 import OwnerEnrollment from './OwnerEnrollment.jsx';
 import { ownerAccess } from './owner-access.js';
+import { PanelSessionProvider } from './panel-session.jsx';
 import './auth.css';
 import './mfa.css';
 
@@ -110,8 +111,8 @@ export default function AuthGate({ children }) {
     {actionError && <p className="auth-banner" role="alert">{actionError}</p>}
     {showEnrollment
       ? <OwnerEnrollment session={state.session} onSession={accept} onSignedOut={signedOut} onComplete={() => setEnrollmentOpen(false)} />
-      : access === 'management'
-        ? <div key={state.session.id}>{children}</div>
+      : ['management', 'read_only'].includes(access)
+        ? <PanelSessionProvider session={state.session}><div key={state.session.id}>{children}</div></PanelSessionProvider>
         : <main className="auth-loading"><h1>{access === 'unknown' ? 'Güvenlik durumu alınamadı' : 'Yönetim erişimi yok'}</h1><p role="alert">{access === 'unknown' ? 'Web arayüzü ve API sürümlerini kontrol edin. Yönetim ekranları güvenlik bilgisi doğrulanana kadar açılmaz.' : 'Bu hesap için sunucu yönetimi yetkisi tanımlı değil.'}</p><button className="auth-primary" onClick={() => refresh()}>Durumu yeniden kontrol et</button></main>}
     {accountOpen && <AccountDialog session={state.session} onClose={() => setAccountOpen(false)} onSession={accept} onSignedOut={signedOut} />}
   </div>;
