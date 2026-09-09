@@ -10,12 +10,22 @@ import {
 
 export const AGENT_PROTOCOL_VERSION = 4;
 
+export const MANAGED_SERVICE_IDS = Object.freeze([
+  'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
+]);
+export const MANAGED_SERVICE_ACTIONS = Object.freeze(['start', 'stop', 'restart']);
+const MANAGED_SERVICE_ID_SET = new Set(MANAGED_SERVICE_IDS);
+const MANAGED_SERVICE_ACTION_SET = new Set(MANAGED_SERVICE_ACTIONS);
+
 export const OPERATIONS = Object.freeze({
   SERVER_INSPECT: 'server.inspect',
   SERVER_SERVICES: 'server.services',
   SERVER_DOCKER: 'server.docker',
   SERVER_NGINX: 'server.nginx',
   SYSTEM_PACKAGES_INSPECT: 'system.packages.inspect',
+  SYSTEM_SERVICES_INSPECT: 'system.services.inspect',
+  SYSTEM_SERVICE_INSTALL: 'system.service.install',
+  SYSTEM_SERVICE_CONTROL: 'system.service.control',
   SYSTEM_UPGRADE: 'system.upgrade',
   DOMAIN_STAGE: 'domain.stage',
   DOMAIN_ACTIVATE: 'domain.activate',
@@ -35,6 +45,7 @@ export const READ_ONLY_OPERATIONS = Object.freeze([
   OPERATIONS.SERVER_DOCKER,
   OPERATIONS.SERVER_NGINX,
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
+  OPERATIONS.SYSTEM_SERVICES_INSPECT,
   OPERATIONS.APP_NODE_STATUS,
 ]);
 
@@ -75,9 +86,34 @@ function validateSafePath(value, fieldName, errors) {
   }
 }
 
+function validateManagedServiceId(value, fieldName, errors) {
+  if (typeof value !== 'string' || !MANAGED_SERVICE_ID_SET.has(value)) errors.push(`${fieldName} is invalid`);
+}
+
+function rejectUnexpectedKeys(payload, allowedKeys, operation, errors) {
+  const allowed = new Set(allowedKeys);
+  if (Object.keys(payload).some((key) => !allowed.has(key))) errors.push(`${operation} contains unsupported arguments`);
+}
+
 function validateMutationPayload(operation, payload, errors) {
   if (operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || operation === OPERATIONS.SYSTEM_UPGRADE) {
     if (Object.keys(payload).length !== 0) errors.push(`${operation} does not accept arguments`);
+  }
+
+  if (operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) {
+    rejectUnexpectedKeys(payload, ['serviceId'], operation, errors);
+    if (payload.serviceId !== undefined) validateManagedServiceId(payload.serviceId, 'system.services.inspect serviceId', errors);
+  }
+
+  if (operation === OPERATIONS.SYSTEM_SERVICE_INSTALL) {
+    rejectUnexpectedKeys(payload, ['serviceId'], operation, errors);
+    validateManagedServiceId(payload.serviceId, 'system.service.install serviceId', errors);
+  }
+
+  if (operation === OPERATIONS.SYSTEM_SERVICE_CONTROL) {
+    rejectUnexpectedKeys(payload, ['serviceId', 'action'], operation, errors);
+    validateManagedServiceId(payload.serviceId, 'system.service.control serviceId', errors);
+    if (typeof payload.action !== 'string' || !MANAGED_SERVICE_ACTION_SET.has(payload.action)) errors.push('system.service.control action is invalid');
   }
 
   if (operation === OPERATIONS.DOMAIN_STAGE) {
