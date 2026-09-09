@@ -25,8 +25,9 @@ Her tamamlanan maddede mümkünse sonuç, tarih ve kısa doğrulama notu bırak�
 
 - [x] **Sağlanan YunPanel test sunucusuna SSH erişimini tekrar doğrula.**
   - 2026-09-09 tarihinde 22/TCP bağlantısı, SSH host-key doğrulaması ve root parola authentication akışı başarıyla tamamlandı.
-  - Sunucu `Ubuntu 22.04.5 LTS`, systemd 249 ve x86_64 olarak doğrulandı; projenin Ubuntu 24.04 LTS destek hedefini karşılamadığı için 24.04 exit validation maddeleri henüz tamamlanmış sayılmamalıdır.
-  - İlk salt-okunur envanterde Plesk, Nginx, Apache, Passenger, Node.js, Docker, MySQL/MariaDB, Certbot ve mail stack kurulu değildi; yalnızca SSH ilgili servisler arasında aktifti ve UFW inaktifti.
+  - İlk envanterde `Ubuntu 22.04.5 LTS` olan host, aynı gün kullanıcı talebiyle ve yerel/sunucu tarafında doğrulanmış yedek alındıktan sonra `Ubuntu 24.04.5 LTS` sürümüne yükseltildi.
+  - Yükseltme sonrasında kernel `6.8.0-139-generic`, systemd 255.4, Nginx 1.24.0, Node.js 24.20.0 ve Certbot 2.9.0 doğrulandı; bekleyen paket, başarısız systemd unit'i veya reboot gereksinimi kalmadı.
+  - İlk salt-okunur envanterde Plesk, Nginx, Apache, Passenger, Node.js, Docker, MySQL/MariaDB, Certbot ve mail stack kurulu değildi; bu çalışma kapsamında yalnızca YunPanel testleri için gereken Nginx, Node.js ve Certbot kuruldu. Plesk/Apache/Passenger/Docker/database/mail stack halen kurulu değildir.
   - Sunucu IP'si, root parolası veya başka credential değerleri bu dosyaya/Git geçmişine yazılmamalıdır.
   - Kimlik bilgileri yalnızca Git tarafından ignore edilen, `0600` izinli yerel dosyada tutulmaktadır.
 
@@ -34,11 +35,11 @@ Her tamamlanan maddede mümkünse sonuç, tarih ve kısa doğrulama notu bırak�
 
 # P0 — İlk envanter ve güvenli test ortamı
 
-- [ ] **YunPanel için ayrı bir Ubuntu 24.04 LTS test sunucusu hazırla.**
+- [x] **YunPanel için ayrı bir Ubuntu 24.04 LTS test sunucusu hazırla.**
   - Production Plesk sunucusunda ilk geliştirme/test yapılmamalı.
   - Minimum olarak public/private IP, SSH erişimi ve sudo/root yetkisi sağlanmalı.
   - Test sunucusu mümkünse production'a benzer Node/Docker/MySQL koşullarına sahip olmalı.
-  - 2026-09-09: Sağlanan boş test hostuna erişim doğrulandı ancak host Ubuntu 22.04.5 LTS çalıştırdığı için bu madde açık bırakıldı; in-place distribution upgrade güvenli test ortamı provisioning'i ile eşdeğer kabul edilmedi.
+  - 2026-09-09: Sağlanan ve production dışı olduğu belirtilen boş test hostu, upgrade öncesi yedek alınarak Ubuntu 22.04.5 LTS'den Ubuntu 24.04.5 LTS'ye yükseltildi. Kalıcı Netplan yapılandırması `/32` adres ve on-link gateway ile düzeltildi; iki reboot sonrasında SSH, network ve YunPanel servisleri doğrulandı.
 
 - [ ] **Mevcut Plesk sunucusunun tam servis envanterini çıkar.**
   - Ubuntu sürümü.
@@ -157,14 +158,16 @@ Nginx adapter/template kodu hazırlandıktan sonra:
 
 SSL kodu hazırlandıktan sonra gerçek DNS gerektiren işler:
 
-- [ ] Test domainini YunPanel test sunucusuna yönlendir.
-- [ ] HTTP-01 ile ilk Let's Encrypt certificate issuance testini yap.
-- [ ] HTTP -> HTTPS redirect'i doğrula.
-- [ ] Renewal dry-run/yenileme testini gerçek sunucuda yap.
+- [x] Test domainini YunPanel test sunucusuna yönlendir.
+- [x] HTTP-01 ile ilk Let's Encrypt certificate issuance testini yap.
+- [x] HTTP -> HTTPS redirect'i doğrula.
+- [x] Renewal dry-run/yenileme testini gerçek sunucuda yap.
 - [ ] Sertifika yenileme sonrası Nginx reload davranışını doğrula.
 - [ ] Yanlış DNS durumunda hata mesajının panelde doğru göründüğünü doğrula.
 - [ ] Expired/invalid certificate failure senaryosu için güvenli test yap.
 - [ ] Wildcard/DNS-01 gerekiyorsa hangi DNS providerların destekleneceğine karar ver ve credentialları güvenli şekilde hazırla.
+
+2026-09-09 doğrulaması: `cryptoraichu.website` apex A kaydı test sunucusuna çözülürken mevcut diğer DNS kayıtlarına dokunulmadı. Domain YunPanel API -> job -> ajan akışıyla önce HTTP olarak stage/activate edildi; Let's Encrypt staging HTTP-01 doğrulaması, üretim sertifika issuance'ı ve üretim sertifikasına karşı renewal dry-run başarıyla tamamlandı. Sertifika CN/SAN alanı `cryptoraichu.website`, geçerlilik sonu 2026-12-08 olarak dışarıdan doğrulandı; HTTP `301` ile HTTPS'e yönleniyor ve HTTPS panel/health yanıtı `200`. Certbot timer aktif/enable edildi ve gerçek yenilemeler için önce `nginx -t`, sonra reload yapan deploy hook kurularak manuel çalıştırıldı; sertifika henüz yeni olduğundan gerçek post-renew reload maddesi zorla ikinci üretim sertifikası alınmadan açık bırakıldı. Panel geçidi yalnızca onaylanan istemci IPv4 adresini kabul ediyor, loopback `127.0.0.1:4300` üzerinde dinliyor ve genel admin API rotalarını yayınlamıyor.
 
 ---
 

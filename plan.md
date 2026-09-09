@@ -53,7 +53,8 @@ Current implementation checkpoint — 2026-09-09:
 - externally observed completed job state is held behind the in-process reconciliation barrier so the related domain/application/certificate state is settled before API job reads return,
 - protected Node runtime environments are implemented with a separate AES-256-GCM store, masked admin metadata, authenticated just-in-time agent delivery and atomic root-protected systemd EnvironmentFile materialization,
 - secure log transport/redaction and the environment/log operator UI remain active Milestone 4 work,
-- real Ubuntu 24.04/systemd validation remains an external test requirement tracked in `todo.md`; the provided test host became reachable over SSH on 2026-09-09 but runs Ubuntu 22.04.5 LTS, so target-platform exit validation remains open.
+- the dedicated test host was backed up and upgraded from Ubuntu 22.04.5 LTS to Ubuntu 24.04.5 LTS; network persistence, reboot recovery, Nginx, Node.js, systemd, control-plane, agent and managed application/vhost health were revalidated on the target platform,
+- `cryptoraichu.website` is active through the real YunPanel domain workflow with an externally trusted Let's Encrypt certificate, HTTP-to-HTTPS redirect and successful ACME staging plus renewal dry-runs; a client-IP-restricted loopback gateway exposes the current dashboard without exposing privileged admin API routes.
 
 ---
 
