@@ -92,6 +92,7 @@ Gerçek render, responsive, keyboard/focus ve route kabulü `todo.md` içindedir
 - [ ] Site cron: user/cwd/env/timezone/enable-disable/last-run/output. Site işleri site user, sistem işleri açık Owner/Server bağlamında çalışsın.
 - [ ] Gerçek metric history, inode/disk threshold, service/app events, deploy/backup/SSL notifications ve bounded log download ekle. Unknown/stale metric sıfır veya yeşil gösterilmesin.
 - [ ] Audit/job detail: actor, resource link, stage, safe error/log, search/filter, cancel/retry. Riskli retry idempotency + lock şartıyla çalışsın.
+- [x] Job ayrıntısında API'nin `finishedAt` alanını tamamlanma zamanı olarak göster; eski `completedAt` kayıtlarını yalnız uyumluluk için kabul et.
 - [ ] Plesk read-only importer, external-managed state ve Passenger/static/Node/DB/Docker/domain/cron/mail migration + per-resource rollback araçlarını tamamla.
 
 ## J. P0–P3 — Test, migration ve yayın kapıları
