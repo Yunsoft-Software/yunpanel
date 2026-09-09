@@ -121,16 +121,18 @@ Her tamamlanan maddede mümkünse sonuç, tarih ve kısa doğrulama notu bırak�
 
 Bu maddeler agent kodu hazırlandıktan sonra test Ubuntu sunucusunda yapılacak.
 
-- [ ] YunPanel için dedicated Linux system user/group oluştur.
-- [ ] `yun-agent` için systemd service kur.
-- [ ] Agent config/secrets için root-protected dizin oluştur.
+- [x] YunPanel için dedicated Linux system user/group oluştur.
+- [x] `yun-agent` için systemd service kur.
+- [x] Agent config/secrets için root-protected dizin oluştur.
 - [ ] Agent'ın ihtiyaç duyduğu sudo/polkit/privilege modelini test sunucusunda uygula.
-- [ ] Agent'ın normal panel backend'inden ayrı kullanıcı altında çalıştığını doğrula.
-- [ ] Agent tarafından kullanılacak filesystem dizinlerinin ownership/permission modelini doğrula.
-- [ ] Agent bağlantısı için firewall/network erişimini aç.
-- [ ] Agent'ın yalnızca beklenen port/interface üzerinde dinlediğini doğrula.
-- [ ] Agent restart sonrası otomatik ayağa kalkıyor mu doğrula.
+- [x] Agent'ın normal panel backend'inden ayrı kullanıcı altında çalıştığını doğrula.
+- [x] Agent tarafından kullanılacak filesystem dizinlerinin ownership/permission modelini doğrula.
+- [x] Agent bağlantısı için firewall/network erişimini aç.
+- [x] Agent'ın yalnızca beklenen port/interface üzerinde dinlediğini doğrula.
+- [x] Agent restart sonrası otomatik ayağa kalkıyor mu doğrula.
 - [ ] Agent credential rotation prosedürünü gerçek sunucuda test et.
+
+2026-09-09 doğrulaması: control plane `yunpanel` kullanıcısıyla, ayrıcalıklı ajan root ile ayrı systemd servislerinde çalıştırıldı. API `127.0.0.1:3001`, ajan `127.0.0.1:4010` üzerinde dinliyor; dışarıya ajan portu açılmadı. Ajan identity/config dizini `0700`, dosyaları `0600`; uygulama environment dizini `0700`, dosyası `0600` doğrulandı. Ajan ve API reboot sonrasında otomatik başladı ve enrollment identity yeniden kullanıldı. Bu test separation'ı kanıtlar; ajanı root yerine sınırlı sudo/polkit yetkilerine indirme maddesi halen açıktır. Hostta UFW inaktif olduğundan "network erişimi" yalnızca gerekli loopback akışı ile dışarıdan erişilen SSH/HTTP portlarının çalıştığını ifade eder, kalıcı firewall policy doğrulaması değildir.
 
 ---
 
@@ -138,14 +140,16 @@ Bu maddeler agent kodu hazırlandıktan sonra test Ubuntu sunucusunda yapılacak
 
 Nginx adapter/template kodu hazırlandıktan sonra:
 
-- [ ] Test sunucusuna üretilen ilk static vhost config'ini uygula.
-- [ ] `nginx -t` doğrulamasını gerçek sunucuda çalıştır.
-- [ ] Geçerli config sonrası reload'un kesintisiz olduğunu doğrula.
-- [ ] Bilerek hatalı config ile YunPanel'in çalışan config'i bozmadığını doğrula.
-- [ ] Duplicate domain ekleme korumasını gerçek Nginx state ile test et.
+- [x] Test sunucusuna üretilen ilk static vhost config'ini uygula.
+- [x] `nginx -t` doğrulamasını gerçek sunucuda çalıştır.
+- [x] Geçerli config sonrası reload'un kesintisiz olduğunu doğrula.
+- [x] Bilerek hatalı config ile YunPanel'in çalışan config'i bozmadığını doğrula.
+- [x] Duplicate domain ekleme korumasını gerçek Nginx state ile test et.
 - [ ] `www`/non-`www` alias ve redirect davranışını gerçek DNS/domain ile test et.
 - [ ] Large upload/proxy timeout gerektiren Node uygulaması için gerçek davranışı test et.
-- [ ] WebSocket/socket.io kullanan uygulamada proxy upgrade header davranışını test et.
+- [x] WebSocket/socket.io kullanan uygulamada proxy upgrade header davranışını test et.
+
+2026-09-09 doğrulaması: gerçek Nginx üzerinde static SPA ve loopback Node proxy vhostları API -> job -> ajan akışıyla stage/activate edildi. Bilerek bozuk aday config `nginx_config_invalid` ile reddedildi ve aktif config checksum/traffic korundu. Duplicate domain API'de `409 domain_conflict` verdi ve aktif config değişmedi. WebSocket fixture'ı Nginx üzerinden gerçek `101 Switching Protocols` yanıtı verdi; reboot sonrasında da aynı sonuç alındı. Gerçek DNS gerektiren yönlendirmeler ile large-upload/timeout senaryosu açık bırakıldı.
 
 ---
 
@@ -166,15 +170,17 @@ SSL kodu hazırlandıktan sonra gerçek DNS gerektiren işler:
 
 # P0 — İlk static migration denemesi
 
-- [ ] Production olmayan veya düşük riskli bir static React/Vite sitesi seç.
+- [x] Production olmayan veya düşük riskli bir static React/Vite sitesi seç.
 - [ ] Plesk'teki mevcut dosya ve domain ayarlarının snapshot/backup'ını al.
 - [ ] Aynı siteyi YunPanel test sunucusunda Git -> build -> Nginx -> SSL akışıyla deploy et.
-- [ ] SPA routing varsa direct route refresh testini yap.
-- [ ] Static asset caching davranışını kontrol et.
+- [x] SPA routing varsa direct route refresh testini yap.
+- [x] Static asset caching davranışını kontrol et.
 - [ ] DNS cutover öncesi hosts override ile test et.
 - [ ] DNS'i YunPanel sunucusuna geçir.
 - [ ] HTTP/HTTPS, www/non-www ve önemli route'ları doğrula.
-- [ ] Rollback prosedürünü gerçekten uygula ve eski sürüme dönebildiğini doğrula.
+- [x] Rollback prosedürünü gerçekten uygula ve eski sürüme dönebildiğini doğrula.
+
+2026-09-09 doğrulaması: YunPanel React/Vite kaynağı test fixture'ı olarak dedicated application user ile GitHub'dan çekilip iki ayrı release halinde build edildi. Nginx SPA direct-route isteği hem deploy hem rollback sonrasında `200` verdi; yayın dizinleri `0755`, dosyalar `0644` doğrulandı. Static asset cache header davranışı ayrı yönetilen static fixture üzerinde doğrulandı. İkinci release'ten ilk release'e gerçek rollback başarılı oldu; kasıtlı `current` symlink drift'i `static_rollback_release_drift` ile hiçbir rollback mutasyonu yapılmadan reddedildi. Bu test HTTP ve Host header override kullandı; gerçek DNS/SSL içeren tam migration maddesi tamamlanmış sayılmadı.
 
 ---
 
@@ -186,29 +192,31 @@ Node deployment ve protected runtime-environment backend'i hazırlandıktan sonr
 - [ ] Plesk env değerlerini güvenli şekilde YunPanel secret store'a taşı.
 - [ ] Production control plane için güçlü `YUNPANEL_SECRET_MASTER_KEY` üret, repo dışında güvenli secret store'a yerleştir ve recovery kopyasının nerede tutulacağını belirle.
 - [ ] Master key olmadan secret write'ın fail-closed davrandığını gerçek API sürecinde doğrula.
-- [ ] Secret registry state dosyasında plaintext secret bulunmadığını ve dosya permissionının `0600` olduğunu doğrula.
+- [x] Secret registry state dosyasında plaintext secret bulunmadığını ve dosya permissionının `0600` olduğunu doğrula.
 - [ ] Agent'ın yalnızca kendi server'ına bağlı Node uygulamanın environment bundle'ını alabildiğini gerçek iki-server/enrollment senaryosunda doğrula.
 - [ ] Production agent-control plane hattında environment fetch'in HTTPS üzerinden gittiğini doğrula.
-- [ ] `/etc/yunpanel/apps` dizininin `0700`, `<application-id>.env` dosyasının `0600` olduğunu gerçek filesystem üzerinde doğrula.
-- [ ] Secret'ın systemd unit textine, process command line'a, generic job payload/result/history'ye veya normal admin environment listesine plaintext düşmediğini doğrula.
-- [ ] Environment variable değiştirip manual restart sonrası yeni değerin process tarafından görüldüğünü doğrula.
-- [ ] Environment variable değiştirip yeni deploy ve manual rollback sırasında aynı desired environment'ın atomik biçimde materialize edildiğini doğrula.
+- [x] `/etc/yunpanel/apps` dizininin `0700`, `<application-id>.env` dosyasının `0600` olduğunu gerçek filesystem üzerinde doğrula.
+- [x] Secret'ın systemd unit textine, process command line'a, generic job payload/result/history'ye veya normal admin environment listesine plaintext düşmediğini doğrula.
+- [x] Environment variable değiştirip manual restart sonrası yeni değerin process tarafından görüldüğünü doğrula.
+- [x] Environment variable değiştirip yeni deploy ve manual rollback sırasında aynı desired environment'ın atomik biçimde materialize edildiğini doğrula.
 - [ ] Master key yedekleme/rotation/recovery prosedürünü production öncesi yaz ve test et; key kaybının mevcut ciphertext'i okunamaz hale getirdiği kabul edilmeli ve recovery yolu kanıtlanmalı.
-- [ ] Doğru Node.js runtime sürümünü test sunucusunda kur/doğrula.
-- [ ] systemd unit'i gerçek sunucuda oluştur ve çalıştır.
-- [ ] Uygulamanın dedicated Unix user altında çalıştığını doğrula.
-- [ ] Nginx reverse proxy üzerinden uygulamayı doğrula.
-- [ ] WebSocket/socket.io varsa gerçek bağlantı testi yap.
-- [ ] Uygulamayı reboot sonrası otomatik başlatma testinden geçir.
-- [ ] Process crash sonrası restart policy davranışını test et.
+- [x] Doğru Node.js runtime sürümünü test sunucusunda kur/doğrula.
+- [x] systemd unit'i gerçek sunucuda oluştur ve çalıştır.
+- [x] Uygulamanın dedicated Unix user altında çalıştığını doğrula.
+- [x] Nginx reverse proxy üzerinden uygulamayı doğrula.
+- [x] WebSocket/socket.io varsa gerçek bağlantı testi yap.
+- [x] Uygulamayı reboot sonrası otomatik başlatma testinden geçir.
+- [x] Process crash sonrası restart policy davranışını test et.
 - [ ] Health check başarısız yeni deploy'da eski release'in servis vermeye devam ettiğini doğrula.
 - [ ] Manual rollback yap ve target release health-check başarısızsa önceki release'in geri geldiğini doğrula.
-- [ ] Manual restart yap ve restart sonrası localhost health doğrulamasını kontrol et.
-- [ ] Control-plane current release ile sunucu `current` symlink'i farklıyken restart/rollback/status operasyonlarının drift hatası verdiğini doğrula.
-- [ ] Node process status sorgusunda systemd active/sub state, PID, restart count ve health sonucunun doğru döndüğünü doğrula.
+- [x] Manual restart yap ve restart sonrası localhost health doğrulamasını kontrol et.
+- [x] Control-plane current release ile sunucu `current` symlink'i farklıyken restart/rollback/status operasyonlarının drift hatası verdiğini doğrula.
+- [x] Node process status sorgusunda systemd active/sub state, PID, restart count ve health sonucunun doğru döndüğünü doğrula.
 - [ ] Custom startup file ve npm start script kullanan uygulamada deploy/restart/rollback boyunca runtime ayarlarının korunmasını doğrula.
 - [ ] Journal/application loglarının YunPanel'e güvenli aktarıldığını doğrula.
 - [ ] Secret içeren örnek loglarla redaction davranışını doğrula; plaintext secret generic job result/audit kayıtlarına düşmemeli.
+
+2026-09-09 doğrulaması: Node.js `24.20.0` checksum doğrulamasıyla kuruldu. Public örnek uygulama dedicated user/systemd unit ile iki kez deploy edildi; environment değişikliği manual restart, yeni deploy ve rollback boyunca process'e ulaştı. Secret control-plane JSON/job state, systemd unit, command line ve admin metadata içinde bulunmadı. Nginx proxy, localhost health, reboot auto-start ve `SIGKILL` sonrası `on-failure` restart doğrulandı. Status active state/PID/restart count/health döndürdü. Kasıtlı release drift durumunda status, restart ve rollback sırasıyla `node_status_release_drift`, `node_restart_release_drift` ve `node_rollback_release_drift` verdi; PID, environment ve symlink operasyonlar tarafından değiştirilmedi. HTTPS control-plane, iki-server ownership, master-key recovery/rotation, unhealthy target rollback ve log streaming/redaction maddeleri açık bırakıldı.
 
 ---
 
@@ -298,12 +306,14 @@ Backup özelliği hazırlandıktan sonra:
 
 # P1 — Firewall ve network
 
-- [ ] Test sunucusunda UFW/nftables/aktif firewall modelini belirle.
-- [ ] YunPanel agent için gereken minimum portları aç.
+- [x] Test sunucusunda UFW/nftables/aktif firewall modelini belirle.
+- [x] YunPanel agent için gereken minimum portları aç.
 - [ ] Public erişim gerekmiyorsa agent'ı private interface/VPN üzerinden bağlama seçeneğini test et.
 - [ ] SSH, HTTP, HTTPS, mail ve DB portlarını ihtiyaca göre doğrula.
 - [ ] Panel API/agent communication için TLS/mTLS certificate deployment'ını test et.
 - [ ] Reboot sonrasında firewall kurallarının korunduğunu doğrula.
+
+2026-09-09 doğrulaması: UFW inaktif bulundu. SSH/22 ve HTTP/80 dış ağdan erişilebilir; ajan ve control-plane API yalnızca loopback üzerinde olduğundan ek public ajan portu açılmadı. Bu sonuç bir firewall hardening doğrulaması değildir; HTTPS/443, mail, DB, VPN/private-interface ve TLS/mTLS maddeleri henüz test edilmedi.
 
 ---
 
@@ -407,10 +417,10 @@ ayrı ayrı tamamlanmalı.
 - [ ] Database backup/restore gerçek veriyle test edildi.
 - [ ] Application full disaster recovery tatbikatı yapıldı.
 - [ ] SSL renewal gerçek domain üzerinde en az bir kez doğrulandı.
-- [ ] Reboot sonrası tüm YunPanel-managed servisler otomatik ayağa kalkıyor.
-- [ ] Agent erişilemediğinde web trafiğinin etkilenmediği doğrulandı.
-- [ ] Control plane kapalıyken çalışan uygulamaların servis vermeye devam ettiği doğrulandı.
-- [ ] Nginx hatalı değişiklik rollback'i doğrulandı.
+- [x] Reboot sonrası tüm YunPanel-managed servisler otomatik ayağa kalkıyor.
+- [x] Agent erişilemediğinde web trafiğinin etkilenmediği doğrulandı.
+- [x] Control plane kapalıyken çalışan uygulamaların servis vermeye devam ettiği doğrulandı.
+- [x] Nginx hatalı değişiklik rollback'i doğrulandı.
 - [ ] Failed deploy rollback'i doğrulandı.
 - [ ] Disk-full davranışı test edildi.
 - [ ] Backup target outage davranışı test edildi.
@@ -468,4 +478,9 @@ Aşağıdaki değerler gerektiğinde kullanıcı/Plesk/sunucu tarafında hazırl
 
 # Tamamlanmış dış işler
 
-Henüz yok.
+- 2026-09-09 — Sağlanan hostta SSH/host-key doğrulaması, salt-okunur envanter ve dışarıdan 22/80 port erişimi tamamlandı. Host Ubuntu 22.04.5 LTS olduğu için Ubuntu 24.04 hedef-platform exit kriteri açık bırakıldı.
+- 2026-09-09 — Nginx, Node.js 24, YunPanel API ve ayrıcalıklı ajan kuruldu; enrollment identity, loopback binding, korumalı config/state izinleri, systemd enablement ve reboot sonrası geri geliş doğrulandı.
+- 2026-09-09 — Static Nginx, geçersiz config koruması, duplicate domain, proxy ve gerçek WebSocket upgrade testleri tamamlandı.
+- 2026-09-09 — Static Git/build/release/SPA/rollback yaşam döngüsü ve static release-drift koruması gerçek sunucuda tamamlandı. Test sırasında keşfedilen restrictive-umask traversal hatası kodda giderilip regresyon testi eklendi.
+- 2026-09-09 — Node deploy/restart/rollback/status, protected environment, secret sızıntı kontrolleri, crash recovery, Nginx proxy ve release-drift korumaları gerçek sunucuda tamamlandı.
+- 2026-09-09 — Ajan ve control plane birlikte durdurulduğunda static, Node ve proxy trafiğinin hizmet vermeye devam ettiği doğrulandı.
