@@ -171,7 +171,7 @@ export function createApp({
   });
   app.post('/api/servers/:serverId/system/packages/inspect', requireBootstrapAdmin, async (request, response) => {
     const server = await registry.getServer(request.params.serverId);
-    if (!server) throw new RegistryError('server_not_found', 'Server not found', 404);
+    if (!server) throw new RegistryError('server_not_found', 'Target server does not exist', 404);
     await ensureResourceJobIdle(jobRegistry, 'system', server.id);
     const job = await jobRegistry.enqueue({
       serverId: server.id,
@@ -383,7 +383,7 @@ export function createApp({
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     if (!['static', 'node'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
-    if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
+    if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already_has_an_active_operation', 409);
 
     const releaseId = request.body?.releaseId ?? application.previousReleaseId;
     if (!releaseId) throw new ApplicationRegistryError('rollback_release_required', 'No previous release is available for rollback', 409);
@@ -476,6 +476,7 @@ export function createApp({
     const domain = await domainRegistry.createDomain({
       serverId: request.body?.serverId,
       primaryDomain: request.body?.primaryDomain,
+      parentDomainId: request.body?.parentDomainId ?? null,
       aliases: request.body?.aliases ?? [],
       targetType: request.body?.targetType,
       target: request.body?.target,
