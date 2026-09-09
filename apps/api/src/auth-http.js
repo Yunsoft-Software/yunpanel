@@ -141,7 +141,8 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
 
     const session = store.getSession(rawToken);
     if (!session) {
-      if (rawToken) setCookie(response, '');
+      // A stale request may arrive after another request rotated the cookie.
+      // Do not erase the newer browser cookie; explicit logout still clears it.
       return json(response, 401, { error: { code: 'unauthorized', message: 'Sign in to continue.' }, setupRequired: pathname === '/api/auth/session' ? !store.configured() : undefined });
     }
     if (!SAFE_METHODS.has(request.method)) {
