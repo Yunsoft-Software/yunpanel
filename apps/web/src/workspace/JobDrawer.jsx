@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { panelRequest } from '../api.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, ErrorNotice, KeyValues, Modal } from './PanelKit.jsx';
-import { formatDate, jobActive } from './site-model.js';
+import { formatDate, jobActive, jobFinishedAt } from './site-model.js';
 import { observeJob } from './observe-job.js';
 
 export default function JobDrawer() {
@@ -22,7 +22,7 @@ function JobObservation({ id, close, update, refresh }) {
     {job && <><div className="ws-job-status"><Badge state={job.status} /><h3>{job.type ?? job.operation}</h3><p>{jobActive(job) ? 'İstek kabul edildi; henüz tamamlanmadı. Bu pencereyi kapatsanız da iş sunucuda devam eder.' : job.status === 'succeeded' ? 'Sunucu işlemi başarıyla tamamladı.' : 'İşlem sonucunu aşağıdan inceleyin.'}</p></div>
       <KeyValues items={[
         ['İş kimliği', job.id], ['Kaynak', job.resourceType], ['Oluşturulma', formatDate(job.createdAt)],
-        ['Tamamlanma', formatDate(job.completedAt)],
+        ['Tamamlanma', formatDate(jobFinishedAt(job))],
         ...(job.result?.activeState ? [['Servis durumu', `${job.result.activeState} / ${job.result.subState ?? '—'}`]] : []),
         ...(typeof job.result?.healthy === 'boolean' ? [['Sağlık kontrolü', job.result.healthy ? 'Başarılı' : 'Başarısız']] : []),
       ]} /></>}

@@ -39,6 +39,7 @@ export function siteJobs(domain, application, jobs) {
   )).sort((a, b) => Date.parse(b.createdAt ?? 0) - Date.parse(a.createdAt ?? 0));
 }
 export const jobActive = (job) => ACTIVE_JOBS.has(job?.status);
+export const jobFinishedAt = (job) => job?.finishedAt ?? job?.completedAt ?? null;
 export function jobFromResponse(result) {
   const job = result?.job ?? result;
   if (!job || typeof job.id !== 'string' || !job.id || !['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(job.status)) {

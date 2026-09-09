@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { collectionReducer, initialCollection, knownCount } from '../src/workspace/resource-model.js';
-import { certificateState, externalSiteUrl, matchingApplications, selectedApplication, parentTrail, siteJobs, jobFromResponse, formatBytes, siteHref } from '../src/workspace/site-model.js';
+import { certificateState, externalSiteUrl, matchingApplications, selectedApplication, parentTrail, siteJobs, jobFromResponse, jobFinishedAt, formatBytes, siteHref } from '../src/workspace/site-model.js';
 const domain = { id: 'domain', serverId: 'local', primaryDomain: 'example.com', targetType: 'proxy', target: { upstreamPort: 4301 }, certificateId: 'cert', httpsMode: 'managed' };
 
 test('unknown counts are not falsely rendered as zero', () => {
@@ -58,6 +58,11 @@ test('queued job acceptance is distinct from completed success', () => {
   const job = { id: 'job', status: 'queued' };
   assert.equal(jobFromResponse({ job }).status, 'queued');
   for (const value of [null, { id: 'job' }, { job: {} }]) assert.throws(() => jobFromResponse(value));
+});
+test('job completion uses the API finishedAt field and retains legacy compatibility', () => {
+  assert.equal(jobFinishedAt({ finishedAt: '2026-09-09T21:12:00.000Z', completedAt: 'legacy' }), '2026-09-09T21:12:00.000Z');
+  assert.equal(jobFinishedAt({ completedAt: 'legacy' }), 'legacy');
+  assert.equal(jobFinishedAt({}), null);
 });
 test('external links cannot introduce script schemes, credentials or arbitrary paths', () => {
   assert.equal(externalSiteUrl(domain), 'https://example.com/');
