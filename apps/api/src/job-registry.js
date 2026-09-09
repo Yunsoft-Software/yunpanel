@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { createOperationEnvelope, OPERATIONS } from '@yunpanel/protocol';
+import {
+  createOperationEnvelope,
+  MANAGED_SERVICE_ACTIONS,
+  MANAGED_SERVICE_IDS,
+  OPERATIONS,
+} from '@yunpanel/protocol';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
@@ -18,6 +23,9 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.APP_NODE_RESTART,
   OPERATIONS.APP_NODE_STATUS,
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
+  OPERATIONS.SYSTEM_SERVICES_INSPECT,
+  OPERATIONS.SYSTEM_SERVICE_INSTALL,
+  OPERATIONS.SYSTEM_SERVICE_CONTROL,
   OPERATIONS.SYSTEM_UPGRADE,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -26,6 +34,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const NODE_SERVICE_PATTERN = /^yunpanel-node-[a-f0-9]{16}\.service$/;
 const SYSTEMD_STATE_PATTERN = /^[a-z0-9-]{1,40}$/;
 const PACKAGE_VERSION_PATTERN = /^[A-Za-z0-9.+:~_-]{1,100}$/;
+const PACKAGE_NAME_PATTERN = /^[a-z0-9][a-z0-9.+-]{0,100}$/;
+const SYSTEMD_UNIT_PATTERN = /^[a-z0-9@_.-]{1,120}\.service$/;
+const MANAGED_SERVICE_ID_SET = new Set(MANAGED_SERVICE_IDS);
+const MANAGED_SERVICE_ACTION_SET = new Set(MANAGED_SERVICE_ACTIONS);
 const MAX_ARTIFACT_FILES = 100_000;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024;
 
@@ -318,7 +330,75 @@ function sanitizeSystemPackageResult(job, result) {
   return { ...sanitized, previousVersion, upgraded: result.upgraded, restartScheduled: result.restartScheduled };
 }
 
+function sanitizeManagedServicePackage(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new JobRegistryError('invalid_job_result', 'Managed service package state is invalid');
+  if (typeof value.packageName !== 'string' || !PACKAGE_NAME_PATTERN.test(value.packageName)) throw new JobRegistryError('invalid_job_result', 'Managed service package name is invalid');
+  if (typeof value.installed !== 'boolean') throw new JobRegistryError('invalid_job_result', 'Managed service package installed state is invalid');
+  const version = value.version == null ? null : sanitizePackageVersion(value.version, 'managedServiceVersion');
+  if (value.installed !== Boolean(version)) throw new JobRegistryError('invalid_job_result', 'Managed service package version state is inconsistent');
+  return { packageName: value.packageName, installed: value.installed, version };
+}
+
+function sanitizeManagedServiceUnit(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new JobRegistryError('invalid_job_result', 'Managed service unit state is invalid');
+  if (typeof value.unit !== 'string' || !SYSTEMD_UNIT_PATTERN.test(value.unit)) throw new JobRegistryError('invalid_job_result', 'Managed service unit name is invalid');
+  const unit = { unit: value.unit };
+  for (const field of ['loadState', 'activeState', 'subState', 'unitFileState']) {
+    if (typeof value[field] !== 'string' || !SYSTEMD_STATE_PATTERN.test(value[field])) {
+      throw new JobRegistryError('invalid_job_result', `Managed service ${field} is invalid`);
+    }
+    unit[field] = value[field];
+  }
+  if (typeof value.inspectionError !== 'boolean') throw new JobRegistryError('invalid_job_result', 'Managed service inspection state is invalid');
+  unit.inspectionError = value.inspectionError;
+  return unit;
+}
+
+function sanitizeManagedServiceState(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new JobRegistryError('invalid_job_result', 'Managed service state is invalid');
+  if (typeof value.id !== 'string' || !MANAGED_SERVICE_ID_SET.has(value.id)) throw new JobRegistryError('invalid_job_result', 'Managed service id is invalid');
+  if (typeof value.installed !== 'boolean' || typeof value.active !== 'boolean') throw new JobRegistryError('invalid_job_result', 'Managed service status is invalid');
+  if (!Array.isArray(value.packages) || value.packages.length < 1 || value.packages.length > 8) throw new JobRegistryError('invalid_job_result', 'Managed service package list is invalid');
+  if (!Array.isArray(value.units) || value.units.length < 1 || value.units.length > 8) throw new JobRegistryError('invalid_job_result', 'Managed service unit list is invalid');
+  const packages = value.packages.map(sanitizeManagedServicePackage);
+  const units = value.units.map(sanitizeManagedServiceUnit);
+  if (value.installed !== packages.every((entry) => entry.installed)) throw new JobRegistryError('invalid_job_result', 'Managed service installed state is inconsistent');
+  if (value.active !== units.every((entry) => entry.activeState === 'active')) throw new JobRegistryError('invalid_job_result', 'Managed service active state is inconsistent');
+  return { id: value.id, installed: value.installed, active: value.active, packages, units };
+}
+
+function sanitizeManagedServiceResult(job, result) {
+  if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) {
+    if (job.payload?.serviceId) {
+      const service = sanitizeManagedServiceState(result);
+      if (service.id !== job.payload.serviceId) throw new JobRegistryError('invalid_job_result', 'Managed service inspection identity does not match the queued operation');
+      return service;
+    }
+    if (!Array.isArray(result) || result.length !== MANAGED_SERVICE_IDS.length) throw new JobRegistryError('invalid_job_result', 'Managed service catalog result is incomplete');
+    const services = result.map(sanitizeManagedServiceState);
+    const ids = new Set(services.map((entry) => entry.id));
+    if (ids.size !== MANAGED_SERVICE_IDS.length || MANAGED_SERVICE_IDS.some((id) => !ids.has(id))) throw new JobRegistryError('invalid_job_result', 'Managed service catalog identities are invalid');
+    return services;
+  }
+
+  const service = sanitizeManagedServiceState(result);
+  if (service.id !== job.payload?.serviceId) throw new JobRegistryError('invalid_job_result', 'Managed service result identity does not match the queued operation');
+  if (job.operation === OPERATIONS.SYSTEM_SERVICE_INSTALL) {
+    if (typeof result.changed !== 'boolean' || !service.installed || !service.active) throw new JobRegistryError('invalid_job_result', 'Managed service installation result is inconsistent');
+    return { ...service, changed: result.changed };
+  }
+  if (job.operation === OPERATIONS.SYSTEM_SERVICE_CONTROL) {
+    const action = result.action;
+    if (typeof action !== 'string' || !MANAGED_SERVICE_ACTION_SET.has(action) || action !== job.payload?.action) throw new JobRegistryError('invalid_job_result', 'Managed service control action does not match the queued operation');
+    if (!service.installed) throw new JobRegistryError('invalid_job_result', 'Managed service control result must remain installed');
+    if (action === 'stop' ? service.active : !service.active) throw new JobRegistryError('invalid_job_result', 'Managed service control active state is inconsistent');
+    return { ...service, action };
+  }
+  throw new JobRegistryError('invalid_operation', 'Managed service operation is not supported by the async queue');
+}
+
 function sanitizeResult(job, result) {
+  if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) return sanitizeManagedServiceResult(job, result);
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
   }
@@ -359,6 +439,9 @@ function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.APP_NODE_STATUS) return sanitizeNodeStatusResult(job, result);
   if (job.operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || job.operation === OPERATIONS.SYSTEM_UPGRADE) {
     return sanitizeSystemPackageResult(job, result);
+  }
+  if (job.operation === OPERATIONS.SYSTEM_SERVICE_INSTALL || job.operation === OPERATIONS.SYSTEM_SERVICE_CONTROL) {
+    return sanitizeManagedServiceResult(job, result);
   }
   throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
 }
