@@ -1,4 +1,11 @@
-import { createAcmeManager, createNginxManager, createNodeStatusInspector, createSystemPackageManager } from '@yunpanel/host-runtime';
+import {
+  createAcmeManager,
+  createNginxManager,
+  createNodeStatusInspector,
+  createStaticDeploymentManager,
+  createStaticRollbackManager,
+  createSystemPackageManager,
+} from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 
 export const LOCAL_HOST_OPERATIONS = Object.freeze([
@@ -8,6 +15,8 @@ export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.DOMAIN_ACTIVATE,
   OPERATIONS.SSL_ISSUE,
   OPERATIONS.SSL_RENEW,
+  OPERATIONS.APP_STATIC_DEPLOY,
+  OPERATIONS.APP_STATIC_ROLLBACK,
   OPERATIONS.APP_NODE_STATUS,
 ]);
 
@@ -17,6 +26,8 @@ export function createLocalHostOperations({
   }),
   nginxManager = createNginxManager(),
   acmeManager = createAcmeManager(),
+  staticDeploymentManager = createStaticDeploymentManager(),
+  staticRollbackManager = createStaticRollbackManager(),
   nodeStatusInspector = createNodeStatusInspector(),
 } = {}) {
   const handlers = new Map([
@@ -26,6 +37,8 @@ export function createLocalHostOperations({
     [OPERATIONS.DOMAIN_ACTIVATE, (payload) => nginxManager.activateDomain(payload)],
     [OPERATIONS.SSL_ISSUE, (payload) => acmeManager.issueCertificate(payload)],
     [OPERATIONS.SSL_RENEW, (payload) => acmeManager.renewCertificate(payload)],
+    [OPERATIONS.APP_STATIC_DEPLOY, (payload) => staticDeploymentManager.deployStatic(payload)],
+    [OPERATIONS.APP_STATIC_ROLLBACK, (payload) => staticRollbackManager.rollbackStatic(payload)],
     [OPERATIONS.APP_NODE_STATUS, (payload) => nodeStatusInspector.inspectNodeStatus(payload)],
   ]);
 
