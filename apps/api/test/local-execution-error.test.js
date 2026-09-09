@@ -10,6 +10,29 @@ test('known diagnostics preserve the code, never the original message or attache
   assert.ok(!JSON.stringify(result).includes('PRIVATE'));
 });
 
+test('Node, environment and managed-service diagnostics use authored messages only', () => {
+  for (const code of [
+    'node_deployment_command_failed',
+    'node_restart_restore_failed',
+    'node_rollback_health_failed',
+    'secret_decryption_failed',
+    'invalid_environment_bundle',
+    'managed_service_install_failed',
+    'managed_service_conflict',
+  ]) {
+    const result = safeLocalOperationError({
+      code,
+      message: 'API_TOKEN=PRIVATE /etc/private/key',
+      stdout: 'PRIVATE',
+      stderr: 'PRIVATE',
+    });
+    assert.equal(result.code, code);
+    assert.deepEqual(Object.keys(result).sort(), ['code', 'message']);
+    assert.ok(!JSON.stringify(result).includes('PRIVATE'));
+    assert.ok(!JSON.stringify(result).includes('/etc/private'));
+  }
+});
+
 test('unknown codes and native error shapes cannot disclose arbitrary strings', () => {
   for (const code of ['private_token_value', 'token=PRIVATE', 'constructor', '__proto__', 'toString', 1, null, undefined]) {
     const result = safeLocalOperationError({ code, message: 'PRIVATE' });
