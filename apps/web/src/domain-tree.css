@@ -1,0 +1,23 @@
+.domain-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-bottom: 16px; }
+.domain-toolbar label { display: grid; gap: 6px; flex: 1 1 240px; font-size: 13px; }
+.domain-toolbar input { min-width: 0; width: 100%; border: 1px solid #d7dee8; border-radius: 8px; padding: 10px 12px; font: inherit; background: #fff; color: #1e293b; box-sizing: border-box; }
+.domain-toolbar > span { font-size: 12px; color: #64748b; align-self: center; }
+.domain-tree .domain-primary { padding-inline-start: calc(var(--domain-depth, 0) * 16px); min-width: 0; }
+.domain-tree .domain-name { min-width: 0; }
+.domain-tree .domain-name strong, .domain-tree .domain-name span { overflow-wrap: anywhere; }
+.domain-disclosure, .domain-disclosure-space { flex: 0 0 24px; width: 24px; height: 24px; }
+.domain-disclosure { padding: 0; border: 1px solid #d7dee8; border-radius: 6px; background: #fff; color: #334155; cursor: pointer; font-size: 16px; }
+.domain-disclosure:disabled { cursor: default; }
+.domain-tree .domain-tree-warning { color: #9a3412; font-size: 12px; }
+.domain-create-fields { min-width: 0; border: 0; padding: 0; margin: 0; }
+.domain-form-legend { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.domain-form-hint { font-size: 12px; color: #64748b; line-height: 1.5; overflow-wrap: anywhere; }
+.domain-tree button:focus-visible, .domain-toolbar input:focus-visible, .domain-create-fields input:focus-visible, .domain-create-fields select:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+.domain-tree .row-actions { flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .domain-toolbar label { flex-basis: 100%; }
+  .domain-tree .domain-row { grid-template-columns: minmax(0, 1fr); }
+  .domain-tree .domain-primary { padding-inline-start: calc(var(--domain-depth, 0) * 8px); }
+  .domain-tree .row-actions { grid-column: 1; }
+  .domain-create-fields { grid-template-columns: minmax(0, 1fr); }
+}
