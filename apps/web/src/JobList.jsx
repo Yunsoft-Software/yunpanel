@@ -10,10 +10,10 @@ function statusTone(status) {
   return 'pending';
 }
 
-export default function JobList({ jobs, access }) {
+export default function JobList({ jobs, access, busyId = null, onCancel = null, limit = 8 }) {
   const recent = [...jobs]
     .sort((left, right) => Date.parse(right.createdAt ?? 0) - Date.parse(left.createdAt ?? 0))
-    .slice(0, 8);
+    .slice(0, limit);
 
   if (!recent.length) {
     return (
@@ -54,6 +54,11 @@ export default function JobList({ jobs, access }) {
           <div className={`domain-state ${job.status === 'succeeded' ? 'active' : job.status === 'failed' ? 'error' : 'draft'}`}>
             {job.status}
           </div>
+          {onCancel && job.status === 'queued' && (
+            <div className="row-actions">
+              <button className="secondary-button" type="button" disabled={busyId === job.id} onClick={() => onCancel(job)}>Cancel</button>
+            </div>
+          )}
         </article>
       ))}
     </div>

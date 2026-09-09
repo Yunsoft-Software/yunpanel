@@ -13,7 +13,7 @@ function targetDescription(domain) {
   return 'Unknown target';
 }
 
-export default function DomainList({ domains, access }) {
+export default function DomainList({ domains, access, busyId = null, onAction = null, onIssue = null }) {
   if (!domains.length) {
     return (
       <div className="domain-empty">
@@ -51,6 +51,14 @@ export default function DomainList({ domains, access }) {
             <strong>{domain.httpsMode ?? 'off'}</strong>
           </div>
           <div className={`domain-state ${domain.state}`}>{domain.state}</div>
+          {(onAction || onIssue) && (
+            <div className="row-actions">
+              {onAction && <button className="secondary-button" type="button" disabled={busyId === domain.id} onClick={() => onAction(domain, 'stage')}>Stage</button>}
+              {onAction && domain.stagedRevision === domain.desiredRevision && <button className="secondary-button" type="button" disabled={busyId === domain.id} onClick={() => onAction(domain, 'activate')}>Activate</button>}
+              {onIssue && domain.httpsMode === 'managed' && domain.state === 'active' && !domain.certificateId && <button className="secondary-button" type="button" disabled={busyId === domain.id} onClick={() => onIssue(domain, true)}>Validate ACME</button>}
+              {onIssue && domain.httpsMode === 'managed' && domain.state === 'active' && !domain.certificateId && <button className="primary-button" type="button" disabled={busyId === domain.id} onClick={() => onIssue(domain, false)}>Issue certificate</button>}
+            </div>
+          )}
         </article>
       ))}
     </div>

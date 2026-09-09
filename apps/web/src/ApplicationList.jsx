@@ -15,7 +15,7 @@ function stateDot(state) {
   return 'pending';
 }
 
-export default function ApplicationList({ applications, access }) {
+export default function ApplicationList({ applications, access, busyId = null, onAction = null, onEnvironment = null }) {
   if (!applications.length) {
     return (
       <div className="domain-empty">
@@ -55,6 +55,15 @@ export default function ApplicationList({ applications, access }) {
           <div className={`domain-state ${application.state === 'active' ? 'active' : application.state === 'error' ? 'error' : 'draft'}`}>
             {application.state}
           </div>
+          {onAction && (
+            <div className="row-actions">
+              <button className="secondary-button" type="button" disabled={busyId === application.id} onClick={() => onAction(application, 'deploy')}>Deploy</button>
+              {application.previousReleaseId && <button className="secondary-button" type="button" disabled={busyId === application.id} onClick={() => onAction(application, 'rollback')}>Rollback</button>}
+              {application.type === 'node' && application.currentReleaseId && <button className="secondary-button" type="button" disabled={busyId === application.id} onClick={() => onAction(application, 'restart')}>Restart</button>}
+              {application.type === 'node' && application.currentReleaseId && <button className="secondary-button" type="button" disabled={busyId === application.id} onClick={() => onAction(application, 'status')}>Refresh status</button>}
+              {onEnvironment && application.type === 'node' && <button className="secondary-button" type="button" disabled={busyId === application.id} onClick={() => onEnvironment(application)}>Environment</button>}
+            </div>
+          )}
           {application.lastError && <div className="server-last-seen">Last operation · {application.lastError}</div>}
         </article>
       ))}

@@ -97,6 +97,67 @@
   font-size: 12px;
 }
 
+.row-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.inline-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+  color: #8993a8;
+  font-size: 11px;
+}
+
+.inline-form input,
+.inline-form select {
+  min-height: 38px;
+  border: 1px solid #293247;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #e8ecf4;
+  background: #0d1320;
+  font: inherit;
+}
+
+.operation-result,
+.operation-error {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(78, 202, 139, 0.28);
+  border-radius: 9px;
+  color: #a9b3c6;
+  background: #0d1320;
+  overflow-wrap: anywhere;
+}
+
+.operation-error {
+  color: #f08a91;
+  border-color: rgba(239, 107, 115, 0.28);
+}
+
+.operation-result code {
+  user-select: all;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 @media (max-width: 980px) {
   .domain-row {
     grid-template-columns: 1fr 1fr;

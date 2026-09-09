@@ -8,7 +8,7 @@ function formatExpiry(certificate) {
   return `${days}d remaining`;
 }
 
-export default function CertificateList({ certificates, access }) {
+export default function CertificateList({ certificates, access, busyId = null, onRenew = null }) {
   if (!certificates.length) {
     return (
       <div className="domain-empty">
@@ -48,6 +48,11 @@ export default function CertificateList({ certificates, access }) {
           <div className={`domain-state ${certificate.state === 'active' || certificate.state === 'validated' ? 'active' : certificate.state === 'error' ? 'error' : 'draft'}`}>
             {certificate.staging ? 'validation' : 'managed'}
           </div>
+          {onRenew && !certificate.staging && certificate.state === 'active' && (
+            <div className="row-actions">
+              <button className="secondary-button" type="button" disabled={busyId === certificate.id} onClick={() => onRenew(certificate)}>Renewal dry-run</button>
+            </div>
+          )}
         </article>
       ))}
     </div>

@@ -1,39 +1,5 @@
 import { useState } from 'react';
-
-const MANAGEMENT_ROOT = '/api/panel';
-
-async function request(path, { method = 'GET', body } = {}) {
-  const response = await fetch(`${MANAGEMENT_ROOT}${path}`, {
-    method,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    const error = new Error(payload?.error?.message ?? `Request failed with HTTP ${response.status}`);
-    error.code = payload?.error?.code ?? `http_${response.status}`;
-    throw error;
-  }
-  return payload?.data;
-}
-
-async function waitForJob(jobId) {
-  for (let attempt = 0; attempt < 180; attempt += 1) {
-    try {
-      const job = await request(`/jobs/${jobId}`);
-      if (job.status === 'succeeded') return job;
-      if (job.status === 'failed' || job.status === 'cancelled') {
-        const error = new Error(job.error?.message ?? `Job ${job.status}`);
-        error.code = job.error?.code ?? job.status;
-        throw error;
-      }
-    } catch (error) {
-      if (error.code && !String(error.code).startsWith('http_')) throw error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-  throw new Error('Package operation timed out');
-}
+import { panelRequest, waitForJob } from './api.js';
 
 export default function SystemUpdatePanel({ server }) {
   const [packageState, setPackageState] = useState(null);
@@ -49,13 +15,13 @@ export default function SystemUpdatePanel({ server }) {
     setConfirming(false);
     setMessage(operation === 'upgrade' ? 'Installing the YunPanel update…' : 'Checking package versions…');
     try {
-      const job = await request(
+      const job = await panelRequest(
         `/servers/${server.id}/system/${operation === 'upgrade' ? 'upgrade' : 'packages/inspect'}`,
         operation === 'upgrade'
           ? { method: 'POST', body: { confirmation: 'upgrade-yunpanel' } }
           : { method: 'POST', body: {} },
       );
-      const completed = await waitForJob(job.id);
+      const completed = await waitForJob(job.id, { attempts: 180 });
       setPackageState(completed.result);
       setMessage(completed.result?.upgraded
         ? `Upgraded ${completed.result.previousVersion} → ${completed.result.installedVersion}. Services are restarting.`

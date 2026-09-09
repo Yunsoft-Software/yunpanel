@@ -23,6 +23,8 @@ The repository has progressed beyond the initial read-only skeleton. Current imp
 - release/state drift validation between control plane and managed server,
 - installable Debian package with systemd-owned API, agent and restricted web services,
 - fixed-scope APT inspection and self-upgrade jobs with delayed service restart,
+- working navigation for implemented server, application, domain, certificate, job and update surfaces,
+- inline controls for enrollment tokens, application lifecycle/status, protected Node environment values, domain staging/activation, certificate operations and queued-job cancellation,
 - separate AES-256-GCM application environment storage,
 - masked secret metadata in normal admin reads,
 - authenticated just-in-time secret delivery to the assigned server agent,

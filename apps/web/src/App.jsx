@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import ApplicationManager from './ApplicationManager.jsx';
 import ApplicationList from './ApplicationList.jsx';
 import CertificateList from './CertificateList.jsx';
+import DomainManager from './DomainManager.jsx';
 import DomainList from './DomainList.jsx';
 import JobList from './JobList.jsx';
+import ServerManager from './ServerManager.jsx';
 import SystemUpdatePanel from './SystemUpdatePanel.jsx';
+import { panelRequest } from './api.js';
 
 const navigation = [
   'Dashboard',
@@ -93,6 +97,8 @@ function App() {
   const [jobAccess, setJobAccess] = useState('checking');
   const [certificates, setCertificates] = useState([]);
   const [certificateAccess, setCertificateAccess] = useState('checking');
+  const [activeView, setActiveView] = useState('Dashboard');
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -138,7 +144,11 @@ function App() {
       clearInterval(timer);
       controller.abort();
     };
-  }, []);
+  }, [refreshKey]);
+
+  function refreshNow() {
+    setRefreshKey((value) => value + 1);
+  }
 
   useEffect(() => {
     if (serverAccess !== 'ready') return;
@@ -215,8 +225,8 @@ function App() {
         </div>
 
         <nav className="navigation" aria-label="Primary navigation">
-          {navigation.map((item, index) => (
-            <button className={index === 0 ? 'nav-item active' : 'nav-item'} type="button" key={item}>
+          {navigation.map((item) => (
+            <button className={activeView === item ? 'nav-item active' : 'nav-item'} type="button" key={item} onClick={() => setActiveView(item)}>
               <span className="nav-dot" />
               {item}
             </button>
@@ -235,17 +245,17 @@ function App() {
       <main className="main-content">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Infrastructure overview</p>
-            <h1>Dashboard</h1>
+            <p className="eyebrow">Infrastructure control plane</p>
+            <h1>{activeView}</h1>
           </div>
           <div className="topbar-actions">
             {apiState.version && <span className="version-chip">API {apiState.version}</span>}
-            <button className="secondary-button" type="button">Enroll server</button>
-            <button className="primary-button" type="button">New application</button>
+            <button className="secondary-button" type="button" onClick={() => setActiveView('Servers')}>Enroll server</button>
+            <button className="primary-button" type="button" onClick={() => setActiveView('Applications')}>New application</button>
           </div>
         </header>
 
-        <section className="summary-grid" aria-label="Infrastructure summary">
+        {activeView === 'Dashboard' && <><section className="summary-grid" aria-label="Infrastructure summary">
           {operationalSummary.cards.map((card) => (
             <article className="summary-card" key={card.label}>
               <span>{card.label}</span>
@@ -254,8 +264,6 @@ function App() {
             </article>
           ))}
         </section>
-
-        {!import.meta.env.DEV && <SystemUpdatePanel server={servers[0] ?? null} />}
 
         <section className="content-grid">
           <article className="panel wide-panel">
@@ -280,7 +288,7 @@ function App() {
                     ? 'Production server inventory will be shown after user authentication and RBAC are enabled.'
                     : 'Create a one-time enrollment token, start yun-agent on Ubuntu 24.04 and its first heartbeat will appear here.'}
                 </p>
-                <button className="secondary-button" type="button">Enrollment via control API</button>
+                <button className="secondary-button" type="button" onClick={() => setActiveView('Servers')}>Enrollment via control API</button>
               </div>
             )}
           </article>
@@ -352,9 +360,87 @@ function App() {
             <span className="panel-meta">{jobAccess}</span>
           </div>
           <JobList jobs={jobs} access={jobAccess} />
-        </section>
+        </section></>}
+
+        {activeView === 'Servers' && (
+          <ServerManager
+            servers={servers}
+            access={serverAccess}
+            renderServer={(server) => <ServerCard server={server} key={server.id} />}
+          />
+        )}
+
+        {activeView === 'Applications' && (
+          <ApplicationManager
+            applications={applications}
+            access={applicationAccess}
+            servers={servers}
+            onChanged={refreshNow}
+          />
+        )}
+
+        {activeView === 'Domains' && (
+          <DomainManager
+            domains={domains}
+            domainAccess={domainAccess}
+            certificates={certificates}
+            certificateAccess={certificateAccess}
+            servers={servers}
+            onChanged={refreshNow}
+          />
+        )}
+
+        {activeView === 'Jobs' && <JobManager jobs={jobs} access={jobAccess} onChanged={refreshNow} />}
+
+        {activeView === 'Settings' && !import.meta.env.DEV && <SystemUpdatePanel server={servers[0] ?? null} />}
+
+        {['Databases', 'Docker', 'Mail', 'Backups', 'Audit Log'].includes(activeView) && (
+          <UnavailableView name={activeView} server={servers[0] ?? null} />
+        )}
       </main>
     </div>
+  );
+}
+
+function JobManager({ jobs, access, onChanged }) {
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState(null);
+
+  async function cancel(job) {
+    setBusyId(job.id);
+    setError(null);
+    try {
+      await panelRequest(`/jobs/${job.id}/cancel`, { method: 'POST', body: {} });
+      onChanged();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section className="panel domain-panel">
+      <div className="panel-heading"><div><p className="eyebrow">Operations</p><h2>All jobs</h2></div><span className="panel-meta">{access}</span></div>
+      <JobList jobs={jobs} access={access} busyId={busyId} onCancel={cancel} limit={100} />
+      {error && <div className="operation-error">{error}</div>}
+    </section>
+  );
+}
+
+function UnavailableView({ name, server }) {
+  const docker = server?.inventory?.docker;
+  const dockerDetail = name === 'Docker' && docker
+    ? `Docker installed: ${docker.installed ? 'yes' : 'no'} · reachable: ${docker.reachable ? 'yes' : 'no'} · containers: ${docker.containers?.length ?? 0}`
+    : null;
+  return (
+    <section className="panel domain-panel">
+      <div className="panel-heading"><div><p className="eyebrow">Capability status</p><h2>{name}</h2></div><span className="panel-meta">not implemented</span></div>
+      <div className="domain-empty">
+        <strong>{name} operations are not available in the current backend.</strong>
+        <span>{dockerDetail ?? 'This menu is connected and intentionally read-only until its allowlisted agent operations and persistence model are implemented.'}</span>
+      </div>
+    </section>
   );
 }
 
