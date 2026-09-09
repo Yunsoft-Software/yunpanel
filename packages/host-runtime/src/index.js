@@ -11,3 +11,10 @@ export {
   systemPackageManagerInternals,
 } from './system-package-manager.js';
 export { createNodeStatusInspector, NodeStatusError, nodeStatusInspector, parseNodeServiceProperties } from './node-status-inspector.js';
+export {
+  createManagedServiceManager,
+  managedServiceManager,
+  ManagedServiceError,
+  managedServicePolicy,
+  managedServiceInternals,
+} from './managed-service-manager.js';
