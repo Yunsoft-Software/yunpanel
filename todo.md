@@ -4,9 +4,9 @@ Yalnızca kalan dış ortam işleri ve doğrulamalar burada tutulur. Ürün/kod 
 
 ## Çalışma sınırı ve Codex başlangıcı
 
-Canlı `cryptoraichu.website` için bu ortamda görsel/interaktif doğrulama, SSH erişimi veya deployment yapılmadı. Depo incelemesi canlı servis yapılandırmasını kanıtlamaz. Authentication kodunun kurulum ve test sınırları `docs/authentication.md`, domain parent/ağaç/form değişikliğinin sınırları `docs/domain-hierarchy.md` içindedir; tam workspace/build ve gerçek tarayıcı kabulü aşağıda açık kalır.
+Canlı `cryptoraichu.website` için bu ortamda görsel/interaktif doğrulama, SSH erişimi veya deployment yapılmadı. Depo incelemesi canlı servis yapılandırmasını kanıtlamaz. Authentication kurulumu `docs/authentication.md`, birleştirilen MFA ve arayüz doğrulama sınırları `docs/mfa.md`, domain parent/ağaç/form değişikliğinin sınırları `docs/domain-hierarchy.md` içindedir; tam workspace/build ve gerçek tarayıcı kabulü aşağıda açık kalır.
 
-Codex önce güncel branch'i ve üç planlama dosyasını okumalı; kod işlerini `plan.md` sırasıyla küçük commitlerle uygulamalıdır. Bu dosya normal kod işlerini ertelemek için kullanılmaz. Hedef mimari geçişi doğrulamalarında tekrar istenen eski akışlar, yeni agentsiz backend için regresyon testidir; eski testin yapılmadığı anlamına gelmez. Authentication veya domain ağacının eklenmesi ayrı agent'ın kaldırıldığı, root terminalin hazır olduğu veya tam Website modeline geçildiği anlamına gelmez.
+Codex önce güncel `main` ve üç planlama dosyasını okumalı; kullanıcı açıkça ayrı branch istemedikçe doğrudan `main` üzerinde küçük commitlerle ilerlemelidir. Bu dosya normal kod işlerini ertelemek için kullanılmaz. Hedef mimari geçişi doğrulamalarında tekrar istenen eski akışlar, yeni agentsiz backend için regresyon testidir; eski testin yapılmadığı anlamına gelmez. Authentication, MFA veya domain ağacının eklenmesi ayrı agent'ın kaldırıldığı, root terminalin hazır olduğu veya tam Website modeline geçildiği anlamına gelmez.
 
 ## T0 — P0: Canlı paneli doğrula ve geçici erişimi koru
 
@@ -26,13 +26,25 @@ Codex önce güncel branch'i ve üç planlama dosyasını okumalı; kod işlerin
 - [ ] SQLite'ın tutarlı yedeğini API/CLI yazıcıları durdurularak veya desteklenen online-backup yöntemiyle al; aktif WAL varken yalnız ana DB dosyasını kopyalama. Test kopyasında restore/paket rollback'i uygula. Eski snapshot geri gelince eski oturum/parola geri dönmesi riskini iptal/kurtarma prosedürüyle kapat.
 - [ ] Gerçek paketle login -> site/application okuma -> izinli düşük riskli işlem -> logout zincirini çalıştır. Agent'ın mevcut kimliğiyle heartbeat/iş sonuçları ve çalışan siteler etkilenmemeli. Yeni kullanıcı auth sürümü kabul edilmeden normal yönetimde eski bootstrap tokenına geri dönüş yolu açma.
 
+## T1b — P0: Birleştirilen MFA ve oturum arayüzünün kabulü
+
+- [ ] Desteklenen Node 24.11.1+ ve kurulu tam workspace ile tüm auth/MFA testlerini çalıştır: native Argon2, gerçek SQLite, OTPAuth, `mfa-crypto`, `mfa-store`, `mfa-auth-flow`, `mfa-cli`, yeni cookie/protokol/oturum testleri ve mevcut core/domain regresyonları. `docs/mfa.md` içindeki 27 test Node 22.16.0 ve kısmi kaynakla çalıştı; HTTP testlerinde store double kullanıldı. Bunları tam crypto/Express/Vite doğrulaması sayma.
+- [ ] Test paketinde `otpauth` ve yeni React modüllerinin birlikte bulunduğunu doğrula. API'yi gerçek `index.js` girişinden başlat; eski frontend ile yeni MFA backend'ini karıştırma. Tam `npm run check` ve production build geçmeden aday yayımlama.
+- [ ] Auth schema-1 verisinin yedekli kopyasında schema-2 geçişini ve yeniden başlatmayı test et. Kullanıcı, parola, oturum ve domain/application verileri korunmalı. Eski pakete rollback için uyumlu state yedeğini kanıtla; yalnız schema numarasını düşürme. WAL dosyaları ve master-key recovery kopyasını yedeğe dahil et.
+- [ ] Gerçek HTTPS tarayıcıda Hesabım -> doğrulayıcı ekle -> anahtarı authenticator'a elle gir -> kodu doğrula -> 10 kurtarma kodunu kaydet -> çıkış -> parola + TOTP giriş akışını tamamla. QR beklenmemeli; bu sürüm manuel anahtar girişi sunar. Parola sonrası 202 challenge panel erişimi vermemeli; challenge cookie HttpOnly/host-only/Secure kalmalı.
+- [ ] Hatalı, yeniden kullanılan ve süresi geçmiş TOTP; beş hatalı challenge denemesi; iptal; recovery ile giriş; aynı recovery kodunun ikinci kullanımının reddi; yeni kod üretiminden sonra eski kodların iptali ve mevcut/diğer oturumların değişimini gerçek store ile doğrula. Faktör kapatma sonrası bütün oturumların iptalini test et.
+- [ ] İki sekme, gecikmiş 401/200 yanıtı, MFA cookie rotasyonu sırasında polling, kayıp doğrulama yanıtı, bfcache/geri tuşu, modal Escape/focus ve recovery kodlarını onaylamadan kapatma senaryolarını test et. Yeni cookie eski isteğin 401 cevabıyla silinmemeli; eski yanıt yeni oturumu geri almamalı. Hassas değerler URL/localStorage/telemetriye düşmemeli.
+- [ ] Idle/absolute son-iki-dakika uyarısını ve açık uzatma butonunu gerçek tarayıcıda doğrula. Arka plan GET polling idle süresini uzatmamalı; geçici ağ hatası formu silmemeli; mutlak süre uzatılamamalı. 1440×900, 1920×1080, 1280×800 ve 390×844 boyutlarında yeni MFA ekranlarını incele.
+- [ ] Mevcut `YUNPANEL_SECRET_MASTER_KEY` değerini değiştirmeden MFA kurulumunu test et. Anahtar eksik/yanlış/kayıp senaryosunda açık bypass olmadığını doğrula. İzole test hesabında `reset-mfa <username> --confirm` komutunu aynı DB ve servis kullanıcısıyla çalıştır; parola korunmalı, factor/recovery/challenge/session kayıtları iptal olmalı. IP kısıtını koruyup tekrar enrollment yap; gerçek anahtar/kodları rapora yazma.
+- [ ] Root/terminal için MFA zorunluluk politikası geliştirildiğinde yeni Owner ve yerel kurtarma sonrası enrollment zorunluluğunu ayrıca doğrula. MFA özelliğinin mevcut olmasını bütün hesaplarda zorunlu MFA uygulanmış sayma; mevcut IP korumasını bu kabul bitmeden kaldırma.
+
 ## T1 — P0: Kullanıcı girişi ve dış erişim kabul testi — plan A
 
 - [ ] Gizli sekmede, izinli IP'den de dahil olmak üzere, login olmadan mevcut site/env/job/API verisi alınamadığını doğrula. Log/file/env-export modülleri eklendiğinde aynı testi genişlet. Korunan API 401, yetkisiz kullanıcı 403 vermeli; sayfa yönlendirmesi veri endpointine koruma yerine geçmemeli.
 - [ ] `/api/panel/*`, doğrudan API yolları, `/api/dev/*`, eski bootstrap/enrollment/agent yolları ve alternatif dinleme portlarında auth bypass olmadığını kontrol et. Normal yönetim ortak bootstrap tokenıyla devam etmemeli. Agent kaldırılana kadar yalnız kendi kimlik doğrulamasıyla kullanılan transport rotalarını browser yönetiminden ayrı doğrula.
 - [ ] Gerçek HTTPS reverse proxy arkasında cookie `Secure`/`HttpOnly`/host-only/SameSite davranışını, trusted-proxy/IP header politikasını, CSRF ve cross-origin reddini doğrula. Gateway arkasındaki ortak peer rate-limit kovasını gerçek kullanımda ölç.
 - [ ] Login rate limit, hatalı parola, idle/absolute timeout, oturum yenileme, logout ve parola değişimi senaryolarını dene. Arka plan polling idle süresini uzatmamalı. Kullanıcı yönetimi eklendiğinde devre dışı bırakma, Read Only mutasyon/terminal reddi ve son Owner korumasını da doğrula.
-- [ ] MFA geliştirildikten sonra TOTP kurulumu, hatalı kod, tek kullanımlık recovery kodu ve yerel MFA kurtarmayı dene. Kurtarma/rol değişiminden sonra açık oturumları ve terminal eklendiğinde canlı bağlantı yetkilerini yeniden doğrula.
+- [ ] T1b MFA kabulüyle birlikte kurtarma/rol değişiminden sonra açık oturumları ve terminal eklendiğinde canlı bağlantı yetkilerini yeniden doğrula.
 
 ## T2 — P1: Agentsiz backend ve paket geçişi — plan B/J
 
@@ -47,7 +59,7 @@ Codex önce güncel branch'i ve üç planlama dosyasını okumalı; kod işlerin
 
 ## T3a — P1: Parent, domain ağacı ve form değişikliğinin yayın kabulü
 
-- [ ] `docs/domain-hierarchy.md` içindeki dört test dosyasını desteklenen Node 24.11.1+ ortamında yeniden çalıştır; ardından tam `npm run check` uygula. Bu turdaki 29 odaklı test Node 22.16.0 altında kısmi workspace ile çalıştı; tüm uygulama/Express/Vite uyumluluğu kanıtlanmadı.
+- [ ] `docs/domain-hierarchy.md` içindeki dört test dosyasını desteklenen Node 24.11.1+ ortamında yeniden çalıştır; ardından tam `npm run check` uygula. Domain geliştirme turundaki 29 odaklı test Node 22.16.0 altında kısmi workspace ile çalıştı; tüm uygulama/Express/Vite uyumluluğu kanıtlanmadı.
 - [ ] Gerçek `index.js` -> `createAuthenticatedApi` -> `app.js`/`core-app.js` bileşimi üzerinden Owner ile ana domain/subdomain POST ve listeleme akışını test et. Eksik parent 404, geçersiz parent ilişkisi 400, farklı sunucu 409 vermeli; anonim erişim 401, yetkisiz rol 403 ve CSRF reddi korunmalı. Doğrudan korumasız test listenerını production kabulü sayma. Mevcut SSL renewal dry-run ve deploy/rollback testlerini de çalıştır.
 - [ ] Paket içinde yeni `core-app.js`, `domain-http.js` ve güncel frontend assetlerinin birlikte bulunduğunu doğrula. Eski API ile yeni frontend'i karıştırma; yeni paketi kabul etmeden canlıya yükseltme. Mevcut auth/IP korumasını değiştirme.
 - [ ] Gerçek React tarayıcısında domain satırından Add subdomain -> otomatik parent -> prefix -> farklı hedef/HTTPS -> oluştur akışını tamamla. Çoklu sunucu fixture'ında çocuğun ilk sunucuya değil parent sunucusuna yazıldığını doğrula. Hatalı istek sonrası formun kaldığını, focus ve yüklenme durumlarını kontrol et.
