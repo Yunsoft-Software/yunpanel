@@ -2,12 +2,17 @@
 set -eu
 
 if [ ! -x /usr/local/bin/node ]; then
-  printf '%s\n' 'YunPanel requires Node.js 24+ at /usr/local/bin/node' >&2
+  printf '%s\n' 'YunPanel requires Node.js 24.11.1+ at /usr/local/bin/node' >&2
   exit 1
 fi
-node_major=$(/usr/local/bin/node -p 'Number(process.versions.node.split(".")[0])')
-if [ "$node_major" -lt 24 ]; then
-  printf '%s\n' 'YunPanel requires Node.js 24 or newer' >&2
+if ! /usr/local/bin/node --input-type=module -e '
+  import { argon2 } from "node:crypto";
+  import { DatabaseSync } from "node:sqlite";
+  const [major, minor, patch] = process.versions.node.split(".").map(Number);
+  const supported = major > 24 || (major === 24 && (minor > 11 || (minor === 11 && patch >= 1)));
+  if (!supported || typeof argon2 !== "function" || typeof DatabaseSync !== "function") process.exit(1);
+'; then
+  printf '%s\n' 'YunPanel authentication requires Node.js 24.11.1+ with native Argon2 and SQLite' >&2
   exit 1
 fi
 

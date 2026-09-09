@@ -9,7 +9,7 @@
     "packages/*"
   ],
   "engines": {
-    "node": ">=24.0.0",
+    "node": ">=24.11.1",
     "npm": ">=11.0.0"
   },
   "scripts": {
@@ -17,6 +17,7 @@
     "dev:web": "npm run dev --workspace @yunpanel/web",
     "dev:api": "npm run dev --workspace @yunpanel/api",
     "dev:agent": "npm run dev --workspace @yunpanel/agent",
+    "auth": "npm run auth --workspace @yunpanel/api --",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "node scripts/validate-repository.mjs",

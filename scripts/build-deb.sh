@@ -24,6 +24,7 @@ trap 'rm -rf -- "$build_directory"' EXIT
 install -d "$package_root/DEBIAN"
 install -d "$package_root/usr/lib/yunpanel/apps"
 install -d "$package_root/usr/lib/yunpanel/packages"
+install -d "$package_root/usr/lib/yunpanel/scripts"
 install -d "$package_root/usr/lib/systemd/system"
 install -d "$package_root/usr/share/yunpanel/web"
 
@@ -32,6 +33,7 @@ install -m 0755 packaging/debian/preinst "$package_root/DEBIAN/preinst"
 install -m 0755 packaging/debian/postinst "$package_root/DEBIAN/postinst"
 install -m 0755 packaging/debian/postrm "$package_root/DEBIAN/postrm"
 install -m 0644 packaging/systemd/*.service "$package_root/usr/lib/systemd/system/"
+install -m 0644 scripts/auth.mjs "$package_root/usr/lib/yunpanel/scripts/auth.mjs"
 
 cp -a package.json "$package_root/usr/lib/yunpanel/"
 cp -a apps/api apps/agent apps/web "$package_root/usr/lib/yunpanel/apps/"
