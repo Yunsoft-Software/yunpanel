@@ -8,6 +8,7 @@ import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -41,7 +42,6 @@ function serviceName(applicationId) {
 }
 
 test('Node application deploy reconciles a healthy systemd release and proxy target', async () => {
-  const adminToken = 'node-application-admin-token';
   const serverRegistry = createServerRegistry();
   const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'node-flow' });
   const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'node-host' });
@@ -49,20 +49,18 @@ test('Node application deploy reconciles a healthy systemd release and proxy tar
     serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
   });
   const jobRegistry = createJobRegistry();
-  const app = createApp({
+  const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
     applicationRegistry,
     jobRegistry,
     domainRegistry: createDomainRegistry(),
     certificateRegistry: createCertificateRegistry(),
-    adminToken,
-  });
+  }));
 
   await withServer(app, async (baseUrl) => {
     const created = await requestJson(`${baseUrl}/api/applications`, {
       method: 'POST',
-      token: adminToken,
       body: {
         type: 'node',
         serverId: enrolled.server.id,
@@ -92,7 +90,6 @@ test('Node application deploy reconciles a healthy systemd release and proxy tar
 
     const deploy = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, {
       method: 'POST',
-      token: adminToken,
     });
     assert.equal(deploy.response.status, 202);
     assert.equal(deploy.payload.data.job.operation, OPERATIONS.APP_NODE_DEPLOY);
@@ -142,7 +139,6 @@ test('Node application deploy reconciles a healthy systemd release and proxy tar
 
     const rollback = await requestJson(`${baseUrl}/api/applications/${application.id}/rollback`, {
       method: 'POST',
-      token: adminToken,
     });
     assert.equal(rollback.response.status, 409);
     assert.equal(rollback.payload.error.code, 'rollback_release_required');
