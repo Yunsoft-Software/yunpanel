@@ -1,6 +1,9 @@
 import {
   createAcmeManager,
   createNginxManager,
+  createNodeDeploymentManager,
+  createNodeRestartManager,
+  createNodeRollbackManager,
   createNodeStatusInspector,
   createStaticDeploymentManager,
   createStaticRollbackManager,
@@ -20,6 +23,16 @@ export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.APP_NODE_STATUS,
 ]);
 
+export const LOCAL_NODE_ENVIRONMENT_OPERATIONS = Object.freeze([
+  OPERATIONS.APP_NODE_DEPLOY,
+  OPERATIONS.APP_NODE_ROLLBACK,
+  OPERATIONS.APP_NODE_RESTART,
+]);
+
+function validEnvironmentBundle(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
+
 export function createLocalHostOperations({
   packageManager = createSystemPackageManager({
     restartUnits: ['yunpanel-api.service', 'yunpanel-web.service'],
@@ -28,8 +41,26 @@ export function createLocalHostOperations({
   acmeManager = createAcmeManager(),
   staticDeploymentManager = createStaticDeploymentManager(),
   staticRollbackManager = createStaticRollbackManager(),
+  nodeDeploymentManager = createNodeDeploymentManager(),
+  nodeRollbackManager = createNodeRollbackManager(),
+  nodeRestartManager = createNodeRestartManager(),
   nodeStatusInspector = createNodeStatusInspector(),
+  loadApplicationEnvironment = null,
 } = {}) {
+  if (loadApplicationEnvironment !== null && typeof loadApplicationEnvironment !== 'function') {
+    throw new Error('loadApplicationEnvironment must be a function when configured');
+  }
+
+  async function withApplicationEnvironment(payload, execute) {
+    const environment = await loadApplicationEnvironment(payload.applicationId);
+    if (!validEnvironmentBundle(environment)) {
+      const error = new Error('Application environment provider returned an invalid bundle');
+      error.code = 'invalid_environment_bundle';
+      throw error;
+    }
+    return execute({ ...payload, environment });
+  }
+
   const handlers = new Map([
     [OPERATIONS.SYSTEM_PACKAGES_INSPECT, () => packageManager.inspect()],
     [OPERATIONS.SYSTEM_UPGRADE, () => packageManager.upgrade()],
@@ -42,8 +73,14 @@ export function createLocalHostOperations({
     [OPERATIONS.APP_NODE_STATUS, (payload) => nodeStatusInspector.inspectNodeStatus(payload)],
   ]);
 
+  if (loadApplicationEnvironment) {
+    handlers.set(OPERATIONS.APP_NODE_DEPLOY, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeDeploymentManager.deployNode(hydrated)));
+    handlers.set(OPERATIONS.APP_NODE_ROLLBACK, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRollbackManager.rollbackNode(hydrated)));
+    handlers.set(OPERATIONS.APP_NODE_RESTART, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRestartManager.restartNode(hydrated)));
+  }
+
   return {
-    operations: [...LOCAL_HOST_OPERATIONS],
+    operations: [...handlers.keys()],
     supports(operation) {
       return handlers.has(operation);
     },
