@@ -11,6 +11,7 @@ import { nodeRollbackManager } from './node-rollback-manager.js';
 import { nodeStatusInspector } from './node-status-inspector.js';
 import { staticDeploymentManager } from './static-deployment-manager.js';
 import { staticRollbackManager } from './static-rollback-manager.js';
+import { systemPackageManager } from './system-package-manager.js';
 import { inspectAllowlistedServices } from './systemd-inspector.js';
 
 const CAPABILITIES = Object.freeze({
@@ -151,6 +152,8 @@ export const operationHandlers = Object.freeze({
   [OPERATIONS.SERVER_SERVICES]: inspectAllowlistedServices,
   [OPERATIONS.SERVER_DOCKER]: inspectDocker,
   [OPERATIONS.SERVER_NGINX]: inspectNginx,
+  [OPERATIONS.SYSTEM_PACKAGES_INSPECT]: () => systemPackageManager.inspect(),
+  [OPERATIONS.SYSTEM_UPGRADE]: () => systemPackageManager.upgrade(),
   [OPERATIONS.DOMAIN_STAGE]: (payload) => nginxManager.stageDomain(payload),
   [OPERATIONS.DOMAIN_ACTIVATE]: (payload) => nginxManager.activateDomain(payload),
   [OPERATIONS.SSL_ISSUE]: (payload) => acmeManager.issueCertificate(payload),

@@ -14,6 +14,7 @@ test('known operations are explicitly allowlisted', () => {
     OPERATIONS.SERVER_INSPECT,
     OPERATIONS.SERVER_DOCKER,
     OPERATIONS.SERVER_NGINX,
+    OPERATIONS.SYSTEM_PACKAGES_INSPECT,
   ]) {
     assert.equal(isKnownOperation(operation), true);
     assert.equal(isReadOnlyOperation(operation), true);
@@ -27,6 +28,7 @@ test('known operations are explicitly allowlisted', () => {
     OPERATIONS.APP_STATIC_ROLLBACK,
     OPERATIONS.APP_NODE_DEPLOY,
     OPERATIONS.APP_NODE_ROLLBACK,
+    OPERATIONS.SYSTEM_UPGRADE,
   ]) {
     assert.equal(isKnownOperation(operation), true);
     assert.equal(isReadOnlyOperation(operation), false);
@@ -34,6 +36,31 @@ test('known operations are explicitly allowlisted', () => {
 
   assert.equal(isKnownOperation('shell.exec'), false);
   assert.equal(isReadOnlyOperation('shell.exec'), false);
+});
+
+test('system package operations accept no caller-controlled arguments', () => {
+  const inspect = createOperationEnvelope({
+    id: 'request-system-inspect',
+    operation: OPERATIONS.SYSTEM_PACKAGES_INSPECT,
+    payload: {},
+  });
+  assert.equal(inspect.protocolVersion, AGENT_PROTOCOL_VERSION);
+
+  const upgrade = createOperationEnvelope({
+    id: 'request-system-upgrade',
+    operation: OPERATIONS.SYSTEM_UPGRADE,
+    payload: {},
+  });
+  assert.equal(upgrade.protocolVersion, AGENT_PROTOCOL_VERSION);
+
+  const injected = validateOperationEnvelope({
+    id: 'request-system-injected',
+    operation: OPERATIONS.SYSTEM_UPGRADE,
+    payload: { packageName: 'anything-else' },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(injected.ok, false);
+  assert.match(injected.errors.join(' '), /does not accept arguments/);
 });
 
 test('validates operation envelopes', () => {

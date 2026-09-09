@@ -12,7 +12,7 @@ import { createDomainRegistry, DomainRegistryError } from './domain-registry.js'
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 
-export const API_VERSION = '0.0.1';
+export const API_VERSION = '0.1.0';
 
 function bearerToken(request) {
   const header = request.headers.authorization;
@@ -168,6 +168,37 @@ export function createApp({
     const server = await registry.getServer(request.params.serverId);
     if (!server) return response.status(404).json({ error: { code: 'server_not_found', message: 'Server not found' } });
     return response.json({ data: server });
+  });
+  app.post('/api/servers/:serverId/system/packages/inspect', requireBootstrapAdmin, async (request, response) => {
+    const server = await registry.getServer(request.params.serverId);
+    if (!server) throw new RegistryError('server_not_found', 'Server not found', 404);
+    await ensureResourceJobIdle(jobRegistry, 'system', server.id);
+    const job = await jobRegistry.enqueue({
+      serverId: server.id,
+      type: 'system.packages.inspect',
+      operation: OPERATIONS.SYSTEM_PACKAGES_INSPECT,
+      payload: {},
+      resourceType: 'system',
+      resourceId: server.id,
+    });
+    return response.status(202).json({ data: job });
+  });
+  app.post('/api/servers/:serverId/system/upgrade', requireBootstrapAdmin, async (request, response) => {
+    const server = await registry.getServer(request.params.serverId);
+    if (!server) throw new RegistryError('server_not_found', 'Server not found', 404);
+    if (request.body?.confirmation !== 'upgrade-yunpanel') {
+      throw new RegistryError('upgrade_confirmation_required', 'Explicit YunPanel upgrade confirmation is required', 400);
+    }
+    await ensureResourceJobIdle(jobRegistry, 'system', server.id);
+    const job = await jobRegistry.enqueue({
+      serverId: server.id,
+      type: 'system.upgrade',
+      operation: OPERATIONS.SYSTEM_UPGRADE,
+      payload: {},
+      resourceType: 'system',
+      resourceId: server.id,
+    });
+    return response.status(202).json({ data: job });
   });
   app.post('/api/servers/enrollment-tokens', requireBootstrapAdmin, async (request, response) => {
     const ttlMinutes = request.body?.ttlMinutes;

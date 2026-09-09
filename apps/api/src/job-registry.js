@@ -5,7 +5,7 @@ import { createOperationEnvelope, OPERATIONS } from '@yunpanel/protocol';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
-const RESOURCE_TYPES = new Set(['domain', 'server', 'application', 'certificate', 'backup', 'database']);
+const RESOURCE_TYPES = new Set(['domain', 'server', 'application', 'certificate', 'backup', 'database', 'system']);
 const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DOMAIN_STAGE,
   OPERATIONS.DOMAIN_ACTIVATE,
@@ -17,12 +17,15 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.APP_NODE_ROLLBACK,
   OPERATIONS.APP_NODE_RESTART,
   OPERATIONS.APP_NODE_STATUS,
+  OPERATIONS.SYSTEM_PACKAGES_INSPECT,
+  OPERATIONS.SYSTEM_UPGRADE,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const NODE_SERVICE_PATTERN = /^yunpanel-node-[a-f0-9]{16}\.service$/;
 const SYSTEMD_STATE_PATTERN = /^[a-z0-9-]{1,40}$/;
+const PACKAGE_VERSION_PATTERN = /^[A-Za-z0-9.+:~_-]{1,100}$/;
 const MAX_ARTIFACT_FILES = 100_000;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024;
 
@@ -272,6 +275,49 @@ function sanitizeNodeStatusResult(job, result) {
   };
 }
 
+function sanitizePackageVersion(value, field, { optional = false } = {}) {
+  if (optional && value == null) return null;
+  if (typeof value !== 'string' || !PACKAGE_VERSION_PATTERN.test(value)) {
+    throw new JobRegistryError('invalid_job_result', `System package ${field} is invalid`);
+  }
+  return value;
+}
+
+function sanitizeSystemPackageResult(job, result) {
+  if (result.packageName !== 'yunpanel') {
+    throw new JobRegistryError('invalid_job_result', 'System package result must describe YunPanel');
+  }
+  const installedVersion = sanitizePackageVersion(result.installedVersion, 'installedVersion', { optional: true });
+  const candidateVersion = sanitizePackageVersion(result.candidateVersion, 'candidateVersion', { optional: true });
+  if (typeof result.installed !== 'boolean' || result.installed !== Boolean(installedVersion)) {
+    throw new JobRegistryError('invalid_job_result', 'System package installed state is invalid');
+  }
+  const expectedUpdate = Boolean(installedVersion && candidateVersion && installedVersion !== candidateVersion);
+  if (typeof result.updateAvailable !== 'boolean' || result.updateAvailable !== expectedUpdate) {
+    throw new JobRegistryError('invalid_job_result', 'System package update state is invalid');
+  }
+  const sanitized = {
+    packageName: 'yunpanel',
+    installed: result.installed,
+    installedVersion,
+    candidateVersion,
+    updateAvailable: result.updateAvailable,
+  };
+  if (job.operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT) return sanitized;
+
+  const previousVersion = sanitizePackageVersion(result.previousVersion, 'previousVersion');
+  if (typeof result.upgraded !== 'boolean' || typeof result.restartScheduled !== 'boolean') {
+    throw new JobRegistryError('invalid_job_result', 'System upgrade completion state is invalid');
+  }
+  if (result.upgraded && (!installedVersion || installedVersion === previousVersion || !result.restartScheduled)) {
+    throw new JobRegistryError('invalid_job_result', 'System upgrade did not report a valid version transition');
+  }
+  if (!result.upgraded && (installedVersion !== previousVersion || result.restartScheduled)) {
+    throw new JobRegistryError('invalid_job_result', 'No-op system upgrade result is inconsistent');
+  }
+  return { ...sanitized, previousVersion, upgraded: result.upgraded, restartScheduled: result.restartScheduled };
+}
+
 function sanitizeResult(job, result) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
@@ -311,6 +357,9 @@ function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.APP_NODE_ROLLBACK) return sanitizeNodeRollbackResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_RESTART) return sanitizeNodeRestartResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_STATUS) return sanitizeNodeStatusResult(job, result);
+  if (job.operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || job.operation === OPERATIONS.SYSTEM_UPGRADE) {
+    return sanitizeSystemPackageResult(job, result);
+  }
   throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
 }
 

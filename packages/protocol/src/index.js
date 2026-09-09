@@ -8,13 +8,15 @@ import {
   normalizeStaticApplicationSpec,
 } from '@yunpanel/shared';
 
-export const AGENT_PROTOCOL_VERSION = 3;
+export const AGENT_PROTOCOL_VERSION = 4;
 
 export const OPERATIONS = Object.freeze({
   SERVER_INSPECT: 'server.inspect',
   SERVER_SERVICES: 'server.services',
   SERVER_DOCKER: 'server.docker',
   SERVER_NGINX: 'server.nginx',
+  SYSTEM_PACKAGES_INSPECT: 'system.packages.inspect',
+  SYSTEM_UPGRADE: 'system.upgrade',
   DOMAIN_STAGE: 'domain.stage',
   DOMAIN_ACTIVATE: 'domain.activate',
   SSL_ISSUE: 'ssl.issue',
@@ -32,6 +34,7 @@ export const READ_ONLY_OPERATIONS = Object.freeze([
   OPERATIONS.SERVER_SERVICES,
   OPERATIONS.SERVER_DOCKER,
   OPERATIONS.SERVER_NGINX,
+  OPERATIONS.SYSTEM_PACKAGES_INSPECT,
   OPERATIONS.APP_NODE_STATUS,
 ]);
 
@@ -73,6 +76,10 @@ function validateSafePath(value, fieldName, errors) {
 }
 
 function validateMutationPayload(operation, payload, errors) {
+  if (operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || operation === OPERATIONS.SYSTEM_UPGRADE) {
+    if (Object.keys(payload).length !== 0) errors.push(`${operation} does not accept arguments`);
+  }
+
   if (operation === OPERATIONS.DOMAIN_STAGE) {
     if (typeof payload.primaryDomain !== 'string' || payload.primaryDomain.length < 3 || payload.primaryDomain.length > 253) errors.push('domain.stage primaryDomain is invalid');
     if (payload.aliases !== undefined && (!Array.isArray(payload.aliases) || payload.aliases.length > 20)) errors.push('domain.stage aliases must be an array with at most 20 entries');
