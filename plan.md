@@ -1,20 +1,20 @@
 # YunPanel — Yapılacaklar
 
-Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan ve doğrulanan alt maddeler listeden çıkarılacak; geçmiş Git commitlerinde kalacak. Kod tamamlanıp gerçek sunucu doğrulaması bekleyen işler `todo.md` içinde açık tutulacak. Bağlayıcı kurallar `agents.md`, authentication kurulumu ve sınırları `docs/authentication.md`, domain hiyerarşisinin uygulama/test sınırları `docs/domain-hierarchy.md` içindedir.
+Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan ve doğrulanan alt maddeler listeden çıkarılacak; geçmiş Git commitlerinde kalacak. Kod tamamlanıp gerçek sunucu doğrulaması bekleyen işler `todo.md` içinde açık tutulacak. Bağlayıcı kurallar `agents.md`, authentication kurulumu ve sınırları `docs/authentication.md`, MFA geçişi ve güncel doğrulama sınırları `docs/mfa.md`, domain hiyerarşisinin uygulama/test sınırları `docs/domain-hierarchy.md` içindedir.
 
-Öncelik: domain/subdomain hiyerarşisi bulunan, Plesk benzeri site detaylarından yönetilen enterprise bir panel. Ayrı sunucu agent'ı kaldırılacak; yerel sunucunun tam yönetim yetkisi panel backend'inde olacak. Enterprise UI çalışması bekletilmeyecek; ancak tam yetkili backend ve terminal, kalan authentication yayın kapısı geçilmeden dış erişime açılmayacak.
+Öncelik: domain/subdomain hiyerarşisi bulunan, Plesk benzeri site detaylarından yönetilen enterprise bir panel. Ayrı sunucu agent'ı kaldırılacak; yerel sunucunun tam yönetim yetkisi panel backend'inde olacak. Enterprise UI çalışması bekletilmeyecek; ancak tam yetkili backend ve terminal, kalan authentication yayın kapısı geçilmeden dış erişime açılmayacak. Kullanıcı açıkça başka branch istemedikçe geliştirme doğrudan `main` üzerinde yapılacak.
 
 ## A. P0 — Kalan authentication ve erişim işleri
 
-- [ ] TOTP kurulumu/doğrulaması, tek kullanımlık kurtarma kodları, MFA değiştirme ve güvenli yerel MFA kurtarma akışını geliştir. Root yönetiminin dış erişim sürümünde MFA bulunmalı; normal her işlem için tekrar parola istenmemeli.
+- [ ] Root yönetiminin dış erişim sürümü için MFA zorunluluk politikasını ve hazır-olma kontrolünü backend'e bağla. Etkinleştirilebilir TOTP bulunmasını bütün Owner hesaplarında zorunlu MFA uygulanmış sayma. Yeni Owner ve yerel kurtarma sonrası yeniden enrollment tamamlanmadan root/terminal public erişimi verilmemeli; normal her işlem için tekrar parola istenmemeli.
 - [ ] Ek Owner oluşturma, kullanıcı düzenleme/devre dışı bırakma ve gerekiyorsa kaynak bazlı Read Only rolünü backend + UI ile geliştir. Son aktif Owner silinememeli/devre dışı bırakılamamalı; rol değişimi mevcut oturumlarda etkili olmalı. Read Only için mevcut kapalı yönetim sınırını yalnızca açık kaynak/işlem izinleriyle genişlet.
-- [ ] Kullanıcıya idle/absolute süre dolmadan anlaşılır uyarı ve oturumu uzatma kontrolü ekle. Gerçek React tarayıcı testleriyle iki sekme, çıkış sırasında bekleyen istek, eski yanıtın yeni girişi etkilemesi, sayfa geri yükleme ve hesap penceresi/focus davranışını kapsa.
+- [ ] Gerçek React tarayıcı otomasyonuyla MFA ve oturum akışlarını kapsa: iki sekme, gecikmiş istekler, kayıp MFA yanıtı, geri yüklenen sayfa, kurtarma kodlarını onaylama, modal/focus ve süre uzatma. Saf protokol/HTTP testlerini render testi sayma. MFA master-key değişimi için uygulama secretlarıyla uyumlu, geri alınabilir rotation aracını geliştir.
 - [ ] `apps/api/src/core-app.js` ve domain route bileşiminde kalan `bootstrap-auth.js` / in-process uyumluluk tokenını kaldırıp doğrulanmış kullanıcı bağlamını doğrudan kullan. Ağ listener'ını atlayan yeni `createApp().listen()` yolu ekleme. Agentsiz geçişte eski enrollment/agent rotalarını ve credential'larını da kaldır.
 - [ ] WebSocket/SSE/terminal eklendiğinde HTTP ile aynı oturum/rol/Origin kontrolünü kur; logout, parola/MFA/rol değişimi ve kullanıcı iptalinde canlı bağlantı/PTY yetkisini derhal kaldır. Şimdilik kapalı upgrade yolunu korumasız açma.
 - [ ] IP allowlist'i güvenlik kabulü sonrası isteğe bağlı ek ağ kontrolüne dönüştür. Açık trusted-proxy sözleşmesi, gerçek istemciye göre rate limit ve proxy header spoof testlerini ekle; bu geçiş doğrulanmadan mevcut ağ kısıtını kaldırma.
 - [ ] Auth eventlerini tam audit modeline ve ekranına bağla; kullanıcı yönetimi ve tüm yönetim/job işlemlerinde actor/resource/result kayıtlarını tamamla. Parola, cookie, env değeri veya ham terminal çıktısı kaydetme.
 
-**Kabul:** Gerçek HTTPS ve tarayıcı kabulü `todo.md` T1/T1a üzerinden tamamlanmalı. MFA, kullanıcı yaşam döngüsü ve ileride canlı bağlantı iptali doğrulanmadan root/terminal public sürümü açılmamalı. Kodun test edilmesi canlı deployment kanıtı sayılmayacak.
+**Kabul:** Gerçek HTTPS, tam Node 24 workspace ve tarayıcı kabulü `todo.md` T1/T1a/T1b üzerinden tamamlanmalı. MFA zorunluluğu, kullanıcı yaşam döngüsü ve ileride canlı bağlantı iptali doğrulanmadan root/terminal public sürümü açılmamalı. Kodun test edilmesi canlı deployment kanıtı sayılmayacak.
 
 ## B. P1 — Ayrı agent'ı kaldır, tam yetkili yerel panel backend'ine geç
 
