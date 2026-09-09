@@ -1,0 +1,8 @@
+.mfa-panel { margin-top: 28px; padding-top: 24px; border-top: 1px solid #e0e7f0; }
+.mfa-panel form, .mfa-panel > label { margin-top: 16px; }
+.mfa-panel textarea { width: 100%; min-width: 0; resize: vertical; padding: 12px; border: 1px solid #bec9d8; border-radius: 7px; font: 12px/1.8 ui-monospace, monospace; white-space: pre; background: #f7f9fc; color: #17233b; }
+.mfa-panel > .auth-primary { margin-top: 16px; width: 100%; }
+.auth-form select, .mfa-panel select { width: 100%; min-height: 44px; border: 1px solid #bec9d8; border-radius: 7px; padding: 8px 12px; background: #fff; color: #17233b; font: inherit; }
+.mfa-secondary { min-height: 44px; border: 1px solid #cbd4e0; border-radius: 7px; padding: 8px 16px; background: #fff; color: #27364e; font: inherit; cursor: pointer; }
+.mfa-panel textarea:focus-visible, .auth-form select:focus-visible, .mfa-panel select:focus-visible { outline: 3px solid #a6c4ff; outline-offset: 2px; }
+@media (max-width: 480px) { .mfa-panel textarea { font-size: 10px; } }
