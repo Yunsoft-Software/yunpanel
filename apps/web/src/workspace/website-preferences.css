@@ -1,0 +1,5 @@
+.ws-site-table .ws-table th { font-size: 12px; }
+.ws-site-table .ws-table td { font-size: 13px; }
+.ws-site-table-comfortable .ws-table td { padding-block: 18px; }
+.ws-site-table-compact .ws-table td { padding-block: 10px; }
+.ws-site-table .ws-view-notice { padding: 0 20px; }
