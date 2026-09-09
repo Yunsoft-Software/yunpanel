@@ -21,7 +21,8 @@ function WebsiteForm({ parentId }) {
   const parent = domains.items.find((item) => item.id === form.parentDomainId);
   const serverId = form.mode === 'subdomain' ? parent?.serverId : form.serverId || (servers.items.length === 1 ? servers.items[0].id : '');
   const eligible = applications.items.filter((app) => app.serverId === serverId && app.type === 'node' && Number.isInteger(app.runtime?.port));
-  const locked = busy || domains.status !== 'ready' || servers.status !== 'ready' || (form.runtime === 'node' && applications.status !== 'ready');
+  const baseLocked = busy || domains.status !== 'ready' || servers.status !== 'ready';
+  const locked = baseLocked || (form.runtime === 'node' && applications.status !== 'ready');
   function update(key, value) { setDirty(true); setForm((current) => ({ ...current, [key]: value, ...(['serverId', 'parentDomainId', 'mode', 'runtime'].includes(key) ? { applicationId: '' } : {}) })); }
   async function submit(event) {
     event.preventDefault(); if (locked || pending.current) return;
@@ -42,7 +43,7 @@ function WebsiteForm({ parentId }) {
     <PageHeading title={form.mode === 'subdomain' ? 'Alt alan adı ekle' : 'Web sitesi ekle'} description="Alan adını seçin, çalışan uygulama veya dosya hedefine bağlayın ve HTTPS tercihini belirleyin." />
     {created ? <Section title="Site kaydı oluşturuldu"><EmptyState icon="check" title={created.primaryDomain} detail="Kayıt taslak olarak oluşturuldu. DNS kayıtlarını hazırlayın; ardından Nginx yapılandırmasını ve SSL’i site içinden etkinleştirin." action={<LinkButton variant="primary" icon="arrow" to={siteHref(created.id, 'domains')}>Siteyi yapılandır</LinkButton>} /></Section> : <Section title="Site yapılandırması" description="Mevcut uygulama, alan adı ve sertifika kayıtları korunur.">
       <CollectionNotice resource={domains} label="Alan adları" /><CollectionNotice resource={servers} label="Sunucular" />{form.runtime === 'node' && <CollectionNotice resource={applications} label="Uygulamalar" />}
-      <form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><fieldset disabled={locked}>
+      <form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><fieldset disabled={baseLocked}>
         <h3>1. Alan adı</h3><div className="ws-form-grid" style={{ marginTop: 16 }}>
           <label>Kayıt türü<select value={form.mode} onChange={(event) => update('mode', event.target.value)}><option value="domain">Bağımsız alan adı</option><option value="subdomain">Alt alan adı</option></select></label>
           {form.mode === 'subdomain' ? <><label>Üst alan adı<select value={form.parentDomainId} required onChange={(event) => update('parentDomainId', event.target.value)}><option value="">Alan adı seçin</option>{domains.items.map((item) => <option key={item.id} value={item.id}>{item.primaryDomain}</option>)}</select></label><label>Alt alan adı<input value={form.prefix} required placeholder="api" autoCapitalize="none" spellCheck={false} onChange={(event) => update('prefix', event.target.value)} /><span className="ws-field-hint">{parent ? `${form.prefix.trim() || 'api'}.${parent.primaryDomain}` : 'Önce üst alan adını seçin.'}</span></label></> : <><label>Alan adı<input value={form.primaryDomain} required placeholder="example.com" autoCapitalize="none" spellCheck={false} onChange={(event) => update('primaryDomain', event.target.value)} /></label><label>Sunucu<select value={serverId} required onChange={(event) => update('serverId', event.target.value)}><option value="">Sunucu seçin</option>{servers.items.map((item) => <option key={item.id} value={item.id}>{item.displayName ?? item.name ?? item.hostname}</option>)}</select></label></>}

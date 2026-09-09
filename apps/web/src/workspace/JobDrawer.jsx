@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { panelRequest } from '../api.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, ErrorNotice, KeyValues, Modal } from './PanelKit.jsx';
-import { formatDate, jobActive } from './site-model.js';
+import { formatDate, jobActive, jobFromResponse } from './site-model.js';
 
 export default function JobDrawer() {
   const { observedJob: job, jobOpen, closeJob, updateJob, refreshAll } = useWorkspace();
@@ -12,12 +12,12 @@ export default function JobDrawer() {
     const controller = new AbortController(); let timer; setError(null);
     async function poll() {
       try {
-        const next = await panelRequest(`/jobs/${encodeURIComponent(job.id)}`, { signal: controller.signal });
+        const next = jobFromResponse(await panelRequest(`/jobs/${encodeURIComponent(job.id)}`, { signal: controller.signal }));
         if (controller.signal.aborted) return;
         updateJob(next); setError(null);
         if (jobActive(next)) timer = setTimeout(poll, 1500); else refreshAll();
       } catch (failure) {
-        if (!controller.signal.aborted && failure.name !== 'AbortError') { setError('İşin güncel durumu alınamadı. İş sunucuda devam ediyor olabilir.'); timer = setTimeout(poll, 4000); }
+        if (!controller.signal.aborted && failure.name !== 'AbortError') { setError('İşin güncel durumu alınamadı. İş sunucuda devam ediyor olabilir.'); if (![401, 403, 404].includes(failure.status)) timer = setTimeout(poll, 4000); }
       }
     }
     poll();

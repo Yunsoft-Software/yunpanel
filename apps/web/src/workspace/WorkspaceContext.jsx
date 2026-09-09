@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { panelRequest } from '../api.js';
 import { useCollection } from './useCollection.js';
 import { jobActive, jobFromResponse } from './site-model.js';
+import { newerJob, trackJob } from './job-tracking.js';
 
 const WorkspaceContext = createContext(null);
 export function WorkspaceProvider({ children }) {
@@ -19,18 +20,19 @@ export function WorkspaceProvider({ children }) {
   useEffect(() => { const controller = new AbortController(); requests.current = controller; return () => controller.abort(); }, []);
   const refreshAll = useCallback(() => { domains.refresh(); applications.refresh(); certificates.refresh(); servers.refresh(); jobs.refresh(); }, [domains.refresh, applications.refresh, certificates.refresh, servers.refresh, jobs.refresh]);
   useEffect(() => {
+    if (['unauthorized', 'forbidden'].includes(jobs.status)) { setTracked({}); setJobOpen(false); return; }
     if (jobs.status !== 'ready') return;
     setTracked((current) => {
       const next = { ...current };
       for (const id of Object.keys(next)) {
         const fresh = jobs.items.find((job) => job.id === id);
-        if (fresh) next[id] = fresh;
+        if (fresh) next[id] = newerJob(next[id], fresh);
       }
       return next;
     });
   }, [jobs.items, jobs.status]);
-  const observe = useCallback((job) => { setTracked((current) => ({ ...current, [job.id]: job })); setObservedId(job.id); setJobOpen(true); }, []);
-  const updateJob = useCallback((job) => setTracked((current) => ({ ...current, [job.id]: job })), []);
+  const observe = useCallback((job) => { setTracked((current) => trackJob(current, job)); setObservedId(job.id); setJobOpen(true); }, []);
+  const updateJob = useCallback((job) => setTracked((current) => trackJob(current, job)), []);
   const runJob = useCallback(async (path, body = {}) => {
     if (submitting.current.has(path)) throw new Error('Bu istek zaten gönderiliyor.');
     submitting.current.add(path);
@@ -41,7 +43,7 @@ export function WorkspaceProvider({ children }) {
       return job;
     } finally { submitting.current.delete(path); }
   }, [observe, jobs.refresh]);
-  const resourceBusy = (type, id) => [...jobs.items, ...Object.values(tracked)].some((job) => job.resourceType === type && job.resourceId === id && jobActive(job));
+  const resourceBusy = (type, id) => Object.values({ ...Object.fromEntries(jobs.items.map((job) => [job.id, job])), ...tracked }).some((job) => job.resourceType === type && job.resourceId === id && jobActive(job));
   return <WorkspaceContext.Provider value={{ domains, applications, certificates, servers, jobs, runJob, resourceBusy, refreshAll, observe, updateJob, observedJob: tracked[observedId] ?? null, jobOpen, closeJob: () => setJobOpen(false), notice, setNotice }}>{children}</WorkspaceContext.Provider>;
 }
 export function useWorkspace() {
