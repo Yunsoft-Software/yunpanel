@@ -21,6 +21,8 @@ The repository has progressed beyond the initial read-only skeleton. Current imp
 - guarded Node manual restart,
 - bounded Node process-status inspection,
 - release/state drift validation between control plane and managed server,
+- installable Debian package with systemd-owned API, agent and restricted web services,
+- fixed-scope APT inspection and self-upgrade jobs with delayed service restart,
 - separate AES-256-GCM application environment storage,
 - masked secret metadata in normal admin reads,
 - authenticated just-in-time secret delivery to the assigned server agent,
@@ -53,5 +55,17 @@ Run the complete local validation set with:
 ```bash
 npm run check
 ```
+
+## Debian package
+
+On an Ubuntu 24.04 build host with Node.js 24 and `dpkg-deb` available:
+
+```bash
+npm install
+npm run build
+./scripts/build-deb.sh 0.1.0-1
+```
+
+The package keeps runtime state under `/var/lib/yunpanel` and configuration/secrets under `/etc/yunpanel`; package upgrades replace application code and systemd units without overwriting those persistent paths. `scripts/publish-local-apt.sh` can publish a built package into a host-local APT repository for controlled validation.
 
 See [docs/development.md](docs/development.md) for development details, [plan.md](plan.md) for the living roadmap, [todo.md](todo.md) for real-server/Plesk validation work and [agents.md](agents.md) for binding project rules.

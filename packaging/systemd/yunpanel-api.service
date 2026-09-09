@@ -1,0 +1,23 @@
+[Unit]
+Description=YunPanel control-plane API
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=yunpanel
+Group=yunpanel
+WorkingDirectory=/usr/lib/yunpanel
+EnvironmentFile=/etc/yunpanel/control-plane/api.env
+ExecStart=/usr/local/bin/node apps/api/src/index.js
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/yunpanel/control-plane
+
+[Install]
+WantedBy=multi-user.target

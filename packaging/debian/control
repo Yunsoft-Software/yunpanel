@@ -1,0 +1,10 @@
+Package: yunpanel
+Version: @VERSION@
+Section: admin
+Priority: optional
+Architecture: all
+Maintainer: Yunsoft <admin@yunsoft.com>
+Depends: adduser, ca-certificates, certbot, git, nginx
+Description: Yunsoft server and hosting control plane
+ YunPanel provides the Node.js control-plane API, privileged allowlisted
+ server agent and restricted web dashboard used to manage Yunsoft hosts.

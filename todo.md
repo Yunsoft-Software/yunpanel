@@ -122,6 +122,9 @@ Her tamamlanan maddede mümkünse sonuç, tarih ve kısa doğrulama notu bırak�
 
 Bu maddeler agent kodu hazırlandıktan sonra test Ubuntu sunucusunda yapılacak.
 
+- [ ] YunPanel `.deb` paketini test sunucusundaki APT repository üzerinden kur ve mevcut `/etc/yunpanel` ile `/var/lib/yunpanel` durumunun korunduğunu doğrula.
+- [ ] Paneldeki `system.upgrade` akışıyla daha yeni YunPanel paketine geç; job sonucu, gecikmeli servis restartı, yeni sürüm ve mevcut domain/application sağlığını doğrula.
+
 - [x] YunPanel için dedicated Linux system user/group oluştur.
 - [x] `yun-agent` için systemd service kur.
 - [x] Agent config/secrets için root-protected dizin oluştur.

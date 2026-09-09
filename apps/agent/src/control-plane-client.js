@@ -5,7 +5,7 @@ import { normalizeApplicationEnvironmentBundle } from '@yunpanel/shared';
 import { executeOperation } from './operations.js';
 import { loadAgentIdentity, saveAgentIdentity } from './identity-store.js';
 
-export const AGENT_VERSION = '0.0.1';
+export const AGENT_VERSION = '0.1.0';
 const DEFAULT_HEARTBEAT_MS = 30_000;
 const DEFAULT_COMMAND_POLL_MS = 5_000;
 const RESULT_REPORT_ATTEMPTS = 3;

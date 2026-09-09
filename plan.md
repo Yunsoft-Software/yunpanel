@@ -55,6 +55,7 @@ Current implementation checkpoint — 2026-09-09:
 - secure log transport/redaction and the environment/log operator UI remain active Milestone 4 work,
 - the dedicated test host was backed up and upgraded from Ubuntu 22.04.5 LTS to Ubuntu 24.04.5 LTS; network persistence, reboot recovery, Nginx, Node.js, systemd, control-plane, agent and managed application/vhost health were revalidated on the target platform,
 - `cryptoraichu.website` is active through the real YunPanel domain workflow with an externally trusted Let's Encrypt certificate, HTTP-to-HTTPS redirect and successful ACME staging plus renewal dry-runs; a client-IP-restricted loopback gateway exposes the current dashboard without exposing privileged admin API routes.
+- Debian package infrastructure now installs versioned YunPanel code, web assets and hardened systemd units while preserving `/etc/yunpanel` configuration and `/var/lib/yunpanel` runtime state; fixed-scope protocol/API/agent jobs inspect the `yunpanel` APT candidate and upgrade only that package before scheduling a delayed API/web/agent restart.
 
 ---
 

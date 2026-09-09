@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+if [ ! -x /usr/local/bin/node ]; then
+  printf '%s\n' 'YunPanel requires Node.js 24+ at /usr/local/bin/node' >&2
+  exit 1
+fi
+node_major=$(/usr/local/bin/node -p 'Number(process.versions.node.split(".")[0])')
+if [ "$node_major" -lt 24 ]; then
+  printf '%s\n' 'YunPanel requires Node.js 24 or newer' >&2
+  exit 1
+fi
+
+exit 0

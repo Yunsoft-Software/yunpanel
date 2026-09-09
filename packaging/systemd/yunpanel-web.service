@@ -1,0 +1,29 @@
+[Unit]
+Description=YunPanel restricted web dashboard
+Wants=network-online.target yunpanel-api.service
+After=network-online.target yunpanel-api.service
+
+[Service]
+Type=simple
+User=yunpanel
+Group=yunpanel
+WorkingDirectory=/usr/lib/yunpanel
+EnvironmentFile=/etc/yunpanel/control-plane/api.env
+EnvironmentFile=/etc/yunpanel/web/web.env
+ExecStart=/usr/local/bin/node apps/web/server.js
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

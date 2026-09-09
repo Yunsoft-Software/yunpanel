@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+if ! getent group yunpanel >/dev/null; then
+  addgroup --system yunpanel >/dev/null
+fi
+if ! id yunpanel >/dev/null 2>&1; then
+  adduser --system --ingroup yunpanel --home /var/lib/yunpanel --no-create-home yunpanel >/dev/null
+fi
+
+install -d -o yunpanel -g yunpanel -m 0700 /var/lib/yunpanel/control-plane
+install -d -o root -g root -m 0700 /var/lib/yunpanel/agent
+install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/control-plane
+install -d -o root -g root -m 0700 /etc/yunpanel/agent
+install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/web
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+  systemctl enable yunpanel-api.service yun-agent.service yunpanel-web.service >/dev/null 2>&1 || true
+  if [ -z "${2:-}" ]; then
+    [ -f /etc/yunpanel/control-plane/api.env ] && systemctl start yunpanel-api.service || true
+    [ -f /etc/yunpanel/agent/agent.env ] && systemctl start yun-agent.service || true
+    [ -f /etc/yunpanel/web/web.env ] && systemctl start yunpanel-web.service || true
+  fi
+fi
+
+exit 0
