@@ -9,6 +9,7 @@ import { createApplicationRegistry, ApplicationRegistryError } from './applicati
 import { createCertificateRegistry, CertificateRegistryError } from './certificate-registry.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
+import { reconcileCompletedJob } from './job-reconciliation.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 
@@ -39,86 +40,6 @@ async function latestNodeStatusJob(jobRegistry, applicationId) {
   return jobs
     .filter((job) => job.operation === OPERATIONS.APP_NODE_STATUS)
     .sort((left, right) => Date.parse(right.createdAt ?? 0) - Date.parse(left.createdAt ?? 0))[0] ?? null;
-}
-
-async function reconcileApplicationJob(applicationRegistry, job) {
-  const application = await applicationRegistry.getApplication(job.resourceId);
-  if (!application) return;
-
-  if (job.status === 'failed') {
-    if (application.activeDeploymentId !== job.id) return;
-    await applicationRegistry.markFailed(job.resourceId, job.id, job.error?.code ?? 'application_operation_failed');
-    return;
-  }
-
-  if (job.operation === OPERATIONS.APP_STATIC_DEPLOY || job.operation === OPERATIONS.APP_NODE_DEPLOY) {
-    if (application.activeDeploymentId == null && application.currentReleaseId === job.result?.releaseId) return;
-    await applicationRegistry.markDeployed(job.resourceId, {
-      deploymentId: job.id,
-      releaseId: job.result.releaseId,
-      commitSha: job.result.commitSha,
-      previousReleaseId: job.result.previousReleaseId,
-      artifactFiles: job.result.artifactFiles ?? null,
-      artifactBytes: job.result.artifactBytes ?? null,
-      serviceName: job.result.serviceName ?? null,
-      port: job.result.port ?? null,
-      healthPath: job.result.healthPath ?? null,
-      healthy: job.result.healthy ?? null,
-    });
-    return;
-  }
-
-  if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK || job.operation === OPERATIONS.APP_NODE_ROLLBACK) {
-    if (application.activeDeploymentId == null && application.currentReleaseId === job.result?.releaseId) return;
-    await applicationRegistry.markRolledBack(job.resourceId, {
-      operationId: job.id,
-      releaseId: job.result.releaseId,
-      previousReleaseId: job.result.previousReleaseId,
-      serviceName: job.result.serviceName ?? null,
-      port: job.result.port ?? null,
-      healthPath: job.result.healthPath ?? null,
-      healthy: job.result.healthy ?? null,
-    });
-  }
-}
-
-async function reconcileAgentJob({ domainRegistry, certificateRegistry, applicationRegistry, job }) {
-  if (job.resourceType === 'application') {
-    await reconcileApplicationJob(applicationRegistry, job);
-    return;
-  }
-
-  if (job.resourceType === 'domain') {
-    if (job.status === 'failed') {
-      await domainRegistry.markFailed(job.resourceId, job.error?.code ?? 'agent_job_failed');
-      return;
-    }
-    if (job.operation === OPERATIONS.DOMAIN_STAGE) {
-      await domainRegistry.markStaged(job.resourceId, { checksum: job.result.checksum, configName: job.result.configName });
-      return;
-    }
-    if (job.operation === OPERATIONS.DOMAIN_ACTIVATE) await domainRegistry.markApplied(job.resourceId, { checksum: job.result.checksum });
-    return;
-  }
-
-  if (job.resourceType === 'certificate') {
-    if (job.status === 'failed') {
-      await certificateRegistry.markFailed(job.resourceId, job.error?.code ?? 'certificate_operation_failed');
-      return;
-    }
-    if (job.operation === OPERATIONS.SSL_ISSUE) {
-      const certificate = await certificateRegistry.markActive(job.resourceId, job.result, { renewal: false });
-      if (!certificate.staging) await domainRegistry.attachCertificate(certificate.domainId, certificate.id);
-      return;
-    }
-    if (job.operation === OPERATIONS.SSL_RENEW) {
-      if (job.result.dryRun === true) {
-        await certificateRegistry.setState(job.resourceId, 'active');
-        return;
-      }
-      await certificateRegistry.markActive(job.resourceId, job.result, { renewal: true });
-    }
-  }
 }
 
 export function createApp({
@@ -246,19 +167,7 @@ export function createApp({
         result: request.body?.result ?? null,
         error: request.body?.error ?? null,
       });
-
-      try {
-        await reconcileAgentJob({ domainRegistry, certificateRegistry, applicationRegistry, job });
-      } catch (error) {
-        if (job.resourceType === 'domain') {
-          await domainRegistry.markFailed(job.resourceId, `reconcile_${error.code ?? 'failed'}`);
-        } else if (job.resourceType === 'certificate') {
-          await certificateRegistry.markFailed(job.resourceId, `reconcile_${error.code ?? 'failed'}`);
-        } else if (job.resourceType === 'application') {
-          const application = await applicationRegistry.getApplication(job.resourceId);
-          if (application?.activeDeploymentId === job.id) await applicationRegistry.markFailed(job.resourceId, job.id, `reconcile_${error.code ?? 'failed'}`);
-        }
-      }
+      await reconcileCompletedJob({ domainRegistry, certificateRegistry, applicationRegistry, job });
       return job;
     })();
 
