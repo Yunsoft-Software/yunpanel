@@ -23,6 +23,7 @@ test('rollback atomically switches current symlink to an existing retained relea
   const result = await manager.rollbackStatic({
     applicationId: APPLICATION_ID,
     releaseId: TARGET_RELEASE,
+    currentReleaseId: CURRENT_RELEASE,
   });
 
   assert.deepEqual(result, {
@@ -42,7 +43,7 @@ test('rollback rejects missing, symbolic and already-active releases', async () 
     lstatFn: async () => { const error = new Error('missing'); error.code = 'ENOENT'; throw error; },
   });
   await assert.rejects(
-    missing.rollbackStatic({ applicationId: APPLICATION_ID, releaseId: TARGET_RELEASE }),
+    missing.rollbackStatic({ applicationId: APPLICATION_ID, releaseId: TARGET_RELEASE, currentReleaseId: CURRENT_RELEASE }),
     (error) => error instanceof StaticRollbackError && error.code === 'rollback_release_missing',
   );
 
@@ -50,7 +51,7 @@ test('rollback rejects missing, symbolic and already-active releases', async () 
     lstatFn: async () => ({ isDirectory: () => true, isSymbolicLink: () => true }),
   });
   await assert.rejects(
-    symbolic.rollbackStatic({ applicationId: APPLICATION_ID, releaseId: TARGET_RELEASE }),
+    symbolic.rollbackStatic({ applicationId: APPLICATION_ID, releaseId: TARGET_RELEASE, currentReleaseId: CURRENT_RELEASE }),
     (error) => error instanceof StaticRollbackError && error.code === 'rollback_release_invalid',
   );
 
@@ -59,7 +60,29 @@ test('rollback rejects missing, symbolic and already-active releases', async () 
     readlinkFn: async () => `releases/${TARGET_RELEASE}`,
   });
   await assert.rejects(
-    current.rollbackStatic({ applicationId: APPLICATION_ID, releaseId: TARGET_RELEASE }),
+    current.rollbackStatic({ applicationId: APPLICATION_ID, releaseId: TARGET_RELEASE, currentReleaseId: TARGET_RELEASE }),
     (error) => error instanceof StaticRollbackError && error.code === 'rollback_target_current',
   );
+});
+
+test('rollback rejects release drift before mutating the application root', async () => {
+  const mutationCalls = [];
+  const manager = createStaticRollbackManager({
+    lstatFn: async () => ({ isDirectory: () => true, isSymbolicLink: () => false }),
+    readlinkFn: async () => `releases/${CURRENT_RELEASE}`,
+    mkdirFn: async (...args) => mutationCalls.push(['mkdir', ...args]),
+    rmFn: async (...args) => mutationCalls.push(['rm', ...args]),
+    symlinkFn: async (...args) => mutationCalls.push(['symlink', ...args]),
+    renameFn: async (...args) => mutationCalls.push(['rename', ...args]),
+  });
+
+  await assert.rejects(
+    manager.rollbackStatic({
+      applicationId: APPLICATION_ID,
+      releaseId: TARGET_RELEASE,
+      currentReleaseId: 'f8343982-05bc-48a7-9c50-979d85abf191',
+    }),
+    (error) => error instanceof StaticRollbackError && error.code === 'static_rollback_release_drift',
+  );
+  assert.deepEqual(mutationCalls, []);
 });

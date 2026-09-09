@@ -131,6 +131,7 @@ test('validates static deploy and rollback payloads', () => {
   const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
   const deploymentId = 'ff830043-9752-4640-83b4-3a1998de78a0';
   const releaseId = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
+  const currentReleaseId = 'f8343982-05bc-48a7-9c50-979d85abf191';
 
   const deploy = validateOperationEnvelope({
     id: deploymentId,
@@ -150,7 +151,7 @@ test('validates static deploy and rollback payloads', () => {
   const rollback = validateOperationEnvelope({
     id: 'request-rollback-0001',
     operation: OPERATIONS.APP_STATIC_ROLLBACK,
-    payload: { applicationId, releaseId },
+    payload: { applicationId, releaseId, currentReleaseId },
     protocolVersion: AGENT_PROTOCOL_VERSION,
   });
   assert.equal(rollback.ok, true);
@@ -158,11 +159,20 @@ test('validates static deploy and rollback payloads', () => {
   const invalidRollback = validateOperationEnvelope({
     id: 'request-rollback-0002',
     operation: OPERATIONS.APP_STATIC_ROLLBACK,
-    payload: { applicationId, releaseId: '../../etc' },
+    payload: { applicationId, releaseId: '../../etc', currentReleaseId },
     protocolVersion: AGENT_PROTOCOL_VERSION,
   });
   assert.equal(invalidRollback.ok, false);
   assert.match(invalidRollback.errors.join(' '), /releaseId/);
+
+  const invalidCurrentRelease = validateOperationEnvelope({
+    id: 'request-rollback-0003',
+    operation: OPERATIONS.APP_STATIC_ROLLBACK,
+    payload: { applicationId, releaseId, currentReleaseId: '../bad' },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(invalidCurrentRelease.ok, false);
+  assert.match(invalidCurrentRelease.errors.join(' '), /currentReleaseId/);
 });
 
 test('validates Node rollback payloads with desired runtime state', () => {

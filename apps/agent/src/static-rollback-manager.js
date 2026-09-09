@@ -32,12 +32,14 @@ export function createStaticRollbackManager({
   rmFn = rm,
   symlinkFn = symlink,
 } = {}) {
-  async function rollbackStatic({ applicationId, releaseId }) {
+  async function rollbackStatic({ applicationId, releaseId, currentReleaseId }) {
     let appId;
     let targetReleaseId;
+    let expectedCurrentReleaseId;
     try {
       appId = assertUuid(applicationId, 'applicationId');
       targetReleaseId = assertUuid(releaseId, 'releaseId');
+      expectedCurrentReleaseId = assertUuid(currentReleaseId, 'currentReleaseId');
     } catch {
       throw new StaticRollbackError('invalid_rollback_target', 'Static rollback target is invalid');
     }
@@ -65,6 +67,12 @@ export function createStaticRollbackManager({
       if (error?.code !== 'ENOENT' && error?.code !== 'EINVAL') throw error;
     }
 
+    if (!previousReleaseId) {
+      throw new StaticRollbackError('rollback_current_missing', 'Current static release is missing or invalid');
+    }
+    if (previousReleaseId !== expectedCurrentReleaseId) {
+      throw new StaticRollbackError('static_rollback_release_drift', 'Current static release does not match the control-plane state');
+    }
     if (previousReleaseId === targetReleaseId) {
       throw new StaticRollbackError('rollback_target_current', 'Requested rollback release is already active');
     }

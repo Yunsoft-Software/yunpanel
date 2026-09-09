@@ -97,6 +97,7 @@ test('rollback switches application state to a retained previous release', async
     assert.equal(claimed.response.status, 200);
     assert.equal(claimed.payload.data.envelope.operation, OPERATIONS.APP_STATIC_ROLLBACK);
     assert.equal(claimed.payload.data.envelope.payload.releaseId, releaseOne);
+    assert.equal(claimed.payload.data.envelope.payload.currentReleaseId, releaseTwo);
 
     const completed = await requestJson(
       `${baseUrl}/api/servers/${enrolled.server.id}/commands/${claimed.payload.data.job.id}/result`,

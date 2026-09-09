@@ -369,7 +369,11 @@ export function createApp({
             currentReleaseId: application.currentReleaseId,
             runtime: application.runtime,
           }
-        : { applicationId: application.id, releaseId },
+        : {
+            applicationId: application.id,
+            releaseId,
+            currentReleaseId: application.currentReleaseId,
+          },
       resourceType: 'application',
       resourceId: application.id,
     });

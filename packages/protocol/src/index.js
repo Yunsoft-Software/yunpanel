@@ -8,7 +8,7 @@ import {
   normalizeStaticApplicationSpec,
 } from '@yunpanel/shared';
 
-export const AGENT_PROTOCOL_VERSION = 2;
+export const AGENT_PROTOCOL_VERSION = 3;
 
 export const OPERATIONS = Object.freeze({
   SERVER_INSPECT: 'server.inspect',
@@ -116,6 +116,7 @@ function validateMutationPayload(operation, payload, errors) {
     try {
       assertUuid(payload.applicationId, 'applicationId');
       assertUuid(payload.releaseId, 'releaseId');
+      assertUuid(payload.currentReleaseId, 'currentReleaseId');
     } catch (error) {
       errors.push(error instanceof ApplicationValidationError ? error.message : 'app.static.rollback payload is invalid');
     }
