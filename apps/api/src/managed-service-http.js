@@ -1,0 +1,135 @@
+import { MANAGED_SERVICE_ACTIONS, MANAGED_SERVICE_IDS, OPERATIONS } from '@yunpanel/protocol';
+import { JobRegistryError } from './job-registry.js';
+import { requirePanelRouteAccess } from './panel-http-guard.js';
+import { RegistryError } from './server-registry.js';
+
+const SERVICE_IDS = new Set(MANAGED_SERVICE_IDS);
+const SERVICE_ACTIONS = new Set(MANAGED_SERVICE_ACTIONS);
+
+export class ManagedServiceHttpError extends Error {
+  constructor(code, message, status = 400) {
+    super(message);
+    this.name = 'ManagedServiceHttpError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+function requireServiceId(value) {
+  if (typeof value !== 'string' || !SERVICE_IDS.has(value)) {
+    throw new ManagedServiceHttpError('unsupported_managed_service', 'Managed service is not supported');
+  }
+  return value;
+}
+
+function requireAction(value) {
+  if (typeof value !== 'string' || !SERVICE_ACTIONS.has(value)) {
+    throw new ManagedServiceHttpError('unsupported_managed_service_action', 'Managed service action is not supported');
+  }
+  return value;
+}
+
+async function requireServer(registry, serverId) {
+  const server = await registry.getServer(serverId);
+  if (!server) throw new RegistryError('server_not_found', 'Server not found', 404);
+  return server;
+}
+
+async function ensureSystemIdle(jobRegistry, serverId) {
+  const jobs = await jobRegistry.listJobs({ resourceType: 'system', resourceId: serverId });
+  if (jobs.some((job) => job.status === 'queued' || job.status === 'running')) {
+    throw new JobRegistryError('system_job_conflict', 'Another server system operation is already queued or running', 409);
+  }
+}
+
+async function latestServiceSnapshot(jobRegistry, serverId) {
+  const jobs = await jobRegistry.listJobs({
+    serverId,
+    resourceType: 'system',
+    resourceId: serverId,
+    status: 'succeeded',
+  });
+  return jobs
+    .filter((job) => job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT && Array.isArray(job.result))
+    .sort((left, right) => Date.parse(right.finishedAt ?? right.createdAt ?? 0) - Date.parse(left.finishedAt ?? left.createdAt ?? 0))[0] ?? null;
+}
+
+function asyncRoute(handler) {
+  return async (request, response, next) => {
+    try { return await handler(request, response); }
+    catch (error) { return next(error); }
+  };
+}
+
+export function mountManagedServiceRoutes(app, { registry, jobRegistry }) {
+  if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
+  if (!registry || typeof registry.getServer !== 'function') throw new Error('Server registry is required');
+  if (!jobRegistry || typeof jobRegistry.enqueue !== 'function' || typeof jobRegistry.listJobs !== 'function') throw new Error('Job registry is required');
+
+  app.get('/api/servers/:serverId/services', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const server = await requireServer(registry, request.params.serverId);
+    const latest = await latestServiceSnapshot(jobRegistry, server.id);
+    return response.json({
+      data: latest?.result ?? null,
+      snapshot: latest ? { jobId: latest.id, refreshedAt: latest.finishedAt ?? latest.createdAt } : null,
+    });
+  }));
+
+  app.post('/api/servers/:serverId/services/inspect', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const server = await requireServer(registry, request.params.serverId);
+    await ensureSystemIdle(jobRegistry, server.id);
+    const job = await jobRegistry.enqueue({
+      serverId: server.id,
+      type: OPERATIONS.SYSTEM_SERVICES_INSPECT,
+      operation: OPERATIONS.SYSTEM_SERVICES_INSPECT,
+      payload: {},
+      resourceType: 'system',
+      resourceId: server.id,
+    });
+    return response.status(202).json({ data: job });
+  }));
+
+  app.post('/api/servers/:serverId/services/:serviceId/install', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const serviceId = requireServiceId(request.params.serviceId);
+    const server = await requireServer(registry, request.params.serverId);
+    if (request.body?.confirmation !== `install:${serviceId}`) {
+      throw new ManagedServiceHttpError('managed_service_confirmation_required', `Confirm installation with install:${serviceId}`);
+    }
+    await ensureSystemIdle(jobRegistry, server.id);
+    const job = await jobRegistry.enqueue({
+      serverId: server.id,
+      type: OPERATIONS.SYSTEM_SERVICE_INSTALL,
+      operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
+      payload: { serviceId },
+      resourceType: 'system',
+      resourceId: server.id,
+    });
+    return response.status(202).json({ data: job });
+  }));
+
+  app.post('/api/servers/:serverId/services/:serviceId/control', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const serviceId = requireServiceId(request.params.serviceId);
+    const action = requireAction(request.body?.action);
+    const server = await requireServer(registry, request.params.serverId);
+    if (request.body?.confirmation !== `control:${serviceId}:${action}`) {
+      throw new ManagedServiceHttpError('managed_service_confirmation_required', `Confirm service action with control:${serviceId}:${action}`);
+    }
+    await ensureSystemIdle(jobRegistry, server.id);
+    const job = await jobRegistry.enqueue({
+      serverId: server.id,
+      type: OPERATIONS.SYSTEM_SERVICE_CONTROL,
+      operation: OPERATIONS.SYSTEM_SERVICE_CONTROL,
+      payload: { serviceId, action },
+      resourceType: 'system',
+      resourceId: server.id,
+    });
+    return response.status(202).json({ data: job });
+  }));
+}
+
+export const managedServiceHttpInternals = Object.freeze({
+  requireServiceId,
+  requireAction,
+  ensureSystemIdle,
+  latestServiceSnapshot,
+});
