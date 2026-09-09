@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { AuthError, safeEqual } from './auth-store.js';
+import { AuthError, safeEqual } from './auth-error.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
 const AGENT_ROUTES = [
@@ -56,23 +56,30 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
     throw new Error('Panel origin must be an exact HTTPS origin (HTTP is only allowed for loopback development)');
   }
   const cookieName = localDevelopment ? 'yunpanel_session' : '__Host-yunpanel_session';
+  const mfaCookieName = localDevelopment ? 'yunpanel_mfa' : '__Host-yunpanel_mfa';
   const cookieOptions = `Path=/; HttpOnly; SameSite=Strict${localDevelopment ? '' : '; Secure'}`;
   // Transitional adapter only: fresh per process, never configured, returned, or sent across a socket.
   // This preserves existing domain/deploy handlers while removing the public bootstrap-token boundary.
   const internalToken = randomBytes(32).toString('base64url');
   const handler = createHandler({ adminToken: internalToken });
 
-  const sessionToken = (request) => {
-    const entries = (request.headers.cookie ?? '').split(';').map((part) => part.trim()).filter((part) => part.startsWith(`${cookieName}=`));
-    if (entries.length > 1) throw new AuthError('invalid_cookie', 'Ambiguous session cookie.');
-    return entries[0]?.slice(cookieName.length + 1) ?? null;
+  const readCookie = (request, name) => {
+    const entries = (request.headers.cookie ?? '').split(';').map((part) => part.trim()).filter((part) => part.startsWith(`${name}=`));
+    if (entries.length > 1) throw new AuthError('invalid_cookie', 'Ambiguous authentication cookie.');
+    return entries[0]?.slice(name.length + 1) ?? null;
   };
   const checkOrigin = (request) => {
     if (request.headers.origin !== publicOrigin || (request.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(request.headers['sec-fetch-site']))) {
       throw new AuthError('origin_forbidden', 'Cross-origin requests are not allowed.', 403);
     }
   };
-  const setCookie = (response, value) => response.setHeader('set-cookie', `${cookieName}=${value}; ${cookieOptions}${value ? '' : '; Max-Age=0'}`);
+  const writeCookie = (response, name, value, maxAge) => {
+    const existing = response.getHeader('set-cookie') ?? [];
+    const lifetime = value ? (maxAge === undefined ? '' : `; Max-Age=${maxAge}`) : '; Max-Age=0';
+    response.setHeader('set-cookie', [...(Array.isArray(existing) ? existing : [existing]), `${name}=${value}; ${cookieOptions}${lifetime}`]);
+  };
+  const setCookie = (response, value) => writeCookie(response, cookieName, value);
+  const setMfaCookie = (response, value) => writeCookie(response, mfaCookieName, value, 300);
 
   async function handle(request, response) {
     response.setHeader('cache-control', 'no-store');
@@ -95,7 +102,8 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
       if (request.headers.origin || request.headers.cookie) throw new AuthError('agent_channel_only', 'This route is not a browser management endpoint.', 403);
       return handler(request, response);
     }
-    const rawToken = sessionToken(request);
+    const rawToken = readCookie(request, cookieName);
+    const challengeToken = readCookie(request, mfaCookieName);
     const peer = request.socket.remoteAddress ?? 'unknown'; // Never trust caller-supplied forwarding headers.
     if (pathname === '/api/auth/login' || pathname === '/api/auth/setup') {
       if (request.method !== 'POST') throw new AuthError('method_not_allowed', 'Use POST.', 405);
@@ -106,7 +114,28 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
         return json(response, 201, { data: user });
       }
       const result = await store.login({ username: body.username, password: body.password, peer, previousToken: rawToken });
+      if (challengeToken) store.mfa.cancelLogin(challengeToken);
+      if (result.mfaRequired) {
+        setCookie(response, '');
+        setMfaCookie(response, result.challengeToken);
+        return json(response, 202, { data: { mfaRequired: true, expiresAt: result.expiresAt } });
+      }
       setCookie(response, result.token);
+      setMfaCookie(response, '');
+      return json(response, 200, { data: result.session });
+    }
+    if (pathname === '/api/auth/mfa/verify' || pathname === '/api/auth/mfa/cancel') {
+      if (request.method !== 'POST') throw new AuthError('method_not_allowed', 'Use POST.', 405);
+      checkOrigin(request);
+      if (pathname.endsWith('/cancel')) {
+        store.mfa.cancelLogin(challengeToken);
+        setMfaCookie(response, '');
+        return json(response, 204);
+      }
+      const body = await readJson(request);
+      const result = store.mfa.completeLogin(challengeToken, { code: body.code, method: body.method }, peer);
+      setCookie(response, result.token);
+      setMfaCookie(response, '');
       return json(response, 200, { data: result.session });
     }
 
@@ -123,20 +152,48 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
       if (pathname === '/api/auth/session' && request.method === 'GET') return json(response, 200, { data: session });
       if (pathname === '/api/auth/sessions' && request.method === 'GET') return json(response, 200, { data: store.listSessions(rawToken) });
       if (pathname === '/api/auth/keep-alive' && request.method === 'POST') return json(response, 200, { data: store.getSession(rawToken, { touch: true }) });
+      if (pathname === '/api/auth/mfa' && request.method === 'GET') return json(response, 200, { data: store.mfa.status(rawToken) });
+      if (pathname === '/api/auth/mfa/enroll' && request.method === 'POST') {
+        const body = await readJson(request);
+        return json(response, 200, { data: await store.mfa.beginEnrollment(rawToken, body.password) });
+      }
+      if (pathname === '/api/auth/mfa/enroll/cancel' && request.method === 'POST') {
+        store.mfa.cancelEnrollment(rawToken);
+        return json(response, 204);
+      }
+      if (['/api/auth/mfa/confirm', '/api/auth/mfa/recovery'].includes(pathname) && request.method === 'POST') {
+        const body = await readJson(request);
+        const result = pathname.endsWith('/confirm') ? store.mfa.confirmEnrollment(rawToken, body.code)
+          : await store.mfa.regenerateRecovery(rawToken, body.password, { code: body.code, method: body.method });
+        setCookie(response, result.token);
+        setMfaCookie(response, '');
+        return json(response, 200, { data: { session: result.session, recoveryCodes: result.recoveryCodes } });
+      }
+      if (pathname === '/api/auth/mfa/disable' && request.method === 'POST') {
+        const body = await readJson(request);
+        await store.mfa.disable(rawToken, body.password, { code: body.code, method: body.method });
+        setCookie(response, '');
+        setMfaCookie(response, '');
+        return json(response, 204);
+      }
       if (pathname === '/api/auth/logout' && request.method === 'POST') {
         store.revokeSession(rawToken);
+        if (challengeToken) store.mfa.cancelLogin(challengeToken);
         setCookie(response, '');
+        setMfaCookie(response, '');
         return json(response, 204);
       }
       if (pathname === '/api/auth/logout-all' && request.method === 'POST') {
         store.revokeAll(rawToken);
         setCookie(response, '');
+        setMfaCookie(response, '');
         return json(response, 204);
       }
       if (pathname === '/api/auth/password' && request.method === 'POST') {
         const body = await readJson(request);
-        await store.changePassword(body && rawToken, body.currentPassword, body.newPassword);
+        await store.changePassword(rawToken, body.currentPassword, body.newPassword);
         setCookie(response, '');
+        setMfaCookie(response, '');
         return json(response, 204);
       }
       const sessionMatch = /^\/api\/auth\/sessions\/([a-f0-9-]{36})$/.exec(pathname);
