@@ -1,5 +1,6 @@
 import {
   createAcmeManager,
+  createManagedServiceManager,
   createNginxManager,
   createNodeDeploymentManager,
   createNodeRestartManager,
@@ -13,6 +14,9 @@ import { OPERATIONS } from '@yunpanel/protocol';
 
 export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
+  OPERATIONS.SYSTEM_SERVICES_INSPECT,
+  OPERATIONS.SYSTEM_SERVICE_INSTALL,
+  OPERATIONS.SYSTEM_SERVICE_CONTROL,
   OPERATIONS.SYSTEM_UPGRADE,
   OPERATIONS.DOMAIN_STAGE,
   OPERATIONS.DOMAIN_ACTIVATE,
@@ -37,6 +41,7 @@ export function createLocalHostOperations({
   packageManager = createSystemPackageManager({
     restartUnits: ['yunpanel-api.service', 'yunpanel-web.service'],
   }),
+  managedServiceManager = createManagedServiceManager(),
   nginxManager = createNginxManager(),
   acmeManager = createAcmeManager(),
   staticDeploymentManager = createStaticDeploymentManager(),
@@ -63,6 +68,9 @@ export function createLocalHostOperations({
 
   const handlers = new Map([
     [OPERATIONS.SYSTEM_PACKAGES_INSPECT, () => packageManager.inspect()],
+    [OPERATIONS.SYSTEM_SERVICES_INSPECT, (payload) => managedServiceManager.inspect(payload.serviceId ?? null)],
+    [OPERATIONS.SYSTEM_SERVICE_INSTALL, (payload) => managedServiceManager.install(payload.serviceId)],
+    [OPERATIONS.SYSTEM_SERVICE_CONTROL, (payload) => managedServiceManager.control(payload.serviceId, payload.action)],
     [OPERATIONS.SYSTEM_UPGRADE, () => packageManager.upgrade()],
     [OPERATIONS.DOMAIN_STAGE, (payload) => nginxManager.stageDomain(payload)],
     [OPERATIONS.DOMAIN_ACTIVATE, (payload) => nginxManager.activateDomain(payload)],
