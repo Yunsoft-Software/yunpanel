@@ -16,6 +16,17 @@ export {
   NodeEnvironmentWriteError,
   nodeEnvironmentWriter,
 } from './node-environment-writer.js';
+export { copyStaticArtifact } from './static-artifact-worker.js';
+export {
+  createStaticDeploymentManager,
+  StaticDeploymentError,
+  staticDeploymentManager,
+} from './static-deployment-manager.js';
+export {
+  createStaticRollbackManager,
+  StaticRollbackError,
+  staticRollbackManager,
+} from './static-rollback-manager.js';
 export {
   createManagedServiceManager,
   managedServiceManager,
