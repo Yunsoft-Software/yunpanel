@@ -86,6 +86,8 @@ Kapsam Yunsoft'un gerçek kullanım ihtiyaçlarıdır; reseller, faturalama, hos
 
 ## 10. Git, test ve otomasyon
 
+- Kullanıcı açıkça ayrı branch istemedikçe yeni branch oluşturma veya başka branch üzerinde geliştirme yapma. Doğrudan güncel `main` üzerinde küçük commitlerle ilerle; bu kural kodlama araçları için de geçerlidir.
+- Mevcut branch birleştirmelerinde iki tarafın commit geçmişini ve değişikliklerini koru. Force push, geçmiş silme, reset veya tek tarafı seçerek içerik ezme yapma. Eşzamanlı değişiklikte güncel `main` tekrar okunup kayıpsız birleştirilir; branch silme kendiliğinden yapılmaz.
 - Küçük, tek amaçlı commitlerle ilerle; refactor ve özellik geliştirmesini mümkün olduğunca ayır. İlgisiz dosyaları değiştirme; eşzamanlı kullanıcı değişikliklerini ezme.
 - GitHub Actions KULLANILMAYACAK. `.github/workflows/` eklenmeyecek. Test/build/deploy yerel komutlar veya YunPanel job sistemiyle yürütülecek.
 - Auth/session/CSRF, WebSocket yetkisi, site izolasyonu, domain hiyerarşisi/migration, config validation, deploy state, rollback, secret masking, duplicate resource, concurrency ve destructive işlemler test edilir.
