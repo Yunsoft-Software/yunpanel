@@ -1,5 +1,6 @@
 let csrfToken = null;
 let version = 0;
+let transitioning = false;
 
 export function setSession(session) {
   const next = session?.csrfToken ?? null;
@@ -7,13 +8,22 @@ export function setSession(session) {
   csrfToken = next;
 }
 
+export function sessionTransitionPending() { return transitioning; }
+export function beginSessionTransition() {
+  if (transitioning) throw new DOMException('Another authentication change is in progress.', 'AbortError');
+  transitioning = true;
+  version += 1;
+  return () => { transitioning = false; version += 1; };
+}
+
 export function sessionVersion() { return version; }
 export function sessionHeaders(method = 'GET') {
   return !['GET', 'HEAD'].includes(method.toUpperCase()) && csrfToken ? { 'x-csrf-token': csrfToken } : {};
 }
 
-export async function requestJson(url, { method = 'GET', body, signal, notifyExpired = true } = {}) {
+export async function requestJson(url, { method = 'GET', body, signal, notifyExpired = true, allowDuringTransition = false } = {}) {
   if (typeof url !== 'string' || !url.startsWith('/api/') || /[\\\r\n]/.test(url)) throw new Error('Only same-origin API paths are supported');
+  if (transitioning && !allowDuringTransition) throw new DOMException('Authentication is changing.', 'AbortError');
   const started = version;
   const checkCurrent = () => {
     if (signal?.aborted || started !== version) throw new DOMException('The request belongs to an obsolete session.', 'AbortError');
