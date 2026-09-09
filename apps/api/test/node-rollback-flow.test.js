@@ -8,6 +8,7 @@ import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -55,7 +56,6 @@ function serviceName(applicationId) {
 }
 
 test('Node rollback queues desired runtime state and reconciles a healthy retained release', async () => {
-  const adminToken = 'node-rollback-admin-token';
   const serverRegistry = createServerRegistry();
   const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'node-rollback-test' });
   const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'node-rollback-host' });
@@ -97,20 +97,18 @@ test('Node rollback queues desired runtime state and reconciles a healthy retain
     healthy: true,
   });
 
-  const app = createApp({
+  const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
     applicationRegistry,
     jobRegistry,
     domainRegistry: createDomainRegistry(),
     certificateRegistry: createCertificateRegistry(),
-    adminToken,
-  });
+  }));
 
   await withServer(app, async (baseUrl) => {
     const rollback = await requestJson(`${baseUrl}/api/applications/${application.id}/rollback`, {
       method: 'POST',
-      token: adminToken,
     });
     assert.equal(rollback.response.status, 202);
     assert.equal(rollback.payload.data.job.operation, OPERATIONS.APP_NODE_ROLLBACK);
