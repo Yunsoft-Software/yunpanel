@@ -16,6 +16,11 @@ export {
   NodeEnvironmentWriteError,
   nodeEnvironmentWriter,
 } from './node-environment-writer.js';
+export {
+  createNodeRestartManager,
+  NodeRestartError,
+  nodeRestartManager,
+} from './node-restart-manager.js';
 export { copyStaticArtifact } from './static-artifact-worker.js';
 export {
   createStaticDeploymentManager,
