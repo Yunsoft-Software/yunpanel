@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createApp } from '../src/app.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -65,33 +66,25 @@ test('agent errors are returned as a safe gateway error', async () => {
   });
 });
 
-test('management routes fail closed when bootstrap authentication is not configured', async () => {
-  await withServer(createApp({ environment: 'production', adminToken: null }), async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/servers`);
-    assert.equal(response.status, 503);
+test('management routes fail closed without server-derived request auth', async () => {
+  await withServer(createApp({ environment: 'production' }), async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/servers`, {
+      headers: { authorization: 'Bearer development-admin-token' },
+    });
+    assert.equal(response.status, 401);
     const body = await response.json();
-    assert.equal(body.error.code, 'bootstrap_admin_not_configured');
+    assert.equal(body.error.code, 'unauthorized');
   });
 });
 
-test('server enrollment and heartbeat use separate one-time and agent credentials', async () => {
+test('server enrollment and heartbeat keep agent credentials separate from panel auth context', async () => {
   const registry = createServerRegistry();
-  const adminToken = 'test-bootstrap-admin-token';
+  const app = withPanelContext(createApp({ registry, environment: 'production' }));
 
-  await withServer(createApp({ registry, environment: 'production', adminToken }), async (baseUrl) => {
-    const unauthorizedIssue = await fetch(`${baseUrl}/api/servers/enrollment-tokens`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ label: 'unauthorized' }),
-    });
-    assert.equal(unauthorizedIssue.status, 401);
-
+  await withServer(app, async (baseUrl) => {
     const issueResponse = await fetch(`${baseUrl}/api/servers/enrollment-tokens`, {
       method: 'POST',
-      headers: {
-        authorization: `Bearer ${adminToken}`,
-        'content-type': 'application/json',
-      },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ label: 'ubuntu-test', ttlMinutes: 10 }),
     });
     assert.equal(issueResponse.status, 201);
@@ -135,9 +128,7 @@ test('server enrollment and heartbeat use separate one-time and agent credential
     const heartbeatBody = await heartbeatResponse.json();
     assert.equal(heartbeatBody.data.connectivity, 'online');
 
-    const listResponse = await fetch(`${baseUrl}/api/servers`, {
-      headers: { authorization: `Bearer ${adminToken}` },
-    });
+    const listResponse = await fetch(`${baseUrl}/api/servers`);
     assert.equal(listResponse.status, 200);
     const listBody = await listResponse.json();
     assert.equal(listBody.data.length, 1);
@@ -153,20 +144,16 @@ test('domain API stores desired state and rejects duplicate ownership', async ()
   const domainRegistry = createDomainRegistry({
     serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
   });
-  const adminToken = 'test-domain-admin-token';
-
-  await withServer(createApp({
+  const app = withPanelContext(createApp({
     registry,
     domainRegistry,
     environment: 'production',
-    adminToken,
-  }), async (baseUrl) => {
+  }));
+
+  await withServer(app, async (baseUrl) => {
     const createResponse = await fetch(`${baseUrl}/api/domains`, {
       method: 'POST',
-      headers: {
-        authorization: `Bearer ${adminToken}`,
-        'content-type': 'application/json',
-      },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         serverId: enrolled.server.id,
         primaryDomain: 'Example.COM',
@@ -183,10 +170,7 @@ test('domain API stores desired state and rejects duplicate ownership', async ()
 
     const conflictResponse = await fetch(`${baseUrl}/api/domains`, {
       method: 'POST',
-      headers: {
-        authorization: `Bearer ${adminToken}`,
-        'content-type': 'application/json',
-      },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         serverId: enrolled.server.id,
         primaryDomain: 'www.example.com',
@@ -198,9 +182,7 @@ test('domain API stores desired state and rejects duplicate ownership', async ()
     const conflictBody = await conflictResponse.json();
     assert.equal(conflictBody.error.code, 'domain_conflict');
 
-    const listResponse = await fetch(`${baseUrl}/api/domains`, {
-      headers: { authorization: `Bearer ${adminToken}` },
-    });
+    const listResponse = await fetch(`${baseUrl}/api/domains`);
     assert.equal(listResponse.status, 200);
     const listBody = await listResponse.json();
     assert.equal(listBody.data.length, 1);
