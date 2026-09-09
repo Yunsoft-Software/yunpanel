@@ -28,9 +28,10 @@ async function fixture(t) {
   const listener = createAuthenticatedApi({
     store: fakeStore(),
     publicOrigin: origin,
-    createHandler: ({ adminToken }) => (request, response) => {
+    createHandler: () => (request, response) => {
       calls += 1;
-      assert.equal(request.headers.authorization, `Bearer ${adminToken}`);
+      assert.equal(request.headers.authorization, undefined);
+      assert.equal(request.auth.user.role, 'read_only');
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ data: { path: request.url, access: request.auth.access } }));
     },
@@ -44,7 +45,7 @@ async function fixture(t) {
   };
 }
 
-test('read-only inventory reads cross the legacy adapter with explicit capabilities', async (t) => {
+test('read-only inventory reads cross the core boundary with explicit capabilities', async (t) => {
   const app = await fixture(t);
   for (const path of ['/api/servers', '/api/servers/s1', '/api/applications/a1', '/api/domains/d1', '/api/certificates/c1']) {
     const response = await app.request(path, { headers: { cookie } });
