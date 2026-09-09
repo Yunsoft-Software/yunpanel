@@ -1,12 +1,14 @@
-import path from 'node:path';
 import http from 'node:http';
-import { createApp } from './app.js';
+import os from 'node:os';
+import path from 'node:path';
+import { createApp, API_VERSION } from './app.js';
 import { createAuthStore } from './auth-store.js';
 import { createAuthenticatedApi } from './auth-http.js';
 import { createApplicationEnvironmentRegistry } from './application-environment-registry.js';
 import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { startCertificateRenewalScheduler } from './certificate-renewal-scheduler.js';
+import { startConfiguredLocalRuntime } from './configured-local-runtime.js';
 import { createDomainRegistry } from './domain-registry.js';
 import { createJobRegistry } from './job-registry.js';
 import { createServerRegistry } from './server-registry.js';
@@ -22,6 +24,13 @@ const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRON
 const certificateRenewalIntervalMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS ?? `${6 * 60 * 60 * 1000}`, 10);
 const certificateRenewBeforeMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEW_BEFORE_MS ?? `${30 * 24 * 60 * 60 * 1000}`, 10);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('YUNPANEL_API_PORT must be a valid TCP port');
+
+function reportLocalExecutorFault(error) {
+  const code = typeof error?.code === 'string' ? error.code : 'local_executor_fault';
+  const phase = typeof error?.phase === 'string' ? error.phase : 'unknown';
+  const jobId = typeof error?.jobId === 'string' ? error.jobId : 'none';
+  console.error(`[yunpanel-api] local executor fault code=${code} phase=${phase} job=${jobId}`);
+}
 
 const registry = createServerRegistry({ filePath: serverStorePath });
 await registry.init();
@@ -47,6 +56,20 @@ const listener = createAuthenticatedApi({
   development: process.env.NODE_ENV === 'development',
   createHandler: () => createApp({ registry, domainRegistry, jobRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry }),
 });
+
+const localRuntime = await startConfiguredLocalRuntime({
+  env: process.env,
+  hostname: os.hostname(),
+  jobStorePath,
+  runtimeVersion: API_VERSION,
+  registry,
+  jobRegistry,
+  domainRegistry,
+  certificateRegistry,
+  applicationRegistry,
+  applicationEnvironmentRegistry,
+  onError: reportLocalExecutorFault,
+});
 const renewalScheduler = startCertificateRenewalScheduler({ certificateRegistry, jobRegistry, intervalMs: certificateRenewalIntervalMs, renewBeforeMs: certificateRenewBeforeMs });
 const server = http.createServer({ headersTimeout: 15_000, requestTimeout: 30_000 }, listener);
 // No terminal/WebSocket endpoint is enabled yet. Do not bypass HTTP auth with a raw upgrade listener.
@@ -61,17 +84,34 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] application environment store=${applicationEnvironmentStorePath}`);
   console.log(`[yunpanel-api] secret store=${applicationEnvironmentRegistry.secretStoreConfigured ? 'configured' : 'not configured'}`);
   console.log(`[yunpanel-api] authentication=${authStore.configured() ? 'configured' : 'local setup required'}`);
+  console.log(`[yunpanel-api] local execution=${localRuntime ? `enabled server=${localRuntime.serverId} operations=${localRuntime.operations.length}` : 'disabled'}`);
 });
+
 let shuttingDown = false;
-function shutdown(signal) {
+async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[yunpanel-api] received ${signal}, shutting down`);
   renewalScheduler.stop();
-  server.close((error) => {
-    authStore.close();
-    if (error) { console.error('[yunpanel-api] shutdown failed', error); process.exitCode = 1; }
+
+  const closePromise = new Promise((resolve) => {
+    server.close((error) => resolve(error ?? null));
   });
+  let runtimeStopFailed = false;
+  if (localRuntime) {
+    try {
+      await localRuntime.stop();
+    } catch {
+      runtimeStopFailed = true;
+      console.error('[yunpanel-api] local runtime shutdown failed');
+    }
+  }
+  const serverCloseError = await closePromise;
+  authStore.close();
+  if (serverCloseError || runtimeStopFailed) {
+    console.error('[yunpanel-api] shutdown incomplete');
+    process.exitCode = 1;
+  }
 }
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => { void shutdown('SIGINT'); });
+process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
