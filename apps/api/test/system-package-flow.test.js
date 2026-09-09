@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createApp } from '../src/app.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -17,16 +18,15 @@ async function withServer(app, callback) {
   }
 }
 
-test('admin can queue fixed-scope YunPanel package inspection and upgrade jobs', async () => {
+test('Owner context can queue fixed-scope YunPanel package inspection and upgrade jobs', async () => {
   const registry = createServerRegistry();
   const token = await registry.issueEnrollmentToken();
   const enrollment = await registry.enrollServer({ token: token.token, hostname: 'package-test' });
   const jobRegistry = createJobRegistry();
-  const adminToken = 'system-package-admin-token';
-  const app = createApp({ registry, jobRegistry, environment: 'production', adminToken });
+  const app = withPanelContext(createApp({ registry, jobRegistry, environment: 'production' }));
 
   await withServer(app, async (baseUrl) => {
-    const headers = { authorization: `Bearer ${adminToken}`, 'content-type': 'application/json' };
+    const headers = { 'content-type': 'application/json' };
     const inspectResponse = await fetch(`${baseUrl}/api/servers/${enrollment.server.id}/system/packages/inspect`, {
       method: 'POST', headers, body: '{}',
     });
