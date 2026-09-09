@@ -4,20 +4,23 @@ import { parseSystemdProperties } from './systemd-inspector.js';
 
 const execFileAsync = promisify(execFile);
 const DPKG_QUERY = '/usr/bin/dpkg-query';
+const APT_GET = '/usr/bin/apt-get';
 const SYSTEMCTL = '/usr/bin/systemctl';
+const SERVICE_ACTIONS = new Set(['start', 'stop', 'restart']);
 
 function service(definition) {
   return Object.freeze({
     ...definition,
     packages: Object.freeze([...definition.packages]),
     units: Object.freeze([...definition.units]),
+    conflicts: Object.freeze([...(definition.conflicts ?? [])]),
   });
 }
 
 const SERVICE_CATALOG = Object.freeze([
   service({ id: 'nginx', label: 'Nginx', category: 'web', packages: ['nginx'], units: ['nginx.service'] }),
-  service({ id: 'mariadb', label: 'MariaDB', category: 'database', packages: ['mariadb-server'], units: ['mariadb.service'] }),
-  service({ id: 'mysql', label: 'MySQL', category: 'database', packages: ['mysql-server'], units: ['mysql.service'] }),
+  service({ id: 'mariadb', label: 'MariaDB', category: 'database', packages: ['mariadb-server'], units: ['mariadb.service'], conflicts: ['mysql'] }),
+  service({ id: 'mysql', label: 'MySQL', category: 'database', packages: ['mysql-server'], units: ['mysql.service'], conflicts: ['mariadb'] }),
   service({ id: 'docker', label: 'Docker', category: 'containers', packages: ['docker.io'], units: ['docker.service'] }),
   service({ id: 'cron', label: 'Cron', category: 'scheduler', packages: ['cron'], units: ['cron.service'] }),
   service({ id: 'postfix', label: 'Postfix', category: 'mail', packages: ['postfix'], units: ['postfix.service'] }),
@@ -46,15 +49,24 @@ function requireService(serviceId) {
   return definition;
 }
 
+function requireAction(action) {
+  if (!SERVICE_ACTIONS.has(action)) {
+    throw new ManagedServiceError('unsupported_managed_service_action', 'Managed service action is not supported');
+  }
+  return action;
+}
+
 export function createManagedServiceManager({
   run = (file, args, options = {}) => execFileAsync(file, args, {
     encoding: 'utf8',
-    timeout: 5000,
-    maxBuffer: 128 * 1024,
+    timeout: 10 * 60 * 1000,
+    maxBuffer: 2 * 1024 * 1024,
     windowsHide: true,
     ...options,
   }),
 } = {}) {
+  let activeMutation = null;
+
   async function inspectPackage(packageName) {
     try {
       const { stdout } = await run(DPKG_QUERY, ['-W', '-f=${Status}\t${Version}', packageName], {
@@ -69,7 +81,7 @@ export function createManagedServiceManager({
   async function inspectUnit(unit) {
     const args = ['show', unit, '--property=LoadState', '--property=ActiveState', '--property=SubState', '--property=UnitFileState', '--no-pager'];
     try {
-      const { stdout } = await run(SYSTEMCTL, args);
+      const { stdout } = await run(SYSTEMCTL, args, { timeout: 5000, maxBuffer: 128 * 1024 });
       return { unit, ...parseSystemdProperties(stdout), inspectionError: false };
     } catch (error) {
       const parsed = typeof error?.stdout === 'string' ? parseSystemdProperties(error.stdout) : null;
@@ -106,13 +118,94 @@ export function createManagedServiceManager({
     return Promise.all(SERVICE_CATALOG.map((entry) => inspectOne(entry.id)));
   }
 
-  return { inspect };
+  async function withMutation(operation) {
+    if (activeMutation) {
+      throw new ManagedServiceError('managed_service_operation_in_progress', 'Another managed service operation is already running');
+    }
+    const pending = Promise.resolve().then(operation);
+    activeMutation = pending;
+    try {
+      return await pending;
+    } finally {
+      if (activeMutation === pending) activeMutation = null;
+    }
+  }
+
+  async function assertNoConflict(definition) {
+    for (const conflictId of definition.conflicts) {
+      const conflict = await inspectOne(conflictId);
+      if (conflict.installed) {
+        throw new ManagedServiceError('managed_service_conflict', `${definition.label} conflicts with installed ${conflict.label}`);
+      }
+    }
+  }
+
+  async function install(serviceId) {
+    const definition = requireService(serviceId);
+    return withMutation(async () => {
+      const before = await inspectOne(serviceId);
+      if (!before.installed) {
+        await assertNoConflict(definition);
+        try {
+          await run(APT_GET, ['update'], {
+            env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive', LC_ALL: 'C' },
+          });
+        } catch {
+          throw new ManagedServiceError('managed_service_apt_update_failed', 'APT package indexes could not be refreshed');
+        }
+        try {
+          await run(APT_GET, ['install', '--yes', '--no-install-recommends', ...definition.packages], {
+            env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive', LC_ALL: 'C' },
+          });
+        } catch {
+          throw new ManagedServiceError('managed_service_install_failed', `${definition.label} packages could not be installed`);
+        }
+      }
+
+      try {
+        for (const unit of definition.units) await run(SYSTEMCTL, ['enable', '--now', unit]);
+      } catch {
+        throw new ManagedServiceError('managed_service_enable_failed', `${definition.label} was installed but could not be enabled and started`);
+      }
+
+      const after = await inspectOne(serviceId);
+      if (!after.installed) throw new ManagedServiceError('managed_service_install_incomplete', `${definition.label} package installation could not be confirmed`);
+      if (!after.active) throw new ManagedServiceError('managed_service_not_active', `${definition.label} is installed but not active`);
+      return { ...after, changed: !before.installed };
+    });
+  }
+
+  async function control(serviceId, action) {
+    const definition = requireService(serviceId);
+    const safeAction = requireAction(action);
+    return withMutation(async () => {
+      const before = await inspectOne(serviceId);
+      if (!before.installed) throw new ManagedServiceError('managed_service_not_installed', `${definition.label} is not installed`);
+      try {
+        for (const unit of definition.units) await run(SYSTEMCTL, [safeAction, unit]);
+      } catch {
+        throw new ManagedServiceError('managed_service_action_failed', `${definition.label} ${safeAction} failed`);
+      }
+      const after = await inspectOne(serviceId);
+      if ((safeAction === 'start' || safeAction === 'restart') && !after.active) {
+        throw new ManagedServiceError('managed_service_not_active', `${definition.label} did not become active`);
+      }
+      if (safeAction === 'stop' && after.active) {
+        throw new ManagedServiceError('managed_service_still_active', `${definition.label} remained active after stop`);
+      }
+      return { ...after, action: safeAction };
+    });
+  }
+
+  return { inspect, install, control };
 }
 
 export const managedServiceManager = createManagedServiceManager();
 export const managedServicePolicy = Object.freeze({
   dpkgQueryPath: DPKG_QUERY,
+  aptGetPath: APT_GET,
   systemctlPath: SYSTEMCTL,
   services: SERVICE_CATALOG,
+  actions: Object.freeze([...SERVICE_ACTIONS]),
 });
-export const managedServiceInternals = Object.freeze({ parsePackageStatus, requireService });
+export const managedServiceInternals = Object.freeze({ parsePackageStatus, requireService, requireAction });
