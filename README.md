@@ -10,7 +10,9 @@ The product direction is a website-centric enterprise interface with explicit do
 
 **The complete target is not implemented yet.** Local Owner setup, login/logout, persistent sessions, password changes/recovery, TOTP enrollment and MFA login/recovery are wired to the API and React entry points. An explicit domain-parent model, searchable domain tree and subdomain form are also implemented. The gateway retains its IP allowlist as an additional restriction but no longer injects a shared administrator token.
 
-Mandatory MFA policy for the future root release, user administration, the agentless/root backend, terminal, complete Website model and enterprise site-detail workspace remain planned work. Do not remove the current access restriction or publish a root backend/terminal before the remaining security release gate is satisfied.
+**HTTPS management now requires Owner MFA enrollment.** Password-only sessions can complete their own setup/recovery but cannot read or mutate management resources. A dedicated setup workspace precedes entry to the panel, including acknowledgement of recovery codes. Only explicit loopback HTTP development is exempt. See [docs/owner-mfa-policy.md](docs/owner-mfa-policy.md) for upgrade prerequisites, the policy boundary and validation limits.
+
+User administration, the agentless/root backend, terminal, complete Website model and enterprise site-detail workspace remain planned work. Future socket/root routes must inherit the existing management policy. Do not remove the current access restriction or publish a root backend/terminal before the remaining security release gate is satisfied.
 
 See [plan.md](plan.md) for remaining code/UI work and acceptance criteria, [todo.md](todo.md) for pending real-host/DNS/Plesk/browser validation, and [agents.md](agents.md) for development rules. Completed tasks leave the task lists; history remains in Git. Unless the user explicitly requests otherwise, work directly on `main` in small commits without creating another branch. Repository changes are not a live deployment.
 
@@ -23,6 +25,7 @@ Implemented foundations include:
 - Argon2id password hashing and private SQLite user/session persistence,
 - cookie-based HTTP authentication, Origin/CSRF protection, persistent login throttling and session expiry/revocation,
 - encrypted TOTP enrollment, a separate MFA login step, one-use recovery codes, regeneration and factor removal,
+- required Owner MFA before HTTPS management, live factor-state checks and a dedicated enrollment workspace,
 - stale-response protection during session changes, idle/absolute expiry warnings and explicit idle extension,
 - local one-time setup-token, password-recovery and confirmed MFA-reset CLI,
 - Node.js control-plane API with a session-authenticated network entry point,
@@ -65,7 +68,7 @@ Open `http://127.0.0.1:5173`. In another terminal at the repository root, genera
 npm run auth -- setup-token
 ```
 
-Complete the Owner form and then sign in. No default credentials are created. The CLI runs in the API workspace to match its default state directory; explicit API store/database overrides must also be provided to the CLI. MFA enrollment requires the configured existing secret master key; follow [docs/mfa.md](docs/mfa.md) rather than replacing a working key.
+Complete the Owner form and then sign in. No default credentials are created. The CLI runs in the API workspace to match its default state directory; explicit API store/database overrides must also be provided to the CLI. MFA enrollment requires the configured existing secret master key; follow [docs/mfa.md](docs/mfa.md) rather than replacing a working key. On HTTPS, complete the required authenticator setup before entering management; local MFA reset requires re-enrollment too.
 
 Current local services, until the agentless migration:
 
@@ -79,11 +82,13 @@ Run the complete repository validation on a fully installed workspace:
 npm run check
 ```
 
-Focused validation and its limitations are recorded in [docs/authentication.md](docs/authentication.md), [docs/mfa.md](docs/mfa.md) and [docs/domain-hierarchy.md](docs/domain-hierarchy.md). A focused test run is not a complete build, rendered-browser test or live-server validation.
+Focused validation and its limitations are recorded in [docs/authentication.md](docs/authentication.md), [docs/mfa.md](docs/mfa.md), [docs/owner-mfa-policy.md](docs/owner-mfa-policy.md) and [docs/domain-hierarchy.md](docs/domain-hierarchy.md). A focused test run is not a complete build, rendered-browser test or live-server validation.
 
 ## Existing-host upgrade and Debian package
 
 **Before upgrading:** configure the same exact HTTPS `YUNPANEL_PUBLIC_ORIGIN` in both API and web environments. The API fails closed if this is absent. Set a private auth database path inside the API service's writable state directory; preserve the IP restriction and independent SSH access. Follow [docs/authentication.md](docs/authentication.md) for setup, recovery, database permissions and consistent SQLite backup, and [docs/mfa.md](docs/mfa.md) for schema-2 migration and MFA key/recovery requirements.
+
+The required-MFA policy also affects existing unenrolled Owners. Preserve and configure the existing `YUNPANEL_SECRET_MASTER_KEY` before upgrading; without it, a new enrollment cannot complete and HTTPS management stays locked. Deploy matching API and web assets only after the package checks in `todo.md` T1c; do not overwrite a working key to bypass this prerequisite.
 
 On an Ubuntu 24.04 build host with the required Node runtime and `dpkg-deb`:
 
