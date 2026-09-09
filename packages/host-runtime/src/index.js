@@ -17,6 +17,11 @@ export {
   nodeEnvironmentWriter,
 } from './node-environment-writer.js';
 export {
+  createNodeDeploymentManager,
+  NodeDeploymentError,
+  nodeDeploymentManager,
+} from './node-deployment-manager.js';
+export {
   createNodeRestartManager,
   NodeRestartError,
   nodeRestartManager,
