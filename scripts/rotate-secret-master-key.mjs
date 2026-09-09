@@ -61,14 +61,6 @@ function storePaths() {
   };
 }
 
-async function validateRollbackTargets(backupDirectory, expected) {
-  const manifest = JSON.parse(await readFile(path.join(path.resolve(backupDirectory), 'manifest.json'), 'utf8'));
-  if (path.resolve(manifest?.sources?.authDbPath ?? '') !== expected.authDbPath
-    || path.resolve(manifest?.sources?.applicationEnvironmentStorePath ?? '') !== expected.applicationEnvironmentStorePath) {
-    throw new Error('Current store paths do not match the rotation manifest; set the same YUNPANEL_* store paths used during rotation');
-  }
-}
-
 const [command, ...args] = process.argv.slice(2);
 try {
   if (!['rotate', 'rollback'].includes(command)) throw new Error(usage());
@@ -82,8 +74,7 @@ try {
 
   if (command === 'rollback') {
     if (options.has('--new-key-file') || options.has('--current-key-file')) throw new Error(usage());
-    await validateRollbackTargets(backupDirectory, paths);
-    const result = await rollbackSecretMasterKey({ backupDirectory });
+    const result = await rollbackSecretMasterKey({ ...paths, backupDirectory });
     console.log(`Master-key data rollback complete. Backup: ${path.resolve(backupDirectory)}`);
     console.log(`Restored ${result.counts?.mfa ?? 0} active MFA, ${result.counts?.mfaPending ?? 0} pending MFA and ${result.counts?.applicationSecrets ?? 0} application secret record(s).`);
     console.log('Restore the PREVIOUS YUNPANEL_SECRET_MASTER_KEY in the API environment before starting yunpanel-api.service.');
