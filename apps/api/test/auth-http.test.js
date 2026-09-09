@@ -24,18 +24,20 @@ function fakeStore() {
 }
 async function fixture(t, options = {}) {
   let calls = 0;
-  let internalToken;
   const listener = createAuthenticatedApi({
     store: options.store ?? fakeStore(), publicOrigin: origin,
-    createHandler: ({ adminToken }) => {
-      internalToken = adminToken;
-      return (request, response) => {
-        calls += 1;
-        const agent = /heartbeat|commands|\/enroll$/.test(request.url);
-        const authorized = request.headers.authorization === `Bearer ${agent ? 'transport-token' : adminToken}`;
-        response.writeHead(authorized ? 200 : 401, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ data: { path: request.url, actor: request.auth?.user.id ?? null } }));
-      };
+    createHandler: () => (request, response) => {
+      calls += 1;
+      const agent = /heartbeat|commands|\/enroll$/.test(request.url);
+      const authorized = agent
+        ? request.headers.authorization === 'Bearer transport-token'
+        : Boolean(request.auth?.user);
+      response.writeHead(authorized ? 200 : 401, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ data: {
+        path: request.url,
+        actor: request.auth?.user.id ?? null,
+        authorization: request.headers.authorization ?? null,
+      } }));
     },
   });
   const server = http.createServer(listener).listen(0, '127.0.0.1');
@@ -43,7 +45,6 @@ async function fixture(t, options = {}) {
   t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
   return {
     calls: () => calls,
-    internalToken: () => internalToken,
     request: (pathname, { method = 'GET', headers = {}, body } = {}) => fetch(`http://127.0.0.1:${server.address().port}${pathname}`, {
       method, headers, body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
     }),
@@ -59,14 +60,14 @@ test('all management paths reject anonymous and bootstrap-bearer requests before
   assert.equal(app.calls(), 0);
 });
 
-test('authenticated owner reaches the existing handlers with an internal-only credential', async (t) => {
+test('authenticated owner reaches handlers through request.auth without injected credentials', async (t) => {
   const app = await fixture(t);
   const response = await app.request('/api/panel/applications', { headers: { cookie, authorization: 'Bearer attacker-supplied' } });
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.data.path, '/api/applications');
   assert.equal(payload.data.actor, 'owner-id');
-  assert.equal(JSON.stringify(payload).includes(app.internalToken()), false);
+  assert.equal(payload.data.authorization, 'Bearer attacker-supplied');
 });
 
 test('mutation requires both exact origin and the session CSRF token', async (t) => {
@@ -120,14 +121,15 @@ test('session listing and logout use the same backend-verified session', async (
   assert.equal((await app.request('/api/servers', { headers: { cookie } })).status, 401);
 });
 
-test('read-only role cannot inherit unrestricted legacy owner access', async (t) => {
+test('read-only role reaches only its explicitly declared inventory surface', async (t) => {
   const store = fakeStore();
   const getSession = store.getSession;
   store.getSession = (token) => { const session = getSession(token); return session && { ...session, user: { ...session.user, role: 'read_only' } }; };
   const app = await fixture(t, { store });
-  assert.equal((await app.request('/api/servers', { headers: { cookie } })).status, 403);
+  assert.equal((await app.request('/api/servers', { headers: { cookie } })).status, 200);
+  assert.equal((await app.request('/api/jobs', { headers: { cookie } })).status, 403);
   assert.equal((await app.request('/api/auth/session', { headers: { cookie } })).status, 200);
-  assert.equal(app.calls(), 0);
+  assert.equal(app.calls(), 1);
 });
 
 test('legacy agent routes retain their own credentials, not owner injection', async (t) => {
