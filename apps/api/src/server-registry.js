@@ -29,6 +29,7 @@ function hashToken(token) {
 }
 
 function safeHashEquals(expectedHash, token) {
+  if (typeof expectedHash !== 'string' || typeof token !== 'string') return false;
   const actual = Buffer.from(hashToken(token), 'hex');
   const expected = Buffer.from(expectedHash, 'hex');
   return actual.length === expected.length && timingSafeEqual(actual, expected);
@@ -58,6 +59,10 @@ function validateDisplayName(displayName, fallback) {
   return displayName.trim() || fallback;
 }
 
+function executionMode(server) {
+  return server.executionMode === 'local' ? 'local' : 'agent';
+}
+
 function publicServer(server, now, offlineAfterMs) {
   let connectivity = 'pending';
   if (server.lastSeenAt) {
@@ -69,6 +74,9 @@ function publicServer(server, now, offlineAfterMs) {
     name: server.name,
     hostname: server.hostname,
     connectivity,
+    executionMode: executionMode(server),
+    localBoundAt: server.localBoundAt ?? null,
+    localRuntimeVersion: server.localRuntimeVersion ?? null,
     createdAt: server.createdAt,
     enrolledAt: server.enrolledAt,
     lastSeenAt: server.lastSeenAt,
@@ -124,6 +132,21 @@ export function createServerRegistry({
 
   async function ensureInitialized() {
     if (!initialized) await init();
+  }
+
+  function requireServer(serverId) {
+    const server = state.servers.find((candidate) => candidate.id === serverId);
+    if (!server) throw new RegistryError('server_not_found', 'Server not found', 404);
+    return server;
+  }
+
+  function requireMatchingHost(serverId, hostname) {
+    const server = requireServer(serverId);
+    const normalizedHostname = validateHostname(hostname);
+    if (server.hostname !== normalizedHostname) {
+      throw new RegistryError('local_server_hostname_mismatch', 'Configured local server hostname does not match the enrolled server', 409);
+    }
+    return server;
   }
 
   async function issueEnrollmentToken({ label = null, ttlMs = DEFAULT_ENROLLMENT_TTL_MS } = {}) {
@@ -183,6 +206,9 @@ export function createServerRegistry({
       id: randomUUID(),
       name: validateDisplayName(displayName, normalizedHostname),
       hostname: normalizedHostname,
+      executionMode: 'agent',
+      localBoundAt: null,
+      localRuntimeVersion: null,
       agentTokenHash: hashToken(agentToken),
       createdAt: timestamp,
       enrolledAt: timestamp,
@@ -206,8 +232,11 @@ export function createServerRegistry({
     await ensureInitialized();
 
     const server = state.servers.find((candidate) => candidate.id === serverId);
-    if (!server || typeof agentToken !== 'string' || !safeHashEquals(server.agentTokenHash, agentToken)) {
+    if (!server || !safeHashEquals(server.agentTokenHash, agentToken)) {
       throw new RegistryError('invalid_agent_credentials', 'Agent credentials are invalid', 401);
+    }
+    if (executionMode(server) === 'local') {
+      throw new RegistryError('server_managed_locally', 'Server operations are owned by the local panel runtime', 409);
     }
 
     return publicServer(server, now(), offlineAfterMs);
@@ -232,6 +261,45 @@ export function createServerRegistry({
     return publicServer(server, now(), offlineAfterMs);
   }
 
+  async function bindLocalServer({ serverId, hostname }) {
+    await ensureInitialized();
+    const server = requireMatchingHost(serverId, hostname);
+    if (executionMode(server) === 'local') return publicServer(server, now(), offlineAfterMs);
+    server.executionMode = 'local';
+    server.localBoundAt = new Date(now()).toISOString();
+    server.localRuntimeVersion = null;
+    server.agentVersion = null;
+    await persist();
+    return publicServer(server, now(), offlineAfterMs);
+  }
+
+  async function releaseLocalServer({ serverId, hostname }) {
+    await ensureInitialized();
+    const server = requireMatchingHost(serverId, hostname);
+    server.executionMode = 'agent';
+    server.localBoundAt = null;
+    server.localRuntimeVersion = null;
+    await persist();
+    return publicServer(server, now(), offlineAfterMs);
+  }
+
+  async function updateLocalSnapshot({ serverId, hostname, runtimeVersion = null, inventory = null, services = null }) {
+    await ensureInitialized();
+    const server = requireMatchingHost(serverId, hostname);
+    if (executionMode(server) !== 'local') {
+      throw new RegistryError('local_server_not_bound', 'Server is not assigned to the local panel runtime', 409);
+    }
+    if (runtimeVersion != null && (typeof runtimeVersion !== 'string' || runtimeVersion.length > 40)) {
+      throw new RegistryError('invalid_local_runtime_version', 'runtimeVersion must be a string up to 40 characters');
+    }
+    server.lastSeenAt = new Date(now()).toISOString();
+    server.localRuntimeVersion = runtimeVersion ?? server.localRuntimeVersion;
+    if (inventory != null) server.inventory = inventory;
+    if (services != null) server.services = services;
+    await persist();
+    return publicServer(server, now(), offlineAfterMs);
+  }
+
   async function listServers() {
     await ensureInitialized();
     const currentTime = now();
@@ -250,6 +318,9 @@ export function createServerRegistry({
     enrollServer,
     authenticateAgent,
     heartbeat,
+    bindLocalServer,
+    releaseLocalServer,
+    updateLocalSnapshot,
     listServers,
     getServer,
   };
