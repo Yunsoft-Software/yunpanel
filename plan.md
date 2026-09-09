@@ -1,6 +1,6 @@
 # YunPanel — Yapılacaklar
 
-Bu dosya yalnızca kalan geliştirme işlerini içerir. Tamamlanan işler geçmiş Git commitlerinde kalır; kodu tamamlanıp gerçek Node 24 / tarayıcı / Ubuntu / canlı servis kabulü bekleyen maddeler `todo.md` içine taşınır. Bağlayıcı geliştirme kuralları `agents.md` içindedir.
+Bu dosya yalnızca kalan geliştirme işlerini içerir. Tamamlanan işler geçmiş Git commitlerinde kalır; kodu tamamlanıp gerçek Node 24 / tarayıcı / Ubuntu / canlı servis kabulü bekleyen maddeler `todo.md` içine taşınır. Bağlayıcı geliştirme kuralları `agents.md` içindedir. Yerel yürütücünün hata sınırı ve Node status taşımasının kapsamı `docs/local-executor-safety.md` içindedir.
 
 Hedef: site merkezli enterprise hosting paneli, açık domain/subdomain hiyerarşisi ve ayrı privileged agent yerine host üzerinde çalışan tam yetkili yerel backend. Kullanıcı ayrıca istemedikçe doğrudan `main` üzerinde küçük commitlerle ilerle; GitHub Actions kullanma. Root backend ve terminal güvenlik/yayın kabulü tamamlanmadan public açılmayacak.
 
@@ -16,15 +16,16 @@ Hedef: site merkezli enterprise hosting paneli, açık domain/subdomain hiyerar�
 ## B. P1 — Ayrı agent'ı kaldır, tam yetkili yerel backend'e geç
 
 - [ ] Sunucu başına yerel panel mimarisini uygula. Yönetim backend'i host üzerinde root yetkili systemd servisi olsun; ayrı `yun-agent`, enrollment, heartbeat, credential exchange veya işlem başına sudo/polkit izin akışı kalmasın.
-- [ ] `apps/agent/src` içindeki çalışan Nginx, ACME, systemd, deploy, rollback, envanter ve paket yönetimi algoritmalarını panel backend'inin dahili host-service/adapter katmanına taşı. Transport bağımlılıklarını ayır; çalışan algoritmaları gereksiz yeniden yazma.
-- [ ] `agent-client.js`, command claim/result, heartbeat ve secret-delivery akışlarını yerel executor'a geçir. Job queue, resource lock, reconciliation, hata/rollback ve restart sonrası idempotency korunmalı.
+- [ ] Kalan Node/static deploy, rollback, restart ve Node environment writer modüllerini panel backend'inin host-runtime katmanına taşı. Mevcut ortak inventory, Nginx/ACME, package ve Node status modüllerini yeniden yazma; kalan transport bağımlılıklarını ayır ve ilgili testleri taşı. Environment materialization olmadan boş env ile restart/deploy bağlama.
+- [ ] `agent-client.js`, command claim/result, heartbeat ve secret-delivery akışlarını yerel executor'a geçir. Açık local-server binding, desteklenen operation seçimi ve tek tüketici/kaynak kilidi sağlanmadan `index.js` içinde worker başlatma; eski agent ile yerel worker aynı kuyruğu eşzamanlı tüketmemeli.
+- [ ] Job registry'de bellek state'i ile kalıcı disk commitini tutarlı hale getir; başarısız persist sonrası idempotent cevapları disk kanıtı sayma. Claim/result/reconciliation için sürümlü kalıcı recovery kaydı ve startup uzlaştırması geliştir. Mevcut executor halt/drain davranışını koru; yalnız process'i yeniden başlatmak veya yeni executor yaratmak belirsiz işi güvenli retry yapmaz.
 - [ ] Yerel server kaydını kurulum/migration sırasında açıkça oluştur veya mevcut local kayıtla eşleştir. Mevcut server/application/domain kimliklerini ve ilişkilerini koru; doğrulanmamış uzak kaydı bu hosta sessizce bağlama.
 - [ ] Root yetkisini site uygulamalarına yayma. Node/static build, npm lifecycle, Git hook, cron ve site terminali dedicated site Unix kullanıcısıyla çalışsın; Owner Sunucu terminali root olabilir.
-- [ ] Systemd unitleri, Debian maintainer scriptleri, installer, package listesi, workspace/env örnekleri ve dev komutlarını agentsiz yapıya geçir. Gerçek management/PTy işlemlerini engelleyen sandbox'ları bilinçli daralt; `chmod -R 777` veya genel ownership değişimi kullanma.
+- [ ] Systemd unitleri, Debian maintainer scriptleri, installer, package listesi, workspace/env örnekleri ve dev komutlarını agentsiz yapıya geçir. Gerçek management/PTy işlemlerini engelleyen sandbox'ları bilinçli daralt; `chmod -R 777` veya genel ownership değişimi kullanma. Eski agent unit/re-export uyumluluğunu ancak yeni paket ve kuyruk geçişi doğrulandıktan sonra kaldır.
 - [ ] Migration sırası: yedek -> job drain -> sürümlü state migration -> yeni backend health -> eski agent durdur/devre dışı -> doğrulama. `/etc/yunpanel`, `/var/lib/yunpanel`, auth SQLite, master key, vhost, sertifika, release ve kullanıcıları koru; rollback eski paket/unit/state'e dönebilsin.
-- [ ] Geçiş tamamlanınca enrollment UI/agent mesajlarını kaldır ve eksik servis, gerçek OS hatası, kullanıcı yetkisi, yanlış config ve uygulanmamış modül durumlarını ayrı göster.
+- [ ] Geçiş tamamlanınca enrollment UI/agent mesajlarını kaldır ve eksik servis, gerçek OS hatası, kullanıcı yetkisi, yanlış config ve uygulanmamış modül durumlarını ayrı göster. Yeni local operation hatalarını güvenli tanı kataloğuna bağla; kalan legacy hata yollarında raw command/error/secret sızıntısı olmadığını ayrıca doğrula.
 
-**Kabul:** Agent çalışmadan envanter, Nginx test/reload, Node deploy/restart/rollback, SSL ve paket işlemleri çalışmalı; Owner root terminal açabilmeli; panel dursa hosted servisler çalışmaya devam etmeli.
+**Kabul:** Agent çalışmadan envanter, Nginx test/reload, Node deploy/restart/rollback, SSL ve paket işlemleri çalışmalı; Owner root terminal açabilmeli; panel dursa hosted servisler çalışmaya devam etmeli. Kalıcı recovery ve gerçek ortam doğrulaması `todo.md` T-LOCAL-EXECUTOR/T-MIGRATION üzerinden tamamlanmalı.
 
 ## C. P1 — Kalıcı Website modeli ve domain hiyerarşisi
 

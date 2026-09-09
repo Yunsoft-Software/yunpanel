@@ -1,8 +1,8 @@
 # YunPanel — Codex / Gerçek Ortam TODO
 
-Bu dosyada yalnız bu oturumda güvenilir biçimde çalıştırılamayan gerçek ortam doğrulamaları tutulur. Ürün/kod işleri `plan.md`, bağlayıcı kurallar `agents.md` içindedir. Doğrudan `main` üzerinde küçük commitler kullan; GitHub Actions kullanma. Secret, parola, cookie, MFA secretı veya kişisel veriyi repo/log/screenshot içine yazma.
+Bu dosyada yalnız güvenilir biçimde çalıştırılamayan gerçek ortam doğrulamaları tutulur. Ürün/kod işleri `plan.md`, bağlayıcı kurallar `agents.md` içindedir. Doğrudan `main` üzerinde küçük commitler kullan; GitHub Actions kullanma. Secret, parola, cookie, MFA secretı veya kişisel veriyi repo/log/screenshot içine yazma.
 
-Bu oturumdaki odaklı Read Only policy/HTTP/client testleri Node 22.16.0 kaynak alt kümesinde 11/11 geçti. Bootstrap/in-process bearer kaldırıldıktan sonra `panel-access` + `panel-http-guard` saf policy seti ayrıca Node 22.16.0 üzerinde 7/7 geçti. Bu sonuçlar Node 24 tam workspace, native auth, gerçek Express entry-point regresyonu, React production build, gerçek browser veya canlı HTTPS kabulü değildir. Master-key rotation testleri repoya eklendi fakat gerekli Node 24/full dependency ortamında henüz çalıştırılmadı.
+Önceki geliştirme kayıtlarında odaklı Read Only policy/HTTP/client testleri Node 22.16.0 kaynak alt kümesinde 11/11 geçti. Bootstrap/in-process bearer kaldırıldıktan sonra `panel-access` + `panel-http-guard` saf policy seti ayrıca Node 22.16.0 üzerinde 7/7 geçti. Son yerel yürütücü/Node status/paket düzeltmelerinin 43 testlik ayrı çalıştırması ve sınırları `docs/local-executor-safety.md` içindedir. Bu tarihsel sonuçları toplu güncel regresyon sayma: Node 24 tam workspace, native auth, gerçek Express entry-point, React build/browser veya canlı HTTPS kabulü yapılmış değildir. Master-key rotation testleri repoya eklendi fakat gerekli Node 24/full dependency ortamında henüz çalıştırılmadı.
 
 ## T-RUNTIME — P0: Desteklenen runtime ve tam repo kabulü
 
@@ -11,6 +11,15 @@ Bu oturumdaki odaklı Read Only policy/HTTP/client testleri Node 22.16.0 kaynak 
 - [ ] Güncel `panel-http-guard.test.js`, `authenticated-core-boundary.test.js` ve request-auth fixture'a taşınan core/deploy/rollback/ACME/Node/package flow testlerini birlikte çalıştır. Raw `createApp()` + eski/admin Bearer management erişimi 401 kalmalı; authenticated listener gerçek core'a yalnız server-derived `request.auth` ile geçmeli; legacy agent claim/result/environment rotaları kendi agent credential'larını korumalı.
 - [ ] API/web/package entry pointlerinin aynı committen geldiğini doğrula. Mixed web/API build durumunda privileged UI fail-closed kalmalı.
 - [ ] `.github/workflows` ekleme/değiştirme; doğrulamaları yerel/test hostunda çalıştır.
+
+## T-LOCAL-EXECUTOR — P1: Yerel iş yürütücüsü ve host-runtime kabulü
+
+- [ ] `docs/local-executor-safety.md` içindeki beş test dosyasını desteklenen Node 24.11.1+ / tam workspace'te tekrar çalıştır. Bu turdaki 43 Node22 testi kısmi kaynak ve yerel package export çözümüyle çalıştı; tam barrel/dependency kurulumu yerine geçmez. Ayrıca çalıştırılmamış `apps/api/test/local-host-operations.test.js`, gerçek registry kullanan `local-job-executor.test.js`, host-runtime/agent package-manager testleri ve mevcut Node status testlerini birlikte çalıştır.
+- [ ] Paketlenmiş gerçek `@yunpanel/host-runtime` importunu ve agent compatibility re-export'unu test et. `yun-agent.service` varsayılan adı modül başlangıcını bozmamalı; eski paket yönetiminde API/web/agent, yerel factory override'ında yalnız API/web restart planlanmalı. Test hostunda doğrulamadan gerçek APT upgrade veya servis restartı yapma.
+- [ ] Gerçek job registry ve disk üzerinde claim/result yazımı, rename, disk-full/read-only ve kaybolan acknowledgement hatalarını kontrollü üret. Başarılı host işi completion hatasında failed'e çevrilmemeli; belirsiz claim/complete/reconcile instance'ı durdurmalı ve yeni claim/otomatik retry olmamalı. In-memory terminal verisini durable disk kaydı kabul etme; plan B'deki kalıcı registry/recovery işi tamamlanmadan process restartını çözüm sayma.
+- [ ] Stop sırasında çalışan işin execution/complete/reconcile aşamalarının beklendiğini, paralel runOnce'un aynı işi tekrar yürütmediğini ve eski scheduler callback'lerinin stop/restart sonrası iş başlatmadığını doğrula. Fault metadata'sında yalnız safe code/phase/jobId olmalı; raw exception/command/env/key/path kayıtlarına sızmamalı. Legacy hata yollarını ayrıca denetle; local sanitizer bütün sistem için redaction kanıtı değildir.
+- [ ] İzole Ubuntu Node uygulamasında gerçek current symlink, deterministik systemd unit, runtime port/path ve health sonucunu karşılaştır. Wrong/missing release veya farklı uygulama kimliği host işleminden önce reddedilmeli. Buradaki gerçek temp-file/loopback HTTP testi gerçek systemctl, süreç izolasyonu veya live host kabulü değildir.
+- [ ] Entry-point bağlantısı geliştirildiğinde önce explicit local-server binding, desteklenen operation seçimi, tek worker/kuyruk sahipliği, job drain ve kalıcı recovery'yi doğrula. Eski agent ve local worker aynı kuyruğu tüketmemeli; taşınmamış restart/deploy işleri boş env ile yürütülmemeli. `index.js` henüz local executor başlatmıyor; bu yardımcı modüllerin varlığını agentsiz production geçişi sayma.
 
 ## T-ACCESS — P0: Read Only gerçek kabulü
 
