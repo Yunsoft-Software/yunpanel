@@ -1,4 +1,4 @@
-import { createAcmeManager, createNginxManager, createSystemPackageManager } from '@yunpanel/host-runtime';
+import { createAcmeManager, createNginxManager, createNodeStatusInspector, createSystemPackageManager } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 
 export const LOCAL_HOST_OPERATIONS = Object.freeze([
@@ -8,6 +8,7 @@ export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.DOMAIN_ACTIVATE,
   OPERATIONS.SSL_ISSUE,
   OPERATIONS.SSL_RENEW,
+  OPERATIONS.APP_NODE_STATUS,
 ]);
 
 export function createLocalHostOperations({
@@ -16,6 +17,7 @@ export function createLocalHostOperations({
   }),
   nginxManager = createNginxManager(),
   acmeManager = createAcmeManager(),
+  nodeStatusInspector = createNodeStatusInspector(),
 } = {}) {
   const handlers = new Map([
     [OPERATIONS.SYSTEM_PACKAGES_INSPECT, () => packageManager.inspect()],
@@ -24,6 +26,7 @@ export function createLocalHostOperations({
     [OPERATIONS.DOMAIN_ACTIVATE, (payload) => nginxManager.activateDomain(payload)],
     [OPERATIONS.SSL_ISSUE, (payload) => acmeManager.issueCertificate(payload)],
     [OPERATIONS.SSL_RENEW, (payload) => acmeManager.renewCertificate(payload)],
+    [OPERATIONS.APP_NODE_STATUS, (payload) => nodeStatusInspector.inspectNodeStatus(payload)],
   ]);
 
   return {
