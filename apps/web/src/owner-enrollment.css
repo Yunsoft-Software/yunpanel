@@ -1,0 +1,11 @@
+.owner-enrollment { min-height: calc(100vh - 52px); padding: 48px 24px; background: #f7f9fc; color: #17233b; }
+.owner-enrollment-card { box-sizing: border-box; width: min(100%, 620px); margin: 0 auto; padding: 32px; background: #fff; border: 1px solid #dbe3ee; border-radius: 12px; }
+.owner-enrollment-card h1 { margin: 0 0 16px; font-size: clamp(23px, 3vw, 30px); line-height: 1.25; letter-spacing: -.6px; }
+.owner-enrollment-card label { display: grid; gap: 8px; font-size: 14px; font-weight: 600; }
+.owner-enrollment-card fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; }
+.owner-enrollment-card input, .owner-enrollment-card select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid #bec9d8; border-radius: 7px; font: inherit; background: #fff; color: #17233b; }
+.owner-enrollment-card :is(input, select, button):focus-visible { outline: 3px solid #a6c4ff; outline-offset: 2px; }
+.owner-enrollment-card button:disabled { opacity: .55; cursor: not-allowed; }
+.owner-enrollment-footer { border-top: 1px solid #e0e7f0; margin-top: 24px; padding-top: 16px; }
+.owner-enrollment-footer button { width: 100%; }
+@media (max-width: 640px) { .owner-enrollment { padding: 24px 16px; } .owner-enrollment-card { padding: 24px 18px; } }
