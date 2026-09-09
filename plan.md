@@ -1,21 +1,20 @@
 # YunPanel — Yapılacaklar
 
-Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan ve doğrulanan alt maddeler listeden çıkarılacak; geçmiş Git commitlerinde kalacak. Kod tamamlanıp gerçek sunucu doğrulaması bekleyen işler `todo.md` içinde açık tutulacak. Yeni hedef mimarinin kuralları `agents.md`, Codex uygulama sırası ve dış ortam kontrolleri `todo.md` içindedir.
+Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan ve doğrulanan alt maddeler listeden çıkarılacak; geçmiş Git commitlerinde kalacak. Kod tamamlanıp gerçek sunucu doğrulaması bekleyen işler `todo.md` içinde açık tutulacak. Bağlayıcı kurallar `agents.md`, mevcut authentication kurulumu ve sınırları `docs/authentication.md` içindedir.
 
-Öncelik: gerçek kullanıcı girişiyle korunan, domain/subdomain hiyerarşisi bulunan, Plesk benzeri site detaylarından yönetilen enterprise bir panel. Ayrı sunucu agent'ı kaldırılacak; yerel sunucunun tam yönetim yetkisi panel backend'inde olacak. Enterprise UI çalışması bekletilmeyecek; ancak tam yetkili backend ve terminal, kimlik doğrulama kontrolleri tamamlanmadan dış erişime açılmayacak.
+Öncelik: domain/subdomain hiyerarşisi bulunan, Plesk benzeri site detaylarından yönetilen enterprise bir panel. Ayrı sunucu agent'ı kaldırılacak; yerel sunucunun tam yönetim yetkisi panel backend'inde olacak. Enterprise UI çalışması bekletilmeyecek; ancak tam yetkili backend ve terminal, kalan authentication yayın kapısı geçilmeden dış erişime açılmayacak.
 
-## A. P0 — Kullanıcı girişi ve oturum güvenliği
+## A. P0 — Kalan authentication ve erişim işleri
 
-- [ ] Gerçek kullanıcı ve kalıcı oturum modeli, login/logout ekranları, oturum sorgulama, parola değiştirme ve aktif oturumları kapatma akışlarını geliştir. İlk kullanıcı Owner olacak; public kayıt olmayacak. Owner tüm yönetim işlemlerine hazır yetkili gelecek, işlem/agent başına izin istemeyecek.
-- [ ] İlk Owner oluşturmayı yalnızca sunucu yöneticisinin başlatabildiği, süreli ve tek kullanımlık kurulum akışına bağla. Kurulum tamamlanınca bootstrap yönetim erişimini kapat; mail kurulmadan da çalışabilen yerel parola kurtarma komutu ekle. Varsayılan parola oluşturma.
-- [ ] `apps/web/server.js` içindeki isteklere ortak admin token ekleyen geçidi kullanıcı oturumuna taşı. `apps/api/src/bootstrap-auth.js` ve API route korumalarını buna göre değiştir. IP filtresini kullanıcı kimliği sayma; yalnızca isteğe bağlı ek ağ kısıtı olarak sun.
-- [ ] Panel verisi dönen bütün API'lere ve WebSocket/SSE bağlantılarına backend oturum kontrolü uygula. Frontend route guard tek başına yeterli sayılmayacak. Production'da `/api/dev/*`, eski bootstrap/agent rotaları ve alternatif portlar giriş atlama yolu bırakmayacak. Public health cevabı hassas envanter içermeyecek.
-- [ ] Parolaları Argon2id ile hash'le; oturumu sunucu tarafında tut. Cookie'yi `HttpOnly`, `Secure`, açık `SameSite` politikası ve host-only kapsamıyla kullan. Login sırasında oturumu yenile; logout/parola değişikliği/kullanıcı iptalinde ilgili oturum ve canlı bağlantıları geçersiz kıl. Tokenları frontend bundle, URL, localStorage veya loglara koyma.
-- [ ] Login rate limit, CSRF koruması, açık trusted-proxy yapılandırması, idle/absolute timeout ve kullanıcıya anlaşılır oturum süresi uyarısı ekle. TOTP ve kurtarma kodlarını root yönetiminin dış erişim sürümüne dahil et; her normal işlem için tekrar parola isteme.
-- [ ] Kullanıcı yönetiminde Owner oluşturma/devre dışı bırakma ve gerekiyorsa Read Only rolü sun. Son aktif Owner'ın silinmesini engelle. Read Only kullanıcının salt-okunur görünümü, backend yetki denetimiyle tutarlı olacak.
-- [ ] Login, kullanıcı değişiklikleri ve yönetim işlemlerini actor/resource/result bilgileriyle audit kaydına bağla; parola, cookie ve secret kaydetme.
+- [ ] TOTP kurulumu/doğrulaması, tek kullanımlık kurtarma kodları, MFA değiştirme ve güvenli yerel MFA kurtarma akışını geliştir. Root yönetiminin dış erişim sürümünde MFA bulunmalı; normal her işlem için tekrar parola istenmemeli.
+- [ ] Ek Owner oluşturma, kullanıcı düzenleme/devre dışı bırakma ve gerekiyorsa kaynak bazlı Read Only rolünü backend + UI ile geliştir. Son aktif Owner silinememeli/devre dışı bırakılamamalı; rol değişimi mevcut oturumlarda etkili olmalı. Read Only için mevcut kapalı yönetim sınırını yalnızca açık kaynak/işlem izinleriyle genişlet.
+- [ ] Kullanıcıya idle/absolute süre dolmadan anlaşılır uyarı ve oturumu uzatma kontrolü ekle. Gerçek React tarayıcı testleriyle iki sekme, çıkış sırasında bekleyen istek, eski yanıtın yeni girişi etkilemesi, sayfa geri yükleme ve hesap penceresi/focus davranışını kapsa.
+- [ ] Kalan core HTTP handler'larında `bootstrap-auth.js` / in-process uyumluluk tokenını kaldırıp doğrulanmış kullanıcı bağlamını doğrudan kullan. Ağ listener'ını atlayan yeni `createApp().listen()` yolu ekleme. Agentsiz geçişte eski enrollment/agent rotalarını ve credential'larını da kaldır.
+- [ ] WebSocket/SSE/terminal eklendiğinde HTTP ile aynı oturum/rol/Origin kontrolünü kur; logout, parola/MFA/rol değişimi ve kullanıcı iptalinde canlı bağlantı/PTY yetkisini derhal kaldır. Şimdilik kapalı upgrade yolunu korumasız açma.
+- [ ] IP allowlist'i güvenlik kabulü sonrası isteğe bağlı ek ağ kontrolüne dönüştür. Açık trusted-proxy sözleşmesi, gerçek istemciye göre rate limit ve proxy header spoof testlerini ekle; bu geçiş doğrulanmadan mevcut ağ kısıtını kaldırma.
+- [ ] Auth eventlerini tam audit modeline ve ekranına bağla; kullanıcı yönetimi ve tüm yönetim/job işlemlerinde actor/resource/result kayıtlarını tamamla. Parola, cookie, env değeri veya ham terminal çıktısı kaydetme.
 
-**Kabul:** Gizli sekmede yalnızca login/kurulumun izin verilen yüzeyi açılmalı. Oturumsuz korunan API isteği 401, yetkisiz işlem 403 vermeli; giriş yapmayan kullanıcı terminal oturumu oluşturamamalı. IP listesindeki istemci dahi login olmadan yönetim yapamamalı.
+**Kabul:** Gerçek HTTPS ve tarayıcı kabulü `todo.md` T1/T1a üzerinden tamamlanmalı. MFA, kullanıcı yaşam döngüsü ve ileride canlı bağlantı iptali doğrulanmadan root/terminal public sürümü açılmamalı. Kodun test edilmesi canlı deployment kanıtı sayılmayacak.
 
 ## B. P1 — Ayrı agent'ı kaldır, tam yetkili yerel panel backend'ine geç
 
@@ -25,7 +24,7 @@ Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan ve doğrulanan
 - [ ] Yerel server kaydını kurulumda otomatik oluştur; mevcut server/application/domain kimliklerini ve bağlantılarını koru. Lokal olduğu doğrulanmayan eski server kayıtlarını sessizce yerel sunucuya bağlama. Çoklu uzak sunucu yönetimi bu geçişin önkoşulu olmayacak.
 - [ ] Panelin root yetkisini uygulama süreçlerine yayma: Node/static build, npm lifecycle scriptleri, Git hook'ları, uygulama cron'u ve site terminali dedicated uygulama kullanıcısıyla çalışacak. Sunucu terminalini Owner root olarak kullanabilecek.
 - [ ] Systemd unitleri, Debian maintainer scriptleri, installer, paket listesi, workspace, env örnekleri ve geliştirme komutlarını agentsiz mimariye geçir. Sandbox/ownership ayarlarının gerçek yönetim işlemlerini ve root PTY'yi engellemediğini test et; çözüm olarak `chmod -R 777`, global sahiplik değişimi veya genel güvenlik kapatma kullanma.
-- [ ] Geçişi yedek -> job drain -> versioned state migration -> yeni backend health kontrolü -> eski agent'ı durdur/devre dışı bırak sırasıyla uygula. Hata halinde eski paket/unit/state'e dönüşü tasarla. `/etc/yunpanel`, `/var/lib/yunpanel`, environment master key, mevcut vhost, sertifika ve release dizinlerini koru.
+- [ ] Geçişi yedek -> job drain -> versioned state migration -> yeni backend health kontrolü -> eski agent'ı durdur/devre dışı bırak sırasıyla uygula. Hata halinde eski paket/unit/state'e dönüşü tasarla. `/etc/yunpanel`, `/var/lib/yunpanel`, auth SQLite verisi, environment master key, mevcut vhost, sertifika ve release dizinlerini koru; servis kullanıcısı değişince auth dosyası ownership geçişini açıkça yap.
 - [ ] Arayüzden agent durumu, enrollment butonları ve agent'a izin verme mesajlarını kaldır. Eksik dependency, gerçek işletim sistemi hatası, kullanıcı yetkisi, yanlış yapılandırma ve henüz uygulanmamış özellik için ayrı durum/hata kodu göster.
 
 **Kabul:** `yun-agent` çalışmazken panelden envanter, Nginx doğrulama/reload, Node restart/deploy, SSL ve paket işlemleri çalışmalı. Owner sunucu terminalinde root oturumu açabilmeli. Panel durduğunda barındırılan siteler ve servisler çalışmaya devam etmeli.
@@ -54,7 +53,7 @@ Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan ve doğrulanan
 - [ ] Site oluşturmayı “Domain -> runtime -> kaynak/document root -> HTTPS -> oluştur” akışıyla tasarla. Kullanıcıdan server ID, application ID, loopback portu veya agent tokenı ezberlemesini isteme; gerekli teknik detaylar gelişmiş bölümde bulunsun.
 - [ ] Formlarda alan bazlı doğrulama, kaydedilmemiş değişiklik uyarısı, doğru loading state, hatadan sonra değerlerin korunması ve uzun işlem için job drawer ekle. Browser `prompt`/`alert` yerine panel bileşenleri kullan; API 202 cevabını işlem tamamlandı diye gösterme.
 - [ ] `404 => protected` eşlemesini kaldır. 401 login, 403 yetkisizlik, 404 bulunamayan kaynak, 409 çatışma ve dependency/runtime hatalarını ayrı işle. Bir tablonun hatası diğer veriyi silmesin; bilinmeyen ölçüm 0 gösterilmesin. Otomatik yenileme açık formu bozmamalı.
-- [ ] Global arama/site değiştirici, kullanıcı menüsü/logout, bildirim merkezi ve kaynakla bağlantılı job/audit detayları ekle. Global Mail/Database ekranlarından ilgili site detayına gidilebilsin.
+- [ ] Global arama/site değiştirici, bildirim merkezi ve kaynakla bağlantılı job/audit detayları ekle; mevcut hesap/oturum kontrollerini yeni layouta entegre et. Global Mail/Database ekranlarından ilgili site detayına gidilebilsin.
 - [ ] Placeholder veya çalışmayan butonu tamamlanmış özellik sayma. Servis kurulmamışsa gerçek teşhis ve uygulanabilir kurulum akışı göster; kodu olmayan modülü ayrı “henüz desteklenmiyor” durumuyla belirt. Desteklenmeyen modüller gerçek backend + ekran olmadan bu plandan çıkarılmayacak.
 
 **Kabul:** 1440×900, 1920×1080, 1280×800 ve 390×844 görünümlerini incele. Ana domain -> subdomain -> Node restart, SSL yenileme ve mailbox oluşturma işlemleri bağlam kaybetmeden tamamlanmalı. Geri/ileri ve reload aynı siteyi/sekmesini korumalı.
@@ -115,13 +114,13 @@ Bu plan yalnızca kalan geliştirme işlerini içerir. Tamamlanan ve doğrulanan
 
 **Kabul:** Ekranı bulunan modül gerçek lifecycle işlemlerini yapmalı. Ayrı test kaynağında application, DB, Docker volume ve mail restore testleri başarılmadan production migration'a geçilmemeli.
 
-## J. P0–P3 — Test, geçiş ve yayın kapıları
+## J. P0–P3 — Kalan test, geçiş ve yayın kapıları
 
-- [ ] Auth bypass, session expiry, CSRF, WebSocket yetkisi, hierarchy migration, owner/read-only ayrımı, input validation ve secret sızıntısı için otomatik testler ekle; mevcut deploy/rollback/ACME/job testlerini agentsiz yapıya taşı.
+- [ ] Yeni MFA/kullanıcı yönetimi, WebSocket yetkisi, hierarchy migration, kaynak bazlı read-only ve yeni secret yüzeylerinin testlerini ekle; mevcut deploy/rollback/ACME/job testlerini agentsiz yapıya taşı. Gerçek core Express handler + oturum sınırı + entry point entegrasyonunu tam workspace'te testlerle kapsa.
 - [ ] UI component ve tarayıcı testleri ekle: login -> site -> subdomain -> Node -> SSL -> mail -> terminal. Loading/empty/error/permission/missing-dependency hallerini, uzun domainleri, çok kayıtlı tabloları ve form sırasında refresh'i kapsa.
-- [ ] Mevcut APT kurulumunu yeniden geliştirmek yerine agentsiz paket yükseltmesi, auth bootstrap, schema migration, PTY bağımlılıkları ve geri dönüşü test et. Job sürerken self-update, restart sonrası reconciliation ve disk-full durumlarını kapsa.
+- [ ] Mevcut APT kurulumunu yeniden geliştirmek yerine agentsiz paket yükseltmesi, schema migration, PTY bağımlılıkları ve geri dönüşü test et. Job sürerken self-update, restart sonrası reconciliation ve disk-full durumlarını kapsa. Auth paketinin gerçek install/upgrade kabulünü `todo.md` T1a'da tamamla.
 - [ ] Master-key rotation/recovery, backup hedefi outage, başarısız restore, eşzamanlı işler, kaynak tükenmesi ve panel kesintisi tatbikatlarını tamamla. Test kanıtı olmayan güvenlik veya görsel kalite iddiası yazma.
-- [ ] Yeni mimari uygulandıkça README, `docs/`, env örnekleri, install/package dokümanı ve geliştirici komutlarındaki eski agent varsayımlarını temizle. Henüz uygulanmamış hedefi mevcut davranış gibi belgeleme.
+- [ ] Agentsiz mimari uygulandıkça `docs/`, install/package dokümanı ve geliştirici komutlarındaki eski agent varsayımlarını temizle. Henüz uygulanmamış hedefi mevcut davranış gibi belgeleme.
 - [ ] `todo.md` içindeki gerçek Ubuntu/DNS/Plesk/browser kontrollerini tamamla; production verisine dokunmadan yedek ve rollback kapısını işlet. GitHub Actions kullanma.
 
-**Yayın sırası:** A güvenlik kapısı -> B agentsiz geçiş -> C/D site modeli ve enterprise UI -> E/F/G günlük hosting araçları -> H mail -> I kalan modüller. C/D tasarım ve bileşen geliştirmesi A/B ile paralel yürüyebilir. Her bölüm kendi test/kabul kapısını geçmeli; terminal ve tam yetkili yönetim A tamamlanmadan public olarak açılmamalı.
+**Yayın sırası:** A'nın kalan güvenlik kapısı -> B agentsiz geçiş -> C/D site modeli ve enterprise UI -> E/F/G günlük hosting araçları -> H mail -> I kalan modüller. C/D tasarım ve bileşen geliştirmesi A/B ile paralel yürüyebilir. Her bölüm kendi test/kabul kapısını geçmeli; terminal ve tam yetkili yönetim A tamamlanmadan public olarak açılmamalı.
