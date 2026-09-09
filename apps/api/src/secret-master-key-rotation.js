@@ -9,6 +9,8 @@ const ENV_STORE_VERSION = 1;
 const ENV_ALGORITHM = 'aes-256-gcm';
 const MANIFEST_VERSION = 1;
 const MFA_TABLES = ['auth_mfa', 'auth_mfa_pending'];
+const AUTH_BACKUP_NAME = 'auth.sqlite';
+const ENVIRONMENT_BACKUP_NAME = 'application-environment-registry.json';
 
 export class SecretMasterKeyRotationError extends Error {
   constructor(code, message) {
@@ -216,8 +218,8 @@ export async function rotateSecretMasterKey({
   await mkdir(backupPath, { mode: 0o700 });
   await chmod(backupPath, 0o700);
 
-  const backupAuthPath = path.join(backupPath, 'auth.sqlite');
-  const backupEnvironmentPath = path.join(backupPath, 'application-environment-registry.json');
+  const backupAuthPath = path.join(backupPath, AUTH_BACKUP_NAME);
+  const backupEnvironmentPath = path.join(backupPath, ENVIRONMENT_BACKUP_NAME);
   const db = new DatabaseSync(authPath);
   db.exec('PRAGMA busy_timeout = 1500; PRAGMA foreign_keys = ON;');
   let transactionOpen = false;
@@ -227,7 +229,7 @@ export async function rotateSecretMasterKey({
     status: 'preparing',
     createdAt: new Date(now()).toISOString(),
     sources: { authDbPath: authPath, applicationEnvironmentStorePath: environmentPath },
-    backups: { authDb: 'auth.sqlite', applicationEnvironmentStore: environmentMetadata ? 'application-environment-registry.json' : null },
+    backups: { authDb: AUTH_BACKUP_NAME, applicationEnvironmentStore: environmentMetadata ? ENVIRONMENT_BACKUP_NAME : null },
     backupHashes: {},
     counts: { mfa: 0, mfaPending: 0, applicationSecrets: 0 },
   };
@@ -302,8 +304,12 @@ export async function rotateSecretMasterKey({
   }
 }
 
-export async function rollbackSecretMasterKey({ backupDirectory, now = Date.now } = {}) {
-  if (typeof backupDirectory !== 'string' || !backupDirectory) throw rotationError('backup_directory_required', 'Backup directory is required');
+export async function rollbackSecretMasterKey({ authDbPath, applicationEnvironmentStorePath, backupDirectory, now = Date.now } = {}) {
+  if (![authDbPath, applicationEnvironmentStorePath, backupDirectory].every((value) => typeof value === 'string' && value)) {
+    throw rotationError('rotation_paths_required', 'Auth DB, application environment store and backup directory paths are required');
+  }
+  const authPath = path.resolve(authDbPath);
+  const environmentPath = path.resolve(applicationEnvironmentStorePath);
   const backupPath = path.resolve(backupDirectory);
   const manifestPath = path.join(backupPath, 'manifest.json');
   let manifest;
@@ -312,21 +318,30 @@ export async function rollbackSecretMasterKey({ backupDirectory, now = Date.now 
   if (manifest?.version !== MANIFEST_VERSION || typeof manifest.sources?.authDbPath !== 'string' || typeof manifest.sources?.applicationEnvironmentStorePath !== 'string') {
     throw rotationError('invalid_rotation_manifest', 'Rotation manifest is unsupported');
   }
+  if (path.resolve(manifest.sources.authDbPath) !== authPath || path.resolve(manifest.sources.applicationEnvironmentStorePath) !== environmentPath) {
+    throw rotationError('rotation_target_mismatch', 'Rotation manifest does not belong to the requested store paths');
+  }
+  if (manifest.backups?.authDb !== AUTH_BACKUP_NAME || ![null, ENVIRONMENT_BACKUP_NAME].includes(manifest.backups?.applicationEnvironmentStore)) {
+    throw rotationError('invalid_rotation_manifest', 'Rotation manifest contains unsupported backup paths');
+  }
 
-  const backupAuthPath = path.join(backupPath, manifest.backups?.authDb ?? '');
-  if (!manifest.backups?.authDb || await sha256File(backupAuthPath) !== manifest.backupHashes?.authDb) {
+  const backupAuthPath = path.join(backupPath, AUTH_BACKUP_NAME);
+  if (await sha256File(backupAuthPath) !== manifest.backupHashes?.authDb) {
     throw rotationError('rotation_backup_tampered', 'Auth database backup does not match the rotation manifest');
   }
-  const authPath = path.resolve(manifest.sources.authDbPath);
-  const environmentPath = path.resolve(manifest.sources.applicationEnvironmentStorePath);
   await fileMetadata(backupAuthPath);
 
-  if (manifest.backups?.applicationEnvironmentStore) {
-    const backupEnvironmentPath = path.join(backupPath, manifest.backups.applicationEnvironmentStore);
+  if (manifest.backups.applicationEnvironmentStore === ENVIRONMENT_BACKUP_NAME) {
+    const backupEnvironmentPath = path.join(backupPath, ENVIRONMENT_BACKUP_NAME);
     if (await sha256File(backupEnvironmentPath) !== manifest.backupHashes?.applicationEnvironmentStore) {
       throw rotationError('rotation_backup_tampered', 'Application environment backup does not match the rotation manifest');
     }
+    await fileMetadata(backupEnvironmentPath);
     await restoreFileFromBackup(backupEnvironmentPath, environmentPath);
+  } else {
+    // If the store did not exist before rotation, remove any post-rotation copy so the
+    // restored old root key cannot encounter data created under the new root key.
+    await rm(environmentPath, { force: true });
   }
 
   // The service must be stopped. Removing sidecar WAL/SHM files prevents pages from the
