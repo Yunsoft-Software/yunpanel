@@ -6,6 +6,7 @@ import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -34,7 +35,6 @@ async function requestJson(url, { method = 'GET', token, body } = {}) {
 }
 
 test('successful agent deploy result cannot overwrite control-plane state when previous release drifts', async () => {
-  const adminToken = 'release-drift-admin-token';
   const serverRegistry = createServerRegistry();
   const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'release-drift' });
   const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'release-drift-host' });
@@ -57,20 +57,18 @@ test('successful agent deploy result cannot overwrite control-plane state when p
     previousReleaseId: null,
   });
 
-  const app = createApp({
+  const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
     applicationRegistry,
     jobRegistry,
     domainRegistry: createDomainRegistry(),
     certificateRegistry: createCertificateRegistry(),
-    adminToken,
-  });
+  }));
 
   await withServer(app, async (baseUrl) => {
     const deploy = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, {
       method: 'POST',
-      token: adminToken,
     });
     assert.equal(deploy.response.status, 202);
 
