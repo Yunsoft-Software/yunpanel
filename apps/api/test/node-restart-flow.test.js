@@ -8,6 +8,7 @@ import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -55,7 +56,6 @@ function serviceName(applicationId) {
 }
 
 test('Node restart queues the active release and accepts only healthy managed service completion', async () => {
-  const adminToken = 'node-restart-admin-token';
   const serverRegistry = createServerRegistry();
   const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'node-restart-test' });
   const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'node-restart-host' });
@@ -83,20 +83,18 @@ test('Node restart queues the active release and accepts only healthy managed se
     healthy: true,
   });
 
-  const app = createApp({
+  const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
     applicationRegistry,
     jobRegistry,
     domainRegistry: createDomainRegistry(),
     certificateRegistry: createCertificateRegistry(),
-    adminToken,
-  });
+  }));
 
   await withServer(app, async (baseUrl) => {
     const restart = await requestJson(`${baseUrl}/api/applications/${application.id}/restart`, {
       method: 'POST',
-      token: adminToken,
     });
     assert.equal(restart.response.status, 202);
     assert.equal(restart.payload.data.operation, OPERATIONS.APP_NODE_RESTART);
