@@ -1,154 +1,158 @@
 # YunPanel — Codex / Gerçek Ortam TODO
 
-Yalnızca kalan dış ortam işleri ve doğrulamalar burada tutulur. Ürün/kod işleri ve uygulama sırası `plan.md`, bağlayıcı geliştirici kuralları `agents.md` içindedir. Tamamlanan alt maddeler listeden çıkarılır; tarih ve güvenli doğrulama kanıtı Git commitinde veya test raporunda kalır. Secret, sunucu parolası, session cookie ve kişisel veri repoya yazılmaz.
+Yalnızca kalan ortam bağımlı işler, somut araç engelleri ve doğrulamalar burada tutulur. Ürün/kod işleri `plan.md`, bağlayıcı kurallar `agents.md` içindedir. Tamamlanan alt madde çıkarılır; güvenli test kanıtı/tarih commit veya doğrulama raporunda kalır. Secret, parola, cookie ve kişisel veri repoya yazılmaz.
 
-## Çalışma sınırı ve Codex başlangıcı
+Güncel `main` ve iki plan dosyasını oku. Kullanıcı ayrıca istemedikçe yeni branch oluşturma; doğrudan main'de küçük commitler kullan. GitHub Actions kullanma. Bu ortamda canlı panel/SSH/deployment yapılmadı. Yeni routed UI'nin kapsamı `docs/website-workspace.md`; auth/MFA/parent modelinin önceki sınırları ilgili runbook'lardadır. Yeni görünüm; eksik user-admin, Website migration, agentless backend veya terminalin tamamlandığı anlamına gelmez.
 
-Canlı `cryptoraichu.website` için bu ortamda görsel/interaktif doğrulama, SSH erişimi veya deployment yapılmadı. Depo incelemesi canlı servis yapılandırmasını kanıtlamaz. Authentication kurulumu `docs/authentication.md`, birleştirilen MFA ve arayüz doğrulama sınırları `docs/mfa.md`, güncel HTTPS MFA zorunluluğu `docs/owner-mfa-policy.md`, domain parent/ağaç/form değişikliğinin sınırları `docs/domain-hierarchy.md` içindedir; tam workspace/build ve gerçek tarayıcı kabulü aşağıda açık kalır.
+## T-USER — P0: Kullanıcı yönetimi yazma engeli ve entegrasyon
 
-Codex önce güncel `main` ve üç planlama dosyasını okumalı; kullanıcı açıkça ayrı branch istemedikçe doğrudan `main` üzerinde küçük commitlerle ilerlemelidir. Bu dosya normal kod işlerini ertelemek için kullanılmaz. Hedef mimari geçişi doğrulamalarında tekrar istenen eski akışlar, yeni agentsiz backend için regresyon testidir; eski testin yapılmadığı anlamına gelmez. Authentication, MFA veya domain ağacının eklenmesi ayrı agent'ın kaldırıldığı, root terminalin hazır olduğu veya tam Website modeline geçildiği anlamına gelmez.
+- [ ] `plan.md` A'daki kullanıcı yaşam döngüsünü yetkili geliştirme ortamında tamamla. Bu turda `user-admin-store.js` için GitHub blob yazımı araç tarafından engellendi; alternatif action/encoding ile tekrar gönderilmedi. Yerel taslak, parola-helper ayrıştırması ve testleri main'de yok; varmış gibi import ekleme. Yeni UI'de kullanıcı CRUD ekranı da açılmış değil.
+- [ ] Native Argon2 ile kullanıcı oluşturma, mevcut Owner/MFA kontrolü, son aktif Owner invariant'ı, optimistic revision, username çakışması, devre dışı bırakma/silme ve oturum/challenge iptalini gerçek auth-store ile birlikte uygula. Yerel taslağın 16 testlik sonucu yalnız native SQLite/Argon2 ve kontrollü session adapter'ını kapsadı; HTTP/MFA login/rol UI entegrasyonu yerine geçmez.
+- [ ] Yeni user-admin API'lerini mevcut management/Owner MFA sınırından geçir; `/api/auth/*` self-service istisnasına koyma. Anonymous, Read Only ve unenrolled Owner reddi; CSRF/Origin; hashing sırasında actor logout/demotion/MFA reset; eşzamanlı son-Owner değişikliği; eski revision ile edit/delete senaryolarını test et.
+- [ ] Kullanıcı ekranında oluşturma, rol/aktivite düzenleme, etkisi açık teyitli silme, last-Owner hatası ve değişiklik sonrası hedef oturumların kapanmasını gerçek tarayıcıda doğrula. Parola/hash/token/MFA secret listelere, audit'e veya telemetry'ye düşmemeli. Bu katman tamamlanmadan kullanıcı yönetimini bitmiş sayma.
 
-## T0 — P0: Canlı paneli doğrula ve geçici erişimi koru
+## T-UI — P1: Yeni routed arayüzün gerçek kabulü
 
-- [ ] `cryptoraichu.website` adresini gerçek tarayıcıda aç; Dashboard, Websites/Applications, Domains, Settings ve mevcut bütün menüleri dolaş. Görselleri, network hata kodlarını ve console hatalarını secret/kişisel verileri maskeleyerek kaydet. “Açılmıyor” sorunlarını oturum/yetki, IP kısıtı, endpoint yokluğu, eksik servis ve işletim sistemi hatası olarak ayır.
-- [ ] Canlı paket/commit sürümünü ve aktif Nginx, web gateway, API ve agent unitlerini salt okunur olarak karşılaştır. Eski tokenlı gateway mi yeni kullanıcı oturumlu sürüm mü dağıtılmış belirle; IP filtresini de doğrula. Herkese açık olduğu veya düzeldiği sonucunu kaynak koddan tek başına çıkarma.
-- [ ] Kalan güvenlik kabulü tamamlanana kadar mevcut IP/erişim korumasını kaldırma. Gerçekten anonim yönetim erişimi bulunursa mevcut SSH/console erişimini kaybetmeden panel yüzeyine geçici IP kısıtı veya reverse-proxy authentication uygula; hosted sitelere aynı kısıtı yayma.
-- [ ] Geçişten önce `/etc/yunpanel`, `/var/lib/yunpanel`, anahtarlar, paket/unitler, Nginx configleri, vhostlar ve release/symlink durumunun yedeğini al. Geri yükleme adımlarını ve bağımsız SSH/provider console erişimini doğrula; yedekleri public web root dışında tut.
+- [ ] Tam repo üzerinde Node 24.11.1+ / npm 11+ ile bağımlılıkları kur; yeni `react-router@8.3.0` dahil manifest çözümünü doğrula. Filtre olmadan `npm run check` ve Vite production build çalıştır. Bu ortamın 22 model testi native Node 24 ile geçti fakat tam bağımlılık kurulumu/build yapılamadı; küçük kaynak alt kümesini tam workspace sayma.
+- [ ] Built React uygulamasını gerçek tarayıcıda aç. Bu ortamda yerel preview `ERR_BLOCKED_BY_ADMINISTRATOR` nedeniyle render etmedi; gerçek ekran görüntüsü, mobil/focus veya gezinme kabulü yapılmış değil. JSX transpilation/CSS parse sonucunu tasarım kabulü sayma.
+- [ ] `AuthGate -> App -> WorkspaceApp` zincirini doğrula. Gizli sekmede login öncesi koleksiyon/management istekleri çalışmamalı; unenrolled Owner zorunlu MFA'da kalmalı. Yeni kullanıcı/senaryo, logout/parola/MFA değişimi, eski yanıt ve tekrar login sonrası önceki kaynak verisi görünmemeli. Router state'inde korunan loader verisi olmamalı.
+- [ ] `/dashboard`, `/websites`, `/websites/new`, `/websites/:id/:tab`, `/applications`, `/applications/new`, `/domains`, `/servers`, `/jobs`, `/settings` için doğrudan URL, reload, back/forward ve yanlış route testlerini yap. HTTPS reverse proxy SPA fallback ve statik assetler API auth'unu atlamadan çalışmalı. Domain ID kullanan mevcut route'u kalıcı Website migration kabulü sayma.
+- [ ] Domain/alias araması, URL type/status/sort filtreleri, grup sayfalama, nested parent context ve collapse davranışını dene. Child kayıt parent'tan ayrı sayfaya düşmemeli. Uzun isimler, çok kayıt, filtre temizleme ve browser history testlerini yap. Gelişmiş eski domain araçları erişilebilir kalmalı.
+- [ ] Ana domain ve seçili parent üzerinden yeni site akışını test et. Çoklu sunucuda açık seçim, Node uygulamasından doğru port, static/proxy hedefi ve HTTPS tercihi korunmalı. Eksik applications API'si statik tür seçimini kilitlememeli. Kayıt taslak olmalı; DNS/SSL/mail otomatik yapılmış gösterilmemeli.
+- [ ] Aynı sunucu/port eşleşmesiyle site Node sekmesinde doğru uygulama seçilmeli; çoklu adayda otomatik atama yapılmamalı, başka sunucu aday olmamalı. Deploy/restart/status/rollback işlemini düşük riskli fixture'da gerçek API ile yap. Kalıcı Website/application bağı henüz yok; statik/Docker bağlantısını varsayma.
+- [ ] Env listeleme/masking, save/delete ve typed confirmation testlerini yap. Hatalı istekte form korunmalı; kaydedilmesi çalışan sürece uygulandı anlamına gelmemeli. Yeni site/uygulama/env/SSL formlarında route veya query değişimi, back/forward ve sayfa kapatma dirty uyarılarını dene. Eski advanced formların kalan guard işleri plan D'de açık.
+- [ ] Nginx stage/activate, ACME staging/production issue, dry-run/production renewal akışlarını test et. Yanlış DNS veya config'i başarılı gösterme; çalışan ana vhost ve diğer siteleri koru. Production doğrulama/yenileme gereksiz tekrarlanarak ACME limitleri tüketilmemeli.
+- [ ] Job dialogunda queued/running/terminal ayrımını, gecikmiş liste yanıtı, kapatıp yeniden açma, network kesintisi, 401/403/404, malformed response ve kaynak kilidi senaryolarını dene. Eski queued yanıtı completed işi geri almamalı; dialog kapanınca iş sunucuda sürmeli. Kuyruk iptali gerçek backend'in durum kontrolüne uymalı; ham payload/result secretları ekrana dökülmemeli.
+- [ ] 401/403/404/409 ve network/missing-data hallerini her koleksiyonda oluştur. Yetki kaybında cache silinmeli; sadece network hatasında tarihli stale görünüm kalmalı. Tek tablo hatası diğer veriyi silmemeli; bilinmeyen ölçüm sıfır/yanlış yeşil SSL olmamalı. Tüm bunları actual React etkileşimiyle kontrol et.
+- [ ] 1440×900, 1920×1080, 1280×800 ve 390×844 boyutlarında Dashboard/Websites/site Node/SSL/forms/jobs ekranlarını incele. Desktop sidebar, mobil focus trap/Escape/inert/backdrop, Cmd/Ctrl+K arama, skip link, modal focus restore, contrast/okunurluk, uzun tablolar ve taşmayı düzelt. MFA/enrollment ekranında sidebar yokken hesap çubuğu boşluk bırakmamalı.
+- [ ] Paket build'inde yeni workspace dosyaları, router dependency ve assets bulunduğunu doğrula; API/web sürümlerini karıştırma. Güncelleme guard'ı development modunda korunmalı. Gelişmiş enrollment, domain/certificate ve APT araçlarını regresyondan geçir. Candidate install/rollback ve auth/deep-link kabulü geçmeden canlıyı değiştirme.
 
-## T1a — P0: Authentication kodunu tam workspace ve gerçek pakette doğrula
+## T0 — P0: Canlı panel ve erişim koruması
 
-- [ ] Tam repo üzerinde Node 24.11.1+ ve npm 11+ ile bağımlılıkları kur; `npm run check` çalıştır. Yerel auth testlerini mevcut Express/deploy/rollback/ACME/job testleriyle birlikte tekrar çalıştır; GitHub Actions kullanma. Bu ortamda bağımlılık kurulumu ve tam repo build/regresyonu çalıştırılamadı.
-- [ ] Production React build'ini gerçek tarayıcıda aç. İlk Owner formu, giriş, yanlış parola, Hesabım penceresi, parola değişimi, oturum listesi ve çıkış akışlarını 1440×900, 1920×1080, 1280×800 ve 390×844 boyutlarda doğrula. Klavye/focus, modal kapanışı, loading/error, iki sekme ve süresi dolmuş oturum testlerini yap; yalnız JSX syntax kontrolünü görsel kabul sayma.
-- [ ] Paket adayı oluştur ve önce test hostunda kur/yükselt. Paket içinde `/usr/lib/yunpanel/scripts/auth.mjs` bulunduğunu ve preinst'in native Argon2/SQLite olmayan runtime'ı reddettiğini doğrula. Yeni APT sürümü yayımlamadan install/rollback'i kanıtla; mevcut release dosyasını sessizce ezme.
-- [ ] API ve web servis ortamlarına aynı tam `YUNPANEL_PUBLIC_ORIGIN=https://cryptoraichu.website` değerini, sondaki slash olmadan koy. API'de bu yeni zorunlu ayar yoksa servis başlamaz. Production `NODE_ENV`, HTTPS proxy ve loopback listenerları doğrula; hata çözmek için development moduna geçme veya IP filtresini kaldırma.
-- [ ] API'nin gerçek `YUNPANEL_SERVER_STORE`/`YUNPANEL_AUTH_DB` yolunu belirle. Mevcut unitin yazılabilir alanı `/var/lib/yunpanel/control-plane`; auth için bunun altında private dizin seç. API ve CLI aynı absolute DB yolunu ve halen `yunpanel` olan servis kullanıcısını kullanmalı. Dizin 0700, DB/WAL dosyaları 0600 ve owner doğru olmalı; global chmod/chown uygulama.
-- [ ] `docs/authentication.md` komutuyla yerel setup tokenı üret, Owner oluştur ve tokenın süresinin/tek kullanımlılığının gerçek hostta çalıştığını doğrula. CLI kurtarmayı ayrı test hesabında/ortamda dene; API restartı olmadan eski oturum iptal olmalı. İlk parola/token/recovery verisi repo dışında kalmalı.
-- [ ] SQLite'ın tutarlı yedeğini API/CLI yazıcıları durdurularak veya desteklenen online-backup yöntemiyle al; aktif WAL varken yalnız ana DB dosyasını kopyalama. Test kopyasında restore/paket rollback'i uygula. Eski snapshot geri gelince eski oturum/parola geri dönmesi riskini iptal/kurtarma prosedürüyle kapat.
-- [ ] Gerçek paketle login -> site/application okuma -> izinli düşük riskli işlem -> logout zincirini çalıştır. Agent'ın mevcut kimliğiyle heartbeat/iş sonuçları ve çalışan siteler etkilenmemeli. Yeni kullanıcı auth sürümü kabul edilmeden normal yönetimde eski bootstrap tokenına geri dönüş yolu açma.
+- [ ] `cryptoraichu.website` adresinde mevcut paket/commit'i, bütün menüleri, network/console hatalarını ve Nginx/web/API/agent unitlerini salt okunur karşılaştır. Maskeli görsel/HTTP kanıtı kaydet; repo kodundan canlı koruma veya deployment sonucunu çıkarma.
+- [ ] Oturum/yetki, IP kısıtı, endpoint yokluğu, servis eksikliği ve OS hatasını ayır. Kalan güvenlik kabulüne kadar IP/erişim korumasını kaldırma. Anonim yönetim gerçekten açıksa SSH/console erişimini koruyarak yalnız panel yüzeyine geçici IP/proxy auth uygula; hosted siteleri kısıtlama.
+- [ ] Geçişten önce `/etc/yunpanel`, `/var/lib/yunpanel`, anahtarlar, paket/unitler, Nginx/vhost, release/symlink ve ilgili veri yedeğini al. Bağımsız SSH/provider-console ve restore/rollback adımlarını doğrula; yedekler public web root dışında kalmalı.
 
-## T1b — P0: Birleştirilen MFA ve oturum arayüzünün kabulü
+## T1a — P0: Auth tam workspace ve paket kabulü
 
-- [ ] Desteklenen Node 24.11.1+ ve kurulu tam workspace ile tüm auth/MFA testlerini çalıştır: native Argon2, gerçek SQLite, OTPAuth, `mfa-crypto`, `mfa-store`, `mfa-auth-flow`, `mfa-cli`, yeni cookie/protokol/oturum testleri ve mevcut core/domain regresyonları. `docs/mfa.md` içindeki 27 test Node 22.16.0 ve kısmi kaynakla çalıştı; HTTP testlerinde store double kullanıldı. Bunları tam crypto/Express/Vite doğrulaması sayma.
-- [ ] Test paketinde `otpauth` ve yeni React modüllerinin birlikte bulunduğunu doğrula. API'yi gerçek `index.js` girişinden başlat; eski frontend ile yeni MFA backend'ini karıştırma. Tam `npm run check` ve production build geçmeden aday yayımlama.
-- [ ] Auth schema-1 verisinin yedekli kopyasında schema-2 geçişini ve yeniden başlatmayı test et. Kullanıcı, parola, oturum ve domain/application verileri korunmalı. Eski pakete rollback için uyumlu state yedeğini kanıtla; yalnız schema numarasını düşürme. WAL dosyaları ve master-key recovery kopyasını yedeğe dahil et.
-- [ ] Gerçek HTTPS tarayıcıda zorunlu Owner kurulum ekranı veya Hesabım -> doğrulayıcı ekle -> anahtarı authenticator'a elle gir -> kodu doğrula -> 10 kurtarma kodunu kaydet -> çıkış -> parola + TOTP giriş akışını tamamla. QR beklenmemeli; bu sürüm manuel anahtar girişi sunar. Parola sonrası 202 challenge panel erişimi vermemeli; challenge cookie HttpOnly/host-only/Secure kalmalı.
-- [ ] Hatalı, yeniden kullanılan ve süresi geçmiş TOTP; beş hatalı challenge denemesi; iptal; recovery ile giriş; aynı recovery kodunun ikinci kullanımının reddi; yeni kod üretiminden sonra eski kodların iptali ve mevcut/diğer oturumların değişimini gerçek store ile doğrula. Faktör kapatma sonrası bütün oturumların iptalini test et.
-- [ ] İki sekme, gecikmiş 401/200 yanıtı, MFA cookie rotasyonu sırasında polling, kayıp doğrulama yanıtı, bfcache/geri tuşu, modal Escape/focus ve recovery kodlarını onaylamadan kapatma senaryolarını test et. Yeni cookie eski isteğin 401 cevabıyla silinmemeli; eski yanıt yeni oturumu geri almamalı. Hassas değerler URL/localStorage/telemetriye düşmemeli.
-- [ ] Idle/absolute son-iki-dakika uyarısını ve açık uzatma butonunu gerçek tarayıcıda doğrula. Arka plan GET polling idle süresini uzatmamalı; geçici ağ hatası formu silmemeli; mutlak süre uzatılamamalı. 1440×900, 1920×1080, 1280×800 ve 390×844 boyutlarında yeni MFA ekranlarını incele.
-- [ ] Mevcut `YUNPANEL_SECRET_MASTER_KEY` değerini değiştirmeden MFA kurulumunu test et. Anahtar eksik/yanlış/kayıp senaryosunda açık bypass olmadığını doğrula. İzole test hesabında `reset-mfa <username> --confirm` komutunu aynı DB ve servis kullanıcısıyla çalıştır; parola korunmalı, factor/recovery/challenge/session kayıtları iptal olmalı. IP kısıtını koruyup tekrar enrollment yap; gerçek anahtar/kodları rapora yazma.
-- [ ] T1c ile mevcut HTTPS MFA zorunluluğunu doğrula; gelecekte root/terminal eklendiğinde aynı kontrolün socket/PTY yollarında da uygulandığını ayrıca test et. Mevcut IP korumasını bütün yayın kabulü bitmeden kaldırma.
+- [ ] Node 24.11.1+/npm 11+ tam repo üzerinde auth ve mevcut Express/deploy/rollback/ACME/job testlerini birlikte, `npm run check` ile çalıştır. Tarihsel odaklı test sayılarını güncel tam regresyon sonucu sayma; GitHub Actions kullanma.
+- [ ] Gerçek React production build'de ilk Owner, login/yanlış parola, Hesabım, parola değişimi, session listesi/logout, iki sekme, loading/error, modal/focus ve süre dolumunu dört hedef ekran boyutunda test et.
+- [ ] Aday `.deb` oluşturup test hostunda install/upgrade/rollback yap. Auth CLI pakette bulunmalı; preinst native Argon2/SQLite olmayan runtime'ı reddetmeli. Yeni APT sürümü kullan; mevcut release dosyasını ezme.
+- [ ] API/web için aynı exact `YUNPANEL_PUBLIC_ORIGIN=https://cryptoraichu.website` (son slash yok), production NODE_ENV, TLS proxy ve loopback listenerları doğrula. Eksik origin ile fail-closed beklenir; development veya IP filtresi kaldırma workaround'u kullanma.
+- [ ] Gerçek `YUNPANEL_SERVER_STORE`/`YUNPANEL_AUTH_DB` yolunu belirle. Halen `yunpanel` servis kullanıcısıyla `/var/lib/yunpanel/control-plane` altında private auth yolu kullan; CLI aynı absolute DB'ye erişmeli. Dizin 0700, DB/WAL 0600 ve doğru owner; genel chmod/chown yok.
+- [ ] Runbook'a göre yerel setup token üretip Owner kur. Süre/tek kullanımlılık, default/public kayıt yokluğu ve CLI parola kurtarmasını izole hesapta doğrula. API restartı olmadan eski session iptal edilmeli; parola/token/recovery verileri repo dışında kalmalı.
+- [ ] SQLite tutarlı yedeği için yazıcıları durdur veya desteklenen online-backup kullan; aktif WAL varken yalnız ana dosyayı kopyalama. Kopyada restore + paket rollback yap; geri gelen eski parola/session riskini iptal/kurtarma prosedürüyle kapat.
+- [ ] Gerçek paketle login -> enrollment -> site/application okuma -> düşük riskli işlem -> logout zincirini dene. Agent heartbeat/sonuçları ve hosted siteler etkilenmemeli; shared bootstrap tokenına yönetim geri dönüş yolu açılmamalı.
 
-## T1c — P0: Zorunlu Owner MFA politikasının gerçek ortam kabulü
+## T1b — P0: MFA ve oturum akışları
 
-- [ ] `docs/owner-mfa-policy.md` kapsamındaki yeni policy/view/HTTP testlerini desteklenen Node 24.11.1+ üzerinde çalıştır; ardından filtre olmadan tam `npm run check` uygula. Genişletilen gerçek auth-store ve gateway enrollment testlerini özellikle çalıştır. Bu turdaki 40 odaklı test Node 22 kaynak alt kümesinde test doubles ile geçti; native testleri veya tam build'i tamamlanmış sayma.
-- [ ] Mevcut secret master key'i ve recovery kopyasını koruyarak API ortamında hazırla. API ve web assetlerini aynı aday paketten dağıt; ilk login öncesi bağımsız SSH/console erişimini doğrula. Key eksikken unenrolled Owner'ın giriş yapıp kurulum gereksinimini görebildiğini ama yönetim yapamadığını test et; çözüm olarak çalışan key'i değiştirme veya production'ı development moduna alma.
-- [ ] Yeni ve mevcut unenrolled Owner hesabıyla HTTPS parola login -> zorunlu kurulum -> gerçek TOTP doğrulama -> recovery kodlarını kaydet/onayla -> panele geç zincirini çalıştır. Öncesinde site/env/job/terminal API'leri `403 mfa_enrollment_required`, sonrasında mevcut yetkili yönetim akışı dönmeli. `/api/auth/security` yalnız kendi hesabının durumunu göstermeli; anonim erişim 401 olmalı.
-- [ ] Yerel MFA reset ve panelden factor kaldırma sonrasında eski oturumların iptalini, sonraki parola login'in tekrar kısıtlı kalmasını ve ancak yeniden enrollment ile HTTPS yönetimin açılmasını doğrula. Geçerli parola + kullanılmamış recovery kodu ile kayıtlı hesabın kurtarma girişini, eksik encryption key senaryosuyla birlikte test et.
-- [ ] Gerçek tarayıcıda session rotasyonu sonrası kurulum ekranının recovery kodları onaylanmadan kapanmadığını, açık formun polling ile kaybolmadığını ve geçersiz/eksik security metadata'sında yönetim bileşenlerinin render edilmediğini doğrula. API/asset sürüm uyuşmazlığı, refresh, geri/ileri, iki sekme, klavye/focus ve 1440×900, 1920×1080, 1280×800, 390×844 boyutlarını kapsa.
-- [ ] Geliştirme istisnasının yalnız explicit loopback HTTP origin için olduğunu doğrula; `development: true` ile HTTPS origin kullanılması yönetimi açmamalı. Legacy agent kendi credential sınırında kalmalı. Root/backend ve terminal henüz uygulanmadığı için bu kabulü onların yayın izni olarak kullanma.
+- [ ] Native Argon2, gerçek SQLite/OTPAuth ile tüm auth/MFA store/HTTP/CLI, session/cookie ve core/domain testlerini çalıştır. Önceki Node22/mock veya compatibility testlerini native tam kabul sayma. `otpauth` ve güncel frontend aynı pakette olmalı; API gerçek index.js girişinden çalışmalı.
+- [ ] Auth schema v1 -> v2 geçişini yedekli kopyada test et; kullanıcı/parola/session/domain/application ilişkilerini koru. Eski pakete dönüş için eşleşen DB/master-key yedeğini prova et; sadece PRAGMA sürüm numarasını düşürme.
+- [ ] Gerçek cihaz ve HTTPS ile Owner/MFA kurulum -> manuel anahtar -> doğrulama -> 10 recovery kodunu kaydet -> logout -> parola+TOTP giriş zincirini tamamla. QR bekleme; 202 challenge management session sayılmamalı. Cookie host-only/Secure/HttpOnly kalmalı.
+- [ ] Yanlış, tekrar kullanılan ve expired TOTP; beş yanlış challenge denemesi; iptal; yeni password challenge'ın limiti sıfırlamaması; recovery kullanımı ve ikinci kez reddi; kod yenilemede eskilerin iptali; factor kaldırma/session rotasyonu testlerini yap. Saat senkronizasyonunu doğrula, tolerans penceresini büyüterek hatayı örtme.
+- [ ] İki sekme, gecikmiş401/200, MFA rotasyonunda polling, kayıp mutation response, bfcache/back, modal Escape/focus ve kodları onaylamadan kapatmayı test et. Eski yanıt yeni cookie/session'ı bozmamalı; kayıp yanıtı körlemesine tekrar gönderme, gerçek durumu yeniden doğrula. URL/localStorage/telemetry'de secret olmamalı.
+- [ ] Idle/absolute son-iki-dakika uyarısı ve uzatma butonunu test et; background GET süre uzatmamalı, mutlak süre uzatılamamalı, network hatası formu silmemeli. Yeni MFA/Owner ekranlarını dört boyutta incele.
+- [ ] Mevcut master key'i değiştirmeden enrollment; eksik/yanlış/kayıp key ile fail-closed TOTP ve parola+geçerli recovery alternatifi; aynı DB/servis kullanıcısıyla `reset-mfa <username> --confirm` testlerini yap. Parola korunmalı, factor/recovery/challenge/session iptal olmalı. Ağ kısıtı altında yeniden enrollment yap; gerçek anahtarları rapora koyma.
 
-## T1 — P0: Kullanıcı girişi ve dış erişim kabul testi — plan A
+## T1c — P0: Zorunlu Owner MFA politikası
 
-- [ ] Gizli sekmede, izinli IP'den de dahil olmak üzere, login olmadan mevcut site/env/job/API verisi alınamadığını doğrula. Log/file/env-export modülleri eklendiğinde aynı testi genişlet. Korunan API 401, yetkisiz kullanıcı 403 vermeli; sayfa yönlendirmesi veri endpointine koruma yerine geçmemeli.
-- [ ] `/api/panel/*`, doğrudan API yolları, `/api/dev/*`, eski bootstrap/enrollment/agent yolları ve alternatif dinleme portlarında auth bypass olmadığını kontrol et. Normal yönetim ortak bootstrap tokenıyla devam etmemeli. Agent kaldırılana kadar yalnız kendi kimlik doğrulamasıyla kullanılan transport rotalarını browser yönetiminden ayrı doğrula.
-- [ ] Gerçek HTTPS reverse proxy arkasında cookie `Secure`/`HttpOnly`/host-only/SameSite davranışını, trusted-proxy/IP header politikasını, CSRF ve cross-origin reddini doğrula. Gateway arkasındaki ortak peer rate-limit kovasını gerçek kullanımda ölç.
-- [ ] Login rate limit, hatalı parola, idle/absolute timeout, oturum yenileme, logout ve parola değişimi senaryolarını dene. Arka plan polling idle süresini uzatmamalı. Kullanıcı yönetimi eklendiğinde devre dışı bırakma, Read Only mutasyon/terminal reddi ve son Owner korumasını da doğrula.
-- [ ] T1b MFA kabulüyle birlikte kurtarma/rol değişiminden sonra açık oturumları ve terminal eklendiğinde canlı bağlantı yetkilerini yeniden doğrula.
+- [ ] `owner-mfa-policy`/`owner-mfa-http`/`owner-access` testleri ile gerçek store/gateway enrollment testlerini tam Node24 workspace'te yeniden çalıştır. Önceki 40 testlik controlled-store run'u native/full-build kabulü sayma.
+- [ ] Existing ve yeni unenrolled Owner ile HTTPS password login -> self-service -> MFA -> recovery onayı -> management zincirini test et. Önce site/env/job/terminal yolları `403 mfa_enrollment_required`, sonra mevcut yönetim erişimi vermeli. `/api/auth/security` yalnız kendi durumu; anonim401.
+- [ ] API key hazır değilken setup prerequisite görünmeli ama management açılmamalı. Local factor reset/panelden disable eski sessionları iptal etmeli; sonraki password login ancak yeniden enrollment ile açılmalı. Çalışan master key'i değiştirme, production'ı development'a alma.
+- [ ] Rotasyonda recovery ekranı onay öncesi kaybolmamalı; eksik/malformed security metadata veya API/asset uyuşmazlığında management render edilmemeli. Polling, refresh/back/iki sekme, klavye ve dört boyutu test et.
+- [ ] Enrollment istisnası yalnız explicit loopback HTTP geliştime için olmalı; development=true + HTTPS policy'yi aşmamalı. Legacy agent kendi credential sınırında kalmalı. Bu kabul henüz yazılmayan root/socket/PTY'ye otomatik yayın izni değildir.
 
-## T2 — P1: Agentsiz backend ve paket geçişi — plan B/J
+## T1 — P0: Dış erişim güvenlik kabulü
 
-- [ ] Yeni agentsiz `.deb` paketini gerçek Ubuntu 24.04 üzerinde önce test ortamına kur/yükselt. PTY native dependency'leri, doğru Node ABI/runtime, dosya ownership'leri ve yeni backend systemd unitini doğrula.
-- [ ] Bekleyen işleri güvenle durult; local server kaydını ve state migration'ı yedekle karşılaştır. Server/application/domain ID, auth SQLite kullanıcı/oturum verisi, env ciphertext/master key, current release, vhost ve sertifika ilişkileri korunmalı. Lokal olmayan eski server kayıtları bu hosta sessizce taşınmamalı.
-- [ ] Yeni panel backend'inin gerekli host işlemlerini root olarak çalıştırdığını doğrula; API/socket yalnızca planlanan interface'te dinlesin. Ayrı agent/enrollment veya işlem başına sudoers/polkit izni gerekmemeli.
-- [ ] Agent durdurulmuşken envanter, Nginx test/reload, ACME, Node deploy/restart/rollback, systemd ve paket işlemlerini dene. Başarıdan sonra eski agent servisini disable et; eski network listener, bootstrap/agent credentials ve unit referanslarını kontrollü temizle.
-- [ ] Root backend'e rağmen uygulama süreçleri, install/build scriptleri ve site terminalinin dedicated site kullanıcısıyla çalıştığını doğrula. Site kullanıcısı panel master key, auth database, başka site env'i ve host yönetim dosyalarını okuyamamalı.
-- [ ] Yeni kurulumda API/PTY/config izinleri gerçek operasyonları engelliyorsa hatalı unit/sandbox/ownership ayarını düzelt; global chmod/chown veya tüm korumaları kapatma kullanma. Servis kullanıcısı değişiminde auth dosyaları ve CLI kullanıcısını kontrollü taşı.
-- [ ] Yükseltme sırasında/sonrasında job drain, servis restartı, yarım kalan işin reconciliation'ı ve duplicate execution korumasını doğrula. Eski paket/state/unit'e rollback'i ayrı test alanında uygula.
-- [ ] Reboot sonrası backend, Nginx ve managed uygulamaların açıldığını; panel durdurulunca hosted trafiğin devam ettiğini doğrula. Bu kontroller agentsiz mimari için yeniden yapılmalı.
+- [ ] Gizli sekmede ve izinli IP'den login olmadan site/env/job/API verisi alınamadığını doğrula; yeni log/file/export modüllerine aynı testi genişlet. 401/403 ayrımı backend'de olmalı, frontend yönlendirmesi yeterli değil.
+- [ ] `/api/panel/*`, raw API, dev, eski bootstrap/enrollment/agent ve alternatif portlarda bypass kontrolü yap. Normal yönetim shared token kabul etmemeli. Agent kaldırılana kadar transport kendi kimliğiyle ve browser yönetiminden ayrı doğrulanmalı.
+- [ ] Gerçek HTTPS proxy'de cookie, SameSite/host-only, CSRF/Origin ve trusted-proxy/IP header spoof reddini doğrula. Proxy arkasındaki ortak peer rate-limit kovasının gerçek etkisini ölç.
+- [ ] Rate limit, yanlış parola, idle/absolute, refresh/logout, password/role/user-disable senaryolarını test et. Son Owner ve Read Only mutasyon/terminal reddi user-admin eklendiğinde tekrar doğrulanmalı. Gelecekte canlı bağlantı yetkisi de iptal edilmeli.
 
-## T3a — P1: Parent, domain ağacı ve form değişikliğinin yayın kabulü
+## T2 — P1: Agentsiz backend ve paket geçişi
 
-- [ ] `docs/domain-hierarchy.md` içindeki dört test dosyasını desteklenen Node 24.11.1+ ortamında yeniden çalıştır; ardından tam `npm run check` uygula. Domain geliştirme turundaki 29 odaklı test Node 22.16.0 altında kısmi workspace ile çalıştı; tüm uygulama/Express/Vite uyumluluğu kanıtlanmadı.
-- [ ] Gerçek `index.js` -> `createAuthenticatedApi` -> `app.js`/`core-app.js` bileşimi üzerinden Owner ile ana domain/subdomain POST ve listeleme akışını test et. Eksik parent 404, geçersiz parent ilişkisi 400, farklı sunucu 409 vermeli; anonim erişim 401, yetkisiz rol 403 ve CSRF reddi korunmalı. Doğrudan korumasız test listenerını production kabulü sayma. Mevcut SSL renewal dry-run ve deploy/rollback testlerini de çalıştır.
-- [ ] Paket içinde yeni `core-app.js`, `domain-http.js` ve güncel frontend assetlerinin birlikte bulunduğunu doğrula. Eski API ile yeni frontend'i karıştırma; yeni paketi kabul etmeden canlıya yükseltme. Mevcut auth/IP korumasını değiştirme.
-- [ ] Gerçek React tarayıcısında domain satırından Add subdomain -> otomatik parent -> prefix -> farklı hedef/HTTPS -> oluştur akışını tamamla. Çoklu sunucu fixture'ında çocuğun ilk sunucuya değil parent sunucusuna yazıldığını doğrula. Hatalı istek sonrası formun kaldığını, focus ve yüklenme durumlarını kontrol et.
-- [ ] Ağaç araması, alias eşleşmesi, üst kayıtların görünmesi, aç/kapat ve arama temizlenince önceki collapse durumunu test et. Uzun adları ve 1440×900, 1920×1080, 1280×800, 390×844 görünümlerini dene; sözdizimi kontrolünü görsel/erişilebilirlik kabulü sayma.
-- [ ] Yedeklenmiş version-1 registry kopyasıyla eski kayıtlara parent tahmin edilmediğini ve salt okumada dosyanın değişmediğini doğrula. Yeni explicit parent, ID, alias, target ve certificate bağları servis yeniden başladığında korunmalı. Paket rollback'ini kopyada test et; eski kodun yeni parent kontrollerini uygulamadığını hesaba kat.
-- [ ] Test domaini üzerinde child stage/activate ve bağımsız TLS hedefini doğrula; mevcut ana domain vhost/sertifikası ve diğer sitelerin trafiği değişmemeli. Kayıt oluşturulmasının DNS veya mailbox yaratmadığını doğrula. Tam Website migration, IDN ve site sekmelerinin hazır olduğunu varsayma; bunlar plan C/D kapsamında kalır.
+- [ ] Yeni agentsiz `.deb`yi Ubuntu24.04 test hostunda install/upgrade et; PTY native bağımlılıkları, Node ABI, ownership ve systemd unitini doğrula.
+- [ ] Job drain ve state migration'ı yedekle karşılaştır. Server/application/domain ID, auth SQLite, ciphertext/master key, current release/vhost/sertifika korunmalı. Lokal olmayan server kayıtları bu hosta sessizce taşınmamalı.
+- [ ] Yeni backend root olarak gerekli host işlemlerini yapmalı ve yalnız planlanan interface'te dinlemeli. Ayrı agent/enrollment veya işlem başına sudoers/polkit izni gerekmemeli.
+- [ ] Agent durmuşken envanter, Nginx test/reload, ACME, deploy/restart/rollback, systemd ve paket akışlarını doğrula; ardından eski agent disable, listener/credential/unit temizliğini kontrollü yap.
+- [ ] Build/npm/Git hook, site process/cron/terminal dedicated user ile çalışmalı; başka site env'i, panel key/auth DB/host dosyaları okunamamalı. Root geçişinde auth ve CLI ownership'ini açık taşı; global chmod/chown veya tüm sandbox'ı kaldırma kullanma.
+- [ ] Upgrade sırasında job drain, restart reconciliation, duplicate execution ve eski paket/state/unit rollback'ini test et. Reboot sonrası bütün servisler açılmalı; panel dururken hosted trafik sürmeli.
 
-## T3 — P1: Domain/subdomain migration ve enterprise ekranlar — plan C/D
+## T3a — P1: Domain parent ve form kabulü
 
-- [ ] Canlı düz domain/application kayıtlarını yeni website + hostname hiyerarşisine test kopyası üzerinde migrate et. Kayıt sayısı, ID, alias, target, document root, env, release ve certificate bağlantılarını karşılaştır; migration tekrar çalışınca veri çoğalmamalı.
-- [ ] Gerçek veya test DNS'inde bir ana domain, iki bağımsız subdomain ve bir alias hazırla. Ağaçta doğru parent/target görünmeli; subdomainlerin ayrı uygulama/env/SSL/logları, aliasın ortak hedefi doğrulanmalı.
-- [ ] `www`/non-`www`, IDN/punycode, trailing-dot/uppercase normalizasyonu ve çok parçalı suffix kullanan adları test et. Başka bir hostname aynı kayıt/alias olarak tekrar yaratılamamalı; parent cycle kabul edilmemeli.
-- [ ] Parent silme/taşıma önizlemesinin çocuk site, mailbox ve sertifika etkisini gösterdiğini doğrula. Test kaynaklarında bile örtülü cascade ile veri silinmemeli.
-- [ ] Gerçek tarayıcıda 1440×900, 1920×1080, 1280×800 ve 390×844 görünümlerini kontrol et. Uzun domain, çok satırlı tablo, yatay taşma, açılır menü ve sidebar davranışını doğrula.
-- [ ] Ana domain -> subdomain -> Node/SSL/Mail sekmeleri, doğrudan URL, reload, geri/ileri, site değiştirici ve logout akışlarını tamamla. Loading/empty/error/missing-service hallerini ve klavye/focus akışını dene.
-- [ ] Form yazarken otomatik yenileme ve API hatası oluştur; değerler/sekme kaybolmamalı. Bir kaynak hatasında diğer veri silinmemeli; 404 genel “yetki yok” mesajı olmamalı.
+- [ ] Domain-hierarchy runbook'undaki dört test dosyasını desteklenen Node24 ve tam repo testleriyle çalıştır. Eski 29 odaklı test kısmi workspace'ti; güncel Express/Vite kabulü yerine geçmez.
+- [ ] Gerçek index -> auth boundary -> app/core/domain route üzerinden Owner parent-aware POST/list testini yap. Missing parent404, invalid relation400, cross-server409, anonymous401, role403 ve CSRF reddi korunmalı. SSL renewal dry-run/deploy/rollback regresyonu çalışmalı.
+- [ ] Paket API/core/domain modülleri ve yeni assets birlikte olmalı; farklı sürümleri karıştırma. Subdomain quick-add ve yeni routed formda parent/doğru server/prefix/hedef/HTTPS, başarısız submit sonrası değer/focus/busy durumlarını doğrula.
+- [ ] Tree araması, alias eşleşmesi/ancestor context, collapse ve search temizlenince görünüm, uzun isim/çok satır/dört ekran boyutunu test et.
+- [ ] Version1 domain kopyasında salt okumada rewrite/parent tahmini olmadığını; yeni explicit parent/ID/alias/target/certificate'in reboot sonrası korunduğunu test et. Eski paketin yeni parent validation'ını uygulamadığını hesaba katarak rollback prova et.
+- [ ] Child stage/activate ve bağımsız TLS hedefi ana vhost/sertifikayı veya diğer siteleri bozmamalı. DNS/mail otomatik yaratılmış sayılmamalı. IDN/reparent/kalıcı Website migration'ı hazır varsayma.
 
-## T4 — P2: Entegre terminal ve dosya işlemleri — plan F
+## T3 — P1: Website migration ve site ilişkileri
 
-- [ ] Gerçek Ubuntu ve TLS reverse proxy arkasında terminal WebSocket upgrade, resize, Unicode, Ctrl+C/Ctrl+D ve interaktif/fullscreen programları test et. Sunucu terminali root, site terminali doğru kullanıcı ve dizin göstermeli.
-- [ ] Oturumsuz, Read Only, başka kullanıcının terminal kimliğiyle ve farklı Origin'den erişimleri dene; reddedilmeli. Terminal açma yetkisi yeniden oynatılarak başka bağlantıda kullanılamamalı.
-- [ ] Logout, parola/rol değişimi, kullanıcı iptali, idle timeout ve tarayıcı kapanmasında yeni komut gönderilemediğini, PTY/process-group cleanup ve oturum limitlerinin çalıştığını doğrula.
-- [ ] Yüksek çıktı ve kopma/yeniden bağlanma senaryolarında memory/backpressure ve sahiplik kontrolünü doğrula. Ham terminal içeriği/keystroke sıradan job/audit/server loglarına düşmemeli.
-- [ ] Site dosya yöneticisinde gerçek filesystem üzerinde `../`, symlink kaçışı, upload ownership, büyük dosya sınırı, rename/edit/delete ve doğru çalışma dizinini test et. Owner sistem dosyası işlemi açık Sunucu bağlamında olmalı.
+- [ ] Düz domain/application verisini yeni Website modeline yedek kopyada migrate et; count/ID/alias/hedef/root/env/release/certificate'i karşılaştır, tekrar koşuda duplicate olmamalı.
+- [ ] Bir ana domain, iki bağımsız subdomain ve alias ile kalıcı parent/target ve ayrı app/env/SSL/log ilişkilerini doğrula; yeni UI'nin port adaylarını kalıcı ilişkilerle değiştir.
+- [ ] www/non-www, IDN/punycode, trailing-dot/uppercase, çok parçalı suffix, duplicate/cycle ve dependency-aware delete/reparent preview testlerini yap. Örtülü cascade olmamalı; mailbox/sertifika etkisi görünmeli.
+- [ ] Site değiştirme, Node/SSL/Mail, direct URL/reload/history/logout ve loading/empty/error/missing-service/klavye/focus'u dört boyutta test et. Form sırasında refresh/API hatası değerleri veya diğer kaynağın verisini silmemeli.
 
-## T5 — P2: Node/static/Git, secret ve log doğrulamaları — plan E/J
+## T4 — P2: Terminal ve dosya işlemleri
 
-- [ ] Custom startup file ve npm start script kullanan uygulamaları site ekranından deploy/restart/rollback et; Node sürümü, port, çalışma dizini ve başlangıç tercihi korunmalı. Runtime kurulumu panelin kendi Node sürümünü bozmamalı.
-- [ ] Sağlıksız yeni release ve sağlıksız manuel rollback hedefi senaryolarında önceki çalışan sürüme dönüşü gerçek host üzerinde doğrula. Hatalı build, port çakışması ve stale `current` durumu doğru hata/job sonucunu vermeli.
-- [ ] Private Git repository/deploy key ve gerekiyorsa webhook secretlarını repo dışında tanımla; fetch/build akışını site kullanıcısıyla dene. İmzalı webhook, tekrar gönderim ve yanlış branch davranışlarını doğrula.
-- [ ] Production master key ve recovery kopyasını güvenli secret store'da hazırla; key yokken write fail-closed olmalı. Rotation, backup ve ciphertext recovery işlemlerini test kopyasında doğrula.
-- [ ] Agentsiz geçiş sonrası secret'ın API listeleri, job payload/result, unit texti, process argümanları, log/audit ve frontend'de sızmadığını yeniden doğrula. Site izolasyonunu gerçek iki-site fixture ile dene; eski iki-agent credential testi yerine yeni yerel sınırları doğrula.
-- [ ] Node/systemd/Nginx/deploy loglarında örnek hassas değerlerle redaction, arama, canlı akış, akış kesilmesi ve sınırlı indirmeyi dene. Test secretlarını gerçek credential yerine kullan.
-- [ ] İlk gerçek Plesk static/Node migration'ında dosya/env/config yedeği al; hosts override -> Git/build -> Nginx/SSL -> DNS cutover -> health/route kontrolü -> rollback sırasını test et. Daha önceki fixture testi gerçek Plesk migration'ın yerine geçmez.
+- [ ] Ubuntu/TLS proxy altında WebSocket upgrade, resize, Unicode, Ctrl+C/D ve fullscreen programları test et. Sunucu=root, site=doğru kullanıcı/dizin olmalı.
+- [ ] Anonymous, Read Only, başka kullanıcı/session/terminal ID, yanlış Origin ve yetki replay reddini doğrula. Logout/password/role/MFA/user-disable/idle/browser close sonrası yeni komut engellenmeli; PTY/process-group/session limitleri çalışmalı.
+- [ ] Yüksek output, kopma/reconnect, backpressure/memory ve sahiplik kontrolünü test et. Raw keystroke/çıktı normal job/audit loguna düşmemeli.
+- [ ] Dosya yöneticisinde gerçek fs `../`, symlink kaçışı, upload ownership/boyut, mkdir/rename/edit/delete/download kontrollerini test et. Owner host işleri açık Sunucu bağlamında olmalı.
 
-## T6 — P2: Nginx, SSL ve DNS — plan G
+## T5 — P2: Node/static/Git, secret ve log
 
-- [ ] Gerçek domainlerde `www`/non-`www`, canonical/alias ve HTTP->HTTPS yönlendirmelerini, her subdomainin ayrı hedefini doğrula. Subdomain yaratmak tek başına DNS kaydı yayınlanmış sayılmamalı.
-- [ ] Büyük upload/proxy timeout gerektiren Node uygulamasını test et; WebSocket ve SPA/cache/header davranışlarını yeni site ayarları ve agentsiz yürütücüyle regresyondan geçir.
-- [ ] Gerçek sertifika yenilenmesinden sonra Nginx test/reload ve yeni sertifikanın sunulduğunu doğrula. Gereksiz production issuance tekrarı yapma; staging/dry-run ile test edilebilenleri orada çalıştır.
-- [ ] Yanlış DNS, expired/invalid certificate ve hatalı Nginx değişikliğinde doğru hata, önceki config'e dönüş ve diğer sitelerin sağlığını doğrula.
-- [ ] Wildcard/DNS-01 için kullanılacak gerçek DNS providerını ve credentiallarını repo dışında hazırla. Apex/wildcard kapsamı, key/cert eşleşmesi, custom certificate ve alias kapsamını test et.
-- [ ] DNS provider envanteri, A/AAAA/CNAME, MX/SPF/DKIM/DMARC, TTL ve DNSSEC etkisini gerçek taşınacak domainler için doğrula. PTR/rDNS değişikliklerini hosting/IP sağlayıcısında yap; panel bunu yapmadan “tamamlandı” dememeli.
+- [ ] Custom startup file/npm script kullanan uygulamaları site içinden deploy/restart/rollback et; Node/port/cwd/startup korunmalı, runtime kurulumu panel Node'unu bozmamalı.
+- [ ] Unhealthy yeni release ve manuel rollback hedefi; build hatası, port çakışması, stale current için güvenli hata/önceki sürüme dönüşü gerçek hostta doğrula.
+- [ ] Private Git/deploy key/webhook secretlarını repo dışında tanımla; site user fetch/build ve imza/branch/replay/duplicate kontrollerini test et.
+- [ ] Master key eksikliği fail-closed, rotation, yedek ve ciphertext recovery'yi test kopyasında doğrula. Yeni yerel yürütücüde API/job/unit/argv/log/audit/frontend sızıntısı olmamalı; iki gerçek site fixture'ıyla izolasyon dene.
+- [ ] Node/systemd/Nginx/deploy loglarında örnek hassas değerlerle redaction, arama/liveflow/disconnect/boundeddownload testini yap. Gerçek credential'ı testdeğeri kullanma.
+- [ ] İlk gerçek Plesk static/Node taşımasında backup -> hosts override -> Git/build -> Nginx/SSL -> DNS cutover -> health/route -> rollback zincirini prova et. Fixture testi gerçek migration yerine geçmez.
 
-## T7 — P2: Mail ve Roundcube — plan H
+## T6 — P2: Nginx, SSL ve DNS
 
-- [ ] Gerçek Plesk mail stack'ini, mailbox/kota, alias/forwarding/catch-all, MX/SPF/DKIM selector/DMARC ve Roundcube özelleştirmelerini export et. Mevcut parola hash uyumluluğunu araştır; uyumsuzsa güvenli reset/taşıma stratejisi belirle.
-- [ ] Ayrı test domaininde Postfix, Dovecot IMAP/LMTP, Rspamd ve Roundcube kurulumunu/yapılandırmasını doğrula. SMTP/IMAP TLS, servis restartı, relay engeli ve gerekli port/provider kısıtlarını test et.
-- [ ] Domain ve açıkça seçilmiş subdomain mail alanı oluştur; mailbox aç/kapat, parola değişimi, kota, alias ve forwarding işlemlerini site ekranından yap. Ana domain mailbox'ları otomatik subdomain hesabına dönüşmemeli.
-- [ ] MX, SPF, DKIM, DMARC ve PTR/rDNS'i gerçek providerda yayımla/doğrula. İmzaları ve header sonuçlarını incele; Gmail ve Outlook ile gönderme/alma testi yap. SMTP kabulünü inbox teslim garantisi sayma.
-- [ ] Roundcube login/send/receive, mail queue, Rspamd spam davranışı, loglar ve servis health ekranını doğrula.
-- [ ] Mail yedeğini ayrı mailbox/domain'e geri yükle; içerik/kota/metadata bütünlüğünü doğrula. Silme ve başarısız restore için geri dönüşü kanıtla; production MX değişikliğini bundan önce yapma.
+- [ ] Gerçek www/non-www/canonical/alias ve HTTP->HTTPS yönlendirmeleri, bağımsız subdomain hedeflerini doğrula. Hostname kaydı DNS yayını sayılmamalı.
+- [ ] Büyük upload/proxy timeout, WebSocket, SPA/cache/header ayarlarını ve agentsiz yürütücüyü gerçek uygulamada regresyondan geçir.
+- [ ] Renewal sonrası Nginx test/reload ve yeni sertifikanın sunulduğunu doğrula; staging/dry-run yeterliyken production issuance tekrarları yapma.
+- [ ] Yanlış DNS, expired/invalid certificate, hatalı Nginx değişiminde doğru hata/önceki config ve diğer site sağlığını doğrula.
+- [ ] DNS-01/wildcard için gerçek provider/credentialları repo dışında hazırla; apex/wildcard/alias kapsamı, key/cert eşleşmesi ve custom certificate'i test et.
+- [ ] Taşınacak domainlerde A/AAAA/CNAME, MX/SPF/DKIM/DMARC, TTL ve DNSSEC etkisini doğrula. PTR/rDNS sağlayıcıda uygulanmadan tamamlandı gösterilmemeli.
 
-## T8 — P3: Docker/Compose ve veritabanları — plan I
+## T7 — P2: Mail ve Roundcube
 
-- [ ] Gerçek Docker Engine/Compose ve private registry credential yöntemini doğrula. Düşük riskli projede build/pull, start/stop/restart, health, Nginx hedefi ve reboot policy testlerini yap.
-- [ ] Named volume/bind mount envanterini, log akışını ve failed deploy sonrası önceki servis durumunu doğrula. Container değişirken persistent veri korunmalı; DB container yedeği için uygulama-tutarlı dump alınmalı.
-- [ ] MySQL/MariaDB provisioning erişimini backend'in korumalı config'inde hazırla. Root host yönetimi uygulama database kullanıcılarına yayılmamalı; gerekiyorsa uzak DB bind/firewall erişimini ayrıca sınırla.
-- [ ] Panelden database/user create/delete, grant/revoke, password rotation, size ve dump/restore testlerini yap. Ayrı test DB'sinde bütünlük, büyük veri disk/süre kullanımı ve başarısız restore geri dönüşünü doğrula.
+- [ ] Plesk mail stack, mailbox/kota, alias/forwarding/catch-all, MX/SPF/DKIM selector/DMARC, Roundcube özelleştirmeleri ve password-hash uyumluluğunu envanterle. Uyumsuz hash için güvenli reset/taşıma belirle.
+- [ ] Ayrı test domaininde Postfix, Dovecot IMAP/LMTP, Rspamd, Roundcube install/config; SMTP/IMAP TLS, restart, relay reddi ve provider port sınırlarını test et.
+- [ ] Site içinde main/explicit subdomain mail alanı, mailbox enable/create/delete/password/quota/alias/forwarding'i dene. Ana mailboxlar otomatik subdomain hesabına dönüşmemeli.
+- [ ] MX/SPF/DKIM/DMARC/PTR yayımla/doğrula; imza/header ve Gmail/Outlook ile send/receive yap. SMTP kabulünü inbox garantisi sayma.
+- [ ] Roundcube login/send/receive, mail queue, spam davranışı, log ve servicehealth'i doğrula. Mail yedeğini ayrı mailbox'a restore et; içerik/kota/metadata ve başarısız restore/silme rollback'ini kanıtla. Bundan önce production MX taşıma.
 
-## T9 — P3: Yedek, cron, ağ ve production dayanıklılığı — plan I/J
+## T8 — P3: Docker ve veritabanları
 
-- [ ] Production backup hedefi ve credentiallarını repo dışında hazırla. Local/S3-compatible veya seçilmiş Restic/remote hedefte application files, env/config metadata, DB dump, Docker volume ve mail restore denemeleri yap.
-- [ ] İzole bir test uygulamasını yalnızca backup'tan yeniden oluştur; checksum/integrity, encryption recovery ve retention doğruluğunu kanıtla. Disk-full, backup target outage ve yarım kalan restore için güvenli hata/geri dönüşü test et.
-- [ ] Cron'u gerçek site kullanıcısı/dizin/env/zaman dilimiyle çalıştır; son çalışma ve output/error kayıtlarını doğrula. Owner sistem cron'u ayrı Sunucu bağlamında görünmeli.
-- [ ] SSH erişimini koruyarak kalıcı firewall politikasını uygula. Panelin private/VPN erişimi seçilecekse dene; public API/terminal yalnızca planlanan TLS girişinden ulaşılmalı. Mail/DB portlarını ihtiyaca göre aç ve reboot sonrası kuralları doğrula; kaldırılan agent için public port bırakma.
-- [ ] Eşzamanlı deploy/restore, Nginx config mutation, self-update, kaynak tükenmesi ve süreç kesilmesi senaryolarını test hostunda uygula. Job/result/audit tutarlılığını, hassas veri masking'ini ve hosted trafiğin etkisini kaydet.
+- [ ] Gerçek Engine/Compose/private registry credential yöntemini doğrula; düşük riskli projede build/pull/start/stop/restart, health, Nginx hedefi ve reboot policy testlerini yap.
+- [ ] Named volume/bind mount, log ve failed deploy sonrası önceki durumu doğrula; persistent veri kaybolmamalı, DB container backup'ı uygulama-tutarlı dump içermeli.
+- [ ] MySQL/MariaDB provisioning'i korumalı backend config'inde hazırla; uygulama DB user'ına host/root yetkisi verme. Gereken remote bind/firewall ayrıca sınırlandırılmalı.
+- [ ] DB/user create/delete, grant/revoke, password rotation, size/dump/restore testini ayrı DB'de yap. Integrity, büyük veri disk/süre ve başarısız restore rollback'i doğrula.
 
-## T10 — P3: Plesk envanteri ve gerçek migration — plan E/I
+## T9 — P3: Backup, cron, ağ ve dayanıklılık
 
-- [ ] Mevcut Plesk sürümü/OS, Nginx/Apache, Passenger, Node sürümleri, Docker/Compose, MySQL/MariaDB, ACME ve mail servis envanterini çıkar. Apache/`.htaccess` gerektiren siteleri ayır.
-- [ ] Domain/document root, uygulama tipi, Git/branch, startup, Node version, env isimleri, DB, cron, SSL ve mail ilişkilerini export et. Secret değerleri güvenli taşı; envanter raporuna yazma.
-- [ ] Örnek Passenger/static/Docker uygulamalarının gerçek vhost/include, interpreter, log, ownership, cache/SPA, volumes/network ve restart yapılandırmalarını maskeli örneklerle incele. Kullanılan özel Nginx directive'lerini ayır.
-- [ ] Passenger'da kalması gereken uygulamayı Plesk dışı adapter ile test et: interpreter/startup, logs, restart, reboot ve rollback davranışı doğrulansın.
-- [ ] Restore edilebilir Plesk yedeği sonrası migration'ı kaynak bazlı uygula: düşük riskli static -> stateless Node -> DB/WebSocket Node -> Passenger -> Docker/stateful workload -> kritik olmayan mail -> kritik hizmetler.
-- [ ] Her taşımada hosts/pre-cutover testi, DNS/MX değişikliği, HTTP/HTTPS/önemli route ve log kontrolü, geri dönüş yöntemi ve gözlem süresi kaydet. Birkaç gerçek workload stabil olmadan Plesk'i geri dönüş seçeneği olarak kaldırma.
+- [ ] Gerçek backup hedefi/credential'ı repo dışında hazırla. Local/S3-compatible veya seçili Restic/remote hedefte appfiles/env/config/DB/volume/mail restore testlerini yap.
+- [ ] İzole uygulamayı yalnız backup'tan yeniden kur; checksum/integrity, encryption recovery, retention ve diskfull/targetoutage/yarım restore güvenli hata/rollback'ini doğrula.
+- [ ] Cron'u gerçek site user/cwd/env/timezone ile çalıştır; last-run/output/error görünsün. Owner sistem cron'u ayrı bağlamda kalmalı.
+- [ ] SSH erişimini koruyarak kalıcı firewall uygula; private/VPN seçildiyse dene. Public API/terminal planlanan TLS girişinden erişilmeli; mail/DB portları ihtiyaca göre, reboot sonrası kurallar doğrulanmış olmalı. Kaldırılmış agent portu açık kalmamalı.
+- [ ] Concurrent deploy/restore, Nginx mutation, self-update, kaynak tükenmesi ve process interruption testlerini yap. Job/result/audit tutarlılığı, redaction ve hosted trafik etkisini kaydet.
+
+## T10 — P3: Gerçek Plesk migration
+
+- [ ] Plesk/OS, Nginx/Apache, Passenger/Node, Docker/Compose, DB/ACME/mail envanterini çıkar; Apache/.htaccess bağımlılıklarını ayır.
+- [ ] Domain/root/runtime/Git/branch/startup/version/env-name/DB/cron/SSL/mail bağlarını export et. Secret değerini rapora değil korumalı taşıma kanalına koy.
+- [ ] Gerçek Passenger/static/Docker vhost/include/interpreter/log/ownership/cache/SPA/volume/network/restart ve özel directive'leri maskeli örneklerle incele. Plesk dışı Passenger adapter'ında interpreter/startup/log/restart/reboot/rollback'i test et.
+- [ ] Restore edilebilir backup sonrası düşük riskli static -> stateless Node -> DB/WebSocket Node -> Passenger -> Docker/stateful -> kritik olmayan mail -> kritik servisler sırasıyla kaynak bazlı taşı.
+- [ ] Her kaynak için hosts/pre-cutover, DNS/MX, HTTP/HTTPS/önemli route/log, rollback ve gözlem süresini kaydet. Birkaç gerçek workload stabil olmadan Plesk geri dönüşünü kaldırma.
 
 ## T11 — Son kapı: Temiz sunucuda Plesksiz kurulum
 
-- [ ] Temiz Ubuntu 24.04 üzerinde Plesk kurmadan agentsiz YunPanel paketini kur; Owner/TOTP, Nginx, Node, ACME ve gereken Docker/DB/mail bileşenlerini panel akışlarıyla hazırla.
-- [ ] Ana domain + bağımsız subdomain + alias, static/Node/Docker uygulama, DB lifecycle, SSL ve gereken mail akışlarını uçtan uca test et. Site içi yönetim için ID/token/agent izni gerekmemeli.
-- [ ] Application/DB/volume/mail yedeği ve restore, gerçek TLS renewal, reboot, root/site terminali ve panel kesintisi kontrollerini tamamla.
-- [ ] Erişim, secret recovery, paket rollback ve service health kanıtlarını gözden geçir; açık kritik madde varken production-ready etiketi verme. Normal günlük yönetim ve test edilmiş kurtarma için Plesk'e bağımlılık kalmamalı.
+- [ ] Temiz Ubuntu24.04'te Plesk olmadan agentsiz YunPanel kur; Owner/MFA, Nginx/Node/ACME ve gereken DB/Docker/mail'i panel akışlarıyla hazırla.
+- [ ] Main domain + bağımsız subdomain + alias, static/Node/Docker, DB lifecycle, SSL ve mail'i uçtan uca doğrula. Günlük site yönetiminde teknik ID/token/agent izni gerekmemeli.
+- [ ] App/DB/volume/mail backup/restore, gerçek TLSrenewal, reboot, root/site terminal ve panel kesintisini test et.
+- [ ] Erişim/secret recovery, package rollback ve health kanıtlarını incele. Kritik açık madde varken production-ready deme; günlük yönetim ve kurtarmada Plesk bağımlılığı kalmamalı.
