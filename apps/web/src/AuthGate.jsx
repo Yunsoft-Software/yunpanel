@@ -4,6 +4,8 @@ import { endAuthenticatedSession, requireSession, sessionDeadline } from './auth
 import { authMessage } from './auth-message.js';
 import LoginForm from './LoginForm.jsx';
 import AccountDialog from './AccountDialog.jsx';
+import OwnerEnrollment from './OwnerEnrollment.jsx';
+import { ownerAccess } from './owner-access.js';
 import './auth.css';
 import './mfa.css';
 
@@ -12,6 +14,7 @@ export default function AuthGate({ children }) {
   const [notice, setNotice] = useState('');
   const [actionError, setActionError] = useState('');
   const [accountOpen, setAccountOpen] = useState(false);
+  const [enrollmentOpen, setEnrollmentOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now);
   const activityAt = useRef(0);
@@ -22,12 +25,13 @@ export default function AuthGate({ children }) {
     const session = requireSession(value);
     requestVersion.current += 1;
     setSession(session); setNow(Date.now());
+    if (ownerAccess(session) === 'enrollment') { setEnrollmentOpen(true); setAccountOpen(false); }
     update({ status: 'ready', session, setupRequired: false });
     setActionError('');
   }, []);
   const signedOut = useCallback((text = 'Oturumunuz kapatıldı.') => {
     requestVersion.current += 1;
-    setSession(null); setAccountOpen(false); setNotice(text);
+    setSession(null); setAccountOpen(false); setEnrollmentOpen(false); setNotice(text);
     update({ status: 'anonymous', session: null, setupRequired: false });
   }, []);
   const refresh = useCallback(async (signal, background = false) => {
@@ -39,7 +43,7 @@ export default function AuthGate({ children }) {
     } catch (error) {
       if (error.name === 'AbortError' || signal?.aborted || version !== requestVersion.current) return;
       if (error.status === 401) {
-        setSession(null); setAccountOpen(false);
+        setSession(null); setAccountOpen(false); setEnrollmentOpen(false);
         update({ status: 'anonymous', session: null, setupRequired: error.setupRequired });
       } else if (background) setActionError(authMessage(error));
       else update({ status: 'error', session: null, setupRequired: false, error: authMessage(error) });
@@ -95,14 +99,20 @@ export default function AuthGate({ children }) {
   if (state.status === 'error') return <div className="auth-loading"><h1>Panele bağlanılamadı</h1><p role="alert">{state.error}</p><button className="auth-primary" onClick={() => refresh()}>Tekrar dene</button></div>;
   if (state.status === 'anonymous') return <LoginForm setupRequired={state.setupRequired} notice={notice} onLogin={(session) => { accept(session); setNotice(''); }} onSetup={() => { setNotice('Kurulum tamamlandı. Yeni hesabınızla giriş yapın.'); update({ status: 'anonymous', session: null, setupRequired: false }); }} />;
   const deadline = sessionDeadline(state.session, now);
+  const access = ownerAccess(state.session);
+  const showEnrollment = access === 'enrollment' || (access === 'management' && enrollmentOpen);
   return <div className="authenticated-panel">
     <div className="auth-sessionbar" aria-label="Hesap işlemleri">
       <span>YunPanel <span className="auth-separator">/</span> Yönetim</span>
-      <div><span>{state.session.user.username}</span><span className="auth-role">{state.session.user.role === 'owner' ? 'Owner' : 'Read Only'}</span><button disabled={busy} onClick={() => setAccountOpen(true)}>Hesabım</button><button disabled={busy} onClick={logout}>{busy ? 'İşleniyor…' : 'Çıkış yap'}</button></div>
+      <div><span>{state.session.user.username}</span><span className="auth-role">{state.session.user.role === 'owner' ? 'Owner' : 'Read Only'}</span><button disabled={busy || showEnrollment} onClick={() => setAccountOpen(true)}>Hesabım</button><button disabled={busy} onClick={logout}>{busy ? 'İşleniyor…' : 'Çıkış yap'}</button></div>
     </div>
     {deadline.warning && <div className="auth-expiry" role="status"><span>{deadline.absolute ? 'Azami oturum süresi dolmak üzere. Yeniden giriş gerekecek.' : 'Oturumunuz hareketsizlik nedeniyle kapanmak üzere.'}</span>{!deadline.absolute && <button className="auth-secondary" disabled={busy} onClick={extend}>Oturumu uzat</button>}</div>}
     {actionError && <p className="auth-banner" role="alert">{actionError}</p>}
-    <div key={state.session.id}>{children}</div>
+    {showEnrollment
+      ? <OwnerEnrollment session={state.session} onSession={accept} onSignedOut={signedOut} onComplete={() => setEnrollmentOpen(false)} />
+      : access === 'management'
+        ? <div key={state.session.id}>{children}</div>
+        : <main className="auth-loading"><h1>{access === 'unknown' ? 'Güvenlik durumu alınamadı' : 'Yönetim erişimi yok'}</h1><p role="alert">{access === 'unknown' ? 'Web arayüzü ve API sürümlerini kontrol edin. Yönetim ekranları güvenlik bilgisi doğrulanana kadar açılmaz.' : 'Bu hesap için sunucu yönetimi yetkisi tanımlı değil.'}</p><button className="auth-primary" onClick={() => refresh()}>Durumu yeniden kontrol et</button></main>}
     {accountOpen && <AccountDialog session={state.session} onClose={() => setAccountOpen(false)} onSession={accept} onSignedOut={signedOut} />}
   </div>;
 }

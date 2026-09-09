@@ -19,6 +19,7 @@ async function fixture(t) {
     revokeSession: () => { active = false; },
     login: async () => ({ mfaRequired: true, challengeToken: 'challenge-secret', expiresAt: 9000 }),
     mfa: {
+      enabled: () => true,
       cancelLogin: () => { challenge = false; },
       completeLogin(token, proof) {
         if (!challenge || token !== 'challenge-secret') throw new AuthError('mfa_challenge_expired', 'Expired', 401);

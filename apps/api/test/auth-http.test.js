@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
-import { createAuthStore } from '../src/auth-store.js';
 import { createAuthenticatedApi } from '../src/auth-http.js';
 
 const origin = 'https://panel.example.test';
@@ -13,6 +12,7 @@ function fakeStore() {
   const session = { id: '12345678-1234-1234-1234-123456789012', user: { id: 'owner-id', username: 'admin', role: 'owner' }, csrfToken };
   return {
     configured: () => true,
+    mfa: { enabled: () => true },
     getSession: (token) => active && token === 'valid-session' ? session : null,
     login: async () => ({ token: 'valid-session', session }),
     completeSetup: async () => session.user,
@@ -159,21 +159,35 @@ test('insecure or noncanonical production origins cannot start the API', () => {
 });
 
 test('real store setup/login/session/logout flow works over HTTP', async (t) => {
-  const store = createAuthStore({ filePath: ':memory:' });
+  const { createAuthStore } = await import('../src/auth-store.js');
+  const { randomBytes } = await import('node:crypto');
+  const { TOTP } = await import('otpauth');
+  const now = 1_700_000_010_000;
+  const store = createAuthStore({ filePath: ':memory:', masterKey: randomBytes(32), now: () => now });
   t.after(() => store.close());
   const app = await fixture(t, { store });
   const before = await app.request('/api/auth/session');
   assert.equal(before.status, 401);
   assert.equal((await before.json()).setupRequired, true);
   const { token: setupToken } = store.issueSetupToken();
-  const { randomBytes } = await import('node:crypto');
   const password = randomBytes(32).toString('base64url');
   const headers = { origin, 'content-type': 'application/json' };
   assert.equal((await app.request('/api/auth/setup', { method: 'POST', headers, body: { setupToken, username: 'test-owner', password } })).status, 201);
   const login = await app.request('/api/auth/login', { method: 'POST', headers, body: { username: 'test-owner', password } });
   assert.equal(login.status, 200);
-  const browserCookie = login.headers.get('set-cookie').split(';')[0];
-  const session = (await login.json()).data;
+  let browserCookie = login.headers.get('set-cookie').split(';')[0];
+  let session = (await login.json()).data;
+  assert.equal(session.security.enrollmentRequired, true);
+  assert.equal((await app.request('/api/servers', { headers: { cookie: browserCookie } })).status, 403);
+  const ownHeaders = { ...headers, cookie: browserCookie, 'x-csrf-token': session.csrfToken };
+  const enrollment = await app.request('/api/auth/mfa/enroll', { method: 'POST', headers: ownHeaders, body: { password } });
+  assert.equal(enrollment.status, 200);
+  const { secret } = (await enrollment.json()).data;
+  const confirm = await app.request('/api/auth/mfa/confirm', { method: 'POST', headers: ownHeaders, body: { code: new TOTP({ secret }).generate({ timestamp: now }) } });
+  assert.equal(confirm.status, 200);
+  browserCookie = confirm.headers.getSetCookie()[0].split(';')[0];
+  session = (await confirm.json()).data.session;
+  assert.equal(session.security.managementAllowed, true);
   assert.equal((await app.request('/api/servers', { headers: { cookie: browserCookie } })).status, 200);
   assert.equal((await app.request('/api/auth/logout', { method: 'POST', headers: { ...headers, cookie: browserCookie, 'x-csrf-token': session.csrfToken } })).status, 204);
   assert.equal((await app.request('/api/servers', { headers: { cookie: browserCookie } })).status, 401);

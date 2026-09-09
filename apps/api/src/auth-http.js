@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { AuthError, safeEqual } from './auth-error.js';
+import { createOwnerMfaPolicy } from './owner-mfa-policy.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
 const AGENT_ROUTES = [
@@ -55,6 +56,8 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
   if (origin.origin !== publicOrigin || (origin.protocol !== 'https:' && !localDevelopment)) {
     throw new Error('Panel origin must be an exact HTTPS origin (HTTP is only allowed for loopback development)');
   }
+  // Only explicit loopback HTTP development is exempt. HTTPS always enforces MFA.
+  const ownerPolicy = createOwnerMfaPolicy({ store, required: !localDevelopment });
   const cookieName = localDevelopment ? 'yunpanel_session' : '__Host-yunpanel_session';
   const mfaCookieName = localDevelopment ? 'yunpanel_mfa' : '__Host-yunpanel_mfa';
   const cookieOptions = `Path=/; HttpOnly; SameSite=Strict${localDevelopment ? '' : '; Secure'}`;
@@ -122,7 +125,7 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
       }
       setCookie(response, result.token);
       setMfaCookie(response, '');
-      return json(response, 200, { data: result.session });
+      return json(response, 200, { data: ownerPolicy.describe(result.session) });
     }
     if (pathname === '/api/auth/mfa/verify' || pathname === '/api/auth/mfa/cancel') {
       if (request.method !== 'POST') throw new AuthError('method_not_allowed', 'Use POST.', 405);
@@ -136,7 +139,7 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
       const result = store.mfa.completeLogin(challengeToken, { code: body.code, method: body.method }, peer);
       setCookie(response, result.token);
       setMfaCookie(response, '');
-      return json(response, 200, { data: result.session });
+      return json(response, 200, { data: ownerPolicy.describe(result.session) });
     }
 
     const session = store.getSession(rawToken);
@@ -150,9 +153,10 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
       if (!safeEqual(request.headers['x-csrf-token'], session.csrfToken)) throw new AuthError('csrf_invalid', 'Session verification failed. Reload the page.', 403);
     }
     if (pathname.startsWith('/api/auth/')) {
-      if (pathname === '/api/auth/session' && request.method === 'GET') return json(response, 200, { data: session });
+      if (pathname === '/api/auth/session' && request.method === 'GET') return json(response, 200, { data: ownerPolicy.describe(session) });
+      if (pathname === '/api/auth/security' && request.method === 'GET') return json(response, 200, { data: ownerPolicy.describe(session).security });
       if (pathname === '/api/auth/sessions' && request.method === 'GET') return json(response, 200, { data: store.listSessions(rawToken) });
-      if (pathname === '/api/auth/keep-alive' && request.method === 'POST') return json(response, 200, { data: store.getSession(rawToken, { touch: true }) });
+      if (pathname === '/api/auth/keep-alive' && request.method === 'POST') return json(response, 200, { data: ownerPolicy.describe(store.getSession(rawToken, { touch: true })) });
       if (pathname === '/api/auth/mfa' && request.method === 'GET') return json(response, 200, { data: store.mfa.status(rawToken) });
       if (pathname === '/api/auth/mfa/enroll' && request.method === 'POST') {
         const body = await readJson(request);
@@ -168,7 +172,7 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
           : await store.mfa.regenerateRecovery(rawToken, body.password, { code: body.code, method: body.method });
         setCookie(response, result.token);
         setMfaCookie(response, '');
-        return json(response, 200, { data: { session: result.session, recoveryCodes: result.recoveryCodes } });
+        return json(response, 200, { data: { session: ownerPolicy.describe(result.session), recoveryCodes: result.recoveryCodes } });
       }
       if (pathname === '/api/auth/mfa/disable' && request.method === 'POST') {
         const body = await readJson(request);
@@ -206,9 +210,9 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
       return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
     }
     // Do not give a broad "read" role access to secrets or undeclared legacy read endpoints.
-    if (session.user.role !== 'owner') throw new AuthError('forbidden', 'Owner access is required.', 403);
+    const authorized = ownerPolicy.requireManagement(store.getSession(rawToken));
     if (!SAFE_METHODS.has(request.method)) store.getSession(rawToken, { touch: true });
-    request.auth = session;
+    request.auth = authorized;
     request.headers.authorization = `Bearer ${internalToken}`;
     return handler(request, response);
   }
