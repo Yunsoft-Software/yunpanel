@@ -1,22 +1,22 @@
 # Authentication — implementation and deployment
 
-This increment adds local Owner setup, login/logout, persistent user sessions, password changes, session revocation and local password recovery. It does **not** implement TOTP, user administration, the agentless/root backend, a terminal, or the website hierarchy. Keep the existing IP restriction until the remaining security release gate in `plan.md` is satisfied.
+The basic authentication increment adds local Owner setup, login/logout, persistent user sessions, password changes, session revocation and local password recovery. The later MFA backend and its prepared form components are described in [mfa.md](mfa.md). **The MFA forms are not yet mounted in AuthGate, and the stale-cookie response race remains open. Do not merge/deploy the MFA draft or enroll a live account before those gates are closed.** User administration, the agentless/root backend, terminal and complete website workspace remain separate plan work. Keep the existing IP restriction.
 
 ## Runtime and entry points
 
-Use Node.js **24.11.1 or newer** with native `node:crypto` Argon2 and `node:sqlite`, and npm 11+. The package pre-install check rejects a runtime without these capabilities. The focused tests were run on Node 24.11.1; SQLite prints an experimental-feature warning on that runtime.
+Use Node.js **24.11.1 or newer** with native `node:crypto` Argon2 and `node:sqlite`, and npm 11+. The package pre-install check rejects a runtime without these capabilities. The basic-auth validation record below concerns the earlier increment; it is not validation of later MFA changes on Node 24.
 
 Start the API through `apps/api/src/index.js`. It creates an authenticated HTTP listener around the existing application handlers. Do not publish `createApp().listen()` directly: `app.js` remains an internal handler factory and still has its older guard for compatibility with existing operation tests.
 
-The deployed management API no longer accepts `YUNPANEL_ADMIN_BOOTSTRAP_TOKEN`. The web gateway forwards the user's cookie and CSRF header; it does not inject administrator credentials. A fresh in-process compatibility value is passed only between the authenticated listener and the old handlers. It is not a configured credential or an additional public authentication method. Remove that compatibility adapter when refactoring the core handlers for the agentless milestone.
+The network management entry point no longer accepts `YUNPANEL_ADMIN_BOOTSTRAP_TOKEN`. The web gateway forwards the user's cookie and CSRF header; it does not inject administrator credentials. A fresh in-process compatibility value is passed only between the authenticated listener and the old handlers. It is not a configured credential or an additional public authentication method. Remove that compatibility adapter when refactoring the core handlers for the agentless milestone.
 
 Exact legacy enrollment/heartbeat/command/result/environment routes still use their existing agent credentials until that migration. Browser-origin/cookie requests cannot use them and the web gateway does not proxy them. Agent secrets have not been retired. No WebSocket/terminal listener is enabled.
 
 ## Configuration before upgrading an existing host
 
-This is not an automatic live deployment. Back up configuration/state and confirm independent SSH/provider-console access before changing the test host.
+This is not an automatic live deployment. Back up configuration/state and confirm independent SSH/provider-console access before changing the test host. The MFA store migrates auth data to schema version 2; follow [mfa.md](mfa.md) for matching database/package backup and downgrade constraints before opening a real database.
 
-Set `YUNPANEL_PUBLIC_ORIGIN` to the same **exact** public origin in both the API and web service environments, for example `https://cryptoraichu.website` without a trailing slash. The API now requires this in production and refuses to start with a missing or non-HTTPS origin. The old gateway's origin setting alone is not enough. Keep `YUNPANEL_ALLOWED_CLIENT_IPS`, the loopback listeners and the current Nginx access policy.
+Set `YUNPANEL_PUBLIC_ORIGIN` to the same **exact** public origin in both the API and web service environments, for example `https://cryptoraichu.website` without a trailing slash. The API requires this in production and refuses to start with a missing or non-HTTPS origin. The old gateway's origin setting alone is not enough. Keep `YUNPANEL_ALLOWED_CLIENT_IPS`, the loopback listeners and the current Nginx access policy.
 
 The current packaged API still runs as `yunpanel` with writes allowed under `/var/lib/yunpanel/control-plane`. Configure an absolute `YUNPANEL_AUTH_DB` such as `/var/lib/yunpanel/control-plane/auth/auth.sqlite` in the API environment. Use exactly the same path for the local CLI. Without an override, the database is placed in `auth/auth.sqlite` alongside `YUNPANEL_SERVER_STORE`.
 
@@ -47,7 +47,7 @@ The npm command runs in the API workspace so its default relative state path mat
 
 The account dialog supports changing the password and ending individual sessions. Password changes end all sessions for that user. The HTTP API also provides `POST /api/auth/logout-all`.
 
-Local recovery does not require mail:
+Local password recovery does not require mail:
 
 ```bash
 sudo -u yunpanel env YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.sqlite \
@@ -55,6 +55,8 @@ sudo -u yunpanel env YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.
 ```
 
 Replace `<username>` with the actual account name. The CLI asks for a hidden password and confirmation on a terminal, or reads a password from stdin for controlled automation. Never pass the password as a command-line argument. SQLite transactions let recovery invalidate active sessions without restarting the API. This is local administrator recovery, not an unauthenticated HTTP password-reset endpoint.
+
+Password recovery does **not** remove an enrolled authenticator. The separate `reset-mfa <username> --confirm` command removes the factor, codes and sessions while preserving the password; its requirements and caveats are in [mfa.md](mfa.md). Neither operation should be confused with a public password-only MFA bypass.
 
 ## Session/security behavior
 
@@ -68,10 +70,10 @@ Replace `<username>` with the actual account name. The CLI asks for a hidden pas
 
 Back up SQLite consistently: stop the API and CLI writers before copying, or use SQLite's supported online-backup mechanism. Do not copy only `auth.sqlite` while WAL writes are active. Protect the backup as credential material. Restore/rollback must be tested on a separate copy; restoring an old auth snapshot can restore old passwords/sessions, so revoke/recover before opening it to users.
 
-## Validation performed in this development environment
+## Earlier basic-auth validation record
 
-On Node 24.11.1, **42 focused tests passed**: 16 auth-store tests (run in bounded batches), 13 HTTP-boundary tests, two separate-process CLI tests, six browser-client unit tests and five gateway tests. Coverage includes setup expiry/reuse/concurrency, hashing, private persistence, session rotation/expiry/revocation, password recovery, throttling, Origin/CSRF, anonymous access, browser transport restrictions and a real HTTP login/logout round trip through gateway plus auth listener. The downstream application handler is a test double in these boundary tests; this is not a full Express/deploy regression run.
+The earlier basic-auth increment recorded **42 focused tests passed on Node 24.11.1**: 16 auth-store tests, 13 HTTP-boundary tests, two separate-process CLI tests, six browser-client unit tests and five gateway tests. The downstream application handler was a test double in the boundary tests; this was not a full Express/deploy regression run. Its JavaScript, JSX transpilation and shell syntax checks and disposable setup-token CLI smoke check were also recorded in that increment's history.
 
-JavaScript syntax checks, JSX transpilation syntax checks and shell syntax checks passed. The root `npm run auth -- setup-token` workspace routing was smoke-tested with a disposable database/token. No credentials from these tests were committed.
+Do not apply that earlier count/runtime claim to the MFA changes. The later MFA pass had Node 22.16.0 and a source subset: 25 direct tests plus eight explicitly qualified Python-Argon2 compatibility tests. Full details, limitations and blocked writes are in [mfa.md](mfa.md).
 
-**Not performed here:** dependency installation/full `npm run check`, production React build, rendered-browser/keyboard/responsive tests, real Express-operation regressions, Debian package installation, live HTTPS, SSH access or deployment to `cryptoraichu.website`. The constrained environment had a source subset and a suitable Node runtime, not the complete installed workspace. These remain explicit tasks in `todo.md`. No GitHub Actions were added or used.
+**Still pending:** native Node 24 validation of the current combined code, dependency installation/full `npm run check`, production React build, rendered-browser/keyboard/responsive tests, real Express-operation regressions, Debian package installation, live HTTPS, SSH access and deployment to `cryptoraichu.website`. These remain explicit tasks in `todo.md`. No GitHub Actions are part of this workflow.
