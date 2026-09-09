@@ -7,6 +7,7 @@ import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -35,7 +36,6 @@ async function requestJson(url, { method = 'GET', token, body } = {}) {
 }
 
 test('admin environment APIs mask secrets while the assigned agent can materialize them', async () => {
-  const adminToken = 'environment-admin-token';
   const serverRegistry = createServerRegistry();
   const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'environment-server' });
   const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'environment-host' });
@@ -54,7 +54,7 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
     applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
   });
 
-  const app = createApp({
+  const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
     applicationRegistry,
@@ -62,13 +62,11 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
     jobRegistry: createJobRegistry(),
     domainRegistry: createDomainRegistry(),
     certificateRegistry: createCertificateRegistry(),
-    adminToken,
-  });
+  }));
 
   await withServer(app, async (baseUrl) => {
     const publicWrite = await requestJson(`${baseUrl}/api/applications/${application.id}/environment/PUBLIC_URL`, {
       method: 'PUT',
-      token: adminToken,
       body: { value: 'https://example.test', secret: false },
     });
     assert.equal(publicWrite.response.status, 200);
@@ -76,7 +74,6 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
 
     const secretWrite = await requestJson(`${baseUrl}/api/applications/${application.id}/environment/API_TOKEN`, {
       method: 'PUT',
-      token: adminToken,
       body: { value: 'private-token-value', secret: true },
     });
     assert.equal(secretWrite.response.status, 200);
@@ -84,7 +81,7 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
     assert.equal('value' in secretWrite.payload.data, false);
     assert.equal(JSON.stringify(secretWrite.payload).includes('private-token-value'), false);
 
-    const listed = await requestJson(`${baseUrl}/api/applications/${application.id}/environment`, { token: adminToken });
+    const listed = await requestJson(`${baseUrl}/api/applications/${application.id}/environment`);
     assert.equal(listed.response.status, 200);
     const secret = listed.payload.data.find((entry) => entry.key === 'API_TOKEN');
     assert.equal(secret.secret, true);
@@ -131,7 +128,6 @@ test('an agent cannot fetch environment belonging to a different managed server'
     jobRegistry: createJobRegistry(),
     domainRegistry: createDomainRegistry(),
     certificateRegistry: createCertificateRegistry(),
-    adminToken: 'admin-token',
   });
 
   await withServer(app, async (baseUrl) => {
