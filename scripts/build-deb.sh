@@ -34,6 +34,7 @@ install -m 0755 packaging/debian/postinst "$package_root/DEBIAN/postinst"
 install -m 0755 packaging/debian/postrm "$package_root/DEBIAN/postrm"
 install -m 0644 packaging/systemd/*.service "$package_root/usr/lib/systemd/system/"
 install -m 0644 scripts/auth.mjs "$package_root/usr/lib/yunpanel/scripts/auth.mjs"
+install -m 0644 scripts/rotate-secret-master-key.mjs "$package_root/usr/lib/yunpanel/scripts/rotate-secret-master-key.mjs"
 
 cp -a package.json "$package_root/usr/lib/yunpanel/"
 cp -a apps/api apps/agent apps/web "$package_root/usr/lib/yunpanel/apps/"
