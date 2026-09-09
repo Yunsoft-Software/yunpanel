@@ -8,6 +8,7 @@ import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -55,7 +56,6 @@ function serviceName(applicationId) {
 }
 
 test('Node process status refresh is queued, sanitized and available through the status endpoint', async () => {
-  const adminToken = 'node-status-admin-token';
   const serverRegistry = createServerRegistry();
   const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'node-status-test' });
   const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'node-status-host' });
@@ -83,24 +83,22 @@ test('Node process status refresh is queued, sanitized and available through the
     healthy: true,
   });
 
-  const app = createApp({
+  const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
     applicationRegistry,
     jobRegistry,
     domainRegistry: createDomainRegistry(),
     certificateRegistry: createCertificateRegistry(),
-    adminToken,
-  });
+  }));
 
   await withServer(app, async (baseUrl) => {
-    const emptyStatus = await requestJson(`${baseUrl}/api/applications/${application.id}/status`, { token: adminToken });
+    const emptyStatus = await requestJson(`${baseUrl}/api/applications/${application.id}/status`);
     assert.equal(emptyStatus.response.status, 200);
     assert.equal(emptyStatus.payload.data, null);
 
     const refresh = await requestJson(`${baseUrl}/api/applications/${application.id}/status/refresh`, {
       method: 'POST',
-      token: adminToken,
     });
     assert.equal(refresh.response.status, 202);
     assert.equal(refresh.payload.data.operation, OPERATIONS.APP_NODE_STATUS);
@@ -140,7 +138,7 @@ test('Node process status refresh is queued, sanitized and available through the
     assert.equal(completed.response.status, 200);
     assert.equal('rawJournal' in completed.payload.data.result, false);
 
-    const status = await requestJson(`${baseUrl}/api/applications/${application.id}/status`, { token: adminToken });
+    const status = await requestJson(`${baseUrl}/api/applications/${application.id}/status`);
     assert.equal(status.response.status, 200);
     assert.equal(status.payload.data.status, 'succeeded');
     assert.equal(status.payload.data.result.activeState, 'active');
