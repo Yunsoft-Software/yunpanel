@@ -103,8 +103,13 @@ export function createStaticDeploymentManager({
     return runRoot(RUNUSER_PATH, ['-u', username, '--', file, ...args], { ...options, env: safeEnvironment(home) });
   }
 
+  async function ensureDirectoryMode(directory, mode) {
+    await mkdirFn(directory, { recursive: true, mode });
+    await chmodFn(directory, mode);
+  }
+
   async function ensureAppUser(username, appBuildRoot) {
-    await mkdirFn(path.dirname(appBuildRoot), { recursive: true, mode: 0o755 });
+    await ensureDirectoryMode(path.dirname(appBuildRoot), 0o711);
     try {
       await runRoot(ID_PATH, ['-u', username], { timeout: 5_000 });
     } catch {
@@ -230,7 +235,11 @@ export function createStaticDeploymentManager({
       const outputInfo = await lstatFn(outputPath);
       if (!outputInfo.isDirectory() || outputInfo.isSymbolicLink()) throw new StaticDeploymentError('invalid_build_output', 'Static build output must be a real directory');
 
-      await mkdirFn(releasesPath, { recursive: true, mode: 0o755 });
+      const webRootParent = path.dirname(webRoot);
+      if (webRootParent !== path.parse(webRootParent).root) await ensureDirectoryMode(webRootParent, 0o711);
+      await ensureDirectoryMode(webRoot, 0o711);
+      await ensureDirectoryMode(appWebRoot, 0o755);
+      await ensureDirectoryMode(releasesPath, 0o755);
       await mkdirFn(servedReleasePath, { recursive: false, mode: 0o755 });
       artifactCreated = true;
       await runRoot(CHOWN_PATH, [`${username}:${username}`, servedReleasePath], { timeout: 10_000 });
