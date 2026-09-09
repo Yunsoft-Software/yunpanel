@@ -6,25 +6,14 @@ import { pathToFileURL } from 'node:url';
 
 const DEFAULT_WEB_ROOT = '/usr/share/yunpanel/web';
 const HOP_BY_HOP_HEADERS = new Set([
-  'connection',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailer',
-  'transfer-encoding',
-  'upgrade',
+  'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+  'te', 'trailer', 'transfer-encoding', 'upgrade',
 ]);
 const CONTENT_TYPES = new Map([
-  ['.css', 'text/css; charset=utf-8'],
-  ['.html', 'text/html; charset=utf-8'],
-  ['.ico', 'image/x-icon'],
-  ['.js', 'text/javascript; charset=utf-8'],
-  ['.json', 'application/json; charset=utf-8'],
-  ['.map', 'application/json; charset=utf-8'],
-  ['.png', 'image/png'],
-  ['.svg', 'image/svg+xml'],
-  ['.webp', 'image/webp'],
+  ['.css', 'text/css; charset=utf-8'], ['.html', 'text/html; charset=utf-8'],
+  ['.ico', 'image/x-icon'], ['.js', 'text/javascript; charset=utf-8'],
+  ['.json', 'application/json; charset=utf-8'], ['.map', 'application/json; charset=utf-8'],
+  ['.png', 'image/png'], ['.svg', 'image/svg+xml'], ['.webp', 'image/webp'],
 ]);
 
 function parseAllowedClients(value) {
@@ -41,45 +30,40 @@ function clientAddress(request) {
 
 function reply(response, statusCode, body, contentType = 'text/plain; charset=utf-8') {
   response.writeHead(statusCode, {
-    'cache-control': 'no-store',
-    'content-type': contentType,
-    'x-content-type-options': 'nosniff',
+    'cache-control': 'no-store', 'content-type': contentType, 'x-content-type-options': 'nosniff',
   });
   response.end(body);
 }
 
 function sameOriginMutation(request, publicOrigin) {
-  if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return true;
-  const origin = request.headers.origin;
+  if (request.method === 'GET' || request.method === 'HEAD') return true;
   const fetchSite = request.headers['sec-fetch-site'];
-  if (typeof origin === 'string' && origin !== publicOrigin) return false;
-  if (typeof fetchSite === 'string' && !['same-origin', 'none'].includes(fetchSite)) return false;
-  return true;
+  return request.headers.origin === publicOrigin && (!fetchSite || ['same-origin', 'none'].includes(fetchSite));
 }
 
-function proxyRequest(request, response, { adminToken, apiHost, apiPort, publicOrigin }) {
+function isTransportPath(pathname) {
+  return pathname === '/api/servers/enroll'
+    || /^\/api\/servers\/[^/]+\/(?:heartbeat|commands(?:\/|$)|applications\/[^/]+\/environment$)/.test(pathname);
+}
+
+function proxyRequest(request, response, { apiHost, apiPort, publicOrigin }) {
   if (!sameOriginMutation(request, publicOrigin)) {
     reply(response, 403, 'Cross-origin panel mutations are not allowed.');
     return;
   }
-
   const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
-  const upstreamPath = requestUrl.pathname === '/api/health'
-    ? `/api/health${requestUrl.search}`
-    : `/api/${requestUrl.pathname.slice('/api/panel/'.length)}${requestUrl.search}`;
+  const upstreamPathname = requestUrl.pathname.startsWith('/api/panel/')
+    ? `/api/${requestUrl.pathname.slice('/api/panel/'.length)}` : requestUrl.pathname;
+  if (isTransportPath(upstreamPathname)) { reply(response, 404, 'Not found.'); return; }
   const headers = {};
   for (const [name, value] of Object.entries(request.headers)) {
-    if (!HOP_BY_HOP_HEADERS.has(name) && value !== undefined && name !== 'authorization') headers[name] = value;
+    if (!HOP_BY_HOP_HEADERS.has(name) && value !== undefined && !['authorization', 'forwarded', 'x-forwarded-for', 'x-real-ip'].includes(name)) headers[name] = value;
   }
   headers.host = `${apiHost}:${apiPort}`;
-  if (requestUrl.pathname !== '/api/health') headers.authorization = `Bearer ${adminToken}`;
-
+  // Cookies and CSRF headers pass through. The gateway never grants an administrator identity.
   const upstream = http.request({
-    host: apiHost,
-    port: apiPort,
-    method: request.method,
-    path: upstreamPath,
-    headers,
+    host: apiHost, port: apiPort, method: request.method,
+    path: `${upstreamPathname}${requestUrl.search}`, headers,
   }, (upstreamResponse) => {
     const responseHeaders = {};
     for (const [name, value] of Object.entries(upstreamResponse.headers)) {
@@ -89,62 +73,43 @@ function proxyRequest(request, response, { adminToken, apiHost, apiPort, publicO
     response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
     upstreamResponse.pipe(response);
   });
-  upstream.on('error', () => reply(response, 502, 'Panel API is unavailable.'));
+  upstream.setTimeout(30_000, () => upstream.destroy(new Error('Upstream timeout')));
+  upstream.on('error', () => {
+    if (!response.headersSent) reply(response, 502, 'Panel API is unavailable.');
+    else response.destroy();
+  });
+  request.on('aborted', () => upstream.destroy());
   request.pipe(upstream);
 }
 
 async function serveStatic(request, response, webRoot, pathname) {
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
-    reply(response, 405, 'Method not allowed.');
-    return;
-  }
-
+  if (request.method !== 'GET' && request.method !== 'HEAD') { reply(response, 405, 'Method not allowed.'); return; }
   let decodedPath;
-  try {
-    decodedPath = decodeURIComponent(pathname);
-  } catch {
-    reply(response, 400, 'Invalid path.');
-    return;
-  }
-
+  try { decodedPath = decodeURIComponent(pathname); }
+  catch { reply(response, 400, 'Invalid path.'); return; }
   const requestedPath = path.resolve(webRoot, `.${decodedPath}`);
-  if (requestedPath !== webRoot && !requestedPath.startsWith(`${webRoot}${path.sep}`)) {
-    reply(response, 403, 'Forbidden.');
-    return;
-  }
-
+  if (requestedPath !== webRoot && !requestedPath.startsWith(`${webRoot}${path.sep}`)) { reply(response, 403, 'Forbidden.'); return; }
   let filePath = requestedPath;
   try {
     const metadata = await stat(filePath);
     if (metadata.isDirectory()) filePath = path.join(filePath, 'index.html');
     await stat(filePath);
-  } catch {
-    filePath = path.join(webRoot, 'index.html');
-  }
-
+  } catch { filePath = path.join(webRoot, 'index.html'); }
   const extension = path.extname(filePath).toLowerCase();
   response.writeHead(200, {
     'cache-control': extension === '.html' ? 'no-store' : 'public, max-age=300',
     'content-type': CONTENT_TYPES.get(extension) ?? 'application/octet-stream',
     'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
-    'referrer-policy': 'no-referrer',
-    'x-content-type-options': 'nosniff',
-    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY',
   });
-  if (request.method === 'HEAD') {
-    response.end();
-    return;
-  }
-  createReadStream(filePath)
-    .on('error', () => {
-      if (!response.headersSent) reply(response, 500, 'Unable to read panel asset.');
-      else response.destroy();
-    })
-    .pipe(response);
+  if (request.method === 'HEAD') { response.end(); return; }
+  createReadStream(filePath).on('error', () => {
+    if (!response.headersSent) reply(response, 500, 'Unable to read panel asset.');
+    else response.destroy();
+  }).pipe(response);
 }
 
 export function createPanelServer({
-  adminToken = process.env.YUNPANEL_ADMIN_BOOTSTRAP_TOKEN,
   allowedClientIps = process.env.YUNPANEL_ALLOWED_CLIENT_IPS,
   apiHost = process.env.YUNPANEL_API_HOST ?? '127.0.0.1',
   apiPort = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10),
@@ -153,26 +118,18 @@ export function createPanelServer({
 } = {}) {
   const allowedClients = parseAllowedClients(allowedClientIps);
   const resolvedWebRoot = path.resolve(webRoot);
-  if (!adminToken) throw new Error('YUNPANEL_ADMIN_BOOTSTRAP_TOKEN is required');
   if (allowedClients.size === 0) throw new Error('YUNPANEL_ALLOWED_CLIENT_IPS is required');
   if (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535) throw new Error('YUNPANEL_API_PORT is invalid');
   if (!publicOrigin || new URL(publicOrigin).origin !== publicOrigin) throw new Error('YUNPANEL_PUBLIC_ORIGIN is required');
-
   return http.createServer(async (request, response) => {
     if (!allowedClients.has(clientAddress(request))) {
-      reply(response, 403, 'This panel is restricted to an approved client address.');
-      return;
+      reply(response, 403, 'This panel is restricted to an approved client address.'); return;
     }
-
     const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
-    if (requestUrl.pathname === '/api/health' || requestUrl.pathname.startsWith('/api/panel/')) {
-      proxyRequest(request, response, { adminToken, apiHost, apiPort, publicOrigin });
-      return;
+    if (requestUrl.pathname === '/api/health' || requestUrl.pathname.startsWith('/api/panel/') || requestUrl.pathname.startsWith('/api/auth/')) {
+      proxyRequest(request, response, { apiHost, apiPort, publicOrigin }); return;
     }
-    if (requestUrl.pathname.startsWith('/api/')) {
-      reply(response, 404, 'Not found.');
-      return;
-    }
+    if (requestUrl.pathname.startsWith('/api/')) { reply(response, 404, 'Not found.'); return; }
     await serveStatic(request, response, resolvedWebRoot, requestUrl.pathname);
   });
 }

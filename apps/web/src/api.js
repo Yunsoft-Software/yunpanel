@@ -1,20 +1,9 @@
+import { requestJson } from './session-client.js';
+
 const MANAGEMENT_ROOT = '/api/panel';
 
-export async function panelRequest(path, { method = 'GET', body, signal } = {}) {
-  const response = await fetch(`${MANAGEMENT_ROOT}${path}`, {
-    method,
-    signal,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const payload = response.status === 204 ? null : await response.json().catch(() => null);
-  if (!response.ok) {
-    const error = new Error(payload?.error?.message ?? `Request failed with HTTP ${response.status}`);
-    error.code = payload?.error?.code ?? `http_${response.status}`;
-    error.status = response.status;
-    throw error;
-  }
-  return payload?.data;
+export function panelRequest(path, options = {}) {
+  return requestJson(`${MANAGEMENT_ROOT}${path}`, options);
 }
 
 export async function waitForJob(jobId, { attempts = 300, intervalMs = 1000 } = {}) {
