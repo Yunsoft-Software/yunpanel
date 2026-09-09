@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { AuthError, safeEqual } from './auth-error.js';
 import { createOwnerMfaPolicy } from './owner-mfa-policy.js';
 import { requireReadOnlyRequest } from './panel-access.js';
@@ -50,7 +49,7 @@ function readJson(request) {
   });
 }
 
-/** Authentication is checked BEFORE the legacy application's handler, on every deployed API request. */
+/** Authentication is checked BEFORE the application's handler, on every deployed API request. */
 export function createAuthenticatedApi({ createHandler, store, publicOrigin, development = false }) {
   let origin;
   try { origin = new URL(publicOrigin); } catch { throw new Error('YUNPANEL_PUBLIC_ORIGIN is required'); }
@@ -63,10 +62,9 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
   const cookieName = localDevelopment ? 'yunpanel_session' : '__Host-yunpanel_session';
   const mfaCookieName = localDevelopment ? 'yunpanel_mfa' : '__Host-yunpanel_mfa';
   const cookieOptions = `Path=/; HttpOnly; SameSite=Strict${localDevelopment ? '' : '; Secure'}`;
-  // Transitional adapter only: fresh per process, never configured, returned, or sent across a socket.
-  // This preserves existing domain/deploy handlers while removing the public bootstrap-token boundary.
-  const internalToken = randomBytes(32).toString('base64url');
-  const handler = createHandler({ adminToken: internalToken });
+  // Core/domain management routes consume request.auth directly. No bearer
+  // credential is generated or injected between the auth listener and handlers.
+  const handler = createHandler();
 
   const readCookie = (request, name) => {
     const entries = (request.headers.cookie ?? '').split(';').map((part) => part.trim()).filter((part) => part.startsWith(`${name}=`));
@@ -220,7 +218,6 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
     if (pathname === '/api/users' || pathname.startsWith('/api/users/')) {
       return handleUserAdmin({ request, response, pathname, query: url.searchParams, store, rawToken, requireManagement: ownerPolicy.requireManagement, readJson, json });
     }
-    request.headers.authorization = `Bearer ${internalToken}`;
     return handler(request, response);
   }
 

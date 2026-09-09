@@ -1,26 +1,25 @@
 import express from 'express';
 import { createApp as createCoreApp } from './core-app.js';
-import { createBootstrapAdminGuard, resolveBootstrapAdminToken } from './bootstrap-auth.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
 import { createDomainHandler } from './domain-http.js';
+import { requirePanelRouteAccess } from './panel-http-guard.js';
 
 export { API_VERSION } from './core-app.js';
 
 // Preserve the existing core operations while extracting feature routes.
-// Production still enters through createAuthenticatedApi in index.js; this
-// factory opens no listener and does not replace session/CSRF/Owner checks.
+// Production still enters through createAuthenticatedApi in index.js. Directly
+// mounting this factory does not create a second auth boundary because every
+// management route requires a server-derived request.auth context.
 export function createApp({
   domainRegistry = createDomainRegistry(),
   environment = process.env.NODE_ENV,
-  adminToken,
   ...options
 } = {}) {
-  const token = adminToken === undefined ? resolveBootstrapAdminToken({ environment }) : adminToken;
-  const core = createCoreApp({ ...options, domainRegistry, environment, adminToken: token });
+  const core = createCoreApp({ ...options, domainRegistry, environment });
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
-  app.post('/api/domains', createBootstrapAdminGuard({ token }), createDomainHandler(domainRegistry));
+  app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry));
   app.use(core);
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
