@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { AuthError, safeEqual } from './auth-error.js';
 import { createOwnerMfaPolicy } from './owner-mfa-policy.js';
+import { requireReadOnlyRequest } from './panel-access.js';
 import { handleUserAdmin } from './user-admin-http.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
@@ -210,8 +211,10 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
       }
       return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
     }
-    // Do not give a broad "read" role access to secrets or undeclared legacy read endpoints.
-    const authorized = ownerPolicy.requireManagement(store.getSession(rawToken));
+    // Restricted roles cross the management boundary only through explicitly declared routes.
+    const authorized = session.user.role === 'read_only'
+      ? requireReadOnlyRequest(ownerPolicy.describe(session), request.method, pathname)
+      : ownerPolicy.requireManagement(session);
     if (!SAFE_METHODS.has(request.method)) store.getSession(rawToken, { touch: true });
     request.auth = authorized;
     if (pathname === '/api/users' || pathname.startsWith('/api/users/')) {
