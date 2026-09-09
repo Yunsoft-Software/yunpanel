@@ -8,9 +8,9 @@ The project is intentionally scoped around Yunsoft production needs rather than 
 
 The management entry point now mounts a **routed website workspace** instead of the old `activeView` panel: compact sidebar, dashboard, searchable domain tree, site detail tabs, guided hostname/application forms and tracked job dialogs. Existing Node deploy/restart/status/rollback, environment, Nginx and ACME operations are available from the relevant site context. See [docs/website-workspace.md](docs/website-workspace.md) for the implemented routes and exact limitations.
 
-**The complete hosting target is not implemented yet.** Site routes currently use existing domain IDs, and Node application candidates are identified by matching server/port; this is not the planned persistent Website/application/Unix-user model. Mail, files, database/Docker lifecycle, cron, backups, audit and terminal modules remain unavailable where their backends are missing. The separate agent is still present. The local user-administration draft was blocked from being written to GitHub and is not part of the repository feature set.
+**The complete hosting target is not implemented yet.** Site routes currently use existing domain IDs, and Node application candidates are identified by matching server/port; this is not the planned persistent Website/application/Unix-user model. Mail, files, database/Docker lifecycle, cron, backups, audit and terminal modules remain unavailable where their backends are missing. The separate agent is still present. Owner-protected user administration is implemented in the API and Settings workspace, while its complete authenticated-browser acceptance remains open.
 
-The product target remains a website-centric enterprise panel, explicit domain/subdomain/alias ownership, an integrated root/site terminal and a privileged local backend replacing `yun-agent`. Visual/browser acceptance and full dependency/build testing of the new UI are still open; source code and syntax checks do not establish production readiness.
+The product target remains a website-centric enterprise panel, explicit domain/subdomain/alias ownership, an integrated root/site terminal and a privileged local backend replacing `yun-agent`. Full Node 24 dependency/test/build acceptance and the initial live HTTPS setup/deep-link render now pass; authenticated Owner/MFA, Read Only, responsive/keyboard and complete operation acceptance remain open.
 
 ## Authentication boundary
 
@@ -67,7 +67,7 @@ Current development services are web on port 5173, API on 3001 and the retained 
 npm run check
 ```
 
-The UI increment passed **22 focused model tests on native Node 24.11.1**. JSX/CSS syntax checks also passed. Full dependency installation, Vite build, actual React/browser navigation, responsive layout and live hosting operations were not validated in that environment. Its separate 16-test user-admin draft result does not mean those blocked backend files were committed. See [docs/website-workspace.md](docs/website-workspace.md) and `todo.md` T-UI/T-USER; historical auth/domain validation reports are not a full regression of the current combined code.
+The current combined tree passes **473 tests**, repository policy validation and the Vite production build on supported Node 24 runtimes both locally and on the Ubuntu package build host. The packaged `0.3.0-2` candidate also passed the live initial-setup render, auth boundary, SPA deep-link and hosted-traffic checks recorded in `todo.md`. These results do not replace the remaining authenticated Owner/MFA, Read Only, responsive/keyboard, rollback and full operation acceptance.
 
 ## Existing-host upgrade and Debian package
 
