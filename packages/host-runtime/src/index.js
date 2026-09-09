@@ -21,6 +21,11 @@ export {
   NodeRestartError,
   nodeRestartManager,
 } from './node-restart-manager.js';
+export {
+  createNodeRollbackManager,
+  NodeRollbackError,
+  nodeRollbackManager,
+} from './node-rollback-manager.js';
 export { copyStaticArtifact } from './static-artifact-worker.js';
 export {
   createStaticDeploymentManager,
