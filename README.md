@@ -4,7 +4,15 @@ YunPanel is Yunsoft's focused hosting and server control plane for managing Node
 
 The project is intentionally scoped around Yunsoft production needs rather than full Plesk feature parity.
 
-## Current status
+## Target architecture and next work
+
+The 2026-09-09 product direction is a website-centric enterprise interface with explicit domain/subdomain/alias hierarchy, real user authentication, an integrated root/site terminal, and a local privileged panel backend instead of a separate `yun-agent` daemon.
+
+**This is the development target, not the current implementation.** The existing gateway uses an IP allowlist and a shared bootstrap management token; it is not a user login/session system. Do not remove the current access restriction or publish a root backend/terminal before the authentication release gate is satisfied. Hosted applications and build scripts must continue to run as dedicated site users even when the management backend runs as root.
+
+See [plan.md](plan.md) for remaining code/UI work and acceptance criteria, [todo.md](todo.md) for pending real-host/DNS/Plesk/browser validation, and [agents.md](agents.md) for updated development rules. Completed tasks are removed from the two task lists; history remains in Git. A planning change does not mean the target has been implemented or deployed.
+
+## Current implementation
 
 The repository has progressed beyond the initial read-only skeleton. Current implemented foundations include:
 
@@ -17,13 +25,12 @@ The repository has progressed beyond the initial read-only skeleton. Current imp
 - static application release/deploy/rollback foundations,
 - Node.js/systemd deployment with dedicated application users and hardened generated units,
 - health-check-based failed-deploy recovery,
-- guarded Node manual rollback,
-- guarded Node manual restart,
+- guarded Node manual rollback and restart,
 - bounded Node process-status inspection,
 - release/state drift validation between control plane and managed server,
 - installable Debian package with systemd-owned API, agent and restricted web services,
 - fixed-scope APT inspection and self-upgrade jobs with delayed service restart,
-- working navigation for implemented server, application, domain, certificate, job and update surfaces,
+- navigation for implemented server, application, domain, certificate, job and update surfaces,
 - inline controls for enrollment tokens, application lifecycle/status, protected Node environment values, domain staging/activation, certificate operations and queued-job cancellation,
 - separate AES-256-GCM application environment storage,
 - masked secret metadata in normal admin reads,
@@ -32,7 +39,7 @@ The repository has progressed beyond the initial read-only skeleton. Current imp
 - local tests and repository policy validation,
 - no GitHub Actions.
 
-Active Node Milestone 4 work is now focused on safe redacted log transport and its operator UI. Real Ubuntu/systemd validation, secret master-key operations and filesystem permission verification are tracked continuously in `todo.md` rather than being treated as completed by code-only tests.
+Database, Docker lifecycle, mail, backup and audit screens currently expose unavailable/capability states rather than completed management modules. Safe redacted log transport and its operator UI also remain development work. The detailed next-work source is `plan.md`; external validation and operational recovery work stay in `todo.md`.
 
 ## Requirements
 
@@ -46,7 +53,7 @@ npm install
 npm run dev
 ```
 
-Local services:
+Current local services, until the agentless migration is implemented:
 
 - web: `http://127.0.0.1:5173`
 - API: `http://127.0.0.1:3001`
@@ -68,6 +75,8 @@ npm run build
 ./scripts/build-deb.sh 0.2.0-1
 ```
 
-The package keeps runtime state under `/var/lib/yunpanel` and configuration/secrets under `/etc/yunpanel`; package upgrades replace application code and systemd units without overwriting those persistent paths. `scripts/publish-local-apt.sh` can publish a built package into a host-local APT repository for controlled validation.
+The current package keeps runtime state under `/var/lib/yunpanel` and configuration/secrets under `/etc/yunpanel`; package upgrades replace application code and systemd units without overwriting those persistent paths. `scripts/publish-local-apt.sh` can publish a built package into a host-local APT repository for controlled validation.
 
-See [docs/development.md](docs/development.md) for development details, [plan.md](plan.md) for the living roadmap, [todo.md](todo.md) for real-server/Plesk validation work and [agents.md](agents.md) for binding project rules.
+The agentless package migration, authentication bootstrap and PTY dependencies still need implementation and real-host validation. Preserve configuration/state, drain jobs and prove rollback before retiring the old agent service.
+
+See [docs/development.md](docs/development.md) for the existing development setup. Update runtime/package documentation alongside the corresponding code migration rather than presenting the new target as already operational.
