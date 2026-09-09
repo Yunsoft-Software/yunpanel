@@ -63,7 +63,7 @@ Bu dosyada yalnız güvenilir biçimde çalıştırılamayan gerçek ortam doğr
 ## T-UI — P1: Routed workspace gerçek browser kabulü
 
 - [x] Built React uygulamasını gerçek browserda aç; `AuthGate` ilk Owner kurulum ekranını render etti ve login öncesi yalnız assetler ile `/api/auth/session` istendi, management collection requesti oluşmadı.
-- [x] 2026-09-10'da authenticated browser ile Dashboard, Web Siteleri, Sunucular, Veritabanları, Docker, Mail, Yedekler, İşler, Denetim, Ayarlar/Kullanıcılar, Uygulamalar, site detay ve bütün site sekmesi linkleri tıklanarak doğru rotaya geçti. APT package inspect, SSL renew dry-run ve Node status işleri UI'dan kuyruğa alınıp `succeeded` oldu; job dialog açılıp kapandı. Uygulanmamış modüller boş/bozuk görünüm yerine açık durum mesajı gösterdi.
+- [x] 2026-09-10'da authenticated browser ile Dashboard, Web Siteleri, Sunucular, Veritabanları, Docker, Mail, Yedekler, İşler, Denetim, Ayarlar/Kullanıcılar, Uygulamalar, site detay ve bütün site sekmesi linkleri tıklanarak doğru rotaya geçti. APT package inspect, SSL renew dry-run ve Node status işleri UI'dan kuyruğa alınıp `succeeded` oldu; job dialog açılıp kapandı ve `finishedAt` düzeltmesinden sonra tamamlanma zamanı canlıda göründü. Uygulanmamış modüller boş/bozuk görünüm yerine açık durum mesajı gösterdi.
 - [ ] `/dashboard`, `/websites`, `/websites/new`, `/websites/:id/:tab`, `/applications`, `/applications/new`, `/domains`, `/servers`, `/jobs`, `/settings`, `/settings/users` için direct URL, reload, back/forward, invalid route ve reverse-proxy SPA fallback testlerini yap.
 - [ ] Domain/alias search, URL filters/sort, group pagination, parent/child context, collapse/density/per-page preferences, multi-tab storage event ve bozuk/engelli localStorage davranışını test et.
 - [ ] New site, application, env, domain/SSL ve job flows için delayed/401/403/404/409/network/malformed response üret. Dirty form ve uncertain mutation sonucunda kullanıcı verisi sessizce kaybolmamalı/kör retry olmamalı.
@@ -74,16 +74,16 @@ Bu dosyada yalnız güvenilir biçimde çalıştırılamayan gerçek ortam doğr
 
 ## T-LIVE — P0/P1: Canlı panel, package ve rollback kapısı
 
-- [x] `cryptoraichu.website` üzerinde deploy edilen `0.3.0-3` paketini, source API/agent `0.3.0` sürümlerini, Nginx/web/API/agent unitlerini, journal durumunu ve mevcut erişim korumasını gerçek hosttan doğrula.
+- [x] `cryptoraichu.website` üzerinde deploy edilen `0.3.0-4` paketini, source API/agent `0.3.0` sürümlerini, Nginx/web/API/agent unitlerini, journal durumunu ve mevcut erişim korumasını gerçek hosttan doğrula.
 - [x] Owner hesabını oluştur, zorunlu MFA'yı etkinleştir ve authenticated management menülerini canlıda smoke test et. Credential, TOTP secretı ve recovery kodları yalnız Git dışı yerel `0600` dosyada tutuldu.
 - [ ] Owner/MFA sonrası browser console/network kaydını, back/forward/reload ve dört hedef viewport varyantını canlıda tamamla.
 - [x] Production değişikliğinden önce `/etc/yunpanel`, `/var/lib/yunpanel`, auth alanı, master key config, package/unit, Nginx/vhost, cert ve release state için checksum doğrulamalı geri dönüş arşivi al.
 - [ ] Geri dönüş arşivinin restore'unu ayrı test hostunda kanıtla.
 - [x] Aday `.deb` install/upgrade çalıştır; required Node/native dependencies, auth CLI, rotation CLI/runbook, systemd ownership/sandbox ve service restart davranışını doğrula.
-- [ ] `0.3.0-3` paket rollback + eşleşen state/config geri dönüşünü izole test hostunda prova et.
+- [ ] `0.3.0-4` paket rollback + eşleşen state/config geri dönüşünü izole test hostunda prova et.
 - [x] Hosted Node/static sitelerin panel restart/upgrade sırasında çalışmaya devam ettiğini 50 ardışık `200/200` örneğiyle doğrula.
 
-2026-09-09 canlı kabul notu: `cryptoraichu.website` Ubuntu 24.04.5 test hostunda APT ile `0.2.0-1 -> 0.3.0-1 -> 0.3.0-2 -> 0.3.0-3` yükseltildi. Son paket ve aday eşit, `dpkg -V` temiz, failed unit/pending update/reboot gereksinimi sıfır, API/web/agent journal warning sayısı sıfır ve ajan heartbeat sürümü `0.3.0`. Auth schema 2, DB/dizin izinleri `0600/0700`, eski bootstrap bearer kaldırılmış, anonim management `401`, yanlış istemci ve cross-origin mutation `403`. 2026-09-10'da ilk Owner + TOTP MFA enrollment tamamlandı; recovery kodları Git dışı yerel credential dosyasında saklandı. Authenticated menü smoke testi, APT package inspect, SSL renew dry-run ve Node status işleri geçti. Geri dönüş arşivi `/root/yunpanel-backups/yunpanel-pre-0.3.0-20260909T203159Z.tar.gz` altında checksum ve tar okunabilirliğiyle doğrulandı; ayrı host restore provası yapılmadı.
+2026-09-09/10 canlı kabul notu: `cryptoraichu.website` Ubuntu 24.04.5 test hostunda APT ile `0.2.0-1 -> 0.3.0-1 -> 0.3.0-2 -> 0.3.0-3 -> 0.3.0-4` yükseltildi. Son paket ve aday eşit, `dpkg -V` temiz, failed unit/pending update/reboot gereksinimi sıfır, API/web/agent journal warning kaydı yok ve ajan heartbeat sürümü `0.3.0`. Auth schema 2, DB/dizin izinleri `0600/0700`, eski bootstrap bearer kaldırılmış, anonim management `401`, yanlış istemci ve cross-origin mutation `403`. İlk Owner + TOTP MFA enrollment tamamlandı; recovery kodları Git dışı yerel credential dosyasında saklandı. Authenticated menü smoke testi, APT package inspect, SSL renew dry-run ve Node status işleri geçti. Job completion zamanı düzeltmesi `0.3.0-4` paketine panelin kendi upgrade akışıyla kuruldu; reload sonrası Owner oturumu/MFA korundu ve UI gerçek tamamlanma zamanını gösterdi. İlk geri dönüş arşivine ek olarak Owner/MFA verisini tutarlı SQLite backup ile içeren `/root/yunpanel-backups/yunpanel-pre-0.3.0-4-20260909T211941Z.tar.gz` checksum ve tar okunabilirliğiyle doğrulandı; ayrı host restore provası yapılmadı.
 
 ## T-MIGRATION — P1+: Agentless / Website / Plesk gerçek ortam kabulü
 
