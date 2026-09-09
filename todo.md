@@ -4,9 +4,22 @@ Yalnızca kalan dış ortam işleri ve doğrulamalar burada tutulur. Ürün/kod 
 
 ## Çalışma sınırı ve Codex başlangıcı
 
-Canlı `cryptoraichu.website` için bu ortamda görsel/interaktif doğrulama, SSH erişimi veya deployment yapılmadı. Depo incelemesi canlı servis yapılandırmasını kanıtlamaz. Authentication kodunun kurulum ve test sınırları `docs/authentication.md` içindedir; tam workspace/build ve gerçek tarayıcı kabulü aşağıda açık kalır.
+Canlı `cryptoraichu.website` için bu ortamda görsel/interaktif doğrulama, SSH erişimi veya deployment yapılmadı. Depo incelemesi canlı servis yapılandırmasını kanıtlamaz. Authentication kodunun kurulum ve test sınırları `docs/authentication.md`, MFA taslağının uygulanmış backend'i ve açık bağlantıları `docs/mfa.md` içindedir; tam workspace/build ve gerçek tarayıcı kabulü aşağıda açık kalır.
 
 Codex önce güncel branch'i ve üç planlama dosyasını okumalı; kod işlerini `plan.md` sırasıyla küçük commitlerle uygulamalıdır. Bu dosya normal kod işlerini ertelemek için kullanılmaz. Hedef mimari geçişi doğrulamalarında tekrar istenen eski akışlar, yeni agentsiz backend için regresyon testidir; eski testin yapılmadığı anlamına gelmez. Authentication eklenmesi ayrı agent'ın kaldırıldığı veya root terminalin hazır olduğu anlamına gelmez.
+
+## T-MFA — P0: Engellenen bağlantılar ve MFA yayın kabulü
+
+- [ ] Taslak PR #2 ile güncel main değişikliklerini karşılaştır; eşzamanlı domain ve session-client işlerini kaybetmeden normal inceleme/birleştirme sürecini tamamla. Main'deki yeni istemci generation yaklaşımıyla PR'daki `changesSession` sözleşmesini uzlaştır; iki ayrı oturum modeli bırakma, force push yapma.
+- [ ] Bu turda GitHub yazma aracı `AuthGate.jsx` bağlantısını engelledi. Yetkili geliştirme ortamında `plan.md` A kapsamındaki hazır LoginForm/MfaPanel bağlantısını tamamla ve test et. Eski giriş formu MFA-required 202 cevabını tam oturum sanıyor; bu düzeltilmeden gerçek hesapta MFA açma veya taslağı dağıtma. Bu, genel kod işlerini dışarı erteleme değil, somut araç engelidir.
+- [ ] Aynı araç, `auth-http.js` için gecikmiş yetkisiz cevabın yeni session cookie'sini silmesini önleyen takip düzeltmesini de engelledi. HTTP cookie sözleşmesini ve gerçek tarayıcı yarışını `plan.md` A'daki kabul koşuluyla tamamla. İstemcideki generation testini bu sunucu düzeltmesinin yerine sayma.
+- [ ] Tam workspace'i Node 24.11.1+ / npm 11+ üzerinde kur; yeni 33 odaklı testi ve mevcut auth/deploy/Express testlerini native Argon2 ile yeniden çalıştır. Bu turdaki 25 doğrudan Node 22 testi ve 8 Python Argon2 köprülü uyumluluk testi, native Node 24 kabulü değildir. Test köprüsünü ürüne/dependency'lere ekleme; GitHub Actions kullanma.
+- [ ] Gerçek doğrulayıcı cihazla manuel anahtar kurulumu, TOTP/recovery ile giriş, yanlış kod, tekrar kullanım, beş hatalı deneme, süre dolumu, yeni parola denemesinin limiti sıfırlamaması ve iptal akışlarını dene. Telefon/sunucu saat senkronizasyonunu doğrula; sorunu tolerans penceresini büyüterek örtme.
+- [ ] UI bağlantısından sonra iki sekme, arka plan polling, MFA etkinleştirme/recovery yenileme esnasında eski yanıt, logout ve kaybolan mutation response senaryolarını gerçek tarayıcıda test et. Kurtarma kodları bir kez gösterilmeli; erken modal kapanışı veya gecikmiş cevap yeni oturumu/kodları kaybettirmemeli. Formlar, klavye ve mobil boyutlar da doğrulanmalı.
+- [ ] Mevcut `YUNPANEL_SECRET_MASTER_KEY` için güvenli yedek/recovery yolunu doğrula; MFA anahtarı ayrı HKDF türevidir. Eksik/yanlış anahtarla TOTP fail-closed davranışını, parola + geçerli recovery kodu alternatifini ve `reset-mfa <username> --confirm` yerel komutunu test et. Gerçek anahtarları repoya yazma.
+- [ ] Auth schema v1 -> v2 geçişini tutarlı yedek üzerinde test et. Eski kodun v2 veritabanını kabul etmediğini dikkate alarak paket + eşleşen DB yedeği geri dönüşünü prova et; sadece sürüm numarasını düşürme. Eski yedekten dönen parola/oturum/recovery kodlarını tekrar güvenli hale getir.
+- [ ] Paketlenmiş CLI'nin mevcut servis kullanıcısı ve aynı absolute DB yoluyla çalıştığını, MFA reset'in parolayı değiştirmeden tüm session/challenge/recovery kayıtlarını iptal ettiğini doğrula. Yeni cihaz kurulumu ve yerel kurtarma sonrası erişim politikalarını test et.
+- [ ] Owner MFA zorunluluğu, kullanıcı yaşam döngüsü ve gelecekteki terminal/socket iptal kapıları tamamlanmadan IP kısıtını kaldırma veya root/terminal sürümünü public açma. Hazır MFA backend'ini tüm güvenlik planının tamamlanması sayma.
 
 ## T0 — P0: Canlı paneli doğrula ve geçici erişimi koru
 
@@ -32,7 +45,7 @@ Codex önce güncel branch'i ve üç planlama dosyasını okumalı; kod işlerin
 - [ ] `/api/panel/*`, doğrudan API yolları, `/api/dev/*`, eski bootstrap/enrollment/agent yolları ve alternatif dinleme portlarında auth bypass olmadığını kontrol et. Normal yönetim ortak bootstrap tokenıyla devam etmemeli. Agent kaldırılana kadar yalnız kendi kimlik doğrulamasıyla kullanılan transport rotalarını browser yönetiminden ayrı doğrula.
 - [ ] Gerçek HTTPS reverse proxy arkasında cookie `Secure`/`HttpOnly`/host-only/SameSite davranışını, trusted-proxy/IP header politikasını, CSRF ve cross-origin reddini doğrula. Gateway arkasındaki ortak peer rate-limit kovasını gerçek kullanımda ölç.
 - [ ] Login rate limit, hatalı parola, idle/absolute timeout, oturum yenileme, logout ve parola değişimi senaryolarını dene. Arka plan polling idle süresini uzatmamalı. Kullanıcı yönetimi eklendiğinde devre dışı bırakma, Read Only mutasyon/terminal reddi ve son Owner korumasını da doğrula.
-- [ ] MFA geliştirildikten sonra TOTP kurulumu, hatalı kod, tek kullanımlık recovery kodu ve yerel MFA kurtarmayı dene. Kurtarma/rol değişiminden sonra açık oturumları ve terminal eklendiğinde canlı bağlantı yetkilerini yeniden doğrula.
+- [ ] MFA arayüz bağlantısı tamamlandıktan sonra T-MFA kabulünü çalıştır. Kurtarma/rol değişiminden sonra açık oturumları ve terminal eklendiğinde canlı bağlantı yetkilerini yeniden doğrula.
 
 ## T2 — P1: Agentsiz backend ve paket geçişi — plan B/J
 
