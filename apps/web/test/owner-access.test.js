@@ -31,8 +31,8 @@ test('panel permissions are explicit for read-only and wildcard only for managem
 
 test('recovery acknowledgement and busy state block leaving enrollment', () => {
   assert.equal(enrollmentCanContinue({ session }), false);
-  assert.equal(enrollmentCanContinue({ session: ready, sensitive: true }), false;
-  assert.equal(enrollmentCanContinue({ session: ready, busy: true }), false;
+  assert.equal(enrollmentCanContinue({ session: ready, sensitive: true }), false);
+  assert.equal(enrollmentCanContinue({ session: ready, busy: true }), false);
   assert.equal(enrollmentCanContinue({ session: ready }), true);
   assert.equal(enrollmentCanContinue({ session: reader }), false);
 });
