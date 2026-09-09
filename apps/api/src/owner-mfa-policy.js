@@ -1,4 +1,5 @@
 import { AuthError } from './auth-error.js';
+import { describePanelAccess } from './panel-access.js';
 
 /** Evaluate live factor state, not client fields or a cached login-time role. */
 export function createOwnerMfaPolicy({ store, required = true }) {
@@ -14,14 +15,14 @@ export function createOwnerMfaPolicy({ store, required = true }) {
     }
     // The optional development policy does not inspect crypto state. Login still
     // requires a second factor whenever the underlying account has one enrolled.
-    return {
+    return describePanelAccess({
       ...session,
       security: {
         ownerMfaRequired: owner && required,
         enrollmentRequired: owner && required && !enrolled,
         managementAllowed: owner && (!required || enrolled),
       },
-    };
+    });
   }
 
   function requireManagement(session) {

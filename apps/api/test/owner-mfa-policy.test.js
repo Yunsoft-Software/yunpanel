@@ -51,3 +51,14 @@ test('optional development policy never promotes read-only accounts', () => {
   assert.throws(() => policy.requireManagement({ ...owner, user: { role: 'read_only' } }), { status: 403 });
   assert.throws(() => createOwnerMfaPolicy({ store: {}, required: 'false' }), TypeError);
 });
+
+test('session descriptions publish only server-derived panel capabilities', () => {
+  const { policy, enable } = fixture();
+  assert.deepEqual(policy.describe(owner).access, { mode: 'self_service', permissions: [] });
+  enable(true);
+  assert.deepEqual(policy.describe(owner).access, { mode: 'management', permissions: ['*'] });
+  assert.deepEqual(policy.describe({ ...owner, user: { id: 'reader', role: 'read_only' } }).access, {
+    mode: 'read_only',
+    permissions: ['servers.read', 'applications.read', 'domains.read', 'certificates.read'],
+  });
+});
