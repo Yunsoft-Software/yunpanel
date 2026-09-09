@@ -1,0 +1,9 @@
+/* The theme is imported before AuthGate renders. Never offset an enrollment
+   header as though the management sidebar were already mounted. */
+.authenticated-panel:not(:has(.workspace-shell)) .auth-sessionbar { padding: 10px 24px; position: static; }
+.workspace-shell h3 { font-size: 14px; }
+.workspace-shell .ws-section { box-shadow: none; }
+.ws-sidebar .ws-button.ws-nav-close { min-width: 32px; padding: 5px; }
+.workspace-shell .ws-table td, .workspace-shell .ws-table th { max-width: 420px; overflow-wrap: anywhere; }
+.ws-modal { overscroll-behavior: contain; }
+@media (max-width: 760px) { .authenticated-panel:not(:has(.workspace-shell)) .auth-sessionbar { padding: 10px 16px; } }
