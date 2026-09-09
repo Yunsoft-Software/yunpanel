@@ -7,6 +7,10 @@ import WebsitesPage from './WebsitesPage.jsx';
 import NewWebsitePage from './NewWebsitePage.jsx';
 import SiteDetailPage from './SiteDetailPage.jsx';
 import ApplicationsPage from './ApplicationsPage.jsx';
+import ReadOnlyDashboardPage from './ReadOnlyDashboardPage.jsx';
+import ReadOnlyWebsitesPage from './ReadOnlyWebsitesPage.jsx';
+import ReadOnlySitePage from './ReadOnlySitePage.jsx';
+import ReadOnlyServersPage from './ReadOnlyServersPage.jsx';
 import { AdvancedDomainsPage, CapabilityPage, JobsPage, NotFoundPage, ServersPage, SettingsPage } from './OperationsPages.jsx';
 import UsersPage from './UsersPage.jsx';
 
@@ -17,20 +21,25 @@ function ManagementRoute({ children }) {
   const { canManage } = usePanelSession();
   return canManage ? children : <Navigate to="/dashboard" replace />;
 }
+function ScopedRoute({ management, readOnly }) {
+  const { canManage } = usePanelSession();
+  return canManage ? management : readOnly;
+}
 const manage = (element) => <ManagementRoute>{element}</ManagementRoute>;
+const scoped = (management, readOnly) => <ScopedRoute management={management} readOnly={readOnly} />;
 function createWorkspaceRouter() {
   return createBrowserRouter([{
     element: <WorkspaceLayout />, errorElement: <RouteFailure />,
     children: [
       { index: true, element: <Navigate to="/dashboard" replace /> },
-      { path: 'dashboard', element: <DashboardPage /> },
-      { path: 'websites', element: <WebsitesPage /> },
+      { path: 'dashboard', element: scoped(<DashboardPage />, <ReadOnlyDashboardPage />) },
+      { path: 'websites', element: scoped(<WebsitesPage />, <ReadOnlyWebsitesPage />) },
       { path: 'websites/new', element: manage(<NewWebsitePage />) },
-      { path: 'websites/:websiteId/:tab?', element: <SiteDetailPage /> },
+      { path: 'websites/:websiteId/:tab?', element: scoped(<SiteDetailPage />, <ReadOnlySitePage />) },
       { path: 'applications', element: manage(<ApplicationsPage />) },
       { path: 'applications/new', element: manage(<ApplicationsPage create />) },
       { path: 'domains', element: manage(<AdvancedDomainsPage />) },
-      { path: 'servers', element: <ServersPage /> },
+      { path: 'servers', element: scoped(<ServersPage />, <ReadOnlyServersPage />) },
       { path: 'jobs', element: manage(<JobsPage />) },
       { path: 'settings', element: manage(<SettingsPage />) },
       { path: 'settings/users', element: manage(<UsersPage />) },
