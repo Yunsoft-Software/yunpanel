@@ -4,7 +4,7 @@ import path from 'node:path';
 import { rollbackSecretMasterKey, rotateSecretMasterKey } from '../apps/api/src/secret-master-key-rotation.js';
 
 function usage() {
-  return 'Usage: node scripts/rotate-secret-master-key.mjs rotate --confirm-offline --backup-dir <dir> --new-key-file <file> [--current-key-file <file>] | rollback --confirm-offline --backup-dir <dir>';
+  return 'Usage: node scripts/rotate-secret-master-key.mjs rotate --confirm-offline --backup-dir <dir> --new-key-file <file> [--current-key-file <file> | --current-env-file <file>] | rollback --confirm-offline --backup-dir <dir>';
 }
 
 function parseOptions(values) {
@@ -16,7 +16,7 @@ function parseOptions(values) {
       options.set(name, true);
       continue;
     }
-    if (!['--backup-dir', '--new-key-file', '--current-key-file'].includes(name)) throw new Error(`Unknown option ${name}`);
+    if (!['--backup-dir', '--new-key-file', '--current-key-file', '--current-env-file'].includes(name)) throw new Error(`Unknown option ${name}`);
     const value = values[index + 1];
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${name}`);
     if (options.has(name)) throw new Error(`Duplicate option ${name}`);
@@ -26,11 +26,41 @@ function parseOptions(values) {
   return options;
 }
 
-async function readPrivateKeyFile(filePath) {
+async function readPrivateTextFile(filePath, label) {
   const resolved = path.resolve(filePath);
   const metadata = await lstat(resolved);
-  if (!metadata.isFile() || (metadata.mode & 0o077) !== 0) throw new Error('Key file must be a private regular file with no group/other permissions');
-  return (await readFile(resolved, 'utf8')).trim();
+  if (!metadata.isFile() || (metadata.mode & 0o077) !== 0) throw new Error(`${label} must be a private regular file with no group/other permissions`);
+  if (metadata.size > 64 * 1024) throw new Error(`${label} is unexpectedly large`);
+  return { path: resolved, text: await readFile(resolved, 'utf8') };
+}
+
+async function readPrivateKeyFile(filePath) {
+  const { text } = await readPrivateTextFile(filePath, 'Key file');
+  return text.trim();
+}
+
+function unquoteEnvironmentValue(value) {
+  const trimmed = value.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+async function readKeyFromEnvironmentFile(filePath) {
+  const { text } = await readPrivateTextFile(filePath, 'Environment file');
+  const values = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const match = /^YUNPANEL_SECRET_MASTER_KEY\s*=\s*(.*)$/.exec(line);
+    if (!match) continue;
+    const value = unquoteEnvironmentValue(match[1]);
+    if (!value || /\s/.test(value)) throw new Error('YUNPANEL_SECRET_MASTER_KEY in the environment file has unsupported whitespace or quoting');
+    values.push(value);
+  }
+  if (values.length !== 1) throw new Error('Environment file must contain exactly one YUNPANEL_SECRET_MASTER_KEY assignment');
+  return values[0];
 }
 
 async function readOrCreateNextKey(filePath) {
@@ -73,7 +103,7 @@ try {
   const paths = storePaths();
 
   if (command === 'rollback') {
-    if (options.has('--new-key-file') || options.has('--current-key-file')) throw new Error(usage());
+    if (options.has('--new-key-file') || options.has('--current-key-file') || options.has('--current-env-file')) throw new Error(usage());
     const result = await rollbackSecretMasterKey({ ...paths, backupDirectory });
     console.log(`Master-key data rollback complete. Backup: ${path.resolve(backupDirectory)}`);
     console.log(`Restored ${result.counts?.mfa ?? 0} active MFA, ${result.counts?.mfaPending ?? 0} pending MFA and ${result.counts?.applicationSecrets ?? 0} application secret record(s).`);
@@ -81,10 +111,13 @@ try {
   } else {
     const newKeyFile = options.get('--new-key-file');
     if (!newKeyFile) throw new Error(usage());
+    if (options.has('--current-key-file') && options.has('--current-env-file')) throw new Error('Choose only one of --current-key-file or --current-env-file');
     const currentMasterKey = options.get('--current-key-file')
       ? await readPrivateKeyFile(options.get('--current-key-file'))
-      : process.env.YUNPANEL_SECRET_MASTER_KEY;
-    if (!currentMasterKey) throw new Error('Current master key is required via YUNPANEL_SECRET_MASTER_KEY or --current-key-file');
+      : options.get('--current-env-file')
+        ? await readKeyFromEnvironmentFile(options.get('--current-env-file'))
+        : process.env.YUNPANEL_SECRET_MASTER_KEY;
+    if (!currentMasterKey) throw new Error('Current master key is required via YUNPANEL_SECRET_MASTER_KEY, --current-key-file or --current-env-file');
     const next = await readOrCreateNextKey(newKeyFile);
     const result = await rotateSecretMasterKey({
       ...paths,
