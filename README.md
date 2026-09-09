@@ -8,9 +8,11 @@ The project is intentionally scoped around Yunsoft production needs rather than 
 
 The product direction is a website-centric enterprise interface with explicit domain/subdomain/alias hierarchy, an integrated root/site terminal, and a local privileged panel backend instead of a separate `yun-agent` daemon.
 
-**The complete target is not implemented yet.** Local Owner setup, user login/logout, persistent sessions, password changes and recovery are now implemented and wired to the API and React entry points. The gateway retains its IP allowlist as an additional restriction but no longer injects a shared administrator token. TOTP, user administration, the agentless/root backend, terminal and website hierarchy remain planned work. Do not remove the current access restriction or publish a root backend/terminal before the remaining security release gate is satisfied.
+**The complete target is not implemented yet.** Local Owner setup, login/logout, persistent sessions, password changes/recovery, TOTP enrollment and MFA login/recovery are wired to the API and React entry points. An explicit domain-parent model, searchable domain tree and subdomain form are also implemented. The gateway retains its IP allowlist as an additional restriction but no longer injects a shared administrator token.
 
-See [plan.md](plan.md) for remaining code/UI work and acceptance criteria, [todo.md](todo.md) for pending real-host/DNS/Plesk/browser validation, and [agents.md](agents.md) for development rules. Completed tasks leave the task lists; history remains in Git. Repository changes are not a live deployment.
+Mandatory MFA policy for the future root release, user administration, the agentless/root backend, terminal, complete Website model and enterprise site-detail workspace remain planned work. Do not remove the current access restriction or publish a root backend/terminal before the remaining security release gate is satisfied.
+
+See [plan.md](plan.md) for remaining code/UI work and acceptance criteria, [todo.md](todo.md) for pending real-host/DNS/Plesk/browser validation, and [agents.md](agents.md) for development rules. Completed tasks leave the task lists; history remains in Git. Unless the user explicitly requests otherwise, work directly on `main` in small commits without creating another branch. Repository changes are not a live deployment.
 
 ## Current implementation
 
@@ -20,10 +22,13 @@ Implemented foundations include:
 - initial Owner setup, login and account/password/session-management interface,
 - Argon2id password hashing and private SQLite user/session persistence,
 - cookie-based HTTP authentication, Origin/CSRF protection, persistent login throttling and session expiry/revocation,
-- local one-time setup-token and password-recovery CLI,
+- encrypted TOTP enrollment, a separate MFA login step, one-use recovery codes, regeneration and factor removal,
+- stale-response protection during session changes, idle/absolute expiry warnings and explicit idle extension,
+- local one-time setup-token, password-recovery and confirmed MFA-reset CLI,
 - Node.js control-plane API with a session-authenticated network entry point,
 - allowlisted `yun-agent` operation protocol, still retained until the agentless migration,
 - server enrollment, heartbeat and read-only inventory flows,
+- explicit domain/subdomain parent references, searchable/collapsible hierarchy and parent-bound creation form,
 - Nginx/domain configuration staging and activation foundations,
 - ACME certificate issue/renew control-plane flows,
 - static application release/deploy/rollback foundations,
@@ -40,7 +45,7 @@ Implemented foundations include:
 - local tests and repository policy validation,
 - no GitHub Actions.
 
-Database, Docker lifecycle, mail, backup and audit screens currently expose unavailable/capability states rather than completed management modules. Safe redacted log transport, the enterprise website workspace and agentless operations remain development work.
+Database, Docker lifecycle, mail, backup and audit screens currently expose unavailable/capability states rather than completed management modules. Safe redacted log transport, the enterprise website workspace and agentless operations remain development work. MFA setup currently uses manual authenticator-key entry, not QR rendering.
 
 ## Requirements
 
@@ -60,7 +65,7 @@ Open `http://127.0.0.1:5173`. In another terminal at the repository root, genera
 npm run auth -- setup-token
 ```
 
-Complete the Owner form and then sign in. No default credentials are created. The CLI runs in the API workspace to match its default state directory; explicit API store/database overrides must also be provided to the CLI.
+Complete the Owner form and then sign in. No default credentials are created. The CLI runs in the API workspace to match its default state directory; explicit API store/database overrides must also be provided to the CLI. MFA enrollment requires the configured existing secret master key; follow [docs/mfa.md](docs/mfa.md) rather than replacing a working key.
 
 Current local services, until the agentless migration:
 
@@ -74,11 +79,11 @@ Run the complete repository validation on a fully installed workspace:
 npm run check
 ```
 
-The auth increment's focused tests and environment limitations are recorded in [docs/authentication.md](docs/authentication.md). A focused test run is not a complete build or live-server validation.
+Focused validation and its limitations are recorded in [docs/authentication.md](docs/authentication.md), [docs/mfa.md](docs/mfa.md) and [docs/domain-hierarchy.md](docs/domain-hierarchy.md). A focused test run is not a complete build, rendered-browser test or live-server validation.
 
 ## Existing-host upgrade and Debian package
 
-**Before upgrading:** configure the same exact HTTPS `YUNPANEL_PUBLIC_ORIGIN` in both API and web environments. The new API fails closed if this is absent. Set a private auth database path inside the API service's writable state directory; preserve the IP restriction and independent SSH access. Follow [docs/authentication.md](docs/authentication.md) for setup, recovery, database permissions and consistent SQLite backup.
+**Before upgrading:** configure the same exact HTTPS `YUNPANEL_PUBLIC_ORIGIN` in both API and web environments. The API fails closed if this is absent. Set a private auth database path inside the API service's writable state directory; preserve the IP restriction and independent SSH access. Follow [docs/authentication.md](docs/authentication.md) for setup, recovery, database permissions and consistent SQLite backup, and [docs/mfa.md](docs/mfa.md) for schema-2 migration and MFA key/recovery requirements.
 
 On an Ubuntu 24.04 build host with the required Node runtime and `dpkg-deb`:
 
@@ -88,8 +93,8 @@ npm run build
 ./scripts/build-deb.sh 0.2.0-1
 ```
 
-Use a new package version when publishing a new candidate rather than overwriting an existing APT release. No release or live deployment is performed merely by updating these sources.
+The version above is the existing packaging example, not a new release. Use a new package version when publishing a candidate rather than overwriting an existing APT release. No release or live deployment is performed merely by updating these sources.
 
-The package keeps runtime state under `/var/lib/yunpanel` and configuration/secrets under `/etc/yunpanel`. `scripts/publish-local-apt.sh` supports a host-local APT repository for controlled validation. The authentication package changes still require a real install/upgrade test. The agentless package migration and PTY dependencies remain to be implemented; preserve state, drain jobs and prove rollback before retiring the old agent service.
+The package keeps runtime state under `/var/lib/yunpanel` and configuration/secrets under `/etc/yunpanel`. `scripts/publish-local-apt.sh` supports a host-local APT repository for controlled validation. Authentication/MFA package changes still require a real install/upgrade test. The agentless package migration and PTY dependencies remain to be implemented; preserve state, drain jobs and prove rollback before retiring the old agent service.
 
 See [docs/development.md](docs/development.md) for the existing core/agent development setup; [docs/authentication.md](docs/authentication.md) defines the current network authentication boundary and supersedes old bootstrap-token management examples.
