@@ -13,7 +13,7 @@ import { reconcileCompletedJob } from './job-reconciliation.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 
-export const API_VERSION = '0.2.0';
+export const API_VERSION = '0.3.0';
 
 function bearerToken(request) {
   const header = request.headers.authorization;

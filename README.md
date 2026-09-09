@@ -80,7 +80,7 @@ On an Ubuntu 24.04 build host with the required runtime and `dpkg-deb`:
 ```bash
 npm install
 npm run check
-./scripts/build-deb.sh 0.2.0-1
+./scripts/build-deb.sh 0.3.0-1
 ```
 
 The package version above is the existing example, not a new release. Use a new version for a candidate rather than overwriting an APT release. Deploy matching API and built web assets only after T-UI/T1 acceptance. Verify HTTPS deep links, browser back/forward, expired sessions, MFA setup and the preserved advanced operations against the real package. Model tests alone are not rollout approval.
