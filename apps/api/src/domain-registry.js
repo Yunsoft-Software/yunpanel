@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { DomainHierarchyError, validateDomainHierarchy, validateDomainParent } from './domain-hierarchy.js';
 import { DomainValidationError, normalizeDomainSet } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
@@ -22,7 +23,13 @@ function emptyState() {
 }
 
 function publicDomain(domain) {
-  return { ...domain };
+  return {
+    ...domain,
+    aliases: [...domain.aliases],
+    target: { ...domain.target },
+    parentDomainId: domain.parentDomainId ?? null,
+    kind: domain.parentDomainId == null ? 'domain' : 'subdomain',
+  };
 }
 
 function validateTarget(targetType, target) {
@@ -107,6 +114,12 @@ export function createDomainRegistry({
         if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.domains)) {
           throw new Error('unsupported or invalid domain registry state');
         }
+        try {
+          validateDomainHierarchy(parsed.domains);
+        } catch (error) {
+          if (error instanceof DomainHierarchyError) throw new DomainRegistryError(error.code, error.message, error.status);
+          throw error;
+        }
         state = parsed;
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
@@ -126,6 +139,7 @@ export function createDomainRegistry({
     targetType,
     target,
     httpsMode = 'off',
+    parentDomainId = null,
   }) {
     await ensureInitialized();
 
@@ -140,6 +154,12 @@ export function createDomainRegistry({
     }
 
     const normalized = normalizeDomains(primaryDomain, aliases);
+    try {
+      validateDomainParent(state.domains, { serverId, primaryDomain: normalized.primary, parentDomainId });
+    } catch (error) {
+      if (error instanceof DomainHierarchyError) throw new DomainRegistryError(error.code, error.message, error.status);
+      throw error;
+    }
     const requestedNames = new Set([normalized.primary, ...normalized.aliases]);
     const conflict = state.domains.find((domain) => ownedNames(domain).some((name) => requestedNames.has(name)));
     if (conflict) {
@@ -151,6 +171,7 @@ export function createDomainRegistry({
       id: randomUUID(),
       serverId,
       primaryDomain: normalized.primary,
+      parentDomainId,
       aliases: normalized.aliases,
       targetType,
       target: validateTarget(targetType, target),
