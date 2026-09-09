@@ -5,6 +5,7 @@ import { createApp } from '../src/app.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -33,7 +34,6 @@ async function requestJson(url, { method = 'GET', token, body } = {}) {
 }
 
 test('domain stage and activation accept only the strict agent result schema', async () => {
-  const adminToken = 'strict-domain-admin-token';
   const serverRegistry = createServerRegistry();
   const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'strict-domain-flow' });
   const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'strict-domain-host' });
@@ -41,18 +41,16 @@ test('domain stage and activation accept only the strict agent result schema', a
     serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
   });
   const jobRegistry = createJobRegistry();
-  const app = createApp({
+  const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
     domainRegistry,
     jobRegistry,
-    adminToken,
-  });
+  }));
 
   await withServer(app, async (baseUrl) => {
     const created = await requestJson(`${baseUrl}/api/domains`, {
       method: 'POST',
-      token: adminToken,
       body: {
         serverId: enrolled.server.id,
         primaryDomain: 'strict.example.com',
@@ -62,7 +60,7 @@ test('domain stage and activation accept only the strict agent result schema', a
     });
     const domain = created.payload.data;
 
-    await requestJson(`${baseUrl}/api/domains/${domain.id}/stage`, { method: 'POST', token: adminToken });
+    await requestJson(`${baseUrl}/api/domains/${domain.id}/stage`, { method: 'POST' });
     const stageClaim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
       token: enrolled.agentToken,
     });
@@ -83,7 +81,7 @@ test('domain stage and activation accept only the strict agent result schema', a
     assert.equal(stageResult.response.status, 200);
     assert.equal((await domainRegistry.getDomain(domain.id)).state, 'staged');
 
-    await requestJson(`${baseUrl}/api/domains/${domain.id}/activate`, { method: 'POST', token: adminToken });
+    await requestJson(`${baseUrl}/api/domains/${domain.id}/activate`, { method: 'POST' });
     const activationClaim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
       token: enrolled.agentToken,
     });
@@ -108,7 +106,6 @@ test('domain stage and activation accept only the strict agent result schema', a
 });
 
 test('completed jobs are not observable before domain reconciliation finishes', async () => {
-  const adminToken = 'reconciliation-barrier-admin-token';
   const serverRegistry = createServerRegistry();
   const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'reconciliation-barrier' });
   const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'reconciliation-host' });
@@ -126,18 +123,16 @@ test('completed jobs are not observable before domain reconciliation finishes', 
     return originalMarkStaged(...args);
   };
   const jobRegistry = createJobRegistry();
-  const app = createApp({
+  const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
     domainRegistry,
     jobRegistry,
-    adminToken,
-  });
+  }));
 
   await withServer(app, async (baseUrl) => {
     const created = await requestJson(`${baseUrl}/api/domains`, {
       method: 'POST',
-      token: adminToken,
       body: {
         serverId: enrolled.server.id,
         primaryDomain: 'barrier.example.com',
@@ -146,7 +141,7 @@ test('completed jobs are not observable before domain reconciliation finishes', 
       },
     });
     const domain = created.payload.data;
-    const staged = await requestJson(`${baseUrl}/api/domains/${domain.id}/stage`, { method: 'POST', token: adminToken });
+    const staged = await requestJson(`${baseUrl}/api/domains/${domain.id}/stage`, { method: 'POST' });
     const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
       token: enrolled.agentToken,
     });
@@ -169,7 +164,7 @@ test('completed jobs are not observable before domain reconciliation finishes', 
     await reconciliationEntered;
 
     let readSettled = false;
-    const jobRead = requestJson(`${baseUrl}/api/jobs/${staged.payload.data.id}`, { token: adminToken })
+    const jobRead = requestJson(`${baseUrl}/api/jobs/${staged.payload.data.id}`)
       .then((result) => {
         readSettled = true;
         return result;
