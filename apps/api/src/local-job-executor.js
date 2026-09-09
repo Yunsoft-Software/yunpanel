@@ -1,9 +1,4 @@
-function safeExecutionError(error) {
-  return {
-    code: typeof error?.code === 'string' && error.code ? error.code.slice(0, 120) : 'local_operation_failed',
-    message: typeof error?.message === 'string' && error.message ? error.message.slice(0, 500) : 'Local host operation failed',
-  };
-}
+import { safeLocalOperationError as safeExecutionError } from './local-execution-error.js';
 
 const FAULTS = Object.freeze({
   claim: ['local_claim_unconfirmed', 'Local job claim could not be confirmed. Inspect stored job state before recovery.'],

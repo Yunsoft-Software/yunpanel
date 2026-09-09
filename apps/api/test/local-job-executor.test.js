@@ -55,14 +55,14 @@ test('local operation failure becomes a terminal failed job and still reconciles
   const executor = createLocalJobExecutor({
     serverId,
     jobRegistry,
-    executeOperation: async () => { const error = new Error('apt failed with private details'); error.code = 'apt_failed'; throw error; },
+    executeOperation: async () => { const error = new Error('apt failed with private details'); error.code = 'apt_inspection_failed'; throw error; },
     reconcileCompletedJob: async (job) => { reconciled = job; return { reconciled: true }; },
   });
 
   const result = await executor.runOnce();
   assert.equal(result.job.status, 'failed');
-  assert.equal(result.job.error.code, 'apt_failed');
-  assert.equal(result.job.error.message, 'apt failed with private details');
+  assert.equal(result.job.error.code, 'apt_inspection_failed');
+  assert.equal(result.job.error.message, 'Unable to inspect the YunPanel APT package.');
   assert.equal(reconciled.id, queued.id);
   assert.equal(reconciled.status, 'failed');
 });
