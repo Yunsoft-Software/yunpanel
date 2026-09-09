@@ -6,5 +6,9 @@
   "exports": "./src/index.js",
   "scripts": {
     "test": "node --test"
+  },
+  "dependencies": {
+    "@yunpanel/config-templates": "*",
+    "@yunpanel/shared": "*"
   }
 }
