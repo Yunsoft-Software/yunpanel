@@ -10,6 +10,14 @@ const FAULTS = Object.freeze({
 function faultError(fault) {
   return Object.assign(new Error(fault.message), { name: 'LocalExecutorError', ...fault });
 }
+function unsupportedOperationError(jobId) {
+  return Object.assign(new Error('The next queued operation has not been migrated to the local runtime.'), {
+    name: 'LocalExecutorError',
+    code: 'local_operation_not_migrated',
+    phase: 'select',
+    jobId,
+  });
+}
 function validClaim(claim, serverId) {
   const { job, envelope } = claim ?? {};
   return job && typeof job.id === 'string' && job.id.length >= 8 && job.id.length <= 128
@@ -18,23 +26,35 @@ function validClaim(claim, serverId) {
     && envelope.operation === job.operation && envelope.payload
     && typeof envelope.payload === 'object' && !Array.isArray(envelope.payload);
 }
+function validQueuedJob(job, serverId) {
+  return job && typeof job.id === 'string' && job.id.length >= 8 && job.id.length <= 128
+    && job.serverId === serverId && job.status === 'queued' && typeof job.operation === 'string';
+}
 
 /**
  * Executes one already-authorized job inside the API process. An uncertain
  * claim, result write or reconciliation HALTS this instance, including manual
  * runOnce/start calls. Recovery must inspect durable and host state first; this
  * is not a retry engine and does not claim crash-safe exactly-once execution.
+ *
+ * When supportsOperation is supplied, the executor inspects the head of the
+ * local server queue before claiming it. An unmigrated operation is left queued
+ * and rejected without changing attempts/status, so a partial migration cannot
+ * accidentally consume work that still belongs to the legacy transport.
  */
 export function createLocalJobExecutor({
   serverId,
   jobRegistry,
   executeOperation,
   reconcileCompletedJob,
+  supportsOperation = null,
   pollMs = 1000,
   onError = () => {},
 } = {}) {
   if (typeof serverId !== 'string' || !serverId) throw new Error('Local executor requires a serverId');
   if (!jobRegistry || typeof jobRegistry.claimNext !== 'function' || typeof jobRegistry.complete !== 'function') throw new Error('Local executor requires a job registry');
+  if (supportsOperation !== null && typeof supportsOperation !== 'function') throw new Error('Local executor operation selector must be a function');
+  if (supportsOperation && typeof jobRegistry.listJobs !== 'function') throw new Error('Local executor operation selection requires job listing');
   if (typeof executeOperation !== 'function') throw new Error('Local executor requires an operation handler');
   if (typeof reconcileCompletedJob !== 'function') throw new Error('Local executor requires job reconciliation');
   if (!Number.isInteger(pollMs) || pollMs < 50 || pollMs > 60_000) throw new Error('Local executor poll interval is invalid');
@@ -55,12 +75,42 @@ export function createLocalJobExecutor({
     return faultError(fault);
   }
 
+  async function selectNextJob() {
+    if (!supportsOperation) return null;
+    let queued;
+    try {
+      queued = await jobRegistry.listJobs({ serverId, status: 'queued' });
+    } catch {
+      throw halt('claim');
+    }
+    if (!Array.isArray(queued)) throw halt('claim');
+    const next = queued[0] ?? null;
+    if (!next) return null;
+    if (!validQueuedJob(next, serverId)) throw halt('claim');
+    let supported = false;
+    try { supported = supportsOperation(next.operation) === true; }
+    catch { throw halt('execute', next.id); }
+    if (!supported) throw unsupportedOperationError(next.id);
+    return next.id;
+  }
+
   async function work() {
+    const expectedJobId = await selectNextJob();
     let claim;
     try { claim = await jobRegistry.claimNext(serverId); }
     catch { throw halt('claim'); }
-    if (claim === null) return { claimed: false, job: null, reconciliation: null };
+    if (claim === null) {
+      if (expectedJobId) throw halt('claim', expectedJobId);
+      return { claimed: false, job: null, reconciliation: null };
+    }
     if (!validClaim(claim, serverId)) throw halt('execute');
+    if (expectedJobId && claim.job.id !== expectedJobId) throw halt('execute', claim.job.id);
+    if (supportsOperation) {
+      let supported = false;
+      try { supported = supportsOperation(claim.job.operation) === true; }
+      catch { throw halt('execute', claim.job.id); }
+      if (!supported) throw halt('execute', claim.job.id);
+    }
 
     // A host error is the ONLY reason to record a failed operation. Storage and
     // reconciliation failures must never be recast as a host failure.
