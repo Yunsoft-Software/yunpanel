@@ -21,7 +21,7 @@ export function loginOutcome(value) {
 }
 
 export async function passwordLogin(username, password, signal) {
-  return loginOutcome(await authRequest('login', { method: 'POST', body: { username, password }, signal, notifyExpired: false }));
+  return loginOutcome(await authRequest('login', { method: 'POST', body: { username, password }, signal, notifyExpired: false, changesSession: true }));
 }
 
 export function proofInput(code, method = 'totp') {
@@ -33,7 +33,7 @@ export function proofInput(code, method = 'totp') {
 }
 
 export async function verifyMfa(code, method, signal) {
-  return requireSession(await authRequest('mfa/verify', { method: 'POST', body: proofInput(code, method), signal, notifyExpired: false }));
+  return requireSession(await authRequest('mfa/verify', { method: 'POST', body: proofInput(code, method), signal, notifyExpired: false, changesSession: true }));
 }
 
 export async function rotateMfa(operation, body, signal) {

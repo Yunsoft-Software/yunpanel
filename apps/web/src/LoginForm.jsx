@@ -44,7 +44,7 @@ export default function LoginForm({ setupRequired, notice, onLogin, onSetup }) {
       } else {
         const outcome = await passwordLogin(username, password, controller.signal);
         setPassword('');
-        if (outcome.status === 'mfa') { setNow(Date.now()); setChallenge(outcome); }
+        if (outcome.status === 'mfa') { setNow(Date.now()); setMethod('totp'); setCode(''); setChallenge(outcome); }
         else onLogin(outcome.session);
       }
     } catch (failure) {
@@ -85,7 +85,7 @@ export default function LoginForm({ setupRequired, notice, onLogin, onSetup }) {
         <fieldset disabled={busy}>
           {challenge ? <>
             <label>Doğrulama yöntemi<select value={method} onChange={(event) => { setMethod(event.target.value); setCode(''); setError(''); }}><option value="totp">Doğrulayıcı uygulama</option><option value="recovery">Kurtarma kodu</option></select></label>
-            <label>{method === 'totp' ? '6 haneli kod' : 'Tek kullanımlık kurtarma kodu'}<input ref={codeInput} type="text" inputMode={method === 'totp' ? 'numeric' : 'text'} autoComplete="one-time-code" autoCapitalize="none" spellCheck={false} maxLength={method === 'totp' ? 6 : 64} pattern={method === 'totp' ? '[0-9]{6}' : undefined} value={code} onChange={(event) => setCode(event.target.value)} required /></label>
+            <label>{method === 'totp' ? '6 haneli kod' : 'Tek kullanımlık kurtarma kodu'}<input key={method} ref={codeInput} type="text" inputMode={method === 'totp' ? 'numeric' : 'text'} autoComplete={method === 'totp' ? 'one-time-code' : 'off'} autoCapitalize="none" spellCheck={false} maxLength={method === 'totp' ? 6 : 64} pattern={method === 'totp' ? '[0-9]{6}' : undefined} value={code} onChange={(event) => setCode(event.target.value)} required /></label>
             <button className="auth-primary" disabled={expired} type="submit">{busy ? 'Doğrulanıyor…' : 'Doğrula ve giriş yap'}</button>
             <button type="button" className="auth-secondary" onClick={cancel}>Girişe dön</button>
           </> : <>

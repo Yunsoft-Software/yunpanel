@@ -8,52 +8,77 @@ export function setSession(session) {
   csrfToken = next;
 }
 
-export function sessionTransitionPending() { return transitioning; }
-export function beginSessionTransition() {
-  if (transitioning) throw new DOMException('Another authentication change is in progress.', 'AbortError');
-  transitioning = true;
-  version += 1;
-  return () => { transitioning = false; version += 1; };
+function staleSessionError() {
+  const error = new Error('The request belongs to an obsolete session.');
+  error.name = 'AbortError';
+  error.code = 'session_superseded';
+  error.status = 409;
+  return error;
 }
 
+export function sessionTransitionPending() { return transitioning; }
 export function sessionVersion() { return version; }
+// Both merged callers share one generation and one mutation lock.
+export const sessionGeneration = sessionVersion;
+export const isSessionChangePending = sessionTransitionPending;
+
+export function beginSessionTransition() {
+  if (transitioning) throw staleSessionError();
+  transitioning = true;
+  version += 1;
+  let finished = false;
+  return () => {
+    if (finished) return;
+    finished = true;
+    transitioning = false;
+    version += 1;
+  };
+}
+
 export function sessionHeaders(method = 'GET') {
   return !['GET', 'HEAD'].includes(method.toUpperCase()) && csrfToken ? { 'x-csrf-token': csrfToken } : {};
 }
 
-export async function requestJson(url, { method = 'GET', body, signal, notifyExpired = true, allowDuringTransition = false } = {}) {
+export async function requestJson(url, { method = 'GET', body, signal, notifyExpired = true, allowDuringTransition = false, changesSession = false } = {}) {
   if (typeof url !== 'string' || !url.startsWith('/api/') || /[\\\r\n]/.test(url)) throw new Error('Only same-origin API paths are supported');
-  if (transitioning && !allowDuringTransition) throw new DOMException('Authentication is changing.', 'AbortError');
+  if (transitioning && (!allowDuringTransition || changesSession)) throw staleSessionError();
+  const finish = changesSession ? beginSessionTransition() : null;
   const started = version;
   const checkCurrent = () => {
-    if (signal?.aborted || started !== version) throw new DOMException('The request belongs to an obsolete session.', 'AbortError');
+    if (signal?.aborted) throw new DOMException('The request was aborted.', 'AbortError');
+    if (started !== version) throw staleSessionError();
   };
-  checkCurrent();
-  let response;
   try {
-    response = await fetch(url, {
-      method, signal, credentials: 'same-origin', cache: 'no-store', redirect: 'error',
-      headers: { ...sessionHeaders(method), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  } catch (error) { checkCurrent(); throw error; }
-  const payload = response.status === 204 ? null : await response.json().catch(() => null);
-  // A response started before login, logout or MFA rotation cannot mutate the new session.
-  checkCurrent();
-  if (!response.ok) {
-    if (response.status === 401 && payload?.error?.code === 'unauthorized' && notifyExpired) {
-      setSession(null);
-      if (typeof window !== 'undefined') window.dispatchEvent(new Event('yunpanel:session-expired'));
+    checkCurrent();
+    let response;
+    try {
+      response = await fetch(url, {
+        method, signal, credentials: 'same-origin', cache: 'no-store', redirect: 'error',
+        headers: { ...sessionHeaders(method), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (error) { checkCurrent(); throw error; }
+    const payload = response.status === 204 ? null : await response.json().catch(() => null);
+    // A response started before login, logout or MFA rotation cannot mutate the new session.
+    checkCurrent();
+    if (!response.ok) {
+      if (response.status === 401 && payload?.error?.code === 'unauthorized' && notifyExpired) {
+        setSession(null);
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event('yunpanel:session-expired'));
+      }
+      const error = new Error(payload?.error?.message ?? `Request failed with HTTP ${response.status}`);
+      error.code = payload?.error?.code ?? `http_${response.status}`;
+      error.status = response.status;
+      error.setupRequired = payload?.setupRequired === true;
+      const retryAfter = Number(response.headers.get('retry-after'));
+      error.retryAfter = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null;
+      throw error;
     }
-    const error = new Error(payload?.error?.message ?? `Request failed with HTTP ${response.status}`);
-    error.code = payload?.error?.code ?? `http_${response.status}`;
-    error.status = response.status;
-    error.setupRequired = payload?.setupRequired === true;
-    const retryAfter = Number(response.headers.get('retry-after'));
-    error.retryAfter = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null;
-    throw error;
-  }
-  return payload?.data;
+    const data = payload?.data;
+    // Support the merged branch's mutation API without a second session store.
+    if (changesSession) setSession(data?.session ?? (data?.user ? data : null));
+    return data;
+  } finally { finish?.(); }
 }
 
 export function authRequest(operation, options = {}) {

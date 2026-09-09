@@ -31,7 +31,10 @@ export default function MfaSettings({ onSession, onSignedOut, onBusy, onSensitiv
     const controller = new AbortController(); active.current = controller;
     setBusy(true); setError(''); setCopied(false);
     try { await operation(controller.signal); }
-    catch (failure) { if (failure.name !== 'AbortError') setError(authMessage(failure)); }
+    catch (failure) {
+      if (failure.name !== 'AbortError') setError(authMessage(failure));
+      if (failure.code === 'mfa_enrollment_expired') setEnrollment(null);
+    }
     finally {
       setPassword(''); setCode('');
       if (active.current === controller) active.current = null;
@@ -111,12 +114,13 @@ export default function MfaSettings({ onSession, onSignedOut, onBusy, onSensitiv
       </fieldset>
     </form> : <form onSubmit={change}>
       <p className="auth-notice">Etkin · {status.recoveryCodesRemaining} kullanılmamış kurtarma kodu</p>
+      {!status.keyConfigured && <p className="auth-notice">MFA anahtarı kullanılamıyor. Mevcut kurtarma koduyla doğrulama yapabilir veya yerel yöneticiden kurtarma isteyebilirsiniz.</p>}
       <fieldset disabled={busy}>
         <label>İşlem<select value={action} onChange={(event) => { setAction(event.target.value); setCode(''); }}><option value="recovery">Yeni kurtarma kodları üret</option><option value="disable">İki adımlı doğrulamayı kapat</option></select></label>
         <p className="auth-muted">{action === 'disable' ? 'Doğrulayıcıyı değiştirmek için önce kapatın, yeniden giriş yapıp yeni doğrulayıcı ekleyin. Bu işlem tüm oturumları kapatır.' : 'Önceki kurtarma kodları ve diğer oturumlar iptal edilir.'}</p>
         <label>Mevcut parola<input type="password" autoComplete="current-password" maxLength={1024} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
         <label>Doğrulama yöntemi<select value={method} onChange={(event) => { setMethod(event.target.value); setCode(''); }}><option value="totp">Doğrulayıcı uygulama</option><option value="recovery">Kurtarma kodu</option></select></label>
-        <label>{method === 'totp' ? '6 haneli kod' : 'Kurtarma kodu'}<input type="text" autoComplete="one-time-code" inputMode={method === 'totp' ? 'numeric' : 'text'} maxLength={method === 'totp' ? 6 : 64} pattern={method === 'totp' ? '[0-9]{6}' : undefined} value={code} onChange={(event) => setCode(event.target.value)} required /></label>
+        <label>{method === 'totp' ? '6 haneli kod' : 'Kurtarma kodu'}<input type="text" autoComplete={method === 'totp' ? 'one-time-code' : 'off'} inputMode={method === 'totp' ? 'numeric' : 'text'} maxLength={method === 'totp' ? 6 : 64} pattern={method === 'totp' ? '[0-9]{6}' : undefined} value={code} onChange={(event) => setCode(event.target.value)} required /></label>
         <button className="auth-primary" type="submit">{busy ? 'İşleniyor…' : action === 'disable' ? 'Doğrulamayı kapat ve çıkış yap' : 'Yeni kodları oluştur'}</button>
       </fieldset>
     </form>}

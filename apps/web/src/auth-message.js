@@ -7,6 +7,8 @@ export function authMessage(error) {
     already_configured: 'İlk kurulum tamamlanmış. Sayfayı yenileyip giriş yapın.',
     origin_forbidden: 'Panel adresi sunucu ayarıyla eşleşmiyor. Yöneticiniz public origin ayarını kontrol etmeli.',
     csrf_invalid: 'Oturum doğrulanamadı. Sayfayı yenileyin.',
+    session_superseded: 'Oturum değişti. İşlemi yeniden deneyin.',
+    invalid_secret_master_key: 'Sunucunun şifreleme anahtarı geçersiz. Yöneticiniz yapılandırmayı kontrol etmeli.',
     mfa_invalid_code: 'Kod geçersiz veya kullanılmış. Yeni uygulama kodunu bekleyin ya da kullanılmamış kurtarma kodunu girin.',
     mfa_challenge_expired: 'Doğrulama süresi doldu. Kullanıcı adı ve parolanızla yeniden başlayın.',
     mfa_enrollment_expired: 'Kurulum süresi doldu veya başka oturumda yenilendi. Kurulumu yeniden başlatın.',
