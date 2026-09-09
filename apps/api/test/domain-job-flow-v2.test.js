@@ -106,3 +106,81 @@ test('domain stage and activation accept only the strict agent result schema', a
     assert.equal(activeDomain.appliedRevision, activeDomain.desiredRevision);
   });
 });
+
+test('completed jobs are not observable before domain reconciliation finishes', async () => {
+  const adminToken = 'reconciliation-barrier-admin-token';
+  const serverRegistry = createServerRegistry();
+  const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'reconciliation-barrier' });
+  const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'reconciliation-host' });
+  const domainRegistry = createDomainRegistry({
+    serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
+  });
+  const originalMarkStaged = domainRegistry.markStaged;
+  let enterReconciliation;
+  let releaseReconciliation;
+  const reconciliationEntered = new Promise((resolve) => { enterReconciliation = resolve; });
+  const reconciliationReleased = new Promise((resolve) => { releaseReconciliation = resolve; });
+  domainRegistry.markStaged = async (...args) => {
+    enterReconciliation();
+    await reconciliationReleased;
+    return originalMarkStaged(...args);
+  };
+  const jobRegistry = createJobRegistry();
+  const app = createApp({
+    environment: 'production',
+    registry: serverRegistry,
+    domainRegistry,
+    jobRegistry,
+    adminToken,
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const created = await requestJson(`${baseUrl}/api/domains`, {
+      method: 'POST',
+      token: adminToken,
+      body: {
+        serverId: enrolled.server.id,
+        primaryDomain: 'barrier.example.com',
+        targetType: 'static',
+        target: { root: '/var/www/barrier' },
+      },
+    });
+    const domain = created.payload.data;
+    const staged = await requestJson(`${baseUrl}/api/domains/${domain.id}/stage`, { method: 'POST', token: adminToken });
+    const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
+      token: enrolled.agentToken,
+    });
+
+    const completion = requestJson(
+      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${claimed.payload.data.job.id}/result`,
+      {
+        method: 'POST',
+        token: enrolled.agentToken,
+        body: {
+          status: 'succeeded',
+          result: {
+            checksum: 'a'.repeat(64),
+            configName: 'yunpanel-barrier.example.com.conf',
+            bytes: 512,
+          },
+        },
+      },
+    );
+    await reconciliationEntered;
+
+    let readSettled = false;
+    const jobRead = requestJson(`${baseUrl}/api/jobs/${staged.payload.data.id}`, { token: adminToken })
+      .then((result) => {
+        readSettled = true;
+        return result;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(readSettled, false);
+
+    releaseReconciliation();
+    const [completed, observed] = await Promise.all([completion, jobRead]);
+    assert.equal(completed.response.status, 200);
+    assert.equal(observed.payload.data.status, 'succeeded');
+    assert.equal((await domainRegistry.getDomain(domain.id)).state, 'staged');
+  });
+});

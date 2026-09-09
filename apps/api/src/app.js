@@ -135,6 +135,7 @@ export function createApp({
   adminToken,
 } = {}) {
   const app = express();
+  const reconciliationJobs = new Map();
   const resolvedAdminToken = adminToken === undefined ? resolveBootstrapAdminToken({ environment }) : adminToken;
   const requireBootstrapAdmin = createBootstrapAdminGuard({ token: resolvedAdminToken });
 
@@ -207,28 +208,38 @@ export function createApp({
     return response.json({ data: await applicationEnvironmentRegistry.materialize(application.id) });
   });
   app.post('/api/servers/:serverId/commands/:jobId/result', async (request, response) => {
-    await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
-    const job = await jobRegistry.complete({
-      serverId: request.params.serverId,
-      jobId: request.params.jobId,
-      status: request.body?.status,
-      result: request.body?.result ?? null,
-      error: request.body?.error ?? null,
-    });
+    const jobId = request.params.jobId;
+    const reconciliation = (async () => {
+      await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
+      const job = await jobRegistry.complete({
+        serverId: request.params.serverId,
+        jobId,
+        status: request.body?.status,
+        result: request.body?.result ?? null,
+        error: request.body?.error ?? null,
+      });
 
-    try {
-      await reconcileAgentJob({ domainRegistry, certificateRegistry, applicationRegistry, job });
-    } catch (error) {
-      if (job.resourceType === 'domain') {
-        await domainRegistry.markFailed(job.resourceId, `reconcile_${error.code ?? 'failed'}`);
-      } else if (job.resourceType === 'certificate') {
-        await certificateRegistry.markFailed(job.resourceId, `reconcile_${error.code ?? 'failed'}`);
-      } else if (job.resourceType === 'application') {
-        const application = await applicationRegistry.getApplication(job.resourceId);
-        if (application?.activeDeploymentId === job.id) await applicationRegistry.markFailed(job.resourceId, job.id, `reconcile_${error.code ?? 'failed'}`);
+      try {
+        await reconcileAgentJob({ domainRegistry, certificateRegistry, applicationRegistry, job });
+      } catch (error) {
+        if (job.resourceType === 'domain') {
+          await domainRegistry.markFailed(job.resourceId, `reconcile_${error.code ?? 'failed'}`);
+        } else if (job.resourceType === 'certificate') {
+          await certificateRegistry.markFailed(job.resourceId, `reconcile_${error.code ?? 'failed'}`);
+        } else if (job.resourceType === 'application') {
+          const application = await applicationRegistry.getApplication(job.resourceId);
+          if (application?.activeDeploymentId === job.id) await applicationRegistry.markFailed(job.resourceId, job.id, `reconcile_${error.code ?? 'failed'}`);
+        }
       }
+      return job;
+    })();
+
+    reconciliationJobs.set(jobId, reconciliation);
+    try {
+      return response.json({ data: await reconciliation });
+    } finally {
+      if (reconciliationJobs.get(jobId) === reconciliation) reconciliationJobs.delete(jobId);
     }
-    return response.json({ data: job });
   });
 
   app.get('/api/applications', requireBootstrapAdmin, async (request, response) => response.json({ data: await applicationRegistry.listApplications() }));
@@ -517,6 +528,7 @@ export function createApp({
   });
 
   app.get('/api/jobs', requireBootstrapAdmin, async (request, response) => {
+    await Promise.allSettled(reconciliationJobs.values());
     const jobs = await jobRegistry.listJobs({
       serverId: request.query.serverId || null,
       resourceType: request.query.resourceType || null,
@@ -526,6 +538,7 @@ export function createApp({
     return response.json({ data: jobs });
   });
   app.get('/api/jobs/:jobId', requireBootstrapAdmin, async (request, response) => {
+    await reconciliationJobs.get(request.params.jobId)?.catch(() => {});
     const job = await jobRegistry.getJob(request.params.jobId);
     if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
     return response.json({ data: job });
