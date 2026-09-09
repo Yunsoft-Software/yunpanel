@@ -61,6 +61,15 @@ async function materialize(applicationEnvironmentStorePath, masterKey) {
   return registry.materialize(APPLICATION_ID);
 }
 
+function rollbackOptions(state, backupDirectory, now) {
+  return {
+    authDbPath: state.authDbPath,
+    applicationEnvironmentStorePath: state.applicationEnvironmentStorePath,
+    backupDirectory,
+    ...(now ? { now } : {}),
+  };
+}
+
 test('rotation rewraps application and MFA secrets together and rollback restores the old key', async (t) => {
   const state = await fixture(t);
   const backupDirectory = path.join(state.directory, 'backup');
@@ -81,7 +90,7 @@ test('rotation rewraps application and MFA secrets together and rollback restore
   assert.deepEqual(await materialize(state.applicationEnvironmentStorePath, state.nextMasterKey), { API_TOKEN: 'super-secret-token', PUBLIC_NAME: 'yunpanel' });
   await assert.rejects(() => materialize(state.applicationEnvironmentStorePath, state.currentMasterKey), { code: 'secret_decryption_failed' });
 
-  const rolledBack = await rollbackSecretMasterKey({ backupDirectory, now: () => 1_800_000_100_000 });
+  const rolledBack = await rollbackSecretMasterKey(rollbackOptions(state, backupDirectory, () => 1_800_000_100_000));
   assert.equal(rolledBack.status, 'rolled_back');
   const restored = readMfa(state.authDbPath);
   assert.equal(oldVault.decrypt('owner-1', restored.active.secret), 'ACTIVE-SECRET');
@@ -111,7 +120,38 @@ test('rollback refuses a modified backup snapshot', async (t) => {
   const backupDirectory = path.join(state.directory, 'tamper-backup');
   await rotateSecretMasterKey({ ...state, backupDirectory });
   await writeFile(path.join(backupDirectory, 'auth.sqlite'), 'not a sqlite backup');
-  await assert.rejects(() => rollbackSecretMasterKey({ backupDirectory }), { code: 'rotation_backup_tampered' });
+  await assert.rejects(() => rollbackSecretMasterKey(rollbackOptions(state, backupDirectory)), { code: 'rotation_backup_tampered' });
+});
+
+test('rollback cannot redirect a manifest to a different live store path', async (t) => {
+  const state = await fixture(t);
+  const backupDirectory = path.join(state.directory, 'bound-target-backup');
+  await rotateSecretMasterKey({ ...state, backupDirectory });
+  await assert.rejects(() => rollbackSecretMasterKey({
+    authDbPath: path.join(state.directory, 'different-auth.sqlite'),
+    applicationEnvironmentStorePath: state.applicationEnvironmentStorePath,
+    backupDirectory,
+  }), { code: 'rotation_target_mismatch' });
+  assert.equal(createMfaVault(state.nextMasterKey).decrypt('owner-1', readMfa(state.authDbPath).active.secret), 'ACTIVE-SECRET');
+});
+
+test('rollback removes an environment store that did not exist before rotation', async (t) => {
+  const state = await fixture(t);
+  await rm(state.applicationEnvironmentStorePath);
+  const backupDirectory = path.join(state.directory, 'no-environment-backup');
+  const manifest = await rotateSecretMasterKey({ ...state, backupDirectory });
+  assert.equal(manifest.backups.applicationEnvironmentStore, null);
+
+  const environment = createApplicationEnvironmentRegistry({
+    filePath: state.applicationEnvironmentStorePath,
+    masterKey: state.nextMasterKey,
+    applicationExists: async (id) => id === APPLICATION_ID,
+  });
+  await environment.init();
+  await environment.setVariable({ applicationId: APPLICATION_ID, key: 'AFTER_ROTATION', value: 'new-key-value', secret: true });
+  await rollbackSecretMasterKey(rollbackOptions(state, backupDirectory));
+  await assert.rejects(() => readFile(state.applicationEnvironmentStorePath), { code: 'ENOENT' });
+  assert.equal(createMfaVault(state.currentMasterKey).decrypt('owner-1', readMfa(state.authDbPath).active.secret), 'ACTIVE-SECRET');
 });
 
 test('rotation rejects reusing the current root key', async (t) => {
