@@ -6,6 +6,7 @@ import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -74,17 +75,15 @@ async function activateHttpDomain(domainRegistry, domain) {
 }
 
 test('ACME dry-run validation stores no certificate files and does not block production issuance', async () => {
-  const adminToken = 'validation-admin-token';
   const context = await createTestContext('validation-host');
   const { serverRegistry, enrolled, domainRegistry, jobRegistry, certificateRegistry } = context;
-  const app = createApp({
+  const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
     domainRegistry,
     jobRegistry,
     certificateRegistry,
-    adminToken,
-  });
+  }));
 
   const domain = await domainRegistry.createDomain({
     serverId: enrolled.server.id,
@@ -99,7 +98,6 @@ test('ACME dry-run validation stores no certificate files and does not block pro
   await withServer(app, async (baseUrl) => {
     const validation = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/issue`, {
       method: 'POST',
-      token: adminToken,
       body: { email: 'Admin@Example.com', staging: true },
     });
     assert.equal(validation.response.status, 202);
@@ -140,7 +138,6 @@ test('ACME dry-run validation stores no certificate files and does not block pro
 
     const production = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/issue`, {
       method: 'POST',
-      token: adminToken,
       body: { email: 'admin@example.com', staging: false },
     });
     assert.equal(production.response.status, 202);
@@ -150,17 +147,15 @@ test('ACME dry-run validation stores no certificate files and does not block pro
 });
 
 test('production certificate attaches to HTTPS desired state and supports renewal', async () => {
-  const adminToken = 'production-certificate-admin-token';
   const context = await createTestContext('production-cert-host');
   const { serverRegistry, enrolled, domainRegistry, jobRegistry, certificateRegistry } = context;
-  const app = createApp({
+  const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
     domainRegistry,
     jobRegistry,
     certificateRegistry,
-    adminToken,
-  });
+  }));
 
   const domain = await domainRegistry.createDomain({
     serverId: enrolled.server.id,
@@ -175,7 +170,6 @@ test('production certificate attaches to HTTPS desired state and supports renewa
   await withServer(app, async (baseUrl) => {
     const issued = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/issue`, {
       method: 'POST',
-      token: adminToken,
       body: { email: 'admin@example.com', staging: false },
     });
     assert.equal(issued.response.status, 202);
@@ -208,7 +202,6 @@ test('production certificate attaches to HTTPS desired state and supports renewa
 
     const dryRun = await requestJson(`${baseUrl}/api/certificates/${certificate.id}/renew`, {
       method: 'POST',
-      token: adminToken,
       body: { dryRun: true },
     });
     assert.equal(dryRun.response.status, 202);
@@ -231,7 +224,6 @@ test('production certificate attaches to HTTPS desired state and supports renewa
 
     const renewal = await requestJson(`${baseUrl}/api/certificates/${certificate.id}/renew`, {
       method: 'POST',
-      token: adminToken,
       body: { dryRun: false },
     });
     assert.equal(renewal.response.status, 202);
@@ -262,7 +254,6 @@ test('production certificate attaches to HTTPS desired state and supports renewa
 
     const stage = await requestJson(`${baseUrl}/api/domains/${domain.id}/stage`, {
       method: 'POST',
-      token: adminToken,
     });
     assert.equal(stage.response.status, 202);
     const stageClaim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
