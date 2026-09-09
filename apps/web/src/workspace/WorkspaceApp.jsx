@@ -7,6 +7,7 @@ import NewWebsitePage from './NewWebsitePage.jsx';
 import SiteDetailPage from './SiteDetailPage.jsx';
 import ApplicationsPage from './ApplicationsPage.jsx';
 import { AdvancedDomainsPage, CapabilityPage, JobsPage, NotFoundPage, ServersPage, SettingsPage } from './OperationsPages.jsx';
+import UsersPage from './UsersPage.jsx';
 
 function RouteFailure() {
   return <main className="ws-content"><h1>Sayfa yüklenemedi</h1><p>Beklenmeyen bir arayüz veya veri hatası oluştu. Sayfayı yeniden yükleyin; sorun sürerse API ve web sürümlerini birlikte kontrol edin.</p><button type="button" className="ws-button" onClick={() => window.location.reload()}>Yeniden yükle</button></main>;
@@ -26,6 +27,7 @@ function createWorkspaceRouter() {
       { path: 'servers', element: <ServersPage /> },
       { path: 'jobs', element: <JobsPage /> },
       { path: 'settings', element: <SettingsPage /> },
+      { path: 'settings/users', element: <UsersPage /> },
       ...['databases', 'docker', 'mail', 'backups', 'audit'].map((name) => ({ path: name, element: <CapabilityPage name={name} /> })),
       { path: '*', element: <NotFoundPage /> },
     ],
