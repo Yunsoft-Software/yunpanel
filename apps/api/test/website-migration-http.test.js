@@ -8,6 +8,7 @@ import { mountWebsiteMigrationRoutes } from '../src/website-migration-http.js';
 
 const domainId = '0ef7e00b-1b85-4938-b726-247c94679c66';
 const websiteId = '46b95b12-600a-4f31-b269-cc9af195ee21';
+const previewDigest = 'a'.repeat(64);
 const ownerAuth = Object.freeze({
   user: { id: 'owner-1', role: 'owner' },
   access: { mode: 'management', permissions: ['*'] },
@@ -33,11 +34,17 @@ async function fixture(t, auth) {
     applicationRegistry: { async listApplications() { calls.push('applications'); return []; } },
     preview(input) {
       calls.push(['preview', input]);
-      return { version: 1, destructive: false, autoApply: false, counts: { total: 0 }, items: [] };
+      return { version: 1, digest: previewDigest, destructive: false, autoApply: false, counts: { total: 0 }, items: [] };
     },
     async bind(input) {
-      calls.push(['bind', input.domainId, input.websiteId]);
-      return { migrated: true, domain: { id: input.domainId, websiteId: input.websiteId }, websiteId: input.websiteId, previewVersion: 1 };
+      calls.push(['bind', input.domainId, input.websiteId, input.previewDigest]);
+      return {
+        migrated: true,
+        domain: { id: input.domainId, websiteId: input.websiteId },
+        websiteId: input.websiteId,
+        previewVersion: 1,
+        previewDigest: input.previewDigest,
+      };
     },
   });
   app.use((error, _request, response, _next) => {
@@ -57,11 +64,20 @@ async function fixture(t, auth) {
   };
 }
 
+function bindBody(overrides = {}) {
+  const values = { domainId, websiteId, previewDigest, ...overrides };
+  return {
+    ...values,
+    confirmation: overrides.confirmation ?? `bind:${values.domainId}:${values.websiteId}:${values.previewDigest}`,
+  };
+}
+
 test('Owner receives non-destructive migration preview from persisted resource snapshots', async (t) => {
   const f = await fixture(t, ownerAuth);
   const response = await f.request();
   assert.equal(response.status, 200);
   const body = await response.json();
+  assert.equal(body.data.digest, previewDigest);
   assert.equal(body.data.destructive, false);
   assert.equal(body.data.autoApply, false);
   assert.deepEqual(f.calls.slice(0, 3).sort(), ['applications', 'domains', 'websites']);
@@ -69,20 +85,20 @@ test('Owner receives non-destructive migration preview from persisted resource s
   assert.equal(f.calls[3][0], 'preview');
 });
 
-test('Owner bind requires exact canonical IDs and typed confirmation before adapter invocation', async (t) => {
+test('Owner bind requires exact canonical IDs preview digest and typed confirmation before adapter invocation', async (t) => {
   const f = await fixture(t, ownerAuth);
   const valid = await f.request('/api/websites/migration/bind', {
-    method: 'POST',
-    body: JSON.stringify({ domainId, websiteId, confirmation: `bind:${domainId}:${websiteId}` }),
+    method: 'POST', body: JSON.stringify(bindBody()),
   });
   assert.equal(valid.status, 200);
   assert.equal((await valid.json()).data.migrated, true);
-  assert.deepEqual(f.calls, [['bind', domainId, websiteId]]);
+  assert.deepEqual(f.calls, [['bind', domainId, websiteId, previewDigest]]);
 
   for (const body of [
-    { domainId, websiteId, confirmation: 'wrong' },
-    { domainId: 'bad', websiteId, confirmation: 'wrong' },
-    { domainId, websiteId, confirmation: `bind:${domainId}:${websiteId}`, extra: 'field' },
+    bindBody({ confirmation: 'wrong' }),
+    bindBody({ domainId: 'bad', confirmation: 'wrong' }),
+    bindBody({ previewDigest: 'bad', confirmation: 'wrong' }),
+    { ...bindBody(), extra: 'field' },
   ]) {
     const before = f.calls.length;
     const response = await f.request('/api/websites/migration/bind', { method: 'POST', body: JSON.stringify(body) });
@@ -96,7 +112,7 @@ test('Read Only cannot invoke migration preview or bind despite ordinary Website
   const f = await fixture(t, readerAuth);
   for (const [pathname, options] of [
     ['/api/websites/migration/preview', {}],
-    ['/api/websites/migration/bind', { method: 'POST', body: JSON.stringify({ domainId, websiteId, confirmation: `bind:${domainId}:${websiteId}` }) }],
+    ['/api/websites/migration/bind', { method: 'POST', body: JSON.stringify(bindBody()) }],
   ]) {
     const response = await f.request(pathname, options);
     assert.equal(response.status, 403);
