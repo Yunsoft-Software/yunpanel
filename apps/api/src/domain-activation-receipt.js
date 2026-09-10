@@ -6,6 +6,7 @@ const DEFAULT_ROOT = '/var/lib/yunpanel/recovery/domain-activations';
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
+const DOMAIN_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const RECEIPT_KEYS = Object.freeze(['version', 'recordedAt', 'serverId', 'jobId', 'primaryDomain', 'checksum']);
 
 export class DomainActivationReceiptError extends Error {
@@ -25,10 +26,12 @@ function normalizeIdentity(serverId, jobId) {
 }
 
 function normalizePrimaryDomain(value) {
-  if (typeof value !== 'string' || !value || value.length > 253 || /[\u0000-\u0020\u007f]/.test(value)) {
+  const domain = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const labels = domain.split('.');
+  if (!domain || domain.length > 253 || labels.length < 2 || labels.some((label) => !DOMAIN_LABEL_PATTERN.test(label))) {
     throw new DomainActivationReceiptError('domain_activation_receipt_domain_invalid', 'Domain activation receipt hostname is invalid');
   }
-  return value.toLowerCase();
+  return domain;
 }
 
 function normalizeChecksum(value) {
