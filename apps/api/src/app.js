@@ -34,7 +34,7 @@ export function createApp({
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
   app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry));
-  mountWebsiteRoutes(app, { websiteRegistry });
+  mountWebsiteRoutes(app, { websiteRegistry, domainRegistry });
   mountManagedServiceRoutes(app, { registry, jobRegistry });
   mountDatabaseRoutes(app, { registry, jobRegistry });
   app.use(core);
