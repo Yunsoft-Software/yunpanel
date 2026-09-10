@@ -101,21 +101,7 @@ function buildBlocks({ identity, targets, members }) {
   return Object.freeze(blocks);
 }
 
-export async function planLocalMigrationRestoreMetadata({
-  backupDirectory,
-  previewRestore = previewLocalMigrationRestore,
-} = {}) {
-  if (typeof previewRestore !== 'function') {
-    throw new LocalMigrationRestoreMetadataPlanError('migration_restore_metadata_dependencies_invalid', 'Migration restore metadata plan dependencies are invalid');
-  }
-  const directory = resolveLocalMigrationBackupDirectory(backupDirectory);
-  let preview;
-  try {
-    preview = await previewRestore({ backupDirectory: directory });
-  } catch (error) {
-    if (error instanceof LocalMigrationRestoreMetadataPlanError) throw error;
-    throw new LocalMigrationRestoreMetadataPlanError('migration_restore_metadata_preview_failed', 'Migration restore metadata plan requires a successful restore preview');
-  }
+function buildPlan(directory, preview) {
   if (!preview || preview.destructive !== false || preview.backupDirectory !== directory
     || preview.archivePath !== path.join(directory, 'state.tar')
     || preview.manifestPath !== path.join(directory, 'manifest.json')
@@ -172,10 +158,34 @@ export async function planLocalMigrationRestoreMetadata({
   });
 }
 
+export function planVerifiedLocalMigrationRestoreMetadata({ backupDirectory, preview } = {}) {
+  const directory = resolveLocalMigrationBackupDirectory(backupDirectory);
+  return buildPlan(directory, preview);
+}
+
+export async function planLocalMigrationRestoreMetadata({
+  backupDirectory,
+  previewRestore = previewLocalMigrationRestore,
+} = {}) {
+  if (typeof previewRestore !== 'function') {
+    throw new LocalMigrationRestoreMetadataPlanError('migration_restore_metadata_dependencies_invalid', 'Migration restore metadata plan dependencies are invalid');
+  }
+  const directory = resolveLocalMigrationBackupDirectory(backupDirectory);
+  let preview;
+  try {
+    preview = await previewRestore({ backupDirectory: directory });
+  } catch (error) {
+    if (error instanceof LocalMigrationRestoreMetadataPlanError) throw error;
+    throw new LocalMigrationRestoreMetadataPlanError('migration_restore_metadata_preview_failed', 'Migration restore metadata plan requires a successful restore preview');
+  }
+  return buildPlan(directory, preview);
+}
+
 export const localMigrationRestoreMetadataPlanInternals = Object.freeze({
   targetActions: Object.freeze([...TARGET_ACTIONS]),
   restoreActions: Object.freeze([...RESTORE_ACTIONS]),
   assertTargets,
   rootPlan,
   buildBlocks,
+  buildPlan,
 });
