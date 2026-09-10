@@ -31,15 +31,16 @@ export async function bindLegacyDomainToWebsite({
   domainRegistry,
   websiteRegistry,
   applicationRegistry,
+  migrationLedger,
   preview = previewWebsiteMigration,
 } = {}) {
-  for (const [dependency, method] of [
-    [domainRegistry, 'listDomains'],
-    [domainRegistry, 'bindWebsite'],
-    [websiteRegistry, 'listWebsites'],
-    [applicationRegistry, 'listApplications'],
+  for (const [dependency, methods] of [
+    [domainRegistry, ['listDomains', 'bindWebsite']],
+    [websiteRegistry, ['listWebsites']],
+    [applicationRegistry, ['listApplications']],
+    [migrationLedger, ['get', 'planBinding', 'markBound']],
   ]) {
-    if (!dependency || typeof dependency[method] !== 'function') {
+    if (!dependency || methods.some((method) => typeof dependency[method] !== 'function')) {
       throw new WebsiteMigrationBindError('website_migration_dependencies_invalid', 'Website migration dependencies are invalid', 503);
     }
   }
@@ -61,22 +62,59 @@ export async function bindLegacyDomainToWebsite({
     if (item.websiteId !== normalizedWebsiteId) {
       throw new WebsiteMigrationBindError('website_migration_binding_conflict', 'Domain is already bound to a different Website');
     }
+    const ledgerEntry = await migrationLedger.get(normalizedDomainId);
+    if (ledgerEntry) {
+      await migrationLedger.markBound({
+        domainId: normalizedDomainId,
+        applicationId: item.applicationId,
+        websiteId: normalizedWebsiteId,
+      });
+    }
     const domain = domains.find((candidate) => candidate.id.toLowerCase() === normalizedDomainId);
-    return Object.freeze({ migrated: false, domain, websiteId: normalizedWebsiteId, previewVersion: plan.version, previewDigest: plan.digest });
+    return Object.freeze({
+      migrated: false,
+      domain,
+      websiteId: normalizedWebsiteId,
+      previewVersion: plan.version,
+      previewDigest: plan.digest,
+      ledgerTracked: Boolean(ledgerEntry),
+    });
   }
 
   if (plan.digest !== expectedDigest) {
     throw new WebsiteMigrationBindError('website_migration_preview_stale', 'Migration state changed after preview; request a new preview before binding');
   }
-  if (item.status !== 'ready' || item.action !== 'bind_existing_website' || item.websiteId !== normalizedWebsiteId) {
+  if (item.status !== 'ready' || item.action !== 'bind_existing_website' || item.websiteId !== normalizedWebsiteId || !item.applicationId) {
     throw new WebsiteMigrationBindError('website_migration_binding_not_ready', 'Migration preview does not authorize this existing Website binding');
   }
+
+  const existingLedger = await migrationLedger.get(normalizedDomainId);
+  const createdWebsite = existingLedger?.createdWebsite === true;
+  await migrationLedger.planBinding({
+    domainId: normalizedDomainId,
+    applicationId: item.applicationId,
+    websiteId: normalizedWebsiteId,
+    previewDigest: expectedDigest,
+    createdWebsite,
+  });
 
   const domain = await domainRegistry.bindWebsite(normalizedDomainId, normalizedWebsiteId);
   if (!domain || domain.id !== normalizedDomainId || domain.websiteId !== normalizedWebsiteId) {
     throw new WebsiteMigrationBindError('website_migration_binding_result_invalid', 'Domain Website binding result is invalid', 503);
   }
-  return Object.freeze({ migrated: true, domain, websiteId: normalizedWebsiteId, previewVersion: plan.version, previewDigest: plan.digest });
+  await migrationLedger.markBound({
+    domainId: normalizedDomainId,
+    applicationId: item.applicationId,
+    websiteId: normalizedWebsiteId,
+  });
+  return Object.freeze({
+    migrated: true,
+    domain,
+    websiteId: normalizedWebsiteId,
+    previewVersion: plan.version,
+    previewDigest: plan.digest,
+    ledgerTracked: true,
+  });
 }
 
 export const websiteMigrationBindInternals = Object.freeze({ digestPattern: DIGEST_PATTERN });
