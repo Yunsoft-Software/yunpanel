@@ -63,12 +63,15 @@ function serviceControlEvidence(snapshot, { serviceId, action }) {
     || !Array.isArray(snapshot.packages) || snapshot.packages.length < 1
     || !Array.isArray(snapshot.units) || snapshot.units.length < 1
     || snapshot.packages.some((entry) => !entry || entry.installed !== true)
-    || snapshot.units.some((entry) => !entry || entry.inspectionError !== false)) {
+    || snapshot.units.some((entry) => !entry || entry.inspectionError !== false || typeof entry.activeState !== 'string')) {
     throw new JobRunningServiceRecoveryError('job_service_recovery_evidence_invalid', 'Managed service host evidence is invalid');
   }
 
   const expectedActive = action === 'start';
-  if (snapshot.active !== expectedActive) return null;
+  const unitsSatisfied = action === 'start'
+    ? snapshot.units.every((entry) => entry.activeState === 'active')
+    : snapshot.units.every((entry) => entry.activeState !== 'active');
+  if (snapshot.active !== expectedActive || !unitsSatisfied) return null;
   return { ...snapshot, action };
 }
 
