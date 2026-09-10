@@ -30,12 +30,14 @@ export async function createWebsiteForMigration({
   domainRegistry,
   websiteRegistry,
   applicationRegistry,
+  migrationLedger,
   preview = previewWebsiteMigration,
 } = {}) {
   for (const [dependency, methods] of [
     [domainRegistry, ['listDomains']],
     [websiteRegistry, ['listWebsites', 'getWebsite', 'createMigrationWebsite']],
     [applicationRegistry, ['listApplications']],
+    [migrationLedger, ['planWebsiteCreation', 'markWebsiteCreated']],
   ]) {
     if (!dependency || methods.some((method) => typeof dependency[method] !== 'function')) {
       throw new WebsiteMigrationCreateError('website_migration_dependencies_invalid', 'Website migration dependencies are invalid', 503);
@@ -60,6 +62,17 @@ export async function createWebsiteForMigration({
     if (existing.serverId !== domain.serverId || existing.applicationId !== normalizedApplicationId || existing.name !== domain.primaryDomain) {
       throw new WebsiteMigrationCreateError('website_migration_create_conflict', 'Existing migration Website does not match current Domain and Application state');
     }
+    await migrationLedger.planWebsiteCreation({
+      domainId: normalizedDomainId,
+      applicationId: normalizedApplicationId,
+      websiteId: expectedWebsiteId,
+      sourcePreviewDigest: previewDigest,
+    });
+    await migrationLedger.markWebsiteCreated({
+      domainId: normalizedDomainId,
+      applicationId: normalizedApplicationId,
+      websiteId: expectedWebsiteId,
+    });
     return Object.freeze({
       created: false,
       website: existing,
@@ -81,6 +94,12 @@ export async function createWebsiteForMigration({
     throw new WebsiteMigrationCreateError('website_migration_create_not_ready', 'Domain state is no longer eligible for Website creation');
   }
 
+  await migrationLedger.planWebsiteCreation({
+    domainId: normalizedDomainId,
+    applicationId: normalizedApplicationId,
+    websiteId: expectedWebsiteId,
+    sourcePreviewDigest: previewDigest,
+  });
   const website = await websiteRegistry.createMigrationWebsite({
     domainId: normalizedDomainId,
     serverId: domain.serverId,
@@ -90,6 +109,11 @@ export async function createWebsiteForMigration({
   if (!website || website.id !== expectedWebsiteId || website.applicationId !== normalizedApplicationId || website.serverId !== domain.serverId) {
     throw new WebsiteMigrationCreateError('website_migration_create_result_invalid', 'Migration Website creation result is invalid', 503);
   }
+  await migrationLedger.markWebsiteCreated({
+    domainId: normalizedDomainId,
+    applicationId: normalizedApplicationId,
+    websiteId: expectedWebsiteId,
+  });
   return Object.freeze({
     created: true,
     website,
