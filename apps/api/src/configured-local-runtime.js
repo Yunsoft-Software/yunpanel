@@ -6,6 +6,7 @@ import { createLocalHostOperations } from './local-host-operations.js';
 import { resolveLocalRuntimeConfig } from './local-runtime-config.js';
 import { startLocalRuntime } from './local-runtime.js';
 import { createManagedServiceMutationReceiptStore } from './managed-service-mutation-receipt.js';
+import { createNodeRestartReceiptStore } from './node-restart-receipt.js';
 
 export class ConfiguredLocalRuntimeError extends Error {
   constructor(code, message) {
@@ -30,6 +31,7 @@ export async function startConfiguredLocalRuntime({
   createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
   createDomainActivationReceipts = createDomainActivationReceiptStore,
   createManagedServiceReceipts = createManagedServiceMutationReceiptStore,
+  createNodeRestartReceipts = createNodeRestartReceiptStore,
   inspectInventory = inspectHostInventory,
   inspectServices = null,
   inspectDocker = null,
@@ -46,6 +48,7 @@ export async function startConfiguredLocalRuntime({
     || typeof createDatabaseDeletionReceipts !== 'function'
     || typeof createDomainActivationReceipts !== 'function'
     || typeof createManagedServiceReceipts !== 'function'
+    || typeof createNodeRestartReceipts !== 'function'
     || typeof inspectInventory !== 'function'
     || (inspectServices !== null && typeof inspectServices !== 'function')
     || (inspectDocker !== null && typeof inspectDocker !== 'function')
@@ -70,6 +73,10 @@ export async function startConfiguredLocalRuntime({
   if (!managedServiceReceipts || typeof managedServiceReceipts.write !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_managed_service_receipts_invalid', 'Local runtime managed service receipt store is invalid');
   }
+  const nodeRestartReceipts = createNodeRestartReceipts();
+  if (!nodeRestartReceipts || typeof nodeRestartReceipts.write !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_node_restart_receipts_invalid', 'Local runtime Node restart receipt store is invalid');
+  }
 
   const recordExecutionEvidence = async ({ serverId, jobId, operation, payload, result }) => {
     if (operation === OPERATIONS.DATABASE_DELETE) {
@@ -92,6 +99,21 @@ export async function startConfiguredLocalRuntime({
         jobId,
         primaryDomain: payload.primaryDomain,
         checksum: payload.checksum,
+      });
+      return;
+    }
+
+    if (operation === OPERATIONS.APP_NODE_RESTART) {
+      if (!result || result.restarted !== true || result.healthy !== true
+        || result.releaseId !== payload?.releaseId || result.port !== payload?.runtime?.port
+        || result.healthPath !== payload?.runtime?.healthPath || typeof payload?.applicationId !== 'string') {
+        throw new Error('Node restart result is not safe recovery evidence');
+      }
+      await nodeRestartReceipts.write({
+        serverId,
+        jobId,
+        applicationId: payload.applicationId,
+        result,
       });
       return;
     }
