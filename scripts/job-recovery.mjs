@@ -5,6 +5,7 @@ import { createDurableJobRegistry } from '../apps/api/src/durable-job-registry.j
 import { inspectDurableJobRecovery } from '../apps/api/src/job-recovery-inspection.js';
 import {
   runRunningDatabaseCreateRecoveryFromStores,
+  runRunningDatabaseDeleteRecoveryFromStores,
   runRunningDomainStageRecoveryFromStores,
   runRunningInspectionRecoveryFromStores,
   runRunningStaticDeploymentRecoveryFromStores,
@@ -21,8 +22,9 @@ const RECOVERY_ACTIONS = Object.freeze([
   'recover-domain-stage',
   'recover-static-deploy',
   'recover-database-create',
+  'recover-database-delete',
 ]);
-const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm';
+const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm';
 
 export function parseJobRecoveryArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
@@ -107,6 +109,7 @@ export async function runJobRecoveryCli({
   recoverDomainStage = runRunningDomainStageRecoveryFromStores,
   recoverStaticDeployment = runRunningStaticDeploymentRecoveryFromStores,
   recoverDatabaseCreate = runRunningDatabaseCreateRecoveryFromStores,
+  recoverDatabaseDelete = runRunningDatabaseDeleteRecoveryFromStores,
   stdout = process.stdout,
 } = {}) {
   const parsed = parseJobRecoveryArguments(argv);
@@ -120,7 +123,8 @@ export async function runJobRecoveryCli({
     else if (parsed.action === 'recover-readonly') handler = recoverRunning;
     else if (parsed.action === 'recover-domain-stage') handler = recoverDomainStage;
     else if (parsed.action === 'recover-static-deploy') handler = recoverStaticDeployment;
-    else handler = recoverDatabaseCreate;
+    else if (parsed.action === 'recover-database-create') handler = recoverDatabaseCreate;
+    else handler = recoverDatabaseDelete;
     if (typeof handler !== 'function') throw new Error('Job recovery mutation dependency is invalid');
     const result = await handler({
       serverId: parsed.serverId,
