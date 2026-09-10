@@ -35,6 +35,7 @@ test('preview distinguishes existing Website binding and create-Website candidat
       domain(domainIds[1], 'api.example.com', 'proxy', { upstreamPort: 4301 }),
     ],
   });
+  assert.match(result.digest, /^[a-f0-9]{64}$/);
   assert.equal(result.destructive, false);
   assert.equal(result.autoApply, false);
   assert.deepEqual(result.counts, { total: 2, alreadyBound: 0, ready: 2, ambiguous: 0, unresolved: 0 });
@@ -48,6 +49,24 @@ test('preview distinguishes existing Website binding and create-Website candidat
   const serialized = JSON.stringify(result);
   assert.equal(serialized.includes('/var/www/'), false);
   assert.equal(serialized.includes('4301'), false);
+});
+
+test('preview digest is stable across source ordering and changes when migration decisions change', () => {
+  const domains = [
+    domain(domainIds[0], 'static.example.com', 'static', { root: `/var/www/yunpanel/apps/${staticAppId}/current` }),
+    domain(domainIds[1], 'api.example.com', 'proxy', { upstreamPort: 4301 }),
+  ];
+  const websites = [{ id: websiteId, serverId, applicationId: staticAppId, runtimeType: 'static' }];
+  const first = previewWebsiteMigration({ domains, websites, applications: applications() });
+  const reordered = previewWebsiteMigration({ domains: [...domains].reverse(), websites, applications: applications().reverse() });
+  assert.equal(reordered.digest, first.digest);
+
+  const changed = previewWebsiteMigration({
+    domains: [domains[0], domain(domainIds[1], 'api.example.com', 'proxy', { upstreamPort: 5500 })],
+    websites,
+    applications: applications(),
+  });
+  assert.notEqual(changed.digest, first.digest);
 });
 
 test('preview reports ambiguous and unresolved legacy targets instead of guessing', () => {
@@ -75,13 +94,13 @@ test('already-bound Domains remain explicit and are not remapped', () => {
   assert.equal(result.items[0].websiteId, websiteId);
   assert.equal(result.items[0].applicationId, staticAppId);
   assert.equal(result.items[0].requiresConfirmation, false);
+  assert.match(result.digest, /^[a-f0-9]{64}$/);
 });
 
 test('invalid bound references and inconsistent Website state fail closed', () => {
   assert.throws(
     () => previewWebsiteMigration({
-      applications: applications(),
-      websites: [],
+      applications: applications(), websites: [],
       domains: [domain(domainIds[0], 'example.com', 'proxy', { upstreamPort: 4301 }, websiteId)],
     }),
     (error) => error instanceof WebsiteMigrationPreviewError && error.code === 'website_migration_bound_reference_invalid',
