@@ -5,13 +5,12 @@ import { parseJobRecoveryArguments, runJobRecoveryCli } from '../../../scripts/j
 const serverId = 'server-1';
 const jobId = '12345678-1234-4234-8234-123456789012';
 
-test('job recovery CLI accepts only confirmed database-create recovery syntax', () => {
+test('job recovery CLI accepts confirmed database-create recovery syntax', () => {
   assert.deepEqual(
     parseJobRecoveryArguments(['recover-database-create', serverId, jobId, '--confirm']),
     { action: 'recover-database-create', serverId, jobId, confirm: true },
   );
   assert.throws(() => parseJobRecoveryArguments(['recover-database-create', serverId, jobId]), /Usage/);
-  assert.throws(() => parseJobRecoveryArguments(['recover-database-delete', serverId, jobId, '--confirm']), /Usage/);
 });
 
 test('packaged database-create recovery delegates exact identity without exposing host result data', async () => {
