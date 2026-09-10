@@ -14,7 +14,7 @@ test('local runtime CLI accepts validation as an exact read-only server action',
   assert.throws(() => parseLocalRuntimeArguments(['validate', serverId, '--backup-dir', '/tmp/x']), /does not accept extra arguments/);
 });
 
-test('validation bypasses backup verification and prints only safe health metadata', async () => {
+test('validation bypasses backup verification, passes current API version and prints only safe health metadata', async () => {
   let verificationCalls = 0;
   const calls = [];
   const output = [];
@@ -39,7 +39,7 @@ test('validation bypasses backup verification and prints only safe health metada
         localBoundAt: '2026-09-10T16:55:00.000Z',
         connectivity: 'online',
         lastSeenAt: '2026-09-10T17:00:00.000Z',
-        localRuntimeVersion: '0.4.0',
+        localRuntimeVersion: input.expectedRuntimeVersion,
         apiState: 'active',
         agentState: 'inactive',
         apiHealth: { healthy: true, statusCode: 200 },
@@ -60,11 +60,13 @@ test('validation bypasses backup verification and prints only safe health metada
   assert.equal(calls.length, 1);
   assert.equal(calls[0].action, 'validate');
   assert.equal(calls[0].confirm, false);
+  assert.equal(calls[0].expectedRuntimeVersion, '0.3.0');
   assert.equal(result.validated, true);
   const text = output.join('');
   assert.match(text, /validation=passed/);
   assert.match(text, /executionMode=local/);
   assert.match(text, /connectivity=online/);
+  assert.match(text, /localRuntimeVersion=0\.3\.0/);
   assert.match(text, /apiState=active/);
   assert.match(text, /agentState=inactive/);
   assert.match(text, /apiHealth=true/);
