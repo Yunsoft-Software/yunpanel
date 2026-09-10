@@ -14,7 +14,14 @@ function fixture({ executeError = null, evidenceError = null } = {}) {
       claimed = true;
       events.push('claim');
       return {
-        job: { id: jobId, serverId, status: 'running', operation: 'database.delete' },
+        job: {
+          id: jobId,
+          serverId,
+          status: 'running',
+          operation: 'database.delete',
+          resourceType: 'database',
+          resourceId: 'app_db',
+        },
         envelope: { id: jobId, operation: 'database.delete', payload: { name: 'app_db' } },
       };
     },
@@ -56,6 +63,8 @@ function fixture({ executeError = null, evidenceError = null } = {}) {
     recordExecutionEvidence: async (input) => {
       events.push('evidence');
       assert.equal(input.jobId, jobId);
+      assert.equal(input.resourceType, 'database');
+      assert.equal(input.resourceId, 'app_db');
       assert.deepEqual(input.payload, { name: 'app_db' });
       input.payload.name = 'mutated-copy';
       if (evidenceError) throw evidenceError;
