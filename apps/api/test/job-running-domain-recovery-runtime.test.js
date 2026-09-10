@@ -12,7 +12,7 @@ function resourceFactory(label, calls) {
   });
 }
 
-test('staged domain recovery runtime binds exact host, guarded stores and Nginx evidence', async () => {
+test('staged domain recovery runtime binds exact host, private context, guarded stores and Nginx evidence', async () => {
   const calls = [];
   const fakeJobRegistry = { marker: 'durable' };
   const result = await runRunningDomainStageRecoveryFromStores({
@@ -40,6 +40,15 @@ test('staged domain recovery runtime binds exact host, guarded stores and Nginx 
       calls.push(['durable.create', filePath]);
       return fakeJobRegistry;
     },
+    contextReaderFactory: ({ filePath }) => {
+      calls.push(['context.create', filePath]);
+      return {
+        async read(id) {
+          calls.push(['context.read', id]);
+          return { id, payload: { primaryDomain: 'example.com' } };
+        },
+      };
+    },
     nginxManagerFactory: () => ({
       async inspectStagedDomain(payload) {
         calls.push(['nginx.evidence', payload]);
@@ -51,6 +60,7 @@ test('staged domain recovery runtime binds exact host, guarded stores and Nginx 
       assert.equal(input.jobRegistry, fakeJobRegistry);
       assert.equal(input.serverId, serverId);
       assert.equal(input.jobId, jobId);
+      assert.deepEqual(await input.loadJobContext(jobId), { id: jobId, payload: { primaryDomain: 'example.com' } });
       assert.deepEqual(await input.inspectStageEvidence({ primaryDomain: 'example.com' }), {
         satisfied: true,
         result: { checksum: 'a'.repeat(64) },
@@ -75,12 +85,15 @@ test('staged domain recovery runtime binds exact host, guarded stores and Nginx 
     ['certificate.init', '/work/state/certificates.json'],
     ['application.init', '/work/state/applications.json'],
     ['durable.create', '/work/state/jobs.json'],
+    ['context.create', '/work/state/jobs.json'],
+    ['context.read', jobId],
     ['nginx.evidence', { primaryDomain: 'example.com' }],
   ]);
 });
 
-test('staged domain recovery refuses a different host before resource or evidence construction', async () => {
+test('staged domain recovery refuses a different host before resource, context or evidence construction', async () => {
   let resourceFactories = 0;
+  let contextFactories = 0;
   let evidenceFactories = 0;
   await assert.rejects(
     runRunningDomainStageRecoveryFromStores({
@@ -97,6 +110,7 @@ test('staged domain recovery refuses a different host before resource or evidenc
       jobRegistryFactory: () => ({}),
       recoveryStoreFactory: () => ({}),
       durableRegistryFactory: () => ({}),
+      contextReaderFactory: () => { contextFactories += 1; return { read: async () => ({}) }; },
       nginxManagerFactory: () => { evidenceFactories += 1; return { inspectStagedDomain: async () => ({}) }; },
       serviceStatus: async () => ({ apiActive: false, agentActive: false }),
       recoverCommand: async () => ({}),
@@ -104,5 +118,6 @@ test('staged domain recovery refuses a different host before resource or evidenc
     { code: 'job_recovery_server_hostname_mismatch' },
   );
   assert.equal(resourceFactories, 0);
+  assert.equal(contextFactories, 0);
   assert.equal(evidenceFactories, 0);
 });
