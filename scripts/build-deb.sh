@@ -36,6 +36,7 @@ install -m 0755 packaging/debian/postrm "$package_root/DEBIAN/postrm"
 install -m 0644 packaging/systemd/*.service "$package_root/usr/lib/systemd/system/"
 install -m 0644 scripts/auth.mjs "$package_root/usr/lib/yunpanel/scripts/auth.mjs"
 install -m 0644 scripts/rotate-secret-master-key.mjs "$package_root/usr/lib/yunpanel/scripts/rotate-secret-master-key.mjs"
+install -m 0755 scripts/local-runtime.mjs "$package_root/usr/lib/yunpanel/scripts/local-runtime.mjs"
 install -m 0644 .env.example README.md \
   docs/authentication.md \
   docs/mfa.md \

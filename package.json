@@ -19,6 +19,7 @@
     "dev:agent": "npm run dev --workspace @yunpanel/agent",
     "auth": "npm run auth --workspace @yunpanel/api --",
     "secret-key": "node scripts/rotate-secret-master-key.mjs",
+    "local-runtime": "node scripts/local-runtime.mjs",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "node scripts/validate-repository.mjs",
