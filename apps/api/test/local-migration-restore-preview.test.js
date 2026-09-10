@@ -34,7 +34,10 @@ function identityComparison(overrides = {}) {
     snapshotUsers: 2,
     currentUsers: 2,
     counts: { match: 2, drift: 0, missingCurrent: 0, addedCurrent: 0 },
-    identities: [],
+    identities: [
+      { name: 'yunapp-aaaaaaaaaaaa', status: 'match', changedFields: [] },
+      { name: 'yunapp-bbbbbbbbbbbb', status: 'match', changedFields: [] },
+    ],
     ...overrides,
   };
 }
@@ -156,7 +159,6 @@ test('identity comparison count mismatch fails closed', async () => {
       verifyBackup: async () => verification([]),
       compareIdentities: async () => identityComparison({
         counts: { match: 2, drift: 1, missingCurrent: 0, addedCurrent: 0 },
-        identities: [],
       }),
       lstatFn: async () => metadata('directory'),
     }),
