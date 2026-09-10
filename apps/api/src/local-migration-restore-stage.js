@@ -26,6 +26,12 @@ const DEFAULT_STAGE_ROOT = '/var/backups/yunpanel/.restore-staging';
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_STAGE_MEMBERS = localMigrationArchiveInspectionInternals.maxMembers;
 const METADATA_MARKERS = new Set([null, '+', '*', '.']);
+const METADATA_PLAN_BLOCKS = new Set([
+  'unix_identity_drift',
+  'restore_target_type_mismatch',
+  'privileged_mode_requires_policy',
+  'extended_metadata_unvalidated',
+]);
 
 export class LocalMigrationRestoreStageError extends Error {
   constructor(code, message) {
@@ -115,7 +121,8 @@ function validatePreview(preview, directory) {
   return Object.freeze(members);
 }
 
-function summarizeMetadataPlan(plan, directory, sha256, memberCount) {
+function summarizeMetadataPlan(plan, directory, sha256, members) {
+  const memberCount = members.length;
   if (!plan || plan.destructive !== false || plan.liveMutation !== false || plan.liveApplyEnabled !== false
     || plan.ownershipMetadata !== true || plan.extendedMetadataValidated !== false
     || plan.backupDirectory !== directory || plan.sha256 !== sha256
@@ -134,9 +141,16 @@ function summarizeMetadataPlan(plan, directory, sha256, memberCount) {
     'identityMissingCurrent',
     'identityAddedCurrent',
   ];
+  const uniqueBlocks = new Set(plan.blocks);
+  const privilegedModeMembers = members.filter((member) => (member.mode & 0o7000) !== 0).length;
+  const extendedMetadataMembers = members.filter((member) => member.metadataMarker !== null).length;
   if (!countKeys.every((key) => Number.isInteger(plan.counts[key]) && plan.counts[key] >= 0)
-    || plan.counts.privilegedModeMembers > memberCount || plan.counts.extendedMetadataMembers > memberCount
-    || plan.blocks.some((block) => typeof block !== 'string' || block.length < 1 || block.length > 80)) {
+    || plan.counts.privilegedModeMembers !== privilegedModeMembers
+    || plan.counts.extendedMetadataMembers !== extendedMetadataMembers
+    || uniqueBlocks.size !== plan.blocks.length
+    || plan.blocks.some((block) => typeof block !== 'string' || !METADATA_PLAN_BLOCKS.has(block))
+    || uniqueBlocks.has('privileged_mode_requires_policy') !== (privilegedModeMembers > 0)
+    || uniqueBlocks.has('extended_metadata_unvalidated') !== (extendedMetadataMembers > 0)) {
     throw new LocalMigrationRestoreStageError('migration_restore_stage_metadata_plan_invalid', 'Migration restore staging metadata plan summary is invalid');
   }
   return Object.freeze({
@@ -317,7 +331,7 @@ export async function stageLocalMigrationRestore({
     }
     throw new LocalMigrationRestoreStageError('migration_restore_stage_metadata_plan_failed', 'Migration restore staging metadata plan could not be produced safely');
   }
-  const metadataSummary = summarizeMetadataPlan(metadataPlan, directory, preview.sha256, members.length);
+  const metadataSummary = summarizeMetadataPlan(metadataPlan, directory, preview.sha256, members);
 
   await ensurePrivateDirectory(safeStageRoot, { mkdirFn, lstatFn, chmodFn, recursive: true });
   let stageDirectory;
