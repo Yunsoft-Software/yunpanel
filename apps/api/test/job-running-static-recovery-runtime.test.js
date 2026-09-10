@@ -10,7 +10,7 @@ function resourceFactory(label, calls) {
   return ({ filePath }) => ({ async init() { calls.push([`${label}.init`, filePath]); } });
 }
 
-test('static recovery runtime binds exact host, resource stores and evidence inspector', async () => {
+test('static recovery runtime binds exact host, private context, resource stores and evidence inspector', async () => {
   const calls = [];
   const fakeJobRegistry = { marker: 'durable' };
   const result = await runRunningStaticDeploymentRecoveryFromStores({
@@ -35,12 +35,22 @@ test('static recovery runtime binds exact host, resource stores and evidence ins
     jobRegistryFactory: () => ({}),
     recoveryStoreFactory: () => ({}),
     durableRegistryFactory: ({ filePath }) => { calls.push(['durable.create', filePath]); return fakeJobRegistry; },
+    contextReaderFactory: ({ filePath }) => {
+      calls.push(['context.create', filePath]);
+      return {
+        async read(id) {
+          calls.push(['context.read', id]);
+          return { id, payload: { applicationId: 'app', deploymentId: jobId } };
+        },
+      };
+    },
     evidenceInspectorFactory: () => ({
       async inspect(identity) { calls.push(['evidence.inspect', identity]); return { satisfied: true, result: {} }; },
     }),
     serviceStatus: async () => ({ apiActive: false, agentActive: false }),
     recoverCommand: async (input) => {
       assert.equal(input.jobRegistry, fakeJobRegistry);
+      assert.deepEqual(await input.loadJobContext(jobId), { id: jobId, payload: { applicationId: 'app', deploymentId: jobId } });
       assert.deepEqual(await input.inspectDeploymentEvidence({ applicationId: 'app', deploymentId: jobId }), {
         satisfied: true,
         result: {},
@@ -57,11 +67,14 @@ test('static recovery runtime binds exact host, resource stores and evidence ins
     ['certificate.init', '/work/state/certificates.json'],
     ['application.init', '/work/state/applications.json'],
     ['durable.create', '/work/state/jobs.json'],
+    ['context.create', '/work/state/jobs.json'],
+    ['context.read', jobId],
     ['evidence.inspect', { applicationId: 'app', deploymentId: jobId }],
   ]);
 });
 
-test('static recovery refuses a different host before evidence construction', async () => {
+test('static recovery refuses a different host before context or evidence construction', async () => {
+  let contextFactories = 0;
   let evidenceFactories = 0;
   await assert.rejects(
     runRunningStaticDeploymentRecoveryFromStores({
@@ -75,11 +88,13 @@ test('static recovery refuses a different host before evidence construction', as
       jobRegistryFactory: () => ({}),
       recoveryStoreFactory: () => ({}),
       durableRegistryFactory: () => ({}),
+      contextReaderFactory: () => { contextFactories += 1; return { read: async () => ({}) }; },
       evidenceInspectorFactory: () => { evidenceFactories += 1; return { inspect: async () => ({}) }; },
       serviceStatus: async () => ({ apiActive: false, agentActive: false }),
       recoverCommand: async () => ({}),
     }),
     { code: 'job_recovery_server_hostname_mismatch' },
   );
+  assert.equal(contextFactories, 0);
   assert.equal(evidenceFactories, 0);
 });
