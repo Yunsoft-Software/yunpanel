@@ -23,6 +23,21 @@ test('HTTP mapping passes parent IDs into the real registry and returns 201', as
   assert.equal((await registry.getDomain(response.payload.data.id)).parentDomainId, root.id);
 });
 
+test('HTTP mapping forwards explicit Website IDs without accepting inferred linkage', async () => {
+  const websiteId = '5a5ea77f-2d7d-43f7-a455-1ed9e5cb41be';
+  const registry = createDomainRegistry({
+    getWebsite: async (id) => id === websiteId ? { id, serverId: 'local' } : null,
+  });
+  const response = responseRecorder();
+  await createDomainHandler(registry)({ body: { ...body, websiteId } }, response, (error) => { throw error; });
+  assert.equal(response.code, 201);
+  assert.equal(response.payload.data.websiteId, websiteId);
+
+  const legacy = responseRecorder();
+  await createDomainHandler(registry)({ body: { ...body, primaryDomain: 'other.example.com' } }, legacy, (error) => { throw error; });
+  assert.equal(legacy.payload.data.websiteId, null);
+});
+
 test('parent validation failures reach the error middleware without a success response', async () => {
   const registry = createDomainRegistry();
   const response = responseRecorder();
@@ -39,6 +54,7 @@ test('legacy domain requests remain independent with the same defaults', async (
   const response = responseRecorder();
   await createDomainHandler(registry)({ body }, response, (error) => { throw error; });
   assert.equal(response.code, 201);
+  assert.equal(response.payload.data.websiteId, null);
   assert.equal(response.payload.data.parentDomainId, null);
   assert.equal(response.payload.data.httpsMode, 'off');
   assert.deepEqual(response.payload.data.aliases, []);
