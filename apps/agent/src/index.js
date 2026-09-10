@@ -1,4 +1,5 @@
 import { startControlPlaneLink } from './control-plane-client.js';
+import { safeLegacyAgentDiagnosticCode } from './legacy-safe-error.js';
 import { createAgentServer } from './server.js';
 
 const host = process.env.YUN_AGENT_HOST ?? '127.0.0.1';
@@ -23,7 +24,7 @@ function shutdown(signal) {
   controlPlaneLink.stop();
   server.close((error) => {
     if (error) {
-      console.error('[yun-agent] shutdown failed', error);
+      console.error(`[yun-agent] shutdown failed: ${safeLegacyAgentDiagnosticCode(error, 'shutdown_failed')}`);
       process.exitCode = 1;
     }
   });
