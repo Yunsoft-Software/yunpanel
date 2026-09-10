@@ -53,6 +53,11 @@ export {
   staticRollbackManager,
 } from './static-rollback-manager.js';
 export {
+  createStaticRollbackEvidenceInspector,
+  StaticRollbackEvidenceError,
+  staticRollbackEvidenceInternals,
+} from './static-rollback-evidence.js';
+export {
   createManagedServiceManager,
   managedServiceManager,
   ManagedServiceError,
