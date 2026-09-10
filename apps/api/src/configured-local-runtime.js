@@ -7,6 +7,7 @@ import { resolveLocalRuntimeConfig } from './local-runtime-config.js';
 import { startLocalRuntime } from './local-runtime.js';
 import { createManagedServiceMutationReceiptStore } from './managed-service-mutation-receipt.js';
 import { createNodeRestartReceiptStore } from './node-restart-receipt.js';
+import { createNodeRollbackReceiptStore } from './node-rollback-receipt.js';
 
 export class ConfiguredLocalRuntimeError extends Error {
   constructor(code, message) {
@@ -32,6 +33,7 @@ export async function startConfiguredLocalRuntime({
   createDomainActivationReceipts = createDomainActivationReceiptStore,
   createManagedServiceReceipts = createManagedServiceMutationReceiptStore,
   createNodeRestartReceipts = createNodeRestartReceiptStore,
+  createNodeRollbackReceipts = createNodeRollbackReceiptStore,
   inspectInventory = inspectHostInventory,
   inspectServices = null,
   inspectDocker = null,
@@ -49,6 +51,7 @@ export async function startConfiguredLocalRuntime({
     || typeof createDomainActivationReceipts !== 'function'
     || typeof createManagedServiceReceipts !== 'function'
     || typeof createNodeRestartReceipts !== 'function'
+    || typeof createNodeRollbackReceipts !== 'function'
     || typeof inspectInventory !== 'function'
     || (inspectServices !== null && typeof inspectServices !== 'function')
     || (inspectDocker !== null && typeof inspectDocker !== 'function')
@@ -76,6 +79,10 @@ export async function startConfiguredLocalRuntime({
   const nodeRestartReceipts = createNodeRestartReceipts();
   if (!nodeRestartReceipts || typeof nodeRestartReceipts.write !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_node_restart_receipts_invalid', 'Local runtime Node restart receipt store is invalid');
+  }
+  const nodeRollbackReceipts = createNodeRollbackReceipts();
+  if (!nodeRollbackReceipts || typeof nodeRollbackReceipts.write !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_node_rollback_receipts_invalid', 'Local runtime Node rollback receipt store is invalid');
   }
 
   const recordExecutionEvidence = async ({ serverId, jobId, operation, payload, result }) => {
@@ -110,6 +117,22 @@ export async function startConfiguredLocalRuntime({
         throw new Error('Node restart result is not safe recovery evidence');
       }
       await nodeRestartReceipts.write({
+        serverId,
+        jobId,
+        applicationId: payload.applicationId,
+        result,
+      });
+      return;
+    }
+
+    if (operation === OPERATIONS.APP_NODE_ROLLBACK) {
+      if (!result || result.active !== true || result.healthy !== true
+        || result.releaseId !== payload?.releaseId || result.previousReleaseId !== payload?.currentReleaseId
+        || result.port !== payload?.runtime?.port || result.healthPath !== payload?.runtime?.healthPath
+        || typeof payload?.applicationId !== 'string') {
+        throw new Error('Node rollback result is not safe recovery evidence');
+      }
+      await nodeRollbackReceipts.write({
         serverId,
         jobId,
         applicationId: payload.applicationId,
