@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { MANAGED_SERVICE_IDS, OPERATIONS } from '@yunpanel/protocol';
@@ -6,9 +7,14 @@ const STORE_VERSION = 1;
 const DEFAULT_ROOT = '/var/lib/yunpanel/recovery/service-mutations';
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+const PACKAGE_NAME_PATTERN = /^[a-z0-9][a-z0-9.+-]{0,100}$/;
+const PACKAGE_VERSION_PATTERN = /^[A-Za-z0-9.+:~_-]{1,100}$/;
+const SYSTEMD_UNIT_PATTERN = /^[a-z0-9@_.-]{1,120}\.service$/;
+const SYSTEMD_STATE_PATTERN = /^[a-z0-9-]{1,40}$/;
+const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const SERVICE_IDS = new Set(MANAGED_SERVICE_IDS);
 const RECEIPT_KEYS = Object.freeze([
-  'version', 'recordedAt', 'serverId', 'jobId', 'operation', 'serviceId', 'action', 'changed',
+  'version', 'recordedAt', 'serverId', 'jobId', 'operation', 'serviceId', 'action', 'changed', 'stateDigest',
 ]);
 
 export class ManagedServiceMutationReceiptError extends Error {
@@ -50,6 +56,56 @@ function normalizeMutation({ operation, action, changed }) {
   throw new ManagedServiceMutationReceiptError('service_receipt_operation_invalid', 'Managed service receipt operation is not supported');
 }
 
+function normalizeServiceState(value, serviceId) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.id !== serviceId
+    || typeof value.installed !== 'boolean' || typeof value.active !== 'boolean'
+    || !Array.isArray(value.packages) || value.packages.length < 1 || value.packages.length > 8
+    || !Array.isArray(value.units) || value.units.length < 1 || value.units.length > 8) {
+    throw new ManagedServiceMutationReceiptError('service_receipt_state_invalid', 'Managed service receipt state is invalid');
+  }
+  const packages = value.packages.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || typeof entry.packageName !== 'string' || !PACKAGE_NAME_PATTERN.test(entry.packageName)
+      || typeof entry.installed !== 'boolean') {
+      throw new ManagedServiceMutationReceiptError('service_receipt_state_invalid', 'Managed service receipt package state is invalid');
+    }
+    const version = entry.version == null ? null : entry.version;
+    if (version !== null && (typeof version !== 'string' || !PACKAGE_VERSION_PATTERN.test(version))) {
+      throw new ManagedServiceMutationReceiptError('service_receipt_state_invalid', 'Managed service receipt package version is invalid');
+    }
+    if (entry.installed !== Boolean(version)) {
+      throw new ManagedServiceMutationReceiptError('service_receipt_state_invalid', 'Managed service receipt package state is inconsistent');
+    }
+    return { packageName: entry.packageName, installed: entry.installed, version };
+  });
+  const units = value.units.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || typeof entry.unit !== 'string' || !SYSTEMD_UNIT_PATTERN.test(entry.unit)
+      || typeof entry.inspectionError !== 'boolean') {
+      throw new ManagedServiceMutationReceiptError('service_receipt_state_invalid', 'Managed service receipt unit state is invalid');
+    }
+    const unit = { unit: entry.unit };
+    for (const field of ['loadState', 'activeState', 'subState', 'unitFileState']) {
+      if (typeof entry[field] !== 'string' || !SYSTEMD_STATE_PATTERN.test(entry[field])) {
+        throw new ManagedServiceMutationReceiptError('service_receipt_state_invalid', 'Managed service receipt unit state is invalid');
+      }
+      unit[field] = entry[field];
+    }
+    unit.inspectionError = entry.inspectionError;
+    return unit;
+  });
+  if (value.installed !== packages.every((entry) => entry.installed)
+    || value.active !== units.every((entry) => entry.activeState === 'active')) {
+    throw new ManagedServiceMutationReceiptError('service_receipt_state_invalid', 'Managed service receipt aggregate state is inconsistent');
+  }
+  return { id: serviceId, installed: value.installed, active: value.active, packages, units };
+}
+
+export function managedServiceStateDigest(value, serviceId) {
+  const safeState = normalizeServiceState(value, normalizeServiceId(serviceId));
+  return createHash('sha256').update(JSON.stringify(safeState)).digest('hex');
+}
+
 function normalizeReceipt(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== STORE_VERSION
     || Object.keys(value).some((key) => !RECEIPT_KEYS.includes(key))) {
@@ -58,8 +114,9 @@ function normalizeReceipt(value) {
   const { serverId, jobId } = normalizeIdentity(value.serverId, value.jobId);
   const serviceId = normalizeServiceId(value.serviceId);
   const mutation = normalizeMutation({ operation: value.operation, action: value.action, changed: value.changed });
-  if (typeof value.recordedAt !== 'string' || !Number.isFinite(Date.parse(value.recordedAt))) {
-    throw new ManagedServiceMutationReceiptError('service_receipt_invalid', 'Managed service mutation receipt timestamp is invalid');
+  if (typeof value.recordedAt !== 'string' || !Number.isFinite(Date.parse(value.recordedAt))
+    || typeof value.stateDigest !== 'string' || !DIGEST_PATTERN.test(value.stateDigest)) {
+    throw new ManagedServiceMutationReceiptError('service_receipt_invalid', 'Managed service mutation receipt metadata is invalid');
   }
   return Object.freeze({
     version: STORE_VERSION,
@@ -68,6 +125,7 @@ function normalizeReceipt(value) {
     jobId,
     ...mutation,
     serviceId,
+    stateDigest: value.stateDigest,
   });
 }
 
@@ -89,16 +147,18 @@ export function createManagedServiceMutationReceiptStore({
     return path.join(root, identity.serverId, `${identity.jobId}.json`);
   }
 
-  async function write({ serverId, jobId, operation, serviceId, action = null, changed = null }) {
+  async function write({ serverId, jobId, operation, serviceId, action = null, changed = null, state }) {
     const identity = normalizeIdentity(serverId, jobId);
+    const normalizedServiceId = normalizeServiceId(serviceId);
     const receipt = normalizeReceipt({
       version: STORE_VERSION,
       recordedAt: new Date(now()).toISOString(),
       ...identity,
       operation,
-      serviceId,
+      serviceId: normalizedServiceId,
       action,
       changed,
+      stateDigest: managedServiceStateDigest(state, normalizedServiceId),
     });
     const directory = path.join(root, identity.serverId);
     const target = receiptPath(identity.serverId, identity.jobId);
@@ -139,5 +199,6 @@ export const managedServiceMutationReceiptInternals = Object.freeze({
   normalizeIdentity,
   normalizeServiceId,
   normalizeMutation,
+  normalizeServiceState,
   normalizeReceipt,
 });
