@@ -44,11 +44,13 @@ function formatStatus(result) {
       'job',
       `server=${job.serverId}`,
       `id=${job.jobId}`,
+      `status=${formatValue(job.status)}`,
       `operation=${formatValue(job.operation)}`,
       `resourceType=${formatValue(job.resourceType)}`,
       `resourceId=${formatValue(job.resourceId)}`,
       `createdAt=${formatValue(job.createdAt)}`,
       `startedAt=${formatValue(job.startedAt)}`,
+      `finishedAt=${formatValue(job.finishedAt)}`,
       `attempts=${formatValue(job.attempts)}`,
     ].join(' '));
   }
