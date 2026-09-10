@@ -21,7 +21,7 @@ test('Debian package installs the local runtime migration entry point and runboo
 test('environment template keeps local execution disabled until explicit migration', async () => {
   const env = await readFile(envExampleUrl, 'utf8');
   assert.match(env, /^YUNPANEL_LOCAL_SERVER_ID=$/m);
-  assert.match(env, /packaged migration CLI before enabling this value/);
+  assert.match(env, /guarded local-runtime `create`/);
   assert.doesNotMatch(env, /^YUNPANEL_LOCAL_SERVER_ID=[0-9a-f-]+$/m);
 });
 
@@ -29,7 +29,7 @@ test('migration runbook requires stopped consumers, clear work and a verified ba
   const doc = await readFile(migrationDocUrl, 'utf8');
   assert.match(doc, /YUNPANEL_SERVER_STORE=\/var\/lib\/yunpanel\/control-plane\/server-registry\.json/);
   assert.match(doc, /YUNPANEL_JOB_STORE=\/var\/lib\/yunpanel\/control-plane\/job-registry\.json/);
-  assert.match(doc, /no `queued` or `running` job/);
+  assert.match(doc, /a `queued` or `running` job exists/);
   assert.match(doc, /systemctl stop yunpanel-api\.service yun-agent\.service/);
   assert.match(doc, /local-migration-backup\.mjs create --confirm/);
   assert.match(doc, /local-migration-backup\.mjs verify \/var\/backups\/yunpanel\/migration-<timestamp>/);

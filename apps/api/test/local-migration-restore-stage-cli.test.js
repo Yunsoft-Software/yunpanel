@@ -18,6 +18,9 @@ function stagedResult(overrides = {}) {
     sha256: 'a'.repeat(64),
     stageDirectory,
     members: 42,
+    ownershipMetadata: true,
+    extendedMetadata: 3,
+    extendedMetadataValidated: false,
     ...overrides,
   };
 }

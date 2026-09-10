@@ -43,7 +43,7 @@ test('Debian build installs the migration backup CLI, restore rehearsal source a
 
   assert.match(backupCore, /const DEFAULT_ROOT = '\/var\/backups\/yunpanel';/);
   assert.match(previewCore, /inspectVerifiedLocalMigrationArchive/);
-  assert.match(previewCore, /compareLocalMigrationUnixIdentities/);
+  assert.match(previewCore, /compareVerifiedLocalMigrationUnixIdentities/);
   assert.match(archiveInspection, /migration_archive_link_escape/);
   assert.match(unixIdentity, /yunapp-\[a-f0-9\]\{12\}/);
   assert.match(stageCore, /const DEFAULT_STAGE_ROOT = '\/var\/backups\/yunpanel\/\.restore-staging';/);
