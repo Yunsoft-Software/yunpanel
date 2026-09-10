@@ -11,6 +11,7 @@ import { createServerRegistry, RegistryError } from './server-registry.js';
 import { mountWebsiteRoutes } from './website-http.js';
 import { WebsiteMigrationBindError } from './website-migration-bind.js';
 import { mountWebsiteMigrationRoutes } from './website-migration-http.js';
+import { createWebsiteMigrationPolicyStore, WebsiteMigrationPolicyError } from './website-migration-policy.js';
 import { WebsiteMigrationPreviewError } from './website-migration-preview.js';
 import { createWebsiteRegistry, WebsiteRegistryError } from './website-registry.js';
 
@@ -22,12 +23,17 @@ export { API_VERSION } from './core-app.js';
 // management route requires a server-derived request.auth context.
 export function createApp({
   registry = createServerRegistry(),
-  domainRegistry = createDomainRegistry(),
   jobRegistry = createJobRegistry(),
   applicationRegistry = createApplicationRegistry(),
   websiteRegistry = createWebsiteRegistry({
     serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
     getApplication: async (applicationId) => applicationRegistry.getApplication(applicationId),
+  }),
+  websiteMigrationPolicy = createWebsiteMigrationPolicyStore(),
+  domainRegistry = createDomainRegistry({
+    serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+    getWebsite: async (websiteId) => websiteRegistry.getWebsite(websiteId),
+    websiteBindingRequired: () => websiteMigrationPolicy.snapshot().websiteBindingRequired,
   }),
   environment = process.env.NODE_ENV,
   ...options
@@ -38,7 +44,7 @@ export function createApp({
   app.use(express.json({ limit: '256kb' }));
   app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry));
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry });
-  mountWebsiteMigrationRoutes(app, { websiteRegistry, domainRegistry, applicationRegistry });
+  mountWebsiteMigrationRoutes(app, { websiteRegistry, domainRegistry, applicationRegistry, websiteMigrationPolicy });
   mountManagedServiceRoutes(app, { registry, jobRegistry });
   mountDatabaseRoutes(app, { registry, jobRegistry });
   app.use(core);
@@ -51,6 +57,7 @@ export function createApp({
       || error instanceof JobRegistryError
       || error instanceof ManagedServiceHttpError
       || error instanceof WebsiteMigrationBindError
+      || error instanceof WebsiteMigrationPolicyError
       || error instanceof WebsiteMigrationPreviewError
       || error instanceof WebsiteRegistryError
     ) {
