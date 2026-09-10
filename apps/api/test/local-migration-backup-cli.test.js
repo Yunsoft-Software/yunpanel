@@ -34,13 +34,30 @@ function archivePreview(value = backupDirectory) {
   };
 }
 
-test('migration backup CLI accepts only exact create, verify and preview syntax', () => {
+function stagedResult(value = backupDirectory) {
+  return {
+    validated: true,
+    destructive: false,
+    liveMutation: false,
+    backupDirectory: value,
+    sha256: 'b'.repeat(64),
+    stageDirectory: '/var/backups/yunpanel/.restore-staging/migration-2026-09-10T15-00-00-000Z-AbCd12',
+    members: 8,
+  };
+}
+
+test('migration backup CLI accepts only exact create, verify, preview and confirmed stage syntax', () => {
   assert.deepEqual(parseLocalMigrationBackupArguments(['create', '--confirm']), { action: 'create', confirm: true });
   assert.deepEqual(parseLocalMigrationBackupArguments(['verify', backupDirectory]), { action: 'verify', backupDirectory });
   assert.deepEqual(parseLocalMigrationBackupArguments(['preview', backupDirectory]), { action: 'preview', backupDirectory });
+  assert.deepEqual(parseLocalMigrationBackupArguments(['stage', backupDirectory, '--confirm']), {
+    action: 'stage', backupDirectory, confirm: true,
+  });
   assert.throws(() => parseLocalMigrationBackupArguments(['create']), /Usage:/);
   assert.throws(() => parseLocalMigrationBackupArguments(['verify', 'relative/path']), /Usage:/);
   assert.throws(() => parseLocalMigrationBackupArguments(['preview', 'relative/path']), /Usage:/);
+  assert.throws(() => parseLocalMigrationBackupArguments(['stage', backupDirectory]), /Usage:/);
+  assert.throws(() => parseLocalMigrationBackupArguments(['stage', 'relative/path', '--confirm']), /Usage:/);
   assert.throws(() => parseLocalMigrationBackupArguments(['restore', backupDirectory]), /Usage:/);
   assert.throws(() => parseLocalMigrationBackupArguments(['verify', backupDirectory, '--confirm']), /Usage:/);
 });
@@ -56,7 +73,7 @@ test('packaged migration backup CLI requires root and refuses non-packaged execu
   );
 });
 
-test('packaged verify and preview can read only snapshot directories below the fixed backup root', () => {
+test('packaged verify, preview and stage can read only snapshot directories below the fixed backup root', () => {
   assert.equal(assertPackagedBackupDirectory(backupDirectory), backupDirectory);
   assert.throws(() => assertPackagedBackupDirectory('/var/backups/yunpanel'), /must be a snapshot below/);
   assert.throws(() => assertPackagedBackupDirectory('/tmp/yunpanel-copy'), /must be a snapshot below/);
@@ -246,4 +263,68 @@ test('preview rejects malformed archive and identity acknowledgements', async ()
     }),
     /preview result is invalid/,
   );
+});
+
+test('stage is confirmed, fixed-root scoped and emits only non-live validation metadata', async () => {
+  const calls = [];
+  const output = [];
+  const result = await runLocalMigrationBackupCli({
+    argv: ['stage', backupDirectory, '--confirm'],
+    filePath: packagedPath,
+    uid: 0,
+    stageRestore: async ({ backupDirectory: value }) => {
+      calls.push(['stage', value]);
+      return stagedResult(value);
+    },
+    stdout: { write(value) { output.push(value); } },
+  });
+
+  assert.deepEqual(calls, [['stage', backupDirectory]]);
+  assert.equal(result.validated, true);
+  assert.equal(result.destructive, false);
+  assert.equal(result.liveMutation, false);
+  const text = output.join('');
+  assert.match(text, /action=stage/);
+  assert.match(text, /validated=true/);
+  assert.match(text, /destructive=false/);
+  assert.match(text, /liveMutation=false/);
+  assert.match(text, /members=8/);
+  assert.match(text, /stageDirectory=\/var\/backups\/yunpanel\/\.restore-staging\//);
+  assert.doesNotMatch(text, /SECRET|PASSWORD|TOKEN|PRIVATE KEY|root:x|:x:/);
+});
+
+test('stage rejects outside-root snapshots before invoking the stage handler', async () => {
+  let stageCalls = 0;
+  await assert.rejects(
+    runLocalMigrationBackupCli({
+      argv: ['stage', '/tmp/outside', '--confirm'],
+      filePath: packagedPath,
+      uid: 0,
+      stageRestore: async () => { stageCalls += 1; return stagedResult(); },
+      stdout: { write() {} },
+    }),
+    /must be a snapshot below/,
+  );
+  assert.equal(stageCalls, 0);
+});
+
+test('stage rejects acknowledgements that claim live or destructive mutation', async () => {
+  for (const bad of [
+    { destructive: true },
+    { liveMutation: true },
+    { validated: false },
+    { stageDirectory: '/tmp/outside-stage' },
+    { members: 0 },
+  ]) {
+    await assert.rejects(
+      runLocalMigrationBackupCli({
+        argv: ['stage', backupDirectory, '--confirm'],
+        filePath: packagedPath,
+        uid: 0,
+        stageRestore: async () => ({ ...stagedResult(), ...bad }),
+        stdout: { write() {} },
+      }),
+      /staging result is invalid/,
+    );
+  }
 });
