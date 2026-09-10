@@ -42,10 +42,10 @@ function appUnixUser(applicationId) {
 
 function migrationWebsiteId(domainId, applicationId) {
   const domain = uuid(domainId, 'domainId');
-  const application = uuid(applicationId, 'applicationId');
+  uuid(applicationId, 'applicationId');
   const digest = createHash('sha1')
     .update(MIGRATION_NAMESPACE)
-    .update(`${domain}:${application}`)
+    .update(domain)
     .digest();
   const bytes = Buffer.from(digest.subarray(0, 16));
   bytes[6] = (bytes[6] & 0x0f) | 0x50;

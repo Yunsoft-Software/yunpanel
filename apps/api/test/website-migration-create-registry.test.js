@@ -18,10 +18,11 @@ function registry(apps = new Map([[applicationId, application()], [otherApplicat
   });
 }
 
-test('migration Website ID is deterministic and canonical', () => {
+test('migration Website ID is deterministic, canonical and stable across candidate drift', () => {
   const lower = websiteRegistryInternals.migrationWebsiteId(domainId, applicationId);
   const upper = websiteRegistryInternals.migrationWebsiteId(domainId.toUpperCase(), applicationId.toUpperCase());
   assert.equal(lower, upper);
+  assert.equal(websiteRegistryInternals.migrationWebsiteId(domainId, otherApplicationId), lower);
   assert.match(lower, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });
 

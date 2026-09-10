@@ -48,7 +48,7 @@ test('migration delete rejects changed Domain identity or current Website state'
   const created = await websites.createMigrationWebsite({ domainId, serverId, name: 'api.example.com', applicationId });
 
   await assert.rejects(
-    websites.deleteMigrationWebsite({ otherDomainId, applicationId, websiteId: created.id, serverId, name: 'api.example.com' }),
+    websites.deleteMigrationWebsite({ domainId: otherDomainId, applicationId, websiteId: created.id, serverId, name: 'api.example.com' }),
     (error) => error instanceof WebsiteRegistryError && error.code === 'migration_website_delete_identity_mismatch',
   );
   await assert.rejects(
