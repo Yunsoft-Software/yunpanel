@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { AuditStoreError } from '../src/audit-store.js';
 import { AuthError } from '../src/auth-error.js';
 import { handleAuditRead, parseAuditQuery } from '../src/audit-http.js';
 
@@ -29,11 +30,14 @@ test('audit query accepts bounded pagination and exact actor/resource filters', 
   });
 });
 
-test('audit query rejects unknown duplicate and incomplete filters', () => {
+test('audit query rejects unknown duplicate incomplete and out-of-range filters', () => {
   for (const query of [
     new URLSearchParams('unknown=x'),
     new URLSearchParams('limit=10&limit=20'),
     new URLSearchParams('limit=-1'),
+    new URLSearchParams('limit=0'),
+    new URLSearchParams('limit=101'),
+    new URLSearchParams(`limit=${Number.MAX_SAFE_INTEGER}0`),
     new URLSearchParams('offset=nope'),
     new URLSearchParams('resourceType=job'),
     new URLSearchParams('resourceId=job-1'),
@@ -60,6 +64,25 @@ test('audit read forwards only normalized filters and bounded store output', () 
   assert.deepEqual(calls, [{ limit: 50, offset: 0, actorId: 'owner-1', resourceType: null, resourceId: null }]);
   assert.deepEqual(payloads, [{ status: 200, payload: { data: page } }]);
   assert.deepEqual(result, { data: page });
+});
+
+test('store-side invalid filters become 400 but real audit failures remain outages', () => {
+  const { response } = responseRecorder();
+  assert.throws(
+    () => handleAuditRead({
+      request: { method: 'GET' }, response, query: new URLSearchParams('actorId=%00'),
+      store: { audit: { list() { throw new AuditStoreError('invalid_audit_event', 'unsafe actor'); } } }, json() {},
+    }),
+    (error) => error instanceof AuthError && error.code === 'invalid_audit_query' && error.status === 400,
+  );
+  const outage = new Error('disk unavailable');
+  assert.throws(
+    () => handleAuditRead({
+      request: { method: 'GET' }, response, query: new URLSearchParams(),
+      store: { audit: { list() { throw outage; } } }, json() {},
+    }),
+    (error) => error === outage,
+  );
 });
 
 test('audit read is GET-only and fails closed when store is unavailable', () => {
