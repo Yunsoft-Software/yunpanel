@@ -56,7 +56,7 @@ test('renders managed HTTPS with HTTP ACME challenge and redirect', () => {
 test('rejects config injection through domain, path, upstream and TLS inputs', () => {
   assert.throws(
     () => renderStaticSiteConfig({ primaryDomain: 'example.com; include /etc/shadow', root: '/var/www/site' }),
-    /Domain labels/,
+    (error) => error?.code === 'invalid_domain_length',
   );
 
   assert.throws(
