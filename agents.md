@@ -6,7 +6,9 @@ Bu dosya repoda çalışan geliştirici ve kodlama ajanlarının kurallarını t
 
 YunPanel, Yunsoft'un Ubuntu sunucularını Plesk'e bağımlı olmadan yöneteceği site merkezli hosting/server panelidir. Kullanıcı bir web sitesine girdiğinde Node.js, Git/deploy, domain/subdomain, SSL, mail, dosya, veritabanı, log, cron, yedek ve terminal işlemlerini o bağlamdan yapabilmelidir.
 
-2026-09-09 ürün kararı: gerçek kullanıcı authentication, enterprise UI/UX, kalıcı domain/subdomain hiyerarşisi ve agentsiz, tam yetkili yerel yönetim backend'i uygulanacaktır. Bu karar eski planın ayrı privileged agent, non-root yönetim backend'i ve terminal yasağı hükümlerinin yerine geçer. Mevcut kodun henüz bu mimariye taşınmış olduğu varsayılmayacaktır.
+2026-09-09 ürün kararı: gerçek kullanıcı authentication, enterprise UI/UX, kalıcı domain/subdomain hiyerarşisi ve agentsiz, tam yetkili yerel yönetim backend'i uygulanacaktır. Bu karar eski planın ayrı privileged agent, non-root yönetim backend'i ve terminal yasağı hükümlerinin yerine geçer.
+
+**2026-09-10 yürütme kararı:** Görsel tasarım/UI/UX yeniden tasarımı, layout/styling, component polish ve benzeri frontend tasarım işi aktif geliştirme sırasından çıkarılmıştır. Bu işler backend/functionality tamamlandıktan sonra ayrı bir modele verilecektir. Mevcut akışta backend işlevi veya güvenlik kontratı zorunlu kılmadıkça `apps/web` görsel/tasarım değişikliği yapılmaz. Enterprise UI/UX hedefi iptal değildir; yalnızca uygulanma sırası en sona alınmıştır.
 
 Kapsam Yunsoft'un gerçek kullanım ihtiyaçlarıdır; reseller, faturalama, hosting paketleri, tüm dağıtımlara destek ve Plesk'in bütün özellikleri bu değişikliğin önkoşulu değildir.
 
@@ -56,7 +58,11 @@ Kapsam Yunsoft'un gerçek kullanım ihtiyaçlarıdır; reseller, faturalama, hos
 - DNS hosting, web hostname ve mail domaini ayrı yaşam döngüleridir. Panelde domain yaratılması dış DNS'in değiştiği veya mailin hazır olduğu anlamına gelmez.
 - Domain/subdomain silmede bağımlılıklar ve etki gösterilir; örtülü cascade yapılmaz. Migration mevcut trafik ve sertifika ilişkilerini bozmamalıdır.
 
-## 7. Enterprise UI/UX standardı
+## 7. DEFERRED — Enterprise UI/UX standardı
+
+Bu bölüm hedef tasarım standardını tanımlar fakat **aktif geliştirme talimatı değildir**. 2026-09-10 kararı gereği görsel UI/UX, layout/styling, component polish, responsive görsel düzen ve benzeri tasarım commitleri backend/functionality tamamlanana kadar yapılmaz. Backend kontratı veya güvenlik gereği zorunlu olmayan `apps/web` değişiklikleri ayrı tasarım aşamasına bırakılır.
+
+Son tasarım aşamasında korunacak hedefler:
 
 - Günlük giriş noktası Web Siteleri ve domain ağacıdır. Site detaylarında breadcrumb, kalıcı başlık, hızlı eylemler ve runtime'a uygun sekmeler bulunur.
 - Gerçek URL routing, deep link, reload ve tarayıcı geri/ileri desteklenir. Tek `activeView` state'ine bağlı tüm-uygulama bileşeni büyütülmez.
@@ -91,7 +97,8 @@ Kapsam Yunsoft'un gerçek kullanım ihtiyaçlarıdır; reseller, faturalama, hos
 - Küçük, tek amaçlı commitlerle ilerle; refactor ve özellik geliştirmesini mümkün olduğunca ayır. İlgisiz dosyaları değiştirme; eşzamanlı kullanıcı değişikliklerini ezme.
 - GitHub Actions KULLANILMAYACAK. `.github/workflows/` eklenmeyecek. Test/build/deploy yerel komutlar veya YunPanel job sistemiyle yürütülecek.
 - Auth/session/CSRF, WebSocket yetkisi, site izolasyonu, domain hiyerarşisi/migration, config validation, deploy state, rollback, secret masking, duplicate resource, concurrency ve destructive işlemler test edilir.
-- UI için tarayıcı, responsive, klavye ve deep-link akışları doğrulanır. Gerçek host bağımlı testler `todo.md` içinde takip edilir.
+- Görsel/component/responsive polish testleri tasarım aşamasına bırakılır; auth/security browser davranışı ve backend contract kabulü ertelenmez.
+- Gerçek host bağımlı testler `todo.md` içinde takip edilir.
 - Çalıştırılmayan test, açılmayan canlı site ve uygulanmayan migration yapılmış gibi raporlanmaz. Kod testi gerçek Ubuntu/DNS/mail/restore kanıtının yerine geçmez.
 
 ## 11. `plan.md` ve `todo.md`
