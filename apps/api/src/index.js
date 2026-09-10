@@ -16,6 +16,7 @@ import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createServerRegistry } from './server-registry.js';
+import { createWebsiteRegistry } from './website-registry.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10);
@@ -24,6 +25,7 @@ const domainStorePath = process.env.YUNPANEL_DOMAIN_STORE ?? path.resolve('.data
 const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-registry.json');
 const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.resolve('.data/certificate-registry.json');
 const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.resolve('.data/application-registry.json');
+const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.data/website-registry.json');
 const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRONMENT_STORE ?? path.resolve('.data/application-environment-registry.json');
 const authStorePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStorePath), 'auth', 'auth.sqlite');
 const certificateRenewalIntervalMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS ?? `${6 * 60 * 60 * 1000}`, 10);
@@ -57,6 +59,12 @@ const certificateRegistry = createCertificateRegistry({ filePath: certificateSto
 await certificateRegistry.init();
 const applicationRegistry = createApplicationRegistry({ filePath: applicationStorePath, serverExists: async (serverId) => Boolean(await registry.getServer(serverId)) });
 await applicationRegistry.init();
+const websiteRegistry = createWebsiteRegistry({
+  filePath: websiteStorePath,
+  serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+  getApplication: async (applicationId) => applicationRegistry.getApplication(applicationId),
+});
+await websiteRegistry.init();
 const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   filePath: applicationEnvironmentStorePath,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
@@ -75,7 +83,15 @@ const listener = createAuthenticatedApi({
   store: authStore,
   publicOrigin: process.env.YUNPANEL_PUBLIC_ORIGIN ?? (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:5173' : undefined),
   development: process.env.NODE_ENV === 'development',
-  createHandler: () => createApp({ registry, domainRegistry, jobRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry }),
+  createHandler: () => createApp({
+    registry,
+    domainRegistry,
+    jobRegistry,
+    certificateRegistry,
+    applicationRegistry,
+    websiteRegistry,
+    applicationEnvironmentRegistry,
+  }),
 });
 
 const localRuntime = await startConfiguredLocalRuntime({
@@ -105,6 +121,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] job store=${jobStorePath}`);
   console.log(`[yunpanel-api] certificate store=${certificateStorePath}`);
   console.log(`[yunpanel-api] application store=${applicationStorePath}`);
+  console.log(`[yunpanel-api] website store=${websiteStorePath}`);
   console.log(`[yunpanel-api] application environment store=${applicationEnvironmentStorePath}`);
   console.log(`[yunpanel-api] secret store=${applicationEnvironmentRegistry.secretStoreConfigured ? 'configured' : 'not configured'}`);
   console.log(`[yunpanel-api] authentication=${authStore.configured() ? 'configured' : 'local setup required'}`);
