@@ -63,11 +63,11 @@ test('static recovery runtime binds exact host, private context, resource stores
   assert.deepEqual(calls, [
     ['server.init', '/work/state/servers.json'],
     ['server.get', serverId],
+    ['durable.create', '/work/state/jobs.json'],
+    ['context.create', '/work/state/jobs.json'],
     ['domain.init', '/work/state/domains.json'],
     ['certificate.init', '/work/state/certificates.json'],
     ['application.init', '/work/state/applications.json'],
-    ['durable.create', '/work/state/jobs.json'],
-    ['context.create', '/work/state/jobs.json'],
     ['context.read', jobId],
     ['evidence.inspect', { applicationId: 'app', deploymentId: jobId }],
   ]);
