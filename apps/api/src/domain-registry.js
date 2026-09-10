@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid, DomainValidationError, normalizeDomainSet } from '@yunpanel/shared';
@@ -77,6 +77,53 @@ function requireDomain(state, domainId) {
   return domain;
 }
 
+function normalizeReparentId(value, field, { nullable = false } = {}) {
+  if (nullable && value === null) return null;
+  if (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(value)) {
+    throw new DomainRegistryError(`invalid_${field.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)}`, `${field} is invalid`);
+  }
+  return value;
+}
+
+function descendantsOf(domains, domainId) {
+  const descendants = [];
+  const pending = [domainId];
+  const visited = new Set(pending);
+  while (pending.length > 0) {
+    const parentId = pending.shift();
+    for (const domain of domains) {
+      if ((domain.parentDomainId ?? null) !== parentId || visited.has(domain.id)) continue;
+      visited.add(domain.id);
+      pending.push(domain.id);
+      descendants.push(Object.freeze({ id: domain.id, primaryDomain: domain.primaryDomain, parentDomainId: domain.parentDomainId ?? null }));
+    }
+  }
+  return descendants.sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function hierarchySnapshot(domains) {
+  return domains.map((domain) => ({
+    id: domain.id,
+    serverId: domain.serverId,
+    websiteId: domain.websiteId ?? null,
+    primaryDomain: domain.primaryDomain,
+    aliases: [...domain.aliases].sort(),
+    parentDomainId: domain.parentDomainId ?? null,
+    certificateId: domain.certificateId ?? null,
+    desiredRevision: domain.desiredRevision,
+  })).sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function reparentDigest({ domainId, currentParentDomainId, nextParentDomainId, hierarchy }) {
+  return createHash('sha256').update(JSON.stringify({
+    version: 1,
+    domainId,
+    currentParentDomainId,
+    nextParentDomainId,
+    hierarchy,
+  })).digest('hex');
+}
+
 export function createDomainRegistry({
   filePath = null,
   now = () => Date.now(),
@@ -142,6 +189,67 @@ export function createDomainRegistry({
 
   async function ensureInitialized() {
     if (!initialized) await init();
+  }
+
+  function buildReparentPreview(domainId, parentDomainId) {
+    const normalizedDomainId = normalizeReparentId(domainId, 'domainId');
+    const normalizedParentId = normalizeReparentId(parentDomainId, 'parentDomainId', { nullable: true });
+    const domain = requireDomain(state, normalizedDomainId);
+    const currentParentDomainId = domain.parentDomainId ?? null;
+    if (currentParentDomainId === normalizedParentId) {
+      throw new DomainRegistryError('domain_reparent_no_changes', 'Domain already has the selected parent', 409);
+    }
+    try {
+      validateDomainParent(state.domains, { ...domain, parentDomainId: normalizedParentId });
+    } catch (error) {
+      if (error instanceof DomainHierarchyError) throw new DomainRegistryError(error.code, error.message, error.status);
+      throw error;
+    }
+    const descendants = descendantsOf(state.domains, domain.id);
+    const hierarchy = hierarchySnapshot(state.domains);
+    const previewDigest = reparentDigest({
+      domainId: domain.id,
+      currentParentDomainId,
+      nextParentDomainId: normalizedParentId,
+      hierarchy,
+    });
+    return Object.freeze({
+      version: 1,
+      domainId: domain.id,
+      currentParentDomainId,
+      nextParentDomainId: normalizedParentId,
+      previewDigest,
+      confirmation: `reparent:${domain.id}:${normalizedParentId ?? 'root'}:${previewDigest}`,
+      impact: Object.freeze({
+        hierarchyOnly: true,
+        domainTrafficChanged: false,
+        websiteId: domain.websiteId ?? null,
+        certificateId: domain.certificateId ?? null,
+        descendantCount: descendants.length,
+        descendants: Object.freeze(descendants),
+      }),
+    });
+  }
+
+  async function previewDomainReparent({ domainId, parentDomainId = null } = {}) {
+    await ensureInitialized();
+    return buildReparentPreview(domainId, parentDomainId);
+  }
+
+  async function reparentDomain({ domainId, parentDomainId = null, previewDigest } = {}) {
+    await ensureInitialized();
+    if (typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)) {
+      throw new DomainRegistryError('invalid_domain_reparent_digest', 'A current Domain reparent preview digest is required');
+    }
+    const preview = buildReparentPreview(domainId, parentDomainId);
+    if (preview.previewDigest !== previewDigest) {
+      throw new DomainRegistryError('domain_reparent_preview_stale', 'Domain hierarchy changed after preview; request a new preview', 409);
+    }
+    const domain = requireDomain(state, preview.domainId);
+    domain.parentDomainId = preview.nextParentDomainId;
+    domain.updatedAt = new Date(now()).toISOString();
+    await persist();
+    return Object.freeze({ domain: publicDomain(domain), impact: preview.impact, previewDigest: preview.previewDigest });
   }
 
   async function createDomain({ serverId, primaryDomain, aliases = [], targetType, target, httpsMode = 'off', parentDomainId = null, websiteId = null }) {
@@ -281,6 +389,8 @@ export function createDomainRegistry({
   return {
     init,
     createDomain,
+    previewDomainReparent,
+    reparentDomain,
     bindWebsite,
     rollbackWebsiteBinding,
     listDomains,
@@ -292,4 +402,12 @@ export function createDomainRegistry({
   };
 }
 
-export const domainRegistryInternals = Object.freeze({ storeVersion: STORE_VERSION, normalizeWebsiteId, hydrateDomain });
+export const domainRegistryInternals = Object.freeze({
+  storeVersion: STORE_VERSION,
+  normalizeWebsiteId,
+  normalizeReparentId,
+  descendantsOf,
+  hierarchySnapshot,
+  reparentDigest,
+  hydrateDomain,
+});

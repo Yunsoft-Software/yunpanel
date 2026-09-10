@@ -23,6 +23,7 @@ Current domain hierarchy rules:
 - the normalized child hostname must be below the parent's primary hostname at a dot boundary,
 - duplicate IDs, missing parents and cycles fail closed,
 - aliases remain attached names and are not silently promoted into independent parent resources,
+- Owner reparent preview/apply keeps the hostname, Nginx target, certificate and desired/applied traffic revisions unchanged,
 - an explicit Website binding requires an existing Website on the same server,
 - a legacy unbound domain can migrate one-way from `websiteId=null` to one exact Website; general rebind remains blocked until impact-preview/move semantics exist.
 
@@ -42,8 +43,10 @@ Owner-only migration management endpoints are:
 GET  /api/websites/migration/preview
 GET  /api/websites/migration/status
 POST /api/websites/migration/bind
+POST /api/websites/migration/create-website
 POST /api/websites/migration/finalize
 POST /api/websites/migration/rollback
+POST /api/websites/migration/rollback-binding
 ```
 
 The read-only preview examines current persisted Domain/Website/Application state. For each legacy domain it may report `already_bound`, `ready / bind_existing_website`, `ready / create_website_then_bind`, `ambiguous` or `unresolved`.
@@ -52,7 +55,7 @@ Static candidate discovery requires exact current managed document-root equality
 
 `POST /api/websites/migration/bind` only handles the existing-Website case. It requires canonical Domain/Website IDs, the exact current preview digest and typed confirmation. The server recomputes the preview before mutation. Stale, ambiguous, unresolved, create-Website or different-Website plans fail closed. Repeating the exact successful bind is idempotent.
 
-Website creation and Domain binding are deliberately not combined into a fake cross-registry transaction. For `create_website_then_bind`, create the Website explicitly, re-run preview, then perform the guarded bind.
+Website creation and Domain binding are deliberately not combined into a fake cross-registry transaction. The durable migration ledger makes `create_website_then_bind` repeatable as explicit Website creation, a refreshed preview and guarded binding.
 
 ## Binding enforcement policy
 
@@ -62,7 +65,7 @@ In `enforced` mode, creating a new managed Domain without an explicit same-serve
 
 Policy rollback requires the exact enforced digest and returns only the policy to `compatibility`; it does not rewrite Nginx traffic targets, certificates, application releases or other resource state. Policy transitions and migration binds are covered by common management audit without copying request bodies/digests into audit metadata.
 
-Remaining migration development is the explicit `create_website_then_bind` orchestration and a migration-only binding rollback ledger/receipt. General Website rebind/unbind is not part of the migration escape hatch.
+Migration Website create/bind and binding rollback use a durable ledger so interrupted calls can be reconciled without guessing. General Website rebind/unbind is not part of the migration escape hatch.
 
 ## Website/domain relationship reads
 
@@ -74,9 +77,13 @@ Website/domain identity, DNS hosting/provider state, certificate state and mail-
 
 Nginx stage/activate and managed certificate issue/renew continue through durable jobs and operation-specific recovery. Do not replace them with generic retry/force-success behavior.
 
-## Delete/move/reparent rule
+## Reparent and remaining move/delete rule
 
-Future reparent/move/delete operations require a backend impact preview covering at least child domains, Website/application bindings, certificates, mail resources, backups and later cron/Docker dependencies. Default behavior must fail closed when dependent resources would be orphaned; hidden cascade deletion is not acceptable.
+`POST /api/domains/:domainId/reparent-preview` accepts one explicit `parentDomainId` (or `null` for a root). It validates the exact selected parent, same-server ownership, dot-boundary ancestry and cycles against the current hierarchy; it never derives a parent by trimming hostname labels. The SHA-256 preview digest covers the complete canonical hierarchy snapshot and reports descendants plus Website/certificate references without changing state.
+
+`POST /api/domains/:domainId/reparent` requires that digest and the exact typed confirmation returned by preview. Any hierarchy, Website binding, certificate or desired-revision drift invalidates it before mutation. Reparent is hierarchy-only: it preserves hostname/aliases, Website binding, target, certificate, Nginx stage/apply state and traffic revisions. Read Only cannot call either POST route, and both actions enter common management audit without request bodies or digests.
+
+Future move/delete operations require a broader backend impact preview covering at least child domains, Website/application bindings, certificates, mail resources, backups and later cron/Docker dependencies. Default behavior must fail closed when dependent resources would be orphaned; hidden cascade deletion is not acceptable.
 
 ## Design status and validation
 

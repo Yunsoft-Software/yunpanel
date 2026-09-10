@@ -145,9 +145,43 @@ test('domain API stores desired state and rejects duplicate ownership', async ()
     const conflictBody = await conflictResponse.json();
     assert.equal(conflictBody.error.code, 'domain_conflict');
 
+    const childResponse = await fetch(`${baseUrl}/api/domains`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        serverId: enrolled.server.id,
+        primaryDomain: 'api.example.com',
+        parentDomainId: createBody.data.id,
+        targetType: 'proxy',
+        target: { upstreamPort: 3011 },
+      }),
+    });
+    assert.equal(childResponse.status, 201);
+    const child = (await childResponse.json()).data;
+    assert.equal(child.parentDomainId, createBody.data.id);
+
+    const previewResponse = await fetch(`${baseUrl}/api/domains/${child.id}/reparent-preview`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ parentDomainId: null }),
+    });
+    assert.equal(previewResponse.status, 200);
+    const preview = (await previewResponse.json()).data;
+    const reparentResponse = await fetch(`${baseUrl}/api/domains/${child.id}/reparent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        parentDomainId: null,
+        previewDigest: preview.previewDigest,
+        confirmation: preview.confirmation,
+      }),
+    });
+    assert.equal(reparentResponse.status, 200);
+    assert.equal((await reparentResponse.json()).data.domain.parentDomainId, null);
+
     const listResponse = await fetch(`${baseUrl}/api/domains`);
     assert.equal(listResponse.status, 200);
     const listBody = await listResponse.json();
-    assert.equal(listBody.data.length, 1);
+    assert.equal(listBody.data.length, 2);
   });
 });

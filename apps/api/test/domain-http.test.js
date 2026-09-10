@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDomainHandler } from '../src/domain-http.js';
+import { createDomainHandler, createDomainReparentHandler, createDomainReparentPreviewHandler } from '../src/domain-http.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 
 function responseRecorder() {
@@ -58,4 +58,69 @@ test('legacy domain requests remain independent with the same defaults', async (
   assert.equal(response.payload.data.parentDomainId, null);
   assert.equal(response.payload.data.httpsMode, 'off');
   assert.deepEqual(response.payload.data.aliases, []);
+});
+
+test('HTTP reparent requires exact digest and typed confirmation before mutation', async () => {
+  const registry = createDomainRegistry();
+  const root = await registry.createDomain(body);
+  const child = await registry.createDomain({ ...body, primaryDomain: 'api.example.com', parentDomainId: root.id });
+  const previewResponse = responseRecorder();
+  await createDomainReparentPreviewHandler(registry)(
+    { params: { domainId: child.id }, body: { parentDomainId: null } },
+    previewResponse,
+    (error) => { throw error; },
+  );
+  const preview = previewResponse.payload.data;
+  assert.equal(preview.nextParentDomainId, null);
+  assert.match(preview.previewDigest, /^[a-f0-9]{64}$/);
+
+  const denied = responseRecorder();
+  let deniedError;
+  await createDomainReparentHandler(registry)(
+    {
+      params: { domainId: child.id },
+      body: { parentDomainId: null, previewDigest: preview.previewDigest, confirmation: 'wrong' },
+    },
+    denied,
+    (error) => { deniedError = error; },
+  );
+  assert.equal(deniedError.code, 'domain_reparent_confirmation_required');
+  assert.equal((await registry.getDomain(child.id)).parentDomainId, root.id);
+
+  const applied = responseRecorder();
+  await createDomainReparentHandler(registry)(
+    {
+      params: { domainId: child.id },
+      body: { parentDomainId: null, previewDigest: preview.previewDigest, confirmation: preview.confirmation },
+    },
+    applied,
+    (error) => { throw error; },
+  );
+  assert.equal(applied.payload.data.domain.parentDomainId, null);
+  assert.equal(applied.payload.data.impact.domainTrafficChanged, false);
+});
+
+test('HTTP reparent rejects unknown body fields and stale digest without mutation', async () => {
+  const registry = createDomainRegistry();
+  const root = await registry.createDomain(body);
+  const child = await registry.createDomain({ ...body, primaryDomain: 'api.example.com', parentDomainId: root.id });
+  const preview = await registry.previewDomainReparent({ domainId: child.id, parentDomainId: null });
+
+  for (const requestBody of [
+    { parentDomainId: null, hidden: true },
+    { parentDomainId: null, previewDigest: preview.previewDigest, confirmation: preview.confirmation, hidden: true },
+    { parentDomainId: null, previewDigest: '0'.repeat(64), confirmation: preview.confirmation },
+  ]) {
+    let failure;
+    const handler = Object.hasOwn(requestBody, 'previewDigest')
+      ? createDomainReparentHandler(registry)
+      : createDomainReparentPreviewHandler(registry);
+    await handler(
+      { params: { domainId: child.id }, body: requestBody },
+      responseRecorder(),
+      (error) => { failure = error; },
+    );
+    assert.ok(failure instanceof Error);
+    assert.equal((await registry.getDomain(child.id)).parentDomainId, root.id);
+  }
 });

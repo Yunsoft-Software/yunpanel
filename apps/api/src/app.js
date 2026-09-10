@@ -3,7 +3,7 @@ import { createApplicationRegistry } from './application-registry.js';
 import { createApp as createCoreApp } from './core-app.js';
 import { DatabaseHttpError, mountDatabaseRoutes } from './database-http.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
-import { createDomainHandler } from './domain-http.js';
+import { createDomainHandler, createDomainReparentHandler, createDomainReparentPreviewHandler } from './domain-http.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -43,6 +43,8 @@ export function createApp({
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
   app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry));
+  app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry));
+  app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry));
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry });
   mountWebsiteMigrationRoutes(app, {
     websiteRegistry,

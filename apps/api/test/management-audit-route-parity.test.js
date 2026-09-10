@@ -81,6 +81,15 @@ test('Website creation and migration mutations are part of common management aud
   });
 });
 
+test('Domain hierarchy preview and apply have bounded common audit identities', () => {
+  assert.deepEqual(classifyManagementMutation('POST', '/api/domains/domain-1/reparent-preview'), {
+    action: 'domain.reparent.preview', resourceType: 'domain', resourceId: 'domain-1',
+  });
+  assert.deepEqual(classifyManagementMutation('POST', '/api/domains/domain-1/reparent'), {
+    action: 'domain.reparent', resourceType: 'domain', resourceId: 'domain-1',
+  });
+});
+
 test('legacy agent transport and auth/user/audit handlers are intentionally outside management route discovery', () => {
   const routes = discoveredMutationRoutes();
   const names = routes.map((entry) => entry.route);

@@ -35,6 +35,8 @@ export function classifyManagementMutation(method, pathname) {
     return { action: method === 'PUT' ? 'application.environment.updated' : 'application.environment.deleted', resourceType: 'application', resourceId: parts[0] };
   }
   if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/stage$/)) && method === 'POST') return { action: 'domain.stage', resourceType: 'domain', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/reparent-preview$/)) && method === 'POST') return { action: 'domain.reparent.preview', resourceType: 'domain', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/reparent$/)) && method === 'POST') return { action: 'domain.reparent', resourceType: 'domain', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/activate$/)) && method === 'POST') return { action: 'domain.activate', resourceType: 'domain', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/certificates\/issue$/)) && method === 'POST') return { action: 'certificate.issue', resourceType: 'domain', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/certificates\/([^/]+)\/renew$/)) && method === 'POST') return { action: 'certificate.renew', resourceType: 'certificate', resourceId: parts[0] };

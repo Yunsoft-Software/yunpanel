@@ -112,3 +112,88 @@ test('nested creation and existing staging lifecycle remain independent', async 
   assert.equal((await registry.getDomain(root.id)).state, 'draft');
   assert.equal((await registry.getDomain(child.id)).state, 'draft');
 });
+
+test('reparent preview lists descendants and apply changes hierarchy without touching traffic state', async (t) => {
+  const filePath = await fixture(t);
+  const registry = createDomainRegistry({ filePath });
+  const root = await registry.createDomain(input('example.com'));
+  const child = await registry.createDomain(input('api.example.com', { parentDomainId: root.id, httpsMode: 'managed' }));
+  const nested = await registry.createDomain(input('v2.api.example.com', { parentDomainId: child.id, target: { upstreamPort: 4400 } }));
+  await registry.markStaged(child.id, { checksum: 'a'.repeat(64), configName: 'api.conf' });
+  await registry.markApplied(child.id, { checksum: 'a'.repeat(64) });
+  const before = await registry.getDomain(child.id);
+
+  const preview = await registry.previewDomainReparent({ domainId: child.id, parentDomainId: null });
+  assert.equal(preview.currentParentDomainId, root.id);
+  assert.equal(preview.nextParentDomainId, null);
+  assert.equal(preview.confirmation, `reparent:${child.id}:root:${preview.previewDigest}`);
+  assert.deepEqual(preview.impact.descendants, [
+    { id: nested.id, primaryDomain: nested.primaryDomain, parentDomainId: child.id },
+  ]);
+  assert.deepEqual(preview.impact, {
+    hierarchyOnly: true,
+    domainTrafficChanged: false,
+    websiteId: null,
+    certificateId: null,
+    descendantCount: 1,
+    descendants: preview.impact.descendants,
+  });
+
+  const result = await registry.reparentDomain({
+    domainId: child.id,
+    parentDomainId: null,
+    previewDigest: preview.previewDigest,
+  });
+  assert.equal(result.domain.parentDomainId, null);
+  assert.equal(result.domain.kind, 'domain');
+  assert.equal(result.domain.desiredRevision, before.desiredRevision);
+  assert.equal(result.domain.appliedRevision, before.appliedRevision);
+  assert.equal(result.domain.stagedChecksum, before.stagedChecksum);
+  assert.deepEqual(result.domain.target, before.target);
+  assert.equal((await registry.getDomain(nested.id)).parentDomainId, child.id);
+
+  const reopened = createDomainRegistry({ filePath });
+  assert.equal((await reopened.getDomain(child.id)).parentDomainId, null);
+});
+
+test('reparent rejects cycle, cross-server and dot-boundary violations before persistence', async (t) => {
+  const filePath = await fixture(t);
+  const registry = createDomainRegistry({ filePath });
+  const root = await registry.createDomain(input('example.com'));
+  const child = await registry.createDomain(input('api.example.com', { parentDomainId: root.id }));
+  const remote = await registry.createDomain(input('other.example', { serverId: 'remote' }));
+  const unrelated = await registry.createDomain(input('api.other.example'));
+  const lookalike = await registry.createDomain(input('api.badexample.com'));
+  const before = await readFile(filePath, 'utf8');
+
+  for (const [domainId, parentDomainId, code] of [
+    [root.id, child.id, 'domain_parent_cycle'],
+    [unrelated.id, remote.id, 'parent_server_mismatch'],
+    [lookalike.id, root.id, 'invalid_subdomain_parent'],
+    [child.id, 'missing-parent', 'parent_domain_not_found'],
+  ]) {
+    await assert.rejects(
+      registry.previewDomainReparent({ domainId, parentDomainId }),
+      (error) => error instanceof DomainRegistryError && error.code === code,
+    );
+    assert.equal(await readFile(filePath, 'utf8'), before);
+  }
+});
+
+test('reparent digest becomes stale when hierarchy changes and no-op is explicit', async () => {
+  const registry = createDomainRegistry();
+  const root = await registry.createDomain(input('example.com'));
+  const child = await registry.createDomain(input('api.example.com', { parentDomainId: root.id }));
+  const preview = await registry.previewDomainReparent({ domainId: child.id, parentDomainId: null });
+  await registry.createDomain(input('new.example.com', { parentDomainId: root.id }));
+
+  await assert.rejects(
+    registry.reparentDomain({ domainId: child.id, parentDomainId: null, previewDigest: preview.previewDigest }),
+    (error) => error instanceof DomainRegistryError && error.code === 'domain_reparent_preview_stale',
+  );
+  assert.equal((await registry.getDomain(child.id)).parentDomainId, root.id);
+  await assert.rejects(
+    registry.previewDomainReparent({ domainId: child.id, parentDomainId: root.id }),
+    (error) => error instanceof DomainRegistryError && error.code === 'domain_reparent_no_changes',
+  );
+});

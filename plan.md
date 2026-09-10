@@ -21,7 +21,6 @@ Doğrudan güncel `main` üzerinde küçük, tek amaçlı commitlerle ilerle. Gi
 
 Kalıcı Website registry/API/persistence, revisioned update/rebind impact akışı, explicit Domain `websiteId`, Website/Application startup foreign-key doğrulaması, IDN→punycode canonicalization, explicit Website→Domain read, read-only migration preview, deterministic preview digest, durable ve tekrar çalıştırılabilir Website-create/bind orchestration'ı, migration-only binding rollback ledger'ı ve persistent compatibility/enforced policy status/finalize/rollback source seviyesinde mevcut. Enforced policy yeni managed domainlerde explicit Website binding ister; legacy state compatibility rollback için okunabilir kalır.
 
-- [ ] Reparent preview + apply geliştir. Duplicate hostname, dot-boundary, same-server ve cycle kontrolleri korunmalı; parent hiçbir zaman suffix keserek tahmin edilmemeli.
 - [ ] Site-create orchestration ekle: existing/new static veya Node application, external reverse proxy ve ileride Docker target; canonical document root ve collision-free port backend tarafından üretilsin. `www` alias mı bağımsız hostname mı explicit seçim olsun.
 - [ ] Website, web hostname/domain, DNS hosting ve mail-domain lifecycle'larını ayır; hostname create DNS publish veya mailbox create anlamına gelmesin.
 - [ ] Website/domain move-delete impact preview API'si ekle. Child domain, application, certificate, mailbox, backup ve ileride cron/Docker bağımlılıkları listelensin; varsayılan davranış fail-closed, örtülü cascade yok.

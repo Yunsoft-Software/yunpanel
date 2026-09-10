@@ -74,7 +74,7 @@ A `202` response is queued/accepted work, not completion.
 
 See `plan.md` C/E/F/G/H/I. Persistent Website foundation, IDN canonicalization, guarded existing-Website migration bind and compatibility/enforced policy are implemented. Remaining Website/domain work includes:
 
-- reparent/move/delete impact preview,
+- move/delete impact preview beyond the hierarchy-only reparent flow,
 - site-create orchestration,
 - DNS/mail lifecycle separation,
 - Docker/static/Node/site-resource relationships beyond current application/domain links.
