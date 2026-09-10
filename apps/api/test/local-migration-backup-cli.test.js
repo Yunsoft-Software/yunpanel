@@ -24,25 +24,47 @@ function verifiedResult() {
   };
 }
 
-function archivePreview(value = backupDirectory) {
+function archiveMembers() {
+  return [
+    { name: 'etc/yunpanel', type: 'd', root: '/etc/yunpanel', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o750, metadataMarker: null },
+    { name: 'etc/yunpanel/api.env', type: '-', root: '/etc/yunpanel', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o640, metadataMarker: '*' },
+    { name: 'var/lib/yunpanel', type: 'd', root: '/var/lib/yunpanel', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o700, metadataMarker: null },
+    { name: 'var/lib/yunpanel/a', type: '-', root: '/var/lib/yunpanel', resolvedLinkTarget: null, uid: 101, gid: 101, mode: 0o640, metadataMarker: null },
+    { name: 'var/lib/yunpanel/b', type: '-', root: '/var/lib/yunpanel', resolvedLinkTarget: null, uid: 101, gid: 101, mode: 0o640, metadataMarker: null },
+    { name: 'var/lib/yunpanel/data', type: 'd', root: '/var/lib/yunpanel', resolvedLinkTarget: null, uid: 101, gid: 101, mode: 0o750, metadataMarker: null },
+    { name: 'var/lib/yunpanel/cache', type: 'd', root: '/var/lib/yunpanel', resolvedLinkTarget: null, uid: 101, gid: 101, mode: 0o750, metadataMarker: null },
+    { name: 'var/lib/yunpanel/link', type: 'l', root: '/var/lib/yunpanel', resolvedLinkTarget: 'var/lib/yunpanel/a', uid: 101, gid: 101, mode: 0o777, metadataMarker: null },
+  ];
+}
+
+function archivePreview(value = backupDirectory, overrides = {}) {
+  const members = archiveMembers();
   return {
     destructive: false,
     linksSafe: true,
+    ownershipMetadata: true,
+    extendedMetadataValidated: false,
     backupDirectory: value,
     sha256: 'a'.repeat(64),
-    counts: { total: 8, files: 3, directories: 4, symlinks: 1, hardlinks: 0 },
+    counts: { total: 8, files: 3, directories: 4, symlinks: 1, hardlinks: 0, extendedMetadata: 1 },
+    members,
+    ...overrides,
   };
 }
 
-function stagedResult(value = backupDirectory) {
+function stagedResult(value = backupDirectory, overrides = {}) {
   return {
     validated: true,
     destructive: false,
     liveMutation: false,
+    ownershipMetadata: true,
+    extendedMetadata: 1,
+    extendedMetadataValidated: false,
     backupDirectory: value,
     sha256: 'b'.repeat(64),
     stageDirectory: '/var/backups/yunpanel/.restore-staging/migration-2026-09-10T15-00-00-000Z-AbCd12',
     members: 8,
+    ...overrides,
   };
 }
 
@@ -124,7 +146,7 @@ test('verify delegates only after the fixed-root path guard', async () => {
   assert.equal(verifyCalls, 0);
 });
 
-test('preview is non-destructive and emits archive plus bounded identity drift metadata only', async () => {
+test('preview is non-destructive and emits bounded archive ownership plus identity drift metadata only', async () => {
   let createCalls = 0;
   const calls = [];
   const output = [];
@@ -191,7 +213,10 @@ test('preview is non-destructive and emits archive plus bounded identity drift m
   assert.match(text, /archiveDirectories=4/);
   assert.match(text, /archiveSymlinks=1/);
   assert.match(text, /archiveHardlinks=0/);
+  assert.match(text, /archiveExtendedMetadata=1/);
   assert.match(text, /archiveLinksSafe=true/);
+  assert.match(text, /archiveOwnershipMetadata=true/);
+  assert.match(text, /archiveExtendedMetadataValidated=false/);
   assert.match(text, /restoreTargets=2/);
   assert.match(text, /identityReferences=2/);
   assert.match(text, /preservedCurrent=1/);
@@ -206,7 +231,7 @@ test('preview is non-destructive and emits archive plus bounded identity drift m
   assert.match(text, /identity name=yunapp-bbbbbbbbbbbb status=drift changed=uid,supplementaryGroups/);
   assert.match(text, /identity name=yunapp-cccccccccccc status=missing_current changed=-/);
   assert.doesNotMatch(text, /yunapp-aaaaaaaaaaaa status=match/);
-  assert.doesNotMatch(text, /SECRET|PASSWORD|TOKEN|PRIVATE KEY|root:x|:x:/);
+  assert.doesNotMatch(text, /uid=|gid=|mode=|SECRET|PASSWORD|TOKEN|PRIVATE KEY|root:x|:x:/);
 });
 
 test('preview rejects outside-root snapshots before invoking the preview handler', async () => {
@@ -242,16 +267,23 @@ test('preview rejects malformed archive and identity acknowledgements', async ()
     },
   };
 
-  await assert.rejects(
-    runLocalMigrationBackupCli({
-      argv: ['preview', backupDirectory],
-      filePath: packagedPath,
-      uid: 0,
-      previewRestore: async () => ({ ...base, archiveInspection: { destructive: true } }),
-      stdout: { write() {} },
-    }),
-    /preview result is invalid/,
-  );
+  for (const invalidArchive of [
+    { destructive: true },
+    archivePreview(backupDirectory, { ownershipMetadata: false }),
+    archivePreview(backupDirectory, { extendedMetadataValidated: true }),
+    archivePreview(backupDirectory, { counts: { total: 8, files: 3, directories: 4, symlinks: 1, hardlinks: 0, extendedMetadata: 0 } }),
+  ]) {
+    await assert.rejects(
+      runLocalMigrationBackupCli({
+        argv: ['preview', backupDirectory],
+        filePath: packagedPath,
+        uid: 0,
+        previewRestore: async () => ({ ...base, archiveInspection: invalidArchive }),
+        stdout: { write() {} },
+      }),
+      /preview result is invalid/,
+    );
+  }
 
   await assert.rejects(
     runLocalMigrationBackupCli({
@@ -283,14 +315,19 @@ test('stage is confirmed, fixed-root scoped and emits only non-live validation m
   assert.equal(result.validated, true);
   assert.equal(result.destructive, false);
   assert.equal(result.liveMutation, false);
+  assert.equal(result.ownershipMetadata, true);
+  assert.equal(result.extendedMetadataValidated, false);
   const text = output.join('');
   assert.match(text, /action=stage/);
   assert.match(text, /validated=true/);
   assert.match(text, /destructive=false/);
   assert.match(text, /liveMutation=false/);
+  assert.match(text, /ownershipMetadata=true/);
+  assert.match(text, /extendedMetadata=1/);
+  assert.match(text, /extendedMetadataValidated=false/);
   assert.match(text, /members=8/);
   assert.match(text, /stageDirectory=\/var\/backups\/yunpanel\/\.restore-staging\//);
-  assert.doesNotMatch(text, /SECRET|PASSWORD|TOKEN|PRIVATE KEY|root:x|:x:/);
+  assert.doesNotMatch(text, /uid=|gid=|mode=|SECRET|PASSWORD|TOKEN|PRIVATE KEY|root:x|:x:/);
 });
 
 test('stage rejects outside-root snapshots before invoking the stage handler', async () => {
@@ -308,11 +345,15 @@ test('stage rejects outside-root snapshots before invoking the stage handler', a
   assert.equal(stageCalls, 0);
 });
 
-test('stage rejects acknowledgements that claim live or destructive mutation', async () => {
+test('stage rejects acknowledgements that claim live/destructive mutation or incomplete metadata evidence', async () => {
   for (const bad of [
     { destructive: true },
     { liveMutation: true },
     { validated: false },
+    { ownershipMetadata: false },
+    { extendedMetadataValidated: true },
+    { extendedMetadata: -1 },
+    { extendedMetadata: 9 },
     { stageDirectory: '/tmp/outside-stage' },
     { members: 0 },
   ]) {
@@ -321,7 +362,7 @@ test('stage rejects acknowledgements that claim live or destructive mutation', a
         argv: ['stage', backupDirectory, '--confirm'],
         filePath: packagedPath,
         uid: 0,
-        stageRestore: async () => ({ ...stagedResult(), ...bad }),
+        stageRestore: async () => stagedResult(backupDirectory, bad),
         stdout: { write() {} },
       }),
       /staging result is invalid/,
