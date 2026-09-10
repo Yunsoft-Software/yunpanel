@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   createLocalMigrationBackup,
   localMigrationBackupInternals,
+  resolveLocalMigrationBackupDirectory,
   verifyLocalMigrationBackup,
 } from '../apps/api/src/local-migration-backup.js';
 
@@ -34,12 +35,7 @@ export function assertPackagedMigrationBackupRoot({ packaged, uid = process.getu
 }
 
 export function assertPackagedBackupDirectory(backupDirectory, backupRoot = BACKUP_ROOT) {
-  const root = path.resolve(backupRoot);
-  const resolved = path.resolve(backupDirectory);
-  if (resolved === root || !resolved.startsWith(`${root}${path.sep}`)) {
-    throw new Error(`Migration backup directory must be a snapshot below ${root}`);
-  }
-  return resolved;
+  return resolveLocalMigrationBackupDirectory(backupDirectory, backupRoot);
 }
 
 function formatResult(result, action) {
