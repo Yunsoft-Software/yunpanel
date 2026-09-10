@@ -2,7 +2,7 @@
 
 Bu dosyada yalnız güvenilir biçimde bu oturumda çalıştırılamayan gerçek ortam / desteklenen runtime / browser / package kabul işleri tutulur. Ürün ve kod işleri `plan.md`, bağlayıcı kurallar `agents.md` içindedir. Doğrudan `main` üzerinde küçük commitler kullan; GitHub Actions kullanma. Secret, parola, cookie, MFA secretı veya kişisel veriyi repo/log/screenshot içine yazma.
 
-2026-09-09'daki birleşik ağaç Node 24.19 üzerinde yerelde ve Node 24.20 Ubuntu package build hostunda filtresiz doğrulanmıştı: repository policy, **473 test** ve Vite production build geçti. Bu tarihsel kabul daha sonra eklenen agentless local-runtime, managed-service ve database management commitlerini kapsamaz. Güncel source için aşağıdaki yeni Node 24/package/browser maddeleri ayrıca çalıştırılmadan “full check geçti” denmeyecek.
+2026-09-09'daki birleşik ağaç Node 24.19 üzerinde yerelde ve Node 24.20 Ubuntu package build hostunda filtresiz doğrulanmıştı: repository policy, **473 test** ve Vite production build geçti. Bu tarihsel kabul daha sonra eklenen agentless local-runtime, managed-service, database management ve packaged migration commitlerini kapsamaz. Güncel source için aşağıdaki yeni Node 24/package/browser maddeleri ayrıca çalıştırılmadan “full check geçti” denmeyecek.
 
 ## T-RUNTIME — P0: Desteklenen runtime ve tam repo kabulü
 
@@ -10,7 +10,7 @@ Bu dosyada yalnız güvenilir biçimde bu oturumda çalıştırılamayan gerçek
 - [x] 2026-09-09 birleşik ağacında filtresiz `npm run check`, bütün workspace testleri ve production build çalıştırıldı.
 - [x] Güncel `panel-http-guard.test.js`, `authenticated-core-boundary.test.js` ve request-auth fixture'a taşınan core/deploy/rollback/ACME/Node/package flow testleri birlikte çalıştırıldı; raw `createApp()` + eski/admin Bearer management erişimi 401 kaldı.
 - [x] API/web/package entry pointlerinin aynı committen geldiği önceki package adayında doğrulandı.
-- [ ] `2e08f38e` ve sonrasındaki agentless runtime + managed-service + DB queue/API/UI değişiklikleriyle Node 24.11.1+ ortamında temiz install sonrası filtresiz `npm run check` ve production Vite build'i tekrar çalıştır. Yeni testleri atlama veya runtime gereksinimini düşürme.
+- [ ] `311a8e4f` ve sonrasındaki agentless runtime + managed-service + DB queue/API/UI + migration/package güvenlik değişiklikleriyle Node 24.11.1+ ortamında temiz install sonrası filtresiz `npm run check` ve production Vite build'i tekrar çalıştır. Yeni testleri atlama veya runtime gereksinimini düşürme.
 - [ ] Bilerek mixed web/API build üretildiğinde privileged UI'ın fail-closed kaldığını ayrıca doğrula.
 - [x] GitHub Actions eklenmedi/değiştirilmedi; doğrulamalar yerel/test hostunda yapıldı.
 
@@ -25,6 +25,8 @@ Bu dosyada yalnız güvenilir biçimde bu oturumda çalıştırılamayan gerçek
 - [ ] Stop sırasında çalışan işin execution/complete/reconcile aşamalarının beklendiğini, paralel `runOnce`'un aynı işi tekrar yürütmediğini ve eski scheduler callback'lerinin stop/restart sonrası iş başlatmadığını doğrula.
 - [ ] İzole Ubuntu Node uygulamasında gerçek current symlink, deterministik systemd unit, runtime port/path ve health sonucunu karşılaştır. Wrong/missing release veya farklı application identity host işleminden önce reddedilmeli.
 - [ ] Legacy agent + local worker dual-consumer testini gerçek durable queue üzerinde yap: local bind öncesi API ve agent durmuş + job drain şartı; bind sonrası aynı server kuyruğunu yalnız local executor tüketmeli. Node deploy/restart/rollback secret env değerleri job JSON'una düşmemeli.
+- [ ] Root API startup'ında legacy private `/var/lib/yunpanel/control-plane/auth` ownership migration'ını gerçek eski-package fixture'ında doğrula. Private 0700/0600 state root'a geçmeli; symlink, foreign owner, group/world permission veya control-plane dışı path auto-fix edilmemeli.
+- [ ] `yunpanel-web.service` process environment'ında `YUNPANEL_SECRET_MASTER_KEY`, auth/state store pathleri ve `YUNPANEL_LOCAL_SERVER_ID` bulunmadığını; process namespace'inden `/etc/yunpanel/control-plane` ve `/var/lib/yunpanel/control-plane` okunamadığını gerçek systemd unit ile doğrula.
 
 ## T-SERVICES — P1: Managed host servisleri gerçek kabulü
 
@@ -76,7 +78,7 @@ Bu dosyada yalnız güvenilir biçimde bu oturumda çalıştırılamayan gerçek
 - [x] 2026-09-10 production build üzerinde ilk Owner oluşturma, parola, zorunlu TOTP enrollment, recovery-code saklama onayı ve management kapısının açılması browserda doğrulandı.
 - [ ] İki browser tabında delayed request, stale 200/401, login cookie rotation, `pageshow`, lost MFA response ve keep-alive yarışlarını test et.
 - [x] Exact `YUNPANEL_PUBLIC_ORIGIN=https://cryptoraichu.website`, TLS reverse proxy, loopback API listener ve Origin/Sec-Fetch/CSRF enforcement canlıda doğrulandı.
-- [ ] Root API geçişinden sonra auth DB/path ownership'i tekrar doğrula: private directory 0700, DB/WAL/SHM 0600; service ve CLI aynı absolute DB'yi kullanmalı.
+- [ ] Root API geçişinden sonra auth DB/path ownership'i tekrar doğrula: private directory 0700, DB/WAL/SHM 0600; service ve local recovery CLI aynı absolute DB'yi kullanmalı.
 - [x] Current IP/proxy protection auth kabulü tamamlanmadan kaldırılmadı; onaylı ve sahte istemci yolları canlı gateway'de doğrulandı.
 - [ ] Trusted-proxy/client-IP/rate-limit spoof kabulünü tamamlamadan public yüzeyi genişletme.
 
@@ -97,21 +99,23 @@ Bu dosyada yalnız güvenilir biçimde bu oturumda çalıştırılamayan gerçek
 
 - [x] `cryptoraichu.website` üzerinde deploy edilen `0.3.0-4` paket, Nginx/web/API/agent unitleri, journal ve mevcut erişim koruması gerçek hostta doğrulandı.
 - [x] Owner hesabı + zorunlu MFA ve authenticated management menüleri canlıda smoke test edildi.
-- [ ] `2e08f38e` ve sonrasındaki source'u yeni `.deb` adayına dönüştürmeden önce Node 24 full check'i bitir; ardından root `yunpanel-api.service`, local-runtime env/config, managed-service ve DB queue/API/UI dosyalarının pakete gerçekten girdiğini `dpkg-deb -c/-I` ile doğrula.
-- [ ] Yeni agentless aday `.deb` için install/upgrade sırasında auth DB/master key/state ownership, API root service, web sandbox, agent migration durumu ve restart davranışını izole test hostunda doğrula; mevcut `0.3.0-4` canlı hosta kör deploy yapma.
+- [ ] `311a8e4f` ve sonrasındaki source'u yeni `.deb` adayına dönüştürmeden önce Node 24 full check'i bitir; ardından root `yunpanel-api.service`, local-runtime env/config/CLI/runbook, web secret sandbox, auth ownership migration, managed-service ve DB queue/API/UI dosyalarının pakete gerçekten girdiğini `dpkg-deb -c/-I` ile doğrula.
+- [ ] Yeni agentless aday `.deb` için install/upgrade sırasında auth DB/master key/state ownership, API root service, web sandbox, agent enablement preservation, migration CLI ve restart davranışını izole test hostunda doğrula; mevcut `0.3.0-4` canlı hosta kör deploy yapma.
 - [ ] Owner/MFA sonrası browser console/network, back/forward/reload ve dört viewport varyantını canlıda tamamla.
 - [x] Production değişikliğinden önce `/etc/yunpanel`, `/var/lib/yunpanel`, auth, master key config, package/unit, Nginx/vhost, cert ve release state için checksum doğrulamalı geri dönüş arşivi alındı.
 - [ ] Geri dönüş arşivinin restore'unu ayrı test hostunda kanıtla.
 - [ ] `0.3.0-4` ve yeni agentless aday arasında package/state rollback provası yap.
 - [x] Hosted Node/static sitelerin önceki panel restart/upgrade sırasında çalışmaya devam ettiği 50 ardışık `200/200` örneğiyle doğrulandı.
 
-2026-09-09/10 canlı kabul notu: `cryptoraichu.website` Ubuntu 24.04.5 test hostunda APT ile `0.2.0-1 -> 0.3.0-1 -> 0.3.0-2 -> 0.3.0-3 -> 0.3.0-4` yükseltildi. `dpkg -V` temiz, failed unit/pending update/reboot sıfır, API/web/agent journal warning yoktu. İlk Owner + TOTP MFA enrollment tamamlandı; credential materyali Git dışı `0600` dosyada tutuldu. APT package inspect, SSL renew dry-run ve Node status işleri geçti. Bu not **sonraki agentless/managed-service/DB source commitlerinin canlı kabulü değildir**.
+2026-09-09/10 canlı kabul notu: `cryptoraichu.website` Ubuntu 24.04.5 test hostunda APT ile `0.2.0-1 -> 0.3.0-1 -> 0.3.0-2 -> 0.3.0-3 -> 0.3.0-4` yükseltildi. `dpkg -V` temiz, failed unit/pending update/reboot sıfır, API/web/agent journal warning yoktu. İlk Owner + TOTP MFA enrollment tamamlandı; credential materyali Git dışı `0600` dosyada tutuldu. APT package inspect, SSL renew dry-run ve Node status işleri geçti. Bu not **sonraki agentless/managed-service/DB/migration source commitlerinin canlı kabulü değildir**.
 
 ## T-MIGRATION — P1+: Agentless / Website / Plesk gerçek ortam kabulü
 
 Bu bölüm yalnız ilgili kod `plan.md` içinden tamamlandıkça çalıştırılır.
 
-- [ ] Paketlenmiş local binding/migration CLI tamamlandıktan sonra backup -> API+agent stop -> job drain -> UUID/hostname bind -> `YUNPANEL_LOCAL_SERVER_ID` config -> local backend start -> health -> agent disable sırasını gerçek package üzerinde test et. IDs, auth DB, master key, vhost, cert, release ve users korunmalı.
+- [ ] Packaged `local-runtime.mjs` ile `docs/local-runtime-migration.md` sırasını gerçek test paketinde uygula: verified backup -> job drain -> API+agent stop -> status preflight -> exact UUID/hostname bind -> `YUNPANEL_LOCAL_SERVER_ID` config -> agent disable -> local API start/health. Server/job state paths `/var/lib/yunpanel/control-plane` altında olmalı; IDs, auth DB, master key, vhost, cert, release ve users korunmalı.
+- [ ] Aynı test hostunda rollback runbook'unu uygula: local jobs drain -> API+agent stop -> env gate kaldır -> `release --confirm` -> agent enable/start. Bind/release sırasında active/activating/deactivating servis, queued/running job, hostname mismatch, outside/relative state path veya unreadable systemd state fail-closed kalmalı.
+- [ ] Package upgrade öncesi disabled `yun-agent.service` sonrasında da disabled kalmalı; fresh install yalnız `/etc/yunpanel/agent/agent.env` varsa legacy agent'ı enable etmeli.
 - [ ] Ubuntu test hostunda agent kapalıyken local root backend ile inventory, Nginx test/reload, Node deploy/restart/rollback, SSL, package management, managed services ve DB inspect/create/drop doğrula; site workload'larının dedicated Unix user altında kaldığını kontrol et.
 - [ ] Local runtime fault/lock recovery ve package rollback'i gerçek systemd/process üzerinde test et; agent tekrar açılacaksa local worker önce tamamen durmuş ve lock bırakmış olmalı.
 - [ ] Kalıcı Website migration'ında apex + iki independent subdomain + alias, explicit parent, app binding, cert ve rollback'i gerçek DNS/test domainiyle doğrula.
