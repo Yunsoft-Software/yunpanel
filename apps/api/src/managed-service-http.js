@@ -42,6 +42,11 @@ async function ensureSystemIdle(jobRegistry, serverId) {
   }
 }
 
+function jobCompletedAt(job) {
+  const value = Date.parse(job?.finishedAt ?? job?.createdAt ?? 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
 async function latestServiceSnapshot(jobRegistry, serverId) {
   const jobs = await jobRegistry.listJobs({
     serverId,
@@ -49,9 +54,31 @@ async function latestServiceSnapshot(jobRegistry, serverId) {
     resourceId: serverId,
     status: 'succeeded',
   });
-  return jobs
-    .filter((job) => job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT && Array.isArray(job.result))
-    .sort((left, right) => Date.parse(right.finishedAt ?? right.createdAt ?? 0) - Date.parse(left.finishedAt ?? left.createdAt ?? 0))[0] ?? null;
+  const relevant = jobs
+    .filter((job) => [
+      OPERATIONS.SYSTEM_SERVICES_INSPECT,
+      OPERATIONS.SYSTEM_SERVICE_INSTALL,
+      OPERATIONS.SYSTEM_SERVICE_CONTROL,
+    ].includes(job.operation))
+    .sort((left, right) => jobCompletedAt(left) - jobCompletedAt(right));
+
+  let services = null;
+  let snapshotJob = null;
+  for (const job of relevant) {
+    if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT && Array.isArray(job.result)) {
+      services = job.result.map((service) => ({ ...service }));
+      snapshotJob = job;
+      continue;
+    }
+    if (!services || !job.result || typeof job.result !== 'object' || Array.isArray(job.result)) continue;
+    if (!SERVICE_IDS.has(job.result.id)) continue;
+    const index = services.findIndex((service) => service.id === job.result.id);
+    if (index < 0) continue;
+    services[index] = { ...job.result };
+    snapshotJob = job;
+  }
+
+  return services && snapshotJob ? { services, job: snapshotJob } : null;
 }
 
 function asyncRoute(handler) {
@@ -70,8 +97,8 @@ export function mountManagedServiceRoutes(app, { registry, jobRegistry }) {
     const server = await requireServer(registry, request.params.serverId);
     const latest = await latestServiceSnapshot(jobRegistry, server.id);
     return response.json({ data: {
-      services: latest?.result ?? null,
-      snapshot: latest ? { jobId: latest.id, refreshedAt: latest.finishedAt ?? latest.createdAt } : null,
+      services: latest?.services ?? null,
+      snapshot: latest ? { jobId: latest.job.id, refreshedAt: latest.job.finishedAt ?? latest.job.createdAt } : null,
     } });
   }));
 
@@ -132,4 +159,5 @@ export const managedServiceHttpInternals = Object.freeze({
   requireAction,
   ensureSystemIdle,
   latestServiceSnapshot,
+  jobCompletedAt,
 });
