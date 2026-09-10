@@ -10,6 +10,7 @@ const apiSource = path.resolve(testDirectory, '../src');
 const SOURCE_FILES = [
   'app.js',
   'core-app.js',
+  'website-http.js',
   'managed-service-http.js',
   'database-http.js',
 ];
@@ -38,7 +39,7 @@ function discoveredMutationRoutes() {
 
 test('every panel management mutation route has a common audit classification', () => {
   const routes = discoveredMutationRoutes();
-  assert.ok(routes.length >= 15, `expected current management mutation surface, found ${routes.length}`);
+  assert.ok(routes.length >= 16, `expected current management mutation surface, found ${routes.length}`);
   const missing = [];
   for (const route of routes) {
     const pathname = concretePath(route.route);
@@ -53,6 +54,15 @@ test('every panel management mutation route has a common audit classification', 
     assert.ok(classification.resourceId.length > 0);
   }
   assert.deepEqual(missing, [], `management mutations missing audit classification:\n${missing.join('\n')}`);
+});
+
+test('Website creation is part of common management audit coverage', () => {
+  assert.deepEqual(classifyManagementMutation('POST', '/api/websites'), {
+    action: 'website.create',
+    resourceType: 'website',
+    resourceId: 'new',
+  });
+  assert.ok(discoveredMutationRoutes().some((entry) => entry.file === 'website-http.js' && entry.method === 'POST' && entry.route === '/api/websites'));
 });
 
 test('legacy agent transport and auth/user/audit handlers are intentionally outside management route discovery', () => {
