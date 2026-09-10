@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { createNginxManager } from '@yunpanel/host-runtime';
+import { createNginxManager, createStaticDeploymentEvidenceInspector } from '@yunpanel/host-runtime';
 import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { createDomainRegistry } from './domain-registry.js';
@@ -10,6 +10,7 @@ import { createJobRecoveryStore } from './job-recovery-store.js';
 import { reconcileTerminalRecovery } from './job-recovery-command.js';
 import { recoverRunningDomainStage } from './job-running-domain-recovery.js';
 import { recoverRunningInspection } from './job-running-recovery.js';
+import { recoverRunningStaticDeployment } from './job-running-static-recovery.js';
 import { createJobRegistry } from './job-registry.js';
 import {
   createMigrationServiceStatus,
@@ -296,6 +297,70 @@ export async function runRunningDomainStageRecoveryFromStores({
     applicationRegistry,
     serviceStatus,
     inspectStageEvidence: (payload) => nginxManager.inspectStagedDomain(payload),
+  });
+  return Object.freeze({ ...result, statePaths: paths });
+}
+
+export async function runRunningStaticDeploymentRecoveryFromStores({
+  serverId,
+  jobId,
+  hostname = os.hostname(),
+  env = process.env,
+  packaged = false,
+  cwd = process.cwd(),
+  serverRegistryFactory = createServerRegistry,
+  domainRegistryFactory = createDomainRegistry,
+  jobRegistryFactory = createJobRegistry,
+  durableRegistryFactory = createDurableJobRegistry,
+  recoveryStoreFactory = createJobRecoveryStore,
+  certificateRegistryFactory = createCertificateRegistry,
+  applicationRegistryFactory = createApplicationRegistry,
+  evidenceInspectorFactory = createStaticDeploymentEvidenceInspector,
+  serviceStatus = createMigrationServiceStatus(),
+  recoverCommand = recoverRunningStaticDeployment,
+} = {}) {
+  for (const dependency of [
+    serverRegistryFactory,
+    domainRegistryFactory,
+    jobRegistryFactory,
+    durableRegistryFactory,
+    recoveryStoreFactory,
+    certificateRegistryFactory,
+    applicationRegistryFactory,
+    evidenceInspectorFactory,
+    serviceStatus,
+    recoverCommand,
+  ]) {
+    if (typeof dependency !== 'function') {
+      throw new JobRecoveryRuntimeError('job_recovery_runtime_dependencies_invalid', 'Static recovery runtime dependencies are invalid');
+    }
+  }
+
+  const paths = resolveJobRecoveryPaths({ env, packaged, cwd });
+  const serverRegistry = await initRegistry(serverRegistryFactory({ filePath: paths.serverStore }), 'Server');
+  await requireRecoveryServerHost({ serverRegistry, serverId, hostname });
+  const { domainRegistry, certificateRegistry, applicationRegistry } = await initResourceRegistries({
+    paths,
+    serverRegistry,
+    domainRegistryFactory,
+    certificateRegistryFactory,
+    applicationRegistryFactory,
+  });
+  const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
+  const evidenceInspector = evidenceInspectorFactory();
+  if (!evidenceInspector || typeof evidenceInspector.inspect !== 'function') {
+    throw new JobRecoveryRuntimeError('job_recovery_static_evidence_invalid', 'Static recovery evidence provider is invalid');
+  }
+
+  const result = await recoverCommand({
+    serverId,
+    jobId,
+    jobRegistry,
+    domainRegistry,
+    certificateRegistry,
+    applicationRegistry,
+    serviceStatus,
+    inspectDeploymentEvidence: (identity) => evidenceInspector.inspect(identity),
   });
   return Object.freeze({ ...result, statePaths: paths });
 }
