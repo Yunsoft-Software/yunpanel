@@ -10,7 +10,7 @@ export const READ_ONLY_PERMISSIONS = Object.freeze([
 
 const READ_ONLY_RULES = Object.freeze([
   ['servers.read', /^\/api\/servers(?:\/[^/%]+)?$/],
-  ['websites.read', /^\/api\/websites(?:\/[^/%]+)?$/],
+  ['websites.read', /^\/api\/websites(?:\/[^/%]+(?:\/domains)?)?$/],
   ['applications.read', /^\/api\/applications(?:\/[^/%]+)?$/],
   ['domains.read', /^\/api\/domains(?:\/[^/%]+)?$/],
   ['certificates.read', /^\/api\/certificates(?:\/[^/%]+)?$/],
@@ -23,8 +23,7 @@ export function describePanelAccess(session) {
   return {
     ...session,
     access: {
-      mode: management ? 'management' : readOnly ? 'read_only' : 'self_service',
-      permissions: management ? ['*'] : readOnly ? [...READ_ONLY_PERMISSIONS] : [],
+      mode: management ? 'management' : readOnly ? [...READ_ONLY_PERMISSIONS] : [],
     },
   };
 }
@@ -39,7 +38,7 @@ export function requireReadOnlyRequest(session, method, pathname) {
   if (!current) throw new AuthError('unauthorized', 'Sign in to continue.', 401);
   if (current.user?.role !== 'read_only') throw new AuthError('forbidden', 'Read-only access is not available for this account.', 403);
   if (!readOnlyPermission(method, pathname)) {
-    throw new AuthError('forbidden', 'This read-only account cannot access that management operation.', 403);
+    throw new AuthError('forbidden', 'This read-only account cannot access that panel operation.', 403);
   }
   return current;
 }
