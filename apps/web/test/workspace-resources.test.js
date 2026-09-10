@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { workspaceResources } from '../src/workspace/workspace-resources.js';
 const selected = (path, options) => Object.entries(workspaceResources(path, options)).filter(([, enabled]) => enabled).map(([key]) => key).sort();
-test('dashboard requests all summary sources, server/settings pages only servers', () => {
+test('dashboard requests all summary sources, server/settings/database pages only servers', () => {
   assert.equal(selected('/dashboard').length, 5);
   assert.deepEqual(selected('/settings'), ['servers']);
   assert.deepEqual(selected('/servers/'), ['servers']);
+  assert.deepEqual(selected('/databases'), ['servers']);
 });
-test('unimplemented modules and unknown routes do not poll unrelated data', () => {
-  for (const path of ['/mail', '/docker', '/databases', '/backups', '/audit', '/invalid', '/settings/unknown', null]) assert.deepEqual(selected(path), []);
+test('remaining unimplemented modules and unknown routes do not poll unrelated data', () => {
+  for (const path of ['/mail', '/docker', '/backups', '/audit', '/invalid', '/settings/unknown', null]) assert.deepEqual(selected(path), []);
 });
 test('website list and creation request their dependencies without a job inventory', () => {
   assert.deepEqual(selected('/websites'), ['applications', 'certificates', 'domains', 'servers']);

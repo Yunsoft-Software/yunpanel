@@ -17,7 +17,7 @@ export function workspaceResources(pathname, { observingJob = false, activeJob =
   else if (path === '/applications/new') enable('applications', 'servers');
   else if (path === '/domains') enable('domains', 'certificates', 'servers');
   else if (path === '/jobs') enable('jobs');
-  else if (path === '/servers' || path === '/settings') enable('servers');
+  else if (path === '/servers' || path === '/settings' || path === '/databases') enable('servers');
   if (observingJob || activeJob) enable('jobs');
   return result;
 }
