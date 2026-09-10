@@ -12,7 +12,9 @@ const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const CONTROL_CHARACTER_PATTERN = /[\x00-\x1f\x7f]/;
 const MAX_LISTING_BYTES = 32 * 1024 * 1024;
 const MAX_MEMBERS = 200_000;
+const MAX_NUMERIC_ID = 0xffff_ffff;
 const SAFE_TYPES = new Set(['-', 'd', 'l', 'h']);
+const SAFE_METADATA_MARKERS = new Set(['', '+', '*', '.']);
 
 export class LocalMigrationArchiveInspectionError extends Error {
   constructor(code, message) {
@@ -117,6 +119,67 @@ function normalizeLinkTarget(member, target, { hardlink = false } = {}) {
   return resolved;
 }
 
+function parseNumericId(value) {
+  if (typeof value !== 'string' || !/^[0-9]+$/.test(value)) {
+    throw new LocalMigrationArchiveInspectionError('migration_archive_owner_invalid', 'Migration archive contains invalid numeric ownership metadata');
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > MAX_NUMERIC_ID) {
+    throw new LocalMigrationArchiveInspectionError('migration_archive_owner_invalid', 'Migration archive contains invalid numeric ownership metadata');
+  }
+  return parsed;
+}
+
+function parsePermissionMode(value) {
+  if (typeof value !== 'string' || value.length !== 9
+    || !/^[r-][w-][xSs-][r-][w-][xSs-][r-][w-][xTt-]$/.test(value)) {
+    throw new LocalMigrationArchiveInspectionError('migration_archive_mode_invalid', 'Migration archive contains invalid permission metadata');
+  }
+  let mode = 0;
+  if (value[0] === 'r') mode |= 0o400;
+  if (value[1] === 'w') mode |= 0o200;
+  if (value[2] === 'x' || value[2] === 's') mode |= 0o100;
+  if (value[2] === 's' || value[2] === 'S') mode |= 0o4000;
+  if (value[3] === 'r') mode |= 0o040;
+  if (value[4] === 'w') mode |= 0o020;
+  if (value[5] === 'x' || value[5] === 's') mode |= 0o010;
+  if (value[5] === 's' || value[5] === 'S') mode |= 0o2000;
+  if (value[6] === 'r') mode |= 0o004;
+  if (value[7] === 'w') mode |= 0o002;
+  if (value[8] === 'x' || value[8] === 't') mode |= 0o001;
+  if (value[8] === 't' || value[8] === 'T') mode |= 0o1000;
+  return mode;
+}
+
+function parseVerboseMetadata(line, expectedType) {
+  const firstQuote = line.indexOf('"');
+  if (firstQuote < 1) {
+    throw new LocalMigrationArchiveInspectionError('migration_archive_listing_invalid', 'Migration archive verbose listing has an unexpected metadata shape');
+  }
+  const fields = line.slice(0, firstQuote).trim().split(/\s+/);
+  if (fields.length < 2) {
+    throw new LocalMigrationArchiveInspectionError('migration_archive_listing_invalid', 'Migration archive verbose listing has an unexpected metadata shape');
+  }
+  const modeToken = fields[0];
+  if (modeToken.length < 10 || modeToken.length > 11 || modeToken[0] !== expectedType) {
+    throw new LocalMigrationArchiveInspectionError('migration_archive_mode_invalid', 'Migration archive contains invalid permission metadata');
+  }
+  const marker = modeToken.length === 11 ? modeToken[10] : '';
+  if (!SAFE_METADATA_MARKERS.has(marker)) {
+    throw new LocalMigrationArchiveInspectionError('migration_archive_metadata_marker_invalid', 'Migration archive contains unsupported extended metadata markers');
+  }
+  const owner = fields[1].match(/^([0-9]+)\/([0-9]+)$/);
+  if (!owner) {
+    throw new LocalMigrationArchiveInspectionError('migration_archive_owner_invalid', 'Migration archive contains invalid numeric ownership metadata');
+  }
+  return Object.freeze({
+    uid: parseNumericId(owner[1]),
+    gid: parseNumericId(owner[2]),
+    mode: parsePermissionMode(modeToken.slice(1, 10)),
+    metadataMarker: marker || null,
+  });
+}
+
 function manifestRoots(verification, directory) {
   if (!verification || verification.verified !== true || verification.backupDirectory !== directory
     || verification.archivePath !== path.join(directory, 'state.tar')
@@ -162,6 +225,7 @@ function parseVerboseListing(stdout, roots) {
     if (!SAFE_TYPES.has(type)) {
       throw new LocalMigrationArchiveInspectionError('migration_archive_special_member', 'Migration archive contains an unsupported special filesystem member');
     }
+    const metadata = parseVerboseMetadata(line, type);
     const literals = extractCStringLiterals(line);
     if ((type === 'l' || type === 'h') ? literals.length !== 2 : literals.length !== 1) {
       throw new LocalMigrationArchiveInspectionError('migration_archive_listing_invalid', 'Migration archive verbose listing has an unexpected shape');
@@ -190,6 +254,10 @@ function parseVerboseListing(stdout, roots) {
       root: root.path,
       linkTarget,
       resolvedLinkTarget,
+      uid: metadata.uid,
+      gid: metadata.gid,
+      mode: metadata.mode,
+      metadataMarker: metadata.metadataMarker,
     }));
   }
   if (members.length === 0) {
@@ -243,6 +311,8 @@ export async function inspectVerifiedLocalMigrationArchive({
       '--list',
       '--verbose',
       '--numeric-owner',
+      '--acls',
+      '--xattrs',
       '--quoting-style=c',
       '--file',
       verification.archivePath,
@@ -257,12 +327,17 @@ export async function inspectVerifiedLocalMigrationArchive({
     directories: members.filter((member) => member.type === 'd').length,
     symlinks: members.filter((member) => member.type === 'l').length,
     hardlinks: members.filter((member) => member.type === 'h').length,
+    extendedMetadata: members.filter((member) => member.metadataMarker !== null).length,
   });
   const normalizedMembers = Object.freeze(members.map((member) => Object.freeze({
     name: member.name,
     type: member.type,
     root: member.root,
     resolvedLinkTarget: member.resolvedLinkTarget,
+    uid: member.uid,
+    gid: member.gid,
+    mode: member.mode,
+    metadataMarker: member.metadataMarker,
   })));
   return Object.freeze({
     backupDirectory: directory,
@@ -270,6 +345,8 @@ export async function inspectVerifiedLocalMigrationArchive({
     counts,
     members: normalizedMembers,
     linksSafe: true,
+    ownershipMetadata: true,
+    extendedMetadataValidated: false,
     destructive: false,
   });
 }
@@ -295,10 +372,14 @@ export async function inspectLocalMigrationArchive({
 export const localMigrationArchiveInspectionInternals = Object.freeze({
   maxListingBytes: MAX_LISTING_BYTES,
   maxMembers: MAX_MEMBERS,
+  maxNumericId: MAX_NUMERIC_ID,
   decodeCStringAt,
   extractCStringLiterals,
   normalizeMemberName,
   normalizeLinkTarget,
+  parseNumericId,
+  parsePermissionMode,
+  parseVerboseMetadata,
   manifestRoots,
   parseVerboseListing,
 });
