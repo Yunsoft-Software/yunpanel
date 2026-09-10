@@ -57,6 +57,44 @@ function preview(memberList = members(), overrides = {}) {
   };
 }
 
+function metadataPlan(memberList = members(), overrides = {}) {
+  const privilegedModeMembers = memberList.filter((entry) => (entry.mode & 0o7000) !== 0).length;
+  const extendedMetadataMembers = memberList.filter((entry) => entry.metadataMarker !== null).length;
+  const blocks = [];
+  if (privilegedModeMembers > 0) blocks.push('privileged_mode_requires_policy');
+  if (extendedMetadataMembers > 0) blocks.push('extended_metadata_unvalidated');
+  return {
+    destructive: false,
+    liveMutation: false,
+    liveApplyEnabled: false,
+    ownershipMetadata: true,
+    extendedMetadataValidated: false,
+    backupDirectory,
+    sha256,
+    counts: {
+      members: memberList.length,
+      restoreTargets: 2,
+      identityReferences: 2,
+      preservedTargets: 5,
+      privilegedModeMembers,
+      extendedMetadataMembers,
+      identityDrift: 0,
+      identityMissingCurrent: 0,
+      identityAddedCurrent: 0,
+    },
+    blocks,
+    targets: Array.from({ length: 9 }, (_, index) => ({ path: `/target-${index}` })),
+    ...overrides,
+  };
+}
+
+function stageRestore(options) {
+  return stageLocalMigrationRestore({
+    planMetadata: async ({ preview: value }) => metadataPlan(value.archiveInspection.members),
+    ...options,
+  });
+}
+
 async function materializeValidStage(directory) {
   await mkdir(path.join(directory, 'etc/yunpanel'), { recursive: true });
   await writeFile(path.join(directory, 'etc/yunpanel/api.env'), 'safe\n');
@@ -73,10 +111,10 @@ async function createFixture(t) {
   return { root, stageRoot: path.join(root, 'restore-staging') };
 }
 
-test('restore staging extracts only into a private isolated tree and preserves owner-mode evidence without applying it', async (t) => {
+test('restore staging extracts only into a private isolated tree and attaches a non-live metadata plan', async (t) => {
   const { stageRoot } = await createFixture(t);
   const tarCalls = [];
-  const result = await stageLocalMigrationRestore({
+  const result = await stageRestore({
     backupDirectory,
     stageRoot,
     previewRestore: async () => preview(),
@@ -95,6 +133,10 @@ test('restore staging extracts only into a private isolated tree and preserves o
   assert.equal(result.extendedMetadata, 1);
   assert.equal(result.extendedMetadataValidated, false);
   assert.equal(result.members, members().length);
+  assert.equal(result.metadataPlan.liveApplyEnabled, false);
+  assert.equal(result.metadataPlan.extendedMetadataValidated, false);
+  assert.deepEqual(result.metadataPlan.blocks, ['extended_metadata_unvalidated']);
+  assert.equal(result.metadataPlan.counts.extendedMetadataMembers, 1);
   assert.equal(path.dirname(result.stageDirectory), stageRoot);
   assert.equal((await lstat(stageRoot)).mode & 0o777, 0o700);
   assert.equal((await lstat(result.stageDirectory)).mode & 0o777, 0o700);
@@ -111,6 +153,32 @@ test('restore staging extracts only into a private isolated tree and preserves o
   assert.equal(source.ino, hard.ino);
 });
 
+test('metadata plan failure or inconsistent summary prevents staging root creation', async (t) => {
+  const { stageRoot } = await createFixture(t);
+  for (const planMetadata of [
+    async () => { throw new Error('SECRET=/root/private/token'); },
+    async () => metadataPlan(members(), { liveApplyEnabled: true }),
+    async () => metadataPlan(members(), { counts: { ...metadataPlan().counts, extendedMetadataMembers: 0 } }),
+    async () => metadataPlan(members(), { blocks: [] }),
+  ]) {
+    await assert.rejects(
+      stageLocalMigrationRestore({
+        backupDirectory,
+        stageRoot,
+        previewRestore: async () => preview(),
+        planMetadata,
+        runTar: async () => { throw new Error('must not extract'); },
+      }),
+      (error) => {
+        assert.match(error.code, /^migration_restore_stage_metadata_plan_(?:invalid|failed)$/);
+        assert.doesNotMatch(error.message, /SECRET|token|\/root\/private/i);
+        return true;
+      },
+    );
+  }
+  await assert.rejects(lstat(stageRoot), { code: 'ENOENT' });
+});
+
 test('missing or malformed archive ownership metadata is rejected before staging root creation', async (t) => {
   const { stageRoot } = await createFixture(t);
   const invalidSets = [
@@ -121,7 +189,7 @@ test('missing or malformed archive ownership metadata is rejected before staging
   ];
   for (const invalid of invalidSets) {
     await assert.rejects(
-      stageLocalMigrationRestore({
+      stageRestore({
         backupDirectory,
         stageRoot,
         previewRestore: async () => preview(invalid),
@@ -137,7 +205,7 @@ test('extended metadata count drift is rejected before extraction', async (t) =>
   const { stageRoot } = await createFixture(t);
   let tarCalls = 0;
   await assert.rejects(
-    stageLocalMigrationRestore({
+    stageRestore({
       backupDirectory,
       stageRoot,
       previewRestore: async () => preview(members(), {
@@ -155,7 +223,7 @@ test('unexpected extracted members fail closed and the partial stage is removed'
   const { stageRoot } = await createFixture(t);
   let stagedDirectory = null;
   await assert.rejects(
-    stageLocalMigrationRestore({
+    stageRestore({
       backupDirectory,
       stageRoot,
       previewRestore: async () => preview(),
@@ -175,7 +243,7 @@ test('staged symlink target drift is rejected and cleaned up', async (t) => {
   const { stageRoot } = await createFixture(t);
   let stagedDirectory = null;
   await assert.rejects(
-    stageLocalMigrationRestore({
+    stageRestore({
       backupDirectory,
       stageRoot,
       previewRestore: async () => preview(),
@@ -198,7 +266,7 @@ test('staged symlink target drift is rejected and cleaned up', async (t) => {
 test('hardlink identity must survive staging rather than becoming a copied file', async (t) => {
   const { stageRoot } = await createFixture(t);
   await assert.rejects(
-    stageLocalMigrationRestore({
+    stageRestore({
       backupDirectory,
       stageRoot,
       previewRestore: async () => preview(),
@@ -224,7 +292,7 @@ test('cross-root link metadata is rejected before the staging root is created', 
       : entry
   ));
   await assert.rejects(
-    stageLocalMigrationRestore({
+    stageRestore({
       backupDirectory,
       stageRoot,
       previewRestore: async () => preview(unsafe),
@@ -239,7 +307,7 @@ test('tar extraction failure is redacted and partial staging is removed', async 
   const { stageRoot } = await createFixture(t);
   let stagedDirectory = null;
   await assert.rejects(
-    stageLocalMigrationRestore({
+    stageRestore({
       backupDirectory,
       stageRoot,
       previewRestore: async () => preview(),
