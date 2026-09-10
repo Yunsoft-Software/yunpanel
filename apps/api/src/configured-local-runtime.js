@@ -1,3 +1,4 @@
+import { inspectHostInventory } from '@yunpanel/host-runtime';
 import { createLocalHostOperations } from './local-host-operations.js';
 import { resolveLocalRuntimeConfig } from './local-runtime-config.js';
 import { startLocalRuntime } from './local-runtime.js';
@@ -22,6 +23,7 @@ export async function startConfiguredLocalRuntime({
   applicationRegistry,
   applicationEnvironmentRegistry,
   createOperations = createLocalHostOperations,
+  inspectInventory = inspectHostInventory,
   startRuntime = startLocalRuntime,
   onError = () => {},
 } = {}) {
@@ -30,13 +32,14 @@ export async function startConfiguredLocalRuntime({
   if (!applicationEnvironmentRegistry || typeof applicationEnvironmentRegistry.materialize !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_environment_registry_invalid', 'Local runtime requires the application environment registry');
   }
-  if (typeof createOperations !== 'function' || typeof startRuntime !== 'function' || typeof onError !== 'function') {
+  if (typeof createOperations !== 'function' || typeof inspectInventory !== 'function' || typeof startRuntime !== 'function' || typeof onError !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_runtime_startup_adapter_invalid', 'Local runtime startup adapters are invalid');
   }
 
   const hostOperations = createOperations({
     loadApplicationEnvironment: (applicationId) => applicationEnvironmentRegistry.materialize(applicationId),
   });
+  const snapshotProvider = async () => ({ inventory: await inspectInventory({ mode: 'local' }) });
 
   return startRuntime({
     serverId: config.serverId,
@@ -49,6 +52,7 @@ export async function startConfiguredLocalRuntime({
     certificateRegistry,
     applicationRegistry,
     hostOperations,
+    snapshotProvider,
     onError,
   });
 }
