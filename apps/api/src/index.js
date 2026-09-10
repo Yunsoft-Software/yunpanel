@@ -47,8 +47,6 @@ function reportAuditFault(metadata) {
 
 const registry = createServerRegistry({ filePath: serverStorePath });
 await registry.init();
-const domainRegistry = createDomainRegistry({ filePath: domainStorePath, serverExists: async (serverId) => Boolean(await registry.getServer(serverId)) });
-await domainRegistry.init();
 const durableJobRegistry = createDurableJobRegistry({
   filePath: jobStorePath,
   registryFactory: createJobRegistry,
@@ -57,7 +55,10 @@ const durableJobRegistry = createDurableJobRegistry({
 await durableJobRegistry.init();
 const certificateRegistry = createCertificateRegistry({ filePath: certificateStorePath });
 await certificateRegistry.init();
-const applicationRegistry = createApplicationRegistry({ filePath: applicationStorePath, serverExists: async (serverId) => Boolean(await registry.getServer(serverId)) });
+const applicationRegistry = createApplicationRegistry({
+  filePath: applicationStorePath,
+  serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+});
 await applicationRegistry.init();
 const websiteRegistry = createWebsiteRegistry({
   filePath: websiteStorePath,
@@ -65,6 +66,12 @@ const websiteRegistry = createWebsiteRegistry({
   getApplication: async (applicationId) => applicationRegistry.getApplication(applicationId),
 });
 await websiteRegistry.init();
+const domainRegistry = createDomainRegistry({
+  filePath: domainStorePath,
+  serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+  getWebsite: async (websiteId) => websiteRegistry.getWebsite(websiteId),
+});
+await domainRegistry.init();
 const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   filePath: applicationEnvironmentStorePath,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
