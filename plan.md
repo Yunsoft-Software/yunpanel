@@ -39,14 +39,14 @@ Yerel executor, explicit `YUNPANEL_LOCAL_SERVER_ID`, hostname doğrulaması, exc
 
 ## D. P1 — Enterprise arayüzde kalan geliştirme
 
-Managed-service Owner UI artık Sunucular ekranında gerçek inspect/install/start/stop/restart job akışını kullanıyor. Read Only hesap bu nested route'u mount etmiyor. Kalan arayüz işleri:
+Managed-service Owner UI artık Sunucular ekranında gerçek inspect/install/start/stop/restart job akışını; Veritabanları ekranı da gerçek MySQL/MariaDB inventory/create/delete job akışını kullanıyor. Read Only hesaplar bu nested management route'larını mount etmiyor. Kalan arayüz işleri:
 
 - [ ] Route başına daha dar backend endpointleri, backend pagination, lazy module yükleme ve gerektiğinde virtualization ekle. Mevcut request-generation/stale-response/session guard'larını koru.
 - [ ] Ortak data-table, field validation, Skeleton ve kalıcı notification center bileşenlerini tamamla. Eski gelişmiş formları aynı UX sözleşmesine taşı; dirty-form guard'ı domain quick-add, server enrollment/bakım gibi kalan formlara genişlet.
 - [ ] Domain listesine kalıcı kolon/collapse tercihleri, application listesine ölçeklenebilir pagination ekle. URL arama/filtre/sort ve parent/child grubunu bozmayan pagination korunmalı.
 - [ ] Site detail'in uygulama seçimini C'deki kalıcı Website binding'e geçir; runtime'a göre yalnız ilgili sekme/eylemleri göster. Static deploy bağlantısı ve Docker runtime yüzeyini tamamla.
 - [ ] Global site switcher, notification center ve resource-linked audit detail ekle. Mail/DB modülleri geldikçe global görünümden site bağlamına geçişi bağla.
-- [ ] Files/DB/cron/backup/terminal placeholder'larını yalnız gerçek backend ve UI akışı tamamlandıktan sonra kaldır. Mail placeholder'ını H tamamlanmadan kaldırma. Job history'yi canlı Node/Nginx logu gibi sunma.
+- [ ] Files/cron/backup/terminal placeholder'larını yalnız gerçek backend ve UI akışı tamamlandıktan sonra kaldır. Mail placeholder'ını H tamamlanmadan kaldırma. Job history'yi canlı Node/Nginx logu gibi sunma.
 
 Gerçek render, responsive, keyboard/focus ve route kabulü `todo.md` içindedir.
 
@@ -90,10 +90,8 @@ Postfix/Dovecot/Rspamd paket install/start/stop/restart artık managed-service k
 
 ## I. P2/P3 — Kalan operasyon modülleri
 
-DB host foundation olarak MySQL/MariaDB socket detection, non-system DB inventory/size, create/drop manager, protocol, local/legacy dispatch ve result sanitizer mevcut. Managed-service katmanı Nginx, MariaDB, MySQL, Docker, Cron, Postfix, Dovecot ve Rspamd install/lifecycle'ını destekliyor. Kalan geliştirme:
+DB foundation artık MySQL/MariaDB socket detection, non-system DB inventory/size, create/drop manager, protocol, local/legacy dispatch, result sanitizer, durable job registry bağlantısı, authenticated API ve `/databases` Owner UI'ını içeriyor. Managed-service katmanı Nginx, MariaDB, MySQL, Docker, Cron, Postfix, Dovecot ve Rspamd install/lifecycle'ını destekliyor. Kalan geliştirme:
 
-- [ ] DB job registry bağlantısını tamamla; `database.inspect/create/delete` sonuçları durable queue'da sanitizer üzerinden persist edilsin.
-- [ ] Authenticated DB API route'ları ve `/databases` Owner UI'ını bağla: liste/yenile/create/typed-confirm delete, gerçek job progress ve stale/error durumları. Read Only nested DB management'e girmemeli.
 - [ ] MySQL/MariaDB site binding, DB user CRUD, grants, password rotation, connection-info, dump/restore ve minimum-privilege application user akışlarını tamamla. Password/credential job JSON'una yazılmayacak; secret materyali ayrı şifreli store üzerinden execution-time materialize edilmeli.
 - [ ] Docker/Compose validation, build/pull/start/stop/restart, env/registry credentials, logs/health, Nginx target ve deploy history ekle; volume/bind inventory + backup politikasını göster.
 - [ ] Şifreli application/config/env/DB/volume/mail backup, local/S3-compatible target, retention/checksum, restore preview/progress, pre-restore backup ve outage handling geliştir.
