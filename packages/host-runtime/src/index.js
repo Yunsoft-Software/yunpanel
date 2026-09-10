@@ -38,6 +38,11 @@ export {
   staticDeploymentManager,
 } from './static-deployment-manager.js';
 export {
+  createStaticDeploymentReceiptStore,
+  StaticDeploymentReceiptError,
+  staticDeploymentReceiptInternals,
+} from './static-deployment-receipt.js';
+export {
   createStaticRollbackManager,
   StaticRollbackError,
   staticRollbackManager,
