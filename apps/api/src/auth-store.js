@@ -3,6 +3,7 @@ import { constants, lstatSync, mkdirSync, openSync, closeSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
+import { createAuditStore } from './audit-store.js';
 import { AuthError, safeEqual } from './auth-error.js';
 import { createMfaStore } from './mfa-store.js';
 import { createUserAdminStore } from './user-admin-store.js';
@@ -108,7 +109,20 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
   `);
   let dummyHash;
   const publicUser = (row) => ({ id: row.id, username: row.username, role: row.role });
-  const event = (actorId, action) => db.prepare('INSERT INTO auth_events(actor_id, action, created_at) VALUES (?, ?, ?)').run(actorId, action, now());
+  const audit = createAuditStore({ db, now });
+  const event = (actorId, action, resource = null, outcome = null, code = null) => {
+    db.prepare('INSERT INTO auth_events(actor_id, action, created_at) VALUES (?, ?, ?)').run(actorId, action, now());
+    const resourceType = resource?.type ?? (actorId ? 'user' : null);
+    const resourceId = resource?.id ?? (actorId ?? null);
+    audit.record({
+      actorId,
+      action,
+      resourceType,
+      resourceId,
+      outcome: outcome ?? (action.endsWith('.failed') ? 'failed' : 'succeeded'),
+      code,
+    });
+  };
   const transaction = (operation) => {
     db.exec('BEGIN IMMEDIATE');
     try { const result = operation(); db.exec('COMMIT'); return result; }
@@ -165,6 +179,7 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
   return {
     mfa,
     users,
+    audit,
     close: () => db.close(),
     configured: () => Boolean(db.prepare('SELECT 1 FROM users LIMIT 1').get()),
     issueSetupToken() {
@@ -201,14 +216,12 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
       const user = db.prepare(`SELECT u.*, COALESCE(r.revision, 1) AS admin_revision
         FROM users u LEFT JOIN auth_user_revisions r ON r.user_id = u.id WHERE u.username = ?`).get(name);
       const userRevision = user?.admin_revision ?? null;
-      // Unknown users still pay the same KDF cost; no username-existence response.
       dummyHash ??= hashPassword(token()).catch((error) => { dummyHash = null; throw error; });
       const fallback = await dummyHash;
       const expected = user?.password_hash ?? fallback;
       const valid = await verifyPassword(password, expected);
       const result = transaction(() => {
         const current = user && db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-        // Revocation must also win against a password login already in flight.
         if (!valid || !current?.active || current.password_hash !== expected || users.revision(current.id) !== userRevision) return null;
         if (typeof previousToken === 'string' && TOKEN_PATTERN.test(previousToken)) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(digest(previousToken));
         if (mfa.enabled(current.id)) {
