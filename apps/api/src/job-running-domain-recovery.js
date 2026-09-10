@@ -43,6 +43,15 @@ function assertCandidate(job, identity) {
   }
 }
 
+function assertRecoveryContext(context, job, candidate, identity) {
+  if (!context || context.id !== identity.jobId || context.serverId !== identity.serverId || context.status !== 'running'
+    || context.operation !== OPERATIONS.DOMAIN_STAGE || context.resourceType !== 'domain'
+    || context.resourceId !== candidate.resourceId || context.resourceId !== job.resourceId
+    || !context.payload || typeof context.payload !== 'object' || Array.isArray(context.payload)) {
+    throw new JobRunningDomainRecoveryError('job_domain_recovery_context_mismatch', 'Private domain recovery context does not match durable job metadata');
+  }
+}
+
 export async function recoverRunningDomainStage({
   serverId,
   jobId,
@@ -51,6 +60,7 @@ export async function recoverRunningDomainStage({
   certificateRegistry,
   applicationRegistry,
   serviceStatus,
+  loadJobContext,
   inspectStageEvidence,
   inspect = inspectDurableJobRecovery,
   reconcile = reconcileCompletedJob,
@@ -63,6 +73,7 @@ export async function recoverRunningDomainStage({
     || typeof jobRegistry.acknowledgeReconciliation !== 'function'
     || !domainRegistry || !certificateRegistry || !applicationRegistry
     || typeof serviceStatus !== 'function'
+    || typeof loadJobContext !== 'function'
     || typeof inspectStageEvidence !== 'function'
     || typeof inspect !== 'function'
     || typeof reconcile !== 'function') {
@@ -92,13 +103,21 @@ export async function recoverRunningDomainStage({
   }
   if (!job || job.id !== identity.jobId || job.serverId !== identity.serverId || job.status !== 'running'
     || job.operation !== OPERATIONS.DOMAIN_STAGE || job.resourceType !== 'domain'
-    || job.resourceId !== candidate.resourceId || !job.payload || typeof job.payload !== 'object' || Array.isArray(job.payload)) {
+    || job.resourceId !== candidate.resourceId) {
     throw new JobRunningDomainRecoveryError('job_domain_recovery_job_mismatch', 'Running domain recovery job no longer matches durable recovery state');
   }
 
+  let context;
+  try {
+    context = await loadJobContext(identity.jobId);
+  } catch {
+    throw new JobRunningDomainRecoveryError('job_domain_recovery_context_failed', 'Private domain recovery context could not be read');
+  }
+  assertRecoveryContext(context, job, candidate, identity);
+
   let evidence;
   try {
-    evidence = await inspectStageEvidence(job.payload);
+    evidence = await inspectStageEvidence(context.payload);
   } catch {
     throw new JobRunningDomainRecoveryError('job_domain_recovery_evidence_failed', 'Staged domain host evidence could not be inspected');
   }
@@ -175,4 +194,5 @@ export const jobRunningDomainRecoveryInternals = Object.freeze({
   normalizeIdentity,
   requireStoppedConsumers,
   assertCandidate,
+  assertRecoveryContext,
 });
