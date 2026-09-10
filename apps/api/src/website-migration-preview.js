@@ -26,6 +26,21 @@ function uniqueById(values, label) {
   return map;
 }
 
+function normalizeApplications(values) {
+  const raw = uniqueById(values, 'Application');
+  return new Map([...raw].map(([key, value]) => [key, { ...value, id: key, serverId: id(value.serverId, 'Application serverId') }]));
+}
+
+function normalizeWebsites(values) {
+  const raw = uniqueById(values, 'Website');
+  return new Map([...raw].map(([key, value]) => [key, {
+    ...value,
+    id: key,
+    serverId: id(value.serverId, 'Website serverId'),
+    applicationId: value.applicationId == null ? null : id(value.applicationId, 'Website applicationId'),
+  }]));
+}
+
 function applicationMatchesDomain(application, domain) {
   if (!application || application.serverId !== domain.serverId) return false;
   if (domain.targetType === 'static') {
@@ -45,25 +60,23 @@ function applicationMatchesDomain(application, domain) {
 function validateWebsiteReferences(websites, applications) {
   const byApplication = new Map();
   for (const website of websites.values()) {
-    id(website.serverId, 'Website serverId');
     if (website.applicationId == null) continue;
-    const applicationId = id(website.applicationId, 'Website applicationId');
-    const application = applications.get(applicationId);
+    const application = applications.get(website.applicationId);
     if (!application || application.serverId !== website.serverId) {
       throw new WebsiteMigrationPreviewError('website_migration_state_invalid', 'Website application reference is inconsistent');
     }
-    if (byApplication.has(applicationId)) {
+    if (byApplication.has(website.applicationId)) {
       throw new WebsiteMigrationPreviewError('website_migration_state_invalid', 'Application is bound to multiple Websites');
     }
-    byApplication.set(applicationId, website);
+    byApplication.set(website.applicationId, website);
   }
   return byApplication;
 }
 
 export function previewWebsiteMigration({ domains, websites, applications } = {}) {
   const domainMap = uniqueById(domains, 'Domain');
-  const websiteMap = uniqueById(websites, 'Website');
-  const applicationMap = uniqueById(applications, 'Application');
+  const websiteMap = normalizeWebsites(websites);
+  const applicationMap = normalizeApplications(applications);
   const websiteByApplication = validateWebsiteReferences(websiteMap, applicationMap);
   const items = [];
 
@@ -87,7 +100,7 @@ export function previewWebsiteMigration({ domains, websites, applications } = {}
         status: 'already_bound',
         action: 'none',
         websiteId,
-        applicationId: website.applicationId ?? null,
+        applicationId: website.applicationId,
         candidateApplicationIds: Object.freeze([]),
         requiresConfirmation: false,
       }));
@@ -96,7 +109,7 @@ export function previewWebsiteMigration({ domains, websites, applications } = {}
 
     const candidates = [...applicationMap.values()]
       .filter((application) => applicationMatchesDomain(application, domain))
-      .map((application) => id(application.id, 'Application id'))
+      .map((application) => application.id)
       .sort();
 
     if (candidates.length === 0) {
