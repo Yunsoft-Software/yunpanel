@@ -97,7 +97,7 @@ test('verify delegates only after the fixed-root path guard', async () => {
   assert.equal(verifyCalls, 0);
 });
 
-test('preview is non-destructive, reuses verification and emits metadata only', async () => {
+test('preview is non-destructive, reuses verification and emits bounded identity drift metadata only', async () => {
   let createCalls = 0;
   const calls = [];
   const output = [];
@@ -119,7 +119,7 @@ test('preview is non-destructive, reuses verification and emits metadata only', 
         backupDirectory: value,
         archivePath: `${value}/state.tar`,
         manifestPath: `${value}/manifest.json`,
-        sha256: 'c'.repeat(64),
+        sha256: 'a'.repeat(64),
         counts: { restore: 2, identityReferences: 2, preserved: 1 },
         targets: [
           {
@@ -131,6 +131,19 @@ test('preview is non-destructive, reuses verification and emits metadata only', 
             current: { present: true, type: 'file' },
           },
         ],
+        identityComparison: {
+          destructive: false,
+          backupDirectory: value,
+          sha256: 'a'.repeat(64),
+          snapshotUsers: 3,
+          currentUsers: 3,
+          counts: { match: 1, drift: 1, missingCurrent: 1, addedCurrent: 0 },
+          identities: [
+            { name: 'yunapp-aaaaaaaaaaaa', status: 'match', changedFields: [] },
+            { name: 'yunapp-bbbbbbbbbbbb', status: 'drift', changedFields: ['uid', 'supplementaryGroups'] },
+            { name: 'yunapp-cccccccccccc', status: 'missing_current', changedFields: [] },
+          ],
+        },
       };
     },
     stdout: { write(value) { output.push(value); } },
@@ -148,9 +161,18 @@ test('preview is non-destructive, reuses verification and emits metadata only', 
   assert.match(text, /restoreTargets=2/);
   assert.match(text, /identityReferences=2/);
   assert.match(text, /preservedCurrent=1/);
+  assert.match(text, /identitySnapshotUsers=3/);
+  assert.match(text, /identityCurrentUsers=3/);
+  assert.match(text, /identityMatched=1/);
+  assert.match(text, /identityDrift=1/);
+  assert.match(text, /identityMissingCurrent=1/);
+  assert.match(text, /identityAddedCurrent=0/);
   assert.match(text, /target path=\/etc\/yunpanel action=restore_replace snapshot=directory current=directory/);
   assert.match(text, /target path=\/etc\/passwd action=identity_reference snapshot=file current=file/);
-  assert.doesNotMatch(text, /SECRET|PASSWORD|TOKEN|PRIVATE KEY/);
+  assert.match(text, /identity name=yunapp-bbbbbbbbbbbb status=drift changed=uid,supplementaryGroups/);
+  assert.match(text, /identity name=yunapp-cccccccccccc status=missing_current changed=-/);
+  assert.doesNotMatch(text, /yunapp-aaaaaaaaaaaa status=match/);
+  assert.doesNotMatch(text, /SECRET|PASSWORD|TOKEN|PRIVATE KEY|root:x|:x:/);
 });
 
 test('preview rejects outside-root snapshots before invoking the preview handler', async () => {
@@ -166,4 +188,24 @@ test('preview rejects outside-root snapshots before invoking the preview handler
     /must be a snapshot below/,
   );
   assert.equal(previewCalls, 0);
+});
+
+test('preview rejects malformed identity comparison acknowledgement', async () => {
+  await assert.rejects(
+    runLocalMigrationBackupCli({
+      argv: ['preview', backupDirectory],
+      filePath: packagedPath,
+      uid: 0,
+      previewRestore: async () => ({
+        destructive: false,
+        backupDirectory,
+        sha256: 'a'.repeat(64),
+        counts: { restore: 0, identityReferences: 2, preserved: 0 },
+        targets: [],
+        identityComparison: { destructive: true },
+      }),
+      stdout: { write() {} },
+    }),
+    /preview result is invalid/,
+  );
 });
