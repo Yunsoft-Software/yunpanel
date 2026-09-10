@@ -7,12 +7,14 @@ import {
 } from '@yunpanel/host-runtime';
 import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
+import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.js';
 import { createDomainRegistry } from './domain-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createLocalHostOperations } from './local-host-operations.js';
 import { createJobRecoveryContextReader } from './job-recovery-context.js';
 import { createJobRecoveryStore } from './job-recovery-store.js';
 import { reconcileTerminalRecovery } from './job-recovery-command.js';
+import { recoverRunningDatabaseDelete } from './job-running-database-delete-recovery.js';
 import { recoverRunningDatabaseCreate } from './job-running-database-recovery.js';
 import { recoverRunningDomainStage } from './job-running-domain-recovery.js';
 import { recoverRunningInspection } from './job-running-recovery.js';
@@ -150,6 +152,23 @@ async function initResourceRegistries({
   const certificateRegistry = await initRegistry(certificateRegistryFactory({ filePath: paths.certificateStore }), 'Certificate');
   const applicationRegistry = await initRegistry(applicationRegistryFactory({ filePath: paths.applicationStore, serverExists }), 'Application');
   return { domainRegistry, certificateRegistry, applicationRegistry };
+}
+
+async function initHostScopedRecovery({
+  paths,
+  serverId,
+  hostname,
+  serverRegistryFactory,
+  jobRegistryFactory,
+  durableRegistryFactory,
+  recoveryStoreFactory,
+  contextReaderFactory,
+}) {
+  const serverRegistry = await initRegistry(serverRegistryFactory({ filePath: paths.serverStore }), 'Server');
+  await requireRecoveryServerHost({ serverRegistry, serverId, hostname });
+  const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
+  const contextReader = createRecoveryContextReader({ paths, contextReaderFactory });
+  return { serverRegistry, jobRegistry, contextReader };
 }
 
 export async function runTerminalRecoveryFromStores({
@@ -294,8 +313,16 @@ export async function runRunningDomainStageRecoveryFromStores({
   }
 
   const paths = resolveJobRecoveryPaths({ env, packaged, cwd });
-  const serverRegistry = await initRegistry(serverRegistryFactory({ filePath: paths.serverStore }), 'Server');
-  await requireRecoveryServerHost({ serverRegistry, serverId, hostname });
+  const { serverRegistry, jobRegistry, contextReader } = await initHostScopedRecovery({
+    paths,
+    serverId,
+    hostname,
+    serverRegistryFactory,
+    jobRegistryFactory,
+    durableRegistryFactory,
+    recoveryStoreFactory,
+    contextReaderFactory,
+  });
   const { domainRegistry, certificateRegistry, applicationRegistry } = await initResourceRegistries({
     paths,
     serverRegistry,
@@ -303,8 +330,6 @@ export async function runRunningDomainStageRecoveryFromStores({
     certificateRegistryFactory,
     applicationRegistryFactory,
   });
-  const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
-  const contextReader = createRecoveryContextReader({ paths, contextReaderFactory });
   const nginxManager = nginxManagerFactory();
   if (!nginxManager || typeof nginxManager.inspectStagedDomain !== 'function') {
     throw new JobRecoveryRuntimeError('job_recovery_nginx_evidence_invalid', 'Domain recovery Nginx evidence provider is invalid');
@@ -362,8 +387,16 @@ export async function runRunningStaticDeploymentRecoveryFromStores({
   }
 
   const paths = resolveJobRecoveryPaths({ env, packaged, cwd });
-  const serverRegistry = await initRegistry(serverRegistryFactory({ filePath: paths.serverStore }), 'Server');
-  await requireRecoveryServerHost({ serverRegistry, serverId, hostname });
+  const { serverRegistry, jobRegistry, contextReader } = await initHostScopedRecovery({
+    paths,
+    serverId,
+    hostname,
+    serverRegistryFactory,
+    jobRegistryFactory,
+    durableRegistryFactory,
+    recoveryStoreFactory,
+    contextReaderFactory,
+  });
   const { domainRegistry, certificateRegistry, applicationRegistry } = await initResourceRegistries({
     paths,
     serverRegistry,
@@ -371,8 +404,6 @@ export async function runRunningStaticDeploymentRecoveryFromStores({
     certificateRegistryFactory,
     applicationRegistryFactory,
   });
-  const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
-  const contextReader = createRecoveryContextReader({ paths, contextReaderFactory });
   const evidenceInspector = evidenceInspectorFactory();
   if (!evidenceInspector || typeof evidenceInspector.inspect !== 'function') {
     throw new JobRecoveryRuntimeError('job_recovery_static_evidence_invalid', 'Static recovery evidence provider is invalid');
@@ -424,10 +455,16 @@ export async function runRunningDatabaseCreateRecoveryFromStores({
   }
 
   const paths = resolveJobRecoveryPaths({ env, packaged, cwd });
-  const serverRegistry = await initRegistry(serverRegistryFactory({ filePath: paths.serverStore }), 'Server');
-  await requireRecoveryServerHost({ serverRegistry, serverId, hostname });
-  const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
-  const contextReader = createRecoveryContextReader({ paths, contextReaderFactory });
+  const { jobRegistry, contextReader } = await initHostScopedRecovery({
+    paths,
+    serverId,
+    hostname,
+    serverRegistryFactory,
+    jobRegistryFactory,
+    durableRegistryFactory,
+    recoveryStoreFactory,
+    contextReaderFactory,
+  });
   const databaseManager = databaseManagerFactory();
   if (!databaseManager || typeof databaseManager.inspect !== 'function') {
     throw new JobRecoveryRuntimeError('job_recovery_database_evidence_invalid', 'Database recovery evidence provider is invalid');
@@ -444,6 +481,71 @@ export async function runRunningDatabaseCreateRecoveryFromStores({
   return Object.freeze({ ...result, statePaths: paths });
 }
 
+export async function runRunningDatabaseDeleteRecoveryFromStores({
+  serverId,
+  jobId,
+  hostname = os.hostname(),
+  env = process.env,
+  packaged = false,
+  cwd = process.cwd(),
+  serverRegistryFactory = createServerRegistry,
+  jobRegistryFactory = createJobRegistry,
+  durableRegistryFactory = createDurableJobRegistry,
+  recoveryStoreFactory = createJobRecoveryStore,
+  contextReaderFactory = createJobRecoveryContextReader,
+  deletionReceiptStoreFactory = createDatabaseDeletionReceiptStore,
+  databaseManagerFactory = createDatabaseManager,
+  serviceStatus = createMigrationServiceStatus(),
+  recoverCommand = recoverRunningDatabaseDelete,
+} = {}) {
+  for (const dependency of [
+    serverRegistryFactory,
+    jobRegistryFactory,
+    durableRegistryFactory,
+    recoveryStoreFactory,
+    contextReaderFactory,
+    deletionReceiptStoreFactory,
+    databaseManagerFactory,
+    serviceStatus,
+    recoverCommand,
+  ]) {
+    if (typeof dependency !== 'function') {
+      throw new JobRecoveryRuntimeError('job_recovery_runtime_dependencies_invalid', 'Database deletion recovery runtime dependencies are invalid');
+    }
+  }
+
+  const paths = resolveJobRecoveryPaths({ env, packaged, cwd });
+  const { jobRegistry, contextReader } = await initHostScopedRecovery({
+    paths,
+    serverId,
+    hostname,
+    serverRegistryFactory,
+    jobRegistryFactory,
+    durableRegistryFactory,
+    recoveryStoreFactory,
+    contextReaderFactory,
+  });
+  const receiptStore = deletionReceiptStoreFactory();
+  if (!receiptStore || typeof receiptStore.read !== 'function') {
+    throw new JobRecoveryRuntimeError('job_recovery_database_delete_receipt_invalid', 'Database deletion recovery receipt store is invalid');
+  }
+  const databaseManager = databaseManagerFactory();
+  if (!databaseManager || typeof databaseManager.inspect !== 'function') {
+    throw new JobRecoveryRuntimeError('job_recovery_database_evidence_invalid', 'Database recovery evidence provider is invalid');
+  }
+
+  const result = await recoverCommand({
+    serverId,
+    jobId,
+    jobRegistry,
+    serviceStatus,
+    loadJobContext: (id) => contextReader.read(id),
+    readDeletionReceipt: (receiptServerId, receiptJobId) => receiptStore.read(receiptServerId, receiptJobId),
+    inspectDatabaseState: () => databaseManager.inspect(),
+  });
+  return Object.freeze({ ...result, statePaths: paths });
+}
+
 export const jobRecoveryRuntimeInternals = Object.freeze({
   packagedStateRoot: PACKAGED_STATE_ROOT,
   resolveRecoveryStorePath,
@@ -453,4 +555,5 @@ export const jobRecoveryRuntimeInternals = Object.freeze({
   normalizeRecoveryHostname,
   requireRecoveryServerHost,
   initResourceRegistries,
+  initHostScopedRecovery,
 });
