@@ -1,4 +1,4 @@
-import { authRequest, beginSessionTransition } from './session-client.js';
+import { announceSessionChange, authRequest, beginSessionTransition, setSession } from './session-client.js';
 
 export function requireSession(value) {
   if (!value || typeof value.id !== 'string' || !value.id || !value.user
@@ -46,8 +46,9 @@ export async function rotateMfa(operation, body, signal) {
       || result.recoveryCodes.some((code) => typeof code !== 'string' || !/^(?:[a-f0-9]{4}-){7}[a-f0-9]{4}$/.test(code))) {
       throw new Error('Kurtarma kodları alınamadı. Oturumunuzu yenileyip yeni kodlar üretin.');
     }
+    setSession(session);
     return { session, recoveryCodes: result.recoveryCodes };
-  } finally { finish(); }
+  } finally { finish(); announceSessionChange(); }
 }
 
 export function sessionDeadline(session, now = Date.now()) {
@@ -60,6 +61,9 @@ export function sessionDeadline(session, now = Date.now()) {
 export async function endAuthenticatedSession(operation, body, signal) {
   if (!['logout', 'logout-all', 'password', 'mfa/disable'].includes(operation)) throw new Error('Invalid session operation');
   const finish = beginSessionTransition();
-  try { return await authRequest(operation, { method: 'POST', body, signal, allowDuringTransition: true }); }
-  finally { finish(); }
+  try {
+    const result = await authRequest(operation, { method: 'POST', body, signal, allowDuringTransition: true });
+    setSession(null);
+    return result;
+  } finally { finish(); announceSessionChange(); }
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { authRequest, sessionTransitionPending, setSession } from './session-client.js';
+import { authRequest, sessionTransitionPending, setSession, setSessionChangePublisher } from './session-client.js';
+import { createSessionBroadcast, restoredPageNeedsSessionRefresh } from './session-broadcast.js';
 import { endAuthenticatedSession, requireSession, sessionDeadline } from './auth-protocol.js';
 import { authMessage } from './auth-message.js';
 import LoginForm from './LoginForm.jsx';
@@ -53,12 +54,36 @@ export default function AuthGate({ children }) {
 
   useEffect(() => {
     const controller = new AbortController();
+    let synchronizationTimer = null;
+    const synchronize = () => {
+      if (controller.signal.aborted) return;
+      if (sessionTransitionPending()) {
+        synchronizationTimer = window.setTimeout(synchronize, 50);
+        return;
+      }
+      refresh(controller.signal);
+    };
+    const broadcast = createSessionBroadcast({
+      onChange: () => {
+        setSession(null);
+        update({ status: 'checking', session: null, setupRequired: false });
+        synchronize();
+      },
+    });
+    setSessionChangePublisher(() => broadcast.announce());
     refresh(controller.signal);
     const expired = () => signedOut('Oturumunuzun süresi doldu. Tekrar giriş yapın.');
     window.addEventListener('yunpanel:session-expired', expired);
-    const restore = (event) => { if (event.persisted) refresh(controller.signal, true); };
+    const restore = (event) => { if (restoredPageNeedsSessionRefresh(event)) refresh(controller.signal, true); };
     window.addEventListener('pageshow', restore);
-    return () => { controller.abort(); window.removeEventListener('yunpanel:session-expired', expired); window.removeEventListener('pageshow', restore); };
+    return () => {
+      controller.abort();
+      if (synchronizationTimer !== null) window.clearTimeout(synchronizationTimer);
+      setSessionChangePublisher(null);
+      broadcast.close();
+      window.removeEventListener('yunpanel:session-expired', expired);
+      window.removeEventListener('pageshow', restore);
+    };
   }, [refresh, signedOut]);
 
   useEffect(() => {

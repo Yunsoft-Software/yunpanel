@@ -1,6 +1,7 @@
 let csrfToken = null;
 let version = 0;
 let transitioning = false;
+let publishSessionChange = () => {};
 
 export function setSession(session) {
   const next = session?.csrfToken ?? null;
@@ -21,6 +22,14 @@ export function sessionVersion() { return version; }
 // Both merged callers share one generation and one mutation lock.
 export const sessionGeneration = sessionVersion;
 export const isSessionChangePending = sessionTransitionPending;
+
+export function setSessionChangePublisher(publisher) {
+  publishSessionChange = typeof publisher === 'function' ? publisher : () => {};
+}
+
+export function announceSessionChange() {
+  publishSessionChange();
+}
 
 export function beginSessionTransition() {
   if (transitioning) throw staleSessionError();
@@ -43,6 +52,7 @@ export async function requestJson(url, { method = 'GET', body, signal, notifyExp
   if (typeof url !== 'string' || !url.startsWith('/api/') || /[\\\r\n]/.test(url)) throw new Error('Only same-origin API paths are supported');
   if (transitioning && (!allowDuringTransition || changesSession)) throw staleSessionError();
   const finish = changesSession ? beginSessionTransition() : null;
+  let sessionMutationDispatched = false;
   const started = version;
   const checkCurrent = () => {
     if (signal?.aborted) throw new DOMException('The request was aborted.', 'AbortError');
@@ -52,6 +62,7 @@ export async function requestJson(url, { method = 'GET', body, signal, notifyExp
     checkCurrent();
     let response;
     try {
+      sessionMutationDispatched = changesSession;
       response = await fetch(url, {
         method, signal, credentials: 'same-origin', cache: 'no-store', redirect: 'error',
         headers: { ...sessionHeaders(method), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
@@ -64,6 +75,7 @@ export async function requestJson(url, { method = 'GET', body, signal, notifyExp
     if (!response.ok) {
       if (response.status === 401 && payload?.error?.code === 'unauthorized' && notifyExpired) {
         setSession(null);
+        if (!changesSession) announceSessionChange();
         if (typeof window !== 'undefined') window.dispatchEvent(new Event('yunpanel:session-expired'));
       }
       const error = new Error(payload?.error?.message ?? `Request failed with HTTP ${response.status}`);
@@ -78,7 +90,10 @@ export async function requestJson(url, { method = 'GET', body, signal, notifyExp
     // Support the merged branch's mutation API without a second session store.
     if (changesSession) setSession(data?.session ?? (data?.user ? data : null));
     return data;
-  } finally { finish?.(); }
+  } finally {
+    finish?.();
+    if (sessionMutationDispatched) announceSessionChange();
+  }
 }
 
 export function authRequest(operation, options = {}) {
