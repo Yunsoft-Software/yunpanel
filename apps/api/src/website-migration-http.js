@@ -1,9 +1,26 @@
 import { assertUuid } from '@yunpanel/shared';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { bindLegacyDomainToWebsite, WebsiteMigrationBindError, websiteMigrationBindInternals } from './website-migration-bind.js';
+import { WebsiteMigrationPolicyError, websiteMigrationPolicyInternals } from './website-migration-policy.js';
 import { previewWebsiteMigration } from './website-migration-preview.js';
 
 const BIND_FIELDS = new Set(['domainId', 'websiteId', 'previewDigest', 'confirmation']);
+const FINALIZE_FIELDS = new Set(['previewDigest', 'confirmation']);
+const ROLLBACK_FIELDS = new Set(['enforcedDigest', 'confirmation']);
+
+function exactBody(body, fields, code, message) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((key) => !fields.has(key))) {
+    throw new WebsiteMigrationPolicyError(code, message, 400);
+  }
+  return body;
+}
+
+function digest(value, field = 'previewDigest') {
+  if (typeof value !== 'string' || !websiteMigrationPolicyInternals.digestPattern.test(value)) {
+    throw new WebsiteMigrationPolicyError('website_migration_preview_digest_invalid', `${field} must be a SHA-256 migration digest`, 400);
+  }
+  return value;
+}
 
 function assertBindBody(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((key) => !BIND_FIELDS.has(key))) {
@@ -27,6 +44,26 @@ function assertBindBody(body) {
   return Object.freeze({ domainId, websiteId, previewDigest: body.previewDigest });
 }
 
+function assertFinalizeBody(body) {
+  const input = exactBody(body, FINALIZE_FIELDS, 'website_migration_finalize_invalid', 'Send only documented migration finalize fields');
+  const previewDigest = digest(input.previewDigest);
+  const expectedConfirmation = `finalize:${previewDigest}`;
+  if (input.confirmation !== expectedConfirmation) {
+    throw new WebsiteMigrationPolicyError('website_migration_confirmation_required', `Confirm Website binding enforcement with ${expectedConfirmation}`, 400);
+  }
+  return Object.freeze({ previewDigest });
+}
+
+function assertRollbackBody(body) {
+  const input = exactBody(body, ROLLBACK_FIELDS, 'website_migration_rollback_invalid', 'Send only documented migration rollback fields');
+  const enforcedDigest = digest(input.enforcedDigest, 'enforcedDigest');
+  const expectedConfirmation = `rollback:${enforcedDigest}`;
+  if (input.confirmation !== expectedConfirmation) {
+    throw new WebsiteMigrationPolicyError('website_migration_confirmation_required', `Confirm Website binding policy rollback with ${expectedConfirmation}`, 400);
+  }
+  return Object.freeze({ enforcedDigest });
+}
+
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
@@ -38,6 +75,7 @@ export function mountWebsiteMigrationRoutes(app, {
   websiteRegistry,
   domainRegistry,
   applicationRegistry,
+  websiteMigrationPolicy,
   preview = previewWebsiteMigration,
   bind = bindLegacyDomainToWebsite,
 } = {}) {
@@ -45,15 +83,28 @@ export function mountWebsiteMigrationRoutes(app, {
   if (!websiteRegistry || typeof websiteRegistry.listWebsites !== 'function') throw new Error('Website registry is required');
   if (!domainRegistry || typeof domainRegistry.listDomains !== 'function' || typeof domainRegistry.bindWebsite !== 'function') throw new Error('Domain registry is required');
   if (!applicationRegistry || typeof applicationRegistry.listApplications !== 'function') throw new Error('Application registry is required');
+  if (!websiteMigrationPolicy || typeof websiteMigrationPolicy.snapshot !== 'function'
+    || typeof websiteMigrationPolicy.finalize !== 'function' || typeof websiteMigrationPolicy.rollback !== 'function') {
+    throw new Error('Website migration policy store is required');
+  }
   if (typeof preview !== 'function' || typeof bind !== 'function') throw new Error('Website migration adapters are required');
 
-  app.get('/api/websites/migration/preview', requirePanelRouteAccess, asyncRoute(async (_request, response) => {
+  async function currentPreview() {
     const [domains, websites, applications] = await Promise.all([
       domainRegistry.listDomains(),
       websiteRegistry.listWebsites(),
       applicationRegistry.listApplications(),
     ]);
-    return response.json({ data: preview({ domains, websites, applications }) });
+    return preview({ domains, websites, applications });
+  }
+
+  app.get('/api/websites/migration/preview', requirePanelRouteAccess, asyncRoute(async (_request, response) => (
+    response.json({ data: await currentPreview() })
+  )));
+
+  app.get('/api/websites/migration/status', requirePanelRouteAccess, asyncRoute(async (_request, response) => {
+    const plan = await currentPreview();
+    return response.json({ data: { policy: websiteMigrationPolicy.snapshot(), preview: plan } });
   }));
 
   app.post('/api/websites/migration/bind', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -67,6 +118,21 @@ export function mountWebsiteMigrationRoutes(app, {
     });
     return response.json({ data: result });
   }));
+
+  app.post('/api/websites/migration/finalize', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const input = assertFinalizeBody(request.body);
+    const plan = await currentPreview();
+    return response.json({ data: await websiteMigrationPolicy.finalize({ preview: plan, previewDigest: input.previewDigest }) });
+  }));
+
+  app.post('/api/websites/migration/rollback', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const input = assertRollbackBody(request.body);
+    return response.json({ data: await websiteMigrationPolicy.rollback(input) });
+  }));
 }
 
-export const websiteMigrationHttpInternals = Object.freeze({ assertBindBody });
+export const websiteMigrationHttpInternals = Object.freeze({
+  assertBindBody,
+  assertFinalizeBody,
+  assertRollbackBody,
+});
