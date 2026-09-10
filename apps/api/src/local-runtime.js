@@ -132,6 +132,7 @@ export async function startLocalRuntime({
   applicationRegistry,
   hostOperations = createLocalHostOperations(),
   snapshotProvider = null,
+  recordExecutionEvidence = null,
   executorFactory = createLocalJobExecutor,
   acquireLock = acquireLocalExecutionLock,
   reconcile = reconcileCompletedJob,
@@ -147,6 +148,9 @@ export async function startLocalRuntime({
   if (typeof lockPath !== 'string' || !lockPath) throw new LocalRuntimeError('invalid_local_lock_path', 'Local runtime lock path is required');
   if (snapshotProvider !== null && typeof snapshotProvider !== 'function') {
     throw new LocalRuntimeError('local_runtime_snapshot_provider_invalid', 'Local runtime snapshot provider must be a function');
+  }
+  if (recordExecutionEvidence !== null && typeof recordExecutionEvidence !== 'function') {
+    throw new LocalRuntimeError('local_runtime_evidence_recorder_invalid', 'Local runtime evidence recorder must be a function');
   }
   if (typeof executorFactory !== 'function' || typeof acquireLock !== 'function' || typeof reconcile !== 'function' || typeof onError !== 'function') {
     throw new LocalRuntimeError('local_runtime_adapter_invalid', 'Local runtime adapter configuration is invalid');
@@ -246,6 +250,7 @@ export async function startLocalRuntime({
       supportsOperation: (operation) => hostOperations.supports(operation),
       executeOperation: (operation, payload) => hostOperations.executeOperation(operation, payload),
       reconcileCompletedJob: reconcileJob,
+      recordExecutionEvidence,
       onError: handleExecutorFault,
     });
     if (!executor || typeof executor.start !== 'function' || typeof executor.stop !== 'function') {
