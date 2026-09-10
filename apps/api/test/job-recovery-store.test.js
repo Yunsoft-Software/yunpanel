@@ -69,3 +69,53 @@ test('replace validates identities before creating the recovery file', async (t)
   );
   await assert.rejects(readFile(filePath), { code: 'ENOENT' });
 });
+
+test('journal add and remove preserve the first detection timestamp until the last identity clears', async (t) => {
+  const filePath = await fixture(t);
+  let now = Date.parse('2026-09-10T01:00:00.000Z');
+  const store = createJobRecoveryStore({ filePath, now: () => now });
+  const first = { jobId: 'job-00001', serverId: 'server-1' };
+  const second = { jobId: 'job-00002', serverId: 'server-2' };
+
+  await store.add(first);
+  now = Date.parse('2026-09-10T01:05:00.000Z');
+  await store.add(second);
+  await store.add(first);
+  assert.deepEqual(store.snapshot(), {
+    version: 1,
+    detectedAt: '2026-09-10T01:00:00.000Z',
+    jobs: [first, second],
+  });
+
+  await store.remove(first);
+  assert.equal(store.snapshot().detectedAt, '2026-09-10T01:00:00.000Z');
+  assert.deepEqual(store.snapshot().jobs, [second]);
+  await store.remove(second);
+  assert.deepEqual(store.snapshot(), { version: 1, detectedAt: null, jobs: [] });
+});
+
+test('concurrent journal additions serialize state computation instead of losing an identity', async (t) => {
+  const filePath = await fixture(t);
+  const store = createJobRecoveryStore({ filePath, now: () => Date.parse('2026-09-10T01:00:00.000Z') });
+  const first = { jobId: 'job-00001', serverId: 'server-1' };
+  const second = { jobId: 'job-00002', serverId: 'server-2' };
+  await Promise.all([store.add(first), store.add(second)]);
+  assert.deepEqual(new Set(store.snapshot().jobs.map((job) => `${job.serverId}:${job.jobId}`)), new Set([
+    'server-1:job-00001',
+    'server-2:job-00002',
+  ]));
+  assert.deepEqual(JSON.parse(await readFile(filePath, 'utf8')), store.snapshot());
+});
+
+test('journal mutations reject extra fields and removing an absent valid identity is idempotent', async (t) => {
+  const filePath = await fixture(t);
+  const store = createJobRecoveryStore({ filePath });
+  await assert.rejects(
+    store.add({ jobId: 'job-00001', serverId: 'server-1', result: { secret: 'x' } }),
+    { code: 'invalid_job_recovery_record' },
+  );
+  await store.add({ jobId: 'job-00001', serverId: 'server-1' });
+  const before = store.snapshot();
+  await store.remove({ jobId: 'job-00002', serverId: 'server-1' });
+  assert.deepEqual(store.snapshot(), before);
+});

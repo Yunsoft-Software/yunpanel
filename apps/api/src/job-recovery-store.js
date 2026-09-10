@@ -47,11 +47,15 @@ function normalizeState(value) {
   return { version: STORE_VERSION, detectedAt, jobs };
 }
 
+function identityKey(job) {
+  return `${job.serverId}:${job.jobId}`;
+}
+
 export function createJobRecoveryStore({ filePath, now = () => Date.now() } = {}) {
   if (typeof filePath !== 'string' || !filePath) throw new JobRecoveryStoreError('job_recovery_store_path_required', 'Job recovery store requires a file path');
   let state = emptyState();
   let initialized = false;
-  let writeTail = Promise.resolve();
+  let mutationTail = Promise.resolve();
 
   async function init() {
     if (initialized) return;
@@ -70,29 +74,59 @@ export function createJobRecoveryStore({ filePath, now = () => Date.now() } = {}
     const snapshot = `${JSON.stringify(next, null, 2)}\n`;
     const directory = path.dirname(filePath);
     const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    const write = writeTail.catch(() => {}).then(async () => {
-      await mkdir(directory, { recursive: true });
-      await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-      state = next;
+    await mkdir(directory, { recursive: true });
+    await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
+    await rename(temporaryPath, filePath);
+    state = next;
+  }
+
+  function queueMutation(transform) {
+    const operation = mutationTail.catch(() => {}).then(async () => {
+      await init();
+      const next = transform(state);
+      if (next === state) return snapshot();
+      await persist(next);
+      return snapshot();
     });
-    writeTail = write;
-    return write;
+    mutationTail = operation;
+    return operation;
   }
 
   async function replace(jobs) {
-    await init();
     if (!Array.isArray(jobs)) throw new JobRecoveryStoreError('invalid_job_recovery_jobs', 'Job recovery jobs must be an array');
     const normalized = jobs.map(normalizeJob);
-    const identities = new Set(normalized.map((job) => `${job.serverId}:${job.jobId}`));
+    const identities = new Set(normalized.map(identityKey));
     if (identities.size !== normalized.length) throw new JobRecoveryStoreError('invalid_job_recovery_jobs', 'Job recovery jobs contain duplicates');
-    const next = {
+    return queueMutation(() => ({
       version: STORE_VERSION,
       detectedAt: normalized.length > 0 ? new Date(now()).toISOString() : null,
       jobs: normalized,
-    };
-    await persist(next);
-    return snapshot();
+    }));
+  }
+
+  async function add(job) {
+    const normalized = normalizeJob(job);
+    return queueMutation((current) => {
+      if (current.jobs.some((candidate) => identityKey(candidate) === identityKey(normalized))) return current;
+      return {
+        version: STORE_VERSION,
+        detectedAt: current.jobs.length > 0 ? current.detectedAt : new Date(now()).toISOString(),
+        jobs: [...current.jobs, normalized],
+      };
+    });
+  }
+
+  async function remove(job) {
+    const normalized = normalizeJob(job);
+    return queueMutation((current) => {
+      const jobs = current.jobs.filter((candidate) => identityKey(candidate) !== identityKey(normalized));
+      if (jobs.length === current.jobs.length) return current;
+      return {
+        version: STORE_VERSION,
+        detectedAt: jobs.length > 0 ? current.detectedAt : null,
+        jobs,
+      };
+    });
   }
 
   function snapshot() {
@@ -103,11 +137,12 @@ export function createJobRecoveryStore({ filePath, now = () => Date.now() } = {}
     };
   }
 
-  return { init, replace, snapshot };
+  return { init, replace, add, remove, snapshot };
 }
 
 export const jobRecoveryStoreInternals = Object.freeze({
   storeVersion: STORE_VERSION,
   normalizeJob,
   normalizeState,
+  identityKey,
 });
