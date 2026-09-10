@@ -53,113 +53,128 @@ sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs reconcile <s
 
 This command re-applies resource reconciliation only. It does **not** re-run the host operation.
 
-### Running read-only inspection recovery
+## Running-job recovery rules
 
-YunPanel permits re-execution only for payload-free inspections whose repetition cannot mutate host state:
+Every running recovery command requires the exact persisted server/job identity, the registered server hostname to match the current OS hostname, and both `yunpanel-api.service` and the retained `yun-agent.service` to be stopped. Public job responses do not expose execution payloads; payload-backed recovery reads the exact intent from the private persisted job store.
+
+There is deliberately no generic `force-success`, `force-failed`, `retry-mutation` or manual journal-clear command. If operation-specific proof is absent or drifted, the job remains unresolved.
+
+### Read-only inspection recovery
+
+`recover-readonly` is limited to current async operations whose repetition cannot mutate host state:
 
 - `system.packages.inspect`
+- `system.services.inspect`
 - `database.inspect`
+- `app.node.status`
 
-After both consumers are stopped, inspect the exact recovery identity first and then run:
+`system.services.inspect` and `app.node.status` reuse their exact private persisted payload; package/database inspection use an empty payload.
 
 ```bash
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-readonly <server-id> <job-id> --confirm
 ```
 
-The command verifies that the requested server identity belongs to the current OS hostname, re-runs the allowlisted read-only inspection and records that fresh result on the original durable job. If the host probe or durable completion cannot be confirmed, the recovery record remains unresolved.
+If the host probe, private context or durable completion cannot be confirmed, the original running job stays unresolved.
 
-### Running `domain.stage` recovery from Nginx evidence
+### Domain stage and activation
 
-`domain.stage` is recoverable only when the exact deterministic staged Nginx config already exists on the same host. YunPanel re-renders the original queued domain spec and compares the expected config and SHA-256 checksum with the staged file without writing or reloading Nginx.
-
-With API and agent stopped:
+`domain.stage` is recoverable only when the exact deterministic staged Nginx config already exists. YunPanel re-renders the original queued domain spec and compares the expected content/checksum without writing or reloading Nginx:
 
 ```bash
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-domain-stage <server-id> <job-id> --confirm
 ```
 
-If exact staged evidence is present, YunPanel opens the durable reconciliation journal, records the recovered stage result, reconciles the domain registry and only then clears the journal. Missing, changed or unreadable staged state leaves the running job unresolved.
-
-### Running `domain.activate` recovery from receipt plus active config
-
-An active Nginx file alone cannot prove that Nginx successfully reloaded it. New agentless activations therefore attempt to write a root-protected receipt only after `nginx -t` and the Nginx reload have completed successfully. Recovery then also verifies that the current active file still has the exact queued SHA-256 checksum.
-
-Activation receipts live below:
-
-```text
-/var/lib/yunpanel/recovery/domain-activations/<server-id>/<job-id>.json
-```
-
-They contain only the server/job identity, primary domain and checksum. With both consumers stopped:
+`domain.activate` additionally needs a root-protected success receipt written only after `nginx -t` and reload succeeded, plus an active config whose checksum still matches the queued stage:
 
 ```bash
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-domain-activate <server-id> <job-id> --confirm
 ```
 
-Missing receipt, receipt/job drift or a changed/missing active config leaves the running activation unresolved. The recovery command never reloads Nginx again.
+Activation receipts live below `/var/lib/yunpanel/recovery/domain-activations/<server-id>/<job-id>.json`. Recovery never reloads Nginx again.
 
-### Running agentless static-deploy recovery from a private receipt
+### Static deploy and rollback
 
-New agentless static deployments attempt to persist a root-protected recovery receipt after the deployment manager has returned a successful, sanitized result. Receipts live below:
+New agentless static deployments persist a bounded private receipt after successful deployment. Receipt directories are `0700`, receipt files are `0600`, and arbitrary payload/result/secret fields are not accepted.
 
-```text
-/var/lib/yunpanel/recovery/static-deployments/<application-id>/<deployment-id>.json
-```
-
-Receipt directories are forced to `0700`, receipt files are `0600`, and the schema accepts only deployment/release identity, commit SHA, previous release and artifact count/size metadata. Environment values, credentials, repository URLs and arbitrary result fields are not accepted.
-
-A receipt is not sufficient by itself. Recovery additionally requires the application's `current` symlink to point exactly at `releases/<job-id>` and that target to be a real directory rather than a symlink.
-
-With API and agent stopped:
+Deploy recovery requires the receipt, `current -> releases/<job-id>` and a real target release directory:
 
 ```bash
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-static-deploy <server-id> <job-id> --confirm
 ```
 
-If all evidence matches, YunPanel completes the original running job, reconciles the application registry and clears the recovery journal. If the receipt was never written, current release drifted or filesystem evidence is inconsistent, the job remains unresolved. Retained legacy-agent deployments are not assumed to have these new receipts.
+Static rollback does not guess from application state alone. Recovery requires the exact retained target/previous release directories and `current` to point at the queued rollback target:
 
-### Running database create/delete recovery
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-static-rollback <server-id> <job-id> --confirm
+```
 
-Database create can be recovered from the exact queued database name plus a fresh read-only local socket inventory. The target schema must exist in the inventory:
+A stale receipt or release/symlink drift leaves the job unresolved.
+
+### Node deploy, restart and rollback
+
+Node mutations use private job-bound receipts because current service state alone cannot reconstruct historical deployment/restart metadata. Environment values and repository credentials are not written to receipts.
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-node-deploy <server-id> <job-id> --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-node-restart <server-id> <job-id> --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-node-rollback <server-id> <job-id> --confirm
+```
+
+Recovery requires exact application/job/release intent, the corresponding private receipt and a fresh read-only Node status proving the expected systemd service is loaded/active and the expected release/port/health path is healthy. Node deploy receipts also retain the sanitized commit SHA/previous-release metadata needed by application reconciliation. Receipt roots are below `/var/lib/yunpanel/recovery/node-deployments`, `/var/lib/yunpanel/recovery/node-restarts` and `/var/lib/yunpanel/recovery/node-rollbacks`.
+
+### Database create and delete
+
+Database create can be recovered from the exact queued database name plus a fresh read-only local socket inventory proving the target schema exists:
 
 ```bash
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-database-create <server-id> <job-id> --confirm
 ```
 
-Database delete needs information that disappears after deletion, so new agentless deletes persist a private receipt after the host manager confirms success. Recovery requires both that exact receipt and a fresh inventory proving the schema is still absent under the same database engine:
+Database delete uses a private success receipt plus a fresh inventory proving the schema is still absent under the same engine:
 
 ```bash
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-database-delete <server-id> <job-id> --confirm
 ```
 
-Deletion receipts live below `/var/lib/yunpanel/recovery/database-deletions/<server-id>/<job-id>.json` with `0700` directories and `0600` files. They contain only bounded engine/version/database identity/size/deleted metadata; raw SQL, socket paths, command output and credentials are not accepted.
+Deletion receipts live below `/var/lib/yunpanel/recovery/database-deletions/<server-id>/<job-id>.json`. Raw SQL, socket/client paths, command output and credentials are not accepted.
 
-### Running managed-service recovery
+### Managed-service recovery
 
-Service `start` and `stop` can be recovered from the exact private queued intent plus a fresh read-only managed-service inspection. Recovery requires all managed packages to remain installed, all systemd inspections to be valid, and every unit to satisfy the requested final state:
+Service `start` and `stop` are recovered from the exact private queued intent plus fresh package/unit inspection:
 
 ```bash
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-service-control <server-id> <job-id> --confirm
 ```
 
-A final active state cannot prove that a `restart` really occurred, and post-install state cannot reconstruct whether installation changed the host. New agentless `install` and `restart` jobs therefore write a minimal job-bound receipt after the host operation succeeds. Recovery requires that receipt plus a fresh inspection proving the service is still installed and active:
+Install and restart need a private receipt because final active state does not prove the historical mutation. The receipt contains a digest of the safe package/unit state recorded after success; recovery recomputes that digest from a fresh inspection:
 
 ```bash
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-service-mutation <server-id> <job-id> --confirm
 ```
 
-Service mutation receipts live below `/var/lib/yunpanel/recovery/service-mutations/<server-id>/<job-id>.json`. They contain only server/job/service identity, the exact supported operation and the minimal `restart`/`changed` metadata needed to rebuild a valid completion result. Raw package/systemd output is not persisted.
+Receipts live below `/var/lib/yunpanel/recovery/service-mutations/<server-id>/<job-id>.json`. State drift invalidates the receipt.
 
-### Mutations that remain unresolved
+### YunPanel package upgrade recovery
 
-There is deliberately no generic `force-success`, `force-failed` or `retry-mutation` recovery command. The following running mutations still need operation-specific evidence before they can be resolved automatically:
+A package upgrade or no-op upgrade writes a private version-transition receipt. Recovery compares that receipt with a fresh read-only YunPanel package inspection and does not run `apt-get` or schedule service restarts again:
 
-- static rollback
-- Node deploy, rollback and restart
-- package upgrade
-- certificate issue/renew
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-system-upgrade <server-id> <job-id> --confirm
+```
 
-Do not mark these succeeded/failed by guess, do not clear their journal manually and do not use process restart as an automatic retry mechanism. A missing proof is an unresolved operation, not a failure result.
+Receipts live below `/var/lib/yunpanel/recovery/system-upgrades/<server-id>/<job-id>.json`. Installed/candidate/version-transition drift leaves the job unresolved.
+
+### Certificate issue and renewal recovery
+
+Certificate operation receipts live below `/var/lib/yunpanel/recovery/certificates/<server-id>/<job-id>.json` and contain only bounded certificate/job identity and safe validation/fingerprint/validity metadata. They do not contain ACME email, PEM content, private-key paths or certbot output.
+
+One command handles both persisted `ssl.issue` and `ssl.renew` intents:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-certificate <server-id> <job-id> --confirm
+```
+
+For staging issue and renewal dry-run, the exact success receipt is the historical proof; recovery does not call certbot again. Production issue/renew additionally inspect the current managed certificate and require matching X.509 fingerprint and validity metadata before reconciliation. Production issue may attach the recovered certificate to its managed HTTPS domain only after those checks succeed.
 
 ## Path A — migrate an existing enrolled server
 
@@ -265,10 +280,11 @@ Then verify through the authenticated panel, in this order:
 
 1. server connectivity and local host inventory,
 2. allowlisted systemd service, Docker and Nginx snapshots,
-3. read-only package/database inspection,
+3. read-only package/service/database/Node-status inspection,
 4. one low-risk managed mutation on the test host,
 5. Node/static runtime operations,
-6. SSL, DB and remaining host operations required by `todo.md`.
+6. SSL, DB and package operations required by `todo.md`,
+7. at least one controlled recovery interruption for each evidence family before production acceptance.
 
 If durable recovery appears at any point, stop creating new work and use `job-recovery status` before deciding the next action.
 
@@ -278,7 +294,7 @@ The root API may adopt an existing private legacy auth directory/SQLite files be
 
 Do not run rollback while local work is active or durable recovery is unresolved.
 
-1. Drain/cancel queued work and resolve any safely recoverable terminal/running recovery state. Leave unsupported unknown mutations unresolved rather than forcing them.
+1. Drain/cancel queued work and resolve only recovery states whose operation-specific proof succeeds. A missing proof remains unresolved rather than being forced.
 2. Stop both services:
 
 ```bash
@@ -303,6 +319,6 @@ sudo systemctl start yunpanel-api.service yun-agent.service
 
 `release --confirm` deliberately fails for a fresh Path B local-only record because no legacy agent credential exists.
 
-If any migration/recovery command reports an active service, active queue, recovery journal, hostname mismatch, invalid/outside state path or unreadable systemd/host evidence, do not bypass the guard. Resolve the discrepancy from independent console access and the verified backup.
+If any migration/recovery command reports an active service, active queue, recovery journal, hostname mismatch, invalid/outside state path or unreadable/mismatched host evidence, do not bypass the guard. Resolve the discrepancy from independent console access and the verified backup.
 
 Complete `T-LOCAL-EXECUTOR`, `T-SERVICES`, `T-DATABASE`, `T-LIVE` and `T-MIGRATION` in `todo.md` on an isolated supported host before calling either path production-ready.
