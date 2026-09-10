@@ -107,6 +107,14 @@ function normalizeHealthResult(result) {
   return Object.freeze({ healthy: true, statusCode: 200 });
 }
 
+function normalizeExpectedRuntimeVersion(value) {
+  if (value == null) return null;
+  if (typeof value !== 'string' || value.length < 1 || value.length > 40 || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new LocalMigrationCliError('local_validation_expected_version_invalid', 'Expected local runtime version is invalid');
+  }
+  return value;
+}
+
 export async function runLocalMigrationCommand({
   action,
   serverId,
@@ -120,6 +128,7 @@ export async function runLocalMigrationCommand({
   jobRegistryFactory = createMigrationJobRegistry,
   serviceStatus = createMigrationServiceStatus(),
   apiHealthCheck = checkLocalApiHealth,
+  expectedRuntimeVersion = null,
 } = {}) {
   const safeAction = requireAction(action);
   if (!['status', 'validate'].includes(safeAction) && confirm !== true) {
@@ -129,6 +138,7 @@ export async function runLocalMigrationCommand({
     || typeof apiHealthCheck !== 'function') {
     throw new LocalMigrationCliError('invalid_migration_dependencies', 'Migration command dependencies are invalid');
   }
+  const expectedVersion = normalizeExpectedRuntimeVersion(expectedRuntimeVersion);
   const paths = resolveLocalMigrationPaths({ env, packaged, cwd });
   const registry = registryFactory({ filePath: paths.serverStore });
   const jobRegistry = jobRegistryFactory({ filePath: paths.jobStore });
@@ -140,6 +150,9 @@ export async function runLocalMigrationCommand({
   }
   if (safeAction === 'validate') {
     const validation = await validateLocalServerRuntime(input);
+    if (expectedVersion !== null && validation.localRuntimeVersion !== expectedVersion) {
+      throw new LocalMigrationCliError('local_validation_runtime_version_mismatch', 'Running local API version does not match this migration tool');
+    }
     let apiHealth;
     try {
       apiHealth = normalizeHealthResult(await apiHealthCheck({ env }));
@@ -171,4 +184,5 @@ export const localMigrationCliInternals = Object.freeze({
   panelUnits: PANEL_UNITS,
   inspectUnitState,
   normalizeHealthResult,
+  normalizeExpectedRuntimeVersion,
 });
