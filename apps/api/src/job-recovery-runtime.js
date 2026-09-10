@@ -1,3 +1,4 @@
+import os from 'node:os';
 import path from 'node:path';
 import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
@@ -91,6 +92,30 @@ function createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegis
   });
 }
 
+function normalizeRecoveryHostname(value) {
+  const hostname = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!hostname || hostname.length > 253 || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(hostname)) {
+    throw new JobRecoveryRuntimeError('job_recovery_hostname_invalid', 'Recovery host name is invalid');
+  }
+  return hostname;
+}
+
+async function requireRecoveryServerHost({ serverRegistry, serverId, hostname }) {
+  let server;
+  try {
+    server = await serverRegistry.getServer(serverId);
+  } catch {
+    throw new JobRecoveryRuntimeError('job_recovery_server_read_failed', 'Recovery server identity could not be read');
+  }
+  if (!server || server.id !== serverId) {
+    throw new JobRecoveryRuntimeError('job_recovery_server_not_found', 'Recovery server identity was not found');
+  }
+  if (normalizeRecoveryHostname(server.hostname) !== normalizeRecoveryHostname(hostname)) {
+    throw new JobRecoveryRuntimeError('job_recovery_server_hostname_mismatch', 'Recovery server identity does not match this host');
+  }
+  return server;
+}
+
 export async function runTerminalRecoveryFromStores({
   serverId,
   jobId,
@@ -146,6 +171,7 @@ export async function runTerminalRecoveryFromStores({
 export async function runRunningInspectionRecoveryFromStores({
   serverId,
   jobId,
+  hostname = os.hostname(),
   env = process.env,
   packaged = false,
   cwd = process.cwd(),
@@ -173,15 +199,7 @@ export async function runRunningInspectionRecoveryFromStores({
 
   const paths = resolveJobRecoveryPaths({ env, packaged, cwd });
   const serverRegistry = await initRegistry(serverRegistryFactory({ filePath: paths.serverStore }), 'Server');
-  let server;
-  try {
-    server = await serverRegistry.getServer(serverId);
-  } catch {
-    throw new JobRecoveryRuntimeError('job_recovery_server_read_failed', 'Recovery server identity could not be read');
-  }
-  if (!server || server.id !== serverId) {
-    throw new JobRecoveryRuntimeError('job_recovery_server_not_found', 'Recovery server identity was not found');
-  }
+  await requireRecoveryServerHost({ serverRegistry, serverId, hostname });
 
   const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
   const hostOperations = hostOperationsFactory();
@@ -204,4 +222,6 @@ export const jobRecoveryRuntimeInternals = Object.freeze({
   resolveRecoveryStorePath,
   initRegistry,
   createDurableRecoveryRegistry,
+  normalizeRecoveryHostname,
+  requireRecoveryServerHost,
 });
