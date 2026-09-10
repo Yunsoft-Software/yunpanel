@@ -7,6 +7,7 @@ import { createNginxManager } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createDurableJobRegistry } from '../src/durable-job-registry.js';
+import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
 import { recoverRunningDomainStage } from '../src/job-running-domain-recovery.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
@@ -58,6 +59,7 @@ async function fixture(t) {
   const restarted = createDurableJobRegistry({ filePath: jobStore, registryFactory: createJobRegistry });
   await restarted.init();
   assert.equal(restarted.recovery().jobs[0].jobId, queued.id);
+  const contextReader = createJobRecoveryContextReader({ filePath: jobStore });
 
   return {
     server,
@@ -65,6 +67,7 @@ async function fixture(t) {
     payload,
     jobId: queued.id,
     jobRegistry: restarted,
+    contextReader,
     domainRegistry,
     nginxManager: createNginxManager({ stagingDir, sitesDir }),
   };
@@ -74,9 +77,12 @@ function stoppedServices() {
   return { apiActive: false, agentActive: false };
 }
 
-test('exact staged Nginx evidence closes the same durable job and reconciles domain state', async (t) => {
+test('exact staged Nginx evidence closes the same durable job using private queued payload', async (t) => {
   const fx = await fixture(t);
   const staged = await fx.nginxManager.stageDomain(fx.payload);
+
+  const publicJob = await fx.jobRegistry.getJob(fx.jobId);
+  assert.equal(Object.hasOwn(publicJob, 'payload'), false);
 
   const recovered = await recoverRunningDomainStage({
     serverId: fx.server.id,
@@ -86,6 +92,7 @@ test('exact staged Nginx evidence closes the same durable job and reconciles dom
     certificateRegistry: {},
     applicationRegistry: {},
     serviceStatus: async () => stoppedServices(),
+    loadJobContext: (id) => fx.contextReader.read(id),
     inspectStageEvidence: (payload) => fx.nginxManager.inspectStagedDomain(payload),
   });
 
@@ -117,6 +124,7 @@ test('absent staged evidence preserves running durable recovery without resource
       certificateRegistry: {},
       applicationRegistry: {},
       serviceStatus: async () => stoppedServices(),
+      loadJobContext: (id) => fx.contextReader.read(id),
       inspectStageEvidence: (payload) => fx.nginxManager.inspectStagedDomain(payload),
     }),
     { code: 'job_domain_recovery_evidence_not_satisfied' },
