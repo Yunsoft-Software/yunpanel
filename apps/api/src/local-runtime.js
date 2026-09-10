@@ -12,6 +12,7 @@ const EXECUTOR_FAULT_CODES = new Set([
 ]);
 const EXECUTOR_FAULT_PHASES = new Set(['claim', 'execute', 'complete', 'reconcile']);
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SNAPSHOT_FIELDS = new Set(['inventory', 'services']);
 
 export class LocalRuntimeError extends Error {
   constructor(code, message) {
@@ -44,6 +45,26 @@ function normalizeSnapshotInterval(value) {
     throw new LocalRuntimeError('invalid_local_snapshot_interval', 'Local runtime snapshot interval must be between 50 and 60000 milliseconds');
   }
   return value;
+}
+
+function normalizeSnapshotPayload(value) {
+  if (value == null) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new LocalRuntimeError('local_runtime_snapshot_invalid', 'Local runtime snapshot provider returned invalid state');
+  }
+  if (Object.keys(value).some((key) => !SNAPSHOT_FIELDS.has(key))) {
+    throw new LocalRuntimeError('local_runtime_snapshot_invalid', 'Local runtime snapshot provider returned unsupported state');
+  }
+  const output = {};
+  for (const field of SNAPSHOT_FIELDS) {
+    if (!(field in value)) continue;
+    const snapshot = value[field];
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+      throw new LocalRuntimeError('local_runtime_snapshot_invalid', `Local runtime ${field} snapshot is invalid`);
+    }
+    output[field] = snapshot;
+  }
+  return output;
 }
 
 function assertBoundServer(server, serverId, hostname) {
@@ -110,6 +131,7 @@ export async function startLocalRuntime({
   certificateRegistry,
   applicationRegistry,
   hostOperations = createLocalHostOperations(),
+  snapshotProvider = null,
   executorFactory = createLocalJobExecutor,
   acquireLock = acquireLocalExecutionLock,
   reconcile = reconcileCompletedJob,
@@ -123,6 +145,9 @@ export async function startLocalRuntime({
   const normalizedVersion = normalizeRuntimeVersion(runtimeVersion);
   const normalizedSnapshotInterval = normalizeSnapshotInterval(snapshotIntervalMs);
   if (typeof lockPath !== 'string' || !lockPath) throw new LocalRuntimeError('invalid_local_lock_path', 'Local runtime lock path is required');
+  if (snapshotProvider !== null && typeof snapshotProvider !== 'function') {
+    throw new LocalRuntimeError('local_runtime_snapshot_provider_invalid', 'Local runtime snapshot provider must be a function');
+  }
   if (typeof executorFactory !== 'function' || typeof acquireLock !== 'function' || typeof reconcile !== 'function' || typeof onError !== 'function') {
     throw new LocalRuntimeError('local_runtime_adapter_invalid', 'Local runtime adapter configuration is invalid');
   }
@@ -172,10 +197,12 @@ export async function startLocalRuntime({
   }
 
   async function refreshSnapshot() {
+    const provided = snapshotProvider ? normalizeSnapshotPayload(await snapshotProvider()) : {};
     const snapshot = await registry.updateLocalSnapshot({
       serverId,
       hostname: normalizedHostname,
       runtimeVersion: normalizedVersion,
+      ...provided,
     });
     assertBoundServer(snapshot, serverId, normalizedHostname);
     return snapshot;
@@ -253,6 +280,7 @@ export const localRuntimeInternals = Object.freeze({
   normalizeHostname,
   normalizeRuntimeVersion,
   normalizeSnapshotInterval,
+  normalizeSnapshotPayload,
   normalizeExecutorFault,
   assertBoundServer,
   defaultSnapshotIntervalMs: DEFAULT_SNAPSHOT_INTERVAL_MS,
