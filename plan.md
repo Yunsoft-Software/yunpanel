@@ -8,7 +8,6 @@ Doğrudan güncel `main` üzerinde küçük, tek amaçlı commitlerle ilerle. Gi
 
 ## A. P0 — Authentication ve erişim sınırı
 
-- [ ] MFA/session browser yarışları için otomasyon ekle: iki sekme, delayed/stale response, cookie rotation, lost MFA response, `pageshow`, keep-alive, idle ve absolute timeout.
 - [ ] WebSocket/SSE/PTY geldiğinde HTTP ile aynı session/role/Origin/Owner-MFA sınırını ortak revocation kanalına bağla; logout, password/MFA/role değişimi ve user disable/delete açık bağlantıları kapatsın.
 
 ## B. P1 — Agentless yerel backend geçişinde kalan kod
