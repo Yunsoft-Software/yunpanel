@@ -15,6 +15,10 @@ import {
   resolveLocalMigrationBackupDirectory,
 } from './local-migration-backup.js';
 import { localMigrationArchiveInspectionInternals } from './local-migration-archive-inspection.js';
+import {
+  LocalMigrationRestoreMetadataPlanError,
+  planVerifiedLocalMigrationRestoreMetadata,
+} from './local-migration-restore-metadata-plan.js';
 import { previewLocalMigrationRestore } from './local-migration-restore-preview.js';
 
 const execFileAsync = promisify(execFile);
@@ -109,6 +113,39 @@ function validatePreview(preview, directory) {
     throw new LocalMigrationRestoreStageError('migration_restore_stage_preview_invalid', 'Migration restore preview extended metadata count is invalid');
   }
   return Object.freeze(members);
+}
+
+function summarizeMetadataPlan(plan, directory, sha256, memberCount) {
+  if (!plan || plan.destructive !== false || plan.liveMutation !== false || plan.liveApplyEnabled !== false
+    || plan.ownershipMetadata !== true || plan.extendedMetadataValidated !== false
+    || plan.backupDirectory !== directory || plan.sha256 !== sha256
+    || !plan.counts || !Array.isArray(plan.blocks) || !Array.isArray(plan.targets)
+    || plan.counts.members !== memberCount || plan.targets.length !== localMigrationBackupInternals.requiredEntries.length) {
+    throw new LocalMigrationRestoreStageError('migration_restore_stage_metadata_plan_invalid', 'Migration restore staging requires a complete read-only metadata plan');
+  }
+  const countKeys = [
+    'members',
+    'restoreTargets',
+    'identityReferences',
+    'preservedTargets',
+    'privilegedModeMembers',
+    'extendedMetadataMembers',
+    'identityDrift',
+    'identityMissingCurrent',
+    'identityAddedCurrent',
+  ];
+  if (!countKeys.every((key) => Number.isInteger(plan.counts[key]) && plan.counts[key] >= 0)
+    || plan.counts.privilegedModeMembers > memberCount || plan.counts.extendedMetadataMembers > memberCount
+    || plan.blocks.some((block) => typeof block !== 'string' || block.length < 1 || block.length > 80)) {
+    throw new LocalMigrationRestoreStageError('migration_restore_stage_metadata_plan_invalid', 'Migration restore staging metadata plan summary is invalid');
+  }
+  return Object.freeze({
+    counts: Object.freeze({ ...plan.counts }),
+    blocks: Object.freeze([...plan.blocks]),
+    ownershipMetadata: true,
+    extendedMetadataValidated: false,
+    liveApplyEnabled: false,
+  });
 }
 
 async function ensurePrivateDirectory(target, { mkdirFn, lstatFn, chmodFn, recursive }) {
@@ -244,6 +281,7 @@ export async function stageLocalMigrationRestore({
   backupDirectory,
   stageRoot = DEFAULT_STAGE_ROOT,
   previewRestore = previewLocalMigrationRestore,
+  planMetadata = planVerifiedLocalMigrationRestoreMetadata,
   mkdirFn = mkdir,
   mkdtempFn = mkdtemp,
   lstatFn = lstat,
@@ -253,7 +291,8 @@ export async function stageLocalMigrationRestore({
   rmFn = rm,
   runTar = defaultRunTar,
 } = {}) {
-  if (typeof previewRestore !== 'function' || typeof mkdirFn !== 'function' || typeof mkdtempFn !== 'function'
+  if (typeof previewRestore !== 'function' || typeof planMetadata !== 'function'
+    || typeof mkdirFn !== 'function' || typeof mkdtempFn !== 'function'
     || typeof lstatFn !== 'function' || typeof chmodFn !== 'function' || typeof readdirFn !== 'function'
     || typeof readlinkFn !== 'function' || typeof rmFn !== 'function' || typeof runTar !== 'function') {
     throw new LocalMigrationRestoreStageError('migration_restore_stage_dependencies_invalid', 'Migration restore staging dependencies are invalid');
@@ -268,6 +307,17 @@ export async function stageLocalMigrationRestore({
     throw new LocalMigrationRestoreStageError('migration_restore_stage_preview_failed', 'Migration restore staging requires a successful restore preview');
   }
   const members = validatePreview(preview, directory);
+
+  let metadataPlan;
+  try {
+    metadataPlan = await planMetadata({ backupDirectory: directory, preview });
+  } catch (error) {
+    if (error instanceof LocalMigrationRestoreMetadataPlanError) {
+      throw new LocalMigrationRestoreStageError('migration_restore_stage_metadata_plan_invalid', 'Migration restore staging requires a complete read-only metadata plan');
+    }
+    throw new LocalMigrationRestoreStageError('migration_restore_stage_metadata_plan_failed', 'Migration restore staging metadata plan could not be produced safely');
+  }
+  const metadataSummary = summarizeMetadataPlan(metadataPlan, directory, preview.sha256, members.length);
 
   await ensurePrivateDirectory(safeStageRoot, { mkdirFn, lstatFn, chmodFn, recursive: true });
   let stageDirectory;
@@ -302,6 +352,7 @@ export async function stageLocalMigrationRestore({
       ownershipMetadata: true,
       extendedMetadata: members.filter((member) => member.metadataMarker !== null).length,
       extendedMetadataValidated: false,
+      metadataPlan: metadataSummary,
       liveMutation: false,
       destructive: false,
       validated: true,
@@ -319,6 +370,7 @@ export const localMigrationRestoreStageInternals = Object.freeze({
   normalizeStageRoot,
   validMemberMetadata,
   validatePreview,
+  summarizeMetadataPlan,
   actualType,
   collectStageEntries,
   validateStagedSymlink,
