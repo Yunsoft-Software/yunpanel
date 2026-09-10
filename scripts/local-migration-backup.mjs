@@ -8,11 +8,16 @@ import {
   verifyLocalMigrationBackup,
 } from '../apps/api/src/local-migration-backup.js';
 import { previewLocalMigrationRestore } from '../apps/api/src/local-migration-restore-preview.js';
+import {
+  localMigrationRestoreStageInternals,
+  stageLocalMigrationRestore,
+} from '../apps/api/src/local-migration-restore-stage.js';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const PACKAGED_SCRIPT_ROOT = '/usr/lib/yunpanel/scripts';
 const BACKUP_ROOT = localMigrationBackupInternals.defaultRoot;
-const USAGE = 'Usage: local-migration-backup.mjs create --confirm | verify <absolute-backup-directory> | preview <absolute-backup-directory>';
+const STAGE_ROOT = localMigrationRestoreStageInternals.defaultStageRoot;
+const USAGE = 'Usage: local-migration-backup.mjs create --confirm | verify <absolute-backup-directory> | preview <absolute-backup-directory> | stage <absolute-backup-directory> --confirm';
 
 export function parseLocalMigrationBackupArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
@@ -21,6 +26,10 @@ export function parseLocalMigrationBackupArguments(argv) {
   }
   if (argv.length === 2 && ['verify', 'preview'].includes(argv[0]) && typeof argv[1] === 'string' && path.isAbsolute(argv[1])) {
     return { action: argv[0], backupDirectory: path.resolve(argv[1]) };
+  }
+  if (argv.length === 3 && argv[0] === 'stage' && typeof argv[1] === 'string'
+    && path.isAbsolute(argv[1]) && argv[2] === '--confirm') {
+    return { action: 'stage', backupDirectory: path.resolve(argv[1]), confirm: true };
   }
   throw new Error(USAGE);
 }
@@ -99,6 +108,19 @@ function formatPreview(result) {
   return lines.join('\n');
 }
 
+function formatStage(result) {
+  return [
+    'action=stage',
+    'validated=true',
+    'destructive=false',
+    'liveMutation=false',
+    `backupDirectory=${result.backupDirectory}`,
+    `sha256=${result.sha256}`,
+    `stageDirectory=${result.stageDirectory}`,
+    `members=${result.members}`,
+  ].join('\n');
+}
+
 function validArchivePreview(archive, result, directory) {
   if (!archive || archive.destructive !== false || archive.linksSafe !== true
     || archive.backupDirectory !== directory || archive.sha256 !== result.sha256
@@ -118,6 +140,15 @@ function validIdentityPreview(identity, result, directory) {
   return identity.counts.match + identity.counts.drift + identity.counts.missingCurrent + identity.counts.addedCurrent === identity.identities.length;
 }
 
+function validStageResult(result, directory) {
+  if (!result || result.validated !== true || result.destructive !== false || result.liveMutation !== false
+    || result.backupDirectory !== directory || typeof result.sha256 !== 'string'
+    || typeof result.stageDirectory !== 'string' || !path.isAbsolute(result.stageDirectory)
+    || !Number.isInteger(result.members) || result.members < 1) return false;
+  const resolvedStage = path.resolve(result.stageDirectory);
+  return path.dirname(resolvedStage) === STAGE_ROOT;
+}
+
 export async function runLocalMigrationBackupCli({
   argv = process.argv.slice(2),
   filePath = scriptPath,
@@ -126,14 +157,23 @@ export async function runLocalMigrationBackupCli({
   createBackup = createLocalMigrationBackup,
   verifyBackup = verifyLocalMigrationBackup,
   previewRestore = previewLocalMigrationRestore,
+  stageRestore = stageLocalMigrationRestore,
   stdout = process.stdout,
 } = {}) {
   const parsed = parseLocalMigrationBackupArguments(argv);
   const packaged = isPackagedMigrationBackupScript(filePath);
   assertPackagedMigrationBackupRoot({ packaged, uid });
   if (typeof createBackup !== 'function' || typeof verifyBackup !== 'function' || typeof previewRestore !== 'function'
-    || !stdout || typeof stdout.write !== 'function') {
+    || typeof stageRestore !== 'function' || !stdout || typeof stdout.write !== 'function') {
     throw new Error('Migration backup CLI dependencies are invalid');
+  }
+
+  if (parsed.action === 'stage') {
+    const directory = assertPackagedBackupDirectory(parsed.backupDirectory, backupRoot);
+    const result = await stageRestore({ backupDirectory: directory });
+    if (!validStageResult(result, directory)) throw new Error('Migration restore staging result is invalid');
+    stdout.write(`${formatStage(result)}\n`);
+    return result;
   }
 
   if (parsed.action === 'preview') {
@@ -179,8 +219,11 @@ if (invoked === import.meta.url) {
 export const localMigrationBackupCliInternals = Object.freeze({
   packagedScriptRoot: PACKAGED_SCRIPT_ROOT,
   backupRoot: BACKUP_ROOT,
+  stageRoot: STAGE_ROOT,
   formatResult,
   formatPreview,
+  formatStage,
   validArchivePreview,
   validIdentityPreview,
+  validStageResult,
 });
