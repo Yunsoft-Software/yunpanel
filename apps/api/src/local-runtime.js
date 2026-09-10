@@ -4,6 +4,14 @@ import { createLocalJobExecutor } from './local-job-executor.js';
 import { reconcileCompletedJob } from './job-reconciliation.js';
 
 const DEFAULT_SNAPSHOT_INTERVAL_MS = 30_000;
+const EXECUTOR_FAULT_CODES = new Set([
+  'local_claim_unconfirmed',
+  'local_claim_invalid',
+  'local_completion_unconfirmed',
+  'local_reconciliation_failed',
+]);
+const EXECUTOR_FAULT_PHASES = new Set(['claim', 'execute', 'complete', 'reconcile']);
+const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class LocalRuntimeError extends Error {
   constructor(code, message) {
@@ -69,16 +77,26 @@ function validateDependencies({ registry, jobRegistry, domainRegistry, certifica
   }
 }
 
-function snapshotFault() {
-  return Object.assign(
-    new Error('Local runtime snapshot refresh failed; host execution has been stopped.'),
-    {
-      name: 'LocalRuntimeError',
-      code: 'local_runtime_snapshot_refresh_failed',
-      phase: 'snapshot',
-      jobId: null,
-    },
-  );
+function normalizeExecutorFault(error) {
+  const code = typeof error?.code === 'string' && EXECUTOR_FAULT_CODES.has(error.code)
+    ? error.code
+    : 'local_executor_fault';
+  const phase = typeof error?.phase === 'string' && EXECUTOR_FAULT_PHASES.has(error.phase)
+    ? error.phase
+    : 'executor';
+  const jobId = typeof error?.jobId === 'string' && JOB_ID_PATTERN.test(error.jobId)
+    ? error.jobId.toLowerCase()
+    : null;
+  return { code, phase, jobId };
+}
+
+function safeFaultError(metadata, message) {
+  return Object.assign(new Error(message), {
+    name: 'LocalRuntimeError',
+    code: metadata.code,
+    phase: metadata.phase,
+    jobId: metadata.jobId,
+  });
 }
 
 export async function startLocalRuntime({
@@ -137,6 +155,22 @@ export async function startLocalRuntime({
     return stopping;
   }
 
+  function reportFault(metadata, message) {
+    if (fault) return;
+    fault = Object.freeze({ ...metadata });
+    const safeError = safeFaultError(fault, message);
+    try { onError(safeError); } catch {}
+    void closeResources().catch(() => {});
+  }
+
+  function handleExecutorFault(error) {
+    if (stopped || fault) return;
+    reportFault(
+      normalizeExecutorFault(error),
+      'Local host execution stopped because the executor entered a fault state.',
+    );
+  }
+
   async function refreshSnapshot() {
     const snapshot = await registry.updateLocalSnapshot({
       serverId,
@@ -156,14 +190,10 @@ export async function startLocalRuntime({
         await refreshSnapshot();
         scheduleSnapshotRefresh();
       } catch {
-        fault = Object.freeze({
-          code: 'local_runtime_snapshot_refresh_failed',
-          phase: 'snapshot',
-          jobId: null,
-        });
-        const error = snapshotFault();
-        try { onError(error); } catch {}
-        await closeResources().catch(() => {});
+        reportFault(
+          { code: 'local_runtime_snapshot_refresh_failed', phase: 'snapshot', jobId: null },
+          'Local runtime snapshot refresh failed; host execution has been stopped.',
+        );
       }
     }, normalizedSnapshotInterval);
     snapshotTimer.unref?.();
@@ -189,7 +219,7 @@ export async function startLocalRuntime({
       supportsOperation: (operation) => hostOperations.supports(operation),
       executeOperation: (operation, payload) => hostOperations.executeOperation(operation, payload),
       reconcileCompletedJob: reconcileJob,
-      onError,
+      onError: handleExecutorFault,
     });
     if (!executor || typeof executor.start !== 'function' || typeof executor.stop !== 'function') {
       throw new LocalRuntimeError('local_runtime_executor_invalid', 'Local executor factory returned an invalid executor');
@@ -223,6 +253,7 @@ export const localRuntimeInternals = Object.freeze({
   normalizeHostname,
   normalizeRuntimeVersion,
   normalizeSnapshotInterval,
+  normalizeExecutorFault,
   assertBoundServer,
   defaultSnapshotIntervalMs: DEFAULT_SNAPSHOT_INTERVAL_MS,
 });
