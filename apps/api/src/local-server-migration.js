@@ -63,6 +63,13 @@ function inspectRecovery(jobRegistry) {
   return recovery.jobs.map((job) => ({ jobId: job.jobId, serverId: job.serverId }));
 }
 
+function inspectServiceStates(units) {
+  const states = units?.states;
+  if (!states || typeof states !== 'object' || Array.isArray(states)
+    || typeof states.api !== 'string' || typeof states.agent !== 'string') return null;
+  return Object.freeze({ api: states.api, agent: states.agent });
+}
+
 async function inspectConsumersAndJobs({ jobRegistry, serviceStatus, serverId = null }) {
   const [jobs, units] = await Promise.all([
     jobRegistry.listJobs(serverId ? { serverId } : {}),
@@ -79,6 +86,7 @@ async function inspectConsumersAndJobs({ jobRegistry, serviceStatus, serverId = 
     recoveryJobs,
     apiActive: units.apiActive === true,
     agentActive: units.agentActive === true,
+    serviceStates: inspectServiceStates(units),
   };
 }
 
@@ -116,6 +124,47 @@ function assertMutationSafe(preflight) {
   }
 }
 
+function isSnapshotObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function assertPostMigrationHealthy(preflight) {
+  const { server } = preflight;
+  if (server.executionMode !== 'local') {
+    throw new LocalServerMigrationError('local_validation_not_bound', 'Server is not assigned to the local runtime');
+  }
+  if (typeof server.localBoundAt !== 'string' || !Number.isFinite(Date.parse(server.localBoundAt))) {
+    throw new LocalServerMigrationError('local_validation_binding_invalid', 'Local runtime binding metadata is incomplete');
+  }
+  if (!preflight.serviceStates || preflight.serviceStates.api !== 'active') {
+    throw new LocalServerMigrationError('local_validation_api_not_active', 'yunpanel-api.service must be active after local migration');
+  }
+  if (preflight.serviceStates.agent !== 'inactive') {
+    throw new LocalServerMigrationError('local_validation_agent_not_inactive', 'yun-agent.service must be inactive after local migration');
+  }
+  if (preflight.activeJobs.length > 0) {
+    throw new LocalServerMigrationError('local_validation_jobs_active', 'Post-migration validation requires an idle local queue');
+  }
+  if (preflight.recoveryJobs.length > 0) {
+    throw new LocalServerMigrationError('local_validation_recovery_pending', 'Post-migration validation requires clear durable recovery state');
+  }
+  if (server.connectivity !== 'online' || typeof server.lastSeenAt !== 'string' || !Number.isFinite(Date.parse(server.lastSeenAt))) {
+    throw new LocalServerMigrationError('local_validation_snapshot_stale', 'Local runtime snapshot is missing or stale');
+  }
+  if (typeof server.localRuntimeVersion !== 'string' || server.localRuntimeVersion.length < 1 || server.localRuntimeVersion.length > 40
+    || /[\u0000-\u001f\u007f]/.test(server.localRuntimeVersion)) {
+    throw new LocalServerMigrationError('local_validation_runtime_version_invalid', 'Local runtime version snapshot is missing or invalid');
+  }
+  if (!isSnapshotObject(server.inventory)
+    || normalizeHostname(server.inventory.hostname) !== preflight.hostname
+    || server.inventory.mode !== 'local') {
+    throw new LocalServerMigrationError('local_validation_inventory_invalid', 'Local host inventory snapshot does not match this runtime');
+  }
+  if (!isSnapshotObject(server.services)) {
+    throw new LocalServerMigrationError('local_validation_services_invalid', 'Local service snapshot is missing or invalid');
+  }
+}
+
 export async function inspectLocalServerMigration(input = {}) {
   const preflight = await inspectPreflight(input);
   return Object.freeze({
@@ -127,6 +176,27 @@ export async function inspectLocalServerMigration(input = {}) {
     agentActive: preflight.agentActive,
     activeJobCount: preflight.activeJobs.length,
     recoveryJobCount: preflight.recoveryJobs.length,
+  });
+}
+
+export async function validateLocalServerRuntime(input = {}) {
+  const preflight = await inspectPreflight(input);
+  assertPostMigrationHealthy(preflight);
+  return Object.freeze({
+    validated: true,
+    serverId: preflight.serverId,
+    hostname: preflight.hostname,
+    executionMode: preflight.server.executionMode,
+    localBoundAt: preflight.server.localBoundAt,
+    connectivity: preflight.server.connectivity,
+    lastSeenAt: preflight.server.lastSeenAt,
+    localRuntimeVersion: preflight.server.localRuntimeVersion,
+    apiState: preflight.serviceStates.api,
+    agentState: preflight.serviceStates.agent,
+    activeJobCount: preflight.activeJobs.length,
+    recoveryJobCount: preflight.recoveryJobs.length,
+    inventoryPresent: true,
+    servicesPresent: true,
   });
 }
 
@@ -158,6 +228,8 @@ export const localServerMigrationInternals = Object.freeze({
   normalizeServerId,
   normalizeHostname,
   inspectRecovery,
+  inspectServiceStates,
   inspectConsumersAndJobs,
   assertMutationSafe,
+  assertPostMigrationHealthy,
 });
