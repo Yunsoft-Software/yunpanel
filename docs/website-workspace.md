@@ -12,6 +12,8 @@ Implemented backend contracts:
 - `GET /api/websites/:websiteId`
 - `GET /api/websites/:websiteId/domains`
 - `POST /api/websites`
+- `POST /api/websites/:websiteId/update-preview`
+- `PATCH /api/websites/:websiteId`
 - `GET /api/websites/migration/preview`
 - `GET /api/websites/migration/status`
 - `POST /api/websites/migration/bind`
@@ -20,7 +22,7 @@ Implemented backend contracts:
 
 Website state is stored separately through `YUNPANEL_WEBSITE_STORE`. Migration enforcement state is stored through `YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE`. Production startup validates persisted Website server/application foreign keys and initializes migration policy before accepting Domain state.
 
-An application-backed Website owns stable Website UUID, server/application IDs, runtime type, canonical managed document root and deterministic `yunapp-*` Unix user. A proxy Website is a real resource without an invented application/document root/Unix user.
+An application-backed Website owns stable Website UUID, server/application IDs, runtime type, canonical managed document root and deterministic `yunapp-*` Unix user. A proxy Website is a real resource without an invented application/document root/Unix user and may own one canonical host/port/WebSocket target. Website records carry a positive revision; persisted v1 state is validated and migrated once to v2 with revision `1` and no invented proxy target.
 
 The Website ID is not a domain ID. Backend relationships use explicit foreign keys rather than permanent server/port/root heuristics.
 
@@ -31,6 +33,14 @@ Domain records may persist `websiteId`. `GET /api/websites/:websiteId/domains` r
 Legacy domain state without the field opens as `websiteId=null`. A one-way registry primitive can bind an unbound legacy domain to one same-server Website without changing its current Nginx desired/applied revision. Rebinding an already-bound domain is blocked until impact-preview/move semantics exist.
 
 Shared hostname validation canonicalizes IDN input to ASCII punycode. Unicode/punycode equivalents therefore collide as the same hostname/alias and hierarchy comparisons use one canonical form.
+
+## Website update and rebind
+
+`POST /api/websites/:websiteId/update-preview` accepts only a `changes` object. Name, application/runtime binding and proxy target are the only update fields. Application-backed roots and Unix users are re-derived from the selected same-server Application; caller-controlled roots/users remain impossible and one Application cannot be attached to multiple Websites.
+
+The preview binds the proposed state to the current Website revision and to a SHA-256 digest of every explicitly linked Domain's safe traffic/certificate revision metadata. It reports whether a later Domain restage is required, but never changes Domain target, Nginx, certificate or live traffic itself. `PATCH /api/websites/:websiteId` requires that exact revision, digest and typed confirmation. Website or linked-Domain drift rejects the apply before mutation. A successful apply increments the Website revision in the private registry file.
+
+Switching an application-backed Website to proxy is explicit: `runtimeType=proxy` and `applicationId=null` are both required. Switching back requires an exact Application ID and its matching `static` or `node` runtime. Proxy hosts accept canonical IP/DNS names only—not URL schemes or paths—and ports remain in the non-privileged `1024..65535` range.
 
 ## Migration preview, bind and enforcement
 
@@ -44,13 +54,13 @@ The backend intentionally does not combine Website creation and Domain binding i
 
 `GET /api/websites/migration/status` returns the current policy beside a fresh preview. The versioned policy starts in `compatibility`. `POST /api/websites/migration/finalize` can switch it to `enforced` only when the exact current preview says every managed Domain is already explicitly bound. In enforced mode new managed Domain creation requires a same-server `websiteId`.
 
-`POST /api/websites/migration/rollback` requires the exact enforced digest and returns policy to compatibility mode. It does not rewrite Domain traffic, certificates, releases or application state. A separate migration-only binding rollback ledger remains to be implemented; policy rollback is not a general Domain unbind operation.
+`POST /api/websites/migration/rollback` requires the exact enforced digest and returns policy to compatibility mode. It does not rewrite Domain traffic, certificates, releases or application state. Migration-only binding rollback uses its own durable ledger/receipt and is not a general Domain unbind operation. A migration-created Website that has been revised by an ordinary update is never silently treated as the untouched rollback resource, even if its visible fields were later restored.
 
 Migration bind/finalize/rollback are covered by common management audit without copying body, confirmation or digest material into audit metadata.
 
 ## Authentication/access boundary
 
-All Website management enters through the authenticated API listener. Owner management requires normal session/MFA/Origin/CSRF policy. Read Only accounts may read Website collection/detail and explicit Website→domains relation; migration preview/status and all Website/migration mutations remain Owner-only.
+All Website management enters through the authenticated API listener. Owner management requires normal session/MFA/Origin/CSRF policy. Read Only accounts may read Website collection/detail and explicit Website→domains relation; Website update preview/apply, migration preview/status and all Website/migration mutations remain Owner-only.
 
 Caller input cannot set `documentRoot` or `unixUser`; those values are derived from managed application identity.
 
@@ -64,9 +74,6 @@ A `202` response is queued/accepted work, not completion.
 
 See `plan.md` C/E/F/G/H/I. Persistent Website foundation, IDN canonicalization, guarded existing-Website migration bind and compatibility/enforced policy are implemented. Remaining Website/domain work includes:
 
-- explicit/repeatable `create_website_then_bind` orchestration,
-- migration-only binding rollback ledger/receipt,
-- Website update/rebind lifecycle,
 - reparent/move/delete impact preview,
 - site-create orchestration,
 - DNS/mail lifecycle separation,

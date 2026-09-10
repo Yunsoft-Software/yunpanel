@@ -38,7 +38,7 @@ test('migration Website creation is idempotent for exact Domain Application iden
 
 test('migration Website identity does not silently accept a changed name or binding', async () => {
   const websites = registry();
-  await websites.createMigrationWebsite({ domainId, serverId, name: 'api.example.com', applicationId });
+  const created = await websites.createMigrationWebsite({ domainId, serverId, name: 'api.example.com', applicationId });
   await assert.rejects(
     websites.createMigrationWebsite({ domainId, serverId, name: 'changed.example.com', applicationId }),
     (error) => error instanceof WebsiteRegistryError && error.code === 'migration_website_identity_conflict',
@@ -46,6 +46,20 @@ test('migration Website identity does not silently accept a changed name or bind
   await assert.rejects(
     websites.createMigrationWebsite({ domainId, serverId, name: 'api.example.com', applicationId: otherApplicationId }),
     (error) => error instanceof WebsiteRegistryError && ['migration_website_identity_conflict', 'application_already_bound'].includes(error.code),
+  );
+
+  for (const nextName of ['temporarily changed', 'api.example.com']) {
+    const preview = await websites.previewWebsiteUpdate(created.id, { name: nextName });
+    await websites.updateWebsite({
+      websiteId: created.id,
+      expectedRevision: preview.currentRevision,
+      changes: { name: nextName },
+      previewFingerprint: preview.fingerprint,
+    });
+  }
+  await assert.rejects(
+    websites.createMigrationWebsite({ domainId, serverId, name: 'api.example.com', applicationId }),
+    (error) => error instanceof WebsiteRegistryError && error.code === 'migration_website_identity_conflict',
   );
 });
 

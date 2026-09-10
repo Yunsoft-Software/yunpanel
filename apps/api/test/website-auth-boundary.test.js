@@ -74,9 +74,30 @@ test('Owner creates a real Website resource through authenticated API compositio
   assert.equal(website.runtimeType, 'proxy');
   assert.equal(website.applicationId, null);
   assert.equal(Object.hasOwn(website, 'hostname'), false);
+
+  const previewResponse = await request(`/api/websites/${website.id}/update-preview`, {
+    method: 'POST', body: { changes: { name: 'Renamed Proxy Site', proxyTarget: { host: '127.0.0.1', port: 8080 } } },
+  });
+  assert.equal(previewResponse.status, 200);
+  const preview = (await previewResponse.json()).data;
+  assert.equal(preview.impact.linkedDomainCount, 0);
+  const updatedResponse = await request(`/api/websites/${website.id}`, {
+    method: 'PATCH',
+    body: {
+      revision: preview.currentRevision,
+      changes: { name: 'Renamed Proxy Site', proxyTarget: { host: '127.0.0.1', port: 8080 } },
+      previewDigest: preview.previewDigest,
+      confirmation: preview.confirmation,
+    },
+  });
+  assert.equal(updatedResponse.status, 200);
+  const updated = (await updatedResponse.json()).data.website;
+  assert.equal(updated.name, 'Renamed Proxy Site');
+  assert.equal(updated.revision, 2);
+  assert.deepEqual(updated.proxyTarget, { host: '127.0.0.1', port: 8080, websocket: true });
 });
 
-test('Read Only may list and read Websites but cannot create one', async (t) => {
+test('Read Only may list and read Websites but cannot create or preview/apply updates', async (t) => {
   const state = await resources();
   const seeded = await state.websiteRegistry.createWebsite({ serverId: state.serverId, name: 'Existing', runtimeType: 'proxy' });
   const request = await createListener(t, { role: 'read_only', ...state });
@@ -92,5 +113,18 @@ test('Read Only may list and read Websites but cannot create one', async (t) => 
   });
   assert.equal(denied.status, 403);
   assert.equal((await denied.json()).error.code, 'forbidden');
+  const updatePreviewDenied = await request(`/api/websites/${seeded.id}/update-preview`, {
+    method: 'POST',
+    body: { changes: { name: 'Denied rename' } },
+  });
+  assert.equal(updatePreviewDenied.status, 403);
+  assert.equal((await updatePreviewDenied.json()).error.code, 'forbidden');
+  const updateDenied = await request(`/api/websites/${seeded.id}`, {
+    method: 'PATCH',
+    body: { revision: 1, changes: { name: 'Denied rename' }, previewDigest: 'a'.repeat(64), confirmation: 'denied' },
+  });
+  assert.equal(updateDenied.status, 403);
+  assert.equal((await updateDenied.json()).error.code, 'forbidden');
   assert.equal((await state.websiteRegistry.listWebsites()).length, 1);
+  assert.equal((await state.websiteRegistry.getWebsite(seeded.id)).name, 'Existing');
 });

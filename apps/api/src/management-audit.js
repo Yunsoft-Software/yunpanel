@@ -23,6 +23,8 @@ export function classifyManagementMutation(method, pathname) {
   if (method === 'POST' && pathname === '/api/websites/migration/rollback-binding') return { action: 'website.migration.rollback_binding', resourceType: 'website_migration', resourceId: 'binding' };
   if (method === 'POST' && pathname === '/api/websites/migration/finalize') return { action: 'website.migration.finalize', resourceType: 'website_migration', resourceId: 'policy' };
   if (method === 'POST' && pathname === '/api/websites/migration/rollback') return { action: 'website.migration.rollback', resourceType: 'website_migration', resourceId: 'policy' };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/update-preview$/)) && method === 'POST') return { action: 'website.update.preview', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)$/)) && method === 'PATCH') return { action: 'website.update', resourceType: 'website', resourceId: parts[0] };
   if (method === 'POST' && pathname === '/api/applications') return { action: 'application.create', resourceType: 'application', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/domains') return { action: 'domain.create', resourceType: 'domain', resourceId: 'new' };
   if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/deploy$/)) && method === 'POST') return { action: 'application.deploy', resourceType: 'application', resourceId: parts[0] };

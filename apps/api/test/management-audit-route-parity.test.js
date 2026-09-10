@@ -73,6 +73,12 @@ test('Website creation and migration mutations are part of common management aud
     const file = route === '/api/websites' ? 'website-http.js' : 'website-migration-http.js';
     assert.ok(routes.some((entry) => entry.file === file && entry.method === 'POST' && entry.route === route));
   }
+  assert.deepEqual(classifyManagementMutation('POST', '/api/websites/website-1/update-preview'), {
+    action: 'website.update.preview', resourceType: 'website', resourceId: 'website-1',
+  });
+  assert.deepEqual(classifyManagementMutation('PATCH', '/api/websites/website-1'), {
+    action: 'website.update', resourceType: 'website', resourceId: 'website-1',
+  });
 });
 
 test('legacy agent transport and auth/user/audit handlers are intentionally outside management route discovery', () => {

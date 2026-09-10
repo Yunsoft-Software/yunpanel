@@ -1,10 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { isIP } from 'node:net';
 import path from 'node:path';
+import { domainToASCII } from 'node:url';
 import { assertUuid } from '@yunpanel/shared';
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const RUNTIME_TYPES = new Set(['static', 'node', 'proxy']);
+const UPDATE_FIELDS = new Set(['name', 'applicationId', 'runtimeType', 'proxyTarget']);
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const STATIC_ROOT = '/var/www/yunpanel/apps';
 const NODE_ROOT = '/var/lib/yunpanel/apps';
@@ -33,6 +37,56 @@ function name(value) {
     throw new WebsiteRegistryError('invalid_website_name', 'Website name must be a printable string up to 120 characters');
   }
   return value.trim();
+}
+
+function proxyHost(value) {
+  if (typeof value !== 'string' || value.trim().length < 1 || value.trim().length > 253
+    || /[\u0000-\u0020\u007f]/.test(value)) {
+    throw new WebsiteRegistryError('invalid_website_proxy_host', 'Proxy host must be an IP address or DNS hostname without a URL scheme or path');
+  }
+  const trimmed = value.trim();
+  const bracketed = trimmed.startsWith('[') && trimmed.endsWith(']');
+  if ((trimmed.includes('[') || trimmed.includes(']')) && !bracketed) {
+    throw new WebsiteRegistryError('invalid_website_proxy_host', 'Proxy host must be an IP address or DNS hostname without a URL scheme or path');
+  }
+  const input = bracketed ? trimmed.slice(1, -1) : trimmed;
+  const ipVersion = isIP(input);
+  if (ipVersion === 4) return input;
+  if (ipVersion === 6) return new URL(`http://[${input}]/`).hostname.slice(1, -1);
+  if (/[/:?#@[\]]/.test(input)) {
+    throw new WebsiteRegistryError('invalid_website_proxy_host', 'Proxy host must be an IP address or DNS hostname without a URL scheme or path');
+  }
+  const ascii = domainToASCII(input).toLowerCase().replace(/\.$/, '');
+  if (!ascii || ascii.length > 253 || ascii.split('.').some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) {
+    throw new WebsiteRegistryError('invalid_website_proxy_host', 'Proxy host must be an IP address or DNS hostname without a URL scheme or path');
+  }
+  return ascii;
+}
+
+function proxyTarget(value, { persisted = false } = {}) {
+  if (value === null) return null;
+  const allowed = new Set(['host', 'port', 'websocket']);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).some((key) => !allowed.has(key))
+    || (persisted && Object.keys(value).length !== allowed.size)) {
+    throw new WebsiteRegistryError('invalid_website_proxy_target', 'Proxy target must contain only host, port and websocket');
+  }
+  if (!Number.isInteger(value.port) || value.port < 1024 || value.port > 65535) {
+    throw new WebsiteRegistryError('invalid_website_proxy_port', 'Proxy port must be between 1024 and 65535');
+  }
+  if (value.websocket !== undefined && typeof value.websocket !== 'boolean') {
+    throw new WebsiteRegistryError('invalid_website_proxy_websocket', 'Proxy websocket must be a boolean');
+  }
+  return Object.freeze({ host: proxyHost(value.host), port: value.port, websocket: value.websocket !== false });
+}
+
+function websiteUpdateFingerprint(plan) {
+  return createHash('sha256').update(JSON.stringify({
+    version: plan.version,
+    websiteId: plan.websiteId,
+    currentRevision: plan.currentRevision,
+    nextWebsite: plan.nextWebsite,
+  })).digest('hex');
 }
 
 function appUnixUser(applicationId) {
@@ -81,12 +135,16 @@ function applicationBinding(application, serverId) {
 }
 
 function publicWebsite(website) {
-  return Object.freeze({ ...website });
+  return Object.freeze({ ...website, proxyTarget: website.proxyTarget ? Object.freeze({ ...website.proxyTarget }) : null });
 }
 
-function validatePersistedWebsite(value) {
+function validatePersistedWebsite(value, sourceVersion = STORE_VERSION) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid website registry entry');
   const allowed = new Set(['id', 'serverId', 'name', 'applicationId', 'runtimeType', 'documentRoot', 'unixUser', 'createdAt', 'updatedAt']);
+  if (sourceVersion >= 2) {
+    allowed.add('revision');
+    allowed.add('proxyTarget');
+  }
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('invalid website registry entry');
   const id = uuid(value.id, 'websiteId');
   const serverId = uuid(value.serverId, 'serverId');
@@ -95,13 +153,18 @@ function validatePersistedWebsite(value) {
   const createdAt = typeof value.createdAt === 'string' && Number.isFinite(Date.parse(value.createdAt)) ? value.createdAt : null;
   const updatedAt = typeof value.updatedAt === 'string' && Number.isFinite(Date.parse(value.updatedAt)) ? value.updatedAt : null;
   if (!createdAt || !updatedAt) throw new Error('invalid website registry entry');
+  const revision = sourceVersion === 1 ? 1 : value.revision;
+  if (!Number.isSafeInteger(revision) || revision < 1) throw new Error('invalid website registry entry');
 
   let applicationId = null;
   let documentRoot = null;
   let unixUser = null;
+  let normalizedProxyTarget = null;
   if (runtimeType === 'proxy') {
     if (value.applicationId !== null || value.documentRoot !== null || value.unixUser !== null) throw new Error('invalid website registry entry');
+    normalizedProxyTarget = sourceVersion === 1 ? null : proxyTarget(value.proxyTarget, { persisted: true });
   } else {
+    if (sourceVersion >= 2 && value.proxyTarget !== null) throw new Error('invalid website registry entry');
     applicationId = uuid(value.applicationId, 'applicationId');
     const expectedRoot = runtimeType === 'static'
       ? path.posix.join(STATIC_ROOT, applicationId, 'current')
@@ -118,6 +181,8 @@ function validatePersistedWebsite(value) {
     runtimeType,
     documentRoot,
     unixUser,
+    proxyTarget: normalizedProxyTarget,
+    revision,
     createdAt,
     updatedAt,
   };
@@ -177,8 +242,9 @@ export function createWebsiteRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.websites)) throw new Error('unsupported or invalid website registry state');
-        const websites = parsed.websites.map(validatePersistedWebsite);
+        if (![1, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.websites)) throw new Error('unsupported or invalid website registry state');
+        const sourceVersion = parsed.version;
+        const websites = parsed.websites.map((website) => validatePersistedWebsite(website, sourceVersion));
         const ids = new Set();
         const applications = new Set();
         for (const website of websites) {
@@ -191,6 +257,7 @@ export function createWebsiteRegistry({
         }
         await validatePersistedReferences(websites);
         state = { version: STORE_VERSION, websites };
+        if (sourceVersion !== STORE_VERSION) await persist();
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
       }
@@ -226,7 +293,9 @@ export function createWebsiteRegistry({
         && existingById.applicationId === binding.applicationId
         && existingById.runtimeType === binding.runtimeType
         && existingById.documentRoot === binding.documentRoot
-        && existingById.unixUser === binding.unixUser;
+        && existingById.unixUser === binding.unixUser
+        && existingById.proxyTarget === null
+        && existingById.revision === 1;
       if (!exact) throw new WebsiteRegistryError('migration_website_identity_conflict', 'Migration Website identity conflicts with existing state', 409);
       return publicWebsite(existingById);
     }
@@ -240,6 +309,8 @@ export function createWebsiteRegistry({
       serverId: normalizedServerId,
       name: normalizedName,
       ...binding,
+      proxyTarget: null,
+      revision: 1,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -248,7 +319,7 @@ export function createWebsiteRegistry({
     return publicWebsite(website);
   }
 
-  async function createWebsite({ serverId, name: displayName, applicationId = null, runtimeType = null } = {}) {
+  async function createWebsite({ serverId, name: displayName, applicationId = null, runtimeType = null, proxyTarget: requestedProxyTarget = null } = {}) {
     await ensureInitialized();
     if (applicationId == null) {
       const normalizedServerId = await requireServer(serverId);
@@ -262,6 +333,8 @@ export function createWebsiteRegistry({
         runtimeType: 'proxy',
         documentRoot: null,
         unixUser: null,
+        proxyTarget: proxyTarget(requestedProxyTarget),
+        revision: 1,
         createdAt: timestamp,
         updatedAt: timestamp,
       };
@@ -269,7 +342,121 @@ export function createWebsiteRegistry({
       await persist();
       return publicWebsite(website);
     }
+    if (requestedProxyTarget !== null) {
+      throw new WebsiteRegistryError('website_proxy_target_not_applicable', 'Application-backed Websites cannot define a proxy target');
+    }
     return createApplicationBackedWebsite({ serverId, displayName, applicationId, runtimeType });
+  }
+
+  function requireWebsite(websiteId) {
+    const id = uuid(websiteId, 'websiteId');
+    const website = state.websites.find((candidate) => candidate.id === id);
+    if (!website) throw new WebsiteRegistryError('website_not_found', 'Website not found', 404);
+    return website;
+  }
+
+  function assertUpdateChanges(changes) {
+    if (!changes || typeof changes !== 'object' || Array.isArray(changes)
+      || Object.keys(changes).length === 0 || Object.keys(changes).some((key) => !UPDATE_FIELDS.has(key))) {
+      throw new WebsiteRegistryError('invalid_website_update', 'Website changes must contain only name, applicationId, runtimeType or proxyTarget');
+    }
+    return changes;
+  }
+
+  async function previewWebsiteUpdate(websiteId, requestedChanges) {
+    await ensureInitialized();
+    const website = requireWebsite(websiteId);
+    const changes = assertUpdateChanges(requestedChanges);
+    const hasApplicationId = Object.hasOwn(changes, 'applicationId');
+    const hasRuntimeType = Object.hasOwn(changes, 'runtimeType');
+    const bindingRequested = hasApplicationId || hasRuntimeType;
+    const next = {
+      name: Object.hasOwn(changes, 'name') ? name(changes.name) : website.name,
+      applicationId: website.applicationId,
+      runtimeType: website.runtimeType,
+      documentRoot: website.documentRoot,
+      unixUser: website.unixUser,
+      proxyTarget: website.proxyTarget ? { ...website.proxyTarget } : null,
+    };
+
+    if (hasApplicationId) next.applicationId = changes.applicationId == null ? null : uuid(changes.applicationId, 'applicationId');
+    if (hasRuntimeType) {
+      if (!RUNTIME_TYPES.has(changes.runtimeType)) throw new WebsiteRegistryError('invalid_website_runtime', 'Website runtimeType must be static, node or proxy');
+      next.runtimeType = changes.runtimeType;
+    } else if (hasApplicationId) {
+      next.runtimeType = next.applicationId === null ? 'proxy' : next.runtimeType;
+    }
+
+    if (bindingRequested) {
+      if (next.runtimeType === 'proxy') {
+        if (next.applicationId !== null) {
+          throw new WebsiteRegistryError('website_proxy_application_conflict', 'Switching to proxy requires applicationId to be explicitly null');
+        }
+        next.documentRoot = null;
+        next.unixUser = null;
+        if (website.runtimeType !== 'proxy') next.proxyTarget = null;
+      } else {
+        if (next.applicationId === null) throw new WebsiteRegistryError('website_application_required', 'Static and Node websites require an application binding');
+        const application = await getApplication(next.applicationId);
+        const binding = applicationBinding(application, website.serverId);
+        if (binding.runtimeType !== next.runtimeType) {
+          throw new WebsiteRegistryError('website_runtime_mismatch', 'Website runtime does not match the bound application', 409);
+        }
+        const conflict = state.websites.find((candidate) => candidate.id !== website.id && candidate.applicationId === binding.applicationId);
+        if (conflict) throw new WebsiteRegistryError('application_already_bound', 'Application is already bound to a Website', 409);
+        Object.assign(next, binding, { proxyTarget: null });
+      }
+    }
+
+    if (Object.hasOwn(changes, 'proxyTarget')) {
+      if (next.runtimeType !== 'proxy') {
+        throw new WebsiteRegistryError('website_proxy_target_not_applicable', 'Proxy target can be changed only for proxy Websites');
+      }
+      next.proxyTarget = proxyTarget(changes.proxyTarget);
+    }
+
+    const nameChanged = next.name !== website.name;
+    const bindingChanged = next.applicationId !== website.applicationId
+      || next.runtimeType !== website.runtimeType
+      || next.documentRoot !== website.documentRoot
+      || next.unixUser !== website.unixUser;
+    const proxyTargetChanged = JSON.stringify(next.proxyTarget) !== JSON.stringify(website.proxyTarget);
+    if (!nameChanged && !bindingChanged && !proxyTargetChanged) {
+      throw new WebsiteRegistryError('website_update_no_changes', 'Website update does not change current state', 409);
+    }
+
+    const plan = {
+      version: 1,
+      websiteId: website.id,
+      currentRevision: website.revision,
+      nextWebsite: Object.freeze(next),
+      impact: Object.freeze({ nameChanged, bindingChanged, proxyTargetChanged }),
+    };
+    return Object.freeze({ ...plan, fingerprint: websiteUpdateFingerprint(plan) });
+  }
+
+  async function updateWebsite({ websiteId, expectedRevision, changes, previewFingerprint } = {}) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new WebsiteRegistryError('invalid_website_revision', 'A positive Website revision is required');
+    }
+    if (typeof previewFingerprint !== 'string' || !SHA256_PATTERN.test(previewFingerprint)) {
+      throw new WebsiteRegistryError('invalid_website_update_fingerprint', 'A current Website update fingerprint is required');
+    }
+    const plan = await previewWebsiteUpdate(websiteId, changes);
+    if (plan.currentRevision !== expectedRevision) {
+      throw new WebsiteRegistryError('website_revision_conflict', 'Website changed after preview; request a new preview', 409);
+    }
+    if (plan.fingerprint !== previewFingerprint) {
+      throw new WebsiteRegistryError('website_update_preview_stale', 'Website update preview is stale', 409);
+    }
+    const current = requireWebsite(plan.websiteId);
+    if (current.revision !== expectedRevision) {
+      throw new WebsiteRegistryError('website_revision_conflict', 'Website changed after preview; request a new preview', 409);
+    }
+    const timestamp = new Date(now()).toISOString();
+    Object.assign(current, plan.nextWebsite, { revision: expectedRevision + 1, updatedAt: timestamp });
+    await persist();
+    return publicWebsite(current);
   }
 
   async function createMigrationWebsite({ domainId, serverId, name: displayName, applicationId } = {}) {
@@ -305,7 +492,9 @@ export function createWebsiteRegistry({
       && website.applicationId === normalizedApplicationId
       && website.runtimeType === binding.runtimeType
       && website.documentRoot === binding.documentRoot
-      && website.unixUser === binding.unixUser;
+      && website.unixUser === binding.unixUser
+      && website.proxyTarget === null
+      && website.revision === 1;
     if (!exact) {
       throw new WebsiteRegistryError('migration_website_delete_state_mismatch', 'Migration Website state does not match rollback identity', 409);
     }
@@ -332,6 +521,8 @@ export function createWebsiteRegistry({
   return Object.freeze({
     init,
     createWebsite,
+    previewWebsiteUpdate,
+    updateWebsite,
     createMigrationWebsite,
     deleteMigrationWebsite,
     getWebsite,
@@ -345,5 +536,8 @@ export const websiteRegistryInternals = Object.freeze({
   appUnixUser,
   migrationWebsiteId,
   applicationBinding,
+  proxyHost,
+  proxyTarget,
+  websiteUpdateFingerprint,
   validatePersistedWebsite,
 });
