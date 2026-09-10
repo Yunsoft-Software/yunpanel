@@ -11,9 +11,8 @@ Hedef: site merkezli enterprise hosting paneli, açık domain/subdomain hiyerar�
 - [ ] MFA/oturum için gerçek React tarayıcı otomasyonu ekle: iki sekme, gecikmiş istek, kayıp MFA cevabı, geri yüklenen sayfa, recovery kodu onayı, modal/focus, idle/absolute süre ve keep-alive davranışını kapsa.
 - [ ] WebSocket/SSE/terminal eklendiğinde HTTP ile aynı session, rol, Origin ve Owner MFA sınırını uygula. Logout, parola/MFA/rol değişimi, kullanıcı disable/delete ve session revoke açık bağlantı/PTY yetkisini derhal düşürsün.
 - [ ] IP allowlist'i ancak gerçek HTTPS/proxy kabulünden sonra isteğe bağlı ek ağ kontrolüne dönüştür. Trusted-proxy sözleşmesi, gerçek istemci IP'sine göre rate limit ve spoof testleri olmadan mevcut korumayı kaldırma.
-- [ ] Common audit foundation artık auth SQLite içinde bounded `actor/action/resource/outcome/code/time` modeli, auth/MFA/user lifecycle dual-write, Owner-only `/api/audit`, authenticated management mutation acceptance, private job→actor linki, async terminal completion/cancel ve packaged recovery terminal handoff'unu kapsıyor. Kalan audit geliştirmesi: management mutation route coverage'ını source parity guard ile eksiksiz tut; audit sorgusuna action/outcome/time filtrelerini ve job detail stage/safe-log ilişkisini ekle. Terminal geliştirildiğinde yalnız open/close/session metadata'sını aynı modele bağla; parola, cookie, env değeri, MFA secretı, request/response body veya ham terminal çıktısı audit'e yazılmayacak.
 
-**Kabul:** Kalan native/browser/canlı kabul işleri `todo.md` içinde. Güvenlik zinciri doğrulanmadan root/terminal public sürümü açılmaz.
+**Kabul:** Kalan native/browser/canlı kabul işleri `todo.md` içinde. Güvenlik zinciri doğrulanmadan root/terminal public sürümü açılmaz. Common audit foundation; bounded auth-SQLite event modeli, auth/MFA/user lifecycle, Owner-only read API, management mutation acceptance, route parity, async job actor/outcome, packaged recovery handoff ve actor/resource/action/outcome/time filtreleriyle kaynak seviyesinde tamamlandı; gerçek Node24/HTTPS/package kabulü `todo.md` T-AUDIT altında.
 
 ## B. P1 — Agentless yerel backend geçişinde kalan işler
 
@@ -91,7 +90,7 @@ DB foundation MySQL/MariaDB socket detection, non-system DB inventory/size, crea
 - [ ] Şifreli application/config/env/DB/volume/mail backup, local/S3-compatible target, retention/checksum, restore preview/progress, pre-restore backup ve outage handling geliştir. Agentless migration snapshot/restore-staging mekanizmasını genel kullanıcı backup ürünü yerine kullanma.
 - [ ] Site cron: user/cwd/env/timezone/enable-disable/last-run/output. Site işleri site user, sistem işleri açık Owner/Server bağlamında çalışsın.
 - [ ] Gerçek metric history, inode/disk threshold, service/app events, deploy/backup/SSL notifications ve bounded log download backend'ini ekle. Unknown/stale metric sıfır veya yeşil sayılmasın.
-- [ ] Job detail/audit sorgu backend'ini tamamla: job stage, bounded safe error/log, action/outcome/time araması ve filtreleme, resource linkleri, cancel/retry. Mevcut common audit actor/resource kayıtlarını tekrar tasarlama; riskli retry yalnız idempotency + resource lock şartıyla çalışsın.
+- [ ] Job detail/audit sorgu backend'ini tamamla: job stage, bounded safe error/log, resource linkleri, cancel/retry. Mevcut common audit actor/resource/action/outcome/time filtrelerini tekrar tasarlama; riskli retry yalnız idempotency + resource lock şartıyla çalışsın.
 - [ ] Plesk read-only importer, external-managed state ve Passenger/static/Node/DB/Docker/domain/cron/mail migration + per-resource rollback araçlarını tamamla.
 
 ## J. P0–P3 — Test, migration ve yayın kapıları
