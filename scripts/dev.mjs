@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process';
 
 const processes = [
-  { name: 'agent', args: ['run', 'dev:agent'] },
   { name: 'api', args: ['run', 'dev:api'] },
   { name: 'web', args: ['run', 'dev:web'] },
 ];
@@ -21,10 +20,7 @@ function stopAll(signal = 'SIGTERM') {
 for (const processConfig of processes) {
   const child = spawn('npm', processConfig.args, {
     stdio: 'inherit',
-    env: {
-      ...process.env,
-      YUN_AGENT_MODE: process.env.YUN_AGENT_MODE ?? 'development',
-    },
+    env: process.env,
   });
 
   children.set(processConfig.name, child);
