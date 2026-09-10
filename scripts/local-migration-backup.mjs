@@ -56,12 +56,19 @@ function formatResult(result, action) {
 }
 
 function formatPreview(result) {
+  const archive = result.archiveInspection;
   const identity = result.identityComparison;
   const lines = [
     'action=preview',
     'destructive=false',
     `backupDirectory=${result.backupDirectory}`,
     `sha256=${result.sha256}`,
+    `archiveMembers=${archive.counts.total}`,
+    `archiveFiles=${archive.counts.files}`,
+    `archiveDirectories=${archive.counts.directories}`,
+    `archiveSymlinks=${archive.counts.symlinks}`,
+    `archiveHardlinks=${archive.counts.hardlinks}`,
+    'archiveLinksSafe=true',
     `restoreTargets=${result.counts.restore}`,
     `identityReferences=${result.counts.identityReferences}`,
     `preservedCurrent=${result.counts.preserved}`,
@@ -92,12 +99,23 @@ function formatPreview(result) {
   return lines.join('\n');
 }
 
+function validArchivePreview(archive, result, directory) {
+  if (!archive || archive.destructive !== false || archive.linksSafe !== true
+    || archive.backupDirectory !== directory || archive.sha256 !== result.sha256
+    || !archive.counts || typeof archive.counts !== 'object') return false;
+  for (const key of ['total', 'files', 'directories', 'symlinks', 'hardlinks']) {
+    if (!Number.isInteger(archive.counts[key]) || archive.counts[key] < 0) return false;
+  }
+  return archive.counts.files + archive.counts.directories + archive.counts.symlinks + archive.counts.hardlinks === archive.counts.total;
+}
+
 function validIdentityPreview(identity, result, directory) {
   if (!identity || identity.destructive !== false || identity.backupDirectory !== directory || identity.sha256 !== result.sha256
     || !Number.isInteger(identity.snapshotUsers) || !Number.isInteger(identity.currentUsers)
     || !identity.counts || !Array.isArray(identity.identities)) return false;
-  return ['match', 'drift', 'missingCurrent', 'addedCurrent']
-    .every((key) => Number.isInteger(identity.counts[key]) && identity.counts[key] >= 0);
+  if (!['match', 'drift', 'missingCurrent', 'addedCurrent']
+    .every((key) => Number.isInteger(identity.counts[key]) && identity.counts[key] >= 0)) return false;
+  return identity.counts.match + identity.counts.drift + identity.counts.missingCurrent + identity.counts.addedCurrent === identity.identities.length;
 }
 
 export async function runLocalMigrationBackupCli({
@@ -123,6 +141,7 @@ export async function runLocalMigrationBackupCli({
     const result = await previewRestore({ backupDirectory: directory, verifyBackup });
     if (!result || result.destructive !== false || result.backupDirectory !== directory
       || !result.counts || !Array.isArray(result.targets) || typeof result.sha256 !== 'string'
+      || !validArchivePreview(result.archiveInspection, result, directory)
       || !validIdentityPreview(result.identityComparison, result, directory)) {
       throw new Error('Migration restore preview result is invalid');
     }
@@ -162,5 +181,6 @@ export const localMigrationBackupCliInternals = Object.freeze({
   backupRoot: BACKUP_ROOT,
   formatResult,
   formatPreview,
+  validArchivePreview,
   validIdentityPreview,
 });
