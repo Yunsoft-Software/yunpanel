@@ -8,6 +8,7 @@ import {
   createLocalServerForRuntime,
   inspectLocalServerMigration,
   releaseLocalServerFromRuntime,
+  validateLocalServerRuntime,
 } from './local-server-migration.js';
 import { createServerRegistry } from './server-registry.js';
 
@@ -91,8 +92,8 @@ export function createMigrationServiceStatus({
 }
 
 function requireAction(action) {
-  if (!['status', 'create', 'bind', 'release'].includes(action)) {
-    throw new LocalMigrationCliError('invalid_migration_action', 'Migration action must be status, create, bind or release');
+  if (!['status', 'validate', 'create', 'bind', 'release'].includes(action)) {
+    throw new LocalMigrationCliError('invalid_migration_action', 'Migration action must be status, validate, create, bind or release');
   }
   return action;
 }
@@ -111,7 +112,7 @@ export async function runLocalMigrationCommand({
   serviceStatus = createMigrationServiceStatus(),
 } = {}) {
   const safeAction = requireAction(action);
-  if (safeAction !== 'status' && confirm !== true) {
+  if (!['status', 'validate'].includes(safeAction) && confirm !== true) {
     throw new LocalMigrationCliError('migration_confirmation_required', `Use --confirm to ${safeAction} local runtime ownership`);
   }
   if (typeof registryFactory !== 'function' || typeof jobRegistryFactory !== 'function' || typeof serviceStatus !== 'function') {
@@ -125,6 +126,10 @@ export async function runLocalMigrationCommand({
   if (safeAction === 'status') {
     const status = await inspectLocalServerMigration(input);
     return Object.freeze({ action: safeAction, ...status, statePaths: paths });
+  }
+  if (safeAction === 'validate') {
+    const validation = await validateLocalServerRuntime(input);
+    return Object.freeze({ action: safeAction, ...validation, statePaths: paths });
   }
 
   let server;
