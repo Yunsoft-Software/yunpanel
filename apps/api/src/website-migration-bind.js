@@ -1,0 +1,66 @@
+import { assertUuid } from '@yunpanel/shared';
+import { previewWebsiteMigration } from './website-migration-preview.js';
+
+export class WebsiteMigrationBindError extends Error {
+  constructor(code, message, status = 409) {
+    super(message);
+    this.name = 'WebsiteMigrationBindError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+function uuid(value, field) {
+  try { return assertUuid(value, field); }
+  catch { throw new WebsiteMigrationBindError('website_migration_binding_invalid', `${field} is invalid`, 400); }
+}
+
+export async function bindLegacyDomainToWebsite({
+  domainId,
+  websiteId,
+  domainRegistry,
+  websiteRegistry,
+  applicationRegistry,
+  preview = previewWebsiteMigration,
+} = {}) {
+  for (const [dependency, method] of [
+    [domainRegistry, 'listDomains'],
+    [domainRegistry, 'bindWebsite'],
+    [websiteRegistry, 'listWebsites'],
+    [applicationRegistry, 'listApplications'],
+  ]) {
+    if (!dependency || typeof dependency[method] !== 'function') {
+      throw new WebsiteMigrationBindError('website_migration_dependencies_invalid', 'Website migration dependencies are invalid', 503);
+    }
+  }
+  if (typeof preview !== 'function') throw new WebsiteMigrationBindError('website_migration_dependencies_invalid', 'Website migration preview is unavailable', 503);
+
+  const normalizedDomainId = uuid(domainId, 'domainId');
+  const normalizedWebsiteId = uuid(websiteId, 'websiteId');
+  const [domains, websites, applications] = await Promise.all([
+    domainRegistry.listDomains(),
+    websiteRegistry.listWebsites(),
+    applicationRegistry.listApplications(),
+  ]);
+  const plan = preview({ domains, websites, applications });
+  const item = plan.items.find((candidate) => candidate.domainId === normalizedDomainId);
+  if (!item) throw new WebsiteMigrationBindError('website_migration_domain_not_found', 'Domain is not present in the migration plan', 404);
+
+  if (item.status === 'already_bound') {
+    if (item.websiteId !== normalizedWebsiteId) {
+      throw new WebsiteMigrationBindError('website_migration_binding_conflict', 'Domain is already bound to a different Website');
+    }
+    const domain = domains.find((candidate) => candidate.id.toLowerCase() === normalizedDomainId);
+    return Object.freeze({ migrated: false, domain, websiteId: normalizedWebsiteId, previewVersion: plan.version });
+  }
+
+  if (item.status !== 'ready' || item.action !== 'bind_existing_website' || item.websiteId !== normalizedWebsiteId) {
+    throw new WebsiteMigrationBindError('website_migration_binding_not_ready', 'Migration preview does not authorize this existing Website binding');
+  }
+
+  const domain = await domainRegistry.bindWebsite(normalizedDomainId, normalizedWebsiteId);
+  if (!domain || domain.id !== normalizedDomainId || domain.websiteId !== normalizedWebsiteId) {
+    throw new WebsiteMigrationBindError('website_migration_binding_result_invalid', 'Domain Website binding result is invalid', 503);
+  }
+  return Object.freeze({ migrated: true, domain, websiteId: normalizedWebsiteId, previewVersion: plan.version });
+}
