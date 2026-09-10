@@ -21,6 +21,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_STAGE_ROOT = '/var/backups/yunpanel/.restore-staging';
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_STAGE_MEMBERS = localMigrationArchiveInspectionInternals.maxMembers;
+const METADATA_MARKERS = new Set([null, '+', '*', '.']);
 
 export class LocalMigrationRestoreStageError extends Error {
   constructor(code, message) {
@@ -46,12 +47,21 @@ function insideArchiveRoot(target, rootPath) {
   return target === root || target.startsWith(`${root}/`);
 }
 
+function validMemberMetadata(member) {
+  return Number.isInteger(member.uid) && member.uid >= 0 && member.uid <= 0xffff_ffff
+    && Number.isInteger(member.gid) && member.gid >= 0 && member.gid <= 0xffff_ffff
+    && Number.isInteger(member.mode) && member.mode >= 0 && member.mode <= 0o7777
+    && METADATA_MARKERS.has(member.metadataMarker);
+}
+
 function validatePreview(preview, directory) {
   if (!preview || preview.destructive !== false || preview.backupDirectory !== directory
     || preview.archivePath !== path.join(directory, 'state.tar')
     || preview.manifestPath !== path.join(directory, 'manifest.json')
     || typeof preview.sha256 !== 'string' || !HASH_PATTERN.test(preview.sha256)
     || !preview.archiveInspection || preview.archiveInspection.linksSafe !== true
+    || preview.archiveInspection.ownershipMetadata !== true
+    || preview.archiveInspection.extendedMetadataValidated !== false
     || preview.archiveInspection.destructive !== false
     || preview.archiveInspection.backupDirectory !== directory
     || preview.archiveInspection.sha256 !== preview.sha256
@@ -65,7 +75,7 @@ function validatePreview(preview, directory) {
   const members = preview.archiveInspection.members.map((member) => {
     if (!member || typeof member.name !== 'string' || !['-', 'd', 'l', 'h'].includes(member.type)
       || typeof member.root !== 'string' || !allowedRoots.has(member.root)
-      || seen.has(member.name)) {
+      || seen.has(member.name) || !validMemberMetadata(member)) {
       throw new LocalMigrationRestoreStageError('migration_restore_stage_preview_invalid', 'Migration restore preview contains invalid archive member metadata');
     }
     const name = localMigrationArchiveInspectionInternals.normalizeMemberName(member.name);
@@ -79,14 +89,25 @@ function validatePreview(preview, directory) {
       if (!insideArchiveRoot(resolvedLinkTarget, member.root)) {
         throw new LocalMigrationRestoreStageError('migration_restore_stage_preview_invalid', 'Migration restore preview contains a link outside its verified source root');
       }
+    } else if (member.resolvedLinkTarget !== null) {
+      throw new LocalMigrationRestoreStageError('migration_restore_stage_preview_invalid', 'Migration restore preview contains unexpected link metadata');
     }
     return Object.freeze({
       name,
       type: member.type,
       root: member.root,
       resolvedLinkTarget,
+      uid: member.uid,
+      gid: member.gid,
+      mode: member.mode,
+      metadataMarker: member.metadataMarker,
     });
   });
+  const extendedMetadata = members.filter((member) => member.metadataMarker !== null).length;
+  if (!Number.isInteger(preview.archiveInspection.counts.extendedMetadata)
+    || preview.archiveInspection.counts.extendedMetadata !== extendedMetadata) {
+    throw new LocalMigrationRestoreStageError('migration_restore_stage_preview_invalid', 'Migration restore preview extended metadata count is invalid');
+  }
   return Object.freeze(members);
 }
 
@@ -278,6 +299,9 @@ export async function stageLocalMigrationRestore({
       sha256: preview.sha256,
       stageDirectory: resolvedStage,
       members: validation.members,
+      ownershipMetadata: true,
+      extendedMetadata: members.filter((member) => member.metadataMarker !== null).length,
+      extendedMetadataValidated: false,
       liveMutation: false,
       destructive: false,
       validated: true,
@@ -293,6 +317,7 @@ export const localMigrationRestoreStageInternals = Object.freeze({
   defaultStageRoot: DEFAULT_STAGE_ROOT,
   maxStageMembers: MAX_STAGE_MEMBERS,
   normalizeStageRoot,
+  validMemberMetadata,
   validatePreview,
   actualType,
   collectStageEntries,
