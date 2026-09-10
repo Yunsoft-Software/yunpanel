@@ -25,21 +25,23 @@ The default launcher is agentless and starts only:
 
 Vite proxies `/api/*` requests to the API during development.
 
-The privileged local executor is opt-in. Without `YUNPANEL_LOCAL_SERVER_ID`, the API starts normally but does not claim local host jobs. Use the guarded local-runtime bootstrap/migration tooling before assigning a real server identity; do not invent a server UUID or bypass the hostname/ownership checks.
+The privileged local executor is opt-in. Without `YUNPANEL_LOCAL_SERVER_ID`, the API starts normally but does not claim local host jobs. Use the guarded local-runtime bootstrap/migration tooling before assigning a real server identity; do not invent a server UUID or bypass hostname/ownership checks.
 
 ## Retained legacy agent development
 
-The legacy `yun-agent` remains available only for compatibility and migration/rollback validation while the acceptance gates in `todo.md` are open. It is not started by `npm run dev`.
+The legacy `yun-agent` remains available only for compatibility and migration/rollback validation while the real-host acceptance gates in `todo.md` are open. It is not started by `npm run dev`.
 
-Start it explicitly when a legacy test actually requires it:
+Start it explicitly only when a rollback/compatibility test requires an already-existing legacy identity:
 
 ```bash
 npm run dev:agent
 ```
 
-The retained daemon uses `YUN_AGENT_HOST`, `YUN_AGENT_PORT`, `YUN_AGENT_MODE` and `YUN_AGENT_TOKEN` for its local read-only HTTP surface, plus the `YUNPANEL_CONTROL_PLANE_URL` / enrollment / identity settings for the old outbound control-plane transport. Fresh agentless development does not need those values.
+The retained daemon uses `YUN_AGENT_HOST`, `YUN_AGENT_PORT`, `YUN_AGENT_MODE` and `YUN_AGENT_TOKEN` for its old local read-only HTTP surface. Existing enrolled rollback identities may additionally use `YUNPANEL_CONTROL_PLANE_URL`, `YUN_AGENT_IDENTITY_FILE`, `YUN_AGENT_HEARTBEAT_MS` and `YUN_AGENT_COMMAND_POLL_MS` for the retained heartbeat/command/environment/result channel.
 
-Production must never rely on the development fallback agent token. The retained transport is temporary compatibility infrastructure; new host functionality belongs in `@yunpanel/host-runtime` and the local executor.
+New enrollment is retired. `YUNPANEL_ENROLLMENT_TOKEN`, `/api/servers/enroll` and first-enrollment client behavior must not be reintroduced. If the retained agent has no existing identity file, its control-plane link fails closed instead of attempting enrollment.
+
+Production must never rely on the development fallback agent token. New host functionality belongs in `@yunpanel/host-runtime` and the local executor; the retained daemon exists only until migration + rollback acceptance permits its removal.
 
 ## Application environment encryption
 
@@ -89,13 +91,7 @@ API health:
 GET http://127.0.0.1:3001/api/health
 ```
 
-The retained development compatibility inspection route is:
-
-```text
-GET http://127.0.0.1:3001/api/dev/agent/inspect
-```
-
-Despite its legacy route name, it no longer makes a loopback request to `yun-agent`; it reads the same local host inventory implementation used by the agentless runtime. It remains disabled with a 404 outside development mode and will be removed with the rest of the legacy naming surface.
+There is no `/api/dev/agent/inspect` compatibility route anymore. Development inventory should use the same local host/runtime paths as production code; do not add a loopback agent backdoor.
 
 Protected application environment metadata:
 
@@ -109,16 +105,45 @@ Secret variables are returned as metadata only; plaintext values are not returne
 
 ## Local ownership and recovery tools
 
-Fresh agentless server identity creation, existing-agent migration and durable recovery have separate guarded CLIs. The source checkout may exercise their pure logic in tests, but packaged ownership mutation is root-only and must follow `docs/local-runtime-migration.md`.
+Fresh agentless server creation, existing-enrolled migration, rollback rehearsal and durable recovery use separate guarded CLIs. Packaged ownership mutation is root-only.
 
-Important boundaries:
+Before ownership mutation, create and rehearse the exact rollback snapshot:
 
-- `local-runtime create --confirm` is for a fresh credentialless local-only identity,
-- `status/bind/release` preserves the existing enrolled identity during migration/rollback,
-- `job-recovery status` is read-only,
-- terminal reconciliation does not re-run the host mutation,
-- `recover-readonly` is limited to explicitly allowlisted side-effect-free inspections,
-- unknown outcomes for mutating jobs must not be guessed or automatically retried.
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs create --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs verify /var/backups/yunpanel/migration-<timestamp>
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs preview /var/backups/yunpanel/migration-<timestamp>
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs stage /var/backups/yunpanel/migration-<timestamp> --confirm
+```
+
+`preview` and `stage` are non-live. They validate the archive/link/type graph, `yunapp-*` Unix identity drift and private staged extraction without applying files to live `/etc` or `/var/lib`.
+
+Ownership commands:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs create --backup-dir /var/backups/yunpanel/migration-<timestamp> --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs status <server-uuid>
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs bind <server-uuid> --backup-dir /var/backups/yunpanel/migration-<timestamp> --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs release <server-uuid> --backup-dir /var/backups/yunpanel/migration-<timestamp> --confirm
+```
+
+After local ownership is configured and the API is started with the legacy agent inactive, run the read-only post-migration gate:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs validate <server-uuid>
+```
+
+`validate` checks exact local binding/hostname, current API runtime version, API active + agent inactive systemd state, idle queue, clear durable recovery, fresh local inventory/services snapshot and loopback `/api/health` success.
+
+Durable recovery starts with:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs status
+```
+
+Terminal reconciliation does not re-run a host mutation. Running recovery is limited to reviewed operation-specific paths: side-effect-free package/service/database/Node status re-inspection and evidence/receipt-backed domain, static, Node, database, managed-service, YunPanel upgrade and certificate recovery. There is no generic force-success, force-failed, blind mutation retry or manual journal-clear path.
+
+See `docs/local-runtime-migration.md` for the exact commands and evidence requirements.
 
 ## Validation
 
