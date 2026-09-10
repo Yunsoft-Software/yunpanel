@@ -269,8 +269,23 @@ function validateHardlink(member, actualEntries) {
 
 async function validateStagedTree(stageDirectory, members, dependencies) {
   const actualEntries = await collectStageEntries(stageDirectory, dependencies);
-  if (actualEntries.size !== members.length) {
+  const expectedNames = new Set(members.map((member) => member.name));
+  const implicitDirectories = new Set();
+  for (const member of members) {
+    let parent = path.posix.dirname(member.name);
+    while (parent !== '.') {
+      if (!expectedNames.has(parent)) implicitDirectories.add(parent);
+      parent = path.posix.dirname(parent);
+    }
+  }
+  const expectedEntryCount = expectedNames.size + implicitDirectories.size;
+  if (actualEntries.size !== expectedEntryCount) {
     throw new LocalMigrationRestoreStageError('migration_restore_stage_member_mismatch', 'Migration restore staged tree does not match the verified archive member count');
+  }
+  for (const directory of implicitDirectories) {
+    if (actualEntries.get(directory)?.type !== 'd') {
+      throw new LocalMigrationRestoreStageError('migration_restore_stage_member_mismatch', 'Migration restore staged tree is missing a required parent directory');
+    }
   }
   for (const member of members) {
     const actual = actualEntries.get(member.name);
@@ -280,7 +295,7 @@ async function validateStagedTree(stageDirectory, members, dependencies) {
     if (member.type === 'l') validateStagedSymlink(member, actual);
   }
   for (const member of members.filter((entry) => entry.type === 'h')) validateHardlink(member, actualEntries);
-  return Object.freeze({ members: actualEntries.size });
+  return Object.freeze({ members: members.length });
 }
 
 function defaultRunTar(args) {
