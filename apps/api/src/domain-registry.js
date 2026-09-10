@@ -45,42 +45,24 @@ function publicDomain(domain) {
 }
 
 function validateTarget(targetType, target) {
-  if (!TARGET_TYPES.has(targetType)) {
-    throw new DomainRegistryError('invalid_target_type', 'targetType must be static or proxy');
-  }
-
-  if (!target || typeof target !== 'object' || Array.isArray(target)) {
-    throw new DomainRegistryError('invalid_target', 'target must be an object');
-  }
-
+  if (!TARGET_TYPES.has(targetType)) throw new DomainRegistryError('invalid_target_type', 'targetType must be static or proxy');
+  if (!target || typeof target !== 'object' || Array.isArray(target)) throw new DomainRegistryError('invalid_target', 'target must be an object');
   if (targetType === 'static') {
     if (typeof target.root !== 'string' || target.root.length < 2 || target.root.length > 500 || /[\u0000-\u001f\u007f]/.test(target.root)) {
       throw new DomainRegistryError('invalid_static_root', 'Static target root is invalid');
     }
-    return {
-      root: target.root,
-      spaFallback: target.spaFallback !== false,
-    };
+    return { root: target.root, spaFallback: target.spaFallback !== false };
   }
-
   if (!Number.isInteger(target.upstreamPort) || target.upstreamPort < 1024 || target.upstreamPort > 65535) {
     throw new DomainRegistryError('invalid_upstream_port', 'Proxy upstreamPort must be between 1024 and 65535');
   }
-
-  return {
-    upstreamHost: '127.0.0.1',
-    upstreamPort: target.upstreamPort,
-    websocket: target.websocket !== false,
-  };
+  return { upstreamHost: '127.0.0.1', upstreamPort: target.upstreamPort, websocket: target.websocket !== false };
 }
 
 function normalizeDomains(primaryDomain, aliases) {
-  try {
-    return normalizeDomainSet(primaryDomain, aliases);
-  } catch (error) {
-    if (error instanceof DomainValidationError) {
-      throw new DomainRegistryError(error.code, error.message);
-    }
+  try { return normalizeDomainSet(primaryDomain, aliases); }
+  catch (error) {
+    if (error instanceof DomainValidationError) throw new DomainRegistryError(error.code, error.message);
     throw error;
   }
 }
@@ -95,12 +77,7 @@ function requireDomain(state, domainId) {
   return domain;
 }
 
-export function createDomainRegistry({
-  filePath = null,
-  now = () => Date.now(),
-  serverExists = async () => true,
-  getWebsite = null,
-} = {}) {
+export function createDomainRegistry({ filePath = null, now = () => Date.now(), serverExists = async () => true, getWebsite = null } = {}) {
   let state = emptyState();
   let initialized = false;
   let writeChain = Promise.resolve();
@@ -114,7 +91,6 @@ export function createDomainRegistry({
     const snapshot = JSON.stringify(state, null, 2);
     const directory = path.dirname(filePath);
     const temporaryPath = `${filePath}.${process.pid}.tmp`;
-
     writeChain = writeChain.then(async () => {
       await mkdir(directory, { recursive: true });
       await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
@@ -126,14 +102,10 @@ export function createDomainRegistry({
   async function requireWebsiteBinding(websiteId, serverId) {
     const id = normalizeWebsiteId(websiteId);
     if (id === null) return null;
-    if (typeof getWebsite !== 'function') {
-      throw new DomainRegistryError('website_registry_unavailable', 'Website registry is required for an explicit domain binding', 503);
-    }
+    if (typeof getWebsite !== 'function') throw new DomainRegistryError('website_registry_unavailable', 'Website registry is required for an explicit domain binding', 503);
     const website = await getWebsite(id);
     if (!website) throw new DomainRegistryError('website_not_found', 'Website does not exist', 404);
-    if (website.serverId !== serverId) {
-      throw new DomainRegistryError('website_server_mismatch', 'Domain and Website must belong to the same server', 409);
-    }
+    if (website.serverId !== serverId) throw new DomainRegistryError('website_server_mismatch', 'Domain and Website must belong to the same server', 409);
     return id;
   }
 
@@ -142,9 +114,7 @@ export function createDomainRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.domains)) {
-          throw new Error('unsupported or invalid domain registry state');
-        }
+        if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.domains)) throw new Error('unsupported or invalid domain registry state');
         try {
           validateDomainHierarchy(parsed.domains);
           for (const domain of parsed.domains) normalizeWebsiteId(domain.websiteId ?? null);
@@ -155,9 +125,7 @@ export function createDomainRegistry({
         state = parsed;
         state.domains.forEach(hydrateDomain);
         if (typeof getWebsite === 'function') {
-          for (const domain of state.domains) {
-            if (domain.websiteId) await requireWebsiteBinding(domain.websiteId, domain.serverId);
-          }
+          for (const domain of state.domains) if (domain.websiteId) await requireWebsiteBinding(domain.websiteId, domain.serverId);
         }
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
@@ -170,68 +138,46 @@ export function createDomainRegistry({
     if (!initialized) await init();
   }
 
-  async function createDomain({
-    serverId,
-    primaryDomain,
-    aliases = [],
-    targetType,
-    target,
-    httpsMode = 'off',
-    parentDomainId = null,
-    websiteId = null,
-  }) {
+  async function createDomain({ serverId, primaryDomain, aliases = [], targetType, target, httpsMode = 'off', parentDomainId = null, websiteId = null }) {
     await ensureInitialized();
-
-    if (typeof serverId !== 'string' || !serverId) {
-      throw new DomainRegistryError('invalid_server', 'serverId is required');
-    }
-    if (!(await serverExists(serverId))) {
-      throw new DomainRegistryError('server_not_found', 'Target server does not exist', 404);
-    }
-    if (!HTTPS_MODES.has(httpsMode)) {
-      throw new DomainRegistryError('invalid_https_mode', 'httpsMode must be off or managed');
-    }
+    if (typeof serverId !== 'string' || !serverId) throw new DomainRegistryError('invalid_server', 'serverId is required');
+    if (!(await serverExists(serverId))) throw new DomainRegistryError('server_not_found', 'Target server does not exist', 404);
+    if (!HTTPS_MODES.has(httpsMode)) throw new DomainRegistryError('invalid_https_mode', 'httpsMode must be off or managed');
 
     const normalizedWebsiteId = await requireWebsiteBinding(websiteId, serverId);
     const normalized = normalizeDomains(primaryDomain, aliases);
-    try {
-      validateDomainParent(state.domains, { serverId, primaryDomain: normalized.primary, parentDomainId });
-    } catch (error) {
+    try { validateDomainParent(state.domains, { serverId, primaryDomain: normalized.primary, parentDomainId }); }
+    catch (error) {
       if (error instanceof DomainHierarchyError) throw new DomainRegistryError(error.code, error.message, error.status);
       throw error;
     }
     const requestedNames = new Set([normalized.primary, ...normalized.aliases]);
     const conflict = state.domains.find((domain) => ownedNames(domain).some((ownedName) => requestedNames.has(ownedName)));
-    if (conflict) {
-      throw new DomainRegistryError('domain_conflict', 'A domain or alias is already managed', 409);
-    }
+    if (conflict) throw new DomainRegistryError('domain_conflict', 'A domain or alias is already managed', 409);
 
     const timestamp = new Date(now()).toISOString();
     const domain = {
-      id: randomUUID(),
-      serverId,
-      websiteId: normalizedWebsiteId,
-      primaryDomain: normalized.primary,
-      parentDomainId,
-      aliases: normalized.aliases,
-      targetType,
-      target: validateTarget(targetType, target),
-      httpsMode,
-      certificateId: null,
-      state: 'draft',
-      desiredRevision: 1,
-      stagedRevision: 0,
-      stagedChecksum: null,
-      stagedConfigName: null,
-      lastStagedAt: null,
-      appliedRevision: 0,
-      lastAppliedAt: null,
-      lastError: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
+      id: randomUUID(), serverId, websiteId: normalizedWebsiteId, primaryDomain: normalized.primary, parentDomainId,
+      aliases: normalized.aliases, targetType, target: validateTarget(targetType, target), httpsMode, certificateId: null,
+      state: 'draft', desiredRevision: 1, stagedRevision: 0, stagedChecksum: null, stagedConfigName: null,
+      lastStagedAt: null, appliedRevision: 0, lastAppliedAt: null, lastError: null, createdAt: timestamp, updatedAt: timestamp,
     };
-
     state.domains.push(domain);
+    await persist();
+    return publicDomain(domain);
+  }
+
+  async function bindWebsite(domainId, websiteId) {
+    await ensureInitialized();
+    const domain = hydrateDomain(requireDomain(state, domainId));
+    const normalizedWebsiteId = await requireWebsiteBinding(websiteId, domain.serverId);
+    if (normalizedWebsiteId === null) throw new DomainRegistryError('website_binding_required', 'A Website ID is required for domain migration');
+    if (domain.websiteId === normalizedWebsiteId) return publicDomain(domain);
+    if (domain.websiteId !== null) {
+      throw new DomainRegistryError('domain_website_rebind_requires_preview', 'Changing an existing Domain Website binding requires an impact preview', 409);
+    }
+    domain.websiteId = normalizedWebsiteId;
+    domain.updatedAt = new Date(now()).toISOString();
     await persist();
     return publicDomain(domain);
   }
@@ -250,14 +196,9 @@ export function createDomainRegistry({
   async function attachCertificate(domainId, certificateId) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
-    if (domain.httpsMode !== 'managed') {
-      throw new DomainRegistryError('https_not_managed', 'Certificate can only be attached to a managed HTTPS domain', 409);
-    }
-    if (typeof certificateId !== 'string' || !certificateId) {
-      throw new DomainRegistryError('invalid_certificate', 'certificateId is required');
-    }
+    if (domain.httpsMode !== 'managed') throw new DomainRegistryError('https_not_managed', 'Certificate can only be attached to a managed HTTPS domain', 409);
+    if (typeof certificateId !== 'string' || !certificateId) throw new DomainRegistryError('invalid_certificate', 'certificateId is required');
     if (domain.certificateId === certificateId) return publicDomain(domain);
-
     domain.certificateId = certificateId;
     domain.desiredRevision += 1;
     domain.stagedRevision = 0;
@@ -274,14 +215,8 @@ export function createDomainRegistry({
   async function markStaged(domainId, { checksum, configName }) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
-
-    if (typeof checksum !== 'string' || !SHA256_PATTERN.test(checksum)) {
-      throw new DomainRegistryError('invalid_staged_checksum', 'Staged domain checksum is invalid');
-    }
-    if (typeof configName !== 'string' || configName.length < 1 || configName.length > 300) {
-      throw new DomainRegistryError('invalid_staged_config', 'Staged domain config name is invalid');
-    }
-
+    if (typeof checksum !== 'string' || !SHA256_PATTERN.test(checksum)) throw new DomainRegistryError('invalid_staged_checksum', 'Staged domain checksum is invalid');
+    if (typeof configName !== 'string' || configName.length < 1 || configName.length > 300) throw new DomainRegistryError('invalid_staged_config', 'Staged domain config name is invalid');
     const timestamp = new Date(now()).toISOString();
     domain.stagedRevision = domain.desiredRevision;
     domain.stagedChecksum = checksum;
@@ -297,14 +232,8 @@ export function createDomainRegistry({
   async function markApplied(domainId, { checksum } = {}) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
-
-    if (domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum) {
-      throw new DomainRegistryError('staged_revision_required', 'Current desired domain revision has not been staged', 409);
-    }
-    if (checksum !== domain.stagedChecksum) {
-      throw new DomainRegistryError('staged_checksum_mismatch', 'Activated checksum does not match staged desired state', 409);
-    }
-
+    if (domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum) throw new DomainRegistryError('staged_revision_required', 'Current desired domain revision has not been staged', 409);
+    if (checksum !== domain.stagedChecksum) throw new DomainRegistryError('staged_checksum_mismatch', 'Activated checksum does not match staged desired state', 409);
     const timestamp = new Date(now()).toISOString();
     domain.appliedRevision = domain.desiredRevision;
     domain.state = 'active';
@@ -318,7 +247,6 @@ export function createDomainRegistry({
   async function markFailed(domainId, errorCode) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
-
     domain.state = 'error';
     domain.lastError = typeof errorCode === 'string' ? errorCode.slice(0, 120) : 'apply_failed';
     domain.updatedAt = new Date(now()).toISOString();
@@ -326,20 +254,7 @@ export function createDomainRegistry({
     return publicDomain(domain);
   }
 
-  return {
-    init,
-    createDomain,
-    listDomains,
-    getDomain,
-    attachCertificate,
-    markStaged,
-    markApplied,
-    markFailed,
-  };
+  return { init, createDomain, bindWebsite, listDomains, getDomain, attachCertificate, markStaged, markApplied, markFailed };
 }
 
-export const domainRegistryInternals = Object.freeze({
-  storeVersion: STORE_VERSION,
-  normalizeWebsiteId,
-  hydrateDomain,
-});
+export const domainRegistryInternals = Object.freeze({ storeVersion: STORE_VERSION, normalizeWebsiteId, hydrateDomain });
