@@ -7,6 +7,7 @@ import {
   MANAGED_SERVICE_IDS,
   OPERATIONS,
 } from '@yunpanel/protocol';
+import { sanitizeDatabaseJobResult } from './database-job-result.js';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
@@ -27,6 +28,9 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.SYSTEM_SERVICE_INSTALL,
   OPERATIONS.SYSTEM_SERVICE_CONTROL,
   OPERATIONS.SYSTEM_UPGRADE,
+  OPERATIONS.DATABASE_INSPECT,
+  OPERATIONS.DATABASE_CREATE,
+  OPERATIONS.DATABASE_DELETE,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
@@ -397,8 +401,22 @@ function sanitizeManagedServiceResult(job, result) {
   throw new JobRegistryError('invalid_operation', 'Managed service operation is not supported by the async queue');
 }
 
+function sanitizeDatabaseResult(job, result) {
+  try {
+    return sanitizeDatabaseJobResult(job, result);
+  } catch (error) {
+    if (error?.code === 'invalid_job_result') {
+      throw new JobRegistryError('invalid_job_result', error.message);
+    }
+    throw error;
+  }
+}
+
 function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) return sanitizeManagedServiceResult(job, result);
+  if ([OPERATIONS.DATABASE_INSPECT, OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE].includes(job.operation)) {
+    return sanitizeDatabaseResult(job, result);
+  }
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
   }
