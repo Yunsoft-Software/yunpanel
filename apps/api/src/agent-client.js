@@ -1,37 +1,30 @@
 import { randomUUID } from 'node:crypto';
-import { OPERATIONS, createOperationEnvelope } from '@yunpanel/protocol';
+import { inspectHostInventory } from '@yunpanel/host-runtime';
+import { OPERATIONS } from '@yunpanel/protocol';
 
-const DEFAULT_AGENT_URL = 'http://127.0.0.1:4010';
-const DEV_TOKEN = 'development-only-token';
+/**
+ * Compatibility adapter for the retained development inspect route. The API no
+ * longer calls the loopback yun-agent HTTP server or reads an agent token just
+ * to inspect its own host; the privileged local runtime implementation is the
+ * single source of host inventory now.
+ */
+export async function inspectLocalAgent({ inspect = inspectHostInventory } = {}) {
+  if (typeof inspect !== 'function') throw new Error('Local host inspection adapter is invalid');
 
-function resolveAgentToken() {
-  if (process.env.YUN_AGENT_TOKEN) return process.env.YUN_AGENT_TOKEN;
-  if (process.env.NODE_ENV === 'development') return DEV_TOKEN;
-  throw new Error('YUN_AGENT_TOKEN is required outside development mode');
-}
-
-export async function inspectLocalAgent({ agentUrl = process.env.YUN_AGENT_URL ?? DEFAULT_AGENT_URL } = {}) {
-  const envelope = createOperationEnvelope({
-    id: randomUUID(),
-    operation: OPERATIONS.SERVER_INSPECT,
-    payload: {},
-  });
-
-  const response = await fetch(`${agentUrl}/v1/operations`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${resolveAgentToken()}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(envelope),
-    signal: AbortSignal.timeout(3000),
-  });
-
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message = body.error?.message ?? `Agent request failed with HTTP ${response.status}`;
-    throw new Error(message);
+  let result;
+  try {
+    result = await inspect({ mode: 'local' });
+  } catch {
+    throw new Error('Local host inspection failed');
+  }
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    throw new Error('Local host inspection returned invalid state');
   }
 
-  return body;
+  return {
+    requestId: randomUUID(),
+    operation: OPERATIONS.SERVER_INSPECT,
+    status: 'succeeded',
+    result,
+  };
 }
