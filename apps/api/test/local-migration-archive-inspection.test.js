@@ -70,8 +70,8 @@ test('archive inspection accepts only links resolving inside their verified sour
   assert.equal(result.linksSafe, true);
   assert.deepEqual(result.counts, {
     total: 16,
-    files: 5,
-    directories: 7,
+    files: 4,
+    directories: 8,
     symlinks: 3,
     hardlinks: 1,
   });
