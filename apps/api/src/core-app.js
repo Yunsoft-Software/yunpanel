@@ -118,20 +118,6 @@ export function createApp({
     });
     return response.status(202).json({ data: job });
   });
-  app.post('/api/servers/enrollment-tokens', requirePanelRouteAccess, async (request, response) => {
-    const ttlMinutes = request.body?.ttlMinutes;
-    const options = { label: request.body?.label ?? null };
-    if (ttlMinutes !== undefined) options.ttlMs = Number(ttlMinutes) * 60 * 1000;
-    return response.status(201).json({ data: await registry.issueEnrollmentToken(options) });
-  });
-  app.post('/api/servers/enroll', async (request, response) => {
-    const enrolled = await registry.enrollServer({
-      token: request.body?.token,
-      hostname: request.body?.hostname,
-      displayName: request.body?.displayName ?? null,
-    });
-    return response.status(201).json({ data: enrolled });
-  });
   app.post('/api/servers/:serverId/heartbeat', async (request, response) => {
     const server = await registry.heartbeat({
       serverId: request.params.serverId,
