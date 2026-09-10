@@ -14,18 +14,18 @@ export class AuditStoreError extends Error {
   }
 }
 
-function optionalId(value, field) {
+function optionalId(value, field, code = 'invalid_audit_event') {
   if (value == null) return null;
   if (typeof value !== 'string' || value.length < 1 || value.length > MAX_ID_LENGTH || /[\u0000-\u001f\u007f]/.test(value)) {
-    throw new AuditStoreError('invalid_audit_event', `Audit ${field} is invalid`);
+    throw new AuditStoreError(code, `Audit ${field} is invalid`);
   }
   return value;
 }
 
-function optionalToken(value, field, pattern) {
+function optionalToken(value, field, pattern, code = 'invalid_audit_event') {
   if (value == null) return null;
   if (typeof value !== 'string' || !pattern.test(value)) {
-    throw new AuditStoreError('invalid_audit_event', `Audit ${field} is invalid`);
+    throw new AuditStoreError(code, `Audit ${field} is invalid`);
   }
   return value;
 }
@@ -88,10 +88,10 @@ function normalizeJobLink(input) {
   if (Object.keys(input).some((key) => !allowed.has(key))) {
     throw new AuditStoreError('invalid_audit_job_link', 'Audit job link contains unsupported metadata');
   }
-  const jobId = optionalId(input.jobId, 'job id');
-  const actorId = optionalId(input.actorId, 'actor id');
-  const resourceType = optionalToken(input.resourceType, 'resource type', TYPE_PATTERN);
-  const resourceId = optionalId(input.resourceId, 'resource id');
+  const jobId = optionalId(input.jobId, 'job id', 'invalid_audit_job_link');
+  const actorId = optionalId(input.actorId, 'actor id', 'invalid_audit_job_link');
+  const resourceType = optionalToken(input.resourceType, 'resource type', TYPE_PATTERN, 'invalid_audit_job_link');
+  const resourceId = optionalId(input.resourceId, 'resource id', 'invalid_audit_job_link');
   if (!jobId || !actorId || typeof input.action !== 'string' || !ACTION_PATTERN.test(input.action)
     || !resourceType || !resourceId) {
     throw new AuditStoreError('invalid_audit_job_link', 'Audit job link identity is invalid');
@@ -216,10 +216,10 @@ export function createAuditStore({ db, now = Date.now } = {}) {
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
       throw new AuditStoreError('invalid_audit_pagination', 'Audit pagination is invalid');
     }
-    const actor = optionalId(actorId, 'actor id');
-    const type = optionalToken(resourceType, 'resource type', TYPE_PATTERN);
-    const resource = optionalId(resourceId, 'resource id');
-    const actionFilter = optionalToken(action, 'action', ACTION_PATTERN);
+    const actor = optionalId(actorId, 'actor id', 'invalid_audit_filter');
+    const type = optionalToken(resourceType, 'resource type', TYPE_PATTERN, 'invalid_audit_filter');
+    const resource = optionalId(resourceId, 'resource id', 'invalid_audit_filter');
+    const actionFilter = optionalToken(action, 'action', ACTION_PATTERN, 'invalid_audit_filter');
     const outcomeFilter = outcome == null ? null : (OUTCOMES.has(outcome) ? outcome : null);
     if (outcome != null && !outcomeFilter) throw new AuditStoreError('invalid_audit_filter', 'Audit outcome filter is invalid');
     const fromTime = optionalTime(from, 'from');
