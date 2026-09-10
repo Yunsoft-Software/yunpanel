@@ -4,6 +4,7 @@ import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.
 import { createLocalHostOperations } from './local-host-operations.js';
 import { resolveLocalRuntimeConfig } from './local-runtime-config.js';
 import { startLocalRuntime } from './local-runtime.js';
+import { createManagedServiceMutationReceiptStore } from './managed-service-mutation-receipt.js';
 
 export class ConfiguredLocalRuntimeError extends Error {
   constructor(code, message) {
@@ -26,6 +27,7 @@ export async function startConfiguredLocalRuntime({
   applicationEnvironmentRegistry,
   createOperations = createLocalHostOperations,
   createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
+  createManagedServiceReceipts = createManagedServiceMutationReceiptStore,
   inspectInventory = inspectHostInventory,
   inspectServices = null,
   inspectDocker = null,
@@ -40,6 +42,7 @@ export async function startConfiguredLocalRuntime({
   }
   if (typeof createOperations !== 'function'
     || typeof createDatabaseDeletionReceipts !== 'function'
+    || typeof createManagedServiceReceipts !== 'function'
     || typeof inspectInventory !== 'function'
     || (inspectServices !== null && typeof inspectServices !== 'function')
     || (inspectDocker !== null && typeof inspectDocker !== 'function')
@@ -56,15 +59,50 @@ export async function startConfiguredLocalRuntime({
   if (!databaseDeletionReceipts || typeof databaseDeletionReceipts.write !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_database_deletion_receipts_invalid', 'Local runtime database deletion receipt store is invalid');
   }
+  const managedServiceReceipts = createManagedServiceReceipts();
+  if (!managedServiceReceipts || typeof managedServiceReceipts.write !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_managed_service_receipts_invalid', 'Local runtime managed service receipt store is invalid');
+  }
 
   const recordExecutionEvidence = async ({ serverId, jobId, operation, payload, result }) => {
-    if (operation !== OPERATIONS.DATABASE_DELETE) return;
-    await databaseDeletionReceipts.write({
-      serverId,
-      jobId,
-      databaseName: payload?.name,
-      result,
-    });
+    if (operation === OPERATIONS.DATABASE_DELETE) {
+      await databaseDeletionReceipts.write({
+        serverId,
+        jobId,
+        databaseName: payload?.name,
+        result,
+      });
+      return;
+    }
+
+    if (operation === OPERATIONS.SYSTEM_SERVICE_INSTALL) {
+      if (!result || result.id !== payload?.serviceId || result.installed !== true || result.active !== true
+        || typeof result.changed !== 'boolean') {
+        throw new Error('Managed service install result is not safe recovery evidence');
+      }
+      await managedServiceReceipts.write({
+        serverId,
+        jobId,
+        operation,
+        serviceId: payload.serviceId,
+        changed: result.changed,
+      });
+      return;
+    }
+
+    if (operation === OPERATIONS.SYSTEM_SERVICE_CONTROL && payload?.action === 'restart') {
+      if (!result || result.id !== payload.serviceId || result.action !== 'restart'
+        || result.installed !== true || result.active !== true) {
+        throw new Error('Managed service restart result is not safe recovery evidence');
+      }
+      await managedServiceReceipts.write({
+        serverId,
+        jobId,
+        operation,
+        serviceId: payload.serviceId,
+        action: 'restart',
+      });
+    }
   };
 
   const snapshotProvider = async () => {
