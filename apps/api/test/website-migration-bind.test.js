@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { bindLegacyDomainToWebsite, WebsiteMigrationBindError } from '../src/website-migration-bind.js';
+import { createWebsiteMigrationLedger } from '../src/website-migration-ledger.js';
 import { previewWebsiteMigration } from '../src/website-migration-preview.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
@@ -26,7 +27,11 @@ async function fixture({ websites = [website()], applications = [app()] } = {}) 
     serverId, primaryDomain: 'api.example.com', targetType: 'proxy', target: { upstreamPort: 4301 },
   });
   return {
-    domain, domainRegistry, websites, applications,
+    domain,
+    domainRegistry,
+    migrationLedger: createWebsiteMigrationLedger(),
+    websites,
+    applications,
     websiteRegistry: { async listWebsites() { return websites.map((item) => ({ ...item })); } },
     applicationRegistry: { async listApplications() { return applications.map((item) => ({ ...item })); } },
   };
@@ -40,7 +45,7 @@ async function digestFor(f) {
 
 const code = (expected) => (error) => error instanceof WebsiteMigrationBindError && error.code === expected;
 
-async function bind(f, targetWebsiteId = websiteId, previewDigest = null) {
+async function bind(f, targetWebsiteId = websiteId, previewDigest = null, migrationLedger = f.migrationLedger) {
   return bindLegacyDomainToWebsite({
     domainId: f.domain.id,
     websiteId: targetWebsiteId,
@@ -48,38 +53,82 @@ async function bind(f, targetWebsiteId = websiteId, previewDigest = null) {
     domainRegistry: f.domainRegistry,
     websiteRegistry: f.websiteRegistry,
     applicationRegistry: f.applicationRegistry,
+    migrationLedger,
   });
 }
 
-test('exact ready preview binds legacy Domain to an existing Website once', async () => {
+test('exact ready preview journals then binds legacy Domain to an existing Website', async () => {
   const f = await fixture();
   const before = await f.domainRegistry.getDomain(f.domain.id);
   const approvedDigest = await digestFor(f);
   const result = await bind(f, websiteId, approvedDigest);
   assert.equal(result.migrated, true);
+  assert.equal(result.ledgerTracked, true);
   assert.equal(result.domain.websiteId, websiteId);
   assert.equal(result.previewDigest, approvedDigest);
   assert.equal(result.domain.desiredRevision, before.desiredRevision);
   assert.deepEqual(result.domain.target, before.target);
+  const ledger = await f.migrationLedger.get(f.domain.id);
+  assert.equal(ledger.state, 'bound');
+  assert.equal(ledger.createdWebsite, false);
+  assert.equal(ledger.bindingPreviewDigest, approvedDigest);
 
   const retry = await bind(f, websiteId, approvedDigest);
   assert.equal(retry.migrated, false);
+  assert.equal(retry.ledgerTracked, true);
   assert.equal(retry.domain.websiteId, websiteId);
-  assert.match(retry.previewDigest, /^[a-f0-9]{64}$/);
+  assert.equal((await f.migrationLedger.get(f.domain.id)).state, 'bound');
 });
 
-test('state drift after preview rejects mutation as stale', async () => {
+test('binding ledger planning failure prevents Domain mutation', async () => {
+  const f = await fixture();
+  const failure = new Error('ledger unavailable');
+  const ledger = {
+    async get() { return null; },
+    async planBinding() { throw failure; },
+    async markBound() { throw new Error('must not run'); },
+  };
+  await assert.rejects(bind(f, websiteId, await digestFor(f), ledger), (error) => error === failure);
+  assert.equal((await f.domainRegistry.getDomain(f.domain.id)).websiteId, null);
+});
+
+test('retry repairs ledger when Domain bind succeeded but terminal ledger marker was interrupted', async () => {
+  const f = await fixture();
+  const approvedDigest = await digestFor(f);
+  let failMarker = true;
+  const interrupted = {
+    get: (...args) => f.migrationLedger.get(...args),
+    planBinding: (...args) => f.migrationLedger.planBinding(...args),
+    async markBound(...args) {
+      if (failMarker) { failMarker = false; throw new Error('simulated bound marker failure'); }
+      return f.migrationLedger.markBound(...args);
+    },
+  };
+
+  await assert.rejects(bind(f, websiteId, approvedDigest, interrupted), /simulated bound marker failure/);
+  assert.equal((await f.domainRegistry.getDomain(f.domain.id)).websiteId, websiteId);
+  assert.equal((await f.migrationLedger.get(f.domain.id)).state, 'binding_planned');
+
+  const retry = await bind(f, websiteId, approvedDigest);
+  assert.equal(retry.migrated, false);
+  assert.equal(retry.ledgerTracked, true);
+  assert.equal((await f.migrationLedger.get(f.domain.id)).state, 'bound');
+});
+
+test('state drift after preview rejects mutation before ledger planning', async () => {
   const f = await fixture();
   const approvedDigest = await digestFor(f);
   f.applications[0] = app({ proxyTarget: { host: '127.0.0.1', port: 5500 } });
   await assert.rejects(bind(f, websiteId, approvedDigest), code('website_migration_preview_stale'));
   assert.equal((await f.domainRegistry.getDomain(f.domain.id)).websiteId, null);
+  assert.equal(await f.migrationLedger.get(f.domain.id), null);
 });
 
-test('wrong Website ID is not authorized by the current migration preview', async () => {
+test('wrong Website ID is not authorized by current migration preview', async () => {
   const f = await fixture({ websites: [website(), website(wrongWebsiteId)] });
   await assert.rejects(bind(f, wrongWebsiteId), code('website_migration_binding_not_ready'));
   assert.equal((await f.domainRegistry.getDomain(f.domain.id)).websiteId, null);
+  assert.equal(await f.migrationLedger.get(f.domain.id), null);
 });
 
 test('create-Website and ambiguous preview states cannot enter existing-Website bind', async () => {
@@ -103,6 +152,15 @@ test('retry against a different Website refuses existing binding conflict', asyn
   await assert.rejects(bind(f, wrongWebsiteId, approvedDigest), code('website_migration_binding_conflict'));
 });
 
+test('already-bound Domain without migration ledger is not retroactively marked migratable', async () => {
+  const f = await fixture();
+  await f.domainRegistry.bindWebsite(f.domain.id, websiteId);
+  const result = await bind(f, websiteId, 'a'.repeat(64));
+  assert.equal(result.migrated, false);
+  assert.equal(result.ledgerTracked, false);
+  assert.equal(await f.migrationLedger.get(f.domain.id), null);
+});
+
 test('migration bind requires a canonical preview digest', async () => {
   const f = await fixture();
   for (const previewDigest of [null, '', 'ABC', 'g'.repeat(64)]) {
@@ -113,6 +171,7 @@ test('migration bind requires a canonical preview digest', async () => {
       domainRegistry: f.domainRegistry,
       websiteRegistry: f.websiteRegistry,
       applicationRegistry: f.applicationRegistry,
+      migrationLedger: f.migrationLedger,
     }), code('website_migration_preview_digest_invalid'));
   }
   assert.equal((await f.domainRegistry.getDomain(f.domain.id)).websiteId, null);
