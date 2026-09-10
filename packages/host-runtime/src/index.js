@@ -49,3 +49,10 @@ export {
   managedServicePolicy,
   managedServiceInternals,
 } from './managed-service-manager.js';
+export {
+  createDatabaseManager,
+  databaseManager,
+  DatabaseManagerError,
+  databaseManagerPolicy,
+  databaseManagerInternals,
+} from './database-manager.js';
