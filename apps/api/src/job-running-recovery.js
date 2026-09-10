@@ -4,8 +4,10 @@ import { inspectDurableJobRecovery } from './job-recovery-inspection.js';
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const SAFE_REEXECUTION = Object.freeze({
-  [OPERATIONS.SYSTEM_PACKAGES_INSPECT]: Object.freeze({ resourceType: 'system' }),
-  [OPERATIONS.DATABASE_INSPECT]: Object.freeze({ resourceType: 'database' }),
+  [OPERATIONS.SYSTEM_PACKAGES_INSPECT]: Object.freeze({ resourceType: 'system', resourceScope: 'server', payloadMode: 'empty' }),
+  [OPERATIONS.SYSTEM_SERVICES_INSPECT]: Object.freeze({ resourceType: 'system', resourceScope: 'server', payloadMode: 'persisted' }),
+  [OPERATIONS.DATABASE_INSPECT]: Object.freeze({ resourceType: 'database', resourceScope: 'server', payloadMode: 'empty' }),
+  [OPERATIONS.APP_NODE_STATUS]: Object.freeze({ resourceType: 'application', resourceScope: 'resource', payloadMode: 'persisted' }),
 });
 
 export class JobRunningRecoveryError extends Error {
@@ -47,10 +49,40 @@ function recoveryPolicy(job) {
       'This running operation cannot be recovered by automatic re-execution',
     );
   }
-  if (job.resourceType !== policy.resourceType || job.resourceId !== job.serverId) {
+  if (job.resourceType !== policy.resourceType
+    || (policy.resourceScope === 'server' && job.resourceId !== job.serverId)
+    || (policy.resourceScope === 'resource' && (typeof job.resourceId !== 'string' || !job.resourceId))) {
     throw new JobRunningRecoveryError('job_running_recovery_job_mismatch', 'Running recovery job metadata is inconsistent');
   }
   return policy;
+}
+
+async function recoveryPayload(job, policy, loadJobContext) {
+  if (policy.payloadMode === 'empty') return {};
+  if (typeof loadJobContext !== 'function') {
+    throw new JobRunningRecoveryError('job_running_recovery_context_unavailable', 'Private running recovery context is required for this read-only operation');
+  }
+
+  let context;
+  try {
+    context = await loadJobContext(job.id);
+  } catch {
+    throw new JobRunningRecoveryError('job_running_recovery_context_failed', 'Private running recovery context could not be read');
+  }
+  if (!context || context.id !== job.id || context.serverId !== job.serverId || context.status !== 'running'
+    || context.operation !== job.operation || context.resourceType !== job.resourceType || context.resourceId !== job.resourceId
+    || !context.payload || typeof context.payload !== 'object' || Array.isArray(context.payload)) {
+    throw new JobRunningRecoveryError('job_running_recovery_context_mismatch', 'Private running recovery context does not match durable job metadata');
+  }
+  if (job.operation === OPERATIONS.APP_NODE_STATUS && context.payload.applicationId !== job.resourceId) {
+    throw new JobRunningRecoveryError('job_running_recovery_context_mismatch', 'Node status recovery context does not match the application resource');
+  }
+
+  try {
+    return structuredClone(context.payload);
+  } catch {
+    throw new JobRunningRecoveryError('job_running_recovery_context_mismatch', 'Private running recovery payload could not be copied safely');
+  }
 }
 
 export async function recoverRunningInspection({
@@ -59,6 +91,7 @@ export async function recoverRunningInspection({
   jobRegistry,
   serviceStatus,
   executeOperation,
+  loadJobContext = null,
   inspect = inspectDurableJobRecovery,
 } = {}) {
   const identity = normalizeIdentity(serverId, jobId);
@@ -100,11 +133,12 @@ export async function recoverRunningInspection({
     || job.operation !== candidate.operation || job.resourceType !== candidate.resourceType || job.resourceId !== candidate.resourceId) {
     throw new JobRunningRecoveryError('job_running_recovery_job_mismatch', 'Running recovery job no longer matches durable recovery state');
   }
-  recoveryPolicy(job);
+  const policy = recoveryPolicy(job);
+  const payload = await recoveryPayload(job, policy, loadJobContext);
 
   let result;
   try {
-    result = await executeOperation(job.operation, {});
+    result = await executeOperation(job.operation, payload);
   } catch {
     throw new JobRunningRecoveryError(
       'job_running_recovery_probe_failed',
@@ -144,4 +178,5 @@ export const jobRunningRecoveryInternals = Object.freeze({
   normalizeIdentity,
   requireStoppedConsumers,
   recoveryPolicy,
+  recoveryPayload,
 });
