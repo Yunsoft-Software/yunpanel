@@ -4,11 +4,13 @@ import http from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
 import { WebsiteMigrationBindError } from '../src/website-migration-bind.js';
+import { WebsiteMigrationCreateError } from '../src/website-migration-create.js';
 import { mountWebsiteMigrationRoutes } from '../src/website-migration-http.js';
 import { WebsiteMigrationPolicyError } from '../src/website-migration-policy.js';
 
 const domainId = '0ef7e00b-1b85-4938-b726-247c94679c66';
 const websiteId = '46b95b12-600a-4f31-b269-cc9af195ee21';
+const applicationId = '340344cf-4e57-4f70-946a-3c6e919e951d';
 const previewDigest = 'a'.repeat(64);
 const ownerAuth = Object.freeze({
   user: { id: 'owner-1', role: 'owner' },
@@ -34,7 +36,11 @@ async function fixture(t, auth) {
   app.use(express.json());
   app.use((request, _response, next) => { request.auth = auth; next(); });
   mountWebsiteMigrationRoutes(app, {
-    websiteRegistry: { async listWebsites() { calls.push('websites'); return []; } },
+    websiteRegistry: {
+      async listWebsites() { calls.push('websites'); return []; },
+      async getWebsite(id) { calls.push(['website.get', id]); return null; },
+      async createMigrationWebsite() { calls.push('website.createMigrationWebsite'); throw new Error('registry primitive should be invoked only through create adapter'); },
+    },
     domainRegistry: {
       async listDomains() { calls.push('domains'); return []; },
       async bindWebsite() { calls.push('bindWebsite'); throw new Error('bind primitive should be invoked only through bind adapter'); },
@@ -68,6 +74,15 @@ async function fixture(t, auth) {
         items: [],
       };
     },
+    async create(input) {
+      calls.push(['create', input.domainId, input.applicationId, input.previewDigest]);
+      return {
+        created: input.previewDigest === previewDigest,
+        website: { id: websiteId, applicationId: input.applicationId },
+        sourcePreviewDigest: input.previewDigest,
+        nextAction: 'rerun_preview_then_bind',
+      };
+    },
     async bind(input) {
       calls.push(['bind', input.domainId, input.websiteId, input.previewDigest]);
       return {
@@ -80,7 +95,7 @@ async function fixture(t, auth) {
     },
   });
   app.use((error, _request, response, _next) => {
-    if (error instanceof WebsiteMigrationBindError || error instanceof WebsiteMigrationPolicyError) {
+    if (error instanceof WebsiteMigrationBindError || error instanceof WebsiteMigrationCreateError || error instanceof WebsiteMigrationPolicyError) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }
     return response.status(500).json({ error: { code: 'internal_error' } });
@@ -100,26 +115,19 @@ async function fixture(t, auth) {
 
 function bindBody(overrides = {}) {
   const values = { domainId, websiteId, previewDigest, ...overrides };
-  return {
-    ...values,
-    confirmation: overrides.confirmation ?? `bind:${values.domainId}:${values.websiteId}:${values.previewDigest}`,
-  };
+  return { ...values, confirmation: overrides.confirmation ?? `bind:${values.domainId}:${values.websiteId}:${values.previewDigest}` };
 }
-
+function createBody(overrides = {}) {
+  const values = { domainId, applicationId, previewDigest, ...overrides };
+  return { ...values, confirmation: overrides.confirmation ?? `create-website:${values.domainId}:${values.applicationId}:${values.previewDigest}` };
+}
 function finalizeBody(overrides = {}) {
   const values = { previewDigest, ...overrides };
-  return {
-    ...values,
-    confirmation: overrides.confirmation ?? `finalize:${values.previewDigest}`,
-  };
+  return { ...values, confirmation: overrides.confirmation ?? `finalize:${values.previewDigest}` };
 }
-
 function rollbackBody(overrides = {}) {
   const values = { enforcedDigest: previewDigest, ...overrides };
-  return {
-    ...values,
-    confirmation: overrides.confirmation ?? `rollback:${values.enforcedDigest}`,
-  };
+  return { ...values, confirmation: overrides.confirmation ?? `rollback:${values.enforcedDigest}` };
 }
 
 test('Owner receives non-destructive migration preview from persisted resource snapshots', async (t) => {
@@ -146,11 +154,44 @@ test('Owner status returns current policy beside the same read-only preview', as
   assert.equal(f.calls.includes('policy.snapshot'), true);
 });
 
+test('Owner migration Website creation requires exact IDs digest and typed confirmation', async (t) => {
+  const f = await fixture(t, ownerAuth);
+  const valid = await f.request('/api/websites/migration/create-website', {
+    method: 'POST', body: JSON.stringify(createBody()),
+  });
+  assert.equal(valid.status, 201);
+  const payload = await valid.json();
+  assert.equal(payload.data.created, true);
+  assert.equal(payload.data.nextAction, 'rerun_preview_then_bind');
+  assert.deepEqual(f.calls, [['create', domainId, applicationId, previewDigest]]);
+
+  for (const body of [
+    createBody({ confirmation: 'wrong' }),
+    createBody({ domainId: 'bad', confirmation: 'wrong' }),
+    createBody({ applicationId: 'bad', confirmation: 'wrong' }),
+    createBody({ previewDigest: 'bad', confirmation: 'wrong' }),
+    { ...createBody(), extra: 'field' },
+  ]) {
+    const before = f.calls.length;
+    const response = await f.request('/api/websites/migration/create-website', { method: 'POST', body: JSON.stringify(body) });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error.code, /^website_migration_/);
+    assert.equal(f.calls.length, before);
+  }
+});
+
+test('idempotent migration Website creation can return 200 without creating another resource', async (t) => {
+  const f = await fixture(t, ownerAuth);
+  const response = await f.request('/api/websites/migration/create-website', {
+    method: 'POST', body: JSON.stringify(createBody({ previewDigest: 'b'.repeat(64), confirmation: `create-website:${domainId}:${applicationId}:${'b'.repeat(64)}` })),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).data.created, false);
+});
+
 test('Owner bind requires exact canonical IDs preview digest and typed confirmation before adapter invocation', async (t) => {
   const f = await fixture(t, ownerAuth);
-  const valid = await f.request('/api/websites/migration/bind', {
-    method: 'POST', body: JSON.stringify(bindBody()),
-  });
+  const valid = await f.request('/api/websites/migration/bind', { method: 'POST', body: JSON.stringify(bindBody()) });
   assert.equal(valid.status, 200);
   assert.equal((await valid.json()).data.migrated, true);
   assert.deepEqual(f.calls, [['bind', domainId, websiteId, previewDigest]]);
@@ -171,17 +212,13 @@ test('Owner bind requires exact canonical IDs preview digest and typed confirmat
 
 test('Owner finalize recomputes preview and requires exact digest confirmation', async (t) => {
   const f = await fixture(t, ownerAuth);
-  const response = await f.request('/api/websites/migration/finalize', {
-    method: 'POST', body: JSON.stringify(finalizeBody()),
-  });
+  const response = await f.request('/api/websites/migration/finalize', { method: 'POST', body: JSON.stringify(finalizeBody()) });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).data.mode, 'enforced');
   assert.equal(f.calls.some((call) => Array.isArray(call) && call[0] === 'policy.finalize' && call[1] === previewDigest && call[2] === previewDigest), true);
 
   const before = f.calls.length;
-  const denied = await f.request('/api/websites/migration/finalize', {
-    method: 'POST', body: JSON.stringify(finalizeBody({ confirmation: 'wrong' })),
-  });
+  const denied = await f.request('/api/websites/migration/finalize', { method: 'POST', body: JSON.stringify(finalizeBody({ confirmation: 'wrong' })) });
   assert.equal(denied.status, 400);
   assert.equal((await denied.json()).error.code, 'website_migration_confirmation_required');
   assert.equal(f.calls.length, before);
@@ -189,17 +226,13 @@ test('Owner finalize recomputes preview and requires exact digest confirmation',
 
 test('Owner rollback requires exact enforced digest confirmation and does not read migration resources', async (t) => {
   const f = await fixture(t, ownerAuth);
-  const response = await f.request('/api/websites/migration/rollback', {
-    method: 'POST', body: JSON.stringify(rollbackBody()),
-  });
+  const response = await f.request('/api/websites/migration/rollback', { method: 'POST', body: JSON.stringify(rollbackBody()) });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).data.mode, 'compatibility');
   assert.deepEqual(f.calls, [['policy.rollback', previewDigest]]);
 
   const before = f.calls.length;
-  const denied = await f.request('/api/websites/migration/rollback', {
-    method: 'POST', body: JSON.stringify(rollbackBody({ enforcedDigest: 'bad', confirmation: 'wrong' })),
-  });
+  const denied = await f.request('/api/websites/migration/rollback', { method: 'POST', body: JSON.stringify(rollbackBody({ enforcedDigest: 'bad', confirmation: 'wrong' })) });
   assert.equal(denied.status, 400);
   assert.equal(f.calls.length, before);
 });
@@ -209,6 +242,7 @@ test('Read Only cannot invoke migration management surfaces despite ordinary Web
   const requests = [
     ['/api/websites/migration/preview', {}],
     ['/api/websites/migration/status', {}],
+    ['/api/websites/migration/create-website', { method: 'POST', body: JSON.stringify(createBody()) }],
     ['/api/websites/migration/bind', { method: 'POST', body: JSON.stringify(bindBody()) }],
     ['/api/websites/migration/finalize', { method: 'POST', body: JSON.stringify(finalizeBody()) }],
     ['/api/websites/migration/rollback', { method: 'POST', body: JSON.stringify(rollbackBody()) }],
