@@ -3,20 +3,23 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createDurableJobRegistry } from '../apps/api/src/durable-job-registry.js';
 import { inspectDurableJobRecovery } from '../apps/api/src/job-recovery-inspection.js';
-import { runTerminalRecoveryFromStores } from '../apps/api/src/job-recovery-runtime.js';
+import {
+  runRunningInspectionRecoveryFromStores,
+  runTerminalRecoveryFromStores,
+} from '../apps/api/src/job-recovery-runtime.js';
 import { createJobRegistry } from '../apps/api/src/job-registry.js';
 import { resolveLocalMigrationPaths } from '../apps/api/src/local-migration-cli.js';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const PACKAGED_SCRIPT_ROOT = '/usr/lib/yunpanel/scripts';
-const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm';
+const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm';
 
 export function parseJobRecoveryArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
   if (argv.length === 1 && argv[0] === 'status') return { action: 'status' };
-  if (argv.length === 4 && argv[0] === 'reconcile' && argv[3] === '--confirm'
+  if (argv.length === 4 && ['reconcile', 'recover-readonly'].includes(argv[0]) && argv[3] === '--confirm'
     && typeof argv[1] === 'string' && argv[1] && typeof argv[2] === 'string' && argv[2]) {
-    return { action: 'reconcile', serverId: argv[1], jobId: argv[2], confirm: true };
+    return { action: argv[0], serverId: argv[1], jobId: argv[2], confirm: true };
   }
   throw new Error(USAGE);
 }
@@ -70,6 +73,16 @@ function formatReconciliation(result) {
   ].join('\n');
 }
 
+function formatReadOnlyRecovery(result) {
+  return [
+    `recovered server=${result.serverId} job=${result.jobId} status=${result.status}`,
+    `operation=${result.operation}`,
+    `method=${result.recoveryMethod}`,
+    `jobStore=${result.statePaths.jobStore}`,
+    `recoveryStore=${result.statePaths.recoveryStore}`,
+  ].join('\n');
+}
+
 export async function runJobRecoveryCli({
   argv = process.argv.slice(2),
   env = process.env,
@@ -80,23 +93,25 @@ export async function runJobRecoveryCli({
   jobRegistryFactory = createJobRegistry,
   inspect = inspectDurableJobRecovery,
   recover = runTerminalRecoveryFromStores,
+  recoverRunning = runRunningInspectionRecoveryFromStores,
   stdout = process.stdout,
 } = {}) {
   const parsed = parseJobRecoveryArguments(argv);
   const packaged = isPackagedJobRecoveryScript(filePath);
   assertPackagedJobRecoveryRoot({ packaged, uid });
 
-  if (parsed.action === 'reconcile') {
-    if (!packaged) throw new Error('Terminal recovery reconciliation is available only from the packaged YunPanel installation');
-    if (typeof recover !== 'function') throw new Error('Job recovery reconciliation dependency is invalid');
-    const result = await recover({
+  if (parsed.action === 'reconcile' || parsed.action === 'recover-readonly') {
+    if (!packaged) throw new Error('Job recovery mutations are available only from the packaged YunPanel installation');
+    const handler = parsed.action === 'reconcile' ? recover : recoverRunning;
+    if (typeof handler !== 'function') throw new Error('Job recovery mutation dependency is invalid');
+    const result = await handler({
       serverId: parsed.serverId,
       jobId: parsed.jobId,
       env,
       packaged: true,
       cwd,
     });
-    stdout.write(`${formatReconciliation(result)}\n`);
+    stdout.write(`${parsed.action === 'reconcile' ? formatReconciliation(result) : formatReadOnlyRecovery(result)}\n`);
     return result;
   }
 
@@ -130,4 +145,5 @@ export const jobRecoveryCliInternals = Object.freeze({
   packagedScriptRoot: PACKAGED_SCRIPT_ROOT,
   formatStatus,
   formatReconciliation,
+  formatReadOnlyRecovery,
 });
