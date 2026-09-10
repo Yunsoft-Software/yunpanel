@@ -10,6 +10,7 @@ const boundServer = {
   executionMode: 'local',
   localBoundAt: '2026-09-10T00:00:00.000Z',
 };
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function fixture(overrides = {}) {
   const events = [];
@@ -85,6 +86,7 @@ test('local runtime acquires ownership, refreshes the bound server and then star
   assert.equal(runtime.serverId, serverId);
   assert.equal(runtime.hostname, hostname);
   assert.deepEqual(runtime.operations, ['system.packages.inspect']);
+  assert.equal(runtime.failure(), null);
 
   const options = fx.getExecutorOptions();
   assert.equal(options.supportsOperation('system.packages.inspect'), true);
@@ -96,6 +98,45 @@ test('local runtime acquires ownership, refreshes the bound server and then star
 
   await runtime.stop();
   assert.deepEqual(fx.events.slice(-2).map((event) => event[0]), ['executor.stop', 'lock.release']);
+  await runtime.stop();
+  assert.equal(fx.events.filter((event) => event[0] === 'lock.release').length, 1);
+});
+
+test('local runtime refreshes its server snapshot before the registry offline threshold', async () => {
+  const fx = fixture();
+  const runtime = await startWith(fx, { snapshotIntervalMs: 50 });
+  await delay(130);
+  const beforeStop = fx.events.filter((event) => event[0] === 'snapshot').length;
+  assert.ok(beforeStop >= 2);
+  await runtime.stop();
+  await delay(80);
+  assert.equal(fx.events.filter((event) => event[0] === 'snapshot').length, beforeStop);
+});
+
+test('snapshot refresh failure stops host execution, releases ownership and reports safe metadata', async () => {
+  let snapshots = 0;
+  const errors = [];
+  const fx = fixture({
+    registry: {
+      getServer: async () => ({ ...boundServer }),
+      updateLocalSnapshot: async (input) => {
+        snapshots += 1;
+        fx.events.push(['snapshot', input]);
+        if (snapshots > 1) throw new Error('/private/path SECRET=must-not-leak');
+        return { ...boundServer, localRuntimeVersion: input.runtimeVersion };
+      },
+    },
+  });
+  const runtime = await startWith(fx, { snapshotIntervalMs: 50, onError: (error) => errors.push(error) });
+  await delay(120);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, 'local_runtime_snapshot_refresh_failed');
+  assert.equal(errors[0].phase, 'snapshot');
+  assert.equal(errors[0].jobId, null);
+  assert.equal(errors[0].message.includes('SECRET'), false);
+  assert.deepEqual(runtime.failure(), { code: 'local_runtime_snapshot_refresh_failed', phase: 'snapshot', jobId: null });
+  assert.equal(fx.events.filter((event) => event[0] === 'executor.stop').length, 1);
+  assert.equal(fx.events.filter((event) => event[0] === 'lock.release').length, 1);
   await runtime.stop();
   assert.equal(fx.events.filter((event) => event[0] === 'lock.release').length, 1);
 });
@@ -147,4 +188,11 @@ test('startup failure drains the executor and releases the ownership lock', asyn
     (error) => error instanceof LocalRuntimeError && error.code === 'local_runtime_start_failed',
   );
   assert.deepEqual(fx.events.slice(-2).map((event) => event[0]), ['executor.stop', 'lock.release']);
+});
+
+test('snapshot interval validation fails before lock acquisition', async () => {
+  let lockCalls = 0;
+  const fx = fixture({ acquireLock: async () => { lockCalls += 1; throw new Error('must not run'); } });
+  await assert.rejects(startWith(fx, { snapshotIntervalMs: 61_000 }), (error) => error instanceof LocalRuntimeError && error.code === 'invalid_local_snapshot_interval');
+  assert.equal(lockCalls, 0);
 });

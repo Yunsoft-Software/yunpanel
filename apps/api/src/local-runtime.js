@@ -3,6 +3,8 @@ import { createLocalHostOperations } from './local-host-operations.js';
 import { createLocalJobExecutor } from './local-job-executor.js';
 import { reconcileCompletedJob } from './job-reconciliation.js';
 
+const DEFAULT_SNAPSHOT_INTERVAL_MS = 30_000;
+
 export class LocalRuntimeError extends Error {
   constructor(code, message) {
     super(message);
@@ -25,6 +27,13 @@ function normalizeHostname(value) {
 function normalizeRuntimeVersion(value) {
   if (typeof value !== 'string' || value.length < 1 || value.length > 40 || /[\u0000-\u001f\u007f]/.test(value)) {
     throw new LocalRuntimeError('invalid_local_runtime_version', 'Local runtime version is invalid');
+  }
+  return value;
+}
+
+function normalizeSnapshotInterval(value) {
+  if (!Number.isInteger(value) || value < 50 || value > 60_000) {
+    throw new LocalRuntimeError('invalid_local_snapshot_interval', 'Local runtime snapshot interval must be between 50 and 60000 milliseconds');
   }
   return value;
 }
@@ -60,6 +69,18 @@ function validateDependencies({ registry, jobRegistry, domainRegistry, certifica
   }
 }
 
+function snapshotFault() {
+  return Object.assign(
+    new Error('Local runtime snapshot refresh failed; host execution has been stopped.'),
+    {
+      name: 'LocalRuntimeError',
+      code: 'local_runtime_snapshot_refresh_failed',
+      phase: 'snapshot',
+      jobId: null,
+    },
+  );
+}
+
 export async function startLocalRuntime({
   serverId,
   hostname,
@@ -75,21 +96,79 @@ export async function startLocalRuntime({
   acquireLock = acquireLocalExecutionLock,
   reconcile = reconcileCompletedJob,
   onError = () => {},
+  snapshotIntervalMs = DEFAULT_SNAPSHOT_INTERVAL_MS,
 } = {}) {
   if (typeof serverId !== 'string' || serverId.length < 1 || serverId.length > 128) {
     throw new LocalRuntimeError('invalid_local_server_id', 'Local runtime server id is invalid');
   }
   const normalizedHostname = normalizeHostname(hostname);
   const normalizedVersion = normalizeRuntimeVersion(runtimeVersion);
+  const normalizedSnapshotInterval = normalizeSnapshotInterval(snapshotIntervalMs);
   if (typeof lockPath !== 'string' || !lockPath) throw new LocalRuntimeError('invalid_local_lock_path', 'Local runtime lock path is required');
   if (typeof executorFactory !== 'function' || typeof acquireLock !== 'function' || typeof reconcile !== 'function' || typeof onError !== 'function') {
     throw new LocalRuntimeError('local_runtime_adapter_invalid', 'Local runtime adapter configuration is invalid');
   }
   validateDependencies({ registry, jobRegistry, domainRegistry, certificateRegistry, applicationRegistry, hostOperations });
 
-  const initialServer = assertBoundServer(await registry.getServer(serverId), serverId, normalizedHostname);
+  assertBoundServer(await registry.getServer(serverId), serverId, normalizedHostname);
   let lock;
   let executor;
+  let snapshotTimer = null;
+  let stopped = false;
+  let resourcesClosed = false;
+  let stopping = null;
+  let fault = null;
+
+  async function closeResources() {
+    if (stopping) return stopping;
+    if (resourcesClosed) return;
+    stopped = true;
+    if (snapshotTimer) {
+      clearTimeout(snapshotTimer);
+      snapshotTimer = null;
+    }
+    stopping = (async () => {
+      let stopError = null;
+      try { await executor?.stop?.(); } catch (error) { stopError = error; }
+      try { await lock?.release?.(); } catch (error) { if (!stopError) stopError = error; }
+      resourcesClosed = true;
+      if (stopError) throw stopError;
+    })().finally(() => { stopping = null; });
+    return stopping;
+  }
+
+  async function refreshSnapshot() {
+    const snapshot = await registry.updateLocalSnapshot({
+      serverId,
+      hostname: normalizedHostname,
+      runtimeVersion: normalizedVersion,
+    });
+    assertBoundServer(snapshot, serverId, normalizedHostname);
+    return snapshot;
+  }
+
+  function scheduleSnapshotRefresh() {
+    if (stopped || snapshotTimer) return;
+    snapshotTimer = setTimeout(async () => {
+      snapshotTimer = null;
+      if (stopped) return;
+      try {
+        await refreshSnapshot();
+        scheduleSnapshotRefresh();
+      } catch {
+        fault = Object.freeze({
+          code: 'local_runtime_snapshot_refresh_failed',
+          phase: 'snapshot',
+          jobId: null,
+        });
+        const error = snapshotFault();
+        try { onError(error); } catch {}
+        await closeResources().catch(() => {});
+      }
+    }, normalizedSnapshotInterval);
+    snapshotTimer.unref?.();
+  }
+
   try {
     lock = await acquireLock({ filePath: lockPath, serverId });
     assertBoundServer(await registry.getServer(serverId), serverId, normalizedHostname);
@@ -116,30 +195,23 @@ export async function startLocalRuntime({
       throw new LocalRuntimeError('local_runtime_executor_invalid', 'Local executor factory returned an invalid executor');
     }
 
-    const snapshot = await registry.updateLocalSnapshot({
-      serverId,
-      hostname: normalizedHostname,
-      runtimeVersion: normalizedVersion,
-    });
-    assertBoundServer(snapshot, serverId, normalizedHostname);
+    await refreshSnapshot();
     executor.start();
+    scheduleSnapshotRefresh();
 
-    let stopped = false;
     return {
       serverId,
       hostname: normalizedHostname,
       runtimeVersion: normalizedVersion,
       operations: Array.isArray(hostOperations.operations) ? [...hostOperations.operations] : [],
+      failure: () => fault ? { ...fault } : null,
       async stop() {
-        if (stopped) return;
-        stopped = true;
-        let stopError = null;
-        try { await executor.stop(); } catch (error) { stopError = error; }
-        try { await lock.release(); } catch (error) { if (!stopError) stopError = error; }
-        if (stopError) throw stopError;
+        await closeResources();
       },
     };
   } catch (error) {
+    stopped = true;
+    if (snapshotTimer) clearTimeout(snapshotTimer);
     if (executor && typeof executor.stop === 'function') await executor.stop().catch(() => {});
     if (lock && typeof lock.release === 'function') await lock.release().catch(() => {});
     if (error instanceof LocalRuntimeError || error instanceof LocalExecutionLockError) throw error;
@@ -150,5 +222,7 @@ export async function startLocalRuntime({
 export const localRuntimeInternals = Object.freeze({
   normalizeHostname,
   normalizeRuntimeVersion,
+  normalizeSnapshotInterval,
   assertBoundServer,
+  defaultSnapshotIntervalMs: DEFAULT_SNAPSHOT_INTERVAL_MS,
 });
