@@ -41,6 +41,7 @@ install -m 0755 scripts/job-recovery.mjs "$package_root/usr/lib/yunpanel/scripts
 install -m 0755 scripts/local-migration-backup.mjs "$package_root/usr/lib/yunpanel/scripts/local-migration-backup.mjs"
 install -m 0644 .env.example README.md \
   docs/authentication.md \
+  docs/local-migration-backup.md \
   docs/local-runtime-migration.md \
   docs/mfa.md \
   docs/owner-mfa-policy.md \
