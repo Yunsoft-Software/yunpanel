@@ -37,9 +37,30 @@ function validateDependencies({ registry, jobRegistry, serviceStatus, create = f
   if (!jobRegistry || typeof jobRegistry.listJobs !== 'function') {
     throw new LocalServerMigrationError('local_migration_jobs_invalid', 'Local server migration requires the job registry');
   }
+  if (jobRegistry.recovery !== undefined && typeof jobRegistry.recovery !== 'function') {
+    throw new LocalServerMigrationError('local_migration_jobs_invalid', 'Job registry recovery inspection is invalid');
+  }
   if (typeof serviceStatus !== 'function') {
     throw new LocalServerMigrationError('local_migration_service_status_invalid', 'Local server migration requires service status inspection');
   }
+}
+
+function inspectRecovery(jobRegistry) {
+  if (typeof jobRegistry.recovery !== 'function') return [];
+  let recovery;
+  try {
+    recovery = jobRegistry.recovery();
+  } catch {
+    throw new LocalServerMigrationError('local_migration_recovery_invalid', 'Durable job recovery state could not be inspected');
+  }
+  if (recovery == null) return [];
+  if (!recovery || typeof recovery !== 'object' || !Array.isArray(recovery.jobs)) {
+    throw new LocalServerMigrationError('local_migration_recovery_invalid', 'Durable job recovery state is invalid');
+  }
+  if (recovery.jobs.some((job) => !job || typeof job !== 'object' || typeof job.jobId !== 'string' || typeof job.serverId !== 'string')) {
+    throw new LocalServerMigrationError('local_migration_recovery_invalid', 'Durable job recovery state is invalid');
+  }
+  return recovery.jobs.map((job) => ({ jobId: job.jobId, serverId: job.serverId }));
 }
 
 async function inspectConsumersAndJobs({ jobRegistry, serviceStatus, serverId = null }) {
@@ -51,8 +72,11 @@ async function inspectConsumersAndJobs({ jobRegistry, serviceStatus, serverId = 
   if (!units || typeof units !== 'object' || Array.isArray(units)) {
     throw new LocalServerMigrationError('local_migration_service_status_invalid', 'Service status inspection returned an invalid result');
   }
+  const recoveryJobs = inspectRecovery(jobRegistry)
+    .filter((job) => !serverId || job.serverId === serverId);
   return {
     activeJobs: jobs.filter((job) => ACTIVE_JOB_STATUSES.has(job?.status)),
+    recoveryJobs,
     apiActive: units.apiActive === true,
     agentActive: units.agentActive === true,
   };
@@ -87,6 +111,9 @@ function assertMutationSafe(preflight) {
   if (preflight.activeJobs.length > 0) {
     throw new LocalServerMigrationError('local_migration_jobs_active', 'Queued or running jobs must be drained or cancelled before changing local server ownership');
   }
+  if (preflight.recoveryJobs.length > 0) {
+    throw new LocalServerMigrationError('local_migration_recovery_pending', 'Durable job recovery must be resolved before changing local server ownership');
+  }
 }
 
 export async function inspectLocalServerMigration(input = {}) {
@@ -99,6 +126,7 @@ export async function inspectLocalServerMigration(input = {}) {
     apiActive: preflight.apiActive,
     agentActive: preflight.agentActive,
     activeJobCount: preflight.activeJobs.length,
+    recoveryJobCount: preflight.recoveryJobs.length,
   });
 }
 
@@ -129,6 +157,7 @@ export async function releaseLocalServerFromRuntime(input = {}) {
 export const localServerMigrationInternals = Object.freeze({
   normalizeServerId,
   normalizeHostname,
+  inspectRecovery,
   inspectConsumersAndJobs,
   assertMutationSafe,
 });
