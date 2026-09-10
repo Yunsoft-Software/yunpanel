@@ -145,6 +145,8 @@ export function createLocalJobExecutor({
               serverId,
               jobId,
               operation: claim.envelope.operation,
+              resourceType: claim.job.resourceType,
+              resourceId: claim.job.resourceId,
               payload: payloadCopy,
               result: resultCopy,
             });
