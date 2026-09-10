@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { inspectAllowlistedServices, inspectDocker, inspectNginx } from '@yunpanel/host-runtime';
 import { createApp, API_VERSION } from './app.js';
+import { createAuditedJobRegistry } from './audited-job-registry.js';
 import { createAuthStore } from './auth-store.js';
 import { createAuthenticatedApi } from './auth-http.js';
 import { createApplicationEnvironmentRegistry } from './application-environment-registry.js';
@@ -36,16 +37,22 @@ function reportLocalExecutorFault(error) {
   console.error(`[yunpanel-api] local executor fault code=${code} phase=${phase} job=${jobId}`);
 }
 
+function reportAuditFault(metadata) {
+  const phase = ['link', 'complete', 'cancel'].includes(metadata?.phase) ? metadata.phase : 'unknown';
+  const jobId = typeof metadata?.jobId === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(metadata.jobId) ? metadata.jobId : 'none';
+  console.error(`[yunpanel-api] audit write failed phase=${phase} job=${jobId}`);
+}
+
 const registry = createServerRegistry({ filePath: serverStorePath });
 await registry.init();
 const domainRegistry = createDomainRegistry({ filePath: domainStorePath, serverExists: async (serverId) => Boolean(await registry.getServer(serverId)) });
 await domainRegistry.init();
-const jobRegistry = createDurableJobRegistry({
+const durableJobRegistry = createDurableJobRegistry({
   filePath: jobStorePath,
   registryFactory: createJobRegistry,
   automaticReconciliation: true,
 });
-await jobRegistry.init();
+await durableJobRegistry.init();
 const certificateRegistry = createCertificateRegistry({ filePath: certificateStorePath });
 await certificateRegistry.init();
 const applicationRegistry = createApplicationRegistry({ filePath: applicationStorePath, serverExists: async (serverId) => Boolean(await registry.getServer(serverId)) });
@@ -59,6 +66,11 @@ await applicationEnvironmentRegistry.init();
 
 await prepareRootAuthStateOwnership({ filePath: authStorePath });
 const authStore = createAuthStore({ filePath: authStorePath });
+const jobRegistry = createAuditedJobRegistry({
+  registry: durableJobRegistry,
+  audit: authStore.audit,
+  onAuditError: reportAuditFault,
+});
 const listener = createAuthenticatedApi({
   store: authStore,
   publicOrigin: process.env.YUNPANEL_PUBLIC_ORIGIN ?? (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:5173' : undefined),
