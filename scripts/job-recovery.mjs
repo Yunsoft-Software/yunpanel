@@ -11,6 +11,7 @@ import {
   runRunningStaticDeploymentRecoveryFromStores,
   runTerminalRecoveryFromStores,
 } from '../apps/api/src/job-recovery-runtime.js';
+import { runRunningDomainActivationRecoveryFromStores } from '../apps/api/src/job-running-domain-activation-recovery-runtime.js';
 import { runRunningServiceControlRecoveryFromStores } from '../apps/api/src/job-running-service-recovery-runtime.js';
 import { runRunningServiceReceiptRecoveryFromStores } from '../apps/api/src/job-running-service-receipt-recovery-runtime.js';
 import { createJobRegistry } from '../apps/api/src/job-registry.js';
@@ -22,13 +23,14 @@ const RECOVERY_ACTIONS = Object.freeze([
   'reconcile',
   'recover-readonly',
   'recover-domain-stage',
+  'recover-domain-activate',
   'recover-static-deploy',
   'recover-database-create',
   'recover-database-delete',
   'recover-service-control',
   'recover-service-mutation',
 ]);
-const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm';
+const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm';
 
 export function parseJobRecoveryArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
@@ -111,6 +113,7 @@ export async function runJobRecoveryCli({
   recover = runTerminalRecoveryFromStores,
   recoverRunning = runRunningInspectionRecoveryFromStores,
   recoverDomainStage = runRunningDomainStageRecoveryFromStores,
+  recoverDomainActivate = runRunningDomainActivationRecoveryFromStores,
   recoverStaticDeployment = runRunningStaticDeploymentRecoveryFromStores,
   recoverDatabaseCreate = runRunningDatabaseCreateRecoveryFromStores,
   recoverDatabaseDelete = runRunningDatabaseDeleteRecoveryFromStores,
@@ -128,6 +131,7 @@ export async function runJobRecoveryCli({
     if (parsed.action === 'reconcile') handler = recover;
     else if (parsed.action === 'recover-readonly') handler = recoverRunning;
     else if (parsed.action === 'recover-domain-stage') handler = recoverDomainStage;
+    else if (parsed.action === 'recover-domain-activate') handler = recoverDomainActivate;
     else if (parsed.action === 'recover-static-deploy') handler = recoverStaticDeployment;
     else if (parsed.action === 'recover-database-create') handler = recoverDatabaseCreate;
     else if (parsed.action === 'recover-database-delete') handler = recoverDatabaseDelete;
