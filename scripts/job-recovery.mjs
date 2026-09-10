@@ -22,6 +22,7 @@ import { runRunningStaticRollbackRecoveryFromStores } from '../apps/api/src/job-
 import { runRunningSystemUpgradeRecoveryFromStores } from '../apps/api/src/job-running-system-upgrade-recovery-runtime.js';
 import { createJobRegistry } from '../apps/api/src/job-registry.js';
 import { resolveLocalMigrationPaths } from '../apps/api/src/local-migration-cli.js';
+import { recordRecoveryAuditOutcome } from '../apps/api/src/recovery-audit.js';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const PACKAGED_SCRIPT_ROOT = '/usr/lib/yunpanel/scripts';
@@ -137,6 +138,7 @@ export async function runJobRecoveryCli({
   recoverDatabaseDelete = runRunningDatabaseDeleteRecoveryFromStores,
   recoverServiceControl = runRunningServiceControlRecoveryFromStores,
   recoverServiceMutation = runRunningServiceReceiptRecoveryFromStores,
+  recoveryAudit = recordRecoveryAuditOutcome,
   stdout = process.stdout,
 } = {}) {
   const parsed = parseJobRecoveryArguments(argv);
@@ -169,6 +171,9 @@ export async function runJobRecoveryCli({
       packaged: true,
       cwd,
     });
+    if (typeof recoveryAudit === 'function') {
+      try { recoveryAudit({ result, env, packaged: true, cwd }); } catch {}
+    }
     stdout.write(`${parsed.action === 'reconcile' ? formatReconciliation(result) : formatRunningRecovery(result)}\n`);
     return result;
   }
