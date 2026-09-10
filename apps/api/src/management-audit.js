@@ -8,7 +8,9 @@ function safeSegment(value) {
 
 function match(pathname, pattern) {
   const result = pattern.exec(pathname);
-  return result ? result.slice(1).map(safeSegment) : null;
+  if (!result) return null;
+  const parts = result.slice(1).map(safeSegment);
+  return parts.some((part) => part === null) ? null : parts;
 }
 
 export function classifyManagementMutation(method, pathname) {
