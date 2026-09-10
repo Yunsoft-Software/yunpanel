@@ -198,7 +198,7 @@ export async function createLocalMigrationBackup({
   const entries = validateSourceEntries(sourceEntries);
   const inspected = await inspectSources(entries, lstatFn);
   const present = inspected.filter((entry) => entry.present);
-  const backupDirectory = path.join(safeRoot, timestampDirectoryName(now()));
+  const backupDirectory = path.join(safeRoot, timestampDirectoryName(now));
   const archivePath = path.join(backupDirectory, 'state.tar');
   const archiveTemporary = `${archivePath}.${process.pid}.tmp`;
   const manifestPath = path.join(backupDirectory, 'manifest.json');
