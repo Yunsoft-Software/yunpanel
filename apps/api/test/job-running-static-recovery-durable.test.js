@@ -10,6 +10,7 @@ import {
 import { OPERATIONS } from '@yunpanel/protocol';
 import { createApplicationRegistry } from '../src/application-registry.js';
 import { createDurableJobRegistry } from '../src/durable-job-registry.js';
+import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
 import { recoverRunningStaticDeployment } from '../src/job-running-static-recovery.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
@@ -63,6 +64,7 @@ async function fixture(t) {
   const webRoot = path.join(root, 'web');
   const receiptStore = createStaticDeploymentReceiptStore({ root: path.join(root, 'receipts') });
   const evidenceInspector = createStaticDeploymentEvidenceInspector({ webRoot, receiptStore });
+  const contextReader = createJobRecoveryContextReader({ filePath: jobStore });
   const result = {
     deploymentId: queued.id,
     releaseId: queued.id,
@@ -72,15 +74,30 @@ async function fixture(t) {
     artifactBytes: 1024,
   };
 
-  return { root, server, application, applicationRegistry, jobRegistry: restarted, webRoot, receiptStore, evidenceInspector, result, jobId: queued.id };
+  return {
+    root,
+    server,
+    application,
+    applicationRegistry,
+    jobRegistry: restarted,
+    contextReader,
+    webRoot,
+    receiptStore,
+    evidenceInspector,
+    result,
+    jobId: queued.id,
+  };
 }
 
-test('verified static receipt and current release close the same durable job and application deployment', async (t) => {
+test('verified static receipt and current release close the durable job using private queued payload', async (t) => {
   const fx = await fixture(t);
   await fx.receiptStore.write({ applicationId: fx.application.id, deploymentId: fx.jobId, result: fx.result });
   const appRoot = path.join(fx.webRoot, fx.application.id);
   await mkdir(path.join(appRoot, 'releases', fx.jobId), { recursive: true });
   await symlink(path.join('releases', fx.jobId), path.join(appRoot, 'current'));
+
+  const publicJob = await fx.jobRegistry.getJob(fx.jobId);
+  assert.equal(Object.hasOwn(publicJob, 'payload'), false);
 
   const recovered = await recoverRunningStaticDeployment({
     serverId: fx.server.id,
@@ -90,6 +107,7 @@ test('verified static receipt and current release close the same durable job and
     certificateRegistry: {},
     applicationRegistry: fx.applicationRegistry,
     serviceStatus: async () => ({ apiActive: false, agentActive: false }),
+    loadJobContext: (id) => fx.contextReader.read(id),
     inspectDeploymentEvidence: (identity) => fx.evidenceInspector.inspect(identity),
   });
 
@@ -116,6 +134,7 @@ test('missing receipt evidence keeps job running and application deploying', asy
       certificateRegistry: {},
       applicationRegistry: fx.applicationRegistry,
       serviceStatus: async () => ({ apiActive: false, agentActive: false }),
+      loadJobContext: (id) => fx.contextReader.read(id),
       inspectDeploymentEvidence: (identity) => fx.evidenceInspector.inspect(identity),
     }),
     { code: 'job_static_recovery_evidence_not_satisfied' },
