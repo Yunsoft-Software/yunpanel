@@ -26,7 +26,20 @@ function verification(entries) {
   };
 }
 
-test('restore preview classifies restore targets without extracting or mutating host state', async () => {
+function identityComparison(overrides = {}) {
+  return {
+    destructive: false,
+    backupDirectory,
+    sha256: 'a'.repeat(64),
+    snapshotUsers: 2,
+    currentUsers: 2,
+    counts: { match: 2, drift: 0, missingCurrent: 0, addedCurrent: 0 },
+    identities: [],
+    ...overrides,
+  };
+}
+
+test('restore preview classifies restore targets and requires read-only Unix identity comparison', async () => {
   const entries = [
     { path: '/etc/yunpanel', type: 'directory', present: true },
     { path: '/var/lib/yunpanel', type: 'directory', present: true },
@@ -44,11 +57,16 @@ test('restore preview classifies restore targets without extracting or mutating 
   ]);
   const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
   const calls = [];
+  const verifyBackup = async ({ backupDirectory: value }) => {
+    calls.push(['verify', value]);
+    return verification(entries);
+  };
   const result = await previewLocalMigrationRestore({
     backupDirectory,
-    verifyBackup: async ({ backupDirectory: value }) => {
-      calls.push(['verify', value]);
-      return verification(entries);
+    verifyBackup,
+    compareIdentities: async ({ backupDirectory: value, verifyBackup: verifier }) => {
+      calls.push(['identities', value, verifier === verifyBackup]);
+      return identityComparison();
     },
     lstatFn: async (target) => {
       calls.push(['lstat', target]);
@@ -64,27 +82,33 @@ test('restore preview classifies restore targets without extracting or mutating 
   assert.equal(result.targets.find((entry) => entry.path === '/etc/passwd').action, 'identity_reference');
   assert.equal(result.targets.find((entry) => entry.path === '/etc/group').action, 'identity_reference');
   assert.deepEqual(result.counts, { restore: 3, identityReferences: 2, preserved: 1 });
+  assert.deepEqual(result.identityComparison.counts, { match: 2, drift: 0, missingCurrent: 0, addedCurrent: 0 });
   assert.deepEqual(calls[0], ['verify', backupDirectory]);
+  assert.ok(calls.some((entry) => entry[0] === 'identities' && entry[1] === backupDirectory && entry[2] === true));
 });
 
 test('restore preview surfaces type drift without silently treating it as safe replacement', async () => {
   const result = await previewLocalMigrationRestore({
     backupDirectory,
     verifyBackup: async () => verification([{ path: '/etc/yunpanel', type: 'directory', present: true }]),
+    compareIdentities: async () => identityComparison(),
     lstatFn: async () => metadata('file'),
   });
   assert.equal(result.targets[0].action, 'restore_type_mismatch');
 });
 
-test('top-level symlink restore target fails closed before producing a plan', async () => {
+test('top-level symlink restore target fails closed before identity comparison', async () => {
+  let identityCalls = 0;
   await assert.rejects(
     previewLocalMigrationRestore({
       backupDirectory,
       verifyBackup: async () => verification([{ path: '/etc/yunpanel', type: 'directory', present: true }]),
+      compareIdentities: async () => { identityCalls += 1; return identityComparison(); },
       lstatFn: async () => metadata('directory', { symlink: true }),
     }),
     { code: 'migration_restore_target_symlink' },
   );
+  assert.equal(identityCalls, 0);
 });
 
 test('invalid or outside-root backup acknowledgement never reaches target inspection', async () => {
@@ -93,6 +117,7 @@ test('invalid or outside-root backup acknowledgement never reaches target inspec
     previewLocalMigrationRestore({
       backupDirectory,
       verifyBackup: async () => ({ ...verification([]), backupDirectory: '/var/backups/yunpanel/migration-other' }),
+      compareIdentities: async () => identityComparison(),
       lstatFn: async () => { inspected = true; return metadata('directory'); },
     }),
     { code: 'migration_restore_backup_invalid' },
@@ -103,8 +128,37 @@ test('invalid or outside-root backup acknowledgement never reaches target inspec
     previewLocalMigrationRestore({
       backupDirectory: '/tmp/outside',
       verifyBackup: async () => verification([]),
+      compareIdentities: async () => identityComparison(),
       lstatFn: async () => metadata('directory'),
     }),
     { code: 'migration_backup_directory_outside_root' },
+  );
+});
+
+test('invalid identity comparison acknowledgement fails closed', async () => {
+  await assert.rejects(
+    previewLocalMigrationRestore({
+      backupDirectory,
+      verifyBackup: async () => verification([]),
+      compareIdentities: async () => identityComparison({ destructive: true }),
+      lstatFn: async () => metadata('directory'),
+    }),
+    { code: 'migration_restore_identity_result_invalid' },
+  );
+});
+
+test('unexpected identity comparator errors are redacted by restore preview', async () => {
+  await assert.rejects(
+    previewLocalMigrationRestore({
+      backupDirectory,
+      verifyBackup: async () => verification([]),
+      compareIdentities: async () => { throw new Error('SECRET=/root/private/token'); },
+      lstatFn: async () => metadata('directory'),
+    }),
+    (error) => {
+      assert.equal(error.code, 'migration_restore_identity_unavailable');
+      assert.doesNotMatch(error.message, /SECRET|token|\/root\/private/);
+      return true;
+    },
   );
 });
