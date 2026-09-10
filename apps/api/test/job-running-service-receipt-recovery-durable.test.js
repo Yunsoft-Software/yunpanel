@@ -80,7 +80,13 @@ for (const scenario of [
 ]) {
   test(`verified ${scenario.name} receipt closes the same durable service mutation`, async (t) => {
     const fx = await fixture(t, scenario.operation, scenario.payload);
-    await fx.receiptStore.write({ serverId: fx.server.id, jobId: fx.jobId, ...scenario.receipt });
+    const recordedState = nginxActiveState();
+    await fx.receiptStore.write({
+      serverId: fx.server.id,
+      jobId: fx.jobId,
+      ...scenario.receipt,
+      state: recordedState,
+    });
 
     const recovered = await recoverRunningServiceReceiptMutation({
       serverId: fx.server.id,
@@ -89,7 +95,7 @@ for (const scenario of [
       serviceStatus: stoppedConsumers,
       loadJobContext: (id) => fx.contextReader.read(id),
       readMutationReceipt: (serverId, jobId) => fx.receiptStore.read(serverId, jobId),
-      inspectServiceState: async () => nginxActiveState(),
+      inspectServiceState: async () => recordedState,
     });
 
     assert.equal(recovered.status, 'succeeded');
