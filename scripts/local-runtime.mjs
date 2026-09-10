@@ -2,28 +2,40 @@
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  resolveLocalMigrationBackupDirectory,
+  verifyLocalMigrationBackup,
+} from '../apps/api/src/local-migration-backup.js';
 import { runLocalMigrationCommand } from '../apps/api/src/local-migration-cli.js';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const PACKAGED_SCRIPT_ROOT = '/usr/lib/yunpanel/scripts';
-const USAGE = 'Usage: local-runtime.mjs create --confirm | status <server-uuid> | bind <server-uuid> --confirm | release <server-uuid> --confirm';
+const USAGE = 'Usage: local-runtime.mjs create --backup-dir <snapshot> --confirm | status <server-uuid> | bind <server-uuid> --backup-dir <snapshot> --confirm | release <server-uuid> --backup-dir <snapshot> --confirm';
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+
+function parseMutationOptions(values, action) {
+  if (values.length !== 3 || values[0] !== '--backup-dir' || typeof values[1] !== 'string'
+    || !path.isAbsolute(values[1]) || values[2] !== '--confirm') {
+    throw new Error(`${action} requires exactly --backup-dir <absolute-snapshot> --confirm`);
+  }
+  return { backupDirectory: path.resolve(values[1]), confirm: true };
+}
 
 export function parseLocalRuntimeArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
-  const [action, serverId, ...rest] = argv;
+  const [action, value, ...rest] = argv;
   if (action === 'create') {
-    if (serverId !== '--confirm' || rest.length !== 0) throw new Error('create requires exactly --confirm');
-    return { action: 'create', confirm: true };
+    const options = parseMutationOptions([value, ...rest], action);
+    return { action: 'create', ...options };
   }
-  if (!['status', 'bind', 'release'].includes(action) || typeof serverId !== 'string' || !serverId) {
+  if (!['status', 'bind', 'release'].includes(action) || typeof value !== 'string' || !value) {
     throw new Error(USAGE);
   }
-  const confirm = rest.length === 1 && rest[0] === '--confirm';
-  if (action === 'status' && rest.length !== 0) throw new Error('status does not accept extra arguments');
-  if ((action === 'bind' || action === 'release') && (!confirm || rest.length !== 1)) {
-    throw new Error(`${action} requires exactly --confirm`);
+  if (action === 'status') {
+    if (rest.length !== 0) throw new Error('status does not accept extra arguments');
+    return { action, serverId: value, confirm: false };
   }
-  return { action, serverId, confirm };
+  return { action, serverId: value, ...parseMutationOptions(rest, action) };
 }
 
 export function isPackagedLocalRuntimeScript(filePath = scriptPath) {
@@ -33,6 +45,16 @@ export function isPackagedLocalRuntimeScript(filePath = scriptPath) {
 
 export function assertPackagedRoot({ packaged, uid = process.getuid?.() } = {}) {
   if (packaged && uid !== 0) throw new Error('Packaged local-runtime migration must be run as root');
+}
+
+function validateBackupVerification(result, expectedDirectory) {
+  if (!result || result.verified !== true || result.backupDirectory !== expectedDirectory
+    || result.archivePath !== path.join(expectedDirectory, 'state.tar')
+    || result.manifestPath !== path.join(expectedDirectory, 'manifest.json')
+    || typeof result.sha256 !== 'string' || !SHA256_PATTERN.test(result.sha256)) {
+    throw new Error('Verified migration backup acknowledgement is invalid');
+  }
+  return result;
 }
 
 function formatStatus(result) {
@@ -59,6 +81,7 @@ function formatMutation(result) {
     summary,
     `hostname=${result.hostname}`,
     `executionMode=${result.executionMode}`,
+    `verifiedBackup=${result.verifiedBackupDirectory}`,
     `serverStore=${result.statePaths.serverStore}`,
     `jobStore=${result.statePaths.jobStore}`,
   ];
@@ -80,12 +103,27 @@ export async function runLocalRuntimeCli({
   filePath = scriptPath,
   uid = process.getuid?.(),
   execute = runLocalMigrationCommand,
+  verifyBackup = verifyLocalMigrationBackup,
   stdout = process.stdout,
 } = {}) {
   const parsed = parseLocalRuntimeArguments(argv);
   const packaged = isPackagedLocalRuntimeScript(filePath);
   assertPackagedRoot({ packaged, uid });
-  const result = await execute({ ...parsed, hostname, env, packaged, cwd: process.cwd() });
+  if (typeof execute !== 'function' || typeof verifyBackup !== 'function' || !stdout || typeof stdout.write !== 'function') {
+    throw new Error('Local runtime CLI dependencies are invalid');
+  }
+
+  let verification = null;
+  if (parsed.action !== 'status') {
+    const backupDirectory = resolveLocalMigrationBackupDirectory(parsed.backupDirectory);
+    verification = validateBackupVerification(await verifyBackup({ backupDirectory }), backupDirectory);
+  }
+
+  const { backupDirectory: _backupDirectory, ...migrationInput } = parsed;
+  const executed = await execute({ ...migrationInput, hostname, env, packaged, cwd: process.cwd() });
+  const result = verification
+    ? Object.freeze({ ...executed, verifiedBackupDirectory: verification.backupDirectory })
+    : executed;
   stdout.write(`${parsed.action === 'status' ? formatStatus(result) : formatMutation(result)}\n`);
   return result;
 }
@@ -97,3 +135,10 @@ if (invoked === import.meta.url) {
     process.exitCode = 1;
   });
 }
+
+export const localRuntimeCliInternals = Object.freeze({
+  packagedScriptRoot: PACKAGED_SCRIPT_ROOT,
+  validateBackupVerification,
+  formatStatus,
+  formatMutation,
+});
