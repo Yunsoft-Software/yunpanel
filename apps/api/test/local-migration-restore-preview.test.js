@@ -26,13 +26,26 @@ function verification(entries) {
   };
 }
 
+function archiveMembers() {
+  return [
+    { name: 'etc/yunpanel', type: 'd', root: '/etc/yunpanel', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o750, metadataMarker: null },
+    { name: 'etc/yunpanel/api.env', type: '-', root: '/etc/yunpanel', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o640, metadataMarker: '*' },
+    { name: 'var/lib/yunpanel', type: 'd', root: '/var/lib/yunpanel', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o700, metadataMarker: null },
+    { name: 'var/lib/yunpanel/state.json', type: '-', root: '/var/lib/yunpanel', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o600, metadataMarker: null },
+  ];
+}
+
 function archiveInspection(overrides = {}) {
+  const members = archiveMembers();
   return {
     destructive: false,
     linksSafe: true,
+    ownershipMetadata: true,
+    extendedMetadataValidated: false,
     backupDirectory,
     sha256: 'a'.repeat(64),
-    counts: { total: 4, files: 2, directories: 2, symlinks: 0, hardlinks: 0 },
+    counts: { total: 4, files: 2, directories: 2, symlinks: 0, hardlinks: 0, extendedMetadata: 1 },
+    members,
     ...overrides,
   };
 }
@@ -53,7 +66,7 @@ function identityComparison(overrides = {}) {
   };
 }
 
-test('restore preview shares one verified backup with archive and Unix identity inspection', async () => {
+test('restore preview shares one verified backup with complete archive metadata and Unix identity inspection', async () => {
   const entries = [
     { path: '/etc/yunpanel', type: 'directory', present: true },
     { path: '/var/lib/yunpanel', type: 'directory', present: true },
@@ -95,6 +108,9 @@ test('restore preview shares one verified backup with archive and Unix identity 
 
   assert.equal(result.destructive, false);
   assert.equal(result.archiveInspection.linksSafe, true);
+  assert.equal(result.archiveInspection.ownershipMetadata, true);
+  assert.equal(result.archiveInspection.extendedMetadataValidated, false);
+  assert.equal(result.archiveInspection.members[1].mode, 0o640);
   assert.equal(result.targets.find((entry) => entry.path === '/etc/yunpanel').action, 'restore_replace');
   assert.equal(result.targets.find((entry) => entry.path === '/etc/letsencrypt').action, 'restore_missing');
   assert.equal(result.targets.find((entry) => entry.path === '/etc/nginx').action, 'preserve_current');
@@ -167,32 +183,43 @@ test('invalid or outside-root backup acknowledgement never reaches archive or ta
 
 test('invalid archive inspection acknowledgement fails closed before target inspection', async () => {
   let inspected = false;
-  await assert.rejects(
-    previewLocalMigrationRestore({
-      backupDirectory,
-      verifyBackup: async () => verification([]),
-      inspectArchive: async () => archiveInspection({ linksSafe: false }),
-      compareIdentities: async () => identityComparison(),
-      lstatFn: async () => { inspected = true; return metadata('directory'); },
-    }),
-    { code: 'migration_restore_archive_result_invalid' },
-  );
+  for (const invalid of [
+    { linksSafe: false },
+    { ownershipMetadata: false },
+    { extendedMetadataValidated: true },
+    { members: archiveMembers().map(({ uid, ...member }) => member) },
+    { members: archiveMembers().map((member, index) => index === 0 ? { ...member, mode: 0o10000 } : member) },
+  ]) {
+    await assert.rejects(
+      previewLocalMigrationRestore({
+        backupDirectory,
+        verifyBackup: async () => verification([]),
+        inspectArchive: async () => archiveInspection(invalid),
+        compareIdentities: async () => identityComparison(),
+        lstatFn: async () => { inspected = true; return metadata('directory'); },
+      }),
+      { code: 'migration_restore_archive_result_invalid' },
+    );
+  }
   assert.equal(inspected, false);
 });
 
-test('archive inspection count mismatch fails closed', async () => {
-  await assert.rejects(
-    previewLocalMigrationRestore({
-      backupDirectory,
-      verifyBackup: async () => verification([]),
-      inspectArchive: async () => archiveInspection({
-        counts: { total: 5, files: 2, directories: 2, symlinks: 0, hardlinks: 0 },
+test('archive inspection count and extended-metadata mismatch fail closed', async () => {
+  for (const counts of [
+    { total: 5, files: 2, directories: 2, symlinks: 0, hardlinks: 0, extendedMetadata: 1 },
+    { total: 4, files: 2, directories: 2, symlinks: 0, hardlinks: 0, extendedMetadata: 0 },
+  ]) {
+    await assert.rejects(
+      previewLocalMigrationRestore({
+        backupDirectory,
+        verifyBackup: async () => verification([]),
+        inspectArchive: async () => archiveInspection({ counts }),
+        compareIdentities: async () => identityComparison(),
+        lstatFn: async () => metadata('directory'),
       }),
-      compareIdentities: async () => identityComparison(),
-      lstatFn: async () => metadata('directory'),
-    }),
-    { code: 'migration_restore_archive_result_invalid' },
-  );
+      { code: 'migration_restore_archive_result_invalid' },
+    );
+  }
 });
 
 test('unexpected archive inspector errors are redacted by restore preview', async () => {
