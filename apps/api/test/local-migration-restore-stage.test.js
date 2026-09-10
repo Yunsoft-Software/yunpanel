@@ -18,17 +18,17 @@ const sha256 = 'a'.repeat(64);
 
 function members() {
   return [
-    { name: 'etc/yunpanel', type: 'd', root: '/etc/yunpanel', resolvedLinkTarget: null },
-    { name: 'etc/yunpanel/api.env', type: '-', root: '/etc/yunpanel', resolvedLinkTarget: null },
-    { name: 'etc/yunpanel/api-link', type: 'l', root: '/etc/yunpanel', resolvedLinkTarget: 'etc/yunpanel/api.env' },
-    { name: 'var/lib/yunpanel', type: 'd', root: '/var/lib/yunpanel', resolvedLinkTarget: null },
-    { name: 'var/lib/yunpanel/data', type: 'd', root: '/var/lib/yunpanel', resolvedLinkTarget: null },
-    { name: 'var/lib/yunpanel/data/file', type: '-', root: '/var/lib/yunpanel', resolvedLinkTarget: null },
-    { name: 'var/lib/yunpanel/data/hard', type: 'h', root: '/var/lib/yunpanel', resolvedLinkTarget: 'var/lib/yunpanel/data/file' },
+    { name: 'etc/yunpanel', type: 'd', root: '/etc/yunpanel', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o750, metadataMarker: null },
+    { name: 'etc/yunpanel/api.env', type: '-', root: '/etc/yunpanel', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o640, metadataMarker: '*' },
+    { name: 'etc/yunpanel/api-link', type: 'l', root: '/etc/yunpanel', resolvedLinkTarget: 'etc/yunpanel/api.env', uid: 0, gid: 0, mode: 0o777, metadataMarker: null },
+    { name: 'var/lib/yunpanel', type: 'd', root: '/var/lib/yunpanel', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o700, metadataMarker: null },
+    { name: 'var/lib/yunpanel/data', type: 'd', root: '/var/lib/yunpanel', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o750, metadataMarker: null },
+    { name: 'var/lib/yunpanel/data/file', type: '-', root: '/var/lib/yunpanel', resolvedLinkTarget: null, uid: 101, gid: 101, mode: 0o640, metadataMarker: null },
+    { name: 'var/lib/yunpanel/data/hard', type: 'h', root: '/var/lib/yunpanel', resolvedLinkTarget: 'var/lib/yunpanel/data/file', uid: 101, gid: 101, mode: 0o640, metadataMarker: null },
   ];
 }
 
-function preview(memberList = members()) {
+function preview(memberList = members(), overrides = {}) {
   return {
     destructive: false,
     backupDirectory,
@@ -38,6 +38,8 @@ function preview(memberList = members()) {
     archiveInspection: {
       destructive: false,
       linksSafe: true,
+      ownershipMetadata: true,
+      extendedMetadataValidated: false,
       backupDirectory,
       sha256,
       counts: {
@@ -46,9 +48,12 @@ function preview(memberList = members()) {
         directories: memberList.filter((entry) => entry.type === 'd').length,
         symlinks: memberList.filter((entry) => entry.type === 'l').length,
         hardlinks: memberList.filter((entry) => entry.type === 'h').length,
+        extendedMetadata: memberList.filter((entry) => entry.metadataMarker !== null).length,
       },
       members: memberList,
+      ...(overrides.archiveInspection ?? {}),
     },
+    ...overrides,
   };
 }
 
@@ -68,7 +73,7 @@ async function createFixture(t) {
   return { root, stageRoot: path.join(root, 'restore-staging') };
 }
 
-test('restore staging extracts only into a private isolated tree and validates archive members', async (t) => {
+test('restore staging extracts only into a private isolated tree and preserves owner-mode evidence without applying it', async (t) => {
   const { stageRoot } = await createFixture(t);
   const tarCalls = [];
   const result = await stageLocalMigrationRestore({
@@ -86,6 +91,9 @@ test('restore staging extracts only into a private isolated tree and validates a
   assert.equal(result.validated, true);
   assert.equal(result.liveMutation, false);
   assert.equal(result.destructive, false);
+  assert.equal(result.ownershipMetadata, true);
+  assert.equal(result.extendedMetadata, 1);
+  assert.equal(result.extendedMetadataValidated, false);
   assert.equal(result.members, members().length);
   assert.equal(path.dirname(result.stageDirectory), stageRoot);
   assert.equal((await lstat(stageRoot)).mode & 0o777, 0o700);
@@ -101,6 +109,46 @@ test('restore staging extracts only into a private isolated tree and validates a
   const hard = await lstat(path.join(result.stageDirectory, 'var/lib/yunpanel/data/hard'));
   assert.equal(source.dev, hard.dev);
   assert.equal(source.ino, hard.ino);
+});
+
+test('missing or malformed archive ownership metadata is rejected before staging root creation', async (t) => {
+  const { stageRoot } = await createFixture(t);
+  const invalidSets = [
+    members().map((entry, index) => index === 0 ? Object.fromEntries(Object.entries(entry).filter(([key]) => key !== 'uid')) : entry),
+    members().map((entry, index) => index === 0 ? { ...entry, gid: -1 } : entry),
+    members().map((entry, index) => index === 0 ? { ...entry, mode: 0o10000 } : entry),
+    members().map((entry, index) => index === 0 ? { ...entry, metadataMarker: '@' } : entry),
+  ];
+  for (const invalid of invalidSets) {
+    await assert.rejects(
+      stageLocalMigrationRestore({
+        backupDirectory,
+        stageRoot,
+        previewRestore: async () => preview(invalid),
+        runTar: async () => { throw new Error('must not extract'); },
+      }),
+      { code: 'migration_restore_stage_preview_invalid' },
+    );
+  }
+  await assert.rejects(lstat(stageRoot), { code: 'ENOENT' });
+});
+
+test('extended metadata count drift is rejected before extraction', async (t) => {
+  const { stageRoot } = await createFixture(t);
+  let tarCalls = 0;
+  await assert.rejects(
+    stageLocalMigrationRestore({
+      backupDirectory,
+      stageRoot,
+      previewRestore: async () => preview(members(), {
+        archiveInspection: { counts: { total: 7, files: 2, directories: 3, symlinks: 1, hardlinks: 1, extendedMetadata: 0 } },
+      }),
+      runTar: async () => { tarCalls += 1; },
+    }),
+    { code: 'migration_restore_stage_preview_invalid' },
+  );
+  assert.equal(tarCalls, 0);
+  await assert.rejects(lstat(stageRoot), { code: 'ENOENT' });
 });
 
 test('unexpected extracted members fail closed and the partial stage is removed', async (t) => {
