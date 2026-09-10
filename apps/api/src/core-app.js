@@ -8,7 +8,7 @@ import { createApplicationRegistry, ApplicationRegistryError } from './applicati
 import { createCertificateRegistry, CertificateRegistryError } from './certificate-registry.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
-import { reconcileCompletedJob } from './job-reconciliation.js';
+import { JobReconciliationError, reconcileCompletedJob } from './job-reconciliation.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 
@@ -475,11 +475,12 @@ export function createApp({
       error instanceof RegistryError
       || error instanceof DomainRegistryError
       || error instanceof JobRegistryError
+      || error instanceof JobReconciliationError
       || error instanceof CertificateRegistryError
       || error instanceof ApplicationRegistryError
       || error instanceof ApplicationEnvironmentRegistryError
     ) {
-      return response.status(error.status).json({ error: { code: error.code, message: error.message } });
+      return response.status(error.status ?? 409).json({ error: { code: error.code, message: error.message } });
     }
     const isJsonSyntaxError = error instanceof SyntaxError && error.status === 400;
     return response.status(isJsonSyntaxError ? 400 : 500).json({

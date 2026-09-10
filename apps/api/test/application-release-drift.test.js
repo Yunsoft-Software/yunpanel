@@ -95,8 +95,13 @@ test('successful agent deploy result cannot overwrite control-plane state when p
         },
       },
     );
-    assert.equal(completed.response.status, 200);
-    assert.equal(completed.payload.data.status, 'succeeded');
+    assert.equal(completed.response.status, 409);
+    assert.deepEqual(completed.payload, {
+      error: {
+        code: 'reconcile_release_state_drift',
+        message: 'Completed job reconciliation failed',
+      },
+    });
 
     const state = await applicationRegistry.getApplication(application.id);
     assert.equal(state.state, 'active');
