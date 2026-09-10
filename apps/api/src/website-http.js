@@ -26,12 +26,13 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountWebsiteRoutes(app, { websiteRegistry } = {}) {
+export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
   if (!websiteRegistry || typeof websiteRegistry.listWebsites !== 'function'
     || typeof websiteRegistry.getWebsite !== 'function' || typeof websiteRegistry.createWebsite !== 'function') {
     throw new Error('Website registry is required');
   }
+  if (!domainRegistry || typeof domainRegistry.listDomains !== 'function') throw new Error('Domain registry is required for Website relationships');
 
   app.get('/api/websites', requirePanelRouteAccess, asyncRoute(async (request, response) => (
     response.json({ data: await websiteRegistry.listWebsites(listFilter(request.query)) })
@@ -41,6 +42,13 @@ export function mountWebsiteRoutes(app, { websiteRegistry } = {}) {
     const website = await websiteRegistry.getWebsite(request.params.websiteId);
     if (!website) throw new WebsiteRegistryError('website_not_found', 'Website not found', 404);
     return response.json({ data: website });
+  }));
+
+  app.get('/api/websites/:websiteId/domains', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const website = await websiteRegistry.getWebsite(request.params.websiteId);
+    if (!website) throw new WebsiteRegistryError('website_not_found', 'Website not found', 404);
+    const domains = (await domainRegistry.listDomains()).filter((domain) => domain.websiteId === website.id);
+    return response.json({ data: domains });
   }));
 
   app.post('/api/websites', requirePanelRouteAccess, asyncRoute(async (request, response) => {
