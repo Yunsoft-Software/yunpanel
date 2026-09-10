@@ -11,22 +11,24 @@ test('describes owner and read-only capability surfaces without client input', (
   assert.deepEqual(describePanelAccess({ ...owner, security: { ...owner.security, managementAllowed: false } }).access, { mode: 'self_service', permissions: [] });
 });
 
-test('read-only inventory rules are exact and exclude nested sensitive GETs', () => {
+test('read-only inventory rules are exact and expose only safe Website nested domains', () => {
   for (const [path, permission] of [
     ['/api/servers', 'servers.read'], ['/api/servers/server-1', 'servers.read'],
-    ['/api/websites', 'websites.read'], ['/api/websites/website-1', 'websites.read'],
+    ['/api/websites', 'websites.read'], ['/api/websites/website-1', 'websites.read'], ['/api/websites/website-1/domains', 'websites.read'],
     ['/api/applications', 'applications.read'], ['/api/applications/app-1', 'applications.read'],
     ['/api/domains/domain-1', 'domains.read'], ['/api/certificates/cert-1', 'certificates.read'],
   ]) assert.equal(readOnlyPermission('GET', path), permission);
-  for (const path of ['/api/jobs', '/api/users', '/api/audit', '/api/websites/website-1/environment', '/api/applications/app-1/environment', '/api/applications/app-1/status', '/api/dev/servers', '/api/servers/server-1/system/packages/inspect']) {
-    assert.equal(readOnlyPermission('GET', path), null);
-  }
+  for (const path of [
+    '/api/jobs', '/api/users', '/api/audit', '/api/websites/website-1/environment', '/api/websites/website-1/domains/extra',
+    '/api/applications/app-1/environment', '/api/applications/app-1/status', '/api/dev/servers', '/api/servers/server-1/system/packages/inspect',
+  ]) assert.equal(readOnlyPermission('GET', path), null);
   assert.equal(readOnlyPermission('POST', '/api/websites'), null);
   assert.equal(readOnlyPermission('POST', '/api/domains'), null);
 });
 
 test('read-only request guard rejects mutations, sensitive reads and other roles', () => {
   assert.equal(requireReadOnlyRequest(reader, 'HEAD', '/api/websites').access.mode, 'read_only');
+  assert.equal(requireReadOnlyRequest(reader, 'HEAD', '/api/websites/website-1/domains').access.mode, 'read_only');
   assert.equal(requireReadOnlyRequest(reader, 'HEAD', '/api/domains').access.mode, 'read_only');
   assert.throws(() => requireReadOnlyRequest(reader, 'POST', '/api/websites'), { status: 403, code: 'forbidden' });
   assert.throws(() => requireReadOnlyRequest(reader, 'POST', '/api/domains'), { status: 403, code: 'forbidden' });
