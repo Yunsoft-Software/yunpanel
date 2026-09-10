@@ -1,5 +1,6 @@
 import express from 'express';
 import { createApp as createCoreApp } from './core-app.js';
+import { DatabaseHttpError, mountDatabaseRoutes } from './database-http.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
 import { createDomainHandler } from './domain-http.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
@@ -26,11 +27,13 @@ export function createApp({
   app.use(express.json({ limit: '256kb' }));
   app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry));
   mountManagedServiceRoutes(app, { registry, jobRegistry });
+  mountDatabaseRoutes(app, { registry, jobRegistry });
   app.use(core);
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
     if (
-      error instanceof DomainRegistryError
+      error instanceof DatabaseHttpError
+      || error instanceof DomainRegistryError
       || error instanceof RegistryError
       || error instanceof JobRegistryError
       || error instanceof ManagedServiceHttpError
