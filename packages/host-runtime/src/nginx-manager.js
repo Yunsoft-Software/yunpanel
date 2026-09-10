@@ -76,13 +76,43 @@ export function createNginxManager({
     await renameFn(temporaryPath, targetPath);
   }
 
-  async function stageDomain(spec) {
+  function expectedStage(spec) {
     const config = renderDomainConfig(spec);
-    const configName = configNameForDomain(spec.primaryDomain);
-    const stagePath = path.join(stagingDir, configName);
+    return {
+      config,
+      configName: configNameForDomain(spec.primaryDomain),
+      checksum: sha256(config),
+      bytes: Buffer.byteLength(config),
+    };
+  }
+
+  async function stageDomain(spec) {
+    const expected = expectedStage(spec);
+    const stagePath = path.join(stagingDir, expected.configName);
     await mkdirFn(stagingDir, { recursive: true, mode: 0o750 });
-    await atomicWrite(stagePath, config, 0o640);
-    return { configName, checksum: sha256(config), bytes: Buffer.byteLength(config) };
+    await atomicWrite(stagePath, expected.config, 0o640);
+    return { configName: expected.configName, checksum: expected.checksum, bytes: expected.bytes };
+  }
+
+  async function inspectStagedDomain(spec) {
+    const expected = expectedStage(spec);
+    const stagePath = path.join(stagingDir, expected.configName);
+    let current;
+    try {
+      current = await readFileFn(stagePath, 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        return { satisfied: false, result: null };
+      }
+      throw new NginxManagerError('staged_config_inspection_failed', 'Staged Nginx configuration could not be inspected');
+    }
+    if (sha256(current) !== expected.checksum || current !== expected.config) {
+      return { satisfied: false, result: null };
+    }
+    return {
+      satisfied: true,
+      result: { configName: expected.configName, checksum: expected.checksum, bytes: expected.bytes },
+    };
   }
 
   async function restoreActive(activePath, previousContent) {
@@ -138,7 +168,7 @@ export function createNginxManager({
     return run;
   }
 
-  return { stageDomain, activateDomain };
+  return { stageDomain, inspectStagedDomain, activateDomain };
 }
 
 export const nginxManager = createNginxManager();
