@@ -1,6 +1,21 @@
 import { OPERATIONS } from '@yunpanel/protocol';
 import { acknowledgeAutomaticJobReconciliation } from './durable-job-registry.js';
 
+const SAFE_ERROR_CODE = /^[a-z0-9_.-]{1,80}$/;
+
+export class JobReconciliationError extends Error {
+  constructor(code) {
+    super('Completed job reconciliation failed');
+    this.name = 'JobReconciliationError';
+    this.code = code;
+  }
+}
+
+function safeReconciliationCode(error) {
+  const suffix = typeof error?.code === 'string' && SAFE_ERROR_CODE.test(error.code) ? error.code : 'failed';
+  return `reconcile_${suffix}`;
+}
+
 async function reconcileApplicationJob(applicationRegistry, job) {
   const application = await applicationRegistry.getApplication(job.resourceId);
   if (!application) return;
@@ -84,16 +99,16 @@ async function applyReconciliation({ domainRegistry, certificateRegistry, applic
 /**
  * Apply a completed job to its desired-state registry without coupling that
  * state transition to the transport that executed the operation. Reconciliation
- * failures are converted to a resource error exactly as the legacy agent result
- * route did, so agent and local execution share one behavior. When a production
- * durable registry armed automatic reconciliation for a legacy result, its
- * recovery journal is acknowledged only after the resource transition succeeds.
+ * failures are recorded on the resource where possible, then raised as a safe
+ * control-plane failure so HTTP/local callers cannot report false success.
+ * Automatic durable reconciliation is acknowledged only after this transition
+ * succeeds; failed reconciliation therefore remains visible in recovery state.
  */
 export async function reconcileCompletedJob({ domainRegistry, certificateRegistry, applicationRegistry, job }) {
   try {
     await applyReconciliation({ domainRegistry, certificateRegistry, applicationRegistry, job });
   } catch (error) {
-    const code = `reconcile_${error.code ?? 'failed'}`;
+    const code = safeReconciliationCode(error);
     try {
       if (job.resourceType === 'domain') {
         await domainRegistry.markFailed(job.resourceId, code);
@@ -104,12 +119,14 @@ export async function reconcileCompletedJob({ domainRegistry, certificateRegistr
         if (application?.activeDeploymentId === job.id) await applicationRegistry.markFailed(job.resourceId, job.id, code);
       }
     } catch {
-      // The job is already terminal. Preserve its sanitized result and surface the
-      // original reconciliation failure to diagnostics instead of corrupting it.
+      // The job is already terminal. Preserve its sanitized result and retain the
+      // durable recovery journal instead of replacing the original failure.
     }
-    return { reconciled: false, error: { code, message: error.message } };
+    throw new JobReconciliationError(code);
   }
 
   await acknowledgeAutomaticJobReconciliation(job);
   return { reconciled: true, error: null };
 }
+
+export const jobReconciliationInternals = Object.freeze({ safeReconciliationCode });
