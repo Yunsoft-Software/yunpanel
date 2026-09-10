@@ -1,5 +1,7 @@
 import { createJobRecoveryStore } from './job-recovery-store.js';
 
+const automaticReconciliationAcks = new WeakMap();
+
 export class DurableJobRegistryError extends Error {
   constructor(code, message) {
     super(message);
@@ -40,15 +42,26 @@ function uniqueRecoveryJobs(jobs) {
   return output;
 }
 
+export async function acknowledgeAutomaticJobReconciliation(job) {
+  if (!job || typeof job !== 'object') return false;
+  const acknowledge = automaticReconciliationAcks.get(job);
+  if (typeof acknowledge !== 'function') return false;
+  await acknowledge();
+  automaticReconciliationAcks.delete(job);
+  return true;
+}
+
 export function createDurableJobRegistry({
   filePath,
   registryFactory,
   recoveryStoreFactory = createJobRecoveryStore,
+  automaticReconciliation = false,
   now = () => Date.now(),
 } = {}) {
   if (typeof filePath !== 'string' || !filePath) throw new DurableJobRegistryError('durable_job_store_required', 'Durable job registry requires a file path');
   if (typeof registryFactory !== 'function') throw new DurableJobRegistryError('durable_job_factory_required', 'Durable job registry requires a registry factory');
   if (typeof recoveryStoreFactory !== 'function') throw new DurableJobRegistryError('durable_job_recovery_factory_required', 'Durable job registry requires a recovery store factory');
+  if (typeof automaticReconciliation !== 'boolean') throw new DurableJobRegistryError('durable_job_reconciliation_mode_invalid', 'Durable job automatic reconciliation mode is invalid');
 
   const recoveryFilePath = `${filePath}.recovery.json`;
   let registry = registryFactory({ filePath, now });
@@ -59,6 +72,7 @@ export function createDurableJobRegistry({
   let fatal = null;
   let recovery = null;
   const reconciliationPending = new Set();
+  const explicitlyBegunReconciliation = new Set();
 
   function assertHealthy() {
     if (fatal) throw new DurableJobRegistryError(fatal.code, fatal.message);
@@ -162,6 +176,7 @@ export function createDurableJobRegistry({
     const storedJobs = recoverySnapshotJobs();
     const jobs = uniqueRecoveryJobs([...storedJobs, ...runningJobs]);
     reconciliationPending.clear();
+    explicitlyBegunReconciliation.clear();
 
     for (const identity of storedJobs) {
       let job;
@@ -212,17 +227,42 @@ export function createDurableJobRegistry({
     }
   }
 
+  async function prepareAutomaticReconciliation(input) {
+    if (!automaticReconciliation) return null;
+    const identity = safeRecoveryJob({ id: input?.jobId, serverId: input?.serverId });
+    if (!identity) return null;
+    const key = recoveryKey(identity);
+    if (explicitlyBegunReconciliation.has(key)) return { identity, key, explicit: true };
+
+    let job;
+    try {
+      job = await registry.getJob(identity.jobId);
+    } catch {
+      latch('durable_job_recovery_scan_failed', 'Durable job registry could not inspect recovery state');
+    }
+    if (job?.serverId === identity.serverId && job.status === 'running') {
+      await addRecoveryJob(identity);
+      reconciliationPending.add(key);
+      setRecovery([...(recovery?.jobs ?? []), identity]);
+    }
+    return { identity, key, explicit: false };
+  }
+
   async function mutate(method, args) {
     await init();
     const operation = mutationTail.then(async () => {
       assertMutationAllowed(method);
       if (typeof registry[method] !== 'function') throw new DurableJobRegistryError('durable_job_method_missing', `Durable job registry does not implement ${method}`);
       try {
+        const automatic = method === 'complete' ? await prepareAutomaticReconciliation(args[0] ?? {}) : null;
         const result = await registry[method](...args);
-        if (method === 'complete' && recovery) {
+        if (method === 'complete') {
           const input = args[0] ?? {};
-          const identity = safeRecoveryJob({ id: input.jobId, serverId: input.serverId });
-          if (identity && !reconciliationPending.has(recoveryKey(identity))) {
+          const identity = automatic?.identity ?? safeRecoveryJob({ id: input.jobId, serverId: input.serverId });
+          const key = identity ? recoveryKey(identity) : null;
+          if (automaticReconciliation && identity && key && !automatic?.explicit && reconciliationPending.has(key)) {
+            automaticReconciliationAcks.set(result, () => acknowledgeReconciliation(identity));
+          } else if (recovery && identity && key && !reconciliationPending.has(key)) {
             await removeRecoveryJob(identity);
             await detectRecovery(registry);
           }
@@ -255,7 +295,9 @@ export function createDurableJobRegistry({
       if (job.status !== 'running') throw new DurableJobRegistryError('durable_job_reconciliation_not_running', 'Only running jobs can enter durable reconciliation');
 
       await addRecoveryJob(identity);
-      reconciliationPending.add(recoveryKey(identity));
+      const key = recoveryKey(identity);
+      reconciliationPending.add(key);
+      explicitlyBegunReconciliation.add(key);
       setRecovery([...(recovery?.jobs ?? []), identity]);
       return { jobId, serverId, status: job.status, pending: true };
     });
@@ -285,11 +327,13 @@ export function createDurableJobRegistry({
         if (reconciliationPending.has(key) || recovery?.jobs.some((candidate) => recoveryKey(candidate) === key)) {
           latch('durable_job_recovery_state_invalid', 'Durable job recovery memory does not match the recovery record');
         }
+        explicitlyBegunReconciliation.delete(key);
         return { jobId, serverId, status: job.status, acknowledged: false };
       }
 
       await removeRecoveryJob(identity);
       reconciliationPending.delete(key);
+      explicitlyBegunReconciliation.delete(key);
       setRecovery((recovery?.jobs ?? []).filter((candidate) => recoveryKey(candidate) !== key));
       return { jobId, serverId, status: job.status, acknowledged: true };
     });

@@ -1,4 +1,5 @@
 import { OPERATIONS } from '@yunpanel/protocol';
+import { acknowledgeAutomaticJobReconciliation } from './durable-job-registry.js';
 
 async function reconcileApplicationJob(applicationRegistry, job) {
   const application = await applicationRegistry.getApplication(job.resourceId);
@@ -84,12 +85,13 @@ async function applyReconciliation({ domainRegistry, certificateRegistry, applic
  * Apply a completed job to its desired-state registry without coupling that
  * state transition to the transport that executed the operation. Reconciliation
  * failures are converted to a resource error exactly as the legacy agent result
- * route did, so agent and future local execution share one behavior.
+ * route did, so agent and local execution share one behavior. When a production
+ * durable registry armed automatic reconciliation for a legacy result, its
+ * recovery journal is acknowledged only after the resource transition succeeds.
  */
 export async function reconcileCompletedJob({ domainRegistry, certificateRegistry, applicationRegistry, job }) {
   try {
     await applyReconciliation({ domainRegistry, certificateRegistry, applicationRegistry, job });
-    return { reconciled: true, error: null };
   } catch (error) {
     const code = `reconcile_${error.code ?? 'failed'}`;
     try {
@@ -107,4 +109,7 @@ export async function reconcileCompletedJob({ domainRegistry, certificateRegistr
     }
     return { reconciled: false, error: { code, message: error.message } };
   }
+
+  await acknowledgeAutomaticJobReconciliation(job);
+  return { reconciled: true, error: null };
 }

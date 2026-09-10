@@ -39,7 +39,11 @@ const registry = createServerRegistry({ filePath: serverStorePath });
 await registry.init();
 const domainRegistry = createDomainRegistry({ filePath: domainStorePath, serverExists: async (serverId) => Boolean(await registry.getServer(serverId)) });
 await domainRegistry.init();
-const jobRegistry = createDurableJobRegistry({ filePath: jobStorePath, registryFactory: createJobRegistry });
+const jobRegistry = createDurableJobRegistry({
+  filePath: jobStorePath,
+  registryFactory: createJobRegistry,
+  automaticReconciliation: true,
+});
 await jobRegistry.init();
 const certificateRegistry = createCertificateRegistry({ filePath: certificateStorePath });
 await certificateRegistry.init();
