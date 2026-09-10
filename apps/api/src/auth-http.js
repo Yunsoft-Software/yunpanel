@@ -1,3 +1,4 @@
+import { handleAuditRead } from './audit-http.js';
 import { AuthError, safeEqual } from './auth-error.js';
 import { createOwnerMfaPolicy } from './owner-mfa-policy.js';
 import { requireReadOnlyRequest } from './panel-access.js';
@@ -44,7 +45,7 @@ function readJson(request) {
       } catch { reject(new AuthError('invalid_json', 'Enter a valid JSON object.')); }
     });
     request.on('error', reject);
-    request.on('aborted', () => reject(new AuthError('request_aborted', 'Request was interrupted.')));
+    request.on('aborted', () => reject(new AuthError('request_aborted', 'Request was interrupted.'));
   });
 }
 
@@ -56,13 +57,10 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
   if (origin.origin !== publicOrigin || (origin.protocol !== 'https:' && !localDevelopment)) {
     throw new Error('Panel origin must be an exact HTTPS origin (HTTP is only allowed for loopback development)');
   }
-  // Only explicit loopback HTTP development is exempt. HTTPS always enforces MFA.
   const ownerPolicy = createOwnerMfaPolicy({ store, required: !localDevelopment });
   const cookieName = localDevelopment ? 'yunpanel_session' : '__Host-yunpanel_session';
   const mfaCookieName = localDevelopment ? 'yunpanel_mfa' : '__Host-yunpanel_mfa';
   const cookieOptions = `Path=/; HttpOnly; SameSite=Strict${localDevelopment ? '' : '; Secure'}`;
-  // Core/domain management routes consume request.auth directly. No bearer
-  // credential is generated or injected between the auth listener and handlers.
   const handler = createHandler();
 
   const readCookie = (request, name) => {
@@ -98,15 +96,13 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
     if (!pathname.startsWith('/api/')) return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
     if (pathname.startsWith('/api/dev/') && !development) return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
 
-    // These exact retained legacy transport routes still use their own agent credentials.
-    // Browser traffic cannot enter them; remove them alongside the agentless migration.
     if (isAgentRoute(request.method, pathname)) {
       if (request.headers.origin || request.headers.cookie) throw new AuthError('agent_channel_only', 'This route is not a browser management endpoint.', 403);
       return handler(request, response);
     }
     const rawToken = readCookie(request, cookieName);
     const challengeToken = readCookie(request, mfaCookieName);
-    const peer = request.socket.remoteAddress ?? 'unknown'; // Never trust caller-supplied forwarding headers.
+    const peer = request.socket.remoteAddress ?? 'unknown';
     if (pathname === '/api/auth/login' || pathname === '/api/auth/setup') {
       if (request.method !== 'POST') throw new AuthError('method_not_allowed', 'Use POST.', 405);
       checkOrigin(request);
@@ -143,8 +139,6 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
 
     const session = store.getSession(rawToken);
     if (!session) {
-      // A stale request may arrive after another request rotated the cookie.
-      // Do not erase the newer browser cookie; explicit logout still clears it.
       return json(response, 401, { error: { code: 'unauthorized', message: 'Sign in to continue.' }, setupRequired: pathname === '/api/auth/session' ? !store.configured() : undefined });
     }
     if (!SAFE_METHODS.has(request.method)) {
@@ -208,7 +202,6 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
       }
       return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
     }
-    // Restricted roles cross the management boundary only through explicitly declared routes.
     const authorized = session.user.role === 'read_only'
       ? requireReadOnlyRequest(ownerPolicy.describe(session), request.method, pathname)
       : ownerPolicy.requireManagement(session);
@@ -216,6 +209,9 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
     request.auth = authorized;
     if (pathname === '/api/users' || pathname.startsWith('/api/users/')) {
       return handleUserAdmin({ request, response, pathname, query: url.searchParams, store, rawToken, requireManagement: ownerPolicy.requireManagement, readJson, json });
+    }
+    if (pathname === '/api/audit') {
+      return handleAuditRead({ request, response, query: url.searchParams, store, json });
     }
     return handler(request, response);
   }
