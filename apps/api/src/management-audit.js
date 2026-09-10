@@ -18,6 +18,7 @@ export function classifyManagementMutation(method, pathname) {
   let parts;
 
   if (method === 'POST' && pathname === '/api/websites') return { action: 'website.create', resourceType: 'website', resourceId: 'new' };
+  if (method === 'POST' && pathname === '/api/websites/migration/bind') return { action: 'website.migration.bind', resourceType: 'website_migration', resourceId: 'bind' };
   if (method === 'POST' && pathname === '/api/applications') return { action: 'application.create', resourceType: 'application', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/domains') return { action: 'domain.create', resourceType: 'domain', resourceId: 'new' };
   if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/deploy$/)) && method === 'POST') return { action: 'application.deploy', resourceType: 'application', resourceId: parts[0] };
