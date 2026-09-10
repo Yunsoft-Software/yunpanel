@@ -12,14 +12,21 @@ function responseRecorder() {
   };
 }
 
-test('audit query accepts bounded pagination and exact actor/resource filters', () => {
-  const query = new URLSearchParams({ limit: '25', offset: '50', actorId: 'owner-1', resourceType: 'job', resourceId: 'job-1' });
+test('audit query accepts bounded pagination and exact actor resource action outcome time filters', () => {
+  const query = new URLSearchParams({
+    limit: '25', offset: '50', actorId: 'owner-1', resourceType: 'job', resourceId: 'job-1',
+    action: 'job.domain.stage', outcome: 'failed', from: '1000', to: '2000',
+  });
   assert.deepEqual(parseAuditQuery(query), {
     limit: 25,
     offset: 50,
     actorId: 'owner-1',
     resourceType: 'job',
     resourceId: 'job-1',
+    action: 'job.domain.stage',
+    outcome: 'failed',
+    from: 1000,
+    to: 2000,
   });
   assert.deepEqual(parseAuditQuery(new URLSearchParams()), {
     limit: 50,
@@ -27,6 +34,10 @@ test('audit query accepts bounded pagination and exact actor/resource filters', 
     actorId: null,
     resourceType: null,
     resourceId: null,
+    action: null,
+    outcome: null,
+    from: null,
+    to: null,
   });
 });
 
@@ -41,6 +52,11 @@ test('audit query rejects unknown duplicate incomplete and out-of-range filters'
     new URLSearchParams('offset=nope'),
     new URLSearchParams('resourceType=job'),
     new URLSearchParams('resourceId=job-1'),
+    new URLSearchParams('from=-1'),
+    new URLSearchParams('to=nope'),
+    new URLSearchParams('from=2000&to=1000'),
+    new URLSearchParams('action=x&action=y'),
+    new URLSearchParams('outcome=failed&outcome=succeeded'),
   ]) {
     assert.throws(
       () => parseAuditQuery(query),
@@ -57,24 +73,36 @@ test('audit read forwards only normalized filters and bounded store output', () 
   const result = handleAuditRead({
     request: { method: 'GET' },
     response,
-    query: new URLSearchParams('actorId=owner-1'),
+    query: new URLSearchParams('actorId=owner-1&action=user.updated&outcome=succeeded&from=1&to=2'),
     store: { audit: { list(input) { calls.push(input); return page; } } },
     json(_response, status, payload) { payloads.push({ status, payload }); return payload; },
   });
-  assert.deepEqual(calls, [{ limit: 50, offset: 0, actorId: 'owner-1', resourceType: null, resourceId: null }]);
+  assert.deepEqual(calls, [{
+    limit: 50,
+    offset: 0,
+    actorId: 'owner-1',
+    resourceType: null,
+    resourceId: null,
+    action: 'user.updated',
+    outcome: 'succeeded',
+    from: 1,
+    to: 2,
+  }]);
   assert.deepEqual(payloads, [{ status: 200, payload: { data: page } }]);
   assert.deepEqual(result, { data: page });
 });
 
 test('store-side invalid filters become 400 but real audit failures remain outages', () => {
   const { response } = responseRecorder();
-  assert.throws(
-    () => handleAuditRead({
-      request: { method: 'GET' }, response, query: new URLSearchParams('actorId=%00'),
-      store: { audit: { list() { throw new AuditStoreError('invalid_audit_event', 'unsafe actor'); } } }, json() {},
-    }),
-    (error) => error instanceof AuthError && error.code === 'invalid_audit_query' && error.status === 400,
-  );
+  for (const query of [new URLSearchParams('actorId=%00'), new URLSearchParams('outcome=unknown'), new URLSearchParams('action=UPPER')]) {
+    assert.throws(
+      () => handleAuditRead({
+        request: { method: 'GET' }, response, query,
+        store: { audit: { list() { throw new AuditStoreError('invalid_audit_filter', 'unsafe filter'); } } }, json() {},
+      }),
+      (error) => error instanceof AuthError && error.code === 'invalid_audit_query' && error.status === 400,
+    );
+  }
   const outage = new Error('disk unavailable');
   assert.throws(
     () => handleAuditRead({
