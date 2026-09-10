@@ -2,7 +2,7 @@
 
 ## Current model
 
-Domains and Websites are now separate persistent backend resources.
+Domains and Websites are separate persistent backend resources.
 
 A `Website` has its own stable UUID and owns the server/application/runtime/document-root/Unix-user binding. A domain record owns hostname-oriented state and may carry an explicit `websiteId` foreign key plus an explicit `parentDomainId`.
 
@@ -29,27 +29,45 @@ Current domain hierarchy rules:
 
 ## Hostname normalization
 
-Shared hostname validation canonicalizes internationalized domain names through Node's UTS-46/ASCII conversion. Unicode and equivalent punycode forms therefore persist and compare in one ASCII representation. Unicode dot variants are normalized before conversion.
+Shared hostname validation canonicalizes internationalized domain names through Node's UTS-46/ASCII conversion. Unicode and equivalent punycode forms persist and compare in one ASCII representation. Unicode dot variants are normalized before conversion.
 
 Duplicate domain/alias and parent-boundary checks operate on that canonical ASCII form. Wildcards remain outside the ordinary hostname validator and are a separate DNS/certificate feature.
 
 ## Migration boundary
 
-Existing domain files with no `websiteId` still open as `websiteId=null`; startup does not invent bindings from hostname, server or port. This is intentional.
+Existing domain files with no `websiteId` still open as `websiteId=null`; startup does not invent bindings from hostname, server or port.
 
-The remaining migration work must:
+A read-only migration planner is now available at:
 
-- produce a versioned/read-only mapping preview,
-- create/reuse Websites without changing current traffic targets,
-- bind legacy domains through the one-way migration primitive,
-- preserve domain/application IDs, certificate links, encrypted secrets and release history,
-- provide rollback before `websiteId` becomes mandatory for new managed domain creation.
+```text
+GET /api/websites/migration/preview
+```
 
-Until that migration is accepted, do not globally require `websiteId` on legacy domain state.
+It is Owner-only and never mutates state. For each legacy domain it may report:
+
+- `already_bound` when an explicit Website relationship already exists,
+- `ready / bind_existing_website` when exactly one matching application already has a Website,
+- `ready / create_website_then_bind` when exactly one matching application exists but has no Website yet,
+- `ambiguous` when multiple applications match the old traffic target,
+- `unresolved` when no safe mapping exists.
+
+Static candidate discovery requires exact current managed document-root equality. Node candidate discovery requires the same server, loopback proxy host and exact current port. These matches are migration **candidates**, not permanent foreign keys. The preview returns `destructive=false` and `autoApply=false`; target paths and ports are not copied into its safe result.
+
+A guarded one-way existing-Website bind is available at:
+
+```text
+POST /api/websites/migration/bind
+```
+
+The request accepts only canonical `domainId`, `websiteId` and typed confirmation. The server recomputes the migration preview immediately before mutation and permits the bind only when the current preview still says that exact existing Website is ready. Ambiguous, unresolved, `create_website_then_bind`, stale or different-Website states do not mutate the domain. Repeating the exact successful bind is idempotent.
+
+The endpoint deliberately does **not** create a Website and bind a Domain in one call because the two registries are separate durable files and there is no cross-registry transaction yet. Create the Website explicitly, re-run preview, then bind it.
+
+Remaining migration work is versioned plan/digest + rollback orchestration and eventual policy transition that makes Website binding mandatory for new managed domains without breaking legacy rollback. Domain/application IDs, traffic targets, certificate links, encrypted secrets and release history must remain stable.
 
 ## Website/domain relationship reads
 
-`GET /api/websites/:websiteId/domains` returns only domains whose persisted `websiteId` equals that Website ID. It does not infer a relationship from proxy ports, static roots or hostname suffixes. Read Only accounts may use this safe relationship read because they already have domain inventory access; unrelated nested Website management remains Owner-only.
+`GET /api/websites/:websiteId/domains` returns only domains whose persisted `websiteId` equals that Website ID. It does not infer a relationship from proxy ports, static roots or hostname suffixes. Read Only accounts may use this safe relationship read; unrelated nested Website management and migration remain Owner-only.
 
 ## DNS, SSL and mail separation
 
