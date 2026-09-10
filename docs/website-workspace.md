@@ -13,9 +13,12 @@ Implemented backend contracts:
 - `GET /api/websites/:websiteId/domains`
 - `POST /api/websites`
 - `GET /api/websites/migration/preview`
+- `GET /api/websites/migration/status`
 - `POST /api/websites/migration/bind`
+- `POST /api/websites/migration/finalize`
+- `POST /api/websites/migration/rollback`
 
-Website state is stored separately through `YUNPANEL_WEBSITE_STORE`. Production startup validates persisted Website server/application foreign keys before accepting the store.
+Website state is stored separately through `YUNPANEL_WEBSITE_STORE`. Migration enforcement state is stored through `YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE`. Production startup validates persisted Website server/application foreign keys and initializes migration policy before accepting Domain state.
 
 An application-backed Website owns stable Website UUID, server/application IDs, runtime type, canonical managed document root and deterministic `yunapp-*` Unix user. A proxy Website is a real resource without an invented application/document root/Unix user.
 
@@ -29,21 +32,25 @@ Legacy domain state without the field opens as `websiteId=null`. A one-way regis
 
 Shared hostname validation canonicalizes IDN input to ASCII punycode. Unicode/punycode equivalents therefore collide as the same hostname/alias and hierarchy comparisons use one canonical form.
 
-## Migration preview and guarded bind
+## Migration preview, bind and enforcement
 
 `GET /api/websites/migration/preview` is Owner-only and read-only. It examines current persisted Domain/Website/Application state and reports safe migration decisions without mutating state. Static legacy targets match applications only by exact managed web root; Node targets match only same-server loopback proxy + exact current port. Multiple matches are `ambiguous`; no safe match is `unresolved`.
 
-A single exact application candidate produces either `bind_existing_website` or `create_website_then_bind`. These are migration suggestions only: preview explicitly returns `destructive=false` and `autoApply=false`.
+A single exact application candidate produces either `bind_existing_website` or `create_website_then_bind`. These are migration suggestions only: preview returns `destructive=false`, `autoApply=false` and a deterministic SHA-256 digest.
 
-`POST /api/websites/migration/bind` only performs the existing-Website case. It accepts canonical Domain/Website UUIDs plus typed confirmation, recomputes the current preview immediately before mutation and permits only the exact currently-authorized existing Website relationship. Retry of the same completed binding is idempotent.
+`POST /api/websites/migration/bind` handles only the existing-Website case. It requires Domain/Website UUIDs, the exact current preview digest and typed confirmation. The server recomputes the current plan before mutation; stale or different plans fail closed. Retry of the same completed binding is idempotent.
 
-The backend intentionally does not combine Website creation and Domain binding into one call because those registries are independent durable files and no cross-registry transaction exists. The operator/API must create the Website explicitly, re-run preview and then bind.
+The backend intentionally does not combine Website creation and Domain binding into one call because those registries are independent durable files. For `create_website_then_bind`, the current safe workflow is explicit Website create → new preview → guarded bind.
 
-Both migration endpoints remain Owner-only. Migration bind is covered by common management audit; request bodies/confirmation are not copied into audit metadata.
+`GET /api/websites/migration/status` returns the current policy beside a fresh preview. The versioned policy starts in `compatibility`. `POST /api/websites/migration/finalize` can switch it to `enforced` only when the exact current preview says every managed Domain is already explicitly bound. In enforced mode new managed Domain creation requires a same-server `websiteId`.
+
+`POST /api/websites/migration/rollback` requires the exact enforced digest and returns policy to compatibility mode. It does not rewrite Domain traffic, certificates, releases or application state. A separate migration-only binding rollback ledger remains to be implemented; policy rollback is not a general Domain unbind operation.
+
+Migration bind/finalize/rollback are covered by common management audit without copying body, confirmation or digest material into audit metadata.
 
 ## Authentication/access boundary
 
-All Website management enters through the authenticated API listener. Owner management requires normal session/MFA/Origin/CSRF policy. Read Only accounts may read Website collection/detail and explicit Website→domains relation; Website creation and migration remain Owner-only.
+All Website management enters through the authenticated API listener. Owner management requires normal session/MFA/Origin/CSRF policy. Read Only accounts may read Website collection/detail and explicit Website→domains relation; migration preview/status and all Website/migration mutations remain Owner-only.
 
 Caller input cannot set `documentRoot` or `unixUser`; those values are derived from managed application identity.
 
@@ -55,11 +62,10 @@ A `202` response is queued/accepted work, not completion.
 
 ## Remaining backend work
 
-See `plan.md` C/E/F/G/H/I. Persistent Website foundation and guarded legacy existing-Website bind do **not** complete migration. Remaining Website/domain work includes:
+See `plan.md` C/E/F/G/H/I. Persistent Website foundation, IDN canonicalization, guarded existing-Website migration bind and compatibility/enforced policy are implemented. Remaining Website/domain work includes:
 
-- versioned migration plan/digest and rollback orchestration,
-- explicit create-Website step for safe migration candidates that have no Website,
-- mandatory Website binding for new managed domains only after rollback-safe transition,
+- explicit/repeatable `create_website_then_bind` orchestration,
+- migration-only binding rollback ledger/receipt,
 - Website update/rebind lifecycle,
 - reparent/move/delete impact preview,
 - site-create orchestration,
@@ -74,4 +80,4 @@ Security behavior, authenticated routing, stale privileged-data handling and des
 
 ## Validation
 
-Current full Node24/workspace, browser, package persistence, Website foreign-key, IDN and migration acceptance are tracked in `todo.md`. Historical UI/model tests are not evidence that the current tree passed. GitHub Actions are not used.
+Current full Node24/workspace, browser, package persistence, Website foreign-key, migration policy, IDN and migration acceptance are tracked in `todo.md`. Historical UI/model tests are not evidence that the current tree passed. GitHub Actions are not used.
