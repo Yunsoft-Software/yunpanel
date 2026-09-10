@@ -54,7 +54,7 @@ function validateFinalPreview(preview, expectedDigest) {
 
 export function createWebsiteMigrationPolicyStore({ filePath = null, now = () => Date.now() } = {}) {
   let state = emptyState();
-  let initialized = false;
+  let initialized = filePath === null;
   let writeChain = Promise.resolve();
   if (typeof now !== 'function') throw new WebsiteMigrationPolicyError('website_migration_policy_dependencies_invalid', 'Website migration policy dependencies are invalid', 503);
 
