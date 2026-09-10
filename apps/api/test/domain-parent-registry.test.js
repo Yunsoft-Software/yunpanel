@@ -26,6 +26,7 @@ test('subdomain parent, independent target and certificate survive reopening', a
   assert.equal((await reopened.getDomain(child.id)).parentDomainId, root.id);
   assert.equal((await reopened.getDomain(child.id)).primaryDomain, 'api.example.com.tr');
   assert.equal((await reopened.getDomain(child.id)).kind, 'subdomain');
+  assert.equal((await reopened.getDomain(child.id)).websiteId, null);
   assert.equal((await reopened.getDomain(child.id)).target.upstreamPort, 4400);
   assert.equal((await reopened.getDomain(child.id)).certificateId, 'child-certificate');
   assert.equal((await reopened.getDomain(root.id)).certificateId, null);
@@ -57,13 +58,14 @@ test('aliases remain attached names, not implicit parent resources', async () =>
   assert.equal((await registry.listDomains()).length, 1);
 });
 
-test('legacy state is read without rewrite or guessed ancestry', async (t) => {
+test('legacy state is read without rewrite or guessed ancestry or Website linkage', async (t) => {
   const filePath = await fixture(t);
   const seed = createDomainRegistry();
   const records = [await seed.createDomain(input()), await seed.createDomain(input('api.example.com.tr'))];
   for (const record of records) {
     delete record.kind;
     delete record.parentDomainId;
+    delete record.websiteId;
     record.state = 'active';
     record.certificateId = `cert-${record.id}`;
     record.desiredRevision = 5;
@@ -73,6 +75,7 @@ test('legacy state is read without rewrite or guessed ancestry', async (t) => {
   await writeFile(filePath, before);
   const registry = createDomainRegistry({ filePath });
   const loaded = await registry.listDomains();
+  assert.equal(loaded[1].websiteId, null);
   assert.equal(loaded[1].parentDomainId, null);
   assert.equal(loaded[1].kind, 'domain');
   assert.equal(loaded[1].certificateId, records[1].certificateId);
