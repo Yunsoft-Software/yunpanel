@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { planLocalMigrationRestoreMetadata } from '../src/local-migration-restore-metadata-plan.js';
+import {
+  planLocalMigrationRestoreMetadata,
+  planVerifiedLocalMigrationRestoreMetadata,
+} from '../src/local-migration-restore-metadata-plan.js';
 
 const backupDirectory = '/var/backups/yunpanel/migration-2026-09-10T15-00-00-000Z';
 const sha256 = 'a'.repeat(64);
@@ -134,6 +137,14 @@ test('metadata plan summarizes fixed restore roots without enabling live apply',
   const passwd = result.targets.find((entry) => entry.path === '/etc/passwd');
   assert.equal(passwd.action, 'identity_reference');
   assert.equal(passwd.members, 1);
+});
+
+test('verified-preview entrypoint reuses existing evidence without invoking another preview', () => {
+  const verifiedPreview = preview();
+  const result = planVerifiedLocalMigrationRestoreMetadata({ backupDirectory, preview: verifiedPreview });
+  assert.equal(result.sha256, sha256);
+  assert.equal(result.counts.members, 11);
+  assert.equal(result.liveApplyEnabled, false);
 });
 
 test('metadata plan blocks identity drift and top-level type mismatch', async () => {
