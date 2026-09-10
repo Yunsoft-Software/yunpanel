@@ -4,14 +4,15 @@ import { panelRequest } from '../api.js';
 import DomainManager from '../DomainManager.jsx';
 import ServerManager from '../ServerManager.jsx';
 import SystemUpdatePanel from '../SystemUpdatePanel.jsx';
+import ManagedServicesPanel from './ManagedServicesPanel.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Button, CollectionNotice, ConfirmDialog, EmptyState, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { ServerSummary } from './DashboardPage.jsx';
 import JobsTable from './JobsTable.jsx';
 
 export function ServersPage() {
-  const { servers } = useWorkspace();
-  return <><PageHeading title="Sunucular" description="Sistem envanteri, bağlantı durumu ve mevcut sunucu kurulum araçları." actions={<Button icon="refresh" onClick={servers.refresh}>Yenile</Button>} /><CollectionNotice resource={servers} label="Sunucular" /><div className="ws-equal-columns">{servers.items.map((server) => <Section key={server.id} title={server.displayName ?? server.name ?? server.hostname}><ServerSummary server={server} /></Section>)}</div><details className="ws-section ws-section-body"><summary>Gelişmiş: mevcut sunucu kayıt akışı</summary><p className="ws-muted">Ayrı agent’ın kaldırılması henüz uygulanmadı. Mevcut sunucu kaydı ve enrollment araçları geçiş tamamlanana kadar korunur.</p><ServerManager servers={servers.items} access={servers.status} renderServer={() => null} /></details></>;
+  const { servers, canManage } = useWorkspace();
+  return <><PageHeading title="Sunucular" description="Sistem envanteri, bağlantı durumu ve mevcut sunucu kurulum araçları." actions={<Button icon="refresh" onClick={servers.refresh}>Yenile</Button>} /><CollectionNotice resource={servers} label="Sunucular" /><div className="ws-equal-columns">{servers.items.map((server) => <Section key={server.id} title={server.displayName ?? server.name ?? server.hostname}><ServerSummary server={server} /></Section>)}</div>{canManage && ['ready', 'stale'].includes(servers.status) && servers.items.map((server) => <ManagedServicesPanel key={`services:${server.id}`} server={server} />)}<details className="ws-section ws-section-body"><summary>Gelişmiş: mevcut sunucu kayıt akışı</summary><p className="ws-muted">Ayrı agent’ın kaldırılması henüz uygulanmadı. Mevcut sunucu kaydı ve enrollment araçları geçiş tamamlanana kadar korunur.</p><ServerManager servers={servers.items} access={servers.status} renderServer={() => null} /></details></>;
 }
 export function JobsPage() {
   const { jobs, refreshAll } = useWorkspace(); const [params, setParams] = useSearchParams();
