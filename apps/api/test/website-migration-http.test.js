@@ -3,8 +3,11 @@ import express from 'express';
 import http from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
+import { WebsiteMigrationBindError } from '../src/website-migration-bind.js';
 import { mountWebsiteMigrationRoutes } from '../src/website-migration-http.js';
 
+const domainId = '0ef7e00b-1b85-4938-b726-247c94679c66';
+const websiteId = '46b95b12-600a-4f31-b269-cc9af195ee21';
 const ownerAuth = Object.freeze({
   user: { id: 'owner-1', role: 'owner' },
   access: { mode: 'management', permissions: ['*'] },
@@ -19,22 +22,38 @@ const readerAuth = Object.freeze({
 async function fixture(t, auth) {
   const calls = [];
   const app = express();
+  app.use(express.json());
   app.use((request, _response, next) => { request.auth = auth; next(); });
   mountWebsiteMigrationRoutes(app, {
     websiteRegistry: { async listWebsites() { calls.push('websites'); return []; } },
-    domainRegistry: { async listDomains() { calls.push('domains'); return []; } },
+    domainRegistry: {
+      async listDomains() { calls.push('domains'); return []; },
+      async bindWebsite() { calls.push('bindWebsite'); throw new Error('bind primitive should be invoked only through bind adapter'); },
+    },
     applicationRegistry: { async listApplications() { calls.push('applications'); return []; } },
     preview(input) {
       calls.push(['preview', input]);
       return { version: 1, destructive: false, autoApply: false, counts: { total: 0 }, items: [] };
     },
+    async bind(input) {
+      calls.push(['bind', input.domainId, input.websiteId]);
+      return { migrated: true, domain: { id: input.domainId, websiteId: input.websiteId }, websiteId: input.websiteId, previewVersion: 1 };
+    },
+  });
+  app.use((error, _request, response, _next) => {
+    if (error instanceof WebsiteMigrationBindError) return response.status(error.status).json({ error: { code: error.code, message: error.message } });
+    return response.status(500).json({ error: { code: 'internal_error' } });
   });
   const server = http.createServer(app).listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
   return {
     calls,
-    request: () => fetch(`http://127.0.0.1:${server.address().port}/api/websites/migration/preview`),
+    request: (pathname = '/api/websites/migration/preview', options = {}) => fetch(`${base}${pathname}`, {
+      ...options,
+      headers: options.body ? { 'content-type': 'application/json', ...(options.headers ?? {}) } : options.headers,
+    }),
   };
 }
 
@@ -50,11 +69,38 @@ test('Owner receives non-destructive migration preview from persisted resource s
   assert.equal(f.calls[3][0], 'preview');
 });
 
-test('Read Only cannot invoke migration preview despite ordinary Website/domain reads', async (t) => {
+test('Owner bind requires exact canonical IDs and typed confirmation before adapter invocation', async (t) => {
+  const f = await fixture(t, ownerAuth);
+  const valid = await f.request('/api/websites/migration/bind', {
+    method: 'POST',
+    body: JSON.stringify({ domainId, websiteId, confirmation: `bind:${domainId}:${websiteId}` }),
+  });
+  assert.equal(valid.status, 200);
+  assert.equal((await valid.json()).data.migrated, true);
+  assert.deepEqual(f.calls, [['bind', domainId, websiteId]]);
+
+  for (const body of [
+    { domainId, websiteId, confirmation: 'wrong' },
+    { domainId: 'bad', websiteId, confirmation: 'wrong' },
+    { domainId, websiteId, confirmation: `bind:${domainId}:${websiteId}`, extra: 'field' },
+  ]) {
+    const before = f.calls.length;
+    const response = await f.request('/api/websites/migration/bind', { method: 'POST', body: JSON.stringify(body) });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error.code, /^website_migration_/);
+    assert.equal(f.calls.length, before);
+  }
+});
+
+test('Read Only cannot invoke migration preview or bind despite ordinary Website/domain reads', async (t) => {
   const f = await fixture(t, readerAuth);
-  const response = await f.request();
-  assert.equal(response.status, 403);
-  const body = await response.json();
-  assert.equal(body.error.code, 'forbidden');
+  for (const [pathname, options] of [
+    ['/api/websites/migration/preview', {}],
+    ['/api/websites/migration/bind', { method: 'POST', body: JSON.stringify({ domainId, websiteId, confirmation: `bind:${domainId}:${websiteId}` }) }],
+  ]) {
+    const response = await f.request(pathname, options);
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).error.code, 'forbidden');
+  }
   assert.deepEqual(f.calls, []);
 });
