@@ -9,6 +9,7 @@ import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-se
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 import { mountWebsiteRoutes } from './website-http.js';
+import { WebsiteMigrationBindError } from './website-migration-bind.js';
 import { mountWebsiteMigrationRoutes } from './website-migration-http.js';
 import { WebsiteMigrationPreviewError } from './website-migration-preview.js';
 import { createWebsiteRegistry, WebsiteRegistryError } from './website-registry.js';
@@ -49,6 +50,7 @@ export function createApp({
       || error instanceof RegistryError
       || error instanceof JobRegistryError
       || error instanceof ManagedServiceHttpError
+      || error instanceof WebsiteMigrationBindError
       || error instanceof WebsiteMigrationPreviewError
       || error instanceof WebsiteRegistryError
     ) {
