@@ -42,6 +42,7 @@ test('validation bypasses backup verification and prints only safe health metada
         localRuntimeVersion: '0.4.0',
         apiState: 'active',
         agentState: 'inactive',
+        apiHealth: { healthy: true, statusCode: 200 },
         activeJobCount: 0,
         recoveryJobCount: 0,
         inventoryPresent: true,
@@ -66,6 +67,8 @@ test('validation bypasses backup verification and prints only safe health metada
   assert.match(text, /connectivity=online/);
   assert.match(text, /apiState=active/);
   assert.match(text, /agentState=inactive/);
+  assert.match(text, /apiHealth=true/);
+  assert.match(text, /apiHealthStatus=200/);
   assert.match(text, /activeJobs=0/);
   assert.match(text, /recoveryJobs=0/);
   assert.match(text, /inventoryPresent=true/);
