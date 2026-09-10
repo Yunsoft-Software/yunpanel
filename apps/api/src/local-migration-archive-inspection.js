@@ -9,6 +9,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
+const CONTROL_CHARACTER_PATTERN = /[\x00-\x1f\x7f]/;
 const MAX_LISTING_BYTES = 32 * 1024 * 1024;
 const MAX_MEMBERS = 200_000;
 const SAFE_TYPES = new Set(['-', 'd', 'l', 'h']);
@@ -35,13 +36,13 @@ function decodeCStringAt(value, start) {
     if (index >= value.length) break;
     const escaped = value[index];
     const simple = {
-      a: '\u0007',
-      b: '\b',
-      f: '\f',
-      n: '\n',
-      r: '\r',
-      t: '\t',
-      v: '\u000b',
+      a: String.fromCharCode(7),
+      b: String.fromCharCode(8),
+      f: String.fromCharCode(12),
+      n: String.fromCharCode(10),
+      r: String.fromCharCode(13),
+      t: String.fromCharCode(9),
+      v: String.fromCharCode(11),
       '\\': '\\',
       '"': '"',
     };
@@ -85,7 +86,7 @@ function extractCStringLiterals(line) {
 }
 
 function normalizeMemberName(value) {
-  if (typeof value !== 'string' || value.length === 0 || /[\u0000\r\n]/.test(value) || value.startsWith('/')) {
+  if (typeof value !== 'string' || value.length === 0 || CONTROL_CHARACTER_PATTERN.test(value) || value.startsWith('/')) {
     throw new LocalMigrationArchiveInspectionError('migration_archive_member_invalid', 'Migration archive contains an unsafe member path');
   }
   const stripped = value.replace(/^\.\//, '').replace(/\/$/, '');
@@ -100,7 +101,7 @@ function normalizeMemberName(value) {
 }
 
 function normalizeLinkTarget(member, target, { hardlink = false } = {}) {
-  if (typeof target !== 'string' || target.length === 0 || /[\u0000\r\n]/.test(target)) {
+  if (typeof target !== 'string' || target.length === 0 || CONTROL_CHARACTER_PATTERN.test(target)) {
     throw new LocalMigrationArchiveInspectionError('migration_archive_link_invalid', 'Migration archive contains an invalid link target');
   }
   if (hardlink) return normalizeMemberName(target);
