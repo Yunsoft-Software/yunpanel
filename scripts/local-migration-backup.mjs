@@ -77,7 +77,10 @@ function formatPreview(result) {
     `archiveDirectories=${archive.counts.directories}`,
     `archiveSymlinks=${archive.counts.symlinks}`,
     `archiveHardlinks=${archive.counts.hardlinks}`,
+    `archiveExtendedMetadata=${archive.counts.extendedMetadata}`,
     'archiveLinksSafe=true',
+    'archiveOwnershipMetadata=true',
+    'archiveExtendedMetadataValidated=false',
     `restoreTargets=${result.counts.restore}`,
     `identityReferences=${result.counts.identityReferences}`,
     `preservedCurrent=${result.counts.preserved}`,
@@ -114,6 +117,9 @@ function formatStage(result) {
     'validated=true',
     'destructive=false',
     'liveMutation=false',
+    'ownershipMetadata=true',
+    `extendedMetadata=${result.extendedMetadata}`,
+    'extendedMetadataValidated=false',
     `backupDirectory=${result.backupDirectory}`,
     `sha256=${result.sha256}`,
     `stageDirectory=${result.stageDirectory}`,
@@ -123,12 +129,15 @@ function formatStage(result) {
 
 function validArchivePreview(archive, result, directory) {
   if (!archive || archive.destructive !== false || archive.linksSafe !== true
+    || archive.ownershipMetadata !== true || archive.extendedMetadataValidated !== false
     || archive.backupDirectory !== directory || archive.sha256 !== result.sha256
-    || !archive.counts || typeof archive.counts !== 'object') return false;
-  for (const key of ['total', 'files', 'directories', 'symlinks', 'hardlinks']) {
+    || !archive.counts || typeof archive.counts !== 'object' || !Array.isArray(archive.members)) return false;
+  for (const key of ['total', 'files', 'directories', 'symlinks', 'hardlinks', 'extendedMetadata']) {
     if (!Number.isInteger(archive.counts[key]) || archive.counts[key] < 0) return false;
   }
-  return archive.counts.files + archive.counts.directories + archive.counts.symlinks + archive.counts.hardlinks === archive.counts.total;
+  return archive.counts.files + archive.counts.directories + archive.counts.symlinks + archive.counts.hardlinks === archive.counts.total
+    && archive.members.length === archive.counts.total
+    && archive.members.filter((member) => member?.metadataMarker != null).length === archive.counts.extendedMetadata;
 }
 
 function validIdentityPreview(identity, result, directory) {
@@ -142,9 +151,11 @@ function validIdentityPreview(identity, result, directory) {
 
 function validStageResult(result, directory) {
   if (!result || result.validated !== true || result.destructive !== false || result.liveMutation !== false
+    || result.ownershipMetadata !== true || result.extendedMetadataValidated !== false
     || result.backupDirectory !== directory || typeof result.sha256 !== 'string'
     || typeof result.stageDirectory !== 'string' || !path.isAbsolute(result.stageDirectory)
-    || !Number.isInteger(result.members) || result.members < 1) return false;
+    || !Number.isInteger(result.members) || result.members < 1
+    || !Number.isInteger(result.extendedMetadata) || result.extendedMetadata < 0 || result.extendedMetadata > result.members) return false;
   const resolvedStage = path.resolve(result.stageDirectory);
   return path.dirname(resolvedStage) === STAGE_ROOT;
 }
