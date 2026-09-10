@@ -10,7 +10,7 @@ test('static deploy recovery syntax is explicit and does not imply rollback reco
     action: 'recover-static-deploy', serverId, jobId, confirm: true,
   });
   assert.throws(() => parseJobRecoveryArguments(['recover-static-deploy', serverId, jobId]), /Usage/);
-  assert.throws(() => parseJobRecoveryArguments(['recover-static-rollback', serverId, jobId, '--confirm']), /Usage/);
+  assert.throws(() => parseJobRecoveryArguments(['recover-static', serverId, jobId, '--confirm']), /Usage/);
 });
 
 test('static deploy recovery delegates only from packaged root entry point', async () => {
@@ -58,5 +58,5 @@ test('packaged static deploy recovery forwards exact identity and prints safe me
   assert.deepEqual({ serverId: calls[0].serverId, jobId: calls[0].jobId }, { serverId, jobId });
   assert.match(output.join(''), /operation=app\.static\.deploy/);
   assert.match(output.join(''), /method=verified_static_deployment_receipt/);
-  assert.doesNotMatch(output.join(''), /commitSha|artifact|receipt/i);
+  assert.doesNotMatch(output.join(''), /commitSha|artifact/i);
 });

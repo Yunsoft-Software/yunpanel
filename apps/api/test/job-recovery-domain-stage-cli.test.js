@@ -10,7 +10,7 @@ test('domain stage recovery syntax is explicit', () => {
     action: 'recover-domain-stage', serverId, jobId, confirm: true,
   });
   assert.throws(() => parseJobRecoveryArguments(['recover-domain-stage', serverId, jobId]), /Usage/);
-  assert.throws(() => parseJobRecoveryArguments(['recover-domain-activate', serverId, jobId, '--confirm']), /Usage/);
+  assert.throws(() => parseJobRecoveryArguments(['recover-domain', serverId, jobId, '--confirm']), /Usage/);
 });
 
 test('domain stage recovery requires the packaged entry point', async () => {
