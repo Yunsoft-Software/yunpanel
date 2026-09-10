@@ -100,6 +100,7 @@ export function mountWebsiteMigrationRoutes(app, {
   domainRegistry,
   applicationRegistry,
   websiteMigrationPolicy,
+  migrationLedger,
   preview = previewWebsiteMigration,
   bind = bindLegacyDomainToWebsite,
   create = createWebsiteForMigration,
@@ -112,6 +113,11 @@ export function mountWebsiteMigrationRoutes(app, {
   if (!websiteMigrationPolicy || typeof websiteMigrationPolicy.snapshot !== 'function'
     || typeof websiteMigrationPolicy.finalize !== 'function' || typeof websiteMigrationPolicy.rollback !== 'function') {
     throw new Error('Website migration policy store is required');
+  }
+  if (!migrationLedger || typeof migrationLedger.list !== 'function' || typeof migrationLedger.get !== 'function'
+    || typeof migrationLedger.planWebsiteCreation !== 'function' || typeof migrationLedger.markWebsiteCreated !== 'function'
+    || typeof migrationLedger.planBinding !== 'function' || typeof migrationLedger.markBound !== 'function') {
+    throw new Error('Website migration ledger is required');
   }
   if (typeof preview !== 'function' || typeof bind !== 'function' || typeof create !== 'function') throw new Error('Website migration adapters are required');
 
@@ -129,8 +135,8 @@ export function mountWebsiteMigrationRoutes(app, {
   )));
 
   app.get('/api/websites/migration/status', requirePanelRouteAccess, asyncRoute(async (_request, response) => {
-    const plan = await currentPreview();
-    return response.json({ data: { policy: websiteMigrationPolicy.snapshot(), preview: plan } });
+    const [plan, ledger] = await Promise.all([currentPreview(), migrationLedger.list()]);
+    return response.json({ data: { policy: websiteMigrationPolicy.snapshot(), preview: plan, ledger } });
   }));
 
   app.post('/api/websites/migration/create-website', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -140,6 +146,7 @@ export function mountWebsiteMigrationRoutes(app, {
       domainRegistry,
       websiteRegistry,
       applicationRegistry,
+      migrationLedger,
       preview,
     });
     return response.status(result.created ? 201 : 200).json({ data: result });
@@ -152,6 +159,7 @@ export function mountWebsiteMigrationRoutes(app, {
       domainRegistry,
       websiteRegistry,
       applicationRegistry,
+      migrationLedger,
       preview,
     });
     return response.json({ data: result });
