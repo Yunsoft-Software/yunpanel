@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,6 +9,7 @@ import {
   normalizeControlPlaneUrl,
   startControlPlaneLink,
 } from '../src/control-plane-client.js';
+import { saveAgentIdentity } from '../src/identity-store.js';
 
 function jsonResponse(status, body) {
   return new Response(body == null ? null : JSON.stringify(body), {
@@ -37,116 +38,52 @@ test('control plane URL requires HTTPS outside development mode', () => {
   );
 });
 
-test('first control plane connection enrolls, protects identity, sends heartbeat and polls commands', async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-agent-'));
+test('missing legacy identity fails closed without attempting retired enrollment HTTP', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-agent-missing-'));
   const identityFile = path.join(directory, 'identity.json');
   const calls = [];
-
-  const fetchImpl = async (url, options = {}) => {
-    calls.push({ url, options });
-
-    if (url.endsWith('/api/servers/enroll')) {
-      return jsonResponse(201, {
-        data: {
-          server: { id: 'server-001' },
-          agentToken: 'agent-token-value-that-is-long-enough',
-        },
-      });
-    }
-
-    if (url.endsWith('/api/servers/server-001/heartbeat')) {
-      return jsonResponse(200, {
-        data: { id: 'server-001', connectivity: 'online' },
-      });
-    }
-
-    if (url.endsWith('/api/servers/server-001/commands/next')) {
-      return emptyCommandResponse();
-    }
-
-    throw new Error(`Unexpected request: ${url}`);
-  };
-
   try {
-    const link = await startControlPlaneLink({
-      controlPlaneUrl: 'http://127.0.0.1:3001',
-      enrollmentToken: 'one-time-enrollment-token-value',
-      identityFile,
-      heartbeatMs: 10_000,
-      commandPollMs: 60_000,
-      mode: 'development',
-      fetchImpl,
-      inspect: async () => ({ hostname: 'yun-test-01', memory: { totalBytes: 100 } }),
-      inspectServices: async () => ({ nginx: { active: true } }),
-      inspectDocker: async () => ({ installed: true, reachable: true, containers: [{ name: 'api' }] }),
-      inspectNginx: async () => ({ installed: true, configs: [{ name: 'app.conf' }] }),
-      logger: { info() {}, error() {} },
-    });
-
-    link.stop();
-
-    assert.equal(link.enabled, true);
-    assert.equal(link.serverId, 'server-001');
-    assert.equal(calls.length, 3);
-
-    const enrollmentRequest = JSON.parse(calls[0].options.body);
-    assert.equal(enrollmentRequest.token, 'one-time-enrollment-token-value');
-
-    const heartbeatRequest = JSON.parse(calls[1].options.body);
-    assert.equal(heartbeatRequest.inventory.hostname, 'yun-test-01');
-    assert.equal(heartbeatRequest.inventory.docker.containers[0].name, 'api');
-    assert.equal(heartbeatRequest.inventory.nginx.configs[0].name, 'app.conf');
-    assert.equal(heartbeatRequest.services.nginx.active, true);
-    assert.equal(calls[1].options.headers.authorization, 'Bearer agent-token-value-that-is-long-enough');
-
-    assert.ok(calls[2].url.endsWith('/api/servers/server-001/commands/next'));
-    assert.equal(calls[2].options.headers.authorization, 'Bearer agent-token-value-that-is-long-enough');
-
-    const identity = JSON.parse(await readFile(identityFile, 'utf8'));
-    assert.equal(identity.serverId, 'server-001');
-    assert.equal(identity.agentToken, 'agent-token-value-that-is-long-enough');
-
-    const identityStat = await stat(identityFile);
-    assert.equal(identityStat.mode & 0o777, 0o600);
+    await assert.rejects(
+      startControlPlaneLink({
+        controlPlaneUrl: 'http://127.0.0.1:3001',
+        identityFile,
+        heartbeatMs: 10_000,
+        commandPollMs: 60_000,
+        mode: 'development',
+        fetchImpl: async (url, options = {}) => {
+          calls.push({ url, options });
+          throw new Error('network must not be reached');
+        },
+        ...emptyInspectors,
+        logger: { info() {}, error() {} },
+      }),
+      (error) => {
+        assert.equal(error.code, 'legacy_agent_identity_required');
+        assert.equal(error.message, 'Retained legacy agent requires an existing identity; new enrollment is retired');
+        return true;
+      },
+    );
+    assert.deepEqual(calls, []);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test('stored identity is reused without replaying enrollment token', async () => {
+test('stored legacy identity is reused for heartbeat and command polling without enrollment traffic', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-agent-reuse-'));
   const identityFile = path.join(directory, 'identity.json');
   const calls = [];
-
-  const initialFetch = async (url) => {
-    if (url.endsWith('/api/servers/enroll')) {
-      return jsonResponse(201, {
-        data: {
-          server: { id: 'server-002' },
-          agentToken: 'persistent-agent-token-value-long-enough',
-        },
-      });
-    }
-    if (url.endsWith('/commands/next')) return emptyCommandResponse();
-    return jsonResponse(200, { data: { id: 'server-002', connectivity: 'online' } });
+  const identity = {
+    serverId: 'server-002',
+    agentToken: 'persistent-agent-token-value-long-enough',
+    controlPlaneUrl: 'http://127.0.0.1:3001',
+    enrolledAt: '2026-09-10T12:00:00.000Z',
   };
 
   try {
-    const first = await startControlPlaneLink({
-      controlPlaneUrl: 'http://127.0.0.1:3001',
-      enrollmentToken: 'first-use-token-long-enough',
-      identityFile,
-      heartbeatMs: 10_000,
-      commandPollMs: 60_000,
-      mode: 'development',
-      fetchImpl: initialFetch,
-      ...emptyInspectors,
-      logger: { info() {}, error() {} },
-    });
-    first.stop();
-
-    const second = await startControlPlaneLink({
-      controlPlaneUrl: 'http://127.0.0.1:3001',
+    await saveAgentIdentity(identityFile, identity);
+    const link = await startControlPlaneLink({
+      controlPlaneUrl: identity.controlPlaneUrl,
       identityFile,
       heartbeatMs: 10_000,
       commandPollMs: 60_000,
@@ -154,17 +91,77 @@ test('stored identity is reused without replaying enrollment token', async () =>
       fetchImpl: async (url, options = {}) => {
         calls.push({ url, options });
         if (url.endsWith('/commands/next')) return emptyCommandResponse();
-        return jsonResponse(200, { data: { id: 'server-002', connectivity: 'online' } });
+        if (url.endsWith('/heartbeat')) return jsonResponse(200, { data: { id: identity.serverId, connectivity: 'online' } });
+        throw new Error(`Unexpected request: ${url}`);
       },
-      ...emptyInspectors,
+      inspect: async () => ({ hostname: 'yun-test-01', memory: { totalBytes: 100 } }),
+      inspectServices: async () => ({ nginx: { active: true } }),
+      inspectDocker: async () => ({ installed: true, reachable: true, containers: [{ name: 'api' }] }),
+      inspectNginx: async () => ({ installed: true, configs: [{ name: 'app.conf' }] }),
       logger: { info() {}, error() {} },
     });
-    second.stop();
+    link.stop();
 
+    assert.equal(link.enabled, true);
+    assert.equal(link.serverId, identity.serverId);
     assert.equal(calls.length, 2);
-    assert.ok(calls[0].url.endsWith('/api/servers/server-002/heartbeat'));
-    assert.ok(calls[1].url.endsWith('/api/servers/server-002/commands/next'));
+    assert.ok(calls[0].url.endsWith(`/api/servers/${identity.serverId}/heartbeat`));
+    assert.ok(calls[1].url.endsWith(`/api/servers/${identity.serverId}/commands/next`));
     assert.equal(calls.some((call) => call.url.endsWith('/api/servers/enroll')), false);
+    assert.equal(calls[0].options.headers.authorization, `Bearer ${identity.agentToken}`);
+    assert.equal(calls[1].options.headers.authorization, `Bearer ${identity.agentToken}`);
+
+    const heartbeatRequest = JSON.parse(calls[0].options.body);
+    assert.equal(heartbeatRequest.inventory.hostname, 'yun-test-01');
+    assert.equal(heartbeatRequest.inventory.docker.containers[0].name, 'api');
+    assert.equal(heartbeatRequest.inventory.nginx.configs[0].name, 'app.conf');
+    assert.equal(heartbeatRequest.services.nginx.active, true);
+    assert.equal((await stat(identityFile)).mode & 0o777, 0o600);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('legacy heartbeat and polling logs never copy remote or host exception messages', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-agent-redact-'));
+  const identityFile = path.join(directory, 'identity.json');
+  const identity = {
+    serverId: 'server-logging',
+    agentToken: 'persistent-agent-token-value-long-enough',
+    controlPlaneUrl: 'http://127.0.0.1:3001',
+  };
+  const logs = [];
+  try {
+    await saveAgentIdentity(identityFile, identity);
+    const link = await startControlPlaneLink({
+      controlPlaneUrl: identity.controlPlaneUrl,
+      identityFile,
+      heartbeatMs: 10_000,
+      commandPollMs: 60_000,
+      mode: 'development',
+      inspect: async () => {
+        const error = new Error('SECRET=/root/private/heartbeat-token');
+        error.code = 'unknown_heartbeat_secret';
+        throw error;
+      },
+      inspectServices: async () => ({}),
+      inspectDocker: async () => ({}),
+      inspectNginx: async () => ({}),
+      fetchImpl: async (url) => {
+        if (url.endsWith('/commands/next')) {
+          return jsonResponse(500, { error: { code: 'remote_secret_code', message: 'PASSWORD=/root/private/poll-token' } });
+        }
+        throw new Error('heartbeat fetch must not run after inspector failure');
+      },
+      logger: { info() {}, error(value) { logs.push(String(value)); } },
+    });
+    link.stop();
+
+    assert.deepEqual(logs, [
+      '[yun-agent] heartbeat failed: heartbeat_failed',
+      '[yun-agent] command polling failed: command_poll_failed',
+    ]);
+    assert.doesNotMatch(logs.join('\n'), /SECRET|PASSWORD|unknown_heartbeat_secret|remote_secret_code|\/root\/private|token/i);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
