@@ -53,6 +53,7 @@ test('preflight reports local ownership blockers without mutating state', async 
     apiActive: true,
     agentActive: true,
     activeJobCount: 1,
+    recoveryJobCount: 0,
   });
   assert.equal(state.calls.some(([name]) => name === 'bind' || name === 'release'), false);
 });
