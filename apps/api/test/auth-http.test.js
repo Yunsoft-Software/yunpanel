@@ -179,14 +179,36 @@ test('real store setup/login/session/logout flow works over HTTP', async (t) => 
   const login = await app.request('/api/auth/login', { method: 'POST', headers, body: { username: 'test-owner', password } });
   assert.equal(login.status, 200);
   let browserCookie = login.headers.get('set-cookie').split(';')[0];
-  const session = await app.request('/api/auth/session', { headers: { cookie: browserCookie } });
-  assert.equal(session.status, 403);
-  const pending = store.mfa.beginEnrollment ? await app.request('/api/auth/mfa/enroll', { method: 'POST', headers: { ...headers, cookie: browserCookie, 'x-csrf-token': (await session.clone().json()).data?.csrfToken ?? '' }, body: { password } }) : null;
-  if (pending?.status === 200) {
-    const enrollment = await pending.json();
-    const code = new TOTP({ secret: enrollment.data.secret }).generate();
-    const confirm = await app.request('/api/auth/mfa/confirm', { method: 'POST', headers: { ...headers, cookie: browserCookie, 'x-csrf-token': enrollment.data.csrfToken ?? '' }, body: { code } });
-    if (confirm.headers.get('set-cookie')) browserCookie = confirm.headers.get('set-cookie').split(';')[0];
-  }
-  assert.ok(browserCookie);
+  const sessionResponse = await app.request('/api/auth/session', { headers: { cookie: browserCookie } });
+  assert.equal(sessionResponse.status, 200);
+  const session = (await sessionResponse.json()).data;
+  assert.equal(session.security.enrollmentRequired, true);
+  assert.equal(session.access.mode, 'self_service');
+  assert.equal((await app.request('/api/servers', { headers: { cookie: browserCookie } })).status, 403);
+
+  const pending = await app.request('/api/auth/mfa/enroll', {
+    method: 'POST',
+    headers: { ...headers, cookie: browserCookie, 'x-csrf-token': session.csrfToken },
+    body: { password },
+  });
+  assert.equal(pending.status, 200);
+  const enrollment = (await pending.json()).data;
+  const code = new TOTP({ secret: enrollment.secret }).generate({ timestamp: now });
+  const confirm = await app.request('/api/auth/mfa/confirm', {
+    method: 'POST',
+    headers: { ...headers, cookie: browserCookie, 'x-csrf-token': session.csrfToken },
+    body: { code },
+  });
+  assert.equal(confirm.status, 200);
+  const confirmed = (await confirm.json()).data;
+  browserCookie = confirm.headers.get('set-cookie').split(';')[0];
+  assert.equal(confirmed.session.access.mode, 'management');
+  assert.ok(confirmed.recoveryCodes.length > 0);
+
+  const logout = await app.request('/api/auth/logout', {
+    method: 'POST',
+    headers: { ...headers, cookie: browserCookie, 'x-csrf-token': confirmed.session.csrfToken },
+  });
+  assert.equal(logout.status, 204);
+  assert.equal((await app.request('/api/auth/session', { headers: { cookie: browserCookie } })).status, 401);
 });
