@@ -40,7 +40,7 @@ function discoveredMutationRoutes() {
 
 test('every panel management mutation route has a common audit classification', () => {
   const routes = discoveredMutationRoutes();
-  assert.ok(routes.length >= 17, `expected current management mutation surface, found ${routes.length}`);
+  assert.ok(routes.length >= 19, `expected current management mutation surface, found ${routes.length}`);
   const missing = [];
   for (const route of routes) {
     const pathname = concretePath(route.route);
@@ -57,16 +57,21 @@ test('every panel management mutation route has a common audit classification', 
   assert.deepEqual(missing, [], `management mutations missing audit classification:\n${missing.join('\n')}`);
 });
 
-test('Website creation and migration bind are part of common management audit coverage', () => {
-  assert.deepEqual(classifyManagementMutation('POST', '/api/websites'), {
-    action: 'website.create', resourceType: 'website', resourceId: 'new',
-  });
-  assert.deepEqual(classifyManagementMutation('POST', '/api/websites/migration/bind'), {
-    action: 'website.migration.bind', resourceType: 'website_migration', resourceId: 'bind',
-  });
+test('Website creation and migration mutations are part of common management audit coverage', () => {
+  const expected = new Map([
+    ['/api/websites', { action: 'website.create', resourceType: 'website', resourceId: 'new' }],
+    ['/api/websites/migration/bind', { action: 'website.migration.bind', resourceType: 'website_migration', resourceId: 'bind' }],
+    ['/api/websites/migration/finalize', { action: 'website.migration.finalize', resourceType: 'website_migration', resourceId: 'policy' }],
+    ['/api/websites/migration/rollback', { action: 'website.migration.rollback', resourceType: 'website_migration', resourceId: 'policy' }],
+  ]);
+  for (const [route, classification] of expected) {
+    assert.deepEqual(classifyManagementMutation('POST', route), classification);
+  }
   const routes = discoveredMutationRoutes();
-  assert.ok(routes.some((entry) => entry.file === 'website-http.js' && entry.method === 'POST' && entry.route === '/api/websites'));
-  assert.ok(routes.some((entry) => entry.file === 'website-migration-http.js' && entry.method === 'POST' && entry.route === '/api/websites/migration/bind'));
+  for (const route of expected.keys()) {
+    const file = route === '/api/websites' ? 'website-http.js' : 'website-migration-http.js';
+    assert.ok(routes.some((entry) => entry.file === file && entry.method === 'POST' && entry.route === route));
+  }
 });
 
 test('legacy agent transport and auth/user/audit handlers are intentionally outside management route discovery', () => {
