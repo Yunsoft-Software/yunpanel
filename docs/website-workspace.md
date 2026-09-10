@@ -1,82 +1,83 @@
-# Website workspace — current compatibility boundary
+# Website workspace — current backend boundary
 
-This document describes the current management workspace boundary that matters to backend development. Visual redesign, layout/styling and component polish are deliberately deferred by the 2026-09-10 execution decision; see `agents.md` and `plan.md`.
+Visual redesign/layout/styling/component polish remains deferred. This document only describes the backend contracts the later UI must consume.
 
-## Current routing and authentication boundary
+## Persistent Website resource
 
-`apps/web/src/App.jsx` mounts the routed workspace behind `AuthGate`. Protected management data is loaded only after the authenticated session boundary. Owner/Read Only authorization, Owner MFA, CSRF/Origin checks and backend route guards remain authoritative; hiding a button in React is never treated as authorization.
+YunPanel now has a real persistent Website resource separate from hostname/domain records.
 
-Current routes include dashboard, websites/site detail, applications, domains, servers, databases, jobs and settings/users. Direct URL/deep-link/browser-history behavior exists in the routed workspace but current browser acceptance remains in `todo.md`.
+Implemented backend contracts:
 
-The server setup UI no longer provisions enrollment tokens. New server ownership is agentless and operator-driven through the packaged migration CLIs documented in `docs/local-runtime-migration.md`. The removed `/api/servers/enroll` and `/api/dev/agent/inspect` compatibility paths must not be reintroduced by workspace work.
+- `GET /api/websites`
+- `GET /api/websites/:websiteId`
+- `GET /api/websites/:websiteId/domains`
+- `POST /api/websites`
 
-## Current Website compatibility limitation
+Website state is stored separately through `YUNPANEL_WEBSITE_STORE`. Production startup validates persisted Website server/application foreign keys before accepting the store.
 
-**There is still no independent persistent `Website` resource.** `/websites/:websiteId/...` remains a compatibility view over the existing domain/application records. The planned permanent model in `plan.md` must separate:
+An application-backed Website owns:
 
-- Website identity,
-- domain/subdomain/alias identity and explicit parent relationships,
-- application/runtime binding,
-- document root,
-- deterministic site Unix user,
-- DNS-hosting and mail-domain lifecycles.
+- stable Website UUID,
+- server ID,
+- application ID,
+- runtime type,
+- canonical managed document root,
+- deterministic `yunapp-*` Unix user.
 
-Existing compatibility matching must not be mistaken for a durable foreign-key relationship. A domain ID is not the future Website ID.
+A proxy Website is a real resource without an invented application/document root/Unix user.
 
-## Existing backend connections
+The Website ID is not a domain ID. Backend relationships must use explicit foreign keys rather than matching server/port/root heuristics.
 
-The current workspace can call implemented backend foundations including:
+## Domain relationship
 
-- authenticated server inventory and persisted local snapshots,
-- static application deploy/rollback,
-- Node deploy/restart/status/rollback,
-- encrypted/masked application environment management,
+Domain records may persist `websiteId`. The Website relationship endpoint reads only that explicit field; it does not infer membership from hostname, parent suffix, proxy port or application root.
+
+Legacy domain state without the field opens as `websiteId=null`. A one-way migration primitive can bind an unbound legacy domain to one same-server Website without changing the active Nginx traffic revision. Rebinding an already-bound domain is deliberately blocked until impact-preview/move semantics exist.
+
+Shared hostname validation now canonicalizes IDN input to ASCII punycode, so Unicode and punycode equivalents compare as the same hostname/alias.
+
+## Authentication/access boundary
+
+All Website management still enters through the authenticated API listener. Owner management requires the normal session/MFA/Origin/CSRF policy. Read Only accounts may read Website collection/detail and the explicit Website→domains relationship; Website creation/mutation remains Owner-only.
+
+Website create is covered by the common audit mutation classifier. Caller input cannot set `documentRoot` or `unixUser`; those values are derived from managed application identity.
+
+## Existing hosting functionality available to the future UI
+
+The later Website UI can build on existing backend foundations for:
+
+- server inventory and local snapshots,
+- static deploy/rollback,
+- Node deploy/status/restart/rollback,
+- encrypted/masked application environment state,
 - Nginx domain stage/activate,
-- managed ACME certificate issue/renew foundations,
-- managed-service inspection/install/start/stop/restart,
-- MySQL/MariaDB inventory and database create/delete,
-- durable jobs and job cancellation where allowed,
-- Owner-protected user administration.
+- managed ACME issue/renew,
+- managed-service lifecycle,
+- MySQL/MariaDB inventory + DB create/delete,
+- durable jobs/recovery,
+- common audit history,
+- Owner user administration.
 
-Long host operations are durable jobs. A `202` response means accepted/queued, not completed. Running/uncertain work must follow the durable recovery rules rather than a blind retry.
+A `202` response is queued/accepted work, not completion.
 
-## Missing backend functionality
+## Remaining backend work
 
-The workspace must not present the following as implemented merely because a route/tab/menu entry exists:
+See `plan.md` C/E/F/G/H/I. In particular the persistent Website foundation does **not** yet mean the migration is complete. Remaining Website/domain work includes:
 
-- persistent Website resource and migration,
-- complete Node runtime/version/start-stop configuration management,
-- private Git credentials and explicit commit/tag deployment selection,
-- live Node/Nginx/deploy log backend,
-- real PTY terminal and site file manager,
-- full Docker/Compose lifecycle,
-- site cron,
-- general application/DB/volume/mail backup product,
-- DNS provider/resolver management and DNS-01/wildcard certificates,
-- complete mail/Roundcube lifecycle,
-- common durable audit backend,
-- Plesk importer/migration.
-
-See `plan.md` for the remaining implementation list. Do not add fake data or inert controls to make these modules appear complete.
-
-## Access and data-loading constraints
-
-Read Only sessions may access only backend-declared read-only inventory surfaces. Jobs/users/env/nested host management and mutations remain Owner-only unless the backend access policy explicitly changes. Browser request selection is an optimization and must never become an authorization mechanism.
-
-Resource transitions must remain scoped: a stale response from a previous route/resource must not overwrite the current view. Access denial must clear privileged cached data. Job detail must be tied to the exact server-verified job identity rather than stale client state.
-
-## User administration
-
-Owner-protected user administration is now implemented in the backend and workspace; the older statement that it was only an uncommitted draft is obsolete. Real browser/process/concurrency acceptance is still open in `todo.md` T-USER and T-AUTH. Last-Owner protection, session revocation effects and MFA-related races must not be considered production-ready until those acceptance items pass.
+- versioned migration from legacy domain/application state,
+- mandatory Website binding for new managed domains only after rollback-safe migration,
+- Website update/rebind lifecycle,
+- reparent/move/delete impact preview,
+- site-create orchestration,
+- DNS/mail lifecycle separation,
+- Docker/static/Node/site-resource relationships beyond the current application/domain links.
 
 ## Design status
 
-The existing workspace is functional scaffolding, not the final visual target. Do not spend the current backend development phase on layout, styling, typography, visual table polish or responsive redesign. A separate model will handle the enterprise UI/UX pass after functionality is complete.
+Do not spend the current development phase on visual Website workspace polish. The existing React workspace may still use compatibility routing/data shapes until a later integration pass. The final enterprise UI/UX is intentionally assigned to a separate model after functionality is complete.
 
-Security/browser behavior that materially protects authentication, authorization, destructive forms, WebSocket/terminal access or stale privileged data is **not** considered optional design polish and remains part of the relevant backend/security acceptance.
+Security behavior, authenticated routing, stale privileged-data handling and destructive confirmation are not optional visual polish and remain subject to `todo.md` acceptance.
 
-## Validation status
+## Validation
 
-Historical UI/model test runs are preserved in Git history and dated historical documents such as `docs/ui-runtime.md`; they do not prove the current tree. The current full Node 24, Vite build, real browser and package-host acceptance requirements live in `todo.md`.
-
-Do not claim current visual quality, full browser acceptance or production readiness unless those current acceptance steps were actually run. GitHub Actions are not used for this project.
+Current full Node24/workspace, browser, package persistence, Website foreign-key, IDN and migration acceptance are tracked in `todo.md`. Historical UI/model tests are not evidence that the current tree passed. GitHub Actions are not used.
