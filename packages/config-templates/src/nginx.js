@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { normalizeDomainSet } from '@yunpanel/shared';
+import { formatProxyHostForUrl, normalizeDomainSet } from '@yunpanel/shared';
 
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
 
@@ -31,11 +31,9 @@ function assertUpstreamPort(value) {
   return value;
 }
 
-function assertLoopbackHost(value) {
-  if (!['127.0.0.1', 'localhost', '::1'].includes(value)) {
-    throw new NginxTemplateError('invalid_upstream_host', 'V1 proxy upstream must use a loopback host');
-  }
-  return value === '::1' ? '[::1]' : value;
+function assertUpstreamHost(value) {
+  try { return formatProxyHostForUrl(value); }
+  catch { throw new NginxTemplateError('invalid_upstream_host', 'Proxy upstream must use a safe IP address or DNS hostname'); }
 }
 
 function serverNames(primaryDomain, aliases) {
@@ -108,7 +106,7 @@ export function renderProxySiteConfig({
   tls = null,
 }) {
   const names = serverNames(primaryDomain, aliases);
-  const host = assertLoopbackHost(upstreamHost);
+  const host = assertUpstreamHost(upstreamHost);
   const port = assertUpstreamPort(upstreamPort);
   const normalizedTls = normalizeTls(tls);
   const preamble = httpPreamble(names, acmeRoot, normalizedTls);

@@ -30,3 +30,9 @@ export {
   normalizeDomainSet,
   validateDomainName,
 } from './domain.js';
+
+export {
+  formatProxyHostForUrl,
+  normalizeProxyHost,
+  ProxyTargetValidationError,
+} from './proxy-target.js';

@@ -33,6 +33,24 @@ test('renders loopback Node proxy settings with websocket support', () => {
   assert.match(config, /proxy_set_header Connection "upgrade";/);
 });
 
+test('renders canonical external DNS and IPv6 reverse proxy targets', () => {
+  const dns = renderProxySiteConfig({
+    primaryDomain: 'edge.example.com',
+    upstreamHost: 'ORIGIN.Example.NET.',
+    upstreamPort: 8443,
+    websocket: false,
+  });
+  assert.match(dns, /proxy_pass http:\/\/origin\.example\.net:8443;/);
+  assert.equal(dns.includes('proxy_set_header Upgrade'), false);
+
+  const ipv6 = renderProxySiteConfig({
+    primaryDomain: 'ipv6.example.com',
+    upstreamHost: '2001:0db8:0:0:0:0:0:1',
+    upstreamPort: 8080,
+  });
+  assert.match(ipv6, /proxy_pass http:\/\/\[2001:db8::1\]:8080;/);
+});
+
 test('renders managed HTTPS with HTTP ACME challenge and redirect', () => {
   const config = renderProxySiteConfig({
     primaryDomain: 'secure.example.com',
@@ -65,7 +83,7 @@ test('rejects config injection through domain, path, upstream and TLS inputs', (
   );
 
   assert.throws(
-    () => renderProxySiteConfig({ primaryDomain: 'api.example.com', upstreamHost: '10.0.0.5', upstreamPort: 3000 }),
+    () => renderProxySiteConfig({ primaryDomain: 'api.example.com', upstreamHost: 'https://10.0.0.5/evil', upstreamPort: 3000 }),
     (error) => error instanceof NginxTemplateError && error.code === 'invalid_upstream_host',
   );
 

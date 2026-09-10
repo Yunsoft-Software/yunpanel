@@ -1,9 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { isIP } from 'node:net';
 import path from 'node:path';
-import { domainToASCII } from 'node:url';
-import { assertUuid } from '@yunpanel/shared';
+import { assertUuid, normalizeProxyHost } from '@yunpanel/shared';
 
 const STORE_VERSION = 2;
 const RUNTIME_TYPES = new Set(['static', 'node', 'proxy']);
@@ -40,27 +38,11 @@ function name(value) {
 }
 
 function proxyHost(value) {
-  if (typeof value !== 'string' || value.trim().length < 1 || value.trim().length > 253
-    || /[\u0000-\u0020\u007f]/.test(value)) {
+  try {
+    return normalizeProxyHost(value);
+  } catch {
     throw new WebsiteRegistryError('invalid_website_proxy_host', 'Proxy host must be an IP address or DNS hostname without a URL scheme or path');
   }
-  const trimmed = value.trim();
-  const bracketed = trimmed.startsWith('[') && trimmed.endsWith(']');
-  if ((trimmed.includes('[') || trimmed.includes(']')) && !bracketed) {
-    throw new WebsiteRegistryError('invalid_website_proxy_host', 'Proxy host must be an IP address or DNS hostname without a URL scheme or path');
-  }
-  const input = bracketed ? trimmed.slice(1, -1) : trimmed;
-  const ipVersion = isIP(input);
-  if (ipVersion === 4) return input;
-  if (ipVersion === 6) return new URL(`http://[${input}]/`).hostname.slice(1, -1);
-  if (/[/:?#@[\]]/.test(input)) {
-    throw new WebsiteRegistryError('invalid_website_proxy_host', 'Proxy host must be an IP address or DNS hostname without a URL scheme or path');
-  }
-  const ascii = domainToASCII(input).toLowerCase().replace(/\.$/, '');
-  if (!ascii || ascii.length > 253 || ascii.split('.').some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) {
-    throw new WebsiteRegistryError('invalid_website_proxy_host', 'Proxy host must be an IP address or DNS hostname without a URL scheme or path');
-  }
-  return ascii;
 }
 
 function proxyTarget(value, { persisted = false } = {}) {

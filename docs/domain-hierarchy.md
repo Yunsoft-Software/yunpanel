@@ -77,6 +77,8 @@ Website/domain identity, DNS hosting/provider state, certificate state and mail-
 
 Nginx stage/activate and managed certificate issue/renew continue through durable jobs and operation-specific recovery. Do not replace them with generic retry/force-success behavior.
 
+Reverse-proxy targets may use canonical DNS, IPv4 or IPv6 hosts. They never accept a URL scheme, path, credentials or control characters; IPv6 is rendered with URL-safe brackets. Node application targets remain backend-assigned loopback ports, while an explicitly selected external-proxy Website may point to a remote origin.
+
 ## Reparent and remaining move/delete rule
 
 `POST /api/domains/:domainId/reparent-preview` accepts one explicit `parentDomainId` (or `null` for a root). It validates the exact selected parent, same-server ownership, dot-boundary ancestry and cycles against the current hierarchy; it never derives a parent by trimming hostname labels. The SHA-256 preview digest covers the complete canonical hierarchy snapshot and reports descendants plus Website/certificate references without changing state.

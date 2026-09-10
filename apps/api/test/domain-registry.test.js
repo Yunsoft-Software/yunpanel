@@ -63,3 +63,31 @@ test('rejects domains for unknown servers and unsafe target values', async () =>
     (error) => error instanceof DomainRegistryError && error.code === 'invalid_upstream_port',
   );
 });
+
+test('external proxy targets canonicalize safe DNS and IPv6 hosts without URL injection', async () => {
+  const registry = createDomainRegistry();
+  const dns = await registry.createDomain({
+    serverId: 'local',
+    primaryDomain: 'edge.example.com',
+    targetType: 'proxy',
+    target: { upstreamHost: 'ORIGIN.Example.NET.', upstreamPort: 8443, websocket: false },
+  });
+  assert.deepEqual(dns.target, { upstreamHost: 'origin.example.net', upstreamPort: 8443, websocket: false });
+  const ipv6 = await registry.createDomain({
+    serverId: 'local',
+    primaryDomain: 'ipv6.example.com',
+    targetType: 'proxy',
+    target: { upstreamHost: '[2001:0DB8:0:0:0:0:0:1]', upstreamPort: 8080 },
+  });
+  assert.equal(ipv6.target.upstreamHost, '2001:db8::1');
+
+  await assert.rejects(
+    registry.createDomain({
+      serverId: 'local',
+      primaryDomain: 'unsafe.example.com',
+      targetType: 'proxy',
+      target: { upstreamHost: 'https://origin.example.net/path', upstreamPort: 8443 },
+    }),
+    (error) => error instanceof DomainRegistryError && error.code === 'invalid_upstream_host',
+  );
+});

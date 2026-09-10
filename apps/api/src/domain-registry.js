@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { assertUuid, DomainValidationError, normalizeDomainSet } from '@yunpanel/shared';
+import { assertUuid, DomainValidationError, normalizeDomainSet, normalizeProxyHost } from '@yunpanel/shared';
 import { DomainHierarchyError, validateDomainHierarchy, validateDomainParent } from './domain-hierarchy.js';
 
 const STORE_VERSION = 1;
@@ -56,7 +56,10 @@ function validateTarget(targetType, target) {
   if (!Number.isInteger(target.upstreamPort) || target.upstreamPort < 1024 || target.upstreamPort > 65535) {
     throw new DomainRegistryError('invalid_upstream_port', 'Proxy upstreamPort must be between 1024 and 65535');
   }
-  return { upstreamHost: '127.0.0.1', upstreamPort: target.upstreamPort, websocket: target.websocket !== false };
+  let upstreamHost;
+  try { upstreamHost = normalizeProxyHost(target.upstreamHost ?? '127.0.0.1'); }
+  catch { throw new DomainRegistryError('invalid_upstream_host', 'Proxy upstreamHost must be an IP address or DNS hostname without a URL scheme or path'); }
+  return { upstreamHost, upstreamPort: target.upstreamPort, websocket: target.websocket !== false };
 }
 
 function normalizeDomains(primaryDomain, aliases) {
