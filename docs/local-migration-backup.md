@@ -64,6 +64,20 @@ Packaged verification refuses the backup root itself and paths outside `/var/bac
 
 Any mismatch means the backup is not a valid migration gate. Do not bypass the check.
 
+## Use the verified snapshot as the ownership-mutation gate
+
+`local-runtime.mjs status <server-uuid>` remains read-only and does not need a backup argument. Every ownership mutation must receive the exact verified snapshot directory:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs create --backup-dir /var/backups/yunpanel/migration-<timestamp> --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs bind <server-uuid> --backup-dir /var/backups/yunpanel/migration-<timestamp> --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs release <server-uuid> --backup-dir /var/backups/yunpanel/migration-<timestamp> --confirm
+```
+
+The ownership CLI re-verifies `manifest.json`, archive SHA-256, permissions and archive member paths immediately before invoking the migration command. A missing, altered, outside-root or malformed snapshot prevents the ownership mutation from starting. Successful mutation output reports the exact verified snapshot directory used as the gate.
+
+The backup path itself is not copied into server/job state, and the verification step does not expose file contents or secrets.
+
 ## Restore boundary
 
 There is intentionally no automatic extract/restore command yet. A valid archive proves that the pre-migration snapshot was created and has not changed; it does not prove restore acceptance.
@@ -82,5 +96,6 @@ On an isolated Ubuntu 24.04 package host, verify at minimum:
 - missing required source rejection,
 - top-level symlink source rejection,
 - archive-member escape rejection,
+- `create`, `bind` and `release` refusing to run without an exact valid `--backup-dir` snapshot,
 - no secret/file-content material in `manifest.json` or normal command output,
 - restoration rehearsal from the snapshot before any production migration is approved.
