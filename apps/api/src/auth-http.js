@@ -113,7 +113,7 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
         const user = await store.completeSetup({ setupToken: body.setupToken, username: body.username, password: body.password, peer });
         return json(response, 201, { data: user });
       }
-      const result = await store.login({ username: body.username, password, peer, previousToken: rawToken });
+      const result = await store.login({ username: body.username, password: body.password, peer, previousToken: rawToken });
       if (challengeToken) store.mfa.cancelLogin(challengeToken);
       if (result.mfaRequired) {
         setCookie(response, '');
@@ -159,6 +159,7 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
       }
       if (pathname === '/api/auth/mfa/enroll/cancel' && request.method === 'POST') {
         store.mfa.cancelEnrollment(rawToken);
+        setMfaCookie(response, '');
         return json(response, 204);
       }
       if (['/api/auth/mfa/confirm', '/api/auth/mfa/recovery'].includes(pathname) && request.method === 'POST') {
