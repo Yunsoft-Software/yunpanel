@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { checkLocalApiHealth, LocalApiHealthError } from './local-api-health.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
 import {
@@ -98,6 +99,14 @@ function requireAction(action) {
   return action;
 }
 
+function normalizeHealthResult(result) {
+  if (!result || result.healthy !== true || result.statusCode !== 200
+    || typeof result.host !== 'string' || !Number.isInteger(result.port)) {
+    throw new LocalMigrationCliError('local_validation_api_health_invalid', 'Local API health probe returned an invalid acknowledgement');
+  }
+  return Object.freeze({ healthy: true, statusCode: 200 });
+}
+
 export async function runLocalMigrationCommand({
   action,
   serverId,
@@ -110,12 +119,14 @@ export async function runLocalMigrationCommand({
   registryFactory = createServerRegistry,
   jobRegistryFactory = createMigrationJobRegistry,
   serviceStatus = createMigrationServiceStatus(),
+  apiHealthCheck = checkLocalApiHealth,
 } = {}) {
   const safeAction = requireAction(action);
   if (!['status', 'validate'].includes(safeAction) && confirm !== true) {
     throw new LocalMigrationCliError('migration_confirmation_required', `Use --confirm to ${safeAction} local runtime ownership`);
   }
-  if (typeof registryFactory !== 'function' || typeof jobRegistryFactory !== 'function' || typeof serviceStatus !== 'function') {
+  if (typeof registryFactory !== 'function' || typeof jobRegistryFactory !== 'function' || typeof serviceStatus !== 'function'
+    || typeof apiHealthCheck !== 'function') {
     throw new LocalMigrationCliError('invalid_migration_dependencies', 'Migration command dependencies are invalid');
   }
   const paths = resolveLocalMigrationPaths({ env, packaged, cwd });
@@ -129,7 +140,14 @@ export async function runLocalMigrationCommand({
   }
   if (safeAction === 'validate') {
     const validation = await validateLocalServerRuntime(input);
-    return Object.freeze({ action: safeAction, ...validation, statePaths: paths });
+    let apiHealth;
+    try {
+      apiHealth = normalizeHealthResult(await apiHealthCheck({ env }));
+    } catch (error) {
+      if (error instanceof LocalApiHealthError || error instanceof LocalMigrationCliError) throw error;
+      throw new LocalMigrationCliError('local_validation_api_health_failed', 'Local API health validation could not be completed');
+    }
+    return Object.freeze({ action: safeAction, ...validation, apiHealth, statePaths: paths });
   }
 
   let server;
@@ -152,4 +170,5 @@ export const localMigrationCliInternals = Object.freeze({
   packagedStateRoot: PACKAGED_STATE_ROOT,
   panelUnits: PANEL_UNITS,
   inspectUnitState,
+  normalizeHealthResult,
 });
