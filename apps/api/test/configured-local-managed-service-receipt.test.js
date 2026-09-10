@@ -1,0 +1,109 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { OPERATIONS } from '@yunpanel/protocol';
+import { startConfiguredLocalRuntime } from '../src/configured-local-runtime.js';
+
+const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
+
+async function captureRecorder() {
+  const writes = [];
+  let startOptions;
+  await startConfiguredLocalRuntime({
+    env: { YUNPANEL_LOCAL_SERVER_ID: serverId },
+    hostname: 'host-1.example.local',
+    jobStorePath: '/var/lib/yunpanel/control-plane/job-registry.json',
+    runtimeVersion: '0.3.0',
+    registry: {},
+    jobRegistry: {},
+    domainRegistry: {},
+    certificateRegistry: {},
+    applicationRegistry: {},
+    applicationEnvironmentRegistry: { materialize: async () => ({}) },
+    createOperations: () => ({ operations: [], supports: () => true, executeOperation: async () => ({}) }),
+    createDatabaseDeletionReceipts: () => ({ write: async () => {} }),
+    createManagedServiceReceipts: () => ({
+      async write(value) { writes.push(value); },
+    }),
+    inspectInventory: async () => ({ hostname: 'host-1.example.local' }),
+    startRuntime: async (options) => { startOptions = options; return { stop: async () => {} }; },
+  });
+  return { writes, recorder: startOptions.recordExecutionEvidence };
+}
+
+test('configured runtime records minimal install and restart receipts only', async () => {
+  const { writes, recorder } = await captureRecorder();
+  await recorder({
+    serverId,
+    jobId: '12345678-1234-4234-8234-123456789012',
+    operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
+    payload: { serviceId: 'nginx' },
+    result: { id: 'nginx', installed: true, active: true, changed: true },
+  });
+  await recorder({
+    serverId,
+    jobId: '22345678-1234-4234-8234-123456789012',
+    operation: OPERATIONS.SYSTEM_SERVICE_CONTROL,
+    payload: { serviceId: 'nginx', action: 'restart' },
+    result: { id: 'nginx', installed: true, active: true, action: 'restart' },
+  });
+  await recorder({
+    serverId,
+    jobId: '32345678-1234-4234-8234-123456789012',
+    operation: OPERATIONS.SYSTEM_SERVICE_CONTROL,
+    payload: { serviceId: 'nginx', action: 'start' },
+    result: { id: 'nginx', installed: true, active: true, action: 'start' },
+  });
+
+  assert.deepEqual(writes, [
+    {
+      serverId,
+      jobId: '12345678-1234-4234-8234-123456789012',
+      operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
+      serviceId: 'nginx',
+      changed: true,
+    },
+    {
+      serverId,
+      jobId: '22345678-1234-4234-8234-123456789012',
+      operation: OPERATIONS.SYSTEM_SERVICE_CONTROL,
+      serviceId: 'nginx',
+      action: 'restart',
+    },
+  ]);
+});
+
+test('configured runtime refuses to record mismatched service evidence', async () => {
+  const { writes, recorder } = await captureRecorder();
+  await assert.rejects(
+    recorder({
+      serverId,
+      jobId: '12345678-1234-4234-8234-123456789012',
+      operation: OPERATIONS.SYSTEM_SERVICE_CONTROL,
+      payload: { serviceId: 'nginx', action: 'restart' },
+      result: { id: 'docker', installed: true, active: true, action: 'restart' },
+    }),
+    /not safe recovery evidence/,
+  );
+  assert.deepEqual(writes, []);
+});
+
+test('configured runtime rejects an invalid managed service receipt store', async () => {
+  await assert.rejects(
+    startConfiguredLocalRuntime({
+      env: { YUNPANEL_LOCAL_SERVER_ID: serverId },
+      hostname: 'host-1.example.local',
+      jobStorePath: '/var/lib/yunpanel/control-plane/job-registry.json',
+      runtimeVersion: '0.3.0',
+      registry: {},
+      jobRegistry: {},
+      domainRegistry: {},
+      certificateRegistry: {},
+      applicationRegistry: {},
+      applicationEnvironmentRegistry: { materialize: async () => ({}) },
+      createOperations: () => ({ operations: [], supports: () => true, executeOperation: async () => ({}) }),
+      createDatabaseDeletionReceipts: () => ({ write: async () => {} }),
+      createManagedServiceReceipts: () => ({}),
+    }),
+    { code: 'local_managed_service_receipts_invalid' },
+  );
+});
