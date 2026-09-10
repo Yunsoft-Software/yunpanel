@@ -1,7 +1,7 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { inspectAllowlistedServices } from '@yunpanel/host-runtime';
+import { inspectAllowlistedServices, inspectDocker } from '@yunpanel/host-runtime';
 import { createApp, API_VERSION } from './app.js';
 import { createAuthStore } from './auth-store.js';
 import { createAuthenticatedApi } from './auth-http.js';
@@ -78,6 +78,7 @@ const localRuntime = await startConfiguredLocalRuntime({
   applicationRegistry,
   applicationEnvironmentRegistry,
   inspectServices: inspectAllowlistedServices,
+  inspectDocker,
   onError: reportLocalExecutorFault,
 });
 const renewalScheduler = startCertificateRenewalScheduler({ certificateRegistry, jobRegistry, intervalMs: certificateRenewalIntervalMs, renewBeforeMs: certificateRenewBeforeMs });
