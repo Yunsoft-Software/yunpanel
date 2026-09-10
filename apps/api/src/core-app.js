@@ -1,6 +1,5 @@
 import express from 'express';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { inspectLocalAgent } from './agent-client.js';
 import {
   createApplicationEnvironmentRegistry,
   ApplicationEnvironmentRegistryError,
@@ -43,7 +42,6 @@ async function latestNodeStatusJob(jobRegistry, applicationId) {
 }
 
 export function createApp({
-  inspectAgent = inspectLocalAgent,
   environment = process.env.NODE_ENV,
   registry = createServerRegistry(),
   domainRegistry = createDomainRegistry(),
@@ -61,15 +59,6 @@ export function createApp({
   app.use(express.json({ limit: '256kb' }));
 
   app.get('/api/health', (request, response) => response.json({ status: 'ok', service: 'yunpanel-api', version: API_VERSION }));
-
-  app.get('/api/dev/agent/inspect', async (request, response) => {
-    if (environment !== 'development') return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
-    try {
-      return response.json(await inspectAgent());
-    } catch (error) {
-      return response.status(502).json({ error: { code: 'agent_unavailable', message: error.message } });
-    }
-  });
 
   const developmentList = (loader) => async (request, response) => {
     if (environment !== 'development') return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
