@@ -51,7 +51,22 @@ sudo systemctl stop yunpanel-api.service yun-agent.service
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs reconcile <server-id> <job-id> --confirm
 ```
 
-This command re-applies resource reconciliation only. It does **not** re-run the host operation. A `running` job is deliberately rejected. Unknown-running recovery requires operation-specific external host evidence and remains a separate development/acceptance gate in `plan.md` and `todo.md`.
+This command re-applies resource reconciliation only. It does **not** re-run the host operation.
+
+A `running` recovery job is handled differently. YunPanel currently permits automatic re-execution only for the two payload-free read-only inspections whose repetition cannot mutate host state:
+
+- `system.packages.inspect`
+- `database.inspect`
+
+After both consumers are stopped, inspect the exact recovery identity first and then run:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-readonly <server-id> <job-id> --confirm
+```
+
+The command re-runs the allowlisted read-only inspection and records that fresh inspection result on the original durable job. If the host probe or durable completion cannot be confirmed, the recovery record remains unresolved. `system.services.inspect`, Node status, deploy/restart/rollback, package upgrade, service mutations, database create/delete, domain and certificate operations are deliberately **not** accepted by this command.
+
+Mutating `running` recovery still requires operation-specific external host evidence. Do not mark a mutation succeeded/failed by guess, do not clear its journal manually and do not use process restart as an automatic retry mechanism. That remaining recovery work stays gated by `plan.md` and `todo.md`.
 
 ## Path A — migrate an existing enrolled server
 
@@ -65,7 +80,7 @@ Identify the exact existing server UUID, then inspect it:
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs status <server-uuid>
 ```
 
-`status` is read-only. It verifies the registry hostname against `os.hostname()` and reports API/agent state and active jobs without changing ownership.
+`status` is read-only. It verifies the registry hostname against `os.hostname()` and reports API/agent state, active jobs and durable recovery count without changing ownership.
 
 ### A2. Stop both command consumers
 
@@ -79,7 +94,7 @@ Run the preflight again:
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs status <server-uuid>
 ```
 
-Continue only when `apiActive=false`, `agentActive=false`, `activeJobs=0`, the hostname is correct and the printed state paths are the intended packaged files.
+Continue only when `apiActive=false`, `agentActive=false`, `activeJobs=0`, `recoveryJobs=0`, the hostname is correct and the printed state paths are the intended packaged files.
 
 ### A3. Bind the existing identity to local runtime
 
@@ -87,7 +102,7 @@ Continue only when `apiActive=false`, `agentActive=false`, `activeJobs=0`, the h
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs bind <server-uuid> --confirm
 ```
 
-The command re-runs the same service/job/hostname preflight immediately before mutation. Repeating a successful bind for the exact already-local host is idempotent.
+The command re-runs the same service/job/recovery/hostname preflight immediately before mutation. Repeating a successful bind for the exact already-local host is idempotent.
 
 Put the exact printed value in `/etc/yunpanel/control-plane/api.env`:
 
@@ -117,7 +132,7 @@ sudo systemctl stop yunpanel-api.service yun-agent.service
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs status
 ```
 
-Do not continue while durable recovery is unresolved. The fresh-create command also fails closed if API/agent is active or any queued/running job exists.
+Do not continue while durable recovery is unresolved. The fresh-create command also fails closed if API/agent is active, any queued/running job exists or the durable recovery sidecar still contains unresolved work.
 
 ### B2. Create the local-only server record
 
@@ -156,10 +171,11 @@ systemctl is-active yun-agent.service || true
 Then verify through the authenticated panel, in this order:
 
 1. server connectivity/local snapshot,
-2. read-only inventory/package/service inspection,
-3. one low-risk managed mutation on the test host,
-4. Node/static runtime operations,
-5. SSL, DB and remaining host operations required by `todo.md`.
+2. host inventory, allowlisted systemd services, Docker and Nginx snapshot parity,
+3. read-only package/service/database inspection,
+4. one low-risk managed mutation on the test host,
+5. Node/static runtime operations,
+6. SSL, DB and remaining host operations required by `todo.md`.
 
 If durable recovery appears at any point, stop creating new work and use `job-recovery status` before deciding the next action.
 
@@ -194,6 +210,6 @@ sudo systemctl start yunpanel-api.service yun-agent.service
 
 `release --confirm` deliberately fails for a fresh Path B local-only record because no legacy agent credential exists.
 
-If any migration/recovery command reports an active service, active queue, hostname mismatch, unknown-running job, invalid/outside state path or unreadable systemd state, do not bypass the guard. Resolve the discrepancy from independent console access and the verified backup.
+If any migration/recovery command reports an active service, active queue, hostname mismatch, unknown-running mutation, invalid/outside state path or unreadable systemd state, do not bypass the guard. Resolve the discrepancy from independent console access and the verified backup.
 
 Complete `T-LOCAL-EXECUTOR`, `T-SERVICES`, `T-DATABASE`, `T-LIVE` and `T-MIGRATION` in `todo.md` on an isolated supported host before calling either path production-ready.
