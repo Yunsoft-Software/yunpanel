@@ -47,7 +47,7 @@ function readJson(request) {
       } catch { reject(new AuthError('invalid_json', 'Enter a valid JSON object.')); }
     });
     request.on('error', reject);
-    request.on('aborted', () => reject(new AuthError('request_aborted', 'Request was interrupted.'));
+    request.on('aborted', () => reject(new AuthError('request_aborted', 'Request was interrupted.')));
   });
 }
 
