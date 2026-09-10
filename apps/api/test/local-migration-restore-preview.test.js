@@ -200,13 +200,14 @@ test('unexpected archive inspector errors are redacted by restore preview', asyn
     previewLocalMigrationRestore({
       backupDirectory,
       verifyBackup: async () => verification([]),
-      inspectArchive: async () => { throw new Error('SECRET=/root/private/archive'); },
+      inspectArchive: async () => { throw new Error('SECRET=/root/private/archive-token'); },
       compareIdentities: async () => identityComparison(),
       lstatFn: async () => metadata('directory'),
     }),
     (error) => {
       assert.equal(error.code, 'migration_restore_archive_unavailable');
-      assert.doesNotMatch(error.message, /SECRET|archive|\/root\/private/i);
+      assert.equal(error.message, 'Migration restore archive inspection could not be completed');
+      assert.doesNotMatch(error.message, /SECRET|token|\/root\/private/i);
       return true;
     },
   );
