@@ -9,6 +9,8 @@ import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-se
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 import { mountWebsiteRoutes } from './website-http.js';
+import { mountWebsiteMigrationRoutes } from './website-migration-http.js';
+import { WebsiteMigrationPreviewError } from './website-migration-preview.js';
 import { createWebsiteRegistry, WebsiteRegistryError } from './website-registry.js';
 
 export { API_VERSION } from './core-app.js';
@@ -35,6 +37,7 @@ export function createApp({
   app.use(express.json({ limit: '256kb' }));
   app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry));
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry });
+  mountWebsiteMigrationRoutes(app, { websiteRegistry, domainRegistry, applicationRegistry });
   mountManagedServiceRoutes(app, { registry, jobRegistry });
   mountDatabaseRoutes(app, { registry, jobRegistry });
   app.use(core);
@@ -46,6 +49,7 @@ export function createApp({
       || error instanceof RegistryError
       || error instanceof JobRegistryError
       || error instanceof ManagedServiceHttpError
+      || error instanceof WebsiteMigrationPreviewError
       || error instanceof WebsiteRegistryError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
