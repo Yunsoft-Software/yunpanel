@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { createNginxManager } from '@yunpanel/host-runtime';
 import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { createDomainRegistry } from './domain-registry.js';
@@ -7,6 +8,7 @@ import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createLocalHostOperations } from './local-host-operations.js';
 import { createJobRecoveryStore } from './job-recovery-store.js';
 import { reconcileTerminalRecovery } from './job-recovery-command.js';
+import { recoverRunningDomainStage } from './job-running-domain-recovery.js';
 import { recoverRunningInspection } from './job-running-recovery.js';
 import { createJobRegistry } from './job-registry.js';
 import {
@@ -116,6 +118,20 @@ async function requireRecoveryServerHost({ serverRegistry, serverId, hostname })
   return server;
 }
 
+async function initResourceRegistries({
+  paths,
+  serverRegistry,
+  domainRegistryFactory,
+  certificateRegistryFactory,
+  applicationRegistryFactory,
+}) {
+  const serverExists = async (id) => Boolean(await serverRegistry.getServer(id));
+  const domainRegistry = await initRegistry(domainRegistryFactory({ filePath: paths.domainStore, serverExists }), 'Domain');
+  const certificateRegistry = await initRegistry(certificateRegistryFactory({ filePath: paths.certificateStore }), 'Certificate');
+  const applicationRegistry = await initRegistry(applicationRegistryFactory({ filePath: paths.applicationStore, serverExists }), 'Application');
+  return { domainRegistry, certificateRegistry, applicationRegistry };
+}
+
 export async function runTerminalRecoveryFromStores({
   serverId,
   jobId,
@@ -150,10 +166,13 @@ export async function runTerminalRecoveryFromStores({
 
   const paths = resolveJobRecoveryPaths({ env, packaged, cwd });
   const serverRegistry = await initRegistry(serverRegistryFactory({ filePath: paths.serverStore }), 'Server');
-  const serverExists = async (id) => Boolean(await serverRegistry.getServer(id));
-  const domainRegistry = await initRegistry(domainRegistryFactory({ filePath: paths.domainStore, serverExists }), 'Domain');
-  const certificateRegistry = await initRegistry(certificateRegistryFactory({ filePath: paths.certificateStore }), 'Certificate');
-  const applicationRegistry = await initRegistry(applicationRegistryFactory({ filePath: paths.applicationStore, serverExists }), 'Application');
+  const { domainRegistry, certificateRegistry, applicationRegistry } = await initResourceRegistries({
+    paths,
+    serverRegistry,
+    domainRegistryFactory,
+    certificateRegistryFactory,
+    applicationRegistryFactory,
+  });
   const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
 
   const result = await reconcileCommand({
@@ -217,6 +236,70 @@ export async function runRunningInspectionRecoveryFromStores({
   return Object.freeze({ ...result, statePaths: paths });
 }
 
+export async function runRunningDomainStageRecoveryFromStores({
+  serverId,
+  jobId,
+  hostname = os.hostname(),
+  env = process.env,
+  packaged = false,
+  cwd = process.cwd(),
+  serverRegistryFactory = createServerRegistry,
+  domainRegistryFactory = createDomainRegistry,
+  jobRegistryFactory = createJobRegistry,
+  durableRegistryFactory = createDurableJobRegistry,
+  recoveryStoreFactory = createJobRecoveryStore,
+  certificateRegistryFactory = createCertificateRegistry,
+  applicationRegistryFactory = createApplicationRegistry,
+  nginxManagerFactory = createNginxManager,
+  serviceStatus = createMigrationServiceStatus(),
+  recoverCommand = recoverRunningDomainStage,
+} = {}) {
+  for (const dependency of [
+    serverRegistryFactory,
+    domainRegistryFactory,
+    jobRegistryFactory,
+    durableRegistryFactory,
+    recoveryStoreFactory,
+    certificateRegistryFactory,
+    applicationRegistryFactory,
+    nginxManagerFactory,
+    serviceStatus,
+    recoverCommand,
+  ]) {
+    if (typeof dependency !== 'function') {
+      throw new JobRecoveryRuntimeError('job_recovery_runtime_dependencies_invalid', 'Domain recovery runtime dependencies are invalid');
+    }
+  }
+
+  const paths = resolveJobRecoveryPaths({ env, packaged, cwd });
+  const serverRegistry = await initRegistry(serverRegistryFactory({ filePath: paths.serverStore }), 'Server');
+  await requireRecoveryServerHost({ serverRegistry, serverId, hostname });
+  const { domainRegistry, certificateRegistry, applicationRegistry } = await initResourceRegistries({
+    paths,
+    serverRegistry,
+    domainRegistryFactory,
+    certificateRegistryFactory,
+    applicationRegistryFactory,
+  });
+  const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
+  const nginxManager = nginxManagerFactory();
+  if (!nginxManager || typeof nginxManager.inspectStagedDomain !== 'function') {
+    throw new JobRecoveryRuntimeError('job_recovery_nginx_evidence_invalid', 'Domain recovery Nginx evidence provider is invalid');
+  }
+
+  const result = await recoverCommand({
+    serverId,
+    jobId,
+    jobRegistry,
+    domainRegistry,
+    certificateRegistry,
+    applicationRegistry,
+    serviceStatus,
+    inspectStageEvidence: (payload) => nginxManager.inspectStagedDomain(payload),
+  });
+  return Object.freeze({ ...result, statePaths: paths });
+}
+
 export const jobRecoveryRuntimeInternals = Object.freeze({
   packagedStateRoot: PACKAGED_STATE_ROOT,
   resolveRecoveryStorePath,
@@ -224,4 +307,5 @@ export const jobRecoveryRuntimeInternals = Object.freeze({
   createDurableRecoveryRegistry,
   normalizeRecoveryHostname,
   requireRecoveryServerHost,
+  initResourceRegistries,
 });
