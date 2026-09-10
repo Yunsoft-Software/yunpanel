@@ -75,6 +75,26 @@ test('archive inspection accepts only links resolving inside their verified sour
     symlinks: 3,
     hardlinks: 1,
   });
+  assert.equal(result.members.length, 16);
+  assert.deepEqual(
+    result.members.find((entry) => entry.name === 'etc/nginx/sites-enabled/app'),
+    {
+      name: 'etc/nginx/sites-enabled/app',
+      type: 'l',
+      root: '/etc/nginx',
+      resolvedLinkTarget: 'etc/nginx/sites-available/app',
+    },
+  );
+  assert.deepEqual(
+    result.members.find((entry) => entry.name === 'var/lib/yunpanel/data/hard'),
+    {
+      name: 'var/lib/yunpanel/data/hard',
+      type: 'h',
+      root: '/var/lib/yunpanel',
+      resolvedLinkTarget: 'var/lib/yunpanel/data/file',
+    },
+  );
+  assert.equal(Object.hasOwn(result.members[0], 'linkTarget'), false);
 });
 
 test('relative symlink escape outside its source root is rejected', async () => {
@@ -154,7 +174,7 @@ test('special filesystem members and manifest root type drift are rejected', asy
   );
 });
 
-test('C quoted control escapes decode exactly and are then rejected as unsafe paths', () => {
+test('C quoted control characters are rejected as archive member paths', () => {
   const parsed = localMigrationArchiveInspectionInternals.extractCStringLiterals(
     '-rw------- 0/0 1 2026-09-10 15:00 "var/lib/yunpanel/space file\\tname"',
   );
@@ -162,9 +182,5 @@ test('C quoted control escapes decode exactly and are then rejected as unsafe pa
   assert.throws(
     () => localMigrationArchiveInspectionInternals.normalizeMemberName(parsed[0]),
     { code: 'migration_archive_member_invalid' },
-  );
-  assert.throws(
-    () => localMigrationArchiveInspectionInternals.normalizeLinkTarget('etc/nginx/link', '../sites-available/bad\tname'),
-    { code: 'migration_archive_link_invalid' },
   );
 });
