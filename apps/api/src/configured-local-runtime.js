@@ -9,6 +9,7 @@ import { createManagedServiceMutationReceiptStore } from './managed-service-muta
 import { createNodeDeploymentReceiptStore } from './node-deployment-receipt.js';
 import { createNodeRestartReceiptStore } from './node-restart-receipt.js';
 import { createNodeRollbackReceiptStore } from './node-rollback-receipt.js';
+import { createSystemUpgradeReceiptStore } from './system-upgrade-receipt.js';
 
 export class ConfiguredLocalRuntimeError extends Error {
   constructor(code, message) {
@@ -36,6 +37,7 @@ export async function startConfiguredLocalRuntime({
   createNodeDeploymentReceipts = createNodeDeploymentReceiptStore,
   createNodeRestartReceipts = createNodeRestartReceiptStore,
   createNodeRollbackReceipts = createNodeRollbackReceiptStore,
+  createSystemUpgradeReceipts = createSystemUpgradeReceiptStore,
   inspectInventory = inspectHostInventory,
   inspectServices = null,
   inspectDocker = null,
@@ -55,6 +57,7 @@ export async function startConfiguredLocalRuntime({
     || typeof createNodeDeploymentReceipts !== 'function'
     || typeof createNodeRestartReceipts !== 'function'
     || typeof createNodeRollbackReceipts !== 'function'
+    || typeof createSystemUpgradeReceipts !== 'function'
     || typeof inspectInventory !== 'function'
     || (inspectServices !== null && typeof inspectServices !== 'function')
     || (inspectDocker !== null && typeof inspectDocker !== 'function')
@@ -90,6 +93,10 @@ export async function startConfiguredLocalRuntime({
   const nodeRollbackReceipts = createNodeRollbackReceipts();
   if (!nodeRollbackReceipts || typeof nodeRollbackReceipts.write !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_node_rollback_receipts_invalid', 'Local runtime Node rollback receipt store is invalid');
+  }
+  const systemUpgradeReceipts = createSystemUpgradeReceipts();
+  if (!systemUpgradeReceipts || typeof systemUpgradeReceipts.write !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_system_upgrade_receipts_invalid', 'Local runtime system upgrade receipt store is invalid');
   }
 
   const recordExecutionEvidence = async ({ serverId, jobId, operation, payload, result }) => {
@@ -160,6 +167,17 @@ export async function startConfiguredLocalRuntime({
         applicationId: payload.applicationId,
         result,
       });
+      return;
+    }
+
+    if (operation === OPERATIONS.SYSTEM_UPGRADE) {
+      if (!result || result.packageName !== 'yunpanel' || result.installed !== true
+        || typeof result.installedVersion !== 'string' || typeof result.previousVersion !== 'string'
+        || typeof result.updateAvailable !== 'boolean' || typeof result.upgraded !== 'boolean'
+        || typeof result.restartScheduled !== 'boolean') {
+        throw new Error('System upgrade result is not safe recovery evidence');
+      }
+      await systemUpgradeReceipts.write({ serverId, jobId, result });
       return;
     }
 
