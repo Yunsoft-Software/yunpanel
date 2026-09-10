@@ -43,6 +43,11 @@ export {
   staticDeploymentReceiptInternals,
 } from './static-deployment-receipt.js';
 export {
+  createStaticDeploymentEvidenceInspector,
+  StaticDeploymentEvidenceError,
+  staticDeploymentEvidenceInternals,
+} from './static-deployment-evidence.js';
+export {
   createStaticRollbackManager,
   StaticRollbackError,
   staticRollbackManager,
