@@ -16,6 +16,7 @@ import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createServerRegistry } from './server-registry.js';
+import { createWebsiteMigrationLedger } from './website-migration-ledger.js';
 import { createWebsiteMigrationPolicyStore } from './website-migration-policy.js';
 import { createWebsiteRegistry } from './website-registry.js';
 
@@ -28,6 +29,7 @@ const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.reso
 const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.resolve('.data/application-registry.json');
 const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.data/website-registry.json');
 const websiteMigrationPolicyStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE ?? path.resolve('.data/website-migration-policy.json');
+const websiteMigrationLedgerStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_LEDGER_STORE ?? path.resolve('.data/website-migration-ledger.json');
 const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRONMENT_STORE ?? path.resolve('.data/application-environment-registry.json');
 const authStorePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStorePath), 'auth', 'auth.sqlite');
 const certificateRenewalIntervalMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS ?? `${6 * 60 * 60 * 1000}`, 10);
@@ -70,6 +72,8 @@ const websiteRegistry = createWebsiteRegistry({
 await websiteRegistry.init();
 const websiteMigrationPolicy = createWebsiteMigrationPolicyStore({ filePath: websiteMigrationPolicyStorePath });
 await websiteMigrationPolicy.init();
+const migrationLedger = createWebsiteMigrationLedger({ filePath: websiteMigrationLedgerStorePath });
+await migrationLedger.init();
 const domainRegistry = createDomainRegistry({
   filePath: domainStorePath,
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
@@ -103,6 +107,7 @@ const listener = createAuthenticatedApi({
     applicationRegistry,
     websiteRegistry,
     websiteMigrationPolicy,
+    migrationLedger,
     applicationEnvironmentRegistry,
   }),
 });
@@ -125,7 +130,6 @@ const localRuntime = await startConfiguredLocalRuntime({
 });
 const renewalScheduler = startCertificateRenewalScheduler({ certificateRegistry, jobRegistry, intervalMs: certificateRenewalIntervalMs, renewBeforeMs: certificateRenewBeforeMs });
 const server = http.createServer({ headersTimeout: 15_000, requestTimeout: 30_000 }, listener);
-// No terminal/WebSocket endpoint is enabled yet. Do not bypass HTTP auth with a raw upgrade listener.
 server.on('upgrade', (_request, socket) => socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'));
 server.listen(port, host, () => {
   console.log(`[yunpanel-api] listening on http://${host}:${port}`);
@@ -136,6 +140,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] application store=${applicationStorePath}`);
   console.log(`[yunpanel-api] website store=${websiteStorePath}`);
   console.log(`[yunpanel-api] website migration policy store=${websiteMigrationPolicyStorePath}`);
+  console.log(`[yunpanel-api] website migration ledger store=${websiteMigrationLedgerStorePath}`);
   console.log(`[yunpanel-api] application environment store=${applicationEnvironmentStorePath}`);
   console.log(`[yunpanel-api] secret store=${applicationEnvironmentRegistry.secretStoreConfigured ? 'configured' : 'not configured'}`);
   console.log(`[yunpanel-api] authentication=${authStore.configured() ? 'configured' : 'local setup required'}`);
@@ -148,15 +153,13 @@ async function shutdown(signal) {
   shuttingDown = true;
   console.log(`[yunpanel-api] received ${signal}, shutting down`);
   renewalScheduler.stop();
-
   const closePromise = new Promise((resolve) => {
     server.close((error) => resolve(error ?? null));
   });
   let runtimeStopFailed = false;
   if (localRuntime) {
-    try {
-      await localRuntime.stop();
-    } catch {
+    try { await localRuntime.stop(); }
+    catch {
       runtimeStopFailed = true;
       console.error('[yunpanel-api] local runtime shutdown failed');
     }
