@@ -30,6 +30,12 @@ function validQueuedJob(job, serverId) {
   return job && typeof job.id === 'string' && job.id.length >= 8 && job.id.length <= 128
     && job.serverId === serverId && job.status === 'queued' && typeof job.operation === 'string';
 }
+function durableReconciliationMode(jobRegistry) {
+  const begin = typeof jobRegistry?.beginReconciliation === 'function';
+  const acknowledge = typeof jobRegistry?.acknowledgeReconciliation === 'function';
+  if (begin !== acknowledge) throw new Error('Local executor durable reconciliation boundary is incomplete');
+  return begin;
+}
 
 /**
  * Executes one already-authorized job inside the API process. An uncertain
@@ -53,6 +59,7 @@ export function createLocalJobExecutor({
 } = {}) {
   if (typeof serverId !== 'string' || !serverId) throw new Error('Local executor requires a serverId');
   if (!jobRegistry || typeof jobRegistry.claimNext !== 'function' || typeof jobRegistry.complete !== 'function') throw new Error('Local executor requires a job registry');
+  const journalReconciliation = durableReconciliationMode(jobRegistry);
   if (supportsOperation !== null && typeof supportsOperation !== 'function') throw new Error('Local executor operation selector must be a function');
   if (supportsOperation && typeof jobRegistry.listJobs !== 'function') throw new Error('Local executor operation selection requires job listing');
   if (typeof executeOperation !== 'function') throw new Error('Local executor requires an operation handler');
@@ -123,6 +130,15 @@ export function createLocalJobExecutor({
       completion = { serverId, jobId, status: 'failed', error: safeExecutionError(error) };
     }
 
+    if (journalReconciliation) {
+      try {
+        const pending = await jobRegistry.beginReconciliation({ serverId, jobId });
+        if (!pending || pending.jobId !== jobId || pending.serverId !== serverId || pending.status !== 'running' || pending.pending !== true) {
+          throw new Error('Inconsistent durable reconciliation acknowledgement');
+        }
+      } catch { throw halt('complete', jobId); }
+    }
+
     let terminal;
     try {
       terminal = await jobRegistry.complete(completion);
@@ -132,8 +148,16 @@ export function createLocalJobExecutor({
     } catch { throw halt('complete', jobId); }
 
     let reconciliation;
-    try { reconciliation = await reconcileCompletedJob(terminal); }
-    catch { throw halt('reconcile', jobId); }
+    try {
+      reconciliation = await reconcileCompletedJob(terminal);
+      if (journalReconciliation) {
+        const acknowledged = await jobRegistry.acknowledgeReconciliation({ serverId, jobId });
+        if (!acknowledged || acknowledged.jobId !== jobId || acknowledged.serverId !== serverId
+          || acknowledged.status !== terminal.status || acknowledged.acknowledged !== true) {
+          throw new Error('Inconsistent durable reconciliation completion');
+        }
+      }
+    } catch { throw halt('reconcile', jobId); }
     return { claimed: true, job: terminal, reconciliation };
   }
 
@@ -190,4 +214,4 @@ export function createLocalJobExecutor({
   };
 }
 
-export const localExecutorInternals = Object.freeze({ safeExecutionError });
+export const localExecutorInternals = Object.freeze({ safeExecutionError, durableReconciliationMode });
