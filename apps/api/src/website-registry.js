@@ -135,6 +135,28 @@ export function createWebsiteRegistry({
     return writeChain;
   }
 
+  async function validatePersistedReferences(websites) {
+    for (const website of websites) {
+      let serverPresent;
+      try { serverPresent = await serverExists(website.serverId); }
+      catch { throw new WebsiteRegistryError('website_server_reference_unavailable', 'Website server reference could not be verified', 409); }
+      if (!serverPresent) throw new WebsiteRegistryError('website_server_reference_missing', 'Persisted Website server does not exist', 409);
+      if (!website.applicationId) continue;
+
+      let application;
+      try { application = await getApplication(website.applicationId); }
+      catch { throw new WebsiteRegistryError('website_application_reference_unavailable', 'Website application reference could not be verified', 409); }
+      if (!application) throw new WebsiteRegistryError('website_application_reference_missing', 'Persisted Website application does not exist', 409);
+      const binding = applicationBinding(application, website.serverId);
+      if (binding.applicationId !== website.applicationId
+        || binding.runtimeType !== website.runtimeType
+        || binding.documentRoot !== website.documentRoot
+        || binding.unixUser !== website.unixUser) {
+        throw new WebsiteRegistryError('website_application_binding_drift', 'Persisted Website application binding no longer matches managed state', 409);
+      }
+    }
+  }
+
   async function init() {
     if (initialized) return;
     if (filePath) {
@@ -152,6 +174,7 @@ export function createWebsiteRegistry({
             applications.add(website.applicationId);
           }
         }
+        await validatePersistedReferences(websites);
         state = { version: STORE_VERSION, websites };
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
