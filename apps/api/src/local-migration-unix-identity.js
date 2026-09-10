@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 const PASSWD_PATH = '/etc/passwd';
 const GROUP_PATH = '/etc/group';
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
+const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_IDENTITY_BYTES = 1024 * 1024;
 const MAX_MANAGED_USERS = 1024;
 
@@ -203,31 +204,11 @@ function assertIdentityArchiveMembers(stdout) {
   }
 }
 
-export async function compareLocalMigrationUnixIdentities({
-  backupDirectory,
-  verifyBackup = verifyLocalMigrationBackup,
-  lstatFn = lstat,
-  readFileFn = readFile,
-  runTar = (args) => execFileAsync(localMigrationBackupInternals.tarPath, args, {
-    encoding: 'utf8',
-    timeout: 30_000,
-    maxBuffer: MAX_IDENTITY_BYTES + (64 * 1024),
-  }),
-} = {}) {
-  if (typeof verifyBackup !== 'function' || typeof lstatFn !== 'function'
-    || typeof readFileFn !== 'function' || typeof runTar !== 'function') {
-    throw new LocalMigrationUnixIdentityError('migration_identity_dependencies_invalid', 'Migration Unix identity comparison dependencies are invalid');
-  }
-  const directory = resolveLocalMigrationBackupDirectory(backupDirectory);
-  let verification;
-  try {
-    verification = await verifyBackup({ backupDirectory: directory });
-  } catch {
-    throw new LocalMigrationUnixIdentityError('migration_identity_backup_invalid', 'Migration Unix identity comparison requires a valid verified backup');
-  }
+function validateVerifiedBackup(verification, directory) {
   if (!verification || verification.verified !== true || verification.backupDirectory !== directory
     || verification.archivePath !== path.join(directory, 'state.tar')
     || verification.manifestPath !== path.join(directory, 'manifest.json')
+    || typeof verification.sha256 !== 'string' || !HASH_PATTERN.test(verification.sha256)
     || !Array.isArray(verification.entries)) {
     throw new LocalMigrationUnixIdentityError('migration_identity_backup_invalid', 'Migration Unix identity backup acknowledgement is invalid');
   }
@@ -237,18 +218,41 @@ export async function compareLocalMigrationUnixIdentities({
       throw new LocalMigrationUnixIdentityError('migration_identity_backup_invalid', 'Verified migration backup is missing required Unix identity metadata');
     }
   }
+  return verification;
+}
+
+function defaultRunTar(args) {
+  return execFileAsync(localMigrationBackupInternals.tarPath, args, {
+    encoding: 'utf8',
+    timeout: 30_000,
+    maxBuffer: MAX_IDENTITY_BYTES + (64 * 1024),
+  });
+}
+
+export async function compareVerifiedLocalMigrationUnixIdentities({
+  backupDirectory,
+  verification,
+  lstatFn = lstat,
+  readFileFn = readFile,
+  runTar = defaultRunTar,
+} = {}) {
+  if (typeof lstatFn !== 'function' || typeof readFileFn !== 'function' || typeof runTar !== 'function') {
+    throw new LocalMigrationUnixIdentityError('migration_identity_dependencies_invalid', 'Migration Unix identity comparison dependencies are invalid');
+  }
+  const directory = resolveLocalMigrationBackupDirectory(backupDirectory);
+  const verified = validateVerifiedBackup(verification, directory);
 
   let listing;
   try {
-    listing = await runTar(['--list', '--file', verification.archivePath, '--', 'etc/passwd', 'etc/group']);
+    listing = await runTar(['--list', '--file', verified.archivePath, '--', 'etc/passwd', 'etc/group']);
   } catch {
     throw new LocalMigrationUnixIdentityError('migration_identity_snapshot_unreadable', 'Snapshot Unix identity members could not be inspected');
   }
   assertIdentityArchiveMembers(listing?.stdout);
 
   const [snapshotPasswd, snapshotGroup, currentPasswd, currentGroup] = await Promise.all([
-    extractIdentityMember(verification.archivePath, PASSWD_PATH, runTar),
-    extractIdentityMember(verification.archivePath, GROUP_PATH, runTar),
+    extractIdentityMember(verified.archivePath, PASSWD_PATH, runTar),
+    extractIdentityMember(verified.archivePath, GROUP_PATH, runTar),
     readCurrentIdentityFile(PASSWD_PATH, { lstatFn, readFileFn }),
     readCurrentIdentityFile(GROUP_PATH, { lstatFn, readFileFn }),
   ]);
@@ -265,12 +269,38 @@ export async function compareLocalMigrationUnixIdentities({
 
   return Object.freeze({
     backupDirectory: directory,
-    sha256: verification.sha256,
+    sha256: verified.sha256,
     snapshotUsers: snapshot.size,
     currentUsers: current.size,
     counts,
     identities,
     destructive: false,
+  });
+}
+
+export async function compareLocalMigrationUnixIdentities({
+  backupDirectory,
+  verifyBackup = verifyLocalMigrationBackup,
+  lstatFn = lstat,
+  readFileFn = readFile,
+  runTar = defaultRunTar,
+} = {}) {
+  if (typeof verifyBackup !== 'function') {
+    throw new LocalMigrationUnixIdentityError('migration_identity_dependencies_invalid', 'Migration Unix identity comparison dependencies are invalid');
+  }
+  const directory = resolveLocalMigrationBackupDirectory(backupDirectory);
+  let verification;
+  try {
+    verification = await verifyBackup({ backupDirectory: directory });
+  } catch {
+    throw new LocalMigrationUnixIdentityError('migration_identity_backup_invalid', 'Migration Unix identity comparison requires a valid verified backup');
+  }
+  return compareVerifiedLocalMigrationUnixIdentities({
+    backupDirectory: directory,
+    verification,
+    lstatFn,
+    readFileFn,
+    runTar,
   });
 }
 
@@ -285,4 +315,5 @@ export const localMigrationUnixIdentityInternals = Object.freeze({
   buildManagedIdentities,
   compareIdentity,
   assertIdentityArchiveMembers,
+  validateVerifiedBackup,
 });
