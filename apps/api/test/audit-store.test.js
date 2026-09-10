@@ -10,6 +10,7 @@ function fixture(t) {
   return {
     db,
     store: createAuditStore({ db, now: () => clock }),
+    now: () => clock,
     advance(milliseconds) { clock += milliseconds; },
   };
 }
@@ -115,6 +116,26 @@ test('resource and actor filters are exact and paginated', (t) => {
   assert.deepEqual(resourcePage.events.map((event) => event.action), ['job.cancelled', 'job.accepted']);
 });
 
+test('action outcome and inclusive time filters compose exactly', (t) => {
+  const { store, now, advance } = fixture(t);
+  const firstAt = now();
+  store.record({ actorId: 'owner-1', action: 'job.domain.stage', resourceType: 'domain', resourceId: 'domain-1', outcome: 'accepted' });
+  advance(1000);
+  const secondAt = now();
+  store.record({ actorId: 'owner-1', action: 'job.domain.stage', resourceType: 'domain', resourceId: 'domain-1', outcome: 'succeeded' });
+  advance(1000);
+  const thirdAt = now();
+  store.record({ actorId: 'owner-2', action: 'job.domain.activate', resourceType: 'domain', resourceId: 'domain-1', outcome: 'failed', code: 'nginx_failed' });
+
+  assert.deepEqual(store.list({ action: 'job.domain.stage' }).events.map((event) => event.createdAt), [secondAt, firstAt]);
+  assert.deepEqual(store.list({ outcome: 'failed' }).events.map((event) => event.createdAt), [thirdAt]);
+  const exact = store.list({ action: 'job.domain.stage', outcome: 'succeeded', from: secondAt, to: secondAt });
+  assert.equal(exact.total, 1);
+  assert.equal(exact.events[0].createdAt, secondAt);
+  const ranged = store.list({ from: firstAt, to: secondAt });
+  assert.deepEqual(ranged.events.map((event) => event.createdAt), [secondAt, firstAt]);
+});
+
 test('resource filters require a complete pair and tokens remain canonical', (t) => {
   const { store } = fixture(t);
   assert.throws(() => store.record({ action: 'x', outcome: 'succeeded', resourceType: 'user' }), { code: 'invalid_audit_event' });
@@ -122,6 +143,13 @@ test('resource filters require a complete pair and tokens remain canonical', (t)
   assert.throws(() => store.record({ action: 'UPPER', outcome: 'succeeded' }), { code: 'invalid_audit_event' });
   assert.throws(() => store.record({ action: 'ok', outcome: 'unknown' }), { code: 'invalid_audit_event' });
   assert.throws(() => store.linkJob({ jobId: 'job-1', actorId: 'owner-1', action: 'job.ok', resourceType: 'job' }), { code: 'invalid_audit_job_link' });
+  for (const invalid of [
+    { action: 'UPPER' },
+    { outcome: 'unknown' },
+    { from: -1 },
+    { to: Number.MAX_SAFE_INTEGER + 1 },
+    { from: 20, to: 10 },
+  ]) assert.throws(() => store.list(invalid), { code: 'invalid_audit_filter' });
 });
 
 test('recording prunes audit rows older than ninety days', (t) => {
