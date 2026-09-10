@@ -1,90 +1,129 @@
 # YunPanel
 
-YunPanel is Yunsoft's focused hosting and server control plane for managing Node.js, static, Docker, database, domain, SSL, backup and mail workloads without depending on a full Plesk installation.
+YunPanel is Yunsoft's website-centric hosting and server control plane for Node.js, static, Docker, database, domain, SSL, backup and mail workloads without depending on a full Plesk installation.
 
 The project is intentionally scoped around Yunsoft production needs rather than full Plesk feature parity.
 
-## Current UI and target architecture
+## Current architecture
 
-The management entry point now mounts a **routed website workspace** instead of the old `activeView` panel: compact sidebar, dashboard, searchable domain tree, site detail tabs, guided hostname/application forms and tracked job dialogs. Existing Node deploy/restart/status/rollback, environment, Nginx and ACME operations are available from the relevant site context. See [docs/website-workspace.md](docs/website-workspace.md) for the implemented routes and exact limitations.
+The management entry point is a routed React workspace with dashboard, server management, website/domain hierarchy, site detail tabs, application/environment controls, tracked jobs and Owner/Read Only access boundaries.
 
-**The complete hosting target is not implemented yet.** Site routes currently use existing domain IDs, and Node application candidates are identified by matching server/port; this is not the planned persistent Website/application/Unix-user model. Mail, files, database/Docker lifecycle, cron, backups, audit and terminal modules remain unavailable where their backends are missing. The separate agent is still present. Owner-protected user administration is implemented in the API and Settings workspace, while its complete authenticated-browser acceptance remains open.
+The privileged execution target is now the local `yunpanel-api` runtime rather than a separate agent. A server can be created directly as a credentialless local-only identity or an existing enrolled server can be migrated to local ownership with guarded CLI tooling. When local execution is enabled, the API maintains the server's inventory, systemd-service, Docker and Nginx snapshots directly from `@yunpanel/host-runtime` and consumes the durable job queue locally.
 
-The product target remains a website-centric enterprise panel, explicit domain/subdomain/alias ownership, an integrated root/site terminal and a privileged local backend replacing `yun-agent`. Full Node 24 dependency/test/build acceptance and the initial live HTTPS setup/deep-link render now pass; authenticated Owner/MFA, Read Only, responsive/keyboard and complete operation acceptance remain open.
+The old `yun-agent` package/service and its enrollment/heartbeat/command/result transport are still retained temporarily for tested migration rollback compatibility. They are not the default development workflow, and the web UI no longer offers enrollment-token provisioning as the normal server setup path. Do not remove the retained daemon/package compatibility surface until the real migration and rollback gates in `todo.md` pass.
 
-## Authentication boundary
+**The complete hosting target is not implemented yet.** Site routes still rely on the existing domain/application model instead of the planned persistent Website identity. Files, cron, backup, terminal, full Docker lifecycle and mail management remain incomplete where their real backends are missing.
 
-Local Owner setup, login/logout, persistent sessions, password changes/recovery, TOTP enrollment and MFA login/recovery are wired to the API and React entry points. The new UI remains **inside the existing AuthGate**; it does not replace authentication. The web gateway retains its IP allowlist and no longer injects a shared administrator token.
+See [plan.md](plan.md) for remaining implementation work, [todo.md](todo.md) for supported-runtime/browser/package/real-host acceptance, and [agents.md](agents.md) for binding development rules. Completed tasks leave the task lists; implementation history stays in Git. Unless explicitly requested otherwise, work directly on `main` in small commits. Do not add GitHub Actions.
 
-**HTTPS management requires Owner MFA enrollment.** Password-only sessions can complete their own setup/recovery but cannot read or mutate management resources. A dedicated setup workspace precedes entry to the panel, including acknowledgement of recovery codes. Only explicit loopback HTTP development is exempt. See [docs/owner-mfa-policy.md](docs/owner-mfa-policy.md) for prerequisites and validation limits.
+## Authentication and privilege boundary
 
-Future user-administration, root and socket routes must inherit the same management policy. Do not remove the network restriction or publish root/terminal access before the remaining security release gate is satisfied.
+Local Owner setup, login/logout, persistent sessions, password changes/recovery, TOTP enrollment, MFA login/recovery and Owner-protected user administration are wired to the API and React entry points. The workspace remains inside `AuthGate`; the web gateway does not inject a shared administrator bearer token.
 
-See [plan.md](plan.md) for remaining development work, [todo.md](todo.md) for blocked and real-environment acceptance, and [agents.md](agents.md) for rules. Completed tasks leave the task lists; history stays in Git. Unless explicitly requested otherwise, work directly on **main** in small commits. No GitHub Actions. Repository changes are not a live deployment.
+HTTPS management requires Owner MFA enrollment. Password-only sessions may complete their own setup/recovery but cannot enter privileged management. Origin/CSRF enforcement, persistent login throttling, session generation, idle/absolute expiry and revocation remain part of the control-plane boundary.
+
+The packaged privilege model is intentional:
+
+- `yunpanel-web.service` is unprivileged and sandboxed away from control-plane secrets/state.
+- `yunpanel-api.service` is the privileged host control plane and may run as root for fixed, structured host administration.
+- Static Git/npm/build/artifact work runs as a deterministic dedicated `yunapp-*` user.
+- Node Git/npm/build and the generated Node systemd service run as the deterministic application user, not root; the service uses `NoNewPrivileges`, an empty capability set and restricted writable paths.
+- Future site cron, file-manager and site terminal work must keep the site-user boundary.
+- Only the explicitly Owner-protected Server terminal target may become a root interactive surface after the WebSocket/session/MFA/audit release gates are complete.
+
+Do not replace structured operations with an unauthenticated generic shell or make site workloads inherit API root privilege.
 
 ## Implemented foundations
 
-- React/JavaScript/JSX management UI with real routes, site breadcrumbs, URL-backed filters, parent-group pagination, shared controls and unsaved-change handling for new forms.
-- Dashboard based on actual inventory/certificate/job data; unavailable metrics remain unknown, and 404 is not mislabeled as authorization.
-- Site-scoped existing Node lifecycle, masked environment editing, Nginx stage/activate, ACME issue/test and renewal/dry-run controls, with confirmation for impactful operations.
-- Separate queued/running/completed job observation; delayed refreshes cannot regress tracked job state. The site log tab is explicitly job history, not live process logs.
-- Initial Owner setup, account/password/session interface, native Argon2id hashing and private SQLite user/session persistence.
-- Cookie authentication, Origin/CSRF checks, persistent login throttling, idle/absolute expiry and revocation.
-- Encrypted TOTP, second-factor login, one-use recovery codes, factor removal and mandatory Owner enrollment for HTTPS management.
-- Session-generation safeguards, expiry warnings, explicit idle extension and local setup/password/MFA-recovery CLI.
-- Session-authenticated Node API entry point and retained authenticated `yun-agent` enrollment/heartbeat/command transport pending migration.
-- Explicit domain/subdomain parent references, aliases and independent target/certificate lifecycle.
-- Nginx configuration staging/activation and ACME issue/renew scheduling foundations.
-- Static release/deploy/rollback and Node/systemd deployment with dedicated application users, health-check recovery, guarded rollback/restart and bounded process status.
-- Separate AES-256-GCM environment storage, masked metadata, authenticated agent materialization and atomic root-protected systemd EnvironmentFile generation.
-- Debian packaging with API/agent/restricted web services and local auth CLI; fixed-scope APT inspection/self-update jobs with delayed restart.
-- Existing advanced domain, certificate, enrollment and update tools remain accessible while the underlying legacy architecture is retained.
+- React/JavaScript/JSX routed management UI with site breadcrumbs, URL-backed list state, parent/child domain context, shared controls and dirty-form protection on implemented advanced forms.
+- Dashboard and server views based on persisted inventory rather than fabricated metrics; unavailable values remain unknown.
+- Owner/Read Only route and HTTP boundaries, initial Owner setup, native Argon2id hashing, private SQLite session/user persistence and mandatory Owner MFA for HTTPS management.
+- Explicit domain/subdomain parent references, aliases, Nginx stage/activate and ACME issue/renew foundations.
+- Static deploy/rollback and Node deploy/restart/status/rollback with dedicated application users, health checks and guarded rollback behavior.
+- AES-256-GCM application environment storage, masked metadata and execution-time secret materialization without putting plaintext environment values into generic job records.
+- Managed-service inspect/install/start/stop/restart support for the current allowlisted host services.
+- MySQL/MariaDB local-socket inventory and database create/delete job flows with result sanitization.
+- Durable queued/running/terminal job persistence with versioned private recovery sidecar state. Terminal-but-unreconciled work survives restart and blocks new mutations until reconciled.
+- Root-only packaged recovery inspection and terminal reconciliation tooling. Side-effect-free running `system.packages.inspect` and `database.inspect` jobs have an explicit `recover-readonly` path; unknown outcomes for mutating jobs remain fail-closed.
+- Credentialless fresh local server bootstrap plus guarded existing-server `status/bind/release` migration tooling.
+- Agentless local snapshots for host inventory, allowlisted systemd services, Docker and Nginx.
+- Debian packaging for API, restricted web gateway and the temporarily retained legacy agent compatibility service.
 
-The new screens do not add missing server operations by themselves. Live redacted logs, persistent Website migration, automatic runtime/port provisioning, private Git credential management, user administration and agentless root/terminal management remain development work. MFA uses manual authenticator-key entry, not QR rendering.
+## Development
 
-## Requirements and development
+Requirements:
 
 - Node.js **24.11.1+**, including native Argon2 and SQLite.
 - npm **11+**.
-- Install the full workspace dependencies before building. The new UI adds pinned `react-router` **8.3.0** while preserving the existing React/Vite versions; copying only source files is insufficient.
+
+Install and start the default development stack:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. In another terminal at the repository root:
+`npm run dev` starts only the web app on `127.0.0.1:5173` and API on `127.0.0.1:3001`. It does **not** start `yun-agent`. The legacy daemon can still be started explicitly with `npm run dev:agent` when a compatibility or rollback test actually needs it.
+
+Local privileged execution is opt-in through `YUNPANEL_LOCAL_SERVER_ID`; do not invent a server identity just to make jobs run. Follow [docs/local-runtime-migration.md](docs/local-runtime-migration.md) for the guarded fresh-create and existing-server migration paths.
+
+Create the first Owner from another terminal at the repository root:
 
 ```bash
 npm run auth -- setup-token
 ```
 
-Complete Owner setup and sign in. No default credentials are created. The CLI runs in the API workspace so relative state paths match; any explicit API store/database overrides must also reach the CLI. Follow [docs/mfa.md](docs/mfa.md) for MFA keys rather than replacing a working master key. HTTPS management requires enrollment, including after local factor reset.
+No default credentials are created. Follow [docs/mfa.md](docs/mfa.md) and [docs/authentication.md](docs/authentication.md) for the current auth setup and recovery rules.
 
-Current development services are web on port 5173, API on 3001 and the retained agent on 4010. Run the complete checks on the installed workspace:
+Run validation with:
 
 ```bash
 npm run check
 ```
 
-The current combined tree passes **473 tests**, repository policy validation and the Vite production build on supported Node 24 runtimes both locally and on the Ubuntu package build host. The packaged `0.3.0-2` candidate also passed the live initial-setup render, auth boundary, SPA deep-link and hosted-traffic checks recorded in `todo.md`. These results do not replace the remaining authenticated Owner/MFA, Read Only, responsive/keyboard, rollback and full operation acceptance.
+Historical commits have passed full supported-Node and package acceptance, but that does not prove the current tree. `todo.md` records the current full-check, browser, Ubuntu package and live acceptance gates that must be rerun after the recent agentless/recovery changes.
 
-## Existing-host upgrade and Debian package
+## Local ownership and durable recovery
 
-Before upgrading, back up state/configuration and keep independent SSH/provider-console access. Preserve the IP restriction and configure the same exact HTTPS `YUNPANEL_PUBLIC_ORIGIN` in API and web environments. Use a private auth database path inside the service's writable directory. Follow [docs/authentication.md](docs/authentication.md) for ownership/recovery and [docs/mfa.md](docs/mfa.md) for consistent SQLite schema-2 backup/rollback.
+The packaged ownership tools are intentionally fail-closed. Fresh local bootstrap and existing-agent migration are separate operations:
 
-Preserve and configure the **existing** `YUNPANEL_SECRET_MASTER_KEY`. Unenrolled Owners cannot complete required MFA without it, and replacing a working key can make existing ciphertext inaccessible. Do not weaken auth or switch production to development to bypass a deployment prerequisite.
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs create --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs status <server-uuid>
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs bind <server-uuid> --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs release <server-uuid> --confirm
+```
 
-On an Ubuntu 24.04 build host with the required runtime and `dpkg-deb`:
+Before ownership changes, inspect durable recovery:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs status
+```
+
+Terminal reconciliation never re-runs the host operation. `recover-readonly` may re-run only explicitly allowlisted side-effect-free inspection operations. Mutating jobs with unknown host outcome must remain blocked until an operation-specific external proof mechanism exists.
+
+The exact migration/recovery sequence and rollback rules live in [docs/local-runtime-migration.md](docs/local-runtime-migration.md).
+
+## Debian package and release gates
+
+Runtime state belongs under `/var/lib/yunpanel`; configuration and secrets belong under `/etc/yunpanel`. Production control-plane state is constrained below `/var/lib/yunpanel/control-plane`. Preserve the existing `YUNPANEL_SECRET_MASTER_KEY` across upgrades and use the dedicated rotation procedure rather than editing it in place.
+
+Build candidates only after a clean supported-runtime check:
 
 ```bash
 npm install
 npm run check
-./scripts/build-deb.sh 0.3.0-4
+./scripts/build-deb.sh <new-version>
 ```
 
-The package version above is the existing example, not a new release. Use a new version for a candidate rather than overwriting an APT release. Deploy matching API and built web assets only after T-UI/T1 acceptance. Verify HTTPS deep links, browser back/forward, expired sessions, MFA setup and the preserved advanced operations against the real package. Model tests alone are not rollout approval.
+A repository commit is not a live deployment. Before replacing the currently accepted package, verify the new `.deb` contents, fresh agentless bootstrap, existing-host migration, recovery tools, root API/web sandbox, auth state ownership, hosted workload continuity and rollback on an isolated Ubuntu host as specified in `todo.md`.
 
-Runtime state stays under `/var/lib/yunpanel`, configuration/secrets under `/etc/yunpanel`. `scripts/publish-local-apt.sh` supports controlled local-APT testing. Agentless package migration and PTY dependencies remain unimplemented; drain jobs and prove rollback before retiring the old service. No package publication, migration or live deployment is performed merely by updating this repository.
+No package publication, migration or live deployment occurs merely by updating this repository.
 
-[docs/development.md](docs/development.md) describes the existing core/agent setup. The authentication and workspace runbooks define the current entry points and supersede older bootstrap-token or single-view UI examples.
+## More documentation
+
+- [docs/development.md](docs/development.md) — current agentless development workflow and retained compatibility path.
+- [docs/local-runtime-migration.md](docs/local-runtime-migration.md) — fresh bootstrap, existing-server migration, durable recovery and rollback.
+- [docs/website-workspace.md](docs/website-workspace.md) — current workspace routes and limitations.
+- [docs/owner-mfa-policy.md](docs/owner-mfa-policy.md) — HTTPS Owner MFA requirements.
+- [docs/secret-master-key-rotation.md](docs/secret-master-key-rotation.md) — key rotation and rollback procedure.
