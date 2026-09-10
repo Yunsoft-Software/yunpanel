@@ -6,6 +6,7 @@ import { inspectDurableJobRecovery } from '../apps/api/src/job-recovery-inspecti
 import {
   runRunningDomainStageRecoveryFromStores,
   runRunningInspectionRecoveryFromStores,
+  runRunningStaticDeploymentRecoveryFromStores,
   runTerminalRecoveryFromStores,
 } from '../apps/api/src/job-recovery-runtime.js';
 import { createJobRegistry } from '../apps/api/src/job-registry.js';
@@ -13,8 +14,13 @@ import { resolveLocalMigrationPaths } from '../apps/api/src/local-migration-cli.
 
 const scriptPath = fileURLToPath(import.meta.url);
 const PACKAGED_SCRIPT_ROOT = '/usr/lib/yunpanel/scripts';
-const RECOVERY_ACTIONS = Object.freeze(['reconcile', 'recover-readonly', 'recover-domain-stage']);
-const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm';
+const RECOVERY_ACTIONS = Object.freeze([
+  'reconcile',
+  'recover-readonly',
+  'recover-domain-stage',
+  'recover-static-deploy',
+]);
+const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm';
 
 export function parseJobRecoveryArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
@@ -97,6 +103,7 @@ export async function runJobRecoveryCli({
   recover = runTerminalRecoveryFromStores,
   recoverRunning = runRunningInspectionRecoveryFromStores,
   recoverDomainStage = runRunningDomainStageRecoveryFromStores,
+  recoverStaticDeployment = runRunningStaticDeploymentRecoveryFromStores,
   stdout = process.stdout,
 } = {}) {
   const parsed = parseJobRecoveryArguments(argv);
@@ -105,11 +112,11 @@ export async function runJobRecoveryCli({
 
   if (RECOVERY_ACTIONS.includes(parsed.action)) {
     if (!packaged) throw new Error('Job recovery mutations are available only from the packaged YunPanel installation');
-    const handler = parsed.action === 'reconcile'
-      ? recover
-      : parsed.action === 'recover-readonly'
-        ? recoverRunning
-        : recoverDomainStage;
+    let handler;
+    if (parsed.action === 'reconcile') handler = recover;
+    else if (parsed.action === 'recover-readonly') handler = recoverRunning;
+    else if (parsed.action === 'recover-domain-stage') handler = recoverDomainStage;
+    else handler = recoverStaticDeployment;
     if (typeof handler !== 'function') throw new Error('Job recovery mutation dependency is invalid');
     const result = await handler({
       serverId: parsed.serverId,
