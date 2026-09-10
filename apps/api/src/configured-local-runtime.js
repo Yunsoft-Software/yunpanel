@@ -1,4 +1,6 @@
 import { inspectHostInventory } from '@yunpanel/host-runtime';
+import { OPERATIONS } from '@yunpanel/protocol';
+import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.js';
 import { createLocalHostOperations } from './local-host-operations.js';
 import { resolveLocalRuntimeConfig } from './local-runtime-config.js';
 import { startLocalRuntime } from './local-runtime.js';
@@ -23,6 +25,7 @@ export async function startConfiguredLocalRuntime({
   applicationRegistry,
   applicationEnvironmentRegistry,
   createOperations = createLocalHostOperations,
+  createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
   inspectInventory = inspectHostInventory,
   inspectServices = null,
   inspectDocker = null,
@@ -36,6 +39,7 @@ export async function startConfiguredLocalRuntime({
     throw new ConfiguredLocalRuntimeError('local_environment_registry_invalid', 'Local runtime requires the application environment registry');
   }
   if (typeof createOperations !== 'function'
+    || typeof createDatabaseDeletionReceipts !== 'function'
     || typeof inspectInventory !== 'function'
     || (inspectServices !== null && typeof inspectServices !== 'function')
     || (inspectDocker !== null && typeof inspectDocker !== 'function')
@@ -48,6 +52,21 @@ export async function startConfiguredLocalRuntime({
   const hostOperations = createOperations({
     loadApplicationEnvironment: (applicationId) => applicationEnvironmentRegistry.materialize(applicationId),
   });
+  const databaseDeletionReceipts = createDatabaseDeletionReceipts();
+  if (!databaseDeletionReceipts || typeof databaseDeletionReceipts.write !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_database_deletion_receipts_invalid', 'Local runtime database deletion receipt store is invalid');
+  }
+
+  const recordExecutionEvidence = async ({ serverId, jobId, operation, payload, result }) => {
+    if (operation !== OPERATIONS.DATABASE_DELETE) return;
+    await databaseDeletionReceipts.write({
+      serverId,
+      jobId,
+      databaseName: payload?.name,
+      result,
+    });
+  };
+
   const snapshotProvider = async () => {
     const [baseInventory, services, docker, nginx] = await Promise.all([
       inspectInventory({ mode: 'local' }),
@@ -73,6 +92,7 @@ export async function startConfiguredLocalRuntime({
     applicationRegistry,
     hostOperations,
     snapshotProvider,
+    recordExecutionEvidence,
     onError,
   });
 }
