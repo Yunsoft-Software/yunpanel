@@ -39,7 +39,7 @@ function identityComparison(overrides = {}) {
   };
 }
 
-test('restore preview classifies restore targets and requires read-only Unix identity comparison', async () => {
+test('restore preview classifies restore targets and shares one verified backup with Unix identity comparison', async () => {
   const entries = [
     { path: '/etc/yunpanel', type: 'directory', present: true },
     { path: '/var/lib/yunpanel', type: 'directory', present: true },
@@ -57,15 +57,16 @@ test('restore preview classifies restore targets and requires read-only Unix ide
   ]);
   const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
   const calls = [];
+  const verified = verification(entries);
   const verifyBackup = async ({ backupDirectory: value }) => {
     calls.push(['verify', value]);
-    return verification(entries);
+    return verified;
   };
   const result = await previewLocalMigrationRestore({
     backupDirectory,
     verifyBackup,
-    compareIdentities: async ({ backupDirectory: value, verifyBackup: verifier }) => {
-      calls.push(['identities', value, verifier === verifyBackup]);
+    compareIdentities: async ({ backupDirectory: value, verification: acknowledgement }) => {
+      calls.push(['identities', value, acknowledgement === verified]);
       return identityComparison();
     },
     lstatFn: async (target) => {
@@ -84,6 +85,7 @@ test('restore preview classifies restore targets and requires read-only Unix ide
   assert.deepEqual(result.counts, { restore: 3, identityReferences: 2, preserved: 1 });
   assert.deepEqual(result.identityComparison.counts, { match: 2, drift: 0, missingCurrent: 0, addedCurrent: 0 });
   assert.deepEqual(calls[0], ['verify', backupDirectory]);
+  assert.equal(calls.filter((entry) => entry[0] === 'verify').length, 1);
   assert.ok(calls.some((entry) => entry[0] === 'identities' && entry[1] === backupDirectory && entry[2] === true));
 });
 
@@ -141,6 +143,21 @@ test('invalid identity comparison acknowledgement fails closed', async () => {
       backupDirectory,
       verifyBackup: async () => verification([]),
       compareIdentities: async () => identityComparison({ destructive: true }),
+      lstatFn: async () => metadata('directory'),
+    }),
+    { code: 'migration_restore_identity_result_invalid' },
+  );
+});
+
+test('identity comparison count mismatch fails closed', async () => {
+  await assert.rejects(
+    previewLocalMigrationRestore({
+      backupDirectory,
+      verifyBackup: async () => verification([]),
+      compareIdentities: async () => identityComparison({
+        counts: { match: 2, drift: 1, missingCurrent: 0, addedCurrent: 0 },
+        identities: [],
+      }),
       lstatFn: async () => metadata('directory'),
     }),
     { code: 'migration_restore_identity_result_invalid' },
