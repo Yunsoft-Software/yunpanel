@@ -39,6 +39,7 @@ install -m 0644 scripts/rotate-secret-master-key.mjs "$package_root/usr/lib/yunp
 install -m 0755 scripts/local-runtime.mjs "$package_root/usr/lib/yunpanel/scripts/local-runtime.mjs"
 install -m 0644 .env.example README.md \
   docs/authentication.md \
+  docs/local-runtime-migration.md \
   docs/mfa.md \
   docs/owner-mfa-policy.md \
   docs/secret-master-key-rotation.md \
