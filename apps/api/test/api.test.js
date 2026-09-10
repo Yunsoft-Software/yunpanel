@@ -77,45 +77,35 @@ test('management routes fail closed without server-derived request auth', async 
   });
 });
 
-test('server enrollment and heartbeat keep agent credentials separate from panel auth context', async () => {
+test('new legacy enrollment HTTP routes are retired while preserved enrolled identities may still heartbeat', async () => {
   const registry = createServerRegistry();
+  const enrollment = await registry.issueEnrollmentToken();
+  const enrolled = await registry.enrollServer({
+    token: enrollment.token,
+    hostname: 'yun-test-01',
+    displayName: 'Yun Test 01',
+  });
   const app = withPanelContext(createApp({ registry, environment: 'production' }));
 
   await withServer(app, async (baseUrl) => {
     const issueResponse = await fetch(`${baseUrl}/api/servers/enrollment-tokens`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ label: 'ubuntu-test', ttlMinutes: 10 }),
+      body: JSON.stringify({ label: 'retired' }),
     });
-    assert.equal(issueResponse.status, 201);
-    const issueBody = await issueResponse.json();
-    assert.ok(issueBody.data.token.length >= 32);
+    assert.equal(issueResponse.status, 404);
 
     const enrollResponse = await fetch(`${baseUrl}/api/servers/enroll`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        token: issueBody.data.token,
-        hostname: 'yun-test-01',
-        displayName: 'Yun Test 01',
-      }),
+      body: JSON.stringify({ token: 'retired-token', hostname: 'yun-test-02' }),
     });
-    assert.equal(enrollResponse.status, 201);
-    const enrollBody = await enrollResponse.json();
-    assert.equal(enrollBody.data.server.connectivity, 'pending');
-    assert.ok(enrollBody.data.agentToken.length >= 32);
+    assert.equal(enrollResponse.status, 404);
 
-    const replayResponse = await fetch(`${baseUrl}/api/servers/enroll`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token: issueBody.data.token, hostname: 'yun-test-02' }),
-    });
-    assert.equal(replayResponse.status, 401);
-
-    const heartbeatResponse = await fetch(`${baseUrl}/api/servers/${enrollBody.data.server.id}/heartbeat`, {
+    const heartbeatResponse = await fetch(`${baseUrl}/api/servers/${enrolled.server.id}/heartbeat`, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${enrollBody.data.agentToken}`,
+        authorization: `Bearer ${enrolled.agentToken}`,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
