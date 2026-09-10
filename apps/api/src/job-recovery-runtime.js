@@ -3,8 +3,10 @@ import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { createDomainRegistry } from './domain-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
+import { createLocalHostOperations } from './local-host-operations.js';
 import { createJobRecoveryStore } from './job-recovery-store.js';
 import { reconcileTerminalRecovery } from './job-recovery-command.js';
+import { recoverRunningInspection } from './job-running-recovery.js';
 import { createJobRegistry } from './job-registry.js';
 import {
   createMigrationServiceStatus,
@@ -81,6 +83,14 @@ async function initRegistry(registry, label) {
   return registry;
 }
 
+function createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory }) {
+  return durableRegistryFactory({
+    filePath: paths.jobStore,
+    registryFactory: jobRegistryFactory,
+    recoveryStoreFactory,
+  });
+}
+
 export async function runTerminalRecoveryFromStores({
   serverId,
   jobId,
@@ -119,11 +129,7 @@ export async function runTerminalRecoveryFromStores({
   const domainRegistry = await initRegistry(domainRegistryFactory({ filePath: paths.domainStore, serverExists }), 'Domain');
   const certificateRegistry = await initRegistry(certificateRegistryFactory({ filePath: paths.certificateStore }), 'Certificate');
   const applicationRegistry = await initRegistry(applicationRegistryFactory({ filePath: paths.applicationStore, serverExists }), 'Application');
-  const jobRegistry = durableRegistryFactory({
-    filePath: paths.jobStore,
-    registryFactory: jobRegistryFactory,
-    recoveryStoreFactory,
-  });
+  const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
 
   const result = await reconcileCommand({
     serverId,
@@ -137,8 +143,65 @@ export async function runTerminalRecoveryFromStores({
   return Object.freeze({ ...result, statePaths: paths });
 }
 
+export async function runRunningInspectionRecoveryFromStores({
+  serverId,
+  jobId,
+  env = process.env,
+  packaged = false,
+  cwd = process.cwd(),
+  serverRegistryFactory = createServerRegistry,
+  jobRegistryFactory = createJobRegistry,
+  durableRegistryFactory = createDurableJobRegistry,
+  recoveryStoreFactory = createJobRecoveryStore,
+  hostOperationsFactory = createLocalHostOperations,
+  serviceStatus = createMigrationServiceStatus(),
+  recoverCommand = recoverRunningInspection,
+} = {}) {
+  for (const dependency of [
+    serverRegistryFactory,
+    jobRegistryFactory,
+    durableRegistryFactory,
+    recoveryStoreFactory,
+    hostOperationsFactory,
+    serviceStatus,
+    recoverCommand,
+  ]) {
+    if (typeof dependency !== 'function') {
+      throw new JobRecoveryRuntimeError('job_recovery_runtime_dependencies_invalid', 'Running recovery runtime dependencies are invalid');
+    }
+  }
+
+  const paths = resolveJobRecoveryPaths({ env, packaged, cwd });
+  const serverRegistry = await initRegistry(serverRegistryFactory({ filePath: paths.serverStore }), 'Server');
+  let server;
+  try {
+    server = await serverRegistry.getServer(serverId);
+  } catch {
+    throw new JobRecoveryRuntimeError('job_recovery_server_read_failed', 'Recovery server identity could not be read');
+  }
+  if (!server || server.id !== serverId) {
+    throw new JobRecoveryRuntimeError('job_recovery_server_not_found', 'Recovery server identity was not found');
+  }
+
+  const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
+  const hostOperations = hostOperationsFactory();
+  if (!hostOperations || typeof hostOperations.executeOperation !== 'function') {
+    throw new JobRecoveryRuntimeError('job_recovery_host_operations_invalid', 'Running recovery host operations are invalid');
+  }
+
+  const result = await recoverCommand({
+    serverId,
+    jobId,
+    jobRegistry,
+    serviceStatus,
+    executeOperation: (operation, payload) => hostOperations.executeOperation(operation, payload),
+  });
+  return Object.freeze({ ...result, statePaths: paths });
+}
+
 export const jobRecoveryRuntimeInternals = Object.freeze({
   packagedStateRoot: PACKAGED_STATE_ROOT,
   resolveRecoveryStorePath,
   initRegistry,
+  createDurableRecoveryRegistry,
 });
