@@ -16,8 +16,11 @@ install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/web
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
-  systemctl enable yunpanel-api.service yun-agent.service yunpanel-web.service >/dev/null 2>&1 || true
+  systemctl enable yunpanel-api.service yunpanel-web.service >/dev/null 2>&1 || true
   if [ -z "${2:-}" ]; then
+    if [ -f /etc/yunpanel/agent/agent.env ]; then
+      systemctl enable yun-agent.service >/dev/null 2>&1 || true
+    fi
     [ -f /etc/yunpanel/control-plane/api.env ] && systemctl start yunpanel-api.service || true
     [ -f /etc/yunpanel/agent/agent.env ] && systemctl start yun-agent.service || true
     [ -f /etc/yunpanel/web/web.env ] && systemctl start yunpanel-web.service || true
