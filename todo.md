@@ -7,7 +7,7 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 ## T-RUNTIME — P0 güncel full check
 
 - [ ] Güncel `main` için desteklenen Node 24.11.1+ / npm 11+ ile temiz dependency install yap.
-- [ ] Filtresiz `npm run check`, bütün workspace testleri ve production Vite build çalıştır. Yeni audit, Website, IDN, migration/recovery ve parity testleri dahil olmalı.
+- [ ] Filtresiz `npm run check`, bütün workspace testleri ve production Vite build çalıştır. Yeni audit, Website, IDN, Website migration policy, migration/recovery ve parity testleri dahil olmalı.
 - [ ] Native SQLite/Argon2/MFA testlerini desteklenen Node24 runtime'da doğrula; test-only adapter sonucu production acceptance sayma.
 - [ ] Mixed/stale web/API build ile privileged management'in fail-closed kaldığını ayrıca doğrula.
 
@@ -48,13 +48,17 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 
 ## T-WEBSITE — P1 kalıcı Website/domain kabulü
 
-- [ ] Güncel Node24 full testte file-backed Website registry persistence, restart-time server/application FK validation ve corruption guards çalışsın.
-- [ ] Production package `YUNPANEL_WEBSITE_STORE=/var/lib/yunpanel/control-plane/website-registry.json` altında private state oluştursun; restart/upgrade kimlikleri değiştirmesin.
-- [ ] Authenticated API'de Owner Website create/list/detail; Read Only list/detail ve POST 403 davranışını gerçek listener üzerinden doğrula.
+- [ ] Güncel Node24 full testte file-backed Website registry persistence, restart-time server/application FK validation, migration policy persistence ve corruption guards çalışsın.
+- [ ] Production package `YUNPANEL_WEBSITE_STORE=/var/lib/yunpanel/control-plane/website-registry.json` ve `YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE=/var/lib/yunpanel/control-plane/website-migration-policy.json` altında private state oluştursun; restart/upgrade kimlikleri veya policy mode/digest bilgisini değiştirmesin.
+- [ ] Authenticated API'de Owner Website create/list/detail; Read Only list/detail/explicit Website→Domain read ve POST/migration 403 davranışını gerçek listener üzerinden doğrula.
 - [ ] Static/Node Website binding'i canonical application root + deterministic `yunapp-*` user kullansın; stale/missing/cross-server application reference startup'ta fail-closed olsun.
-- [ ] Domain `websiteId` ilişkisi same-server ve existing Website şartını korusun; legacy kayıtlar migration öncesi `websiteId=null` olarak okunabilsin ve otomatik server/port/hostname tahminiyle kalıcı bağ oluşturulmasın.
+- [ ] Domain `websiteId` ilişkisi same-server ve existing Website şartını korusun; legacy kayıtlar compatibility modda `websiteId=null` olarak okunabilsin ve otomatik server/port/hostname tahminiyle kalıcı bağ oluşturulmasın.
 - [ ] IDN hostname inputları gerçek API'de canonical ASCII punycode olarak persist olsun; Unicode/punycode eşdeğerleri duplicate hostname/alias olarak kabul edilsin.
-- [ ] Versioned Website migration geliştirildikten sonra apex + bağımsız subdomain + alias + application + certificate + rollback'i gerçek test domainiyle doğrula.
+- [ ] Owner `GET /api/websites/migration/preview` ve `/status` için deterministic digest/current policy üretimini doğrula. Read Only her iki migration route'unda 403 kalmalı.
+- [ ] Existing-Website migration bind exact `domainId + websiteId + previewDigest + typed confirmation` istemeli; state değişirse stale digest hiçbir Domain mutationı üretmemeli, aynı tamamlanmış bind retry'ı idempotent kalmalı.
+- [ ] Migration finalize yalnız fresh preview bütün Domainleri `already_bound` gösterdiğinde exact digest ile `compatibility -> enforced` geçsin. Enforced modda yeni unbound managed Domain 409 `website_binding_required`, same-server explicit Website ile create başarılı olsun.
+- [ ] Policy rollback yalnız exact enforced digest + typed confirmation ile compatibility moduna dönsün; Nginx target, certificate, application release veya Domain traffic revision değişmesin. Migration-only binding rollback ledger kodlandığında onun ayrı rollback acceptance'ını da çalıştır.
+- [ ] `create_website_then_bind` orchestration ve migration binding rollback ledger tamamlandıktan sonra apex + bağımsız subdomain + alias + application + certificate + policy finalize/rollback'i gerçek test domainiyle uçtan uca doğrula.
 
 ## T-SERVICES-DB — P1/P2 gerçek host functionality
 
@@ -65,10 +69,10 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 
 ## T-PACKAGE-LIVE — P0/P1 package ve canlı kapı
 
-- [ ] Node24 full check tamamlandıktan sonra yeni `.deb` üret; `dpkg-deb -c/-I` ile root API, Website/audit files, local-runtime, migration backup CLI, bütün job-recovery komutları, receipts, runbooklar ve web sandbox'ın aynı committen paketlendiğini doğrula.
-- [ ] İzole Ubuntu hostta clean install + old-package upgrade yap. Auth DB/master key/state permissions, disabled-agent preservation, Website/audit schema ve local runtime startup davranışı korunmalı.
+- [ ] Node24 full check tamamlandıktan sonra yeni `.deb` üret; `dpkg-deb -c/-I` ile root API, Website/audit/migration-policy files, local-runtime, migration backup CLI, bütün job-recovery komutları, receipts, runbooklar ve web sandbox'ın aynı committen paketlendiğini doğrula.
+- [ ] İzole Ubuntu hostta clean install + old-package upgrade yap. Auth DB/master key/state permissions, disabled-agent preservation, Website/audit/migration-policy schema ve local runtime startup davranışı korunmalı.
 - [ ] Hosted static/Node siteler panel restart/upgrade sırasında çalışmaya devam etsin.
-- [ ] `0.3.0-4` ↔ yeni agentless aday package/state rollback provası yap; IDs, auth, master key, vhost, cert, Website/application/domain ve release state korunmalı.
+- [ ] `0.3.0-4` ↔ yeni agentless aday package/state rollback provası yap; IDs, auth, master key, vhost, cert, Website/application/domain/policy ve release state korunmalı.
 - [ ] Gerçek live hosta ancak isolated package/migration/rollback kabulünden sonra geç.
 
 ## T-FUTURE — ilgili kod geldikten sonra
