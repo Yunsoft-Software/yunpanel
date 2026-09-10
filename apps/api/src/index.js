@@ -16,6 +16,7 @@ import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createServerRegistry } from './server-registry.js';
+import { createWebsiteMigrationPolicyStore } from './website-migration-policy.js';
 import { createWebsiteRegistry } from './website-registry.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
@@ -26,6 +27,7 @@ const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-r
 const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.resolve('.data/certificate-registry.json');
 const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.resolve('.data/application-registry.json');
 const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.data/website-registry.json');
+const websiteMigrationPolicyStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE ?? path.resolve('.data/website-migration-policy.json');
 const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRONMENT_STORE ?? path.resolve('.data/application-environment-registry.json');
 const authStorePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStorePath), 'auth', 'auth.sqlite');
 const certificateRenewalIntervalMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS ?? `${6 * 60 * 60 * 1000}`, 10);
@@ -66,10 +68,13 @@ const websiteRegistry = createWebsiteRegistry({
   getApplication: async (applicationId) => applicationRegistry.getApplication(applicationId),
 });
 await websiteRegistry.init();
+const websiteMigrationPolicy = createWebsiteMigrationPolicyStore({ filePath: websiteMigrationPolicyStorePath });
+await websiteMigrationPolicy.init();
 const domainRegistry = createDomainRegistry({
   filePath: domainStorePath,
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
   getWebsite: async (websiteId) => websiteRegistry.getWebsite(websiteId),
+  websiteBindingRequired: () => websiteMigrationPolicy.snapshot().websiteBindingRequired,
 });
 await domainRegistry.init();
 const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
@@ -97,6 +102,7 @@ const listener = createAuthenticatedApi({
     certificateRegistry,
     applicationRegistry,
     websiteRegistry,
+    websiteMigrationPolicy,
     applicationEnvironmentRegistry,
   }),
 });
@@ -129,6 +135,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] certificate store=${certificateStorePath}`);
   console.log(`[yunpanel-api] application store=${applicationStorePath}`);
   console.log(`[yunpanel-api] website store=${websiteStorePath}`);
+  console.log(`[yunpanel-api] website migration policy store=${websiteMigrationPolicyStorePath}`);
   console.log(`[yunpanel-api] application environment store=${applicationEnvironmentStorePath}`);
   console.log(`[yunpanel-api] secret store=${applicationEnvironmentRegistry.secretStoreConfigured ? 'configured' : 'not configured'}`);
   console.log(`[yunpanel-api] authentication=${authStore.configured() ? 'configured' : 'local setup required'}`);
