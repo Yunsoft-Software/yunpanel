@@ -1,5 +1,6 @@
 import { inspectHostInventory } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { createCertificateOperationReceiptStore } from './certificate-operation-receipt.js';
 import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.js';
 import { createDomainActivationReceiptStore } from './domain-activation-receipt.js';
 import { createLocalHostOperations } from './local-host-operations.js';
@@ -19,6 +20,11 @@ export class ConfiguredLocalRuntimeError extends Error {
   }
 }
 
+function exactStringArray(left, right) {
+  return Array.isArray(left) && Array.isArray(right) && left.length === right.length
+    && left.every((value, index) => typeof value === 'string' && value === right[index]);
+}
+
 export async function startConfiguredLocalRuntime({
   env = process.env,
   hostname,
@@ -31,6 +37,7 @@ export async function startConfiguredLocalRuntime({
   applicationRegistry,
   applicationEnvironmentRegistry,
   createOperations = createLocalHostOperations,
+  createCertificateOperationReceipts = createCertificateOperationReceiptStore,
   createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
   createDomainActivationReceipts = createDomainActivationReceiptStore,
   createManagedServiceReceipts = createManagedServiceMutationReceiptStore,
@@ -51,6 +58,7 @@ export async function startConfiguredLocalRuntime({
     throw new ConfiguredLocalRuntimeError('local_environment_registry_invalid', 'Local runtime requires the application environment registry');
   }
   if (typeof createOperations !== 'function'
+    || typeof createCertificateOperationReceipts !== 'function'
     || typeof createDatabaseDeletionReceipts !== 'function'
     || typeof createDomainActivationReceipts !== 'function'
     || typeof createManagedServiceReceipts !== 'function'
@@ -70,6 +78,10 @@ export async function startConfiguredLocalRuntime({
   const hostOperations = createOperations({
     loadApplicationEnvironment: (applicationId) => applicationEnvironmentRegistry.materialize(applicationId),
   });
+  const certificateOperationReceipts = createCertificateOperationReceipts();
+  if (!certificateOperationReceipts || typeof certificateOperationReceipts.write !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_certificate_operation_receipts_invalid', 'Local runtime certificate operation receipt store is invalid');
+  }
   const databaseDeletionReceipts = createDatabaseDeletionReceipts();
   if (!databaseDeletionReceipts || typeof databaseDeletionReceipts.write !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_database_deletion_receipts_invalid', 'Local runtime database deletion receipt store is invalid');
@@ -99,7 +111,42 @@ export async function startConfiguredLocalRuntime({
     throw new ConfiguredLocalRuntimeError('local_system_upgrade_receipts_invalid', 'Local runtime system upgrade receipt store is invalid');
   }
 
-  const recordExecutionEvidence = async ({ serverId, jobId, operation, payload, result }) => {
+  const recordExecutionEvidence = async ({ serverId, jobId, operation, resourceType, resourceId, payload, result }) => {
+    if (operation === OPERATIONS.SSL_ISSUE) {
+      if (resourceType !== 'certificate' || typeof resourceId !== 'string' || !resourceId
+        || !Array.isArray(payload?.domains) || payload.domains.length < 1
+        || result?.certName !== payload.domains[0] || !exactStringArray(result.domains, payload.domains)
+        || typeof payload.staging !== 'boolean' || result.staging !== payload.staging
+        || result.status !== (payload.staging ? 'validated' : 'issued')) {
+        throw new Error('Certificate issue result is not safe recovery evidence');
+      }
+      await certificateOperationReceipts.write({
+        serverId,
+        jobId,
+        certificateId: resourceId,
+        operation,
+        result,
+      });
+      return;
+    }
+
+    if (operation === OPERATIONS.SSL_RENEW) {
+      if (resourceType !== 'certificate' || typeof resourceId !== 'string' || !resourceId
+        || typeof payload?.certName !== 'string' || !payload.certName
+        || typeof payload.dryRun !== 'boolean' || result?.certName !== payload.certName
+        || result.dryRun !== payload.dryRun || result.status !== (payload.dryRun ? 'validated' : 'renewed')) {
+        throw new Error('Certificate renewal result is not safe recovery evidence');
+      }
+      await certificateOperationReceipts.write({
+        serverId,
+        jobId,
+        certificateId: resourceId,
+        operation,
+        result,
+      });
+      return;
+    }
+
     if (operation === OPERATIONS.DATABASE_DELETE) {
       await databaseDeletionReceipts.write({
         serverId,
