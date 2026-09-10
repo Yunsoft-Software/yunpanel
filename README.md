@@ -8,11 +8,11 @@ The project is intentionally scoped around Yunsoft production needs rather than 
 
 The management entry point is a routed React workspace with dashboard, server management, website/domain hierarchy, site detail tabs, application/environment controls, tracked jobs and Owner/Read Only access boundaries.
 
-The privileged execution target is now the local `yunpanel-api` runtime rather than a separate agent. A server can be created directly as a credentialless local-only identity or an existing enrolled server can be migrated to local ownership with guarded CLI tooling. When local execution is enabled, the API maintains the server's inventory, systemd-service, Docker and Nginx snapshots directly from `@yunpanel/host-runtime` and consumes the durable job queue locally.
+The privileged execution target is the local `yunpanel-api` runtime rather than a separate privileged agent. A server can be created directly as a credentialless local-only identity or an existing enrolled server can be migrated to local ownership with guarded CLI tooling. When local execution is enabled, the API maintains host inventory, allowlisted systemd-service, Docker and Nginx snapshots directly from `@yunpanel/host-runtime` and consumes the durable job queue locally.
 
-The old `yun-agent` package/service and its enrollment/heartbeat/command/result transport are still retained temporarily for tested migration rollback compatibility. They are not the default development workflow, and the web UI no longer offers enrollment-token provisioning as the normal server setup path. Do not remove the retained daemon/package compatibility surface until the real migration and rollback gates in `todo.md` pass.
+The old `yun-agent` package/service remains temporarily only as a rollback bridge for hosts that were enrolled before the agentless migration. New enrollment-token provisioning, the enrollment HTTP endpoint, the first-enrollment agent client path and its auth bypass are retired. Existing legacy heartbeat/command/environment/result transport is retained only until real migration + rollback acceptance passes; local-owned server identities reject that channel with `server_managed_locally`.
 
-**The complete hosting target is not implemented yet.** Site routes still rely on the existing domain/application model instead of the planned persistent Website identity. Files, cron, backup, terminal, full Docker lifecycle and mail management remain incomplete where their real backends are missing.
+**The complete hosting target is not implemented yet.** Site routes still rely on the existing domain/application model instead of the planned persistent Website identity. Files, cron, general-purpose backups, terminal, full Docker lifecycle and mail management remain incomplete where their real backends are missing.
 
 See [plan.md](plan.md) for remaining implementation work, [todo.md](todo.md) for supported-runtime/browser/package/real-host acceptance, and [agents.md](agents.md) for binding development rules. Completed tasks leave the task lists; implementation history stays in Git. Unless explicitly requested otherwise, work directly on `main` in small commits. Do not add GitHub Actions.
 
@@ -38,16 +38,17 @@ Do not replace structured operations with an unauthenticated generic shell or ma
 - React/JavaScript/JSX routed management UI with site breadcrumbs, URL-backed list state, parent/child domain context, shared controls and dirty-form protection on implemented advanced forms.
 - Dashboard and server views based on persisted inventory rather than fabricated metrics; unavailable values remain unknown.
 - Owner/Read Only route and HTTP boundaries, initial Owner setup, native Argon2id hashing, private SQLite session/user persistence and mandatory Owner MFA for HTTPS management.
-- Explicit domain/subdomain parent references, aliases, Nginx stage/activate and ACME issue/renew foundations.
+- Explicit domain/subdomain parent references, aliases, Nginx stage/activate and ACME issue/manual-renew/automatic-renewal foundations.
 - Static deploy/rollback and Node deploy/restart/status/rollback with dedicated application users, health checks and guarded rollback behavior.
 - AES-256-GCM application environment storage, masked metadata and execution-time secret materialization without putting plaintext environment values into generic job records.
 - Managed-service inspect/install/start/stop/restart support for the current allowlisted host services.
 - MySQL/MariaDB local-socket inventory and database create/delete job flows with result sanitization.
-- Durable queued/running/terminal job persistence with versioned private recovery sidecar state. Terminal-but-unreconciled work survives restart and blocks new mutations until reconciled.
-- Root-only packaged recovery inspection and terminal reconciliation tooling. Side-effect-free running `system.packages.inspect` and `database.inspect` jobs have an explicit `recover-readonly` path; unknown outcomes for mutating jobs remain fail-closed.
-- Credentialless fresh local server bootstrap plus guarded existing-server `status/bind/release` migration tooling.
+- Durable queued/running/terminal job persistence with a versioned private recovery sidecar. Terminal-but-unreconciled and supported running-recovery state survives restart and blocks unsafe new work.
+- Operation-specific running recovery for read-only package/service/database/Node status inspection, domain stage/activate, static deploy/rollback, Node deploy/rollback/restart, database create/delete, managed-service mutations, YunPanel package upgrade and certificate issue/renew. Recovery uses exact persisted intent plus host evidence or private job-bound receipts; there is no generic force-success or blind mutation retry.
+- Credentialless fresh local server bootstrap plus guarded existing-server `status/bind/release` migration tooling and post-migration `validate` health verification.
+- Verified migration backup, non-destructive restore preview, archive member/type/link inspection, `yunapp-*` Unix identity drift comparison, metadata planning and private staged extraction. There is intentionally no live archive apply/restore command yet.
 - Agentless local snapshots for host inventory, allowlisted systemd services, Docker and Nginx.
-- Debian packaging for API, restricted web gateway and the temporarily retained legacy agent compatibility service.
+- Debian packaging for API, restricted web gateway and the temporarily retained legacy agent rollback service.
 
 ## Development
 
@@ -63,9 +64,9 @@ npm install
 npm run dev
 ```
 
-`npm run dev` starts only the web app on `127.0.0.1:5173` and API on `127.0.0.1:3001`. It does **not** start `yun-agent`. The legacy daemon can still be started explicitly with `npm run dev:agent` when a compatibility or rollback test actually needs it.
+`npm run dev` starts only the web app on `127.0.0.1:5173` and API on `127.0.0.1:3001`. It does **not** start `yun-agent`. The legacy daemon can still be started explicitly with `npm run dev:agent` only for rollback/compatibility testing with an already-existing legacy identity.
 
-Local privileged execution is opt-in through `YUNPANEL_LOCAL_SERVER_ID`; do not invent a server identity just to make jobs run. Follow [docs/local-runtime-migration.md](docs/local-runtime-migration.md) for the guarded fresh-create and existing-server migration paths.
+Local privileged execution is opt-in through `YUNPANEL_LOCAL_SERVER_ID`; do not invent a server identity just to make jobs run. Follow [docs/local-runtime-migration.md](docs/local-runtime-migration.md) for guarded fresh-create and existing-server migration paths.
 
 Create the first Owner from another terminal at the repository root:
 
@@ -81,28 +82,47 @@ Run validation with:
 npm run check
 ```
 
-Historical commits have passed full supported-Node and package acceptance, but that does not prove the current tree. `todo.md` records the current full-check, browser, Ubuntu package and live acceptance gates that must be rerun after the recent agentless/recovery changes.
+Historical commits have passed full supported-Node and package acceptance, but that does not prove the current tree. `todo.md` records the current full-check, browser, Ubuntu package and live acceptance gates that must be rerun after the recent agentless/recovery/migration changes.
 
-## Local ownership and durable recovery
+## Local ownership, migration backup and durable recovery
 
-The packaged ownership tools are intentionally fail-closed. Fresh local bootstrap and existing-agent migration are separate operations:
+Packaged ownership mutation is intentionally fail-closed. Before `create`, `bind` or `release`, both command consumers must be stopped, queued/running and durable-recovery work must be clear, and the exact migration snapshot must be verified.
+
+Create and rehearse the rollback snapshot first:
 
 ```bash
-sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs create --confirm
-sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs status <server-uuid>
-sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs bind <server-uuid> --confirm
-sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs release <server-uuid> --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs create --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs verify /var/backups/yunpanel/migration-<timestamp>
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs preview /var/backups/yunpanel/migration-<timestamp>
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs stage /var/backups/yunpanel/migration-<timestamp> --confirm
 ```
 
-Before ownership changes, inspect durable recovery:
+`preview` and `stage` do not mutate live `/etc`, `/var/lib`, Unix users/groups or services. Staging is restricted to `/var/backups/yunpanel/.restore-staging`; live apply remains disabled pending real-host acceptance.
+
+Then use the ownership commands:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs create --backup-dir /var/backups/yunpanel/migration-<timestamp> --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs status <server-uuid>
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs bind <server-uuid> --backup-dir /var/backups/yunpanel/migration-<timestamp> --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs release <server-uuid> --backup-dir /var/backups/yunpanel/migration-<timestamp> --confirm
+```
+
+After setting the exact `YUNPANEL_LOCAL_SERVER_ID`, disabling the legacy agent and starting the API, run:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs validate <server-uuid>
+```
+
+`validate` is read-only and checks exact local binding/hostname, `yunpanel-api.service=active`, `yun-agent.service=inactive`, idle queue, clear durable recovery, fresh online local snapshot, current API runtime version and loopback `/api/health` success.
+
+Before ownership changes or uncertain-outcome recovery, inspect durable state:
 
 ```bash
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs status
 ```
 
-Terminal reconciliation never re-runs the host operation. `recover-readonly` may re-run only explicitly allowlisted side-effect-free inspection operations. Mutating jobs with unknown host outcome must remain blocked until an operation-specific external proof mechanism exists.
-
-The exact migration/recovery sequence and rollback rules live in [docs/local-runtime-migration.md](docs/local-runtime-migration.md).
+Terminal reconciliation never re-runs the host operation. Running recovery is restricted to the operation-specific commands documented in [docs/local-runtime-migration.md](docs/local-runtime-migration.md); each command either re-runs a reviewed read-only inspection or requires exact host evidence/private receipt. Missing evidence means unresolved, not success or failure.
 
 ## Debian package and release gates
 
@@ -116,14 +136,15 @@ npm run check
 ./scripts/build-deb.sh <new-version>
 ```
 
-A repository commit is not a live deployment. Before replacing the currently accepted package, verify the new `.deb` contents, fresh agentless bootstrap, existing-host migration, recovery tools, root API/web sandbox, auth state ownership, hosted workload continuity and rollback on an isolated Ubuntu host as specified in `todo.md`.
+A repository commit is not a live deployment. Before replacing the currently accepted package, verify the new `.deb` contents, fresh agentless bootstrap, existing-host migration, `local-runtime validate`, recovery tools, migration backup/preview/stage, root API/web sandbox, auth state ownership, hosted workload continuity and rollback on an isolated Ubuntu host as specified in `todo.md`.
 
 No package publication, migration or live deployment occurs merely by updating this repository.
 
 ## More documentation
 
-- [docs/development.md](docs/development.md) — current agentless development workflow and retained compatibility path.
+- [docs/development.md](docs/development.md) — current agentless development workflow and retained rollback compatibility path.
 - [docs/local-runtime-migration.md](docs/local-runtime-migration.md) — fresh bootstrap, existing-server migration, durable recovery and rollback.
+- [docs/local-migration-backup.md](docs/local-migration-backup.md) — verified migration backup, restore preview and private staging boundary.
 - [docs/website-workspace.md](docs/website-workspace.md) — current workspace routes and limitations.
 - [docs/owner-mfa-policy.md](docs/owner-mfa-policy.md) — HTTPS Owner MFA requirements.
 - [docs/secret-master-key-rotation.md](docs/secret-master-key-rotation.md) — key rotation and rollback procedure.
