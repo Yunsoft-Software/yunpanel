@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -54,6 +54,50 @@ test('staged-domain evidence rejects unreadable state with an authored error', a
     manager.inspectStagedDomain(spec),
     (error) => error instanceof NginxManagerError
       && error.code === 'staged_config_inspection_failed'
+      && !error.message.includes('/private')
+      && !error.message.includes('secret'),
+  );
+});
+
+test('active-domain evidence requires the exact active file checksum without executing reload', async (t) => {
+  const { stagingDir, sitesDir } = await fixture(t);
+  const manager = createNginxManager({
+    stagingDir,
+    sitesDir,
+    execFn: async () => { throw new Error('active inspection must not execute nginx or systemctl'); },
+  });
+  const staged = await manager.stageDomain(spec);
+  await mkdir(sitesDir, { recursive: true });
+  const activePath = path.join(sitesDir, staged.configName);
+  await writeFile(activePath, await readFile(path.join(stagingDir, staged.configName), 'utf8'), 'utf8');
+
+  assert.deepEqual(
+    await manager.inspectActiveDomain({ primaryDomain: spec.primaryDomain, checksum: staged.checksum }),
+    { satisfied: true, result: { configName: staged.configName, checksum: staged.checksum, active: true } },
+  );
+  await writeFile(activePath, '# changed\n', 'utf8');
+  assert.deepEqual(
+    await manager.inspectActiveDomain({ primaryDomain: spec.primaryDomain, checksum: staged.checksum }),
+    { satisfied: false, result: null },
+  );
+});
+
+test('active-domain evidence reports missing and unreadable state safely', async (t) => {
+  const { sitesDir } = await fixture(t);
+  const checksum = 'a'.repeat(64);
+  const missing = createNginxManager({ sitesDir });
+  assert.deepEqual(
+    await missing.inspectActiveDomain({ primaryDomain: spec.primaryDomain, checksum }),
+    { satisfied: false, result: null },
+  );
+
+  const unreadable = createNginxManager({
+    readFileFn: async () => { throw Object.assign(new Error('/private/nginx TOKEN=secret'), { code: 'EACCES' }); },
+  });
+  await assert.rejects(
+    unreadable.inspectActiveDomain({ primaryDomain: spec.primaryDomain, checksum }),
+    (error) => error instanceof NginxManagerError
+      && error.code === 'active_config_inspection_failed'
       && !error.message.includes('/private')
       && !error.message.includes('secret'),
   );
