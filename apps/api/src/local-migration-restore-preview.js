@@ -4,6 +4,10 @@ import {
   resolveLocalMigrationBackupDirectory,
   verifyLocalMigrationBackup,
 } from './local-migration-backup.js';
+import {
+  compareLocalMigrationUnixIdentities,
+  LocalMigrationUnixIdentityError,
+} from './local-migration-unix-identity.js';
 
 const IDENTITY_REFERENCES = new Set(['/etc/passwd', '/etc/group']);
 const RESTORE_TARGETS = new Set([
@@ -63,12 +67,27 @@ function restoreAction(entry, current) {
   return current.type === entry.type ? 'restore_replace' : 'restore_type_mismatch';
 }
 
+function assertIdentityComparison(result, directory, sha256) {
+  if (!result || result.destructive !== false || result.backupDirectory !== directory || result.sha256 !== sha256
+    || !Number.isInteger(result.snapshotUsers) || !Number.isInteger(result.currentUsers)
+    || !result.counts || typeof result.counts !== 'object' || !Array.isArray(result.identities)) {
+    throw new LocalMigrationRestorePreviewError('migration_restore_identity_result_invalid', 'Migration restore Unix identity comparison result is invalid');
+  }
+  for (const key of ['match', 'drift', 'missingCurrent', 'addedCurrent']) {
+    if (!Number.isInteger(result.counts[key]) || result.counts[key] < 0) {
+      throw new LocalMigrationRestorePreviewError('migration_restore_identity_result_invalid', 'Migration restore Unix identity comparison counts are invalid');
+    }
+  }
+  return result;
+}
+
 export async function previewLocalMigrationRestore({
   backupDirectory,
   verifyBackup = verifyLocalMigrationBackup,
+  compareIdentities = compareLocalMigrationUnixIdentities,
   lstatFn = lstat,
 } = {}) {
-  if (typeof verifyBackup !== 'function' || typeof lstatFn !== 'function') {
+  if (typeof verifyBackup !== 'function' || typeof compareIdentities !== 'function' || typeof lstatFn !== 'function') {
     throw new LocalMigrationRestorePreviewError('migration_restore_preview_dependencies_invalid', 'Migration restore preview dependencies are invalid');
   }
   const directory = resolveLocalMigrationBackupDirectory(backupDirectory);
@@ -100,6 +119,15 @@ export async function previewLocalMigrationRestore({
     }));
   }
 
+  let identityComparison;
+  try {
+    identityComparison = await compareIdentities({ backupDirectory: directory, verifyBackup });
+  } catch (error) {
+    if (error instanceof LocalMigrationUnixIdentityError) throw error;
+    throw new LocalMigrationRestorePreviewError('migration_restore_identity_unavailable', 'Migration restore Unix identity comparison could not be completed');
+  }
+  assertIdentityComparison(identityComparison, directory, verification.sha256);
+
   const counts = Object.freeze({
     restore: targets.filter((target) => target.action === 'restore_replace' || target.action === 'restore_missing' || target.action === 'restore_type_mismatch').length,
     identityReferences: targets.filter((target) => target.action === 'identity_reference').length,
@@ -113,6 +141,7 @@ export async function previewLocalMigrationRestore({
     sha256: verification.sha256,
     targets: Object.freeze(targets),
     counts,
+    identityComparison,
     destructive: false,
   });
 }
@@ -122,4 +151,5 @@ export const localMigrationRestorePreviewInternals = Object.freeze({
   restoreTargets: Object.freeze([...RESTORE_TARGETS]),
   currentType,
   restoreAction,
+  assertIdentityComparison,
 });
