@@ -1,99 +1,122 @@
 # YunPanel — Codex / Gerçek Ortam TODO
 
-Bu dosyada yalnız güvenilir biçimde çalıştırılamayan gerçek ortam doğrulamaları tutulur. Ürün/kod işleri `plan.md`, bağlayıcı kurallar `agents.md` içindedir. Doğrudan `main` üzerinde küçük commitler kullan; GitHub Actions kullanma. Secret, parola, cookie, MFA secretı veya kişisel veriyi repo/log/screenshot içine yazma.
+Bu dosyada yalnız güvenilir biçimde bu oturumda çalıştırılamayan gerçek ortam / desteklenen runtime / browser / package kabul işleri tutulur. Ürün ve kod işleri `plan.md`, bağlayıcı kurallar `agents.md` içindedir. Doğrudan `main` üzerinde küçük commitler kullan; GitHub Actions kullanma. Secret, parola, cookie, MFA secretı veya kişisel veriyi repo/log/screenshot içine yazma.
 
-Önceki dar kaynak-alt-kümesi sonuçlarının sınırları ilgili runbooklarda korunur. 2026-09-09'da güncel birleşik ağaç Node 24.19 üzerinde yerelde ve Node 24.20 üzerinde Ubuntu paket build hostunda filtresiz çalıştırıldı: repository policy, **473 test** ve Vite production build geçti. Bu sonuç native auth/SQLite/Argon2, master-key rotation, request-auth, local executor, host-runtime ve UI model testlerini kapsar; kullanıcı credentialı gerektiren gerçek Owner/MFA/Read Only, responsive/keyboard ve rollback kabulünün yerine geçmez.
+2026-09-09'daki birleşik ağaç Node 24.19 üzerinde yerelde ve Node 24.20 Ubuntu package build hostunda filtresiz doğrulanmıştı: repository policy, **473 test** ve Vite production build geçti. Bu tarihsel kabul daha sonra eklenen agentless local-runtime, managed-service ve database foundation commitlerini kapsamaz. Güncel source için aşağıdaki yeni Node 24/package/browser maddeleri ayrıca çalıştırılmadan “full check geçti” denmeyecek.
 
 ## T-RUNTIME — P0: Desteklenen runtime ve tam repo kabulü
 
 - [x] Node 24.11.1+ ve npm 11+ ile temiz dependency install yap; workspace manifestlerini ve native dependencies'i doğrula.
-- [x] Filtre olmadan `npm run check`, bütün workspace testleri ve production build çalıştır. Test/build hatasını runtime gereksinimini düşürerek veya test atlayarak çözme.
-- [x] Güncel `panel-http-guard.test.js`, `authenticated-core-boundary.test.js` ve request-auth fixture'a taşınan core/deploy/rollback/ACME/Node/package flow testlerini birlikte çalıştır. Raw `createApp()` + eski/admin Bearer management erişimi 401 kalmalı; authenticated listener gerçek core'a yalnız server-derived `request.auth` ile geçmeli; legacy agent claim/result/environment rotaları kendi agent credential'larını korumalı.
-- [x] API/web/package entry pointlerinin aynı committen geldiğini doğrula.
+- [x] 2026-09-09 birleşik ağacında filtresiz `npm run check`, bütün workspace testleri ve production build çalıştırıldı.
+- [x] Güncel `panel-http-guard.test.js`, `authenticated-core-boundary.test.js` ve request-auth fixture'a taşınan core/deploy/rollback/ACME/Node/package flow testleri birlikte çalıştırıldı; raw `createApp()` + eski/admin Bearer management erişimi 401 kaldı.
+- [x] API/web/package entry pointlerinin aynı committen geldiği önceki package adayında doğrulandı.
+- [ ] `99354d6b` ve sonrasındaki agentless runtime + managed-service + DB değişiklikleriyle Node 24.11.1+ ortamında temiz install sonrası filtresiz `npm run check` ve production Vite build'i tekrar çalıştır. Yeni testleri atlama veya runtime gereksinimini düşürme.
 - [ ] Bilerek mixed web/API build üretildiğinde privileged UI'ın fail-closed kaldığını ayrıca doğrula.
-- [x] `.github/workflows` ekleme/değiştirme; doğrulamaları yerel/test hostunda çalıştır.
+- [x] GitHub Actions eklenmedi/değiştirilmedi; doğrulamalar yerel/test hostunda yapıldı.
 
 ## T-LOCAL-EXECUTOR — P1: Yerel iş yürütücüsü ve host-runtime kabulü
 
-- [x] `docs/local-executor-safety.md` içindeki beş test dosyasını desteklenen Node 24.11.1+ / tam workspace'te tekrar çalıştır. Ayrıca `apps/api/test/local-host-operations.test.js`, gerçek registry kullanan `local-job-executor.test.js`, host-runtime/agent package-manager testleri ve mevcut Node status testlerini birlikte çalıştır.
-- [x] Paketlenmiş gerçek `@yunpanel/host-runtime` importunu ve agent compatibility re-export'unu test et. `yun-agent.service` varsayılan adı, eski API/web/agent restart planı ve yerel API/web override'ı güncel testlerle geçti; gerçek APT upgrade ve servis restartı test hostunda doğrulandı.
-- [ ] Gerçek job registry ve disk üzerinde claim/result yazımı, rename, disk-full/read-only ve kaybolan acknowledgement hatalarını kontrollü üret. Başarılı host işi completion hatasında failed'e çevrilmemeli; belirsiz claim/complete/reconcile instance'ı durdurmalı ve yeni claim/otomatik retry olmamalı. In-memory terminal verisini durable disk kaydı kabul etme; plan B'deki kalıcı registry/recovery işi tamamlanmadan process restartını çözüm sayma.
-- [ ] Stop sırasında çalışan işin execution/complete/reconcile aşamalarının beklendiğini, paralel runOnce'un aynı işi tekrar yürütmediğini ve eski scheduler callback'lerinin stop/restart sonrası iş başlatmadığını doğrula. Fault metadata'sında yalnız safe code/phase/jobId olmalı; raw exception/command/env/key/path kayıtlarına sızmamalı. Legacy hata yollarını ayrıca denetle; local sanitizer bütün sistem için redaction kanıtı değildir.
-- [ ] İzole Ubuntu Node uygulamasında gerçek current symlink, deterministik systemd unit, runtime port/path ve health sonucunu karşılaştır. Wrong/missing release veya farklı uygulama kimliği host işleminden önce reddedilmeli. Buradaki gerçek temp-file/loopback HTTP testi gerçek systemctl, süreç izolasyonu veya live host kabulü değildir.
-- [ ] Entry-point bağlantısı geliştirildiğinde önce explicit local-server binding, desteklenen operation seçimi, tek worker/kuyruk sahipliği, job drain ve kalıcı recovery'yi doğrula. Eski agent ve local worker aynı kuyruğu tüketmemeli; taşınmamış restart/deploy işleri boş env ile yürütülmemeli. `index.js` henüz local executor başlatmıyor; bu yardımcı modüllerin varlığını agentsiz production geçişi sayma.
+- [x] Eski local-executor güvenlik testleri, local host operation testleri, package-manager ve Node status testleri önceki Node 24 full-workspace kabulünde çalıştırıldı.
+- [x] Paketlenmiş `@yunpanel/host-runtime` importu ve agent compatibility re-export'u önceki adayda doğrulandı; gerçek APT upgrade ve servis restartı test hostunda çalıştı.
+- [ ] Güncel source'ta explicit `YUNPANEL_LOCAL_SERVER_ID`, OS hostname eşleşmesi, derived lock path, root `yunpanel-api.service`, production `index.js` startup/shutdown ve execution-time application env materialization zincirini Node 24 full workspace'te doğrula. Env verilmemişse local runtime kapalı kalmalı.
+- [ ] Local runtime'ın 30 saniyelik snapshot yenilemesini, 90 saniyelik offline eşiğini geçmeden server kaydını canlı tuttuğunu gerçek registry/disk üzerinde doğrula. Binding kaybı veya snapshot persist hatası executor'ı drain edip ownership lock'unu bırakmalı.
+- [ ] Executor fatal fault sırasında yalnız safe `code/phase/jobId` raporlandığını; snapshot timer'ın durduğunu, executor'ın drain olduğunu ve exclusive lock'un bırakıldığını process-level testte doğrula. Raw exception/command/env/key/path hiçbir kayıt/loga sızmamalı.
+- [ ] Gerçek job registry ve disk üzerinde claim/result yazımı, rename, disk-full/read-only ve kaybolan acknowledgement hatalarını kontrollü üret. Başarılı host işi completion hatasında failed'e çevrilmemeli; belirsiz claim/complete/reconcile instance'ı durdurmalı ve yeni claim/otomatik retry olmamalı. Plan B'deki durable recovery işi tamamlanmadan process restartını çözüm sayma.
+- [ ] Stop sırasında çalışan işin execution/complete/reconcile aşamalarının beklendiğini, paralel `runOnce`'un aynı işi tekrar yürütmediğini ve eski scheduler callback'lerinin stop/restart sonrası iş başlatmadığını doğrula.
+- [ ] İzole Ubuntu Node uygulamasında gerçek current symlink, deterministik systemd unit, runtime port/path ve health sonucunu karşılaştır. Wrong/missing release veya farklı application identity host işleminden önce reddedilmeli.
+- [ ] Legacy agent + local worker dual-consumer testini gerçek durable queue üzerinde yap: local bind öncesi API ve agent durmuş + job drain şartı; bind sonrası aynı server kuyruğunu yalnız local executor tüketmeli. Node deploy/restart/rollback secret env değerleri job JSON'una düşmemeli.
+
+## T-SERVICES — P1: Managed host servisleri gerçek kabulü
+
+- [ ] Node 24 full workspace'te managed-service manager, protocol, job registry, authenticated HTTP ve web client/model testlerini birlikte çalıştır.
+- [ ] Ubuntu 24.04 test hostunda Owner ile Nginx, MariaDB/MySQL, Docker, Cron, Postfix, Dovecot ve Rspamd için inspect çalıştır. Kurulu olmayan güvenli bir servis üzerinde install -> enable/start -> stop -> start/restart akışını gerçek `apt-get/systemctl` ile doğrula.
+- [ ] MariaDB kurulu hostta MySQL kurulumunun ve MySQL kurulu hostta MariaDB kurulumunun fail-closed kaldığını doğrula; mevcut DB servisini kaldırma/bozma.
+- [ ] `/servers` Owner UI'da “Servisleri tara”, install/start/stop/restart job progress, terminal sonuç sonrası refresh ve reload sonrası snapshot doğruluğunu browserda test et. Mutation sonrası eski inspect snapshot'ı tekrar render edilmemeli.
+- [ ] Read Only browser oturumunda managed-service paneli mount edilmemeli ve networkte nested `/servers/:id/services` isteği oluşmamalı. Raw API isteği 403 kalmalı.
+
+## T-DATABASE — P1/P2: MySQL/MariaDB foundation gerçek kabulü
+
+- [ ] Güncel Node 24 full workspace'te `database-manager`, DB protocol, local/legacy dispatch ve DB result-sanitizer testlerini diğer job/host-runtime testleriyle birlikte çalıştır.
+- [ ] İzole Ubuntu 24.04 test hostunda root Unix socket auth ile MariaDB veya MySQL engine/version tespiti ve non-system schema inventory/size sorgusunu doğrula. TCP password fallback ekleme.
+- [ ] Test amaçlı güvenli isimle DB create -> inspect -> drop -> inspect yap. `mysql`, `information_schema`, `performance_schema`, `sys` oluşturma/silme hedefi olamamalı; boş/özel karakterli/injection isimleri host komutundan önce reddedilmeli.
+- [ ] DB job registry/API wiring tamamlandıktan sonra queued/completed result JSON'unda yalnız engine/version/name/size/created/deleted metadata bulunduğunu doğrula. Raw SQL, socket/client path, command output veya credential persist edilmemeli.
+- [ ] `/databases` Owner UI tamamlandıktan sonra liste/refresh/create/typed-confirm delete, stale/error/job-progress ve reload senaryolarını browserda test et; Read Only nested DB management isteği üretmemeli.
 
 ## T-ACCESS — P0: Read Only gerçek kabulü
 
-- [x] Yeni `panel-access`, `panel-http-guard`, owner-MFA capability, Read Only HTTP ve owner-access testlerini tam Node 24 workspace içinde mevcut auth/core testleriyle birlikte çalıştır.
-- [ ] Gerçek browserda Read Only hesabıyla Dashboard, Web Siteleri, site detail ve Sunucular ekranlarının açıldığını doğrula. Jobs, Users, Settings, Applications management, Domains management, create ekranları ve diğer mutation yüzeyleri görünmemeli/mount edilmemeli.
-- [ ] Network panelinde Read Only oturumunun yalnız izin verilen `GET/HEAD /api/{servers,applications,domains,certificates}` list/detail isteklerini yaptığını doğrula. `/jobs`, `/users`, application env/status, nested system inspection veya herhangi bir mutation otomatik/polling olarak üretilmemeli.
-- [ ] Raw API'de Read Only ile jobs/users/env/status/system inspection ve bütün mutation isteklerinin core management handlerına ulaşmadan `403` kaldığını doğrula. URL yazarak veya client payload değiştirerek izin genişletilememeli.
+- [x] `panel-access`, `panel-http-guard`, Owner-MFA capability, Read Only HTTP ve owner-access testleri önceki Node 24 workspace kabulünde geçti.
+- [ ] Gerçek browserda Read Only hesabıyla Dashboard, Web Siteleri, site detail ve Sunucular ekranlarının açıldığını doğrula. Jobs, Users, Settings, Applications management, Domains management, create ekranları ve mutation yüzeyleri görünmemeli/mount edilmemeli.
+- [ ] Network panelinde Read Only oturumunun yalnız izin verilen `GET/HEAD /api/{servers,applications,domains,certificates}` list/detail isteklerini yaptığını doğrula. `/jobs`, `/users`, application env/status, nested service/DB/system inspection veya mutation polling üretilmemeli.
+- [ ] Raw API'de Read Only ile jobs/users/env/status/nested system/service/DB inspection ve bütün mutation isteklerinin core management handlerına ulaşmadan `403` kaldığını doğrula.
 - [ ] Owner + MFA management görünümünün eski işlevlerini regresyondan geçir. Read Only capability metadata'sına `*` veya bozuk mode enjekte edildiğinde UI ve API fail-closed kalmalı.
 - [ ] Role change / disable / delete / logout sonrası açık Read Only ekranlarında eski kaynak cache'i kalmamalı; yeni session gelmeden stale privileged veri render edilmemeli.
 
 ## T-KEY — P0: Secret master-key rotation kabulü
 
-- [x] Node 24 full workspace'te `apps/api/test/secret-master-key-rotation.test.js` çalıştır. Active MFA, pending MFA, application secret, public env value, wrong-current-key preflight, same-key reject, backup tamper, target-path binding, absent pre-rotation env-store ve rollback senaryolarının tümü geçti.
-- [ ] Test hostunda packaged service ile `docs/secret-master-key-rotation.md` runbook'unu birebir prova et: bağımsız console/SSH erişimi -> yedek -> `yunpanel-api.service` stop -> rotation -> `api.env` root key update -> service start -> health/functional validation.
-- [ ] Rotation sonrası Owner password + TOTP login, recovery akışı ve secret application environment materialization çalışmalı. API/frontend secret value'yu maskeli tutmalı; loglarda `mfa_key_unavailable` / `secret_decryption_failed` benzeri hata olmamalı.
-- [ ] Rotation backup directory'nin 0700, snapshot/key dosyalarının 0600 ve public web root dışında olduğunu doğrula. Manifest raw key/plaintext secret içermemeli; generated key hiçbir argv/log/audit çıktısına düşmemeli.
-- [ ] Rollback tatbikatı yap: API stop -> aynı live store pathleriyle rollback -> önceki `YUNPANEL_SECRET_MASTER_KEY` geri yükle -> API start -> MFA + application secret validation. Old-data/new-key veya new-data/old-key ile servis açma.
-- [ ] Process kill/power-loss benzeri kesinti noktasını kontrollü test hostunda simüle et; backup/manifest ile deterministik recovery yapabildiğini doğrula. Bu prova tamamlanmadan production root key rotate etme.
-- [x] Debian/package çıktısında `scripts/rotate-secret-master-key.mjs`, root `npm run secret-key`, `.env.example` ayarları ve runbook'un bulunduğunu doğrula.
+- [x] Önceki Node 24 full workspace'te `apps/api/test/secret-master-key-rotation.test.js` active MFA, pending MFA, application secret, public env, wrong-key, same-key, backup tamper, target-path, absent-store ve rollback senaryolarıyla geçti.
+- [ ] Test hostunda packaged service ile `docs/secret-master-key-rotation.md` runbook'unu birebir prova et: bağımsız console/SSH -> yedek -> API stop -> rotation -> `api.env` key update -> service start -> health/functional validation.
+- [ ] Rotation sonrası Owner password + TOTP login, recovery ve secret application environment materialization çalışmalı; frontend secret value'yu maskeli tutmalı.
+- [ ] Rotation backup directory 0700, snapshot/key dosyaları 0600 ve public web root dışında olmalı. Manifest raw key/plaintext secret içermemeli.
+- [ ] Rollback tatbikatı: API stop -> aynı live store pathleriyle rollback -> eski key -> API start -> MFA + application secret validation.
+- [ ] Process kill/power-loss kesintisini test hostunda simüle et; backup/manifest ile deterministik recovery kanıtla.
+- [x] Önceki Debian/package adayında rotation CLI, root `npm run secret-key`, `.env.example` ve runbook bulunduğu doğrulandı.
 
 ## T-USER — P0: Kullanıcı yönetimi native ve browser kabulü
 
-- [x] Native Argon2/SQLite ile user-admin store/HTTP/client testlerini mevcut auth/MFA/gateway/core testleriyle birlikte çalıştır.
-- [ ] Gerçek `index.js -> authenticated API -> core/domain` zincirinde `/api/panel/users` CRUD'u doğrula. Anonymous, Read Only ve MFA enrollment'ı eksik Owner reddedilmeli; CSRF/Origin/body-limit korunmalı.
-- [ ] Ayrı SQLite bağlantıları/process'leriyle son-Owner disable/demotion/delete, username/revision yarışları ve login sırasında account/session değişimini test et. Transaction/audit failure yarım lifecycle bırakmamalı.
-- [ ] Auth DB upgrade/migration, repeated startup, unknown schema rejection, consistent backup/restore ve old-package rollback davranışını test et.
-- [ ] Browserda `/settings/users`: create/edit/role/active/password reset/delete, typed confirm, son Owner hatası, pagination, dirty-form, double-submit, delayed/malformed/network response ve back/forward/reload davranışlarını dört hedef viewportta test et.
-- [ ] User disable/delete/role/password/MFA değişikliğinin ilgili sessions, pending enrollment ve login challenges üzerinde beklenen revoke etkisini gerçek MFA ile doğrula. Hash/token/MFA secret list/audit/URL/localStorage/telemetry'ye düşmemeli.
+- [x] Native Argon2/SQLite user-admin store/HTTP/client testleri önceki auth/MFA/gateway/core paketiyle birlikte geçti.
+- [ ] Gerçek `index.js -> authenticated API -> core/domain` zincirinde `/api/panel/users` CRUD'u doğrula. Anonymous, Read Only ve MFA enrollment eksik Owner reddedilmeli; CSRF/Origin/body-limit korunmalı.
+- [ ] Ayrı SQLite connection/process'leriyle son-Owner disable/demotion/delete, username/revision yarışları ve login sırasında account/session değişimini test et.
+- [ ] Auth DB upgrade/migration, repeated startup, unknown schema reject, consistent backup/restore ve old-package rollback davranışını test et.
+- [ ] Browserda `/settings/users`: create/edit/role/active/password reset/delete, typed confirm, son Owner hatası, pagination, dirty-form, double-submit, delayed/malformed/network response ve back/forward/reload davranışlarını dört viewportta test et.
+- [ ] User disable/delete/role/password/MFA değişikliğinin sessions, pending enrollment ve login challenges revoke etkisini gerçek MFA ile doğrula.
 
 ## T-AUTH — P0: MFA, session ve gerçek HTTPS zinciri
 
-- [ ] React production buildde first Owner setup, login/wrong password, MFA enrollment/verify/recovery, Account dialog, password change, session list/logout/logout-all, idle timeout ve absolute timeout akışlarını gerçek browserda test et.
-- [x] 2026-09-10'da production build üzerinde ilk Owner oluşturma, parola girişi, zorunlu TOTP enrollment, recovery-code saklama onayı ve management kapısının açılması gerçek browserda doğrulandı. Wrong-password/recovery/password/session/timeout varyantları yukarıdaki maddede açık kaldı.
-- [ ] İki browser tabında delayed request, stale 200/401, login cookie rotation, page restore (`pageshow`), lost MFA response ve keep-alive yarışlarını test et; eski response yeni login/session'ı bozmamalı.
-- [x] Exact `YUNPANEL_PUBLIC_ORIGIN=https://cryptoraichu.website` (trailing slash yok), TLS reverse proxy, loopback API listener ve Origin/Sec-Fetch/CSRF enforcement'ı doğrula.
-- [ ] Auth DB/path ownership: service-owned private directory 0700, DB/WAL/SHM 0600; CLI ve service aynı absolute DB'yi kullanmalı. Genel chmod/chown yapma.
-- [x] Current IP/proxy protection'ı auth kabulü tamamlanmadan kaldırma; onaylı ve sahte istemci yollarını canlı gateway'de doğrula.
+- [ ] React production buildde first Owner setup, login/wrong password, MFA enrollment/verify/recovery, Account dialog, password change, session list/logout/logout-all, idle ve absolute timeout akışlarını gerçek browserda tamamla.
+- [x] 2026-09-10 production build üzerinde ilk Owner oluşturma, parola, zorunlu TOTP enrollment, recovery-code saklama onayı ve management kapısının açılması browserda doğrulandı.
+- [ ] İki browser tabında delayed request, stale 200/401, login cookie rotation, `pageshow`, lost MFA response ve keep-alive yarışlarını test et.
+- [x] Exact `YUNPANEL_PUBLIC_ORIGIN=https://cryptoraichu.website`, TLS reverse proxy, loopback API listener ve Origin/Sec-Fetch/CSRF enforcement canlıda doğrulandı.
+- [ ] Root API geçişinden sonra auth DB/path ownership'i tekrar doğrula: private directory 0700, DB/WAL/SHM 0600; service ve CLI aynı absolute DB'yi kullanmalı.
+- [x] Current IP/proxy protection auth kabulü tamamlanmadan kaldırılmadı; onaylı ve sahte istemci yolları canlı gateway'de doğrulandı.
 - [ ] Trusted-proxy/client-IP/rate-limit spoof kabulünü tamamlamadan public yüzeyi genişletme.
 
 ## T-UI — P1: Routed workspace gerçek browser kabulü
 
-- [x] Built React uygulamasını gerçek browserda aç; `AuthGate` ilk Owner kurulum ekranını render etti ve login öncesi yalnız assetler ile `/api/auth/session` istendi, management collection requesti oluşmadı.
-- [x] 2026-09-10'da authenticated browser ile Dashboard, Web Siteleri, Sunucular, Veritabanları, Docker, Mail, Yedekler, İşler, Denetim, Ayarlar/Kullanıcılar, Uygulamalar, site detay ve bütün site sekmesi linkleri tıklanarak doğru rotaya geçti. APT package inspect, SSL renew dry-run ve Node status işleri UI'dan kuyruğa alınıp `succeeded` oldu; job dialog açılıp kapandı ve `finishedAt` düzeltmesinden sonra tamamlanma zamanı canlıda göründü. Uygulanmamış modüller boş/bozuk görünüm yerine açık durum mesajı gösterdi.
-- [ ] `/dashboard`, `/websites`, `/websites/new`, `/websites/:id/:tab`, `/applications`, `/applications/new`, `/domains`, `/servers`, `/jobs`, `/settings`, `/settings/users` için direct URL, reload, back/forward, invalid route ve reverse-proxy SPA fallback testlerini yap.
+- [x] Built React uygulamasında `AuthGate` login öncesi yalnız assetler + `/api/auth/session` isteğiyle render oldu; management collection requesti oluşmadı.
+- [x] 2026-09-10 authenticated browser smoke testinde Dashboard, Web Siteleri, Sunucular, Veritabanları, Docker, Mail, Yedekler, İşler, Denetim, Ayarlar/Kullanıcılar, Uygulamalar, site detail ve site sekmeleri doğru rotaya geçti. O tarihte uygulanmamış modüller açık placeholder gösterdi.
+- [ ] Yeni managed-service UI ve ilerleyen DB UI eklendikten sonra `/servers` ve `/databases` için direct URL, reload, back/forward, job drawer, stale/error/permission loss ve responsive davranışı tekrar test et.
+- [ ] `/dashboard`, `/websites`, `/websites/new`, `/websites/:id/:tab`, `/applications`, `/applications/new`, `/domains`, `/servers`, `/jobs`, `/settings`, `/settings/users` için direct URL, reload, back/forward, invalid route ve reverse-proxy SPA fallback testlerini tamamla.
 - [ ] Domain/alias search, URL filters/sort, group pagination, parent/child context, collapse/density/per-page preferences, multi-tab storage event ve bozuk/engelli localStorage davranışını test et.
-- [ ] New site, application, env, domain/SSL ve job flows için delayed/401/403/404/409/network/malformed response üret. Dirty form ve uncertain mutation sonucunda kullanıcı verisi sessizce kaybolmamalı/kör retry olmamalı.
-- [ ] Job drawer/dialog: queued/running/terminal, delayed list/detail, close/reopen, wrong ID, stale response, network cut ve permission loss. Dialog kapanınca server job devam edebilmeli; raw secret payload/result render edilmemeli.
-- [ ] 1440×900, 1920×1080, 1280×800 ve 390×844 viewportlarda Dashboard/Websites/site detail/forms/jobs/users/MFA ekranlarını kontrol et. Sidebar, mobile focus trap/Escape/inert/backdrop, Cmd/Ctrl+K, skip link, modal focus restore, contrast, long hostnames/tables ve overflow'u düzelt.
-- [x] Package build'in bütün workspace/router/assets dosyalarını içerdiğini ve update sonrası `/dashboard` deep-link/login kapısının çalıştığını doğrula.
+- [ ] New site, application, env, domain/SSL ve job flows için delayed/401/403/404/409/network/malformed response üret. Dirty form ve uncertain mutation sonucunda kullanıcı verisi kaybolmamalı/kör retry olmamalı.
+- [ ] Job drawer/dialog: queued/running/terminal, delayed list/detail, close/reopen, wrong ID, stale response, network cut ve permission loss. Raw secret payload/result render edilmemeli.
+- [ ] 1440×900, 1920×1080, 1280×800 ve 390×844 viewportlarda Dashboard/Websites/site detail/forms/jobs/users/MFA + Servers service panelini kontrol et.
+- [x] Önceki package build'in bütün workspace/router/assets dosyalarını içerdiği ve update sonrası `/dashboard` deep-link/login kapısının çalıştığı doğrulandı.
 - [ ] Paket rollback sonrası deep-link/login davranışını ayrıca doğrula.
 
 ## T-LIVE — P0/P1: Canlı panel, package ve rollback kapısı
 
-- [x] `cryptoraichu.website` üzerinde deploy edilen `0.3.0-4` paketini, source API/agent `0.3.0` sürümlerini, Nginx/web/API/agent unitlerini, journal durumunu ve mevcut erişim korumasını gerçek hosttan doğrula.
-- [x] Owner hesabını oluştur, zorunlu MFA'yı etkinleştir ve authenticated management menülerini canlıda smoke test et. Credential, TOTP secretı ve recovery kodları yalnız Git dışı yerel `0600` dosyada tutuldu.
-- [ ] Owner/MFA sonrası browser console/network kaydını, back/forward/reload ve dört hedef viewport varyantını canlıda tamamla.
-- [x] Production değişikliğinden önce `/etc/yunpanel`, `/var/lib/yunpanel`, auth alanı, master key config, package/unit, Nginx/vhost, cert ve release state için checksum doğrulamalı geri dönüş arşivi al.
+- [x] `cryptoraichu.website` üzerinde deploy edilen `0.3.0-4` paket, Nginx/web/API/agent unitleri, journal ve mevcut erişim koruması gerçek hostta doğrulandı.
+- [x] Owner hesabı + zorunlu MFA ve authenticated management menüleri canlıda smoke test edildi.
+- [ ] `99354d6b` ve sonrasındaki source'u yeni `.deb` adayına dönüştürmeden önce Node 24 full check'i bitir; ardından root `yunpanel-api.service`, local-runtime env/config, managed-service ve DB foundation dosyalarının pakete gerçekten girdiğini `dpkg-deb -c/-I` ile doğrula.
+- [ ] Yeni agentless aday `.deb` için install/upgrade sırasında auth DB/master key/state ownership, API root service, web sandbox, agent migration durumu ve restart davranışını izole test hostunda doğrula; mevcut `0.3.0-4` canlı hosta kör deploy yapma.
+- [ ] Owner/MFA sonrası browser console/network, back/forward/reload ve dört viewport varyantını canlıda tamamla.
+- [x] Production değişikliğinden önce `/etc/yunpanel`, `/var/lib/yunpanel`, auth, master key config, package/unit, Nginx/vhost, cert ve release state için checksum doğrulamalı geri dönüş arşivi alındı.
 - [ ] Geri dönüş arşivinin restore'unu ayrı test hostunda kanıtla.
-- [x] Aday `.deb` install/upgrade çalıştır; required Node/native dependencies, auth CLI, rotation CLI/runbook, systemd ownership/sandbox ve service restart davranışını doğrula.
-- [ ] `0.3.0-4` paket rollback + eşleşen state/config geri dönüşünü izole test hostunda prova et.
-- [x] Hosted Node/static sitelerin panel restart/upgrade sırasında çalışmaya devam ettiğini 50 ardışık `200/200` örneğiyle doğrula.
+- [ ] `0.3.0-4` ve yeni agentless aday arasında package/state rollback provası yap.
+- [x] Hosted Node/static sitelerin önceki panel restart/upgrade sırasında çalışmaya devam ettiği 50 ardışık `200/200` örneğiyle doğrulandı.
 
-2026-09-09/10 canlı kabul notu: `cryptoraichu.website` Ubuntu 24.04.5 test hostunda APT ile `0.2.0-1 -> 0.3.0-1 -> 0.3.0-2 -> 0.3.0-3 -> 0.3.0-4` yükseltildi. Son paket ve aday eşit, `dpkg -V` temiz, failed unit/pending update/reboot gereksinimi sıfır, API/web/agent journal warning kaydı yok ve ajan heartbeat sürümü `0.3.0`. Auth schema 2, DB/dizin izinleri `0600/0700`, eski bootstrap bearer kaldırılmış, anonim management `401`, yanlış istemci ve cross-origin mutation `403`. İlk Owner + TOTP MFA enrollment tamamlandı; recovery kodları Git dışı yerel credential dosyasında saklandı. Authenticated menü smoke testi, APT package inspect, SSL renew dry-run ve Node status işleri geçti. Job completion zamanı düzeltmesi `0.3.0-4` paketine panelin kendi upgrade akışıyla kuruldu; reload sonrası Owner oturumu/MFA korundu ve UI gerçek tamamlanma zamanını gösterdi. İlk geri dönüş arşivine ek olarak Owner/MFA verisini tutarlı SQLite backup ile içeren `/root/yunpanel-backups/yunpanel-pre-0.3.0-4-20260909T211941Z.tar.gz` checksum ve tar okunabilirliğiyle doğrulandı; ayrı host restore provası yapılmadı.
+2026-09-09/10 canlı kabul notu: `cryptoraichu.website` Ubuntu 24.04.5 test hostunda APT ile `0.2.0-1 -> 0.3.0-1 -> 0.3.0-2 -> 0.3.0-3 -> 0.3.0-4` yükseltildi. `dpkg -V` temiz, failed unit/pending update/reboot sıfır, API/web/agent journal warning yoktu. İlk Owner + TOTP MFA enrollment tamamlandı; credential materyali Git dışı `0600` dosyada tutuldu. APT package inspect, SSL renew dry-run ve Node status işleri geçti. Bu not **sonraki agentless/managed-service/DB source commitlerinin canlı kabulü değildir**.
 
 ## T-MIGRATION — P1+: Agentless / Website / Plesk gerçek ortam kabulü
 
 Bu bölüm yalnız ilgili kod `plan.md` içinden tamamlandıkça çalıştırılır.
 
-- [ ] Ubuntu test hostunda agent kapalıyken local root backend ile inventory, Nginx test/reload, Node deploy/restart/rollback, SSL, package management ve root terminali doğrula; site workload'larının dedicated Unix user altında kaldığını kontrol et.
-- [ ] Agentless migration için backup -> job drain -> state migration -> new backend health -> old agent disable -> rollback sırasını gerçek package üzerinde test et. IDs, auth DB, master key, vhost, cert, release ve users korunmalı.
-- [ ] Kalıcı Website migration'ında apex + iki independent subdomain + alias, explicit parent, app binding, cert ve rollback'i gerçek DNS/test domainiyle doğrula. Domain-ID compatibility ekranını migration başarısı sayma.
+- [ ] Paketlenmiş local binding/migration CLI tamamlandıktan sonra backup -> API+agent stop -> job drain -> UUID/hostname bind -> `YUNPANEL_LOCAL_SERVER_ID` config -> local backend start -> health -> agent disable sırasını gerçek package üzerinde test et. IDs, auth DB, master key, vhost, cert, release ve users korunmalı.
+- [ ] Ubuntu test hostunda agent kapalıyken local root backend ile inventory, Nginx test/reload, Node deploy/restart/rollback, SSL, package management, managed services ve DB inspect/create/drop doğrula; site workload'larının dedicated Unix user altında kaldığını kontrol et.
+- [ ] Local runtime fault/lock recovery ve package rollback'i gerçek systemd/process üzerinde test et; agent tekrar açılacaksa local worker önce tamamen durmuş ve lock bırakmış olmalı.
+- [ ] Kalıcı Website migration'ında apex + iki independent subdomain + alias, explicit parent, app binding, cert ve rollback'i gerçek DNS/test domainiyle doğrula.
 - [ ] Plesk importer/migration geliştirildikten sonra external-managed inventory, Passenger/static/Node/DB/Docker/domain/cron/mail ve per-resource rollback'i izole Plesk fixture/test hostunda doğrula.
 
 ## Yayın kuralı
 
-Bir maddenin kodunun repoda bulunması kabulün geçtiği anlamına gelmez. Node 24/full workspace, gerçek browser, HTTPS proxy, package/test-host ve gerektiğinde DNS/Ubuntu/Plesk doğrulaması yapılmadan ilgili özelliği production-ready sayma. Çalıştırılmayan testi geçmiş gibi yazma; GitHub Actions kullanma.
+Bir maddenin kodunun repoda bulunması kabulün geçtiği anlamına gelmez. Node 24/full workspace, gerçek browser, HTTPS proxy, package/test-host ve gerektiğinde DNS/Ubuntu/Plesk doğrulaması yapılmadan ilgili özellik production-ready sayılmaz. Çalıştırılmayan testi geçmiş gibi yazma; GitHub Actions kullanma.
