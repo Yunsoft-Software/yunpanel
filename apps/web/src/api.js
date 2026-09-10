@@ -39,6 +39,39 @@ export function controlManagedService(serverId, serviceId, action) {
   });
 }
 
+function databaseServerPath(serverId) {
+  if (typeof serverId !== 'string' || !serverId) throw new Error('serverId is required');
+  return `/servers/${encodeURIComponent(serverId)}/databases`;
+}
+
+function databasePath(serverId, name) {
+  if (typeof name !== 'string' || !name) throw new Error('database name is required');
+  return `${databaseServerPath(serverId)}/${encodeURIComponent(name)}`;
+}
+
+export function getDatabases(serverId) {
+  return panelRequest(databaseServerPath(serverId));
+}
+
+export function inspectDatabases(serverId) {
+  return panelRequest(`${databaseServerPath(serverId)}/inspect`, { method: 'POST', body: {} });
+}
+
+export function createDatabase(serverId, name) {
+  if (typeof name !== 'string' || !name) throw new Error('database name is required');
+  return panelRequest(databaseServerPath(serverId), {
+    method: 'POST',
+    body: { name, confirmation: `create:${name}` },
+  });
+}
+
+export function deleteDatabase(serverId, name) {
+  return panelRequest(databasePath(serverId, name), {
+    method: 'DELETE',
+    body: { confirmation: `delete:${name}` },
+  });
+}
+
 export async function waitForJob(jobId, { attempts = 300, intervalMs = 1000 } = {}) {
   let connectionFailures = 0;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -67,3 +100,4 @@ export async function runJob(path, options) {
 }
 
 export const managedServiceApiInternals = Object.freeze({ managedServiceServerPath, managedServicePath });
+export const databaseApiInternals = Object.freeze({ databaseServerPath, databasePath });
