@@ -191,6 +191,21 @@ export function createDomainRegistry({
     return publicDomain(domain);
   }
 
+  async function rollbackWebsiteBinding(domainId, websiteId) {
+    await ensureInitialized();
+    const domain = hydrateDomain(requireDomain(state, domainId));
+    const expectedWebsiteId = normalizeWebsiteId(websiteId);
+    if (expectedWebsiteId === null) throw new DomainRegistryError('website_binding_required', 'A Website ID is required for migration rollback');
+    if (domain.websiteId === null) return publicDomain(domain);
+    if (domain.websiteId !== expectedWebsiteId) {
+      throw new DomainRegistryError('domain_website_rollback_mismatch', 'Domain Website binding does not match migration rollback identity', 409);
+    }
+    domain.websiteId = null;
+    domain.updatedAt = new Date(now()).toISOString();
+    await persist();
+    return publicDomain(domain);
+  }
+
   async function listDomains() {
     await ensureInitialized();
     return state.domains.map((domain) => publicDomain(hydrateDomain(domain)));
@@ -263,7 +278,18 @@ export function createDomainRegistry({
     return publicDomain(domain);
   }
 
-  return { init, createDomain, bindWebsite, listDomains, getDomain, attachCertificate, markStaged, markApplied, markFailed };
+  return {
+    init,
+    createDomain,
+    bindWebsite,
+    rollbackWebsiteBinding,
+    listDomains,
+    getDomain,
+    attachCertificate,
+    markStaged,
+    markApplied,
+    markFailed,
+  };
 }
 
 export const domainRegistryInternals = Object.freeze({ storeVersion: STORE_VERSION, normalizeWebsiteId, hydrateDomain });
