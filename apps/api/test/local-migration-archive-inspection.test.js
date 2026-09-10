@@ -18,10 +18,11 @@ function verification(entries) {
   };
 }
 
-function line(type, name, suffix = '') {
-  const mode = type === 'd' ? 'drwx------' : type === 'l' ? 'lrwxrwxrwx' : type === 'h' ? 'hrw-------' : '-rw-------';
+function line(type, name, suffix = '', { permissions = null, marker = '', uid = 0, gid = 0 } = {}) {
+  const base = permissions ?? (type === 'd' ? 'rwx------' : type === 'l' ? 'rwxrwxrwx' : 'rw-------');
+  const mode = `${type}${base}${marker}`;
   const quoted = JSON.stringify(name);
-  return `${mode} 0/0 1 2026-09-10 15:00 ${quoted}${suffix}`;
+  return `${mode} ${uid}/${gid} 1 2026-09-10 15:00 ${quoted}${suffix}`;
 }
 
 const roots = [
@@ -36,44 +37,49 @@ const roots = [
 
 function validListing() {
   return [
-    line('d', 'etc/yunpanel/'),
-    line('-', 'etc/yunpanel/api.env'),
-    line('d', 'var/lib/yunpanel/'),
-    line('d', 'var/lib/yunpanel/data/'),
-    line('-', 'var/lib/yunpanel/data/file'),
-    line('h', 'var/lib/yunpanel/data/hard', ` link to ${JSON.stringify('var/lib/yunpanel/data/file')}`),
-    line('-', 'etc/passwd'),
-    line('-', 'etc/group'),
-    line('d', 'etc/nginx/'),
-    line('d', 'etc/nginx/sites-enabled/'),
+    line('d', 'etc/yunpanel/', '', { permissions: 'rwxr-x---', uid: 0, gid: 0 }),
+    line('-', 'etc/yunpanel/api.env', '', { permissions: 'rw-r-----', uid: 0, gid: 0, marker: '*' }),
+    line('d', 'var/lib/yunpanel/', '', { permissions: 'rwx------', uid: 0, gid: 0 }),
+    line('d', 'var/lib/yunpanel/data/', '', { permissions: 'rwxr-x---', uid: 0, gid: 0 }),
+    line('-', 'var/lib/yunpanel/data/file', '', { permissions: 'rw-r-----', uid: 101, gid: 202 }),
+    line('h', 'var/lib/yunpanel/data/hard', ` link to ${JSON.stringify('var/lib/yunpanel/data/file')}`, { permissions: 'rw-r-----', uid: 101, gid: 202 }),
+    line('-', 'etc/passwd', '', { permissions: 'rw-r--r--', uid: 0, gid: 0 }),
+    line('-', 'etc/group', '', { permissions: 'rw-r--r--', uid: 0, gid: 0 }),
+    line('d', 'etc/nginx/', '', { permissions: 'rwxr-xr-x', uid: 0, gid: 0 }),
+    line('d', 'etc/nginx/sites-enabled/', '', { permissions: 'rwxr-xr-x', uid: 0, gid: 0 }),
     line('l', 'etc/nginx/sites-enabled/app', ` -> ${JSON.stringify('../sites-available/app')}`),
     line('l', 'etc/nginx/sites-enabled/absolute-app', ` -> ${JSON.stringify('/etc/nginx/sites-available/app')}`),
-    line('d', 'etc/letsencrypt/'),
-    line('d', 'etc/letsencrypt/live/'),
-    line('d', 'etc/letsencrypt/live/example/'),
+    line('d', 'etc/letsencrypt/', '', { permissions: 'rwxr-xr-x', uid: 0, gid: 0 }),
+    line('d', 'etc/letsencrypt/live/', '', { permissions: 'rwx------', uid: 0, gid: 0 }),
+    line('d', 'etc/letsencrypt/live/example/', '', { permissions: 'rwxr-xr-x', uid: 0, gid: 0 }),
     line('l', 'etc/letsencrypt/live/example/fullchain.pem', ` -> ${JSON.stringify('../../archive/example/fullchain1.pem')}`),
     '',
   ].join('\n');
 }
 
-test('archive inspection accepts only links resolving inside their verified source root', async () => {
+test('archive inspection accepts in-root links and captures bounded numeric ownership metadata', async () => {
   const result = await inspectVerifiedLocalMigrationArchive({
     backupDirectory,
     verification: verification(roots),
     runTar: async (args) => {
-      assert.deepEqual(args.slice(0, 4), ['--list', '--verbose', '--numeric-owner', '--quoting-style=c']);
+      assert.deepEqual(args.slice(0, 7), [
+        '--list', '--verbose', '--numeric-owner', '--acls', '--xattrs', '--quoting-style=c', '--file',
+      ]);
       return { stdout: validListing() };
     },
   });
 
   assert.equal(result.destructive, false);
   assert.equal(result.linksSafe, true);
+  assert.equal(result.ownershipMetadata, true);
+  assert.equal(result.extendedMetadataValidated, false);
   assert.deepEqual(result.counts, {
     total: 16,
     files: 4,
     directories: 8,
     symlinks: 3,
     hardlinks: 1,
+    extendedMetadata: 1,
   });
   assert.equal(result.members.length, 16);
   assert.deepEqual(
@@ -83,6 +89,10 @@ test('archive inspection accepts only links resolving inside their verified sour
       type: 'l',
       root: '/etc/nginx',
       resolvedLinkTarget: 'etc/nginx/sites-available/app',
+      uid: 0,
+      gid: 0,
+      mode: 0o777,
+      metadataMarker: null,
     },
   );
   assert.deepEqual(
@@ -92,9 +102,48 @@ test('archive inspection accepts only links resolving inside their verified sour
       type: 'h',
       root: '/var/lib/yunpanel',
       resolvedLinkTarget: 'var/lib/yunpanel/data/file',
+      uid: 101,
+      gid: 202,
+      mode: 0o640,
+      metadataMarker: null,
+    },
+  );
+  assert.deepEqual(
+    result.members.find((entry) => entry.name === 'etc/yunpanel/api.env'),
+    {
+      name: 'etc/yunpanel/api.env',
+      type: '-',
+      root: '/etc/yunpanel',
+      resolvedLinkTarget: null,
+      uid: 0,
+      gid: 0,
+      mode: 0o640,
+      metadataMarker: '*',
     },
   );
   assert.equal(Object.hasOwn(result.members[0], 'linkTarget'), false);
+});
+
+test('permission parser preserves setuid setgid and sticky bits without applying them', () => {
+  assert.equal(localMigrationArchiveInspectionInternals.parsePermissionMode('rwsr-sr-t'), 0o7755);
+  assert.equal(localMigrationArchiveInspectionInternals.parsePermissionMode('rwSr-Sr-T'), 0o7644);
+});
+
+test('invalid owner, permission and extended-metadata markers fail closed', async () => {
+  for (const [listing, code] of [
+    [validListing().replace(' 101/202 1 ', ' root/202 1 '), 'migration_archive_owner_invalid'],
+    [validListing().replace('-rw-r-----* 0/0', '-rw-r--q--* 0/0'), 'migration_archive_mode_invalid'],
+    [validListing().replace('-rw-r-----* 0/0', '-rw-r-----@ 0/0'), 'migration_archive_metadata_marker_invalid'],
+  ]) {
+    await assert.rejects(
+      inspectVerifiedLocalMigrationArchive({
+        backupDirectory,
+        verification: verification(roots),
+        runTar: async () => ({ stdout: listing }),
+      }),
+      { code },
+    );
+  }
 });
 
 test('relative symlink escape outside its source root is rejected', async () => {
@@ -163,7 +212,10 @@ test('special filesystem members and manifest root type drift are rejected', asy
     { code: 'migration_archive_special_member' },
   );
 
-  const wrongRootType = validListing().replace(line('d', 'etc/yunpanel/'), line('-', 'etc/yunpanel'));
+  const wrongRootType = validListing().replace(
+    line('d', 'etc/yunpanel/', '', { permissions: 'rwxr-x---', uid: 0, gid: 0 }),
+    line('-', 'etc/yunpanel', '', { permissions: 'rw-r-----', uid: 0, gid: 0 }),
+  );
   await assert.rejects(
     inspectVerifiedLocalMigrationArchive({
       backupDirectory,
