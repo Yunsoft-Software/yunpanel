@@ -27,6 +27,9 @@ export const OPERATIONS = Object.freeze({
   SYSTEM_SERVICE_INSTALL: 'system.service.install',
   SYSTEM_SERVICE_CONTROL: 'system.service.control',
   SYSTEM_UPGRADE: 'system.upgrade',
+  DATABASE_INSPECT: 'database.inspect',
+  DATABASE_CREATE: 'database.create',
+  DATABASE_DELETE: 'database.delete',
   DOMAIN_STAGE: 'domain.stage',
   DOMAIN_ACTIVATE: 'domain.activate',
   SSL_ISSUE: 'ssl.issue',
@@ -46,6 +49,7 @@ export const READ_ONLY_OPERATIONS = Object.freeze([
   OPERATIONS.SERVER_NGINX,
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
   OPERATIONS.SYSTEM_SERVICES_INSPECT,
+  OPERATIONS.DATABASE_INSPECT,
   OPERATIONS.APP_NODE_STATUS,
 ]);
 
@@ -54,6 +58,8 @@ const DOMAIN_CHECKSUM = /^[a-f0-9]{64}$/;
 const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SAFE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._/-]+$/;
+const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
+const RESERVED_DATABASE_NAMES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 
 export function isKnownOperation(operation) {
   return typeof operation === 'string' && KNOWN_OPERATIONS.has(operation);
@@ -90,13 +96,19 @@ function validateManagedServiceId(value, fieldName, errors) {
   if (typeof value !== 'string' || !MANAGED_SERVICE_ID_SET.has(value)) errors.push(`${fieldName} is invalid`);
 }
 
+function validateDatabaseName(value, fieldName, errors) {
+  if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value) || RESERVED_DATABASE_NAMES.has(value.toLowerCase())) {
+    errors.push(`${fieldName} is invalid`);
+  }
+}
+
 function rejectUnexpectedKeys(payload, allowedKeys, operation, errors) {
   const allowed = new Set(allowedKeys);
   if (Object.keys(payload).some((key) => !allowed.has(key))) errors.push(`${operation} contains unsupported arguments`);
 }
 
 function validateMutationPayload(operation, payload, errors) {
-  if (operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || operation === OPERATIONS.SYSTEM_UPGRADE) {
+  if (operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || operation === OPERATIONS.SYSTEM_UPGRADE || operation === OPERATIONS.DATABASE_INSPECT) {
     if (Object.keys(payload).length !== 0) errors.push(`${operation} does not accept arguments`);
   }
 
@@ -114,6 +126,11 @@ function validateMutationPayload(operation, payload, errors) {
     rejectUnexpectedKeys(payload, ['serviceId', 'action'], operation, errors);
     validateManagedServiceId(payload.serviceId, 'system.service.control serviceId', errors);
     if (typeof payload.action !== 'string' || !MANAGED_SERVICE_ACTION_SET.has(payload.action)) errors.push('system.service.control action is invalid');
+  }
+
+  if (operation === OPERATIONS.DATABASE_CREATE || operation === OPERATIONS.DATABASE_DELETE) {
+    rejectUnexpectedKeys(payload, ['name'], operation, errors);
+    validateDatabaseName(payload.name, `${operation} name`, errors);
   }
 
   if (operation === OPERATIONS.DOMAIN_STAGE) {
