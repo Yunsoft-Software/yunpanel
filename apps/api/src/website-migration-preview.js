@@ -1,10 +1,11 @@
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class WebsiteMigrationPreviewError extends Error {
-  constructor(code, message) {
+  constructor(code, message, status = 409) {
     super(message);
     this.name = 'WebsiteMigrationPreviewError';
     this.code = code;
+    this.status = status;
   }
 }
 
