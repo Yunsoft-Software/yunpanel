@@ -36,6 +36,10 @@ function durableReconciliationMode(jobRegistry) {
   if (begin !== acknowledge) throw new Error('Local executor durable reconciliation boundary is incomplete');
   return begin;
 }
+function cloneEvidenceValue(value) {
+  try { return structuredClone(value); }
+  catch { return null; }
+}
 
 /**
  * Executes one already-authorized job inside the API process. An uncertain
@@ -47,6 +51,11 @@ function durableReconciliationMode(jobRegistry) {
  * local server queue before claiming it. An unmigrated operation is left queued
  * and rejected without changing attempts/status, so a partial migration cannot
  * accidentally consume work that still belongs to the legacy transport.
+ *
+ * recordExecutionEvidence is an internal best-effort hook for tightly-scoped,
+ * secret-free recovery receipts. It runs only after successful host execution
+ * and before durable completion. Its failure never recasts a successful host
+ * operation as failed and never prevents the normal completion attempt.
  */
 export function createLocalJobExecutor({
   serverId,
@@ -54,6 +63,7 @@ export function createLocalJobExecutor({
   executeOperation,
   reconcileCompletedJob,
   supportsOperation = null,
+  recordExecutionEvidence = null,
   pollMs = 1000,
   onError = () => {},
 } = {}) {
@@ -62,6 +72,7 @@ export function createLocalJobExecutor({
   const journalReconciliation = durableReconciliationMode(jobRegistry);
   if (supportsOperation !== null && typeof supportsOperation !== 'function') throw new Error('Local executor operation selector must be a function');
   if (supportsOperation && typeof jobRegistry.listJobs !== 'function') throw new Error('Local executor operation selection requires job listing');
+  if (recordExecutionEvidence !== null && typeof recordExecutionEvidence !== 'function') throw new Error('Local executor evidence recorder must be a function');
   if (typeof executeOperation !== 'function') throw new Error('Local executor requires an operation handler');
   if (typeof reconcileCompletedJob !== 'function') throw new Error('Local executor requires job reconciliation');
   if (!Number.isInteger(pollMs) || pollMs < 50 || pollMs > 60_000) throw new Error('Local executor poll interval is invalid');
@@ -125,6 +136,24 @@ export function createLocalJobExecutor({
     let completion;
     try {
       const result = await executeOperation(claim.envelope.operation, claim.envelope.payload);
+      if (recordExecutionEvidence) {
+        const payloadCopy = cloneEvidenceValue(claim.envelope.payload);
+        const resultCopy = cloneEvidenceValue(result);
+        if (payloadCopy && resultCopy) {
+          try {
+            await recordExecutionEvidence({
+              serverId,
+              jobId,
+              operation: claim.envelope.operation,
+              payload: payloadCopy,
+              result: resultCopy,
+            });
+          } catch {
+            // Recovery receipts are supplementary. Normal durable completion is
+            // still attempted so a receipt failure cannot strand a successful job.
+          }
+        }
+      }
       completion = { serverId, jobId, status: 'succeeded', result };
     } catch (error) {
       completion = { serverId, jobId, status: 'failed', error: safeExecutionError(error) };
@@ -214,4 +243,8 @@ export function createLocalJobExecutor({
   };
 }
 
-export const localExecutorInternals = Object.freeze({ safeExecutionError, durableReconciliationMode });
+export const localExecutorInternals = Object.freeze({
+  safeExecutionError,
+  durableReconciliationMode,
+  cloneEvidenceValue,
+});
