@@ -11,6 +11,7 @@ const SOURCE_FILES = [
   'app.js',
   'core-app.js',
   'website-http.js',
+  'website-migration-http.js',
   'managed-service-http.js',
   'database-http.js',
 ];
@@ -39,7 +40,7 @@ function discoveredMutationRoutes() {
 
 test('every panel management mutation route has a common audit classification', () => {
   const routes = discoveredMutationRoutes();
-  assert.ok(routes.length >= 16, `expected current management mutation surface, found ${routes.length}`);
+  assert.ok(routes.length >= 17, `expected current management mutation surface, found ${routes.length}`);
   const missing = [];
   for (const route of routes) {
     const pathname = concretePath(route.route);
@@ -56,13 +57,16 @@ test('every panel management mutation route has a common audit classification', 
   assert.deepEqual(missing, [], `management mutations missing audit classification:\n${missing.join('\n')}`);
 });
 
-test('Website creation is part of common management audit coverage', () => {
+test('Website creation and migration bind are part of common management audit coverage', () => {
   assert.deepEqual(classifyManagementMutation('POST', '/api/websites'), {
-    action: 'website.create',
-    resourceType: 'website',
-    resourceId: 'new',
+    action: 'website.create', resourceType: 'website', resourceId: 'new',
   });
-  assert.ok(discoveredMutationRoutes().some((entry) => entry.file === 'website-http.js' && entry.method === 'POST' && entry.route === '/api/websites'));
+  assert.deepEqual(classifyManagementMutation('POST', '/api/websites/migration/bind'), {
+    action: 'website.migration.bind', resourceType: 'website_migration', resourceId: 'bind',
+  });
+  const routes = discoveredMutationRoutes();
+  assert.ok(routes.some((entry) => entry.file === 'website-http.js' && entry.method === 'POST' && entry.route === '/api/websites'));
+  assert.ok(routes.some((entry) => entry.file === 'website-migration-http.js' && entry.method === 'POST' && entry.route === '/api/websites/migration/bind'));
 });
 
 test('legacy agent transport and auth/user/audit handlers are intentionally outside management route discovery', () => {
@@ -75,7 +79,5 @@ test('legacy agent transport and auth/user/audit handlers are intentionally outs
 });
 
 export const managementAuditRouteParityInternals = Object.freeze({
-  sourceFiles: Object.freeze([...SOURCE_FILES]),
-  concretePath,
-  discoveredMutationRoutes,
+  sourceFiles: Object.freeze([...SOURCE_FILES]), concretePath, discoveredMutationRoutes,
 });
