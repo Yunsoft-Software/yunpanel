@@ -56,6 +56,7 @@ function formatResult(result, action) {
 }
 
 function formatPreview(result) {
+  const identity = result.identityComparison;
   const lines = [
     'action=preview',
     'destructive=false',
@@ -64,6 +65,12 @@ function formatPreview(result) {
     `restoreTargets=${result.counts.restore}`,
     `identityReferences=${result.counts.identityReferences}`,
     `preservedCurrent=${result.counts.preserved}`,
+    `identitySnapshotUsers=${identity.snapshotUsers}`,
+    `identityCurrentUsers=${identity.currentUsers}`,
+    `identityMatched=${identity.counts.match}`,
+    `identityDrift=${identity.counts.drift}`,
+    `identityMissingCurrent=${identity.counts.missingCurrent}`,
+    `identityAddedCurrent=${identity.counts.addedCurrent}`,
   ];
   for (const target of result.targets) {
     lines.push([
@@ -74,7 +81,23 @@ function formatPreview(result) {
       `current=${target.current.present ? target.current.type : 'absent'}`,
     ].join(' '));
   }
+  for (const entry of identity.identities.filter((candidate) => candidate.status !== 'match')) {
+    lines.push([
+      'identity',
+      `name=${entry.name}`,
+      `status=${entry.status}`,
+      `changed=${entry.changedFields.length > 0 ? entry.changedFields.join(',') : '-'}`,
+    ].join(' '));
+  }
   return lines.join('\n');
+}
+
+function validIdentityPreview(identity, result, directory) {
+  if (!identity || identity.destructive !== false || identity.backupDirectory !== directory || identity.sha256 !== result.sha256
+    || !Number.isInteger(identity.snapshotUsers) || !Number.isInteger(identity.currentUsers)
+    || !identity.counts || !Array.isArray(identity.identities)) return false;
+  return ['match', 'drift', 'missingCurrent', 'addedCurrent']
+    .every((key) => Number.isInteger(identity.counts[key]) && identity.counts[key] >= 0);
 }
 
 export async function runLocalMigrationBackupCli({
@@ -99,7 +122,8 @@ export async function runLocalMigrationBackupCli({
     const directory = assertPackagedBackupDirectory(parsed.backupDirectory, backupRoot);
     const result = await previewRestore({ backupDirectory: directory, verifyBackup });
     if (!result || result.destructive !== false || result.backupDirectory !== directory
-      || !result.counts || !Array.isArray(result.targets) || typeof result.sha256 !== 'string') {
+      || !result.counts || !Array.isArray(result.targets) || typeof result.sha256 !== 'string'
+      || !validIdentityPreview(result.identityComparison, result, directory)) {
       throw new Error('Migration restore preview result is invalid');
     }
     stdout.write(`${formatPreview(result)}\n`);
@@ -138,4 +162,5 @@ export const localMigrationBackupCliInternals = Object.freeze({
   backupRoot: BACKUP_ROOT,
   formatResult,
   formatPreview,
+  validIdentityPreview,
 });
