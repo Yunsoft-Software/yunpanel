@@ -284,6 +284,36 @@ export function createWebsiteRegistry({
     });
   }
 
+  async function deleteMigrationWebsite({ domainId, applicationId, websiteId, serverId, name: displayName } = {}) {
+    await ensureInitialized();
+    const normalizedApplicationId = uuid(applicationId, 'applicationId');
+    const expectedWebsiteId = migrationWebsiteId(domainId, normalizedApplicationId);
+    const normalizedWebsiteId = uuid(websiteId, 'websiteId');
+    if (normalizedWebsiteId !== expectedWebsiteId) {
+      throw new WebsiteRegistryError('migration_website_delete_identity_mismatch', 'Website is not the deterministic migration resource for this Domain and Application', 409);
+    }
+    const index = state.websites.findIndex((website) => website.id === normalizedWebsiteId);
+    if (index < 0) return Object.freeze({ deleted: false, websiteId: normalizedWebsiteId });
+
+    const website = state.websites[index];
+    const normalizedServerId = uuid(serverId, 'serverId');
+    const normalizedName = name(displayName);
+    const application = await getApplication(normalizedApplicationId);
+    const binding = applicationBinding(application, normalizedServerId);
+    const exact = website.serverId === normalizedServerId
+      && website.name === normalizedName
+      && website.applicationId === normalizedApplicationId
+      && website.runtimeType === binding.runtimeType
+      && website.documentRoot === binding.documentRoot
+      && website.unixUser === binding.unixUser;
+    if (!exact) {
+      throw new WebsiteRegistryError('migration_website_delete_state_mismatch', 'Migration Website state does not match rollback identity', 409);
+    }
+    state.websites.splice(index, 1);
+    await persist();
+    return Object.freeze({ deleted: true, websiteId: normalizedWebsiteId });
+  }
+
   async function getWebsite(websiteId) {
     await ensureInitialized();
     const id = uuid(websiteId, 'websiteId');
@@ -299,7 +329,14 @@ export function createWebsiteRegistry({
       .map(publicWebsite);
   }
 
-  return Object.freeze({ init, createWebsite, createMigrationWebsite, getWebsite, listWebsites });
+  return Object.freeze({
+    init,
+    createWebsite,
+    createMigrationWebsite,
+    deleteMigrationWebsite,
+    getWebsite,
+    listWebsites,
+  });
 }
 
 export const websiteRegistryInternals = Object.freeze({
