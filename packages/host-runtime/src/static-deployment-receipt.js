@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const STORE_VERSION = 1;
@@ -87,6 +87,7 @@ function normalizeReceipt(value) {
 export function createStaticDeploymentReceiptStore({
   root = DEFAULT_ROOT,
   now = () => Date.now(),
+  chmodFn = chmod,
   mkdirFn = mkdir,
   readFileFn = readFile,
   renameFn = rename,
@@ -116,7 +117,9 @@ export function createStaticDeploymentReceiptStore({
     const target = receiptPath(appId, deployId);
     const temporary = `${target}.${process.pid}.tmp`;
     await mkdirFn(root, { recursive: true, mode: 0o700 });
+    await chmodFn(root, 0o700);
     await mkdirFn(directory, { recursive: true, mode: 0o700 });
+    await chmodFn(directory, 0o700);
     await writeFileFn(temporary, `${JSON.stringify(receipt, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     await renameFn(temporary, target);
     return structuredClone(receipt);
