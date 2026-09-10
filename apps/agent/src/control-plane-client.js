@@ -1,9 +1,8 @@
-import os from 'node:os';
 import path from 'node:path';
 import { OPERATIONS, validateOperationEnvelope } from '@yunpanel/protocol';
 import { normalizeApplicationEnvironmentBundle } from '@yunpanel/shared';
 import { executeOperation } from './operations.js';
-import { loadAgentIdentity, saveAgentIdentity } from './identity-store.js';
+import { loadAgentIdentity } from './identity-store.js';
 import { safeLegacyAgentDiagnosticCode, safeLegacyAgentError } from './legacy-safe-error.js';
 
 export const AGENT_VERSION = '0.3.0';
@@ -74,30 +73,6 @@ function agentAuthorization(identity) {
 
 function safeCommandError(error) {
   return safeLegacyAgentError(error);
-}
-
-export async function enrollWithControlPlane({
-  baseUrl,
-  enrollmentToken,
-  hostname = os.hostname(),
-  displayName = null,
-  fetchImpl = fetch,
-}) {
-  if (!enrollmentToken) throw new Error('YUNPANEL_ENROLLMENT_TOKEN is required for first enrollment');
-
-  const response = await fetchImpl(`${baseUrl}/api/servers/enroll`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ token: enrollmentToken, hostname, displayName }),
-  });
-
-  const body = await readJsonResponse(response, 'Server enrollment');
-  return {
-    serverId: body.data.server.id,
-    agentToken: body.data.agentToken,
-    controlPlaneUrl: baseUrl,
-    enrolledAt: new Date().toISOString(),
-  };
 }
 
 export async function sendHeartbeat({
@@ -237,7 +212,6 @@ export async function executeClaimedCommand({
 
 export async function startControlPlaneLink({
   controlPlaneUrl = process.env.YUNPANEL_CONTROL_PLANE_URL,
-  enrollmentToken = process.env.YUNPANEL_ENROLLMENT_TOKEN,
   identityFile,
   heartbeatMs = Number.parseInt(process.env.YUN_AGENT_HEARTBEAT_MS ?? `${DEFAULT_HEARTBEAT_MS}`, 10),
   commandPollMs = Number.parseInt(process.env.YUN_AGENT_COMMAND_POLL_MS ?? `${DEFAULT_COMMAND_POLL_MS}`, 10),
@@ -262,20 +236,15 @@ export async function startControlPlaneLink({
   }
 
   const resolvedIdentityFile = identityFile ?? resolveIdentityFile(mode);
-  let identity = await loadAgentIdentity(resolvedIdentityFile);
-
-  if (identity && identity.controlPlaneUrl !== baseUrl) {
-    throw new Error('Stored agent identity belongs to a different control plane');
-  }
+  const identity = await loadAgentIdentity(resolvedIdentityFile);
 
   if (!identity) {
-    identity = await enrollWithControlPlane({
-      baseUrl,
-      enrollmentToken,
-      fetchImpl,
-    });
-    await saveAgentIdentity(resolvedIdentityFile, identity);
-    logger.info(`[yun-agent] enrolled server ${identity.serverId}`);
+    const error = new Error('Retained legacy agent requires an existing identity; new enrollment is retired');
+    error.code = 'legacy_agent_identity_required';
+    throw error;
+  }
+  if (identity.controlPlaneUrl !== baseUrl) {
+    throw new Error('Stored agent identity belongs to a different control plane');
   }
 
   let stopped = false;
