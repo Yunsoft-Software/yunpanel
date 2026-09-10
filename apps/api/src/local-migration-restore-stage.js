@@ -41,6 +41,11 @@ function normalizeStageRoot(value) {
   return resolved;
 }
 
+function insideArchiveRoot(target, rootPath) {
+  const root = localMigrationBackupInternals.relativeArchivePath(rootPath);
+  return target === root || target.startsWith(`${root}/`);
+}
+
 function validatePreview(preview, directory) {
   if (!preview || preview.destructive !== false || preview.backupDirectory !== directory
     || preview.archivePath !== path.join(directory, 'state.tar')
@@ -65,14 +70,21 @@ function validatePreview(preview, directory) {
     }
     const name = localMigrationArchiveInspectionInternals.normalizeMemberName(member.name);
     seen.add(name);
-    if ((member.type === 'l' || member.type === 'h') && typeof member.resolvedLinkTarget !== 'string') {
-      throw new LocalMigrationRestoreStageError('migration_restore_stage_preview_invalid', 'Migration restore preview is missing safe link metadata');
+    let resolvedLinkTarget = null;
+    if (member.type === 'l' || member.type === 'h') {
+      if (typeof member.resolvedLinkTarget !== 'string') {
+        throw new LocalMigrationRestoreStageError('migration_restore_stage_preview_invalid', 'Migration restore preview is missing safe link metadata');
+      }
+      resolvedLinkTarget = localMigrationArchiveInspectionInternals.normalizeMemberName(member.resolvedLinkTarget);
+      if (!insideArchiveRoot(resolvedLinkTarget, member.root)) {
+        throw new LocalMigrationRestoreStageError('migration_restore_stage_preview_invalid', 'Migration restore preview contains a link outside its verified source root');
+      }
     }
     return Object.freeze({
       name,
       type: member.type,
       root: member.root,
-      resolvedLinkTarget: member.resolvedLinkTarget ?? null,
+      resolvedLinkTarget,
     });
   });
   return Object.freeze(members);
@@ -250,7 +262,7 @@ export async function stageLocalMigrationRestore({
   }
 
   try {
-    await ensurePrivateDirectory(resolvedStage, { mkdirFn, lstatFn, chmodFn, recursive: false });
+    await ensurePrivateDirectory(resolvedStage, { mkdirFn, lstatFn, chmodFn, recursive: true });
     await runTar([
       '--extract',
       '--file', preview.archivePath,
