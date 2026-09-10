@@ -10,7 +10,8 @@ import { runLocalMigrationCommand } from '../apps/api/src/local-migration-cli.js
 
 const scriptPath = fileURLToPath(import.meta.url);
 const PACKAGED_SCRIPT_ROOT = '/usr/lib/yunpanel/scripts';
-const USAGE = 'Usage: local-runtime.mjs create --backup-dir <snapshot> --confirm | status <server-uuid> | bind <server-uuid> --backup-dir <snapshot> --confirm | release <server-uuid> --backup-dir <snapshot> --confirm';
+const READ_ONLY_ACTIONS = new Set(['status', 'validate']);
+const USAGE = 'Usage: local-runtime.mjs create --backup-dir <snapshot> --confirm | status <server-uuid> | validate <server-uuid> | bind <server-uuid> --backup-dir <snapshot> --confirm | release <server-uuid> --backup-dir <snapshot> --confirm';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 function parseMutationOptions(values, action) {
@@ -28,11 +29,11 @@ export function parseLocalRuntimeArguments(argv) {
     const options = parseMutationOptions([value, ...rest], action);
     return { action: 'create', ...options };
   }
-  if (!['status', 'bind', 'release'].includes(action) || typeof value !== 'string' || !value) {
+  if (!['status', 'validate', 'bind', 'release'].includes(action) || typeof value !== 'string' || !value) {
     throw new Error(USAGE);
   }
-  if (action === 'status') {
-    if (rest.length !== 0) throw new Error('status does not accept extra arguments');
+  if (READ_ONLY_ACTIONS.has(action)) {
+    if (rest.length !== 0) throw new Error(`${action} does not accept extra arguments`);
     return { action, serverId: value, confirm: false };
   }
   return { action, serverId: value, ...parseMutationOptions(rest, action) };
@@ -66,6 +67,26 @@ function formatStatus(result) {
     `agentActive=${result.agentActive}`,
     `activeJobs=${result.activeJobCount}`,
     `recoveryJobs=${result.recoveryJobCount}`,
+    `serverStore=${result.statePaths.serverStore}`,
+    `jobStore=${result.statePaths.jobStore}`,
+  ].join('\n');
+}
+
+function formatValidation(result) {
+  return [
+    'validation=passed',
+    `server=${result.serverId}`,
+    `hostname=${result.hostname}`,
+    `executionMode=${result.executionMode}`,
+    `connectivity=${result.connectivity}`,
+    `lastSeenAt=${result.lastSeenAt}`,
+    `localRuntimeVersion=${result.localRuntimeVersion}`,
+    `apiState=${result.apiState}`,
+    `agentState=${result.agentState}`,
+    `activeJobs=${result.activeJobCount}`,
+    `recoveryJobs=${result.recoveryJobCount}`,
+    `inventoryPresent=${result.inventoryPresent}`,
+    `servicesPresent=${result.servicesPresent}`,
     `serverStore=${result.statePaths.serverStore}`,
     `jobStore=${result.statePaths.jobStore}`,
   ].join('\n');
@@ -114,7 +135,7 @@ export async function runLocalRuntimeCli({
   }
 
   let verification = null;
-  if (parsed.action !== 'status') {
+  if (!READ_ONLY_ACTIONS.has(parsed.action)) {
     const backupDirectory = resolveLocalMigrationBackupDirectory(parsed.backupDirectory);
     verification = validateBackupVerification(await verifyBackup({ backupDirectory }), backupDirectory);
   }
@@ -124,7 +145,12 @@ export async function runLocalRuntimeCli({
   const result = verification
     ? Object.freeze({ ...executed, verifiedBackupDirectory: verification.backupDirectory })
     : executed;
-  stdout.write(`${parsed.action === 'status' ? formatStatus(result) : formatMutation(result)}\n`);
+  const output = parsed.action === 'status'
+    ? formatStatus(result)
+    : parsed.action === 'validate'
+      ? formatValidation(result)
+      : formatMutation(result);
+  stdout.write(`${output}\n`);
   return result;
 }
 
@@ -138,7 +164,9 @@ if (invoked === import.meta.url) {
 
 export const localRuntimeCliInternals = Object.freeze({
   packagedScriptRoot: PACKAGED_SCRIPT_ROOT,
+  readOnlyActions: READ_ONLY_ACTIONS,
   validateBackupVerification,
   formatStatus,
+  formatValidation,
   formatMutation,
 });
