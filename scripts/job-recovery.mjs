@@ -18,6 +18,7 @@ import { runRunningNodeRollbackRecoveryFromStores } from '../apps/api/src/job-ru
 import { runRunningServiceControlRecoveryFromStores } from '../apps/api/src/job-running-service-recovery-runtime.js';
 import { runRunningServiceReceiptRecoveryFromStores } from '../apps/api/src/job-running-service-receipt-recovery-runtime.js';
 import { runRunningStaticRollbackRecoveryFromStores } from '../apps/api/src/job-running-static-rollback-recovery-runtime.js';
+import { runRunningSystemUpgradeRecoveryFromStores } from '../apps/api/src/job-running-system-upgrade-recovery-runtime.js';
 import { createJobRegistry } from '../apps/api/src/job-registry.js';
 import { resolveLocalMigrationPaths } from '../apps/api/src/local-migration-cli.js';
 
@@ -33,12 +34,13 @@ const RECOVERY_ACTIONS = Object.freeze([
   'recover-node-deploy',
   'recover-node-restart',
   'recover-node-rollback',
+  'recover-system-upgrade',
   'recover-database-create',
   'recover-database-delete',
   'recover-service-control',
   'recover-service-mutation',
 ]);
-const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm';
+const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm';
 
 export function parseJobRecoveryArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
@@ -127,6 +129,7 @@ export async function runJobRecoveryCli({
   recoverNodeDeployment = runRunningNodeDeploymentRecoveryFromStores,
   recoverNodeRestart = runRunningNodeRestartRecoveryFromStores,
   recoverNodeRollback = runRunningNodeRollbackRecoveryFromStores,
+  recoverSystemUpgrade = runRunningSystemUpgradeRecoveryFromStores,
   recoverDatabaseCreate = runRunningDatabaseCreateRecoveryFromStores,
   recoverDatabaseDelete = runRunningDatabaseDeleteRecoveryFromStores,
   recoverServiceControl = runRunningServiceControlRecoveryFromStores,
@@ -149,6 +152,7 @@ export async function runJobRecoveryCli({
     else if (parsed.action === 'recover-node-deploy') handler = recoverNodeDeployment;
     else if (parsed.action === 'recover-node-restart') handler = recoverNodeRestart;
     else if (parsed.action === 'recover-node-rollback') handler = recoverNodeRollback;
+    else if (parsed.action === 'recover-system-upgrade') handler = recoverSystemUpgrade;
     else if (parsed.action === 'recover-database-create') handler = recoverDatabaseCreate;
     else if (parsed.action === 'recover-database-delete') handler = recoverDatabaseDelete;
     else if (parsed.action === 'recover-service-control') handler = recoverServiceControl;
