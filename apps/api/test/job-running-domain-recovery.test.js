@@ -25,7 +25,7 @@ function fixture({ operation = OPERATIONS.DOMAIN_STAGE, evidence = { satisfied: 
     async getJob(id) {
       events.push('get');
       assert.equal(id, jobId);
-      return { id: jobId, serverId, status, operation, resourceType: 'domain', resourceId, payload };
+      return { id: jobId, serverId, status, operation, resourceType: 'domain', resourceId };
     },
     async beginReconciliation(identity) {
       events.push('begin');
@@ -37,7 +37,7 @@ function fixture({ operation = OPERATIONS.DOMAIN_STAGE, evidence = { satisfied: 
       assert.equal(input.status, 'succeeded');
       assert.deepEqual(input.result, result);
       status = 'succeeded';
-      return { id: jobId, serverId, status, operation, resourceType: 'domain', resourceId, payload, result };
+      return { id: jobId, serverId, status, operation, resourceType: 'domain', resourceId, result };
     },
     async acknowledgeReconciliation(identity) {
       events.push('ack');
@@ -60,6 +60,11 @@ function fixture({ operation = OPERATIONS.DOMAIN_STAGE, evidence = { satisfied: 
     applicationRegistry: {},
     serviceStatus: async () => ({ apiActive: false, agentActive: false }),
     inspect: async () => inspection,
+    loadJobContext: async (id) => {
+      events.push('context');
+      assert.equal(id, jobId);
+      return { id: jobId, serverId, status: 'running', operation, resourceType: 'domain', resourceId, payload };
+    },
     inspectStageEvidence: async (input) => {
       events.push('evidence');
       assert.deepEqual(input, payload);
@@ -75,12 +80,12 @@ function fixture({ operation = OPERATIONS.DOMAIN_STAGE, evidence = { satisfied: 
   return { events, options };
 }
 
-test('domain stage recovery proves host state before journaling and acknowledges only after reconciliation', async () => {
+test('domain stage recovery proves private queued payload and host state before journaling', async () => {
   const fx = fixture();
   const recovered = await recoverRunningDomainStage(fx.options);
   assert.equal(recovered.recoveryMethod, 'verified_staged_nginx_config');
   assert.equal(recovered.reconciled, true);
-  assert.deepEqual(fx.events, ['get', 'evidence', 'begin', 'complete', 'reconcile', 'ack']);
+  assert.deepEqual(fx.events, ['get', 'context', 'evidence', 'begin', 'complete', 'reconcile', 'ack']);
 });
 
 test('missing exact staged evidence leaves the running job untouched', async () => {
@@ -89,7 +94,7 @@ test('missing exact staged evidence leaves the running job untouched', async () 
     recoverRunningDomainStage(fx.options),
     (error) => error instanceof JobRunningDomainRecoveryError && error.code === 'job_domain_recovery_evidence_not_satisfied',
   );
-  assert.deepEqual(fx.events, ['get', 'evidence']);
+  assert.deepEqual(fx.events, ['get', 'context', 'evidence']);
 });
 
 test('domain activate and other operations cannot enter staged-domain recovery', async () => {
@@ -101,6 +106,21 @@ test('domain activate and other operations cannot enter staged-domain recovery',
   assert.deepEqual(fx.events, []);
 });
 
+test('private recovery context mismatch is rejected before host evidence inspection', async () => {
+  const fx = fixture();
+  fx.options.loadJobContext = async () => ({
+    id: jobId,
+    serverId,
+    status: 'running',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    resourceType: 'domain',
+    resourceId: 'different-domain',
+    payload,
+  });
+  await assert.rejects(recoverRunningDomainStage(fx.options), { code: 'job_domain_recovery_context_mismatch' });
+  assert.deepEqual(fx.events, ['get']);
+});
+
 test('resource reconciliation failure leaves the terminal journal unacknowledged', async () => {
   const fx = fixture({ reconcileError: new Error('/private/path TOKEN=must-not-leak') });
   await assert.rejects(
@@ -110,7 +130,7 @@ test('resource reconciliation failure leaves the terminal journal unacknowledged
       && !error.message.includes('/private')
       && !error.message.includes('must-not-leak'),
   );
-  assert.deepEqual(fx.events, ['get', 'evidence', 'begin', 'complete', 'reconcile']);
+  assert.deepEqual(fx.events, ['get', 'context', 'evidence', 'begin', 'complete', 'reconcile']);
 });
 
 test('active API or agent blocks host evidence inspection', async () => {
