@@ -4,13 +4,15 @@ import { runRunningInspectionRecoveryFromStores } from '../src/job-recovery-runt
 
 const serverId = 'server-1';
 const jobId = '12345678-1234-4234-8234-123456789012';
+const hostname = 'host-1';
 
-test('running inspection recovery runtime opens only server/job state and local host operations', async () => {
+test('running inspection recovery runtime opens only exact-host server/job state and local host operations', async () => {
   const calls = [];
   const fakeJobRegistry = { marker: 'durable-job-registry' };
   const result = await runRunningInspectionRecoveryFromStores({
     serverId,
     jobId,
+    hostname,
     env: {
       YUNPANEL_SERVER_STORE: '/work/state/servers.json',
       YUNPANEL_JOB_STORE: '/work/state/jobs.json',
@@ -18,7 +20,7 @@ test('running inspection recovery runtime opens only server/job state and local 
     cwd: '/',
     serverRegistryFactory: ({ filePath }) => ({
       async init() { calls.push(['server.init', filePath]); },
-      async getServer(id) { calls.push(['server.get', id]); return { id, hostname: 'host-1' }; },
+      async getServer(id) { calls.push(['server.get', id]); return { id, hostname }; },
     }),
     jobRegistryFactory: () => ({ marker: 'raw-job-registry' }),
     recoveryStoreFactory: () => ({ marker: 'recovery-store' }),
@@ -65,6 +67,7 @@ test('running inspection recovery refuses an unknown server before constructing 
     runRunningInspectionRecoveryFromStores({
       serverId,
       jobId,
+      hostname,
       serverRegistryFactory: () => ({ async init() {}, async getServer() { return null; } }),
       jobRegistryFactory: () => ({}),
       recoveryStoreFactory: () => ({}),
@@ -75,5 +78,30 @@ test('running inspection recovery refuses an unknown server before constructing 
     }),
     { code: 'job_recovery_server_not_found' },
   );
+  assert.equal(hostFactories, 0);
+});
+
+test('running inspection recovery refuses a different registered hostname before constructing host operations', async () => {
+  let hostFactories = 0;
+  let recoveryFactories = 0;
+  await assert.rejects(
+    runRunningInspectionRecoveryFromStores({
+      serverId,
+      jobId,
+      hostname,
+      serverRegistryFactory: () => ({
+        async init() {},
+        async getServer() { return { id: serverId, hostname: 'other-host' }; },
+      }),
+      jobRegistryFactory: () => ({}),
+      recoveryStoreFactory: () => ({}),
+      durableRegistryFactory: () => { recoveryFactories += 1; return {}; },
+      hostOperationsFactory: () => { hostFactories += 1; return { executeOperation: async () => ({}) }; },
+      serviceStatus: async () => ({ apiActive: false, agentActive: false }),
+      recoverCommand: async () => ({}),
+    }),
+    { code: 'job_recovery_server_hostname_mismatch' },
+  );
+  assert.equal(recoveryFactories, 0);
   assert.equal(hostFactories, 0);
 });
