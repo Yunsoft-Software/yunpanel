@@ -23,6 +23,8 @@ const RESTORE_TARGETS = new Set([
   '/etc/systemd/system/yunpanel-web.service',
   '/etc/systemd/system/yun-agent.service',
 ]);
+const ARCHIVE_MEMBER_TYPES = new Set(['-', 'd', 'l', 'h']);
+const ARCHIVE_METADATA_MARKERS = new Set([null, '+', '*', '.']);
 
 export class LocalMigrationRestorePreviewError extends Error {
   constructor(code, message) {
@@ -71,19 +73,36 @@ function restoreAction(entry, current) {
   return current.type === entry.type ? 'restore_replace' : 'restore_type_mismatch';
 }
 
+function validArchiveMember(member) {
+  if (!member || typeof member !== 'object' || Array.isArray(member)
+    || typeof member.name !== 'string' || member.name.length === 0
+    || !ARCHIVE_MEMBER_TYPES.has(member.type)
+    || typeof member.root !== 'string' || !path.isAbsolute(member.root)
+    || !Number.isInteger(member.uid) || member.uid < 0 || member.uid > 0xffff_ffff
+    || !Number.isInteger(member.gid) || member.gid < 0 || member.gid > 0xffff_ffff
+    || !Number.isInteger(member.mode) || member.mode < 0 || member.mode > 0o7777
+    || !ARCHIVE_METADATA_MARKERS.has(member.metadataMarker)) return false;
+  const isLink = member.type === 'l' || member.type === 'h';
+  return isLink ? typeof member.resolvedLinkTarget === 'string' && member.resolvedLinkTarget.length > 0 : member.resolvedLinkTarget === null;
+}
+
 function assertArchiveInspection(result, directory, sha256) {
   if (!result || result.destructive !== false || result.linksSafe !== true
+    || result.ownershipMetadata !== true || result.extendedMetadataValidated !== false
     || result.backupDirectory !== directory || result.sha256 !== sha256
-    || !result.counts || typeof result.counts !== 'object') {
+    || !result.counts || typeof result.counts !== 'object' || !Array.isArray(result.members)) {
     throw new LocalMigrationRestorePreviewError('migration_restore_archive_result_invalid', 'Migration restore archive inspection result is invalid');
   }
-  for (const key of ['total', 'files', 'directories', 'symlinks', 'hardlinks']) {
+  for (const key of ['total', 'files', 'directories', 'symlinks', 'hardlinks', 'extendedMetadata']) {
     if (!Number.isInteger(result.counts[key]) || result.counts[key] < 0) {
       throw new LocalMigrationRestorePreviewError('migration_restore_archive_result_invalid', 'Migration restore archive inspection counts are invalid');
     }
   }
-  if (result.counts.files + result.counts.directories + result.counts.symlinks + result.counts.hardlinks !== result.counts.total) {
-    throw new LocalMigrationRestorePreviewError('migration_restore_archive_result_invalid', 'Migration restore archive inspection counts do not match the member total');
+  if (result.counts.files + result.counts.directories + result.counts.symlinks + result.counts.hardlinks !== result.counts.total
+    || result.members.length !== result.counts.total
+    || result.members.some((member) => !validArchiveMember(member))
+    || result.members.filter((member) => member.metadataMarker !== null).length !== result.counts.extendedMetadata) {
+    throw new LocalMigrationRestorePreviewError('migration_restore_archive_result_invalid', 'Migration restore archive inspection metadata does not match the member total');
   }
   return result;
 }
@@ -188,6 +207,7 @@ export const localMigrationRestorePreviewInternals = Object.freeze({
   restoreTargets: Object.freeze([...RESTORE_TARGETS]),
   currentType,
   restoreAction,
+  validArchiveMember,
   assertArchiveInspection,
   assertIdentityComparison,
 });
