@@ -13,8 +13,8 @@ const wrongWebsiteId = 'da25db71-1a5d-414e-af9f-f1e7f9a9baf7';
 function app(overrides = {}) {
   return { id: applicationId, serverId, type: 'node', proxyTarget: { host: '127.0.0.1', port: 4301 }, ...overrides };
 }
-function website(id = websiteId) {
-  return { id, serverId, applicationId, runtimeType: 'node' };
+function website(id = websiteId, overrides = {}) {
+  return { id, serverId, applicationId, runtimeType: 'node', ...overrides };
 }
 
 async function fixture({ websites = [website()], applications = [app()] } = {}) {
@@ -125,7 +125,7 @@ test('state drift after preview rejects mutation before ledger planning', async 
 });
 
 test('wrong Website ID is not authorized by current migration preview', async () => {
-  const f = await fixture({ websites: [website(), website(wrongWebsiteId)] });
+  const f = await fixture({ websites: [website(), website(wrongWebsiteId, { applicationId: null, runtimeType: 'proxy' })] });
   await assert.rejects(bind(f, wrongWebsiteId), code('website_migration_binding_not_ready'));
   assert.equal((await f.domainRegistry.getDomain(f.domain.id)).websiteId, null);
   assert.equal(await f.migrationLedger.get(f.domain.id), null);
@@ -146,7 +146,7 @@ test('create-Website and ambiguous preview states cannot enter existing-Website 
 });
 
 test('retry against a different Website refuses existing binding conflict', async () => {
-  const f = await fixture({ websites: [website(), website(wrongWebsiteId)] });
+  const f = await fixture({ websites: [website(), website(wrongWebsiteId, { applicationId: null, runtimeType: 'proxy' })] });
   const approvedDigest = await digestFor(f);
   await bind(f, websiteId, approvedDigest);
   await assert.rejects(bind(f, wrongWebsiteId, approvedDigest), code('website_migration_binding_conflict'));
