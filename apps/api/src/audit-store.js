@@ -30,6 +30,14 @@ function optionalToken(value, field, pattern) {
   return value;
 }
 
+function optionalTime(value, field) {
+  if (value == null) return null;
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new AuditStoreError('invalid_audit_filter', `Audit ${field} time is invalid`);
+  }
+  return value;
+}
+
 function normalizeEvent(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new AuditStoreError('invalid_audit_event', 'Audit event must be an object');
@@ -118,6 +126,7 @@ export function createAuditStore({ db, now = Date.now } = {}) {
     CREATE INDEX IF NOT EXISTS audit_events_created ON audit_events(created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS audit_events_resource ON audit_events(resource_type, resource_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS audit_events_actor ON audit_events(actor_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS audit_events_action_outcome ON audit_events(action, outcome, created_at DESC);
     CREATE TABLE IF NOT EXISTS audit_job_links (
       job_id TEXT PRIMARY KEY,
       actor_id TEXT NOT NULL,
@@ -193,20 +202,42 @@ export function createAuditStore({ db, now = Date.now } = {}) {
     return event;
   }
 
-  function list({ offset = 0, limit = 50, actorId = null, resourceType = null, resourceId = null } = {}) {
+  function list({
+    offset = 0,
+    limit = 50,
+    actorId = null,
+    resourceType = null,
+    resourceId = null,
+    action = null,
+    outcome = null,
+    from = null,
+    to = null,
+  } = {}) {
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
       throw new AuditStoreError('invalid_audit_pagination', 'Audit pagination is invalid');
     }
     const actor = optionalId(actorId, 'actor id');
     const type = optionalToken(resourceType, 'resource type', TYPE_PATTERN);
     const resource = optionalId(resourceId, 'resource id');
+    const actionFilter = optionalToken(action, 'action', ACTION_PATTERN);
+    const outcomeFilter = outcome == null ? null : (OUTCOMES.has(outcome) ? outcome : null);
+    if (outcome != null && !outcomeFilter) throw new AuditStoreError('invalid_audit_filter', 'Audit outcome filter is invalid');
+    const fromTime = optionalTime(from, 'from');
+    const toTime = optionalTime(to, 'to');
     if ((type == null) !== (resource == null)) {
       throw new AuditStoreError('invalid_audit_filter', 'Audit resource type and id filters must be supplied together');
+    }
+    if (fromTime != null && toTime != null && fromTime > toTime) {
+      throw new AuditStoreError('invalid_audit_filter', 'Audit time range is invalid');
     }
     const clauses = [];
     const values = [];
     if (actor) { clauses.push('actor_id = ?'); values.push(actor); }
     if (type) { clauses.push('resource_type = ? AND resource_id = ?'); values.push(type, resource); }
+    if (actionFilter) { clauses.push('action = ?'); values.push(actionFilter); }
+    if (outcomeFilter) { clauses.push('outcome = ?'); values.push(outcomeFilter); }
+    if (fromTime != null) { clauses.push('created_at >= ?'); values.push(fromTime); }
+    if (toTime != null) { clauses.push('created_at <= ?'); values.push(toTime); }
     const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
     const total = db.prepare(`SELECT count(*) AS count FROM audit_events${where}`).get(...values).count;
     const events = db.prepare(`SELECT * FROM audit_events${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`)
