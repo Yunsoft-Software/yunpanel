@@ -16,6 +16,7 @@ Both paths remain fail-closed until the package/test-host acceptance in `todo.md
 - Do not proceed while a `queued` or `running` job exists or durable recovery is unresolved.
 - Every `create`, `bind` or `release` ownership mutation requires an already-created, re-verified snapshot below `/var/backups/yunpanel`.
 - Before an ownership mutation on a migration/rollback host, run the non-destructive restore `preview` and private `stage` rehearsal for that exact snapshot; neither command mutates live `/etc`, `/var/lib`, Unix identities or services.
+- After starting the local API, run the read-only `local-runtime.mjs validate <server-uuid>` gate before any functional validation or additional mutation.
 - There is no generic `force-success`, `force-failed`, mutation retry or journal-clear escape hatch.
 
 Recommended packaged control-plane paths:
@@ -251,6 +252,16 @@ sudo systemctl start yunpanel-api.service
 
 Do not start `yun-agent.service` while that server registry record is `executionMode=local`. Retained legacy heartbeat/command/environment/result routes are expected to reject a locally owned server with `server_managed_locally`.
 
+### A5. Validate the local runtime before functional tests
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs validate <server-uuid>
+```
+
+`validate` is read-only and does not require a backup argument. It succeeds only when the exact registry identity is locally owned on the current OS hostname, `yunpanel-api.service` is exactly `active`, `yun-agent.service` is exactly `inactive`, queued/running and recovery job counts are zero, a current local inventory/services snapshot exists, the inventory hostname/mode is exact, the snapshot runtime version matches the packaged API version, and loopback `GET /api/health` returns HTTP 200 with `status=ok`. A stale older API process must therefore fail validation even if systemd reports it active.
+
+If validation fails, do not continue to functional mutations and do not re-enable the agent while the registry remains locally owned. Diagnose the failed invariant from independent console access.
+
 ## Path B — bootstrap a fresh agentless local server
 
 Use this path only when there is no enrolled server identity that must be preserved.
@@ -284,14 +295,25 @@ sudo systemctl start yunpanel-api.service
 
 No `/etc/yunpanel/agent/agent.env`, enrollment token or agent credential is required for the fresh local identity.
 
-## Verification after either path
+### B4. Validate the fresh local runtime
 
-Verify service ownership first:
+Use the exact UUID printed by `create`:
 
 ```bash
-systemctl is-active yunpanel-api.service
-systemctl is-active yun-agent.service || true
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs validate <printed-server-uuid>
 ```
+
+The same exact local-ownership, systemd, durable queue/recovery, snapshot, package-version and loopback HTTP health gates from Path A apply. Do not proceed to functional mutations until this command reports `validation=passed`.
+
+## Verification after either path
+
+The packaged validation command is the first post-start gate:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs validate <server-uuid>
+```
+
+A passing result reports `executionMode=local`, `connectivity=online`, `apiState=active`, `agentState=inactive`, `apiHealth=true`, `apiHealthStatus=200`, zero active/recovery jobs, and present inventory/services snapshots. It does not expose credentials or file contents.
 
 Then verify through the authenticated panel/backend, in this order:
 
