@@ -61,6 +61,7 @@ test('validation action reads packaged state then requires loopback API health',
     packaged: true,
     cwd: '/root',
     env: { YUNPANEL_API_HOST: '127.0.0.1', YUNPANEL_API_PORT: '3001' },
+    expectedRuntimeVersion: '0.4.0',
     ...dependencies(events),
     apiHealthCheck: async ({ env }) => {
       events.push(['health', env.YUNPANEL_API_HOST, env.YUNPANEL_API_PORT]);
@@ -98,6 +99,7 @@ test('failed state validation prevents the HTTP health probe from running', asyn
       packaged: true,
       cwd: '/root',
       env: {},
+      expectedRuntimeVersion: '0.4.0',
       ...dependencies(events, { serverValue: server({ connectivity: 'offline' }) }),
       apiHealthCheck: async () => {
         healthCalls += 1;
@@ -105,6 +107,29 @@ test('failed state validation prevents the HTTP health probe from running', asyn
       },
     }),
     { code: 'local_validation_snapshot_stale' },
+  );
+  assert.equal(healthCalls, 0);
+});
+
+test('stale local runtime version is rejected before the HTTP health probe', async () => {
+  const events = [];
+  let healthCalls = 0;
+  await assert.rejects(
+    runLocalMigrationCommand({
+      action: 'validate',
+      serverId,
+      hostname,
+      packaged: true,
+      cwd: '/root',
+      env: {},
+      expectedRuntimeVersion: '0.4.1',
+      ...dependencies(events),
+      apiHealthCheck: async () => {
+        healthCalls += 1;
+        return { healthy: true, host: '127.0.0.1', port: 3001, statusCode: 200 };
+      },
+    }),
+    { code: 'local_validation_runtime_version_mismatch' },
   );
   assert.equal(healthCalls, 0);
 });
@@ -119,6 +144,7 @@ test('unexpected health adapter failures are redacted', async () => {
       packaged: true,
       cwd: '/root',
       env: {},
+      expectedRuntimeVersion: '0.4.0',
       ...dependencies(events),
       apiHealthCheck: async () => { throw new Error('SECRET=/root/private/api.sock'); },
     }),
