@@ -22,6 +22,14 @@ test('production API persists and initializes the Website registry explicitly', 
   assert.match(source, /website store=\$\{websiteStorePath\}/);
 });
 
+test('production Domain registry validates explicit Website links after Website initialization', () => {
+  const websiteInit = source.indexOf('await websiteRegistry.init();');
+  const domainCreate = source.indexOf('const domainRegistry = createDomainRegistry({');
+  const domainInit = source.indexOf('await domainRegistry.init();');
+  assert.ok(websiteInit >= 0 && domainCreate > websiteInit && domainInit > domainCreate);
+  assert.match(source, /getWebsite: async \(websiteId\) => websiteRegistry\.getWebsite\(websiteId\),/);
+});
+
 test('Website store has an explicit environment contract and API composition mount', () => {
   assert.match(envExample, /^YUNPANEL_WEBSITE_STORE=\.data\/website-registry\.json$/m);
   assert.match(appSource, /mountWebsiteRoutes\(app, \{ websiteRegistry \}\);/);
