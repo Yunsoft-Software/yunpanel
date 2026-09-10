@@ -1,3 +1,5 @@
+import { domainToASCII } from 'node:url';
+
 export class DomainValidationError extends Error {
   constructor(code, message) {
     super(message);
@@ -8,7 +10,15 @@ export class DomainValidationError extends Error {
 
 export function normalizeDomainName(value) {
   if (typeof value !== 'string') return '';
-  return value.trim().toLowerCase().replace(/\.$/, '');
+  const input = value.trim().replace(/[\u3002\uff0e\uff61]/g, '.').replace(/\.$/, '');
+  if (!input) return '';
+  if (input.includes('*')) return input.toLowerCase();
+  if (/[\u0000-\u001f\u007f]/.test(input)) return '';
+  try {
+    return domainToASCII(input.normalize('NFC')).toLowerCase().replace(/\.$/, '');
+  } catch {
+    return '';
+  }
 }
 
 export function validateDomainName(value) {
