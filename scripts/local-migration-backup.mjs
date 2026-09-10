@@ -7,19 +7,20 @@ import {
   resolveLocalMigrationBackupDirectory,
   verifyLocalMigrationBackup,
 } from '../apps/api/src/local-migration-backup.js';
+import { previewLocalMigrationRestore } from '../apps/api/src/local-migration-restore-preview.js';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const PACKAGED_SCRIPT_ROOT = '/usr/lib/yunpanel/scripts';
 const BACKUP_ROOT = localMigrationBackupInternals.defaultRoot;
-const USAGE = 'Usage: local-migration-backup.mjs create --confirm | verify <absolute-backup-directory>';
+const USAGE = 'Usage: local-migration-backup.mjs create --confirm | verify <absolute-backup-directory> | preview <absolute-backup-directory>';
 
 export function parseLocalMigrationBackupArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
   if (argv.length === 2 && argv[0] === 'create' && argv[1] === '--confirm') {
     return { action: 'create', confirm: true };
   }
-  if (argv.length === 2 && argv[0] === 'verify' && typeof argv[1] === 'string' && path.isAbsolute(argv[1])) {
-    return { action: 'verify', backupDirectory: path.resolve(argv[1]) };
+  if (argv.length === 2 && ['verify', 'preview'].includes(argv[0]) && typeof argv[1] === 'string' && path.isAbsolute(argv[1])) {
+    return { action: argv[0], backupDirectory: path.resolve(argv[1]) };
   }
   throw new Error(USAGE);
 }
@@ -54,6 +55,28 @@ function formatResult(result, action) {
   ].join('\n');
 }
 
+function formatPreview(result) {
+  const lines = [
+    'action=preview',
+    'destructive=false',
+    `backupDirectory=${result.backupDirectory}`,
+    `sha256=${result.sha256}`,
+    `restoreTargets=${result.counts.restore}`,
+    `identityReferences=${result.counts.identityReferences}`,
+    `preservedCurrent=${result.counts.preserved}`,
+  ];
+  for (const target of result.targets) {
+    lines.push([
+      'target',
+      `path=${target.path}`,
+      `action=${target.action}`,
+      `snapshot=${target.snapshotPresent ? target.snapshotType : 'absent'}`,
+      `current=${target.current.present ? target.current.type : 'absent'}`,
+    ].join(' '));
+  }
+  return lines.join('\n');
+}
+
 export async function runLocalMigrationBackupCli({
   argv = process.argv.slice(2),
   filePath = scriptPath,
@@ -61,13 +84,26 @@ export async function runLocalMigrationBackupCli({
   backupRoot = BACKUP_ROOT,
   createBackup = createLocalMigrationBackup,
   verifyBackup = verifyLocalMigrationBackup,
+  previewRestore = previewLocalMigrationRestore,
   stdout = process.stdout,
 } = {}) {
   const parsed = parseLocalMigrationBackupArguments(argv);
   const packaged = isPackagedMigrationBackupScript(filePath);
   assertPackagedMigrationBackupRoot({ packaged, uid });
-  if (typeof createBackup !== 'function' || typeof verifyBackup !== 'function' || !stdout || typeof stdout.write !== 'function') {
+  if (typeof createBackup !== 'function' || typeof verifyBackup !== 'function' || typeof previewRestore !== 'function'
+    || !stdout || typeof stdout.write !== 'function') {
     throw new Error('Migration backup CLI dependencies are invalid');
+  }
+
+  if (parsed.action === 'preview') {
+    const directory = assertPackagedBackupDirectory(parsed.backupDirectory, backupRoot);
+    const result = await previewRestore({ backupDirectory: directory, verifyBackup });
+    if (!result || result.destructive !== false || result.backupDirectory !== directory
+      || !result.counts || !Array.isArray(result.targets) || typeof result.sha256 !== 'string') {
+      throw new Error('Migration restore preview result is invalid');
+    }
+    stdout.write(`${formatPreview(result)}\n`);
+    return result;
   }
 
   let result;
@@ -101,4 +137,5 @@ export const localMigrationBackupCliInternals = Object.freeze({
   packagedScriptRoot: PACKAGED_SCRIPT_ROOT,
   backupRoot: BACKUP_ROOT,
   formatResult,
+  formatPreview,
 });
