@@ -1,6 +1,7 @@
 import { OPERATIONS } from '@yunpanel/protocol';
 import { inspectDurableJobRecovery } from './job-recovery-inspection.js';
 import { reconcileCompletedJob } from './job-reconciliation.js';
+import { managedServiceStateDigest } from './managed-service-mutation-receipt.js';
 
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -87,6 +88,21 @@ function activeServiceEvidence(snapshot, serviceId) {
   return snapshot;
 }
 
+function requireReceiptStateDigest(receipt, snapshot, serviceId) {
+  let currentDigest;
+  try {
+    currentDigest = managedServiceStateDigest(snapshot, serviceId);
+  } catch {
+    throw new JobRunningServiceReceiptRecoveryError('job_service_receipt_recovery_evidence_invalid', 'Managed service host evidence is invalid');
+  }
+  if (receipt.stateDigest !== currentDigest) {
+    throw new JobRunningServiceReceiptRecoveryError(
+      'job_service_receipt_recovery_evidence_not_satisfied',
+      'Managed service host state changed after the recorded mutation; the running job remains unresolved',
+    );
+  }
+}
+
 export async function recoverRunningServiceReceiptMutation({
   serverId,
   jobId,
@@ -170,6 +186,7 @@ export async function recoverRunningServiceReceiptMutation({
   if (!evidence) {
     throw new JobRunningServiceReceiptRecoveryError('job_service_receipt_recovery_evidence_not_satisfied', 'Managed service host state no longer satisfies the completed mutation');
   }
+  requireReceiptStateDigest(receipt, evidence, intent.serviceId);
   const result = intent.operation === OPERATIONS.SYSTEM_SERVICE_INSTALL
     ? { ...evidence, changed: receipt.changed }
     : { ...evidence, action: 'restart' };
@@ -232,4 +249,5 @@ export const jobRunningServiceReceiptRecoveryInternals = Object.freeze({
   assertPublicJob,
   assertReceipt,
   activeServiceEvidence,
+  requireReceiptStateDigest,
 });
