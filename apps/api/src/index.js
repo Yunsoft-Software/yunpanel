@@ -11,6 +11,7 @@ import { startCertificateRenewalScheduler } from './certificate-renewal-schedule
 import { startConfiguredLocalRuntime } from './configured-local-runtime.js';
 import { createDomainRegistry } from './domain-registry.js';
 import { createJobRegistry } from './job-registry.js';
+import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createServerRegistry } from './server-registry.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
@@ -21,6 +22,7 @@ const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-r
 const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.resolve('.data/certificate-registry.json');
 const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.resolve('.data/application-registry.json');
 const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRONMENT_STORE ?? path.resolve('.data/application-environment-registry.json');
+const authStorePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStorePath), 'auth', 'auth.sqlite');
 const certificateRenewalIntervalMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS ?? `${6 * 60 * 60 * 1000}`, 10);
 const certificateRenewBeforeMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEW_BEFORE_MS ?? `${30 * 24 * 60 * 60 * 1000}`, 10);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('YUNPANEL_API_PORT must be a valid TCP port');
@@ -49,7 +51,8 @@ const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
 });
 await applicationEnvironmentRegistry.init();
 
-const authStore = createAuthStore({ filePath: process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStorePath), 'auth', 'auth.sqlite') });
+await prepareRootAuthStateOwnership({ filePath: authStorePath });
+const authStore = createAuthStore({ filePath: authStorePath });
 const listener = createAuthenticatedApi({
   store: authStore,
   publicOrigin: process.env.YUNPANEL_PUBLIC_ORIGIN ?? (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:5173' : undefined),
