@@ -258,10 +258,17 @@ export async function inspectVerifiedLocalMigrationArchive({
     symlinks: members.filter((member) => member.type === 'l').length,
     hardlinks: members.filter((member) => member.type === 'h').length,
   });
+  const normalizedMembers = Object.freeze(members.map((member) => Object.freeze({
+    name: member.name,
+    type: member.type,
+    root: member.root,
+    resolvedLinkTarget: member.resolvedLinkTarget,
+  })));
   return Object.freeze({
     backupDirectory: directory,
     sha256: verification.sha256,
     counts,
+    members: normalizedMembers,
     linksSafe: true,
     destructive: false,
   });
