@@ -6,6 +6,7 @@ import { createLocalHostOperations } from './local-host-operations.js';
 import { resolveLocalRuntimeConfig } from './local-runtime-config.js';
 import { startLocalRuntime } from './local-runtime.js';
 import { createManagedServiceMutationReceiptStore } from './managed-service-mutation-receipt.js';
+import { createNodeDeploymentReceiptStore } from './node-deployment-receipt.js';
 import { createNodeRestartReceiptStore } from './node-restart-receipt.js';
 import { createNodeRollbackReceiptStore } from './node-rollback-receipt.js';
 
@@ -32,6 +33,7 @@ export async function startConfiguredLocalRuntime({
   createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
   createDomainActivationReceipts = createDomainActivationReceiptStore,
   createManagedServiceReceipts = createManagedServiceMutationReceiptStore,
+  createNodeDeploymentReceipts = createNodeDeploymentReceiptStore,
   createNodeRestartReceipts = createNodeRestartReceiptStore,
   createNodeRollbackReceipts = createNodeRollbackReceiptStore,
   inspectInventory = inspectHostInventory,
@@ -50,6 +52,7 @@ export async function startConfiguredLocalRuntime({
     || typeof createDatabaseDeletionReceipts !== 'function'
     || typeof createDomainActivationReceipts !== 'function'
     || typeof createManagedServiceReceipts !== 'function'
+    || typeof createNodeDeploymentReceipts !== 'function'
     || typeof createNodeRestartReceipts !== 'function'
     || typeof createNodeRollbackReceipts !== 'function'
     || typeof inspectInventory !== 'function'
@@ -75,6 +78,10 @@ export async function startConfiguredLocalRuntime({
   const managedServiceReceipts = createManagedServiceReceipts();
   if (!managedServiceReceipts || typeof managedServiceReceipts.write !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_managed_service_receipts_invalid', 'Local runtime managed service receipt store is invalid');
+  }
+  const nodeDeploymentReceipts = createNodeDeploymentReceipts();
+  if (!nodeDeploymentReceipts || typeof nodeDeploymentReceipts.write !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_node_deployment_receipts_invalid', 'Local runtime Node deployment receipt store is invalid');
   }
   const nodeRestartReceipts = createNodeRestartReceipts();
   if (!nodeRestartReceipts || typeof nodeRestartReceipts.write !== 'function') {
@@ -106,6 +113,21 @@ export async function startConfiguredLocalRuntime({
         jobId,
         primaryDomain: payload.primaryDomain,
         checksum: payload.checksum,
+      });
+      return;
+    }
+
+    if (operation === OPERATIONS.APP_NODE_DEPLOY) {
+      if (!result || result.healthy !== true || result.deploymentId !== jobId || result.releaseId !== jobId
+        || result.port !== payload?.runtime?.port || result.healthPath !== payload?.runtime?.healthPath
+        || typeof result.commitSha !== 'string' || typeof payload?.applicationId !== 'string') {
+        throw new Error('Node deployment result is not safe recovery evidence');
+      }
+      await nodeDeploymentReceipts.write({
+        serverId,
+        jobId,
+        applicationId: payload.applicationId,
+        result,
       });
       return;
     }
