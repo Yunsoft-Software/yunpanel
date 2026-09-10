@@ -2,6 +2,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { API_VERSION } from '../apps/api/src/core-app.js';
 import {
   resolveLocalMigrationBackupDirectory,
   verifyLocalMigrationBackup,
@@ -143,7 +144,8 @@ export async function runLocalRuntimeCli({
   }
 
   const { backupDirectory: _backupDirectory, ...migrationInput } = parsed;
-  const executed = await execute({ ...migrationInput, hostname, env, packaged, cwd: process.cwd() });
+  const versionInput = parsed.action === 'validate' ? { expectedRuntimeVersion: API_VERSION } : {};
+  const executed = await execute({ ...migrationInput, ...versionInput, hostname, env, packaged, cwd: process.cwd() });
   const result = verification
     ? Object.freeze({ ...executed, verifiedBackupDirectory: verification.backupDirectory })
     : executed;
@@ -167,6 +169,7 @@ if (invoked === import.meta.url) {
 export const localRuntimeCliInternals = Object.freeze({
   packagedScriptRoot: PACKAGED_SCRIPT_ROOT,
   readOnlyActions: READ_ONLY_ACTIONS,
+  apiVersion: API_VERSION,
   validateBackupVerification,
   formatStatus,
   formatValidation,
