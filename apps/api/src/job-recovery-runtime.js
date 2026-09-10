@@ -6,6 +6,7 @@ import { createCertificateRegistry } from './certificate-registry.js';
 import { createDomainRegistry } from './domain-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createLocalHostOperations } from './local-host-operations.js';
+import { createJobRecoveryContextReader } from './job-recovery-context.js';
 import { createJobRecoveryStore } from './job-recovery-store.js';
 import { reconcileTerminalRecovery } from './job-recovery-command.js';
 import { recoverRunningDomainStage } from './job-running-domain-recovery.js';
@@ -93,6 +94,19 @@ function createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegis
     registryFactory: jobRegistryFactory,
     recoveryStoreFactory,
   });
+}
+
+function createRecoveryContextReader({ paths, contextReaderFactory }) {
+  let reader;
+  try {
+    reader = contextReaderFactory({ filePath: paths.jobStore });
+  } catch {
+    throw new JobRecoveryRuntimeError('job_recovery_context_reader_invalid', 'Recovery job context reader could not be created');
+  }
+  if (!reader || typeof reader.read !== 'function') {
+    throw new JobRecoveryRuntimeError('job_recovery_context_reader_invalid', 'Recovery job context reader is invalid');
+  }
+  return reader;
 }
 
 function normalizeRecoveryHostname(value) {
@@ -251,6 +265,7 @@ export async function runRunningDomainStageRecoveryFromStores({
   recoveryStoreFactory = createJobRecoveryStore,
   certificateRegistryFactory = createCertificateRegistry,
   applicationRegistryFactory = createApplicationRegistry,
+  contextReaderFactory = createJobRecoveryContextReader,
   nginxManagerFactory = createNginxManager,
   serviceStatus = createMigrationServiceStatus(),
   recoverCommand = recoverRunningDomainStage,
@@ -263,6 +278,7 @@ export async function runRunningDomainStageRecoveryFromStores({
     recoveryStoreFactory,
     certificateRegistryFactory,
     applicationRegistryFactory,
+    contextReaderFactory,
     nginxManagerFactory,
     serviceStatus,
     recoverCommand,
@@ -283,6 +299,7 @@ export async function runRunningDomainStageRecoveryFromStores({
     applicationRegistryFactory,
   });
   const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
+  const contextReader = createRecoveryContextReader({ paths, contextReaderFactory });
   const nginxManager = nginxManagerFactory();
   if (!nginxManager || typeof nginxManager.inspectStagedDomain !== 'function') {
     throw new JobRecoveryRuntimeError('job_recovery_nginx_evidence_invalid', 'Domain recovery Nginx evidence provider is invalid');
@@ -296,6 +313,7 @@ export async function runRunningDomainStageRecoveryFromStores({
     certificateRegistry,
     applicationRegistry,
     serviceStatus,
+    loadJobContext: (id) => contextReader.read(id),
     inspectStageEvidence: (payload) => nginxManager.inspectStagedDomain(payload),
   });
   return Object.freeze({ ...result, statePaths: paths });
@@ -315,6 +333,7 @@ export async function runRunningStaticDeploymentRecoveryFromStores({
   recoveryStoreFactory = createJobRecoveryStore,
   certificateRegistryFactory = createCertificateRegistry,
   applicationRegistryFactory = createApplicationRegistry,
+  contextReaderFactory = createJobRecoveryContextReader,
   evidenceInspectorFactory = createStaticDeploymentEvidenceInspector,
   serviceStatus = createMigrationServiceStatus(),
   recoverCommand = recoverRunningStaticDeployment,
@@ -327,6 +346,7 @@ export async function runRunningStaticDeploymentRecoveryFromStores({
     recoveryStoreFactory,
     certificateRegistryFactory,
     applicationRegistryFactory,
+    contextReaderFactory,
     evidenceInspectorFactory,
     serviceStatus,
     recoverCommand,
@@ -347,6 +367,7 @@ export async function runRunningStaticDeploymentRecoveryFromStores({
     applicationRegistryFactory,
   });
   const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
+  const contextReader = createRecoveryContextReader({ paths, contextReaderFactory });
   const evidenceInspector = evidenceInspectorFactory();
   if (!evidenceInspector || typeof evidenceInspector.inspect !== 'function') {
     throw new JobRecoveryRuntimeError('job_recovery_static_evidence_invalid', 'Static recovery evidence provider is invalid');
@@ -360,6 +381,7 @@ export async function runRunningStaticDeploymentRecoveryFromStores({
     certificateRegistry,
     applicationRegistry,
     serviceStatus,
+    loadJobContext: (id) => contextReader.read(id),
     inspectDeploymentEvidence: (identity) => evidenceInspector.inspect(identity),
   });
   return Object.freeze({ ...result, statePaths: paths });
@@ -370,6 +392,7 @@ export const jobRecoveryRuntimeInternals = Object.freeze({
   resolveRecoveryStorePath,
   initRegistry,
   createDurableRecoveryRegistry,
+  createRecoveryContextReader,
   normalizeRecoveryHostname,
   requireRecoveryServerHost,
   initResourceRegistries,
