@@ -77,12 +77,18 @@ function requireDomain(state, domainId) {
   return domain;
 }
 
-export function createDomainRegistry({ filePath = null, now = () => Date.now(), serverExists = async () => true, getWebsite = null } = {}) {
+export function createDomainRegistry({
+  filePath = null,
+  now = () => Date.now(),
+  serverExists = async () => true,
+  getWebsite = null,
+  websiteBindingRequired = () => false,
+} = {}) {
   let state = emptyState();
   let initialized = false;
   let writeChain = Promise.resolve();
 
-  if (typeof serverExists !== 'function' || (getWebsite !== null && typeof getWebsite !== 'function')) {
+  if (typeof serverExists !== 'function' || (getWebsite !== null && typeof getWebsite !== 'function') || typeof websiteBindingRequired !== 'function') {
     throw new DomainRegistryError('invalid_domain_registry_dependencies', 'Domain registry dependencies are invalid');
   }
 
@@ -145,6 +151,9 @@ export function createDomainRegistry({ filePath = null, now = () => Date.now(), 
     if (!HTTPS_MODES.has(httpsMode)) throw new DomainRegistryError('invalid_https_mode', 'httpsMode must be off or managed');
 
     const normalizedWebsiteId = await requireWebsiteBinding(websiteId, serverId);
+    if (normalizedWebsiteId === null && websiteBindingRequired() === true) {
+      throw new DomainRegistryError('website_binding_required', 'New managed domains require an explicit Website binding', 409);
+    }
     const normalized = normalizeDomains(primaryDomain, aliases);
     try { validateDomainParent(state.domains, { serverId, primaryDomain: normalized.primary, parentDomainId }); }
     catch (error) {
