@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
 import {
   bindLocalServerForRuntime,
@@ -26,6 +27,10 @@ export class LocalMigrationCliError extends Error {
     this.name = 'LocalMigrationCliError';
     this.code = code;
   }
+}
+
+export function createMigrationJobRegistry({ filePath } = {}) {
+  return createDurableJobRegistry({ filePath, registryFactory: createJobRegistry });
 }
 
 function resolveStorePath(value, fallback, { packaged, cwd }) {
@@ -102,7 +107,7 @@ export async function runLocalMigrationCommand({
   packaged = false,
   cwd = process.cwd(),
   registryFactory = createServerRegistry,
-  jobRegistryFactory = createJobRegistry,
+  jobRegistryFactory = createMigrationJobRegistry,
   serviceStatus = createMigrationServiceStatus(),
 } = {}) {
   const safeAction = requireAction(action);
