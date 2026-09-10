@@ -91,3 +91,33 @@ test('external proxy targets canonicalize safe DNS and IPv6 hosts without URL in
     (error) => error instanceof DomainRegistryError && error.code === 'invalid_upstream_host',
   );
 });
+
+test('internal deterministic Domain identity is idempotent without resetting applied state', async () => {
+  const registry = createDomainRegistry();
+  const domainId = '234cd749-403d-4bb1-b122-5693d36af3fe';
+  const input = {
+    domainId,
+    serverId: 'local',
+    primaryDomain: 'stable.example.com',
+    targetType: 'proxy',
+    target: { upstreamHost: '127.0.0.1', upstreamPort: 3100 },
+  };
+  const created = await registry.createDomain(input);
+  await registry.markStaged(created.id, {
+    revision: created.desiredRevision,
+    checksum: 'a'.repeat(64),
+    configName: 'stable.example.com.conf',
+  });
+  await registry.markApplied(created.id, { checksum: 'a'.repeat(64) });
+
+  const retried = await registry.createDomain(input);
+  assert.equal(retried.id, domainId);
+  assert.equal(retried.state, 'active');
+  assert.equal(retried.appliedRevision, 1);
+  assert.equal((await registry.listDomains()).length, 1);
+
+  await assert.rejects(
+    registry.createDomain({ ...input, primaryDomain: 'reused.example.com' }),
+    (error) => error instanceof DomainRegistryError && error.code === 'domain_identity_conflict' && error.status === 409,
+  );
+});

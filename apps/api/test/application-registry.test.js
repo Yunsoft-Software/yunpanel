@@ -59,3 +59,48 @@ test('application creation rejects unknown server and unsafe repository configur
     (error) => error instanceof ApplicationRegistryError && error.code === 'server_not_found',
   );
 });
+
+test('internal deterministic Application identity is idempotent and rejects configuration drift', async () => {
+  const registry = createApplicationRegistry({ serverExists: async () => true });
+  const applicationId = '8137ef5f-f728-4c52-a214-ab2c1b45268e';
+  const input = {
+    applicationId,
+    serverId: 'server-1',
+    name: 'Deterministic Site',
+    repositoryUrl: 'https://github.com/example/deterministic',
+    branch: 'main',
+    build: { mode: 'none', outputDir: '.' },
+  };
+  const created = await registry.createApplication(input);
+  const retried = await registry.createApplication(input);
+  assert.equal(created.id, applicationId);
+  assert.equal(retried.id, created.id);
+  assert.equal((await registry.listApplications()).length, 1);
+
+  await assert.rejects(
+    registry.createApplication({ ...input, name: 'Reused identity' }),
+    (error) => error instanceof ApplicationRegistryError && error.code === 'application_identity_conflict' && error.status === 409,
+  );
+});
+
+test('Node port allocation avoids managed and reserved ports and creation rejects duplicates', async () => {
+  const registry = createApplicationRegistry({ serverExists: async () => true });
+  await registry.createNodeApplication({
+    serverId: 'server-1',
+    name: 'Existing Node',
+    repositoryUrl: 'https://github.com/example/existing-node',
+    runtime: { port: 3100 },
+  });
+  assert.equal(await registry.allocateNodePort({ serverId: 'server-1', reservedPorts: [3101] }), 3102);
+  assert.equal(await registry.allocateNodePort({ serverId: 'server-2', reservedPorts: [3100] }), 3101);
+
+  await assert.rejects(
+    registry.createNodeApplication({
+      serverId: 'server-1',
+      name: 'Conflicting Node',
+      repositoryUrl: 'https://github.com/example/conflicting-node',
+      runtime: { port: 3100 },
+    }),
+    (error) => error instanceof ApplicationRegistryError && error.code === 'node_port_conflict' && error.status === 409,
+  );
+});

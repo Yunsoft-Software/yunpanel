@@ -117,6 +117,28 @@ test('proxy Website owns a canonical optional target without an invented applica
   assert.deepEqual((await reopened.getWebsite(website.id)).proxyTarget, website.proxyTarget);
 });
 
+test('internal deterministic Website identity retries exactly and rejects reuse', async (t) => {
+  const { registry } = await fixture(t);
+  const websiteId = '5b504f8f-4341-4a55-a6fb-86c6eb282e61';
+  const input = {
+    websiteId,
+    serverId,
+    name: 'Deterministic Proxy',
+    runtimeType: 'proxy',
+    proxyTarget: { host: 'origin.example.test', port: 8443, websocket: false },
+  };
+  const created = await registry.createWebsite(input);
+  const retried = await registry.createWebsite(input);
+  assert.equal(created.id, websiteId);
+  assert.deepEqual(retried, created);
+  assert.equal((await registry.listWebsites()).length, 1);
+
+  await assert.rejects(
+    registry.createWebsite({ ...input, name: 'Reused identity' }),
+    (error) => error instanceof WebsiteRegistryError && error.code === 'website_identity_conflict' && error.status === 409,
+  );
+});
+
 test('application binding is unique and must match Website server and runtime', async (t) => {
   const { apps, registry } = await fixture(t);
   await registry.createWebsite({ serverId, name: 'One', applicationId: staticAppId });

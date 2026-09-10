@@ -255,33 +255,48 @@ export function createDomainRegistry({
     return Object.freeze({ domain: publicDomain(domain), impact: preview.impact, previewDigest: preview.previewDigest });
   }
 
-  async function createDomain({ serverId, primaryDomain, aliases = [], targetType, target, httpsMode = 'off', parentDomainId = null, websiteId = null }) {
+  async function createDomain({ domainId = null, serverId, primaryDomain, aliases = [], targetType, target, httpsMode = 'off', parentDomainId = null, websiteId = null }) {
     await ensureInitialized();
     if (typeof serverId !== 'string' || !serverId) throw new DomainRegistryError('invalid_server', 'serverId is required');
     if (!(await serverExists(serverId))) throw new DomainRegistryError('server_not_found', 'Target server does not exist', 404);
     if (!HTTPS_MODES.has(httpsMode)) throw new DomainRegistryError('invalid_https_mode', 'httpsMode must be off or managed');
+    const normalizedDomainId = domainId == null ? randomUUID() : (() => {
+      try { return assertUuid(domainId, 'domainId'); }
+      catch { throw new DomainRegistryError('invalid_domain_id', 'domainId must be a valid UUID'); }
+    })();
 
     const normalizedWebsiteId = await requireWebsiteBinding(websiteId, serverId);
     if (normalizedWebsiteId === null && websiteBindingRequired() === true) {
       throw new DomainRegistryError('website_binding_required', 'New managed domains require an explicit Website binding', 409);
     }
     const normalized = normalizeDomains(primaryDomain, aliases);
-    try { validateDomainParent(state.domains, { serverId, primaryDomain: normalized.primary, parentDomainId }); }
+    try { validateDomainParent(state.domains, { id: normalizedDomainId, serverId, primaryDomain: normalized.primary, parentDomainId }); }
     catch (error) {
       if (error instanceof DomainHierarchyError) throw new DomainRegistryError(error.code, error.message, error.status);
       throw error;
     }
     const requestedNames = new Set([normalized.primary, ...normalized.aliases]);
-    const conflict = state.domains.find((domain) => ownedNames(domain).some((ownedName) => requestedNames.has(ownedName)));
+    const conflict = state.domains.find((domain) => domain.id !== normalizedDomainId
+      && ownedNames(domain).some((ownedName) => requestedNames.has(ownedName)));
     if (conflict) throw new DomainRegistryError('domain_conflict', 'A domain or alias is already managed', 409);
 
     const timestamp = new Date(now()).toISOString();
     const domain = {
-      id: randomUUID(), serverId, websiteId: normalizedWebsiteId, primaryDomain: normalized.primary, parentDomainId,
+      id: normalizedDomainId, serverId, websiteId: normalizedWebsiteId, primaryDomain: normalized.primary, parentDomainId,
       aliases: normalized.aliases, targetType, target: validateTarget(targetType, target), httpsMode, certificateId: null,
       state: 'draft', desiredRevision: 1, stagedRevision: 0, stagedChecksum: null, stagedConfigName: null,
       lastStagedAt: null, appliedRevision: 0, lastAppliedAt: null, lastError: null, createdAt: timestamp, updatedAt: timestamp,
     };
+    const existing = state.domains.find((candidate) => candidate.id === normalizedDomainId) ?? null;
+    if (existing) {
+      if (domainId === null || existing.serverId !== domain.serverId || existing.websiteId !== domain.websiteId
+        || existing.primaryDomain !== domain.primaryDomain || (existing.parentDomainId ?? null) !== domain.parentDomainId
+        || JSON.stringify(existing.aliases) !== JSON.stringify(domain.aliases) || existing.targetType !== domain.targetType
+        || JSON.stringify(existing.target) !== JSON.stringify(domain.target) || existing.httpsMode !== domain.httpsMode) {
+        throw new DomainRegistryError('domain_identity_conflict', 'Domain identity conflicts with existing state', 409);
+      }
+      return publicDomain(existing);
+    }
     state.domains.push(domain);
     await persist();
     return publicDomain(domain);

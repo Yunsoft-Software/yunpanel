@@ -257,7 +257,14 @@ export function createWebsiteRegistry({
     return id;
   }
 
-  async function createApplicationBackedWebsite({ websiteId, serverId, displayName, applicationId, runtimeType = null }) {
+  async function createApplicationBackedWebsite({
+    websiteId,
+    serverId,
+    displayName,
+    applicationId,
+    runtimeType = null,
+    identityConflictCode = 'website_identity_conflict',
+  }) {
     const normalizedServerId = await requireServer(serverId);
     const normalizedApplicationId = uuid(applicationId, 'applicationId');
     const application = await getApplication(normalizedApplicationId);
@@ -278,7 +285,7 @@ export function createWebsiteRegistry({
         && existingById.unixUser === binding.unixUser
         && existingById.proxyTarget === null
         && existingById.revision === 1;
-      if (!exact) throw new WebsiteRegistryError('migration_website_identity_conflict', 'Migration Website identity conflicts with existing state', 409);
+      if (!exact) throw new WebsiteRegistryError(identityConflictCode, 'Website identity conflicts with existing state', 409);
       return publicWebsite(existingById);
     }
     if (state.websites.some((website) => website.applicationId === normalizedApplicationId)) {
@@ -301,14 +308,15 @@ export function createWebsiteRegistry({
     return publicWebsite(website);
   }
 
-  async function createWebsite({ serverId, name: displayName, applicationId = null, runtimeType = null, proxyTarget: requestedProxyTarget = null } = {}) {
+  async function createWebsite({ websiteId = null, serverId, name: displayName, applicationId = null, runtimeType = null, proxyTarget: requestedProxyTarget = null } = {}) {
     await ensureInitialized();
     if (applicationId == null) {
       const normalizedServerId = await requireServer(serverId);
       if (runtimeType !== 'proxy') throw new WebsiteRegistryError('website_application_required', 'Static and Node websites require an application binding');
       const timestamp = new Date(now()).toISOString();
+      const normalizedWebsiteId = websiteId == null ? randomUUID() : uuid(websiteId, 'websiteId');
       const website = {
-        id: randomUUID(),
+        id: normalizedWebsiteId,
         serverId: normalizedServerId,
         name: name(displayName),
         applicationId: null,
@@ -320,6 +328,20 @@ export function createWebsiteRegistry({
         createdAt: timestamp,
         updatedAt: timestamp,
       };
+      const existing = state.websites.find((candidate) => candidate.id === normalizedWebsiteId) ?? null;
+      if (existing) {
+        const exact = websiteId !== null
+          && existing.serverId === website.serverId
+          && existing.name === website.name
+          && existing.applicationId === null
+          && existing.runtimeType === 'proxy'
+          && existing.documentRoot === null
+          && existing.unixUser === null
+          && JSON.stringify(existing.proxyTarget) === JSON.stringify(website.proxyTarget)
+          && existing.revision === 1;
+        if (!exact) throw new WebsiteRegistryError('website_identity_conflict', 'Website identity conflicts with existing state', 409);
+        return publicWebsite(existing);
+      }
       state.websites.push(website);
       await persist();
       return publicWebsite(website);
@@ -327,7 +349,7 @@ export function createWebsiteRegistry({
     if (requestedProxyTarget !== null) {
       throw new WebsiteRegistryError('website_proxy_target_not_applicable', 'Application-backed Websites cannot define a proxy target');
     }
-    return createApplicationBackedWebsite({ serverId, displayName, applicationId, runtimeType });
+    return createApplicationBackedWebsite({ websiteId, serverId, displayName, applicationId, runtimeType });
   }
 
   function requireWebsite(websiteId) {
@@ -450,6 +472,7 @@ export function createWebsiteRegistry({
       serverId,
       displayName,
       applicationId: normalizedApplicationId,
+      identityConflictCode: 'migration_website_identity_conflict',
     });
   }
 

@@ -96,6 +96,26 @@ function normalizeNullableUuid(value, fieldName) {
   return value == null ? null : normalizeUuid(value, fieldName);
 }
 
+function normalizeApplicationId(value) {
+  try { return assertUuid(value, 'applicationId'); }
+  catch { throw new ApplicationRegistryError('invalid_application_id', 'applicationId is invalid'); }
+}
+
+function sameValue(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function existingApplication(state, application, { idempotent }) {
+  const existing = state.applications.find((candidate) => candidate.id === application.id) ?? null;
+  if (!existing) return null;
+  if (!idempotent) throw new ApplicationRegistryError('application_identity_conflict', 'Application identity already exists', 409);
+  const fields = ['serverId', 'name', 'type', 'repositoryUrl', 'branch', 'retention', 'build', 'runtime', 'webRoot'];
+  if (fields.some((field) => !sameValue(existing[field] ?? null, application[field] ?? null))) {
+    throw new ApplicationRegistryError('application_identity_conflict', 'Application identity conflicts with existing state', 409);
+  }
+  return publicApplication(hydrateApplication(existing));
+}
+
 function hydrateApplication(application) {
   if (!application.type) application.type = 'static';
   if (!Array.isArray(application.releases)) application.releases = [];
@@ -217,11 +237,11 @@ export function createApplicationRegistry({
     if (!(await serverExists(serverId))) throw new ApplicationRegistryError('server_not_found', 'Target server does not exist', 404);
   }
 
-  async function createApplication({ serverId, name, repositoryUrl, branch = 'main', build = {}, retention = 5 }) {
+  async function createApplication({ applicationId = null, serverId, name, repositoryUrl, branch = 'main', build = {}, retention = 5 }) {
     await ensureInitialized();
     await ensureServer(serverId);
     const config = normalizeStaticConfig({ repositoryUrl, branch, build, retention });
-    const id = randomUUID();
+    const id = applicationId == null ? randomUUID() : normalizeApplicationId(applicationId);
     const timestamp = new Date(now()).toISOString();
     const application = {
       ...baseApplication({
@@ -238,16 +258,18 @@ export function createApplicationRegistry({
       runtime: null,
       webRoot: `/var/www/yunpanel/apps/${id}/current`,
     };
+    const existing = existingApplication(state, application, { idempotent: applicationId !== null });
+    if (existing) return existing;
     state.applications.push(application);
     await persist();
     return publicApplication(application);
   }
 
-  async function createNodeApplication({ serverId, name, repositoryUrl, branch = 'main', runtime, retention = 5 }) {
+  async function createNodeApplication({ applicationId = null, serverId, name, repositoryUrl, branch = 'main', runtime, retention = 5 }) {
     await ensureInitialized();
     await ensureServer(serverId);
     const config = normalizeNodeConfig({ repositoryUrl, branch, runtime, retention });
-    const id = randomUUID();
+    const id = applicationId == null ? randomUUID() : normalizeApplicationId(applicationId);
     const timestamp = new Date(now()).toISOString();
     const application = {
       ...baseApplication({
@@ -267,9 +289,32 @@ export function createApplicationRegistry({
       healthPath: config.runtime.healthPath,
       proxyTarget: { host: '127.0.0.1', port: config.runtime.port },
     };
+    const existing = existingApplication(state, application, { idempotent: applicationId !== null });
+    if (existing) return existing;
+    if (state.applications.some((candidate) => candidate.serverId === serverId
+      && candidate.type === 'node' && candidate.runtime?.port === config.runtime.port)) {
+      throw new ApplicationRegistryError('node_port_conflict', 'Node application port is already allocated on this server', 409);
+    }
     state.applications.push(application);
     await persist();
     return publicApplication(application);
+  }
+
+  async function allocateNodePort({ serverId, reservedPorts = [], start = 3100, end = 49151 } = {}) {
+    await ensureInitialized();
+    await ensureServer(serverId);
+    if (!Array.isArray(reservedPorts) || reservedPorts.some((port) => !Number.isInteger(port) || port < 1024 || port > 65535)
+      || !Number.isInteger(start) || !Number.isInteger(end) || start < 1024 || end > 65535 || start > end) {
+      throw new ApplicationRegistryError('invalid_node_port_allocation', 'Node port allocation bounds are invalid');
+    }
+    const used = new Set(reservedPorts);
+    for (const application of state.applications) {
+      if (application.serverId === serverId && application.type === 'node' && Number.isInteger(application.runtime?.port)) {
+        used.add(application.runtime.port);
+      }
+    }
+    for (let port = start; port <= end; port += 1) if (!used.has(port)) return port;
+    throw new ApplicationRegistryError('node_port_exhausted', 'No managed Node application port is available', 409);
   }
 
   async function markDeploying(applicationId, deploymentId) {
@@ -460,6 +505,7 @@ export function createApplicationRegistry({
     init,
     createApplication,
     createNodeApplication,
+    allocateNodePort,
     markDeploying,
     markDeployed,
     markRollingBack,
