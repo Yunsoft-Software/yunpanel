@@ -14,6 +14,10 @@ const ownerAuth = Object.freeze({
 
 async function fixture(t) {
   const websites = [];
+  const domains = [
+    { id: 'domain-1', websiteId: 'website-1', primaryDomain: 'example.com' },
+    { id: 'domain-2', websiteId: null, primaryDomain: 'legacy.example.com' },
+  ];
   const calls = [];
   const websiteRegistry = {
     async listWebsites(filter) { calls.push(['list', filter]); return websites.map((website) => ({ ...website })); },
@@ -21,22 +25,20 @@ async function fixture(t) {
     async createWebsite(input) {
       calls.push(['create', input]);
       const website = {
-        id: 'website-1',
-        serverId: input.serverId,
-        name: input.name,
-        applicationId: input.applicationId,
-        runtimeType: input.runtimeType ?? 'static',
-        documentRoot: '/managed/current',
-        unixUser: 'yunapp-123456789abc',
+        id: 'website-1', serverId: input.serverId, name: input.name, applicationId: input.applicationId,
+        runtimeType: input.runtimeType ?? 'static', documentRoot: '/managed/current', unixUser: 'yunapp-123456789abc',
       };
       websites.push(website);
       return { ...website };
     },
   };
+  const domainRegistry = {
+    async listDomains() { calls.push(['domains']); return domains.map((domain) => ({ ...domain })); },
+  };
   const app = express();
   app.use(express.json());
   app.use((request, _response, next) => { request.auth = ownerAuth; next(); });
-  mountWebsiteRoutes(app, { websiteRegistry });
+  mountWebsiteRoutes(app, { websiteRegistry, domainRegistry });
   app.use((error, _request, response, _next) => {
     if (error instanceof WebsiteRegistryError) return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     return response.status(500).json({ error: { code: 'internal_error' } });
@@ -57,8 +59,7 @@ async function fixture(t) {
 test('Website collection and detail return actual Website records', async (t) => {
   const f = await fixture(t);
   const created = await f.request('/api/websites', {
-    method: 'POST',
-    body: JSON.stringify({ serverId: 'server-1', name: 'Site', applicationId: 'app-1' }),
+    method: 'POST', body: JSON.stringify({ serverId: 'server-1', name: 'Site', applicationId: 'app-1' }),
   });
   assert.equal(created.status, 201);
   assert.equal((await created.json()).data.id, 'website-1');
@@ -75,6 +76,17 @@ test('Website collection and detail return actual Website records', async (t) =>
     ['list', { serverId: 'server-1' }],
     ['get', 'website-1'],
   ]);
+});
+
+test('Website domain relationship uses explicit websiteId only', async (t) => {
+  const f = await fixture(t);
+  await f.request('/api/websites', { method: 'POST', body: JSON.stringify({ serverId: 'server-1', name: 'Site', applicationId: 'app-1' }) });
+  const response = await f.request('/api/websites/website-1/domains');
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.data.map((domain) => domain.id), ['domain-1']);
+  assert.equal(body.data.some((domain) => domain.id === 'domain-2'), false);
+  assert.equal(f.calls.some(([name]) => name === 'domains'), true);
 });
 
 test('Website create rejects caller-controlled root user and unknown fields before registry mutation', async (t) => {
@@ -101,9 +113,11 @@ test('Website list accepts only a single serverId query', async (t) => {
   assert.equal(f.calls.some(([name]) => name === 'list'), false);
 });
 
-test('missing Website detail is an explicit 404', async (t) => {
+test('missing Website detail and domain relationship are explicit 404s', async (t) => {
   const f = await fixture(t);
-  const response = await f.request('/api/websites/missing');
-  assert.equal(response.status, 404);
-  assert.equal((await response.json()).error.code, 'website_not_found');
+  for (const pathname of ['/api/websites/missing', '/api/websites/missing/domains']) {
+    const response = await f.request(pathname);
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).error.code, 'website_not_found');
+  }
 });
