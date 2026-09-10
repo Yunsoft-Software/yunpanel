@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class WebsiteMigrationPreviewError extends Error {
@@ -74,6 +76,22 @@ function validateWebsiteReferences(websites, applications) {
   return byApplication;
 }
 
+function previewDigest(items) {
+  const canonical = [...items]
+    .sort((left, right) => left.domainId.localeCompare(right.domainId))
+    .map((item) => ({
+      domainId: item.domainId,
+      hostname: item.hostname,
+      status: item.status,
+      action: item.action,
+      websiteId: item.websiteId,
+      applicationId: item.applicationId,
+      candidateApplicationIds: [...item.candidateApplicationIds],
+      requiresConfirmation: item.requiresConfirmation,
+    }));
+  return createHash('sha256').update(JSON.stringify({ version: 1, items: canonical })).digest('hex');
+}
+
 export function previewWebsiteMigration({ domains, websites, applications } = {}) {
   const domainMap = uniqueById(domains, 'Domain');
   const websiteMap = normalizeWebsites(websites);
@@ -96,14 +114,8 @@ export function previewWebsiteMigration({ domains, websites, applications } = {}
         throw new WebsiteMigrationPreviewError('website_migration_bound_reference_invalid', 'Bound Domain Website reference is invalid');
       }
       items.push(Object.freeze({
-        domainId,
-        hostname: domain.primaryDomain ?? null,
-        status: 'already_bound',
-        action: 'none',
-        websiteId,
-        applicationId: website.applicationId,
-        candidateApplicationIds: Object.freeze([]),
-        requiresConfirmation: false,
+        domainId, hostname: domain.primaryDomain ?? null, status: 'already_bound', action: 'none', websiteId,
+        applicationId: website.applicationId, candidateApplicationIds: Object.freeze([]), requiresConfirmation: false,
       }));
       continue;
     }
@@ -115,28 +127,16 @@ export function previewWebsiteMigration({ domains, websites, applications } = {}
 
     if (candidates.length === 0) {
       items.push(Object.freeze({
-        domainId,
-        hostname: domain.primaryDomain ?? null,
-        status: 'unresolved',
-        action: 'manual_mapping_required',
-        websiteId: null,
-        applicationId: null,
-        candidateApplicationIds: Object.freeze([]),
-        requiresConfirmation: true,
+        domainId, hostname: domain.primaryDomain ?? null, status: 'unresolved', action: 'manual_mapping_required',
+        websiteId: null, applicationId: null, candidateApplicationIds: Object.freeze([]), requiresConfirmation: true,
       }));
       continue;
     }
 
     if (candidates.length > 1) {
       items.push(Object.freeze({
-        domainId,
-        hostname: domain.primaryDomain ?? null,
-        status: 'ambiguous',
-        action: 'manual_mapping_required',
-        websiteId: null,
-        applicationId: null,
-        candidateApplicationIds: Object.freeze(candidates),
-        requiresConfirmation: true,
+        domainId, hostname: domain.primaryDomain ?? null, status: 'ambiguous', action: 'manual_mapping_required',
+        websiteId: null, applicationId: null, candidateApplicationIds: Object.freeze(candidates), requiresConfirmation: true,
       }));
       continue;
     }
@@ -162,7 +162,8 @@ export function previewWebsiteMigration({ domains, websites, applications } = {}
     ambiguous: items.filter((item) => item.status === 'ambiguous').length,
     unresolved: items.filter((item) => item.status === 'unresolved').length,
   });
-  return Object.freeze({ version: 1, destructive: false, autoApply: false, counts, items: Object.freeze(items) });
+  const digest = previewDigest(items);
+  return Object.freeze({ version: 1, digest, destructive: false, autoApply: false, counts, items: Object.freeze(items) });
 }
 
-export const websiteMigrationPreviewInternals = Object.freeze({ applicationMatchesDomain });
+export const websiteMigrationPreviewInternals = Object.freeze({ applicationMatchesDomain, previewDigest });
