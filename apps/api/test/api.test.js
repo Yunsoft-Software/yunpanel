@@ -30,40 +30,13 @@ test('health endpoint returns API status', async () => {
   });
 });
 
-test('development agent endpoint is hidden outside development mode', async () => {
-  await withServer(createApp({ environment: 'production' }), async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/dev/agent/inspect`);
-    assert.equal(response.status, 404);
-  });
-});
-
-test('development agent endpoint returns the inspected agent payload', async () => {
-  const inspectAgent = async () => ({
-    requestId: 'request-0001',
-    status: 'succeeded',
-    result: { hostname: 'local-dev' },
-  });
-
-  await withServer(createApp({ inspectAgent, environment: 'development' }), async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/dev/agent/inspect`);
-    assert.equal(response.status, 200);
-    const body = await response.json();
-    assert.equal(body.status, 'succeeded');
-    assert.equal(body.result.hostname, 'local-dev');
-  });
-});
-
-test('agent errors are returned as a safe gateway error', async () => {
-  const inspectAgent = async () => {
-    throw new Error('agent is offline');
-  };
-
-  await withServer(createApp({ inspectAgent, environment: 'development' }), async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/dev/agent/inspect`);
-    assert.equal(response.status, 502);
-    const body = await response.json();
-    assert.equal(body.error.code, 'agent_unavailable');
-  });
+test('retired development agent inspection route is unavailable in every environment', async () => {
+  for (const environment of ['production', 'development']) {
+    await withServer(createApp({ environment }), async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/dev/agent/inspect`);
+      assert.equal(response.status, 404);
+    });
+  }
 });
 
 test('management routes fail closed without server-derived request auth', async () => {
