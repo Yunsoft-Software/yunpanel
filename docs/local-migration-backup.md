@@ -64,6 +64,24 @@ Packaged verification refuses the backup root itself and paths outside `/var/bac
 
 Any mismatch means the backup is not a valid migration gate. Do not bypass the check.
 
+## Preview restore intent without changing the host
+
+After verification, inspect the current restore intent before any rollback/rehearsal work:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs preview /var/backups/yunpanel/migration-<timestamp>
+```
+
+`preview` is deliberately non-destructive. It re-verifies the exact snapshot and compares only allowlisted top-level targets against the current host. Its output starts with `action=preview` and `destructive=false`, then reports safe path/type/action metadata only.
+
+Restore-intent classes are conservative:
+
+- mutable YunPanel/Nginx/Let's Encrypt/systemd state present in the snapshot can be classified as a future `restore_replace` target,
+- `/etc/passwd` and `/etc/group` are always `identity_reference` inputs and are **not** automatic restore targets,
+- optional paths absent from the snapshot are `preserve_current`; preview does not propose deleting current host state merely because the old snapshot lacked it.
+
+If a current top-level target is a symlink or another unsafe/unexpected type, preview fails closed. Preview does not extract `state.tar`, copy files, delete files, change ownership/modes, edit Unix users/groups or restart services.
+
 ## Use the verified snapshot as the ownership-mutation gate
 
 `local-runtime.mjs status <server-uuid>` remains read-only and does not need a backup argument. Every ownership mutation must receive the exact verified snapshot directory:
@@ -80,9 +98,9 @@ The backup path itself is not copied into server/job state, and the verification
 
 ## Restore boundary
 
-There is intentionally no automatic extract/restore command yet. A valid archive proves that the pre-migration snapshot was created and has not changed; it does not prove restore acceptance.
+There is intentionally no automatic extract/restore command yet. `preview` only describes a validated restore intent; it never mutates the host. A valid archive proves that the pre-migration snapshot was created and has not changed, but it does not prove restore acceptance.
 
-Before a restore implementation is enabled, it must additionally validate archive link targets and ownership/mode behavior in a staged extraction environment. Never introduce a blind `tar -x` against `/` as rollback automation.
+Before a restore implementation is enabled, it must additionally validate archive link targets, staged extraction contents, dedicated `yunapp-*` identity drift and ownership/mode behavior before any replacement is allowed. Never introduce a blind `tar -x` against `/` as rollback automation.
 
 Until the restore path has real Ubuntu/package acceptance, rollback continues to use the verified snapshot plus the explicit procedure in `docs/local-runtime-migration.md` and package rollback tooling.
 
@@ -96,6 +114,7 @@ On an isolated Ubuntu 24.04 package host, verify at minimum:
 - missing required source rejection,
 - top-level symlink source rejection,
 - archive-member escape rejection,
+- `preview` reports `destructive=false`, never extracts/copies/deletes, and treats `/etc/passwd` plus `/etc/group` as identity references only,
 - `create`, `bind` and `release` refusing to run without an exact valid `--backup-dir` snapshot,
 - no secret/file-content material in `manifest.json` or normal command output,
-- restoration rehearsal from the snapshot before any production migration is approved.
+- staged restoration rehearsal from the snapshot before any production migration is approved.
