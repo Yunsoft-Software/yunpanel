@@ -1,6 +1,7 @@
 import { inspectHostInventory } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.js';
+import { createDomainActivationReceiptStore } from './domain-activation-receipt.js';
 import { createLocalHostOperations } from './local-host-operations.js';
 import { resolveLocalRuntimeConfig } from './local-runtime-config.js';
 import { startLocalRuntime } from './local-runtime.js';
@@ -27,6 +28,7 @@ export async function startConfiguredLocalRuntime({
   applicationEnvironmentRegistry,
   createOperations = createLocalHostOperations,
   createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
+  createDomainActivationReceipts = createDomainActivationReceiptStore,
   createManagedServiceReceipts = createManagedServiceMutationReceiptStore,
   inspectInventory = inspectHostInventory,
   inspectServices = null,
@@ -42,6 +44,7 @@ export async function startConfiguredLocalRuntime({
   }
   if (typeof createOperations !== 'function'
     || typeof createDatabaseDeletionReceipts !== 'function'
+    || typeof createDomainActivationReceipts !== 'function'
     || typeof createManagedServiceReceipts !== 'function'
     || typeof inspectInventory !== 'function'
     || (inspectServices !== null && typeof inspectServices !== 'function')
@@ -59,6 +62,10 @@ export async function startConfiguredLocalRuntime({
   if (!databaseDeletionReceipts || typeof databaseDeletionReceipts.write !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_database_deletion_receipts_invalid', 'Local runtime database deletion receipt store is invalid');
   }
+  const domainActivationReceipts = createDomainActivationReceipts();
+  if (!domainActivationReceipts || typeof domainActivationReceipts.write !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_domain_activation_receipts_invalid', 'Local runtime domain activation receipt store is invalid');
+  }
   const managedServiceReceipts = createManagedServiceReceipts();
   if (!managedServiceReceipts || typeof managedServiceReceipts.write !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_managed_service_receipts_invalid', 'Local runtime managed service receipt store is invalid');
@@ -71,6 +78,20 @@ export async function startConfiguredLocalRuntime({
         jobId,
         databaseName: payload?.name,
         result,
+      });
+      return;
+    }
+
+    if (operation === OPERATIONS.DOMAIN_ACTIVATE) {
+      if (!result || result.active !== true || result.checksum !== payload?.checksum
+        || typeof result.configName !== 'string' || !result.configName) {
+        throw new Error('Domain activation result is not safe recovery evidence');
+      }
+      await domainActivationReceipts.write({
+        serverId,
+        jobId,
+        primaryDomain: payload.primaryDomain,
+        checksum: payload.checksum,
       });
       return;
     }
