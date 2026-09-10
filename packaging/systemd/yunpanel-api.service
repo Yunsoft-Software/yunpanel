@@ -9,6 +9,7 @@ User=root
 Group=root
 WorkingDirectory=/usr/lib/yunpanel
 EnvironmentFile=/etc/yunpanel/control-plane/api.env
+EnvironmentFile=/etc/yunpanel/control-plane/proxy.env
 ExecStart=/usr/local/bin/node apps/api/src/index.js
 Restart=on-failure
 RestartSec=3

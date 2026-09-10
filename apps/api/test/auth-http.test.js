@@ -7,6 +7,7 @@ import { createAuthenticatedApi } from '../src/auth-http.js';
 const origin = 'https://panel.example.test';
 const cookie = '__Host-yunpanel_session=valid-session';
 const csrfToken = 'test-csrf-value';
+const proxyToken = 'p'.repeat(43);
 function fakeStore() {
   let active = true;
   const session = { id: '12345678-1234-1234-1234-123456789012', user: { id: 'owner-id', username: 'admin', role: 'owner' }, csrfToken };
@@ -27,6 +28,8 @@ async function fixture(t, options = {}) {
   let calls = 0;
   const listener = createAuthenticatedApi({
     store: options.store ?? fakeStore(), publicOrigin: origin,
+    proxyToken: options.proxyToken,
+    trustedProxyIps: options.trustedProxyIps,
     createHandler: () => (request, response) => {
       calls += 1;
       const agent = /heartbeat|commands/.test(request.url);
@@ -102,6 +105,28 @@ test('login refuses cross-origin, missing-origin and wrong-content-type requests
   assert.equal((await app.request('/api/auth/login', { method: 'POST', body: '{}' })).status, 403);
   assert.equal((await app.request('/api/auth/login', { method: 'POST', headers: { origin }, body: '{}' })).status, 415);
   assert.equal((await app.request('/api/auth/login')).status, 405);
+});
+
+test('login rate limiting receives only authenticated single-hop client IP metadata', async (t) => {
+  const store = fakeStore();
+  const peers = [];
+  store.login = async ({ peer }) => { peers.push(peer); return { token: 'valid-session', session: store.getSession('valid-session') }; };
+  const app = await fixture(t, { store, proxyToken });
+  const headers = {
+    ...mutationHeaders,
+    'x-yunpanel-client-ip': '203.0.113.8',
+    'x-yunpanel-proxy-token': proxyToken,
+  };
+  assert.equal((await app.request('/api/auth/login', { method: 'POST', headers, body: {} })).status, 200);
+  assert.deepEqual(peers, ['203.0.113.8']);
+
+  for (const spoofed of [
+    { ...mutationHeaders, 'x-forwarded-for': '203.0.113.8' },
+    { ...mutationHeaders, 'x-real-ip': '203.0.113.8' },
+    { ...headers, 'x-yunpanel-proxy-token': 'x'.repeat(43) },
+    { ...headers, 'x-yunpanel-client-ip': '203.0.113.8, 192.0.2.1' },
+  ]) assert.equal((await app.request('/api/auth/login', { method: 'POST', headers: spoofed, body: {} })).status, 400);
+  assert.deepEqual(peers, ['203.0.113.8']);
 });
 
 test('auth body parser rejects malformed, non-object and oversized JSON', async (t) => {

@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import http from 'node:http';
+import { isIP } from 'node:net';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -15,17 +16,42 @@ const CONTENT_TYPES = new Map([
   ['.json', 'application/json; charset=utf-8'], ['.map', 'application/json; charset=utf-8'],
   ['.png', 'image/png'], ['.svg', 'image/svg+xml'], ['.webp', 'image/webp'],
 ]);
+const PROXY_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const TRUSTED_PROXY_DEFAULT = '127.0.0.1,::1';
 
-function parseAllowedClients(value) {
-  return new Set((value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean));
+function normalizeIp(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  const candidate = trimmed.toLowerCase().startsWith('::ffff:') ? trimmed.slice(7) : trimmed;
+  const version = isIP(candidate);
+  if (version === 4) return candidate;
+  if (version === 6) return new URL(`http://[${candidate}]`).hostname.slice(1, -1);
+  return null;
 }
 
-function clientAddress(request) {
-  const peer = request.socket.remoteAddress;
-  const loopback = peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1';
-  if (!loopback) return peer;
-  const realAddress = request.headers['x-real-ip'];
-  return typeof realAddress === 'string' ? realAddress.trim() : peer;
+function parseIpSet(value, label) {
+  const entries = (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+  const normalized = entries.map(normalizeIp);
+  if (normalized.some((entry) => entry === null)) throw new Error(`${label} must contain only IP addresses`);
+  return new Set(normalized);
+}
+
+function singleForwardedIp(value) {
+  if (value === undefined) return null;
+  if (typeof value !== 'string' || value.includes(',')) return false;
+  return normalizeIp(value) ?? false;
+}
+
+function clientAddress(request, trustedProxies) {
+  const peer = normalizeIp(request.socket.remoteAddress);
+  if (!peer) return null;
+  const realAddress = singleForwardedIp(request.headers['x-real-ip']);
+  const forwardedFor = singleForwardedIp(request.headers['x-forwarded-for']);
+  const hasForwarded = request.headers.forwarded !== undefined || realAddress !== null || forwardedFor !== null;
+  if (!trustedProxies.has(peer)) return hasForwarded ? null : peer;
+  if (request.headers.forwarded !== undefined || realAddress === false || forwardedFor === false) return null;
+  if (realAddress && forwardedFor && realAddress !== forwardedFor) return null;
+  return realAddress || forwardedFor || peer;
 }
 
 function reply(response, statusCode, body, contentType = 'text/plain; charset=utf-8') {
@@ -46,7 +72,7 @@ function isTransportPath(pathname) {
     || /^\/api\/servers\/[^/]+\/(?:heartbeat|commands(?:\/|$)|applications\/[^/]+\/environment$)/.test(pathname);
 }
 
-function proxyRequest(request, response, { apiHost, apiPort, publicOrigin }) {
+function proxyRequest(request, response, { apiHost, apiPort, clientIp, proxyToken, publicOrigin }) {
   if (!sameOriginMutation(request, publicOrigin)) {
     reply(response, 403, 'Cross-origin panel mutations are not allowed.');
     return;
@@ -57,9 +83,12 @@ function proxyRequest(request, response, { apiHost, apiPort, publicOrigin }) {
   if (isTransportPath(upstreamPathname)) { reply(response, 404, 'Not found.'); return; }
   const headers = {};
   for (const [name, value] of Object.entries(request.headers)) {
-    if (!HOP_BY_HOP_HEADERS.has(name) && value !== undefined && !['authorization', 'forwarded', 'x-forwarded-for', 'x-real-ip'].includes(name)) headers[name] = value;
+    if (!HOP_BY_HOP_HEADERS.has(name) && value !== undefined
+      && !['authorization', 'forwarded', 'x-forwarded-for', 'x-real-ip', 'x-yunpanel-client-ip', 'x-yunpanel-proxy-token'].includes(name)) headers[name] = value;
   }
   headers.host = `${apiHost}:${apiPort}`;
+  headers['x-yunpanel-client-ip'] = clientIp;
+  headers['x-yunpanel-proxy-token'] = proxyToken;
   // Cookies and CSRF headers pass through. The gateway never grants an administrator identity.
   const upstream = http.request({
     host: apiHost, port: apiPort, method: request.method,
@@ -114,25 +143,33 @@ export function createPanelServer({
   apiHost = process.env.YUNPANEL_API_HOST ?? '127.0.0.1',
   apiPort = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10),
   publicOrigin = process.env.YUNPANEL_PUBLIC_ORIGIN,
+  proxyToken = process.env.YUNPANEL_INTERNAL_PROXY_TOKEN,
+  trustedProxyIps = process.env.YUNPANEL_TRUSTED_PROXY_IPS ?? TRUSTED_PROXY_DEFAULT,
   webRoot = process.env.YUNPANEL_WEB_ROOT ?? DEFAULT_WEB_ROOT,
 } = {}) {
-  const allowedClients = parseAllowedClients(allowedClientIps);
+  const allowedClients = parseIpSet(allowedClientIps, 'YUNPANEL_ALLOWED_CLIENT_IPS');
+  const trustedProxies = parseIpSet(trustedProxyIps, 'YUNPANEL_TRUSTED_PROXY_IPS');
   const resolvedWebRoot = path.resolve(webRoot);
   if (allowedClients.size === 0) throw new Error('YUNPANEL_ALLOWED_CLIENT_IPS is required');
+  if (trustedProxies.size === 0) throw new Error('YUNPANEL_TRUSTED_PROXY_IPS is required');
+  if (typeof proxyToken !== 'string' || !PROXY_TOKEN_PATTERN.test(proxyToken)) throw new Error('YUNPANEL_INTERNAL_PROXY_TOKEN is required');
   if (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535) throw new Error('YUNPANEL_API_PORT is invalid');
   if (!publicOrigin || new URL(publicOrigin).origin !== publicOrigin) throw new Error('YUNPANEL_PUBLIC_ORIGIN is required');
   return http.createServer(async (request, response) => {
-    if (!allowedClients.has(clientAddress(request))) {
+    const clientIp = clientAddress(request, trustedProxies);
+    if (!clientIp || !allowedClients.has(clientIp)) {
       reply(response, 403, 'This panel is restricted to an approved client address.'); return;
     }
     const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
     if (requestUrl.pathname === '/api/health' || requestUrl.pathname.startsWith('/api/panel/') || requestUrl.pathname.startsWith('/api/auth/')) {
-      proxyRequest(request, response, { apiHost, apiPort, publicOrigin }); return;
+      proxyRequest(request, response, { apiHost, apiPort, clientIp, proxyToken, publicOrigin }); return;
     }
     if (requestUrl.pathname.startsWith('/api/')) { reply(response, 404, 'Not found.'); return; }
     await serveStatic(request, response, resolvedWebRoot, requestUrl.pathname);
   });
 }
+
+export const panelServerInternals = Object.freeze({ normalizeIp, parseIpSet, clientAddress });
 
 export function startPanelServer(options = {}) {
   const host = options.host ?? process.env.YUNPANEL_WEB_HOST ?? '127.0.0.1';

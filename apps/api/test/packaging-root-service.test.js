@@ -5,6 +5,7 @@ import test from 'node:test';
 const apiUnitUrl = new URL('../../../packaging/systemd/yunpanel-api.service', import.meta.url);
 const webUnitUrl = new URL('../../../packaging/systemd/yunpanel-web.service', import.meta.url);
 const controlUrl = new URL('../../../packaging/debian/control', import.meta.url);
+const postinstUrl = new URL('../../../packaging/debian/postinst', import.meta.url);
 
 test('packaged management API is the privileged host process while the web gateway remains restricted', async () => {
   const [apiUnit, webUnit] = await Promise.all([
@@ -31,4 +32,18 @@ test('Debian package description documents the local privileged runtime as the t
   assert.match(control, /privileged local\n host runtime/);
   assert.match(control, /legacy yun-agent service remains packaged only for controlled migration/);
   assert.doesNotMatch(control, /privileged allowlisted\n server agent/);
+});
+
+test('packaged gateway authenticates canonical client IP metadata to the root API', async () => {
+  const [apiUnit, webUnit, postinst] = await Promise.all([
+    readFile(apiUnitUrl, 'utf8'),
+    readFile(webUnitUrl, 'utf8'),
+    readFile(postinstUrl, 'utf8'),
+  ]);
+  for (const unit of [apiUnit, webUnit]) {
+    assert.match(unit, /^EnvironmentFile=\/etc\/yunpanel\/control-plane\/proxy\.env$/m);
+  }
+  assert.match(postinst, /randomBytes\(32\)\.toString\("base64url"\)/);
+  assert.match(postinst, /install -o root -g root -m 0600 "\$proxy_temp" "\$proxy_env"/);
+  assert.match(postinst, /printf 'YUNPANEL_INTERNAL_PROXY_TOKEN=%s\\n' "\$proxy_token" >>"\$proxy_temp"/);
 });

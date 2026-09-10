@@ -18,18 +18,20 @@ This is not an automatic live deployment. Back up configuration/state and confir
 
 Set `YUNPANEL_PUBLIC_ORIGIN` to the same **exact** public origin in both the API and web service environments, for example `https://cryptoraichu.website` without a trailing slash. The API requires this in production and refuses to start with a missing or non-HTTPS origin. The old gateway's origin setting alone is not enough. Keep `YUNPANEL_ALLOWED_CLIENT_IPS`, the loopback listeners and the current Nginx access policy.
 
-The current packaged API still runs as `yunpanel` with writes allowed under `/var/lib/yunpanel/control-plane`. Configure an absolute `YUNPANEL_AUTH_DB` such as `/var/lib/yunpanel/control-plane/auth/auth.sqlite` in the API environment. Use exactly the same path for the local CLI. Without an override, the database is placed in `auth/auth.sqlite` alongside `YUNPANEL_SERVER_STORE`.
+Packaged installs generate `/etc/yunpanel/control-plane/proxy.env` as a root-owned `0600` file. The web gateway removes caller-supplied forwarding headers, resolves exactly one client address from an explicitly trusted immediate proxy (`YUNPANEL_TRUSTED_PROXY_IPS`, loopback by default), and authenticates that address to the API with the generated internal proxy token. The API rejects standard forwarding headers and invalid, unsigned or non-single-hop client metadata. This token only authenticates the local gateway hop; it is not a user session or management bearer credential.
 
-The auth directory must be owned by the API service identity with mode `0700`; the database must be a regular non-symlink file with mode `0600`. The service creates a missing private directory/database. It deliberately refuses unsafe ownership/permissions rather than changing unrelated directories. Do not choose a path outside the existing unit's `ReadWritePaths`, run the CLI as a different file owner, or solve this with recursive chmod/chown. The future root-backend migration must explicitly preserve/migrate the auth database too.
+The packaged API runs as `root` and keeps control-plane state below `/var/lib/yunpanel/control-plane`. Configure an absolute `YUNPANEL_AUTH_DB` such as `/var/lib/yunpanel/control-plane/auth/auth.sqlite` in the API environment. Use exactly the same path for the local CLI. Without an override, the database is placed in `auth/auth.sqlite` alongside `YUNPANEL_SERVER_STORE`.
+
+The auth directory must be root-owned with mode `0700`; the database must be a root-owned regular non-symlink file with mode `0600`. Packaged startup has a narrow migration for the legacy private auth directory and SQLite sidecars; it refuses symlinks, foreign ownership and unsafe modes rather than recursively changing unrelated state. Run the CLI as root against the same database path.
 
 The package includes `/usr/lib/yunpanel/scripts/auth.mjs`. Build, install and test the candidate package in the test environment before publishing any APT release. Existing application state, env/master keys, certificates, vhosts and agent units are not migrated by these authentication changes. MFA adds auth schema version 2: preserve a consistent pre-upgrade backup and review the rollback restrictions in `mfa.md` before the first upgraded start. The required-MFA policy does not change that schema.
 
 ## Initial Owner
 
-After configuring the API's database path, generate a single-use setup token locally as the current service user:
+After configuring the API's database path, generate a single-use setup token locally as root:
 
 ```bash
-sudo -u yunpanel env YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.sqlite \
+sudo env YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.sqlite \
   /usr/local/bin/node /usr/lib/yunpanel/scripts/auth.mjs setup-token
 ```
 
@@ -50,7 +52,7 @@ The account dialog supports changing the password, ending individual sessions an
 Local password recovery does not require mail:
 
 ```bash
-sudo -u yunpanel env YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.sqlite \
+sudo env YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.sqlite \
   /usr/local/bin/node /usr/lib/yunpanel/scripts/auth.mjs reset-password <username>
 ```
 

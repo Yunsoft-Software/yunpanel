@@ -14,7 +14,7 @@ In the required Owner setup workspace or **Hesabım / İki adımlı doğrulama**
 
 Enabling MFA or regenerating recovery codes rotates the current session and revokes other sessions. Ten recovery codes are shown once; the user must acknowledge saving them before closing the account dialog normally or continuing from the enrollment workspace. Codes and the setup key remain only in component memory. The backend stores recovery-code digests, not plaintext codes, and atomically consumes them. TOTP counter tracking rejects replayed codes.
 
-Disabling MFA requires the password and a current TOTP/recovery proof, revokes sessions and signs the user out. Replacing an authenticator currently means disabling it, signing in again and enrolling the replacement. HTTPS management requires current Owner enrollment, including after local MFA reset; only explicit loopback HTTP development is exempt. Integration with the future root/terminal socket paths remains pending in `plan.md`. Keep the existing IP restriction and do not expose a privileged/root release on the strength of this increment alone.
+Disabling MFA requires the password and a current TOTP/recovery proof, revokes sessions and signs the user out. Replacing an authenticator currently means disabling it, signing in again and enrolling the replacement. HTTPS management requires current Owner enrollment, including after local MFA reset; only explicit loopback HTTP development is exempt. Terminal/WebSocket revocation integration remains pending in `plan.md`. Keep the existing IP restriction and do not expose a privileged/root release until the package and migration acceptance gates pass.
 
 ## Session integration
 
@@ -30,18 +30,18 @@ MFA uses `YUNPANEL_SECRET_MASTER_KEY`, encoded as 64 hexadecimal characters or b
 
 The auth store supports schema version 2 and adds its MFA tables on initialization. The required-MFA policy introduces no further schema migration. Back up the auth database consistently before the first upgraded start: stop API/CLI writers or use a supported SQLite backup mechanism, and account for WAL state. Do not copy only the main database file during writes. Keep an independent console/SSH recovery path. The old schema-1 package cannot be assumed to accept schema 2; rollback needs a compatible application/state snapshot. Do not manually decrement `PRAGMA user_version`. Restoring an older snapshot can restore old passwords and sessions, so recovery/revocation must precede reopening access.
 
-Retain the current service identity and writable path. The packaged API still runs as `yunpanel`, not the planned root backend. See `authentication.md` for exact HTTPS-origin configuration and private database ownership. No agent, vhost, certificate, application release or live server was migrated by this merge.
+The packaged API runs as root; retain the exact auth database path and master key. See `authentication.md` for exact HTTPS-origin configuration, narrow legacy ownership migration and private database ownership. No agent, vhost, certificate, application release or live server is migrated merely by changing MFA state.
 
 ## Local recovery
 
 Password recovery and MFA recovery are separate operations. On a host using the documented default packaged layout:
 
 ```bash
-sudo -u yunpanel env YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.sqlite \
+sudo env YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.sqlite \
   /usr/local/bin/node /usr/lib/yunpanel/scripts/auth.mjs reset-mfa <username> --confirm
 ```
 
-Replace `<username>` with the affected account. This requires local filesystem authority as the current service user, not public HTTP access. The command removes the account's factor, recovery codes, pending challenges and sessions; it does not change the password. It deliberately does not require decryption with a lost key. Keep the panel network restriction in place, restore/configure the correct key, sign in and re-enroll the authenticator. The next password login remains self-service-only until enrollment succeeds. Changing the password alone does not remove MFA. Never record real keys, cookies, passwords, setup tokens or recovery codes in Git or test evidence.
+Replace `<username>` with the affected account. This requires local root filesystem authority, not public HTTP access. The command removes the account's factor, recovery codes, pending challenges and sessions; it does not change the password. It deliberately does not require decryption with a lost key. Keep the panel network restriction in place, restore/configure the correct key, sign in and re-enroll the authenticator. The next password login remains self-service-only until enrollment succeeds. Changing the password alone does not remove MFA. Never record real keys, cookies, passwords, setup tokens or recovery codes in Git or test evidence.
 
 ## Validation in the consolidation/UI increment — 2026-09-09
 

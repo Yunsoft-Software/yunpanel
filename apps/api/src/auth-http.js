@@ -1,4 +1,5 @@
 import { handleAuditRead } from './audit-http.js';
+import { isIP } from 'node:net';
 import { withAuditActor } from './audit-request-context.js';
 import { AuthError, safeEqual } from './auth-error.js';
 import { attachManagementAudit } from './management-audit.js';
@@ -7,6 +8,8 @@ import { requireReadOnlyRequest } from './panel-access.js';
 import { handleUserAdmin } from './user-admin-http.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
+const PROXY_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const TRUSTED_PROXY_DEFAULT = '127.0.0.1,::1';
 const AGENT_ROUTES = [
   ['POST', /^\/api\/servers\/[^/%]+\/heartbeat$/],
   ['GET', /^\/api\/servers\/[^/%]+\/commands\/next$/],
@@ -16,6 +19,40 @@ const AGENT_ROUTES = [
 
 export function isAgentRoute(method, pathname) {
   return AGENT_ROUTES.some(([verb, pattern]) => verb === method && pattern.test(pathname));
+}
+
+function normalizeIp(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  const candidate = trimmed.toLowerCase().startsWith('::ffff:') ? trimmed.slice(7) : trimmed;
+  const version = isIP(candidate);
+  if (version === 4) return candidate;
+  if (version === 6) return new URL(`http://[${candidate}]`).hostname.slice(1, -1);
+  return null;
+}
+
+function parseTrustedProxies(value) {
+  const entries = (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+  const normalized = entries.map(normalizeIp);
+  if (entries.length === 0 || normalized.some((entry) => entry === null)) throw new Error('YUNPANEL_TRUSTED_PROXY_IPS must contain only IP addresses');
+  return new Set(normalized);
+}
+
+function requestPeer(request, { proxyToken, trustedProxies }) {
+  const peer = normalizeIp(request.socket.remoteAddress);
+  if (!peer) throw new AuthError('client_address_invalid', 'Client address could not be verified.', 400);
+  const clientHeader = request.headers['x-yunpanel-client-ip'];
+  const tokenHeader = request.headers['x-yunpanel-proxy-token'];
+  const standardForwarding = ['forwarded', 'x-forwarded-for', 'x-real-ip'].some((name) => request.headers[name] !== undefined);
+  const hasInternalHeaders = clientHeader !== undefined || tokenHeader !== undefined;
+  if (standardForwarding || (hasInternalHeaders && (!trustedProxies.has(peer)
+    || typeof proxyToken !== 'string' || !safeEqual(tokenHeader, proxyToken)))) {
+    throw new AuthError('proxy_headers_forbidden', 'Proxy headers could not be verified.', 400);
+  }
+  if (!hasInternalHeaders) return peer;
+  const clientIp = typeof clientHeader === 'string' && !clientHeader.includes(',') ? normalizeIp(clientHeader) : null;
+  if (!clientIp || typeof tokenHeader !== 'string') throw new AuthError('client_address_invalid', 'Client address could not be verified.', 400);
+  return clientIp;
 }
 
 function json(response, status, payload) {
@@ -52,7 +89,14 @@ function readJson(request) {
 }
 
 /** Authentication is checked BEFORE the application's handler, on every deployed API request. */
-export function createAuthenticatedApi({ createHandler, store, publicOrigin, development = false }) {
+export function createAuthenticatedApi({
+  createHandler,
+  store,
+  publicOrigin,
+  development = false,
+  proxyToken,
+  trustedProxyIps = TRUSTED_PROXY_DEFAULT,
+}) {
   let origin;
   try { origin = new URL(publicOrigin); } catch { throw new Error('YUNPANEL_PUBLIC_ORIGIN is required'); }
   const localDevelopment = development && origin.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname);
@@ -60,6 +104,10 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
     throw new Error('Panel origin must be an exact HTTPS origin (HTTP is only allowed for loopback development)');
   }
   const ownerPolicy = createOwnerMfaPolicy({ store, required: !localDevelopment });
+  const trustedProxies = parseTrustedProxies(trustedProxyIps);
+  if (proxyToken !== undefined && (typeof proxyToken !== 'string' || !PROXY_TOKEN_PATTERN.test(proxyToken))) {
+    throw new Error('YUNPANEL_INTERNAL_PROXY_TOKEN is invalid');
+  }
   const cookieName = localDevelopment ? 'yunpanel_session' : '__Host-yunpanel_session';
   const mfaCookieName = localDevelopment ? 'yunpanel_mfa' : '__Host-yunpanel_mfa';
   const cookieOptions = `Path=/; HttpOnly; SameSite=Strict${localDevelopment ? '' : '; Secure'}`;
@@ -104,7 +152,7 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
     }
     const rawToken = readCookie(request, cookieName);
     const challengeToken = readCookie(request, mfaCookieName);
-    const peer = request.socket.remoteAddress ?? 'unknown';
+    const peer = requestPeer(request, { proxyToken, trustedProxies });
     if (pathname === '/api/auth/login' || pathname === '/api/auth/setup') {
       if (request.method !== 'POST') throw new AuthError('method_not_allowed', 'Use POST.', 405);
       checkOrigin(request);
@@ -232,3 +280,5 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
     });
   };
 }
+
+export const authHttpInternals = Object.freeze({ normalizeIp, parseTrustedProxies, requestPeer });

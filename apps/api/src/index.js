@@ -32,9 +32,13 @@ const websiteMigrationPolicyStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_P
 const websiteMigrationLedgerStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_LEDGER_STORE ?? path.resolve('.data/website-migration-ledger.json');
 const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRONMENT_STORE ?? path.resolve('.data/application-environment-registry.json');
 const authStorePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStorePath), 'auth', 'auth.sqlite');
+const internalProxyToken = process.env.YUNPANEL_INTERNAL_PROXY_TOKEN;
 const certificateRenewalIntervalMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS ?? `${6 * 60 * 60 * 1000}`, 10);
 const certificateRenewBeforeMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEW_BEFORE_MS ?? `${30 * 24 * 60 * 60 * 1000}`, 10);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('YUNPANEL_API_PORT must be a valid TCP port');
+if (process.env.NODE_ENV !== 'development' && !/^[A-Za-z0-9_-]{43}$/.test(internalProxyToken ?? '')) {
+  throw new Error('YUNPANEL_INTERNAL_PROXY_TOKEN is required in production');
+}
 
 function reportLocalExecutorFault(error) {
   const code = typeof error?.code === 'string' ? error.code : 'local_executor_fault';
@@ -99,6 +103,8 @@ const listener = createAuthenticatedApi({
   store: authStore,
   publicOrigin: process.env.YUNPANEL_PUBLIC_ORIGIN ?? (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:5173' : undefined),
   development: process.env.NODE_ENV === 'development',
+  proxyToken: internalProxyToken,
+  trustedProxyIps: process.env.YUNPANEL_TRUSTED_PROXY_IPS,
   createHandler: () => createApp({
     registry,
     domainRegistry,

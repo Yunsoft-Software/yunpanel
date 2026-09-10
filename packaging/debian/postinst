@@ -14,6 +14,19 @@ install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/control-plane
 install -d -o root -g root -m 0700 /etc/yunpanel/agent
 install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/web
 
+proxy_env=/etc/yunpanel/control-plane/proxy.env
+proxy_token_count=$(grep -Ec '^YUNPANEL_INTERNAL_PROXY_TOKEN=' "$proxy_env" 2>/dev/null || true)
+if [ "$proxy_token_count" -ne 1 ] || ! grep -Eq '^YUNPANEL_INTERNAL_PROXY_TOKEN=[A-Za-z0-9_-]{43}$' "$proxy_env" 2>/dev/null; then
+  proxy_token=$(/usr/local/bin/node --input-type=module -e 'import { randomBytes } from "node:crypto"; process.stdout.write(randomBytes(32).toString("base64url"));')
+  proxy_temp=$(mktemp /etc/yunpanel/control-plane/proxy.env.XXXXXX)
+  if [ -f "$proxy_env" ]; then
+    grep -v '^YUNPANEL_INTERNAL_PROXY_TOKEN=' "$proxy_env" >"$proxy_temp" || true
+  fi
+  printf 'YUNPANEL_INTERNAL_PROXY_TOKEN=%s\n' "$proxy_token" >>"$proxy_temp"
+  install -o root -g root -m 0600 "$proxy_temp" "$proxy_env"
+  rm -f "$proxy_temp"
+fi
+
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
   systemctl enable yunpanel-api.service yunpanel-web.service >/dev/null 2>&1 || true

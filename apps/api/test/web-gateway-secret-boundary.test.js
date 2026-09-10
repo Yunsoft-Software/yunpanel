@@ -19,6 +19,9 @@ test('web gateway cannot inherit privileged API secrets or read control-plane st
     'YUNPANEL_JOB_STORE',
     'YUNPANEL_CERTIFICATE_STORE',
     'YUNPANEL_APPLICATION_STORE',
+    'YUNPANEL_WEBSITE_STORE',
+    'YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE',
+    'YUNPANEL_WEBSITE_MIGRATION_LEDGER_STORE',
     'YUNPANEL_APPLICATION_ENVIRONMENT_STORE',
     'YUNPANEL_LOCAL_SERVER_ID',
   ]) assert.ok(unset.split(/\s+/).includes(name), `${name} must be removed from the web process environment`);

@@ -6,6 +6,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { createPanelServer } from '../server.js';
 
+const proxyToken = 'p'.repeat(43);
+
 async function listen(server) {
   server.listen(0, '127.0.0.1');
   await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
@@ -19,7 +21,13 @@ async function fixture(t, listener) {
   const upstreamPort = await listen(upstream);
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-web-'));
   await writeFile(path.join(directory, 'index.html'), '<title>YunPanel</title>');
-  const panel = createPanelServer({ allowedClientIps: '203.0.113.8', apiPort: upstreamPort, publicOrigin: 'https://panel.example.com', webRoot: directory });
+  const panel = createPanelServer({
+    allowedClientIps: '203.0.113.8',
+    apiPort: upstreamPort,
+    proxyToken,
+    publicOrigin: 'https://panel.example.com',
+    webRoot: directory,
+  });
   const panelPort = await listen(panel);
   t.after(async () => { await close(panel); await close(upstream); await rm(directory, { recursive: true, force: true }); });
   return { request: (pathname, options = {}) => fetch(`http://127.0.0.1:${panelPort}${pathname}`, { ...options, headers: { 'x-real-ip': '203.0.113.8', ...options.headers } }) };
@@ -28,15 +36,46 @@ async function fixture(t, listener) {
 test('panel gateway keeps the IP restriction but never injects admin authorization', async (t) => {
   const requests = [];
   const app = await fixture(t, (request, response) => {
-    requests.push({ method: request.method, url: request.url, authorization: request.headers.authorization, cookie: request.headers.cookie });
+    requests.push({
+      method: request.method,
+      url: request.url,
+      authorization: request.headers.authorization,
+      cookie: request.headers.cookie,
+      clientIp: request.headers['x-yunpanel-client-ip'],
+      proxyToken: request.headers['x-yunpanel-proxy-token'],
+    });
     response.writeHead(200, { 'content-type': 'application/json' }); response.end('{"data":[]}');
   });
   assert.equal((await app.request('/', { headers: { 'x-real-ip': '192.0.2.9' } })).status, 403);
   const page = await app.request('/settings');
   assert.equal(page.status, 200);
   assert.match(await page.text(), /YunPanel/);
-  assert.equal((await app.request('/api/panel/servers?active=true', { headers: { authorization: 'Bearer rejected-browser-value', cookie: '__Host-yunpanel_session=test-cookie' } })).status, 200);
-  assert.deepEqual(requests[0], { method: 'GET', url: '/api/servers?active=true', authorization: undefined, cookie: '__Host-yunpanel_session=test-cookie' });
+  assert.equal((await app.request('/api/panel/servers?active=true', { headers: {
+    authorization: 'Bearer rejected-browser-value',
+    cookie: '__Host-yunpanel_session=test-cookie',
+    'x-yunpanel-client-ip': '192.0.2.55',
+    'x-yunpanel-proxy-token': 'attacker-value',
+  } })).status, 200);
+  assert.deepEqual(requests[0], {
+    method: 'GET',
+    url: '/api/servers?active=true',
+    authorization: undefined,
+    cookie: '__Host-yunpanel_session=test-cookie',
+    clientIp: '203.0.113.8',
+    proxyToken,
+  });
+});
+
+test('gateway rejects spoofed or ambiguous forwarding chains before proxying', async (t) => {
+  let requests = 0;
+  const app = await fixture(t, (_request, response) => { requests += 1; response.end('{}'); });
+  for (const headers of [
+    { forwarded: 'for=203.0.113.8' },
+    { 'x-forwarded-for': '203.0.113.8, 192.0.2.1' },
+    { 'x-forwarded-for': '192.0.2.1' },
+    { 'x-real-ip': 'not-an-ip' },
+  ]) assert.equal((await app.request('/api/auth/session', { headers })).status, 403);
+  assert.equal(requests, 0);
 });
 
 test('panel gateway rejects cross-origin and missing-origin mutations', async (t) => {
@@ -86,7 +125,7 @@ test('IP-approved browser still needs login through the complete gateway/API cha
   const { token: setupToken } = store.issueSetupToken();
   const password = randomBytes(32).toString('base64url');
   await store.completeSetup({ setupToken, username: 'owner', password });
-  const listener = createAuthenticatedApi({ store, publicOrigin: 'https://panel.example.com', createHandler: () => (_request, response) => { response.writeHead(200, { 'content-type': 'application/json' }); response.end('{"data":[]}'); } });
+  const listener = createAuthenticatedApi({ store, proxyToken, publicOrigin: 'https://panel.example.com', createHandler: () => (_request, response) => { response.writeHead(200, { 'content-type': 'application/json' }); response.end('{"data":[]}'); } });
   const app = await fixture(t, listener);
   assert.equal((await app.request('/api/panel/servers')).status, 401);
   const headers = { origin: 'https://panel.example.com', 'content-type': 'application/json' };
