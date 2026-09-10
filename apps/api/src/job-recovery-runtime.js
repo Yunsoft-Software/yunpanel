@@ -1,6 +1,10 @@
 import os from 'node:os';
 import path from 'node:path';
-import { createNginxManager, createStaticDeploymentEvidenceInspector } from '@yunpanel/host-runtime';
+import {
+  createDatabaseManager,
+  createNginxManager,
+  createStaticDeploymentEvidenceInspector,
+} from '@yunpanel/host-runtime';
 import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { createDomainRegistry } from './domain-registry.js';
@@ -9,6 +13,7 @@ import { createLocalHostOperations } from './local-host-operations.js';
 import { createJobRecoveryContextReader } from './job-recovery-context.js';
 import { createJobRecoveryStore } from './job-recovery-store.js';
 import { reconcileTerminalRecovery } from './job-recovery-command.js';
+import { recoverRunningDatabaseCreate } from './job-running-database-recovery.js';
 import { recoverRunningDomainStage } from './job-running-domain-recovery.js';
 import { recoverRunningInspection } from './job-running-recovery.js';
 import { recoverRunningStaticDeployment } from './job-running-static-recovery.js';
@@ -383,6 +388,58 @@ export async function runRunningStaticDeploymentRecoveryFromStores({
     serviceStatus,
     loadJobContext: (id) => contextReader.read(id),
     inspectDeploymentEvidence: (identity) => evidenceInspector.inspect(identity),
+  });
+  return Object.freeze({ ...result, statePaths: paths });
+}
+
+export async function runRunningDatabaseCreateRecoveryFromStores({
+  serverId,
+  jobId,
+  hostname = os.hostname(),
+  env = process.env,
+  packaged = false,
+  cwd = process.cwd(),
+  serverRegistryFactory = createServerRegistry,
+  jobRegistryFactory = createJobRegistry,
+  durableRegistryFactory = createDurableJobRegistry,
+  recoveryStoreFactory = createJobRecoveryStore,
+  contextReaderFactory = createJobRecoveryContextReader,
+  databaseManagerFactory = createDatabaseManager,
+  serviceStatus = createMigrationServiceStatus(),
+  recoverCommand = recoverRunningDatabaseCreate,
+} = {}) {
+  for (const dependency of [
+    serverRegistryFactory,
+    jobRegistryFactory,
+    durableRegistryFactory,
+    recoveryStoreFactory,
+    contextReaderFactory,
+    databaseManagerFactory,
+    serviceStatus,
+    recoverCommand,
+  ]) {
+    if (typeof dependency !== 'function') {
+      throw new JobRecoveryRuntimeError('job_recovery_runtime_dependencies_invalid', 'Database recovery runtime dependencies are invalid');
+    }
+  }
+
+  const paths = resolveJobRecoveryPaths({ env, packaged, cwd });
+  const serverRegistry = await initRegistry(serverRegistryFactory({ filePath: paths.serverStore }), 'Server');
+  await requireRecoveryServerHost({ serverRegistry, serverId, hostname });
+  const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
+  const contextReader = createRecoveryContextReader({ paths, contextReaderFactory });
+  const databaseManager = databaseManagerFactory();
+  if (!databaseManager || typeof databaseManager.inspect !== 'function') {
+    throw new JobRecoveryRuntimeError('job_recovery_database_evidence_invalid', 'Database recovery evidence provider is invalid');
+  }
+
+  const result = await recoverCommand({
+    serverId,
+    jobId,
+    jobRegistry,
+    serviceStatus,
+    loadJobContext: (id) => contextReader.read(id),
+    inspectDatabaseState: () => databaseManager.inspect(),
   });
   return Object.freeze({ ...result, statePaths: paths });
 }
