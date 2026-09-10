@@ -7,7 +7,6 @@ import {
   runRunningDatabaseCreateRecoveryFromStores,
   runRunningDatabaseDeleteRecoveryFromStores,
   runRunningDomainStageRecoveryFromStores,
-  runRunningInspectionRecoveryFromStores,
   runRunningStaticDeploymentRecoveryFromStores,
   runTerminalRecoveryFromStores,
 } from '../apps/api/src/job-recovery-runtime.js';
@@ -16,6 +15,7 @@ import { runRunningDomainActivationRecoveryFromStores } from '../apps/api/src/jo
 import { runRunningNodeDeploymentRecoveryFromStores } from '../apps/api/src/job-running-node-deployment-recovery-runtime.js';
 import { runRunningNodeRestartRecoveryFromStores } from '../apps/api/src/job-running-node-restart-recovery-runtime.js';
 import { runRunningNodeRollbackRecoveryFromStores } from '../apps/api/src/job-running-node-rollback-recovery-runtime.js';
+import { runRunningReadOnlyRecoveryFromStores } from '../apps/api/src/job-running-readonly-recovery-runtime.js';
 import { runRunningServiceControlRecoveryFromStores } from '../apps/api/src/job-running-service-recovery-runtime.js';
 import { runRunningServiceReceiptRecoveryFromStores } from '../apps/api/src/job-running-service-receipt-recovery-runtime.js';
 import { runRunningStaticRollbackRecoveryFromStores } from '../apps/api/src/job-running-static-rollback-recovery-runtime.js';
@@ -123,7 +123,7 @@ export async function runJobRecoveryCli({
   jobRegistryFactory = createJobRegistry,
   inspect = inspectDurableJobRecovery,
   recover = runTerminalRecoveryFromStores,
-  recoverRunning = runRunningInspectionRecoveryFromStores,
+  recoverRunning = runRunningReadOnlyRecoveryFromStores,
   recoverDomainStage = runRunningDomainStageRecoveryFromStores,
   recoverDomainActivate = runRunningDomainActivationRecoveryFromStores,
   recoverStaticDeployment = runRunningStaticDeploymentRecoveryFromStores,
