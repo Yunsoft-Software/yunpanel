@@ -1,42 +1,66 @@
-# Domain hierarchy: implementation and validation boundary
+# Domain hierarchy — current backend boundary
 
 ## Implemented scope
 
-The domain registry accepts an explicit optional `parentDomainId`. Reads return that reference and a derived `kind` (`domain` or `subdomain`). Parent and child must share a server, the normalized child hostname must be below the parent's primary hostname at a dot boundary, and persisted links must not contain missing ancestors, duplicate IDs or cycles. Aliases remain attached names; an alias is not implicitly promoted to a parent resource.
+The domain registry supports an explicit optional `parentDomainId`. Parent/child relationships are stored as resource identity, not inferred from string suffixes at read time.
 
-Each child remains its own domain record with its own static/proxy target and certificate lifecycle. This does not yet create a separate Website/application/Unix-user model. IDN/punycode input, reparenting existing domains, full website migration, per-site runtime tabs and dependency-aware deletion remain in `plan.md`.
+Current hierarchy rules include:
 
-The additive field uses the existing version-1 registry. Reading legacy records neither rewrites the file nor guesses parentage from hostname suffixes. Existing records without a parent remain independent. This compatibility step is not the planned versioned Website migration. Older code does not enforce hierarchy, so package rollback still requires explicit operational validation.
+- parent and child must belong to the same server,
+- the normalized child hostname must be below the parent's primary hostname at a dot boundary,
+- duplicate IDs, missing parents and cycles are rejected,
+- aliases remain attached names and are not silently promoted into independent parent resources,
+- legacy domain records without a parent remain independent rather than receiving guessed ancestry.
 
-The domain view has expandable branches, domain/alias search with ancestor context and an Add subdomain form. Subdomain creation uses the selected parent's server rather than the first server in the collection. Inputs survive failed submission. Existing staging, activation and certificate controls remain. Creating a record does not publish DNS or configure mail.
+Each child is still its own domain record with its own target and certificate lifecycle. Creating a domain/subdomain record does not publish external DNS and does not create a mail domain.
 
-`apps/api/src/app.js` composes the parent-aware POST handler from `domain-http.js` ahead of the legacy core. `core-app.js` preserves the original core handler from commit `2571d221425e16398131dd5bb085004115bdb606`, blob `77cdeef5130a0ac5384473fadc6c59728f154e54`, byte-for-byte. Production must continue entering through `createAuthenticatedApi` in `index.js`; neither factory is a new public listener. The in-process compatibility guard remains until the planned authentication refactor. Do not start `core-app.js` or `createApp().listen()` as an alternative production entry point.
+## Important current limitation
 
-## Focused validation — 2026-09-09
+The current hierarchy is **not** the final Website model. There is still no independent persistent `Website` identity that owns runtime/document-root/Unix-user relationships.
 
-Command, from the repository root after the normal workspace dependencies are available:
+The remaining model work in `plan.md` includes:
 
-```bash
-node --test \
-  apps/api/test/domain-hierarchy.test.js \
-  apps/api/test/domain-parent-registry.test.js \
-  apps/api/test/domain-http.test.js \
-  apps/web/test/domain-tree.test.js
-```
+- persistent Website records separate from hostnames,
+- explicit Website ↔ application/runtime/document-root/Unix-user links,
+- IDN/punycode normalization,
+- safe reparenting of existing records,
+- dependency-aware move/delete preview,
+- alias/canonical semantics in the final Website/domain model,
+- versioned migration from existing domain/application records while preserving IDs, certificates, releases and traffic.
 
-Result in this development environment: **29 tests passed, 0 failed, 0 skipped**.
+Do not treat `/websites/:id` compatibility routing or same-server/port application matching as a permanent foreign-key relationship.
 
-Coverage:
+## API and authentication boundary
 
-- 9 hierarchy checks: explicit parents, nested children, dot boundaries, unrelated names, aliases, invalid/missing IDs, cross-server ownership, cycles and non-mutation.
-- 7 registry checks: reopen/persistence, independent targets/certificates, rejected requests leaving disk unchanged, legacy read compatibility, corrupt-state rejection, defensive copies and existing staging lifecycle.
-- 3 HTTP mapping checks using the real registry and an in-memory response recorder: parent forwarding/201, failure propagation, and legacy defaults. These are not network or authenticated-listener tests.
-- 10 tree/form checks: stable hierarchy order, collapse, matching ancestors, aliases, orphan/cycle handling, no mutation, correct parent-server selection, no fallback for a missing parent/server, prefix and port validation.
+Production enters through `apps/api/src/index.js` and `createAuthenticatedApi()`. Domain management remains behind the backend session/role/MFA/CSRF/Origin boundary. Directly mounting a lower-level app factory is not a supported alternate public listener.
 
-Environment qualification: these focused tests ran under Node 22.16.0 against a locally assembled subset because Git/network dependency installation was unavailable. `@yunpanel/shared` was resolved locally to the repository's unchanged domain validation source; no replacement validation algorithm was used. This is not a full workspace installation and does not establish compatibility for the repository's required Node 24.11.1+ auth/SQLite runtime. No engine requirement or dependency policy was lowered.
+The old server-enrollment HTTP path has been retired. Domain work must not reintroduce an agent enrollment or alternate unauthenticated management surface.
 
-`DomainList.jsx` and `DomainManager.jsx` also passed a JSX syntax-transpilation check, and the new composition module passed `node --check`. No TypeScript source or dependency was added to the project. Syntax checks do not establish React rendering, accessibility, layout quality, Vite resolution or browser behavior.
+Nginx domain stage/activate and managed certificate issue/renew foundations already exist and are consumed through durable jobs. Their running uncertain-outcome recovery is operation-specific; do not replace it with generic retry or force-success logic.
 
-## Not validated here
+## DNS, SSL and mail separation
 
-The full `npm run check`, actual Express composition/authentication boundary, package build/upgrade, React browser rendering and responsive interactions, real DNS/Nginx/ACME, and live `cryptoraichu.website` deployment were not run in this environment. Required acceptance checks are in `todo.md` T1a/T3a. Existing systemd/agent/terminal behavior was not migrated by this feature. No GitHub Actions or production mutations were performed.
+The following remain distinct lifecycles:
+
+- web hostname/domain resource,
+- DNS hosting/provider state,
+- certificate state,
+- mail domain/mailbox state.
+
+Creating or reparenting a web hostname must never imply that DNS propagated, a certificate is valid, or mail is configured. DNS readiness/provider mutation, DNS-01/wildcard support and full mail lifecycle remain separate implementation work.
+
+## Deletion and migration rule
+
+Future delete/move operations must produce an impact preview covering dependent child domains, application/Website links, certificates, mail resources and backups where applicable. Default behavior must fail closed when dependent resources would be orphaned; hidden cascade deletion is not acceptable.
+
+Migration from the current compatibility model must be versioned, repeatable and backed up. Existing server/application/domain IDs, encrypted secrets, certificates and release relationships must not be rewritten casually.
+
+## UI status
+
+The existing routed workspace can render the current hierarchy, but final enterprise UI/UX design is deferred. Do not spend the current backend development phase on hierarchy visual polish. Security/browser behavior that affects authorization, destructive confirmation or stale privileged state remains subject to `todo.md` acceptance.
+
+## Validation status
+
+Older focused hierarchy/model test runs are historical evidence only. They do not prove the current tree after the later auth, agentless, recovery and migration changes.
+
+Current full Node 24, browser, package, DNS/Nginx/ACME and migration acceptance requirements are tracked in `todo.md`. Do not mark the hierarchy/Website migration production-ready until the relevant current acceptance steps are actually run. GitHub Actions are not used for this project.
