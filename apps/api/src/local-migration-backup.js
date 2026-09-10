@@ -40,6 +40,18 @@ function normalizeRoot(value) {
   return path.resolve(value);
 }
 
+export function resolveLocalMigrationBackupDirectory(backupDirectory, root = DEFAULT_ROOT) {
+  const safeRoot = normalizeRoot(root);
+  if (typeof backupDirectory !== 'string' || !path.isAbsolute(backupDirectory) || /[\u0000\r\n]/.test(backupDirectory)) {
+    throw new LocalMigrationBackupError('migration_backup_directory_invalid', 'Migration backup directory must be an absolute snapshot path');
+  }
+  const resolved = path.resolve(backupDirectory);
+  if (resolved === safeRoot || !resolved.startsWith(`${safeRoot}${path.sep}`)) {
+    throw new LocalMigrationBackupError('migration_backup_directory_outside_root', `Migration backup directory must be a snapshot below ${safeRoot}`);
+  }
+  return resolved;
+}
+
 function relativeArchivePath(value) {
   const relative = value.replace(/^\/+/, '');
   if (!relative || relative.startsWith('../') || relative.includes('/../') || relative.includes('\0')) {
