@@ -6,9 +6,6 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 
 ## T-RUNTIME — P0 güncel full check
 
-- [ ] Güncel `main` için desteklenen Node 24.11.1+ / npm 11+ ile temiz dependency install yap.
-- [ ] Filtresiz `npm run check`, bütün workspace testleri ve production Vite build çalıştır. Yeni audit, Website, IDN, Website migration policy, migration/recovery ve parity testleri dahil olmalı.
-- [ ] Native SQLite/Argon2/MFA testlerini desteklenen Node24 runtime'da doğrula; test-only adapter sonucu production acceptance sayma.
 - [ ] Mixed/stale web/API build ile privileged management'in fail-closed kaldığını ayrıca doğrula.
 
 ## T-AUTH-AUDIT — P0 gerçek HTTPS/browser kabulü
@@ -57,8 +54,8 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 - [ ] Owner `GET /api/websites/migration/preview` ve `/status` için deterministic digest/current policy üretimini doğrula. Read Only her iki migration route'unda 403 kalmalı.
 - [ ] Existing-Website migration bind exact `domainId + websiteId + previewDigest + typed confirmation` istemeli; state değişirse stale digest hiçbir Domain mutationı üretmemeli, aynı tamamlanmış bind retry'ı idempotent kalmalı.
 - [ ] Migration finalize yalnız fresh preview bütün Domainleri `already_bound` gösterdiğinde exact digest ile `compatibility -> enforced` geçsin. Enforced modda yeni unbound managed Domain 409 `website_binding_required`, same-server explicit Website ile create başarılı olsun.
-- [ ] Policy rollback yalnız exact enforced digest + typed confirmation ile compatibility moduna dönsün; Nginx target, certificate, application release veya Domain traffic revision değişmesin. Migration-only binding rollback ledger kodlandığında onun ayrı rollback acceptance'ını da çalıştır.
-- [ ] `create_website_then_bind` orchestration ve migration binding rollback ledger tamamlandıktan sonra apex + bağımsız subdomain + alias + application + certificate + policy finalize/rollback'i gerçek test domainiyle uçtan uca doğrula.
+- [ ] Policy rollback yalnız exact enforced digest + typed confirmation ile compatibility moduna dönsün; migration-only binding rollback exact ledger identity/digest istesin; iki rollback de Nginx target, certificate, application release veya Domain traffic revision değiştirmesin.
+- [ ] Apex + bağımsız subdomain + alias + application + certificate + Website-create/bind orchestration + policy finalize/rollback'i gerçek test domainiyle uçtan uca doğrula.
 
 ## T-SERVICES-DB — P1/P2 gerçek host functionality
 

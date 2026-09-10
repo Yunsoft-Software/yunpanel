@@ -9,7 +9,6 @@ Doğrudan güncel `main` üzerinde küçük, tek amaçlı commitlerle ilerle. Gi
 ## A. P0 — Authentication ve erişim sınırı
 
 - [ ] MFA/session browser yarışları için otomasyon ekle: iki sekme, delayed/stale response, cookie rotation, lost MFA response, `pageshow`, keep-alive, idle ve absolute timeout.
-- [ ] Trusted-proxy/client-IP modelini kodla; rate limit gerçek client IP üzerinden çalışsın ve spoofed forwarding header fail-closed kalsın. IP allowlist ancak gerçek HTTPS/proxy kabulü sonrası opsiyonel ek katmana dönüşsün.
 - [ ] WebSocket/SSE/PTY geldiğinde HTTP ile aynı session/role/Origin/Owner-MFA sınırını ortak revocation kanalına bağla; logout, password/MFA/role değişimi ve user disable/delete açık bağlantıları kapatsın.
 
 ## B. P1 — Agentless yerel backend geçişinde kalan kod
@@ -21,16 +20,13 @@ Doğrudan güncel `main` üzerinde küçük, tek amaçlı commitlerle ilerle. Gi
 
 ## C. P1 — Kalıcı Website modeli ve domain yaşam döngüsü
 
-Kalıcı Website registry/API/persistence, explicit Domain `websiteId`, Website/Application startup foreign-key doğrulaması, IDN→punycode canonicalization, explicit Website→Domain read, read-only migration preview, deterministic preview digest, guarded existing-Website bind ve persistent compatibility/enforced policy status/finalize/rollback source seviyesinde mevcut. Enforced policy yeni managed domainlerde explicit Website binding ister; legacy state compatibility rollback için okunabilir kalır.
+Kalıcı Website registry/API/persistence, explicit Domain `websiteId`, Website/Application startup foreign-key doğrulaması, IDN→punycode canonicalization, explicit Website→Domain read, read-only migration preview, deterministic preview digest, durable ve tekrar çalıştırılabilir Website-create/bind orchestration'ı, migration-only binding rollback ledger'ı ve persistent compatibility/enforced policy status/finalize/rollback source seviyesinde mevcut. Enforced policy yeni managed domainlerde explicit Website binding ister; legacy state compatibility rollback için okunabilir kalır.
 
-- [ ] Migration preview'daki `create_website_then_bind` adımını explicit ve tekrar çalıştırılabilir orchestration'a dönüştür. Website create ile Domain bind ayrı durable/rollback-safe adımlar olarak kalsın; iki JSON registry arasında sahte atomik transaction oluşturma.
-- [ ] Migration binding rollback ledger/receipt geliştir: yalnız migration tarafından `websiteId=null` durumundan bağlanan Domain kayıtları exact domain/Website/digest kanıtıyla geri alınabilsin. Genel Website rebind/unbind API'sine dönüşmesin; traffic target, cert ve release state değişmemeli.
 - [ ] Website update/rebind lifecycle'ı ekle: isim, runtime/application binding ve proxy hedef değişiklikleri explicit revision/impact kontrolüyle yapılsın; application birden fazla Website'e yanlışlıkla bağlanamasın.
 - [ ] Reparent preview + apply geliştir. Duplicate hostname, dot-boundary, same-server ve cycle kontrolleri korunmalı; parent hiçbir zaman suffix keserek tahmin edilmemeli.
 - [ ] Site-create orchestration ekle: existing/new static veya Node application, external reverse proxy ve ileride Docker target; canonical document root ve collision-free port backend tarafından üretilsin. `www` alias mı bağımsız hostname mı explicit seçim olsun.
 - [ ] Website, web hostname/domain, DNS hosting ve mail-domain lifecycle'larını ayır; hostname create DNS publish veya mailbox create anlamına gelmesin.
 - [ ] Website/domain move-delete impact preview API'si ekle. Child domain, application, certificate, mailbox, backup ve ileride cron/Docker bağımlılıkları listelensin; varsayılan davranış fail-closed, örtülü cascade yok.
-- [ ] Website migration'ı source seviyesinde tamamla: explicit Website-create adımı, binding rollback ledger ve migration finalization sonrası rollback provasıyla IDs, current traffic target, secrets, cert ve release history korunmalı. Server/port/hostname yalnız preview adayı üretmek için kullanılabilir; kalıcı ilişki explicit foreign key olmaya devam etmeli.
 
 ## D. DEFERRED — Görsel UI/UX
 
