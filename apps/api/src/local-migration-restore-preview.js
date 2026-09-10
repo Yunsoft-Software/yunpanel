@@ -5,6 +5,10 @@ import {
   verifyLocalMigrationBackup,
 } from './local-migration-backup.js';
 import {
+  inspectVerifiedLocalMigrationArchive,
+  LocalMigrationArchiveInspectionError,
+} from './local-migration-archive-inspection.js';
+import {
   compareVerifiedLocalMigrationUnixIdentities,
   LocalMigrationUnixIdentityError,
 } from './local-migration-unix-identity.js';
@@ -67,6 +71,23 @@ function restoreAction(entry, current) {
   return current.type === entry.type ? 'restore_replace' : 'restore_type_mismatch';
 }
 
+function assertArchiveInspection(result, directory, sha256) {
+  if (!result || result.destructive !== false || result.linksSafe !== true
+    || result.backupDirectory !== directory || result.sha256 !== sha256
+    || !result.counts || typeof result.counts !== 'object') {
+    throw new LocalMigrationRestorePreviewError('migration_restore_archive_result_invalid', 'Migration restore archive inspection result is invalid');
+  }
+  for (const key of ['total', 'files', 'directories', 'symlinks', 'hardlinks']) {
+    if (!Number.isInteger(result.counts[key]) || result.counts[key] < 0) {
+      throw new LocalMigrationRestorePreviewError('migration_restore_archive_result_invalid', 'Migration restore archive inspection counts are invalid');
+    }
+  }
+  if (result.counts.files + result.counts.directories + result.counts.symlinks + result.counts.hardlinks !== result.counts.total) {
+    throw new LocalMigrationRestorePreviewError('migration_restore_archive_result_invalid', 'Migration restore archive inspection counts do not match the member total');
+  }
+  return result;
+}
+
 function assertIdentityComparison(result, directory, sha256) {
   if (!result || result.destructive !== false || result.backupDirectory !== directory || result.sha256 !== sha256
     || !Number.isInteger(result.snapshotUsers) || !Number.isInteger(result.currentUsers)
@@ -87,10 +108,12 @@ function assertIdentityComparison(result, directory, sha256) {
 export async function previewLocalMigrationRestore({
   backupDirectory,
   verifyBackup = verifyLocalMigrationBackup,
+  inspectArchive = inspectVerifiedLocalMigrationArchive,
   compareIdentities = compareVerifiedLocalMigrationUnixIdentities,
   lstatFn = lstat,
 } = {}) {
-  if (typeof verifyBackup !== 'function' || typeof compareIdentities !== 'function' || typeof lstatFn !== 'function') {
+  if (typeof verifyBackup !== 'function' || typeof inspectArchive !== 'function'
+    || typeof compareIdentities !== 'function' || typeof lstatFn !== 'function') {
     throw new LocalMigrationRestorePreviewError('migration_restore_preview_dependencies_invalid', 'Migration restore preview dependencies are invalid');
   }
   const directory = resolveLocalMigrationBackupDirectory(backupDirectory);
@@ -107,6 +130,15 @@ export async function previewLocalMigrationRestore({
     || !Array.isArray(verification.entries)) {
     throw new LocalMigrationRestorePreviewError('migration_restore_backup_invalid', 'Migration restore backup acknowledgement is invalid');
   }
+
+  let archiveInspection;
+  try {
+    archiveInspection = await inspectArchive({ backupDirectory: directory, verification });
+  } catch (error) {
+    if (error instanceof LocalMigrationArchiveInspectionError) throw error;
+    throw new LocalMigrationRestorePreviewError('migration_restore_archive_unavailable', 'Migration restore archive inspection could not be completed');
+  }
+  assertArchiveInspection(archiveInspection, directory, verification.sha256);
 
   const targets = [];
   for (const entry of verification.entries) {
@@ -143,6 +175,7 @@ export async function previewLocalMigrationRestore({
     archivePath: verification.archivePath,
     manifestPath: verification.manifestPath,
     sha256: verification.sha256,
+    archiveInspection,
     targets: Object.freeze(targets),
     counts,
     identityComparison,
@@ -155,5 +188,6 @@ export const localMigrationRestorePreviewInternals = Object.freeze({
   restoreTargets: Object.freeze([...RESTORE_TARGETS]),
   currentType,
   restoreAction,
+  assertArchiveInspection,
   assertIdentityComparison,
 });
