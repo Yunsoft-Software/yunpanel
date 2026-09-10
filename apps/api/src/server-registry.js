@@ -78,7 +78,7 @@ function publicServer(server, now, offlineAfterMs) {
     localBoundAt: server.localBoundAt ?? null,
     localRuntimeVersion: server.localRuntimeVersion ?? null,
     createdAt: server.createdAt,
-    enrolledAt: server.enrolledAt,
+    enrolledAt: server.enrolledAt ?? null,
     lastSeenAt: server.lastSeenAt,
     agentVersion: server.agentVersion ?? null,
     inventory: server.inventory ?? null,
@@ -149,6 +149,12 @@ export function createServerRegistry({
     return server;
   }
 
+  function assertHostnameAvailable(hostname) {
+    if (state.servers.some((server) => server.hostname === hostname)) {
+      throw new RegistryError('server_exists', 'A server with this hostname is already registered', 409);
+    }
+  }
+
   async function issueEnrollmentToken({ label = null, ttlMs = DEFAULT_ENROLLMENT_TTL_MS } = {}) {
     await ensureInitialized();
 
@@ -196,9 +202,7 @@ export function createServerRegistry({
       throw new RegistryError('invalid_enrollment_token', 'Enrollment token is invalid or expired', 401);
     }
 
-    if (state.servers.some((server) => server.hostname === normalizedHostname)) {
-      throw new RegistryError('server_exists', 'A server with this hostname is already enrolled', 409);
-    }
+    assertHostnameAvailable(normalizedHostname);
 
     const agentToken = createSecret();
     const timestamp = new Date(now()).toISOString();
@@ -226,6 +230,33 @@ export function createServerRegistry({
       server: publicServer(server, now(), offlineAfterMs),
       agentToken,
     };
+  }
+
+  async function createLocalServer({ hostname, displayName = null }) {
+    await ensureInitialized();
+    const normalizedHostname = validateHostname(hostname);
+    assertHostnameAvailable(normalizedHostname);
+
+    const timestamp = new Date(now()).toISOString();
+    const server = {
+      id: randomUUID(),
+      name: validateDisplayName(displayName, normalizedHostname),
+      hostname: normalizedHostname,
+      executionMode: 'local',
+      localBoundAt: timestamp,
+      localRuntimeVersion: null,
+      agentTokenHash: null,
+      createdAt: timestamp,
+      enrolledAt: null,
+      lastSeenAt: null,
+      agentVersion: null,
+      inventory: null,
+      services: null,
+    };
+
+    state.servers.push(server);
+    await persist();
+    return publicServer(server, now(), offlineAfterMs);
   }
 
   async function authenticateAgent({ serverId, agentToken }) {
@@ -276,6 +307,9 @@ export function createServerRegistry({
   async function releaseLocalServer({ serverId, hostname }) {
     await ensureInitialized();
     const server = requireMatchingHost(serverId, hostname);
+    if (typeof server.agentTokenHash !== 'string' || server.agentTokenHash.length === 0) {
+      throw new RegistryError('agent_credentials_unavailable', 'Local-only server has no legacy agent credential to restore', 409);
+    }
     server.executionMode = 'agent';
     server.localBoundAt = null;
     server.localRuntimeVersion = null;
@@ -316,6 +350,7 @@ export function createServerRegistry({
     init,
     issueEnrollmentToken,
     enrollServer,
+    createLocalServer,
     authenticateAgent,
     heartbeat,
     bindLocalServer,
