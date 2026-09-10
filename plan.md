@@ -1,105 +1,89 @@
-# YunPanel — Yapılacaklar
+# YunPanel — Kalan Geliştirme Planı
 
-Bu dosya yalnızca kalan geliştirme işlerini içerir. Tamamlanan işler Git commitlerinde kalır; kodu tamamlanıp gerçek Node 24 / tarayıcı / Ubuntu / package / canlı servis kabulü bekleyen maddeler `todo.md` içine taşınır. Bağlayıcı geliştirme kuralları `agents.md`, yerel yürütücü güvenlik sınırı `docs/local-executor-safety.md`, agentless migration/recovery prosedürü `docs/local-runtime-migration.md` içindedir.
+Bu dosyada yalnız **kalan kod/geliştirme işleri** tutulur. Tamamlanan işler Git geçmişinde kalır; gerçek Node 24, browser, Ubuntu, package, DNS ve canlı rollback kabulü `todo.md` içindedir. Bağlayıcı kurallar `agents.md`, agentless güvenlik/migration prosedürleri `docs/local-executor-safety.md` ve `docs/local-runtime-migration.md` içindedir.
 
-Hedef: site merkezli enterprise hosting paneli, açık domain/subdomain hiyerarşisi ve ayrı privileged agent yerine host üzerinde çalışan tam yetkili yerel backend. Kullanıcı ayrıca istemedikçe doğrudan `main` üzerinde küçük commitlerle ilerle; GitHub Actions kullanma. Root backend ve terminal güvenlik/yayın kabulü tamamlanmadan public yüzeyi genişletme.
+Doğrudan güncel `main` üzerinde küçük, tek amaçlı commitlerle ilerle. GitHub Actions kullanma. Çalıştırılmayan testi geçmiş sayma.
 
-**2026-09-10 yürütme kararı:** Görsel tasarım, UI/UX yeniden tasarımı, layout/styling, component polish ve benzeri `apps/web` işleri bu geliştirme akışında donduruldu. Bunlar en sonda ayrı bir modele verilecek. Backend işlevi veya güvenlik kontratı için zorunlu olmadıkça frontend dosyalarına dokunma; önce backend, veri modeli, host operasyonları, migration, terminal altyapısı, DNS/SSL/mail/DB/Docker/backup/cron/audit functionality tamamlanmalı.
+**2026-09-10 kararı:** Görsel UI/UX, layout, styling, component polish ve responsive tasarım bu akışta donduruldu. Backend functionality tamamlandıktan sonra ayrı modele verilecek. Güvenlik veya backend kontratı için zorunlu olmadıkça `apps/web` tasarımına dokunma.
 
-## A. P0 — Authentication ve erişim sınırında kalan işler
+## A. P0 — Authentication ve erişim sınırı
 
-- [ ] MFA/oturum için gerçek React tarayıcı otomasyonu ekle: iki sekme, gecikmiş istek, kayıp MFA cevabı, geri yüklenen sayfa, recovery kodu onayı, modal/focus, idle/absolute süre ve keep-alive davranışını kapsa.
-- [ ] WebSocket/SSE/terminal eklendiğinde HTTP ile aynı session, rol, Origin ve Owner MFA sınırını uygula. Logout, parola/MFA/rol değişimi, kullanıcı disable/delete ve session revoke açık bağlantı/PTY yetkisini derhal düşürsün.
-- [ ] IP allowlist'i ancak gerçek HTTPS/proxy kabulünden sonra isteğe bağlı ek ağ kontrolüne dönüştür. Trusted-proxy sözleşmesi, gerçek istemci IP'sine göre rate limit ve spoof testleri olmadan mevcut korumayı kaldırma.
+- [ ] MFA/session browser yarışları için otomasyon ekle: iki sekme, delayed/stale response, cookie rotation, lost MFA response, `pageshow`, keep-alive, idle ve absolute timeout.
+- [ ] Trusted-proxy/client-IP modelini kodla; rate limit gerçek client IP üzerinden çalışsın ve spoofed forwarding header fail-closed kalsın. IP allowlist ancak gerçek HTTPS/proxy kabulü sonrası opsiyonel ek katmana dönüşsün.
+- [ ] WebSocket/SSE/PTY geldiğinde HTTP ile aynı session/role/Origin/Owner-MFA sınırını ortak revocation kanalına bağla; logout, password/MFA/role değişimi ve user disable/delete açık bağlantıları kapatsın.
 
-**Kabul:** Kalan native/browser/canlı kabul işleri `todo.md` içinde. Güvenlik zinciri doğrulanmadan root/terminal public sürümü açılmaz. Common audit foundation; bounded auth-SQLite event modeli, auth/MFA/user lifecycle, Owner-only read API, management mutation acceptance, route parity, async job actor/outcome, packaged recovery handoff ve actor/resource/action/outcome/time filtreleriyle kaynak seviyesinde tamamlandı; gerçek Node24/HTTPS/package kabulü `todo.md` T-AUDIT altında.
+## B. P1 — Agentless yerel backend geçişinde kalan kod
 
-## B. P1 — Agentless yerel backend geçişinde kalan işler
+- [ ] Gerçek migration + rollback kabulü tamamlandıktan sonra retained legacy heartbeat/command/environment/result transport rotalarını, agent credential surface'ini ve eski enrolled-host compatibility kodunu kaldır.
+- [ ] Aynı kabul sonrası `yun-agent.service`, agent package/env/install compatibility ve artık gereksiz registry credential alanlarını kaldır. Upgrade disabled agent'ı tekrar enable etmemeli.
+- [ ] Yeni site yüzeylerinde workload isolation invariantını koru: Git hook, cron ve site terminali dedicated `yunapp-*` kullanıcıyla; yalnız Owner Server terminali root.
+- [ ] Migration live-apply katmanını yalnız gerçek test-host kabulünden sonra aç: staged tree'den per-target replacement, owner/mode/ACL/xattr policy, `yunapp-*` identity drift çözümü, pre-apply backup, health validation ve deterministic rollback. `/etc/passwd` veya `/etc/group` kör overwrite edilmez.
 
-Agentless local executor, exact `YUNPANEL_LOCAL_SERVER_ID` + OS hostname doğrulaması, exclusive host lock, root `yunpanel-api.service`, execution-time application env materialization, host inventory/services/Docker/Nginx snapshot yenilemesi, fresh credentialless `local-runtime create`, mevcut enrolled kimlik için `status/bind/release`, post-migration read-only `validate`, durable recovery sidecar ve terminal reconciliation mevcut. Default `npm run dev` artık agent başlatmıyor; web enrollment-token, yeni enrollment HTTP/client yolu ve enrollment auth bypass'ı kaldırıldı. Running recovery payload'ı public job API'sine açılmadan private persisted job-store context reader üzerinden doğrulanıyor. Güncel async queue için source-level running recovery kapsamı read-only `system.packages.inspect`, `system.services.inspect`, `database.inspect`, `app.node.status`; Nginx `domain.stage/activate`; static deploy/rollback; Node deploy/rollback/restart; DB create/delete; managed-service start/stop/install/restart; YunPanel package upgrade ve SSL issue/renew varyantlarını operation-specific host kanıtı veya private receipt ile kapsıyor. Queue/recovery parity source invariantı ve payload-backed durable lifecycle testleri mevcut; generic `force-success`, kör mutation retry veya kanıtsız journal temizleme yok. Ownership mutationları verified backup gate ister; rollback tarafında non-destructive preview, archive member/type/link doğrulaması, `yunapp-*` Unix identity drift karşılaştırması, metadata planı ve yalnız private staging root altında no-owner/no-permission restore staging mevcut. Legacy compatibility completion/log errorları authored safe diagnostic kataloğuna bağlıdır. Aşağıdakiler hâlâ geliştirme işidir:
+## C. P1 — Kalıcı Website modeli ve domain yaşam döngüsü
 
-- [ ] Retained legacy heartbeat/command/result/environment backend transport rotalarını ve agent credential yüzeyini gerçek migration + rollback kabulünden sonra kaldır. Local ownership altında mevcut 409 `server_managed_locally` sınırını o zamana kadar koru; eski enrolled hostların rollback kimliğini erken bozma.
-- [ ] `yun-agent.service` ve package/env compatibility katmanını gerçek migration + rollback kabulünden sonra kaldır. Debian maintainer scriptleri disabled agent'ı upgrade sırasında tekrar enable etmemeli.
-- [ ] Site workload izolasyonunu yeni yüzeylerde de koru. Mevcut Node/static clone/npm/build ve Node systemd runtime dedicated `yunapp-*` kullanıcılarıyla çalışıyor; eklenecek Git hook, cron ve site terminali de dedicated site Unix user'ıyla çalışmalı. Yalnız Owner Server terminali root olabilir.
-- [ ] Migration/rollback live-apply katmanını ancak gerçek test-host kanıtı sonrası tamamla: staged tree'den per-target replacement, ownership/mode/ACL/xattr doğrulaması, `yunapp-*` identity drift çözüm politikası, pre-apply backup, agent disable/enable sırası, functional validation ve ara hata için deterministik rollback. `/etc/passwd` veya `/etc/group` kör overwrite edilmemeli; `/etc/yunpanel`, `/var/lib/yunpanel`, auth SQLite, master key, vhost, cert, release ve users korunmalı. Mevcut `local-runtime validate` kapısı API active + agent inactive + exact runtime version + fresh snapshot + loopback health doğrulaması için kullanılmalı; live restore/apply gerçek kabul olmadan açılmamalı.
+- [ ] Domain→Website geçişini tamamla: migration sonrası yeni managed domainlerde `websiteId` zorunlu olsun; legacy `websiteId=null` yalnız versioned migration/rollback süresince desteklensin. Website/domain server ownership ve referential integrity bütün mutationlarda korunmalı.
+- [ ] Website update/rebind lifecycle'ı ekle: isim, runtime/application binding ve proxy hedef değişiklikleri explicit revision/impact kontrolüyle yapılsın; application birden fazla Website'e yanlışlıkla bağlanamasın.
+- [ ] Reparent preview + apply geliştir. Duplicate hostname, dot-boundary, same-server ve cycle kontrolleri korunmalı; parent hiçbir zaman suffix keserek tahmin edilmemeli.
+- [ ] Site-create orchestration ekle: existing/new static veya Node application, external reverse proxy ve ileride Docker target; canonical document root ve collision-free port backend tarafından üretilsin. `www` alias mı bağımsız hostname mı explicit seçim olsun.
+- [ ] Website, web hostname/domain, DNS hosting ve mail-domain lifecycle'larını ayır; hostname create DNS publish veya mailbox create anlamına gelmesin.
+- [ ] Website/domain move-delete impact preview API'si ekle. Child domain, application, certificate, mailbox, backup ve ileride cron/Docker bağımlılıkları listelensin; varsayılan davranış fail-closed, örtülü cascade yok.
+- [ ] Mevcut domain/application state'i için versioned, repeatable Website migration + rollback geliştir. IDs, current traffic target, secrets, cert ve release history korunmalı; server/port/hostname'den sessiz kalıcı binding tahmini yapılmamalı.
 
-**Kabul:** Agent kapalıyken inventory, Nginx, Node deploy/restart/rollback, SSL, managed services, DB ve package management gerçek test hostunda çalışmalı; hosted servisler panel restartında ayakta kalmalı. Bütün operation-specific recovery komutları gerçek host evidence/receipt ile fail-closed doğrulanmalı. Backup preview/stage gerçek GNU tar ve gerçek `yunapp-*` kimlikleriyle doğrulanmalı; `local-runtime validate` gerçek package hostta geçmeli; live restore/apply ayrı kabul olmadan açılmamalı. Gerçek kabul `todo.md` T-LOCAL-EXECUTOR/T-MIGRATION/T-LIVE altında.
+## D. DEFERRED — Görsel UI/UX
 
-## C. P1 — Kalıcı Website modeli ve domain hiyerarşisi
+Aktif geliştirme dışı. Enterprise layout/component styling/data-table görünümü/skeleton/notification/responsive polish/typography/site-detail görsel düzeni en sonda ayrı modele verilecek.
 
-- [ ] Kalıcı `Website` kimliğini hostname/domain kaydından ayır. Website; server, application/runtime, document root ve Unix user ilişkilerini; domain ise website linki, explicit parent ve alias/canonical ilişkisini taşısın.
-- [ ] Website API/resource katmanını gerçek Website kaynağına geçir. Mevcut domain ID ve aynı server/porttan application tahminini kalıcı bağ sayma; Node/static/Docker, env/log/files/backup ilişkileri açık backend foreign key'leriyle tutulmalı. Görsel site-detail entegrasyonu tasarım aşamasına bırakılabilir.
-- [ ] Shared FQDN doğrulamasına IDN/punycode ekle. Reparent preview/migration'da duplicate hostname, nokta sınırı, same-server ve cycle kontrollerini koru; parent'i son iki label'dan tahmin etme.
-- [ ] Site oluşturma backend akışında existing/new app, static/Node/Docker/reverse proxy, otomatik document root ve çakışmasız port tahsisi ekle. `www` alias mı bağımsız website mı API/model düzeyinde explicit seçim olsun.
-- [ ] Website, DNS hosting ve mail-domain lifecycle'larını ayır. Subdomain mail alanını veya mailbox'ları parent'tan otomatik kopyalama.
-- [ ] Silme/taşıma preview API'sinde child domain, application, mailbox, certificate ve backup etkisini üret; bağımlı kaynak varken varsayılan silme fail-closed olsun, örtülü cascade olmasın.
-- [ ] Mevcut domain/application kayıtlarından sürümlü, tekrar çalıştırılabilir, yedekli Website migration + rollback geliştir. Mevcut trafik, IDs, secrets, cert ve release ilişkilerini koru.
+## E. P2 — Node.js, static ve Git functionality
 
-## D. DEFERRED — Görsel UI/UX tasarımı
+- [ ] Node application management: enable/disable, explicit start/stop, runtime, startup file/npm script, package manager, mode ve document-root yönetimi. Mevcut deploy/restart/status/rollback akışını yeniden yazma.
+- [ ] Hosttaki kurulu Node sürümlerini inspect et; eksik runtime install/select ve collision-free port allocation ekle. Panelin kendi Node runtime'ı site runtime seçimiyle değişmemeli.
+- [ ] Git deploy'a explicit commit/tag seçimi ve private deploy key/token secret store ekle. Clone/fetch/install/build site Unix user'ıyla çalışmalı.
+- [ ] Env import validation, change metadata ve `saved-on-disk` / `applied-to-running-process` ayrımı ekle.
+- [ ] Node/systemd/Nginx/deploy için bounded, redacted log stream/search/filter/download backend'i geliştir.
+- [ ] Static/SPA ve Docker runtime'larını kalıcı Website modeline bağla; Passenger yalnız compatibility adapter olarak kalsın.
+- [ ] Signed Git webhook deploy: replay/duplicate koruması + resource lock + durable YunPanel job. GitHub Actions yok.
 
-Bu bölüm aktif geliştirme akışının dışındadır ve en sonda ayrı modele verilecektir. Enterprise layout, component tasarımı, data-table görünümü, skeleton/notification görselleri, responsive polish, typography/spacing, site-detail görsel düzeni ve diğer frontend tasarım işleri için bu aşamada commit üretme. Backend/API kontratlarını tasarım modelinin sonradan bağlayabileceği kadar açık ve kararlı tut.
+## F. P2 — Terminal ve file manager backend
 
-## E. P2 — Site içi Node.js, static ve Git işlevleri
+- [ ] Gerçek PTY backend'i: site terminali dedicated user/cwd, Owner Server terminali root. Tek-shot HTTP exec terminal yerine geçmez.
+- [ ] WebSocket upgrade session/role/Origin/Owner-MFA doğrulaması ve short-lived session-bound capability ekle.
+- [ ] PTY resize, Ctrl+C/Ctrl+D, Unicode/fullscreen TUI, multi-session, reconnect/disconnect cleanup, process-group cleanup, idle/output/backpressure limitleri.
+- [ ] Session/user/MFA/password/role revocation açık PTY/WS bağlantısını derhal kapatsın.
+- [ ] Terminal open/close/session metadata'sını common audit'e yaz; raw keystroke/output/history merkezi audit'e yazılmasın.
+- [ ] Site file manager: list/upload/download/mkdir/rename/text edit/permission display/confirmed delete; traversal ve symlink escape fail-closed. Owner host-files context'i ayrı kalsın.
 
-Mevcut static/Node deploy akışları repository URL + branch ile clone/fetch yapıyor, commit SHA'yı doğruluyor, npm install/ci + build'i dedicated `yunapp-*` user altında çalıştırıyor; Node için systemd activation/health/rollback, static için atomic release switch mevcut. Kalan geliştirme:
+## G. P2 — Domain, DNS, Nginx ve SSL
 
-- [ ] Node/Git backend API'larına enable/disable, explicit start/stop, runtime, app/document root, startup file/npm script, package manager ve çalışma modu yönetimini ekle. Mevcut deploy/restart/status/rollback akışlarını yeniden yazma.
-- [ ] Kurulu Node sürümlerini hosttan okuyup eksik runtime kurma ve site runtime seçimini ekle. Panelin kendi Node runtime'ını değiştirme; port tahsisi çakışmasız otomatik olsun, manuel seçenek advanced API/config olarak kalsın.
-- [ ] Git deploy'a explicit commit/tag seçimi ve private Git deploy key/token yönetimi ekle. Mevcut branch clone/fetch, npm install/ci ve build akışlarını koru; bütün yeni Git/build scriptleri site Unix user'ıyla çalışsın.
-- [ ] Env backend'ine import validation, change metadata ve “diskte kaydedildi / çalışan sürece uygulandı” state ayrımını ekle. Mevcut masking, encrypted-at-rest store, execution-time materialization ve typed delete confirm kontratını koru.
-- [ ] Node stdout/stderr, systemd, Nginx ve deploy logları için bounded stream/search/filter/download backend'i geliştir; redaction uygula. Görsel log ekranı son tasarım aşamasına bırakılabilir.
-- [ ] Static/SPA ve Docker runtime backend'lerini kalıcı Website/site modeline bağla. Passenger compatibility adapter'ını gerçek Plesk örnekleriyle tamamla; yeni Node app varsayılanı systemd kalsın.
-- [ ] Git webhook deploy'u signature doğrulaması, replay/duplicate koruması ve resource lock ile YunPanel job sistemine bağla; GitHub Actions ekleme.
+- [ ] Alias/canonical edit ve HTTPS redirect lifecycle'ı ekle; son hata için actionable diagnosis üret.
+- [ ] Existing/custom certificate seçimi, certificate/private-key match, DNS-01 ve wildcard desteği ekle.
+- [ ] Resolver tabanlı A/AAAA/CNAME + ACME readiness modeli geliştir; external DNS mutation yalnız provider adapter üzerinden explicit yetkiyle yapılsın.
+- [ ] Site bazlı Nginx settings: upload size, proxy timeout, WebSocket, SPA fallback, cache/header/redirect; preview/diff/test/rollback backend'i ekle.
+- [ ] DNS/certificate/reload error diagnosis güvenli ve bounded olsun; private key API/public job/audit'e çıkmasın.
 
-## F. P2 — Terminal altyapısı ve dosya yöneticisi backend'i
+## H. P2 — Mail ve Roundcube
 
-- [ ] Gerçek PTY backend'i geliştir. Site terminali dedicated site user/doğru cwd; Server terminali Owner için root olmalı. xterm.js/görsel terminal entegrasyonu son tasarım aşamasına bırakılabilir; tek-shot HTTP exec yapma.
-- [ ] WebSocket upgrade'de session/role/Origin/Owner-MFA doğrula; terminal capability süreli ve session-bound olsun. Kalıcı credential URL/query içine koyma.
-- [ ] PTY resize, Ctrl+C/Ctrl+D, Unicode, fullscreen TUI gereksinimleri için backend stream/protocol desteğini; multi-session ve disconnect cleanup davranışını tamamla.
-- [ ] Logout/session revoke/user disable-delete/role-password-MFA değişiminde WS/PTY derhal kapansın. Process-group cleanup, idle timeout, session/output/backpressure limitleri olsun.
-- [ ] Root terminal open/close metadata'sını audit'e yaz; raw keystroke/output/history merkezi audit'e varsayılan olarak yazılmasın.
-- [ ] Site file manager backend'i: list/upload/download/mkdir/rename/text-edit/permission display/confirmed delete. Path traversal ve symlink escape engellensin; host dosya düzenleme ayrı Owner/Server bağlamında kalsın.
-
-## G. P2 — Domain, DNS, Nginx ve SSL functionality
-
-Nginx stage/activate, managed ACME issue, manual renew, otomatik renewal sweep/scheduler ve bunların operation-specific recovery yolları mevcut. Kalan geliştirme:
-
-- [ ] Domain/SSL backend'ine alias/canonical edit, HTTPS redirect ve actionable son-hata teşhisi ekle. Mevcut stage/activate, ACME issue/renew ve renewal scheduler'ı yeniden yazma.
-- [ ] Hostname kapsamına uygun mevcut/custom certificate seçimi, certificate/key match, DNS-01 ve wildcard desteği ekle; apex/wildcard kapsamını ayrı değerlendir.
-- [ ] Gerçek resolver ile A/AAAA/CNAME ve ACME readiness üret. Dış DNS'i YunPanel yönetiyorsa provider adapter üzerinden ayrı yetkili mutation kullan; hostname oluşturmayı DNS yayını sayma.
-- [ ] Site bazlı upload size, proxy timeout, WebSocket, SPA fallback, cache/header/redirect ayarları ve advanced Nginx preview/diff/test/rollback backend'ini ekle.
-- [ ] DNS/certificate/reload hatalarını gerçek teşhisle bağla. Private key API listesine/frontend'e çıkmamalı; hatalı vhost değişimi diğer siteleri bozmamalı.
-
-## H. P2 — Mail ve Roundcube functionality
-
-Postfix/Dovecot/Rspamd paket install/start/stop/restart managed-service katmanında mevcut; mail ürününün yapılandırma/lifecycle katmanı eksik:
-
-- [ ] Postfix, Dovecot, Rspamd ve Roundcube config/health adapter'larını geliştir; Roundcube detection/install'i managed-service kataloğuna uygun biçimde ekle.
-- [ ] Mail-domain backend'inde enable/disable, mailbox create/delete, password, quota/usage, alias/forwarding lifecycle'ını tamamla; parent/subdomain mail kapsamı explicit seçim olsun.
-- [ ] MX/SPF/DKIM/DMARC ve PTR/rDNS için expected/current/action-needed teşhisi üret; provider port kısıtlarını ayrı raporla.
-- [ ] SMTP/IMAP TLS, queue ve logs yönetimini bağla; unauthenticated relay engellensin.
-- [ ] Roundcube için gerçek webmail endpoint/health entegrasyonunu sağla; panel session ile mailbox credential'ını karıştırma.
-- [ ] Mailbox/domain delete için impact/backup/restore uygula; mail data/metadata backup modeline dahil olsun.
+- [ ] Postfix/Dovecot/Rspamd/Roundcube config ve health adapter'ları; Roundcube detection/install.
+- [ ] Mail-domain enable/disable, mailbox CRUD, password rotation, quota/usage, alias/forwarding lifecycle.
+- [ ] MX/SPF/DKIM/DMARC/PTR expected-current-action-needed diagnostics.
+- [ ] SMTP/IMAP TLS, queue ve bounded logs; open relay fail-closed.
+- [ ] Roundcube webmail endpoint/health; panel session ve mailbox credentials ayrı kalmalı.
+- [ ] Mailbox/domain delete impact ve mail data backup/restore.
 
 ## I. P2/P3 — Kalan operasyon modülleri
 
-DB foundation MySQL/MariaDB socket detection, non-system DB inventory/size, create/drop manager, protocol, durable job registry, authenticated API ve temel `/databases` Owner functionality'sini içeriyor. Managed-service katmanı Nginx, MariaDB, MySQL, Docker, Cron, Postfix, Dovecot ve Rspamd install/lifecycle'ını destekliyor. Kalan geliştirme:
+- [ ] DB: Website/site binding, DB user CRUD, grants, password rotation, connection info, dump/restore ve minimum-privilege application user. Credentials encrypted store'dan execution-time materialize edilmeli.
+- [ ] Docker/Compose: validation, build/pull/start/stop/restart, env/registry credentials, logs/health, Website/Nginx target, deploy history, volume/bind inventory + backup policy.
+- [ ] Genel backup ürünü: encrypted app/config/env/DB/volume/mail backup, local/S3-compatible target, retention/checksum, restore preview/progress, pre-restore backup ve failure rollback. Migration snapshot mekanizması bunun yerine kullanılmaz.
+- [ ] Cron: site user/cwd/env/timezone/enable-disable/last-run/bounded output; system cron yalnız explicit Owner/Server context.
+- [ ] Metric history, inode/disk threshold, service/app events, deploy/backup/SSL notifications ve bounded log download.
+- [ ] Job detail backend: stage/progress, resource link, safe error/log metadata, search/filter ve yalnız idempotency+lock ile güvenli retry.
+- [ ] Plesk read-only importer + external-managed state; Passenger/static/Node/DB/Docker/domain/cron/mail migration ve per-resource rollback.
 
-- [ ] MySQL/MariaDB site binding, DB user CRUD, grants, password rotation, connection-info, dump/restore ve minimum-privilege application user akışlarını tamamla. Password/credential job JSON'una yazılmayacak; secret materyali ayrı şifreli store üzerinden execution-time materialize edilmeli.
-- [ ] Docker/Compose validation, build/pull/start/stop/restart, env/registry credentials, logs/health, Nginx target ve deploy history ekle; volume/bind inventory + backup politikasını gösteren backend metadata'sı üret.
-- [ ] Şifreli application/config/env/DB/volume/mail backup, local/S3-compatible target, retention/checksum, restore preview/progress, pre-restore backup ve outage handling geliştir. Agentless migration snapshot/restore-staging mekanizmasını genel kullanıcı backup ürünü yerine kullanma.
-- [ ] Site cron: user/cwd/env/timezone/enable-disable/last-run/output. Site işleri site user, sistem işleri açık Owner/Server bağlamında çalışsın.
-- [ ] Gerçek metric history, inode/disk threshold, service/app events, deploy/backup/SSL notifications ve bounded log download backend'ini ekle. Unknown/stale metric sıfır veya yeşil sayılmasın.
-- [ ] Job detail/audit sorgu backend'ini tamamla: job stage, bounded safe error/log, resource linkleri, cancel/retry. Mevcut common audit actor/resource/action/outcome/time filtrelerini tekrar tasarlama; riskli retry yalnız idempotency + resource lock şartıyla çalışsın.
-- [ ] Plesk read-only importer, external-managed state ve Passenger/static/Node/DB/Docker/domain/cron/mail migration + per-resource rollback araçlarını tamamla.
+## J. P0–P3 — Test, migration ve yayın kod işleri
 
-## J. P0–P3 — Test, migration ve yayın kapıları
+- [ ] Yeni Website/migration/resource/terminal/secret yüzeyleri geldikçe native/process/source parity testleri ekle.
+- [ ] Agentless package upgrade/schema migration/PTY dependency/restart reconciliation/job-running self-update/disk-full rollback senaryolarını tamamla.
+- [ ] Migration kabulünden sonra install/package/docs/registry'deki retained agent varsayımlarını aynı değişimle temizle.
+- [ ] `todo.md` kabulü tamamlanmadan production-ready etiketi verme.
 
-- [ ] Agentsiz mimari ilerledikçe mevcut core/deploy/rollback/ACME/job testlerini local-executor sınırına taşı; test-only network backdoor ekleme.
-- [ ] Website migration, resource-scoped access, WebSocket/PTY ve yeni secret yüzeyleri için native/process testleri ekle. Görsel/component/browser polish testleri tasarım aşamasına bırakılabilir; auth/security browser kabulü `todo.md` gereği korunur.
-- [ ] Agentsiz package upgrade, schema migration, PTY dependency, restart reconciliation, job-running self-update ve disk-full rollback senaryolarını tamamla.
-- [ ] Master-key/backup/restore/resource-exhaustion/panel-outage tatbikatlarını gerçek desteklenen runtime ve test hostunda çalıştır; çalıştırılmayan testi geçmiş sayma.
-- [ ] Migration kabulü tamamlandıkça install/package docs ve compatibility yüzeylerinden kalan agent varsayımlarını temizle; rollback gerektiren davranışı erken kaldırma.
-- [ ] `todo.md` içindeki Node 24, auth/security browser, HTTPS, package, Ubuntu/DNS/Plesk ve canlı rollback kabulünü tamamlamadan production-ready etiketi verme.
-
-**Yayın sırası:** A güvenlik sınırı -> B agentless root backend/migration -> C kalıcı Website modeli -> E/F/G günlük hosting functionality -> H mail -> I kalan modüller -> en sonda ayrı model ile D görsel UI/UX tasarımı. Tasarım çalışması backend functionality veya production-ready kabulü yerine geçmez.
+**Uygulama sırası:** A'da dış ortama bağlı olmayan güvenlik işi → B'de kabul beklemeyen agentless iş → C Website/domain modeli → E/F/G günlük hosting functionality → H mail → I kalan modüller → en son D görsel UI/UX.
