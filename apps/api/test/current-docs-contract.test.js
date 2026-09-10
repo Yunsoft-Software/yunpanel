@@ -6,6 +6,7 @@ const root = new URL('../../../', import.meta.url);
 const currentDocs = [
   'README.md',
   'plan.md',
+  'todo.md',
   'agents.md',
   'docs/development.md',
   'docs/domain-hierarchy.md',
@@ -46,7 +47,8 @@ test('current docs expose the implemented agentless migration and deferred-desig
 
   assert.match(docs.get('README.md'), /local-runtime\.mjs validate <server-uuid>/);
   assert.match(docs.get('README.md'), /create --backup-dir \/var\/backups\/yunpanel\/migration-<timestamp> --confirm/);
-  assert.match(docs.get('plan.md'), /post-migration read-only `validate`/);
+  assert.match(docs.get('plan.md'), /Migration live-apply katmanını yalnız gerçek test-host kabulünden sonra aç/);
+  assert.match(docs.get('todo.md'), /`local-runtime validate <id>`/);
   assert.doesNotMatch(docs.get('plan.md'), /Kalan legacy hata yollarını güvenli tanı kataloğuna bağla/);
   assert.match(docs.get('agents.md'), /DEFERRED — Enterprise UI\/UX standardı/);
   assert.match(docs.get('docs/development.md'), /New enrollment is retired/);
@@ -54,6 +56,6 @@ test('current docs expose the implemented agentless migration and deferred-desig
   assert.match(docs.get('docs/local-executor-safety.md'), /There is no generic `force-success`/);
   assert.match(docs.get('docs/local-migration-backup.md'), /Metadata plan for future live apply/);
   assert.match(docs.get('docs/local-runtime-migration.md'), /local-runtime\.mjs validate <server-uuid>/);
-  assert.match(docs.get('docs/website-workspace.md'), /Owner-protected user administration is now implemented/);
-  assert.match(docs.get('docs/domain-hierarchy.md'), /There is still no independent persistent `Website` identity/);
+  assert.match(docs.get('docs/website-workspace.md'), /common audit and Owner user administration/);
+  assert.match(docs.get('docs/domain-hierarchy.md'), /Website identity is independent from hostname\/domain IDs/);
 });
