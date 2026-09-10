@@ -70,7 +70,7 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
   function record(actorId, targetId, action) {
     db.prepare('DELETE FROM auth_user_admin_events WHERE created_at < ?').run(now() - 90 * 24 * 60 * 60_000);
     db.prepare('INSERT INTO auth_user_admin_events(actor_id, target_id, action, created_at) VALUES (?, ?, ?, ?)').run(actorId, targetId, action, now());
-    audit(actorId, action);
+    audit(actorId, action, { type: 'user', id: targetId });
   }
   function existing(id, expectedRevision) {
     if (typeof id !== 'string' || id.length > 128) throw missing();
@@ -96,7 +96,6 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
   }
 
   return {
-    // Used to reject password logins that race a user lifecycle change.
     revision(userId) { return read(userId)?.revision ?? null; },
     list(rawToken, requireManagement, { offset = 0, limit = 50 } = {}) {
       if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
