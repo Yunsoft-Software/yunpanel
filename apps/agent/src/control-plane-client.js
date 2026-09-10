@@ -4,6 +4,7 @@ import { OPERATIONS, validateOperationEnvelope } from '@yunpanel/protocol';
 import { normalizeApplicationEnvironmentBundle } from '@yunpanel/shared';
 import { executeOperation } from './operations.js';
 import { loadAgentIdentity, saveAgentIdentity } from './identity-store.js';
+import { safeLegacyAgentDiagnosticCode, safeLegacyAgentError } from './legacy-safe-error.js';
 
 export const AGENT_VERSION = '0.3.0';
 const DEFAULT_HEARTBEAT_MS = 30_000;
@@ -49,14 +50,17 @@ async function readJsonResponse(response, operationName) {
   try {
     body = await response.json();
   } catch {
-    throw new Error(`${operationName} returned invalid JSON`);
+    const error = new Error(`${operationName} returned invalid JSON`);
+    error.code = 'control_plane_invalid_json';
+    error.status = response.status;
+    throw error;
   }
 
   if (!response.ok) {
-    const code = body?.error?.code ?? `http_${response.status}`;
-    const message = body?.error?.message ?? `${operationName} failed`;
-    const error = new Error(message);
-    error.code = code;
+    const safe = safeLegacyAgentError({ code: body?.error?.code });
+    const recognized = safe.code !== 'legacy_operation_failed';
+    const error = new Error(recognized ? safe.message : `${operationName} failed`);
+    error.code = recognized ? safe.code : 'control_plane_request_failed';
     error.status = response.status;
     throw error;
   }
@@ -69,10 +73,7 @@ function agentAuthorization(identity) {
 }
 
 function safeCommandError(error) {
-  return {
-    code: typeof error?.code === 'string' ? error.code.slice(0, 120) : 'operation_failed',
-    message: typeof error?.message === 'string' ? error.message.slice(0, 500) : 'Agent operation failed',
-  };
+  return safeLegacyAgentError(error);
 }
 
 export async function enrollWithControlPlane({
@@ -297,7 +298,7 @@ export async function startControlPlaneLink({
       const inventory = { ...baseInventory, docker, nginx };
       await sendHeartbeat({ baseUrl, identity, inventory, services, fetchImpl });
     } catch (error) {
-      logger.error(`[yun-agent] heartbeat failed: ${error.code ?? error.message}`);
+      logger.error(`[yun-agent] heartbeat failed: ${safeLegacyAgentDiagnosticCode(error, 'heartbeat_failed')}`);
     } finally {
       heartbeatRunning = false;
     }
@@ -320,7 +321,7 @@ export async function startControlPlaneLink({
         });
       }
     } catch (error) {
-      logger.error(`[yun-agent] command polling failed: ${error.code ?? error.message}`);
+      logger.error(`[yun-agent] command polling failed: ${safeLegacyAgentDiagnosticCode(error, 'command_poll_failed')}`);
     } finally {
       commandRunning = false;
     }
