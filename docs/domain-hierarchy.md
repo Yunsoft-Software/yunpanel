@@ -1,66 +1,68 @@
 # Domain hierarchy — current backend boundary
 
-## Implemented scope
+## Current model
 
-The domain registry supports an explicit optional `parentDomainId`. Parent/child relationships are stored as resource identity, not inferred from string suffixes at read time.
+Domains and Websites are now separate persistent backend resources.
 
-Current hierarchy rules include:
+A `Website` has its own stable UUID and owns the server/application/runtime/document-root/Unix-user binding. A domain record owns hostname-oriented state and may carry an explicit `websiteId` foreign key plus an explicit `parentDomainId`.
 
-- parent and child must belong to the same server,
+Current Website rules:
+
+- Website identity is independent from hostname/domain IDs,
+- application-backed static/Node Websites derive canonical document root and deterministic `yunapp-*` user from the application ID,
+- one application cannot be silently bound to multiple Websites,
+- persisted Website records revalidate server/application references at startup,
+- missing/cross-server/runtime/root drift fails closed,
+- proxy Websites remain valid without inventing an application or Unix user,
+- `/api/websites`, `/api/websites/:id` and `/api/websites/:id/domains` read real Website state rather than same-server/port inference.
+
+Current domain hierarchy rules:
+
+- `parentDomainId` is explicit; ancestry is never guessed from the final two labels,
+- parent/child must share a server,
 - the normalized child hostname must be below the parent's primary hostname at a dot boundary,
-- duplicate IDs, missing parents and cycles are rejected,
+- duplicate IDs, missing parents and cycles fail closed,
 - aliases remain attached names and are not silently promoted into independent parent resources,
-- legacy domain records without a parent remain independent rather than receiving guessed ancestry.
+- `websiteId` is optional only for legacy/migration compatibility,
+- an explicit Website binding requires an existing Website on the same server,
+- a legacy unbound domain can migrate one-way from `websiteId=null` to one exact Website; changing an existing binding requires a future impact-preview path.
 
-Each child is still its own domain record with its own target and certificate lifecycle. Creating a domain/subdomain record does not publish external DNS and does not create a mail domain.
+## Hostname normalization
 
-## Important current limitation
+Shared hostname validation canonicalizes internationalized domain names through Node's UTS-46/ASCII conversion. Unicode and equivalent punycode forms therefore persist and compare in one ASCII representation. Unicode dot variants are normalized before conversion.
 
-The current hierarchy is **not** the final Website model. There is still no independent persistent `Website` identity that owns runtime/document-root/Unix-user relationships.
+Duplicate domain/alias and parent-boundary checks operate on that canonical ASCII form. Wildcards remain outside the ordinary hostname validator and are a separate DNS/certificate feature.
 
-The remaining model work in `plan.md` includes:
+## Migration boundary
 
-- persistent Website records separate from hostnames,
-- explicit Website ↔ application/runtime/document-root/Unix-user links,
-- IDN/punycode normalization,
-- safe reparenting of existing records,
-- dependency-aware move/delete preview,
-- alias/canonical semantics in the final Website/domain model,
-- versioned migration from existing domain/application records while preserving IDs, certificates, releases and traffic.
+Existing domain files with no `websiteId` still open as `websiteId=null`; startup does not invent bindings from hostname, server or port. This is intentional.
 
-Do not treat `/websites/:id` compatibility routing or same-server/port application matching as a permanent foreign-key relationship.
+The remaining migration work must:
 
-## API and authentication boundary
+- produce a versioned/read-only mapping preview,
+- create/reuse Websites without changing current traffic targets,
+- bind legacy domains through the one-way migration primitive,
+- preserve domain/application IDs, certificate links, encrypted secrets and release history,
+- provide rollback before `websiteId` becomes mandatory for new managed domain creation.
 
-Production enters through `apps/api/src/index.js` and `createAuthenticatedApi()`. Domain management remains behind the backend session/role/MFA/CSRF/Origin boundary. Directly mounting a lower-level app factory is not a supported alternate public listener.
+Until that migration is accepted, do not globally require `websiteId` on legacy domain state.
 
-The old server-enrollment HTTP path has been retired. Domain work must not reintroduce an agent enrollment or alternate unauthenticated management surface.
+## Website/domain relationship reads
 
-Nginx domain stage/activate and managed certificate issue/renew foundations already exist and are consumed through durable jobs. Their running uncertain-outcome recovery is operation-specific; do not replace it with generic retry or force-success logic.
+`GET /api/websites/:websiteId/domains` returns only domains whose persisted `websiteId` equals that Website ID. It does not infer a relationship from proxy ports, static roots or hostname suffixes. Read Only accounts may use this safe relationship read because they already have domain inventory access; unrelated nested Website management remains Owner-only.
 
 ## DNS, SSL and mail separation
 
-The following remain distinct lifecycles:
+Website/domain identity, DNS hosting/provider state, certificate state and mail-domain/mailbox state remain separate lifecycles. Creating or binding a hostname does not mean DNS propagated, a certificate exists or mail is configured.
 
-- web hostname/domain resource,
-- DNS hosting/provider state,
-- certificate state,
-- mail domain/mailbox state.
+Nginx stage/activate and managed certificate issue/renew continue through durable jobs and operation-specific recovery. Do not replace them with generic retry/force-success behavior.
 
-Creating or reparenting a web hostname must never imply that DNS propagated, a certificate is valid, or mail is configured. DNS readiness/provider mutation, DNS-01/wildcard support and full mail lifecycle remain separate implementation work.
+## Delete/move/reparent rule
 
-## Deletion and migration rule
+Future reparent/move/delete operations require a backend impact preview covering at least child domains, Website/application bindings, certificates, mail resources, backups and later cron/Docker dependencies. Default behavior must fail closed when dependent resources would be orphaned; hidden cascade deletion is not acceptable.
 
-Future delete/move operations must produce an impact preview covering dependent child domains, application/Website links, certificates, mail resources and backups where applicable. Default behavior must fail closed when dependent resources would be orphaned; hidden cascade deletion is not acceptable.
+## Design status and validation
 
-Migration from the current compatibility model must be versioned, repeatable and backed up. Existing server/application/domain IDs, encrypted secrets, certificates and release relationships must not be rewritten casually.
+Visual hierarchy/site-detail redesign is deferred until backend functionality is complete. Do not spend this phase on layout/styling polish.
 
-## UI status
-
-The existing routed workspace can render the current hierarchy, but final enterprise UI/UX design is deferred. Do not spend the current backend development phase on hierarchy visual polish. Security/browser behavior that affects authorization, destructive confirmation or stale privileged state remains subject to `todo.md` acceptance.
-
-## Validation status
-
-Older focused hierarchy/model test runs are historical evidence only. They do not prove the current tree after the later auth, agentless, recovery and migration changes.
-
-Current full Node 24, browser, package, DNS/Nginx/ACME and migration acceptance requirements are tracked in `todo.md`. Do not mark the hierarchy/Website migration production-ready until the relevant current acceptance steps are actually run. GitHub Actions are not used for this project.
+Current Node24/full-workspace, authenticated API, package persistence, IDN, Website/domain migration and real DNS/Nginx/ACME acceptance requirements are in `todo.md`. Source implementation is not production acceptance. GitHub Actions are not used.
