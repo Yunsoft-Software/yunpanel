@@ -40,7 +40,7 @@ function discoveredMutationRoutes() {
 
 test('every panel management mutation route has a common audit classification', () => {
   const routes = discoveredMutationRoutes();
-  assert.ok(routes.length >= 19, `expected current management mutation surface, found ${routes.length}`);
+  assert.ok(routes.length >= 20, `expected current management mutation surface, found ${routes.length}`);
   const missing = [];
   for (const route of routes) {
     const pathname = concretePath(route.route);
@@ -60,6 +60,7 @@ test('every panel management mutation route has a common audit classification', 
 test('Website creation and migration mutations are part of common management audit coverage', () => {
   const expected = new Map([
     ['/api/websites', { action: 'website.create', resourceType: 'website', resourceId: 'new' }],
+    ['/api/websites/migration/create-website', { action: 'website.migration.create', resourceType: 'website_migration', resourceId: 'create' }],
     ['/api/websites/migration/bind', { action: 'website.migration.bind', resourceType: 'website_migration', resourceId: 'bind' }],
     ['/api/websites/migration/finalize', { action: 'website.migration.finalize', resourceType: 'website_migration', resourceId: 'policy' }],
     ['/api/websites/migration/rollback', { action: 'website.migration.rollback', resourceType: 'website_migration', resourceId: 'policy' }],
