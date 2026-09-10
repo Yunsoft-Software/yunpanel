@@ -21,10 +21,7 @@ function fixture({ operation = OPERATIONS.APP_STATIC_DEPLOY, evidence = { satisf
   const jobRegistry = {
     async getJob() {
       events.push('get');
-      return {
-        id: jobId, serverId, status, operation, resourceType: 'application', resourceId: applicationId,
-        payload: { applicationId, deploymentId: jobId },
-      };
+      return { id: jobId, serverId, status, operation, resourceType: 'application', resourceId: applicationId };
     },
     async beginReconciliation() { events.push('begin'); return { serverId, jobId, status: 'running', pending: true }; },
     async complete(input) {
@@ -47,6 +44,18 @@ function fixture({ operation = OPERATIONS.APP_STATIC_DEPLOY, evidence = { satisf
       inspect: async () => ({
         jobs: [{ jobId, serverId, status: 'running', operation, resourceType: 'application', resourceId: applicationId }],
       }),
+      loadJobContext: async () => {
+        events.push('context');
+        return {
+          id: jobId,
+          serverId,
+          status: 'running',
+          operation,
+          resourceType: 'application',
+          resourceId: applicationId,
+          payload: { applicationId, deploymentId: jobId },
+        };
+      },
       inspectDeploymentEvidence: async (identity) => {
         events.push('evidence');
         assert.deepEqual(identity, { applicationId, deploymentId: jobId });
@@ -57,17 +66,17 @@ function fixture({ operation = OPERATIONS.APP_STATIC_DEPLOY, evidence = { satisf
   };
 }
 
-test('static recovery proves deployment before journal and acknowledges after reconciliation', async () => {
+test('static recovery proves private queued payload before host evidence and journal', async () => {
   const fx = fixture();
   const recovered = await recoverRunningStaticDeployment(fx.options);
   assert.equal(recovered.recoveryMethod, 'verified_static_deployment_receipt');
-  assert.deepEqual(fx.events, ['get', 'evidence', 'begin', 'complete', 'reconcile', 'ack']);
+  assert.deepEqual(fx.events, ['get', 'context', 'evidence', 'begin', 'complete', 'reconcile', 'ack']);
 });
 
 test('missing static deployment evidence leaves running state untouched', async () => {
   const fx = fixture({ evidence: { satisfied: false, result: null } });
   await assert.rejects(recoverRunningStaticDeployment(fx.options), { code: 'job_static_recovery_evidence_not_satisfied' });
-  assert.deepEqual(fx.events, ['get', 'evidence']);
+  assert.deepEqual(fx.events, ['get', 'context', 'evidence']);
 });
 
 test('static rollback and Node deployment cannot enter static deploy recovery', async () => {
@@ -78,9 +87,24 @@ test('static rollback and Node deployment cannot enter static deploy recovery', 
   }
 });
 
+test('private static recovery context mismatch is rejected before evidence inspection', async () => {
+  const fx = fixture();
+  fx.options.loadJobContext = async () => ({
+    id: jobId,
+    serverId,
+    status: 'running',
+    operation: OPERATIONS.APP_STATIC_DEPLOY,
+    resourceType: 'application',
+    resourceId: applicationId,
+    payload: { applicationId: 'different-application', deploymentId: jobId },
+  });
+  await assert.rejects(recoverRunningStaticDeployment(fx.options), { code: 'job_static_recovery_context_mismatch' });
+  assert.deepEqual(fx.events, ['get']);
+});
+
 test('reconciliation failure keeps terminal receipt-backed work unacknowledged', async () => {
   const fx = fixture();
   fx.options.reconcile = async () => { fx.events.push('reconcile'); throw new Error('hidden'); };
   await assert.rejects(recoverRunningStaticDeployment(fx.options), { code: 'job_static_recovery_reconciliation_failed' });
-  assert.deepEqual(fx.events, ['get', 'evidence', 'begin', 'complete', 'reconcile']);
+  assert.deepEqual(fx.events, ['get', 'context', 'evidence', 'begin', 'complete', 'reconcile']);
 });
