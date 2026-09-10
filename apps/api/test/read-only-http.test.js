@@ -75,7 +75,7 @@ test('read-only auth session publishes its scoped permissions', async (t) => {
   const session = (await response.json()).data;
   assert.deepEqual(session.access, {
     mode: 'read_only',
-    permissions: ['servers.read', 'applications.read', 'domains.read', 'certificates.read'],
+    permissions: ['servers.read', 'websites.read', 'applications.read', 'domains.read', 'certificates.read'],
   });
   assert.equal(app.calls(), 0);
 });
