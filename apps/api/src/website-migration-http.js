@@ -1,10 +1,12 @@
 import { assertUuid } from '@yunpanel/shared';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { bindLegacyDomainToWebsite, WebsiteMigrationBindError, websiteMigrationBindInternals } from './website-migration-bind.js';
+import { createWebsiteForMigration, WebsiteMigrationCreateError } from './website-migration-create.js';
 import { WebsiteMigrationPolicyError, websiteMigrationPolicyInternals } from './website-migration-policy.js';
 import { previewWebsiteMigration } from './website-migration-preview.js';
 
 const BIND_FIELDS = new Set(['domainId', 'websiteId', 'previewDigest', 'confirmation']);
+const CREATE_FIELDS = new Set(['domainId', 'applicationId', 'previewDigest', 'confirmation']);
 const FINALIZE_FIELDS = new Set(['previewDigest', 'confirmation']);
 const ROLLBACK_FIELDS = new Set(['enforcedDigest', 'confirmation']);
 
@@ -44,6 +46,28 @@ function assertBindBody(body) {
   return Object.freeze({ domainId, websiteId, previewDigest: body.previewDigest });
 }
 
+function assertCreateBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((key) => !CREATE_FIELDS.has(key))) {
+    throw new WebsiteMigrationCreateError('website_migration_create_invalid', 'Send only documented migration Website creation fields', 400);
+  }
+  let domainId;
+  let applicationId;
+  try {
+    domainId = assertUuid(body.domainId, 'domainId');
+    applicationId = assertUuid(body.applicationId, 'applicationId');
+  } catch {
+    throw new WebsiteMigrationCreateError('website_migration_create_invalid', 'Domain and Application IDs must be valid UUIDs', 400);
+  }
+  if (typeof body.previewDigest !== 'string' || !websiteMigrationBindInternals.digestPattern.test(body.previewDigest)) {
+    throw new WebsiteMigrationCreateError('website_migration_preview_digest_invalid', 'A current migration preview digest is required', 400);
+  }
+  const expectedConfirmation = `create-website:${domainId}:${applicationId}:${body.previewDigest}`;
+  if (body.confirmation !== expectedConfirmation) {
+    throw new WebsiteMigrationCreateError('website_migration_confirmation_required', `Confirm migration Website creation with ${expectedConfirmation}`, 400);
+  }
+  return Object.freeze({ domainId, applicationId, previewDigest: body.previewDigest });
+}
+
 function assertFinalizeBody(body) {
   const input = exactBody(body, FINALIZE_FIELDS, 'website_migration_finalize_invalid', 'Send only documented migration finalize fields');
   const previewDigest = digest(input.previewDigest);
@@ -78,16 +102,18 @@ export function mountWebsiteMigrationRoutes(app, {
   websiteMigrationPolicy,
   preview = previewWebsiteMigration,
   bind = bindLegacyDomainToWebsite,
+  create = createWebsiteForMigration,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
-  if (!websiteRegistry || typeof websiteRegistry.listWebsites !== 'function') throw new Error('Website registry is required');
+  if (!websiteRegistry || typeof websiteRegistry.listWebsites !== 'function' || typeof websiteRegistry.getWebsite !== 'function'
+    || typeof websiteRegistry.createMigrationWebsite !== 'function') throw new Error('Website registry is required');
   if (!domainRegistry || typeof domainRegistry.listDomains !== 'function' || typeof domainRegistry.bindWebsite !== 'function') throw new Error('Domain registry is required');
   if (!applicationRegistry || typeof applicationRegistry.listApplications !== 'function') throw new Error('Application registry is required');
   if (!websiteMigrationPolicy || typeof websiteMigrationPolicy.snapshot !== 'function'
     || typeof websiteMigrationPolicy.finalize !== 'function' || typeof websiteMigrationPolicy.rollback !== 'function') {
     throw new Error('Website migration policy store is required');
   }
-  if (typeof preview !== 'function' || typeof bind !== 'function') throw new Error('Website migration adapters are required');
+  if (typeof preview !== 'function' || typeof bind !== 'function' || typeof create !== 'function') throw new Error('Website migration adapters are required');
 
   async function currentPreview() {
     const [domains, websites, applications] = await Promise.all([
@@ -105,6 +131,18 @@ export function mountWebsiteMigrationRoutes(app, {
   app.get('/api/websites/migration/status', requirePanelRouteAccess, asyncRoute(async (_request, response) => {
     const plan = await currentPreview();
     return response.json({ data: { policy: websiteMigrationPolicy.snapshot(), preview: plan } });
+  }));
+
+  app.post('/api/websites/migration/create-website', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const input = assertCreateBody(request.body);
+    const result = await create({
+      ...input,
+      domainRegistry,
+      websiteRegistry,
+      applicationRegistry,
+      preview,
+    });
+    return response.status(result.created ? 201 : 200).json({ data: result });
   }));
 
   app.post('/api/websites/migration/bind', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -133,6 +171,7 @@ export function mountWebsiteMigrationRoutes(app, {
 
 export const websiteMigrationHttpInternals = Object.freeze({
   assertBindBody,
+  assertCreateBody,
   assertFinalizeBody,
   assertRollbackBody,
 });
