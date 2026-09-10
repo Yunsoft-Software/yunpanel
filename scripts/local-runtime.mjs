@@ -83,6 +83,8 @@ function formatValidation(result) {
     `localRuntimeVersion=${result.localRuntimeVersion}`,
     `apiState=${result.apiState}`,
     `agentState=${result.agentState}`,
+    `apiHealth=${result.apiHealth?.healthy === true}`,
+    `apiHealthStatus=${result.apiHealth?.statusCode ?? 'unknown'}`,
     `activeJobs=${result.activeJobCount}`,
     `recoveryJobs=${result.recoveryJobCount}`,
     `inventoryPresent=${result.inventoryPresent}`,
