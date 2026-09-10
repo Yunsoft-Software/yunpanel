@@ -7,11 +7,32 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createManagedServiceMutationReceiptStore,
   ManagedServiceMutationReceiptError,
+  managedServiceStateDigest,
 } from '../src/managed-service-mutation-receipt.js';
 
 const serverId = 'server-1';
 const installJobId = '12345678-1234-4234-8234-123456789012';
 const restartJobId = '87654321-1234-4234-8234-123456789012';
+
+function activeState(extra = {}) {
+  return {
+    id: 'nginx',
+    installed: true,
+    active: true,
+    packages: [{ packageName: 'nginx', installed: true, version: '1.24.0-1', raw: 'must-not-persist' }],
+    units: [{
+      unit: 'nginx.service',
+      loadState: 'loaded',
+      activeState: 'active',
+      subState: 'running',
+      unitFileState: 'enabled',
+      inspectionError: false,
+      rawOutput: 'must-not-persist',
+    }],
+    rawOutput: 'must-not-persist',
+    ...extra,
+  };
+}
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-service-receipt-'));
@@ -20,15 +41,17 @@ async function fixture(t) {
   return { root, store: createManagedServiceMutationReceiptStore({ root }) };
 }
 
-test('managed service receipts persist only minimal install/restart metadata with private modes', async (t) => {
+test('managed service receipts persist only minimal install/restart metadata plus safe state digest with private modes', async (t) => {
   const fx = await fixture(t);
+  const installState = activeState({ changed: true });
+  const restartState = activeState({ action: 'restart' });
   const install = await fx.store.write({
     serverId,
     jobId: installJobId,
     operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
     serviceId: 'nginx',
     changed: true,
-    result: { rawOutput: 'must-not-persist' },
+    state: installState,
   });
   const restart = await fx.store.write({
     serverId,
@@ -36,10 +59,13 @@ test('managed service receipts persist only minimal install/restart metadata wit
     operation: OPERATIONS.SYSTEM_SERVICE_CONTROL,
     serviceId: 'nginx',
     action: 'restart',
+    state: restartState,
   });
 
   assert.equal(install.changed, true);
   assert.equal(restart.action, 'restart');
+  assert.equal(install.stateDigest, managedServiceStateDigest(installState, 'nginx'));
+  assert.equal(restart.stateDigest, managedServiceStateDigest(restartState, 'nginx'));
   assert.deepEqual(await fx.store.read(serverId, installJobId), install);
   assert.deepEqual(await fx.store.read(serverId, restartJobId), restart);
 
@@ -47,7 +73,7 @@ test('managed service receipts persist only minimal install/restart metadata wit
   assert.equal((await stat(path.join(fx.root, serverId))).mode & 0o777, 0o700);
   assert.equal((await stat(fx.store.receiptPath(serverId, installJobId))).mode & 0o777, 0o600);
   const raw = await readFile(fx.store.receiptPath(serverId, installJobId), 'utf8');
-  assert.doesNotMatch(raw, /rawOutput|must-not-persist|result/i);
+  assert.doesNotMatch(raw, /rawOutput|must-not-persist|packages|units|result/i);
 });
 
 test('receipt store rejects unsupported service controls and incomplete install evidence', async (t) => {
@@ -59,6 +85,7 @@ test('receipt store rejects unsupported service controls and incomplete install 
       operation: OPERATIONS.SYSTEM_SERVICE_CONTROL,
       serviceId: 'nginx',
       action: 'stop',
+      state: activeState({ action: 'stop' }),
     }),
     (error) => error instanceof ManagedServiceMutationReceiptError && error.code === 'service_receipt_mutation_invalid',
   );
@@ -68,8 +95,24 @@ test('receipt store rejects unsupported service controls and incomplete install 
       jobId: installJobId,
       operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
       serviceId: 'nginx',
+      state: activeState(),
     }),
     (error) => error instanceof ManagedServiceMutationReceiptError && error.code === 'service_receipt_mutation_invalid',
+  );
+});
+
+test('invalid safe service state is rejected before any receipt is persisted', async (t) => {
+  const fx = await fixture(t);
+  await assert.rejects(
+    fx.store.write({
+      serverId,
+      jobId: installJobId,
+      operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
+      serviceId: 'nginx',
+      changed: true,
+      state: { id: 'nginx', installed: true, active: true },
+    }),
+    (error) => error instanceof ManagedServiceMutationReceiptError && error.code === 'service_receipt_state_invalid',
   );
 });
 
@@ -86,6 +129,7 @@ test('tampered receipt fields fail closed without echoing file contents', async 
     serviceId: 'nginx',
     action: null,
     changed: true,
+    stateDigest: 'a'.repeat(64),
     token: 'hidden-value',
   }), { mode: 0o600 });
 
