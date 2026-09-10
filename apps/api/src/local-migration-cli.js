@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { createJobRegistry } from './job-registry.js';
 import {
   bindLocalServerForRuntime,
+  createLocalServerForRuntime,
   inspectLocalServerMigration,
   releaseLocalServerFromRuntime,
 } from './local-server-migration.js';
@@ -85,8 +86,8 @@ export function createMigrationServiceStatus({
 }
 
 function requireAction(action) {
-  if (!['status', 'bind', 'release'].includes(action)) {
-    throw new LocalMigrationCliError('invalid_migration_action', 'Migration action must be status, bind or release');
+  if (!['status', 'create', 'bind', 'release'].includes(action)) {
+    throw new LocalMigrationCliError('invalid_migration_action', 'Migration action must be status, create, bind or release');
   }
   return action;
 }
@@ -95,6 +96,7 @@ export async function runLocalMigrationCommand({
   action,
   serverId,
   hostname,
+  displayName = null,
   confirm = false,
   env = process.env,
   packaged = false,
@@ -104,7 +106,7 @@ export async function runLocalMigrationCommand({
   serviceStatus = createMigrationServiceStatus(),
 } = {}) {
   const safeAction = requireAction(action);
-  if ((safeAction === 'bind' || safeAction === 'release') && confirm !== true) {
+  if (safeAction !== 'status' && confirm !== true) {
     throw new LocalMigrationCliError('migration_confirmation_required', `Use --confirm to ${safeAction} local runtime ownership`);
   }
   if (typeof registryFactory !== 'function' || typeof jobRegistryFactory !== 'function' || typeof serviceStatus !== 'function') {
@@ -113,15 +115,18 @@ export async function runLocalMigrationCommand({
   const paths = resolveLocalMigrationPaths({ env, packaged, cwd });
   const registry = registryFactory({ filePath: paths.serverStore });
   const jobRegistry = jobRegistryFactory({ filePath: paths.jobStore });
-  const input = { serverId, hostname, registry, jobRegistry, serviceStatus };
+  const input = { serverId, hostname, displayName, registry, jobRegistry, serviceStatus };
 
   if (safeAction === 'status') {
     const status = await inspectLocalServerMigration(input);
     return Object.freeze({ action: safeAction, ...status, statePaths: paths });
   }
-  const server = safeAction === 'bind'
-    ? await bindLocalServerForRuntime(input)
-    : await releaseLocalServerFromRuntime(input);
+
+  let server;
+  if (safeAction === 'create') server = await createLocalServerForRuntime(input);
+  else if (safeAction === 'bind') server = await bindLocalServerForRuntime(input);
+  else server = await releaseLocalServerFromRuntime(input);
+
   return Object.freeze({
     action: safeAction,
     serverId: server.id,
