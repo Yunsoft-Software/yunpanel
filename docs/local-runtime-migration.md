@@ -15,6 +15,7 @@ Both paths remain fail-closed until the package/test-host acceptance in `todo.md
 - Do not change `YUNPANEL_SECRET_MASTER_KEY` as part of execution-ownership migration.
 - Do not proceed while a `queued` or `running` job exists or durable recovery is unresolved.
 - Every `create`, `bind` or `release` ownership mutation requires an already-created, re-verified snapshot below `/var/backups/yunpanel`.
+- Before an ownership mutation on a migration/rollback host, run the non-destructive restore `preview` and private `stage` rehearsal for that exact snapshot; neither command mutates live `/etc`, `/var/lib`, Unix identities or services.
 - There is no generic `force-success`, `force-failed`, mutation retry or journal-clear escape hatch.
 
 Recommended packaged control-plane paths:
@@ -84,7 +85,27 @@ Copy the exact printed snapshot path, then explicitly re-verify it:
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs verify /var/backups/yunpanel/migration-<timestamp>
 ```
 
-The backup procedure, fixed source allowlist, modes and restore boundary are defined in `docs/local-migration-backup.md`. The ownership CLI verifies the same snapshot again immediately before invoking its mutation.
+The backup procedure and fixed source allowlist are defined in `docs/local-migration-backup.md`. The ownership CLI verifies the same snapshot again immediately before invoking its mutation.
+
+### 5. Preview and stage the rollback snapshot
+
+Before changing execution ownership, run the non-destructive restore preview on the same snapshot:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs preview /var/backups/yunpanel/migration-<timestamp>
+```
+
+`preview` re-validates the archive member/type/link graph, compares current restore targets, and compares managed `yunapp-*` UID/GID/home/shell/group identity state. `/etc/passwd` and `/etc/group` are identity references only; preview never proposes overwriting them.
+
+Then prove that the verified archive can be materialized only into the private staging root:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs stage /var/backups/yunpanel/migration-<timestamp> --confirm
+```
+
+A successful `stage` must report `validated=true`, `destructive=false` and `liveMutation=false`. It uses `/var/backups/yunpanel/.restore-staging`, `--no-same-owner` and `--no-same-permissions`, validates the extracted member/link graph, and does not modify live `/etc`, `/var/lib`, services or Unix accounts. A successful stage is a rollback rehearsal only; there is still no live restore/apply command.
+
+If preview reports identity drift, type drift, unsafe archive/link metadata, or staging fails, do not proceed with ownership mutation until the discrepancy is understood from independent console access.
 
 ## Durable recovery commands
 
@@ -193,13 +214,16 @@ sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/local-runtime.mjs status <ser
 
 ### A2. Complete the common pre-mutation sequence
 
-Drain work, stop API + agent, resolve durable recovery, create the verified snapshot, and run `status` again. Continue only when:
+Drain work, stop API + agent, resolve durable recovery, create/re-verify the snapshot, complete `preview` + private `stage`, and run `status` again. Continue only when:
 
 - `apiActive=false`
 - `agentActive=false`
 - `activeJobs=0`
 - `recoveryJobs=0`
 - hostname is exact
+- the snapshot verifies cleanly
+- restore preview is non-destructive and archive/identity checks are understood
+- the private stage validates without touching live state
 - printed state paths are the intended packaged files.
 
 ### A3. Bind the preserved identity
@@ -233,7 +257,7 @@ Use this path only when there is no enrolled server identity that must be preser
 
 ### B1. Complete the common pre-mutation sequence
 
-API and agent must be stopped and the global queue/recovery state must be clear. Create and re-verify a snapshot as described above.
+API and agent must be stopped and the global queue/recovery state must be clear. Create/re-verify the snapshot and complete its non-destructive `preview` + private `stage` rehearsal as described above.
 
 ### B2. Create the local-only identity
 
@@ -294,7 +318,7 @@ Do not release ownership while local work is active or durable recovery is unres
 sudo systemctl stop yunpanel-api.service yun-agent.service
 ```
 
-3. Create and re-verify a **new** snapshot of the current local-owned state with `local-migration-backup.mjs create --confirm` and `verify`.
+3. Create and re-verify a **new** snapshot of the current local-owned state. Run `preview` and `stage` for that exact rollback snapshot before changing ownership again.
 4. Remove `YUNPANEL_LOCAL_SERVER_ID` from `/etc/yunpanel/control-plane/api.env` only while both services remain stopped.
 5. Release the preserved enrolled identity:
 
@@ -311,10 +335,10 @@ sudo systemctl start yunpanel-api.service yun-agent.service
 
 7. Verify agent heartbeat, exact server identity, queue behavior, auth, hosted sites, certificates and releases.
 
-`release --confirm` is not available for a fresh Path B local-only record because no legacy agent credential exists; the command fails `agent_credentials_unavailable` rather than inventing one.
+`release <server-uuid> --backup-dir <snapshot> --confirm` is not available for a fresh Path B local-only record because no legacy agent credential exists; the command fails `agent_credentials_unavailable` rather than inventing one.
 
-There is intentionally no blind automatic archive extraction. Restoring files from the verified snapshot remains a separate package/test-host acceptance item in `todo.md` and must use staged extraction/link/ownership validation before it can become an automated rollback primitive.
+Private staged extraction is available only as a non-live rehearsal under `/var/backups/yunpanel/.restore-staging`. There is intentionally no live archive apply/restore command. Promoting staged files into live `/etc`, `/var/lib`, Nginx, certificate or systemd state remains a separate package/test-host acceptance item in `todo.md` and must define per-target replacement, ownership/mode/ACL/xattr verification, Unix identity policy, pre-apply backup and deterministic rollback first.
 
-If any migration/recovery command reports an active service, active queue, recovery journal, hostname mismatch, invalid/outside state path, invalid backup or unreadable host evidence, do not bypass the guard. Resolve the discrepancy from independent console access and the verified snapshot.
+If any migration/recovery command reports an active service, active queue, recovery journal, hostname mismatch, invalid/outside state path, invalid backup, unsafe archive/link metadata, unexplained Unix identity drift or unreadable host evidence, do not bypass the guard. Resolve the discrepancy from independent console access and the verified snapshot.
 
 Complete `T-LOCAL-EXECUTOR`, `T-SERVICES`, `T-DATABASE`, `T-LIVE` and `T-MIGRATION` in `todo.md` on an isolated supported host before calling either path production-ready.
