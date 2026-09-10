@@ -5,7 +5,6 @@ import { handleUserAdmin } from './user-admin-http.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
 const AGENT_ROUTES = [
-  ['POST', /^\/api\/servers\/enroll$/],
   ['POST', /^\/api\/servers\/[^/%]+\/heartbeat$/],
   ['GET', /^\/api\/servers\/[^/%]+\/commands\/next$/],
   ['GET', /^\/api\/servers\/[^/%]+\/applications\/[^/%]+\/environment$/],
@@ -99,7 +98,7 @@ export function createAuthenticatedApi({ createHandler, store, publicOrigin, dev
     if (!pathname.startsWith('/api/')) return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
     if (pathname.startsWith('/api/dev/') && !development) return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
 
-    // These exact legacy transport routes still use their own enrollment/agent credentials.
+    // These exact retained legacy transport routes still use their own agent credentials.
     // Browser traffic cannot enter them; remove them alongside the agentless migration.
     if (isAgentRoute(request.method, pathname)) {
       if (request.headers.origin || request.headers.cookie) throw new AuthError('agent_channel_only', 'This route is not a browser management endpoint.', 403);
