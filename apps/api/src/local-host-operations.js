@@ -8,6 +8,7 @@ import {
   createNodeRollbackManager,
   createNodeStatusInspector,
   createStaticDeploymentManager,
+  createStaticDeploymentReceiptStore,
   createStaticRollbackManager,
   createSystemPackageManager,
 } from '@yunpanel/host-runtime';
@@ -50,6 +51,7 @@ export function createLocalHostOperations({
   nginxManager = createNginxManager(),
   acmeManager = createAcmeManager(),
   staticDeploymentManager = createStaticDeploymentManager(),
+  staticDeploymentReceiptStore = createStaticDeploymentReceiptStore(),
   staticRollbackManager = createStaticRollbackManager(),
   nodeDeploymentManager = createNodeDeploymentManager(),
   nodeRollbackManager = createNodeRollbackManager(),
@@ -60,6 +62,9 @@ export function createLocalHostOperations({
   if (loadApplicationEnvironment !== null && typeof loadApplicationEnvironment !== 'function') {
     throw new Error('loadApplicationEnvironment must be a function when configured');
   }
+  if (!staticDeploymentReceiptStore || typeof staticDeploymentReceiptStore.write !== 'function') {
+    throw new Error('staticDeploymentReceiptStore must provide write()');
+  }
 
   async function withApplicationEnvironment(payload, execute) {
     const environment = await loadApplicationEnvironment(payload.applicationId);
@@ -69,6 +74,22 @@ export function createLocalHostOperations({
       throw error;
     }
     return execute({ ...payload, environment });
+  }
+
+  async function deployStaticWithReceipt(payload) {
+    const result = await staticDeploymentManager.deployStatic(payload);
+    try {
+      await staticDeploymentReceiptStore.write({
+        applicationId: payload.applicationId,
+        deploymentId: payload.deploymentId,
+        result,
+      });
+    } catch {
+      // A recovery receipt is additional crash evidence, not part of the host
+      // deployment transaction. Never recast a completed deploy as failed just
+      // because its optional recovery receipt could not be persisted.
+    }
+    return result;
   }
 
   const handlers = new Map([
@@ -84,7 +105,7 @@ export function createLocalHostOperations({
     [OPERATIONS.DOMAIN_ACTIVATE, (payload) => nginxManager.activateDomain(payload)],
     [OPERATIONS.SSL_ISSUE, (payload) => acmeManager.issueCertificate(payload)],
     [OPERATIONS.SSL_RENEW, (payload) => acmeManager.renewCertificate(payload)],
-    [OPERATIONS.APP_STATIC_DEPLOY, (payload) => staticDeploymentManager.deployStatic(payload)],
+    [OPERATIONS.APP_STATIC_DEPLOY, (payload) => deployStaticWithReceipt(payload)],
     [OPERATIONS.APP_STATIC_ROLLBACK, (payload) => staticRollbackManager.rollbackStatic(payload)],
     [OPERATIONS.APP_NODE_STATUS, (payload) => nodeStatusInspector.inspectNodeStatus(payload)],
   ]);
