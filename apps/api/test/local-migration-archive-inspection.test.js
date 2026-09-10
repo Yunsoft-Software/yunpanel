@@ -154,9 +154,17 @@ test('special filesystem members and manifest root type drift are rejected', asy
   );
 });
 
-test('C quoted names decode escapes without turning them into path separators', () => {
+test('C quoted control escapes decode exactly and are then rejected as unsafe paths', () => {
   const parsed = localMigrationArchiveInspectionInternals.extractCStringLiterals(
     '-rw------- 0/0 1 2026-09-10 15:00 "var/lib/yunpanel/space file\\tname"',
   );
   assert.deepEqual(parsed, ['var/lib/yunpanel/space file\tname']);
+  assert.throws(
+    () => localMigrationArchiveInspectionInternals.normalizeMemberName(parsed[0]),
+    { code: 'migration_archive_member_invalid' },
+  );
+  assert.throws(
+    () => localMigrationArchiveInspectionInternals.normalizeLinkTarget('etc/nginx/link', '../sites-available/bad\tname'),
+    { code: 'migration_archive_link_invalid' },
+  );
 });
