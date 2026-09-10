@@ -53,7 +53,9 @@ sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs reconcile <s
 
 This command re-applies resource reconciliation only. It does **not** re-run the host operation.
 
-A `running` recovery job is handled differently. YunPanel currently permits automatic re-execution only for the two payload-free read-only inspections whose repetition cannot mutate host state:
+### Running read-only inspection recovery
+
+YunPanel permits re-execution only for payload-free inspections whose repetition cannot mutate host state:
 
 - `system.packages.inspect`
 - `database.inspect`
@@ -64,9 +66,53 @@ After both consumers are stopped, inspect the exact recovery identity first and 
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-readonly <server-id> <job-id> --confirm
 ```
 
-The command re-runs the allowlisted read-only inspection and records that fresh inspection result on the original durable job. If the host probe or durable completion cannot be confirmed, the recovery record remains unresolved. `system.services.inspect`, Node status, deploy/restart/rollback, package upgrade, service mutations, database create/delete, domain and certificate operations are deliberately **not** accepted by this command.
+The command verifies that the requested server identity belongs to the current OS hostname, re-runs the allowlisted read-only inspection and records that fresh result on the original durable job. If the host probe or durable completion cannot be confirmed, the recovery record remains unresolved.
 
-Mutating `running` recovery still requires operation-specific external host evidence. Do not mark a mutation succeeded/failed by guess, do not clear its journal manually and do not use process restart as an automatic retry mechanism. That remaining recovery work stays gated by `plan.md` and `todo.md`.
+### Running `domain.stage` recovery from Nginx evidence
+
+`domain.stage` is recoverable only when the exact deterministic staged Nginx config already exists on the same host. YunPanel re-renders the original queued domain spec and compares the expected config and SHA-256 checksum with the staged file without writing or reloading Nginx.
+
+With API and agent stopped:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-domain-stage <server-id> <job-id> --confirm
+```
+
+If exact staged evidence is present, YunPanel opens the durable reconciliation journal, records the recovered stage result, reconciles the domain registry and only then clears the journal. Missing, changed or unreadable staged state leaves the running job unresolved. This command does **not** recover `domain.activate`; an active config file alone does not prove that the Nginx process successfully reloaded it.
+
+### Running agentless static-deploy recovery from a private receipt
+
+New agentless static deployments attempt to persist a root-protected recovery receipt after the deployment manager has returned a successful, sanitized result. Receipts live below:
+
+```text
+/var/lib/yunpanel/recovery/static-deployments/<application-id>/<deployment-id>.json
+```
+
+Receipt directories are forced to `0700`, receipt files are `0600`, and the schema accepts only deployment/release identity, commit SHA, previous release and artifact count/size metadata. Environment values, credentials, repository URLs and arbitrary result fields are not accepted.
+
+A receipt is not sufficient by itself. Recovery additionally requires the application's `current` symlink to point exactly at `releases/<job-id>` and that target to be a real directory rather than a symlink.
+
+With API and agent stopped:
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-static-deploy <server-id> <job-id> --confirm
+```
+
+If all evidence matches, YunPanel completes the original running job, reconciles the application registry and clears the recovery journal. If the receipt was never written, current release drifted or filesystem evidence is inconsistent, the job remains unresolved. Retained legacy-agent deployments are not assumed to have these new receipts.
+
+### Mutations that remain unresolved
+
+There is deliberately no generic `force-success`, `force-failed` or `retry-mutation` recovery command. The following running mutations still need operation-specific evidence before they can be resolved automatically:
+
+- `domain.activate`
+- static rollback
+- Node deploy, rollback and restart
+- package upgrade
+- managed-service install/control
+- database create/delete
+- certificate issue/renew
+
+Do not mark these succeeded/failed by guess, do not clear their journal manually and do not use process restart as an automatic retry mechanism. A missing proof is an unresolved operation, not a failure result.
 
 ## Path A — migrate an existing enrolled server
 
@@ -132,7 +178,7 @@ sudo systemctl stop yunpanel-api.service yun-agent.service
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs status
 ```
 
-Do not continue while durable recovery is unresolved. The fresh-create command also fails closed if API/agent is active, any queued/running job exists or the durable recovery sidecar still contains unresolved work.
+Do not continue while durable recovery is unresolved. The fresh-create command also fails closed if API/agent is active, any queued/running job exists or the durable recovery sidecar contains unresolved work.
 
 ### B2. Create the local-only server record
 
@@ -170,9 +216,9 @@ systemctl is-active yun-agent.service || true
 
 Then verify through the authenticated panel, in this order:
 
-1. server connectivity/local snapshot,
-2. host inventory, allowlisted systemd services, Docker and Nginx snapshot parity,
-3. read-only package/service/database inspection,
+1. server connectivity and local host inventory,
+2. allowlisted systemd service, Docker and Nginx snapshots,
+3. read-only package/database inspection,
 4. one low-risk managed mutation on the test host,
 5. Node/static runtime operations,
 6. SSL, DB and remaining host operations required by `todo.md`.
@@ -185,7 +231,7 @@ The root API may adopt an existing private legacy auth directory/SQLite files be
 
 Do not run rollback while local work is active or durable recovery is unresolved.
 
-1. Drain/cancel queued work and resolve any terminal reconciliation journal.
+1. Drain/cancel queued work and resolve any safely recoverable terminal/running recovery state. Leave unsupported unknown mutations unresolved rather than forcing them.
 2. Stop both services:
 
 ```bash
@@ -210,6 +256,6 @@ sudo systemctl start yunpanel-api.service yun-agent.service
 
 `release --confirm` deliberately fails for a fresh Path B local-only record because no legacy agent credential exists.
 
-If any migration/recovery command reports an active service, active queue, hostname mismatch, unknown-running mutation, invalid/outside state path or unreadable systemd state, do not bypass the guard. Resolve the discrepancy from independent console access and the verified backup.
+If any migration/recovery command reports an active service, active queue, recovery journal, hostname mismatch, invalid/outside state path or unreadable systemd/host evidence, do not bypass the guard. Resolve the discrepancy from independent console access and the verified backup.
 
 Complete `T-LOCAL-EXECUTOR`, `T-SERVICES`, `T-DATABASE`, `T-LIVE` and `T-MIGRATION` in `todo.md` on an isolated supported host before calling either path production-ready.
