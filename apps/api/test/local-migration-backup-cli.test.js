@@ -24,6 +24,16 @@ function verifiedResult() {
   };
 }
 
+function archivePreview(value = backupDirectory) {
+  return {
+    destructive: false,
+    linksSafe: true,
+    backupDirectory: value,
+    sha256: 'a'.repeat(64),
+    counts: { total: 8, files: 3, directories: 4, symlinks: 1, hardlinks: 0 },
+  };
+}
+
 test('migration backup CLI accepts only exact create, verify and preview syntax', () => {
   assert.deepEqual(parseLocalMigrationBackupArguments(['create', '--confirm']), { action: 'create', confirm: true });
   assert.deepEqual(parseLocalMigrationBackupArguments(['verify', backupDirectory]), { action: 'verify', backupDirectory });
@@ -97,7 +107,7 @@ test('verify delegates only after the fixed-root path guard', async () => {
   assert.equal(verifyCalls, 0);
 });
 
-test('preview is non-destructive, reuses verification and emits bounded identity drift metadata only', async () => {
+test('preview is non-destructive and emits archive plus bounded identity drift metadata only', async () => {
   let createCalls = 0;
   const calls = [];
   const output = [];
@@ -120,6 +130,7 @@ test('preview is non-destructive, reuses verification and emits bounded identity
         archivePath: `${value}/state.tar`,
         manifestPath: `${value}/manifest.json`,
         sha256: 'a'.repeat(64),
+        archiveInspection: archivePreview(value),
         counts: { restore: 2, identityReferences: 2, preserved: 1 },
         targets: [
           {
@@ -158,6 +169,12 @@ test('preview is non-destructive, reuses verification and emits bounded identity
   const text = output.join('');
   assert.match(text, /action=preview/);
   assert.match(text, /destructive=false/);
+  assert.match(text, /archiveMembers=8/);
+  assert.match(text, /archiveFiles=3/);
+  assert.match(text, /archiveDirectories=4/);
+  assert.match(text, /archiveSymlinks=1/);
+  assert.match(text, /archiveHardlinks=0/);
+  assert.match(text, /archiveLinksSafe=true/);
   assert.match(text, /restoreTargets=2/);
   assert.match(text, /identityReferences=2/);
   assert.match(text, /preservedCurrent=1/);
@@ -190,20 +207,41 @@ test('preview rejects outside-root snapshots before invoking the preview handler
   assert.equal(previewCalls, 0);
 });
 
-test('preview rejects malformed identity comparison acknowledgement', async () => {
+test('preview rejects malformed archive and identity acknowledgements', async () => {
+  const base = {
+    destructive: false,
+    backupDirectory,
+    sha256: 'a'.repeat(64),
+    counts: { restore: 0, identityReferences: 2, preserved: 0 },
+    targets: [],
+    identityComparison: {
+      destructive: false,
+      backupDirectory,
+      sha256: 'a'.repeat(64),
+      snapshotUsers: 0,
+      currentUsers: 0,
+      counts: { match: 0, drift: 0, missingCurrent: 0, addedCurrent: 0 },
+      identities: [],
+    },
+  };
+
   await assert.rejects(
     runLocalMigrationBackupCli({
       argv: ['preview', backupDirectory],
       filePath: packagedPath,
       uid: 0,
-      previewRestore: async () => ({
-        destructive: false,
-        backupDirectory,
-        sha256: 'a'.repeat(64),
-        counts: { restore: 0, identityReferences: 2, preserved: 0 },
-        targets: [],
-        identityComparison: { destructive: true },
-      }),
+      previewRestore: async () => ({ ...base, archiveInspection: { destructive: true } }),
+      stdout: { write() {} },
+    }),
+    /preview result is invalid/,
+  );
+
+  await assert.rejects(
+    runLocalMigrationBackupCli({
+      argv: ['preview', backupDirectory],
+      filePath: packagedPath,
+      uid: 0,
+      previewRestore: async () => ({ ...base, archiveInspection: archivePreview(), identityComparison: { destructive: true } }),
       stdout: { write() {} },
     }),
     /preview result is invalid/,
