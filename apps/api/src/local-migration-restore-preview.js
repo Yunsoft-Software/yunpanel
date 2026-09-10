@@ -5,7 +5,7 @@ import {
   verifyLocalMigrationBackup,
 } from './local-migration-backup.js';
 import {
-  compareLocalMigrationUnixIdentities,
+  compareVerifiedLocalMigrationUnixIdentities,
   LocalMigrationUnixIdentityError,
 } from './local-migration-unix-identity.js';
 
@@ -78,13 +78,16 @@ function assertIdentityComparison(result, directory, sha256) {
       throw new LocalMigrationRestorePreviewError('migration_restore_identity_result_invalid', 'Migration restore Unix identity comparison counts are invalid');
     }
   }
+  if (result.counts.match + result.counts.drift + result.counts.missingCurrent + result.counts.addedCurrent !== result.identities.length) {
+    throw new LocalMigrationRestorePreviewError('migration_restore_identity_result_invalid', 'Migration restore Unix identity comparison counts do not match the result set');
+  }
   return result;
 }
 
 export async function previewLocalMigrationRestore({
   backupDirectory,
   verifyBackup = verifyLocalMigrationBackup,
-  compareIdentities = compareLocalMigrationUnixIdentities,
+  compareIdentities = compareVerifiedLocalMigrationUnixIdentities,
   lstatFn = lstat,
 } = {}) {
   if (typeof verifyBackup !== 'function' || typeof compareIdentities !== 'function' || typeof lstatFn !== 'function') {
@@ -100,6 +103,7 @@ export async function previewLocalMigrationRestore({
   if (!verification || verification.verified !== true || verification.backupDirectory !== directory
     || verification.archivePath !== path.join(directory, 'state.tar')
     || verification.manifestPath !== path.join(directory, 'manifest.json')
+    || typeof verification.sha256 !== 'string'
     || !Array.isArray(verification.entries)) {
     throw new LocalMigrationRestorePreviewError('migration_restore_backup_invalid', 'Migration restore backup acknowledgement is invalid');
   }
@@ -121,7 +125,7 @@ export async function previewLocalMigrationRestore({
 
   let identityComparison;
   try {
-    identityComparison = await compareIdentities({ backupDirectory: directory, verifyBackup });
+    identityComparison = await compareIdentities({ backupDirectory: directory, verification });
   } catch (error) {
     if (error instanceof LocalMigrationUnixIdentityError) throw error;
     throw new LocalMigrationRestorePreviewError('migration_restore_identity_unavailable', 'Migration restore Unix identity comparison could not be completed');
