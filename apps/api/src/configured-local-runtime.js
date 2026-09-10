@@ -107,6 +107,7 @@ export async function startConfiguredLocalRuntime({
         operation,
         serviceId: payload.serviceId,
         changed: result.changed,
+        state: result,
       });
       return;
     }
@@ -122,6 +123,7 @@ export async function startConfiguredLocalRuntime({
         operation,
         serviceId: payload.serviceId,
         action: 'restart',
+        state: result,
       });
     }
   };
