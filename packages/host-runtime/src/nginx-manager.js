@@ -115,6 +115,23 @@ export function createNginxManager({
     };
   }
 
+  async function inspectActiveDomain({ primaryDomain, checksum } = {}) {
+    if (typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
+      throw new NginxManagerError('invalid_checksum', 'A SHA-256 active configuration checksum is required');
+    }
+    const configName = configNameForDomain(primaryDomain);
+    const activePath = path.join(sitesDir, configName);
+    let current;
+    try {
+      current = await readFileFn(activePath, 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') return { satisfied: false, result: null };
+      throw new NginxManagerError('active_config_inspection_failed', 'Active Nginx configuration could not be inspected');
+    }
+    if (sha256(current) !== checksum) return { satisfied: false, result: null };
+    return { satisfied: true, result: { configName, checksum, active: true } };
+  }
+
   async function restoreActive(activePath, previousContent) {
     if (previousContent == null) {
       await rmFn(activePath, { force: true });
@@ -168,7 +185,7 @@ export function createNginxManager({
     return run;
   }
 
-  return { stageDomain, inspectStagedDomain, activateDomain };
+  return { stageDomain, inspectStagedDomain, inspectActiveDomain, activateDomain };
 }
 
 export const nginxManager = createNginxManager();
