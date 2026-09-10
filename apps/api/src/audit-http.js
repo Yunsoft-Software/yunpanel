@@ -1,3 +1,4 @@
+import { AuditStoreError } from './audit-store.js';
 import { AuthError } from './auth-error.js';
 
 const ALLOWED_QUERY_KEYS = new Set(['limit', 'offset', 'actorId', 'resourceType', 'resourceId']);
@@ -12,7 +13,10 @@ function one(query, key) {
 function parsePagination(value, fallback, field) {
   if (value == null) return fallback;
   if (!/^\d+$/.test(value)) throw new AuthError('invalid_audit_query', `Audit ${field} must be numeric.`);
-  return Number(value);
+  const parsed = Number(value);
+  const valid = Number.isSafeInteger(parsed) && (field === 'limit' ? parsed >= 1 && parsed <= 100 : parsed >= 0);
+  if (!valid) throw new AuthError('invalid_audit_query', `Audit ${field} is outside the allowed range.`);
+  return parsed;
 }
 
 export function parseAuditQuery(query) {
@@ -41,5 +45,15 @@ export function handleAuditRead({ request, response, query, store, json }) {
   if (!store?.audit || typeof store.audit.list !== 'function') {
     throw new AuthError('audit_unavailable', 'Audit history is temporarily unavailable.', 503);
   }
-  return json(response, 200, { data: store.audit.list(parseAuditQuery(query)) });
+  let page;
+  try {
+    page = store.audit.list(parseAuditQuery(query));
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+    if (error instanceof AuditStoreError && error.code.startsWith('invalid_audit_')) {
+      throw new AuthError('invalid_audit_query', 'Audit filters are invalid.', 400);
+    }
+    throw error;
+  }
+  return json(response, 200, { data: page });
 }
