@@ -22,6 +22,7 @@ function fakeStore(role = 'owner') {
   return {
     configured: () => true,
     mfa: { enabled: () => role === 'owner' },
+    audit: { record() {} },
     getSession: (token) => token === 'valid-session' ? session : null,
     listSessions: () => [],
   };
