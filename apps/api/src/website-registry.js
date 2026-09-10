@@ -8,6 +8,7 @@ const RUNTIME_TYPES = new Set(['static', 'node', 'proxy']);
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const STATIC_ROOT = '/var/www/yunpanel/apps';
 const NODE_ROOT = '/var/lib/yunpanel/apps';
+const MIGRATION_NAMESPACE = Buffer.from('8af0d7a45c4e4e6bb71a10ce8fba8261', 'hex');
 
 export class WebsiteRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -37,6 +38,20 @@ function name(value) {
 function appUnixUser(applicationId) {
   const id = uuid(applicationId, 'applicationId');
   return `yunapp-${createHash('sha256').update(id).digest('hex').slice(0, 12)}`;
+}
+
+function migrationWebsiteId(domainId, applicationId) {
+  const domain = uuid(domainId, 'domainId');
+  const application = uuid(applicationId, 'applicationId');
+  const digest = createHash('sha1')
+    .update(MIGRATION_NAMESPACE)
+    .update(`${domain}:${application}`)
+    .digest();
+  const bytes = Buffer.from(digest.subarray(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function applicationBinding(application, serverId) {
@@ -193,30 +208,37 @@ export function createWebsiteRegistry({
     return id;
   }
 
-  async function createWebsite({ serverId, name: displayName, applicationId = null, runtimeType = null } = {}) {
-    await ensureInitialized();
+  async function createApplicationBackedWebsite({ websiteId, serverId, displayName, applicationId, runtimeType = null }) {
     const normalizedServerId = await requireServer(serverId);
-    let binding;
-    if (applicationId == null) {
-      if (runtimeType !== 'proxy') throw new WebsiteRegistryError('website_application_required', 'Static and Node websites require an application binding');
-      binding = { applicationId: null, runtimeType: 'proxy', documentRoot: null, unixUser: null };
-    } else {
-      const normalizedApplicationId = uuid(applicationId, 'applicationId');
-      if (state.websites.some((website) => website.applicationId === normalizedApplicationId)) {
-        throw new WebsiteRegistryError('application_already_bound', 'Application is already bound to a Website', 409);
-      }
-      const application = await getApplication(normalizedApplicationId);
-      binding = applicationBinding(application, normalizedServerId);
-      if (runtimeType != null && runtimeType !== binding.runtimeType) {
-        throw new WebsiteRegistryError('website_runtime_mismatch', 'Website runtime does not match the bound application', 409);
-      }
+    const normalizedApplicationId = uuid(applicationId, 'applicationId');
+    const application = await getApplication(normalizedApplicationId);
+    const binding = applicationBinding(application, normalizedServerId);
+    if (runtimeType != null && runtimeType !== binding.runtimeType) {
+      throw new WebsiteRegistryError('website_runtime_mismatch', 'Website runtime does not match the bound application', 409);
+    }
+
+    const normalizedWebsiteId = websiteId == null ? randomUUID() : uuid(websiteId, 'websiteId');
+    const normalizedName = name(displayName);
+    const existingById = state.websites.find((website) => website.id === normalizedWebsiteId) ?? null;
+    if (existingById) {
+      const exact = existingById.serverId === normalizedServerId
+        && existingById.name === normalizedName
+        && existingById.applicationId === binding.applicationId
+        && existingById.runtimeType === binding.runtimeType
+        && existingById.documentRoot === binding.documentRoot
+        && existingById.unixUser === binding.unixUser;
+      if (!exact) throw new WebsiteRegistryError('migration_website_identity_conflict', 'Migration Website identity conflicts with existing state', 409);
+      return publicWebsite(existingById);
+    }
+    if (state.websites.some((website) => website.applicationId === normalizedApplicationId)) {
+      throw new WebsiteRegistryError('application_already_bound', 'Application is already bound to a Website', 409);
     }
 
     const timestamp = new Date(now()).toISOString();
     const website = {
-      id: randomUUID(),
+      id: normalizedWebsiteId,
       serverId: normalizedServerId,
-      name: name(displayName),
+      name: normalizedName,
       ...binding,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -224,6 +246,42 @@ export function createWebsiteRegistry({
     state.websites.push(website);
     await persist();
     return publicWebsite(website);
+  }
+
+  async function createWebsite({ serverId, name: displayName, applicationId = null, runtimeType = null } = {}) {
+    await ensureInitialized();
+    if (applicationId == null) {
+      const normalizedServerId = await requireServer(serverId);
+      if (runtimeType !== 'proxy') throw new WebsiteRegistryError('website_application_required', 'Static and Node websites require an application binding');
+      const timestamp = new Date(now()).toISOString();
+      const website = {
+        id: randomUUID(),
+        serverId: normalizedServerId,
+        name: name(displayName),
+        applicationId: null,
+        runtimeType: 'proxy',
+        documentRoot: null,
+        unixUser: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      state.websites.push(website);
+      await persist();
+      return publicWebsite(website);
+    }
+    return createApplicationBackedWebsite({ serverId, displayName, applicationId, runtimeType });
+  }
+
+  async function createMigrationWebsite({ domainId, serverId, name: displayName, applicationId } = {}) {
+    await ensureInitialized();
+    const normalizedApplicationId = uuid(applicationId, 'applicationId');
+    const websiteId = migrationWebsiteId(domainId, normalizedApplicationId);
+    return createApplicationBackedWebsite({
+      websiteId,
+      serverId,
+      displayName,
+      applicationId: normalizedApplicationId,
+    });
   }
 
   async function getWebsite(websiteId) {
@@ -241,13 +299,14 @@ export function createWebsiteRegistry({
       .map(publicWebsite);
   }
 
-  return Object.freeze({ init, createWebsite, getWebsite, listWebsites });
+  return Object.freeze({ init, createWebsite, createMigrationWebsite, getWebsite, listWebsites });
 }
 
 export const websiteRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
   runtimeTypes: Object.freeze([...RUNTIME_TYPES]),
   appUnixUser,
+  migrationWebsiteId,
   applicationBinding,
   validatePersistedWebsite,
 });
