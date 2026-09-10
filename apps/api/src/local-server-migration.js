@@ -128,6 +128,15 @@ function isSnapshotObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function inventoryMatchesRuntime(value, hostname) {
+  if (!isSnapshotObject(value) || value.mode !== 'local') return false;
+  try {
+    return normalizeHostname(value.hostname) === hostname;
+  } catch {
+    return false;
+  }
+}
+
 function assertPostMigrationHealthy(preflight) {
   const { server } = preflight;
   if (server.executionMode !== 'local') {
@@ -155,9 +164,7 @@ function assertPostMigrationHealthy(preflight) {
     || /[\u0000-\u001f\u007f]/.test(server.localRuntimeVersion)) {
     throw new LocalServerMigrationError('local_validation_runtime_version_invalid', 'Local runtime version snapshot is missing or invalid');
   }
-  if (!isSnapshotObject(server.inventory)
-    || normalizeHostname(server.inventory.hostname) !== preflight.hostname
-    || server.inventory.mode !== 'local') {
+  if (!inventoryMatchesRuntime(server.inventory, preflight.hostname)) {
     throw new LocalServerMigrationError('local_validation_inventory_invalid', 'Local host inventory snapshot does not match this runtime');
   }
   if (!isSnapshotObject(server.services)) {
@@ -231,5 +238,6 @@ export const localServerMigrationInternals = Object.freeze({
   inspectServiceStates,
   inspectConsumersAndJobs,
   assertMutationSafe,
+  inventoryMatchesRuntime,
   assertPostMigrationHealthy,
 });
