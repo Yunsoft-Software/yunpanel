@@ -273,7 +273,7 @@ test('Node mutations fetch environment just in time without placing secrets in r
   assert.equal(calls[1].options.body.includes('private-token-value'), false);
 });
 
-test('failed command reports bounded safe error metadata without stack or secret fields', async () => {
+test('failed command reports authored safe error metadata without raw message, stack or secret fields', async () => {
   const identity = { serverId: 'server-004', agentToken: 'agent-token-long-enough' };
   const claimed = {
     job: { id: '123e4567-e89b-12d3-a456-426614174001' },
@@ -291,7 +291,7 @@ test('failed command reports bounded safe error metadata without stack or secret
     baseUrl: 'http://127.0.0.1:3001',
     identity,
     execute: async () => {
-      const error = new Error('nginx validation failed');
+      const error = new Error('nginx validation failed SECRET=/root/private/key');
       error.code = 'nginx_config_invalid';
       error.secret = 'must-not-leak';
       throw error;
@@ -307,8 +307,45 @@ test('failed command reports bounded safe error metadata without stack or secret
   const resultBody = JSON.parse(calls[0].options.body);
   assert.deepEqual(resultBody.error, {
     code: 'nginx_config_invalid',
-    message: 'nginx validation failed',
+    message: 'Nginx rejected the staged configuration.',
   });
   assert.equal('secret' in resultBody.error, false);
   assert.equal('stack' in resultBody.error, false);
+  assert.doesNotMatch(calls[0].options.body, /SECRET|\/root\/private|must-not-leak/);
+});
+
+test('unknown command errors collapse to a generic legacy failure without leaking code or message', async () => {
+  const identity = { serverId: 'server-006', agentToken: 'agent-token-long-enough' };
+  const claimed = {
+    job: { id: '123e4567-e89b-12d3-a456-426614174006' },
+    envelope: {
+      id: '123e4567-e89b-12d3-a456-426614174006',
+      operation: OPERATIONS.DOMAIN_ACTIVATE,
+      payload: { primaryDomain: 'example.com', checksum: 'c'.repeat(64) },
+      protocolVersion: AGENT_PROTOCOL_VERSION,
+    },
+  };
+  const calls = [];
+  await executeClaimedCommand({
+    claimed,
+    baseUrl: 'http://127.0.0.1:3001',
+    identity,
+    execute: async () => {
+      const error = new Error('SECRET=/root/private/token');
+      error.code = 'secret_token_abc';
+      throw error;
+    },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse(200, { data: { status: 'failed' } });
+    },
+    sleepFn: async () => {},
+  });
+
+  const body = calls[0].options.body;
+  assert.deepEqual(JSON.parse(body).error, {
+    code: 'legacy_operation_failed',
+    message: 'Legacy host operation failed. Inspect protected host diagnostics before retrying.',
+  });
+  assert.doesNotMatch(body, /SECRET|secret_token_abc|\/root\/private|token/);
 });
