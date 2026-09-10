@@ -18,6 +18,7 @@ export function classifyManagementMutation(method, pathname) {
   let parts;
 
   if (method === 'POST' && pathname === '/api/websites') return { action: 'website.create', resourceType: 'website', resourceId: 'new' };
+  if (method === 'POST' && pathname === '/api/websites/migration/create-website') return { action: 'website.migration.create', resourceType: 'website_migration', resourceId: 'create' };
   if (method === 'POST' && pathname === '/api/websites/migration/bind') return { action: 'website.migration.bind', resourceType: 'website_migration', resourceId: 'bind' };
   if (method === 'POST' && pathname === '/api/websites/migration/finalize') return { action: 'website.migration.finalize', resourceType: 'website_migration', resourceId: 'policy' };
   if (method === 'POST' && pathname === '/api/websites/migration/rollback') return { action: 'website.migration.rollback', resourceType: 'website_migration', resourceId: 'policy' };
