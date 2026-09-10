@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { assertUuid, DomainValidationError, normalizeDomainSet } from '@yunpanel/shared';
 import { DomainHierarchyError, validateDomainHierarchy, validateDomainParent } from './domain-hierarchy.js';
-import { DomainValidationError, normalizeDomainSet } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
 const TARGET_TYPES = new Set(['static', 'proxy']);
@@ -22,9 +22,21 @@ function emptyState() {
   return { version: STORE_VERSION, domains: [] };
 }
 
+function normalizeWebsiteId(value) {
+  if (value == null) return null;
+  try { return assertUuid(value, 'websiteId'); }
+  catch { throw new DomainRegistryError('invalid_website_id', 'websiteId must be a valid Website UUID'); }
+}
+
+function hydrateDomain(domain) {
+  if (domain.websiteId === undefined) domain.websiteId = null;
+  return domain;
+}
+
 function publicDomain(domain) {
   return {
     ...domain,
+    websiteId: domain.websiteId ?? null,
     aliases: [...domain.aliases],
     target: { ...domain.target },
     parentDomainId: domain.parentDomainId ?? null,
@@ -87,10 +99,15 @@ export function createDomainRegistry({
   filePath = null,
   now = () => Date.now(),
   serverExists = async () => true,
+  getWebsite = null,
 } = {}) {
   let state = emptyState();
   let initialized = false;
   let writeChain = Promise.resolve();
+
+  if (typeof serverExists !== 'function' || (getWebsite !== null && typeof getWebsite !== 'function')) {
+    throw new DomainRegistryError('invalid_domain_registry_dependencies', 'Domain registry dependencies are invalid');
+  }
 
   async function persist() {
     if (!filePath) return;
@@ -106,6 +123,20 @@ export function createDomainRegistry({
     return writeChain;
   }
 
+  async function requireWebsiteBinding(websiteId, serverId) {
+    const id = normalizeWebsiteId(websiteId);
+    if (id === null) return null;
+    if (typeof getWebsite !== 'function') {
+      throw new DomainRegistryError('website_registry_unavailable', 'Website registry is required for an explicit domain binding', 503);
+    }
+    const website = await getWebsite(id);
+    if (!website) throw new DomainRegistryError('website_not_found', 'Website does not exist', 404);
+    if (website.serverId !== serverId) {
+      throw new DomainRegistryError('website_server_mismatch', 'Domain and Website must belong to the same server', 409);
+    }
+    return id;
+  }
+
   async function init() {
     if (initialized) return;
     if (filePath) {
@@ -116,11 +147,18 @@ export function createDomainRegistry({
         }
         try {
           validateDomainHierarchy(parsed.domains);
+          for (const domain of parsed.domains) normalizeWebsiteId(domain.websiteId ?? null);
         } catch (error) {
-          if (error instanceof DomainHierarchyError) throw new DomainRegistryError(error.code, error.message, error.status);
+          if (error instanceof DomainHierarchyError || error instanceof DomainRegistryError) throw error;
           throw error;
         }
         state = parsed;
+        state.domains.forEach(hydrateDomain);
+        if (typeof getWebsite === 'function') {
+          for (const domain of state.domains) {
+            if (domain.websiteId) await requireWebsiteBinding(domain.websiteId, domain.serverId);
+          }
+        }
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
       }
@@ -140,6 +178,7 @@ export function createDomainRegistry({
     target,
     httpsMode = 'off',
     parentDomainId = null,
+    websiteId = null,
   }) {
     await ensureInitialized();
 
@@ -153,6 +192,7 @@ export function createDomainRegistry({
       throw new DomainRegistryError('invalid_https_mode', 'httpsMode must be off or managed');
     }
 
+    const normalizedWebsiteId = await requireWebsiteBinding(websiteId, serverId);
     const normalized = normalizeDomains(primaryDomain, aliases);
     try {
       validateDomainParent(state.domains, { serverId, primaryDomain: normalized.primary, parentDomainId });
@@ -161,7 +201,7 @@ export function createDomainRegistry({
       throw error;
     }
     const requestedNames = new Set([normalized.primary, ...normalized.aliases]);
-    const conflict = state.domains.find((domain) => ownedNames(domain).some((name) => requestedNames.has(name)));
+    const conflict = state.domains.find((domain) => ownedNames(domain).some((ownedName) => requestedNames.has(ownedName)));
     if (conflict) {
       throw new DomainRegistryError('domain_conflict', 'A domain or alias is already managed', 409);
     }
@@ -170,6 +210,7 @@ export function createDomainRegistry({
     const domain = {
       id: randomUUID(),
       serverId,
+      websiteId: normalizedWebsiteId,
       primaryDomain: normalized.primary,
       parentDomainId,
       aliases: normalized.aliases,
@@ -197,13 +238,13 @@ export function createDomainRegistry({
 
   async function listDomains() {
     await ensureInitialized();
-    return state.domains.map(publicDomain);
+    return state.domains.map((domain) => publicDomain(hydrateDomain(domain)));
   }
 
   async function getDomain(domainId) {
     await ensureInitialized();
     const domain = state.domains.find((candidate) => candidate.id === domainId);
-    return domain ? publicDomain(domain) : null;
+    return domain ? publicDomain(hydrateDomain(domain)) : null;
   }
 
   async function attachCertificate(domainId, certificateId) {
@@ -296,3 +337,9 @@ export function createDomainRegistry({
     markFailed,
   };
 }
+
+export const domainRegistryInternals = Object.freeze({
+  storeVersion: STORE_VERSION,
+  normalizeWebsiteId,
+  hydrateDomain,
+});
