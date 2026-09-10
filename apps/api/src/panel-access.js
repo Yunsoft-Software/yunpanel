@@ -23,7 +23,8 @@ export function describePanelAccess(session) {
   return {
     ...session,
     access: {
-      mode: management ? 'management' : readOnly ? [...READ_ONLY_PERMISSIONS] : [],
+      mode: management ? 'management' : readOnly ? 'read_only' : 'self_service',
+      permissions: management ? ['*'] : readOnly ? [...READ_ONLY_PERMISSIONS] : [],
     },
   };
 }
