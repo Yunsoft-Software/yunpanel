@@ -43,6 +43,7 @@ function formatStatus(result) {
     `apiActive=${result.apiActive}`,
     `agentActive=${result.agentActive}`,
     `activeJobs=${result.activeJobCount}`,
+    `recoveryJobs=${result.recoveryJobCount}`,
     `serverStore=${result.statePaths.serverStore}`,
     `jobStore=${result.statePaths.jobStore}`,
   ].join('\n');
