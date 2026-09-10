@@ -15,6 +15,7 @@ import { mountWebsiteMigrationRoutes } from './website-migration-http.js';
 import { createWebsiteMigrationLedger, WebsiteMigrationLedgerError } from './website-migration-ledger.js';
 import { createWebsiteMigrationPolicyStore, WebsiteMigrationPolicyError } from './website-migration-policy.js';
 import { WebsiteMigrationPreviewError } from './website-migration-preview.js';
+import { WebsiteMigrationRollbackError } from './website-migration-rollback.js';
 import { createWebsiteRegistry, WebsiteRegistryError } from './website-registry.js';
 
 export { API_VERSION } from './core-app.js';
@@ -66,6 +67,7 @@ export function createApp({
       || error instanceof WebsiteMigrationLedgerError
       || error instanceof WebsiteMigrationPolicyError
       || error instanceof WebsiteMigrationPreviewError
+      || error instanceof WebsiteMigrationRollbackError
       || error instanceof WebsiteRegistryError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });

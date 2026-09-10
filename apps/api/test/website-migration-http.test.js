@@ -7,6 +7,7 @@ import { WebsiteMigrationBindError } from '../src/website-migration-bind.js';
 import { WebsiteMigrationCreateError } from '../src/website-migration-create.js';
 import { mountWebsiteMigrationRoutes } from '../src/website-migration-http.js';
 import { WebsiteMigrationPolicyError } from '../src/website-migration-policy.js';
+import { WebsiteMigrationRollbackError } from '../src/website-migration-rollback.js';
 
 const domainId = '0ef7e00b-1b85-4938-b726-247c94679c66';
 const websiteId = '46b95b12-600a-4f31-b269-cc9af195ee21';
@@ -22,6 +23,7 @@ async function fixture(t, auth) {
     async list() { calls.push('ledger.list'); return [{ domainId, applicationId, websiteId, state: 'bound' }]; },
     async get() { return null; },
     async planWebsiteCreation() {}, async markWebsiteCreated() {}, async planBinding() {}, async markBound() {},
+    async beginRollback() {}, async markRolledBack() {},
   };
   const app = express();
   app.use(express.json());
@@ -31,10 +33,13 @@ async function fixture(t, auth) {
       async listWebsites() { calls.push('websites'); return []; },
       async getWebsite(id) { calls.push(['website.get', id]); return null; },
       async createMigrationWebsite() { calls.push('website.createMigrationWebsite'); throw new Error('registry primitive should be invoked only through create adapter'); },
+      async deleteMigrationWebsite() { calls.push('website.deleteMigrationWebsite'); throw new Error('registry primitive should be invoked only through rollback adapter'); },
     },
     domainRegistry: {
       async listDomains() { calls.push('domains'); return []; },
+      async getDomain() { return null; },
       async bindWebsite() { calls.push('bindWebsite'); throw new Error('bind primitive should be invoked only through bind adapter'); },
+      async rollbackWebsiteBinding() { calls.push('rollbackWebsiteBinding'); throw new Error('registry primitive should be invoked only through rollback adapter'); },
     },
     applicationRegistry: { async listApplications() { calls.push('applications'); return []; } },
     websiteMigrationPolicy: {
@@ -57,9 +62,14 @@ async function fixture(t, auth) {
       calls.push(['bind', input.domainId, input.websiteId, input.previewDigest]);
       return { migrated: true, domain: { id: input.domainId, websiteId: input.websiteId }, websiteId: input.websiteId, previewVersion: 1, previewDigest: input.previewDigest };
     },
+    async rollbackBinding(input) {
+      assert.equal(input.migrationLedger, migrationLedger);
+      calls.push(['rollbackBinding', input.domainId, input.websiteId, input.bindingPreviewDigest]);
+      return { rolledBack: true, domain: { id: input.domainId, websiteId: null }, websiteDeleted: false };
+    },
   });
   app.use((error, _request, response, _next) => {
-    if (error instanceof WebsiteMigrationBindError || error instanceof WebsiteMigrationCreateError || error instanceof WebsiteMigrationPolicyError) {
+    if (error instanceof WebsiteMigrationBindError || error instanceof WebsiteMigrationCreateError || error instanceof WebsiteMigrationPolicyError || error instanceof WebsiteMigrationRollbackError) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }
     return response.status(500).json({ error: { code: 'internal_error' } });
@@ -75,6 +85,7 @@ function bindBody(overrides = {}) { const values = { domainId, websiteId, previe
 function createBody(overrides = {}) { const values = { domainId, applicationId, previewDigest, ...overrides }; return { ...values, confirmation: overrides.confirmation ?? `create-website:${values.domainId}:${values.applicationId}:${values.previewDigest}` }; }
 function finalizeBody(overrides = {}) { const values = { previewDigest, ...overrides }; return { ...values, confirmation: overrides.confirmation ?? `finalize:${values.previewDigest}` }; }
 function rollbackBody(overrides = {}) { const values = { enforcedDigest: previewDigest, ...overrides }; return { ...values, confirmation: overrides.confirmation ?? `rollback:${values.enforcedDigest}` }; }
+function rollbackBindingBody(overrides = {}) { const values = { domainId, websiteId, bindingPreviewDigest: previewDigest, ...overrides }; return { ...values, confirmation: overrides.confirmation ?? `rollback-binding:${values.domainId}:${values.websiteId}:${values.bindingPreviewDigest}` }; }
 
 test('Owner receives non-destructive migration preview from persisted resource snapshots', async (t) => {
   const f = await fixture(t, ownerAuth); const response = await f.request(); assert.equal(response.status, 200); const body = await response.json(); assert.equal(body.data.digest, previewDigest); assert.equal(body.data.destructive, false); assert.equal(body.data.autoApply, false); assert.deepEqual(f.calls.slice(0, 3).sort(), ['applications', 'domains', 'websites']);
@@ -104,6 +115,20 @@ test('Owner finalize and rollback require exact typed confirmations', async (t) 
   const f = await fixture(t, ownerAuth); const finalized = await f.request('/api/websites/migration/finalize', { method: 'POST', body: JSON.stringify(finalizeBody()) }); assert.equal(finalized.status, 200); assert.equal((await finalized.json()).data.mode, 'enforced'); const rolled = await f.request('/api/websites/migration/rollback', { method: 'POST', body: JSON.stringify(rollbackBody()) }); assert.equal(rolled.status, 200); assert.equal((await rolled.json()).data.mode, 'compatibility');
 });
 
+test('Owner binding rollback requires exact ledger identity and typed confirmation', async (t) => {
+  const f = await fixture(t, ownerAuth);
+  const valid = await f.request('/api/websites/migration/rollback-binding', { method: 'POST', body: JSON.stringify(rollbackBindingBody()) });
+  assert.equal(valid.status, 200);
+  assert.equal((await valid.json()).data.rolledBack, true);
+  assert.deepEqual(f.calls, [['rollbackBinding', domainId, websiteId, previewDigest]]);
+  for (const body of [rollbackBindingBody({ confirmation: 'wrong' }), rollbackBindingBody({ bindingPreviewDigest: 'bad', confirmation: 'wrong' }), { ...rollbackBindingBody(), extra: 'field' }]) {
+    const before = f.calls.length;
+    const response = await f.request('/api/websites/migration/rollback-binding', { method: 'POST', body: JSON.stringify(body) });
+    assert.equal(response.status, 400);
+    assert.equal(f.calls.length, before);
+  }
+});
+
 test('Read Only cannot invoke migration management surfaces', async (t) => {
-  const f = await fixture(t, readerAuth); const requests = [['/api/websites/migration/preview', {}], ['/api/websites/migration/status', {}], ['/api/websites/migration/create-website', { method: 'POST', body: JSON.stringify(createBody()) }], ['/api/websites/migration/bind', { method: 'POST', body: JSON.stringify(bindBody()) }], ['/api/websites/migration/finalize', { method: 'POST', body: JSON.stringify(finalizeBody()) }], ['/api/websites/migration/rollback', { method: 'POST', body: JSON.stringify(rollbackBody()) }]]; for (const [pathname, options] of requests) { const response = await f.request(pathname, options); assert.equal(response.status, 403); assert.equal((await response.json()).error.code, 'forbidden'); } assert.deepEqual(f.calls, []);
+  const f = await fixture(t, readerAuth); const requests = [['/api/websites/migration/preview', {}], ['/api/websites/migration/status', {}], ['/api/websites/migration/create-website', { method: 'POST', body: JSON.stringify(createBody()) }], ['/api/websites/migration/bind', { method: 'POST', body: JSON.stringify(bindBody()) }], ['/api/websites/migration/finalize', { method: 'POST', body: JSON.stringify(finalizeBody()) }], ['/api/websites/migration/rollback', { method: 'POST', body: JSON.stringify(rollbackBody()) }], ['/api/websites/migration/rollback-binding', { method: 'POST', body: JSON.stringify(rollbackBindingBody()) }]]; for (const [pathname, options] of requests) { const response = await f.request(pathname, options); assert.equal(response.status, 403); assert.equal((await response.json()).error.code, 'forbidden'); } assert.deepEqual(f.calls, []);
 });
