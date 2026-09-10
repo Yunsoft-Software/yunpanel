@@ -30,8 +30,11 @@ test('production Domain registry validates explicit Website links after Website 
   assert.match(source, /getWebsite: async \(websiteId\) => websiteRegistry\.getWebsite\(websiteId\),/);
 });
 
-test('Website store has an explicit environment contract and API composition mount', () => {
+test('Website store and API composition include explicit domain and migration dependencies', () => {
   assert.match(envExample, /^YUNPANEL_WEBSITE_STORE=\.data\/website-registry\.json$/m);
-  assert.match(appSource, /mountWebsiteRoutes\(app, \{ websiteRegistry \}\);/);
+  assert.match(appSource, /mountWebsiteRoutes\(app, \{ websiteRegistry, domainRegistry \}\);/);
+  assert.match(appSource, /mountWebsiteMigrationRoutes\(app, \{ websiteRegistry, domainRegistry, applicationRegistry \}\);/);
+  assert.match(appSource, /error instanceof WebsiteMigrationBindError/);
+  assert.match(appSource, /error instanceof WebsiteMigrationPreviewError/);
   assert.match(appSource, /error instanceof WebsiteRegistryError/);
 });
