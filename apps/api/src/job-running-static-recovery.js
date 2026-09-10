@@ -43,6 +43,15 @@ function assertCandidate(job, identity) {
   }
 }
 
+function assertRecoveryContext(context, job, candidate, identity) {
+  if (!context || context.id !== identity.jobId || context.serverId !== identity.serverId || context.status !== 'running'
+    || context.operation !== OPERATIONS.APP_STATIC_DEPLOY || context.resourceType !== 'application'
+    || context.resourceId !== candidate.resourceId || context.resourceId !== job.resourceId
+    || context.payload?.applicationId !== context.resourceId || context.payload?.deploymentId !== identity.jobId) {
+    throw new JobRunningStaticRecoveryError('job_static_recovery_context_mismatch', 'Private static recovery context does not match durable job metadata');
+  }
+}
+
 export async function recoverRunningStaticDeployment({
   serverId,
   jobId,
@@ -51,6 +60,7 @@ export async function recoverRunningStaticDeployment({
   certificateRegistry,
   applicationRegistry,
   serviceStatus,
+  loadJobContext,
   inspectDeploymentEvidence,
   inspect = inspectDurableJobRecovery,
   reconcile = reconcileCompletedJob,
@@ -63,6 +73,7 @@ export async function recoverRunningStaticDeployment({
     || typeof jobRegistry.acknowledgeReconciliation !== 'function'
     || !domainRegistry || !certificateRegistry || !applicationRegistry
     || typeof serviceStatus !== 'function'
+    || typeof loadJobContext !== 'function'
     || typeof inspectDeploymentEvidence !== 'function'
     || typeof inspect !== 'function'
     || typeof reconcile !== 'function') {
@@ -92,16 +103,23 @@ export async function recoverRunningStaticDeployment({
   }
   if (!job || job.id !== identity.jobId || job.serverId !== identity.serverId || job.status !== 'running'
     || job.operation !== OPERATIONS.APP_STATIC_DEPLOY || job.resourceType !== 'application'
-    || job.resourceId !== candidate.resourceId || job.payload?.applicationId !== job.resourceId
-    || job.payload?.deploymentId !== identity.jobId) {
+    || job.resourceId !== candidate.resourceId) {
     throw new JobRunningStaticRecoveryError('job_static_recovery_job_mismatch', 'Running static deployment no longer matches durable recovery state');
   }
+
+  let context;
+  try {
+    context = await loadJobContext(identity.jobId);
+  } catch {
+    throw new JobRunningStaticRecoveryError('job_static_recovery_context_failed', 'Private static recovery context could not be read');
+  }
+  assertRecoveryContext(context, job, candidate, identity);
 
   let evidence;
   try {
     evidence = await inspectDeploymentEvidence({
-      applicationId: job.payload.applicationId,
-      deploymentId: job.payload.deploymentId,
+      applicationId: context.payload.applicationId,
+      deploymentId: context.payload.deploymentId,
     });
   } catch {
     throw new JobRunningStaticRecoveryError('job_static_recovery_evidence_failed', 'Static deployment host evidence could not be inspected');
@@ -179,4 +197,5 @@ export const jobRunningStaticRecoveryInternals = Object.freeze({
   normalizeIdentity,
   requireStoppedConsumers,
   assertCandidate,
+  assertRecoveryContext,
 });
