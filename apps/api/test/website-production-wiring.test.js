@@ -22,19 +22,32 @@ test('production API persists and initializes the Website registry explicitly', 
   assert.match(source, /website store=\$\{websiteStorePath\}/);
 });
 
-test('production Domain registry validates explicit Website links after Website initialization', () => {
+test('production Website migration policy persists before Domain registry initialization', () => {
+  assert.match(source, /import \{ createWebsiteMigrationPolicyStore \} from '\.\/website-migration-policy\.js';/);
+  assert.match(source, /const websiteMigrationPolicyStorePath = process\.env\.YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE \?\? path\.resolve\('\.data\/website-migration-policy\.json'\);/);
+  assert.match(source, /const websiteMigrationPolicy = createWebsiteMigrationPolicyStore\(\{ filePath: websiteMigrationPolicyStorePath \}\);/);
+  assert.match(source, /await websiteMigrationPolicy\.init\(\);/);
+
   const websiteInit = source.indexOf('await websiteRegistry.init();');
+  const policyInit = source.indexOf('await websiteMigrationPolicy.init();');
   const domainCreate = source.indexOf('const domainRegistry = createDomainRegistry({');
   const domainInit = source.indexOf('await domainRegistry.init();');
-  assert.ok(websiteInit >= 0 && domainCreate > websiteInit && domainInit > domainCreate);
+  assert.ok(websiteInit >= 0 && policyInit > websiteInit && domainCreate > policyInit && domainInit > domainCreate);
+  assert.match(source, /websiteBindingRequired: \(\) => websiteMigrationPolicy\.snapshot\(\)\.websiteBindingRequired,/);
   assert.match(source, /getWebsite: async \(websiteId\) => websiteRegistry\.getWebsite\(websiteId\),/);
+  assert.match(source, /websiteMigrationPolicy,/);
+  assert.match(source, /website migration policy store=\$\{websiteMigrationPolicyStorePath\}/);
 });
 
-test('Website store and API composition include explicit domain and migration dependencies', () => {
+test('Website stores and API composition include explicit domain migration policy dependencies', () => {
   assert.match(envExample, /^YUNPANEL_WEBSITE_STORE=\.data\/website-registry\.json$/m);
+  assert.match(envExample, /^YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE=\.data\/website-migration-policy\.json$/m);
+  assert.match(appSource, /websiteMigrationPolicy = createWebsiteMigrationPolicyStore\(\),/);
+  assert.match(appSource, /websiteBindingRequired: \(\) => websiteMigrationPolicy\.snapshot\(\)\.websiteBindingRequired,/);
   assert.match(appSource, /mountWebsiteRoutes\(app, \{ websiteRegistry, domainRegistry \}\);/);
-  assert.match(appSource, /mountWebsiteMigrationRoutes\(app, \{ websiteRegistry, domainRegistry, applicationRegistry \}\);/);
+  assert.match(appSource, /mountWebsiteMigrationRoutes\(app, \{ websiteRegistry, domainRegistry, applicationRegistry, websiteMigrationPolicy \}\);/);
   assert.match(appSource, /error instanceof WebsiteMigrationBindError/);
+  assert.match(appSource, /error instanceof WebsiteMigrationPolicyError/);
   assert.match(appSource, /error instanceof WebsiteMigrationPreviewError/);
   assert.match(appSource, /error instanceof WebsiteRegistryError/);
 });
