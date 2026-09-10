@@ -24,6 +24,7 @@ export async function startConfiguredLocalRuntime({
   applicationEnvironmentRegistry,
   createOperations = createLocalHostOperations,
   inspectInventory = inspectHostInventory,
+  inspectServices = null,
   startRuntime = startLocalRuntime,
   onError = () => {},
 } = {}) {
@@ -32,14 +33,25 @@ export async function startConfiguredLocalRuntime({
   if (!applicationEnvironmentRegistry || typeof applicationEnvironmentRegistry.materialize !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_environment_registry_invalid', 'Local runtime requires the application environment registry');
   }
-  if (typeof createOperations !== 'function' || typeof inspectInventory !== 'function' || typeof startRuntime !== 'function' || typeof onError !== 'function') {
+  if (typeof createOperations !== 'function'
+    || typeof inspectInventory !== 'function'
+    || (inspectServices !== null && typeof inspectServices !== 'function')
+    || typeof startRuntime !== 'function'
+    || typeof onError !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_runtime_startup_adapter_invalid', 'Local runtime startup adapters are invalid');
   }
 
   const hostOperations = createOperations({
     loadApplicationEnvironment: (applicationId) => applicationEnvironmentRegistry.materialize(applicationId),
   });
-  const snapshotProvider = async () => ({ inventory: await inspectInventory({ mode: 'local' }) });
+  const snapshotProvider = async () => {
+    if (!inspectServices) return { inventory: await inspectInventory({ mode: 'local' }) };
+    const [inventory, services] = await Promise.all([
+      inspectInventory({ mode: 'local' }),
+      inspectServices(),
+    ]);
+    return { inventory, services };
+  };
 
   return startRuntime({
     serverId: config.serverId,
