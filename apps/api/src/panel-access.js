@@ -2,6 +2,7 @@ import { AuthError } from './auth-error.js';
 
 export const READ_ONLY_PERMISSIONS = Object.freeze([
   'servers.read',
+  'websites.read',
   'applications.read',
   'domains.read',
   'certificates.read',
@@ -9,6 +10,7 @@ export const READ_ONLY_PERMISSIONS = Object.freeze([
 
 const READ_ONLY_RULES = Object.freeze([
   ['servers.read', /^\/api\/servers(?:\/[^/%]+)?$/],
+  ['websites.read', /^\/api\/websites(?:\/[^/%]+)?$/],
   ['applications.read', /^\/api\/applications(?:\/[^/%]+)?$/],
   ['domains.read', /^\/api\/domains(?:\/[^/%]+)?$/],
   ['certificates.read', /^\/api\/certificates(?:\/[^/%]+)?$/],
