@@ -27,8 +27,11 @@ function normalizeHostname(value) {
   return normalized;
 }
 
-function validateDependencies({ registry, jobRegistry, serviceStatus }) {
-  if (!registry || typeof registry.getServer !== 'function' || typeof registry.bindLocalServer !== 'function' || typeof registry.releaseLocalServer !== 'function') {
+function validateDependencies({ registry, jobRegistry, serviceStatus, create = false }) {
+  const requiredRegistryMethods = create
+    ? ['createLocalServer']
+    : ['getServer', 'bindLocalServer', 'releaseLocalServer'];
+  if (!registry || requiredRegistryMethods.some((method) => typeof registry[method] !== 'function')) {
     throw new LocalServerMigrationError('local_migration_registry_invalid', 'Local server migration requires the server registry');
   }
   if (!jobRegistry || typeof jobRegistry.listJobs !== 'function') {
@@ -37,6 +40,22 @@ function validateDependencies({ registry, jobRegistry, serviceStatus }) {
   if (typeof serviceStatus !== 'function') {
     throw new LocalServerMigrationError('local_migration_service_status_invalid', 'Local server migration requires service status inspection');
   }
+}
+
+async function inspectConsumersAndJobs({ jobRegistry, serviceStatus, serverId = null }) {
+  const [jobs, units] = await Promise.all([
+    jobRegistry.listJobs(serverId ? { serverId } : {}),
+    serviceStatus(),
+  ]);
+  if (!Array.isArray(jobs)) throw new LocalServerMigrationError('local_migration_jobs_invalid', 'Job registry returned an invalid result');
+  if (!units || typeof units !== 'object' || Array.isArray(units)) {
+    throw new LocalServerMigrationError('local_migration_service_status_invalid', 'Service status inspection returned an invalid result');
+  }
+  return {
+    activeJobs: jobs.filter((job) => ACTIVE_JOB_STATUSES.has(job?.status)),
+    apiActive: units.apiActive === true,
+    agentActive: units.agentActive === true,
+  };
 }
 
 async function inspectPreflight({ serverId, hostname, registry, jobRegistry, serviceStatus }) {
@@ -49,23 +68,12 @@ async function inspectPreflight({ serverId, hostname, registry, jobRegistry, ser
     throw new LocalServerMigrationError('local_server_hostname_mismatch', 'Server registry hostname does not match this host');
   }
 
-  const [jobs, units] = await Promise.all([
-    jobRegistry.listJobs({ serverId: normalizedId }),
-    serviceStatus(),
-  ]);
-  if (!Array.isArray(jobs)) throw new LocalServerMigrationError('local_migration_jobs_invalid', 'Job registry returned an invalid result');
-  if (!units || typeof units !== 'object' || Array.isArray(units)) {
-    throw new LocalServerMigrationError('local_migration_service_status_invalid', 'Service status inspection returned an invalid result');
-  }
-
-  const activeJobs = jobs.filter((job) => ACTIVE_JOB_STATUSES.has(job?.status));
+  const runtimeState = await inspectConsumersAndJobs({ jobRegistry, serviceStatus, serverId: normalizedId });
   return {
     serverId: normalizedId,
     hostname: normalizedHostname,
     server,
-    activeJobs,
-    apiActive: units.apiActive === true,
-    agentActive: units.agentActive === true,
+    ...runtimeState,
   };
 }
 
@@ -94,6 +102,14 @@ export async function inspectLocalServerMigration(input = {}) {
   });
 }
 
+export async function createLocalServerForRuntime({ hostname, displayName = null, registry, jobRegistry, serviceStatus } = {}) {
+  validateDependencies({ registry, jobRegistry, serviceStatus, create: true });
+  const normalizedHostname = normalizeHostname(hostname);
+  const runtimeState = await inspectConsumersAndJobs({ jobRegistry, serviceStatus });
+  assertMutationSafe(runtimeState);
+  return registry.createLocalServer({ hostname: normalizedHostname, displayName });
+}
+
 export async function bindLocalServerForRuntime(input = {}) {
   const preflight = await inspectPreflight(input);
   assertMutationSafe(preflight);
@@ -110,4 +126,9 @@ export async function releaseLocalServerFromRuntime(input = {}) {
   return input.registry.releaseLocalServer({ serverId: preflight.serverId, hostname: preflight.hostname });
 }
 
-export const localServerMigrationInternals = Object.freeze({ normalizeServerId, normalizeHostname, assertMutationSafe });
+export const localServerMigrationInternals = Object.freeze({
+  normalizeServerId,
+  normalizeHostname,
+  inspectConsumersAndJobs,
+  assertMutationSafe,
+});
