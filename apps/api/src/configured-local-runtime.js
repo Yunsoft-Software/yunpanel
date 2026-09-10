@@ -25,6 +25,7 @@ export async function startConfiguredLocalRuntime({
   createOperations = createLocalHostOperations,
   inspectInventory = inspectHostInventory,
   inspectServices = null,
+  inspectDocker = null,
   startRuntime = startLocalRuntime,
   onError = () => {},
 } = {}) {
@@ -36,6 +37,7 @@ export async function startConfiguredLocalRuntime({
   if (typeof createOperations !== 'function'
     || typeof inspectInventory !== 'function'
     || (inspectServices !== null && typeof inspectServices !== 'function')
+    || (inspectDocker !== null && typeof inspectDocker !== 'function')
     || typeof startRuntime !== 'function'
     || typeof onError !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_runtime_startup_adapter_invalid', 'Local runtime startup adapters are invalid');
@@ -45,12 +47,13 @@ export async function startConfiguredLocalRuntime({
     loadApplicationEnvironment: (applicationId) => applicationEnvironmentRegistry.materialize(applicationId),
   });
   const snapshotProvider = async () => {
-    if (!inspectServices) return { inventory: await inspectInventory({ mode: 'local' }) };
-    const [inventory, services] = await Promise.all([
+    const [baseInventory, services, docker] = await Promise.all([
       inspectInventory({ mode: 'local' }),
-      inspectServices(),
+      inspectServices ? inspectServices() : null,
+      inspectDocker ? inspectDocker() : null,
     ]);
-    return { inventory, services };
+    const inventory = inspectDocker ? { ...baseInventory, docker } : baseInventory;
+    return inspectServices ? { inventory, services } : { inventory };
   };
 
   return startRuntime({
