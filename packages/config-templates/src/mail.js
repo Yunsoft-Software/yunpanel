@@ -6,9 +6,11 @@ const MAX_MAILBOXES = 10_000;
 const MAX_ALIASES = 10_000;
 const MAX_ALIAS_DESTINATIONS = 20;
 const LOCAL_PART_PATTERN = /^[a-z0-9](?:[a-z0-9._+-]{0,62}[a-z0-9])?$/;
+const ARGON2ID_PATTERN = /^\$argon2id\$v=19\$m=(\d+),t=(\d+),p=(\d+)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/;
 const POSTFIX_VIRTUAL_DOMAIN_MAP_PATH = '/etc/yunpanel/mail/postfix/virtual-domains';
 const POSTFIX_VIRTUAL_MAILBOX_MAP_PATH = '/etc/yunpanel/mail/postfix/virtual-mailboxes';
 const POSTFIX_VIRTUAL_ALIAS_MAP_PATH = '/etc/yunpanel/mail/postfix/virtual-aliases';
+const DOVECOT_PASSWD_FILE_PATH = '/etc/yunpanel/mail/dovecot/users';
 
 export class MailTemplateError extends Error {
   constructor(code, message) {
@@ -155,6 +157,62 @@ function normalizeAliases(domains, aliases) {
   return bySource;
 }
 
+function decodeCanonicalBase64(value, minimumBytes, maximumBytes) {
+  if (value.length % 4 === 1) return null;
+  const decoded = Buffer.from(`${value}${'='.repeat((4 - value.length % 4) % 4)}`, 'base64');
+  if (decoded.length < minimumBytes || decoded.length > maximumBytes
+    || decoded.toString('base64').replace(/=+$/, '') !== value) return null;
+  return decoded;
+}
+
+function normalizeArgon2idHash(value) {
+  if (typeof value !== 'string' || value.length > 512) {
+    throw new MailTemplateError('invalid_mailbox_password_hash', 'Mailbox password hash must be a bounded Argon2id PHC string');
+  }
+  const match = value.match(ARGON2ID_PATTERN);
+  if (!match) {
+    throw new MailTemplateError('invalid_mailbox_password_hash', 'Mailbox password hash must use canonical Argon2id PHC encoding');
+  }
+  const memory = Number.parseInt(match[1], 10);
+  const passes = Number.parseInt(match[2], 10);
+  const parallelism = Number.parseInt(match[3], 10);
+  if (!Number.isSafeInteger(memory) || memory < 65_536 || memory > 262_144
+    || !Number.isSafeInteger(passes) || passes < 3 || passes > 10
+    || !Number.isSafeInteger(parallelism) || parallelism < 1 || parallelism > 4
+    || !decodeCanonicalBase64(match[4], 16, 64) || !decodeCanonicalBase64(match[5], 32, 64)) {
+    throw new MailTemplateError('invalid_mailbox_password_hash', 'Mailbox Argon2id parameters or encoded values are outside policy');
+  }
+  return value;
+}
+
+function normalizeMailboxAccounts(domains, accounts) {
+  if (!Array.isArray(accounts)) {
+    throw new MailTemplateError('invalid_mailbox_accounts', 'Mailbox accounts must be an array');
+  }
+  if (accounts.length > MAX_MAILBOXES) {
+    throw new MailTemplateError('too_many_mailboxes', `At most ${MAX_MAILBOXES} managed mailbox accounts are supported`);
+  }
+  const managedDomains = new Set(domains);
+  const normalized = [];
+  const addresses = new Set();
+  for (const value of accounts) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).length !== 2 || !Object.hasOwn(value, 'address') || !Object.hasOwn(value, 'passwordHash')) {
+      throw new MailTemplateError('invalid_mailbox_account', 'Mailbox account must contain only address and passwordHash');
+    }
+    const mailbox = normalizeAddress(value.address);
+    if (!managedDomains.has(mailbox.domain)) {
+      throw new MailTemplateError('mailbox_domain_unmanaged', 'Mailbox account must belong to an explicitly managed mail domain');
+    }
+    if (addresses.has(mailbox.address)) {
+      throw new MailTemplateError('duplicate_mailbox', 'Mailbox accounts must be unique after canonicalization');
+    }
+    addresses.add(mailbox.address);
+    normalized.push(Object.freeze({ address: mailbox.address, passwordHash: normalizeArgon2idHash(value.passwordHash) }));
+  }
+  return normalized.sort((left, right) => left.address < right.address ? -1 : left.address > right.address ? 1 : 0);
+}
+
 function artifact(path, content) {
   return Object.freeze({
     version: 1,
@@ -217,6 +275,28 @@ export function previewPostfixVirtualMaps({ domains, mailboxes = [], aliases = [
   });
 }
 
+export function renderDovecotPasswdFile({ domains, accounts } = {}) {
+  const normalizedDomains = normalizeManagedDomains(domains);
+  const normalizedAccounts = normalizeMailboxAccounts(normalizedDomains, accounts);
+  return normalizedAccounts.length === 0 ? ''
+    : `${normalizedAccounts.map((account) => `${account.address}:{ARGON2ID}${account.passwordHash}`).join('\n')}\n`;
+}
+
+export function previewDovecotPasswdFile(input = {}) {
+  const content = renderDovecotPasswdFile(input);
+  return Object.freeze({
+    version: 1,
+    path: DOVECOT_PASSWD_FILE_PATH,
+    sha256: createHash('sha256').update(content).digest('hex'),
+    bytes: Buffer.byteLength(content),
+    entries: content === '' ? 0 : content.split('\n').length - 1,
+    sensitive: true,
+    contentIncluded: false,
+    validate: Object.freeze({ file: '/usr/bin/doveconf', args: Object.freeze(['-n']) }),
+    sideEffects: false,
+  });
+}
+
 export const mailTemplatePolicy = Object.freeze({
   maxManagedDomains: MAX_MANAGED_DOMAINS,
   maxMailboxes: MAX_MAILBOXES,
@@ -225,4 +305,5 @@ export const mailTemplatePolicy = Object.freeze({
   postfixVirtualDomainMapPath: POSTFIX_VIRTUAL_DOMAIN_MAP_PATH,
   postfixVirtualMailboxMapPath: POSTFIX_VIRTUAL_MAILBOX_MAP_PATH,
   postfixVirtualAliasMapPath: POSTFIX_VIRTUAL_ALIAS_MAP_PATH,
+  dovecotPasswdFilePath: DOVECOT_PASSWD_FILE_PATH,
 });

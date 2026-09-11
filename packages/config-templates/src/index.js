@@ -16,8 +16,10 @@ export {
 export {
   MailTemplateError,
   mailTemplatePolicy,
+  previewDovecotPasswdFile,
   previewPostfixVirtualDomainMap,
   previewPostfixVirtualMaps,
+  renderDovecotPasswdFile,
   renderPostfixVirtualAliasMap,
   renderPostfixVirtualDomainMap,
   renderPostfixVirtualMailboxMap,

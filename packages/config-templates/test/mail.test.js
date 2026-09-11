@@ -3,12 +3,16 @@ import test from 'node:test';
 import {
   MailTemplateError,
   mailTemplatePolicy,
+  previewDovecotPasswdFile,
   previewPostfixVirtualDomainMap,
   previewPostfixVirtualMaps,
+  renderDovecotPasswdFile,
   renderPostfixVirtualAliasMap,
   renderPostfixVirtualDomainMap,
   renderPostfixVirtualMailboxMap,
 } from '../src/index.js';
+
+const ARGON2ID_HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 1).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 2).toString('base64').replace(/=+$/, '')}`;
 
 test('renders a canonical deterministic Postfix virtual domain map', () => {
   const rendered = renderPostfixVirtualDomainMap(['Z.example.com.', 't\u00fcrkiye.example']);
@@ -129,5 +133,54 @@ test('previews the complete Postfix map set and rejects mailbox-alias ambiguity'
       aliases: [{ source: 'INFO@example.com', destinations: ['owner@example.com'] }],
     }),
     (error) => error instanceof MailTemplateError && error.code === 'mail_alias_mailbox_conflict',
+  );
+});
+
+test('renders Dovecot passwd-file rows from canonical Argon2id hashes only', () => {
+  const content = renderDovecotPasswdFile({
+    domains: ['example.com'],
+    accounts: [
+      { address: 'Sales@EXAMPLE.COM.', passwordHash: ARGON2ID_HASH },
+      { address: 'admin@example.com', passwordHash: ARGON2ID_HASH },
+    ],
+  });
+  assert.equal(content, `admin@example.com:{ARGON2ID}${ARGON2ID_HASH}\nsales@example.com:{ARGON2ID}${ARGON2ID_HASH}\n`);
+  assert.equal(content.includes('plaintext'), false);
+});
+
+test('Dovecot passwd preview never returns password hashes or rendered content', () => {
+  const preview = previewDovecotPasswdFile({
+    domains: ['example.com'],
+    accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
+  });
+  assert.deepEqual(Object.keys(preview).sort(), [
+    'bytes', 'contentIncluded', 'entries', 'path', 'sensitive', 'sha256', 'sideEffects', 'validate', 'version',
+  ]);
+  assert.equal(preview.path, '/etc/yunpanel/mail/dovecot/users');
+  assert.equal(preview.entries, 1);
+  assert.equal(preview.sensitive, true);
+  assert.equal(preview.contentIncluded, false);
+  assert.match(preview.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(preview).includes(ARGON2ID_HASH), false);
+});
+
+test('Dovecot passwd rendering rejects weak, noncanonical and out-of-scope account state', () => {
+  for (const passwordHash of [
+    'plaintext',
+    ARGON2ID_HASH.replace('m=65536', 'm=32768'),
+    ARGON2ID_HASH.replace('t=3', 't=2'),
+    `${ARGON2ID_HASH}=`,
+    ARGON2ID_HASH.replace(/\$[^$]+$/, '$c2hvcnQ'),
+  ]) assert.throws(
+    () => renderDovecotPasswdFile({
+      domains: ['example.com'], accounts: [{ address: 'owner@example.com', passwordHash }],
+    }),
+    (error) => error instanceof MailTemplateError && error.code === 'invalid_mailbox_password_hash',
+  );
+  assert.throws(
+    () => renderDovecotPasswdFile({
+      domains: ['example.com'], accounts: [{ address: 'owner@other.example', passwordHash: ARGON2ID_HASH }],
+    }),
+    (error) => error instanceof MailTemplateError && error.code === 'mailbox_domain_unmanaged',
   );
 });
