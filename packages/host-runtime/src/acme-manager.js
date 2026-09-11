@@ -1,4 +1,9 @@
-import { X509Certificate } from 'node:crypto';
+import {
+  createPrivateKey,
+  createPublicKey,
+  timingSafeEqual,
+  X509Certificate,
+} from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { access, chmod, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -70,8 +75,12 @@ function certificatePaths(liveRoot, certName) {
 async function inspectCertificateFile({ liveRoot, certName, readFileFn = readFile }) {
   const paths = certificatePaths(liveRoot, certName);
   let pem;
+  let privateKeyPem;
   try {
-    pem = await readFileFn(paths.certificatePath, 'utf8');
+    [pem, privateKeyPem] = await Promise.all([
+      readFileFn(paths.certificatePath, 'utf8'),
+      readFileFn(paths.privateKeyPath, 'utf8'),
+    ]);
   } catch {
     throw new AcmeManagerError('certificate_not_found', 'Issued certificate metadata could not be read');
   }
@@ -81,6 +90,18 @@ async function inspectCertificateFile({ liveRoot, certName, readFileFn = readFil
     certificate = new X509Certificate(pem);
   } catch {
     throw new AcmeManagerError('invalid_certificate_file', 'Issued certificate file is invalid');
+  }
+
+  let privateKey;
+  try {
+    privateKey = createPrivateKey({ key: privateKeyPem, format: 'pem' });
+  } catch {
+    throw new AcmeManagerError('invalid_private_key_file', 'Issued certificate private key file is invalid');
+  }
+  const certificateKey = certificate.publicKey.export({ type: 'spki', format: 'der' });
+  const privateKeyPublic = createPublicKey(privateKey).export({ type: 'spki', format: 'der' });
+  if (certificateKey.length !== privateKeyPublic.length || !timingSafeEqual(certificateKey, privateKeyPublic)) {
+    throw new AcmeManagerError('certificate_private_key_mismatch', 'Issued certificate and private key do not match');
   }
 
   return {
@@ -191,3 +212,9 @@ export function createAcmeManager({
 }
 
 export const acmeManager = createAcmeManager();
+
+export const acmeManagerInternals = Object.freeze({
+  certificatePaths,
+  inspectCertificateFile,
+  normalizeDomains,
+});

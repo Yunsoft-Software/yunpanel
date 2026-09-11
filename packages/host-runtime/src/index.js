@@ -15,7 +15,12 @@ export {
 export { createDockerInspector, inspectDocker, parseDockerPsOutput } from './docker-inspector.js';
 export { createNginxInspector, inspectNginx, parseNginxConfigMetadata } from './nginx-inspector.js';
 export { createNginxManager, nginxManager, NginxManagerError } from './nginx-manager.js';
-export { createAcmeManager, acmeManager, AcmeManagerError } from './acme-manager.js';
+export {
+  createAcmeManager,
+  acmeManager,
+  AcmeManagerError,
+  acmeManagerInternals,
+} from './acme-manager.js';
 export { inspectAllowlistedServices, parseSystemdProperties, systemdInspectionPolicy } from './systemd-inspector.js';
 export {
   createSystemPackageManager,
