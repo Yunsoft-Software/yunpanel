@@ -27,7 +27,7 @@ function deploymentSpec() {
   };
 }
 
-function createHarness({ healthResults = [true], failFirstRestart = false } = {}) {
+function createHarness({ healthResults = [true], failFirstRestart = false, lstatFn = null, realpathFn = null } = {}) {
   const commands = [];
   const links = [];
   const removals = [];
@@ -63,13 +63,13 @@ function createHarness({ healthResults = [true], failFirstRestart = false } = {}
     npmPaths: ['/usr/bin/npm'],
     systemctlPaths: ['/usr/bin/systemctl'],
     mkdirFn: async () => {},
-    lstatFn: async () => ({
+    lstatFn: lstatFn ?? (async () => ({
       isFile: () => true,
       isDirectory: () => true,
       isSymbolicLink: () => false,
       mtimeMs: Date.now(),
-    }),
-    realpathFn: async (value) => value,
+    })),
+    realpathFn: realpathFn ?? (async (value) => value),
     readlinkFn: async () => `releases/${PREVIOUS_RELEASE}`,
     readdirFn: async () => [],
     renameFn: async () => {},
@@ -135,4 +135,74 @@ test('systemd restart failure also restores the previous release', async () => {
   assert.ok(harness.links.some((entry) => entry.target === `releases/${PREVIOUS_RELEASE}`));
   const restarts = harness.commands.filter((entry) => entry.file === '/usr/bin/systemctl' && entry.args[0] === 'restart');
   assert.equal(restarts.length, 2);
+});
+
+test('pnpm monorepo deployment runs install and build inside the verified document root', async () => {
+  const harness = createHarness({ healthResults: [true] });
+  const pnpmManager = createNodeDeploymentManager({
+    appRoot: '/apps',
+    dataRoot: '/data',
+    envRoot: '/env',
+    systemdRoot: '/systemd',
+    run: async (file, args, options = {}) => {
+      harness.commands.push({ file, args, options });
+      if (file === '/usr/bin/node' && args[0] === '--version') return { stdout: 'v24.8.0\n' };
+      if (file === '/usr/bin/pnpm' && args[0] === '--version') return { stdout: '10.0.0\n' };
+      if (file === '/usr/bin/systemctl' && args[0] === '--version') return { stdout: 'systemd 255\n' };
+      if (file === '/usr/sbin/runuser' && args.includes('rev-parse')) return { stdout: `${'a'.repeat(40)}\n` };
+      return { stdout: '' };
+    },
+    nodePaths: ['/usr/bin/node'],
+    packageManagerPaths: { pnpm: ['/usr/bin/pnpm'] },
+    systemctlPaths: ['/usr/bin/systemctl'],
+    mkdirFn: async () => {},
+    lstatFn: async () => ({ isFile: () => true, isDirectory: () => true, isSymbolicLink: () => false, mtimeMs: Date.now() }),
+    realpathFn: async (value) => value,
+    readlinkFn: async () => `releases/${PREVIOUS_RELEASE}`,
+    readdirFn: async () => [],
+    renameFn: async () => {},
+    rmFn: async () => {},
+    symlinkFn: async () => {},
+    writeFileFn: async () => {},
+    waitForHealth: async () => true,
+  });
+
+  await pnpmManager.deployNode({
+    ...deploymentSpec(),
+    runtime: {
+      ...deploymentSpec().runtime,
+      packageManager: 'pnpm',
+      documentRoot: 'services/api',
+    },
+  });
+
+  const commands = harness.commands.filter((entry) => entry.file === '/usr/sbin/runuser');
+  assert.ok(commands.some((entry) => entry.args.includes('/usr/bin/pnpm')
+    && entry.args.includes('--frozen-lockfile')
+    && entry.options.cwd === `/apps/${APPLICATION_ID}/releases/${DEPLOYMENT_ID}/services/api`));
+  assert.ok(commands.some((entry) => entry.args.includes('build')
+    && entry.options.cwd === `/apps/${APPLICATION_ID}/releases/${DEPLOYMENT_ID}/services/api`));
+});
+
+test('document root symlinks and release escapes fail before package installation', async () => {
+  for (const options of [
+    {
+      lstatFn: async () => ({ isFile: () => false, isDirectory: () => false, isSymbolicLink: () => true }),
+      expectedCode: 'node_document_root_invalid',
+    },
+    {
+      realpathFn: async (value) => value.endsWith('/services/api') ? '/outside/api' : value,
+      expectedCode: 'node_document_root_escape',
+    },
+  ]) {
+    const harness = createHarness(options);
+    await assert.rejects(
+      harness.manager.deployNode({
+        ...deploymentSpec(),
+        runtime: { ...deploymentSpec().runtime, documentRoot: 'services/api' },
+      }),
+      (error) => error instanceof NodeDeploymentError && error.code === options.expectedCode,
+    );
+    assert.equal(harness.commands.some((entry) => entry.file === '/usr/sbin/runuser' && entry.args.includes('/usr/bin/npm')), false);
+  }
 });

@@ -8,6 +8,8 @@ import {
 
 const SCRIPT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$/;
 const HEALTH_PATH_PATTERN = /^\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$/;
+const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn']);
+const RUNTIME_MODES = new Set(['production', 'development']);
 
 function normalizeScriptName(value, fieldName, { nullable = false } = {}) {
   if (value == null && nullable) return null;
@@ -36,6 +38,15 @@ export function normalizeNodeRuntimeConfig(value = {}) {
   }
 
   const buildScript = normalizeScriptName(value.buildScript ?? null, 'buildScript', { nullable: true });
+  const packageManager = value.packageManager ?? 'npm';
+  if (!PACKAGE_MANAGERS.has(packageManager)) {
+    throw new ApplicationValidationError('invalid_package_manager', 'Node packageManager must be npm, pnpm or yarn');
+  }
+  const mode = value.mode ?? 'production';
+  if (!RUNTIME_MODES.has(mode)) {
+    throw new ApplicationValidationError('invalid_node_mode', 'Node mode must be production or development');
+  }
+  const documentRoot = normalizeRelativeBuildPath(value.documentRoot ?? '.', { allowDot: true });
   const startMode = value.startMode ?? value.start?.mode ?? 'node';
   if (!['node', 'npm'].includes(startMode)) {
     throw new ApplicationValidationError('invalid_start_mode', 'Node startMode must be node or npm');
@@ -75,8 +86,11 @@ export function normalizeNodeRuntimeConfig(value = {}) {
 
   return {
     nodeMajor,
+    packageManager,
     installMode,
     buildScript,
+    mode,
+    documentRoot,
     start,
     port,
     healthPath,
@@ -125,3 +139,8 @@ export function normalizeNodeRestartSpec(value) {
 export function normalizeNodeStatusSpec(value) {
   return normalizeManagedNodeSpec(value, 'invalid_node_status', 'Node status spec must be an object');
 }
+
+export const nodeApplicationInternals = Object.freeze({
+  packageManagers: Object.freeze([...PACKAGE_MANAGERS]),
+  runtimeModes: Object.freeze([...RUNTIME_MODES]),
+});

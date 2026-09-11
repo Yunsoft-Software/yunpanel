@@ -55,6 +55,32 @@ test('renders allowlisted npm start scripts directly through npm', () => {
   assert.match(unit, /Restart=always/);
 });
 
+test('renders an explicit package manager, mode and release-contained document root', () => {
+  const unit = renderNodeSystemdUnit({
+    applicationId: APPLICATION_ID,
+    user: nodeApplicationUser(APPLICATION_ID),
+    nodePath: '/usr/bin/node',
+    packageManagerPath: '/usr/bin/pnpm',
+    runtime: {
+      nodeMajor: 24,
+      packageManager: 'pnpm',
+      mode: 'development',
+      documentRoot: 'services/api',
+      port: 4100,
+      startMode: 'npm',
+      startScript: 'serve',
+    },
+  });
+  const environment = renderNodeEnvironmentFile({
+    applicationId: APPLICATION_ID,
+    runtime: { port: 4100, mode: 'development' },
+  });
+
+  assert.match(unit, /WorkingDirectory=\/var\/lib\/yunpanel\/apps\/.+\/current\/services\/api/);
+  assert.match(unit, /ExecStart=\/usr\/bin\/pnpm run serve/);
+  assert.match(environment, /NODE_ENV="development"/);
+});
+
 test('renders baseline and custom environment values with safe quoting', () => {
   const environmentFile = renderNodeEnvironmentFile({
     applicationId: APPLICATION_ID,

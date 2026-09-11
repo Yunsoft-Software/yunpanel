@@ -23,6 +23,11 @@ const INSTALL_PATH = '/usr/bin/install';
 const SYSTEMCTL_PATHS = Object.freeze(['/usr/bin/systemctl', '/bin/systemctl']);
 const NODE_PATHS = Object.freeze(['/usr/bin/node', '/usr/local/bin/node']);
 const NPM_PATHS = Object.freeze(['/usr/bin/npm', '/usr/local/bin/npm']);
+const PACKAGE_MANAGER_PATHS = Object.freeze({
+  npm: NPM_PATHS,
+  pnpm: Object.freeze(['/usr/bin/pnpm', '/usr/local/bin/pnpm']),
+  yarn: Object.freeze(['/usr/bin/yarn', '/usr/local/bin/yarn']),
+});
 const GIT_PATH = '/usr/bin/git';
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -119,6 +124,7 @@ export function createNodeDeploymentManager({
   waitForHealth = defaultWaitForHealth,
   nodePaths = NODE_PATHS,
   npmPaths = NPM_PATHS,
+  packageManagerPaths = PACKAGE_MANAGER_PATHS,
   systemctlPaths = SYSTEMCTL_PATHS,
 } = {}) {
   const deploymentLocks = new Map();
@@ -227,8 +233,13 @@ export function createNodeDeploymentManager({
       throw new NodeDeploymentError('node_runtime_mismatch', `Node.js ${spec.runtime.nodeMajor} is required by this application`);
     }
 
-    const npmPath = await findExecutable(npmPaths, run);
-    if (!npmPath) throw new NodeDeploymentError('npm_not_installed', 'npm is not installed on the managed server');
+    const managerPaths = spec.runtime.packageManager === 'npm'
+      ? npmPaths
+      : packageManagerPaths?.[spec.runtime.packageManager];
+    const packageManagerPath = Array.isArray(managerPaths) ? await findExecutable(managerPaths, run) : null;
+    if (!packageManagerPath) {
+      throw new NodeDeploymentError(`${spec.runtime.packageManager}_not_installed`, `${spec.runtime.packageManager} is not installed on the managed server`);
+    }
     const systemctlPath = await findExecutable(systemctlPaths, run);
     if (!systemctlPath) throw new NodeDeploymentError('systemd_not_available', 'systemctl is not available on the managed server');
 
@@ -255,23 +266,40 @@ export function createNodeDeploymentManager({
       const commitSha = String(revision.stdout ?? '').trim().toLowerCase();
       if (!COMMIT_PATTERN.test(commitSha)) throw new NodeDeploymentError('invalid_git_revision', 'Git returned an invalid commit revision');
 
-      const installArgs = spec.runtime.installMode === 'ci'
-        ? ['ci', '--no-audit', '--no-fund']
-        : ['install', '--no-audit', '--no-fund'];
-      await runAsUser(user, dataDirectory, npmPath, installArgs, { cwd: releaseDirectory, timeout: 15 * 60 * 1000 });
+      const requestedDocumentRoot = path.join(releaseDirectory, spec.runtime.documentRoot);
+      let documentRoot;
+      let requestedDocumentRootInfo;
+      try {
+        requestedDocumentRootInfo = await lstatFn(requestedDocumentRoot);
+        documentRoot = await realpathFn(requestedDocumentRoot);
+      }
+      catch { throw new NodeDeploymentError('node_document_root_missing', 'Node application document root does not exist'); }
+      if (!requestedDocumentRootInfo.isDirectory() || requestedDocumentRootInfo.isSymbolicLink()) {
+        throw new NodeDeploymentError('node_document_root_invalid', 'Node application document root must be a real directory');
+      }
+      if (documentRoot !== releaseDirectory && !documentRoot.startsWith(`${releaseDirectory}${path.sep}`)) {
+        throw new NodeDeploymentError('node_document_root_escape', 'Node application document root resolves outside the release');
+      }
+
+      const installArgs = spec.runtime.packageManager === 'npm'
+        ? (spec.runtime.installMode === 'ci' ? ['ci', '--no-audit', '--no-fund'] : ['install', '--no-audit', '--no-fund'])
+        : spec.runtime.packageManager === 'pnpm'
+          ? (spec.runtime.installMode === 'ci' ? ['install', '--frozen-lockfile'] : ['install'])
+          : (spec.runtime.installMode === 'ci' ? ['install', '--immutable'] : ['install']);
+      await runAsUser(user, dataDirectory, packageManagerPath, installArgs, { cwd: documentRoot, timeout: 15 * 60 * 1000 });
       if (spec.runtime.buildScript) {
-        await runAsUser(user, dataDirectory, npmPath, ['run', spec.runtime.buildScript], { cwd: releaseDirectory, timeout: 15 * 60 * 1000 });
+        await runAsUser(user, dataDirectory, packageManagerPath, ['run', spec.runtime.buildScript], { cwd: documentRoot, timeout: 15 * 60 * 1000 });
       }
 
       if (spec.runtime.start.mode === 'node') {
-        const requestedEntry = path.join(releaseDirectory, spec.runtime.start.entryFile);
+        const requestedEntry = path.join(documentRoot, spec.runtime.start.entryFile);
         let resolvedEntry;
         try {
           resolvedEntry = await realpathFn(requestedEntry);
         } catch {
           throw new NodeDeploymentError('node_entry_missing', 'Node application entry file does not exist');
         }
-        if (!resolvedEntry.startsWith(`${releaseDirectory}${path.sep}`)) {
+        if (!resolvedEntry.startsWith(`${documentRoot}${path.sep}`)) {
           throw new NodeDeploymentError('node_entry_escape', 'Node application entry file resolves outside the release');
         }
         const entryInfo = await lstatFn(resolvedEntry);
@@ -300,7 +328,7 @@ export function createNodeDeploymentManager({
         applicationId: spec.applicationId,
         user,
         nodePath,
-        npmPath,
+        packageManagerPath,
         runtime: spec.runtime,
       });
       await atomicWrite(unitPath, unit, 0o644);
