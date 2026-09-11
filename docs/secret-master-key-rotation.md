@@ -14,7 +14,7 @@ Use Node.js 24.11.1 or newer and the same packaged YunPanel code that will be st
 Before starting:
 
 1. Confirm independent SSH/provider-console access to the host.
-2. Record the exact production `YUNPANEL_AUTH_DB` and `YUNPANEL_APPLICATION_ENVIRONMENT_STORE` paths. The latter also contains internal encrypted Git deployment credentials, so the same rotation/rollback covers them.
+2. Record the exact production `YUNPANEL_AUTH_DB` and `YUNPANEL_APPLICATION_ENVIRONMENT_STORE` paths. The latter also contains internal encrypted Git deployment credentials and GitHub webhook secrets, so the same rotation/rollback covers them.
 3. Ensure the current `YUNPANEL_SECRET_MASTER_KEY` is recoverable from a separate protected secret store. The rotation backup intentionally does **not** contain the raw old or new key.
 4. Stop `yunpanel-api.service` and keep it stopped until the data rotation and API environment update are complete. `--confirm-offline` is an operator acknowledgement; it is not a substitute for stopping the service.
 5. Choose a new, non-existing backup directory under a private service-owned location. Rotation refuses to reuse an existing backup directory.
