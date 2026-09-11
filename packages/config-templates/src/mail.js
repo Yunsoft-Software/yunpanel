@@ -78,6 +78,10 @@ function normalizeAddress(value) {
   return Object.freeze({ address, domain });
 }
 
+export function normalizeMailboxAddress(value) {
+  return normalizeAddress(value);
+}
+
 function normalizeMailboxes(domains, mailboxes) {
   if (!Array.isArray(mailboxes)) {
     throw new MailTemplateError('invalid_mailboxes', 'Managed mailboxes must be an array');

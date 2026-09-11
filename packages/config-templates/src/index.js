@@ -16,6 +16,7 @@ export {
 export {
   MailTemplateError,
   mailTemplatePolicy,
+  normalizeMailboxAddress,
   previewDovecotPasswdFile,
   previewDovecotVirtualMailConfig,
   previewManagedMailConfiguration,
