@@ -221,6 +221,7 @@ export function createExternalLifecycleRegistry({
         state = { version: STORE_VERSION, [collectionKey]: resources };
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
+        await persist();
       }
     }
     initialized = true;

@@ -105,6 +105,7 @@ export function createWebsiteMigrationLedger({ filePath = null, now = () => Date
         state = { version: STORE_VERSION, entries };
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
+        await persist();
       }
     }
     initialized = true;

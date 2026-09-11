@@ -167,6 +167,7 @@ export function createDockerWorkloadRegistry({
         state = { version: STORE_VERSION, workloads };
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
+        await persist();
       }
     }
     initialized = true;

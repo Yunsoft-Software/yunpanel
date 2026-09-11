@@ -189,6 +189,7 @@ export function createDnsProviderCredentialRegistry({
         state = { version: STORE_VERSION, credentials };
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
+        await persist();
       }
     }
     initialized = true;

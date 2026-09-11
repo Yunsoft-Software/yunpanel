@@ -75,7 +75,10 @@ export function createWebsiteMigrationPolicyStore({ filePath = null, now = () =>
     if (initialized) return;
     if (filePath) {
       try { state = validateState(JSON.parse(await readFile(filePath, 'utf8'))); }
-      catch (error) { if (error?.code !== 'ENOENT') throw error; }
+      catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        await persist();
+      }
     }
     initialized = true;
   }

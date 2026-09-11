@@ -75,7 +75,12 @@ test('finalize rejects stale and incomplete migration state without mutating pol
     );
     assert.equal(store.snapshot().mode, 'compatibility');
   }
-  await assert.rejects(readFile(filePath, 'utf8'), { code: 'ENOENT' });
+  assert.deepEqual(JSON.parse(await readFile(filePath, 'utf8')), {
+    version: 1,
+    mode: 'compatibility',
+    enforcedDigest: null,
+    transitionedAt: null,
+  });
 });
 
 test('finalize is idempotent for the same digest and rejects a different finalized state', async (t) => {

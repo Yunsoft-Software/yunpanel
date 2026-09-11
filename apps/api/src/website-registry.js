@@ -291,6 +291,7 @@ export function createWebsiteRegistry({
         if (sourceVersion !== STORE_VERSION) await persist();
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
+        await persist();
       }
     }
     initialized = true;
