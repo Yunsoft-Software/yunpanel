@@ -27,6 +27,8 @@ YUNPANEL_DOMAIN_STORE=/var/lib/yunpanel/control-plane/domain-registry.json
 YUNPANEL_JOB_STORE=/var/lib/yunpanel/control-plane/job-registry.json
 YUNPANEL_CERTIFICATE_STORE=/var/lib/yunpanel/control-plane/certificate-registry.json
 YUNPANEL_APPLICATION_STORE=/var/lib/yunpanel/control-plane/application-registry.json
+YUNPANEL_WEBSITE_STORE=/var/lib/yunpanel/control-plane/website-registry.json
+YUNPANEL_DOCKER_WORKLOAD_STORE=/var/lib/yunpanel/control-plane/docker-workload-registry.json
 YUNPANEL_APPLICATION_ENVIRONMENT_STORE=/var/lib/yunpanel/control-plane/application-environment-registry.json
 YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.sqlite
 ```

@@ -14,13 +14,16 @@ Implemented backend contracts:
 - `POST /api/websites`
 - `POST /api/websites/:websiteId/update-preview`
 - `PATCH /api/websites/:websiteId`
+- `GET /api/docker/workloads`
+- `GET /api/docker/workloads/:dockerWorkloadId`
+- `POST /api/docker/workloads`
 - `GET /api/websites/migration/preview`
 - `GET /api/websites/migration/status`
 - `POST /api/websites/migration/bind`
 - `POST /api/websites/migration/finalize`
 - `POST /api/websites/migration/rollback`
 
-Website state is stored separately through `YUNPANEL_WEBSITE_STORE`. Migration enforcement state is stored through `YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE`. Production startup validates persisted Website server/application foreign keys and initializes migration policy before accepting Domain state.
+Website state is stored separately through `YUNPANEL_WEBSITE_STORE`. Migration enforcement state is stored through `YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE`. Production startup validates persisted Website server/Application/Docker-workload foreign keys and initializes migration policy before accepting Domain state. Docker tracking is stored separately through `YUNPANEL_DOCKER_WORKLOAD_STORE`.
 
 Node Application runtime settings use Owner-only `POST /api/applications/:applicationId/configuration-preview` and `POST /api/applications/:applicationId/configuration`. Apply requires the exact desired revision, preview digest and typed confirmation. The managed port is immutable in this flow because it is part of Website/Nginx routing identity. Node major, direct-file or package-script startup, npm/pnpm/yarn, production/development mode and a validated release-contained document root are configurable. A deployed Application retains its separate `activeRuntime` until a successful deploy applies the desired settings; restart, status and rollback use the active or release-specific snapshot rather than silently applying pending configuration.
 
@@ -34,7 +37,11 @@ Owner-only `GET|PUT|DELETE /api/applications/:applicationId/deployment-credentia
 
 Owner Application environment supports single-key edits plus strict `.env` merge/replace import with optimistic revision and typed replacement confirmation. Public environment metadata contains only revision, apply state, timestamps and change counts. A saved revision is not described as active until the exact revision has been materialized by a successful Node deploy/restart/rollback and reconciled to the current release.
 
-An application-backed Website owns stable Website UUID, server/application IDs, runtime type, canonical managed document root and deterministic `yunapp-*` Unix user. A proxy Website is a real resource without an invented application/document root/Unix user and may own one canonical host/port/WebSocket target. Website records carry a positive revision; persisted v1 state is validated and migrated once to v2 with revision `1` and no invented proxy target.
+An application-backed Website owns stable Website UUID, server/application IDs, runtime type, canonical managed document root and deterministic `yunapp-*` Unix user. A proxy Website is a real resource without an invented application/document root/Unix user and may own one canonical host/port/WebSocket target. A Docker Website instead binds one explicit same-server Docker workload ID; its loopback proxy target is derived from that workload and cannot be supplied separately. One workload cannot be attached to multiple Websites.
+
+Docker workload records currently support only explicit `external` tracking and begin `unverified`. Creation returns `containersChanged=false` and `nginxChanged=false`; it does not claim to inspect Compose files, start a container or activate traffic. Managed Compose lifecycle remains a separate plan item. Read Only accounts may inspect the bounded tracking metadata but cannot create it.
+
+Website records carry a positive revision. Persisted v1/v2 state is validated and migrated once to v3, adding `dockerWorkloadId=null` without changing existing identity, Application binding or proxy target. Docker-bound state revalidates the exact workload/server/endpoint relation at startup.
 
 The Website ID is not a domain ID. Backend relationships use explicit foreign keys rather than permanent server/port/root heuristics.
 
@@ -52,7 +59,9 @@ Shared hostname validation canonicalizes IDN input to ASCII punycode. Unicode/pu
 
 The preview binds the proposed state to the current Website revision and to a SHA-256 digest of every explicitly linked Domain's safe traffic/certificate revision metadata. It reports whether a later Domain restage is required, but never changes Domain target, Nginx, certificate or live traffic itself. `PATCH /api/websites/:websiteId` requires that exact revision, digest and typed confirmation. Website or linked-Domain drift rejects the apply before mutation. A successful apply increments the Website revision in the private registry file.
 
-Switching an application-backed Website to proxy is explicit: `runtimeType=proxy` and `applicationId=null` are both required. Switching back requires an exact Application ID and its matching `static` or `node` runtime. Proxy hosts accept canonical IP/DNS names only—not URL schemes or paths—and ports remain in the non-privileged `1024..65535` range.
+Switching an application-backed Website to proxy is explicit: `runtimeType=proxy` and `applicationId=null` are both required. Docker transitions likewise require an exact `dockerWorkloadId`; transitions away must explicitly clear it. Switching back to an Application requires the matching `static` or `node` runtime and clears Docker binding. Proxy hosts accept canonical IP/DNS names only—not URL schemes or paths—and ports remain in the non-privileged `1024..65535` range.
+
+Guarded site-create accepts `source.kind=existing_docker` with only `dockerWorkloadId`. The preview includes the exact tracked workload revision/target, so observation or registry drift invalidates an older digest. The result persists Website and Domain relationships but keeps DNS/certificate/mail/container side effects false.
 
 ## Migration preview, bind and enforcement
 
@@ -84,12 +93,7 @@ A `202` response is queued/accepted work, not completion.
 
 ## Remaining backend work
 
-See `plan.md` C/E/F/G/H/I. Persistent Website foundation, IDN canonicalization, guarded existing-Website migration bind and compatibility/enforced policy are implemented. Remaining Website/domain work includes:
-
-- move/delete impact preview beyond the hierarchy-only reparent flow,
-- site-create orchestration,
-- DNS/mail lifecycle separation,
-- Docker/static/Node/site-resource relationships beyond current application/domain links.
+See `plan.md` C/E/F/G/H/I. Persistent Website foundation, IDN canonicalization, guarded migration, site-create, external lifecycle separation and fail-closed impact preview are implemented. Remaining backend work includes managed Docker/Compose lifecycle, site resource registries such as cron/backup/mailbox, Website/Domain move-delete apply semantics and later UI integration. Static/Node/Docker Website identity relationships are present; Docker tracking is not a substitute for managed container operations.
 
 ## Design status
 

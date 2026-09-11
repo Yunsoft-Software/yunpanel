@@ -79,6 +79,8 @@ Rules:
 
 The default application environment registry file is `.data/application-environment-registry.json`. Override it with `YUNPANEL_APPLICATION_ENVIRONMENT_STORE` when required. The state file is mode `0600`; application environment secrets and internal deployment credentials contain ciphertext, IV and authentication tag rather than plaintext values. Deployment credentials are reserved internal records and never enter the hosted process environment.
 
+Docker Website identity tracking uses `.data/docker-workload-registry.json` or `YUNPANEL_DOCKER_WORKLOAD_STORE`. The current API is deliberately limited to `GET /api/docker/workloads`, `GET /api/docker/workloads/:dockerWorkloadId` and Owner-only `POST /api/docker/workloads`. A create request must declare `managementMode=external` and an exact same-server loopback host/port/WebSocket target; the response explicitly reports that no container or Nginx change occurred. Managed Compose lifecycle is not implemented by this tracking endpoint.
+
 Managed Node applications receive their effective environment in:
 
 ```text
