@@ -32,10 +32,6 @@ Application environment katı ve bounded `.env` merge/replace import, optimistic
 Owner-only local log backend Node journalını, allowlist'li systemd unitlerini, Nginx access/error dosyalarını ve job'a özel deploy çıktısını bounded/redacted okur. Exact query alanları zaman/seviye/arama filtresi ve source-specific cursor paging taşır; JSON, finite NDJSON snapshot ve text download verir. Keyfi unit/path, remote legacy host ve Read Only erişimi kapalıdır; deploy store job başına/global retention sınırlarıyla private modda kalır.
 Static/SPA trafiği explicit Domain `spaFallback` state'iyle canonical static Application/Website köküne bağlıdır. Docker Website hedefi ayrı private workload registry kimliğini, same-server loopback endpointini, unique binding'i, revisioned Website update'i, guarded site-create akışını ve impact envanterini taşır; şimdilik yalnız açık `external/unverified` tracking sunar ve container lifecycle sonucu iddia etmez. Passenger yeni runtime değildir; yalnız legacy host discovery/ilerideki Plesk importer compatibility yüzeyinde kalır. Managed Docker/Compose lifecycle işi I bölümündedir.
 
-## F. P2 — Terminal ve file manager backend
-
-- [ ] Site file manager: list/upload/download/mkdir/rename/text edit/permission display/confirmed delete; traversal ve symlink escape fail-closed. Owner host-files context'i ayrı kalsın.
-
 ## G. P2 — Domain, DNS, Nginx ve SSL
 
 - [ ] Alias/canonical edit ve HTTPS redirect lifecycle'ı ekle; son hata için actionable diagnosis üret.

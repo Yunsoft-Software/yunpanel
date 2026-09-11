@@ -12,7 +12,7 @@ The privileged execution target is the local `yunpanel-api` runtime rather than 
 
 The old `yun-agent` package/service remains temporarily only as a rollback bridge for hosts that were enrolled before the agentless migration. New enrollment-token provisioning, the enrollment HTTP endpoint, the first-enrollment agent client path and its auth bypass are retired. Existing legacy heartbeat/command/environment/result transport is retained only until real migration + rollback acceptance passes; local-owned server identities reject that channel with `server_managed_locally`.
 
-**The complete hosting target is not implemented yet.** Persistent Website/Domain identities and the guarded backend site-create API exist, but the routed frontend does not yet expose that complete orchestration. Files, cron, general-purpose backups, terminal, full Docker lifecycle and mail management remain incomplete where their real backends are missing.
+**The complete hosting target is not implemented yet.** Persistent Website/Domain identities and the guarded backend site-create API exist, but the routed frontend does not yet expose that complete orchestration. Cron, general-purpose backups, full Docker lifecycle and mail management remain incomplete where their real backends are missing; terminal and site-file backends now exist but still carry the real package/browser/host acceptance gates in `todo.md`.
 
 See [plan.md](plan.md) for remaining implementation work, [todo.md](todo.md) for supported-runtime/browser/package/real-host acceptance, and [agents.md](agents.md) for binding development rules. Completed tasks leave the task lists; implementation history stays in Git. Unless explicitly requested otherwise, work directly on `main` in small commits. Do not add GitHub Actions.
 
@@ -28,7 +28,7 @@ The packaged privilege model is intentional:
 - `yunpanel-api.service` is the privileged host control plane and may run as root for fixed, structured host administration.
 - Static Git/npm/build/artifact work runs as a deterministic dedicated `yunapp-*` user.
 - Node Git/npm/build and the generated Node systemd service run as the deterministic application user, not root; the service uses `NoNewPrivileges`, an empty capability set and restricted writable paths.
-- Future site cron, file-manager and site terminal work must keep the site-user boundary.
+- Site file workers and site terminals run through fixed arguments as the deterministic `yunapp-*` account; future site cron work must keep the same boundary.
 - The interactive terminal uses a real PTY over an exact same-origin WebSocket: site sessions run through their deterministic `yunapp-*` account and only an authenticated, MFA-complete Owner may open the local Server root terminal. Short-lived capabilities are session-bound; revocation closes live sockets and process groups.
 
 Do not replace structured operations with an unauthenticated generic shell or make site workloads inherit API root privilege.
@@ -52,6 +52,7 @@ Do not replace structured operations with an unauthenticated generic shell or ma
 - Per-Application GitHub token or unencrypted SSH deploy-key credentials are AES-256-GCM encrypted by the existing master-key store, materialized only for clone/fetch and excluded from application env, job/recovery result and audit metadata.
 - AES-256-GCM application environment storage, strict bounded `.env` merge/replace import, revisioned change metadata and explicit saved-on-disk versus applied-to-running-process state; plaintext values never enter generic job records.
 - Owner-only local log backend for Node journals, allowlisted systemd units, Nginx access/error files and private deploy output. Queries have bounded time/entry/byte windows, server-side search/level filters, cursor paging, credential redaction, NDJSON snapshots and text downloads.
+- Owner-only local static/Node file backend with site-user worker isolation, canonical active-release validation, permission metadata, bounded binary transfer, optimistic-lock text edits, atomic writes, confirmed deletion and fail-closed traversal/symlink handling.
 - Managed-service inspect/install/start/stop/restart support for the current allowlisted host services.
 - MySQL/MariaDB local-socket inventory and database create/delete job flows with result sanitization.
 - Durable queued/running/terminal job persistence with a versioned private recovery sidecar. Terminal-but-unreconciled and supported running-recovery state survives restart and blocks unsafe new work.
@@ -159,4 +160,5 @@ No package publication, migration or live deployment occurs merely by updating t
 - [docs/website-workspace.md](docs/website-workspace.md) — current workspace routes and limitations.
 - [docs/owner-mfa-policy.md](docs/owner-mfa-policy.md) — HTTPS Owner MFA requirements.
 - [docs/terminal.md](docs/terminal.md) — PTY/WebSocket boundary, limits, audit policy and package requirements.
+- [docs/site-files.md](docs/site-files.md) — local Website release boundary, file operations, limits and symlink policy.
 - [docs/secret-master-key-rotation.md](docs/secret-master-key-rotation.md) — key rotation and rollback procedure.

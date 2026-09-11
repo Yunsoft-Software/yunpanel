@@ -214,7 +214,7 @@ The packaged architecture deliberately separates control-plane privilege from si
 - generic arbitrary command execution is not an internal replacement for structured host operations,
 - static Git/npm/build/artifact work runs through a dedicated deterministic `yunapp-*` user,
 - Node Git/npm/build runs as the dedicated application user and the generated systemd service uses the same user with `NoNewPrivileges`, an empty capability set and restricted writable paths,
-- future site cron and file-manager work must preserve the dedicated site-user boundary,
+- site file-manager workers run through fixed arguments as the deterministic `yunapp-*` user and remain confined to the canonical active release,
 - site terminals run through fixed `runuser` arguments as their deterministic `yunapp-*` user and managed current-release directory,
 - only the HTTP-authenticated, MFA-complete Owner may exchange a short-lived session capability for the local Server root PTY; logout, password/MFA/role/user changes close live sessions.
 

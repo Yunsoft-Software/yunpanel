@@ -68,6 +68,7 @@ install -m 0644 .env.example README.md \
   docs/mfa.md \
   docs/owner-mfa-policy.md \
   docs/secret-master-key-rotation.md \
+  docs/site-files.md \
   docs/terminal.md \
   "$package_root/usr/share/doc/yunpanel/"
 
