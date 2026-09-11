@@ -27,6 +27,7 @@ test('DNS provider tokens persist encrypted and materialize only for execution',
   assert.equal('token' in configured, false);
   const stored = await readFile(filePath, 'utf8');
   assert.doesNotMatch(stored, new RegExp(token));
+  assert.equal((await stat(directory)).mode & 0o777, 0o700);
   assert.equal((await stat(filePath)).mode & 0o777, 0o600);
   assert.deepEqual(await registry.materialize(configured.id), {
     id: configured.id,

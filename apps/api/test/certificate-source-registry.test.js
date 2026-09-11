@@ -96,6 +96,30 @@ test('version one ACME state hydrates without rewrite and persists source policy
   assert.equal(await readFile(filePath, 'utf8'), before);
   await registry.setState(certificate.id, 'issuing');
   const persisted = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(persisted.version, 2);
+  assert.equal(persisted.version, 3);
   assert.equal(persisted.certificates[0].source, 'acme');
+  assert.deepEqual(persisted.certificates[0].certificateNames, ['example.com']);
+  assert.deepEqual(persisted.certificates[0].challenge, { type: 'http-01' });
+});
+
+test('version two certificate state hydrates DNS fields without changing identity', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-certificate-v2-'));
+  const filePath = path.join(directory, 'certificates.json');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const seed = createCertificateRegistry();
+  const certificate = await seed.createForDomain({
+    domainId: 'domain-2', serverId: 'server-2', domains: ['www.example.com'], email: 'ops@example.com',
+  });
+  const legacy = { ...certificate };
+  delete legacy.certificateNames;
+  delete legacy.challenge;
+  const before = JSON.stringify({ version: 2, certificates: [legacy] });
+  await writeFile(filePath, before);
+
+  const registry = createCertificateRegistry({ filePath });
+  const loaded = await registry.getCertificate(certificate.id);
+  assert.equal(loaded.id, certificate.id);
+  assert.deepEqual(loaded.certificateNames, ['www.example.com']);
+  assert.deepEqual(loaded.challenge, { type: 'http-01' });
+  assert.equal(await readFile(filePath, 'utf8'), before);
 });

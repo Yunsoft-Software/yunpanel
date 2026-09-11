@@ -36,6 +36,7 @@ export async function startConfiguredLocalRuntime({
   certificateRegistry,
   applicationRegistry,
   applicationEnvironmentRegistry,
+  dnsProviderCredentialRegistry = null,
   jobLogStore = null,
   createOperations = createLocalHostOperations,
   createCertificateOperationReceipts = createCertificateOperationReceiptStore,
@@ -83,6 +84,9 @@ export async function startConfiguredLocalRuntime({
     loadDeploymentCredential: typeof applicationEnvironmentRegistry.materializeDeploymentCredential === 'function'
       ? (applicationId) => applicationEnvironmentRegistry.materializeDeploymentCredential(applicationId)
       : async () => null,
+    loadDnsProviderCredential: dnsProviderCredentialRegistry && typeof dnsProviderCredentialRegistry.materialize === 'function'
+      ? (credentialId) => dnsProviderCredentialRegistry.materialize(credentialId)
+      : null,
     jobLogStore,
   });
   const certificateOperationReceipts = createCertificateOperationReceipts();

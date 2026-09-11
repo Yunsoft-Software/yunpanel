@@ -28,6 +28,70 @@ async function ensureResourceJobIdle(jobRegistry, resourceType, resourceId) {
   }
 }
 
+function domainWithinZone(hostname, zoneName) {
+  return hostname === zoneName || hostname.endsWith(`.${zoneName}`);
+}
+
+function coveredByZoneWildcard(hostname, zoneName) {
+  if (hostname === zoneName) return true;
+  if (!hostname.endsWith(`.${zoneName}`)) return false;
+  return !hostname.slice(0, -(zoneName.length + 1)).includes('.');
+}
+
+async function resolveCertificateIssueIntent({
+  body,
+  domain,
+  dnsHostingRegistry,
+  dnsProviderCredentialRegistry,
+  localServerId,
+}) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).some((field) => !['email', 'staging', 'challenge'].includes(field))
+    || (body.staging !== undefined && typeof body.staging !== 'boolean')) {
+    throw new CertificateRegistryError('invalid_certificate_request', 'Certificate request fields are invalid');
+  }
+  if (body.challenge === undefined || (body.challenge?.type === 'http-01' && Object.keys(body.challenge).length === 1)) {
+    return { certificateNames: [domain.primaryDomain, ...domain.aliases], challenge: { type: 'http-01' } };
+  }
+  const challenge = body.challenge;
+  const fields = new Set(['type', 'dnsZoneId', 'wildcard']);
+  if (!challenge || typeof challenge !== 'object' || Array.isArray(challenge)
+    || challenge.type !== 'dns-01' || typeof challenge.dnsZoneId !== 'string' || typeof challenge.wildcard !== 'boolean'
+    || Object.keys(challenge).length !== fields.size || Object.keys(challenge).some((field) => !fields.has(field))) {
+    throw new CertificateRegistryError('invalid_certificate_challenge', 'DNS certificate challenge fields are invalid');
+  }
+  if (!dnsHostingRegistry || !dnsProviderCredentialRegistry || !localServerId || domain.serverId !== localServerId) {
+    throw new CertificateRegistryError('local_dns_challenge_required', 'DNS certificate challenges require this local managed Server', 409);
+  }
+  const zone = await dnsHostingRegistry.getZone(challenge.dnsZoneId);
+  if (!zone) throw new CertificateRegistryError('dns_zone_not_found', 'DNS zone was not found', 404);
+  const routeDomains = [domain.primaryDomain, ...domain.aliases];
+  if (routeDomains.some((hostname) => !domainWithinZone(hostname, zone.zoneName))) {
+    throw new CertificateRegistryError('certificate_dns_zone_mismatch', 'DNS zone does not contain every current Domain hostname', 409);
+  }
+  const credential = await dnsProviderCredentialRegistry.getForZone(zone.id);
+  if (!credential?.configured || credential.provider !== 'cloudflare') {
+    throw new CertificateRegistryError('dns_provider_credential_required', 'A supported DNS provider credential is required', 409);
+  }
+  const names = challenge.wildcard
+    ? [zone.zoneName, `*.${zone.zoneName}`, ...routeDomains.filter((hostname) => !coveredByZoneWildcard(hostname, zone.zoneName))]
+    : routeDomains;
+  const certificateNames = [...new Set(names)];
+  if (certificateNames.length > 21) {
+    throw new CertificateRegistryError('invalid_certificate_domains', 'Certificate names exceed the supported limit');
+  }
+  return {
+    certificateNames,
+    challenge: {
+      type: 'dns-01',
+      provider: credential.provider,
+      credentialId: credential.id,
+      dnsZoneId: zone.id,
+      propagationSeconds: 30,
+    },
+  };
+}
+
 async function resolveDomainTls(domain, certificateRegistry, certificateMaterialManager, localServerId) {
   if (!domain.certificateId) return null;
   const certificate = await certificateRegistry.getCertificate(domain.certificateId);
@@ -111,6 +175,8 @@ export function createApp({
   certificateRegistry = createCertificateRegistry(),
   certificateMaterialManager = null,
   localServerId = null,
+  dnsHostingRegistry = null,
+  dnsProviderCredentialRegistry = null,
   applicationRegistry = createApplicationRegistry(),
   applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
     applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
@@ -536,12 +602,23 @@ export function createApp({
     const domain = await domainRegistry.getDomain(request.params.domainId);
     if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
     if (domain.httpsMode !== 'managed') throw new CertificateRegistryError('https_not_managed', 'Domain must use managed HTTPS before requesting a certificate', 409);
-    if (domain.state !== 'active' || domain.appliedRevision !== domain.desiredRevision) throw new CertificateRegistryError('http_domain_not_active', 'Current domain revision must be active before HTTP-01 certificate issuance', 409);
+    const intent = await resolveCertificateIssueIntent({
+      body: request.body,
+      domain,
+      dnsHostingRegistry,
+      dnsProviderCredentialRegistry,
+      localServerId,
+    });
+    if (intent.challenge.type === 'http-01' && (domain.state !== 'active' || domain.appliedRevision !== domain.desiredRevision)) {
+      throw new CertificateRegistryError('http_domain_not_active', 'Current domain revision must be active before HTTP-01 certificate issuance', 409);
+    }
 
     const certificate = await certificateRegistry.createForDomain({
       domainId: domain.id,
       serverId: domain.serverId,
       domains: [domain.primaryDomain, ...domain.aliases],
+      certificateNames: intent.certificateNames,
+      challenge: intent.challenge,
       email: request.body?.email,
       staging: request.body?.staging === true,
       replaceExisting: domain.certificateId === null,
@@ -551,7 +628,12 @@ export function createApp({
         serverId: domain.serverId,
         type: 'ssl.issue',
         operation: OPERATIONS.SSL_ISSUE,
-        payload: { domains: certificate.domains, email: certificate.email, staging: certificate.staging },
+        payload: {
+          domains: certificate.certificateNames,
+          email: certificate.email,
+          staging: certificate.staging,
+          ...(certificate.challenge.type === 'dns-01' ? { challenge: certificate.challenge } : {}),
+        },
         resourceType: 'certificate',
         resourceId: certificate.id,
       });
@@ -575,14 +657,33 @@ export function createApp({
     if (certificate.source !== 'acme' || certificate.renewalMode !== 'automatic') {
       throw new CertificateRegistryError('certificate_not_renewable', 'Only managed ACME certificates can be renewed', 409);
     }
+    if (certificate.challenge?.type === 'dns-01') {
+      if (!localServerId || certificate.serverId !== localServerId || !dnsProviderCredentialRegistry) {
+        throw new CertificateRegistryError('local_dns_challenge_required', 'DNS certificate renewal requires this local managed Server', 409);
+      }
+      const credential = await dnsProviderCredentialRegistry.getForZone(certificate.challenge.dnsZoneId);
+      if (!credential?.configured || credential.id !== certificate.challenge.credentialId
+        || credential.provider !== certificate.challenge.provider) {
+        throw new CertificateRegistryError('dns_provider_credential_required', 'The certificate DNS provider credential is unavailable', 409);
+      }
+    }
     if (certificate.state !== 'active') throw new CertificateRegistryError('certificate_not_active', 'Only active certificates can be renewed', 409);
     await ensureResourceJobIdle(jobRegistry, 'certificate', certificate.id);
-    const dryRun = request.body?.dryRun === true;
+    if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)
+      || Object.keys(request.body).some((field) => field !== 'dryRun')
+      || (request.body.dryRun !== undefined && typeof request.body.dryRun !== 'boolean')) {
+      throw new CertificateRegistryError('invalid_certificate_renewal_request', 'Certificate renewal request fields are invalid');
+    }
+    const dryRun = request.body.dryRun === true;
     const job = await jobRegistry.enqueue({
       serverId: certificate.serverId,
       type: 'ssl.renew',
       operation: OPERATIONS.SSL_RENEW,
-      payload: { certName: certificate.certName, dryRun },
+      payload: {
+        certName: certificate.certName,
+        dryRun,
+        ...(certificate.challenge?.type === 'dns-01' ? { challenge: certificate.challenge } : {}),
+      },
       resourceType: 'certificate',
       resourceId: certificate.id,
     });

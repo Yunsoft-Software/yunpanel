@@ -10,7 +10,7 @@ import {
   normalizeStaticApplicationSpec,
 } from '@yunpanel/shared';
 
-export const AGENT_PROTOCOL_VERSION = 4;
+export const AGENT_PROTOCOL_VERSION = 5;
 
 export const MANAGED_SERVICE_IDS = Object.freeze([
   'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
@@ -76,7 +76,7 @@ export function isReadOnlyOperation(operation) {
   return READ_ONLY_OPERATIONS.includes(operation);
 }
 
-function validateDomainList(domains, fieldName, errors) {
+function validateDomainList(domains, fieldName, errors, { allowWildcard = false } = {}) {
   if (!Array.isArray(domains) || domains.length < 1 || domains.length > 21) {
     errors.push(`${fieldName} must contain between 1 and 21 domains`);
     return;
@@ -84,13 +84,42 @@ function validateDomainList(domains, fieldName, errors) {
 
   const normalized = new Set();
   for (const domain of domains) {
-    if (typeof domain !== 'string' || !DOMAIN_PATTERN.test(domain) || domain.includes('*')) {
+    const wildcard = typeof domain === 'string' && domain.startsWith('*.');
+    const hostname = wildcard ? domain.slice(2) : domain;
+    if (typeof domain !== 'string' || !DOMAIN_PATTERN.test(hostname)
+      || (wildcard && !allowWildcard) || (!wildcard && domain.includes('*'))) {
       errors.push(`${fieldName} contains an invalid domain`);
       continue;
     }
     if (normalized.has(domain)) errors.push(`${fieldName} contains duplicate domains`);
     normalized.add(domain);
   }
+  if (typeof domains[0] === 'string' && domains[0].startsWith('*.')) errors.push(`${fieldName} first domain cannot be a wildcard`);
+}
+
+function validateAcmeChallenge(value, operation, errors) {
+  if (value === undefined) return false;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    errors.push(`${operation} challenge is invalid`);
+    return false;
+  }
+  if (value.type === 'http-01' && Object.keys(value).length === 1) return false;
+  const allowed = new Set(['type', 'provider', 'credentialId', 'dnsZoneId', 'propagationSeconds']);
+  if (value.type !== 'dns-01' || value.provider !== 'cloudflare'
+    || Object.keys(value).length !== allowed.size || Object.keys(value).some((key) => !allowed.has(key))) {
+    errors.push(`${operation} DNS challenge is invalid`);
+    return false;
+  }
+  try {
+    assertUuid(value.credentialId, 'credentialId');
+    assertUuid(value.dnsZoneId, 'dnsZoneId');
+  } catch {
+    errors.push(`${operation} DNS challenge identities are invalid`);
+  }
+  if (!Number.isInteger(value.propagationSeconds) || value.propagationSeconds < 10 || value.propagationSeconds > 120) {
+    errors.push(`${operation} DNS propagation seconds are invalid`);
+  }
+  return true;
 }
 
 function validateSafePath(value, fieldName, errors) {
@@ -184,12 +213,16 @@ function validateMutationPayload(operation, payload, errors) {
   }
 
   if (operation === OPERATIONS.SSL_ISSUE) {
-    validateDomainList(payload.domains, 'ssl.issue domains', errors);
+    rejectUnexpectedKeys(payload, ['domains', 'email', 'staging', 'challenge'], operation, errors);
+    const dnsChallenge = validateAcmeChallenge(payload.challenge, operation, errors);
+    validateDomainList(payload.domains, 'ssl.issue domains', errors, { allowWildcard: dnsChallenge });
     if (typeof payload.email !== 'string' || payload.email.length > 254 || !EMAIL_PATTERN.test(payload.email)) errors.push('ssl.issue email is invalid');
     if (payload.staging !== undefined && typeof payload.staging !== 'boolean') errors.push('ssl.issue staging must be boolean');
   }
 
   if (operation === OPERATIONS.SSL_RENEW) {
+    rejectUnexpectedKeys(payload, ['certName', 'dryRun', 'challenge'], operation, errors);
+    validateAcmeChallenge(payload.challenge, operation, errors);
     if (typeof payload.certName !== 'string' || !DOMAIN_PATTERN.test(payload.certName) || payload.certName.includes('*')) errors.push('ssl.renew certName is invalid');
     if (payload.dryRun !== undefined && typeof payload.dryRun !== 'boolean') errors.push('ssl.renew dryRun must be boolean');
   }

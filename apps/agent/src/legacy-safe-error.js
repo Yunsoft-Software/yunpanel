@@ -29,6 +29,8 @@ const messages = Object.freeze({
   invalid_acme_email: 'The ACME account email is invalid.',
   certificate_not_found: 'Issued certificate metadata could not be read.',
   invalid_certificate_file: 'The issued certificate file is invalid.',
+  invalid_private_key_file: 'The issued certificate private key is invalid.',
+  certificate_private_key_mismatch: 'The issued certificate and private key do not match.',
   certbot_not_installed: 'Certbot is not installed on the managed server.',
   certbot_failed: 'The Certbot operation failed.',
   invalid_static_deployment: 'The static deployment specification is invalid.',

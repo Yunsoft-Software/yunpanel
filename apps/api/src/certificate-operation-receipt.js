@@ -33,8 +33,14 @@ function domains(value) {
     throw new CertificateOperationReceiptError('certificate_receipt_domains_invalid', 'Certificate receipt domains are invalid');
   }
   try {
-    const normalized = normalizeDomainSet(value[0], value.slice(1));
-    return [normalized.primary, ...normalized.aliases];
+    const normalized = value.map((domain) => {
+      if (typeof domain !== 'string') throw new Error('invalid');
+      if (domain.startsWith('*.')) return `*.${normalizeDomainSet(domain.slice(2), []).primary}`;
+      if (domain.includes('*')) throw new Error('invalid');
+      return normalizeDomainSet(domain, []).primary;
+    });
+    if (new Set(normalized).size !== normalized.length || normalized[0].startsWith('*.')) throw new Error('invalid');
+    return normalized;
   } catch {
     throw new CertificateOperationReceiptError('certificate_receipt_domains_invalid', 'Certificate receipt domains are invalid');
   }

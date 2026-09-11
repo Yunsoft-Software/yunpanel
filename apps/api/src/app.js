@@ -101,6 +101,8 @@ export function createApp({
     applicationRegistry,
     environment,
     localServerId,
+    dnsHostingRegistry,
+    dnsProviderCredentialRegistry,
   });
   const app = express();
   const files = siteFileManager ?? createSiteFileManager({ websiteRegistry, localServerId });

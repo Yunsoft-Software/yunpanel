@@ -6,6 +6,7 @@ const DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 export async function runCertificateRenewalSweep({
   certificateRegistry,
   jobRegistry,
+  dnsProviderCredentialRegistry = null,
   now = () => Date.now(),
   renewBeforeMs = DEFAULT_RENEW_BEFORE_MS,
 } = {}) {
@@ -21,6 +22,14 @@ export async function runCertificateRenewalSweep({
 
   for (const certificate of certificates) {
     if (certificate.state !== 'active' || certificate.staging || certificate.renewalMode !== 'automatic' || !certificate.validTo) continue;
+    if (certificate.challenge?.type === 'dns-01') {
+      if (!dnsProviderCredentialRegistry || typeof dnsProviderCredentialRegistry.getForZone !== 'function') continue;
+      let credential;
+      try { credential = await dnsProviderCredentialRegistry.getForZone(certificate.challenge.dnsZoneId); }
+      catch { continue; }
+      if (!credential?.configured || credential.id !== certificate.challenge.credentialId
+        || credential.provider !== certificate.challenge.provider) continue;
+    }
     const expiresAt = Date.parse(certificate.validTo);
     if (!Number.isFinite(expiresAt) || expiresAt > threshold) continue;
 
@@ -37,7 +46,11 @@ export async function runCertificateRenewalSweep({
       serverId: certificate.serverId,
       type: 'ssl.renew',
       operation: OPERATIONS.SSL_RENEW,
-      payload: { certName: certificate.certName, dryRun: false },
+      payload: {
+        certName: certificate.certName,
+        dryRun: false,
+        ...(certificate.challenge?.type === 'dns-01' ? { challenge: certificate.challenge } : {}),
+      },
       resourceType: 'certificate',
       resourceId: certificate.id,
     });
@@ -51,6 +64,7 @@ export async function runCertificateRenewalSweep({
 export function startCertificateRenewalScheduler({
   certificateRegistry,
   jobRegistry,
+  dnsProviderCredentialRegistry = null,
   intervalMs = DEFAULT_INTERVAL_MS,
   renewBeforeMs = DEFAULT_RENEW_BEFORE_MS,
   logger = console,
@@ -66,7 +80,9 @@ export function startCertificateRenewalScheduler({
     if (stopped || running) return [];
     running = true;
     try {
-      const jobs = await runCertificateRenewalSweep({ certificateRegistry, jobRegistry, renewBeforeMs });
+      const jobs = await runCertificateRenewalSweep({
+        certificateRegistry, jobRegistry, dnsProviderCredentialRegistry, renewBeforeMs,
+      });
       if (jobs.length > 0) logger.info(`[yunpanel-api] queued ${jobs.length} certificate renewal job(s)`);
       return jobs;
     } catch (error) {

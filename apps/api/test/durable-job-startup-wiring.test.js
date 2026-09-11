@@ -12,5 +12,5 @@ test('production API shares one durable job registry across HTTP, scheduler and 
   assert.equal((source.match(/createDurableJobRegistry\(/g) ?? []).length, 1);
   assert.match(source, /createHandler: \(\) => createApp\(\{[\s\S]*?\n\s*jobRegistry,/);
   assert.match(source, /startConfiguredLocalRuntime\(\{[\s\S]*?jobRegistry,/);
-  assert.match(source, /startCertificateRenewalScheduler\(\{ certificateRegistry, jobRegistry,/);
+  assert.match(source, /startCertificateRenewalScheduler\(\{[\s\S]*?\n\s*certificateRegistry,[\s\S]*?\n\s*jobRegistry,[\s\S]*?\n\s*dnsProviderCredentialRegistry,/);
 });

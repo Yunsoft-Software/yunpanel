@@ -14,6 +14,13 @@ test('known legacy host errors use authored safe diagnostics instead of raw mess
   });
 });
 
+test('certificate pair failures keep a bounded legacy diagnostic', () => {
+  const error = Object.assign(new Error('PRIVATE KEY MATERIAL'), { code: 'certificate_private_key_mismatch' });
+  const result = safeLegacyAgentError(error);
+  assert.equal(result.code, 'certificate_private_key_mismatch');
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE KEY MATERIAL/);
+});
+
 test('unknown or hostile error codes cannot escape into job or journal diagnostics', () => {
   const unknown = new Error('password=super-secret /root/private/key');
   unknown.code = 'password_super_secret';

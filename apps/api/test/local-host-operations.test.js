@@ -141,3 +141,30 @@ test('managed Node runtime inventory and install dispatch outside application se
   assert.deepEqual(environments, []);
   assert.deepEqual(calls, [['node-runtime.inspect'], ['node-runtime.install', 24]]);
 });
+
+test('DNS certificate operations materialize provider credentials only for host execution', async () => {
+  const challenge = {
+    type: 'dns-01', provider: 'cloudflare',
+    credentialId: '12345678-1234-4234-8234-123456789012',
+    dnsZoneId: '22345678-1234-4234-8234-123456789012', propagationSeconds: 30,
+  };
+  const payload = {
+    domains: ['example.com', '*.example.com'], email: 'owner@example.com', staging: true, challenge,
+  };
+  const credential = { id: challenge.credentialId, dnsZoneId: challenge.dnsZoneId, provider: 'cloudflare', token: 'private-token' };
+  let execution;
+  const operations = createLocalHostOperations({
+    loadDnsProviderCredential: async (id) => {
+      assert.equal(id, challenge.credentialId);
+      return credential;
+    },
+    acmeManager: {
+      issueCertificate: async (input, options) => { execution = { input, options }; return { status: 'validated' }; },
+      renewCertificate: async () => ({ status: 'validated' }),
+    },
+  });
+  await operations.executeOperation(OPERATIONS.SSL_ISSUE, payload);
+  assert.equal(execution.input, payload);
+  assert.deepEqual(execution.options, { dnsCredential: credential });
+  assert.equal(Object.hasOwn(payload, 'dnsCredential'), false);
+});

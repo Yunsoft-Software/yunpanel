@@ -152,6 +152,25 @@ test('validates certificate issue and renewal payloads', () => {
   });
   assert.equal(wildcardIssue.ok, false);
 
+  const dnsWildcardIssue = validateOperationEnvelope({
+    id: 'request-0006b',
+    operation: OPERATIONS.SSL_ISSUE,
+    payload: {
+      domains: ['example.com', '*.example.com'],
+      email: 'admin@example.com',
+      staging: true,
+      challenge: {
+        type: 'dns-01',
+        provider: 'cloudflare',
+        credentialId: '12345678-1234-4234-8234-123456789012',
+        dnsZoneId: '22345678-1234-4234-8234-123456789012',
+        propagationSeconds: 30,
+      },
+    },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(dnsWildcardIssue.ok, true);
+
   const badEmail = validateOperationEnvelope({
     id: 'request-0007',
     operation: OPERATIONS.SSL_ISSUE,

@@ -129,7 +129,7 @@ try {
     console.log(`Master-key data rotation complete. Backup: ${path.resolve(backupDirectory)}`);
     console.log(`Rotated ${result.counts.mfa} active MFA, ${result.counts.mfaPending} pending MFA, ${result.counts.applicationSecrets} application secret and ${result.counts.dnsProviderSecrets} DNS provider secret record(s).`);
     console.log(`Next key ${next.created ? 'created' : 'read'} at ${next.path}; its contents were not printed.`);
-    console.log('Replace YUNPANEL_SECRET_MASTER_KEY in /etc/yunpanel/control-plane/api.env with that key, then start yunpanel-api.service and validate MFA + application secrets.');
+    console.log('Replace YUNPANEL_SECRET_MASTER_KEY in /etc/yunpanel/control-plane/api.env with that key, then start yunpanel-api.service and validate MFA, application secrets and DNS provider credentials.');
     console.log(`If validation fails: stop the API, restore the previous key configuration, then run rollback with --backup-dir ${path.resolve(backupDirectory)}.`);
   }
 } catch (error) {

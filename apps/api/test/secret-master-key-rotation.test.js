@@ -116,7 +116,7 @@ function rollbackOptions(state, backupDirectory, now) {
   };
 }
 
-test('rotation rewraps application and MFA secrets together and rollback restores the old key', async (t) => {
+test('rotation rewraps application, MFA and DNS-provider secrets together and rollback restores the old key', async (t) => {
   const state = await fixture(t);
   const backupDirectory = path.join(state.directory, 'backup');
   const manifest = await rotateSecretMasterKey({ ...state, backupDirectory, now: () => 1_800_000_000_000 });
@@ -159,7 +159,7 @@ test('rotation rewraps application and MFA secrets together and rollback restore
     'cloudflare_rotation_private_token_1234');
 });
 
-test('wrong current key fails before replacing either live store', async (t) => {
+test('wrong current key fails before replacing any live store', async (t) => {
   const state = await fixture(t);
   const originalEnvironment = await readFile(state.applicationEnvironmentStorePath, 'utf8');
   const backupDirectory = path.join(state.directory, 'wrong-key-backup');

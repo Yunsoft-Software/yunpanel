@@ -17,7 +17,7 @@ test('API local executor and renewal scheduler share the audited registry', asyn
   const source = await readFile(indexUrl, 'utf8');
   assert.match(source, /createHandler: \(\) => createApp\(\{[\s\S]*?\n\s*jobRegistry,[\s\S]*?\n\s*applicationEnvironmentRegistry,/);
   assert.match(source, /startConfiguredLocalRuntime\(\{[\s\S]*\n\s*jobRegistry,[\s\S]*\n\s*domainRegistry,/);
-  assert.match(source, /startCertificateRenewalScheduler\(\{ certificateRegistry, jobRegistry,/);
+  assert.match(source, /startCertificateRenewalScheduler\(\{[\s\S]*?\n\s*certificateRegistry,[\s\S]*?\n\s*jobRegistry,[\s\S]*?\n\s*dnsProviderCredentialRegistry,/);
 });
 
 test('production audit fault logging is bounded to safe phase and job identity', async () => {

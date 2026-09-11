@@ -19,6 +19,11 @@ test('Node, environment and managed-service diagnostics use authored messages on
     'invalid_environment_bundle',
     'managed_service_install_failed',
     'managed_service_conflict',
+    'invalid_acme_challenge',
+    'invalid_dns_provider_credential',
+    'dns_provider_credential_unavailable',
+    'dns_provider_credential_not_found',
+    'certificate_private_key_mismatch',
   ]) {
     const result = safeLocalOperationError({
       code,

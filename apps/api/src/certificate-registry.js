@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeDomainSet } from '@yunpanel/shared';
 
-const STORE_VERSION = 2;
+const STORE_VERSION = 3;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CERT_STATES = new Set(['pending', 'validating', 'validated', 'issuing', 'active', 'renewing', 'superseded', 'error']);
@@ -48,6 +48,54 @@ function normalizeDomains(domains) {
   }
 }
 
+function normalizeCertificateNames(domains, challenge) {
+  if (!Array.isArray(domains) || domains.length < 1 || domains.length > 21) {
+    throw new CertificateRegistryError('invalid_certificate_domains', 'Certificate names are invalid');
+  }
+  let values;
+  try {
+    values = domains.map((domain) => {
+      if (typeof domain !== 'string') throw new Error('invalid');
+      if (domain.startsWith('*.')) return `*.${normalizeDomainSet(domain.slice(2), []).primary}`;
+      if (domain.includes('*')) throw new Error('invalid');
+      return normalizeDomainSet(domain, []).primary;
+    });
+  } catch {
+    throw new CertificateRegistryError('invalid_certificate_domains', 'Certificate names are invalid');
+  }
+  if (new Set(values).size !== values.length || values[0].startsWith('*.')) {
+    throw new CertificateRegistryError('invalid_certificate_domains', 'Certificate names are invalid');
+  }
+  if (values.some((domain) => domain.startsWith('*.')) && challenge.type !== 'dns-01') {
+    throw new CertificateRegistryError('wildcard_not_supported', 'Wildcard certificates require DNS-01', 409);
+  }
+  return values;
+}
+
+function normalizeChallenge(value, { custom = false } = {}) {
+  if (custom) {
+    if (value !== null && value !== undefined) throw new CertificateRegistryError('invalid_certificate_challenge', 'Custom certificate challenge must be null');
+    return null;
+  }
+  if (value === undefined || value === null) return Object.freeze({ type: 'http-01' });
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CertificateRegistryError('invalid_certificate_challenge', 'Certificate challenge is invalid');
+  }
+  if (value.type === 'http-01' && Object.keys(value).length === 1) return Object.freeze({ type: 'http-01' });
+  const fields = new Set(['type', 'provider', 'credentialId', 'dnsZoneId', 'propagationSeconds']);
+  if (value.type !== 'dns-01' || value.provider !== 'cloudflare'
+    || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
+    || typeof value.credentialId !== 'string' || !UUID_PATTERN.test(value.credentialId)
+    || typeof value.dnsZoneId !== 'string' || !UUID_PATTERN.test(value.dnsZoneId)
+    || !Number.isInteger(value.propagationSeconds) || value.propagationSeconds < 10 || value.propagationSeconds > 120) {
+    throw new CertificateRegistryError('invalid_certificate_challenge', 'DNS certificate challenge is invalid');
+  }
+  return Object.freeze({
+    type: 'dns-01', provider: 'cloudflare', credentialId: value.credentialId.toLowerCase(),
+    dnsZoneId: value.dnsZoneId.toLowerCase(), propagationSeconds: value.propagationSeconds,
+  });
+}
+
 function validateEmail(email) {
   if (typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new CertificateRegistryError('invalid_acme_email', 'ACME account email is invalid');
@@ -90,8 +138,8 @@ function assertResultIdentity(certificate, result) {
     throw new CertificateRegistryError('certificate_name_mismatch', 'Certificate name does not match desired state', 409);
   }
 
-  const returnedDomains = normalizeDomains(result.domains ?? certificate.domains);
-  if (returnedDomains.join('\n') !== certificate.domains.join('\n')) {
+  const returnedDomains = normalizeCertificateNames(result.domains ?? certificate.certificateNames, certificate.challenge);
+  if (returnedDomains.join('\n') !== certificate.certificateNames.join('\n')) {
     throw new CertificateRegistryError('certificate_domain_mismatch', 'Certificate domains do not match desired state', 409);
   }
 }
@@ -103,6 +151,10 @@ function hydrateCertificate(certificate, sourceVersion, roots) {
     certificate.materialDigest = null;
     certificate.lastImportedAt = null;
   }
+  if (sourceVersion < 3) {
+    certificate.certificateNames = [...certificate.domains];
+    certificate.challenge = certificate.source === 'acme' ? { type: 'http-01' } : null;
+  }
   if (!CERT_STATES.has(certificate.state) || !CERTIFICATE_SOURCES.has(certificate.source) || !RENEWAL_MODES.has(certificate.renewalMode)
     || (certificate.source === 'acme' && certificate.renewalMode !== 'automatic')
     || (certificate.source === 'custom' && certificate.renewalMode !== 'manual')) {
@@ -111,6 +163,8 @@ function hydrateCertificate(certificate, sourceVersion, roots) {
   if (certificate.source === 'custom' && (typeof certificate.id !== 'string' || !UUID_PATTERN.test(certificate.id))) {
     throw new CertificateRegistryError('invalid_certificate_state', 'Persisted custom certificate identity is invalid', 409);
   }
+  certificate.challenge = normalizeChallenge(certificate.challenge, { custom: certificate.source === 'custom' });
+  certificate.certificateNames = normalizeCertificateNames(certificate.certificateNames, certificate.challenge ?? { type: 'custom' });
   if (certificate.state !== 'pending' && certificate.state !== 'validating' && certificate.state !== 'validated'
     && certificate.state !== 'issuing' && certificate.state !== 'error') {
     validateCertificatePath(certificate, certificate.certificatePath, 'cert.pem', roots);
@@ -153,7 +207,7 @@ export function createCertificateRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.certificates)) {
+        if (![1, 2, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.certificates)) {
           throw new Error('unsupported or invalid certificate registry state');
         }
         parsed.certificates.forEach((certificate) => hydrateCertificate(certificate, parsed.version, roots));
@@ -170,13 +224,24 @@ export function createCertificateRegistry({
     if (!initialized) await init();
   }
 
-  async function createForDomain({ domainId, serverId, domains, email, staging = false, replaceExisting = false }) {
+  async function createForDomain({
+    domainId,
+    serverId,
+    domains,
+    certificateNames = domains,
+    challenge: requestedChallenge,
+    email,
+    staging = false,
+    replaceExisting = false,
+  }) {
     await ensureInitialized();
     if (typeof domainId !== 'string' || !domainId) throw new CertificateRegistryError('invalid_domain', 'domainId is required');
     if (typeof serverId !== 'string' || !serverId) throw new CertificateRegistryError('invalid_server', 'serverId is required');
 
     const normalizedDomains = normalizeDomains(domains);
-    const certName = normalizedDomains[0];
+    const challenge = normalizeChallenge(requestedChallenge);
+    const normalizedCertificateNames = normalizeCertificateNames(certificateNames, challenge);
+    const certName = normalizedCertificateNames[0];
     const isValidation = Boolean(staging);
     if (typeof replaceExisting !== 'boolean') {
       throw new CertificateRegistryError('invalid_certificate_replacement', 'Certificate replacement policy is invalid');
@@ -205,6 +270,8 @@ export function createCertificateRegistry({
       serverId,
       certName,
       domains: normalizedDomains,
+      certificateNames: normalizedCertificateNames,
+      challenge,
       email: validateEmail(email),
       staging: isValidation,
       source: 'acme',
@@ -341,6 +408,8 @@ export function createCertificateRegistry({
       serverId,
       certName: normalizedDomains[0],
       domains: normalizedDomains,
+      certificateNames: normalizedDomains,
+      challenge: null,
       email: null,
       staging: false,
       source: 'custom',

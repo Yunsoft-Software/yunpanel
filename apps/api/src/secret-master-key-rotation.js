@@ -194,7 +194,7 @@ async function restoreFileFromBackup(backupPath, targetPath) {
 }
 
 /**
- * Offline, rollback-capable rotation across both stores that consume
+ * Offline, rollback-capable rotation across every persisted secret surface that consumes
  * YUNPANEL_SECRET_MASTER_KEY. The caller must keep the API stopped for the whole call.
  */
 export async function rotateSecretMasterKey({

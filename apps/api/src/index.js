@@ -201,13 +201,20 @@ const localRuntime = await startConfiguredLocalRuntime({
   certificateRegistry,
   applicationRegistry,
   applicationEnvironmentRegistry,
+  dnsProviderCredentialRegistry,
   jobLogStore,
   inspectServices: inspectAllowlistedServices,
   inspectDocker,
   inspectNginx,
   onError: reportLocalExecutorFault,
 });
-const renewalScheduler = startCertificateRenewalScheduler({ certificateRegistry, jobRegistry, intervalMs: certificateRenewalIntervalMs, renewBeforeMs: certificateRenewBeforeMs });
+const renewalScheduler = startCertificateRenewalScheduler({
+  certificateRegistry,
+  jobRegistry,
+  dnsProviderCredentialRegistry,
+  intervalMs: certificateRenewalIntervalMs,
+  renewBeforeMs: certificateRenewBeforeMs,
+});
 const server = http.createServer({ headersTimeout: 15_000, requestTimeout: 30_000 }, listener);
 const terminalAuthenticator = createLiveConnectionAuthenticator({
   store: authStore,

@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
@@ -152,7 +152,8 @@ export function createDnsProviderCredentialRegistry({
     const directory = path.dirname(filePath);
     const temporaryPath = filePath + '.' + process.pid + '.tmp';
     writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true });
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      await chmod(directory, 0o700);
       await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
       await rename(temporaryPath, filePath);
     });

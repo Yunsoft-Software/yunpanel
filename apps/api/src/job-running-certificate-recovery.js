@@ -39,6 +39,10 @@ function sameStrings(left, right) {
     && left.every((value, index) => typeof value === 'string' && value === right[index]);
 }
 
+function persistedChallenge(certificate) {
+  return certificate?.challenge?.type === 'dns-01' ? certificate.challenge : null;
+}
+
 function assertContext(context, job, candidate, identity) {
   if (!context || context.id !== identity.jobId || context.serverId !== identity.serverId || context.status !== 'running'
     || context.operation !== job.operation || context.operation !== candidate.operation
@@ -59,6 +63,7 @@ function assertContext(context, job, candidate, identity) {
       domains: [...context.payload.domains],
       email: context.payload.email,
       staging: context.payload.staging,
+      challenge: context.payload.challenge ?? null,
       dryRun: null,
       expectedState: context.payload.staging ? 'validating' : 'issuing',
       requiresLiveCertificate: !context.payload.staging,
@@ -78,6 +83,7 @@ function assertContext(context, job, candidate, identity) {
       email: null,
       staging: null,
       dryRun: context.payload.dryRun,
+      challenge: context.payload.challenge ?? null,
       expectedState: context.payload.dryRun ? 'active' : 'renewing',
       requiresLiveCertificate: !context.payload.dryRun,
     };
@@ -96,11 +102,13 @@ async function requireCertificateIntent(certificateRegistry, serverId, intent) {
   }
 
   if (intent.operation === OPERATIONS.SSL_ISSUE) {
-    if (!sameStrings(certificate.domains, intent.domains) || certificate.email !== intent.email.toLowerCase()
-      || certificate.staging !== intent.staging) {
+    if (!sameStrings(certificate.certificateNames ?? certificate.domains, intent.domains)
+      || JSON.stringify(persistedChallenge(certificate)) !== JSON.stringify(intent.challenge)
+      || certificate.email !== intent.email.toLowerCase() || certificate.staging !== intent.staging) {
       throw new JobRunningCertificateRecoveryError('job_certificate_recovery_certificate_mismatch', 'Certificate issue desired state no longer matches the running operation');
     }
-  } else if (certificate.staging !== false) {
+  } else if (certificate.staging !== false
+    || JSON.stringify(persistedChallenge(certificate)) !== JSON.stringify(intent.challenge)) {
     throw new JobRunningCertificateRecoveryError('job_certificate_recovery_certificate_mismatch', 'Staging certificate records cannot be renewed');
   }
   return certificate;

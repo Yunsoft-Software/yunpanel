@@ -67,6 +67,7 @@ export function createLocalHostOperations({
   nodeStatusInspector = createNodeStatusInspector(),
   loadApplicationEnvironment = null,
   loadDeploymentCredential = null,
+  loadDnsProviderCredential = null,
   jobLogStore = null,
 } = {}) {
   if (loadApplicationEnvironment !== null && typeof loadApplicationEnvironment !== 'function') {
@@ -74,6 +75,9 @@ export function createLocalHostOperations({
   }
   if (loadDeploymentCredential !== null && typeof loadDeploymentCredential !== 'function') {
     throw new Error('loadDeploymentCredential must be a function when configured');
+  }
+  if (loadDnsProviderCredential !== null && typeof loadDnsProviderCredential !== 'function') {
+    throw new Error('loadDnsProviderCredential must be a function when configured');
   }
   if (jobLogStore !== null && typeof jobLogStore.record !== 'function') {
     throw new Error('jobLogStore must provide record() when configured');
@@ -122,6 +126,17 @@ export function createLocalHostOperations({
     return result;
   }
 
+  async function executeCertificate(payload, execute) {
+    if (payload.challenge?.type !== 'dns-01') return execute(payload);
+    if (!loadDnsProviderCredential) {
+      const error = new Error('DNS provider credential loader is unavailable');
+      error.code = 'dns_provider_credential_unavailable';
+      throw error;
+    }
+    const dnsCredential = await loadDnsProviderCredential(payload.challenge.credentialId);
+    return execute(payload, { dnsCredential });
+  }
+
   const handlers = new Map([
     [OPERATIONS.SYSTEM_PACKAGES_INSPECT, () => packageManager.inspect()],
     [OPERATIONS.SYSTEM_SERVICES_INSPECT, (payload) => managedServiceManager.inspect(payload.serviceId ?? null)],
@@ -133,8 +148,8 @@ export function createLocalHostOperations({
     [OPERATIONS.DATABASE_DELETE, (payload) => databaseManager.dropDatabase(payload.name)],
     [OPERATIONS.DOMAIN_STAGE, (payload) => nginxManager.stageDomain(payload)],
     [OPERATIONS.DOMAIN_ACTIVATE, (payload) => nginxManager.activateDomain(payload)],
-    [OPERATIONS.SSL_ISSUE, (payload) => acmeManager.issueCertificate(payload)],
-    [OPERATIONS.SSL_RENEW, (payload) => acmeManager.renewCertificate(payload)],
+    [OPERATIONS.SSL_ISSUE, (payload) => executeCertificate(payload, (input, execution) => acmeManager.issueCertificate(input, execution))],
+    [OPERATIONS.SSL_RENEW, (payload) => executeCertificate(payload, (input, execution) => acmeManager.renewCertificate(input, execution))],
     [OPERATIONS.APP_STATIC_DEPLOY, (payload) => deployStaticWithReceipt(payload)],
     [OPERATIONS.APP_STATIC_ROLLBACK, (payload) => staticRollbackManager.rollbackStatic(payload)],
     [OPERATIONS.APP_NODE_STATUS, (payload) => nodeStatusInspector.inspectNodeStatus(payload)],
