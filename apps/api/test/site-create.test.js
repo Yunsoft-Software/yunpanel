@@ -227,6 +227,7 @@ test('existing Docker workload becomes an explicit Website runtime without claim
     upstreamHost: '127.0.0.1', upstreamPort: 8080, websocket: true,
   });
   assert.equal(preview.steps.dockerWorkloadReady, true);
+  assert.equal(preview.lifecycle.containersChanged, false);
 
   const created = await apply(input, state, preview);
   assert.equal(created.application, null);

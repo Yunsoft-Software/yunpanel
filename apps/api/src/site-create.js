@@ -527,7 +527,12 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
       primaryDomainReady: primaryReady,
       wwwDomainReady: normalized.wwwMode === 'independent' ? wwwReady : null,
     }),
-    lifecycle: Object.freeze({ dnsPublished: false, certificateIssued: false, mailDomainCreated: false }),
+    lifecycle: Object.freeze({
+      dnsPublished: false,
+      certificateIssued: false,
+      mailDomainCreated: false,
+      ...(normalized.source.kind === 'existing_docker' ? { containersChanged: false } : {}),
+    }),
     plan: Object.freeze(planCore.resources),
   });
 }
