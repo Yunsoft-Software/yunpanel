@@ -14,6 +14,7 @@ class Response extends EventEmitter {
 test('current management mutation routes map to bounded action and resource identities', () => {
   const cases = [
     ['POST', '/api/applications', 'application.create', 'application', 'new'],
+    ['POST', '/api/terminal/capabilities', 'terminal.capability.issued', 'terminal', 'new'],
     ['POST', '/api/applications/app-1/deploy', 'application.deploy', 'application', 'app-1'],
     ['POST', '/api/applications/app-1/rollback', 'application.rollback', 'application', 'app-1'],
     ['POST', '/api/applications/app-1/restart', 'application.restart', 'application', 'app-1'],

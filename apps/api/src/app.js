@@ -23,6 +23,8 @@ import { mountResourceImpactRoutes } from './resource-impact-http.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 import { SiteCreateError } from './site-create.js';
 import { mountSiteCreateRoutes } from './site-create-http.js';
+import { mountTerminalCapabilityRoutes } from './terminal-capability-http.js';
+import { TerminalCapabilityError } from './terminal-capability-registry.js';
 import { mountWebsiteRoutes } from './website-http.js';
 import { WebsiteMigrationBindError } from './website-migration-bind.js';
 import { WebsiteMigrationCreateError } from './website-migration-create.js';
@@ -66,6 +68,7 @@ export function createApp({
   nginxLogReader = null,
   jobLogStore = null,
   localServerId = null,
+  terminalCapabilityRegistry = null,
   ...options
 } = {}) {
   const core = createCoreApp({ ...options, registry, domainRegistry, jobRegistry, certificateRegistry, applicationRegistry, environment });
@@ -112,6 +115,9 @@ export function createApp({
   mountLogRoutes(app, {
     registry, applicationRegistry, jobRegistry, journalLogReader, nginxLogReader, jobLogStore, localServerId,
   });
+  mountTerminalCapabilityRoutes(app, {
+    terminalCapabilityRegistry, serverRegistry: registry, websiteRegistry, localServerId,
+  });
   app.use(core);
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
@@ -128,6 +134,7 @@ export function createApp({
       || error instanceof NodeRuntimeHttpError
       || error instanceof ResourceImpactError
       || error instanceof SiteCreateError
+      || error instanceof TerminalCapabilityError
       || error instanceof WebsiteMigrationBindError
       || error instanceof WebsiteMigrationCreateError
       || error instanceof WebsiteMigrationLedgerError

@@ -20,9 +20,11 @@ import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
 import { createJobLogStore } from './job-log-store.js';
 import { createGithubWebhookHandler } from './github-webhook-http.js';
+import { createLiveSessionRegistry } from './live-session-registry.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createServerRegistry } from './server-registry.js';
+import { createTerminalCapabilityRegistry } from './terminal-capability-registry.js';
 import { createWebsiteMigrationLedger } from './website-migration-ledger.js';
 import { createWebsiteMigrationPolicyStore } from './website-migration-policy.js';
 import { createWebsiteRegistry } from './website-registry.js';
@@ -125,7 +127,9 @@ const nginxLogReader = createNginxLogReader();
 const localServerId = process.env.YUNPANEL_LOCAL_SERVER_ID?.trim() || null;
 
 await prepareRootAuthStateOwnership({ filePath: authStorePath });
-const authStore = createAuthStore({ filePath: authStorePath });
+const liveSessions = createLiveSessionRegistry();
+const authStore = createAuthStore({ filePath: authStorePath, liveSessions });
+const terminalCapabilityRegistry = createTerminalCapabilityRegistry({ liveSessions });
 const jobRegistry = createAuditedJobRegistry({
   registry: durableJobRegistry,
   audit: authStore.audit,
@@ -165,6 +169,7 @@ const listener = createAuthenticatedApi({
     nginxLogReader,
     jobLogStore,
     localServerId,
+    terminalCapabilityRegistry,
   }),
 });
 
@@ -226,6 +231,7 @@ async function shutdown(signal) {
     }
   }
   const serverCloseError = await closePromise;
+  liveSessions.closeAll();
   authStore.close();
   if (serverCloseError || runtimeStopFailed) {
     console.error('[yunpanel-api] shutdown incomplete');

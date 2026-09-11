@@ -31,6 +31,7 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/impact-preview$/)) && method === 'POST') return { action: 'website.impact.preview', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)$/)) && method === 'PATCH') return { action: 'website.update', resourceType: 'website', resourceId: parts[0] };
   if (method === 'POST' && pathname === '/api/applications') return { action: 'application.create', resourceType: 'application', resourceId: 'new' };
+  if (method === 'POST' && pathname === '/api/terminal/capabilities') return { action: 'terminal.capability.issued', resourceType: 'terminal', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/domains') return { action: 'domain.create', resourceType: 'domain', resourceId: 'new' };
   if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/deploy$/)) && method === 'POST') return { action: 'application.deploy', resourceType: 'application', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/rollback$/)) && method === 'POST') return { action: 'application.rollback', resourceType: 'application', resourceId: parts[0] };
