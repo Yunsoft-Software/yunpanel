@@ -32,7 +32,7 @@ test('Node restart is allowlisted as a control-plane mutation bound to the activ
   const result = validateOperationEnvelope({
     id: 'node-restart-request-0001',
     operation: OPERATIONS.APP_NODE_RESTART,
-    payload: { applicationId: APPLICATION_ID, releaseId: RELEASE_ID, runtime: runtime() },
+    payload: { applicationId: APPLICATION_ID, releaseId: RELEASE_ID, runtime: runtime(), environmentRevision: 3 },
     protocolVersion: AGENT_PROTOCOL_VERSION,
   });
   assert.equal(result.ok, true);
@@ -56,4 +56,13 @@ test('Node restart rejects invalid desired runtime or release state', () => {
   });
   assert.equal(invalidRelease.ok, false);
   assert.match(invalidRelease.errors.join(' '), /releaseId/);
+
+  const invalidEnvironmentRevision = validateOperationEnvelope({
+    id: 'node-restart-request-0004',
+    operation: OPERATIONS.APP_NODE_RESTART,
+    payload: { applicationId: APPLICATION_ID, releaseId: RELEASE_ID, runtime: runtime(), environmentRevision: -1 },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(invalidEnvironmentRevision.ok, false);
+  assert.match(invalidEnvironmentRevision.errors.join(' '), /environmentRevision/);
 });

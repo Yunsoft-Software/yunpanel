@@ -123,14 +123,17 @@ export async function fetchApplicationEnvironment({
   baseUrl,
   identity,
   applicationId,
+  environmentRevision = null,
   fetchImpl = fetch,
 }) {
+  const revisionQuery = environmentRevision === null ? '' : `?revision=${environmentRevision}`;
   const response = await fetchImpl(
-    `${baseUrl}/api/servers/${identity.serverId}/applications/${applicationId}/environment`,
+    `${baseUrl}/api/servers/${identity.serverId}/applications/${applicationId}/environment${revisionQuery}`,
     { headers: { authorization: agentAuthorization(identity) } },
   );
   const body = await readJsonResponse(response, 'Application environment');
   try {
+    if (environmentRevision !== null && body?.environmentRevision !== environmentRevision) throw new Error('revision mismatch');
     return normalizeApplicationEnvironmentBundle(body?.data ?? {});
   } catch {
     const error = new Error('Control plane returned an invalid application environment bundle');
@@ -209,6 +212,7 @@ export async function executeClaimedCommand({
         baseUrl,
         identity,
         applicationId: claimed.envelope.payload.applicationId,
+        environmentRevision: claimed.envelope.payload.environmentRevision ?? null,
         fetchImpl,
       });
       executionPayload = { ...executionPayload, environment };

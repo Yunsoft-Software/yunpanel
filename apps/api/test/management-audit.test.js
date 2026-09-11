@@ -23,6 +23,7 @@ test('current management mutation routes map to bounded action and resource iden
     ['DELETE', '/api/applications/app-1/environment/API_SECRET', 'application.environment.deleted', 'application', 'app-1'],
     ['PUT', '/api/applications/app-1/deployment-credential', 'application.git_credential.updated', 'application', 'app-1'],
     ['DELETE', '/api/applications/app-1/deployment-credential', 'application.git_credential.deleted', 'application', 'app-1'],
+    ['POST', '/api/applications/app-1/environment/import', 'application.environment.imported', 'application', 'app-1'],
     ['POST', '/api/domains', 'domain.create', 'domain', 'new'],
     ['POST', '/api/domains/domain-1/reparent-preview', 'domain.reparent.preview', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/reparent', 'domain.reparent', 'domain', 'domain-1'],
@@ -91,6 +92,22 @@ test('Git credential body never enters common audit metadata', () => {
   assert.deepEqual(events.map((event) => event.action), [
     'application.git_credential.updated', 'application.git_credential.updated',
   ]);
+});
+
+test('environment import content never enters common audit metadata', () => {
+  const events = [];
+  const response = new Response(200);
+  attachManagementAudit({
+    request: { method: 'POST', auth: { user: { id: 'owner-1' } }, body: { content: 'PRIVATE_TOKEN=do-not-log', mode: 'merge' } },
+    response,
+    pathname: '/api/applications/app-1/environment/import',
+    audit: { record(event) { events.push(event); } },
+  });
+  response.emit('finish');
+  assert.deepEqual(events.map((event) => event.action), [
+    'application.environment.imported', 'application.environment.imported',
+  ]);
+  assert.doesNotMatch(JSON.stringify(events), /PRIVATE_TOKEN|do-not-log|content|mode/);
 });
 
 test('audit acceptance failure blocks the management mutation boundary', () => {

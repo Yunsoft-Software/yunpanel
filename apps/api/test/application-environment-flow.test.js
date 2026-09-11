@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
+import { OPERATIONS } from '@yunpanel/protocol';
 import { createApp } from '../src/app.js';
 import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
 import { createApplicationRegistry } from '../src/application-registry.js';
@@ -119,15 +121,6 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
     );
     assert.deepEqual(agentCredential.payload.data, { type: 'github_token', token: deployToken });
 
-    const deploy = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, { method: 'POST' });
-    assert.equal(deploy.response.status, 202);
-    assert.equal(JSON.stringify(deploy.payload).includes(deployToken), false);
-    const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
-    });
-    assert.equal(claimed.response.status, 200);
-    assert.equal(JSON.stringify(claimed.payload).includes(deployToken), false);
-
     const wrongDelete = await requestJson(`${baseUrl}/api/applications/${application.id}/deployment-credential`, {
       method: 'DELETE', body: { confirmation: 'delete' },
     });
@@ -136,6 +129,121 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
       method: 'DELETE', body: { confirmation: `delete-deployment-credential:${application.id}` },
     });
     assert.equal(deleted.response.status, 204);
+    await requestJson(`${baseUrl}/api/applications/${application.id}/deployment-credential`, {
+      method: 'PUT', body: { type: 'github_token', token: deployToken },
+    });
+
+    const deploy = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, { method: 'POST' });
+    assert.equal(deploy.response.status, 202);
+    assert.equal(JSON.stringify(deploy.payload).includes(deployToken), false);
+    const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
+      token: enrolled.agentToken,
+    });
+    assert.equal(claimed.response.status, 200);
+    assert.equal(JSON.stringify(claimed.payload).includes(deployToken), false);
+    const blockedDelete = await requestJson(`${baseUrl}/api/applications/${application.id}/deployment-credential`, {
+      method: 'DELETE', body: { confirmation: `delete-deployment-credential:${application.id}` },
+    });
+    assert.equal(blockedDelete.response.status, 409);
+  });
+});
+
+test('dotenv import revision stays saved until the exact Node environment reaches a running release', async () => {
+  const serverRegistry = createServerRegistry();
+  const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'environment-revision-server' });
+  const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'environment-revision-host' });
+  const applicationRegistry = createApplicationRegistry({
+    serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
+  });
+  const application = await applicationRegistry.createNodeApplication({
+    serverId: enrolled.server.id,
+    name: 'Revision Node App',
+    repositoryUrl: 'https://github.com/example/revision-node-app',
+    runtime: { port: 3300 },
+  });
+  const releaseId = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
+  const serviceName = `yunpanel-node-${createHash('sha256').update(application.id).digest('hex').slice(0, 16)}.service`;
+  await applicationRegistry.markDeploying(application.id, releaseId);
+  await applicationRegistry.markDeployed(application.id, {
+    deploymentId: releaseId,
+    releaseId,
+    previousReleaseId: null,
+    commitSha: 'a'.repeat(40),
+    serviceName,
+    port: 3300,
+    healthPath: '/health',
+    healthy: true,
+  });
+  const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
+    masterKey: Buffer.alloc(32, 5),
+    applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
+  });
+  const jobRegistry = createJobRegistry();
+  const app = withPanelContext(createApp({
+    environment: 'production',
+    registry: serverRegistry,
+    applicationRegistry,
+    applicationEnvironmentRegistry,
+    jobRegistry,
+    domainRegistry: createDomainRegistry(),
+    certificateRegistry: createCertificateRegistry(),
+  }));
+
+  await withServer(app, async (baseUrl) => {
+    const imported = await requestJson(`${baseUrl}/api/applications/${application.id}/environment/import`, {
+      method: 'POST',
+      body: { content: 'API_TOKEN=private-value\nFEATURE=enabled', mode: 'merge', secret: true, expectedRevision: 0, confirmation: null },
+    });
+    assert.equal(imported.response.status, 200);
+    assert.equal(imported.payload.data.environment.savedRevision, 1);
+    assert.equal(imported.payload.data.environment.appliedToRunningProcess, false);
+    assert.equal(JSON.stringify(imported.payload).includes('private-value'), false);
+
+    const restart = await requestJson(`${baseUrl}/api/applications/${application.id}/restart`, { method: 'POST' });
+    assert.equal(restart.response.status, 202);
+    assert.equal(restart.payload.data.operation, OPERATIONS.APP_NODE_RESTART);
+
+    const blockedMutation = await requestJson(`${baseUrl}/api/applications/${application.id}/environment/AFTER_QUEUE`, {
+      method: 'PUT', body: { value: 'blocked', secret: false },
+    });
+    assert.equal(blockedMutation.response.status, 409);
+
+    const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, { token: enrolled.agentToken });
+    assert.equal(claimed.payload.data.envelope.payload.environmentRevision, 1);
+    const materialized = await requestJson(
+      `${baseUrl}/api/servers/${enrolled.server.id}/applications/${application.id}/environment?revision=1`,
+      { token: enrolled.agentToken },
+    );
+    assert.equal(materialized.payload.environmentRevision, 1);
+    assert.deepEqual(materialized.payload.data, { API_TOKEN: 'private-value', FEATURE: 'enabled' });
+    const staleMaterialization = await requestJson(
+      `${baseUrl}/api/servers/${enrolled.server.id}/applications/${application.id}/environment?revision=0`,
+      { token: enrolled.agentToken },
+    );
+    assert.equal(staleMaterialization.response.status, 409);
+
+    const completed = await requestJson(
+      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${claimed.payload.data.job.id}/result`,
+      {
+        method: 'POST', token: enrolled.agentToken,
+        body: { status: 'succeeded', result: { releaseId, serviceName, port: 3300, healthPath: '/health', healthy: true, restarted: true } },
+      },
+    );
+    assert.equal(completed.response.status, 200);
+    const applied = await requestJson(`${baseUrl}/api/applications/${application.id}/environment/status`);
+    assert.equal(applied.payload.data.savedRevision, 1);
+    assert.equal(applied.payload.data.appliedRevision, 1);
+    assert.equal(applied.payload.data.appliedReleaseId, releaseId);
+    assert.equal(applied.payload.data.appliedToRunningProcess, true);
+
+    const changed = await requestJson(`${baseUrl}/api/applications/${application.id}/environment/FEATURE`, {
+      method: 'PUT', body: { value: 'disabled', secret: false },
+    });
+    assert.equal(changed.response.status, 200);
+    const pending = await requestJson(`${baseUrl}/api/applications/${application.id}/environment/status`);
+    assert.equal(pending.payload.data.savedRevision, 2);
+    assert.equal(pending.payload.data.appliedRevision, 1);
+    assert.equal(pending.payload.data.state, 'saved_on_disk');
   });
 });
 

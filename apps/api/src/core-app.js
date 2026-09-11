@@ -55,6 +55,32 @@ function deploymentGitTarget(body, defaultBranch) {
   }
 }
 
+function requestedEnvironmentRevision(query) {
+  if (!query || Object.keys(query).length === 0) return null;
+  if (Object.keys(query).length !== 1 || typeof query.revision !== 'string' || !/^(?:0|[1-9][0-9]{0,14})$/.test(query.revision)) {
+    throw new ApplicationEnvironmentRegistryError('invalid_environment_revision', 'Expected environment revision query is invalid');
+  }
+  const revision = Number(query.revision);
+  if (!Number.isSafeInteger(revision)) throw new ApplicationEnvironmentRegistryError('invalid_environment_revision', 'Expected environment revision query is invalid');
+  return revision;
+}
+
+function environmentImportInput(body) {
+  const fields = ['confirmation', 'content', 'expectedRevision', 'mode', 'secret'];
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).length !== fields.length || Object.keys(body).some((key) => !fields.includes(key))) {
+    throw new ApplicationEnvironmentRegistryError('invalid_environment_import', 'Environment import request fields are invalid');
+  }
+  return body;
+}
+
+async function ensureEnvironmentMutable(application, jobRegistry) {
+  await ensureResourceJobIdle(jobRegistry, 'application', application.id);
+  if (application.activeDeploymentId) {
+    throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
+  }
+}
+
 export function createApp({
   environment = process.env.NODE_ENV,
   registry = createServerRegistry(),
@@ -143,7 +169,10 @@ export function createApp({
     if (!application || application.serverId !== request.params.serverId || application.type !== 'node') {
       throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     }
-    return response.json({ data: await applicationEnvironmentRegistry.materialize(application.id) });
+    const expectedRevision = requestedEnvironmentRevision(request.query);
+    const data = await applicationEnvironmentRegistry.materialize(application.id, { expectedRevision });
+    const environment = await applicationEnvironmentRegistry.environmentStatus(application.id);
+    return response.json({ data, environmentRevision: environment.savedRevision });
   });
   app.get('/api/servers/:serverId/applications/:applicationId/deployment-credential', async (request, response) => {
     await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
@@ -164,7 +193,9 @@ export function createApp({
         result: request.body?.result ?? null,
         error: request.body?.error ?? null,
       });
-      await reconcileCompletedJob({ domainRegistry, certificateRegistry, applicationRegistry, job });
+      await reconcileCompletedJob({
+        domainRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry, job,
+      });
       return job;
     })();
 
@@ -187,8 +218,26 @@ export function createApp({
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     return response.json({
       data: await applicationEnvironmentRegistry.listVariables(application.id),
+      environment: await applicationEnvironmentRegistry.environmentStatus(application.id, { currentReleaseId: application.currentReleaseId }),
       secretStoreConfigured: applicationEnvironmentRegistry.secretStoreConfigured,
     });
+  });
+  app.get('/api/applications/:applicationId/environment/status', requirePanelRouteAccess, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    return response.json({
+      data: await applicationEnvironmentRegistry.environmentStatus(application.id, { currentReleaseId: application.currentReleaseId }),
+    });
+  });
+  app.post('/api/applications/:applicationId/environment/import', requirePanelRouteAccess, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    if (application.type !== 'node') throw new ApplicationRegistryError('environment_import_not_supported', 'Environment import is available only for Node applications', 409);
+    await ensureEnvironmentMutable(application, jobRegistry);
+    return response.json({ data: await applicationEnvironmentRegistry.importVariables({
+      applicationId: application.id,
+      ...environmentImportInput(request.body),
+    }) });
   });
   app.get('/api/applications/:applicationId/deployment-credential', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
@@ -201,6 +250,7 @@ export function createApp({
   app.put('/api/applications/:applicationId/deployment-credential', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    await ensureEnvironmentMutable(application, jobRegistry);
     return response.json({ data: await applicationEnvironmentRegistry.setDeploymentCredential({
       applicationId: application.id,
       credential: request.body,
@@ -209,6 +259,7 @@ export function createApp({
   app.delete('/api/applications/:applicationId/deployment-credential', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    await ensureEnvironmentMutable(application, jobRegistry);
     const confirmation = `delete-deployment-credential:${application.id}`;
     if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)
       || Object.keys(request.body).length !== 1 || request.body.confirmation !== confirmation) {
@@ -220,6 +271,7 @@ export function createApp({
   app.put('/api/applications/:applicationId/environment/:key', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    await ensureEnvironmentMutable(application, jobRegistry);
     const variable = await applicationEnvironmentRegistry.setVariable({
       applicationId: application.id,
       key: request.params.key,
@@ -231,6 +283,7 @@ export function createApp({
   app.delete('/api/applications/:applicationId/environment/:key', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    await ensureEnvironmentMutable(application, jobRegistry);
     await applicationEnvironmentRegistry.deleteVariable(application.id, request.params.key);
     return response.status(204).end();
   });
@@ -282,6 +335,7 @@ export function createApp({
         retention: application.retention,
       };
     } else if (application.type === 'node') {
+      const environment = await applicationEnvironmentRegistry.environmentStatus(application.id);
       operation = OPERATIONS.APP_NODE_DEPLOY;
       type = 'app.node.deploy';
       payload = {
@@ -291,6 +345,7 @@ export function createApp({
         gitTarget,
         runtime: application.runtime,
         retention: application.retention,
+        environmentRevision: environment.savedRevision,
       };
     } else {
       throw new ApplicationRegistryError('unsupported_application_type', 'Application type is not deployable', 409);
@@ -322,6 +377,7 @@ export function createApp({
     if (!releaseId) throw new ApplicationRegistryError('rollback_release_required', 'No previous release is available for rollback', 409);
 
     const nodeRollback = application.type === 'node';
+    const environment = nodeRollback ? await applicationEnvironmentRegistry.environmentStatus(application.id) : null;
     const job = await jobRegistry.enqueue({
       serverId: application.serverId,
       type: nodeRollback ? 'app.node.rollback' : 'app.static.rollback',
@@ -334,6 +390,7 @@ export function createApp({
             runtime: application.releases.find((release) => release.releaseId === releaseId)?.runtime
               ?? application.activeRuntime
               ?? application.runtime,
+            environmentRevision: environment.savedRevision,
           }
         : {
             applicationId: application.id,
@@ -358,6 +415,7 @@ export function createApp({
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
 
+    const environment = await applicationEnvironmentRegistry.environmentStatus(application.id);
     const job = await jobRegistry.enqueue({
       serverId: application.serverId,
       type: 'app.node.restart',
@@ -366,6 +424,7 @@ export function createApp({
         applicationId: application.id,
         releaseId: application.currentReleaseId,
         runtime: application.activeRuntime ?? application.runtime,
+        environmentRevision: environment.savedRevision,
       },
       resourceType: 'application',
       resourceId: application.id,

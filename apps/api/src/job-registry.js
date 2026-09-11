@@ -215,6 +215,15 @@ function validateManagedNodeResult(job, result, action) {
   return { releaseId, serviceName: result.serviceName, port: result.port, healthPath: result.healthPath };
 }
 
+function sanitizedEnvironmentRevision(job) {
+  const revision = job.payload?.environmentRevision;
+  if (revision === undefined) return {};
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    throw new JobRegistryError('invalid_job_result', 'Queued environment revision is invalid');
+  }
+  return { environmentRevision: revision };
+}
+
 function sanitizeNodeDeploymentResult(job, result) {
   const identity = sanitizeReleaseIdentity(job, result);
   const expectedService = expectedNodeServiceName(job.payload?.applicationId);
@@ -232,6 +241,7 @@ function sanitizeNodeDeploymentResult(job, result) {
   }
   return {
     ...identity,
+    ...sanitizedEnvironmentRevision(job),
     serviceName: result.serviceName,
     port: result.port,
     healthPath: result.healthPath,
@@ -261,7 +271,7 @@ function sanitizeNodeRollbackResult(job, result) {
   if (result.healthy !== true || result.active !== true) {
     throw new JobRegistryError('invalid_job_result', 'Node rollback must confirm healthy active state');
   }
-  return { ...managed, previousReleaseId, healthy: true, active: true };
+  return { ...managed, ...sanitizedEnvironmentRevision(job), previousReleaseId, healthy: true, active: true };
 }
 
 function sanitizeNodeRestartResult(job, result) {
@@ -269,7 +279,7 @@ function sanitizeNodeRestartResult(job, result) {
   if (result.healthy !== true || result.restarted !== true) {
     throw new JobRegistryError('invalid_job_result', 'Node restart must confirm a healthy restarted service');
   }
-  return { ...managed, healthy: true, restarted: true };
+  return { ...managed, ...sanitizedEnvironmentRevision(job), healthy: true, restarted: true };
 }
 
 function sanitizeNodeStatusResult(job, result) {

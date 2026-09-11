@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -125,4 +125,106 @@ test('environment registry checks application ownership before reads and writes'
     registry.listVariables(unknownId),
     (error) => error instanceof ApplicationEnvironmentRegistryError && error.code === 'application_not_found',
   );
+});
+
+test('tracks saved and applied revisions without exposing environment values', async () => {
+  const registry = createRegistry();
+  const releaseId = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
+  assert.deepEqual(await registry.environmentStatus(APPLICATION_ID, { currentReleaseId: releaseId }), {
+    applicationId: APPLICATION_ID,
+    savedRevision: 0,
+    appliedRevision: null,
+    appliedReleaseId: null,
+    savedOnDisk: true,
+    appliedToRunningProcess: false,
+    state: 'saved_on_disk',
+    lastChangedAt: null,
+    lastAppliedAt: null,
+    lastChange: null,
+  });
+
+  await registry.setVariable({ applicationId: APPLICATION_ID, key: 'FIRST', value: 'one', secret: true });
+  const saved = await registry.environmentStatus(APPLICATION_ID, { currentReleaseId: releaseId });
+  assert.equal(saved.savedRevision, 1);
+  assert.deepEqual(saved.lastChange, { source: 'single', added: 1, updated: 0, deleted: 0 });
+  assert.equal(JSON.stringify(saved).includes('one'), false);
+
+  const applied = await registry.markApplied({ applicationId: APPLICATION_ID, revision: 1, releaseId });
+  assert.equal(applied.appliedToRunningProcess, true);
+  assert.equal(applied.state, 'applied_to_running_process');
+  await registry.setVariable({ applicationId: APPLICATION_ID, key: 'SECOND', value: 'two', secret: false });
+  const pending = await registry.environmentStatus(APPLICATION_ID, { currentReleaseId: releaseId });
+  assert.equal(pending.savedRevision, 2);
+  assert.equal(pending.appliedRevision, 1);
+  assert.equal(pending.appliedToRunningProcess, false);
+  await assert.rejects(
+    registry.materialize(APPLICATION_ID, { expectedRevision: 1 }),
+    (error) => error instanceof ApplicationEnvironmentRegistryError && error.code === 'environment_revision_conflict',
+  );
+});
+
+test('imports strict dotenv text atomically with merge replace and stale revision guards', async () => {
+  const registry = createRegistry();
+  await registry.setVariable({ applicationId: APPLICATION_ID, key: 'EXISTING', value: 'old', secret: false });
+
+  const merged = await registry.importVariables({
+    applicationId: APPLICATION_ID,
+    content: 'EXISTING=new\nADDED=value',
+    mode: 'merge',
+    secret: true,
+    expectedRevision: 1,
+    confirmation: null,
+  });
+  assert.equal(merged.environment.savedRevision, 2);
+  assert.deepEqual(merged.environment.lastChange, { source: 'import_merge', added: 1, updated: 1, deleted: 0 });
+  assert.deepEqual(await registry.materialize(APPLICATION_ID), { EXISTING: 'new', ADDED: 'value' });
+  assert.equal(merged.variables.every((variable) => variable.secret && variable.value === undefined), true);
+
+  await assert.rejects(
+    registry.importVariables({
+      applicationId: APPLICATION_ID, content: 'ONLY=one', mode: 'replace', secret: false,
+      expectedRevision: 1, confirmation: `replace-environment:${APPLICATION_ID}:1`,
+    }),
+    (error) => error instanceof ApplicationEnvironmentRegistryError && error.code === 'environment_revision_conflict',
+  );
+  const replaced = await registry.importVariables({
+    applicationId: APPLICATION_ID,
+    content: 'ONLY=one',
+    mode: 'replace',
+    secret: false,
+    expectedRevision: 2,
+    confirmation: `replace-environment:${APPLICATION_ID}:2`,
+  });
+  assert.deepEqual(replaced.environment.lastChange, { source: 'import_replace', added: 1, updated: 0, deleted: 2 });
+  assert.deepEqual(await registry.materialize(APPLICATION_ID), { ONLY: 'one' });
+});
+
+test('migrates version one environment state as saved but not proven applied', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-env-v1-'));
+  const filePath = path.join(directory, 'environment.json');
+  try {
+    await writeFile(filePath, JSON.stringify({
+      version: 1,
+      variables: [{
+        applicationId: APPLICATION_ID,
+        key: 'LEGACY',
+        secret: false,
+        value: 'value',
+        ciphertext: null,
+        iv: null,
+        tag: null,
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-02T00:00:00.000Z',
+      }],
+    }));
+    const registry = createRegistry({ filePath });
+    await registry.init();
+    const status = await registry.environmentStatus(APPLICATION_ID);
+    assert.equal(status.savedRevision, 1);
+    assert.equal(status.appliedRevision, null);
+    assert.deepEqual(status.lastChange, { source: 'migration', added: 1, updated: 0, deleted: 0 });
+    assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, 2);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

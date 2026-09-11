@@ -51,8 +51,8 @@ function fixture({ withEnvironment = false } = {}) {
     },
   };
   if (withEnvironment) {
-    options.loadApplicationEnvironment = async (applicationId) => {
-      environments.push(applicationId);
+    options.loadApplicationEnvironment = async (applicationId, expectedRevision) => {
+      environments.push([applicationId, expectedRevision]);
       return { PUBLIC_VALUE: 'visible', API_TOKEN: 'secret-value' };
     };
     options.loadDeploymentCredential = async (applicationId) => {
@@ -86,15 +86,15 @@ test('Node deploy hydrates environment and Git credential only for execution', a
   const deploymentId = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
   const previousId = 'ff830043-9752-4640-83b4-3a1998de78a0';
   const runtime = { port: 3100, healthPath: '/health' };
-  const deploy = { applicationId, deploymentId, runtime };
-  const rollback = { applicationId, releaseId: previousId, currentReleaseId: deploymentId, runtime };
-  const restart = { applicationId, releaseId: deploymentId, runtime };
+  const deploy = { applicationId, deploymentId, runtime, environmentRevision: 3 };
+  const rollback = { applicationId, releaseId: previousId, currentReleaseId: deploymentId, runtime, environmentRevision: 4 };
+  const restart = { applicationId, releaseId: deploymentId, runtime, environmentRevision: 5 };
 
   await operations.executeOperation(OPERATIONS.APP_NODE_DEPLOY, deploy);
   await operations.executeOperation(OPERATIONS.APP_NODE_ROLLBACK, rollback);
   await operations.executeOperation(OPERATIONS.APP_NODE_RESTART, restart);
 
-  assert.deepEqual(environments, [applicationId, applicationId, applicationId]);
+  assert.deepEqual(environments, [[applicationId, 3], [applicationId, 4], [applicationId, 5]]);
   assert.deepEqual(credentials, [applicationId]);
   assert.equal(Object.hasOwn(deploy, 'environment'), false);
   assert.equal(Object.hasOwn(rollback, 'environment'), false);

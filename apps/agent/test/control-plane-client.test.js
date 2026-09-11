@@ -223,6 +223,7 @@ test('Node mutations fetch environment just in time without placing secrets in r
         applicationId,
         releaseId,
         runtime: { port: 3100 },
+        environmentRevision: 7,
       },
       protocolVersion: AGENT_PROTOCOL_VERSION,
     },
@@ -250,9 +251,10 @@ test('Node mutations fetch environment just in time without placing secrets in r
     },
     fetchImpl: async (url, options = {}) => {
       calls.push({ url, options });
-      if (url.endsWith(`/api/servers/${identity.serverId}/applications/${applicationId}/environment`)) {
+      if (url.endsWith(`/api/servers/${identity.serverId}/applications/${applicationId}/environment?revision=7`)) {
         assert.equal(options.headers.authorization, `Bearer ${identity.agentToken}`);
         return jsonResponse(200, {
+          environmentRevision: 7,
           data: {
             API_TOKEN: 'private-token-value',
             PUBLIC_URL: 'https://example.test',

@@ -5,6 +5,7 @@ import {
   applicationEnvironmentPolicy,
   normalizeApplicationEnvironmentBundle,
   normalizeEnvironmentKey,
+  parseApplicationEnvironmentImport,
 } from '../src/index.js';
 
 test('normalizes bounded application environment values', () => {
@@ -39,4 +40,26 @@ test('enforces the per-application environment variable limit', () => {
     Array.from({ length: applicationEnvironmentPolicy.maxVariables + 1 }, (_, index) => [`VALUE_${index}`, 'x']),
   );
   assert.throws(() => normalizeApplicationEnvironmentBundle(tooMany), ApplicationValidationError);
+});
+
+test('parses a strict bounded dotenv import without executing interpolation', () => {
+  assert.deepEqual(parseApplicationEnvironmentImport(`\ufeff# comment\nexport API_URL=https://example.test # public\nTOKEN='literal # value'\nQUOTE="say \\"hello\\""\nEMPTY=\n`), {
+    API_URL: 'https://example.test',
+    TOKEN: 'literal # value',
+    QUOTE: 'say "hello"',
+    EMPTY: '',
+  });
+  assert.equal(applicationEnvironmentPolicy.maxImportLength, 12 * 1024);
+});
+
+test('rejects ambiguous, duplicate, reserved and multiline dotenv input', () => {
+  for (const source of [
+    'lower=value',
+    'DUP=one\nDUP=two',
+    'PORT=4000',
+    'BROKEN="unterminated',
+    'ESCAPE="line\\nvalue"',
+    'MULTI=one\rvalue',
+    `TOO_LARGE=${'x'.repeat((12 * 1024) + 1)}`,
+  ]) assert.throws(() => parseApplicationEnvironmentImport(source), ApplicationValidationError);
 });

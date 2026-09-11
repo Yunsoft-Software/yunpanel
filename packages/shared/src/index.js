@@ -15,6 +15,7 @@ export {
   normalizeApplicationEnvironmentBundle,
   normalizeEnvironmentKey,
   normalizeEnvironmentValue,
+  parseApplicationEnvironmentImport,
 } from './application-environment.js';
 
 export {

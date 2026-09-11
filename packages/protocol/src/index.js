@@ -114,6 +114,13 @@ function rejectUnexpectedKeys(payload, allowedKeys, operation, errors) {
   if (Object.keys(payload).some((key) => !allowed.has(key))) errors.push(`${operation} contains unsupported arguments`);
 }
 
+function validateEnvironmentRevision(payload, operation, errors) {
+  if (payload.environmentRevision !== undefined
+    && (!Number.isSafeInteger(payload.environmentRevision) || payload.environmentRevision < 0)) {
+    errors.push(`${operation} environmentRevision is invalid`);
+  }
+}
+
 function validateMutationPayload(operation, payload, errors) {
   if (operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || operation === OPERATIONS.SYSTEM_UPGRADE
     || operation === OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT || operation === OPERATIONS.DATABASE_INSPECT) {
@@ -198,6 +205,10 @@ function validateMutationPayload(operation, payload, errors) {
   }
 
   if (operation === OPERATIONS.APP_NODE_DEPLOY) {
+    rejectUnexpectedKeys(payload, [
+      'applicationId', 'deploymentId', 'repositoryUrl', 'branch', 'gitTarget', 'runtime', 'retention', 'environmentRevision',
+    ], operation, errors);
+    validateEnvironmentRevision(payload, operation, errors);
     try {
       normalizeNodeApplicationSpec(payload);
     } catch (error) {
@@ -206,6 +217,8 @@ function validateMutationPayload(operation, payload, errors) {
   }
 
   if (operation === OPERATIONS.APP_NODE_ROLLBACK) {
+    rejectUnexpectedKeys(payload, ['applicationId', 'releaseId', 'currentReleaseId', 'runtime', 'environmentRevision'], operation, errors);
+    validateEnvironmentRevision(payload, operation, errors);
     try {
       normalizeNodeRollbackSpec(payload);
     } catch (error) {
@@ -214,6 +227,8 @@ function validateMutationPayload(operation, payload, errors) {
   }
 
   if (operation === OPERATIONS.APP_NODE_RESTART) {
+    rejectUnexpectedKeys(payload, ['applicationId', 'releaseId', 'runtime', 'environmentRevision'], operation, errors);
+    validateEnvironmentRevision(payload, operation, errors);
     try {
       normalizeNodeRestartSpec(payload);
     } catch (error) {

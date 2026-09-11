@@ -79,7 +79,7 @@ export function createLocalHostOperations({
   }
 
   async function withApplicationEnvironment(payload, execute) {
-    const environment = await loadApplicationEnvironment(payload.applicationId);
+    const environment = await loadApplicationEnvironment(payload.applicationId, payload.environmentRevision ?? null);
     if (!validEnvironmentBundle(environment)) {
       const error = new Error('Application environment provider returned an invalid bundle');
       error.code = 'invalid_environment_bundle';

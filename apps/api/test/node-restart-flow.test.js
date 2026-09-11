@@ -140,7 +140,7 @@ test('Node restart queues the active release and accepts only healthy managed se
         },
       },
     );
-    assert.equal(completed.response.status, 200);
+    assert.equal(completed.response.status, 200, JSON.stringify(completed.payload));
     assert.equal(completed.payload.data.result.restarted, true);
 
     const unchangedApplication = await applicationRegistry.getApplication(application.id);

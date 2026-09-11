@@ -76,7 +76,9 @@ export async function startConfiguredLocalRuntime({
   }
 
   const hostOperations = createOperations({
-    loadApplicationEnvironment: (applicationId) => applicationEnvironmentRegistry.materialize(applicationId),
+    loadApplicationEnvironment: (applicationId, expectedRevision) => applicationEnvironmentRegistry.materialize(applicationId, {
+      expectedRevision,
+    }),
     loadDeploymentCredential: typeof applicationEnvironmentRegistry.materializeDeploymentCredential === 'function'
       ? (applicationId) => applicationEnvironmentRegistry.materializeDeploymentCredential(applicationId)
       : async () => null,
@@ -286,6 +288,7 @@ export async function startConfiguredLocalRuntime({
     domainRegistry,
     certificateRegistry,
     applicationRegistry,
+    applicationEnvironmentRegistry,
     hostOperations,
     snapshotProvider,
     recordExecutionEvidence,

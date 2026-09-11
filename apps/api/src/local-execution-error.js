@@ -70,6 +70,7 @@ const messages = Object.freeze({
   secret_store_unavailable: 'The application secret store is not configured.',
   secret_decryption_failed: 'A stored application secret could not be decrypted.',
   invalid_environment_bundle: 'The application environment bundle is invalid.',
+  environment_revision_conflict: 'The application environment changed after this job was queued.',
   application_not_found: 'The application required by this host operation was not found.',
   invalid_node_status: 'The Node status specification is invalid.',
   node_status_current_missing: 'The Node application does not have a valid active release.',

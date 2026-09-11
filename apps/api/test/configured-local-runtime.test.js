@@ -34,8 +34,8 @@ test('enabled local runtime hydrates Node environment only through the registry 
   let startOptions;
   const runtime = { stop: async () => {} };
   const applicationEnvironmentRegistry = {
-    materialize: async (applicationId) => {
-      materialized.push(applicationId);
+    materialize: async (applicationId, options) => {
+      materialized.push([applicationId, options]);
       return { APP_SECRET: 'runtime-only' };
     },
     materializeDeploymentCredential: async (applicationId) => ({
@@ -60,12 +60,12 @@ test('enabled local runtime hydrates Node environment only through the registry 
   assert.equal(startOptions.runtimeVersion, '0.3.0');
   assert.equal(startOptions.lockPath, '/var/lib/yunpanel/control-plane/local-executor.lock');
   assert.equal(startOptions.hostOperations.operations.length, 0);
-  assert.equal('applicationEnvironmentRegistry' in startOptions, false);
-  assert.deepEqual(await operationOptions.loadApplicationEnvironment('app-1'), { APP_SECRET: 'runtime-only' });
+  assert.equal(startOptions.applicationEnvironmentRegistry, applicationEnvironmentRegistry);
+  assert.deepEqual(await operationOptions.loadApplicationEnvironment('app-1', 7), { APP_SECRET: 'runtime-only' });
   assert.deepEqual(await operationOptions.loadDeploymentCredential('app-1'), {
     type: 'github_token', token: 'token-for-app-1-private',
   });
-  assert.deepEqual(materialized, ['app-1']);
+  assert.deepEqual(materialized, [['app-1', { expectedRevision: 7 }]]);
 });
 
 test('enabled local runtime refuses to start without the environment materializer', async () => {

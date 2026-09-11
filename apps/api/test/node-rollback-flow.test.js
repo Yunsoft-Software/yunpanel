@@ -145,7 +145,7 @@ test('Node rollback queues desired runtime state and reconciles a healthy retain
         },
       },
     );
-    assert.equal(completed.response.status, 200);
+    assert.equal(completed.response.status, 200, JSON.stringify(completed.payload));
     assert.equal(completed.payload.data.result.serviceName, managedService);
     assert.equal('ignored' in completed.payload.data.result, false);
 

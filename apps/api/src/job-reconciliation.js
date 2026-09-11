@@ -16,7 +16,17 @@ function safeReconciliationCode(error) {
   return `reconcile_${suffix}`;
 }
 
-async function reconcileApplicationJob(applicationRegistry, job) {
+async function markEnvironmentApplied(applicationEnvironmentRegistry, job, releaseId) {
+  if (!applicationEnvironmentRegistry || typeof applicationEnvironmentRegistry.markApplied !== 'function') return;
+  if (![OPERATIONS.APP_NODE_DEPLOY, OPERATIONS.APP_NODE_RESTART, OPERATIONS.APP_NODE_ROLLBACK].includes(job.operation)) return;
+  await applicationEnvironmentRegistry.markApplied({
+    applicationId: job.resourceId,
+    revision: job.result?.environmentRevision ?? 0,
+    releaseId,
+  });
+}
+
+async function reconcileApplicationJob(applicationRegistry, applicationEnvironmentRegistry, job) {
   const application = await applicationRegistry.getApplication(job.resourceId);
   if (!application) return;
 
@@ -27,41 +37,50 @@ async function reconcileApplicationJob(applicationRegistry, job) {
   }
 
   if (job.operation === OPERATIONS.APP_STATIC_DEPLOY || job.operation === OPERATIONS.APP_NODE_DEPLOY) {
-    if (application.activeDeploymentId == null && application.currentReleaseId === job.result?.releaseId) return;
-    await applicationRegistry.markDeployed(job.resourceId, {
-      deploymentId: job.id,
-      releaseId: job.result.releaseId,
-      commitSha: job.result.commitSha,
-      gitTarget: job.result.gitTarget,
-      previousReleaseId: job.result.previousReleaseId,
-      artifactFiles: job.result.artifactFiles ?? null,
-      artifactBytes: job.result.artifactBytes ?? null,
-      serviceName: job.result.serviceName ?? null,
-      port: job.result.port ?? null,
-      healthPath: job.result.healthPath ?? null,
-      healthy: job.result.healthy ?? null,
-      runtime: job.payload?.runtime ?? null,
-    });
+    if (!(application.activeDeploymentId == null && application.currentReleaseId === job.result?.releaseId)) {
+      await applicationRegistry.markDeployed(job.resourceId, {
+        deploymentId: job.id,
+        releaseId: job.result.releaseId,
+        commitSha: job.result.commitSha,
+        gitTarget: job.result.gitTarget,
+        previousReleaseId: job.result.previousReleaseId,
+        artifactFiles: job.result.artifactFiles ?? null,
+        artifactBytes: job.result.artifactBytes ?? null,
+        serviceName: job.result.serviceName ?? null,
+        port: job.result.port ?? null,
+        healthPath: job.result.healthPath ?? null,
+        healthy: job.result.healthy ?? null,
+        runtime: job.payload?.runtime ?? null,
+      });
+    }
+    await markEnvironmentApplied(applicationEnvironmentRegistry, job, job.result.releaseId);
     return;
   }
 
   if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK || job.operation === OPERATIONS.APP_NODE_ROLLBACK) {
-    if (application.activeDeploymentId == null && application.currentReleaseId === job.result?.releaseId) return;
-    await applicationRegistry.markRolledBack(job.resourceId, {
-      operationId: job.id,
-      releaseId: job.result.releaseId,
-      previousReleaseId: job.result.previousReleaseId,
-      serviceName: job.result.serviceName ?? null,
-      port: job.result.port ?? null,
-      healthPath: job.result.healthPath ?? null,
-      healthy: job.result.healthy ?? null,
-    });
+    if (!(application.activeDeploymentId == null && application.currentReleaseId === job.result?.releaseId)) {
+      await applicationRegistry.markRolledBack(job.resourceId, {
+        operationId: job.id,
+        releaseId: job.result.releaseId,
+        previousReleaseId: job.result.previousReleaseId,
+        serviceName: job.result.serviceName ?? null,
+        port: job.result.port ?? null,
+        healthPath: job.result.healthPath ?? null,
+        healthy: job.result.healthy ?? null,
+      });
+    }
+    await markEnvironmentApplied(applicationEnvironmentRegistry, job, job.result.releaseId);
+    return;
+  }
+
+  if (job.operation === OPERATIONS.APP_NODE_RESTART) {
+    await markEnvironmentApplied(applicationEnvironmentRegistry, job, job.result.releaseId);
   }
 }
 
-async function applyReconciliation({ domainRegistry, certificateRegistry, applicationRegistry, job }) {
+async function applyReconciliation({ domainRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry, job }) {
   if (job.resourceType === 'application') {
-    await reconcileApplicationJob(applicationRegistry, job);
+    await reconcileApplicationJob(applicationRegistry, applicationEnvironmentRegistry, job);
     return;
   }
 
@@ -106,9 +125,9 @@ async function applyReconciliation({ domainRegistry, certificateRegistry, applic
  * Automatic durable reconciliation is acknowledged only after this transition
  * succeeds; failed reconciliation therefore remains visible in recovery state.
  */
-export async function reconcileCompletedJob({ domainRegistry, certificateRegistry, applicationRegistry, job }) {
+export async function reconcileCompletedJob({ domainRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry = null, job }) {
   try {
-    await applyReconciliation({ domainRegistry, certificateRegistry, applicationRegistry, job });
+    await applyReconciliation({ domainRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry, job });
   } catch (error) {
     const code = safeReconciliationCode(error);
     try {

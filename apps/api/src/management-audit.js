@@ -42,6 +42,9 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/deployment-credential$/)) && ['PUT', 'DELETE'].includes(method)) {
     return { action: method === 'PUT' ? 'application.git_credential.updated' : 'application.git_credential.deleted', resourceType: 'application', resourceId: parts[0] };
   }
+  if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/environment\/import$/)) && method === 'POST') {
+    return { action: 'application.environment.imported', resourceType: 'application', resourceId: parts[0] };
+  }
   if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/environment\/[^/]+$/)) && ['PUT', 'DELETE'].includes(method)) {
     return { action: method === 'PUT' ? 'application.environment.updated' : 'application.environment.deleted', resourceType: 'application', resourceId: parts[0] };
   }

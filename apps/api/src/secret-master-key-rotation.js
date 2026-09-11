@@ -5,7 +5,7 @@ import path from 'node:path';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
 import { createMfaVault } from './mfa-crypto.js';
 
-const ENV_STORE_VERSION = 1;
+const ENV_STORE_VERSIONS = new Set([1, 2]);
 const ENV_ALGORITHM = 'aes-256-gcm';
 const MANIFEST_VERSION = 1;
 const MFA_TABLES = ['auth_mfa', 'auth_mfa_pending'];
@@ -70,7 +70,7 @@ export function rewrapApplicationEnvironmentSnapshot(snapshot, { currentMasterKe
   const currentKey = rootKey(currentMasterKey, 'Current');
   const nextKey = rootKey(nextMasterKey, 'Next');
   assertDifferentKeys(currentKey, nextKey);
-  if (!snapshot || snapshot.version !== ENV_STORE_VERSION || !Array.isArray(snapshot.variables)) {
+  if (!snapshot || !ENV_STORE_VERSIONS.has(snapshot.version) || !Array.isArray(snapshot.variables)) {
     throw rotationError('invalid_application_environment_store', 'Application environment store is invalid or unsupported');
   }
   return {

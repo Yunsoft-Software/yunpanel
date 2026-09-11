@@ -130,6 +130,7 @@ export async function startLocalRuntime({
   domainRegistry,
   certificateRegistry,
   applicationRegistry,
+  applicationEnvironmentRegistry = null,
   hostOperations = createLocalHostOperations(),
   snapshotProvider = null,
   recordExecutionEvidence = null,
@@ -235,7 +236,7 @@ export async function startLocalRuntime({
     assertBoundServer(await registry.getServer(serverId), serverId, normalizedHostname);
 
     const reconcileJob = async (job) => {
-      const result = await reconcile({ domainRegistry, certificateRegistry, applicationRegistry, job });
+      const result = await reconcile({ domainRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry, job });
       if (!result || result.reconciled !== true) {
         const error = new Error('Local job reconciliation did not complete');
         error.code = result?.error?.code ?? 'local_reconciliation_failed';
