@@ -64,6 +64,10 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/impact-preview$/)) && method === 'POST') return { action: 'domain.impact.preview', resourceType: 'domain', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/reparent$/)) && method === 'POST') return { action: 'domain.reparent', resourceType: 'domain', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/activate$/)) && method === 'POST') return { action: 'domain.activate', resourceType: 'domain', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/certificates\/custom-preview$/)) && method === 'POST') return { action: 'certificate.custom.preview', resourceType: 'domain', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/certificates\/custom$/)) && method === 'POST') return { action: 'certificate.custom.import', resourceType: 'domain', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/certificates\/([^/]+)\/select-preview$/)) && method === 'POST') return { action: 'certificate.select.preview', resourceType: 'domain', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/certificates\/([^/]+)\/select$/)) && method === 'POST') return { action: 'certificate.select', resourceType: 'domain', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/certificates\/issue$/)) && method === 'POST') return { action: 'certificate.issue', resourceType: 'domain', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/certificates\/([^/]+)\/renew$/)) && method === 'POST') return { action: 'certificate.renew', resourceType: 'certificate', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/jobs\/([^/]+)\/cancel$/)) && method === 'POST') return { action: 'job.cancel', resourceType: 'job', resourceId: parts[0] };

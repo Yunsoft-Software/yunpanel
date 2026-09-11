@@ -106,6 +106,7 @@ async function applyReconciliation({ domainRegistry, certificateRegistry, applic
       const certificate = await certificateRegistry.markActive(job.resourceId, job.result, { renewal: false });
       if (!certificate.staging) {
         await domainRegistry.attachCertificate(certificate.domainId, certificate.id, { domains: certificate.domains });
+        await certificateRegistry.commitSelection(certificate.id);
       }
       return;
     }

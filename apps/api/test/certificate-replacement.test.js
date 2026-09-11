@@ -34,6 +34,8 @@ test('managed certificate replacement supersedes the detached active record only
   });
   assert.equal((await registry.getCertificate(first.id)).state, 'active');
   await registry.markActive(replacement.id, result(replacement.certName, replacement.domains));
+  assert.equal((await registry.getCertificate(first.id)).state, 'active');
+  await registry.commitSelection(replacement.id);
   assert.equal((await registry.getCertificate(first.id)).state, 'superseded');
   assert.equal((await registry.getCertificate(replacement.id)).state, 'active');
 });

@@ -2,7 +2,9 @@ import express from 'express';
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
 import { mountApplicationProcessRoutes } from './application-process-http.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
-import { createCertificateRegistry } from './certificate-registry.js';
+import { CertificateRegistryError, createCertificateRegistry } from './certificate-registry.js';
+import { CertificateMaterialError, createCertificateMaterialManager } from './certificate-material-manager.js';
+import { mountCertificateRoutes } from './certificate-http.js';
 import { createApp as createCoreApp } from './core-app.js';
 import { DatabaseHttpError, mountDatabaseRoutes } from './database-http.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
@@ -50,6 +52,7 @@ export function createApp({
   registry = createServerRegistry(),
   jobRegistry = createJobRegistry(),
   certificateRegistry = createCertificateRegistry(),
+  certificateMaterialManager = createCertificateMaterialManager(),
   applicationRegistry = createApplicationRegistry(),
   dockerWorkloadRegistry = createDockerWorkloadRegistry({
     serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
@@ -81,12 +84,29 @@ export function createApp({
   siteFileManager = null,
   ...options
 } = {}) {
-  const core = createCoreApp({ ...options, registry, domainRegistry, jobRegistry, certificateRegistry, applicationRegistry, environment });
+  const core = createCoreApp({
+    ...options,
+    registry,
+    domainRegistry,
+    jobRegistry,
+    certificateRegistry,
+    certificateMaterialManager,
+    applicationRegistry,
+    environment,
+    localServerId,
+  });
   const app = express();
   const files = siteFileManager ?? createSiteFileManager({ websiteRegistry, localServerId });
   app.disable('x-powered-by');
   mountSiteFileRoutes(app, { siteFileManager: files });
   app.use(express.json({ limit: '256kb' }));
+  mountCertificateRoutes(app, {
+    domainRegistry,
+    certificateRegistry,
+    certificateMaterialManager,
+    jobRegistry,
+    localServerId,
+  });
   app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry));
   app.post('/api/domains/:domainId/update-preview', requirePanelRouteAccess, createDomainUpdatePreviewHandler(domainRegistry));
   app.patch('/api/domains/:domainId', requirePanelRouteAccess, createDomainUpdateHandler(domainRegistry, { jobRegistry, certificateRegistry }));
@@ -137,6 +157,8 @@ export function createApp({
     if (response.headersSent) return next(error);
     if (
       error instanceof DatabaseHttpError
+      || error instanceof CertificateMaterialError
+      || error instanceof CertificateRegistryError
       || error instanceof ApplicationRegistryError
       || error instanceof DomainRegistryError
       || error instanceof DockerWorkloadRegistryError

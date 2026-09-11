@@ -20,7 +20,7 @@ export async function runCertificateRenewalSweep({
   const queued = [];
 
   for (const certificate of certificates) {
-    if (certificate.state !== 'active' || certificate.staging || !certificate.validTo) continue;
+    if (certificate.state !== 'active' || certificate.staging || certificate.renewalMode !== 'automatic' || !certificate.validTo) continue;
     const expiresAt = Date.parse(certificate.validTo);
     if (!Number.isFinite(expiresAt) || expiresAt > threshold) continue;
 

@@ -11,6 +11,7 @@ import { createApplicationEnvironmentRegistry } from './application-environment-
 import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
+import { createCertificateMaterialManager } from './certificate-material-manager.js';
 import { startCertificateRenewalScheduler } from './certificate-renewal-scheduler.js';
 import { startConfiguredLocalRuntime } from './configured-local-runtime.js';
 import { createDomainRegistry } from './domain-registry.js';
@@ -38,6 +39,7 @@ const domainStorePath = process.env.YUNPANEL_DOMAIN_STORE ?? path.resolve('.data
 const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-registry.json');
 const jobLogStorePath = path.resolve(path.dirname(jobStorePath), 'job-logs');
 const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.resolve('.data/certificate-registry.json');
+const customCertificateRoot = path.join(path.dirname(certificateStorePath), 'custom-certificates');
 const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.resolve('.data/application-registry.json');
 const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.data/website-registry.json');
 const websiteMigrationPolicyStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE ?? path.resolve('.data/website-migration-policy.json');
@@ -77,8 +79,9 @@ const durableJobRegistry = createDurableJobRegistry({
   automaticReconciliation: true,
 });
 await durableJobRegistry.init();
-const certificateRegistry = createCertificateRegistry({ filePath: certificateStorePath });
+const certificateRegistry = createCertificateRegistry({ filePath: certificateStorePath, customRoot: customCertificateRoot });
 await certificateRegistry.init();
+const certificateMaterialManager = createCertificateMaterialManager({ customRoot: customCertificateRoot });
 const applicationRegistry = createApplicationRegistry({
   filePath: applicationStorePath,
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
@@ -160,6 +163,7 @@ const listener = createAuthenticatedApi({
     domainRegistry,
     jobRegistry,
     certificateRegistry,
+    certificateMaterialManager,
     applicationRegistry,
     websiteRegistry,
     websiteMigrationPolicy,

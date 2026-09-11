@@ -3,9 +3,12 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeDomainSet } from '@yunpanel/shared';
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CERT_STATES = new Set(['pending', 'validating', 'validated', 'issuing', 'active', 'renewing', 'superseded', 'error']);
+const CERTIFICATE_SOURCES = new Set(['acme', 'custom']);
+const RENEWAL_MODES = new Set(['automatic', 'manual']);
 
 export class CertificateRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -22,6 +25,14 @@ function emptyState() {
 
 function publicCertificate(certificate) {
   return { ...certificate };
+}
+
+function safeAbsoluteRoot(value, fallback) {
+  const candidate = value ?? fallback;
+  if (typeof candidate !== 'string' || !path.isAbsolute(candidate) || candidate === path.parse(candidate).root || /[\u0000-\u001f\u007f]/.test(candidate)) {
+    throw new CertificateRegistryError('invalid_certificate_root', 'Certificate material root is invalid', 500);
+  }
+  return path.resolve(candidate);
 }
 
 function normalizeDomains(domains) {
@@ -50,13 +61,16 @@ function requireCertificate(state, certificateId) {
   return certificate;
 }
 
-function validateCertificatePath(certName, value, expectedFile) {
+function validateCertificatePath(certificate, value, expectedFile, { acmeLiveRoot, customRoot }) {
   if (typeof value !== 'string') {
     throw new CertificateRegistryError('invalid_certificate_path', 'Certificate path metadata is invalid');
   }
-  const expected = `/etc/letsencrypt/live/${certName}/${expectedFile}`;
+  const directory = certificate.source === 'custom'
+    ? path.join(customRoot, certificate.id)
+    : path.join(acmeLiveRoot, certificate.certName);
+  const expected = path.join(directory, expectedFile);
   if (value !== expected) {
-    throw new CertificateRegistryError('invalid_certificate_path', 'Certificate path is outside the managed Certbot directory');
+    throw new CertificateRegistryError('invalid_certificate_path', 'Certificate path is outside its managed material directory');
   }
   return value;
 }
@@ -82,7 +96,40 @@ function assertResultIdentity(certificate, result) {
   }
 }
 
-export function createCertificateRegistry({ filePath = null, now = () => Date.now() } = {}) {
+function hydrateCertificate(certificate, sourceVersion, roots) {
+  if (sourceVersion < 2) {
+    certificate.source = 'acme';
+    certificate.renewalMode = 'automatic';
+    certificate.materialDigest = null;
+    certificate.lastImportedAt = null;
+  }
+  if (!CERT_STATES.has(certificate.state) || !CERTIFICATE_SOURCES.has(certificate.source) || !RENEWAL_MODES.has(certificate.renewalMode)
+    || (certificate.source === 'acme' && certificate.renewalMode !== 'automatic')
+    || (certificate.source === 'custom' && certificate.renewalMode !== 'manual')) {
+    throw new CertificateRegistryError('invalid_certificate_state', 'Persisted certificate source policy is invalid', 409);
+  }
+  if (certificate.source === 'custom' && (typeof certificate.id !== 'string' || !UUID_PATTERN.test(certificate.id))) {
+    throw new CertificateRegistryError('invalid_certificate_state', 'Persisted custom certificate identity is invalid', 409);
+  }
+  if (certificate.state !== 'pending' && certificate.state !== 'validating' && certificate.state !== 'validated'
+    && certificate.state !== 'issuing' && certificate.state !== 'error') {
+    validateCertificatePath(certificate, certificate.certificatePath, 'cert.pem', roots);
+    validateCertificatePath(certificate, certificate.fullchainPath, 'fullchain.pem', roots);
+    validateCertificatePath(certificate, certificate.privateKeyPath, 'privkey.pem', roots);
+  }
+  return certificate;
+}
+
+export function createCertificateRegistry({
+  filePath = null,
+  now = () => Date.now(),
+  acmeLiveRoot = '/etc/letsencrypt/live',
+  customRoot = filePath ? path.join(path.dirname(filePath), 'custom-certificates') : '/var/lib/yunpanel/control-plane/custom-certificates',
+} = {}) {
+  const roots = Object.freeze({
+    acmeLiveRoot: safeAbsoluteRoot(acmeLiveRoot, '/etc/letsencrypt/live'),
+    customRoot: safeAbsoluteRoot(customRoot, '/var/lib/yunpanel/control-plane/custom-certificates'),
+  });
   let state = emptyState();
   let initialized = false;
   let writeChain = Promise.resolve();
@@ -106,10 +153,12 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.certificates)) {
+        if (![1, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.certificates)) {
           throw new Error('unsupported or invalid certificate registry state');
         }
+        parsed.certificates.forEach((certificate) => hydrateCertificate(certificate, parsed.version, roots));
         state = parsed;
+        state.version = STORE_VERSION;
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
       }
@@ -158,6 +207,8 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
       domains: normalizedDomains,
       email: validateEmail(email),
       staging: isValidation,
+      source: 'acme',
+      renewalMode: 'automatic',
       state: 'pending',
       certificatePath: null,
       fullchainPath: null,
@@ -171,6 +222,8 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
       lastValidatedAt: null,
       lastIssuedAt: null,
       lastRenewedAt: null,
+      lastImportedAt: null,
+      materialDigest: null,
       lastError: null,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -218,6 +271,9 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
     if (certificate.staging) {
       return markValidated(certificateId, result);
     }
+    if (certificate.source !== 'acme') {
+      throw new CertificateRegistryError('managed_certificate_required', 'Only managed ACME certificates can reconcile issue or renewal results', 409);
+    }
     assertResultIdentity(certificate, result);
 
     const validFrom = validateDate(result.validFrom, 'validFrom');
@@ -229,15 +285,10 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
       throw new CertificateRegistryError('invalid_certificate_metadata', 'Certificate fingerprint is invalid');
     }
 
-    const certificatePath = validateCertificatePath(certificate.certName, result.certificatePath, 'cert.pem');
-    const fullchainPath = validateCertificatePath(certificate.certName, result.fullchainPath, 'fullchain.pem');
-    const privateKeyPath = validateCertificatePath(certificate.certName, result.privateKeyPath, 'privkey.pem');
+    const certificatePath = validateCertificatePath(certificate, result.certificatePath, 'cert.pem', roots);
+    const fullchainPath = validateCertificatePath(certificate, result.fullchainPath, 'fullchain.pem', roots);
+    const privateKeyPath = validateCertificatePath(certificate, result.privateKeyPath, 'privkey.pem', roots);
     const timestamp = new Date(now()).toISOString();
-    for (const previous of state.certificates) {
-      if (previous.id === certificate.id || previous.domainId !== certificate.domainId || previous.staging || previous.state !== 'active') continue;
-      previous.state = 'superseded';
-      previous.updatedAt = timestamp;
-    }
     certificate.state = 'active';
     certificate.certificatePath = certificatePath;
     certificate.fullchainPath = fullchainPath;
@@ -254,6 +305,119 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
     else certificate.lastIssuedAt = timestamp;
     await persist();
     return publicCertificate(certificate);
+  }
+
+  async function registerCustom({
+    certificateId,
+    domainId,
+    serverId,
+    domains,
+    certificatePath,
+    fullchainPath,
+    privateKeyPath,
+    subject,
+    issuer,
+    subjectAltName,
+    validFrom,
+    validTo,
+    fingerprint256,
+    materialDigest,
+  } = {}) {
+    await ensureInitialized();
+    if (typeof certificateId !== 'string' || !UUID_PATTERN.test(certificateId)) {
+      throw new CertificateRegistryError('invalid_certificate_id', 'Custom certificate ID is invalid');
+    }
+    const id = certificateId.toLowerCase();
+    if (state.certificates.some((candidate) => candidate.id === id)) {
+      throw new CertificateRegistryError('certificate_identity_conflict', 'Certificate ID already exists', 409);
+    }
+    if (typeof domainId !== 'string' || !domainId) throw new CertificateRegistryError('invalid_domain', 'domainId is required');
+    if (typeof serverId !== 'string' || !serverId) throw new CertificateRegistryError('invalid_server', 'serverId is required');
+    const normalizedDomains = normalizeDomains(domains);
+    const timestamp = new Date(now()).toISOString();
+    const certificate = {
+      id,
+      domainId,
+      serverId,
+      certName: normalizedDomains[0],
+      domains: normalizedDomains,
+      email: null,
+      staging: false,
+      source: 'custom',
+      renewalMode: 'manual',
+      state: 'active',
+      certificatePath: null,
+      fullchainPath: null,
+      privateKeyPath: null,
+      subject: typeof subject === 'string' ? subject.slice(0, 500) : null,
+      issuer: typeof issuer === 'string' ? issuer.slice(0, 500) : null,
+      subjectAltName: typeof subjectAltName === 'string' ? subjectAltName.slice(0, 2000) : null,
+      validFrom: validateDate(validFrom, 'validFrom'),
+      validTo: validateDate(validTo, 'validTo'),
+      fingerprint256: typeof fingerprint256 === 'string' && SHA256_FINGERPRINT.test(fingerprint256)
+        ? fingerprint256.toUpperCase()
+        : null,
+      lastValidatedAt: null,
+      lastIssuedAt: null,
+      lastRenewedAt: null,
+      lastImportedAt: timestamp,
+      materialDigest: typeof materialDigest === 'string' && /^[a-f0-9]{64}$/.test(materialDigest) ? materialDigest : null,
+      lastError: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    if (!certificate.fingerprint256 || !certificate.materialDigest
+      || Date.parse(certificate.validTo) <= Date.parse(certificate.validFrom)) {
+      throw new CertificateRegistryError('invalid_certificate_metadata', 'Custom certificate metadata is invalid');
+    }
+    certificate.certificatePath = validateCertificatePath(certificate, certificatePath, 'cert.pem', roots);
+    certificate.fullchainPath = validateCertificatePath(certificate, fullchainPath, 'fullchain.pem', roots);
+    certificate.privateKeyPath = validateCertificatePath(certificate, privateKeyPath, 'privkey.pem', roots);
+    state.certificates.push(certificate);
+    try {
+      await persist();
+    } catch (error) {
+      state.certificates = state.certificates.filter((candidate) => candidate.id !== certificate.id);
+      throw error;
+    }
+    return publicCertificate(certificate);
+  }
+
+  async function prepareSelection(certificateId) {
+    await ensureInitialized();
+    const certificate = requireCertificate(state, certificateId);
+    if (certificate.staging || !['active', 'superseded'].includes(certificate.state)
+      || !certificate.validTo || Date.parse(certificate.validTo) <= now()) {
+      throw new CertificateRegistryError('certificate_not_selectable', 'Certificate is not selectable', 409);
+    }
+    validateCertificatePath(certificate, certificate.certificatePath, 'cert.pem', roots);
+    validateCertificatePath(certificate, certificate.fullchainPath, 'fullchain.pem', roots);
+    validateCertificatePath(certificate, certificate.privateKeyPath, 'privkey.pem', roots);
+    if (certificate.state === 'superseded') {
+      certificate.state = 'active';
+      certificate.lastError = null;
+      certificate.updatedAt = new Date(now()).toISOString();
+      await persist();
+    }
+    return publicCertificate(certificate);
+  }
+
+  async function commitSelection(certificateId) {
+    await ensureInitialized();
+    const selected = requireCertificate(state, certificateId);
+    if (selected.staging || selected.state !== 'active') {
+      throw new CertificateRegistryError('certificate_not_selectable', 'Certificate is not selectable', 409);
+    }
+    const timestamp = new Date(now()).toISOString();
+    let changed = false;
+    for (const certificate of state.certificates) {
+      if (certificate.id === selected.id || certificate.domainId !== selected.domainId || certificate.staging || certificate.state !== 'active') continue;
+      certificate.state = 'superseded';
+      certificate.updatedAt = timestamp;
+      changed = true;
+    }
+    if (changed) await persist();
+    return publicCertificate(selected);
   }
 
   async function markFailed(certificateId, errorCode) {
@@ -286,6 +450,9 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
   return {
     init,
     createForDomain,
+    registerCustom,
+    prepareSelection,
+    commitSelection,
     setState,
     markValidated,
     markActive,
@@ -295,3 +462,8 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
     listCertificates,
   };
 }
+
+export const certificateRegistryInternals = Object.freeze({
+  storeVersion: STORE_VERSION,
+  hydrateCertificate,
+});

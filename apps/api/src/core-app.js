@@ -28,13 +28,31 @@ async function ensureResourceJobIdle(jobRegistry, resourceType, resourceId) {
   }
 }
 
-async function resolveDomainTls(domain, certificateRegistry) {
+async function resolveDomainTls(domain, certificateRegistry, certificateMaterialManager, localServerId) {
   if (!domain.certificateId) return null;
   const certificate = await certificateRegistry.getCertificate(domain.certificateId);
   if (!certificate || certificate.state !== 'active') throw new CertificateRegistryError('certificate_not_active', 'Attached certificate is not active', 409);
   if (certificate.staging) throw new CertificateRegistryError('staging_certificate_not_allowed', 'Staging certificates cannot be attached to production HTTPS config', 409);
   if (certificate.domains.join('\n') !== [domain.primaryDomain, ...domain.aliases].join('\n')) {
     throw new CertificateRegistryError('certificate_domain_mismatch', 'Attached certificate does not cover the current Domain routing names', 409);
+  }
+  if (certificateMaterialManager && domain.serverId === localServerId) {
+    let inspected;
+    try {
+      inspected = await certificateMaterialManager.inspectStored({
+        certificate,
+        domains: [domain.primaryDomain, ...domain.aliases],
+      });
+    } catch (error) {
+      throw new CertificateRegistryError(
+        error?.code ?? 'certificate_material_unavailable',
+        error?.message ?? 'Certificate material is unavailable',
+        error?.status ?? 409,
+      );
+    }
+    if (inspected.fingerprint256 !== certificate.fingerprint256) {
+      throw new CertificateRegistryError('certificate_metadata_mismatch', 'Stored certificate metadata does not match its material', 409);
+    }
   }
   return { fullchainPath: certificate.fullchainPath, privateKeyPath: certificate.privateKeyPath };
 }
@@ -91,6 +109,8 @@ export function createApp({
   domainRegistry = createDomainRegistry(),
   jobRegistry = createJobRegistry(),
   certificateRegistry = createCertificateRegistry(),
+  certificateMaterialManager = null,
+  localServerId = null,
   applicationRegistry = createApplicationRegistry(),
   applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
     applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
@@ -480,7 +500,7 @@ export function createApp({
     const domain = await domainRegistry.getDomain(request.params.domainId);
     if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
     await ensureResourceJobIdle(jobRegistry, 'domain', domain.id);
-    const tls = await resolveDomainTls(domain, certificateRegistry);
+    const tls = await resolveDomainTls(domain, certificateRegistry, certificateMaterialManager, localServerId);
     const payload = {
       primaryDomain: domain.primaryDomain,
       aliases: domain.aliases,
@@ -552,6 +572,9 @@ export function createApp({
   app.post('/api/certificates/:certificateId/renew', requirePanelRouteAccess, async (request, response) => {
     const certificate = await certificateRegistry.getCertificate(request.params.certificateId);
     if (!certificate) throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
+    if (certificate.source !== 'acme' || certificate.renewalMode !== 'automatic') {
+      throw new CertificateRegistryError('certificate_not_renewable', 'Only managed ACME certificates can be renewed', 409);
+    }
     if (certificate.state !== 'active') throw new CertificateRegistryError('certificate_not_active', 'Only active certificates can be renewed', 409);
     await ensureResourceJobIdle(jobRegistry, 'certificate', certificate.id);
     const dryRun = request.body?.dryRun === true;
