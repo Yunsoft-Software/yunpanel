@@ -68,6 +68,7 @@ export function createGithubWebhookHandler({
   applicationRegistry,
   applicationEnvironmentRegistry,
   queueApplicationDeploy,
+  localServerId = null,
 } = {}) {
   if (!applicationRegistry || !applicationEnvironmentRegistry || typeof queueApplicationDeploy !== 'function') {
     throw new TypeError('GitHub webhook dependencies are required');
@@ -102,7 +103,7 @@ export function createGithubWebhookHandler({
     try {
       const rawBody = await readRawBody(request);
       const application = await applicationRegistry.getApplication(applicationId);
-      if (!application) {
+      if (!application || (localServerId !== null && application.serverId !== localServerId)) {
         error(response, 404, 'github_webhook_not_found', 'GitHub webhook is not configured.');
         return true;
       }

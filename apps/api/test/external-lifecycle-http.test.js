@@ -364,3 +364,42 @@ test('Read Only may inspect lifecycle inventory but cannot create it', async () 
     })).status, 403);
   });
 });
+
+test('local panel hides DNS and mail lifecycle records linked to another Server', async () => {
+  const state = await fixture();
+  const remoteEnrollment = await state.registry.issueEnrollmentToken({ label: 'remote-lifecycle-host' });
+  const remoteServer = (await state.registry.enrollServer({ token: remoteEnrollment.token, hostname: 'remote-lifecycle-host' })).server;
+  const remoteDomain = await state.domainRegistry.createDomain({
+    serverId: remoteServer.id,
+    primaryDomain: 'remote-lifecycle.example.test',
+    targetType: 'proxy',
+    target: { upstreamPort: 8500 },
+  });
+  const localZone = await state.dnsHostingRegistry.createZone({
+    zoneName: state.domain.primaryDomain, webDomainId: state.domain.id, managementMode: 'external',
+  });
+  const remoteZone = await state.dnsHostingRegistry.createZone({
+    zoneName: remoteDomain.primaryDomain, webDomainId: remoteDomain.id, managementMode: 'external',
+  });
+  const localMail = await state.mailDomainRegistry.createMailDomain({
+    domainName: state.domain.primaryDomain, webDomainId: state.domain.id, managementMode: 'external',
+  });
+  const remoteMail = await state.mailDomainRegistry.createMailDomain({
+    domainName: remoteDomain.primaryDomain, webDomainId: remoteDomain.id, managementMode: 'external',
+  });
+  const app = withPanelContext(createApp({
+    ...state, localServerId: state.domain.serverId, environment: 'production',
+  }), ownerManagementContext);
+  await withServer(app, async (baseUrl) => {
+    const zones = await (await request(baseUrl, '/api/dns-zones')).json();
+    assert.deepEqual(zones.data.map((zone) => zone.id), [localZone.id]);
+    assert.equal((await request(baseUrl, `/api/dns-zones/${remoteZone.id}`)).status, 404);
+    const mailDomains = await (await request(baseUrl, '/api/mail-domains')).json();
+    assert.deepEqual(mailDomains.data.map((mailDomain) => mailDomain.id), [localMail.id]);
+    assert.equal((await request(baseUrl, `/api/mail-domains/${remoteMail.id}`)).status, 404);
+    assert.equal((await request(baseUrl, '/api/dns-zones', {
+      method: 'POST',
+      body: { name: remoteDomain.primaryDomain, webDomainId: remoteDomain.id, managementMode: 'external' },
+    })).status, 404);
+  });
+});

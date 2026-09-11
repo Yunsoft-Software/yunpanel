@@ -29,7 +29,7 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry } = {}) {
+export function mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry, localServerId = null } = {}) {
   if (!app || typeof app.post !== 'function'
     || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
     || !jobRegistry || typeof jobRegistry.listJobs !== 'function' || typeof jobRegistry.enqueue !== 'function') {
@@ -39,7 +39,7 @@ export function mountApplicationProcessRoutes(app, { applicationRegistry, jobReg
   app.post('/api/applications/:applicationId/process', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = exactBody(request.body);
     const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    if (!application || (localServerId && application.serverId !== localServerId)) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     if (application.type !== 'node') {
       throw new ApplicationRegistryError('node_process_not_supported', 'Process control is available only for Node applications', 409);
     }

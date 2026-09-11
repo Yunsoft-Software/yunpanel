@@ -19,7 +19,7 @@ const readOnly = Object.freeze({
   security: { managementAllowed: false },
 });
 
-async function listen(t, auth, registry = null) {
+async function listen(t, auth, registry = null, scope = {}) {
   const domains = new Map([[localDomain.id, localDomain], [externalDomain.id, externalDomain]]);
   const mailboxRegistry = registry ?? createMailboxRegistry({
     masterKey: randomBytes(32),
@@ -29,7 +29,7 @@ async function listen(t, auth, registry = null) {
   const app = express();
   app.use(express.json());
   app.use((request, _response, next) => { request.auth = auth; next(); });
-  mountMailboxRoutes(app, { mailboxRegistry });
+  mountMailboxRoutes(app, { mailboxRegistry, ...scope });
   app.use((error, _request, response, _next) => {
     const known = error instanceof MailboxRegistryError || error instanceof MailboxPasswordError;
     return response.status(known ? error.status : 500).json({
@@ -147,4 +147,36 @@ test('Read Only may inspect mailbox metadata but cannot mutate it', async (t) =>
   assert.equal((await request(base, `/api/mailboxes/${created.id}`, {
     method: 'DELETE', body: { expectedRevision: 1, confirmation: 'delete-mailbox:reader@example.com' },
   })).status, 403);
+});
+
+test('local panel hides mailboxes whose mail Domain belongs to another Server', async (t) => {
+  const localServerId = randomUUID();
+  const remoteServerId = randomUUID();
+  const localWebDomain = { id: randomUUID(), serverId: localServerId };
+  const remoteWebDomain = { id: randomUUID(), serverId: remoteServerId };
+  const localMailDomain = { id: randomUUID(), domainName: 'local.example', managementMode: 'local', webDomainId: localWebDomain.id };
+  const remoteMailDomain = { id: randomUUID(), domainName: 'remote.example', managementMode: 'local', webDomainId: remoteWebDomain.id };
+  const mailDomains = new Map([[localMailDomain.id, localMailDomain], [remoteMailDomain.id, remoteMailDomain]]);
+  const webDomains = new Map([[localWebDomain.id, localWebDomain], [remoteWebDomain.id, remoteWebDomain]]);
+  const registry = createMailboxRegistry({
+    masterKey: randomBytes(32),
+    getMailDomain: async (id) => mailDomains.get(id) ?? null,
+  });
+  const localMailbox = await registry.createMailbox({
+    mailDomainId: localMailDomain.id, address: 'owner@local.example', password: 'valid mailbox password',
+  });
+  const remoteMailbox = await registry.createMailbox({
+    mailDomainId: remoteMailDomain.id, address: 'owner@remote.example', password: 'valid mailbox password',
+  });
+  const { base } = await listen(t, owner, registry, {
+    localServerId,
+    mailDomainRegistry: { getMailDomain: async (id) => mailDomains.get(id) ?? null },
+    domainRegistry: { getDomain: async (id) => webDomains.get(id) ?? null },
+  });
+  assert.deepEqual((await (await request(base, '/api/mailboxes')).json()).data.map((mailbox) => mailbox.id), [localMailbox.id]);
+  assert.equal((await request(base, `/api/mailboxes/${remoteMailbox.id}`)).status, 404);
+  assert.equal((await request(base, '/api/mailboxes', {
+    method: 'POST',
+    body: { mailDomainId: remoteMailDomain.id, address: 'second@remote.example', password: 'valid mailbox password' },
+  })).status, 404);
 });

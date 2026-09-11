@@ -36,7 +36,9 @@ function asyncRoute(handler) {
 
 const noHostSideEffects = Object.freeze({ mailConfigurationChanged: false, mailDataChanged: false });
 
-export function mountMailboxRoutes(app, { mailboxRegistry } = {}) {
+export function mountMailboxRoutes(app, {
+  mailboxRegistry, mailDomainRegistry = null, domainRegistry = null, localServerId = null,
+} = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function'
     || typeof app.patch !== 'function' || typeof app.delete !== 'function') {
     throw new Error('Express application is required');
@@ -47,20 +49,47 @@ export function mountMailboxRoutes(app, { mailboxRegistry } = {}) {
     || typeof mailboxRegistry.deleteMailbox !== 'function') {
     throw new Error('Mailbox registry is required');
   }
+  if (localServerId !== null && (!mailDomainRegistry || !domainRegistry)) {
+    throw new Error('Local mailbox scope dependencies are required');
+  }
 
-  app.get('/api/mailboxes', requirePanelRouteAccess, asyncRoute(async (request, response) => (
-    response.json({ data: await mailboxRegistry.listMailboxes(listFilter(request.query)) })
-  )));
+  async function localMailDomain(mailDomainId) {
+    const mailDomain = await mailDomainRegistry?.getMailDomain(mailDomainId);
+    const domain = mailDomain?.webDomainId ? await domainRegistry?.getDomain(mailDomain.webDomainId) : null;
+    if (localServerId !== null && domain?.serverId !== localServerId) {
+      throw new MailboxRegistryError('mail_domain_not_found', 'Mail domain was not found', 404);
+    }
+    return mailDomain;
+  }
+
+  async function localMailbox(mailboxId) {
+    const mailbox = await mailboxRegistry.getMailbox(mailboxId);
+    if (!mailbox) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox was not found', 404);
+    await localMailDomain(mailbox.mailDomainId);
+    return mailbox;
+  }
+
+  app.get('/api/mailboxes', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const filter = listFilter(request.query);
+    if (localServerId !== null && filter.mailDomainId) await localMailDomain(filter.mailDomainId);
+    const mailboxes = await mailboxRegistry.listMailboxes(filter);
+    if (localServerId === null) return response.json({ data: mailboxes });
+    const local = await Promise.all(mailboxes.map(async (mailbox) => {
+      const mailDomain = await mailDomainRegistry.getMailDomain(mailbox.mailDomainId);
+      const domain = mailDomain?.webDomainId ? await domainRegistry.getDomain(mailDomain.webDomainId) : null;
+      return domain?.serverId === localServerId ? mailbox : null;
+    }));
+    return response.json({ data: local.filter(Boolean) });
+  }));
 
   app.get('/api/mailboxes/:mailboxId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    const mailbox = await mailboxRegistry.getMailbox(request.params.mailboxId);
-    if (!mailbox) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox was not found', 404);
-    return response.json({ data: mailbox });
+    return response.json({ data: await localMailbox(request.params.mailboxId) });
   }));
 
   app.post('/api/mailboxes', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = exactBody(request.body, CREATE_FIELDS, 'mailbox_create_input_invalid');
+    await localMailDomain(body.mailDomainId);
     const mailbox = await mailboxRegistry.createMailbox(body);
     return response.status(201).json({ data: mailbox, sideEffects: noHostSideEffects });
   }));
@@ -68,6 +97,7 @@ export function mountMailboxRoutes(app, { mailboxRegistry } = {}) {
   app.post('/api/mailboxes/:mailboxId/password', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
     const body = exactBody(request.body, ROTATE_FIELDS, 'mailbox_password_input_invalid');
+    await localMailbox(request.params.mailboxId);
     const mailbox = await mailboxRegistry.rotatePassword(request.params.mailboxId, body);
     return response.json({ data: mailbox, sideEffects: noHostSideEffects });
   }));
@@ -75,6 +105,7 @@ export function mountMailboxRoutes(app, { mailboxRegistry } = {}) {
   app.patch('/api/mailboxes/:mailboxId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
     const body = exactBody(request.body, UPDATE_FIELDS, 'mailbox_update_input_invalid');
+    await localMailbox(request.params.mailboxId);
     const mailbox = await mailboxRegistry.setEnabled(request.params.mailboxId, body);
     return response.json({ data: mailbox, sideEffects: noHostSideEffects });
   }));
@@ -82,6 +113,7 @@ export function mountMailboxRoutes(app, { mailboxRegistry } = {}) {
   app.delete('/api/mailboxes/:mailboxId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
     const body = exactBody(request.body, DELETE_FIELDS, 'mailbox_delete_input_invalid');
+    await localMailbox(request.params.mailboxId);
     await mailboxRegistry.deleteMailbox(request.params.mailboxId, body);
     return response.json({
       data: { id: request.params.mailboxId, deleted: true },

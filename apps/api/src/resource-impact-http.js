@@ -26,6 +26,17 @@ export function mountResourceImpactRoutes(app, dependencies = {}) {
   if (!app || typeof app.post !== 'function') throw new Error('Express application is required');
   const handler = (resourceType, parameter) => asyncRoute(async (request, response) => {
     const input = impactInput(request.body);
+    if (dependencies.localServerId && input.operation === 'move') {
+      throw new ResourceImpactError('local_server_only', 'Resources cannot be moved to another server from a local panel', 409);
+    }
+    if (dependencies.localServerId) {
+      const registry = resourceType === 'website' ? dependencies.websiteRegistry : dependencies.domainRegistry;
+      const method = resourceType === 'website' ? 'getWebsite' : 'getDomain';
+      const resource = await registry[method](request.params[parameter]);
+      if (!resource || resource.serverId !== dependencies.localServerId) {
+        throw new ResourceImpactError(`${resourceType}_not_found`, `${resourceType === 'website' ? 'Website' : 'Domain'} not found`, 404);
+      }
+    }
     const preview = await previewResourceImpact({
       resourceType,
       resourceId: request.params[parameter],

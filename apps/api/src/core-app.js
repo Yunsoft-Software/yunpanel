@@ -191,6 +191,50 @@ export function createApp({
     jobRegistry,
   });
 
+  const inLocalScope = (resource) => Boolean(resource)
+    && (localServerId === null || resource.serverId === localServerId || resource.id === localServerId);
+  const localOnly = (resources) => localServerId === null
+    ? resources
+    : resources.filter((resource) => inLocalScope(resource));
+  const requireRequestedLocalServer = (serverId) => {
+    if (localServerId !== null && serverId !== localServerId) {
+      throw new RegistryError('local_server_required', 'Only this panel host can be managed', 404);
+    }
+    return serverId;
+  };
+  const requireServer = async (serverId) => {
+    const server = await registry.getServer(requireRequestedLocalServer(serverId));
+    if (!server || (localServerId !== null && server.executionMode !== 'local')) {
+      throw new RegistryError('server_not_found', 'Server not found', 404);
+    }
+    return server;
+  };
+  const requireApplication = async (applicationId) => {
+    const application = await applicationRegistry.getApplication(applicationId);
+    if (!inLocalScope(application)) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    return application;
+  };
+  const requireDomain = async (domainId) => {
+    const domain = await domainRegistry.getDomain(domainId);
+    if (!inLocalScope(domain)) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+    return domain;
+  };
+  const requireCertificate = async (certificateId) => {
+    const certificate = await certificateRegistry.getCertificate(certificateId);
+    if (!inLocalScope(certificate)) throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
+    return certificate;
+  };
+  const requireJob = async (jobId) => {
+    const job = await jobRegistry.getJob(jobId);
+    if (!inLocalScope(job)) throw new JobRegistryError('job_not_found', 'Job not found', 404);
+    return job;
+  };
+  const rejectLegacyAgentTransport = () => {
+    if (localServerId !== null) {
+      throw new RegistryError('agent_transport_removed', 'Remote agent transport is not available on a local panel', 404);
+    }
+  };
+
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
 
@@ -200,22 +244,19 @@ export function createApp({
     if (environment !== 'development') return response.status(404).json({ error: { code: 'not_found', message: 'Not found' } });
     return response.json({ data: await loader() });
   };
-  app.get('/api/dev/servers', developmentList(() => registry.listServers()));
-  app.get('/api/dev/domains', developmentList(() => domainRegistry.listDomains()));
-  app.get('/api/dev/jobs', developmentList(async () => (await jobRegistry.listJobs()).map(jobPublicView)));
+  app.get('/api/dev/servers', developmentList(async () => localOnly(await registry.listServers())));
+  app.get('/api/dev/domains', developmentList(async () => localOnly(await domainRegistry.listDomains())));
+  app.get('/api/dev/jobs', developmentList(async () => localOnly(await jobRegistry.listJobs()).map(jobPublicView)));
   app.get('/api/dev/certificates', developmentList(async () => (
-    await certificateRegistry.listCertificates()).map((certificate) => certificatePublicView(certificate))));
-  app.get('/api/dev/applications', developmentList(() => applicationRegistry.listApplications()));
+    localOnly(await certificateRegistry.listCertificates())).map((certificate) => certificatePublicView(certificate))));
+  app.get('/api/dev/applications', developmentList(async () => localOnly(await applicationRegistry.listApplications())));
 
-  app.get('/api/servers', requirePanelRouteAccess, async (request, response) => response.json({ data: await registry.listServers() }));
+  app.get('/api/servers', requirePanelRouteAccess, async (request, response) => response.json({ data: localOnly(await registry.listServers()) }));
   app.get('/api/servers/:serverId', requirePanelRouteAccess, async (request, response) => {
-    const server = await registry.getServer(request.params.serverId);
-    if (!server) return response.status(404).json({ error: { code: 'server_not_found', message: 'Server not found' } });
-    return response.json({ data: server });
+    return response.json({ data: await requireServer(request.params.serverId) });
   });
   app.post('/api/servers/:serverId/system/packages/inspect', requirePanelRouteAccess, async (request, response) => {
-    const server = await registry.getServer(request.params.serverId);
-    if (!server) throw new RegistryError('server_not_found', 'Server not found', 404);
+    const server = await requireServer(request.params.serverId);
     await ensureResourceJobIdle(jobRegistry, 'system', server.id);
     const job = await jobRegistry.enqueue({
       serverId: server.id,
@@ -228,8 +269,7 @@ export function createApp({
     return response.status(202).json({ data: job });
   });
   app.post('/api/servers/:serverId/system/upgrade', requirePanelRouteAccess, async (request, response) => {
-    const server = await registry.getServer(request.params.serverId);
-    if (!server) throw new RegistryError('server_not_found', 'Server not found', 404);
+    const server = await requireServer(request.params.serverId);
     if (request.body?.confirmation !== 'upgrade-yunpanel') {
       throw new RegistryError('upgrade_confirmation_required', 'Explicit YunPanel upgrade confirmation is required', 400);
     }
@@ -245,6 +285,7 @@ export function createApp({
     return response.status(202).json({ data: job });
   });
   app.post('/api/servers/:serverId/heartbeat', async (request, response) => {
+    rejectLegacyAgentTransport();
     const server = await registry.heartbeat({
       serverId: request.params.serverId,
       agentToken: bearerToken(request),
@@ -255,12 +296,14 @@ export function createApp({
     return response.json({ data: server });
   });
   app.get('/api/servers/:serverId/commands/next', async (request, response) => {
+    rejectLegacyAgentTransport();
     await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
     const claimed = await jobRegistry.claimNext(request.params.serverId);
     if (!claimed) return response.status(204).end();
     return response.json({ data: claimed });
   });
   app.get('/api/servers/:serverId/applications/:applicationId/environment', async (request, response) => {
+    rejectLegacyAgentTransport();
     await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application || application.serverId !== request.params.serverId || application.type !== 'node') {
@@ -272,6 +315,7 @@ export function createApp({
     return response.json({ data, environmentRevision: environment.savedRevision });
   });
   app.get('/api/servers/:serverId/applications/:applicationId/deployment-credential', async (request, response) => {
+    rejectLegacyAgentTransport();
     await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application || application.serverId !== request.params.serverId || !['static', 'node'].includes(application.type)) {
@@ -280,6 +324,7 @@ export function createApp({
     return response.json({ data: await applicationEnvironmentRegistry.materializeDeploymentCredential(application.id) });
   });
   app.post('/api/servers/:serverId/commands/:jobId/result', async (request, response) => {
+    rejectLegacyAgentTransport();
     const jobId = request.params.jobId;
     const reconciliation = (async () => {
       await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
@@ -304,15 +349,13 @@ export function createApp({
     }
   });
 
-  app.get('/api/applications', requirePanelRouteAccess, async (request, response) => response.json({ data: await applicationRegistry.listApplications() }));
+  app.get('/api/applications', requirePanelRouteAccess, async (request, response) => response.json({ data: localOnly(await applicationRegistry.listApplications()) }));
   app.get('/api/applications/:applicationId', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     return response.json({ data: application });
   });
   app.get('/api/applications/:applicationId/environment', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     return response.json({
       data: await applicationEnvironmentRegistry.listVariables(application.id),
       environment: await applicationEnvironmentRegistry.environmentStatus(application.id, { currentReleaseId: application.currentReleaseId }),
@@ -320,15 +363,13 @@ export function createApp({
     });
   });
   app.get('/api/applications/:applicationId/environment/status', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     return response.json({
       data: await applicationEnvironmentRegistry.environmentStatus(application.id, { currentReleaseId: application.currentReleaseId }),
     });
   });
   app.post('/api/applications/:applicationId/environment/import', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     if (application.type !== 'node') throw new ApplicationRegistryError('environment_import_not_supported', 'Environment import is available only for Node applications', 409);
     await ensureEnvironmentMutable(application, jobRegistry);
     return response.json({ data: await applicationEnvironmentRegistry.importVariables({
@@ -337,16 +378,14 @@ export function createApp({
     }) });
   });
   app.get('/api/applications/:applicationId/deployment-credential', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     return response.json({
       data: await applicationEnvironmentRegistry.deploymentCredential(application.id),
       secretStoreConfigured: applicationEnvironmentRegistry.secretStoreConfigured,
     });
   });
   app.put('/api/applications/:applicationId/deployment-credential', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     await ensureEnvironmentMutable(application, jobRegistry);
     return response.json({ data: await applicationEnvironmentRegistry.setDeploymentCredential({
       applicationId: application.id,
@@ -354,8 +393,7 @@ export function createApp({
     }) });
   });
   app.delete('/api/applications/:applicationId/deployment-credential', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     await ensureEnvironmentMutable(application, jobRegistry);
     const confirmation = `delete-deployment-credential:${application.id}`;
     if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)
@@ -366,16 +404,14 @@ export function createApp({
     return response.status(204).end();
   });
   app.get('/api/applications/:applicationId/github-webhook', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     return response.json({
       data: await applicationEnvironmentRegistry.webhookSecret(application.id),
       secretStoreConfigured: applicationEnvironmentRegistry.secretStoreConfigured,
     });
   });
   app.put('/api/applications/:applicationId/github-webhook', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     await ensureEnvironmentMutable(application, jobRegistry);
     if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)
       || Object.keys(request.body).length !== 1 || typeof request.body.secret !== 'string') {
@@ -387,8 +423,7 @@ export function createApp({
     }) });
   });
   app.delete('/api/applications/:applicationId/github-webhook', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     await ensureEnvironmentMutable(application, jobRegistry);
     const confirmation = `delete-github-webhook:${application.id}`;
     if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)
@@ -399,8 +434,7 @@ export function createApp({
     return response.status(204).end();
   });
   app.put('/api/applications/:applicationId/environment/:key', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     await ensureEnvironmentMutable(application, jobRegistry);
     const variable = await applicationEnvironmentRegistry.setVariable({
       applicationId: application.id,
@@ -411,18 +445,22 @@ export function createApp({
     return response.json({ data: variable });
   });
   app.delete('/api/applications/:applicationId/environment/:key', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     await ensureEnvironmentMutable(application, jobRegistry);
     await applicationEnvironmentRegistry.deleteVariable(application.id, request.params.key);
     return response.status(204).end();
   });
   app.post('/api/applications', requirePanelRouteAccess, async (request, response) => {
     const type = request.body?.type ?? 'static';
+    const requestedServerId = request.body?.serverId ?? null;
+    if (localServerId !== null && requestedServerId !== null && requestedServerId !== localServerId) {
+      throw new ApplicationRegistryError('local_server_required', 'Applications can be created only on this panel host', 404);
+    }
+    const serverId = localServerId ?? requestedServerId;
     let application;
     if (type === 'static') {
       application = await applicationRegistry.createApplication({
-        serverId: request.body?.serverId,
+        serverId,
         name: request.body?.name,
         repositoryUrl: request.body?.repositoryUrl,
         branch: request.body?.branch ?? 'main',
@@ -431,7 +469,7 @@ export function createApp({
       });
     } else if (type === 'node') {
       application = await applicationRegistry.createNodeApplication({
-        serverId: request.body?.serverId,
+        serverId,
         name: request.body?.name,
         repositoryUrl: request.body?.repositoryUrl,
         branch: request.body?.branch ?? 'main',
@@ -444,15 +482,13 @@ export function createApp({
     return response.status(201).json({ data: application });
   });
   app.post('/api/applications/:applicationId/deploy', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     const gitTarget = deploymentGitTarget(request.body, application.branch);
     const queued = await queueDeploy({ applicationId: application.id, gitTarget });
     return response.status(202).json({ data: { application: queued.application, job: queued.job } });
   });
   app.post('/api/applications/:applicationId/rollback', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     if (!['static', 'node'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
@@ -492,8 +528,7 @@ export function createApp({
     }
   });
   app.post('/api/applications/:applicationId/restart', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     if (application.type !== 'node') throw new ApplicationRegistryError('restart_not_supported', 'Restart is only supported for Node applications', 409);
     if (!application.currentReleaseId) throw new ApplicationRegistryError('application_not_deployed', 'Application has no active release to restart', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
@@ -516,14 +551,12 @@ export function createApp({
     return response.status(202).json({ data: job });
   });
   app.get('/api/applications/:applicationId/status', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     if (application.type !== 'node') throw new ApplicationRegistryError('status_not_supported', 'Process status is only supported for Node applications', 409);
     return response.json({ data: await latestNodeStatusJob(jobRegistry, application.id) });
   });
   app.post('/api/applications/:applicationId/status/refresh', requirePanelRouteAccess, async (request, response) => {
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const application = await requireApplication(request.params.applicationId);
     if (application.type !== 'node') throw new ApplicationRegistryError('status_not_supported', 'Process status is only supported for Node applications', 409);
     if (!application.currentReleaseId) throw new ApplicationRegistryError('application_not_deployed', 'Application has no active release to inspect', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
@@ -544,15 +577,18 @@ export function createApp({
     return response.status(202).json({ data: job });
   });
 
-  app.get('/api/domains', requirePanelRouteAccess, async (request, response) => response.json({ data: await domainRegistry.listDomains() }));
+  app.get('/api/domains', requirePanelRouteAccess, async (request, response) => response.json({ data: localOnly(await domainRegistry.listDomains()) }));
   app.get('/api/domains/:domainId', requirePanelRouteAccess, async (request, response) => {
-    const domain = await domainRegistry.getDomain(request.params.domainId);
-    if (!domain) return response.status(404).json({ error: { code: 'domain_not_found', message: 'Not found' } });
+    const domain = await requireDomain(request.params.domainId);
     return response.json({ data: domain });
   });
   app.post('/api/domains', requirePanelRouteAccess, async (request, response) => {
+    const requestedServerId = request.body?.serverId ?? null;
+    if (localServerId !== null && requestedServerId !== null && requestedServerId !== localServerId) {
+      throw new DomainRegistryError('local_server_required', 'Domains can be created only on this panel host', 404);
+    }
     const domain = await domainRegistry.createDomain({
-      serverId: request.body?.serverId,
+      serverId: localServerId ?? requestedServerId,
       primaryDomain: request.body?.primaryDomain,
       aliases: request.body?.aliases ?? [],
       targetType: request.body?.targetType,
@@ -565,8 +601,7 @@ export function createApp({
     return response.status(201).json({ data: domain });
   });
   app.post('/api/domains/:domainId/stage', requirePanelRouteAccess, async (request, response) => {
-    const domain = await domainRegistry.getDomain(request.params.domainId);
-    if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+    const domain = await requireDomain(request.params.domainId);
     await ensureResourceJobIdle(jobRegistry, 'domain', domain.id);
     const tls = await resolveDomainTls(domain, certificateRegistry, certificateMaterialManager, localServerId);
     const payload = {
@@ -583,8 +618,7 @@ export function createApp({
     return response.status(202).json({ data: job });
   });
   app.post('/api/domains/:domainId/activate', requirePanelRouteAccess, async (request, response) => {
-    const domain = await domainRegistry.getDomain(request.params.domainId);
-    if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+    const domain = await requireDomain(request.params.domainId);
     if (domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum) throw new DomainRegistryError('staged_revision_required', 'Current desired domain revision must be staged before activation', 409);
     await ensureResourceJobIdle(jobRegistry, 'domain', domain.id);
     const job = await jobRegistry.enqueue({
@@ -602,8 +636,7 @@ export function createApp({
     return response.status(202).json({ data: job });
   });
   app.post('/api/domains/:domainId/certificates/issue', requirePanelRouteAccess, async (request, response) => {
-    const domain = await domainRegistry.getDomain(request.params.domainId);
-    if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+    const domain = await requireDomain(request.params.domainId);
     if (domain.httpsMode !== 'managed') throw new CertificateRegistryError('https_not_managed', 'Domain must use managed HTTPS before requesting a certificate', 409);
     const intent = await resolveCertificateIssueIntent({
       body: request.body,
@@ -651,17 +684,15 @@ export function createApp({
   });
 
   app.get('/api/certificates', requirePanelRouteAccess, async (request, response) => {
-    const certificates = await certificateRegistry.listCertificates();
+    const certificates = localOnly(await certificateRegistry.listCertificates());
     return response.json({ data: certificates.map((certificate) => certificatePublicView(certificate)) });
   });
   app.get('/api/certificates/:certificateId', requirePanelRouteAccess, async (request, response) => {
-    const certificate = await certificateRegistry.getCertificate(request.params.certificateId);
-    if (!certificate) throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
+    const certificate = await requireCertificate(request.params.certificateId);
     return response.json({ data: certificatePublicView(certificate) });
   });
   app.post('/api/certificates/:certificateId/renew', requirePanelRouteAccess, async (request, response) => {
-    const certificate = await certificateRegistry.getCertificate(request.params.certificateId);
-    if (!certificate) throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
+    const certificate = await requireCertificate(request.params.certificateId);
     if (certificate.source !== 'acme' || certificate.renewalMode !== 'automatic') {
       throw new CertificateRegistryError('certificate_not_renewable', 'Only managed ACME certificates can be renewed', 409);
     }
@@ -701,21 +732,24 @@ export function createApp({
 
   app.get('/api/jobs', requirePanelRouteAccess, async (request, response) => {
     await Promise.allSettled(reconciliationJobs.values());
+    if (localServerId !== null && request.query.serverId && request.query.serverId !== localServerId) {
+      throw new JobRegistryError('local_server_required', 'Jobs can be listed only for this panel host', 404);
+    }
     const jobs = await jobRegistry.listJobs({
-      serverId: request.query.serverId || null,
+      serverId: localServerId ?? request.query.serverId ?? null,
       resourceType: request.query.resourceType || null,
       resourceId: request.query.resourceId || null,
       status: request.query.status || null,
     });
-    return response.json({ data: jobs.map(jobPublicView) });
+    return response.json({ data: localOnly(jobs).map(jobPublicView) });
   });
   app.get('/api/jobs/:jobId', requirePanelRouteAccess, async (request, response) => {
     await reconciliationJobs.get(request.params.jobId)?.catch(() => {});
-    const job = await jobRegistry.getJob(request.params.jobId);
-    if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
+    const job = await requireJob(request.params.jobId);
     return response.json({ data: jobPublicView(job) });
   });
   app.post('/api/jobs/:jobId/cancel', requirePanelRouteAccess, async (request, response) => {
+    await requireJob(request.params.jobId);
     const job = await jobRegistry.cancel(request.params.jobId);
     if (job.resourceType === 'application') {
       const application = await applicationRegistry.getApplication(job.resourceId);

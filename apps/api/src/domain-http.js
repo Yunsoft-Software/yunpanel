@@ -81,13 +81,30 @@ async function assertDomainUpdateIdle(domainId, { jobRegistry = null, certificat
   }
 }
 
+async function requireLocalDomain(domainRegistry, domainId, localServerId) {
+  if (!localServerId) return null;
+  const domain = await domainRegistry.getDomain(domainId);
+  if (!domain || domain.serverId !== localServerId) {
+    throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+  }
+  return domain;
+}
+
+function localCreateServerId(requestedServerId, localServerId) {
+  if (!localServerId) return requestedServerId;
+  if (requestedServerId !== undefined && requestedServerId !== null && requestedServerId !== localServerId) {
+    throw new DomainRegistryError('local_server_required', 'Domains can be created only on this panel host', 404);
+  }
+  return localServerId;
+}
+
 // Transport mapping is separate from validation and persistence so parent/Website
 // references and error propagation can be tested without a network listener.
-export function createDomainHandler(domainRegistry) {
+export function createDomainHandler(domainRegistry, { localServerId = null } = {}) {
   return async (request, response, next) => {
     try {
       const domain = await domainRegistry.createDomain({
-        serverId: request.body?.serverId,
+        serverId: localCreateServerId(request.body?.serverId, localServerId),
         websiteId: request.body?.websiteId ?? null,
         primaryDomain: request.body?.primaryDomain,
         parentDomainId: request.body?.parentDomainId ?? null,
@@ -106,12 +123,13 @@ export function createDomainHandler(domainRegistry) {
   };
 }
 
-export function createDomainReparentPreviewHandler(domainRegistry) {
+export function createDomainReparentPreviewHandler(domainRegistry, { localServerId = null } = {}) {
   return async (request, response, next) => {
     try {
       if (!domainRegistry || typeof domainRegistry.previewDomainReparent !== 'function') {
         throw new DomainRegistryError('domain_reparent_unavailable', 'Domain reparent preview is unavailable', 503);
       }
+      await requireLocalDomain(domainRegistry, request.params.domainId, localServerId);
       const input = assertReparentPreviewBody(request.body);
       const preview = await domainRegistry.previewDomainReparent({ domainId: request.params.domainId, ...input });
       return response.json({ data: preview });
@@ -121,12 +139,13 @@ export function createDomainReparentPreviewHandler(domainRegistry) {
   };
 }
 
-export function createDomainUpdatePreviewHandler(domainRegistry) {
+export function createDomainUpdatePreviewHandler(domainRegistry, { localServerId = null } = {}) {
   return async (request, response, next) => {
     try {
       if (!domainRegistry || typeof domainRegistry.previewDomainUpdate !== 'function') {
         throw new DomainRegistryError('domain_update_unavailable', 'Domain update preview is unavailable', 503);
       }
+      await requireLocalDomain(domainRegistry, request.params.domainId, localServerId);
       const preview = await domainRegistry.previewDomainUpdate({ domainId: request.params.domainId, ...assertUpdatePreviewBody(request.body) });
       return response.json({ data: preview });
     } catch (error) {
@@ -141,6 +160,7 @@ export function createDomainUpdateHandler(domainRegistry, dependencies = {}) {
       if (!domainRegistry || typeof domainRegistry.previewDomainUpdate !== 'function' || typeof domainRegistry.updateDomain !== 'function') {
         throw new DomainRegistryError('domain_update_unavailable', 'Domain update is unavailable', 503);
       }
+      await requireLocalDomain(domainRegistry, request.params.domainId, dependencies.localServerId ?? null);
       const input = assertUpdateApplyBody(request.body);
       await assertDomainUpdateIdle(request.params.domainId, dependencies);
       const preview = await domainRegistry.previewDomainUpdate({ domainId: request.params.domainId, changes: input.changes });
@@ -162,12 +182,13 @@ export function createDomainUpdateHandler(domainRegistry, dependencies = {}) {
   };
 }
 
-export function createDomainReparentHandler(domainRegistry) {
+export function createDomainReparentHandler(domainRegistry, { localServerId = null } = {}) {
   return async (request, response, next) => {
     try {
       if (!domainRegistry || typeof domainRegistry.previewDomainReparent !== 'function' || typeof domainRegistry.reparentDomain !== 'function') {
         throw new DomainRegistryError('domain_reparent_unavailable', 'Domain reparent is unavailable', 503);
       }
+      await requireLocalDomain(domainRegistry, request.params.domainId, localServerId);
       const input = assertReparentApplyBody(request.body);
       const preview = await domainRegistry.previewDomainReparent({
         domainId: request.params.domainId,

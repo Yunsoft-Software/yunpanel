@@ -114,6 +114,23 @@ async function currentUpdatePreview({ websiteId, changes, websiteRegistry, domai
   return updatePreview(registryPlan, domains);
 }
 
+async function requireLocalWebsite(websiteRegistry, websiteId, localServerId) {
+  const website = await websiteRegistry.getWebsite(websiteId);
+  if (!website || (localServerId && website.serverId !== localServerId)) {
+    throw new WebsiteRegistryError('website_not_found', 'Website not found', 404);
+  }
+  return website;
+}
+
+function localListFilter(query, localServerId) {
+  const filter = listFilter(query);
+  if (!localServerId) return filter;
+  if (filter.serverId && filter.serverId !== localServerId) {
+    throw new WebsiteRegistryError('local_server_required', 'Websites can be listed only for this panel host', 404);
+  }
+  return { serverId: localServerId };
+}
+
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
@@ -121,7 +138,7 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry } = {}) {
+export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId = null } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.patch !== 'function') throw new Error('Express application is required');
   if (!websiteRegistry || typeof websiteRegistry.listWebsites !== 'function'
     || typeof websiteRegistry.getWebsite !== 'function' || typeof websiteRegistry.createWebsite !== 'function'
@@ -131,26 +148,27 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry } = {}
   if (!domainRegistry || typeof domainRegistry.listDomains !== 'function') throw new Error('Domain registry is required for Website relationships');
 
   app.get('/api/websites', requirePanelRouteAccess, asyncRoute(async (request, response) => (
-    response.json({ data: await websiteRegistry.listWebsites(listFilter(request.query)) })
+    response.json({ data: await websiteRegistry.listWebsites(localListFilter(request.query, localServerId)) })
   )));
 
   app.get('/api/websites/:websiteId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    const website = await websiteRegistry.getWebsite(request.params.websiteId);
-    if (!website) throw new WebsiteRegistryError('website_not_found', 'Website not found', 404);
+    const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     return response.json({ data: website });
   }));
 
   app.get('/api/websites/:websiteId/domains', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    const website = await websiteRegistry.getWebsite(request.params.websiteId);
-    if (!website) throw new WebsiteRegistryError('website_not_found', 'Website not found', 404);
+    const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const domains = (await domainRegistry.listDomains()).filter((domain) => domain.websiteId === website.id);
     return response.json({ data: domains });
   }));
 
   app.post('/api/websites', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = assertCreateBody(request.body);
+    if (localServerId && body.serverId !== undefined && body.serverId !== localServerId) {
+      throw new WebsiteRegistryError('local_server_required', 'Websites can be created only on this panel host', 404);
+    }
     const website = await websiteRegistry.createWebsite({
-      serverId: body.serverId,
+      serverId: localServerId ?? body.serverId,
       name: body.name,
       applicationId: body.applicationId ?? null,
       dockerWorkloadId: body.dockerWorkloadId ?? null,
@@ -162,6 +180,7 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry } = {}
 
   app.post('/api/websites/:websiteId/update-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const changes = assertPreviewBody(request.body);
+    await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const preview = await currentUpdatePreview({
       websiteId: request.params.websiteId,
       changes,
@@ -173,6 +192,7 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry } = {}
 
   app.patch('/api/websites/:websiteId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const input = assertApplyBody(request.body);
+    await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const preview = await currentUpdatePreview({
       websiteId: request.params.websiteId,
       changes: input.changes,

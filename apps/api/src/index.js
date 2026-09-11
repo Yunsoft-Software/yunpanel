@@ -55,11 +55,15 @@ const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRON
 const authStorePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStorePath), 'auth', 'auth.sqlite');
 const internalProxyToken = process.env.YUNPANEL_INTERNAL_PROXY_TOKEN;
 const publicOrigin = process.env.YUNPANEL_PUBLIC_ORIGIN ?? (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:5173' : undefined);
+const localServerId = process.env.YUNPANEL_LOCAL_SERVER_ID?.trim() || null;
 const certificateRenewalIntervalMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS ?? `${6 * 60 * 60 * 1000}`, 10);
 const certificateRenewBeforeMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEW_BEFORE_MS ?? `${30 * 24 * 60 * 60 * 1000}`, 10);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('YUNPANEL_API_PORT must be a valid TCP port');
 if (process.env.NODE_ENV !== 'development' && !/^[A-Za-z0-9_-]{43}$/.test(internalProxyToken ?? '')) {
   throw new Error('YUNPANEL_INTERNAL_PROXY_TOKEN is required in production');
+}
+if (process.env.NODE_ENV !== 'development' && !localServerId) {
+  throw new Error('YUNPANEL_LOCAL_SERVER_ID is required in production');
 }
 
 function reportLocalExecutorFault(error) {
@@ -146,8 +150,6 @@ const jobLogStore = createJobLogStore({ directoryPath: jobLogStorePath });
 await jobLogStore.init();
 const journalLogReader = createJournalLogReader();
 const nginxLogReader = createNginxLogReader();
-const localServerId = process.env.YUNPANEL_LOCAL_SERVER_ID?.trim() || null;
-
 await prepareRootAuthStateOwnership({ filePath: authStorePath });
 const liveSessions = createLiveSessionRegistry();
 const authStore = createAuthStore({ filePath: authStorePath, liveSessions });
@@ -173,6 +175,7 @@ const listener = createAuthenticatedApi({
     applicationRegistry,
     applicationEnvironmentRegistry,
     queueApplicationDeploy: applicationDeployQueue,
+    localServerId,
   }),
   createHandler: () => createApp({
     registry,

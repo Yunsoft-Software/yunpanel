@@ -27,22 +27,30 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry } = {}) {
+export function mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry, localServerId = null } = {}) {
   if (!app || typeof app.post !== 'function'
     || !applicationRegistry || typeof applicationRegistry.previewNodeConfiguration !== 'function'
-    || typeof applicationRegistry.updateNodeConfiguration !== 'function'
+    || typeof applicationRegistry.updateNodeConfiguration !== 'function' || typeof applicationRegistry.getApplication !== 'function'
     || !jobRegistry || typeof jobRegistry.listJobs !== 'function') {
     throw new Error('Application configuration dependencies are required');
   }
 
   app.post('/api/applications/:applicationId/configuration-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = exactBody(request.body, PREVIEW_FIELDS);
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application || (localServerId && application.serverId !== localServerId)) {
+      throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    }
     await ensureApplicationIdle(jobRegistry, request.params.applicationId);
     return response.json({ data: await applicationRegistry.previewNodeConfiguration(request.params.applicationId, body.runtime) });
   }));
 
   app.post('/api/applications/:applicationId/configuration', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = exactBody(request.body, APPLY_FIELDS);
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application || (localServerId && application.serverId !== localServerId)) {
+      throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    }
     await ensureApplicationIdle(jobRegistry, request.params.applicationId);
     return response.json({ data: await applicationRegistry.updateNodeConfiguration({
       applicationId: request.params.applicationId,

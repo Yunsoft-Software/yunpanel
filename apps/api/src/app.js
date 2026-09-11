@@ -57,6 +57,26 @@ import { createWebsiteRegistry, WebsiteRegistryError } from './website-registry.
 
 export { API_VERSION } from './core-app.js';
 
+function localServerRegistryView(registry, localServerId) {
+  if (!localServerId) return registry;
+  return new Proxy(registry, {
+    get(target, property) {
+      if (property === 'getServer') {
+        return async (serverId) => {
+          if (serverId !== localServerId) return null;
+          const server = await target.getServer(serverId);
+          return server?.executionMode === 'local' ? server : null;
+        };
+      }
+      if (property === 'listServers') {
+        return async () => (await target.listServers()).filter((server) => server.id === localServerId && server.executionMode === 'local');
+      }
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 export function createApp({
   registry = createServerRegistry(),
   jobRegistry = createJobRegistry(),
@@ -115,6 +135,7 @@ export function createApp({
     dnsProviderCredentialRegistry,
   });
   const app = express();
+  const localRegistry = localServerRegistryView(registry, localServerId);
   const files = siteFileManager ?? createSiteFileManager({ websiteRegistry, localServerId });
   const readiness = dnsReadinessService ?? createDnsReadinessService({
     dnsHostingRegistry,
@@ -132,14 +153,14 @@ export function createApp({
     jobRegistry,
     localServerId,
   });
-  app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry));
-  app.post('/api/domains/:domainId/update-preview', requirePanelRouteAccess, createDomainUpdatePreviewHandler(domainRegistry));
-  app.patch('/api/domains/:domainId', requirePanelRouteAccess, createDomainUpdateHandler(domainRegistry, { jobRegistry, certificateRegistry }));
-  app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry));
-  app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry));
-  mountSiteCreateRoutes(app, { registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry });
+  app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry, { localServerId }));
+  app.post('/api/domains/:domainId/update-preview', requirePanelRouteAccess, createDomainUpdatePreviewHandler(domainRegistry, { localServerId }));
+  app.patch('/api/domains/:domainId', requirePanelRouteAccess, createDomainUpdateHandler(domainRegistry, { jobRegistry, certificateRegistry, localServerId }));
+  app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry, { localServerId }));
+  app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry, { localServerId }));
+  mountSiteCreateRoutes(app, { registry: localRegistry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry, localServerId });
   mountResourceImpactRoutes(app, {
-    registry,
+    registry: localRegistry,
     applicationRegistry,
     websiteRegistry,
     domainRegistry,
@@ -147,6 +168,7 @@ export function createApp({
     jobRegistry,
     dnsHostingRegistry,
     mailDomainRegistry,
+    localServerId,
     additionalProviders: {
       dockerWorkloads: async ({ dockerWorkloadId }) => {
         if (!dockerWorkloadId) return [];
@@ -175,21 +197,22 @@ export function createApp({
     localServerId,
     mailDomainRegistry,
   });
-  mountMailboxRoutes(app, { mailboxRegistry });
-  mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry });
-  mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry });
-  mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry });
-  mountWebsiteRoutes(app, { websiteRegistry, domainRegistry });
+  mountMailboxRoutes(app, { mailboxRegistry, mailDomainRegistry, domainRegistry, localServerId });
+  mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry, localServerId });
+  mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry, localServerId });
+  mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry, localServerId });
+  mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId });
   mountWebsiteMigrationRoutes(app, {
     websiteRegistry,
     domainRegistry,
     applicationRegistry,
     websiteMigrationPolicy,
     migrationLedger,
+    localServerId,
   });
-  mountManagedServiceRoutes(app, { registry, jobRegistry });
-  mountNodeRuntimeRoutes(app, { registry, jobRegistry });
-  mountDatabaseRoutes(app, { registry, jobRegistry });
+  mountManagedServiceRoutes(app, { registry: localRegistry, jobRegistry });
+  mountNodeRuntimeRoutes(app, { registry: localRegistry, jobRegistry });
+  mountDatabaseRoutes(app, { registry: localRegistry, jobRegistry });
   mountLogRoutes(app, {
     registry, applicationRegistry, jobRegistry, journalLogReader, nginxLogReader, jobLogStore, localServerId,
   });

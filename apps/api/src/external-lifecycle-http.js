@@ -111,6 +111,52 @@ export function mountExternalLifecycleRoutes(app, {
   }
   const zoneLocks = new Map();
 
+  async function localDomain(webDomainId, resourceLabel) {
+    if (localServerId === null) return webDomainId ? domainRegistry.getDomain(webDomainId) : null;
+    if (!webDomainId) {
+      throw new ExternalLifecycleRegistryError('local_web_domain_required', `${resourceLabel} must be linked to a Domain on this panel host`, 404);
+    }
+    const domain = await domainRegistry.getDomain(webDomainId);
+    if (!domain || domain.serverId !== localServerId) {
+      throw new ExternalLifecycleRegistryError('local_web_domain_required', `${resourceLabel} must be linked to a Domain on this panel host`, 404);
+    }
+    return domain;
+  }
+
+  async function localZones() {
+    const zones = await dnsHostingRegistry.listZones();
+    if (localServerId === null) return zones;
+    const local = await Promise.all(zones.map(async (zone) => ({
+      zone,
+      domain: zone.webDomainId ? await domainRegistry.getDomain(zone.webDomainId) : null,
+    })));
+    return local.filter(({ domain }) => domain?.serverId === localServerId).map(({ zone }) => zone);
+  }
+
+  async function localZone(dnsZoneId) {
+    const zone = await dnsHostingRegistry.getZone(dnsZoneId);
+    if (!zone) throw new ExternalLifecycleRegistryError('dns_zone_not_found', 'DNS zone was not found', 404);
+    await localDomain(zone.webDomainId, 'DNS zone');
+    return zone;
+  }
+
+  async function localMailDomains() {
+    const mailDomains = await mailDomainRegistry.listMailDomains();
+    if (localServerId === null) return mailDomains;
+    const local = await Promise.all(mailDomains.map(async (mailDomain) => ({
+      mailDomain,
+      domain: mailDomain.webDomainId ? await domainRegistry.getDomain(mailDomain.webDomainId) : null,
+    })));
+    return local.filter(({ domain }) => domain?.serverId === localServerId).map(({ mailDomain }) => mailDomain);
+  }
+
+  async function localMailDomain(mailDomainId) {
+    const mailDomain = await mailDomainRegistry.getMailDomain(mailDomainId);
+    if (!mailDomain) throw new ExternalLifecycleRegistryError('mail_domain_not_found', 'Mail domain was not found', 404);
+    await localDomain(mailDomain.webDomainId, 'Mail domain');
+    return mailDomain;
+  }
+
   async function withZoneLock(dnsZoneId, operation) {
     const previous = zoneLocks.get(dnsZoneId) ?? Promise.resolve();
     let release;
@@ -133,8 +179,7 @@ export function mountExternalLifecycleRoutes(app, {
 
   async function buildRecordPreview(dnsZoneId, body) {
     const input = recordInput(body, body.previewDigest === undefined ? RECORD_PREVIEW_FIELDS : RECORD_APPLY_FIELDS);
-    const zone = await dnsHostingRegistry.getZone(dnsZoneId);
-    if (!zone) throw new ExternalLifecycleRegistryError('dns_zone_not_found', 'DNS zone was not found', 404);
+    const zone = await localZone(dnsZoneId);
     if (zone.revision !== input.expectedRevision) {
       throw new ExternalLifecycleRegistryError('dns_zone_revision_conflict', 'DNS zone changed after the request was prepared', 409);
     }
@@ -202,16 +247,15 @@ export function mountExternalLifecycleRoutes(app, {
 
   app.get('/api/dns-zones', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    return response.json({ data: await dnsHostingRegistry.listZones() });
+    return response.json({ data: await localZones() });
   }));
   app.get('/api/dns-zones/:dnsZoneId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    const resource = await dnsHostingRegistry.getZone(request.params.dnsZoneId);
-    if (!resource) throw new ExternalLifecycleRegistryError('dns_zone_not_found', 'DNS zone was not found', 404);
-    return response.json({ data: resource });
+    return response.json({ data: await localZone(request.params.dnsZoneId) });
   }));
   app.post('/api/dns-zones', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = createInput(request.body);
+    await localDomain(body.webDomainId, 'DNS zone');
     const resource = await dnsHostingRegistry.createZone({
       zoneName: body.name,
       webDomainId: body.webDomainId,
@@ -221,9 +265,7 @@ export function mountExternalLifecycleRoutes(app, {
   }));
   app.get('/api/dns-zones/:dnsZoneId/provider-credential', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    if (!(await dnsHostingRegistry.getZone(request.params.dnsZoneId))) {
-      throw new ExternalLifecycleRegistryError('dns_zone_not_found', 'DNS zone was not found', 404);
-    }
+    await localZone(request.params.dnsZoneId);
     return response.json({ data: await dnsProviderCredentialRegistry.getForZone(request.params.dnsZoneId) });
   }));
   app.put('/api/dns-zones/:dnsZoneId/provider-credential', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -238,6 +280,7 @@ export function mountExternalLifecycleRoutes(app, {
     if (body.confirmation !== expected) {
       throw new ExternalLifecycleRegistryError('dns_provider_credential_confirmation_required', `Confirm DNS provider credential with ${expected}`);
     }
+    await localZone(request.params.dnsZoneId);
     const credential = await withZoneLock(request.params.dnsZoneId, async () => {
       await assertZoneIdle(request.params.dnsZoneId);
       return dnsProviderCredentialRegistry.setCredential({
@@ -260,6 +303,7 @@ export function mountExternalLifecycleRoutes(app, {
     if (body.confirmation !== expected) {
       throw new ExternalLifecycleRegistryError('dns_provider_credential_confirmation_required', `Confirm DNS provider credential deletion with ${expected}`);
     }
+    await localZone(request.params.dnsZoneId);
     await withZoneLock(request.params.dnsZoneId, async () => {
       await assertZoneIdle(request.params.dnsZoneId);
       await dnsProviderCredentialRegistry.deleteForZone(request.params.dnsZoneId);
@@ -275,6 +319,7 @@ export function mountExternalLifecycleRoutes(app, {
       || !Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 1) {
       throw new ExternalLifecycleRegistryError('dns_readiness_input_invalid', 'DNS readiness refresh requires one positive expectedRevision');
     }
+    await localZone(request.params.dnsZoneId);
     const result = await withZoneLock(request.params.dnsZoneId, async () => {
       await assertZoneIdle(request.params.dnsZoneId);
       const readiness = await dnsReadinessService.inspectZone(request.params.dnsZoneId);
@@ -330,22 +375,19 @@ export function mountExternalLifecycleRoutes(app, {
 
   app.get('/api/mail-domains', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    return response.json({ data: await mailDomainRegistry.listMailDomains() });
+    return response.json({ data: await localMailDomains() });
   }));
   app.get('/api/mail-domains/:mailDomainId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    const resource = await mailDomainRegistry.getMailDomain(request.params.mailDomainId);
-    if (!resource) throw new ExternalLifecycleRegistryError('mail_domain_not_found', 'Mail domain was not found', 404);
-    return response.json({ data: resource });
+    return response.json({ data: await localMailDomain(request.params.mailDomainId) });
   }));
   app.get('/api/mail-domains/:mailDomainId/config-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    const resource = await mailDomainRegistry.getMailDomain(request.params.mailDomainId);
-    if (!resource) throw new ExternalLifecycleRegistryError('mail_domain_not_found', 'Mail domain was not found', 404);
-    return response.json({ data: mailConfigurationPreview(resource) });
+    return response.json({ data: mailConfigurationPreview(await localMailDomain(request.params.mailDomainId)) });
   }));
   app.post('/api/mail-domains', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = createInput(request.body);
+    await localDomain(body.webDomainId, 'Mail domain');
     const resource = await mailDomainRegistry.createMailDomain({
       domainName: body.name,
       webDomainId: body.webDomainId,

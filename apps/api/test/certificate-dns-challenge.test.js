@@ -8,6 +8,7 @@ import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
 import { createDnsProviderCredentialRegistry } from '../src/dns-provider-credential-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
+import { reconcileCompletedJob } from '../src/job-reconciliation.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
@@ -98,13 +99,11 @@ test('local Owner issues and renews a wildcard certificate through encrypted Clo
     assert.equal(certificate.challenge.credentialId, credential.id);
     assert.doesNotMatch(JSON.stringify(issued.payload), new RegExp(providerToken));
 
-    const issueClaim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
-    });
-    assert.equal(issueClaim.payload.data.envelope.operation, OPERATIONS.SSL_ISSUE);
-    assert.deepEqual(issueClaim.payload.data.envelope.payload.domains, ['example.com', '*.example.com']);
-    assert.deepEqual(issueClaim.payload.data.envelope.payload.challenge, certificate.challenge);
-    assert.doesNotMatch(JSON.stringify(issueClaim.payload), new RegExp(providerToken));
+    const issueClaim = await jobRegistry.claimNext(enrolled.server.id);
+    assert.equal(issueClaim.envelope.operation, OPERATIONS.SSL_ISSUE);
+    assert.deepEqual(issueClaim.envelope.payload.domains, ['example.com', '*.example.com']);
+    assert.deepEqual(issueClaim.envelope.payload.challenge, certificate.challenge);
+    assert.doesNotMatch(JSON.stringify(issueClaim), new RegExp(providerToken));
 
     const result = {
       certName: 'example.com',
@@ -121,11 +120,10 @@ test('local Owner issues and renews a wildcard certificate through encrypted Clo
       staging: false,
       status: 'issued',
     };
-    const completed = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${issueClaim.payload.data.job.id}/result`,
-      { method: 'POST', token: enrolled.agentToken, body: { status: 'succeeded', result } },
-    );
-    assert.equal(completed.response.status, 200);
+    const completed = await jobRegistry.complete({
+      serverId: enrolled.server.id, jobId: issueClaim.job.id, status: 'succeeded', result,
+    });
+    await reconcileCompletedJob({ domainRegistry, certificateRegistry, job: completed });
     assert.equal((await domainRegistry.getDomain(domain.id)).certificateId, certificate.id);
 
     const invalidRenewal = await requestJson(`${baseUrl}/api/certificates/${certificate.id}/renew`, {
@@ -139,13 +137,10 @@ test('local Owner issues and renews a wildcard certificate through encrypted Clo
     });
     assert.equal(renewal.response.status, 202);
     assert.doesNotMatch(JSON.stringify(renewal.payload), new RegExp(providerToken));
-    const renewalClaim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
-    });
-    assert.equal(renewalClaim.response.status, 200);
-    assert.equal(renewalClaim.payload.data.envelope.operation, OPERATIONS.SSL_RENEW);
-    assert.deepEqual(renewalClaim.payload.data.envelope.payload.challenge, certificate.challenge);
-    assert.doesNotMatch(JSON.stringify(renewalClaim.payload), new RegExp(providerToken));
+    const renewalClaim = await jobRegistry.claimNext(enrolled.server.id);
+    assert.equal(renewalClaim.envelope.operation, OPERATIONS.SSL_RENEW);
+    assert.deepEqual(renewalClaim.envelope.payload.challenge, certificate.challenge);
+    assert.doesNotMatch(JSON.stringify(renewalClaim), new RegExp(providerToken));
   });
 });
 
@@ -175,7 +170,7 @@ test('DNS-01 refuses remote Domains and zones outside the current hostname set',
         challenge: { type: 'dns-01', dnsZoneId: zone.id, wildcard: true },
       },
     });
-    assert.equal(response.response.status, 409);
-    assert.equal(response.payload.error.code, 'local_dns_challenge_required');
+    assert.equal(response.response.status, 404);
+    assert.equal(response.payload.error.code, 'domain_not_found');
   });
 });

@@ -41,13 +41,19 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
 
   app.post('/api/sites/create-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = previewBody(request.body);
-    return response.json({ data: await previewSiteCreate({ input: body.input, ...dependencies }) });
+    if (dependencies.localServerId && body.input?.serverId !== dependencies.localServerId) {
+      throw new SiteCreateError('local_server_required', 'Sites can be created only on this panel host', 404);
+    }
+    return response.json({ data: await previewSiteCreate({ input: { ...body.input, serverId: dependencies.localServerId ?? body.input?.serverId }, ...dependencies }) });
   }));
 
   app.post('/api/sites', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = applyBody(request.body);
+    if (dependencies.localServerId && body.input?.serverId !== dependencies.localServerId) {
+      throw new SiteCreateError('local_server_required', 'Sites can be created only on this panel host', 404);
+    }
     const result = await createSite({
-      input: body.input,
+      input: { ...body.input, serverId: dependencies.localServerId ?? body.input?.serverId },
       previewDigest: body.previewDigest,
       confirmation: body.confirmation,
       ...dependencies,

@@ -34,7 +34,7 @@ function signedHeaders(body, overrides = {}) {
   };
 }
 
-async function fixture(t) {
+async function fixture(t, { localServerId = null } = {}) {
   const serverRegistry = createServerRegistry();
   const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'webhook-host' });
   const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'webhook-host' });
@@ -66,7 +66,7 @@ async function fixture(t) {
       response.end('{"error":{"code":"not_found"}}');
     },
     publicWebhookHandler: createGithubWebhookHandler({
-      applicationRegistry, applicationEnvironmentRegistry, queueApplicationDeploy,
+      applicationRegistry, applicationEnvironmentRegistry, queueApplicationDeploy, localServerId,
     }),
   });
   const server = http.createServer(listener).listen(0, '127.0.0.1');
@@ -84,6 +84,16 @@ async function send(url, payload, { headers = {}, method = 'POST' } = {}) {
   const response = await fetch(url, { method, headers: signedHeaders(body, headers), body: method === 'POST' ? body : undefined });
   return { response, payload: await response.json() };
 }
+
+test('local panel hides a webhook that belongs to another Server before secret materialization or deploy', async (t) => {
+  const state = await fixture(t, { localServerId: '00000000-0000-4000-8000-000000000000' });
+  const result = await send(state.url, {
+    ref: 'refs/heads/main', after: COMMIT, repository: { full_name: 'Yunsoft-Software/webhook-app' },
+  });
+  assert.equal(result.response.status, 404);
+  assert.equal(result.payload.error.code, 'github_webhook_not_found');
+  assert.deepEqual(await state.jobRegistry.listJobs(), []);
+});
 
 test('signed configured-branch push queues one immutable durable deployment and replays by delivery ID', async (t) => {
   const state = await fixture(t);

@@ -113,6 +113,7 @@ export function mountWebsiteMigrationRoutes(app, {
   bind = bindLegacyDomainToWebsite,
   create = createWebsiteForMigration,
   rollbackBinding = rollbackWebsiteMigrationBinding,
+  localServerId = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
   if (!websiteRegistry || typeof websiteRegistry.listWebsites !== 'function' || typeof websiteRegistry.getWebsite !== 'function'
@@ -128,11 +129,24 @@ export function mountWebsiteMigrationRoutes(app, {
     || typeof migrationLedger.beginRollback !== 'function' || typeof migrationLedger.markRolledBack !== 'function') throw new Error('Website migration ledger is required');
   if ([preview, bind, create, rollbackBinding].some((adapter) => typeof adapter !== 'function')) throw new Error('Website migration adapters are required');
 
+  const localOnly = (resources) => localServerId
+    ? resources.filter((resource) => resource.serverId === localServerId)
+    : resources;
+  const scopedPreview = ({ domains, websites, applications }) => preview({
+    domains: localOnly(domains),
+    websites: localOnly(websites),
+    applications: localOnly(applications),
+  });
+  async function requireLocalResource(registry, method, id, code, message) {
+    if (!localServerId) return;
+    const resource = await registry[method](id);
+    if (!resource || resource.serverId !== localServerId) throw new WebsiteMigrationPolicyError(code, message, 404);
+  }
   async function currentPreview() {
     const [domains, websites, applications] = await Promise.all([
       domainRegistry.listDomains(), websiteRegistry.listWebsites(), applicationRegistry.listApplications(),
     ]);
-    return preview({ domains, websites, applications });
+    return scopedPreview({ domains, websites, applications });
   }
 
   app.get('/api/websites/migration/preview', requirePanelRouteAccess, asyncRoute(async (_request, response) => response.json({ data: await currentPreview() })));
@@ -144,13 +158,17 @@ export function mountWebsiteMigrationRoutes(app, {
 
   app.post('/api/websites/migration/create-website', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const input = assertCreateBody(request.body);
-    const result = await create({ ...input, domainRegistry, websiteRegistry, applicationRegistry, migrationLedger, preview });
+    await requireLocalResource(domainRegistry, 'getDomain', input.domainId, 'domain_not_found', 'Domain not found');
+    await requireLocalResource(applicationRegistry, 'getApplication', input.applicationId, 'application_not_found', 'Application not found');
+    const result = await create({ ...input, domainRegistry, websiteRegistry, applicationRegistry, migrationLedger, preview: scopedPreview });
     return response.status(result.created ? 201 : 200).json({ data: result });
   }));
 
   app.post('/api/websites/migration/bind', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const input = assertBindBody(request.body);
-    const result = await bind({ ...input, domainRegistry, websiteRegistry, applicationRegistry, migrationLedger, preview });
+    await requireLocalResource(domainRegistry, 'getDomain', input.domainId, 'domain_not_found', 'Domain not found');
+    await requireLocalResource(websiteRegistry, 'getWebsite', input.websiteId, 'website_not_found', 'Website not found');
+    const result = await bind({ ...input, domainRegistry, websiteRegistry, applicationRegistry, migrationLedger, preview: scopedPreview });
     return response.json({ data: result });
   }));
 
@@ -167,6 +185,8 @@ export function mountWebsiteMigrationRoutes(app, {
 
   app.post('/api/websites/migration/rollback-binding', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const input = assertRollbackBindingBody(request.body);
+    await requireLocalResource(domainRegistry, 'getDomain', input.domainId, 'domain_not_found', 'Domain not found');
+    await requireLocalResource(websiteRegistry, 'getWebsite', input.websiteId, 'website_not_found', 'Website not found');
     const result = await rollbackBinding({
       ...input,
       websiteMigrationPolicy,

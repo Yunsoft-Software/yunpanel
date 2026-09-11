@@ -31,25 +31,32 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry } = {}) {
+export function mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry, localServerId = null } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
   if (!dockerWorkloadRegistry || typeof dockerWorkloadRegistry.createWorkload !== 'function'
     || typeof dockerWorkloadRegistry.getWorkload !== 'function' || typeof dockerWorkloadRegistry.listWorkloads !== 'function') {
     throw new Error('Docker workload registry is required');
   }
 
-  app.get('/api/docker/workloads', requirePanelRouteAccess, asyncRoute(async (request, response) => (
-    response.json({ data: await dockerWorkloadRegistry.listWorkloads(listFilter(request.query)) })
-  )));
+  app.get('/api/docker/workloads', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const filter = listFilter(request.query);
+    if (localServerId && filter.serverId && filter.serverId !== localServerId) {
+      throw new DockerWorkloadRegistryError('local_server_required', 'Docker workloads can be listed only for this panel host', 404);
+    }
+    return response.json({ data: await dockerWorkloadRegistry.listWorkloads({ serverId: localServerId ?? filter.serverId }) });
+  }));
   app.get('/api/docker/workloads/:dockerWorkloadId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
     const workload = await dockerWorkloadRegistry.getWorkload(request.params.dockerWorkloadId);
-    if (!workload) throw new DockerWorkloadRegistryError('docker_workload_not_found', 'Docker workload was not found', 404);
+    if (!workload || (localServerId && workload.serverId !== localServerId)) throw new DockerWorkloadRegistryError('docker_workload_not_found', 'Docker workload was not found', 404);
     return response.json({ data: workload });
   }));
   app.post('/api/docker/workloads', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = createInput(request.body);
-    const workload = await dockerWorkloadRegistry.createWorkload(body);
+    if (localServerId && body.serverId !== localServerId) {
+      throw new DockerWorkloadRegistryError('local_server_required', 'Docker workloads can be created only on this panel host', 404);
+    }
+    const workload = await dockerWorkloadRegistry.createWorkload({ ...body, serverId: localServerId ?? body.serverId });
     return response.status(201).json({
       data: workload,
       sideEffects: Object.freeze({ containersChanged: false, nginxChanged: false }),
