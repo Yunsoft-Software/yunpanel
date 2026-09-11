@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { WebSocket, WebSocketServer } from 'ws';
 import { createPanelServer } from '../server.js';
 
 const proxyToken = 'p'.repeat(43);
@@ -30,7 +32,11 @@ async function fixture(t, listener) {
   });
   const panelPort = await listen(panel);
   t.after(async () => { await close(panel); await close(upstream); await rm(directory, { recursive: true, force: true }); });
-  return { request: (pathname, options = {}) => fetch(`http://127.0.0.1:${panelPort}${pathname}`, { ...options, headers: { 'x-real-ip': '203.0.113.8', ...options.headers } }) };
+  return {
+    panelPort,
+    upstream,
+    request: (pathname, options = {}) => fetch(`http://127.0.0.1:${panelPort}${pathname}`, { ...options, headers: { 'x-real-ip': '203.0.113.8', ...options.headers } }),
+  };
 }
 
 test('panel gateway keeps the IP restriction but never injects admin authorization', async (t) => {
@@ -185,4 +191,60 @@ test('IP-approved browser still needs login through the complete gateway/API cha
   assert.equal((await app.request('/api/panel/servers', { headers: { cookie } })).status, 200);
   assert.equal((await app.request('/api/auth/logout', { method: 'POST', headers: { ...headers, cookie, 'x-csrf-token': session.csrfToken } })).status, 204);
   assert.equal((await app.request('/api/panel/servers', { headers: { cookie } })).status, 401);
+});
+
+test('terminal WebSocket upgrade preserves browser auth but replaces forwarding identity', async (t) => {
+  const requests = [];
+  const app = await fixture(t, (_request, response) => { response.writeHead(404); response.end(); });
+  const upstreamWebSocket = new WebSocketServer({ noServer: true, handleProtocols: (protocols) => (protocols.has('yunpanel-terminal-v1') ? 'yunpanel-terminal-v1' : false) });
+  app.upstream.on('upgrade', (request, socket, head) => {
+    requests.push(request.headers);
+    upstreamWebSocket.handleUpgrade(request, socket, head, (websocket) => {
+      websocket.on('message', (data) => websocket.send(data));
+    });
+  });
+  t.after(() => upstreamWebSocket.close());
+
+  const websocket = new WebSocket(`ws://127.0.0.1:${app.panelPort}/api/terminal`, [
+    'yunpanel-terminal-v1', `yunpanel-terminal-capability.${'a'.repeat(43)}`,
+  ], {
+    headers: {
+      origin: 'https://panel.example.com',
+      cookie: '__Host-yunpanel_session=session-cookie',
+      authorization: 'Bearer attacker-value',
+      'x-real-ip': '203.0.113.8',
+      'x-yunpanel-client-ip': '192.0.2.4',
+      'x-yunpanel-proxy-token': 'attacker-value',
+    },
+  });
+  await once(websocket, 'open');
+  const echoed = once(websocket, 'message');
+  websocket.send('terminal-frame');
+  assert.equal((await echoed)[0].toString(), 'terminal-frame');
+  assert.equal(websocket.protocol, 'yunpanel-terminal-v1');
+  assert.equal(requests[0].cookie, '__Host-yunpanel_session=session-cookie');
+  assert.equal(requests[0].authorization, undefined);
+  assert.equal(requests[0]['x-yunpanel-client-ip'], '203.0.113.8');
+  assert.equal(requests[0]['x-yunpanel-proxy-token'], proxyToken);
+  websocket.close();
+  await once(websocket, 'close');
+});
+
+test('terminal WebSocket gateway rejects wrong Origin, client IP, path and query before upstream', async (t) => {
+  const app = await fixture(t, (_request, response) => { response.writeHead(404); response.end(); });
+  let upgrades = 0;
+  app.upstream.on('upgrade', (_request, socket) => { upgrades += 1; socket.destroy(); });
+
+  async function rejected(pathname, headers, expected) {
+    const websocket = new WebSocket(`ws://127.0.0.1:${app.panelPort}${pathname}`, ['yunpanel-terminal-v1'], { headers });
+    websocket.on('error', () => {});
+    const [, response] = await once(websocket, 'unexpected-response');
+    assert.equal(response.statusCode, expected);
+    response.resume();
+  }
+  await rejected('/api/terminal', { origin: 'https://attacker.example', 'x-real-ip': '203.0.113.8' }, 403);
+  await rejected('/api/terminal', { origin: 'https://panel.example.com', 'x-real-ip': '192.0.2.9' }, 403);
+  await rejected('/api/terminal/extra', { origin: 'https://panel.example.com', 'x-real-ip': '203.0.113.8' }, 404);
+  await rejected('/api/terminal?token=forbidden', { origin: 'https://panel.example.com', 'x-real-ip': '203.0.113.8' }, 404);
+  assert.equal(upgrades, 0);
 });

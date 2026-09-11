@@ -152,10 +152,12 @@ export function createTerminalProcessManager({
     let closed = false;
     let exited = false;
     let forceTimer = null;
-    const dataSubscription = child.onData((data) => {
+    let dataSubscription;
+    let exitSubscription;
+    dataSubscription = child.onData((data) => {
       if (!closed && typeof data === 'string') onData(data);
     });
-    const exitSubscription = child.onExit((event) => {
+    exitSubscription = child.onExit((event) => {
       if (exited) return;
       exited = true;
       closed = true;

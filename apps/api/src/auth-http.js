@@ -57,6 +57,68 @@ function requestPeer(request, { proxyToken, trustedProxies }) {
   return clientIp;
 }
 
+function createBrowserAuthBoundary({
+  store,
+  publicOrigin,
+  development = false,
+  proxyToken,
+  trustedProxyIps = TRUSTED_PROXY_DEFAULT,
+}) {
+  let origin;
+  try { origin = new URL(publicOrigin); } catch { throw new Error('YUNPANEL_PUBLIC_ORIGIN is required'); }
+  const localDevelopment = development && origin.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname);
+  if (origin.origin !== publicOrigin || (origin.protocol !== 'https:' && !localDevelopment)) {
+    throw new Error('Panel origin must be an exact HTTPS origin (HTTP is only allowed for loopback development)');
+  }
+  const ownerPolicy = createOwnerMfaPolicy({ store, required: !localDevelopment });
+  const trustedProxies = parseTrustedProxies(trustedProxyIps);
+  if (proxyToken !== undefined && (typeof proxyToken !== 'string' || !PROXY_TOKEN_PATTERN.test(proxyToken))) {
+    throw new Error('YUNPANEL_INTERNAL_PROXY_TOKEN is invalid');
+  }
+  const cookieName = localDevelopment ? 'yunpanel_session' : '__Host-yunpanel_session';
+  const mfaCookieName = localDevelopment ? 'yunpanel_mfa' : '__Host-yunpanel_mfa';
+
+  function readCookie(request, name) {
+    const entries = (request.headers.cookie ?? '').split(';').map((part) => part.trim()).filter((part) => part.startsWith(`${name}=`));
+    if (entries.length > 1) throw new AuthError('invalid_cookie', 'Ambiguous authentication cookie.');
+    return entries[0]?.slice(name.length + 1) ?? null;
+  }
+
+  function checkOrigin(request) {
+    if (request.headers.origin !== publicOrigin || (request.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(request.headers['sec-fetch-site']))) {
+      throw new AuthError('origin_forbidden', 'Cross-origin requests are not allowed.', 403);
+    }
+  }
+
+  function currentOwner(rawToken, expected = null, { touch = false } = {}) {
+    const session = store.getSession(rawToken, { touch });
+    if (!session) throw new AuthError('unauthorized', 'Sign in to continue.', 401);
+    const authorized = ownerPolicy.requireManagement(session);
+    if (expected && (authorized.id !== expected.sessionId || authorized.user.id !== expected.userId)) {
+      throw new AuthError('unauthorized', 'Sign in to continue.', 401);
+    }
+    return authorized;
+  }
+
+  return Object.freeze({
+    localDevelopment,
+    ownerPolicy,
+    cookieName,
+    mfaCookieName,
+    readCookie,
+    checkOrigin,
+    peer: (request) => requestPeer(request, { proxyToken, trustedProxies }),
+    authenticateLiveOwner(request) {
+      checkOrigin(request);
+      const peer = requestPeer(request, { proxyToken, trustedProxies });
+      const rawToken = readCookie(request, cookieName);
+      const session = currentOwner(rawToken);
+      return Object.freeze({ rawToken, session, peer });
+    },
+    reauthorizeLiveOwner: (rawToken, expected, options) => currentOwner(rawToken, expected, options),
+  });
+}
+
 function json(response, status, payload) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   response.end(status === 204 ? undefined : JSON.stringify(payload));
@@ -100,35 +162,14 @@ export function createAuthenticatedApi({
   trustedProxyIps = TRUSTED_PROXY_DEFAULT,
   publicWebhookHandler = null,
 }) {
-  let origin;
-  try { origin = new URL(publicOrigin); } catch { throw new Error('YUNPANEL_PUBLIC_ORIGIN is required'); }
-  const localDevelopment = development && origin.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname);
-  if (origin.origin !== publicOrigin || (origin.protocol !== 'https:' && !localDevelopment)) {
-    throw new Error('Panel origin must be an exact HTTPS origin (HTTP is only allowed for loopback development)');
-  }
-  const ownerPolicy = createOwnerMfaPolicy({ store, required: !localDevelopment });
-  const trustedProxies = parseTrustedProxies(trustedProxyIps);
-  if (proxyToken !== undefined && (typeof proxyToken !== 'string' || !PROXY_TOKEN_PATTERN.test(proxyToken))) {
-    throw new Error('YUNPANEL_INTERNAL_PROXY_TOKEN is invalid');
-  }
-  const cookieName = localDevelopment ? 'yunpanel_session' : '__Host-yunpanel_session';
-  const mfaCookieName = localDevelopment ? 'yunpanel_mfa' : '__Host-yunpanel_mfa';
+  const boundary = createBrowserAuthBoundary({ store, publicOrigin, development, proxyToken, trustedProxyIps });
+  const { localDevelopment, ownerPolicy, cookieName, mfaCookieName, readCookie, checkOrigin } = boundary;
   const cookieOptions = `Path=/; HttpOnly; SameSite=Strict${localDevelopment ? '' : '; Secure'}`;
   const handler = createHandler();
   if (publicWebhookHandler !== null && typeof publicWebhookHandler !== 'function') {
     throw new TypeError('Public webhook handler must be a function');
   }
 
-  const readCookie = (request, name) => {
-    const entries = (request.headers.cookie ?? '').split(';').map((part) => part.trim()).filter((part) => part.startsWith(`${name}=`));
-    if (entries.length > 1) throw new AuthError('invalid_cookie', 'Ambiguous authentication cookie.');
-    return entries[0]?.slice(name.length + 1) ?? null;
-  };
-  const checkOrigin = (request) => {
-    if (request.headers.origin !== publicOrigin || (request.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(request.headers['sec-fetch-site']))) {
-      throw new AuthError('origin_forbidden', 'Cross-origin requests are not allowed.', 403);
-    }
-  };
   const writeCookie = (response, name, value, maxAge) => {
     const existing = response.getHeader('set-cookie') ?? [];
     const lifetime = value ? (maxAge === undefined ? '' : `; Max-Age=${maxAge}`) : '; Max-Age=0';
@@ -154,7 +195,7 @@ export function createAuthenticatedApi({
     if (pathname.startsWith('/api/dev/') && !development) return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
 
     if (githubWebhookPath) {
-      requestPeer(request, { proxyToken, trustedProxies });
+      boundary.peer(request);
       if (!publicWebhookHandler) return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
       await publicWebhookHandler(request, response, pathname);
       return;
@@ -166,7 +207,7 @@ export function createAuthenticatedApi({
     }
     const rawToken = readCookie(request, cookieName);
     const challengeToken = readCookie(request, mfaCookieName);
-    const peer = requestPeer(request, { proxyToken, trustedProxies });
+    const peer = boundary.peer(request);
     if (pathname === '/api/auth/login' || pathname === '/api/auth/setup') {
       if (request.method !== 'POST') throw new AuthError('method_not_allowed', 'Use POST.', 405);
       checkOrigin(request);
@@ -295,4 +336,12 @@ export function createAuthenticatedApi({
   };
 }
 
-export const authHttpInternals = Object.freeze({ normalizeIp, parseTrustedProxies, requestPeer });
+export function createLiveConnectionAuthenticator(options) {
+  const boundary = createBrowserAuthBoundary(options);
+  return Object.freeze({
+    authenticate: boundary.authenticateLiveOwner,
+    reauthorize: boundary.reauthorizeLiveOwner,
+  });
+}
+
+export const authHttpInternals = Object.freeze({ normalizeIp, parseTrustedProxies, requestPeer, createBrowserAuthBoundary });

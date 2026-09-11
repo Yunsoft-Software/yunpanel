@@ -6,7 +6,7 @@ import { inspectAllowlistedServices, inspectDocker, inspectNginx } from '@yunpan
 import { createApp, API_VERSION } from './app.js';
 import { createAuditedJobRegistry } from './audited-job-registry.js';
 import { createAuthStore } from './auth-store.js';
-import { createAuthenticatedApi } from './auth-http.js';
+import { createAuthenticatedApi, createLiveConnectionAuthenticator } from './auth-http.js';
 import { createApplicationEnvironmentRegistry } from './application-environment-registry.js';
 import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { createApplicationRegistry } from './application-registry.js';
@@ -25,6 +25,8 @@ import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createServerRegistry } from './server-registry.js';
 import { createTerminalCapabilityRegistry } from './terminal-capability-registry.js';
+import { createTerminalProcessManager } from './terminal-process-manager.js';
+import { createTerminalWebSocketServer } from './terminal-websocket.js';
 import { createWebsiteMigrationLedger } from './website-migration-ledger.js';
 import { createWebsiteMigrationPolicyStore } from './website-migration-policy.js';
 import { createWebsiteRegistry } from './website-registry.js';
@@ -46,6 +48,7 @@ const dockerWorkloadStorePath = process.env.YUNPANEL_DOCKER_WORKLOAD_STORE ?? pa
 const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRONMENT_STORE ?? path.resolve('.data/application-environment-registry.json');
 const authStorePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStorePath), 'auth', 'auth.sqlite');
 const internalProxyToken = process.env.YUNPANEL_INTERNAL_PROXY_TOKEN;
+const publicOrigin = process.env.YUNPANEL_PUBLIC_ORIGIN ?? (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:5173' : undefined);
 const certificateRenewalIntervalMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS ?? `${6 * 60 * 60 * 1000}`, 10);
 const certificateRenewBeforeMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEW_BEFORE_MS ?? `${30 * 24 * 60 * 60 * 1000}`, 10);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('YUNPANEL_API_PORT must be a valid TCP port');
@@ -130,6 +133,7 @@ await prepareRootAuthStateOwnership({ filePath: authStorePath });
 const liveSessions = createLiveSessionRegistry();
 const authStore = createAuthStore({ filePath: authStorePath, liveSessions });
 const terminalCapabilityRegistry = createTerminalCapabilityRegistry({ liveSessions });
+const terminalProcessManager = createTerminalProcessManager();
 const jobRegistry = createAuditedJobRegistry({
   registry: durableJobRegistry,
   audit: authStore.audit,
@@ -142,7 +146,7 @@ const applicationDeployQueue = createApplicationDeployQueue({
 });
 const listener = createAuthenticatedApi({
   store: authStore,
-  publicOrigin: process.env.YUNPANEL_PUBLIC_ORIGIN ?? (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:5173' : undefined),
+  publicOrigin,
   development: process.env.NODE_ENV === 'development',
   proxyToken: internalProxyToken,
   trustedProxyIps: process.env.YUNPANEL_TRUSTED_PROXY_IPS,
@@ -192,7 +196,21 @@ const localRuntime = await startConfiguredLocalRuntime({
 });
 const renewalScheduler = startCertificateRenewalScheduler({ certificateRegistry, jobRegistry, intervalMs: certificateRenewalIntervalMs, renewBeforeMs: certificateRenewBeforeMs });
 const server = http.createServer({ headersTimeout: 15_000, requestTimeout: 30_000 }, listener);
-server.on('upgrade', (_request, socket) => socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'));
+const terminalAuthenticator = createLiveConnectionAuthenticator({
+  store: authStore,
+  publicOrigin,
+  development: process.env.NODE_ENV === 'development',
+  proxyToken: internalProxyToken,
+  trustedProxyIps: process.env.YUNPANEL_TRUSTED_PROXY_IPS,
+});
+const terminalWebSocket = createTerminalWebSocketServer({
+  ...terminalAuthenticator,
+  terminalCapabilityRegistry,
+  terminalProcessManager,
+  liveSessions,
+  audit: authStore.audit,
+});
+server.on('upgrade', terminalWebSocket.handleUpgrade);
 server.listen(port, host, () => {
   console.log(`[yunpanel-api] listening on http://${host}:${port}`);
   console.log(`[yunpanel-api] server store=${serverStorePath}`);
@@ -219,6 +237,8 @@ async function shutdown(signal) {
   shuttingDown = true;
   console.log(`[yunpanel-api] received ${signal}, shutting down`);
   renewalScheduler.stop();
+  liveSessions.closeAll('server_shutdown');
+  terminalWebSocket.closeAll('server_shutdown');
   const closePromise = new Promise((resolve) => {
     server.close((error) => resolve(error ?? null));
   });
@@ -231,7 +251,6 @@ async function shutdown(signal) {
     }
   }
   const serverCloseError = await closePromise;
-  liveSessions.closeAll();
   authStore.close();
   if (serverCloseError || runtimeStopFailed) {
     console.error('[yunpanel-api] shutdown incomplete');

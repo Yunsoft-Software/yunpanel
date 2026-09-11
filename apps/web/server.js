@@ -61,6 +61,16 @@ function reply(response, statusCode, body, contentType = 'text/plain; charset=ut
   response.end(body);
 }
 
+function rejectSocket(socket, statusCode) {
+  if (socket.destroyed) return;
+  const status = [400, 401, 403, 404, 409, 429, 502, 503].includes(statusCode) ? statusCode : 502;
+  const labels = {
+    400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found',
+    409: 'Conflict', 429: 'Too Many Requests', 502: 'Bad Gateway', 503: 'Service Unavailable',
+  };
+  socket.end(`HTTP/1.1 ${status} ${labels[status]}\r\nConnection: close\r\nCache-Control: no-store\r\nContent-Length: 0\r\n\r\n`);
+}
+
 function sameOriginMutation(request, publicOrigin) {
   if (request.method === 'GET' || request.method === 'HEAD') return true;
   const fetchSite = request.headers['sec-fetch-site'];
@@ -115,6 +125,51 @@ function proxyRequest(request, response, { apiHost, apiPort, clientIp, proxyToke
   request.pipe(upstream);
 }
 
+function proxyWebSocket(request, socket, head, { apiHost, apiPort, clientIp, proxyToken, publicOrigin }) {
+  const fetchSite = request.headers['sec-fetch-site'];
+  if (request.method !== 'GET' || request.headers.origin !== publicOrigin
+    || (fetchSite && !['same-origin', 'none'].includes(fetchSite))) {
+    rejectSocket(socket, 403);
+    return;
+  }
+  const headers = {};
+  for (const [name, value] of Object.entries(request.headers)) {
+    if (!HOP_BY_HOP_HEADERS.has(name) && value !== undefined
+      && !['authorization', 'forwarded', 'x-forwarded-for', 'x-real-ip', 'x-yunpanel-client-ip', 'x-yunpanel-proxy-token'].includes(name)) headers[name] = value;
+  }
+  headers.host = `${apiHost}:${apiPort}`;
+  headers.connection = 'Upgrade';
+  headers.upgrade = 'websocket';
+  headers['x-yunpanel-client-ip'] = clientIp;
+  headers['x-yunpanel-proxy-token'] = proxyToken;
+
+  const upstream = http.request({ host: apiHost, port: apiPort, method: 'GET', path: '/api/terminal', headers });
+  upstream.setTimeout(10_000, () => upstream.destroy(new Error('Upstream timeout')));
+  upstream.on('upgrade', (response, upstreamSocket, upstreamHead) => {
+    upstream.setTimeout(0);
+    const allowed = ['upgrade', 'connection', 'sec-websocket-accept', 'sec-websocket-protocol'];
+    const responseHeaders = [];
+    for (const name of allowed) {
+      const value = response.headers[name];
+      if (typeof value === 'string' && !/[\r\n]/.test(value)) responseHeaders.push(`${name}: ${value}`);
+    }
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\n${responseHeaders.join('\r\n')}\r\n\r\n`);
+    if (upstreamHead.length) socket.write(upstreamHead);
+    if (head.length) upstreamSocket.write(head);
+    socket.pipe(upstreamSocket).pipe(socket);
+    socket.on('error', () => upstreamSocket.destroy());
+    upstreamSocket.on('error', () => socket.destroy());
+  });
+  upstream.on('response', (response) => {
+    response.resume();
+    rejectSocket(socket, [400, 401, 403, 404, 409, 429, 503].includes(response.statusCode) ? response.statusCode : 502);
+  });
+  upstream.on('error', () => rejectSocket(socket, 502));
+  socket.on('error', () => upstream.destroy());
+  socket.on('close', () => upstream.destroy());
+  upstream.end();
+}
+
 async function serveStatic(request, response, webRoot, pathname) {
   if (request.method !== 'GET' && request.method !== 'HEAD') { reply(response, 405, 'Method not allowed.'); return; }
   let decodedPath;
@@ -159,7 +214,7 @@ export function createPanelServer({
   if (typeof proxyToken !== 'string' || !PROXY_TOKEN_PATTERN.test(proxyToken)) throw new Error('YUNPANEL_INTERNAL_PROXY_TOKEN is required');
   if (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535) throw new Error('YUNPANEL_API_PORT is invalid');
   if (!publicOrigin || new URL(publicOrigin).origin !== publicOrigin) throw new Error('YUNPANEL_PUBLIC_ORIGIN is required');
-  return http.createServer(async (request, response) => {
+  const server = http.createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
     const signedWebhook = isGithubWebhookPath(requestUrl.pathname);
     const clientIp = clientAddress(request, trustedProxies);
@@ -178,9 +233,20 @@ export function createPanelServer({
     if (requestUrl.pathname.startsWith('/api/')) { reply(response, 404, 'Not found.'); return; }
     await serveStatic(request, response, resolvedWebRoot, requestUrl.pathname);
   });
+  server.on('upgrade', (request, socket, head) => {
+    socket.on('error', () => {});
+    let requestUrl;
+    try { requestUrl = new URL(request.url ?? '/', 'http://panel.local'); }
+    catch { rejectSocket(socket, 400); return; }
+    const clientIp = clientAddress(request, trustedProxies);
+    if (!clientIp || !allowedClients.has(clientIp)) { rejectSocket(socket, 403); return; }
+    if (requestUrl.pathname !== '/api/terminal' || requestUrl.search) { rejectSocket(socket, 404); return; }
+    proxyWebSocket(request, socket, head, { apiHost, apiPort, clientIp, proxyToken, publicOrigin });
+  });
+  return server;
 }
 
-export const panelServerInternals = Object.freeze({ normalizeIp, parseIpSet, clientAddress, isGithubWebhookPath });
+export const panelServerInternals = Object.freeze({ normalizeIp, parseIpSet, clientAddress, isGithubWebhookPath, proxyWebSocket });
 
 export function startPanelServer(options = {}) {
   const host = options.host ?? process.env.YUNPANEL_WEB_HOST ?? '127.0.0.1';
