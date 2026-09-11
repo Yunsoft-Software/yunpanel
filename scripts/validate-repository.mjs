@@ -5,6 +5,12 @@ import process from 'node:process';
 const root = process.cwd();
 const ignoredDirectories = new Set(['.git', 'node_modules', 'dist', 'coverage']);
 const violations = [];
+const supportedLinuxNativeBindings = new Map([
+  ['node_modules/@rolldown/binding-linux-x64-gnu', 'x64'],
+  ['node_modules/@rolldown/binding-linux-arm64-gnu', 'arm64'],
+  ['node_modules/lightningcss-linux-x64-gnu', 'x64'],
+  ['node_modules/lightningcss-linux-arm64-gnu', 'arm64'],
+]);
 
 async function walk(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -47,6 +53,16 @@ async function walk(directory) {
 }
 
 await walk(root);
+
+const packageLock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
+for (const [packagePath, cpu] of supportedLinuxNativeBindings) {
+  const binding = packageLock.packages?.[packagePath];
+  if (!binding || binding.optional !== true || !binding.os?.includes('linux')
+    || !binding.cpu?.includes(cpu) || !binding.libc?.includes('glibc')
+    || typeof binding.integrity !== 'string' || !binding.integrity.startsWith('sha512-')) {
+    violations.push(`package-lock.json: missing complete Ubuntu ${cpu} native binding ${packagePath}`);
+  }
+}
 
 if (violations.length > 0) {
   console.error('Repository policy validation failed:');
