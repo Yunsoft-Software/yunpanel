@@ -10,7 +10,7 @@ Start the API through `apps/api/src/index.js`. It creates the authenticated HTTP
 
 The old `bootstrap-auth.js`, `YUNPANEL_ADMIN_BOOTSTRAP_TOKEN` management path and in-process compatibility bearer have been removed. The web gateway forwards the user's cookie and CSRF header; it does not inject administrator credentials. Core/domain management authorization ignores bearer headers and depends on the verified in-memory `request.auth` context. An attacker-supplied `Authorization` header therefore cannot substitute for a panel session or elevate a Read Only account.
 
-Exact legacy enrollment/heartbeat/command/result/environment routes still use their existing agent credentials until the agentless migration. Browser-origin/cookie requests cannot use them and the web gateway does not proxy them. Agent secrets have not been retired. No WebSocket/terminal listener is enabled.
+Exact legacy enrollment/heartbeat/command/result/environment routes still use their existing agent credentials until the agentless migration. Browser-origin/cookie requests cannot use them and the web gateway does not proxy them. Agent secrets have not been retired. The one enabled browser upgrade is exact `/api/terminal`; it repeats the HTTP cookie, proxy-peer, Origin, Owner and MFA checks and additionally requires a short-lived session-bound capability.
 
 ## Configuration before upgrading an existing host
 

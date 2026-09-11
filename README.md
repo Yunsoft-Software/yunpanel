@@ -29,7 +29,7 @@ The packaged privilege model is intentional:
 - Static Git/npm/build/artifact work runs as a deterministic dedicated `yunapp-*` user.
 - Node Git/npm/build and the generated Node systemd service run as the deterministic application user, not root; the service uses `NoNewPrivileges`, an empty capability set and restricted writable paths.
 - Future site cron, file-manager and site terminal work must keep the site-user boundary.
-- Only the explicitly Owner-protected Server terminal target may become a root interactive surface after the WebSocket/session/MFA/audit release gates are complete.
+- The interactive terminal uses a real PTY over an exact same-origin WebSocket: site sessions run through their deterministic `yunapp-*` account and only an authenticated, MFA-complete Owner may open the local Server root terminal. Short-lived capabilities are session-bound; revocation closes live sockets and process groups.
 
 Do not replace structured operations with an unauthenticated generic shell or make site workloads inherit API root privilege.
 
@@ -142,7 +142,7 @@ Runtime state belongs under `/var/lib/yunpanel`; configuration and secrets belon
 Build candidates only after a clean supported-runtime check:
 
 ```bash
-npm install
+npm ci
 npm run check
 ./scripts/build-deb.sh <new-version>
 ```
@@ -158,4 +158,5 @@ No package publication, migration or live deployment occurs merely by updating t
 - [docs/local-migration-backup.md](docs/local-migration-backup.md) — verified migration backup, restore preview and private staging boundary.
 - [docs/website-workspace.md](docs/website-workspace.md) — current workspace routes and limitations.
 - [docs/owner-mfa-policy.md](docs/owner-mfa-policy.md) — HTTPS Owner MFA requirements.
+- [docs/terminal.md](docs/terminal.md) — PTY/WebSocket boundary, limits, audit policy and package requirements.
 - [docs/secret-master-key-rotation.md](docs/secret-master-key-rotation.md) — key rotation and rollback procedure.

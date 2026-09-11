@@ -11,8 +11,30 @@ if ! command -v dpkg-deb >/dev/null; then
   printf 'dpkg-deb is required to build the YunPanel package\n' >&2
   exit 1
 fi
-if [[ ! -d node_modules || ! -d apps/web/dist ]]; then
-  printf 'run npm install and npm run build before building the package\n' >&2
+if ! command -v dpkg >/dev/null; then
+  printf 'dpkg is required to resolve the YunPanel package architecture\n' >&2
+  exit 1
+fi
+if [[ ! -f package-lock.json || ! -d node_modules || ! -d apps/web/dist ]]; then
+  printf 'run npm ci and npm run build before building the package\n' >&2
+  exit 1
+fi
+node_platform=$(node --print 'process.platform')
+node_arch=$(node --print 'process.arch')
+case "$node_arch" in
+  x64) architecture=amd64 ;;
+  arm64) architecture=arm64 ;;
+  *)
+    printf 'unsupported Node architecture for YunPanel package: %s\n' "$node_arch" >&2
+    exit 1
+    ;;
+esac
+if [[ "$node_platform" != linux || "$(dpkg --print-architecture)" != "$architecture" ]]; then
+  printf 'build the native YunPanel package on matching Linux %s (current platform=%s dpkg=%s)\n' "$architecture" "$node_platform" "$(dpkg --print-architecture)" >&2
+  exit 1
+fi
+if ! node --input-type=module -e 'import { spawn } from "node-pty"; if (typeof spawn !== "function") process.exit(1);'; then
+  printf 'node-pty native module is missing; run the approved npm install on this Linux architecture\n' >&2
   exit 1
 fi
 
@@ -29,7 +51,7 @@ install -d "$package_root/usr/lib/systemd/system"
 install -d "$package_root/usr/share/yunpanel/web"
 install -d "$package_root/usr/share/doc/yunpanel"
 
-sed "s/@VERSION@/$version/" packaging/debian/control >"$package_root/DEBIAN/control"
+sed -e "s/@VERSION@/$version/" -e "s/@ARCHITECTURE@/$architecture/" packaging/debian/control >"$package_root/DEBIAN/control"
 install -m 0755 packaging/debian/preinst "$package_root/DEBIAN/preinst"
 install -m 0755 packaging/debian/postinst "$package_root/DEBIAN/postinst"
 install -m 0755 packaging/debian/postrm "$package_root/DEBIAN/postrm"
@@ -46,6 +68,7 @@ install -m 0644 .env.example README.md \
   docs/mfa.md \
   docs/owner-mfa-policy.md \
   docs/secret-master-key-rotation.md \
+  docs/terminal.md \
   "$package_root/usr/share/doc/yunpanel/"
 
 cp -a package.json "$package_root/usr/lib/yunpanel/"
@@ -57,5 +80,6 @@ rm -rf -- "$package_root/usr/lib/yunpanel/apps/web/dist" "$package_root/usr/lib/
 find "$package_root/usr/lib/yunpanel" -type d -name test -prune -exec rm -rf -- {} +
 
 install -d "$repository_root/$output_directory"
-dpkg-deb --build --root-owner-group "$package_root" "$repository_root/$output_directory/yunpanel_${version}_all.deb" >/dev/null
-printf '%s\n' "$repository_root/$output_directory/yunpanel_${version}_all.deb"
+package_path="$repository_root/$output_directory/yunpanel_${version}_${architecture}.deb"
+dpkg-deb --build --root-owner-group "$package_root" "$package_path" >/dev/null
+printf '%s\n' "$package_path"

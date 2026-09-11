@@ -78,15 +78,16 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 
 ## T-PACKAGE-LIVE — P0/P1 package ve canlı kapı
 
+- [ ] Matching Ubuntu `amd64`/`arm64` build hostunda approved `node-pty@1.1.0` install scriptiyle temiz `npm ci` çalıştır; native `pty.node` ve `spawn-helper` yüklenebilmeli. Üretilen `.deb` `all` değil doğru mimariyi bildirmeli, clean install/upgrade sonrasında `/usr/local/bin/node` ile `node-pty` importu ve gerçek PTY spawn çalışmalı; farklı OS/mimari veya eksik native build paketleme öncesi fail-closed kalmalı.
 - [ ] Node24 full check tamamlandıktan sonra yeni `.deb` üret; `dpkg-deb -c/-I` ile root API, Website/audit/migration-policy files, local-runtime, migration backup CLI, bütün job-recovery komutları, receipts, runbooklar ve web sandbox'ın aynı committen paketlendiğini doğrula.
 - [ ] İzole Ubuntu hostta clean install + old-package upgrade yap. Auth DB/master key/state permissions, disabled-agent preservation, Website/audit/migration-policy schema ve local runtime startup davranışı korunmalı.
 - [ ] Hosted static/Node siteler panel restart/upgrade sırasında çalışmaya devam etsin.
 - [ ] `0.3.0-4` ↔ yeni agentless aday package/state rollback provası yap; IDs, auth, master key, vhost, cert, Website/application/domain/policy ve release state korunmalı.
 - [ ] Gerçek live hosta ancak isolated package/migration/rollback kabulünden sonra geç.
 
-## T-FUTURE — ilgili kod geldikten sonra
+## T-FEATURE-ACCEPTANCE — gerçek servis/provider/browser kabulü
 
-- [ ] Terminal/WS: Owner root terminal + site `yunapp-*` terminal, Origin/session/MFA/revoke/cleanup/backpressure ve open-close audit kabulü.
+- [ ] Packaged HTTPS panelde gerçek Chromium/Firefox ile Owner root ve static/Node `yunapp-*` site terminalini doğrula: exact user/cwd, Ctrl+C/Ctrl+D, Unicode/IME, `vim`/`top` gibi fullscreen TUI, resize, beş paralel session ve kapatıp yeni PTY'ye yeniden bağlanma çalışmalı. Yanlış Origin/cookie/MFA/role/capability, replay ve URL token reddedilmeli; logout/logout-all/session delete/expiry, password/MFA/role/user disable-delete açık socketi ve process group'u derhal kapatmalı. Idle/absolute/output/backpressure limitleri orphan bırakmamalı; audit yalnız open/close metadata içermeli, keystroke/output/history içermemeli.
 - [ ] DNS/wildcard/custom-cert/mail/Docker/backup/cron/Plesk importer ilgili `plan.md` kodu tamamlandıkça gerçek provider/host fixture'larında doğrulanır.
 - [ ] Görsel UI/UX responsive/polish kabulü backend functionality tamamlandıktan ve tasarım ayrı modele verildikten sonra yapılır.
 

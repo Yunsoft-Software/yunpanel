@@ -14,7 +14,7 @@ In the required Owner setup workspace or **Hesabım / İki adımlı doğrulama**
 
 Enabling MFA or regenerating recovery codes rotates the current session and revokes other sessions. Ten recovery codes are shown once; the user must acknowledge saving them before closing the account dialog normally or continuing from the enrollment workspace. Codes and the setup key remain only in component memory. The backend stores recovery-code digests, not plaintext codes, and atomically consumes them. TOTP counter tracking rejects replayed codes.
 
-Disabling MFA requires the password and a current TOTP/recovery proof, revokes sessions and signs the user out. Replacing an authenticator currently means disabling it, signing in again and enrolling the replacement. HTTPS management requires current Owner enrollment, including after local MFA reset; only explicit loopback HTTP development is exempt. Terminal/WebSocket revocation integration remains pending in `plan.md`. Keep the existing IP restriction and do not expose a privileged/root release until the package and migration acceptance gates pass.
+Disabling MFA requires the password and a current TOTP/recovery proof, revokes sessions and signs the user out. Replacing an authenticator currently means disabling it, signing in again and enrolling the replacement. HTTPS management requires current Owner enrollment, including after local MFA reset; only explicit loopback HTTP development is exempt. Terminal WebSockets use the same live MFA policy and are closed on MFA/password/session/role/user revocation. Keep the existing IP restriction and do not expose a privileged/root release until the package and migration acceptance gates pass.
 
 ## Session integration
 

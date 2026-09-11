@@ -25,5 +25,8 @@
     "test": "npm run test --workspaces --if-present",
     "lint": "node scripts/validate-repository.mjs",
     "check": "npm run lint && npm test && npm run build"
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
   }
 }

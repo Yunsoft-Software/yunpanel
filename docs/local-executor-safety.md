@@ -12,7 +12,7 @@ The packaged API may run as root because it performs structured host administrat
 - Node Git/npm/build and the generated systemd service run as the deterministic application `yunapp-*` account,
 - Node services use `NoNewPrivileges`, an empty capability set and restricted writable paths,
 - future site cron/file-manager/terminal work must preserve the dedicated site-user boundary,
-- only an explicitly Owner-protected Server terminal may become a root PTY after the WebSocket/session/MFA/audit gates are implemented.
+- only the HTTP-authenticated, MFA-complete Owner may exchange a short-lived session capability for the local Server root PTY; site terminals remain dedicated-user processes and live auth revocation closes both scopes.
 
 There is no generic root shell operation inside the job protocol.
 

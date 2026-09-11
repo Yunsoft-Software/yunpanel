@@ -6,10 +6,6 @@ Doğrudan güncel `main` üzerinde küçük, tek amaçlı commitlerle ilerle. Gi
 
 **2026-09-10 kararı:** Görsel UI/UX, layout, styling, component polish ve responsive tasarım bu akışta donduruldu. Backend functionality tamamlandıktan sonra ayrı modele verilecek. Güvenlik veya backend kontratı için zorunlu olmadıkça `apps/web` tasarımına dokunma.
 
-## A. P0 — Authentication ve erişim sınırı
-
-- [ ] WebSocket/SSE/PTY geldiğinde HTTP ile aynı session/role/Origin/Owner-MFA sınırını ortak revocation kanalına bağla; logout, password/MFA/role değişimi ve user disable/delete açık bağlantıları kapatsın.
-
 ## B. P1 — Agentless yerel backend geçişinde kalan kod
 
 - [ ] Gerçek migration + rollback kabulü tamamlandıktan sonra retained legacy heartbeat/command/environment/result transport rotalarını, agent credential surface'ini ve eski enrolled-host compatibility kodunu kaldır.
@@ -38,11 +34,6 @@ Static/SPA trafiği explicit Domain `spaFallback` state'iyle canonical static Ap
 
 ## F. P2 — Terminal ve file manager backend
 
-- [ ] Gerçek PTY backend'i: site terminali dedicated user/cwd, Owner Server terminali root. Tek-shot HTTP exec terminal yerine geçmez.
-- [ ] WebSocket upgrade session/role/Origin/Owner-MFA doğrulaması ve short-lived session-bound capability ekle.
-- [ ] PTY resize, Ctrl+C/Ctrl+D, Unicode/fullscreen TUI, multi-session, reconnect/disconnect cleanup, process-group cleanup, idle/output/backpressure limitleri.
-- [ ] Session/user/MFA/password/role revocation açık PTY/WS bağlantısını derhal kapatsın.
-- [ ] Terminal open/close/session metadata'sını common audit'e yaz; raw keystroke/output/history merkezi audit'e yazılmasın.
 - [ ] Site file manager: list/upload/download/mkdir/rename/text edit/permission display/confirmed delete; traversal ve symlink escape fail-closed. Owner host-files context'i ayrı kalsın.
 
 ## G. P2 — Domain, DNS, Nginx ve SSL
