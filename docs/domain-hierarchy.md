@@ -105,12 +105,15 @@ DNS hosting and mail-domain tracking have separate private versioned registries 
 GET  /api/dns-zones
 GET  /api/dns-zones/:dnsZoneId
 POST /api/dns-zones
+POST /api/dns-zones/:dnsZoneId/readiness/refresh
 GET  /api/mail-domains
 GET  /api/mail-domains/:mailDomainId
 POST /api/mail-domains
 ```
 
-Owner creation requires exactly `name`, an explicit `webDomainId` or `null`, and `managementMode=external`. A non-null reference must name the exact canonical web Domain; suffix matching or hostname inference is not used. New resources begin as `unverified`, and their create responses state that DNS was not published and mail/mailboxes were not configured. Read Only may inspect the bounded lifecycle metadata but cannot create it. Provider/internal observation can revision the record to `ready` or `degraded`; no public route can claim those side effects happened.
+Owner creation requires exactly `name`, an explicit `webDomainId` or `null`, and `managementMode=external`. A non-null reference must name the exact canonical web Domain; suffix matching or hostname inference is not used. New resources begin as `unverified`, and their create responses state that DNS was not published and mail/mailboxes were not configured. Read Only may inspect the bounded lifecycle metadata but cannot create or refresh it.
+
+Readiness refresh accepts exactly the current positive `expectedRevision`. It resolves the linked Domain's canonical hostname and aliases as bounded A, AAAA and CNAME evidence, canonicalizes IPv6, and compares resolved addresses with the explicitly linked managed Server inventory. Missing records, target mismatch, missing expected Server addresses and resolver failures remain distinct authored states; resolver exceptions are never serialized. HTTP-01 additionally requires the current Domain revision to be active. DNS-01 independently reports whether a supported provider credential is configured and distinguishes an unavailable credential store from an absent credential. A successful revision check records only evidence-derived `ready` or `degraded` lifecycle status. It does not publish DNS, contact the provider mutation API or claim certificate issuance.
 
 Nginx stage/activate and managed certificate issue/renew continue through durable jobs and operation-specific recovery. Do not replace them with generic retry/force-success behavior.
 

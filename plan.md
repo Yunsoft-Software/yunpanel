@@ -34,7 +34,7 @@ Static/SPA trafiği explicit Domain `spaFallback` state'iyle canonical static Ap
 
 ## G. P2 — Domain, DNS, Nginx ve SSL
 
-- [ ] Resolver tabanlı A/AAAA/CNAME + ACME readiness modeli geliştir; external DNS mutation yalnız provider adapter üzerinden explicit yetkiyle yapılsın.
+- [ ] External DNS mutation yalnız provider adapter, explicit Owner onayı ve durable job/recovery üzerinden yapılsın.
 - [ ] Site bazlı Nginx settings: upload size, proxy timeout, WebSocket, SPA fallback, cache/header/redirect; preview/diff/test/rollback backend'i ekle.
 - [ ] DNS/certificate/reload error diagnosis güvenli ve bounded olsun; private key API/public job/audit'e çıkmasın.
 

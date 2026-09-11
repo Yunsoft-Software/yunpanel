@@ -12,6 +12,7 @@ import {
   createDnsProviderCredentialRegistry,
   DnsProviderCredentialRegistryError,
 } from './dns-provider-credential-registry.js';
+import { createDnsReadinessService, DnsReadinessError } from './dns-readiness.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
 import {
   createDomainHandler,
@@ -79,6 +80,7 @@ export function createApp({
   dnsProviderCredentialRegistry = createDnsProviderCredentialRegistry({
     getDnsZone: async (dnsZoneId) => dnsHostingRegistry.getZone(dnsZoneId),
   }),
+  dnsReadinessService = null,
   mailDomainRegistry = createMailDomainRegistry({
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
   }),
@@ -106,6 +108,12 @@ export function createApp({
   });
   const app = express();
   const files = siteFileManager ?? createSiteFileManager({ websiteRegistry, localServerId });
+  const readiness = dnsReadinessService ?? createDnsReadinessService({
+    dnsHostingRegistry,
+    domainRegistry,
+    serverRegistry: registry,
+    dnsProviderCredentialRegistry,
+  });
   app.disable('x-powered-by');
   mountSiteFileRoutes(app, { siteFileManager: files });
   app.use(express.json({ limit: '256kb' }));
@@ -140,7 +148,12 @@ export function createApp({
       },
     },
   });
-  mountExternalLifecycleRoutes(app, { dnsHostingRegistry, dnsProviderCredentialRegistry, mailDomainRegistry });
+  mountExternalLifecycleRoutes(app, {
+    dnsHostingRegistry,
+    dnsProviderCredentialRegistry,
+    dnsReadinessService: readiness,
+    mailDomainRegistry,
+  });
   mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry });
   mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry });
   mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry });
@@ -172,6 +185,7 @@ export function createApp({
       || error instanceof DomainRegistryError
       || error instanceof DockerWorkloadRegistryError
       || error instanceof DnsProviderCredentialRegistryError
+      || error instanceof DnsReadinessError
       || error instanceof ExternalLifecycleRegistryError
       || error instanceof RegistryError
       || error instanceof JobRegistryError

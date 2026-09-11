@@ -59,9 +59,27 @@ function request(baseUrl, pathname, { method = 'GET', body } = {}) {
 
 test('Owner explicitly tracks separate DNS and mail lifecycles without publishing or provisioning', async () => {
   const state = await fixture();
+  const inspectedZoneIds = [];
+  let routingReady = true;
+  const dnsReadinessService = {
+    async inspectZone(dnsZoneId) {
+      inspectedZoneIds.push(dnsZoneId);
+      return {
+        dnsZoneId,
+        observedAt: '2026-09-11T08:30:00.000Z',
+        routing: routingReady
+          ? { ready: true, reasonCodes: [], action: null }
+          : { ready: false, reasonCodes: ['dns_target_mismatch'], action: 'correct_public_dns_records' },
+        acme: {
+          http01: { ready: false, reasonCodes: ['dns_http_domain_not_active'], action: 'activate_domain_for_http01' },
+          dns01: { ready: true, provider: 'cloudflare', reasonCodes: [], action: null },
+        },
+      };
+    },
+  };
   assert.equal((await state.dnsHostingRegistry.listZones()).length, 0);
   assert.equal((await state.mailDomainRegistry.listMailDomains()).length, 0);
-  const app = withPanelContext(createApp({ ...state, environment: 'production' }), ownerManagementContext);
+  const app = withPanelContext(createApp({ ...state, dnsReadinessService, environment: 'production' }), ownerManagementContext);
   await withServer(app, async (baseUrl) => {
     const input = { name: 'SEPARATE.example.test.', webDomainId: state.domain.id, managementMode: 'external' };
     const dnsResponse = await request(baseUrl, '/api/dns-zones', { method: 'POST', body: input });
@@ -89,6 +107,39 @@ test('Owner explicitly tracks separate DNS and mail lifecycles without publishin
     const credentialRead = await request(baseUrl, `/api/dns-zones/${dnsPayload.data.id}/provider-credential`);
     assert.equal(credentialRead.status, 200);
     assert.equal((await credentialRead.json()).data.id, credential.id);
+
+    const readinessResponse = await request(baseUrl, `/api/dns-zones/${dnsPayload.data.id}/readiness/refresh`, {
+      method: 'POST', body: { expectedRevision: 1 },
+    });
+    assert.equal(readinessResponse.status, 200);
+    const readinessPayload = (await readinessResponse.json()).data;
+    assert.equal(readinessPayload.zone.status, 'ready');
+    assert.equal(readinessPayload.zone.revision, 2);
+    assert.equal(readinessPayload.zone.lastErrorCode, null);
+    assert.equal(readinessPayload.readiness.acme.http01.ready, false);
+    assert.deepEqual(inspectedZoneIds, [dnsPayload.data.id]);
+
+    routingReady = false;
+    const degradedResponse = await request(baseUrl, `/api/dns-zones/${dnsPayload.data.id}/readiness/refresh`, {
+      method: 'POST', body: { expectedRevision: 2 },
+    });
+    assert.equal(degradedResponse.status, 200);
+    const degradedZone = (await degradedResponse.json()).data.zone;
+    assert.equal(degradedZone.status, 'degraded');
+    assert.equal(degradedZone.revision, 3);
+    assert.equal(degradedZone.lastErrorCode, 'dns_target_mismatch');
+    assert.deepEqual(inspectedZoneIds, [dnsPayload.data.id, dnsPayload.data.id]);
+
+    const staleReadiness = await request(baseUrl, `/api/dns-zones/${dnsPayload.data.id}/readiness/refresh`, {
+      method: 'POST', body: { expectedRevision: 2 },
+    });
+    assert.equal(staleReadiness.status, 409);
+    assert.equal((await staleReadiness.json()).error.code, 'dns_zone_revision_conflict');
+    const invalidReadiness = await request(baseUrl, `/api/dns-zones/${dnsPayload.data.id}/readiness/refresh`, {
+      method: 'POST', body: { expectedRevision: 3, status: 'ready' },
+    });
+    assert.equal(invalidReadiness.status, 400);
+    assert.equal((await invalidReadiness.json()).error.code, 'dns_readiness_input_invalid');
 
     const mailResponse = await request(baseUrl, '/api/mail-domains', { method: 'POST', body: input });
     assert.equal(mailResponse.status, 201);
@@ -130,6 +181,9 @@ test('Read Only may inspect lifecycle inventory but cannot create it', async () 
         provider: 'cloudflare', token: 'cloudflare_token_private_http_123456',
         confirmation: `configure-dns-provider:${zone.id}:cloudflare`,
       },
+    })).status, 403);
+    assert.equal((await request(baseUrl, `/api/dns-zones/${zone.id}/readiness/refresh`, {
+      method: 'POST', body: { expectedRevision: zone.revision },
     })).status, 403);
   });
 });

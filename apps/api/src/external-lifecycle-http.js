@@ -4,6 +4,7 @@ import { requirePanelRouteAccess } from './panel-http-guard.js';
 const CREATE_FIELDS = new Set(['name', 'webDomainId', 'managementMode']);
 const PROVIDER_CREDENTIAL_FIELDS = new Set(['provider', 'token', 'confirmation']);
 const PROVIDER_CREDENTIAL_DELETE_FIELDS = new Set(['confirmation']);
+const READINESS_REFRESH_FIELDS = new Set(['expectedRevision']);
 
 function createInput(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)
@@ -27,12 +28,19 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountExternalLifecycleRoutes(app, { dnsHostingRegistry, dnsProviderCredentialRegistry, mailDomainRegistry } = {}) {
+export function mountExternalLifecycleRoutes(app, {
+  dnsHostingRegistry,
+  dnsProviderCredentialRegistry,
+  dnsReadinessService,
+  mailDomainRegistry,
+} = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
   if (!dnsHostingRegistry || typeof dnsHostingRegistry.createZone !== 'function'
     || typeof dnsHostingRegistry.getZone !== 'function' || typeof dnsHostingRegistry.listZones !== 'function'
+    || typeof dnsHostingRegistry.recordObservation !== 'function'
     || !dnsProviderCredentialRegistry || typeof dnsProviderCredentialRegistry.setCredential !== 'function'
     || typeof dnsProviderCredentialRegistry.getForZone !== 'function' || typeof dnsProviderCredentialRegistry.deleteForZone !== 'function'
+    || !dnsReadinessService || typeof dnsReadinessService.inspectZone !== 'function'
     || !mailDomainRegistry || typeof mailDomainRegistry.createMailDomain !== 'function'
     || typeof mailDomainRegistry.getMailDomain !== 'function' || typeof mailDomainRegistry.listMailDomains !== 'function') {
     throw new Error('External lifecycle registries are required');
@@ -94,6 +102,23 @@ export function mountExternalLifecycleRoutes(app, { dnsHostingRegistry, dnsProvi
     }
     await dnsProviderCredentialRegistry.deleteForZone(request.params.dnsZoneId);
     return response.status(204).end();
+  }));
+  app.post('/api/dns-zones/:dnsZoneId/readiness/refresh', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const body = request.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)
+      || Object.keys(body).length !== READINESS_REFRESH_FIELDS.size
+      || Object.keys(body).some((field) => !READINESS_REFRESH_FIELDS.has(field))
+      || !Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 1) {
+      throw new ExternalLifecycleRegistryError('dns_readiness_input_invalid', 'DNS readiness refresh requires one positive expectedRevision');
+    }
+    const readiness = await dnsReadinessService.inspectZone(request.params.dnsZoneId);
+    const zone = await dnsHostingRegistry.recordObservation(request.params.dnsZoneId, {
+      expectedRevision: body.expectedRevision,
+      status: readiness.routing.ready ? 'ready' : 'degraded',
+      errorCode: readiness.routing.ready ? null : readiness.routing.reasonCodes[0],
+    });
+    return response.json({ data: { zone, readiness } });
   }));
 
   app.get('/api/mail-domains', requirePanelRouteAccess, asyncRoute(async (request, response) => {

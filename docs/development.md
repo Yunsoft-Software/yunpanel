@@ -81,6 +81,8 @@ The default application environment registry file is `.data/application-environm
 
 Cloudflare DNS-01 credentials use the same root key but a separate `.data/dns-provider-credential-registry.json` store, configurable with `YUNPANEL_DNS_CREDENTIAL_STORE`. Public reads expose only provider/configuration metadata. The token is decrypted only by the local root executor, written to a private temporary Certbot credentials file beneath `/run/yunpanel/acme-credentials`, and removed after issue/renew. The Debian package depends on `python3-certbot-dns-cloudflare`; real provider validation remains an Ubuntu acceptance item.
 
+Owner-only `POST /api/dns-zones/:dnsZoneId/readiness/refresh` accepts exactly `{ "expectedRevision": <positive integer> }`. It reads public A/AAAA/CNAME evidence with a bounded resolver timeout, matches canonical addresses against the linked managed Server inventory and reports separate routing, HTTP-01 and DNS-01 readiness. The lifecycle revision changes only after that evidence is collected and the caller's revision still matches. This route does not mutate external DNS; real resolver and dual-stack acceptance remains in `todo.md`.
+
 Docker Website identity tracking uses `.data/docker-workload-registry.json` or `YUNPANEL_DOCKER_WORKLOAD_STORE`. The current API is deliberately limited to `GET /api/docker/workloads`, `GET /api/docker/workloads/:dockerWorkloadId` and Owner-only `POST /api/docker/workloads`. A create request must declare `managementMode=external` and an exact same-server loopback host/port/WebSocket target; the response explicitly reports that no container or Nginx change occurred. Managed Compose lifecycle is not implemented by this tracking endpoint.
 
 Managed Node applications receive their effective environment in:
