@@ -27,9 +27,8 @@ Aktif geliştirme dışı. Enterprise layout/component styling/data-table görü
 
 ## E. P2 — Node.js, static ve Git functionality
 
-Node runtime major/startup/package-manager/mode/document-root ayarları revisioned preview/apply ile yönetilir; çalışan release ayrı `activeRuntime` snapshot'ını korur. Explicit systemd enable/disable/start/stop aktif release'e bağlı, onaylı durable job'dur ve kesinti sonrası exact intent + host final-state kanıtıyla kurtarılır. Mevcut deploy/restart/status/rollback akışları korunur.
+Node runtime major/startup/package-manager/mode/document-root ayarları revisioned preview/apply ile yönetilir; çalışan release ayrı `activeRuntime` snapshot'ını korur. Explicit systemd enable/disable/start/stop aktif release'e bağlı, onaylı durable job'dur ve kesinti sonrası exact intent + host final-state kanıtıyla kurtarılır. Host Node 22/24 LTS inventory/install ayrı managed dizinlerde checksum doğrulamalı ve atomiktir; Application `nodeMajor` seçimi deploy/systemd/build PATH'ini aynı site runtime'ına bağlar, panelin `/usr/local/bin/node` runtime'ını değiştirmez. Mevcut deploy/restart/status/rollback akışları korunur.
 
-- [ ] Hosttaki kurulu Node sürümlerini inspect et; eksik runtime install/select ekle. Panelin kendi Node runtime'ı site runtime seçimiyle değişmemeli.
 - [ ] Git deploy'a explicit commit/tag seçimi ve private deploy key/token secret store ekle. Clone/fetch/install/build site Unix user'ıyla çalışmalı.
 - [ ] Env import validation, change metadata ve `saved-on-disk` / `applied-to-running-process` ayrımı ekle.
 - [ ] Node/systemd/Nginx/deploy için bounded, redacted log stream/search/filter/download backend'i geliştir.

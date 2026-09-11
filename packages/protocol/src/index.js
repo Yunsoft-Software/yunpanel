@@ -3,6 +3,7 @@ import {
   assertUuid,
   normalizeNodeApplicationSpec,
   normalizeNodeProcessSpec,
+  MANAGED_NODE_RUNTIME_MAJORS as SHARED_MANAGED_NODE_RUNTIME_MAJORS,
   normalizeNodeRestartSpec,
   normalizeNodeRollbackSpec,
   normalizeNodeStatusSpec,
@@ -15,6 +16,7 @@ export const MANAGED_SERVICE_IDS = Object.freeze([
   'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
 ]);
 export const MANAGED_SERVICE_ACTIONS = Object.freeze(['start', 'stop', 'restart']);
+export const MANAGED_NODE_RUNTIME_MAJORS = SHARED_MANAGED_NODE_RUNTIME_MAJORS;
 const MANAGED_SERVICE_ID_SET = new Set(MANAGED_SERVICE_IDS);
 const MANAGED_SERVICE_ACTION_SET = new Set(MANAGED_SERVICE_ACTIONS);
 
@@ -28,6 +30,8 @@ export const OPERATIONS = Object.freeze({
   SYSTEM_SERVICE_INSTALL: 'system.service.install',
   SYSTEM_SERVICE_CONTROL: 'system.service.control',
   SYSTEM_UPGRADE: 'system.upgrade',
+  SYSTEM_NODE_RUNTIMES_INSPECT: 'system.node-runtimes.inspect',
+  SYSTEM_NODE_RUNTIME_INSTALL: 'system.node-runtime.install',
   DATABASE_INSPECT: 'database.inspect',
   DATABASE_CREATE: 'database.create',
   DATABASE_DELETE: 'database.delete',
@@ -51,6 +55,7 @@ export const READ_ONLY_OPERATIONS = Object.freeze([
   OPERATIONS.SERVER_NGINX,
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
   OPERATIONS.SYSTEM_SERVICES_INSPECT,
+  OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT,
   OPERATIONS.DATABASE_INSPECT,
   OPERATIONS.APP_NODE_STATUS,
 ]);
@@ -110,8 +115,16 @@ function rejectUnexpectedKeys(payload, allowedKeys, operation, errors) {
 }
 
 function validateMutationPayload(operation, payload, errors) {
-  if (operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || operation === OPERATIONS.SYSTEM_UPGRADE || operation === OPERATIONS.DATABASE_INSPECT) {
+  if (operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || operation === OPERATIONS.SYSTEM_UPGRADE
+    || operation === OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT || operation === OPERATIONS.DATABASE_INSPECT) {
     if (Object.keys(payload).length !== 0) errors.push(`${operation} does not accept arguments`);
+  }
+
+  if (operation === OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL) {
+    rejectUnexpectedKeys(payload, ['major'], operation, errors);
+    if (!Number.isInteger(payload.major) || !MANAGED_NODE_RUNTIME_MAJORS.includes(payload.major)) {
+      errors.push('system.node-runtime.install major is invalid');
+    }
   }
 
   if (operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) {

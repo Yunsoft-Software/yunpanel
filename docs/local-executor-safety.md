@@ -32,7 +32,7 @@ The current local operation map covers the asynchronous queue operations used by
 - Nginx domain stage/activate,
 - ACME certificate issue/renew,
 - static deploy/rollback,
-- Node deploy/rollback/restart/status and release-bound enable/disable/start/stop process control.
+- Node deploy/rollback/restart/status, release-bound enable/disable/start/stop process control and isolated runtime inventory/install.
 
 Node environment secrets are materialized from the encrypted application environment registry at execution time. Plaintext application secrets are not copied into generic durable job payloads or public job responses.
 
@@ -94,6 +94,8 @@ Read-only running recovery may re-run only explicitly allowlisted inspection wor
 There is no generic `force-success`, `force-failed`, blind mutation retry or manual journal-clear escape hatch. Missing or drifted evidence means the job remains unresolved.
 
 Private recovery context contains execution intent needed by recovery without adding payloads to public `/api/jobs` responses. Receipt stores accept only operation-specific bounded metadata; they do not accept arbitrary result/env/secret objects.
+
+Managed Node runtime installation downloads only the official `latest-v22.x` or `latest-v24.x` Linux x64/arm64 archive over HTTPS, verifies the exact archive against the same release's SHA-256 manifest, extracts to a private temporary directory and atomically activates `/opt/yunpanel/node-runtimes/v<major>`. Existing invalid runtime state is never overwritten. `/usr/local/bin/node` is inspected before/after as the packaged panel runtime and is never an installation target.
 
 ## Execution evidence
 

@@ -41,6 +41,10 @@ function fixture({ withEnvironment = false } = {}) {
     nodeProcessManager: {
       controlNodeProcess: async (payload) => { calls.push(['node.process', payload]); return { releaseId: payload.releaseId, action: payload.action }; },
     },
+    nodeRuntimeManager: {
+      inspect: async () => { calls.push(['node-runtime.inspect']); return { managedRuntimes: [] }; },
+      install: async (major) => { calls.push(['node-runtime.install', major]); return { changed: true }; },
+    },
     nodeStatusInspector: {
       inspectNodeStatus: async (payload) => { calls.push(['node.status', payload]); return { releaseId: payload.releaseId, healthy: true }; },
     },
@@ -117,4 +121,12 @@ test('static lifecycle, Node status and Node process control never request appli
   await operations.executeOperation(OPERATIONS.APP_NODE_PROCESS, processPayload);
   assert.deepEqual(environments, []);
   assert.deepEqual(calls.map(([name]) => name), ['static.deploy', 'node.status', 'node.process']);
+});
+
+test('managed Node runtime inventory and install dispatch outside application secret materialization', async () => {
+  const { operations, calls, environments } = fixture({ withEnvironment: true });
+  await operations.executeOperation(OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT, {});
+  await operations.executeOperation(OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL, { major: 24 });
+  assert.deepEqual(environments, []);
+  assert.deepEqual(calls, [['node-runtime.inspect'], ['node-runtime.install', 24]]);
 });

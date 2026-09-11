@@ -164,6 +164,14 @@ sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-node
 
 Deploy, rollback and restart require their private job-bound success receipt plus exact Application state and fresh read-only Node/systemd/health evidence for the expected release, service, port and health path. Process enable/disable/start/stop is idempotent and instead requires exact private action/release/active-runtime intent plus fresh final-state evidence; recovery never replays `systemctl`. Environment secrets are not stored in recovery receipts or process jobs.
 
+### Managed Node runtime installation
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-node-runtime-install <server-id> <job-id> --confirm
+```
+
+Runtime inventory is safely repeatable through `recover-readonly`. Installation recovery never downloads or extracts again: exact private major intent must match a fresh `/opt/yunpanel/node-runtimes/v<major>` inventory, and the packaged `/usr/local/bin/node` identity must remain valid.
+
 ### Database create and delete
 
 ```bash

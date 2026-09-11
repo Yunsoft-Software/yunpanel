@@ -6,6 +6,7 @@ const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const SAFE_REEXECUTION = Object.freeze({
   [OPERATIONS.SYSTEM_PACKAGES_INSPECT]: Object.freeze({ resourceType: 'system', resourceScope: 'server', payloadMode: 'empty' }),
   [OPERATIONS.SYSTEM_SERVICES_INSPECT]: Object.freeze({ resourceType: 'system', resourceScope: 'server', payloadMode: 'persisted' }),
+  [OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT]: Object.freeze({ resourceType: 'system', resourceScope: 'server', payloadMode: 'empty' }),
   [OPERATIONS.DATABASE_INSPECT]: Object.freeze({ resourceType: 'database', resourceScope: 'server', payloadMode: 'empty' }),
   [OPERATIONS.APP_NODE_STATUS]: Object.freeze({ resourceType: 'application', resourceScope: 'resource', payloadMode: 'persisted' }),
 });

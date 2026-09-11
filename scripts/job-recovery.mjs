@@ -15,6 +15,7 @@ import { runRunningDomainActivationRecoveryFromStores } from '../apps/api/src/jo
 import { runRunningNodeDeploymentRecoveryFromStores } from '../apps/api/src/job-running-node-deployment-recovery-runtime.js';
 import { runRunningNodeRestartRecoveryFromStores } from '../apps/api/src/job-running-node-restart-recovery-runtime.js';
 import { runRunningNodeProcessRecoveryFromStores } from '../apps/api/src/job-running-node-process-recovery-runtime.js';
+import { runRunningNodeRuntimeRecoveryFromStores } from '../apps/api/src/job-running-node-runtime-recovery-runtime.js';
 import { runRunningNodeRollbackRecoveryFromStores } from '../apps/api/src/job-running-node-rollback-recovery-runtime.js';
 import { runRunningReadOnlyRecoveryFromStores } from '../apps/api/src/job-running-readonly-recovery-runtime.js';
 import { runRunningServiceControlRecoveryFromStores } from '../apps/api/src/job-running-service-recovery-runtime.js';
@@ -37,6 +38,7 @@ const RECOVERY_ACTIONS = Object.freeze([
   'recover-node-deploy',
   'recover-node-restart',
   'recover-node-process',
+  'recover-node-runtime-install',
   'recover-node-rollback',
   'recover-system-upgrade',
   'recover-certificate',
@@ -45,7 +47,7 @@ const RECOVERY_ACTIONS = Object.freeze([
   'recover-service-control',
   'recover-service-mutation',
 ]);
-const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-process <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-certificate <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm';
+const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-process <server-id> <job-id> --confirm | recover-node-runtime-install <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-certificate <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm';
 
 export function parseJobRecoveryArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
@@ -134,6 +136,7 @@ export async function runJobRecoveryCli({
   recoverNodeDeployment = runRunningNodeDeploymentRecoveryFromStores,
   recoverNodeRestart = runRunningNodeRestartRecoveryFromStores,
   recoverNodeProcess = runRunningNodeProcessRecoveryFromStores,
+  recoverNodeRuntimeInstall = runRunningNodeRuntimeRecoveryFromStores,
   recoverNodeRollback = runRunningNodeRollbackRecoveryFromStores,
   recoverSystemUpgrade = runRunningSystemUpgradeRecoveryFromStores,
   recoverCertificate = runRunningCertificateRecoveryFromStores,
@@ -160,6 +163,7 @@ export async function runJobRecoveryCli({
     else if (parsed.action === 'recover-node-deploy') handler = recoverNodeDeployment;
     else if (parsed.action === 'recover-node-restart') handler = recoverNodeRestart;
     else if (parsed.action === 'recover-node-process') handler = recoverNodeProcess;
+    else if (parsed.action === 'recover-node-runtime-install') handler = recoverNodeRuntimeInstall;
     else if (parsed.action === 'recover-node-rollback') handler = recoverNodeRollback;
     else if (parsed.action === 'recover-system-upgrade') handler = recoverSystemUpgrade;
     else if (parsed.action === 'recover-certificate') handler = recoverCertificate;

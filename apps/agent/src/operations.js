@@ -7,6 +7,7 @@ import { nginxManager } from './nginx-manager.js';
 import { nodeDeploymentManager } from './node-deployment-manager.js';
 import { nodeRestartManager } from './node-restart-manager.js';
 import { nodeProcessManager } from './node-process-manager.js';
+import { nodeRuntimeManager } from './node-runtime-manager.js';
 import { nodeRollbackManager } from './node-rollback-manager.js';
 import { nodeStatusInspector } from './node-status-inspector.js';
 import { staticDeploymentManager } from './static-deployment-manager.js';
@@ -38,6 +39,8 @@ export const operationHandlers = Object.freeze({
   [OPERATIONS.APP_NODE_RESTART]: (payload) => nodeRestartManager.restartNode(payload),
   [OPERATIONS.APP_NODE_STATUS]: (payload) => nodeStatusInspector.inspectNodeStatus(payload),
   [OPERATIONS.APP_NODE_PROCESS]: (payload) => nodeProcessManager.controlNodeProcess(payload),
+  [OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT]: () => nodeRuntimeManager.inspect(),
+  [OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL]: (payload) => nodeRuntimeManager.install(payload.major),
 });
 
 export async function executeOperation(operation, payload) {

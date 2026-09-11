@@ -5,6 +5,7 @@ import {
   createOperationEnvelope,
   MANAGED_SERVICE_ACTIONS,
   MANAGED_SERVICE_IDS,
+  MANAGED_NODE_RUNTIME_MAJORS,
   OPERATIONS,
 } from '@yunpanel/protocol';
 import { sanitizeDatabaseJobResult } from './database-job-result.js';
@@ -24,6 +25,8 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.APP_NODE_RESTART,
   OPERATIONS.APP_NODE_STATUS,
   OPERATIONS.APP_NODE_PROCESS,
+  OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT,
+  OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL,
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
   OPERATIONS.SYSTEM_SERVICES_INSPECT,
   OPERATIONS.SYSTEM_SERVICE_INSTALL,
@@ -41,6 +44,7 @@ const SYSTEMD_STATE_PATTERN = /^[a-z0-9-]{1,40}$/;
 const PACKAGE_VERSION_PATTERN = /^[A-Za-z0-9.+:~_-]{1,100}$/;
 const PACKAGE_NAME_PATTERN = /^[a-z0-9][a-z0-9.+-]{0,100}$/;
 const SYSTEMD_UNIT_PATTERN = /^[a-z0-9@_.-]{1,120}\.service$/;
+const NODE_VERSION_PATTERN = /^v(\d{1,2})\.\d{1,3}\.\d{1,3}$/;
 const MANAGED_SERVICE_ID_SET = new Set(MANAGED_SERVICE_IDS);
 const MANAGED_SERVICE_ACTION_SET = new Set(MANAGED_SERVICE_ACTIONS);
 const MAX_ARTIFACT_FILES = 100_000;
@@ -328,6 +332,76 @@ function sanitizeNodeProcessResult(job, result) {
   };
 }
 
+function sanitizeNodeExecutable(value, source, expectedMajor = null, { nullable = false } = {}) {
+  if (value == null && nullable) return null;
+  const match = typeof value?.version === 'string' ? value.version.match(NODE_VERSION_PATTERN) : null;
+  const major = match ? Number.parseInt(match[1], 10) : null;
+  const expectedPath = source === 'panel' ? '/usr/local/bin/node'
+    : source === 'system' ? '/usr/bin/node'
+      : `/opt/yunpanel/node-runtimes/v${expectedMajor}/bin/node`;
+  if (!match || !Number.isInteger(major) || (expectedMajor !== null && major !== expectedMajor)
+    || value.path !== expectedPath || value.source !== source) {
+    throw new JobRegistryError('invalid_job_result', `Node ${source} runtime metadata is invalid`);
+  }
+  return { path: expectedPath, source, version: value.version, major };
+}
+
+function sanitizeManagedNodeRuntime(value, expectedMajor) {
+  if (!value || value.major !== expectedMajor || typeof value.installed !== 'boolean'
+    || value.path !== `/opt/yunpanel/node-runtimes/v${expectedMajor}/bin/node`
+    || (value.installed ? typeof value.version !== 'string' : value.version !== null)
+    || !Array.isArray(value.packageManagers)) {
+    throw new JobRegistryError('invalid_job_result', 'Managed Node runtime inventory is invalid');
+  }
+  const packageManagers = [...value.packageManagers];
+  if (new Set(packageManagers).size !== packageManagers.length
+    || packageManagers.some((name) => !['npm', 'pnpm', 'yarn'].includes(name))
+    || (!value.installed && packageManagers.length > 0)) {
+    throw new JobRegistryError('invalid_job_result', 'Managed Node runtime package-manager inventory is invalid');
+  }
+  if (value.installed) sanitizeNodeExecutable({ ...value, source: 'managed' }, 'managed', expectedMajor);
+  return { major: expectedMajor, installed: value.installed, path: value.path, version: value.version, packageManagers };
+}
+
+function sanitizeNodeRuntimeInventory(result) {
+  if (!result || result.platform !== 'linux' || !['x64', 'arm64'].includes(result.architecture)
+    || !Array.isArray(result.supportedMajors)
+    || result.supportedMajors.length !== MANAGED_NODE_RUNTIME_MAJORS.length
+    || result.supportedMajors.some((major, index) => major !== MANAGED_NODE_RUNTIME_MAJORS[index])
+    || !Array.isArray(result.managedRuntimes)
+    || result.managedRuntimes.length !== MANAGED_NODE_RUNTIME_MAJORS.length) {
+    throw new JobRegistryError('invalid_job_result', 'Managed Node runtime inventory metadata is invalid');
+  }
+  return {
+    platform: 'linux',
+    architecture: result.architecture,
+    supportedMajors: [...MANAGED_NODE_RUNTIME_MAJORS],
+    panelRuntime: sanitizeNodeExecutable(result.panelRuntime, 'panel', null, { nullable: true }),
+    systemRuntime: sanitizeNodeExecutable(result.systemRuntime, 'system', null, { nullable: true }),
+    managedRuntimes: MANAGED_NODE_RUNTIME_MAJORS.map((major, index) => sanitizeManagedNodeRuntime(result.managedRuntimes[index], major)),
+  };
+}
+
+function sanitizeNodeRuntimeInstallResult(job, result) {
+  const expectedMajor = job.payload?.major;
+  if (!MANAGED_NODE_RUNTIME_MAJORS.includes(expectedMajor) || typeof result?.changed !== 'boolean'
+    || !result.runtime || result.runtime.major !== expectedMajor || result.runtime.source !== 'managed'
+    || !Array.isArray(result.runtime.packageManagers)) {
+    throw new JobRegistryError('invalid_job_result', 'Managed Node runtime installation result is invalid');
+  }
+  const runtime = sanitizeNodeExecutable(result.runtime, 'managed', expectedMajor);
+  const packageManagers = [...result.runtime.packageManagers];
+  if (packageManagers.length !== 3 || packageManagers.some((name, index) => name !== ['npm', 'pnpm', 'yarn'][index])) {
+    throw new JobRegistryError('invalid_job_result', 'Managed Node runtime installation package managers are invalid');
+  }
+  const inventory = sanitizeNodeRuntimeInventory(result.inventory);
+  const installed = inventory.managedRuntimes.find((entry) => entry.major === expectedMajor);
+  if (!installed?.installed || installed.version !== runtime.version) {
+    throw new JobRegistryError('invalid_job_result', 'Managed Node runtime installation is not confirmed by inventory');
+  }
+  return { changed: result.changed, runtime: { ...runtime, packageManagers }, inventory };
+}
+
 function sanitizePackageVersion(value, field, { optional = false } = {}) {
   if (optional && value == null) return null;
   if (typeof value !== 'string' || !PACKAGE_VERSION_PATTERN.test(value)) {
@@ -493,6 +567,8 @@ function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.APP_NODE_RESTART) return sanitizeNodeRestartResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_STATUS) return sanitizeNodeStatusResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_PROCESS) return sanitizeNodeProcessResult(job, result);
+  if (job.operation === OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT) return sanitizeNodeRuntimeInventory(result);
+  if (job.operation === OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL) return sanitizeNodeRuntimeInstallResult(job, result);
   if (job.operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || job.operation === OPERATIONS.SYSTEM_UPGRADE) {
     return sanitizeSystemPackageResult(job, result);
   }

@@ -105,6 +105,22 @@ test('database inspection remains safely re-executable with an empty payload', a
   assert.equal(result.operation, OPERATIONS.DATABASE_INSPECT);
 });
 
+test('managed Node runtime inventory remains safely re-executable with an empty payload', async () => {
+  const job = candidate(OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT, 'system');
+  const jobRegistry = registry(job);
+  const executions = [];
+  const result = await recoverRunningInspection({
+    serverId,
+    jobId,
+    jobRegistry,
+    serviceStatus: stopped,
+    inspect: async () => inspectWith(job),
+    executeOperation: async (operation, payload) => { executions.push([operation, payload]); return { managedRuntimes: [] }; },
+  });
+  assert.equal(result.operation, OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT);
+  assert.deepEqual(executions, [[OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT, {}]]);
+});
+
 test('managed service inspection reuses only its exact private persisted payload', async () => {
   const job = candidate(OPERATIONS.SYSTEM_SERVICES_INSPECT, 'system');
   const jobRegistry = registry(job);

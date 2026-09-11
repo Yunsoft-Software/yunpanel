@@ -60,13 +60,14 @@ test('read-only inventory reads cross the core boundary with explicit capabiliti
 
 test('read-only sensitive reads and mutations fail before the core handler', async (t) => {
   const app = await fixture(t);
-  for (const path of ['/api/jobs', '/api/users', '/api/applications/a1/environment', '/api/applications/a1/status', '/api/servers/s1/system/packages/inspect']) {
+  for (const path of ['/api/jobs', '/api/users', '/api/applications/a1/environment', '/api/applications/a1/status', '/api/servers/s1/system/packages/inspect', '/api/servers/s1/node-runtimes']) {
     assert.equal((await app.request(path, { headers: { cookie } })).status, 403, path);
   }
   for (const path of [
     '/api/domains', '/api/domains/domain-1/reparent-preview', '/api/domains/domain-1/reparent',
     '/api/applications/application-1/configuration-preview', '/api/applications/application-1/configuration',
     '/api/applications/application-1/process',
+    '/api/servers/server-1/node-runtimes/inspect', '/api/servers/server-1/node-runtimes/24/install',
   ]) {
     assert.equal((await app.request(path, {
       method: 'POST',

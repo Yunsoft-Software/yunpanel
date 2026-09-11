@@ -52,6 +52,8 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/jobs\/([^/]+)\/cancel$/)) && method === 'POST') return { action: 'job.cancel', resourceType: 'job', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/system\/packages\/inspect$/)) && method === 'POST') return { action: 'system.packages.inspect', resourceType: 'server', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/system\/upgrade$/)) && method === 'POST') return { action: 'system.upgrade', resourceType: 'server', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/node-runtimes\/inspect$/)) && method === 'POST') return { action: 'node_runtime.inspect', resourceType: 'server', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/node-runtimes\/([^/]+)\/install$/)) && method === 'POST') return { action: 'node_runtime.install', resourceType: 'server', resourceId: `${parts[0]}:${parts[1]}` };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/services\/inspect$/)) && method === 'POST') return { action: 'system.services.inspect', resourceType: 'server', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/services\/([^/]+)\/install$/)) && method === 'POST') return { action: 'service.install', resourceType: 'service', resourceId: `${parts[0]}:${parts[1]}` };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/services\/([^/]+)\/control$/)) && method === 'POST') return { action: 'service.control', resourceType: 'service', resourceId: `${parts[0]}:${parts[1]}` };

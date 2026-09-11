@@ -13,6 +13,7 @@ import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
+import { mountNodeRuntimeRoutes, NodeRuntimeHttpError } from './node-runtime-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { ResourceImpactError } from './resource-impact.js';
 import { mountResourceImpactRoutes } from './resource-impact-http.js';
@@ -86,6 +87,7 @@ export function createApp({
     migrationLedger,
   });
   mountManagedServiceRoutes(app, { registry, jobRegistry });
+  mountNodeRuntimeRoutes(app, { registry, jobRegistry });
   mountDatabaseRoutes(app, { registry, jobRegistry });
   app.use(core);
   app.use((error, request, response, next) => {
@@ -98,6 +100,7 @@ export function createApp({
       || error instanceof RegistryError
       || error instanceof JobRegistryError
       || error instanceof ManagedServiceHttpError
+      || error instanceof NodeRuntimeHttpError
       || error instanceof ResourceImpactError
       || error instanceof SiteCreateError
       || error instanceof WebsiteMigrationBindError

@@ -6,6 +6,7 @@ import {
   createNodeDeploymentManager,
   createNodeRestartManager,
   createNodeProcessManager,
+  createNodeRuntimeManager,
   createNodeRollbackManager,
   createNodeStatusInspector,
   createStaticDeploymentManager,
@@ -32,6 +33,8 @@ export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.APP_STATIC_ROLLBACK,
   OPERATIONS.APP_NODE_STATUS,
   OPERATIONS.APP_NODE_PROCESS,
+  OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT,
+  OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL,
 ]);
 
 export const LOCAL_NODE_ENVIRONMENT_OPERATIONS = Object.freeze([
@@ -59,6 +62,7 @@ export function createLocalHostOperations({
   nodeRollbackManager = createNodeRollbackManager(),
   nodeRestartManager = createNodeRestartManager(),
   nodeProcessManager = createNodeProcessManager(),
+  nodeRuntimeManager = createNodeRuntimeManager(),
   nodeStatusInspector = createNodeStatusInspector(),
   loadApplicationEnvironment = null,
 } = {}) {
@@ -112,6 +116,8 @@ export function createLocalHostOperations({
     [OPERATIONS.APP_STATIC_ROLLBACK, (payload) => staticRollbackManager.rollbackStatic(payload)],
     [OPERATIONS.APP_NODE_STATUS, (payload) => nodeStatusInspector.inspectNodeStatus(payload)],
     [OPERATIONS.APP_NODE_PROCESS, (payload) => nodeProcessManager.controlNodeProcess(payload)],
+    [OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT, () => nodeRuntimeManager.inspect()],
+    [OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL, (payload) => nodeRuntimeManager.install(payload.major)],
   ]);
 
   if (loadApplicationEnvironment) {

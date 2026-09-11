@@ -33,6 +33,8 @@ test('current management mutation routes map to bounded action and resource iden
     ['POST', '/api/jobs/job-1/cancel', 'job.cancel', 'job', 'job-1'],
     ['POST', '/api/servers/server-1/system/packages/inspect', 'system.packages.inspect', 'server', 'server-1'],
     ['POST', '/api/servers/server-1/system/upgrade', 'system.upgrade', 'server', 'server-1'],
+    ['POST', '/api/servers/server-1/node-runtimes/inspect', 'node_runtime.inspect', 'server', 'server-1'],
+    ['POST', '/api/servers/server-1/node-runtimes/24/install', 'node_runtime.install', 'server', 'server-1:24'],
     ['POST', '/api/servers/server-1/services/inspect', 'system.services.inspect', 'server', 'server-1'],
     ['POST', '/api/servers/server-1/services/nginx/install', 'service.install', 'service', 'server-1:nginx'],
     ['POST', '/api/servers/server-1/services/nginx/control', 'service.control', 'service', 'server-1:nginx'],
