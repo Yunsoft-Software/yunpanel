@@ -13,6 +13,7 @@ const POSTFIX_VIRTUAL_ALIAS_MAP_PATH = '/etc/yunpanel/mail/postfix/virtual-alias
 const DOVECOT_PASSWD_FILE_PATH = '/etc/yunpanel/mail/dovecot/users';
 const DOVECOT_AUTH_CONFIG_PATH = '/etc/dovecot/conf.d/10-auth.conf';
 const DOVECOT_MAIL_CONFIG_PATH = '/etc/dovecot/conf.d/99-yunpanel-mail.conf';
+const RSPAMD_PROXY_CONFIG_PATH = '/etc/rspamd/local.d/worker-proxy.inc';
 
 export class MailTemplateError extends Error {
   constructor(code, message) {
@@ -338,6 +339,45 @@ export function previewDovecotVirtualMailConfig(input = {}) {
   });
 }
 
+export function renderRspamdProxyConfig() {
+  return `bind_socket = "127.0.0.1:11332";\nmilter = yes;\n\nupstream "local" {\n  self_scan = yes;\n}\n`;
+}
+
+export function previewRspamdPostfixIntegration() {
+  const content = renderRspamdProxyConfig();
+  const artifact = Object.freeze({
+    version: 1,
+    path: RSPAMD_PROXY_CONFIG_PATH,
+    sha256: createHash('sha256').update(content).digest('hex'),
+    bytes: Buffer.byteLength(content),
+    content,
+    sensitive: false,
+    sideEffects: false,
+  });
+  const postfixParameters = Object.freeze([
+    Object.freeze({ name: 'milter_default_action', value: 'tempfail' }),
+    Object.freeze({ name: 'milter_protocol', value: '6' }),
+    Object.freeze({ name: 'non_smtpd_milters', value: 'inet:127.0.0.1:11332' }),
+    Object.freeze({ name: 'smtpd_milters', value: 'inet:127.0.0.1:11332' }),
+  ]);
+  const identity = {
+    artifact: { path: artifact.path, sha256: artifact.sha256 },
+    postfixParameters,
+  };
+  return Object.freeze({
+    version: 1,
+    sha256: createHash('sha256').update(JSON.stringify(identity)).digest('hex'),
+    artifacts: Object.freeze([artifact]),
+    postfixParameters,
+    validate: Object.freeze([
+      Object.freeze({ file: '/usr/bin/rspamadm', args: Object.freeze(['configtest']) }),
+      Object.freeze({ file: '/usr/sbin/postfix', args: Object.freeze(['check']) }),
+    ]),
+    requirements: Object.freeze(['rspamd', 'postfix', 'loopback_11332_available']),
+    sideEffects: false,
+  });
+}
+
 export const mailTemplatePolicy = Object.freeze({
   maxManagedDomains: MAX_MANAGED_DOMAINS,
   maxMailboxes: MAX_MAILBOXES,
@@ -349,4 +389,5 @@ export const mailTemplatePolicy = Object.freeze({
   dovecotPasswdFilePath: DOVECOT_PASSWD_FILE_PATH,
   dovecotAuthConfigPath: DOVECOT_AUTH_CONFIG_PATH,
   dovecotMailConfigPath: DOVECOT_MAIL_CONFIG_PATH,
+  rspamdProxyConfigPath: RSPAMD_PROXY_CONFIG_PATH,
 });

@@ -20,10 +20,12 @@ export {
   previewDovecotVirtualMailConfig,
   previewPostfixVirtualDomainMap,
   previewPostfixVirtualMaps,
+  previewRspamdPostfixIntegration,
   renderDovecotAuthConfig,
   renderDovecotMailConfig,
   renderDovecotPasswdFile,
   renderPostfixVirtualAliasMap,
   renderPostfixVirtualDomainMap,
   renderPostfixVirtualMailboxMap,
+  renderRspamdProxyConfig,
 } from './mail.js';

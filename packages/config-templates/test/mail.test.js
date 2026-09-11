@@ -7,12 +7,14 @@ import {
   previewDovecotVirtualMailConfig,
   previewPostfixVirtualDomainMap,
   previewPostfixVirtualMaps,
+  previewRspamdPostfixIntegration,
   renderDovecotAuthConfig,
   renderDovecotMailConfig,
   renderDovecotPasswdFile,
   renderPostfixVirtualAliasMap,
   renderPostfixVirtualDomainMap,
   renderPostfixVirtualMailboxMap,
+  renderRspamdProxyConfig,
 } from '../src/index.js';
 
 const ARGON2ID_HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 1).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 2).toString('base64').replace(/=+$/, '')}`;
@@ -230,4 +232,33 @@ test('previews deterministic non-secret Dovecot config with explicit activation 
   assert.equal(previewDovecotVirtualMailConfig({
     postmasterAddress: 'POSTMASTER@EXAMPLE.COM.', domains: ['EXAMPLE.COM.'],
   }).sha256, preview.sha256);
+});
+
+test('renders an explicit loopback-only Rspamd self-scan Milter worker', () => {
+  const config = renderRspamdProxyConfig();
+  assert.match(config, /^bind_socket = "127\.0\.0\.1:11332";$/m);
+  assert.match(config, /^milter = yes;$/m);
+  assert.match(config, /^upstream "local" \{$/m);
+  assert.match(config, /^  self_scan = yes;$/m);
+  assert.equal(config.includes('*:11332'), false);
+  assert.equal(config.includes('0.0.0.0'), false);
+});
+
+test('previews strict Postfix Milter parameters and fixed config validators', () => {
+  const preview = previewRspamdPostfixIntegration();
+  assert.match(preview.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(preview.artifacts[0].path, '/etc/rspamd/local.d/worker-proxy.inc');
+  assert.deepEqual(preview.postfixParameters, [
+    { name: 'milter_default_action', value: 'tempfail' },
+    { name: 'milter_protocol', value: '6' },
+    { name: 'non_smtpd_milters', value: 'inet:127.0.0.1:11332' },
+    { name: 'smtpd_milters', value: 'inet:127.0.0.1:11332' },
+  ]);
+  assert.deepEqual(preview.validate, [
+    { file: '/usr/bin/rspamadm', args: ['configtest'] },
+    { file: '/usr/sbin/postfix', args: ['check'] },
+  ]);
+  assert.deepEqual(preview.requirements, ['rspamd', 'postfix', 'loopback_11332_available']);
+  assert.equal(preview.sideEffects, false);
+  assert.equal(preview.artifacts[0].sideEffects, false);
 });

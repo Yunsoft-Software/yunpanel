@@ -177,6 +177,8 @@ Dovecot passwd-file rendering accepts no plaintext password. Each account must c
 
 The Dovecot 2.3 config preview replaces `10-auth.conf` as one complete managed artifact instead of appending a second passdb after the distribution PAM include. It selects only the protected passwd-file, stops on lookup failure/internal failure, lowercases the full `user@domain` identity and keeps PLAIN/LOGIN unavailable over non-TLS connections. A second managed fragment selects Maildir below `/var/lib/yunpanel/mail/%d/%n`, enables IMAP plus LMTP, and creates only the documented Postfix-owned `0600` socket below `/var/spool/postfix/private`. The postmaster address must be canonical and belong to the managed-domain set. Preview still has no side effects and carries explicit Dovecot-version, Unix-identity and TLS-material prerequisites; the renderer alone is not activation approval.
 
+Rspamd integration preview pins the proxy worker to `127.0.0.1:11332`, explicitly enables Milter self-scan, and never emits a wildcard listener. The paired Postfix parameter set covers both SMTP and non-SMTP mail, uses Milter protocol 6 and chooses `milter_default_action=tempfail`; an unavailable scanner therefore defers mail instead of silently accepting an unscanned message. The preview contains only deterministic non-secret content, parameter values, fixed `rspamadm configtest`/`postfix check` argv and package/port prerequisites. Atomic `main.cf` parameter staging, service reload ordering, post-condition evidence and rollback are still required before activation.
+
 ## Local log API
 
 Log reads are sensitive Owner-management operations and remain unavailable for Read Only accounts, remote legacy-agent records or a panel without an active local-server binding. Supported routes are:

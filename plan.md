@@ -34,7 +34,7 @@ Static/SPA trafiği explicit Domain `spaFallback` state'iyle canonical static Ap
 
 ## H. P2 — Mail ve Roundcube
 
-- [ ] Postfix managed-set staging/parameter integration/apply/test/rollback; Dovecot managed config staging/apply/test/rollback; Rspamd config preview/apply/test/rollback; Roundcube için Nginx/PHP-FPM/veritabanı yapılandırma ve geri alma akışı.
+- [ ] Postfix managed-set staging/parameter integration/apply/test/rollback; Dovecot managed config staging/apply/test/rollback; Rspamd managed config staging/apply/test/rollback; Roundcube için Nginx/PHP-FPM/veritabanı yapılandırma ve geri alma akışı.
 - [ ] Mail-domain enable/disable, mailbox CRUD, password rotation, quota/usage, alias/forwarding lifecycle.
 - [ ] MX/SPF/DKIM/DMARC/PTR expected-current-action-needed diagnostics.
 - [ ] SMTP/IMAP TLS, queue ve bounded logs; open relay fail-closed.
