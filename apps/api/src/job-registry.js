@@ -11,6 +11,7 @@ import {
 import { normalizeGitDeploymentTarget, sanitizeLogMessage } from '@yunpanel/shared';
 import { sanitizeDatabaseJobResult } from './database-job-result.js';
 import { safeLocalOperationError } from './local-execution-error.js';
+import { managedServiceStatePolicy } from './managed-service-state-policy.js';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
 const STORE_VERSION = 1;
@@ -51,6 +52,12 @@ const SYSTEMD_UNIT_PATTERN = /^[a-z0-9@_.-]{1,120}\.service$/;
 const NODE_VERSION_PATTERN = /^v(\d{1,2})\.\d{1,3}\.\d{1,3}$/;
 const MANAGED_SERVICE_ID_SET = new Set(MANAGED_SERVICE_IDS);
 const MANAGED_SERVICE_ACTION_SET = new Set(MANAGED_SERVICE_ACTIONS);
+const MANAGED_SERVICE_HEALTH_STATUS_SET = new Set([
+  'ready', 'installed', 'not_installed', 'inactive', 'unknown', 'configuration_invalid',
+]);
+const MANAGED_SERVICE_CONFIGURATION_STATUS_SET = new Set([
+  'not_checked', 'not_applicable', 'valid', 'invalid',
+]);
 const MAX_ARTIFACT_FILES = 100_000;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{16,200}$/;
@@ -548,17 +555,54 @@ function sanitizeManagedServiceUnit(value) {
   return unit;
 }
 
+function sanitizeManagedServiceHealth(value, { policy, installed, active, units }) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || typeof value.status !== 'string' || !MANAGED_SERVICE_HEALTH_STATUS_SET.has(value.status)
+    || typeof value.configuration !== 'string' || !MANAGED_SERVICE_CONFIGURATION_STATUS_SET.has(value.configuration)) {
+    throw new JobRegistryError('invalid_job_result', 'Managed service health state is invalid');
+  }
+  const expectedConfiguration = !installed
+    ? 'not_checked'
+    : policy.checksConfiguration ? null : 'not_applicable';
+  if ((expectedConfiguration && value.configuration !== expectedConfiguration)
+    || (expectedConfiguration === null && !['valid', 'invalid'].includes(value.configuration))) {
+    throw new JobRegistryError('invalid_job_result', 'Managed service configuration health is inconsistent');
+  }
+  const expectedStatus = !installed
+    ? 'not_installed'
+    : units.some((entry) => entry.inspectionError)
+      ? 'unknown'
+      : value.configuration === 'invalid'
+        ? 'configuration_invalid'
+        : units.length === 0 ? 'installed' : !active ? 'inactive' : 'ready';
+  if (value.status !== expectedStatus) {
+    throw new JobRegistryError('invalid_job_result', 'Managed service aggregate health is inconsistent');
+  }
+  return { status: value.status, configuration: value.configuration };
+}
+
 function sanitizeManagedServiceState(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new JobRegistryError('invalid_job_result', 'Managed service state is invalid');
   if (typeof value.id !== 'string' || !MANAGED_SERVICE_ID_SET.has(value.id)) throw new JobRegistryError('invalid_job_result', 'Managed service id is invalid');
+  const policy = managedServiceStatePolicy(value.id);
   if (typeof value.installed !== 'boolean' || typeof value.active !== 'boolean') throw new JobRegistryError('invalid_job_result', 'Managed service status is invalid');
   if (!Array.isArray(value.packages) || value.packages.length < 1 || value.packages.length > 8) throw new JobRegistryError('invalid_job_result', 'Managed service package list is invalid');
-  if (!Array.isArray(value.units) || value.units.length < 1 || value.units.length > 8) throw new JobRegistryError('invalid_job_result', 'Managed service unit list is invalid');
+  if (!Array.isArray(value.units) || value.units.length !== policy.units.length) {
+    throw new JobRegistryError('invalid_job_result', 'Managed service unit list is invalid');
+  }
   const packages = value.packages.map(sanitizeManagedServicePackage);
   const units = value.units.map(sanitizeManagedServiceUnit);
+  if (packages.length !== policy.packages.length
+    || packages.some((entry, index) => entry.packageName !== policy.packages[index])
+    || units.some((entry, index) => entry.unit !== policy.units[index])) {
+    throw new JobRegistryError('invalid_job_result', 'Managed service package or unit identities are invalid');
+  }
   if (value.installed !== packages.every((entry) => entry.installed)) throw new JobRegistryError('invalid_job_result', 'Managed service installed state is inconsistent');
-  if (value.active !== units.every((entry) => entry.activeState === 'active')) throw new JobRegistryError('invalid_job_result', 'Managed service active state is inconsistent');
-  return { id: value.id, installed: value.installed, active: value.active, packages, units };
+  if (value.active !== (units.length > 0 && units.every((entry) => entry.activeState === 'active'))) throw new JobRegistryError('invalid_job_result', 'Managed service active state is inconsistent');
+  const health = sanitizeManagedServiceHealth(value.health, {
+    policy, installed: value.installed, active: value.active, units,
+  });
+  return { id: value.id, installed: value.installed, active: value.active, packages, units, health };
 }
 
 function sanitizeManagedServiceResult(job, result) {
@@ -578,7 +622,10 @@ function sanitizeManagedServiceResult(job, result) {
   const service = sanitizeManagedServiceState(result);
   if (service.id !== job.payload?.serviceId) throw new JobRegistryError('invalid_job_result', 'Managed service result identity does not match the queued operation');
   if (job.operation === OPERATIONS.SYSTEM_SERVICE_INSTALL) {
-    if (typeof result.changed !== 'boolean' || !service.installed || !service.active) throw new JobRegistryError('invalid_job_result', 'Managed service installation result is inconsistent');
+    if (typeof result.changed !== 'boolean' || !service.installed
+      || (service.units.length > 0 && !service.active)) {
+      throw new JobRegistryError('invalid_job_result', 'Managed service installation result is inconsistent');
+    }
     return { ...service, changed: result.changed };
   }
   if (job.operation === OPERATIONS.SYSTEM_SERVICE_CONTROL) {

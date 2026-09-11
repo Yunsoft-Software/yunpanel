@@ -144,6 +144,8 @@ Allowlisted read-only operations are:
 
 The payload-backed operations read execution intent only from the private job store; public job responses remain payload-free. Probe failure or context drift leaves recovery unresolved.
 
+Managed-service protocol version 8 adds the package-only Roundcube identity and bounded mail configuration health. Completion and recovery accept only the exact package/unit allowlist; Roundcube recovery proves `roundcube-core` installation without inventing a systemd unit or endpoint readiness.
+
 ### Domain stage and activation
 
 ```bash

@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { OPERATIONS } from '@yunpanel/protocol';
+import { MANAGED_SERVICE_IDS, OPERATIONS } from '@yunpanel/protocol';
 import { managedServiceHttpInternals } from '../src/managed-service-http.js';
 
 const serverId = 'server-1';
-const inspectResult = [
-  { id: 'nginx', installed: true, active: true },
-  { id: 'mariadb', installed: false, active: false },
-];
+const inspectResult = MANAGED_SERVICE_IDS.map((id) => ({
+  id,
+  installed: id === 'nginx',
+  active: id === 'nginx',
+}));
 
 function registry(jobs) {
   return { listJobs: async (filters) => {
@@ -51,4 +52,14 @@ test('partial mutation history without a full inspection is not presented as com
     finishedAt: '2026-09-10T00:01:00.000Z', result: { id: 'nginx', installed: true, active: true, changed: true },
   };
   assert.equal(await managedServiceHttpInternals.latestServiceSnapshot(registry([installed]), serverId), null);
+});
+
+test('legacy full inspection without the current Roundcube identity is not presented as current inventory', async () => {
+  const legacy = {
+    id: 'legacy-inspect',
+    operation: OPERATIONS.SYSTEM_SERVICES_INSPECT,
+    finishedAt: '2026-09-10T00:01:00.000Z',
+    result: inspectResult.filter((service) => service.id !== 'roundcube'),
+  };
+  assert.equal(await managedServiceHttpInternals.latestServiceSnapshot(registry([legacy]), serverId), null);
 });

@@ -24,11 +24,27 @@ function activeState(version = '1.24.0-1') {
   };
 }
 
-function fixture({ operation = OPERATIONS.SYSTEM_SERVICE_INSTALL, action = null, receipt = undefined, snapshot = undefined } = {}) {
+function roundcubeState(version = '1.6.6+dfsg-2ubuntu0.1') {
+  return {
+    id: 'roundcube',
+    installed: true,
+    active: false,
+    packages: [{ packageName: 'roundcube-core', installed: true, version }],
+    units: [],
+    health: { status: 'installed', configuration: 'valid' },
+  };
+}
+
+function fixture({
+  operation = OPERATIONS.SYSTEM_SERVICE_INSTALL,
+  action = null,
+  receipt = undefined,
+  snapshot = undefined,
+  serviceId = 'nginx',
+} = {}) {
   const events = [];
   let status = 'running';
-  const serviceId = 'nginx';
-  const recordedState = activeState();
+  const recordedState = serviceId === 'roundcube' ? roundcubeState() : activeState();
   const defaultReceipt = operation === OPERATIONS.SYSTEM_SERVICE_INSTALL
     ? { serverId, jobId, operation, serviceId, action: null, changed: true, stateDigest: managedServiceStateDigest(recordedState, serviceId) }
     : { serverId, jobId, operation, serviceId, action: 'restart', changed: null, stateDigest: managedServiceStateDigest(recordedState, serviceId) };
@@ -83,6 +99,15 @@ function fixture({ operation = OPERATIONS.SYSTEM_SERVICE_INSTALL, action = null,
     },
   };
 }
+
+test('receipt-backed recovery accepts an installed Roundcube package without a fabricated systemd unit', async () => {
+  const fx = fixture({ serviceId: 'roundcube' });
+  const result = await recoverRunningServiceReceiptMutation(fx.options);
+  assert.equal(result.serviceId, 'roundcube');
+  assert.equal(result.action, null);
+  assert.equal(result.recoveryMethod, 'verified_managed_service_receipt_and_state');
+  assert.deepEqual(fx.events, ['get', 'context', 'receipt', 'evidence', 'begin', 'complete', 'reconcile', 'ack']);
+});
 
 for (const input of [
   { operation: OPERATIONS.SYSTEM_SERVICE_INSTALL, action: null },

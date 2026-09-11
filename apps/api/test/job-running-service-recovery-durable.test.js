@@ -26,6 +26,7 @@ function nginxState(active) {
       unitFileState: 'enabled',
       inspectionError: false,
     }],
+    health: { status: active ? 'ready' : 'inactive', configuration: 'not_applicable' },
   };
 }
 

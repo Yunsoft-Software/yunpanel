@@ -96,6 +96,34 @@ test('configured runtime records install and restart receipts with exact safe st
   ]);
 });
 
+test('configured runtime records package-only Roundcube install evidence without requiring a systemd unit', async () => {
+  const { writes, recorder } = await captureRecorder();
+  const result = {
+    id: 'roundcube',
+    installed: true,
+    active: false,
+    packages: [{ packageName: 'roundcube-core', installed: true, version: '1.6.6+dfsg-2ubuntu0.1' }],
+    units: [],
+    health: { status: 'installed', configuration: 'valid' },
+    changed: true,
+  };
+  await recorder({
+    serverId,
+    jobId: '42345678-1234-4234-8234-123456789012',
+    operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
+    payload: { serviceId: 'roundcube' },
+    result,
+  });
+  assert.deepEqual(writes, [{
+    serverId,
+    jobId: '42345678-1234-4234-8234-123456789012',
+    operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
+    serviceId: 'roundcube',
+    changed: true,
+    state: result,
+  }]);
+});
+
 test('configured runtime refuses to record mismatched service evidence', async () => {
   const { writes, recorder } = await captureRecorder();
   await assert.rejects(

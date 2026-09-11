@@ -7,12 +7,22 @@ const DPKG_QUERY = '/usr/bin/dpkg-query';
 const APT_GET = '/usr/bin/apt-get';
 const SYSTEMCTL = '/usr/bin/systemctl';
 const SERVICE_ACTIONS = new Set(['start', 'stop', 'restart']);
+const CONFIGURATION_STATES = Object.freeze({
+  NOT_CHECKED: 'not_checked',
+  NOT_APPLICABLE: 'not_applicable',
+  VALID: 'valid',
+  INVALID: 'invalid',
+});
 
 function service(definition) {
   return Object.freeze({
     ...definition,
     packages: Object.freeze([...definition.packages]),
     units: Object.freeze([...definition.units]),
+    configurationChecks: Object.freeze((definition.configurationChecks ?? []).map((check) => Object.freeze({
+      file: check.file,
+      args: Object.freeze([...check.args]),
+    }))),
     conflicts: Object.freeze([...(definition.conflicts ?? [])]),
   });
 }
@@ -23,9 +33,26 @@ const SERVICE_CATALOG = Object.freeze([
   service({ id: 'mysql', label: 'MySQL', category: 'database', packages: ['mysql-server'], units: ['mysql.service'], conflicts: ['mariadb'] }),
   service({ id: 'docker', label: 'Docker', category: 'containers', packages: ['docker.io'], units: ['docker.service'] }),
   service({ id: 'cron', label: 'Cron', category: 'scheduler', packages: ['cron'], units: ['cron.service'] }),
-  service({ id: 'postfix', label: 'Postfix', category: 'mail', packages: ['postfix'], units: ['postfix.service'] }),
-  service({ id: 'dovecot', label: 'Dovecot', category: 'mail', packages: ['dovecot-imapd'], units: ['dovecot.service'] }),
-  service({ id: 'rspamd', label: 'Rspamd', category: 'mail', packages: ['rspamd'], units: ['rspamd.service'] }),
+  service({
+    id: 'postfix', label: 'Postfix', category: 'mail', packages: ['postfix'], units: ['postfix.service'],
+    configurationChecks: [{ file: '/usr/sbin/postfix', args: ['check'] }],
+  }),
+  service({
+    id: 'dovecot', label: 'Dovecot', category: 'mail', packages: ['dovecot-imapd'], units: ['dovecot.service'],
+    configurationChecks: [{ file: '/usr/bin/doveconf', args: ['-n'] }],
+  }),
+  service({
+    id: 'rspamd', label: 'Rspamd', category: 'mail', packages: ['rspamd'], units: ['rspamd.service'],
+    configurationChecks: [{ file: '/usr/bin/rspamadm', args: ['configtest'] }],
+  }),
+  service({
+    id: 'roundcube', label: 'Roundcube', category: 'mail', packages: ['roundcube-core'], units: [],
+    configurationChecks: [
+      { file: '/usr/bin/test', args: ['-f', '/usr/share/roundcube/index.php'] },
+      { file: '/usr/bin/test', args: ['-f', '/etc/roundcube/config.inc.php'] },
+      { file: '/usr/bin/php', args: ['-l', '/etc/roundcube/config.inc.php'] },
+    ],
+  }),
 ]);
 const SERVICE_BY_ID = new Map(SERVICE_CATALOG.map((entry) => [entry.id, entry]));
 
@@ -96,20 +123,50 @@ export function createManagedServiceManager({
     }
   }
 
+  async function inspectConfiguration(definition, installed) {
+    if (!installed) return CONFIGURATION_STATES.NOT_CHECKED;
+    if (definition.configurationChecks.length === 0) return CONFIGURATION_STATES.NOT_APPLICABLE;
+    try {
+      for (const check of definition.configurationChecks) {
+        await run(check.file, check.args, {
+          timeout: 30_000,
+          maxBuffer: 128 * 1024,
+          env: { ...process.env, LC_ALL: 'C' },
+        });
+      }
+      return CONFIGURATION_STATES.VALID;
+    } catch {
+      return CONFIGURATION_STATES.INVALID;
+    }
+  }
+
+  function healthFor({ installed, active, units, configuration }) {
+    if (!installed) return { status: 'not_installed', configuration };
+    if (units.some((entry) => entry.inspectionError)) return { status: 'unknown', configuration };
+    if (configuration === CONFIGURATION_STATES.INVALID) return { status: 'configuration_invalid', configuration };
+    if (units.length === 0) return { status: 'installed', configuration };
+    if (units.length > 0 && !active) return { status: 'inactive', configuration };
+    return { status: 'ready', configuration };
+  }
+
   async function inspectOne(serviceId) {
     const definition = requireService(serviceId);
     const [packages, units] = await Promise.all([
       Promise.all(definition.packages.map(inspectPackage)),
       Promise.all(definition.units.map(inspectUnit)),
     ]);
+    const installed = packages.every((entry) => entry.installed);
+    const active = units.length > 0 && units.every((entry) => entry.activeState === 'active');
+    const configuration = await inspectConfiguration(definition, installed);
     return {
       id: definition.id,
       label: definition.label,
       category: definition.category,
-      installed: packages.every((entry) => entry.installed),
-      active: units.length > 0 && units.every((entry) => entry.activeState === 'active'),
+      installed,
+      active,
       packages,
       units,
+      health: healthFor({ installed, active, units, configuration }),
     };
   }
 
@@ -162,15 +219,17 @@ export function createManagedServiceManager({
         }
       }
 
-      try {
-        for (const unit of definition.units) await run(SYSTEMCTL, ['enable', '--now', unit]);
-      } catch {
-        throw new ManagedServiceError('managed_service_enable_failed', `${definition.label} was installed but could not be enabled and started`);
+      if (definition.units.length > 0) {
+        try {
+          for (const unit of definition.units) await run(SYSTEMCTL, ['enable', '--now', unit]);
+        } catch {
+          throw new ManagedServiceError('managed_service_enable_failed', `${definition.label} was installed but could not be enabled and started`);
+        }
       }
 
       const after = await inspectOne(serviceId);
       if (!after.installed) throw new ManagedServiceError('managed_service_install_incomplete', `${definition.label} package installation could not be confirmed`);
-      if (!after.active) throw new ManagedServiceError('managed_service_not_active', `${definition.label} is installed but not active`);
+      if (definition.units.length > 0 && !after.active) throw new ManagedServiceError('managed_service_not_active', `${definition.label} is installed but not active`);
       return { ...after, changed: !before.installed };
     });
   }
@@ -178,6 +237,9 @@ export function createManagedServiceManager({
   async function control(serviceId, action) {
     const definition = requireService(serviceId);
     const safeAction = requireAction(action);
+    if (definition.units.length === 0) {
+      throw new ManagedServiceError('managed_service_not_controllable', 'Managed application does not expose a systemd service control');
+    }
     return withMutation(async () => {
       const before = await inspectOne(serviceId);
       if (!before.installed) throw new ManagedServiceError('managed_service_not_installed', `${definition.label} is not installed`);
@@ -208,4 +270,4 @@ export const managedServicePolicy = Object.freeze({
   services: SERVICE_CATALOG,
   actions: Object.freeze([...SERVICE_ACTIONS]),
 });
-export const managedServiceInternals = Object.freeze({ parsePackageStatus, requireService, requireAction });
+export const managedServiceInternals = Object.freeze({ parsePackageStatus, requireService, requireAction, CONFIGURATION_STATES });

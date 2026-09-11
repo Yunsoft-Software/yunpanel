@@ -76,13 +76,15 @@ function assertReceipt(receipt, identity, intent) {
   }
 }
 
-function activeServiceEvidence(snapshot, serviceId) {
+function installedServiceEvidence(snapshot, serviceId) {
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)
-    || snapshot.id !== serviceId || snapshot.installed !== true || snapshot.active !== true
+    || snapshot.id !== serviceId || snapshot.installed !== true
     || !Array.isArray(snapshot.packages) || snapshot.packages.length < 1
-    || !Array.isArray(snapshot.units) || snapshot.units.length < 1
+    || !Array.isArray(snapshot.units)
+    || (serviceId === 'roundcube' ? snapshot.units.length !== 0 : snapshot.units.length < 1)
     || snapshot.packages.some((entry) => !entry || entry.installed !== true)
-    || snapshot.units.some((entry) => !entry || entry.inspectionError !== false || entry.activeState !== 'active')) {
+    || snapshot.units.some((entry) => !entry || entry.inspectionError !== false || entry.activeState !== 'active')
+    || snapshot.active !== (snapshot.units.length > 0)) {
     return null;
   }
   return snapshot;
@@ -182,7 +184,7 @@ export async function recoverRunningServiceReceiptMutation({
   } catch {
     throw new JobRunningServiceReceiptRecoveryError('job_service_receipt_recovery_evidence_failed', 'Managed service host state could not be inspected');
   }
-  const evidence = activeServiceEvidence(snapshot, intent.serviceId);
+  const evidence = installedServiceEvidence(snapshot, intent.serviceId);
   if (!evidence) {
     throw new JobRunningServiceReceiptRecoveryError('job_service_receipt_recovery_evidence_not_satisfied', 'Managed service host state no longer satisfies the completed mutation');
   }
@@ -248,6 +250,6 @@ export const jobRunningServiceReceiptRecoveryInternals = Object.freeze({
   recoveryIntent,
   assertPublicJob,
   assertReceipt,
-  activeServiceEvidence,
+  installedServiceEvidence,
   requireReceiptStateDigest,
 });

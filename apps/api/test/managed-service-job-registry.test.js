@@ -4,24 +4,38 @@ import { MANAGED_SERVICE_IDS, OPERATIONS } from '@yunpanel/protocol';
 import { createJobRegistry, JobRegistryError } from '../src/job-registry.js';
 
 const serverId = 'server-1';
+const servicePackages = {
+  nginx: 'nginx', mariadb: 'mariadb-server', mysql: 'mysql-server', docker: 'docker.io', cron: 'cron',
+  postfix: 'postfix', dovecot: 'dovecot-imapd', rspamd: 'rspamd', roundcube: 'roundcube-core',
+};
 
 function serviceState(id, { installed = false, active = false } = {}) {
+  const unitless = id === 'roundcube';
+  const effectiveActive = unitless ? false : active;
+  const configuration = !installed
+    ? 'not_checked'
+    : ['postfix', 'dovecot', 'rspamd', 'roundcube'].includes(id) ? 'valid' : 'not_applicable';
   return {
     id,
     label: 'must-not-persist',
     category: 'must-not-persist',
     installed,
-    active,
-    packages: [{ packageName: id, installed, version: installed ? '1.2.3-1' : null, raw: 'PRIVATE' }],
-    units: [{
+    active: effectiveActive,
+    packages: [{ packageName: servicePackages[id], installed, version: installed ? '1.2.3-1' : null, raw: 'PRIVATE' }],
+    units: unitless ? [] : [{
       unit: `${id}.service`,
       loadState: installed ? 'loaded' : 'not-found',
-      activeState: active ? 'active' : 'inactive',
-      subState: active ? 'running' : 'dead',
+      activeState: effectiveActive ? 'active' : 'inactive',
+      subState: effectiveActive ? 'running' : 'dead',
       unitFileState: installed ? 'enabled' : 'unknown',
       inspectionError: false,
       rawOutput: 'PRIVATE',
     }],
+    health: {
+      status: !installed ? 'not_installed' : unitless ? 'installed' : effectiveActive ? 'ready' : 'inactive',
+      configuration,
+      raw: 'PRIVATE',
+    },
     stdout: 'PRIVATE',
   };
 }
@@ -51,6 +65,22 @@ test('managed service catalog inspection persists only bounded structured state'
   assert.ok(!JSON.stringify(completed.result).includes('PRIVATE'));
   assert.equal(Object.hasOwn(completed.result[0], 'label'), false);
   assert.equal(Object.hasOwn(completed.result[0].packages[0], 'raw'), false);
+  assert.equal(Object.hasOwn(completed.result[0].health, 'raw'), false);
+});
+
+test('Roundcube install accepts package evidence without inventing an active systemd unit', async () => {
+  const registry = createJobRegistry();
+  const job = await enqueueAndClaim(registry, OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'roundcube' });
+  const completed = await registry.complete({
+    serverId,
+    jobId: job.id,
+    status: 'succeeded',
+    result: { ...serviceState('roundcube', { installed: true }), changed: true },
+  });
+  assert.equal(completed.result.id, 'roundcube');
+  assert.equal(completed.result.active, false);
+  assert.deepEqual(completed.result.units, []);
+  assert.deepEqual(completed.result.health, { status: 'installed', configuration: 'valid' });
 });
 
 test('single-service inspection must return the queued service identity', async () => {
@@ -58,6 +88,17 @@ test('single-service inspection must return the queued service identity', async 
   const job = await enqueueAndClaim(registry, OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'docker' });
   await assert.rejects(
     registry.complete({ serverId, jobId: job.id, status: 'succeeded', result: serviceState('nginx') }),
+    (error) => error instanceof JobRegistryError && error.code === 'invalid_job_result',
+  );
+});
+
+test('managed service completion rejects forged package and unit identities', async () => {
+  const registry = createJobRegistry();
+  const job = await enqueueAndClaim(registry, OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'roundcube' });
+  const forged = serviceState('roundcube', { installed: true });
+  forged.packages[0].packageName = 'openssh-server';
+  await assert.rejects(
+    registry.complete({ serverId, jobId: job.id, status: 'succeeded', result: forged }),
     (error) => error instanceof JobRegistryError && error.code === 'invalid_job_result',
   );
 });

@@ -10,6 +10,10 @@ import { createServerRegistry } from '../src/server-registry.js';
 
 const origin = 'https://services.example.test';
 const csrfToken = 'services-csrf';
+const servicePackages = {
+  nginx: 'nginx', mariadb: 'mariadb-server', mysql: 'mysql-server', docker: 'docker.io', cron: 'cron',
+  postfix: 'postfix', dovecot: 'dovecot-imapd', rspamd: 'rspamd', roundcube: 'roundcube-core',
+};
 
 function fakeStore(role = 'owner') {
   const session = {
@@ -60,14 +64,15 @@ async function fixture(t, role = 'owner') {
 }
 
 function healthyService(id) {
+  const unitless = id === 'roundcube';
   return {
     id,
     label: `ignored-${id}`,
     category: 'ignored',
     installed: true,
-    active: true,
-    packages: [{ packageName: id, installed: true, version: '1.0.0-1' }],
-    units: [{
+    active: !unitless,
+    packages: [{ packageName: servicePackages[id], installed: true, version: '1.0.0-1' }],
+    units: unitless ? [] : [{
       unit: `${id}.service`,
       loadState: 'loaded',
       activeState: 'active',
@@ -75,6 +80,10 @@ function healthyService(id) {
       unitFileState: 'enabled',
       inspectionError: false,
     }],
+    health: {
+      status: unitless ? 'installed' : 'ready',
+      configuration: ['postfix', 'dovecot', 'rspamd', 'roundcube'].includes(id) ? 'valid' : 'not_applicable',
+    },
   };
 }
 
@@ -114,6 +123,13 @@ test('service installation requires exact confirmation and queues only an allowl
   assert.equal(accepted.status, 202);
   const job = (await accepted.json()).data;
   assert.equal(job.operation, OPERATIONS.SYSTEM_SERVICE_INSTALL);
+
+  const roundcube = await fixture(t);
+  const roundcubeResponse = await roundcube.request(`/api/servers/${roundcube.serverId}/services/roundcube/install`, {
+    method: 'POST',
+    body: { confirmation: 'install:roundcube' },
+  });
+  assert.equal(roundcubeResponse.status, 202);
 });
 
 test('service control validates action confirmation and serializes server system work', async (t) => {
@@ -128,6 +144,17 @@ test('service control validates action confirmation and serializes server system
   const conflict = await request(`/api/servers/${serverId}/services/inspect`, { method: 'POST', body: {} });
   assert.equal(conflict.status, 409);
   assert.equal((await conflict.json()).error.code, 'system_job_conflict');
+});
+
+test('Roundcube cannot be queued as a systemd control operation', async (t) => {
+  const { request, jobRegistry, serverId } = await fixture(t);
+  const response = await request(`/api/servers/${serverId}/services/roundcube/control`, {
+    method: 'POST',
+    body: { action: 'restart', confirmation: 'control:roundcube:restart' },
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, 'managed_service_not_controllable');
+  assert.equal((await jobRegistry.listJobs()).length, 0);
 });
 
 test('latest successful full inspection is readable inside the standard data envelope', async (t) => {

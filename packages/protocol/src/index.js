@@ -14,14 +14,16 @@ import {
 } from '@yunpanel/shared';
 import { isIP, SocketAddress } from 'node:net';
 
-export const AGENT_PROTOCOL_VERSION = 7;
+export const AGENT_PROTOCOL_VERSION = 8;
 
 export const MANAGED_SERVICE_IDS = Object.freeze([
-  'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
+  'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'roundcube',
 ]);
+export const MANAGED_SERVICE_CONTROL_IDS = Object.freeze(MANAGED_SERVICE_IDS.filter((id) => id !== 'roundcube'));
 export const MANAGED_SERVICE_ACTIONS = Object.freeze(['start', 'stop', 'restart']);
 export const MANAGED_NODE_RUNTIME_MAJORS = SHARED_MANAGED_NODE_RUNTIME_MAJORS;
 const MANAGED_SERVICE_ID_SET = new Set(MANAGED_SERVICE_IDS);
+const MANAGED_SERVICE_CONTROL_ID_SET = new Set(MANAGED_SERVICE_CONTROL_IDS);
 const MANAGED_SERVICE_ACTION_SET = new Set(MANAGED_SERVICE_ACTIONS);
 
 export const OPERATIONS = Object.freeze({
@@ -139,6 +141,10 @@ function validateManagedServiceId(value, fieldName, errors) {
   if (typeof value !== 'string' || !MANAGED_SERVICE_ID_SET.has(value)) errors.push(`${fieldName} is invalid`);
 }
 
+function validateManagedServiceControlId(value, fieldName, errors) {
+  if (typeof value !== 'string' || !MANAGED_SERVICE_CONTROL_ID_SET.has(value)) errors.push(`${fieldName} is invalid`);
+}
+
 function validateDatabaseName(value, fieldName, errors) {
   if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value) || RESERVED_DATABASE_NAMES.has(value.toLowerCase())) {
     errors.push(`${fieldName} is invalid`);
@@ -225,7 +231,7 @@ function validateMutationPayload(operation, payload, errors) {
 
   if (operation === OPERATIONS.SYSTEM_SERVICE_CONTROL) {
     rejectUnexpectedKeys(payload, ['serviceId', 'action'], operation, errors);
-    validateManagedServiceId(payload.serviceId, 'system.service.control serviceId', errors);
+    validateManagedServiceControlId(payload.serviceId, 'system.service.control serviceId', errors);
     if (typeof payload.action !== 'string' || !MANAGED_SERVICE_ACTION_SET.has(payload.action)) errors.push('system.service.control action is invalid');
   }
 

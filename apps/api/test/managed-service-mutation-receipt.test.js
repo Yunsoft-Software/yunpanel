@@ -76,6 +76,18 @@ test('managed service receipts persist only minimal install/restart metadata plu
   assert.doesNotMatch(raw, /rawOutput|must-not-persist|packages|units|result/i);
 });
 
+test('Roundcube package-only install state can be digested without a fabricated systemd unit', () => {
+  const digest = managedServiceStateDigest({
+    id: 'roundcube',
+    installed: true,
+    active: false,
+    packages: [{ packageName: 'roundcube-core', installed: true, version: '1.6.6+dfsg-2ubuntu0.1' }],
+    units: [],
+    health: { status: 'installed', configuration: 'valid' },
+  }, 'roundcube');
+  assert.match(digest, /^[a-f0-9]{64}$/);
+});
+
 test('receipt store rejects unsupported service controls and incomplete install evidence', async (t) => {
   const fx = await fixture(t);
   await assert.rejects(

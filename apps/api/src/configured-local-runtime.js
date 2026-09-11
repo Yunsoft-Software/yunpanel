@@ -240,7 +240,9 @@ export async function startConfiguredLocalRuntime({
     }
 
     if (operation === OPERATIONS.SYSTEM_SERVICE_INSTALL) {
-      if (!result || result.id !== payload?.serviceId || result.installed !== true || result.active !== true
+      const unitlessRoundcube = payload?.serviceId === 'roundcube';
+      if (!result || result.id !== payload?.serviceId || result.installed !== true
+        || (unitlessRoundcube ? result.active !== false || !Array.isArray(result.units) || result.units.length !== 0 : result.active !== true)
         || typeof result.changed !== 'boolean') {
         throw new Error('Managed service install result is not safe recovery evidence');
       }

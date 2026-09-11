@@ -11,12 +11,12 @@ const INACTIVE_UNIT = 'LoadState=loaded\nActiveState=inactive\nSubState=dead\nUn
 
 test('managed service catalog covers the hosting service groups without arbitrary units', () => {
   assert.deepEqual(managedServicePolicy.services.map((entry) => entry.id), [
-    'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
+    'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'roundcube',
   ]);
   assert.deepEqual(managedServicePolicy.actions, ['start', 'stop', 'restart']);
   for (const entry of managedServicePolicy.services) {
     assert.ok(entry.packages.length > 0);
-    assert.ok(entry.units.length > 0);
+    assert.equal(entry.units.length > 0, entry.id !== 'roundcube');
     assert.ok(entry.units.every((unit) => unit.endsWith('.service')));
   }
 });
@@ -37,6 +37,7 @@ test('inspect reports package and unit state for an allowlisted service', async 
   assert.equal(result.active, true);
   assert.equal(result.packages[0].packageName, 'mariadb-server');
   assert.equal(result.units[0].unit, 'mariadb.service');
+  assert.deepEqual(result.health, { status: 'ready', configuration: 'not_applicable' });
   assert.equal(calls.length, 2);
 });
 
@@ -51,6 +52,72 @@ test('missing packages are reported without leaking command errors', async () =>
   assert.deepEqual(result.packages, [{ packageName: 'rspamd', installed: false, version: null }]);
   assert.equal(result.installed, false);
   assert.equal(result.active, false);
+  assert.deepEqual(result.health, { status: 'not_installed', configuration: 'not_checked' });
+});
+
+test('mail inspection runs only fixed configuration checks and never returns their output', async () => {
+  const cases = [
+    ['postfix', '/usr/sbin/postfix', ['check']],
+    ['dovecot', '/usr/bin/doveconf', ['-n']],
+    ['rspamd', '/usr/bin/rspamadm', ['configtest']],
+  ];
+  for (const [serviceId, checkFile, checkArgs] of cases) {
+    const calls = [];
+    const manager = createManagedServiceManager({
+      run: async (file, args) => {
+        calls.push([file, args]);
+        if (file === '/usr/bin/dpkg-query') return { stdout: 'install ok installed\t1.0' };
+        if (file === '/usr/bin/systemctl') return { stdout: ACTIVE_UNIT };
+        if (file === checkFile) return { stdout: 'PRIVATE CONFIG OUTPUT', stderr: 'PRIVATE WARNING' };
+        throw new Error('unexpected command');
+      },
+    });
+    const result = await manager.inspect(serviceId);
+    assert.deepEqual(result.health, { status: 'ready', configuration: 'valid' });
+    assert.ok(calls.some(([file, args]) => file === checkFile && JSON.stringify(args) === JSON.stringify(checkArgs)));
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE/);
+  }
+});
+
+test('failed mail configuration checks produce bounded health without leaking command errors', async () => {
+  const manager = createManagedServiceManager({
+    run: async (file) => {
+      if (file === '/usr/bin/dpkg-query') return { stdout: 'install ok installed\t1.0' };
+      if (file === '/usr/bin/systemctl') return { stdout: ACTIVE_UNIT };
+      throw Object.assign(new Error('/private/mail/config'), { stderr: 'TOKEN=hidden' });
+    },
+  });
+  const result = await manager.inspect('postfix');
+  assert.deepEqual(result.health, { status: 'configuration_invalid', configuration: 'invalid' });
+  assert.doesNotMatch(JSON.stringify(result), /private|hidden/);
+});
+
+test('Roundcube package inspection and install remain distinct from systemd service control', async () => {
+  const calls = [];
+  let installed = false;
+  const manager = createManagedServiceManager({
+    run: async (file, args) => {
+      calls.push([file, args]);
+      if (file === '/usr/bin/dpkg-query') {
+        if (!installed) throw new Error('not installed');
+        return { stdout: 'install ok installed\t1.6.6+dfsg-2ubuntu0.1' };
+      }
+      if (file === '/usr/bin/apt-get' && args[0] === 'install') { installed = true; return { stdout: '' }; }
+      if (file === '/usr/bin/apt-get' || file === '/usr/bin/test' || file === '/usr/bin/php') return { stdout: '' };
+      throw new Error('unexpected command');
+    },
+  });
+  const result = await manager.install('roundcube');
+  assert.equal(result.changed, true);
+  assert.equal(result.installed, true);
+  assert.equal(result.active, false);
+  assert.deepEqual(result.units, []);
+  assert.deepEqual(result.health, { status: 'installed', configuration: 'valid' });
+  assert.deepEqual(calls.find(([file, args]) => file === '/usr/bin/apt-get' && args[0] === 'install')?.[1], [
+    'install', '--yes', '--no-install-recommends', 'roundcube-core',
+  ]);
+  assert.equal(calls.some(([file]) => file === '/usr/bin/systemctl'), false);
+  await assert.rejects(manager.control('roundcube', 'restart'), { code: 'managed_service_not_controllable' });
 });
 
 test('install refreshes APT, installs only catalog packages and enables the fixed unit', async () => {

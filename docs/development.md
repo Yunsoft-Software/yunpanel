@@ -165,6 +165,12 @@ Terminal reconciliation does not re-run a host mutation. Running recovery is lim
 
 See `docs/local-runtime-migration.md` for the exact commands and evidence requirements.
 
+## Managed service and mail health inventory
+
+The managed-service catalog accepts only the fixed Ubuntu package and systemd-unit identities declared by the runtime. Postfix, Dovecot and Rspamd inspection additionally runs their fixed configuration validators; command output and errors are discarded and only bounded `health.status` plus `health.configuration` values cross the job boundary. A missing package is `not_installed`, an invalid configuration is `configuration_invalid`, an inactive unit is `inactive`, and a fully checked active service is `ready`.
+
+Roundcube is represented as the `roundcube-core` package, not as a fabricated daemon. Its inspection checks the fixed application/config paths and PHP syntax. A successful package/config inspection reports `active=false`, `units=[]`, `health.status=installed`; this does not claim that an Nginx/PHP-FPM endpoint, database or mailbox login is ready. The install route may install the package, while the systemd control route rejects Roundcube before a job is queued.
+
 ## Local log API
 
 Log reads are sensitive Owner-management operations and remain unavailable for Read Only accounts, remote legacy-agent records or a panel without an active local-server binding. Supported routes are:

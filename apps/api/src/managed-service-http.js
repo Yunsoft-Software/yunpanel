@@ -1,9 +1,15 @@
-import { MANAGED_SERVICE_ACTIONS, MANAGED_SERVICE_IDS, OPERATIONS } from '@yunpanel/protocol';
+import {
+  MANAGED_SERVICE_ACTIONS,
+  MANAGED_SERVICE_CONTROL_IDS,
+  MANAGED_SERVICE_IDS,
+  OPERATIONS,
+} from '@yunpanel/protocol';
 import { JobRegistryError } from './job-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { RegistryError } from './server-registry.js';
 
 const SERVICE_IDS = new Set(MANAGED_SERVICE_IDS);
+const CONTROL_SERVICE_IDS = new Set(MANAGED_SERVICE_CONTROL_IDS);
 const SERVICE_ACTIONS = new Set(MANAGED_SERVICE_ACTIONS);
 
 export class ManagedServiceHttpError extends Error {
@@ -29,6 +35,14 @@ function requireAction(value) {
   return value;
 }
 
+function requireControlServiceId(value) {
+  const serviceId = requireServiceId(value);
+  if (!CONTROL_SERVICE_IDS.has(serviceId)) {
+    throw new ManagedServiceHttpError('managed_service_not_controllable', 'Managed application does not expose a systemd service control');
+  }
+  return serviceId;
+}
+
 async function requireServer(registry, serverId) {
   const server = await registry.getServer(serverId);
   if (!server) throw new RegistryError('server_not_found', 'Server not found', 404);
@@ -45,6 +59,12 @@ async function ensureSystemIdle(jobRegistry, serverId) {
 function jobCompletedAt(job) {
   const value = Date.parse(job?.finishedAt ?? job?.createdAt ?? 0);
   return Number.isFinite(value) ? value : 0;
+}
+
+function isCompleteServiceInventory(value) {
+  if (!Array.isArray(value) || value.length !== MANAGED_SERVICE_IDS.length) return false;
+  const ids = new Set(value.map((entry) => entry?.id));
+  return ids.size === MANAGED_SERVICE_IDS.length && MANAGED_SERVICE_IDS.every((id) => ids.has(id));
 }
 
 async function latestServiceSnapshot(jobRegistry, serverId) {
@@ -65,7 +85,7 @@ async function latestServiceSnapshot(jobRegistry, serverId) {
   let services = null;
   let snapshotJob = null;
   for (const job of relevant) {
-    if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT && Array.isArray(job.result)) {
+    if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT && isCompleteServiceInventory(job.result)) {
       services = job.result.map((service) => ({ ...service }));
       snapshotJob = job;
       continue;
@@ -135,7 +155,7 @@ export function mountManagedServiceRoutes(app, { registry, jobRegistry }) {
   }));
 
   app.post('/api/servers/:serverId/services/:serviceId/control', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    const serviceId = requireServiceId(request.params.serviceId);
+    const serviceId = requireControlServiceId(request.params.serviceId);
     const action = requireAction(request.body?.action);
     const server = await requireServer(registry, request.params.serverId);
     if (request.body?.confirmation !== `control:${serviceId}:${action}`) {
@@ -156,8 +176,10 @@ export function mountManagedServiceRoutes(app, { registry, jobRegistry }) {
 
 export const managedServiceHttpInternals = Object.freeze({
   requireServiceId,
+  requireControlServiceId,
   requireAction,
   ensureSystemIdle,
   latestServiceSnapshot,
   jobCompletedAt,
+  isCompleteServiceInventory,
 });

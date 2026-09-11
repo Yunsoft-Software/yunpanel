@@ -49,6 +49,7 @@ function nginxState() {
       unitFileState: 'enabled',
       inspectionError: false,
     }],
+    health: { status: 'ready', configuration: 'not_applicable' },
   };
 }
 

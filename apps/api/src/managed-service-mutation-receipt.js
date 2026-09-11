@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { MANAGED_SERVICE_IDS, OPERATIONS } from '@yunpanel/protocol';
+import { managedServiceStatePolicy } from './managed-service-state-policy.js';
 
 const STORE_VERSION = 1;
 const DEFAULT_ROOT = '/var/lib/yunpanel/recovery/service-mutations';
@@ -57,10 +58,11 @@ function normalizeMutation({ operation, action, changed }) {
 }
 
 function normalizeServiceState(value, serviceId) {
+  const policy = managedServiceStatePolicy(serviceId);
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.id !== serviceId
     || typeof value.installed !== 'boolean' || typeof value.active !== 'boolean'
-    || !Array.isArray(value.packages) || value.packages.length < 1 || value.packages.length > 8
-    || !Array.isArray(value.units) || value.units.length < 1 || value.units.length > 8) {
+    || !Array.isArray(value.packages) || value.packages.length !== policy.packages.length
+    || !Array.isArray(value.units) || value.units.length !== policy.units.length) {
     throw new ManagedServiceMutationReceiptError('service_receipt_state_invalid', 'Managed service receipt state is invalid');
   }
   const packages = value.packages.map((entry) => {
@@ -94,8 +96,12 @@ function normalizeServiceState(value, serviceId) {
     unit.inspectionError = entry.inspectionError;
     return unit;
   });
+  if (packages.some((entry, index) => entry.packageName !== policy.packages[index])
+    || units.some((entry, index) => entry.unit !== policy.units[index])) {
+    throw new ManagedServiceMutationReceiptError('service_receipt_state_invalid', 'Managed service receipt package or unit identities are invalid');
+  }
   if (value.installed !== packages.every((entry) => entry.installed)
-    || value.active !== units.every((entry) => entry.activeState === 'active')) {
+    || value.active !== (units.length > 0 && units.every((entry) => entry.activeState === 'active'))) {
     throw new ManagedServiceMutationReceiptError('service_receipt_state_invalid', 'Managed service receipt aggregate state is inconsistent');
   }
   return { id: serviceId, installed: value.installed, active: value.active, packages, units };

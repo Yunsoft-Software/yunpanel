@@ -25,6 +25,18 @@ function nginxActiveState() {
       unitFileState: 'enabled',
       inspectionError: false,
     }],
+    health: { status: 'ready', configuration: 'not_applicable' },
+  };
+}
+
+function roundcubeInstalledState() {
+  return {
+    id: 'roundcube',
+    installed: true,
+    active: false,
+    packages: [{ packageName: 'roundcube-core', installed: true, version: '1.6.6+dfsg-2ubuntu0.1' }],
+    units: [],
+    health: { status: 'installed', configuration: 'valid' },
   };
 }
 
@@ -70,17 +82,26 @@ for (const scenario of [
     operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
     payload: { serviceId: 'nginx' },
     receipt: { operation: OPERATIONS.SYSTEM_SERVICE_INSTALL, serviceId: 'nginx', changed: true },
+    state: nginxActiveState,
   },
   {
     name: 'restart',
     operation: OPERATIONS.SYSTEM_SERVICE_CONTROL,
     payload: { serviceId: 'nginx', action: 'restart' },
     receipt: { operation: OPERATIONS.SYSTEM_SERVICE_CONTROL, serviceId: 'nginx', action: 'restart' },
+    state: nginxActiveState,
+  },
+  {
+    name: 'Roundcube install',
+    operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
+    payload: { serviceId: 'roundcube' },
+    receipt: { operation: OPERATIONS.SYSTEM_SERVICE_INSTALL, serviceId: 'roundcube', changed: true },
+    state: roundcubeInstalledState,
   },
 ]) {
   test(`verified ${scenario.name} receipt closes the same durable service mutation`, async (t) => {
     const fx = await fixture(t, scenario.operation, scenario.payload);
-    const recordedState = nginxActiveState();
+    const recordedState = scenario.state();
     await fx.receiptStore.write({
       serverId: fx.server.id,
       jobId: fx.jobId,
@@ -105,9 +126,9 @@ for (const scenario of [
 
     const terminal = await fx.jobRegistry.getJob(fx.jobId);
     assert.equal(terminal.status, 'succeeded');
-    assert.equal(terminal.result.id, 'nginx');
-    assert.equal(terminal.result.active, true);
-    if (scenario.name === 'install') assert.equal(terminal.result.changed, true);
+    assert.equal(terminal.result.id, scenario.payload.serviceId);
+    assert.equal(terminal.result.active, scenario.payload.serviceId !== 'roundcube');
+    if (scenario.operation === OPERATIONS.SYSTEM_SERVICE_INSTALL) assert.equal(terminal.result.changed, true);
     else assert.equal(terminal.result.action, 'restart');
   });
 }
