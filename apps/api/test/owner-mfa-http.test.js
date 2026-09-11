@@ -59,7 +59,7 @@ test('production password login returns enrollment state without granting manage
 
 test('every management path rejects an unenrolled Owner before the core handler', async (t) => {
   const app = await fixture(t);
-  for (const url of ['/api/servers', '/api/panel/servers', '/api/panel/applications/x/environment', '/api/jobs', '/api/panel/domains', '/api/terminal']) {
+  for (const url of ['/api/servers', '/api/panel/servers', '/api/panel/applications/x/environment', '/api/jobs', '/api/jobs/x/logs/deploy', '/api/panel/domains', '/api/terminal']) {
     const response = await app.request(url);
     assert.equal(response.status, 403);
     assert.equal((await response.json()).error.code, 'mfa_enrollment_required');

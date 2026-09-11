@@ -58,7 +58,7 @@ const mutationHeaders = { cookie, origin, 'content-type': 'application/json', 'x
 
 test('all management paths reject anonymous and bootstrap-bearer requests before the handler', async (t) => {
   const app = await fixture(t);
-  for (const pathname of ['/api/servers', '/api/panel/applications', '/api/applications/one/environment', '/api/jobs']) {
+  for (const pathname of ['/api/servers', '/api/panel/applications', '/api/applications/one/environment', '/api/jobs', '/api/jobs/one/logs/deploy']) {
     assert.equal((await app.request(pathname, { headers: { authorization: 'Bearer obsolete-bootstrap-value' } })).status, 401);
   }
   assert.equal(app.calls(), 0);

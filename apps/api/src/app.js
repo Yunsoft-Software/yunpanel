@@ -12,6 +12,7 @@ import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
 import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
+import { LogHttpError, mountLogRoutes } from './log-http.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
 import { mountNodeRuntimeRoutes, NodeRuntimeHttpError } from './node-runtime-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -55,6 +56,10 @@ export function createApp({
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
   }),
   environment = process.env.NODE_ENV,
+  journalLogReader = null,
+  nginxLogReader = null,
+  jobLogStore = null,
+  localServerId = null,
   ...options
 } = {}) {
   const core = createCoreApp({ ...options, registry, domainRegistry, jobRegistry, certificateRegistry, applicationRegistry, environment });
@@ -89,6 +94,9 @@ export function createApp({
   mountManagedServiceRoutes(app, { registry, jobRegistry });
   mountNodeRuntimeRoutes(app, { registry, jobRegistry });
   mountDatabaseRoutes(app, { registry, jobRegistry });
+  mountLogRoutes(app, {
+    registry, applicationRegistry, jobRegistry, journalLogReader, nginxLogReader, jobLogStore, localServerId,
+  });
   app.use(core);
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
@@ -99,6 +107,7 @@ export function createApp({
       || error instanceof ExternalLifecycleRegistryError
       || error instanceof RegistryError
       || error instanceof JobRegistryError
+      || error instanceof LogHttpError
       || error instanceof ManagedServiceHttpError
       || error instanceof NodeRuntimeHttpError
       || error instanceof ResourceImpactError

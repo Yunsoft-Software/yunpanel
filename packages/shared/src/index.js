@@ -18,6 +18,8 @@ export {
   parseApplicationEnvironmentImport,
 } from './application-environment.js';
 
+export { logSafetyPolicy, sanitizeLogMessage } from './log-safety.js';
+
 export {
   normalizeNodeApplicationSpec,
   normalizeNodeRestartSpec,

@@ -1,5 +1,17 @@
 export { inspectHostInventory, inventoryInternals } from './inventory.js';
 export { gitDeploymentInternals } from './git-deployment.js';
+export {
+  createJournalLogReader,
+  JournalLogReaderError,
+  journalLogInternals,
+  journalLogPolicy,
+} from './journal-log-reader.js';
+export {
+  createNginxLogReader,
+  NginxLogReaderError,
+  nginxLogInternals,
+  nginxLogPolicy,
+} from './nginx-log-reader.js';
 export { createDockerInspector, inspectDocker, parseDockerPsOutput } from './docker-inspector.js';
 export { createNginxInspector, inspectNginx, parseNginxConfigMetadata } from './nginx-inspector.js';
 export { createNginxManager, nginxManager, NginxManagerError } from './nginx-manager.js';

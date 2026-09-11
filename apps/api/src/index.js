@@ -1,6 +1,7 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { createJournalLogReader, createNginxLogReader } from '@yunpanel/host-runtime';
 import { inspectAllowlistedServices, inspectDocker, inspectNginx } from '@yunpanel/host-runtime';
 import { createApp, API_VERSION } from './app.js';
 import { createAuditedJobRegistry } from './audited-job-registry.js';
@@ -15,6 +16,7 @@ import { createDomainRegistry } from './domain-registry.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
+import { createJobLogStore } from './job-log-store.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createServerRegistry } from './server-registry.js';
@@ -27,6 +29,7 @@ const port = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10);
 const serverStorePath = process.env.YUNPANEL_SERVER_STORE ?? path.resolve('.data/server-registry.json');
 const domainStorePath = process.env.YUNPANEL_DOMAIN_STORE ?? path.resolve('.data/domain-registry.json');
 const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-registry.json');
+const jobLogStorePath = path.resolve(path.dirname(jobStorePath), 'job-logs');
 const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.resolve('.data/certificate-registry.json');
 const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.resolve('.data/application-registry.json');
 const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.data/website-registry.json');
@@ -105,6 +108,11 @@ const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
 });
 await applicationEnvironmentRegistry.init();
+const jobLogStore = createJobLogStore({ directoryPath: jobLogStorePath });
+await jobLogStore.init();
+const journalLogReader = createJournalLogReader();
+const nginxLogReader = createNginxLogReader();
+const localServerId = process.env.YUNPANEL_LOCAL_SERVER_ID?.trim() || null;
 
 await prepareRootAuthStateOwnership({ filePath: authStorePath });
 const authStore = createAuthStore({ filePath: authStorePath });
@@ -131,6 +139,10 @@ const listener = createAuthenticatedApi({
     dnsHostingRegistry,
     mailDomainRegistry,
     applicationEnvironmentRegistry,
+    journalLogReader,
+    nginxLogReader,
+    jobLogStore,
+    localServerId,
   }),
 });
 
@@ -145,6 +157,7 @@ const localRuntime = await startConfiguredLocalRuntime({
   certificateRegistry,
   applicationRegistry,
   applicationEnvironmentRegistry,
+  jobLogStore,
   inspectServices: inspectAllowlistedServices,
   inspectDocker,
   inspectNginx,
@@ -158,6 +171,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] server store=${serverStorePath}`);
   console.log(`[yunpanel-api] domain store=${domainStorePath}`);
   console.log(`[yunpanel-api] job store=${jobStorePath}`);
+  console.log(`[yunpanel-api] job log store=${jobLogStorePath}`);
   console.log(`[yunpanel-api] certificate store=${certificateStorePath}`);
   console.log(`[yunpanel-api] application store=${applicationStorePath}`);
   console.log(`[yunpanel-api] website store=${websiteStorePath}`);
