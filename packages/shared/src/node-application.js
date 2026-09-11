@@ -18,6 +18,7 @@ const RUNTIME_FIELDS = new Set([
 const START_FIELDS = new Set(['mode', 'entryFile', 'script']);
 const PROCESS_ACTIONS = new Set(['enable', 'disable', 'start', 'stop']);
 const PROCESS_FIELDS = new Set(['applicationId', 'releaseId', 'runtime', 'action']);
+export const MANAGED_NODE_RUNTIME_MAJORS = Object.freeze([22, 24]);
 
 function normalizeScriptName(value, fieldName, { nullable = false } = {}) {
   if (value == null && nullable) return null;

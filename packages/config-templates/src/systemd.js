@@ -8,11 +8,13 @@ import {
 
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const NODE_PATHS = new Set(['/usr/bin/node', '/usr/local/bin/node']);
+const MANAGED_NODE_PATH_PATTERN = /^\/opt\/yunpanel\/node-runtimes\/v(\d{2})\/bin\/node$/;
 const PACKAGE_MANAGER_PATHS = Object.freeze({
   npm: new Set(['/usr/bin/npm', '/usr/local/bin/npm']),
   pnpm: new Set(['/usr/bin/pnpm', '/usr/local/bin/pnpm']),
   yarn: new Set(['/usr/bin/yarn', '/usr/local/bin/yarn']),
 });
+const MANAGED_PACKAGE_MANAGER_PATH_PATTERN = /^\/opt\/yunpanel\/node-runtimes\/v(\d{2})\/bin\/(npm|pnpm|yarn)$/;
 const APP_ROOT = '/var/lib/yunpanel/apps';
 const DATA_ROOT = '/var/lib/yunpanel/data';
 const ENV_ROOT = '/etc/yunpanel/apps';
@@ -45,15 +47,18 @@ function validateUser(user, applicationId) {
   return user;
 }
 
-function validateNodePath(value) {
-  if (!NODE_PATHS.has(value)) {
+function validateNodePath(value, nodeMajor) {
+  const managed = typeof value === 'string' ? value.match(MANAGED_NODE_PATH_PATTERN) : null;
+  if (!NODE_PATHS.has(value) && (!managed || Number.parseInt(managed[1], 10) !== nodeMajor)) {
     throw new SystemdTemplateError('invalid_node_path', 'Node executable path is not allowlisted');
   }
   return value;
 }
 
-function validatePackageManagerPath(value, packageManager) {
-  if (!PACKAGE_MANAGER_PATHS[packageManager]?.has(value)) {
+function validatePackageManagerPath(value, packageManager, nodeMajor) {
+  const managed = typeof value === 'string' ? value.match(MANAGED_PACKAGE_MANAGER_PATH_PATTERN) : null;
+  if (!PACKAGE_MANAGER_PATHS[packageManager]?.has(value)
+    && (!managed || managed[2] !== packageManager || Number.parseInt(managed[1], 10) !== nodeMajor)) {
     throw new SystemdTemplateError('invalid_package_manager_path', 'Package manager executable path is not allowlisted');
   }
   return value;
@@ -81,8 +86,8 @@ export function renderNodeEnvironmentFile({ applicationId, runtime, environment 
 export function renderNodeSystemdUnit({ applicationId, user, nodePath, packageManagerPath = null, npmPath = null, runtime }) {
   const appId = assertUuid(applicationId, 'applicationId');
   const account = validateUser(user, appId);
-  const safeNodePath = validateNodePath(nodePath);
   const normalizedRuntime = normalizeNodeRuntimeConfig(runtime);
+  const safeNodePath = validateNodePath(nodePath, normalizedRuntime.nodeMajor);
   const releaseDirectory = path.posix.join(APP_ROOT, appId, 'current');
   const currentDirectory = path.posix.join(releaseDirectory, normalizedRuntime.documentRoot);
   const dataDirectory = path.posix.join(DATA_ROOT, appId);
@@ -93,9 +98,10 @@ export function renderNodeSystemdUnit({ applicationId, user, nodePath, packageMa
     execStart = `${safeNodePath} ${path.posix.join(currentDirectory, normalizedRuntime.start.entryFile)}`;
   } else {
     const executable = packageManagerPath ?? npmPath;
-    const safePackageManagerPath = validatePackageManagerPath(executable, normalizedRuntime.packageManager);
+    const safePackageManagerPath = validatePackageManagerPath(executable, normalizedRuntime.packageManager, normalizedRuntime.nodeMajor);
     execStart = `${safePackageManagerPath} run ${normalizedRuntime.start.script}`;
   }
 
-  return `[Unit]\nDescription=YunPanel Node application ${appId}\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser=${account}\nGroup=${account}\nWorkingDirectory=${currentDirectory}\nEnvironmentFile=${environmentFile}\nExecStart=${execStart}\nRestart=${normalizedRuntime.restartPolicy}\nRestartSec=3\nTimeoutStopSec=30\nKillSignal=SIGTERM\nKillMode=control-group\nSuccessExitStatus=143\nNoNewPrivileges=true\nPrivateTmp=true\nPrivateDevices=true\nProtectSystem=strict\nProtectHome=true\nProtectKernelTunables=true\nProtectKernelModules=true\nProtectControlGroups=true\nProtectKernelLogs=true\nProtectClock=true\nLockPersonality=true\nRestrictSUIDSGID=true\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\nSystemCallArchitectures=native\nCapabilityBoundingSet=\nAmbientCapabilities=\nReadWritePaths=${dataDirectory}\nUMask=0027\n\n[Install]\nWantedBy=multi-user.target\n`;
+  const runtimeBin = path.posix.dirname(safeNodePath);
+  return `[Unit]\nDescription=YunPanel Node application ${appId}\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser=${account}\nGroup=${account}\nWorkingDirectory=${currentDirectory}\nEnvironmentFile=${environmentFile}\nEnvironment="PATH=${runtimeBin}:/usr/bin:/bin"\nExecStart=${execStart}\nRestart=${normalizedRuntime.restartPolicy}\nRestartSec=3\nTimeoutStopSec=30\nKillSignal=SIGTERM\nKillMode=control-group\nSuccessExitStatus=143\nNoNewPrivileges=true\nPrivateTmp=true\nPrivateDevices=true\nProtectSystem=strict\nProtectHome=true\nProtectKernelTunables=true\nProtectKernelModules=true\nProtectControlGroups=true\nProtectKernelLogs=true\nProtectClock=true\nLockPersonality=true\nRestrictSUIDSGID=true\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\nSystemCallArchitectures=native\nCapabilityBoundingSet=\nAmbientCapabilities=\nReadWritePaths=${dataDirectory}\nUMask=0027\n\n[Install]\nWantedBy=multi-user.target\n`;
 }

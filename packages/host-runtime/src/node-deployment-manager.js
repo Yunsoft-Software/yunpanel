@@ -21,7 +21,8 @@ const USERADD_PATH = '/usr/sbin/useradd';
 const ID_PATH = '/usr/bin/id';
 const INSTALL_PATH = '/usr/bin/install';
 const SYSTEMCTL_PATHS = Object.freeze(['/usr/bin/systemctl', '/bin/systemctl']);
-const NODE_PATHS = Object.freeze(['/usr/bin/node', '/usr/local/bin/node']);
+const NODE_PATHS = Object.freeze(['/usr/bin/node']);
+const MANAGED_NODE_ROOT = '/opt/yunpanel/node-runtimes';
 const NPM_PATHS = Object.freeze(['/usr/bin/npm', '/usr/local/bin/npm']);
 const PACKAGE_MANAGER_PATHS = Object.freeze({
   npm: NPM_PATHS,
@@ -40,10 +41,10 @@ export class NodeDeploymentError extends Error {
   }
 }
 
-function safeBuildEnvironment(home) {
+function safeBuildEnvironment(home, runtimeBin) {
   return {
     HOME: home,
-    PATH: '/usr/local/bin:/usr/bin:/bin',
+    PATH: `${runtimeBin}:/usr/bin:/bin`,
     CI: '1',
     LANG: 'C.UTF-8',
     GIT_TERMINAL_PROMPT: '0',
@@ -59,6 +60,21 @@ async function findExecutable(paths, run) {
     } catch {
       // Continue through fixed allowlisted executable paths.
     }
+  }
+  return null;
+}
+
+function parseNodeMajor(value) {
+  const match = String(value ?? '').trim().match(/^v(\d{1,2})\.\d+\.\d+$/);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+async function findNodeExecutable(paths, requestedMajor, run) {
+  for (const candidate of paths) {
+    try {
+      const { stdout } = await run(candidate, ['--version'], { timeout: 5_000 });
+      if (parseNodeMajor(stdout) === requestedMajor) return candidate;
+    } catch { /* Continue through fixed version-bound paths. */ }
   }
   return null;
 }
@@ -122,7 +138,8 @@ export function createNodeDeploymentManager({
   symlinkFn = symlink,
   writeFileFn = writeFile,
   waitForHealth = defaultWaitForHealth,
-  nodePaths = NODE_PATHS,
+  nodePaths = null,
+  managedNodeRoot = MANAGED_NODE_ROOT,
   npmPaths = NPM_PATHS,
   packageManagerPaths = PACKAGE_MANAGER_PATHS,
   systemctlPaths = SYSTEMCTL_PATHS,
@@ -140,10 +157,10 @@ export function createNodeDeploymentManager({
     }
   }
 
-  async function runAsUser(user, home, file, args, options = {}) {
+  async function runAsUser(user, home, runtimeBin, file, args, options = {}) {
     return runSafe(RUNUSER_PATH, ['-u', user, '--', file, ...args], {
       ...options,
-      env: safeBuildEnvironment(home),
+      env: safeBuildEnvironment(home, runtimeBin),
     });
   }
 
@@ -225,17 +242,19 @@ export function createNodeDeploymentManager({
     let environmentTransaction = null;
     let environmentRestored = false;
 
-    const nodePath = await findExecutable(nodePaths, run);
+    const candidates = Array.isArray(nodePaths)
+      ? nodePaths
+      : [path.join(managedNodeRoot, `v${spec.runtime.nodeMajor}`, 'bin', 'node'), ...NODE_PATHS];
+    const nodePath = await findNodeExecutable(candidates, spec.runtime.nodeMajor, run);
     if (!nodePath) throw new NodeDeploymentError('node_not_installed', 'An allowlisted Node.js runtime is not installed');
-    const nodeVersion = await runSafe(nodePath, ['--version'], { timeout: 5_000 });
-    const nodeMajor = Number.parseInt(String(nodeVersion.stdout ?? '').trim().replace(/^v/, '').split('.')[0], 10);
-    if (nodeMajor !== spec.runtime.nodeMajor) {
-      throw new NodeDeploymentError('node_runtime_mismatch', `Node.js ${spec.runtime.nodeMajor} is required by this application`);
-    }
+    const runtimeBin = path.dirname(nodePath);
 
-    const managerPaths = spec.runtime.packageManager === 'npm'
-      ? npmPaths
-      : packageManagerPaths?.[spec.runtime.packageManager];
+    const managedNodePrefix = `${path.join(managedNodeRoot, `v${spec.runtime.nodeMajor}`)}${path.sep}`;
+    const managerPaths = nodePath.startsWith(managedNodePrefix)
+      ? [path.join(runtimeBin, spec.runtime.packageManager)]
+      : spec.runtime.packageManager === 'npm'
+        ? npmPaths
+        : packageManagerPaths?.[spec.runtime.packageManager];
     const packageManagerPath = Array.isArray(managerPaths) ? await findExecutable(managerPaths, run) : null;
     if (!packageManagerPath) {
       throw new NodeDeploymentError(`${spec.runtime.packageManager}_not_installed`, `${spec.runtime.packageManager} is not installed on the managed server`);
@@ -250,7 +269,7 @@ export function createNodeDeploymentManager({
     releaseCreated = true;
 
     try {
-      await runAsUser(user, dataDirectory, GIT_PATH, [
+      await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, [
         'clone',
         '--depth', '1',
         '--single-branch',
@@ -259,7 +278,7 @@ export function createNodeDeploymentManager({
         '.',
       ], { cwd: releaseDirectory, timeout: 5 * 60 * 1000 });
 
-      const revision = await runAsUser(user, dataDirectory, GIT_PATH, ['rev-parse', '--verify', 'HEAD^{commit}'], {
+      const revision = await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, ['rev-parse', '--verify', 'HEAD^{commit}'], {
         cwd: releaseDirectory,
         timeout: 30_000,
       });
@@ -286,9 +305,9 @@ export function createNodeDeploymentManager({
         : spec.runtime.packageManager === 'pnpm'
           ? (spec.runtime.installMode === 'ci' ? ['install', '--frozen-lockfile'] : ['install'])
           : (spec.runtime.installMode === 'ci' ? ['install', '--immutable'] : ['install']);
-      await runAsUser(user, dataDirectory, packageManagerPath, installArgs, { cwd: documentRoot, timeout: 15 * 60 * 1000 });
+      await runAsUser(user, dataDirectory, runtimeBin, packageManagerPath, installArgs, { cwd: documentRoot, timeout: 15 * 60 * 1000 });
       if (spec.runtime.buildScript) {
-        await runAsUser(user, dataDirectory, packageManagerPath, ['run', spec.runtime.buildScript], { cwd: documentRoot, timeout: 15 * 60 * 1000 });
+        await runAsUser(user, dataDirectory, runtimeBin, packageManagerPath, ['run', spec.runtime.buildScript], { cwd: documentRoot, timeout: 15 * 60 * 1000 });
       }
 
       if (spec.runtime.start.mode === 'node') {
@@ -431,3 +450,4 @@ export function createNodeDeploymentManager({
 }
 
 export const nodeDeploymentManager = createNodeDeploymentManager();
+export const nodeDeploymentInternals = Object.freeze({ safeBuildEnvironment, findExecutable, parseNodeMajor, findNodeExecutable });

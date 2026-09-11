@@ -19,6 +19,7 @@ export {
 export {
   createNodeDeploymentManager,
   NodeDeploymentError,
+  nodeDeploymentInternals,
   nodeDeploymentManager,
 } from './node-deployment-manager.js';
 export {
@@ -32,6 +33,13 @@ export {
   nodeProcessInternals,
   nodeProcessManager,
 } from './node-process-manager.js';
+export {
+  createNodeRuntimeManager,
+  NodeRuntimeManagerError,
+  nodeRuntimeInternals,
+  nodeRuntimeManager,
+  nodeRuntimePolicy,
+} from './node-runtime-manager.js';
 export {
   createNodeRollbackManager,
   NodeRollbackError,

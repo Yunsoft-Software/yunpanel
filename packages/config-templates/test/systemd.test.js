@@ -81,6 +81,32 @@ test('renders an explicit package manager, mode and release-contained document r
   assert.match(environment, /NODE_ENV="development"/);
 });
 
+test('managed Node runtime paths stay bound to the selected major and process PATH', () => {
+  const user = nodeApplicationUser(APPLICATION_ID);
+  const unit = renderNodeSystemdUnit({
+    applicationId: APPLICATION_ID,
+    user,
+    nodePath: '/opt/yunpanel/node-runtimes/v24/bin/node',
+    packageManagerPath: '/opt/yunpanel/node-runtimes/v24/bin/pnpm',
+    runtime: { nodeMajor: 24, packageManager: 'pnpm', port: 3100, startMode: 'npm', startScript: 'start' },
+  });
+  assert.match(unit, /Environment="PATH=\/opt\/yunpanel\/node-runtimes\/v24\/bin:\/usr\/bin:\/bin"/);
+  assert.match(unit, /ExecStart=\/opt\/yunpanel\/node-runtimes\/v24\/bin\/pnpm run start/);
+  assert.throws(() => renderNodeSystemdUnit({
+    applicationId: APPLICATION_ID,
+    user,
+    nodePath: '/opt/yunpanel/node-runtimes/v22/bin/node',
+    runtime: { nodeMajor: 24, port: 3100 },
+  }), SystemdTemplateError);
+  assert.throws(() => renderNodeSystemdUnit({
+    applicationId: APPLICATION_ID,
+    user,
+    nodePath: '/opt/yunpanel/node-runtimes/v24/bin/node',
+    packageManagerPath: '/opt/yunpanel/node-runtimes/v22/bin/pnpm',
+    runtime: { nodeMajor: 24, packageManager: 'pnpm', port: 3100, startMode: 'npm', startScript: 'start' },
+  }), SystemdTemplateError);
+});
+
 test('renders baseline and custom environment values with safe quoting', () => {
   const environmentFile = renderNodeEnvironmentFile({
     applicationId: APPLICATION_ID,

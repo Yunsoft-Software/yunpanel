@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createNodeDeploymentManager, NodeDeploymentError } from '../src/node-deployment-manager.js';
+import { createNodeDeploymentManager, NodeDeploymentError, nodeDeploymentInternals } from '../src/node-deployment-manager.js';
 
 const APPLICATION_ID = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
 const DEPLOYMENT_ID = 'ff830043-9752-4640-83b4-3a1998de78a0';
@@ -205,4 +205,19 @@ test('document root symlinks and release escapes fail before package installatio
     );
     assert.equal(harness.commands.some((entry) => entry.file === '/usr/sbin/runuser' && entry.args.includes('/usr/bin/npm')), false);
   }
+});
+
+test('Node executable selection matches the requested site major without selecting panel Node', async () => {
+  const calls = [];
+  const selected = await nodeDeploymentInternals.findNodeExecutable([
+    '/opt/yunpanel/node-runtimes/v24/bin/node',
+    '/usr/bin/node',
+  ], 24, async (file) => {
+    calls.push(file);
+    return { stdout: file.startsWith('/opt/') ? 'v24.21.0\n' : 'v22.23.2\n' };
+  });
+  assert.equal(selected, '/opt/yunpanel/node-runtimes/v24/bin/node');
+  assert.deepEqual(calls, ['/opt/yunpanel/node-runtimes/v24/bin/node']);
+  assert.equal(nodeDeploymentInternals.safeBuildEnvironment('/data/app', '/opt/yunpanel/node-runtimes/v24/bin').PATH,
+    '/opt/yunpanel/node-runtimes/v24/bin:/usr/bin:/bin');
 });
