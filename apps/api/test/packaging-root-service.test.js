@@ -44,6 +44,8 @@ test('packaged gateway authenticates canonical client IP metadata to the root AP
     assert.match(unit, /^EnvironmentFile=\/etc\/yunpanel\/control-plane\/proxy\.env$/m);
   }
   assert.match(postinst, /randomBytes\(32\)\.toString\("base64url"\)/);
+  assert.match(postinst, /proxy_token_count=0/);
+  assert.match(postinst, /if \[ -f "\$proxy_env" \]; then\n  proxy_token_count=\$\(grep -Ec/);
   assert.match(postinst, /install -o root -g root -m 0600 "\$proxy_temp" "\$proxy_env"/);
   assert.match(postinst, /printf 'YUNPANEL_INTERNAL_PROXY_TOKEN=%s\\n' "\$proxy_token" >>"\$proxy_temp"/);
 });

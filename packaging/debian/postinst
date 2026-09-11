@@ -15,7 +15,10 @@ install -d -o root -g root -m 0700 /etc/yunpanel/agent
 install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/web
 
 proxy_env=/etc/yunpanel/control-plane/proxy.env
-proxy_token_count=$(grep -Ec '^YUNPANEL_INTERNAL_PROXY_TOKEN=' "$proxy_env" 2>/dev/null || true)
+proxy_token_count=0
+if [ -f "$proxy_env" ]; then
+  proxy_token_count=$(grep -Ec '^YUNPANEL_INTERNAL_PROXY_TOKEN=' "$proxy_env" || true)
+fi
 if [ "$proxy_token_count" -ne 1 ] || ! grep -Eq '^YUNPANEL_INTERNAL_PROXY_TOKEN=[A-Za-z0-9_-]{43}$' "$proxy_env" 2>/dev/null; then
   proxy_token=$(/usr/local/bin/node --input-type=module -e 'import { randomBytes } from "node:crypto"; process.stdout.write(randomBytes(32).toString("base64url"));')
   proxy_temp=$(mktemp /etc/yunpanel/control-plane/proxy.env.XXXXXX)
