@@ -21,6 +21,12 @@ export {
   AcmeManagerError,
   acmeManagerInternals,
 } from './acme-manager.js';
+export {
+  createCloudflareDnsManager,
+  cloudflareDnsManager,
+  CloudflareDnsManagerError,
+  cloudflareDnsManagerInternals,
+} from './cloudflare-dns-manager.js';
 export { inspectAllowlistedServices, parseSystemdProperties, systemdInspectionPolicy } from './systemd-inspector.js';
 export {
   createSystemPackageManager,
