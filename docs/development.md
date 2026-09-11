@@ -179,6 +179,8 @@ The Dovecot 2.3 config preview replaces `10-auth.conf` as one complete managed a
 
 Rspamd integration preview pins the proxy worker to `127.0.0.1:11332`, explicitly enables Milter self-scan, and never emits a wildcard listener. The paired Postfix parameter set covers both SMTP and non-SMTP mail, uses Milter protocol 6 and chooses `milter_default_action=tempfail`; an unavailable scanner therefore defers mail instead of silently accepting an unscanned message. The preview contains only deterministic non-secret content, parameter values, fixed `rspamadm configtest`/`postfix check` argv and package/port prerequisites. Atomic `main.cf` parameter staging, service reload ordering, post-condition evidence and rollback are still required before activation.
 
+`previewManagedMailConfiguration` composes the Postfix maps and parameters, protected Dovecot passwd digest, Dovecot config and Rspamd worker into one ordered bundle identity. The Postfix recipient set and Dovecot account set must match exactly, so an accepted SMTP recipient cannot silently lack an authentication/delivery identity. The aggregate preview contains counts and non-secret config/map content, but the passwd rows and Argon2id hashes remain absent. It lists all fixed validators plus relay-policy, `mydestination`, TLS, Unix-account and loopback-port prerequisites and always returns `readyToApply=false`; only the future host inspector/stager may satisfy those prerequisites.
+
 ## Local log API
 
 Log reads are sensitive Owner-management operations and remain unavailable for Read Only accounts, remote legacy-agent records or a panel without an active local-server binding. Supported routes are:

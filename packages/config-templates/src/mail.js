@@ -378,6 +378,83 @@ export function previewRspamdPostfixIntegration() {
   });
 }
 
+export function previewManagedMailConfiguration({
+  domains,
+  mailboxes = [],
+  aliases = [],
+  accounts = [],
+  postmasterAddress,
+} = {}) {
+  const normalizedDomains = normalizeManagedDomains(domains);
+  const normalizedMailboxes = normalizeMailboxes(normalizedDomains, mailboxes);
+  const normalizedAliases = normalizeAliases(normalizedDomains, aliases);
+  const normalizedAccounts = normalizeMailboxAccounts(normalizedDomains, accounts);
+  const accountAddresses = normalizedAccounts.map((account) => account.address);
+  if (normalizedMailboxes.length !== accountAddresses.length
+    || normalizedMailboxes.some((address, index) => address !== accountAddresses[index])) {
+    throw new MailTemplateError('mailbox_account_set_mismatch', 'Postfix mailbox and Dovecot account identities must match exactly');
+  }
+
+  const postfix = previewPostfixVirtualMaps({
+    domains: normalizedDomains,
+    mailboxes: normalizedMailboxes,
+    aliases: normalizedAliases,
+  });
+  const dovecotPasswd = previewDovecotPasswdFile({ domains: normalizedDomains, accounts: normalizedAccounts });
+  const dovecot = previewDovecotVirtualMailConfig({ domains: normalizedDomains, postmasterAddress });
+  const rspamd = previewRspamdPostfixIntegration();
+  const postfixParameters = Object.freeze([
+    ...rspamd.postfixParameters,
+    Object.freeze({ name: 'virtual_alias_maps', value: `hash:${POSTFIX_VIRTUAL_ALIAS_MAP_PATH}` }),
+    Object.freeze({ name: 'virtual_mailbox_domains', value: `hash:${POSTFIX_VIRTUAL_DOMAIN_MAP_PATH}` }),
+    Object.freeze({ name: 'virtual_mailbox_maps', value: `hash:${POSTFIX_VIRTUAL_MAILBOX_MAP_PATH}` }),
+    Object.freeze({ name: 'virtual_transport', value: 'lmtp:unix:private/dovecot-lmtp' }),
+  ].sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+  const artifactDigests = [
+    ...postfix.artifacts,
+    dovecotPasswd,
+    ...dovecot.artifacts,
+    ...rspamd.artifacts,
+  ].map((entry) => ({ path: entry.path, sha256: entry.sha256 }));
+  const identity = {
+    version: 1,
+    domains: normalizedDomains,
+    mailboxes: normalizedMailboxes,
+    aliases: normalizedAliases,
+    postmasterAddress: normalizeAddress(postmasterAddress).address,
+    artifactDigests,
+    postfixParameters,
+  };
+  return Object.freeze({
+    version: 1,
+    sha256: createHash('sha256').update(JSON.stringify(identity)).digest('hex'),
+    counts: Object.freeze({
+      domains: normalizedDomains.length,
+      mailboxes: normalizedMailboxes.length,
+      aliases: normalizedAliases.length,
+    }),
+    artifacts: Object.freeze([
+      ...postfix.artifacts,
+      dovecotPasswd,
+      ...dovecot.artifacts,
+      ...rspamd.artifacts,
+    ]),
+    postfixParameters,
+    validate: Object.freeze([
+      Object.freeze({ file: '/usr/sbin/postfix', args: Object.freeze(['check']) }),
+      Object.freeze({ file: '/usr/bin/doveconf', args: Object.freeze(['-n']) }),
+      Object.freeze({ file: '/usr/bin/rspamadm', args: Object.freeze(['configtest']) }),
+    ]),
+    requirements: Object.freeze([
+      'postfix', 'dovecot_2_3', 'rspamd', 'vmail_identity', 'postfix_identity',
+      'mail_tls_material', 'loopback_11332_available', 'managed_domains_excluded_from_mydestination',
+      'postfix_relay_policy_verified',
+    ]),
+    readyToApply: false,
+    sideEffects: false,
+  });
+}
+
 export const mailTemplatePolicy = Object.freeze({
   maxManagedDomains: MAX_MANAGED_DOMAINS,
   maxMailboxes: MAX_MAILBOXES,

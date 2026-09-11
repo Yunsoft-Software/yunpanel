@@ -5,6 +5,7 @@ import {
   mailTemplatePolicy,
   previewDovecotPasswdFile,
   previewDovecotVirtualMailConfig,
+  previewManagedMailConfiguration,
   previewPostfixVirtualDomainMap,
   previewPostfixVirtualMaps,
   previewRspamdPostfixIntegration,
@@ -261,4 +262,59 @@ test('previews strict Postfix Milter parameters and fixed config validators', ()
   assert.deepEqual(preview.requirements, ['rspamd', 'postfix', 'loopback_11332_available']);
   assert.equal(preview.sideEffects, false);
   assert.equal(preview.artifacts[0].sideEffects, false);
+});
+
+test('aggregates one deterministic managed-mail preview without exposing passwd content', () => {
+  const input = {
+    domains: ['example.com'],
+    mailboxes: ['owner@example.com'],
+    accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
+    aliases: [{ source: 'info@example.com', destinations: ['owner@example.com'] }],
+    postmasterAddress: 'owner@example.com',
+  };
+  const preview = previewManagedMailConfiguration(input);
+  assert.match(preview.sha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(preview.counts, { domains: 1, mailboxes: 1, aliases: 1 });
+  assert.equal(preview.readyToApply, false);
+  assert.equal(preview.sideEffects, false);
+  assert.deepEqual(preview.postfixParameters.map((entry) => entry.name), [
+    'milter_default_action', 'milter_protocol', 'non_smtpd_milters', 'smtpd_milters',
+    'virtual_alias_maps', 'virtual_mailbox_domains', 'virtual_mailbox_maps', 'virtual_transport',
+  ]);
+  assert.deepEqual(preview.artifacts.map((entry) => entry.path), [
+    '/etc/yunpanel/mail/postfix/virtual-domains',
+    '/etc/yunpanel/mail/postfix/virtual-mailboxes',
+    '/etc/yunpanel/mail/postfix/virtual-aliases',
+    '/etc/yunpanel/mail/dovecot/users',
+    '/etc/dovecot/conf.d/10-auth.conf',
+    '/etc/dovecot/conf.d/99-yunpanel-mail.conf',
+    '/etc/rspamd/local.d/worker-proxy.inc',
+  ]);
+  const passwdArtifact = preview.artifacts.find((entry) => entry.path.endsWith('/dovecot/users'));
+  assert.equal(passwdArtifact.sensitive, true);
+  assert.equal(passwdArtifact.contentIncluded, false);
+  assert.equal('content' in passwdArtifact, false);
+  assert.equal(JSON.stringify(preview).includes(ARGON2ID_HASH), false);
+  assert.equal(preview.requirements.includes('postfix_relay_policy_verified'), true);
+
+  const reordered = previewManagedMailConfiguration({
+    ...input,
+    domains: ['EXAMPLE.COM.'],
+    mailboxes: ['OWNER@EXAMPLE.COM'],
+    accounts: [{ address: 'OWNER@EXAMPLE.COM', passwordHash: ARGON2ID_HASH }],
+    postmasterAddress: 'OWNER@EXAMPLE.COM',
+  });
+  assert.equal(reordered.sha256, preview.sha256);
+});
+
+test('managed-mail preview rejects divergent Postfix and Dovecot recipient identities', () => {
+  assert.throws(
+    () => previewManagedMailConfiguration({
+      domains: ['example.com'],
+      mailboxes: ['owner@example.com'],
+      accounts: [{ address: 'other@example.com', passwordHash: ARGON2ID_HASH }],
+      postmasterAddress: 'owner@example.com',
+    }),
+    (error) => error instanceof MailTemplateError && error.code === 'mailbox_account_set_mismatch',
+  );
 });

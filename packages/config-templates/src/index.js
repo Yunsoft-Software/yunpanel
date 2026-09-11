@@ -18,6 +18,7 @@ export {
   mailTemplatePolicy,
   previewDovecotPasswdFile,
   previewDovecotVirtualMailConfig,
+  previewManagedMailConfiguration,
   previewPostfixVirtualDomainMap,
   previewPostfixVirtualMaps,
   previewRspamdPostfixIntegration,
