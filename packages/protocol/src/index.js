@@ -1,6 +1,7 @@
 import {
   ApplicationValidationError,
   assertUuid,
+  normalizeDomainSet,
   normalizeNodeApplicationSpec,
   normalizeNodeProcessSpec,
   MANAGED_NODE_RUNTIME_MAJORS as SHARED_MANAGED_NODE_RUNTIME_MAJORS,
@@ -9,8 +10,9 @@ import {
   normalizeNodeStatusSpec,
   normalizeStaticApplicationSpec,
 } from '@yunpanel/shared';
+import { isIP, SocketAddress } from 'node:net';
 
-export const AGENT_PROTOCOL_VERSION = 5;
+export const AGENT_PROTOCOL_VERSION = 6;
 
 export const MANAGED_SERVICE_IDS = Object.freeze([
   'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
@@ -35,6 +37,7 @@ export const OPERATIONS = Object.freeze({
   DATABASE_INSPECT: 'database.inspect',
   DATABASE_CREATE: 'database.create',
   DATABASE_DELETE: 'database.delete',
+  DNS_RECORD_APPLY: 'dns.record.apply',
   DOMAIN_STAGE: 'domain.stage',
   DOMAIN_ACTIVATE: 'domain.activate',
   SSL_ISSUE: 'ssl.issue',
@@ -67,6 +70,8 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SAFE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._/-]+$/;
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const RESERVED_DATABASE_NAMES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
+const DNS_RECORD_TYPES = new Set(['A', 'AAAA', 'CNAME']);
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 export function isKnownOperation(operation) {
   return typeof operation === 'string' && KNOWN_OPERATIONS.has(operation);
@@ -138,6 +143,49 @@ function validateDatabaseName(value, fieldName, errors) {
   }
 }
 
+function canonicalDomain(value) {
+  try { return normalizeDomainSet(value, []).primary; }
+  catch { return null; }
+}
+
+function canonicalIp(value, family) {
+  if (isIP(value) !== family) return null;
+  return new SocketAddress({ address: value, family: family === 4 ? 'ipv4' : 'ipv6', port: 0 }).address;
+}
+
+function validateDnsRecordApply(payload, operation, errors) {
+  rejectUnexpectedKeys(payload, [
+    'provider', 'credentialId', 'dnsZoneId', 'zoneName', 'action', 'record', 'expectedSnapshotDigest',
+  ], operation, errors);
+  if (payload.provider !== 'cloudflare' || !['upsert', 'delete'].includes(payload.action)
+    || typeof payload.expectedSnapshotDigest !== 'string' || !SHA256_PATTERN.test(payload.expectedSnapshotDigest)) {
+    errors.push(`${operation} provider action or snapshot is invalid`);
+  }
+  try {
+    if (assertUuid(payload.credentialId, 'credentialId') !== payload.credentialId
+      || assertUuid(payload.dnsZoneId, 'dnsZoneId') !== payload.dnsZoneId) throw new Error('noncanonical');
+  } catch { errors.push(`${operation} identities are invalid`); }
+  const zoneName = canonicalDomain(payload.zoneName);
+  if (!zoneName || zoneName !== payload.zoneName) errors.push(`${operation} zoneName is invalid`);
+  const record = payload.record;
+  if (!record || typeof record !== 'object' || Array.isArray(record)) {
+    errors.push(`${operation} record is invalid`);
+    return;
+  }
+  rejectUnexpectedKeys(record, ['type', 'name', 'content', 'ttl', 'proxied'], `${operation} record`, errors);
+  const type = typeof record.type === 'string' ? record.type : '';
+  const name = canonicalDomain(record.name);
+  const content = type === 'A' ? canonicalIp(record.content, 4)
+    : type === 'AAAA' ? canonicalIp(record.content, 6)
+      : type === 'CNAME' ? canonicalDomain(record.content) : null;
+  if (!DNS_RECORD_TYPES.has(type) || !name || name !== record.name || !content || content !== record.content
+    || !zoneName || (name !== zoneName && !name.endsWith(`.${zoneName}`))
+    || !Number.isInteger(record.ttl) || (record.ttl !== 1 && (record.ttl < 60 || record.ttl > 86_400))
+    || typeof record.proxied !== 'boolean' || (record.proxied && record.ttl !== 1)) {
+    errors.push(`${operation} record fields are invalid`);
+  }
+}
+
 function rejectUnexpectedKeys(payload, allowedKeys, operation, errors) {
   const allowed = new Set(allowedKeys);
   if (Object.keys(payload).some((key) => !allowed.has(key))) errors.push(`${operation} contains unsupported arguments`);
@@ -183,6 +231,8 @@ function validateMutationPayload(operation, payload, errors) {
     rejectUnexpectedKeys(payload, ['name'], operation, errors);
     validateDatabaseName(payload.name, `${operation} name`, errors);
   }
+
+  if (operation === OPERATIONS.DNS_RECORD_APPLY) validateDnsRecordApply(payload, operation, errors);
 
   if (operation === OPERATIONS.DOMAIN_STAGE) {
     rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'tls', 'canonicalRedirect', 'httpsRedirect'], operation, errors);

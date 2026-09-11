@@ -215,6 +215,14 @@ sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-cert
 
 The handler derives `ssl.issue` versus `ssl.renew` from private persisted job intent. Staging issue and renew dry-run require the exact private success receipt. Production issue/renew additionally require current managed X.509 fingerprint and validity metadata to match the receipt. Certbot is never invoked by recovery.
 
+### Cloudflare DNS record mutation
+
+```bash
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-dns-record <server-id> <job-id> --confirm
+```
+
+Recovery reads the exact private `dns.record.apply` intent, materializes the matching encrypted credential only inside the adapter, and re-establishes the intended provider post-condition. Create/update/delete is not blindly repeated: an already-applied state completes without another write, an unchanged expected provider snapshot may safely complete the original operation, and snapshot drift, ambiguous records, invalid credentials or provider uncertainty leave the job running and its recovery journal untouched. Public job and recovery output contain only normalized record state, never the token.
+
 Receipt directories and files used by these recovery paths are root-protected and carry only operation-specific, bounded metadata; generic payload/result/env/secret material is not accepted.
 
 ## Path A — migrate an existing enrolled server

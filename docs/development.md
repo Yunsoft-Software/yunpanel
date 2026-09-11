@@ -79,9 +79,11 @@ Rules:
 
 The default application environment registry file is `.data/application-environment-registry.json`. Override it with `YUNPANEL_APPLICATION_ENVIRONMENT_STORE` when required. The state file is mode `0600`; application environment secrets, internal deployment credentials and GitHub webhook secrets contain ciphertext, IV and authentication tag rather than plaintext values. Deployment credentials and webhook secrets are reserved internal records and never enter the hosted process environment.
 
-Cloudflare DNS-01 credentials use the same root key but a separate `.data/dns-provider-credential-registry.json` store, configurable with `YUNPANEL_DNS_CREDENTIAL_STORE`. Public reads expose only provider/configuration metadata. The token is decrypted only by the local root executor, written to a private temporary Certbot credentials file beneath `/run/yunpanel/acme-credentials`, and removed after issue/renew. The Debian package depends on `python3-certbot-dns-cloudflare`; real provider validation remains an Ubuntu acceptance item.
+Cloudflare DNS-01 and record-management credentials use the same root key but a separate `.data/dns-provider-credential-registry.json` store, configurable with `YUNPANEL_DNS_CREDENTIAL_STORE`. Public reads expose only provider/configuration metadata. For certificate work the token is decrypted only by the local root executor, written to a private temporary Certbot credentials file beneath `/run/yunpanel/acme-credentials`, and removed after issue/renew. For record work it is materialized only for the bounded HTTPS provider adapter and never copied into job payload/result/recovery/audit/log/URL state. The Debian package depends on `python3-certbot-dns-cloudflare`; real provider validation remains an Ubuntu acceptance item.
 
 Owner-only `POST /api/dns-zones/:dnsZoneId/readiness/refresh` accepts exactly `{ "expectedRevision": <positive integer> }`. It reads public A/AAAA/CNAME evidence with a bounded resolver timeout, matches canonical addresses against the linked managed Server inventory and reports separate routing, HTTP-01 and DNS-01 readiness. The lifecycle revision changes only after that evidence is collected and the caller's revision still matches. This route does not mutate external DNS; real resolver and dual-stack acceptance remains in `todo.md`.
+
+Owner-only `POST /api/dns-zones/:dnsZoneId/records/preview` and `/records/apply` manage canonical A/AAAA/CNAME records through Cloudflare. Apply requires the exact current preview digest and typed confirmation, then creates a durable resource-locked local job; provider snapshot or credential/zone revision drift fails before queueing. A successful record job does not update readiness because public propagation remains separately observed.
 
 Docker Website identity tracking uses `.data/docker-workload-registry.json` or `YUNPANEL_DOCKER_WORKLOAD_STORE`. The current API is deliberately limited to `GET /api/docker/workloads`, `GET /api/docker/workloads/:dockerWorkloadId` and Owner-only `POST /api/docker/workloads`. A create request must declare `managementMode=external` and an exact same-server loopback host/port/WebSocket target; the response explicitly reports that no container or Nginx change occurred. Managed Compose lifecycle is not implemented by this tracking endpoint.
 
@@ -155,7 +157,7 @@ Durable recovery starts with:
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs status
 ```
 
-Terminal reconciliation does not re-run a host mutation. Running recovery is limited to reviewed operation-specific paths: side-effect-free package/service/database/Node status re-inspection and evidence/receipt-backed domain, static, Node, database, managed-service, YunPanel upgrade and certificate recovery. There is no generic force-success, force-failed, blind mutation retry or manual journal-clear path.
+Terminal reconciliation does not re-run a host mutation. Running recovery is limited to reviewed operation-specific paths: side-effect-free package/service/database/Node status re-inspection, evidence/receipt-backed host operations, and exact idempotent Cloudflare record post-condition recovery. There is no generic force-success, force-failed, blind mutation retry or manual journal-clear path.
 
 See `docs/local-runtime-migration.md` for the exact commands and evidence requirements.
 

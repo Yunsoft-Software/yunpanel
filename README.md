@@ -43,6 +43,7 @@ Do not replace structured operations with an unauthenticated generic shell or ma
 - Private Docker workload identity tracking for explicit same-server loopback endpoints. Records start `external/unverified`; Website binding, restart validation and impact inventory exist without pretending that Compose/container lifecycle or Nginx mutation ran.
 - Separate persistent DNS-zone and mail-domain lifecycle identities that begin as explicit external/unverified tracking, never imply provider publication or mail provisioning, and are not silently created by Website/hostname creation.
 - Owner-only DNS readiness refresh with bounded A/AAAA/CNAME evidence, managed-Server address matching, independent HTTP-01/DNS-01 diagnosis and revision-guarded lifecycle observations; it inspects DNS but does not mutate provider records.
+- Owner-only Cloudflare A/AAAA/CNAME preview/apply with canonical zone boundaries, exact provider snapshot/typed confirmation, encrypted execution-time credentials, durable local `dns_zone` jobs and idempotent uncertain-outcome recovery; successful writes do not fabricate propagation readiness.
 - Owner-only Website/Domain move-delete impact previews that enumerate current hierarchy, Application/Docker binding, DNS-zone, mail-domain, certificate and active-job dependencies and fail closed on mailbox/backup/cron inventories that do not exist yet; no cascade or apply route is implied.
 - Static deploy/rollback and Node deploy/restart/status/rollback with dedicated application users, health checks and guarded rollback behavior.
 - Revisioned Node runtime configuration for startup file/npm script, npm/pnpm/yarn, production/development mode and release-contained document root; pending desired settings do not replace the active release snapshot before a successful deploy.
@@ -57,7 +58,7 @@ Do not replace structured operations with an unauthenticated generic shell or ma
 - Managed-service inspect/install/start/stop/restart support for the current allowlisted host services.
 - MySQL/MariaDB local-socket inventory and database create/delete job flows with result sanitization.
 - Durable queued/running/terminal job persistence with a versioned private recovery sidecar. Terminal-but-unreconciled and supported running-recovery state survives restart and blocks unsafe new work.
-- Operation-specific running recovery for read-only package/service/database/Node status/runtime inspection, domain stage/activate, static deploy/rollback, Node deploy/rollback/restart/process/runtime install, database create/delete, managed-service mutations, YunPanel package upgrade and certificate issue/renew. Recovery uses exact persisted intent plus host evidence or private job-bound receipts; there is no generic force-success or blind mutation retry.
+- Operation-specific running recovery for read-only package/service/database/Node status/runtime inspection, domain stage/activate, static deploy/rollback, Node deploy/rollback/restart/process/runtime install, database create/delete, managed-service mutations, YunPanel package upgrade, certificate issue/renew and Cloudflare DNS records. Recovery uses exact persisted intent plus host evidence/private receipts or the DNS adapter's idempotent provider post-condition; there is no generic force-success or blind mutation retry.
 - Credentialless fresh local server bootstrap plus guarded existing-server `status/bind/release` migration tooling and post-migration `validate` health verification.
 - Verified migration backup, non-destructive restore preview, archive member/type/link inspection, `yunapp-*` Unix identity drift comparison, metadata planning and private staged extraction. There is intentionally no live archive apply/restore command yet.
 - Agentless local snapshots for host inventory, allowlisted systemd services, Docker and Nginx.
@@ -135,7 +136,7 @@ Before ownership changes or uncertain-outcome recovery, inspect durable state:
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs status
 ```
 
-Terminal reconciliation never re-runs the host operation. Running recovery is restricted to the operation-specific commands documented in [docs/local-runtime-migration.md](docs/local-runtime-migration.md); each command either re-runs a reviewed read-only inspection or requires exact host evidence/private receipt. Missing evidence means unresolved, not success or failure.
+Terminal reconciliation never re-runs the host operation. Running recovery is restricted to the operation-specific commands documented in [docs/local-runtime-migration.md](docs/local-runtime-migration.md); each command uses a reviewed read-only inspection, exact host evidence/private receipt, or the DNS adapter's exact idempotent provider post-condition. Missing evidence or provider certainty means unresolved, not success or failure.
 
 ## Debian package and release gates
 

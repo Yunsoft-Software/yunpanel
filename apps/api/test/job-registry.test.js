@@ -66,6 +66,35 @@ test('agent jobs move through queued, running and succeeded states exactly once'
   );
 });
 
+test('DNS record jobs retain only provider-safe confirmed state', async () => {
+  const registry = createJobRegistry();
+  const payload = {
+    provider: 'cloudflare',
+    credentialId: '10714f5d-8646-4f9a-a8e9-b80439ff6305',
+    dnsZoneId: '822fa920-166c-4a7a-a26b-476c81d82165',
+    zoneName: 'example.test', action: 'upsert',
+    record: { type: 'A', name: 'app.example.test', content: '203.0.113.10', ttl: 300, proxied: false },
+    expectedSnapshotDigest: 'a'.repeat(64),
+  };
+  const job = await registry.enqueue({
+    serverId: 'server-1', type: 'dns.record.apply', operation: OPERATIONS.DNS_RECORD_APPLY,
+    payload, resourceType: 'dns_zone', resourceId: payload.dnsZoneId,
+  });
+  await registry.claimNext('server-1');
+  const completed = await registry.complete({
+    serverId: 'server-1', jobId: job.id, status: 'succeeded',
+    result: {
+      provider: 'cloudflare', action: 'upsert', zoneName: 'example.test', record: payload.record,
+      changed: true, state: 'present', providerRecordId: 'must-not-persist', token: 'must-not-persist',
+    },
+  });
+  assert.deepEqual(completed.result, {
+    provider: 'cloudflare', action: 'upsert', zoneName: 'example.test', record: payload.record,
+    changed: true, state: 'present',
+  });
+  assert.doesNotMatch(JSON.stringify(completed), /providerRecordId|token|must-not-persist/);
+});
+
 test('invalid successful result does not transition a running job', async () => {
   const registry = createJobRegistry();
   const job = await registry.enqueue({

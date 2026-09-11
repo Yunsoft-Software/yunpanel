@@ -1,5 +1,6 @@
 import {
   createAcmeManager,
+  createCloudflareDnsManager,
   createDatabaseManager,
   createManagedServiceManager,
   createNginxManager,
@@ -26,6 +27,7 @@ export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.DATABASE_INSPECT,
   OPERATIONS.DATABASE_CREATE,
   OPERATIONS.DATABASE_DELETE,
+  OPERATIONS.DNS_RECORD_APPLY,
   OPERATIONS.DOMAIN_STAGE,
   OPERATIONS.DOMAIN_ACTIVATE,
   OPERATIONS.SSL_ISSUE,
@@ -56,6 +58,7 @@ export function createLocalHostOperations({
   databaseManager = createDatabaseManager(),
   nginxManager = createNginxManager(),
   acmeManager = createAcmeManager(),
+  cloudflareDnsManager = createCloudflareDnsManager(),
   staticDeploymentManager = null,
   staticDeploymentReceiptStore = createStaticDeploymentReceiptStore(),
   staticRollbackManager = createStaticRollbackManager(),
@@ -78,6 +81,9 @@ export function createLocalHostOperations({
   }
   if (loadDnsProviderCredential !== null && typeof loadDnsProviderCredential !== 'function') {
     throw new Error('loadDnsProviderCredential must be a function when configured');
+  }
+  if (!cloudflareDnsManager || typeof cloudflareDnsManager.applyRecord !== 'function') {
+    throw new Error('cloudflareDnsManager must provide applyRecord()');
   }
   if (jobLogStore !== null && typeof jobLogStore.record !== 'function') {
     throw new Error('jobLogStore must provide record() when configured');
@@ -137,6 +143,16 @@ export function createLocalHostOperations({
     return execute(payload, { dnsCredential });
   }
 
+  async function executeDnsRecord(payload) {
+    if (!loadDnsProviderCredential) {
+      const error = new Error('DNS provider credential loader is unavailable');
+      error.code = 'dns_provider_credential_unavailable';
+      throw error;
+    }
+    const dnsCredential = await loadDnsProviderCredential(payload.credentialId);
+    return cloudflareDnsManager.applyRecord(payload, { dnsCredential });
+  }
+
   const handlers = new Map([
     [OPERATIONS.SYSTEM_PACKAGES_INSPECT, () => packageManager.inspect()],
     [OPERATIONS.SYSTEM_SERVICES_INSPECT, (payload) => managedServiceManager.inspect(payload.serviceId ?? null)],
@@ -146,6 +162,7 @@ export function createLocalHostOperations({
     [OPERATIONS.DATABASE_INSPECT, () => databaseManager.inspect()],
     [OPERATIONS.DATABASE_CREATE, (payload) => databaseManager.createDatabase(payload.name)],
     [OPERATIONS.DATABASE_DELETE, (payload) => databaseManager.dropDatabase(payload.name)],
+    [OPERATIONS.DNS_RECORD_APPLY, executeDnsRecord],
     [OPERATIONS.DOMAIN_STAGE, (payload) => nginxManager.stageDomain(payload)],
     [OPERATIONS.DOMAIN_ACTIVATE, (payload) => nginxManager.activateDomain(payload)],
     [OPERATIONS.SSL_ISSUE, (payload) => executeCertificate(payload, (input, execution) => acmeManager.issueCertificate(input, execution))],

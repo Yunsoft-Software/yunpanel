@@ -15,8 +15,8 @@ test('production wraps the durable registry with the common audit store before e
 
 test('API local executor and renewal scheduler share the audited registry', async () => {
   const source = await readFile(indexUrl, 'utf8');
-  assert.match(source, /createHandler: \(\) => createApp\(\{[\s\S]*?\n\s*jobRegistry,[\s\S]*?\n\s*applicationEnvironmentRegistry,/);
-  assert.match(source, /startConfiguredLocalRuntime\(\{[\s\S]*\n\s*jobRegistry,[\s\S]*\n\s*domainRegistry,/);
+  assert.match(source, /createHandler: \(\) => createApp\(\{[\s\S]*?\n\s*jobRegistry,[\s\S]*?\n\s*dnsProviderCredentialRegistry,/);
+  assert.match(source, /startConfiguredLocalRuntime\(\{[\s\S]*\n\s*jobRegistry,[\s\S]*\n\s*dnsProviderCredentialRegistry,/);
   assert.match(source, /startCertificateRenewalScheduler\(\{[\s\S]*?\n\s*certificateRegistry,[\s\S]*?\n\s*jobRegistry,[\s\S]*?\n\s*dnsProviderCredentialRegistry,/);
 });
 

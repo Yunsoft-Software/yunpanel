@@ -105,7 +105,12 @@ DNS hosting and mail-domain tracking have separate private versioned registries 
 GET  /api/dns-zones
 GET  /api/dns-zones/:dnsZoneId
 POST /api/dns-zones
+GET  /api/dns-zones/:dnsZoneId/provider-credential
+PUT  /api/dns-zones/:dnsZoneId/provider-credential
+DELETE /api/dns-zones/:dnsZoneId/provider-credential
 POST /api/dns-zones/:dnsZoneId/readiness/refresh
+POST /api/dns-zones/:dnsZoneId/records/preview
+POST /api/dns-zones/:dnsZoneId/records/apply
 GET  /api/mail-domains
 GET  /api/mail-domains/:mailDomainId
 POST /api/mail-domains
@@ -114,6 +119,10 @@ POST /api/mail-domains
 Owner creation requires exactly `name`, an explicit `webDomainId` or `null`, and `managementMode=external`. A non-null reference must name the exact canonical web Domain; suffix matching or hostname inference is not used. New resources begin as `unverified`, and their create responses state that DNS was not published and mail/mailboxes were not configured. Read Only may inspect the bounded lifecycle metadata but cannot create or refresh it.
 
 Readiness refresh accepts exactly the current positive `expectedRevision`. It resolves the linked Domain's canonical hostname and aliases as bounded A, AAAA and CNAME evidence, canonicalizes IPv6, and compares resolved addresses with the explicitly linked managed Server inventory. Missing records, target mismatch, missing expected Server addresses and resolver failures remain distinct authored states; resolver exceptions are never serialized. HTTP-01 additionally requires the current Domain revision to be active. DNS-01 independently reports whether a supported provider credential is configured and distinguishes an unavailable credential store from an absent credential. A successful revision check records only evidence-derived `ready` or `degraded` lifecycle status. It does not publish DNS, contact the provider mutation API or claim certificate issuance.
+
+Cloudflare record mutation is a separate Owner-only two-step path for A, AAAA and CNAME. Preview validates an explicit local web Domain relationship, canonical zone boundary, current zone revision, encrypted credential metadata and the live provider snapshot; it returns the normalized desired record, create/update/delete/no-change effect, a deterministic digest and typed confirmation. Apply recomputes the live preview, rejects provider/credential/zone drift, and queues one resource-locked `dns.record.apply` job. TTL is either provider automatic (`1`) or 60–86400 seconds; proxied records require automatic TTL. The provider token is materialized only inside the local root adapter and is absent from the API result, public/private job payload, recovery result, audit and URL.
+
+The adapter checks the provider post-condition after mutation and returns only bounded record state. An interrupted running job can be resolved, with both command consumers stopped, through `job-recovery.mjs recover-dns-record <server-id> <job-id> --confirm`. Recovery uses the exact private intent and the adapter's idempotent post-condition: an already-applied create/update/delete completes without repeating the write, an unchanged preview snapshot may safely finish the original intent, and drift or provider uncertainty leaves the job unresolved. DNS mutation never marks propagation or certificate readiness; the readiness endpoint must observe public DNS separately.
 
 Nginx stage/activate and managed certificate issue/renew continue through durable jobs and operation-specific recovery. Do not replace them with generic retry/force-success behavior.
 

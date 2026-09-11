@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { OPERATIONS } from '@yunpanel/protocol';
 import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -5,6 +7,9 @@ const CREATE_FIELDS = new Set(['name', 'webDomainId', 'managementMode']);
 const PROVIDER_CREDENTIAL_FIELDS = new Set(['provider', 'token', 'confirmation']);
 const PROVIDER_CREDENTIAL_DELETE_FIELDS = new Set(['confirmation']);
 const READINESS_REFRESH_FIELDS = new Set(['expectedRevision']);
+const RECORD_PREVIEW_FIELDS = new Set(['action', 'record', 'expectedRevision']);
+const RECORD_APPLY_FIELDS = new Set(['action', 'record', 'expectedRevision', 'previewDigest', 'confirmation']);
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 function createInput(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)
@@ -28,10 +33,34 @@ function asyncRoute(handler) {
   };
 }
 
+function recordInput(body, fields) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).length !== fields.size || Object.keys(body).some((field) => !fields.has(field))
+    || !['upsert', 'delete'].includes(body.action)
+    || !body.record || typeof body.record !== 'object' || Array.isArray(body.record)
+    || !Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 1) {
+    throw new ExternalLifecycleRegistryError('dns_record_input_invalid', 'DNS record operation fields are invalid');
+  }
+  return body;
+}
+
+function digest(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function sameRecord(left, right) {
+  return left.type === right.type && left.name === right.name && left.content === right.content
+    && left.ttl === right.ttl && left.proxied === right.proxied;
+}
+
 export function mountExternalLifecycleRoutes(app, {
   dnsHostingRegistry,
   dnsProviderCredentialRegistry,
   dnsReadinessService,
+  dnsRecordManager,
+  domainRegistry,
+  jobRegistry,
+  localServerId,
   mailDomainRegistry,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
@@ -40,10 +69,104 @@ export function mountExternalLifecycleRoutes(app, {
     || typeof dnsHostingRegistry.recordObservation !== 'function'
     || !dnsProviderCredentialRegistry || typeof dnsProviderCredentialRegistry.setCredential !== 'function'
     || typeof dnsProviderCredentialRegistry.getForZone !== 'function' || typeof dnsProviderCredentialRegistry.deleteForZone !== 'function'
+    || typeof dnsProviderCredentialRegistry.materialize !== 'function'
     || !dnsReadinessService || typeof dnsReadinessService.inspectZone !== 'function'
+    || !dnsRecordManager || typeof dnsRecordManager.inspectRecord !== 'function'
+    || !domainRegistry || typeof domainRegistry.getDomain !== 'function'
+    || !jobRegistry || typeof jobRegistry.enqueue !== 'function' || typeof jobRegistry.listJobs !== 'function'
     || !mailDomainRegistry || typeof mailDomainRegistry.createMailDomain !== 'function'
     || typeof mailDomainRegistry.getMailDomain !== 'function' || typeof mailDomainRegistry.listMailDomains !== 'function') {
     throw new Error('External lifecycle registries are required');
+  }
+  const zoneLocks = new Map();
+
+  async function withZoneLock(dnsZoneId, operation) {
+    const previous = zoneLocks.get(dnsZoneId) ?? Promise.resolve();
+    let release;
+    const current = new Promise((resolve) => { release = resolve; });
+    zoneLocks.set(dnsZoneId, current);
+    await previous.catch(() => {});
+    try { return await operation(); }
+    finally {
+      release();
+      if (zoneLocks.get(dnsZoneId) === current) zoneLocks.delete(dnsZoneId);
+    }
+  }
+
+  async function assertZoneIdle(dnsZoneId) {
+    const jobs = await jobRegistry.listJobs({ resourceType: 'dns_zone', resourceId: dnsZoneId });
+    if (jobs.some((job) => job.status === 'queued' || job.status === 'running')) {
+      throw new ExternalLifecycleRegistryError('dns_zone_job_conflict', 'Wait for the active DNS zone operation', 409);
+    }
+  }
+
+  async function buildRecordPreview(dnsZoneId, body) {
+    const input = recordInput(body, body.previewDigest === undefined ? RECORD_PREVIEW_FIELDS : RECORD_APPLY_FIELDS);
+    const zone = await dnsHostingRegistry.getZone(dnsZoneId);
+    if (!zone) throw new ExternalLifecycleRegistryError('dns_zone_not_found', 'DNS zone was not found', 404);
+    if (zone.revision !== input.expectedRevision) {
+      throw new ExternalLifecycleRegistryError('dns_zone_revision_conflict', 'DNS zone changed after the request was prepared', 409);
+    }
+    if (!zone.webDomainId) {
+      throw new ExternalLifecycleRegistryError('dns_zone_web_domain_required', 'DNS record management requires an explicit web Domain relationship', 409);
+    }
+    const domain = await domainRegistry.getDomain(zone.webDomainId);
+    if (!domain || domain.primaryDomain !== zone.zoneName) {
+      throw new ExternalLifecycleRegistryError('dns_zone_web_domain_mismatch', 'DNS zone web Domain relationship is unavailable', 409);
+    }
+    if (!localServerId || domain.serverId !== localServerId) {
+      throw new ExternalLifecycleRegistryError('local_dns_zone_required', 'DNS records can be managed only for this local Server', 409);
+    }
+    await assertZoneIdle(zone.id);
+    const credential = await dnsProviderCredentialRegistry.getForZone(zone.id);
+    if (!credential?.configured || credential.provider !== 'cloudflare') {
+      throw new ExternalLifecycleRegistryError('dns_provider_credential_required', 'A supported DNS provider credential is required', 409);
+    }
+    const materialized = await dnsProviderCredentialRegistry.materialize(credential.id);
+    const snapshot = await dnsRecordManager.inspectRecord({
+      provider: credential.provider,
+      credentialId: credential.id,
+      dnsZoneId: zone.id,
+      zoneName: zone.zoneName,
+      record: input.record,
+    }, { dnsCredential: materialized });
+    if (snapshot.records.length > 1) {
+      throw new ExternalLifecycleRegistryError('dns_provider_record_ambiguous', 'DNS provider has multiple matching records', 409);
+    }
+    const existing = snapshot.records[0] ?? null;
+    if (input.action === 'delete' && existing && !sameRecord(existing, snapshot.desired)) {
+      throw new ExternalLifecycleRegistryError('dns_provider_record_mismatch', 'DNS provider record does not match the requested deletion', 409);
+    }
+    const effect = input.action === 'upsert'
+      ? existing === null ? 'create' : sameRecord(existing, snapshot.desired) ? 'no_change' : 'update'
+      : existing === null ? 'no_change' : 'delete';
+    const identity = {
+      version: 1,
+      operation: 'dns_record_apply',
+      dnsZoneId: zone.id,
+      zoneName: zone.zoneName,
+      expectedRevision: zone.revision,
+      provider: credential.provider,
+      credentialId: credential.id,
+      credentialUpdatedAt: credential.updatedAt,
+      action: input.action,
+      record: snapshot.desired,
+      currentRecords: snapshot.records,
+      providerSnapshotDigest: snapshot.snapshotDigest,
+      effect,
+    };
+    const previewDigest = digest(identity);
+    return Object.freeze({
+      zone,
+      domain,
+      credential,
+      snapshot,
+      preview: Object.freeze({
+        ...identity,
+        previewDigest,
+        confirmation: `apply-dns-record:${zone.id}:${previewDigest}`,
+      }),
+    });
   }
 
   app.get('/api/dns-zones', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -73,6 +196,7 @@ export function mountExternalLifecycleRoutes(app, {
     return response.json({ data: await dnsProviderCredentialRegistry.getForZone(request.params.dnsZoneId) });
   }));
   app.put('/api/dns-zones/:dnsZoneId/provider-credential', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
     const body = request.body;
     if (!body || typeof body !== 'object' || Array.isArray(body)
       || Object.keys(body).length !== PROVIDER_CREDENTIAL_FIELDS.size
@@ -83,13 +207,18 @@ export function mountExternalLifecycleRoutes(app, {
     if (body.confirmation !== expected) {
       throw new ExternalLifecycleRegistryError('dns_provider_credential_confirmation_required', `Confirm DNS provider credential with ${expected}`);
     }
-    return response.json({ data: await dnsProviderCredentialRegistry.setCredential({
-      dnsZoneId: request.params.dnsZoneId,
-      provider: body.provider,
-      token: body.token,
-    }) });
+    const credential = await withZoneLock(request.params.dnsZoneId, async () => {
+      await assertZoneIdle(request.params.dnsZoneId);
+      return dnsProviderCredentialRegistry.setCredential({
+        dnsZoneId: request.params.dnsZoneId,
+        provider: body.provider,
+        token: body.token,
+      });
+    });
+    return response.json({ data: credential });
   }));
   app.delete('/api/dns-zones/:dnsZoneId/provider-credential', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
     const body = request.body;
     if (!body || typeof body !== 'object' || Array.isArray(body)
       || Object.keys(body).length !== PROVIDER_CREDENTIAL_DELETE_FIELDS.size
@@ -100,7 +229,10 @@ export function mountExternalLifecycleRoutes(app, {
     if (body.confirmation !== expected) {
       throw new ExternalLifecycleRegistryError('dns_provider_credential_confirmation_required', `Confirm DNS provider credential deletion with ${expected}`);
     }
-    await dnsProviderCredentialRegistry.deleteForZone(request.params.dnsZoneId);
+    await withZoneLock(request.params.dnsZoneId, async () => {
+      await assertZoneIdle(request.params.dnsZoneId);
+      await dnsProviderCredentialRegistry.deleteForZone(request.params.dnsZoneId);
+    });
     return response.status(204).end();
   }));
   app.post('/api/dns-zones/:dnsZoneId/readiness/refresh', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -112,13 +244,57 @@ export function mountExternalLifecycleRoutes(app, {
       || !Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 1) {
       throw new ExternalLifecycleRegistryError('dns_readiness_input_invalid', 'DNS readiness refresh requires one positive expectedRevision');
     }
-    const readiness = await dnsReadinessService.inspectZone(request.params.dnsZoneId);
-    const zone = await dnsHostingRegistry.recordObservation(request.params.dnsZoneId, {
-      expectedRevision: body.expectedRevision,
-      status: readiness.routing.ready ? 'ready' : 'degraded',
-      errorCode: readiness.routing.ready ? null : readiness.routing.reasonCodes[0],
+    const result = await withZoneLock(request.params.dnsZoneId, async () => {
+      await assertZoneIdle(request.params.dnsZoneId);
+      const readiness = await dnsReadinessService.inspectZone(request.params.dnsZoneId);
+      const zone = await dnsHostingRegistry.recordObservation(request.params.dnsZoneId, {
+        expectedRevision: body.expectedRevision,
+        status: readiness.routing.ready ? 'ready' : 'degraded',
+        errorCode: readiness.routing.ready ? null : readiness.routing.reasonCodes[0],
+      });
+      return { zone, readiness };
     });
-    return response.json({ data: { zone, readiness } });
+    return response.json({ data: result });
+  }));
+  app.post('/api/dns-zones/:dnsZoneId/records/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const result = await withZoneLock(request.params.dnsZoneId, () => buildRecordPreview(request.params.dnsZoneId, request.body));
+    return response.json({ data: result.preview });
+  }));
+  app.post('/api/dns-zones/:dnsZoneId/records/apply', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const apply = recordInput(request.body, RECORD_APPLY_FIELDS);
+    if (!SHA256_PATTERN.test(apply.previewDigest ?? '') || typeof apply.confirmation !== 'string') {
+      throw new ExternalLifecycleRegistryError('dns_record_apply_identity_invalid', 'A current DNS record preview and confirmation are required');
+    }
+    const queued = await withZoneLock(request.params.dnsZoneId, async () => {
+      const result = await buildRecordPreview(request.params.dnsZoneId, apply);
+      if (apply.previewDigest !== result.preview.previewDigest) {
+        throw new ExternalLifecycleRegistryError('dns_record_preview_stale', 'DNS provider state changed after preview', 409);
+      }
+      if (apply.confirmation !== result.preview.confirmation) {
+        throw new ExternalLifecycleRegistryError('dns_record_confirmation_required', `Confirm DNS record operation with ${result.preview.confirmation}`);
+      }
+      const job = await jobRegistry.enqueue({
+        serverId: result.domain.serverId,
+        type: 'dns.record.apply',
+        operation: OPERATIONS.DNS_RECORD_APPLY,
+        payload: {
+          provider: result.credential.provider,
+          credentialId: result.credential.id,
+          dnsZoneId: result.zone.id,
+          zoneName: result.zone.zoneName,
+          action: apply.action,
+          record: result.snapshot.desired,
+          expectedSnapshotDigest: result.snapshot.snapshotDigest,
+        },
+        resourceType: 'dns_zone',
+        resourceId: result.zone.id,
+        idempotencyKey: `dns-record:${result.zone.id}:${result.preview.previewDigest}`,
+      });
+      return { previewDigest: result.preview.previewDigest, job };
+    });
+    return response.status(202).json({ data: queued });
   }));
 
   app.get('/api/mail-domains', requirePanelRouteAccess, asyncRoute(async (request, response) => {

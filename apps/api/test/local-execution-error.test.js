@@ -23,6 +23,18 @@ test('Node, environment and managed-service diagnostics use authored messages on
     'invalid_dns_provider_credential',
     'dns_provider_credential_unavailable',
     'dns_provider_credential_not_found',
+    'dns_provider_credential_invalid',
+    'dns_provider_unauthorized',
+    'dns_provider_rate_limited',
+    'dns_provider_unavailable',
+    'dns_provider_request_failed',
+    'dns_provider_response_invalid',
+    'dns_provider_zone_not_found',
+    'dns_provider_zone_ambiguous',
+    'dns_provider_snapshot_stale',
+    'dns_provider_record_ambiguous',
+    'dns_provider_record_mismatch',
+    'dns_provider_mutation_unconfirmed',
     'certificate_private_key_mismatch',
   ]) {
     const result = safeLocalOperationError({

@@ -141,11 +141,14 @@ test('Cloudflare adapter validates zone boundaries and sanitizes provider failur
   });
   await assert.rejects(
     manager.inspectRecord(inspect(desired({ name: 'lookalike-example.test' })), { dnsCredential: credential() }),
-    (error) => error instanceof CloudflareDnsManagerError && error.code === 'dns_record_outside_zone',
+    (error) => error instanceof CloudflareDnsManagerError && error.code === 'dns_record_outside_zone'
+      && error.status === 400,
   );
   await assert.rejects(
     manager.inspectRecord(inspect(), { dnsCredential: credential() }),
     (error) => error instanceof CloudflareDnsManagerError && error.code === 'dns_provider_unauthorized'
-      && !error.message.includes(TOKEN),
+      && error.status === 409 && !error.message.includes(TOKEN),
   );
+  assert.equal(new CloudflareDnsManagerError('dns_provider_unavailable', 'safe').status, 503);
+  assert.equal(new CloudflareDnsManagerError('dns_provider_response_invalid', 'safe').status, 502);
 });

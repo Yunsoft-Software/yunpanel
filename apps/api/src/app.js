@@ -1,4 +1,5 @@
 import express from 'express';
+import { createCloudflareDnsManager, CloudflareDnsManagerError } from '@yunpanel/host-runtime';
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
 import { mountApplicationProcessRoutes } from './application-process-http.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
@@ -81,6 +82,7 @@ export function createApp({
     getDnsZone: async (dnsZoneId) => dnsHostingRegistry.getZone(dnsZoneId),
   }),
   dnsReadinessService = null,
+  dnsRecordManager = createCloudflareDnsManager(),
   mailDomainRegistry = createMailDomainRegistry({
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
   }),
@@ -152,6 +154,10 @@ export function createApp({
     dnsHostingRegistry,
     dnsProviderCredentialRegistry,
     dnsReadinessService: readiness,
+    dnsRecordManager,
+    domainRegistry,
+    jobRegistry,
+    localServerId,
     mailDomainRegistry,
   });
   mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry });
@@ -186,6 +192,7 @@ export function createApp({
       || error instanceof DockerWorkloadRegistryError
       || error instanceof DnsProviderCredentialRegistryError
       || error instanceof DnsReadinessError
+      || error instanceof CloudflareDnsManagerError
       || error instanceof ExternalLifecycleRegistryError
       || error instanceof RegistryError
       || error instanceof JobRegistryError

@@ -18,6 +18,7 @@ const recoverySources = [
   'job-running-node-rollback-recovery.js',
   'job-running-database-recovery.js',
   'job-running-database-delete-recovery.js',
+  'job-running-dns-record-recovery.js',
   'job-running-service-recovery.js',
   'job-running-service-receipt-recovery.js',
   'job-running-system-upgrade-recovery.js',
@@ -66,6 +67,7 @@ test('packaged recovery CLI exposes only explicit operation families and no forc
     'recover-certificate',
     'recover-database-create',
     'recover-database-delete',
+    'recover-dns-record',
     'recover-service-control',
     'recover-service-mutation',
   ]) {

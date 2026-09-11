@@ -5,6 +5,7 @@ import { createApp } from '../src/app.js';
 import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
 import { createDnsProviderCredentialRegistry } from '../src/dns-provider-credential-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
+import { createJobRegistry } from '../src/job-registry.js';
 import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
@@ -44,8 +45,10 @@ async function fixture() {
     getDnsZone: async (id) => dnsHostingRegistry.getZone(id),
   });
   const mailDomainRegistry = createMailDomainRegistry({ getWebDomain });
+  const jobRegistry = createJobRegistry();
   return {
-    registry, websiteRegistry, domainRegistry, dnsHostingRegistry, dnsProviderCredentialRegistry, mailDomainRegistry, domain,
+    registry, websiteRegistry, domainRegistry, dnsHostingRegistry, dnsProviderCredentialRegistry, mailDomainRegistry,
+    jobRegistry, domain,
   };
 }
 
@@ -158,6 +161,132 @@ test('Owner explicitly tracks separate DNS and mail lifecycles without publishin
   });
 });
 
+test('Owner previews and queues an exact Cloudflare record mutation without exposing its token', async () => {
+  const state = await fixture();
+  const zone = await state.dnsHostingRegistry.createZone({
+    zoneName: state.domain.primaryDomain, webDomainId: state.domain.id, managementMode: 'external',
+  });
+  const token = 'cloudflare_private_record_http_token';
+  const credential = await state.dnsProviderCredentialRegistry.setCredential({
+    dnsZoneId: zone.id, provider: 'cloudflare', token,
+  });
+  const inspections = [];
+  const record = { type: 'A', name: 'app.separate.example.test', content: '203.0.113.10', ttl: 300, proxied: false };
+  const dnsRecordManager = {
+    async inspectRecord(input, execution) {
+      inspections.push({ input, execution });
+      return {
+        provider: 'cloudflare', zoneName: zone.zoneName, desired: { ...record }, records: [],
+        snapshotDigest: 'a'.repeat(64),
+      };
+    },
+  };
+  const app = withPanelContext(createApp({
+    ...state,
+    dnsRecordManager,
+    localServerId: state.domain.serverId,
+    environment: 'production',
+  }), ownerManagementContext);
+
+  await withServer(app, async (baseUrl) => {
+    const previewResponse = await request(baseUrl, `/api/dns-zones/${zone.id}/records/preview`, {
+      method: 'POST', body: { action: 'upsert', record, expectedRevision: zone.revision },
+    });
+    assert.equal(previewResponse.status, 200);
+    const preview = (await previewResponse.json()).data;
+    assert.equal(preview.effect, 'create');
+    assert.equal(preview.credentialId, credential.id);
+    assert.deepEqual(preview.currentRecords, []);
+    assert.match(preview.previewDigest, /^[a-f0-9]{64}$/);
+    assert.equal(JSON.stringify(preview).includes(token), false);
+
+    const wrongConfirmation = await request(baseUrl, `/api/dns-zones/${zone.id}/records/apply`, {
+      method: 'POST',
+      body: {
+        action: 'upsert', record, expectedRevision: zone.revision,
+        previewDigest: preview.previewDigest, confirmation: 'wrong',
+      },
+    });
+    assert.equal(wrongConfirmation.status, 400);
+    assert.equal((await wrongConfirmation.json()).error.code, 'dns_record_confirmation_required');
+    assert.equal((await state.jobRegistry.listJobs()).length, 0);
+
+    const applyResponse = await request(baseUrl, `/api/dns-zones/${zone.id}/records/apply`, {
+      method: 'POST',
+      body: {
+        action: 'upsert', record, expectedRevision: zone.revision,
+        previewDigest: preview.previewDigest, confirmation: preview.confirmation,
+      },
+    });
+    assert.equal(applyResponse.status, 202);
+    const queued = (await applyResponse.json()).data;
+    assert.equal(queued.previewDigest, preview.previewDigest);
+    assert.equal(queued.job.resourceType, 'dns_zone');
+    assert.equal(queued.job.resourceId, zone.id);
+    assert.equal(JSON.stringify(queued).includes(token), false);
+
+    const claimed = await state.jobRegistry.claimNext(state.domain.serverId);
+    assert.equal(claimed.envelope.operation, 'dns.record.apply');
+    assert.deepEqual(claimed.envelope.payload.record, record);
+    assert.equal(claimed.envelope.payload.credentialId, credential.id);
+    assert.equal(JSON.stringify(claimed).includes(token), false);
+
+    const readinessWhileRunning = await request(baseUrl, `/api/dns-zones/${zone.id}/readiness/refresh`, {
+      method: 'POST', body: { expectedRevision: zone.revision },
+    });
+    assert.equal(readinessWhileRunning.status, 409);
+    assert.equal((await readinessWhileRunning.json()).error.code, 'dns_zone_job_conflict');
+    const deleteCredential = await request(baseUrl, `/api/dns-zones/${zone.id}/provider-credential`, {
+      method: 'DELETE', body: { confirmation: `delete-dns-provider:${zone.id}` },
+    });
+    assert.equal(deleteCredential.status, 409);
+    assert.equal((await deleteCredential.json()).error.code, 'dns_zone_job_conflict');
+  });
+
+  assert.equal(inspections.length, 3);
+  assert.ok(inspections.every(({ execution }) => execution.dnsCredential.token === token));
+  assert.ok(inspections.every(({ input }) => input.dnsZoneId === zone.id && input.credentialId === credential.id));
+});
+
+test('DNS record apply detects provider snapshot drift before queueing', async () => {
+  const state = await fixture();
+  const zone = await state.dnsHostingRegistry.createZone({
+    zoneName: state.domain.primaryDomain, webDomainId: state.domain.id, managementMode: 'external',
+  });
+  await state.dnsProviderCredentialRegistry.setCredential({
+    dnsZoneId: zone.id, provider: 'cloudflare', token: 'cloudflare_private_snapshot_token',
+  });
+  let inspections = 0;
+  const record = { type: 'CNAME', name: 'app.separate.example.test', content: zone.zoneName, ttl: 300, proxied: false };
+  const dnsRecordManager = {
+    async inspectRecord() {
+      inspections += 1;
+      return {
+        provider: 'cloudflare', zoneName: zone.zoneName, desired: record, records: [],
+        snapshotDigest: (inspections === 1 ? 'a' : 'b').repeat(64),
+      };
+    },
+  };
+  const app = withPanelContext(createApp({
+    ...state, dnsRecordManager, localServerId: state.domain.serverId, environment: 'production',
+  }), ownerManagementContext);
+  await withServer(app, async (baseUrl) => {
+    const preview = (await (await request(baseUrl, `/api/dns-zones/${zone.id}/records/preview`, {
+      method: 'POST', body: { action: 'upsert', record, expectedRevision: zone.revision },
+    })).json()).data;
+    const applied = await request(baseUrl, `/api/dns-zones/${zone.id}/records/apply`, {
+      method: 'POST',
+      body: {
+        action: 'upsert', record, expectedRevision: zone.revision,
+        previewDigest: preview.previewDigest, confirmation: preview.confirmation,
+      },
+    });
+    assert.equal(applied.status, 409);
+    assert.equal((await applied.json()).error.code, 'dns_record_preview_stale');
+    assert.equal((await state.jobRegistry.listJobs()).length, 0);
+  });
+});
+
 test('Read Only may inspect lifecycle inventory but cannot create it', async () => {
   const state = await fixture();
   const zone = await state.dnsHostingRegistry.createZone({
@@ -184,6 +313,13 @@ test('Read Only may inspect lifecycle inventory but cannot create it', async () 
     })).status, 403);
     assert.equal((await request(baseUrl, `/api/dns-zones/${zone.id}/readiness/refresh`, {
       method: 'POST', body: { expectedRevision: zone.revision },
+    })).status, 403);
+    assert.equal((await request(baseUrl, `/api/dns-zones/${zone.id}/records/preview`, {
+      method: 'POST',
+      body: {
+        action: 'upsert', expectedRevision: zone.revision,
+        record: { type: 'A', name: zone.zoneName, content: '203.0.113.10', ttl: 300, proxied: false },
+      },
     })).status, 403);
   });
 });

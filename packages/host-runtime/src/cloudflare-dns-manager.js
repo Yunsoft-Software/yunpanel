@@ -17,6 +17,14 @@ export class CloudflareDnsManagerError extends Error {
     super(message);
     this.name = 'CloudflareDnsManagerError';
     this.code = code;
+    this.status = code === 'dns_provider_rate_limited' || code === 'dns_provider_unavailable'
+      ? 503
+      : code === 'dns_provider_request_failed' || code === 'dns_provider_response_invalid'
+        || code === 'dns_provider_mutation_unconfirmed'
+        ? 502
+        : code.startsWith('dns_provider_')
+          ? 409
+          : 400;
   }
 }
 

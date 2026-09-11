@@ -168,3 +168,37 @@ test('DNS certificate operations materialize provider credentials only for host 
   assert.deepEqual(execution.options, { dnsCredential: credential });
   assert.equal(Object.hasOwn(payload, 'dnsCredential'), false);
 });
+
+test('DNS record mutations materialize a provider credential only for the guarded adapter', async () => {
+  const credentialId = '10714f5d-8646-4f9a-a8e9-b80439ff6305';
+  const payload = {
+    provider: 'cloudflare', credentialId,
+    dnsZoneId: '822fa920-166c-4a7a-a26b-476c81d82165',
+    zoneName: 'example.test', action: 'upsert',
+    record: { type: 'A', name: 'app.example.test', content: '203.0.113.10', ttl: 300, proxied: false },
+    expectedSnapshotDigest: 'a'.repeat(64),
+  };
+  const credential = { id: credentialId, dnsZoneId: payload.dnsZoneId, provider: 'cloudflare', token: 'private-token' };
+  let received;
+  const operations = createLocalHostOperations({
+    loadDnsProviderCredential: async (id) => {
+      assert.equal(id, credentialId);
+      return credential;
+    },
+    cloudflareDnsManager: {
+      async applyRecord(input, options) { received = { input, options }; return { state: 'present' }; },
+    },
+  });
+  assert.equal(operations.supports(OPERATIONS.DNS_RECORD_APPLY), true);
+  await operations.executeOperation(OPERATIONS.DNS_RECORD_APPLY, payload);
+  assert.equal(received.input, payload);
+  assert.deepEqual(received.options, { dnsCredential: credential });
+  assert.equal(Object.hasOwn(payload, 'dnsCredential'), false);
+
+  const withoutCredentialLoader = createLocalHostOperations({ cloudflareDnsManager: { applyRecord: async () => null } });
+  assert.equal(withoutCredentialLoader.supports(OPERATIONS.DNS_RECORD_APPLY), true);
+  await assert.rejects(
+    withoutCredentialLoader.executeOperation(OPERATIONS.DNS_RECORD_APPLY, payload),
+    { code: 'dns_provider_credential_unavailable' },
+  );
+});

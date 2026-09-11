@@ -13,7 +13,7 @@ import { sanitizeDatabaseJobResult } from './database-job-result.js';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
-const RESOURCE_TYPES = new Set(['domain', 'server', 'application', 'certificate', 'backup', 'database', 'system']);
+const RESOURCE_TYPES = new Set(['domain', 'server', 'application', 'certificate', 'backup', 'database', 'dns_zone', 'system']);
 const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DOMAIN_STAGE,
   OPERATIONS.DOMAIN_ACTIVATE,
@@ -36,6 +36,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DATABASE_INSPECT,
   OPERATIONS.DATABASE_CREATE,
   OPERATIONS.DATABASE_DELETE,
+  OPERATIONS.DNS_RECORD_APPLY,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
@@ -564,11 +565,27 @@ function sanitizeDatabaseResult(job, result) {
   }
 }
 
+function sanitizeDnsRecordResult(job, result) {
+  const expectedState = job.payload?.action === 'upsert' ? 'present' : 'absent';
+  if (!result || typeof result !== 'object' || Array.isArray(result)
+    || result.provider !== 'cloudflare' || result.provider !== job.payload?.provider
+    || result.action !== job.payload?.action || result.zoneName !== job.payload?.zoneName
+    || result.state !== expectedState || typeof result.changed !== 'boolean'
+    || JSON.stringify(result.record) !== JSON.stringify(job.payload?.record)) {
+    throw new JobRegistryError('invalid_job_result', 'DNS record result does not match the queued operation');
+  }
+  return {
+    provider: 'cloudflare', action: result.action, zoneName: result.zoneName,
+    record: structuredClone(job.payload.record), changed: result.changed, state: expectedState,
+  };
+}
+
 function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) return sanitizeManagedServiceResult(job, result);
   if ([OPERATIONS.DATABASE_INSPECT, OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE].includes(job.operation)) {
     return sanitizeDatabaseResult(job, result);
   }
+  if (job.operation === OPERATIONS.DNS_RECORD_APPLY) return sanitizeDnsRecordResult(job, result);
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
   }
