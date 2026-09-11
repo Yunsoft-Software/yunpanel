@@ -25,7 +25,7 @@ The default launcher is agentless and starts only:
 
 Vite proxies `/api/*` requests to the API during development.
 
-The privileged local executor is opt-in. Without `YUNPANEL_LOCAL_SERVER_ID`, the API starts normally but does not claim local host jobs. Use the guarded local-runtime bootstrap/migration tooling before assigning a real server identity; do not invent a server UUID or bypass hostname/ownership checks.
+The privileged local executor is opt-in only in source development. Without `YUNPANEL_LOCAL_SERVER_ID`, a development API starts but does not claim local host jobs. Production startup requires the exact identity printed by the guarded local-runtime bootstrap/migration tooling; do not invent a server UUID or bypass hostname/ownership checks.
 
 ## Retained legacy agent development
 

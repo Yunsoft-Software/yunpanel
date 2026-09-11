@@ -8,7 +8,7 @@ Doğrudan güncel `main` üzerinde küçük, tek amaçlı commitlerle ilerle. Gi
 
 ## B. P1 — Agentless yerel backend geçişinde kalan kod
 
-- [ ] Gerçek migration + rollback kabulü tamamlandıktan sonra retained legacy heartbeat/command/environment/result transport rotalarını, agent credential surface'ini ve eski enrolled-host compatibility kodunu kaldır.
+- [ ] Production'da erişilemeyen retained legacy heartbeat/command/environment/result kodunu, gerçek migration + rollback kabulü tamamlandıktan sonra rollback paket yüzeyi ve agent credential state'iyle birlikte fiziksel olarak kaldır.
 - [ ] Aynı kabul sonrası `yun-agent.service`, agent package/env/install compatibility ve artık gereksiz registry credential alanlarını kaldır. Upgrade disabled agent'ı tekrar enable etmemeli.
 - [ ] Yeni site yüzeylerinde workload isolation invariantını koru: Git hook, cron ve site terminali dedicated `yunapp-*` kullanıcıyla; yalnız Owner Server terminali root.
 - [ ] Migration live-apply katmanını yalnız gerçek test-host kabulünden sonra aç: staged tree'den per-target replacement, owner/mode/ACL/xattr policy, `yunapp-*` identity drift çözümü, pre-apply backup, health validation ve deterministic rollback. `/etc/passwd` veya `/etc/group` kör overwrite edilmez.

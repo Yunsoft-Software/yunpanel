@@ -7,6 +7,7 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 ## T-RUNTIME — P0 güncel full check
 
 - [ ] Mixed/stale web/API build ile privileged management'in fail-closed kaldığını ayrıca doğrula.
+- [ ] Production listener `YUNPANEL_LOCAL_SERVER_ID` olmadan başlamasın; doğru kimlikle `/servers`, Website/Application/Domain/job koleksiyonları yalnız OS hostname'i doğrulanan yerel hostu göstersin. Eski/uzak kimlikle detail, mutation, move ve agent transport istekleri fail-closed kalsın.
 
 ## T-AUTH-AUDIT — P0 gerçek HTTPS/browser kabulü
 
@@ -28,7 +29,7 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 - [ ] Bütün güncel recovery komutlarını gerçek host evidence/receipt ile doğrula: read-only inspect, domain stage/activate, static deploy/rollback, Node deploy/restart/rollback/process enable-disable-start-stop/runtime install, DB create/delete, service control/install/restart, system upgrade, certificate issue/renew.
 - [ ] Generic force-success/force-failed, blind mutation retry veya evidence-free journal clear yolu bulunmasın.
 - [ ] Node/static clone/install/build ve runtime dedicated `yunapp-*`; Node systemd unit `NoNewPrivileges=true`, boş capabilities ve bounded writable path kullansın.
-- [ ] Local ownership altında retained legacy heartbeat/command/environment/result 409 `server_managed_locally` kalsın.
+- [ ] Local ownership altında retained legacy heartbeat/command/environment/result 404 `agent_transport_removed` kalsın ve eski agent kimliği/job state'i değişmesin.
 - [ ] Web service process environment/state mountlarında control-plane secrets görünmesin.
 
 ## T-MIGRATION — P1 agentless migration/rollback
@@ -57,6 +58,7 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 - [ ] Migration finalize yalnız fresh preview bütün Domainleri `already_bound` gösterdiğinde exact digest ile `compatibility -> enforced` geçsin. Enforced modda yeni unbound managed Domain 409 `website_binding_required`, same-server explicit Website ile create başarılı olsun.
 - [ ] Policy rollback yalnız exact enforced digest + typed confirmation ile compatibility moduna dönsün; migration-only binding rollback exact ledger identity/digest istesin; iki rollback de Nginx target, certificate, application release veya Domain traffic revision değiştirmesin.
 - [ ] Apex + bağımsız subdomain + alias + application + certificate + Website-create/bind orchestration + policy finalize/rollback'i gerçek test domainiyle uçtan uca doğrula.
+- [ ] Gerçek browserda yeni site formu tek yerel sunucu üzerinde guarded site-create preview/apply ile kalıcı Website+Domain oluştursun; legacy Domain düzeltme eylemi create/bind sonrası site terminalini açsın. Site dosya listeleme/düzenleme/klasör/silme/indirme ve Node/Nginx log okuma/indirme aynı Website/yerel host sınırında çalışsın.
 
 ## T-SERVICES-DB — P1/P2 gerçek host functionality
 

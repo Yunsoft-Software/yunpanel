@@ -4,7 +4,7 @@ This document describes the current safety boundary of YunPanel's privileged in-
 
 ## Ownership and startup
 
-Production enters through `apps/api/src/index.js`. When `YUNPANEL_LOCAL_SERVER_ID` is empty, the API can run but local host execution remains disabled. When it is set, `startConfiguredLocalRuntime()` validates the configured server identity against the current OS hostname, then starts the local executor only for a server already bound to `executionMode=local`.
+Production enters through `apps/api/src/index.js` and requires a non-empty `YUNPANEL_LOCAL_SERVER_ID`; startup fails before listening when it is absent. `startConfiguredLocalRuntime()` validates that configured server identity against the current OS hostname, then starts the local executor only for a server already bound to `executionMode=local`. Development may omit the identity for non-privileged source tests, but that is not a production operating mode.
 
 The packaged API may run as root because it performs structured host administration. This does **not** make hosted workloads root-owned:
 
@@ -20,7 +20,7 @@ There is no generic root shell operation inside the job protocol.
 
 The local runtime acquires an exclusive host lock before claiming work. A server record must match the exact configured ID and normalized OS hostname before and after lock acquisition. The executor consumes the same durable job registry used by the control plane; it does not create a parallel queue.
 
-Local ownership blocks the retained legacy heartbeat/command/environment/result channel with `server_managed_locally`. The legacy agent service remains installed only as a rollback bridge until the real migration/rollback acceptance in `todo.md` is complete.
+The production API and UI expose only the exact local server and resources whose `serverId` matches it. A different server identity is returned as not found, cross-server move intent is rejected, and retained heartbeat/command/environment/result transport returns `agent_transport_removed` without authenticating or mutating legacy state. The legacy agent package may remain installed only as an offline rollback bridge until the real migration/rollback acceptance in `todo.md` is complete.
 
 ## Supported host operations
 

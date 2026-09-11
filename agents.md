@@ -22,6 +22,7 @@ Kapsam Yunsoft'un gerçek kullanım ihtiyaçlarıdır; reseller, faturalama, hos
 
 ## 3. Agentsiz yönetim mimarisi
 
+- **2026-09-12 tek-sunucu kararı:** Production YunPanel yalnız kurulu olduğu ve `YUNPANEL_LOCAL_SERVER_ID` ile OS hostname eşleşmesi doğrulanan hostu yönetir. Production bu kimlik olmadan başlamaz. API ve arayüz uzak/eski server kaydı seçtirmez, listelemez veya onun adına job/mutation çalıştırmaz; retained agent transport production yerel panelinde kapalıdır. Eski kayıtlar yalnız açık migration/rollback araçlarının çevrimdışı girdisidir.
 - Hedef kurulum sunucu başına yerel paneldir. Yönetim backend'i host üzerinde root yetkili systemd servisi olarak çalışacak; ayrı `yun-agent` servisi olmayacak.
 - Nginx/systemd/ACME/deploy/env/backup/mail/paket operasyonları aynı panel backend'inin dahili adapter ve job katmanında yürütülecek. Farklı isim altında ikinci bir privileged daemon veya yeniden agent enrollment/credential exchange kurulmayacak.
 - Kurulum Owner'a tüm sunucu yönetim yetkilerini hazır sunacak. Normal yönetim için her operasyonda ayrı sudoers/polkit/agent capability onayı istenmeyecek.
