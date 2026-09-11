@@ -5,6 +5,7 @@ import {
   createNginxManager,
   createNodeDeploymentManager,
   createNodeRestartManager,
+  createNodeProcessManager,
   createNodeRollbackManager,
   createNodeStatusInspector,
   createStaticDeploymentManager,
@@ -30,6 +31,7 @@ export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.APP_STATIC_DEPLOY,
   OPERATIONS.APP_STATIC_ROLLBACK,
   OPERATIONS.APP_NODE_STATUS,
+  OPERATIONS.APP_NODE_PROCESS,
 ]);
 
 export const LOCAL_NODE_ENVIRONMENT_OPERATIONS = Object.freeze([
@@ -56,6 +58,7 @@ export function createLocalHostOperations({
   nodeDeploymentManager = createNodeDeploymentManager(),
   nodeRollbackManager = createNodeRollbackManager(),
   nodeRestartManager = createNodeRestartManager(),
+  nodeProcessManager = createNodeProcessManager(),
   nodeStatusInspector = createNodeStatusInspector(),
   loadApplicationEnvironment = null,
 } = {}) {
@@ -108,6 +111,7 @@ export function createLocalHostOperations({
     [OPERATIONS.APP_STATIC_DEPLOY, (payload) => deployStaticWithReceipt(payload)],
     [OPERATIONS.APP_STATIC_ROLLBACK, (payload) => staticRollbackManager.rollbackStatic(payload)],
     [OPERATIONS.APP_NODE_STATUS, (payload) => nodeStatusInspector.inspectNodeStatus(payload)],
+    [OPERATIONS.APP_NODE_PROCESS, (payload) => nodeProcessManager.controlNodeProcess(payload)],
   ]);
 
   if (loadApplicationEnvironment) {

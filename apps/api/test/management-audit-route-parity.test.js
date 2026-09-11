@@ -13,6 +13,7 @@ const SOURCE_FILES = [
   'site-create-http.js',
   'resource-impact-http.js',
   'application-configuration-http.js',
+  'application-process-http.js',
   'external-lifecycle-http.js',
   'website-http.js',
   'website-migration-http.js',
@@ -127,6 +128,12 @@ test('Node configuration preview and apply have Application-scoped audit identit
   });
   assert.deepEqual(classifyManagementMutation('POST', '/api/applications/application-1/configuration'), {
     action: 'application.configuration.update', resourceType: 'application', resourceId: 'application-1',
+  });
+});
+
+test('Node process control has an Application-scoped audit identity', () => {
+  assert.deepEqual(classifyManagementMutation('POST', '/api/applications/application-1/process'), {
+    action: 'application.process', resourceType: 'application', resourceId: 'application-1',
   });
 });
 

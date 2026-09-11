@@ -17,6 +17,7 @@ test('current management mutation routes map to bounded action and resource iden
     ['POST', '/api/applications/app-1/deploy', 'application.deploy', 'application', 'app-1'],
     ['POST', '/api/applications/app-1/rollback', 'application.rollback', 'application', 'app-1'],
     ['POST', '/api/applications/app-1/restart', 'application.restart', 'application', 'app-1'],
+    ['POST', '/api/applications/app-1/process', 'application.process', 'application', 'app-1'],
     ['POST', '/api/applications/app-1/status/refresh', 'application.status.refresh', 'application', 'app-1'],
     ['PUT', '/api/applications/app-1/environment/API_SECRET', 'application.environment.updated', 'application', 'app-1'],
     ['DELETE', '/api/applications/app-1/environment/API_SECRET', 'application.environment.deleted', 'application', 'app-1'],

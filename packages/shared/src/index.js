@@ -18,6 +18,7 @@ export {
 export {
   normalizeNodeApplicationSpec,
   normalizeNodeRestartSpec,
+  normalizeNodeProcessSpec,
   normalizeNodeRollbackSpec,
   normalizeNodeRuntimeConfig,
   normalizeNodeStatusSpec,

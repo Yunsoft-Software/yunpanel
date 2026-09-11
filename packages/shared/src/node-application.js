@@ -16,6 +16,8 @@ const RUNTIME_FIELDS = new Set([
   'healthTimeoutSeconds', 'restartPolicy',
 ]);
 const START_FIELDS = new Set(['mode', 'entryFile', 'script']);
+const PROCESS_ACTIONS = new Set(['enable', 'disable', 'start', 'stop']);
+const PROCESS_FIELDS = new Set(['applicationId', 'releaseId', 'runtime', 'action']);
 
 function normalizeScriptName(value, fieldName, { nullable = false } = {}) {
   if (value == null && nullable) return null;
@@ -152,8 +154,21 @@ export function normalizeNodeStatusSpec(value) {
   return normalizeManagedNodeSpec(value, 'invalid_node_status', 'Node status spec must be an object');
 }
 
+export function normalizeNodeProcessSpec(value) {
+  const normalized = normalizeManagedNodeSpec(value, 'invalid_node_process', 'Node process spec must be an object');
+  if (Object.keys(value).some((key) => !PROCESS_FIELDS.has(key))) {
+    throw new ApplicationValidationError('invalid_node_process', 'Node process spec contains unsupported fields');
+  }
+  if (!PROCESS_ACTIONS.has(value.action)) {
+    throw new ApplicationValidationError('invalid_node_process_action', 'Node process action must be enable, disable, start or stop');
+  }
+  return { ...normalized, action: value.action };
+}
+
 export const nodeApplicationInternals = Object.freeze({
   packageManagers: Object.freeze([...PACKAGE_MANAGERS]),
   runtimeModes: Object.freeze([...RUNTIME_MODES]),
   runtimeFields: Object.freeze([...RUNTIME_FIELDS]),
+  processActions: Object.freeze([...PROCESS_ACTIONS]),
+  processFields: Object.freeze([...PROCESS_FIELDS]),
 });

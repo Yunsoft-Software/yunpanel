@@ -1,5 +1,6 @@
 import express from 'express';
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
+import { mountApplicationProcessRoutes } from './application-process-http.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { createApp as createCoreApp } from './core-app.js';
@@ -75,6 +76,7 @@ export function createApp({
   });
   mountExternalLifecycleRoutes(app, { dnsHostingRegistry, mailDomainRegistry });
   mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry });
+  mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry });
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry });
   mountWebsiteMigrationRoutes(app, {
     websiteRegistry,

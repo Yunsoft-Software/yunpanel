@@ -35,6 +35,7 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/deploy$/)) && method === 'POST') return { action: 'application.deploy', resourceType: 'application', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/rollback$/)) && method === 'POST') return { action: 'application.rollback', resourceType: 'application', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/restart$/)) && method === 'POST') return { action: 'application.restart', resourceType: 'application', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/process$/)) && method === 'POST') return { action: 'application.process', resourceType: 'application', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/status\/refresh$/)) && method === 'POST') return { action: 'application.status.refresh', resourceType: 'application', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/configuration-preview$/)) && method === 'POST') return { action: 'application.configuration.preview', resourceType: 'application', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/applications\/([^/]+)\/configuration$/)) && method === 'POST') return { action: 'application.configuration.update', resourceType: 'application', resourceId: parts[0] };

@@ -27,6 +27,12 @@ export {
   nodeRestartManager,
 } from './node-restart-manager.js';
 export {
+  createNodeProcessManager,
+  NodeProcessError,
+  nodeProcessInternals,
+  nodeProcessManager,
+} from './node-process-manager.js';
+export {
   createNodeRollbackManager,
   NodeRollbackError,
   nodeRollbackManager,

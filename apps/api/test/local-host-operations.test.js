@@ -38,6 +38,9 @@ function fixture({ withEnvironment = false } = {}) {
     nodeRestartManager: {
       restartNode: async (payload) => { calls.push(['node.restart', payload]); return { releaseId: payload.releaseId, restarted: true }; },
     },
+    nodeProcessManager: {
+      controlNodeProcess: async (payload) => { calls.push(['node.process', payload]); return { releaseId: payload.releaseId, action: payload.action }; },
+    },
     nodeStatusInspector: {
       inspectNodeStatus: async (payload) => { calls.push(['node.status', payload]); return { releaseId: payload.releaseId, healthy: true }; },
     },
@@ -104,12 +107,14 @@ test('invalid environment bundles fail before a Node manager executes', async ()
   assert.equal(executions, 0);
 });
 
-test('static lifecycle and Node status never request application secrets', async () => {
+test('static lifecycle, Node status and Node process control never request application secrets', async () => {
   const { operations, calls, environments } = fixture({ withEnvironment: true });
   const staticPayload = { applicationId: 'static-app', deploymentId: 'release' };
   const statusPayload = { applicationId: 'node-app', releaseId: 'release', runtime: { port: 3100, healthPath: '/health' } };
+  const processPayload = { ...statusPayload, action: 'stop' };
   await operations.executeOperation(OPERATIONS.APP_STATIC_DEPLOY, staticPayload);
   await operations.executeOperation(OPERATIONS.APP_NODE_STATUS, statusPayload);
+  await operations.executeOperation(OPERATIONS.APP_NODE_PROCESS, processPayload);
   assert.deepEqual(environments, []);
-  assert.deepEqual(calls.map(([name]) => name), ['static.deploy', 'node.status']);
+  assert.deepEqual(calls.map(([name]) => name), ['static.deploy', 'node.status', 'node.process']);
 });

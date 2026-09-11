@@ -23,6 +23,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.APP_NODE_ROLLBACK,
   OPERATIONS.APP_NODE_RESTART,
   OPERATIONS.APP_NODE_STATUS,
+  OPERATIONS.APP_NODE_PROCESS,
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
   OPERATIONS.SYSTEM_SERVICES_INSPECT,
   OPERATIONS.SYSTEM_SERVICE_INSTALL,
@@ -291,6 +292,42 @@ function sanitizeNodeStatusResult(job, result) {
   };
 }
 
+function sanitizeNodeProcessResult(job, result) {
+  const managed = validateManagedNodeResult(job, result, 'process');
+  if (result.action !== job.payload?.action || !['enable', 'disable', 'start', 'stop'].includes(result.action)) {
+    throw new JobRegistryError('invalid_job_result', 'Node process action does not match the queued operation');
+  }
+  for (const field of ['loadState', 'activeState', 'subState', 'unitFileState']) {
+    if (typeof result[field] !== 'string' || !SYSTEMD_STATE_PATTERN.test(result[field])) {
+      throw new JobRegistryError('invalid_job_result', `Node process ${field} is invalid`);
+    }
+  }
+  if (result.loadState !== 'loaded' || !Number.isSafeInteger(result.mainPid) || result.mainPid < 0
+    || typeof result.enabled !== 'boolean' || typeof result.active !== 'boolean' || typeof result.healthy !== 'boolean'
+    || result.enabled !== (result.unitFileState === 'enabled')
+    || result.active !== (result.activeState === 'active')) {
+    throw new JobRegistryError('invalid_job_result', 'Node process state is inconsistent');
+  }
+  if ((result.action === 'enable' && !result.enabled)
+    || (result.action === 'disable' && result.unitFileState !== 'disabled')
+    || (result.action === 'start' && (!result.active || !result.healthy || result.mainPid < 1))
+    || (result.action === 'stop' && (result.activeState !== 'inactive' || result.healthy || result.mainPid !== 0))) {
+    throw new JobRegistryError('invalid_job_result', 'Node process result does not confirm the requested state');
+  }
+  return {
+    ...managed,
+    action: result.action,
+    loadState: result.loadState,
+    activeState: result.activeState,
+    subState: result.subState,
+    unitFileState: result.unitFileState,
+    mainPid: result.mainPid,
+    enabled: result.enabled,
+    active: result.active,
+    healthy: result.healthy,
+  };
+}
+
 function sanitizePackageVersion(value, field, { optional = false } = {}) {
   if (optional && value == null) return null;
   if (typeof value !== 'string' || !PACKAGE_VERSION_PATTERN.test(value)) {
@@ -455,6 +492,7 @@ function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.APP_NODE_ROLLBACK) return sanitizeNodeRollbackResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_RESTART) return sanitizeNodeRestartResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_STATUS) return sanitizeNodeStatusResult(job, result);
+  if (job.operation === OPERATIONS.APP_NODE_PROCESS) return sanitizeNodeProcessResult(job, result);
   if (job.operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || job.operation === OPERATIONS.SYSTEM_UPGRADE) {
     return sanitizeSystemPackageResult(job, result);
   }

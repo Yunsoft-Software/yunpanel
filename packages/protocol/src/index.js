@@ -2,6 +2,7 @@ import {
   ApplicationValidationError,
   assertUuid,
   normalizeNodeApplicationSpec,
+  normalizeNodeProcessSpec,
   normalizeNodeRestartSpec,
   normalizeNodeRollbackSpec,
   normalizeNodeStatusSpec,
@@ -40,6 +41,7 @@ export const OPERATIONS = Object.freeze({
   APP_NODE_ROLLBACK: 'app.node.rollback',
   APP_NODE_RESTART: 'app.node.restart',
   APP_NODE_STATUS: 'app.node.status',
+  APP_NODE_PROCESS: 'app.node.process',
 });
 
 export const READ_ONLY_OPERATIONS = Object.freeze([
@@ -211,6 +213,14 @@ function validateMutationPayload(operation, payload, errors) {
       normalizeNodeStatusSpec(payload);
     } catch (error) {
       errors.push(error instanceof ApplicationValidationError ? error.message : 'app.node.status payload is invalid');
+    }
+  }
+
+  if (operation === OPERATIONS.APP_NODE_PROCESS) {
+    try {
+      normalizeNodeProcessSpec(payload);
+    } catch (error) {
+      errors.push(error instanceof ApplicationValidationError ? error.message : 'app.node.process payload is invalid');
     }
   }
 }

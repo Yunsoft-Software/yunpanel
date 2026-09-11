@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   ApplicationValidationError,
   normalizeNodeApplicationSpec,
+  normalizeNodeProcessSpec,
   normalizeNodeRuntimeConfig,
 } from '../src/index.js';
 
@@ -109,4 +110,17 @@ test('normalizes complete Node deployment specs', () => {
   assert.equal(spec.runtime.start.entryFile, 'dist/server.js');
   assert.equal(spec.runtime.port, 3100);
   assert.equal(spec.retention, 4);
+});
+
+test('normalizes fixed Node process actions against a managed release', () => {
+  const spec = normalizeNodeProcessSpec({
+    applicationId: '9d4a4727-1aba-4d35-95fe-21db67042ce9',
+    releaseId: 'ff830043-9752-4640-83b4-3a1998de78a0',
+    runtime: { port: 3100 },
+    action: 'enable',
+  });
+  assert.equal(spec.action, 'enable');
+  assert.equal(spec.runtime.port, 3100);
+  assert.throws(() => normalizeNodeProcessSpec({ ...spec, action: 'restart' }), ApplicationValidationError);
+  assert.throws(() => normalizeNodeProcessSpec({ ...spec, command: 'whoami' }), ApplicationValidationError);
 });

@@ -66,6 +66,7 @@ test('read-only sensitive reads and mutations fail before the core handler', asy
   for (const path of [
     '/api/domains', '/api/domains/domain-1/reparent-preview', '/api/domains/domain-1/reparent',
     '/api/applications/application-1/configuration-preview', '/api/applications/application-1/configuration',
+    '/api/applications/application-1/process',
   ]) {
     assert.equal((await app.request(path, {
       method: 'POST',
