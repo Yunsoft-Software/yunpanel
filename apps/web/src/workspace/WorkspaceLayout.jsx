@@ -8,9 +8,8 @@ import JobDrawer from './JobDrawer.jsx';
 import './workspace.css';
 
 const navigation = [
-  ['/dashboard', 'Genel bakış', 'dashboard'], ['/websites', 'Web siteleri', 'globe'], ['/servers', 'Sunucular', 'server'],
-  ['/databases', 'Veritabanları', 'database'], ['/docker', 'Docker', 'box'], ['/mail', 'Mail', 'mail'],
-  ['/backups', 'Yedekler', 'archive'], ['/jobs', 'İşler', 'jobs'], ['/audit', 'Denetim kayıtları', 'shield'], ['/settings', 'Ayarlar', 'settings'],
+  ['/dashboard', 'Genel bakış', 'dashboard'], ['/websites', 'Web siteleri', 'globe'], ['/servers', 'Sunucu', 'server'],
+  ['/databases', 'Veritabanları', 'database'], ['/jobs', 'İşler', 'jobs'], ['/settings', 'Ayarlar', 'settings'],
 ];
 const readOnlyNavigation = new Set(['/dashboard', '/websites', '/servers']);
 export default function WorkspaceLayout() {

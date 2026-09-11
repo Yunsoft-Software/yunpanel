@@ -12,6 +12,7 @@ const domains = [
 ];
 const ids = (rows) => rows.map((row) => row.domain.id);
 const servers = [{ id: 's1' }, { id: 's2' }];
+const localServers = [{ id: 's2' }];
 const form = { mode: 'domain', serverId: 's1', primaryDomain: 'new.example.com', prefix: '', parentDomainId: '', aliases: '', targetType: 'proxy', targetValue: '4301', httpsMode: 'off' };
 
 test('tree uses explicit IDs, sorts siblings and does not infer legacy parentage', () => {
@@ -50,35 +51,35 @@ test('tree preparation leaves API records unchanged', () => {
   assert.equal(JSON.stringify(domains), before);
 });
 
-test('subdomain form binds the parent server, not the first server', () => {
-  const payload = domainCreatePayload({ ...form, mode: 'subdomain', parentDomainId: 'r', prefix: 'API' }, domains, servers);
+test('subdomain form binds the one local server shared by its parent', () => {
+  const payload = domainCreatePayload({ ...form, serverId: '', mode: 'subdomain', parentDomainId: 'r', prefix: 'API' }, domains, localServers);
   assert.equal(payload.serverId, 's2');
   assert.equal(payload.parentDomainId, 'r');
   assert.equal(payload.primaryDomain, 'api.example.com.tr');
 });
 
 test('missing parent or missing parent server never falls back to another server', () => {
-  assert.throws(() => domainCreatePayload({ ...form, mode: 'subdomain', parentDomainId: 'missing', prefix: 'api' }, domains, servers), /parent domain/);
-  assert.throws(() => domainCreatePayload({ ...form, mode: 'subdomain', parentDomainId: 'r', prefix: 'api' }, domains, [servers[0]]), /available server/);
+  assert.throws(() => domainCreatePayload({ ...form, serverId: '', mode: 'subdomain', parentDomainId: 'missing', prefix: 'api' }, domains, localServers), /parent domain/);
+  assert.throws(() => domainCreatePayload({ ...form, serverId: '', mode: 'subdomain', parentDomainId: 'r', prefix: 'api' }, domains, [servers[0]]), /panel sunucusuna/);
 });
 
-test('root domain has no parent and multi-server selection is explicit', () => {
-  const payload = domainCreatePayload({ ...form, parentDomainId: 'r' }, domains, servers);
+test('root domain has no parent and always uses the one local server', () => {
+  const payload = domainCreatePayload({ ...form, serverId: '', parentDomainId: 'r' }, domains, localServers);
   assert.equal(payload.parentDomainId, null);
-  assert.equal(payload.serverId, 's1');
-  assert.throws(() => domainCreatePayload({ ...form, serverId: '' }, domains, servers), /available server/);
-  assert.equal(domainCreatePayload({ ...form, serverId: '' }, domains, [servers[1]]).serverId, 's2');
+  assert.equal(payload.serverId, 's2');
+  assert.throws(() => domainCreatePayload({ ...form, serverId: '' }, domains, servers), /Yerel sunucu/);
+  assert.throws(() => domainCreatePayload(form, domains, localServers), /Yalnızca/);
 });
 
 test('prefix validation rejects unsafe or empty labels and allows nested prefixes', () => {
   for (const prefix of ['', '.api', 'api.', 'a..b', '-api', 'api-', 'a/b', 'x'.repeat(64)]) {
-    assert.throws(() => domainCreatePayload({ ...form, mode: 'subdomain', parentDomainId: 'r', prefix }, domains, servers), /valid subdomain prefix/);
+    assert.throws(() => domainCreatePayload({ ...form, serverId: '', mode: 'subdomain', parentDomainId: 'r', prefix }, domains, localServers), /valid subdomain prefix/);
   }
-  assert.equal(domainCreatePayload({ ...form, mode: 'subdomain', parentDomainId: 'r', prefix: 'v2.api' }, domains, servers).primaryDomain, 'v2.api.example.com.tr');
+  assert.equal(domainCreatePayload({ ...form, serverId: '', mode: 'subdomain', parentDomainId: 'r', prefix: 'v2.api' }, domains, localServers).primaryDomain, 'v2.api.example.com.tr');
 });
 
 test('invalid upstream ports are caught before submission', () => {
   for (const targetValue of ['', 'NaN', '1023', '65536', '4301.5']) {
-    assert.throws(() => domainCreatePayload({ ...form, targetValue }, domains, servers), /Upstream port/);
+    assert.throws(() => domainCreatePayload({ ...form, serverId: '', targetValue }, domains, localServers), /Upstream port/);
   }
 });

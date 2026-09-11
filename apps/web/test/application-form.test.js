@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applicationCreatePayload } from '../src/workspace/application-form.js';
 const form = { type: 'node', serverId: '', name: 'Demo', repositoryUrl: 'https://github.com/example/project', branch: 'main', port: '4301', entryFile: 'server.js', healthPath: '/health', outputDir: 'dist' };
-test('multiple servers require a deliberate selection, one server may default', () => {
+test('application creation requires exactly the current local server', () => {
   assert.throws(() => applicationCreatePayload(form, [{ id: 'a' }, { id: 'b' }]), /sunucu/);
   assert.equal(applicationCreatePayload(form, [{ id: 'a' }]).serverId, 'a');
-  assert.equal(applicationCreatePayload({ ...form, serverId: 'b' }, [{ id: 'a' }, { id: 'b' }]).serverId, 'b');
+  assert.throws(() => applicationCreatePayload({ ...form, serverId: 'b' }, [{ id: 'a' }]), /sunucu/);
 });
 test('unknown servers and invalid ports are rejected', () => {
   assert.throws(() => applicationCreatePayload({ ...form, serverId: 'missing' }, [{ id: 'a' }]), /sunucu/);

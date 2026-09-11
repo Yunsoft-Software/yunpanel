@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router';
 import {
   createDatabase,
   deleteDatabase,
@@ -32,7 +31,6 @@ async function queueAndWait(queue, { observe, refreshJobs, updateJob }) {
 
 export default function DatabasesPage() {
   const { servers, jobs, observe, updateJob } = useWorkspace();
-  const [params, setParams] = useSearchParams();
   const requestGeneration = useRef(0);
   const pending = useRef(false);
   const [status, setStatus] = useState('idle');
@@ -42,8 +40,7 @@ export default function DatabasesPage() {
   const [name, setName] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const server = servers.items.find((item) => item.id === params.get('server'))
-    ?? (servers.items.length === 1 ? servers.items[0] : null);
+  const server = servers.items.length === 1 ? servers.items[0] : null;
 
   const load = useCallback(async () => {
     if (!server) {
@@ -122,12 +119,8 @@ export default function DatabasesPage() {
       description="MySQL/MariaDB veritabanlarını sunucu üzerinde Unix socket üzerinden yönetin. Kullanıcı/grant ve yedek/restore akışları sonraki aşamadadır."
       actions={<Button icon="refresh" disabled={!server || busy} onClick={load}>Kaydı yenile</Button>}
     />
-    <CollectionNotice resource={servers} label="Sunucular" />
-    {['ready', 'stale'].includes(servers.status) && <Section title="Sunucu">
-      <div className="ws-section-body"><label>Veritabanı sunucusu<select value={server?.id ?? ''} onChange={(event) => setParams(event.target.value ? { server: event.target.value } : {})}><option value="">Sunucu seçin</option>{servers.items.map((item) => <option key={item.id} value={item.id}>{item.displayName ?? item.name ?? item.hostname}</option>)}</select></label></div>
-    </Section>}
-
-    {!server && ['ready', 'stale'].includes(servers.status) && <Section title="Veritabanları"><EmptyState title="Sunucu seçin" detail="Veritabanı envanteri ve işlemleri belirli bir sunucuya bağlıdır." icon="database" /></Section>}
+    <CollectionNotice resource={servers} label="Yerel sunucu" />
+    {!server && ['ready', 'stale'].includes(servers.status) && <Section title="Veritabanları"><EmptyState title="Yerel sunucu kullanılamıyor" detail="Panel yalnız çalıştığı sunucuyu yönetir; yerel sunucu kaydı doğrulanamadı." icon="database" /></Section>}
 
     {server && <>
       <Section

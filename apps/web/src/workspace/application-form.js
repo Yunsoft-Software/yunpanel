@@ -1,6 +1,7 @@
 export function applicationCreatePayload(form, servers) {
-  const serverId = form.serverId || (servers.length === 1 ? servers[0].id : null);
-  if (!serverId || !servers.some((item) => item.id === serverId)) throw new Error('Geçerli bir sunucu seçin.');
+  if (servers.length !== 1) throw new Error('Yerel sunucu kullanılamıyor.');
+  const serverId = servers[0].id;
+  if (form.serverId && form.serverId !== serverId) throw new Error('Yalnızca bu panel sunucusu yönetilebilir.');
   if (!['static', 'node'].includes(form.type)) throw new Error('Uygulama türü geçersiz.');
   const name = form.name.trim();
   if (!name || name.length > 80) throw new Error('Uygulama adı 1–80 karakter olmalıdır.');

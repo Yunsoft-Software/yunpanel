@@ -1,11 +1,13 @@
 const labelPattern = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 
 export function domainCreatePayload(form, domains, servers) {
+  if (servers.length !== 1) throw new Error('Yerel sunucu kullanılamıyor.');
+  const serverId = servers[0].id;
   const isSubdomain = form.mode === 'subdomain';
   const parent = isSubdomain ? domains.find((domain) => domain.id === form.parentDomainId) : null;
   if (isSubdomain && !parent) throw new Error('Select an existing parent domain.');
-  const serverId = isSubdomain ? parent.serverId : (form.serverId || (servers.length === 1 ? servers[0].id : null));
-  if (!serverId || !servers.some((server) => server.id === serverId)) throw new Error('Select an available server.');
+  if (parent && parent.serverId !== serverId) throw new Error('Üst alan adı bu panel sunucusuna ait değil.');
+  if (form.serverId && form.serverId !== serverId) throw new Error('Yalnızca bu panel sunucusu yönetilebilir.');
 
   let primaryDomain = form.primaryDomain.trim().toLowerCase().replace(/\.$/, '');
   if (isSubdomain) {

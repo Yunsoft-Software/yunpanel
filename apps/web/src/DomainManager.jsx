@@ -4,7 +4,7 @@ import DomainList from './DomainList.jsx';
 import { domainCreatePayload } from './domain-form.js';
 import { panelRequest, waitForJob } from './api.js';
 
-const initialForm = { mode: 'domain', serverId: '', parentDomainId: '', prefix: '', primaryDomain: '', aliases: '', targetType: 'proxy', targetValue: '4301', httpsMode: 'off' };
+const initialForm = { mode: 'domain', parentDomainId: '', prefix: '', primaryDomain: '', aliases: '', targetType: 'proxy', targetValue: '4301', httpsMode: 'off' };
 
 export default function DomainManager({ domains, domainAccess, certificates, certificateAccess, servers, onChanged }) {
   const [form, setForm] = useState(initialForm);
@@ -23,7 +23,7 @@ export default function DomainManager({ domains, domainAccess, certificates, cer
 
   function addSubdomain(domain) {
     if (busyId !== null) return;
-    setForm({ ...initialForm, mode: 'subdomain', parentDomainId: domain.id, serverId: domain.serverId });
+    setForm({ ...initialForm, mode: 'subdomain', parentDomainId: domain.id });
     setMessage(null);
     setError(null);
     requestAnimationFrame(() => {
@@ -125,13 +125,12 @@ export default function DomainManager({ domains, domainAccess, certificates, cer
               <label>Subdomain prefix<input ref={nameInput} value={form.prefix} placeholder="api" required onChange={(event) => update('prefix', event.target.value)} /><span className="domain-form-hint">{parent ? `${form.prefix.trim() || 'prefix'}.${parent.primaryDomain}` : 'Select a parent first. The subdomain uses that server.'}</span></label>
             </> : <>
               <label>Primary domain<input ref={nameInput} value={form.primaryDomain} placeholder="example.com" required onChange={(event) => update('primaryDomain', event.target.value)} /></label>
-              <label>Server<select value={form.serverId || (servers.length === 1 ? servers[0].id : '')} required onChange={(event) => update('serverId', event.target.value)}><option value="">Select server</option>{servers.map((server) => <option key={server.id} value={server.id}>{server.displayName || server.hostname || server.id}</option>)}</select></label>
             </>}
             <label>Aliases, comma separated<input value={form.aliases} onChange={(event) => update('aliases', event.target.value)} /><span className="domain-form-hint">Aliases share this target; they are not independent subdomains.</span></label>
             <label>Target type<select value={form.targetType} onChange={(event) => setForm((current) => ({ ...current, targetType: event.target.value, targetValue: event.target.value === 'proxy' ? '4301' : '' }))}><option value="proxy">Loopback proxy</option><option value="static">Static root</option></select></label>
             <label>{form.targetType === 'proxy' ? 'Upstream port' : 'Absolute web root'}<input type={form.targetType === 'proxy' ? 'number' : 'text'} min={form.targetType === 'proxy' ? 1024 : undefined} max={form.targetType === 'proxy' ? 65535 : undefined} value={form.targetValue} required onChange={(event) => update('targetValue', event.target.value)} /></label>
             <label>HTTPS<select value={form.httpsMode} onChange={(event) => update('httpsMode', event.target.value)}><option value="off">Off</option><option value="managed">Managed</option></select></label>
-            <button className="primary-button" type="submit" disabled={!servers.length || (isSubdomain && !parent)}>{busyId === 'create' ? 'Creating…' : isSubdomain ? 'Create subdomain' : 'Create domain'}</button>
+            <button className="primary-button" type="submit" disabled={servers.length !== 1 || (isSubdomain && !parent)}>{busyId === 'create' ? 'Creating…' : isSubdomain ? 'Create subdomain' : 'Create domain'}</button>
           </fieldset>
         </form>
         <p className="domain-form-hint">Creating a domain does not publish DNS records or enable mail. Existing domains are not automatically regrouped.</p>

@@ -1,27 +1,68 @@
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, CollectionNotice, EmptyState, Icon, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
+import { Badge, Button, CollectionNotice, EmptyState, ErrorNotice, Icon, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { SITE_TABS, certificateState, externalSiteUrl, matchingApplications, parentTrail, selectedApplication, siteHref, siteJobs, formatDate } from './site-model.js';
 import { ApplicationOperations, DomainOperations, SslOperations } from './SiteOperations.jsx';
 import EnvironmentPanel from './EnvironmentPanel.jsx';
 import JobsTable from './JobsTable.jsx';
 import TerminalPanel from './LazyTerminalPanel.jsx';
+import FilesPanel from './FilesPanel.jsx';
+import LogsPanel from './LogsPanel.jsx';
+import { panelRequest } from '../api.js';
 
-const unavailable = {
-  mail: ['Mail yönetimi', 'Mailbox, kota, yönlendirme ve Roundcube backend’i henüz uygulanmadı. Bu sekme mail servisini kurmaz veya DNS kaydı yayımlamaz.', 'mail'],
-  files: ['Dosya yönetimi', 'Site dosyalarını listeleme, yükleme ve düzenleme API’leri henüz uygulanmadı.', 'file'],
-  databases: ['Veritabanları', 'Siteye bağlı veritabanı oluşturma, kullanıcı yetkileri ve dump/restore API’leri henüz uygulanmadı.', 'database'],
-  cron: ['Zamanlanmış işler', 'Site kullanıcısıyla cron oluşturma ve çalışma kayıtları henüz uygulanmadı.', 'clock'],
-  backups: ['Yedekler', 'Şifreli yedek, hedef/retention ve geri yükleme backend’i henüz uygulanmadı.', 'archive'],
-};
+function LegacyWebsiteRepair({ domain, canManage, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  async function repair() {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      let preview = await panelRequest('/websites/migration/preview');
+      let item = preview.items.find((candidate) => candidate.domainId === domain.id);
+      if (!item || item.status !== 'ready') {
+        throw new Error(item?.status === 'ambiguous'
+          ? 'Bu Domain için birden fazla uygulama eşleşiyor; önce hedef uygulamayı tekilleştirin.'
+          : 'Bu Domain için aynı port ve sunucuda eşleşen bir uygulama bulunamadı.');
+      }
+      if (item.action === 'create_website_then_bind') {
+        await panelRequest('/websites/migration/create-website', {
+          method: 'POST',
+          body: {
+            domainId: domain.id,
+            applicationId: item.applicationId,
+            previewDigest: preview.digest,
+            confirmation: `create-website:${domain.id}:${item.applicationId}:${preview.digest}`,
+          },
+        });
+        preview = await panelRequest('/websites/migration/preview');
+        item = preview.items.find((candidate) => candidate.domainId === domain.id);
+      }
+      if (!item || item.status !== 'ready' || item.action !== 'bind_existing_website' || !item.websiteId) {
+        throw new Error('Website kaydı oluşturuldu ancak güvenli bağlama planı üretilemedi; sayfayı yenileyip tekrar deneyin.');
+      }
+      await panelRequest('/websites/migration/bind', {
+        method: 'POST',
+        body: {
+          domainId: domain.id,
+          websiteId: item.websiteId,
+          previewDigest: preview.digest,
+          confirmation: `bind:${domain.id}:${item.websiteId}:${preview.digest}`,
+        },
+      });
+      onChanged();
+    } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
+    finally { setBusy(false); }
+  }
+  return <Section title="Site kimliği gerekli"><div className="ws-section-body"><ErrorNotice error={error} /><p className="ws-muted">Bu eski Domain kaydı henüz kalıcı Website kimliğine bağlı değil. Terminal ve dosya erişimi açılmadan önce eşleşen yerel uygulamayla açıkça bağlanmalıdır.</p>{canManage && <Button variant="primary" disabled={busy} onClick={repair}>{busy ? 'Site kimliği hazırlanıyor…' : 'Site kimliğini oluştur ve bağla'}</Button>}</div></Section>;
+}
 export default function SiteDetailPage() {
   const { websiteId, tab = 'overview' } = useParams();
   // A separate instance per domain prevents form state leaking when the site changes.
   return <SiteWorkspace key={websiteId} websiteId={websiteId} tab={tab} />;
 }
 function SiteWorkspace({ websiteId, tab }) {
-  const { domains, applications, certificates, servers, jobs, refreshAll } = useWorkspace();
+  const { domains, applications, certificates, servers, jobs, refreshAll, canManage } = useWorkspace();
   const [params, setParams] = useSearchParams();
   const domain = domains.items.find((item) => item.id === websiteId);
   if (!domain) return <><PageHeading title="Web sitesi" /><CollectionNotice resource={domains} label="Alan adı" />{domains.status === 'ready' && <EmptyState title="Web sitesi bulunamadı" detail="Kayıt kaldırılmış olabilir veya bağlantı yanlış bir kimliğe işaret ediyor." icon="globe" action={<LinkButton to="/websites">Web sitelerine dön</LinkButton>} />}</>;
@@ -53,18 +94,17 @@ function SiteWorkspace({ websiteId, tab }) {
     {['node', 'deploy'].includes(tab) && <><ApplicationOperations domain={domain} application={application} deployOnly={tab === 'deploy'} disabled={domains.status !== 'ready'} />{application && tab === 'node' && <EnvironmentPanel key={application.id} application={application} />}</>}
     {tab === 'domains' && <DomainOperations domain={domain} />}
     {tab === 'ssl' && <><CollectionNotice resource={certificates} label="Sertifikalar" /><SslOperations key={domain.id} domain={domain} /></>}
-    {tab === 'logs' && <><div className="ws-notice"><Icon name="file" /><span>Bu sürümde siteye ait işlem kayıtları gösterilir. Canlı Node.js/Nginx log akışı henüz yok.</span></div><Section title="Site işlem kayıtları"><CollectionNotice resource={jobs} label="İşlem kayıtları" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={50} />}</Section></>}
-    {tab === 'terminal' && <TerminalPanel
+    {tab === 'logs' && <><LogsPanel application={application} domain={domain} server={server} /><Section title="Site işlem kayıtları"><CollectionNotice resource={jobs} label="İşlem kayıtları" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={50} />}</Section></>}
+    {tab === 'terminal' && (domain.websiteId ? <TerminalPanel
       title="Site terminali"
       description={`${domain.primaryDomain} için dedicated site kullanıcısında interaktif PTY.`}
-      target={domain.websiteId ? { scope: 'site', websiteId: domain.websiteId } : null}
-      unavailable={!domain.websiteId ? 'Bu eski Domain kaydı kalıcı bir Website kimliğine bağlı değil; site terminali güvenli hedef belirleyemiyor.' : null}
-    />}
+      target={{ scope: 'site', websiteId: domain.websiteId }}
+    /> : <LegacyWebsiteRepair domain={domain} canManage={canManage} onChanged={refreshAll} />)}
+    {tab === 'files' && (domain.websiteId ? <FilesPanel websiteId={domain.websiteId} /> : <LegacyWebsiteRepair domain={domain} canManage={canManage} onChanged={refreshAll} />)}
     {tab === 'settings' && <Section title="Site ayarları"><KeyValues items={[
       ['Kayıt kimliği', domain.id], ['Üst alan adı', domains.items.find((item) => item.id === domain.parentDomainId)?.primaryDomain ?? 'Bağımsız kayıt'],
       ['Sunucu', server?.displayName ?? server?.hostname], ['Hedef türü', domain.targetType],
       ['Oluşturulma', formatDate(domain.createdAt)], ['Güncelleme', formatDate(domain.updatedAt)],
-    ]} /><div className="ws-section-body"><p className="ws-muted">Bu ekran mevcut domain kimliğini kullanır. Website veri modeli, kalıcı uygulama atama ve bağımlılıkları kontrol ederek silme/taşıma henüz tamamlanmadı.</p><Link to="/domains">Gelişmiş alan adı araçlarına git</Link></div></Section>}
-    {unavailable[tab] && <Section title={unavailable[tab][0]}><EmptyState title="Bu modül henüz uygulanmadı" detail={unavailable[tab][1]} icon={unavailable[tab][2]} /></Section>}
+    ]} /><div className="ws-section-body"><p className="ws-muted">Bu ekran yalnız bu panel sunucusundaki Domain ve kalıcı Website kimliğini kullanır.</p><Link to="/domains">Gelişmiş alan adı araçlarına git</Link></div></Section>}
   </>;
 }
