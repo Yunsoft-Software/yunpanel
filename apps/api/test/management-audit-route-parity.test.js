@@ -15,6 +15,7 @@ const SOURCE_FILES = [
   'application-configuration-http.js',
   'application-process-http.js',
   'external-lifecycle-http.js',
+  'mailbox-http.js',
   'website-http.js',
   'website-migration-http.js',
   'managed-service-http.js',
@@ -124,12 +125,27 @@ test('Website and Domain impact previews have resource-scoped audit identities',
   });
 });
 
-test('explicit external DNS and mail tracking have separate audit resources', () => {
+test('explicit DNS and mail tracking have separate audit resources', () => {
   assert.deepEqual(classifyManagementMutation('POST', '/api/dns-zones'), {
     action: 'dns_zone.external.track', resourceType: 'dns_zone', resourceId: 'new',
   });
   assert.deepEqual(classifyManagementMutation('POST', '/api/mail-domains'), {
-    action: 'mail_domain.external.track', resourceType: 'mail_domain', resourceId: 'new',
+    action: 'mail_domain.track', resourceType: 'mail_domain', resourceId: 'new',
+  });
+});
+
+test('mailbox mutations have bounded common audit identities', () => {
+  assert.deepEqual(classifyManagementMutation('POST', '/api/mailboxes'), {
+    action: 'mailbox.create', resourceType: 'mailbox', resourceId: 'new',
+  });
+  assert.deepEqual(classifyManagementMutation('POST', '/api/mailboxes/mailbox-1/password'), {
+    action: 'mailbox.password.rotate', resourceType: 'mailbox', resourceId: 'mailbox-1',
+  });
+  assert.deepEqual(classifyManagementMutation('PATCH', '/api/mailboxes/mailbox-1'), {
+    action: 'mailbox.update', resourceType: 'mailbox', resourceId: 'mailbox-1',
+  });
+  assert.deepEqual(classifyManagementMutation('DELETE', '/api/mailboxes/mailbox-1'), {
+    action: 'mailbox.delete', resourceType: 'mailbox', resourceId: 'mailbox-1',
   });
 });
 

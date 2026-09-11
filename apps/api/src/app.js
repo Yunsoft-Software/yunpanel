@@ -29,6 +29,8 @@ import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { createMailboxRegistry, MailboxRegistryError } from './mailbox-registry.js';
+import { mountMailboxRoutes } from './mailbox-http.js';
+import { MailboxPasswordError } from './mailbox-password.js';
 import { LogHttpError, mountLogRoutes } from './log-http.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
 import { mountNodeRuntimeRoutes, NodeRuntimeHttpError } from './node-runtime-http.js';
@@ -173,6 +175,7 @@ export function createApp({
     localServerId,
     mailDomainRegistry,
   });
+  mountMailboxRoutes(app, { mailboxRegistry });
   mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry });
   mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry });
   mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry });
@@ -212,6 +215,7 @@ export function createApp({
       || error instanceof LogHttpError
       || error instanceof ManagedServiceHttpError
       || error instanceof MailboxRegistryError
+      || error instanceof MailboxPasswordError
       || error instanceof NodeRuntimeHttpError
       || error instanceof ResourceImpactError
       || error instanceof SiteFileHttpError

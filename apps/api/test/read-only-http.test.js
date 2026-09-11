@@ -50,13 +50,14 @@ test('read-only inventory reads cross the core boundary with explicit capabiliti
   for (const path of [
     '/api/servers', '/api/servers/s1', '/api/applications/a1', '/api/domains/d1', '/api/certificates/c1',
     '/api/dns-zones', '/api/dns-zones/z1', '/api/mail-domains', '/api/mail-domains/m1',
+    '/api/mailboxes', '/api/mailboxes/m1',
     '/api/docker/workloads', '/api/docker/workloads/w1',
   ]) {
     const response = await app.request(path, { headers: { cookie } });
     assert.equal(response.status, 200, path);
     assert.equal((await response.json()).data.access.mode, 'read_only');
   }
-  assert.equal(app.calls(), 11);
+  assert.equal(app.calls(), 13);
 });
 
 test('read-only sensitive reads and mutations fail before the core handler', async (t) => {
@@ -96,7 +97,7 @@ test('read-only auth session publishes its scoped permissions', async (t) => {
     mode: 'read_only',
     permissions: [
       'servers.read', 'websites.read', 'applications.read', 'domains.read', 'certificates.read',
-      'dns_zones.read', 'mail_domains.read', 'docker_workloads.read',
+      'dns_zones.read', 'mail_domains.read', 'mailboxes.read', 'docker_workloads.read',
     ],
   });
   assert.equal(app.calls(), 0);

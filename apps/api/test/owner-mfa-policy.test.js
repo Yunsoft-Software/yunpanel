@@ -61,7 +61,7 @@ test('session descriptions publish only server-derived panel capabilities', () =
     mode: 'read_only',
     permissions: [
       'servers.read', 'websites.read', 'applications.read', 'domains.read', 'certificates.read',
-      'dns_zones.read', 'mail_domains.read', 'docker_workloads.read',
+      'dns_zones.read', 'mail_domains.read', 'mailboxes.read', 'docker_workloads.read',
     ],
   });
 });

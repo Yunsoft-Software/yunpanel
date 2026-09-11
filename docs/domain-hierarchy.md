@@ -115,11 +115,19 @@ GET  /api/mail-domains
 GET  /api/mail-domains/:mailDomainId
 GET  /api/mail-domains/:mailDomainId/config-preview
 POST /api/mail-domains
+GET  /api/mailboxes?mailDomainId=<mail-domain-uuid>
+GET  /api/mailboxes/:mailboxId
+POST /api/mailboxes
+POST /api/mailboxes/:mailboxId/password
+PATCH /api/mailboxes/:mailboxId
+DELETE /api/mailboxes/:mailboxId
 ```
 
 Owner creation requires exactly `name`, an explicit `webDomainId` or `null`, and `managementMode`. DNS accepts only `external`; mail accepts `external` or `local`. A non-null reference must name the exact canonical web Domain; suffix matching or hostname inference is not used. External resources begin `unverified`; a local mail domain begins `disabled`. Every create response states that DNS was not published and mail/mailboxes were not configured. Read Only may inspect the bounded lifecycle metadata but cannot create or refresh it.
 
 Mail configuration preview is currently a read-only, candidate-domain-only contract. It returns the exact canonical Postfix virtual-domain source map, SHA-256 digest, fixed `postmap`/`postfix check` commands and `sideEffects=false`. An external record returns `readyToApply=false` with `mail_domain_management_mode_external`; a local/disabled record returns `mail_configuration_apply_not_implemented`. No file is staged, compiled or activated. Local apply remains unavailable until the managed-mail lifecycle can aggregate every local domain and provide test plus rollback evidence.
+
+Mailbox create accepts exactly `mailDomainId`, `address` and plaintext `password`; only a `local` mail-domain identity is eligible. Password rotation accepts the exact current `expectedRevision` plus `password`. Enable/disable accepts `expectedRevision + enabled`; delete additionally requires `delete-mailbox:<canonical-address>`. Plaintext passwords, Argon2id hashes and encryption envelopes never appear in responses. Read Only may list and inspect the bounded metadata but cannot mutate it. Every mutation reports that mail configuration and mail data were unchanged; the registry is desired-state metadata, not evidence that a Dovecot account exists. Common management audit retains only bounded action/resource/outcome metadata and never the password or request body.
 
 Readiness refresh accepts exactly the current positive `expectedRevision`. It resolves the linked Domain's canonical hostname and aliases as bounded A, AAAA and CNAME evidence, canonicalizes IPv6, and compares resolved addresses with the explicitly linked managed Server inventory. Missing records, target mismatch, missing expected Server addresses and resolver failures remain distinct authored states; resolver exceptions are never serialized. HTTP-01 additionally requires the current Domain revision to be active. DNS-01 independently reports whether a supported provider credential is configured and distinguishes an unavailable credential store from an absent credential. A successful revision check records only evidence-derived `ready` or `degraded` lifecycle status. It does not publish DNS, contact the provider mutation API or claim certificate issuance.
 

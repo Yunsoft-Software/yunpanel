@@ -28,6 +28,10 @@ test('current management mutation routes map to bounded action and resource iden
     ['DELETE', '/api/applications/app-1/github-webhook', 'application.github_webhook.deleted', 'application', 'app-1'],
     ['POST', '/api/applications/app-1/environment/import', 'application.environment.imported', 'application', 'app-1'],
     ['POST', '/api/domains', 'domain.create', 'domain', 'new'],
+    ['POST', '/api/mailboxes', 'mailbox.create', 'mailbox', 'new'],
+    ['POST', '/api/mailboxes/mailbox-1/password', 'mailbox.password.rotate', 'mailbox', 'mailbox-1'],
+    ['PATCH', '/api/mailboxes/mailbox-1', 'mailbox.update', 'mailbox', 'mailbox-1'],
+    ['DELETE', '/api/mailboxes/mailbox-1', 'mailbox.delete', 'mailbox', 'mailbox-1'],
     ['POST', '/api/domains/domain-1/reparent-preview', 'domain.reparent.preview', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/reparent', 'domain.reparent', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/update-preview', 'domain.update.preview', 'domain', 'domain-1'],
@@ -111,6 +115,26 @@ test('Git credential body never enters common audit metadata', () => {
   assert.deepEqual(events.map((event) => event.action), [
     'application.git_credential.updated', 'application.git_credential.updated',
   ]);
+});
+
+test('mailbox password and mutation body never enter common audit metadata', () => {
+  const events = [];
+  const response = new Response(200);
+  attachManagementAudit({
+    request: {
+      method: 'POST',
+      auth: { user: { id: 'owner-1' } },
+      body: { expectedRevision: 4, password: 'private mailbox value', confirmation: 'do-not-log' },
+    },
+    response,
+    pathname: '/api/mailboxes/mailbox-1/password',
+    audit: { record(event) { events.push(event); } },
+  });
+  response.emit('finish');
+  assert.deepEqual(events.map((event) => event.action), [
+    'mailbox.password.rotate', 'mailbox.password.rotate',
+  ]);
+  assert.doesNotMatch(JSON.stringify(events), /private mailbox value|expectedRevision|confirmation|do-not-log/);
 });
 
 test('environment import content never enters common audit metadata', () => {

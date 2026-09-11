@@ -13,7 +13,7 @@ export const readOnlyManagementContext = Object.freeze({
     mode: 'read_only',
     permissions: Object.freeze([
       'servers.read', 'websites.read', 'applications.read', 'domains.read', 'certificates.read',
-      'dns_zones.read', 'mail_domains.read',
+      'dns_zones.read', 'mail_domains.read', 'mailboxes.read', 'docker_workloads.read',
     ]),
   }),
 });

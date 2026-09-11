@@ -20,6 +20,7 @@ test('read-only inventory rules are exact and expose only safe Website nested do
     ['/api/dns-zones', 'dns_zones.read'], ['/api/dns-zones/zone-1', 'dns_zones.read'],
     ['/api/mail-domains', 'mail_domains.read'], ['/api/mail-domains/mail-1', 'mail_domains.read'],
     ['/api/mail-domains/mail-1/config-preview', 'mail_domains.read'],
+    ['/api/mailboxes', 'mailboxes.read'], ['/api/mailboxes/mailbox-1', 'mailboxes.read'],
   ]) assert.equal(readOnlyPermission('GET', path), permission);
   for (const path of [
     '/api/jobs', '/api/users', '/api/audit', '/api/websites/website-1/environment', '/api/websites/website-1/domains/extra',
