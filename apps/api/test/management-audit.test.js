@@ -31,6 +31,11 @@ test('current management mutation routes map to bounded action and resource iden
     ['POST', '/api/domains/domain-1/reparent-preview', 'domain.reparent.preview', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/reparent', 'domain.reparent', 'domain', 'domain-1'],
     ['POST', '/api/websites/website-1/update-preview', 'website.update.preview', 'website', 'website-1'],
+    ['PUT', '/api/websites/website-1/files/upload', 'website.file.upload', 'website', 'website-1'],
+    ['PUT', '/api/websites/website-1/files/text', 'website.file.edit', 'website', 'website-1'],
+    ['POST', '/api/websites/website-1/files/mkdir', 'website.file.mkdir', 'website', 'website-1'],
+    ['POST', '/api/websites/website-1/files/rename', 'website.file.rename', 'website', 'website-1'],
+    ['DELETE', '/api/websites/website-1/files', 'website.file.delete', 'website', 'website-1'],
     ['PATCH', '/api/websites/website-1', 'website.update', 'website', 'website-1'],
     ['POST', '/api/domains/domain-1/stage', 'domain.stage', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/activate', 'domain.activate', 'domain', 'domain-1'],
@@ -111,6 +116,23 @@ test('environment import content never enters common audit metadata', () => {
     'application.environment.imported', 'application.environment.imported',
   ]);
   assert.doesNotMatch(JSON.stringify(events), /PRIVATE_TOKEN|do-not-log|content|mode/);
+});
+
+test('site file paths and content never enter common audit metadata', () => {
+  const events = [];
+  const response = new Response(200);
+  attachManagementAudit({
+    request: {
+      method: 'PUT', auth: { user: { id: 'owner-1' } },
+      body: { path: 'private/config.txt', content: 'API_TOKEN=do-not-log', expectedSha256: 'a'.repeat(64) },
+    },
+    response,
+    pathname: '/api/websites/website-1/files/text',
+    audit: { record(event) { events.push(event); } },
+  });
+  response.emit('finish');
+  assert.deepEqual(events.map((event) => event.action), ['website.file.edit', 'website.file.edit']);
+  assert.doesNotMatch(JSON.stringify(events), /private|config|API_TOKEN|do-not-log|path|content/);
 });
 
 test('audit acceptance failure blocks the management mutation boundary', () => {

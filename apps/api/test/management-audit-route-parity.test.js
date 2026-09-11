@@ -20,6 +20,7 @@ const SOURCE_FILES = [
   'managed-service-http.js',
   'node-runtime-http.js',
   'database-http.js',
+  'site-file-http.js',
 ];
 const ROUTE_PATTERN = /app\.(post|put|patch|delete)\(\s*'([^']+)'\s*,\s*requirePanelRouteAccess\b/g;
 

@@ -150,7 +150,7 @@ export function createStaticDeploymentManager({
     }
   }
 
-  async function verifyAndNormalizeArtifact(directory) {
+  async function verifyAndNormalizeArtifact(directory, username) {
     async function visit(current) {
       const entries = await readdirFn(current, { withFileTypes: true });
       for (const entry of entries) {
@@ -169,7 +169,7 @@ export function createStaticDeploymentManager({
 
     await chmodFn(directory, 0o755);
     await visit(directory);
-    await runRoot(CHOWN_PATH, ['--recursive', '--no-dereference', 'root:root', directory], { timeout: 60_000 });
+    await runRoot(CHOWN_PATH, ['--recursive', '--no-dereference', `${username}:${username}`, directory], { timeout: 60_000 });
   }
 
   async function cleanupOldReleases({ releasesPath, currentReleaseId, previousReleaseId, retention }) {
@@ -317,7 +317,7 @@ export function createStaticDeploymentManager({
       }
 
       await stopAppProcesses(username);
-      await verifyAndNormalizeArtifact(servedReleasePath);
+      await verifyAndNormalizeArtifact(servedReleasePath, username);
 
       let previousReleaseId = null;
       try {

@@ -56,4 +56,7 @@ test('static deployment restores traversable shared-root modes under a restricti
   assert.equal(fetchCommand.options.env.YUNPANEL_GIT_TOKEN, gitToken);
   const artifactCommand = commands.find((entry) => entry.args.includes('/worker.js'));
   assert.equal('YUNPANEL_GIT_TOKEN' in artifactCommand.options.env, false);
+  const ownership = commands.find((entry) => entry.args.includes('--recursive') && entry.args.includes('--no-dereference'));
+  assert.match(ownership.args.at(-2), /^yunapp-[a-f0-9]{12}:yunapp-[a-f0-9]{12}$/);
+  assert.equal(ownership.args.at(-1), `/srv/yunpanel/web/apps/${APPLICATION_ID}/releases/${DEPLOYMENT_ID}`);
 });

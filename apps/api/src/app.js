@@ -21,6 +21,9 @@ import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { ResourceImpactError } from './resource-impact.js';
 import { mountResourceImpactRoutes } from './resource-impact-http.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
+import { SiteFileHttpError, mountSiteFileRoutes } from './site-file-http.js';
+import { createSiteFileManager, SiteFileManagerError } from './site-file-manager.js';
+import { SiteFileWorkerError } from './site-file-worker.js';
 import { SiteCreateError } from './site-create.js';
 import { mountSiteCreateRoutes } from './site-create-http.js';
 import { mountTerminalCapabilityRoutes } from './terminal-capability-http.js';
@@ -69,11 +72,14 @@ export function createApp({
   jobLogStore = null,
   localServerId = null,
   terminalCapabilityRegistry = null,
+  siteFileManager = null,
   ...options
 } = {}) {
   const core = createCoreApp({ ...options, registry, domainRegistry, jobRegistry, certificateRegistry, applicationRegistry, environment });
   const app = express();
+  const files = siteFileManager ?? createSiteFileManager({ websiteRegistry, localServerId });
   app.disable('x-powered-by');
+  mountSiteFileRoutes(app, { siteFileManager: files });
   app.use(express.json({ limit: '256kb' }));
   app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry));
   app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry));
@@ -133,6 +139,9 @@ export function createApp({
       || error instanceof ManagedServiceHttpError
       || error instanceof NodeRuntimeHttpError
       || error instanceof ResourceImpactError
+      || error instanceof SiteFileHttpError
+      || error instanceof SiteFileManagerError
+      || error instanceof SiteFileWorkerError
       || error instanceof SiteCreateError
       || error instanceof TerminalCapabilityError
       || error instanceof WebsiteMigrationBindError
@@ -146,10 +155,11 @@ export function createApp({
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }
     const invalidJson = error instanceof SyntaxError && error.status === 400;
-    return response.status(invalidJson ? 400 : 500).json({
+    const bodyTooLarge = error?.type === 'entity.too.large' || error?.status === 413;
+    return response.status(bodyTooLarge ? 413 : invalidJson ? 400 : 500).json({
       error: {
-        code: invalidJson ? 'invalid_json' : 'internal_error',
-        message: invalidJson ? 'Invalid JSON body' : 'Unexpected server error',
+        code: bodyTooLarge ? 'request_body_too_large' : invalidJson ? 'invalid_json' : 'internal_error',
+        message: bodyTooLarge ? 'Request body is too large' : invalidJson ? 'Invalid JSON body' : 'Unexpected server error',
       },
     });
   });

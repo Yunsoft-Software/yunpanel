@@ -29,6 +29,11 @@ export function classifyManagementMutation(method, pathname) {
   if (method === 'POST' && pathname === '/api/websites/migration/rollback') return { action: 'website.migration.rollback', resourceType: 'website_migration', resourceId: 'policy' };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/update-preview$/)) && method === 'POST') return { action: 'website.update.preview', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/impact-preview$/)) && method === 'POST') return { action: 'website.impact.preview', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files\/upload$/)) && method === 'PUT') return { action: 'website.file.upload', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files\/text$/)) && method === 'PUT') return { action: 'website.file.edit', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files\/mkdir$/)) && method === 'POST') return { action: 'website.file.mkdir', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files\/rename$/)) && method === 'POST') return { action: 'website.file.rename', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files$/)) && method === 'DELETE') return { action: 'website.file.delete', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)$/)) && method === 'PATCH') return { action: 'website.update', resourceType: 'website', resourceId: parts[0] };
   if (method === 'POST' && pathname === '/api/applications') return { action: 'application.create', resourceType: 'application', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/terminal/capabilities') return { action: 'terminal.capability.issued', resourceType: 'terminal', resourceId: 'new' };
