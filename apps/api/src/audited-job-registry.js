@@ -1,4 +1,5 @@
 import { currentAuditActorId } from './audit-request-context.js';
+import { isNewlyEnqueuedJob } from './job-registry.js';
 
 function safeAuditFailure(onAuditError, phase, jobId) {
   try { onAuditError(Object.freeze({ phase, jobId: typeof jobId === 'string' ? jobId : null })); } catch {}
@@ -23,6 +24,7 @@ export function createAuditedJobRegistry({
   async function enqueue(input) {
     const actorId = actorProvider() ?? 'system';
     const job = await registry.enqueue(input);
+    if (isNewlyEnqueuedJob(job) === false) return job;
     try {
       audit.linkJob({
         jobId: job.id,

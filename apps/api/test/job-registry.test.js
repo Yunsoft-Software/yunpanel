@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createJobRegistry, JobRegistryError } from '../src/job-registry.js';
+import { createJobRegistry, isNewlyEnqueuedJob, JobRegistryError } from '../src/job-registry.js';
 
 test('agent jobs move through queued, running and succeeded states exactly once', async () => {
   let clock = Date.parse('2026-09-08T21:00:00.000Z');
@@ -175,4 +175,36 @@ test('only queued jobs can be cancelled', async () => {
   const cancelled = await registry.cancel(job.id);
   assert.equal(cancelled.status, 'cancelled');
   assert.equal(await registry.claimNext('server-1'), null);
+});
+
+test('active resource jobs are locked and durable idempotency keys replay only identical work', async () => {
+  const registry = createJobRegistry();
+  const input = {
+    serverId: 'server-1',
+    type: 'domain.stage',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: { primaryDomain: 'example.com', aliases: [], targetType: 'static', target: { root: '/var/www/example' } },
+    resourceType: 'domain',
+    resourceId: 'domain-1',
+    idempotencyKey: 'github:9d4a4727-1aba-4d35-95fe-21db67042ce9:12345678-1234-4234-9234-123456789012',
+  };
+  const created = await registry.enqueue(input);
+  assert.equal(isNewlyEnqueuedJob(created), true);
+
+  const replayed = await registry.enqueue(input);
+  assert.equal(replayed.id, created.id);
+  assert.equal(isNewlyEnqueuedJob(replayed), false);
+
+  await assert.rejects(
+    registry.enqueue({ ...input, idempotencyKey: null }),
+    (error) => error instanceof JobRegistryError && error.code === 'domain_job_conflict',
+  );
+  await assert.rejects(
+    registry.enqueue({ ...input, payload: { ...input.payload, primaryDomain: 'changed.example.com' } }),
+    (error) => error instanceof JobRegistryError && error.code === 'job_idempotency_conflict',
+  );
+
+  const listed = await registry.listJobs();
+  assert.equal(listed.length, 1);
+  assert.equal(JSON.stringify(listed).includes(input.idempotencyKey), false);
 });

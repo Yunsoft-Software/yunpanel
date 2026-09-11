@@ -50,6 +50,8 @@ const MANAGED_SERVICE_ID_SET = new Set(MANAGED_SERVICE_IDS);
 const MANAGED_SERVICE_ACTION_SET = new Set(MANAGED_SERVICE_ACTIONS);
 const MAX_ARTIFACT_FILES = 100_000;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024;
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{16,200}$/;
+const enqueueCreated = Symbol('yunpanel.job.enqueueCreated');
 
 export class JobRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -80,6 +82,27 @@ function publicJob(job) {
     result: job.result ?? null,
     error: job.error ?? null,
   };
+}
+
+function enqueueResult(job, created) {
+  const result = publicJob(job);
+  Object.defineProperty(result, enqueueCreated, { value: created === true });
+  return result;
+}
+
+export function isNewlyEnqueuedJob(job) {
+  return typeof job?.[enqueueCreated] === 'boolean' ? job[enqueueCreated] : null;
+}
+
+function idempotencyDigest(input) {
+  return createHash('sha256').update(JSON.stringify({
+    serverId: input.serverId,
+    type: input.type,
+    operation: input.operation,
+    payload: input.payload,
+    resourceType: input.resourceType,
+    resourceId: input.resourceId,
+  })).digest('hex');
 }
 
 function validateError(error) {
@@ -633,7 +656,7 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     if (!initialized) await init();
   }
 
-  async function enqueue({ serverId, type, operation, payload, resourceType, resourceId }) {
+  async function enqueue({ serverId, type, operation, payload, resourceType, resourceId, idempotencyKey = null }) {
     await ensureInitialized();
     if (typeof serverId !== 'string' || !serverId) throw new JobRegistryError('invalid_server', 'serverId is required');
     if (typeof type !== 'string' || type.length < 1 || type.length > 80) throw new JobRegistryError('invalid_job_type', 'Job type is invalid');
@@ -641,6 +664,24 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new JobRegistryError('invalid_payload', 'Job payload must be an object');
     if (!RESOURCE_TYPES.has(resourceType)) throw new JobRegistryError('invalid_resource_type', 'Job resource type is invalid');
     if (typeof resourceId !== 'string' || !resourceId) throw new JobRegistryError('invalid_resource_id', 'Job resource id is required');
+    if (idempotencyKey !== null && (typeof idempotencyKey !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey))) {
+      throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
+    }
+
+    const requestDigest = idempotencyKey === null ? null : idempotencyDigest({
+      serverId, type, operation, payload, resourceType, resourceId,
+    });
+    const existing = idempotencyKey === null ? null : state.jobs.find((candidate) => candidate.idempotencyKey === idempotencyKey);
+    if (existing) {
+      if (existing.idempotencyDigest !== requestDigest) {
+        throw new JobRegistryError('job_idempotency_conflict', 'Job idempotency key was already used for different work', 409);
+      }
+      return enqueueResult(existing, false);
+    }
+    if (state.jobs.some((candidate) => candidate.resourceType === resourceType
+      && candidate.resourceId === resourceId && ['queued', 'running'].includes(candidate.status))) {
+      throw new JobRegistryError(`${resourceType}_job_conflict`, `A ${resourceType} operation is already queued or running`, 409);
+    }
 
     const id = randomUUID();
     const deploymentOperation = operation === OPERATIONS.APP_STATIC_DEPLOY || operation === OPERATIONS.APP_NODE_DEPLOY;
@@ -667,10 +708,12 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
       attempts: 0,
       result: null,
       error: null,
+      idempotencyKey,
+      idempotencyDigest: requestDigest,
     };
     state.jobs.push(job);
     await persist();
-    return publicJob(job);
+    return enqueueResult(job, true);
   }
 
   async function claimNext(serverId) {

@@ -5,6 +5,7 @@ import {
   createApplicationEnvironmentRegistry,
   ApplicationEnvironmentRegistryError,
 } from './application-environment-registry.js';
+import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
 import { createCertificateRegistry, CertificateRegistryError } from './certificate-registry.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
@@ -91,9 +92,15 @@ export function createApp({
   applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
     applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
   }),
+  applicationDeployQueue = null,
 } = {}) {
   const app = express();
   const reconciliationJobs = new Map();
+  const queueDeploy = applicationDeployQueue ?? createApplicationDeployQueue({
+    applicationRegistry,
+    applicationEnvironmentRegistry,
+    jobRegistry,
+  });
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
@@ -350,54 +357,8 @@ export function createApp({
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     const gitTarget = deploymentGitTarget(request.body, application.branch);
-    await ensureResourceJobIdle(jobRegistry, 'application', application.id);
-    if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
-
-    let operation;
-    let type;
-    let payload;
-    if (application.type === 'static') {
-      operation = OPERATIONS.APP_STATIC_DEPLOY;
-      type = 'app.static.deploy';
-      payload = {
-        applicationId: application.id,
-        repositoryUrl: application.repositoryUrl,
-        branch: application.branch,
-        gitTarget,
-        build: application.build,
-        retention: application.retention,
-      };
-    } else if (application.type === 'node') {
-      const environment = await applicationEnvironmentRegistry.environmentStatus(application.id);
-      operation = OPERATIONS.APP_NODE_DEPLOY;
-      type = 'app.node.deploy';
-      payload = {
-        applicationId: application.id,
-        repositoryUrl: application.repositoryUrl,
-        branch: application.branch,
-        gitTarget,
-        runtime: application.runtime,
-        retention: application.retention,
-        environmentRevision: environment.savedRevision,
-      };
-    } else {
-      throw new ApplicationRegistryError('unsupported_application_type', 'Application type is not deployable', 409);
-    }
-
-    const job = await jobRegistry.enqueue({
-      serverId: application.serverId,
-      type,
-      operation,
-      payload,
-      resourceType: 'application',
-      resourceId: application.id,
-    });
-    try {
-      return response.status(202).json({ data: { application: await applicationRegistry.markDeploying(application.id, job.id), job } });
-    } catch (error) {
-      await jobRegistry.cancel(job.id).catch(() => {});
-      throw error;
-    }
+    const queued = await queueDeploy({ applicationId: application.id, gitTarget });
+    return response.status(202).json({ data: { application: queued.application, job: queued.job } });
   });
   app.post('/api/applications/:applicationId/rollback', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
