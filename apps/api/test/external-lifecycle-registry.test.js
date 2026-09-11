@@ -94,7 +94,7 @@ test('external observation is revisioned and cannot fabricate readiness or diagn
   assert.doesNotMatch(JSON.stringify(hostile), /token_deadbeef/);
 });
 
-test('external tracking requires explicit mode and exact optional web Domain reference', async (t) => {
+test('DNS remains external-only while local mail domains start disabled', async (t) => {
   const state = await fixture(t);
   await assert.rejects(
     state.dns.createZone({ zoneName: 'other.example', webDomainId: 'missing-domain', managementMode: 'external' }),
@@ -105,8 +105,22 @@ test('external tracking requires explicit mode and exact optional web Domain ref
     (error) => error instanceof ExternalLifecycleRegistryError && error.code === 'dns_zone_web_domain_mismatch' && error.status === 409,
   );
   await assert.rejects(
-    state.mail.createMailDomain({ domainName: 'mail-only.example', webDomainId: null, managementMode: 'local' }),
-    (error) => error instanceof ExternalLifecycleRegistryError && error.code === 'mail_domain_management_mode_unsupported' && error.status === 409,
+    state.dns.createZone({ zoneName: 'mail-only.example', webDomainId: null, managementMode: 'local' }),
+    (error) => error instanceof ExternalLifecycleRegistryError && error.code === 'dns_zone_management_mode_unsupported' && error.status === 409,
+  );
+  const localMail = await state.mail.createMailDomain({
+    domainName: 'mail-only.example',
+    webDomainId: null,
+    managementMode: 'local',
+  });
+  assert.equal(localMail.managementMode, 'local');
+  assert.equal(localMail.status, 'disabled');
+  assert.equal(localMail.lastObservedAt, null);
+  await assert.rejects(
+    state.mail.recordObservation(localMail.id, { expectedRevision: 1, status: 'ready' }),
+    (error) => error instanceof ExternalLifecycleRegistryError
+      && error.code === 'mail_domain_observation_not_applicable'
+      && error.status === 409,
   );
 
   await state.dns.createZone({ zoneName: 'other.example', webDomainId: 'web-domain-2', managementMode: 'external' });

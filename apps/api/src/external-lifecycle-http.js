@@ -71,10 +71,14 @@ function mailConfigurationPreview(mailDomain) {
     scope: 'candidate_domain_only',
     candidateArtifacts: Object.freeze([artifact]),
     readyToApply: false,
-    blockers: Object.freeze([Object.freeze({
+    blockers: Object.freeze([Object.freeze(mailDomain.managementMode === 'external' ? {
       code: 'mail_domain_management_mode_external',
       message: 'This mail domain is tracked as externally managed and cannot change local mail configuration.',
-      action: 'Enable an explicit local managed-mail lifecycle before requesting an apply operation.',
+      action: 'Create an explicit local mail-domain identity before requesting local configuration.',
+    } : {
+      code: 'mail_configuration_apply_not_implemented',
+      message: 'Local mail configuration apply is not implemented.',
+      action: 'Keep the mail domain disabled until guarded staging, validation and rollback are available.',
     })]),
     sideEffects: false,
   });

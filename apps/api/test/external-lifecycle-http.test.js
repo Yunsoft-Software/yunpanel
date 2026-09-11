@@ -176,6 +176,22 @@ test('Owner explicitly tracks separate DNS and mail lifecycles without publishin
       sideEffects: false,
     }]);
 
+    const localMailResponse = await request(baseUrl, '/api/mail-domains', {
+      method: 'POST',
+      body: { name: 'local-mail.example.test', webDomainId: null, managementMode: 'local' },
+    });
+    assert.equal(localMailResponse.status, 201);
+    const localMail = await localMailResponse.json();
+    assert.equal(localMail.data.managementMode, 'local');
+    assert.equal(localMail.data.status, 'disabled');
+    assert.deepEqual(localMail.sideEffects, { mailConfigured: false, mailboxesCreated: false });
+    const localPreviewResponse = await request(baseUrl, `/api/mail-domains/${localMail.data.id}/config-preview`);
+    assert.equal(localPreviewResponse.status, 200);
+    const localPreview = (await localPreviewResponse.json()).data;
+    assert.equal(localPreview.readyToApply, false);
+    assert.equal(localPreview.sideEffects, false);
+    assert.deepEqual(localPreview.blockers.map((entry) => entry.code), ['mail_configuration_apply_not_implemented']);
+
     assert.equal((await request(baseUrl, `/api/dns-zones/${dnsPayload.data.id}`)).status, 200);
     assert.equal((await request(baseUrl, `/api/mail-domains/${mailPayload.data.id}`)).status, 200);
     const hiddenStatus = await request(baseUrl, '/api/dns-zones', {

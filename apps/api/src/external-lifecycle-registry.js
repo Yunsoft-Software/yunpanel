@@ -4,8 +4,10 @@ import path from 'node:path';
 import { assertUuid, DomainValidationError, normalizeDomainSet } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
-const MANAGEMENT_MODE = 'external';
+const EXTERNAL_MANAGEMENT_MODE = 'external';
+const LOCAL_MANAGEMENT_MODE = 'local';
 const STATUSES = new Set(['unverified', 'ready', 'degraded']);
+const LOCAL_MAIL_STATUSES = new Set(['disabled']);
 const WEB_DOMAIN_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const ERROR_CODE_PATTERN = /^[a-z0-9][a-z0-9_:-]{0,119}$/;
 const DNS_OBSERVATION_DIAGNOSES = Object.freeze({
@@ -68,6 +70,18 @@ function errorCode(value, status, prefix) {
   return null;
 }
 
+function managementMode(value, resourceType, prefix) {
+  if (value === EXTERNAL_MANAGEMENT_MODE
+    || (resourceType === 'mail_domain' && value === LOCAL_MANAGEMENT_MODE)) return value;
+  throw new ExternalLifecycleRegistryError(
+    `${prefix}_management_mode_unsupported`,
+    resourceType === 'mail_domain'
+      ? 'Mail domain managementMode must be external or local'
+      : 'Only explicit external lifecycle tracking is implemented',
+    409,
+  );
+}
+
 function publicResource(resource, { resourceType, nameField }) {
   const diagnosis = resourceType === 'dns_zone' ? dnsObservationDiagnosis(resource) : null;
   return Object.freeze({
@@ -118,20 +132,27 @@ function validatePersisted(value, options) {
     || Object.keys(value).some((key) => !allowed.has(key))) {
     throw new ExternalLifecycleRegistryError(`${prefix}_state_invalid`, `${resourceType} state is invalid`, 409);
   }
-  const normalizedStatus = STATUSES.has(value.status) ? value.status : null;
-  if (value.managementMode !== MANAGEMENT_MODE || !normalizedStatus
+  const normalizedManagementMode = managementMode(value.managementMode, resourceType, prefix);
+  const normalizedStatus = (normalizedManagementMode === EXTERNAL_MANAGEMENT_MODE ? STATUSES : LOCAL_MAIL_STATUSES).has(value.status)
+    ? value.status
+    : null;
+  if (!normalizedStatus
     || !Number.isSafeInteger(value.revision) || value.revision < 1) {
     throw new ExternalLifecycleRegistryError(`${prefix}_state_invalid`, `${resourceType} lifecycle state is invalid`, 409);
   }
   const lastObservedAt = value.lastObservedAt === null ? null : timestamp(value.lastObservedAt, 'lastObservedAt', prefix);
-  if ((normalizedStatus === 'unverified') !== (lastObservedAt === null)) {
+  if (normalizedManagementMode === EXTERNAL_MANAGEMENT_MODE
+    && (normalizedStatus === 'unverified') !== (lastObservedAt === null)) {
     throw new ExternalLifecycleRegistryError(`${prefix}_state_invalid`, `${resourceType} observation state is inconsistent`, 409);
+  }
+  if (normalizedManagementMode === LOCAL_MANAGEMENT_MODE && lastObservedAt !== null) {
+    throw new ExternalLifecycleRegistryError(`${prefix}_state_invalid`, 'Local mail-domain state cannot contain an external observation', 409);
   }
   return {
     id: id(value.id, prefix),
     [nameField]: canonicalName(value[nameField], prefix),
     webDomainId: webDomainId(value.webDomainId, prefix),
-    managementMode: MANAGEMENT_MODE,
+    managementMode: normalizedManagementMode,
     status: normalizedStatus,
     revision: value.revision,
     lastObservedAt,
@@ -160,6 +181,7 @@ export function createExternalLifecycleRegistry({
     throw new ExternalLifecycleRegistryError('external_lifecycle_dependencies_invalid', 'External lifecycle registry dependencies are invalid', 503);
   }
   const options = Object.freeze({ prefix, resourceType, collectionKey, nameField });
+  const managementModeValue = (value) => managementMode(value, resourceType, prefix);
   let state = { version: STORE_VERSION, [collectionKey]: [] };
   let initialized = false;
   let writeChain = Promise.resolve();
@@ -233,9 +255,7 @@ export function createExternalLifecycleRegistry({
 
   async function createResource({ name, webDomainId: requestedWebDomainId = null, managementMode } = {}) {
     await ensureInitialized();
-    if (managementMode !== MANAGEMENT_MODE) {
-      throw new ExternalLifecycleRegistryError(`${prefix}_management_mode_unsupported`, 'Only explicit external lifecycle tracking is implemented', 409);
-    }
+    const normalizedManagementMode = managementModeValue(managementMode);
     const normalizedName = canonicalName(name, prefix);
     const normalizedWebDomainId = webDomainId(requestedWebDomainId, prefix);
     const candidate = { [nameField]: normalizedName, webDomainId: normalizedWebDomainId };
@@ -251,8 +271,8 @@ export function createExternalLifecycleRegistry({
       id: randomUUID(),
       [nameField]: normalizedName,
       webDomainId: normalizedWebDomainId,
-      managementMode: MANAGEMENT_MODE,
-      status: 'unverified',
+      managementMode: normalizedManagementMode,
+      status: normalizedManagementMode === EXTERNAL_MANAGEMENT_MODE ? 'unverified' : 'disabled',
       revision: 1,
       lastObservedAt: null,
       lastErrorCode: null,
@@ -269,6 +289,9 @@ export function createExternalLifecycleRegistry({
     const normalizedId = id(resourceId, prefix);
     const resource = state[collectionKey].find((candidate) => candidate.id === normalizedId);
     if (!resource) throw new ExternalLifecycleRegistryError(`${prefix}_not_found`, `${resourceType} was not found`, 404);
+    if (resource.managementMode !== EXTERNAL_MANAGEMENT_MODE) {
+      throw new ExternalLifecycleRegistryError(`${prefix}_observation_not_applicable`, 'Local mail-domain state does not accept external observations', 409);
+    }
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
       throw new ExternalLifecycleRegistryError(`invalid_${prefix}_revision`, 'A positive expected revision is required');
     }
@@ -305,7 +328,7 @@ export function createExternalLifecycleRegistry({
 
 export const externalLifecycleRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
-  managementMode: MANAGEMENT_MODE,
+  managementModes: Object.freeze([EXTERNAL_MANAGEMENT_MODE, LOCAL_MANAGEMENT_MODE]),
   statuses: Object.freeze([...STATUSES]),
   webDomainId,
   canonicalName,
