@@ -153,15 +153,16 @@ sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-stat
 
 Static deploy requires its private receipt, `current -> releases/<job-id>` and a real release directory. Static rollback requires the exact persisted rollback intent plus retained real source/target release directories and `current` pointing at the requested rollback target. Stale/missing filesystem evidence is rejected.
 
-### Node deploy, rollback and restart
+### Node deploy, rollback, restart and process state
 
 ```bash
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-node-deploy <server-id> <job-id> --confirm
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-node-rollback <server-id> <job-id> --confirm
 sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-node-restart <server-id> <job-id> --confirm
+sudo /usr/local/bin/node /usr/lib/yunpanel/scripts/job-recovery.mjs recover-node-process <server-id> <job-id> --confirm
 ```
 
-Each path requires its private job-bound success receipt plus exact application desired-state and fresh read-only Node/systemd/health evidence for the expected release, service, port and health path. Environment secrets are not stored in recovery receipts and the Node mutation is never blindly repeated.
+Deploy, rollback and restart require their private job-bound success receipt plus exact Application state and fresh read-only Node/systemd/health evidence for the expected release, service, port and health path. Process enable/disable/start/stop is idempotent and instead requires exact private action/release/active-runtime intent plus fresh final-state evidence; recovery never replays `systemctl`. Environment secrets are not stored in recovery receipts or process jobs.
 
 ### Database create and delete
 

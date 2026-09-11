@@ -69,6 +69,7 @@ Rules:
 - existing encrypted secrets cannot be decrypted with a different key,
 - production key backup/rotation is an explicit secret-management procedure,
 - local Node deploy/restart/rollback materializes environment values directly from the application environment registry at execution time,
+- Node enable/disable/start/stop uses the active release runtime snapshot and does not materialize application secrets,
 - retained legacy-agent materialization exists only for rollback compatibility while that transport remains installed,
 - secret values are not included in generic deployment/restart/rollback job payloads or result records,
 - managed runtime keys `NODE_ENV`, `HOST`, `PORT` and `YUNPANEL_APPLICATION_ID` cannot be overridden by application environment input.

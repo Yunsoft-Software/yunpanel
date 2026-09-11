@@ -25,7 +25,7 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 - [ ] 30s local snapshot host inventory + allowlisted systemd services + Docker + Nginx'i aynı server record'a persist etsin; snapshot/binding fault executor'ı drain edip lock'u bıraksın.
 - [ ] Executor disk-full/read-only/lost acknowledgement senaryolarında successful host mutation'ı failed diye yeniden yazmasın; ambiguous state yeni claim/retry'ı durdursun.
 - [ ] `.recovery.json` sidecar 0600 ve secret-free kalsın; running/terminal/mixed recovery sınıflandırması restart sonrası korunsun.
-- [ ] Bütün güncel recovery komutlarını gerçek host evidence/receipt ile doğrula: read-only inspect, domain stage/activate, static deploy/rollback, Node deploy/restart/rollback, DB create/delete, service control/install/restart, system upgrade, certificate issue/renew.
+- [ ] Bütün güncel recovery komutlarını gerçek host evidence/receipt ile doğrula: read-only inspect, domain stage/activate, static deploy/rollback, Node deploy/restart/rollback/process enable-disable-start-stop, DB create/delete, service control/install/restart, system upgrade, certificate issue/renew.
 - [ ] Generic force-success/force-failed, blind mutation retry veya evidence-free journal clear yolu bulunmasın.
 - [ ] Node/static clone/install/build ve runtime dedicated `yunapp-*`; Node systemd unit `NoNewPrivileges=true`, boş capabilities ve bounded writable path kullansın.
 - [ ] Local ownership altında retained legacy heartbeat/command/environment/result 409 `server_managed_locally` kalsın.
@@ -64,6 +64,7 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 ## T-SERVICES-DB — P1/P2 gerçek host functionality
 
 - [ ] Node configuration preview/apply'i packaged Owner API'de runtime/startup/package-manager/mode/document-root değişiklikleriyle doğrula. Exact revision/digest/confirmation, immutable managed port, queued-job conflict ve pending desired config sırasında restart/status'un `activeRuntime` kullanması korunmalı; npm/pnpm/yarn işlemleri exact site user ve release-contained cwd ile çalışmalı.
+- [ ] Node process enable/disable/start/stop'u packaged Owner API'de exact release-bound confirmation ve `activeRuntime` ile doğrula. Start health failure servisi stopped duruma döndürmeli; API kesintisi sonrası `recover-node-process` yalnız exact private intent + gerçek systemd/health final-state kanıtıyla job'ı kapatmalı ve kör komut tekrarı yapmamalı.
 - [ ] Nginx, MariaDB/MySQL, Docker, Cron, Postfix, Dovecot, Rspamd inspect ve güvenli bir servis üzerinde install/start/stop/restart gerçek `apt/systemctl` ile çalışsın.
 - [ ] MariaDB↔MySQL conflict fail-closed kalsın; mevcut DB engine bozularak değiştirilmesin.
 - [ ] MySQL/MariaDB Unix socket root auth ile engine/version/non-system inventory; test DB create→inspect→drop→inspect çalışsın. System DB ve injection isimleri reddedilsin.

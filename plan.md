@@ -27,7 +27,8 @@ Aktif geliştirme dışı. Enterprise layout/component styling/data-table görü
 
 ## E. P2 — Node.js, static ve Git functionality
 
-- [ ] Node application process lifecycle: systemd enable/disable ile explicit start/stop işlemlerini durable job + recovery modeliyle ekle. Runtime major, startup file/npm script, npm/pnpm/yarn package manager, production/development mode ve release-contained document-root ayarları revisioned preview/apply ile yönetiliyor; çalışan release ayrı `activeRuntime` snapshot'ını koruyor. Mevcut deploy/restart/status/rollback akışını yeniden yazma.
+Node runtime major/startup/package-manager/mode/document-root ayarları revisioned preview/apply ile yönetilir; çalışan release ayrı `activeRuntime` snapshot'ını korur. Explicit systemd enable/disable/start/stop aktif release'e bağlı, onaylı durable job'dur ve kesinti sonrası exact intent + host final-state kanıtıyla kurtarılır. Mevcut deploy/restart/status/rollback akışları korunur.
+
 - [ ] Hosttaki kurulu Node sürümlerini inspect et; eksik runtime install/select ekle. Panelin kendi Node runtime'ı site runtime seçimiyle değişmemeli.
 - [ ] Git deploy'a explicit commit/tag seçimi ve private deploy key/token secret store ekle. Clone/fetch/install/build site Unix user'ıyla çalışmalı.
 - [ ] Env import validation, change metadata ve `saved-on-disk` / `applied-to-running-process` ayrımı ekle.

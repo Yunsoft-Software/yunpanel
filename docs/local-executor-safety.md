@@ -32,7 +32,7 @@ The current local operation map covers the asynchronous queue operations used by
 - Nginx domain stage/activate,
 - ACME certificate issue/renew,
 - static deploy/rollback,
-- Node deploy/rollback/restart/status.
+- Node deploy/rollback/restart/status and release-bound enable/disable/start/stop process control.
 
 Node environment secrets are materialized from the encrypted application environment registry at execution time. Plaintext application secrets are not copied into generic durable job payloads or public job responses.
 
@@ -99,7 +99,7 @@ Private recovery context contains execution intent needed by recovery without ad
 
 For host mutations whose final state alone cannot prove that the exact operation ran, the local executor may write a private success receipt after the host operation succeeds and before durable completion is attempted. Receipt write failure does not turn a successful host mutation into a failed mutation; normal completion is still attempted. If both evidence and completion are unavailable, recovery remains unresolved.
 
-Examples include domain activation, Node deploy/restart/rollback, managed-service install/restart, database deletion, YunPanel upgrade and certificate operations. Recovery cross-checks the receipt against exact persisted job/resource identity and fresh host state instead of trusting a receipt alone.
+Examples include domain activation, Node deploy/restart/rollback, managed-service install/restart, database deletion, YunPanel upgrade and certificate operations. Recovery cross-checks the receipt against exact persisted job/resource identity and fresh host state instead of trusting a receipt alone. Idempotent Node enable/disable/start/stop recovery does not need a historical receipt: it requires the exact private release/runtime/action intent and a fresh final state that proves that intent is currently satisfied, without replaying `systemctl`.
 
 ## Safe diagnostics
 
