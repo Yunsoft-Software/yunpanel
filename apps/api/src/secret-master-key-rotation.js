@@ -4,15 +4,17 @@ import { chmod, copyFile, lstat, mkdir, open, readFile, rename, rm } from 'node:
 import path from 'node:path';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
 import { rewrapDnsProviderCredentialSnapshot } from './dns-provider-credential-registry.js';
+import { rewrapMailboxSnapshot } from './mailbox-registry.js';
 import { createMfaVault } from './mfa-crypto.js';
 
 const ENV_STORE_VERSIONS = new Set([1, 2]);
 const ENV_ALGORITHM = 'aes-256-gcm';
-const MANIFEST_VERSION = 2;
+const MANIFEST_VERSION = 3;
 const MFA_TABLES = ['auth_mfa', 'auth_mfa_pending'];
 const AUTH_BACKUP_NAME = 'auth.sqlite';
 const ENVIRONMENT_BACKUP_NAME = 'application-environment-registry.json';
 const DNS_PROVIDER_BACKUP_NAME = 'dns-provider-credential-registry.json';
+const MAILBOX_BACKUP_NAME = 'mailbox-registry.json';
 
 export class SecretMasterKeyRotationError extends Error {
   constructor(code, message) {
@@ -201,6 +203,7 @@ export async function rotateSecretMasterKey({
   authDbPath,
   applicationEnvironmentStorePath,
   dnsProviderCredentialStorePath = null,
+  mailboxStorePath = null,
   currentMasterKey,
   nextMasterKey,
   backupDirectory,
@@ -214,6 +217,7 @@ export async function rotateSecretMasterKey({
   const dnsProviderPath = typeof dnsProviderCredentialStorePath === 'string' && dnsProviderCredentialStorePath
     ? path.resolve(dnsProviderCredentialStorePath)
     : null;
+  const mailboxPath = typeof mailboxStorePath === 'string' && mailboxStorePath ? path.resolve(mailboxStorePath) : null;
   const backupPath = path.resolve(backupDirectory);
   const currentKey = rootKey(currentMasterKey, 'Current');
   const nextKey = rootKey(nextMasterKey, 'Next');
@@ -222,17 +226,20 @@ export async function rotateSecretMasterKey({
   await fileMetadata(authPath);
   const environmentMetadata = await fileMetadata(environmentPath, { optional: true });
   const dnsProviderMetadata = dnsProviderPath ? await fileMetadata(dnsProviderPath, { optional: true }) : null;
+  const mailboxMetadata = mailboxPath ? await fileMetadata(mailboxPath, { optional: true }) : null;
   await mkdir(backupPath, { mode: 0o700 });
   await chmod(backupPath, 0o700);
 
   const backupAuthPath = path.join(backupPath, AUTH_BACKUP_NAME);
   const backupEnvironmentPath = path.join(backupPath, ENVIRONMENT_BACKUP_NAME);
   const backupDnsProviderPath = path.join(backupPath, DNS_PROVIDER_BACKUP_NAME);
+  const backupMailboxPath = path.join(backupPath, MAILBOX_BACKUP_NAME);
   const db = new DatabaseSync(authPath);
   db.exec('PRAGMA busy_timeout = 1500; PRAGMA foreign_keys = ON;');
   let transactionOpen = false;
   let environmentReplaced = false;
   let dnsProviderReplaced = false;
+  let mailboxReplaced = false;
   let manifest = {
     version: MANIFEST_VERSION,
     status: 'preparing',
@@ -241,14 +248,16 @@ export async function rotateSecretMasterKey({
       authDbPath: authPath,
       applicationEnvironmentStorePath: environmentPath,
       dnsProviderCredentialStorePath: dnsProviderPath,
+      mailboxStorePath: mailboxPath,
     },
     backups: {
       authDb: AUTH_BACKUP_NAME,
       applicationEnvironmentStore: environmentMetadata ? ENVIRONMENT_BACKUP_NAME : null,
       dnsProviderCredentialStore: dnsProviderMetadata ? DNS_PROVIDER_BACKUP_NAME : null,
+      mailboxStore: mailboxMetadata ? MAILBOX_BACKUP_NAME : null,
     },
     backupHashes: {},
-    counts: { mfa: 0, mfaPending: 0, applicationSecrets: 0, dnsProviderSecrets: 0 },
+    counts: { mfa: 0, mfaPending: 0, applicationSecrets: 0, dnsProviderSecrets: 0, mailboxSecrets: 0 },
   };
 
   try {
@@ -264,6 +273,11 @@ export async function rotateSecretMasterKey({
       await copyFile(dnsProviderPath, backupDnsProviderPath);
       await chmod(backupDnsProviderPath, 0o600);
       manifest.backupHashes.dnsProviderCredentialStore = await sha256File(backupDnsProviderPath);
+    }
+    if (mailboxMetadata) {
+      await copyFile(mailboxPath, backupMailboxPath);
+      await chmod(backupMailboxPath, 0o600);
+      manifest.backupHashes.mailboxStore = await sha256File(backupMailboxPath);
     }
 
     const environmentText = environmentMetadata ? await readFile(environmentPath, 'utf8') : null;
@@ -294,6 +308,24 @@ export async function rotateSecretMasterKey({
       manifest.counts.dnsProviderSecrets = snapshot.credentials.length;
       nextDnsProviderText = `${JSON.stringify(nextSnapshot, null, 2)}\n`;
     }
+    const mailboxText = mailboxMetadata ? await readFile(mailboxPath, 'utf8') : null;
+    let nextMailboxText = null;
+    if (mailboxText !== null) {
+      let snapshot;
+      try { snapshot = JSON.parse(mailboxText); }
+      catch { throw rotationError('invalid_mailbox_store', 'Mailbox store is not valid JSON'); }
+      let nextSnapshot;
+      try {
+        nextSnapshot = rewrapMailboxSnapshot(snapshot, {
+          currentMasterKey: currentKey,
+          nextMasterKey: nextKey,
+        });
+      } catch {
+        throw rotationError('mailbox_secret_decryption_failed', 'Mailbox credentials cannot be decrypted with the current key');
+      }
+      manifest.counts.mailboxSecrets = snapshot.mailboxes.length;
+      nextMailboxText = `${JSON.stringify(nextSnapshot, null, 2)}\n`;
+    }
 
     const activeRows = readMfaRows(db, 'auth_mfa');
     const pendingRows = readMfaRows(db, 'auth_mfa_pending');
@@ -315,6 +347,9 @@ export async function rotateSecretMasterKey({
     if (dnsProviderText !== null && await readFile(dnsProviderPath, 'utf8') !== dnsProviderText) {
       throw rotationError('concurrent_dns_provider_change', 'DNS provider credential state changed after rotation preflight');
     }
+    if (mailboxText !== null && await readFile(mailboxPath, 'utf8') !== mailboxText) {
+      throw rotationError('concurrent_mailbox_change', 'Mailbox credential state changed after rotation preflight');
+    }
 
     updateMfaRows(db, 'auth_mfa', nextActiveRows);
     updateMfaRows(db, 'auth_mfa_pending', nextPendingRows);
@@ -328,6 +363,10 @@ export async function rotateSecretMasterKey({
     if (nextDnsProviderText !== null) {
       await atomicWrite(dnsProviderPath, nextDnsProviderText);
       dnsProviderReplaced = true;
+    }
+    if (nextMailboxText !== null) {
+      await atomicWrite(mailboxPath, nextMailboxText);
+      mailboxReplaced = true;
     }
     db.exec('COMMIT');
     transactionOpen = false;
@@ -347,9 +386,13 @@ export async function rotateSecretMasterKey({
       try { await restoreFileFromBackup(backupDnsProviderPath, dnsProviderPath); dnsProviderReplaced = false; }
       catch { /* Preserve the original error; manifest and backups remain for explicit rollback. */ }
     }
+    if (mailboxReplaced && mailboxMetadata) {
+      try { await restoreFileFromBackup(backupMailboxPath, mailboxPath); mailboxReplaced = false; }
+      catch { /* Preserve the original error; manifest and backups remain for explicit rollback. */ }
+    }
     manifest = {
       ...manifest,
-      status: environmentReplaced || dnsProviderReplaced ? 'rollback_required' : 'failed',
+      status: environmentReplaced || dnsProviderReplaced || mailboxReplaced ? 'rollback_required' : 'failed',
       failedAt: new Date(now()).toISOString(),
       error: safeManifestError(error),
     };
@@ -364,6 +407,7 @@ export async function rollbackSecretMasterKey({
   authDbPath,
   applicationEnvironmentStorePath,
   dnsProviderCredentialStorePath = null,
+  mailboxStorePath = null,
   backupDirectory,
   now = Date.now,
 } = {}) {
@@ -375,30 +419,40 @@ export async function rollbackSecretMasterKey({
   const dnsProviderPath = typeof dnsProviderCredentialStorePath === 'string' && dnsProviderCredentialStorePath
     ? path.resolve(dnsProviderCredentialStorePath)
     : null;
+  const mailboxPath = typeof mailboxStorePath === 'string' && mailboxStorePath ? path.resolve(mailboxStorePath) : null;
   const backupPath = path.resolve(backupDirectory);
   const manifestPath = path.join(backupPath, 'manifest.json');
   let manifest;
   try { manifest = JSON.parse(await readFile(manifestPath, 'utf8')); }
   catch { throw rotationError('invalid_rotation_manifest', 'Rotation manifest is missing or invalid'); }
-  if (![1, MANIFEST_VERSION].includes(manifest?.version) || typeof manifest.sources?.authDbPath !== 'string'
+  if (![1, 2, MANIFEST_VERSION].includes(manifest?.version) || typeof manifest.sources?.authDbPath !== 'string'
     || typeof manifest.sources?.applicationEnvironmentStorePath !== 'string') {
     throw rotationError('invalid_rotation_manifest', 'Rotation manifest is unsupported');
   }
   if (path.resolve(manifest.sources.authDbPath) !== authPath || path.resolve(manifest.sources.applicationEnvironmentStorePath) !== environmentPath) {
     throw rotationError('rotation_target_mismatch', 'Rotation manifest does not belong to the requested store paths');
   }
-  if (manifest.version === MANIFEST_VERSION
+  if (manifest.version >= 2
     && (manifest.sources.dnsProviderCredentialStorePath === null
       ? dnsProviderPath !== null
       : !dnsProviderPath || path.resolve(manifest.sources.dnsProviderCredentialStorePath) !== dnsProviderPath)) {
     throw rotationError('rotation_target_mismatch', 'Rotation manifest does not belong to the requested DNS provider store path');
   }
+  if (manifest.version >= 3
+    && (manifest.sources.mailboxStorePath === null
+      ? mailboxPath !== null
+      : !mailboxPath || path.resolve(manifest.sources.mailboxStorePath) !== mailboxPath)) {
+    throw rotationError('rotation_target_mismatch', 'Rotation manifest does not belong to the requested mailbox store path');
+  }
   if (manifest.backups?.authDb !== AUTH_BACKUP_NAME || ![null, ENVIRONMENT_BACKUP_NAME].includes(manifest.backups?.applicationEnvironmentStore)) {
     throw rotationError('invalid_rotation_manifest', 'Rotation manifest contains unsupported backup paths');
   }
-  if (manifest.version === MANIFEST_VERSION
+  if (manifest.version >= 2
     && ![null, DNS_PROVIDER_BACKUP_NAME].includes(manifest.backups?.dnsProviderCredentialStore)) {
     throw rotationError('invalid_rotation_manifest', 'Rotation manifest contains an unsupported DNS provider backup path');
+  }
+  if (manifest.version >= 3 && ![null, MAILBOX_BACKUP_NAME].includes(manifest.backups?.mailboxStore)) {
+    throw rotationError('invalid_rotation_manifest', 'Rotation manifest contains an unsupported mailbox backup path');
   }
 
   const backupAuthPath = path.join(backupPath, AUTH_BACKUP_NAME);
@@ -408,12 +462,21 @@ export async function rollbackSecretMasterKey({
   await fileMetadata(backupAuthPath);
 
   let backupDnsProviderPath = null;
-  if (manifest.version === MANIFEST_VERSION && manifest.backups.dnsProviderCredentialStore === DNS_PROVIDER_BACKUP_NAME) {
+  if (manifest.version >= 2 && manifest.backups.dnsProviderCredentialStore === DNS_PROVIDER_BACKUP_NAME) {
     backupDnsProviderPath = path.join(backupPath, DNS_PROVIDER_BACKUP_NAME);
     if (await sha256File(backupDnsProviderPath) !== manifest.backupHashes?.dnsProviderCredentialStore) {
       throw rotationError('rotation_backup_tampered', 'DNS provider credential backup does not match the rotation manifest');
     }
     await fileMetadata(backupDnsProviderPath);
+  }
+
+  let backupMailboxPath = null;
+  if (manifest.version >= 3 && manifest.backups.mailboxStore === MAILBOX_BACKUP_NAME) {
+    backupMailboxPath = path.join(backupPath, MAILBOX_BACKUP_NAME);
+    if (await sha256File(backupMailboxPath) !== manifest.backupHashes?.mailboxStore) {
+      throw rotationError('rotation_backup_tampered', 'Mailbox backup does not match the rotation manifest');
+    }
+    await fileMetadata(backupMailboxPath);
   }
 
   if (manifest.backups.applicationEnvironmentStore === ENVIRONMENT_BACKUP_NAME) {
@@ -431,8 +494,14 @@ export async function rollbackSecretMasterKey({
 
   if (backupDnsProviderPath) {
     await restoreFileFromBackup(backupDnsProviderPath, dnsProviderPath);
-  } else if (manifest.version === MANIFEST_VERSION && dnsProviderPath) {
+  } else if (manifest.version >= 2 && dnsProviderPath) {
     await rm(dnsProviderPath, { force: true });
+  }
+
+  if (backupMailboxPath) {
+    await restoreFileFromBackup(backupMailboxPath, mailboxPath);
+  } else if (manifest.version >= 3 && mailboxPath) {
+    await rm(mailboxPath, { force: true });
   }
 
   // The service must be stopped. Removing sidecar WAL/SHM files prevents pages from the

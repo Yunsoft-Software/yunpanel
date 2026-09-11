@@ -8,10 +8,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
 import { createDnsProviderCredentialRegistry } from '../src/dns-provider-credential-registry.js';
 import { createMfaVault } from '../src/mfa-crypto.js';
+import { createMailboxRegistry } from '../src/mailbox-registry.js';
+import { verifyMailboxPassword } from '../src/mailbox-password.js';
 import { rollbackSecretMasterKey, rotateSecretMasterKey } from '../src/secret-master-key-rotation.js';
 
 const APPLICATION_ID = '11111111-1111-4111-8111-111111111111';
 const DNS_ZONE_ID = '22222222-2222-4222-8222-222222222222';
+const MAIL_DOMAIN_ID = '33333333-3333-4333-8333-333333333333';
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-key-rotation-'));
@@ -19,6 +22,7 @@ async function fixture(t) {
   const authDbPath = path.join(directory, 'auth.sqlite');
   const applicationEnvironmentStorePath = path.join(directory, 'application-environment-registry.json');
   const dnsProviderCredentialStorePath = path.join(directory, 'dns-provider-credential-registry.json');
+  const mailboxStorePath = path.join(directory, 'mailbox-registry.json');
   const currentMasterKey = randomBytes(32);
   const nextMasterKey = randomBytes(32);
   const oldVault = createMfaVault(currentMasterKey);
@@ -54,11 +58,24 @@ async function fixture(t) {
     provider: 'cloudflare',
     token: 'cloudflare_rotation_private_token_1234',
   });
+  const mailbox = createMailboxRegistry({
+    filePath: mailboxStorePath,
+    masterKey: currentMasterKey,
+    getMailDomain: async (id) => id === MAIL_DOMAIN_ID
+      ? { id, domainName: 'example.com', managementMode: 'local' }
+      : null,
+  });
+  await mailbox.createMailbox({
+    mailDomainId: MAIL_DOMAIN_ID,
+    address: 'owner@example.com',
+    password: 'mailbox rotation password',
+  });
   return {
     directory,
     authDbPath,
     applicationEnvironmentStorePath,
     dnsProviderCredentialStorePath,
+    mailboxStorePath,
     currentMasterKey,
     nextMasterKey,
   };
@@ -106,27 +123,41 @@ async function materializeDnsCredential(dnsProviderCredentialStorePath, masterKe
   return registry.materialize(metadata.id);
 }
 
+async function materializeMailbox(mailboxStorePath, masterKey) {
+  const registry = createMailboxRegistry({
+    filePath: mailboxStorePath,
+    masterKey,
+    getMailDomain: async (id) => id === MAIL_DOMAIN_ID
+      ? { id, domainName: 'example.com', managementMode: 'local' }
+      : null,
+  });
+  await registry.init();
+  return registry.materializeEnabledAccounts();
+}
+
 function rollbackOptions(state, backupDirectory, now) {
   return {
     authDbPath: state.authDbPath,
     applicationEnvironmentStorePath: state.applicationEnvironmentStorePath,
     dnsProviderCredentialStorePath: state.dnsProviderCredentialStorePath,
+    mailboxStorePath: state.mailboxStorePath,
     backupDirectory,
     ...(now ? { now } : {}),
   };
 }
 
-test('rotation rewraps application, MFA and DNS-provider secrets together and rollback restores the old key', async (t) => {
+test('rotation rewraps application, MFA, DNS-provider and mailbox secrets together and rollback restores the old key', async (t) => {
   const state = await fixture(t);
   const backupDirectory = path.join(state.directory, 'backup');
   const manifest = await rotateSecretMasterKey({ ...state, backupDirectory, now: () => 1_800_000_000_000 });
   assert.equal(manifest.status, 'applied');
   assert.deepEqual(manifest.counts, {
-    mfa: 1, mfaPending: 1, applicationSecrets: 2, dnsProviderSecrets: 1,
+    mfa: 1, mfaPending: 1, applicationSecrets: 2, dnsProviderSecrets: 1, mailboxSecrets: 1,
   });
   assert.match(manifest.backupHashes.authDb, /^[a-f0-9]{64}$/);
   assert.match(manifest.backupHashes.applicationEnvironmentStore, /^[a-f0-9]{64}$/);
   assert.match(manifest.backupHashes.dnsProviderCredentialStore, /^[a-f0-9]{64}$/);
+  assert.match(manifest.backupHashes.mailboxStore, /^[a-f0-9]{64}$/);
 
   const rotated = readMfa(state.authDbPath);
   const nextVault = createMfaVault(state.nextMasterKey);
@@ -142,8 +173,13 @@ test('rotation rewraps application, MFA and DNS-provider secrets together and ro
   });
   assert.equal((await materializeDnsCredential(state.dnsProviderCredentialStorePath, state.nextMasterKey)).token,
     'cloudflare_rotation_private_token_1234');
+  assert.equal(await verifyMailboxPassword(
+    'mailbox rotation password',
+    (await materializeMailbox(state.mailboxStorePath, state.nextMasterKey))[0].passwordHash,
+  ), true);
   await assert.rejects(() => materialize(state.applicationEnvironmentStorePath, state.currentMasterKey), { code: 'secret_decryption_failed' });
   await assert.rejects(() => materializeDnsCredential(state.dnsProviderCredentialStorePath, state.currentMasterKey), { code: 'secret_decryption_failed' });
+  await assert.rejects(() => materializeMailbox(state.mailboxStorePath, state.currentMasterKey), { code: 'secret_decryption_failed' });
 
   const rolledBack = await rollbackSecretMasterKey(rollbackOptions(state, backupDirectory, () => 1_800_000_100_000));
   assert.equal(rolledBack.status, 'rolled_back');
@@ -157,6 +193,10 @@ test('rotation rewraps application, MFA and DNS-provider secrets together and ro
   });
   assert.equal((await materializeDnsCredential(state.dnsProviderCredentialStorePath, state.currentMasterKey)).token,
     'cloudflare_rotation_private_token_1234');
+  assert.equal(await verifyMailboxPassword(
+    'mailbox rotation password',
+    (await materializeMailbox(state.mailboxStorePath, state.currentMasterKey))[0].passwordHash,
+  ), true);
 });
 
 test('wrong current key fails before replacing any live store', async (t) => {

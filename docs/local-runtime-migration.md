@@ -32,13 +32,14 @@ YUNPANEL_DOCKER_WORKLOAD_STORE=/var/lib/yunpanel/control-plane/docker-workload-r
 YUNPANEL_DNS_HOSTING_STORE=/var/lib/yunpanel/control-plane/dns-hosting-registry.json
 YUNPANEL_DNS_CREDENTIAL_STORE=/var/lib/yunpanel/control-plane/dns-provider-credential-registry.json
 YUNPANEL_MAIL_DOMAIN_STORE=/var/lib/yunpanel/control-plane/mail-domain-registry.json
+YUNPANEL_MAILBOX_STORE=/var/lib/yunpanel/control-plane/mailbox-registry.json
 YUNPANEL_APPLICATION_ENVIRONMENT_STORE=/var/lib/yunpanel/control-plane/application-environment-registry.json
 YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.sqlite
 ```
 
 Custom certificate material is derived from `YUNPANEL_CERTIFICATE_STORE` and stored in the sibling `custom-certificates/<certificate-uuid>` directory. On the packaged layout this is `/var/lib/yunpanel/control-plane/custom-certificates`; preserve that directory together with the versioned certificate registry during backup, migration, upgrade and rollback.
 
-`YUNPANEL_DNS_CREDENTIAL_STORE` contains only encrypted DNS-provider tokens, but it is inseparable from the matching `YUNPANEL_SECRET_MASTER_KEY`. Preserve and rotate it with the application secret store and auth database; never expose it to `yunpanel-web.service`.
+`YUNPANEL_DNS_CREDENTIAL_STORE` and `YUNPANEL_MAILBOX_STORE` contain only encrypted provider tokens and mailbox hashes, but both are inseparable from the matching `YUNPANEL_SECRET_MASTER_KEY`. Preserve and rotate them with the application secret store and auth database; never expose them to `yunpanel-web.service`.
 
 Packaged migration/recovery tooling rejects relevant state paths outside the control-plane root instead of copying or mutating unknown state automatically.
 
