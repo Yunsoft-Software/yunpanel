@@ -92,6 +92,8 @@ Son tasarım aşamasında korunacak hedefler:
 
 ## 10. Git, test ve otomasyon
 
+- IP adresi `.44` ile biten ve Plesk kurulu olan sunucu YunPanel geliştirme ve testlerinin kesinlikle kapsamı dışındadır. Codex'e bağlı veya erişilebilir görünse bile bu sunucuya SSH bağlantısı, salt okunur audit, test, deploy, paket kurulumu, servis işlemi ya da başka herhangi bir amaçla dokunulmayacak.
+- Sunucu işlemlerinden önce hedef adres doğrulanacak ve `.44` olmadığı açıkça teyit edilecek. Test/deploy yalnızca repo dışı `.local/test-server.env` dosyasında açıkça tanımlanan YunPanel test sunucusunda yürütülecek; hedef belirsizse hiçbir bağlantı kurulmayacak.
 - Kullanıcı açıkça ayrı branch istemedikçe yeni branch oluşturma veya başka branch üzerinde geliştirme yapma. Doğrudan güncel `main` üzerinde küçük commitlerle ilerle; bu kural kodlama araçları için de geçerlidir.
 - Mevcut branch birleştirmelerinde iki tarafın commit geçmişini ve değişikliklerini koru. Force push, geçmiş silme, reset veya tek tarafı seçerek içerik ezme yapma. Eşzamanlı değişiklikte güncel `main` tekrar okunup kayıpsız birleştirilir; branch silme kendiliğinden yapılmaz.
 - Küçük, tek amaçlı commitlerle ilerle; refactor ve özellik geliştirmesini mümkün olduğunca ayır. İlgisiz dosyaları değiştirme; eşzamanlı kullanıcı değişikliklerini ezme.
