@@ -49,6 +49,7 @@ Do not replace structured operations with an unauthenticated generic shell or ma
 - Static and Node deploys accept an explicit branch, tag or immutable 40-character commit target; Git fetch runs as the dedicated site user and the resolved target is retained with release history.
 - Per-Application GitHub token or unencrypted SSH deploy-key credentials are AES-256-GCM encrypted by the existing master-key store, materialized only for clone/fetch and excluded from application env, job/recovery result and audit metadata.
 - AES-256-GCM application environment storage, strict bounded `.env` merge/replace import, revisioned change metadata and explicit saved-on-disk versus applied-to-running-process state; plaintext values never enter generic job records.
+- Owner-only local log backend for Node journals, allowlisted systemd units, Nginx access/error files and private deploy output. Queries have bounded time/entry/byte windows, server-side search/level filters, cursor paging, credential redaction, NDJSON snapshots and text downloads.
 - Managed-service inspect/install/start/stop/restart support for the current allowlisted host services.
 - MySQL/MariaDB local-socket inventory and database create/delete job flows with result sanitization.
 - Durable queued/running/terminal job persistence with a versioned private recovery sidecar. Terminal-but-unreconciled and supported running-recovery state survives restart and blocks unsafe new work.

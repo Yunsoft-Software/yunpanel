@@ -99,6 +99,8 @@ Managed Node runtime installation downloads only the official `latest-v22.x` or 
 
 Private Git deploy credentials are fetched from the master-key-encrypted Application store only after a static/Node deployment job is claimed. GitHub tokens use a fixed packaged askpass helper and appear only in the fetch process environment, never in URL/argv/job/recovery/audit/build environment. SSH deploy keys are written with `0600` to a deterministic private site directory, owned by the dedicated `yunapp-*` user, used with strict host-key checking against `/etc/ssh/ssh_known_hosts`, and removed before dependency lifecycle/build commands. Only unencrypted keys are accepted; no passphrase is persisted.
 
+Local log access never accepts a caller-provided systemd unit or file path. Node unit names are derived from the Application UUID; server units come from the managed catalog plus the two YunPanel services; Nginx file reads are fixed to current access/error logs and use no-follow open plus inode verification. Journal, Nginx and deploy output is control-character-cleaned, credential-redacted and bounded before it crosses the Owner API. Deploy logs are operational diagnostics, not durable job/recovery evidence, and a log write failure cannot recast host execution as success or failure.
+
 ## Execution evidence
 
 For host mutations whose final state alone cannot prove that the exact operation ran, the local executor may write a private success receipt after the host operation succeeds and before durable completion is attempted. Receipt write failure does not turn a successful host mutation into a failed mutation; normal completion is still attempted. If both evidence and completion are unavailable, recovery remains unresolved.

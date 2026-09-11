@@ -153,6 +153,22 @@ Terminal reconciliation does not re-run a host mutation. Running recovery is lim
 
 See `docs/local-runtime-migration.md` for the exact commands and evidence requirements.
 
+## Local log API
+
+Log reads are sensitive Owner-management operations and remain unavailable for Read Only accounts, remote legacy-agent records or a panel without an active local-server binding. Supported routes are:
+
+```text
+GET /api/applications/:applicationId/logs/node
+GET /api/servers/:serverId/logs/:serviceId
+GET /api/jobs/:jobId/logs/deploy
+```
+
+Append `/stream` for a finite NDJSON snapshot or `/download` for a bounded `text/plain` attachment. This is not an open-ended SSE tail. `serviceId` accepts the managed service catalog, `yunpanel-api`, `yunpanel-web`, `nginx-access` or `nginx-error`; arbitrary systemd units and filesystem paths are never accepted.
+
+Query fields are exact: `since`, `until`, `level`, `q`, `cursor` and `limit`. The default range is 24 hours and a single request cannot exceed 30 days, 200 entries or the reader byte cap; deploy downloads may request at most 1,000 already-bounded private entries. Do not put secrets into `q` or any URL. Journal cursors, Nginx byte cursors and deploy sequence cursors are source-specific and fail closed when malformed or stale.
+
+Deploy output is stored beside the durable job registry under private `0700`/`0600` paths. Each job retains at most 1,000 entries and 512 KiB; global retention is 30 days and 500 job files. ANSI/control characters, common credential assignments, Authorization values, authenticated URLs, GitHub tokens, JWTs and private-key blocks are redacted before persistence or response. This defense does not make application logs an appropriate place to print secrets.
+
 ## Validation
 
 Run repository policy validation:
