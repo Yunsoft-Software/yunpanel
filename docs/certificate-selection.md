@@ -2,10 +2,26 @@
 
 YunPanel supports two production certificate sources for a local managed Domain:
 
-- `acme`: Certbot-issued material with automatic renewal;
+- `acme`: Certbot-issued HTTP-01 or Cloudflare DNS-01 material with automatic renewal;
 - `custom`: Owner-supplied material with manual renewal.
 
-The feature does not add DNS-01 or wildcard issuance. A custom wildcard certificate can cover an ordinary current hostname when X.509 wildcard matching permits it, but DNS-01 issuance/renewal remains in `plan.md`.
+ACME DNS-01 can issue exact-name or wildcard certificates. Custom wildcard material can also cover an ordinary current hostname when X.509 wildcard matching permits it. Website hostname state never becomes wildcard state: `domains` remains the exact current primary hostname and aliases, while ACME's actual SAN request is stored separately as `certificateNames`.
+
+## Managed ACME challenge flow
+
+`POST /api/domains/:domainId/certificates/issue` accepts only `email`, `staging` and optional `challenge`. Omitting the challenge, or sending exactly `{ "type": "http-01" }`, keeps the existing webroot flow and requires the current Domain revision to be active.
+
+DNS issuance sends exactly `{ "type": "dns-01", "dnsZoneId": "<uuid>", "wildcard": true|false }`. It is limited to the local managed Server. The selected persistent DNS zone must contain the Domain's primary hostname and every alias, and that zone must have a configured Cloudflare credential. Exact DNS-01 requests use the current hostname set. A wildcard request asks for the zone apex plus `*.zone`; any deeper hostname not covered by that one-label wildcard remains an explicit SAN. DNS-01 does not claim that Nginx or general DNS records are active.
+
+Provider credentials are Owner-only:
+
+- `GET /api/dns-zones/:dnsZoneId/provider-credential` returns masked configuration metadata;
+- `PUT` accepts exactly `provider`, `token` and `confirmation=configure-dns-provider:<zone-uuid>:cloudflare`;
+- `DELETE` accepts exactly `confirmation=delete-dns-provider:<zone-uuid>`.
+
+The token is AES-256-GCM encrypted in `YUNPANEL_DNS_CREDENTIAL_STORE` with `YUNPANEL_SECRET_MASTER_KEY`. Public certificate/job/audit data carries only the bounded provider, credential ID, DNS-zone ID and propagation delay. The local root executor decrypts the token only when it claims the exact certificate operation. Certbot receives a mode-`0600` temporary credentials file below `/run/yunpanel/acme-credentials`; the token is never placed in argv and the temporary directory is removed after success or failure.
+
+Production and dry-run renewal reuse the challenge bound to the certificate record. Manual renewal and the automatic renewal sweep both require the same credential ID/provider still to be configured; automatic scheduling skips DNS certificates whose credential is unavailable instead of queuing an operation that cannot materialize its secret. The Ubuntu package installs the Cloudflare Certbot plugin, but actual Cloudflare authorization, TXT propagation/cleanup and Let's Encrypt behavior are external acceptance work in `todo.md`.
 
 ## Guarded Owner flow
 
@@ -23,6 +39,6 @@ Custom material is installed by the packaged root API below `/var/lib/yunpanel/c
 
 Certbot paths remain fixed below `/etc/letsencrypt/live/<cert-name>`. Certbot symlinks are allowed only at those exact paths. Production issue/renew inspection now reads both `cert.pem` and `privkey.pem` and rejects a mismatch before returning a successful result. Domain staging repeats stored-material inspection for the local Server, including custom material, so post-import file replacement fails before a TLS job is queued.
 
-Public import/selection responses omit PEM, private-key paths and material digests. Common management audit records only the bounded Domain-scoped action and outcome; request bodies are not audit metadata. Certificate registry state upgrades in memory from version 1 ACME records to version 2 source/renewal metadata and is written only on the next mutation.
+Public import/selection responses omit PEM, private-key paths and material digests. Common management audit records only the bounded Domain-scoped action and outcome; request bodies are not audit metadata. Certificate registry state upgrades in memory from version 1 ACME records through version 2 source/renewal metadata to version 3 `certificateNames`/challenge metadata and is written only on the next mutation.
 
-Source tests use real short-lived OpenSSL certificates to cover matched and mismatched keys, wildcard hostname coverage, private file modes, concurrent import, selection, store migration, ACME inspection and post-import tamper rejection. The required packaged Ubuntu, Nginx, HTTPS, permission, restart, upgrade and backup/restore acceptance remains in `todo.md`.
+Source tests use real short-lived OpenSSL certificates to cover matched and mismatched keys, wildcard hostname coverage, private file modes, concurrent import, selection, store migration, ACME inspection, private DNS credential materialization/cleanup and post-import tamper rejection. The required packaged Ubuntu, Nginx, Cloudflare/Let's Encrypt, HTTPS, permission, restart, upgrade and backup/restore acceptance remains in `todo.md`.

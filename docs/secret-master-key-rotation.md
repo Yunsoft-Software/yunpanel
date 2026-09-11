@@ -1,11 +1,12 @@
 # Secret master-key rotation
 
-YunPanel uses one 32-byte root key (`YUNPANEL_SECRET_MASTER_KEY`) for two encrypted stores:
+YunPanel uses one 32-byte root key (`YUNPANEL_SECRET_MASTER_KEY`) across three persisted secret surfaces:
 
 - application environment variables marked as secret;
-- active and pending MFA TOTP secrets in the authentication SQLite database.
+- active and pending MFA TOTP secrets in the authentication SQLite database;
+- DNS-provider API tokens in the DNS credential store.
 
-Changing the environment variable by itself makes existing secrets unreadable. Use the offline rotation command so both stores are rewrapped together and a rollback snapshot is created first.
+Changing the environment variable by itself makes existing secrets unreadable. Use the offline rotation command so every configured secret surface is rewrapped together and a rollback snapshot is created first.
 
 ## Safety requirements
 
@@ -14,7 +15,7 @@ Use Node.js 24.11.1 or newer and the same packaged YunPanel code that will be st
 Before starting:
 
 1. Confirm independent SSH/provider-console access to the host.
-2. Record the exact production `YUNPANEL_AUTH_DB` and `YUNPANEL_APPLICATION_ENVIRONMENT_STORE` paths. The latter also contains internal encrypted Git deployment credentials and GitHub webhook secrets, so the same rotation/rollback covers them.
+2. Record the exact production `YUNPANEL_AUTH_DB`, `YUNPANEL_APPLICATION_ENVIRONMENT_STORE` and `YUNPANEL_DNS_CREDENTIAL_STORE` paths. The application store also contains internal encrypted Git deployment credentials and GitHub webhook secrets; the DNS store contains encrypted provider tokens.
 3. Ensure the current `YUNPANEL_SECRET_MASTER_KEY` is recoverable from a separate protected secret store. The rotation backup intentionally does **not** contain the raw old or new key.
 4. Stop `yunpanel-api.service` and keep it stopped until the data rotation and API environment update are complete. `--confirm-offline` is an operator acknowledgement; it is not a substitute for stopping the service.
 5. Choose a new, non-existing backup directory under a private service-owned location. Rotation refuses to reuse an existing backup directory.
@@ -41,6 +42,7 @@ Run the rotation as the service user. This example reads the existing root key d
 sudo -u yunpanel env \
   YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.sqlite \
   YUNPANEL_APPLICATION_ENVIRONMENT_STORE=/var/lib/yunpanel/control-plane/application-environment-registry.json \
+  YUNPANEL_DNS_CREDENTIAL_STORE=/var/lib/yunpanel/control-plane/dns-provider-credential-registry.json \
   /usr/local/bin/node /usr/lib/yunpanel/scripts/rotate-secret-master-key.mjs rotate \
   --confirm-offline \
   --current-env-file /etc/yunpanel/control-plane/api.env \
@@ -52,11 +54,12 @@ The backup directory is created mode `0700`. It contains:
 
 - a SQLite backup of the pre-rotation authentication database;
 - the pre-rotation application environment store when that file existed;
+- the pre-rotation DNS provider credential store when that file existed;
 - `manifest.json` with source paths, backup hashes, record counts and rotation state.
 
-It contains no plaintext MFA/application secret and no raw master key. Treat it as sensitive control-plane backup material anyway.
+It contains no plaintext MFA/application/DNS-provider secret and no raw master key. Treat it as sensitive control-plane backup material anyway.
 
-Rotation preflights every encrypted application and MFA secret with the current key before replacing live data. It then rechecks the stores while holding an exclusive SQLite transaction. Normal runtime failures roll SQLite back and restore the environment store where necessary. A process/host crash can still interrupt a cross-file operation, which is why the service must be offline and the backup/manifest must be retained until validation is complete.
+Rotation preflights every encrypted application, MFA and DNS-provider secret with the current key before replacing live data. It then rechecks the stores while holding an exclusive SQLite transaction. Normal runtime failures roll SQLite back and restore both JSON stores where necessary. A process/host crash can still interrupt a cross-file operation, which is why the service must be offline and the backup/manifest must be retained until validation is complete.
 
 After the command succeeds, update the single `YUNPANEL_SECRET_MASTER_KEY` assignment in `/etc/yunpanel/control-plane/api.env` to the value held in the newly created private key file. Do this with a protected local editor or secret-management workflow; do not place the key in shell history, process arguments, Git, tickets, logs or chat. Preserve the previous key separately until the rollback window is closed.
 
@@ -72,6 +75,7 @@ Acceptance is not just “the service started”. Verify at minimum:
 - Owner password + TOTP login succeeds;
 - an application containing a secret environment variable can materialize/use that secret successfully;
 - the application environment API still masks secret values;
+- DNS credential metadata remains masked and one controlled DNS-01 dry run can materialize the credential without exposing it;
 - ordinary management reads and one controlled mutation behave normally;
 - no `mfa_key_unavailable`, `secret_decryption_failed` or related startup/runtime errors appear in service logs.
 
@@ -89,12 +93,13 @@ sudo systemctl stop yunpanel-api.service
 sudo -u yunpanel env \
   YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.sqlite \
   YUNPANEL_APPLICATION_ENVIRONMENT_STORE=/var/lib/yunpanel/control-plane/application-environment-registry.json \
+  YUNPANEL_DNS_CREDENTIAL_STORE=/var/lib/yunpanel/control-plane/dns-provider-credential-registry.json \
   /usr/local/bin/node /usr/lib/yunpanel/scripts/rotate-secret-master-key.mjs rollback \
   --confirm-offline \
   --backup-dir /var/lib/yunpanel/control-plane/key-rotation-20260909T120000Z
 ```
 
-Rollback is bound to the source paths recorded in the manifest and refuses a different target. It also verifies backup SHA-256 hashes before restoring. If the application environment store did not exist before rotation, rollback removes a copy created after rotation so old-key state cannot be mixed with new-key data. SQLite WAL/SHM sidecars are removed before the auth snapshot is restored.
+Rollback is bound to the source paths recorded in the manifest and refuses a different target. It also verifies backup SHA-256 hashes before restoring. If either JSON secret store did not exist before rotation, rollback removes a copy created after rotation so old-key state cannot be mixed with new-key data. SQLite WAL/SHM sidecars are removed before the auth snapshot is restored.
 
 After the data rollback, restore the **previous** `YUNPANEL_SECRET_MASTER_KEY` in the private API environment, then start the API and repeat the MFA/application-secret validation above.
 
@@ -109,4 +114,4 @@ npm run secret-key -- rotate --confirm-offline --backup-dir <new-private-dir> --
 npm run secret-key -- rollback --confirm-offline --backup-dir <rotation-backup-dir>
 ```
 
-The rotation module has focused tests for active MFA, pending MFA, application secrets, wrong-current-key preflight, backup tampering, target-path binding, absent pre-rotation environment stores and rollback. Those tests still need to be run in the required Node 24/full-workspace acceptance environment before production use.
+The rotation module has focused tests for active MFA, pending MFA, application secrets, DNS-provider credentials, wrong-current-key preflight, backup tampering, target-path binding, absent pre-rotation stores and rollback. Those tests still need to be run in the required Node 24/full-workspace acceptance environment before production use.
