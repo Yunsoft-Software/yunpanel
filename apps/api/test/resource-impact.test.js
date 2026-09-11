@@ -4,7 +4,9 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import { createApplicationRegistry } from '../src/application-registry.js';
 import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
+import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
+import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
 import { previewResourceImpact, ResourceImpactError, resourceImpactInternals } from '../src/resource-impact.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
@@ -82,6 +84,19 @@ async function fixture() {
     resourceType: 'domain',
     resourceId: domain.id,
   });
+  const getWebDomain = async (id) => domainRegistry.getDomain(id);
+  const dnsHostingRegistry = createDnsHostingRegistry({ getWebDomain });
+  const mailDomainRegistry = createMailDomainRegistry({ getWebDomain });
+  const dnsZone = await dnsHostingRegistry.createZone({
+    zoneName: domain.primaryDomain,
+    webDomainId: domain.id,
+    managementMode: 'external',
+  });
+  const mailDomain = await mailDomainRegistry.createMailDomain({
+    domainName: domain.primaryDomain,
+    webDomainId: domain.id,
+    managementMode: 'external',
+  });
   return {
     registry,
     applicationRegistry,
@@ -89,6 +104,8 @@ async function fixture() {
     domainRegistry,
     certificateRegistry,
     jobRegistry,
+    dnsHostingRegistry,
+    mailDomainRegistry,
     sourceServerId: first.server.id,
     targetServerId: second.server.id,
     application,
@@ -98,6 +115,8 @@ async function fixture() {
     child,
     certificate,
     job,
+    dnsZone,
+    mailDomain,
   };
 }
 
@@ -109,6 +128,8 @@ function dependencies(state, additions = {}) {
     domainRegistry: state.domainRegistry,
     certificateRegistry: state.certificateRegistry,
     jobRegistry: state.jobRegistry,
+    dnsHostingRegistry: state.dnsHostingRegistry,
+    mailDomainRegistry: state.mailDomainRegistry,
     ...additions,
   };
 }
@@ -136,6 +157,8 @@ test('Website impact preview lists real dependency graph and marks missing inven
   assert.equal(preview.dependencies.application.id, state.application.id);
   assert.deepEqual(preview.dependencies.certificates.map((item) => item.id), [state.certificate.id]);
   assert.deepEqual(preview.dependencies.activeJobs.map((item) => item.id), [state.job.id]);
+  assert.deepEqual(preview.dependencies.dnsZones.map((item) => item.id), [state.dnsZone.id]);
+  assert.deepEqual(preview.dependencies.mailDomains.map((item) => item.id), [state.mailDomain.id]);
   assert.deepEqual(preview.dependencies.mailboxes, { status: 'available', items: [{ id: 'mailbox-1', state: 'active' }] });
   for (const type of ['backups', 'crons', 'dockerWorkloads']) {
     assert.deepEqual(preview.dependencies[type], { status: 'unavailable', items: [] });
@@ -143,7 +166,8 @@ test('Website impact preview lists real dependency graph and marks missing inven
   const blockerCodes = preview.blockers.map((item) => item.code);
   for (const code of [
     'linked_domains_present', 'child_domains_present', 'application_binding_present', 'certificates_present',
-    'active_jobs_present', 'mailbox_dependencies_present', 'dependency_inventory_unavailable', 'impact_apply_not_implemented',
+    'active_jobs_present', 'dns_zones_present', 'mail_domains_present', 'mailbox_dependencies_present',
+    'dependency_inventory_unavailable', 'impact_apply_not_implemented',
   ]) assert.ok(blockerCodes.includes(code), code);
   assert.equal(preview.safeToApply, false);
   assert.equal(preview.applySupported, false);

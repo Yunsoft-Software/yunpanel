@@ -10,7 +10,10 @@ const owner = {
 const reader = {
   user: { id: 'reader-1', role: 'read_only' },
   security: { managementAllowed: false },
-  access: { mode: 'read_only', permissions: ['servers.read', 'applications.read', 'domains.read', 'certificates.read'] },
+  access: {
+    mode: 'read_only',
+    permissions: ['servers.read', 'applications.read', 'domains.read', 'certificates.read', 'dns_zones.read', 'mail_domains.read'],
+  },
 };
 
 function run({ auth = null, method = 'GET', url = '/api/servers', authorization } = {}) {
@@ -38,6 +41,8 @@ test('bearer headers cannot substitute for request.auth', () => {
 test('read-only context is limited by exact resource and method rules', () => {
   assert.equal(run({ auth: reader, url: '/api/servers' }).next, true);
   assert.equal(run({ auth: reader, url: '/api/applications/app-1' }).next, true);
+  assert.equal(run({ auth: reader, url: '/api/dns-zones' }).next, true);
+  assert.equal(run({ auth: reader, url: '/api/mail-domains/mail-1' }).next, true);
   assert.equal(run({ auth: reader, url: '/api/jobs' }).status, 403);
   assert.equal(run({ auth: reader, method: 'POST', url: '/api/domains' }).status, 403);
 });

@@ -59,6 +59,9 @@ test('session descriptions publish only server-derived panel capabilities', () =
   assert.deepEqual(policy.describe(owner).access, { mode: 'management', permissions: ['*'] });
   assert.deepEqual(policy.describe({ ...owner, user: { id: 'reader', role: 'read_only' } }).access, {
     mode: 'read_only',
-    permissions: ['servers.read', 'websites.read', 'applications.read', 'domains.read', 'certificates.read'],
+    permissions: [
+      'servers.read', 'websites.read', 'applications.read', 'domains.read', 'certificates.read',
+      'dns_zones.read', 'mail_domains.read',
+    ],
   });
 });

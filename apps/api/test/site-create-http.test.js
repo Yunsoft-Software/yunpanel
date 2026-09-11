@@ -6,6 +6,8 @@ import { createApp } from '../src/app.js';
 import { createApplicationRegistry } from '../src/application-registry.js';
 import { createAuthenticatedApi } from '../src/auth-http.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
+import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
+import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
 
@@ -43,8 +45,22 @@ async function resources() {
     getWebsite: async (id) => websiteRegistry.getWebsite(id),
     websiteBindingRequired: () => true,
   });
-  await Promise.all([applicationRegistry.init(), websiteRegistry.init(), domainRegistry.init()]);
-  return { registry, applicationRegistry, websiteRegistry, domainRegistry, serverId: enrolled.server.id };
+  const getWebDomain = async (id) => domainRegistry.getDomain(id);
+  const dnsHostingRegistry = createDnsHostingRegistry({ getWebDomain });
+  const mailDomainRegistry = createMailDomainRegistry({ getWebDomain });
+  await Promise.all([
+    applicationRegistry.init(), websiteRegistry.init(), domainRegistry.init(),
+    dnsHostingRegistry.init(), mailDomainRegistry.init(),
+  ]);
+  return {
+    registry,
+    applicationRegistry,
+    websiteRegistry,
+    domainRegistry,
+    dnsHostingRegistry,
+    mailDomainRegistry,
+    serverId: enrolled.server.id,
+  };
 }
 
 async function listener(t, role, state) {
@@ -113,6 +129,8 @@ test('Owner previews and applies site creation through the authenticated API', a
   });
   assert.equal(retry.status, 200);
   assert.equal((await retry.json()).data.created, false);
+  assert.deepEqual(await state.dnsHostingRegistry.listZones(), []);
+  assert.deepEqual(await state.mailDomainRegistry.listMailDomains(), []);
 });
 
 test('authentication and Read Only authorization stop site planning before registries mutate', async (t) => {

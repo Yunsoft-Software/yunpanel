@@ -12,8 +12,10 @@ import { createCertificateRegistry } from './certificate-registry.js';
 import { startCertificateRenewalScheduler } from './certificate-renewal-scheduler.js';
 import { startConfiguredLocalRuntime } from './configured-local-runtime.js';
 import { createDomainRegistry } from './domain-registry.js';
+import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
+import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createServerRegistry } from './server-registry.js';
 import { createWebsiteMigrationLedger } from './website-migration-ledger.js';
@@ -30,6 +32,8 @@ const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.reso
 const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.data/website-registry.json');
 const websiteMigrationPolicyStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE ?? path.resolve('.data/website-migration-policy.json');
 const websiteMigrationLedgerStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_LEDGER_STORE ?? path.resolve('.data/website-migration-ledger.json');
+const dnsHostingStorePath = process.env.YUNPANEL_DNS_HOSTING_STORE ?? path.resolve('.data/dns-hosting-registry.json');
+const mailDomainStorePath = process.env.YUNPANEL_MAIL_DOMAIN_STORE ?? path.resolve('.data/mail-domain-registry.json');
 const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRONMENT_STORE ?? path.resolve('.data/application-environment-registry.json');
 const authStorePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStorePath), 'auth', 'auth.sqlite');
 const internalProxyToken = process.env.YUNPANEL_INTERNAL_PROXY_TOKEN;
@@ -85,6 +89,16 @@ const domainRegistry = createDomainRegistry({
   websiteBindingRequired: () => websiteMigrationPolicy.snapshot().websiteBindingRequired,
 });
 await domainRegistry.init();
+const dnsHostingRegistry = createDnsHostingRegistry({
+  filePath: dnsHostingStorePath,
+  getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
+});
+await dnsHostingRegistry.init();
+const mailDomainRegistry = createMailDomainRegistry({
+  filePath: mailDomainStorePath,
+  getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
+});
+await mailDomainRegistry.init();
 const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   filePath: applicationEnvironmentStorePath,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
@@ -114,6 +128,8 @@ const listener = createAuthenticatedApi({
     websiteRegistry,
     websiteMigrationPolicy,
     migrationLedger,
+    dnsHostingRegistry,
+    mailDomainRegistry,
     applicationEnvironmentRegistry,
   }),
 });
@@ -147,6 +163,8 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] website store=${websiteStorePath}`);
   console.log(`[yunpanel-api] website migration policy store=${websiteMigrationPolicyStorePath}`);
   console.log(`[yunpanel-api] website migration ledger store=${websiteMigrationLedgerStorePath}`);
+  console.log(`[yunpanel-api] DNS hosting store=${dnsHostingStorePath}`);
+  console.log(`[yunpanel-api] mail Domain store=${mailDomainStorePath}`);
   console.log(`[yunpanel-api] application environment store=${applicationEnvironmentStorePath}`);
   console.log(`[yunpanel-api] secret store=${applicationEnvironmentRegistry.secretStoreConfigured ? 'configured' : 'not configured'}`);
   console.log(`[yunpanel-api] authentication=${authStore.configured() ? 'configured' : 'local setup required'}`);

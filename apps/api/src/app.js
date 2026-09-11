@@ -3,9 +3,13 @@ import { createApplicationRegistry, ApplicationRegistryError } from './applicati
 import { createCertificateRegistry } from './certificate-registry.js';
 import { createApp as createCoreApp } from './core-app.js';
 import { DatabaseHttpError, mountDatabaseRoutes } from './database-http.js';
+import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
 import { createDomainHandler, createDomainReparentHandler, createDomainReparentPreviewHandler } from './domain-http.js';
+import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
+import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
+import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { ResourceImpactError } from './resource-impact.js';
@@ -41,6 +45,12 @@ export function createApp({
     getWebsite: async (websiteId) => websiteRegistry.getWebsite(websiteId),
     websiteBindingRequired: () => websiteMigrationPolicy.snapshot().websiteBindingRequired,
   }),
+  dnsHostingRegistry = createDnsHostingRegistry({
+    getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
+  }),
+  mailDomainRegistry = createMailDomainRegistry({
+    getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
+  }),
   environment = process.env.NODE_ENV,
   ...options
 } = {}) {
@@ -59,7 +69,10 @@ export function createApp({
     domainRegistry,
     certificateRegistry,
     jobRegistry,
+    dnsHostingRegistry,
+    mailDomainRegistry,
   });
+  mountExternalLifecycleRoutes(app, { dnsHostingRegistry, mailDomainRegistry });
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry });
   mountWebsiteMigrationRoutes(app, {
     websiteRegistry,
@@ -77,6 +90,7 @@ export function createApp({
       error instanceof DatabaseHttpError
       || error instanceof ApplicationRegistryError
       || error instanceof DomainRegistryError
+      || error instanceof ExternalLifecycleRegistryError
       || error instanceof RegistryError
       || error instanceof JobRegistryError
       || error instanceof ManagedServiceHttpError

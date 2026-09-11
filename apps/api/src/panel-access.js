@@ -6,6 +6,8 @@ export const READ_ONLY_PERMISSIONS = Object.freeze([
   'applications.read',
   'domains.read',
   'certificates.read',
+  'dns_zones.read',
+  'mail_domains.read',
 ]);
 
 const READ_ONLY_RULES = Object.freeze([
@@ -14,6 +16,8 @@ const READ_ONLY_RULES = Object.freeze([
   ['applications.read', /^\/api\/applications(?:\/[^/%]+)?$/],
   ['domains.read', /^\/api\/domains(?:\/[^/%]+)?$/],
   ['certificates.read', /^\/api\/certificates(?:\/[^/%]+)?$/],
+  ['dns_zones.read', /^\/api\/dns-zones(?:\/[^/%]+)?$/],
+  ['mail_domains.read', /^\/api\/mail-domains(?:\/[^/%]+)?$/],
 ]);
 
 export function describePanelAccess(session) {

@@ -110,6 +110,16 @@ function jobReference(job) {
   });
 }
 
+function externalLifecycleReference(resource, nameField) {
+  return Object.freeze({
+    id: resource.id,
+    [nameField]: resource[nameField],
+    webDomainId: resource.webDomainId,
+    status: resource.status,
+    revision: resource.revision,
+  });
+}
+
 function descendants(domains, rootIds) {
   const roots = new Set(rootIds);
   const visited = new Set(rootIds);
@@ -195,6 +205,8 @@ export async function previewResourceImpact({
   domainRegistry,
   certificateRegistry,
   jobRegistry,
+  dnsHostingRegistry,
+  mailDomainRegistry,
   additionalProviders = {},
 } = {}) {
   if (!['website', 'domain'].includes(resourceType)) {
@@ -207,6 +219,8 @@ export async function previewResourceImpact({
     [domainRegistry, ['getDomain', 'listDomains']],
     [certificateRegistry, ['listCertificates']],
     [jobRegistry, ['listJobs']],
+    [dnsHostingRegistry, ['listZones']],
+    [mailDomainRegistry, ['listMailDomains']],
   ];
   if (dependencies.some(([dependency, methods]) => !dependency
     || methods.some((method) => typeof dependency[method] !== 'function'))
@@ -216,8 +230,12 @@ export async function previewResourceImpact({
   }
   const normalizedResourceId = resourceIdentity(resourceId, resourceType);
   const requested = operationInput(operation, targetServerId);
-  const [domains, certificates, jobs] = await Promise.all([
-    domainRegistry.listDomains(), certificateRegistry.listCertificates(), jobRegistry.listJobs(),
+  const [domains, certificates, jobs, allDnsZones, allMailDomains] = await Promise.all([
+    domainRegistry.listDomains(),
+    certificateRegistry.listCertificates(),
+    jobRegistry.listJobs(),
+    dnsHostingRegistry.listZones(),
+    mailDomainRegistry.listMailDomains(),
   ]);
 
   let resource;
@@ -262,6 +280,12 @@ export async function previewResourceImpact({
     ...linkedDomains.map((domain) => domain.id),
     ...childDomains.map((domain) => domain.id),
   ]);
+  const dnsZones = allDnsZones.filter((item) => item.webDomainId !== null && impactedDomainIds.has(item.webDomainId))
+    .map((item) => externalLifecycleReference(item, 'zoneName'))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const mailDomains = allMailDomains.filter((item) => item.webDomainId !== null && impactedDomainIds.has(item.webDomainId))
+    .map((item) => externalLifecycleReference(item, 'domainName'))
+    .sort((left, right) => left.id.localeCompare(right.id));
   const certificateReferences = certificates.filter((certificate) => impactedDomainIds.has(certificate.domainId))
     .map(certificateReference).sort((left, right) => left.id.localeCompare(right.id));
   const activeJobs = relevantJobs(jobs, {
@@ -287,11 +311,15 @@ export async function previewResourceImpact({
     childDomains: Object.freeze(childDomains),
     website: resourceType === 'domain' && website ? websiteReference(website) : null,
     application: applicationReference(application),
+    dnsZones: Object.freeze(dnsZones),
+    mailDomains: Object.freeze(mailDomains),
     certificates: Object.freeze(certificateReferences),
     activeJobs: Object.freeze(activeJobs),
     ...additional,
   });
   const blockers = knownBlockers(dependencySet);
+  if (dnsZones.length > 0) blockers.push(blocker('dns_zones_present', 'dns_zone', dnsZones.length));
+  if (mailDomains.length > 0) blockers.push(blocker('mail_domains_present', 'mail_domain', mailDomains.length));
   for (const [key, type] of ADDITIONAL_TYPES) {
     const bucket = additional[key];
     if (bucket.status === 'unavailable') blockers.push(blocker('dependency_inventory_unavailable', type));
@@ -332,6 +360,7 @@ export const resourceImpactInternals = Object.freeze({
   applicationReference,
   certificateReference,
   jobReference,
+  externalLifecycleReference,
   descendants,
   sanitizeAdditionalReference,
   additionalBucket,

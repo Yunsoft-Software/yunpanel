@@ -19,6 +19,8 @@ export function classifyManagementMutation(method, pathname) {
 
   if (method === 'POST' && pathname === '/api/sites/create-preview') return { action: 'site.create.preview', resourceType: 'site', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/sites') return { action: 'site.create', resourceType: 'site', resourceId: 'new' };
+  if (method === 'POST' && pathname === '/api/dns-zones') return { action: 'dns_zone.external.track', resourceType: 'dns_zone', resourceId: 'new' };
+  if (method === 'POST' && pathname === '/api/mail-domains') return { action: 'mail_domain.external.track', resourceType: 'mail_domain', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/websites') return { action: 'website.create', resourceType: 'website', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/websites/migration/create-website') return { action: 'website.migration.create', resourceType: 'website_migration', resourceId: 'create' };
   if (method === 'POST' && pathname === '/api/websites/migration/bind') return { action: 'website.migration.bind', resourceType: 'website_migration', resourceId: 'bind' };

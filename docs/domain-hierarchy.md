@@ -99,6 +99,19 @@ Migration Website create/bind and binding rollback use a durable ledger so inter
 
 Website/domain identity, DNS hosting/provider state, certificate state and mail-domain/mailbox state remain separate lifecycles. Creating or binding a hostname does not mean DNS propagated, a certificate exists or mail is configured. The site-create result exposes those three external lifecycle outcomes as false rather than fabricating success.
 
+DNS hosting and mail-domain tracking have separate private versioned registries and authenticated inventory APIs:
+
+```text
+GET  /api/dns-zones
+GET  /api/dns-zones/:dnsZoneId
+POST /api/dns-zones
+GET  /api/mail-domains
+GET  /api/mail-domains/:mailDomainId
+POST /api/mail-domains
+```
+
+Owner creation requires exactly `name`, an explicit `webDomainId` or `null`, and `managementMode=external`. A non-null reference must name the exact canonical web Domain; suffix matching or hostname inference is not used. New resources begin as `unverified`, and their create responses state that DNS was not published and mail/mailboxes were not configured. Read Only may inspect the bounded lifecycle metadata but cannot create it. Provider/internal observation can revision the record to `ready` or `degraded`; no public route can claim those side effects happened.
+
 Nginx stage/activate and managed certificate issue/renew continue through durable jobs and operation-specific recovery. Do not replace them with generic retry/force-success behavior.
 
 Reverse-proxy targets may use canonical DNS, IPv4 or IPv6 hosts. They never accept a URL scheme, path, credentials or control characters; IPv6 is rendered with URL-safe brackets. Node application targets remain backend-assigned loopback ports, while an explicitly selected external-proxy Website may point to a remote origin.
@@ -116,7 +129,7 @@ POST /api/websites/:websiteId/impact-preview
 POST /api/domains/:domainId/impact-preview
 ```
 
-Delete accepts exactly `{ "operation": "delete" }`. Move accepts exactly `{ "operation": "move", "targetServerId": "<server-uuid>" }`; the target must exist and differ from the current server. The preview digest covers the selected resource plus relevant child/linked Domains, Website/Application binding, bounded certificate identity and queued/running jobs. It returns a typed confirmation for future guarded apply, but never mutates state.
+Delete accepts exactly `{ "operation": "delete" }`. Move accepts exactly `{ "operation": "move", "targetServerId": "<server-uuid>" }`; the target must exist and differ from the current server. The preview digest covers the selected resource plus relevant child/linked Domains, Website/Application binding, explicitly linked DNS zones and mail domains, bounded certificate identity and queued/running jobs. It returns a typed confirmation for future guarded apply, but never mutates state.
 
 Mailbox, backup, cron and Docker providers have explicit bounded adapter slots. Until a real association registry exists, each category is returned with `status=unavailable` and a blocker rather than a fabricated empty list. Provider failure or unsafe/duplicate reference metadata fails the whole preview closed. Certificate email/path/private-key metadata, repository URLs, proxy targets, job payloads/results and external provider data are not copied into the preview.
 

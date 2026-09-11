@@ -12,6 +12,7 @@ const SOURCE_FILES = [
   'core-app.js',
   'site-create-http.js',
   'resource-impact-http.js',
+  'external-lifecycle-http.js',
   'website-http.js',
   'website-migration-http.js',
   'managed-service-http.js',
@@ -107,6 +108,15 @@ test('Website and Domain impact previews have resource-scoped audit identities',
   });
   assert.deepEqual(classifyManagementMutation('POST', '/api/domains/domain-1/impact-preview'), {
     action: 'domain.impact.preview', resourceType: 'domain', resourceId: 'domain-1',
+  });
+});
+
+test('explicit external DNS and mail tracking have separate audit resources', () => {
+  assert.deepEqual(classifyManagementMutation('POST', '/api/dns-zones'), {
+    action: 'dns_zone.external.track', resourceType: 'dns_zone', resourceId: 'new',
+  });
+  assert.deepEqual(classifyManagementMutation('POST', '/api/mail-domains'), {
+    action: 'mail_domain.external.track', resourceType: 'mail_domain', resourceId: 'new',
   });
 });
 

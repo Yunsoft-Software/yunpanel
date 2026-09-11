@@ -11,7 +11,10 @@ export const readOnlyManagementContext = Object.freeze({
   security: Object.freeze({ ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: false }),
   access: Object.freeze({
     mode: 'read_only',
-    permissions: Object.freeze(['servers.read', 'applications.read', 'domains.read', 'certificates.read']),
+    permissions: Object.freeze([
+      'servers.read', 'websites.read', 'applications.read', 'domains.read', 'certificates.read',
+      'dns_zones.read', 'mail_domains.read',
+    ]),
   }),
 });
 

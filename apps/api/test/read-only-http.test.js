@@ -47,12 +47,15 @@ async function fixture(t) {
 
 test('read-only inventory reads cross the core boundary with explicit capabilities', async (t) => {
   const app = await fixture(t);
-  for (const path of ['/api/servers', '/api/servers/s1', '/api/applications/a1', '/api/domains/d1', '/api/certificates/c1']) {
+  for (const path of [
+    '/api/servers', '/api/servers/s1', '/api/applications/a1', '/api/domains/d1', '/api/certificates/c1',
+    '/api/dns-zones', '/api/dns-zones/z1', '/api/mail-domains', '/api/mail-domains/m1',
+  ]) {
     const response = await app.request(path, { headers: { cookie } });
     assert.equal(response.status, 200, path);
     assert.equal((await response.json()).data.access.mode, 'read_only');
   }
-  assert.equal(app.calls(), 5);
+  assert.equal(app.calls(), 9);
 });
 
 test('read-only sensitive reads and mutations fail before the core handler', async (t) => {
@@ -77,7 +80,10 @@ test('read-only auth session publishes its scoped permissions', async (t) => {
   const session = (await response.json()).data;
   assert.deepEqual(session.access, {
     mode: 'read_only',
-    permissions: ['servers.read', 'websites.read', 'applications.read', 'domains.read', 'certificates.read'],
+    permissions: [
+      'servers.read', 'websites.read', 'applications.read', 'domains.read', 'certificates.read',
+      'dns_zones.read', 'mail_domains.read',
+    ],
   });
   assert.equal(app.calls(), 0);
 });
