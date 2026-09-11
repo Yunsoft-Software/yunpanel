@@ -65,10 +65,42 @@ test('secret writes fail closed when no master key is configured', async () => {
     }),
     (error) => error instanceof ApplicationEnvironmentRegistryError && error.code === 'secret_store_unavailable',
   );
+  await assert.rejects(
+    registry.setWebhookSecret({ applicationId: APPLICATION_ID, secret: 'w'.repeat(32) }),
+    (error) => error instanceof ApplicationEnvironmentRegistryError && error.code === 'secret_store_unavailable',
+  );
   assert.equal((await registry.deploymentCredential(APPLICATION_ID)).configured, false);
+  assert.equal((await registry.webhookSecret(APPLICATION_ID)).configured, false);
 
   const plain = await registry.setVariable({ applicationId: APPLICATION_ID, key: 'PUBLIC_URL', value: 'https://example.test', secret: false });
   assert.equal(plain.value, 'https://example.test');
+});
+
+test('GitHub webhook secrets are encrypted, masked and excluded from application environments', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-webhook-secret-'));
+  const filePath = path.join(directory, 'environment.json');
+  const secret = 'webhook-secret-value-with-enough-entropy-123';
+  try {
+    const registry = createRegistry({ filePath });
+    const saved = await registry.setWebhookSecret({ applicationId: APPLICATION_ID, secret });
+    assert.equal(saved.configured, true);
+    assert.equal(JSON.stringify(saved).includes(secret), false);
+    assert.equal(await registry.materializeWebhookSecret(APPLICATION_ID), secret);
+    assert.deepEqual(await registry.materialize(APPLICATION_ID), {});
+    assert.deepEqual(await registry.listVariables(APPLICATION_ID), []);
+
+    const persisted = await readFile(filePath, 'utf8');
+    assert.equal(persisted.includes(secret), false);
+    assert.match(persisted, /YUNPANEL_GITHUB_WEBHOOK_SECRET/);
+
+    await registry.deleteWebhookSecret(APPLICATION_ID);
+    assert.deepEqual(await registry.webhookSecret(APPLICATION_ID), {
+      configured: false, createdAt: null, updatedAt: null,
+    });
+    assert.equal(await registry.materializeWebhookSecret(APPLICATION_ID), null);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('Git credentials share encrypted storage but never enter application environment materialization', async () => {
@@ -114,6 +146,10 @@ test('reserved environment variables cannot override YunPanel runtime state', as
   );
   await assert.rejects(
     registry.setVariable({ applicationId: APPLICATION_ID, key: 'YUNPANEL_GIT_CREDENTIAL', value: 'leak', secret: false }),
+    (error) => error instanceof ApplicationEnvironmentRegistryError && error.code === 'reserved_environment_key',
+  );
+  await assert.rejects(
+    registry.setVariable({ applicationId: APPLICATION_ID, key: 'YUNPANEL_GITHUB_WEBHOOK_SECRET', value: 'leak', secret: false }),
     (error) => error instanceof ApplicationEnvironmentRegistryError && error.code === 'reserved_environment_key',
   );
 });

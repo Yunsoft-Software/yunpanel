@@ -23,6 +23,8 @@ test('current management mutation routes map to bounded action and resource iden
     ['DELETE', '/api/applications/app-1/environment/API_SECRET', 'application.environment.deleted', 'application', 'app-1'],
     ['PUT', '/api/applications/app-1/deployment-credential', 'application.git_credential.updated', 'application', 'app-1'],
     ['DELETE', '/api/applications/app-1/deployment-credential', 'application.git_credential.deleted', 'application', 'app-1'],
+    ['PUT', '/api/applications/app-1/github-webhook', 'application.github_webhook.updated', 'application', 'app-1'],
+    ['DELETE', '/api/applications/app-1/github-webhook', 'application.github_webhook.deleted', 'application', 'app-1'],
     ['POST', '/api/applications/app-1/environment/import', 'application.environment.imported', 'application', 'app-1'],
     ['POST', '/api/domains', 'domain.create', 'domain', 'new'],
     ['POST', '/api/domains/domain-1/reparent-preview', 'domain.reparent.preview', 'domain', 'domain-1'],

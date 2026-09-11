@@ -268,6 +268,39 @@ export function createApp({
     await applicationEnvironmentRegistry.deleteDeploymentCredential(application.id);
     return response.status(204).end();
   });
+  app.get('/api/applications/:applicationId/github-webhook', requirePanelRouteAccess, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    return response.json({
+      data: await applicationEnvironmentRegistry.webhookSecret(application.id),
+      secretStoreConfigured: applicationEnvironmentRegistry.secretStoreConfigured,
+    });
+  });
+  app.put('/api/applications/:applicationId/github-webhook', requirePanelRouteAccess, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    await ensureEnvironmentMutable(application, jobRegistry);
+    if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)
+      || Object.keys(request.body).length !== 1 || typeof request.body.secret !== 'string') {
+      throw new ApplicationEnvironmentRegistryError('invalid_github_webhook_secret', 'GitHub webhook secret request is invalid');
+    }
+    return response.json({ data: await applicationEnvironmentRegistry.setWebhookSecret({
+      applicationId: application.id,
+      secret: request.body.secret,
+    }) });
+  });
+  app.delete('/api/applications/:applicationId/github-webhook', requirePanelRouteAccess, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    await ensureEnvironmentMutable(application, jobRegistry);
+    const confirmation = `delete-github-webhook:${application.id}`;
+    if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)
+      || Object.keys(request.body).length !== 1 || request.body.confirmation !== confirmation) {
+      throw new ApplicationEnvironmentRegistryError('github_webhook_confirmation_required', `Confirm webhook deletion with ${confirmation}`);
+    }
+    await applicationEnvironmentRegistry.deleteWebhookSecret(application.id);
+    return response.status(204).end();
+  });
   app.put('/api/applications/:applicationId/environment/:key', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);

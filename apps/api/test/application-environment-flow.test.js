@@ -115,6 +115,18 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
     assert.equal(credentialMetadata.payload.data.type, 'github_token');
     assert.equal(JSON.stringify(credentialMetadata.payload).includes(deployToken), false);
 
+    const webhookSecret = 'webhook-secret-value-with-enough-entropy-456';
+    const webhookWrite = await requestJson(`${baseUrl}/api/applications/${application.id}/github-webhook`, {
+      method: 'PUT', body: { secret: webhookSecret },
+    });
+    assert.equal(webhookWrite.response.status, 200);
+    assert.equal(webhookWrite.payload.data.configured, true);
+    assert.equal(JSON.stringify(webhookWrite.payload).includes(webhookSecret), false);
+    const webhookMetadata = await requestJson(`${baseUrl}/api/applications/${application.id}/github-webhook`);
+    assert.equal(webhookMetadata.response.status, 200);
+    assert.equal(webhookMetadata.payload.data.configured, true);
+    assert.equal(JSON.stringify(webhookMetadata.payload).includes(webhookSecret), false);
+
     const agentCredential = await requestJson(
       `${baseUrl}/api/servers/${enrolled.server.id}/applications/${application.id}/deployment-credential`,
       { token: enrolled.agentToken },
@@ -145,6 +157,10 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
       method: 'DELETE', body: { confirmation: `delete-deployment-credential:${application.id}` },
     });
     assert.equal(blockedDelete.response.status, 409);
+    const blockedWebhookDelete = await requestJson(`${baseUrl}/api/applications/${application.id}/github-webhook`, {
+      method: 'DELETE', body: { confirmation: `delete-github-webhook:${application.id}` },
+    });
+    assert.equal(blockedWebhookDelete.response.status, 409);
   });
 });
 

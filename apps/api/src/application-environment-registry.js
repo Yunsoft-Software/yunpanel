@@ -13,6 +13,8 @@ import {
 const STORE_VERSION = 2;
 const ALGORITHM = 'aes-256-gcm';
 const GIT_CREDENTIAL_KEY = 'YUNPANEL_GIT_CREDENTIAL';
+const GITHUB_WEBHOOK_SECRET_KEY = 'YUNPANEL_GITHUB_WEBHOOK_SECRET';
+const INTERNAL_KEYS = new Set([GIT_CREDENTIAL_KEY, GITHUB_WEBHOOK_SECRET_KEY]);
 const CHANGE_SOURCES = new Set(['single', 'import_merge', 'import_replace', 'migration']);
 
 export class ApplicationEnvironmentRegistryError extends Error {
@@ -98,6 +100,29 @@ function publicDeploymentCredential(record) {
     createdAt: null,
     updatedAt: null,
   };
+}
+
+function publicWebhookSecret(record) {
+  return record ? {
+    applicationId: record.applicationId,
+    configured: true,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  } : {
+    configured: false,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+function normalizeWebhookSecret(value) {
+  if (typeof value !== 'string' || !/^[\x21-\x7e]{32,128}$/.test(value)) {
+    throw new ApplicationEnvironmentRegistryError(
+      'invalid_github_webhook_secret',
+      'GitHub webhook secret must be 32 to 128 printable ASCII characters without spaces',
+    );
+  }
+  return value;
 }
 
 function validateEnvironmentRevision(value, field = 'environment revision') {
@@ -245,7 +270,7 @@ export function createApplicationEnvironmentRegistry({
         if (parsed.version === 1) {
           const byApplication = new Map();
           for (const record of parsed.variables) {
-            if (record?.key === GIT_CREDENTIAL_KEY) continue;
+            if (INTERNAL_KEYS.has(record?.key)) continue;
             const applicationId = normalizeApplicationId(record?.applicationId);
             const current = byApplication.get(applicationId) ?? { count: 0, timestamp: null };
             current.count += 1;
@@ -437,6 +462,70 @@ export function createApplicationEnvironmentRegistry({
     await persist();
   }
 
+  async function setWebhookSecret({ applicationId, secret } = {}) {
+    await ensureInitialized();
+    const normalizedApplicationId = normalizeApplicationId(applicationId);
+    const normalizedSecret = normalizeWebhookSecret(secret);
+    await ensureApplication(normalizedApplicationId);
+    const encrypted = encryptValue(encryptionKey, normalizedApplicationId, GITHUB_WEBHOOK_SECRET_KEY, normalizedSecret);
+    const timestamp = new Date(now()).toISOString();
+    let record = state.variables.find((candidate) => candidate.applicationId === normalizedApplicationId
+      && candidate.key === GITHUB_WEBHOOK_SECRET_KEY);
+    if (!record) {
+      record = {
+        applicationId: normalizedApplicationId,
+        key: GITHUB_WEBHOOK_SECRET_KEY,
+        secret: true,
+        value: null,
+        ciphertext: null,
+        iv: null,
+        tag: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      state.variables.push(record);
+    }
+    record.secret = true;
+    record.value = null;
+    record.ciphertext = encrypted.ciphertext;
+    record.iv = encrypted.iv;
+    record.tag = encrypted.tag;
+    record.updatedAt = timestamp;
+    await persist();
+    return publicWebhookSecret(record);
+  }
+
+  async function webhookSecret(applicationId) {
+    await ensureInitialized();
+    const normalizedApplicationId = normalizeApplicationId(applicationId);
+    await ensureApplication(normalizedApplicationId);
+    const record = state.variables.find((candidate) => candidate.applicationId === normalizedApplicationId
+      && candidate.key === GITHUB_WEBHOOK_SECRET_KEY) ?? null;
+    return publicWebhookSecret(record);
+  }
+
+  async function materializeWebhookSecret(applicationId) {
+    await ensureInitialized();
+    const normalizedApplicationId = normalizeApplicationId(applicationId);
+    await ensureApplication(normalizedApplicationId);
+    const record = state.variables.find((candidate) => candidate.applicationId === normalizedApplicationId
+      && candidate.key === GITHUB_WEBHOOK_SECRET_KEY) ?? null;
+    return record ? normalizeWebhookSecret(decryptValue(encryptionKey, record)) : null;
+  }
+
+  async function deleteWebhookSecret(applicationId) {
+    await ensureInitialized();
+    const normalizedApplicationId = normalizeApplicationId(applicationId);
+    await ensureApplication(normalizedApplicationId);
+    const index = state.variables.findIndex((candidate) => candidate.applicationId === normalizedApplicationId
+      && candidate.key === GITHUB_WEBHOOK_SECRET_KEY);
+    if (index < 0) {
+      throw new ApplicationEnvironmentRegistryError('github_webhook_secret_not_found', 'GitHub webhook secret is not configured', 404);
+    }
+    state.variables.splice(index, 1);
+    await persist();
+  }
+
   async function deleteVariable(applicationId, key) {
     await ensureInitialized();
     const normalizedApplicationId = normalizeApplicationId(applicationId);
@@ -484,7 +573,7 @@ export function createApplicationEnvironmentRegistry({
     }
 
     const existing = state.variables.filter((record) => record.applicationId === normalizedApplicationId
-      && record.key !== GIT_CREDENTIAL_KEY);
+      && !INTERNAL_KEYS.has(record.key));
     const existingByKey = new Map(existing.map((record) => [record.key, record]));
     const timestamp = new Date(now()).toISOString();
     const nextByKey = mode === 'merge' ? new Map(existingByKey) : new Map();
@@ -524,7 +613,7 @@ export function createApplicationEnvironmentRegistry({
     }
     if (added + updated + deleted > 0) {
       state.variables = state.variables.filter((record) => record.applicationId !== normalizedApplicationId
-        || record.key === GIT_CREDENTIAL_KEY);
+        || INTERNAL_KEYS.has(record.key));
       state.variables.push(...nextByKey.values());
       recordEnvironmentChange(normalizedApplicationId, timestamp, {
         source: mode === 'merge' ? 'import_merge' : 'import_replace', added, updated, deleted,
@@ -582,7 +671,7 @@ export function createApplicationEnvironmentRegistry({
     const normalizedApplicationId = normalizeApplicationId(applicationId);
     await ensureApplication(normalizedApplicationId);
     return state.variables
-      .filter((record) => record.applicationId === normalizedApplicationId && record.key !== GIT_CREDENTIAL_KEY)
+      .filter((record) => record.applicationId === normalizedApplicationId && !INTERNAL_KEYS.has(record.key))
       .sort((left, right) => left.key.localeCompare(right.key))
       .map(publicVariable);
   }
@@ -597,7 +686,7 @@ export function createApplicationEnvironmentRegistry({
     }
     const values = {};
     for (const record of state.variables.filter((candidate) => candidate.applicationId === normalizedApplicationId
-      && candidate.key !== GIT_CREDENTIAL_KEY)) {
+      && !INTERNAL_KEYS.has(candidate.key))) {
       values[record.key] = record.secret ? decryptValue(encryptionKey, record) : record.value;
     }
     return values;
@@ -613,6 +702,10 @@ export function createApplicationEnvironmentRegistry({
     deploymentCredential,
     materializeDeploymentCredential,
     deleteDeploymentCredential,
+    setWebhookSecret,
+    webhookSecret,
+    materializeWebhookSecret,
+    deleteWebhookSecret,
     deleteVariable,
     listVariables,
     materialize,
@@ -620,4 +713,7 @@ export function createApplicationEnvironmentRegistry({
   };
 }
 
-export const applicationEnvironmentRegistryInternals = Object.freeze({ gitCredentialKey: GIT_CREDENTIAL_KEY });
+export const applicationEnvironmentRegistryInternals = Object.freeze({
+  gitCredentialKey: GIT_CREDENTIAL_KEY,
+  githubWebhookSecretKey: GITHUB_WEBHOOK_SECRET_KEY,
+});
