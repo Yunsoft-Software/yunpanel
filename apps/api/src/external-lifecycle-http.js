@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { previewPostfixVirtualDomainMap } from '@yunpanel/config-templates';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -51,6 +52,32 @@ function digest(value) {
 function sameRecord(left, right) {
   return left.type === right.type && left.name === right.name && left.content === right.content
     && left.ttl === right.ttl && left.proxied === right.proxied;
+}
+
+function mailConfigurationPreview(mailDomain) {
+  const artifact = previewPostfixVirtualDomainMap([mailDomain.domainName]);
+  const identity = Object.freeze({
+    version: 1,
+    operation: 'mail_configuration_preview',
+    mailDomainId: mailDomain.id,
+    domainName: mailDomain.domainName,
+    expectedRevision: mailDomain.revision,
+    managementMode: mailDomain.managementMode,
+    candidateArtifactDigests: Object.freeze([{ path: artifact.path, sha256: artifact.sha256 }]),
+  });
+  return Object.freeze({
+    ...identity,
+    previewDigest: digest(identity),
+    scope: 'candidate_domain_only',
+    candidateArtifacts: Object.freeze([artifact]),
+    readyToApply: false,
+    blockers: Object.freeze([Object.freeze({
+      code: 'mail_domain_management_mode_external',
+      message: 'This mail domain is tracked as externally managed and cannot change local mail configuration.',
+      action: 'Enable an explicit local managed-mail lifecycle before requesting an apply operation.',
+    })]),
+    sideEffects: false,
+  });
 }
 
 export function mountExternalLifecycleRoutes(app, {
@@ -307,6 +334,12 @@ export function mountExternalLifecycleRoutes(app, {
     if (!resource) throw new ExternalLifecycleRegistryError('mail_domain_not_found', 'Mail domain was not found', 404);
     return response.json({ data: resource });
   }));
+  app.get('/api/mail-domains/:mailDomainId/config-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const resource = await mailDomainRegistry.getMailDomain(request.params.mailDomainId);
+    if (!resource) throw new ExternalLifecycleRegistryError('mail_domain_not_found', 'Mail domain was not found', 404);
+    return response.json({ data: mailConfigurationPreview(resource) });
+  }));
   app.post('/api/mail-domains', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = createInput(request.body);
     const resource = await mailDomainRegistry.createMailDomain({
@@ -318,4 +351,4 @@ export function mountExternalLifecycleRoutes(app, {
   }));
 }
 
-export const externalLifecycleHttpInternals = Object.freeze({ createInput, emptyQuery });
+export const externalLifecycleHttpInternals = Object.freeze({ createInput, emptyQuery, mailConfigurationPreview });

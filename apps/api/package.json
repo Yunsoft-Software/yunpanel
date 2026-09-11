@@ -10,6 +10,7 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@yunpanel/config-templates": "*",
     "@yunpanel/host-runtime": "*",
     "@yunpanel/protocol": "*",
     "@yunpanel/shared": "*",

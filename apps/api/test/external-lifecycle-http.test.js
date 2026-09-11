@@ -151,6 +151,31 @@ test('Owner explicitly tracks separate DNS and mail lifecycles without publishin
     assert.notEqual(mailPayload.data.id, dnsPayload.data.id);
     assert.deepEqual(mailPayload.sideEffects, { mailConfigured: false, mailboxesCreated: false });
 
+    const mailPreviewResponse = await request(baseUrl, `/api/mail-domains/${mailPayload.data.id}/config-preview`);
+    assert.equal(mailPreviewResponse.status, 200);
+    const mailPreview = (await mailPreviewResponse.json()).data;
+    assert.equal(mailPreview.operation, 'mail_configuration_preview');
+    assert.equal(mailPreview.mailDomainId, mailPayload.data.id);
+    assert.equal(mailPreview.domainName, 'separate.example.test');
+    assert.equal(mailPreview.expectedRevision, 1);
+    assert.equal(mailPreview.scope, 'candidate_domain_only');
+    assert.equal(mailPreview.readyToApply, false);
+    assert.equal(mailPreview.sideEffects, false);
+    assert.match(mailPreview.previewDigest, /^[a-f0-9]{64}$/);
+    assert.deepEqual(mailPreview.blockers.map((entry) => entry.code), ['mail_domain_management_mode_external']);
+    assert.deepEqual(mailPreview.candidateArtifacts, [{
+      version: 1,
+      path: '/etc/yunpanel/mail/postfix/virtual-domains',
+      lookup: 'hash:/etc/yunpanel/mail/postfix/virtual-domains',
+      sha256: 'a9f8da608e67a32b6f2762510b6fbe7f791028bab231c9f4127eebeea4035286',
+      bytes: 25,
+      entries: 1,
+      content: 'separate.example.test OK\n',
+      compile: { file: '/usr/sbin/postmap', args: ['hash:/etc/yunpanel/mail/postfix/virtual-domains'] },
+      validate: { file: '/usr/sbin/postfix', args: ['check'] },
+      sideEffects: false,
+    }]);
+
     assert.equal((await request(baseUrl, `/api/dns-zones/${dnsPayload.data.id}`)).status, 200);
     assert.equal((await request(baseUrl, `/api/mail-domains/${mailPayload.data.id}`)).status, 200);
     const hiddenStatus = await request(baseUrl, '/api/dns-zones', {

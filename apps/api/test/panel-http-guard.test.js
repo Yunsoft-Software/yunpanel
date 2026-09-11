@@ -43,6 +43,7 @@ test('read-only context is limited by exact resource and method rules', () => {
   assert.equal(run({ auth: reader, url: '/api/applications/app-1' }).next, true);
   assert.equal(run({ auth: reader, url: '/api/dns-zones' }).next, true);
   assert.equal(run({ auth: reader, url: '/api/mail-domains/mail-1' }).next, true);
+  assert.equal(run({ auth: reader, url: '/api/mail-domains/mail-1/config-preview' }).next, true);
   assert.equal(run({ auth: reader, url: '/api/jobs' }).status, 403);
   assert.equal(run({ auth: reader, url: '/api/servers/server-1/logs/nginx' }).status, 403);
   assert.equal(run({ auth: reader, method: 'POST', url: '/api/domains' }).status, 403);
