@@ -179,3 +179,72 @@ test('completed jobs are not observable before domain reconciliation finishes', 
     assert.equal((await domainRegistry.getDomain(domain.id)).state, 'staged');
   });
 });
+
+test('Domain routing update carries redirect policy and the previous canonical config through jobs', async () => {
+  const serverRegistry = createServerRegistry();
+  const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'domain-routing-update' });
+  const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'domain-routing-host' });
+  const domainRegistry = createDomainRegistry({
+    serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
+  });
+  const jobRegistry = createJobRegistry();
+  const app = withPanelContext(createApp({
+    environment: 'production', registry: serverRegistry, domainRegistry, jobRegistry,
+  }));
+
+  await withServer(app, async (baseUrl) => {
+    const created = await requestJson(`${baseUrl}/api/domains`, {
+      method: 'POST',
+      body: {
+        serverId: enrolled.server.id, primaryDomain: 'old.example.com', targetType: 'proxy', target: { upstreamPort: 3300 },
+      },
+    });
+    const domain = created.payload.data;
+    const firstChecksum = 'a'.repeat(64);
+    await requestJson(`${baseUrl}/api/domains/${domain.id}/stage`, { method: 'POST' });
+    const firstStage = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, { token: enrolled.agentToken });
+    await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/${firstStage.payload.data.job.id}/result`, {
+      method: 'POST', token: enrolled.agentToken,
+      body: { status: 'succeeded', result: { checksum: firstChecksum, configName: 'yunpanel-old.example.com.conf', bytes: 512 } },
+    });
+    await requestJson(`${baseUrl}/api/domains/${domain.id}/activate`, { method: 'POST' });
+    const firstActivation = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, { token: enrolled.agentToken });
+    await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/${firstActivation.payload.data.job.id}/result`, {
+      method: 'POST', token: enrolled.agentToken,
+      body: { status: 'succeeded', result: { checksum: firstChecksum, configName: 'yunpanel-old.example.com.conf', active: true } },
+    });
+
+    const changes = {
+      primaryDomain: 'new.example.com', aliases: ['www.new.example.com'], httpsMode: 'managed',
+      httpsRedirect: false, canonicalRedirect: true,
+    };
+    const preview = await requestJson(`${baseUrl}/api/domains/${domain.id}/update-preview`, {
+      method: 'POST', body: { changes },
+    });
+    assert.equal(preview.response.status, 200);
+    const updated = await requestJson(`${baseUrl}/api/domains/${domain.id}`, {
+      method: 'PATCH',
+      body: { changes, previewDigest: preview.payload.data.previewDigest, confirmation: preview.payload.data.confirmation },
+    });
+    assert.equal(updated.response.status, 200);
+    assert.equal(updated.payload.data.domain.appliedPrimaryDomain, 'old.example.com');
+
+    await requestJson(`${baseUrl}/api/domains/${domain.id}/stage`, { method: 'POST' });
+    const nextStage = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, { token: enrolled.agentToken });
+    assert.deepEqual(nextStage.payload.data.envelope.payload, {
+      primaryDomain: 'new.example.com', aliases: ['www.new.example.com'], targetType: 'proxy',
+      target: { upstreamHost: '127.0.0.1', upstreamPort: 3300, websocket: true },
+      canonicalRedirect: true, httpsRedirect: false,
+    });
+    const nextChecksum = 'b'.repeat(64);
+    await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/${nextStage.payload.data.job.id}/result`, {
+      method: 'POST', token: enrolled.agentToken,
+      body: { status: 'succeeded', result: { checksum: nextChecksum, configName: 'yunpanel-new.example.com.conf', bytes: 768 } },
+    });
+    await requestJson(`${baseUrl}/api/domains/${domain.id}/activate`, { method: 'POST' });
+    const nextActivation = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, { token: enrolled.agentToken });
+    assert.deepEqual(nextActivation.payload.data.envelope.payload, {
+      primaryDomain: 'new.example.com', previousPrimaryDomain: 'old.example.com', checksum: nextChecksum,
+    });
+  });
+});

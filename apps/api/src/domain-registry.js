@@ -4,10 +4,20 @@ import path from 'node:path';
 import { assertUuid, DomainValidationError, normalizeDomainSet, normalizeProxyHost } from '@yunpanel/shared';
 import { DomainHierarchyError, validateDomainHierarchy, validateDomainParent } from './domain-hierarchy.js';
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const TARGET_TYPES = new Set(['static', 'proxy']);
 const HTTPS_MODES = new Set(['off', 'managed']);
+const UPDATE_FIELDS = new Set(['primaryDomain', 'aliases', 'httpsMode', 'httpsRedirect', 'canonicalRedirect']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+
+const DOMAIN_ERROR_DIAGNOSES = Object.freeze({
+  nginx_config_invalid: Object.freeze({ message: 'Nginx rejected the staged configuration.', action: 'Review the generated settings, stage a new revision, then activate it.' }),
+  nginx_activation_prepare_failed: Object.freeze({ message: 'Nginx could not replace the active configuration.', action: 'Inspect protected filesystem diagnostics and active configuration permissions before retrying.' }),
+  nginx_reload_failed: Object.freeze({ message: 'Nginx reload failed and the previous configuration was restored.', action: 'Inspect protected Nginx service logs, then retry activation.' }),
+  nginx_rollback_failed: Object.freeze({ message: 'Nginx reload failed and rollback could not be confirmed.', action: 'Inspect Nginx configuration and service health on the Server before any retry.' }),
+  staged_config_missing: Object.freeze({ message: 'The staged Nginx configuration is missing.', action: 'Stage the current Domain revision again.' }),
+  staged_config_changed: Object.freeze({ message: 'The staged Nginx configuration changed before activation.', action: 'Stage the current Domain revision again; do not reuse the old checksum.' }),
+});
 
 export class DomainRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -28,9 +38,54 @@ function normalizeWebsiteId(value) {
   catch { throw new DomainRegistryError('invalid_website_id', 'websiteId must be a valid Website UUID'); }
 }
 
-function hydrateDomain(domain) {
+function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
   if (domain.websiteId === undefined) domain.websiteId = null;
+  if (sourceVersion < 2) {
+    domain.canonicalRedirect = false;
+    domain.httpsRedirect = domain.httpsMode === 'managed';
+    domain.appliedPrimaryDomain = domain.appliedRevision > 0 ? domain.primaryDomain : null;
+    if (domain.lastError === undefined) domain.lastError = null;
+    else if (domain.lastError !== null && (typeof domain.lastError !== 'string' || !/^[a-z0-9_]{1,120}$/.test(domain.lastError))) {
+      domain.lastError = 'apply_failed';
+    }
+  }
+  if (typeof domain.canonicalRedirect !== 'boolean' || typeof domain.httpsRedirect !== 'boolean'
+    || !HTTPS_MODES.has(domain.httpsMode) || (domain.httpsMode === 'off' && domain.httpsRedirect)
+    || (domain.appliedPrimaryDomain !== null && typeof domain.appliedPrimaryDomain !== 'string')) {
+    throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain routing policy is invalid', 409);
+  }
+  if (domain.appliedPrimaryDomain !== null && normalizeDomains(domain.appliedPrimaryDomain, []).primary !== domain.appliedPrimaryDomain) {
+    throw new DomainRegistryError('invalid_domain_state', 'Persisted applied Domain identity is invalid', 409);
+  }
+  if (domain.lastError !== null && (typeof domain.lastError !== 'string' || !/^[a-z0-9_]{1,120}$/.test(domain.lastError))) {
+    throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain error metadata is invalid', 409);
+  }
   return domain;
+}
+
+function diagnosis(domain) {
+  if (domain.lastError) {
+    const authored = DOMAIN_ERROR_DIAGNOSES[domain.lastError] ?? Object.freeze({
+      message: 'The last Domain operation failed.',
+      action: 'Inspect the protected job and host diagnostics before retrying.',
+    });
+    return Object.freeze({ severity: 'error', code: domain.lastError, ...authored });
+  }
+  if (domain.stagedRevision !== domain.desiredRevision) {
+    return Object.freeze({ severity: 'action_required', code: 'domain_stage_required', message: 'The desired Domain revision is not staged.', action: 'Stage the current revision.' });
+  }
+  if (domain.appliedRevision !== domain.desiredRevision) {
+    return Object.freeze({ severity: 'action_required', code: 'domain_activation_required', message: 'The staged Domain revision is not active.', action: 'Activate the staged revision.' });
+  }
+  if (domain.httpsMode === 'managed' && !domain.certificateId) {
+    return Object.freeze({
+      severity: 'action_required',
+      code: 'domain_certificate_required',
+      message: domain.httpsRedirect ? 'Managed HTTPS and redirect are waiting for a certificate.' : 'Managed HTTPS is waiting for a certificate.',
+      action: 'Issue or select a certificate covering the canonical hostname and every alias.',
+    });
+  }
+  return null;
 }
 
 function publicDomain(domain) {
@@ -41,6 +96,7 @@ function publicDomain(domain) {
     target: { ...domain.target },
     parentDomainId: domain.parentDomainId ?? null,
     kind: domain.parentDomainId == null ? 'domain' : 'subdomain',
+    diagnosis: diagnosis(domain),
   };
 }
 
@@ -127,6 +183,43 @@ function reparentDigest({ domainId, currentParentDomainId, nextParentDomainId, h
   })).digest('hex');
 }
 
+function normalizedUpdate(domain, changes) {
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)
+    || Object.keys(changes).length < 1 || Object.keys(changes).some((key) => !UPDATE_FIELDS.has(key))) {
+    throw new DomainRegistryError('invalid_domain_update', 'Domain changes must contain only canonical hostname, aliases, HTTPS or redirect settings');
+  }
+  const names = normalizeDomains(changes.primaryDomain ?? domain.primaryDomain, changes.aliases ?? domain.aliases);
+  const httpsMode = changes.httpsMode ?? domain.httpsMode;
+  if (!HTTPS_MODES.has(httpsMode)) throw new DomainRegistryError('invalid_https_mode', 'httpsMode must be off or managed');
+  let httpsRedirect = changes.httpsRedirect ?? domain.httpsRedirect;
+  if (Object.hasOwn(changes, 'httpsMode') && httpsMode !== domain.httpsMode && !Object.hasOwn(changes, 'httpsRedirect')) {
+    httpsRedirect = httpsMode === 'managed';
+  }
+  const canonicalRedirect = changes.canonicalRedirect ?? domain.canonicalRedirect;
+  if (typeof httpsRedirect !== 'boolean' || typeof canonicalRedirect !== 'boolean' || (httpsMode === 'off' && httpsRedirect)) {
+    throw new DomainRegistryError('invalid_redirect_policy', 'Redirect policy is invalid for the selected HTTPS mode');
+  }
+  return Object.freeze({
+    primaryDomain: names.primary,
+    aliases: Object.freeze([...names.aliases]),
+    httpsMode,
+    httpsRedirect,
+    canonicalRedirect,
+  });
+}
+
+function updateDigest({ domain, next, hierarchy }) {
+  return createHash('sha256').update(JSON.stringify({
+    version: 1,
+    domainId: domain.id,
+    currentRevision: domain.desiredRevision,
+    currentCertificateId: domain.certificateId,
+    appliedPrimaryDomain: domain.appliedPrimaryDomain,
+    next,
+    hierarchy,
+  })).digest('hex');
+}
+
 export function createDomainRegistry({
   filePath = null,
   now = () => Date.now(),
@@ -170,16 +263,17 @@ export function createDomainRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.domains)) throw new Error('unsupported or invalid domain registry state');
+        if (![1, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.domains)) throw new Error('unsupported or invalid domain registry state');
         try {
           validateDomainHierarchy(parsed.domains);
+          parsed.domains.forEach((domain) => hydrateDomain(domain, parsed.version));
           for (const domain of parsed.domains) normalizeWebsiteId(domain.websiteId ?? null);
         } catch (error) {
           if (error instanceof DomainHierarchyError || error instanceof DomainRegistryError) throw error;
           throw error;
         }
         state = parsed;
-        state.domains.forEach(hydrateDomain);
+        state.version = STORE_VERSION;
         if (typeof getWebsite === 'function') {
           for (const domain of state.domains) if (domain.websiteId) await requireWebsiteBinding(domain.websiteId, domain.serverId);
         }
@@ -234,6 +328,60 @@ export function createDomainRegistry({
     });
   }
 
+  function buildDomainUpdatePreview(domainId, changes) {
+    const normalizedDomainId = normalizeReparentId(domainId, 'domainId');
+    const domain = requireDomain(state, normalizedDomainId);
+    const next = normalizedUpdate(domain, changes);
+    const hostnameChanged = next.primaryDomain !== domain.primaryDomain
+      || JSON.stringify(next.aliases) !== JSON.stringify(domain.aliases);
+    const policyChanged = next.httpsMode !== domain.httpsMode
+      || next.httpsRedirect !== domain.httpsRedirect
+      || next.canonicalRedirect !== domain.canonicalRedirect;
+    if (!hostnameChanged && !policyChanged) {
+      throw new DomainRegistryError('domain_update_no_changes', 'Domain already has the requested routing settings', 409);
+    }
+    if (hostnameChanged) {
+      const requestedNames = new Set([next.primaryDomain, ...next.aliases]);
+      const conflict = state.domains.find((candidate) => candidate.id !== domain.id
+        && ownedNames(candidate).some((ownedName) => requestedNames.has(ownedName)));
+      if (conflict) throw new DomainRegistryError('domain_conflict', 'A domain or alias is already managed', 409);
+      try {
+        validateDomainHierarchy(state.domains.map((candidate) => candidate.id === domain.id
+          ? { ...candidate, primaryDomain: next.primaryDomain, aliases: [...next.aliases] }
+          : candidate));
+      } catch (error) {
+        if (error instanceof DomainHierarchyError) throw new DomainRegistryError(error.code, error.message, error.status);
+        throw error;
+      }
+    }
+    const hierarchy = hierarchySnapshot(state.domains);
+    const previewDigest = updateDigest({ domain, next, hierarchy });
+    const certificateDetached = domain.certificateId !== null && (hostnameChanged || next.httpsMode === 'off');
+    const descendants = descendantsOf(state.domains, domain.id);
+    return Object.freeze({
+      version: 1,
+      domainId: domain.id,
+      currentRevision: domain.desiredRevision,
+      nextRevision: domain.desiredRevision + 1,
+      next,
+      previewDigest,
+      confirmation: `update-domain:${domain.id}:${previewDigest}`,
+      impact: Object.freeze({
+        trafficChange: true,
+        requiresStageAndActivation: true,
+        hostnameChanged,
+        policyChanged,
+        activeConfigRename: domain.appliedPrimaryDomain !== null && domain.appliedPrimaryDomain !== next.primaryDomain,
+        certificate: Object.freeze({
+          id: domain.certificateId,
+          detached: certificateDetached,
+          reason: certificateDetached ? (next.httpsMode === 'off' ? 'https_disabled' : 'hostname_set_changed') : null,
+        }),
+        descendants: Object.freeze(descendants),
+      }),
+    });
+  }
+
   async function previewDomainReparent({ domainId, parentDomainId = null } = {}) {
     await ensureInitialized();
     return buildReparentPreview(domainId, parentDomainId);
@@ -255,11 +403,50 @@ export function createDomainRegistry({
     return Object.freeze({ domain: publicDomain(domain), impact: preview.impact, previewDigest: preview.previewDigest });
   }
 
-  async function createDomain({ domainId = null, serverId, primaryDomain, aliases = [], targetType, target, httpsMode = 'off', parentDomainId = null, websiteId = null }) {
+  async function previewDomainUpdate({ domainId, changes } = {}) {
+    await ensureInitialized();
+    return buildDomainUpdatePreview(domainId, changes);
+  }
+
+  async function updateDomain({ domainId, changes, previewDigest } = {}) {
+    await ensureInitialized();
+    if (typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)) {
+      throw new DomainRegistryError('invalid_domain_update_digest', 'A current Domain update preview digest is required');
+    }
+    const preview = buildDomainUpdatePreview(domainId, changes);
+    if (preview.previewDigest !== previewDigest) {
+      throw new DomainRegistryError('domain_update_preview_stale', 'Domain routing state changed after preview; request a new preview', 409);
+    }
+    const domain = requireDomain(state, preview.domainId);
+    domain.primaryDomain = preview.next.primaryDomain;
+    domain.aliases = [...preview.next.aliases];
+    domain.httpsMode = preview.next.httpsMode;
+    domain.httpsRedirect = preview.next.httpsRedirect;
+    domain.canonicalRedirect = preview.next.canonicalRedirect;
+    if (preview.impact.certificate.detached) domain.certificateId = null;
+    domain.desiredRevision = preview.nextRevision;
+    domain.stagedRevision = 0;
+    domain.stagedChecksum = null;
+    domain.stagedConfigName = null;
+    domain.lastStagedAt = null;
+    domain.state = 'draft';
+    domain.lastError = null;
+    domain.updatedAt = new Date(now()).toISOString();
+    await persist();
+    return Object.freeze({ domain: publicDomain(domain), impact: preview.impact, previewDigest });
+  }
+
+  async function createDomain({
+    domainId = null, serverId, primaryDomain, aliases = [], targetType, target, httpsMode = 'off',
+    httpsRedirect = httpsMode === 'managed', canonicalRedirect = false, parentDomainId = null, websiteId = null,
+  }) {
     await ensureInitialized();
     if (typeof serverId !== 'string' || !serverId) throw new DomainRegistryError('invalid_server', 'serverId is required');
     if (!(await serverExists(serverId))) throw new DomainRegistryError('server_not_found', 'Target server does not exist', 404);
     if (!HTTPS_MODES.has(httpsMode)) throw new DomainRegistryError('invalid_https_mode', 'httpsMode must be off or managed');
+    if (typeof httpsRedirect !== 'boolean' || typeof canonicalRedirect !== 'boolean' || (httpsMode === 'off' && httpsRedirect)) {
+      throw new DomainRegistryError('invalid_redirect_policy', 'Redirect policy is invalid for the selected HTTPS mode');
+    }
     const normalizedDomainId = domainId == null ? randomUUID() : (() => {
       try { return assertUuid(domainId, 'domainId'); }
       catch { throw new DomainRegistryError('invalid_domain_id', 'domainId must be a valid UUID'); }
@@ -283,7 +470,8 @@ export function createDomainRegistry({
     const timestamp = new Date(now()).toISOString();
     const domain = {
       id: normalizedDomainId, serverId, websiteId: normalizedWebsiteId, primaryDomain: normalized.primary, parentDomainId,
-      aliases: normalized.aliases, targetType, target: validateTarget(targetType, target), httpsMode, certificateId: null,
+      aliases: normalized.aliases, targetType, target: validateTarget(targetType, target), httpsMode, httpsRedirect, canonicalRedirect,
+      certificateId: null, appliedPrimaryDomain: null,
       state: 'draft', desiredRevision: 1, stagedRevision: 0, stagedChecksum: null, stagedConfigName: null,
       lastStagedAt: null, appliedRevision: 0, lastAppliedAt: null, lastError: null, createdAt: timestamp, updatedAt: timestamp,
     };
@@ -292,7 +480,8 @@ export function createDomainRegistry({
       if (domainId === null || existing.serverId !== domain.serverId || existing.websiteId !== domain.websiteId
         || existing.primaryDomain !== domain.primaryDomain || (existing.parentDomainId ?? null) !== domain.parentDomainId
         || JSON.stringify(existing.aliases) !== JSON.stringify(domain.aliases) || existing.targetType !== domain.targetType
-        || JSON.stringify(existing.target) !== JSON.stringify(domain.target) || existing.httpsMode !== domain.httpsMode) {
+        || JSON.stringify(existing.target) !== JSON.stringify(domain.target) || existing.httpsMode !== domain.httpsMode
+        || existing.httpsRedirect !== domain.httpsRedirect || existing.canonicalRedirect !== domain.canonicalRedirect) {
         throw new DomainRegistryError('domain_identity_conflict', 'Domain identity conflicts with existing state', 409);
       }
       return publicDomain(existing);
@@ -343,11 +532,17 @@ export function createDomainRegistry({
     return domain ? publicDomain(hydrateDomain(domain)) : null;
   }
 
-  async function attachCertificate(domainId, certificateId) {
+  async function attachCertificate(domainId, certificateId, { domains = null } = {}) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
     if (domain.httpsMode !== 'managed') throw new DomainRegistryError('https_not_managed', 'Certificate can only be attached to a managed HTTPS domain', 409);
     if (typeof certificateId !== 'string' || !certificateId) throw new DomainRegistryError('invalid_certificate', 'certificateId is required');
+    if (domains !== null) {
+      const covered = normalizeDomains(domains?.[0], domains?.slice(1) ?? []);
+      if ([covered.primary, ...covered.aliases].join('\n') !== [domain.primaryDomain, ...domain.aliases].join('\n')) {
+        throw new DomainRegistryError('certificate_domain_mismatch', 'Certificate domains do not match current Domain routing state', 409);
+      }
+    }
     if (domain.certificateId === certificateId) return publicDomain(domain);
     domain.certificateId = certificateId;
     domain.desiredRevision += 1;
@@ -386,6 +581,7 @@ export function createDomainRegistry({
     if (checksum !== domain.stagedChecksum) throw new DomainRegistryError('staged_checksum_mismatch', 'Activated checksum does not match staged desired state', 409);
     const timestamp = new Date(now()).toISOString();
     domain.appliedRevision = domain.desiredRevision;
+    domain.appliedPrimaryDomain = domain.primaryDomain;
     domain.state = 'active';
     domain.lastAppliedAt = timestamp;
     domain.lastError = null;
@@ -398,7 +594,7 @@ export function createDomainRegistry({
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
     domain.state = 'error';
-    domain.lastError = typeof errorCode === 'string' ? errorCode.slice(0, 120) : 'apply_failed';
+    domain.lastError = typeof errorCode === 'string' && /^[a-z0-9_]{1,120}$/.test(errorCode) ? errorCode : 'apply_failed';
     domain.updatedAt = new Date(now()).toISOString();
     await persist();
     return publicDomain(domain);
@@ -407,6 +603,8 @@ export function createDomainRegistry({
   return {
     init,
     createDomain,
+    previewDomainUpdate,
+    updateDomain,
     previewDomainReparent,
     reparentDomain,
     bindWebsite,
@@ -427,5 +625,8 @@ export const domainRegistryInternals = Object.freeze({
   descendantsOf,
   hierarchySnapshot,
   reparentDigest,
+  normalizedUpdate,
+  updateDigest,
+  diagnosis,
   hydrateDomain,
 });

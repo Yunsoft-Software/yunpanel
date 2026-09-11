@@ -7,7 +7,13 @@ import { createApp as createCoreApp } from './core-app.js';
 import { DatabaseHttpError, mountDatabaseRoutes } from './database-http.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
-import { createDomainHandler, createDomainReparentHandler, createDomainReparentPreviewHandler } from './domain-http.js';
+import {
+  createDomainHandler,
+  createDomainReparentHandler,
+  createDomainReparentPreviewHandler,
+  createDomainUpdateHandler,
+  createDomainUpdatePreviewHandler,
+} from './domain-http.js';
 import { mountDockerWorkloadRoutes } from './docker-workload-http.js';
 import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from './docker-workload-registry.js';
 import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
@@ -82,6 +88,8 @@ export function createApp({
   mountSiteFileRoutes(app, { siteFileManager: files });
   app.use(express.json({ limit: '256kb' }));
   app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry));
+  app.post('/api/domains/:domainId/update-preview', requirePanelRouteAccess, createDomainUpdatePreviewHandler(domainRegistry));
+  app.patch('/api/domains/:domainId', requirePanelRouteAccess, createDomainUpdateHandler(domainRegistry, { jobRegistry, certificateRegistry }));
   app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry));
   app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry));
   mountSiteCreateRoutes(app, { registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry });

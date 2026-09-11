@@ -106,6 +106,15 @@ test('Domain hierarchy preview and apply have bounded common audit identities', 
   });
 });
 
+test('Domain routing preview and apply have bounded common audit identities', () => {
+  assert.deepEqual(classifyManagementMutation('POST', '/api/domains/domain-1/update-preview'), {
+    action: 'domain.update.preview', resourceType: 'domain', resourceId: 'domain-1',
+  });
+  assert.deepEqual(classifyManagementMutation('PATCH', '/api/domains/domain-1'), {
+    action: 'domain.update', resourceType: 'domain', resourceId: 'domain-1',
+  });
+});
+
 test('Website and Domain impact previews have resource-scoped audit identities', () => {
   assert.deepEqual(classifyManagementMutation('POST', '/api/websites/website-1/impact-preview'), {
     action: 'website.impact.preview', resourceType: 'website', resourceId: 'website-1',

@@ -33,6 +33,9 @@ async function resolveDomainTls(domain, certificateRegistry) {
   const certificate = await certificateRegistry.getCertificate(domain.certificateId);
   if (!certificate || certificate.state !== 'active') throw new CertificateRegistryError('certificate_not_active', 'Attached certificate is not active', 409);
   if (certificate.staging) throw new CertificateRegistryError('staging_certificate_not_allowed', 'Staging certificates cannot be attached to production HTTPS config', 409);
+  if (certificate.domains.join('\n') !== [domain.primaryDomain, ...domain.aliases].join('\n')) {
+    throw new CertificateRegistryError('certificate_domain_mismatch', 'Attached certificate does not cover the current Domain routing names', 409);
+  }
   return { fullchainPath: certificate.fullchainPath, privateKeyPath: certificate.privateKeyPath };
 }
 
@@ -468,6 +471,8 @@ export function createApp({
       targetType: request.body?.targetType,
       target: request.body?.target,
       httpsMode: request.body?.httpsMode ?? 'off',
+      httpsRedirect: request.body?.httpsRedirect,
+      canonicalRedirect: request.body?.canonicalRedirect ?? false,
     });
     return response.status(201).json({ data: domain });
   });
@@ -476,7 +481,14 @@ export function createApp({
     if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
     await ensureResourceJobIdle(jobRegistry, 'domain', domain.id);
     const tls = await resolveDomainTls(domain, certificateRegistry);
-    const payload = { primaryDomain: domain.primaryDomain, aliases: domain.aliases, targetType: domain.targetType, target: domain.target };
+    const payload = {
+      primaryDomain: domain.primaryDomain,
+      aliases: domain.aliases,
+      targetType: domain.targetType,
+      target: domain.target,
+      canonicalRedirect: domain.canonicalRedirect,
+      httpsRedirect: domain.httpsRedirect,
+    };
     if (tls) payload.tls = tls;
     const job = await jobRegistry.enqueue({ serverId: domain.serverId, type: 'domain.stage', operation: OPERATIONS.DOMAIN_STAGE, payload, resourceType: 'domain', resourceId: domain.id });
     return response.status(202).json({ data: job });
@@ -490,7 +502,11 @@ export function createApp({
       serverId: domain.serverId,
       type: 'domain.activate',
       operation: OPERATIONS.DOMAIN_ACTIVATE,
-      payload: { primaryDomain: domain.primaryDomain, checksum: domain.stagedChecksum },
+      payload: {
+        primaryDomain: domain.primaryDomain,
+        previousPrimaryDomain: domain.appliedPrimaryDomain !== domain.primaryDomain ? domain.appliedPrimaryDomain : null,
+        checksum: domain.stagedChecksum,
+      },
       resourceType: 'domain',
       resourceId: domain.id,
     });
@@ -508,6 +524,7 @@ export function createApp({
       domains: [domain.primaryDomain, ...domain.aliases],
       email: request.body?.email,
       staging: request.body?.staging === true,
+      replaceExisting: domain.certificateId === null,
     });
     try {
       const job = await jobRegistry.enqueue({

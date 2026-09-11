@@ -104,7 +104,9 @@ async function applyReconciliation({ domainRegistry, certificateRegistry, applic
     }
     if (job.operation === OPERATIONS.SSL_ISSUE) {
       const certificate = await certificateRegistry.markActive(job.resourceId, job.result, { renewal: false });
-      if (!certificate.staging) await domainRegistry.attachCertificate(certificate.domainId, certificate.id);
+      if (!certificate.staging) {
+        await domainRegistry.attachCertificate(certificate.domainId, certificate.id, { domains: certificate.domains });
+      }
       return;
     }
     if (job.operation === OPERATIONS.SSL_RENEW) {

@@ -58,6 +58,8 @@ export function classifyManagementMutation(method, pathname) {
     return { action: method === 'PUT' ? 'application.environment.updated' : 'application.environment.deleted', resourceType: 'application', resourceId: parts[0] };
   }
   if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/stage$/)) && method === 'POST') return { action: 'domain.stage', resourceType: 'domain', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/update-preview$/)) && method === 'POST') return { action: 'domain.update.preview', resourceType: 'domain', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/domains\/([^/]+)$/)) && method === 'PATCH') return { action: 'domain.update', resourceType: 'domain', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/reparent-preview$/)) && method === 'POST') return { action: 'domain.reparent.preview', resourceType: 'domain', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/impact-preview$/)) && method === 'POST') return { action: 'domain.impact.preview', resourceType: 'domain', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/domains\/([^/]+)\/reparent$/)) && method === 'POST') return { action: 'domain.reparent', resourceType: 'domain', resourceId: parts[0] };

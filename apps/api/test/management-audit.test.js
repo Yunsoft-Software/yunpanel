@@ -30,6 +30,8 @@ test('current management mutation routes map to bounded action and resource iden
     ['POST', '/api/domains', 'domain.create', 'domain', 'new'],
     ['POST', '/api/domains/domain-1/reparent-preview', 'domain.reparent.preview', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/reparent', 'domain.reparent', 'domain', 'domain-1'],
+    ['POST', '/api/domains/domain-1/update-preview', 'domain.update.preview', 'domain', 'domain-1'],
+    ['PATCH', '/api/domains/domain-1', 'domain.update', 'domain', 'domain-1'],
     ['POST', '/api/websites/website-1/update-preview', 'website.update.preview', 'website', 'website-1'],
     ['PUT', '/api/websites/website-1/files/upload', 'website.file.upload', 'website', 'website-1'],
     ['PUT', '/api/websites/website-1/files/text', 'website.file.edit', 'website', 'website-1'],

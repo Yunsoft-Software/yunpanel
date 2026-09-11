@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDomainHandler, createDomainReparentHandler, createDomainReparentPreviewHandler } from '../src/domain-http.js';
+import {
+  createDomainHandler,
+  createDomainReparentHandler,
+  createDomainReparentPreviewHandler,
+  createDomainUpdateHandler,
+  createDomainUpdatePreviewHandler,
+} from '../src/domain-http.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 
 function responseRecorder() {
@@ -122,5 +128,80 @@ test('HTTP reparent rejects unknown body fields and stale digest without mutatio
     );
     assert.ok(failure instanceof Error);
     assert.equal((await registry.getDomain(child.id)).parentDomainId, root.id);
+  }
+});
+
+test('HTTP Domain update requires current preview and exact typed confirmation', async () => {
+  const registry = createDomainRegistry();
+  const domain = await registry.createDomain(body);
+  const changes = { aliases: ['www.example.com'], canonicalRedirect: true };
+  const previewResponse = responseRecorder();
+  await createDomainUpdatePreviewHandler(registry)(
+    { params: { domainId: domain.id }, body: { changes } },
+    previewResponse,
+    (error) => { throw error; },
+  );
+  const preview = previewResponse.payload.data;
+  assert.match(preview.previewDigest, /^[a-f0-9]{64}$/);
+  assert.equal(preview.next.canonicalRedirect, true);
+
+  let deniedError;
+  await createDomainUpdateHandler(registry)(
+    { params: { domainId: domain.id }, body: { changes, previewDigest: preview.previewDigest, confirmation: 'wrong' } },
+    responseRecorder(),
+    (error) => { deniedError = error; },
+  );
+  assert.equal(deniedError.code, 'domain_update_confirmation_required');
+  assert.deepEqual((await registry.getDomain(domain.id)).aliases, []);
+
+  const applied = responseRecorder();
+  await createDomainUpdateHandler(registry)(
+    { params: { domainId: domain.id }, body: { changes, previewDigest: preview.previewDigest, confirmation: preview.confirmation } },
+    applied,
+    (error) => { throw error; },
+  );
+  assert.deepEqual(applied.payload.data.domain.aliases, ['www.example.com']);
+  assert.equal(applied.payload.data.domain.canonicalRedirect, true);
+});
+
+test('HTTP Domain update rejects unknown outer fields and stale digests', async () => {
+  const registry = createDomainRegistry();
+  const domain = await registry.createDomain(body);
+  const changes = { canonicalRedirect: true };
+  for (const requestBody of [
+    { changes, hidden: true },
+    { changes, previewDigest: '0'.repeat(64), confirmation: 'wrong', hidden: true },
+    { changes, previewDigest: '0'.repeat(64), confirmation: 'wrong' },
+  ]) {
+    let failure;
+    const handler = Object.hasOwn(requestBody, 'previewDigest') ? createDomainUpdateHandler(registry) : createDomainUpdatePreviewHandler(registry);
+    await handler(
+      { params: { domainId: domain.id }, body: requestBody },
+      responseRecorder(),
+      (error) => { failure = error; },
+    );
+    assert.ok(failure instanceof Error);
+    assert.equal((await registry.getDomain(domain.id)).canonicalRedirect, false);
+  }
+});
+
+test('HTTP Domain update apply waits for Domain and certificate operations', async () => {
+  const registry = createDomainRegistry();
+  const domain = await registry.createDomain(body);
+  const changes = { canonicalRedirect: true };
+  const preview = await registry.previewDomainUpdate({ domainId: domain.id, changes });
+  const request = {
+    params: { domainId: domain.id },
+    body: { changes, previewDigest: preview.previewDigest, confirmation: preview.confirmation },
+  };
+
+  for (const dependencies of [
+    { jobRegistry: { listJobs: async () => [{ status: 'running' }] } },
+    { certificateRegistry: { listCertificates: async () => [{ domainId: domain.id, state: 'issuing' }] } },
+  ]) {
+    let failure;
+    await createDomainUpdateHandler(registry, dependencies)(request, responseRecorder(), (error) => { failure = error; });
+    assert.equal(failure.code, 'domain_update_operation_conflict');
+    assert.equal((await registry.getDomain(domain.id)).canonicalRedirect, false);
   }
 });

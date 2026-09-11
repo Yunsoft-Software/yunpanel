@@ -5,7 +5,7 @@ import { normalizeDomainSet } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
-const CERT_STATES = new Set(['pending', 'validating', 'validated', 'issuing', 'active', 'renewing', 'error']);
+const CERT_STATES = new Set(['pending', 'validating', 'validated', 'issuing', 'active', 'renewing', 'superseded', 'error']);
 
 export class CertificateRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -121,7 +121,7 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
     if (!initialized) await init();
   }
 
-  async function createForDomain({ domainId, serverId, domains, email, staging = false }) {
+  async function createForDomain({ domainId, serverId, domains, email, staging = false, replaceExisting = false }) {
     await ensureInitialized();
     if (typeof domainId !== 'string' || !domainId) throw new CertificateRegistryError('invalid_domain', 'domainId is required');
     if (typeof serverId !== 'string' || !serverId) throw new CertificateRegistryError('invalid_server', 'serverId is required');
@@ -129,9 +129,16 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
     const normalizedDomains = normalizeDomains(domains);
     const certName = normalizedDomains[0];
     const isValidation = Boolean(staging);
+    if (typeof replaceExisting !== 'boolean') {
+      throw new CertificateRegistryError('invalid_certificate_replacement', 'Certificate replacement policy is invalid');
+    }
     const existing = state.certificates.find((certificate) => {
-      if (certificate.domainId !== domainId || certificate.state === 'error') return false;
-      if (!isValidation) return certificate.staging === false;
+      if (certificate.domainId !== domainId || ['error', 'superseded'].includes(certificate.state)) return false;
+      if (!isValidation) {
+        if (certificate.staging) return false;
+        if (['pending', 'issuing', 'renewing'].includes(certificate.state)) return true;
+        return !replaceExisting;
+      }
       return certificate.staging === true && ['pending', 'validating'].includes(certificate.state);
     });
     if (existing) {
@@ -222,11 +229,19 @@ export function createCertificateRegistry({ filePath = null, now = () => Date.no
       throw new CertificateRegistryError('invalid_certificate_metadata', 'Certificate fingerprint is invalid');
     }
 
+    const certificatePath = validateCertificatePath(certificate.certName, result.certificatePath, 'cert.pem');
+    const fullchainPath = validateCertificatePath(certificate.certName, result.fullchainPath, 'fullchain.pem');
+    const privateKeyPath = validateCertificatePath(certificate.certName, result.privateKeyPath, 'privkey.pem');
     const timestamp = new Date(now()).toISOString();
+    for (const previous of state.certificates) {
+      if (previous.id === certificate.id || previous.domainId !== certificate.domainId || previous.staging || previous.state !== 'active') continue;
+      previous.state = 'superseded';
+      previous.updatedAt = timestamp;
+    }
     certificate.state = 'active';
-    certificate.certificatePath = validateCertificatePath(certificate.certName, result.certificatePath, 'cert.pem');
-    certificate.fullchainPath = validateCertificatePath(certificate.certName, result.fullchainPath, 'fullchain.pem');
-    certificate.privateKeyPath = validateCertificatePath(certificate.certName, result.privateKeyPath, 'privkey.pem');
+    certificate.certificatePath = certificatePath;
+    certificate.fullchainPath = fullchainPath;
+    certificate.privateKeyPath = privateKeyPath;
     certificate.subject = typeof result.subject === 'string' ? result.subject.slice(0, 500) : null;
     certificate.issuer = typeof result.issuer === 'string' ? result.issuer.slice(0, 500) : null;
     certificate.subjectAltName = typeof result.subjectAltName === 'string' ? result.subjectAltName.slice(0, 2000) : null;
