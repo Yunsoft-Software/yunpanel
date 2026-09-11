@@ -34,7 +34,7 @@ The current local operation map covers the asynchronous queue operations used by
 - static deploy/rollback,
 - Node deploy/rollback/restart/status, release-bound enable/disable/start/stop process control and isolated runtime inventory/install.
 
-Node environment secrets are materialized from the encrypted application environment registry at execution time. Plaintext application secrets are not copied into generic durable job payloads or public job responses.
+Node environment secrets are materialized from the encrypted application environment registry at execution time. Plaintext application secrets are not copied into generic durable job payloads or public job responses. Node deploy/restart/rollback carries only a monotonic environment revision; execution fails closed if saved state drifted after queueing, and successful reconciliation marks that exact revision/release as applied to the running process.
 
 A source-level queue/recovery parity invariant must fail when a new asynchronous operation is added without an explicit recovery classification.
 

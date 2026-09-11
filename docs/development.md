@@ -74,7 +74,7 @@ Rules:
 - deploy requests may select an exact branch, tag or full commit SHA; the queued target is bounded metadata and the resolved target is recorded with the release,
 - private GitHub tokens and unencrypted SSH deploy keys use the same encrypted Application secret store but are hidden from application environment list/materialization; token askpass and temporary SSH key material exist only for Git clone/fetch,
 - retained legacy-agent materialization exists only for rollback compatibility while that transport remains installed,
-- secret values are not included in generic deployment/restart/rollback job payloads or result records,
+- secret values are not included in generic deployment/restart/rollback job payloads or result records; only the bounded environment revision is carried with Node work,
 - managed runtime keys `NODE_ENV`, `HOST`, `PORT` and `YUNPANEL_APPLICATION_ID` cannot be overridden by application environment input.
 
 The default application environment registry file is `.data/application-environment-registry.json`. Override it with `YUNPANEL_APPLICATION_ENVIRONMENT_STORE` when required. The state file is mode `0600`; application environment secrets and internal deployment credentials contain ciphertext, IV and authentication tag rather than plaintext values. Deployment credentials are reserved internal records and never enter the hosted process environment.
@@ -101,11 +101,15 @@ Protected application environment metadata:
 
 ```text
 GET    /api/applications/:applicationId/environment
+GET    /api/applications/:applicationId/environment/status
 PUT    /api/applications/:applicationId/environment/:key
 DELETE /api/applications/:applicationId/environment/:key
+POST   /api/applications/:applicationId/environment/import
 ```
 
-Secret variables are returned as metadata only; plaintext values are not returned by the normal admin list API.
+Secret variables are returned as metadata only; plaintext values are not returned by the normal admin list API. The import route accepts exact `content`, `mode`, `secret`, `expectedRevision` and `confirmation` fields. `content` is a bounded strict `KEY=value` dotenv subset; duplicate/reserved/multiline values fail before mutation. Merge requires `confirmation: null`; replace requires `replace-environment:<application-id>:<saved-revision>`. Each real edit/import creates one saved revision with added/updated/deleted counts.
+
+Environment status remains `saved_on_disk` until a Node deploy, restart or rollback materializes that exact queued revision and its successful job reconciles to the exact running release. Job-time materialization rejects revision drift; environment and deploy-credential mutations are blocked while Application work is queued/running.
 
 ## Local ownership and recovery tools
 

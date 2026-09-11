@@ -48,7 +48,7 @@ Do not replace structured operations with an unauthenticated generic shell or ma
 - Managed Node 22/24 LTS inventory and checksum-verified atomic installation under `/opt/yunpanel/node-runtimes`; deploy, build lifecycle and systemd PATH use the selected site major without replacing YunPanel's packaged `/usr/local/bin/node` runtime.
 - Static and Node deploys accept an explicit branch, tag or immutable 40-character commit target; Git fetch runs as the dedicated site user and the resolved target is retained with release history.
 - Per-Application GitHub token or unencrypted SSH deploy-key credentials are AES-256-GCM encrypted by the existing master-key store, materialized only for clone/fetch and excluded from application env, job/recovery result and audit metadata.
-- AES-256-GCM application environment storage, masked metadata and execution-time secret materialization without putting plaintext environment values into generic job records.
+- AES-256-GCM application environment storage, strict bounded `.env` merge/replace import, revisioned change metadata and explicit saved-on-disk versus applied-to-running-process state; plaintext values never enter generic job records.
 - Managed-service inspect/install/start/stop/restart support for the current allowlisted host services.
 - MySQL/MariaDB local-socket inventory and database create/delete job flows with result sanitization.
 - Durable queued/running/terminal job persistence with a versioned private recovery sidecar. Terminal-but-unreconciled and supported running-recovery state survives restart and blocks unsafe new work.
