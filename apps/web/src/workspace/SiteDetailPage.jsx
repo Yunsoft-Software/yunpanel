@@ -6,6 +6,7 @@ import { SITE_TABS, certificateState, externalSiteUrl, matchingApplications, par
 import { ApplicationOperations, DomainOperations, SslOperations } from './SiteOperations.jsx';
 import EnvironmentPanel from './EnvironmentPanel.jsx';
 import JobsTable from './JobsTable.jsx';
+import TerminalPanel from './LazyTerminalPanel.jsx';
 
 const unavailable = {
   mail: ['Mail yönetimi', 'Mailbox, kota, yönlendirme ve Roundcube backend’i henüz uygulanmadı. Bu sekme mail servisini kurmaz veya DNS kaydı yayımlamaz.', 'mail'],
@@ -13,7 +14,6 @@ const unavailable = {
   databases: ['Veritabanları', 'Siteye bağlı veritabanı oluşturma, kullanıcı yetkileri ve dump/restore API’leri henüz uygulanmadı.', 'database'],
   cron: ['Zamanlanmış işler', 'Site kullanıcısıyla cron oluşturma ve çalışma kayıtları henüz uygulanmadı.', 'clock'],
   backups: ['Yedekler', 'Şifreli yedek, hedef/retention ve geri yükleme backend’i henüz uygulanmadı.', 'archive'],
-  terminal: ['Entegre terminal', 'PTY/WebSocket terminali ve agentsiz backend geçişi henüz uygulanmadı. Bu sürümde terminal açılmaz.', 'terminal'],
 };
 export default function SiteDetailPage() {
   const { websiteId, tab = 'overview' } = useParams();
@@ -54,6 +54,12 @@ function SiteWorkspace({ websiteId, tab }) {
     {tab === 'domains' && <DomainOperations domain={domain} />}
     {tab === 'ssl' && <><CollectionNotice resource={certificates} label="Sertifikalar" /><SslOperations key={domain.id} domain={domain} /></>}
     {tab === 'logs' && <><div className="ws-notice"><Icon name="file" /><span>Bu sürümde siteye ait işlem kayıtları gösterilir. Canlı Node.js/Nginx log akışı henüz yok.</span></div><Section title="Site işlem kayıtları"><CollectionNotice resource={jobs} label="İşlem kayıtları" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={50} />}</Section></>}
+    {tab === 'terminal' && <TerminalPanel
+      title="Site terminali"
+      description={`${domain.primaryDomain} için dedicated site kullanıcısında interaktif PTY.`}
+      target={domain.websiteId ? { scope: 'site', websiteId: domain.websiteId } : null}
+      unavailable={!domain.websiteId ? 'Bu eski Domain kaydı kalıcı bir Website kimliğine bağlı değil; site terminali güvenli hedef belirleyemiyor.' : null}
+    />}
     {tab === 'settings' && <Section title="Site ayarları"><KeyValues items={[
       ['Kayıt kimliği', domain.id], ['Üst alan adı', domains.items.find((item) => item.id === domain.parentDomainId)?.primaryDomain ?? 'Bağımsız kayıt'],
       ['Sunucu', server?.displayName ?? server?.hostname], ['Hedef türü', domain.targetType],
