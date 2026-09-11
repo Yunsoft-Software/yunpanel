@@ -33,19 +33,16 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 
 ## T-MIGRATION — P1 agentless migration/rollback
 
-- [ ] Gerçek packaged hostta API+agent stopped + queue/recovery clear iken `local-migration-backup create -> verify -> preview -> stage` zincirini çalıştır.
 - [ ] Backup/snapshot/stage rootları 0700, archive/manifest 0600; checksum tamper, missing required path, source symlink, duplicate/special member, link escape, type drift ve partial-stage cleanup fail-closed olsun.
 - [ ] `/etc/passwd` ve `/etc/group` yalnız `yunapp-*` identity reference olsun; live overwrite yapılmasın. UID/GID/home/shell/group drift doğru raporlansın.
-- [ ] Enrolled host: verified snapshot sonrası `bind <id> --backup-dir <snapshot> --confirm`, exact env ID, agent disable, API start, `local-runtime validate <id>` sırasını uygula.
 - [ ] Fresh agentless host: verified snapshot sonrası `create --backup-dir <snapshot> --confirm`; `agentTokenHash=null`, enrollment credential yok. API start sonrası `validate` geçmeden functional mutation yapma.
-- [ ] `validate` exact local ownership/hostname, API active, agent inactive, queue/recovery zero, fresh local snapshot, exact packaged API version ve loopback `/api/health` 200 `status=ok` istemeli.
 - [ ] Existing enrolled host rollback: new rollback snapshot → verify/preview/stage → API+agent stop → `release <id> --backup-dir <snapshot> --confirm` → agent enable/start. Fresh local-only identity release edilememeli.
 - [ ] Live restore/apply kodu açıldığında per-target replace, owner/mode/ACL/xattr, pre-apply backup, health gate ve deterministic rollback gerçek isolated hostta kanıtlanmadan production'a alınmasın.
 - [ ] Migration + rollback kabulü tamamlandıktan sonra `yun-agent.service` ve retained transport kaldırılırken package upgrade disabled agent'ı tekrar enable etmemeli.
 
 ## T-WEBSITE — P1 kalıcı Website/domain kabulü
 
-- [ ] Production package `YUNPANEL_WEBSITE_STORE`, `YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE`, `YUNPANEL_WEBSITE_MIGRATION_LEDGER_STORE`, `YUNPANEL_DNS_HOSTING_STORE`, `YUNPANEL_DNS_CREDENTIAL_STORE`, `YUNPANEL_MAIL_DOMAIN_STORE` ve `YUNPANEL_DOCKER_WORKLOAD_STORE` için startup'ta `0600` private state oluştursun; restart/upgrade kimlikleri, explicit ilişkileri veya policy mode/digest bilgisini değiştirmesin.
+- [ ] Dolu production Website/migration/DNS/mail/Docker state'i restart ve package upgrade sonrasında kimliklerini, explicit ilişkilerini ve policy mode/digest bilgisini korusun.
 - [ ] Authenticated API'de Owner Website create/list/detail; Read Only list/detail/explicit Website→Domain read ve POST/migration 403 davranışını gerçek listener üzerinden doğrula.
 - [ ] Website store v1/v2→v3 upgrade'i gerçek package state üzerinde ID değiştirmeden revision/proxy target/null Docker-workload alanlarını eklesin. Owner update preview/apply exact revision + linked-Domain digest + typed confirmation istesin; stale Website/Domain state ve duplicate Application/Docker rebind mutation üretmesin, Read Only iki update route'unda 403 kalsın.
 - [ ] Static/Node Website binding'i canonical application root + deterministic `yunapp-*` user kullansın; stale/missing/cross-server application reference startup'ta fail-closed olsun.
@@ -82,8 +79,7 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 
 ## T-PACKAGE-LIVE — P0/P1 package ve canlı kapı
 
-- [ ] Matching Ubuntu `amd64`/`arm64` build hostunda approved `node-pty@1.1.0` install scriptiyle temiz `npm ci` çalıştır; native `pty.node` ve `spawn-helper` yüklenebilmeli. Üretilen `.deb` `all` değil doğru mimariyi bildirmeli, clean install/upgrade sonrasında `/usr/local/bin/node` ile `node-pty` importu ve gerçek PTY spawn çalışmalı; farklı OS/mimari veya eksik native build paketleme öncesi fail-closed kalmalı.
-- [ ] Node24 full check tamamlandıktan sonra yeni `.deb` üret; `dpkg-deb -c/-I` ile root API, Website/audit/migration-policy files, local-runtime, migration backup CLI, bütün job-recovery komutları, receipts, runbooklar ve web sandbox'ın aynı committen paketlendiğini doğrula.
+- [ ] Matching Ubuntu `arm64` build hostunda approved `node-pty@1.1.0` install scriptiyle temiz `npm ci` çalıştır; native `pty.node` ve `spawn-helper` yüklenebilmeli. Üretilen `.deb` doğru mimariyi bildirmeli, clean install/upgrade sonrasında `/usr/local/bin/node` ile `node-pty` importu ve gerçek PTY spawn çalışmalı; farklı OS/mimari veya eksik native build paketleme öncesi fail-closed kalmalı.
 - [ ] İzole Ubuntu hostta clean install + old-package upgrade yap. Auth DB/master key/state permissions, disabled-agent preservation, Website/audit/migration-policy schema ve local runtime startup davranışı korunmalı.
 - [ ] Hosted static/Node siteler panel restart/upgrade sırasında çalışmaya devam etsin.
 - [ ] `0.3.0-4` ↔ yeni agentless aday package/state rollback provası yap; IDs, auth, master key, vhost, cert, Website/application/domain/policy ve release state korunmalı.
