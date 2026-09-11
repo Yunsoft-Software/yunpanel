@@ -7,9 +7,9 @@ import {
 } from './application-environment-registry.js';
 import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
-import { createCertificateRegistry, CertificateRegistryError } from './certificate-registry.js';
+import { certificatePublicView, createCertificateRegistry, CertificateRegistryError } from './certificate-registry.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
-import { createJobRegistry, JobRegistryError } from './job-registry.js';
+import { createJobRegistry, jobPublicView, JobRegistryError } from './job-registry.js';
 import { JobReconciliationError, reconcileCompletedJob } from './job-reconciliation.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
@@ -202,8 +202,9 @@ export function createApp({
   };
   app.get('/api/dev/servers', developmentList(() => registry.listServers()));
   app.get('/api/dev/domains', developmentList(() => domainRegistry.listDomains()));
-  app.get('/api/dev/jobs', developmentList(() => jobRegistry.listJobs()));
-  app.get('/api/dev/certificates', developmentList(() => certificateRegistry.listCertificates()));
+  app.get('/api/dev/jobs', developmentList(async () => (await jobRegistry.listJobs()).map(jobPublicView)));
+  app.get('/api/dev/certificates', developmentList(async () => (
+    await certificateRegistry.listCertificates()).map((certificate) => certificatePublicView(certificate))));
   app.get('/api/dev/applications', developmentList(() => applicationRegistry.listApplications()));
 
   app.get('/api/servers', requirePanelRouteAccess, async (request, response) => response.json({ data: await registry.listServers() }));
@@ -297,7 +298,7 @@ export function createApp({
 
     reconciliationJobs.set(jobId, reconciliation);
     try {
-      return response.json({ data: await reconciliation });
+      return response.json({ data: jobPublicView(await reconciliation) });
     } finally {
       if (reconciliationJobs.get(jobId) === reconciliation) reconciliationJobs.delete(jobId);
     }
@@ -640,18 +641,23 @@ export function createApp({
         resourceId: certificate.id,
       });
       await certificateRegistry.setState(certificate.id, 'issuing');
-      return response.status(202).json({ data: { certificate: await certificateRegistry.getCertificate(certificate.id), job } });
+      return response.status(202).json({
+        data: { certificate: certificatePublicView(await certificateRegistry.getCertificate(certificate.id)), job: jobPublicView(job) },
+      });
     } catch (error) {
       await certificateRegistry.markFailed(certificate.id, error.code ?? 'certificate_enqueue_failed');
       throw error;
     }
   });
 
-  app.get('/api/certificates', requirePanelRouteAccess, async (request, response) => response.json({ data: await certificateRegistry.listCertificates() }));
+  app.get('/api/certificates', requirePanelRouteAccess, async (request, response) => {
+    const certificates = await certificateRegistry.listCertificates();
+    return response.json({ data: certificates.map((certificate) => certificatePublicView(certificate)) });
+  });
   app.get('/api/certificates/:certificateId', requirePanelRouteAccess, async (request, response) => {
     const certificate = await certificateRegistry.getCertificate(request.params.certificateId);
     if (!certificate) throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
-    return response.json({ data: certificate });
+    return response.json({ data: certificatePublicView(certificate) });
   });
   app.post('/api/certificates/:certificateId/renew', requirePanelRouteAccess, async (request, response) => {
     const certificate = await certificateRegistry.getCertificate(request.params.certificateId);
@@ -690,7 +696,7 @@ export function createApp({
       resourceId: certificate.id,
     });
     if (!dryRun) await certificateRegistry.setState(certificate.id, 'renewing');
-    return response.status(202).json({ data: job });
+    return response.status(202).json({ data: jobPublicView(job) });
   });
 
   app.get('/api/jobs', requirePanelRouteAccess, async (request, response) => {
@@ -701,13 +707,13 @@ export function createApp({
       resourceId: request.query.resourceId || null,
       status: request.query.status || null,
     });
-    return response.json({ data: jobs });
+    return response.json({ data: jobs.map(jobPublicView) });
   });
   app.get('/api/jobs/:jobId', requirePanelRouteAccess, async (request, response) => {
     await reconciliationJobs.get(request.params.jobId)?.catch(() => {});
     const job = await jobRegistry.getJob(request.params.jobId);
     if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
-    return response.json({ data: job });
+    return response.json({ data: jobPublicView(job) });
   });
   app.post('/api/jobs/:jobId/cancel', requirePanelRouteAccess, async (request, response) => {
     const job = await jobRegistry.cancel(request.params.jobId);
@@ -715,7 +721,7 @@ export function createApp({
       const application = await applicationRegistry.getApplication(job.resourceId);
       if (application?.activeDeploymentId === job.id) await applicationRegistry.markFailed(job.resourceId, job.id, 'operation_cancelled');
     }
-    return response.json({ data: job });
+    return response.json({ data: jobPublicView(job) });
   });
 
   app.use((request, response) => response.status(404).json({ error: { code: 'not_found', message: 'Not found' } }));

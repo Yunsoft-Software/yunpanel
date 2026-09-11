@@ -115,6 +115,10 @@ test('Domain diagnosis maps safe errors to concrete actions without copying host
   const hostile = await registry.markFailed(domain.id, 'TOKEN=/private/path');
   assert.equal(hostile.lastError, 'apply_failed');
   assert.doesNotMatch(JSON.stringify(hostile.diagnosis), /TOKEN|private|path/);
+  const boundedHostile = await registry.markFailed(domain.id, 'token_deadbeef');
+  assert.equal(boundedHostile.lastError, 'token_deadbeef');
+  assert.equal(boundedHostile.diagnosis.code, 'nginx_operation_failed');
+  assert.doesNotMatch(JSON.stringify(boundedHostile.diagnosis), /token_deadbeef/);
 });
 
 test('version one Domain state hydrates without rewrite and persists version three on mutation', async (t) => {

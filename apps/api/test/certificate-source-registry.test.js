@@ -3,7 +3,11 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createCertificateRegistry, CertificateRegistryError } from '../src/certificate-registry.js';
+import {
+  certificatePublicView,
+  createCertificateRegistry,
+  CertificateRegistryError,
+} from '../src/certificate-registry.js';
 
 const fingerprint256 = Array.from({ length: 32 }, () => 'AB').join(':');
 
@@ -122,4 +126,32 @@ test('version two certificate state hydrates DNS fields without changing identit
   assert.deepEqual(loaded.certificateNames, ['www.example.com']);
   assert.deepEqual(loaded.challenge, { type: 'http-01' });
   assert.equal(await readFile(filePath, 'utf8'), before);
+});
+
+test('public certificate view omits private state and exposes authored lifecycle diagnosis', async () => {
+  const now = Date.parse('2026-11-15T00:00:00.000Z');
+  const registry = createCertificateRegistry({ now: () => now });
+  const certificate = await registry.createForDomain({
+    domainId: 'domain-1', serverId: 'server-1', domains: ['example.com'], email: 'private@example.com',
+  });
+  await registry.markActive(certificate.id, acmeResult(certificate.certName, certificate.domains));
+  const active = await registry.getCertificate(certificate.id);
+  const publicActive = certificatePublicView({ ...active, subject: 'token=PRIVATE' }, { now });
+  assert.equal(publicActive.diagnosis.code, 'certificate_expiring');
+  assert.deepEqual(publicActive.challenge, { type: 'http-01' });
+  for (const field of ['email', 'certificatePath', 'fullchainPath', 'privateKeyPath', 'materialDigest', 'lastError']) {
+    assert.equal(Object.hasOwn(publicActive, field), false);
+  }
+  assert.doesNotMatch(JSON.stringify(publicActive), /private@example|letsencrypt|privkey/);
+  assert.equal(publicActive.subject, 'token=[REDACTED]');
+
+  await registry.markFailed(certificate.id, 'token_deadbeef');
+  const failed = certificatePublicView(await registry.getCertificate(certificate.id), { now });
+  assert.deepEqual(failed.diagnosis, {
+    severity: 'error',
+    code: 'certificate_operation_failed',
+    message: 'The certificate operation failed.',
+    action: 'Inspect the protected certificate job and host diagnostics before retrying.',
+  });
+  assert.doesNotMatch(JSON.stringify(failed), /token_deadbeef/);
 });

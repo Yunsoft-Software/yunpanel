@@ -111,7 +111,9 @@ Examples include domain activation, Node deploy/restart/rollback, managed-servic
 
 ## Safe diagnostics
 
-`local-execution-error.js` maps reviewed host/OS error codes to authored public messages. Unknown or hostile error objects collapse to a generic `local_operation_failed` diagnostic. Raw child-process output, exception messages, stack traces, secrets and arbitrary unknown codes must not be copied into failed jobs.
+`local-execution-error.js` maps reviewed host/OS error codes to authored public messages. Job completion applies this mapping again at the durable registry boundary, including results submitted by the retained remote transport. Unknown or hostile error objects collapse to a generic `local_operation_failed` diagnostic. Raw child-process output, exception messages, stack traces, secrets and arbitrary unknown codes must not be copied into failed jobs. Public DNS, certificate and Nginx job views add only catalogued remediation actions; an unknown stored code is replaced by a scope-specific generic diagnosis.
+
+Certificate reconciliation retains fixed material paths only inside the private mode-`0600` job/certificate stores because Nginx activation and crash recovery need the exact local identity. `/api/jobs`, certificate inventory, development inventory and command-completion responses remove certificate, full-chain and private-key paths. They also omit certificate email, material digest and raw failure code state. Audit receives only job identity, action, resource, outcome and an authored safe code; it never receives result material or paths.
 
 The temporarily retained legacy agent transport has its own authored safe-error compatibility catalog and source guards. First enrollment is retired; retained transport exists only for already-enrolled rollback identities.
 

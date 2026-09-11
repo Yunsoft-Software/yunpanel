@@ -4,7 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createJobRegistry, isNewlyEnqueuedJob, JobRegistryError } from '../src/job-registry.js';
+import {
+  createJobRegistry,
+  isNewlyEnqueuedJob,
+  jobPublicView,
+  JobRegistryError,
+} from '../src/job-registry.js';
 
 test('agent jobs move through queued, running and succeeded states exactly once', async () => {
   let clock = Date.parse('2026-09-08T21:00:00.000Z');
@@ -122,7 +127,7 @@ test('invalid successful result does not transition a running job', async () => 
   assert.equal(unchanged.result, null);
 });
 
-test('failed job results keep only bounded safe error metadata', async () => {
+test('failed job results keep only authored safe error metadata and actionable diagnosis', async () => {
   const registry = createJobRegistry();
   const job = await registry.enqueue({
     serverId: 'server-2',
@@ -140,7 +145,7 @@ test('failed job results keep only bounded safe error metadata', async () => {
     status: 'failed',
     error: {
       code: 'nginx_config_invalid',
-      message: 'x'.repeat(1_000),
+      message: 'TOKEN=PRIVATE /etc/letsencrypt/live/example.com/privkey.pem',
       stack: 'must never persist',
       secret: 'must never persist',
     },
@@ -148,9 +153,51 @@ test('failed job results keep only bounded safe error metadata', async () => {
 
   assert.equal(failed.status, 'failed');
   assert.equal(failed.error.code, 'nginx_config_invalid');
-  assert.equal(failed.error.message.length, 500);
+  assert.equal(failed.error.message, 'Nginx rejected the staged configuration.');
   assert.equal('stack' in failed.error, false);
   assert.equal('secret' in failed.error, false);
+  const publicView = jobPublicView(failed);
+  assert.equal(publicView.diagnosis.code, 'nginx_config_invalid');
+  assert.match(publicView.diagnosis.action, /stage a new revision/);
+  assert.doesNotMatch(JSON.stringify(publicView), /PRIVATE|letsencrypt|privkey/);
+
+  const legacyHostile = jobPublicView({
+    ...failed,
+    error: { code: 'token_deadbeef', message: 'PRIVATE /etc/letsencrypt/live/example.com/privkey.pem' },
+  });
+  assert.equal(legacyHostile.error.code, 'local_operation_failed');
+  assert.equal(legacyHostile.diagnosis.code, 'nginx_operation_failed');
+  assert.doesNotMatch(JSON.stringify(legacyHostile), /token_deadbeef|PRIVATE|letsencrypt|privkey/);
+});
+
+test('public certificate job results omit every managed material path', async () => {
+  const registry = createJobRegistry();
+  const job = await registry.enqueue({
+    serverId: 'server-1', type: 'ssl.issue', operation: OPERATIONS.SSL_ISSUE,
+    payload: { domains: ['example.com'], email: 'ops@example.com', staging: false },
+    resourceType: 'certificate', resourceId: 'certificate-1',
+  });
+  await registry.claimNext('server-1');
+  const completed = await registry.complete({
+    serverId: 'server-1', jobId: job.id, status: 'succeeded',
+    result: {
+      certName: 'example.com', domains: ['example.com'], staging: false, status: 'issued',
+      certificatePath: '/etc/letsencrypt/live/example.com/cert.pem',
+      fullchainPath: '/etc/letsencrypt/live/example.com/fullchain.pem',
+      privateKeyPath: '/etc/letsencrypt/live/example.com/privkey.pem',
+      validFrom: '2026-09-01T00:00:00.000Z', validTo: '2026-12-01T00:00:00.000Z',
+      fingerprint256: Array.from({ length: 32 }, () => 'AA').join(':'),
+      subject: 'token=PRIVATE',
+    },
+  });
+  assert.equal(completed.result.privateKeyPath, '/etc/letsencrypt/live/example.com/privkey.pem');
+  const view = jobPublicView(completed);
+  assert.equal(view.result.certName, 'example.com');
+  assert.equal(Object.hasOwn(view.result, 'certificatePath'), false);
+  assert.equal(Object.hasOwn(view.result, 'fullchainPath'), false);
+  assert.equal(Object.hasOwn(view.result, 'privateKeyPath'), false);
+  assert.equal(view.result.subject, 'token=[REDACTED]');
+  assert.doesNotMatch(JSON.stringify(view), /letsencrypt|privkey|PRIVATE/);
 });
 
 test('job registry only accepts explicitly supported async mutation operations', async () => {

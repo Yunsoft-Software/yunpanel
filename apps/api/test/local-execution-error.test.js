@@ -19,6 +19,9 @@ test('Node, environment and managed-service diagnostics use authored messages on
     'invalid_environment_bundle',
     'managed_service_install_failed',
     'managed_service_conflict',
+    'staged_config_inspection_failed',
+    'active_config_inspection_failed',
+    'nginx_activation_prepare_failed',
     'invalid_acme_challenge',
     'invalid_dns_provider_credential',
     'dns_provider_credential_unavailable',
@@ -36,6 +39,8 @@ test('Node, environment and managed-service diagnostics use authored messages on
     'dns_provider_record_mismatch',
     'dns_provider_mutation_unconfirmed',
     'certificate_private_key_mismatch',
+    'certificate_material_unavailable',
+    'certificate_metadata_mismatch',
   ]) {
     const result = safeLocalOperationError({
       code,

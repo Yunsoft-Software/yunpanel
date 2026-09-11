@@ -43,6 +43,7 @@ test('DNS hosting and mail Domain use separate canonical persistent identities',
   assert.equal(dns.status, 'unverified');
   assert.equal(mail.status, 'unverified');
   assert.equal(dns.lastObservedAt, null);
+  assert.equal(dns.diagnosis.code, 'dns_readiness_required');
   assert.equal((await stat(state.dnsPath)).mode & 0o077, 0);
   assert.equal((await stat(state.mailPath)).mode & 0o077, 0);
 
@@ -81,6 +82,16 @@ test('external observation is revisioned and cannot fabricate readiness or diagn
   });
   assert.equal(degraded.revision, 3);
   assert.equal(degraded.lastErrorCode, 'resolver_timeout');
+  assert.equal(degraded.diagnosis.action, 'Retry DNS readiness after resolver connectivity recovers.');
+
+  const hostile = await state.dns.recordObservation(zone.id, {
+    expectedRevision: 3,
+    status: 'degraded',
+    errorCode: 'token_deadbeef',
+  });
+  assert.equal(hostile.lastErrorCode, 'dns_observation_failed');
+  assert.equal(hostile.diagnosis.code, 'dns_observation_failed');
+  assert.doesNotMatch(JSON.stringify(hostile), /token_deadbeef/);
 });
 
 test('external tracking requires explicit mode and exact optional web Domain reference', async (t) => {

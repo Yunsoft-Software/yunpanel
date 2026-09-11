@@ -8,6 +8,13 @@ const MANAGEMENT_MODE = 'external';
 const STATUSES = new Set(['unverified', 'ready', 'degraded']);
 const WEB_DOMAIN_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const ERROR_CODE_PATTERN = /^[a-z0-9][a-z0-9_:-]{0,119}$/;
+const DNS_OBSERVATION_DIAGNOSES = Object.freeze({
+  dns_expected_address_unavailable: Object.freeze({ message: 'The managed Server does not expose a usable public address.', action: 'Inspect the managed Server network inventory.' }),
+  dns_resolver_unavailable: Object.freeze({ message: 'Public DNS resolution could not be completed.', action: 'Retry DNS readiness after resolver connectivity recovers.' }),
+  resolver_timeout: Object.freeze({ message: 'Public DNS resolution timed out.', action: 'Retry DNS readiness after resolver connectivity recovers.' }),
+  dns_address_missing: Object.freeze({ message: 'The web hostname has no public address record.', action: 'Publish the required A or AAAA record, then refresh readiness.' }),
+  dns_target_mismatch: Object.freeze({ message: 'A public DNS address does not match the managed Server.', action: 'Correct the hostname target, then refresh readiness.' }),
+});
 
 export class ExternalLifecycleRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -62,6 +69,7 @@ function errorCode(value, status, prefix) {
 }
 
 function publicResource(resource, { resourceType, nameField }) {
+  const diagnosis = resourceType === 'dns_zone' ? dnsObservationDiagnosis(resource) : null;
   return Object.freeze({
     id: resource.id,
     resourceType,
@@ -71,10 +79,33 @@ function publicResource(resource, { resourceType, nameField }) {
     status: resource.status,
     revision: resource.revision,
     lastObservedAt: resource.lastObservedAt,
-    lastErrorCode: resource.lastErrorCode,
+    lastErrorCode: resourceType === 'dns_zone'
+      ? diagnosis?.severity === 'error' ? diagnosis.code : null
+      : resource.lastErrorCode,
+    diagnosis,
     createdAt: resource.createdAt,
     updatedAt: resource.updatedAt,
   });
+}
+
+function dnsObservationDiagnosis(resource) {
+  if (resource.status === 'unverified') {
+    return Object.freeze({
+      severity: 'action_required', code: 'dns_readiness_required',
+      message: 'DNS readiness has not been checked.',
+      action: 'Run a DNS readiness refresh for the current zone revision.',
+    });
+  }
+  if (resource.status !== 'degraded') return null;
+  const authored = DNS_OBSERVATION_DIAGNOSES[resource.lastErrorCode];
+  if (!authored) {
+    return Object.freeze({
+      severity: 'error', code: 'dns_observation_failed',
+      message: 'The last DNS readiness observation failed.',
+      action: 'Inspect the protected DNS diagnostics and refresh readiness.',
+    });
+  }
+  return Object.freeze({ severity: 'error', code: resource.lastErrorCode, ...authored });
 }
 
 function validatePersisted(value, options) {
@@ -279,5 +310,6 @@ export const externalLifecycleRegistryInternals = Object.freeze({
   canonicalName,
   errorCode,
   publicResource,
+  dnsObservationDiagnosis,
   validatePersisted,
 });

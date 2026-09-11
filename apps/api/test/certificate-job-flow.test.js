@@ -178,7 +178,7 @@ test('production certificate attaches to HTTPS desired state and supports renewa
     const issueClaim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
       token: enrolled.agentToken,
     });
-    await requestJson(
+    const issueCompletion = await requestJson(
       `${baseUrl}/api/servers/${enrolled.server.id}/commands/${issueClaim.payload.data.job.id}/result`,
       {
         method: 'POST',
@@ -189,10 +189,28 @@ test('production certificate attaches to HTTPS desired state and supports renewa
         },
       },
     );
+    assert.equal(issueCompletion.response.status, 200);
+    assert.equal(issueCompletion.payload.data.result.certName, certificate.certName);
+    assert.equal(Object.hasOwn(issueCompletion.payload.data.result, 'certificatePath'), false);
+    assert.equal(Object.hasOwn(issueCompletion.payload.data.result, 'fullchainPath'), false);
+    assert.equal(Object.hasOwn(issueCompletion.payload.data.result, 'privateKeyPath'), false);
+    assert.doesNotMatch(JSON.stringify(issueCompletion.payload), /letsencrypt|privkey/);
 
     const activeCertificate = await certificateRegistry.getCertificate(certificate.id);
     assert.equal(activeCertificate.state, 'active');
     assert.ok(activeCertificate.lastIssuedAt);
+
+    const publicCertificate = await requestJson(`${baseUrl}/api/certificates/${certificate.id}`);
+    assert.equal(publicCertificate.response.status, 200);
+    assert.equal(publicCertificate.payload.data.id, certificate.id);
+    for (const field of ['email', 'certificatePath', 'fullchainPath', 'privateKeyPath', 'materialDigest', 'lastError']) {
+      assert.equal(Object.hasOwn(publicCertificate.payload.data, field), false);
+    }
+    assert.doesNotMatch(JSON.stringify(publicCertificate.payload), /letsencrypt|privkey|admin@example\.com/);
+
+    const publicJobs = await requestJson(`${baseUrl}/api/jobs?resourceType=certificate&resourceId=${certificate.id}`);
+    assert.equal(publicJobs.response.status, 200);
+    assert.doesNotMatch(JSON.stringify(publicJobs.payload), /letsencrypt|privkey/);
 
     const attachedDomain = await domainRegistry.getDomain(domain.id);
     assert.equal(attachedDomain.certificateId, certificate.id);

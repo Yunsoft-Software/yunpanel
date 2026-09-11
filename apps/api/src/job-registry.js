@@ -8,8 +8,10 @@ import {
   MANAGED_NODE_RUNTIME_MAJORS,
   OPERATIONS,
 } from '@yunpanel/protocol';
-import { normalizeGitDeploymentTarget } from '@yunpanel/shared';
+import { normalizeGitDeploymentTarget, sanitizeLogMessage } from '@yunpanel/shared';
 import { sanitizeDatabaseJobResult } from './database-job-result.js';
+import { safeLocalOperationError } from './local-execution-error.js';
+import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
@@ -80,9 +82,48 @@ function publicJob(job) {
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     attempts: job.attempts,
-    result: job.result ?? null,
-    error: job.error ?? null,
+    result: job.result == null ? null : structuredClone(job.result),
+    error: job.error == null ? null : structuredClone(job.error),
   };
+}
+
+function publicResult(operation, result) {
+  if (result === null || result === undefined) return null;
+  if (operation === OPERATIONS.SSL_ISSUE || operation === OPERATIONS.SSL_RENEW) {
+    const output = {};
+    for (const field of ['certName', 'validFrom', 'validTo', 'fingerprint256', 'status']) {
+      if (typeof result[field] === 'string') output[field] = sanitizeLogMessage(result[field]).message.slice(0, 253);
+    }
+    for (const [field, limit] of [['subject', 500], ['issuer', 500], ['subjectAltName', 2000]]) {
+      if (typeof result[field] === 'string') output[field] = sanitizeLogMessage(result[field]).message.slice(0, limit);
+      else if (result[field] === null) output[field] = null;
+    }
+    if (Array.isArray(result.domains)) {
+      output.domains = result.domains.filter((domain) => typeof domain === 'string').slice(0, 21)
+        .map((domain) => sanitizeLogMessage(domain).message.slice(0, 253));
+    }
+    if (typeof result.staging === 'boolean') output.staging = result.staging;
+    if (typeof result.dryRun === 'boolean') output.dryRun = result.dryRun;
+    return output;
+  }
+  return structuredClone(result);
+}
+
+function diagnosisScope(operation) {
+  if (operation === OPERATIONS.DOMAIN_STAGE || operation === OPERATIONS.DOMAIN_ACTIVATE) return 'nginx';
+  if (operation === OPERATIONS.DNS_RECORD_APPLY) return 'dns';
+  if (operation === OPERATIONS.SSL_ISSUE || operation === OPERATIONS.SSL_RENEW) return 'certificate';
+  return null;
+}
+
+export function jobPublicView(job) {
+  if (!job || typeof job !== 'object') return null;
+  const view = publicJob(job);
+  view.result = publicResult(job.operation, job.result);
+  view.error = job.error ? safeLocalOperationError(job.error) : null;
+  const scope = job.status === 'failed' ? diagnosisScope(job.operation) : null;
+  if (scope) view.diagnosis = operationErrorDiagnosis(scope, view.error?.code);
+  return Object.freeze(view);
 }
 
 function enqueueResult(job, created) {
@@ -107,11 +148,7 @@ function idempotencyDigest(input) {
 }
 
 function validateError(error) {
-  if (!error || typeof error !== 'object' || Array.isArray(error)) return null;
-  return {
-    code: typeof error.code === 'string' ? error.code.slice(0, 120) : 'job_failed',
-    message: typeof error.message === 'string' ? error.message.slice(0, 500) : 'Agent job failed',
-  };
+  return safeLocalOperationError(error);
 }
 
 function boundedString(value, maxLength) {

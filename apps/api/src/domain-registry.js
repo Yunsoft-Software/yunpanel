@@ -10,21 +10,13 @@ import {
   normalizeProxyHost,
 } from '@yunpanel/shared';
 import { DomainHierarchyError, validateDomainHierarchy, validateDomainParent } from './domain-hierarchy.js';
+import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
 const STORE_VERSION = 3;
 const TARGET_TYPES = new Set(['static', 'proxy']);
 const HTTPS_MODES = new Set(['off', 'managed']);
 const UPDATE_FIELDS = new Set(['primaryDomain', 'aliases', 'httpsMode', 'httpsRedirect', 'canonicalRedirect', 'nginxSettings']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
-
-const DOMAIN_ERROR_DIAGNOSES = Object.freeze({
-  nginx_config_invalid: Object.freeze({ message: 'Nginx rejected the staged configuration.', action: 'Review the generated settings, stage a new revision, then activate it.' }),
-  nginx_activation_prepare_failed: Object.freeze({ message: 'Nginx could not replace the active configuration.', action: 'Inspect protected filesystem diagnostics and active configuration permissions before retrying.' }),
-  nginx_reload_failed: Object.freeze({ message: 'Nginx reload failed and the previous configuration was restored.', action: 'Inspect protected Nginx service logs, then retry activation.' }),
-  nginx_rollback_failed: Object.freeze({ message: 'Nginx reload failed and rollback could not be confirmed.', action: 'Inspect Nginx configuration and service health on the Server before any retry.' }),
-  staged_config_missing: Object.freeze({ message: 'The staged Nginx configuration is missing.', action: 'Stage the current Domain revision again.' }),
-  staged_config_changed: Object.freeze({ message: 'The staged Nginx configuration changed before activation.', action: 'Stage the current Domain revision again; do not reuse the old checksum.' }),
-});
 
 export class DomainRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -79,11 +71,7 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
 
 function diagnosis(domain) {
   if (domain.lastError) {
-    const authored = DOMAIN_ERROR_DIAGNOSES[domain.lastError] ?? Object.freeze({
-      message: 'The last Domain operation failed.',
-      action: 'Inspect the protected job and host diagnostics before retrying.',
-    });
-    return Object.freeze({ severity: 'error', code: domain.lastError, ...authored });
+    return operationErrorDiagnosis('nginx', domain.lastError);
   }
   if (domain.stagedRevision !== domain.desiredRevision) {
     return Object.freeze({ severity: 'action_required', code: 'domain_stage_required', message: 'The desired Domain revision is not staged.', action: 'Stage the current revision.' });

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { CertificateMaterialError } from './certificate-material-manager.js';
-import { CertificateRegistryError } from './certificate-registry.js';
+import { certificatePublicView, CertificateRegistryError } from './certificate-registry.js';
 import { DomainRegistryError } from './domain-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -23,24 +23,7 @@ function digest(value) {
 }
 
 function publicCertificate(certificate) {
-  return Object.freeze({
-    id: certificate.id,
-    domainId: certificate.domainId,
-    serverId: certificate.serverId,
-    source: certificate.source,
-    renewalMode: certificate.renewalMode,
-    state: certificate.state,
-    certName: certificate.certName,
-    domains: Object.freeze([...certificate.domains]),
-    subject: certificate.subject,
-    issuer: certificate.issuer,
-    subjectAltName: certificate.subjectAltName,
-    validFrom: certificate.validFrom,
-    validTo: certificate.validTo,
-    fingerprint256: certificate.fingerprint256,
-    createdAt: certificate.createdAt,
-    updatedAt: certificate.updatedAt,
-  });
+  return certificatePublicView(certificate);
 }
 
 function assertApplyIdentity(body, fields, code, message) {

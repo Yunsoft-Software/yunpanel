@@ -6,12 +6,17 @@ import {
 } from '../src/legacy-safe-error.js';
 
 test('known legacy host errors use authored safe diagnostics instead of raw messages', () => {
-  const error = new Error('SECRET=/root/private/nginx.conf');
-  error.code = 'nginx_config_invalid';
-  assert.deepEqual(safeLegacyAgentError(error), {
-    code: 'nginx_config_invalid',
-    message: 'Nginx rejected the staged configuration.',
-  });
+  for (const code of [
+    'nginx_config_invalid',
+    'nginx_activation_prepare_failed',
+    'staged_config_inspection_failed',
+    'active_config_inspection_failed',
+  ]) {
+    const error = Object.assign(new Error('SECRET=/root/private/nginx.conf'), { code });
+    const result = safeLegacyAgentError(error);
+    assert.equal(result.code, code);
+    assert.doesNotMatch(JSON.stringify(result), /SECRET|\/root\/private/);
+  }
 });
 
 test('certificate pair failures keep a bounded legacy diagnostic', () => {

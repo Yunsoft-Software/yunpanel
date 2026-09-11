@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { normalizeDomainSet } from '@yunpanel/shared';
+import { normalizeDomainSet, sanitizeLogMessage } from '@yunpanel/shared';
+import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
 const STORE_VERSION = 3;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
@@ -24,7 +25,110 @@ function emptyState() {
 }
 
 function publicCertificate(certificate) {
-  return { ...certificate };
+  return {
+    ...certificate,
+    domains: [...certificate.domains],
+    certificateNames: [...certificate.certificateNames],
+    challenge: certificate.challenge ? { ...certificate.challenge } : null,
+  };
+}
+
+export function certificateDiagnosis(certificate, { now = Date.now() } = {}) {
+  if (!certificate || typeof certificate !== 'object') return null;
+  if (certificate.state === 'error') return operationErrorDiagnosis('certificate', certificate.lastError);
+  if (certificate.state === 'pending') {
+    return Object.freeze({
+      severity: 'action_required', code: 'certificate_queue_required',
+      message: 'The certificate request has not entered host execution.',
+      action: 'Retry queueing the certificate operation or inspect the protected job state.',
+    });
+  }
+  if (certificate.state === 'validating' || certificate.state === 'issuing' || certificate.state === 'renewing') {
+    return Object.freeze({
+      severity: 'in_progress', code: `certificate_${certificate.state}`,
+      message: `The certificate is ${certificate.state}.`,
+      action: 'Wait for the durable certificate job to finish.',
+    });
+  }
+  if (certificate.state === 'validated') {
+    return Object.freeze({
+      severity: 'info', code: 'certificate_validation_complete',
+      message: 'The staging certificate challenge completed successfully.',
+      action: 'Request a production certificate when DNS and routing are ready.',
+    });
+  }
+  if (certificate.state === 'superseded') {
+    return Object.freeze({
+      severity: 'info', code: 'certificate_superseded',
+      message: 'A newer certificate is selected for this Domain.',
+      action: 'No action is required unless this certificate should be selected again.',
+    });
+  }
+  if (certificate.state === 'active' && certificate.validTo) {
+    const expiresAt = Date.parse(certificate.validTo);
+    const currentTime = typeof now === 'function' ? now() : now;
+    if (!Number.isFinite(expiresAt) || !Number.isFinite(currentTime)) {
+      return operationErrorDiagnosis('certificate', 'certificate_metadata_mismatch');
+    }
+    if (expiresAt <= currentTime) {
+      return Object.freeze({
+        severity: 'error', code: 'certificate_expired',
+        message: 'The active certificate has expired.',
+        action: certificate.renewalMode === 'automatic'
+          ? 'Inspect renewal jobs and issue or select a valid replacement.'
+          : 'Import or select a valid replacement certificate.',
+      });
+    }
+    if (expiresAt - currentTime <= 30 * 24 * 60 * 60 * 1000) {
+      return Object.freeze({
+        severity: 'warning', code: 'certificate_expiring',
+        message: 'The active certificate expires within 30 days.',
+        action: certificate.renewalMode === 'automatic'
+          ? 'Verify automatic renewal readiness and recent renewal jobs.'
+          : 'Import or select a replacement certificate before expiry.',
+      });
+    }
+  }
+  return null;
+}
+
+export function certificatePublicView(certificate, { now = Date.now } = {}) {
+  if (!certificate || typeof certificate !== 'object') return null;
+  const challenge = certificate.challenge?.type === 'dns-01'
+    ? Object.freeze({
+      type: 'dns-01', provider: certificate.challenge.provider,
+      credentialId: certificate.challenge.credentialId,
+      dnsZoneId: certificate.challenge.dnsZoneId,
+      propagationSeconds: certificate.challenge.propagationSeconds,
+    })
+    : certificate.challenge?.type === 'http-01' ? Object.freeze({ type: 'http-01' }) : null;
+  return Object.freeze({
+    id: certificate.id,
+    domainId: certificate.domainId,
+    serverId: certificate.serverId,
+    source: certificate.source,
+    renewalMode: certificate.renewalMode,
+    state: certificate.state,
+    certName: certificate.certName,
+    domains: Object.freeze([...(certificate.domains ?? [])]),
+    certificateNames: Object.freeze([...(certificate.certificateNames ?? certificate.domains ?? [])]),
+    challenge,
+    staging: certificate.staging === true,
+    subject: typeof certificate.subject === 'string' ? sanitizeLogMessage(certificate.subject).message.slice(0, 500) : null,
+    issuer: typeof certificate.issuer === 'string' ? sanitizeLogMessage(certificate.issuer).message.slice(0, 500) : null,
+    subjectAltName: typeof certificate.subjectAltName === 'string'
+      ? sanitizeLogMessage(certificate.subjectAltName).message.slice(0, 2000) : null,
+    validFrom: certificate.validFrom,
+    validTo: certificate.validTo,
+    fingerprint256: certificate.fingerprint256,
+    lastValidatedAt: certificate.lastValidatedAt,
+    lastIssuedAt: certificate.lastIssuedAt,
+    lastRenewedAt: certificate.lastRenewedAt,
+    lastImportedAt: certificate.lastImportedAt,
+    createdAt: certificate.createdAt,
+    updatedAt: certificate.updatedAt,
+    diagnosis: certificateDiagnosis(certificate, { now }),
+  });
 }
 
 function safeAbsoluteRoot(value, fallback) {
