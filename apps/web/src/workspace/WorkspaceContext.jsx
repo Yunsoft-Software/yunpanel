@@ -17,6 +17,7 @@ export function WorkspaceProvider({ children }) {
   const [notice, setNotice] = useState(null);
   const demand = workspaceResources(pathname, { observingJob: jobOpen, activeJob: Object.values(tracked).some(jobActive) });
   const domains = useCollection('/domains', { enabled: demand.domains && can('domains.read') });
+  const websites = useCollection('/websites', { enabled: demand.websites && can('websites.read') });
   const applications = useCollection('/applications', { enabled: demand.applications && can('applications.read') });
   const certificates = useCollection('/certificates', { enabled: demand.certificates && can('certificates.read') });
   const servers = useCollection('/servers', { enabled: demand.servers && can('servers.read') });
@@ -24,7 +25,7 @@ export function WorkspaceProvider({ children }) {
   const requests = useRef(null);
   const submitting = useRef(new Set());
   useEffect(() => { const controller = new AbortController(); requests.current = controller; return () => controller.abort(); }, []);
-  const refreshAll = useCallback(() => { domains.refresh(); applications.refresh(); certificates.refresh(); servers.refresh(); jobs.refresh(); }, [domains.refresh, applications.refresh, certificates.refresh, servers.refresh, jobs.refresh]);
+  const refreshAll = useCallback(() => { domains.refresh(); websites.refresh(); applications.refresh(); certificates.refresh(); servers.refresh(); jobs.refresh(); }, [domains.refresh, websites.refresh, applications.refresh, certificates.refresh, servers.refresh, jobs.refresh]);
   useEffect(() => {
     if (['unauthorized', 'forbidden'].includes(jobs.status)) { setTracked({}); setJobOpen(false); return; }
     if (jobs.status !== 'ready') return;
@@ -51,7 +52,7 @@ export function WorkspaceProvider({ children }) {
     } finally { submitting.current.delete(path); }
   }, [canManage, observe, jobs.refresh]);
   const resourceBusy = (type, id) => Object.values({ ...Object.fromEntries(jobs.items.map((job) => [job.id, job])), ...tracked }).some((job) => job.resourceType === type && job.resourceId === id && jobActive(job));
-  return <WorkspaceContext.Provider value={{ domains, applications, certificates, servers, jobs, runJob, resourceBusy, refreshAll, observe, updateJob, observedJob: tracked[observedId] ?? null, jobOpen, closeJob: () => setJobOpen(false), notice, setNotice, can, canManage, readOnly }}>{children}</WorkspaceContext.Provider>;
+  return <WorkspaceContext.Provider value={{ domains, websites, applications, certificates, servers, jobs, runJob, resourceBusy, refreshAll, observe, updateJob, observedJob: tracked[observedId] ?? null, jobOpen, closeJob: () => setJobOpen(false), notice, setNotice, can, canManage, readOnly }}>{children}</WorkspaceContext.Provider>;
 }
 export function useWorkspace() {
   const value = useContext(WorkspaceContext);

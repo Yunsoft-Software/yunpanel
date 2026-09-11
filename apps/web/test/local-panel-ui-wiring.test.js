@@ -37,6 +37,8 @@ test('legacy Domain repair and real site file manager replace terminal and file 
   ]);
   assert.match(detail, /websites\/migration\/create-website/);
   assert.match(detail, /websites\/migration\/bind/);
+  assert.match(detail, /websites\.items\.find/);
+  assert.match(detail, /\['files', 'terminal'\]\.includes\(key\)/);
   assert.match(detail, /<FilesPanel websiteId=\{domain\.websiteId\}/);
   assert.doesNotMatch(detail, /Site dosyalarını listeleme, yükleme ve düzenleme API’leri henüz uygulanmadı/);
   assert.match(files, /\/files\/text/);
