@@ -17,5 +17,8 @@ export {
   MailTemplateError,
   mailTemplatePolicy,
   previewPostfixVirtualDomainMap,
+  previewPostfixVirtualMaps,
+  renderPostfixVirtualAliasMap,
   renderPostfixVirtualDomainMap,
+  renderPostfixVirtualMailboxMap,
 } from './mail.js';

@@ -4,7 +4,10 @@ import {
   MailTemplateError,
   mailTemplatePolicy,
   previewPostfixVirtualDomainMap,
+  previewPostfixVirtualMaps,
+  renderPostfixVirtualAliasMap,
   renderPostfixVirtualDomainMap,
+  renderPostfixVirtualMailboxMap,
 } from '../src/index.js';
 
 test('renders a canonical deterministic Postfix virtual domain map', () => {
@@ -53,5 +56,78 @@ test('rejects invalid, duplicate and oversized managed domain state', () => {
   assert.throws(
     () => renderPostfixVirtualDomainMap(Array.from({ length: 1_001 }, (_, index) => `${index}.example.com`)),
     (error) => error instanceof MailTemplateError && error.code === 'too_many_mail_domains',
+  );
+});
+
+test('renders canonical Postfix mailbox lookup entries only for managed domains', () => {
+  assert.equal(renderPostfixVirtualMailboxMap({
+    domains: ['example.com'],
+    mailboxes: ['Sales+EU@EXAMPLE.COM.', 'admin@example.com'],
+  }), 'admin@example.com 1\nsales+eu@example.com 1\n');
+
+  assert.throws(
+    () => renderPostfixVirtualMailboxMap({ domains: ['example.com'], mailboxes: ['admin@other.example'] }),
+    (error) => error instanceof MailTemplateError && error.code === 'mailbox_domain_unmanaged',
+  );
+  assert.throws(
+    () => renderPostfixVirtualMailboxMap({ domains: ['example.com'], mailboxes: ['Admin@example.com', 'admin@EXAMPLE.COM'] }),
+    (error) => error instanceof MailTemplateError && error.code === 'duplicate_mailbox',
+  );
+});
+
+test('renders bounded canonical forwarding aliases without map control characters', () => {
+  assert.equal(renderPostfixVirtualAliasMap({
+    domains: ['example.com'],
+    aliases: [{ source: 'Info@Example.com', destinations: ['Sales@Other.example', 'owner@example.com', 'sales@other.example'] }],
+  }), 'info@example.com owner@example.com, sales@other.example\n');
+
+  for (const alias of [
+    { source: '#root@example.com', destinations: ['owner@example.com'] },
+    { source: 'root@example.com\nroot', destinations: ['owner@example.com'] },
+    { source: 'root@example.com', destinations: [] },
+  ]) assert.throws(() => renderPostfixVirtualAliasMap({ domains: ['example.com'], aliases: [alias] }), MailTemplateError);
+  assert.throws(
+    () => renderPostfixVirtualAliasMap({
+      domains: ['example.com'], aliases: [{ source: 'info@other.example', destinations: ['owner@example.com'] }],
+    }),
+    (error) => error instanceof MailTemplateError && error.code === 'mail_alias_domain_unmanaged',
+  );
+  assert.throws(
+    () => renderPostfixVirtualAliasMap({
+      domains: ['example.com'],
+      aliases: [
+        { source: 'first@example.com', destinations: ['second@example.com'] },
+        { source: 'second@example.com', destinations: ['first@example.com'] },
+      ],
+    }),
+    (error) => error instanceof MailTemplateError && error.code === 'mail_alias_cycle',
+  );
+});
+
+test('previews the complete Postfix map set and rejects mailbox-alias ambiguity', () => {
+  const preview = previewPostfixVirtualMaps({
+    domains: ['example.com'],
+    mailboxes: ['owner@example.com'],
+    aliases: [{ source: 'info@example.com', destinations: ['owner@example.com'] }],
+  });
+  assert.equal(preview.version, 1);
+  assert.match(preview.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(preview.sideEffects, false);
+  assert.deepEqual(preview.artifacts.map((entry) => [entry.path, entry.entries]), [
+    ['/etc/yunpanel/mail/postfix/virtual-domains', 1],
+    ['/etc/yunpanel/mail/postfix/virtual-mailboxes', 1],
+    ['/etc/yunpanel/mail/postfix/virtual-aliases', 1],
+  ]);
+  assert.equal(previewPostfixVirtualMaps({
+    aliases: [{ source: 'INFO@example.com', destinations: ['owner@example.com'] }],
+    mailboxes: ['Owner@example.com'],
+    domains: ['EXAMPLE.com'],
+  }).sha256, preview.sha256);
+  assert.throws(
+    () => previewPostfixVirtualMaps({
+      domains: ['example.com'], mailboxes: ['info@example.com'],
+      aliases: [{ source: 'INFO@example.com', destinations: ['owner@example.com'] }],
+    }),
+    (error) => error instanceof MailTemplateError && error.code === 'mail_alias_mailbox_conflict',
   );
 });

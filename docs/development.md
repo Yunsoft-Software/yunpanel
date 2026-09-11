@@ -171,6 +171,8 @@ The managed-service catalog accepts only the fixed Ubuntu package and systemd-un
 
 Roundcube is represented as the `roundcube-core` package, not as a fabricated daemon. Its inspection checks the fixed application/config paths and PHP syntax. A successful package/config inspection reports `active=false`, `units=[]`, `health.status=installed`; this does not claim that an Nginx/PHP-FPM endpoint, database or mailbox login is ready. The install route may install the package, while the systemd control route rejects Roundcube before a job is queued.
 
+The mail template layer renders deterministic Postfix `virtual_mailbox_domains`, `virtual_mailbox_maps` and `virtual_alias_maps` source files below `/etc/yunpanel/mail/postfix`. Domain and address inputs are canonicalized before sorting; mailbox and alias sources must belong to the explicit managed-domain set. The initial mailbox local-part policy is a conservative lowercase ASCII subset. Duplicate mailboxes, duplicate alias sources, mailbox/alias collisions, forwarding cycles, unmanaged source domains, control characters and bounded-count violations fail before a host command exists. Alias destinations may be external canonical addresses, but duplicate destinations collapse deterministically. Preview artifacts include exact content, byte/entry counts, SHA-256 and fixed argv for `postmap` plus `postfix check`; rendering never writes or compiles a file. The current external mail-domain API exposes only a blocked candidate-domain preview and does not yet consume the full mailbox/alias set.
+
 ## Local log API
 
 Log reads are sensitive Owner-management operations and remain unavailable for Read Only accounts, remote legacy-agent records or a panel without an active local-server binding. Supported routes are:
