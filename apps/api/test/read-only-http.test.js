@@ -63,7 +63,10 @@ test('read-only sensitive reads and mutations fail before the core handler', asy
   for (const path of ['/api/jobs', '/api/users', '/api/applications/a1/environment', '/api/applications/a1/status', '/api/servers/s1/system/packages/inspect']) {
     assert.equal((await app.request(path, { headers: { cookie } })).status, 403, path);
   }
-  for (const path of ['/api/domains', '/api/domains/domain-1/reparent-preview', '/api/domains/domain-1/reparent']) {
+  for (const path of [
+    '/api/domains', '/api/domains/domain-1/reparent-preview', '/api/domains/domain-1/reparent',
+    '/api/applications/application-1/configuration-preview', '/api/applications/application-1/configuration',
+  ]) {
     assert.equal((await app.request(path, {
       method: 'POST',
       headers: { cookie, origin, 'content-type': 'application/json', 'x-csrf-token': csrfToken },

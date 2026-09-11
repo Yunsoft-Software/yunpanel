@@ -82,6 +82,20 @@ test('Node restart queues the active release and accepts only healthy managed se
     healthPath: '/health',
     healthy: true,
   });
+  const configurationPreview = await applicationRegistry.previewNodeConfiguration(application.id, {
+    ...(await applicationRegistry.getApplication(application.id)).runtime,
+    mode: 'development',
+  });
+  const pendingConfiguration = await applicationRegistry.updateNodeConfiguration({
+    applicationId: application.id,
+    expectedRevision: configurationPreview.currentRevision,
+    runtime: configurationPreview.nextRuntime,
+    previewDigest: configurationPreview.previewDigest,
+    confirmation: configurationPreview.confirmation,
+  });
+  assert.equal(pendingConfiguration.configurationPending, true);
+  assert.equal(pendingConfiguration.runtime.mode, 'development');
+  assert.equal(pendingConfiguration.activeRuntime.mode, 'production');
 
   const app = withPanelContext(createApp({
     environment: 'production',
@@ -106,6 +120,7 @@ test('Node restart queues the active release and accepts only healthy managed se
     assert.equal(claimed.payload.data.envelope.operation, OPERATIONS.APP_NODE_RESTART);
     assert.equal(claimed.payload.data.envelope.payload.releaseId, releaseId);
     assert.equal(claimed.payload.data.envelope.payload.runtime.port, 3100);
+    assert.equal(claimed.payload.data.envelope.payload.runtime.mode, 'production');
 
     const completed = await requestJson(
       `${baseUrl}/api/servers/${enrolled.server.id}/commands/${claimed.payload.data.job.id}/result`,

@@ -80,6 +80,8 @@ test('rejects shell fragments, unsafe entry files, ports and health URLs', () =>
     { port: 3000, packageManager: 'bun' },
     { port: 3000, mode: 'staging' },
     { port: 3000, documentRoot: '../service' },
+    { port: 3000, command: 'node server.js' },
+    { port: 3000, start: { mode: 'node', entryFile: 'server.js', shell: true } },
   ];
 
   for (const profile of invalidProfiles) {

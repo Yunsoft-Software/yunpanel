@@ -22,6 +22,8 @@ Implemented backend contracts:
 
 Website state is stored separately through `YUNPANEL_WEBSITE_STORE`. Migration enforcement state is stored through `YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE`. Production startup validates persisted Website server/application foreign keys and initializes migration policy before accepting Domain state.
 
+Node Application runtime settings use Owner-only `POST /api/applications/:applicationId/configuration-preview` and `POST /api/applications/:applicationId/configuration`. Apply requires the exact desired revision, preview digest and typed confirmation. The managed port is immutable in this flow because it is part of Website/Nginx routing identity. Node major, direct-file or package-script startup, npm/pnpm/yarn, production/development mode and a validated release-contained document root are configurable. A deployed Application retains its separate `activeRuntime` until a successful deploy applies the desired settings; restart, status and rollback use the active or release-specific snapshot rather than silently applying pending configuration.
+
 An application-backed Website owns stable Website UUID, server/application IDs, runtime type, canonical managed document root and deterministic `yunapp-*` Unix user. A proxy Website is a real resource without an invented application/document root/Unix user and may own one canonical host/port/WebSocket target. Website records carry a positive revision; persisted v1 state is validated and migrated once to v2 with revision `1` and no invented proxy target.
 
 The Website ID is not a domain ID. Backend relationships use explicit foreign keys rather than permanent server/port/root heuristics.

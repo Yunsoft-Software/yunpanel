@@ -13,6 +13,7 @@ import {
 const STORE_VERSION = 1;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 const NODE_SERVICE_PATTERN = /^yunpanel-node-[a-f0-9]{16}\.service$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 export class ApplicationRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -72,10 +73,23 @@ function expectedNodeServiceName(applicationId) {
 }
 
 function publicApplication(application) {
-  return {
+  const runtime = application.runtime ? structuredClone(application.runtime) : null;
+  const activeRuntime = application.activeRuntime ? structuredClone(application.activeRuntime) : null;
+  return Object.freeze({
     ...application,
-    releases: Array.isArray(application.releases) ? application.releases.map((release) => ({ ...release })) : [],
-  };
+    build: application.build ? Object.freeze({ ...application.build }) : null,
+    runtime: runtime ? Object.freeze(runtime) : null,
+    activeRuntime: activeRuntime ? Object.freeze(activeRuntime) : null,
+    configurationPending: application.type === 'node'
+      && application.currentReleaseId !== null
+      && !sameValue(runtime, activeRuntime),
+    releases: Object.freeze(Array.isArray(application.releases)
+      ? application.releases.map((release) => Object.freeze({
+          ...release,
+          runtime: release.runtime ? Object.freeze(structuredClone(release.runtime)) : null,
+        }))
+      : []),
+  });
 }
 
 function requireApplication(state, applicationId) {
@@ -129,6 +143,39 @@ function hydrateApplication(application) {
       ? { host: '127.0.0.1', port: application.runtime.port }
       : null;
   }
+  if (!Number.isSafeInteger(application.desiredRevision) || application.desiredRevision < 1) application.desiredRevision = 1;
+  if (application.type === 'node') {
+    application.runtime = normalizeNodeConfig({
+      repositoryUrl: application.repositoryUrl,
+      branch: application.branch,
+      runtime: application.runtime,
+      retention: application.retention,
+    }).runtime;
+    if (application.activeRuntime === undefined) {
+      application.activeRuntime = application.currentReleaseId ? structuredClone(application.runtime) : null;
+    } else if (application.activeRuntime !== null) {
+      application.activeRuntime = normalizeNodeRuntimeConfig(application.activeRuntime);
+    }
+    if (application.appliedRevision === undefined) {
+      application.appliedRevision = application.currentReleaseId ? application.desiredRevision : 0;
+    }
+    if (!Number.isSafeInteger(application.appliedRevision) || application.appliedRevision < 0
+      || (application.currentReleaseId === null && application.appliedRevision !== 0)
+      || (application.currentReleaseId !== null && (application.activeRuntime === null || application.appliedRevision < 1))) {
+      throw new ApplicationRegistryError('application_state_invalid', 'Node application configuration state is invalid', 409);
+    }
+    application.releases = application.releases.map((release) => ({
+      ...release,
+      runtime: normalizeNodeRuntimeConfig(release.runtime ?? application.activeRuntime ?? application.runtime),
+      configurationRevision: Number.isSafeInteger(release.configurationRevision) && release.configurationRevision >= 1
+        ? release.configurationRevision
+        : application.appliedRevision || 1,
+    }));
+  } else {
+    application.activeRuntime = null;
+    if (application.appliedRevision === undefined) application.appliedRevision = application.currentReleaseId ? application.desiredRevision : 0;
+    application.releases = application.releases.map((release) => ({ ...release, runtime: null, configurationRevision: null }));
+  }
 
   if (
     application.currentReleaseId
@@ -143,6 +190,8 @@ function hydrateApplication(application) {
       artifactFiles: null,
       artifactBytes: null,
       deployedAt: application.lastDeployedAt ?? application.updatedAt ?? application.createdAt,
+      runtime: application.type === 'node' ? structuredClone(application.activeRuntime) : null,
+      configurationRevision: application.type === 'node' ? application.appliedRevision : null,
     });
   }
   return application;
@@ -172,6 +221,7 @@ function baseApplication({ id, serverId, name, type, repositoryUrl, branch, rete
     retention,
     state: 'draft',
     desiredRevision: 1,
+    appliedRevision: 0,
     currentReleaseId: null,
     previousReleaseId: null,
     currentCommitSha: null,
@@ -186,6 +236,7 @@ function baseApplication({ id, serverId, name, type, repositoryUrl, branch, rete
     servicePort: null,
     healthPath: null,
     proxyTarget: null,
+    activeRuntime: null,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -343,6 +394,7 @@ export function createApplicationRegistry({
     port = null,
     healthPath = null,
     healthy = null,
+    runtime: requestedRuntime = null,
   }) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
@@ -359,14 +411,23 @@ export function createApplicationRegistry({
     if (artifactBytes != null && (!Number.isInteger(artifactBytes) || artifactBytes < 0 || artifactBytes > 2 * 1024 * 1024 * 1024)) throw new ApplicationRegistryError('invalid_artifact_metadata', 'Artifact byte size is invalid');
 
     if (application.type === 'node') {
+      const deployedRuntime = normalizeNodeConfig({
+        repositoryUrl: application.repositoryUrl,
+        branch: application.branch,
+        runtime: requestedRuntime ?? application.runtime,
+        retention: application.retention,
+      }).runtime;
+      if (!sameValue(deployedRuntime, application.runtime)) {
+        throw new ApplicationRegistryError('node_runtime_state_drift', 'Node deployment runtime does not match current desired configuration', 409);
+      }
       const expectedService = expectedNodeServiceName(application.id);
       if (typeof serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(serviceName) || serviceName !== expectedService) {
         throw new ApplicationRegistryError('invalid_node_service', 'Node deployment service identity is invalid');
       }
-      if (!Number.isInteger(port) || port !== application.runtime?.port) {
+      if (!Number.isInteger(port) || port !== deployedRuntime.port) {
         throw new ApplicationRegistryError('invalid_node_port', 'Node deployment port does not match application state');
       }
-      if (typeof healthPath !== 'string' || healthPath !== application.runtime?.healthPath || healthy !== true) {
+      if (typeof healthPath !== 'string' || healthPath !== deployedRuntime.healthPath || healthy !== true) {
         throw new ApplicationRegistryError('invalid_node_health', 'Node deployment health result does not match application state');
       }
     }
@@ -382,6 +443,8 @@ export function createApplicationRegistry({
     application.lastError = null;
     application.updatedAt = timestamp;
     if (application.type === 'node') {
+      application.activeRuntime = structuredClone(application.runtime);
+      application.appliedRevision = application.desiredRevision;
       application.serviceName = serviceName;
       application.servicePort = port;
       application.healthPath = healthPath;
@@ -396,6 +459,8 @@ export function createApplicationRegistry({
       artifactFiles,
       artifactBytes,
       deployedAt: timestamp,
+      runtime: application.type === 'node' ? structuredClone(application.activeRuntime) : null,
+      configurationRevision: application.type === 'node' ? application.appliedRevision : null,
     });
     trimReleaseHistory(application);
     await persist();
@@ -444,14 +509,15 @@ export function createApplicationRegistry({
     if (!target) throw new ApplicationRegistryError('rollback_release_unknown', 'Rollback release is not in retained application history', 409);
 
     if (application.type === 'node') {
+      const targetRuntime = normalizeNodeRuntimeConfig(target.runtime);
       const expectedService = expectedNodeServiceName(application.id);
       if (typeof serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(serviceName) || serviceName !== expectedService) {
         throw new ApplicationRegistryError('invalid_node_service', 'Node rollback service identity is invalid');
       }
-      if (!Number.isInteger(port) || port !== application.runtime?.port) {
+      if (!Number.isInteger(port) || port !== targetRuntime.port) {
         throw new ApplicationRegistryError('invalid_node_port', 'Node rollback port does not match application state');
       }
-      if (typeof healthPath !== 'string' || healthPath !== application.runtime?.healthPath || healthy !== true) {
+      if (typeof healthPath !== 'string' || healthPath !== targetRuntime.healthPath || healthy !== true) {
         throw new ApplicationRegistryError('invalid_node_health', 'Node rollback health result does not match application state');
       }
     }
@@ -467,6 +533,8 @@ export function createApplicationRegistry({
     application.lastError = null;
     application.updatedAt = timestamp;
     if (application.type === 'node') {
+      application.activeRuntime = structuredClone(target.runtime);
+      application.appliedRevision = target.configurationRevision;
       application.serviceName = serviceName;
       application.servicePort = port;
       application.healthPath = healthPath;
@@ -485,6 +553,82 @@ export function createApplicationRegistry({
     application.pendingRollbackReleaseId = null;
     application.state = application.currentReleaseId ? 'active' : 'error';
     application.lastError = typeof errorCode === 'string' ? errorCode.slice(0, 120) : 'deployment_failed';
+    application.updatedAt = new Date(now()).toISOString();
+    await persist();
+    return publicApplication(application);
+  }
+
+  async function previewNodeConfiguration(applicationId, requestedRuntime) {
+    await ensureInitialized();
+    const application = hydrateApplication(requireApplication(state, normalizeApplicationId(applicationId)));
+    if (application.type !== 'node') {
+      throw new ApplicationRegistryError('node_configuration_not_supported', 'Runtime configuration is available only for Node applications', 409);
+    }
+    if (application.activeDeploymentId) {
+      throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
+    }
+    const nextRuntime = normalizeNodeConfig({
+      repositoryUrl: application.repositoryUrl,
+      branch: application.branch,
+      runtime: requestedRuntime,
+      retention: application.retention,
+    }).runtime;
+    if (nextRuntime.port !== application.runtime.port) {
+      throw new ApplicationRegistryError('node_port_immutable', 'Managed Node port cannot be changed through runtime configuration', 409);
+    }
+    if (sameValue(nextRuntime, application.runtime)) {
+      throw new ApplicationRegistryError('node_configuration_no_changes', 'Node runtime configuration does not change current desired state', 409);
+    }
+    const changedFields = Object.keys(nextRuntime).filter((field) => !sameValue(nextRuntime[field], application.runtime[field])).sort();
+    const core = {
+      version: 1,
+      applicationId: application.id,
+      currentRevision: application.desiredRevision,
+      currentReleaseId: application.currentReleaseId,
+      nextRuntime,
+      impact: {
+        changedFields,
+        deploymentRequired: application.currentReleaseId !== null,
+        activeProcessChanged: false,
+      },
+    };
+    const previewDigest = createHash('sha256').update(JSON.stringify(core)).digest('hex');
+    return Object.freeze({
+      ...core,
+      previewDigest,
+      confirmation: `update-node:${application.id}:${application.desiredRevision}:${previewDigest}`,
+      autoApply: false,
+    });
+  }
+
+  async function updateNodeConfiguration({ applicationId, expectedRevision, runtime, previewDigest, confirmation } = {}) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new ApplicationRegistryError('invalid_application_revision', 'A positive Application revision is required');
+    }
+    if (typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)) {
+      throw new ApplicationRegistryError('invalid_node_configuration_digest', 'A current Node configuration preview digest is required');
+    }
+    await ensureInitialized();
+    const beforePreview = hydrateApplication(requireApplication(state, normalizeApplicationId(applicationId)));
+    if (beforePreview.desiredRevision !== expectedRevision) {
+      throw new ApplicationRegistryError('application_revision_conflict', 'Application changed after preview; request a new preview', 409);
+    }
+    const preview = await previewNodeConfiguration(applicationId, runtime);
+    if (preview.currentRevision !== expectedRevision) {
+      throw new ApplicationRegistryError('application_revision_conflict', 'Application changed after preview; request a new preview', 409);
+    }
+    if (preview.previewDigest !== previewDigest) {
+      throw new ApplicationRegistryError('node_configuration_preview_stale', 'Node configuration preview is stale', 409);
+    }
+    if (confirmation !== preview.confirmation) {
+      throw new ApplicationRegistryError('node_configuration_confirmation_required', 'Exact Node configuration confirmation is required');
+    }
+    const application = hydrateApplication(requireApplication(state, preview.applicationId));
+    if (application.desiredRevision !== expectedRevision || application.activeDeploymentId) {
+      throw new ApplicationRegistryError('application_revision_conflict', 'Application changed after preview; request a new preview', 409);
+    }
+    application.runtime = structuredClone(preview.nextRuntime);
+    application.desiredRevision += 1;
     application.updatedAt = new Date(now()).toISOString();
     await persist();
     return publicApplication(application);
@@ -511,6 +655,8 @@ export function createApplicationRegistry({
     markRollingBack,
     markRolledBack,
     markFailed,
+    previewNodeConfiguration,
+    updateNodeConfiguration,
     getApplication,
     listApplications,
   };

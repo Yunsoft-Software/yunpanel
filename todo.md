@@ -63,6 +63,7 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 
 ## T-SERVICES-DB — P1/P2 gerçek host functionality
 
+- [ ] Node configuration preview/apply'i packaged Owner API'de runtime/startup/package-manager/mode/document-root değişiklikleriyle doğrula. Exact revision/digest/confirmation, immutable managed port, queued-job conflict ve pending desired config sırasında restart/status'un `activeRuntime` kullanması korunmalı; npm/pnpm/yarn işlemleri exact site user ve release-contained cwd ile çalışmalı.
 - [ ] Nginx, MariaDB/MySQL, Docker, Cron, Postfix, Dovecot, Rspamd inspect ve güvenli bir servis üzerinde install/start/stop/restart gerçek `apt/systemctl` ile çalışsın.
 - [ ] MariaDB↔MySQL conflict fail-closed kalsın; mevcut DB engine bozularak değiştirilmesin.
 - [ ] MySQL/MariaDB Unix socket root auth ile engine/version/non-system inventory; test DB create→inspect→drop→inspect çalışsın. System DB ve injection isimleri reddedilsin.

@@ -43,6 +43,7 @@ Do not replace structured operations with an unauthenticated generic shell or ma
 - Separate persistent DNS-zone and mail-domain lifecycle identities that begin as explicit external/unverified tracking, never imply provider publication or mail provisioning, and are not silently created by Website/hostname creation.
 - Owner-only Website/Domain move-delete impact previews that enumerate current hierarchy, binding, DNS-zone, mail-domain, certificate and active-job dependencies and fail closed on mailbox/backup/cron/Docker inventories that do not exist yet; no cascade or apply route is implied.
 - Static deploy/rollback and Node deploy/restart/status/rollback with dedicated application users, health checks and guarded rollback behavior.
+- Revisioned Node runtime configuration for startup file/npm script, npm/pnpm/yarn, production/development mode and release-contained document root; pending desired settings do not replace the active release snapshot before a successful deploy.
 - AES-256-GCM application environment storage, masked metadata and execution-time secret materialization without putting plaintext environment values into generic job records.
 - Managed-service inspect/install/start/stop/restart support for the current allowlisted host services.
 - MySQL/MariaDB local-socket inventory and database create/delete job flows with result sanitization.

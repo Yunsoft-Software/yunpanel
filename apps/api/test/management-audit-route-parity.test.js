@@ -12,6 +12,7 @@ const SOURCE_FILES = [
   'core-app.js',
   'site-create-http.js',
   'resource-impact-http.js',
+  'application-configuration-http.js',
   'external-lifecycle-http.js',
   'website-http.js',
   'website-migration-http.js',
@@ -117,6 +118,15 @@ test('explicit external DNS and mail tracking have separate audit resources', ()
   });
   assert.deepEqual(classifyManagementMutation('POST', '/api/mail-domains'), {
     action: 'mail_domain.external.track', resourceType: 'mail_domain', resourceId: 'new',
+  });
+});
+
+test('Node configuration preview and apply have Application-scoped audit identities', () => {
+  assert.deepEqual(classifyManagementMutation('POST', '/api/applications/application-1/configuration-preview'), {
+    action: 'application.configuration.preview', resourceType: 'application', resourceId: 'application-1',
+  });
+  assert.deepEqual(classifyManagementMutation('POST', '/api/applications/application-1/configuration'), {
+    action: 'application.configuration.update', resourceType: 'application', resourceId: 'application-1',
   });
 });
 

@@ -10,6 +10,12 @@ const SCRIPT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$/;
 const HEALTH_PATH_PATTERN = /^\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$/;
 const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn']);
 const RUNTIME_MODES = new Set(['production', 'development']);
+const RUNTIME_FIELDS = new Set([
+  'nodeMajor', 'packageManager', 'installMode', 'buildScript', 'mode', 'documentRoot',
+  'startMode', 'entryFile', 'startScript', 'start', 'port', 'healthPath',
+  'healthTimeoutSeconds', 'restartPolicy',
+]);
+const START_FIELDS = new Set(['mode', 'entryFile', 'script']);
 
 function normalizeScriptName(value, fieldName, { nullable = false } = {}) {
   if (value == null && nullable) return null;
@@ -23,8 +29,14 @@ export function normalizeNodeRuntimeConfig(value = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ApplicationValidationError('invalid_node_runtime', 'Node runtime config must be an object');
   }
+  if (Object.keys(value).some((key) => !RUNTIME_FIELDS.has(key))) {
+    throw new ApplicationValidationError('invalid_node_runtime', 'Node runtime config contains unsupported fields');
+  }
   if (value.start !== undefined && (!value.start || typeof value.start !== 'object' || Array.isArray(value.start))) {
     throw new ApplicationValidationError('invalid_node_start', 'Node start config must be an object');
+  }
+  if (value.start && Object.keys(value.start).some((key) => !START_FIELDS.has(key))) {
+    throw new ApplicationValidationError('invalid_node_start', 'Node start config contains unsupported fields');
   }
 
   const nodeMajor = value.nodeMajor ?? 24;
@@ -143,4 +155,5 @@ export function normalizeNodeStatusSpec(value) {
 export const nodeApplicationInternals = Object.freeze({
   packageManagers: Object.freeze([...PACKAGE_MANAGERS]),
   runtimeModes: Object.freeze([...RUNTIME_MODES]),
+  runtimeFields: Object.freeze([...RUNTIME_FIELDS]),
 });

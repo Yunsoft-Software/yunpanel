@@ -39,6 +39,7 @@ async function reconcileApplicationJob(applicationRegistry, job) {
       port: job.result.port ?? null,
       healthPath: job.result.healthPath ?? null,
       healthy: job.result.healthy ?? null,
+      runtime: job.payload?.runtime ?? null,
     });
     return;
   }

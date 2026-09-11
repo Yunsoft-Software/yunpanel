@@ -279,7 +279,9 @@ export function createApp({
             applicationId: application.id,
             releaseId,
             currentReleaseId: application.currentReleaseId,
-            runtime: application.runtime,
+            runtime: application.releases.find((release) => release.releaseId === releaseId)?.runtime
+              ?? application.activeRuntime
+              ?? application.runtime,
           }
         : {
             applicationId: application.id,
@@ -311,7 +313,7 @@ export function createApp({
       payload: {
         applicationId: application.id,
         releaseId: application.currentReleaseId,
-        runtime: application.runtime,
+        runtime: application.activeRuntime ?? application.runtime,
       },
       resourceType: 'application',
       resourceId: application.id,
@@ -339,7 +341,7 @@ export function createApp({
       payload: {
         applicationId: application.id,
         releaseId: application.currentReleaseId,
-        runtime: application.runtime,
+        runtime: application.activeRuntime ?? application.runtime,
       },
       resourceType: 'application',
       resourceId: application.id,
