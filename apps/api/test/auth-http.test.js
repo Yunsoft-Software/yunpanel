@@ -32,7 +32,7 @@ async function fixture(t, options = {}) {
     trustedProxyIps: options.trustedProxyIps,
     createHandler: () => (request, response) => {
       calls += 1;
-      const agent = /heartbeat|commands/.test(request.url);
+      const agent = /heartbeat|commands|\/applications\/[^/]+\/(?:environment|deployment-credential)$/.test(request.url);
       const authorized = agent
         ? request.headers.authorization === 'Bearer transport-token'
         : Boolean(request.auth?.user);
@@ -160,11 +160,15 @@ test('read-only role reaches only its explicitly declared inventory surface', as
 
 test('legacy agent routes retain their own credentials, not owner injection', async (t) => {
   const app = await fixture(t);
-  const pathname = '/api/servers/local/commands/next';
-  assert.equal((await app.request(pathname)).status, 401);
-  assert.equal((await app.request(pathname, { headers: { authorization: 'Bearer transport-token' } })).status, 200);
-  assert.equal((await app.request(pathname, { headers: { origin, authorization: 'Bearer transport-token' } })).status, 403);
-  assert.equal((await app.request(pathname, { headers: { cookie } })).status, 403);
+  for (const pathname of [
+    '/api/servers/local/commands/next',
+    '/api/servers/local/applications/application-id/deployment-credential',
+  ]) {
+    assert.equal((await app.request(pathname)).status, 401);
+    assert.equal((await app.request(pathname, { headers: { authorization: 'Bearer transport-token' } })).status, 200);
+    assert.equal((await app.request(pathname, { headers: { origin, authorization: 'Bearer transport-token' } })).status, 403);
+    assert.equal((await app.request(pathname, { headers: { cookie } })).status, 403);
+  }
 });
 
 test('production development endpoints stay closed and public health contains no inventory', async (t) => {

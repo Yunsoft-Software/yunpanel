@@ -16,9 +16,11 @@ test('only retained rollback transport routes keep the agent-channel auth bounda
   assert.equal(isAgentRoute('POST', `/api/servers/${serverId}/heartbeat`), true);
   assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/commands/next`), true);
   assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/applications/${applicationId}/environment`), true);
+  assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/applications/${applicationId}/deployment-credential`), true);
   assert.equal(isAgentRoute('POST', `/api/servers/${serverId}/commands/${jobId}/result`), true);
 
   assert.equal(isAgentRoute('POST', `/api/servers/${serverId}/commands/next`), false);
   assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/heartbeat`), false);
+  assert.equal(isAgentRoute('POST', `/api/servers/${serverId}/applications/${applicationId}/deployment-credential`), false);
   assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/commands/${jobId}/result`), false);
 });

@@ -14,6 +14,7 @@ const AGENT_ROUTES = [
   ['POST', /^\/api\/servers\/[^/%]+\/heartbeat$/],
   ['GET', /^\/api\/servers\/[^/%]+\/commands\/next$/],
   ['GET', /^\/api\/servers\/[^/%]+\/applications\/[^/%]+\/environment$/],
+  ['GET', /^\/api\/servers\/[^/%]+\/applications\/[^/%]+\/deployment-credential$/],
   ['POST', /^\/api\/servers\/[^/%]+\/commands\/[^/%]+\/result$/],
 ];
 
