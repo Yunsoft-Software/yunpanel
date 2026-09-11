@@ -12,7 +12,8 @@ test('production mounts the site-user file manager before the global JSON body l
   const mountIndex = appSource.indexOf('mountSiteFileRoutes(app, { siteFileManager: files });');
   const globalJsonIndex = appSource.indexOf("app.use(express.json({ limit: '256kb' }));");
   assert.ok(mountIndex >= 0 && globalJsonIndex > mountIndex);
-  assert.match(managerSource, /execFileAsync\(RUNUSER_PATH, \['-u', user, '--', process\.execPath, WORKER_PATH\]/);
+  assert.match(managerSource, /execFileWithInput\([\s\S]*RUNUSER_PATH,[\s\S]*\['-u', user, '--', process\.execPath, WORKER_PATH\]/);
+  assert.match(managerSource, /child\.stdin\.end\(input\)/);
   assert.match(managerSource, /getuid\(\) !== 0/);
   assert.match(buildSource, /cp -a apps\/api apps\/agent apps\/web/);
   assert.match(buildSource, /docs\/site-files\.md/);

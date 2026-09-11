@@ -111,3 +111,13 @@ test('site file manager accepts only structured worker responses', () => {
     (error) => error instanceof SiteFileManagerError && error.code === 'site_file_worker_failed',
   );
 });
+
+test('site file manager writes worker input and closes stdin', async () => {
+  const result = await siteFileManagerInternals.execFileWithInput(
+    process.execPath,
+    ['-e', 'const chunks=[]; process.stdin.on("data", (chunk) => chunks.push(chunk)); process.stdin.on("end", () => process.stdout.write(Buffer.concat(chunks)))'],
+    { encoding: 'utf8', timeout: 1_000, maxBuffer: 16 * 1024 },
+    '{"operation":"list"}',
+  );
+  assert.equal(result.stdout, '{"operation":"list"}');
+});

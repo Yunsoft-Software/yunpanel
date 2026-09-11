@@ -2,11 +2,9 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { SiteFileWorkerError } from './site-file-worker.js';
 
-const execFileAsync = promisify(execFile);
 const RUNUSER_PATH = '/usr/sbin/runuser';
 const WORKER_PATH = fileURLToPath(new URL('./site-file-worker.js', import.meta.url));
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
@@ -80,16 +78,44 @@ function parseWorkerResult(output) {
   throw new SiteFileManagerError('site_file_worker_failed', 'Site file worker returned an invalid response', 503);
 }
 
+function execFileWithInput(file, args, options, input) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const child = execFile(file, args, options, (error, stdout, stderr) => {
+      if (settled) return;
+      settled = true;
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+    child.stdin.once('error', (error) => {
+      if (settled || error?.code === 'EPIPE') return;
+      settled = true;
+      child.kill();
+      reject(error);
+    });
+    child.stdin.end(input);
+  });
+}
+
 async function executeWorker({ user, request }) {
   const options = {
     encoding: 'utf8',
     env: { HOME: '/', LANG: 'C.UTF-8', PATH: '/usr/local/bin:/usr/bin:/bin' },
-    input: JSON.stringify(request),
     maxBuffer: MAX_WORKER_BUFFER,
     timeout: 30_000,
   };
   try {
-    const result = await execFileAsync(RUNUSER_PATH, ['-u', user, '--', process.execPath, WORKER_PATH], options);
+    const result = await execFileWithInput(
+      RUNUSER_PATH,
+      ['-u', user, '--', process.execPath, WORKER_PATH],
+      options,
+      JSON.stringify(request),
+    );
     return parseWorkerResult(result.stdout);
   } catch (error) {
     if (typeof error?.stdout === 'string' && error.stdout) return parseWorkerResult(error.stdout);
@@ -142,6 +168,7 @@ export function createSiteFileManager({
 
 export const siteFileManagerInternals = Object.freeze({
   appUnixUser,
+  execFileWithInput,
   parseManagedAccount,
   parseWorkerResult,
   validateWebsite,
