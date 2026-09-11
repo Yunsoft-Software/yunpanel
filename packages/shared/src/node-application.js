@@ -3,6 +3,7 @@ import {
   assertUuid,
   normalizeGithubRepositoryUrl,
   normalizeGitBranch,
+  normalizeGitDeploymentTarget,
   normalizeRelativeBuildPath,
 } from './application.js';
 
@@ -130,11 +131,13 @@ export function normalizeNodeApplicationSpec(value) {
     throw new ApplicationValidationError('invalid_application_spec', 'Node application spec must be an object');
   }
 
+  const branch = normalizeGitBranch(value.branch ?? 'main');
   return {
     applicationId: assertUuid(value.applicationId, 'applicationId'),
     deploymentId: assertUuid(value.deploymentId, 'deploymentId'),
     repositoryUrl: normalizeGithubRepositoryUrl(value.repositoryUrl),
-    branch: normalizeGitBranch(value.branch ?? 'main'),
+    branch,
+    gitTarget: normalizeGitDeploymentTarget(value.gitTarget, { defaultBranch: branch }),
     runtime: normalizeNodeRuntimeConfig(value.runtime),
     retention: Number.isInteger(value.retention) && value.retention >= 2 && value.retention <= 20 ? value.retention : 5,
   };

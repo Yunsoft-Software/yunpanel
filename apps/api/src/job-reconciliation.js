@@ -32,6 +32,7 @@ async function reconcileApplicationJob(applicationRegistry, job) {
       deploymentId: job.id,
       releaseId: job.result.releaseId,
       commitSha: job.result.commitSha,
+      gitTarget: job.result.gitTarget,
       previousReleaseId: job.result.previousReleaseId,
       artifactFiles: job.result.artifactFiles ?? null,
       artifactBytes: job.result.artifactBytes ?? null,

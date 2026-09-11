@@ -1,5 +1,6 @@
 import express from 'express';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { ApplicationValidationError, normalizeGitDeploymentTarget } from '@yunpanel/shared';
 import {
   createApplicationEnvironmentRegistry,
   ApplicationEnvironmentRegistryError,
@@ -39,6 +40,19 @@ async function latestNodeStatusJob(jobRegistry, applicationId) {
   return jobs
     .filter((job) => job.operation === OPERATIONS.APP_NODE_STATUS)
     .sort((left, right) => Date.parse(right.createdAt ?? 0) - Date.parse(left.createdAt ?? 0))[0] ?? null;
+}
+
+function deploymentGitTarget(body, defaultBranch) {
+  if (body !== undefined && (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).some((key) => key !== 'gitTarget'))) {
+    throw new ApplicationRegistryError('invalid_deployment_request', 'Deployment accepts only an optional gitTarget');
+  }
+  try {
+    return normalizeGitDeploymentTarget(body?.gitTarget, { defaultBranch });
+  } catch (error) {
+    if (error instanceof ApplicationValidationError) throw new ApplicationRegistryError(error.code, error.message);
+    throw error;
+  }
 }
 
 export function createApp({
@@ -214,6 +228,7 @@ export function createApp({
   app.post('/api/applications/:applicationId/deploy', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const gitTarget = deploymentGitTarget(request.body, application.branch);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
 
@@ -227,6 +242,7 @@ export function createApp({
         applicationId: application.id,
         repositoryUrl: application.repositoryUrl,
         branch: application.branch,
+        gitTarget,
         build: application.build,
         retention: application.retention,
       };
@@ -237,6 +253,7 @@ export function createApp({
         applicationId: application.id,
         repositoryUrl: application.repositoryUrl,
         branch: application.branch,
+        gitTarget,
         runtime: application.runtime,
         retention: application.retention,
       };

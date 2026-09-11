@@ -46,6 +46,7 @@ Do not replace structured operations with an unauthenticated generic shell or ma
 - Revisioned Node runtime configuration for startup file/npm script, npm/pnpm/yarn, production/development mode and release-contained document root; pending desired settings do not replace the active release snapshot before a successful deploy.
 - Release-bound Node process enable/disable/start/stop through exact-confirmation durable jobs; unhealthy starts return to stopped state and interrupted idempotent controls require fresh systemd/health evidence before recovery.
 - Managed Node 22/24 LTS inventory and checksum-verified atomic installation under `/opt/yunpanel/node-runtimes`; deploy, build lifecycle and systemd PATH use the selected site major without replacing YunPanel's packaged `/usr/local/bin/node` runtime.
+- Static and Node deploys accept an explicit branch, tag or immutable 40-character commit target; Git fetch runs as the dedicated site user and the resolved target is retained with release history.
 - AES-256-GCM application environment storage, masked metadata and execution-time secret materialization without putting plaintext environment values into generic job records.
 - Managed-service inspect/install/start/stop/restart support for the current allowlisted host services.
 - MySQL/MariaDB local-socket inventory and database create/delete job flows with result sanitization.

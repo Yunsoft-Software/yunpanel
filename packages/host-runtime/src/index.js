@@ -1,4 +1,5 @@
 export { inspectHostInventory, inventoryInternals } from './inventory.js';
+export { gitDeploymentInternals } from './git-deployment.js';
 export { createDockerInspector, inspectDocker, parseDockerPsOutput } from './docker-inspector.js';
 export { createNginxInspector, inspectNginx, parseNginxConfigMetadata } from './nginx-inspector.js';
 export { createNginxManager, nginxManager, NginxManagerError } from './nginx-manager.js';

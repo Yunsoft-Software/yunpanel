@@ -4,6 +4,7 @@ import {
   ApplicationValidationError,
   normalizeGithubRepositoryUrl,
   normalizeGitBranch,
+  normalizeGitDeploymentTarget,
   normalizeStaticApplicationSpec,
   normalizeStaticBuildConfig,
 } from '../src/index.js';
@@ -31,6 +32,20 @@ test('plain static profile can serve repository root without executing npm', () 
     outputDir: '.',
     healthFile: 'public/index.html',
   });
+});
+
+test('Git deployment targets distinguish configured branch, exact tag and immutable commit', () => {
+  assert.deepEqual(normalizeGitDeploymentTarget(null, { defaultBranch: 'main' }), { kind: 'branch', value: 'main' });
+  assert.deepEqual(normalizeGitDeploymentTarget({ kind: 'tag', value: 'v2.4.0' }), { kind: 'tag', value: 'v2.4.0' });
+  assert.deepEqual(normalizeGitDeploymentTarget({ kind: 'commit', value: 'A'.repeat(40) }), {
+    kind: 'commit', value: 'a'.repeat(40),
+  });
+  for (const target of [
+    { kind: 'commit', value: 'abc123' },
+    { kind: 'tag', value: '--upload-pack=evil' },
+    { kind: 'branch', value: 'main', extra: true },
+    { kind: 'ref', value: 'refs/pull/1/head' },
+  ]) assert.throws(() => normalizeGitDeploymentTarget(target), ApplicationValidationError);
 });
 
 test('rejects credentials, non-GitHub URLs, branch option injection and output traversal', () => {
@@ -67,6 +82,7 @@ test('normalizes complete static deployment specs', () => {
   });
 
   assert.equal(spec.repositoryUrl, 'https://github.com/example/site.git');
+  assert.deepEqual(spec.gitTarget, { kind: 'branch', value: 'main' });
   assert.equal(spec.retention, 7);
   assert.equal(spec.build.outputDir, 'dist');
   assert.equal(spec.build.healthFile, 'index.html');

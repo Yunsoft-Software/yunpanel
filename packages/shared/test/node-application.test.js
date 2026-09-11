@@ -96,6 +96,7 @@ test('normalizes complete Node deployment specs', () => {
     deploymentId: 'ff830043-9752-4640-83b4-3a1998de78a0',
     repositoryUrl: 'https://github.com/example/node-app',
     branch: 'production',
+    gitTarget: { kind: 'tag', value: 'v3.2.1' },
     runtime: {
       nodeMajor: 24,
       buildScript: 'build',
@@ -107,6 +108,7 @@ test('normalizes complete Node deployment specs', () => {
   });
 
   assert.equal(spec.repositoryUrl, 'https://github.com/example/node-app.git');
+  assert.deepEqual(spec.gitTarget, { kind: 'tag', value: 'v3.2.1' });
   assert.equal(spec.runtime.start.entryFile, 'dist/server.js');
   assert.equal(spec.runtime.port, 3100);
   assert.equal(spec.retention, 4);

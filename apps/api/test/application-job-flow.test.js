@@ -105,6 +105,7 @@ test('static application deploy moves through queue and reconciles the active re
 
     const deploy = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, {
       method: 'POST',
+      body: { gitTarget: { kind: 'tag', value: 'v2.4.0' } },
     });
     assert.equal(deploy.response.status, 202);
     assert.equal(deploy.payload.data.job.operation, OPERATIONS.APP_STATIC_DEPLOY);
@@ -125,6 +126,7 @@ test('static application deploy moves through queue and reconciles the active re
     assert.equal(claimed.payload.data.envelope.payload.applicationId, application.id);
     assert.equal(claimed.payload.data.envelope.payload.deploymentId, deploy.payload.data.job.id);
     assert.equal(claimed.payload.data.envelope.payload.repositoryUrl, 'https://github.com/Yunsoft-Software/example-static.git');
+    assert.deepEqual(claimed.payload.data.envelope.payload.gitTarget, { kind: 'tag', value: 'v2.4.0' });
 
     const firstReleaseId = deploy.payload.data.job.id;
     const completed = await requestJson(
@@ -155,6 +157,8 @@ test('static application deploy moves through queue and reconciles the active re
     assert.equal(active.payload.data.currentReleaseId, firstReleaseId);
     assert.equal(active.payload.data.previousReleaseId, null);
     assert.equal(active.payload.data.currentCommitSha, 'a'.repeat(40));
+    assert.deepEqual(active.payload.data.currentGitTarget, { kind: 'tag', value: 'v2.4.0' });
+    assert.deepEqual(active.payload.data.releases[0].gitTarget, { kind: 'tag', value: 'v2.4.0' });
     assert.equal(active.payload.data.activeDeploymentId, null);
 
     const secondDeploy = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, {
@@ -189,6 +193,36 @@ test('static application deploy moves through queue and reconciles the active re
     assert.equal(afterFailure.currentReleaseId, firstReleaseId);
     assert.equal(afterFailure.activeDeploymentId, null);
     assert.equal(afterFailure.lastError, 'npm_build_failed');
+  });
+});
+
+test('deploy rejects malformed Git selectors before queueing work', async () => {
+  const context = await createContext();
+  const app = withPanelContext(createApp({
+    environment: 'production',
+    registry: context.serverRegistry,
+    applicationRegistry: context.applicationRegistry,
+    domainRegistry: context.domainRegistry,
+    jobRegistry: context.jobRegistry,
+    certificateRegistry: context.certificateRegistry,
+  }));
+  const application = await context.applicationRegistry.createApplication({
+    serverId: context.enrolled.server.id,
+    name: 'Target validation',
+    repositoryUrl: 'https://github.com/Yunsoft-Software/target-validation',
+    build: { mode: 'none', outputDir: '.' },
+  });
+  await withServer(app, async (baseUrl) => {
+    for (const body of [
+      { gitTarget: { kind: 'commit', value: 'short' } },
+      { gitTarget: { kind: 'tag', value: 'v1', force: true } },
+      { gitTarget: { kind: 'ref', value: 'refs/pull/1/head' } },
+      { gitTarget: { kind: 'branch', value: 'main' }, command: 'id' },
+    ]) {
+      const response = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, { method: 'POST', body });
+      assert.equal(response.response.status, 400);
+    }
+    assert.equal((await context.jobRegistry.listJobs()).length, 0);
   });
 });
 

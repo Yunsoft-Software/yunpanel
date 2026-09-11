@@ -90,6 +90,7 @@ test('Node application deploy reconciles a healthy systemd release and proxy tar
 
     const deploy = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, {
       method: 'POST',
+      body: { gitTarget: { kind: 'commit', value: 'c'.repeat(40) } },
     });
     assert.equal(deploy.response.status, 202);
     assert.equal(deploy.payload.data.job.operation, OPERATIONS.APP_NODE_DEPLOY);
@@ -103,6 +104,7 @@ test('Node application deploy reconciles a healthy systemd release and proxy tar
     const deploymentId = claimed.payload.data.job.id;
     assert.equal(claimed.payload.data.envelope.payload.deploymentId, deploymentId);
     assert.equal(claimed.payload.data.envelope.payload.runtime.port, 3300);
+    assert.deepEqual(claimed.payload.data.envelope.payload.gitTarget, { kind: 'commit', value: 'c'.repeat(40) });
 
     const completed = await requestJson(
       `${baseUrl}/api/servers/${enrolled.server.id}/commands/${deploymentId}/result`,
@@ -132,6 +134,7 @@ test('Node application deploy reconciles a healthy systemd release and proxy tar
     assert.equal(active.state, 'active');
     assert.equal(active.currentReleaseId, deploymentId);
     assert.equal(active.currentCommitSha, 'c'.repeat(40));
+    assert.deepEqual(active.currentGitTarget, { kind: 'commit', value: 'c'.repeat(40) });
     assert.equal(active.serviceName, serviceName(application.id));
     assert.equal(active.servicePort, 3300);
     assert.equal(active.healthPath, '/health');
@@ -156,6 +159,7 @@ test('Node deploy result cannot change the desired port or service identity', as
       applicationId,
       repositoryUrl: 'https://github.com/example/node-app',
       branch: 'main',
+      gitTarget: { kind: 'commit', value: 'd'.repeat(40) },
       runtime: { nodeMajor: 24, port: 3300 },
       retention: 5,
     },
@@ -163,6 +167,25 @@ test('Node deploy result cannot change the desired port or service identity', as
     resourceId: applicationId,
   });
   await registry.claimNext('server-1');
+
+  await assert.rejects(
+    registry.complete({
+      serverId: 'server-1',
+      jobId: job.id,
+      status: 'succeeded',
+      result: {
+        deploymentId: job.id,
+        releaseId: job.id,
+        previousReleaseId: null,
+        commitSha: 'e'.repeat(40),
+        serviceName: serviceName(applicationId),
+        port: 3300,
+        healthPath: '/health',
+        healthy: true,
+      },
+    }),
+    /does not match the requested Git target/,
+  );
 
   await assert.rejects(
     registry.complete({

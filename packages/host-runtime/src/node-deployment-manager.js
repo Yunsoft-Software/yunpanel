@@ -9,6 +9,7 @@ import {
   renderNodeSystemdUnit,
 } from '@yunpanel/config-templates';
 import { normalizeNodeApplicationSpec } from '@yunpanel/shared';
+import { gitFetchArguments, resolvedGitCommit } from './git-deployment.js';
 import { createNodeEnvironmentWriter, NodeEnvironmentWriteError } from './node-environment-writer.js';
 
 const execFileAsync = promisify(execFile);
@@ -30,7 +31,6 @@ const PACKAGE_MANAGER_PATHS = Object.freeze({
   yarn: Object.freeze(['/usr/bin/yarn', '/usr/local/bin/yarn']),
 });
 const GIT_PATH = '/usr/bin/git';
-const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class NodeDeploymentError extends Error {
@@ -269,21 +269,25 @@ export function createNodeDeploymentManager({
     releaseCreated = true;
 
     try {
-      await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, [
-        'clone',
-        '--depth', '1',
-        '--single-branch',
-        '--branch', spec.branch,
-        spec.repositoryUrl,
-        '.',
-      ], { cwd: releaseDirectory, timeout: 5 * 60 * 1000 });
+      await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, ['init', '.'], {
+        cwd: releaseDirectory, timeout: 30_000,
+      });
+      await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, ['remote', 'add', 'origin', spec.repositoryUrl], {
+        cwd: releaseDirectory, timeout: 30_000,
+      });
+      await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, gitFetchArguments(spec.gitTarget, { depth: 1 }), {
+        cwd: releaseDirectory, timeout: 5 * 60 * 1000,
+      });
 
-      const revision = await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, ['rev-parse', '--verify', 'HEAD^{commit}'], {
+      const revision = await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, ['rev-parse', '--verify', 'FETCH_HEAD^{commit}'], {
         cwd: releaseDirectory,
         timeout: 30_000,
       });
-      const commitSha = String(revision.stdout ?? '').trim().toLowerCase();
-      if (!COMMIT_PATTERN.test(commitSha)) throw new NodeDeploymentError('invalid_git_revision', 'Git returned an invalid commit revision');
+      const commitSha = resolvedGitCommit(revision.stdout, spec.gitTarget);
+      if (!commitSha) throw new NodeDeploymentError('invalid_git_revision', 'Git returned a revision that does not match the deployment target');
+      await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, ['checkout', '--detach', commitSha], {
+        cwd: releaseDirectory, timeout: 60_000,
+      });
 
       const requestedDocumentRoot = path.join(releaseDirectory, spec.runtime.documentRoot);
       let documentRoot;

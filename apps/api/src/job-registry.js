@@ -8,6 +8,7 @@ import {
   MANAGED_NODE_RUNTIME_MAJORS,
   OPERATIONS,
 } from '@yunpanel/protocol';
+import { normalizeGitDeploymentTarget } from '@yunpanel/shared';
 import { sanitizeDatabaseJobResult } from './database-job-result.js';
 
 const STORE_VERSION = 1;
@@ -158,11 +159,18 @@ function sanitizeReleaseIdentity(job, result) {
   if (typeof result.commitSha !== 'string' || !COMMIT_PATTERN.test(result.commitSha)) {
     throw new JobRegistryError('invalid_job_result', 'Deployment commit SHA is invalid');
   }
+  let gitTarget;
+  try { gitTarget = normalizeGitDeploymentTarget(job.payload?.gitTarget, { defaultBranch: job.payload?.branch ?? 'main' }); }
+  catch { throw new JobRegistryError('invalid_job_result', 'Deployment Git target is invalid'); }
+  if (gitTarget.kind === 'commit' && result.commitSha.toLowerCase() !== gitTarget.value) {
+    throw new JobRegistryError('invalid_job_result', 'Deployment commit SHA does not match the requested Git target');
+  }
   return {
     deploymentId,
     releaseId,
     previousReleaseId,
     commitSha: result.commitSha.toLowerCase(),
+    gitTarget,
   };
 }
 

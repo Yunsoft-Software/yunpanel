@@ -71,6 +71,7 @@ Rules:
 - local Node deploy/restart/rollback materializes environment values directly from the application environment registry at execution time,
 - Node enable/disable/start/stop uses the active release runtime snapshot and does not materialize application secrets,
 - Node 22/24 site runtimes install under `/opt/yunpanel/node-runtimes`; site deploy/build/systemd PATH uses the selected major while `/usr/local/bin/node` remains the panel runtime,
+- deploy requests may select an exact branch, tag or full commit SHA; the queued target is bounded metadata and the resolved target is recorded with the release,
 - retained legacy-agent materialization exists only for rollback compatibility while that transport remains installed,
 - secret values are not included in generic deployment/restart/rollback job payloads or result records,
 - managed runtime keys `NODE_ENV`, `HOST`, `PORT` and `YUNPANEL_APPLICATION_ID` cannot be overridden by application environment input.

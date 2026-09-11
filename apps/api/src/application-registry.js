@@ -6,6 +6,7 @@ import {
   assertUuid,
   normalizeGithubRepositoryUrl,
   normalizeGitBranch,
+  normalizeGitDeploymentTarget,
   normalizeNodeRuntimeConfig,
   normalizeStaticBuildConfig,
 } from '@yunpanel/shared';
@@ -80,12 +81,14 @@ function publicApplication(application) {
     build: application.build ? Object.freeze({ ...application.build }) : null,
     runtime: runtime ? Object.freeze(runtime) : null,
     activeRuntime: activeRuntime ? Object.freeze(activeRuntime) : null,
+    currentGitTarget: application.currentGitTarget ? Object.freeze({ ...application.currentGitTarget }) : null,
     configurationPending: application.type === 'node'
       && application.currentReleaseId !== null
       && !sameValue(runtime, activeRuntime),
     releases: Object.freeze(Array.isArray(application.releases)
       ? application.releases.map((release) => Object.freeze({
           ...release,
+          gitTarget: release.gitTarget ? Object.freeze({ ...release.gitTarget }) : null,
           runtime: release.runtime ? Object.freeze(structuredClone(release.runtime)) : null,
         }))
       : []),
@@ -177,6 +180,23 @@ function hydrateApplication(application) {
     application.releases = application.releases.map((release) => ({ ...release, runtime: null, configurationRevision: null }));
   }
 
+  try {
+    application.releases = application.releases.map((release) => ({
+      ...release,
+      gitTarget: normalizeGitDeploymentTarget(release.gitTarget, { defaultBranch: application.branch }),
+    }));
+    if (application.currentGitTarget === undefined) {
+      application.currentGitTarget = application.currentReleaseId
+        ? application.releases.find((release) => release.releaseId === application.currentReleaseId)?.gitTarget
+          ?? normalizeGitDeploymentTarget(null, { defaultBranch: application.branch })
+        : null;
+    } else if (application.currentGitTarget !== null) {
+      application.currentGitTarget = normalizeGitDeploymentTarget(application.currentGitTarget);
+    }
+  } catch {
+    throw new ApplicationRegistryError('application_state_invalid', 'Application Git deployment target state is invalid', 409);
+  }
+
   if (
     application.currentReleaseId
     && application.currentCommitSha
@@ -187,6 +207,7 @@ function hydrateApplication(application) {
       releaseId: application.currentReleaseId,
       deploymentId: application.currentReleaseId,
       commitSha: application.currentCommitSha.toLowerCase(),
+      gitTarget: application.currentGitTarget ?? normalizeGitDeploymentTarget(null, { defaultBranch: application.branch }),
       artifactFiles: null,
       artifactBytes: null,
       deployedAt: application.lastDeployedAt ?? application.updatedAt ?? application.createdAt,
@@ -225,6 +246,7 @@ function baseApplication({ id, serverId, name, type, repositoryUrl, branch, rete
     currentReleaseId: null,
     previousReleaseId: null,
     currentCommitSha: null,
+    currentGitTarget: null,
     releases: [],
     activeDeploymentId: null,
     pendingRollbackReleaseId: null,
@@ -387,6 +409,7 @@ export function createApplicationRegistry({
     deploymentId,
     releaseId,
     commitSha,
+    gitTarget: requestedGitTarget = null,
     previousReleaseId,
     artifactFiles = null,
     artifactBytes = null,
@@ -407,6 +430,12 @@ export function createApplicationRegistry({
     if (normalizedReleaseId !== normalizedDeploymentId) throw new ApplicationRegistryError('release_mismatch', 'Application release must match deployment identity', 409);
     if (normalizedPreviousReleaseId !== application.currentReleaseId) throw new ApplicationRegistryError('release_state_drift', 'Managed server previous release does not match control-plane state', 409);
     if (typeof commitSha !== 'string' || !COMMIT_PATTERN.test(commitSha)) throw new ApplicationRegistryError('invalid_commit_sha', 'Deployment commit SHA is invalid');
+    let gitTarget;
+    try { gitTarget = normalizeGitDeploymentTarget(requestedGitTarget, { defaultBranch: application.branch }); }
+    catch { throw new ApplicationRegistryError('invalid_git_target', 'Deployment Git target is invalid'); }
+    if (gitTarget.kind === 'commit' && commitSha.toLowerCase() !== gitTarget.value) {
+      throw new ApplicationRegistryError('git_target_mismatch', 'Deployment commit does not match the requested Git target', 409);
+    }
     if (artifactFiles != null && (!Number.isInteger(artifactFiles) || artifactFiles < 1 || artifactFiles > 100_000)) throw new ApplicationRegistryError('invalid_artifact_metadata', 'Artifact file count is invalid');
     if (artifactBytes != null && (!Number.isInteger(artifactBytes) || artifactBytes < 0 || artifactBytes > 2 * 1024 * 1024 * 1024)) throw new ApplicationRegistryError('invalid_artifact_metadata', 'Artifact byte size is invalid');
 
@@ -436,6 +465,7 @@ export function createApplicationRegistry({
     application.previousReleaseId = application.currentReleaseId;
     application.currentReleaseId = normalizedReleaseId;
     application.currentCommitSha = commitSha.toLowerCase();
+    application.currentGitTarget = gitTarget;
     application.activeDeploymentId = null;
     application.pendingRollbackReleaseId = null;
     application.state = 'active';
@@ -456,6 +486,7 @@ export function createApplicationRegistry({
       releaseId: normalizedReleaseId,
       deploymentId: normalizedDeploymentId,
       commitSha: commitSha.toLowerCase(),
+      gitTarget,
       artifactFiles,
       artifactBytes,
       deployedAt: timestamp,
@@ -526,6 +557,7 @@ export function createApplicationRegistry({
     application.previousReleaseId = application.currentReleaseId;
     application.currentReleaseId = normalizedReleaseId;
     application.currentCommitSha = target.commitSha;
+    application.currentGitTarget = structuredClone(target.gitTarget);
     application.activeDeploymentId = null;
     application.pendingRollbackReleaseId = null;
     application.state = 'active';

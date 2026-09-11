@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { normalizeStaticApplicationSpec } from '@yunpanel/shared';
+import { gitFetchArguments, resolvedGitCommit } from './git-deployment.js';
 
 const execFileAsync = promisify(execFile);
 const BUILD_ROOT = '/var/lib/yunpanel/build';
@@ -18,7 +19,6 @@ const PKILL_PATH = '/usr/bin/pkill';
 const GIT_PATH = '/usr/bin/git';
 const NPM_PATHS = Object.freeze(['/usr/bin/npm', '/usr/local/bin/npm']);
 const ARTIFACT_WORKER_PATH = fileURLToPath(new URL('./static-artifact-worker.js', import.meta.url));
-const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class StaticDeploymentError extends Error {
@@ -207,10 +207,12 @@ export function createStaticDeploymentManager({
         await runAsUser(username, appBuildRoot, GIT_PATH, ['clone', '--no-checkout', spec.repositoryUrl, repositoryPath], { timeout: 5 * 60 * 1000 });
       }
 
-      await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'fetch', '--prune', '--no-tags', 'origin', spec.branch], { timeout: 5 * 60 * 1000 });
+      await runAsUser(username, appBuildRoot, GIT_PATH, [
+        '-C', repositoryPath, ...gitFetchArguments(spec.gitTarget, { prune: true }),
+      ], { timeout: 5 * 60 * 1000 });
       const revision = await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'rev-parse', '--verify', 'FETCH_HEAD^{commit}']);
-      const commitSha = String(revision.stdout ?? '').trim().toLowerCase();
-      if (!COMMIT_PATTERN.test(commitSha)) throw new StaticDeploymentError('invalid_git_revision', 'Git returned an invalid commit revision');
+      const commitSha = resolvedGitCommit(revision.stdout, spec.gitTarget);
+      if (!commitSha) throw new StaticDeploymentError('invalid_git_revision', 'Git returned a revision that does not match the deployment target');
 
       await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'worktree', 'add', '--detach', worktreePath, commitSha], { timeout: 60_000 });
       worktreeCreated = true;

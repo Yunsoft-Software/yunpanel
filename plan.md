@@ -29,7 +29,9 @@ Aktif geliştirme dışı. Enterprise layout/component styling/data-table görü
 
 Node runtime major/startup/package-manager/mode/document-root ayarları revisioned preview/apply ile yönetilir; çalışan release ayrı `activeRuntime` snapshot'ını korur. Explicit systemd enable/disable/start/stop aktif release'e bağlı, onaylı durable job'dur ve kesinti sonrası exact intent + host final-state kanıtıyla kurtarılır. Host Node 22/24 LTS inventory/install ayrı managed dizinlerde checksum doğrulamalı ve atomiktir; Application `nodeMajor` seçimi deploy/systemd/build PATH'ini aynı site runtime'ına bağlar, panelin `/usr/local/bin/node` runtime'ını değiştirmez. Mevcut deploy/restart/status/rollback akışları korunur.
 
-- [ ] Git deploy'a explicit commit/tag seçimi ve private deploy key/token secret store ekle. Clone/fetch/install/build site Unix user'ıyla çalışmalı.
+Git deploy branch/tag/full commit hedefini explicit ve bounded job metadata'sı olarak taşır; host exact ref'i site kullanıcısıyla fetch eder, commit hedefi farklı SHA'ya çözülürse fail-closed kalır ve seçilen hedef release geçmişine yazılır.
+
+- [ ] Private GitHub deploy key/token secret store ekle. Credential generic job/recovery/audit/log kayıtlarına girmemeli; clone/fetch/install/build site Unix user'ıyla çalışmalı.
 - [ ] Env import validation, change metadata ve `saved-on-disk` / `applied-to-running-process` ayrımı ekle.
 - [ ] Node/systemd/Nginx/deploy için bounded, redacted log stream/search/filter/download backend'i geliştir.
 - [ ] Static/SPA ve Docker runtime'larını kalıcı Website modeline bağla; Passenger yalnız compatibility adapter olarak kalsın.

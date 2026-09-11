@@ -28,6 +28,8 @@ Owner-only `POST /api/applications/:applicationId/process` accepts exactly `enab
 
 Owner-only server runtime routes are `GET /api/servers/:serverId/node-runtimes`, `POST /api/servers/:serverId/node-runtimes/inspect` and confirmed `POST /api/servers/:serverId/node-runtimes/:major/install`. Managed installation supports the maintained Node 22/24 LTS lines, verifies the official release checksum and writes only the version-specific `/opt/yunpanel/node-runtimes` tree. The Application's revisioned `nodeMajor` is the selection; a subsequent deploy binds Node, npm/pnpm/yarn lifecycle and systemd PATH to that exact major without replacing YunPanel's packaged runtime.
 
+`POST /api/applications/:applicationId/deploy` accepts only an optional `gitTarget` object with `kind` `branch`, `tag` or `commit` and its bounded `value`; omission retains the configured branch behavior. Commit targets require a full 40-character SHA and the host rejects any different resolved commit. Branch/tag/commit fetch, detached checkout, dependency install and build execute as the deterministic `yunapp-*` site user. Release history retains the requested target and resolved commit separately.
+
 An application-backed Website owns stable Website UUID, server/application IDs, runtime type, canonical managed document root and deterministic `yunapp-*` Unix user. A proxy Website is a real resource without an invented application/document root/Unix user and may own one canonical host/port/WebSocket target. Website records carry a positive revision; persisted v1 state is validated and migrated once to v2 with revision `1` and no invented proxy target.
 
 The Website ID is not a domain ID. Backend relationships use explicit foreign keys rather than permanent server/port/root heuristics.

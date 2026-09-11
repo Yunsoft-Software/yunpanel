@@ -1,5 +1,7 @@
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BRANCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/;
+const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
+const GIT_TARGET_FIELDS = new Set(['kind', 'value']);
 const SCRIPT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$/;
 const RELATIVE_PATH_PATTERN = /^[A-Za-z0-9._/-]+$/;
 
@@ -50,6 +52,31 @@ export function normalizeGitBranch(value) {
     throw new ApplicationValidationError('invalid_branch', 'Git branch contains unsupported sequences');
   }
   return value;
+}
+
+export function normalizeGitDeploymentTarget(value, { defaultBranch = null } = {}) {
+  const candidate = value == null && defaultBranch !== null
+    ? { kind: 'branch', value: defaultBranch }
+    : value;
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)
+    || Object.keys(candidate).length !== 2
+    || Object.keys(candidate).some((key) => !GIT_TARGET_FIELDS.has(key))) {
+    throw new ApplicationValidationError('invalid_git_target', 'Git deployment target must contain exactly kind and value');
+  }
+  if (candidate.kind === 'commit') {
+    if (typeof candidate.value !== 'string' || !COMMIT_PATTERN.test(candidate.value)) {
+      throw new ApplicationValidationError('invalid_git_target', 'Git commit target must be a full 40-character SHA');
+    }
+    return { kind: 'commit', value: candidate.value.toLowerCase() };
+  }
+  if (!['branch', 'tag'].includes(candidate.kind)) {
+    throw new ApplicationValidationError('invalid_git_target', 'Git deployment target kind must be branch, tag or commit');
+  }
+  try {
+    return { kind: candidate.kind, value: normalizeGitBranch(candidate.value) };
+  } catch {
+    throw new ApplicationValidationError('invalid_git_target', `Git ${candidate.kind} target is invalid`);
+  }
 }
 
 export function normalizeRelativeBuildPath(value, { allowDot = false } = {}) {
@@ -116,11 +143,13 @@ export function normalizeStaticApplicationSpec(value) {
     throw new ApplicationValidationError('invalid_application_spec', 'Static application spec must be an object');
   }
 
+  const branch = normalizeGitBranch(value.branch ?? 'main');
   return {
     applicationId: assertUuid(value.applicationId, 'applicationId'),
     deploymentId: assertUuid(value.deploymentId, 'deploymentId'),
     repositoryUrl: normalizeGithubRepositoryUrl(value.repositoryUrl),
-    branch: normalizeGitBranch(value.branch ?? 'main'),
+    branch,
+    gitTarget: normalizeGitDeploymentTarget(value.gitTarget, { defaultBranch: branch }),
     build: normalizeStaticBuildConfig(value.build),
     retention: Number.isInteger(value.retention) && value.retention >= 2 && value.retention <= 20 ? value.retention : 5,
   };
