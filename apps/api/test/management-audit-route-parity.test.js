@@ -11,6 +11,7 @@ const SOURCE_FILES = [
   'app.js',
   'core-app.js',
   'site-create-http.js',
+  'resource-impact-http.js',
   'website-http.js',
   'website-migration-http.js',
   'managed-service-http.js',
@@ -97,6 +98,15 @@ test('Domain hierarchy preview and apply have bounded common audit identities', 
   });
   assert.deepEqual(classifyManagementMutation('POST', '/api/domains/domain-1/reparent'), {
     action: 'domain.reparent', resourceType: 'domain', resourceId: 'domain-1',
+  });
+});
+
+test('Website and Domain impact previews have resource-scoped audit identities', () => {
+  assert.deepEqual(classifyManagementMutation('POST', '/api/websites/website-1/impact-preview'), {
+    action: 'website.impact.preview', resourceType: 'website', resourceId: 'website-1',
+  });
+  assert.deepEqual(classifyManagementMutation('POST', '/api/domains/domain-1/impact-preview'), {
+    action: 'domain.impact.preview', resourceType: 'domain', resourceId: 'domain-1',
   });
 });
 

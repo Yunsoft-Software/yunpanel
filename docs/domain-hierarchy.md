@@ -103,13 +103,24 @@ Nginx stage/activate and managed certificate issue/renew continue through durabl
 
 Reverse-proxy targets may use canonical DNS, IPv4 or IPv6 hosts. They never accept a URL scheme, path, credentials or control characters; IPv6 is rendered with URL-safe brackets. Node application targets remain backend-assigned loopback ports, while an explicitly selected external-proxy Website may point to a remote origin.
 
-## Reparent and remaining move/delete rule
+## Reparent and guarded move/delete impact
 
 `POST /api/domains/:domainId/reparent-preview` accepts one explicit `parentDomainId` (or `null` for a root). It validates the exact selected parent, same-server ownership, dot-boundary ancestry and cycles against the current hierarchy; it never derives a parent by trimming hostname labels. The SHA-256 preview digest covers the complete canonical hierarchy snapshot and reports descendants plus Website/certificate references without changing state.
 
 `POST /api/domains/:domainId/reparent` requires that digest and the exact typed confirmation returned by preview. Any hierarchy, Website binding, certificate or desired-revision drift invalidates it before mutation. Reparent is hierarchy-only: it preserves hostname/aliases, Website binding, target, certificate, Nginx stage/apply state and traffic revisions. Read Only cannot call either POST route, and both actions enter common management audit without request bodies or digests.
 
-Future move/delete operations require a broader backend impact preview covering at least child domains, Website/application bindings, certificates, mail resources, backups and later cron/Docker dependencies. Default behavior must fail closed when dependent resources would be orphaned; hidden cascade deletion is not acceptable.
+The broader Owner-only previews are:
+
+```text
+POST /api/websites/:websiteId/impact-preview
+POST /api/domains/:domainId/impact-preview
+```
+
+Delete accepts exactly `{ "operation": "delete" }`. Move accepts exactly `{ "operation": "move", "targetServerId": "<server-uuid>" }`; the target must exist and differ from the current server. The preview digest covers the selected resource plus relevant child/linked Domains, Website/Application binding, bounded certificate identity and queued/running jobs. It returns a typed confirmation for future guarded apply, but never mutates state.
+
+Mailbox, backup, cron and Docker providers have explicit bounded adapter slots. Until a real association registry exists, each category is returned with `status=unavailable` and a blocker rather than a fabricated empty list. Provider failure or unsafe/duplicate reference metadata fails the whole preview closed. Certificate email/path/private-key metadata, repository URLs, proxy targets, job payloads/results and external provider data are not copied into the preview.
+
+Every current preview returns `applySupported=false`, `safeToApply=false`, `autoApply=false` and an `impact_apply_not_implemented` blocker. There is deliberately no move/delete apply endpoint yet and no hidden cascade. A future apply path must recompute the digest and resolve every dependency or require an explicit resource-scoped choice; the preview API alone is not evidence that deletion or migration occurred.
 
 ## Design status and validation
 

@@ -1,5 +1,6 @@
 import express from 'express';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
+import { createCertificateRegistry } from './certificate-registry.js';
 import { createApp as createCoreApp } from './core-app.js';
 import { DatabaseHttpError, mountDatabaseRoutes } from './database-http.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
@@ -7,6 +8,8 @@ import { createDomainHandler, createDomainReparentHandler, createDomainReparentP
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
+import { ResourceImpactError } from './resource-impact.js';
+import { mountResourceImpactRoutes } from './resource-impact-http.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 import { SiteCreateError } from './site-create.js';
 import { mountSiteCreateRoutes } from './site-create-http.js';
@@ -25,6 +28,7 @@ export { API_VERSION } from './core-app.js';
 export function createApp({
   registry = createServerRegistry(),
   jobRegistry = createJobRegistry(),
+  certificateRegistry = createCertificateRegistry(),
   applicationRegistry = createApplicationRegistry(),
   websiteRegistry = createWebsiteRegistry({
     serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
@@ -40,7 +44,7 @@ export function createApp({
   environment = process.env.NODE_ENV,
   ...options
 } = {}) {
-  const core = createCoreApp({ ...options, registry, domainRegistry, jobRegistry, applicationRegistry, environment });
+  const core = createCoreApp({ ...options, registry, domainRegistry, jobRegistry, certificateRegistry, applicationRegistry, environment });
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
@@ -48,6 +52,14 @@ export function createApp({
   app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry));
   app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry));
   mountSiteCreateRoutes(app, { registry, applicationRegistry, websiteRegistry, domainRegistry });
+  mountResourceImpactRoutes(app, {
+    registry,
+    applicationRegistry,
+    websiteRegistry,
+    domainRegistry,
+    certificateRegistry,
+    jobRegistry,
+  });
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry });
   mountWebsiteMigrationRoutes(app, {
     websiteRegistry,
@@ -68,6 +80,7 @@ export function createApp({
       || error instanceof RegistryError
       || error instanceof JobRegistryError
       || error instanceof ManagedServiceHttpError
+      || error instanceof ResourceImpactError
       || error instanceof SiteCreateError
       || error instanceof WebsiteMigrationBindError
       || error instanceof WebsiteMigrationCreateError
