@@ -14,6 +14,8 @@
     "@yunpanel/protocol": "*",
     "@yunpanel/shared": "*",
     "express": "5.2.1",
-    "otpauth": "9.5.2"
+    "node-pty": "1.1.0",
+    "otpauth": "9.5.2",
+    "ws": "8.21.3"
   }
 }
