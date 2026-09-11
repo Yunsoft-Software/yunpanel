@@ -14,6 +14,7 @@ import { startCertificateRenewalScheduler } from './certificate-renewal-schedule
 import { startConfiguredLocalRuntime } from './configured-local-runtime.js';
 import { createDomainRegistry } from './domain-registry.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
+import { createDockerWorkloadRegistry } from './docker-workload-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
 import { createJobLogStore } from './job-log-store.js';
@@ -37,6 +38,7 @@ const websiteMigrationPolicyStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_P
 const websiteMigrationLedgerStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_LEDGER_STORE ?? path.resolve('.data/website-migration-ledger.json');
 const dnsHostingStorePath = process.env.YUNPANEL_DNS_HOSTING_STORE ?? path.resolve('.data/dns-hosting-registry.json');
 const mailDomainStorePath = process.env.YUNPANEL_MAIL_DOMAIN_STORE ?? path.resolve('.data/mail-domain-registry.json');
+const dockerWorkloadStorePath = process.env.YUNPANEL_DOCKER_WORKLOAD_STORE ?? path.resolve('.data/docker-workload-registry.json');
 const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRONMENT_STORE ?? path.resolve('.data/application-environment-registry.json');
 const authStorePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStorePath), 'auth', 'auth.sqlite');
 const internalProxyToken = process.env.YUNPANEL_INTERNAL_PROXY_TOKEN;
@@ -75,6 +77,11 @@ const applicationRegistry = createApplicationRegistry({
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
 });
 await applicationRegistry.init();
+const dockerWorkloadRegistry = createDockerWorkloadRegistry({
+  filePath: dockerWorkloadStorePath,
+  serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+});
+await dockerWorkloadRegistry.init();
 const websiteRegistry = createWebsiteRegistry({
   filePath: websiteStorePath,
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
@@ -138,6 +145,7 @@ const listener = createAuthenticatedApi({
     migrationLedger,
     dnsHostingRegistry,
     mailDomainRegistry,
+    dockerWorkloadRegistry,
     applicationEnvironmentRegistry,
     journalLogReader,
     nginxLogReader,
@@ -179,6 +187,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] website migration ledger store=${websiteMigrationLedgerStorePath}`);
   console.log(`[yunpanel-api] DNS hosting store=${dnsHostingStorePath}`);
   console.log(`[yunpanel-api] mail Domain store=${mailDomainStorePath}`);
+  console.log(`[yunpanel-api] Docker workload store=${dockerWorkloadStorePath}`);
   console.log(`[yunpanel-api] application environment store=${applicationEnvironmentStorePath}`);
   console.log(`[yunpanel-api] secret store=${applicationEnvironmentRegistry.secretStoreConfigured ? 'configured' : 'not configured'}`);
   console.log(`[yunpanel-api] authentication=${authStore.configured() ? 'configured' : 'local setup required'}`);

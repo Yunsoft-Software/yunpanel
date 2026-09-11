@@ -8,6 +8,8 @@ import { DatabaseHttpError, mountDatabaseRoutes } from './database-http.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
 import { createDomainHandler, createDomainReparentHandler, createDomainReparentPreviewHandler } from './domain-http.js';
+import { mountDockerWorkloadRoutes } from './docker-workload-http.js';
+import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from './docker-workload-registry.js';
 import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
 import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
@@ -55,6 +57,9 @@ export function createApp({
   mailDomainRegistry = createMailDomainRegistry({
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
   }),
+  dockerWorkloadRegistry = createDockerWorkloadRegistry({
+    serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+  }),
   environment = process.env.NODE_ENV,
   journalLogReader = null,
   nginxLogReader = null,
@@ -81,6 +86,7 @@ export function createApp({
     mailDomainRegistry,
   });
   mountExternalLifecycleRoutes(app, { dnsHostingRegistry, mailDomainRegistry });
+  mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry });
   mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry });
   mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry });
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry });
@@ -104,6 +110,7 @@ export function createApp({
       error instanceof DatabaseHttpError
       || error instanceof ApplicationRegistryError
       || error instanceof DomainRegistryError
+      || error instanceof DockerWorkloadRegistryError
       || error instanceof ExternalLifecycleRegistryError
       || error instanceof RegistryError
       || error instanceof JobRegistryError

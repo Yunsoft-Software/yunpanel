@@ -8,6 +8,7 @@ export const READ_ONLY_PERMISSIONS = Object.freeze([
   'certificates.read',
   'dns_zones.read',
   'mail_domains.read',
+  'docker_workloads.read',
 ]);
 
 const READ_ONLY_RULES = Object.freeze([
@@ -18,6 +19,7 @@ const READ_ONLY_RULES = Object.freeze([
   ['certificates.read', /^\/api\/certificates(?:\/[^/%]+)?$/],
   ['dns_zones.read', /^\/api\/dns-zones(?:\/[^/%]+)?$/],
   ['mail_domains.read', /^\/api\/mail-domains(?:\/[^/%]+)?$/],
+  ['docker_workloads.read', /^\/api\/docker\/workloads(?:\/[^/%]+)?$/],
 ]);
 
 export function describePanelAccess(session) {
