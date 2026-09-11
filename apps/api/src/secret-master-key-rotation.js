@@ -3,14 +3,16 @@ import { backup, DatabaseSync } from 'node:sqlite';
 import { chmod, copyFile, lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
+import { rewrapDnsProviderCredentialSnapshot } from './dns-provider-credential-registry.js';
 import { createMfaVault } from './mfa-crypto.js';
 
 const ENV_STORE_VERSIONS = new Set([1, 2]);
 const ENV_ALGORITHM = 'aes-256-gcm';
-const MANIFEST_VERSION = 1;
+const MANIFEST_VERSION = 2;
 const MFA_TABLES = ['auth_mfa', 'auth_mfa_pending'];
 const AUTH_BACKUP_NAME = 'auth.sqlite';
 const ENVIRONMENT_BACKUP_NAME = 'application-environment-registry.json';
+const DNS_PROVIDER_BACKUP_NAME = 'dns-provider-credential-registry.json';
 
 export class SecretMasterKeyRotationError extends Error {
   constructor(code, message) {
@@ -198,6 +200,7 @@ async function restoreFileFromBackup(backupPath, targetPath) {
 export async function rotateSecretMasterKey({
   authDbPath,
   applicationEnvironmentStorePath,
+  dnsProviderCredentialStorePath = null,
   currentMasterKey,
   nextMasterKey,
   backupDirectory,
@@ -208,6 +211,9 @@ export async function rotateSecretMasterKey({
   }
   const authPath = path.resolve(authDbPath);
   const environmentPath = path.resolve(applicationEnvironmentStorePath);
+  const dnsProviderPath = typeof dnsProviderCredentialStorePath === 'string' && dnsProviderCredentialStorePath
+    ? path.resolve(dnsProviderCredentialStorePath)
+    : null;
   const backupPath = path.resolve(backupDirectory);
   const currentKey = rootKey(currentMasterKey, 'Current');
   const nextKey = rootKey(nextMasterKey, 'Next');
@@ -215,23 +221,34 @@ export async function rotateSecretMasterKey({
 
   await fileMetadata(authPath);
   const environmentMetadata = await fileMetadata(environmentPath, { optional: true });
+  const dnsProviderMetadata = dnsProviderPath ? await fileMetadata(dnsProviderPath, { optional: true }) : null;
   await mkdir(backupPath, { mode: 0o700 });
   await chmod(backupPath, 0o700);
 
   const backupAuthPath = path.join(backupPath, AUTH_BACKUP_NAME);
   const backupEnvironmentPath = path.join(backupPath, ENVIRONMENT_BACKUP_NAME);
+  const backupDnsProviderPath = path.join(backupPath, DNS_PROVIDER_BACKUP_NAME);
   const db = new DatabaseSync(authPath);
   db.exec('PRAGMA busy_timeout = 1500; PRAGMA foreign_keys = ON;');
   let transactionOpen = false;
   let environmentReplaced = false;
+  let dnsProviderReplaced = false;
   let manifest = {
     version: MANIFEST_VERSION,
     status: 'preparing',
     createdAt: new Date(now()).toISOString(),
-    sources: { authDbPath: authPath, applicationEnvironmentStorePath: environmentPath },
-    backups: { authDb: AUTH_BACKUP_NAME, applicationEnvironmentStore: environmentMetadata ? ENVIRONMENT_BACKUP_NAME : null },
+    sources: {
+      authDbPath: authPath,
+      applicationEnvironmentStorePath: environmentPath,
+      dnsProviderCredentialStorePath: dnsProviderPath,
+    },
+    backups: {
+      authDb: AUTH_BACKUP_NAME,
+      applicationEnvironmentStore: environmentMetadata ? ENVIRONMENT_BACKUP_NAME : null,
+      dnsProviderCredentialStore: dnsProviderMetadata ? DNS_PROVIDER_BACKUP_NAME : null,
+    },
     backupHashes: {},
-    counts: { mfa: 0, mfaPending: 0, applicationSecrets: 0 },
+    counts: { mfa: 0, mfaPending: 0, applicationSecrets: 0, dnsProviderSecrets: 0 },
   };
 
   try {
@@ -243,6 +260,11 @@ export async function rotateSecretMasterKey({
       await chmod(backupEnvironmentPath, 0o600);
       manifest.backupHashes.applicationEnvironmentStore = await sha256File(backupEnvironmentPath);
     }
+    if (dnsProviderMetadata) {
+      await copyFile(dnsProviderPath, backupDnsProviderPath);
+      await chmod(backupDnsProviderPath, 0o600);
+      manifest.backupHashes.dnsProviderCredentialStore = await sha256File(backupDnsProviderPath);
+    }
 
     const environmentText = environmentMetadata ? await readFile(environmentPath, 'utf8') : null;
     let nextEnvironmentText = null;
@@ -253,6 +275,24 @@ export async function rotateSecretMasterKey({
       const nextSnapshot = rewrapApplicationEnvironmentSnapshot(snapshot, { currentMasterKey: currentKey, nextMasterKey: nextKey });
       manifest.counts.applicationSecrets = snapshot.variables.filter((record) => record?.secret === true).length;
       nextEnvironmentText = `${JSON.stringify(nextSnapshot, null, 2)}\n`;
+    }
+    const dnsProviderText = dnsProviderMetadata ? await readFile(dnsProviderPath, 'utf8') : null;
+    let nextDnsProviderText = null;
+    if (dnsProviderText !== null) {
+      let snapshot;
+      try { snapshot = JSON.parse(dnsProviderText); }
+      catch { throw rotationError('invalid_dns_provider_credential_store', 'DNS provider credential store is not valid JSON'); }
+      let nextSnapshot;
+      try {
+        nextSnapshot = rewrapDnsProviderCredentialSnapshot(snapshot, {
+          currentMasterKey: currentKey,
+          nextMasterKey: nextKey,
+        });
+      } catch {
+        throw rotationError('dns_provider_secret_decryption_failed', 'DNS provider credentials cannot be decrypted with the current key');
+      }
+      manifest.counts.dnsProviderSecrets = snapshot.credentials.length;
+      nextDnsProviderText = `${JSON.stringify(nextSnapshot, null, 2)}\n`;
     }
 
     const activeRows = readMfaRows(db, 'auth_mfa');
@@ -272,6 +312,9 @@ export async function rotateSecretMasterKey({
     if (environmentText !== null && await readFile(environmentPath, 'utf8') !== environmentText) {
       throw rotationError('concurrent_environment_change', 'Application environment state changed after rotation preflight');
     }
+    if (dnsProviderText !== null && await readFile(dnsProviderPath, 'utf8') !== dnsProviderText) {
+      throw rotationError('concurrent_dns_provider_change', 'DNS provider credential state changed after rotation preflight');
+    }
 
     updateMfaRows(db, 'auth_mfa', nextActiveRows);
     updateMfaRows(db, 'auth_mfa_pending', nextPendingRows);
@@ -281,6 +324,10 @@ export async function rotateSecretMasterKey({
     if (nextEnvironmentText !== null) {
       await atomicWrite(environmentPath, nextEnvironmentText);
       environmentReplaced = true;
+    }
+    if (nextDnsProviderText !== null) {
+      await atomicWrite(dnsProviderPath, nextDnsProviderText);
+      dnsProviderReplaced = true;
     }
     db.exec('COMMIT');
     transactionOpen = false;
@@ -296,7 +343,16 @@ export async function rotateSecretMasterKey({
       try { await restoreFileFromBackup(backupEnvironmentPath, environmentPath); environmentReplaced = false; }
       catch { /* Preserve the original error; manifest and backups remain for explicit rollback. */ }
     }
-    manifest = { ...manifest, status: environmentReplaced ? 'rollback_required' : 'failed', failedAt: new Date(now()).toISOString(), error: safeManifestError(error) };
+    if (dnsProviderReplaced && dnsProviderMetadata) {
+      try { await restoreFileFromBackup(backupDnsProviderPath, dnsProviderPath); dnsProviderReplaced = false; }
+      catch { /* Preserve the original error; manifest and backups remain for explicit rollback. */ }
+    }
+    manifest = {
+      ...manifest,
+      status: environmentReplaced || dnsProviderReplaced ? 'rollback_required' : 'failed',
+      failedAt: new Date(now()).toISOString(),
+      error: safeManifestError(error),
+    };
     await writeManifest(backupPath, manifest).catch(() => {});
     throw error;
   } finally {
@@ -304,25 +360,45 @@ export async function rotateSecretMasterKey({
   }
 }
 
-export async function rollbackSecretMasterKey({ authDbPath, applicationEnvironmentStorePath, backupDirectory, now = Date.now } = {}) {
+export async function rollbackSecretMasterKey({
+  authDbPath,
+  applicationEnvironmentStorePath,
+  dnsProviderCredentialStorePath = null,
+  backupDirectory,
+  now = Date.now,
+} = {}) {
   if (![authDbPath, applicationEnvironmentStorePath, backupDirectory].every((value) => typeof value === 'string' && value)) {
     throw rotationError('rotation_paths_required', 'Auth DB, application environment store and backup directory paths are required');
   }
   const authPath = path.resolve(authDbPath);
   const environmentPath = path.resolve(applicationEnvironmentStorePath);
+  const dnsProviderPath = typeof dnsProviderCredentialStorePath === 'string' && dnsProviderCredentialStorePath
+    ? path.resolve(dnsProviderCredentialStorePath)
+    : null;
   const backupPath = path.resolve(backupDirectory);
   const manifestPath = path.join(backupPath, 'manifest.json');
   let manifest;
   try { manifest = JSON.parse(await readFile(manifestPath, 'utf8')); }
   catch { throw rotationError('invalid_rotation_manifest', 'Rotation manifest is missing or invalid'); }
-  if (manifest?.version !== MANIFEST_VERSION || typeof manifest.sources?.authDbPath !== 'string' || typeof manifest.sources?.applicationEnvironmentStorePath !== 'string') {
+  if (![1, MANIFEST_VERSION].includes(manifest?.version) || typeof manifest.sources?.authDbPath !== 'string'
+    || typeof manifest.sources?.applicationEnvironmentStorePath !== 'string') {
     throw rotationError('invalid_rotation_manifest', 'Rotation manifest is unsupported');
   }
   if (path.resolve(manifest.sources.authDbPath) !== authPath || path.resolve(manifest.sources.applicationEnvironmentStorePath) !== environmentPath) {
     throw rotationError('rotation_target_mismatch', 'Rotation manifest does not belong to the requested store paths');
   }
+  if (manifest.version === MANIFEST_VERSION
+    && (manifest.sources.dnsProviderCredentialStorePath === null
+      ? dnsProviderPath !== null
+      : !dnsProviderPath || path.resolve(manifest.sources.dnsProviderCredentialStorePath) !== dnsProviderPath)) {
+    throw rotationError('rotation_target_mismatch', 'Rotation manifest does not belong to the requested DNS provider store path');
+  }
   if (manifest.backups?.authDb !== AUTH_BACKUP_NAME || ![null, ENVIRONMENT_BACKUP_NAME].includes(manifest.backups?.applicationEnvironmentStore)) {
     throw rotationError('invalid_rotation_manifest', 'Rotation manifest contains unsupported backup paths');
+  }
+  if (manifest.version === MANIFEST_VERSION
+    && ![null, DNS_PROVIDER_BACKUP_NAME].includes(manifest.backups?.dnsProviderCredentialStore)) {
+    throw rotationError('invalid_rotation_manifest', 'Rotation manifest contains an unsupported DNS provider backup path');
   }
 
   const backupAuthPath = path.join(backupPath, AUTH_BACKUP_NAME);
@@ -330,6 +406,15 @@ export async function rollbackSecretMasterKey({ authDbPath, applicationEnvironme
     throw rotationError('rotation_backup_tampered', 'Auth database backup does not match the rotation manifest');
   }
   await fileMetadata(backupAuthPath);
+
+  let backupDnsProviderPath = null;
+  if (manifest.version === MANIFEST_VERSION && manifest.backups.dnsProviderCredentialStore === DNS_PROVIDER_BACKUP_NAME) {
+    backupDnsProviderPath = path.join(backupPath, DNS_PROVIDER_BACKUP_NAME);
+    if (await sha256File(backupDnsProviderPath) !== manifest.backupHashes?.dnsProviderCredentialStore) {
+      throw rotationError('rotation_backup_tampered', 'DNS provider credential backup does not match the rotation manifest');
+    }
+    await fileMetadata(backupDnsProviderPath);
+  }
 
   if (manifest.backups.applicationEnvironmentStore === ENVIRONMENT_BACKUP_NAME) {
     const backupEnvironmentPath = path.join(backupPath, ENVIRONMENT_BACKUP_NAME);
@@ -342,6 +427,12 @@ export async function rollbackSecretMasterKey({ authDbPath, applicationEnvironme
     // If the store did not exist before rotation, remove any post-rotation copy so the
     // restored old root key cannot encounter data created under the new root key.
     await rm(environmentPath, { force: true });
+  }
+
+  if (backupDnsProviderPath) {
+    await restoreFileFromBackup(backupDnsProviderPath, dnsProviderPath);
+  } else if (manifest.version === MANIFEST_VERSION && dnsProviderPath) {
+    await rm(dnsProviderPath, { force: true });
   }
 
   // The service must be stopped. Removing sidecar WAL/SHM files prevents pages from the

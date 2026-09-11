@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import test from 'node:test';
 import { createApp } from '../src/app.js';
 import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
+import { createDnsProviderCredentialRegistry } from '../src/dns-provider-credential-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
@@ -37,8 +39,14 @@ async function fixture() {
   });
   const getWebDomain = async (id) => domainRegistry.getDomain(id);
   const dnsHostingRegistry = createDnsHostingRegistry({ getWebDomain });
+  const dnsProviderCredentialRegistry = createDnsProviderCredentialRegistry({
+    masterKey: randomBytes(32),
+    getDnsZone: async (id) => dnsHostingRegistry.getZone(id),
+  });
   const mailDomainRegistry = createMailDomainRegistry({ getWebDomain });
-  return { registry, websiteRegistry, domainRegistry, dnsHostingRegistry, mailDomainRegistry, domain };
+  return {
+    registry, websiteRegistry, domainRegistry, dnsHostingRegistry, dnsProviderCredentialRegistry, mailDomainRegistry, domain,
+  };
 }
 
 function request(baseUrl, pathname, { method = 'GET', body } = {}) {
@@ -62,6 +70,25 @@ test('Owner explicitly tracks separate DNS and mail lifecycles without publishin
     assert.equal(dnsPayload.data.zoneName, 'separate.example.test');
     assert.equal(dnsPayload.data.status, 'unverified');
     assert.deepEqual(dnsPayload.sideEffects, { dnsPublished: false });
+
+    const providerToken = 'cloudflare_token_private_http_123456';
+    const credentialResponse = await request(baseUrl, `/api/dns-zones/${dnsPayload.data.id}/provider-credential`, {
+      method: 'PUT',
+      body: {
+        provider: 'cloudflare',
+        token: providerToken,
+        confirmation: `configure-dns-provider:${dnsPayload.data.id}:cloudflare`,
+      },
+    });
+    assert.equal(credentialResponse.status, 200);
+    const credential = (await credentialResponse.json()).data;
+    assert.equal(credential.provider, 'cloudflare');
+    assert.equal('token' in credential, false);
+    assert.doesNotMatch(JSON.stringify(credential), new RegExp(providerToken));
+    assert.equal((await state.dnsProviderCredentialRegistry.materialize(credential.id)).token, providerToken);
+    const credentialRead = await request(baseUrl, `/api/dns-zones/${dnsPayload.data.id}/provider-credential`);
+    assert.equal(credentialRead.status, 200);
+    assert.equal((await credentialRead.json()).data.id, credential.id);
 
     const mailResponse = await request(baseUrl, '/api/mail-domains', { method: 'POST', body: input });
     assert.equal(mailResponse.status, 201);
@@ -91,10 +118,18 @@ test('Read Only may inspect lifecycle inventory but cannot create it', async () 
     assert.equal(list.status, 200);
     assert.equal((await list.json()).data[0].id, zone.id);
     assert.equal((await request(baseUrl, `/api/dns-zones/${zone.id}`)).status, 200);
+    assert.equal((await request(baseUrl, `/api/dns-zones/${zone.id}/provider-credential`)).status, 403);
     assert.equal((await request(baseUrl, '/api/mail-domains')).status, 200);
     assert.equal((await request(baseUrl, '/api/mail-domains', {
       method: 'POST',
       body: { name: state.domain.primaryDomain, webDomainId: state.domain.id, managementMode: 'external' },
+    })).status, 403);
+    assert.equal((await request(baseUrl, `/api/dns-zones/${zone.id}/provider-credential`, {
+      method: 'PUT',
+      body: {
+        provider: 'cloudflare', token: 'cloudflare_token_private_http_123456',
+        confirmation: `configure-dns-provider:${zone.id}:cloudflare`,
+      },
     })).status, 403);
   });
 });

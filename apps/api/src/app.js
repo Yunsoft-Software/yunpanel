@@ -8,6 +8,10 @@ import { mountCertificateRoutes } from './certificate-http.js';
 import { createApp as createCoreApp } from './core-app.js';
 import { DatabaseHttpError, mountDatabaseRoutes } from './database-http.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
+import {
+  createDnsProviderCredentialRegistry,
+  DnsProviderCredentialRegistryError,
+} from './dns-provider-credential-registry.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
 import {
   createDomainHandler,
@@ -72,6 +76,9 @@ export function createApp({
   dnsHostingRegistry = createDnsHostingRegistry({
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
   }),
+  dnsProviderCredentialRegistry = createDnsProviderCredentialRegistry({
+    getDnsZone: async (dnsZoneId) => dnsHostingRegistry.getZone(dnsZoneId),
+  }),
   mailDomainRegistry = createMailDomainRegistry({
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
   }),
@@ -131,7 +138,7 @@ export function createApp({
       },
     },
   });
-  mountExternalLifecycleRoutes(app, { dnsHostingRegistry, mailDomainRegistry });
+  mountExternalLifecycleRoutes(app, { dnsHostingRegistry, dnsProviderCredentialRegistry, mailDomainRegistry });
   mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry });
   mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry });
   mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry });
@@ -162,6 +169,7 @@ export function createApp({
       || error instanceof ApplicationRegistryError
       || error instanceof DomainRegistryError
       || error instanceof DockerWorkloadRegistryError
+      || error instanceof DnsProviderCredentialRegistryError
       || error instanceof ExternalLifecycleRegistryError
       || error instanceof RegistryError
       || error instanceof JobRegistryError

@@ -46,6 +46,8 @@ test('current management mutation routes map to bounded action and resource iden
     ['POST', '/api/domains/domain-1/certificates/certificate-1/select-preview', 'certificate.select.preview', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/certificates/certificate-1/select', 'certificate.select', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/certificates/issue', 'certificate.issue', 'domain', 'domain-1'],
+    ['PUT', '/api/dns-zones/zone-1/provider-credential', 'dns.provider.configure', 'dns_zone', 'zone-1'],
+    ['DELETE', '/api/dns-zones/zone-1/provider-credential', 'dns.provider.delete', 'dns_zone', 'zone-1'],
     ['POST', '/api/certificates/cert-1/renew', 'certificate.renew', 'certificate', 'cert-1'],
     ['POST', '/api/jobs/job-1/cancel', 'job.cancel', 'job', 'job-1'],
     ['POST', '/api/servers/server-1/system/packages/inspect', 'system.packages.inspect', 'server', 'server-1'],

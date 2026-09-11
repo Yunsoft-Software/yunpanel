@@ -16,6 +16,7 @@ import { startCertificateRenewalScheduler } from './certificate-renewal-schedule
 import { startConfiguredLocalRuntime } from './configured-local-runtime.js';
 import { createDomainRegistry } from './domain-registry.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
+import { createDnsProviderCredentialRegistry } from './dns-provider-credential-registry.js';
 import { createDockerWorkloadRegistry } from './docker-workload-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
@@ -45,6 +46,7 @@ const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.da
 const websiteMigrationPolicyStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE ?? path.resolve('.data/website-migration-policy.json');
 const websiteMigrationLedgerStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_LEDGER_STORE ?? path.resolve('.data/website-migration-ledger.json');
 const dnsHostingStorePath = process.env.YUNPANEL_DNS_HOSTING_STORE ?? path.resolve('.data/dns-hosting-registry.json');
+const dnsProviderCredentialStorePath = process.env.YUNPANEL_DNS_CREDENTIAL_STORE ?? path.resolve('.data/dns-provider-credential-registry.json');
 const mailDomainStorePath = process.env.YUNPANEL_MAIL_DOMAIN_STORE ?? path.resolve('.data/mail-domain-registry.json');
 const dockerWorkloadStorePath = process.env.YUNPANEL_DOCKER_WORKLOAD_STORE ?? path.resolve('.data/docker-workload-registry.json');
 const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRONMENT_STORE ?? path.resolve('.data/application-environment-registry.json');
@@ -115,6 +117,12 @@ const dnsHostingRegistry = createDnsHostingRegistry({
   getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
 });
 await dnsHostingRegistry.init();
+const dnsProviderCredentialRegistry = createDnsProviderCredentialRegistry({
+  filePath: dnsProviderCredentialStorePath,
+  masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY,
+  getDnsZone: async (dnsZoneId) => dnsHostingRegistry.getZone(dnsZoneId),
+});
+await dnsProviderCredentialRegistry.init();
 const mailDomainRegistry = createMailDomainRegistry({
   filePath: mailDomainStorePath,
   getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
@@ -169,6 +177,7 @@ const listener = createAuthenticatedApi({
     websiteMigrationPolicy,
     migrationLedger,
     dnsHostingRegistry,
+    dnsProviderCredentialRegistry,
     mailDomainRegistry,
     dockerWorkloadRegistry,
     applicationEnvironmentRegistry,
@@ -227,6 +236,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] website migration policy store=${websiteMigrationPolicyStorePath}`);
   console.log(`[yunpanel-api] website migration ledger store=${websiteMigrationLedgerStorePath}`);
   console.log(`[yunpanel-api] DNS hosting store=${dnsHostingStorePath}`);
+  console.log(`[yunpanel-api] DNS credential store=${dnsProviderCredentialStorePath}`);
   console.log(`[yunpanel-api] mail Domain store=${mailDomainStorePath}`);
   console.log(`[yunpanel-api] Docker workload store=${dockerWorkloadStorePath}`);
   console.log(`[yunpanel-api] application environment store=${applicationEnvironmentStorePath}`);

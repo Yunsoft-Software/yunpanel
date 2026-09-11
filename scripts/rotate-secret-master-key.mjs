@@ -88,6 +88,7 @@ function storePaths() {
   return {
     authDbPath: path.resolve(process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStore), 'auth', 'auth.sqlite')),
     applicationEnvironmentStorePath: path.resolve(process.env.YUNPANEL_APPLICATION_ENVIRONMENT_STORE ?? '.data/application-environment-registry.json'),
+    dnsProviderCredentialStorePath: path.resolve(process.env.YUNPANEL_DNS_CREDENTIAL_STORE ?? '.data/dns-provider-credential-registry.json'),
   };
 }
 
@@ -106,7 +107,7 @@ try {
     if (options.has('--new-key-file') || options.has('--current-key-file') || options.has('--current-env-file')) throw new Error(usage());
     const result = await rollbackSecretMasterKey({ ...paths, backupDirectory });
     console.log(`Master-key data rollback complete. Backup: ${path.resolve(backupDirectory)}`);
-    console.log(`Restored ${result.counts?.mfa ?? 0} active MFA, ${result.counts?.mfaPending ?? 0} pending MFA and ${result.counts?.applicationSecrets ?? 0} application secret record(s).`);
+    console.log(`Restored ${result.counts?.mfa ?? 0} active MFA, ${result.counts?.mfaPending ?? 0} pending MFA, ${result.counts?.applicationSecrets ?? 0} application secret and ${result.counts?.dnsProviderSecrets ?? 0} DNS provider secret record(s).`);
     console.log('Restore the PREVIOUS YUNPANEL_SECRET_MASTER_KEY in the API environment before starting yunpanel-api.service.');
   } else {
     const newKeyFile = options.get('--new-key-file');
@@ -126,7 +127,7 @@ try {
       backupDirectory,
     });
     console.log(`Master-key data rotation complete. Backup: ${path.resolve(backupDirectory)}`);
-    console.log(`Rotated ${result.counts.mfa} active MFA, ${result.counts.mfaPending} pending MFA and ${result.counts.applicationSecrets} application secret record(s).`);
+    console.log(`Rotated ${result.counts.mfa} active MFA, ${result.counts.mfaPending} pending MFA, ${result.counts.applicationSecrets} application secret and ${result.counts.dnsProviderSecrets} DNS provider secret record(s).`);
     console.log(`Next key ${next.created ? 'created' : 'read'} at ${next.path}; its contents were not printed.`);
     console.log('Replace YUNPANEL_SECRET_MASTER_KEY in /etc/yunpanel/control-plane/api.env with that key, then start yunpanel-api.service and validate MFA + application secrets.');
     console.log(`If validation fails: stop the API, restore the previous key configuration, then run rollback with --backup-dir ${path.resolve(backupDirectory)}.`);

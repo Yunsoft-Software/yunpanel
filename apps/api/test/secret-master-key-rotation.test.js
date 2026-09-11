@@ -6,16 +6,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
+import { createDnsProviderCredentialRegistry } from '../src/dns-provider-credential-registry.js';
 import { createMfaVault } from '../src/mfa-crypto.js';
 import { rollbackSecretMasterKey, rotateSecretMasterKey } from '../src/secret-master-key-rotation.js';
 
 const APPLICATION_ID = '11111111-1111-4111-8111-111111111111';
+const DNS_ZONE_ID = '22222222-2222-4222-8222-222222222222';
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-key-rotation-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const authDbPath = path.join(directory, 'auth.sqlite');
   const applicationEnvironmentStorePath = path.join(directory, 'application-environment-registry.json');
+  const dnsProviderCredentialStorePath = path.join(directory, 'dns-provider-credential-registry.json');
   const currentMasterKey = randomBytes(32);
   const nextMasterKey = randomBytes(32);
   const oldVault = createMfaVault(currentMasterKey);
@@ -41,7 +44,24 @@ async function fixture(t) {
     applicationId: APPLICATION_ID,
     credential: { type: 'github_token', token: 'github_pat_rotation_private_value' },
   });
-  return { directory, authDbPath, applicationEnvironmentStorePath, currentMasterKey, nextMasterKey };
+  const dnsProvider = createDnsProviderCredentialRegistry({
+    filePath: dnsProviderCredentialStorePath,
+    masterKey: currentMasterKey,
+    getDnsZone: async (id) => id === DNS_ZONE_ID ? { id, zoneName: 'example.com' } : null,
+  });
+  await dnsProvider.setCredential({
+    dnsZoneId: DNS_ZONE_ID,
+    provider: 'cloudflare',
+    token: 'cloudflare_rotation_private_token_1234',
+  });
+  return {
+    directory,
+    authDbPath,
+    applicationEnvironmentStorePath,
+    dnsProviderCredentialStorePath,
+    currentMasterKey,
+    nextMasterKey,
+  };
 }
 
 function readMfa(authDbPath) {
@@ -75,10 +95,22 @@ async function materializeCredential(applicationEnvironmentStorePath, masterKey)
   return registry.materializeDeploymentCredential(APPLICATION_ID);
 }
 
+async function materializeDnsCredential(dnsProviderCredentialStorePath, masterKey) {
+  const registry = createDnsProviderCredentialRegistry({
+    filePath: dnsProviderCredentialStorePath,
+    masterKey,
+    getDnsZone: async (id) => id === DNS_ZONE_ID ? { id, zoneName: 'example.com' } : null,
+  });
+  await registry.init();
+  const metadata = await registry.getForZone(DNS_ZONE_ID);
+  return registry.materialize(metadata.id);
+}
+
 function rollbackOptions(state, backupDirectory, now) {
   return {
     authDbPath: state.authDbPath,
     applicationEnvironmentStorePath: state.applicationEnvironmentStorePath,
+    dnsProviderCredentialStorePath: state.dnsProviderCredentialStorePath,
     backupDirectory,
     ...(now ? { now } : {}),
   };
@@ -89,9 +121,12 @@ test('rotation rewraps application and MFA secrets together and rollback restore
   const backupDirectory = path.join(state.directory, 'backup');
   const manifest = await rotateSecretMasterKey({ ...state, backupDirectory, now: () => 1_800_000_000_000 });
   assert.equal(manifest.status, 'applied');
-  assert.deepEqual(manifest.counts, { mfa: 1, mfaPending: 1, applicationSecrets: 2 });
+  assert.deepEqual(manifest.counts, {
+    mfa: 1, mfaPending: 1, applicationSecrets: 2, dnsProviderSecrets: 1,
+  });
   assert.match(manifest.backupHashes.authDb, /^[a-f0-9]{64}$/);
   assert.match(manifest.backupHashes.applicationEnvironmentStore, /^[a-f0-9]{64}$/);
+  assert.match(manifest.backupHashes.dnsProviderCredentialStore, /^[a-f0-9]{64}$/);
 
   const rotated = readMfa(state.authDbPath);
   const nextVault = createMfaVault(state.nextMasterKey);
@@ -105,7 +140,10 @@ test('rotation rewraps application and MFA secrets together and rollback restore
   assert.deepEqual(await materializeCredential(state.applicationEnvironmentStorePath, state.nextMasterKey), {
     type: 'github_token', token: 'github_pat_rotation_private_value',
   });
+  assert.equal((await materializeDnsCredential(state.dnsProviderCredentialStorePath, state.nextMasterKey)).token,
+    'cloudflare_rotation_private_token_1234');
   await assert.rejects(() => materialize(state.applicationEnvironmentStorePath, state.currentMasterKey), { code: 'secret_decryption_failed' });
+  await assert.rejects(() => materializeDnsCredential(state.dnsProviderCredentialStorePath, state.currentMasterKey), { code: 'secret_decryption_failed' });
 
   const rolledBack = await rollbackSecretMasterKey(rollbackOptions(state, backupDirectory, () => 1_800_000_100_000));
   assert.equal(rolledBack.status, 'rolled_back');
@@ -117,6 +155,8 @@ test('rotation rewraps application and MFA secrets together and rollback restore
   assert.deepEqual(await materializeCredential(state.applicationEnvironmentStorePath, state.currentMasterKey), {
     type: 'github_token', token: 'github_pat_rotation_private_value',
   });
+  assert.equal((await materializeDnsCredential(state.dnsProviderCredentialStorePath, state.currentMasterKey)).token,
+    'cloudflare_rotation_private_token_1234');
 });
 
 test('wrong current key fails before replacing either live store', async (t) => {
