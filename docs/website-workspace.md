@@ -30,6 +30,8 @@ Owner-only server runtime routes are `GET /api/servers/:serverId/node-runtimes`,
 
 `POST /api/applications/:applicationId/deploy` accepts only an optional `gitTarget` object with `kind` `branch`, `tag` or `commit` and its bounded `value`; omission retains the configured branch behavior. Commit targets require a full 40-character SHA and the host rejects any different resolved commit. Branch/tag/commit fetch, detached checkout, dependency install and build execute as the deterministic `yunapp-*` site user. Release history retains the requested target and resolved commit separately.
 
+Owner-only `GET|PUT|DELETE /api/applications/:applicationId/deployment-credential` manages masked credential metadata, a GitHub token, or an unencrypted SSH deploy key; delete requires `delete-deployment-credential:<application-id>`. The value shares the AES-256-GCM master-key store but is excluded from normal Application environment reads/materialization. The retained legacy agent may fetch it only for an exact same-server Application. Neither deploy job payload/result nor recovery/audit metadata contains credential material.
+
 An application-backed Website owns stable Website UUID, server/application IDs, runtime type, canonical managed document root and deterministic `yunapp-*` Unix user. A proxy Website is a real resource without an invented application/document root/Unix user and may own one canonical host/port/WebSocket target. Website records carry a positive revision; persisted v1 state is validated and migrated once to v2 with revision `1` and no invented proxy target.
 
 The Website ID is not a domain ID. Backend relationships use explicit foreign keys rather than permanent server/port/root heuristics.

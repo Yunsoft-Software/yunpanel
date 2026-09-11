@@ -58,15 +58,62 @@ test('secret writes fail closed when no master key is configured', async () => {
     registry.setVariable({ applicationId: APPLICATION_ID, key: 'API_TOKEN', value: 'secret', secret: true }),
     (error) => error instanceof ApplicationEnvironmentRegistryError && error.code === 'secret_store_unavailable',
   );
+  await assert.rejects(
+    registry.setDeploymentCredential({
+      applicationId: APPLICATION_ID,
+      credential: { type: 'github_token', token: 'github_pat_private_missing_key' },
+    }),
+    (error) => error instanceof ApplicationEnvironmentRegistryError && error.code === 'secret_store_unavailable',
+  );
+  assert.equal((await registry.deploymentCredential(APPLICATION_ID)).configured, false);
 
   const plain = await registry.setVariable({ applicationId: APPLICATION_ID, key: 'PUBLIC_URL', value: 'https://example.test', secret: false });
   assert.equal(plain.value, 'https://example.test');
+});
+
+test('Git credentials share encrypted storage but never enter application environment materialization', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-git-credential-'));
+  const filePath = path.join(directory, 'environment.json');
+  const token = 'github_pat_private_registry_value';
+  try {
+    const registry = createRegistry({ filePath });
+    const saved = await registry.setDeploymentCredential({
+      applicationId: APPLICATION_ID,
+      credential: { type: 'github_token', token },
+    });
+    assert.deepEqual({ configured: saved.configured, type: saved.type }, { configured: true, type: 'github_token' });
+    assert.equal(JSON.stringify(saved).includes(token), false);
+    assert.deepEqual(await registry.materializeDeploymentCredential(APPLICATION_ID), { type: 'github_token', token });
+    assert.deepEqual(await registry.materialize(APPLICATION_ID), {});
+    assert.deepEqual(await registry.listVariables(APPLICATION_ID), []);
+    const persisted = await readFile(filePath, 'utf8');
+    assert.equal(persisted.includes(token), false);
+    assert.match(persisted, /YUNPANEL_GIT_CREDENTIAL/);
+
+    const privateKey = `-----BEGIN OPENSSH PRIVATE KEY-----\n${'A'.repeat(96)}\n-----END OPENSSH PRIVATE KEY-----\n`;
+    const replaced = await registry.setDeploymentCredential({
+      applicationId: APPLICATION_ID,
+      credential: { type: 'ssh_deploy_key', privateKey },
+    });
+    assert.equal(replaced.type, 'ssh_deploy_key');
+    assert.deepEqual(await registry.materializeDeploymentCredential(APPLICATION_ID), { type: 'ssh_deploy_key', privateKey });
+    await registry.deleteDeploymentCredential(APPLICATION_ID);
+    assert.deepEqual(await registry.deploymentCredential(APPLICATION_ID), {
+      configured: false, type: null, createdAt: null, updatedAt: null,
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('reserved environment variables cannot override YunPanel runtime state', async () => {
   const registry = createRegistry();
   await assert.rejects(
     registry.setVariable({ applicationId: APPLICATION_ID, key: 'PORT', value: '9999', secret: false }),
+    (error) => error instanceof ApplicationEnvironmentRegistryError && error.code === 'reserved_environment_key',
+  );
+  await assert.rejects(
+    registry.setVariable({ applicationId: APPLICATION_ID, key: 'YUNPANEL_GIT_CREDENTIAL', value: 'leak', secret: false }),
     (error) => error instanceof ApplicationEnvironmentRegistryError && error.code === 'reserved_environment_key',
   );
 });

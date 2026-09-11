@@ -2,6 +2,7 @@ const messages = Object.freeze({
   operation_unavailable: 'The requested legacy host operation is not available.',
   invalid_command_envelope: 'The control plane returned an invalid command envelope.',
   invalid_environment_bundle: 'The application environment bundle is invalid.',
+  invalid_git_credential: 'The Git deployment credential is invalid.',
   application_not_found: 'The application required by this host operation was not found.',
   server_not_found: 'The managed server identity was not found.',
   invalid_agent_credentials: 'Legacy agent credentials were rejected.',

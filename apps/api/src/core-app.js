@@ -145,6 +145,14 @@ export function createApp({
     }
     return response.json({ data: await applicationEnvironmentRegistry.materialize(application.id) });
   });
+  app.get('/api/servers/:serverId/applications/:applicationId/deployment-credential', async (request, response) => {
+    await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application || application.serverId !== request.params.serverId || !['static', 'node'].includes(application.type)) {
+      throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    }
+    return response.json({ data: await applicationEnvironmentRegistry.materializeDeploymentCredential(application.id) });
+  });
   app.post('/api/servers/:serverId/commands/:jobId/result', async (request, response) => {
     const jobId = request.params.jobId;
     const reconciliation = (async () => {
@@ -181,6 +189,33 @@ export function createApp({
       data: await applicationEnvironmentRegistry.listVariables(application.id),
       secretStoreConfigured: applicationEnvironmentRegistry.secretStoreConfigured,
     });
+  });
+  app.get('/api/applications/:applicationId/deployment-credential', requirePanelRouteAccess, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    return response.json({
+      data: await applicationEnvironmentRegistry.deploymentCredential(application.id),
+      secretStoreConfigured: applicationEnvironmentRegistry.secretStoreConfigured,
+    });
+  });
+  app.put('/api/applications/:applicationId/deployment-credential', requirePanelRouteAccess, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    return response.json({ data: await applicationEnvironmentRegistry.setDeploymentCredential({
+      applicationId: application.id,
+      credential: request.body,
+    }) });
+  });
+  app.delete('/api/applications/:applicationId/deployment-credential', requirePanelRouteAccess, async (request, response) => {
+    const application = await applicationRegistry.getApplication(request.params.applicationId);
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const confirmation = `delete-deployment-credential:${application.id}`;
+    if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)
+      || Object.keys(request.body).length !== 1 || request.body.confirmation !== confirmation) {
+      throw new ApplicationEnvironmentRegistryError('git_credential_confirmation_required', `Confirm credential deletion with ${confirmation}`);
+    }
+    await applicationEnvironmentRegistry.deleteDeploymentCredential(application.id);
+    return response.status(204).end();
   });
   app.put('/api/applications/:applicationId/environment/:key', requirePanelRouteAccess, async (request, response) => {
     const application = await applicationRegistry.getApplication(request.params.applicationId);

@@ -15,6 +15,7 @@ import {
   createSystemPackageManager,
 } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { normalizeGitDeploymentCredential } from '@yunpanel/shared';
 
 export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
@@ -65,9 +66,13 @@ export function createLocalHostOperations({
   nodeRuntimeManager = createNodeRuntimeManager(),
   nodeStatusInspector = createNodeStatusInspector(),
   loadApplicationEnvironment = null,
+  loadDeploymentCredential = null,
 } = {}) {
   if (loadApplicationEnvironment !== null && typeof loadApplicationEnvironment !== 'function') {
     throw new Error('loadApplicationEnvironment must be a function when configured');
+  }
+  if (loadDeploymentCredential !== null && typeof loadDeploymentCredential !== 'function') {
+    throw new Error('loadDeploymentCredential must be a function when configured');
   }
   if (!staticDeploymentReceiptStore || typeof staticDeploymentReceiptStore.write !== 'function') {
     throw new Error('staticDeploymentReceiptStore must provide write()');
@@ -83,8 +88,19 @@ export function createLocalHostOperations({
     return execute({ ...payload, environment });
   }
 
+  async function credentialFor(applicationId) {
+    if (!loadDeploymentCredential) return null;
+    try { return normalizeGitDeploymentCredential(await loadDeploymentCredential(applicationId)); }
+    catch {
+      const error = new Error('Deployment credential provider returned an invalid credential');
+      error.code = 'invalid_git_credential';
+      throw error;
+    }
+  }
+
   async function deployStaticWithReceipt(payload) {
-    const result = await staticDeploymentManager.deployStatic(payload);
+    const gitCredential = await credentialFor(payload.applicationId);
+    const result = await staticDeploymentManager.deployStatic(payload, { gitCredential });
     try {
       await staticDeploymentReceiptStore.write({
         applicationId: payload.applicationId,
@@ -121,7 +137,9 @@ export function createLocalHostOperations({
   ]);
 
   if (loadApplicationEnvironment) {
-    handlers.set(OPERATIONS.APP_NODE_DEPLOY, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeDeploymentManager.deployNode(hydrated)));
+    handlers.set(OPERATIONS.APP_NODE_DEPLOY, (payload) => withApplicationEnvironment(payload, async (hydrated) => nodeDeploymentManager.deployNode(hydrated, {
+      gitCredential: await credentialFor(payload.applicationId),
+    })));
     handlers.set(OPERATIONS.APP_NODE_ROLLBACK, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRollbackManager.rollbackNode(hydrated)));
     handlers.set(OPERATIONS.APP_NODE_RESTART, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRestartManager.restartNode(hydrated)));
   }

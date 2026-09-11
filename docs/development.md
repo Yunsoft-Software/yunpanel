@@ -72,11 +72,12 @@ Rules:
 - Node enable/disable/start/stop uses the active release runtime snapshot and does not materialize application secrets,
 - Node 22/24 site runtimes install under `/opt/yunpanel/node-runtimes`; site deploy/build/systemd PATH uses the selected major while `/usr/local/bin/node` remains the panel runtime,
 - deploy requests may select an exact branch, tag or full commit SHA; the queued target is bounded metadata and the resolved target is recorded with the release,
+- private GitHub tokens and unencrypted SSH deploy keys use the same encrypted Application secret store but are hidden from application environment list/materialization; token askpass and temporary SSH key material exist only for Git clone/fetch,
 - retained legacy-agent materialization exists only for rollback compatibility while that transport remains installed,
 - secret values are not included in generic deployment/restart/rollback job payloads or result records,
 - managed runtime keys `NODE_ENV`, `HOST`, `PORT` and `YUNPANEL_APPLICATION_ID` cannot be overridden by application environment input.
 
-The default application environment registry file is `.data/application-environment-registry.json`. Override it with `YUNPANEL_APPLICATION_ENVIRONMENT_STORE` when required. The state file is mode `0600`; secret records contain ciphertext, IV and authentication tag rather than plaintext values.
+The default application environment registry file is `.data/application-environment-registry.json`. Override it with `YUNPANEL_APPLICATION_ENVIRONMENT_STORE` when required. The state file is mode `0600`; application environment secrets and internal deployment credentials contain ciphertext, IV and authentication tag rather than plaintext values. Deployment credentials are reserved internal records and never enter the hosted process environment.
 
 Managed Node applications receive their effective environment in:
 

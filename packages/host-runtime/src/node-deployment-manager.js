@@ -9,7 +9,7 @@ import {
   renderNodeSystemdUnit,
 } from '@yunpanel/config-templates';
 import { normalizeNodeApplicationSpec } from '@yunpanel/shared';
-import { gitFetchArguments, resolvedGitCommit } from './git-deployment.js';
+import { gitAuthenticationPlan, gitFetchArguments, resolvedGitCommit } from './git-deployment.js';
 import { createNodeEnvironmentWriter, NodeEnvironmentWriteError } from './node-environment-writer.js';
 
 const execFileAsync = promisify(execFile);
@@ -21,6 +21,7 @@ const RUNUSER_PATH = '/usr/sbin/runuser';
 const USERADD_PATH = '/usr/sbin/useradd';
 const ID_PATH = '/usr/bin/id';
 const INSTALL_PATH = '/usr/bin/install';
+const CHOWN_PATH = '/usr/bin/chown';
 const SYSTEMCTL_PATHS = Object.freeze(['/usr/bin/systemctl', '/bin/systemctl']);
 const NODE_PATHS = Object.freeze(['/usr/bin/node']);
 const MANAGED_NODE_ROOT = '/opt/yunpanel/node-runtimes';
@@ -160,7 +161,7 @@ export function createNodeDeploymentManager({
   async function runAsUser(user, home, runtimeBin, file, args, options = {}) {
     return runSafe(RUNUSER_PATH, ['-u', user, '--', file, ...args], {
       ...options,
-      env: safeBuildEnvironment(home, runtimeBin),
+      env: { ...safeBuildEnvironment(home, runtimeBin), ...(options.env ?? {}) },
     });
   }
 
@@ -220,7 +221,7 @@ export function createNodeDeploymentManager({
     }
   }
 
-  async function deployUnlocked(rawSpec) {
+  async function deployUnlocked(rawSpec, { gitCredential = null } = {}) {
     let spec;
     try {
       spec = normalizeNodeApplicationSpec(rawSpec);
@@ -236,11 +237,16 @@ export function createNodeDeploymentManager({
     const currentPath = path.join(applicationDirectory, 'current');
     const dataDirectory = path.join(dataRoot, spec.applicationId);
     const unitPath = path.join(systemdRoot, serviceName);
+    const privateKeyPath = path.join(dataDirectory, `.git-key-${spec.deploymentId}`);
+    let gitAuthentication;
+    try { gitAuthentication = gitAuthenticationPlan({ repositoryUrl: spec.repositoryUrl, credential: gitCredential, privateKeyPath }); }
+    catch { throw new NodeDeploymentError('invalid_git_credential', 'Git deployment credential is invalid'); }
     let releaseCreated = false;
     let newReleaseActive = false;
     let previousReleaseId = null;
     let environmentTransaction = null;
     let environmentRestored = false;
+    let privateKeyCreated = false;
 
     const candidates = Array.isArray(nodePaths)
       ? nodePaths
@@ -269,14 +275,19 @@ export function createNodeDeploymentManager({
     releaseCreated = true;
 
     try {
+      if (gitAuthentication.privateKey) {
+        await writeFileFn(privateKeyPath, gitAuthentication.privateKey, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+        privateKeyCreated = true;
+        await runSafe(CHOWN_PATH, [`${user}:${user}`, privateKeyPath], { timeout: 10_000 });
+      }
       await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, ['init', '.'], {
         cwd: releaseDirectory, timeout: 30_000,
       });
-      await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, ['remote', 'add', 'origin', spec.repositoryUrl], {
+      await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, ['remote', 'add', 'origin', gitAuthentication.repositoryUrl], {
         cwd: releaseDirectory, timeout: 30_000,
       });
       await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, gitFetchArguments(spec.gitTarget, { depth: 1 }), {
-        cwd: releaseDirectory, timeout: 5 * 60 * 1000,
+        cwd: releaseDirectory, timeout: 5 * 60 * 1000, env: gitAuthentication.environment,
       });
 
       const revision = await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, ['rev-parse', '--verify', 'FETCH_HEAD^{commit}'], {
@@ -288,6 +299,10 @@ export function createNodeDeploymentManager({
       await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, ['checkout', '--detach', commitSha], {
         cwd: releaseDirectory, timeout: 60_000,
       });
+      if (privateKeyCreated) {
+        await rmFn(privateKeyPath, { force: true });
+        privateKeyCreated = false;
+      }
 
       const requestedDocumentRoot = path.join(releaseDirectory, spec.runtime.documentRoot);
       let documentRoot;
@@ -429,6 +444,7 @@ export function createNodeDeploymentManager({
         healthy: true,
       };
     } catch (error) {
+      if (privateKeyCreated) await rmFn(privateKeyPath, { force: true }).catch(() => {});
       if (environmentTransaction && !environmentRestored) await environmentTransaction.restore().catch(() => {});
       if (!newReleaseActive && releaseCreated) {
         await rmFn(releaseDirectory, { recursive: true, force: true }).catch(() => {});
@@ -438,10 +454,10 @@ export function createNodeDeploymentManager({
     }
   }
 
-  function deployNode(spec) {
+  function deployNode(spec, options = {}) {
     const key = spec?.applicationId ?? 'invalid';
     const previous = deploymentLocks.get(key) ?? Promise.resolve();
-    const runDeployment = previous.catch(() => {}).then(() => deployUnlocked(spec));
+    const runDeployment = previous.catch(() => {}).then(() => deployUnlocked(spec, options));
     let tracked;
     tracked = runDeployment.finally(() => {
       if (deploymentLocks.get(key) === tracked) deploymentLocks.delete(key);

@@ -28,6 +28,7 @@ const messages = Object.freeze({
   deployment_command_failed: 'A static deployment command failed.',
   npm_not_installed: 'npm is not installed on the managed server.',
   invalid_git_revision: 'Git returned an invalid commit revision.',
+  invalid_git_credential: 'The Git deployment credential is invalid.',
   build_output_missing: 'The static build output directory does not exist.',
   build_output_escape: 'The static build output resolved outside the deployment worktree.',
   invalid_build_output: 'The static build output is invalid.',

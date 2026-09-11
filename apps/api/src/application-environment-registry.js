@@ -4,12 +4,14 @@ import path from 'node:path';
 import {
   ApplicationValidationError,
   assertUuid,
+  normalizeGitDeploymentCredential,
   normalizeEnvironmentKey,
   normalizeEnvironmentValue,
 } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
 const ALGORITHM = 'aes-256-gcm';
+const GIT_CREDENTIAL_KEY = 'YUNPANEL_GIT_CREDENTIAL';
 
 export class ApplicationEnvironmentRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -78,6 +80,21 @@ function publicVariable(record) {
     hasValue: true,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+  };
+}
+
+function publicDeploymentCredential(record) {
+  return record ? {
+    applicationId: record.applicationId,
+    configured: true,
+    type: record.credentialType,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  } : {
+    configured: false,
+    type: null,
+    createdAt: null,
+    updatedAt: null,
   };
 }
 
@@ -201,6 +218,86 @@ export function createApplicationEnvironmentRegistry({
     return publicVariable(record);
   }
 
+  async function setDeploymentCredential({ applicationId, credential } = {}) {
+    await ensureInitialized();
+    const normalizedApplicationId = normalizeApplicationId(applicationId);
+    let normalized;
+    try { normalized = normalizeGitDeploymentCredential(credential, { nullable: false }); }
+    catch (error) {
+      if (error instanceof ApplicationValidationError) throw new ApplicationEnvironmentRegistryError(error.code, error.message);
+      throw error;
+    }
+    await ensureApplication(normalizedApplicationId);
+    const encrypted = encryptValue(encryptionKey, normalizedApplicationId, GIT_CREDENTIAL_KEY, JSON.stringify(normalized));
+    const timestamp = new Date(now()).toISOString();
+    let record = state.variables.find((candidate) => candidate.applicationId === normalizedApplicationId
+      && candidate.key === GIT_CREDENTIAL_KEY);
+    if (!record) {
+      record = {
+        applicationId: normalizedApplicationId,
+        key: GIT_CREDENTIAL_KEY,
+        secret: true,
+        value: null,
+        ciphertext: null,
+        iv: null,
+        tag: null,
+        credentialType: normalized.type,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      state.variables.push(record);
+    }
+    record.secret = true;
+    record.value = null;
+    record.ciphertext = encrypted.ciphertext;
+    record.iv = encrypted.iv;
+    record.tag = encrypted.tag;
+    record.credentialType = normalized.type;
+    record.updatedAt = timestamp;
+    await persist();
+    return publicDeploymentCredential(record);
+  }
+
+  async function deploymentCredential(applicationId) {
+    await ensureInitialized();
+    const normalizedApplicationId = normalizeApplicationId(applicationId);
+    await ensureApplication(normalizedApplicationId);
+    const record = state.variables.find((candidate) => candidate.applicationId === normalizedApplicationId
+      && candidate.key === GIT_CREDENTIAL_KEY) ?? null;
+    if (record && !['github_token', 'ssh_deploy_key'].includes(record.credentialType)) {
+      throw new ApplicationEnvironmentRegistryError('git_credential_state_invalid', 'Stored Git deployment credential metadata is invalid', 500);
+    }
+    return publicDeploymentCredential(record);
+  }
+
+  async function materializeDeploymentCredential(applicationId) {
+    await ensureInitialized();
+    const normalizedApplicationId = normalizeApplicationId(applicationId);
+    await ensureApplication(normalizedApplicationId);
+    const record = state.variables.find((candidate) => candidate.applicationId === normalizedApplicationId
+      && candidate.key === GIT_CREDENTIAL_KEY) ?? null;
+    if (!record) return null;
+    try {
+      const value = normalizeGitDeploymentCredential(JSON.parse(decryptValue(encryptionKey, record)), { nullable: false });
+      if (value.type !== record.credentialType) throw new Error('credential type mismatch');
+      return value;
+    } catch (error) {
+      if (error instanceof ApplicationEnvironmentRegistryError) throw error;
+      throw new ApplicationEnvironmentRegistryError('git_credential_decryption_failed', 'Stored Git deployment credential could not be decrypted', 500);
+    }
+  }
+
+  async function deleteDeploymentCredential(applicationId) {
+    await ensureInitialized();
+    const normalizedApplicationId = normalizeApplicationId(applicationId);
+    await ensureApplication(normalizedApplicationId);
+    const index = state.variables.findIndex((candidate) => candidate.applicationId === normalizedApplicationId
+      && candidate.key === GIT_CREDENTIAL_KEY);
+    if (index < 0) throw new ApplicationEnvironmentRegistryError('git_credential_not_found', 'Git deployment credential is not configured', 404);
+    state.variables.splice(index, 1);
+    await persist();
+  }
+
   async function deleteVariable(applicationId, key) {
     await ensureInitialized();
     const normalizedApplicationId = normalizeApplicationId(applicationId);
@@ -223,7 +320,7 @@ export function createApplicationEnvironmentRegistry({
     const normalizedApplicationId = normalizeApplicationId(applicationId);
     await ensureApplication(normalizedApplicationId);
     return state.variables
-      .filter((record) => record.applicationId === normalizedApplicationId)
+      .filter((record) => record.applicationId === normalizedApplicationId && record.key !== GIT_CREDENTIAL_KEY)
       .sort((left, right) => left.key.localeCompare(right.key))
       .map(publicVariable);
   }
@@ -233,7 +330,8 @@ export function createApplicationEnvironmentRegistry({
     const normalizedApplicationId = normalizeApplicationId(applicationId);
     await ensureApplication(normalizedApplicationId);
     const values = {};
-    for (const record of state.variables.filter((candidate) => candidate.applicationId === normalizedApplicationId)) {
+    for (const record of state.variables.filter((candidate) => candidate.applicationId === normalizedApplicationId
+      && candidate.key !== GIT_CREDENTIAL_KEY)) {
       values[record.key] = record.secret ? decryptValue(encryptionKey, record) : record.value;
     }
     return values;
@@ -242,9 +340,15 @@ export function createApplicationEnvironmentRegistry({
   return {
     init,
     setVariable,
+    setDeploymentCredential,
+    deploymentCredential,
+    materializeDeploymentCredential,
+    deleteDeploymentCredential,
     deleteVariable,
     listVariables,
     materialize,
     secretStoreConfigured: Boolean(encryptionKey),
   };
 }
+
+export const applicationEnvironmentRegistryInternals = Object.freeze({ gitCredentialKey: GIT_CREDENTIAL_KEY });

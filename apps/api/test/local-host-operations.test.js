@@ -10,6 +10,7 @@ import {
 function fixture({ withEnvironment = false } = {}) {
   const calls = [];
   const environments = [];
+  const credentials = [];
   const options = {
     packageManager: {
       inspect: async () => { calls.push(['packages.inspect']); return { packageName: 'yunpanel' }; },
@@ -24,13 +25,13 @@ function fixture({ withEnvironment = false } = {}) {
       renewCertificate: async (payload) => { calls.push(['ssl.renew', payload]); return { certName: payload.certName, dryRun: payload.dryRun === true, status: payload.dryRun ? 'validated' : 'renewed' }; },
     },
     staticDeploymentManager: {
-      deployStatic: async (payload) => { calls.push(['static.deploy', payload]); return { deploymentId: payload.deploymentId, releaseId: payload.deploymentId }; },
+      deployStatic: async (payload, execution) => { calls.push(['static.deploy', payload, execution]); return { deploymentId: payload.deploymentId, releaseId: payload.deploymentId }; },
     },
     staticRollbackManager: {
       rollbackStatic: async (payload) => { calls.push(['static.rollback', payload]); return { releaseId: payload.releaseId, previousReleaseId: payload.currentReleaseId, active: true }; },
     },
     nodeDeploymentManager: {
-      deployNode: async (payload) => { calls.push(['node.deploy', payload]); return { releaseId: payload.deploymentId }; },
+      deployNode: async (payload, execution) => { calls.push(['node.deploy', payload, execution]); return { releaseId: payload.deploymentId }; },
     },
     nodeRollbackManager: {
       rollbackNode: async (payload) => { calls.push(['node.rollback', payload]); return { releaseId: payload.releaseId }; },
@@ -54,8 +55,12 @@ function fixture({ withEnvironment = false } = {}) {
       environments.push(applicationId);
       return { PUBLIC_VALUE: 'visible', API_TOKEN: 'secret-value' };
     };
+    options.loadDeploymentCredential = async (applicationId) => {
+      credentials.push(applicationId);
+      return { type: 'github_token', token: 'github_pat_private_test_value' };
+    };
   }
-  return { calls, environments, operations: createLocalHostOperations(options) };
+  return { calls, environments, credentials, operations: createLocalHostOperations(options) };
 }
 
 test('Node mutations stay unsupported when no application environment provider is configured', async () => {
@@ -75,8 +80,8 @@ test('configured environment provider enables all Node mutation operations', () 
   }
 });
 
-test('Node deploy, rollback and restart hydrate environment only for execution', async () => {
-  const { operations, calls, environments } = fixture({ withEnvironment: true });
+test('Node deploy hydrates environment and Git credential only for execution', async () => {
+  const { operations, calls, environments, credentials } = fixture({ withEnvironment: true });
   const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
   const deploymentId = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
   const previousId = 'ff830043-9752-4640-83b4-3a1998de78a0';
@@ -90,12 +95,16 @@ test('Node deploy, rollback and restart hydrate environment only for execution',
   await operations.executeOperation(OPERATIONS.APP_NODE_RESTART, restart);
 
   assert.deepEqual(environments, [applicationId, applicationId, applicationId]);
+  assert.deepEqual(credentials, [applicationId]);
   assert.equal(Object.hasOwn(deploy, 'environment'), false);
   assert.equal(Object.hasOwn(rollback, 'environment'), false);
   assert.equal(Object.hasOwn(restart, 'environment'), false);
   for (const [, hydrated] of calls) {
     assert.deepEqual(hydrated.environment, { PUBLIC_VALUE: 'visible', API_TOKEN: 'secret-value' });
   }
+  assert.deepEqual(calls.find(([name]) => name === 'node.deploy')[2], {
+    gitCredential: { type: 'github_token', token: 'github_pat_private_test_value' },
+  });
 });
 
 test('invalid environment bundles fail before a Node manager executes', async () => {
@@ -111,8 +120,8 @@ test('invalid environment bundles fail before a Node manager executes', async ()
   assert.equal(executions, 0);
 });
 
-test('static lifecycle, Node status and Node process control never request application secrets', async () => {
-  const { operations, calls, environments } = fixture({ withEnvironment: true });
+test('only deploy requests Git credentials while status and process control avoid secrets', async () => {
+  const { operations, calls, environments, credentials } = fixture({ withEnvironment: true });
   const staticPayload = { applicationId: 'static-app', deploymentId: 'release' };
   const statusPayload = { applicationId: 'node-app', releaseId: 'release', runtime: { port: 3100, healthPath: '/health' } };
   const processPayload = { ...statusPayload, action: 'stop' };
@@ -120,7 +129,9 @@ test('static lifecycle, Node status and Node process control never request appli
   await operations.executeOperation(OPERATIONS.APP_NODE_STATUS, statusPayload);
   await operations.executeOperation(OPERATIONS.APP_NODE_PROCESS, processPayload);
   assert.deepEqual(environments, []);
+  assert.deepEqual(credentials, ['static-app']);
   assert.deepEqual(calls.map(([name]) => name), ['static.deploy', 'node.status', 'node.process']);
+  assert.deepEqual(calls[0][2], { gitCredential: { type: 'github_token', token: 'github_pat_private_test_value' } });
 });
 
 test('managed Node runtime inventory and install dispatch outside application secret materialization', async () => {

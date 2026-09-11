@@ -32,9 +32,15 @@ export const operationHandlers = Object.freeze({
   [OPERATIONS.DOMAIN_ACTIVATE]: (payload) => nginxManager.activateDomain(payload),
   [OPERATIONS.SSL_ISSUE]: (payload) => acmeManager.issueCertificate(payload),
   [OPERATIONS.SSL_RENEW]: (payload) => acmeManager.renewCertificate(payload),
-  [OPERATIONS.APP_STATIC_DEPLOY]: (payload) => staticDeploymentManager.deployStatic(payload),
+  [OPERATIONS.APP_STATIC_DEPLOY]: (payload) => {
+    const { gitCredential = null, ...jobPayload } = payload;
+    return staticDeploymentManager.deployStatic(jobPayload, { gitCredential });
+  },
   [OPERATIONS.APP_STATIC_ROLLBACK]: (payload) => staticRollbackManager.rollbackStatic(payload),
-  [OPERATIONS.APP_NODE_DEPLOY]: (payload) => nodeDeploymentManager.deployNode(payload),
+  [OPERATIONS.APP_NODE_DEPLOY]: (payload) => {
+    const { gitCredential = null, ...jobPayload } = payload;
+    return nodeDeploymentManager.deployNode(jobPayload, { gitCredential });
+  },
   [OPERATIONS.APP_NODE_ROLLBACK]: (payload) => nodeRollbackManager.rollbackNode(payload),
   [OPERATIONS.APP_NODE_RESTART]: (payload) => nodeRestartManager.restartNode(payload),
   [OPERATIONS.APP_NODE_STATUS]: (payload) => nodeStatusInspector.inspectNodeStatus(payload),

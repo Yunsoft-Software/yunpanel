@@ -26,3 +26,27 @@ test('an immutable commit target must resolve to the requested SHA', () => {
   }), null);
   assert.equal(gitDeploymentInternals.resolvedGitCommit('HEAD\n', { kind: 'tag', value: 'v1.0.0' }), null);
 });
+
+test('Git authentication keeps tokens out of URLs and pins SSH host verification', () => {
+  const token = 'github_pat_private_deploy_token';
+  const tokenPlan = gitDeploymentInternals.gitAuthenticationPlan({
+    repositoryUrl: 'https://github.com/example/private.git',
+    credential: { type: 'github_token', token },
+  });
+  assert.equal(tokenPlan.repositoryUrl, 'https://github.com/example/private.git');
+  assert.equal(tokenPlan.environment.YUNPANEL_GIT_TOKEN, token);
+  assert.equal(tokenPlan.environment.GIT_ASKPASS, gitDeploymentInternals.askPassPath);
+  assert.equal(JSON.stringify(tokenPlan.repositoryUrl).includes(token), false);
+
+  const privateKey = `-----BEGIN OPENSSH PRIVATE KEY-----\n${'A'.repeat(96)}\n-----END OPENSSH PRIVATE KEY-----\n`;
+  const sshPlan = gitDeploymentInternals.gitAuthenticationPlan({
+    repositoryUrl: 'https://github.com/example/private.git',
+    credential: { type: 'ssh_deploy_key', privateKey },
+    privateKeyPath: '/var/lib/yunpanel/data/app/.git-key-job',
+  });
+  assert.equal(sshPlan.repositoryUrl, 'ssh://git@github.com/example/private.git');
+  assert.equal(sshPlan.privateKey, privateKey);
+  assert.match(sshPlan.environment.GIT_SSH_COMMAND, /StrictHostKeyChecking=yes/);
+  assert.match(sshPlan.environment.GIT_SSH_COMMAND, /UserKnownHostsFile=\/etc\/ssh\/ssh_known_hosts/);
+  assert.equal(sshPlan.environment.GIT_SSH_COMMAND.includes(privateKey), false);
+});

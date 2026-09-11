@@ -270,6 +270,44 @@ test('Node mutations fetch environment just in time without placing secrets in r
   assert.equal(calls[1].options.body.includes('private-token-value'), false);
 });
 
+test('deploy fetches a private Git credential only for execution and never reports it', async () => {
+  const identity = { serverId: 'server-006', agentToken: 'agent-token-long-enough' };
+  const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
+  const jobId = '123e4567-e89b-12d3-a456-426614174006';
+  const secret = 'github_pat_private_deploy_value';
+  const calls = [];
+  const completion = await executeClaimedCommand({
+    claimed: {
+      job: { id: jobId },
+      envelope: {
+        id: jobId,
+        operation: OPERATIONS.APP_STATIC_DEPLOY,
+        payload: { applicationId, deploymentId: jobId },
+        protocolVersion: AGENT_PROTOCOL_VERSION,
+      },
+    },
+    baseUrl: 'http://127.0.0.1:3001',
+    identity,
+    execute: async (operation, payload) => {
+      assert.equal(operation, OPERATIONS.APP_STATIC_DEPLOY);
+      assert.deepEqual(payload.gitCredential, { type: 'github_token', token: secret });
+      return { deploymentId: jobId, releaseId: jobId, commitSha: 'a'.repeat(40) };
+    },
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url, options });
+      if (url.endsWith(`/api/servers/${identity.serverId}/applications/${applicationId}/deployment-credential`)) {
+        assert.equal(options.headers.authorization, `Bearer ${identity.agentToken}`);
+        return jsonResponse(200, { data: { type: 'github_token', token: secret } });
+      }
+      return jsonResponse(200, { data: { status: 'succeeded' } });
+    },
+    sleepFn: async () => {},
+  });
+  assert.equal(completion.status, 'succeeded');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].options.body.includes(secret), false);
+});
+
 test('failed command reports authored safe error metadata without raw message, stack or secret fields', async () => {
   const identity = { serverId: 'server-004', agentToken: 'agent-token-long-enough' };
   const claimed = {

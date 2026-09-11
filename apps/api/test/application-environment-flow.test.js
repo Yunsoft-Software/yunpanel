@@ -65,6 +65,7 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
   }));
 
   await withServer(app, async (baseUrl) => {
+    const deployToken = 'github_pat_private_http_value';
     const publicWrite = await requestJson(`${baseUrl}/api/applications/${application.id}/environment/PUBLIC_URL`, {
       method: 'PUT',
       body: { value: 'https://example.test', secret: false },
@@ -96,6 +97,45 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
       API_TOKEN: 'private-token-value',
       PUBLIC_URL: 'https://example.test',
     });
+
+    const credentialWrite = await requestJson(`${baseUrl}/api/applications/${application.id}/deployment-credential`, {
+      method: 'PUT', body: { type: 'github_token', token: deployToken },
+    });
+    assert.equal(credentialWrite.response.status, 200);
+    assert.deepEqual({
+      configured: credentialWrite.payload.data.configured,
+      type: credentialWrite.payload.data.type,
+    }, { configured: true, type: 'github_token' });
+    assert.equal(JSON.stringify(credentialWrite.payload).includes(deployToken), false);
+
+    const credentialMetadata = await requestJson(`${baseUrl}/api/applications/${application.id}/deployment-credential`);
+    assert.equal(credentialMetadata.response.status, 200);
+    assert.equal(credentialMetadata.payload.data.type, 'github_token');
+    assert.equal(JSON.stringify(credentialMetadata.payload).includes(deployToken), false);
+
+    const agentCredential = await requestJson(
+      `${baseUrl}/api/servers/${enrolled.server.id}/applications/${application.id}/deployment-credential`,
+      { token: enrolled.agentToken },
+    );
+    assert.deepEqual(agentCredential.payload.data, { type: 'github_token', token: deployToken });
+
+    const deploy = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, { method: 'POST' });
+    assert.equal(deploy.response.status, 202);
+    assert.equal(JSON.stringify(deploy.payload).includes(deployToken), false);
+    const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
+      token: enrolled.agentToken,
+    });
+    assert.equal(claimed.response.status, 200);
+    assert.equal(JSON.stringify(claimed.payload).includes(deployToken), false);
+
+    const wrongDelete = await requestJson(`${baseUrl}/api/applications/${application.id}/deployment-credential`, {
+      method: 'DELETE', body: { confirmation: 'delete' },
+    });
+    assert.equal(wrongDelete.response.status, 400);
+    const deleted = await requestJson(`${baseUrl}/api/applications/${application.id}/deployment-credential`, {
+      method: 'DELETE', body: { confirmation: `delete-deployment-credential:${application.id}` },
+    });
+    assert.equal(deleted.response.status, 204);
   });
 });
 
@@ -137,5 +177,11 @@ test('an agent cannot fetch environment belonging to a different managed server'
     );
     assert.equal(response.response.status, 404);
     assert.equal(response.payload.error.code, 'application_not_found');
+    const credential = await requestJson(
+      `${baseUrl}/api/servers/${second.server.id}/applications/${application.id}/deployment-credential`,
+      { token: second.agentToken },
+    );
+    assert.equal(credential.response.status, 404);
+    assert.equal(credential.payload.error.code, 'application_not_found');
   });
 });

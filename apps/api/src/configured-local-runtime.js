@@ -77,6 +77,9 @@ export async function startConfiguredLocalRuntime({
 
   const hostOperations = createOperations({
     loadApplicationEnvironment: (applicationId) => applicationEnvironmentRegistry.materialize(applicationId),
+    loadDeploymentCredential: typeof applicationEnvironmentRegistry.materializeDeploymentCredential === 'function'
+      ? (applicationId) => applicationEnvironmentRegistry.materializeDeploymentCredential(applicationId)
+      : async () => null,
   });
   const certificateOperationReceipts = createCertificateOperationReceipts();
   if (!certificateOperationReceipts || typeof certificateOperationReceipts.write !== 'function') {

@@ -84,10 +84,11 @@ function createHarness({ healthResults = [true], failFirstRestart = false, lstat
 
 test('healthy Node deployment creates hardened service state and materializes custom environment', async () => {
   const harness = createHarness({ healthResults: [true] });
+  const gitToken = 'github_pat_private_node_deploy';
   const result = await harness.manager.deployNode({
     ...deploymentSpec(),
     environment: { API_TOKEN: 'secret-value', PUBLIC_URL: 'https://example.test' },
-  });
+  }, { gitCredential: { type: 'github_token', token: gitToken } });
 
   assert.equal(result.releaseId, DEPLOYMENT_ID);
   assert.equal(result.previousReleaseId, PREVIOUS_RELEASE);
@@ -109,6 +110,12 @@ test('healthy Node deployment creates hardened service state and materializes cu
   assert.match(unitWrite.content, /ProtectSystem=strict/);
   assert.match(unitWrite.content, /NoNewPrivileges=true/);
   assert.equal(unitWrite.options.mode, 0o644);
+  assert.equal(harness.commands.some((entry) => entry.args.some((argument) => String(argument).includes(gitToken))), false);
+  const gitFetch = harness.commands.find((entry) => entry.file === '/usr/sbin/runuser' && entry.args.includes('fetch'));
+  assert.equal(gitFetch.options.env.YUNPANEL_GIT_TOKEN, gitToken);
+  assert.match(gitFetch.options.env.GIT_ASKPASS, /git-askpass\.js$/);
+  const npmInstall = harness.commands.find((entry) => entry.file === '/usr/sbin/runuser' && entry.args.includes('/usr/bin/npm'));
+  assert.equal('YUNPANEL_GIT_TOKEN' in npmInstall.options.env, false);
 });
 
 test('failed health check restores the previous release before reporting failure', async () => {
@@ -122,6 +129,26 @@ test('failed health check restores the previous release before reporting failure
   assert.ok(harness.links.some((entry) => entry.target === `releases/${DEPLOYMENT_ID}`));
   assert.ok(harness.links.some((entry) => entry.target === `releases/${PREVIOUS_RELEASE}`));
   assert.ok(harness.removals.some((entry) => entry.value === `/apps/${APPLICATION_ID}/releases/${DEPLOYMENT_ID}`));
+});
+
+test('SSH deploy key is a private temporary site-user file removed before build', async () => {
+  const harness = createHarness({ healthResults: [true] });
+  const privateKey = `-----BEGIN OPENSSH PRIVATE KEY-----\n${'A'.repeat(96)}\n-----END OPENSSH PRIVATE KEY-----\n`;
+  await harness.manager.deployNode(deploymentSpec(), {
+    gitCredential: { type: 'ssh_deploy_key', privateKey },
+  });
+  const keyPath = `/data/${APPLICATION_ID}/.git-key-${DEPLOYMENT_ID}`;
+  const keyWrite = harness.writes.find((entry) => entry.target === keyPath);
+  assert.equal(keyWrite.content, privateKey);
+  assert.deepEqual(keyWrite.options, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+  assert.ok(harness.commands.some((entry) => entry.file === '/usr/bin/chown'
+    && entry.args[0].startsWith('yunapp-') && entry.args[1] === keyPath));
+  const fetchCommand = harness.commands.find((entry) => entry.file === '/usr/sbin/runuser' && entry.args.includes('fetch'));
+  assert.match(fetchCommand.options.env.GIT_SSH_COMMAND, /StrictHostKeyChecking=yes/);
+  assert.equal(fetchCommand.args.some((argument) => String(argument).includes(privateKey)), false);
+  assert.ok(harness.removals.some((entry) => entry.value === keyPath && entry.options.force === true));
+  const npmInstall = harness.commands.find((entry) => entry.file === '/usr/sbin/runuser' && entry.args.includes('/usr/bin/npm'));
+  assert.equal('GIT_SSH_COMMAND' in npmInstall.options.env, false);
 });
 
 test('systemd restart failure also restores the previous release', async () => {

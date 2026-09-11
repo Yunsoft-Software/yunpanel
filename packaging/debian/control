@@ -4,7 +4,7 @@ Section: admin
 Priority: optional
 Architecture: all
 Maintainer: Yunsoft <admin@yunsoft.com>
-Depends: adduser, ca-certificates, certbot, curl, git, nginx, xz-utils
+Depends: adduser, ca-certificates, certbot, curl, git, nginx, openssh-client, xz-utils
 Description: Yunsoft server and hosting control plane
  YunPanel provides an authenticated Node.js management API, privileged local
  host runtime and restricted web dashboard used to manage Yunsoft hosts.

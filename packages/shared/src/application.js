@@ -2,6 +2,12 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const BRANCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 const GIT_TARGET_FIELDS = new Set(['kind', 'value']);
+const GIT_CREDENTIAL_FIELDS = Object.freeze({
+  github_token: new Set(['type', 'token']),
+  ssh_deploy_key: new Set(['type', 'privateKey']),
+});
+const GITHUB_TOKEN_PATTERN = /^[\x21-\x7e]{20,255}$/;
+const PRIVATE_KEY_LABELS = new Set(['OPENSSH PRIVATE KEY', 'PRIVATE KEY', 'RSA PRIVATE KEY', 'EC PRIVATE KEY']);
 const SCRIPT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$/;
 const RELATIVE_PATH_PATTERN = /^[A-Za-z0-9._/-]+$/;
 
@@ -77,6 +83,34 @@ export function normalizeGitDeploymentTarget(value, { defaultBranch = null } = {
   } catch {
     throw new ApplicationValidationError('invalid_git_target', `Git ${candidate.kind} target is invalid`);
   }
+}
+
+export function normalizeGitDeploymentCredential(value, { nullable = true } = {}) {
+  if (value == null && nullable) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.type !== 'string') {
+    throw new ApplicationValidationError('invalid_git_credential', 'Git deployment credential is invalid');
+  }
+  const fields = GIT_CREDENTIAL_FIELDS[value.type];
+  if (!fields || Object.keys(value).length !== fields.size || Object.keys(value).some((key) => !fields.has(key))) {
+    throw new ApplicationValidationError('invalid_git_credential', 'Git deployment credential fields are invalid');
+  }
+  if (value.type === 'github_token') {
+    if (typeof value.token !== 'string' || !GITHUB_TOKEN_PATTERN.test(value.token)) {
+      throw new ApplicationValidationError('invalid_git_credential', 'GitHub token format is invalid');
+    }
+    return { type: value.type, token: value.token };
+  }
+  if (typeof value.privateKey !== 'string' || value.privateKey.length < 100 || value.privateKey.length > 32 * 1024
+    || value.privateKey.includes('\u0000')) {
+    throw new ApplicationValidationError('invalid_git_credential', 'SSH deploy key format is invalid');
+  }
+  const normalized = value.privateKey.replace(/\r\n/g, '\n').trim();
+  const begin = normalized.match(/^-----BEGIN ([A-Z0-9 ]+)-----\n/);
+  const end = normalized.match(/\n-----END ([A-Z0-9 ]+)-----$/);
+  if (!begin || !end || begin[1] !== end[1] || !PRIVATE_KEY_LABELS.has(begin[1])) {
+    throw new ApplicationValidationError('invalid_git_credential', 'SSH deploy key must be an unencrypted private key');
+  }
+  return { type: value.type, privateKey: `${normalized}\n` };
 }
 
 export function normalizeRelativeBuildPath(value, { allowDot = false } = {}) {

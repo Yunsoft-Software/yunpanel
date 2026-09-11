@@ -21,6 +21,8 @@ test('current management mutation routes map to bounded action and resource iden
     ['POST', '/api/applications/app-1/status/refresh', 'application.status.refresh', 'application', 'app-1'],
     ['PUT', '/api/applications/app-1/environment/API_SECRET', 'application.environment.updated', 'application', 'app-1'],
     ['DELETE', '/api/applications/app-1/environment/API_SECRET', 'application.environment.deleted', 'application', 'app-1'],
+    ['PUT', '/api/applications/app-1/deployment-credential', 'application.git_credential.updated', 'application', 'app-1'],
+    ['DELETE', '/api/applications/app-1/deployment-credential', 'application.git_credential.deleted', 'application', 'app-1'],
     ['POST', '/api/domains', 'domain.create', 'domain', 'new'],
     ['POST', '/api/domains/domain-1/reparent-preview', 'domain.reparent.preview', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/reparent', 'domain.reparent', 'domain', 'domain-1'],
@@ -71,6 +73,23 @@ test('environment key and request body never enter management audit metadata', (
   assert.deepEqual(events, [
     { actorId: 'owner-1', action: 'application.environment.updated', resourceType: 'application', resourceId: 'app-1', outcome: 'accepted' },
     { actorId: 'owner-1', action: 'application.environment.updated', resourceType: 'application', resourceId: 'app-1', outcome: 'succeeded', code: null },
+  ]);
+});
+
+test('Git credential body never enters common audit metadata', () => {
+  const events = [];
+  const response = new Response(200);
+  const token = 'github_pat_private_audit_value';
+  attachManagementAudit({
+    request: { method: 'PUT', auth: { user: { id: 'owner-1' } }, body: { type: 'github_token', token } },
+    response,
+    pathname: '/api/applications/app-1/deployment-credential',
+    audit: { record(event) { events.push(event); } },
+  });
+  response.emit('finish');
+  assert.equal(JSON.stringify(events).includes(token), false);
+  assert.deepEqual(events.map((event) => event.action), [
+    'application.git_credential.updated', 'application.git_credential.updated',
   ]);
 });
 

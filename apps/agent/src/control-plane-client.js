@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { OPERATIONS, validateOperationEnvelope } from '@yunpanel/protocol';
-import { normalizeApplicationEnvironmentBundle } from '@yunpanel/shared';
+import { normalizeApplicationEnvironmentBundle, normalizeGitDeploymentCredential } from '@yunpanel/shared';
 import { executeOperation } from './operations.js';
 import { loadAgentIdentity } from './identity-store.js';
 import { safeLegacyAgentDiagnosticCode, safeLegacyAgentError } from './legacy-safe-error.js';
@@ -14,6 +14,7 @@ const ENVIRONMENT_OPERATIONS = new Set([
   OPERATIONS.APP_NODE_RESTART,
   OPERATIONS.APP_NODE_ROLLBACK,
 ]);
+const DEPLOYMENT_OPERATIONS = new Set([OPERATIONS.APP_STATIC_DEPLOY, OPERATIONS.APP_NODE_DEPLOY]);
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -138,6 +139,26 @@ export async function fetchApplicationEnvironment({
   }
 }
 
+export async function fetchApplicationDeploymentCredential({
+  baseUrl,
+  identity,
+  applicationId,
+  fetchImpl = fetch,
+}) {
+  const response = await fetchImpl(
+    `${baseUrl}/api/servers/${identity.serverId}/applications/${applicationId}/deployment-credential`,
+    { headers: { authorization: agentAuthorization(identity) } },
+  );
+  const body = await readJsonResponse(response, 'Application deployment credential');
+  try {
+    return normalizeGitDeploymentCredential(body?.data ?? null);
+  } catch {
+    const error = new Error('Control plane returned an invalid Git deployment credential');
+    error.code = 'invalid_git_credential';
+    throw error;
+  }
+}
+
 export async function reportCommandResult({
   baseUrl,
   identity,
@@ -191,6 +212,15 @@ export async function executeClaimedCommand({
         fetchImpl,
       });
       executionPayload = { ...executionPayload, environment };
+    }
+    if (DEPLOYMENT_OPERATIONS.has(claimed.envelope.operation)) {
+      const gitCredential = await fetchApplicationDeploymentCredential({
+        baseUrl,
+        identity,
+        applicationId: claimed.envelope.payload.applicationId,
+        fetchImpl,
+      });
+      executionPayload = { ...executionPayload, gitCredential };
     }
     const result = await execute(claimed.envelope.operation, executionPayload);
     completion = { status: 'succeeded', result };

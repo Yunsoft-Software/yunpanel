@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { access, chmod, lstat, mkdir, readlink, realpath, readdir, rename, rm, symlink } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, readlink, realpath, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { normalizeStaticApplicationSpec } from '@yunpanel/shared';
-import { gitFetchArguments, resolvedGitCommit } from './git-deployment.js';
+import { gitAuthenticationPlan, gitFetchArguments, resolvedGitCommit } from './git-deployment.js';
 
 const execFileAsync = promisify(execFile);
 const BUILD_ROOT = '/var/lib/yunpanel/build';
@@ -83,6 +83,7 @@ export function createStaticDeploymentManager({
   renameFn = rename,
   rmFn = rm,
   symlinkFn = symlink,
+  writeFileFn = writeFile,
   nodePath = process.execPath,
   artifactWorkerPath = ARTIFACT_WORKER_PATH,
   npmPaths = NPM_PATHS,
@@ -100,7 +101,10 @@ export function createStaticDeploymentManager({
   }
 
   async function runAsUser(username, home, file, args, options = {}) {
-    return runRoot(RUNUSER_PATH, ['-u', username, '--', file, ...args], { ...options, env: safeEnvironment(home) });
+    return runRoot(RUNUSER_PATH, ['-u', username, '--', file, ...args], {
+      ...options,
+      env: { ...safeEnvironment(home), ...(options.env ?? {}) },
+    });
   }
 
   async function ensureDirectoryMode(directory, mode) {
@@ -177,7 +181,7 @@ export function createStaticDeploymentManager({
     }
   }
 
-  async function deployUnlocked(rawSpec) {
+  async function deployUnlocked(rawSpec, { gitCredential = null } = {}) {
     let spec;
     try {
       spec = normalizeStaticApplicationSpec(rawSpec);
@@ -194,25 +198,41 @@ export function createStaticDeploymentManager({
     const servedReleasePath = path.join(releasesPath, spec.deploymentId);
     const currentPath = path.join(appWebRoot, 'current');
     const temporaryCurrentPath = path.join(appWebRoot, `.current-${spec.deploymentId}`);
+    const privateKeyPath = path.join(appBuildRoot, `.git-key-${spec.deploymentId}`);
+    let gitAuthentication;
+    try { gitAuthentication = gitAuthenticationPlan({ repositoryUrl: spec.repositoryUrl, credential: gitCredential, privateKeyPath }); }
+    catch { throw new StaticDeploymentError('invalid_git_credential', 'Git deployment credential is invalid'); }
     let worktreeCreated = false;
     let artifactCreated = false;
+    let privateKeyCreated = false;
 
     await ensureAppUser(username, appBuildRoot);
 
     try {
+      if (gitAuthentication.privateKey) {
+        await writeFileFn(privateKeyPath, gitAuthentication.privateKey, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+        privateKeyCreated = true;
+        await runRoot(CHOWN_PATH, [`${username}:${username}`, privateKeyPath], { timeout: 10_000 });
+      }
       try {
         await accessFn(path.join(repositoryPath, '.git'));
-        await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'remote', 'set-url', 'origin', spec.repositoryUrl]);
+        await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'remote', 'set-url', 'origin', gitAuthentication.repositoryUrl]);
       } catch {
-        await runAsUser(username, appBuildRoot, GIT_PATH, ['clone', '--no-checkout', spec.repositoryUrl, repositoryPath], { timeout: 5 * 60 * 1000 });
+        await runAsUser(username, appBuildRoot, GIT_PATH, ['clone', '--no-checkout', gitAuthentication.repositoryUrl, repositoryPath], {
+          timeout: 5 * 60 * 1000, env: gitAuthentication.environment,
+        });
       }
 
       await runAsUser(username, appBuildRoot, GIT_PATH, [
         '-C', repositoryPath, ...gitFetchArguments(spec.gitTarget, { prune: true }),
-      ], { timeout: 5 * 60 * 1000 });
+      ], { timeout: 5 * 60 * 1000, env: gitAuthentication.environment });
       const revision = await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'rev-parse', '--verify', 'FETCH_HEAD^{commit}']);
       const commitSha = resolvedGitCommit(revision.stdout, spec.gitTarget);
       if (!commitSha) throw new StaticDeploymentError('invalid_git_revision', 'Git returned a revision that does not match the deployment target');
+      if (privateKeyCreated) {
+        await rmFn(privateKeyPath, { force: true });
+        privateKeyCreated = false;
+      }
 
       await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'worktree', 'add', '--detach', worktreePath, commitSha], { timeout: 60_000 });
       worktreeCreated = true;
@@ -303,6 +323,7 @@ export function createStaticDeploymentManager({
       if (error instanceof StaticDeploymentError) throw error;
       throw new StaticDeploymentError('static_deployment_failed', 'Static deployment failed');
     } finally {
+      if (privateKeyCreated) await rmFn(privateKeyPath, { force: true }).catch(() => {});
       if (worktreeCreated) {
         try {
           await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'worktree', 'remove', '--force', worktreePath], { timeout: 60_000 });
@@ -313,10 +334,10 @@ export function createStaticDeploymentManager({
     }
   }
 
-  function deployStatic(spec) {
+  function deployStatic(spec, options = {}) {
     const key = spec?.applicationId ?? 'invalid';
     const previous = deploymentLocks.get(key) ?? Promise.resolve();
-    const runDeployment = previous.catch(() => {}).then(() => deployUnlocked(spec));
+    const runDeployment = previous.catch(() => {}).then(() => deployUnlocked(spec, options));
     let tracked;
     tracked = runDeployment.finally(() => {
       if (deploymentLocks.get(key) === tracked) deploymentLocks.delete(key);

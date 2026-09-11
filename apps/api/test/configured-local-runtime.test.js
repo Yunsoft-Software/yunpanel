@@ -38,6 +38,9 @@ test('enabled local runtime hydrates Node environment only through the registry 
       materialized.push(applicationId);
       return { APP_SECRET: 'runtime-only' };
     },
+    materializeDeploymentCredential: async (applicationId) => ({
+      type: 'github_token', token: `token-for-${applicationId}-private`,
+    }),
   };
 
   const result = await startConfiguredLocalRuntime({
@@ -59,6 +62,9 @@ test('enabled local runtime hydrates Node environment only through the registry 
   assert.equal(startOptions.hostOperations.operations.length, 0);
   assert.equal('applicationEnvironmentRegistry' in startOptions, false);
   assert.deepEqual(await operationOptions.loadApplicationEnvironment('app-1'), { APP_SECRET: 'runtime-only' });
+  assert.deepEqual(await operationOptions.loadDeploymentCredential('app-1'), {
+    type: 'github_token', token: 'token-for-app-1-private',
+  });
   assert.deepEqual(materialized, ['app-1']);
 });
 

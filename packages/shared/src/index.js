@@ -3,6 +3,7 @@ export {
   assertUuid,
   normalizeGithubRepositoryUrl,
   normalizeGitBranch,
+  normalizeGitDeploymentCredential,
   normalizeGitDeploymentTarget,
   normalizeRelativeBuildPath,
   normalizeStaticApplicationSpec,

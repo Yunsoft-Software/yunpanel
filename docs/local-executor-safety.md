@@ -97,6 +97,8 @@ Private recovery context contains execution intent needed by recovery without ad
 
 Managed Node runtime installation downloads only the official `latest-v22.x` or `latest-v24.x` Linux x64/arm64 archive over HTTPS, verifies the exact archive against the same release's SHA-256 manifest, extracts to a private temporary directory and atomically activates `/opt/yunpanel/node-runtimes/v<major>`. Existing invalid runtime state is never overwritten. `/usr/local/bin/node` is inspected before/after as the packaged panel runtime and is never an installation target.
 
+Private Git deploy credentials are fetched from the master-key-encrypted Application store only after a static/Node deployment job is claimed. GitHub tokens use a fixed packaged askpass helper and appear only in the fetch process environment, never in URL/argv/job/recovery/audit/build environment. SSH deploy keys are written with `0600` to a deterministic private site directory, owned by the dedicated `yunapp-*` user, used with strict host-key checking against `/etc/ssh/ssh_known_hosts`, and removed before dependency lifecycle/build commands. Only unencrypted keys are accepted; no passphrase is persisted.
+
 ## Execution evidence
 
 For host mutations whose final state alone cannot prove that the exact operation ran, the local executor may write a private success receipt after the host operation succeeds and before durable completion is attempted. Receipt write failure does not turn a successful host mutation into a failed mutation; normal completion is still attempted. If both evidence and completion are unavailable, recovery remains unresolved.

@@ -4,6 +4,7 @@ import {
   ApplicationValidationError,
   normalizeGithubRepositoryUrl,
   normalizeGitBranch,
+  normalizeGitDeploymentCredential,
   normalizeGitDeploymentTarget,
   normalizeStaticApplicationSpec,
   normalizeStaticBuildConfig,
@@ -46,6 +47,21 @@ test('Git deployment targets distinguish configured branch, exact tag and immuta
     { kind: 'branch', value: 'main', extra: true },
     { kind: 'ref', value: 'refs/pull/1/head' },
   ]) assert.throws(() => normalizeGitDeploymentTarget(target), ApplicationValidationError);
+});
+
+test('Git deployment credentials accept bounded tokens and unencrypted deploy keys only', () => {
+  const token = 'github_pat_private_shared_value';
+  assert.deepEqual(normalizeGitDeploymentCredential({ type: 'github_token', token }), { type: 'github_token', token });
+  const privateKey = `-----BEGIN OPENSSH PRIVATE KEY-----\n${'A'.repeat(96)}\n-----END OPENSSH PRIVATE KEY-----\n`;
+  assert.deepEqual(normalizeGitDeploymentCredential({ type: 'ssh_deploy_key', privateKey }), {
+    type: 'ssh_deploy_key', privateKey,
+  });
+  for (const value of [
+    { type: 'github_token', token: 'short' },
+    { type: 'github_token', token, username: 'attacker' },
+    { type: 'ssh_deploy_key', privateKey: '-----BEGIN ENCRYPTED PRIVATE KEY-----\nsecret\n-----END ENCRYPTED PRIVATE KEY-----' },
+    { type: 'basic', password: token },
+  ]) assert.throws(() => normalizeGitDeploymentCredential(value, { nullable: false }), ApplicationValidationError);
 });
 
 test('rejects credentials, non-GitHub URLs, branch option injection and output traversal', () => {

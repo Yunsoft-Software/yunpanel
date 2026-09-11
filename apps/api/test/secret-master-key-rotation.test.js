@@ -37,6 +37,10 @@ async function fixture(t) {
   await environment.init();
   await environment.setVariable({ applicationId: APPLICATION_ID, key: 'API_TOKEN', value: 'super-secret-token', secret: true });
   await environment.setVariable({ applicationId: APPLICATION_ID, key: 'PUBLIC_NAME', value: 'yunpanel', secret: false });
+  await environment.setDeploymentCredential({
+    applicationId: APPLICATION_ID,
+    credential: { type: 'github_token', token: 'github_pat_rotation_private_value' },
+  });
   return { directory, authDbPath, applicationEnvironmentStorePath, currentMasterKey, nextMasterKey };
 }
 
@@ -61,6 +65,16 @@ async function materialize(applicationEnvironmentStorePath, masterKey) {
   return registry.materialize(APPLICATION_ID);
 }
 
+async function materializeCredential(applicationEnvironmentStorePath, masterKey) {
+  const registry = createApplicationEnvironmentRegistry({
+    filePath: applicationEnvironmentStorePath,
+    masterKey,
+    applicationExists: async (id) => id === APPLICATION_ID,
+  });
+  await registry.init();
+  return registry.materializeDeploymentCredential(APPLICATION_ID);
+}
+
 function rollbackOptions(state, backupDirectory, now) {
   return {
     authDbPath: state.authDbPath,
@@ -75,7 +89,7 @@ test('rotation rewraps application and MFA secrets together and rollback restore
   const backupDirectory = path.join(state.directory, 'backup');
   const manifest = await rotateSecretMasterKey({ ...state, backupDirectory, now: () => 1_800_000_000_000 });
   assert.equal(manifest.status, 'applied');
-  assert.deepEqual(manifest.counts, { mfa: 1, mfaPending: 1, applicationSecrets: 1 });
+  assert.deepEqual(manifest.counts, { mfa: 1, mfaPending: 1, applicationSecrets: 2 });
   assert.match(manifest.backupHashes.authDb, /^[a-f0-9]{64}$/);
   assert.match(manifest.backupHashes.applicationEnvironmentStore, /^[a-f0-9]{64}$/);
 
@@ -88,6 +102,9 @@ test('rotation rewraps application and MFA secrets together and rollback restore
   assert.equal(rotated.events, 1);
   assert.throws(() => oldVault.decrypt('owner-1', rotated.active.secret), { code: 'mfa_key_unavailable' });
   assert.deepEqual(await materialize(state.applicationEnvironmentStorePath, state.nextMasterKey), { API_TOKEN: 'super-secret-token', PUBLIC_NAME: 'yunpanel' });
+  assert.deepEqual(await materializeCredential(state.applicationEnvironmentStorePath, state.nextMasterKey), {
+    type: 'github_token', token: 'github_pat_rotation_private_value',
+  });
   await assert.rejects(() => materialize(state.applicationEnvironmentStorePath, state.currentMasterKey), { code: 'secret_decryption_failed' });
 
   const rolledBack = await rollbackSecretMasterKey(rollbackOptions(state, backupDirectory, () => 1_800_000_100_000));
@@ -97,6 +114,9 @@ test('rotation rewraps application and MFA secrets together and rollback restore
   assert.equal(oldVault.decrypt('owner-2', restored.pending.secret), 'PENDING-SECRET');
   assert.equal(restored.events, 0);
   assert.deepEqual(await materialize(state.applicationEnvironmentStorePath, state.currentMasterKey), { API_TOKEN: 'super-secret-token', PUBLIC_NAME: 'yunpanel' });
+  assert.deepEqual(await materializeCredential(state.applicationEnvironmentStorePath, state.currentMasterKey), {
+    type: 'github_token', token: 'github_pat_rotation_private_value',
+  });
 });
 
 test('wrong current key fails before replacing either live store', async (t) => {

@@ -7,10 +7,12 @@ const DEPLOYMENT_ID = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
 
 test('static deployment restores traversable shared-root modes under a restrictive agent umask', async () => {
   const chmodCalls = [];
+  const commands = [];
   const manager = createStaticDeploymentManager({
     buildRoot: '/srv/yunpanel/build',
     webRoot: '/srv/yunpanel/web/apps',
-    run: async (_file, args) => {
+    run: async (file, args, options = {}) => {
+      commands.push({ file, args, options });
       if (args.includes('rev-parse')) return { stdout: `${'a'.repeat(40)}\n`, stderr: '' };
       if (args.includes('/worker.js')) {
         return { stdout: JSON.stringify({ files: 2, directories: 1, bytes: 512, healthFile: 'index.html' }), stderr: '' };
@@ -31,6 +33,7 @@ test('static deployment restores traversable shared-root modes under a restricti
     artifactWorkerPath: '/worker.js',
   });
 
+  const gitToken = 'github_pat_private_static_deploy';
   const result = await manager.deployStatic({
     applicationId: APPLICATION_ID,
     deploymentId: DEPLOYMENT_ID,
@@ -38,7 +41,7 @@ test('static deployment restores traversable shared-root modes under a restricti
     branch: 'main',
     build: { mode: 'none', outputDir: '.', healthFile: 'index.html' },
     retention: 5,
-  });
+  }, { gitCredential: { type: 'github_token', token: gitToken } });
 
   assert.equal(result.releaseId, DEPLOYMENT_ID);
   assert.deepEqual(chmodCalls.filter(([, mode]) => mode === 0o711), [
@@ -48,4 +51,9 @@ test('static deployment restores traversable shared-root modes under a restricti
   ]);
   assert.ok(chmodCalls.some(([target, mode]) => target === `/srv/yunpanel/web/apps/${APPLICATION_ID}` && mode === 0o755));
   assert.ok(chmodCalls.some(([target, mode]) => target === `/srv/yunpanel/web/apps/${APPLICATION_ID}/releases` && mode === 0o755));
+  assert.equal(commands.some((entry) => entry.args.some((argument) => String(argument).includes(gitToken))), false);
+  const fetchCommand = commands.find((entry) => entry.args.includes('fetch'));
+  assert.equal(fetchCommand.options.env.YUNPANEL_GIT_TOKEN, gitToken);
+  const artifactCommand = commands.find((entry) => entry.args.includes('/worker.js'));
+  assert.equal('YUNPANEL_GIT_TOKEN' in artifactCommand.options.env, false);
 });
