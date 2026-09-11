@@ -148,6 +148,30 @@ test('individual and all-session revocation take effect immediately', async (t) 
   assert.equal(store.getSession(one.token), null);
 });
 
+test('session rotation logout-all and password changes notify live connection revocation', async (t) => {
+  const notifications = [];
+  const liveSessions = {
+    revokeSession(sessionId, reason) { notifications.push(['session', sessionId, reason]); },
+    revokeUser(userId, reason) { notifications.push(['user', userId, reason]); },
+  };
+  const { store } = fixture(t, { liveSessions });
+  const user = await owner(store);
+  const first = await login(store);
+  const rotated = await login(store, { previousToken: first.token });
+  assert.deepEqual(notifications.shift(), ['session', first.session.id, 'session_rotated']);
+
+  const second = await login(store);
+  store.revokeSession(rotated.token, second.session.id);
+  assert.deepEqual(notifications.shift(), ['session', second.session.id, 'session_revoked']);
+  store.revokeAll(rotated.token);
+  assert.deepEqual(notifications.shift(), ['user', user.id, 'user_sessions_revoked']);
+
+  const next = await login(store);
+  await store.changePassword(next.token, password, secondPassword);
+  assert.deepEqual(notifications.shift(), ['user', user.id, 'password_changed']);
+  assert.deepEqual(notifications, []);
+});
+
 test('password changes require current credentials and revoke every session', async (t) => {
   const { store } = fixture(t);
   await owner(store);

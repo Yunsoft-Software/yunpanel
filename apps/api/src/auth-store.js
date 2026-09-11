@@ -69,10 +69,29 @@ export function defaultAuthPath() {
 }
 
 /** One SQLite transaction per mutation also coordinates the API with the local recovery CLI. */
-export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, idleMs = 30 * 60_000, absoluteMs = 12 * 60 * 60_000, masterKey = process.env.YUNPANEL_SECRET_MASTER_KEY ?? null } = {}) {
+export function createAuthStore({
+  filePath = defaultAuthPath(),
+  now = Date.now,
+  idleMs = 30 * 60_000,
+  absoluteMs = 12 * 60 * 60_000,
+  masterKey = process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+  liveSessions = null,
+} = {}) {
   if (![idleMs, absoluteMs].every((value) => Number.isSafeInteger(value) && value > 0) || idleMs > absoluteMs) {
     throw new Error('Invalid authentication session lifetime');
   }
+  if (liveSessions !== null && (!liveSessions || typeof liveSessions.revokeSession !== 'function'
+    || typeof liveSessions.revokeUser !== 'function')) {
+    throw new TypeError('Live session registry is invalid');
+  }
+  const revokeLiveSession = (sessionId, reason) => {
+    if (!sessionId || !liveSessions) return;
+    try { liveSessions.revokeSession(sessionId, reason); } catch {}
+  };
+  const revokeLiveUser = (userId, reason) => {
+    if (!userId || !liveSessions) return;
+    try { liveSessions.revokeUser(userId, reason); } catch {}
+  };
   if (filePath !== ':memory:') {
     filePath = path.resolve(filePath);
     const directory = path.dirname(filePath);
@@ -152,6 +171,7 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
     if (!row) return null;
     if (!row.active || row.expires_at <= now() || row.last_active_at + idleMs <= now()) {
       db.prepare('DELETE FROM sessions WHERE id = ?').run(row.id);
+      revokeLiveSession(row.id, row.active ? 'session_expired' : 'user_disabled');
       return null;
     }
     if (touch) {
@@ -172,8 +192,12 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
   let mfa;
   let users;
   try {
-    mfa = createMfaStore({ db, now, masterKey, getSession, verifyPassword, createSession, transaction, rateLimit, audit: event });
-    users = createUserAdminStore({ db, now, transaction, getSession, hashPassword, normalizeUsername: username, mfa, audit: event });
+    mfa = createMfaStore({
+      db, now, masterKey, getSession, verifyPassword, createSession, transaction, rateLimit, audit: event, revokeLiveUser,
+    });
+    users = createUserAdminStore({
+      db, now, transaction, getSession, hashPassword, normalizeUsername: username, mfa, audit: event, revokeLiveUser,
+    });
   } catch (error) { db.close(); throw error; }
 
   return {
@@ -220,6 +244,7 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
       const fallback = await dummyHash;
       const expected = user?.password_hash ?? fallback;
       const valid = await verifyPassword(password, expected);
+      const previousSession = getSession(previousToken);
       const result = transaction(() => {
         const current = user && db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
         if (!valid || !current?.active || current.password_hash !== expected || users.revision(current.id) !== userRevision) return null;
@@ -234,6 +259,7 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
         return result;
       });
       if (!result) { event(null, 'login.failed'); throw invalid(); }
+      if (previousSession) revokeLiveSession(previousSession.id, 'session_rotated');
       return result;
     },
     getSession,
@@ -245,10 +271,13 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
     revokeSession(rawToken, sessionId = null) {
       const current = getSession(rawToken);
       if (!current) return;
-      transaction(() => {
-        db.prepare('DELETE FROM sessions WHERE user_id = ? AND id = ?').run(current.user.id, sessionId ?? current.id);
+      const targetSessionId = sessionId ?? current.id;
+      const revoked = transaction(() => {
+        const changed = db.prepare('DELETE FROM sessions WHERE user_id = ? AND id = ?').run(current.user.id, targetSessionId).changes === 1;
         event(current.user.id, 'session.revoked');
+        return changed;
       });
+      if (revoked) revokeLiveSession(targetSessionId, 'session_revoked');
     },
     revokeAll(rawToken) {
       const current = getSession(rawToken);
@@ -258,6 +287,7 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
         mfa.invalidateUser(current.user.id);
         event(current.user.id, 'sessions.revoked');
       });
+      revokeLiveUser(current.user.id, 'user_sessions_revoked');
     },
     async changePassword(rawToken, currentPassword, newPassword) {
       const current = getSession(rawToken);
@@ -273,11 +303,12 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
         mfa.invalidateUser(user.id);
         event(user.id, 'password.changed');
       });
+      revokeLiveUser(user.id, 'password_changed');
     },
     async resetPassword(input, newPassword) {
       const name = username(input);
       const encoded = await hashPassword(newPassword);
-      transaction(() => {
+      const userId = transaction(() => {
         const user = db.prepare('SELECT * FROM users WHERE username = ? AND active = 1').get(name);
         if (!user) throw new AuthError('user_not_found', 'Active user not found.', 404);
         db.prepare('UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?').run(encoded, now(), user.id);
@@ -285,7 +316,9 @@ export function createAuthStore({ filePath = defaultAuthPath(), now = Date.now, 
         db.prepare('DELETE FROM auth_limits').run();
         mfa.invalidateUser(user.id);
         event(user.id, 'password.recovered_locally');
+        return user.id;
       });
+      revokeLiveUser(userId, 'password_recovered');
     },
   };
 }

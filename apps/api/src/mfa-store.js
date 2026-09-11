@@ -7,7 +7,7 @@ const invalidProof = () => new AuthError('mfa_invalid_code', 'The verification c
 const invalidChallenge = () => new AuthError('mfa_challenge_expired', 'Sign in again to start a new verification attempt.', 401);
 
 /** Shares the auth database/transactions; never opens another public authentication channel. */
-export function createMfaStore({ db, now, masterKey, getSession, verifyPassword, createSession, transaction, rateLimit, audit }) {
+export function createMfaStore({ db, now, masterKey, getSession, verifyPassword, createSession, transaction, rateLimit, audit, revokeLiveUser = () => {} }) {
   const vault = createMfaVault(masterKey);
   transaction(() => db.exec(`
     CREATE TABLE IF NOT EXISTS auth_mfa (
@@ -106,7 +106,7 @@ export function createMfaStore({ db, now, masterKey, getSession, verifyPassword,
     confirmEnrollment(rawToken, code) {
       const { user } = requireSession(rawToken);
       rateLimit([[`mfa:enrollment:${user.id}`, 10]]);
-      return transaction(() => {
+      const result = transaction(() => {
         const session = requireSession(rawToken);
         const pending = db.prepare('SELECT * FROM auth_mfa_pending WHERE user_id = ?').get(user.id);
         if (!pending || pending.session_id !== session.id || pending.expires_at <= now() || enabled(user.id)) {
@@ -121,6 +121,8 @@ export function createMfaStore({ db, now, masterKey, getSession, verifyPassword,
         audit(user.id, 'mfa.enabled');
         return { ...result, recoveryCodes };
       });
+      revokeLiveUser(user.id, 'mfa_changed');
+      return result;
     },
     cancelEnrollment(rawToken) {
       const session = requireSession(rawToken);
@@ -169,7 +171,7 @@ export function createMfaStore({ db, now, masterKey, getSession, verifyPassword,
     },
     async regenerateRecovery(rawToken, password, proof) {
       const checked = await confirmPassword(rawToken, password);
-      return transaction(() => {
+      const result = transaction(() => {
         const { user } = recheck(rawToken, checked);
         if (!consumeProof(user.id, proof)) throw invalidProof();
         const recoveryCodes = replaceRecovery(user.id);
@@ -178,6 +180,8 @@ export function createMfaStore({ db, now, masterKey, getSession, verifyPassword,
         audit(user.id, 'mfa.recovery.regenerated');
         return { ...result, recoveryCodes };
       });
+      revokeLiveUser(checked.session.user.id, 'mfa_changed');
+      return result;
     },
     async disable(rawToken, password, proof) {
       const checked = await confirmPassword(rawToken, password);
@@ -189,10 +193,11 @@ export function createMfaStore({ db, now, masterKey, getSession, verifyPassword,
         revokeSessions(user.id);
         audit(user.id, 'mfa.disabled');
       });
+      revokeLiveUser(checked.session.user.id, 'mfa_changed');
     },
     resetLocal(username) {
       if (typeof username !== 'string') throw new AuthError('invalid_username', 'Enter a username.');
-      transaction(() => {
+      const userId = transaction(() => {
         const user = db.prepare('SELECT id FROM users WHERE username = ? AND active = 1').get(username.trim().toLowerCase());
         if (!user) throw new AuthError('user_not_found', 'Active user not found.', 404);
         db.prepare('DELETE FROM auth_mfa WHERE user_id = ?').run(user.id);
@@ -200,7 +205,9 @@ export function createMfaStore({ db, now, masterKey, getSession, verifyPassword,
         revokeSessions(user.id);
         db.prepare('DELETE FROM auth_limits WHERE key IN (?, ?, ?)').run(`mfa:login:${user.id}`, `mfa:settings:${user.id}`, `mfa:enrollment:${user.id}`);
         audit(user.id, 'mfa.recovered_locally');
+        return user.id;
       });
+      revokeLiveUser(userId, 'mfa_recovered');
     },
   };
 }

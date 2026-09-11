@@ -8,21 +8,30 @@ import { createOwnerMfaPolicy } from '../src/owner-mfa-policy.js';
 // HTTPS Owner-MFA enforcement is covered separately by user-admin-http.test.js.
 const password = 'native-integration-fixture-password';
 async function fixture(t) {
-  const store = createAuthStore({ filePath: ':memory:', masterKey: null });
+  const revoked = [];
+  const store = createAuthStore({
+    filePath: ':memory:',
+    masterKey: null,
+    liveSessions: {
+      revokeSession() {},
+      revokeUser(userId, reason) { revoked.push([userId, reason]); },
+    },
+  });
   t.after(() => store.close());
   const setup = store.issueSetupToken();
   const owner = await store.completeSetup({ setupToken: setup.token, username: 'owner', password });
   const login = await store.login({ username: 'owner', password });
   const policy = createOwnerMfaPolicy({ store, required: false }).requireManagement;
-  return { store, owner, token: login.token, policy };
+  return { store, owner, token: login.token, policy, revoked };
 }
 
 test('native additional-account password login and session revocation', async (t) => {
-  const { store, token, policy } = await fixture(t);
+  const { store, token, policy, revoked } = await fixture(t);
   const user = await store.users.create(token, policy, { username: 'second', password, role: 'owner' });
   const login = await store.login({ username: 'second', password });
   assert.equal(login.session.user.id, user.id);
   store.users.update(token, policy, user.id, { revision: 1, active: false });
+  assert.deepEqual(revoked, [[user.id, 'user_changed']]);
   assert.equal(store.getSession(login.token), null);
   await assert.rejects(store.login({ username: 'second', password }), { code: 'invalid_credentials' });
 });

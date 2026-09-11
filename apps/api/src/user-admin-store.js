@@ -27,7 +27,7 @@ function revision(value) {
  * The HTTP caller supplies its live Owner/MFA policy, never a client-supplied role.
  * Additive sidecar tables leave the existing users/session/MFA schema compatible.
  */
-export function createUserAdminStore({ db, now, transaction, getSession, hashPassword, normalizeUsername, mfa, audit }) {
+export function createUserAdminStore({ db, now, transaction, getSession, hashPassword, normalizeUsername, mfa, audit, revokeLiveUser = () => {} }) {
   transaction(() => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS auth_user_admin_schema (
@@ -129,7 +129,7 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
     update(rawToken, requireManagement, id, input) {
       fields(input, ['revision', 'username', 'role', 'active']);
       if (!['username', 'role', 'active'].some((key) => Object.hasOwn(input, key))) throw new AuthError('empty_user_update', 'Choose an account field to change.');
-      return transaction(() => {
+      const result = transaction(() => {
         const actor = requireActor(rawToken, requireManagement);
         const user = existing(id, input.revision);
         const name = Object.hasOwn(input, 'username') ? normalizeUsername(input.username) : user.username;
@@ -137,19 +137,23 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         const nextActive = Object.hasOwn(input, 'active') ? active(input.active) : Boolean(user.active);
         unique(name, id);
         protectOwner(user, nextRole, nextActive);
-        if (user.username === name && user.role === nextRole && Boolean(user.active) === nextActive) return publicUser(user);
+        if (user.username === name && user.role === nextRole && Boolean(user.active) === nextActive) {
+          return { user: publicUser(user), revoked: false };
+        }
         if (user.revision === Number.MAX_SAFE_INTEGER) throw conflict();
         db.prepare('UPDATE users SET username = ?, role = ?, active = ? WHERE id = ?').run(name, nextRole, Number(nextActive), id);
         db.prepare('INSERT INTO auth_user_revisions VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET revision = excluded.revision, updated_at = excluded.updated_at')
           .run(id, user.revision + 1, now());
         revoke(id);
         record(actor.user.id, id, 'user.updated');
-        return publicUser(read(id));
+        return { user: publicUser(read(id)), revoked: true };
       });
+      if (result.revoked) revokeLiveUser(id, 'user_changed');
+      return result.user;
     },
     remove(rawToken, requireManagement, id, input) {
       fields(input, ['revision']);
-      return transaction(() => {
+      transaction(() => {
         const actor = requireActor(rawToken, requireManagement);
         const user = existing(id, input.revision);
         protectOwner(user, null, false);
@@ -159,6 +163,7 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         db.prepare('DELETE FROM users WHERE id = ?').run(id);
         record(actor.user.id, id, 'user.deleted');
       });
+      revokeLiveUser(id, 'user_deleted');
     },
   };
 }
