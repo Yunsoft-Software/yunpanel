@@ -34,7 +34,7 @@ Static/SPA trafiği explicit Domain `spaFallback` state'iyle canonical static Ap
 
 ## G. P2 — Domain, DNS, Nginx ve SSL
 
-- [ ] Existing/custom certificate seçimi, certificate/private-key match, DNS-01 ve wildcard desteği ekle.
+- [ ] DNS-01 ve wildcard sertifika issuance/renewal desteği ekle; provider credential yalnız encrypted store'dan execution-time materialize edilsin.
 - [ ] Resolver tabanlı A/AAAA/CNAME + ACME readiness modeli geliştir; external DNS mutation yalnız provider adapter üzerinden explicit yetkiyle yapılsın.
 - [ ] Site bazlı Nginx settings: upload size, proxy timeout, WebSocket, SPA fallback, cache/header/redirect; preview/diff/test/rollback backend'i ekle.
 - [ ] DNS/certificate/reload error diagnosis güvenli ve bounded olsun; private key API/public job/audit'e çıkmasın.

@@ -33,6 +33,8 @@ YUNPANEL_APPLICATION_ENVIRONMENT_STORE=/var/lib/yunpanel/control-plane/applicati
 YUNPANEL_AUTH_DB=/var/lib/yunpanel/control-plane/auth/auth.sqlite
 ```
 
+Custom certificate material is derived from `YUNPANEL_CERTIFICATE_STORE` and stored in the sibling `custom-certificates/<certificate-uuid>` directory. On the packaged layout this is `/var/lib/yunpanel/control-plane/custom-certificates`; preserve that directory together with the versioned certificate registry during backup, migration, upgrade and rollback.
+
 Packaged migration/recovery tooling rejects relevant state paths outside the control-plane root instead of copying or mutating unknown state automatically.
 
 ## Required pre-mutation sequence
