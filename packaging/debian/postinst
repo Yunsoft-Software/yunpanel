@@ -30,6 +30,15 @@ if [ "$proxy_token_count" -ne 1 ] || ! grep -Eq '^YUNPANEL_INTERNAL_PROXY_TOKEN=
   rm -f "$proxy_temp"
 fi
 
+api_env=/etc/yunpanel/control-plane/api.env
+if [ -f "$api_env" ] && ! grep -q '^YUNPANEL_MAILBOX_STORE=' "$api_env"; then
+  api_temp=$(mktemp /etc/yunpanel/control-plane/api.env.XXXXXX)
+  cp "$api_env" "$api_temp"
+  printf '%s\n' 'YUNPANEL_MAILBOX_STORE=/var/lib/yunpanel/control-plane/mailbox-registry.json' >>"$api_temp"
+  install -o yunpanel -g yunpanel -m 0600 "$api_temp" "$api_env"
+  rm -f "$api_temp"
+fi
+
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
   systemctl enable yunpanel-api.service yunpanel-web.service >/dev/null 2>&1 || true

@@ -48,4 +48,7 @@ test('packaged gateway authenticates canonical client IP metadata to the root AP
   assert.match(postinst, /if \[ -f "\$proxy_env" \]; then\n  proxy_token_count=\$\(grep -Ec/);
   assert.match(postinst, /install -o root -g root -m 0600 "\$proxy_temp" "\$proxy_env"/);
   assert.match(postinst, /printf 'YUNPANEL_INTERNAL_PROXY_TOKEN=%s\\n' "\$proxy_token" >>"\$proxy_temp"/);
+  assert.match(postinst, /if \[ -f "\$api_env" \] && ! grep -q '\^YUNPANEL_MAILBOX_STORE=' "\$api_env"; then/);
+  assert.match(postinst, /YUNPANEL_MAILBOX_STORE=\/var\/lib\/yunpanel\/control-plane\/mailbox-registry\.json/);
+  assert.match(postinst, /install -o yunpanel -g yunpanel -m 0600 "\$api_temp" "\$api_env"/);
 });

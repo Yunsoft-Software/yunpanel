@@ -28,6 +28,7 @@ import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
 import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
+import { createMailboxRegistry, MailboxRegistryError } from './mailbox-registry.js';
 import { LogHttpError, mountLogRoutes } from './log-http.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
 import { mountNodeRuntimeRoutes, NodeRuntimeHttpError } from './node-runtime-http.js';
@@ -85,6 +86,9 @@ export function createApp({
   dnsRecordManager = createCloudflareDnsManager(),
   mailDomainRegistry = createMailDomainRegistry({
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
+  }),
+  mailboxRegistry = createMailboxRegistry({
+    getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
   environment = process.env.NODE_ENV,
   journalLogReader = null,
@@ -148,6 +152,15 @@ export function createApp({
         if (!workload) throw new Error('Docker workload reference is unavailable');
         return [{ id: workload.id, state: workload.state }];
       },
+      mailboxes: async ({ domainIds }) => {
+        const impactedDomains = new Set(domainIds);
+        const mailDomainIds = new Set((await mailDomainRegistry.listMailDomains())
+          .filter((item) => item.webDomainId !== null && impactedDomains.has(item.webDomainId))
+          .map((item) => item.id));
+        return (await mailboxRegistry.listMailboxes())
+          .filter((item) => mailDomainIds.has(item.mailDomainId))
+          .map((item) => ({ id: item.id, state: item.enabled ? 'enabled' : 'disabled' }));
+      },
     },
   });
   mountExternalLifecycleRoutes(app, {
@@ -198,6 +211,7 @@ export function createApp({
       || error instanceof JobRegistryError
       || error instanceof LogHttpError
       || error instanceof ManagedServiceHttpError
+      || error instanceof MailboxRegistryError
       || error instanceof NodeRuntimeHttpError
       || error instanceof ResourceImpactError
       || error instanceof SiteFileHttpError

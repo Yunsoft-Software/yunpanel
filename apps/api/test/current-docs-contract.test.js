@@ -48,7 +48,7 @@ test('current docs expose the implemented agentless migration and deferred-desig
   assert.match(docs.get('README.md'), /local-runtime\.mjs validate <server-uuid>/);
   assert.match(docs.get('README.md'), /create --backup-dir \/var\/backups\/yunpanel\/migration-<timestamp> --confirm/);
   assert.match(docs.get('plan.md'), /Migration live-apply katmanını yalnız gerçek test-host kabulünden sonra aç/);
-  assert.match(docs.get('todo.md'), /`local-runtime validate <id>`/);
+  assert.match(docs.get('todo.md'), /Fresh agentless host:.*API start sonrası `validate` geçmeden functional mutation yapma/);
   assert.doesNotMatch(docs.get('plan.md'), /Kalan legacy hata yollarını güvenli tanı kataloğuna bağla/);
   assert.match(docs.get('agents.md'), /DEFERRED — Enterprise UI\/UX standardı/);
   assert.match(docs.get('docs/development.md'), /New enrollment is retired/);
