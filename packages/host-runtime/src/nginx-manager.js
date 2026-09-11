@@ -49,7 +49,12 @@ function renderDomainConfig(spec) {
     httpsRedirect: spec.httpsRedirect !== false,
   };
   if (spec.targetType === 'static') {
-    return renderStaticSiteConfig({ ...common, root: spec.target?.root, spaFallback: spec.target?.spaFallback !== false });
+    return renderStaticSiteConfig({
+      ...common,
+      root: spec.target?.root,
+      spaFallback: spec.target?.spaFallback !== false,
+      nginxSettings: spec.nginxSettings,
+    });
   }
   if (spec.targetType === 'proxy') {
     return renderProxySiteConfig({
@@ -57,6 +62,7 @@ function renderDomainConfig(spec) {
       upstreamHost: spec.target?.upstreamHost ?? '127.0.0.1',
       upstreamPort: spec.target?.upstreamPort,
       websocket: spec.target?.websocket !== false,
+      nginxSettings: spec.nginxSettings,
     });
   }
   throw new NginxManagerError('invalid_target_type', 'Domain targetType must be static or proxy');

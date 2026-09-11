@@ -85,6 +85,8 @@ Owner-only `POST /api/dns-zones/:dnsZoneId/readiness/refresh` accepts exactly `{
 
 Owner-only `POST /api/dns-zones/:dnsZoneId/records/preview` and `/records/apply` manage canonical A/AAAA/CNAME records through Cloudflare. Apply requires the exact current preview digest and typed confirmation, then creates a durable resource-locked local job; provider snapshot or credential/zone revision drift fails before queueing. A successful record job does not update readiness because public propagation remains separately observed.
 
+Per-site Nginx settings use the existing Owner-only Domain update preview/apply and stage/activate lifecycle. `nginxSettings` supports bounded upload size and response headers for every target, proxy timeout/WebSocket for proxy targets, and SPA fallback/static-asset cache for static targets. Raw Nginx directives are never accepted. Applying desired state does not touch live traffic; the subsequent durable stage/activate jobs render the exact settings and retain `nginx -t`, reload and previous-config rollback.
+
 Docker Website identity tracking uses `.data/docker-workload-registry.json` or `YUNPANEL_DOCKER_WORKLOAD_STORE`. The current API is deliberately limited to `GET /api/docker/workloads`, `GET /api/docker/workloads/:dockerWorkloadId` and Owner-only `POST /api/docker/workloads`. A create request must declare `managementMode=external` and an exact same-server loopback host/port/WebSocket target; the response explicitly reports that no container or Nginx change occurred. Managed Compose lifecycle is not implemented by this tracking endpoint.
 
 Managed Node applications receive their effective environment in:

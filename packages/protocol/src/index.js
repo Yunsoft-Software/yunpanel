@@ -1,7 +1,9 @@
 import {
   ApplicationValidationError,
   assertUuid,
+  NginxSettingsValidationError,
   normalizeDomainSet,
+  normalizeNginxSettings,
   normalizeNodeApplicationSpec,
   normalizeNodeProcessSpec,
   MANAGED_NODE_RUNTIME_MAJORS as SHARED_MANAGED_NODE_RUNTIME_MAJORS,
@@ -12,7 +14,7 @@ import {
 } from '@yunpanel/shared';
 import { isIP, SocketAddress } from 'node:net';
 
-export const AGENT_PROTOCOL_VERSION = 6;
+export const AGENT_PROTOCOL_VERSION = 7;
 
 export const MANAGED_SERVICE_IDS = Object.freeze([
   'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
@@ -235,11 +237,24 @@ function validateMutationPayload(operation, payload, errors) {
   if (operation === OPERATIONS.DNS_RECORD_APPLY) validateDnsRecordApply(payload, operation, errors);
 
   if (operation === OPERATIONS.DOMAIN_STAGE) {
-    rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'tls', 'canonicalRedirect', 'httpsRedirect'], operation, errors);
+    rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'nginxSettings', 'tls', 'canonicalRedirect', 'httpsRedirect'], operation, errors);
     if (typeof payload.primaryDomain !== 'string' || payload.primaryDomain.length < 3 || payload.primaryDomain.length > 253) errors.push('domain.stage primaryDomain is invalid');
     if (payload.aliases !== undefined && (!Array.isArray(payload.aliases) || payload.aliases.length > 20)) errors.push('domain.stage aliases must be an array with at most 20 entries');
     if (!['static', 'proxy'].includes(payload.targetType)) errors.push('domain.stage targetType must be static or proxy');
     if (!payload.target || typeof payload.target !== 'object' || Array.isArray(payload.target)) errors.push('domain.stage target must be an object');
+    if (payload.nginxSettings !== undefined && ['static', 'proxy'].includes(payload.targetType)) {
+      try {
+        const normalized = normalizeNginxSettings(payload.targetType, payload.nginxSettings);
+        if (JSON.stringify(normalized) !== JSON.stringify(payload.nginxSettings)
+          || (payload.targetType === 'proxy' && payload.target?.websocket !== normalized.websocket)
+          || (payload.targetType === 'static' && payload.target?.spaFallback !== normalized.spaFallback)) {
+          errors.push('domain.stage nginxSettings must be canonical and match the target');
+        }
+      } catch (error) {
+        if (error instanceof NginxSettingsValidationError) errors.push('domain.stage nginxSettings are invalid');
+        else throw error;
+      }
+    }
     if (payload.canonicalRedirect !== undefined && typeof payload.canonicalRedirect !== 'boolean') errors.push('domain.stage canonicalRedirect must be a boolean');
     if (payload.httpsRedirect !== undefined && typeof payload.httpsRedirect !== 'boolean') errors.push('domain.stage httpsRedirect must be a boolean');
     if (payload.tls !== undefined && payload.tls !== null) {

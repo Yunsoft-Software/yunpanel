@@ -34,7 +34,6 @@ Static/SPA trafiği explicit Domain `spaFallback` state'iyle canonical static Ap
 
 ## G. P2 — Domain, DNS, Nginx ve SSL
 
-- [ ] Site bazlı Nginx settings: upload size, proxy timeout, WebSocket, SPA fallback, cache/header/redirect; preview/diff/test/rollback backend'i ekle.
 - [ ] DNS/certificate/reload error diagnosis güvenli ve bounded olsun; private key API/public job/audit'e çıkmasın.
 
 ## H. P2 — Mail ve Roundcube

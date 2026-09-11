@@ -33,6 +33,47 @@ test('renders loopback Node proxy settings with websocket support', () => {
   assert.match(config, /proxy_set_header Connection "upgrade";/);
 });
 
+test('renders bounded per-site upload timeout websocket and response-header settings', () => {
+  const config = renderProxySiteConfig({
+    primaryDomain: 'settings.example.com',
+    upstreamPort: 3008,
+    nginxSettings: {
+      clientMaxBodySizeMb: 128,
+      proxyTimeoutSeconds: 90,
+      websocket: false,
+      headers: [
+        { name: 'X-Frame-Options', value: 'SAMEORIGIN', always: true },
+        { name: 'Referrer-Policy', value: 'strict-origin', always: false },
+      ],
+    },
+  });
+  assert.match(config, /client_max_body_size 128m;/);
+  assert.match(config, /proxy_connect_timeout 90s;/);
+  assert.match(config, /proxy_send_timeout 90s;/);
+  assert.match(config, /proxy_read_timeout 90s;/);
+  assert.match(config, /add_header X-Frame-Options "SAMEORIGIN" always;/);
+  assert.match(config, /add_header Referrer-Policy "strict-origin";/);
+  assert.equal(config.includes('proxy_set_header Upgrade'), false);
+});
+
+test('renders configurable SPA and static-asset cache policy', () => {
+  const config = renderStaticSiteConfig({
+    primaryDomain: 'static-settings.example.com',
+    root: '/var/www/static-settings',
+    nginxSettings: {
+      clientMaxBodySizeMb: null,
+      spaFallback: false,
+      staticAssetCacheSeconds: 0,
+      headers: [{ name: 'X-Content-Type-Options', value: 'nosniff', always: true }],
+    },
+  });
+  assert.match(config, /try_files \$uri \$uri\/ =404;/);
+  assert.match(config, /expires -1;/);
+  assert.match(config, /add_header Cache-Control "no-store" always;/);
+  assert.equal(config.includes('client_max_body_size'), false);
+  assert.equal(config.match(/add_header X-Content-Type-Options "nosniff" always;/g)?.length, 2);
+});
+
 test('renders canonical external DNS and IPv6 reverse proxy targets', () => {
   const dns = renderProxySiteConfig({
     primaryDomain: 'edge.example.com',

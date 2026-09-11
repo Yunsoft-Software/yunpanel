@@ -38,6 +38,12 @@ test('stages, validates and atomically activates a generated domain config', asy
     aliases: ['www.example.com'],
     targetType: 'static',
     target: { root: '/var/lib/yunpanel/apps/example/current', spaFallback: true },
+    nginxSettings: {
+      clientMaxBodySizeMb: 32,
+      spaFallback: false,
+      staticAssetCacheSeconds: null,
+      headers: [{ name: 'X-Frame-Options', value: 'SAMEORIGIN', always: true }],
+    },
   });
 
   assert.match(staged.checksum, /^[a-f0-9]{64}$/);
@@ -49,7 +55,12 @@ test('stages, validates and atomically activates a generated domain config', asy
   });
 
   assert.equal(activated.active, true);
-  assert.match(memory.files.get('/etc/nginx/sites-enabled/yunpanel-example.com.conf'), /server_name example\.com www\.example\.com;/);
+  const activeConfig = memory.files.get('/etc/nginx/sites-enabled/yunpanel-example.com.conf');
+  assert.match(activeConfig, /server_name example\.com www\.example\.com;/);
+  assert.match(activeConfig, /client_max_body_size 32m;/);
+  assert.match(activeConfig, /try_files \$uri \$uri\/ =404;/);
+  assert.match(activeConfig, /add_header X-Frame-Options "SAMEORIGIN" always;/);
+  assert.equal(activeConfig.includes('expires 7d'), false);
   assert.deepEqual(commands.map((command) => command.args), [
     ['-t'],
     ['reload', 'nginx'],

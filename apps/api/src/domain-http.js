@@ -97,6 +97,7 @@ export function createDomainHandler(domainRegistry) {
         httpsMode: request.body?.httpsMode ?? 'off',
         httpsRedirect: request.body?.httpsRedirect,
         canonicalRedirect: request.body?.canonicalRedirect ?? false,
+        nginxSettings: request.body?.nginxSettings,
       });
       return response.status(201).json({ data: domain });
     } catch (error) {

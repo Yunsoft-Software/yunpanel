@@ -1,13 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { assertUuid, DomainValidationError, normalizeDomainSet, normalizeProxyHost } from '@yunpanel/shared';
+import {
+  assertUuid,
+  DomainValidationError,
+  NginxSettingsValidationError,
+  normalizeDomainSet,
+  normalizeNginxSettings,
+  normalizeProxyHost,
+} from '@yunpanel/shared';
 import { DomainHierarchyError, validateDomainHierarchy, validateDomainParent } from './domain-hierarchy.js';
 
-const STORE_VERSION = 2;
+const STORE_VERSION = 3;
 const TARGET_TYPES = new Set(['static', 'proxy']);
 const HTTPS_MODES = new Set(['off', 'managed']);
-const UPDATE_FIELDS = new Set(['primaryDomain', 'aliases', 'httpsMode', 'httpsRedirect', 'canonicalRedirect']);
+const UPDATE_FIELDS = new Set(['primaryDomain', 'aliases', 'httpsMode', 'httpsRedirect', 'canonicalRedirect', 'nginxSettings']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 const DOMAIN_ERROR_DIAGNOSES = Object.freeze({
@@ -48,6 +55,13 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
     else if (domain.lastError !== null && (typeof domain.lastError !== 'string' || !/^[a-z0-9_]{1,120}$/.test(domain.lastError))) {
       domain.lastError = 'apply_failed';
     }
+  }
+  if (sourceVersion < 3) domain.nginxSettings = settingsFromTarget(domain.targetType, domain.target);
+  const normalizedSettings = settings(domain.targetType, domain.nginxSettings);
+  if (JSON.stringify(normalizedSettings) !== JSON.stringify(domain.nginxSettings)
+    || (domain.targetType === 'proxy' && domain.target?.websocket !== normalizedSettings.websocket)
+    || (domain.targetType === 'static' && domain.target?.spaFallback !== normalizedSettings.spaFallback)) {
+    throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain Nginx settings are invalid', 409);
   }
   if (typeof domain.canonicalRedirect !== 'boolean' || typeof domain.httpsRedirect !== 'boolean'
     || !HTTPS_MODES.has(domain.httpsMode) || (domain.httpsMode === 'off' && domain.httpsRedirect)
@@ -94,6 +108,7 @@ function publicDomain(domain) {
     websiteId: domain.websiteId ?? null,
     aliases: [...domain.aliases],
     target: { ...domain.target },
+    nginxSettings: { ...domain.nginxSettings, headers: domain.nginxSettings.headers.map((header) => ({ ...header })) },
     parentDomainId: domain.parentDomainId ?? null,
     kind: domain.parentDomainId == null ? 'domain' : 'subdomain',
     diagnosis: diagnosis(domain),
@@ -116,6 +131,26 @@ function validateTarget(targetType, target) {
   try { upstreamHost = normalizeProxyHost(target.upstreamHost ?? '127.0.0.1'); }
   catch { throw new DomainRegistryError('invalid_upstream_host', 'Proxy upstreamHost must be an IP address or DNS hostname without a URL scheme or path'); }
   return { upstreamHost, upstreamPort: target.upstreamPort, websocket: target.websocket !== false };
+}
+
+function settings(targetType, value, base = null) {
+  try { return normalizeNginxSettings(targetType, value, base); }
+  catch (error) {
+    if (error instanceof NginxSettingsValidationError) throw new DomainRegistryError(error.code, error.message);
+    throw error;
+  }
+}
+
+function settingsFromTarget(targetType, target) {
+  return settings(targetType, targetType === 'proxy'
+    ? { websocket: target?.websocket !== false }
+    : { spaFallback: target?.spaFallback !== false });
+}
+
+function targetWithSettings(targetType, target, nginxSettings) {
+  return targetType === 'proxy'
+    ? { ...target, websocket: nginxSettings.websocket }
+    : { ...target, spaFallback: nginxSettings.spaFallback };
 }
 
 function normalizeDomains(primaryDomain, aliases) {
@@ -186,7 +221,7 @@ function reparentDigest({ domainId, currentParentDomainId, nextParentDomainId, h
 function normalizedUpdate(domain, changes) {
   if (!changes || typeof changes !== 'object' || Array.isArray(changes)
     || Object.keys(changes).length < 1 || Object.keys(changes).some((key) => !UPDATE_FIELDS.has(key))) {
-    throw new DomainRegistryError('invalid_domain_update', 'Domain changes must contain only canonical hostname, aliases, HTTPS or redirect settings');
+    throw new DomainRegistryError('invalid_domain_update', 'Domain changes must contain only canonical hostname, HTTPS, redirect or Nginx settings');
   }
   const names = normalizeDomains(changes.primaryDomain ?? domain.primaryDomain, changes.aliases ?? domain.aliases);
   const httpsMode = changes.httpsMode ?? domain.httpsMode;
@@ -199,12 +234,16 @@ function normalizedUpdate(domain, changes) {
   if (typeof httpsRedirect !== 'boolean' || typeof canonicalRedirect !== 'boolean' || (httpsMode === 'off' && httpsRedirect)) {
     throw new DomainRegistryError('invalid_redirect_policy', 'Redirect policy is invalid for the selected HTTPS mode');
   }
+  const nginxSettings = Object.hasOwn(changes, 'nginxSettings')
+    ? settings(domain.targetType, changes.nginxSettings, domain.nginxSettings)
+    : settings(domain.targetType, domain.nginxSettings);
   return Object.freeze({
     primaryDomain: names.primary,
     aliases: Object.freeze([...names.aliases]),
     httpsMode,
     httpsRedirect,
     canonicalRedirect,
+    nginxSettings,
   });
 }
 
@@ -263,7 +302,7 @@ export function createDomainRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.domains)) throw new Error('unsupported or invalid domain registry state');
+        if (![1, 2, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.domains)) throw new Error('unsupported or invalid domain registry state');
         try {
           validateDomainHierarchy(parsed.domains);
           parsed.domains.forEach((domain) => hydrateDomain(domain, parsed.version));
@@ -337,7 +376,8 @@ export function createDomainRegistry({
     const policyChanged = next.httpsMode !== domain.httpsMode
       || next.httpsRedirect !== domain.httpsRedirect
       || next.canonicalRedirect !== domain.canonicalRedirect;
-    if (!hostnameChanged && !policyChanged) {
+    const settingsChanged = JSON.stringify(next.nginxSettings) !== JSON.stringify(domain.nginxSettings);
+    if (!hostnameChanged && !policyChanged && !settingsChanged) {
       throw new DomainRegistryError('domain_update_no_changes', 'Domain already has the requested routing settings', 409);
     }
     if (hostnameChanged) {
@@ -371,6 +411,16 @@ export function createDomainRegistry({
         requiresStageAndActivation: true,
         hostnameChanged,
         policyChanged,
+        settingsChanged,
+        nginxSettings: Object.freeze({
+          current: Object.freeze({
+            ...domain.nginxSettings,
+            headers: Object.freeze(domain.nginxSettings.headers.map((header) => Object.freeze({ ...header }))),
+          }),
+          next: next.nginxSettings,
+          changedFields: Object.freeze(Object.keys(next.nginxSettings)
+            .filter((field) => JSON.stringify(next.nginxSettings[field]) !== JSON.stringify(domain.nginxSettings[field]))),
+        }),
         activeConfigRename: domain.appliedPrimaryDomain !== null && domain.appliedPrimaryDomain !== next.primaryDomain,
         certificate: Object.freeze({
           id: domain.certificateId,
@@ -423,6 +473,11 @@ export function createDomainRegistry({
     domain.httpsMode = preview.next.httpsMode;
     domain.httpsRedirect = preview.next.httpsRedirect;
     domain.canonicalRedirect = preview.next.canonicalRedirect;
+    domain.nginxSettings = {
+      ...preview.next.nginxSettings,
+      headers: preview.next.nginxSettings.headers.map((header) => ({ ...header })),
+    };
+    domain.target = targetWithSettings(domain.targetType, domain.target, domain.nginxSettings);
     if (preview.impact.certificate.detached) domain.certificateId = null;
     domain.desiredRevision = preview.nextRevision;
     domain.stagedRevision = 0;
@@ -438,7 +493,8 @@ export function createDomainRegistry({
 
   async function createDomain({
     domainId = null, serverId, primaryDomain, aliases = [], targetType, target, httpsMode = 'off',
-    httpsRedirect = httpsMode === 'managed', canonicalRedirect = false, parentDomainId = null, websiteId = null,
+    httpsRedirect = httpsMode === 'managed', canonicalRedirect = false, nginxSettings = undefined,
+    parentDomainId = null, websiteId = null,
   }) {
     await ensureInitialized();
     if (typeof serverId !== 'string' || !serverId) throw new DomainRegistryError('invalid_server', 'serverId is required');
@@ -467,10 +523,19 @@ export function createDomainRegistry({
       && ownedNames(domain).some((ownedName) => requestedNames.has(ownedName)));
     if (conflict) throw new DomainRegistryError('domain_conflict', 'A domain or alias is already managed', 409);
 
+    const normalizedTarget = validateTarget(targetType, target);
+    const normalizedNginxSettings = settings(
+      targetType,
+      nginxSettings ?? {},
+      settingsFromTarget(targetType, normalizedTarget),
+    );
     const timestamp = new Date(now()).toISOString();
     const domain = {
       id: normalizedDomainId, serverId, websiteId: normalizedWebsiteId, primaryDomain: normalized.primary, parentDomainId,
-      aliases: normalized.aliases, targetType, target: validateTarget(targetType, target), httpsMode, httpsRedirect, canonicalRedirect,
+      aliases: normalized.aliases, targetType,
+      target: targetWithSettings(targetType, normalizedTarget, normalizedNginxSettings),
+      nginxSettings: { ...normalizedNginxSettings, headers: normalizedNginxSettings.headers.map((header) => ({ ...header })) },
+      httpsMode, httpsRedirect, canonicalRedirect,
       certificateId: null, appliedPrimaryDomain: null,
       state: 'draft', desiredRevision: 1, stagedRevision: 0, stagedChecksum: null, stagedConfigName: null,
       lastStagedAt: null, appliedRevision: 0, lastAppliedAt: null, lastError: null, createdAt: timestamp, updatedAt: timestamp,
@@ -481,6 +546,7 @@ export function createDomainRegistry({
         || existing.primaryDomain !== domain.primaryDomain || (existing.parentDomainId ?? null) !== domain.parentDomainId
         || JSON.stringify(existing.aliases) !== JSON.stringify(domain.aliases) || existing.targetType !== domain.targetType
         || JSON.stringify(existing.target) !== JSON.stringify(domain.target) || existing.httpsMode !== domain.httpsMode
+        || JSON.stringify(existing.nginxSettings) !== JSON.stringify(domain.nginxSettings)
         || existing.httpsRedirect !== domain.httpsRedirect || existing.canonicalRedirect !== domain.canonicalRedirect) {
         throw new DomainRegistryError('domain_identity_conflict', 'Domain identity conflicts with existing state', 409);
       }

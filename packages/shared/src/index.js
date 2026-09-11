@@ -43,3 +43,9 @@ export {
   normalizeProxyHost,
   ProxyTargetValidationError,
 } from './proxy-target.js';
+
+export {
+  NginxSettingsValidationError,
+  normalizeNginxSettings,
+  nginxSettingsPolicy,
+} from './nginx-settings.js';

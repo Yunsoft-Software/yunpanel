@@ -234,6 +234,9 @@ test('Domain routing update carries redirect policy and the previous canonical c
     assert.deepEqual(nextStage.payload.data.envelope.payload, {
       primaryDomain: 'new.example.com', aliases: ['www.new.example.com'], targetType: 'proxy',
       target: { upstreamHost: '127.0.0.1', upstreamPort: 3300, websocket: true },
+      nginxSettings: {
+        clientMaxBodySizeMb: null, proxyTimeoutSeconds: null, websocket: true, headers: [],
+      },
       canonicalRedirect: true, httpsRedirect: false,
     });
     const nextChecksum = 'b'.repeat(64);

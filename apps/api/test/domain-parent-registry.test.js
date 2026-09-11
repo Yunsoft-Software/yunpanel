@@ -91,14 +91,18 @@ test('corrupt saved parent relationships fail closed without rewriting state', a
   assert.equal(await readFile(filePath, 'utf8'), before);
 });
 
-test('public results do not allow mutation of stored targets or aliases', async () => {
+test('public results do not allow mutation of stored targets aliases or Nginx settings', async () => {
   const registry = createDomainRegistry();
   const result = await registry.createDomain(input());
   result.target.upstreamPort = 1;
   result.aliases.push('taken.example.com');
+  result.nginxSettings.websocket = false;
+  result.nginxSettings.headers.push({ name: 'X-Injected', value: 'yes', always: true });
   const stored = await registry.getDomain(result.id);
   assert.equal(stored.target.upstreamPort, 4301);
   assert.deepEqual(stored.aliases, []);
+  assert.equal(stored.nginxSettings.websocket, true);
+  assert.deepEqual(stored.nginxSettings.headers, []);
 });
 
 test('nested creation and existing staging lifecycle remain independent', async () => {

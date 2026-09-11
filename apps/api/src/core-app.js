@@ -559,6 +559,7 @@ export function createApp({
       httpsMode: request.body?.httpsMode ?? 'off',
       httpsRedirect: request.body?.httpsRedirect,
       canonicalRedirect: request.body?.canonicalRedirect ?? false,
+      nginxSettings: request.body?.nginxSettings,
     });
     return response.status(201).json({ data: domain });
   });
@@ -572,6 +573,7 @@ export function createApp({
       aliases: domain.aliases,
       targetType: domain.targetType,
       target: domain.target,
+      nginxSettings: domain.nginxSettings,
       canonicalRedirect: domain.canonicalRedirect,
       httpsRedirect: domain.httpsRedirect,
     };

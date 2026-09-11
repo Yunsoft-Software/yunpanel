@@ -36,6 +36,9 @@ test('Domain routing preview and apply update canonical names and detach a stale
   assert.deepEqual(preview.next, {
     primaryDomain: 'new.example.com', aliases: ['www.new.example.com'],
     httpsMode: 'managed', httpsRedirect: false, canonicalRedirect: true,
+    nginxSettings: {
+      clientMaxBodySizeMb: null, proxyTimeoutSeconds: null, websocket: true, headers: [],
+    },
   });
   assert.equal(preview.impact.hostnameChanged, true);
   assert.equal(preview.impact.policyChanged, true);
@@ -114,14 +117,14 @@ test('Domain diagnosis maps safe errors to concrete actions without copying host
   assert.doesNotMatch(JSON.stringify(hostile.diagnosis), /TOKEN|private|path/);
 });
 
-test('version one Domain state hydrates without rewrite and persists version two on mutation', async (t) => {
+test('version one Domain state hydrates without rewrite and persists version three on mutation', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-domain-update-'));
   const filePath = path.join(directory, 'domains.json');
   t.after(() => rm(directory, { recursive: true, force: true }));
   const seed = createDomainRegistry();
   const domain = await seed.createDomain(input('legacy.example.com', { aliases: [], httpsMode: 'off' }));
   const legacy = { ...domain };
-  for (const key of ['kind', 'diagnosis', 'canonicalRedirect', 'httpsRedirect', 'appliedPrimaryDomain']) delete legacy[key];
+  for (const key of ['kind', 'diagnosis', 'canonicalRedirect', 'httpsRedirect', 'appliedPrimaryDomain', 'nginxSettings']) delete legacy[key];
   legacy.state = 'active';
   legacy.stagedRevision = 1;
   legacy.appliedRevision = 1;
@@ -140,5 +143,81 @@ test('version one Domain state hydrates without rewrite and persists version two
   const changes = { canonicalRedirect: true };
   const preview = await registry.previewDomainUpdate({ domainId: domain.id, changes });
   await registry.updateDomain({ domainId: domain.id, changes, previewDigest: preview.previewDigest });
-  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, 2);
+  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, 3);
+});
+
+test('version two Domain state derives Nginx settings from its exact legacy target without eager rewrite', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-domain-nginx-v2-'));
+  const filePath = path.join(directory, 'domains.json');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const seed = createDomainRegistry();
+  const domain = await seed.createDomain(input('legacy-v2.example.com', {
+    aliases: [], httpsMode: 'off', target: { upstreamPort: 4301, websocket: false },
+  }));
+  const legacy = { ...domain };
+  for (const key of ['kind', 'diagnosis', 'nginxSettings']) delete legacy[key];
+  const before = JSON.stringify({ version: 2, domains: [legacy] });
+  await writeFile(filePath, before);
+
+  const registry = createDomainRegistry({ filePath });
+  const loaded = await registry.getDomain(domain.id);
+  assert.deepEqual(loaded.nginxSettings, {
+    clientMaxBodySizeMb: null, proxyTimeoutSeconds: null, websocket: false, headers: [],
+  });
+  assert.equal(await readFile(filePath, 'utf8'), before);
+
+  const changes = { nginxSettings: { proxyTimeoutSeconds: 45 } };
+  const preview = await registry.previewDomainUpdate({ domainId: domain.id, changes });
+  await registry.updateDomain({ domainId: domain.id, changes, previewDigest: preview.previewDigest });
+  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, 3);
+});
+
+test('Domain Nginx settings preview exposes an exact diff and applies target invariants', async () => {
+  const registry = createDomainRegistry();
+  const domain = await registry.createDomain(input('settings.example.com', { aliases: [], httpsMode: 'off' }));
+  const nginxSettings = {
+    clientMaxBodySizeMb: 128,
+    proxyTimeoutSeconds: 90,
+    websocket: false,
+    headers: [{ name: 'X-Frame-Options', value: 'SAMEORIGIN', always: true }],
+  };
+  const preview = await registry.previewDomainUpdate({ domainId: domain.id, changes: { nginxSettings } });
+  assert.equal(preview.impact.hostnameChanged, false);
+  assert.equal(preview.impact.policyChanged, false);
+  assert.equal(preview.impact.settingsChanged, true);
+  assert.deepEqual(preview.impact.nginxSettings.changedFields, [
+    'clientMaxBodySizeMb', 'proxyTimeoutSeconds', 'websocket', 'headers',
+  ]);
+  assert.deepEqual(preview.impact.nginxSettings.current, domain.nginxSettings);
+  assert.deepEqual(preview.impact.nginxSettings.next, nginxSettings);
+
+  const result = await registry.updateDomain({
+    domainId: domain.id,
+    changes: { nginxSettings },
+    previewDigest: preview.previewDigest,
+  });
+  assert.deepEqual(result.domain.nginxSettings, nginxSettings);
+  assert.equal(result.domain.target.websocket, false);
+  assert.equal(result.domain.state, 'draft');
+  assert.equal(result.domain.certificateId, null);
+});
+
+test('Domain Nginx settings reject target mismatch and unsafe response headers before mutation', async () => {
+  const registry = createDomainRegistry();
+  const proxy = await registry.createDomain(input('proxy-settings.example.com', { aliases: [], httpsMode: 'off' }));
+  const staticDomain = await registry.createDomain(input('static-settings.example.com', {
+    aliases: [], targetType: 'static', target: { root: '/var/www/static-settings' }, httpsMode: 'off',
+  }));
+  for (const [domain, nginxSettings] of [
+    [proxy, { spaFallback: false }],
+    [staticDomain, { proxyTimeoutSeconds: 60 }],
+    [proxy, { headers: [{ name: 'Set-Cookie', value: 'admin=true', always: true }] }],
+  ]) {
+    await assert.rejects(
+      registry.previewDomainUpdate({ domainId: domain.id, changes: { nginxSettings } }),
+      (error) => error instanceof DomainRegistryError,
+    );
+  }
+  assert.equal((await registry.getDomain(proxy.id)).nginxSettings.websocket, true);
+  assert.equal((await registry.getDomain(staticDomain.id)).nginxSettings.spaFallback, true);
 });

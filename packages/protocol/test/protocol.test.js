@@ -94,7 +94,13 @@ test('validates domain mutation payloads before they reach the agent handler', (
       primaryDomain: 'example.com',
       aliases: ['www.example.com'],
       targetType: 'proxy',
-      target: { upstreamPort: 3000 },
+      target: { upstreamPort: 3000, websocket: false },
+      nginxSettings: {
+        clientMaxBodySizeMb: 64,
+        proxyTimeoutSeconds: 120,
+        websocket: false,
+        headers: [{ name: 'X-Frame-Options', value: 'SAMEORIGIN', always: true }],
+      },
       canonicalRedirect: true,
       httpsRedirect: false,
     },
@@ -110,6 +116,20 @@ test('validates domain mutation payloads before they reach the agent handler', (
   });
   assert.equal(invalidRedirect.ok, false);
   assert.match(invalidRedirect.errors.join(' '), /canonicalRedirect/);
+
+  const invalidNginxSettings = validateOperationEnvelope({
+    id: 'request-0003c',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: {
+      primaryDomain: 'example.com', targetType: 'proxy', target: { upstreamPort: 3000, websocket: true },
+      nginxSettings: {
+        clientMaxBodySizeMb: null, proxyTimeoutSeconds: 30, websocket: false, headers: [],
+      },
+    },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(invalidNginxSettings.ok, false);
+  assert.match(invalidNginxSettings.errors.join(' '), /nginxSettings/);
 
   const invalidActivation = validateOperationEnvelope({
     id: 'request-0004',

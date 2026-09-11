@@ -134,7 +134,11 @@ test('HTTP reparent rejects unknown body fields and stale digest without mutatio
 test('HTTP Domain update requires current preview and exact typed confirmation', async () => {
   const registry = createDomainRegistry();
   const domain = await registry.createDomain(body);
-  const changes = { aliases: ['www.example.com'], canonicalRedirect: true };
+  const changes = {
+    aliases: ['www.example.com'],
+    canonicalRedirect: true,
+    nginxSettings: { clientMaxBodySizeMb: 64, proxyTimeoutSeconds: 30, websocket: false, headers: [] },
+  };
   const previewResponse = responseRecorder();
   await createDomainUpdatePreviewHandler(registry)(
     { params: { domainId: domain.id }, body: { changes } },
@@ -162,6 +166,8 @@ test('HTTP Domain update requires current preview and exact typed confirmation',
   );
   assert.deepEqual(applied.payload.data.domain.aliases, ['www.example.com']);
   assert.equal(applied.payload.data.domain.canonicalRedirect, true);
+  assert.equal(applied.payload.data.domain.nginxSettings.proxyTimeoutSeconds, 30);
+  assert.equal(applied.payload.data.domain.target.websocket, false);
 });
 
 test('HTTP Domain update rejects unknown outer fields and stale digests', async () => {
