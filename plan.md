@@ -19,10 +19,9 @@ Doğrudan güncel `main` üzerinde küçük, tek amaçlı commitlerle ilerle. Gi
 
 ## C. P1 — Kalıcı Website modeli ve domain yaşam döngüsü
 
-Kalıcı Website registry/API/persistence, revisioned update/rebind impact akışı, explicit Domain `websiteId`, Website/Application startup foreign-key doğrulaması, IDN→punycode canonicalization, explicit Website→Domain read, read-only migration preview, deterministic preview digest, durable ve tekrar çalıştırılabilir Website-create/bind orchestration'ı, migration-only binding rollback ledger'ı ve persistent compatibility/enforced policy status/finalize/rollback source seviyesinde mevcut. Enforced policy yeni managed domainlerde explicit Website binding ister; legacy state compatibility rollback için okunabilir kalır.
+Kalıcı Website registry/API/persistence, revisioned update/rebind impact akışı, explicit Domain `websiteId`, Website/Application startup foreign-key doğrulaması, IDN→punycode canonicalization, explicit Website→Domain read, read-only migration preview, deterministic preview digest, durable ve tekrar çalıştırılabilir Website-create/bind migration'ı, guarded site-create orchestration'ı, migration-only binding rollback ledger'ı ve persistent compatibility/enforced policy status/finalize/rollback source seviyesinde mevcut. Site-create existing/new static/Node ve external proxy kaynaklarını, backend-managed portu, explicit `www` alias/child seçimini, stale preview korumasını ve kesinti sonrası deterministic devamı kapsar; Docker target dürüstçe deferred kalır. Enforced policy yeni managed domainlerde explicit Website binding ister; legacy state compatibility rollback için okunabilir kalır.
 
-- [ ] Site-create orchestration ekle: existing/new static veya Node application, external reverse proxy ve ileride Docker target; canonical document root ve collision-free port backend tarafından üretilsin. `www` alias mı bağımsız hostname mı explicit seçim olsun.
-- [ ] Website, web hostname/domain, DNS hosting ve mail-domain lifecycle'larını ayır; hostname create DNS publish veya mailbox create anlamına gelmesin.
+- [ ] DNS hosting ve mail-domain için bağımsız kalıcı resource/lifecycle adapterları ekle; Website/hostname create bu kaynakları örtülü mutate etmesin.
 - [ ] Website/domain move-delete impact preview API'si ekle. Child domain, application, certificate, mailbox, backup ve ileride cron/Docker bağımlılıkları listelensin; varsayılan davranış fail-closed, örtülü cascade yok.
 
 ## D. DEFERRED — Görsel UI/UX
@@ -32,7 +31,7 @@ Aktif geliştirme dışı. Enterprise layout/component styling/data-table görü
 ## E. P2 — Node.js, static ve Git functionality
 
 - [ ] Node application management: enable/disable, explicit start/stop, runtime, startup file/npm script, package manager, mode ve document-root yönetimi. Mevcut deploy/restart/status/rollback akışını yeniden yazma.
-- [ ] Hosttaki kurulu Node sürümlerini inspect et; eksik runtime install/select ve collision-free port allocation ekle. Panelin kendi Node runtime'ı site runtime seçimiyle değişmemeli.
+- [ ] Hosttaki kurulu Node sürümlerini inspect et; eksik runtime install/select ekle. Panelin kendi Node runtime'ı site runtime seçimiyle değişmemeli.
 - [ ] Git deploy'a explicit commit/tag seçimi ve private deploy key/token secret store ekle. Clone/fetch/install/build site Unix user'ıyla çalışmalı.
 - [ ] Env import validation, change metadata ve `saved-on-disk` / `applied-to-running-process` ayrımı ekle.
 - [ ] Node/systemd/Nginx/deploy için bounded, redacted log stream/search/filter/download backend'i geliştir.

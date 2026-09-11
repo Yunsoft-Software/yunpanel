@@ -1,5 +1,5 @@
 import express from 'express';
-import { createApplicationRegistry } from './application-registry.js';
+import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
 import { createApp as createCoreApp } from './core-app.js';
 import { DatabaseHttpError, mountDatabaseRoutes } from './database-http.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
@@ -8,6 +8,8 @@ import { createJobRegistry, JobRegistryError } from './job-registry.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
+import { SiteCreateError } from './site-create.js';
+import { mountSiteCreateRoutes } from './site-create-http.js';
 import { mountWebsiteRoutes } from './website-http.js';
 import { WebsiteMigrationBindError } from './website-migration-bind.js';
 import { WebsiteMigrationCreateError } from './website-migration-create.js';
@@ -45,6 +47,7 @@ export function createApp({
   app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry));
   app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry));
   app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry));
+  mountSiteCreateRoutes(app, { registry, applicationRegistry, websiteRegistry, domainRegistry });
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry });
   mountWebsiteMigrationRoutes(app, {
     websiteRegistry,
@@ -60,10 +63,12 @@ export function createApp({
     if (response.headersSent) return next(error);
     if (
       error instanceof DatabaseHttpError
+      || error instanceof ApplicationRegistryError
       || error instanceof DomainRegistryError
       || error instanceof RegistryError
       || error instanceof JobRegistryError
       || error instanceof ManagedServiceHttpError
+      || error instanceof SiteCreateError
       || error instanceof WebsiteMigrationBindError
       || error instanceof WebsiteMigrationCreateError
       || error instanceof WebsiteMigrationLedgerError

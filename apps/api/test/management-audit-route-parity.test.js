@@ -10,6 +10,7 @@ const apiSource = path.resolve(testDirectory, '../src');
 const SOURCE_FILES = [
   'app.js',
   'core-app.js',
+  'site-create-http.js',
   'website-http.js',
   'website-migration-http.js',
   'managed-service-http.js',
@@ -78,6 +79,15 @@ test('Website creation and migration mutations are part of common management aud
   });
   assert.deepEqual(classifyManagementMutation('PATCH', '/api/websites/website-1'), {
     action: 'website.update', resourceType: 'website', resourceId: 'website-1',
+  });
+});
+
+test('site creation preview and apply have bounded common audit identities', () => {
+  assert.deepEqual(classifyManagementMutation('POST', '/api/sites/create-preview'), {
+    action: 'site.create.preview', resourceType: 'site', resourceId: 'new',
+  });
+  assert.deepEqual(classifyManagementMutation('POST', '/api/sites'), {
+    action: 'site.create', resourceType: 'site', resourceId: 'new',
   });
 });
 

@@ -12,7 +12,7 @@ The privileged execution target is the local `yunpanel-api` runtime rather than 
 
 The old `yun-agent` package/service remains temporarily only as a rollback bridge for hosts that were enrolled before the agentless migration. New enrollment-token provisioning, the enrollment HTTP endpoint, the first-enrollment agent client path and its auth bypass are retired. Existing legacy heartbeat/command/environment/result transport is retained only until real migration + rollback acceptance passes; local-owned server identities reject that channel with `server_managed_locally`.
 
-**The complete hosting target is not implemented yet.** Site routes still rely on the existing domain/application model instead of the planned persistent Website identity. Files, cron, general-purpose backups, terminal, full Docker lifecycle and mail management remain incomplete where their real backends are missing.
+**The complete hosting target is not implemented yet.** Persistent Website/Domain identities and the guarded backend site-create API exist, but the routed frontend does not yet expose that complete orchestration. Files, cron, general-purpose backups, terminal, full Docker lifecycle and mail management remain incomplete where their real backends are missing.
 
 See [plan.md](plan.md) for remaining implementation work, [todo.md](todo.md) for supported-runtime/browser/package/real-host acceptance, and [agents.md](agents.md) for binding development rules. Completed tasks leave the task lists; implementation history stays in Git. Unless explicitly requested otherwise, work directly on `main` in small commits. Do not add GitHub Actions.
 
@@ -39,6 +39,7 @@ Do not replace structured operations with an unauthenticated generic shell or ma
 - Dashboard and server views based on persisted inventory rather than fabricated metrics; unavailable values remain unknown.
 - Owner/Read Only route and HTTP boundaries, initial Owner setup, native Argon2id hashing, private SQLite session/user persistence and mandatory Owner MFA for HTTPS management.
 - Explicit domain/subdomain parent references, aliases, Nginx stage/activate and ACME issue/manual-renew/automatic-renewal foundations.
+- Preview/confirmation-gated site creation for existing/new static or Node applications and external reverse proxies, with deterministic retry identities, backend-assigned managed Node ports and explicit `www` alias/child choices.
 - Static deploy/rollback and Node deploy/restart/status/rollback with dedicated application users, health checks and guarded rollback behavior.
 - AES-256-GCM application environment storage, masked metadata and execution-time secret materialization without putting plaintext environment values into generic job records.
 - Managed-service inspect/install/start/stop/restart support for the current allowlisted host services.

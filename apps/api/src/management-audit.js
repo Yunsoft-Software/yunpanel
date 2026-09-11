@@ -17,6 +17,8 @@ export function classifyManagementMutation(method, pathname) {
   if (!MUTATION_METHODS.has(method) || typeof pathname !== 'string') return null;
   let parts;
 
+  if (method === 'POST' && pathname === '/api/sites/create-preview') return { action: 'site.create.preview', resourceType: 'site', resourceId: 'new' };
+  if (method === 'POST' && pathname === '/api/sites') return { action: 'site.create', resourceType: 'site', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/websites') return { action: 'website.create', resourceType: 'website', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/websites/migration/create-website') return { action: 'website.migration.create', resourceType: 'website_migration', resourceId: 'create' };
   if (method === 'POST' && pathname === '/api/websites/migration/bind') return { action: 'website.migration.bind', resourceType: 'website_migration', resourceId: 'bind' };

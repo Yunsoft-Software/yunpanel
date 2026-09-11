@@ -27,6 +27,30 @@ Current domain hierarchy rules:
 - an explicit Website binding requires an existing Website on the same server,
 - a legacy unbound domain can migrate one-way from `websiteId=null` to one exact Website; general rebind remains blocked until impact-preview/move semantics exist.
 
+## Guarded site creation
+
+Owner-only site creation uses two authenticated management endpoints:
+
+```text
+POST /api/sites/create-preview
+POST /api/sites
+```
+
+Preview accepts exactly one `input` object. Apply accepts that same input plus the exact current `previewDigest` and typed `confirmation` returned by preview. Both routes require the normal Owner session, Origin, CSRF and MFA management boundary; Read Only is denied before registry access. Both enter the bounded common management audit without persisting request bodies, repository URLs, proxy targets, digests or confirmation text.
+
+The input requires a caller-generated UUID `operationId`, `serverId`, display `name`, canonicalized `primaryDomain`, explicit nullable `parentDomainId`, `wwwMode`, `httpsMode` and one source:
+
+- `existing_application` binds one existing same-server static or Node Application that is not already bound to another Website,
+- `new_static` creates a deterministic Application with its canonical managed document root,
+- `new_node` creates a deterministic Application and assigns the first collision-free managed port after considering same-server Node Applications and loopback Domain targets; callers cannot supply the port,
+- `external_proxy` creates no Application and accepts only a validated DNS/IP host, port and WebSocket flag.
+
+Docker is reported as explicitly unsupported rather than creating a placeholder resource. `wwwMode=alias` keeps `www` as an alias on the primary Domain; `wwwMode=independent` creates a separate child Domain with an explicit parent; `none` creates neither. No parent is inferred from hostname labels.
+
+The operation ID deterministically derives the new Application, Website and Domain IDs. Exact retries are idempotent. If the process stops after an earlier resource is persisted, a new preview reports the completed steps and apply resumes from those resources without duplicating them. Reusing the operation ID for different immutable input, conflicting hostname ownership, changed same-server state or a stale digest fails before further mutation.
+
+Site creation establishes only control-plane Application/Website/hostname desired state. `lifecycle.dnsPublished`, `certificateIssued` and `mailDomainCreated` remain false. `httpsMode=managed` expresses certificate intent on the Domain but does not claim ACME issuance. DNS provider changes, Nginx activation, deploy, certificate issuance and mail provisioning retain their separate guarded job/lifecycle paths.
+
 ## Hostname normalization
 
 Shared hostname validation canonicalizes internationalized domain names through Node's UTS-46/ASCII conversion. Unicode and equivalent punycode forms persist and compare in one ASCII representation. Unicode dot variants are normalized before conversion.
@@ -73,7 +97,7 @@ Migration Website create/bind and binding rollback use a durable ledger so inter
 
 ## DNS, SSL and mail separation
 
-Website/domain identity, DNS hosting/provider state, certificate state and mail-domain/mailbox state remain separate lifecycles. Creating or binding a hostname does not mean DNS propagated, a certificate exists or mail is configured.
+Website/domain identity, DNS hosting/provider state, certificate state and mail-domain/mailbox state remain separate lifecycles. Creating or binding a hostname does not mean DNS propagated, a certificate exists or mail is configured. The site-create result exposes those three external lifecycle outcomes as false rather than fabricating success.
 
 Nginx stage/activate and managed certificate issue/renew continue through durable jobs and operation-specific recovery. Do not replace them with generic retry/force-success behavior.
 
