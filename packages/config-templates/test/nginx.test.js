@@ -71,6 +71,60 @@ test('renders managed HTTPS with HTTP ACME challenge and redirect', () => {
   assert.match(config, /proxy_pass http:\/\/127\.0\.0\.1:3100;/);
 });
 
+test('serves HTTP alongside HTTPS when HTTPS redirect is disabled', () => {
+  const config = renderProxySiteConfig({
+    primaryDomain: 'secure.example.com',
+    aliases: ['www.secure.example.com'],
+    upstreamPort: 3100,
+    httpsRedirect: false,
+    tls: {
+      fullchainPath: '/etc/letsencrypt/live/secure.example.com/fullchain.pem',
+      privateKeyPath: '/etc/letsencrypt/live/secure.example.com/privkey.pem',
+    },
+  });
+  assert.equal(config.includes('return 301'), false);
+  assert.equal(config.match(/proxy_pass http:\/\/127\.0\.0\.1:3100;/g)?.length, 2);
+  assert.match(config, /listen 80;/);
+  assert.match(config, /listen 443 ssl;/);
+});
+
+test('redirects aliases to the canonical primary hostname on HTTP and HTTPS', () => {
+  const config = renderStaticSiteConfig({
+    primaryDomain: 'example.com',
+    aliases: ['www.example.com', 'example.net'],
+    root: '/var/www/yunpanel/apps/example/current',
+    canonicalRedirect: true,
+    tls: {
+      fullchainPath: '/etc/letsencrypt/live/example.com/fullchain.pem',
+      privateKeyPath: '/etc/letsencrypt/live/example.com/privkey.pem',
+    },
+  });
+  assert.match(config, /server_name example\.com;/);
+  assert.match(config, /server_name www\.example\.com example\.net;/);
+  assert.equal(config.match(/return 301 https:\/\/example\.com\$request_uri;/g)?.length, 3);
+  assert.equal(config.match(/\.well-known\/acme-challenge/g)?.length, 2);
+  assert.equal(config.match(/root \/var\/www\/yunpanel\/apps\/example\/current;/g)?.length, 1);
+});
+
+test('canonical HTTP aliases stay on HTTP until a certificate is attached', () => {
+  const config = renderProxySiteConfig({
+    primaryDomain: 'api.example.com',
+    aliases: ['old.example.com'],
+    upstreamPort: 3100,
+    canonicalRedirect: true,
+    httpsRedirect: true,
+  });
+  assert.match(config, /return 301 http:\/\/api\.example\.com\$request_uri;/);
+  assert.equal(config.includes('listen 443 ssl;'), false);
+});
+
+test('rejects non-boolean redirect policy values', () => {
+  assert.throws(
+    () => renderProxySiteConfig({ primaryDomain: 'api.example.com', upstreamPort: 3100, canonicalRedirect: 'yes' }),
+    (error) => error instanceof NginxTemplateError && error.code === 'invalid_redirect_policy',
+  );
+});
+
 test('rejects config injection through domain, path, upstream and TLS inputs', () => {
   assert.throws(
     () => renderStaticSiteConfig({ primaryDomain: 'example.com; include /etc/shadow', root: '/var/www/site' }),

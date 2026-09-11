@@ -82,3 +82,17 @@ test('active config drift leaves the running activation unresolved', async () =>
   await assert.rejects(recoverRunningDomainActivation(fx.options), { code: 'job_domain_activation_recovery_evidence_not_satisfied' });
   assert.deepEqual(fx.events, ['get', 'context', 'receipt', 'evidence']);
 });
+
+test('unsafe previous canonical identity is rejected before receipt or host inspection', async () => {
+  const fx = fixture();
+  fx.options.loadJobContext = async () => {
+    fx.events.push('context');
+    return {
+      id: jobId, serverId, status: 'running', operation: OPERATIONS.DOMAIN_ACTIVATE,
+      resourceType: 'domain', resourceId,
+      payload: { primaryDomain: 'example.com', previousPrimaryDomain: '/etc/nginx', checksum },
+    };
+  };
+  await assert.rejects(recoverRunningDomainActivation(fx.options), { code: 'job_domain_activation_recovery_context_mismatch' });
+  assert.deepEqual(fx.events, ['get', 'context']);
+});

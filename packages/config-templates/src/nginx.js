@@ -38,7 +38,7 @@ function assertUpstreamHost(value) {
 
 function serverNames(primaryDomain, aliases) {
   const domains = normalizeDomainSet(primaryDomain, aliases);
-  return [domains.primary, ...domains.aliases].join(' ');
+  return { primary: domains.primary, aliases: domains.aliases, all: [domains.primary, ...domains.aliases].join(' ') };
 }
 
 function acmeLocation(acmeRoot) {
@@ -58,12 +58,51 @@ function normalizeTls(tls) {
   };
 }
 
-function httpPreamble(names, acmeRoot, tls) {
-  if (!tls) {
-    return `server {\n  listen 80;\n  listen [::]:80;\n  server_name ${names};\n\n${acmeLocation(acmeRoot)}`;
+function redirectBody(destination) {
+  return `  location / {\n    return 301 ${destination}$request_uri;\n  }`;
+}
+
+function serverBlock({ names, body, acmeRoot = null, tls = null }) {
+  const listen = tls
+    ? '  listen 443 ssl;\n  listen [::]:443 ssl;'
+    : '  listen 80;\n  listen [::]:80;';
+  const acme = acmeRoot ? `\n\n${acmeLocation(acmeRoot)}` : '';
+  const certificates = tls
+    ? `\n\n  ssl_certificate ${tls.fullchainPath};\n  ssl_certificate_key ${tls.privateKeyPath};`
+    : '';
+  return `server {\n${listen}\n  server_name ${names};${acme}${certificates}\n\n${body}\n}`;
+}
+
+function renderServerSet({ primaryDomain, aliases, acmeRoot, tls, body, canonicalRedirect, httpsRedirect }) {
+  if (typeof canonicalRedirect !== 'boolean' || typeof httpsRedirect !== 'boolean') {
+    throw new NginxTemplateError('invalid_redirect_policy', 'Redirect policies must be boolean values');
+  }
+  const names = serverNames(primaryDomain, aliases);
+  const blocks = [];
+  if (!canonicalRedirect) {
+    const httpBody = tls && httpsRedirect ? redirectBody('https://$host') : body;
+    blocks.push(serverBlock({ names: names.all, body: httpBody, acmeRoot }));
+    if (tls) blocks.push(serverBlock({ names: names.all, body, tls }));
+    return `${blocks.join('\n\n')}\n`;
   }
 
-  return `server {\n  listen 80;\n  listen [::]:80;\n  server_name ${names};\n\n${acmeLocation(acmeRoot)}\n\n  location / {\n    return 301 https://$host$request_uri;\n  }\n}\n\nserver {\n  listen 443 ssl;\n  listen [::]:443 ssl;\n  server_name ${names};\n\n  ssl_certificate ${tls.fullchainPath};\n  ssl_certificate_key ${tls.privateKeyPath};`;
+  const primaryHttpBody = tls && httpsRedirect ? redirectBody(`https://${names.primary}`) : body;
+  blocks.push(serverBlock({ names: names.primary, body: primaryHttpBody, acmeRoot }));
+  if (names.aliases.length > 0) {
+    const aliasScheme = tls && httpsRedirect ? 'https' : 'http';
+    blocks.push(serverBlock({
+      names: names.aliases.join(' '),
+      body: redirectBody(`${aliasScheme}://${names.primary}`),
+      acmeRoot,
+    }));
+  }
+  if (tls) {
+    blocks.push(serverBlock({ names: names.primary, body, tls }));
+    if (names.aliases.length > 0) {
+      blocks.push(serverBlock({ names: names.aliases.join(' '), body: redirectBody(`https://${names.primary}`), tls }));
+    }
+  }
+  return `${blocks.join('\n\n')}\n`;
 }
 
 function staticBody({ root, spaFallback }) {
@@ -86,14 +125,13 @@ export function renderStaticSiteConfig({
   spaFallback = true,
   acmeRoot = '/var/lib/yunpanel/acme',
   tls = null,
+  canonicalRedirect = false,
+  httpsRedirect = true,
 }) {
   const safeRoot = assertSafeAbsolutePath(root, 'root');
-  const names = serverNames(primaryDomain, aliases);
   const normalizedTls = normalizeTls(tls);
-  const preamble = httpPreamble(names, acmeRoot, normalizedTls);
   const body = staticBody({ root: safeRoot, spaFallback });
-
-  return `${preamble}\n\n${body}\n}\n`;
+  return renderServerSet({ primaryDomain, aliases, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect });
 }
 
 export function renderProxySiteConfig({
@@ -104,15 +142,14 @@ export function renderProxySiteConfig({
   websocket = true,
   acmeRoot = '/var/lib/yunpanel/acme',
   tls = null,
+  canonicalRedirect = false,
+  httpsRedirect = true,
 }) {
-  const names = serverNames(primaryDomain, aliases);
   const host = assertUpstreamHost(upstreamHost);
   const port = assertUpstreamPort(upstreamPort);
   const normalizedTls = normalizeTls(tls);
-  const preamble = httpPreamble(names, acmeRoot, normalizedTls);
   const body = proxyBody({ host, port, websocket });
-
-  return `${preamble}\n\n${body}\n}\n`;
+  return renderServerSet({ primaryDomain, aliases, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect });
 }
 
 export function nginxConfigFileName(primaryDomain) {

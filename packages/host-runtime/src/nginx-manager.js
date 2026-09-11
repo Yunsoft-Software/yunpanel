@@ -41,7 +41,13 @@ function renderDomainConfig(spec) {
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
     throw new NginxManagerError('invalid_domain_spec', 'Domain spec must be an object');
   }
-  const common = { primaryDomain: spec.primaryDomain, aliases: spec.aliases ?? [], tls: spec.tls ?? null };
+  const common = {
+    primaryDomain: spec.primaryDomain,
+    aliases: spec.aliases ?? [],
+    tls: spec.tls ?? null,
+    canonicalRedirect: spec.canonicalRedirect === true,
+    httpsRedirect: spec.httpsRedirect !== false,
+  };
   if (spec.targetType === 'static') {
     return renderStaticSiteConfig({ ...common, root: spec.target?.root, spaFallback: spec.target?.spaFallback !== false });
   }
@@ -115,7 +121,7 @@ export function createNginxManager({
     };
   }
 
-  async function inspectActiveDomain({ primaryDomain, checksum } = {}) {
+  async function inspectActiveDomain({ primaryDomain, previousPrimaryDomain = null, checksum } = {}) {
     if (typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
       throw new NginxManagerError('invalid_checksum', 'A SHA-256 active configuration checksum is required');
     }
@@ -129,6 +135,17 @@ export function createNginxManager({
       throw new NginxManagerError('active_config_inspection_failed', 'Active Nginx configuration could not be inspected');
     }
     if (sha256(current) !== checksum) return { satisfied: false, result: null };
+    if (previousPrimaryDomain !== null && previousPrimaryDomain !== primaryDomain) {
+      const previousPath = path.join(sitesDir, configNameForDomain(previousPrimaryDomain));
+      try {
+        await readFileFn(previousPath, 'utf8');
+        return { satisfied: false, result: null };
+      } catch (error) {
+        if (error?.code !== 'ENOENT') {
+          throw new NginxManagerError('active_config_inspection_failed', 'Active Nginx configuration could not be inspected');
+        }
+      }
+    }
     return { satisfied: true, result: { configName, checksum, active: true } };
   }
 
@@ -140,13 +157,17 @@ export function createNginxManager({
     await atomicWrite(activePath, previousContent, 0o644);
   }
 
-  async function activateNow({ primaryDomain, checksum }) {
+  async function activateNow({ primaryDomain, previousPrimaryDomain = null, checksum }) {
     if (typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
       throw new NginxManagerError('invalid_checksum', 'A SHA-256 staging checksum is required');
     }
     const configName = configNameForDomain(primaryDomain);
     const stagePath = path.join(stagingDir, configName);
     const activePath = path.join(sitesDir, configName);
+    const previousConfigName = previousPrimaryDomain === null ? null : configNameForDomain(previousPrimaryDomain);
+    const previousActivePath = previousConfigName && previousConfigName !== configName
+      ? path.join(sitesDir, previousConfigName)
+      : null;
     let candidate;
     try { candidate = await readFileFn(stagePath, 'utf8'); }
     catch { throw new NginxManagerError('staged_config_missing', 'Staged Nginx configuration was not found'); }
@@ -155,19 +176,38 @@ export function createNginxManager({
     let previousContent = null;
     try { previousContent = await readFileFn(activePath, 'utf8'); }
     catch (error) { if (error?.code !== 'ENOENT') throw error; }
+    let renamedPreviousContent = null;
+    if (previousActivePath) {
+      try { renamedPreviousContent = await readFileFn(previousActivePath, 'utf8'); }
+      catch (error) { if (error?.code !== 'ENOENT') throw error; }
+    }
 
-    await mkdirFn(sitesDir, { recursive: true, mode: 0o755 });
-    await atomicWrite(activePath, candidate, 0o644);
+    async function restorePreviousConfiguration() {
+      await restoreActive(activePath, previousContent);
+      if (previousActivePath) await restoreActive(previousActivePath, renamedPreviousContent);
+    }
+
+    try {
+      await mkdirFn(sitesDir, { recursive: true, mode: 0o755 });
+      await atomicWrite(activePath, candidate, 0o644);
+      if (previousActivePath) await rmFn(previousActivePath, { force: true });
+    } catch {
+      try { await restorePreviousConfiguration(); }
+      catch { throw new NginxManagerError('nginx_rollback_failed', 'Nginx activation preparation failed and rollback could not be confirmed'); }
+      throw new NginxManagerError('nginx_activation_prepare_failed', 'Nginx activation could not replace the active configuration');
+    }
     try {
       await execFn(nginxPath, ['-t']);
     } catch {
-      await restoreActive(activePath, previousContent);
+      try { await restorePreviousConfiguration(); }
+      catch { throw new NginxManagerError('nginx_rollback_failed', 'Nginx rejected the staged configuration and rollback could not be confirmed'); }
       throw new NginxManagerError('nginx_config_invalid', 'Nginx rejected the staged configuration');
     }
     try {
       await execFn(systemctlPath, ['reload', 'nginx']);
     } catch {
-      await restoreActive(activePath, previousContent);
+      try { await restorePreviousConfiguration(); }
+      catch { throw new NginxManagerError('nginx_rollback_failed', 'Nginx reload failed and rollback could not be confirmed'); }
       try {
         await execFn(nginxPath, ['-t']);
         await execFn(systemctlPath, ['reload', 'nginx']);

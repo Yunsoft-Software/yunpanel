@@ -1,4 +1,5 @@
 import { OPERATIONS } from '@yunpanel/protocol';
+import { normalizeDomainSet } from '@yunpanel/shared';
 import { inspectDurableJobRecovery } from './job-recovery-inspection.js';
 import { reconcileCompletedJob } from './job-reconciliation.js';
 
@@ -45,16 +46,29 @@ function assertCandidate(candidate, identity) {
   }
 }
 
+function normalizePersistedDomain(value, { nullable = false } = {}) {
+  if (nullable && value == null) return null;
+  if (typeof value !== 'string') return null;
+  try {
+    const normalized = normalizeDomainSet(value, []).primary;
+    return normalized === value.toLowerCase() ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
 function activationIntent(context, job, candidate, identity) {
-  const primaryDomain = typeof context?.payload?.primaryDomain === 'string' ? context.payload.primaryDomain.toLowerCase() : '';
+  const primaryDomain = normalizePersistedDomain(context?.payload?.primaryDomain);
+  const previousPrimaryDomain = normalizePersistedDomain(context?.payload?.previousPrimaryDomain, { nullable: true });
   const checksum = context?.payload?.checksum;
   if (!context || context.id !== identity.jobId || context.serverId !== identity.serverId || context.status !== 'running'
     || context.operation !== OPERATIONS.DOMAIN_ACTIVATE || context.resourceType !== 'domain'
     || context.resourceId !== candidate.resourceId || context.resourceId !== job.resourceId
-    || !primaryDomain || typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
+    || !primaryDomain || (context?.payload?.previousPrimaryDomain != null && !previousPrimaryDomain)
+    || typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
     throw new JobRunningDomainActivationRecoveryError('job_domain_activation_recovery_context_mismatch', 'Private domain activation context does not match durable job metadata');
   }
-  return { primaryDomain, checksum };
+  return { primaryDomain, previousPrimaryDomain, checksum };
 }
 
 function assertReceipt(receipt, identity, intent) {

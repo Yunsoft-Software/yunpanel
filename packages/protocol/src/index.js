@@ -156,10 +156,13 @@ function validateMutationPayload(operation, payload, errors) {
   }
 
   if (operation === OPERATIONS.DOMAIN_STAGE) {
+    rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'tls', 'canonicalRedirect', 'httpsRedirect'], operation, errors);
     if (typeof payload.primaryDomain !== 'string' || payload.primaryDomain.length < 3 || payload.primaryDomain.length > 253) errors.push('domain.stage primaryDomain is invalid');
     if (payload.aliases !== undefined && (!Array.isArray(payload.aliases) || payload.aliases.length > 20)) errors.push('domain.stage aliases must be an array with at most 20 entries');
     if (!['static', 'proxy'].includes(payload.targetType)) errors.push('domain.stage targetType must be static or proxy');
     if (!payload.target || typeof payload.target !== 'object' || Array.isArray(payload.target)) errors.push('domain.stage target must be an object');
+    if (payload.canonicalRedirect !== undefined && typeof payload.canonicalRedirect !== 'boolean') errors.push('domain.stage canonicalRedirect must be a boolean');
+    if (payload.httpsRedirect !== undefined && typeof payload.httpsRedirect !== 'boolean') errors.push('domain.stage httpsRedirect must be a boolean');
     if (payload.tls !== undefined && payload.tls !== null) {
       if (!payload.tls || typeof payload.tls !== 'object' || Array.isArray(payload.tls)) {
         errors.push('domain.stage tls must be an object');
@@ -171,7 +174,12 @@ function validateMutationPayload(operation, payload, errors) {
   }
 
   if (operation === OPERATIONS.DOMAIN_ACTIVATE) {
+    rejectUnexpectedKeys(payload, ['primaryDomain', 'previousPrimaryDomain', 'checksum'], operation, errors);
     if (typeof payload.primaryDomain !== 'string' || payload.primaryDomain.length < 3 || payload.primaryDomain.length > 253) errors.push('domain.activate primaryDomain is invalid');
+    if (payload.previousPrimaryDomain !== undefined && payload.previousPrimaryDomain !== null
+      && (typeof payload.previousPrimaryDomain !== 'string' || !DOMAIN_PATTERN.test(payload.previousPrimaryDomain))) {
+      errors.push('domain.activate previousPrimaryDomain is invalid');
+    }
     if (typeof payload.checksum !== 'string' || !DOMAIN_CHECKSUM.test(payload.checksum)) errors.push('domain.activate checksum must be a SHA-256 hex digest');
   }
 

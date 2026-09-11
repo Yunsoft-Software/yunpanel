@@ -102,3 +102,20 @@ test('active-domain evidence reports missing and unreadable state safely', async
       && !error.message.includes('secret'),
   );
 });
+
+test('renamed canonical host evidence requires the previous active config to be absent', async (t) => {
+  const { stagingDir, sitesDir } = await fixture(t);
+  const manager = createNginxManager({ stagingDir, sitesDir });
+  const nextSpec = { ...spec, primaryDomain: 'new.example.com' };
+  const staged = await manager.stageDomain(nextSpec);
+  await mkdir(sitesDir, { recursive: true });
+  await writeFile(path.join(sitesDir, staged.configName), await readFile(path.join(stagingDir, staged.configName), 'utf8'));
+  const previousPath = path.join(sitesDir, 'yunpanel-example.com.conf');
+  await writeFile(previousPath, '# previous\n');
+  const intent = { primaryDomain: nextSpec.primaryDomain, previousPrimaryDomain: spec.primaryDomain, checksum: staged.checksum };
+  assert.deepEqual(await manager.inspectActiveDomain(intent), { satisfied: false, result: null });
+  await rm(previousPath);
+  assert.deepEqual(await manager.inspectActiveDomain(intent), {
+    satisfied: true, result: { configName: staged.configName, checksum: staged.checksum, active: true },
+  });
+});

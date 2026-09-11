@@ -97,3 +97,67 @@ test('activation refuses a candidate whose checksum changed after staging', asyn
     (error) => error instanceof NginxManagerError && error.code === 'staged_config_changed',
   );
 });
+
+test('canonical hostname activation removes the previous config and restores it on failure', async () => {
+  const previousPath = '/etc/nginx/sites-enabled/yunpanel-old.example.com.conf';
+  const nextPath = '/etc/nginx/sites-enabled/yunpanel-new.example.com.conf';
+  const previous = 'server { # old active config\n}\n';
+  const memory = createMemoryFs({ [previousPath]: previous });
+  const manager = createNginxManager({ ...memory, execFn: async () => '' });
+  const staged = await manager.stageDomain({
+    primaryDomain: 'new.example.com', targetType: 'proxy', target: { upstreamPort: 3008 },
+  });
+  await manager.activateDomain({
+    primaryDomain: 'new.example.com', previousPrimaryDomain: 'old.example.com', checksum: staged.checksum,
+  });
+  assert.equal(memory.files.has(previousPath), false);
+  assert.equal(memory.files.has(nextPath), true);
+
+  const rollbackMemory = createMemoryFs({ [previousPath]: previous });
+  const failing = createNginxManager({
+    ...rollbackMemory,
+    execFn: async (_file, args) => { if (args[0] === '-t') throw new Error('invalid'); },
+  });
+  const candidate = await failing.stageDomain({
+    primaryDomain: 'new.example.com', targetType: 'proxy', target: { upstreamPort: 3008 },
+  });
+  await assert.rejects(
+    failing.activateDomain({ primaryDomain: 'new.example.com', previousPrimaryDomain: 'old.example.com', checksum: candidate.checksum }),
+    (error) => error instanceof NginxManagerError && error.code === 'nginx_config_invalid',
+  );
+  assert.equal(rollbackMemory.files.get(previousPath), previous);
+  assert.equal(rollbackMemory.files.has(nextPath), false);
+});
+
+test('canonical hostname activation restores both paths when replacement preparation fails', async () => {
+  const previousPath = '/etc/nginx/sites-enabled/yunpanel-old.example.com.conf';
+  const nextPath = '/etc/nginx/sites-enabled/yunpanel-new.example.com.conf';
+  const previous = 'server { # old active config\n}\n';
+  const memory = createMemoryFs({ [previousPath]: previous });
+  let failedOnce = false;
+  const commands = [];
+  const manager = createNginxManager({
+    ...memory,
+    rmFn: async (filePath) => {
+      if (filePath === previousPath && !failedOnce) {
+        failedOnce = true;
+        throw new Error('permission denied');
+      }
+      memory.files.delete(filePath);
+    },
+    execFn: async (file, args) => { commands.push({ file, args }); },
+  });
+  const staged = await manager.stageDomain({
+    primaryDomain: 'new.example.com', targetType: 'proxy', target: { upstreamPort: 3008 },
+  });
+
+  await assert.rejects(
+    manager.activateDomain({
+      primaryDomain: 'new.example.com', previousPrimaryDomain: 'old.example.com', checksum: staged.checksum,
+    }),
+    (error) => error instanceof NginxManagerError && error.code === 'nginx_activation_prepare_failed',
+  );
+  assert.equal(memory.files.get(previousPath), previous);
+  assert.equal(memory.files.has(nextPath), false);
+  assert.deepEqual(commands, []);
+});

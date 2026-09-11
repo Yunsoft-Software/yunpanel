@@ -95,10 +95,21 @@ test('validates domain mutation payloads before they reach the agent handler', (
       aliases: ['www.example.com'],
       targetType: 'proxy',
       target: { upstreamPort: 3000 },
+      canonicalRedirect: true,
+      httpsRedirect: false,
     },
     protocolVersion: AGENT_PROTOCOL_VERSION,
   });
   assert.equal(validStage.ok, true);
+
+  const invalidRedirect = validateOperationEnvelope({
+    id: 'request-0003b',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: { primaryDomain: 'example.com', targetType: 'proxy', target: { upstreamPort: 3000 }, canonicalRedirect: 'yes' },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(invalidRedirect.ok, false);
+  assert.match(invalidRedirect.errors.join(' '), /canonicalRedirect/);
 
   const invalidActivation = validateOperationEnvelope({
     id: 'request-0004',
@@ -108,6 +119,13 @@ test('validates domain mutation payloads before they reach the agent handler', (
   });
   assert.equal(invalidActivation.ok, false);
   assert.match(invalidActivation.errors.join(' '), /SHA-256/);
+
+  const renamedActivation = validateOperationEnvelope({
+    id: 'request-0004b', operation: OPERATIONS.DOMAIN_ACTIVATE,
+    payload: { primaryDomain: 'new.example.com', previousPrimaryDomain: 'old.example.com', checksum: 'a'.repeat(64) },
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  });
+  assert.equal(renamedActivation.ok, true);
 });
 
 test('validates certificate issue and renewal payloads', () => {
