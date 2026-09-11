@@ -36,6 +36,7 @@ export async function startConfiguredLocalRuntime({
   certificateRegistry,
   applicationRegistry,
   applicationEnvironmentRegistry,
+  jobLogStore = null,
   createOperations = createLocalHostOperations,
   createCertificateOperationReceipts = createCertificateOperationReceiptStore,
   createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
@@ -82,6 +83,7 @@ export async function startConfiguredLocalRuntime({
     loadDeploymentCredential: typeof applicationEnvironmentRegistry.materializeDeploymentCredential === 'function'
       ? (applicationId) => applicationEnvironmentRegistry.materializeDeploymentCredential(applicationId)
       : async () => null,
+    jobLogStore,
   });
   const certificateOperationReceipts = createCertificateOperationReceipts();
   if (!certificateOperationReceipts || typeof certificateOperationReceipts.write !== 'function') {

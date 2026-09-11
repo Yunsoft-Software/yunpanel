@@ -27,7 +27,7 @@ function deploymentSpec() {
   };
 }
 
-function createHarness({ healthResults = [true], failFirstRestart = false, lstatFn = null, realpathFn = null } = {}) {
+function createHarness({ healthResults = [true], failFirstRestart = false, lstatFn = null, realpathFn = null, recordLog = null, commandLogs = false } = {}) {
   const commands = [];
   const links = [];
   const removals = [];
@@ -50,6 +50,8 @@ function createHarness({ healthResults = [true], failFirstRestart = false, lstat
       return { stdout: '' };
     }
     if (file === '/usr/sbin/runuser' && args.includes('rev-parse')) return { stdout: 'a'.repeat(40) + '\n' };
+    if (commandLogs && file === '/usr/sbin/runuser' && args.includes('fetch')) return { stdout: '', stderr: 'Git fetch complete\n' };
+    if (commandLogs && file === '/usr/sbin/runuser' && args.includes('/usr/bin/npm')) return { stdout: 'npm stage complete\n', stderr: '' };
     return { stdout: '' };
   };
 
@@ -62,6 +64,7 @@ function createHarness({ healthResults = [true], failFirstRestart = false, lstat
     nodePaths: ['/usr/bin/node'],
     npmPaths: ['/usr/bin/npm'],
     systemctlPaths: ['/usr/bin/systemctl'],
+    recordLog,
     mkdirFn: async () => {},
     lstatFn: lstatFn ?? (async () => ({
       isFile: () => true,
@@ -81,6 +84,18 @@ function createHarness({ healthResults = [true], failFirstRestart = false, lstat
 
   return { manager, commands, links, removals, writes };
 }
+
+test('Node deploy reports bounded stage and command output through the optional log sink', async () => {
+  const logs = [];
+  const harness = createHarness({ commandLogs: true, recordLog: async (entry) => logs.push(entry) });
+  await harness.manager.deployNode(deploymentSpec());
+  assert.ok(logs.some((entry) => entry.stage === 'prepare' && entry.message.includes('preparation')));
+  assert.ok(logs.some((entry) => entry.stage === 'git' && entry.level === 'warning' && entry.message.includes('Git fetch')));
+  assert.ok(logs.some((entry) => entry.stage === 'dependencies' && entry.message.includes('npm stage')));
+  assert.ok(logs.some((entry) => entry.stage === 'build' && entry.message.includes('npm stage')));
+  assert.ok(logs.some((entry) => entry.stage === 'complete'));
+  assert.equal(logs.every((entry) => entry.jobId === DEPLOYMENT_ID), true);
+});
 
 test('healthy Node deployment creates hardened service state and materializes custom environment', async () => {
   const harness = createHarness({ healthResults: [true] });

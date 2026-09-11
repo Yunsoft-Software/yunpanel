@@ -87,13 +87,30 @@ export function createStaticDeploymentManager({
   nodePath = process.execPath,
   artifactWorkerPath = ARTIFACT_WORKER_PATH,
   npmPaths = NPM_PATHS,
+  recordLog = null,
 } = {}) {
+  if (recordLog !== null && typeof recordLog !== 'function') throw new Error('recordLog must be a function when configured');
   const deploymentLocks = new Map();
 
+  async function emitLog(context, level, message) {
+    if (!recordLog || !context) return;
+    try { await recordLog({ jobId: context.jobId, stage: context.stage, level, message }); } catch { /* Logs never decide deployment state. */ }
+  }
+
+  async function recordCommandOutput(context, result, failed = false) {
+    if (!context) return;
+    if (typeof result?.stdout === 'string' && result.stdout) await emitLog(context, 'info', result.stdout);
+    if (typeof result?.stderr === 'string' && result.stderr) await emitLog(context, failed ? 'error' : 'warning', result.stderr);
+  }
+
   async function runRoot(file, args, options = {}) {
+    const { log = null, ...runOptions } = options;
     try {
-      return await run(file, args, options);
+      const result = await run(file, args, runOptions);
+      await recordCommandOutput(log, result);
+      return result;
     } catch (error) {
+      await recordCommandOutput(log, error, true);
       const wrapped = new StaticDeploymentError('deployment_command_failed', 'Static deployment command failed');
       wrapped.exitCode = Number.isInteger(error?.code) ? error.code : null;
       throw wrapped;
@@ -205,7 +222,9 @@ export function createStaticDeploymentManager({
     let worktreeCreated = false;
     let artifactCreated = false;
     let privateKeyCreated = false;
+    const log = (stage) => ({ jobId: spec.deploymentId, stage });
 
+    await emitLog(log('prepare'), 'info', 'Static deployment preparation started.');
     await ensureAppUser(username, appBuildRoot);
 
     try {
@@ -219,14 +238,16 @@ export function createStaticDeploymentManager({
         await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'remote', 'set-url', 'origin', gitAuthentication.repositoryUrl]);
       } catch {
         await runAsUser(username, appBuildRoot, GIT_PATH, ['clone', '--no-checkout', gitAuthentication.repositoryUrl, repositoryPath], {
-          timeout: 5 * 60 * 1000, env: gitAuthentication.environment,
+          timeout: 5 * 60 * 1000, env: gitAuthentication.environment, log: log('git'),
         });
       }
 
       await runAsUser(username, appBuildRoot, GIT_PATH, [
         '-C', repositoryPath, ...gitFetchArguments(spec.gitTarget, { prune: true }),
-      ], { timeout: 5 * 60 * 1000, env: gitAuthentication.environment });
-      const revision = await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'rev-parse', '--verify', 'FETCH_HEAD^{commit}']);
+      ], { timeout: 5 * 60 * 1000, env: gitAuthentication.environment, log: log('git') });
+      const revision = await runAsUser(username, appBuildRoot, GIT_PATH, ['-C', repositoryPath, 'rev-parse', '--verify', 'FETCH_HEAD^{commit}'], {
+        log: log('git'),
+      });
       const commitSha = resolvedGitCommit(revision.stdout, spec.gitTarget);
       if (!commitSha) throw new StaticDeploymentError('invalid_git_revision', 'Git returned a revision that does not match the deployment target');
       if (privateKeyCreated) {
@@ -241,8 +262,14 @@ export function createStaticDeploymentManager({
         const npmPath = await findExecutable(npmPaths, accessFn);
         if (!npmPath) throw new StaticDeploymentError('npm_not_installed', 'npm is not installed on the managed server');
         const installArgs = spec.build.installMode === 'ci' ? ['ci', '--no-audit', '--no-fund'] : ['install', '--no-audit', '--no-fund'];
-        await runAsUser(username, appBuildRoot, npmPath, installArgs, { cwd: worktreePath, timeout: 15 * 60 * 1000 });
-        await runAsUser(username, appBuildRoot, npmPath, ['run', spec.build.buildScript], { cwd: worktreePath, timeout: 15 * 60 * 1000 });
+        await emitLog(log('dependencies'), 'info', 'Installing static build dependencies with npm.');
+        await runAsUser(username, appBuildRoot, npmPath, installArgs, {
+          cwd: worktreePath, timeout: 15 * 60 * 1000, log: log('dependencies'),
+        });
+        await emitLog(log('build'), 'info', `Running configured build script ${spec.build.buildScript}.`);
+        await runAsUser(username, appBuildRoot, npmPath, ['run', spec.build.buildScript], {
+          cwd: worktreePath, timeout: 15 * 60 * 1000, log: log('build'),
+        });
       }
 
       const requestedOutput = spec.build.outputDir === '.' ? worktreePath : path.join(worktreePath, spec.build.outputDir);
@@ -309,6 +336,8 @@ export function createStaticDeploymentManager({
         retention: spec.retention,
       });
 
+      await emitLog(log('complete'), 'info', 'Static deployment completed and the release is active.');
+
       return {
         deploymentId: spec.deploymentId,
         releaseId: spec.deploymentId,
@@ -320,6 +349,7 @@ export function createStaticDeploymentManager({
     } catch (error) {
       await stopAppProcesses(username);
       if (artifactCreated) await rmFn(servedReleasePath, { recursive: true, force: true }).catch(() => {});
+      await emitLog(log('failed'), 'error', `Static deployment failed with ${error?.code ?? 'static_deployment_failed'}.`);
       if (error instanceof StaticDeploymentError) throw error;
       throw new StaticDeploymentError('static_deployment_failed', 'Static deployment failed');
     } finally {

@@ -144,14 +144,31 @@ export function createNodeDeploymentManager({
   npmPaths = NPM_PATHS,
   packageManagerPaths = PACKAGE_MANAGER_PATHS,
   systemctlPaths = SYSTEMCTL_PATHS,
+  recordLog = null,
 } = {}) {
+  if (recordLog !== null && typeof recordLog !== 'function') throw new Error('recordLog must be a function when configured');
   const deploymentLocks = new Map();
   const environmentWriter = createNodeEnvironmentWriter({ envRoot, mkdirFn, renameFn, rmFn, writeFileFn });
 
+  async function emitLog(context, level, message) {
+    if (!recordLog || !context) return;
+    try { await recordLog({ jobId: context.jobId, stage: context.stage, level, message }); } catch { /* Logs never decide deployment state. */ }
+  }
+
+  async function recordCommandOutput(context, result, failed = false) {
+    if (!context) return;
+    if (typeof result?.stdout === 'string' && result.stdout) await emitLog(context, 'info', result.stdout);
+    if (typeof result?.stderr === 'string' && result.stderr) await emitLog(context, failed ? 'error' : 'warning', result.stderr);
+  }
+
   async function runSafe(file, args, options = {}) {
+    const { log = null, ...runOptions } = options;
     try {
-      return await run(file, args, options);
+      const result = await run(file, args, runOptions);
+      await recordCommandOutput(log, result);
+      return result;
     } catch (error) {
+      await recordCommandOutput(log, error, true);
       const wrapped = new NodeDeploymentError('node_deployment_command_failed', 'Node deployment command failed');
       wrapped.exitCode = Number.isInteger(error?.code) ? error.code : null;
       throw wrapped;
@@ -247,6 +264,9 @@ export function createNodeDeploymentManager({
     let environmentTransaction = null;
     let environmentRestored = false;
     let privateKeyCreated = false;
+    const log = (stage) => ({ jobId: spec.deploymentId, stage });
+
+    await emitLog(log('prepare'), 'info', 'Node deployment preparation started.');
 
     const candidates = Array.isArray(nodePaths)
       ? nodePaths
@@ -287,12 +307,13 @@ export function createNodeDeploymentManager({
         cwd: releaseDirectory, timeout: 30_000,
       });
       await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, gitFetchArguments(spec.gitTarget, { depth: 1 }), {
-        cwd: releaseDirectory, timeout: 5 * 60 * 1000, env: gitAuthentication.environment,
+        cwd: releaseDirectory, timeout: 5 * 60 * 1000, env: gitAuthentication.environment, log: log('git'),
       });
 
       const revision = await runAsUser(user, dataDirectory, runtimeBin, GIT_PATH, ['rev-parse', '--verify', 'FETCH_HEAD^{commit}'], {
         cwd: releaseDirectory,
         timeout: 30_000,
+        log: log('git'),
       });
       const commitSha = resolvedGitCommit(revision.stdout, spec.gitTarget);
       if (!commitSha) throw new NodeDeploymentError('invalid_git_revision', 'Git returned a revision that does not match the deployment target');
@@ -324,9 +345,15 @@ export function createNodeDeploymentManager({
         : spec.runtime.packageManager === 'pnpm'
           ? (spec.runtime.installMode === 'ci' ? ['install', '--frozen-lockfile'] : ['install'])
           : (spec.runtime.installMode === 'ci' ? ['install', '--immutable'] : ['install']);
-      await runAsUser(user, dataDirectory, runtimeBin, packageManagerPath, installArgs, { cwd: documentRoot, timeout: 15 * 60 * 1000 });
+      await emitLog(log('dependencies'), 'info', `Installing dependencies with ${spec.runtime.packageManager}.`);
+      await runAsUser(user, dataDirectory, runtimeBin, packageManagerPath, installArgs, {
+        cwd: documentRoot, timeout: 15 * 60 * 1000, log: log('dependencies'),
+      });
       if (spec.runtime.buildScript) {
-        await runAsUser(user, dataDirectory, runtimeBin, packageManagerPath, ['run', spec.runtime.buildScript], { cwd: documentRoot, timeout: 15 * 60 * 1000 });
+        await emitLog(log('build'), 'info', `Running configured build script ${spec.runtime.buildScript}.`);
+        await runAsUser(user, dataDirectory, runtimeBin, packageManagerPath, ['run', spec.runtime.buildScript], {
+          cwd: documentRoot, timeout: 15 * 60 * 1000, log: log('build'),
+        });
       }
 
       if (spec.runtime.start.mode === 'node') {
@@ -382,9 +409,10 @@ export function createNodeDeploymentManager({
 
       let activationError = null;
       try {
-        await runSafe(systemctlPath, ['daemon-reload'], { timeout: 30_000 });
-        await runSafe(systemctlPath, ['enable', serviceName], { timeout: 30_000 });
-        await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000 });
+        await emitLog(log('activation'), 'info', 'Activating the new Node release.');
+        await runSafe(systemctlPath, ['daemon-reload'], { timeout: 30_000, log: log('activation') });
+        await runSafe(systemctlPath, ['enable', serviceName], { timeout: 30_000, log: log('activation') });
+        await runSafe(systemctlPath, ['restart', serviceName], { timeout: 30_000, log: log('activation') });
         const healthy = await waitForHealth({
           port: spec.runtime.port,
           healthPath: spec.runtime.healthPath,
@@ -433,6 +461,8 @@ export function createNodeDeploymentManager({
         retention: spec.retention,
       });
 
+      await emitLog(log('complete'), 'info', 'Node deployment completed with a healthy release.');
+
       return {
         deploymentId: spec.deploymentId,
         releaseId: spec.deploymentId,
@@ -449,6 +479,7 @@ export function createNodeDeploymentManager({
       if (!newReleaseActive && releaseCreated) {
         await rmFn(releaseDirectory, { recursive: true, force: true }).catch(() => {});
       }
+      await emitLog(log('failed'), 'error', `Node deployment failed with ${error?.code ?? 'node_deployment_failed'}.`);
       if (error instanceof NodeDeploymentError) throw error;
       throw new NodeDeploymentError('node_deployment_failed', 'Node deployment failed');
     }

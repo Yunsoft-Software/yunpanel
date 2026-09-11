@@ -56,10 +56,10 @@ export function createLocalHostOperations({
   databaseManager = createDatabaseManager(),
   nginxManager = createNginxManager(),
   acmeManager = createAcmeManager(),
-  staticDeploymentManager = createStaticDeploymentManager(),
+  staticDeploymentManager = null,
   staticDeploymentReceiptStore = createStaticDeploymentReceiptStore(),
   staticRollbackManager = createStaticRollbackManager(),
-  nodeDeploymentManager = createNodeDeploymentManager(),
+  nodeDeploymentManager = null,
   nodeRollbackManager = createNodeRollbackManager(),
   nodeRestartManager = createNodeRestartManager(),
   nodeProcessManager = createNodeProcessManager(),
@@ -67,6 +67,7 @@ export function createLocalHostOperations({
   nodeStatusInspector = createNodeStatusInspector(),
   loadApplicationEnvironment = null,
   loadDeploymentCredential = null,
+  jobLogStore = null,
 } = {}) {
   if (loadApplicationEnvironment !== null && typeof loadApplicationEnvironment !== 'function') {
     throw new Error('loadApplicationEnvironment must be a function when configured');
@@ -74,9 +75,15 @@ export function createLocalHostOperations({
   if (loadDeploymentCredential !== null && typeof loadDeploymentCredential !== 'function') {
     throw new Error('loadDeploymentCredential must be a function when configured');
   }
+  if (jobLogStore !== null && typeof jobLogStore.record !== 'function') {
+    throw new Error('jobLogStore must provide record() when configured');
+  }
   if (!staticDeploymentReceiptStore || typeof staticDeploymentReceiptStore.write !== 'function') {
     throw new Error('staticDeploymentReceiptStore must provide write()');
   }
+  const deploymentLog = jobLogStore ? (entry) => jobLogStore.record(entry) : null;
+  const resolvedStaticDeploymentManager = staticDeploymentManager ?? createStaticDeploymentManager({ recordLog: deploymentLog });
+  const resolvedNodeDeploymentManager = nodeDeploymentManager ?? createNodeDeploymentManager({ recordLog: deploymentLog });
 
   async function withApplicationEnvironment(payload, execute) {
     const environment = await loadApplicationEnvironment(payload.applicationId, payload.environmentRevision ?? null);
@@ -100,7 +107,7 @@ export function createLocalHostOperations({
 
   async function deployStaticWithReceipt(payload) {
     const gitCredential = await credentialFor(payload.applicationId);
-    const result = await staticDeploymentManager.deployStatic(payload, { gitCredential });
+    const result = await resolvedStaticDeploymentManager.deployStatic(payload, { gitCredential });
     try {
       await staticDeploymentReceiptStore.write({
         applicationId: payload.applicationId,
@@ -137,7 +144,7 @@ export function createLocalHostOperations({
   ]);
 
   if (loadApplicationEnvironment) {
-    handlers.set(OPERATIONS.APP_NODE_DEPLOY, (payload) => withApplicationEnvironment(payload, async (hydrated) => nodeDeploymentManager.deployNode(hydrated, {
+    handlers.set(OPERATIONS.APP_NODE_DEPLOY, (payload) => withApplicationEnvironment(payload, async (hydrated) => resolvedNodeDeploymentManager.deployNode(hydrated, {
       gitCredential: await credentialFor(payload.applicationId),
     })));
     handlers.set(OPERATIONS.APP_NODE_ROLLBACK, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRollbackManager.rollbackNode(hydrated)));

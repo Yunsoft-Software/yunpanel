@@ -42,11 +42,13 @@ test('enabled local runtime hydrates Node environment only through the registry 
       type: 'github_token', token: `token-for-${applicationId}-private`,
     }),
   };
+  const jobLogStore = { record: async () => {} };
 
   const result = await startConfiguredLocalRuntime({
     ...base,
     env: { YUNPANEL_LOCAL_SERVER_ID: serverId },
     applicationEnvironmentRegistry,
+    jobLogStore,
     createOperations: (options) => {
       operationOptions = options;
       return { operations: [], supports: () => true, executeOperation: async () => ({}) };
@@ -61,6 +63,7 @@ test('enabled local runtime hydrates Node environment only through the registry 
   assert.equal(startOptions.lockPath, '/var/lib/yunpanel/control-plane/local-executor.lock');
   assert.equal(startOptions.hostOperations.operations.length, 0);
   assert.equal(startOptions.applicationEnvironmentRegistry, applicationEnvironmentRegistry);
+  assert.equal(operationOptions.jobLogStore, jobLogStore);
   assert.deepEqual(await operationOptions.loadApplicationEnvironment('app-1', 7), { APP_SECRET: 'runtime-only' });
   assert.deepEqual(await operationOptions.loadDeploymentCredential('app-1'), {
     type: 'github_token', token: 'token-for-app-1-private',
