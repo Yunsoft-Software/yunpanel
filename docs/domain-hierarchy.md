@@ -115,4 +115,4 @@ Future move/delete operations require a broader backend impact preview covering 
 
 Visual hierarchy/site-detail redesign is deferred until backend functionality is complete. Do not spend this phase on layout/styling polish.
 
-Current Node24/full-workspace, authenticated API, package persistence, Website migration policy, IDN and real DNS/Nginx/ACME acceptance requirements are in `todo.md`. Source implementation is not production acceptance. GitHub Actions are not used.
+Authenticated package persistence, Website migration policy, IDN and real DNS/Nginx/ACME acceptance requirements are in `todo.md`. Source implementation and a local Node24 full-workspace check are not production acceptance. GitHub Actions are not used.

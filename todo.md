@@ -45,7 +45,6 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 
 ## T-WEBSITE — P1 kalıcı Website/domain kabulü
 
-- [ ] Güncel Node24 full testte file-backed Website registry persistence, restart-time server/application FK validation, migration policy persistence ve corruption guards çalışsın.
 - [ ] Production package `YUNPANEL_WEBSITE_STORE=/var/lib/yunpanel/control-plane/website-registry.json` ve `YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE=/var/lib/yunpanel/control-plane/website-migration-policy.json` altında private state oluştursun; restart/upgrade kimlikleri veya policy mode/digest bilgisini değiştirmesin.
 - [ ] Authenticated API'de Owner Website create/list/detail; Read Only list/detail/explicit Website→Domain read ve POST/migration 403 davranışını gerçek listener üzerinden doğrula.
 - [ ] Website store v1→v2 upgrade'i gerçek package state üzerinde ID değiştirmeden revision/proxy target alanlarını eklesin. Owner update preview/apply exact revision + linked-Domain digest + typed confirmation istesin; stale Website/Domain state ve duplicate Application rebind mutation üretmesin, Read Only iki update route'unda 403 kalsın.
