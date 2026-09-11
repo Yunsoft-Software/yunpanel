@@ -86,6 +86,7 @@ const websiteRegistry = createWebsiteRegistry({
   filePath: websiteStorePath,
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
   getApplication: async (applicationId) => applicationRegistry.getApplication(applicationId),
+  getDockerWorkload: async (workloadId) => dockerWorkloadRegistry.getWorkload(workloadId),
 });
 await websiteRegistry.init();
 const websiteMigrationPolicy = createWebsiteMigrationPolicyStore({ filePath: websiteMigrationPolicyStorePath });

@@ -3,9 +3,9 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid, normalizeProxyHost } from '@yunpanel/shared';
 
-const STORE_VERSION = 2;
-const RUNTIME_TYPES = new Set(['static', 'node', 'proxy']);
-const UPDATE_FIELDS = new Set(['name', 'applicationId', 'runtimeType', 'proxyTarget']);
+const STORE_VERSION = 3;
+const RUNTIME_TYPES = new Set(['static', 'node', 'docker', 'proxy']);
+const UPDATE_FIELDS = new Set(['name', 'applicationId', 'dockerWorkloadId', 'runtimeType', 'proxyTarget']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const STATIC_ROOT = '/var/www/yunpanel/apps';
@@ -116,6 +116,24 @@ function applicationBinding(application, serverId) {
   return Object.freeze({ applicationId, runtimeType: application.type, documentRoot, unixUser });
 }
 
+function dockerBinding(workload, serverId) {
+  if (!workload || typeof workload !== 'object' || Array.isArray(workload)) {
+    throw new WebsiteRegistryError('docker_workload_not_found', 'Docker workload not found', 404);
+  }
+  const dockerWorkloadId = uuid(workload.id, 'dockerWorkloadId');
+  if (uuid(workload.serverId, 'serverId') !== serverId) {
+    throw new WebsiteRegistryError('website_docker_server_mismatch', 'Docker workload belongs to a different server', 409);
+  }
+  if (workload.managementMode !== 'external') {
+    throw new WebsiteRegistryError('website_docker_mode_unsupported', 'Docker workload management mode is not supported yet', 409);
+  }
+  return Object.freeze({
+    dockerWorkloadId,
+    runtimeType: 'docker',
+    proxyTarget: proxyTarget(workload.proxyTarget, { persisted: true }),
+  });
+}
+
 function publicWebsite(website) {
   return Object.freeze({ ...website, proxyTarget: website.proxyTarget ? Object.freeze({ ...website.proxyTarget }) : null });
 }
@@ -127,6 +145,7 @@ function validatePersistedWebsite(value, sourceVersion = STORE_VERSION) {
     allowed.add('revision');
     allowed.add('proxyTarget');
   }
+  if (sourceVersion >= 3) allowed.add('dockerWorkloadId');
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('invalid website registry entry');
   const id = uuid(value.id, 'websiteId');
   const serverId = uuid(value.serverId, 'serverId');
@@ -139,14 +158,23 @@ function validatePersistedWebsite(value, sourceVersion = STORE_VERSION) {
   if (!Number.isSafeInteger(revision) || revision < 1) throw new Error('invalid website registry entry');
 
   let applicationId = null;
+  let dockerWorkloadId = null;
   let documentRoot = null;
   let unixUser = null;
   let normalizedProxyTarget = null;
   if (runtimeType === 'proxy') {
     if (value.applicationId !== null || value.documentRoot !== null || value.unixUser !== null) throw new Error('invalid website registry entry');
+    if (sourceVersion >= 3 && value.dockerWorkloadId !== null) throw new Error('invalid website registry entry');
     normalizedProxyTarget = sourceVersion === 1 ? null : proxyTarget(value.proxyTarget, { persisted: true });
+  } else if (runtimeType === 'docker') {
+    if (sourceVersion < 3 || value.applicationId !== null || value.documentRoot !== null || value.unixUser !== null) {
+      throw new Error('invalid website registry entry');
+    }
+    dockerWorkloadId = uuid(value.dockerWorkloadId, 'dockerWorkloadId');
+    normalizedProxyTarget = proxyTarget(value.proxyTarget, { persisted: true });
   } else {
     if (sourceVersion >= 2 && value.proxyTarget !== null) throw new Error('invalid website registry entry');
+    if (sourceVersion >= 3 && value.dockerWorkloadId !== null) throw new Error('invalid website registry entry');
     applicationId = uuid(value.applicationId, 'applicationId');
     const expectedRoot = runtimeType === 'static'
       ? path.posix.join(STATIC_ROOT, applicationId, 'current')
@@ -160,6 +188,7 @@ function validatePersistedWebsite(value, sourceVersion = STORE_VERSION) {
     serverId,
     name: name(value.name),
     applicationId,
+    dockerWorkloadId,
     runtimeType,
     documentRoot,
     unixUser,
@@ -175,12 +204,14 @@ export function createWebsiteRegistry({
   now = () => Date.now(),
   serverExists = async () => true,
   getApplication = async () => null,
+  getDockerWorkload = async () => null,
 } = {}) {
   let state = emptyState();
   let initialized = false;
   let writeChain = Promise.resolve();
 
-  if (typeof now !== 'function' || typeof serverExists !== 'function' || typeof getApplication !== 'function') {
+  if (typeof now !== 'function' || typeof serverExists !== 'function' || typeof getApplication !== 'function'
+    || typeof getDockerWorkload !== 'function') {
     throw new WebsiteRegistryError('invalid_website_registry_dependencies', 'Website registry dependencies are invalid');
   }
 
@@ -217,6 +248,19 @@ export function createWebsiteRegistry({
         throw new WebsiteRegistryError('website_application_binding_drift', 'Persisted Website application binding no longer matches managed state', 409);
       }
     }
+    for (const website of websites) {
+      if (!website.dockerWorkloadId) continue;
+      let workload;
+      try { workload = await getDockerWorkload(website.dockerWorkloadId); }
+      catch { throw new WebsiteRegistryError('website_docker_reference_unavailable', 'Website Docker workload reference could not be verified', 409); }
+      if (!workload) throw new WebsiteRegistryError('website_docker_reference_missing', 'Persisted Website Docker workload does not exist', 409);
+      const binding = dockerBinding(workload, website.serverId);
+      if (binding.dockerWorkloadId !== website.dockerWorkloadId
+        || binding.runtimeType !== website.runtimeType
+        || JSON.stringify(binding.proxyTarget) !== JSON.stringify(website.proxyTarget)) {
+        throw new WebsiteRegistryError('website_docker_binding_drift', 'Persisted Website Docker binding no longer matches managed state', 409);
+      }
+    }
   }
 
   async function init() {
@@ -224,17 +268,22 @@ export function createWebsiteRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.websites)) throw new Error('unsupported or invalid website registry state');
+        if (![1, 2, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.websites)) throw new Error('unsupported or invalid website registry state');
         const sourceVersion = parsed.version;
         const websites = parsed.websites.map((website) => validatePersistedWebsite(website, sourceVersion));
         const ids = new Set();
         const applications = new Set();
+        const dockerWorkloads = new Set();
         for (const website of websites) {
           if (ids.has(website.id)) throw new Error('duplicate website registry identity');
           ids.add(website.id);
           if (website.applicationId) {
             if (applications.has(website.applicationId)) throw new Error('application bound to multiple websites');
             applications.add(website.applicationId);
+          }
+          if (website.dockerWorkloadId) {
+            if (dockerWorkloads.has(website.dockerWorkloadId)) throw new Error('Docker workload bound to multiple websites');
+            dockerWorkloads.add(website.dockerWorkloadId);
           }
         }
         await validatePersistedReferences(websites);
@@ -280,6 +329,7 @@ export function createWebsiteRegistry({
       const exact = existingById.serverId === normalizedServerId
         && existingById.name === normalizedName
         && existingById.applicationId === binding.applicationId
+        && existingById.dockerWorkloadId === null
         && existingById.runtimeType === binding.runtimeType
         && existingById.documentRoot === binding.documentRoot
         && existingById.unixUser === binding.unixUser
@@ -298,6 +348,7 @@ export function createWebsiteRegistry({
       serverId: normalizedServerId,
       name: normalizedName,
       ...binding,
+      dockerWorkloadId: null,
       proxyTarget: null,
       revision: 1,
       createdAt: timestamp,
@@ -308,11 +359,67 @@ export function createWebsiteRegistry({
     return publicWebsite(website);
   }
 
-  async function createWebsite({ websiteId = null, serverId, name: displayName, applicationId = null, runtimeType = null, proxyTarget: requestedProxyTarget = null } = {}) {
+  async function createWebsite({
+    websiteId = null,
+    serverId,
+    name: displayName,
+    applicationId = null,
+    dockerWorkloadId = null,
+    runtimeType = null,
+    proxyTarget: requestedProxyTarget = null,
+  } = {}) {
     await ensureInitialized();
+    if (applicationId !== null && dockerWorkloadId !== null) {
+      throw new WebsiteRegistryError('website_binding_conflict', 'Website cannot bind both an Application and a Docker workload');
+    }
+    if (dockerWorkloadId !== null) {
+      if (applicationId !== null || runtimeType !== 'docker') {
+        throw new WebsiteRegistryError('website_docker_binding_invalid', 'Docker Website requires runtimeType docker and no Application');
+      }
+      if (requestedProxyTarget !== null) {
+        throw new WebsiteRegistryError('website_proxy_target_not_applicable', 'Docker Website proxy target is derived from its workload');
+      }
+      const normalizedServerId = await requireServer(serverId);
+      const normalizedDockerWorkloadId = uuid(dockerWorkloadId, 'dockerWorkloadId');
+      const workload = await getDockerWorkload(normalizedDockerWorkloadId);
+      const binding = dockerBinding(workload, normalizedServerId);
+      const normalizedWebsiteId = websiteId == null ? randomUUID() : uuid(websiteId, 'websiteId');
+      const normalizedName = name(displayName);
+      const existing = state.websites.find((candidate) => candidate.id === normalizedWebsiteId) ?? null;
+      if (existing) {
+        const exact = websiteId !== null && existing.serverId === normalizedServerId
+          && existing.name === normalizedName && existing.applicationId === null
+          && existing.dockerWorkloadId === binding.dockerWorkloadId && existing.runtimeType === 'docker'
+          && existing.documentRoot === null && existing.unixUser === null
+          && JSON.stringify(existing.proxyTarget) === JSON.stringify(binding.proxyTarget) && existing.revision === 1;
+        if (!exact) throw new WebsiteRegistryError('website_identity_conflict', 'Website identity conflicts with existing state', 409);
+        return publicWebsite(existing);
+      }
+      if (state.websites.some((website) => website.dockerWorkloadId === normalizedDockerWorkloadId)) {
+        throw new WebsiteRegistryError('docker_workload_already_bound', 'Docker workload is already bound to a Website', 409);
+      }
+      const timestamp = new Date(now()).toISOString();
+      const website = {
+        id: normalizedWebsiteId,
+        serverId: normalizedServerId,
+        name: normalizedName,
+        applicationId: null,
+        dockerWorkloadId: binding.dockerWorkloadId,
+        runtimeType: 'docker',
+        documentRoot: null,
+        unixUser: null,
+        proxyTarget: binding.proxyTarget,
+        revision: 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      state.websites.push(website);
+      await persist();
+      return publicWebsite(website);
+    }
     if (applicationId == null) {
       const normalizedServerId = await requireServer(serverId);
-      if (runtimeType !== 'proxy') throw new WebsiteRegistryError('website_application_required', 'Static and Node websites require an application binding');
+      if (runtimeType !== 'proxy') throw new WebsiteRegistryError('website_application_required', 'Static and Node Websites require an Application; Docker Websites require a workload');
       const timestamp = new Date(now()).toISOString();
       const normalizedWebsiteId = websiteId == null ? randomUUID() : uuid(websiteId, 'websiteId');
       const website = {
@@ -320,6 +427,7 @@ export function createWebsiteRegistry({
         serverId: normalizedServerId,
         name: name(displayName),
         applicationId: null,
+        dockerWorkloadId: null,
         runtimeType: 'proxy',
         documentRoot: null,
         unixUser: null,
@@ -334,6 +442,7 @@ export function createWebsiteRegistry({
           && existing.serverId === website.serverId
           && existing.name === website.name
           && existing.applicationId === null
+          && existing.dockerWorkloadId === null
           && existing.runtimeType === 'proxy'
           && existing.documentRoot === null
           && existing.unixUser === null
@@ -362,7 +471,7 @@ export function createWebsiteRegistry({
   function assertUpdateChanges(changes) {
     if (!changes || typeof changes !== 'object' || Array.isArray(changes)
       || Object.keys(changes).length === 0 || Object.keys(changes).some((key) => !UPDATE_FIELDS.has(key))) {
-      throw new WebsiteRegistryError('invalid_website_update', 'Website changes must contain only name, applicationId, runtimeType or proxyTarget');
+      throw new WebsiteRegistryError('invalid_website_update', 'Website changes must contain only name, applicationId, dockerWorkloadId, runtimeType or proxyTarget');
     }
     return changes;
   }
@@ -372,11 +481,13 @@ export function createWebsiteRegistry({
     const website = requireWebsite(websiteId);
     const changes = assertUpdateChanges(requestedChanges);
     const hasApplicationId = Object.hasOwn(changes, 'applicationId');
+    const hasDockerWorkloadId = Object.hasOwn(changes, 'dockerWorkloadId');
     const hasRuntimeType = Object.hasOwn(changes, 'runtimeType');
-    const bindingRequested = hasApplicationId || hasRuntimeType;
+    const bindingRequested = hasApplicationId || hasDockerWorkloadId || hasRuntimeType;
     const next = {
       name: Object.hasOwn(changes, 'name') ? name(changes.name) : website.name,
       applicationId: website.applicationId,
+      dockerWorkloadId: website.dockerWorkloadId,
       runtimeType: website.runtimeType,
       documentRoot: website.documentRoot,
       unixUser: website.unixUser,
@@ -384,11 +495,16 @@ export function createWebsiteRegistry({
     };
 
     if (hasApplicationId) next.applicationId = changes.applicationId == null ? null : uuid(changes.applicationId, 'applicationId');
+    if (hasDockerWorkloadId) next.dockerWorkloadId = changes.dockerWorkloadId == null
+      ? null
+      : uuid(changes.dockerWorkloadId, 'dockerWorkloadId');
     if (hasRuntimeType) {
-      if (!RUNTIME_TYPES.has(changes.runtimeType)) throw new WebsiteRegistryError('invalid_website_runtime', 'Website runtimeType must be static, node or proxy');
+      if (!RUNTIME_TYPES.has(changes.runtimeType)) throw new WebsiteRegistryError('invalid_website_runtime', 'Website runtimeType must be static, node, docker or proxy');
       next.runtimeType = changes.runtimeType;
     } else if (hasApplicationId) {
       next.runtimeType = next.applicationId === null ? 'proxy' : next.runtimeType;
+    } else if (hasDockerWorkloadId) {
+      next.runtimeType = next.dockerWorkloadId === null ? 'proxy' : 'docker';
     }
 
     if (bindingRequested) {
@@ -396,10 +512,29 @@ export function createWebsiteRegistry({
         if (next.applicationId !== null) {
           throw new WebsiteRegistryError('website_proxy_application_conflict', 'Switching to proxy requires applicationId to be explicitly null');
         }
+        if (next.dockerWorkloadId !== null) {
+          throw new WebsiteRegistryError('website_proxy_docker_conflict', 'Switching to proxy requires dockerWorkloadId to be explicitly null');
+        }
         next.documentRoot = null;
         next.unixUser = null;
         if (website.runtimeType !== 'proxy') next.proxyTarget = null;
+      } else if (next.runtimeType === 'docker') {
+        if (next.applicationId !== null) {
+          throw new WebsiteRegistryError('website_docker_application_conflict', 'Switching to Docker requires applicationId to be explicitly null');
+        }
+        if (next.dockerWorkloadId === null) {
+          throw new WebsiteRegistryError('website_docker_workload_required', 'Docker Website requires a workload binding');
+        }
+        const workload = await getDockerWorkload(next.dockerWorkloadId);
+        const binding = dockerBinding(workload, website.serverId);
+        const conflict = state.websites.find((candidate) => candidate.id !== website.id
+          && candidate.dockerWorkloadId === binding.dockerWorkloadId);
+        if (conflict) throw new WebsiteRegistryError('docker_workload_already_bound', 'Docker workload is already bound to a Website', 409);
+        Object.assign(next, binding, { applicationId: null, documentRoot: null, unixUser: null });
       } else {
+        if (next.dockerWorkloadId !== null) {
+          throw new WebsiteRegistryError('website_application_docker_conflict', 'Switching to an Application requires dockerWorkloadId to be explicitly null');
+        }
         if (next.applicationId === null) throw new WebsiteRegistryError('website_application_required', 'Static and Node websites require an application binding');
         const application = await getApplication(next.applicationId);
         const binding = applicationBinding(application, website.serverId);
@@ -408,19 +543,20 @@ export function createWebsiteRegistry({
         }
         const conflict = state.websites.find((candidate) => candidate.id !== website.id && candidate.applicationId === binding.applicationId);
         if (conflict) throw new WebsiteRegistryError('application_already_bound', 'Application is already bound to a Website', 409);
-        Object.assign(next, binding, { proxyTarget: null });
+        Object.assign(next, binding, { dockerWorkloadId: null, proxyTarget: null });
       }
     }
 
     if (Object.hasOwn(changes, 'proxyTarget')) {
       if (next.runtimeType !== 'proxy') {
-        throw new WebsiteRegistryError('website_proxy_target_not_applicable', 'Proxy target can be changed only for proxy Websites');
+        throw new WebsiteRegistryError('website_proxy_target_not_applicable', 'Proxy target can be changed only for unbound proxy Websites');
       }
       next.proxyTarget = proxyTarget(changes.proxyTarget);
     }
 
     const nameChanged = next.name !== website.name;
     const bindingChanged = next.applicationId !== website.applicationId
+      || next.dockerWorkloadId !== website.dockerWorkloadId
       || next.runtimeType !== website.runtimeType
       || next.documentRoot !== website.documentRoot
       || next.unixUser !== website.unixUser;
@@ -495,6 +631,7 @@ export function createWebsiteRegistry({
     const exact = website.serverId === normalizedServerId
       && website.name === normalizedName
       && website.applicationId === normalizedApplicationId
+      && website.dockerWorkloadId === null
       && website.runtimeType === binding.runtimeType
       && website.documentRoot === binding.documentRoot
       && website.unixUser === binding.unixUser
@@ -541,6 +678,7 @@ export const websiteRegistryInternals = Object.freeze({
   appUnixUser,
   migrationWebsiteId,
   applicationBinding,
+  dockerBinding,
   proxyHost,
   proxyTarget,
   websiteUpdateFingerprint,

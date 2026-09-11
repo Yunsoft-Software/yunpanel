@@ -8,6 +8,7 @@ import { createWebsiteRegistry, WebsiteRegistryError } from '../src/website-regi
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const otherServerId = 'c8e93a53-6b7b-41bb-a55f-eddb6fe6aa23';
 const applicationId = '5a5ea77f-2d7d-43f7-a455-1ed9e5cb41be';
+const dockerWorkloadId = '0bb78242-03a6-429f-9d17-7725c521437c';
 const staticApplication = (overrides = {}) => ({
   id: applicationId,
   serverId,
@@ -86,4 +87,40 @@ test('persisted proxy Website still requires its server but never invents an app
     createWebsiteRegistry({ filePath, serverExists: async () => false }).init(),
     code('website_server_reference_missing'),
   );
+});
+
+test('persisted Docker Website revalidates its exact same-server workload endpoint', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-docker-website-reference-'));
+  const filePath = path.join(root, 'website-registry.json');
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const workload = {
+    id: dockerWorkloadId,
+    serverId,
+    managementMode: 'external',
+    proxyTarget: { host: '127.0.0.1', port: 8080, websocket: true },
+  };
+  const registry = createWebsiteRegistry({
+    filePath,
+    serverExists: async () => true,
+    getDockerWorkload: async (id) => id === dockerWorkloadId ? workload : null,
+  });
+  await registry.init();
+  const website = await registry.createWebsite({
+    serverId, name: 'Docker Site', runtimeType: 'docker', dockerWorkloadId,
+  });
+  assert.equal(website.dockerWorkloadId, dockerWorkloadId);
+
+  await assert.rejects(createWebsiteRegistry({
+    filePath, serverExists: async () => true, getDockerWorkload: async () => null,
+  }).init(), code('website_docker_reference_missing'));
+  await assert.rejects(createWebsiteRegistry({
+    filePath,
+    serverExists: async () => true,
+    getDockerWorkload: async () => ({ ...workload, serverId: otherServerId }),
+  }).init(), code('website_docker_server_mismatch'));
+  await assert.rejects(createWebsiteRegistry({
+    filePath,
+    serverExists: async () => true,
+    getDockerWorkload: async () => ({ ...workload, proxyTarget: { ...workload.proxyTarget, port: 8081 } }),
+  }).init(), code('website_docker_binding_drift'));
 });

@@ -7,6 +7,7 @@ import { createApplicationRegistry } from '../src/application-registry.js';
 import { createAuthenticatedApi } from '../src/auth-http.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
+import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
 import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
@@ -36,9 +37,11 @@ async function resources() {
   const enrollment = await registry.issueEnrollmentToken({ label: 'site-create-http' });
   const enrolled = await registry.enrollServer({ token: enrollment.token, hostname: 'site-create-http-host' });
   const applicationRegistry = createApplicationRegistry({ serverExists: async (id) => Boolean(await registry.getServer(id)) });
+  const dockerWorkloadRegistry = createDockerWorkloadRegistry({ serverExists: async (id) => Boolean(await registry.getServer(id)) });
   const websiteRegistry = createWebsiteRegistry({
     serverExists: async (id) => Boolean(await registry.getServer(id)),
     getApplication: async (id) => applicationRegistry.getApplication(id),
+    getDockerWorkload: async (id) => dockerWorkloadRegistry.getWorkload(id),
   });
   const domainRegistry = createDomainRegistry({
     serverExists: async (id) => Boolean(await registry.getServer(id)),
@@ -49,12 +52,13 @@ async function resources() {
   const dnsHostingRegistry = createDnsHostingRegistry({ getWebDomain });
   const mailDomainRegistry = createMailDomainRegistry({ getWebDomain });
   await Promise.all([
-    applicationRegistry.init(), websiteRegistry.init(), domainRegistry.init(),
+    applicationRegistry.init(), dockerWorkloadRegistry.init(), websiteRegistry.init(), domainRegistry.init(),
     dnsHostingRegistry.init(), mailDomainRegistry.init(),
   ]);
   return {
     registry,
     applicationRegistry,
+    dockerWorkloadRegistry,
     websiteRegistry,
     domainRegistry,
     dnsHostingRegistry,

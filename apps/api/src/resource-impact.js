@@ -69,6 +69,7 @@ function websiteReference(website) {
     serverId: website.serverId,
     name: website.name,
     applicationId: website.applicationId ?? null,
+    dockerWorkloadId: website.dockerWorkloadId ?? null,
     runtimeType: website.runtimeType,
     revision: website.revision,
   });
@@ -184,12 +185,13 @@ function knownBlockers({ linkedDomains, childDomains, website, application, cert
   return blockers;
 }
 
-function relevantJobs(jobs, { domainIds, applicationId, certificateIds }) {
+function relevantJobs(jobs, { domainIds, applicationId, dockerWorkloadId, certificateIds }) {
   const domains = new Set(domainIds);
   const certificates = new Set(certificateIds);
   return jobs.filter((job) => ACTIVE_JOB_STATES.has(job.status) && (
     (job.resourceType === 'domain' && domains.has(job.resourceId))
     || (job.resourceType === 'application' && job.resourceId === applicationId)
+    || (job.resourceType === 'docker_workload' && job.resourceId === dockerWorkloadId)
     || (job.resourceType === 'certificate' && certificates.has(job.resourceId))
   )).map(jobReference).sort((left, right) => left.id.localeCompare(right.id));
 }
@@ -291,6 +293,7 @@ export async function previewResourceImpact({
   const activeJobs = relevantJobs(jobs, {
     domainIds: impactedDomainIds,
     applicationId: application?.id ?? null,
+    dockerWorkloadId: website?.dockerWorkloadId ?? null,
     certificateIds: certificateReferences.map((certificate) => certificate.id),
   });
   const providerContext = Object.freeze({
@@ -300,6 +303,7 @@ export async function previewResourceImpact({
     targetServerId: requested.targetServerId,
     websiteId: website?.id ?? null,
     applicationId: application?.id ?? null,
+    dockerWorkloadId: website?.dockerWorkloadId ?? null,
     domainIds: Object.freeze([...impactedDomainIds].sort()),
   });
   const additionalEntries = await Promise.all(ADDITIONAL_TYPES.map(async ([key, type]) => (

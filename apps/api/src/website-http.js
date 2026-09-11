@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { WebsiteRegistryError } from './website-registry.js';
 
-const CREATE_FIELDS = new Set(['serverId', 'name', 'applicationId', 'runtimeType', 'proxyTarget']);
-const UPDATE_CHANGE_FIELDS = new Set(['name', 'applicationId', 'runtimeType', 'proxyTarget']);
+const CREATE_FIELDS = new Set(['serverId', 'name', 'applicationId', 'dockerWorkloadId', 'runtimeType', 'proxyTarget']);
+const UPDATE_CHANGE_FIELDS = new Set(['name', 'applicationId', 'dockerWorkloadId', 'runtimeType', 'proxyTarget']);
 const APPLY_FIELDS = new Set(['revision', 'changes', 'previewDigest', 'confirmation']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -26,7 +26,7 @@ function listFilter(query) {
 function assertChanges(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length === 0
     || Object.keys(value).some((key) => !UPDATE_CHANGE_FIELDS.has(key))) {
-    throw new WebsiteRegistryError('invalid_website_update', 'Website changes must contain only name, applicationId, runtimeType or proxyTarget');
+    throw new WebsiteRegistryError('invalid_website_update', 'Website changes must contain only name, applicationId, dockerWorkloadId, runtimeType or proxyTarget');
   }
   return value;
 }
@@ -153,6 +153,7 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry } = {}
       serverId: body.serverId,
       name: body.name,
       applicationId: body.applicationId ?? null,
+      dockerWorkloadId: body.dockerWorkloadId ?? null,
       runtimeType: body.runtimeType ?? null,
       proxyTarget: body.proxyTarget ?? null,
     });

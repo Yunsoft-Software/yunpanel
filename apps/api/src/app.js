@@ -40,9 +40,13 @@ export function createApp({
   jobRegistry = createJobRegistry(),
   certificateRegistry = createCertificateRegistry(),
   applicationRegistry = createApplicationRegistry(),
+  dockerWorkloadRegistry = createDockerWorkloadRegistry({
+    serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+  }),
   websiteRegistry = createWebsiteRegistry({
     serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
     getApplication: async (applicationId) => applicationRegistry.getApplication(applicationId),
+    getDockerWorkload: async (workloadId) => dockerWorkloadRegistry.getWorkload(workloadId),
   }),
   websiteMigrationPolicy = createWebsiteMigrationPolicyStore(),
   migrationLedger = createWebsiteMigrationLedger(),
@@ -56,9 +60,6 @@ export function createApp({
   }),
   mailDomainRegistry = createMailDomainRegistry({
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
-  }),
-  dockerWorkloadRegistry = createDockerWorkloadRegistry({
-    serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
   }),
   environment = process.env.NODE_ENV,
   journalLogReader = null,
@@ -74,7 +75,7 @@ export function createApp({
   app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry));
   app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry));
   app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry));
-  mountSiteCreateRoutes(app, { registry, applicationRegistry, websiteRegistry, domainRegistry });
+  mountSiteCreateRoutes(app, { registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry });
   mountResourceImpactRoutes(app, {
     registry,
     applicationRegistry,
@@ -84,6 +85,14 @@ export function createApp({
     jobRegistry,
     dnsHostingRegistry,
     mailDomainRegistry,
+    additionalProviders: {
+      dockerWorkloads: async ({ dockerWorkloadId }) => {
+        if (!dockerWorkloadId) return [];
+        const workload = await dockerWorkloadRegistry.getWorkload(dockerWorkloadId);
+        if (!workload) throw new Error('Docker workload reference is unavailable');
+        return [{ id: workload.id, state: workload.state }];
+      },
+    },
   });
   mountExternalLifecycleRoutes(app, { dnsHostingRegistry, mailDomainRegistry });
   mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry });

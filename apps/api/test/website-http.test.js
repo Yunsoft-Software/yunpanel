@@ -105,7 +105,7 @@ test('Website collection and detail return actual Website records', async (t) =>
   assert.equal(detail.status, 200);
   assert.equal((await detail.json()).data.name, 'Site');
   assert.deepEqual(f.calls.slice(0, 3), [
-    ['create', { serverId: 'server-1', name: 'Site', applicationId: 'app-1', runtimeType: null, proxyTarget: null }],
+    ['create', { serverId: 'server-1', name: 'Site', applicationId: 'app-1', dockerWorkloadId: null, runtimeType: null, proxyTarget: null }],
     ['list', { serverId: 'server-1' }],
     ['get', 'website-1'],
   ]);
@@ -120,6 +120,23 @@ test('Website domain relationship uses explicit websiteId only', async (t) => {
   assert.deepEqual(body.data.map((domain) => domain.id), ['domain-1']);
   assert.equal(body.data.some((domain) => domain.id === 'domain-2'), false);
   assert.equal(f.calls.some(([name]) => name === 'domains'), true);
+});
+
+test('Website create forwards an explicit Docker workload identity without a caller target', async (t) => {
+  const f = await fixture(t);
+  const response = await f.request('/api/websites', {
+    method: 'POST',
+    body: JSON.stringify({
+      serverId: 'server-1', name: 'Docker Site', applicationId: null,
+      dockerWorkloadId: 'workload-1', runtimeType: 'docker',
+    }),
+  });
+  assert.equal(response.status, 201);
+  const call = f.calls.find(([name]) => name === 'create');
+  assert.deepEqual(call, ['create', {
+    serverId: 'server-1', name: 'Docker Site', applicationId: null,
+    dockerWorkloadId: 'workload-1', runtimeType: 'docker', proxyTarget: null,
+  }]);
 });
 
 test('Website create rejects caller-controlled root user and unknown fields before registry mutation', async (t) => {

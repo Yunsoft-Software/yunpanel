@@ -66,6 +66,7 @@ test('Owner receives fail-closed Website and Domain impact previews without a mu
     assert.equal(websiteResponse.status, 200);
     const websitePreview = (await websiteResponse.json()).data;
     assert.equal(websitePreview.dependencies.linkedDomains[0].id, state.domain.id);
+    assert.deepEqual(websitePreview.dependencies.dockerWorkloads, { status: 'available', items: [] });
     assert.equal(websitePreview.applySupported, false);
     assert.equal(websitePreview.safeToApply, false);
 

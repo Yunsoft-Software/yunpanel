@@ -10,6 +10,8 @@ const otherServerId = 'c8e93a53-6b7b-41bb-a55f-eddb6fe6aa23';
 const staticAppId = '5a5ea77f-2d7d-43f7-a455-1ed9e5cb41be';
 const nodeAppId = '340344cf-4e57-4f70-946a-3c6e919e951d';
 const otherNodeAppId = 'c42e06d2-9bd1-4757-b320-5975ef454ee1';
+const dockerWorkloadId = '0bb78242-03a6-429f-9d17-7725c521437c';
+const otherDockerWorkloadId = '294dfeda-c5ba-4e2c-ab4f-e012c5c53880';
 
 function applications() {
   return new Map([
@@ -41,15 +43,26 @@ async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-websites-'));
   const filePath = path.join(root, 'website-registry.json');
   const apps = applications();
+  const workloads = new Map([
+    [dockerWorkloadId, {
+      id: dockerWorkloadId, serverId, name: 'Docker API', managementMode: 'external',
+      proxyTarget: { host: '127.0.0.1', port: 8080, websocket: true },
+    }],
+    [otherDockerWorkloadId, {
+      id: otherDockerWorkloadId, serverId, name: 'Docker Worker', managementMode: 'external',
+      proxyTarget: { host: '::1', port: 8081, websocket: false },
+    }],
+  ]);
   const registry = createWebsiteRegistry({
     filePath,
     now: () => Date.parse('2026-09-10T20:30:00.000Z'),
     serverExists: async (id) => id === serverId || id === otherServerId,
     getApplication: async (id) => apps.get(id) ?? null,
+    getDockerWorkload: async (id) => workloads.get(id) ?? null,
   });
   t.after(() => rm(root, { recursive: true, force: true }));
   await registry.init();
-  return { root, filePath, apps, registry };
+  return { root, filePath, apps, workloads, registry };
 }
 
 test('application-backed Website gets independent identity and canonical runtime binding', async (t) => {
@@ -80,6 +93,34 @@ test('Node Website derives current release root and deterministic application us
   assert.equal(website.runtimeType, 'node');
   assert.equal(website.documentRoot, `/var/lib/yunpanel/apps/${nodeAppId}/current`);
   assert.equal(website.unixUser, websiteRegistryInternals.appUnixUser(nodeAppId));
+});
+
+test('Docker Website binds one tracked workload and derives its loopback target', async (t) => {
+  const { workloads, registry } = await fixture(t);
+  const website = await registry.createWebsite({
+    serverId,
+    name: 'Container API',
+    dockerWorkloadId,
+    runtimeType: 'docker',
+  });
+  assert.equal(website.applicationId, null);
+  assert.equal(website.dockerWorkloadId, dockerWorkloadId);
+  assert.equal(website.runtimeType, 'docker');
+  assert.equal(website.documentRoot, null);
+  assert.equal(website.unixUser, null);
+  assert.deepEqual(website.proxyTarget, workloads.get(dockerWorkloadId).proxyTarget);
+
+  await assert.rejects(
+    registry.createWebsite({ serverId, name: 'Duplicate', dockerWorkloadId, runtimeType: 'docker' }),
+    (error) => error instanceof WebsiteRegistryError && error.code === 'docker_workload_already_bound',
+  );
+  await assert.rejects(
+    registry.createWebsite({
+      serverId, name: 'Caller target', dockerWorkloadId: otherDockerWorkloadId, runtimeType: 'docker',
+      proxyTarget: { host: '127.0.0.1', port: 9999, websocket: true },
+    }),
+    (error) => error instanceof WebsiteRegistryError && error.code === 'website_proxy_target_not_applicable',
+  );
 });
 
 test('proxy Website owns a canonical optional target without an invented application or Unix user', async (t) => {
@@ -187,13 +228,14 @@ test('file-backed Website records persist privately and reopen without changing 
   assert.deepEqual((await reopened.listWebsites({ serverId })).map((item) => item.id), [created.id]);
 });
 
-test('v1 Website state migrates once to revisioned v2 without changing resource identity', async (t) => {
+test('v1 Website state migrates once to current revisioned state without changing resource identity', async (t) => {
   const { filePath, apps, registry } = await fixture(t);
   const created = await registry.createWebsite({ serverId, name: 'Legacy Website', applicationId: staticAppId });
   const legacy = JSON.parse(await readFile(filePath, 'utf8'));
   legacy.version = 1;
   delete legacy.websites[0].revision;
   delete legacy.websites[0].proxyTarget;
+  delete legacy.websites[0].dockerWorkloadId;
   await writeFile(filePath, JSON.stringify(legacy), { mode: 0o600 });
 
   const reopened = createWebsiteRegistry({
@@ -202,11 +244,12 @@ test('v1 Website state migrates once to revisioned v2 without changing resource 
     getApplication: async (id) => apps.get(id) ?? null,
   });
   await reopened.init();
-  assert.deepEqual(await reopened.getWebsite(created.id), { ...created, revision: 1, proxyTarget: null });
+  assert.deepEqual(await reopened.getWebsite(created.id), { ...created, revision: 1, proxyTarget: null, dockerWorkloadId: null });
   const migrated = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(migrated.version, 2);
+  assert.equal(migrated.version, 3);
   assert.equal(migrated.websites[0].revision, 1);
   assert.equal(migrated.websites[0].proxyTarget, null);
+  assert.equal(migrated.websites[0].dockerWorkloadId, null);
 
   const again = createWebsiteRegistry({
     filePath,
@@ -215,6 +258,27 @@ test('v1 Website state migrates once to revisioned v2 without changing resource 
   });
   await again.init();
   assert.equal((await again.getWebsite(created.id)).revision, 1);
+});
+
+test('v2 Website state adds a null Docker identity without changing proxy state', async (t) => {
+  const { filePath, registry } = await fixture(t);
+  const created = await registry.createWebsite({
+    serverId,
+    name: 'V2 Proxy',
+    runtimeType: 'proxy',
+    proxyTarget: { host: 'origin.example', port: 8443, websocket: false },
+  });
+  const oldState = JSON.parse(await readFile(filePath, 'utf8'));
+  oldState.version = 2;
+  delete oldState.websites[0].dockerWorkloadId;
+  await writeFile(filePath, JSON.stringify(oldState), { mode: 0o600 });
+
+  const reopened = createWebsiteRegistry({ filePath, serverExists: async () => true });
+  await reopened.init();
+  assert.deepEqual(await reopened.getWebsite(created.id), { ...created, dockerWorkloadId: null });
+  const migrated = JSON.parse(await readFile(filePath, 'utf8'));
+  assert.equal(migrated.version, 3);
+  assert.equal(migrated.websites[0].dockerWorkloadId, null);
 });
 
 test('Website update preview binds exact revision and canonical application impact', async (t) => {
@@ -279,6 +343,42 @@ test('Website rebind keeps application unique and proxy transitions explicit', a
 
   const bind = await registry.previewWebsiteUpdate(first.id, { applicationId: otherNodeAppId, runtimeType: 'node' });
   assert.equal(bind.nextWebsite.proxyTarget, null);
+});
+
+test('Website rebind makes Docker and Application transitions explicit and revisioned', async (t) => {
+  const { registry } = await fixture(t);
+  const website = await registry.createWebsite({
+    serverId, name: 'Switchable', runtimeType: 'proxy',
+    proxyTarget: { host: 'origin.example', port: 8443, websocket: false },
+  });
+  const dockerChanges = { runtimeType: 'docker', dockerWorkloadId };
+  const dockerPreview = await registry.previewWebsiteUpdate(website.id, dockerChanges);
+  assert.equal(dockerPreview.nextWebsite.dockerWorkloadId, dockerWorkloadId);
+  assert.deepEqual(dockerPreview.nextWebsite.proxyTarget, { host: '127.0.0.1', port: 8080, websocket: true });
+  const dockerWebsite = await registry.updateWebsite({
+    websiteId: website.id,
+    expectedRevision: dockerPreview.currentRevision,
+    changes: dockerChanges,
+    previewFingerprint: dockerPreview.fingerprint,
+  });
+  assert.equal(dockerWebsite.revision, 2);
+
+  await assert.rejects(
+    registry.previewWebsiteUpdate(website.id, { runtimeType: 'static', applicationId: staticAppId }),
+    (error) => error instanceof WebsiteRegistryError && error.code === 'website_application_docker_conflict',
+  );
+  const staticChanges = { runtimeType: 'static', applicationId: staticAppId, dockerWorkloadId: null };
+  const staticPreview = await registry.previewWebsiteUpdate(website.id, staticChanges);
+  const staticWebsite = await registry.updateWebsite({
+    websiteId: website.id,
+    expectedRevision: staticPreview.currentRevision,
+    changes: staticChanges,
+    previewFingerprint: staticPreview.fingerprint,
+  });
+  assert.equal(staticWebsite.runtimeType, 'static');
+  assert.equal(staticWebsite.dockerWorkloadId, null);
+  assert.equal(staticWebsite.applicationId, staticAppId);
+  assert.equal(staticWebsite.proxyTarget, null);
 });
 
 test('Website update rejects no-op and stale fingerprint without mutation', async (t) => {

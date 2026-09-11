@@ -17,6 +17,7 @@ test('production API persists and initializes Website registry explicitly', () =
   assert.match(source, /filePath: websiteStorePath,/);
   assert.match(source, /serverExists: async \(serverId\) => Boolean\(await registry\.getServer\(serverId\)\),/);
   assert.match(source, /getApplication: async \(applicationId\) => applicationRegistry\.getApplication\(applicationId\),/);
+  assert.match(source, /getDockerWorkload: async \(workloadId\) => dockerWorkloadRegistry\.getWorkload\(workloadId\),/);
   assert.match(source, /await websiteRegistry\.init\(\);/);
   assert.match(source, /website store=\$\{websiteStorePath\}/);
 });

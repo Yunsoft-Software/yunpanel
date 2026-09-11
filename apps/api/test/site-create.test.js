@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApplicationRegistry } from '../src/application-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
+import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createSite, previewSiteCreate, SiteCreateError, siteCreateInternals } from '../src/site-create.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
@@ -9,6 +10,7 @@ import { createWebsiteRegistry } from '../src/website-registry.js';
 const STATIC_OPERATION = 'ab9b4c03-e744-40d4-ad1d-e9bab966a3e7';
 const NODE_OPERATION = '47bc6cf1-75bc-4cba-a610-aa0cd0522c80';
 const PROXY_OPERATION = '86e826ad-2dc6-45e4-ac3f-0c03bcff18fc';
+const DOCKER_OPERATION = 'a17be329-acdf-48fd-ac1f-b3e35ec75565';
 
 async function fixture() {
   const registry = createServerRegistry();
@@ -17,19 +19,24 @@ async function fixture() {
   const applicationRegistry = createApplicationRegistry({
     serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
   });
+  const dockerWorkloadRegistry = createDockerWorkloadRegistry({
+    serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+  });
   const websiteRegistry = createWebsiteRegistry({
     serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
     getApplication: async (applicationId) => applicationRegistry.getApplication(applicationId),
+    getDockerWorkload: async (workloadId) => dockerWorkloadRegistry.getWorkload(workloadId),
   });
   const domainRegistry = createDomainRegistry({
     serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
     getWebsite: async (websiteId) => websiteRegistry.getWebsite(websiteId),
     websiteBindingRequired: () => true,
   });
-  await Promise.all([applicationRegistry.init(), websiteRegistry.init(), domainRegistry.init()]);
+  await Promise.all([applicationRegistry.init(), dockerWorkloadRegistry.init(), websiteRegistry.init(), domainRegistry.init()]);
   return {
     registry,
     applicationRegistry,
+    dockerWorkloadRegistry,
     websiteRegistry,
     domainRegistry,
     serverId: enrolled.server.id,
@@ -40,6 +47,7 @@ function dependencies(state, overrides = {}) {
   return {
     registry: state.registry,
     applicationRegistry: state.applicationRegistry,
+    dockerWorkloadRegistry: state.dockerWorkloadRegistry,
     websiteRegistry: state.websiteRegistry,
     domainRegistry: state.domainRegistry,
     ...overrides,
@@ -193,6 +201,51 @@ test('external proxy site canonicalizes its origin without creating an Applicati
   assert.equal(created.website.runtimeType, 'proxy');
   assert.deepEqual(created.website.proxyTarget, { host: 'origin.example.net', port: 8443, websocket: false });
   assert.deepEqual(created.primaryDomain.target, { upstreamHost: 'origin.example.net', upstreamPort: 8443, websocket: false });
+});
+
+test('existing Docker workload becomes an explicit Website runtime without claiming container lifecycle', async () => {
+  const state = await fixture();
+  const workload = await state.dockerWorkloadRegistry.createWorkload({
+    serverId: state.serverId,
+    name: 'Compose API',
+    managementMode: 'external',
+    proxyTarget: { host: '127.0.0.1', port: 8080, websocket: true },
+  });
+  const input = inputFor(state.serverId, {
+    operationId: DOCKER_OPERATION,
+    name: 'Docker API',
+    primaryDomain: 'docker.example.test',
+    wwwMode: 'none',
+    source: { kind: 'existing_docker', dockerWorkloadId: workload.id },
+  });
+  const preview = await previewSiteCreate({ input, ...dependencies(state) });
+  assert.equal(preview.plan.application, null);
+  assert.equal(preview.plan.dockerWorkload.id, workload.id);
+  assert.equal(preview.plan.website.runtimeType, 'docker');
+  assert.equal(preview.plan.website.dockerWorkloadId, workload.id);
+  assert.deepEqual(preview.plan.primaryDomain.target, {
+    upstreamHost: '127.0.0.1', upstreamPort: 8080, websocket: true,
+  });
+  assert.equal(preview.steps.dockerWorkloadReady, true);
+
+  const created = await apply(input, state, preview);
+  assert.equal(created.application, null);
+  assert.equal(created.dockerWorkload.id, workload.id);
+  assert.equal(created.website.dockerWorkloadId, workload.id);
+  assert.equal(created.website.runtimeType, 'docker');
+  assert.deepEqual(created.primaryDomain.target, preview.plan.primaryDomain.target);
+
+  await assert.rejects(
+    previewSiteCreate({
+      input: inputFor(state.serverId, {
+        operationId: '4ea277a7-76ea-4a66-a001-f1df6005327a',
+        primaryDomain: 'other-docker.example.test',
+        source: { kind: 'existing_docker', dockerWorkloadId: workload.id },
+      }),
+      ...dependencies(state),
+    }),
+    (error) => error instanceof SiteCreateError && error.code === 'docker_workload_already_bound',
+  );
 });
 
 test('site creation resumes after an interruption without duplicating earlier resources', async () => {

@@ -14,7 +14,7 @@ import {
 import { DomainHierarchyError, validateDomainParent } from './domain-hierarchy.js';
 
 const SITE_NAMESPACE = Buffer.from('0bcd2cf8883b49f997294b5d225cf15e', 'hex');
-const SOURCE_KINDS = new Set(['existing_application', 'new_static', 'new_node', 'external_proxy']);
+const SOURCE_KINDS = new Set(['existing_application', 'existing_docker', 'new_static', 'new_node', 'external_proxy']);
 const WWW_MODES = new Set(['none', 'alias', 'independent']);
 const HTTPS_MODES = new Set(['off', 'managed']);
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
@@ -76,6 +76,10 @@ function normalizedSource(source) {
     if (source.kind === 'existing_application') {
       exactObject(source, new Set(['kind', 'applicationId']), 'site_create_source_invalid', 'Existing application source requires only kind and applicationId');
       return Object.freeze({ kind: source.kind, applicationId: uuid(source.applicationId, 'applicationId') });
+    }
+    if (source.kind === 'existing_docker') {
+      exactObject(source, new Set(['kind', 'dockerWorkloadId']), 'site_create_source_invalid', 'Existing Docker source requires only kind and dockerWorkloadId');
+      return Object.freeze({ kind: source.kind, dockerWorkloadId: uuid(source.dockerWorkloadId, 'dockerWorkloadId') });
     }
     if (source.kind === 'external_proxy') {
       exactObject(source, new Set(['kind', 'target']), 'site_create_source_invalid', 'External proxy source requires only kind and target');
@@ -211,11 +215,24 @@ function stableWebsite(website) {
     serverId: website.serverId,
     name: website.name,
     applicationId: website.applicationId,
+    dockerWorkloadId: website.dockerWorkloadId ?? null,
     runtimeType: website.runtimeType,
     documentRoot: website.documentRoot,
     unixUser: website.unixUser,
     proxyTarget: website.proxyTarget,
     revision: website.revision,
+  };
+}
+
+function stableDockerWorkload(workload) {
+  return {
+    id: workload.id,
+    serverId: workload.serverId,
+    name: workload.name,
+    managementMode: workload.managementMode,
+    state: workload.state,
+    proxyTarget: workload.proxyTarget,
+    revision: workload.revision,
   };
 }
 
@@ -239,11 +256,26 @@ function ensureExact(existing, expected, code, message, project = (value) => val
   return true;
 }
 
-function domainTarget(application, source) {
+function domainTarget(application, source, dockerWorkload = null) {
   if (source.kind === 'external_proxy') {
     return Object.freeze({
       targetType: 'proxy',
       target: Object.freeze({ upstreamHost: source.target.host, upstreamPort: source.target.port, websocket: source.target.websocket }),
+    });
+  }
+  if (source.kind === 'existing_docker') {
+    if (!dockerWorkload || dockerWorkload.id !== source.dockerWorkloadId
+      || dockerWorkload.managementMode !== 'external'
+      || !dockerWorkload.proxyTarget || typeof dockerWorkload.proxyTarget !== 'object') {
+      throw new SiteCreateError('site_create_docker_target_invalid', 'Selected Docker workload target is invalid', 409);
+    }
+    const { host, port, websocket } = dockerWorkload.proxyTarget;
+    if (!LOOPBACK_HOSTS.has(host) || !Number.isInteger(port) || port < 1024 || port > 65535 || typeof websocket !== 'boolean') {
+      throw new SiteCreateError('site_create_docker_target_invalid', 'Selected Docker workload target is invalid', 409);
+    }
+    return Object.freeze({
+      targetType: 'proxy',
+      target: Object.freeze({ upstreamHost: host, upstreamPort: port, websocket }),
     });
   }
   if (application.type === 'static') {
@@ -271,11 +303,13 @@ function validatePlannedDomain(domains, expected) {
   return Boolean(existing);
 }
 
-function canonicalState({ applications, websites, domains, excludedIds, selectedApplicationId, serverId }) {
+function canonicalState({ applications, dockerWorkloads, websites, domains, excludedIds, selectedApplicationId, selectedDockerWorkloadId, serverId }) {
   return {
     applications: applications.filter((item) => item.serverId === serverId
       && (item.id !== excludedIds.applicationId || item.id === selectedApplicationId))
       .map(stableApplication).sort((left, right) => left.id.localeCompare(right.id)),
+    dockerWorkloads: dockerWorkloads.filter((item) => item.serverId === serverId && item.id !== selectedDockerWorkloadId)
+      .map(stableDockerWorkload).sort((left, right) => left.id.localeCompare(right.id)),
     websites: websites.filter((item) => item.serverId === serverId && item.id !== excludedIds.websiteId)
       .map(stableWebsite).sort((left, right) => left.id.localeCompare(right.id)),
     domains: domains.filter((item) => item.serverId === serverId && !excludedIds.domainIds.has(item.id))
@@ -283,10 +317,11 @@ function canonicalState({ applications, websites, domains, excludedIds, selected
   };
 }
 
-export async function previewSiteCreate({ input, registry, applicationRegistry, websiteRegistry, domainRegistry } = {}) {
+export async function previewSiteCreate({ input, registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry } = {}) {
   for (const [dependency, methods] of [
     [registry, ['getServer']],
     [applicationRegistry, ['getApplication', 'listApplications', 'allocateNodePort']],
+    [dockerWorkloadRegistry, ['getWorkload', 'listWorkloads']],
     [websiteRegistry, ['getWebsite', 'listWebsites']],
     [domainRegistry, ['getDomain', 'listDomains']],
   ]) {
@@ -303,11 +338,12 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
     primaryDomainId: resourceId(normalized.operationId, 'primary-domain'),
     wwwDomainId: normalized.wwwMode === 'independent' ? resourceId(normalized.operationId, 'www-domain') : null,
   });
-  const [applications, websites, domains] = await Promise.all([
-    applicationRegistry.listApplications(), websiteRegistry.listWebsites(), domainRegistry.listDomains(),
+  const [applications, dockerWorkloads, websites, domains] = await Promise.all([
+    applicationRegistry.listApplications(), dockerWorkloadRegistry.listWorkloads(), websiteRegistry.listWebsites(), domainRegistry.listDomains(),
   ]);
 
   let application = null;
+  let dockerWorkload = null;
   let applicationExpected = null;
   let assignedPort = null;
   if (normalized.source.kind === 'existing_application') {
@@ -315,6 +351,12 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
     if (!application) throw new SiteCreateError('application_not_found', 'Selected Application does not exist', 404);
     if (application.serverId !== normalized.serverId) throw new SiteCreateError('site_create_application_server_mismatch', 'Selected Application belongs to a different server', 409);
     if (!['static', 'node'].includes(application.type)) throw new SiteCreateError('site_create_application_type_unsupported', 'Selected Application type is not supported', 409);
+  } else if (normalized.source.kind === 'existing_docker') {
+    dockerWorkload = dockerWorkloads.find((candidate) => candidate.id === normalized.source.dockerWorkloadId) ?? null;
+    if (!dockerWorkload) throw new SiteCreateError('docker_workload_not_found', 'Selected Docker workload does not exist', 404);
+    if (dockerWorkload.serverId !== normalized.serverId) {
+      throw new SiteCreateError('site_create_docker_server_mismatch', 'Selected Docker workload belongs to a different server', 409);
+    }
   } else if (normalized.source.kind === 'new_static') {
     applicationExpected = {
       id: ids.applicationId,
@@ -366,15 +408,25 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
     const boundElsewhere = websites.find((website) => website.applicationId === application.id && website.id !== ids.websiteId);
     if (boundElsewhere) throw new SiteCreateError('application_already_bound', 'Application is already bound to another Website', 409);
   }
-  const target = domainTarget(application, normalized.source);
+  if (dockerWorkload) {
+    const boundElsewhere = websites.find((website) => website.dockerWorkloadId === dockerWorkload.id && website.id !== ids.websiteId);
+    if (boundElsewhere) throw new SiteCreateError('docker_workload_already_bound', 'Docker workload is already bound to another Website', 409);
+  }
+  const target = domainTarget(application, normalized.source, dockerWorkload);
   const websiteExpected = normalized.source.kind === 'external_proxy'
     ? {
         id: ids.websiteId, serverId: normalized.serverId, name: normalized.name, applicationId: null,
-        runtimeType: 'proxy', documentRoot: null, unixUser: null, proxyTarget: normalized.source.target, revision: 1,
+        dockerWorkloadId: null, runtimeType: 'proxy', documentRoot: null, unixUser: null, proxyTarget: normalized.source.target, revision: 1,
       }
+    : normalized.source.kind === 'existing_docker'
+      ? {
+          id: ids.websiteId, serverId: normalized.serverId, name: normalized.name, applicationId: null,
+          dockerWorkloadId: dockerWorkload.id, runtimeType: 'docker', documentRoot: null, unixUser: null,
+          proxyTarget: dockerWorkload.proxyTarget, revision: 1,
+        }
     : {
         id: ids.websiteId, serverId: normalized.serverId, name: normalized.name, applicationId: application.id,
-        runtimeType: application.type, documentRoot: application.type === 'static' ? application.webRoot : `/var/lib/yunpanel/apps/${application.id}/current`,
+        dockerWorkloadId: null, runtimeType: application.type, documentRoot: application.type === 'static' ? application.webRoot : `/var/lib/yunpanel/apps/${application.id}/current`,
         unixUser: `yunapp-${createHash('sha256').update(application.id).digest('hex').slice(0, 12)}`, proxyTarget: null, revision: 1,
       };
   const websiteExisting = websites.find((candidate) => candidate.id === ids.websiteId) ?? null;
@@ -422,20 +474,29 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
   }
 
   const applicationReady = normalized.source.kind === 'existing_application'
+    || normalized.source.kind === 'existing_docker'
     || normalized.source.kind === 'external_proxy'
     || applications.some((candidate) => candidate.id === ids.applicationId);
   const state = canonicalState({
     applications,
+    dockerWorkloads,
     websites,
     domains,
     excludedIds: { applicationId: ids.applicationId, websiteId: ids.websiteId, domainIds: new Set([ids.primaryDomainId, ids.wwwDomainId].filter(Boolean)) },
     selectedApplicationId: normalized.source.kind === 'existing_application' ? normalized.source.applicationId : null,
+    selectedDockerWorkloadId: normalized.source.kind === 'existing_docker' ? normalized.source.dockerWorkloadId : null,
     serverId: normalized.serverId,
   });
   const planCore = {
     version: 1,
     input: normalized,
-    resources: { application: applicationExpected ?? (application ? stableApplication(application) : null), website: websiteExpected, primaryDomain: primaryExpected, wwwDomain: wwwExpected },
+    resources: {
+      application: applicationExpected ?? (application ? stableApplication(application) : null),
+      dockerWorkload: dockerWorkload ? stableDockerWorkload(dockerWorkload) : null,
+      website: websiteExpected,
+      primaryDomain: primaryExpected,
+      wwwDomain: wwwExpected,
+    },
     state,
   };
   const previewDigest = createHash('sha256').update(JSON.stringify(planCore)).digest('hex');
@@ -459,17 +520,27 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
       aliases: normalized.aliases,
       independentWwwDomain: normalized.wwwPrimaryDomain,
     }),
-    steps: Object.freeze({ applicationReady, websiteReady, primaryDomainReady: primaryReady, wwwDomainReady: normalized.wwwMode === 'independent' ? wwwReady : null }),
+    steps: Object.freeze({
+      applicationReady,
+      ...(normalized.source.kind === 'existing_docker' ? { dockerWorkloadReady: true } : {}),
+      websiteReady,
+      primaryDomainReady: primaryReady,
+      wwwDomainReady: normalized.wwwMode === 'independent' ? wwwReady : null,
+    }),
     lifecycle: Object.freeze({ dnsPublished: false, certificateIssued: false, mailDomainCreated: false }),
     plan: Object.freeze(planCore.resources),
   });
 }
 
-export async function createSite({ input, previewDigest, confirmation, registry, applicationRegistry, websiteRegistry, domainRegistry } = {}) {
+export async function createSite({
+  input, previewDigest, confirmation, registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry,
+} = {}) {
   if (typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)) {
     throw new SiteCreateError('site_create_preview_digest_invalid', 'A current site-create preview digest is required');
   }
-  const preview = await previewSiteCreate({ input, registry, applicationRegistry, websiteRegistry, domainRegistry });
+  const preview = await previewSiteCreate({
+    input, registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry,
+  });
   if (preview.previewDigest !== previewDigest) {
     throw new SiteCreateError('site_create_preview_stale', 'Site-create state changed after preview; request a new preview', 409);
   }
@@ -479,6 +550,9 @@ export async function createSite({ input, previewDigest, confirmation, registry,
   const normalized = normalizeInput(input);
   let application = normalized.source.kind === 'existing_application'
     ? await applicationRegistry.getApplication(normalized.source.applicationId)
+    : null;
+  const dockerWorkload = normalized.source.kind === 'existing_docker'
+    ? await dockerWorkloadRegistry.getWorkload(normalized.source.dockerWorkloadId)
     : null;
   if (normalized.source.kind === 'new_static') {
     application = await applicationRegistry.createApplication({
@@ -507,7 +581,8 @@ export async function createSite({ input, previewDigest, confirmation, registry,
     serverId: normalized.serverId,
     name: normalized.name,
     applicationId: application?.id ?? null,
-    runtimeType: application?.type ?? 'proxy',
+    dockerWorkloadId: dockerWorkload?.id ?? null,
+    runtimeType: dockerWorkload ? 'docker' : application?.type ?? 'proxy',
     proxyTarget: normalized.source.kind === 'external_proxy' ? normalized.source.target : null,
   });
   const primaryDomain = await domainRegistry.createDomain({
@@ -537,6 +612,7 @@ export async function createSite({ input, previewDigest, confirmation, registry,
     resumed: preview.resumeRequired,
     operationId: normalized.operationId,
     application,
+    dockerWorkload,
     website,
     primaryDomain,
     wwwDomain,
@@ -549,6 +625,7 @@ export const siteCreateInternals = Object.freeze({
   normalizeInput,
   normalizedSource,
   stableApplication,
+  stableDockerWorkload,
   stableWebsite,
   stableDomain,
   domainTarget,
