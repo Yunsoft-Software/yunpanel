@@ -11,6 +11,8 @@ const POSTFIX_VIRTUAL_DOMAIN_MAP_PATH = '/etc/yunpanel/mail/postfix/virtual-doma
 const POSTFIX_VIRTUAL_MAILBOX_MAP_PATH = '/etc/yunpanel/mail/postfix/virtual-mailboxes';
 const POSTFIX_VIRTUAL_ALIAS_MAP_PATH = '/etc/yunpanel/mail/postfix/virtual-aliases';
 const DOVECOT_PASSWD_FILE_PATH = '/etc/yunpanel/mail/dovecot/users';
+const DOVECOT_AUTH_CONFIG_PATH = '/etc/dovecot/conf.d/10-auth.conf';
+const DOVECOT_MAIL_CONFIG_PATH = '/etc/dovecot/conf.d/99-yunpanel-mail.conf';
 
 export class MailTemplateError extends Error {
   constructor(code, message) {
@@ -297,6 +299,45 @@ export function previewDovecotPasswdFile(input = {}) {
   });
 }
 
+export function renderDovecotAuthConfig() {
+  return `disable_plaintext_auth = yes\nauth_mechanisms = plain login\nauth_username_format = %Lu\n\npassdb {\n  driver = passwd-file\n  args = username_format=%u ${DOVECOT_PASSWD_FILE_PATH}\n  result_failure = return-fail\n  result_internalfail = return-fail\n  result_success = return-ok\n}\n\nuserdb {\n  driver = static\n  args = uid=vmail gid=vmail home=/var/lib/yunpanel/mail/%d/%n\n  result_failure = return-fail\n  result_internalfail = return-fail\n  result_success = return-ok\n}\n`;
+}
+
+export function renderDovecotMailConfig({ domains, postmasterAddress } = {}) {
+  const normalizedDomains = normalizeManagedDomains(domains);
+  const postmaster = normalizeAddress(postmasterAddress);
+  if (!normalizedDomains.includes(postmaster.domain)) {
+    throw new MailTemplateError('postmaster_domain_unmanaged', 'Dovecot postmaster address must belong to a managed mail domain');
+  }
+  return `protocols = imap lmtp\nmail_home = /var/lib/yunpanel/mail/%d/%n\nmail_location = maildir:~/Maildir\n\nservice lmtp {\n  unix_listener /var/spool/postfix/private/dovecot-lmtp {\n    mode = 0600\n    user = postfix\n    group = postfix\n  }\n}\n\nprotocol lmtp {\n  auth_username_format = %Lu\n  postmaster_address = ${postmaster.address}\n}\n`;
+}
+
+export function previewDovecotVirtualMailConfig(input = {}) {
+  const rendered = [
+    [DOVECOT_AUTH_CONFIG_PATH, renderDovecotAuthConfig()],
+    [DOVECOT_MAIL_CONFIG_PATH, renderDovecotMailConfig(input)],
+  ];
+  const artifacts = Object.freeze(rendered.map(([path, content]) => Object.freeze({
+    version: 1,
+    path,
+    sha256: createHash('sha256').update(content).digest('hex'),
+    bytes: Buffer.byteLength(content),
+    content,
+    sensitive: false,
+    sideEffects: false,
+  })));
+  return Object.freeze({
+    version: 1,
+    sha256: createHash('sha256').update(JSON.stringify(
+      artifacts.map((entry) => ({ path: entry.path, sha256: entry.sha256 })),
+    )).digest('hex'),
+    artifacts,
+    validate: Object.freeze({ file: '/usr/bin/doveconf', args: Object.freeze(['-n']) }),
+    requirements: Object.freeze(['dovecot_2_3', 'vmail_identity', 'postfix_identity', 'mail_tls_material']),
+    sideEffects: false,
+  });
+}
+
 export const mailTemplatePolicy = Object.freeze({
   maxManagedDomains: MAX_MANAGED_DOMAINS,
   maxMailboxes: MAX_MAILBOXES,
@@ -306,4 +347,6 @@ export const mailTemplatePolicy = Object.freeze({
   postfixVirtualMailboxMapPath: POSTFIX_VIRTUAL_MAILBOX_MAP_PATH,
   postfixVirtualAliasMapPath: POSTFIX_VIRTUAL_ALIAS_MAP_PATH,
   dovecotPasswdFilePath: DOVECOT_PASSWD_FILE_PATH,
+  dovecotAuthConfigPath: DOVECOT_AUTH_CONFIG_PATH,
+  dovecotMailConfigPath: DOVECOT_MAIL_CONFIG_PATH,
 });

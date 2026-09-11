@@ -4,8 +4,11 @@ import {
   MailTemplateError,
   mailTemplatePolicy,
   previewDovecotPasswdFile,
+  previewDovecotVirtualMailConfig,
   previewPostfixVirtualDomainMap,
   previewPostfixVirtualMaps,
+  renderDovecotAuthConfig,
+  renderDovecotMailConfig,
   renderDovecotPasswdFile,
   renderPostfixVirtualAliasMap,
   renderPostfixVirtualDomainMap,
@@ -183,4 +186,48 @@ test('Dovecot passwd rendering rejects weak, noncanonical and out-of-scope accou
     }),
     (error) => error instanceof MailTemplateError && error.code === 'mailbox_domain_unmanaged',
   );
+});
+
+test('renders fail-closed Dovecot virtual authentication without PAM fallback', () => {
+  const config = renderDovecotAuthConfig();
+  assert.match(config, /^disable_plaintext_auth = yes$/m);
+  assert.match(config, /^auth_mechanisms = plain login$/m);
+  assert.match(config, /^auth_username_format = %Lu$/m);
+  assert.match(config, /driver = passwd-file/);
+  assert.match(config, /username_format=%u \/etc\/yunpanel\/mail\/dovecot\/users/);
+  assert.equal(config.match(/result_failure = return-fail/g)?.length, 2);
+  assert.equal(config.match(/result_internalfail = return-fail/g)?.length, 2);
+  assert.equal(config.includes('driver = pam'), false);
+  assert.equal(config.includes('allow_all_users'), false);
+});
+
+test('renders Dovecot Maildir and Postfix LMTP socket from fixed paths', () => {
+  const config = renderDovecotMailConfig({ domains: ['example.com'], postmasterAddress: 'Postmaster@EXAMPLE.COM.' });
+  assert.match(config, /^protocols = imap lmtp$/m);
+  assert.match(config, /^mail_home = \/var\/lib\/yunpanel\/mail\/%d\/%n$/m);
+  assert.match(config, /^mail_location = maildir:~\/Maildir$/m);
+  assert.match(config, /unix_listener \/var\/spool\/postfix\/private\/dovecot-lmtp/);
+  assert.match(config, /^    mode = 0600$/m);
+  assert.match(config, /^    user = postfix$/m);
+  assert.match(config, /^    group = postfix$/m);
+  assert.match(config, /^  postmaster_address = postmaster@example\.com$/m);
+  assert.throws(
+    () => renderDovecotMailConfig({ domains: ['example.com'], postmasterAddress: 'postmaster@other.example' }),
+    (error) => error instanceof MailTemplateError && error.code === 'postmaster_domain_unmanaged',
+  );
+});
+
+test('previews deterministic non-secret Dovecot config with explicit activation requirements', () => {
+  const preview = previewDovecotVirtualMailConfig({ domains: ['example.com'], postmasterAddress: 'postmaster@example.com' });
+  assert.match(preview.sha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(preview.artifacts.map((entry) => entry.path), [
+    '/etc/dovecot/conf.d/10-auth.conf',
+    '/etc/dovecot/conf.d/99-yunpanel-mail.conf',
+  ]);
+  assert.deepEqual(preview.validate, { file: '/usr/bin/doveconf', args: ['-n'] });
+  assert.deepEqual(preview.requirements, ['dovecot_2_3', 'vmail_identity', 'postfix_identity', 'mail_tls_material']);
+  assert.equal(preview.sideEffects, false);
+  assert.equal(previewDovecotVirtualMailConfig({
+    postmasterAddress: 'POSTMASTER@EXAMPLE.COM.', domains: ['EXAMPLE.COM.'],
+  }).sha256, preview.sha256);
 });
