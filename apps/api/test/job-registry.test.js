@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { createJobRegistry, isNewlyEnqueuedJob, JobRegistryError } from '../src/job-registry.js';
@@ -207,4 +210,30 @@ test('active resource jobs are locked and durable idempotency keys replay only i
   const listed = await registry.listJobs();
   assert.equal(listed.length, 1);
   assert.equal(JSON.stringify(listed).includes(input.idempotencyKey), false);
+});
+
+test('idempotent enqueue identity survives reopening the private job store', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-job-idempotency-'));
+  const filePath = path.join(directory, 'jobs.json');
+  const input = {
+    serverId: 'server-1',
+    type: 'domain.stage',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: { primaryDomain: 'example.com', aliases: [], targetType: 'static', target: { root: '/var/www/example' } },
+    resourceType: 'domain',
+    resourceId: 'domain-1',
+    idempotencyKey: 'github:9d4a4727-1aba-4d35-95fe-21db67042ce9:12345678-1234-4234-9234-123456789012',
+  };
+  try {
+    const firstRegistry = createJobRegistry({ filePath });
+    const first = await firstRegistry.enqueue(input);
+    const reopened = createJobRegistry({ filePath });
+    await reopened.init();
+    const replayed = await reopened.enqueue(input);
+    assert.equal(replayed.id, first.id);
+    assert.equal(isNewlyEnqueuedJob(replayed), false);
+    assert.equal((await reopened.listJobs()).length, 1);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

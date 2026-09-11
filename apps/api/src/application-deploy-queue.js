@@ -23,12 +23,14 @@ export function createApplicationDeployQueue({
       throw error;
     }
 
-    const jobs = await jobRegistry.listJobs({ resourceType: 'application', resourceId: application.id });
-    if (jobs.some((job) => job.status === 'queued' || job.status === 'running')) {
-      throw new JobRegistryError('application_job_conflict', 'An application operation is already queued or running', 409);
-    }
-    if (application.activeDeploymentId) {
-      throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
+    if (idempotencyKey === null) {
+      const jobs = await jobRegistry.listJobs({ resourceType: 'application', resourceId: application.id });
+      if (jobs.some((job) => job.status === 'queued' || job.status === 'running')) {
+        throw new JobRegistryError('application_job_conflict', 'An application operation is already queued or running', 409);
+      }
+      if (application.activeDeploymentId) {
+        throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
+      }
     }
 
     let operation;

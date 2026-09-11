@@ -6,6 +6,7 @@ import { attachManagementAudit } from './management-audit.js';
 import { createOwnerMfaPolicy } from './owner-mfa-policy.js';
 import { requireReadOnlyRequest } from './panel-access.js';
 import { handleUserAdmin } from './user-admin-http.js';
+import { isGithubWebhookPath } from './github-webhook-http.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
 const PROXY_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -97,6 +98,7 @@ export function createAuthenticatedApi({
   development = false,
   proxyToken,
   trustedProxyIps = TRUSTED_PROXY_DEFAULT,
+  publicWebhookHandler = null,
 }) {
   let origin;
   try { origin = new URL(publicOrigin); } catch { throw new Error('YUNPANEL_PUBLIC_ORIGIN is required'); }
@@ -113,6 +115,9 @@ export function createAuthenticatedApi({
   const mfaCookieName = localDevelopment ? 'yunpanel_mfa' : '__Host-yunpanel_mfa';
   const cookieOptions = `Path=/; HttpOnly; SameSite=Strict${localDevelopment ? '' : '; Secure'}`;
   const handler = createHandler();
+  if (publicWebhookHandler !== null && typeof publicWebhookHandler !== 'function') {
+    throw new TypeError('Public webhook handler must be a function');
+  }
 
   const readCookie = (request, name) => {
     const entries = (request.headers.cookie ?? '').split(';').map((part) => part.trim()).filter((part) => part.startsWith(`${name}=`));
@@ -139,6 +144,7 @@ export function createAuthenticatedApi({
     if (!request.url?.startsWith('/') || request.url.startsWith('//')) throw new AuthError('invalid_path', 'Invalid request path.');
     const url = new URL(request.url, 'http://api.local');
     let pathname = url.pathname;
+    const githubWebhookPath = isGithubWebhookPath(pathname);
     if (pathname.startsWith('/api/panel/')) {
       pathname = `/api/${pathname.slice('/api/panel/'.length)}`;
       request.url = pathname + url.search;
@@ -146,6 +152,13 @@ export function createAuthenticatedApi({
     if (pathname === '/api/health' && SAFE_METHODS.has(request.method)) return json(response, 200, { status: 'ok' });
     if (!pathname.startsWith('/api/')) return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
     if (pathname.startsWith('/api/dev/') && !development) return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
+
+    if (githubWebhookPath) {
+      requestPeer(request, { proxyToken, trustedProxies });
+      if (!publicWebhookHandler) return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
+      await publicWebhookHandler(request, response, pathname);
+      return;
+    }
 
     if (isAgentRoute(request.method, pathname)) {
       if (request.headers.origin || request.headers.cookie) throw new AuthError('agent_channel_only', 'This route is not a browser management endpoint.', 403);

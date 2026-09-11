@@ -8,6 +8,7 @@ import { createAuditedJobRegistry } from './audited-job-registry.js';
 import { createAuthStore } from './auth-store.js';
 import { createAuthenticatedApi } from './auth-http.js';
 import { createApplicationEnvironmentRegistry } from './application-environment-registry.js';
+import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { startCertificateRenewalScheduler } from './certificate-renewal-scheduler.js';
@@ -18,6 +19,7 @@ import { createDockerWorkloadRegistry } from './docker-workload-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
 import { createJobLogStore } from './job-log-store.js';
+import { createGithubWebhookHandler } from './github-webhook-http.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createServerRegistry } from './server-registry.js';
@@ -129,12 +131,22 @@ const jobRegistry = createAuditedJobRegistry({
   audit: authStore.audit,
   onAuditError: reportAuditFault,
 });
+const applicationDeployQueue = createApplicationDeployQueue({
+  applicationRegistry,
+  applicationEnvironmentRegistry,
+  jobRegistry,
+});
 const listener = createAuthenticatedApi({
   store: authStore,
   publicOrigin: process.env.YUNPANEL_PUBLIC_ORIGIN ?? (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:5173' : undefined),
   development: process.env.NODE_ENV === 'development',
   proxyToken: internalProxyToken,
   trustedProxyIps: process.env.YUNPANEL_TRUSTED_PROXY_IPS,
+  publicWebhookHandler: createGithubWebhookHandler({
+    applicationRegistry,
+    applicationEnvironmentRegistry,
+    queueApplicationDeploy: applicationDeployQueue,
+  }),
   createHandler: () => createApp({
     registry,
     domainRegistry,
@@ -148,6 +160,7 @@ const listener = createAuthenticatedApi({
     mailDomainRegistry,
     dockerWorkloadRegistry,
     applicationEnvironmentRegistry,
+    applicationDeployQueue,
     journalLogReader,
     nginxLogReader,
     jobLogStore,

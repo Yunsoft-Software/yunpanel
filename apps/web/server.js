@@ -72,8 +72,12 @@ function isTransportPath(pathname) {
     || /^\/api\/servers\/[^/]+\/(?:heartbeat|commands(?:\/|$)|applications\/[^/]+\/environment$)/.test(pathname);
 }
 
-function proxyRequest(request, response, { apiHost, apiPort, clientIp, proxyToken, publicOrigin }) {
-  if (!sameOriginMutation(request, publicOrigin)) {
+function isGithubWebhookPath(pathname) {
+  return /^\/api\/webhooks\/github\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(pathname);
+}
+
+function proxyRequest(request, response, { apiHost, apiPort, clientIp, proxyToken, publicOrigin, signedWebhook = false }) {
+  if (!signedWebhook && !sameOriginMutation(request, publicOrigin)) {
     reply(response, 403, 'Cross-origin panel mutations are not allowed.');
     return;
   }
@@ -156,11 +160,18 @@ export function createPanelServer({
   if (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535) throw new Error('YUNPANEL_API_PORT is invalid');
   if (!publicOrigin || new URL(publicOrigin).origin !== publicOrigin) throw new Error('YUNPANEL_PUBLIC_ORIGIN is required');
   return http.createServer(async (request, response) => {
+    const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
+    const signedWebhook = isGithubWebhookPath(requestUrl.pathname);
     const clientIp = clientAddress(request, trustedProxies);
-    if (!clientIp || !allowedClients.has(clientIp)) {
+    if (!clientIp || (!signedWebhook && !allowedClients.has(clientIp))) {
       reply(response, 403, 'This panel is restricted to an approved client address.'); return;
     }
-    const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
+    if (signedWebhook) {
+      proxyRequest(request, response, {
+        apiHost, apiPort, clientIp, proxyToken, publicOrigin, signedWebhook: true,
+      });
+      return;
+    }
     if (requestUrl.pathname === '/api/health' || requestUrl.pathname.startsWith('/api/panel/') || requestUrl.pathname.startsWith('/api/auth/')) {
       proxyRequest(request, response, { apiHost, apiPort, clientIp, proxyToken, publicOrigin }); return;
     }
@@ -169,7 +180,7 @@ export function createPanelServer({
   });
 }
 
-export const panelServerInternals = Object.freeze({ normalizeIp, parseIpSet, clientAddress });
+export const panelServerInternals = Object.freeze({ normalizeIp, parseIpSet, clientAddress, isGithubWebhookPath });
 
 export function startPanelServer(options = {}) {
   const host = options.host ?? process.env.YUNPANEL_WEB_HOST ?? '127.0.0.1';

@@ -66,6 +66,44 @@ test('panel gateway keeps the IP restriction but never injects admin authorizati
   });
 });
 
+test('gateway exposes only the exact signed webhook path outside the panel IP allowlist', async (t) => {
+  const requests = [];
+  const app = await fixture(t, (request, response) => {
+    requests.push({
+      method: request.method,
+      url: request.url,
+      clientIp: request.headers['x-yunpanel-client-ip'],
+      signature: request.headers['x-hub-signature-256'],
+      origin: request.headers.origin,
+    });
+    response.writeHead(202, { 'content-type': 'application/json' });
+    response.end('{"data":{"status":"queued"}}');
+  });
+  const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
+  const response = await app.request(`/api/webhooks/github/${applicationId}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-real-ip': '192.0.2.90',
+      'x-github-delivery': '12345678-1234-4234-9234-123456789012',
+      'x-github-event': 'push',
+      'x-hub-signature-256': `sha256=${'a'.repeat(64)}`,
+    },
+    body: '{}',
+  });
+  assert.equal(response.status, 202);
+  assert.deepEqual(requests, [{
+    method: 'POST',
+    url: `/api/webhooks/github/${applicationId}`,
+    clientIp: '192.0.2.90',
+    signature: `sha256=${'a'.repeat(64)}`,
+    origin: undefined,
+  }]);
+  assert.equal((await app.request(`/api/webhooks/github/${applicationId}/extra`, {
+    headers: { 'x-real-ip': '192.0.2.90' },
+  })).status, 403);
+});
+
 test('gateway rejects spoofed or ambiguous forwarding chains before proxying', async (t) => {
   let requests = 0;
   const app = await fixture(t, (_request, response) => { requests += 1; response.end('{}'); });
