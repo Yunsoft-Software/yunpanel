@@ -12,3 +12,10 @@ export {
   renderNodeEnvironmentFile,
   renderNodeSystemdUnit,
 } from './systemd.js';
+
+export {
+  MailTemplateError,
+  mailTemplatePolicy,
+  previewPostfixVirtualDomainMap,
+  renderPostfixVirtualDomainMap,
+} from './mail.js';
