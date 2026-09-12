@@ -12,6 +12,7 @@ import { createManagedServiceMutationReceiptStore } from './managed-service-muta
 import { createNodeDeploymentReceiptStore } from './node-deployment-receipt.js';
 import { createNodeRestartReceiptStore } from './node-restart-receipt.js';
 import { createNodeRollbackReceiptStore } from './node-rollback-receipt.js';
+import { createRoundcubeConfigOperationReceiptStore } from './roundcube-config-operation-receipt.js';
 import { createSystemUpgradeReceiptStore } from './system-upgrade-receipt.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -43,6 +44,7 @@ export async function startConfiguredLocalRuntime({
   mailDomainRegistry = null,
   mailConfigurationService = null,
   mailDkimConfigurationService = null,
+  roundcubeConfigurationService = null,
   dnsProviderCredentialRegistry = null,
   jobLogStore = null,
   createOperations = createLocalHostOperations,
@@ -55,6 +57,7 @@ export async function startConfiguredLocalRuntime({
   createNodeDeploymentReceipts = createNodeDeploymentReceiptStore,
   createNodeRestartReceipts = createNodeRestartReceiptStore,
   createNodeRollbackReceipts = createNodeRollbackReceiptStore,
+  createRoundcubeConfigOperationReceipts = createRoundcubeConfigOperationReceiptStore,
   createSystemUpgradeReceipts = createSystemUpgradeReceiptStore,
   inspectInventory = inspectHostInventory,
   inspectServices = null,
@@ -74,6 +77,9 @@ export async function startConfiguredLocalRuntime({
   if (mailDkimConfigurationService !== null && typeof mailDkimConfigurationService.materializeApply !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_mail_dkim_configuration_invalid', 'Local runtime managed DKIM configuration provider is invalid');
   }
+  if (roundcubeConfigurationService !== null && typeof roundcubeConfigurationService.materializeForServer !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_roundcube_configuration_invalid', 'Local runtime Roundcube configuration provider is invalid');
+  }
   if (mailConfigurationService !== null
     && (!mailDomainRegistry || typeof mailDomainRegistry.transitionLocalStatus !== 'function')) {
     throw new ConfiguredLocalRuntimeError('local_mail_domain_registry_invalid', 'Local runtime managed mail reconciliation registry is invalid');
@@ -92,6 +98,7 @@ export async function startConfiguredLocalRuntime({
     || typeof createNodeDeploymentReceipts !== 'function'
     || typeof createNodeRestartReceipts !== 'function'
     || typeof createNodeRollbackReceipts !== 'function'
+    || typeof createRoundcubeConfigOperationReceipts !== 'function'
     || typeof createSystemUpgradeReceipts !== 'function'
     || typeof inspectInventory !== 'function'
     || (inspectServices !== null && typeof inspectServices !== 'function')
@@ -121,6 +128,11 @@ export async function startConfiguredLocalRuntime({
       expectedConfigurationSha256: payload.configurationSha256,
     })
     : null;
+  const loadRoundcubeConfiguration = roundcubeConfigurationService
+    ? (payload, execution) => roundcubeConfigurationService.materializeForServer(execution?.resourceId, {
+      expectedPreviewSha256: payload.previewSha256,
+    })
+    : null;
   const hostOperations = createOperations({
     loadApplicationEnvironment: (applicationId, expectedRevision) => applicationEnvironmentRegistry.materialize(applicationId, {
       expectedRevision,
@@ -133,6 +145,7 @@ export async function startConfiguredLocalRuntime({
       : null,
     loadManagedMailConfiguration,
     loadManagedDkimConfiguration,
+    loadRoundcubeConfiguration,
     jobLogStore,
   });
   const certificateOperationReceipts = createCertificateOperationReceipts();
@@ -154,6 +167,11 @@ export async function startConfiguredLocalRuntime({
   const mailDkimOperationReceipts = mailDkimConfigurationService ? createMailDkimOperationReceipts() : null;
   if (mailDkimConfigurationService && (!mailDkimOperationReceipts || typeof mailDkimOperationReceipts.write !== 'function')) {
     throw new ConfiguredLocalRuntimeError('local_mail_dkim_receipts_invalid', 'Local runtime DKIM operation receipt store is invalid');
+  }
+  const roundcubeConfigOperationReceipts = roundcubeConfigurationService ? createRoundcubeConfigOperationReceipts() : null;
+  if (roundcubeConfigurationService
+    && (!roundcubeConfigOperationReceipts || typeof roundcubeConfigOperationReceipts.write !== 'function')) {
+    throw new ConfiguredLocalRuntimeError('local_roundcube_receipts_invalid', 'Local runtime Roundcube operation receipt store is invalid');
   }
   const managedServiceReceipts = createManagedServiceReceipts();
   if (!managedServiceReceipts || typeof managedServiceReceipts.write !== 'function') {
@@ -285,6 +303,30 @@ export async function startConfiguredLocalRuntime({
         expectedKeyRevision: payload.expectedKeyRevision,
         previewDigest: payload.previewDigest,
         configurationSha256: payload.configurationSha256,
+        applied: true,
+      });
+      return;
+    }
+
+    if (operation === OPERATIONS.ROUNDCUBE_CONFIG_APPLY) {
+      if (!roundcubeConfigOperationReceipts || resourceType !== 'server' || resourceId !== serverId
+        || !SHA256_PATTERN.test(payload?.previewSha256 ?? '')
+        || !SHA256_PATTERN.test(payload?.configSha256 ?? '')
+        || !SHA256_PATTERN.test(payload?.fpmSha256 ?? '')
+        || result?.previewSha256 !== payload.previewSha256
+        || result.configSha256 !== payload.configSha256
+        || result.fpmSha256 !== payload.fpmSha256
+        || typeof result.databaseCreated !== 'boolean'
+        || result.applied !== true || result.sideEffects !== true) {
+        throw new Error('Roundcube result is not safe recovery evidence');
+      }
+      await roundcubeConfigOperationReceipts.write({
+        serverId,
+        jobId,
+        previewSha256: payload.previewSha256,
+        configSha256: payload.configSha256,
+        fpmSha256: payload.fpmSha256,
+        databaseCreated: result.databaseCreated,
         applied: true,
       });
       return;
