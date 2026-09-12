@@ -10,10 +10,15 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
-import { roundcubeFpmTemplatePolicy, roundcubeTemplatePolicy } from '@yunpanel/config-templates';
+import {
+  roundcubeFpmTemplatePolicy,
+  roundcubeNginxTemplatePolicy,
+  roundcubeTemplatePolicy,
+} from '@yunpanel/config-templates';
 
 const TRANSACTION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const MANIFEST_VERSION = 2;
 const BACKUP_ROOT_MODE = 0o700;
 const BACKUP_FILE_MODE = 0o600;
 const MAX_CONFIG_BYTES = 1024 * 1024;
@@ -42,6 +47,7 @@ export function createRoundcubeConfigBackupManager({
   backupRoot = '/var/lib/yunpanel/backups/roundcube',
   configPath = roundcubeTemplatePolicy.configPath,
   fpmPoolPath = roundcubeFpmTemplatePolicy.poolPath,
+  nginxConfigPath = roundcubeNginxTemplatePolicy.configPath,
   databasePath = roundcubeTemplatePolicy.databasePath,
   chmodFn = chmod,
   chownFn = chown,
@@ -82,9 +88,7 @@ export function createRoundcubeConfigBackupManager({
     let metadata;
     try { metadata = await lstatFn(targetPath); }
     catch (error) {
-      if (error?.code === 'ENOENT') {
-        return Object.freeze({ targetPath, exists: false, backupName: null });
-      }
+      if (error?.code === 'ENOENT') return Object.freeze({ targetPath, exists: false, backupName: null });
       throw new RoundcubeConfigBackupError('roundcube_backup_inspection_failed', 'Roundcube live configuration could not be inspected');
     }
     if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > MAX_CONFIG_BYTES) {
@@ -137,15 +141,17 @@ export function createRoundcubeConfigBackupManager({
     await mkdirFn(directory, { mode: BACKUP_ROOT_MODE });
     await chmodFn(directory, BACKUP_ROOT_MODE);
     try {
-      const [config, fpm, databaseExisted] = await Promise.all([
+      const [config, fpm, nginx, databaseExisted] = await Promise.all([
         inspectTarget(configPath, 'config.inc.php'),
         inspectTarget(fpmPoolPath, 'yunpanel-roundcube-fpm.conf'),
+        inspectTarget(nginxConfigPath, 'yunpanel-roundcube-nginx.conf'),
         inspectDatabasePresence(),
       ]);
-      for (const record of [config, fpm]) {
+      for (const record of [config, fpm, nginx]) {
         if (!record.exists) continue;
-        await writeFileFn(path.join(directory, record.backupName), record.content, { mode: BACKUP_FILE_MODE, flag: 'wx' });
-        await chmodFn(path.join(directory, record.backupName), BACKUP_FILE_MODE);
+        const backupPath = path.join(directory, record.backupName);
+        await writeFileFn(backupPath, record.content, { mode: BACKUP_FILE_MODE, flag: 'wx' });
+        await chmodFn(backupPath, BACKUP_FILE_MODE);
       }
       const publicRecord = (record) => record.exists ? Object.freeze({
         targetPath: record.targetPath,
@@ -158,10 +164,10 @@ export function createRoundcubeConfigBackupManager({
         gid: record.gid,
       }) : record;
       const manifest = Object.freeze({
-        version: 1,
+        version: MANIFEST_VERSION,
         transactionId: normalizedId,
         databaseExisted,
-        files: Object.freeze([publicRecord(config), publicRecord(fpm)]),
+        files: Object.freeze([publicRecord(config), publicRecord(fpm), publicRecord(nginx)]),
       });
       const manifestPath = path.join(directory, 'manifest.json');
       await writeFileFn(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', mode: BACKUP_FILE_MODE, flag: 'wx' });
@@ -176,11 +182,12 @@ export function createRoundcubeConfigBackupManager({
 
   function validateManifest(value, id) {
     if (!value || typeof value !== 'object' || Array.isArray(value)
-      || value.version !== 1 || value.transactionId !== id || typeof value.databaseExisted !== 'boolean'
-      || !Array.isArray(value.files) || value.files.length !== 2) {
+      || value.version !== MANIFEST_VERSION || value.transactionId !== id || typeof value.databaseExisted !== 'boolean'
+      || !Array.isArray(value.files) || value.files.length !== 3) {
       throw new RoundcubeConfigBackupError('roundcube_backup_manifest_invalid', 'Roundcube backup manifest is invalid');
     }
-    const expectedTargets = [configPath, fpmPoolPath];
+    const expectedTargets = [configPath, fpmPoolPath, nginxConfigPath];
+    const expectedBackupNames = ['config.inc.php', 'yunpanel-roundcube-fpm.conf', 'yunpanel-roundcube-nginx.conf'];
     const records = value.files.map((record, index) => {
       if (!record || typeof record !== 'object' || Array.isArray(record)
         || record.targetPath !== expectedTargets[index] || typeof record.exists !== 'boolean') {
@@ -190,8 +197,8 @@ export function createRoundcubeConfigBackupManager({
         if (record.backupName !== null) throw new RoundcubeConfigBackupError('roundcube_backup_manifest_invalid', 'Roundcube backup manifest is invalid');
         return Object.freeze({ targetPath: record.targetPath, exists: false, backupName: null });
       }
-      const expectedBackupName = index === 0 ? 'config.inc.php' : 'yunpanel-roundcube-fpm.conf';
-      if (record.backupName !== expectedBackupName || typeof record.sha256 !== 'string' || !SHA256_PATTERN.test(record.sha256)
+      if (record.backupName !== expectedBackupNames[index]
+        || typeof record.sha256 !== 'string' || !SHA256_PATTERN.test(record.sha256)
         || !Number.isSafeInteger(record.bytes) || record.bytes < 0 || record.bytes > MAX_CONFIG_BYTES
         || !Number.isSafeInteger(record.mode) || record.mode < 0 || record.mode > 0o7777
         || !Number.isSafeInteger(record.uid) || record.uid < 0
@@ -200,7 +207,12 @@ export function createRoundcubeConfigBackupManager({
       }
       return Object.freeze({ ...record });
     });
-    return Object.freeze({ version: 1, transactionId: id, databaseExisted: value.databaseExisted, files: Object.freeze(records) });
+    return Object.freeze({
+      version: MANIFEST_VERSION,
+      transactionId: id,
+      databaseExisted: value.databaseExisted,
+      files: Object.freeze(records),
+    });
   }
 
   async function loadManifest(id) {
@@ -272,7 +284,7 @@ export function createRoundcubeConfigBackupManager({
       throw new RoundcubeConfigBackupError('roundcube_restore_failed', 'Roundcube configuration rollback failed');
     }
     return Object.freeze({
-      version: 1,
+      version: MANIFEST_VERSION,
       transactionId: manifest.transactionId,
       restored: true,
       databaseRemoved: manifest.databaseExisted === false,
@@ -283,6 +295,7 @@ export function createRoundcubeConfigBackupManager({
 }
 
 export const roundcubeConfigBackupInternals = Object.freeze({
+  manifestVersion: MANIFEST_VERSION,
   sha256,
   transactionId,
   backupRootMode: BACKUP_ROOT_MODE,
