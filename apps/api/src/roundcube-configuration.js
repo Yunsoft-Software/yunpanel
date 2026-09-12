@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto';
 import {
   previewRoundcubeConfiguration,
   previewRoundcubeFpmPool,
+  previewRoundcubeNginxConfig,
   renderRoundcubeConfig,
   renderRoundcubeFpmPool,
+  renderRoundcubeNginxConfig,
 } from '@yunpanel/config-templates';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -62,7 +64,16 @@ export function createRoundcubeConfigurationService({
       desKey: secret.desKey,
     });
     const config = previewRoundcubeConfiguration(configInput);
-    const fpm = previewRoundcubeFpmPool({ temporaryDirectory: config.temporaryDirectory });
+    const fpmInput = Object.freeze({ temporaryDirectory: config.temporaryDirectory });
+    const fpm = previewRoundcubeFpmPool(fpmInput);
+    const nginxInput = Object.freeze({
+      webHostname: identity.hostname,
+      fullchainPath: identity.fullchainPath,
+      privateKeyPath: identity.privateKeyPath,
+      publicRoot: config.publicRoot,
+      fpmSocketPath: fpm.socketPath,
+    });
+    const nginx = previewRoundcubeNginxConfig(nginxInput);
     const identityRecord = Object.freeze({
       version: 1,
       serverId: id,
@@ -73,18 +84,23 @@ export function createRoundcubeConfigurationService({
       roundcubeSecretRevision: secret.revision,
       configSha256: config.sha256,
       fpmSha256: fpm.sha256,
+      nginxSha256: nginx.sha256,
       databasePath: config.databasePath,
       publicRoot: config.publicRoot,
       fpmSocketPath: fpm.socketPath,
       fpmServiceUnit: fpm.serviceUnit,
+      nginxServiceUnit: nginx.serviceUnit,
+      webEndpoint: nginx.endpoint,
     });
     return Object.freeze({
       identity: identityRecord,
       sha256: digest(identityRecord),
       config,
       fpm,
+      nginx,
       configContent: renderRoundcubeConfig(configInput),
-      fpmContent: renderRoundcubeFpmPool({ temporaryDirectory: config.temporaryDirectory }),
+      fpmContent: renderRoundcubeFpmPool(fpmInput),
+      nginxContent: renderRoundcubeNginxConfig(nginxInput),
     });
   }
 
@@ -105,6 +121,7 @@ export function createRoundcubeConfigurationService({
         requires: current.config.requires,
       }),
       fpm: current.fpm,
+      nginx: current.nginx,
       sideEffects: false,
     });
   }
@@ -156,10 +173,10 @@ export function createRoundcubeConfigurationService({
         path: current.config.artifact.path,
         content: current.configContent,
       })]),
-      publicArtifacts: Object.freeze([Object.freeze({
-        path: current.fpm.artifact.path,
-        content: current.fpmContent,
-      })]),
+      publicArtifacts: Object.freeze([
+        Object.freeze({ path: current.fpm.artifact.path, content: current.fpmContent }),
+        Object.freeze({ path: current.nginx.artifact.path, content: current.nginxContent }),
+      ]),
     });
   }
 
