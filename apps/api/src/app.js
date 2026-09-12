@@ -50,6 +50,9 @@ import { MailDiagnosticsHttpError, mountMailDiagnosticsRoutes } from './mail-dia
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { mountMailServiceIdentityRoutes } from './mail-service-identity-http.js';
 import { MailServiceIdentityRegistryError } from './mail-service-identity-registry.js';
+import { MailSrsConfigurationError } from './mail-srs-configuration.js';
+import { MailSrsHttpError, mountMailSrsRoutes } from './mail-srs-http.js';
+import { MailSrsSecretRegistryError } from './mail-srs-secret-registry.js';
 import { mountMailboxForwardingRoutes } from './mailbox-forwarding-http.js';
 import {
   createMailboxForwardingRegistry,
@@ -151,6 +154,7 @@ export function createApp({
   mailDkimConfigurationService = null,
   mailDkimDnsService = null,
   mailServiceIdentityRegistry = null,
+  mailSrsConfigurationService = null,
   mailboxRegistry = createMailboxRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
@@ -328,6 +332,13 @@ export function createApp({
       localServerId,
     });
   }
+  if (mailSrsConfigurationService) {
+    mountMailSrsRoutes(app, {
+      mailSrsConfigurationService,
+      jobRegistry,
+      localServerId,
+    });
+  }
   mountMailConfigurationRoutes(app, {
     mailConfigurationService: mailConfig,
     mailDomainRegistry,
@@ -393,6 +404,9 @@ export function createApp({
       || error instanceof MailDiagnosticsHttpError
       || error instanceof MailDiagnosticsInspectorError
       || error instanceof MailServiceIdentityRegistryError
+      || error instanceof MailSrsConfigurationError
+      || error instanceof MailSrsHttpError
+      || error instanceof MailSrsSecretRegistryError
       || error instanceof MailboxForwardingRegistryError
       || error instanceof MailboxQuotaRegistryError
       || error instanceof MailboxQuotaHttpError
