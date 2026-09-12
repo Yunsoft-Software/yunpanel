@@ -31,3 +31,8 @@ export {
   renderPostfixVirtualMailboxMap,
   renderRspamdProxyConfig,
 } from './mail.js';
+
+export {
+  MailApplyPlanError,
+  previewManagedMailApplyPlan,
+} from './mail-apply-plan.js';
