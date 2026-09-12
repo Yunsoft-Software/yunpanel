@@ -100,3 +100,10 @@ export {
   renderRoundcubeFpmPool,
   roundcubeFpmTemplatePolicy,
 } from './roundcube-fpm.js';
+
+export {
+  RoundcubeNginxTemplateError,
+  previewRoundcubeNginxConfig,
+  renderRoundcubeNginxConfig,
+  roundcubeNginxTemplatePolicy,
+} from './roundcube-nginx.js';
