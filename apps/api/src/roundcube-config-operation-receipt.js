@@ -1,7 +1,7 @@
 import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const DEFAULT_ROOT = '/var/lib/yunpanel/recovery/roundcube-config-operations';
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
