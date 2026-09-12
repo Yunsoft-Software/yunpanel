@@ -132,6 +132,7 @@ export function previewManagedMailApplyPlan(preview) {
     previewSha256: preview.sha256,
     requirements: Object.freeze([...preview.requirements]),
     artifacts,
+    postfixParameters,
     stages: Object.freeze({
       backup: Object.freeze(artifacts.map((artifact) => Object.freeze({ path: artifact.path }))),
       write: artifacts,
