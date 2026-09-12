@@ -32,6 +32,8 @@ import {
 
 const ARGON2ID_HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 11).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 12).toString('base64').replace(/=+$/, '')}`;
 const TRANSACTION_ID = 'mail-job-activate-001';
+const VMAIL_UID = 5000;
+const VMAIL_GID = 5000;
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -93,7 +95,7 @@ function createMappedFs(liveRoot) {
   };
 }
 
-async function prepare({ root, failFirstDoveconf = false, failSievec = false } = {}) {
+async function prepare({ root, failFirstDoveconf = false, failSievec = false, invalidVmailIdentity = false } = {}) {
   const liveRoot = path.join(root, 'live');
   const stagingRoot = path.join(root, 'staging');
   const backupRoot = path.join(root, 'backup');
@@ -131,6 +133,15 @@ async function prepare({ root, failFirstDoveconf = false, failSievec = false } =
   let doveconfFailuresRemaining = failFirstDoveconf ? 1 : 0;
   const run = async (file, args) => {
     calls.push([file, [...args]]);
+    if (file === '/usr/bin/getent') {
+      assert.deepEqual(args, ['passwd', 'vmail']);
+      return {
+        stdout: invalidVmailIdentity
+          ? 'vmail:x:0:0::/var/lib/yunpanel/mail:/usr/sbin/nologin\n'
+          : `vmail:x:${VMAIL_UID}:${VMAIL_GID}::/var/lib/yunpanel/mail:/usr/sbin/nologin\n`,
+        stderr: '',
+      };
+    }
     if (file === '/usr/sbin/postmap') {
       const source = args[0].replace(/^hash:/, '');
       await writeFile(mapped.mapPath(`${source}.db`), Buffer.from(`compiled:${source}\n`), { mode: 0o640 });
@@ -202,16 +213,20 @@ test('activates staged mail config with compiled maps/sieve, postfix parameters 
   for (const compiledPath of mailConfigBackupInternals.postfixCompiledPaths) {
     assert.equal((await stat(context.mapped.mapPath(compiledPath))).isFile(), true);
   }
-  const compiledSieve = context.mapped.mapPath(mailConfigBackupInternals.sieveCompiledPath);
-  assert.equal((await stat(compiledSieve)).isFile(), true);
-  assert.equal((await stat(compiledSieve)).mode & 0o777, 0o600);
+  const sieveSourceMetadata = await context.mapped.lstatFn(mailForwardingTemplatePolicy.sievePath);
+  assert.equal(sieveSourceMetadata.uid, 0);
+  assert.equal(sieveSourceMetadata.gid, VMAIL_GID);
+  assert.equal(sieveSourceMetadata.mode & 0o777, 0o640);
   const compiledSieveMetadata = await context.mapped.lstatFn(mailConfigBackupInternals.sieveCompiledPath);
+  assert.equal(compiledSieveMetadata.isFile(), true);
+  assert.equal(compiledSieveMetadata.mode & 0o777, 0o640);
   assert.equal(compiledSieveMetadata.uid, 0);
-  assert.equal(compiledSieveMetadata.gid, 0);
+  assert.equal(compiledSieveMetadata.gid, VMAIL_GID);
   assert.equal((await stat(context.mapped.mapPath('/etc/yunpanel/mail/postfix'))).isDirectory(), true);
   assert.equal((await stat(context.mapped.mapPath('/etc/yunpanel/mail/dovecot'))).isDirectory(), true);
 
-  assert.deepEqual(context.calls.slice(0, 4).map((entry) => entry[0]), [
+  const compileCalls = context.calls.filter(([file]) => file === '/usr/sbin/postmap' || file === '/usr/bin/sievec');
+  assert.deepEqual(compileCalls.map((entry) => entry[0]), [
     '/usr/sbin/postmap',
     '/usr/sbin/postmap',
     '/usr/sbin/postmap',
@@ -259,6 +274,20 @@ test('sieve compile failure rolls back without being mislabeled as a postmap fai
   }
 }));
 
+test('invalid or privileged vmail identity blocks activation before the first mutation', async () => withTempDirectory(async (root) => {
+  const context = await prepare({ root, invalidVmailIdentity: true });
+  await assert.rejects(
+    context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID }),
+    (error) => error instanceof MailConfigActivationError && error.code === 'mail_vmail_identity_unavailable',
+  );
+  assert.deepEqual(context.calls, [['/usr/bin/getent', ['passwd', 'vmail']]]);
+  assert.deepEqual(await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath)), context.originalMainCf);
+  await assert.rejects(
+    lstat(context.mapped.mapPath('/etc/yunpanel/mail/postfix')),
+    (error) => error?.code === 'ENOENT',
+  );
+}));
+
 test('rejects live state drift after backup before the first activation mutation', async () => withTempDirectory(async (root) => {
   const context = await prepare({ root });
   await writeFile(
@@ -271,7 +300,7 @@ test('rejects live state drift after backup before the first activation mutation
     context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID }),
     (error) => error instanceof MailConfigActivationError && error.code === 'mail_live_state_changed',
   );
-  assert.equal(context.calls.length, 0);
+  assert.deepEqual(context.calls, [['/usr/bin/getent', ['passwd', 'vmail']]]);
   await assert.rejects(
     lstat(context.mapped.mapPath('/etc/yunpanel/mail/postfix')),
     (error) => error?.code === 'ENOENT',
