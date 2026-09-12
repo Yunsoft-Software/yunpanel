@@ -5,6 +5,7 @@ import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.
 import { createDomainActivationReceiptStore } from './domain-activation-receipt.js';
 import { createLocalHostOperations } from './local-host-operations.js';
 import { createMailConfigOperationReceiptStore } from './mail-config-operation-receipt.js';
+import { createMailDkimOperationReceiptStore } from './mail-dkim-operation-receipt.js';
 import { resolveLocalRuntimeConfig } from './local-runtime-config.js';
 import { startLocalRuntime } from './local-runtime.js';
 import { createManagedServiceMutationReceiptStore } from './managed-service-mutation-receipt.js';
@@ -41,6 +42,7 @@ export async function startConfiguredLocalRuntime({
   applicationEnvironmentRegistry,
   mailDomainRegistry = null,
   mailConfigurationService = null,
+  mailDkimConfigurationService = null,
   dnsProviderCredentialRegistry = null,
   jobLogStore = null,
   createOperations = createLocalHostOperations,
@@ -48,6 +50,7 @@ export async function startConfiguredLocalRuntime({
   createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
   createDomainActivationReceipts = createDomainActivationReceiptStore,
   createMailConfigOperationReceipts = createMailConfigOperationReceiptStore,
+  createMailDkimOperationReceipts = createMailDkimOperationReceiptStore,
   createManagedServiceReceipts = createManagedServiceMutationReceiptStore,
   createNodeDeploymentReceipts = createNodeDeploymentReceiptStore,
   createNodeRestartReceipts = createNodeRestartReceiptStore,
@@ -68,15 +71,23 @@ export async function startConfiguredLocalRuntime({
   if (mailConfigurationService !== null && typeof mailConfigurationService.materializeTransition !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_mail_configuration_invalid', 'Local runtime managed mail configuration provider is invalid');
   }
+  if (mailDkimConfigurationService !== null && typeof mailDkimConfigurationService.materializeApply !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_mail_dkim_configuration_invalid', 'Local runtime managed DKIM configuration provider is invalid');
+  }
   if (mailConfigurationService !== null
     && (!mailDomainRegistry || typeof mailDomainRegistry.transitionLocalStatus !== 'function')) {
     throw new ConfiguredLocalRuntimeError('local_mail_domain_registry_invalid', 'Local runtime managed mail reconciliation registry is invalid');
+  }
+  if (mailDkimConfigurationService !== null
+    && (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function')) {
+    throw new ConfiguredLocalRuntimeError('local_mail_dkim_domain_registry_invalid', 'Local runtime managed DKIM mail-domain registry is invalid');
   }
   if (typeof createOperations !== 'function'
     || typeof createCertificateOperationReceipts !== 'function'
     || typeof createDatabaseDeletionReceipts !== 'function'
     || typeof createDomainActivationReceipts !== 'function'
     || typeof createMailConfigOperationReceipts !== 'function'
+    || typeof createMailDkimOperationReceipts !== 'function'
     || typeof createManagedServiceReceipts !== 'function'
     || typeof createNodeDeploymentReceipts !== 'function'
     || typeof createNodeRestartReceipts !== 'function'
@@ -101,6 +112,15 @@ export async function startConfiguredLocalRuntime({
       expectedConfigurationSha256: payload.configurationSha256,
     })
     : null;
+  const loadManagedDkimConfiguration = mailDkimConfigurationService
+    ? (payload) => mailDkimConfigurationService.materializeApply({
+      mailDomainId: payload.mailDomainId,
+      expectedKeyRevision: payload.expectedKeyRevision,
+    }, {
+      expectedPreviewDigest: payload.previewDigest,
+      expectedConfigurationSha256: payload.configurationSha256,
+    })
+    : null;
   const hostOperations = createOperations({
     loadApplicationEnvironment: (applicationId, expectedRevision) => applicationEnvironmentRegistry.materialize(applicationId, {
       expectedRevision,
@@ -112,6 +132,7 @@ export async function startConfiguredLocalRuntime({
       ? (credentialId) => dnsProviderCredentialRegistry.materialize(credentialId)
       : null,
     loadManagedMailConfiguration,
+    loadManagedDkimConfiguration,
     jobLogStore,
   });
   const certificateOperationReceipts = createCertificateOperationReceipts();
@@ -129,6 +150,10 @@ export async function startConfiguredLocalRuntime({
   const mailConfigOperationReceipts = mailConfigurationService ? createMailConfigOperationReceipts() : null;
   if (mailConfigurationService && (!mailConfigOperationReceipts || typeof mailConfigOperationReceipts.write !== 'function')) {
     throw new ConfiguredLocalRuntimeError('local_mail_config_receipts_invalid', 'Local runtime managed mail operation receipt store is invalid');
+  }
+  const mailDkimOperationReceipts = mailDkimConfigurationService ? createMailDkimOperationReceipts() : null;
+  if (mailDkimConfigurationService && (!mailDkimOperationReceipts || typeof mailDkimOperationReceipts.write !== 'function')) {
+    throw new ConfiguredLocalRuntimeError('local_mail_dkim_receipts_invalid', 'Local runtime DKIM operation receipt store is invalid');
   }
   const managedServiceReceipts = createManagedServiceReceipts();
   if (!managedServiceReceipts || typeof managedServiceReceipts.write !== 'function') {
@@ -236,6 +261,30 @@ export async function startConfiguredLocalRuntime({
         configurationSha256: payload.configurationSha256,
         planSha256: result.planSha256,
         readinessSha256: result.readinessSha256,
+        applied: true,
+      });
+      return;
+    }
+
+    if (operation === OPERATIONS.MAIL_DKIM_APPLY) {
+      if (!mailDkimOperationReceipts || resourceType !== 'mail_domain'
+        || resourceId !== payload?.mailDomainId || result?.mailDomainId !== payload.mailDomainId
+        || result.expectedKeyRevision !== payload.expectedKeyRevision
+        || result.previewDigest !== payload.previewDigest
+        || result.configurationSha256 !== payload.configurationSha256
+        || !Number.isSafeInteger(payload.expectedKeyRevision) || payload.expectedKeyRevision < 1
+        || !SHA256_PATTERN.test(payload.previewDigest ?? '')
+        || !SHA256_PATTERN.test(payload.configurationSha256 ?? '')
+        || result.applied !== true || result.sideEffects !== true) {
+        throw new Error('Managed DKIM result is not safe recovery evidence');
+      }
+      await mailDkimOperationReceipts.write({
+        serverId,
+        jobId,
+        mailDomainId: payload.mailDomainId,
+        expectedKeyRevision: payload.expectedKeyRevision,
+        previewDigest: payload.previewDigest,
+        configurationSha256: payload.configurationSha256,
         applied: true,
       });
       return;
