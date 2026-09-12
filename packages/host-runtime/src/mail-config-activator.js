@@ -13,16 +13,21 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { previewManagedMailApplyPlan } from '@yunpanel/config-templates';
+import {
+  mailForwardingTemplatePolicy,
+  previewManagedMailApplyPlan,
+} from '@yunpanel/config-templates';
 import { createMailConfigBackupManager, mailConfigBackupInternals } from './mail-config-backup.js';
 import { createMailConfigManager } from './mail-config-manager.js';
 import { createMailReadinessInspector } from './mail-readiness-inspector.js';
+import { parseManagedVmailIdentity } from './mail-vmail-identity.js';
 
 const execFileAsync = promisify(execFile);
 const ROOT_UID = 0;
 const ROOT_GID = 0;
 const NEW_MANAGED_DIRECTORY_MODE = 0o750;
-const COMPILED_SIEVE_MODE = 0o600;
+const SIEVE_SHARED_MODE = 0o640;
+const GETENT = '/usr/bin/getent';
 const MAX_OUTPUT = 128 * 1024;
 const UNMANAGED_REQUIRED_DIRECTORIES = Object.freeze([
   '/etc/postfix',
@@ -97,6 +102,21 @@ export function createMailConfigActivator({
       return result;
     } catch {
       throw activationError(code, message);
+    }
+  }
+
+  async function resolveVmailIdentity() {
+    try {
+      const result = await run(GETENT, ['passwd', 'vmail'], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
+      if (Buffer.byteLength(String(result?.stdout ?? result ?? '')) > MAX_OUTPUT
+        || Buffer.byteLength(String(result?.stderr ?? '')) > MAX_OUTPUT) {
+        throw new Error('bounded output exceeded');
+      }
+      const identity = parseManagedVmailIdentity(result?.stdout ?? result);
+      if (!identity) throw new Error('invalid vmail identity');
+      return identity;
+    } catch {
+      throw activationError('mail_vmail_identity_unavailable', 'Managed vmail identity could not be resolved safely');
     }
   }
 
@@ -194,7 +214,7 @@ export function createMailConfigActivator({
     }
   }
 
-  async function replaceManagedArtifacts(stage, planSha256, onMutation) {
+  async function replaceManagedArtifacts(stage, planSha256, onMutation, vmailGid) {
     const stageDirectory = configManager.stageDirectory(planSha256);
     for (const artifact of stage.artifacts) {
       const content = await readStagedArtifact(stageDirectory, artifact);
@@ -223,7 +243,7 @@ export function createMailConfigActivator({
         await atomicReplace(artifact.targetPath, content, {
           mode: artifact.mode,
           uid: ROOT_UID,
-          gid: ROOT_GID,
+          gid: artifact.targetPath === mailForwardingTemplatePolicy.sievePath ? vmailGid : ROOT_GID,
         });
       } catch {
         throw activationError('mail_live_replace_failed', 'Managed mail configuration could not be replaced');
@@ -257,17 +277,17 @@ export function createMailConfigActivator({
     }
   }
 
-  async function secureCompiledSieve() {
+  async function secureCompiledSieve(vmailGid) {
     const compiledPath = mailConfigBackupInternals.sieveCompiledPath;
     try {
       let metadata = await lstatFn(compiledPath);
       if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('unsafe compiled sieve');
-      await chownFn(compiledPath, ROOT_UID, ROOT_GID);
-      await chmodFn(compiledPath, COMPILED_SIEVE_MODE);
+      await chownFn(compiledPath, ROOT_UID, vmailGid);
+      await chmodFn(compiledPath, SIEVE_SHARED_MODE);
       metadata = await lstatFn(compiledPath);
       if (!metadata.isFile() || metadata.isSymbolicLink()
-        || metadata.uid !== ROOT_UID || metadata.gid !== ROOT_GID
-        || (metadata.mode & 0o7777) !== COMPILED_SIEVE_MODE) {
+        || metadata.uid !== ROOT_UID || metadata.gid !== vmailGid
+        || (metadata.mode & 0o7777) !== SIEVE_SHARED_MODE) {
         throw new Error('compiled sieve metadata mismatch');
       }
     } catch {
@@ -275,7 +295,7 @@ export function createMailConfigActivator({
     }
   }
 
-  async function runApplyCommands(plan) {
+  async function runApplyCommands(plan, vmailGid) {
     for (const command of plan.stages.compile) {
       if (command.file === '/usr/bin/sievec') {
         await runCommand(command, 'mail_sieve_compile_failed', 'Managed mailbox forwarding script compilation failed');
@@ -284,7 +304,7 @@ export function createMailConfigActivator({
       }
     }
     await assertCompiledMapsSafe();
-    await secureCompiledSieve();
+    await secureCompiledSieve(vmailGid);
     for (const command of plan.stages.configurePostfix) {
       await runCommand(command, 'mail_postconf_failed', 'Postfix managed parameter update failed');
     }
@@ -381,6 +401,7 @@ export function createMailConfigActivator({
       throw activationError('mail_activation_prerequisite_stale', 'Managed mail staging or backup belongs to a different configuration');
     }
 
+    const vmailIdentity = await resolveVmailIdentity();
     await assertRequiredDirectoriesSafe();
     await assertLiveMatchesBackup(backup);
 
@@ -388,8 +409,8 @@ export function createMailConfigActivator({
     const markMutation = () => { mutationStarted = true; };
     try {
       await createManagedDirectories(backup, markMutation);
-      await replaceManagedArtifacts(stage, plan.sha256, markMutation);
-      await runApplyCommands(plan);
+      await replaceManagedArtifacts(stage, plan.sha256, markMutation, vmailIdentity.gid);
+      await runApplyCommands(plan, vmailIdentity.gid);
       const finalReadiness = await readinessInspector.inspect(preview);
       if (!finalReadiness.ready || finalReadiness.previewSha256 !== preview.sha256) {
         throw activationError('mail_post_apply_readiness_failed', 'Managed mail host readiness failed after activation');
@@ -425,5 +446,5 @@ export function createMailConfigActivator({
 export const mailConfigActivatorInternals = Object.freeze({
   unmanagedRequiredDirectories: UNMANAGED_REQUIRED_DIRECTORIES,
   newManagedDirectoryMode: NEW_MANAGED_DIRECTORY_MODE,
-  compiledSieveMode: COMPILED_SIEVE_MODE,
+  sieveSharedMode: SIEVE_SHARED_MODE,
 });
