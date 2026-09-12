@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { stat } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { mailTemplatePolicy } from '@yunpanel/config-templates';
+import { mailSecurityTemplatePolicy, mailTemplatePolicy } from '@yunpanel/config-templates';
 import { createManagedServiceManager } from './managed-service-manager.js';
 import { parseManagedVmailIdentity } from './mail-vmail-identity.js';
 
@@ -128,6 +128,38 @@ function destinationTokens(value, variables) {
   return expanded;
 }
 
+function previewParameterMap(preview) {
+  if (!Array.isArray(preview?.postfixParameters)) return null;
+  const result = new Map();
+  for (const parameter of preview.postfixParameters) {
+    if (!parameter || typeof parameter.name !== 'string' || typeof parameter.value !== 'string'
+      || result.has(parameter.name)) return null;
+    result.set(parameter.name, parameter.value);
+  }
+  return result;
+}
+
+function candidateRelayPolicySatisfied(preview) {
+  const parameters = previewParameterMap(preview);
+  if (!parameters) return false;
+  return parameters.get('mynetworks') === mailSecurityTemplatePolicy.loopbackNetworks
+    && parameters.get('smtpd_relay_restrictions') === mailSecurityTemplatePolicy.relayRestrictions
+    && parameters.get('smtpd_sasl_auth_enable') === 'no';
+}
+
+function candidateTlsPolicySatisfied(preview) {
+  const parameters = previewParameterMap(preview);
+  if (!parameters) return false;
+  const dovecot = preview.artifacts?.find((artifact) => artifact?.path === mailTemplatePolicy.dovecotMailConfigPath);
+  return typeof dovecot?.content === 'string'
+    && dovecot.content.startsWith(mailSecurityTemplatePolicy.dovecotTlsPrefix)
+    && parameters.get('smtpd_tls_security_level') === 'may'
+    && parameters.get('smtp_tls_security_level') === 'may'
+    && parameters.get('smtpd_tls_protocols') === `>=${mailSecurityTemplatePolicy.tlsMinProtocol}`
+    && parameters.get('smtp_tls_protocols') === `>=${mailSecurityTemplatePolicy.tlsMinProtocol}`
+    && parameters.get('smtpd_tls_auth_only') === 'yes';
+}
+
 function loopbackPortSafe(value) {
   const output = cleanOutput(value);
   if (!output) return true;
@@ -206,8 +238,6 @@ export function createMailReadinessInspector({
       runText(POSTCONF, ['-h', 'myhostname']),
       runText(POSTCONF, ['-h', 'mydomain']),
       runText(POSTCONF, ['-h', 'mydestination']),
-      runText(POSTCONF, ['-h', 'smtpd_relay_restrictions']),
-      runText(POSTCONF, ['-h', 'smtpd_recipient_restrictions']),
       runText(SS, ['-H', '-ltn', 'sport = :11332']),
     ]);
     const [
@@ -222,8 +252,6 @@ export function createMailReadinessInspector({
       myhostname,
       mydomain,
       mydestination,
-      relayRestrictions,
-      recipientRestrictions,
       socketState,
     ] = checks;
 
@@ -250,13 +278,6 @@ export function createMailReadinessInspector({
       : null;
     const managedDomainsExcluded = Array.isArray(destinations)
       && domains.every((domain) => !destinations.includes(domain));
-
-    const relayTokens = [
-      ...(relayRestrictions.ok ? restrictionTokens(relayRestrictions.output) : []),
-      ...(recipientRestrictions.ok ? restrictionTokens(recipientRestrictions.output) : []),
-    ];
-    const relayPolicyVerified = relayTokens.includes('reject_unauth_destination')
-      || relayTokens.includes('defer_unauth_destination');
     const managedVmailIdentity = vmailIdentity.ok ? parseManagedVmailIdentity(vmailIdentity.output) : null;
 
     const status = new Map([
@@ -266,11 +287,12 @@ export function createMailReadinessInspector({
       ['rspamd', serviceSatisfied(rspamd)],
       ['vmail_identity', managedVmailIdentity !== null],
       ['postfix_identity', postfixIdentity.ok && identityPresent(postfixIdentity.output, 'postfix')],
-      ['mail_tls_material', dovecotSsl.ok && dovecotSsl.output.toLowerCase() !== 'no'
+      ['mail_tls_material', candidateTlsPolicySatisfied(preview)
+        && dovecotSsl.ok && dovecotSsl.output.toLowerCase() !== 'no'
         && dovecotCert.ok && dovecotKey.ok && postfixCert.ok && postfixKey.ok && tlsFiles.every(Boolean)],
       ['loopback_11332_available', socketState.ok && loopbackPortSafe(socketState.output)],
       ['managed_domains_excluded_from_mydestination', managedDomainsExcluded],
-      ['postfix_relay_policy_verified', relayPolicyVerified],
+      ['postfix_relay_policy_verified', candidateRelayPolicySatisfied(preview)],
     ]);
     const requirements = Object.freeze(requirementIds.map((id) => Object.freeze({ id, satisfied: status.get(id) === true })));
     const blockers = Object.freeze(requirements.filter((entry) => !entry.satisfied).map((entry) => entry.id));
@@ -303,6 +325,8 @@ export const mailReadinessInternals = Object.freeze({
   configuredPath,
   destinationTokens,
   restrictionTokens,
+  candidateRelayPolicySatisfied,
+  candidateTlsPolicySatisfied,
   loopbackPortSafe,
   identityPresent,
 });
