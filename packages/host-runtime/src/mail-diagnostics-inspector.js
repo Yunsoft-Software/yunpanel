@@ -21,9 +21,9 @@ export class MailDiagnosticsInspectorError extends Error {
   }
 }
 
-function canonicalHostname(value, code = 'mail_diagnostics_hostname_invalid') {
+function canonicalHostname(value, code = 'mail_diagnostics_hostname_invalid', status = 503) {
   try { return normalizeDomainSet(String(value ?? '').trim(), []).primary; }
-  catch { throw new MailDiagnosticsInspectorError(code, 'Mail diagnostics hostname is invalid', 503); }
+  catch { throw new MailDiagnosticsInspectorError(code, 'Mail diagnostics hostname is invalid', status); }
 }
 
 function canonicalAddress(value, family) {
@@ -295,7 +295,7 @@ export function createMailDiagnosticsInspector({
   }
 
   async function inspect(domainName) {
-    const domain = canonicalHostname(domainName, 'mail_diagnostics_domain_invalid');
+    const domain = canonicalHostname(domainName, 'mail_diagnostics_domain_invalid', 400);
     const mailHostname = await managedMailHostname();
     const [mx, txt, dmarc, ipv4, ipv6] = await Promise.all([
       resolveOptional(() => resolveMx(domain), normalizeMx, resolutionTimeoutMs),
