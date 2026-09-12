@@ -41,6 +41,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DATABASE_DELETE,
   OPERATIONS.DNS_RECORD_APPLY,
   OPERATIONS.MAIL_CONFIG_APPLY,
+  OPERATIONS.MAIL_DKIM_APPLY,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
@@ -317,7 +318,6 @@ function sanitizeNodeDeploymentResult(job, result) {
     healthy: true,
   };
 }
-
 function sanitizeStaticRollbackResult(job, result) {
   const releaseId = normalizeUuid(result.releaseId);
   const expectedReleaseId = normalizeUuid(job.payload?.releaseId);
@@ -689,6 +689,27 @@ function sanitizeMailConfigResult(job, result) {
   };
 }
 
+function sanitizeMailDkimResult(job, result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)
+    || Object.keys(result).length !== 7
+    || result.version !== 1 || result.applied !== true || result.sideEffects !== true
+    || result.mailDomainId !== job.payload?.mailDomainId
+    || result.expectedKeyRevision !== job.payload?.expectedKeyRevision
+    || result.previewDigest !== job.payload?.previewDigest
+    || result.configurationSha256 !== job.payload?.configurationSha256) {
+    throw new JobRegistryError('invalid_job_result', 'Managed DKIM result does not match the queued configuration');
+  }
+  return {
+    version: 1,
+    mailDomainId: result.mailDomainId,
+    expectedKeyRevision: result.expectedKeyRevision,
+    previewDigest: result.previewDigest,
+    configurationSha256: result.configurationSha256,
+    applied: true,
+    sideEffects: true,
+  };
+}
+
 function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) return sanitizeManagedServiceResult(job, result);
   if ([OPERATIONS.DATABASE_INSPECT, OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE].includes(job.operation)) {
@@ -696,6 +717,7 @@ function sanitizeResult(job, result) {
   }
   if (job.operation === OPERATIONS.DNS_RECORD_APPLY) return sanitizeDnsRecordResult(job, result);
   if (job.operation === OPERATIONS.MAIL_CONFIG_APPLY) return sanitizeMailConfigResult(job, result);
+  if (job.operation === OPERATIONS.MAIL_DKIM_APPLY) return sanitizeMailDkimResult(job, result);
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
   }
