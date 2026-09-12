@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { previewManagedMailConfiguration } from '@yunpanel/config-templates';
+import {
+  previewManagedMailConfiguration,
+  previewManagedMailForwardingConfiguration,
+} from '@yunpanel/config-templates';
 import {
   createMailReadinessInspector,
   MailReadinessError,
@@ -14,6 +17,16 @@ function preview() {
     mailboxes: ['owner@example.com'],
     accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
     postmasterAddress: 'owner@example.com',
+  });
+}
+
+function forwardingPreview() {
+  return previewManagedMailForwardingConfiguration({
+    domains: ['example.com'],
+    mailboxes: ['owner@example.com'],
+    accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
+    postmasterAddress: 'owner@example.com',
+    forwardings: [{ source: 'owner@example.com', mode: 'copy', destinations: ['backup@elsewhere.test'] }],
   });
 }
 
@@ -50,7 +63,7 @@ function healthyOutputs(overrides = {}) {
   }));
 }
 
-function createInspector({ outputs = healthyOutputs(), serviceOverrides = {}, missingFiles = [] } = {}) {
+function createInspector({ outputs = healthyOutputs(), serviceOverrides = {}, missingFiles = [], sievecMode = 0o755 } = {}) {
   return createMailReadinessInspector({
     managedServiceManager: {
       inspect: async (id) => serviceOverrides[id] ?? service(id),
@@ -62,7 +75,7 @@ function createInspector({ outputs = healthyOutputs(), serviceOverrides = {}, mi
     },
     statFn: async (filePath) => {
       if (missingFiles.includes(filePath)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
-      return { isFile: () => true };
+      return { isFile: () => true, mode: filePath === '/usr/bin/sievec' ? sievecMode : 0o600 };
     },
   });
 }
@@ -75,6 +88,21 @@ test('marks managed mail ready only when every host requirement is satisfied', a
   assert.match(result.sha256, /^[a-f0-9]{64}$/);
   assert.equal(JSON.stringify(result).includes('/etc/ssl/private/mail.key'), false);
   assert.equal(JSON.stringify(result).includes('defer_unauth_destination'), false);
+});
+
+test('forwarding readiness requires the fixed executable sievec binary', async () => {
+  const candidate = forwardingPreview();
+  const ready = await createInspector().inspect(candidate);
+  assert.equal(ready.ready, true);
+  assert.equal(ready.requirements.some((entry) => entry.id === 'dovecot_sieve' && entry.satisfied), true);
+
+  const missing = await createInspector({ missingFiles: ['/usr/bin/sievec'] }).inspect(candidate);
+  assert.equal(missing.ready, false);
+  assert.equal(missing.blockers.includes('dovecot_sieve'), true);
+
+  const nonExecutable = await createInspector({ sievecMode: 0o644 }).inspect(candidate);
+  assert.equal(nonExecutable.ready, false);
+  assert.equal(nonExecutable.blockers.includes('dovecot_sieve'), true);
 });
 
 test('blocks managed domains in mydestination and wildcard rspamd listeners', async () => {
@@ -115,7 +143,7 @@ test('blocks missing tls material, non-2.3 dovecot and unsafe relay policy', asy
 });
 
 test('rejects forged readiness requirement ordering before host inspection', async () => {
-  const input = preview();
+  const input = forwardingPreview();
   await assert.rejects(
     createInspector().inspect({ ...input, requirements: [...input.requirements].reverse() }),
     (error) => error instanceof MailReadinessError && error.code === 'mail_readiness_requirements_invalid',
