@@ -311,6 +311,35 @@ export function createMailDkimActivator({
     return manifest;
   }
 
+  async function liveArtifactMatches(snapshot) {
+    try {
+      const metadata = await lstatFn(snapshot.targetPath);
+      if (!snapshot.present || !metadata.isFile() || metadata.isSymbolicLink()
+        || (metadata.mode & 0o7777) !== snapshot.mode
+        || metadata.uid !== snapshot.uid || metadata.gid !== snapshot.gid) return false;
+      const content = await readFileFn(snapshot.targetPath);
+      return content.length === snapshot.bytes && sha256(content) === snapshot.sha256;
+    } catch (error) {
+      return !snapshot.present && isMissing(error);
+    }
+  }
+
+  async function assertLiveMatchesBackup(manifest) {
+    for (const directory of manifest.directories) {
+      const current = await inspectDirectory(directory.path);
+      if (current.present !== directory.present
+        || (current.present && (current.mode !== directory.mode
+          || current.uid !== directory.uid || current.gid !== directory.gid))) {
+        throw activationError('mail_dkim_live_state_changed', 'DKIM live directory state changed after backup');
+      }
+    }
+    for (const artifact of manifest.artifacts) {
+      if (!(await liveArtifactMatches(artifact))) {
+        throw activationError('mail_dkim_live_state_changed', 'DKIM live artifact state changed after backup');
+      }
+    }
+  }
+
   async function ensureLiveKeyDirectories(rspamd, manifest, onMutation) {
     const parentBefore = manifest.directories.find((entry) => entry.path === LIVE_KEY_PARENT);
     const rootBefore = manifest.directories.find((entry) => entry.path === mailDkimTemplatePolicy.keyRoot);
@@ -476,6 +505,7 @@ export function createMailDkimActivator({
     await assertRspamdDirectoriesSafe();
     const rspamd = await resolveRspamdIdentity();
     const manifest = await createBackup(bundle, tx);
+    await assertLiveMatchesBackup(manifest);
     let mutationStarted = false;
     const markMutation = () => { mutationStarted = true; };
     try {
