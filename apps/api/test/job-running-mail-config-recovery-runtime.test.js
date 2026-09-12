@@ -30,6 +30,9 @@ test('managed mail recovery runtime wires private registries, receipt, materiali
   const fakeMailboxQuotaRegistry = {
     async init() { calls.push(['mailbox-quota.init', '/work/state/mailbox-quotas.json']); },
   };
+  const fakeMailboxForwardingRegistry = {
+    async init() { calls.push(['mailbox-forwarding.init', '/work/state/mailbox-forwardings.json']); },
+  };
   const fakeMailAliasRegistry = {
     async init() { calls.push(['mail-alias.init', '/work/state/mail-aliases.json']); },
   };
@@ -47,6 +50,7 @@ test('managed mail recovery runtime wires private registries, receipt, materiali
       YUNPANEL_MAIL_DOMAIN_STORE: '/work/state/mail-domains.json',
       YUNPANEL_MAILBOX_STORE: '/work/state/mailboxes.json',
       YUNPANEL_MAILBOX_QUOTA_STORE: '/work/state/mailbox-quotas.json',
+      YUNPANEL_MAILBOX_FORWARDING_STORE: '/work/state/mailbox-forwardings.json',
       YUNPANEL_MAIL_ALIAS_STORE: '/work/state/mail-aliases.json',
       YUNPANEL_SECRET_MASTER_KEY: 'private-master-key',
     },
@@ -72,6 +76,11 @@ test('managed mail recovery runtime wires private registries, receipt, materiali
       calls.push(['mailbox-quota.create', filePath]);
       assert.equal(typeof getMailbox, 'function');
       return fakeMailboxQuotaRegistry;
+    },
+    mailboxForwardingRegistryFactory: ({ filePath, getMailbox }) => {
+      calls.push(['mailbox-forwarding.create', filePath]);
+      assert.equal(typeof getMailbox, 'function');
+      return fakeMailboxForwardingRegistry;
     },
     mailAliasRegistryFactory: ({ filePath, getMailDomain, listMailboxes }) => {
       calls.push(['mail-alias.create', filePath]);
@@ -99,11 +108,13 @@ test('managed mail recovery runtime wires private registries, receipt, materiali
       mailDomainRegistry,
       mailboxRegistry,
       mailboxQuotaRegistry,
+      mailboxForwardingRegistry,
       mailAliasRegistry,
     }) => {
       assert.equal(mailDomainRegistry, fakeMailDomainRegistry);
       assert.equal(mailboxRegistry, fakeMailboxRegistry);
       assert.equal(mailboxQuotaRegistry, fakeMailboxQuotaRegistry);
+      assert.equal(mailboxForwardingRegistry, fakeMailboxForwardingRegistry);
       assert.equal(mailAliasRegistry, fakeMailAliasRegistry);
       return {
         async materializeTransition(input, expected) {
@@ -140,11 +151,13 @@ test('managed mail recovery runtime wires private registries, receipt, materiali
   assert.equal(result.statePaths.mailDomainStore, '/work/state/mail-domains.json');
   assert.equal(result.statePaths.mailboxStore, '/work/state/mailboxes.json');
   assert.equal(result.statePaths.mailboxQuotaStore, '/work/state/mailbox-quotas.json');
+  assert.equal(result.statePaths.mailboxForwardingStore, '/work/state/mailbox-forwardings.json');
   assert.equal(result.statePaths.mailAliasStore, '/work/state/mail-aliases.json');
   assert.ok(calls.some((entry) => entry[0] === 'mail-domain.create' && entry[1] === '/work/state/mail-domains.json'));
   assert.ok(calls.some((entry) => entry[0] === 'mailbox.create'
     && entry[1] === '/work/state/mailboxes.json' && entry[2] === 'private-master-key'));
   assert.ok(calls.some((entry) => entry[0] === 'mailbox-quota.create' && entry[1] === '/work/state/mailbox-quotas.json'));
+  assert.ok(calls.some((entry) => entry[0] === 'mailbox-forwarding.create' && entry[1] === '/work/state/mailbox-forwardings.json'));
   assert.ok(calls.some((entry) => entry[0] === 'mail-alias.create' && entry[1] === '/work/state/mail-aliases.json'));
   assert.ok(calls.some(([name]) => name === 'receipt.read'));
   assert.ok(calls.some(([name]) => name === 'materialize'));
@@ -170,6 +183,7 @@ test('managed mail recovery runtime rejects wrong host before opening protected 
       mailDomainRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
       mailboxRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
       mailboxQuotaRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
+      mailboxForwardingRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
       mailAliasRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
       jobRegistryFactory: () => ({}),
       recoveryStoreFactory: () => ({}),
