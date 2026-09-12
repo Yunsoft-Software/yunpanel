@@ -86,3 +86,10 @@ export {
   MailApplyPlanError,
   previewManagedMailApplyPlan,
 } from './mail-apply-plan.js';
+
+export {
+  RoundcubeTemplateError,
+  previewRoundcubeConfiguration,
+  renderRoundcubeConfig,
+  roundcubeTemplatePolicy,
+} from './roundcube.js';
