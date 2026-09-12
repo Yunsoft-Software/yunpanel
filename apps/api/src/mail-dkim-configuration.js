@@ -103,8 +103,8 @@ export function createMailDkimConfigurationService({
     if (mailDomain.managementMode !== 'local') {
       throw new MailDkimConfigurationError('mail_domain_not_locally_managed', 'Mail domain is not locally managed', 409);
     }
-    if (mailDomain.status !== 'enabled') {
-      throw new MailDkimConfigurationError('mail_dkim_domain_not_enabled', 'DKIM signing can be applied only to an enabled local mail domain', 409);
+    if (!['enabled', 'disabled'].includes(mailDomain.status)) {
+      throw new MailDkimConfigurationError('mail_dkim_domain_state_invalid', 'DKIM signing target mail-domain state is invalid', 409);
     }
     const targetKey = await mailDkimRegistry.getKey(input.mailDomainId);
     if (!targetKey) throw new MailDkimConfigurationError('mail_dkim_key_not_found', 'DKIM key was not found', 404);
@@ -128,7 +128,8 @@ export function createMailDkimConfigurationService({
       if (owner.managementMode === 'local' && owner.status === 'enabled') enabledKeys.push(key);
     }
     enabledKeys.sort((left, right) => left.domainName.localeCompare(right.domainName));
-    if (!enabledKeys.some((key) => key.mailDomainId === input.mailDomainId)) {
+    if (mailDomain.status === 'enabled'
+      && !enabledKeys.some((key) => key.mailDomainId === input.mailDomainId)) {
       throw new MailDkimConfigurationError('mail_dkim_state_invalid', 'Target DKIM key is missing from enabled signing state', 409);
     }
 
