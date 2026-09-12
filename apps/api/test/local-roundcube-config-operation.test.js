@@ -10,6 +10,7 @@ const payload = Object.freeze({
   configSha256: 'b'.repeat(64),
   fpmSha256: 'c'.repeat(64),
 });
+const nginxSha256 = 'e'.repeat(64);
 const execution = Object.freeze({
   jobId: '12345678-1234-4234-8234-123456789012',
   resourceType: 'server',
@@ -23,16 +24,22 @@ function fixture({ stale = false } = {}) {
       sha256: stale ? 'd'.repeat(64) : payload.previewSha256,
       configSha256: payload.configSha256,
       fpmSha256: payload.fpmSha256,
+      nginxSha256,
       configuration: { artifact: { path: '/etc/roundcube/config.inc.php' } },
       fpm: { artifact: { path: '/etc/php/8.3/fpm/pool.d/yunpanel-roundcube.conf' } },
+      nginx: { artifact: { path: '/etc/nginx/sites-enabled/yunpanel-roundcube.conf' } },
     },
     sensitiveArtifacts: [{ path: '/etc/roundcube/config.inc.php', content: '<?php secret();\n' }],
-    publicArtifacts: [{ path: '/etc/php/8.3/fpm/pool.d/yunpanel-roundcube.conf', content: '[pool]\n' }],
+    publicArtifacts: [
+      { path: '/etc/php/8.3/fpm/pool.d/yunpanel-roundcube.conf', content: '[pool]\n' },
+      { path: '/etc/nginx/sites-enabled/yunpanel-roundcube.conf', content: 'server {}\n' },
+    ],
   };
   const operation = createLocalRoundcubeConfigOperation({
     configManager: {
       async stageConfiguration(preview, content) { calls.push(['config', preview, content]); },
       async stageFpmPool(preview, content) { calls.push(['fpm', preview, content]); },
+      async stageNginxConfig(preview, content) { calls.push(['nginx', preview, content]); },
     },
     backupManager: { async backupConfiguration() {} },
     activator: {
@@ -43,7 +50,9 @@ function fixture({ stale = false } = {}) {
           previewSha256: payload.previewSha256,
           configSha256: payload.configSha256,
           fpmSha256: payload.fpmSha256,
+          nginxSha256,
           databaseCreated: true,
+          httpHealthy: true,
           applied: true,
           sideEffects: true,
         };
@@ -57,18 +66,20 @@ function fixture({ stale = false } = {}) {
   return { operation, calls };
 }
 
-test('Roundcube host operation stages private config and public FPM material outside job payload', async () => {
+test('Roundcube host operation stages private config plus public FPM/Nginx material outside job payload', async () => {
   const fx = fixture();
   const result = await fx.operation.execute(payload, execution);
   assert.deepEqual(result, {
     version: 1,
     ...payload,
+    nginxSha256,
     databaseCreated: true,
+    httpHealthy: true,
     applied: true,
     sideEffects: true,
   });
-  assert.deepEqual(fx.calls.map(([name]) => name), ['load', 'config', 'fpm', 'activate']);
-  assert.doesNotMatch(JSON.stringify(payload), /secret|des_key|config\.inc/);
+  assert.deepEqual(fx.calls.map(([name]) => name), ['load', 'config', 'fpm', 'nginx', 'activate']);
+  assert.doesNotMatch(JSON.stringify(payload), /secret|des_key|config\.inc|nginx/i);
   assert.deepEqual(fx.calls.at(-1)[2], { transactionId: execution.jobId });
 });
 
