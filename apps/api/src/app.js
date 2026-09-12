@@ -272,6 +272,7 @@ export function createApp({
   });
   mountMailDiagnosticsRoutes(app, {
     mailDiagnosticsInspector,
+    mailDkimRegistry,
     mailDomainRegistry,
     domainRegistry,
     localServerId,
