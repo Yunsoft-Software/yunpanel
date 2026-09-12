@@ -11,7 +11,9 @@ const POSTSRSD_CHROOT = '/var/lib/postsrsd';
 const LISTEN_ADDRESS = '127.0.0.1';
 const FORWARD_PORT = 10001;
 const REVERSE_PORT = 10002;
+const SECRET_MODE = 0o600;
 const SRS_REQUIREMENT = 'postsrsd_srs';
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const POSTFIX_PARAMETERS = Object.freeze([
   Object.freeze({ name: 'recipient_canonical_classes', value: 'envelope_recipient,header_recipient' }),
   Object.freeze({ name: 'recipient_canonical_maps', value: `tcp:${LISTEN_ADDRESS}:${REVERSE_PORT}` }),
@@ -99,7 +101,32 @@ function mergePostfixParameters(parameters) {
   return Object.freeze([...byName.values()].sort((left, right) => left.name.localeCompare(right.name)));
 }
 
-export function enableManagedMailSrs(preview, { domains, forwardings = [], srsDomain } = {}) {
+function secretArtifact({ secretRevision, secretSha256, secretBytes } = {}) {
+  if (!Number.isSafeInteger(secretRevision) || secretRevision < 1
+    || typeof secretSha256 !== 'string' || !SHA256_PATTERN.test(secretSha256)
+    || !Number.isSafeInteger(secretBytes) || secretBytes < 2 || secretBytes > 256) {
+    throw new MailSrsTemplateError('mail_srs_secret_metadata_invalid', 'Managed SRS secret metadata is invalid');
+  }
+  return Object.freeze({
+    version: 1,
+    path: POSTSRSD_SECRET_PATH,
+    sha256: secretSha256,
+    bytes: secretBytes,
+    sensitive: true,
+    contentIncluded: false,
+    mode: SECRET_MODE,
+    sideEffects: false,
+  });
+}
+
+export function enableManagedMailSrs(preview, {
+  domains,
+  forwardings = [],
+  srsDomain,
+  secretRevision = null,
+  secretSha256 = null,
+  secretBytes = null,
+} = {}) {
   if (!preview || typeof preview !== 'object' || Array.isArray(preview)
     || preview.version !== 1 || typeof preview.sha256 !== 'string'
     || !Array.isArray(preview.artifacts) || !Array.isArray(preview.postfixParameters)
@@ -119,20 +146,23 @@ export function enableManagedMailSrs(preview, { domains, forwardings = [], srsDo
     sensitive: false,
     sideEffects: false,
   });
-  if (preview.artifacts.some((artifact) => artifact?.path === POSTSRSD_DEFAULTS_PATH)) {
+  const protectedArtifact = secretArtifact({ secretRevision, secretSha256, secretBytes });
+  if (preview.artifacts.some((artifact) => [POSTSRSD_DEFAULTS_PATH, POSTSRSD_SECRET_PATH].includes(artifact?.path))) {
     throw new MailSrsTemplateError('mail_srs_artifact_conflict', 'Managed mail preview already contains PostSRSd configuration');
   }
   const requirements = preview.requirements.includes(SRS_REQUIREMENT)
     ? Object.freeze([...preview.requirements])
     : Object.freeze([...preview.requirements, SRS_REQUIREMENT]);
-  const artifacts = Object.freeze([...preview.artifacts, defaultsArtifact]);
+  const artifacts = Object.freeze([...preview.artifacts, defaultsArtifact, protectedArtifact]);
   const postfixParameters = mergePostfixParameters(preview.postfixParameters);
   const srs = Object.freeze({
     required: true,
     rewriteDomain: canonicalDomain(srsDomain, 'SRS rewrite domain'),
     externalDestinationCount: externalDestinations.length,
     defaultsSha256: defaultsArtifact.sha256,
-    secretPath: POSTSRSD_SECRET_PATH,
+    secretRevision,
+    secretSha256,
+    secretBytes,
     serviceUnit: POSTSRSD_SERVICE_UNIT,
     packageName: POSTSRSD_PACKAGE,
     forwardEndpoint: `tcp:${LISTEN_ADDRESS}:${FORWARD_PORT}`,
@@ -161,6 +191,7 @@ export function enableManagedMailSrs(preview, { domains, forwardings = [], srsDo
 export const mailSrsTemplatePolicy = Object.freeze({
   defaultsPath: POSTSRSD_DEFAULTS_PATH,
   secretPath: POSTSRSD_SECRET_PATH,
+  secretMode: SECRET_MODE,
   serviceUnit: POSTSRSD_SERVICE_UNIT,
   packageName: POSTSRSD_PACKAGE,
   runtimeUser: POSTSRSD_USER,
@@ -177,4 +208,5 @@ export const mailSrsTemplateInternals = Object.freeze({
   externalForwardingDestinations,
   renderPostSrsdDefaults,
   mergePostfixParameters,
+  secretArtifact,
 });
