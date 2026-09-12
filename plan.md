@@ -119,11 +119,11 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 - [x] DKIM DNS-provider lifecycle kaynakta hazır: önceki selector/TXT retirement metadata'sı restart-safe kalıcı state'te tutuluyor; bounded generic TXT desteği aynı Cloudflare snapshot/digest/idempotency/recovery motoruna eklendi. Current TXT publish/update ve eski selector TXT delete `dns.record.apply` durable job'unu reuse ediyor; selector adında farklı provider TXT varsa fail-closed kalıyor, provider absence sonrası explicit veya sonraki lifecycle auto-reconcile retirement state'ini temizliyor ve ikinci rotation pending retirement bitmeden açılmıyor.
 - [x] SMTP/IMAP security ve bounded queue/log backend'i kaynakta hazır: Dovecot client bağlantıları `ssl=required` ve minimum TLS 1.2 policy'sine, Postfix inbound/outbound opportunistic TLS + minimum TLS 1.2 policy'sine bağlandı; `mynetworks` yalnız loopback, SMTP SASL kapalı ve relay policy `permit_mynetworks, reject_unauth_destination` olarak desired-state digest/apply/live-evidence zincirine girdi. Gerçek cert/key material readiness gate'i korunuyor. Mevcut bounded/redacted Postfix/Dovecot/Rspamd journal log rotaları reuse ediliyor ve Owner-only local `postqueue -j` queue görünümü raw body vermeden bounded metadata sunuyor.
 - [x] Authenticated SMTP submission backend'i kaynakta hazır: dedicated Postfix `submission/inet` 587 service'i yalnız TLS altında Dovecot SASL `PLAIN/LOGIN` kullanıyor; global port 25 SASL kapalı kalıyor. Canonical sender-login map authenticated mailbox'ı aynı envelope sender'a bağlıyor ve `reject_sender_login_mismatch` spoofing'i fail-closed tutuyor. Sender-login source/`.db`, `/etc/postfix/main.cf` ve `/etc/postfix/master.cf` aynı transaction backup/rollback zincirinde; `postconf -M/-P` yalnız sabit allowlist ile çalışıyor. Dovecot auth socket'i `/var/spool/postfix/private/auth` için runtime Postfix UID/GID + Unix socket + `0660` live evidence zorunlu ve lost-ack recovery exact master service/override/socket kanıtı olmadan job'ı başarılı saymıyor.
+- [x] Roundcube control-plane ve host lifecycle kaynakta hazır: private `des_key` registry/materialization, deterministic config/PHP-FPM/Nginx preview, secret-free durable `roundcube.config.apply`, private staging, SQLite bootstrap/integrity, PHP/FPM/Nginx validate+reload, dedicated FPM socket, loopback SNI/TLS HTTPS web health, config/FPM/Nginx/DB pre-apply backup + deterministic rollback, versioned secret-free receipt ve current protected desired-state + live web evidence tabanlı `recover-roundcube-config` production/package wiring'e bağlı.
 - [ ] Forwarding dış tesliminde SPF/DMARC bozulmasını gidermek için SRS politikasını açıkça modelle; external forwarding deliverability'yi SRS hazır olmadan garanti edilmiş gibi gösterme.
-- [ ] Roundcube için Nginx/PHP-FPM/database config, web endpoint, health ve rollback ekle.
 - [ ] Mailbox/domain delete impact ile mail data backup/restore ekle.
 
-Üst seviye Mail modülü bu kalan SRS, Roundcube ve mail-data işlerinin tamamı ile gerçek TLS/open-relay/submission/queue/DKIM provider kabulleri bitene kadar hazır sayılmaz.
+Üst seviye Mail modülü bu kalan SRS ve mail-data işlerinin tamamı ile gerçek TLS/open-relay/submission/queue/DKIM/Roundcube servis kabulleri bitene kadar hazır sayılmaz.
 
 ## H. Docker ve Compose
 
@@ -175,7 +175,7 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 ## M. Package, yayın ve canlı kabul
 
 - [x] 2026-09-12 doğrulanmış baseline kaynak ağacı Node 24 ile API 1129, web 153, agent 74, config 35, host-runtime 100, protocol 24 ve shared 27 olmak üzere toplam 1542 otomatik testten geçti; lint/build yeşildi.
-- [ ] Bu baseline sonrasındaki managed-mail apply/recovery, empty-set teardown, alias lifecycle/config/recovery, quota enforcement/usage, mailbox forwarding/Sieve, mail diagnostics, DKIM key/signing/apply/recovery/teardown, key rotation/delete/retirement evidence, DKIM provider TXT lifecycle, generic DNS TXT, mail TLS/relay security policy, authenticated SMTP submission/master.cf/Dovecot auth socket lifecycle, bounded Postfix queue ve ilgili HTTP/production/package wiring değişiklikleri için targeted config-templates + host-runtime + protocol + API testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
+- [ ] Bu baseline sonrasındaki managed-mail apply/recovery, empty-set teardown, alias lifecycle/config/recovery, quota enforcement/usage, mailbox forwarding/Sieve, mail diagnostics, DKIM key/signing/apply/recovery/teardown, key rotation/delete/retirement evidence, DKIM provider TXT lifecycle, generic DNS TXT, mail TLS/relay security policy, authenticated SMTP submission/master.cf/Dovecot auth socket lifecycle, bounded Postfix queue, Roundcube control-plane + Nginx/PHP-FPM/SQLite/HTTPS health/rollback/recovery/CLI ve ilgili HTTP/production/package wiring değişiklikleri için targeted config-templates + host-runtime + protocol + API testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
 - [x] Linux amd64 `0.3.0-9` paketi üretildi ve yalnız onaylı `.44` olmayan YunPanel test sunucusuna yüklendi; API/web/nginx aktif, eski `yun-agent` inactive/disabled doğrulandı.
 - [x] Canlı Owner API smoke'ta tek yerel server, Website/Application/Domain/certificate/job envanteri; site dosya listesi, Node logu, site terminal capability hedefi ve audit filtre/pagination sözleşmesi doğrulandı.
 - [ ] Matching Ubuntu arm64 hostta native `node-pty` dahil clean install ve doğru mimarili `.deb` üretimini doğrula.
@@ -196,7 +196,7 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 ## Uygulama sırası
 
 1. P0 güvenlik, tek-sunucu fail-closed davranışı ve mevcut canlı işlevlerde regresyon bırakma.
-2. Mail lifecycle'ın kalan SRS, Roundcube/data parçaları ve gerçek TLS/submission/queue/DKIM provider servis kabulü.
+2. Mail lifecycle'ın kalan SRS/data parçaları ve gerçek TLS/submission/queue/DKIM/Roundcube servis kabulü.
 3. Veritabanı user/grant/credential ve dump/restore yaşam döngüsü.
 4. Docker/Compose lifecycle ve Website/Nginx entegrasyonu.
 5. Genel backup/restore ürünü.
