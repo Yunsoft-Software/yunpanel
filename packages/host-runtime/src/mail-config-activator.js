@@ -15,19 +15,22 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import {
   mailForwardingTemplatePolicy,
+  mailSubmissionTemplatePolicy,
   previewManagedMailApplyPlan,
 } from '@yunpanel/config-templates';
 import { createMailConfigBackupManager, mailConfigBackupInternals } from './mail-config-backup.js';
 import { createMailConfigManager } from './mail-config-manager.js';
 import { createMailReadinessInspector } from './mail-readiness-inspector.js';
-import { parseManagedVmailIdentity } from './mail-vmail-identity.js';
+import { parseManagedSystemIdentity, parseManagedVmailIdentity } from './mail-vmail-identity.js';
 
 const execFileAsync = promisify(execFile);
 const ROOT_UID = 0;
 const ROOT_GID = 0;
 const NEW_MANAGED_DIRECTORY_MODE = 0o750;
 const SIEVE_SHARED_MODE = 0o640;
+const SUBMISSION_SOCKET_MODE = 0o660;
 const GETENT = '/usr/bin/getent';
+const POSTCONF = '/usr/sbin/postconf';
 const MAX_OUTPUT = 128 * 1024;
 const UNMANAGED_REQUIRED_DIRECTORIES = Object.freeze([
   '/etc/postfix',
@@ -54,6 +57,15 @@ function activationError(code, message) {
 
 function isMissing(error) {
   return error?.code === 'ENOENT';
+}
+
+function boundedOutput(result) {
+  const stdout = String(result?.stdout ?? result ?? '');
+  const stderr = String(result?.stderr ?? '');
+  if (Buffer.byteLength(stdout) > MAX_OUTPUT || Buffer.byteLength(stderr) > MAX_OUTPUT) {
+    throw new Error('bounded output exceeded');
+  }
+  return stdout.trim();
 }
 
 export function createMailConfigActivator({
@@ -95,30 +107,37 @@ export function createMailConfigActivator({
   async function runCommand(command, code, message) {
     try {
       const result = await run(command.file, command.args, { timeout: 30_000, maxBuffer: MAX_OUTPUT });
-      if (Buffer.byteLength(String(result?.stdout ?? '')) > MAX_OUTPUT
-        || Buffer.byteLength(String(result?.stderr ?? '')) > MAX_OUTPUT) {
-        throw new Error('bounded output exceeded');
-      }
+      boundedOutput(result);
       return result;
     } catch {
       throw activationError(code, message);
     }
   }
 
-  async function resolveVmailIdentity() {
+  async function resolveSystemIdentity(name, code, message) {
     try {
-      const result = await run(GETENT, ['passwd', 'vmail'], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
-      if (Buffer.byteLength(String(result?.stdout ?? result ?? '')) > MAX_OUTPUT
-        || Buffer.byteLength(String(result?.stderr ?? '')) > MAX_OUTPUT) {
-        throw new Error('bounded output exceeded');
-      }
-      const identity = parseManagedVmailIdentity(result?.stdout ?? result);
-      if (!identity) throw new Error('invalid vmail identity');
+      const result = await run(GETENT, ['passwd', name], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
+      const output = boundedOutput(result);
+      const identity = name === 'vmail'
+        ? parseManagedVmailIdentity(output)
+        : parseManagedSystemIdentity(output, name);
+      if (!identity) throw new Error('invalid system identity');
       return identity;
     } catch {
-      throw activationError('mail_vmail_identity_unavailable', 'Managed vmail identity could not be resolved safely');
+      throw activationError(code, message);
     }
   }
+
+  const resolveVmailIdentity = () => resolveSystemIdentity(
+    'vmail',
+    'mail_vmail_identity_unavailable',
+    'Managed vmail identity could not be resolved safely',
+  );
+  const resolvePostfixIdentity = () => resolveSystemIdentity(
+    'postfix',
+    'mail_postfix_identity_unavailable',
+    'Managed postfix identity could not be resolved safely',
+  );
 
   async function atomicReplace(targetPath, content, { mode, uid = ROOT_UID, gid = ROOT_GID } = {}) {
     const temporaryPath = `${targetPath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
@@ -253,15 +272,42 @@ export function createMailConfigActivator({
 
   async function assertPostfixParameters(plan) {
     for (const parameter of plan.postfixParameters) {
-      let result;
+      let output;
       try {
-        result = await run('/usr/sbin/postconf', ['-h', parameter.name], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
+        output = boundedOutput(await run(POSTCONF, ['-h', parameter.name], { timeout: 10_000, maxBuffer: MAX_OUTPUT }));
       } catch {
         throw activationError('mail_postfix_verify_failed', 'Managed Postfix parameter could not be verified');
       }
-      const output = String(result?.stdout ?? result ?? '').trim();
-      if (Buffer.byteLength(output) > MAX_OUTPUT || output !== parameter.value) {
+      if (output !== parameter.value) {
         throw activationError('mail_postfix_verify_failed', 'Managed Postfix parameter did not match the requested value');
+      }
+    }
+  }
+
+  async function assertPostfixMasterServices(plan) {
+    for (const service of plan.postfixMasterServices) {
+      const identity = `${service.service}/${service.type}`;
+      let serviceOutput;
+      try {
+        serviceOutput = boundedOutput(await run(POSTCONF, ['-M', identity], { timeout: 10_000, maxBuffer: MAX_OUTPUT }));
+      } catch {
+        throw activationError('mail_postfix_master_verify_failed', 'Managed Postfix submission service could not be verified');
+      }
+      if (serviceOutput.replace(/\s+/g, ' ') !== service.definition.replace(/\s+/g, ' ')) {
+        throw activationError('mail_postfix_master_verify_failed', 'Managed Postfix submission service did not match requested state');
+      }
+      for (const parameter of service.parameters) {
+        const key = `${identity}/${parameter.name}`;
+        const expected = `${key}=${parameter.value}`;
+        let output;
+        try {
+          output = boundedOutput(await run(POSTCONF, ['-P', key], { timeout: 10_000, maxBuffer: MAX_OUTPUT }));
+        } catch {
+          throw activationError('mail_postfix_master_verify_failed', 'Managed Postfix submission override could not be verified');
+        }
+        if (output !== expected) {
+          throw activationError('mail_postfix_master_verify_failed', 'Managed Postfix submission override did not match requested state');
+        }
       }
     }
   }
@@ -295,7 +341,20 @@ export function createMailConfigActivator({
     }
   }
 
-  async function runApplyCommands(plan, vmailGid) {
+  async function assertSubmissionSocketSafe(postfixIdentity) {
+    try {
+      const metadata = await lstatFn(mailSubmissionTemplatePolicy.dovecotAuthSocket);
+      if (!metadata.isSocket() || metadata.isSymbolicLink()
+        || metadata.uid !== postfixIdentity.uid || metadata.gid !== postfixIdentity.gid
+        || (metadata.mode & 0o7777) !== SUBMISSION_SOCKET_MODE) {
+        throw new Error('submission socket metadata mismatch');
+      }
+    } catch {
+      throw activationError('mail_submission_socket_invalid', 'Dovecot submission authentication socket is unavailable or unsafe');
+    }
+  }
+
+  async function runApplyCommands(plan, vmailGid, postfixIdentity) {
     for (const command of plan.stages.compile) {
       if (command.file === '/usr/bin/sievec') {
         await runCommand(command, 'mail_sieve_compile_failed', 'Managed mailbox forwarding script compilation failed');
@@ -309,6 +368,10 @@ export function createMailConfigActivator({
       await runCommand(command, 'mail_postconf_failed', 'Postfix managed parameter update failed');
     }
     await assertPostfixParameters(plan);
+    for (const command of plan.stages.configurePostfixMaster) {
+      await runCommand(command, 'mail_postfix_master_apply_failed', 'Postfix submission service update failed');
+    }
+    await assertPostfixMasterServices(plan);
     for (const command of plan.stages.validate) {
       await runCommand(command, 'mail_config_validation_failed', 'Managed mail configuration validation failed');
     }
@@ -318,6 +381,7 @@ export function createMailConfigActivator({
     for (const command of plan.stages.health) {
       await runCommand(command, 'mail_service_health_failed', 'Managed mail service did not become healthy');
     }
+    await assertSubmissionSocketSafe(postfixIdentity);
   }
 
   async function restoreBackupFile(backupDirectory, artifact) {
@@ -401,7 +465,10 @@ export function createMailConfigActivator({
       throw activationError('mail_activation_prerequisite_stale', 'Managed mail staging or backup belongs to a different configuration');
     }
 
-    const vmailIdentity = await resolveVmailIdentity();
+    const [vmailIdentity, postfixIdentity] = await Promise.all([
+      resolveVmailIdentity(),
+      resolvePostfixIdentity(),
+    ]);
     await assertRequiredDirectoriesSafe();
     await assertLiveMatchesBackup(backup);
 
@@ -410,7 +477,7 @@ export function createMailConfigActivator({
     try {
       await createManagedDirectories(backup, markMutation);
       await replaceManagedArtifacts(stage, plan.sha256, markMutation, vmailIdentity.gid);
-      await runApplyCommands(plan, vmailIdentity.gid);
+      await runApplyCommands(plan, vmailIdentity.gid, postfixIdentity);
       const finalReadiness = await readinessInspector.inspect(preview);
       if (!finalReadiness.ready || finalReadiness.previewSha256 !== preview.sha256) {
         throw activationError('mail_post_apply_readiness_failed', 'Managed mail host readiness failed after activation');
@@ -447,4 +514,5 @@ export const mailConfigActivatorInternals = Object.freeze({
   unmanagedRequiredDirectories: UNMANAGED_REQUIRED_DIRECTORIES,
   newManagedDirectoryMode: NEW_MANAGED_DIRECTORY_MODE,
   sieveSharedMode: SIEVE_SHARED_MODE,
+  submissionSocketMode: SUBMISSION_SOCKET_MODE,
 });
