@@ -2,13 +2,14 @@ import { createHash, randomBytes } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
+  mailForwardingTemplatePolicy,
   mailTemplatePolicy,
   previewManagedMailApplyPlan,
 } from '@yunpanel/config-templates';
 
 const DEFAULT_STAGING_ROOT = '/var/lib/yunpanel/staging/mail';
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
-const MANIFEST_VERSION = 1;
+const MANIFEST_VERSION = 2;
 const MANIFEST_FILE = 'manifest.json';
 const PRIVATE_MODE = 0o600;
 const PUBLIC_MODE = 0o640;
@@ -21,6 +22,7 @@ const ALLOWED_ARTIFACT_PATHS = Object.freeze([
   mailTemplatePolicy.dovecotPasswdFilePath,
   mailTemplatePolicy.dovecotAuthConfigPath,
   mailTemplatePolicy.dovecotMailConfigPath,
+  mailForwardingTemplatePolicy.sievePath,
   mailTemplatePolicy.rspamdProxyConfigPath,
 ]);
 const ALLOWED_ARTIFACT_SET = new Set(ALLOWED_ARTIFACT_PATHS);
