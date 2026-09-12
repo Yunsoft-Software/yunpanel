@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
 import { normalizeMailboxAddress } from './mail.js';
+import {
+  previewManagedMailQuotaConfiguration,
+  renderDovecotQuotaMailConfig,
+} from './mail-quota.js';
 
 const FORWARDING_SIEVE_PATH = '/etc/dovecot/yunpanel-forwarding.sieve';
 const FORWARDING_SVBIN_PATH = '/etc/dovecot/yunpanel-forwarding.svbin';
@@ -13,6 +17,10 @@ export class MailForwardingTemplateError extends Error {
     this.name = 'MailForwardingTemplateError';
     this.code = code;
   }
+}
+
+function sha256(content) {
+  return createHash('sha256').update(content).digest('hex');
 }
 
 function canonicalAddress(value, code) {
@@ -102,16 +110,93 @@ export function renderManagedMailboxForwardingSieve(forwardings = []) {
 }
 
 export function previewManagedMailboxForwardingSieve(forwardings = []) {
-  const content = renderManagedMailboxForwardingSieve(forwardings);
+  const normalized = normalizeForwardings(forwardings);
+  const content = renderManagedMailboxForwardingSieve(normalized);
   return Object.freeze({
     version: 1,
     path: FORWARDING_SIEVE_PATH,
     compiledPath: FORWARDING_SVBIN_PATH,
-    sha256: createHash('sha256').update(content).digest('hex'),
+    sha256: sha256(content),
     bytes: Buffer.byteLength(content),
-    policies: normalizeForwardings(forwardings).length,
+    policies: normalized.length,
     content,
     compile: Object.freeze({ file: '/usr/bin/sievec', args: Object.freeze([FORWARDING_SIEVE_PATH]) }),
+    sideEffects: false,
+  });
+}
+
+export function renderDovecotQuotaForwardingMailConfig({ domains, postmasterAddress } = {}) {
+  const quotaConfig = renderDovecotQuotaMailConfig({ domains, postmasterAddress });
+  const withLmtpSieve = quotaConfig.replace(
+    'protocol lmtp {\n',
+    'protocol lmtp {\n  mail_plugins = $mail_plugins sieve\n',
+  );
+  if (withLmtpSieve === quotaConfig) {
+    throw new MailForwardingTemplateError('dovecot_lmtp_config_invalid', 'Managed Dovecot LMTP config could not be extended safely');
+  }
+  const pluginNeedle = 'plugin {\n  quota = maildir:User quota\n}\n';
+  const pluginReplacement = `plugin {\n  quota = maildir:User quota\n  sieve_before = file:${FORWARDING_SIEVE_PATH}\n}\n`;
+  const rendered = withLmtpSieve.replace(pluginNeedle, pluginReplacement);
+  if (rendered === withLmtpSieve) {
+    throw new MailForwardingTemplateError('dovecot_plugin_config_invalid', 'Managed Dovecot plugin config could not be extended safely');
+  }
+  return rendered;
+}
+
+function publicArtifact(path, content) {
+  return Object.freeze({
+    version: 1,
+    path,
+    sha256: sha256(content),
+    bytes: Buffer.byteLength(content),
+    content,
+    sensitive: false,
+    sideEffects: false,
+  });
+}
+
+export function previewManagedMailForwardingConfiguration({
+  domains,
+  mailboxes = [],
+  aliases = [],
+  accounts = [],
+  postmasterAddress,
+  forwardings = [],
+} = {}) {
+  const base = previewManagedMailQuotaConfiguration({
+    domains,
+    mailboxes,
+    aliases,
+    accounts,
+    postmasterAddress,
+  });
+  const forwarding = previewManagedMailboxForwardingSieve(forwardings);
+  const dovecotMail = publicArtifact(
+    '/etc/dovecot/conf.d/99-yunpanel-mail.conf',
+    renderDovecotQuotaForwardingMailConfig({ domains, postmasterAddress }),
+  );
+  const artifacts = [];
+  for (const artifact of base.artifacts) {
+    if (artifact.path === dovecotMail.path) artifacts.push(dovecotMail);
+    else if (artifact.path === '/etc/rspamd/local.d/worker-proxy.inc') {
+      artifacts.push(forwarding, artifact);
+    } else artifacts.push(artifact);
+  }
+  const identity = {
+    version: 1,
+    baseSha256: base.sha256,
+    forwardingSha256: forwarding.sha256,
+    artifactDigests: artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
+  };
+  return Object.freeze({
+    version: 1,
+    sha256: sha256(JSON.stringify(identity)),
+    counts: Object.freeze({ ...base.counts, forwardings: forwarding.policies }),
+    artifacts: Object.freeze(artifacts),
+    postfixParameters: base.postfixParameters,
+    validate: base.validate,
+    requirements: base.requirements,
+    readyToApply: false,
     sideEffects: false,
   });
 }
