@@ -86,6 +86,9 @@ function buildStageManifest(preview, sensitiveArtifacts) {
     if (!ALLOWED_ARTIFACT_SET.has(artifact.path)) {
       throw new MailConfigManagerError('mail_artifact_path_forbidden', 'Managed mail artifact path is not allowlisted');
     }
+    if (artifact.path !== ALLOWED_ARTIFACT_PATHS[index]) {
+      throw new MailConfigManagerError('mail_artifact_order_invalid', 'Managed mail artifact order is not canonical');
+    }
     const source = previewByPath.get(artifact.path);
     const content = artifact.sensitive ? privateContent.get(artifact.path) : source?.content;
     if (typeof content !== 'string') {
