@@ -88,6 +88,17 @@ test('blocks managed domains in mydestination and wildcard rspamd listeners', as
   assert.equal(result.blockers.includes('loopback_11332_available'), true);
 });
 
+test('blocks dynamic or unresolved mydestination values instead of guessing', async () => {
+  for (const value of ['$myhostname, $relay_domains, localhost\n', 'hash:/etc/postfix/virtual-destinations\n']) {
+    const outputs = healthyOutputs({
+      [command('/usr/sbin/postconf', ['-h', 'mydestination'])]: value,
+    });
+    const result = await createInspector({ outputs }).inspect(preview());
+    assert.equal(result.ready, false);
+    assert.equal(result.blockers.includes('managed_domains_excluded_from_mydestination'), true);
+  }
+});
+
 test('blocks missing tls material, non-2.3 dovecot and unsafe relay policy', async () => {
   const outputs = healthyOutputs({
     [command('/usr/sbin/dovecot', ['--version'])]: '2.4.0\n',
