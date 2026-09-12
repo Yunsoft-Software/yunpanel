@@ -29,8 +29,8 @@ test('renders deterministic exact-domain Rspamd DKIM signing config and DNS reco
   assert.match(config, /^check_pubkey = true;$/m);
   assert.match(config, /^allow_pubkey_mismatch = false;$/m);
   assert.ok(config.indexOf('example.com {') < config.indexOf('sub.example.com {'));
-  assert.match(config, /path = "\/etc\/yunpanel\/mail\/dkim\/example\.com\.yunpanel\.key";/);
-  assert.match(config, /path = "\/etc\/yunpanel\/mail\/dkim\/sub\.example\.com\.mail-2026\.key";/);
+  assert.match(config, /path = "\/etc\/rspamd\/dkim\/yunpanel\/example\.com\.yunpanel\.key";/);
+  assert.match(config, /path = "\/etc\/rspamd\/dkim\/yunpanel\/sub\.example\.com\.mail-2026\.key";/);
   assert.equal(preview.artifact.path, '/etc/rspamd/local.d/dkim_signing.conf');
   assert.equal(preview.artifact.content, config);
   assert.equal(preview.artifact.sensitive, false);
@@ -54,7 +54,7 @@ test('builds a canonical DKIM DNS record without private material', () => {
     name: 'mail._domainkey.example.com',
     value: `v=DKIM1; k=rsa; p=${PUBLIC_A}`,
   });
-  assert.doesNotMatch(JSON.stringify(record), /PRIVATE KEY|\/etc\/yunpanel\/mail\/dkim/);
+  assert.doesNotMatch(JSON.stringify(record), /PRIVATE KEY|\/etc\/rspamd\/dkim\/yunpanel/);
 });
 
 test('rejects duplicate domains, unsafe selectors and noncanonical public keys', () => {
@@ -73,5 +73,5 @@ test('rejects duplicate domains, unsafe selectors and noncanonical public keys',
     () => renderRspamdDkimSigningConfig([{ domain: 'example.com', selector: 'mail', publicKey: PUBLIC_A.replace(/=$/, '') }]),
     (error) => error instanceof MailDkimTemplateError && error.code === 'invalid_dkim_public_key',
   );
-  assert.equal(mailDkimTemplatePolicy.keyPath('example.com', 'mail'), '/etc/yunpanel/mail/dkim/example.com.mail.key');
+  assert.equal(mailDkimTemplatePolicy.keyPath('example.com', 'mail'), '/etc/rspamd/dkim/yunpanel/example.com.mail.key');
 });
