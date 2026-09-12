@@ -64,6 +64,12 @@ export {
 } from './mail-submission.js';
 
 export {
+  MailTlsIdentityTemplateError,
+  mailTlsIdentityTemplatePolicy,
+  bindManagedMailTlsIdentity,
+} from './mail-tls-identity.js';
+
+export {
   MailDkimTemplateError,
   mailDkimTemplatePolicy,
   managedDkimDnsRecord,
