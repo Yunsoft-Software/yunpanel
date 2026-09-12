@@ -1,8 +1,14 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { createJournalLogReader, createNginxLogReader } from '@yunpanel/host-runtime';
-import { inspectAllowlistedServices, inspectDocker, inspectNginx } from '@yunpanel/host-runtime';
+import {
+  createJournalLogReader,
+  createMailDiagnosticsInspector,
+  createNginxLogReader,
+  inspectAllowlistedServices,
+  inspectDocker,
+  inspectNginx,
+} from '@yunpanel/host-runtime';
 import { createApp, API_VERSION } from './app.js';
 import { createAuditedJobRegistry } from './audited-job-registry.js';
 import { createAuthStore } from './auth-store.js';
@@ -25,6 +31,7 @@ import { createGithubWebhookHandler } from './github-webhook-http.js';
 import { createLiveSessionRegistry } from './live-session-registry.js';
 import { createMailAliasRegistry } from './mail-alias-registry.js';
 import { createMailConfigurationService } from './mail-configuration.js';
+import { createMailDkimConfigurationService } from './mail-dkim-configuration.js';
 import { createMailDkimRegistry } from './mail-dkim-registry.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { createMailboxForwardingRegistry } from './mailbox-forwarding-registry.js';
@@ -148,6 +155,12 @@ const mailDkimRegistry = createMailDkimRegistry({
   getMailDomain: (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
 });
 await mailDkimRegistry.init();
+const mailDiagnosticsInspector = createMailDiagnosticsInspector();
+const mailDkimConfigurationService = createMailDkimConfigurationService({
+  mailDomainRegistry,
+  mailDkimRegistry,
+  mailDiagnosticsInspector,
+});
 const mailboxRegistry = createMailboxRegistry({
   filePath: mailboxStorePath,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY,
@@ -228,6 +241,8 @@ const listener = createAuthenticatedApi({
     dnsProviderCredentialRegistry,
     mailDomainRegistry,
     mailDkimRegistry,
+    mailDiagnosticsInspector,
+    mailDkimConfigurationService,
     mailboxRegistry,
     mailboxQuotaRegistry,
     mailboxForwardingRegistry,
@@ -257,6 +272,7 @@ const localRuntime = await startConfiguredLocalRuntime({
   applicationEnvironmentRegistry,
   mailDomainRegistry,
   mailConfigurationService,
+  mailDkimConfigurationService,
   dnsProviderCredentialRegistry,
   jobLogStore,
   inspectServices: inspectAllowlistedServices,
