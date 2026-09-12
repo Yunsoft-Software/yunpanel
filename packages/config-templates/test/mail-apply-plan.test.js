@@ -4,6 +4,7 @@ import {
   MailApplyPlanError,
   previewManagedMailApplyPlan,
   previewManagedMailConfiguration,
+  previewManagedMailForwardingConfiguration,
 } from '../src/index.js';
 
 const ARGON2ID_HASH = '$argon2id$v=19$m=65536,t=3,p=1$c2FsdHNhbHRzYWx0c2FsdA$YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY';
@@ -15,6 +16,17 @@ function managedPreview() {
     aliases: [{ source: 'info@example.com', destinations: ['owner@example.com'] }],
     accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
     postmasterAddress: 'owner@example.com',
+  });
+}
+
+function forwardingPreview() {
+  return previewManagedMailForwardingConfiguration({
+    domains: ['example.com'],
+    mailboxes: ['owner@example.com'],
+    aliases: [],
+    accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
+    postmasterAddress: 'owner@example.com',
+    forwardings: [{ source: 'owner@example.com', mode: 'copy', destinations: ['backup@elsewhere.test'] }],
   });
 }
 
@@ -60,6 +72,18 @@ test('builds deterministic secret-free managed mail apply and rollback stages', 
   assert.equal(previewManagedMailApplyPlan(preview).sha256, plan.sha256);
 });
 
+test('forwarding-aware plan appends only the fixed sievec compile command', () => {
+  const preview = forwardingPreview();
+  const plan = previewManagedMailApplyPlan(preview);
+  assert.deepEqual(plan.stages.compile, [
+    { file: '/usr/sbin/postmap', args: ['hash:/etc/yunpanel/mail/postfix/virtual-domains'] },
+    { file: '/usr/sbin/postmap', args: ['hash:/etc/yunpanel/mail/postfix/virtual-mailboxes'] },
+    { file: '/usr/sbin/postmap', args: ['hash:/etc/yunpanel/mail/postfix/virtual-aliases'] },
+    { file: '/usr/bin/sievec', args: ['/etc/dovecot/yunpanel-forwarding.sieve'] },
+  ]);
+  assert.equal(plan.artifacts.some((artifact) => artifact.path === '/etc/dovecot/yunpanel-forwarding.sieve'), true);
+});
+
 test('rejects malformed preview and unsafe Postfix parameter metadata', () => {
   assert.throws(
     () => previewManagedMailApplyPlan(null),
@@ -92,6 +116,16 @@ test('rejects compile and validator commands outside the managed allowlist', () 
     () => previewManagedMailApplyPlan({ ...preview, artifacts: forgedArtifacts }),
     (error) => error instanceof MailApplyPlanError && error.code === 'invalid_mail_compile_command',
   );
+
+  const forwarding = forwardingPreview();
+  const forgedSieve = forwarding.artifacts.map((artifact) => artifact.path === '/etc/dovecot/yunpanel-forwarding.sieve'
+    ? { ...artifact, compile: { file: '/usr/bin/sievec', args: ['/tmp/attacker.sieve'] } }
+    : artifact);
+  assert.throws(
+    () => previewManagedMailApplyPlan({ ...forwarding, artifacts: forgedSieve }),
+    (error) => error instanceof MailApplyPlanError && error.code === 'invalid_mail_compile_command',
+  );
+
   assert.throws(
     () => previewManagedMailApplyPlan({
       ...preview,
