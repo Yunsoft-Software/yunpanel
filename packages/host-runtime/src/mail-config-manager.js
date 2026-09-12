@@ -3,13 +3,14 @@ import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promis
 import path from 'node:path';
 import {
   mailForwardingTemplatePolicy,
+  mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
   previewManagedMailApplyPlan,
 } from '@yunpanel/config-templates';
 
 const DEFAULT_STAGING_ROOT = '/var/lib/yunpanel/staging/mail';
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
-const MANIFEST_VERSION = 2;
+const MANIFEST_VERSION = 3;
 const MANIFEST_FILE = 'manifest.json';
 const PRIVATE_MODE = 0o600;
 const PUBLIC_MODE = 0o640;
@@ -19,6 +20,7 @@ const ALLOWED_ARTIFACT_PATHS = Object.freeze([
   mailTemplatePolicy.postfixVirtualDomainMapPath,
   mailTemplatePolicy.postfixVirtualMailboxMapPath,
   mailTemplatePolicy.postfixVirtualAliasMapPath,
+  mailSubmissionTemplatePolicy.senderLoginPath,
   mailTemplatePolicy.dovecotPasswdFilePath,
   mailTemplatePolicy.dovecotAuthConfigPath,
   mailTemplatePolicy.dovecotMailConfigPath,
@@ -274,6 +276,7 @@ export const mailConfigManagerInternals = Object.freeze({
   directoryMode: DIRECTORY_MODE,
   privateMode: PRIVATE_MODE,
   publicMode: PUBLIC_MODE,
+  manifestVersion: MANIFEST_VERSION,
   normalizeManifest,
   buildStageManifest,
 });
