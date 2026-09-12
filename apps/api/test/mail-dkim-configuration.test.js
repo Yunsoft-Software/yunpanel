@@ -187,17 +187,52 @@ test('state change during private materialization is rejected before host activa
   );
 });
 
-test('disabled target domain and stale target key revision fail closed', async () => {
-  const disabled = fixture();
-  disabled.domains[0].status = 'disabled';
-  await assert.rejects(
-    disabled.service.previewApply(input),
-    (error) => error instanceof MailDkimConfigurationError && error.code === 'mail_dkim_domain_not_enabled',
-  );
+test('disabled target is removed from aggregate signing while remaining enabled domains stay configured', async () => {
+  const state = fixture();
+  state.domains[0].status = 'disabled';
+  const preview = await state.service.previewApply(input);
+  assert.equal(preview.readyToApply, true);
+  assert.equal(preview.configuration.domains, 1);
+  assert.deepEqual(preview.dnsStates, [
+    { mailDomainId: secondDomain.id, domainName: secondDomain.domainName, state: 'ready' },
+  ]);
+  assert.deepEqual(state.diagnosticsCalls, [[secondDomain.domainName, 'mail-b']]);
 
-  const stale = fixture();
-  await assert.rejects(
-    stale.service.previewApply({ ...input, expectedKeyRevision: 2 }),
-    (error) => error instanceof MailDkimConfigurationError && error.code === 'stale_mail_dkim_revision',
-  );
+  const materialized = await state.service.materializeApply(input, {
+    expectedPreviewDigest: preview.previewDigest,
+    expectedConfigurationSha256: preview.configuration.sha256,
+  });
+  assert.equal(materialized.keys.length, 1);
+  assert.equal(materialized.keys[0].domain, secondDomain.domainName);
+});
+
+test('last disabled DKIM domain produces a deterministic zero-key teardown without DNS blockers', async () => {
+  const state = fixture();
+  state.domains[0].status = 'disabled';
+  state.domains[1].status = 'disabled';
+  const preview = await state.service.previewApply(input);
+  assert.equal(preview.readyToApply, true);
+  assert.deepEqual(preview.blockers, []);
+  assert.equal(preview.configuration.domains, 0);
+  assert.deepEqual(preview.dns, []);
+  assert.deepEqual(preview.dnsStates, []);
+  assert.deepEqual(state.diagnosticsCalls, []);
+
+  const materialized = await state.service.materializeApply(input, {
+    expectedPreviewDigest: preview.previewDigest,
+    expectedConfigurationSha256: preview.configuration.sha256,
+  });
+  assert.deepEqual(materialized.keys, []);
+  assert.equal(materialized.preview.sha256, preview.configuration.sha256);
+});
+
+test('stale target key revision still fails closed for enabled or disabled targets', async () => {
+  for (const disabled of [false, true]) {
+    const state = fixture();
+    if (disabled) state.domains[0].status = 'disabled';
+    await assert.rejects(
+      state.service.previewApply({ ...input, expectedKeyRevision: 2 }),
+      (error) => error instanceof MailDkimConfigurationError && error.code === 'stale_mail_dkim_revision',
+    );
+  }
 });
