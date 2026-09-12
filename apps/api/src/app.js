@@ -37,10 +37,7 @@ import { mountMailAliasRoutes } from './mail-alias-http.js';
 import { createMailAliasRegistry, MailAliasRegistryError } from './mail-alias-registry.js';
 import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
 import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
-import {
-  createMailDkimConfigurationService,
-  MailDkimConfigurationError,
-} from './mail-dkim-configuration.js';
+import { MailDkimConfigurationError } from './mail-dkim-configuration.js';
 import { mountMailDkimRoutes, MailDkimHttpError } from './mail-dkim-http.js';
 import { createMailDkimRegistry, MailDkimRegistryError } from './mail-dkim-registry.js';
 import { MailDiagnosticsHttpError, mountMailDiagnosticsRoutes } from './mail-diagnostics-http.js';
@@ -137,11 +134,7 @@ export function createApp({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
   mailDiagnosticsInspector = createMailDiagnosticsInspector(),
-  mailDkimConfigurationService = createMailDkimConfigurationService({
-    mailDomainRegistry,
-    mailDkimRegistry,
-    mailDiagnosticsInspector,
-  }),
+  mailDkimConfigurationService = null,
   mailboxRegistry = createMailboxRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
@@ -278,7 +271,7 @@ export function createApp({
     mailDkimConfigurationService,
     mailDomainRegistry,
     domainRegistry,
-    jobRegistry,
+    jobRegistry: mailDkimConfigurationService ? jobRegistry : null,
     localServerId,
   });
   mountMailDiagnosticsRoutes(app, {
