@@ -16,55 +16,69 @@ async function withTempDirectory(run) {
   finally { await rm(root, { recursive: true, force: true }); }
 }
 
-test('backs up and restores exact live config/FPM files and removes newly-created database', async () => withTempDirectory(async (root) => {
+test('backs up and restores exact live config/FPM/Nginx files and removes newly-created database', async () => withTempDirectory(async (root) => {
   const configPath = path.join(root, 'config.inc.php');
   const fpmPoolPath = path.join(root, 'pool.conf');
+  const nginxConfigPath = path.join(root, 'nginx.conf');
   const databasePath = path.join(root, 'roundcube.sqlite');
   const backupRoot = path.join(root, 'backups');
   await writeFile(configPath, 'old-secret-config\n', { mode: 0o640 });
   await writeFile(fpmPoolPath, 'old-fpm\n', { mode: 0o600 });
+  await writeFile(nginxConfigPath, 'old-nginx\n', { mode: 0o640 });
   await chmod(configPath, 0o640);
   await chmod(fpmPoolPath, 0o600);
+  await chmod(nginxConfigPath, 0o640);
 
   const manager = createRoundcubeConfigBackupManager({
     backupRoot,
     configPath,
     fpmPoolPath,
+    nginxConfigPath,
     databasePath,
     chownFn: async () => {},
   });
   const backup = await manager.backupConfiguration(TX);
+  assert.equal(backup.version, 2);
   assert.equal(backup.databaseExisted, false);
   assert.equal(backup.files[0].exists, true);
   assert.equal(backup.files[1].exists, true);
+  assert.equal(backup.files[2].exists, true);
   assert.equal((await stat(backupRoot)).mode & 0o777, 0o700);
   assert.equal((await stat(path.join(manager.transactionDirectory(TX), 'manifest.json'))).mode & 0o777, 0o600);
   assert.equal((await stat(path.join(manager.transactionDirectory(TX), 'config.inc.php'))).mode & 0o777, 0o600);
+  assert.equal((await stat(path.join(manager.transactionDirectory(TX), 'yunpanel-roundcube-nginx.conf'))).mode & 0o777, 0o600);
 
   await writeFile(configPath, 'new-config\n');
   await writeFile(fpmPoolPath, 'new-fpm\n');
+  await writeFile(nginxConfigPath, 'new-nginx\n');
   await writeFile(databasePath, 'new-database');
   const restored = await manager.restoreConfiguration(TX);
+  assert.equal(restored.version, 2);
   assert.equal(restored.restored, true);
   assert.equal(restored.databaseRemoved, true);
   assert.equal(await readFile(configPath, 'utf8'), 'old-secret-config\n');
   assert.equal(await readFile(fpmPoolPath, 'utf8'), 'old-fpm\n');
+  assert.equal(await readFile(nginxConfigPath, 'utf8'), 'old-nginx\n');
   assert.equal((await stat(configPath)).mode & 0o777, 0o640);
   assert.equal((await stat(fpmPoolPath)).mode & 0o777, 0o600);
+  assert.equal((await stat(nginxConfigPath)).mode & 0o777, 0o640);
   await assert.rejects(stat(databasePath), { code: 'ENOENT' });
 }));
 
 test('rollback leaves a pre-existing Roundcube database untouched', async () => withTempDirectory(async (root) => {
   const configPath = path.join(root, 'config.inc.php');
   const fpmPoolPath = path.join(root, 'pool.conf');
+  const nginxConfigPath = path.join(root, 'nginx.conf');
   const databasePath = path.join(root, 'roundcube.sqlite');
   await writeFile(configPath, 'old-config');
   await writeFile(fpmPoolPath, 'old-fpm');
+  await writeFile(nginxConfigPath, 'old-nginx');
   await writeFile(databasePath, 'existing-user-data');
   const manager = createRoundcubeConfigBackupManager({
     backupRoot: path.join(root, 'backups'),
     configPath,
     fpmPoolPath,
+    nginxConfigPath,
     databasePath,
     chownFn: async () => {},
   });
@@ -79,13 +93,16 @@ test('backup rejects symlink live targets and duplicate transaction IDs', async 
   const configPath = path.join(root, 'config.inc.php');
   const target = path.join(root, 'real-config');
   const fpmPoolPath = path.join(root, 'pool.conf');
+  const nginxConfigPath = path.join(root, 'nginx.conf');
   await writeFile(target, 'secret');
   await symlink(target, configPath);
   await writeFile(fpmPoolPath, 'fpm');
+  await writeFile(nginxConfigPath, 'nginx');
   const manager = createRoundcubeConfigBackupManager({
     backupRoot: path.join(root, 'backups'),
     configPath,
     fpmPoolPath,
+    nginxConfigPath,
     databasePath: path.join(root, 'db.sqlite'),
   });
   await assert.rejects(
