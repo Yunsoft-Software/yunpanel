@@ -9,6 +9,7 @@ const POSTFIX_MAP_PATHS = Object.freeze(new Set([
   '/etc/yunpanel/mail/postfix/virtual-mailboxes',
   '/etc/yunpanel/mail/postfix/virtual-aliases',
 ]));
+const FORWARDING_SIEVE_PATH = '/etc/dovecot/yunpanel-forwarding.sieve';
 const VALIDATORS = Object.freeze(new Map([
   ['/usr/sbin/postfix', Object.freeze(['check'])],
   ['/usr/bin/doveconf', Object.freeze(['-n'])],
@@ -72,12 +73,20 @@ function validatorCommand(entry) {
 
 function compileCommand(artifact) {
   const entry = artifact.compile;
-  const expectedArgument = `hash:${artifact.path}`;
-  if (!POSTFIX_MAP_PATHS.has(artifact.path) || !entry || entry.file !== '/usr/sbin/postmap'
-    || !Array.isArray(entry.args) || entry.args.length !== 1 || entry.args[0] !== expectedArgument) {
+  if (!entry || !Array.isArray(entry.args) || entry.args.length !== 1) {
     throw new MailApplyPlanError('invalid_mail_compile_command', 'Managed mail compile command is not allowlisted');
   }
-  return command(entry.file, entry.args);
+  if (POSTFIX_MAP_PATHS.has(artifact.path)
+    && entry.file === '/usr/sbin/postmap'
+    && entry.args[0] === `hash:${artifact.path}`) {
+    return command(entry.file, entry.args);
+  }
+  if (artifact.path === FORWARDING_SIEVE_PATH
+    && entry.file === '/usr/bin/sievec'
+    && entry.args[0] === FORWARDING_SIEVE_PATH) {
+    return command(entry.file, entry.args);
+  }
+  throw new MailApplyPlanError('invalid_mail_compile_command', 'Managed mail compile command is not allowlisted');
 }
 
 export function previewManagedMailApplyPlan(preview) {
