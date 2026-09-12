@@ -1,17 +1,19 @@
 import { createHash } from 'node:crypto';
 import {
+  MailForwardingTemplateError,
   MailQuotaTemplateError,
   MailTemplateError,
   mailTemplatePolicy,
   normalizeMailboxAddress,
   previewManagedMailEmptyConfiguration,
-  previewManagedMailQuotaConfiguration,
+  previewManagedMailForwardingConfiguration,
   renderDovecotQuotaPasswdFile,
 } from '@yunpanel/config-templates';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const LOCAL_STATUSES = new Set(['disabled', 'enabled']);
 const EMPTY_QUOTA_REGISTRY = Object.freeze({ listQuotas: async () => [] });
+const EMPTY_FORWARDING_REGISTRY = Object.freeze({ materializeEnabledForwardings: async () => [] });
 
 export class MailConfigurationError extends Error {
   constructor(code, message, status = 400) {
@@ -83,13 +85,15 @@ export function createMailConfigurationService({
   mailboxRegistry,
   mailAliasRegistry,
   mailboxQuotaRegistry = EMPTY_QUOTA_REGISTRY,
+  mailboxForwardingRegistry = EMPTY_FORWARDING_REGISTRY,
 } = {}) {
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
     || typeof mailDomainRegistry.listMailDomains !== 'function'
     || !mailboxRegistry || typeof mailboxRegistry.listMailboxes !== 'function'
     || typeof mailboxRegistry.materializeEnabledAccounts !== 'function'
     || !mailAliasRegistry || typeof mailAliasRegistry.materializeEnabledAliases !== 'function'
-    || !mailboxQuotaRegistry || typeof mailboxQuotaRegistry.listQuotas !== 'function') {
+    || !mailboxQuotaRegistry || typeof mailboxQuotaRegistry.listQuotas !== 'function'
+    || !mailboxForwardingRegistry || typeof mailboxForwardingRegistry.materializeEnabledForwardings !== 'function') {
     throw new MailConfigurationError('mail_configuration_dependencies_invalid', 'Mail configuration registries are unavailable', 503);
   }
 
@@ -128,6 +132,26 @@ export function createMailConfigurationService({
       .sort((left, right) => left.source.localeCompare(right.source));
     const quotaByMailboxId = new Map((await mailboxQuotaRegistry.listQuotas())
       .map((policy) => [policy.mailboxId, policy.quotaBytes]));
+    const enabledMailboxById = new Map(publicMailboxes.map((mailbox) => [mailbox.id, mailbox]));
+    const forwardings = (await mailboxForwardingRegistry.materializeEnabledForwardings())
+      .filter((policy) => enabledMailboxById.has(policy.mailboxId))
+      .map((policy) => {
+        const owner = enabledMailboxById.get(policy.mailboxId);
+        const source = normalizeMailboxAddress(policy.source).address;
+        if (source !== owner.address) {
+          throw new MailConfigurationError(
+            'mail_configuration_forwarding_mismatch',
+            'Mailbox forwarding state is inconsistent with enabled mailbox state',
+            409,
+          );
+        }
+        return Object.freeze({
+          source,
+          mode: policy.mode,
+          destinations: Object.freeze([...policy.destinations]),
+        });
+      })
+      .sort((left, right) => left.source.localeCompare(right.source));
 
     if (publicMailboxes.length !== privateAccounts.length
       || publicMailboxes.some((mailbox, index) => mailbox.address !== privateAccounts[index]?.address)) {
@@ -158,15 +182,18 @@ export function createMailConfigurationService({
     const postmasterAddress = accounts[0].address;
     let preview;
     try {
-      preview = previewManagedMailQuotaConfiguration({
+      preview = previewManagedMailForwardingConfiguration({
         domains: resolved.domains,
         mailboxes: accounts.map((account) => account.address),
         aliases,
         accounts,
         postmasterAddress,
+        forwardings,
       });
     } catch (error) {
-      if (error instanceof MailTemplateError || error instanceof MailQuotaTemplateError) {
+      if (error instanceof MailTemplateError
+        || error instanceof MailQuotaTemplateError
+        || error instanceof MailForwardingTemplateError) {
         throw new MailConfigurationError(
           'mail_configuration_state_invalid',
           'Managed mail identity state is inconsistent and cannot be applied',
