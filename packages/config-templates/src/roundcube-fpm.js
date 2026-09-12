@@ -35,7 +35,7 @@ export const roundcubeFpmTemplatePolicy = Object.freeze({
   socketPath: '/run/php/yunpanel-roundcube.sock',
   serviceUnit: 'php8.3-fpm.service',
   runtimeUser: 'yunpanel-roundcube',
-  runtimeGroup: 'www-data',
+  runtimeGroup: 'yunpanel-roundcube',
   socketOwner: 'www-data',
   socketGroup: 'www-data',
   poolMode: 0o640,
