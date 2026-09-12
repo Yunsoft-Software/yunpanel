@@ -14,6 +14,7 @@ import {
 import { createJobRecoveryStore } from './job-recovery-store.js';
 import { createJobRegistry } from './job-registry.js';
 import { recoverRunningMailConfig } from './job-running-mail-config-recovery.js';
+import { createMailAliasRegistry } from './mail-alias-registry.js';
 import { createMailConfigurationService } from './mail-configuration.js';
 import { createMailConfigOperationReceiptStore } from './mail-config-operation-receipt.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
@@ -36,7 +37,12 @@ function resolveMailRecoveryPaths({ env, packaged, cwd }) {
     path.join(defaultRoot, 'mailbox-registry.json'),
     { packaged, cwd, label: 'mailbox' },
   );
-  return Object.freeze({ ...base, mailDomainStore, mailboxStore });
+  const mailAliasStore = jobRecoveryRuntimeInternals.resolveRecoveryStorePath(
+    env.YUNPANEL_MAIL_ALIAS_STORE,
+    path.join(defaultRoot, 'mail-alias-registry.json'),
+    { packaged, cwd, label: 'mail alias' },
+  );
+  return Object.freeze({ ...base, mailDomainStore, mailboxStore, mailAliasStore });
 }
 
 export async function runRunningMailConfigRecoveryFromStores({
@@ -52,6 +58,7 @@ export async function runRunningMailConfigRecoveryFromStores({
   applicationRegistryFactory = createApplicationRegistry,
   mailDomainRegistryFactory = createMailDomainRegistry,
   mailboxRegistryFactory = createMailboxRegistry,
+  mailAliasRegistryFactory = createMailAliasRegistry,
   jobRegistryFactory = createJobRegistry,
   durableRegistryFactory = createDurableJobRegistry,
   recoveryStoreFactory = createJobRecoveryStore,
@@ -69,6 +76,7 @@ export async function runRunningMailConfigRecoveryFromStores({
     applicationRegistryFactory,
     mailDomainRegistryFactory,
     mailboxRegistryFactory,
+    mailAliasRegistryFactory,
     jobRegistryFactory,
     durableRegistryFactory,
     recoveryStoreFactory,
@@ -115,8 +123,17 @@ export async function runRunningMailConfigRecoveryFromStores({
     masterKey: env.YUNPANEL_SECRET_MASTER_KEY ?? null,
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }), 'Mailbox');
+  const mailAliasRegistry = await jobRecoveryRuntimeInternals.initRegistry(mailAliasRegistryFactory({
+    filePath: paths.mailAliasStore,
+    getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
+    listMailboxes: (filter) => mailboxRegistry.listMailboxes(filter),
+  }), 'Mail alias');
 
-  const configurationService = mailConfigurationServiceFactory({ mailDomainRegistry, mailboxRegistry });
+  const configurationService = mailConfigurationServiceFactory({
+    mailDomainRegistry,
+    mailboxRegistry,
+    mailAliasRegistry,
+  });
   if (!configurationService || typeof configurationService.materializeTransition !== 'function') {
     throw new JobRecoveryRuntimeError(
       'job_recovery_mail_configuration_invalid',
