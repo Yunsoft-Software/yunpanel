@@ -9,7 +9,6 @@ import {
   rename,
   rm,
   rmdir,
-  stat,
   writeFile,
 } from 'node:fs/promises';
 import os from 'node:os';
@@ -276,7 +275,7 @@ test('live artifact drift after backup fails closed before replacement', async (
   const originalLstat = context.mapped.lstatFn;
   const activator = createMailDkimActivator({
     backupRoot: '/var/lib/yunpanel/recovery/mail-dkim-drift',
-    run: async (file, args) => {
+    run: async (file) => {
       if (file === '/usr/bin/getent') return { stdout: '_rspamd:x:113:119::/var/lib/rspamd:/usr/sbin/nologin\n', stderr: '' };
       return { stdout: '', stderr: '' };
     },
