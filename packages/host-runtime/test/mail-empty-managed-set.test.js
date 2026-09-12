@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  mailForwardingTemplatePolicy,
   mailTemplatePolicy,
   previewManagedMailApplyPlan,
   previewManagedMailEmptyConfiguration,
@@ -16,7 +17,7 @@ async function withTempDirectory(run) {
   finally { await rm(root, { recursive: true, force: true }); }
 }
 
-test('stages the empty managed mail set with an empty protected passwd artifact', async () => withTempDirectory(async (root) => {
+test('stages the empty managed mail set with protected passwd and no-op forwarding sieve artifacts', async () => withTempDirectory(async (root) => {
   const preview = previewManagedMailEmptyConfiguration();
   const manager = createMailConfigManager({ stagingRoot: path.join(root, 'staging') });
   const manifest = await manager.stageConfiguration(preview, {
@@ -26,7 +27,7 @@ test('stages the empty managed mail set with an empty protected passwd artifact'
 
   assert.equal(manifest.planSha256, plan.sha256);
   assert.equal(manifest.previewSha256, preview.sha256);
-  assert.equal(manifest.artifacts.length, 7);
+  assert.equal(manifest.artifacts.length, 8);
   assert.deepEqual(manifest.artifacts.map((artifact) => artifact.targetPath), [
     mailTemplatePolicy.postfixVirtualDomainMapPath,
     mailTemplatePolicy.postfixVirtualMailboxMapPath,
@@ -34,6 +35,7 @@ test('stages the empty managed mail set with an empty protected passwd artifact'
     mailTemplatePolicy.dovecotPasswdFilePath,
     mailTemplatePolicy.dovecotAuthConfigPath,
     mailTemplatePolicy.dovecotMailConfigPath,
+    mailForwardingTemplatePolicy.sievePath,
     mailTemplatePolicy.rspamdProxyConfigPath,
   ]);
 
@@ -43,6 +45,11 @@ test('stages the empty managed mail set with an empty protected passwd artifact'
   assert.equal(passwdArtifact.bytes, 0);
   assert.equal((await stat(passwdPath)).mode & 0o777, 0o600);
   assert.equal(await readFile(passwdPath, 'utf8'), '');
+
+  const sieveArtifact = manifest.artifacts.find((artifact) => artifact.targetPath === mailForwardingTemplatePolicy.sievePath);
+  const sievePath = path.join(stageDirectory, sieveArtifact.stagedName);
+  assert.equal((await stat(sievePath)).mode & 0o777, 0o640);
+  assert.equal(await readFile(sievePath, 'utf8'), 'require ["envelope", "copy"];\n\n\n');
 
   const mailArtifact = manifest.artifacts.find((artifact) => artifact.targetPath === mailTemplatePolicy.dovecotMailConfigPath);
   const mailConfig = await readFile(path.join(stageDirectory, mailArtifact.stagedName), 'utf8');
