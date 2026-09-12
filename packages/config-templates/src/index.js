@@ -93,3 +93,10 @@ export {
   renderRoundcubeConfig,
   roundcubeTemplatePolicy,
 } from './roundcube.js';
+
+export {
+  RoundcubeFpmTemplateError,
+  previewRoundcubeFpmPool,
+  renderRoundcubeFpmPool,
+  roundcubeFpmTemplatePolicy,
+} from './roundcube-fpm.js';
