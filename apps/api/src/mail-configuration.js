@@ -1,15 +1,17 @@
 import { createHash } from 'node:crypto';
 import {
+  MailQuotaTemplateError,
   MailTemplateError,
   mailTemplatePolicy,
   normalizeMailboxAddress,
-  previewManagedMailConfiguration,
   previewManagedMailEmptyConfiguration,
-  renderDovecotPasswdFile,
+  previewManagedMailQuotaConfiguration,
+  renderDovecotQuotaPasswdFile,
 } from '@yunpanel/config-templates';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const LOCAL_STATUSES = new Set(['disabled', 'enabled']);
+const EMPTY_QUOTA_REGISTRY = Object.freeze({ listQuotas: async () => [] });
 
 export class MailConfigurationError extends Error {
   constructor(code, message, status = 400) {
@@ -80,12 +82,14 @@ export function createMailConfigurationService({
   mailDomainRegistry,
   mailboxRegistry,
   mailAliasRegistry,
+  mailboxQuotaRegistry = EMPTY_QUOTA_REGISTRY,
 } = {}) {
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
     || typeof mailDomainRegistry.listMailDomains !== 'function'
     || !mailboxRegistry || typeof mailboxRegistry.listMailboxes !== 'function'
     || typeof mailboxRegistry.materializeEnabledAccounts !== 'function'
-    || !mailAliasRegistry || typeof mailAliasRegistry.materializeEnabledAliases !== 'function') {
+    || !mailAliasRegistry || typeof mailAliasRegistry.materializeEnabledAliases !== 'function'
+    || !mailboxQuotaRegistry || typeof mailboxQuotaRegistry.listQuotas !== 'function') {
     throw new MailConfigurationError('mail_configuration_dependencies_invalid', 'Mail configuration registries are unavailable', 503);
   }
 
@@ -122,6 +126,8 @@ export function createMailConfigurationService({
     const aliases = (await mailAliasRegistry.materializeEnabledAliases())
       .filter((alias) => domainSet.has(normalizeMailboxAddress(alias.source).domain))
       .sort((left, right) => left.source.localeCompare(right.source));
+    const quotaByMailboxId = new Map((await mailboxQuotaRegistry.listQuotas())
+      .map((policy) => [policy.mailboxId, policy.quotaBytes]));
 
     if (publicMailboxes.length !== privateAccounts.length
       || publicMailboxes.some((mailbox, index) => mailbox.address !== privateAccounts[index]?.address)) {
@@ -145,18 +151,22 @@ export function createMailConfigurationService({
       });
     }
 
-    const postmasterAddress = privateAccounts[0].address;
+    const accounts = Object.freeze(privateAccounts.map((account, index) => Object.freeze({
+      ...account,
+      quotaBytes: quotaByMailboxId.get(publicMailboxes[index].id) ?? null,
+    })));
+    const postmasterAddress = accounts[0].address;
     let preview;
     try {
-      preview = previewManagedMailConfiguration({
+      preview = previewManagedMailQuotaConfiguration({
         domains: resolved.domains,
-        mailboxes: privateAccounts.map((account) => account.address),
+        mailboxes: accounts.map((account) => account.address),
         aliases,
-        accounts: privateAccounts,
+        accounts,
         postmasterAddress,
       });
     } catch (error) {
-      if (error instanceof MailTemplateError) {
+      if (error instanceof MailTemplateError || error instanceof MailQuotaTemplateError) {
         throw new MailConfigurationError(
           'mail_configuration_state_invalid',
           'Managed mail identity state is inconsistent and cannot be applied',
@@ -169,7 +179,7 @@ export function createMailConfigurationService({
       ready: true,
       blockers: Object.freeze([]),
       preview,
-      accounts: Object.freeze(privateAccounts),
+      accounts,
     });
   }
 
@@ -195,7 +205,7 @@ export function createMailConfigurationService({
       || publicPreview.configuration?.sha256 !== expectedConfigurationSha256) {
       throw new MailConfigurationError('mail_configuration_preview_stale', 'Managed mail configuration changed after preview', 409);
     }
-    const passwd = renderDovecotPasswdFile({
+    const passwd = renderDovecotQuotaPasswdFile({
       domains: resolved.domains,
       accounts: materialized.accounts,
     });
