@@ -5,8 +5,10 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   stat,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import os from 'node:os';
@@ -45,12 +47,10 @@ function generator(calls) {
   };
 }
 
-test('persists only public DKIM metadata while private key stays in a 0600 file', async () => withTempDirectory(async (root) => {
-  const filePath = path.join(root, 'state', 'mail-dkim-registry.json');
+test('atomically persists public metadata beside a private 0600 DKIM key', async () => withTempDirectory(async (root) => {
   const keyRoot = path.join(root, 'keys');
   const calls = [];
   const registry = createMailDkimRegistry({
-    filePath,
     keyRoot,
     now: () => Date.parse('2026-09-12T19:00:00.000Z'),
     getMailDomain: async (id) => id === mailDomainId ? localMailDomain : null,
@@ -78,14 +78,18 @@ test('persists only public DKIM metadata while private key stays in a 0600 file'
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
   }]]);
 
-  const keyPath = path.join(keyRoot, `${mailDomainId}.mail-2026.key`);
-  assert.equal((await stat(path.dirname(filePath))).mode & 0o777, 0o700);
-  assert.equal((await stat(filePath)).mode & 0o777, 0o600);
+  const keyDirectory = path.join(keyRoot, mailDomainId);
+  const metadataPath = path.join(keyDirectory, 'metadata.json');
+  const privateKeyPath = path.join(keyDirectory, 'private.pem');
   assert.equal((await stat(keyRoot)).mode & 0o777, 0o700);
-  assert.equal((await stat(keyPath)).mode & 0o777, 0o600);
-  assert.match(await readFile(keyPath, 'utf8'), /^-----BEGIN PRIVATE KEY-----/);
-  const persisted = await readFile(filePath, 'utf8');
+  assert.equal((await stat(keyDirectory)).mode & 0o777, 0o700);
+  assert.equal((await stat(metadataPath)).mode & 0o777, 0o600);
+  assert.equal((await stat(privateKeyPath)).mode & 0o777, 0o600);
+  assert.match(await readFile(privateKeyPath, 'utf8'), /^-----BEGIN PRIVATE KEY-----/);
+  const persisted = await readFile(metadataPath, 'utf8');
   assert.doesNotMatch(persisted, /BEGIN PRIVATE KEY|privateKey/i);
+  assert.match(persisted, /"selector": "mail-2026"/);
+  assert.deepEqual(await readdir(keyRoot), [mailDomainId]);
 
   const materialized = await registry.materializePrivateKey(mailDomainId);
   assert.equal(materialized.privateKey, KEY_PAIR.privateKey);
@@ -93,7 +97,6 @@ test('persists only public DKIM metadata while private key stays in a 0600 file'
   assert.doesNotMatch(JSON.stringify(materialized.metadata), /BEGIN PRIVATE KEY/);
 
   const reopened = createMailDkimRegistry({
-    filePath,
     keyRoot,
     getMailDomain: async (id) => id === mailDomainId ? localMailDomain : null,
   });
@@ -119,22 +122,19 @@ test('concurrent first-key creation generates only one key and rejects the loser
   assert.equal(calls.length, 1);
 });
 
-test('startup fails closed when private key content or mode does not match public state', async () => withTempDirectory(async (root) => {
-  const filePath = path.join(root, 'state', 'mail-dkim-registry.json');
+test('startup fails closed when committed private material mode or content is unsafe', async () => withTempDirectory(async (root) => {
   const keyRoot = path.join(root, 'keys');
   const registry = createMailDkimRegistry({
-    filePath,
     keyRoot,
     getMailDomain: async (id) => id === mailDomainId ? localMailDomain : null,
     generateKeyPairFn: generator([]),
   });
   await registry.init();
   await registry.createKey(mailDomainId, { expectedRevision: 0, selector: 'mail' });
-  const keyPath = path.join(keyRoot, `${mailDomainId}.mail.key`);
+  const privateKeyPath = path.join(keyRoot, mailDomainId, 'private.pem');
 
-  await chmod(keyPath, 0o644);
+  await chmod(privateKeyPath, 0o644);
   const unsafe = createMailDkimRegistry({
-    filePath,
     keyRoot,
     getMailDomain: async (id) => id === mailDomainId ? localMailDomain : null,
   });
@@ -143,10 +143,9 @@ test('startup fails closed when private key content or mode does not match publi
     (error) => error instanceof MailDkimRegistryError && error.code === 'mail_dkim_private_key_unsafe',
   );
 
-  await chmod(keyPath, 0o600);
-  await writeFile(keyPath, 'not a private key\n', { mode: 0o600 });
+  await chmod(privateKeyPath, 0o600);
+  await writeFile(privateKeyPath, 'not a private key\n', { mode: 0o600 });
   const corrupted = createMailDkimRegistry({
-    filePath,
     keyRoot,
     getMailDomain: async (id) => id === mailDomainId ? localMailDomain : null,
   });
@@ -156,16 +155,40 @@ test('startup fails closed when private key content or mode does not match publi
   );
 }));
 
-test('external domains, stale revisions, unsafe selectors and orphan key paths fail closed', async () => withTempDirectory(async (root) => {
+test('startup removes safe interrupted pending transactions but rejects unsafe pending entries', async () => withTempDirectory(async (root) => {
+  const keyRoot = path.join(root, 'keys');
+  await mkdir(keyRoot, { recursive: true, mode: 0o700 });
+  const pending = path.join(keyRoot, `.pending-${mailDomainId}-deadbeef`);
+  await mkdir(pending, { mode: 0o700 });
+  await writeFile(path.join(pending, 'partial'), 'incomplete\n', { mode: 0o600 });
+
+  const registry = createMailDkimRegistry({
+    keyRoot,
+    getMailDomain: async (id) => id === mailDomainId ? localMailDomain : null,
+  });
+  await registry.init();
+  assert.deepEqual(await readdir(keyRoot), []);
+
+  const unsafePending = path.join(keyRoot, `.pending-${mailDomainId}-symlink`);
+  await symlink(root, unsafePending);
+  const unsafe = createMailDkimRegistry({
+    keyRoot,
+    getMailDomain: async (id) => id === mailDomainId ? localMailDomain : null,
+  });
+  await assert.rejects(
+    unsafe.init(),
+    (error) => error instanceof MailDkimRegistryError && error.code === 'mail_dkim_state_invalid',
+  );
+}));
+
+test('external domains, stale revisions and unsafe selectors fail closed without creating state', async () => withTempDirectory(async (root) => {
   const externalId = randomUUID();
   const domains = new Map([
     [mailDomainId, localMailDomain],
     [externalId, { id: externalId, domainName: 'external.example', managementMode: 'external' }],
   ]);
-  const filePath = path.join(root, 'state', 'mail-dkim-registry.json');
   const keyRoot = path.join(root, 'keys');
   const registry = createMailDkimRegistry({
-    filePath,
     keyRoot,
     getMailDomain: async (id) => domains.get(id) ?? null,
     generateKeyPairFn: generator([]),
@@ -184,12 +207,16 @@ test('external domains, stale revisions, unsafe selectors and orphan key paths f
     registry.createKey(mailDomainId, { expectedRevision: 0, selector: '../mail' }),
     (error) => error instanceof MailDkimRegistryError && error.code === 'invalid_mail_dkim_selector',
   );
-
-  await mkdir(keyRoot, { recursive: true, mode: 0o700 });
-  await writeFile(path.join(keyRoot, `${mailDomainId}.mail.key`), KEY_PAIR.privateKey, { mode: 0o600 });
-  await assert.rejects(
-    registry.createKey(mailDomainId, { expectedRevision: 0, selector: 'mail' }),
-    (error) => error instanceof MailDkimRegistryError && error.code === 'mail_dkim_orphan_key_exists',
-  );
   assert.deepEqual(await registry.listKeys(), []);
+  assert.deepEqual(await readdir(keyRoot), []);
+}));
+
+test('unexpected persistent entries fail closed instead of being ignored', async () => withTempDirectory(async (root) => {
+  const keyRoot = path.join(root, 'keys');
+  await mkdir(path.join(keyRoot, 'not-a-uuid'), { recursive: true, mode: 0o700 });
+  const registry = createMailDkimRegistry({
+    keyRoot,
+    getMailDomain: async (id) => id === mailDomainId ? localMailDomain : null,
+  });
+  await assert.rejects(registry.init(), (error) => error instanceof MailDkimRegistryError);
 }));
