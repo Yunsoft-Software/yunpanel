@@ -40,6 +40,8 @@ const noHostSideEffects = Object.freeze({ mailConfigurationChanged: false, mailD
 export function mountMailboxRoutes(app, {
   mailboxRegistry,
   mailAliasRegistry = null,
+  mailboxQuotaRegistry = null,
+  mailboxForwardingRegistry = null,
   mailDomainRegistry = null,
   domainRegistry = null,
   localServerId = null,
@@ -56,6 +58,12 @@ export function mountMailboxRoutes(app, {
   }
   if (mailAliasRegistry !== null && typeof mailAliasRegistry.listAliases !== 'function') {
     throw new Error('Mail alias registry is invalid');
+  }
+  if (mailboxQuotaRegistry !== null && typeof mailboxQuotaRegistry.getQuota !== 'function') {
+    throw new Error('Mailbox quota registry is invalid');
+  }
+  if (mailboxForwardingRegistry !== null && typeof mailboxForwardingRegistry.getForwarding !== 'function') {
+    throw new Error('Mailbox forwarding registry is invalid');
   }
   if (localServerId !== null && (!mailDomainRegistry || !domainRegistry)) {
     throw new Error('Local mailbox scope dependencies are required');
@@ -94,6 +102,23 @@ export function mountMailboxRoutes(app, {
       throw new MailboxRegistryError(
         'mailbox_alias_conflict',
         'An address cannot be both a mailbox and a mail alias source',
+        409,
+      );
+    }
+  }
+
+  async function assertDeleteDependenciesCleared(mailboxId) {
+    if (mailboxQuotaRegistry && await mailboxQuotaRegistry.getQuota(mailboxId)) {
+      throw new MailboxRegistryError(
+        'mailbox_delete_quota_configured',
+        'Mailbox quota must be cleared before deleting the mailbox',
+        409,
+      );
+    }
+    if (mailboxForwardingRegistry && await mailboxForwardingRegistry.getForwarding(mailboxId)) {
+      throw new MailboxRegistryError(
+        'mailbox_delete_forwarding_configured',
+        'Mailbox forwarding must be cleared before deleting the mailbox',
         409,
       );
     }
@@ -145,6 +170,7 @@ export function mountMailboxRoutes(app, {
     emptyQuery(request.query);
     const body = exactBody(request.body, DELETE_FIELDS, 'mailbox_delete_input_invalid');
     await localMailbox(request.params.mailboxId);
+    await assertDeleteDependenciesCleared(request.params.mailboxId);
     await mailboxRegistry.deleteMailbox(request.params.mailboxId, body);
     return response.json({
       data: { id: request.params.mailboxId, deleted: true },
