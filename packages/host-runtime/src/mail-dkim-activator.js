@@ -41,7 +41,6 @@ const MAX_PRIVATE_KEY_BYTES = 16 * 1024;
 const TRANSACTION_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const MANIFEST_FILE = 'manifest.json';
 const MANIFEST_VERSION = 1;
-const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const LIVE_KEY_PARENT = path.dirname(mailDkimTemplatePolicy.keyRoot);
 
 export class MailDkimActivationError extends Error {
@@ -120,11 +119,21 @@ function normalizeBundle(bundle) {
       targetPath: mailDkimTemplatePolicy.keyPath(entry.domain, entry.selector),
     }))
     .sort((left, right) => left.targetPath.localeCompare(right.targetPath));
+  if (new Set(normalizedKeys.map((entry) => entry.targetPath)).size !== normalizedKeys.length) {
+    throw activationError('mail_dkim_bundle_invalid', 'DKIM activation key targets are not unique');
+  }
   return Object.freeze({ preview: expected, keys: Object.freeze(normalizedKeys) });
 }
 
 function backupName(index, targetPath) {
   return `${String(index).padStart(2, '0')}-${path.basename(targetPath)}.bak`;
+}
+
+function directoryTraversableBy(snapshot, identity) {
+  if (!snapshot?.present) return false;
+  if (snapshot.uid === identity.uid) return (snapshot.mode & 0o100) !== 0;
+  if (snapshot.gid === identity.gid) return (snapshot.mode & 0o010) !== 0;
+  return (snapshot.mode & 0o001) !== 0;
 }
 
 export function createMailDkimActivator({
@@ -265,7 +274,14 @@ export function createMailDkimActivator({
     const directory = path.join(backupRoot, tx);
     await mkdirFn(backupRoot, { recursive: true, mode: BACKUP_DIRECTORY_MODE });
     await chmodFn(backupRoot, BACKUP_DIRECTORY_MODE);
-    await mkdirFn(directory, { recursive: true, mode: BACKUP_DIRECTORY_MODE });
+    try {
+      await mkdirFn(directory, { mode: BACKUP_DIRECTORY_MODE });
+    } catch (error) {
+      if (error?.code === 'EEXIST') {
+        throw activationError('mail_dkim_backup_exists', 'A DKIM recovery transaction already exists and will not be overwritten');
+      }
+      throw activationError('mail_dkim_backup_create_failed', 'DKIM recovery transaction could not be created');
+    }
     await chmodFn(directory, BACKUP_DIRECTORY_MODE);
 
     const directorySnapshots = Object.freeze([
@@ -295,22 +311,52 @@ export function createMailDkimActivator({
     return manifest;
   }
 
-  async function ensureLiveKeyDirectories(rspamdGid, onMutation) {
-    for (const directoryPath of [LIVE_KEY_PARENT, mailDkimTemplatePolicy.keyRoot]) {
-      const snapshot = await inspectDirectory(directoryPath);
-      if (!snapshot.present) {
-        onMutation();
-        try { await mkdirFn(directoryPath, { mode: LIVE_KEY_DIRECTORY_MODE }); }
-        catch { throw activationError('mail_dkim_directory_create_failed', 'DKIM key directory could not be created'); }
+  async function ensureLiveKeyDirectories(rspamd, manifest, onMutation) {
+    const parentBefore = manifest.directories.find((entry) => entry.path === LIVE_KEY_PARENT);
+    const rootBefore = manifest.directories.find((entry) => entry.path === mailDkimTemplatePolicy.keyRoot);
+    if (!parentBefore || !rootBefore) {
+      throw activationError('mail_dkim_backup_invalid', 'DKIM recovery directory snapshot is incomplete');
+    }
+
+    if (!parentBefore.present) {
+      onMutation();
+      try {
+        await mkdirFn(LIVE_KEY_PARENT, { mode: LIVE_KEY_DIRECTORY_MODE });
+        await chownFn(LIVE_KEY_PARENT, ROOT_UID, rspamd.gid);
+        await chmodFn(LIVE_KEY_PARENT, LIVE_KEY_DIRECTORY_MODE);
+      } catch {
+        throw activationError('mail_dkim_directory_create_failed', 'DKIM parent directory could not be created securely');
       }
-      if (directoryPath === mailDkimTemplatePolicy.keyRoot) {
-        try {
-          await chownFn(directoryPath, ROOT_UID, rspamdGid);
-          await chmodFn(directoryPath, LIVE_KEY_DIRECTORY_MODE);
-        } catch {
-          throw activationError('mail_dkim_directory_permission_failed', 'DKIM key directory permissions could not be secured');
-        }
+    } else if (!directoryTraversableBy(parentBefore, rspamd)) {
+      throw activationError('mail_dkim_parent_not_traversable', 'Existing Rspamd DKIM parent is not traversable by the Rspamd service identity');
+    }
+
+    if (!rootBefore.present) {
+      onMutation();
+      try {
+        await mkdirFn(mailDkimTemplatePolicy.keyRoot, { mode: LIVE_KEY_DIRECTORY_MODE });
+        await chownFn(mailDkimTemplatePolicy.keyRoot, ROOT_UID, rspamd.gid);
+        await chmodFn(mailDkimTemplatePolicy.keyRoot, LIVE_KEY_DIRECTORY_MODE);
+      } catch {
+        throw activationError('mail_dkim_directory_create_failed', 'Managed DKIM key directory could not be created securely');
       }
+    } else if (rootBefore.uid !== ROOT_UID || rootBefore.gid !== rspamd.gid
+      || rootBefore.mode !== LIVE_KEY_DIRECTORY_MODE) {
+      onMutation();
+      try {
+        await chownFn(mailDkimTemplatePolicy.keyRoot, ROOT_UID, rspamd.gid);
+        await chmodFn(mailDkimTemplatePolicy.keyRoot, LIVE_KEY_DIRECTORY_MODE);
+      } catch {
+        throw activationError('mail_dkim_directory_permission_failed', 'Managed DKIM key directory permissions could not be secured');
+      }
+    }
+
+    const parentAfter = await inspectDirectory(LIVE_KEY_PARENT);
+    const rootAfter = await inspectDirectory(mailDkimTemplatePolicy.keyRoot);
+    if (!directoryTraversableBy(parentAfter, rspamd)
+      || !rootAfter.present || rootAfter.uid !== ROOT_UID || rootAfter.gid !== rspamd.gid
+      || rootAfter.mode !== LIVE_KEY_DIRECTORY_MODE) {
+      throw activationError('mail_dkim_directory_permission_failed', 'Managed DKIM key directories do not satisfy Rspamd access policy');
     }
   }
 
@@ -339,7 +385,14 @@ export function createMailDkimActivator({
     }
   }
 
-  async function assertLive(bundle, rspamdGid) {
+  async function assertLive(bundle, rspamd) {
+    const parent = await inspectDirectory(LIVE_KEY_PARENT);
+    const keyRoot = await inspectDirectory(mailDkimTemplatePolicy.keyRoot);
+    if (!directoryTraversableBy(parent, rspamd)
+      || !keyRoot.present || keyRoot.uid !== ROOT_UID || keyRoot.gid !== rspamd.gid
+      || keyRoot.mode !== LIVE_KEY_DIRECTORY_MODE) {
+      throw activationError('mail_dkim_live_state_invalid', 'Rspamd DKIM key directories do not match desired access policy');
+    }
     const config = await lstatFn(mailDkimTemplatePolicy.configPath);
     if (!config.isFile() || config.isSymbolicLink() || config.uid !== ROOT_UID || config.gid !== ROOT_GID
       || (config.mode & 0o7777) !== PUBLIC_CONFIG_MODE
@@ -348,7 +401,7 @@ export function createMailDkimActivator({
     }
     for (const key of bundle.keys) {
       const metadata = await lstatFn(key.targetPath);
-      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.uid !== ROOT_UID || metadata.gid !== rspamdGid
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.uid !== ROOT_UID || metadata.gid !== rspamd.gid
         || (metadata.mode & 0o7777) !== LIVE_KEY_MODE) {
         throw activationError('mail_dkim_live_state_invalid', 'Rspamd DKIM private key permissions do not match desired state');
       }
@@ -388,11 +441,22 @@ export function createMailDkimActivator({
 
   async function restoreDirectories(manifest) {
     for (const directory of [...manifest.directories].reverse()) {
-      if (directory.present) continue;
-      try { await rmdirFn(directory.path); }
-      catch (error) {
-        if (isMissing(error)) continue;
-        throw activationError('mail_dkim_restore_failed', 'DKIM rollback could not remove a newly-created directory');
+      if (!directory.present) {
+        try { await rmdirFn(directory.path); }
+        catch (error) {
+          if (isMissing(error)) continue;
+          throw activationError('mail_dkim_restore_failed', 'DKIM rollback could not remove a newly-created directory');
+        }
+        continue;
+      }
+      if (directory.path !== mailDkimTemplatePolicy.keyRoot) continue;
+      try {
+        const current = await lstatFn(directory.path);
+        if (!current.isDirectory() || current.isSymbolicLink()) throw new Error('unsafe directory');
+        await chownFn(directory.path, directory.uid, directory.gid);
+        await chmodFn(directory.path, directory.mode);
+      } catch {
+        throw activationError('mail_dkim_restore_failed', 'DKIM rollback could not restore managed directory permissions');
       }
     }
   }
@@ -415,12 +479,12 @@ export function createMailDkimActivator({
     let mutationStarted = false;
     const markMutation = () => { mutationStarted = true; };
     try {
-      await ensureLiveKeyDirectories(rspamd.gid, markMutation);
+      await ensureLiveKeyDirectories(rspamd, manifest, markMutation);
       await replaceLive(bundle, rspamd.gid, markMutation);
       await runCommand(RSPAMADM, ['configtest'], 'mail_dkim_config_validation_failed', 'Rspamd DKIM signing configuration is invalid');
       await runCommand(SYSTEMCTL, ['reload', 'rspamd'], 'mail_dkim_reload_failed', 'Rspamd could not reload DKIM signing configuration');
       await runCommand(SYSTEMCTL, ['is-active', '--quiet', 'rspamd'], 'mail_dkim_health_failed', 'Rspamd is not healthy after DKIM activation');
-      await assertLive(bundle, rspamd.gid);
+      await assertLive(bundle, rspamd);
       return Object.freeze({
         version: 1,
         previewSha256: bundle.preview.sha256,
@@ -455,4 +519,5 @@ export const mailDkimActivatorInternals = Object.freeze({
   maxPrivateKeyBytes: MAX_PRIVATE_KEY_BYTES,
   normalizeBundle,
   publicKeyFromPrivate,
+  directoryTraversableBy,
 });
