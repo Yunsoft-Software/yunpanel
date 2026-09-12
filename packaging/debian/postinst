@@ -35,6 +35,10 @@ if [ -f "$api_env" ]; then
   api_temp=$(mktemp /etc/yunpanel/control-plane/api.env.XXXXXX)
   cp "$api_env" "$api_temp"
   api_changed=0
+  if ! grep -q '^YUNPANEL_MAIL_DKIM_ROOT=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_MAIL_DKIM_ROOT=/var/lib/yunpanel/control-plane/mail-dkim' >>"$api_temp"
+    api_changed=1
+  fi
   if ! grep -q '^YUNPANEL_MAILBOX_STORE=' "$api_env"; then
     printf '%s\n' 'YUNPANEL_MAILBOX_STORE=/var/lib/yunpanel/control-plane/mailbox-registry.json' >>"$api_temp"
     api_changed=1
