@@ -11,6 +11,10 @@ const APPLY_FIELDS = new Set([
   'confirmation',
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const MANAGED_MAIL_MUTATIONS = new Set([
+  OPERATIONS.MAIL_CONFIG_APPLY,
+  OPERATIONS.MAIL_DKIM_APPLY,
+]);
 
 export class MailConfigurationHttpError extends Error {
   constructor(code, message, status = 400) {
@@ -56,9 +60,9 @@ async function scopedMailDomain({ mailDomainRegistry, domainRegistry, mailDomain
   return Object.freeze({ mailDomain, domain });
 }
 
-async function ensureMailConfigurationIdle(jobRegistry, serverId) {
+export async function ensureMailConfigurationIdle(jobRegistry, serverId) {
   const jobs = await jobRegistry.listJobs({ serverId });
-  if (jobs.some((job) => job.operation === OPERATIONS.MAIL_CONFIG_APPLY
+  if (jobs.some((job) => MANAGED_MAIL_MUTATIONS.has(job.operation)
     && (job.status === 'queued' || job.status === 'running'))) {
     throw new JobRegistryError(
       'mail_configuration_job_conflict',
@@ -161,4 +165,5 @@ export const mailConfigurationHttpInternals = Object.freeze({
   emptyQuery,
   scopedMailDomain,
   ensureMailConfigurationIdle,
+  managedMailMutations: MANAGED_MAIL_MUTATIONS,
 });
