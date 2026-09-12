@@ -41,6 +41,11 @@ export {
   mailConfigEvidenceInternals,
 } from './mail-config-evidence-inspector.js';
 export {
+  createMailDiagnosticsInspector,
+  MailDiagnosticsInspectorError,
+  mailDiagnosticsInspectorInternals,
+} from './mail-diagnostics-inspector.js';
+export {
   createMailboxQuotaInspector,
   MailboxQuotaInspectorError,
   mailboxQuotaInspectorInternals,
@@ -63,6 +68,7 @@ export {
   createSystemPackageManager,
   systemPackageManager,
   SystemPackageManagerError,
+  systemPackageManagerPolicy,
   systemPackageManagerInternals,
 } from './system-package-manager.js';
 export { createNodeStatusInspector, NodeStatusError, nodeStatusInspector, parseNodeServiceProperties } from './node-status-inspector.js';
