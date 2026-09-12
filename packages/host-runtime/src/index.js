@@ -87,6 +87,11 @@ export {
   roundcubeConfigActivatorInternals,
 } from './roundcube-config-activator.js';
 export {
+  createRoundcubeConfigEvidenceInspector,
+  RoundcubeConfigEvidenceError,
+  roundcubeConfigEvidenceInternals,
+} from './roundcube-config-evidence-inspector.js';
+export {
   createAcmeManager,
   acmeManager,
   AcmeManagerError,
