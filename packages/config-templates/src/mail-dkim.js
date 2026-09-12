@@ -5,7 +5,7 @@ const MAX_DKIM_DOMAINS = 1_000;
 const SELECTOR_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 const PUBLIC_KEY_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 const CONFIG_PATH = '/etc/rspamd/local.d/dkim_signing.conf';
-const KEY_ROOT = '/etc/yunpanel/mail/dkim';
+const KEY_ROOT = '/etc/rspamd/dkim/yunpanel';
 
 export class MailDkimTemplateError extends Error {
   constructor(code, message) {
