@@ -14,7 +14,8 @@ test('empty managed mail configuration is deterministic and secret-free', () => 
 
   assert.equal(first.sha256, second.sha256);
   assert.match(first.sha256, /^[a-f0-9]{64}$/);
-  assert.deepEqual(first.counts, { domains: 0, mailboxes: 0, aliases: 0 });
+  assert.deepEqual(first.counts, { domains: 0, mailboxes: 0, aliases: 0, forwardings: 0 });
+  assert.equal(first.artifacts.length, 8);
   assert.equal(first.readyToApply, false);
   assert.equal(first.sideEffects, false);
 
@@ -30,6 +31,13 @@ test('empty managed mail configuration is deterministic and secret-free', () => 
   assert.equal(passwd.contentIncluded, false);
   assert.equal(passwd.sha256, EMPTY_SHA256);
   assert.equal(Object.hasOwn(passwd, 'content'), false);
+
+  const sieve = first.artifacts.find((artifact) => artifact.path === '/etc/dovecot/yunpanel-forwarding.sieve');
+  assert.ok(sieve);
+  assert.equal(sieve.sensitive, false);
+  assert.equal(sieve.compile.file, '/usr/bin/sievec');
+  assert.deepEqual(sieve.compile.args, ['/etc/dovecot/yunpanel-forwarding.sieve']);
+  assert.equal(first.requirements.includes('dovecot_sieve'), true);
   assert.doesNotMatch(JSON.stringify(first), /argon2|passwordHash/i);
 });
 
@@ -56,10 +64,11 @@ test('empty managed set remains compatible with the allowlisted apply plan', () 
   assert.equal(plan.sensitiveMaterialRequired, true);
   assert.equal(plan.readyToExecute, false);
   assert.equal(plan.sideEffects, false);
-  assert.deepEqual(plan.stages.compile.map((command) => command.args[0]), [
-    'hash:/etc/yunpanel/mail/postfix/virtual-domains',
-    'hash:/etc/yunpanel/mail/postfix/virtual-mailboxes',
-    'hash:/etc/yunpanel/mail/postfix/virtual-aliases',
+  assert.deepEqual(plan.stages.compile, [
+    { file: '/usr/sbin/postmap', args: ['hash:/etc/yunpanel/mail/postfix/virtual-domains'] },
+    { file: '/usr/sbin/postmap', args: ['hash:/etc/yunpanel/mail/postfix/virtual-mailboxes'] },
+    { file: '/usr/sbin/postmap', args: ['hash:/etc/yunpanel/mail/postfix/virtual-aliases'] },
+    { file: '/usr/bin/sievec', args: ['/etc/dovecot/yunpanel-forwarding.sieve'] },
   ]);
   assert.deepEqual(plan.stages.reload.map((command) => command.args[1]), ['rspamd', 'dovecot', 'postfix']);
   assert.deepEqual(plan.stages.health.map((command) => command.args[2]), ['rspamd', 'dovecot', 'postfix']);
