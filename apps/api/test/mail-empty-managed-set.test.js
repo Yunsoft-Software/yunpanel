@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mailSubmissionTemplatePolicy } from '@yunpanel/config-templates';
 import { createMailConfigurationService } from '../src/mail-configuration.js';
 
 function fixtureHash() {
@@ -31,11 +32,12 @@ function createFixture() {
       }],
       materializeEnabledAccounts: async () => [account],
     },
+    mailAliasRegistry: { materializeEnabledAliases: async () => [] },
   });
   return { service };
 }
 
-test('last enabled mail domain produces an applyable empty managed-set preview', async () => {
+test('last enabled mail domain produces an applyable empty submission-aware managed-set preview', async () => {
   const { service } = createFixture();
   const transition = { mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'disabled' };
   const preview = await service.previewTransition(transition);
@@ -43,7 +45,12 @@ test('last enabled mail domain produces an applyable empty managed-set preview',
   assert.equal(preview.readyToApply, true);
   assert.deepEqual(preview.domains, []);
   assert.deepEqual(preview.blockers, []);
-  assert.deepEqual(preview.configuration.counts, { domains: 0, mailboxes: 0, aliases: 0 });
+  assert.deepEqual(preview.configuration.counts, { domains: 0, mailboxes: 0, aliases: 0, forwardings: 0 });
+  assert.deepEqual(preview.configuration.postfixMasterServices, [mailSubmissionTemplatePolicy.service]);
+  assert.equal(
+    preview.configuration.artifactDigests.some((artifact) => artifact.path === mailSubmissionTemplatePolicy.senderLoginPath),
+    true,
+  );
   assert.match(preview.previewDigest, /^[a-f0-9]{64}$/);
   assert.match(preview.configurationSha256, /^[a-f0-9]{64}$/);
   assert.doesNotMatch(JSON.stringify(preview), /argon2|passwordHash/i);
