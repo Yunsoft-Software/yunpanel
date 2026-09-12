@@ -4,7 +4,7 @@ import {
   createPublicKey,
 } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { lstat, readFile } from 'node:fs/promises';
+import { lstat, readFile, readdir } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { mailDkimTemplatePolicy } from '@yunpanel/config-templates';
 import { mailDkimActivatorInternals } from './mail-dkim-activator.js';
@@ -59,8 +59,10 @@ export function createMailDkimEvidenceInspector({
   }),
   lstatFn = lstat,
   readFileFn = readFile,
+  readdirFn = readdir,
 } = {}) {
-  if (typeof run !== 'function' || typeof lstatFn !== 'function' || typeof readFileFn !== 'function') {
+  if (typeof run !== 'function' || typeof lstatFn !== 'function'
+    || typeof readFileFn !== 'function' || typeof readdirFn !== 'function') {
     throw new MailDkimEvidenceError('mail_dkim_evidence_dependencies_invalid', 'DKIM evidence dependencies are invalid');
   }
 
@@ -103,6 +105,23 @@ export function createMailDkimEvidenceInspector({
     }
   }
 
+  async function exactManagedKeySet(bundle) {
+    let entries;
+    try { entries = await readdirFn(mailDkimTemplatePolicy.keyRoot, { withFileTypes: true }); }
+    catch { return false; }
+    if (!Array.isArray(entries) || entries.length > mailDkimActivatorInternals.maxLiveKeyFiles) return false;
+    const actual = [];
+    for (const entry of entries) {
+      const parsed = mailDkimActivatorInternals.managedKeyFileName(entry?.name);
+      if (!parsed || !entry.isFile() || entry.isSymbolicLink()) return false;
+      actual.push(parsed.targetPath);
+    }
+    actual.sort();
+    const expected = bundle.keys.map((entry) => entry.targetPath).sort();
+    return actual.length === expected.length
+      && actual.every((value, index) => value === expected[index]);
+  }
+
   async function inspect(input) {
     let bundle;
     try { bundle = mailDkimActivatorInternals.normalizeBundle(input); }
@@ -116,7 +135,8 @@ export function createMailDkimEvidenceInspector({
     if (!parent || !keyRoot
       || !mailDkimActivatorInternals.directoryTraversableBy(parent, identity)
       || keyRoot.uid !== ROOT_UID || keyRoot.gid !== identity.gid
-      || keyRoot.mode !== mailDkimActivatorInternals.liveKeyDirectoryMode) {
+      || keyRoot.mode !== mailDkimActivatorInternals.liveKeyDirectoryMode
+      || !(await exactManagedKeySet(bundle))) {
       return Object.freeze({ satisfied: false, result: null });
     }
 
