@@ -1,3 +1,4 @@
+import { normalizeMailboxAddress } from '@yunpanel/config-templates';
 import { MailboxRegistryError } from './mailbox-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -37,7 +38,11 @@ function asyncRoute(handler) {
 const noHostSideEffects = Object.freeze({ mailConfigurationChanged: false, mailDataChanged: false });
 
 export function mountMailboxRoutes(app, {
-  mailboxRegistry, mailDomainRegistry = null, domainRegistry = null, localServerId = null,
+  mailboxRegistry,
+  mailAliasRegistry = null,
+  mailDomainRegistry = null,
+  domainRegistry = null,
+  localServerId = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function'
     || typeof app.patch !== 'function' || typeof app.delete !== 'function') {
@@ -48,6 +53,9 @@ export function mountMailboxRoutes(app, {
     || typeof mailboxRegistry.rotatePassword !== 'function' || typeof mailboxRegistry.setEnabled !== 'function'
     || typeof mailboxRegistry.deleteMailbox !== 'function') {
     throw new Error('Mailbox registry is required');
+  }
+  if (mailAliasRegistry !== null && typeof mailAliasRegistry.listAliases !== 'function') {
+    throw new Error('Mail alias registry is invalid');
   }
   if (localServerId !== null && (!mailDomainRegistry || !domainRegistry)) {
     throw new Error('Local mailbox scope dependencies are required');
@@ -67,6 +75,28 @@ export function mountMailboxRoutes(app, {
     if (!mailbox) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox was not found', 404);
     await localMailDomain(mailbox.mailDomainId);
     return mailbox;
+  }
+
+  async function assertAliasSourceAvailable(mailDomainId, requestedAddress) {
+    if (!mailAliasRegistry) return;
+    let canonical;
+    try { canonical = normalizeMailboxAddress(requestedAddress).address; }
+    catch { return; }
+    let aliases;
+    try { aliases = await mailAliasRegistry.listAliases({ mailDomainId }); }
+    catch {
+      throw new MailboxRegistryError('mail_alias_state_unavailable', 'Mail alias state could not be verified', 503);
+    }
+    if (!Array.isArray(aliases)) {
+      throw new MailboxRegistryError('mail_alias_state_unavailable', 'Mail alias state could not be verified', 503);
+    }
+    if (aliases.some((alias) => alias?.source === canonical)) {
+      throw new MailboxRegistryError(
+        'mailbox_alias_conflict',
+        'An address cannot be both a mailbox and a mail alias source',
+        409,
+      );
+    }
   }
 
   app.get('/api/mailboxes', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -90,6 +120,7 @@ export function mountMailboxRoutes(app, {
   app.post('/api/mailboxes', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = exactBody(request.body, CREATE_FIELDS, 'mailbox_create_input_invalid');
     await localMailDomain(body.mailDomainId);
+    await assertAliasSourceAvailable(body.mailDomainId, body.address);
     const mailbox = await mailboxRegistry.createMailbox(body);
     return response.status(201).json({ data: mailbox, sideEffects: noHostSideEffects });
   }));
@@ -122,4 +153,9 @@ export function mountMailboxRoutes(app, {
   }));
 }
 
-export const mailboxHttpInternals = Object.freeze({ exactBody, listFilter, emptyQuery, noHostSideEffects });
+export const mailboxHttpInternals = Object.freeze({
+  exactBody,
+  listFilter,
+  emptyQuery,
+  noHostSideEffects,
+});
