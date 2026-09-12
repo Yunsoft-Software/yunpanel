@@ -34,6 +34,7 @@ const key = Object.freeze({
 async function listen(t, auth, {
   status = 'disabled',
   activeJobs = [],
+  pendingDnsRetirement = null,
   retirementSatisfied = true,
   retirementThrows = false,
 } = {}) {
@@ -65,6 +66,14 @@ async function listen(t, auth, {
         calls.push(['delete', id, structuredClone(input)]);
         return { mailDomainId: id, selector: key.selector, revision: key.revision, deleted: true };
       },
+    },
+    mailDkimRetirementRegistry: {
+      async getRetirement(id) {
+        calls.push(['retirementState', id]);
+        return pendingDnsRetirement;
+      },
+      async prepareRotation() { throw new Error('not used'); },
+      async confirmRotation() { throw new Error('not used'); },
     },
     mailDkimConfigurationService: {
       async previewApply() { throw new Error('not used'); },
@@ -112,7 +121,7 @@ function remove(base) {
   });
 }
 
-test('Owner deletes private DKIM state only after disabled-domain live retirement is verified', async (t) => {
+test('Owner deletes private DKIM state only after disabled-domain live retirement and DNS retirement are verified', async (t) => {
   const { base, calls } = await listen(t, owner);
   const response = await remove(base);
   assert.equal(response.status, 200);
@@ -126,12 +135,31 @@ test('Owner deletes private DKIM state only after disabled-domain live retiremen
   });
   assert.deepEqual(calls, [
     ['listJobs', { serverId }],
+    ['retirementState', mailDomainId],
     ['get', mailDomainId],
     ['retirement', { domain: 'example.com', selector: 'mail-2026' }],
     ['delete', mailDomainId, {
       expectedRevision: 3,
       confirmation: `delete-mail-dkim:${mailDomainId}:mail-2026:3`,
     }],
+  ]);
+});
+
+test('pending previous-selector DNS retirement blocks key deletion before live evidence', async (t) => {
+  const { base, calls } = await listen(t, owner, {
+    pendingDnsRetirement: {
+      mailDomainId,
+      previousSelector: 'mail-old',
+      phase: 'dns_retirement_pending',
+      revision: 2,
+    },
+  });
+  const response = await remove(base);
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error.code, 'mail_dkim_retirement_pending');
+  assert.deepEqual(calls, [
+    ['listJobs', { serverId }],
+    ['retirementState', mailDomainId],
   ]);
 });
 
@@ -156,13 +184,13 @@ test('missing or unavailable retirement evidence fails closed without deleting c
   const staleResponse = await remove(stale.base);
   assert.equal(staleResponse.status, 409);
   assert.equal((await staleResponse.json()).error.code, 'mail_dkim_retirement_not_ready');
-  assert.deepEqual(stale.calls.map(([name]) => name), ['listJobs', 'get', 'retirement']);
+  assert.deepEqual(stale.calls.map(([name]) => name), ['listJobs', 'retirementState', 'get', 'retirement']);
 
   const unavailable = await listen(t, owner, { retirementThrows: true });
   const unavailableResponse = await remove(unavailable.base);
   assert.equal(unavailableResponse.status, 503);
   assert.equal((await unavailableResponse.json()).error.code, 'mail_dkim_retirement_unavailable');
-  assert.deepEqual(unavailable.calls.map(([name]) => name), ['listJobs', 'get', 'retirement']);
+  assert.deepEqual(unavailable.calls.map(([name]) => name), ['listJobs', 'retirementState', 'get', 'retirement']);
 });
 
 test('Read Only cannot delete DKIM key state', async (t) => {
