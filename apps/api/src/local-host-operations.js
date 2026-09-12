@@ -5,6 +5,7 @@ import {
   createMailConfigActivator,
   createMailConfigBackupManager,
   createMailConfigManager,
+  createMailDkimActivator,
   createManagedServiceManager,
   createNginxManager,
   createNodeDeploymentManager,
@@ -51,6 +52,7 @@ export const LOCAL_NODE_ENVIRONMENT_OPERATIONS = Object.freeze([
 
 export const LOCAL_MAIL_CONFIGURATION_OPERATIONS = Object.freeze([
   OPERATIONS.MAIL_CONFIG_APPLY,
+  OPERATIONS.MAIL_DKIM_APPLY,
 ]);
 
 const EXECUTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -91,7 +93,9 @@ export function createLocalHostOperations({
   mailConfigManager = null,
   mailConfigBackupManager = null,
   mailConfigActivator = null,
+  mailDkimActivator = null,
   loadManagedMailConfiguration = null,
+  loadManagedDkimConfiguration = null,
   loadApplicationEnvironment = null,
   loadDeploymentCredential = null,
   loadDnsProviderCredential = null,
@@ -108,6 +112,9 @@ export function createLocalHostOperations({
   }
   if (loadManagedMailConfiguration !== null && typeof loadManagedMailConfiguration !== 'function') {
     throw new Error('loadManagedMailConfiguration must be a function when configured');
+  }
+  if (loadManagedDkimConfiguration !== null && typeof loadManagedDkimConfiguration !== 'function') {
+    throw new Error('loadManagedDkimConfiguration must be a function when configured');
   }
   if (!cloudflareDnsManager || typeof cloudflareDnsManager.applyRecord !== 'function') {
     throw new Error('cloudflareDnsManager must provide applyRecord()');
@@ -127,6 +134,7 @@ export function createLocalHostOperations({
     configManager: resolvedMailConfigManager,
     backupManager: resolvedMailConfigBackupManager,
   });
+  const resolvedMailDkimActivator = mailDkimActivator ?? createMailDkimActivator();
 
   if (!resolvedMailConfigManager || typeof resolvedMailConfigManager.stageConfiguration !== 'function') {
     throw new Error('mailConfigManager must provide stageConfiguration()');
@@ -136,6 +144,9 @@ export function createLocalHostOperations({
   }
   if (!resolvedMailConfigActivator || typeof resolvedMailConfigActivator.activateConfiguration !== 'function') {
     throw new Error('mailConfigActivator must provide activateConfiguration()');
+  }
+  if (!resolvedMailDkimActivator || typeof resolvedMailDkimActivator.activate !== 'function') {
+    throw new Error('mailDkimActivator must provide activate()');
   }
 
   async function withApplicationEnvironment(payload, execute) {
@@ -239,6 +250,40 @@ export function createLocalHostOperations({
     });
   }
 
+  async function executeManagedDkimConfiguration(payload, execution) {
+    assertMailExecutionContext(payload, execution);
+    const bundle = await loadManagedDkimConfiguration(payload);
+    if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)
+      || !bundle.preview || !Array.isArray(bundle.keys) || bundle.keys.length < 1) {
+      const error = new Error('Managed DKIM provider returned an invalid private bundle');
+      error.code = 'mail_dkim_bundle_invalid';
+      throw error;
+    }
+    if (bundle.preview.sha256 !== payload.configurationSha256) {
+      const error = new Error('Managed DKIM provider returned stale desired state');
+      error.code = 'mail_dkim_preview_stale';
+      throw error;
+    }
+    const activation = await resolvedMailDkimActivator.activate(bundle, {
+      transactionId: execution.jobId,
+    });
+    if (!activation || activation.applied !== true || activation.sideEffects !== true
+      || activation.previewSha256 !== payload.configurationSha256) {
+      const error = new Error('Managed DKIM activation did not confirm the queued configuration');
+      error.code = 'mail_dkim_activation_unconfirmed';
+      throw error;
+    }
+    return Object.freeze({
+      version: 1,
+      mailDomainId: payload.mailDomainId,
+      expectedKeyRevision: payload.expectedKeyRevision,
+      previewDigest: payload.previewDigest,
+      configurationSha256: payload.configurationSha256,
+      applied: true,
+      sideEffects: true,
+    });
+  }
+
   const handlers = new Map([
     [OPERATIONS.SYSTEM_PACKAGES_INSPECT, () => packageManager.inspect()],
     [OPERATIONS.SYSTEM_SERVICES_INSPECT, (payload) => managedServiceManager.inspect(payload.serviceId ?? null)],
@@ -270,6 +315,9 @@ export function createLocalHostOperations({
   }
   if (loadManagedMailConfiguration) {
     handlers.set(OPERATIONS.MAIL_CONFIG_APPLY, executeManagedMailConfiguration);
+  }
+  if (loadManagedDkimConfiguration) {
+    handlers.set(OPERATIONS.MAIL_DKIM_APPLY, executeManagedDkimConfiguration);
   }
 
   return {
