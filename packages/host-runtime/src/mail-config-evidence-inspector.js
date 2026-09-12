@@ -12,6 +12,7 @@ const ROOT_UID = 0;
 const ROOT_GID = 0;
 const SENSITIVE_MODE = 0o600;
 const PUBLIC_MODE = 0o640;
+const COMPILED_SIEVE_MODE = 0o600;
 
 export class MailConfigEvidenceError extends Error {
   constructor(code, message) {
@@ -69,6 +70,17 @@ export function createMailConfigEvidenceInspector({
     }
   }
 
+  async function inspectCompiledSieve() {
+    try {
+      const metadata = await lstatFn(mailConfigBackupInternals.sieveCompiledPath);
+      return metadata.isFile() && !metadata.isSymbolicLink()
+        && metadata.uid === ROOT_UID && metadata.gid === ROOT_GID
+        && (metadata.mode & 0o777) === COMPILED_SIEVE_MODE;
+    } catch {
+      return false;
+    }
+  }
+
   async function commandSatisfied(command) {
     try {
       const result = await run(command.file, command.args, { timeout: 30_000, maxBuffer: MAX_OUTPUT });
@@ -97,6 +109,7 @@ export function createMailConfigEvidenceInspector({
     for (const compiledPath of mailConfigBackupInternals.postfixCompiledPaths) {
       if (!(await inspectCompiledMap(compiledPath))) return { satisfied: false, result: null };
     }
+    if (!(await inspectCompiledSieve())) return { satisfied: false, result: null };
     for (const parameter of plan.postfixParameters) {
       if (!(await postfixParameterSatisfied(parameter))) return { satisfied: false, result: null };
     }
@@ -136,5 +149,6 @@ export const mailConfigEvidenceInternals = Object.freeze({
   rootGid: ROOT_GID,
   sensitiveMode: SENSITIVE_MODE,
   publicMode: PUBLIC_MODE,
+  compiledSieveMode: COMPILED_SIEVE_MODE,
   boundedOutput,
 });
