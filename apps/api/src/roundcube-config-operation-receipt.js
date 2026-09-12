@@ -1,14 +1,14 @@
 import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const DEFAULT_ROOT = '/var/lib/yunpanel/recovery/roundcube-config-operations';
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const RECEIPT_KEYS = Object.freeze([
   'version', 'recordedAt', 'serverId', 'jobId', 'previewSha256', 'configSha256',
-  'fpmSha256', 'databaseCreated', 'applied',
+  'fpmSha256', 'nginxSha256', 'databaseCreated', 'httpHealthy', 'applied',
 ]);
 
 export class RoundcubeConfigOperationReceiptError extends Error {
@@ -42,7 +42,7 @@ function normalizeReceipt(value) {
   }
   const normalizedIdentity = identity(value.serverId, value.jobId);
   if (typeof value.recordedAt !== 'string' || !Number.isFinite(Date.parse(value.recordedAt))
-    || typeof value.databaseCreated !== 'boolean' || value.applied !== true) {
+    || typeof value.databaseCreated !== 'boolean' || value.httpHealthy !== true || value.applied !== true) {
     throw new RoundcubeConfigOperationReceiptError('roundcube_receipt_invalid', 'Roundcube operation receipt state is invalid');
   }
   return Object.freeze({
@@ -52,7 +52,9 @@ function normalizeReceipt(value) {
     previewSha256: checksum(value.previewSha256, 'previewSha256'),
     configSha256: checksum(value.configSha256, 'configSha256'),
     fpmSha256: checksum(value.fpmSha256, 'fpmSha256'),
+    nginxSha256: checksum(value.nginxSha256, 'nginxSha256'),
     databaseCreated: value.databaseCreated,
+    httpHealthy: true,
     applied: true,
   });
 }
@@ -85,7 +87,9 @@ export function createRoundcubeConfigOperationReceiptStore({
       previewSha256: input?.previewSha256,
       configSha256: input?.configSha256,
       fpmSha256: input?.fpmSha256,
+      nginxSha256: input?.nginxSha256,
       databaseCreated: input?.databaseCreated,
+      httpHealthy: input?.httpHealthy,
       applied: input?.applied,
     });
     const directory = path.join(root, normalizedIdentity.serverId);
