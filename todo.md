@@ -15,7 +15,7 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 - [ ] İki tab browser race: delayed 200/401, cookie rotation, lost MFA response, `pageshow`, keep-alive ve session revoke yarışlarını doğrula.
 - [ ] Read Only session yalnız izinli resource GET/HEAD'lerine ulaşsın; mutation/jobs/users/audit/sensitive nested endpointler 403 kalsın.
 - [ ] Trusted proxy/client-IP/rate-limit spoof kabulünü gerçek reverse proxy üzerinde tamamla; forwarding header doğrudan güvenilmesin.
-- [ ] Owner `/api/audit` gerçek auth/MFA sınırında çalışsın; Read Only 403. actor/resource/action/outcome/time filtreleri ve pagination gerçek browser/API isteğiyle doğrulansın.
+- [ ] Gerçek headed browserda Owner Denetim ekranının actor/resource/action/outcome/time filtre formu ve ileri/geri sayfalaması UI üzerinden doğrulansın; Read Only hesabıyla `/api/audit` ve ekran erişimi 403/kapalı kalsın.
 - [ ] Owner mutation → queued job → local/legacy terminal completion ve `job-recovery` terminal handoff actor bağını aynı private auth SQLite üzerinde doğrula. `system` scheduler işleri Owner gibi görünmemeli.
 - [ ] Audit tablosu/job linkleri password, cookie, CSRF, env value, MFA secret, request/response body, raw job output veya terminal output içermemeli.
 - [ ] Auth DB/WAL/SHM ve audit state root-owned/service-owned doğru private izinlerle kalmalı; restart/upgrade/backup-restore sonrası audit schema tekrar açılmalı.
