@@ -1,5 +1,9 @@
 import express from 'express';
-import { createCloudflareDnsManager, CloudflareDnsManagerError } from '@yunpanel/host-runtime';
+import {
+  createCloudflareDnsManager,
+  CloudflareDnsManagerError,
+  createMailboxQuotaInspector,
+} from '@yunpanel/host-runtime';
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
 import { mountApplicationProcessRoutes } from './application-process-http.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
@@ -32,6 +36,8 @@ import { createMailAliasRegistry, MailAliasRegistryError } from './mail-alias-re
 import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
 import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
+import { MailboxQuotaHttpError, mountMailboxQuotaRoutes } from './mailbox-quota-http.js';
+import { createMailboxQuotaRegistry, MailboxQuotaRegistryError } from './mailbox-quota-registry.js';
 import { createMailboxRegistry, MailboxRegistryError } from './mailbox-registry.js';
 import { mountMailboxRoutes } from './mailbox-http.js';
 import { MailboxPasswordError } from './mailbox-password.js';
@@ -116,11 +122,20 @@ export function createApp({
   mailboxRegistry = createMailboxRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
+  mailboxQuotaRegistry = createMailboxQuotaRegistry({
+    getMailbox: async (mailboxId) => mailboxRegistry.getMailbox(mailboxId),
+  }),
+  mailboxQuotaInspector = createMailboxQuotaInspector(),
   mailAliasRegistry = createMailAliasRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
     listMailboxes: (filter) => mailboxRegistry.listMailboxes(filter),
   }),
-  mailConfigurationService = createMailConfigurationService({ mailDomainRegistry, mailboxRegistry, mailAliasRegistry }),
+  mailConfigurationService = createMailConfigurationService({
+    mailDomainRegistry,
+    mailboxRegistry,
+    mailAliasRegistry,
+    mailboxQuotaRegistry,
+  }),
   environment = process.env.NODE_ENV,
   journalLogReader = null,
   nginxLogReader = null,
@@ -214,6 +229,14 @@ export function createApp({
     domainRegistry,
     localServerId,
   });
+  mountMailboxQuotaRoutes(app, {
+    mailboxQuotaRegistry,
+    mailboxQuotaInspector,
+    mailboxRegistry,
+    mailDomainRegistry,
+    domainRegistry,
+    localServerId,
+  });
   mountMailConfigurationRoutes(app, {
     mailConfigurationService,
     mailDomainRegistry,
@@ -263,6 +286,8 @@ export function createApp({
       || error instanceof MailAliasRegistryError
       || error instanceof MailConfigurationError
       || error instanceof MailConfigurationHttpError
+      || error instanceof MailboxQuotaRegistryError
+      || error instanceof MailboxQuotaHttpError
       || error instanceof MailboxRegistryError
       || error instanceof MailboxPasswordError
       || error instanceof NodeRuntimeHttpError
