@@ -2,12 +2,14 @@ import { createHash } from 'node:crypto';
 import {
   MailForwardingTemplateError,
   MailQuotaTemplateError,
+  MailSecurityTemplateError,
   MailTemplateError,
   mailTemplatePolicy,
   normalizeMailboxAddress,
   previewManagedMailEmptyConfiguration,
-  previewManagedMailForwardingConfiguration,
+  previewManagedMailSecurityConfiguration,
   renderDovecotQuotaPasswdFile,
+  secureManagedMailPreview,
 } from '@yunpanel/config-templates';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -162,7 +164,7 @@ export function createMailConfigurationService({
       return Object.freeze({
         ready: true,
         blockers: Object.freeze([]),
-        preview: previewManagedMailEmptyConfiguration(),
+        preview: secureManagedMailPreview(previewManagedMailEmptyConfiguration()),
         accounts: Object.freeze([]),
       });
     }
@@ -182,7 +184,7 @@ export function createMailConfigurationService({
     const postmasterAddress = accounts[0].address;
     let preview;
     try {
-      preview = previewManagedMailForwardingConfiguration({
+      preview = previewManagedMailSecurityConfiguration({
         domains: resolved.domains,
         mailboxes: accounts.map((account) => account.address),
         aliases,
@@ -193,7 +195,8 @@ export function createMailConfigurationService({
     } catch (error) {
       if (error instanceof MailTemplateError
         || error instanceof MailQuotaTemplateError
-        || error instanceof MailForwardingTemplateError) {
+        || error instanceof MailForwardingTemplateError
+        || error instanceof MailSecurityTemplateError) {
         throw new MailConfigurationError(
           'mail_configuration_state_invalid',
           'Managed mail identity state is inconsistent and cannot be applied',
