@@ -6,9 +6,10 @@ function phc(saltByte, hashByte) {
   return ['$argon2id', 'v=19', 'm=65536,t=3,p=1', Buffer.alloc(16, saltByte).toString('base64').replace(/=+$/, ''), Buffer.alloc(32, hashByte).toString('base64').replace(/=+$/, '')].join('$');
 }
 
-function fixture({ candidateStatus = 'disabled', candidateMode = 'local', accounts = null } = {}) {
+function fixture({ candidateStatus = 'disabled', candidateMode = 'local', accounts = null, aliases = null } = {}) {
   const candidate = { id: 'mail-domain-0001', domainName: 'example.com', managementMode: candidateMode, status: candidateStatus, revision: 1 };
   let privateAccounts = accounts ?? [{ address: 'owner@example.com', passwordHash: phc(1, 2) }];
+  let enabledAliases = aliases ?? [];
   const service = createMailConfigurationService({
     mailDomainRegistry: {
       getMailDomain: async () => candidate,
@@ -18,8 +19,18 @@ function fixture({ candidateStatus = 'disabled', candidateMode = 'local', accoun
       listMailboxes: async () => privateAccounts.map((account, index) => ({ id: `mailbox-${index}`, mailDomainId: candidate.id, address: account.address, enabled: true })),
       materializeEnabledAccounts: async () => privateAccounts.map((account) => ({ ...account })),
     },
+    mailAliasRegistry: {
+      materializeEnabledAliases: async () => enabledAliases.map((alias) => ({
+        source: alias.source,
+        destinations: [...alias.destinations],
+      })),
+    },
   });
-  return { service, setAccounts: (next) => { privateAccounts = next; } };
+  return {
+    service,
+    setAccounts: (next) => { privateAccounts = next; },
+    setAliases: (next) => { enabledAliases = next; },
+  };
 }
 
 test('managed mail enable preview stays secret-free and requires a postmaster mailbox', async () => {
@@ -51,8 +62,33 @@ test('private enable materialization becomes stale when protected mailbox state 
   );
 });
 
+test('enabled aliases enter Postfix preview and stale an older apply digest when forwarding changes', async () => {
+  const state = fixture({
+    aliases: [{ source: 'info@example.com', destinations: ['owner@example.com', 'external@elsewhere.test'] }],
+  });
+  const transition = { mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'enabled' };
+  const preview = await state.service.previewTransition(transition);
+  assert.equal(preview.configuration.counts.aliases, 1);
+  const aliasMap = preview.configuration.artifactDigests.find(
+    (artifact) => artifact.path === '/etc/yunpanel/mail/postfix/virtual-aliases',
+  );
+  assert.match(aliasMap.sha256, /^[a-f0-9]{64}$/);
+
+  state.setAliases([{ source: 'info@example.com', destinations: ['external@changed.test'] }]);
+  await assert.rejects(
+    state.service.materializeTransition(transition, {
+      expectedPreviewDigest: preview.previewDigest,
+      expectedConfigurationSha256: preview.configurationSha256,
+    }),
+    (error) => error instanceof MailConfigurationError && error.code === 'mail_configuration_preview_stale' && error.status === 409,
+  );
+});
+
 test('last enabled managed mail domain disables through a zero-account private bundle', async () => {
-  const state = fixture({ candidateStatus: 'enabled' });
+  const state = fixture({
+    candidateStatus: 'enabled',
+    aliases: [{ source: 'info@example.com', destinations: ['external@elsewhere.test'] }],
+  });
   const transition = { mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'disabled' };
   const preview = await state.service.previewTransition(transition);
 
