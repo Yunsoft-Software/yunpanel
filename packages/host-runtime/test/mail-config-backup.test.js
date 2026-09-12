@@ -31,6 +31,18 @@ function regularStat({ mode = 0o640, uid = 0, gid = 0 } = {}) {
     uid,
     gid,
     isFile: () => true,
+    isDirectory: () => false,
+    isSymbolicLink: () => false,
+  };
+}
+
+function directoryStat({ mode = 0o750, uid = 0, gid = 0 } = {}) {
+  return {
+    mode,
+    uid,
+    gid,
+    isFile: () => false,
+    isDirectory: () => true,
     isSymbolicLink: () => false,
   };
 }
@@ -45,17 +57,23 @@ async function withTempDirectory(run) {
   finally { await rm(root, { recursive: true, force: true }); }
 }
 
-test('backs up existing live mail config and records absent targets without exposing content', async () => withTempDirectory(async (root) => {
+test('backs up source, compiled map, main.cf and managed directory state without exposing content', async () => withTempDirectory(async (root) => {
+  const compiledDomainMap = mailConfigBackupInternals.postfixCompiledPaths[0];
   const live = new Map([
     [mailTemplatePolicy.postfixVirtualDomainMapPath, Buffer.from('example.com OK\n')],
+    [compiledDomainMap, Buffer.from('compiled-domain-map')],
     [mailConfigBackupInternals.postfixMainCfPath, Buffer.from('myhostname = mail.example.com\n')],
     [mailTemplatePolicy.dovecotPasswdFilePath, Buffer.from(`owner@example.com:{ARGON2ID}${ARGON2ID_HASH}\n`)],
     [mailTemplatePolicy.rspamdProxyConfigPath, Buffer.from('bind_socket = "127.0.0.1:11332";\n')],
+  ]);
+  const liveDirectories = new Map([
+    ['/etc/yunpanel', directoryStat({ mode: 0o755, uid: 0, gid: 0 })],
   ]);
   let liveReads = 0;
   const manager = createMailConfigBackupManager({
     backupRoot: path.join(root, 'backup'),
     liveLstatFn: async (targetPath) => {
+      if (liveDirectories.has(targetPath)) return liveDirectories.get(targetPath);
       if (!live.has(targetPath)) throw missing();
       return regularStat({ mode: targetPath === mailTemplatePolicy.dovecotPasswdFilePath ? 0o600 : 0o640, uid: 12, gid: 34 });
     },
@@ -68,10 +86,14 @@ test('backs up existing live mail config and records absent targets without expo
   const result = await manager.backupConfiguration(preview(), { transactionId: 'mail-job-0001' });
   assert.equal(result.transactionId, 'mail-job-0001');
   assert.equal(result.artifacts.length, mailConfigBackupInternals.targetPaths.length);
+  assert.equal(result.directories.length, mailConfigBackupInternals.managedDirectoryPaths.length);
   assert.equal(JSON.stringify(result).includes(ARGON2ID_HASH), false);
+  assert.equal(result.artifacts.find((entry) => entry.targetPath === compiledDomainMap).present, true);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === mailConfigBackupInternals.postfixMainCfPath).present, true);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === mailTemplatePolicy.dovecotPasswdFilePath).mode, 0o600);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === mailTemplatePolicy.dovecotAuthConfigPath).present, false);
+  assert.deepEqual(result.directories[0], { path: '/etc/yunpanel', present: true, mode: 0o755, uid: 0, gid: 0 });
+  assert.equal(result.directories[1].present, false);
 
   const directory = manager.transactionDirectory('mail-job-0001');
   assert.equal((await stat(directory)).mode & 0o777, 0o700);
@@ -112,6 +134,7 @@ test('fails closed on symlink-like live targets and invalid transaction ids', as
         uid: 0,
         gid: 0,
         isFile: () => true,
+        isDirectory: () => false,
         isSymbolicLink: () => true,
       };
     },
