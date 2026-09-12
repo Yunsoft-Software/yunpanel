@@ -1,3 +1,4 @@
+import { createMailDkimRetirementInspector } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { ensureMailConfigurationIdle } from './mail-configuration-http.js';
 import { MailDkimRegistryError } from './mail-dkim-registry.js';
@@ -78,7 +79,7 @@ async function scopedLocalMailDomain({ mailDomainRegistry, domainRegistry, mailD
 export function mountMailDkimRoutes(app, {
   mailDkimRegistry,
   mailDkimConfigurationService = null,
-  mailDkimRetirementInspector = null,
+  mailDkimRetirementInspector = createMailDkimRetirementInspector(),
   mailDomainRegistry,
   domainRegistry,
   jobRegistry = null,
