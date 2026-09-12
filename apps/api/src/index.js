@@ -25,6 +25,7 @@ import { createGithubWebhookHandler } from './github-webhook-http.js';
 import { createLiveSessionRegistry } from './live-session-registry.js';
 import { createMailAliasRegistry } from './mail-alias-registry.js';
 import { createMailConfigurationService } from './mail-configuration.js';
+import { createMailDkimRegistry } from './mail-dkim-registry.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { createMailboxForwardingRegistry } from './mailbox-forwarding-registry.js';
 import { createMailboxQuotaRegistry } from './mailbox-quota-registry.js';
@@ -53,6 +54,7 @@ const websiteMigrationLedgerStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_L
 const dnsHostingStorePath = process.env.YUNPANEL_DNS_HOSTING_STORE ?? path.resolve('.data/dns-hosting-registry.json');
 const dnsProviderCredentialStorePath = process.env.YUNPANEL_DNS_CREDENTIAL_STORE ?? path.resolve('.data/dns-provider-credential-registry.json');
 const mailDomainStorePath = process.env.YUNPANEL_MAIL_DOMAIN_STORE ?? path.resolve('.data/mail-domain-registry.json');
+const mailDkimRootPath = process.env.YUNPANEL_MAIL_DKIM_ROOT ?? path.resolve('.data/mail-dkim');
 const mailboxStorePath = process.env.YUNPANEL_MAILBOX_STORE ?? path.resolve('.data/mailbox-registry.json');
 const mailboxQuotaStorePath = process.env.YUNPANEL_MAILBOX_QUOTA_STORE ?? path.resolve('.data/mailbox-quota-registry.json');
 const mailboxForwardingStorePath = process.env.YUNPANEL_MAILBOX_FORWARDING_STORE ?? path.resolve('.data/mailbox-forwarding-registry.json');
@@ -141,6 +143,11 @@ const mailDomainRegistry = createMailDomainRegistry({
   getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
 });
 await mailDomainRegistry.init();
+const mailDkimRegistry = createMailDkimRegistry({
+  keyRoot: mailDkimRootPath,
+  getMailDomain: (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
+});
+await mailDkimRegistry.init();
 const mailboxRegistry = createMailboxRegistry({
   filePath: mailboxStorePath,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY,
@@ -220,6 +227,7 @@ const listener = createAuthenticatedApi({
     dnsHostingRegistry,
     dnsProviderCredentialRegistry,
     mailDomainRegistry,
+    mailDkimRegistry,
     mailboxRegistry,
     mailboxQuotaRegistry,
     mailboxForwardingRegistry,
@@ -293,6 +301,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] DNS hosting store=${dnsHostingStorePath}`);
   console.log(`[yunpanel-api] DNS credential store=${dnsProviderCredentialStorePath}`);
   console.log(`[yunpanel-api] mail Domain store=${mailDomainStorePath}`);
+  console.log(`[yunpanel-api] mail DKIM root=${mailDkimRootPath}`);
   console.log(`[yunpanel-api] mailbox store=${mailboxStorePath}`);
   console.log(`[yunpanel-api] mailbox quota store=${mailboxQuotaStorePath}`);
   console.log(`[yunpanel-api] mailbox forwarding store=${mailboxForwardingStorePath}`);
