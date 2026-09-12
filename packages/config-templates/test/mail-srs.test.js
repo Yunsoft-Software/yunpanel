@@ -19,6 +19,11 @@ const BASE = Object.freeze({
   readyToApply: false,
   sideEffects: false,
 });
+const SECRET_METADATA = Object.freeze({
+  secretRevision: 1,
+  secretSha256: 'b'.repeat(64),
+  secretBytes: 44,
+});
 
 test('SRS policy is a no-op when forwarding stays inside managed mail domains', () => {
   const result = enableManagedMailSrs(BASE, {
@@ -33,10 +38,11 @@ test('SRS policy is a no-op when forwarding stays inside managed mail domains', 
   assert.equal(result, BASE);
 });
 
-test('external forwarding adds Noble PostSRSd 1.x config and exact Postfix canonical maps without a secret value', () => {
+test('external forwarding adds Noble PostSRSd 1.x config, protected secret metadata and exact Postfix canonical maps', () => {
   const result = enableManagedMailSrs(BASE, {
     domains: ['example.com', 'example.net'],
     srsDomain: 'mail.example.com',
+    ...SECRET_METADATA,
     forwardings: [{
       source: 'owner@example.com',
       mode: 'redirect',
@@ -49,6 +55,7 @@ test('external forwarding adds Noble PostSRSd 1.x config and exact Postfix canon
   assert.equal(result.srs.required, true);
   assert.equal(result.srs.rewriteDomain, 'mail.example.com');
   assert.equal(result.srs.externalDestinationCount, 1);
+  assert.equal(result.srs.secretRevision, 1);
   assert.equal(result.srs.forwardEndpoint, 'tcp:127.0.0.1:10001');
   assert.equal(result.srs.reverseEndpoint, 'tcp:127.0.0.1:10002');
 
@@ -61,6 +68,19 @@ test('external forwarding adds Noble PostSRSd 1.x config and exact Postfix canon
   assert.match(defaults.content, /^SRS_EXCLUDE_DOMAINS=example\.com,example\.net$/m);
   assert.doesNotMatch(defaults.content, /secret\s*=\s*[A-Za-z0-9+/=_-]{16,}/i);
 
+  const secret = result.artifacts.find((artifact) => artifact.path === mailSrsTemplatePolicy.secretPath);
+  assert.deepEqual(secret, {
+    version: 1,
+    path: mailSrsTemplatePolicy.secretPath,
+    sha256: SECRET_METADATA.secretSha256,
+    bytes: SECRET_METADATA.secretBytes,
+    sensitive: true,
+    contentIncluded: false,
+    mode: 0o600,
+    sideEffects: false,
+  });
+  assert.equal(Object.hasOwn(secret, 'content'), false);
+
   const parameters = Object.fromEntries(result.postfixParameters.map((entry) => [entry.name, entry.value]));
   assert.equal(parameters.sender_canonical_maps, 'tcp:127.0.0.1:10001');
   assert.equal(parameters.sender_canonical_classes, 'envelope_sender');
@@ -68,11 +88,21 @@ test('external forwarding adds Noble PostSRSd 1.x config and exact Postfix canon
   assert.equal(parameters.recipient_canonical_classes, 'envelope_recipient,header_recipient');
 });
 
-test('SRS policy fails closed on invalid rewrite domain or conflicting Postfix canonical maps', () => {
+test('SRS policy fails closed on missing secret metadata, invalid rewrite domain or conflicting canonical maps', () => {
+  assert.throws(
+    () => enableManagedMailSrs(BASE, {
+      domains: ['example.com'],
+      srsDomain: 'mail.example.com',
+      forwardings: [{ source: 'owner@example.com', mode: 'copy', destinations: ['external@gmail.com'] }],
+    }),
+    (error) => error instanceof MailSrsTemplateError && error.code === 'mail_srs_secret_metadata_invalid',
+  );
+
   assert.throws(
     () => enableManagedMailSrs(BASE, {
       domains: ['example.com'],
       srsDomain: 'not a hostname',
+      ...SECRET_METADATA,
       forwardings: [{ source: 'owner@example.com', mode: 'copy', destinations: ['external@gmail.com'] }],
     }),
     (error) => error instanceof MailSrsTemplateError && error.code === 'invalid_mail_srs_domain',
@@ -85,6 +115,7 @@ test('SRS policy fails closed on invalid rewrite domain or conflicting Postfix c
     }, {
       domains: ['example.com'],
       srsDomain: 'mail.example.com',
+      ...SECRET_METADATA,
       forwardings: [{ source: 'owner@example.com', mode: 'copy', destinations: ['external@gmail.com'] }],
     }),
     (error) => error instanceof MailSrsTemplateError && error.code === 'mail_srs_postfix_parameter_conflict',
