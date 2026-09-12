@@ -8,19 +8,26 @@ async function text(name) {
   return readFile(source(name), 'utf8');
 }
 
-test('production API constructs and shares the managed mail configuration service', async () => {
+test('production API constructs and shares quota and forwarding managed mail state', async () => {
   const [indexSource, appSource] = await Promise.all([
     text('index.js'),
     text('app.js'),
   ]);
 
   assert.match(indexSource, /createMailboxQuotaRegistry\(\{/);
-  assert.match(indexSource, /createMailConfigurationService\(\{[\s\S]*?mailDomainRegistry,[\s\S]*?mailboxRegistry,[\s\S]*?mailAliasRegistry,[\s\S]*?mailboxQuotaRegistry,[\s\S]*?\}\)/);
-  assert.match(indexSource, /createApp\(\{[\s\S]*?mailboxQuotaRegistry,[\s\S]*?mailConfigurationService,[\s\S]*?\}\)/);
+  assert.match(indexSource, /createMailboxForwardingRegistry\(\{/);
+  assert.match(indexSource, /YUNPANEL_MAILBOX_FORWARDING_STORE/);
+  assert.match(indexSource, /createMailConfigurationService\(\{[\s\S]*?mailDomainRegistry,[\s\S]*?mailboxRegistry,[\s\S]*?mailAliasRegistry,[\s\S]*?mailboxQuotaRegistry,[\s\S]*?mailboxForwardingRegistry,[\s\S]*?\}\)/);
+  assert.match(indexSource, /createApp\(\{[\s\S]*?mailboxQuotaRegistry,[\s\S]*?mailboxForwardingRegistry,[\s\S]*?mailConfigurationService,[\s\S]*?\}\)/);
   assert.match(indexSource, /startConfiguredLocalRuntime\(\{[\s\S]*?mailDomainRegistry,[\s\S]*?mailConfigurationService,[\s\S]*?\}\)/);
 
+  assert.match(appSource, /createMailboxForwardingRegistry\(\{/);
+  assert.match(appSource, /createMailConfigurationService\(\{[\s\S]*?mailboxQuotaRegistry,[\s\S]*?mailboxForwardingRegistry,[\s\S]*?\}\)/);
+  assert.match(appSource, /mountMailboxRoutes\(app,\s*\{[\s\S]*?mailboxQuotaRegistry,[\s\S]*?mailboxForwardingRegistry,[\s\S]*?\}\)/);
   assert.match(appSource, /mountMailboxQuotaRoutes\(app,\s*\{[\s\S]*?mailboxQuotaRegistry,[\s\S]*?mailboxQuotaInspector,[\s\S]*?mailboxRegistry,[\s\S]*?\}\)/);
+  assert.match(appSource, /mountMailboxForwardingRoutes\(app,\s*\{[\s\S]*?mailboxForwardingRegistry,[\s\S]*?mailboxRegistry,[\s\S]*?\}\)/);
   assert.match(appSource, /mountMailConfigurationRoutes\(app,\s*\{[\s\S]*?mailConfigurationService,[\s\S]*?mailDomainRegistry,[\s\S]*?domainRegistry,[\s\S]*?jobRegistry,[\s\S]*?localServerId,[\s\S]*?\}\)/);
+  assert.match(appSource, /error instanceof MailboxForwardingRegistryError/);
   assert.match(appSource, /error instanceof MailboxQuotaRegistryError/);
   assert.match(appSource, /error instanceof MailboxQuotaHttpError/);
   assert.match(appSource, /error instanceof MailConfigurationError/);
