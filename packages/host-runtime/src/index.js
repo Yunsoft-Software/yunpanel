@@ -16,6 +16,11 @@ export { createDockerInspector, inspectDocker, parseDockerPsOutput } from './doc
 export { createNginxInspector, inspectNginx, parseNginxConfigMetadata } from './nginx-inspector.js';
 export { createNginxManager, nginxManager, NginxManagerError } from './nginx-manager.js';
 export {
+  createMailConfigManager,
+  MailConfigManagerError,
+  mailConfigManagerInternals,
+} from './mail-config-manager.js';
+export {
   createAcmeManager,
   acmeManager,
   AcmeManagerError,
