@@ -83,7 +83,7 @@ function publicKeyFromPrivate(privateKeyPem) {
 function normalizeBundle(bundle) {
   if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)
     || Object.keys(bundle).length !== 2 || !bundle.preview || !Array.isArray(bundle.keys)
-    || bundle.keys.length < 1 || bundle.keys.length > mailDkimTemplatePolicy.maxDomains) {
+    || bundle.keys.length > mailDkimTemplatePolicy.maxDomains) {
     throw activationError('mail_dkim_bundle_invalid', 'DKIM activation bundle is invalid');
   }
   const keys = bundle.keys.map((entry) => {
