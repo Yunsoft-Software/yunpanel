@@ -78,6 +78,79 @@ test('enabled local runtime hydrates Node environment only through the registry 
   assert.deepEqual(materialized, [['app-1', { expectedRevision: 7 }]]);
 });
 
+test('Roundcube desired state materializes only inside the local executor and persists secret-free recovery evidence', async () => {
+  const previewSha256 = 'a'.repeat(64);
+  const configSha256 = 'b'.repeat(64);
+  const fpmSha256 = 'c'.repeat(64);
+  const materializeCalls = [];
+  const receiptWrites = [];
+  let operationOptions;
+  let startOptions;
+  const bundle = {
+    preview: { sha256: previewSha256, configSha256, fpmSha256 },
+    sensitiveArtifacts: [{ path: '/etc/roundcube/config.inc.php', content: '$config[\'des_key\'] = \'private-only\';' }],
+    publicArtifacts: [{ path: '/etc/php/8.3/fpm/pool.d/roundcube.conf', content: '[roundcube]' }],
+  };
+
+  await startConfiguredLocalRuntime({
+    ...base,
+    env: { YUNPANEL_LOCAL_SERVER_ID: serverId },
+    applicationEnvironmentRegistry: { materialize: async () => ({}) },
+    roundcubeConfigurationService: {
+      async materializeForServer(id, options) {
+        materializeCalls.push([id, structuredClone(options)]);
+        return bundle;
+      },
+    },
+    createRoundcubeConfigOperationReceipts: () => ({
+      async write(input) { receiptWrites.push(structuredClone(input)); },
+    }),
+    createOperations: (options) => {
+      operationOptions = options;
+      return { operations: ['roundcube.config.apply'], supports: () => true, executeOperation: async () => ({}) };
+    },
+    startRuntime: async (options) => {
+      startOptions = options;
+      return { stop: async () => {} };
+    },
+  });
+
+  assert.equal(await operationOptions.loadRoundcubeConfiguration(
+    { previewSha256, configSha256, fpmSha256 },
+    { resourceId: serverId },
+  ), bundle);
+  assert.deepEqual(materializeCalls, [[serverId, { expectedPreviewSha256: previewSha256 }]]);
+
+  await startOptions.recordExecutionEvidence({
+    serverId,
+    jobId: 'roundcube-job-1',
+    operation: 'roundcube.config.apply',
+    resourceType: 'server',
+    resourceId: serverId,
+    payload: { previewSha256, configSha256, fpmSha256 },
+    result: {
+      version: 1,
+      previewSha256,
+      configSha256,
+      fpmSha256,
+      databaseCreated: true,
+      applied: true,
+      sideEffects: true,
+    },
+  });
+
+  assert.deepEqual(receiptWrites, [{
+    serverId,
+    jobId: 'roundcube-job-1',
+    previewSha256,
+    configSha256,
+    fpmSha256,
+    databaseCreated: true,
+    applied: true,
+  }]);
+  assert.doesNotMatch(JSON.stringify(receiptWrites), /private-only|des_key|content/i);
+});
+
 test('enabled local runtime refuses to start without the environment materializer', async () => {
   let starts = 0;
   await assert.rejects(
@@ -90,6 +163,21 @@ test('enabled local runtime refuses to start without the environment materialize
     (error) => error instanceof ConfiguredLocalRuntimeError && error.code === 'local_environment_registry_invalid',
   );
   assert.equal(starts, 0);
+});
+
+test('enabled local runtime rejects an invalid Roundcube materializer before constructing host operations', async () => {
+  let operationFactories = 0;
+  await assert.rejects(
+    startConfiguredLocalRuntime({
+      ...base,
+      env: { YUNPANEL_LOCAL_SERVER_ID: serverId },
+      applicationEnvironmentRegistry: { materialize: async () => ({}) },
+      roundcubeConfigurationService: {},
+      createOperations: () => { operationFactories += 1; return {}; },
+    }),
+    (error) => error instanceof ConfiguredLocalRuntimeError && error.code === 'local_roundcube_configuration_invalid',
+  );
+  assert.equal(operationFactories, 0);
 });
 
 test('configured runtime forwards only the supplied safe fault observer', async () => {
