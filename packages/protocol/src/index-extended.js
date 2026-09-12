@@ -1,6 +1,6 @@
 export * from './index.js';
 
-import { assertUuid } from '@yunpanel/shared';
+import { assertUuid, normalizeDomainSet } from '@yunpanel/shared';
 import {
   AGENT_PROTOCOL_VERSION,
   OPERATIONS as BASE_OPERATIONS,
@@ -13,6 +13,7 @@ import {
 
 const MAIL_DKIM_APPLY = 'mail.dkim.apply';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const TXT_MAX_BYTES = 4096;
 
 export const OPERATIONS = Object.freeze({
   ...BASE_OPERATIONS,
@@ -25,6 +26,11 @@ export function isKnownOperation(operation) {
 
 export function isReadOnlyOperation(operation) {
   return isBaseReadOnlyOperation(operation);
+}
+
+function canonicalDomain(value) {
+  try { return normalizeDomainSet(value, []).primary; }
+  catch { return null; }
 }
 
 function validateMailDkimApply(payload, errors) {
@@ -48,18 +54,67 @@ function validateMailDkimApply(payload, errors) {
   }
 }
 
-export function validateOperationEnvelope(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || value.operation !== MAIL_DKIM_APPLY) {
-    return validateBaseOperationEnvelope(value);
+function validateDnsTxtApply(payload, errors) {
+  const operation = BASE_OPERATIONS.DNS_RECORD_APPLY;
+  const allowed = new Set([
+    'provider', 'credentialId', 'dnsZoneId', 'zoneName', 'action', 'record', 'expectedSnapshotDigest',
+  ]);
+  if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
+    errors.push(`${operation} contains unsupported arguments`);
   }
+  if (payload.provider !== 'cloudflare' || !['upsert', 'delete'].includes(payload.action)
+    || typeof payload.expectedSnapshotDigest !== 'string' || !SHA256_PATTERN.test(payload.expectedSnapshotDigest)) {
+    errors.push(`${operation} provider action or snapshot is invalid`);
+  }
+  try {
+    if (assertUuid(payload.credentialId, 'credentialId') !== payload.credentialId
+      || assertUuid(payload.dnsZoneId, 'dnsZoneId') !== payload.dnsZoneId) throw new Error('noncanonical');
+  } catch {
+    errors.push(`${operation} identities are invalid`);
+  }
+  const zoneName = canonicalDomain(payload.zoneName);
+  if (!zoneName || zoneName !== payload.zoneName) errors.push(`${operation} zoneName is invalid`);
+  const record = payload.record;
+  const recordAllowed = new Set(['type', 'name', 'content', 'ttl', 'proxied']);
+  if (!record || typeof record !== 'object' || Array.isArray(record)
+    || Object.keys(record).length !== recordAllowed.size
+    || Object.keys(record).some((key) => !recordAllowed.has(key))) {
+    errors.push(`${operation} record is invalid`);
+    return;
+  }
+  const name = canonicalDomain(record.name);
+  const contentBytes = typeof record.content === 'string' ? Buffer.byteLength(record.content) : 0;
+  const contentSafe = typeof record.content === 'string' && contentBytes >= 1 && contentBytes <= TXT_MAX_BYTES
+    && !/[\u0000-\u001f\u007f]/.test(record.content);
+  if (record.type !== 'TXT' || !name || name !== record.name
+    || !zoneName || (name !== zoneName && !name.endsWith(`.${zoneName}`))
+    || !contentSafe || !Number.isInteger(record.ttl)
+    || (record.ttl !== 1 && (record.ttl < 60 || record.ttl > 86_400))
+    || record.proxied !== false) {
+    errors.push(`${operation} TXT record fields are invalid`);
+  }
+}
+
+function extendedOperation(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (value.operation === MAIL_DKIM_APPLY) return 'mail_dkim';
+  if (value.operation === BASE_OPERATIONS.DNS_RECORD_APPLY && value.payload?.record?.type === 'TXT') return 'dns_txt';
+  return null;
+}
+
+export function validateOperationEnvelope(value) {
+  const extension = extendedOperation(value);
+  if (!extension) return validateBaseOperationEnvelope(value);
   const errors = [];
   if (typeof value.id !== 'string' || value.id.length < 8 || value.id.length > 128) {
     errors.push('id must be a string between 8 and 128 characters');
   }
   if (!value.payload || typeof value.payload !== 'object' || Array.isArray(value.payload)) {
     errors.push('payload must be an object');
-  } else {
+  } else if (extension === 'mail_dkim') {
     validateMailDkimApply(value.payload, errors);
+  } else {
+    validateDnsTxtApply(value.payload, errors);
   }
   if (value.protocolVersion !== AGENT_PROTOCOL_VERSION) {
     errors.push(`protocolVersion must equal ${AGENT_PROTOCOL_VERSION}`);
@@ -68,7 +123,9 @@ export function validateOperationEnvelope(value) {
 }
 
 export function createOperationEnvelope({ id, operation, payload = {} }) {
-  if (operation !== MAIL_DKIM_APPLY) return createBaseOperationEnvelope({ id, operation, payload });
+  const extended = operation === MAIL_DKIM_APPLY
+    || (operation === BASE_OPERATIONS.DNS_RECORD_APPLY && payload?.record?.type === 'TXT');
+  if (!extended) return createBaseOperationEnvelope({ id, operation, payload });
   const envelope = { id, operation, payload, protocolVersion: AGENT_PROTOCOL_VERSION };
   const validation = validateOperationEnvelope(envelope);
   if (!validation.ok) throw new Error(validation.errors.join('; '));
@@ -78,5 +135,7 @@ export function createOperationEnvelope({ id, operation, payload = {} }) {
 export const protocolExtensionInternals = Object.freeze({
   mailDkimApply: MAIL_DKIM_APPLY,
   readOnlyOperations: READ_ONLY_OPERATIONS,
+  txtMaxBytes: TXT_MAX_BYTES,
   validateMailDkimApply,
+  validateDnsTxtApply,
 });
