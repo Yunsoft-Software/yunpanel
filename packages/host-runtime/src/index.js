@@ -31,6 +31,11 @@ export {
   mailReadinessInternals,
 } from './mail-readiness-inspector.js';
 export {
+  createMailConfigActivator,
+  MailConfigActivationError,
+  mailConfigActivatorInternals,
+} from './mail-config-activator.js';
+export {
   createAcmeManager,
   acmeManager,
   AcmeManagerError,
