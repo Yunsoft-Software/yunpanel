@@ -21,6 +21,7 @@ import { runRunningNodeProcessRecoveryFromStores } from '../apps/api/src/job-run
 import { runRunningNodeRuntimeRecoveryFromStores } from '../apps/api/src/job-running-node-runtime-recovery-runtime.js';
 import { runRunningNodeRollbackRecoveryFromStores } from '../apps/api/src/job-running-node-rollback-recovery-runtime.js';
 import { runRunningReadOnlyRecoveryFromStores } from '../apps/api/src/job-running-readonly-recovery-runtime.js';
+import { runRunningRoundcubeConfigRecoveryFromStores } from '../apps/api/src/job-running-roundcube-config-recovery-runtime.js';
 import { runRunningServiceControlRecoveryFromStores } from '../apps/api/src/job-running-service-recovery-runtime.js';
 import { runRunningServiceReceiptRecoveryFromStores } from '../apps/api/src/job-running-service-receipt-recovery-runtime.js';
 import { runRunningStaticRollbackRecoveryFromStores } from '../apps/api/src/job-running-static-rollback-recovery-runtime.js';
@@ -52,8 +53,9 @@ const RECOVERY_ACTIONS = Object.freeze([
   'recover-service-mutation',
   'recover-mail-config',
   'recover-mail-dkim',
+  'recover-roundcube-config',
 ]);
-const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-process <server-id> <job-id> --confirm | recover-node-runtime-install <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-certificate <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-dns-record <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm | recover-mail-config <server-id> <job-id> --confirm | recover-mail-dkim <server-id> <job-id> --confirm';
+const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-process <server-id> <job-id> --confirm | recover-node-runtime-install <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-certificate <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-dns-record <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm | recover-mail-config <server-id> <job-id> --confirm | recover-mail-dkim <server-id> <job-id> --confirm | recover-roundcube-config <server-id> <job-id> --confirm';
 
 export function parseJobRecoveryArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
@@ -153,6 +155,7 @@ export async function runJobRecoveryCli({
   recoverServiceMutation = runRunningServiceReceiptRecoveryFromStores,
   recoverMailConfig = runRunningMailConfigRecoveryFromStores,
   recoverMailDkim = runRunningMailDkimRecoveryFromStores,
+  recoverRoundcubeConfig = runRunningRoundcubeConfigRecoveryFromStores,
   recoveryAudit = recordRecoveryAuditOutcome,
   stdout = process.stdout,
 } = {}) {
@@ -182,7 +185,8 @@ export async function runJobRecoveryCli({
     else if (parsed.action === 'recover-service-control') handler = recoverServiceControl;
     else if (parsed.action === 'recover-service-mutation') handler = recoverServiceMutation;
     else if (parsed.action === 'recover-mail-config') handler = recoverMailConfig;
-    else handler = recoverMailDkim;
+    else if (parsed.action === 'recover-mail-dkim') handler = recoverMailDkim;
+    else handler = recoverRoundcubeConfig;
     if (typeof handler !== 'function') throw new Error('Job recovery mutation dependency is invalid');
     const result = await handler({
       serverId: parsed.serverId,
