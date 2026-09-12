@@ -42,6 +42,13 @@ export {
 } from './mail-quota.js';
 
 export {
+  MailForwardingTemplateError,
+  mailForwardingTemplatePolicy,
+  previewManagedMailboxForwardingSieve,
+  renderManagedMailboxForwardingSieve,
+} from './mail-forwarding.js';
+
+export {
   previewManagedMailEmptyConfiguration,
   renderDovecotEmptyManagedSetConfig,
 } from './mail-teardown.js';
