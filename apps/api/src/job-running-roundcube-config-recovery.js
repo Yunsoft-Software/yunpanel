@@ -70,7 +70,8 @@ function assertReceipt(receipt, identity, intent) {
     || receipt.previewSha256 !== intent.previewSha256
     || receipt.configSha256 !== intent.configSha256
     || receipt.fpmSha256 !== intent.fpmSha256
-    || typeof receipt.databaseCreated !== 'boolean' || receipt.applied !== true) {
+    || typeof receipt.nginxSha256 !== 'string' || !SHA256_PATTERN.test(receipt.nginxSha256)
+    || typeof receipt.databaseCreated !== 'boolean' || receipt.httpHealthy !== true || receipt.applied !== true) {
     throw new JobRunningRoundcubeConfigRecoveryError(
       'job_roundcube_recovery_receipt_mismatch',
       'Roundcube operation receipt does not match the running job',
@@ -158,7 +159,8 @@ export async function recoverRunningRoundcubeConfig({
   }
   if (!bundle?.preview || bundle.preview.sha256 !== intent.previewSha256
     || bundle.preview.configSha256 !== intent.configSha256 || bundle.preview.fpmSha256 !== intent.fpmSha256
-    || typeof bundle.preview.nginxSha256 !== 'string' || !SHA256_PATTERN.test(bundle.preview.nginxSha256)) {
+    || typeof bundle.preview.nginxSha256 !== 'string' || !SHA256_PATTERN.test(bundle.preview.nginxSha256)
+    || receipt.nginxSha256 !== bundle.preview.nginxSha256) {
     throw new JobRunningRoundcubeConfigRecoveryError('job_roundcube_recovery_materialization_invalid', 'Roundcube recovery materialization is inconsistent');
   }
 
@@ -171,7 +173,7 @@ export async function recoverRunningRoundcubeConfig({
     || evidence.result.previewSha256 !== intent.previewSha256
     || evidence.result.configSha256 !== intent.configSha256
     || evidence.result.fpmSha256 !== intent.fpmSha256
-    || evidence.result.nginxSha256 !== bundle.preview.nginxSha256
+    || evidence.result.nginxSha256 !== receipt.nginxSha256
     || evidence.result.databaseHealthy !== true || evidence.result.httpHealthy !== true
     || evidence.result.applied !== true || evidence.result.sideEffects !== true) {
     throw new JobRunningRoundcubeConfigRecoveryError(
@@ -185,7 +187,7 @@ export async function recoverRunningRoundcubeConfig({
     previewSha256: intent.previewSha256,
     configSha256: intent.configSha256,
     fpmSha256: intent.fpmSha256,
-    nginxSha256: bundle.preview.nginxSha256,
+    nginxSha256: receipt.nginxSha256,
     databaseCreated: receipt.databaseCreated,
     httpHealthy: true,
     applied: true,
