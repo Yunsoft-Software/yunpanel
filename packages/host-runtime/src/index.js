@@ -41,6 +41,12 @@ export {
   mailConfigEvidenceInternals,
 } from './mail-config-evidence-inspector.js';
 export {
+  createMailboxQuotaInspector,
+  MailboxQuotaInspectorError,
+  mailboxQuotaInspectorInternals,
+  parseDoveadmQuotaTab,
+} from './mailbox-quota-inspector.js';
+export {
   createAcmeManager,
   acmeManager,
   AcmeManagerError,
