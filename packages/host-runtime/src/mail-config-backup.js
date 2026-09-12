@@ -13,11 +13,22 @@ const MANIFEST_VERSION = 1;
 const MANIFEST_FILE = 'manifest.json';
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const TRANSACTION_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+const POSTFIX_MAIN_CF_PATH = '/etc/postfix/main.cf';
 
-const TARGET_PATHS = Object.freeze([
+const PLAN_ARTIFACT_PATHS = Object.freeze([
   mailTemplatePolicy.postfixVirtualDomainMapPath,
   mailTemplatePolicy.postfixVirtualMailboxMapPath,
   mailTemplatePolicy.postfixVirtualAliasMapPath,
+  mailTemplatePolicy.dovecotPasswdFilePath,
+  mailTemplatePolicy.dovecotAuthConfigPath,
+  mailTemplatePolicy.dovecotMailConfigPath,
+  mailTemplatePolicy.rspamdProxyConfigPath,
+]);
+const BACKUP_TARGET_PATHS = Object.freeze([
+  mailTemplatePolicy.postfixVirtualDomainMapPath,
+  mailTemplatePolicy.postfixVirtualMailboxMapPath,
+  mailTemplatePolicy.postfixVirtualAliasMapPath,
+  POSTFIX_MAIN_CF_PATH,
   mailTemplatePolicy.dovecotPasswdFilePath,
   mailTemplatePolicy.dovecotAuthConfigPath,
   mailTemplatePolicy.dovecotMailConfigPath,
@@ -54,11 +65,11 @@ function backupName(index, targetPath) {
 }
 
 function assertPlanArtifactSet(plan) {
-  if (!plan || !Array.isArray(plan.artifacts) || plan.artifacts.length !== TARGET_PATHS.length) {
+  if (!plan || !Array.isArray(plan.artifacts) || plan.artifacts.length !== PLAN_ARTIFACT_PATHS.length) {
     throw new MailConfigBackupError('mail_backup_artifact_set_invalid', 'Managed mail apply plan artifact set is incomplete');
   }
-  for (let index = 0; index < TARGET_PATHS.length; index += 1) {
-    if (plan.artifacts[index]?.path !== TARGET_PATHS[index]) {
+  for (let index = 0; index < PLAN_ARTIFACT_PATHS.length; index += 1) {
+    if (plan.artifacts[index]?.path !== PLAN_ARTIFACT_PATHS[index]) {
       throw new MailConfigBackupError('mail_backup_artifact_set_invalid', 'Managed mail apply plan artifact order is invalid');
     }
   }
@@ -72,11 +83,11 @@ function normalizeManifest(value, { transactionId, planSha256 } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== MANIFEST_VERSION
     || value.transactionId !== transactionId || value.planSha256 !== planSha256
     || typeof value.previewSha256 !== 'string' || !CHECKSUM_PATTERN.test(value.previewSha256)
-    || !Array.isArray(value.artifacts) || value.artifacts.length !== TARGET_PATHS.length) {
+    || !Array.isArray(value.artifacts) || value.artifacts.length !== BACKUP_TARGET_PATHS.length) {
     throw new MailConfigBackupError('mail_backup_manifest_invalid', 'Managed mail backup manifest is invalid');
   }
   const artifacts = value.artifacts.map((artifact, index) => {
-    const targetPath = TARGET_PATHS[index];
+    const targetPath = BACKUP_TARGET_PATHS[index];
     if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)
       || artifact.targetPath !== targetPath || typeof artifact.present !== 'boolean') {
       throw new MailConfigBackupError('mail_backup_manifest_invalid', 'Managed mail backup artifact metadata is invalid');
@@ -188,13 +199,16 @@ export function createMailConfigBackupManager({
     await chmodFn(directory, DIRECTORY_MODE);
 
     const artifacts = [];
-    for (let index = 0; index < TARGET_PATHS.length; index += 1) {
-      const targetPath = TARGET_PATHS[index];
+    for (let index = 0; index < BACKUP_TARGET_PATHS.length; index += 1) {
+      const targetPath = BACKUP_TARGET_PATHS[index];
       let metadata;
       try {
         metadata = await liveLstatFn(targetPath);
       } catch (error) {
         if (error?.code === 'ENOENT') {
+          if (targetPath === POSTFIX_MAIN_CF_PATH) {
+            throw new MailConfigBackupError('mail_postfix_main_cf_missing', 'Postfix main.cf is required before managed mail apply can be backed up');
+          }
           artifacts.push(Object.freeze({
             targetPath,
             present: false,
@@ -269,7 +283,9 @@ export function createMailConfigBackupManager({
 
 export const mailConfigBackupInternals = Object.freeze({
   defaultBackupRoot: DEFAULT_BACKUP_ROOT,
-  targetPaths: TARGET_PATHS,
+  planArtifactPaths: PLAN_ARTIFACT_PATHS,
+  targetPaths: BACKUP_TARGET_PATHS,
+  postfixMainCfPath: POSTFIX_MAIN_CF_PATH,
   directoryMode: DIRECTORY_MODE,
   backupFileMode: BACKUP_FILE_MODE,
   normalizeTransactionId,
