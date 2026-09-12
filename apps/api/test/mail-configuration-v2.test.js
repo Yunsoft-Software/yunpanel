@@ -69,6 +69,7 @@ test('enabled aliases enter Postfix preview and stale an older apply digest when
   const transition = { mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'enabled' };
   const preview = await state.service.previewTransition(transition);
   assert.equal(preview.configuration.counts.aliases, 1);
+  assert.equal(preview.configuration.counts.forwardings, 0);
   const aliasMap = preview.configuration.artifactDigests.find(
     (artifact) => artifact.path === '/etc/yunpanel/mail/postfix/virtual-aliases',
   );
@@ -95,7 +96,7 @@ test('last enabled managed mail domain disables through a zero-account private b
   assert.equal(preview.readyToApply, true);
   assert.deepEqual(preview.domains, []);
   assert.deepEqual(preview.blockers, []);
-  assert.deepEqual(preview.configuration.counts, { domains: 0, mailboxes: 0, aliases: 0 });
+  assert.deepEqual(preview.configuration.counts, { domains: 0, mailboxes: 0, aliases: 0, forwardings: 0 });
   assert.match(preview.configurationSha256, /^[a-f0-9]{64}$/);
   assert.doesNotMatch(JSON.stringify(preview), /argon2|passwordHash|dovecot-lmtp|postmaster_address/i);
 
