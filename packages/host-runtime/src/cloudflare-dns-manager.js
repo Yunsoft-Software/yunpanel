@@ -7,9 +7,10 @@ const PROVIDER_ID_PATTERN = /^[a-f0-9]{32}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = /^[A-Za-z0-9._~-]{20,256}$/;
-const RECORD_TYPES = new Set(['A', 'AAAA', 'CNAME']);
+const RECORD_TYPES = new Set(['A', 'AAAA', 'CNAME', 'TXT']);
 const ACTIONS = new Set(['upsert', 'delete']);
 const MAX_RESPONSE_CHARACTERS = 256 * 1024;
+const TXT_MAX_BYTES = 4096;
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 export class CloudflareDnsManagerError extends Error {
@@ -40,9 +41,18 @@ function address(value, family) {
   return new SocketAddress({ address: value, family: family === 4 ? 'ipv4' : 'ipv6', port: 0 }).address;
 }
 
+function txtContent(value) {
+  if (typeof value !== 'string' || Buffer.byteLength(value) < 1 || Buffer.byteLength(value) > TXT_MAX_BYTES
+    || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new CloudflareDnsManagerError('invalid_dns_record_content', 'DNS TXT content is invalid');
+  }
+  return value;
+}
+
 function recordContent(type, value) {
   if (type === 'A') return address(value, 4);
   if (type === 'AAAA') return address(value, 6);
+  if (type === 'TXT') return txtContent(value);
   return hostname(value, 'dns_record_content');
 }
 
@@ -52,7 +62,8 @@ function normalizeRecord(value) {
     || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
     || typeof value.type !== 'string' || !RECORD_TYPES.has(value.type.toUpperCase())
     || !Number.isInteger(value.ttl) || (value.ttl !== 1 && (value.ttl < 60 || value.ttl > 86_400))
-    || typeof value.proxied !== 'boolean' || (value.proxied && value.ttl !== 1)) {
+    || typeof value.proxied !== 'boolean' || (value.proxied && value.ttl !== 1)
+    || (value.type.toUpperCase() === 'TXT' && value.proxied)) {
     throw new CloudflareDnsManagerError('invalid_dns_record', 'DNS record fields are invalid');
   }
   const type = value.type.toUpperCase();
@@ -315,6 +326,7 @@ export const cloudflareDnsManagerInternals = Object.freeze({
   apiRoot: API_ROOT,
   defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
   maxResponseCharacters: MAX_RESPONSE_CHARACTERS,
+  txtMaxBytes: TXT_MAX_BYTES,
   normalizeRecord,
   normalizeInspect,
   normalizeApply,
