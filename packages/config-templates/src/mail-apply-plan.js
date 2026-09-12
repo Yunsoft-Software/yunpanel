@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { mailSubmissionTemplatePolicy } from './mail-submission.js';
 
 const POSTFIX_SERVICE = 'postfix';
 const DOVECOT_SERVICE = 'dovecot';
@@ -8,6 +9,7 @@ const POSTFIX_MAP_PATHS = Object.freeze(new Set([
   '/etc/yunpanel/mail/postfix/virtual-domains',
   '/etc/yunpanel/mail/postfix/virtual-mailboxes',
   '/etc/yunpanel/mail/postfix/virtual-aliases',
+  mailSubmissionTemplatePolicy.senderLoginPath,
 ]));
 const FORWARDING_SIEVE_PATH = '/etc/dovecot/yunpanel-forwarding.sieve';
 const VALIDATORS = Object.freeze(new Map([
@@ -32,6 +34,7 @@ function assertPreview(preview) {
     throw new MailApplyPlanError('invalid_mail_preview_digest', 'Managed mail preview must contain a sha256 digest');
   }
   if (!Array.isArray(preview.artifacts) || !Array.isArray(preview.postfixParameters)
+    || !Array.isArray(preview.postfixMasterServices)
     || !Array.isArray(preview.validate) || !Array.isArray(preview.requirements)) {
     throw new MailApplyPlanError('invalid_mail_preview_shape', 'Managed mail preview is missing apply metadata');
   }
@@ -89,6 +92,44 @@ function compileCommand(artifact) {
   throw new MailApplyPlanError('invalid_mail_compile_command', 'Managed mail compile command is not allowlisted');
 }
 
+function canonicalMasterServices(value) {
+  const expected = mailSubmissionTemplatePolicy.service;
+  if (!Array.isArray(value) || value.length !== 1) {
+    throw new MailApplyPlanError('invalid_postfix_master_service', 'Managed Postfix master service metadata is incomplete');
+  }
+  const service = value[0];
+  if (!service || service.service !== expected.service || service.type !== expected.type
+    || service.definition !== expected.definition || !Array.isArray(service.parameters)
+    || service.parameters.length !== expected.parameters.length) {
+    throw new MailApplyPlanError('invalid_postfix_master_service', 'Managed Postfix master service metadata is invalid');
+  }
+  for (let index = 0; index < expected.parameters.length; index += 1) {
+    const actual = service.parameters[index];
+    const wanted = expected.parameters[index];
+    if (!actual || actual.name !== wanted.name || actual.value !== wanted.value) {
+      throw new MailApplyPlanError('invalid_postfix_master_service', 'Managed Postfix master service override is not allowlisted');
+    }
+  }
+  return Object.freeze([Object.freeze({
+    service: expected.service,
+    type: expected.type,
+    definition: expected.definition,
+    parameters: Object.freeze(expected.parameters.map((parameter) => Object.freeze({ ...parameter }))),
+  })]);
+}
+
+function masterServiceCommands(services) {
+  const commands = [];
+  for (const service of services) {
+    const identity = `${service.service}/${service.type}`;
+    commands.push(command('/usr/sbin/postconf', ['-M', `${identity}=${service.definition}`]));
+    for (const parameter of service.parameters) {
+      commands.push(command('/usr/sbin/postconf', ['-P', `${identity}/${parameter.name}=${parameter.value}`]));
+    }
+  }
+  return Object.freeze(commands);
+}
+
 export function previewManagedMailApplyPlan(preview) {
   assertPreview(preview);
 
@@ -101,6 +142,7 @@ export function previewManagedMailApplyPlan(preview) {
     }
     return Object.freeze({ name: parameter.name, value: parameter.value });
   }));
+  const postfixMasterServices = canonicalMasterServices(preview.postfixMasterServices);
   const validators = Object.freeze(preview.validate.map(validatorCommand));
 
   const compile = Object.freeze(preview.artifacts
@@ -110,6 +152,7 @@ export function previewManagedMailApplyPlan(preview) {
     '/usr/sbin/postconf',
     ['-e', `${parameter.name} = ${parameter.value}`],
   )));
+  const configurePostfixMaster = masterServiceCommands(postfixMasterServices);
   const reload = Object.freeze(MANAGED_SERVICES.map((service) => command(
     '/usr/bin/systemctl',
     ['reload', service],
@@ -128,8 +171,10 @@ export function previewManagedMailApplyPlan(preview) {
     previewSha256: preview.sha256,
     artifacts,
     postfixParameters,
+    postfixMasterServices,
     validators,
     compile,
+    configurePostfixMaster,
     reload,
     health,
     rollbackReload,
@@ -142,11 +187,13 @@ export function previewManagedMailApplyPlan(preview) {
     requirements: Object.freeze([...preview.requirements]),
     artifacts,
     postfixParameters,
+    postfixMasterServices,
     stages: Object.freeze({
       backup: Object.freeze(artifacts.map((artifact) => Object.freeze({ path: artifact.path }))),
       write: artifacts,
       compile,
       configurePostfix,
+      configurePostfixMaster,
       validate: validators,
       reload,
       health,
