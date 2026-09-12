@@ -12,16 +12,20 @@ import {
 } from './index.js';
 
 const MAIL_DKIM_APPLY = 'mail.dkim.apply';
+const ROUNDCUBE_CONFIG_APPLY = 'roundcube.config.apply';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const TXT_MAX_BYTES = 4096;
 
 export const OPERATIONS = Object.freeze({
   ...BASE_OPERATIONS,
   MAIL_DKIM_APPLY,
+  ROUNDCUBE_CONFIG_APPLY,
 });
 
 export function isKnownOperation(operation) {
-  return isBaseKnownOperation(operation) || operation === MAIL_DKIM_APPLY;
+  return isBaseKnownOperation(operation)
+    || operation === MAIL_DKIM_APPLY
+    || operation === ROUNDCUBE_CONFIG_APPLY;
 }
 
 export function isReadOnlyOperation(operation) {
@@ -51,6 +55,18 @@ function validateMailDkimApply(payload, errors) {
   if (typeof payload.previewDigest !== 'string' || !SHA256_PATTERN.test(payload.previewDigest)
     || typeof payload.configurationSha256 !== 'string' || !SHA256_PATTERN.test(payload.configurationSha256)) {
     errors.push(`${MAIL_DKIM_APPLY} digests are invalid`);
+  }
+}
+
+function validateRoundcubeConfigApply(payload, errors) {
+  const allowed = new Set(['previewSha256', 'configSha256', 'fpmSha256']);
+  if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
+    errors.push(`${ROUNDCUBE_CONFIG_APPLY} contains unsupported arguments`);
+  }
+  if (typeof payload.previewSha256 !== 'string' || !SHA256_PATTERN.test(payload.previewSha256)
+    || typeof payload.configSha256 !== 'string' || !SHA256_PATTERN.test(payload.configSha256)
+    || typeof payload.fpmSha256 !== 'string' || !SHA256_PATTERN.test(payload.fpmSha256)) {
+    errors.push(`${ROUNDCUBE_CONFIG_APPLY} digests are invalid`);
   }
 }
 
@@ -98,6 +114,7 @@ function validateDnsTxtApply(payload, errors) {
 function extendedOperation(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   if (value.operation === MAIL_DKIM_APPLY) return 'mail_dkim';
+  if (value.operation === ROUNDCUBE_CONFIG_APPLY) return 'roundcube';
   if (value.operation === BASE_OPERATIONS.DNS_RECORD_APPLY && value.payload?.record?.type === 'TXT') return 'dns_txt';
   return null;
 }
@@ -113,6 +130,8 @@ export function validateOperationEnvelope(value) {
     errors.push('payload must be an object');
   } else if (extension === 'mail_dkim') {
     validateMailDkimApply(value.payload, errors);
+  } else if (extension === 'roundcube') {
+    validateRoundcubeConfigApply(value.payload, errors);
   } else {
     validateDnsTxtApply(value.payload, errors);
   }
@@ -124,6 +143,7 @@ export function validateOperationEnvelope(value) {
 
 export function createOperationEnvelope({ id, operation, payload = {} }) {
   const extended = operation === MAIL_DKIM_APPLY
+    || operation === ROUNDCUBE_CONFIG_APPLY
     || (operation === BASE_OPERATIONS.DNS_RECORD_APPLY && payload?.record?.type === 'TXT');
   if (!extended) return createBaseOperationEnvelope({ id, operation, payload });
   const envelope = { id, operation, payload, protocolVersion: AGENT_PROTOCOL_VERSION };
@@ -134,8 +154,10 @@ export function createOperationEnvelope({ id, operation, payload = {} }) {
 
 export const protocolExtensionInternals = Object.freeze({
   mailDkimApply: MAIL_DKIM_APPLY,
+  roundcubeConfigApply: ROUNDCUBE_CONFIG_APPLY,
   readOnlyOperations: READ_ONLY_OPERATIONS,
   txtMaxBytes: TXT_MAX_BYTES,
   validateMailDkimApply,
+  validateRoundcubeConfigApply,
   validateDnsTxtApply,
 });
