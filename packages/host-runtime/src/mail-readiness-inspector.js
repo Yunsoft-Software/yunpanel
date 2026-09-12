@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { mailTemplatePolicy } from '@yunpanel/config-templates';
 import { createManagedServiceManager } from './managed-service-manager.js';
+import { parseManagedVmailIdentity } from './mail-vmail-identity.js';
 
 const execFileAsync = promisify(execFile);
 const GETENT = '/usr/bin/getent';
@@ -256,13 +257,14 @@ export function createMailReadinessInspector({
     ];
     const relayPolicyVerified = relayTokens.includes('reject_unauth_destination')
       || relayTokens.includes('defer_unauth_destination');
+    const managedVmailIdentity = vmailIdentity.ok ? parseManagedVmailIdentity(vmailIdentity.output) : null;
 
     const status = new Map([
       ['postfix', serviceSatisfied(postfix)],
       ['dovecot_2_3', serviceSatisfied(dovecot) && dovecotVersion.ok && /^2\.3(?:\.|$)/.test(dovecotVersion.output)],
       ['dovecot_sieve', serviceSatisfied(dovecot) && sieveExecutable],
       ['rspamd', serviceSatisfied(rspamd)],
-      ['vmail_identity', vmailIdentity.ok && identityPresent(vmailIdentity.output, 'vmail')],
+      ['vmail_identity', managedVmailIdentity !== null],
       ['postfix_identity', postfixIdentity.ok && identityPresent(postfixIdentity.output, 'postfix')],
       ['mail_tls_material', dovecotSsl.ok && dovecotSsl.output.toLowerCase() !== 'no'
         && dovecotCert.ok && dovecotKey.ok && postfixCert.ok && postfixKey.ok && tlsFiles.every(Boolean)],
