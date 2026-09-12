@@ -46,6 +46,11 @@ export {
   mailDiagnosticsInspectorInternals,
 } from './mail-diagnostics-inspector.js';
 export {
+  createMailQueueInspector,
+  MailQueueInspectorError,
+  mailQueueInspectorInternals,
+} from './mail-queue-inspector.js';
+export {
   createMailDkimActivator,
   MailDkimActivationError,
   mailDkimActivatorInternals,
