@@ -48,6 +48,8 @@ import {
 } from './mail-dkim-retirement-registry.js';
 import { MailDiagnosticsHttpError, mountMailDiagnosticsRoutes } from './mail-diagnostics-http.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
+import { mountMailServiceIdentityRoutes } from './mail-service-identity-http.js';
+import { MailServiceIdentityRegistryError } from './mail-service-identity-registry.js';
 import { mountMailboxForwardingRoutes } from './mailbox-forwarding-http.js';
 import {
   createMailboxForwardingRegistry,
@@ -145,6 +147,7 @@ export function createApp({
   mailDiagnosticsInspector = createMailDiagnosticsInspector(),
   mailDkimConfigurationService = null,
   mailDkimDnsService = null,
+  mailServiceIdentityRegistry = null,
   mailboxRegistry = createMailboxRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
@@ -159,13 +162,7 @@ export function createApp({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
     listMailboxes: (filter) => mailboxRegistry.listMailboxes(filter),
   }),
-  mailConfigurationService = createMailConfigurationService({
-    mailDomainRegistry,
-    mailboxRegistry,
-    mailAliasRegistry,
-    mailboxQuotaRegistry,
-    mailboxForwardingRegistry,
-  }),
+  mailConfigurationService = null,
   environment = process.env.NODE_ENV,
   journalLogReader = null,
   nginxLogReader = null,
@@ -196,6 +193,14 @@ export function createApp({
     domainRegistry,
     serverRegistry: registry,
     dnsProviderCredentialRegistry,
+  });
+  const mailConfig = mailConfigurationService ?? createMailConfigurationService({
+    mailDomainRegistry,
+    mailboxRegistry,
+    mailAliasRegistry,
+    mailboxQuotaRegistry,
+    mailboxForwardingRegistry,
+    ...(mailServiceIdentityRegistry ? { domainRegistry, mailServiceIdentityRegistry } : {}),
   });
   const canCreateDkimDnsService = typeof dnsHostingRegistry?.listZones === 'function'
     && typeof dnsProviderCredentialRegistry?.getForZone === 'function'
@@ -310,8 +315,17 @@ export function createApp({
     domainRegistry,
     localServerId,
   });
+  if (mailServiceIdentityRegistry) {
+    mountMailServiceIdentityRoutes(app, {
+      mailServiceIdentityRegistry,
+      mailDomainRegistry,
+      domainRegistry,
+      jobRegistry,
+      localServerId,
+    });
+  }
   mountMailConfigurationRoutes(app, {
-    mailConfigurationService,
+    mailConfigurationService: mailConfig,
     mailDomainRegistry,
     domainRegistry,
     jobRegistry,
@@ -367,6 +381,7 @@ export function createApp({
       || error instanceof MailDkimRetirementRegistryError
       || error instanceof MailDiagnosticsHttpError
       || error instanceof MailDiagnosticsInspectorError
+      || error instanceof MailServiceIdentityRegistryError
       || error instanceof MailboxForwardingRegistryError
       || error instanceof MailboxQuotaRegistryError
       || error instanceof MailboxQuotaHttpError
