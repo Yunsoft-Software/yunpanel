@@ -18,6 +18,7 @@ import { createMailAliasRegistry } from './mail-alias-registry.js';
 import { createMailConfigurationService } from './mail-configuration.js';
 import { createMailConfigOperationReceiptStore } from './mail-config-operation-receipt.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
+import { createMailServiceIdentityRegistry } from './mail-service-identity-registry.js';
 import { createMailboxForwardingRegistry } from './mailbox-forwarding-registry.js';
 import { createMailboxQuotaRegistry } from './mailbox-quota-registry.js';
 import { createMailboxRegistry } from './mailbox-registry.js';
@@ -54,6 +55,11 @@ function resolveMailRecoveryPaths({ env, packaged, cwd }) {
     path.join(defaultRoot, 'mail-alias-registry.json'),
     { packaged, cwd, label: 'mail alias' },
   );
+  const mailServiceIdentityStore = jobRecoveryRuntimeInternals.resolveRecoveryStorePath(
+    env.YUNPANEL_MAIL_SERVICE_IDENTITY_STORE,
+    path.join(defaultRoot, 'mail-service-identity-registry.json'),
+    { packaged, cwd, label: 'mail service identity' },
+  );
   return Object.freeze({
     ...base,
     mailDomainStore,
@@ -61,6 +67,7 @@ function resolveMailRecoveryPaths({ env, packaged, cwd }) {
     mailboxQuotaStore,
     mailboxForwardingStore,
     mailAliasStore,
+    mailServiceIdentityStore,
   });
 }
 
@@ -76,6 +83,7 @@ export async function runRunningMailConfigRecoveryFromStores({
   certificateRegistryFactory = createCertificateRegistry,
   applicationRegistryFactory = createApplicationRegistry,
   mailDomainRegistryFactory = createMailDomainRegistry,
+  mailServiceIdentityRegistryFactory = createMailServiceIdentityRegistry,
   mailboxRegistryFactory = createMailboxRegistry,
   mailboxQuotaRegistryFactory = createMailboxQuotaRegistry,
   mailboxForwardingRegistryFactory = createMailboxForwardingRegistry,
@@ -96,6 +104,7 @@ export async function runRunningMailConfigRecoveryFromStores({
     certificateRegistryFactory,
     applicationRegistryFactory,
     mailDomainRegistryFactory,
+    mailServiceIdentityRegistryFactory,
     mailboxRegistryFactory,
     mailboxQuotaRegistryFactory,
     mailboxForwardingRegistryFactory,
@@ -137,6 +146,11 @@ export async function runRunningMailConfigRecoveryFromStores({
     applicationRegistryFactory,
   });
 
+  const mailServiceIdentityRegistry = await jobRecoveryRuntimeInternals.initRegistry(mailServiceIdentityRegistryFactory({
+    filePath: paths.mailServiceIdentityStore,
+    getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
+    getCertificate: async (certificateId) => certificateRegistry.getCertificate(certificateId),
+  }), 'Mail service identity');
   const mailDomainRegistry = await jobRecoveryRuntimeInternals.initRegistry(mailDomainRegistryFactory({
     filePath: paths.mailDomainStore,
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
@@ -166,6 +180,8 @@ export async function runRunningMailConfigRecoveryFromStores({
     mailboxQuotaRegistry,
     mailboxForwardingRegistry,
     mailAliasRegistry,
+    domainRegistry,
+    mailServiceIdentityRegistry,
   });
   if (!configurationService || typeof configurationService.materializeTransition !== 'function') {
     throw new JobRecoveryRuntimeError(
