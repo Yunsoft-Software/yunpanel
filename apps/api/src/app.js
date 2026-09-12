@@ -27,6 +27,7 @@ import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from './doc
 import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
 import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
+import { mountMailAliasRoutes } from './mail-alias-http.js';
 import { createMailAliasRegistry, MailAliasRegistryError } from './mail-alias-registry.js';
 import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
 import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
@@ -205,6 +206,7 @@ export function createApp({
     localServerId,
     mailDomainRegistry,
   });
+  mountMailAliasRoutes(app, { mailAliasRegistry, mailDomainRegistry, domainRegistry, localServerId });
   mountMailboxRoutes(app, { mailboxRegistry, mailDomainRegistry, domainRegistry, localServerId });
   mountMailConfigurationRoutes(app, {
     mailConfigurationService,
