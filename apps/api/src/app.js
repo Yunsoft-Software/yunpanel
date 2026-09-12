@@ -36,6 +36,11 @@ import { createMailAliasRegistry, MailAliasRegistryError } from './mail-alias-re
 import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
 import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
+import { mountMailboxForwardingRoutes } from './mailbox-forwarding-http.js';
+import {
+  createMailboxForwardingRegistry,
+  MailboxForwardingRegistryError,
+} from './mailbox-forwarding-registry.js';
 import { MailboxQuotaHttpError, mountMailboxQuotaRoutes } from './mailbox-quota-http.js';
 import { createMailboxQuotaRegistry, MailboxQuotaRegistryError } from './mailbox-quota-registry.js';
 import { createMailboxRegistry, MailboxRegistryError } from './mailbox-registry.js';
@@ -126,6 +131,9 @@ export function createApp({
     getMailbox: async (mailboxId) => mailboxRegistry.getMailbox(mailboxId),
   }),
   mailboxQuotaInspector = createMailboxQuotaInspector(),
+  mailboxForwardingRegistry = createMailboxForwardingRegistry({
+    getMailbox: async (mailboxId) => mailboxRegistry.getMailbox(mailboxId),
+  }),
   mailAliasRegistry = createMailAliasRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
     listMailboxes: (filter) => mailboxRegistry.listMailboxes(filter),
@@ -135,6 +143,7 @@ export function createApp({
     mailboxRegistry,
     mailAliasRegistry,
     mailboxQuotaRegistry,
+    mailboxForwardingRegistry,
   }),
   environment = process.env.NODE_ENV,
   journalLogReader = null,
@@ -225,6 +234,8 @@ export function createApp({
   mountMailboxRoutes(app, {
     mailboxRegistry,
     mailAliasRegistry,
+    mailboxQuotaRegistry,
+    mailboxForwardingRegistry,
     mailDomainRegistry,
     domainRegistry,
     localServerId,
@@ -232,6 +243,13 @@ export function createApp({
   mountMailboxQuotaRoutes(app, {
     mailboxQuotaRegistry,
     mailboxQuotaInspector,
+    mailboxRegistry,
+    mailDomainRegistry,
+    domainRegistry,
+    localServerId,
+  });
+  mountMailboxForwardingRoutes(app, {
+    mailboxForwardingRegistry,
     mailboxRegistry,
     mailDomainRegistry,
     domainRegistry,
@@ -286,6 +304,7 @@ export function createApp({
       || error instanceof MailAliasRegistryError
       || error instanceof MailConfigurationError
       || error instanceof MailConfigurationHttpError
+      || error instanceof MailboxForwardingRegistryError
       || error instanceof MailboxQuotaRegistryError
       || error instanceof MailboxQuotaHttpError
       || error instanceof MailboxRegistryError
