@@ -316,8 +316,9 @@ export async function startConfiguredLocalRuntime({
         || result?.previewSha256 !== payload.previewSha256
         || result.configSha256 !== payload.configSha256
         || result.fpmSha256 !== payload.fpmSha256
+        || !SHA256_PATTERN.test(result.nginxSha256 ?? '')
         || typeof result.databaseCreated !== 'boolean'
-        || result.applied !== true || result.sideEffects !== true) {
+        || result.httpHealthy !== true || result.applied !== true || result.sideEffects !== true) {
         throw new Error('Roundcube result is not safe recovery evidence');
       }
       await roundcubeConfigOperationReceipts.write({
@@ -326,7 +327,9 @@ export async function startConfiguredLocalRuntime({
         previewSha256: payload.previewSha256,
         configSha256: payload.configSha256,
         fpmSha256: payload.fpmSha256,
+        nginxSha256: result.nginxSha256,
         databaseCreated: result.databaseCreated,
+        httpHealthy: true,
         applied: true,
       });
       return;
