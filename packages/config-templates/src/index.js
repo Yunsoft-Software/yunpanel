@@ -33,6 +33,11 @@ export {
 } from './mail.js';
 
 export {
+  previewManagedMailEmptyConfiguration,
+  renderDovecotEmptyManagedSetConfig,
+} from './mail-teardown.js';
+
+export {
   MailApplyPlanError,
   previewManagedMailApplyPlan,
 } from './mail-apply-plan.js';
