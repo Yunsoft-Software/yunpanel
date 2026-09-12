@@ -51,6 +51,31 @@ test('private enable materialization becomes stale when protected mailbox state 
   );
 });
 
+test('last enabled managed mail domain disables through a zero-account private bundle', async () => {
+  const state = fixture({ candidateStatus: 'enabled' });
+  const transition = { mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'disabled' };
+  const preview = await state.service.previewTransition(transition);
+
+  assert.equal(preview.readyToApply, true);
+  assert.deepEqual(preview.domains, []);
+  assert.deepEqual(preview.blockers, []);
+  assert.deepEqual(preview.configuration.counts, { domains: 0, mailboxes: 0, aliases: 0 });
+  assert.match(preview.configurationSha256, /^[a-f0-9]{64}$/);
+  assert.doesNotMatch(JSON.stringify(preview), /argon2|passwordHash|dovecot-lmtp|postmaster_address/i);
+
+  const bundle = await state.service.materializeTransition(transition, {
+    expectedPreviewDigest: preview.previewDigest,
+    expectedConfigurationSha256: preview.configurationSha256,
+  });
+  assert.equal(bundle.preview.sha256, preview.configurationSha256);
+  assert.equal(bundle.sensitiveArtifacts.length, 1);
+  assert.equal(bundle.sensitiveArtifacts[0].path, '/etc/yunpanel/mail/dovecot/users');
+  assert.equal(bundle.sensitiveArtifacts[0].content, '');
+  const dovecotMail = bundle.preview.artifacts.find((artifact) => artifact.path === '/etc/dovecot/conf.d/99-yunpanel-mail.conf');
+  assert.match(dovecotMail.content, /^protocols = imap$/m);
+  assert.doesNotMatch(dovecotMail.content, /lmtp|postmaster_address|dovecot-lmtp/i);
+});
+
 test('external mail domains remain excluded from local configuration transitions', async () => {
   const state = fixture({ candidateMode: 'external' });
   await assert.rejects(
