@@ -58,6 +58,10 @@ if [ -f "$api_env" ]; then
     printf '%s\n' 'YUNPANEL_MAIL_SERVICE_IDENTITY_STORE=/var/lib/yunpanel/control-plane/mail-service-identity-registry.json' >>"$api_temp"
     api_changed=1
   fi
+  if ! grep -q '^YUNPANEL_MAIL_SRS_SECRET_STORE=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_MAIL_SRS_SECRET_STORE=/var/lib/yunpanel/control-plane/mail-srs-secret-registry.json' >>"$api_temp"
+    api_changed=1
+  fi
   if ! grep -q '^YUNPANEL_ROUNDCUBE_SECRET_STORE=' "$api_env"; then
     printf '%s\n' 'YUNPANEL_ROUNDCUBE_SECRET_STORE=/var/lib/yunpanel/control-plane/roundcube-secret-registry.json' >>"$api_temp"
     api_changed=1
