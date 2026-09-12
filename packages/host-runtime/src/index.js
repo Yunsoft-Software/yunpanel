@@ -36,6 +36,11 @@ export {
   mailConfigActivatorInternals,
 } from './mail-config-activator.js';
 export {
+  createMailConfigEvidenceInspector,
+  MailConfigEvidenceError,
+  mailConfigEvidenceInternals,
+} from './mail-config-evidence-inspector.js';
+export {
   createAcmeManager,
   acmeManager,
   AcmeManagerError,
