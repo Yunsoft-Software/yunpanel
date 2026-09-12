@@ -249,7 +249,7 @@ export async function startLocalRuntime({
       serverId,
       jobRegistry,
       supportsOperation: (operation) => hostOperations.supports(operation),
-      executeOperation: (operation, payload) => hostOperations.executeOperation(operation, payload),
+      executeOperation: (operation, payload, execution) => hostOperations.executeOperation(operation, payload, execution),
       reconcileCompletedJob: reconcileJob,
       recordExecutionEvidence,
       onError: handleExecutorFault,
