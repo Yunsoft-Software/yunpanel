@@ -50,11 +50,11 @@ test('forwarding preview exposes only fixed compile metadata and deterministic d
     destinations: ['external@elsewhere.test'],
   }];
   const preview = previewManagedMailboxForwardingSieve(input);
-  assert.equal(preview.path, '/etc/yunpanel/mail/dovecot/yunpanel-forwarding.sieve');
-  assert.equal(preview.compiledPath, '/etc/yunpanel/mail/dovecot/yunpanel-forwarding.svbin');
+  assert.equal(preview.path, '/etc/dovecot/yunpanel-forwarding.sieve');
+  assert.equal(preview.compiledPath, '/etc/dovecot/yunpanel-forwarding.svbin');
   assert.deepEqual(preview.compile, {
     file: '/usr/bin/sievec',
-    args: ['/etc/yunpanel/mail/dovecot/yunpanel-forwarding.sieve'],
+    args: ['/etc/dovecot/yunpanel-forwarding.sieve'],
   });
   assert.equal(preview.policies, 1);
   assert.match(preview.sha256, /^[a-f0-9]{64}$/);
