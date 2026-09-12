@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import {
   roundcubeFpmTemplatePolicy,
@@ -12,8 +13,9 @@ import {
 const TX = '12345678-1234-4234-8234-123456789012';
 const CONFIG = Buffer.from('<?php $config = [];\n');
 const FPM = Buffer.from('[yunpanel-roundcube]\n');
-const CONFIG_SHA = 'a'.repeat(64);
-const FPM_SHA = 'b'.repeat(64);
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+const CONFIG_SHA = sha256(CONFIG);
+const FPM_SHA = sha256(FPM);
 const PREVIEW_SHA = 'c'.repeat(64);
 
 function preview() {
@@ -31,7 +33,7 @@ function preview() {
         sha256: CONFIG_SHA,
         bytes: CONFIG.length,
         sensitive: true,
-        mode: 0o600,
+        mode: roundcubeTemplatePolicy.configMode,
       },
       databasePath: roundcubeTemplatePolicy.databasePath,
       databaseSchemaPath: roundcubeTemplatePolicy.databaseSchemaPath,
