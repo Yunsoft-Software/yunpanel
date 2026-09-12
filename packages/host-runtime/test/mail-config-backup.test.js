@@ -4,8 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  mailForwardingTemplatePolicy,
   mailTemplatePolicy,
-  previewManagedMailConfiguration,
+  previewManagedMailForwardingConfiguration,
 } from '@yunpanel/config-templates';
 import {
   createMailConfigBackupManager,
@@ -16,12 +17,13 @@ import {
 const ARGON2ID_HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 3).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 4).toString('base64').replace(/=+$/, '')}`;
 
 function preview() {
-  return previewManagedMailConfiguration({
+  return previewManagedMailForwardingConfiguration({
     domains: ['example.com'],
     mailboxes: ['owner@example.com'],
     aliases: [{ source: 'info@example.com', destinations: ['owner@example.com'] }],
     accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
     postmasterAddress: 'owner@example.com',
+    forwardings: [{ source: 'owner@example.com', mode: 'copy', destinations: ['backup@elsewhere.test'] }],
   });
 }
 
@@ -57,13 +59,16 @@ async function withTempDirectory(run) {
   finally { await rm(root, { recursive: true, force: true }); }
 }
 
-test('backs up source, compiled map, main.cf and managed directory state without exposing content', async () => withTempDirectory(async (root) => {
+test('backs up mail sources, compiled maps/sieve, main.cf and managed directory state without exposing content', async () => withTempDirectory(async (root) => {
   const compiledDomainMap = mailConfigBackupInternals.postfixCompiledPaths[0];
+  const compiledSieve = mailConfigBackupInternals.sieveCompiledPath;
   const live = new Map([
     [mailTemplatePolicy.postfixVirtualDomainMapPath, Buffer.from('example.com OK\n')],
     [compiledDomainMap, Buffer.from('compiled-domain-map')],
     [mailConfigBackupInternals.postfixMainCfPath, Buffer.from('myhostname = mail.example.com\n')],
     [mailTemplatePolicy.dovecotPasswdFilePath, Buffer.from(`owner@example.com:{ARGON2ID}${ARGON2ID_HASH}\n`)],
+    [mailForwardingTemplatePolicy.sievePath, Buffer.from('require ["envelope", "copy"];\n')],
+    [compiledSieve, Buffer.from('compiled-sieve')],
     [mailTemplatePolicy.rspamdProxyConfigPath, Buffer.from('bind_socket = "127.0.0.1:11332";\n')],
   ]);
   const liveDirectories = new Map([
@@ -75,7 +80,8 @@ test('backs up source, compiled map, main.cf and managed directory state without
     liveLstatFn: async (targetPath) => {
       if (liveDirectories.has(targetPath)) return liveDirectories.get(targetPath);
       if (!live.has(targetPath)) throw missing();
-      return regularStat({ mode: targetPath === mailTemplatePolicy.dovecotPasswdFilePath ? 0o600 : 0o640, uid: 12, gid: 34 });
+      const privateTarget = targetPath === mailTemplatePolicy.dovecotPasswdFilePath || targetPath === compiledSieve;
+      return regularStat({ mode: privateTarget ? 0o600 : 0o640, uid: 12, gid: 34 });
     },
     liveReadFileFn: async (targetPath) => {
       liveReads += 1;
@@ -84,11 +90,14 @@ test('backs up source, compiled map, main.cf and managed directory state without
   });
 
   const result = await manager.backupConfiguration(preview(), { transactionId: 'mail-job-0001' });
+  assert.equal(result.version, 3);
   assert.equal(result.transactionId, 'mail-job-0001');
   assert.equal(result.artifacts.length, mailConfigBackupInternals.targetPaths.length);
   assert.equal(result.directories.length, mailConfigBackupInternals.managedDirectoryPaths.length);
   assert.equal(JSON.stringify(result).includes(ARGON2ID_HASH), false);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === compiledDomainMap).present, true);
+  assert.equal(result.artifacts.find((entry) => entry.targetPath === compiledSieve).present, true);
+  assert.equal(result.artifacts.find((entry) => entry.targetPath === mailForwardingTemplatePolicy.sievePath).present, true);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === mailConfigBackupInternals.postfixMainCfPath).present, true);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === mailTemplatePolicy.dovecotPasswdFilePath).mode, 0o600);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === mailTemplatePolicy.dovecotAuthConfigPath).present, false);
