@@ -106,25 +106,39 @@ test('prepare creates only private secret state and returns secret-free determin
   assert.equal(prepared.roundcubeSecretRevision, 1);
   assert.equal(prepared.configuration.artifact.sensitive, true);
   assert.equal(prepared.fpm.runtimeUser, 'yunpanel-roundcube');
+  assert.equal(prepared.nginx.webHostname, 'mail.example.com');
+  assert.equal(prepared.nginx.endpoint, 'https://mail.example.com/');
+  assert.equal(prepared.webEndpoint, 'https://mail.example.com/');
+  assert.equal(prepared.nginx.artifact.sensitive, false);
   assert.equal(JSON.stringify(prepared).includes('desKey'), false);
   assert.equal(JSON.stringify(prepared).includes('privkey.pem'), false);
+  assert.equal(JSON.stringify(prepared).includes('fullchain.pem'), false);
   assert.equal(JSON.stringify(prepared).includes("smtp_pass']"), false);
 
   const again = await fx.service.previewForServer(SERVER_ID);
   assert.equal(again.sha256, prepared.sha256);
+  assert.equal(again.nginxSha256, prepared.nginxSha256);
 });
 
-test('materialization carries protected config only after exact digest and becomes stale on cert renewal', async () => {
+test('materialization carries protected config and public FPM/Nginx artifacts only after exact digest', async () => {
   const fx = await fixture();
   const prepared = await fx.service.prepareForServer(SERVER_ID);
   const bundle = await fx.service.materializeForServer(SERVER_ID, { expectedPreviewSha256: prepared.sha256 });
   assert.equal(bundle.preview.sha256, prepared.sha256);
   assert.equal(bundle.sensitiveArtifacts.length, 1);
-  assert.equal(bundle.publicArtifacts.length, 1);
+  assert.equal(bundle.publicArtifacts.length, 2);
   assert.match(bundle.sensitiveArtifacts[0].content, /\$config\['des_key'\]/);
   assert.match(bundle.sensitiveArtifacts[0].content, /tls:\/\/mail\.example\.com:587/);
-  assert.doesNotMatch(JSON.stringify(bundle.preview), /ABCDEFGHIJKLMNOPQRSTUVWX|privkey\.pem/);
+  assert.match(bundle.publicArtifacts[0].content, /\[yunpanel-roundcube\]/);
+  assert.match(bundle.publicArtifacts[1].content, /server_name mail\.example\.com;/);
+  assert.match(bundle.publicArtifacts[1].content, /ssl_certificate \/etc\/letsencrypt\/live\/mail\.example\.com\/fullchain\.pem;/);
+  assert.match(bundle.publicArtifacts[1].content, /fastcgi_pass unix:\/run\/php\/yunpanel-roundcube\.sock;/);
+  assert.doesNotMatch(JSON.stringify(bundle.preview), /ABCDEFGHIJKLMNOPQRSTUVWX|privkey\.pem|fullchain\.pem/);
+});
 
+test('certificate renewal invalidates Roundcube config and Nginx preview atomically', async () => {
+  const fx = await fixture();
+  const prepared = await fx.service.prepareForServer(SERVER_ID);
   fx.setCertificate(CERT_B);
   await assert.rejects(
     fx.service.materializeForServer(SERVER_ID, { expectedPreviewSha256: prepared.sha256 }),
@@ -132,6 +146,7 @@ test('materialization carries protected config only after exact digest and becom
   );
   const renewed = await fx.service.previewForServer(SERVER_ID);
   assert.notEqual(renewed.sha256, prepared.sha256);
+  assert.notEqual(renewed.nginxSha256, prepared.nginxSha256);
   assert.equal(renewed.certificateId, CERT_B);
 });
 
