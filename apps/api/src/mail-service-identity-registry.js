@@ -229,7 +229,8 @@ export function createMailServiceIdentityRegistry({
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
       throw new MailServiceIdentityRegistryError('invalid_expected_revision', 'expectedRevision is invalid');
     }
-    const existing = state.bindings.find((candidate) => candidate.serverId === normalizedServerId) ?? null;
+    const existingIndex = state.bindings.findIndex((candidate) => candidate.serverId === normalizedServerId);
+    const existing = existingIndex >= 0 ? state.bindings[existingIndex] : null;
     if ((existing?.revision ?? 0) !== expectedRevision) {
       throw new MailServiceIdentityRegistryError(
         'mail_service_identity_revision_conflict',
@@ -252,7 +253,7 @@ export function createMailServiceIdentityRegistry({
     if (existing && existing.webDomainId === candidate.webDomainId && existing.hostname === candidate.hostname) {
       throw new MailServiceIdentityRegistryError('mail_service_identity_no_change', 'Mail service identity is already bound to this Web Domain', 409);
     }
-    if (existing) Object.assign(existing, candidate);
+    if (existingIndex >= 0) state.bindings[existingIndex] = candidate;
     else state.bindings.push(candidate);
     await persist();
     return publicBinding(candidate, domain, certificate, []);
