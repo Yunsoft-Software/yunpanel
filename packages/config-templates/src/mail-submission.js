@@ -25,8 +25,6 @@ const POSTFIX_SUBMISSION_SERVICE = Object.freeze({
 });
 const AUTH_APPEND = [
   '',
-  'auth_mechanisms = plain login',
-  '',
   'service auth {',
   `  unix_listener ${DOVECOT_AUTH_SOCKET} {`,
   '    mode = 0660',
@@ -87,10 +85,12 @@ function submissionAuthArtifact(artifact) {
       'Managed Dovecot authentication artifact is unavailable',
     );
   }
-  if (/^auth_mechanisms\s*=/m.test(artifact.content) || artifact.content.includes(`unix_listener ${DOVECOT_AUTH_SOCKET}`)) {
+  const mechanisms = [...artifact.content.matchAll(/^auth_mechanisms\s*=\s*([^\r\n]+)$/gm)];
+  if (mechanisms.length !== 1 || mechanisms[0][1].trim().toLowerCase() !== 'plain login'
+    || artifact.content.includes(`unix_listener ${DOVECOT_AUTH_SOCKET}`)) {
     throw new MailSubmissionTemplateError(
       'submission_dovecot_auth_conflict',
-      'Managed Dovecot authentication artifact already defines submission authentication',
+      'Managed Dovecot authentication policy is not canonical for submission',
     );
   }
   const content = `${artifact.content.trimEnd()}\n${AUTH_APPEND}`;
