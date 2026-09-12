@@ -3,11 +3,13 @@ import {
   MailForwardingTemplateError,
   MailQuotaTemplateError,
   MailSecurityTemplateError,
+  MailSubmissionTemplateError,
   MailTemplateError,
+  enableManagedMailSubmission,
   mailTemplatePolicy,
   normalizeMailboxAddress,
   previewManagedMailEmptyConfiguration,
-  previewManagedMailSecurityConfiguration,
+  previewManagedMailSubmissionConfiguration,
   renderDovecotQuotaPasswdFile,
   secureManagedMailPreview,
 } from '@yunpanel/config-templates';
@@ -52,6 +54,7 @@ function publicConfigurationPreview(preview) {
       sensitive: artifact.sensitive === true,
     }))),
     postfixParameters: preview.postfixParameters,
+    postfixMasterServices: preview.postfixMasterServices ?? Object.freeze([]),
     validate: preview.validate,
     requirements: preview.requirements,
     sideEffects: false,
@@ -164,7 +167,10 @@ export function createMailConfigurationService({
       return Object.freeze({
         ready: true,
         blockers: Object.freeze([]),
-        preview: secureManagedMailPreview(previewManagedMailEmptyConfiguration()),
+        preview: enableManagedMailSubmission(
+          secureManagedMailPreview(previewManagedMailEmptyConfiguration()),
+          [],
+        ),
         accounts: Object.freeze([]),
       });
     }
@@ -184,7 +190,7 @@ export function createMailConfigurationService({
     const postmasterAddress = accounts[0].address;
     let preview;
     try {
-      preview = previewManagedMailSecurityConfiguration({
+      preview = previewManagedMailSubmissionConfiguration({
         domains: resolved.domains,
         mailboxes: accounts.map((account) => account.address),
         aliases,
@@ -196,7 +202,8 @@ export function createMailConfigurationService({
       if (error instanceof MailTemplateError
         || error instanceof MailQuotaTemplateError
         || error instanceof MailForwardingTemplateError
-        || error instanceof MailSecurityTemplateError) {
+        || error instanceof MailSecurityTemplateError
+        || error instanceof MailSubmissionTemplateError) {
         throw new MailConfigurationError(
           'mail_configuration_state_invalid',
           'Managed mail identity state is inconsistent and cannot be applied',
