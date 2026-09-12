@@ -49,6 +49,13 @@ export {
 } from './mail-forwarding.js';
 
 export {
+  MailSecurityTemplateError,
+  mailSecurityTemplatePolicy,
+  previewManagedMailSecurityConfiguration,
+  secureManagedMailPreview,
+} from './mail-security.js';
+
+export {
   MailDkimTemplateError,
   mailDkimTemplatePolicy,
   managedDkimDnsRecord,
