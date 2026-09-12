@@ -4,6 +4,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import {
   roundcubeFpmTemplatePolicy,
+  roundcubeNginxTemplatePolicy,
   roundcubeTemplatePolicy,
 } from '@yunpanel/config-templates';
 import { parseManagedSystemIdentity } from './mail-vmail-identity.js';
@@ -16,11 +17,14 @@ const ID = '/usr/bin/id';
 const PHP = '/usr/bin/php';
 const PHP_FPM = '/usr/sbin/php-fpm8.3';
 const SQLITE = '/usr/bin/sqlite3';
+const NGINX = '/usr/sbin/nginx';
+const CURL = '/usr/bin/curl';
 const SYSTEMCTL = '/usr/bin/systemctl';
 const ROOT_UID = 0;
 const ROOT_GID = 0;
 const CONFIG_MODE = 0o640;
 const FPM_MODE = 0o640;
+const NGINX_MODE = 0o640;
 const DATABASE_MODE = 0o600;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const SOCKET_MODE = 0o660;
@@ -55,12 +59,20 @@ function validPreview(preview) {
     && typeof preview.sha256 === 'string' && SHA256_PATTERN.test(preview.sha256)
     && typeof preview.configSha256 === 'string' && SHA256_PATTERN.test(preview.configSha256)
     && typeof preview.fpmSha256 === 'string' && SHA256_PATTERN.test(preview.fpmSha256)
+    && typeof preview.nginxSha256 === 'string' && SHA256_PATTERN.test(preview.nginxSha256)
     && preview.configuration?.artifact?.path === roundcubeTemplatePolicy.configPath
     && preview.configuration.artifact.sha256 === preview.configSha256
     && preview.fpm?.artifact?.path === roundcubeFpmTemplatePolicy.poolPath
     && preview.fpm.artifact.sha256 === preview.fpmSha256
     && preview.fpm.socketPath === roundcubeFpmTemplatePolicy.socketPath
-    && preview.fpm.serviceUnit === roundcubeFpmTemplatePolicy.serviceUnit);
+    && preview.fpm.serviceUnit === roundcubeFpmTemplatePolicy.serviceUnit
+    && preview.nginx?.artifact?.path === roundcubeNginxTemplatePolicy.configPath
+    && preview.nginx.artifact.sha256 === preview.nginxSha256
+    && preview.nginx.publicRoot === roundcubeNginxTemplatePolicy.publicRoot
+    && preview.nginx.fpmSocketPath === roundcubeFpmTemplatePolicy.socketPath
+    && preview.nginx.serviceUnit === roundcubeNginxTemplatePolicy.serviceUnit
+    && preview.nginx.webHostname === preview.mailHostname
+    && preview.nginx.endpoint === `https://${preview.mailHostname}/`);
 }
 
 export function createRoundcubeConfigEvidenceInspector({
@@ -137,9 +149,9 @@ export function createRoundcubeConfigEvidenceInspector({
     }
   }
 
-  async function commandReady(file, args) {
+  async function commandReady(file, args, options = {}) {
     try {
-      const result = await run(file, args, { timeout: 30_000, maxBuffer: MAX_OUTPUT });
+      const result = await run(file, args, { timeout: 30_000, maxBuffer: MAX_OUTPUT, ...options });
       boundedOutput(result);
       return true;
     } catch {
@@ -156,6 +168,16 @@ export function createRoundcubeConfigEvidenceInspector({
     } catch {
       return false;
     }
+  }
+
+  async function httpReady(preview) {
+    return commandReady(CURL, [
+      '--fail', '--silent', '--show-error', '--insecure',
+      '--max-time', '10',
+      '--resolve', `${preview.nginx.webHostname}:443:127.0.0.1`,
+      '--output', '/dev/null',
+      preview.nginx.endpoint,
+    ], { timeout: 15_000 });
   }
 
   async function inspect(preview) {
@@ -178,15 +200,21 @@ export function createRoundcubeConfigEvidenceInspector({
     if (!(await exactFile(roundcubeFpmTemplatePolicy.poolPath, preview.fpmSha256, {
       uid: ROOT_UID, gid: ROOT_GID, mode: FPM_MODE,
     }))) return Object.freeze({ satisfied: false, result: null });
+    if (!(await exactFile(roundcubeNginxTemplatePolicy.configPath, preview.nginxSha256, {
+      uid: ROOT_UID, gid: ROOT_GID, mode: NGINX_MODE,
+    }))) return Object.freeze({ satisfied: false, result: null });
     if (!(await databaseReady(runtimeIdentity))) return Object.freeze({ satisfied: false, result: null });
-    if (!(await commandReady(PHP, ['-l', roundcubeTemplatePolicy.configPath]))) {
-      return Object.freeze({ satisfied: false, result: null });
-    }
+    if (!(await commandReady(PHP, ['-l', roundcubeTemplatePolicy.configPath]))) return Object.freeze({ satisfied: false, result: null });
     if (!(await commandReady(PHP_FPM, ['-t']))) return Object.freeze({ satisfied: false, result: null });
+    if (!(await commandReady(NGINX, ['-t']))) return Object.freeze({ satisfied: false, result: null });
     if (!(await commandReady(SYSTEMCTL, ['is-active', '--quiet', roundcubeFpmTemplatePolicy.serviceUnit]))) {
       return Object.freeze({ satisfied: false, result: null });
     }
+    if (!(await commandReady(SYSTEMCTL, ['is-active', '--quiet', roundcubeNginxTemplatePolicy.serviceUnit]))) {
+      return Object.freeze({ satisfied: false, result: null });
+    }
     if (!(await socketReady(wwwIdentity))) return Object.freeze({ satisfied: false, result: null });
+    if (!(await httpReady(preview))) return Object.freeze({ satisfied: false, result: null });
 
     return Object.freeze({
       satisfied: true,
@@ -195,7 +223,9 @@ export function createRoundcubeConfigEvidenceInspector({
         previewSha256: preview.sha256,
         configSha256: preview.configSha256,
         fpmSha256: preview.fpmSha256,
+        nginxSha256: preview.nginxSha256,
         databaseHealthy: true,
+        httpHealthy: true,
         applied: true,
         sideEffects: true,
       }),
@@ -211,10 +241,13 @@ export const roundcubeConfigEvidenceInternals = Object.freeze({
   phpPath: PHP,
   phpFpmPath: PHP_FPM,
   sqlitePath: SQLITE,
+  nginxPath: NGINX,
+  curlPath: CURL,
   systemctlPath: SYSTEMCTL,
   maxOutput: MAX_OUTPUT,
   configMode: CONFIG_MODE,
   fpmMode: FPM_MODE,
+  nginxMode: NGINX_MODE,
   databaseMode: DATABASE_MODE,
   privateDirectoryMode: PRIVATE_DIRECTORY_MODE,
   socketMode: SOCKET_MODE,
