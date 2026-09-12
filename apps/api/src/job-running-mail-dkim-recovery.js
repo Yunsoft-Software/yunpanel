@@ -153,7 +153,7 @@ export async function recoverRunningMailDkim({
   } catch {
     throw new JobRunningMailDkimRecoveryError('job_mail_dkim_recovery_materialization_failed', 'Current protected DKIM desired state does not match the recovery intent');
   }
-  if (!bundle?.preview || !Array.isArray(bundle.keys) || bundle.keys.length < 1
+  if (!bundle?.preview || !Array.isArray(bundle.keys)
     || bundle.preview.sha256 !== intent.configurationSha256) {
     throw new JobRunningMailDkimRecoveryError('job_mail_dkim_recovery_materialization_invalid', 'DKIM recovery materialization is inconsistent');
   }
