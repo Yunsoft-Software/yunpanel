@@ -56,6 +56,11 @@ export {
   mailDkimEvidenceInternals,
 } from './mail-dkim-evidence-inspector.js';
 export {
+  createMailDkimRetirementInspector,
+  MailDkimRetirementError,
+  mailDkimRetirementInternals,
+} from './mail-dkim-retirement-inspector.js';
+export {
   createMailboxQuotaInspector,
   MailboxQuotaInspectorError,
   mailboxQuotaInspectorInternals,
