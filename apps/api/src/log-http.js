@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
+import { createMailQueueInspector, MailQueueInspectorError } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
 const QUERY_FIELDS = new Set(['cursor', 'level', 'limit', 'q', 'since', 'until']);
+const MAIL_QUEUE_QUERY_FIELDS = new Set(['limit', 'q', 'queue']);
 const JOURNAL_LEVELS = Object.freeze(['emerg', 'alert', 'crit', 'error', 'warning', 'notice', 'info', 'debug']);
 const JOB_LEVELS = Object.freeze(['error', 'warning', 'notice', 'info', 'debug']);
 const SERVICE_UNITS = Object.freeze({
@@ -20,6 +22,7 @@ const SERVICE_UNITS = Object.freeze({
 const DEPLOY_OPERATIONS = new Set([OPERATIONS.APP_STATIC_DEPLOY, OPERATIONS.APP_NODE_DEPLOY]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SEARCH_PATTERN = /^[\p{L}\p{N} ._/@+\-]{1,100}$/u;
+const QUEUE_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
 const DEFAULT_RANGE_MS = 24 * 60 * 60 * 1_000;
 const MAX_RANGE_MS = 30 * 24 * 60 * 60 * 1_000;
 
@@ -75,6 +78,26 @@ export function normalizeLogQuery(query, { now = Date.now(), allowedLevels = JOU
   return { since, until, limit, levels, search, cursor };
 }
 
+export function normalizeMailQueueQuery(query) {
+  if (!query || typeof query !== 'object' || Array.isArray(query)
+    || Object.keys(query).some((key) => !MAIL_QUEUE_QUERY_FIELDS.has(key) || typeof query[key] !== 'string')) {
+    throw new LogHttpError('invalid_mail_queue_query', 'Mail queue query fields are invalid');
+  }
+  const limit = query.limit === undefined ? 100 : Number(query.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200 || String(limit) !== (query.limit ?? '100')) {
+    throw new LogHttpError('invalid_mail_queue_query', 'Mail queue limit must be between 1 and 200');
+  }
+  const search = query.q ?? null;
+  if (search !== null && !SEARCH_PATTERN.test(search)) {
+    throw new LogHttpError('invalid_mail_queue_query', 'Mail queue search contains unsupported characters');
+  }
+  const queueName = query.queue ?? null;
+  if (queueName !== null && !QUEUE_NAME_PATTERN.test(queueName)) {
+    throw new LogHttpError('invalid_mail_queue_query', 'Mail queue name is invalid');
+  }
+  return { limit, search, queueName };
+}
+
 function nodeUnit(applicationId) {
   if (typeof applicationId !== 'string' || !UUID_PATTERN.test(applicationId)) {
     throw new LogHttpError('application_not_found', 'Application not found', 404);
@@ -120,6 +143,9 @@ function asyncRoute(handler) {
     try { return await handler(request, response); }
     catch (error) {
       if (error instanceof LogHttpError) return next(error);
+      if (error instanceof MailQueueInspectorError) {
+        return next(new LogHttpError(error.code, error.message, error.status));
+      }
       const status = Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 ? error.status : 503;
       return next(new LogHttpError(
         typeof error?.code === 'string' && /^[a-z0-9_]{1,80}$/.test(error.code) ? error.code : 'log_backend_failed',
@@ -138,11 +164,12 @@ function mountFormats(app, basePath, handler) {
 
 export function mountLogRoutes(app, {
   registry, applicationRegistry, jobRegistry, journalLogReader = null, nginxLogReader = null,
-  jobLogStore = null, localServerId = null, now = () => Date.now(),
+  jobLogStore = null, mailQueueInspector = createMailQueueInspector(), localServerId = null, now = () => Date.now(),
 } = {}) {
   if (!app || typeof app.get !== 'function' || !registry || typeof registry.getServer !== 'function'
     || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
-    || !jobRegistry || typeof jobRegistry.getJob !== 'function' || typeof now !== 'function') {
+    || !jobRegistry || typeof jobRegistry.getJob !== 'function' || typeof now !== 'function'
+    || !mailQueueInspector || typeof mailQueueInspector.query !== 'function') {
     throw new Error('Log HTTP dependencies are required');
   }
 
@@ -160,6 +187,15 @@ export function mountLogRoutes(app, {
     });
     return sendResult(response, result, format, `yunpanel-node-${application.id}-logs.txt`);
   });
+
+  app.get('/api/servers/:serverId/mail/queue', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    requireLocalServer(await registry.getServer(request.params.serverId), localServerId);
+    const query = normalizeMailQueueQuery(request.query);
+    const result = await mailQueueInspector.query(query);
+    response.setHeader('cache-control', 'no-store');
+    response.setHeader('x-content-type-options', 'nosniff');
+    return response.json({ data: result });
+  }));
 
   mountFormats(app, '/api/servers/:serverId/logs/:serviceId', async (request, response, format) => {
     const nginxKind = request.params.serviceId === 'nginx-access' ? 'access'
@@ -204,4 +240,5 @@ export const logHttpInternals = Object.freeze({
   nodeUnit,
   renderText,
   requireLocalServer,
+  normalizeMailQueueQuery,
 });
