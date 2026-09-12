@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { previewManagedMailApplyPlan } from '@yunpanel/config-templates';
@@ -53,7 +54,6 @@ export function createMailConfigEvidenceInspector({
         || (metadata.mode & 0o777) !== expectedMode
         || metadata.uid !== ROOT_UID || metadata.gid !== ROOT_GID) return false;
       const content = await readFileFn(artifact.path);
-      const { createHash } = await import('node:crypto');
       return createHash('sha256').update(content).digest('hex') === artifact.sha256;
     } catch {
       return false;
