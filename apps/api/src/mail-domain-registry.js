@@ -14,6 +14,7 @@ export function createMailDomainRegistry(options = {}) {
       name: domainName, webDomainId, managementMode,
     }),
     recordObservation: registry.recordObservation,
+    transitionLocalStatus: registry.transitionLocalStatus,
     getMailDomain: registry.getResource,
     listMailDomains: registry.listResources,
   });
