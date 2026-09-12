@@ -50,9 +50,14 @@ const SERVICE_CATALOG = Object.freeze([
     configurationChecks: [{ file: '/usr/bin/rspamadm', args: ['configtest'] }],
   }),
   service({
-    id: 'roundcube', label: 'Roundcube', category: 'mail', packages: ['roundcube-core'], units: [],
+    id: 'roundcube',
+    label: 'Roundcube',
+    category: 'mail',
+    packages: ['roundcube-core', 'roundcube-sqlite3', 'php-fpm'],
+    units: [],
     configurationChecks: [
-      { file: '/usr/bin/test', args: ['-f', '/usr/share/roundcube/index.php'] },
+      { file: '/usr/bin/test', args: ['-f', '/var/lib/roundcube/public_html/index.php'] },
+      { file: '/usr/bin/test', args: ['-f', '/usr/share/roundcube/SQL/sqlite.initial.sql'] },
       { file: '/usr/bin/test', args: ['-f', '/etc/roundcube/config.inc.php'] },
       { file: '/usr/bin/php', args: ['-l', '/etc/roundcube/config.inc.php'] },
     ],
