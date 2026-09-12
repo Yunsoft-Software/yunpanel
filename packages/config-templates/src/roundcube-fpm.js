@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 
-const SAFE_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
 
 export class RoundcubeFpmTemplateError extends Error {
@@ -11,9 +10,9 @@ export class RoundcubeFpmTemplateError extends Error {
   }
 }
 
-function safeName(value, field) {
-  if (typeof value !== 'string' || !SAFE_NAME.test(value)) {
-    throw new RoundcubeFpmTemplateError('invalid_roundcube_fpm_identity', `${field} is invalid`);
+function exactIdentity(value, expected, field) {
+  if (value !== expected) {
+    throw new RoundcubeFpmTemplateError('invalid_roundcube_fpm_identity', `${field} must use the managed Roundcube identity`);
   }
   return value;
 }
@@ -51,11 +50,14 @@ export function renderRoundcubeFpmPool({
   socketPath = roundcubeFpmTemplatePolicy.socketPath,
   temporaryDirectory = '/var/lib/yunpanel/roundcube/tmp',
 } = {}) {
-  const user = safeName(runtimeUser, 'runtimeUser');
-  const group = safeName(runtimeGroup, 'runtimeGroup');
-  const owner = safeName(socketOwner, 'socketOwner');
-  const socketGroupName = safeName(socketGroup, 'socketGroup');
+  const user = exactIdentity(runtimeUser, roundcubeFpmTemplatePolicy.runtimeUser, 'runtimeUser');
+  const group = exactIdentity(runtimeGroup, roundcubeFpmTemplatePolicy.runtimeGroup, 'runtimeGroup');
+  const owner = exactIdentity(socketOwner, roundcubeFpmTemplatePolicy.socketOwner, 'socketOwner');
+  const socketGroupName = exactIdentity(socketGroup, roundcubeFpmTemplatePolicy.socketGroup, 'socketGroup');
   const socket = safePath(socketPath, 'socketPath');
+  if (socket !== roundcubeFpmTemplatePolicy.socketPath) {
+    throw new RoundcubeFpmTemplateError('invalid_roundcube_fpm_path', 'socketPath must use the managed Roundcube socket');
+  }
   const temp = safePath(temporaryDirectory, 'temporaryDirectory');
   return `[${roundcubeFpmTemplatePolicy.poolName}]\nuser = ${user}\ngroup = ${group}\nlisten = ${socket}\nlisten.owner = ${owner}\nlisten.group = ${socketGroupName}\nlisten.mode = ${roundcubeFpmTemplatePolicy.socketMode}\npm = ondemand\npm.max_children = 10\npm.process_idle_timeout = 10s\npm.max_requests = 500\nclear_env = yes\ncatch_workers_output = no\nsecurity.limit_extensions = .php\nphp_admin_value[sys_temp_dir] = ${temp}\nphp_admin_value[upload_tmp_dir] = ${temp}\n`;
 }
@@ -74,7 +76,7 @@ export function previewRoundcubeFpmPool(input = {}) {
     }),
     socketPath: roundcubeFpmTemplatePolicy.socketPath,
     serviceUnit: roundcubeFpmTemplatePolicy.serviceUnit,
-    runtimeUser: input.runtimeUser ?? roundcubeFpmTemplatePolicy.runtimeUser,
-    runtimeGroup: input.runtimeGroup ?? roundcubeFpmTemplatePolicy.runtimeGroup,
+    runtimeUser: roundcubeFpmTemplatePolicy.runtimeUser,
+    runtimeGroup: roundcubeFpmTemplatePolicy.runtimeGroup,
   });
 }
