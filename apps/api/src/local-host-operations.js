@@ -21,6 +21,7 @@ import {
 } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { normalizeGitDeploymentCredential } from '@yunpanel/shared';
+import { createLocalRoundcubeConfigOperation } from './local-roundcube-config-operation.js';
 
 export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
@@ -53,6 +54,10 @@ export const LOCAL_NODE_ENVIRONMENT_OPERATIONS = Object.freeze([
 export const LOCAL_MAIL_CONFIGURATION_OPERATIONS = Object.freeze([
   OPERATIONS.MAIL_CONFIG_APPLY,
   OPERATIONS.MAIL_DKIM_APPLY,
+]);
+
+export const LOCAL_ROUNDCUBE_CONFIGURATION_OPERATIONS = Object.freeze([
+  OPERATIONS.ROUNDCUBE_CONFIG_APPLY,
 ]);
 
 const EXECUTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -94,8 +99,10 @@ export function createLocalHostOperations({
   mailConfigBackupManager = null,
   mailConfigActivator = null,
   mailDkimActivator = null,
+  roundcubeConfigOperation = null,
   loadManagedMailConfiguration = null,
   loadManagedDkimConfiguration = null,
+  loadRoundcubeConfiguration = null,
   loadApplicationEnvironment = null,
   loadDeploymentCredential = null,
   loadDnsProviderCredential = null,
@@ -116,6 +123,12 @@ export function createLocalHostOperations({
   if (loadManagedDkimConfiguration !== null && typeof loadManagedDkimConfiguration !== 'function') {
     throw new Error('loadManagedDkimConfiguration must be a function when configured');
   }
+  if (loadRoundcubeConfiguration !== null && typeof loadRoundcubeConfiguration !== 'function') {
+    throw new Error('loadRoundcubeConfiguration must be a function when configured');
+  }
+  if (roundcubeConfigOperation !== null && typeof roundcubeConfigOperation?.execute !== 'function') {
+    throw new Error('roundcubeConfigOperation must provide execute() when configured');
+  }
   if (!cloudflareDnsManager || typeof cloudflareDnsManager.applyRecord !== 'function') {
     throw new Error('cloudflareDnsManager must provide applyRecord()');
   }
@@ -135,6 +148,9 @@ export function createLocalHostOperations({
     backupManager: resolvedMailConfigBackupManager,
   });
   const resolvedMailDkimActivator = mailDkimActivator ?? createMailDkimActivator();
+  const resolvedRoundcubeConfigOperation = roundcubeConfigOperation ?? (loadRoundcubeConfiguration
+    ? createLocalRoundcubeConfigOperation({ loadConfiguration: loadRoundcubeConfiguration })
+    : null);
 
   if (!resolvedMailConfigManager || typeof resolvedMailConfigManager.stageConfiguration !== 'function') {
     throw new Error('mailConfigManager must provide stageConfiguration()');
@@ -318,6 +334,9 @@ export function createLocalHostOperations({
   }
   if (loadManagedDkimConfiguration) {
     handlers.set(OPERATIONS.MAIL_DKIM_APPLY, executeManagedDkimConfiguration);
+  }
+  if (resolvedRoundcubeConfigOperation) {
+    handlers.set(OPERATIONS.ROUNDCUBE_CONFIG_APPLY, (payload, execution) => resolvedRoundcubeConfigOperation.execute(payload, execution));
   }
 
   return {
