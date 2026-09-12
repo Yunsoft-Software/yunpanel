@@ -296,6 +296,7 @@ export function createApp({
     mailDkimRegistry,
     mailDkimRetirementRegistry,
     mailDkimConfigurationService,
+    mailDkimDnsService: dkimDns,
     mailDomainRegistry,
     domainRegistry,
     jobRegistry: mailDkimConfigurationService ? jobRegistry : null,
