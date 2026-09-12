@@ -43,6 +43,10 @@ if [ -f "$api_env" ]; then
     printf '%s\n' 'YUNPANEL_MAILBOX_QUOTA_STORE=/var/lib/yunpanel/control-plane/mailbox-quota-registry.json' >>"$api_temp"
     api_changed=1
   fi
+  if ! grep -q '^YUNPANEL_MAILBOX_FORWARDING_STORE=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_MAILBOX_FORWARDING_STORE=/var/lib/yunpanel/control-plane/mailbox-forwarding-registry.json' >>"$api_temp"
+    api_changed=1
+  fi
   if ! grep -q '^YUNPANEL_MAIL_ALIAS_STORE=' "$api_env"; then
     printf '%s\n' 'YUNPANEL_MAIL_ALIAS_STORE=/var/lib/yunpanel/control-plane/mail-alias-registry.json' >>"$api_temp"
     api_changed=1
