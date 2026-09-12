@@ -7,6 +7,6 @@ export function parseManagedVmailIdentity(value) {
     || !/^\d+$/.test(fields[2]) || !/^\d+$/.test(fields[3])) return null;
   const uid = Number.parseInt(fields[2], 10);
   const gid = Number.parseInt(fields[3], 10);
-  if (!Number.isSafeInteger(uid) || uid < 0 || !Number.isSafeInteger(gid) || gid < 0) return null;
+  if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(gid) || gid <= 0) return null;
   return Object.freeze({ uid, gid });
 }
