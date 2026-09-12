@@ -5,6 +5,7 @@ import { requirePanelRouteAccess } from './panel-http-guard.js';
 
 const CREATE_FIELDS = new Set(['expectedRevision', 'selector']);
 const ROTATE_FIELDS = new Set(['expectedRevision', 'selector']);
+const DELETE_FIELDS = new Set(['expectedRevision', 'confirmation']);
 const PREVIEW_FIELDS = new Set(['expectedKeyRevision']);
 const APPLY_FIELDS = new Set([
   'expectedKeyRevision', 'previewDigest', 'configurationSha256', 'confirmation',
@@ -47,6 +48,11 @@ const keyGenerationSideEffects = Object.freeze({
   requiresDnsPublish: true,
   requiresConfigurationApply: true,
 });
+const keyDeletionSideEffects = Object.freeze({
+  mailConfigurationChanged: false,
+  mailDataChanged: false,
+  requiresDnsDelete: true,
+});
 
 async function scopedLocalMailDomain({ mailDomainRegistry, domainRegistry, mailDomainId, localServerId }) {
   const mailDomain = await mailDomainRegistry.getMailDomain(mailDomainId);
@@ -72,12 +78,13 @@ async function scopedLocalMailDomain({ mailDomainRegistry, domainRegistry, mailD
 export function mountMailDkimRoutes(app, {
   mailDkimRegistry,
   mailDkimConfigurationService = null,
+  mailDkimRetirementInspector = null,
   mailDomainRegistry,
   domainRegistry,
   jobRegistry = null,
   localServerId = null,
 } = {}) {
-  if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') {
+  if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.delete !== 'function') {
     throw new Error('Express application is required');
   }
   if (!mailDkimRegistry || typeof mailDkimRegistry.getKey !== 'function'
@@ -137,6 +144,47 @@ export function mountMailDkimRoutes(app, {
     await ensureMailConfigurationIdle(jobRegistry, scoped.webDomain.serverId);
     const key = await mailDkimRegistry.rotateKey(request.params.mailDomainId, body);
     return response.json({ data: key, sideEffects: keyGenerationSideEffects });
+  }));
+
+  app.delete('/api/mail-domains/:mailDomainId/dkim', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const body = exactBody(request.body, DELETE_FIELDS, 'mail_dkim_delete_input_invalid');
+    const scoped = await scopedLocalMailDomain({
+      mailDomainRegistry,
+      domainRegistry,
+      mailDomainId: request.params.mailDomainId,
+      localServerId,
+    });
+    if (scoped.mailDomain.status !== 'disabled') {
+      throw new MailDkimHttpError(
+        'mail_dkim_delete_domain_enabled',
+        'Disable the local mail domain and apply DKIM signing teardown before deleting its private key',
+        409,
+      );
+    }
+    if (typeof mailDkimRegistry.deleteKey !== 'function'
+      || !jobRegistry || typeof jobRegistry.listJobs !== 'function'
+      || !mailDkimRetirementInspector || typeof mailDkimRetirementInspector.inspect !== 'function') {
+      throw new MailDkimHttpError('mail_dkim_delete_unavailable', 'DKIM deletion safety checks are unavailable', 503);
+    }
+    await ensureMailConfigurationIdle(jobRegistry, scoped.webDomain.serverId);
+    const key = await mailDkimRegistry.getKey(request.params.mailDomainId);
+    if (!key) throw new MailDkimRegistryError('mail_dkim_key_not_found', 'DKIM key was not found', 404);
+    let retirement;
+    try {
+      retirement = await mailDkimRetirementInspector.inspect({ domain: key.domainName, selector: key.selector });
+    } catch {
+      throw new MailDkimHttpError('mail_dkim_retirement_unavailable', 'Live DKIM retirement evidence could not be inspected', 503);
+    }
+    if (!retirement?.satisfied) {
+      throw new MailDkimHttpError(
+        'mail_dkim_retirement_not_ready',
+        'Apply DKIM signing teardown and confirm the live key is retired before deleting private key state',
+        409,
+      );
+    }
+    const deleted = await mailDkimRegistry.deleteKey(request.params.mailDomainId, body);
+    return response.json({ data: deleted, sideEffects: keyDeletionSideEffects });
   }));
 
   if (mailDkimConfigurationService) {
@@ -209,7 +257,9 @@ export const mailDkimHttpInternals = Object.freeze({
   emptyQuery,
   scopedLocalMailDomain,
   keyGenerationSideEffects,
+  keyDeletionSideEffects,
   rotateFields: ROTATE_FIELDS,
+  deleteFields: DELETE_FIELDS,
   previewFields: PREVIEW_FIELDS,
   applyFields: APPLY_FIELDS,
 });
