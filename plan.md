@@ -104,8 +104,10 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 - [x] Şifreli mailbox registry; create/list/detail, parola rotation, enable/disable ve confirmed delete kaynak akışları hazır.
 - [x] Postfix managed recipient/map, Dovecot passwd/config ve Rspamd loopback Milter config preview üreticileri hazır.
 - [x] Aggregate mail config preview digest/order/readiness blocker sözleşmesi hazır; protected hash/config içeriği public çıktıya girmiyor.
+- [x] Secret-free managed mail apply plan; sabit `postmap`/`postconf`/validator/reload/health sırası ve komut allowlist kontrolleri hazır.
+- [x] Protected Dovecot materyalini public plana taşımadan private `0700` staging, digest/mode/symlink doğrulaması ve transaction-scoped pre-apply backup hazır; rollback için `/etc/postfix/main.cf` snapshot'ı zorunlu.
 - [x] Mail servis health/inspect ve Roundcube package detection/install temeli hazır; kurulum sonucu dürüstçe `installed`, `active=false` kalıyor.
-- [ ] Postfix, Dovecot ve Rspamd için staged apply→config test→reload→health→rollback zincirini uygula.
+- [ ] Staged bundle'ı canlı hedeflere güvenli replace et; `postmap`/`postconf` sonrası Postfix, Dovecot ve Rspamd config test→reload→health→deterministic rollback zincirini tamamla.
 - [ ] Mail-domain enable/disable, quota/usage, alias ve forwarding lifecycle ekle.
 - [ ] MX/SPF/DKIM/DMARC/PTR expected/current/action-needed diagnostics ekle.
 - [ ] SMTP/IMAP TLS, bounded queue/log görünümü ve open-relay fail-closed kabulü ekle.
