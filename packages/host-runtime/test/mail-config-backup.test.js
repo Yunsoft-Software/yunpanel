@@ -48,6 +48,7 @@ async function withTempDirectory(run) {
 test('backs up existing live mail config and records absent targets without exposing content', async () => withTempDirectory(async (root) => {
   const live = new Map([
     [mailTemplatePolicy.postfixVirtualDomainMapPath, Buffer.from('example.com OK\n')],
+    [mailConfigBackupInternals.postfixMainCfPath, Buffer.from('myhostname = mail.example.com\n')],
     [mailTemplatePolicy.dovecotPasswdFilePath, Buffer.from(`owner@example.com:{ARGON2ID}${ARGON2ID_HASH}\n`)],
     [mailTemplatePolicy.rspamdProxyConfigPath, Buffer.from('bind_socket = "127.0.0.1:11332";\n')],
   ]);
@@ -68,6 +69,7 @@ test('backs up existing live mail config and records absent targets without expo
   assert.equal(result.transactionId, 'mail-job-0001');
   assert.equal(result.artifacts.length, mailConfigBackupInternals.targetPaths.length);
   assert.equal(JSON.stringify(result).includes(ARGON2ID_HASH), false);
+  assert.equal(result.artifacts.find((entry) => entry.targetPath === mailConfigBackupInternals.postfixMainCfPath).present, true);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === mailTemplatePolicy.dovecotPasswdFilePath).mode, 0o600);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === mailTemplatePolicy.dovecotAuthConfigPath).present, false);
 
@@ -85,6 +87,19 @@ test('backs up existing live mail config and records absent targets without expo
   const repeated = await manager.backupConfiguration(preview(), { transactionId: 'mail-job-0001' });
   assert.equal(repeated.planSha256, result.planSha256);
   assert.equal(liveReads, readsBeforeRetry);
+}));
+
+test('fails closed when postfix main.cf is unavailable before apply backup', async () => withTempDirectory(async (root) => {
+  const manager = createMailConfigBackupManager({
+    backupRoot: path.join(root, 'backup'),
+    liveLstatFn: async () => { throw missing(); },
+    liveReadFileFn: async () => Buffer.alloc(0),
+  });
+
+  await assert.rejects(
+    manager.backupConfiguration(preview(), { transactionId: 'mail-job-0002' }),
+    (error) => error instanceof MailConfigBackupError && error.code === 'mail_postfix_main_cf_missing',
+  );
 }));
 
 test('fails closed on symlink-like live targets and invalid transaction ids', async () => withTempDirectory(async (root) => {
@@ -108,7 +123,7 @@ test('fails closed on symlink-like live targets and invalid transaction ids', as
     (error) => error instanceof MailConfigBackupError && error.code === 'mail_backup_transaction_invalid',
   );
   await assert.rejects(
-    manager.backupConfiguration(preview(), { transactionId: 'mail-job-0002' }),
+    manager.backupConfiguration(preview(), { transactionId: 'mail-job-0003' }),
     (error) => error instanceof MailConfigBackupError && error.code === 'mail_live_artifact_unsafe',
   );
 }));
