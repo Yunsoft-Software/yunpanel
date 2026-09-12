@@ -12,8 +12,10 @@ import {
 const SERVER_ID = '10714f5d-8646-4f9a-a8e9-b80439ff6305';
 const OTHER_SERVER_ID = '822fa920-166c-4a7a-a26b-476c81d82165';
 const DOMAIN_ID = '0b83fb4d-d9d5-4a88-9975-977f015427c5';
+const SECOND_DOMAIN_ID = 'f4d7be56-4fbb-4b89-a92b-8cb46ef93310';
 const CERT_A = '74774ae1-e801-4d8e-a631-13e92cf13a05';
 const CERT_B = '7b51a02c-c991-44f9-bde0-30a497724c18';
+const CERT_C = 'df97d7cf-bfa5-442b-a6bc-826ef32effca';
 const NOW = Date.parse('2026-09-13T00:00:00.000Z');
 
 function certificate(id, overrides = {}) {
@@ -141,6 +143,55 @@ test('persisted hostname drift is rejected on restart instead of silently follow
     (error) => error instanceof MailServiceIdentityRegistryError
       && error.code === 'mail_service_identity_state_invalid',
   );
+}));
+
+test('rebind after restart replaces hydrated immutable state instead of mutating it', async () => withTempDirectory(async (root) => {
+  const filePath = path.join(root, 'mail-service-identity.json');
+  const domains = new Map([
+    [DOMAIN_ID, {
+      id: DOMAIN_ID,
+      serverId: SERVER_ID,
+      primaryDomain: 'mail.example.com',
+      certificateId: CERT_A,
+    }],
+    [SECOND_DOMAIN_ID, {
+      id: SECOND_DOMAIN_ID,
+      serverId: SERVER_ID,
+      primaryDomain: 'smtp.example.com',
+      certificateId: CERT_C,
+    }],
+  ]);
+  const certificates = new Map([
+    [CERT_A, certificate(CERT_A)],
+    [CERT_C, certificate(CERT_C, {
+      domainId: SECOND_DOMAIN_ID,
+      certificateNames: ['smtp.example.com'],
+      fingerprint256: 'EE:FF',
+      fullchainPath: '/etc/letsencrypt/live/smtp.example.com/fullchain.pem',
+      privateKeyPath: '/etc/letsencrypt/live/smtp.example.com/privkey.pem',
+    })],
+  ]);
+  const open = () => createMailServiceIdentityRegistry({
+    filePath,
+    now: () => NOW,
+    getWebDomain: async (id) => domains.has(id) ? structuredClone(domains.get(id)) : null,
+    getCertificate: async (id) => certificates.has(id) ? structuredClone(certificates.get(id)) : null,
+  });
+
+  const first = open();
+  await first.bind({ serverId: SERVER_ID, webDomainId: DOMAIN_ID, expectedRevision: 0 });
+  const reopened = open();
+  await reopened.init();
+  const rebound = await reopened.bind({
+    serverId: SERVER_ID,
+    webDomainId: SECOND_DOMAIN_ID,
+    expectedRevision: 1,
+  });
+  assert.equal(rebound.hostname, 'smtp.example.com');
+  assert.equal(rebound.webDomainId, SECOND_DOMAIN_ID);
+  assert.equal(rebound.certificateId, CERT_C);
+  assert.equal(rebound.revision, 2);
+  assert.equal((await reopened.getForServer(SERVER_ID)).hostname, 'smtp.example.com');
 }));
 
 test('clear requires exact revision and typed confirmation', async () => {
