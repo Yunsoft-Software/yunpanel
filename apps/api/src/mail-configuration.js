@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  MailTemplateError,
   mailTemplatePolicy,
   normalizeMailboxAddress,
   previewManagedMailConfiguration,
@@ -145,13 +146,25 @@ export function createMailConfigurationService({
     }
 
     const postmasterAddress = privateAccounts[0].address;
-    const preview = previewManagedMailConfiguration({
-      domains: resolved.domains,
-      mailboxes: privateAccounts.map((account) => account.address),
-      aliases,
-      accounts: privateAccounts,
-      postmasterAddress,
-    });
+    let preview;
+    try {
+      preview = previewManagedMailConfiguration({
+        domains: resolved.domains,
+        mailboxes: privateAccounts.map((account) => account.address),
+        aliases,
+        accounts: privateAccounts,
+        postmasterAddress,
+      });
+    } catch (error) {
+      if (error instanceof MailTemplateError) {
+        throw new MailConfigurationError(
+          'mail_configuration_state_invalid',
+          'Managed mail identity state is inconsistent and cannot be applied',
+          409,
+        );
+      }
+      throw error;
+    }
     return Object.freeze({
       ready: true,
       blockers: Object.freeze([]),
