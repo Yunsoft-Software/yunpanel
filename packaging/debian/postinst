@@ -13,6 +13,9 @@ fi
 if ! id yunpanel-roundcube >/dev/null 2>&1; then
   adduser --system --ingroup yunpanel-roundcube --home /var/lib/yunpanel/roundcube --no-create-home --shell /usr/sbin/nologin yunpanel-roundcube >/dev/null
 fi
+if getent group www-data >/dev/null; then
+  adduser yunpanel-roundcube www-data >/dev/null 2>&1 || true
+fi
 
 install -d -o yunpanel -g yunpanel -m 0700 /var/lib/yunpanel/control-plane
 install -d -o root -g root -m 0700 /var/lib/yunpanel/agent
