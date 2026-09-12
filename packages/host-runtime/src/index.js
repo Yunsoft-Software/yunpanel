@@ -21,6 +21,11 @@ export {
   mailConfigManagerInternals,
 } from './mail-config-manager.js';
 export {
+  createMailConfigBackupManager,
+  MailConfigBackupError,
+  mailConfigBackupInternals,
+} from './mail-config-backup.js';
+export {
   createAcmeManager,
   acmeManager,
   AcmeManagerError,
