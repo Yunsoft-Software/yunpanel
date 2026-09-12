@@ -14,11 +14,15 @@ test('production API constructs and shares the managed mail configuration servic
     text('app.js'),
   ]);
 
-  assert.match(indexSource, /createMailConfigurationService\(\{\s*mailDomainRegistry,\s*mailboxRegistry\s*\}\)/);
-  assert.match(indexSource, /createApp\(\{[\s\S]*?mailConfigurationService,[\s\S]*?\}\)/);
+  assert.match(indexSource, /createMailboxQuotaRegistry\(\{/);
+  assert.match(indexSource, /createMailConfigurationService\(\{[\s\S]*?mailDomainRegistry,[\s\S]*?mailboxRegistry,[\s\S]*?mailAliasRegistry,[\s\S]*?mailboxQuotaRegistry,[\s\S]*?\}\)/);
+  assert.match(indexSource, /createApp\(\{[\s\S]*?mailboxQuotaRegistry,[\s\S]*?mailConfigurationService,[\s\S]*?\}\)/);
   assert.match(indexSource, /startConfiguredLocalRuntime\(\{[\s\S]*?mailDomainRegistry,[\s\S]*?mailConfigurationService,[\s\S]*?\}\)/);
 
+  assert.match(appSource, /mountMailboxQuotaRoutes\(app,\s*\{[\s\S]*?mailboxQuotaRegistry,[\s\S]*?mailboxQuotaInspector,[\s\S]*?mailboxRegistry,[\s\S]*?\}\)/);
   assert.match(appSource, /mountMailConfigurationRoutes\(app,\s*\{[\s\S]*?mailConfigurationService,[\s\S]*?mailDomainRegistry,[\s\S]*?domainRegistry,[\s\S]*?jobRegistry,[\s\S]*?localServerId,[\s\S]*?\}\)/);
+  assert.match(appSource, /error instanceof MailboxQuotaRegistryError/);
+  assert.match(appSource, /error instanceof MailboxQuotaHttpError/);
   assert.match(appSource, /error instanceof MailConfigurationError/);
   assert.match(appSource, /error instanceof MailConfigurationHttpError/);
 });
