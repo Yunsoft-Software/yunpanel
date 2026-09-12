@@ -5,8 +5,9 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   mailForwardingTemplatePolicy,
+  mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
-  previewManagedMailForwardingConfiguration,
+  previewManagedMailSubmissionConfiguration,
 } from '@yunpanel/config-templates';
 import {
   createMailConfigBackupManager,
@@ -17,7 +18,7 @@ import {
 const ARGON2ID_HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 3).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 4).toString('base64').replace(/=+$/, '')}`;
 
 function preview() {
-  return previewManagedMailForwardingConfiguration({
+  return previewManagedMailSubmissionConfiguration({
     domains: ['example.com'],
     mailboxes: ['owner@example.com'],
     aliases: [{ source: 'info@example.com', destinations: ['owner@example.com'] }],
@@ -59,13 +60,17 @@ async function withTempDirectory(run) {
   finally { await rm(root, { recursive: true, force: true }); }
 }
 
-test('backs up mail sources, compiled maps/sieve, main.cf and managed directory state without exposing content', async () => withTempDirectory(async (root) => {
+test('backs up mail sources, compiled maps/sieve, main.cf/master.cf and managed directory state without exposing content', async () => withTempDirectory(async (root) => {
   const compiledDomainMap = mailConfigBackupInternals.postfixCompiledPaths[0];
+  const compiledSenderMap = `${mailSubmissionTemplatePolicy.senderLoginPath}.db`;
   const compiledSieve = mailConfigBackupInternals.sieveCompiledPath;
   const live = new Map([
     [mailTemplatePolicy.postfixVirtualDomainMapPath, Buffer.from('example.com OK\n')],
     [compiledDomainMap, Buffer.from('compiled-domain-map')],
+    [mailSubmissionTemplatePolicy.senderLoginPath, Buffer.from('owner@example.com owner@example.com\n')],
+    [compiledSenderMap, Buffer.from('compiled-sender-map')],
     [mailConfigBackupInternals.postfixMainCfPath, Buffer.from('myhostname = mail.example.com\n')],
+    [mailConfigBackupInternals.postfixMasterCfPath, Buffer.from('smtp inet n - y - - smtpd\n')],
     [mailTemplatePolicy.dovecotPasswdFilePath, Buffer.from(`owner@example.com:{ARGON2ID}${ARGON2ID_HASH}\n`)],
     [mailForwardingTemplatePolicy.sievePath, Buffer.from('require ["envelope", "copy"];\n')],
     [compiledSieve, Buffer.from('compiled-sieve')],
@@ -90,15 +95,17 @@ test('backs up mail sources, compiled maps/sieve, main.cf and managed directory 
   });
 
   const result = await manager.backupConfiguration(preview(), { transactionId: 'mail-job-0001' });
-  assert.equal(result.version, 3);
+  assert.equal(result.version, 4);
   assert.equal(result.transactionId, 'mail-job-0001');
   assert.equal(result.artifacts.length, mailConfigBackupInternals.targetPaths.length);
   assert.equal(result.directories.length, mailConfigBackupInternals.managedDirectoryPaths.length);
   assert.equal(JSON.stringify(result).includes(ARGON2ID_HASH), false);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === compiledDomainMap).present, true);
+  assert.equal(result.artifacts.find((entry) => entry.targetPath === compiledSenderMap).present, true);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === compiledSieve).present, true);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === mailForwardingTemplatePolicy.sievePath).present, true);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === mailConfigBackupInternals.postfixMainCfPath).present, true);
+  assert.equal(result.artifacts.find((entry) => entry.targetPath === mailConfigBackupInternals.postfixMasterCfPath).present, true);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === mailTemplatePolicy.dovecotPasswdFilePath).mode, 0o600);
   assert.equal(result.artifacts.find((entry) => entry.targetPath === mailTemplatePolicy.dovecotAuthConfigPath).present, false);
   assert.deepEqual(result.directories[0], { path: '/etc/yunpanel', present: true, mode: 0o755, uid: 0, gid: 0 });
@@ -130,6 +137,26 @@ test('fails closed when postfix main.cf is unavailable before apply backup', asy
   await assert.rejects(
     manager.backupConfiguration(preview(), { transactionId: 'mail-job-0002' }),
     (error) => error instanceof MailConfigBackupError && error.code === 'mail_postfix_main_cf_missing',
+  );
+}));
+
+test('fails closed when master.cf is unavailable after main.cf is present', async () => withTempDirectory(async (root) => {
+  const manager = createMailConfigBackupManager({
+    backupRoot: path.join(root, 'backup'),
+    liveLstatFn: async (targetPath) => {
+      if (targetPath === mailConfigBackupInternals.postfixMainCfPath) return regularStat({ mode: 0o644 });
+      if (targetPath === mailConfigBackupInternals.postfixMasterCfPath) throw missing();
+      if (mailConfigBackupInternals.managedDirectoryPaths.includes(targetPath)) throw missing();
+      throw missing();
+    },
+    liveReadFileFn: async (targetPath) => targetPath === mailConfigBackupInternals.postfixMainCfPath
+      ? Buffer.from('myhostname = mail.example.com\n')
+      : Buffer.alloc(0),
+  });
+
+  await assert.rejects(
+    manager.backupConfiguration(preview(), { transactionId: 'mail-job-0004' }),
+    (error) => error instanceof MailConfigBackupError && error.code === 'mail_postfix_master_cf_missing',
   );
 }));
 
