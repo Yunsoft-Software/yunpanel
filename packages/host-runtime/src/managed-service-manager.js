@@ -38,7 +38,11 @@ const SERVICE_CATALOG = Object.freeze([
     configurationChecks: [{ file: '/usr/sbin/postfix', args: ['check'] }],
   }),
   service({
-    id: 'dovecot', label: 'Dovecot', category: 'mail', packages: ['dovecot-imapd'], units: ['dovecot.service'],
+    id: 'dovecot',
+    label: 'Dovecot',
+    category: 'mail',
+    packages: ['dovecot-imapd', 'dovecot-lmtpd', 'dovecot-sieve'],
+    units: ['dovecot.service'],
     configurationChecks: [{ file: '/usr/bin/doveconf', args: ['-n'] }],
   }),
   service({
