@@ -49,6 +49,13 @@ const keyGenerationSideEffects = Object.freeze({
   requiresDnsPublish: true,
   requiresConfigurationApply: true,
 });
+const keyRotationSideEffects = Object.freeze({
+  mailConfigurationChanged: false,
+  mailDataChanged: false,
+  requiresDnsPublish: true,
+  requiresConfigurationApply: true,
+  requiresDnsRetirement: true,
+});
 const keyDeletionSideEffects = Object.freeze({
   mailConfigurationChanged: false,
   mailDataChanged: false,
@@ -79,6 +86,7 @@ async function scopedLocalMailDomain({ mailDomainRegistry, domainRegistry, mailD
 export function mountMailDkimRoutes(app, {
   mailDkimRegistry,
   mailDkimConfigurationService = null,
+  mailDkimRetirementRegistry = null,
   mailDkimRetirementInspector = createMailDkimRetirementInspector(),
   mailDomainRegistry,
   domainRegistry,
@@ -116,6 +124,24 @@ export function mountMailDkimRoutes(app, {
     return response.json({ data: await mailDkimRegistry.getKey(request.params.mailDomainId) });
   }));
 
+  app.get('/api/mail-domains/:mailDomainId/dkim/retirement', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    await scopedLocalMailDomain({
+      mailDomainRegistry,
+      domainRegistry,
+      mailDomainId: request.params.mailDomainId,
+      localServerId,
+    });
+    if (!mailDkimRetirementRegistry || typeof mailDkimRetirementRegistry.getRetirement !== 'function') {
+      throw new MailDkimHttpError(
+        'mail_dkim_retirement_state_unavailable',
+        'DKIM DNS retirement state is unavailable',
+        503,
+      );
+    }
+    return response.json({ data: await mailDkimRetirementRegistry.getRetirement(request.params.mailDomainId) });
+  }));
+
   app.post('/api/mail-domains/:mailDomainId/dkim', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
     const body = exactBody(request.body, CREATE_FIELDS, 'mail_dkim_create_input_invalid');
@@ -139,12 +165,34 @@ export function mountMailDkimRoutes(app, {
       localServerId,
     });
     if (typeof mailDkimRegistry.rotateKey !== 'function'
+      || !mailDkimRetirementRegistry
+      || typeof mailDkimRetirementRegistry.prepareRotation !== 'function'
+      || typeof mailDkimRetirementRegistry.confirmRotation !== 'function'
+      || typeof mailDkimRetirementRegistry.getRetirement !== 'function'
       || !jobRegistry || typeof jobRegistry.listJobs !== 'function') {
-      throw new MailDkimHttpError('mail_dkim_rotation_unavailable', 'DKIM rotation requires managed mail job coordination', 503);
+      throw new MailDkimHttpError('mail_dkim_rotation_unavailable', 'DKIM rotation requires managed mail and DNS retirement coordination', 503);
     }
     await ensureMailConfigurationIdle(jobRegistry, scoped.webDomain.serverId);
+    await mailDkimRetirementRegistry.prepareRotation(request.params.mailDomainId, {
+      expectedKeyRevision: body.expectedRevision,
+      targetSelector: body.selector,
+    });
     const key = await mailDkimRegistry.rotateKey(request.params.mailDomainId, body);
-    return response.json({ data: key, sideEffects: keyGenerationSideEffects });
+    let retirement;
+    try {
+      retirement = await mailDkimRetirementRegistry.confirmRotation(request.params.mailDomainId);
+    } catch {
+      throw new MailDkimHttpError(
+        'mail_dkim_rotation_retirement_unconfirmed',
+        'DKIM key rotation committed but previous-selector DNS retirement state could not be confirmed; refresh before further changes',
+        503,
+      );
+    }
+    return response.json({
+      data: key,
+      retirement,
+      sideEffects: keyRotationSideEffects,
+    });
   }));
 
   app.delete('/api/mail-domains/:mailDomainId/dkim', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -164,11 +212,20 @@ export function mountMailDkimRoutes(app, {
       );
     }
     if (typeof mailDkimRegistry.deleteKey !== 'function'
+      || !mailDkimRetirementRegistry || typeof mailDkimRetirementRegistry.getRetirement !== 'function'
       || !jobRegistry || typeof jobRegistry.listJobs !== 'function'
       || !mailDkimRetirementInspector || typeof mailDkimRetirementInspector.inspect !== 'function') {
       throw new MailDkimHttpError('mail_dkim_delete_unavailable', 'DKIM deletion safety checks are unavailable', 503);
     }
     await ensureMailConfigurationIdle(jobRegistry, scoped.webDomain.serverId);
+    const pendingRetirement = await mailDkimRetirementRegistry.getRetirement(request.params.mailDomainId);
+    if (pendingRetirement) {
+      throw new MailDkimHttpError(
+        'mail_dkim_retirement_pending',
+        'Retire the previous DKIM selector DNS record before deleting current private key state',
+        409,
+      );
+    }
     const key = await mailDkimRegistry.getKey(request.params.mailDomainId);
     if (!key) throw new MailDkimRegistryError('mail_dkim_key_not_found', 'DKIM key was not found', 404);
     let retirement;
@@ -258,6 +315,7 @@ export const mailDkimHttpInternals = Object.freeze({
   emptyQuery,
   scopedLocalMailDomain,
   keyGenerationSideEffects,
+  keyRotationSideEffects,
   keyDeletionSideEffects,
   rotateFields: ROTATE_FIELDS,
   deleteFields: DELETE_FIELDS,
