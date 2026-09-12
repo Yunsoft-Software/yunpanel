@@ -78,18 +78,22 @@ test('enabled local runtime hydrates Node environment only through the registry 
   assert.deepEqual(materialized, [['app-1', { expectedRevision: 7 }]]);
 });
 
-test('Roundcube desired state materializes only inside the local executor and persists secret-free recovery evidence', async () => {
+test('Roundcube desired state materializes only inside the local executor and persists secret-free web recovery evidence', async () => {
   const previewSha256 = 'a'.repeat(64);
   const configSha256 = 'b'.repeat(64);
   const fpmSha256 = 'c'.repeat(64);
+  const nginxSha256 = 'd'.repeat(64);
   const materializeCalls = [];
   const receiptWrites = [];
   let operationOptions;
   let startOptions;
   const bundle = {
-    preview: { sha256: previewSha256, configSha256, fpmSha256 },
+    preview: { sha256: previewSha256, configSha256, fpmSha256, nginxSha256 },
     sensitiveArtifacts: [{ path: '/etc/roundcube/config.inc.php', content: '$config[\'des_key\'] = \'private-only\';' }],
-    publicArtifacts: [{ path: '/etc/php/8.3/fpm/pool.d/roundcube.conf', content: '[roundcube]' }],
+    publicArtifacts: [
+      { path: '/etc/php/8.3/fpm/pool.d/roundcube.conf', content: '[roundcube]' },
+      { path: '/etc/nginx/sites-enabled/yunpanel-roundcube.conf', content: 'server {}' },
+    ],
   };
 
   await startConfiguredLocalRuntime({
@@ -133,7 +137,9 @@ test('Roundcube desired state materializes only inside the local executor and pe
       previewSha256,
       configSha256,
       fpmSha256,
+      nginxSha256,
       databaseCreated: true,
+      httpHealthy: true,
       applied: true,
       sideEffects: true,
     },
@@ -145,7 +151,9 @@ test('Roundcube desired state materializes only inside the local executor and pe
     previewSha256,
     configSha256,
     fpmSha256,
+    nginxSha256,
     databaseCreated: true,
+    httpHealthy: true,
     applied: true,
   }]);
   assert.doesNotMatch(JSON.stringify(receiptWrites), /private-only|des_key|content/i);
