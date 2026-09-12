@@ -27,6 +27,7 @@ import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from './doc
 import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
 import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
+import { createMailAliasRegistry, MailAliasRegistryError } from './mail-alias-registry.js';
 import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
 import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
@@ -114,7 +115,11 @@ export function createApp({
   mailboxRegistry = createMailboxRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
-  mailConfigurationService = createMailConfigurationService({ mailDomainRegistry, mailboxRegistry }),
+  mailAliasRegistry = createMailAliasRegistry({
+    getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
+    listMailboxes: (filter) => mailboxRegistry.listMailboxes(filter),
+  }),
+  mailConfigurationService = createMailConfigurationService({ mailDomainRegistry, mailboxRegistry, mailAliasRegistry }),
   environment = process.env.NODE_ENV,
   journalLogReader = null,
   nginxLogReader = null,
@@ -247,6 +252,7 @@ export function createApp({
       || error instanceof JobRegistryError
       || error instanceof LogHttpError
       || error instanceof ManagedServiceHttpError
+      || error instanceof MailAliasRegistryError
       || error instanceof MailConfigurationError
       || error instanceof MailConfigurationHttpError
       || error instanceof MailboxRegistryError
