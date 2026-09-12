@@ -33,6 +33,15 @@ export {
 } from './mail.js';
 
 export {
+  MailQuotaTemplateError,
+  mailQuotaTemplatePolicy,
+  previewManagedMailQuotaConfiguration,
+  renderDovecotQuotaAuthConfig,
+  renderDovecotQuotaMailConfig,
+  renderDovecotQuotaPasswdFile,
+} from './mail-quota.js';
+
+export {
   previewManagedMailEmptyConfiguration,
   renderDovecotEmptyManagedSetConfig,
 } from './mail-teardown.js';
