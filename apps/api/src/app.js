@@ -37,6 +37,8 @@ import { mountMailAliasRoutes } from './mail-alias-http.js';
 import { createMailAliasRegistry, MailAliasRegistryError } from './mail-alias-registry.js';
 import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
 import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
+import { mountMailDkimRoutes, MailDkimHttpError } from './mail-dkim-http.js';
+import { createMailDkimRegistry, MailDkimRegistryError } from './mail-dkim-registry.js';
 import { MailDiagnosticsHttpError, mountMailDiagnosticsRoutes } from './mail-diagnostics-http.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { mountMailboxForwardingRoutes } from './mailbox-forwarding-http.js';
@@ -126,6 +128,9 @@ export function createApp({
   dnsRecordManager = createCloudflareDnsManager(),
   mailDomainRegistry = createMailDomainRegistry({
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
+  }),
+  mailDkimRegistry = createMailDkimRegistry({
+    getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
   mailDiagnosticsInspector = createMailDiagnosticsInspector(),
   mailboxRegistry = createMailboxRegistry({
@@ -259,6 +264,12 @@ export function createApp({
     domainRegistry,
     localServerId,
   });
+  mountMailDkimRoutes(app, {
+    mailDkimRegistry,
+    mailDomainRegistry,
+    domainRegistry,
+    localServerId,
+  });
   mountMailDiagnosticsRoutes(app, {
     mailDiagnosticsInspector,
     mailDomainRegistry,
@@ -314,6 +325,8 @@ export function createApp({
       || error instanceof MailAliasRegistryError
       || error instanceof MailConfigurationError
       || error instanceof MailConfigurationHttpError
+      || error instanceof MailDkimHttpError
+      || error instanceof MailDkimRegistryError
       || error instanceof MailDiagnosticsHttpError
       || error instanceof MailDiagnosticsInspectorError
       || error instanceof MailboxForwardingRegistryError
