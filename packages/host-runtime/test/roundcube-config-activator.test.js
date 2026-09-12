@@ -220,9 +220,9 @@ test('fresh activation failure removes the newly-created database and restores a
       && error.code === 'roundcube_fpm_config_invalid',
   );
   assert.equal(fx.state.databaseExists, false);
-  assert.ok(fx.calls.some((entry) => entry[0] === 'restore'));
-  assert.equal(fx.calls.some((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/php'
-    && fx.state.restored), false);
+  const restoreIndex = fx.calls.findIndex((entry) => entry[0] === 'restore');
+  assert.ok(restoreIndex >= 0);
+  assert.equal(fx.calls.slice(restoreIndex + 1).some((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/php'), false);
 });
 
 test('missing www-data supplementary membership fails before backup or live mutation', async () => {
