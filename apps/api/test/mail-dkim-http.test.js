@@ -70,6 +70,7 @@ async function listen(t, auth) {
         };
         return state;
       },
+      async rotateKey() { throw new Error('not used'); },
     },
   });
   app.use((error, _request, response, _next) => {
