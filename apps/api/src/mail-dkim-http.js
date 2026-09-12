@@ -81,7 +81,7 @@ export function mountMailDkimRoutes(app, {
     throw new Error('Express application is required');
   }
   if (!mailDkimRegistry || typeof mailDkimRegistry.getKey !== 'function'
-    || typeof mailDkimRegistry.createKey !== 'function' || typeof mailDkimRegistry.rotateKey !== 'function') {
+    || typeof mailDkimRegistry.createKey !== 'function') {
     throw new Error('DKIM key registry is required');
   }
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
@@ -130,7 +130,8 @@ export function mountMailDkimRoutes(app, {
       mailDomainId: request.params.mailDomainId,
       localServerId,
     });
-    if (!jobRegistry || typeof jobRegistry.listJobs !== 'function') {
+    if (typeof mailDkimRegistry.rotateKey !== 'function'
+      || !jobRegistry || typeof jobRegistry.listJobs !== 'function') {
       throw new MailDkimHttpError('mail_dkim_rotation_unavailable', 'DKIM rotation requires managed mail job coordination', 503);
     }
     await ensureMailConfigurationIdle(jobRegistry, scoped.webDomain.serverId);
