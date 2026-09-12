@@ -254,7 +254,7 @@ export function createLocalHostOperations({
     assertMailExecutionContext(payload, execution);
     const bundle = await loadManagedDkimConfiguration(payload);
     if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)
-      || !bundle.preview || !Array.isArray(bundle.keys) || bundle.keys.length < 1) {
+      || !bundle.preview || !Array.isArray(bundle.keys)) {
       const error = new Error('Managed DKIM provider returned an invalid private bundle');
       error.code = 'mail_dkim_bundle_invalid';
       throw error;
