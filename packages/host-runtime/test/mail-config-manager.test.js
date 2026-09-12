@@ -68,7 +68,7 @@ test('stages the complete mail bundle atomically without returning protected con
   assert.equal(JSON.stringify(inspected).includes(ARGON2ID_HASH), false);
 }));
 
-test('fails closed when protected material is missing, unexpected or digest-mismatched', async () => withTempDirectory(async (root) => {
+test('fails closed when protected material is missing, unexpected, reordered or digest-mismatched', async () => withTempDirectory(async (root) => {
   const { preview, passwd } = fixture();
   const manager = createMailConfigManager({ stagingRoot: path.join(root, 'staging') });
 
@@ -84,6 +84,16 @@ test('fails closed when protected material is missing, unexpected or digest-mism
       ],
     }),
     (error) => error instanceof MailConfigManagerError && error.code === 'mail_sensitive_artifact_unexpected',
+  );
+  const reorderedPreview = {
+    ...preview,
+    artifacts: [preview.artifacts[1], preview.artifacts[0], ...preview.artifacts.slice(2)],
+  };
+  await assert.rejects(
+    manager.stageConfiguration(reorderedPreview, {
+      sensitiveArtifacts: [{ path: mailTemplatePolicy.dovecotPasswdFilePath, content: passwd }],
+    }),
+    (error) => error instanceof MailConfigManagerError && error.code === 'mail_artifact_order_invalid',
   );
   await assert.rejects(
     manager.stageConfiguration(preview, {
