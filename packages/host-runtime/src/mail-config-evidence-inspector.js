@@ -4,11 +4,12 @@ import { lstat, readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import {
   mailForwardingTemplatePolicy,
+  mailSubmissionTemplatePolicy,
   previewManagedMailApplyPlan,
 } from '@yunpanel/config-templates';
 import { mailConfigBackupInternals } from './mail-config-backup.js';
 import { createMailReadinessInspector } from './mail-readiness-inspector.js';
-import { parseManagedVmailIdentity } from './mail-vmail-identity.js';
+import { parseManagedSystemIdentity, parseManagedVmailIdentity } from './mail-vmail-identity.js';
 
 const execFileAsync = promisify(execFile);
 const MAX_OUTPUT = 128 * 1024;
@@ -17,7 +18,9 @@ const ROOT_GID = 0;
 const SENSITIVE_MODE = 0o600;
 const PUBLIC_MODE = 0o640;
 const SIEVE_SHARED_MODE = 0o640;
+const SUBMISSION_SOCKET_MODE = 0o660;
 const GETENT = '/usr/bin/getent';
+const POSTCONF = '/usr/sbin/postconf';
 
 export class MailConfigEvidenceError extends Error {
   constructor(code, message) {
@@ -52,11 +55,14 @@ export function createMailConfigEvidenceInspector({
     throw new MailConfigEvidenceError('mail_config_evidence_readiness_invalid', 'Managed mail readiness inspector is unavailable');
   }
 
-  async function resolveVmailIdentity() {
+  async function resolveSystemIdentity(name) {
     try {
-      const result = await run(GETENT, ['passwd', 'vmail'], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
+      const result = await run(GETENT, ['passwd', name], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
       boundedOutput(result?.stderr ?? '');
-      return parseManagedVmailIdentity(boundedOutput(result?.stdout ?? result));
+      const output = boundedOutput(result?.stdout ?? result);
+      return name === 'vmail'
+        ? parseManagedVmailIdentity(output)
+        : parseManagedSystemIdentity(output, name);
     } catch {
       return null;
     }
@@ -97,6 +103,17 @@ export function createMailConfigEvidenceInspector({
     }
   }
 
+  async function inspectSubmissionSocket(postfixIdentity) {
+    try {
+      const metadata = await lstatFn(mailSubmissionTemplatePolicy.dovecotAuthSocket);
+      return metadata.isSocket() && !metadata.isSymbolicLink()
+        && metadata.uid === postfixIdentity.uid && metadata.gid === postfixIdentity.gid
+        && (metadata.mode & 0o7777) === SUBMISSION_SOCKET_MODE;
+    } catch {
+      return false;
+    }
+  }
+
   async function commandSatisfied(command) {
     try {
       const result = await run(command.file, command.args, { timeout: 30_000, maxBuffer: MAX_OUTPUT });
@@ -110,8 +127,25 @@ export function createMailConfigEvidenceInspector({
 
   async function postfixParameterSatisfied(parameter) {
     try {
-      const result = await run('/usr/sbin/postconf', ['-h', parameter.name], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
+      const result = await run(POSTCONF, ['-h', parameter.name], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
       return boundedOutput(result?.stdout ?? result) === parameter.value;
+    } catch {
+      return false;
+    }
+  }
+
+  async function postfixMasterServiceSatisfied(service) {
+    const identity = `${service.service}/${service.type}`;
+    try {
+      const serviceResult = await run(POSTCONF, ['-M', identity], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
+      if (boundedOutput(serviceResult?.stdout ?? serviceResult).replace(/\s+/g, ' ')
+        !== service.definition.replace(/\s+/g, ' ')) return false;
+      for (const parameter of service.parameters) {
+        const key = `${identity}/${parameter.name}`;
+        const result = await run(POSTCONF, ['-P', key], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
+        if (boundedOutput(result?.stdout ?? result) !== `${key}=${parameter.value}`) return false;
+      }
+      return true;
     } catch {
       return false;
     }
@@ -119,8 +153,11 @@ export function createMailConfigEvidenceInspector({
 
   async function inspect(preview) {
     const plan = previewManagedMailApplyPlan(preview);
-    const vmailIdentity = await resolveVmailIdentity();
-    if (!vmailIdentity) return { satisfied: false, result: null };
+    const [vmailIdentity, postfixIdentity] = await Promise.all([
+      resolveSystemIdentity('vmail'),
+      resolveSystemIdentity('postfix'),
+    ]);
+    if (!vmailIdentity || !postfixIdentity) return { satisfied: false, result: null };
     for (const artifact of plan.artifacts) {
       if (!(await inspectArtifact(artifact, vmailIdentity.gid))) return { satisfied: false, result: null };
     }
@@ -131,12 +168,16 @@ export function createMailConfigEvidenceInspector({
     for (const parameter of plan.postfixParameters) {
       if (!(await postfixParameterSatisfied(parameter))) return { satisfied: false, result: null };
     }
+    for (const service of plan.postfixMasterServices) {
+      if (!(await postfixMasterServiceSatisfied(service))) return { satisfied: false, result: null };
+    }
     for (const command of plan.stages.validate) {
       if (!(await commandSatisfied(command))) return { satisfied: false, result: null };
     }
     for (const command of plan.stages.health) {
       if (!(await commandSatisfied(command))) return { satisfied: false, result: null };
     }
+    if (!(await inspectSubmissionSocket(postfixIdentity))) return { satisfied: false, result: null };
 
     let readiness;
     try { readiness = await readinessInspector.inspect(preview); }
@@ -168,5 +209,6 @@ export const mailConfigEvidenceInternals = Object.freeze({
   sensitiveMode: SENSITIVE_MODE,
   publicMode: PUBLIC_MODE,
   sieveSharedMode: SIEVE_SHARED_MODE,
+  submissionSocketMode: SUBMISSION_SOCKET_MODE,
   boundedOutput,
 });
