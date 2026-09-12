@@ -11,7 +11,13 @@ const fpmSha256 = 'c'.repeat(64);
 const nginxSha256 = 'e'.repeat(64);
 const payload = { previewSha256, configSha256, fpmSha256 };
 
-function fixture({ evidenceSatisfied = true, materializedPreview = previewSha256, httpHealthy = true } = {}) {
+function fixture({
+  evidenceSatisfied = true,
+  materializedPreview = previewSha256,
+  httpHealthy = true,
+  receiptNginxSha256 = nginxSha256,
+  receiptHttpHealthy = true,
+} = {}) {
   const calls = [];
   const job = {
     id: jobId,
@@ -53,7 +59,13 @@ function fixture({ evidenceSatisfied = true, materializedPreview = previewSha256
         resourceType: 'server', resourceId: serverId, payload,
       }),
       readOperationReceipt: async () => ({
-        serverId, jobId, ...payload, databaseCreated: true, applied: true,
+        serverId,
+        jobId,
+        ...payload,
+        nginxSha256: receiptNginxSha256,
+        databaseCreated: true,
+        httpHealthy: receiptHttpHealthy,
+        applied: true,
       }),
       materializeConfiguration: async (id, expected) => {
         calls.push(['materialize', id, expected]);
@@ -99,7 +111,15 @@ test('Roundcube lost acknowledgement closes only after receipt, desired state an
   });
 });
 
-test('Roundcube recovery remains unresolved when desired state, live files or HTTPS health drifted', async () => {
+test('Roundcube recovery remains unresolved when receipt, desired state, live files or HTTPS health drifted', async () => {
+  await assert.rejects(
+    recoverRunningRoundcubeConfig(fixture({ receiptHttpHealthy: false }).input),
+    { code: 'job_roundcube_recovery_receipt_mismatch' },
+  );
+  await assert.rejects(
+    recoverRunningRoundcubeConfig(fixture({ receiptNginxSha256: 'f'.repeat(64) }).input),
+    { code: 'job_roundcube_recovery_materialization_invalid' },
+  );
   await assert.rejects(
     recoverRunningRoundcubeConfig(fixture({ materializedPreview: 'd'.repeat(64) }).input),
     { code: 'job_roundcube_recovery_materialization_invalid' },
