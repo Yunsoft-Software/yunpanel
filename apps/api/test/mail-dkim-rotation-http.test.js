@@ -27,6 +27,7 @@ const readOnly = Object.freeze({
   security: { managementAllowed: false },
 });
 const publicKey = Buffer.alloc(256, 9).toString('base64');
+const oldPublicKey = Buffer.alloc(256, 8).toString('base64');
 
 async function listen(t, auth, { activeJobs = [] } = {}) {
   const calls = [];
@@ -60,6 +61,31 @@ async function listen(t, auth, { activeJobs = [] } = {}) {
           revision: input.expectedRevision + 1,
           createdAt: '2026-09-12T19:00:00.000Z',
           updatedAt: '2026-09-12T20:00:00.000Z',
+        };
+      },
+    },
+    mailDkimRetirementRegistry: {
+      async getRetirement(id) { calls.push(['retirement.get', id]); return null; },
+      async prepareRotation(id, input) {
+        calls.push(['retirement.prepare', id, structuredClone(input)]);
+        return { mailDomainId: id, phase: 'rotation_prepared' };
+      },
+      async confirmRotation(id) {
+        calls.push(['retirement.confirm', id]);
+        return {
+          mailDomainId: id,
+          domainName: mailDomain.domainName,
+          previousSelector: 'mail-2026a',
+          previousDnsRecord: {
+            type: 'TXT',
+            name: 'mail-2026a._domainkey.example.com',
+            value: `v=DKIM1; k=rsa; p=${oldPublicKey}`,
+          },
+          targetSelector: 'mail-2026b',
+          previousKeyRevision: 1,
+          currentKeyRevision: 2,
+          phase: 'dns_retirement_pending',
+          revision: 2,
         };
       },
     },
@@ -99,26 +125,31 @@ function rotate(base, body) {
   });
 }
 
-test('Owner rotates DKIM desired state only while managed mail jobs are idle', async (t) => {
+test('Owner rotates DKIM desired state only while managed mail jobs are idle and retirement intent is durable', async (t) => {
   const { base, calls } = await listen(t, owner);
   const response = await rotate(base, { expectedRevision: 1, selector: 'mail-2026b' });
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.data.revision, 2);
   assert.equal(body.data.selector, 'mail-2026b');
+  assert.equal(body.retirement.previousSelector, 'mail-2026a');
+  assert.equal(body.retirement.phase, 'dns_retirement_pending');
   assert.deepEqual(body.sideEffects, {
     mailConfigurationChanged: false,
     mailDataChanged: false,
     requiresDnsPublish: true,
     requiresConfigurationApply: true,
+    requiresDnsRetirement: true,
   });
   assert.deepEqual(calls, [
     ['listJobs', { serverId }],
+    ['retirement.prepare', mailDomain.id, { expectedKeyRevision: 1, targetSelector: 'mail-2026b' }],
     ['rotate', mailDomain.id, { expectedRevision: 1, selector: 'mail-2026b' }],
+    ['retirement.confirm', mailDomain.id],
   ]);
 });
 
-test('queued or running managed mail jobs block rotation before key generation', async (t) => {
+test('queued or running managed mail jobs block rotation before retirement intent or key generation', async (t) => {
   for (const status of ['queued', 'running']) {
     const { base, calls } = await listen(t, owner, {
       activeJobs: [{ operation: OPERATIONS.MAIL_DKIM_APPLY, status }],
