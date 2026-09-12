@@ -27,6 +27,8 @@ import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from './doc
 import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
 import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
+import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
+import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { createMailboxRegistry, MailboxRegistryError } from './mailbox-registry.js';
 import { mountMailboxRoutes } from './mailbox-http.js';
@@ -112,6 +114,7 @@ export function createApp({
   mailboxRegistry = createMailboxRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
+  mailConfigurationService = createMailConfigurationService({ mailDomainRegistry, mailboxRegistry }),
   environment = process.env.NODE_ENV,
   journalLogReader = null,
   nginxLogReader = null,
@@ -198,6 +201,13 @@ export function createApp({
     mailDomainRegistry,
   });
   mountMailboxRoutes(app, { mailboxRegistry, mailDomainRegistry, domainRegistry, localServerId });
+  mountMailConfigurationRoutes(app, {
+    mailConfigurationService,
+    mailDomainRegistry,
+    domainRegistry,
+    jobRegistry,
+    localServerId,
+  });
   mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry, localServerId });
   mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry, localServerId });
   mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry, localServerId });
@@ -237,6 +247,8 @@ export function createApp({
       || error instanceof JobRegistryError
       || error instanceof LogHttpError
       || error instanceof ManagedServiceHttpError
+      || error instanceof MailConfigurationError
+      || error instanceof MailConfigurationHttpError
       || error instanceof MailboxRegistryError
       || error instanceof MailboxPasswordError
       || error instanceof NodeRuntimeHttpError
