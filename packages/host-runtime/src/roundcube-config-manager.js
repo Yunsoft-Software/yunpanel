@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { roundcubeTemplatePolicy } from '@yunpanel/config-templates';
+import { roundcubeFpmTemplatePolicy, roundcubeTemplatePolicy } from '@yunpanel/config-templates';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const STAGE_DIRECTORY_MODE = 0o700;
 const STAGED_CONFIG_MODE = 0o600;
+const STAGED_PUBLIC_MODE = 0o640;
 
 export class RoundcubeConfigManagerError extends Error {
   constructor(code, message) {
@@ -19,17 +20,33 @@ function sha256(content) {
   return createHash('sha256').update(content).digest('hex');
 }
 
-function validatePreview(preview) {
+function validateArtifactPreview(preview, { path: expectedPath, sensitive, mode }, code) {
   if (!preview || typeof preview !== 'object' || Array.isArray(preview)
     || typeof preview.sha256 !== 'string' || !SHA256_PATTERN.test(preview.sha256)
-    || !preview.artifact || preview.artifact.path !== roundcubeTemplatePolicy.configPath
+    || !preview.artifact || preview.artifact.path !== expectedPath
     || preview.artifact.sha256 !== preview.sha256
-    || preview.artifact.sensitive !== true
-    || preview.artifact.mode !== roundcubeTemplatePolicy.configMode
+    || preview.artifact.sensitive !== sensitive
+    || preview.artifact.mode !== mode
     || !Number.isSafeInteger(preview.artifact.bytes) || preview.artifact.bytes < 1) {
-    throw new RoundcubeConfigManagerError('roundcube_preview_invalid', 'Roundcube configuration preview is invalid');
+    throw new RoundcubeConfigManagerError(code, 'Roundcube configuration preview is invalid');
   }
   return preview;
+}
+
+function validatePreview(preview) {
+  return validateArtifactPreview(preview, {
+    path: roundcubeTemplatePolicy.configPath,
+    sensitive: true,
+    mode: roundcubeTemplatePolicy.configMode,
+  }, 'roundcube_preview_invalid');
+}
+
+function validateFpmPreview(preview) {
+  return validateArtifactPreview(preview, {
+    path: roundcubeFpmTemplatePolicy.poolPath,
+    sensitive: false,
+    mode: roundcubeFpmTemplatePolicy.poolMode,
+  }, 'roundcube_fpm_preview_invalid');
 }
 
 export function createRoundcubeConfigManager({
@@ -58,6 +75,10 @@ export function createRoundcubeConfigManager({
     return path.join(stageDirectory(previewSha256), 'config.inc.php');
   }
 
+  function stagedFpmPath(previewSha256) {
+    return path.join(stageDirectory(previewSha256), 'yunpanel-roundcube-fpm.conf');
+  }
+
   async function ensureSafeDirectory(directory, mode) {
     try {
       const metadata = await lstatFn(directory);
@@ -75,53 +96,47 @@ export function createRoundcubeConfigManager({
     await chmodFn(directory, mode);
   }
 
-  async function atomicWrite(targetPath, content) {
+  async function atomicWrite(targetPath, content, mode) {
     const temporaryPath = `${targetPath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
     try {
-      await writeFileFn(temporaryPath, content, { encoding: 'utf8', mode: STAGED_CONFIG_MODE, flag: 'wx' });
+      await writeFileFn(temporaryPath, content, { encoding: 'utf8', mode, flag: 'wx' });
       await renameFn(temporaryPath, targetPath);
-      await chmodFn(targetPath, STAGED_CONFIG_MODE);
+      await chmodFn(targetPath, mode);
     } catch (error) {
       try { await rmFn(temporaryPath, { force: true }); } catch {}
       throw error;
     }
   }
 
-  async function stageConfiguration(preview, configContent) {
-    const expected = validatePreview(preview);
-    if (typeof configContent !== 'string'
-      || Buffer.byteLength(configContent) !== expected.artifact.bytes
-      || sha256(configContent) !== expected.artifact.sha256) {
-      throw new RoundcubeConfigManagerError(
-        'roundcube_sensitive_material_mismatch',
-        'Roundcube private configuration does not match the approved preview',
-      );
+  async function stageArtifact({ preview, content, validate, targetPath, mode, mismatchCode, failureCode, resultKey }) {
+    const expected = validate(preview);
+    if (typeof content !== 'string'
+      || Buffer.byteLength(content) !== expected.artifact.bytes
+      || sha256(content) !== expected.artifact.sha256) {
+      throw new RoundcubeConfigManagerError(mismatchCode, 'Roundcube staged material does not match the approved preview');
     }
     await ensureSafeDirectory(resolvedRoot, STAGE_DIRECTORY_MODE);
     const directory = stageDirectory(expected.sha256);
     await ensureSafeDirectory(directory, STAGE_DIRECTORY_MODE);
-    try {
-      await atomicWrite(stagedConfigPath(expected.sha256), configContent);
-    } catch (error) {
-      if (error instanceof RoundcubeConfigManagerError) throw error;
-      throw new RoundcubeConfigManagerError('roundcube_staging_failed', 'Roundcube private configuration could not be staged');
+    try { await atomicWrite(targetPath(expected.sha256), content, mode); }
+    catch {
+      throw new RoundcubeConfigManagerError(failureCode, 'Roundcube configuration could not be staged');
     }
     return Object.freeze({
       version: 1,
       previewSha256: expected.sha256,
-      configSha256: expected.artifact.sha256,
+      [resultKey]: expected.artifact.sha256,
       bytes: expected.artifact.bytes,
       staged: true,
     });
   }
 
-  async function inspectStagedConfiguration(preview) {
-    const expected = validatePreview(preview);
+  async function inspectArtifact({ preview, validate, targetPath, mode, resultKey }) {
+    const expected = validate(preview);
     try {
-      const filePath = stagedConfigPath(expected.sha256);
+      const filePath = targetPath(expected.sha256);
       const metadata = await lstatFn(filePath);
-      if (!metadata.isFile() || metadata.isSymbolicLink()
-        || (metadata.mode & 0o7777) !== STAGED_CONFIG_MODE) {
+      if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o7777) !== mode) {
         return Object.freeze({ satisfied: false, result: null });
       }
       const content = await readFileFn(filePath);
@@ -133,7 +148,7 @@ export function createRoundcubeConfigManager({
         result: Object.freeze({
           version: 1,
           previewSha256: expected.sha256,
-          configSha256: expected.artifact.sha256,
+          [resultKey]: expected.artifact.sha256,
           bytes: expected.artifact.bytes,
           staged: true,
         }),
@@ -144,17 +159,68 @@ export function createRoundcubeConfigManager({
     }
   }
 
+  function stageConfiguration(preview, configContent) {
+    return stageArtifact({
+      preview,
+      content: configContent,
+      validate: validatePreview,
+      targetPath: stagedConfigPath,
+      mode: STAGED_CONFIG_MODE,
+      mismatchCode: 'roundcube_sensitive_material_mismatch',
+      failureCode: 'roundcube_staging_failed',
+      resultKey: 'configSha256',
+    });
+  }
+
+  function stageFpmPool(preview, content) {
+    return stageArtifact({
+      preview,
+      content,
+      validate: validateFpmPreview,
+      targetPath: stagedFpmPath,
+      mode: STAGED_PUBLIC_MODE,
+      mismatchCode: 'roundcube_fpm_material_mismatch',
+      failureCode: 'roundcube_fpm_staging_failed',
+      resultKey: 'fpmSha256',
+    });
+  }
+
+  function inspectStagedConfiguration(preview) {
+    return inspectArtifact({
+      preview,
+      validate: validatePreview,
+      targetPath: stagedConfigPath,
+      mode: STAGED_CONFIG_MODE,
+      resultKey: 'configSha256',
+    });
+  }
+
+  function inspectStagedFpmPool(preview) {
+    return inspectArtifact({
+      preview,
+      validate: validateFpmPreview,
+      targetPath: stagedFpmPath,
+      mode: STAGED_PUBLIC_MODE,
+      resultKey: 'fpmSha256',
+    });
+  }
+
   return Object.freeze({
     stageConfiguration,
+    stageFpmPool,
     inspectStagedConfiguration,
+    inspectStagedFpmPool,
     stageDirectory,
     stagedConfigPath,
+    stagedFpmPath,
   });
 }
 
 export const roundcubeConfigManagerInternals = Object.freeze({
   validatePreview,
+  validateFpmPreview,
   sha256,
   stageDirectoryMode: STAGE_DIRECTORY_MODE,
   stagedConfigMode: STAGED_CONFIG_MODE,
+  stagedPublicMode: STAGED_PUBLIC_MODE,
 });
