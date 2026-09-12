@@ -78,11 +78,13 @@ function transitionPreview(resolved, materialized) {
 export function createMailConfigurationService({
   mailDomainRegistry,
   mailboxRegistry,
+  mailAliasRegistry,
 } = {}) {
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
     || typeof mailDomainRegistry.listMailDomains !== 'function'
     || !mailboxRegistry || typeof mailboxRegistry.listMailboxes !== 'function'
-    || typeof mailboxRegistry.materializeEnabledAccounts !== 'function') {
+    || typeof mailboxRegistry.materializeEnabledAccounts !== 'function'
+    || !mailAliasRegistry || typeof mailAliasRegistry.materializeEnabledAliases !== 'function') {
     throw new MailConfigurationError('mail_configuration_dependencies_invalid', 'Mail configuration registries are unavailable', 503);
   }
 
@@ -116,6 +118,9 @@ export function createMailConfigurationService({
     const privateAccounts = (await mailboxRegistry.materializeEnabledAccounts())
       .filter((account) => domainSet.has(normalizeMailboxAddress(account.address).domain))
       .sort((left, right) => left.address.localeCompare(right.address));
+    const aliases = (await mailAliasRegistry.materializeEnabledAliases())
+      .filter((alias) => domainSet.has(normalizeMailboxAddress(alias.source).domain))
+      .sort((left, right) => left.source.localeCompare(right.source));
 
     if (publicMailboxes.length !== privateAccounts.length
       || publicMailboxes.some((mailbox, index) => mailbox.address !== privateAccounts[index]?.address)) {
@@ -143,7 +148,7 @@ export function createMailConfigurationService({
     const preview = previewManagedMailConfiguration({
       domains: resolved.domains,
       mailboxes: privateAccounts.map((account) => account.address),
-      aliases: [],
+      aliases,
       accounts: privateAccounts,
       postmasterAddress,
     });
