@@ -99,7 +99,7 @@ export function createMailConfigurationService({
     if (candidate.revision !== normalized.expectedRevision) {
       throw new MailConfigurationError('mail_domain_revision_conflict', 'Mail domain changed after the transition was prepared', 409);
     }
-    if (candidate.status === normalized.status) {
+    if (candidate.status === normalized.status && normalized.status !== 'enabled') {
       throw new MailConfigurationError('mail_domain_status_no_change', 'Mail domain already has the requested status', 409);
     }
 
