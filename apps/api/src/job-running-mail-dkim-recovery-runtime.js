@@ -35,7 +35,7 @@ function resolveMailDkimRecoveryPaths({ env, packaged, cwd }) {
     { packaged, cwd, label: 'mail domain' },
   );
   const mailDkimKeyRoot = jobRecoveryRuntimeInternals.resolveRecoveryStorePath(
-    env.YUNPANEL_MAIL_DKIM_KEY_ROOT,
+    env.YUNPANEL_MAIL_DKIM_ROOT,
     path.join(defaultRoot, 'mail-dkim'),
     { packaged, cwd, label: 'mail dkim key root' },
   );
