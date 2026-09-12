@@ -11,6 +11,7 @@ import {
   lstat,
   mkdir,
   readFile,
+  readdir,
   rename,
   rm,
   rmdir,
@@ -22,6 +23,7 @@ import {
   mailDkimTemplatePolicy,
   previewRspamdDkimSigningConfig,
 } from '@yunpanel/config-templates';
+import { normalizeDomainSet } from '@yunpanel/shared';
 import { parseManagedRspamdIdentity } from './mail-rspamd-identity.js';
 
 const execFileAsync = promisify(execFile);
@@ -38,6 +40,7 @@ const LIVE_KEY_DIRECTORY_MODE = 0o750;
 const BACKUP_DIRECTORY_MODE = 0o700;
 const MAX_OUTPUT = 128 * 1024;
 const MAX_PRIVATE_KEY_BYTES = 16 * 1024;
+const MAX_LIVE_KEY_FILES = 2_000;
 const TRANSACTION_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const MANIFEST_FILE = 'manifest.json';
 const MANIFEST_VERSION = 1;
@@ -125,6 +128,24 @@ function normalizeBundle(bundle) {
   return Object.freeze({ preview: expected, keys: Object.freeze(normalizedKeys) });
 }
 
+function managedKeyFileName(fileName) {
+  if (typeof fileName !== 'string' || fileName.length < 7 || fileName.length > 300
+    || !fileName.endsWith('.key') || fileName.includes('/') || fileName.includes('\\')) return null;
+  const stem = fileName.slice(0, -4);
+  const separator = stem.lastIndexOf('.');
+  if (separator < 1 || separator === stem.length - 1) return null;
+  const domain = stem.slice(0, separator);
+  const selector = stem.slice(separator + 1);
+  let canonical;
+  try { canonical = normalizeDomainSet(domain, []).primary; }
+  catch { return null; }
+  if (canonical !== domain || !mailDkimTemplatePolicy.selectorPattern.test(selector)) return null;
+  const targetPath = mailDkimTemplatePolicy.keyPath(domain, selector);
+  return path.basename(targetPath) === fileName
+    ? Object.freeze({ fileName, domain, selector, targetPath })
+    : null;
+}
+
 function backupName(index, targetPath) {
   return `${String(index).padStart(2, '0')}-${path.basename(targetPath)}.bak`;
 }
@@ -151,6 +172,7 @@ export function createMailDkimActivator({
   lstatFn = lstat,
   mkdirFn = mkdir,
   readFileFn = readFile,
+  readdirFn = readdir,
   renameFn = rename,
   rmFn = rm,
   rmdirFn = rmdir,
@@ -219,6 +241,32 @@ export function createMailDkimActivator({
     }
   }
 
+  async function inspectManagedLiveKeyPaths() {
+    const root = await inspectDirectory(mailDkimTemplatePolicy.keyRoot);
+    if (!root.present) return Object.freeze([]);
+    let entries;
+    try { entries = await readdirFn(mailDkimTemplatePolicy.keyRoot, { withFileTypes: true }); }
+    catch { throw activationError('mail_dkim_live_key_root_unavailable', 'Managed DKIM live key root could not be inspected'); }
+    if (!Array.isArray(entries) || entries.length > MAX_LIVE_KEY_FILES) {
+      throw activationError('mail_dkim_live_key_root_invalid', 'Managed DKIM live key root exceeds its bounded file policy');
+    }
+    const paths = [];
+    for (const entry of entries) {
+      const parsed = managedKeyFileName(entry?.name);
+      if (!parsed || !entry.isFile() || entry.isSymbolicLink()) {
+        throw activationError('mail_dkim_live_key_entry_unsafe', 'Managed DKIM live key root contains an unexpected entry');
+      }
+      let metadata;
+      try { metadata = await lstatFn(parsed.targetPath); }
+      catch { throw activationError('mail_dkim_live_key_entry_unsafe', 'Managed DKIM live key entry could not be inspected'); }
+      if (!metadata.isFile() || metadata.isSymbolicLink()) {
+        throw activationError('mail_dkim_live_key_entry_unsafe', 'Managed DKIM live key entry is unsafe');
+      }
+      paths.push(parsed.targetPath);
+    }
+    return Object.freeze([...new Set(paths)].sort());
+  }
+
   async function assertRspamdDirectoriesSafe() {
     for (const directoryPath of ['/etc/rspamd', '/etc/rspamd/local.d']) {
       const snapshot = await inspectDirectory(directoryPath);
@@ -271,6 +319,9 @@ export function createMailDkimActivator({
   }
 
   async function createBackup(bundle, tx) {
+    const liveKeyPaths = await inspectManagedLiveKeyPaths();
+    const desiredKeyPaths = bundle.keys.map((entry) => entry.targetPath);
+    const keyTargets = [...new Set([...liveKeyPaths, ...desiredKeyPaths])].sort();
     const directory = path.join(backupRoot, tx);
     await mkdirFn(backupRoot, { recursive: true, mode: BACKUP_DIRECTORY_MODE });
     await chmodFn(backupRoot, BACKUP_DIRECTORY_MODE);
@@ -288,10 +339,7 @@ export function createMailDkimActivator({
       await inspectDirectory(LIVE_KEY_PARENT),
       await inspectDirectory(mailDkimTemplatePolicy.keyRoot),
     ]);
-    const targetPaths = [
-      mailDkimTemplatePolicy.configPath,
-      ...bundle.keys.map((entry) => entry.targetPath),
-    ];
+    const targetPaths = [mailDkimTemplatePolicy.configPath, ...keyTargets];
     const artifacts = [];
     for (let index = 0; index < targetPaths.length; index += 1) {
       artifacts.push(await snapshotArtifact(targetPaths[index], index, directory));
@@ -389,7 +437,7 @@ export function createMailDkimActivator({
     }
   }
 
-  async function replaceLive(bundle, rspamdGid, onMutation) {
+  async function replaceLive(bundle, rspamdGid, manifest, onMutation) {
     onMutation();
     try {
       await atomicReplace(mailDkimTemplatePolicy.configPath, bundle.preview.artifact.content, {
@@ -400,7 +448,9 @@ export function createMailDkimActivator({
     } catch {
       throw activationError('mail_dkim_config_replace_failed', 'Rspamd DKIM signing configuration could not be replaced');
     }
+    const desired = new Set();
     for (const key of bundle.keys) {
+      desired.add(key.targetPath);
       onMutation();
       try {
         await atomicReplace(key.targetPath, key.privateKey, {
@@ -411,6 +461,13 @@ export function createMailDkimActivator({
       } catch {
         throw activationError('mail_dkim_key_replace_failed', 'Rspamd DKIM private key could not be replaced');
       }
+    }
+    for (const artifact of manifest.artifacts) {
+      if (!artifact.targetPath.startsWith(`${mailDkimTemplatePolicy.keyRoot}/`)
+        || !artifact.present || desired.has(artifact.targetPath)) continue;
+      onMutation();
+      try { await rmFn(artifact.targetPath, { force: false }); }
+      catch { throw activationError('mail_dkim_stale_key_remove_failed', 'Stale managed DKIM private key could not be removed'); }
     }
   }
 
@@ -438,6 +495,12 @@ export function createMailDkimActivator({
       if (publicKeyFromPrivate(content) !== key.publicKey) {
         throw activationError('mail_dkim_live_state_invalid', 'Rspamd DKIM private key does not match desired public key');
       }
+    }
+    const livePaths = await inspectManagedLiveKeyPaths();
+    const desiredPaths = bundle.keys.map((entry) => entry.targetPath).sort();
+    if (livePaths.length !== desiredPaths.length
+      || livePaths.some((value, index) => value !== desiredPaths[index])) {
+      throw activationError('mail_dkim_live_state_invalid', 'Managed DKIM live key set contains stale or missing private keys');
     }
   }
 
@@ -510,7 +573,7 @@ export function createMailDkimActivator({
     const markMutation = () => { mutationStarted = true; };
     try {
       await ensureLiveKeyDirectories(rspamd, manifest, markMutation);
-      await replaceLive(bundle, rspamd.gid, markMutation);
+      await replaceLive(bundle, rspamd.gid, manifest, markMutation);
       await runCommand(RSPAMADM, ['configtest'], 'mail_dkim_config_validation_failed', 'Rspamd DKIM signing configuration is invalid');
       await runCommand(SYSTEMCTL, ['reload', 'rspamd'], 'mail_dkim_reload_failed', 'Rspamd could not reload DKIM signing configuration');
       await runCommand(SYSTEMCTL, ['is-active', '--quiet', 'rspamd'], 'mail_dkim_health_failed', 'Rspamd is not healthy after DKIM activation');
@@ -547,7 +610,9 @@ export const mailDkimActivatorInternals = Object.freeze({
   liveKeyMode: LIVE_KEY_MODE,
   liveKeyDirectoryMode: LIVE_KEY_DIRECTORY_MODE,
   maxPrivateKeyBytes: MAX_PRIVATE_KEY_BYTES,
+  maxLiveKeyFiles: MAX_LIVE_KEY_FILES,
   normalizeBundle,
   publicKeyFromPrivate,
+  managedKeyFileName,
   directoryTraversableBy,
 });
