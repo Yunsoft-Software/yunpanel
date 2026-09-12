@@ -77,6 +77,11 @@ export {
   roundcubeConfigManagerInternals,
 } from './roundcube-config-manager.js';
 export {
+  createRoundcubeConfigBackupManager,
+  RoundcubeConfigBackupError,
+  roundcubeConfigBackupInternals,
+} from './roundcube-config-backup.js';
+export {
   createAcmeManager,
   acmeManager,
   AcmeManagerError,
