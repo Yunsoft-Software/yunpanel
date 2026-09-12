@@ -35,6 +35,7 @@ import { createMailDkimConfigurationService } from './mail-dkim-configuration.js
 import { createMailDkimRegistry } from './mail-dkim-registry.js';
 import { createMailDkimRetirementRegistry } from './mail-dkim-retirement-registry.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
+import { createMailServiceIdentityRegistry } from './mail-service-identity-registry.js';
 import { createMailboxForwardingRegistry } from './mailbox-forwarding-registry.js';
 import { createMailboxQuotaRegistry } from './mailbox-quota-registry.js';
 import { createMailboxRegistry } from './mailbox-registry.js';
@@ -65,6 +66,8 @@ const mailDomainStorePath = process.env.YUNPANEL_MAIL_DOMAIN_STORE ?? path.resol
 const mailDkimRootPath = process.env.YUNPANEL_MAIL_DKIM_ROOT ?? path.resolve('.data/mail-dkim');
 const mailDkimRetirementStorePath = process.env.YUNPANEL_MAIL_DKIM_RETIREMENT_STORE
   ?? path.resolve('.data/mail-dkim-retirement-registry.json');
+const mailServiceIdentityStorePath = process.env.YUNPANEL_MAIL_SERVICE_IDENTITY_STORE
+  ?? path.resolve('.data/mail-service-identity-registry.json');
 const mailboxStorePath = process.env.YUNPANEL_MAILBOX_STORE ?? path.resolve('.data/mailbox-registry.json');
 const mailboxQuotaStorePath = process.env.YUNPANEL_MAILBOX_QUOTA_STORE ?? path.resolve('.data/mailbox-quota-registry.json');
 const mailboxForwardingStorePath = process.env.YUNPANEL_MAILBOX_FORWARDING_STORE ?? path.resolve('.data/mailbox-forwarding-registry.json');
@@ -148,6 +151,12 @@ const dnsProviderCredentialRegistry = createDnsProviderCredentialRegistry({
   getDnsZone: async (dnsZoneId) => dnsHostingRegistry.getZone(dnsZoneId),
 });
 await dnsProviderCredentialRegistry.init();
+const mailServiceIdentityRegistry = createMailServiceIdentityRegistry({
+  filePath: mailServiceIdentityStorePath,
+  getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
+  getCertificate: async (certificateId) => certificateRegistry.getCertificate(certificateId),
+});
+await mailServiceIdentityRegistry.init();
 const mailDomainRegistry = createMailDomainRegistry({
   filePath: mailDomainStorePath,
   getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
@@ -197,6 +206,8 @@ const mailConfigurationService = createMailConfigurationService({
   mailAliasRegistry,
   mailboxQuotaRegistry,
   mailboxForwardingRegistry,
+  domainRegistry,
+  mailServiceIdentityRegistry,
 });
 const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   filePath: applicationEnvironmentStorePath,
@@ -252,6 +263,7 @@ const listener = createAuthenticatedApi({
     mailDkimRetirementRegistry,
     mailDiagnosticsInspector,
     mailDkimConfigurationService,
+    mailServiceIdentityRegistry,
     mailboxRegistry,
     mailboxQuotaRegistry,
     mailboxForwardingRegistry,
@@ -328,6 +340,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] mail Domain store=${mailDomainStorePath}`);
   console.log(`[yunpanel-api] mail DKIM root=${mailDkimRootPath}`);
   console.log(`[yunpanel-api] mail DKIM retirement store=${mailDkimRetirementStorePath}`);
+  console.log(`[yunpanel-api] mail service identity store=${mailServiceIdentityStorePath}`);
   console.log(`[yunpanel-api] mailbox store=${mailboxStorePath}`);
   console.log(`[yunpanel-api] mailbox quota store=${mailboxQuotaStorePath}`);
   console.log(`[yunpanel-api] mailbox forwarding store=${mailboxForwardingStorePath}`);
