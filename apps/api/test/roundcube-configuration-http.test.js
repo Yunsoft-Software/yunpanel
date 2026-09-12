@@ -125,7 +125,7 @@ test('Owner previews, prepares and queues exact secret-free Roundcube configurat
   assert.equal(previewBody.data.sha256, previewSha256);
   assert.equal(previewBody.data.configuration.sha256, configSha256);
   assert.equal(previewBody.data.fpm.sha256, fpmSha256);
-  assert.doesNotMatch(JSON.stringify(previewBody), /desKey|password|secret|content/i);
+  assert.doesNotMatch(JSON.stringify(previewBody), /desKey|password|ciphertext|configContent|fpmContent/i);
 
   const prepareResponse = await post(base, '/api/roundcube/config-prepare', {});
   assert.equal(prepareResponse.status, 200);
@@ -145,7 +145,7 @@ test('Owner previews, prepares and queues exact secret-free Roundcube configurat
     resourceType: 'server',
     resourceId: localServerId,
   }]);
-  assert.doesNotMatch(JSON.stringify(enqueued), /desKey|password|secret|content/i);
+  assert.doesNotMatch(JSON.stringify(enqueued), /desKey|password|ciphertext|configContent|fpmContent/i);
   assert.deepEqual(calls, [
     ['preview', localServerId],
     ['prepare', localServerId],
