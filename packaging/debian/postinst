@@ -7,9 +7,17 @@ fi
 if ! id yunpanel >/dev/null 2>&1; then
   adduser --system --ingroup yunpanel --home /var/lib/yunpanel --no-create-home yunpanel >/dev/null
 fi
+if ! getent group yunpanel-roundcube >/dev/null; then
+  addgroup --system yunpanel-roundcube >/dev/null
+fi
+if ! id yunpanel-roundcube >/dev/null 2>&1; then
+  adduser --system --ingroup yunpanel-roundcube --home /var/lib/yunpanel/roundcube --no-create-home --shell /usr/sbin/nologin yunpanel-roundcube >/dev/null
+fi
 
 install -d -o yunpanel -g yunpanel -m 0700 /var/lib/yunpanel/control-plane
 install -d -o root -g root -m 0700 /var/lib/yunpanel/agent
+install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel/roundcube
+install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel/roundcube/tmp
 install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/control-plane
 install -d -o root -g root -m 0700 /etc/yunpanel/agent
 install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/web
@@ -45,6 +53,10 @@ if [ -f "$api_env" ]; then
   fi
   if ! grep -q '^YUNPANEL_MAIL_SERVICE_IDENTITY_STORE=' "$api_env"; then
     printf '%s\n' 'YUNPANEL_MAIL_SERVICE_IDENTITY_STORE=/var/lib/yunpanel/control-plane/mail-service-identity-registry.json' >>"$api_temp"
+    api_changed=1
+  fi
+  if ! grep -q '^YUNPANEL_ROUNDCUBE_SECRET_STORE=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_ROUNDCUBE_SECRET_STORE=/var/lib/yunpanel/control-plane/roundcube-secret-registry.json' >>"$api_temp"
     api_changed=1
   fi
   if ! grep -q '^YUNPANEL_MAILBOX_STORE=' "$api_env"; then
