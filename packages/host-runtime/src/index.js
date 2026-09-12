@@ -72,6 +72,11 @@ export {
   parseDoveadmQuotaTab,
 } from './mailbox-quota-inspector.js';
 export {
+  createRoundcubeConfigManager,
+  RoundcubeConfigManagerError,
+  roundcubeConfigManagerInternals,
+} from './roundcube-config-manager.js';
+export {
   createAcmeManager,
   acmeManager,
   AcmeManagerError,
