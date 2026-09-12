@@ -15,6 +15,7 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const TRANSACTION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_OUTPUT = 128 * 1024;
 const GETENT = '/usr/bin/getent';
+const ID = '/usr/bin/id';
 const PHP = '/usr/bin/php';
 const PHP_FPM = '/usr/sbin/php-fpm8.3';
 const SQLITE = '/usr/bin/sqlite3';
@@ -103,7 +104,8 @@ export function createRoundcubeConfigActivator({
     throw activationError('roundcube_config_manager_invalid', 'Roundcube staging manager is unavailable');
   }
   if (!backupManager || typeof backupManager.backupConfiguration !== 'function'
-    || typeof backupManager.restoreConfiguration !== 'function') {
+    || typeof backupManager.restoreConfiguration !== 'function'
+    || typeof backupManager.loadManifest !== 'function') {
     throw activationError('roundcube_backup_manager_invalid', 'Roundcube backup manager is unavailable');
   }
 
@@ -127,6 +129,22 @@ export function createRoundcubeConfigActivator({
       return identity;
     } catch {
       throw activationError(code, 'Roundcube runtime identity could not be resolved safely');
+    }
+  }
+
+  async function assertPackageGroupMembership() {
+    try {
+      const result = await run(ID, ['-nG', roundcubeFpmTemplatePolicy.runtimeUser], {
+        timeout: 10_000,
+        maxBuffer: MAX_OUTPUT,
+      });
+      const groups = new Set(boundedOutput(result).split(/\s+/).filter(Boolean));
+      if (!groups.has('www-data')) throw new Error('missing package config group');
+    } catch {
+      throw activationError(
+        'roundcube_runtime_group_unavailable',
+        'Roundcube runtime user is not allowed to traverse the package configuration group',
+      );
     }
   }
 
@@ -236,13 +254,16 @@ export function createRoundcubeConfigActivator({
     await assertDatabaseHealthy(runtimeIdentity);
   }
 
-  async function validatePhpAndFpm() {
+  async function validatePhpConfig() {
     await runCommand(
       PHP,
       ['-l', roundcubeTemplatePolicy.configPath],
       'roundcube_php_config_invalid',
       'Roundcube PHP configuration validation failed',
     );
+  }
+
+  async function validateFpmConfig() {
     await runCommand(
       PHP_FPM,
       ['-t'],
@@ -251,7 +272,7 @@ export function createRoundcubeConfigActivator({
     );
   }
 
-  async function reloadAndCheckFpm(wwwIdentity) {
+  async function reloadFpm() {
     await runCommand(
       SYSTEMCTL,
       ['reload', roundcubeFpmTemplatePolicy.serviceUnit],
@@ -264,25 +285,37 @@ export function createRoundcubeConfigActivator({
       'roundcube_fpm_health_failed',
       'Roundcube PHP-FPM service is not active',
     );
+  }
+
+  async function assertFpmSocket(wwwIdentity, expectedPresent = true) {
     try {
       const metadata = await lstatFn(roundcubeFpmTemplatePolicy.socketPath);
+      if (!expectedPresent) throw new Error('unexpected fpm socket');
       if (!metadata.isSocket() || metadata.isSymbolicLink()
         || metadata.uid !== wwwIdentity.uid || metadata.gid !== wwwIdentity.gid
         || (metadata.mode & 0o7777) !== SOCKET_MODE) {
         throw new Error('unsafe fpm socket');
       }
-    } catch {
-      throw activationError('roundcube_fpm_socket_invalid', 'Roundcube PHP-FPM socket is unavailable or unsafe');
+    } catch (error) {
+      if (!expectedPresent && error?.code === 'ENOENT') return;
+      throw activationError(
+        expectedPresent ? 'roundcube_fpm_socket_invalid' : 'roundcube_fpm_socket_not_retired',
+        expectedPresent
+          ? 'Roundcube PHP-FPM socket is unavailable or unsafe'
+          : 'Roundcube PHP-FPM socket remained after rollback',
+      );
     }
   }
 
   async function rollback(transactionId, runtimeIdentity, wwwIdentity) {
     try {
-      await backupManager.restoreConfiguration(transactionId);
-      await validatePhpAndFpm();
-      await reloadAndCheckFpm(wwwIdentity);
-      const databaseExists = await inspectDatabase(runtimeIdentity);
       const manifest = await backupManager.loadManifest(transactionId);
+      await backupManager.restoreConfiguration(transactionId);
+      if (manifest.files[0].exists) await validatePhpConfig();
+      await validateFpmConfig();
+      await reloadFpm();
+      await assertFpmSocket(wwwIdentity, manifest.files[1].exists);
+      const databaseExists = await inspectDatabase(runtimeIdentity);
       if (databaseExists !== manifest.databaseExisted) throw new Error('database rollback mismatch');
       if (databaseExists) await assertDatabaseHealthy(runtimeIdentity);
     } catch {
@@ -297,6 +330,7 @@ export function createRoundcubeConfigActivator({
       resolveIdentity(roundcubeFpmTemplatePolicy.runtimeUser, 'roundcube_runtime_identity_unavailable'),
       resolveIdentity(roundcubeFpmTemplatePolicy.socketOwner, 'roundcube_web_identity_unavailable'),
     ]);
+    await assertPackageGroupMembership();
     await Promise.all([
       assertDirectory('/var/lib/yunpanel/roundcube', {
         uid: runtimeIdentity.uid, gid: runtimeIdentity.gid, mode: PRIVATE_DIRECTORY_MODE,
@@ -343,8 +377,10 @@ export function createRoundcubeConfigActivator({
       const databaseExists = await inspectDatabase(runtimeIdentity);
       if (!databaseExists) await bootstrapDatabase(runtimeIdentity);
       else await assertDatabaseHealthy(runtimeIdentity);
-      await validatePhpAndFpm();
-      await reloadAndCheckFpm(wwwIdentity);
+      await validatePhpConfig();
+      await validateFpmConfig();
+      await reloadFpm();
+      await assertFpmSocket(wwwIdentity, true);
       return Object.freeze({
         version: 1,
         previewSha256: expected.sha256,
@@ -373,6 +409,7 @@ export function createRoundcubeConfigActivator({
 
 export const roundcubeConfigActivatorInternals = Object.freeze({
   getentPath: GETENT,
+  idPath: ID,
   phpPath: PHP,
   phpFpmPath: PHP_FPM,
   sqlitePath: SQLITE,
