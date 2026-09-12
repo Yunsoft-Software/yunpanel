@@ -24,10 +24,18 @@ const PLAN_ARTIFACT_PATHS = Object.freeze([
   mailTemplatePolicy.dovecotMailConfigPath,
   mailTemplatePolicy.rspamdProxyConfigPath,
 ]);
+const POSTFIX_COMPILED_PATHS = Object.freeze([
+  `${mailTemplatePolicy.postfixVirtualDomainMapPath}.db`,
+  `${mailTemplatePolicy.postfixVirtualMailboxMapPath}.db`,
+  `${mailTemplatePolicy.postfixVirtualAliasMapPath}.db`,
+]);
 const BACKUP_TARGET_PATHS = Object.freeze([
   mailTemplatePolicy.postfixVirtualDomainMapPath,
+  POSTFIX_COMPILED_PATHS[0],
   mailTemplatePolicy.postfixVirtualMailboxMapPath,
+  POSTFIX_COMPILED_PATHS[1],
   mailTemplatePolicy.postfixVirtualAliasMapPath,
+  POSTFIX_COMPILED_PATHS[2],
   POSTFIX_MAIN_CF_PATH,
   mailTemplatePolicy.dovecotPasswdFilePath,
   mailTemplatePolicy.dovecotAuthConfigPath,
@@ -284,6 +292,7 @@ export function createMailConfigBackupManager({
 export const mailConfigBackupInternals = Object.freeze({
   defaultBackupRoot: DEFAULT_BACKUP_ROOT,
   planArtifactPaths: PLAN_ARTIFACT_PATHS,
+  postfixCompiledPaths: POSTFIX_COMPILED_PATHS,
   targetPaths: BACKUP_TARGET_PATHS,
   postfixMainCfPath: POSTFIX_MAIN_CF_PATH,
   directoryMode: DIRECTORY_MODE,
