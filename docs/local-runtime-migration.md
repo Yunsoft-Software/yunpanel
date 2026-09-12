@@ -279,7 +279,7 @@ sudo systemctl disable yun-agent.service
 sudo systemctl start yunpanel-api.service
 ```
 
-Do not start `yun-agent.service` while that server registry record is `executionMode=local`. Retained legacy heartbeat/command/environment/result routes are expected to reject a locally owned server with `server_managed_locally`.
+Do not start `yun-agent.service` while that server registry record is `executionMode=local`. Retained legacy heartbeat/command/environment/result routes are outside the local-owner production surface and must return `404 agent_transport_removed`; they must not expose the earlier `server_managed_locally` compatibility response through the public listener.
 
 ### A5. Validate the local runtime before functional tests
 
