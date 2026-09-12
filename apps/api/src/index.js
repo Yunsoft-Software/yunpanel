@@ -40,6 +40,8 @@ import { createMailboxForwardingRegistry } from './mailbox-forwarding-registry.j
 import { createMailboxQuotaRegistry } from './mailbox-quota-registry.js';
 import { createMailboxRegistry } from './mailbox-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
+import { createRoundcubeConfigurationService } from './roundcube-configuration.js';
+import { createRoundcubeSecretRegistry } from './roundcube-secret-registry.js';
 import { createServerRegistry } from './server-registry.js';
 import { createTerminalCapabilityRegistry } from './terminal-capability-registry.js';
 import { createTerminalProcessManager } from './terminal-process-manager.js';
@@ -68,6 +70,8 @@ const mailDkimRetirementStorePath = process.env.YUNPANEL_MAIL_DKIM_RETIREMENT_ST
   ?? path.resolve('.data/mail-dkim-retirement-registry.json');
 const mailServiceIdentityStorePath = process.env.YUNPANEL_MAIL_SERVICE_IDENTITY_STORE
   ?? path.resolve('.data/mail-service-identity-registry.json');
+const roundcubeSecretStorePath = process.env.YUNPANEL_ROUNDCUBE_SECRET_STORE
+  ?? path.resolve('.data/roundcube-secret-registry.json');
 const mailboxStorePath = process.env.YUNPANEL_MAILBOX_STORE ?? path.resolve('.data/mailbox-registry.json');
 const mailboxQuotaStorePath = process.env.YUNPANEL_MAILBOX_QUOTA_STORE ?? path.resolve('.data/mailbox-quota-registry.json');
 const mailboxForwardingStorePath = process.env.YUNPANEL_MAILBOX_FORWARDING_STORE ?? path.resolve('.data/mailbox-forwarding-registry.json');
@@ -157,6 +161,15 @@ const mailServiceIdentityRegistry = createMailServiceIdentityRegistry({
   getCertificate: async (certificateId) => certificateRegistry.getCertificate(certificateId),
 });
 await mailServiceIdentityRegistry.init();
+const roundcubeSecretRegistry = createRoundcubeSecretRegistry({
+  filePath: roundcubeSecretStorePath,
+  serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+});
+await roundcubeSecretRegistry.init();
+const roundcubeConfigurationService = createRoundcubeConfigurationService({
+  mailServiceIdentityRegistry,
+  roundcubeSecretRegistry,
+});
 const mailDomainRegistry = createMailDomainRegistry({
   filePath: mailDomainStorePath,
   getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
@@ -269,6 +282,7 @@ const listener = createAuthenticatedApi({
     mailboxForwardingRegistry,
     mailAliasRegistry,
     mailConfigurationService,
+    roundcubeConfigurationService,
     dockerWorkloadRegistry,
     applicationEnvironmentRegistry,
     applicationDeployQueue,
@@ -294,6 +308,7 @@ const localRuntime = await startConfiguredLocalRuntime({
   mailDomainRegistry,
   mailConfigurationService,
   mailDkimConfigurationService,
+  roundcubeConfigurationService,
   dnsProviderCredentialRegistry,
   jobLogStore,
   inspectServices: inspectAllowlistedServices,
@@ -341,6 +356,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] mail DKIM root=${mailDkimRootPath}`);
   console.log(`[yunpanel-api] mail DKIM retirement store=${mailDkimRetirementStorePath}`);
   console.log(`[yunpanel-api] mail service identity store=${mailServiceIdentityStorePath}`);
+  console.log(`[yunpanel-api] Roundcube secret store=${roundcubeSecretStorePath}`);
   console.log(`[yunpanel-api] mailbox store=${mailboxStorePath}`);
   console.log(`[yunpanel-api] mailbox quota store=${mailboxQuotaStorePath}`);
   console.log(`[yunpanel-api] mailbox forwarding store=${mailboxForwardingStorePath}`);
