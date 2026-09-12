@@ -93,12 +93,14 @@ function destinationTokens(value, variables) {
   const expanded = [];
   for (const token of tokens) {
     if (token.includes(':') || token.startsWith('/')) return null;
-    expanded.push(token
-      .replaceAll('$myhostname', variables.myhostname)
+    const resolved = token
       .replaceAll('${myhostname}', variables.myhostname)
-      .replaceAll('$mydomain', variables.mydomain)
+      .replaceAll('$myhostname', variables.myhostname)
       .replaceAll('${mydomain}', variables.mydomain)
-      .toLowerCase());
+      .replaceAll('$mydomain', variables.mydomain)
+      .toLowerCase();
+    if (!resolved || resolved.includes('$') || !/^[a-z0-9.-]+$/.test(resolved)) return null;
+    expanded.push(resolved);
   }
   return expanded;
 }
