@@ -5,6 +5,8 @@ import {
   MailSecurityTemplateError,
   MailSubmissionTemplateError,
   MailTemplateError,
+  MailTlsIdentityTemplateError,
+  bindManagedMailTlsIdentity,
   enableManagedMailSubmission,
   mailTemplatePolicy,
   normalizeMailboxAddress,
@@ -43,6 +45,17 @@ function transitionInput(value) {
   return value;
 }
 
+function publicPostfixParameter(parameter) {
+  if (parameter?.protected === true) {
+    return Object.freeze({
+      name: parameter.name,
+      protected: true,
+      valueSha256: digest(parameter.value),
+    });
+  }
+  return Object.freeze({ name: parameter.name, value: parameter.value });
+}
+
 function publicConfigurationPreview(preview) {
   return Object.freeze({
     version: preview.version,
@@ -53,8 +66,9 @@ function publicConfigurationPreview(preview) {
       sha256: artifact.sha256,
       sensitive: artifact.sensitive === true,
     }))),
-    postfixParameters: preview.postfixParameters,
+    postfixParameters: Object.freeze(preview.postfixParameters.map(publicPostfixParameter)),
     postfixMasterServices: preview.postfixMasterServices ?? Object.freeze([]),
+    tlsIdentity: preview.tlsIdentity ?? null,
     validate: preview.validate,
     requirements: preview.requirements,
     sideEffects: false,
@@ -91,14 +105,19 @@ export function createMailConfigurationService({
   mailAliasRegistry,
   mailboxQuotaRegistry = EMPTY_QUOTA_REGISTRY,
   mailboxForwardingRegistry = EMPTY_FORWARDING_REGISTRY,
+  domainRegistry = null,
+  mailServiceIdentityRegistry = null,
 } = {}) {
+  const tlsIdentityConfigured = domainRegistry !== null || mailServiceIdentityRegistry !== null;
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
     || typeof mailDomainRegistry.listMailDomains !== 'function'
     || !mailboxRegistry || typeof mailboxRegistry.listMailboxes !== 'function'
     || typeof mailboxRegistry.materializeEnabledAccounts !== 'function'
     || !mailAliasRegistry || typeof mailAliasRegistry.materializeEnabledAliases !== 'function'
     || !mailboxQuotaRegistry || typeof mailboxQuotaRegistry.listQuotas !== 'function'
-    || !mailboxForwardingRegistry || typeof mailboxForwardingRegistry.materializeEnabledForwardings !== 'function') {
+    || !mailboxForwardingRegistry || typeof mailboxForwardingRegistry.materializeEnabledForwardings !== 'function'
+    || (tlsIdentityConfigured && (!domainRegistry || typeof domainRegistry.getDomain !== 'function'
+      || !mailServiceIdentityRegistry || typeof mailServiceIdentityRegistry.materializeForServer !== 'function'))) {
     throw new MailConfigurationError('mail_configuration_dependencies_invalid', 'Mail configuration registries are unavailable', 503);
   }
 
@@ -122,6 +141,33 @@ export function createMailConfigurationService({
       .map((mailDomain) => mailDomain.domainName)
       .sort();
     return Object.freeze({ candidate, input: Object.freeze({ ...normalized }), domains: Object.freeze(domains) });
+  }
+
+  async function resolveTlsIdentity(resolved) {
+    if (!tlsIdentityConfigured || resolved.domains.length === 0) return Object.freeze({ identity: null, blocker: null });
+    if (!resolved.candidate.webDomainId) {
+      return Object.freeze({ identity: null, blocker: 'mail_service_domain_required' });
+    }
+    let webDomain;
+    try { webDomain = await domainRegistry.getDomain(resolved.candidate.webDomainId); }
+    catch {
+      throw new MailConfigurationError('mail_service_domain_unavailable', 'Mail service Domain could not be verified', 503);
+    }
+    if (!webDomain || typeof webDomain.serverId !== 'string' || !webDomain.serverId) {
+      return Object.freeze({ identity: null, blocker: 'mail_service_domain_required' });
+    }
+    try {
+      return Object.freeze({
+        identity: await mailServiceIdentityRegistry.materializeForServer(webDomain.serverId),
+        blocker: null,
+      });
+    } catch (error) {
+      if (Number.isInteger(error?.status) && error.status >= 400 && error.status < 500
+        && typeof error?.code === 'string' && /^[a-z0-9_]{1,120}$/.test(error.code)) {
+        return Object.freeze({ identity: null, blocker: error.code });
+      }
+      throw new MailConfigurationError('mail_service_identity_unavailable', 'Mail service TLS identity could not be materialized', 503);
+    }
   }
 
   async function materializeConfiguration(resolved) {
@@ -183,6 +229,16 @@ export function createMailConfigurationService({
       });
     }
 
+    const tlsIdentity = await resolveTlsIdentity(resolved);
+    if (tlsIdentity.blocker) {
+      return Object.freeze({
+        ready: false,
+        blockers: Object.freeze([tlsIdentity.blocker]),
+        preview: null,
+        accounts: Object.freeze([]),
+      });
+    }
+
     const accounts = Object.freeze(privateAccounts.map((account, index) => Object.freeze({
       ...account,
       quotaBytes: quotaByMailboxId.get(publicMailboxes[index].id) ?? null,
@@ -198,12 +254,14 @@ export function createMailConfigurationService({
         postmasterAddress,
         forwardings,
       });
+      if (tlsIdentity.identity) preview = bindManagedMailTlsIdentity(preview, tlsIdentity.identity);
     } catch (error) {
       if (error instanceof MailTemplateError
         || error instanceof MailQuotaTemplateError
         || error instanceof MailForwardingTemplateError
         || error instanceof MailSecurityTemplateError
-        || error instanceof MailSubmissionTemplateError) {
+        || error instanceof MailSubmissionTemplateError
+        || error instanceof MailTlsIdentityTemplateError) {
         throw new MailConfigurationError(
           'mail_configuration_state_invalid',
           'Managed mail identity state is inconsistent and cannot be applied',
@@ -269,6 +327,7 @@ export function createMailConfigurationService({
 
 export const mailConfigurationInternals = Object.freeze({
   transitionInput,
+  publicPostfixParameter,
   publicConfigurationPreview,
   transitionPreview,
 });
