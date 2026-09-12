@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
+  mailForwardingTemplatePolicy,
   mailTemplatePolicy,
   previewManagedMailApplyPlan,
 } from '@yunpanel/config-templates';
@@ -9,7 +10,7 @@ import {
 const DEFAULT_BACKUP_ROOT = '/var/lib/yunpanel/recovery/mail-config';
 const DIRECTORY_MODE = 0o700;
 const BACKUP_FILE_MODE = 0o600;
-const MANIFEST_VERSION = 2;
+const MANIFEST_VERSION = 3;
 const MANIFEST_FILE = 'manifest.json';
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const TRANSACTION_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -22,6 +23,7 @@ const PLAN_ARTIFACT_PATHS = Object.freeze([
   mailTemplatePolicy.dovecotPasswdFilePath,
   mailTemplatePolicy.dovecotAuthConfigPath,
   mailTemplatePolicy.dovecotMailConfigPath,
+  mailForwardingTemplatePolicy.sievePath,
   mailTemplatePolicy.rspamdProxyConfigPath,
 ]);
 const POSTFIX_COMPILED_PATHS = Object.freeze([
@@ -29,6 +31,8 @@ const POSTFIX_COMPILED_PATHS = Object.freeze([
   `${mailTemplatePolicy.postfixVirtualMailboxMapPath}.db`,
   `${mailTemplatePolicy.postfixVirtualAliasMapPath}.db`,
 ]);
+const SIEVE_COMPILED_PATH = mailForwardingTemplatePolicy.compiledPath;
+const COMPILED_PATHS = Object.freeze([...POSTFIX_COMPILED_PATHS, SIEVE_COMPILED_PATH]);
 const BACKUP_TARGET_PATHS = Object.freeze([
   mailTemplatePolicy.postfixVirtualDomainMapPath,
   POSTFIX_COMPILED_PATHS[0],
@@ -40,6 +44,8 @@ const BACKUP_TARGET_PATHS = Object.freeze([
   mailTemplatePolicy.dovecotPasswdFilePath,
   mailTemplatePolicy.dovecotAuthConfigPath,
   mailTemplatePolicy.dovecotMailConfigPath,
+  mailForwardingTemplatePolicy.sievePath,
+  SIEVE_COMPILED_PATH,
   mailTemplatePolicy.rspamdProxyConfigPath,
 ]);
 const MANAGED_DIRECTORY_PATHS = Object.freeze([
@@ -353,6 +359,8 @@ export const mailConfigBackupInternals = Object.freeze({
   defaultBackupRoot: DEFAULT_BACKUP_ROOT,
   planArtifactPaths: PLAN_ARTIFACT_PATHS,
   postfixCompiledPaths: POSTFIX_COMPILED_PATHS,
+  sieveCompiledPath: SIEVE_COMPILED_PATH,
+  compiledPaths: COMPILED_PATHS,
   targetPaths: BACKUP_TARGET_PATHS,
   managedDirectoryPaths: MANAGED_DIRECTORY_PATHS,
   postfixMainCfPath: POSTFIX_MAIN_CF_PATH,
