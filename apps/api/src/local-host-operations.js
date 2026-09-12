@@ -2,6 +2,9 @@ import {
   createAcmeManager,
   createCloudflareDnsManager,
   createDatabaseManager,
+  createMailConfigActivator,
+  createMailConfigBackupManager,
+  createMailConfigManager,
   createManagedServiceManager,
   createNginxManager,
   createNodeDeploymentManager,
@@ -46,8 +49,25 @@ export const LOCAL_NODE_ENVIRONMENT_OPERATIONS = Object.freeze([
   OPERATIONS.APP_NODE_RESTART,
 ]);
 
+export const LOCAL_MAIL_CONFIGURATION_OPERATIONS = Object.freeze([
+  OPERATIONS.MAIL_CONFIG_APPLY,
+]);
+
+const EXECUTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+
 function validEnvironmentBundle(value) {
   return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function assertMailExecutionContext(payload, execution) {
+  if (!execution || typeof execution !== 'object' || Array.isArray(execution)
+    || typeof execution.jobId !== 'string' || !EXECUTION_ID_PATTERN.test(execution.jobId)
+    || execution.resourceType !== 'mail_domain' || execution.resourceId !== payload.mailDomainId) {
+    const error = new Error('Managed mail execution context does not match the queued resource');
+    error.code = 'mail_execution_context_invalid';
+    throw error;
+  }
+  return execution;
 }
 
 export function createLocalHostOperations({
@@ -68,6 +88,10 @@ export function createLocalHostOperations({
   nodeProcessManager = createNodeProcessManager(),
   nodeRuntimeManager = createNodeRuntimeManager(),
   nodeStatusInspector = createNodeStatusInspector(),
+  mailConfigManager = null,
+  mailConfigBackupManager = null,
+  mailConfigActivator = null,
+  loadManagedMailConfiguration = null,
   loadApplicationEnvironment = null,
   loadDeploymentCredential = null,
   loadDnsProviderCredential = null,
@@ -82,6 +106,9 @@ export function createLocalHostOperations({
   if (loadDnsProviderCredential !== null && typeof loadDnsProviderCredential !== 'function') {
     throw new Error('loadDnsProviderCredential must be a function when configured');
   }
+  if (loadManagedMailConfiguration !== null && typeof loadManagedMailConfiguration !== 'function') {
+    throw new Error('loadManagedMailConfiguration must be a function when configured');
+  }
   if (!cloudflareDnsManager || typeof cloudflareDnsManager.applyRecord !== 'function') {
     throw new Error('cloudflareDnsManager must provide applyRecord()');
   }
@@ -94,6 +121,22 @@ export function createLocalHostOperations({
   const deploymentLog = jobLogStore ? (entry) => jobLogStore.record(entry) : null;
   const resolvedStaticDeploymentManager = staticDeploymentManager ?? createStaticDeploymentManager({ recordLog: deploymentLog });
   const resolvedNodeDeploymentManager = nodeDeploymentManager ?? createNodeDeploymentManager({ recordLog: deploymentLog });
+  const resolvedMailConfigManager = mailConfigManager ?? createMailConfigManager();
+  const resolvedMailConfigBackupManager = mailConfigBackupManager ?? createMailConfigBackupManager();
+  const resolvedMailConfigActivator = mailConfigActivator ?? createMailConfigActivator({
+    configManager: resolvedMailConfigManager,
+    backupManager: resolvedMailConfigBackupManager,
+  });
+
+  if (!resolvedMailConfigManager || typeof resolvedMailConfigManager.stageConfiguration !== 'function') {
+    throw new Error('mailConfigManager must provide stageConfiguration()');
+  }
+  if (!resolvedMailConfigBackupManager || typeof resolvedMailConfigBackupManager.backupConfiguration !== 'function') {
+    throw new Error('mailConfigBackupManager must provide backupConfiguration()');
+  }
+  if (!resolvedMailConfigActivator || typeof resolvedMailConfigActivator.activateConfiguration !== 'function') {
+    throw new Error('mailConfigActivator must provide activateConfiguration()');
+  }
 
   async function withApplicationEnvironment(payload, execute) {
     const environment = await loadApplicationEnvironment(payload.applicationId, payload.environmentRevision ?? null);
@@ -153,6 +196,49 @@ export function createLocalHostOperations({
     return cloudflareDnsManager.applyRecord(payload, { dnsCredential });
   }
 
+  async function executeManagedMailConfiguration(payload, execution) {
+    assertMailExecutionContext(payload, execution);
+    const bundle = await loadManagedMailConfiguration(payload);
+    if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)
+      || !bundle.preview || !Array.isArray(bundle.sensitiveArtifacts)) {
+      const error = new Error('Managed mail configuration provider returned an invalid private bundle');
+      error.code = 'mail_configuration_bundle_invalid';
+      throw error;
+    }
+    if (bundle.preview.sha256 !== payload.configurationSha256) {
+      const error = new Error('Managed mail configuration provider returned stale desired state');
+      error.code = 'mail_configuration_preview_stale';
+      throw error;
+    }
+
+    await resolvedMailConfigManager.stageConfiguration(bundle.preview, {
+      sensitiveArtifacts: bundle.sensitiveArtifacts,
+    });
+    await resolvedMailConfigBackupManager.backupConfiguration(bundle.preview, {
+      transactionId: execution.jobId,
+    });
+    const activation = await resolvedMailConfigActivator.activateConfiguration(bundle.preview, {
+      transactionId: execution.jobId,
+    });
+    if (!activation || activation.applied !== true || activation.sideEffects !== true
+      || activation.previewSha256 !== payload.configurationSha256) {
+      const error = new Error('Managed mail activation did not confirm the queued configuration');
+      error.code = 'mail_config_activation_unconfirmed';
+      throw error;
+    }
+    return Object.freeze({
+      version: 1,
+      mailDomainId: payload.mailDomainId,
+      desiredStatus: payload.desiredStatus,
+      previewDigest: payload.previewDigest,
+      configurationSha256: payload.configurationSha256,
+      planSha256: activation.planSha256,
+      readinessSha256: activation.readinessSha256,
+      applied: true,
+      sideEffects: true,
+    });
+  }
+
   const handlers = new Map([
     [OPERATIONS.SYSTEM_PACKAGES_INSPECT, () => packageManager.inspect()],
     [OPERATIONS.SYSTEM_SERVICES_INSPECT, (payload) => managedServiceManager.inspect(payload.serviceId ?? null)],
@@ -182,13 +268,16 @@ export function createLocalHostOperations({
     handlers.set(OPERATIONS.APP_NODE_ROLLBACK, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRollbackManager.rollbackNode(hydrated)));
     handlers.set(OPERATIONS.APP_NODE_RESTART, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRestartManager.restartNode(hydrated)));
   }
+  if (loadManagedMailConfiguration) {
+    handlers.set(OPERATIONS.MAIL_CONFIG_APPLY, executeManagedMailConfiguration);
+  }
 
   return {
     operations: [...handlers.keys()],
     supports(operation) {
       return handlers.has(operation);
     },
-    async executeOperation(operation, payload = {}) {
+    async executeOperation(operation, payload = {}, execution = null) {
       const handler = handlers.get(operation);
       if (!handler) {
         const error = new Error('Host operation has not been migrated to the local runtime');
@@ -200,7 +289,11 @@ export function createLocalHostOperations({
         error.code = 'invalid_local_operation_payload';
         throw error;
       }
-      return handler(payload);
+      return handler(payload, execution);
     },
   };
 }
+
+export const localHostOperationInternals = Object.freeze({
+  assertMailExecutionContext,
+});
