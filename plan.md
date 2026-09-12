@@ -112,7 +112,7 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 - [x] Son enabled local mail-domain için empty managed-set teardown/apply hazır; managed Postfix mapleri boşaltılıyor, protected Dovecot passwd boş ve `0600` stage ediliyor, managed LMTP listener/postmaster stanza kaldırılıyor ve aynı backup→validate→reload→health→rollback/recovery zinciri korunuyor.
 - [x] Kalıcı mail alias registry ve API hazır; canonical source/destination, local-domain scope, duplicate/self/transitive-cycle, mailbox-source conflict, optimistic revision/confirmed delete ve Read Only GET-only sınırı uygulanıyor. Enabled alias seti managed config digestine ve crash recovery desired-state materialization'ına bağlı.
 - [x] Mailbox quota policy/usage backend'i hazır; revisioned quota store, Dovecot passwd-file userdb `userdb_quota_rule`, quota/imap_quota plugin configi, enabled→enabled config reapply, crash-recovery desired-state bağı, Owner quota CRUD ve bounded `doveadm quota get` usage API'si kaynakta bağlı. Policy mutation tek başına host-side-effect başarı sonucu üretmiyor ve explicit config apply gerektiriyor.
-- [ ] Gerçek mailbox forwarding lifecycle ekle.
+- [x] Mailbox forwarding backend lifecycle kaynakta hazır; per-mailbox copy/redirect policy store/API, canonical/self/cycle kontrolleri, desired-state digest ve crash-recovery bağı, global Dovecot `sieve_before`, exact allowlisted `sievec`, Sieve source+`.svbin` backup/rollback/live-evidence zinciri, `root:vmail 0640` ownership ve Sieve readiness gate'i hazır. Forwarding mutation tek başına host-side-effect sonucu üretmiyor, explicit config apply gerektiriyor ve quota/forwarding policy varken mailbox delete fail-closed kalıyor.
 - [ ] MX/SPF/DKIM/DMARC/PTR expected/current/action-needed diagnostics ekle.
 - [ ] SMTP/IMAP TLS, bounded queue/log görünümü ve open-relay fail-closed kabulü ekle.
 - [ ] Roundcube için Nginx/PHP-FPM/database config, web endpoint, health ve rollback ekle.
@@ -170,7 +170,7 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 ## M. Package, yayın ve canlı kabul
 
 - [x] 2026-09-12 doğrulanmış baseline kaynak ağacı Node 24 ile API 1129, web 153, agent 74, config 35, host-runtime 100, protocol 24 ve shared 27 olmak üzere toplam 1542 otomatik testten geçti; lint/build yeşildi.
-- [ ] Bu baseline sonrasındaki managed-mail apply/recovery, empty-set teardown, alias lifecycle/config/recovery, quota enforcement/usage ve HTTP/production/package wiring değişiklikleri için targeted config-templates + host-runtime + API testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
+- [ ] Bu baseline sonrasındaki managed-mail apply/recovery, empty-set teardown, alias lifecycle/config/recovery, quota enforcement/usage, mailbox forwarding/Sieve ve HTTP/production/package wiring değişiklikleri için targeted config-templates + host-runtime + API testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
 - [x] Linux amd64 `0.3.0-9` paketi üretildi ve yalnız onaylı `.44` olmayan YunPanel test sunucusuna yüklendi; API/web/nginx aktif, eski `yun-agent` inactive/disabled doğrulandı.
 - [x] Canlı Owner API smoke'ta tek yerel server, Website/Application/Domain/certificate/job envanteri; site dosya listesi, Node logu, site terminal capability hedefi ve audit filtre/pagination sözleşmesi doğrulandı.
 - [ ] Matching Ubuntu arm64 hostta native `node-pty` dahil clean install ve doğru mimarili `.deb` üretimini doğrula.
@@ -191,7 +191,7 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 ## Uygulama sırası
 
 1. P0 güvenlik, tek-sunucu fail-closed davranışı ve mevcut canlı işlevlerde regresyon bırakma.
-2. Mail lifecycle'ın kalan forwarding/diagnostic/Roundcube/data parçaları ve gerçek servis kabulü.
+2. Mail lifecycle'ın kalan diagnostic/Roundcube/data parçaları ve gerçek servis kabulü.
 3. Veritabanı user/grant/credential ve dump/restore yaşam döngüsü.
 4. Docker/Compose lifecycle ve Website/Nginx entegrasyonu.
 5. Genel backup/restore ürünü.
