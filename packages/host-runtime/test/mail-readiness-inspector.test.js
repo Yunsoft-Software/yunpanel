@@ -105,6 +105,20 @@ test('forwarding readiness requires the fixed executable sievec binary', async (
   assert.equal(nonExecutable.blockers.includes('dovecot_sieve'), true);
 });
 
+test('blocks privileged or malformed vmail identities', async () => {
+  for (const value of [
+    'vmail:x:0:0::/var/lib/yunpanel/mail:/usr/sbin/nologin\n',
+    'vmail:x:not-a-number:5000::/var/lib/yunpanel/mail:/usr/sbin/nologin\n',
+  ]) {
+    const outputs = healthyOutputs({
+      [command('/usr/bin/getent', ['passwd', 'vmail'])]: value,
+    });
+    const result = await createInspector({ outputs }).inspect(forwardingPreview());
+    assert.equal(result.ready, false);
+    assert.equal(result.blockers.includes('vmail_identity'), true);
+  }
+});
+
 test('blocks managed domains in mydestination and wildcard rspamd listeners', async () => {
   const outputs = healthyOutputs({
     [command('/usr/sbin/postconf', ['-h', 'mydestination'])]: '$myhostname, example.com, localhost\n',
