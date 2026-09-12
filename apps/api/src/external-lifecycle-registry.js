@@ -7,7 +7,7 @@ const STORE_VERSION = 1;
 const EXTERNAL_MANAGEMENT_MODE = 'external';
 const LOCAL_MANAGEMENT_MODE = 'local';
 const STATUSES = new Set(['unverified', 'ready', 'degraded']);
-const LOCAL_MAIL_STATUSES = new Set(['disabled']);
+const LOCAL_MAIL_STATUSES = new Set(['disabled', 'enabled']);
 const WEB_DOMAIN_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const ERROR_CODE_PATTERN = /^[a-z0-9][a-z0-9_:-]{0,119}$/;
 const DNS_OBSERVATION_DIAGNOSES = Object.freeze({
@@ -312,6 +312,35 @@ export function createExternalLifecycleRegistry({
     return publicResource(resource, options);
   }
 
+  async function transitionLocalStatus(resourceId, { expectedRevision, status } = {}) {
+    await ensureInitialized();
+    const normalizedId = id(resourceId, prefix);
+    const resource = state[collectionKey].find((candidate) => candidate.id === normalizedId);
+    if (!resource) throw new ExternalLifecycleRegistryError(`${prefix}_not_found`, `${resourceType} was not found`, 404);
+    if (resourceType !== 'mail_domain' || resource.managementMode !== LOCAL_MANAGEMENT_MODE) {
+      throw new ExternalLifecycleRegistryError(`${prefix}_local_status_not_applicable`, 'Only locally managed mail domains have a local lifecycle status', 409);
+    }
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new ExternalLifecycleRegistryError(`invalid_${prefix}_revision`, 'A positive expected revision is required');
+    }
+    if (resource.revision !== expectedRevision) {
+      throw new ExternalLifecycleRegistryError(`${prefix}_revision_conflict`, `${resourceType} changed before local status transition`, 409);
+    }
+    if (!LOCAL_MAIL_STATUSES.has(status)) {
+      throw new ExternalLifecycleRegistryError(`invalid_${prefix}_status`, 'Local mail-domain status must be disabled or enabled');
+    }
+    if (resource.status === status) {
+      throw new ExternalLifecycleRegistryError(`${prefix}_status_no_change`, 'Local mail-domain status is unchanged', 409);
+    }
+    resource.status = status;
+    resource.revision += 1;
+    resource.lastObservedAt = null;
+    resource.lastErrorCode = null;
+    resource.updatedAt = new Date(now()).toISOString();
+    await persist();
+    return publicResource(resource, options);
+  }
+
   async function getResource(resourceId) {
     await ensureInitialized();
     const resource = state[collectionKey].find((candidate) => candidate.id === resourceId);
@@ -323,13 +352,14 @@ export function createExternalLifecycleRegistry({
     return state[collectionKey].map((resource) => publicResource(resource, options));
   }
 
-  return Object.freeze({ init, createResource, recordObservation, getResource, listResources });
+  return Object.freeze({ init, createResource, recordObservation, transitionLocalStatus, getResource, listResources });
 }
 
 export const externalLifecycleRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
   managementModes: Object.freeze([EXTERNAL_MANAGEMENT_MODE, LOCAL_MANAGEMENT_MODE]),
   statuses: Object.freeze([...STATUSES]),
+  localMailStatuses: Object.freeze([...LOCAL_MAIL_STATUSES]),
   webDomainId,
   canonicalName,
   errorCode,
