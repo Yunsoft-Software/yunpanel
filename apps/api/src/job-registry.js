@@ -42,6 +42,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DNS_RECORD_APPLY,
   OPERATIONS.MAIL_CONFIG_APPLY,
   OPERATIONS.MAIL_DKIM_APPLY,
+  OPERATIONS.ROUNDCUBE_CONFIG_APPLY,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
@@ -710,6 +711,30 @@ function sanitizeMailDkimResult(job, result) {
   };
 }
 
+function sanitizeRoundcubeConfigResult(job, result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)
+    || Object.keys(result).length !== 9
+    || result.version !== 1 || result.applied !== true || result.sideEffects !== true
+    || result.previewSha256 !== job.payload?.previewSha256
+    || result.configSha256 !== job.payload?.configSha256
+    || result.fpmSha256 !== job.payload?.fpmSha256
+    || typeof result.nginxSha256 !== 'string' || !SHA256_PATTERN.test(result.nginxSha256)
+    || typeof result.databaseCreated !== 'boolean' || result.httpHealthy !== true) {
+    throw new JobRegistryError('invalid_job_result', 'Roundcube result does not match the queued configuration');
+  }
+  return {
+    version: 1,
+    previewSha256: result.previewSha256,
+    configSha256: result.configSha256,
+    fpmSha256: result.fpmSha256,
+    nginxSha256: result.nginxSha256,
+    databaseCreated: result.databaseCreated,
+    httpHealthy: true,
+    applied: true,
+    sideEffects: true,
+  };
+}
+
 function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) return sanitizeManagedServiceResult(job, result);
   if ([OPERATIONS.DATABASE_INSPECT, OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE].includes(job.operation)) {
@@ -718,6 +743,7 @@ function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.DNS_RECORD_APPLY) return sanitizeDnsRecordResult(job, result);
   if (job.operation === OPERATIONS.MAIL_CONFIG_APPLY) return sanitizeMailConfigResult(job, result);
   if (job.operation === OPERATIONS.MAIL_DKIM_APPLY) return sanitizeMailDkimResult(job, result);
+  if (job.operation === OPERATIONS.ROUNDCUBE_CONFIG_APPLY) return sanitizeRoundcubeConfigResult(job, result);
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
   }
