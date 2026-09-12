@@ -15,9 +15,21 @@ function resourceFactory(label, calls, extra = {}) {
   });
 }
 
-test('managed mail recovery runtime wires private registries, receipt, materialization and active evidence', async () => {
+test('managed mail recovery runtime wires private registries, tls identity, receipt, materialization and active evidence', async () => {
   const calls = [];
   const fakeJobRegistry = { marker: 'durable' };
+  const fakeDomainRegistry = {
+    async init() { calls.push(['domain.init', '/work/state/domains.json']); },
+    async getDomain(id) { calls.push(['domain.get', id]); return { id, serverId }; },
+  };
+  const fakeCertificateRegistry = {
+    async init() { calls.push(['certificate.init', '/work/state/certificates.json']); },
+    async getCertificate(id) { calls.push(['certificate.get', id]); return { id }; },
+  };
+  const fakeMailServiceIdentityRegistry = {
+    async init() { calls.push(['mail-service-identity.init', '/work/state/mail-service-identity.json']); },
+    async materializeForServer(id) { calls.push(['mail-service-identity.materialize', id]); return { serverId: id }; },
+  };
   const fakeMailDomainRegistry = {
     async init() { calls.push(['mail-domain.init', '/work/state/mail-domains.json']); },
     async getMailDomain(id) { calls.push(['mail-domain.get', id]); return { id }; },
@@ -48,6 +60,7 @@ test('managed mail recovery runtime wires private registries, receipt, materiali
       YUNPANEL_CERTIFICATE_STORE: '/work/state/certificates.json',
       YUNPANEL_APPLICATION_STORE: '/work/state/applications.json',
       YUNPANEL_MAIL_DOMAIN_STORE: '/work/state/mail-domains.json',
+      YUNPANEL_MAIL_SERVICE_IDENTITY_STORE: '/work/state/mail-service-identity.json',
       YUNPANEL_MAILBOX_STORE: '/work/state/mailboxes.json',
       YUNPANEL_MAILBOX_QUOTA_STORE: '/work/state/mailbox-quotas.json',
       YUNPANEL_MAILBOX_FORWARDING_STORE: '/work/state/mailbox-forwardings.json',
@@ -59,9 +72,15 @@ test('managed mail recovery runtime wires private registries, receipt, materiali
       async init() { calls.push(['server.init', filePath]); },
       async getServer(id) { calls.push(['server.get', id]); return { id, hostname }; },
     }),
-    domainRegistryFactory: resourceFactory('domain', calls, { getDomain: async (id) => ({ id }) }),
-    certificateRegistryFactory: resourceFactory('certificate', calls),
+    domainRegistryFactory: () => fakeDomainRegistry,
+    certificateRegistryFactory: () => fakeCertificateRegistry,
     applicationRegistryFactory: resourceFactory('application', calls),
+    mailServiceIdentityRegistryFactory: ({ filePath, getWebDomain, getCertificate }) => {
+      calls.push(['mail-service-identity.create', filePath]);
+      assert.equal(typeof getWebDomain, 'function');
+      assert.equal(typeof getCertificate, 'function');
+      return fakeMailServiceIdentityRegistry;
+    },
     mailDomainRegistryFactory: ({ filePath, getWebDomain }) => {
       calls.push(['mail-domain.create', filePath]);
       assert.equal(typeof getWebDomain, 'function');
@@ -110,12 +129,16 @@ test('managed mail recovery runtime wires private registries, receipt, materiali
       mailboxQuotaRegistry,
       mailboxForwardingRegistry,
       mailAliasRegistry,
+      domainRegistry,
+      mailServiceIdentityRegistry,
     }) => {
       assert.equal(mailDomainRegistry, fakeMailDomainRegistry);
       assert.equal(mailboxRegistry, fakeMailboxRegistry);
       assert.equal(mailboxQuotaRegistry, fakeMailboxQuotaRegistry);
       assert.equal(mailboxForwardingRegistry, fakeMailboxForwardingRegistry);
       assert.equal(mailAliasRegistry, fakeMailAliasRegistry);
+      assert.equal(domainRegistry, fakeDomainRegistry);
+      assert.equal(mailServiceIdentityRegistry, fakeMailServiceIdentityRegistry);
       return {
         async materializeTransition(input, expected) {
           calls.push(['materialize', input, expected]);
@@ -149,10 +172,13 @@ test('managed mail recovery runtime wires private registries, receipt, materiali
 
   assert.equal(result.reconciled, true);
   assert.equal(result.statePaths.mailDomainStore, '/work/state/mail-domains.json');
+  assert.equal(result.statePaths.mailServiceIdentityStore, '/work/state/mail-service-identity.json');
   assert.equal(result.statePaths.mailboxStore, '/work/state/mailboxes.json');
   assert.equal(result.statePaths.mailboxQuotaStore, '/work/state/mailbox-quotas.json');
   assert.equal(result.statePaths.mailboxForwardingStore, '/work/state/mailbox-forwardings.json');
   assert.equal(result.statePaths.mailAliasStore, '/work/state/mail-aliases.json');
+  assert.ok(calls.some((entry) => entry[0] === 'mail-service-identity.create'
+    && entry[1] === '/work/state/mail-service-identity.json'));
   assert.ok(calls.some((entry) => entry[0] === 'mail-domain.create' && entry[1] === '/work/state/mail-domains.json'));
   assert.ok(calls.some((entry) => entry[0] === 'mailbox.create'
     && entry[1] === '/work/state/mailboxes.json' && entry[2] === 'private-master-key'));
@@ -180,6 +206,7 @@ test('managed mail recovery runtime rejects wrong host before opening protected 
       domainRegistryFactory: () => ({ async init() {} }),
       certificateRegistryFactory: () => ({ async init() {} }),
       applicationRegistryFactory: () => ({ async init() {} }),
+      mailServiceIdentityRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
       mailDomainRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
       mailboxRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
       mailboxQuotaRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
