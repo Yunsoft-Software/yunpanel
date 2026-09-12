@@ -5,6 +5,18 @@ import {
   MailDiagnosticsInspectorError,
 } from '../src/index.js';
 
+const DKIM_PUBLIC_KEY = Buffer.alloc(256, 7).toString('base64');
+const DKIM_METADATA = Object.freeze({
+  domainName: 'example.com',
+  selector: 'mail-2026',
+  publicKey: DKIM_PUBLIC_KEY,
+  dnsRecord: Object.freeze({
+    type: 'TXT',
+    name: 'mail-2026._domainkey.example.com',
+    value: `v=DKIM1; k=rsa; p=${DKIM_PUBLIC_KEY}`,
+  }),
+});
+
 function absent(code = 'ENODATA') {
   return Object.assign(new Error('absent'), { code });
 }
@@ -26,6 +38,11 @@ function fixture(overrides = {}) {
     },
     resolveTxt: async (name) => {
       calls.push(['txt', name]);
+      if (name.includes('._domainkey.')) {
+        if (overrides.dkimError) throw overrides.dkimError;
+        if (overrides.dkim) return overrides.dkim;
+        throw absent();
+      }
       if (name.startsWith('_dmarc.')) {
         if (overrides.dmarcError) throw overrides.dmarcError;
         return overrides.dmarc ?? [['v=DMARC1; p=none']];
@@ -84,6 +101,47 @@ test('reports bounded current/expected mail DNS state without pretending DKIM is
   }]);
   assert.equal(result.attentionRequired, true);
   assert.ok(calls.some(([kind, name]) => kind === 'txt' && name === '_dmarc.example.com'));
+  assert.equal(calls.some(([kind, name]) => kind === 'txt' && String(name).includes('._domainkey.')), false);
+});
+
+test('configured DKIM requires the exact generated selector TXT value', async () => {
+  const readyFixture = fixture({ dkim: [[DKIM_METADATA.dnsRecord.value]] });
+  const ready = await readyFixture.inspector.inspect('example.com', { dkim: DKIM_METADATA });
+  assert.equal(ready.diagnostics.dkim.state, 'ready');
+  assert.deepEqual(ready.diagnostics.dkim.expected, {
+    selector: 'mail-2026',
+    name: DKIM_METADATA.dnsRecord.name,
+    value: DKIM_METADATA.dnsRecord.value,
+  });
+  assert.equal(ready.issues.some((issue) => issue.kind === 'dkim'), false);
+  assert.ok(readyFixture.calls.some(([kind, name]) => kind === 'txt' && name === DKIM_METADATA.dnsRecord.name));
+
+  const mismatch = await fixture({
+    dkim: [[`v=DKIM1; k=rsa; p=${Buffer.alloc(256, 8).toString('base64')}`]],
+  }).inspector.inspect('example.com', { dkim: DKIM_METADATA });
+  assert.equal(mismatch.diagnostics.dkim.state, 'value_mismatch');
+  assert.equal(mismatch.diagnostics.dkim.action, 'publish_expected_dkim_record');
+
+  const multiple = await fixture({
+    dkim: [[DKIM_METADATA.dnsRecord.value], [`v=DKIM1; k=rsa; p=${Buffer.alloc(256, 9).toString('base64')}`]],
+  }).inspector.inspect('example.com', { dkim: DKIM_METADATA });
+  assert.equal(multiple.diagnostics.dkim.state, 'multiple');
+  assert.equal(multiple.diagnostics.dkim.action, 'consolidate_dkim_records');
+});
+
+test('managed DKIM metadata mismatch fails closed instead of querying attacker-controlled names', async () => {
+  const { inspector, calls } = fixture();
+  await assert.rejects(
+    inspector.inspect('example.com', {
+      dkim: {
+        ...DKIM_METADATA,
+        dnsRecord: { ...DKIM_METADATA.dnsRecord, name: 'evil._domainkey.attacker.test' },
+      },
+    }),
+    (error) => error instanceof MailDiagnosticsInspectorError
+      && error.code === 'mail_diagnostics_dkim_state_invalid' && error.status === 503,
+  );
+  assert.equal(calls.length, 0);
 });
 
 test('reports actionable MX, SPF, DMARC and PTR mismatches without raw resolver errors', async () => {
@@ -131,6 +189,12 @@ test('mail hostname address and resolver failures remain bounded diagnostics', a
   assert.equal(failed.diagnostics.mx.state, 'resolver_error');
   assert.equal(failed.diagnostics.mx.action, 'retry_mail_dns_diagnostics');
   assert.doesNotMatch(JSON.stringify(failed), /private resolver failure|ETIMEOUT/);
+
+  const dkimResolverFailure = fixture({ dkimError: Object.assign(new Error('private dkim resolver failure'), { code: 'ETIMEOUT' }) });
+  const failedDkim = await dkimResolverFailure.inspector.inspect('example.com', { dkim: DKIM_METADATA });
+  assert.equal(failedDkim.diagnostics.dkim.state, 'resolver_error');
+  assert.equal(failedDkim.diagnostics.dkim.action, 'retry_mail_dns_diagnostics');
+  assert.doesNotMatch(JSON.stringify(failedDkim), /private dkim resolver failure|ETIMEOUT/);
 });
 
 test('invalid input and invalid Postfix hostname fail with authored bounded errors', async () => {
