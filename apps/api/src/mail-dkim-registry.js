@@ -33,6 +33,7 @@ const METADATA_FILE = 'metadata.json';
 const PRIVATE_KEY_FILE = 'private.pem';
 const PENDING_PREFIX = '.pending-';
 const PREVIOUS_PREFIX = '.previous-';
+const DELETED_PREFIX = '.deleted-';
 const TRANSIENT_NONCE_BYTES = 6;
 
 export class MailDkimRegistryError extends Error {
@@ -138,16 +139,24 @@ function validatePersisted(record) {
   };
 }
 
-function previousEntryIdentity(name) {
-  if (typeof name !== 'string' || !name.startsWith(PREVIOUS_PREFIX)) return null;
+function transientEntryIdentity(name, prefix) {
+  if (typeof name !== 'string' || typeof prefix !== 'string' || !name.startsWith(prefix)) return null;
   const suffixLength = 1 + (TRANSIENT_NONCE_BYTES * 2);
-  if (name.length <= PREVIOUS_PREFIX.length + suffixLength) return null;
+  if (name.length <= prefix.length + suffixLength) return null;
   const separator = name.length - suffixLength;
   if (name[separator] !== '-') return null;
   const nonce = name.slice(separator + 1);
   if (!/^[a-f0-9]{12}$/.test(nonce)) return null;
-  try { return uuid(name.slice(PREVIOUS_PREFIX.length, separator)); }
+  try { return uuid(name.slice(prefix.length, separator)); }
   catch { return null; }
+}
+
+function previousEntryIdentity(name) {
+  return transientEntryIdentity(name, PREVIOUS_PREFIX);
+}
+
+function deletedEntryIdentity(name) {
+  return transientEntryIdentity(name, DELETED_PREFIX);
 }
 
 export function createMailDkimRegistry({
@@ -204,16 +213,11 @@ export function createMailDkimRegistry({
   }
 
   async function assertPrivateDirectory(directory, code = 'mail_dkim_state_invalid') {
-    try {
-      const metadata = await lstat(directory);
-      if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== DIRECTORY_MODE) {
-        throw new MailDkimRegistryError(code, 'DKIM key directory is unsafe', 409);
-      }
-      return metadata;
-    } catch (error) {
-      if (error instanceof MailDkimRegistryError) throw error;
-      throw error;
+    const metadata = await lstat(directory);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== DIRECTORY_MODE) {
+      throw new MailDkimRegistryError(code, 'DKIM key directory is unsafe', 409);
     }
+    return metadata;
   }
 
   async function readPrivateKey(record) {
@@ -293,11 +297,32 @@ export function createMailDkimRegistry({
     }
   }
 
+  async function cleanupDeletedEntries() {
+    if (!keyRoot) return;
+    const entries = await readdir(keyRoot, { withFileTypes: true });
+    const seen = new Set();
+    for (const entry of entries) {
+      if (!entry.name.startsWith(DELETED_PREFIX)) continue;
+      const id = deletedEntryIdentity(entry.name);
+      if (!id || seen.has(id)) {
+        throw new MailDkimRegistryError('mail_dkim_state_invalid', 'DKIM deletion recovery state is invalid', 409);
+      }
+      seen.add(id);
+      const tombstone = path.join(keyRoot, entry.name);
+      const metadata = await lstat(tombstone);
+      if (!entry.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== DIRECTORY_MODE) {
+        throw new MailDkimRegistryError('mail_dkim_state_invalid', 'DKIM deletion recovery directory is unsafe', 409);
+      }
+      await rm(tombstone, { recursive: true, force: false });
+    }
+  }
+
   async function loadPersistentState() {
     await mkdir(keyRoot, { recursive: true, mode: DIRECTORY_MODE });
     await chmod(keyRoot, DIRECTORY_MODE);
     await cleanupPendingEntries();
     await recoverPreviousEntries();
+    await cleanupDeletedEntries();
     const entries = await readdir(keyRoot, { withFileTypes: true });
     const keys = [];
     for (const entry of entries) {
@@ -336,10 +361,10 @@ export function createMailDkimRegistry({
     if (!initialized) await init();
   }
 
-  async function writePendingRecord(record, privateKeyPem, label = PENDING_PREFIX) {
+  async function writePendingRecord(record, privateKeyPem) {
     const pending = path.join(
       keyRoot,
-      `${label}${record.mailDomainId}-${randomBytes(TRANSIENT_NONCE_BYTES).toString('hex')}`,
+      `${PENDING_PREFIX}${record.mailDomainId}-${randomBytes(TRANSIENT_NONCE_BYTES).toString('hex')}`,
     );
     await mkdir(pending, { mode: DIRECTORY_MODE });
     try {
@@ -441,6 +466,48 @@ export function createMailDkimRegistry({
         );
       }
       throw new MailDkimRegistryError('mail_dkim_rotation_failed', 'DKIM key rotation could not be committed', 503);
+    }
+  }
+
+  async function commitPersistentDeletion(record) {
+    if (!keyRoot) {
+      if (!memoryKeys.has(record.mailDomainId)) {
+        throw new MailDkimRegistryError('mail_dkim_key_not_found', 'DKIM key was not found', 404);
+      }
+      memoryKeys.delete(record.mailDomainId);
+      return;
+    }
+    const target = finalDirectory(record.mailDomainId);
+    try { await assertPrivateDirectory(target, 'mail_dkim_private_key_unsafe'); }
+    catch (error) {
+      if (error?.code === 'ENOENT') {
+        throw new MailDkimRegistryError('mail_dkim_key_not_found', 'DKIM key was not found', 404);
+      }
+      throw error;
+    }
+    const tombstone = path.join(
+      keyRoot,
+      `${DELETED_PREFIX}${record.mailDomainId}-${randomBytes(TRANSIENT_NONCE_BYTES).toString('hex')}`,
+    );
+    let moved = false;
+    try {
+      await rename(target, tombstone);
+      moved = true;
+      await rm(tombstone, { recursive: true, force: false });
+    } catch {
+      if (moved) {
+        try {
+          await rename(tombstone, target);
+          await chmod(target, DIRECTORY_MODE);
+        } catch {
+          throw new MailDkimRegistryError(
+            'mail_dkim_delete_recovery_failed',
+            'DKIM key deletion failed and private state could not be restored',
+            503,
+          );
+        }
+      }
+      throw new MailDkimRegistryError('mail_dkim_delete_failed', 'DKIM key deletion could not be committed', 503);
     }
   }
 
@@ -564,6 +631,46 @@ export function createMailDkimRegistry({
     return operation;
   }
 
+  async function deleteKey(mailDomainId, { expectedRevision, confirmation } = {}) {
+    await ensureInitialized();
+    const id = uuid(mailDomainId);
+    const expected = revision(expectedRevision);
+    const operation = mutationChain.then(async () => {
+      const index = state.keys.findIndex((record) => record.mailDomainId === id);
+      if (index < 0) throw new MailDkimRegistryError('mail_dkim_key_not_found', 'DKIM key was not found', 404);
+      const existing = state.keys[index];
+      if (existing.revision !== expected) {
+        throw new MailDkimRegistryError('stale_mail_dkim_revision', 'DKIM key state changed; refresh and retry', 409);
+      }
+      if (confirmation !== `delete-mail-dkim:${id}:${existing.selector}:${existing.revision}`) {
+        throw new MailDkimRegistryError('mail_dkim_delete_confirmation_mismatch', 'DKIM key delete confirmation does not match', 409);
+      }
+      const mailDomain = await resolveMailDomain(id);
+      if (mailDomain.domainName !== existing.domainName) {
+        throw new MailDkimRegistryError('mail_dkim_domain_drift', 'DKIM key domain identity no longer matches mail domain state', 409);
+      }
+      if (mailDomain.status !== 'disabled') {
+        throw new MailDkimRegistryError(
+          'mail_dkim_delete_domain_enabled',
+          'DKIM private key can be deleted only after the local mail domain is disabled and signing teardown is applied',
+          409,
+        );
+      }
+      await commitPersistentDeletion(existing);
+      const keys = [...state.keys];
+      keys.splice(index, 1);
+      state = { version: STORE_VERSION, keys };
+      return Object.freeze({
+        mailDomainId: id,
+        selector: existing.selector,
+        revision: existing.revision,
+        deleted: true,
+      });
+    });
+    mutationChain = operation.catch(() => {});
+    return operation;
+  }
+
   async function materializePrivateKey(mailDomainId) {
     await ensureInitialized();
     const id = uuid(mailDomainId);
@@ -583,6 +690,7 @@ export function createMailDkimRegistry({
     listKeys,
     createKey,
     rotateKey,
+    deleteKey,
     materializePrivateKey,
   });
 }
@@ -597,7 +705,9 @@ export const mailDkimRegistryInternals = Object.freeze({
   privateKeyFile: PRIVATE_KEY_FILE,
   pendingPrefix: PENDING_PREFIX,
   previousPrefix: PREVIOUS_PREFIX,
+  deletedPrefix: DELETED_PREFIX,
   publicKeyFromPrivate,
   validatePersisted,
   previousEntryIdentity,
+  deletedEntryIdentity,
 });
