@@ -40,6 +40,14 @@ function cloneEvidenceValue(value) {
   try { return structuredClone(value); }
   catch { return null; }
 }
+function executionContext(job, serverId) {
+  return Object.freeze({
+    jobId: job.id,
+    serverId,
+    resourceType: job.resourceType,
+    resourceId: job.resourceId,
+  });
+}
 
 /**
  * Executes one already-authorized job inside the API process. An uncertain
@@ -135,7 +143,11 @@ export function createLocalJobExecutor({
     const jobId = claim.job.id;
     let completion;
     try {
-      const result = await executeOperation(claim.envelope.operation, claim.envelope.payload);
+      const result = await executeOperation(
+        claim.envelope.operation,
+        claim.envelope.payload,
+        executionContext(claim.job, serverId),
+      );
       if (recordExecutionEvidence) {
         const payloadCopy = cloneEvidenceValue(claim.envelope.payload);
         const resultCopy = cloneEvidenceValue(result);
@@ -249,4 +261,5 @@ export const localExecutorInternals = Object.freeze({
   safeExecutionError,
   durableReconciliationMode,
   cloneEvidenceValue,
+  executionContext,
 });
