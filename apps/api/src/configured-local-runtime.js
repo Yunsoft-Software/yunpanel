@@ -4,6 +4,7 @@ import { createCertificateOperationReceiptStore } from './certificate-operation-
 import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.js';
 import { createDomainActivationReceiptStore } from './domain-activation-receipt.js';
 import { createLocalHostOperations } from './local-host-operations.js';
+import { createMailConfigOperationReceiptStore } from './mail-config-operation-receipt.js';
 import { resolveLocalRuntimeConfig } from './local-runtime-config.js';
 import { startLocalRuntime } from './local-runtime.js';
 import { createManagedServiceMutationReceiptStore } from './managed-service-mutation-receipt.js';
@@ -11,6 +12,8 @@ import { createNodeDeploymentReceiptStore } from './node-deployment-receipt.js';
 import { createNodeRestartReceiptStore } from './node-restart-receipt.js';
 import { createNodeRollbackReceiptStore } from './node-rollback-receipt.js';
 import { createSystemUpgradeReceiptStore } from './system-upgrade-receipt.js';
+
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 export class ConfiguredLocalRuntimeError extends Error {
   constructor(code, message) {
@@ -36,12 +39,15 @@ export async function startConfiguredLocalRuntime({
   certificateRegistry,
   applicationRegistry,
   applicationEnvironmentRegistry,
+  mailDomainRegistry = null,
+  mailConfigurationService = null,
   dnsProviderCredentialRegistry = null,
   jobLogStore = null,
   createOperations = createLocalHostOperations,
   createCertificateOperationReceipts = createCertificateOperationReceiptStore,
   createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
   createDomainActivationReceipts = createDomainActivationReceiptStore,
+  createMailConfigOperationReceipts = createMailConfigOperationReceiptStore,
   createManagedServiceReceipts = createManagedServiceMutationReceiptStore,
   createNodeDeploymentReceipts = createNodeDeploymentReceiptStore,
   createNodeRestartReceipts = createNodeRestartReceiptStore,
@@ -59,10 +65,18 @@ export async function startConfiguredLocalRuntime({
   if (!applicationEnvironmentRegistry || typeof applicationEnvironmentRegistry.materialize !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_environment_registry_invalid', 'Local runtime requires the application environment registry');
   }
+  if (mailConfigurationService !== null && typeof mailConfigurationService.materializeTransition !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_mail_configuration_invalid', 'Local runtime managed mail configuration provider is invalid');
+  }
+  if (mailConfigurationService !== null
+    && (!mailDomainRegistry || typeof mailDomainRegistry.transitionLocalStatus !== 'function')) {
+    throw new ConfiguredLocalRuntimeError('local_mail_domain_registry_invalid', 'Local runtime managed mail reconciliation registry is invalid');
+  }
   if (typeof createOperations !== 'function'
     || typeof createCertificateOperationReceipts !== 'function'
     || typeof createDatabaseDeletionReceipts !== 'function'
     || typeof createDomainActivationReceipts !== 'function'
+    || typeof createMailConfigOperationReceipts !== 'function'
     || typeof createManagedServiceReceipts !== 'function'
     || typeof createNodeDeploymentReceipts !== 'function'
     || typeof createNodeRestartReceipts !== 'function'
@@ -77,6 +91,16 @@ export async function startConfiguredLocalRuntime({
     throw new ConfiguredLocalRuntimeError('local_runtime_startup_adapter_invalid', 'Local runtime startup adapters are invalid');
   }
 
+  const loadManagedMailConfiguration = mailConfigurationService
+    ? (payload) => mailConfigurationService.materializeTransition({
+      mailDomainId: payload.mailDomainId,
+      expectedRevision: payload.expectedRevision,
+      status: payload.desiredStatus,
+    }, {
+      expectedPreviewDigest: payload.previewDigest,
+      expectedConfigurationSha256: payload.configurationSha256,
+    })
+    : null;
   const hostOperations = createOperations({
     loadApplicationEnvironment: (applicationId, expectedRevision) => applicationEnvironmentRegistry.materialize(applicationId, {
       expectedRevision,
@@ -87,6 +111,7 @@ export async function startConfiguredLocalRuntime({
     loadDnsProviderCredential: dnsProviderCredentialRegistry && typeof dnsProviderCredentialRegistry.materialize === 'function'
       ? (credentialId) => dnsProviderCredentialRegistry.materialize(credentialId)
       : null,
+    loadManagedMailConfiguration,
     jobLogStore,
   });
   const certificateOperationReceipts = createCertificateOperationReceipts();
@@ -100,6 +125,10 @@ export async function startConfiguredLocalRuntime({
   const domainActivationReceipts = createDomainActivationReceipts();
   if (!domainActivationReceipts || typeof domainActivationReceipts.write !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_domain_activation_receipts_invalid', 'Local runtime domain activation receipt store is invalid');
+  }
+  const mailConfigOperationReceipts = mailConfigurationService ? createMailConfigOperationReceipts() : null;
+  if (mailConfigurationService && (!mailConfigOperationReceipts || typeof mailConfigOperationReceipts.write !== 'function')) {
+    throw new ConfiguredLocalRuntimeError('local_mail_config_receipts_invalid', 'Local runtime managed mail operation receipt store is invalid');
   }
   const managedServiceReceipts = createManagedServiceReceipts();
   if (!managedServiceReceipts || typeof managedServiceReceipts.write !== 'function') {
@@ -178,6 +207,36 @@ export async function startConfiguredLocalRuntime({
         jobId,
         primaryDomain: payload.primaryDomain,
         checksum: payload.checksum,
+      });
+      return;
+    }
+
+    if (operation === OPERATIONS.MAIL_CONFIG_APPLY) {
+      if (!mailConfigOperationReceipts || resourceType !== 'mail_domain'
+        || resourceId !== payload?.mailDomainId || result?.mailDomainId !== payload.mailDomainId
+        || result.desiredStatus !== payload.desiredStatus
+        || result.previewDigest !== payload.previewDigest
+        || result.configurationSha256 !== payload.configurationSha256
+        || typeof payload.expectedRevision !== 'number' || !Number.isSafeInteger(payload.expectedRevision)
+        || payload.expectedRevision < 1
+        || !['disabled', 'enabled'].includes(payload.desiredStatus)
+        || !SHA256_PATTERN.test(payload.previewDigest ?? '')
+        || !SHA256_PATTERN.test(payload.configurationSha256 ?? '')
+        || !SHA256_PATTERN.test(result.planSha256 ?? '')
+        || !SHA256_PATTERN.test(result.readinessSha256 ?? '')
+        || result.applied !== true || result.sideEffects !== true) {
+        throw new Error('Managed mail result is not safe recovery evidence');
+      }
+      await mailConfigOperationReceipts.write({
+        serverId,
+        jobId,
+        mailDomainId: payload.mailDomainId,
+        desiredStatus: payload.desiredStatus,
+        previewDigest: payload.previewDigest,
+        configurationSha256: payload.configurationSha256,
+        planSha256: result.planSha256,
+        readinessSha256: result.readinessSha256,
+        applied: true,
       });
       return;
     }
@@ -297,6 +356,7 @@ export async function startConfiguredLocalRuntime({
     certificateRegistry,
     applicationRegistry,
     applicationEnvironmentRegistry,
+    mailDomainRegistry,
     hostOperations,
     snapshotProvider,
     recordExecutionEvidence,
