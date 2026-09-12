@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import {
   roundcubeFpmTemplatePolicy,
+  roundcubeNginxTemplatePolicy,
   roundcubeTemplatePolicy,
 } from '@yunpanel/config-templates';
 import {
@@ -13,9 +14,11 @@ import {
 const TX = '12345678-1234-4234-8234-123456789012';
 const CONFIG = Buffer.from('<?php $config = [];\n');
 const FPM = Buffer.from('[yunpanel-roundcube]\n');
+const NGINX = Buffer.from('server { listen 443 ssl; }\n');
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const CONFIG_SHA = sha256(CONFIG);
 const FPM_SHA = sha256(FPM);
+const NGINX_SHA = sha256(NGINX);
 const PREVIEW_SHA = 'c'.repeat(64);
 
 function preview() {
@@ -23,8 +26,10 @@ function preview() {
     version: 1,
     readyToApply: true,
     sha256: PREVIEW_SHA,
+    mailHostname: 'mail.example.com',
     configSha256: CONFIG_SHA,
     fpmSha256: FPM_SHA,
+    nginxSha256: NGINX_SHA,
     configuration: {
       version: 1,
       sha256: CONFIG_SHA,
@@ -47,10 +52,27 @@ function preview() {
         sha256: FPM_SHA,
         bytes: FPM.length,
         sensitive: false,
-        mode: 0o640,
+        mode: roundcubeFpmTemplatePolicy.poolMode,
       },
       socketPath: roundcubeFpmTemplatePolicy.socketPath,
       serviceUnit: roundcubeFpmTemplatePolicy.serviceUnit,
+    },
+    nginx: {
+      version: 1,
+      sha256: NGINX_SHA,
+      artifact: {
+        path: roundcubeNginxTemplatePolicy.configPath,
+        sha256: NGINX_SHA,
+        bytes: NGINX.length,
+        sensitive: false,
+        mode: roundcubeNginxTemplatePolicy.configMode,
+      },
+      webHostname: 'mail.example.com',
+      publicRoot: roundcubeNginxTemplatePolicy.publicRoot,
+      fpmSocketPath: roundcubeFpmTemplatePolicy.socketPath,
+      serviceUnit: roundcubeNginxTemplatePolicy.serviceUnit,
+      healthPath: roundcubeNginxTemplatePolicy.healthPath,
+      endpoint: 'https://mail.example.com/',
     },
   };
 }
@@ -100,19 +122,22 @@ function fixture({ existingDatabase = false, failFirstFpmValidation = false, gro
     restored: false,
   };
   const manifest = {
-    version: 1,
+    version: 2,
     transactionId: TX,
     databaseExisted: existingDatabase,
     files: [
       { targetPath: roundcubeTemplatePolicy.configPath, exists: false, backupName: null },
       { targetPath: roundcubeFpmTemplatePolicy.poolPath, exists: false, backupName: null },
+      { targetPath: roundcubeNginxTemplatePolicy.configPath, exists: false, backupName: null },
     ],
   };
   const configManager = {
     inspectStagedConfiguration: async () => ({ satisfied: true, result: {} }),
     inspectStagedFpmPool: async () => ({ satisfied: true, result: {} }),
+    inspectStagedNginxConfig: async () => ({ satisfied: true, result: {} }),
     stagedConfigPath: () => '/stage/config.inc.php',
-    stagedFpmPath: () => '/stage/yunpanel-roundcube.conf',
+    stagedFpmPath: () => '/stage/yunpanel-roundcube-fpm.conf',
+    stagedNginxPath: () => '/stage/yunpanel-roundcube-nginx.conf',
   };
   const backupManager = {
     async backupConfiguration(id) { calls.push(['backup', id]); return manifest; },
@@ -151,9 +176,12 @@ function fixture({ existingDatabase = false, failFirstFpmValidation = false, gro
     if (target === '/var/lib/yunpanel/roundcube' || target === roundcubeTemplatePolicy.temporaryDirectory) {
       return directory({ uid: 2001, gid: 2001, mode: 0o700 });
     }
-    if (target === '/etc/roundcube' || target === '/etc/php/8.3/fpm/pool.d') return directory();
+    if (target === '/etc/roundcube' || target === '/etc/php/8.3/fpm/pool.d' || target === '/etc/nginx/sites-enabled') {
+      return directory();
+    }
     if (target === '/stage/config.inc.php') return file({ mode: 0o600, size: CONFIG.length });
-    if (target === '/stage/yunpanel-roundcube.conf') return file({ mode: 0o640, size: FPM.length });
+    if (target === '/stage/yunpanel-roundcube-fpm.conf') return file({ mode: 0o640, size: FPM.length });
+    if (target === '/stage/yunpanel-roundcube-nginx.conf') return file({ mode: 0o640, size: NGINX.length });
     if (target === roundcubeTemplatePolicy.databaseSchemaPath) return file({ mode: 0o644, size: 1000 });
     if (target === roundcubeTemplatePolicy.databasePath) {
       if (!state.databaseExists) throw enoent();
@@ -170,7 +198,11 @@ function fixture({ existingDatabase = false, failFirstFpmValidation = false, gro
     backupManager,
     run,
     lstatFn,
-    readFileFn: async (target) => target.includes('config.inc') ? CONFIG : FPM,
+    readFileFn: async (target) => {
+      if (target.includes('config.inc')) return CONFIG;
+      if (target.includes('nginx')) return NGINX;
+      return FPM;
+    },
     writeFileFn: async () => {},
     renameFn: async () => {},
     rmFn: async (target) => {
@@ -192,16 +224,21 @@ function fixture({ existingDatabase = false, failFirstFpmValidation = false, gro
   return { activator, calls, state };
 }
 
-test('fresh activation bootstraps SQLite once and proves the dedicated FPM socket', async () => {
+test('fresh activation bootstraps SQLite and proves FPM, Nginx and HTTPS endpoint health', async () => {
   const fx = fixture();
   const result = await fx.activator.activateConfiguration(preview(), { transactionId: TX });
   assert.equal(result.applied, true);
   assert.equal(result.databaseCreated, true);
+  assert.equal(result.nginxSha256, NGINX_SHA);
+  assert.equal(result.httpHealthy, true);
   assert.ok(fx.calls.some((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/sqlite3'
     && entry[2][1] === `.read ${roundcubeTemplatePolicy.databaseSchemaPath}`));
   assert.ok(fx.calls.some((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/sqlite3'
     && entry[2][1] === 'PRAGMA quick_check;' && entry[3].uid === 2001 && entry[3].gid === 2001));
   assert.ok(fx.calls.some((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/id'));
+  assert.ok(fx.calls.some((entry) => entry[0] === 'run' && entry[1] === '/usr/sbin/nginx' && entry[2][0] === '-t'));
+  assert.ok(fx.calls.some((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/curl'
+    && entry[2].includes('https://mail.example.com/')));
 });
 
 test('existing Roundcube database is integrity checked without schema replay', async () => {
@@ -225,6 +262,7 @@ test('fresh activation failure removes the newly-created database and restores a
   const restoreIndex = fx.calls.findIndex((entry) => entry[0] === 'restore');
   assert.ok(restoreIndex >= 0);
   assert.equal(fx.calls.slice(restoreIndex + 1).some((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/php'), false);
+  assert.ok(fx.calls.slice(restoreIndex + 1).some((entry) => entry[0] === 'run' && entry[1] === '/usr/sbin/nginx'));
 });
 
 test('missing www-data supplementary membership fails before backup or live mutation', async () => {
