@@ -37,6 +37,10 @@ import { mountMailAliasRoutes } from './mail-alias-http.js';
 import { createMailAliasRegistry, MailAliasRegistryError } from './mail-alias-registry.js';
 import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
 import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
+import {
+  createMailDkimConfigurationService,
+  MailDkimConfigurationError,
+} from './mail-dkim-configuration.js';
 import { mountMailDkimRoutes, MailDkimHttpError } from './mail-dkim-http.js';
 import { createMailDkimRegistry, MailDkimRegistryError } from './mail-dkim-registry.js';
 import { MailDiagnosticsHttpError, mountMailDiagnosticsRoutes } from './mail-diagnostics-http.js';
@@ -133,6 +137,11 @@ export function createApp({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
   mailDiagnosticsInspector = createMailDiagnosticsInspector(),
+  mailDkimConfigurationService = createMailDkimConfigurationService({
+    mailDomainRegistry,
+    mailDkimRegistry,
+    mailDiagnosticsInspector,
+  }),
   mailboxRegistry = createMailboxRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
@@ -266,8 +275,10 @@ export function createApp({
   });
   mountMailDkimRoutes(app, {
     mailDkimRegistry,
+    mailDkimConfigurationService,
     mailDomainRegistry,
     domainRegistry,
+    jobRegistry,
     localServerId,
   });
   mountMailDiagnosticsRoutes(app, {
@@ -326,6 +337,7 @@ export function createApp({
       || error instanceof MailAliasRegistryError
       || error instanceof MailConfigurationError
       || error instanceof MailConfigurationHttpError
+      || error instanceof MailDkimConfigurationError
       || error instanceof MailDkimHttpError
       || error instanceof MailDkimRegistryError
       || error instanceof MailDiagnosticsHttpError
