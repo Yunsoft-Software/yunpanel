@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  enableManagedMailSubmission,
+  mailSubmissionTemplatePolicy,
   previewManagedMailApplyPlan,
   previewManagedMailEmptyConfiguration,
   renderDovecotEmptyManagedSetConfig,
+  secureManagedMailPreview,
 } from '../src/index.js';
 
 const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
@@ -56,8 +59,11 @@ test('empty managed set disables Dovecot LMTP while keeping fail-closed passwd a
   assert.equal(mail.content, config);
 });
 
-test('empty managed set remains compatible with the allowlisted apply plan', () => {
-  const preview = previewManagedMailEmptyConfiguration();
+test('empty managed set remains compatible with the production security/submission apply plan', () => {
+  const preview = enableManagedMailSubmission(
+    secureManagedMailPreview(previewManagedMailEmptyConfiguration()),
+    [],
+  );
   const plan = previewManagedMailApplyPlan(preview);
 
   assert.equal(plan.previewSha256, preview.sha256);
@@ -68,8 +74,10 @@ test('empty managed set remains compatible with the allowlisted apply plan', () 
     { file: '/usr/sbin/postmap', args: ['hash:/etc/yunpanel/mail/postfix/virtual-domains'] },
     { file: '/usr/sbin/postmap', args: ['hash:/etc/yunpanel/mail/postfix/virtual-mailboxes'] },
     { file: '/usr/sbin/postmap', args: ['hash:/etc/yunpanel/mail/postfix/virtual-aliases'] },
+    { file: '/usr/sbin/postmap', args: [`hash:${mailSubmissionTemplatePolicy.senderLoginPath}`] },
     { file: '/usr/bin/sievec', args: ['/etc/dovecot/yunpanel-forwarding.sieve'] },
   ]);
+  assert.deepEqual(plan.postfixMasterServices, [mailSubmissionTemplatePolicy.service]);
   assert.deepEqual(plan.stages.reload.map((command) => command.args[1]), ['rspamd', 'dovecot', 'postfix']);
   assert.deepEqual(plan.stages.health.map((command) => command.args[2]), ['rspamd', 'dovecot', 'postfix']);
 });
