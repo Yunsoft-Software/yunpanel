@@ -4,6 +4,7 @@ import { chmod, chown, lstat, readFile, rename, rm, writeFile } from 'node:fs/pr
 import { promisify } from 'node:util';
 import {
   roundcubeFpmTemplatePolicy,
+  roundcubeNginxTemplatePolicy,
   roundcubeTemplatePolicy,
 } from '@yunpanel/config-templates';
 import { createRoundcubeConfigBackupManager } from './roundcube-config-backup.js';
@@ -19,11 +20,14 @@ const ID = '/usr/bin/id';
 const PHP = '/usr/bin/php';
 const PHP_FPM = '/usr/sbin/php-fpm8.3';
 const SQLITE = '/usr/bin/sqlite3';
+const NGINX = '/usr/sbin/nginx';
+const CURL = '/usr/bin/curl';
 const SYSTEMCTL = '/usr/bin/systemctl';
 const ROOT_UID = 0;
 const ROOT_GID = 0;
 const CONFIG_MODE = 0o640;
 const FPM_MODE = 0o640;
+const NGINX_MODE = 0o640;
 const DATABASE_MODE = 0o600;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const SOCKET_MODE = 0o660;
@@ -65,7 +69,15 @@ function validatePreview(preview) {
     || !preview.fpm || preview.fpm.sha256 !== preview.fpmSha256
     || preview.fpm.artifact?.path !== roundcubeFpmTemplatePolicy.poolPath
     || preview.fpm.socketPath !== roundcubeFpmTemplatePolicy.socketPath
-    || preview.fpm.serviceUnit !== roundcubeFpmTemplatePolicy.serviceUnit) {
+    || preview.fpm.serviceUnit !== roundcubeFpmTemplatePolicy.serviceUnit
+    || !preview.nginx || preview.nginx.sha256 !== preview.nginxSha256
+    || preview.nginx.artifact?.path !== roundcubeNginxTemplatePolicy.configPath
+    || preview.nginx.publicRoot !== roundcubeNginxTemplatePolicy.publicRoot
+    || preview.nginx.fpmSocketPath !== roundcubeFpmTemplatePolicy.socketPath
+    || preview.nginx.serviceUnit !== roundcubeNginxTemplatePolicy.serviceUnit
+    || preview.nginx.healthPath !== roundcubeNginxTemplatePolicy.healthPath
+    || preview.nginx.webHostname !== preview.mailHostname
+    || preview.nginx.endpoint !== `https://${preview.mailHostname}/`) {
     throw activationError('roundcube_activation_preview_invalid', 'Roundcube activation preview is invalid');
   }
   return preview;
@@ -99,8 +111,10 @@ export function createRoundcubeConfigActivator({
 } = {}) {
   if (!configManager || typeof configManager.inspectStagedConfiguration !== 'function'
     || typeof configManager.inspectStagedFpmPool !== 'function'
+    || typeof configManager.inspectStagedNginxConfig !== 'function'
     || typeof configManager.stagedConfigPath !== 'function'
-    || typeof configManager.stagedFpmPath !== 'function') {
+    || typeof configManager.stagedFpmPath !== 'function'
+    || typeof configManager.stagedNginxPath !== 'function') {
     throw activationError('roundcube_config_manager_invalid', 'Roundcube staging manager is unavailable');
   }
   if (!backupManager || typeof backupManager.backupConfiguration !== 'function'
@@ -148,9 +162,9 @@ export function createRoundcubeConfigActivator({
     }
   }
 
-  async function assertDirectory(path, { uid, gid, mode }) {
+  async function assertDirectory(targetPath, { uid, gid, mode }) {
     try {
-      const metadata = await lstatFn(path);
+      const metadata = await lstatFn(targetPath);
       if (!metadata.isDirectory() || metadata.isSymbolicLink()
         || metadata.uid !== uid || metadata.gid !== gid || (metadata.mode & 0o7777) !== mode) {
         throw new Error('unsafe directory');
@@ -160,22 +174,22 @@ export function createRoundcubeConfigActivator({
     }
   }
 
-  async function assertParentDirectory(path) {
+  async function assertParentDirectory(targetPath) {
     try {
-      const metadata = await lstatFn(path);
+      const metadata = await lstatFn(targetPath);
       if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error('unsafe parent');
     } catch {
       throw activationError('roundcube_configuration_parent_unsafe', 'Roundcube configuration directory is unavailable or unsafe');
     }
   }
 
-  async function readStaged(path, expectedSha256, expectedBytes, expectedMode) {
+  async function readStaged(targetPath, expectedSha256, expectedBytes, expectedMode) {
     try {
-      const metadata = await lstatFn(path);
+      const metadata = await lstatFn(targetPath);
       if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o7777) !== expectedMode) {
         throw new Error('unsafe stage');
       }
-      const content = await readFileFn(path);
+      const content = await readFileFn(targetPath);
       if (content.length !== expectedBytes || sha256(content) !== expectedSha256) throw new Error('changed stage');
       return content;
     } catch {
@@ -255,36 +269,25 @@ export function createRoundcubeConfigActivator({
   }
 
   async function validatePhpConfig() {
-    await runCommand(
-      PHP,
-      ['-l', roundcubeTemplatePolicy.configPath],
-      'roundcube_php_config_invalid',
-      'Roundcube PHP configuration validation failed',
-    );
+    await runCommand(PHP, ['-l', roundcubeTemplatePolicy.configPath], 'roundcube_php_config_invalid', 'Roundcube PHP configuration validation failed');
   }
 
   async function validateFpmConfig() {
-    await runCommand(
-      PHP_FPM,
-      ['-t'],
-      'roundcube_fpm_config_invalid',
-      'Roundcube PHP-FPM configuration validation failed',
-    );
+    await runCommand(PHP_FPM, ['-t'], 'roundcube_fpm_config_invalid', 'Roundcube PHP-FPM configuration validation failed');
+  }
+
+  async function validateNginxConfig() {
+    await runCommand(NGINX, ['-t'], 'roundcube_nginx_config_invalid', 'Roundcube Nginx configuration validation failed');
   }
 
   async function reloadFpm() {
-    await runCommand(
-      SYSTEMCTL,
-      ['reload', roundcubeFpmTemplatePolicy.serviceUnit],
-      'roundcube_fpm_reload_failed',
-      'Roundcube PHP-FPM reload failed',
-    );
-    await runCommand(
-      SYSTEMCTL,
-      ['is-active', '--quiet', roundcubeFpmTemplatePolicy.serviceUnit],
-      'roundcube_fpm_health_failed',
-      'Roundcube PHP-FPM service is not active',
-    );
+    await runCommand(SYSTEMCTL, ['reload', roundcubeFpmTemplatePolicy.serviceUnit], 'roundcube_fpm_reload_failed', 'Roundcube PHP-FPM reload failed');
+    await runCommand(SYSTEMCTL, ['is-active', '--quiet', roundcubeFpmTemplatePolicy.serviceUnit], 'roundcube_fpm_health_failed', 'Roundcube PHP-FPM service is not active');
+  }
+
+  async function reloadNginx() {
+    await runCommand(SYSTEMCTL, ['reload', roundcubeNginxTemplatePolicy.serviceUnit], 'roundcube_nginx_reload_failed', 'Roundcube Nginx reload failed');
+    await runCommand(SYSTEMCTL, ['is-active', '--quiet', roundcubeNginxTemplatePolicy.serviceUnit], 'roundcube_nginx_health_failed', 'Roundcube Nginx service is not active');
   }
 
   async function assertFpmSocket(wwwIdentity, expectedPresent = true) {
@@ -307,14 +310,32 @@ export function createRoundcubeConfigActivator({
     }
   }
 
+  async function assertHttpHealthy(preview) {
+    await runCommand(
+      CURL,
+      [
+        '--fail', '--silent', '--show-error', '--insecure',
+        '--max-time', '10',
+        '--resolve', `${preview.nginx.webHostname}:443:127.0.0.1`,
+        '--output', '/dev/null',
+        preview.nginx.endpoint,
+      ],
+      'roundcube_http_health_failed',
+      'Roundcube HTTPS endpoint did not become healthy',
+      { timeout: 15_000 },
+    );
+  }
+
   async function rollback(transactionId, runtimeIdentity, wwwIdentity) {
     try {
       const manifest = await backupManager.loadManifest(transactionId);
       await backupManager.restoreConfiguration(transactionId);
       if (manifest.files[0].exists) await validatePhpConfig();
       await validateFpmConfig();
+      await validateNginxConfig();
       await reloadFpm();
       await assertFpmSocket(wwwIdentity, manifest.files[1].exists);
+      await reloadNginx();
       const databaseExists = await inspectDatabase(runtimeIdentity);
       if (databaseExists !== manifest.databaseExisted) throw new Error('database rollback mismatch');
       if (databaseExists) await assertDatabaseHealthy(runtimeIdentity);
@@ -340,16 +361,18 @@ export function createRoundcubeConfigActivator({
       }),
       assertParentDirectory('/etc/roundcube'),
       assertParentDirectory('/etc/php/8.3/fpm/pool.d'),
+      assertParentDirectory('/etc/nginx/sites-enabled'),
     ]);
 
-    const [stagedConfig, stagedFpm] = await Promise.all([
+    const [stagedConfig, stagedFpm, stagedNginx] = await Promise.all([
       configManager.inspectStagedConfiguration(expected.configuration),
       configManager.inspectStagedFpmPool(expected.fpm),
+      configManager.inspectStagedNginxConfig(expected.nginx),
     ]);
-    if (!stagedConfig?.satisfied || !stagedFpm?.satisfied) {
+    if (!stagedConfig?.satisfied || !stagedFpm?.satisfied || !stagedNginx?.satisfied) {
       throw activationError('roundcube_activation_prerequisite_missing', 'Roundcube staged configuration is missing');
     }
-    const [configContent, fpmContent] = await Promise.all([
+    const [configContent, fpmContent, nginxContent] = await Promise.all([
       readStaged(
         configManager.stagedConfigPath(expected.configuration.sha256),
         expected.configuration.artifact.sha256,
@@ -361,6 +384,12 @@ export function createRoundcubeConfigActivator({
         expected.fpm.artifact.sha256,
         expected.fpm.artifact.bytes,
         FPM_MODE,
+      ),
+      readStaged(
+        configManager.stagedNginxPath(expected.nginx.sha256),
+        expected.nginx.artifact.sha256,
+        expected.nginx.artifact.bytes,
+        NGINX_MODE,
       ),
     ]);
 
@@ -374,19 +403,27 @@ export function createRoundcubeConfigActivator({
       await atomicReplace(roundcubeFpmTemplatePolicy.poolPath, fpmContent, {
         uid: ROOT_UID, gid: ROOT_GID, mode: FPM_MODE,
       });
+      await atomicReplace(roundcubeNginxTemplatePolicy.configPath, nginxContent, {
+        uid: ROOT_UID, gid: ROOT_GID, mode: NGINX_MODE,
+      });
       const databaseExists = await inspectDatabase(runtimeIdentity);
       if (!databaseExists) await bootstrapDatabase(runtimeIdentity);
       else await assertDatabaseHealthy(runtimeIdentity);
       await validatePhpConfig();
       await validateFpmConfig();
+      await validateNginxConfig();
       await reloadFpm();
       await assertFpmSocket(wwwIdentity, true);
+      await reloadNginx();
+      await assertHttpHealthy(expected);
       return Object.freeze({
         version: 1,
         previewSha256: expected.sha256,
         configSha256: expected.configSha256,
         fpmSha256: expected.fpmSha256,
+        nginxSha256: expected.nginxSha256,
         databaseCreated: backup.databaseExisted === false,
+        httpHealthy: true,
         applied: true,
         sideEffects: true,
       });
@@ -413,10 +450,13 @@ export const roundcubeConfigActivatorInternals = Object.freeze({
   phpPath: PHP,
   phpFpmPath: PHP_FPM,
   sqlitePath: SQLITE,
+  nginxPath: NGINX,
+  curlPath: CURL,
   systemctlPath: SYSTEMCTL,
   maxOutput: MAX_OUTPUT,
   configMode: CONFIG_MODE,
   fpmMode: FPM_MODE,
+  nginxMode: NGINX_MODE,
   databaseMode: DATABASE_MODE,
   privateDirectoryMode: PRIVATE_DIRECTORY_MODE,
   socketMode: SOCKET_MODE,
