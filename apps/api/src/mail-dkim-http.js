@@ -86,6 +86,7 @@ async function scopedLocalMailDomain({ mailDomainRegistry, domainRegistry, mailD
 export function mountMailDkimRoutes(app, {
   mailDkimRegistry,
   mailDkimConfigurationService = null,
+  mailDkimDnsService = null,
   mailDkimRetirementRegistry = null,
   mailDkimRetirementInspector = createMailDkimRetirementInspector(),
   mailDomainRegistry,
@@ -111,6 +112,9 @@ export function mountMailDkimRoutes(app, {
     && (typeof mailDkimConfigurationService.previewApply !== 'function'
       || !jobRegistry || typeof jobRegistry.enqueue !== 'function' || typeof jobRegistry.listJobs !== 'function')) {
     throw new Error('DKIM configuration apply dependencies are invalid');
+  }
+  if (mailDkimDnsService !== null && typeof mailDkimDnsService.reconcileRetirement !== 'function') {
+    throw new Error('DKIM DNS service is invalid');
   }
 
   app.get('/api/mail-domains/:mailDomainId/dkim', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -173,6 +177,7 @@ export function mountMailDkimRoutes(app, {
       throw new MailDkimHttpError('mail_dkim_rotation_unavailable', 'DKIM rotation requires managed mail and DNS retirement coordination', 503);
     }
     await ensureMailConfigurationIdle(jobRegistry, scoped.webDomain.serverId);
+    if (mailDkimDnsService) await mailDkimDnsService.reconcileRetirement(request.params.mailDomainId);
     await mailDkimRetirementRegistry.prepareRotation(request.params.mailDomainId, {
       expectedKeyRevision: body.expectedRevision,
       targetSelector: body.selector,
@@ -218,6 +223,7 @@ export function mountMailDkimRoutes(app, {
       throw new MailDkimHttpError('mail_dkim_delete_unavailable', 'DKIM deletion safety checks are unavailable', 503);
     }
     await ensureMailConfigurationIdle(jobRegistry, scoped.webDomain.serverId);
+    if (mailDkimDnsService) await mailDkimDnsService.reconcileRetirement(request.params.mailDomainId);
     const pendingRetirement = await mailDkimRetirementRegistry.getRetirement(request.params.mailDomainId);
     if (pendingRetirement) {
       throw new MailDkimHttpError(
