@@ -16,7 +16,7 @@ import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
-const RESOURCE_TYPES = new Set(['domain', 'server', 'application', 'certificate', 'backup', 'database', 'dns_zone', 'system']);
+const RESOURCE_TYPES = new Set(['domain', 'server', 'application', 'certificate', 'backup', 'database', 'dns_zone', 'mail_domain', 'system']);
 const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DOMAIN_STAGE,
   OPERATIONS.DOMAIN_ACTIVATE,
@@ -40,6 +40,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DATABASE_CREATE,
   OPERATIONS.DATABASE_DELETE,
   OPERATIONS.DNS_RECORD_APPLY,
+  OPERATIONS.MAIL_CONFIG_APPLY,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
@@ -664,12 +665,37 @@ function sanitizeDnsRecordResult(job, result) {
   };
 }
 
+function sanitizeMailConfigResult(job, result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)
+    || result.version !== 1 || result.applied !== true || result.sideEffects !== true
+    || result.mailDomainId !== job.payload?.mailDomainId
+    || result.desiredStatus !== job.payload?.desiredStatus
+    || result.previewDigest !== job.payload?.previewDigest
+    || result.configurationSha256 !== job.payload?.configurationSha256
+    || typeof result.planSha256 !== 'string' || !SHA256_PATTERN.test(result.planSha256)
+    || typeof result.readinessSha256 !== 'string' || !SHA256_PATTERN.test(result.readinessSha256)) {
+    throw new JobRegistryError('invalid_job_result', 'Managed mail result does not match the queued transition');
+  }
+  return {
+    version: 1,
+    mailDomainId: result.mailDomainId,
+    desiredStatus: result.desiredStatus,
+    previewDigest: result.previewDigest,
+    configurationSha256: result.configurationSha256,
+    planSha256: result.planSha256,
+    readinessSha256: result.readinessSha256,
+    applied: true,
+    sideEffects: true,
+  };
+}
+
 function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) return sanitizeManagedServiceResult(job, result);
   if ([OPERATIONS.DATABASE_INSPECT, OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE].includes(job.operation)) {
     return sanitizeDatabaseResult(job, result);
   }
   if (job.operation === OPERATIONS.DNS_RECORD_APPLY) return sanitizeDnsRecordResult(job, result);
+  if (job.operation === OPERATIONS.MAIL_CONFIG_APPLY) return sanitizeMailConfigResult(job, result);
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
   }
