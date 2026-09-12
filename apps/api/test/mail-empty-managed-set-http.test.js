@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
+import { mailSubmissionTemplatePolicy } from '@yunpanel/config-templates';
 import { createMailConfigurationService } from '../src/mail-configuration.js';
 import { mountMailConfigurationRoutes } from '../src/mail-configuration-http.js';
 
@@ -48,6 +49,7 @@ async function startFixture(t) {
       }],
       materializeEnabledAccounts: async () => [account],
     },
+    mailAliasRegistry: { materializeEnabledAliases: async () => [] },
   });
   const enqueued = [];
   const app = express();
@@ -90,7 +92,7 @@ async function post(base, pathname, body) {
   });
 }
 
-test('Owner can preview and queue disabling the final enabled local mail domain', async (t) => {
+test('Owner can preview and queue disabling the final enabled local mail domain with submission teardown state', async (t) => {
   const fixture = await startFixture(t);
   const previewResponse = await post(
     fixture.base,
@@ -101,7 +103,11 @@ test('Owner can preview and queue disabling the final enabled local mail domain'
   const preview = (await previewResponse.json()).data;
   assert.equal(preview.readyToApply, true);
   assert.deepEqual(preview.domains, []);
-  assert.deepEqual(preview.configuration.counts, { domains: 0, mailboxes: 0, aliases: 0 });
+  assert.deepEqual(preview.configuration.counts, { domains: 0, mailboxes: 0, aliases: 0, forwardings: 0 });
+  assert.deepEqual(preview.configuration.postfixMasterServices, [mailSubmissionTemplatePolicy.service]);
+  assert.equal(preview.configuration.artifactDigests.some(
+    (artifact) => artifact.path === mailSubmissionTemplatePolicy.senderLoginPath,
+  ), true);
   assert.doesNotMatch(JSON.stringify(preview), /argon2|passwordHash/i);
 
   const applyResponse = await post(
