@@ -49,6 +49,14 @@ export {
 } from './mail-forwarding.js';
 
 export {
+  MailDkimTemplateError,
+  mailDkimTemplatePolicy,
+  managedDkimDnsRecord,
+  previewRspamdDkimSigningConfig,
+  renderRspamdDkimSigningConfig,
+} from './mail-dkim.js';
+
+export {
   previewManagedMailEmptyConfiguration,
   renderDovecotEmptyManagedSetConfig,
 } from './mail-teardown.js';
