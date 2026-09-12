@@ -23,6 +23,7 @@ import { createJobRegistry } from './job-registry.js';
 import { createJobLogStore } from './job-log-store.js';
 import { createGithubWebhookHandler } from './github-webhook-http.js';
 import { createLiveSessionRegistry } from './live-session-registry.js';
+import { createMailConfigurationService } from './mail-configuration.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { createMailboxRegistry } from './mailbox-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
@@ -140,6 +141,7 @@ const mailboxRegistry = createMailboxRegistry({
   getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
 });
 await mailboxRegistry.init();
+const mailConfigurationService = createMailConfigurationService({ mailDomainRegistry, mailboxRegistry });
 const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   filePath: applicationEnvironmentStorePath,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
@@ -191,6 +193,7 @@ const listener = createAuthenticatedApi({
     dnsProviderCredentialRegistry,
     mailDomainRegistry,
     mailboxRegistry,
+    mailConfigurationService,
     dockerWorkloadRegistry,
     applicationEnvironmentRegistry,
     applicationDeployQueue,
@@ -213,6 +216,8 @@ const localRuntime = await startConfiguredLocalRuntime({
   certificateRegistry,
   applicationRegistry,
   applicationEnvironmentRegistry,
+  mailDomainRegistry,
+  mailConfigurationService,
   dnsProviderCredentialRegistry,
   jobLogStore,
   inspectServices: inspectAllowlistedServices,
