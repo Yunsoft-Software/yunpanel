@@ -207,7 +207,13 @@ export function createApp({
     mailDomainRegistry,
   });
   mountMailAliasRoutes(app, { mailAliasRegistry, mailDomainRegistry, domainRegistry, localServerId });
-  mountMailboxRoutes(app, { mailboxRegistry, mailDomainRegistry, domainRegistry, localServerId });
+  mountMailboxRoutes(app, {
+    mailboxRegistry,
+    mailAliasRegistry,
+    mailDomainRegistry,
+    domainRegistry,
+    localServerId,
+  });
   mountMailConfigurationRoutes(app, {
     mailConfigurationService,
     mailDomainRegistry,
