@@ -42,8 +42,13 @@ function publicConfiguration(preview) {
   });
 }
 
-function previewIdentity(input, targetKey, preview, dkimDiagnostic) {
+function previewIdentity(input, targetKey, preview, dnsDiagnostics) {
   const configuration = publicConfiguration(preview);
+  const dnsStates = Object.freeze(dnsDiagnostics.map((entry) => Object.freeze({
+    mailDomainId: entry.mailDomainId,
+    domainName: entry.domainName,
+    state: entry.diagnostic.state,
+  })));
   const identity = Object.freeze({
     version: 1,
     operation: 'mail_dkim_apply',
@@ -51,10 +56,10 @@ function previewIdentity(input, targetKey, preview, dkimDiagnostic) {
     expectedKeyRevision: input.expectedKeyRevision,
     selector: targetKey.selector,
     configurationSha256: configuration.sha256,
-    dkimDnsState: dkimDiagnostic.state,
+    dnsStates,
   });
   const previewDigest = digest(identity);
-  const blockers = dkimDiagnostic.state === 'ready'
+  const blockers = dnsStates.every((entry) => entry.state === 'ready')
     ? Object.freeze([])
     : Object.freeze(['mail_dkim_dns_not_ready']);
   return Object.freeze({
@@ -64,7 +69,11 @@ function previewIdentity(input, targetKey, preview, dkimDiagnostic) {
     readyToApply: blockers.length === 0,
     blockers,
     configuration,
-    dns: dkimDiagnostic,
+    dns: Object.freeze(dnsDiagnostics.map((entry) => Object.freeze({
+      mailDomainId: entry.mailDomainId,
+      domainName: entry.domainName,
+      diagnostic: entry.diagnostic,
+    }))),
     sideEffects: false,
   });
 }
@@ -136,17 +145,25 @@ export function createMailDkimConfigurationService({
       }
       throw error;
     }
-    const diagnostics = await mailDiagnosticsInspector.inspect(mailDomain.domainName, { dkim: targetKey });
-    const dkimDiagnostic = diagnostics?.diagnostics?.dkim;
-    if (!dkimDiagnostic || typeof dkimDiagnostic.state !== 'string') {
-      throw new MailDkimConfigurationError('mail_dkim_diagnostics_invalid', 'Managed DKIM DNS diagnostics are unavailable', 503);
-    }
+
+    const dnsDiagnostics = Object.freeze(await Promise.all(enabledKeys.map(async (key) => {
+      const diagnostics = await mailDiagnosticsInspector.inspect(key.domainName, { dkim: key });
+      const diagnostic = diagnostics?.diagnostics?.dkim;
+      if (!diagnostic || typeof diagnostic.state !== 'string') {
+        throw new MailDkimConfigurationError('mail_dkim_diagnostics_invalid', 'Managed DKIM DNS diagnostics are unavailable', 503);
+      }
+      return Object.freeze({
+        mailDomainId: key.mailDomainId,
+        domainName: key.domainName,
+        diagnostic,
+      });
+    })));
     return Object.freeze({
       input,
       targetKey,
       enabledKeys: Object.freeze(enabledKeys),
       preview,
-      publicPreview: previewIdentity(input, targetKey, preview, dkimDiagnostic),
+      publicPreview: previewIdentity(input, targetKey, preview, dnsDiagnostics),
     });
   }
 
@@ -164,7 +181,7 @@ export function createMailDkimConfigurationService({
     }
     const state = await materializeState(input);
     if (!state.publicPreview.readyToApply) {
-      throw new MailDkimConfigurationError('mail_dkim_dns_not_ready', 'Managed DKIM DNS record is not ready to apply', 409);
+      throw new MailDkimConfigurationError('mail_dkim_dns_not_ready', 'Every enabled managed DKIM DNS record must be ready before signing is applied', 409);
     }
     if (state.publicPreview.previewDigest !== expectedPreviewDigest
       || state.preview.sha256 !== expectedConfigurationSha256) {
