@@ -157,7 +157,8 @@ export async function recoverRunningRoundcubeConfig({
     );
   }
   if (!bundle?.preview || bundle.preview.sha256 !== intent.previewSha256
-    || bundle.preview.configSha256 !== intent.configSha256 || bundle.preview.fpmSha256 !== intent.fpmSha256) {
+    || bundle.preview.configSha256 !== intent.configSha256 || bundle.preview.fpmSha256 !== intent.fpmSha256
+    || typeof bundle.preview.nginxSha256 !== 'string' || !SHA256_PATTERN.test(bundle.preview.nginxSha256)) {
     throw new JobRunningRoundcubeConfigRecoveryError('job_roundcube_recovery_materialization_invalid', 'Roundcube recovery materialization is inconsistent');
   }
 
@@ -170,7 +171,9 @@ export async function recoverRunningRoundcubeConfig({
     || evidence.result.previewSha256 !== intent.previewSha256
     || evidence.result.configSha256 !== intent.configSha256
     || evidence.result.fpmSha256 !== intent.fpmSha256
-    || evidence.result.databaseHealthy !== true || evidence.result.applied !== true || evidence.result.sideEffects !== true) {
+    || evidence.result.nginxSha256 !== bundle.preview.nginxSha256
+    || evidence.result.databaseHealthy !== true || evidence.result.httpHealthy !== true
+    || evidence.result.applied !== true || evidence.result.sideEffects !== true) {
     throw new JobRunningRoundcubeConfigRecoveryError(
       'job_roundcube_recovery_evidence_not_satisfied',
       'Active Roundcube host state does not match the completed operation',
@@ -182,7 +185,9 @@ export async function recoverRunningRoundcubeConfig({
     previewSha256: intent.previewSha256,
     configSha256: intent.configSha256,
     fpmSha256: intent.fpmSha256,
+    nginxSha256: bundle.preview.nginxSha256,
     databaseCreated: receipt.databaseCreated,
+    httpHealthy: true,
     applied: true,
     sideEffects: true,
   });
