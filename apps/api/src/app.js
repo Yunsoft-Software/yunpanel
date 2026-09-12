@@ -40,6 +40,10 @@ import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail
 import { MailDkimConfigurationError } from './mail-dkim-configuration.js';
 import { mountMailDkimRoutes, MailDkimHttpError } from './mail-dkim-http.js';
 import { createMailDkimRegistry, MailDkimRegistryError } from './mail-dkim-registry.js';
+import {
+  createMailDkimRetirementRegistry,
+  MailDkimRetirementRegistryError,
+} from './mail-dkim-retirement-registry.js';
 import { MailDiagnosticsHttpError, mountMailDiagnosticsRoutes } from './mail-diagnostics-http.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { mountMailboxForwardingRoutes } from './mailbox-forwarding-http.js';
@@ -132,6 +136,9 @@ export function createApp({
   }),
   mailDkimRegistry = createMailDkimRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
+  }),
+  mailDkimRetirementRegistry = createMailDkimRetirementRegistry({
+    getDkimKey: async (mailDomainId) => mailDkimRegistry.getKey(mailDomainId),
   }),
   mailDiagnosticsInspector = createMailDiagnosticsInspector(),
   mailDkimConfigurationService = null,
@@ -268,6 +275,7 @@ export function createApp({
   });
   mountMailDkimRoutes(app, {
     mailDkimRegistry,
+    mailDkimRetirementRegistry,
     mailDkimConfigurationService,
     mailDomainRegistry,
     domainRegistry,
@@ -333,6 +341,7 @@ export function createApp({
       || error instanceof MailDkimConfigurationError
       || error instanceof MailDkimHttpError
       || error instanceof MailDkimRegistryError
+      || error instanceof MailDkimRetirementRegistryError
       || error instanceof MailDiagnosticsHttpError
       || error instanceof MailDiagnosticsInspectorError
       || error instanceof MailboxForwardingRegistryError
