@@ -20,10 +20,11 @@ function digest(value) {
 
 function input(value, { apply = false } = {}) {
   const fields = new Set(apply
-    ? ['kind', 'expectedRevision', 'previewDigest', 'confirmation']
-    : ['kind', 'expectedRevision']);
+    ? ['mailDomainId', 'kind', 'expectedRevision', 'previewDigest', 'confirmation']
+    : ['mailDomainId', 'kind', 'expectedRevision']);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
+    || typeof value.mailDomainId !== 'string' || !value.mailDomainId
     || !KINDS.has(value.kind) || !Number.isSafeInteger(value.expectedRevision) || value.expectedRevision < 1
     || (apply && (typeof value.previewDigest !== 'string' || !SHA256_PATTERN.test(value.previewDigest)
       || typeof value.confirmation !== 'string' || value.confirmation.length > 300))) {
@@ -82,6 +83,7 @@ export function createMailDkimDnsService({
     }
     const webDomain = await domainRegistry.getDomain(mailDomain.webDomainId);
     if (!webDomain || webDomain.primaryDomain !== mailDomain.domainName
+      || typeof webDomain.serverId !== 'string' || !webDomain.serverId
       || (localServerId !== null && webDomain.serverId !== localServerId)) {
       throw new MailDkimDnsError('mail_domain_not_found', 'Mail domain was not found', 404);
     }
@@ -157,7 +159,8 @@ export function createMailDkimDnsService({
       record: canonicalRecord,
     }, { dnsCredential: scoped.secret });
     if (!snapshot || snapshot.provider !== 'cloudflare' || !Array.isArray(snapshot.records)
-      || snapshot.records.length > 1 || typeof snapshot.snapshotDigest !== 'string') {
+      || snapshot.records.length > 1 || typeof snapshot.snapshotDigest !== 'string'
+      || !SHA256_PATTERN.test(snapshot.snapshotDigest)) {
       throw new MailDkimDnsError('mail_dkim_dns_snapshot_invalid', 'DNS provider snapshot is invalid', 503);
     }
     const existing = snapshot.records[0] ?? null;
@@ -183,7 +186,9 @@ export function createMailDkimDnsService({
       mailDomainId: scoped.mailDomain.id,
       expectedRevision: request.expectedRevision,
       selector: desired.selector,
+      serverId: scoped.webDomain.serverId,
       dnsZoneId: scoped.zone.id,
+      zoneName: scoped.zone.zoneName,
       zoneRevision: scoped.zone.revision,
       provider: scoped.credential.provider,
       credentialId: scoped.credential.id,
@@ -203,7 +208,7 @@ export function createMailDkimDnsService({
   }
 
   async function preview(rawInput) {
-    return buildPreview(input(rawInput));
+    return buildPreview(rawInput);
   }
 
   async function apply(rawInput) {
@@ -234,14 +239,14 @@ export function createMailDkimDnsService({
       });
     }
     const job = await jobRegistry.enqueue({
-      serverId: (await domainRegistry.getDomain((await mailDomainRegistry.getMailDomain(request.mailDomainId)).webDomainId)).serverId,
+      serverId: preview.serverId,
       type: OPERATIONS.DNS_RECORD_APPLY,
       operation: OPERATIONS.DNS_RECORD_APPLY,
       payload: {
         provider: preview.provider,
         credentialId: preview.credentialId,
         dnsZoneId: preview.dnsZoneId,
-        zoneName: (await dnsHostingRegistry.listZones()).find((zone) => zone.id === preview.dnsZoneId)?.zoneName,
+        zoneName: preview.zoneName,
         action: preview.action,
         record: preview.record,
         expectedSnapshotDigest: preview.providerSnapshotDigest,
