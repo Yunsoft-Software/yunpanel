@@ -4,6 +4,7 @@ import { MailDkimRegistryError } from './mail-dkim-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
 const CREATE_FIELDS = new Set(['expectedRevision', 'selector']);
+const ROTATE_FIELDS = new Set(['expectedRevision', 'selector']);
 const PREVIEW_FIELDS = new Set(['expectedKeyRevision']);
 const APPLY_FIELDS = new Set([
   'expectedKeyRevision', 'previewDigest', 'configurationSha256', 'confirmation',
@@ -80,7 +81,7 @@ export function mountMailDkimRoutes(app, {
     throw new Error('Express application is required');
   }
   if (!mailDkimRegistry || typeof mailDkimRegistry.getKey !== 'function'
-    || typeof mailDkimRegistry.createKey !== 'function') {
+    || typeof mailDkimRegistry.createKey !== 'function' || typeof mailDkimRegistry.rotateKey !== 'function') {
     throw new Error('DKIM key registry is required');
   }
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
@@ -118,6 +119,23 @@ export function mountMailDkimRoutes(app, {
     });
     const key = await mailDkimRegistry.createKey(request.params.mailDomainId, body);
     return response.status(201).json({ data: key, sideEffects: keyGenerationSideEffects });
+  }));
+
+  app.post('/api/mail-domains/:mailDomainId/dkim/rotate', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const body = exactBody(request.body, ROTATE_FIELDS, 'mail_dkim_rotate_input_invalid');
+    const scoped = await scopedLocalMailDomain({
+      mailDomainRegistry,
+      domainRegistry,
+      mailDomainId: request.params.mailDomainId,
+      localServerId,
+    });
+    if (!jobRegistry || typeof jobRegistry.listJobs !== 'function') {
+      throw new MailDkimHttpError('mail_dkim_rotation_unavailable', 'DKIM rotation requires managed mail job coordination', 503);
+    }
+    await ensureMailConfigurationIdle(jobRegistry, scoped.webDomain.serverId);
+    const key = await mailDkimRegistry.rotateKey(request.params.mailDomainId, body);
+    return response.json({ data: key, sideEffects: keyGenerationSideEffects });
   }));
 
   if (mailDkimConfigurationService) {
@@ -190,6 +208,7 @@ export const mailDkimHttpInternals = Object.freeze({
   emptyQuery,
   scopedLocalMailDomain,
   keyGenerationSideEffects,
+  rotateFields: ROTATE_FIELDS,
   previewFields: PREVIEW_FIELDS,
   applyFields: APPLY_FIELDS,
 });
