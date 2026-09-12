@@ -161,14 +161,16 @@ export function createMailConfigActivator({
     }
   }
 
-  async function createManagedDirectories(backup) {
+  async function createManagedDirectories(backup, onCreated) {
     for (const directory of backup.directories) {
       if (directory.present) continue;
       try {
         await mkdirFn(directory.path, { mode: NEW_MANAGED_DIRECTORY_MODE });
+        onCreated();
         await chownFn(directory.path, ROOT_UID, ROOT_GID);
         await chmodFn(directory.path, NEW_MANAGED_DIRECTORY_MODE);
-      } catch {
+      } catch (error) {
+        if (error instanceof MailConfigActivationError) throw error;
         throw activationError('mail_directory_create_failed', 'Managed mail configuration directory could not be created');
       }
     }
@@ -190,16 +192,18 @@ export function createMailConfigActivator({
     }
   }
 
-  async function replaceManagedArtifacts(stage, planSha256) {
+  async function replaceManagedArtifacts(stage, planSha256, onMutation) {
     const stageDirectory = configManager.stageDirectory(planSha256);
     for (const artifact of stage.artifacts) {
       const content = await readStagedArtifact(stageDirectory, artifact);
       try {
-        await mkdirFn(path.dirname(artifact.targetPath), { recursive: false });
-      } catch (error) {
-        if (error?.code !== 'EEXIST') {
-          throw activationError('mail_live_parent_unavailable', 'Managed mail target directory is unavailable');
+        const parent = await lstatFn(path.dirname(artifact.targetPath));
+        if (!parent.isDirectory() || parent.isSymbolicLink()) {
+          throw activationError('mail_live_parent_unsafe', 'Managed mail target parent is not a safe directory');
         }
+      } catch (error) {
+        if (error instanceof MailConfigActivationError) throw error;
+        throw activationError('mail_live_parent_unavailable', 'Managed mail target directory is unavailable');
       }
       try {
         const existing = await lstatFn(artifact.targetPath);
@@ -212,6 +216,7 @@ export function createMailConfigActivator({
           throw activationError('mail_live_target_inspection_failed', 'Managed mail target could not be inspected');
         }
       }
+      onMutation();
       try {
         await atomicReplace(artifact.targetPath, content, {
           mode: artifact.mode,
@@ -301,7 +306,8 @@ export function createMailConfigActivator({
     for (const directory of [...backup.directories].reverse()) {
       if (directory.present) continue;
       try { await rmdirFn(directory.path); }
-      catch {
+      catch (error) {
+        if (isMissing(error)) continue;
         throw activationError('mail_restore_failed', 'Managed mail rollback could not remove a newly-created directory');
       }
     }
@@ -322,7 +328,6 @@ export function createMailConfigActivator({
     for (const command of plan.rollback.health) {
       await runCommand(command, 'mail_restore_health_failed', 'Restored mail service did not become healthy');
     }
-    await assertPostfixParameters({ postfixParameters: [] });
     const readiness = await readinessInspector.inspect(preview);
     if (!readiness.ready || readiness.previewSha256 !== preview.sha256) {
       throw activationError('mail_restore_readiness_failed', 'Restored mail host readiness could not be confirmed');
@@ -355,11 +360,10 @@ export function createMailConfigActivator({
     await assertLiveMatchesBackup(backup);
 
     let mutationStarted = false;
+    const markMutation = () => { mutationStarted = true; };
     try {
-      mutationStarted = backup.directories.some((directory) => !directory.present);
-      await createManagedDirectories(backup);
-      mutationStarted = true;
-      await replaceManagedArtifacts(stage, plan.sha256);
+      await createManagedDirectories(backup, markMutation);
+      await replaceManagedArtifacts(stage, plan.sha256, markMutation);
       await runApplyCommands(plan);
       const finalReadiness = await readinessInspector.inspect(preview);
       if (!finalReadiness.ready || finalReadiness.previewSha256 !== preview.sha256) {
