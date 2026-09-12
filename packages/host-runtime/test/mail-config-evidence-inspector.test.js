@@ -13,6 +13,8 @@ import {
 } from '../src/index.js';
 
 const ARGON2ID_HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 8).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 9).toString('base64').replace(/=+$/, '')}`;
+const VMAIL_UID = 5000;
+const VMAIL_GID = 5000;
 
 function fixture() {
   const input = {
@@ -47,9 +49,11 @@ function inspectorFor({
   files,
   postfixOverride = null,
   readinessReady = true,
-  compiledSieveMode = 0o600,
+  compiledSieveMode = 0o640,
   compiledSieveUid = 0,
-  compiledSieveGid = 0,
+  compiledSieveGid = VMAIL_GID,
+  sieveSourceGid = VMAIL_GID,
+  invalidVmailIdentity = false,
 } = {}) {
   const plan = previewManagedMailApplyPlan(preview);
   const parameters = new Map(plan.postfixParameters.map((entry) => [entry.name, entry.value]));
@@ -64,17 +68,27 @@ function inspectorFor({
     lstatFn: async (filePath) => {
       if (!files.has(filePath)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
       const compiledSieve = filePath === mailConfigBackupInternals.sieveCompiledPath;
+      const sieveSource = filePath === mailForwardingTemplatePolicy.sievePath;
       const sensitive = filePath === mailTemplatePolicy.dovecotPasswdFilePath;
       return {
         mode: compiledSieve ? compiledSieveMode : sensitive ? 0o600 : 0o640,
         uid: compiledSieve ? compiledSieveUid : 0,
-        gid: compiledSieve ? compiledSieveGid : 0,
+        gid: compiledSieve ? compiledSieveGid : sieveSource ? sieveSourceGid : 0,
         isFile: () => true,
         isSymbolicLink: () => false,
       };
     },
     readFileFn: async (filePath) => Buffer.from(files.get(filePath)),
     run: async (file, args) => {
+      if (file === '/usr/bin/getent') {
+        assert.deepEqual(args, ['passwd', 'vmail']);
+        return {
+          stdout: invalidVmailIdentity
+            ? 'vmail:x:0:0::/var/lib/yunpanel/mail:/usr/sbin/nologin\n'
+            : `vmail:x:${VMAIL_UID}:${VMAIL_GID}::/var/lib/yunpanel/mail:/usr/sbin/nologin\n`,
+          stderr: '',
+        };
+      }
       if (file === '/usr/sbin/postconf' && args[0] === '-h') {
         const value = postfixOverride?.name === args[1] ? postfixOverride.value : parameters.get(args[1]);
         return { stdout: `${value ?? ''}\n`, stderr: '' };
@@ -89,7 +103,7 @@ function inspectorFor({
   });
 }
 
-test('active managed mail evidence requires exact live artifacts and compiled sieve without protected content', async () => {
+test('active managed mail evidence requires exact live artifacts and vmail-readable compiled sieve without protected content', async () => {
   const state = fixture();
   const result = await inspectorFor(state).inspect(state.preview);
   const plan = previewManagedMailApplyPlan(state.preview);
@@ -107,7 +121,7 @@ test('active managed mail evidence requires exact live artifacts and compiled si
   assert.equal(JSON.stringify(result).includes(ARGON2ID_HASH), false);
 });
 
-test('active managed mail evidence fails closed on artifact, compiled sieve or postfix drift', async () => {
+test('active managed mail evidence fails closed on artifact, sieve ownership or postfix drift', async () => {
   const state = fixture();
   state.files.set(mailTemplatePolicy.dovecotAuthConfigPath, Buffer.from('tampered\n'));
   assert.deepEqual(await inspectorFor(state).inspect(state.preview), { satisfied: false, result: null });
@@ -117,11 +131,23 @@ test('active managed mail evidence fails closed on artifact, compiled sieve or p
   assert.deepEqual(await inspectorFor(missingSieve).inspect(missingSieve.preview), { satisfied: false, result: null });
 
   const unsafeSieve = fixture();
-  assert.deepEqual(await inspectorFor({ ...unsafeSieve, compiledSieveMode: 0o644 }).inspect(unsafeSieve.preview), {
+  assert.deepEqual(await inspectorFor({ ...unsafeSieve, compiledSieveMode: 0o600 }).inspect(unsafeSieve.preview), {
     satisfied: false,
     result: null,
   });
   assert.deepEqual(await inspectorFor({ ...unsafeSieve, compiledSieveUid: 1000 }).inspect(unsafeSieve.preview), {
+    satisfied: false,
+    result: null,
+  });
+  assert.deepEqual(await inspectorFor({ ...unsafeSieve, compiledSieveGid: 0 }).inspect(unsafeSieve.preview), {
+    satisfied: false,
+    result: null,
+  });
+  assert.deepEqual(await inspectorFor({ ...unsafeSieve, sieveSourceGid: 0 }).inspect(unsafeSieve.preview), {
+    satisfied: false,
+    result: null,
+  });
+  assert.deepEqual(await inspectorFor({ ...unsafeSieve, invalidVmailIdentity: true }).inspect(unsafeSieve.preview), {
     satisfied: false,
     result: null,
   });
