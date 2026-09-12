@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promises as dns } from 'node:dns';
 import { isIP, SocketAddress } from 'node:net';
 import { promisify } from 'node:util';
+import { managedDkimDnsRecord } from '@yunpanel/config-templates';
 import { normalizeDomainSet } from '@yunpanel/shared';
 
 const execFileAsync = promisify(execFile);
@@ -122,13 +123,7 @@ async function resolveOptional(resolve, normalize, timeoutMs) {
 }
 
 function recordDiagnostic({ expected, current, state, reasonCode = null, action = null }) {
-  return Object.freeze({
-    expected,
-    current,
-    state,
-    reasonCode,
-    action,
-  });
+  return Object.freeze({ expected, current, state, reasonCode, action });
 }
 
 function inspectMx(mailHostname, resolution) {
@@ -193,6 +188,82 @@ function inspectVersionedTxt(resolution, { prefix, missingReason, multipleReason
     expected: Object.freeze({ singleRecord: true }),
     current: records,
     state: 'present',
+  });
+}
+
+function normalizeDkimExpectation(domain, dkim) {
+  if (dkim == null) return null;
+  if (!dkim || typeof dkim !== 'object' || Array.isArray(dkim)
+    || typeof dkim.domainName !== 'string' || typeof dkim.selector !== 'string'
+    || typeof dkim.publicKey !== 'string' || !dkim.dnsRecord || typeof dkim.dnsRecord !== 'object') {
+    throw new MailDiagnosticsInspectorError('mail_diagnostics_dkim_state_invalid', 'Managed DKIM public state is invalid', 503);
+  }
+  if (canonicalHostname(dkim.domainName, 'mail_diagnostics_dkim_state_invalid') !== domain) {
+    throw new MailDiagnosticsInspectorError('mail_diagnostics_dkim_state_invalid', 'Managed DKIM domain does not match diagnostics domain', 503);
+  }
+  let expected;
+  try {
+    expected = managedDkimDnsRecord({ domain, selector: dkim.selector, publicKey: dkim.publicKey });
+  } catch {
+    throw new MailDiagnosticsInspectorError('mail_diagnostics_dkim_state_invalid', 'Managed DKIM public state is invalid', 503);
+  }
+  if (dkim.dnsRecord.type !== expected.type || dkim.dnsRecord.name !== expected.name
+    || dkim.dnsRecord.value !== expected.value) {
+    throw new MailDiagnosticsInspectorError('mail_diagnostics_dkim_state_invalid', 'Managed DKIM DNS metadata is inconsistent', 503);
+  }
+  return Object.freeze({ selector: dkim.selector, name: expected.name, value: expected.value });
+}
+
+function inspectDkim(expectation, resolution) {
+  if (!expectation) {
+    return recordDiagnostic({
+      expected: null,
+      current: Object.freeze({ selector: null, records: Object.freeze([]) }),
+      state: 'not_configured',
+      reasonCode: 'mail_dkim_not_configured',
+      action: 'configure_dkim_signing',
+    });
+  }
+  const expected = Object.freeze({
+    selector: expectation.selector,
+    name: expectation.name,
+    value: expectation.value,
+  });
+  if (resolution.state === 'resolver_error') {
+    return recordDiagnostic({
+      expected,
+      current: Object.freeze([]),
+      state: 'resolver_error',
+      reasonCode: 'mail_dkim_resolver_unavailable',
+      action: 'retry_mail_dns_diagnostics',
+    });
+  }
+  const records = Object.freeze(resolution.records.filter((record) => record.toLowerCase().startsWith('v=dkim1;')));
+  if (records.length === 0) {
+    return recordDiagnostic({
+      expected,
+      current: records,
+      state: 'missing',
+      reasonCode: 'mail_dkim_missing',
+      action: 'publish_dkim_record',
+    });
+  }
+  if (records.length > 1) {
+    return recordDiagnostic({
+      expected,
+      current: records,
+      state: 'multiple',
+      reasonCode: 'mail_dkim_multiple',
+      action: 'consolidate_dkim_records',
+    });
+  }
+  const matched = records[0] === expectation.value;
+  return recordDiagnostic({
+    expected,
+    current: records,
+    state: matched ? 'ready' : 'value_mismatch',
+    reasonCode: matched ? null : 'mail_dkim_value_mismatch',
+    action: matched ? null : 'publish_expected_dkim_record',
   });
 }
 
@@ -294,15 +365,19 @@ export function createMailDiagnosticsInspector({
     }
   }
 
-  async function inspect(domainName) {
+  async function inspect(domainName, { dkim = null } = {}) {
     const domain = canonicalHostname(domainName, 'mail_diagnostics_domain_invalid', 400);
+    const dkimExpectation = normalizeDkimExpectation(domain, dkim);
     const mailHostname = await managedMailHostname();
-    const [mx, txt, dmarc, ipv4, ipv6] = await Promise.all([
+    const [mx, txt, dmarc, ipv4, ipv6, dkimTxt] = await Promise.all([
       resolveOptional(() => resolveMx(domain), normalizeMx, resolutionTimeoutMs),
       resolveOptional(() => resolveTxt(domain), normalizeTxt, resolutionTimeoutMs),
       resolveOptional(() => resolveTxt(`_dmarc.${domain}`), normalizeTxt, resolutionTimeoutMs),
       resolveOptional(() => resolve4(mailHostname), (values) => normalizeAddresses(values, 4), resolutionTimeoutMs),
       resolveOptional(() => resolve6(mailHostname), (values) => normalizeAddresses(values, 6), resolutionTimeoutMs),
+      dkimExpectation
+        ? resolveOptional(() => resolveTxt(dkimExpectation.name), normalizeTxt, resolutionTimeoutMs)
+        : Promise.resolve(Object.freeze({ state: 'absent', records: Object.freeze([]) })),
     ]);
     const diagnostics = Object.freeze({
       mx: inspectMx(mailHostname, mx),
@@ -313,13 +388,7 @@ export function createMailDiagnosticsInspector({
         missingAction: 'publish_spf_policy',
         multipleAction: 'consolidate_spf_records',
       }),
-      dkim: recordDiagnostic({
-        expected: null,
-        current: Object.freeze({ selector: null, records: Object.freeze([]) }),
-        state: 'not_configured',
-        reasonCode: 'mail_dkim_not_configured',
-        action: 'configure_dkim_signing',
-      }),
+      dkim: inspectDkim(dkimExpectation, dkimTxt),
       dmarc: inspectVersionedTxt(dmarc, {
         prefix: 'v=dmarc1;',
         missingReason: 'mail_dmarc_missing',
@@ -357,5 +426,7 @@ export const mailDiagnosticsInspectorInternals = Object.freeze({
   resolveOptional,
   inspectMx,
   inspectVersionedTxt,
+  normalizeDkimExpectation,
+  inspectDkim,
   inspectPtr,
 });
