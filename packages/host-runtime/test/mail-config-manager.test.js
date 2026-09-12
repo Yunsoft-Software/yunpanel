@@ -5,8 +5,9 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   mailForwardingTemplatePolicy,
+  mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
-  previewManagedMailForwardingConfiguration,
+  previewManagedMailSubmissionConfiguration,
   previewManagedMailApplyPlan,
   renderDovecotQuotaPasswdFile,
 } from '@yunpanel/config-templates';
@@ -28,7 +29,7 @@ function fixture() {
   };
   return {
     input,
-    preview: previewManagedMailForwardingConfiguration(input),
+    preview: previewManagedMailSubmissionConfiguration(input),
     passwd: renderDovecotQuotaPasswdFile({ domains: input.domains, accounts: input.accounts }),
   };
 }
@@ -39,7 +40,7 @@ async function withTempDirectory(run) {
   finally { await rm(root, { recursive: true, force: true }); }
 }
 
-test('stages the complete mail bundle atomically without returning protected content', async () => withTempDirectory(async (root) => {
+test('stages the complete submission-aware mail bundle atomically without returning protected content', async () => withTempDirectory(async (root) => {
   const { preview, passwd } = fixture();
   const stagingRoot = path.join(root, 'staging');
   const manager = createMailConfigManager({ stagingRoot });
@@ -48,12 +49,12 @@ test('stages the complete mail bundle atomically without returning protected con
   });
   const plan = previewManagedMailApplyPlan(preview);
 
-  assert.equal(manifest.version, 2);
+  assert.equal(manifest.version, 3);
   assert.equal(manifest.planSha256, plan.sha256);
   assert.equal(manifest.previewSha256, preview.sha256);
   assert.equal(JSON.stringify(manifest).includes(ARGON2ID_HASH), false);
   assert.equal(JSON.stringify(manifest).includes(passwd), false);
-  assert.equal(manifest.artifacts.length, 8);
+  assert.equal(manifest.artifacts.length, 9);
 
   const directory = manager.stageDirectory(plan.sha256);
   assert.equal((await stat(directory)).mode & 0o777, 0o700);
@@ -64,6 +65,10 @@ test('stages the complete mail bundle atomically without returning protected con
 
   const publicArtifact = manifest.artifacts.find((artifact) => artifact.targetPath === mailTemplatePolicy.dovecotAuthConfigPath);
   assert.equal((await stat(path.join(directory, publicArtifact.stagedName))).mode & 0o777, 0o640);
+  const senderLogins = manifest.artifacts.find((artifact) => artifact.targetPath === mailSubmissionTemplatePolicy.senderLoginPath);
+  assert.ok(senderLogins);
+  assert.equal((await stat(path.join(directory, senderLogins.stagedName))).mode & 0o777, 0o640);
+  assert.equal(await readFile(path.join(directory, senderLogins.stagedName), 'utf8'), 'owner@example.com owner@example.com\n');
   const sieveArtifact = manifest.artifacts.find((artifact) => artifact.targetPath === mailForwardingTemplatePolicy.sievePath);
   assert.ok(sieveArtifact);
   assert.equal((await stat(path.join(directory, sieveArtifact.stagedName))).mode & 0o777, 0o640);
