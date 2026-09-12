@@ -92,17 +92,21 @@ test('failed mail configuration checks produce bounded health without leaking co
   assert.doesNotMatch(JSON.stringify(result), /private|hidden/);
 });
 
-test('Roundcube package inspection and install remain distinct from systemd service control', async () => {
+test('Roundcube install includes SQLite backend and PHP-FPM while remaining distinct from service control', async () => {
   const calls = [];
-  let installed = false;
+  const installed = new Set();
   const manager = createManagedServiceManager({
     run: async (file, args) => {
       calls.push([file, args]);
       if (file === '/usr/bin/dpkg-query') {
-        if (!installed) throw new Error('not installed');
+        const packageName = args.at(-1);
+        if (!installed.has(packageName)) throw new Error('not installed');
         return { stdout: 'install ok installed\t1.6.6+dfsg-2ubuntu0.1' };
       }
-      if (file === '/usr/bin/apt-get' && args[0] === 'install') { installed = true; return { stdout: '' }; }
+      if (file === '/usr/bin/apt-get' && args[0] === 'install') {
+        for (const packageName of args.slice(3)) installed.add(packageName);
+        return { stdout: '' };
+      }
       if (file === '/usr/bin/apt-get' || file === '/usr/bin/test' || file === '/usr/bin/php') return { stdout: '' };
       throw new Error('unexpected command');
     },
@@ -113,9 +117,16 @@ test('Roundcube package inspection and install remain distinct from systemd serv
   assert.equal(result.active, false);
   assert.deepEqual(result.units, []);
   assert.deepEqual(result.health, { status: 'installed', configuration: 'valid' });
-  assert.deepEqual(calls.find(([file, args]) => file === '/usr/bin/apt-get' && args[0] === 'install')?.[1], [
-    'install', '--yes', '--no-install-recommends', 'roundcube-core',
+  assert.deepEqual(result.packages.map((entry) => entry.packageName), [
+    'roundcube-core', 'roundcube-sqlite3', 'php-fpm',
   ]);
+  assert.deepEqual(calls.find(([file, args]) => file === '/usr/bin/apt-get' && args[0] === 'install')?.[1], [
+    'install', '--yes', '--no-install-recommends', 'roundcube-core', 'roundcube-sqlite3', 'php-fpm',
+  ]);
+  assert.ok(calls.some(([file, args]) => file === '/usr/bin/test'
+    && args.join(' ') === '-f /var/lib/roundcube/public_html/index.php'));
+  assert.ok(calls.some(([file, args]) => file === '/usr/bin/test'
+    && args.join(' ') === '-f /usr/share/roundcube/SQL/sqlite.initial.sql'));
   assert.equal(calls.some(([file]) => file === '/usr/bin/systemctl'), false);
   await assert.rejects(manager.control('roundcube', 'restart'), { code: 'managed_service_not_controllable' });
 });
