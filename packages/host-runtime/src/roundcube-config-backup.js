@@ -1,6 +1,7 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   chmod,
+  chown,
   lstat,
   mkdir,
   readFile,
@@ -12,9 +13,11 @@ import path from 'node:path';
 import { roundcubeFpmTemplatePolicy, roundcubeTemplatePolicy } from '@yunpanel/config-templates';
 
 const TRANSACTION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const BACKUP_ROOT_MODE = 0o700;
 const BACKUP_FILE_MODE = 0o600;
 const MAX_CONFIG_BYTES = 1024 * 1024;
+const MAX_MANIFEST_BYTES = 32 * 1024;
 
 export class RoundcubeConfigBackupError extends Error {
   constructor(code, message) {
@@ -41,6 +44,7 @@ export function createRoundcubeConfigBackupManager({
   fpmPoolPath = roundcubeFpmTemplatePolicy.poolPath,
   databasePath = roundcubeTemplatePolicy.databasePath,
   chmodFn = chmod,
+  chownFn = chown,
   lstatFn = lstat,
   mkdirFn = mkdir,
   readFileFn = readFile,
@@ -170,7 +174,112 @@ export function createRoundcubeConfigBackupManager({
     }
   }
 
-  return Object.freeze({ backupConfiguration, transactionDirectory });
+  function validateManifest(value, id) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.version !== 1 || value.transactionId !== id || typeof value.databaseExisted !== 'boolean'
+      || !Array.isArray(value.files) || value.files.length !== 2) {
+      throw new RoundcubeConfigBackupError('roundcube_backup_manifest_invalid', 'Roundcube backup manifest is invalid');
+    }
+    const expectedTargets = [configPath, fpmPoolPath];
+    const records = value.files.map((record, index) => {
+      if (!record || typeof record !== 'object' || Array.isArray(record)
+        || record.targetPath !== expectedTargets[index] || typeof record.exists !== 'boolean') {
+        throw new RoundcubeConfigBackupError('roundcube_backup_manifest_invalid', 'Roundcube backup manifest is invalid');
+      }
+      if (!record.exists) {
+        if (record.backupName !== null) throw new RoundcubeConfigBackupError('roundcube_backup_manifest_invalid', 'Roundcube backup manifest is invalid');
+        return Object.freeze({ targetPath: record.targetPath, exists: false, backupName: null });
+      }
+      const expectedBackupName = index === 0 ? 'config.inc.php' : 'yunpanel-roundcube-fpm.conf';
+      if (record.backupName !== expectedBackupName || typeof record.sha256 !== 'string' || !SHA256_PATTERN.test(record.sha256)
+        || !Number.isSafeInteger(record.bytes) || record.bytes < 0 || record.bytes > MAX_CONFIG_BYTES
+        || !Number.isSafeInteger(record.mode) || record.mode < 0 || record.mode > 0o7777
+        || !Number.isSafeInteger(record.uid) || record.uid < 0
+        || !Number.isSafeInteger(record.gid) || record.gid < 0) {
+        throw new RoundcubeConfigBackupError('roundcube_backup_manifest_invalid', 'Roundcube backup manifest is invalid');
+      }
+      return Object.freeze({ ...record });
+    });
+    return Object.freeze({ version: 1, transactionId: id, databaseExisted: value.databaseExisted, files: Object.freeze(records) });
+  }
+
+  async function loadManifest(id) {
+    const normalizedId = transactionId(id);
+    const directory = transactionDirectory(normalizedId);
+    let manifestBuffer;
+    try {
+      const manifestPath = path.join(directory, 'manifest.json');
+      const metadata = await lstatFn(manifestPath);
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size < 2 || metadata.size > MAX_MANIFEST_BYTES
+        || (metadata.mode & 0o7777) !== BACKUP_FILE_MODE) {
+        throw new RoundcubeConfigBackupError('roundcube_backup_manifest_invalid', 'Roundcube backup manifest is invalid');
+      }
+      manifestBuffer = await readFileFn(manifestPath);
+    } catch (error) {
+      if (error instanceof RoundcubeConfigBackupError) throw error;
+      throw new RoundcubeConfigBackupError('roundcube_backup_manifest_unavailable', 'Roundcube backup manifest is unavailable');
+    }
+    let parsed;
+    try { parsed = JSON.parse(manifestBuffer.toString('utf8')); }
+    catch { throw new RoundcubeConfigBackupError('roundcube_backup_manifest_invalid', 'Roundcube backup manifest is invalid'); }
+    return validateManifest(parsed, normalizedId);
+  }
+
+  async function atomicRestore(record, directory) {
+    if (!record.exists) {
+      await rmFn(record.targetPath, { force: true });
+      return;
+    }
+    const backupPath = path.join(directory, record.backupName);
+    const metadata = await lstatFn(backupPath);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o7777) !== BACKUP_FILE_MODE) {
+      throw new RoundcubeConfigBackupError('roundcube_backup_file_invalid', 'Roundcube backup file is invalid');
+    }
+    const content = await readFileFn(backupPath);
+    if (content.length !== record.bytes || sha256(content) !== record.sha256) {
+      throw new RoundcubeConfigBackupError('roundcube_backup_file_invalid', 'Roundcube backup file is invalid');
+    }
+    const temporaryPath = `${record.targetPath}.${process.pid}.${randomBytes(6).toString('hex')}.restore`;
+    try {
+      await writeFileFn(temporaryPath, content, { mode: record.mode, flag: 'wx' });
+      await chownFn(temporaryPath, record.uid, record.gid);
+      await chmodFn(temporaryPath, record.mode);
+      await renameFn(temporaryPath, record.targetPath);
+    } catch (error) {
+      try { await rmFn(temporaryPath, { force: true }); } catch {}
+      throw error;
+    }
+  }
+
+  async function restoreConfiguration(id) {
+    const manifest = await loadManifest(id);
+    const directory = transactionDirectory(manifest.transactionId);
+    try {
+      for (const record of manifest.files) await atomicRestore(record, directory);
+      if (!manifest.databaseExisted) {
+        try {
+          const metadata = await lstatFn(databasePath);
+          if (!metadata.isFile() || metadata.isSymbolicLink()) {
+            throw new RoundcubeConfigBackupError('roundcube_database_unsafe', 'Roundcube database path is unsafe');
+          }
+          await rmFn(databasePath, { force: true });
+        } catch (error) {
+          if (error?.code !== 'ENOENT') throw error;
+        }
+      }
+    } catch (error) {
+      if (error instanceof RoundcubeConfigBackupError) throw error;
+      throw new RoundcubeConfigBackupError('roundcube_restore_failed', 'Roundcube configuration rollback failed');
+    }
+    return Object.freeze({
+      version: 1,
+      transactionId: manifest.transactionId,
+      restored: true,
+      databaseRemoved: manifest.databaseExisted === false,
+    });
+  }
+
+  return Object.freeze({ backupConfiguration, restoreConfiguration, loadManifest, transactionDirectory });
 }
 
 export const roundcubeConfigBackupInternals = Object.freeze({
