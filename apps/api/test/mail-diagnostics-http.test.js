@@ -39,8 +39,23 @@ const readOnly = Object.freeze({
   access: { mode: 'read_only', permissions: ['mail.read'] },
   security: { managementAllowed: false },
 });
+const publicKey = Buffer.alloc(256, 3).toString('base64');
+const dkim = Object.freeze({
+  mailDomainId: localMailDomain.id,
+  domainName: localMailDomain.domainName,
+  selector: 'mail-2026',
+  publicKey,
+  dnsRecord: Object.freeze({
+    type: 'TXT',
+    name: 'mail-2026._domainkey.example.com',
+    value: `v=DKIM1; k=rsa; p=${publicKey}`,
+  }),
+  revision: 1,
+  createdAt: '2026-09-12T19:00:00.000Z',
+  updatedAt: '2026-09-12T19:00:00.000Z',
+});
 
-async function listen(t, auth) {
+async function listen(t, auth, { dkimState = dkim } = {}) {
   const calls = [];
   const mailDomains = new Map([
     [localMailDomain.id, localMailDomain],
@@ -61,9 +76,15 @@ async function listen(t, auth) {
     domainRegistry: {
       async getDomain(id) { return webDomains.get(id) ?? null; },
     },
+    mailDkimRegistry: {
+      async getKey(id) {
+        calls.push(['dkim', id]);
+        return id === localMailDomain.id ? dkimState : null;
+      },
+    },
     mailDiagnosticsInspector: {
-      async inspect(domainName) {
-        calls.push(domainName);
+      async inspect(domainName, options) {
+        calls.push(['inspect', domainName, structuredClone(options)]);
         return {
           version: 1,
           domainName,
@@ -92,24 +113,38 @@ async function listen(t, auth) {
   return { base: `http://127.0.0.1:${server.address().port}`, calls };
 }
 
-test('Owner reads local mail diagnostics without mutations', async (t) => {
+test('Owner reads local mail diagnostics with managed public DKIM metadata only', async (t) => {
   const { base, calls } = await listen(t, owner);
   const response = await fetch(`${base}/api/mail-domains/${localMailDomain.id}/diagnostics`);
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.data.domainName, 'example.com');
   assert.equal(body.data.sideEffects, false);
-  assert.deepEqual(calls, ['example.com']);
+  assert.deepEqual(calls, [
+    ['dkim', localMailDomain.id],
+    ['inspect', 'example.com', { dkim }],
+  ]);
+  assert.doesNotMatch(JSON.stringify(calls), /BEGIN PRIVATE KEY|private\.pem/i);
+});
+
+test('diagnostics keeps DKIM explicitly unconfigured when no managed key exists', async (t) => {
+  const { base, calls } = await listen(t, owner, { dkimState: null });
+  const response = await fetch(`${base}/api/mail-domains/${localMailDomain.id}/diagnostics`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    ['dkim', localMailDomain.id],
+    ['inspect', 'example.com', { dkim: null }],
+  ]);
 });
 
 test('Read Only may read local mail diagnostics', async (t) => {
   const { base, calls } = await listen(t, readOnly);
   const response = await fetch(`${base}/api/mail-domains/${localMailDomain.id}/diagnostics`);
   assert.equal(response.status, 200);
-  assert.deepEqual(calls, ['example.com']);
+  assert.equal(calls.some(([name]) => name === 'inspect'), true);
 });
 
-test('remote and external mail domains are rejected before diagnostics inspection', async (t) => {
+test('remote and external mail domains are rejected before DKIM or diagnostics inspection', async (t) => {
   const { base, calls } = await listen(t, owner);
 
   const remote = await fetch(`${base}/api/mail-domains/${remoteMailDomain.id}/diagnostics`);
@@ -122,7 +157,7 @@ test('remote and external mail domains are rejected before diagnostics inspectio
   assert.deepEqual(calls, []);
 });
 
-test('diagnostics rejects query parameters and unavailable web-domain binding', async (t) => {
+test('diagnostics rejects query parameters before reading DKIM state', async (t) => {
   const { base, calls } = await listen(t, owner);
   const query = await fetch(`${base}/api/mail-domains/${localMailDomain.id}/diagnostics?refresh=true`);
   assert.equal(query.status, 400);
