@@ -106,15 +106,16 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 - [x] Aggregate mail config preview digest/order/readiness blocker sözleşmesi hazır; protected hash/config içeriği public çıktıya girmiyor.
 - [x] Secret-free managed mail apply plan; sabit `postmap`/`postconf`/validator/reload/health sırası ve komut allowlist kontrolleri hazır.
 - [x] Protected Dovecot materyalini public plana taşımadan private `0700` staging, digest/mode/symlink doğrulaması ve transaction-scoped pre-apply backup hazır; rollback için `/etc/postfix/main.cf` snapshot'ı zorunlu.
+- [x] Staged bundle live hedeflere atomik replace ediliyor; `postmap`/`postconf` sonrası Postfix, Dovecot ve Rspamd config test→reload→health zinciri ile failure halinde exact pre-apply dosya/compiled-map/`main.cf` restore + reverse reload/health doğrulaması hazır.
+- [x] Owner config-preview/config-apply exact revision+digest+typed confirmation ile secret-free `mail.config.apply` job'u oluşturuyor; private materialization, receipt, reconciliation ve receipt+current desired state+live host evidence tabanlı `recover-mail-config` akışı production wiring'e bağlı.
 - [x] Mail servis health/inspect ve Roundcube package detection/install temeli hazır; kurulum sonucu dürüstçe `installed`, `active=false` kalıyor.
-- [ ] Staged bundle'ı canlı hedeflere güvenli replace et; `postmap`/`postconf` sonrası Postfix, Dovecot ve Rspamd config test→reload→health→deterministic rollback zincirini tamamla.
-- [ ] Mail-domain enable/disable, quota/usage, alias ve forwarding lifecycle ekle.
+- [ ] Son enabled local mail-domain'ı güvenle disable edebilmek için empty managed-set teardown/apply akışını tamamla; ardından quota/usage, alias ve forwarding lifecycle ekle.
 - [ ] MX/SPF/DKIM/DMARC/PTR expected/current/action-needed diagnostics ekle.
 - [ ] SMTP/IMAP TLS, bounded queue/log görünümü ve open-relay fail-closed kabulü ekle.
 - [ ] Roundcube için Nginx/PHP-FPM/database config, web endpoint, health ve rollback ekle.
 - [ ] Mailbox/domain delete impact ile mail data backup/restore ekle.
 
-Üst seviye Mail modülü bu kalan apply/lifecycle işleri tamamlanana kadar hazır sayılmaz.
+Üst seviye Mail modülü bu kalan lifecycle/diagnostic/Roundcube/data işlerinin tamamı bitene kadar hazır sayılmaz.
 
 ## H. Docker ve Compose
 
@@ -166,7 +167,7 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 ## M. Package, yayın ve canlı kabul
 
 - [x] 2026-09-12 doğrulanmış baseline kaynak ağacı Node 24 ile API 1129, web 153, agent 74, config 35, host-runtime 100, protocol 24 ve shared 27 olmak üzere toplam 1542 otomatik testten geçti; lint/build yeşildi.
-- [ ] Bu baseline sonrasındaki managed-mail apply-plan/staging/backup değişiklikleri için targeted config-templates + host-runtime testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
+- [ ] Bu baseline sonrasındaki managed-mail apply-plan/staging/backup/activation, durable job+reconciliation, crash receipt/evidence recovery ve HTTP/production wiring değişiklikleri için targeted config-templates + host-runtime + API testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
 - [x] Linux amd64 `0.3.0-9` paketi üretildi ve yalnız onaylı `.44` olmayan YunPanel test sunucusuna yüklendi; API/web/nginx aktif, eski `yun-agent` inactive/disabled doğrulandı.
 - [x] Canlı Owner API smoke'ta tek yerel server, Website/Application/Domain/certificate/job envanteri; site dosya listesi, Node logu, site terminal capability hedefi ve audit filtre/pagination sözleşmesi doğrulandı.
 - [ ] Matching Ubuntu arm64 hostta native `node-pty` dahil clean install ve doğru mimarili `.deb` üretimini doğrula.
@@ -187,7 +188,7 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 ## Uygulama sırası
 
 1. P0 güvenlik, tek-sunucu fail-closed davranışı ve mevcut canlı işlevlerde regresyon bırakma.
-2. Mail apply/lifecycle ve gerçek servis config test/rollback zinciri.
+2. Mail lifecycle'ın kalan empty-set/alias/quota/diagnostic/Roundcube/data parçaları ve gerçek servis kabulü.
 3. Veritabanı user/grant/credential ve dump/restore yaşam döngüsü.
 4. Docker/Compose lifecycle ve Website/Nginx entegrasyonu.
 5. Genel backup/restore ürünü.
