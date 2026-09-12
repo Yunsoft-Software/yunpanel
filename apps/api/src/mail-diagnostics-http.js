@@ -52,6 +52,7 @@ async function scopedLocalMailDomain({ mailDomainRegistry, domainRegistry, mailD
 
 export function mountMailDiagnosticsRoutes(app, {
   mailDiagnosticsInspector,
+  mailDkimRegistry,
   mailDomainRegistry,
   domainRegistry,
   localServerId = null,
@@ -59,6 +60,9 @@ export function mountMailDiagnosticsRoutes(app, {
   if (!app || typeof app.get !== 'function') throw new Error('Express application is required');
   if (!mailDiagnosticsInspector || typeof mailDiagnosticsInspector.inspect !== 'function') {
     throw new Error('Mail diagnostics inspector is required');
+  }
+  if (!mailDkimRegistry || typeof mailDkimRegistry.getKey !== 'function') {
+    throw new Error('Managed DKIM registry is required');
   }
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
     || !domainRegistry || typeof domainRegistry.getDomain !== 'function') {
@@ -73,7 +77,10 @@ export function mountMailDiagnosticsRoutes(app, {
       mailDomainId: request.params.mailDomainId,
       localServerId,
     });
-    return response.json({ data: await mailDiagnosticsInspector.inspect(mailDomain.domainName) });
+    const dkim = await mailDkimRegistry.getKey(mailDomain.id);
+    return response.json({
+      data: await mailDiagnosticsInspector.inspect(mailDomain.domainName, { dkim }),
+    });
   }));
 }
 
