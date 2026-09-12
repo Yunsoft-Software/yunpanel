@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promis
 import path from 'node:path';
 import {
   mailForwardingTemplatePolicy,
+  mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
   previewManagedMailApplyPlan,
 } from '@yunpanel/config-templates';
@@ -10,16 +11,18 @@ import {
 const DEFAULT_BACKUP_ROOT = '/var/lib/yunpanel/recovery/mail-config';
 const DIRECTORY_MODE = 0o700;
 const BACKUP_FILE_MODE = 0o600;
-const MANIFEST_VERSION = 3;
+const MANIFEST_VERSION = 4;
 const MANIFEST_FILE = 'manifest.json';
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const TRANSACTION_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const POSTFIX_MAIN_CF_PATH = '/etc/postfix/main.cf';
+const POSTFIX_MASTER_CF_PATH = '/etc/postfix/master.cf';
 
 const PLAN_ARTIFACT_PATHS = Object.freeze([
   mailTemplatePolicy.postfixVirtualDomainMapPath,
   mailTemplatePolicy.postfixVirtualMailboxMapPath,
   mailTemplatePolicy.postfixVirtualAliasMapPath,
+  mailSubmissionTemplatePolicy.senderLoginPath,
   mailTemplatePolicy.dovecotPasswdFilePath,
   mailTemplatePolicy.dovecotAuthConfigPath,
   mailTemplatePolicy.dovecotMailConfigPath,
@@ -30,6 +33,7 @@ const POSTFIX_COMPILED_PATHS = Object.freeze([
   `${mailTemplatePolicy.postfixVirtualDomainMapPath}.db`,
   `${mailTemplatePolicy.postfixVirtualMailboxMapPath}.db`,
   `${mailTemplatePolicy.postfixVirtualAliasMapPath}.db`,
+  `${mailSubmissionTemplatePolicy.senderLoginPath}.db`,
 ]);
 const SIEVE_COMPILED_PATH = mailForwardingTemplatePolicy.compiledPath;
 const COMPILED_PATHS = Object.freeze([...POSTFIX_COMPILED_PATHS, SIEVE_COMPILED_PATH]);
@@ -40,7 +44,10 @@ const BACKUP_TARGET_PATHS = Object.freeze([
   POSTFIX_COMPILED_PATHS[1],
   mailTemplatePolicy.postfixVirtualAliasMapPath,
   POSTFIX_COMPILED_PATHS[2],
+  mailSubmissionTemplatePolicy.senderLoginPath,
+  POSTFIX_COMPILED_PATHS[3],
   POSTFIX_MAIN_CF_PATH,
+  POSTFIX_MASTER_CF_PATH,
   mailTemplatePolicy.dovecotPasswdFilePath,
   mailTemplatePolicy.dovecotAuthConfigPath,
   mailTemplatePolicy.dovecotMailConfigPath,
@@ -279,8 +286,13 @@ export function createMailConfigBackupManager({
         metadata = await liveLstatFn(targetPath);
       } catch (error) {
         if (error?.code === 'ENOENT') {
-          if (targetPath === POSTFIX_MAIN_CF_PATH) {
-            throw new MailConfigBackupError('mail_postfix_main_cf_missing', 'Postfix main.cf is required before managed mail apply can be backed up');
+          if (targetPath === POSTFIX_MAIN_CF_PATH || targetPath === POSTFIX_MASTER_CF_PATH) {
+            throw new MailConfigBackupError(
+              targetPath === POSTFIX_MAIN_CF_PATH ? 'mail_postfix_main_cf_missing' : 'mail_postfix_master_cf_missing',
+              targetPath === POSTFIX_MAIN_CF_PATH
+                ? 'Postfix main.cf is required before managed mail apply can be backed up'
+                : 'Postfix master.cf is required before managed submission can be backed up',
+            );
           }
           artifacts.push(Object.freeze({
             targetPath,
@@ -364,8 +376,10 @@ export const mailConfigBackupInternals = Object.freeze({
   targetPaths: BACKUP_TARGET_PATHS,
   managedDirectoryPaths: MANAGED_DIRECTORY_PATHS,
   postfixMainCfPath: POSTFIX_MAIN_CF_PATH,
+  postfixMasterCfPath: POSTFIX_MASTER_CF_PATH,
   directoryMode: DIRECTORY_MODE,
   backupFileMode: BACKUP_FILE_MODE,
+  manifestVersion: MANIFEST_VERSION,
   normalizeTransactionId,
   normalizeManifest,
   normalizeDirectorySnapshot,
