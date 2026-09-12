@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { normalizeMailboxAddress } from './mail.js';
 
-const FORWARDING_SIEVE_PATH = '/etc/yunpanel/mail/dovecot/yunpanel-forwarding.sieve';
-const FORWARDING_SVBIN_PATH = '/etc/yunpanel/mail/dovecot/yunpanel-forwarding.svbin';
+const FORWARDING_SIEVE_PATH = '/etc/dovecot/yunpanel-forwarding.sieve';
+const FORWARDING_SVBIN_PATH = '/etc/dovecot/yunpanel-forwarding.svbin';
 const MAX_FORWARDINGS = 10_000;
 const MAX_DESTINATIONS = 4;
 const MODES = new Set(['copy', 'redirect']);
