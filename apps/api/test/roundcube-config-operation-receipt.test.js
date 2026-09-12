@@ -31,6 +31,7 @@ async function temp(run) {
 test('Roundcube receipt persists only bounded secret-free recovery evidence', async () => temp(async (root) => {
   const store = createRoundcubeConfigOperationReceiptStore({ root, now: () => Date.parse('2026-09-13T00:00:00.000Z') });
   const saved = await store.write(receipt);
+  assert.equal(saved.version, 2);
   assert.equal(saved.recordedAt, '2026-09-13T00:00:00.000Z');
   assert.equal(saved.nginxSha256, 'd'.repeat(64));
   assert.equal(saved.httpHealthy, true);
@@ -42,7 +43,7 @@ test('Roundcube receipt persists only bounded secret-free recovery evidence', as
   assert.deepEqual(await store.read(SERVER, JOB), saved);
 }));
 
-test('Roundcube receipt fails closed on unsafe mode, unhealthy web state and extra persisted fields', async () => temp(async (root) => {
+test('Roundcube receipt fails closed on unsafe mode, stale schema, unhealthy web state and extra persisted fields', async () => temp(async (root) => {
   const store = createRoundcubeConfigOperationReceiptStore({ root });
   await store.write(receipt);
   const target = store.receiptPath(SERVER, JOB);
@@ -53,6 +54,12 @@ test('Roundcube receipt fails closed on unsafe mode, unhealthy web state and ext
 
   await chmod(target, 0o600);
   const parsed = JSON.parse(await readFile(target, 'utf8'));
+  parsed.version = 1;
+  await writeFile(target, JSON.stringify(parsed), { mode: 0o600 });
+  await assert.rejects(store.read(SERVER, JOB), (error) => error instanceof RoundcubeConfigOperationReceiptError
+    && error.code === 'roundcube_receipt_invalid');
+
+  parsed.version = 2;
   parsed.httpHealthy = false;
   await writeFile(target, JSON.stringify(parsed), { mode: 0o600 });
   await assert.rejects(store.read(SERVER, JOB), (error) => error instanceof RoundcubeConfigOperationReceiptError
