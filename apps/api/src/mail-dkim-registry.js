@@ -158,9 +158,14 @@ export function createMailDkimRegistry({
     const temporary = `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
     await mkdir(directory, { recursive: true, mode: DIRECTORY_MODE });
     await chmod(directory, DIRECTORY_MODE);
-    await writeFile(temporary, `${JSON.stringify(nextState, null, 2)}\n`, { encoding: 'utf8', mode: PRIVATE_MODE });
-    await rename(temporary, filePath);
-    await chmod(filePath, PRIVATE_MODE);
+    try {
+      await writeFile(temporary, `${JSON.stringify(nextState, null, 2)}\n`, { encoding: 'utf8', mode: PRIVATE_MODE });
+      await rename(temporary, filePath);
+      await chmod(filePath, PRIVATE_MODE);
+    } catch (error) {
+      try { await rm(temporary, { force: true }); } catch {}
+      throw error;
+    }
   }
 
   async function resolveMailDomain(mailDomainId) {
@@ -238,9 +243,14 @@ export function createMailDkimRegistry({
       }
     }
     const temporary = `${target}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-    await writeFile(temporary, privateKeyPem, { encoding: 'utf8', mode: PRIVATE_MODE });
-    await rename(temporary, target);
-    await chmod(target, PRIVATE_MODE);
+    try {
+      await writeFile(temporary, privateKeyPem, { encoding: 'utf8', mode: PRIVATE_MODE });
+      await rename(temporary, target);
+      await chmod(target, PRIVATE_MODE);
+    } catch (error) {
+      try { await rm(temporary, { force: true }); } catch {}
+      throw error;
+    }
     return { name, path: target };
   }
 
@@ -288,18 +298,6 @@ export function createMailDkimRegistry({
     if (!initialized) await init();
   }
 
-  function mutate(operation) {
-    const result = mutationChain.then(async () => {
-      const next = structuredClone(state);
-      const output = await operation(next);
-      await persist(next);
-      state = next;
-      return output;
-    });
-    mutationChain = result.catch(() => {});
-    return result;
-  }
-
   async function getKey(mailDomainId) {
     await ensureInitialized();
     const id = uuid(mailDomainId);
@@ -324,11 +322,12 @@ export function createMailDkimRegistry({
       throw new MailDkimRegistryError('stale_mail_dkim_revision', 'DKIM key state changed; refresh and retry', 409);
     }
     const dkimSelector = normalizeSelector(requestedSelector);
-    const mailDomain = await resolveMailDomain(id);
-    return mutate(async (next) => {
+    const operation = mutationChain.then(async () => {
+      const next = structuredClone(state);
       if (next.keys.some((record) => record.mailDomainId === id)) {
         throw new MailDkimRegistryError('mail_dkim_key_exists', 'DKIM key already exists for this mail domain', 409);
       }
+      const mailDomain = await resolveMailDomain(id);
       let generated;
       try {
         generated = await generateKeyPairFn('rsa', {
@@ -364,8 +363,11 @@ export function createMailDkimRegistry({
         await removeCreatedPrivateKey(created);
         throw error;
       }
+      state = next;
       return publicKeyMetadata(record);
     });
+    mutationChain = operation.catch(() => {});
+    return operation;
   }
 
   async function materializePrivateKey(mailDomainId) {
