@@ -115,12 +115,13 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 - [x] Mailbox forwarding backend lifecycle kaynakta hazır; per-mailbox copy/redirect policy store/API, canonical/self/cycle kontrolleri, desired-state digest ve crash-recovery bağı, global Dovecot `sieve_before`, exact allowlisted `sievec`, Sieve source+`.svbin` backup/rollback/live-evidence zinciri, `root:vmail 0640` ownership ve Sieve readiness gate'i hazır. Forwarding mutation tek başına host-side-effect sonucu üretmiyor, explicit config apply gerektiriyor ve quota/forwarding policy varken mailbox delete fail-closed kalıyor.
 - [x] Side-effect-free MX/SPF/DKIM/DMARC/PTR diagnostics backend'i hazır; local-server scoped GET endpointi gerçek `postconf myhostname` ile MX/PTR hedefini ve bounded public DNS gözlemlerini raporluyor, SPF/DMARC missing/multiple ayrımını yapıyor; DKIM key yokken açık `not_configured`, key üretildikten sonra selector TXT için exact expected/current/mismatch sonucu veriyor.
 - [x] İlk-generation DKIM signing backend'i kaynakta hazır: RSA-2048 selector/key generation, atomik `0700/0600` private control-plane state, secret-free public DNS TXT metadata, bütün enabled DKIM domainleri için exact DNS readiness gate, aggregate Rspamd outbound signing preview/apply, live keylerde runtime `_rspamd` group doğrulaması ve `root:_rspamd 0640`, pre-apply backup→configtest→reload→health→deterministic rollback, secret-free durable `mail.dkim.apply`, receipt+current private desired-state+live host evidence tabanlı `recover-mail-dkim` ve disabled-domain/zero-key signing teardown akışları production wiring'e bağlı.
-- [ ] DKIM key rotation/delete, live managed key root'taki stale private-key dosyalarının fiziksel cleanup/rollback lifecycle'ı ve TXT kaydını DNS provider'a otomatik publish/update/delete akışı ekle; forwarding dış tesliminde gerekliyse SRS politikasını ayrıca açıkça modelle.
+- [x] DKIM key rotation/delete lifecycle kaynakta hazır: rotation optimistic revision + zorunlu yeni selector ile fresh RSA key üretip private state'i pending/previous directory swap ile crash-safe değiştiriyor; managed-mail job conflict rotation/delete'i engelliyor. Delete yalnız local mail-domain disabled, signing teardown sonrası live key/config retirement evidence + exact revision/typed confirmation ile private control-plane key state'ini fiziksel kaldırıyor. Live managed key root stale-key prune/backup/rollback/evidence zinciri ayrıca hazır.
+- [ ] DKIM rotation için önceki selector/TXT retirement metadata'sını restart-safe kalıcı modelle; mevcut generic `dns.record.apply` provider snapshot→preview→typed confirmation→durable job/recovery hattını reuse ederek yeni TXT publish/update ve eski/deleted TXT cleanup akışını bağla. Forwarding dış tesliminde gerekiyorsa SRS politikasını ayrıca açıkça modelle.
 - [ ] SMTP/IMAP TLS, bounded queue/log görünümü ve open-relay fail-closed kabulü ekle.
 - [ ] Roundcube için Nginx/PHP-FPM/database config, web endpoint, health ve rollback ekle.
 - [ ] Mailbox/domain delete impact ile mail data backup/restore ekle.
 
-Üst seviye Mail modülü bu kalan DKIM rotation/cleanup, TLS/queue, Roundcube ve mail-data işlerinin tamamı bitene kadar hazır sayılmaz.
+Üst seviye Mail modülü bu kalan DKIM DNS-provider/SRS, TLS/queue, Roundcube ve mail-data işlerinin tamamı bitene kadar hazır sayılmaz.
 
 ## H. Docker ve Compose
 
@@ -172,7 +173,7 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 ## M. Package, yayın ve canlı kabul
 
 - [x] 2026-09-12 doğrulanmış baseline kaynak ağacı Node 24 ile API 1129, web 153, agent 74, config 35, host-runtime 100, protocol 24 ve shared 27 olmak üzere toplam 1542 otomatik testten geçti; lint/build yeşildi.
-- [ ] Bu baseline sonrasındaki managed-mail apply/recovery, empty-set teardown, alias lifecycle/config/recovery, quota enforcement/usage, mailbox forwarding/Sieve, mail diagnostics, DKIM key/signing/apply/recovery/teardown ve HTTP/production/package wiring değişiklikleri için targeted config-templates + host-runtime + protocol + API testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
+- [ ] Bu baseline sonrasındaki managed-mail apply/recovery, empty-set teardown, alias lifecycle/config/recovery, quota enforcement/usage, mailbox forwarding/Sieve, mail diagnostics, DKIM key/signing/apply/recovery/teardown, key rotation/delete/retirement evidence ve HTTP/production/package wiring değişiklikleri için targeted config-templates + host-runtime + protocol + API testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
 - [x] Linux amd64 `0.3.0-9` paketi üretildi ve yalnız onaylı `.44` olmayan YunPanel test sunucusuna yüklendi; API/web/nginx aktif, eski `yun-agent` inactive/disabled doğrulandı.
 - [x] Canlı Owner API smoke'ta tek yerel server, Website/Application/Domain/certificate/job envanteri; site dosya listesi, Node logu, site terminal capability hedefi ve audit filtre/pagination sözleşmesi doğrulandı.
 - [ ] Matching Ubuntu arm64 hostta native `node-pty` dahil clean install ve doğru mimarili `.deb` üretimini doğrula.
@@ -193,7 +194,7 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 ## Uygulama sırası
 
 1. P0 güvenlik, tek-sunucu fail-closed davranışı ve mevcut canlı işlevlerde regresyon bırakma.
-2. Mail lifecycle'ın kalan DKIM rotation/cleanup, TLS/queue, Roundcube/data parçaları ve gerçek servis kabulü.
+2. Mail lifecycle'ın kalan DKIM DNS-provider/SRS, TLS/queue, Roundcube/data parçaları ve gerçek servis kabulü.
 3. Veritabanı user/grant/credential ve dump/restore yaşam döngüsü.
 4. Docker/Compose lifecycle ve Website/Nginx entegrasyonu.
 5. Genel backup/restore ürünü.
