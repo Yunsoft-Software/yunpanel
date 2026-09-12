@@ -26,6 +26,11 @@ export {
   mailConfigBackupInternals,
 } from './mail-config-backup.js';
 export {
+  createMailReadinessInspector,
+  MailReadinessError,
+  mailReadinessInternals,
+} from './mail-readiness-inspector.js';
+export {
   createAcmeManager,
   acmeManager,
   AcmeManagerError,
