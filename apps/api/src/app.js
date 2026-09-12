@@ -66,6 +66,9 @@ import { mountNodeRuntimeRoutes, NodeRuntimeHttpError } from './node-runtime-htt
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { ResourceImpactError } from './resource-impact.js';
 import { mountResourceImpactRoutes } from './resource-impact-http.js';
+import { RoundcubeConfigurationError } from './roundcube-configuration.js';
+import { RoundcubeConfigurationHttpError, mountRoundcubeConfigurationRoutes } from './roundcube-configuration-http.js';
+import { RoundcubeSecretRegistryError } from './roundcube-secret-registry.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 import { SiteFileHttpError, mountSiteFileRoutes } from './site-file-http.js';
 import { createSiteFileManager, SiteFileManagerError } from './site-file-manager.js';
@@ -163,6 +166,7 @@ export function createApp({
     listMailboxes: (filter) => mailboxRegistry.listMailboxes(filter),
   }),
   mailConfigurationService = null,
+  roundcubeConfigurationService = null,
   environment = process.env.NODE_ENV,
   journalLogReader = null,
   nginxLogReader = null,
@@ -331,6 +335,13 @@ export function createApp({
     jobRegistry,
     localServerId,
   });
+  if (roundcubeConfigurationService) {
+    mountRoundcubeConfigurationRoutes(app, {
+      roundcubeConfigurationService,
+      jobRegistry,
+      localServerId,
+    });
+  }
   mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry, localServerId });
   mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry, localServerId });
   mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry, localServerId });
@@ -389,6 +400,9 @@ export function createApp({
       || error instanceof MailboxPasswordError
       || error instanceof NodeRuntimeHttpError
       || error instanceof ResourceImpactError
+      || error instanceof RoundcubeConfigurationError
+      || error instanceof RoundcubeConfigurationHttpError
+      || error instanceof RoundcubeSecretRegistryError
       || error instanceof SiteFileHttpError
       || error instanceof SiteFileManagerError
       || error instanceof SiteFileWorkerError
