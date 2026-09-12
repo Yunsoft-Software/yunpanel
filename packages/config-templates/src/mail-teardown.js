@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { previewManagedMailboxForwardingSieve } from './mail-forwarding.js';
 import {
   mailTemplatePolicy,
   previewDovecotPasswdFile,
@@ -30,6 +31,7 @@ export function previewManagedMailEmptyConfiguration() {
     configArtifact(mailTemplatePolicy.dovecotAuthConfigPath, renderDovecotAuthConfig()),
     configArtifact(mailTemplatePolicy.dovecotMailConfigPath, renderDovecotEmptyManagedSetConfig()),
   ]);
+  const forwarding = previewManagedMailboxForwardingSieve([]);
   const rspamd = previewRspamdPostfixIntegration();
   const postfixParameters = Object.freeze([
     ...rspamd.postfixParameters,
@@ -42,6 +44,7 @@ export function previewManagedMailEmptyConfiguration() {
     ...postfix.artifacts,
     dovecotPasswd,
     ...dovecotArtifacts,
+    forwarding,
     ...rspamd.artifacts,
   ]);
   const validate = Object.freeze([
@@ -50,7 +53,7 @@ export function previewManagedMailEmptyConfiguration() {
     Object.freeze({ file: '/usr/bin/rspamadm', args: Object.freeze(['configtest']) }),
   ]);
   const requirements = Object.freeze([
-    'postfix', 'dovecot_2_3', 'rspamd', 'vmail_identity', 'postfix_identity',
+    'postfix', 'dovecot_2_3', 'dovecot_sieve', 'rspamd', 'vmail_identity', 'postfix_identity',
     'mail_tls_material', 'loopback_11332_available', 'managed_domains_excluded_from_mydestination',
     'postfix_relay_policy_verified',
   ]);
@@ -63,7 +66,7 @@ export function previewManagedMailEmptyConfiguration() {
   return Object.freeze({
     version: 1,
     sha256: createHash('sha256').update(JSON.stringify(identity)).digest('hex'),
-    counts: Object.freeze({ domains: 0, mailboxes: 0, aliases: 0 }),
+    counts: Object.freeze({ domains: 0, mailboxes: 0, aliases: 0, forwardings: 0 }),
     artifacts,
     postfixParameters,
     validate,
