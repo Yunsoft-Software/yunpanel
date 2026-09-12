@@ -101,7 +101,8 @@ async function reconcileMailDomainJob(mailDomainRegistry, job) {
     error.code = 'mail_domain_reconciliation_target_unavailable';
     throw error;
   }
-  if (current.status === desiredStatus && current.revision === expectedRevision + 1) return;
+  if (current.status === desiredStatus
+    && (current.revision === expectedRevision || current.revision === expectedRevision + 1)) return;
   if (current.revision !== expectedRevision || current.status === desiredStatus) {
     const error = new Error('Mail-domain state changed before reconciliation');
     error.code = 'mail_domain_reconciliation_conflict';
