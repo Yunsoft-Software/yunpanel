@@ -17,9 +17,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  mailForwardingTemplatePolicy,
   mailTemplatePolicy,
-  previewManagedMailConfiguration,
-  renderDovecotPasswdFile,
+  previewManagedMailForwardingConfiguration,
+  renderDovecotQuotaPasswdFile,
 } from '@yunpanel/config-templates';
 import {
   createMailConfigActivator,
@@ -43,10 +44,11 @@ function fixture() {
     aliases: [{ source: 'info@example.com', destinations: ['owner@example.com'] }],
     accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
     postmasterAddress: 'owner@example.com',
+    forwardings: [{ source: 'owner@example.com', mode: 'copy', destinations: ['backup@elsewhere.test'] }],
   };
   return {
-    preview: previewManagedMailConfiguration(input),
-    passwd: renderDovecotPasswdFile({ domains: input.domains, accounts: input.accounts }),
+    preview: previewManagedMailForwardingConfiguration(input),
+    passwd: renderDovecotQuotaPasswdFile({ domains: input.domains, accounts: input.accounts }),
   };
 }
 
@@ -57,24 +59,41 @@ async function withTempDirectory(run) {
 }
 
 function createMappedFs(liveRoot) {
+  const owners = new Map();
   const mapPath = (value) => value === '/etc' || value.startsWith('/etc/')
     ? path.join(liveRoot, value.slice(1))
     : value;
   return {
     mapPath,
-    lstatFn: (value) => lstat(mapPath(value)),
+    lstatFn: async (value) => {
+      const target = mapPath(value);
+      const metadata = await lstat(target);
+      const owner = owners.get(target);
+      if (!owner) return metadata;
+      return new Proxy(metadata, {
+        get(object, property) {
+          if (property === 'uid') return owner.uid;
+          if (property === 'gid') return owner.gid;
+          const resolved = object[property];
+          return typeof resolved === 'function' ? resolved.bind(object) : resolved;
+        },
+      });
+    },
     mkdirFn: (value, options) => mkdir(mapPath(value), options),
     readFileFn: (value, options) => readFile(mapPath(value), options),
     renameFn: (from, to) => rename(mapPath(from), mapPath(to)),
-    rmFn: (value, options) => rm(mapPath(value), options),
+    rmFn: async (value, options) => {
+      owners.delete(mapPath(value));
+      return rm(mapPath(value), options);
+    },
     rmdirFn: (value) => rmdir(mapPath(value)),
     writeFileFn: (value, content, options) => writeFile(mapPath(value), content, options),
     chmodFn: (value, mode) => chmod(mapPath(value), mode),
-    chownFn: async () => {},
+    chownFn: async (value, uid, gid) => { owners.set(mapPath(value), { uid, gid }); },
   };
 }
 
-async function prepare({ root, failFirstDoveconf = false } = {}) {
+async function prepare({ root, failFirstDoveconf = false, failSievec = false } = {}) {
   const liveRoot = path.join(root, 'live');
   const stagingRoot = path.join(root, 'staging');
   const backupRoot = path.join(root, 'backup');
@@ -117,6 +136,16 @@ async function prepare({ root, failFirstDoveconf = false } = {}) {
       await writeFile(mapped.mapPath(`${source}.db`), Buffer.from(`compiled:${source}\n`), { mode: 0o640 });
       return { stdout: '', stderr: '' };
     }
+    if (file === '/usr/bin/sievec') {
+      if (failSievec) throw new Error('fixture sieve compile failure');
+      assert.deepEqual(args, [mailForwardingTemplatePolicy.sievePath]);
+      await writeFile(
+        mapped.mapPath(mailForwardingTemplatePolicy.compiledPath),
+        Buffer.from('compiled-sieve'),
+        { mode: 0o644 },
+      );
+      return { stdout: '', stderr: '' };
+    }
     if (file === '/usr/sbin/postconf' && args[0] === '-e') {
       const separator = args[1].indexOf(' = ');
       const name = args[1].slice(0, separator);
@@ -154,7 +183,7 @@ async function prepare({ root, failFirstDoveconf = false } = {}) {
   };
 }
 
-test('activates staged mail config with compiled maps, postfix parameters and secret-free result', async () => withTempDirectory(async (root) => {
+test('activates staged mail config with compiled maps/sieve, postfix parameters and secret-free result', async () => withTempDirectory(async (root) => {
   const context = await prepare({ root });
   const result = await context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID });
 
@@ -173,19 +202,26 @@ test('activates staged mail config with compiled maps, postfix parameters and se
   for (const compiledPath of mailConfigBackupInternals.postfixCompiledPaths) {
     assert.equal((await stat(context.mapped.mapPath(compiledPath))).isFile(), true);
   }
+  const compiledSieve = context.mapped.mapPath(mailConfigBackupInternals.sieveCompiledPath);
+  assert.equal((await stat(compiledSieve)).isFile(), true);
+  assert.equal((await stat(compiledSieve)).mode & 0o777, 0o600);
+  const compiledSieveMetadata = await context.mapped.lstatFn(mailConfigBackupInternals.sieveCompiledPath);
+  assert.equal(compiledSieveMetadata.uid, 0);
+  assert.equal(compiledSieveMetadata.gid, 0);
   assert.equal((await stat(context.mapped.mapPath('/etc/yunpanel/mail/postfix'))).isDirectory(), true);
   assert.equal((await stat(context.mapped.mapPath('/etc/yunpanel/mail/dovecot'))).isDirectory(), true);
 
-  assert.deepEqual(context.calls.slice(0, 3).map((entry) => entry[0]), [
+  assert.deepEqual(context.calls.slice(0, 4).map((entry) => entry[0]), [
     '/usr/sbin/postmap',
     '/usr/sbin/postmap',
     '/usr/sbin/postmap',
+    '/usr/bin/sievec',
   ]);
   const reloads = context.calls.filter(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'reload');
   assert.deepEqual(reloads.map(([, args]) => args[1]), ['rspamd', 'dovecot', 'postfix']);
 }));
 
-test('restores files, postfix main.cf, compiled maps and newly-created directories after validation failure', async () => withTempDirectory(async (root) => {
+test('restores files, postfix main.cf, compiled maps/sieve and newly-created directories after validation failure', async () => withTempDirectory(async (root) => {
   const context = await prepare({ root, failFirstDoveconf: true });
 
   await assert.rejects(
@@ -198,7 +234,7 @@ test('restores files, postfix main.cf, compiled maps and newly-created directori
     context.originalMainCf,
   );
   for (const targetPath of context.preview.artifacts.map((artifact) => artifact.path)
-    .concat(mailConfigBackupInternals.postfixCompiledPaths)) {
+    .concat(mailConfigBackupInternals.compiledPaths)) {
     await assert.rejects(lstat(context.mapped.mapPath(targetPath)), (error) => error?.code === 'ENOENT');
   }
   for (const directoryPath of mailConfigBackupInternals.managedDirectoryPaths) {
@@ -209,6 +245,18 @@ test('restores files, postfix main.cf, compiled maps and newly-created directori
   assert.deepEqual(reloads.map(([, args]) => args[1]), ['postfix', 'dovecot', 'rspamd']);
   const inspected = await context.backupManager.inspectBackup(context.preview, { transactionId: TRANSACTION_ID });
   assert.equal(inspected.satisfied, true);
+}));
+
+test('sieve compile failure rolls back without being mislabeled as a postmap failure', async () => withTempDirectory(async (root) => {
+  const context = await prepare({ root, failSievec: true });
+  await assert.rejects(
+    context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID }),
+    (error) => error instanceof MailConfigActivationError && error.code === 'mail_sieve_compile_failed',
+  );
+  for (const targetPath of context.preview.artifacts.map((artifact) => artifact.path)
+    .concat(mailConfigBackupInternals.compiledPaths)) {
+    await assert.rejects(lstat(context.mapped.mapPath(targetPath)), (error) => error?.code === 'ENOENT');
+  }
 }));
 
 test('rejects live state drift after backup before the first activation mutation', async () => withTempDirectory(async (root) => {
