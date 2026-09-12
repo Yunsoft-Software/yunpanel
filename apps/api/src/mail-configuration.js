@@ -50,6 +50,30 @@ function publicConfigurationPreview(preview) {
   });
 }
 
+function transitionPreview(resolved, materialized) {
+  const configuration = materialized.preview ? publicConfigurationPreview(materialized.preview) : null;
+  const identity = Object.freeze({
+    version: 1,
+    operation: 'mail_configuration_apply',
+    mailDomainId: resolved.candidate.id,
+    expectedRevision: resolved.candidate.revision,
+    currentStatus: resolved.candidate.status,
+    desiredStatus: resolved.input.status,
+    domains: resolved.domains,
+    configurationSha256: configuration?.sha256 ?? null,
+    blockers: materialized.blockers,
+  });
+  const previewDigest = digest(identity);
+  return Object.freeze({
+    ...identity,
+    previewDigest,
+    confirmation: `apply-mail-configuration:${resolved.candidate.id}:${previewDigest}`,
+    readyToApply: materialized.ready,
+    configuration,
+    sideEffects: false,
+  });
+}
+
 export function createMailConfigurationService({
   mailDomainRegistry,
   mailboxRegistry,
@@ -133,27 +157,7 @@ export function createMailConfigurationService({
   async function previewTransition(input) {
     const resolved = await resolveTransition(input);
     const materialized = await materializeConfiguration(resolved);
-    const configuration = materialized.preview ? publicConfigurationPreview(materialized.preview) : null;
-    const identity = Object.freeze({
-      version: 1,
-      operation: 'mail_configuration_apply',
-      mailDomainId: resolved.candidate.id,
-      expectedRevision: resolved.candidate.revision,
-      currentStatus: resolved.candidate.status,
-      desiredStatus: resolved.input.status,
-      domains: resolved.domains,
-      configurationSha256: configuration?.sha256 ?? null,
-      blockers: materialized.blockers,
-    });
-    const previewDigest = digest(identity);
-    return Object.freeze({
-      ...identity,
-      previewDigest,
-      confirmation: `apply-mail-configuration:${resolved.candidate.id}:${previewDigest}`,
-      readyToApply: materialized.ready,
-      configuration,
-      sideEffects: false,
-    });
+    return transitionPreview(resolved, materialized);
   }
 
   async function materializeTransition(input, { expectedPreviewDigest, expectedConfigurationSha256 } = {}) {
@@ -166,7 +170,7 @@ export function createMailConfigurationService({
     if (!materialized.ready || !materialized.preview) {
       throw new MailConfigurationError('mail_configuration_not_ready', 'Managed mail configuration is not ready to apply', 409);
     }
-    const publicPreview = await previewTransition(input);
+    const publicPreview = transitionPreview(resolved, materialized);
     if (publicPreview.previewDigest !== expectedPreviewDigest
       || materialized.preview.sha256 !== expectedConfigurationSha256
       || publicPreview.configuration?.sha256 !== expectedConfigurationSha256) {
@@ -196,3 +200,9 @@ export function createMailConfigurationService({
     materializeTransition,
   });
 }
+
+export const mailConfigurationInternals = Object.freeze({
+  transitionInput,
+  publicConfigurationPreview,
+  transitionPreview,
+});
