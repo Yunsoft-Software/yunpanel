@@ -9,7 +9,10 @@ test('dashboard requests all summary sources, server/settings/database pages onl
   assert.deepEqual(selected('/databases'), ['servers']);
 });
 test('remaining unimplemented modules and unknown routes do not poll unrelated data', () => {
-  for (const path of ['/mail', '/docker', '/backups', '/audit', '/invalid', '/settings/unknown', null]) assert.deepEqual(selected(path), []);
+  for (const path of ['/mail', '/docker', '/backups', '/invalid', '/settings/unknown', null]) assert.deepEqual(selected(path), []);
+});
+test('audit owns its bounded history request instead of polling workspace collections', () => {
+  assert.deepEqual(selected('/audit'), []);
 });
 test('website list and creation request their dependencies without a job inventory', () => {
   assert.deepEqual(selected('/websites'), ['applications', 'certificates', 'domains', 'servers']);

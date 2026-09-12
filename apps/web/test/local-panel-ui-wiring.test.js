@@ -24,9 +24,24 @@ test('primary navigation exposes working modules instead of placeholder destinat
     readFile(new URL('../src/workspace/WorkspaceLayout.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/workspace/site-model.js', import.meta.url), 'utf8'),
   ]);
-  assert.doesNotMatch(layout, /\['\/(?:docker|mail|backups|audit)'/);
+  assert.doesNotMatch(layout, /\['\/(?:docker|mail|backups)'/);
+  assert.match(layout, /\['\/audit', 'Denetim', 'shield'\]/);
   assert.doesNotMatch(model, /\['(?:mail|databases|cron|backups)'/);
   assert.match(model, /\['files', 'Dosyalar'\]/);
+});
+
+test('audit route uses the real owner-only history client instead of a placeholder', async () => {
+  const [app, page, client, operations] = await Promise.all([
+    readFile(new URL('../src/workspace/WorkspaceApp.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/AuditPage.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/audit-client.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/OperationsPages.jsx', import.meta.url), 'utf8'),
+  ]);
+  assert.match(app, /path: 'audit', element: manage\(<AuditPage \/>\)/);
+  assert.match(page, /createAuditClient/);
+  assert.match(page, /type="datetime-local"/);
+  assert.match(client, /`\/audit\?\$\{query\}`/);
+  assert.doesNotMatch(operations, /audit: \['Denetim kayıtları'/);
 });
 
 test('legacy Domain repair and real site file manager replace terminal and file placeholders', async () => {

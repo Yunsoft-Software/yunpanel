@@ -37,7 +37,7 @@ Migration is additive and separately versioned:
 - `auth_user_revisions`: per-user revision/update time, removed through the user foreign key. Existing accounts implicitly start at revision 1.
 - `auth_user_admin_events`: actor ID, target ID, action and time. It deliberately has no user FK so safe lifecycle records survive account deletion. Records older than 90 days are pruned on administration mutations.
 
-The base authentication schema remains version 2. Existing users, hashes and session IDs are not rewritten at migration. Lifecycle audit and ordinary auth events commit atomically with the account change; audit failure rolls back changes and revocation. This is not the planned full audit UI or complete management/job audit model.
+The base authentication schema remains version 2. Existing users, hashes and session IDs are not rewritten at migration. Lifecycle audit and ordinary auth events commit atomically with the account change; audit failure rolls back changes and revocation. The common Owner-only audit screen now exposes bounded lifecycle and management events, including terminal job outcomes, without exposing request bodies or credentials.
 
 Preserve private auth directory/database permissions, the existing service identity and master key. Back up SQLite consistently, not just the main file while WAL writers are active. Exercise startup, repeat migration, backup/restore and older-package behavior on a test copy before release. An old code version does not enforce the new administration-revision login rule; do not assume rollback has identical security behavior or manually drop sidecars on a running service.
 
