@@ -42,6 +42,7 @@ export const OPERATIONS = Object.freeze({
   DATABASE_CREATE: 'database.create',
   DATABASE_DELETE: 'database.delete',
   DNS_RECORD_APPLY: 'dns.record.apply',
+  MAIL_CONFIG_APPLY: 'mail.config.apply',
   DOMAIN_STAGE: 'domain.stage',
   DOMAIN_ACTIVATE: 'domain.activate',
   SSL_ISSUE: 'ssl.issue',
@@ -194,6 +195,25 @@ function validateDnsRecordApply(payload, operation, errors) {
   }
 }
 
+function validateMailConfigApply(payload, operation, errors) {
+  rejectUnexpectedKeys(payload, [
+    'mailDomainId', 'expectedRevision', 'desiredStatus', 'previewDigest', 'configurationSha256',
+  ], operation, errors);
+  try {
+    if (assertUuid(payload.mailDomainId, 'mailDomainId') !== payload.mailDomainId) throw new Error('noncanonical');
+  } catch { errors.push(`${operation} mailDomainId is invalid`); }
+  if (!Number.isSafeInteger(payload.expectedRevision) || payload.expectedRevision < 1) {
+    errors.push(`${operation} expectedRevision is invalid`);
+  }
+  if (!['disabled', 'enabled'].includes(payload.desiredStatus)) {
+    errors.push(`${operation} desiredStatus is invalid`);
+  }
+  if (typeof payload.previewDigest !== 'string' || !SHA256_PATTERN.test(payload.previewDigest)
+    || typeof payload.configurationSha256 !== 'string' || !SHA256_PATTERN.test(payload.configurationSha256)) {
+    errors.push(`${operation} digests are invalid`);
+  }
+}
+
 function rejectUnexpectedKeys(payload, allowedKeys, operation, errors) {
   const allowed = new Set(allowedKeys);
   if (Object.keys(payload).some((key) => !allowed.has(key))) errors.push(`${operation} contains unsupported arguments`);
@@ -241,6 +261,7 @@ function validateMutationPayload(operation, payload, errors) {
   }
 
   if (operation === OPERATIONS.DNS_RECORD_APPLY) validateDnsRecordApply(payload, operation, errors);
+  if (operation === OPERATIONS.MAIL_CONFIG_APPLY) validateMailConfigApply(payload, operation, errors);
 
   if (operation === OPERATIONS.DOMAIN_STAGE) {
     rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'nginxSettings', 'tls', 'canonicalRedirect', 'httpsRedirect'], operation, errors);
