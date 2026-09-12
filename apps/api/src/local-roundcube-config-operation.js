@@ -39,6 +39,26 @@ function assertPayload(payload) {
   return payload;
 }
 
+function exactPublicArtifacts(bundle) {
+  if (!Array.isArray(bundle.publicArtifacts) || bundle.publicArtifacts.length !== 2
+    || !bundle.preview?.fpm?.artifact?.path || !bundle.preview?.nginx?.artifact?.path) {
+    throw new LocalRoundcubeConfigOperationError(
+      'roundcube_configuration_bundle_invalid',
+      'Roundcube protected desired state does not contain exact public artifacts',
+    );
+  }
+  const byPath = new Map(bundle.publicArtifacts.map((artifact) => [artifact?.path, artifact]));
+  if (byPath.size !== 2) {
+    throw new LocalRoundcubeConfigOperationError('roundcube_configuration_bundle_invalid', 'Roundcube public artifacts are not unique');
+  }
+  const fpm = byPath.get(bundle.preview.fpm.artifact.path);
+  const nginx = byPath.get(bundle.preview.nginx.artifact.path);
+  if (!fpm || !nginx || typeof fpm.content !== 'string' || typeof nginx.content !== 'string') {
+    throw new LocalRoundcubeConfigOperationError('roundcube_configuration_bundle_invalid', 'Roundcube public artifact bundle is invalid');
+  }
+  return Object.freeze({ fpm, nginx });
+}
+
 export function createLocalRoundcubeConfigOperation({
   configManager = createRoundcubeConfigManager(),
   backupManager = createRoundcubeConfigBackupManager(),
@@ -47,6 +67,7 @@ export function createLocalRoundcubeConfigOperation({
 } = {}) {
   if (!configManager || typeof configManager.stageConfiguration !== 'function'
     || typeof configManager.stageFpmPool !== 'function'
+    || typeof configManager.stageNginxConfig !== 'function'
     || !backupManager || typeof backupManager.backupConfiguration !== 'function'
     || typeof loadConfiguration !== 'function') {
     throw new LocalRoundcubeConfigOperationError(
@@ -72,34 +93,36 @@ export function createLocalRoundcubeConfigOperation({
       );
     }
     if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)
-      || !bundle.preview || !Array.isArray(bundle.sensitiveArtifacts) || !Array.isArray(bundle.publicArtifacts)
-      || bundle.sensitiveArtifacts.length !== 1 || bundle.publicArtifacts.length !== 1
+      || !bundle.preview || !Array.isArray(bundle.sensitiveArtifacts)
+      || bundle.sensitiveArtifacts.length !== 1
       || bundle.preview.sha256 !== input.previewSha256
       || bundle.preview.configSha256 !== input.configSha256
-      || bundle.preview.fpmSha256 !== input.fpmSha256) {
+      || bundle.preview.fpmSha256 !== input.fpmSha256
+      || typeof bundle.preview.nginxSha256 !== 'string' || !SHA256_PATTERN.test(bundle.preview.nginxSha256)) {
       throw new LocalRoundcubeConfigOperationError(
         'roundcube_configuration_bundle_invalid',
         'Roundcube protected desired state does not match the queued operation',
       );
     }
     const privateConfig = bundle.sensitiveArtifacts[0];
-    const publicFpm = bundle.publicArtifacts[0];
-    if (privateConfig.path !== bundle.preview.configuration?.artifact?.path
-      || publicFpm.path !== bundle.preview.fpm?.artifact?.path
-      || typeof privateConfig.content !== 'string' || typeof publicFpm.content !== 'string') {
+    if (privateConfig.path !== bundle.preview.configuration?.artifact?.path || typeof privateConfig.content !== 'string') {
       throw new LocalRoundcubeConfigOperationError(
         'roundcube_configuration_bundle_invalid',
         'Roundcube protected artifact bundle is invalid',
       );
     }
+    const publicArtifacts = exactPublicArtifacts(bundle);
 
     await configManager.stageConfiguration(bundle.preview.configuration, privateConfig.content);
-    await configManager.stageFpmPool(bundle.preview.fpm, publicFpm.content);
+    await configManager.stageFpmPool(bundle.preview.fpm, publicArtifacts.fpm.content);
+    await configManager.stageNginxConfig(bundle.preview.nginx, publicArtifacts.nginx.content);
     const activation = await resolvedActivator.activateConfiguration(bundle.preview, { transactionId: context.jobId });
     if (!activation || activation.applied !== true || activation.sideEffects !== true
       || activation.previewSha256 !== input.previewSha256
       || activation.configSha256 !== input.configSha256
       || activation.fpmSha256 !== input.fpmSha256
+      || activation.nginxSha256 !== bundle.preview.nginxSha256
+      || activation.httpHealthy !== true
       || typeof activation.databaseCreated !== 'boolean') {
       throw new LocalRoundcubeConfigOperationError(
         'roundcube_activation_unconfirmed',
@@ -111,7 +134,9 @@ export function createLocalRoundcubeConfigOperation({
       previewSha256: input.previewSha256,
       configSha256: input.configSha256,
       fpmSha256: input.fpmSha256,
+      nginxSha256: activation.nginxSha256,
       databaseCreated: activation.databaseCreated,
+      httpHealthy: true,
       applied: true,
       sideEffects: true,
     });
@@ -123,4 +148,5 @@ export function createLocalRoundcubeConfigOperation({
 export const localRoundcubeConfigOperationInternals = Object.freeze({
   assertExecution,
   assertPayload,
+  exactPublicArtifacts,
 });
