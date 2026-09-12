@@ -74,4 +74,29 @@ test('rejects malformed preview and unsafe Postfix parameter metadata', () => {
     }),
     (error) => error instanceof MailApplyPlanError && error.code === 'invalid_postfix_parameter',
   );
+  assert.throws(
+    () => previewManagedMailApplyPlan({
+      ...preview,
+      postfixParameters: [{ name: 'virtual_transport', value: 'lmtp:unix:private/dovecot-lmtp\nrelayhost = attacker' }],
+    }),
+    (error) => error instanceof MailApplyPlanError && error.code === 'invalid_postfix_parameter',
+  );
+});
+
+test('rejects compile and validator commands outside the managed allowlist', () => {
+  const preview = managedPreview();
+  const forgedArtifacts = preview.artifacts.map((artifact, index) => index === 0
+    ? { ...artifact, compile: { file: '/bin/sh', args: ['-c', 'true'] } }
+    : artifact);
+  assert.throws(
+    () => previewManagedMailApplyPlan({ ...preview, artifacts: forgedArtifacts }),
+    (error) => error instanceof MailApplyPlanError && error.code === 'invalid_mail_compile_command',
+  );
+  assert.throws(
+    () => previewManagedMailApplyPlan({
+      ...preview,
+      validate: [{ file: '/bin/true', args: [] }],
+    }),
+    (error) => error instanceof MailApplyPlanError && error.code === 'invalid_mail_validator',
+  );
 });
