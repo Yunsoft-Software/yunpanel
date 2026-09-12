@@ -9,7 +9,7 @@ import {
 const DEFAULT_BACKUP_ROOT = '/var/lib/yunpanel/recovery/mail-config';
 const DIRECTORY_MODE = 0o700;
 const BACKUP_FILE_MODE = 0o600;
-const MANIFEST_VERSION = 1;
+const MANIFEST_VERSION = 2;
 const MANIFEST_FILE = 'manifest.json';
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const TRANSACTION_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -41,6 +41,12 @@ const BACKUP_TARGET_PATHS = Object.freeze([
   mailTemplatePolicy.dovecotAuthConfigPath,
   mailTemplatePolicy.dovecotMailConfigPath,
   mailTemplatePolicy.rspamdProxyConfigPath,
+]);
+const MANAGED_DIRECTORY_PATHS = Object.freeze([
+  '/etc/yunpanel',
+  '/etc/yunpanel/mail',
+  '/etc/yunpanel/mail/postfix',
+  '/etc/yunpanel/mail/dovecot',
 ]);
 
 export class MailConfigBackupError extends Error {
@@ -87,11 +93,31 @@ function publicManifest(manifest) {
   return structuredClone(manifest);
 }
 
+function normalizeDirectorySnapshot(value, expectedPath) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.path !== expectedPath || typeof value.present !== 'boolean') {
+    throw new MailConfigBackupError('mail_backup_manifest_invalid', 'Managed mail directory backup metadata is invalid');
+  }
+  if (!value.present) {
+    if (value.mode !== null || value.uid !== null || value.gid !== null) {
+      throw new MailConfigBackupError('mail_backup_manifest_invalid', 'Absent managed mail directory metadata is invalid');
+    }
+    return Object.freeze({ path: expectedPath, present: false, mode: null, uid: null, gid: null });
+  }
+  if (!Number.isSafeInteger(value.mode) || value.mode < 0 || value.mode > 0o7777
+    || !Number.isSafeInteger(value.uid) || value.uid < 0
+    || !Number.isSafeInteger(value.gid) || value.gid < 0) {
+    throw new MailConfigBackupError('mail_backup_manifest_invalid', 'Present managed mail directory metadata is invalid');
+  }
+  return Object.freeze({ path: expectedPath, present: true, mode: value.mode, uid: value.uid, gid: value.gid });
+}
+
 function normalizeManifest(value, { transactionId, planSha256 } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== MANIFEST_VERSION
     || value.transactionId !== transactionId || value.planSha256 !== planSha256
     || typeof value.previewSha256 !== 'string' || !CHECKSUM_PATTERN.test(value.previewSha256)
-    || !Array.isArray(value.artifacts) || value.artifacts.length !== BACKUP_TARGET_PATHS.length) {
+    || !Array.isArray(value.artifacts) || value.artifacts.length !== BACKUP_TARGET_PATHS.length
+    || !Array.isArray(value.directories) || value.directories.length !== MANAGED_DIRECTORY_PATHS.length) {
     throw new MailConfigBackupError('mail_backup_manifest_invalid', 'Managed mail backup manifest is invalid');
   }
   const artifacts = value.artifacts.map((artifact, index) => {
@@ -117,12 +143,17 @@ function normalizeManifest(value, { transactionId, planSha256 } = {}) {
     }
     return Object.freeze({ ...artifact });
   });
+  const directories = value.directories.map((directory, index) => normalizeDirectorySnapshot(
+    directory,
+    MANAGED_DIRECTORY_PATHS[index],
+  ));
   return Object.freeze({
     version: MANIFEST_VERSION,
     transactionId,
     planSha256,
     previewSha256: value.previewSha256,
     artifacts: Object.freeze(artifacts),
+    directories: Object.freeze(directories),
   });
 }
 
@@ -187,6 +218,33 @@ export function createMailConfigBackupManager({
     return true;
   }
 
+  async function snapshotManagedDirectories() {
+    const directories = [];
+    for (const directoryPath of MANAGED_DIRECTORY_PATHS) {
+      try {
+        const metadata = await liveLstatFn(directoryPath);
+        if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+          throw new MailConfigBackupError('mail_live_directory_unsafe', 'Managed mail live directory must be a real directory');
+        }
+        directories.push(Object.freeze({
+          path: directoryPath,
+          present: true,
+          mode: metadata.mode & 0o7777,
+          uid: metadata.uid,
+          gid: metadata.gid,
+        }));
+      } catch (error) {
+        if (error?.code === 'ENOENT') {
+          directories.push(Object.freeze({ path: directoryPath, present: false, mode: null, uid: null, gid: null }));
+          continue;
+        }
+        if (error instanceof MailConfigBackupError) throw error;
+        throw new MailConfigBackupError('mail_live_directory_inspection_failed', 'Managed mail live directory could not be inspected');
+      }
+    }
+    return Object.freeze(directories);
+  }
+
   async function backupNow(preview, { transactionId } = {}) {
     const normalizedTransactionId = normalizeTransactionId(transactionId);
     const plan = previewManagedMailApplyPlan(preview);
@@ -201,6 +259,7 @@ export function createMailConfigBackupManager({
       return publicManifest(existing);
     }
 
+    const directories = await snapshotManagedDirectories();
     await mkdirFn(backupRoot, { recursive: true, mode: DIRECTORY_MODE });
     await chmodFn(backupRoot, DIRECTORY_MODE);
     await mkdirFn(directory, { recursive: true, mode: DIRECTORY_MODE });
@@ -257,6 +316,7 @@ export function createMailConfigBackupManager({
       planSha256: plan.sha256,
       previewSha256: plan.previewSha256,
       artifacts: Object.freeze(artifacts),
+      directories,
     });
     await atomicWrite(path.join(directory, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`, {
       mode: BACKUP_FILE_MODE,
@@ -294,10 +354,12 @@ export const mailConfigBackupInternals = Object.freeze({
   planArtifactPaths: PLAN_ARTIFACT_PATHS,
   postfixCompiledPaths: POSTFIX_COMPILED_PATHS,
   targetPaths: BACKUP_TARGET_PATHS,
+  managedDirectoryPaths: MANAGED_DIRECTORY_PATHS,
   postfixMainCfPath: POSTFIX_MAIN_CF_PATH,
   directoryMode: DIRECTORY_MODE,
   backupFileMode: BACKUP_FILE_MODE,
   normalizeTransactionId,
   normalizeManifest,
+  normalizeDirectorySnapshot,
   assertPlanArtifactSet,
 });
