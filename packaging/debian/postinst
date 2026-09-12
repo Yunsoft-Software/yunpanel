@@ -43,6 +43,10 @@ if [ -f "$api_env" ]; then
     printf '%s\n' 'YUNPANEL_MAIL_DKIM_RETIREMENT_STORE=/var/lib/yunpanel/control-plane/mail-dkim-retirement-registry.json' >>"$api_temp"
     api_changed=1
   fi
+  if ! grep -q '^YUNPANEL_MAIL_SERVICE_IDENTITY_STORE=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_MAIL_SERVICE_IDENTITY_STORE=/var/lib/yunpanel/control-plane/mail-service-identity-registry.json' >>"$api_temp"
+    api_changed=1
+  fi
   if ! grep -q '^YUNPANEL_MAILBOX_STORE=' "$api_env"; then
     printf '%s\n' 'YUNPANEL_MAILBOX_STORE=/var/lib/yunpanel/control-plane/mailbox-registry.json' >>"$api_temp"
     api_changed=1
