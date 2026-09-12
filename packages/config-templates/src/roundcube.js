@@ -49,8 +49,8 @@ export const roundcubeTemplatePolicy = Object.freeze({
   publicRoot: '/var/lib/roundcube/public_html',
   temporaryDirectory: '/var/lib/yunpanel/roundcube/tmp',
   configMode: 0o640,
-  databaseMode: 0o660,
-  privateDirectoryMode: 0o770,
+  databaseMode: 0o600,
+  privateDirectoryMode: 0o700,
   desKeyBytes: 18,
   desKeyCharacters: 24,
 });
