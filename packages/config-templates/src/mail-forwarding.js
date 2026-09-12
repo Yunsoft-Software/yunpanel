@@ -95,6 +95,21 @@ function normalizeForwardings(values) {
   return Object.freeze(normalized);
 }
 
+function forwardingRequirements(baseRequirements) {
+  if (!Array.isArray(baseRequirements)) {
+    throw new MailForwardingTemplateError('mail_forwarding_requirements_invalid', 'Managed mail requirements are invalid');
+  }
+  const result = [];
+  for (const requirement of baseRequirements) {
+    result.push(requirement);
+    if (requirement === 'dovecot_2_3') result.push('dovecot_sieve');
+  }
+  if (!result.includes('dovecot_sieve')) {
+    throw new MailForwardingTemplateError('mail_forwarding_requirements_invalid', 'Dovecot readiness requirement is unavailable');
+  }
+  return Object.freeze(result);
+}
+
 export function renderManagedMailboxForwardingSieve(forwardings = []) {
   const normalized = normalizeForwardings(forwardings);
   const lines = ['require ["envelope", "copy"];', ''];
@@ -182,11 +197,13 @@ export function previewManagedMailForwardingConfiguration({
       artifacts.push(forwarding, artifact);
     } else artifacts.push(artifact);
   }
+  const requirements = forwardingRequirements(base.requirements);
   const identity = {
     version: 1,
     baseSha256: base.sha256,
     forwardingSha256: forwarding.sha256,
     artifactDigests: artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
+    requirements,
   };
   return Object.freeze({
     version: 1,
@@ -195,7 +212,7 @@ export function previewManagedMailForwardingConfiguration({
     artifacts: Object.freeze(artifacts),
     postfixParameters: base.postfixParameters,
     validate: base.validate,
-    requirements: base.requirements,
+    requirements,
     readyToApply: false,
     sideEffects: false,
   });
@@ -207,4 +224,8 @@ export const mailForwardingTemplatePolicy = Object.freeze({
   maxForwardings: MAX_FORWARDINGS,
   maxDestinations: MAX_DESTINATIONS,
   modes: Object.freeze([...MODES]),
+});
+
+export const mailForwardingTemplateInternals = Object.freeze({
+  forwardingRequirements,
 });
