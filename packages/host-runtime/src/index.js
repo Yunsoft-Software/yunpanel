@@ -82,6 +82,11 @@ export {
   roundcubeConfigBackupInternals,
 } from './roundcube-config-backup.js';
 export {
+  createRoundcubeConfigActivator,
+  RoundcubeConfigActivationError,
+  roundcubeConfigActivatorInternals,
+} from './roundcube-config-activator.js';
+export {
   createAcmeManager,
   acmeManager,
   AcmeManagerError,
