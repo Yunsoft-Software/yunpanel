@@ -78,9 +78,56 @@ async function reconcileApplicationJob(applicationRegistry, applicationEnvironme
   }
 }
 
-async function applyReconciliation({ domainRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry, job }) {
+async function reconcileMailDomainJob(mailDomainRegistry, job) {
+  if (job.operation !== OPERATIONS.MAIL_CONFIG_APPLY || job.status === 'failed') return;
+  if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
+    || typeof mailDomainRegistry.transitionLocalStatus !== 'function') {
+    const error = new Error('Mail-domain reconciliation registry is unavailable');
+    error.code = 'mail_domain_reconciliation_unavailable';
+    throw error;
+  }
+  const expectedRevision = job.payload?.expectedRevision;
+  const desiredStatus = job.result?.desiredStatus;
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1
+    || !['disabled', 'enabled'].includes(desiredStatus)
+    || job.result?.mailDomainId !== job.resourceId || job.payload?.mailDomainId !== job.resourceId) {
+    const error = new Error('Mail-domain reconciliation identity is invalid');
+    error.code = 'mail_domain_reconciliation_invalid';
+    throw error;
+  }
+  const current = await mailDomainRegistry.getMailDomain(job.resourceId);
+  if (!current || current.managementMode !== 'local') {
+    const error = new Error('Mail-domain reconciliation target is unavailable');
+    error.code = 'mail_domain_reconciliation_target_unavailable';
+    throw error;
+  }
+  if (current.status === desiredStatus && current.revision === expectedRevision + 1) return;
+  if (current.revision !== expectedRevision || current.status === desiredStatus) {
+    const error = new Error('Mail-domain state changed before reconciliation');
+    error.code = 'mail_domain_reconciliation_conflict';
+    throw error;
+  }
+  await mailDomainRegistry.transitionLocalStatus(job.resourceId, {
+    expectedRevision,
+    status: desiredStatus,
+  });
+}
+
+async function applyReconciliation({
+  domainRegistry,
+  certificateRegistry,
+  applicationRegistry,
+  applicationEnvironmentRegistry,
+  mailDomainRegistry,
+  job,
+}) {
   if (job.resourceType === 'application') {
     await reconcileApplicationJob(applicationRegistry, applicationEnvironmentRegistry, job);
+    return;
+  }
+
+  if (job.resourceType === 'mail_domain') {
+    await reconcileMailDomainJob(mailDomainRegistry, job);
     return;
   }
 
@@ -128,9 +175,23 @@ async function applyReconciliation({ domainRegistry, certificateRegistry, applic
  * Automatic durable reconciliation is acknowledged only after this transition
  * succeeds; failed reconciliation therefore remains visible in recovery state.
  */
-export async function reconcileCompletedJob({ domainRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry = null, job }) {
+export async function reconcileCompletedJob({
+  domainRegistry,
+  certificateRegistry,
+  applicationRegistry,
+  applicationEnvironmentRegistry = null,
+  mailDomainRegistry = null,
+  job,
+}) {
   try {
-    await applyReconciliation({ domainRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry, job });
+    await applyReconciliation({
+      domainRegistry,
+      certificateRegistry,
+      applicationRegistry,
+      applicationEnvironmentRegistry,
+      mailDomainRegistry,
+      job,
+    });
   } catch (error) {
     const code = safeReconciliationCode(error);
     try {
@@ -153,4 +214,7 @@ export async function reconcileCompletedJob({ domainRegistry, certificateRegistr
   return { reconciled: true, error: null };
 }
 
-export const jobReconciliationInternals = Object.freeze({ safeReconciliationCode });
+export const jobReconciliationInternals = Object.freeze({
+  safeReconciliationCode,
+  reconcileMailDomainJob,
+});
