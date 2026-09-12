@@ -56,6 +56,14 @@ export {
 } from './mail-security.js';
 
 export {
+  MailSubmissionTemplateError,
+  mailSubmissionTemplatePolicy,
+  enableManagedMailSubmission,
+  previewManagedMailSubmissionConfiguration,
+  renderPostfixSenderLoginMap,
+} from './mail-submission.js';
+
+export {
   MailDkimTemplateError,
   mailDkimTemplatePolicy,
   managedDkimDnsRecord,
