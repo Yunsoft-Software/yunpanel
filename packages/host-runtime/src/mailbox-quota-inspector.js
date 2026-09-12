@@ -49,7 +49,7 @@ export function parseDoveadmQuotaTab(value, mailboxAddress) {
   const typeIndex = headers.indexOf('type');
   const valueIndex = headers.indexOf('value');
   const limitIndex = headers.indexOf('limit');
-  const percentIndex = headers.indexOf('%');
+  const percentIndex = headers.includes('%') ? headers.indexOf('%') : headers.indexOf('percent');
   if ([typeIndex, valueIndex, limitIndex, percentIndex].some((index) => index < 0)) {
     throw new MailboxQuotaInspectorError('mailbox_quota_usage_invalid', 'Dovecot mailbox quota usage columns are invalid');
   }
