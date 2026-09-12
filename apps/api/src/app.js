@@ -2,6 +2,8 @@ import express from 'express';
 import {
   createCloudflareDnsManager,
   CloudflareDnsManagerError,
+  createMailDiagnosticsInspector,
+  MailDiagnosticsInspectorError,
   createMailboxQuotaInspector,
 } from '@yunpanel/host-runtime';
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
@@ -35,6 +37,7 @@ import { mountMailAliasRoutes } from './mail-alias-http.js';
 import { createMailAliasRegistry, MailAliasRegistryError } from './mail-alias-registry.js';
 import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
 import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
+import { MailDiagnosticsHttpError, mountMailDiagnosticsRoutes } from './mail-diagnostics-http.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { mountMailboxForwardingRoutes } from './mailbox-forwarding-http.js';
 import {
@@ -124,6 +127,7 @@ export function createApp({
   mailDomainRegistry = createMailDomainRegistry({
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
   }),
+  mailDiagnosticsInspector = createMailDiagnosticsInspector(),
   mailboxRegistry = createMailboxRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
@@ -255,6 +259,12 @@ export function createApp({
     domainRegistry,
     localServerId,
   });
+  mountMailDiagnosticsRoutes(app, {
+    mailDiagnosticsInspector,
+    mailDomainRegistry,
+    domainRegistry,
+    localServerId,
+  });
   mountMailConfigurationRoutes(app, {
     mailConfigurationService,
     mailDomainRegistry,
@@ -304,6 +314,8 @@ export function createApp({
       || error instanceof MailAliasRegistryError
       || error instanceof MailConfigurationError
       || error instanceof MailConfigurationHttpError
+      || error instanceof MailDiagnosticsHttpError
+      || error instanceof MailDiagnosticsInspectorError
       || error instanceof MailboxForwardingRegistryError
       || error instanceof MailboxQuotaRegistryError
       || error instanceof MailboxQuotaHttpError
