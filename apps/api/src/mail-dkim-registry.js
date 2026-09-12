@@ -32,6 +32,8 @@ const RSA_BITS = 2048;
 const METADATA_FILE = 'metadata.json';
 const PRIVATE_KEY_FILE = 'private.pem';
 const PENDING_PREFIX = '.pending-';
+const PREVIOUS_PREFIX = '.previous-';
+const TRANSIENT_NONCE_BYTES = 6;
 
 export class MailDkimRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -136,6 +138,18 @@ function validatePersisted(record) {
   };
 }
 
+function previousEntryIdentity(name) {
+  if (typeof name !== 'string' || !name.startsWith(PREVIOUS_PREFIX)) return null;
+  const suffixLength = 1 + (TRANSIENT_NONCE_BYTES * 2);
+  if (name.length <= PREVIOUS_PREFIX.length + suffixLength) return null;
+  const separator = name.length - suffixLength;
+  if (name[separator] !== '-') return null;
+  const nonce = name.slice(separator + 1);
+  if (!/^[a-f0-9]{12}$/.test(nonce)) return null;
+  try { return uuid(name.slice(PREVIOUS_PREFIX.length, separator)); }
+  catch { return null; }
+}
+
 export function createMailDkimRegistry({
   keyRoot = null,
   now = () => Date.now(),
@@ -189,6 +203,19 @@ export function createMailDkimRegistry({
     }
   }
 
+  async function assertPrivateDirectory(directory, code = 'mail_dkim_state_invalid') {
+    try {
+      const metadata = await lstat(directory);
+      if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== DIRECTORY_MODE) {
+        throw new MailDkimRegistryError(code, 'DKIM key directory is unsafe', 409);
+      }
+      return metadata;
+    } catch (error) {
+      if (error instanceof MailDkimRegistryError) throw error;
+      throw error;
+    }
+  }
+
   async function readPrivateKey(record) {
     if (!keyRoot) {
       const content = memoryKeys.get(record.mailDomainId);
@@ -199,11 +226,7 @@ export function createMailDkimRegistry({
     }
     const directory = finalDirectory(record.mailDomainId);
     try {
-      const directoryMetadata = await lstat(directory);
-      if (!directoryMetadata.isDirectory() || directoryMetadata.isSymbolicLink()
-        || (directoryMetadata.mode & 0o777) !== DIRECTORY_MODE) {
-        throw new MailDkimRegistryError('mail_dkim_private_key_unsafe', 'DKIM key directory is unsafe', 409);
-      }
+      await assertPrivateDirectory(directory, 'mail_dkim_private_key_unsafe');
       const keyPath = path.join(directory, PRIVATE_KEY_FILE);
       await assertPrivateEntry(keyPath);
       const content = await readFile(keyPath, 'utf8');
@@ -235,10 +258,38 @@ export function createMailDkimRegistry({
       if (!entry.name.startsWith(PENDING_PREFIX)) continue;
       const target = path.join(keyRoot, entry.name);
       const metadata = await lstat(target);
-      if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+      if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== DIRECTORY_MODE) {
         throw new MailDkimRegistryError('mail_dkim_state_invalid', 'DKIM pending state is unsafe', 409);
       }
       await rm(target, { recursive: true, force: true });
+    }
+  }
+
+  async function recoverPreviousEntries() {
+    if (!keyRoot) return;
+    const entries = await readdir(keyRoot, { withFileTypes: true });
+    const seen = new Set();
+    for (const entry of entries) {
+      if (!entry.name.startsWith(PREVIOUS_PREFIX)) continue;
+      const id = previousEntryIdentity(entry.name);
+      if (!id || seen.has(id)) {
+        throw new MailDkimRegistryError('mail_dkim_state_invalid', 'DKIM rotation recovery state is invalid', 409);
+      }
+      seen.add(id);
+      const previous = path.join(keyRoot, entry.name);
+      const metadata = await lstat(previous);
+      if (!entry.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== DIRECTORY_MODE) {
+        throw new MailDkimRegistryError('mail_dkim_state_invalid', 'DKIM rotation recovery directory is unsafe', 409);
+      }
+      const target = finalDirectory(id);
+      try {
+        await assertPrivateDirectory(target);
+        await rm(previous, { recursive: true, force: false });
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        await rename(previous, target);
+        await chmod(target, DIRECTORY_MODE);
+      }
     }
   }
 
@@ -246,10 +297,10 @@ export function createMailDkimRegistry({
     await mkdir(keyRoot, { recursive: true, mode: DIRECTORY_MODE });
     await chmod(keyRoot, DIRECTORY_MODE);
     await cleanupPendingEntries();
+    await recoverPreviousEntries();
     const entries = await readdir(keyRoot, { withFileTypes: true });
     const keys = [];
     for (const entry of entries) {
-      if (entry.name.startsWith(PENDING_PREFIX)) continue;
       const id = uuid(entry.name);
       const directory = path.join(keyRoot, entry.name);
       const directoryMetadata = await lstat(directory);
@@ -285,6 +336,28 @@ export function createMailDkimRegistry({
     if (!initialized) await init();
   }
 
+  async function writePendingRecord(record, privateKeyPem, label = PENDING_PREFIX) {
+    const pending = path.join(
+      keyRoot,
+      `${label}${record.mailDomainId}-${randomBytes(TRANSIENT_NONCE_BYTES).toString('hex')}`,
+    );
+    await mkdir(pending, { mode: DIRECTORY_MODE });
+    try {
+      await writeFile(path.join(pending, METADATA_FILE), `${JSON.stringify(record, null, 2)}\n`, {
+        encoding: 'utf8',
+        mode: PRIVATE_MODE,
+      });
+      await chmod(path.join(pending, METADATA_FILE), PRIVATE_MODE);
+      await writeFile(path.join(pending, PRIVATE_KEY_FILE), privateKeyPem, { encoding: 'utf8', mode: PRIVATE_MODE });
+      await chmod(path.join(pending, PRIVATE_KEY_FILE), PRIVATE_MODE);
+      await chmod(pending, DIRECTORY_MODE);
+      return pending;
+    } catch (error) {
+      try { await rm(pending, { recursive: true, force: true }); } catch {}
+      throw error;
+    }
+  }
+
   async function commitPersistentRecord(record, privateKeyPem) {
     if (!keyRoot) {
       if (memoryKeys.has(record.mailDomainId)) {
@@ -303,23 +376,91 @@ export function createMailDkimRegistry({
         throw new MailDkimRegistryError('mail_dkim_private_key_unavailable', 'DKIM key target could not be inspected', 503);
       }
     }
-    const pending = path.join(
-      keyRoot,
-      `${PENDING_PREFIX}${record.mailDomainId}-${randomBytes(6).toString('hex')}`,
-    );
-    await mkdir(pending, { mode: DIRECTORY_MODE });
+    let pending;
     try {
-      const metadata = `${JSON.stringify(record, null, 2)}\n`;
-      await writeFile(path.join(pending, METADATA_FILE), metadata, { encoding: 'utf8', mode: PRIVATE_MODE });
-      await chmod(path.join(pending, METADATA_FILE), PRIVATE_MODE);
-      await writeFile(path.join(pending, PRIVATE_KEY_FILE), privateKeyPem, { encoding: 'utf8', mode: PRIVATE_MODE });
-      await chmod(path.join(pending, PRIVATE_KEY_FILE), PRIVATE_MODE);
+      pending = await writePendingRecord(record, privateKeyPem);
       await rename(pending, target);
       await chmod(target, DIRECTORY_MODE);
     } catch (error) {
-      try { await rm(pending, { recursive: true, force: true }); } catch {}
+      if (pending) {
+        try { await rm(pending, { recursive: true, force: true }); } catch {}
+      }
       throw error;
     }
+  }
+
+  async function commitPersistentRotation(record, privateKeyPem) {
+    if (!keyRoot) {
+      if (!memoryKeys.has(record.mailDomainId)) {
+        throw new MailDkimRegistryError('mail_dkim_key_not_found', 'DKIM key was not found', 404);
+      }
+      memoryKeys.set(record.mailDomainId, privateKeyPem);
+      return;
+    }
+
+    const target = finalDirectory(record.mailDomainId);
+    try { await assertPrivateDirectory(target, 'mail_dkim_private_key_unsafe'); }
+    catch (error) {
+      if (error?.code === 'ENOENT') {
+        throw new MailDkimRegistryError('mail_dkim_key_not_found', 'DKIM key was not found', 404);
+      }
+      throw error;
+    }
+
+    const pending = await writePendingRecord(record, privateKeyPem);
+    const previous = path.join(
+      keyRoot,
+      `${PREVIOUS_PREFIX}${record.mailDomainId}-${randomBytes(TRANSIENT_NONCE_BYTES).toString('hex')}`,
+    );
+    let movedPrevious = false;
+    let installedNew = false;
+    try {
+      await rename(target, previous);
+      movedPrevious = true;
+      await rename(pending, target);
+      installedNew = true;
+      await chmod(target, DIRECTORY_MODE);
+      await rm(previous, { recursive: true, force: false });
+    } catch {
+      let rollbackFailed = false;
+      if (installedNew) {
+        try { await rm(target, { recursive: true, force: true }); } catch { rollbackFailed = true; }
+      }
+      if (movedPrevious) {
+        try {
+          await rename(previous, target);
+          await chmod(target, DIRECTORY_MODE);
+        } catch { rollbackFailed = true; }
+      }
+      try { await rm(pending, { recursive: true, force: true }); } catch { rollbackFailed = true; }
+      if (rollbackFailed) {
+        throw new MailDkimRegistryError(
+          'mail_dkim_rotation_recovery_failed',
+          'DKIM key rotation failed and previous private state could not be restored',
+          503,
+        );
+      }
+      throw new MailDkimRegistryError('mail_dkim_rotation_failed', 'DKIM key rotation could not be committed', 503);
+    }
+  }
+
+  async function generateKeyMaterial() {
+    let generated;
+    try {
+      generated = await generateKeyPairFn('rsa', {
+        modulusLength: RSA_BITS,
+        publicKeyEncoding: { type: 'spki', format: 'der' },
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      });
+    } catch {
+      throw new MailDkimRegistryError('mail_dkim_key_generation_failed', 'DKIM key generation failed', 503);
+    }
+    const publicKey = Buffer.from(generated.publicKey).toString('base64');
+    const privateKeyPem = String(generated.privateKey);
+    if (publicKeyFromPrivate(privateKeyPem) !== publicKey) {
+      throw new MailDkimRegistryError('mail_dkim_key_generation_failed', 'Generated DKIM keypair is inconsistent', 503);
+    }
+    return Object.freeze({ publicKey, privateKeyPem });
   }
 
   async function getKey(mailDomainId) {
@@ -351,22 +492,8 @@ export function createMailDkimRegistry({
         throw new MailDkimRegistryError('mail_dkim_key_exists', 'DKIM key already exists for this mail domain', 409);
       }
       const mailDomain = await resolveMailDomain(id);
-      let generated;
-      try {
-        generated = await generateKeyPairFn('rsa', {
-          modulusLength: RSA_BITS,
-          publicKeyEncoding: { type: 'spki', format: 'der' },
-          privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-        });
-      } catch {
-        throw new MailDkimRegistryError('mail_dkim_key_generation_failed', 'DKIM key generation failed', 503);
-      }
-      const publicKey = Buffer.from(generated.publicKey).toString('base64');
-      const privateKeyPem = String(generated.privateKey);
-      if (publicKeyFromPrivate(privateKeyPem) !== publicKey) {
-        throw new MailDkimRegistryError('mail_dkim_key_generation_failed', 'Generated DKIM keypair is inconsistent', 503);
-      }
-      dnsRecord(mailDomain.domainName, dkimSelector, publicKey);
+      const generated = await generateKeyMaterial();
+      dnsRecord(mailDomain.domainName, dkimSelector, generated.publicKey);
       const current = new Date(now()).toISOString();
       const record = {
         version: STORE_VERSION,
@@ -374,16 +501,63 @@ export function createMailDkimRegistry({
         domainName: mailDomain.domainName,
         selector: dkimSelector,
         algorithm: ALGORITHM,
-        publicKey,
+        publicKey: generated.publicKey,
         revision: 1,
         createdAt: current,
         updatedAt: current,
       };
-      await commitPersistentRecord(record, privateKeyPem);
+      await commitPersistentRecord(record, generated.privateKeyPem);
       state = {
         version: STORE_VERSION,
         keys: [...state.keys, record].sort((left, right) => left.domainName.localeCompare(right.domainName)),
       };
+      return publicKeyMetadata(record);
+    });
+    mutationChain = operation.catch(() => {});
+    return operation;
+  }
+
+  async function rotateKey(mailDomainId, { expectedRevision, selector: requestedSelector } = {}) {
+    await ensureInitialized();
+    const id = uuid(mailDomainId);
+    const expected = revision(expectedRevision);
+    const dkimSelector = normalizeSelector(requestedSelector);
+    const operation = mutationChain.then(async () => {
+      const index = state.keys.findIndex((record) => record.mailDomainId === id);
+      if (index < 0) throw new MailDkimRegistryError('mail_dkim_key_not_found', 'DKIM key was not found', 404);
+      const existing = state.keys[index];
+      if (existing.revision !== expected) {
+        throw new MailDkimRegistryError('stale_mail_dkim_revision', 'DKIM key state changed; refresh and retry', 409);
+      }
+      if (existing.selector === dkimSelector) {
+        throw new MailDkimRegistryError(
+          'mail_dkim_rotation_selector_unchanged',
+          'DKIM rotation requires a new selector so old and new DNS records can coexist during rollout',
+          409,
+        );
+      }
+      const mailDomain = await resolveMailDomain(id);
+      if (mailDomain.domainName !== existing.domainName) {
+        throw new MailDkimRegistryError('mail_dkim_domain_drift', 'DKIM key domain identity no longer matches mail domain state', 409);
+      }
+      const generated = await generateKeyMaterial();
+      dnsRecord(mailDomain.domainName, dkimSelector, generated.publicKey);
+      const current = new Date(now()).toISOString();
+      const record = {
+        version: STORE_VERSION,
+        mailDomainId: id,
+        domainName: mailDomain.domainName,
+        selector: dkimSelector,
+        algorithm: ALGORITHM,
+        publicKey: generated.publicKey,
+        revision: existing.revision + 1,
+        createdAt: existing.createdAt,
+        updatedAt: current,
+      };
+      await commitPersistentRotation(record, generated.privateKeyPem);
+      const keys = [...state.keys];
+      keys[index] = record;
+      state = { version: STORE_VERSION, keys: keys.sort((left, right) => left.domainName.localeCompare(right.domainName)) };
       return publicKeyMetadata(record);
     });
     mutationChain = operation.catch(() => {});
@@ -408,6 +582,7 @@ export function createMailDkimRegistry({
     getKey,
     listKeys,
     createKey,
+    rotateKey,
     materializePrivateKey,
   });
 }
@@ -421,6 +596,8 @@ export const mailDkimRegistryInternals = Object.freeze({
   metadataFile: METADATA_FILE,
   privateKeyFile: PRIVATE_KEY_FILE,
   pendingPrefix: PENDING_PREFIX,
+  previousPrefix: PREVIOUS_PREFIX,
   publicKeyFromPrivate,
   validatePersisted,
+  previousEntryIdentity,
 });
