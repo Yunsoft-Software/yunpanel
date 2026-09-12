@@ -3,6 +3,7 @@ import {
   mailTemplatePolicy,
   normalizeMailboxAddress,
   previewManagedMailConfiguration,
+  previewManagedMailEmptyConfiguration,
   renderDovecotPasswdFile,
 } from '@yunpanel/config-templates';
 
@@ -123,9 +124,9 @@ export function createMailConfigurationService({
 
     if (resolved.domains.length === 0) {
       return Object.freeze({
-        ready: false,
-        blockers: Object.freeze(['mail_configuration_empty_set_not_supported']),
-        preview: null,
+        ready: true,
+        blockers: Object.freeze([]),
+        preview: previewManagedMailEmptyConfiguration(),
         accounts: Object.freeze([]),
       });
     }
