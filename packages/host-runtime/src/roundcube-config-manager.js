@@ -1,7 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { roundcubeFpmTemplatePolicy, roundcubeTemplatePolicy } from '@yunpanel/config-templates';
+import {
+  roundcubeFpmTemplatePolicy,
+  roundcubeNginxTemplatePolicy,
+  roundcubeTemplatePolicy,
+} from '@yunpanel/config-templates';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const STAGE_DIRECTORY_MODE = 0o700;
@@ -49,6 +53,14 @@ function validateFpmPreview(preview) {
   }, 'roundcube_fpm_preview_invalid');
 }
 
+function validateNginxPreview(preview) {
+  return validateArtifactPreview(preview, {
+    path: roundcubeNginxTemplatePolicy.configPath,
+    sensitive: false,
+    mode: roundcubeNginxTemplatePolicy.configMode,
+  }, 'roundcube_nginx_preview_invalid');
+}
+
 export function createRoundcubeConfigManager({
   stagingRoot = '/var/lib/yunpanel/staging/roundcube',
   chmodFn = chmod,
@@ -77,6 +89,10 @@ export function createRoundcubeConfigManager({
 
   function stagedFpmPath(previewSha256) {
     return path.join(stageDirectory(previewSha256), 'yunpanel-roundcube-fpm.conf');
+  }
+
+  function stagedNginxPath(previewSha256) {
+    return path.join(stageDirectory(previewSha256), 'yunpanel-roundcube-nginx.conf');
   }
 
   async function ensureSafeDirectory(directory, mode) {
@@ -185,6 +201,19 @@ export function createRoundcubeConfigManager({
     });
   }
 
+  function stageNginxConfig(preview, content) {
+    return stageArtifact({
+      preview,
+      content,
+      validate: validateNginxPreview,
+      targetPath: stagedNginxPath,
+      mode: STAGED_PUBLIC_MODE,
+      mismatchCode: 'roundcube_nginx_material_mismatch',
+      failureCode: 'roundcube_nginx_staging_failed',
+      resultKey: 'nginxSha256',
+    });
+  }
+
   function inspectStagedConfiguration(preview) {
     return inspectArtifact({
       preview,
@@ -205,20 +234,34 @@ export function createRoundcubeConfigManager({
     });
   }
 
+  function inspectStagedNginxConfig(preview) {
+    return inspectArtifact({
+      preview,
+      validate: validateNginxPreview,
+      targetPath: stagedNginxPath,
+      mode: STAGED_PUBLIC_MODE,
+      resultKey: 'nginxSha256',
+    });
+  }
+
   return Object.freeze({
     stageConfiguration,
     stageFpmPool,
+    stageNginxConfig,
     inspectStagedConfiguration,
     inspectStagedFpmPool,
+    inspectStagedNginxConfig,
     stageDirectory,
     stagedConfigPath,
     stagedFpmPath,
+    stagedNginxPath,
   });
 }
 
 export const roundcubeConfigManagerInternals = Object.freeze({
   validatePreview,
   validateFpmPreview,
+  validateNginxPreview,
   sha256,
   stageDirectoryMode: STAGE_DIRECTORY_MODE,
   stagedConfigMode: STAGED_CONFIG_MODE,
