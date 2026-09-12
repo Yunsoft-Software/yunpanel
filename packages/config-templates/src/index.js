@@ -56,6 +56,12 @@ export {
 } from './mail-security.js';
 
 export {
+  MailSrsTemplateError,
+  enableManagedMailSrs,
+  mailSrsTemplatePolicy,
+} from './mail-srs.js';
+
+export {
   MailSubmissionTemplateError,
   mailSubmissionTemplatePolicy,
   enableManagedMailSubmission,
