@@ -18,6 +18,7 @@ import { createMailAliasRegistry } from './mail-alias-registry.js';
 import { createMailConfigurationService } from './mail-configuration.js';
 import { createMailConfigOperationReceiptStore } from './mail-config-operation-receipt.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
+import { createMailboxQuotaRegistry } from './mailbox-quota-registry.js';
 import { createMailboxRegistry } from './mailbox-registry.js';
 import { createMigrationServiceStatus } from './local-migration-cli.js';
 import { createServerRegistry } from './server-registry.js';
@@ -37,12 +38,17 @@ function resolveMailRecoveryPaths({ env, packaged, cwd }) {
     path.join(defaultRoot, 'mailbox-registry.json'),
     { packaged, cwd, label: 'mailbox' },
   );
+  const mailboxQuotaStore = jobRecoveryRuntimeInternals.resolveRecoveryStorePath(
+    env.YUNPANEL_MAILBOX_QUOTA_STORE,
+    path.join(defaultRoot, 'mailbox-quota-registry.json'),
+    { packaged, cwd, label: 'mailbox quota' },
+  );
   const mailAliasStore = jobRecoveryRuntimeInternals.resolveRecoveryStorePath(
     env.YUNPANEL_MAIL_ALIAS_STORE,
     path.join(defaultRoot, 'mail-alias-registry.json'),
     { packaged, cwd, label: 'mail alias' },
   );
-  return Object.freeze({ ...base, mailDomainStore, mailboxStore, mailAliasStore });
+  return Object.freeze({ ...base, mailDomainStore, mailboxStore, mailboxQuotaStore, mailAliasStore });
 }
 
 export async function runRunningMailConfigRecoveryFromStores({
@@ -58,6 +64,7 @@ export async function runRunningMailConfigRecoveryFromStores({
   applicationRegistryFactory = createApplicationRegistry,
   mailDomainRegistryFactory = createMailDomainRegistry,
   mailboxRegistryFactory = createMailboxRegistry,
+  mailboxQuotaRegistryFactory = createMailboxQuotaRegistry,
   mailAliasRegistryFactory = createMailAliasRegistry,
   jobRegistryFactory = createJobRegistry,
   durableRegistryFactory = createDurableJobRegistry,
@@ -76,6 +83,7 @@ export async function runRunningMailConfigRecoveryFromStores({
     applicationRegistryFactory,
     mailDomainRegistryFactory,
     mailboxRegistryFactory,
+    mailboxQuotaRegistryFactory,
     mailAliasRegistryFactory,
     jobRegistryFactory,
     durableRegistryFactory,
@@ -123,6 +131,10 @@ export async function runRunningMailConfigRecoveryFromStores({
     masterKey: env.YUNPANEL_SECRET_MASTER_KEY ?? null,
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }), 'Mailbox');
+  const mailboxQuotaRegistry = await jobRecoveryRuntimeInternals.initRegistry(mailboxQuotaRegistryFactory({
+    filePath: paths.mailboxQuotaStore,
+    getMailbox: (mailboxId) => mailboxRegistry.getMailbox(mailboxId),
+  }), 'Mailbox quota');
   const mailAliasRegistry = await jobRecoveryRuntimeInternals.initRegistry(mailAliasRegistryFactory({
     filePath: paths.mailAliasStore,
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
@@ -132,6 +144,7 @@ export async function runRunningMailConfigRecoveryFromStores({
   const configurationService = mailConfigurationServiceFactory({
     mailDomainRegistry,
     mailboxRegistry,
+    mailboxQuotaRegistry,
     mailAliasRegistry,
   });
   if (!configurationService || typeof configurationService.materializeTransition !== 'function') {
