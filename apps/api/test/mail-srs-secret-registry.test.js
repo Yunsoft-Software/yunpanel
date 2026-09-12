@@ -119,7 +119,8 @@ test('SRS secret registry rejects tampered ciphertext and missing server referen
   await registry.init();
   await registry.ensureForServer(SERVER_ID);
 
-  const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+  const validRaw = await readFile(filePath, 'utf8');
+  const parsed = JSON.parse(validRaw);
   parsed.records[0].ciphertext = `${parsed.records[0].ciphertext.slice(0, -2)}AA`;
   await writeFile(filePath, `${JSON.stringify(parsed, null, 2)}\n`, { mode: 0o600 });
   const tampered = createMailSrsSecretRegistry({
@@ -133,7 +134,7 @@ test('SRS secret registry rejects tampered ciphertext and missing server referen
       && error.code === 'mail_srs_secret_decryption_failed',
   );
 
-  parsed.records[0].ciphertext = JSON.parse(await readFile(filePath, 'utf8')).records[0].ciphertext;
+  await writeFile(filePath, validRaw, { mode: 0o600 });
   const missingServer = createMailSrsSecretRegistry({
     filePath,
     masterKey: MASTER_KEY,
