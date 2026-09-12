@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  mailForwardingTemplatePolicy,
   mailTemplatePolicy,
   previewManagedMailApplyPlan,
-  previewManagedMailConfiguration,
-  renderDovecotPasswdFile,
+  previewManagedMailForwardingConfiguration,
+  renderDovecotQuotaPasswdFile,
 } from '@yunpanel/config-templates';
 import {
   createMailConfigEvidenceInspector,
@@ -20,9 +21,10 @@ function fixture() {
     aliases: [],
     accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
     postmasterAddress: 'owner@example.com',
+    forwardings: [{ source: 'owner@example.com', mode: 'copy', destinations: ['backup@elsewhere.test'] }],
   };
-  const preview = previewManagedMailConfiguration(input);
-  const passwd = renderDovecotPasswdFile({ domains: input.domains, accounts: input.accounts });
+  const preview = previewManagedMailForwardingConfiguration(input);
+  const passwd = renderDovecotQuotaPasswdFile({ domains: input.domains, accounts: input.accounts });
   const files = new Map();
   for (const artifact of preview.artifacts) {
     files.set(artifact.path, Buffer.from(
@@ -32,6 +34,7 @@ function fixture() {
   for (const compiledPath of mailConfigBackupInternals.postfixCompiledPaths) {
     files.set(compiledPath, Buffer.from('compiled-map'));
   }
+  files.set(mailConfigBackupInternals.sieveCompiledPath, Buffer.from('compiled-sieve'));
   return { preview, files };
 }
 
@@ -39,7 +42,15 @@ function commandKey(file, args) {
   return `${file}\u0000${args.join('\u0000')}`;
 }
 
-function inspectorFor({ preview, files, postfixOverride = null, readinessReady = true }) {
+function inspectorFor({
+  preview,
+  files,
+  postfixOverride = null,
+  readinessReady = true,
+  compiledSieveMode = 0o600,
+  compiledSieveUid = 0,
+  compiledSieveGid = 0,
+} = {}) {
   const plan = previewManagedMailApplyPlan(preview);
   const parameters = new Map(plan.postfixParameters.map((entry) => [entry.name, entry.value]));
   return createMailConfigEvidenceInspector({
@@ -52,11 +63,12 @@ function inspectorFor({ preview, files, postfixOverride = null, readinessReady =
     },
     lstatFn: async (filePath) => {
       if (!files.has(filePath)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      const compiledSieve = filePath === mailConfigBackupInternals.sieveCompiledPath;
       const sensitive = filePath === mailTemplatePolicy.dovecotPasswdFilePath;
       return {
-        mode: sensitive ? 0o600 : 0o640,
-        uid: 0,
-        gid: 0,
+        mode: compiledSieve ? compiledSieveMode : sensitive ? 0o600 : 0o640,
+        uid: compiledSieve ? compiledSieveUid : 0,
+        gid: compiledSieve ? compiledSieveGid : 0,
         isFile: () => true,
         isSymbolicLink: () => false,
       };
@@ -77,7 +89,7 @@ function inspectorFor({ preview, files, postfixOverride = null, readinessReady =
   });
 }
 
-test('active managed mail evidence requires exact live artifacts and returns no protected content', async () => {
+test('active managed mail evidence requires exact live artifacts and compiled sieve without protected content', async () => {
   const state = fixture();
   const result = await inspectorFor(state).inspect(state.preview);
   const plan = previewManagedMailApplyPlan(state.preview);
@@ -90,13 +102,29 @@ test('active managed mail evidence requires exact live artifacts and returns no 
     applied: true,
     sideEffects: true,
   });
+  assert.equal(state.files.has(mailForwardingTemplatePolicy.sievePath), true);
+  assert.equal(state.files.has(mailConfigBackupInternals.sieveCompiledPath), true);
   assert.equal(JSON.stringify(result).includes(ARGON2ID_HASH), false);
 });
 
-test('active managed mail evidence fails closed on artifact or postfix drift', async () => {
+test('active managed mail evidence fails closed on artifact, compiled sieve or postfix drift', async () => {
   const state = fixture();
   state.files.set(mailTemplatePolicy.dovecotAuthConfigPath, Buffer.from('tampered\n'));
   assert.deepEqual(await inspectorFor(state).inspect(state.preview), { satisfied: false, result: null });
+
+  const missingSieve = fixture();
+  missingSieve.files.delete(mailConfigBackupInternals.sieveCompiledPath);
+  assert.deepEqual(await inspectorFor(missingSieve).inspect(missingSieve.preview), { satisfied: false, result: null });
+
+  const unsafeSieve = fixture();
+  assert.deepEqual(await inspectorFor({ ...unsafeSieve, compiledSieveMode: 0o644 }).inspect(unsafeSieve.preview), {
+    satisfied: false,
+    result: null,
+  });
+  assert.deepEqual(await inspectorFor({ ...unsafeSieve, compiledSieveUid: 1000 }).inspect(unsafeSieve.preview), {
+    satisfied: false,
+    result: null,
+  });
 
   const clean = fixture();
   const parameter = previewManagedMailApplyPlan(clean.preview).postfixParameters[0];
