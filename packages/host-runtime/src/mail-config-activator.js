@@ -22,9 +22,11 @@ const execFileAsync = promisify(execFile);
 const ROOT_UID = 0;
 const ROOT_GID = 0;
 const NEW_MANAGED_DIRECTORY_MODE = 0o750;
+const COMPILED_SIEVE_MODE = 0o600;
 const MAX_OUTPUT = 128 * 1024;
 const UNMANAGED_REQUIRED_DIRECTORIES = Object.freeze([
   '/etc/postfix',
+  '/etc/dovecot',
   '/etc/dovecot/conf.d',
   '/etc/rspamd/local.d',
 ]);
@@ -255,11 +257,34 @@ export function createMailConfigActivator({
     }
   }
 
+  async function secureCompiledSieve() {
+    const compiledPath = mailConfigBackupInternals.sieveCompiledPath;
+    try {
+      let metadata = await lstatFn(compiledPath);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('unsafe compiled sieve');
+      await chownFn(compiledPath, ROOT_UID, ROOT_GID);
+      await chmodFn(compiledPath, COMPILED_SIEVE_MODE);
+      metadata = await lstatFn(compiledPath);
+      if (!metadata.isFile() || metadata.isSymbolicLink()
+        || metadata.uid !== ROOT_UID || metadata.gid !== ROOT_GID
+        || (metadata.mode & 0o7777) !== COMPILED_SIEVE_MODE) {
+        throw new Error('compiled sieve metadata mismatch');
+      }
+    } catch {
+      throw activationError('mail_sieve_output_invalid', 'Mailbox forwarding compilation did not produce a safe Sieve binary');
+    }
+  }
+
   async function runApplyCommands(plan) {
     for (const command of plan.stages.compile) {
-      await runCommand(command, 'mail_postmap_failed', 'Postfix managed map compilation failed');
+      if (command.file === '/usr/bin/sievec') {
+        await runCommand(command, 'mail_sieve_compile_failed', 'Managed mailbox forwarding script compilation failed');
+      } else {
+        await runCommand(command, 'mail_postmap_failed', 'Postfix managed map compilation failed');
+      }
     }
     await assertCompiledMapsSafe();
+    await secureCompiledSieve();
     for (const command of plan.stages.configurePostfix) {
       await runCommand(command, 'mail_postconf_failed', 'Postfix managed parameter update failed');
     }
@@ -400,4 +425,5 @@ export function createMailConfigActivator({
 export const mailConfigActivatorInternals = Object.freeze({
   unmanagedRequiredDirectories: UNMANAGED_REQUIRED_DIRECTORIES,
   newManagedDirectoryMode: NEW_MANAGED_DIRECTORY_MODE,
+  compiledSieveMode: COMPILED_SIEVE_MODE,
 });
