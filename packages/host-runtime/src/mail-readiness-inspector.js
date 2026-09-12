@@ -11,10 +11,23 @@ const DOVECOT = '/usr/sbin/dovecot';
 const DOVECONF = '/usr/bin/doveconf';
 const POSTCONF = '/usr/sbin/postconf';
 const SS = '/usr/bin/ss';
+const SIEVEC = '/usr/bin/sievec';
 const MAX_OUTPUT = 128 * 1024;
-const REQUIREMENTS = Object.freeze([
+const BASE_REQUIREMENTS = Object.freeze([
   'postfix',
   'dovecot_2_3',
+  'rspamd',
+  'vmail_identity',
+  'postfix_identity',
+  'mail_tls_material',
+  'loopback_11332_available',
+  'managed_domains_excluded_from_mydestination',
+  'postfix_relay_policy_verified',
+]);
+const SIEVE_REQUIREMENTS = Object.freeze([
+  'postfix',
+  'dovecot_2_3',
+  'dovecot_sieve',
   'rspamd',
   'vmail_identity',
   'postfix_identity',
@@ -36,16 +49,25 @@ function sha256(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+function canonicalRequirementIds(value) {
+  if (!Array.isArray(value)) {
+    throw new MailReadinessError('mail_readiness_requirements_invalid', 'Managed mail preview readiness requirements are not canonical');
+  }
+  for (const allowed of [BASE_REQUIREMENTS, SIEVE_REQUIREMENTS]) {
+    if (value.length === allowed.length && value.every((requirement, index) => requirement === allowed[index])) {
+      return allowed;
+    }
+  }
+  throw new MailReadinessError('mail_readiness_requirements_invalid', 'Managed mail preview readiness requirements are not canonical');
+}
+
 function canonicalDomainsFromPreview(preview) {
   if (!preview || typeof preview !== 'object' || Array.isArray(preview)
     || typeof preview.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(preview.sha256)
     || !Array.isArray(preview.artifacts) || !Array.isArray(preview.requirements)) {
     throw new MailReadinessError('mail_readiness_preview_invalid', 'Managed mail preview is invalid');
   }
-  if (preview.requirements.length !== REQUIREMENTS.length
-    || preview.requirements.some((requirement, index) => requirement !== REQUIREMENTS[index])) {
-    throw new MailReadinessError('mail_readiness_requirements_invalid', 'Managed mail preview readiness requirements are not canonical');
-  }
+  canonicalRequirementIds(preview.requirements);
   const domainArtifact = preview.artifacts.find((artifact) => artifact?.path === mailTemplatePolicy.postfixVirtualDomainMapPath);
   if (!domainArtifact || typeof domainArtifact.content !== 'string') {
     throw new MailReadinessError('mail_readiness_domains_unavailable', 'Managed mail domain map is unavailable');
@@ -152,8 +174,19 @@ export function createMailReadinessInspector({
     catch { return false; }
   }
 
+  async function executableFileExists(filePath) {
+    try {
+      const metadata = await statFn(filePath);
+      return metadata.isFile() && Number.isSafeInteger(metadata.mode) && (metadata.mode & 0o111) !== 0;
+    } catch {
+      return false;
+    }
+  }
+
   async function inspect(preview) {
     const domains = canonicalDomainsFromPreview(preview);
+    const requirementIds = canonicalRequirementIds(preview.requirements);
+    const requiresSieve = requirementIds.includes('dovecot_sieve');
     const [postfix, dovecot, rspamd] = await Promise.all([
       managedServiceManager.inspect('postfix'),
       managedServiceManager.inspect('dovecot'),
@@ -197,12 +230,14 @@ export function createMailReadinessInspector({
     const dovecotKeyPath = configuredPath(dovecotKey.output);
     const postfixCertPath = configuredPath(postfixCert.output);
     const postfixKeyPath = configuredPath(postfixKey.output);
-    const tlsFiles = await Promise.all([
+    const [dovecotCertExists, dovecotKeyExists, postfixCertExists, postfixKeyExists, sieveExecutable] = await Promise.all([
       regularFileExists(dovecotCertPath),
       regularFileExists(dovecotKeyPath),
       regularFileExists(postfixCertPath),
       regularFileExists(postfixKeyPath),
+      requiresSieve ? executableFileExists(SIEVEC) : Promise.resolve(true),
     ]);
+    const tlsFiles = [dovecotCertExists, dovecotKeyExists, postfixCertExists, postfixKeyExists];
 
     const variablesValid = myhostname.ok && mydomain.ok
       && /^[a-z0-9.-]+$/i.test(myhostname.output) && /^[a-z0-9.-]+$/i.test(mydomain.output);
@@ -225,6 +260,7 @@ export function createMailReadinessInspector({
     const status = new Map([
       ['postfix', serviceSatisfied(postfix)],
       ['dovecot_2_3', serviceSatisfied(dovecot) && dovecotVersion.ok && /^2\.3(?:\.|$)/.test(dovecotVersion.output)],
+      ['dovecot_sieve', serviceSatisfied(dovecot) && sieveExecutable],
       ['rspamd', serviceSatisfied(rspamd)],
       ['vmail_identity', vmailIdentity.ok && identityPresent(vmailIdentity.output, 'vmail')],
       ['postfix_identity', postfixIdentity.ok && identityPresent(postfixIdentity.output, 'postfix')],
@@ -234,7 +270,7 @@ export function createMailReadinessInspector({
       ['managed_domains_excluded_from_mydestination', managedDomainsExcluded],
       ['postfix_relay_policy_verified', relayPolicyVerified],
     ]);
-    const requirements = Object.freeze(REQUIREMENTS.map((id) => Object.freeze({ id, satisfied: status.get(id) === true })));
+    const requirements = Object.freeze(requirementIds.map((id) => Object.freeze({ id, satisfied: status.get(id) === true })));
     const blockers = Object.freeze(requirements.filter((entry) => !entry.satisfied).map((entry) => entry.id));
     const identity = {
       version: 1,
@@ -256,8 +292,11 @@ export function createMailReadinessInspector({
 }
 
 export const mailReadinessInternals = Object.freeze({
-  requirements: REQUIREMENTS,
+  requirements: BASE_REQUIREMENTS,
+  sieveRequirements: SIEVE_REQUIREMENTS,
+  sievecPath: SIEVEC,
   commandKey,
+  canonicalRequirementIds,
   canonicalDomainsFromPreview,
   configuredPath,
   destinationTokens,
