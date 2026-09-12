@@ -38,6 +38,8 @@ import { createMailAliasRegistry, MailAliasRegistryError } from './mail-alias-re
 import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
 import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
 import { MailDkimConfigurationError } from './mail-dkim-configuration.js';
+import { createMailDkimDnsService, MailDkimDnsError } from './mail-dkim-dns.js';
+import { MailDkimDnsHttpError, mountMailDkimDnsRoutes } from './mail-dkim-dns-http.js';
 import { mountMailDkimRoutes, MailDkimHttpError } from './mail-dkim-http.js';
 import { createMailDkimRegistry, MailDkimRegistryError } from './mail-dkim-registry.js';
 import {
@@ -142,6 +144,7 @@ export function createApp({
   }),
   mailDiagnosticsInspector = createMailDiagnosticsInspector(),
   mailDkimConfigurationService = null,
+  mailDkimDnsService = null,
   mailboxRegistry = createMailboxRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
@@ -194,6 +197,22 @@ export function createApp({
     serverRegistry: registry,
     dnsProviderCredentialRegistry,
   });
+  const canCreateDkimDnsService = typeof dnsHostingRegistry?.listZones === 'function'
+    && typeof dnsProviderCredentialRegistry?.getForZone === 'function'
+    && typeof dnsProviderCredentialRegistry?.materialize === 'function'
+    && typeof dnsRecordManager?.inspectRecord === 'function'
+    && typeof jobRegistry?.enqueue === 'function' && typeof jobRegistry?.listJobs === 'function';
+  const dkimDns = mailDkimDnsService ?? (canCreateDkimDnsService ? createMailDkimDnsService({
+    mailDomainRegistry,
+    mailDkimRegistry,
+    mailDkimRetirementRegistry,
+    domainRegistry,
+    dnsHostingRegistry,
+    dnsProviderCredentialRegistry,
+    dnsRecordManager,
+    jobRegistry,
+    localServerId,
+  }) : null);
   app.disable('x-powered-by');
   mountSiteFileRoutes(app, { siteFileManager: files });
   app.use(express.json({ limit: '256kb' }));
@@ -282,6 +301,7 @@ export function createApp({
     jobRegistry: mailDkimConfigurationService ? jobRegistry : null,
     localServerId,
   });
+  if (dkimDns) mountMailDkimDnsRoutes(app, { mailDkimDnsService: dkimDns });
   mountMailDiagnosticsRoutes(app, {
     mailDiagnosticsInspector,
     mailDkimRegistry,
@@ -339,6 +359,8 @@ export function createApp({
       || error instanceof MailConfigurationError
       || error instanceof MailConfigurationHttpError
       || error instanceof MailDkimConfigurationError
+      || error instanceof MailDkimDnsError
+      || error instanceof MailDkimDnsHttpError
       || error instanceof MailDkimHttpError
       || error instanceof MailDkimRegistryError
       || error instanceof MailDkimRetirementRegistryError
