@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   previewManagedMailConfiguration,
-  previewManagedMailForwardingConfiguration,
+  previewManagedMailSecurityConfiguration,
 } from '@yunpanel/config-templates';
 import {
   createMailReadinessInspector,
@@ -12,16 +12,17 @@ import {
 const ARGON2ID_HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 5).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 6).toString('base64').replace(/=+$/, '')}`;
 
 function preview() {
-  return previewManagedMailConfiguration({
+  return previewManagedMailSecurityConfiguration({
     domains: ['example.com'],
     mailboxes: ['owner@example.com'],
     accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
     postmasterAddress: 'owner@example.com',
+    forwardings: [],
   });
 }
 
 function forwardingPreview() {
-  return previewManagedMailForwardingConfiguration({
+  return previewManagedMailSecurityConfiguration({
     domains: ['example.com'],
     mailboxes: ['owner@example.com'],
     accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
@@ -56,8 +57,6 @@ function healthyOutputs(overrides = {}) {
     [command('/usr/sbin/postconf', ['-h', 'myhostname'])]: 'mail.example.net\n',
     [command('/usr/sbin/postconf', ['-h', 'mydomain'])]: 'example.net\n',
     [command('/usr/sbin/postconf', ['-h', 'mydestination'])]: '$myhostname, localhost.$mydomain, localhost\n',
-    [command('/usr/sbin/postconf', ['-h', 'smtpd_relay_restrictions'])]: 'permit_mynetworks, permit_sasl_authenticated, defer_unauth_destination\n',
-    [command('/usr/sbin/postconf', ['-h', 'smtpd_recipient_restrictions'])]: '\n',
     [command('/usr/bin/ss', ['-H', '-ltn', 'sport = :11332'])]: '\n',
     ...overrides,
   }));
@@ -80,14 +79,14 @@ function createInspector({ outputs = healthyOutputs(), serviceOverrides = {}, mi
   });
 }
 
-test('marks managed mail ready only when every host requirement is satisfied', async () => {
+test('marks managed mail ready only when every host and candidate-security requirement is satisfied', async () => {
   const result = await createInspector().inspect(preview());
   assert.equal(result.ready, true);
   assert.deepEqual(result.blockers, []);
   assert.equal(result.requirements.every((entry) => entry.satisfied), true);
   assert.match(result.sha256, /^[a-f0-9]{64}$/);
   assert.equal(JSON.stringify(result).includes('/etc/ssl/private/mail.key'), false);
-  assert.equal(JSON.stringify(result).includes('defer_unauth_destination'), false);
+  assert.equal(JSON.stringify(result).includes('reject_unauth_destination'), false);
 });
 
 test('forwarding readiness requires the fixed executable sievec binary', async () => {
@@ -141,17 +140,36 @@ test('blocks dynamic or unresolved mydestination values instead of guessing', as
   }
 });
 
-test('blocks missing tls material, non-2.3 dovecot and unsafe relay policy', async () => {
+test('blocks missing TLS material, non-2.3 dovecot and forged candidate relay policy', async () => {
   const outputs = healthyOutputs({
     [command('/usr/sbin/dovecot', ['--version'])]: '2.4.0\n',
-    [command('/usr/sbin/postconf', ['-h', 'smtpd_relay_restrictions'])]: 'permit_mynetworks\n',
   });
+  const candidate = preview();
+  const forged = {
+    ...candidate,
+    postfixParameters: candidate.postfixParameters.map((parameter) => parameter.name === 'smtpd_relay_restrictions'
+      ? { ...parameter, value: 'permit_mynetworks' }
+      : parameter),
+  };
   const result = await createInspector({
     outputs,
     missingFiles: ['/etc/ssl/private/mail.key'],
-  }).inspect(preview());
+  }).inspect(forged);
   assert.equal(result.ready, false);
   assert.equal(result.blockers.includes('dovecot_2_3'), true);
+  assert.equal(result.blockers.includes('mail_tls_material'), true);
+  assert.equal(result.blockers.includes('postfix_relay_policy_verified'), true);
+});
+
+test('legacy preview without managed TLS and relay policy is not apply-ready', async () => {
+  const legacy = previewManagedMailConfiguration({
+    domains: ['example.com'],
+    mailboxes: ['owner@example.com'],
+    accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
+    postmasterAddress: 'owner@example.com',
+  });
+  const result = await createInspector().inspect(legacy);
+  assert.equal(result.ready, false);
   assert.equal(result.blockers.includes('mail_tls_material'), true);
   assert.equal(result.blockers.includes('postfix_relay_policy_verified'), true);
 });
