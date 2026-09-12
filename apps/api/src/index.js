@@ -26,6 +26,7 @@ import { createLiveSessionRegistry } from './live-session-registry.js';
 import { createMailAliasRegistry } from './mail-alias-registry.js';
 import { createMailConfigurationService } from './mail-configuration.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
+import { createMailboxQuotaRegistry } from './mailbox-quota-registry.js';
 import { createMailboxRegistry } from './mailbox-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createServerRegistry } from './server-registry.js';
@@ -52,6 +53,7 @@ const dnsHostingStorePath = process.env.YUNPANEL_DNS_HOSTING_STORE ?? path.resol
 const dnsProviderCredentialStorePath = process.env.YUNPANEL_DNS_CREDENTIAL_STORE ?? path.resolve('.data/dns-provider-credential-registry.json');
 const mailDomainStorePath = process.env.YUNPANEL_MAIL_DOMAIN_STORE ?? path.resolve('.data/mail-domain-registry.json');
 const mailboxStorePath = process.env.YUNPANEL_MAILBOX_STORE ?? path.resolve('.data/mailbox-registry.json');
+const mailboxQuotaStorePath = process.env.YUNPANEL_MAILBOX_QUOTA_STORE ?? path.resolve('.data/mailbox-quota-registry.json');
 const mailAliasStorePath = process.env.YUNPANEL_MAIL_ALIAS_STORE ?? path.resolve('.data/mail-alias-registry.json');
 const dockerWorkloadStorePath = process.env.YUNPANEL_DOCKER_WORKLOAD_STORE ?? path.resolve('.data/docker-workload-registry.json');
 const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRONMENT_STORE ?? path.resolve('.data/application-environment-registry.json');
@@ -143,6 +145,11 @@ const mailboxRegistry = createMailboxRegistry({
   getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
 });
 await mailboxRegistry.init();
+const mailboxQuotaRegistry = createMailboxQuotaRegistry({
+  filePath: mailboxQuotaStorePath,
+  getMailbox: (mailboxId) => mailboxRegistry.getMailbox(mailboxId),
+});
+await mailboxQuotaRegistry.init();
 const mailAliasRegistry = createMailAliasRegistry({
   filePath: mailAliasStorePath,
   getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
@@ -153,6 +160,7 @@ const mailConfigurationService = createMailConfigurationService({
   mailDomainRegistry,
   mailboxRegistry,
   mailAliasRegistry,
+  mailboxQuotaRegistry,
 });
 const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   filePath: applicationEnvironmentStorePath,
@@ -205,6 +213,7 @@ const listener = createAuthenticatedApi({
     dnsProviderCredentialRegistry,
     mailDomainRegistry,
     mailboxRegistry,
+    mailboxQuotaRegistry,
     mailAliasRegistry,
     mailConfigurationService,
     dockerWorkloadRegistry,
@@ -276,6 +285,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] DNS credential store=${dnsProviderCredentialStorePath}`);
   console.log(`[yunpanel-api] mail Domain store=${mailDomainStorePath}`);
   console.log(`[yunpanel-api] mailbox store=${mailboxStorePath}`);
+  console.log(`[yunpanel-api] mailbox quota store=${mailboxQuotaStorePath}`);
   console.log(`[yunpanel-api] mail alias store=${mailAliasStorePath}`);
   console.log(`[yunpanel-api] Docker workload store=${dockerWorkloadStorePath}`);
   console.log(`[yunpanel-api] application environment store=${applicationEnvironmentStorePath}`);
