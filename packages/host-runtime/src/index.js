@@ -68,7 +68,6 @@ export {
   createSystemPackageManager,
   systemPackageManager,
   SystemPackageManagerError,
-  systemPackageManagerPolicy,
   systemPackageManagerInternals,
 } from './system-package-manager.js';
 export { createNodeStatusInspector, NodeStatusError, nodeStatusInspector, parseNodeServiceProperties } from './node-status-inspector.js';
