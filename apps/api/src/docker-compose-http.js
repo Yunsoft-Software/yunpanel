@@ -3,6 +3,10 @@ import { DockerComposeProjectRegistryError } from './docker-compose-project-regi
 import { DockerComposeEnvironmentRegistryError } from './docker-compose-environment-registry.js';
 import { DockerComposeOperationsError } from './docker-compose-operations.js';
 import { DockerRegistryCredentialRegistryError } from './docker-registry-credential-registry.js';
+import {
+  diagnoseManagedComposeBinding,
+  ManagedComposeWebsiteDiagnosisError,
+} from './managed-compose-website-diagnosis.js';
 import { JobRegistryError } from './job-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -22,6 +26,7 @@ const KNOWN_ERRORS = Object.freeze([
   DockerComposeEnvironmentRegistryError,
   DockerComposeOperationsError,
   DockerRegistryCredentialRegistryError,
+  ManagedComposeWebsiteDiagnosisError,
   JobRegistryError,
 ]);
 
@@ -55,6 +60,28 @@ function logQuery(query) {
     throw new DockerComposeHttpError('docker_compose_query_invalid', 'Docker Compose log query is invalid');
   }
   return { service: value.service ?? null, tail };
+}
+
+function diagnosisQuery(query) {
+  const value = query ?? {};
+  const keys = Object.keys(value);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || keys.length !== 2 || keys.some((key) => !['service', 'targetPort'].includes(key))
+    || typeof value.service !== 'string' || value.service.length < 1
+    || typeof value.targetPort !== 'string' || !/^[1-9][0-9]{0,4}$/.test(value.targetPort)) {
+    throw new DockerComposeHttpError(
+      'docker_compose_diagnosis_query_invalid',
+      'Docker Compose diagnosis requires service and targetPort',
+    );
+  }
+  const targetPort = Number(value.targetPort);
+  if (!Number.isSafeInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
+    throw new DockerComposeHttpError(
+      'docker_compose_diagnosis_query_invalid',
+      'Docker Compose diagnosis targetPort is invalid',
+    );
+  }
+  return Object.freeze({ serviceName: value.service, targetPort });
 }
 
 function asyncRoute(handler) {
@@ -275,6 +302,23 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: await safeCall(() => dockerComposeObserver.inspect({ projectName: project.projectName })) });
   }));
 
+  app.get('/api/docker/projects/:dockerProjectId/diagnosis', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const query = diagnosisQuery(request.query);
+    const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
+    const diagnosis = await safeCall(() => diagnoseManagedComposeBinding({
+      project,
+      binding: {
+        projectId: project.id,
+        serviceName: query.serviceName,
+        targetPort: query.targetPort,
+        protocol: 'tcp',
+      },
+      serverId: project.serverId,
+      dockerComposeObserver,
+    }));
+    return response.json({ data: diagnosis });
+  }));
+
   app.get('/api/docker/projects/:dockerProjectId/logs', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const query = logQuery(request.query);
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
@@ -332,6 +376,7 @@ export const dockerComposeHttpInternals = Object.freeze({
   exactBody,
   optionalEmptyBody,
   logQuery,
+  diagnosisQuery,
   requireLocalServer,
   requireProject,
 });
