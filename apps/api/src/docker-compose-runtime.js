@@ -31,6 +31,49 @@ function storePaths(env) {
   });
 }
 
+function assertServerRegistry(serverRegistry) {
+  if (!serverRegistry || typeof serverRegistry.getServer !== 'function') {
+    throw new DockerComposeRuntimeError(
+      'docker_compose_runtime_dependencies_invalid',
+      'Docker Compose runtime dependencies are invalid',
+    );
+  }
+}
+
+function assertProjectRegistry(projectRegistry) {
+  if (!projectRegistry || typeof projectRegistry.init !== 'function'
+    || typeof projectRegistry.getProject !== 'function'
+    || typeof projectRegistry.createProject !== 'function'
+    || typeof projectRegistry.updateProject !== 'function'
+    || typeof projectRegistry.listProjects !== 'function'
+    || typeof projectRegistry.materializeProject !== 'function') {
+    throw new DockerComposeRuntimeError(
+      'docker_compose_project_registry_invalid',
+      'Docker Compose project registry dependency is invalid',
+    );
+  }
+}
+
+export function createDockerComposeProjectRegistryBootstrap({
+  env = process.env,
+  serverRegistry,
+} = {}) {
+  if (!env || typeof env !== 'object' || Array.isArray(env)) {
+    throw new DockerComposeRuntimeError(
+      'docker_compose_runtime_dependencies_invalid',
+      'Docker Compose runtime dependencies are invalid',
+    );
+  }
+  assertServerRegistry(serverRegistry);
+  const paths = storePaths(env);
+  const projectRegistry = createDockerComposeProjectRegistry({
+    filePath: paths.projects,
+    masterKey: env.YUNPANEL_SECRET_MASTER_KEY,
+    serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
+  });
+  return Object.freeze({ paths, projectRegistry });
+}
+
 function extendLocalOperations(baseOperations, localOperation) {
   if (!baseOperations || !Array.isArray(baseOperations.operations)
     || typeof baseOperations.supports !== 'function' || typeof baseOperations.executeOperation !== 'function'
@@ -57,6 +100,7 @@ export async function createDockerComposeRuntime({
   env = process.env,
   serverRegistry,
   jobRegistry,
+  projectRegistry: providedProjectRegistry = null,
   validateDockerCompose = createDockerComposeValidator(),
   observer = createDockerComposeObserver(),
   receiptStore = createDockerComposeOperationReceiptStore(),
@@ -77,11 +121,12 @@ export async function createDockerComposeRuntime({
   }
 
   const paths = storePaths(env);
-  const projectRegistry = createDockerComposeProjectRegistry({
-    filePath: paths.projects,
-    masterKey: env.YUNPANEL_SECRET_MASTER_KEY,
-    serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
-  });
+  let projectRegistry = providedProjectRegistry;
+  if (projectRegistry === null) {
+    ({ projectRegistry } = createDockerComposeProjectRegistryBootstrap({ env, serverRegistry }));
+  } else {
+    assertProjectRegistry(projectRegistry);
+  }
   await projectRegistry.init();
 
   const projectExists = async (projectId) => Boolean(await projectRegistry.getProject(projectId));
