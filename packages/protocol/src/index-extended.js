@@ -97,10 +97,13 @@ function validateMailDataIdentity(payload, operation, errors) {
   }
   const normalized = payload.scope === 'mailbox' ? canonicalMailbox(payload.identity) : canonicalDomain(payload.identity);
   if (!normalized || normalized !== payload.identity) errors.push(`${operation} identity is invalid`);
+  if (!Number.isSafeInteger(payload.expectedResourceRevision) || payload.expectedResourceRevision < 1) {
+    errors.push(`${operation} expectedResourceRevision is invalid`);
+  }
 }
 
 function validateMailDataBackup(payload, errors) {
-  const allowed = new Set(['mailDomainId', 'scope', 'identity', 'expectedSnapshotSha256']);
+  const allowed = new Set(['mailDomainId', 'scope', 'identity', 'expectedResourceRevision', 'expectedSnapshotSha256']);
   if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
     errors.push(`${MAIL_DATA_BACKUP} contains unsupported arguments`);
   }
@@ -111,7 +114,7 @@ function validateMailDataBackup(payload, errors) {
 }
 
 function validateMailDataRestore(payload, errors) {
-  const allowed = new Set(['mailDomainId', 'backupId', 'scope', 'identity', 'expectedTargetSnapshotSha256']);
+  const allowed = new Set(['mailDomainId', 'backupId', 'scope', 'identity', 'expectedResourceRevision', 'expectedTargetSnapshotSha256']);
   if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
     errors.push(`${MAIL_DATA_RESTORE} contains unsupported arguments`);
   }
