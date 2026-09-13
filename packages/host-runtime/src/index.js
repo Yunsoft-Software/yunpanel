@@ -46,6 +46,11 @@ export {
   mailDataInspectorInternals,
 } from './mail-data-inspector.js';
 export {
+  createMailDataBackupManager,
+  MailDataBackupError,
+  mailDataBackupInternals,
+} from './mail-data-backup-manager.js';
+export {
   createMailDiagnosticsInspector,
   MailDiagnosticsInspectorError,
   mailDiagnosticsInspectorInternals,
@@ -154,6 +159,7 @@ export { copyStaticArtifact } from './static-artifact-worker.js';
 export {
   createStaticDeploymentManager,
   StaticDeploymentError,
+  staticDeploymentInternals,
   staticDeploymentManager,
 } from './static-deployment-manager.js';
 export {
