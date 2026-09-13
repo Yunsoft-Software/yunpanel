@@ -1,208 +1,84 @@
-# YunPanel — Uygulama Durumu ve Kalan Geliştirme Planı
+# YunPanel — Kalan Geliştirme Planı
 
-Bu dosya 2026-09-13 tarihli Owner talimatıyla hem kaynakta hazır olan işleri hem de kalan geliştirmeyi birlikte gösterir. Bağlayıcı mimari ve güvenlik kuralları `agents.md`; bu ortam dışında yapılacak gerçek Ubuntu, HTTPS/browser, DNS/provider, package ve rollback kabulleri `todo.md` içindedir.
+Bu dosya yalnız **kaynakta henüz tamamlanmamış geliştirme işlerini** tutar. Yapılmış işler burada tekrar listelenmez.
 
-## Durum işaretleri
+Bağlayıcı mimari ve güvenlik kuralları `agents.md` içindedir. Bu ortamda güvenilir biçimde yapılamayan gerçek Ubuntu, browser, package, DNS/provider, servis ve rollback kabulleri `todo.md` içinde tutulur. Geliştirme güncel `main` üzerinde küçük, tek amaçlı commitlerle ilerler; GitHub Actions kullanılmaz. Enterprise UI/UX polish backend functionality tamamlanana kadar ertelenmiştir.
 
-- `[x] Kaynakta hazır`: production kodu ve ilgili otomatik/source testleri repoda mevcut. Satırda ayrıca canlı kabul yazmıyorsa gerçek host/provider/browser kabulünün tamamlandığı anlamına gelmez.
-- `[ ] Kalan`: kod, entegrasyon veya açıkça belirtilen kabul kanıtı eksik.
-- `todo.md` kapıları tamamlanmadan ürünün bütünü için “production-ready” denmez.
+## 1. Docker / Compose — mevcut ana öncelik
 
-Geliştirme doğrudan güncel `main` üzerinde küçük, tek amaçlı commitlerle yürür. GitHub Actions kullanılmaz. Görsel UI/UX polish işi backend functionality tamamlanana kadar ertelenmiştir.
+Compose desired-state, encrypted project/env/registry credential modeli, validation, build/pull/start/stop/restart durable job lifecycle, resource lock, receipt tabanlı lost-ack recovery, durable deploy history ve bounded/redacted project runtime health/log backend'i kaynakta hazırdır; aşağıdaki işler kalmıştır.
 
-## A. Authentication, kullanıcı, yetki ve audit
+- [ ] Managed Compose projesini mevcut `external/unverified dockerWorkloadId` modeline zorlamadan ayrı ve explicit bir Website binding modeliyle ilişkilendir.
+- [ ] Website registry migrationını managed Compose binding için versioned ve restart-safe yap; same-server, unique binding ve stale reference kontrollerini fail-closed uygula.
+- [ ] Managed Compose Website için explicit Nginx target üret: yalnız doğrulanmış loopback/published port seçimine izin ver; otomatik container/port tahmini yapma.
+- [ ] Compose runtime health, container absence/unhealthy/restart/exit ve Nginx target readiness sonuçlarından secret-free actionable diagnosis üret.
+- [ ] Managed Compose binding değişikliği için preview/digest/typed-confirmation ve impact modelini Website/Domain resource graph'ına bağla.
+- [ ] Volume/bind inventory modelini ekle; named volume, bind mount ve ephemeral storage ayrımını public metadata'da açık göster.
+- [ ] Docker volume/bind için backup/restore politikasını genel backup manifestine bağlanabilecek şekilde tasarla; arbitrary host path backup'ını varsayılan olarak reddet.
+- [ ] Docker/Compose backend yüzeyini gerçek panel arayüzüne bağla: project create/edit, env, registry credential metadata, validate, lifecycle preview/apply, history, runtime health ve log görünümü.
 
-- [x] İlk Owner için süreli/tek kullanımlık setup, Argon2id parola, server-side session, güvenli cookie, CSRF, login rate-limit ve trusted-proxy sözleşmesi hazır.
-- [x] TOTP, recovery code, MFA policy, parola değiştirme ve bütün oturumları iptal etme akışları hazır.
-- [x] Owner kullanıcı yönetimi, son aktif Owner koruması ve backend'de uygulanan Read Only yetki sınırı hazır.
-- [x] Ortak audit deposu actor/action/resource/outcome/zaman metadata'sını secret, request body ve ham terminal çıktısı olmadan kaydediyor.
-- [x] Owner Denetim ekranında actor, resource, action, outcome ve zaman filtreleri ile cursor sayfalama hazır; backend Owner-only çalışıyor.
-- [ ] Gerçek HTTPS browserda setup/login/TOTP/recovery/password/session/logout, iki sekme yarışları, idle/absolute timeout ve bütün revoke yollarını tamamla.
-- [ ] Read Only hesabının mutation, job, user, audit ve hassas nested endpointlerdeki gerçek listener 403 matrisini tamamla.
-- [ ] Trusted-proxy spoof/rate-limit, audit DB/WAL izinleri, upgrade/restore sürekliliği ve secret absence kabulünü tamamla.
+Gerçek Docker Engine/Compose host kabulü, crash/lost-ack provası ve secret/permission kontrolleri `todo.md` içinde kalır.
 
-Gerçek ortam kabul ayrıntıları: `todo.md` içindeki `T-AUTH-AUDIT`.
+## 2. Website / Domain / Nginx kalanları
 
-## B. Tek sunucu ve agentsiz yerel backend
+- [ ] Canlı state'teki Website'e bağlı olmayan external-proxy Domain kayıtlarını explicit create/bind migrationıyla eşleştir; otomatik tahmin yapma.
+- [ ] Backup ve cron association registry'leri geldikten sonra Website/Domain impact preview'a gerçek dependency provider olarak bağla; gelene kadar blocker `unavailable` kalmalı.
+- [ ] Managed Compose Website binding tamamlandığında Domain/Nginx lifecycle'ına explicit target kaynağı olarak ekle.
 
-- [x] Production yalnız exact `YUNPANEL_LOCAL_SERVER_ID` ile OS hostname'i eşleşen tek yerel sunucuyu açıyor; uzak/eski server seçimi ve mutation'ı kapalı.
-- [x] Retained agent heartbeat/command/environment/result transportu production yerel panelinde `404 agent_transport_removed` döndürüyor.
-- [x] Root yetkili `yunpanel-api` içindeki local executor; host inventory, allowlist'li systemd servisleri, Docker ve Nginx snapshot'larını aynı yerel server kaydına bağlıyor.
-- [x] Kalıcı job kuyruğu, resource lock, private recovery intent/receipt ve operasyona özel reconciliation altyapısı hazır.
-- [x] Agentless migration için backup/verify/preview/stage, local identity create/bind/release/validate ve deterministic rollback temelleri hazır.
-- [x] `.44` ile biten Plesk sunucusunun hiçbir geliştirme/test/deploy işleminde kullanılmaması bağlayıcı repo kuralı.
-- [ ] Live-apply katmanına per-target replace, UID/GID drift çözümü, owner/mode/ACL/xattr politikası, pre-apply backup, health gate ve deterministic rollback ekle.
-- [ ] İzole gerçek Ubuntu hostta migration + rollback kabulünü tamamla.
-- [ ] Kabulden sonra retained agent transport/storage kodunu, enrollment credential yüzeyini, `yun-agent.service` ve package/env/install compatibility parçalarını fiziksel olarak kaldır.
-- [ ] Disk-full, read-only filesystem ve lost-acknowledgement durumlarında ambiguous mutation'ın kör retry edilmediğini gerçek hostta doğrula.
+Gerçek DNS/Nginx/HTTPS, IDN, certificate ve provider acceptance işleri `todo.md` içindedir.
+
+## 3. Agentless migration ve legacy agent temizliği
+
+- [ ] Migration live-apply katmanına per-target replace, UID/GID drift çözümü, owner/mode/ACL/xattr policy, pre-apply backup, health gate ve deterministic rollback ekle.
+- [ ] İzole migration/rollback kabul kapısı tamamlandıktan sonra retained heartbeat/command/environment/result transportunu, enrollment credential yüzeyini, agent storage kodunu, `yun-agent.service` ve package compatibility parçalarını fiziksel olarak kaldır.
 - [ ] Yeni Git hook, cron, build ve runtime yüzeylerinde `yunapp-*` workload isolation invariantını koru; yalnız Owner Sunucu terminali root kalmalı.
 
-Gerçek ortam kabul ayrıntıları: `T-AGENTLESS` ve `T-MIGRATION`.
+## 4. Genel backup / restore ürünü
 
-## C. Website, Domain, Nginx, SSL ve DNS
-
-- [x] Kalıcı Website kimliği; Domain `websiteId` ilişkisi; Website/Application foreign-key startup doğrulaması ve IDN→punycode canonicalization hazır.
-- [x] Apex, bağımsız subdomain ve alias için explicit parent/target modeli; duplicate/cycle/cross-server/dot-boundary kontrolleri ve reparent preview/apply hazır.
-- [x] Compatibility→enforced Website migration preview/digest/create/bind/finalize/rollback ledger'ı kalıcı ve tekrar çalıştırılabilir.
-- [x] Guarded site-create; existing/new static/Node, external proxy ve external/unverified Docker workload hedeflerini, managed portu ve explicit `www` alias/child seçimini kapsıyor.
-- [x] Website/Domain move-delete impact preview; child/linked Domain, Application, Docker workload, DNS zone, mail domain/mailbox, certificate ve aktif job bağımlılıklarını listeliyor.
-- [x] Revisioned Nginx routing/settings preview→stage→activate→rollback; static SPA/cache/header ve proxy timeout/upload/WebSocket/header ayarları hazır.
-- [x] ACME issue/renew, custom certificate import/select ve Cloudflare DNS-01 credential temelleri hazır.
-- [x] DNS zone lifecycle, readiness kontrolü ve Cloudflare A/AAAA/CNAME/TXT preview/apply/recovery altyapısı hazır; TXT kayıtları bounded, unproxied ve aynı provider snapshot/idempotency/recovery sözleşmesini kullanıyor.
-- [ ] Canlı state'teki Website'e bağlı olmayan external-proxy Domain kayıtlarını açık create/bind migration'ıyla eşleştir; otomatik tahmin yapma.
-- [ ] Backup ve cron association registry'leri geldiğinde impact preview'a gerçek bağımlılık sağlayıcılarını bağla; o zamana kadar blocker “unavailable” kalmalı.
-- [ ] Gerçek DNS/Nginx/HTTPS üzerinde redirect, SPA, WebSocket, header, IDN, certificate issue/renew/import/select ve rollback hata matrisini tamamla.
-- [ ] Cloudflare DNS-01 ile DNS record mutation/readiness zincirini least-privilege token ve gerçek resolver ile tamamla.
-- [ ] Website migration, policy finalize/rollback ve site-create akışını gerçek test domainiyle uçtan uca doğrula.
-
-Gerçek ortam kabul ayrıntıları: `T-WEBSITE` ve `T-FEATURE-ACCEPTANCE`.
-
-## D. Static, Node.js, Git, env, dosya ve log
-
-- [x] Static/Node deploy, active release, health, restart, rollback ve kesinti sonrası recovery hazır.
-- [x] Node runtime/startup/package-manager/mode/document-root revisioned preview/apply; enable/disable/start/stop ve active-runtime ayrımı hazır.
-- [x] Node 22/24 managed runtime inventory/install; checksum doğrulama, atomik kurulum ve seçilen runtime'ın build/systemd PATH'ine taşınması hazır.
-- [x] Explicit branch/tag/full SHA Git deploy ve çözülen commit'in release geçmişine yazılması hazır.
-- [x] Şifreli GitHub token/SSH deploy key kasası, strict known-host ve sadece fetch sırasında materialization hazır.
-- [x] Signed GitHub webhook; raw-body HMAC, repo/branch/SHA kontrolü, delivery idempotency ve aynı Application resource lock ile hazır.
-- [x] Şifreli Application env merge/replace, optimistic revision ve `saved_on_disk`/`applied_to_running_process` ayrımı hazır.
-- [x] Owner-only bounded/redacted Node journal, Nginx ve deploy log API/UI yüzeyi hazır.
-- [x] Website/site-user sınırında list/create/edit/rename/delete/download sunan dosya API ve arayüzü hazır.
-- [ ] Gerçek private GitHub repo için token ve SSH key deploy; webhook erişim/imza/replay/lock kabulünü tamamla.
-- [ ] Packaged API/UI üzerinde env import/apply, stale revision, secret leakage ve restart/deploy davranışını tamamla.
-- [ ] Gerçek rotation dosyalarıyla log cursor/redaction/retention/permission testlerini tamamla.
-- [ ] Gerçek `yunapp-*` kullanıcılarıyla traversal, ara/final symlink, siteler arası kaçış, atomik yazma ve limit matrisini tamamla.
-- [ ] Panel update/disk-full/recovery sırasında aktif static ve Node sitelerin kesintisiz kaldığını doğrula.
-
-Gerçek ortam kabul ayrıntıları: `T-SERVICES-DB`, `T-PACKAGE-LIVE` ve `T-FEATURE-ACCEPTANCE`.
-
-## E. Terminal
-
-- [x] Gerçek PTY + xterm.js, Owner root Sunucu terminali ve `yunapp-*` site terminali hazır.
-- [x] Session-bound capability; cookie/MFA/role/Origin kontrolü, replay koruması ve URL token yasağı hazır.
-- [x] Resize, Unicode, kontrol karakterleri, eşzamanlı oturum sınırı, idle/output/backpressure limitleri ve process-group cleanup hazır.
-- [x] Logout, session revoke, parola/MFA/rol/kullanıcı değişiminde açık terminal yetkisini kaldıran altyapı hazır.
-- [x] Audit yalnız terminal açılış/kapanış metadata'sını tutuyor; keystroke, output ve history kaydedilmiyor.
-- [ ] Chromium ve Firefox'ta root/site user/cwd, Ctrl+C/Ctrl+D, `vim`/`top`, resize, Unicode/IME ve beş paralel oturumu headed olarak doğrula.
-- [ ] Logout/logout-all/session delete/expiry ve kullanıcı güvenlik değişikliklerinin açık WebSocket/process group'u anında kapattığını gerçek browserda doğrula.
-
-Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
-
-## F. Veritabanı
-
-- [x] MariaDB↔MySQL conflict fail-closed detection, engine/version ve non-system database inventory hazır.
-- [x] Unix socket root auth ile database create/delete kalıcı job'ları, recovery ve system-name/injection kontrolleri hazır.
-- [x] Temel veritabanı listeleme/oluşturma/silme arayüzü gerçek API'ye bağlı.
-- [x] Database ownership kaynak lifecycle'ı hazır: schema kalıcı olarak same-server Website/Application ve deterministik `yunapp-*` site kullanıcısına explicit binding ile bağlanıyor; stale/cross-server/proxy-Docker drift fail-closed, bağlı schema DROP öncesi explicit unbind zorunlu ve binding state restart/upgrade için kalıcı store'da tutuluyor.
-- [x] DB user/grant/credential kaynak lifecycle'ı hazır: binding başına deterministik `ydb_*@localhost`, allowlist'li minimum-privilege grant seti, AES-256-GCM encrypted parola store'u, grant/parola rotation desired-state'i, secret-free durable `database.credential.apply/delete`, host ownership marker + conflict detection, pre-mutation user/grant snapshot rollback, receipt + live marker/grant evidence tabanlı `recover-database-credential`, packaged CLI/parity ve guarded finalize/unbind akışları production wiring'e bağlı.
-- [x] Private database backup kaynak lifecycle'ı hazır: canonical socket-only dump, private `0700/0600` artifact+manifest, SHA-256/size/permission verification, secret/path/SQL taşımayan exact terminal result, durable `database.backup`, Owner typed-confirmation API, job-id backup kimliği ve verified private manifest tabanlı `recover-database-backup` runtime/CLI/parity zinciri kaynakta bağlı.
-- [x] Database restore kaynak lifecycle'ı hazır: same-server succeeded backup + private manifest SHA ile pinned preview/apply, yalnız `databaseName + backupId + expectedBackupSha256` taşıyan durable `database.restore`, exact Owner HTTP contract, canonical re-dump verification, `pre-restore:<jobId>` backup + deterministic verified rollback, private `0700/0600` receipt, receipt+selected/pre-restore backup+live digest tabanlı mutation-free lost-ack recovery/runtime/CLI/parity ve bounded `db.restore.*`/`progress=N` job-log checkpoint'leri production wiring'e bağlı.
-- [ ] Gerçek MySQL/MariaDB hostta inspect→create→inspect→drop→inspect, binding/credential apply-rotate-delete, private backup→verify→restore/rollback ve secret-free receipt/recovery kabulünü tamamla.
-
-## G. Mail ve Roundcube
-
-- [x] Web Domain'den ayrı mail-domain kimliği; `external/unverified` ve yan etkisiz `local/disabled` başlangıç durumları hazır.
-- [x] Şifreli mailbox registry; create/list/detail, parola rotation, enable/disable ve confirmed delete kaynak akışları hazır.
-- [x] Postfix managed recipient/map, Dovecot passwd/config ve Rspamd loopback Milter config preview üreticileri hazır.
-- [x] Aggregate mail config preview digest/order/readiness blocker sözleşmesi hazır; protected hash/config içeriği public çıktıya girmiyor.
-- [x] Secret-free managed mail apply plan; sabit `postmap`/`postconf`/validator/reload/health sırası ve komut allowlist kontrolleri hazır.
-- [x] Protected Dovecot materyalini public plana taşımadan private `0700` staging, digest/mode/symlink doğrulaması ve transaction-scoped pre-apply backup hazır; rollback için `/etc/postfix/main.cf` snapshot'ı zorunlu.
-- [x] Staged bundle live hedeflere atomik replace ediliyor; `postmap`/`postconf` sonrası Postfix, Dovecot ve Rspamd config test→reload→health zinciri ile failure halinde exact pre-apply dosya/compiled-map/`main.cf` restore + reverse reload/health doğrulaması hazır.
-- [x] Owner config-preview/config-apply exact revision+digest+typed confirmation ile secret-free `mail.config.apply` job'u oluşturuyor; private materialization, receipt, reconciliation ve receipt+current desired state+live host evidence tabanlı `recover-mail-config` akışı production wiring'e bağlı.
-- [x] Mail servis health/inspect ve Roundcube package detection/install temeli hazır; kurulum sonucu dürüstçe `installed`, `active=false` kalıyor.
-- [x] Son enabled local mail-domain için empty managed-set teardown/apply hazır; managed Postfix mapleri boşaltılıyor, protected Dovecot passwd boş ve `0600` stage ediliyor, managed LMTP listener/postmaster stanza kaldırılıyor ve aynı backup→validate→reload→health→rollback/recovery zinciri korunuyor.
-- [x] Kalıcı mail alias registry ve API hazır; canonical source/destination, local-domain scope, duplicate/self/transitive-cycle, mailbox-source conflict, optimistic revision/confirmed delete ve Read Only GET-only sınırı uygulanıyor. Enabled alias seti managed config digestine ve crash-recovery desired-state materialization'ına bağlı.
-- [x] Mailbox quota policy/usage backend'i hazır; revisioned quota store, Dovecot passwd-file userdb `userdb_quota_rule`, quota/imap_quota plugin configi, enabled→enabled config reapply, crash-recovery desired-state bağı, Owner quota CRUD ve bounded `doveadm quota get` usage API'si kaynakta bağlı. Policy mutation tek başına host-side-effect başarı sonucu üretmiyor ve explicit config apply gerektiriyor.
-- [x] Mailbox forwarding backend lifecycle kaynakta hazır; per-mailbox copy/redirect policy store/API, canonical/self/cycle kontrolleri, desired-state digest ve crash-recovery bağı, global Dovecot `sieve_before`, exact allowlisted `sievec`, Sieve source+`.svbin` backup/rollback/live-evidence zinciri, `root:vmail 0640` ownership ve Sieve readiness gate'i hazır. Forwarding mutation tek başına host-side-effect sonucu üretmiyor, explicit config apply gerektiriyor ve quota/forwarding policy varken mailbox delete fail-closed kalıyor.
-- [x] Side-effect-free MX/SPF/DKIM/DMARC/PTR diagnostics backend'i hazır; local-server scoped GET endpointi gerçek `postconf myhostname` ile MX/PTR hedefini ve bounded public DNS gözlemlerini raporluyor, SPF/DMARC missing/multiple ayrımını yapıyor; DKIM key yokken açık `not_configured`, key üretildikten sonra selector TXT için exact expected/current/mismatch sonucu veriyor.
-- [x] İlk-generation DKIM signing backend'i kaynakta hazır: RSA-2048 selector/key generation, atomik `0700/0600` private control-plane state, secret-free public DNS TXT metadata, bütün enabled DKIM domainleri için exact DNS readiness gate, aggregate Rspamd outbound signing preview/apply, live keylerde runtime `_rspamd` group doğrulaması ve `root:_rspamd 0640`, pre-apply backup→configtest→reload→health→deterministic rollback, secret-free durable `mail.dkim.apply`, receipt+current private desired-state+live host evidence tabanlı `recover-mail-dkim` ve disabled-domain/zero-key signing teardown akışları production wiring'e bağlı.
-- [x] DKIM key rotation/delete lifecycle kaynakta hazır: rotation optimistic revision + zorunlu yeni selector ile fresh RSA key üretip private state'i pending/previous directory swap ile crash-safe değiştiriyor; managed-mail job conflict rotation/delete'i engelliyor. Delete yalnız local mail-domain disabled, signing teardown sonrası live key/config retirement evidence + exact revision/typed confirmation ile private control-plane key state'ini fiziksel kaldırıyor. Live managed key root stale-key prune/backup/rollback/evidence zinciri ayrıca hazır.
-- [x] DKIM DNS-provider lifecycle kaynakta hazır: önceki selector/TXT retirement metadata'sı restart-safe kalıcı state'te tutuluyor; bounded generic TXT desteği aynı Cloudflare snapshot/digest/idempotency/recovery motoruna eklendi. Current TXT publish/update ve eski selector TXT delete `dns.record.apply` durable job'unu reuse ediyor; selector adında farklı provider TXT varsa fail-closed kalıyor, provider absence sonrası explicit veya sonraki lifecycle auto-reconcile retirement state'ini temizliyor ve ikinci rotation pending retirement bitmeden açılmıyor.
-- [x] SMTP/IMAP security ve bounded queue/log backend'i kaynakta hazır: Dovecot client bağlantıları `ssl=required` ve minimum TLS 1.2 policy'sine, Postfix inbound/outbound opportunistic TLS + minimum TLS 1.2 policy'sine bağlandı; `mynetworks` yalnız loopback, SMTP SASL kapalı ve relay policy `permit_mynetworks, reject_unauth_destination` olarak desired-state digest/apply/live-evidence zincirine girdi. Gerçek cert/key material readiness gate'i korunuyor. Mevcut bounded/redacted Postfix/Dovecot/Rspamd journal log rotaları reuse ediliyor ve Owner-only local `postqueue -j` queue görünümü raw body vermeden bounded metadata sunuyor.
-- [x] Authenticated SMTP submission backend'i kaynakta hazır: dedicated Postfix `submission/inet` 587 service'i yalnız TLS altında Dovecot SASL `PLAIN/LOGIN` kullanıyor; global port 25 SASL kapalı kalıyor. Canonical sender-login map authenticated mailbox'ı aynı envelope sender'a bağlıyor ve `reject_sender_login_mismatch` spoofing'i fail-closed tutuyor. Sender-login source/`.db`, `/etc/postfix/main.cf` ve `/etc/postfix/master.cf` aynı transaction backup/rollback zincirinde; `postconf -M/-P` yalnız sabit allowlist ile çalışıyor. Dovecot auth socket'i `/var/spool/postfix/private/auth` için runtime Postfix UID/GID + Unix socket + `0660` live evidence zorunlu ve lost-ack recovery exact master service/override/socket kanıtı olmadan job'ı başarılı saymıyor.
-- [x] Roundcube control-plane ve host lifecycle kaynakta hazır: private `des_key` registry/materialization, deterministic config/PHP-FPM/Nginx preview, secret-free durable `roundcube.config.apply`, private staging, SQLite bootstrap/integrity, PHP/FPM/Nginx validate+reload, dedicated FPM socket, loopback SNI/TLS HTTPS web health, config/FPM/Nginx/DB pre-apply backup + deterministic rollback, versioned secret-free receipt ve current protected desired-state + live web evidence tabanlı `recover-roundcube-config` production/package wiring'e bağlı.
-- [x] Forwarding dış teslimi için SRS lifecycle kaynakta hazır: encrypted PostSRSd secret prepare/rotate, external forwarding varken SRS readiness blocker'ı, Ubuntu 24.04 PostSRSd 1.x loopback `10001/10002` sender/recipient canonical-map policy'si, protected secret/default staging, apply/teardown, backup/rollback, service/socket/live-map evidence ve lost-ack `recover-mail-config` bağı hazır. Diagnostics SRS eksikken `action_required`, hazırken yalnız `srs_ready` raporluyor ve `deliveryAssurance=not_guaranteed` ile SPF/DMARC teslim garantisi üretmiyor.
-- [x] Mailbox/domain delete-impact ve mail-data lifecycle kaynakta hazır: canonical Maildir inspect, private tree-digest backup, atomic restore + pre-restore backup/rollback, verified-backup zorunlu atomic tombstone delete, secret-free durable `mail.data.backup/restore/delete`, receipt ve `recover-mail-data` lost-ack recovery, exact resource UUID/revision/snapshot pinning ve terminal delete job + fresh impact + data-absence kanıtı olmadan control-plane mailbox/mail-domain kaydını silmeyen guarded finalize akışı production API'ye bağlı.
-
-Üst seviye Mail modülünün kaynak lifecycle'ı tamamlandı; gerçek TLS/open-relay/submission/queue/DKIM/SRS/Roundcube/mail-data servis ve provider kabulleri `todo.md` tamamlanmadan modül production-ready sayılmaz.
-
-## H. Docker ve Compose
-
-- [x] Private external/unverified Docker workload registry, same-server loopback endpoint doğrulaması, unique Website binding ve impact envanteri hazır.
-- [x] Mevcut sonuçlar container lifecycle yapılmış gibi gösterilmiyor; workload yalnız açıkça `external/unverified` izleniyor.
-- [ ] Compose parse/validation ve revisioned project/env/registry credential modeli ekle.
-- [ ] Build/pull/start/stop/restart kalıcı job'ları, resource lock, recovery ve deploy history ekle.
-- [ ] Container log/health, Website/Nginx target ve actionable diagnosis ekle.
-- [ ] Volume/bind inventory ile backup/restore policy ekle.
-- [ ] Gerçek Docker Engine/Compose hostunda bütün lifecycle ve rollback akışını doğrula.
-
-Üst seviye Docker rotası lifecycle hazır olana kadar dürüst placeholder durumundadır.
-
-## I. Genel backup ve restore
-
-- [x] Agentless migration snapshot/verify/stage/rollback mekanizması hazır; bu mekanizma genel ürün backup'ı olarak gösterilmiyor.
-- [ ] Application release/config/env, database, Docker volume ve mail verisini kapsayan backup manifesti ekle.
+- [ ] Application release/config/env, database, managed Docker volume/bind ve mail verisini kapsayan versioned backup manifesti ekle.
 - [ ] Local ve S3-compatible target, şifreleme, checksum, retention ve credential lifecycle ekle.
 - [ ] Restore preview, veri kaybı etkisi, progress, pre-restore backup, health gate ve deterministic failure rollback ekle.
-- [ ] Disk-full, bozuk archive/checksum, kesinti ve kısmi restore recovery testlerini ekle.
-- [ ] Gerçek büyük veri ve object-storage fixture'ıyla backup→verify→restore kabulünü tamamla.
+- [ ] Disk-full, bozuk archive/checksum, kesinti ve kısmi restore için mutation-safe recovery modelini ekle.
+- [ ] Backup/restore kaynaklarını Website/Application/Database/Docker/Mail impact graph'ına bağla.
 
-Üst seviye Backup rotası ürün backup'ı hazır olana kadar dürüst placeholder durumundadır.
-
-## J. Cron
+## 5. Cron
 
 - [ ] Website/Application'a bağlı site-user cron registry ve CRUD ekle.
-- [ ] Schedule, timezone, cwd, bounded env, enable/disable, last/next run ve bounded output ekle.
+- [ ] Schedule, timezone, cwd, bounded env, enable/disable, last/next run ve bounded/redacted output ekle.
 - [ ] Cron command'ını shell-string birleştirmeden doğrulanmış execution contract'ına bağla.
 - [ ] System cron'u yalnız explicit Owner/Sunucu bağlamında ayrı kaynak türü olarak uygula.
-- [ ] Site isolation, eşzamanlılık, restart ve gerçek cron daemon kabulünü tamamla.
+- [ ] Cron association'larını Website/Application impact preview ve backup manifestine bağla.
 
-## K. Job detayları, metrik ve bildirimler
+## 6. Job detail, metrik ve bildirimler
 
-- [x] Kalıcı job queue; queued/running/succeeded/failed/cancelled durumları, temel list/detail/cancel ve resource lock hazır.
-- [x] Secret-free public job sonucu ile private recovery intent/receipt ayrımı hazır.
-- [ ] Job detail'e stage/progress, resource link, safe error/log metadata, arama/filtre ve güvenli retry ekle.
-- [ ] CPU/RAM/load/disk/inode/service/Application metric history ve retention ekle.
-- [ ] Disk/inode threshold, service/app, deploy, backup ve SSL event modelini ekle.
+- [ ] Job detail'e stage/progress, resource link, safe error/log metadata, arama/filtre ve operasyon bazlı güvenli retry policy ekle.
+- [ ] Retry yalnız operation-specific idempotency/recovery kanıtı bulunan işler için açılsın; ambiguous mutation için generic retry/force-success yolu ekleme.
+- [ ] CPU/RAM/load/disk/inode/service/Application/Docker metric history ve retention ekle.
+- [ ] Disk/inode threshold, service/app/container, deploy, backup ve SSL event modelini ekle.
 - [ ] Panel içi bildirim merkezi ve seçilecek dış kanallar için secret-safe delivery/retry ekle.
 
-## L. Plesk read-only importer
+## 7. Plesk read-only importer
 
-- [ ] Plesk state'ini değiştirmeyen, bounded ve secret-safe discovery/import preview ekle.
+- [ ] Plesk state'ini değiştirmeyen bounded ve secret-safe discovery/import preview ekle.
 - [ ] Passenger/static/Node, Domain, database, Docker, cron ve mail kaynaklarını external-managed olarak modelle.
 - [ ] Kaynak başına conflict, dependency, explicit confirmation, migration job ve deterministic rollback ekle.
-- [ ] `.44` Plesk sunucusuna hiçbir amaçla bağlanma; geliştirme offline fixture veya `.local/test-server.env` içinde açıkça onaylı, `.44` olmayan test hostuyla yapılmalı.
+- [ ] `.44` ile biten Plesk sunucusuna hiçbir geliştirme/test/deploy işleminde bağlanma; yalnız offline fixture veya açıkça onaylı `.44` olmayan test hostu kullan.
 
-## M. Package, yayın ve canlı kabul
+## 8. UI/UX ve son entegrasyon
 
-- [x] 2026-09-12 doğrulanmış baseline kaynak ağacı Node 24 ile API 1129, web 153, agent 74, config 35, host-runtime 100, protocol 24 ve shared 27 olmak üzere toplam 1542 otomatik testten geçti; lint/build yeşildi.
-- [ ] Bu baseline sonrasındaki managed-mail apply/recovery, empty-set teardown, alias lifecycle/config/recovery, quota enforcement/usage, mailbox forwarding/Sieve, mail diagnostics, DKIM key/signing/apply/recovery/teardown, key rotation/delete/retirement evidence, DKIM provider TXT lifecycle, generic DNS TXT, mail TLS/relay security policy, authenticated SMTP submission/master.cf/Dovecot auth socket lifecycle, bounded Postfix queue, Roundcube control-plane + Nginx/PHP-FPM/SQLite/HTTPS health/rollback/recovery/CLI, SRS/PostSRSd prepare/apply/teardown/recovery/diagnostics, mail-data impact/backup/restore/delete/finalize/`recover-mail-data` ve database ownership/credential/apply-delete recovery/private dump-backup/restore durable HTTP/recovery/progress değişiklikleri için targeted host-runtime + protocol + API testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
-- [x] Linux amd64 `0.3.0-9` paketi üretildi ve yalnız onaylı `.44` olmayan YunPanel test sunucusuna yüklendi; API/web/nginx aktif, eski `yun-agent` inactive/disabled doğrulandı.
-- [x] Canlı Owner API smoke'ta tek yerel server, Website/Application/Domain/certificate/job envanteri; site dosya listesi, Node logu, site terminal capability hedefi ve audit filtre/pagination sözleşmesi doğrulandı.
-- [ ] Matching Ubuntu arm64 hostta native `node-pty` dahil clean install ve doğru mimarili `.deb` üretimini doğrula.
-- [ ] İzole Ubuntu hostta clean install ve eski package upgrade; auth/master key/state/Website/audit/migration şema ve izinlerini doğrula.
-- [ ] `0.3.0-4` ↔ güncel agentless package/state rollback provası yap.
-- [ ] Panel restart/upgrade boyunca hosted static/Node uygulamaların çalışmaya devam ettiğini doğrula.
-- [ ] `todo.md` içindeki kalan bütün P0/P1 yayın kapıları tamamlanmadan genel live/production dağıtımı yapma.
-
-## N. Arayüz durumu ve ertelenen tasarım
-
-- [x] Gerçek URL routing/deep-link; login/setup/MFA; Website list/detail; Application, Domain, Server, Database, Job, Audit ve User yönetim yüzeyleri backend API'lerine bağlı.
-- [x] Site dosya, Node/Nginx log, terminal, env, runtime/process ve ilgili preview/confirmation akışları reusable React JS/JSX bileşenleriyle hazır.
-- [x] Eksik modüller sahte başarı veya inert kontrol yerine açık unavailable/placeholder durumu gösteriyor.
-- [ ] Mail, Docker, Backup, Cron, metric/notification ve Plesk importer backend functionality'si tamamlandıkça gerçek rotalarını bağla.
-- [ ] Backend functionality bittikten sonra enterprise layout/styling, component/data-table polish, responsive ve accessibility çalışmasını ayrı tasarım aşamasında yap.
-- [ ] Son aşamada gerçek Chromium/Firefox headed browser, mobil viewport, klavye ve ekran okuyucu kabulünü tamamla.
+- [ ] Mail, managed Docker/Compose, Backup, Cron, metric/notification ve Plesk importer backend functionality'si tamamlandıkça gerçek UI rotalarını bağla; placeholder/inert kontrol bırakma.
+- [ ] Backend functionality tamamlandıktan sonra enterprise layout/styling, navigation hierarchy, data-table/form polish, responsive ve accessibility aşamasını yap.
+- [ ] Domain/subdomain/Website hiyerarşisini Plesk benzeri yönetim akışında netleştir; Website içine Node/runtime/env/log/file/terminal, mail, SSL ve ilgili kaynak erişimlerini bağla.
 
 ## Uygulama sırası
 
-1. P0 güvenlik, tek-sunucu fail-closed davranışı ve mevcut canlı işlevlerde regresyon bırakma.
-2. Mail lifecycle ve veritabanı ownership/credential/private backup/restore kaynak lifecycle'ları tamamlandı. Gerçek DB kabulü `todo-database.md` içinde açık kalırken sıradaki ana backend işi Docker/Compose lifecycle'dır.
-3. Docker/Compose lifecycle ve Website/Nginx entegrasyonu.
-4. Genel backup/restore ürünü.
-5. Cron, ardından job detail/metrik/bildirim katmanı.
+1. Managed Compose → Website/Nginx explicit binding + diagnosis.
+2. Docker volume/bind inventory ve backup policy.
+3. Genel backup/restore ürünü.
+4. Cron.
+5. Job detail/metrik/bildirim.
 6. Plesk read-only importer.
-7. İzole migration/rollback kabulünden sonra retained agent kodu ve paket yüzeyinin fiziksel temizliği.
-8. Bütün backend functionality tamamlandıktan sonra ertelenen enterprise UI/UX ve headed browser kabulü.
+7. İzole migration/rollback kabulünden sonra legacy agent kod/paket yüzeyinin fiziksel temizliği.
+8. Bütün backend functionality tamamlandıktan sonra enterprise UI/UX polish.
 
-Her adımda ilgili otomatik testler eklenir, aynı turda `plan.md`/`todo.md` gerçek duruma göre daraltılır ve küçük commit doğrudan `main` üzerine gönderilir.
+Her geliştirme diliminde ilgili source testleri aynı değişiklikle eklenir. Bu ortamda yapılamayan gerçek-host/browser/provider/package kabul işleri kod planına geri sokulmaz; `todo.md` içinde tutulur.
