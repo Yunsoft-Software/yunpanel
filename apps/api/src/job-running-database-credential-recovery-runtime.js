@@ -1,11 +1,13 @@
 import os from 'node:os';
 import path from 'node:path';
 import { createDatabaseCredentialEvidenceInspector } from '@yunpanel/host-runtime';
+import { OPERATIONS } from '@yunpanel/protocol';
 import { createApplicationRegistry } from './application-registry.js';
 import { createDatabaseBindingRegistry } from './database-binding-registry.js';
 import { createDatabaseCredentialMaterializer } from './database-credential-materializer.js';
 import { createDatabaseCredentialOperationReceiptStore } from './database-credential-operation-receipt.js';
 import { createDatabaseCredentialRegistry } from './database-credential-registry.js';
+import { createDockerWorkloadRegistry } from './docker-workload-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRecoveryContextReader } from './job-recovery-context.js';
 import {
@@ -30,6 +32,11 @@ function resolveDatabaseCredentialRecoveryPaths({ env, packaged, cwd }) {
     path.join(defaultRoot, 'website-registry.json'),
     { packaged, cwd, label: 'website' },
   );
+  const dockerWorkloadStore = jobRecoveryRuntimeInternals.resolveRecoveryStorePath(
+    env.YUNPANEL_DOCKER_WORKLOAD_STORE,
+    path.join(defaultRoot, 'docker-workload-registry.json'),
+    { packaged, cwd, label: 'Docker workload' },
+  );
   const databaseBindingStore = jobRecoveryRuntimeInternals.resolveRecoveryStorePath(
     env.YUNPANEL_DATABASE_BINDING_STORE,
     path.join(defaultRoot, 'database-binding-registry.json'),
@@ -40,7 +47,13 @@ function resolveDatabaseCredentialRecoveryPaths({ env, packaged, cwd }) {
     path.join(defaultRoot, 'database-credential-registry.json'),
     { packaged, cwd, label: 'database credential' },
   );
-  return Object.freeze({ ...base, websiteStore, databaseBindingStore, databaseCredentialStore });
+  return Object.freeze({
+    ...base,
+    websiteStore,
+    dockerWorkloadStore,
+    databaseBindingStore,
+    databaseCredentialStore,
+  });
 }
 
 export async function runRunningDatabaseCredentialRecoveryFromStores({
@@ -53,6 +66,7 @@ export async function runRunningDatabaseCredentialRecoveryFromStores({
   serverRegistryFactory = createServerRegistry,
   applicationRegistryFactory = createApplicationRegistry,
   websiteRegistryFactory = createWebsiteRegistry,
+  dockerWorkloadRegistryFactory = createDockerWorkloadRegistry,
   databaseBindingRegistryFactory = createDatabaseBindingRegistry,
   databaseCredentialRegistryFactory = createDatabaseCredentialRegistry,
   materializerFactory = createDatabaseCredentialMaterializer,
@@ -69,6 +83,7 @@ export async function runRunningDatabaseCredentialRecoveryFromStores({
     serverRegistryFactory,
     applicationRegistryFactory,
     websiteRegistryFactory,
+    dockerWorkloadRegistryFactory,
     databaseBindingRegistryFactory,
     databaseCredentialRegistryFactory,
     materializerFactory,
@@ -105,11 +120,15 @@ export async function runRunningDatabaseCredentialRecoveryFromStores({
     filePath: paths.applicationStore,
     serverExists,
   }), 'Application');
+  const dockerWorkloadRegistry = await jobRecoveryRuntimeInternals.initRegistry(dockerWorkloadRegistryFactory({
+    filePath: paths.dockerWorkloadStore,
+    serverExists,
+  }), 'Docker workload');
   const websiteRegistry = await jobRecoveryRuntimeInternals.initRegistry(websiteRegistryFactory({
     filePath: paths.websiteStore,
     serverExists,
     getApplication: async (id) => applicationRegistry.getApplication(id),
-    getDockerWorkload: async () => null,
+    getDockerWorkload: async (id) => dockerWorkloadRegistry.getWorkload(id),
   }), 'Website');
   const databaseBindingRegistry = await jobRecoveryRuntimeInternals.initRegistry(databaseBindingRegistryFactory({
     filePath: paths.databaseBindingStore,
@@ -154,7 +173,7 @@ export async function runRunningDatabaseCredentialRecoveryFromStores({
     loadJobContext: (id) => contextReader.read(id),
     readReceipt: (receiptServerId, receiptJobId) => receiptStore.read(receiptServerId, receiptJobId),
     materializeDesiredState: (payload, operation) => materializer.materializePublic(payload, operation),
-    inspectLiveState: (operation, bundle) => operation === 'database.credential.apply'
+    inspectLiveState: (operation, bundle) => operation === OPERATIONS.DATABASE_CREDENTIAL_APPLY
       ? evidenceInspector.inspectApplied(bundle)
       : evidenceInspector.inspectDeleted(bundle),
   });
