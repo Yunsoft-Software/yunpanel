@@ -20,6 +20,10 @@ import {
 
 const CANONICAL_SOURCE = '/var/lib/yunpanel/mail/example.com/owner';
 const SNAPSHOT = 'a'.repeat(64);
+const CURRENT_UID = process.getuid?.() ?? 5000;
+const CURRENT_GID = process.getgid?.() ?? 5000;
+const UID = CURRENT_UID === 0 ? 5000 : CURRENT_UID;
+const GID = CURRENT_GID === 0 ? 5000 : CURRENT_GID;
 
 async function withTempDirectory(run) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-mail-data-delete-'));
@@ -40,7 +44,17 @@ function mappedFs(sourceRoot) {
   };
   return {
     mapPath,
-    lstatFn: (value) => lstat(mapPath(value)),
+    lstatFn: async (value) => {
+      const metadata = await lstat(mapPath(value));
+      return {
+        ...metadata,
+        uid: UID,
+        gid: GID,
+        isDirectory: () => metadata.isDirectory(),
+        isFile: () => metadata.isFile(),
+        isSymbolicLink: () => metadata.isSymbolicLink(),
+      };
+    },
     openFn: (value, flags, mode) => open(mapPath(value), flags, mode),
     readdirFn: (value, options) => readdir(mapPath(value), options),
     renameFn: (from, to) => rename(mapPath(from), mapPath(to)),
@@ -78,9 +92,7 @@ function inspector() {
 }
 
 function vmailRun() {
-  const uid = process.getuid?.() ?? 1000;
-  const gid = process.getgid?.() ?? 1000;
-  return async () => ({ stdout: `vmail:x:${uid}:${gid}:vmail:/var/lib/yunpanel/mail:/usr/sbin/nologin\n` });
+  return async () => ({ stdout: `vmail:x:${UID}:${GID}:vmail:/var/lib/yunpanel/mail:/usr/sbin/nologin\n` });
 }
 
 async function createVerifiedBackup(root, sourceRoot, mapped) {
