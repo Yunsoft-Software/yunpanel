@@ -7,7 +7,11 @@ const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const BACKUP_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
-const OPERATIONS_SET = new Set([OPERATIONS.MAIL_DATA_BACKUP, OPERATIONS.MAIL_DATA_RESTORE]);
+const OPERATIONS_SET = new Set([
+  OPERATIONS.MAIL_DATA_BACKUP,
+  OPERATIONS.MAIL_DATA_RESTORE,
+  OPERATIONS.MAIL_DATA_DELETE,
+]);
 
 export class JobRunningMailDataRecoveryError extends Error {
   constructor(code, message) {
@@ -81,13 +85,15 @@ function validateCommonPayload(payload, operation, candidate) {
         'Private mail data backup recovery context is invalid',
       );
     }
-  } else if (Object.keys(payload).length !== 7
+    return;
+  }
+  if (Object.keys(payload).length !== 7
     || typeof payload.backupId !== 'string' || !BACKUP_ID_PATTERN.test(payload.backupId)
     || typeof payload.expectedTargetSnapshotSha256 !== 'string'
     || !CHECKSUM_PATTERN.test(payload.expectedTargetSnapshotSha256)) {
     throw new JobRunningMailDataRecoveryError(
       'job_mail_data_recovery_context_mismatch',
-      'Private mail data restore recovery context is invalid',
+      `Private mail data ${operation === OPERATIONS.MAIL_DATA_DELETE ? 'delete' : 'restore'} recovery context is invalid`,
     );
   }
 }
@@ -133,6 +139,17 @@ function assertReceipt(receipt, identity, intent) {
     }
     return;
   }
+  if (intent.operation === OPERATIONS.MAIL_DATA_DELETE) {
+    if (receipt.transactionId !== identity.jobId || receipt.backupId !== intent.backupId
+      || receipt.resourceId !== intent.resourceId || typeof receipt.sourcePresent !== 'boolean'
+      || receipt.deleted !== true || receipt.sideEffects !== true) {
+      throw new JobRunningMailDataRecoveryError(
+        'job_mail_data_recovery_receipt_mismatch',
+        'Mail data delete receipt does not match the running job',
+      );
+    }
+    return;
+  }
   if (receipt.transactionId !== identity.jobId || receipt.backupId !== intent.backupId
     || receipt.preRestoreBackupId !== `pre-restore:${identity.jobId}`
     || receipt.restoredPresent !== true || receipt.applied !== true || receipt.sideEffects !== true) {
@@ -174,10 +191,11 @@ async function assertCurrentResource(intent, { mailDomainRegistry, mailboxRegist
       );
     }
   }
-  if (intent.operation === OPERATIONS.MAIL_DATA_RESTORE && mailDomain.status !== 'disabled') {
+  if ([OPERATIONS.MAIL_DATA_RESTORE, OPERATIONS.MAIL_DATA_DELETE].includes(intent.operation)
+    && mailDomain.status !== 'disabled') {
     throw new JobRunningMailDataRecoveryError(
-      'job_mail_data_recovery_restore_domain_not_disabled',
-      'Mail-domain must remain disabled while recovering a mail data restore',
+      'job_mail_data_recovery_domain_not_disabled',
+      'Mail-domain must remain disabled while recovering mail data restore or deletion',
     );
   }
   return mailDomain;
@@ -216,6 +234,25 @@ function restoreResultFromReceipt(intent, receipt) {
     directories: receipt.directories,
     restoredPresent: true,
     applied: true,
+    sideEffects: true,
+  });
+}
+
+function deleteResultFromReceipt(intent, receipt) {
+  return Object.freeze({
+    version: 1,
+    transactionId: receipt.transactionId,
+    backupId: receipt.backupId,
+    mailDomainId: intent.mailDomainId,
+    resourceId: intent.resourceId,
+    scope: intent.scope,
+    identity: intent.identity,
+    sourcePresent: receipt.sourcePresent,
+    contentSha256: receipt.contentSha256,
+    bytes: receipt.bytes,
+    files: receipt.files,
+    directories: receipt.directories,
+    deleted: true,
     sideEffects: true,
   });
 }
@@ -272,6 +309,42 @@ async function verifyRestoreEvidence(intent, receipt, identity, inspectBackup, i
   return restoreResultFromReceipt(intent, receipt);
 }
 
+async function verifyDeleteEvidence(intent, receipt, identity, inspectBackup, inspectDeleted) {
+  let selected;
+  let absence;
+  try {
+    [selected, absence] = await Promise.all([
+      inspectBackup(intent.backupId),
+      inspectDeleted({
+        transactionId: identity.jobId,
+        backupId: intent.backupId,
+        scope: intent.scope,
+        identity: intent.identity,
+      }),
+    ]);
+  } catch {
+    throw new JobRunningMailDataRecoveryError('job_mail_data_recovery_evidence_failed', 'Mail data delete evidence could not be verified');
+  }
+  if (!selected || selected.backupId !== intent.backupId || selected.scope !== intent.scope
+    || selected.identity !== intent.identity || selected.sourcePresent !== receipt.sourcePresent
+    || selected.contentSha256 !== receipt.contentSha256 || selected.bytes !== receipt.bytes
+    || selected.files !== receipt.files || selected.directories !== receipt.directories
+    || !absence || absence.satisfied !== true || !absence.result
+    || absence.result.transactionId !== identity.jobId || absence.result.backupId !== intent.backupId
+    || absence.result.scope !== intent.scope || absence.result.identity !== intent.identity
+    || absence.result.sourcePresent !== receipt.sourcePresent
+    || absence.result.contentSha256 !== receipt.contentSha256
+    || absence.result.bytes !== receipt.bytes || absence.result.files !== receipt.files
+    || absence.result.directories !== receipt.directories
+    || absence.result.deleted !== true || absence.result.sideEffects !== true) {
+    throw new JobRunningMailDataRecoveryError(
+      'job_mail_data_recovery_evidence_not_satisfied',
+      'Mail data target or delete tombstone still exists or the verified backup does not match',
+    );
+  }
+  return deleteResultFromReceipt(intent, receipt);
+}
+
 export async function recoverRunningMailData({
   serverId,
   jobId,
@@ -286,6 +359,7 @@ export async function recoverRunningMailData({
   readOperationReceipt,
   inspectBackup,
   inspectRestored,
+  inspectDeleted,
   inspect = inspectDurableJobRecovery,
   reconcile = reconcileCompletedJob,
 } = {}) {
@@ -298,7 +372,8 @@ export async function recoverRunningMailData({
     || !mailboxRegistry || typeof mailboxRegistry.getMailbox !== 'function'
     || typeof serviceStatus !== 'function' || typeof loadJobContext !== 'function'
     || typeof readOperationReceipt !== 'function' || typeof inspectBackup !== 'function'
-    || typeof inspectRestored !== 'function' || typeof inspect !== 'function' || typeof reconcile !== 'function') {
+    || typeof inspectRestored !== 'function' || typeof inspectDeleted !== 'function'
+    || typeof inspect !== 'function' || typeof reconcile !== 'function') {
     throw new JobRunningMailDataRecoveryError(
       'job_mail_data_recovery_dependencies_invalid',
       'Mail data recovery dependencies are invalid',
@@ -349,9 +424,14 @@ export async function recoverRunningMailData({
   }
   assertReceipt(receipt, identity, intent);
 
-  const result = intent.operation === OPERATIONS.MAIL_DATA_BACKUP
-    ? await verifyBackupEvidence(intent, receipt, identity, inspectBackup)
-    : await verifyRestoreEvidence(intent, receipt, identity, inspectBackup, inspectRestored);
+  let result;
+  if (intent.operation === OPERATIONS.MAIL_DATA_BACKUP) {
+    result = await verifyBackupEvidence(intent, receipt, identity, inspectBackup);
+  } else if (intent.operation === OPERATIONS.MAIL_DATA_DELETE) {
+    result = await verifyDeleteEvidence(intent, receipt, identity, inspectBackup, inspectDeleted);
+  } else {
+    result = await verifyRestoreEvidence(intent, receipt, identity, inspectBackup, inspectRestored);
+  }
 
   let begun;
   try { begun = await jobRegistry.beginReconciliation(identity); }
@@ -403,14 +483,17 @@ export async function recoverRunningMailData({
     throw new JobRunningMailDataRecoveryError('job_mail_data_recovery_acknowledgement_invalid', 'Mail data recovery acknowledgement is inconsistent');
   }
 
+  const recoveryMethod = intent.operation === OPERATIONS.MAIL_DATA_BACKUP
+    ? 'verified_mail_data_backup_receipt_and_manifest'
+    : intent.operation === OPERATIONS.MAIL_DATA_DELETE
+      ? 'verified_mail_data_delete_receipt_backup_and_absence'
+      : 'verified_mail_data_restore_receipt_backup_and_live_state';
   return Object.freeze({
     serverId: identity.serverId,
     jobId: identity.jobId,
     operation: intent.operation,
     status: 'succeeded',
-    recoveryMethod: intent.operation === OPERATIONS.MAIL_DATA_BACKUP
-      ? 'verified_mail_data_backup_receipt_and_manifest'
-      : 'verified_mail_data_restore_receipt_backup_and_live_state',
+    recoveryMethod,
     reconciled: true,
   });
 }
@@ -424,4 +507,5 @@ export const jobRunningMailDataRecoveryInternals = Object.freeze({
   assertCurrentResource,
   verifyBackupEvidence,
   verifyRestoreEvidence,
+  verifyDeleteEvidence,
 });
