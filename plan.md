@@ -8,9 +8,8 @@ Bağlayıcı mimari ve güvenlik kuralları `agents.md` içindedir. Bu ortamda g
 
 ## 1. Docker / Compose — mevcut ana öncelik
 
-Compose desired-state, encrypted project/env/registry credential modeli, validation, build/pull/start/stop/restart durable job lifecycle, resource lock, receipt tabanlı lost-ack recovery, durable deploy history, bounded/redacted project runtime health/log backend'i ve restart-safe explicit Managed Compose Website binding'i kaynakta hazırdır; aşağıdaki işler kalmıştır.
+Compose desired-state, encrypted project/env/registry credential modeli, validation, build/pull/start/stop/restart durable job lifecycle, resource lock, receipt tabanlı lost-ack recovery, durable deploy history, bounded/redacted project runtime health/log backend'i, restart-safe explicit Managed Compose Website binding'i ve stage anında güncel doğrulanmış loopback published porttan üretilen Nginx target'ı kaynakta hazırdır; aşağıdaki işler kalmıştır.
 
-- [ ] Managed Compose Website için explicit Nginx target üret: yalnız doğrulanmış loopback/published port seçimine izin ver; otomatik container/port tahmini yapma.
 - [ ] Compose runtime health, container absence/unhealthy/restart/exit ve Nginx target readiness sonuçlarından secret-free actionable diagnosis üret.
 - [ ] Managed Compose binding değişikliği için preview/digest/typed-confirmation ve impact modelini Website/Domain resource graph'ına bağla.
 - [ ] Docker/Compose backend yüzeyini gerçek panel arayüzüne bağla: project create/edit, env, registry credential metadata, validate, lifecycle preview/apply, history, runtime health ve log görünümü.
@@ -21,7 +20,6 @@ Gerçek Docker Engine/Compose host kabulü, crash/lost-ack provası ve secret/pe
 
 ## 2. Website / Domain / Nginx kalanları
 
-- [ ] Managed Compose Website binding'i Domain/Nginx lifecycle'ına explicit target kaynağı olarak ekle.
 - [ ] Canlı state'teki Website'e bağlı olmayan external-proxy Domain kayıtlarını explicit create/bind migrationıyla eşleştir; otomatik tahmin yapma.
 - [ ] Backup ve cron association registry'leri geldikten sonra Website/Domain impact preview'a gerçek dependency provider olarak bağla; gelene kadar blocker `unavailable` kalmalı.
 
@@ -81,7 +79,7 @@ Backend'i hazır veya büyük ölçüde hazır olup ürün yüzeyinde eksik kala
 
 ## Uygulama sırası
 
-1. Managed Compose → Website/Nginx explicit target + diagnosis.
+1. Managed Compose runtime/target diagnosis + Website/Domain impact graph.
 2. Managed Docker/Compose UI ve hazır Mail backend'inin UI entegrasyonu.
 3. Docker volume/bind inventory ve backup policy.
 4. Genel backup/restore ürünü + UI.
