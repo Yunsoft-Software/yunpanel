@@ -7,6 +7,13 @@ const DATABASE_OPERATIONS = new Set([
   OPERATIONS.DATABASE_INSPECT,
   OPERATIONS.DATABASE_CREATE,
   OPERATIONS.DATABASE_DELETE,
+  OPERATIONS.DATABASE_CREDENTIAL_APPLY,
+  OPERATIONS.DATABASE_CREDENTIAL_DELETE,
+]);
+const INVENTORY_OPERATIONS = new Set([
+  OPERATIONS.DATABASE_INSPECT,
+  OPERATIONS.DATABASE_CREATE,
+  OPERATIONS.DATABASE_DELETE,
 ]);
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
@@ -50,7 +57,7 @@ function copyInventory(result) {
 
 async function latestDatabaseSnapshot(jobRegistry, serverId) {
   const jobs = (await jobRegistry.listJobs({ serverId, status: 'succeeded' }))
-    .filter((job) => DATABASE_OPERATIONS.has(job.operation));
+    .filter((job) => INVENTORY_OPERATIONS.has(job.operation));
   let inspectIndex = -1;
   for (let index = jobs.length - 1; index >= 0; index -= 1) {
     if (jobs[index].operation === OPERATIONS.DATABASE_INSPECT) {
