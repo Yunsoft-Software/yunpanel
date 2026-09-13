@@ -36,6 +36,8 @@ import { createMailDkimRegistry } from './mail-dkim-registry.js';
 import { createMailDkimRetirementRegistry } from './mail-dkim-retirement-registry.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { createMailServiceIdentityRegistry } from './mail-service-identity-registry.js';
+import { createMailSrsConfigurationService } from './mail-srs-configuration.js';
+import { createMailSrsSecretRegistry } from './mail-srs-secret-registry.js';
 import { createMailboxForwardingRegistry } from './mailbox-forwarding-registry.js';
 import { createMailboxQuotaRegistry } from './mailbox-quota-registry.js';
 import { createMailboxRegistry } from './mailbox-registry.js';
@@ -70,6 +72,8 @@ const mailDkimRetirementStorePath = process.env.YUNPANEL_MAIL_DKIM_RETIREMENT_ST
   ?? path.resolve('.data/mail-dkim-retirement-registry.json');
 const mailServiceIdentityStorePath = process.env.YUNPANEL_MAIL_SERVICE_IDENTITY_STORE
   ?? path.resolve('.data/mail-service-identity-registry.json');
+const mailSrsSecretStorePath = process.env.YUNPANEL_MAIL_SRS_SECRET_STORE
+  ?? path.resolve('.data/mail-srs-secret-registry.json');
 const roundcubeSecretStorePath = process.env.YUNPANEL_ROUNDCUBE_SECRET_STORE
   ?? path.resolve('.data/roundcube-secret-registry.json');
 const mailboxStorePath = process.env.YUNPANEL_MAILBOX_STORE ?? path.resolve('.data/mailbox-registry.json');
@@ -161,6 +165,16 @@ const mailServiceIdentityRegistry = createMailServiceIdentityRegistry({
   getCertificate: async (certificateId) => certificateRegistry.getCertificate(certificateId),
 });
 await mailServiceIdentityRegistry.init();
+const mailSrsSecretRegistry = createMailSrsSecretRegistry({
+  filePath: mailSrsSecretStorePath,
+  masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY,
+  serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+});
+await mailSrsSecretRegistry.init();
+const mailSrsConfigurationService = createMailSrsConfigurationService({
+  mailServiceIdentityRegistry,
+  mailSrsSecretRegistry,
+});
 const roundcubeSecretRegistry = createRoundcubeSecretRegistry({
   filePath: roundcubeSecretStorePath,
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
@@ -277,6 +291,7 @@ const listener = createAuthenticatedApi({
     mailDiagnosticsInspector,
     mailDkimConfigurationService,
     mailServiceIdentityRegistry,
+    mailSrsConfigurationService,
     mailboxRegistry,
     mailboxQuotaRegistry,
     mailboxForwardingRegistry,
@@ -356,6 +371,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] mail DKIM root=${mailDkimRootPath}`);
   console.log(`[yunpanel-api] mail DKIM retirement store=${mailDkimRetirementStorePath}`);
   console.log(`[yunpanel-api] mail service identity store=${mailServiceIdentityStorePath}`);
+  console.log(`[yunpanel-api] mail SRS secret store=${mailSrsSecretStorePath}`);
   console.log(`[yunpanel-api] Roundcube secret store=${roundcubeSecretStorePath}`);
   console.log(`[yunpanel-api] mailbox store=${mailboxStorePath}`);
   console.log(`[yunpanel-api] mailbox quota store=${mailboxQuotaStorePath}`);
