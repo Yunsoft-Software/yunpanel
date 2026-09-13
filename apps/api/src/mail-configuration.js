@@ -3,11 +3,14 @@ import {
   MailForwardingTemplateError,
   MailQuotaTemplateError,
   MailSecurityTemplateError,
+  MailSrsTemplateError,
   MailSubmissionTemplateError,
   MailTemplateError,
   MailTlsIdentityTemplateError,
   bindManagedMailTlsIdentity,
+  enableManagedMailSrs,
   enableManagedMailSubmission,
+  mailSrsTemplatePolicy,
   mailTemplatePolicy,
   normalizeMailboxAddress,
   previewManagedMailEmptyConfiguration,
@@ -45,6 +48,13 @@ function transitionInput(value) {
   return value;
 }
 
+function externalForwardingRequired(domains, forwardings) {
+  const localDomains = new Set(domains);
+  return forwardings.some((policy) => policy.destinations.some(
+    (destination) => !localDomains.has(normalizeMailboxAddress(destination).domain),
+  ));
+}
+
 function publicPostfixParameter(parameter) {
   if (parameter?.protected === true) {
     return Object.freeze({
@@ -69,6 +79,7 @@ function publicConfigurationPreview(preview) {
     postfixParameters: Object.freeze(preview.postfixParameters.map(publicPostfixParameter)),
     postfixMasterServices: preview.postfixMasterServices ?? Object.freeze([]),
     tlsIdentity: preview.tlsIdentity ?? null,
+    srs: preview.srs ?? null,
     validate: preview.validate,
     requirements: preview.requirements,
     sideEffects: false,
@@ -107,6 +118,7 @@ export function createMailConfigurationService({
   mailboxForwardingRegistry = EMPTY_FORWARDING_REGISTRY,
   domainRegistry = null,
   mailServiceIdentityRegistry = null,
+  mailSrsConfigurationService = null,
 } = {}) {
   const tlsIdentityConfigured = domainRegistry !== null || mailServiceIdentityRegistry !== null;
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
@@ -117,7 +129,10 @@ export function createMailConfigurationService({
     || !mailboxQuotaRegistry || typeof mailboxQuotaRegistry.listQuotas !== 'function'
     || !mailboxForwardingRegistry || typeof mailboxForwardingRegistry.materializeEnabledForwardings !== 'function'
     || (tlsIdentityConfigured && (!domainRegistry || typeof domainRegistry.getDomain !== 'function'
-      || !mailServiceIdentityRegistry || typeof mailServiceIdentityRegistry.materializeForServer !== 'function'))) {
+      || !mailServiceIdentityRegistry || typeof mailServiceIdentityRegistry.materializeForServer !== 'function'))
+    || (mailSrsConfigurationService !== null
+      && (typeof mailSrsConfigurationService.previewForServer !== 'function'
+        || typeof mailSrsConfigurationService.materializeForServer !== 'function'))) {
     throw new MailConfigurationError('mail_configuration_dependencies_invalid', 'Mail configuration registries are unavailable', 503);
   }
 
@@ -144,9 +159,11 @@ export function createMailConfigurationService({
   }
 
   async function resolveTlsIdentity(resolved) {
-    if (!tlsIdentityConfigured || resolved.domains.length === 0) return Object.freeze({ identity: null, blocker: null });
+    if (!tlsIdentityConfigured || resolved.domains.length === 0) {
+      return Object.freeze({ identity: null, blocker: null, serverId: null });
+    }
     if (!resolved.candidate.webDomainId) {
-      return Object.freeze({ identity: null, blocker: 'mail_service_domain_required' });
+      return Object.freeze({ identity: null, blocker: 'mail_service_domain_required', serverId: null });
     }
     let webDomain;
     try { webDomain = await domainRegistry.getDomain(resolved.candidate.webDomainId); }
@@ -154,20 +171,61 @@ export function createMailConfigurationService({
       throw new MailConfigurationError('mail_service_domain_unavailable', 'Mail service Domain could not be verified', 503);
     }
     if (!webDomain || typeof webDomain.serverId !== 'string' || !webDomain.serverId) {
-      return Object.freeze({ identity: null, blocker: 'mail_service_domain_required' });
+      return Object.freeze({ identity: null, blocker: 'mail_service_domain_required', serverId: null });
     }
     try {
       return Object.freeze({
         identity: await mailServiceIdentityRegistry.materializeForServer(webDomain.serverId),
         blocker: null,
+        serverId: webDomain.serverId,
       });
     } catch (error) {
       if (Number.isInteger(error?.status) && error.status >= 400 && error.status < 500
         && typeof error?.code === 'string' && /^[a-z0-9_]{1,120}$/.test(error.code)) {
-        return Object.freeze({ identity: null, blocker: error.code });
+        return Object.freeze({ identity: null, blocker: error.code, serverId: webDomain.serverId });
       }
       throw new MailConfigurationError('mail_service_identity_unavailable', 'Mail service TLS identity could not be materialized', 503);
     }
+  }
+
+  async function materializeSrs(resolved, forwardings, tlsIdentity) {
+    if (!externalForwardingRequired(resolved.domains, forwardings)) return null;
+    if (!mailSrsConfigurationService) {
+      return Object.freeze({ blocker: 'mail_srs_configuration_unavailable' });
+    }
+    if (!tlsIdentity.serverId) {
+      return Object.freeze({ blocker: 'mail_service_domain_required' });
+    }
+    let publicSrs;
+    try { publicSrs = await mailSrsConfigurationService.previewForServer(tlsIdentity.serverId); }
+    catch {
+      throw new MailConfigurationError('mail_srs_configuration_unavailable', 'Managed SRS state could not be inspected', 503);
+    }
+    if (!publicSrs?.ready) {
+      const blockers = Array.isArray(publicSrs?.blockers) && publicSrs.blockers.length > 0
+        ? publicSrs.blockers
+        : ['mail_srs_configuration_not_ready'];
+      return Object.freeze({ blockers: Object.freeze([...new Set(blockers)]) });
+    }
+    let privateSrs;
+    try { privateSrs = await mailSrsConfigurationService.materializeForServer(tlsIdentity.serverId); }
+    catch (error) {
+      if (Number.isInteger(error?.status) && error.status >= 400 && error.status < 500) {
+        return Object.freeze({ blocker: error.code ?? 'mail_srs_configuration_not_ready' });
+      }
+      throw new MailConfigurationError('mail_srs_configuration_unavailable', 'Managed SRS state could not be materialized', 503);
+    }
+    if (!privateSrs || privateSrs.serverId !== tlsIdentity.serverId
+      || privateSrs.srsDomain !== publicSrs.srsDomain
+      || privateSrs.mailServiceIdentityRevision !== publicSrs.mailServiceIdentityRevision
+      || privateSrs.srsSecretRevision !== publicSrs.srsSecretRevision
+      || !privateSrs.secretArtifact || privateSrs.secretArtifact.path !== mailSrsTemplatePolicy.secretPath
+      || !SHA256_PATTERN.test(privateSrs.secretArtifact.sha256 ?? '')
+      || typeof privateSrs.secretContent !== 'string'
+      || createHash('sha256').update(privateSrs.secretContent).digest('hex') !== privateSrs.secretArtifact.sha256) {
+      throw new MailConfigurationError('mail_srs_configuration_inconsistent', 'Managed SRS state changed while preparing mail configuration', 409);
+    }
+    return Object.freeze({ public: publicSrs, private: privateSrs });
   }
 
   async function materializeConfiguration(resolved) {
@@ -218,6 +276,7 @@ export function createMailConfigurationService({
           [],
         ),
         accounts: Object.freeze([]),
+        srs: null,
       });
     }
     if (privateAccounts.length === 0) {
@@ -226,6 +285,7 @@ export function createMailConfigurationService({
         blockers: Object.freeze(['mail_postmaster_mailbox_required']),
         preview: null,
         accounts: Object.freeze([]),
+        srs: null,
       });
     }
 
@@ -236,6 +296,17 @@ export function createMailConfigurationService({
         blockers: Object.freeze([tlsIdentity.blocker]),
         preview: null,
         accounts: Object.freeze([]),
+        srs: null,
+      });
+    }
+    const srs = await materializeSrs(resolved, forwardings, tlsIdentity);
+    if (srs?.blocker || srs?.blockers) {
+      return Object.freeze({
+        ready: false,
+        blockers: srs.blockers ?? Object.freeze([srs.blocker]),
+        preview: null,
+        accounts: Object.freeze([]),
+        srs: null,
       });
     }
 
@@ -254,12 +325,22 @@ export function createMailConfigurationService({
         postmasterAddress,
         forwardings,
       });
+      if (srs?.private) {
+        preview = enableManagedMailSrs(preview, {
+          domains: resolved.domains,
+          forwardings,
+          srsDomain: srs.private.srsDomain,
+          secretRevision: srs.private.srsSecretRevision,
+          secretSha256: srs.private.secretArtifact.sha256,
+        });
+      }
       if (tlsIdentity.identity) preview = bindManagedMailTlsIdentity(preview, tlsIdentity.identity);
     } catch (error) {
       if (error instanceof MailTemplateError
         || error instanceof MailQuotaTemplateError
         || error instanceof MailForwardingTemplateError
         || error instanceof MailSecurityTemplateError
+        || error instanceof MailSrsTemplateError
         || error instanceof MailSubmissionTemplateError
         || error instanceof MailTlsIdentityTemplateError) {
         throw new MailConfigurationError(
@@ -275,6 +356,7 @@ export function createMailConfigurationService({
       blockers: Object.freeze([]),
       preview,
       accounts,
+      srs: srs?.private ?? null,
     });
   }
 
@@ -304,18 +386,32 @@ export function createMailConfigurationService({
       domains: resolved.domains,
       accounts: materialized.accounts,
     });
-    const sensitiveArtifact = materialized.preview.artifacts.find(
+    const passwdArtifact = materialized.preview.artifacts.find(
       (artifact) => artifact.path === mailTemplatePolicy.dovecotPasswdFilePath,
     );
-    if (!sensitiveArtifact || sensitiveArtifact.sha256 !== createHash('sha256').update(passwd).digest('hex')) {
+    if (!passwdArtifact || passwdArtifact.sha256 !== createHash('sha256').update(passwd).digest('hex')) {
       throw new MailConfigurationError('mail_configuration_sensitive_digest_mismatch', 'Protected mail configuration material is inconsistent', 409);
+    }
+    const sensitiveArtifacts = [Object.freeze({
+      path: mailTemplatePolicy.dovecotPasswdFilePath,
+      content: passwd,
+    })];
+    if (materialized.srs) {
+      const srsArtifact = materialized.preview.artifacts.find(
+        (artifact) => artifact.path === mailSrsTemplatePolicy.secretPath,
+      );
+      if (!srsArtifact || srsArtifact.sha256 !== materialized.srs.secretArtifact.sha256
+        || createHash('sha256').update(materialized.srs.secretContent).digest('hex') !== srsArtifact.sha256) {
+        throw new MailConfigurationError('mail_configuration_sensitive_digest_mismatch', 'Protected SRS material is inconsistent', 409);
+      }
+      sensitiveArtifacts.push(Object.freeze({
+        path: mailSrsTemplatePolicy.secretPath,
+        content: materialized.srs.secretContent,
+      }));
     }
     return Object.freeze({
       preview: materialized.preview,
-      sensitiveArtifacts: Object.freeze([Object.freeze({
-        path: mailTemplatePolicy.dovecotPasswdFilePath,
-        content: passwd,
-      })]),
+      sensitiveArtifacts: Object.freeze(sensitiveArtifacts),
     });
   }
 
@@ -327,6 +423,7 @@ export function createMailConfigurationService({
 
 export const mailConfigurationInternals = Object.freeze({
   transitionInput,
+  externalForwardingRequired,
   publicPostfixParameter,
   publicConfigurationPreview,
   transitionPreview,
