@@ -13,7 +13,13 @@ const mailDomainId = randomUUID();
 const mailboxId = randomUUID();
 const digest = 'a'.repeat(64);
 
-function fixture({ domainStatus = 'disabled', mailboxRevision = 3, activeJobs = [], selectedBackup = null } = {}) {
+function fixture({
+  domainStatus = 'disabled',
+  mailboxRevision = 3,
+  activeJobs = [],
+  selectedBackup = null,
+  deleteBlockers = [{ code: 'mail_data_backup_required', count: 1 }],
+} = {}) {
   const enqueued = [];
   const mailDomain = {
     id: mailDomainId,
@@ -77,7 +83,7 @@ function fixture({ domainStatus = 'disabled', mailboxRevision = 3, activeJobs = 
           identity: 'owner@example.com',
           sourcePath: '/var/lib/yunpanel/mail/example.com/owner',
           sourcePresent: true,
-          sourceSnapshotSha256: 'b'.repeat(64),
+          sourceSnapshotSha256: digest,
           sourceFingerprintSha256: 'c'.repeat(64),
           contentSha256: 'd'.repeat(64),
           bytes: 2048,
@@ -86,6 +92,16 @@ function fixture({ domainStatus = 'disabled', mailboxRevision = 3, activeJobs = 
           createdAt: '2026-09-13T21:30:00.000Z',
           sideEffects: true,
         } : null;
+      },
+    },
+    mailDeleteImpactService: {
+      async inspectMailbox(id) {
+        assert.equal(id, mailboxId);
+        return { blockers: deleteBlockers, sideEffects: false };
+      },
+      async inspectMailDomain(id) {
+        assert.equal(id, mailDomainId);
+        return { blockers: deleteBlockers, sideEffects: false };
       },
     },
     jobRegistry: {
@@ -194,7 +210,72 @@ test('restore queues selected backup against the same mail-domain resource lock'
   assert.equal(state.enqueued[0].operation, OPERATIONS.MAIL_DATA_RESTORE);
 });
 
-test('active mail-domain jobs block backup and restore previews before enqueue', async () => {
+test('delete preview requires disabled domain verified current backup and no non-data blockers', async () => {
+  const enabled = fixture({ domainStatus: 'enabled' });
+  await assert.rejects(
+    enabled.service.previewDelete({ scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' }),
+    (error) => error instanceof MailDataOperationsError && error.code === 'mail_data_delete_domain_disable_required',
+  );
+
+  const blocked = fixture({ deleteBlockers: [
+    { code: 'mailbox_alias_reference_configured', count: 1 },
+    { code: 'mail_data_backup_required', count: 1 },
+  ] });
+  await assert.rejects(
+    blocked.service.previewDelete({ scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' }),
+    (error) => error instanceof MailDataOperationsError && error.code === 'mail_data_delete_dependencies_exist',
+  );
+
+  const staleBackup = fixture({ selectedBackup: {
+    version: 1,
+    backupId: 'mail-backup-0001',
+    scope: 'mailbox',
+    identity: 'owner@example.com',
+    sourcePresent: true,
+    sourceSnapshotSha256: 'f'.repeat(64),
+    contentSha256: 'd'.repeat(64),
+    bytes: 2048,
+  } });
+  await assert.rejects(
+    staleBackup.service.previewDelete({ scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' }),
+    (error) => error instanceof MailDataOperationsError && error.code === 'mail_data_delete_backup_stale',
+  );
+});
+
+test('delete queues exact resource revision and verified backup on the shared mail-domain lock', async () => {
+  const state = fixture();
+  const preview = await state.service.previewDelete({
+    scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001',
+  });
+  assert.equal(preview.operation, 'mail_data_delete');
+  assert.equal(preview.backupContentSha256, 'd'.repeat(64));
+  assert.equal(preview.targetSnapshotSha256, digest);
+  assert.equal(preview.expectedRevision, 3);
+
+  await state.service.queueDelete({
+    scope: 'mailbox',
+    resourceId: mailboxId,
+    backupId: 'mail-backup-0001',
+    expectedRevision: preview.expectedRevision,
+    expectedPreviewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+  assert.equal(state.enqueued.length, 1);
+  assert.deepEqual(state.enqueued[0].payload, {
+    mailDomainId,
+    resourceId: mailboxId,
+    backupId: 'mail-backup-0001',
+    scope: 'mailbox',
+    identity: 'owner@example.com',
+    expectedResourceRevision: 3,
+    expectedTargetSnapshotSha256: digest,
+  });
+  assert.equal(state.enqueued[0].operation, OPERATIONS.MAIL_DATA_DELETE);
+  assert.equal(state.enqueued[0].resourceType, 'mail_domain');
+  assert.equal(state.enqueued[0].resourceId, mailDomainId);
+});
+
+test('active mail-domain jobs block backup restore and delete previews before enqueue', async () => {
   const state = fixture({ activeJobs: [{ id: randomUUID(), status: 'running' }] });
   await assert.rejects(
     state.service.previewBackup({ scope: 'domain', resourceId: mailDomainId }),
@@ -202,6 +283,10 @@ test('active mail-domain jobs block backup and restore previews before enqueue',
   );
   await assert.rejects(
     state.service.previewRestore({ scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' }),
+    (error) => error instanceof MailDataOperationsError && error.code === 'mail_domain_job_conflict',
+  );
+  await assert.rejects(
+    state.service.previewDelete({ scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' }),
     (error) => error instanceof MailDataOperationsError && error.code === 'mail_domain_job_conflict',
   );
   assert.equal(state.enqueued.length, 0);
