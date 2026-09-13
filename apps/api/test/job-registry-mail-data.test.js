@@ -6,6 +6,7 @@ import { createJobRegistry, JobRegistryError } from '../src/job-registry.js';
 
 const serverId = randomUUID();
 const mailDomainId = randomUUID();
+const mailboxId = randomUUID();
 const digest = 'a'.repeat(64);
 
 async function queuedBackup(registry) {
@@ -15,6 +16,7 @@ async function queuedBackup(registry) {
     operation: OPERATIONS.MAIL_DATA_BACKUP,
     payload: {
       mailDomainId,
+      resourceId: mailboxId,
       scope: 'mailbox',
       identity: 'owner@example.com',
       expectedResourceRevision: 3,
@@ -37,6 +39,7 @@ test('mail data backup durably enqueues, claims and completes with a secret-free
   assert.equal(claimed.envelope.operation, OPERATIONS.MAIL_DATA_BACKUP);
   assert.deepEqual(claimed.envelope.payload, {
     mailDomainId,
+    resourceId: mailboxId,
     scope: 'mailbox',
     identity: 'owner@example.com',
     expectedResourceRevision: 3,
@@ -77,6 +80,7 @@ test('mail data restore pins selected backup and pre-restore identity in termina
     operation: OPERATIONS.MAIL_DATA_RESTORE,
     payload: {
       mailDomainId,
+      resourceId: mailDomainId,
       backupId: 'mail-backup-selected',
       scope: 'domain',
       identity: 'example.com',
