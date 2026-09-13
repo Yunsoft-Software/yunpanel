@@ -139,7 +139,7 @@ export async function runRunningDatabaseCredentialRecoveryFromStores({
   const databaseCredentialRegistry = await jobRecoveryRuntimeInternals.initRegistry(databaseCredentialRegistryFactory({
     filePath: paths.databaseCredentialStore,
     masterKey: env.YUNPANEL_SECRET_MASTER_KEY,
-    getBinding: async (id) => databaseBindingRegistry.getBinding(id),
+    getDatabaseBinding: async (id) => databaseBindingRegistry.getBinding(id),
   }), 'Database credential');
 
   const materializer = materializerFactory({ databaseBindingRegistry, databaseCredentialRegistry });
