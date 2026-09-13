@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseBackupOperationsError } from '../src/database-backup-operations.js';
-import { DatabaseHttpError } from '../src/database-http.js';
-import { mountDatabaseRestoreRoutes } from '../src/database-restore-http.js';
+import { JobRegistryError } from '../src/job-registry.js';
+import {
+  DatabaseRestoreHttpError,
+  mountDatabaseRestoreRoutes,
+} from '../src/database-restore-http.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const databaseName = 'app_main';
@@ -114,7 +117,8 @@ test('database restore routes reject extra or incomplete body fields before serv
   ]) {
     const fx = mounted();
     const response = await invoke(fx[handlerName], body);
-    assert.ok(response.error instanceof DatabaseHttpError);
+    assert.ok(response.error instanceof DatabaseRestoreHttpError);
+    assert.ok(response.error instanceof JobRegistryError);
     assert.equal(fx.calls.length, 0);
   }
 });
@@ -124,7 +128,8 @@ test('database restore service errors retain safe HTTP code and status', async (
     previewError: new DatabaseBackupOperationsError('database_restore_backup_evidence_drift', 'Selected backup evidence drifted', 409),
   });
   const response = await invoke(fx.preview, { backupId });
-  assert.ok(response.error instanceof DatabaseHttpError);
+  assert.ok(response.error instanceof DatabaseRestoreHttpError);
+  assert.ok(response.error instanceof JobRegistryError);
   assert.equal(response.error.code, 'database_restore_backup_evidence_drift');
   assert.equal(response.error.status, 409);
 });
