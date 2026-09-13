@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { getMailDomain, listMailAliases, listMailDomains, listMailboxes } from './mail-client.js';
+import MailAliasesPanel from './MailAliasesPanel.jsx';
+import MailboxesPanel from './MailboxesPanel.jsx';
 import MailDomainCreateDialog from './MailDomainCreateDialog.jsx';
 import { Badge, Button, EmptyState, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
@@ -55,7 +57,7 @@ function MailDomainDetail({ mailDomainId }) {
   }, [mailDomainId]);
   const data = detail.data;
   const domain = data?.domain ?? null;
-  return <><nav className="ws-breadcrumb"><Link to="/mail">Mail</Link><span>/ {domain?.domainName ?? mailDomainId}</span></nav><PageHeading title={domain?.domainName ?? 'Mail domain'} description="Mail domain identity, mailbox ve alias desired-state envanteri." actions={<Button icon="refresh" onClick={detail.refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Mail domain" />{domain && <><Section title="Domain durumu"><div className="ws-section-body"><KeyValues items={[
+  return <><nav className="ws-breadcrumb"><Link to="/mail">Mail</Link><span>/ {domain?.domainName ?? mailDomainId}</span></nav><PageHeading title={domain?.domainName ?? 'Mail domain'} description="Mail domain identity, mailbox, alias ve host configuration yönetimi." actions={<Button icon="refresh" onClick={detail.refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Mail domain" />{domain && <><Section title="Domain durumu"><div className="ws-section-body"><KeyValues items={[
     ['Yönetim modu', domain.managementMode],
     ['Durum', <Badge key="status" state={mailState(domain)}>{domain.status}</Badge>],
     ['Revizyon', domain.revision],
@@ -63,7 +65,7 @@ function MailDomainDetail({ mailDomainId }) {
     ['Mailbox', data.mailboxes?.length ?? 0],
     ['Alias', data.aliases?.length ?? 0],
     ['Son gözlem', formatDate(domain.lastObservedAt)],
-  ]} />{domain.managementMode === 'external' && <p className="ws-muted">External mail domain yalnız takip edilir; local mailbox, DKIM ve host configuration işlemleri bu kayda uygulanmaz.</p>}</div></Section><Section title="Mailbox envanteri">{data.mailboxes?.length ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Adres</th><th>Durum</th><th>Revizyon</th><th>Parola</th></tr></thead><tbody>{data.mailboxes.map((mailbox) => <tr key={mailbox.id}><td><strong>{mailbox.address}</strong></td><td><Badge state={mailbox.enabled ? 'active' : 'offline'}>{mailbox.enabled ? 'enabled' : 'disabled'}</Badge></td><td>{mailbox.revision}</td><td>{mailbox.passwordConfigured ? `Configured · ${formatDate(mailbox.passwordUpdatedAt)}` : '—'}</td></tr>)}</tbody></table></div> : <EmptyState icon="mail" title="Mailbox yok" detail={domain.managementMode === 'local' ? 'Mailbox create ve policy yönetimi sonraki panel diliminde bu ekrana bağlanacak.' : 'External mail domain için local mailbox oluşturulmaz.'} />}</Section><Section title="Alias envanteri">{data.aliases?.length ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Kaynak</th><th>Hedefler</th><th>Durum</th><th>Revizyon</th></tr></thead><tbody>{data.aliases.map((alias) => <tr key={alias.id}><td><strong>{alias.source}</strong></td><td>{alias.destinations?.join(', ')}</td><td><Badge state={alias.enabled ? 'active' : 'offline'}>{alias.enabled ? 'enabled' : 'disabled'}</Badge></td><td>{alias.revision}</td></tr>)}</tbody></table></div> : <EmptyState icon="mail" title="Alias yok" detail={domain.managementMode === 'local' ? 'Alias create ve update işlemleri sonraki panel diliminde bu ekrana bağlanacak.' : 'External mail domain için local alias policy tutulmaz.'} />}</Section></>}</>;
+  ]} />{domain.managementMode === 'external' && <p className="ws-muted">External mail domain yalnız takip edilir; local mailbox, alias, DKIM ve host configuration işlemleri bu kayda uygulanmaz.</p>}</div></Section>{domain.managementMode === 'local' ? <><MailboxesPanel domain={domain} mailboxes={data.mailboxes ?? []} onChanged={detail.refresh} /><MailAliasesPanel domain={domain} aliases={data.aliases ?? []} onChanged={detail.refresh} /></> : <Section title="External mail takibi"><EmptyState icon="external" title="Host mail konfigürasyonu bu panel tarafından yönetilmiyor" detail="Bu kayıt external lifecycle identity olarak tutulur. Local mailbox veya alias desired-state oluşturulmaz." /></Section>}</>}</>;
 }
 
 export default function MailDomainsPage() {
