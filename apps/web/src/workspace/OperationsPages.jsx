@@ -40,12 +40,10 @@ export function SettingsPage() {
   return <><PageHeading title="Ayarlar" description="Panel bakım araçları ve yönetim erişimi." /><Section title="Hesap ve erişim"><div className="ws-section-body"><p className="ws-muted">Kendi parolanız, MFA ve oturumlarınız üstteki Hesabım menüsünden yönetilir. Owner hesapları kullanıcı ekleyebilir, düzenleyebilir, kapatabilir ve silebilir; son aktif Owner korunur.</p><LinkButton to="/settings/users" icon="user">Kullanıcıları yönet</LinkButton></div></Section><Section title="YunPanel güncellemeleri"><CollectionNotice resource={servers} label="Yerel sunucu" />{server && servers.status === 'ready' && !import.meta.env.DEV && <div className="ws-section-body"><SystemUpdatePanel key={server.id} server={server} /></div>}</Section>{import.meta.env.DEV && <p className="ws-muted">Paket güncelleme işlemleri geliştirme görünümünde kapalıdır.</p>}<Section title="Gelişmiş araçlar"><div className="ws-section-body ws-actions"><LinkButton to="/applications" icon="code">Uygulamalar</LinkButton><LinkButton to="/domains" icon="globe">Alan adları ve sertifikalar</LinkButton><LinkButton to="/audit" icon="shield">Denetim kayıtları</LinkButton><LinkButton to="/servers" icon="server">Yerel sunucu</LinkButton></div></Section></>;
 }
 const capabilities = {
-  docker: ['Docker', 'Compose yaşam döngüsü, registry ve volume yönetimi henüz uygulanmadı.', 'box'],
-  mail: ['Mail', 'Postfix, Dovecot, mailbox ve Roundcube yönetim backend’i henüz uygulanmadı.', 'mail'],
   backups: ['Yedekler', 'Yedek hedefleri, retention ve geri yükleme yönetimi henüz uygulanmadı.', 'archive'],
 };
 export function CapabilityPage({ name }) {
-  const [title, detail, icon] = capabilities[name];
+  const [title, detail, icon] = capabilities[name] ?? ['Modül', 'Bu modül henüz uygulanmadı.', 'box'];
   return <><PageHeading title={title} description="Modülün uygulama durumu." /><Section title={title}><EmptyState title="Bu modül henüz uygulanmadı" detail={detail} icon={icon} action={<LinkButton to="/websites">Web sitelerine dön</LinkButton>} /></Section></>;
 }
 export function NotFoundPage() {
