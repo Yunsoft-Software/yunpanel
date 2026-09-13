@@ -3,6 +3,9 @@ export * from './index.js';
 import { assertUuid, normalizeDomainSet } from '@yunpanel/shared';
 import {
   AGENT_PROTOCOL_VERSION,
+  MANAGED_SERVICE_ACTIONS,
+  MANAGED_SERVICE_CONTROL_IDS as BASE_MANAGED_SERVICE_CONTROL_IDS,
+  MANAGED_SERVICE_IDS as BASE_MANAGED_SERVICE_IDS,
   OPERATIONS as BASE_OPERATIONS,
   READ_ONLY_OPERATIONS,
   createOperationEnvelope as createBaseOperationEnvelope,
@@ -13,8 +16,12 @@ import {
 
 const MAIL_DKIM_APPLY = 'mail.dkim.apply';
 const ROUNDCUBE_CONFIG_APPLY = 'roundcube.config.apply';
+const POSTSRSD_SERVICE_ID = 'postsrsd';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const TXT_MAX_BYTES = 4096;
+
+export const MANAGED_SERVICE_IDS = Object.freeze([...BASE_MANAGED_SERVICE_IDS, POSTSRSD_SERVICE_ID]);
+export const MANAGED_SERVICE_CONTROL_IDS = Object.freeze([...BASE_MANAGED_SERVICE_CONTROL_IDS, POSTSRSD_SERVICE_ID]);
 
 export const OPERATIONS = Object.freeze({
   ...BASE_OPERATIONS,
@@ -111,11 +118,33 @@ function validateDnsTxtApply(payload, errors) {
   }
 }
 
+function validatePostsrsdServiceOperation(operation, payload, errors) {
+  const allowed = operation === BASE_OPERATIONS.SYSTEM_SERVICE_CONTROL
+    ? new Set(['serviceId', 'action'])
+    : new Set(['serviceId']);
+  if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
+    errors.push(`${operation} contains unsupported arguments`);
+  }
+  if (payload.serviceId !== POSTSRSD_SERVICE_ID) {
+    errors.push(`${operation} serviceId is invalid`);
+  }
+  if (operation === BASE_OPERATIONS.SYSTEM_SERVICE_CONTROL
+    && (typeof payload.action !== 'string' || !MANAGED_SERVICE_ACTIONS.includes(payload.action))) {
+    errors.push(`${operation} action is invalid`);
+  }
+}
+
 function extendedOperation(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   if (value.operation === MAIL_DKIM_APPLY) return 'mail_dkim';
   if (value.operation === ROUNDCUBE_CONFIG_APPLY) return 'roundcube';
   if (value.operation === BASE_OPERATIONS.DNS_RECORD_APPLY && value.payload?.record?.type === 'TXT') return 'dns_txt';
+  if (value.payload?.serviceId === POSTSRSD_SERVICE_ID
+    && [
+      BASE_OPERATIONS.SYSTEM_SERVICES_INSPECT,
+      BASE_OPERATIONS.SYSTEM_SERVICE_INSTALL,
+      BASE_OPERATIONS.SYSTEM_SERVICE_CONTROL,
+    ].includes(value.operation)) return 'postsrsd_service';
   return null;
 }
 
@@ -132,6 +161,8 @@ export function validateOperationEnvelope(value) {
     validateMailDkimApply(value.payload, errors);
   } else if (extension === 'roundcube') {
     validateRoundcubeConfigApply(value.payload, errors);
+  } else if (extension === 'postsrsd_service') {
+    validatePostsrsdServiceOperation(value.operation, value.payload, errors);
   } else {
     validateDnsTxtApply(value.payload, errors);
   }
@@ -144,7 +175,13 @@ export function validateOperationEnvelope(value) {
 export function createOperationEnvelope({ id, operation, payload = {} }) {
   const extended = operation === MAIL_DKIM_APPLY
     || operation === ROUNDCUBE_CONFIG_APPLY
-    || (operation === BASE_OPERATIONS.DNS_RECORD_APPLY && payload?.record?.type === 'TXT');
+    || (operation === BASE_OPERATIONS.DNS_RECORD_APPLY && payload?.record?.type === 'TXT')
+    || (payload?.serviceId === POSTSRSD_SERVICE_ID
+      && [
+        BASE_OPERATIONS.SYSTEM_SERVICES_INSPECT,
+        BASE_OPERATIONS.SYSTEM_SERVICE_INSTALL,
+        BASE_OPERATIONS.SYSTEM_SERVICE_CONTROL,
+      ].includes(operation));
   if (!extended) return createBaseOperationEnvelope({ id, operation, payload });
   const envelope = { id, operation, payload, protocolVersion: AGENT_PROTOCOL_VERSION };
   const validation = validateOperationEnvelope(envelope);
@@ -155,9 +192,11 @@ export function createOperationEnvelope({ id, operation, payload = {} }) {
 export const protocolExtensionInternals = Object.freeze({
   mailDkimApply: MAIL_DKIM_APPLY,
   roundcubeConfigApply: ROUNDCUBE_CONFIG_APPLY,
+  postsrsdServiceId: POSTSRSD_SERVICE_ID,
   readOnlyOperations: READ_ONLY_OPERATIONS,
   txtMaxBytes: TXT_MAX_BYTES,
   validateMailDkimApply,
   validateRoundcubeConfigApply,
   validateDnsTxtApply,
+  validatePostsrsdServiceOperation,
 });
