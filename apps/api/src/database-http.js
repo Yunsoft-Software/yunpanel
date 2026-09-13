@@ -7,6 +7,7 @@ const DATABASE_OPERATIONS = new Set([
   OPERATIONS.DATABASE_INSPECT,
   OPERATIONS.DATABASE_CREATE,
   OPERATIONS.DATABASE_DELETE,
+  OPERATIONS.DATABASE_BACKUP,
   OPERATIONS.DATABASE_CREDENTIAL_APPLY,
   OPERATIONS.DATABASE_CREDENTIAL_DELETE,
 ]);
@@ -32,6 +33,17 @@ function requireDatabaseName(value) {
     throw new DatabaseHttpError('invalid_database_name', 'Database name is invalid');
   }
   return value;
+}
+
+function exactConfirmationBody(body, expected, action) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).length !== 1 || typeof body.confirmation !== 'string') {
+    throw new DatabaseHttpError('database_confirmation_input_invalid', 'Request must contain exactly confirmation');
+  }
+  if (body.confirmation !== expected) {
+    throw new DatabaseHttpError('database_confirmation_required', `Confirm database ${action} with ${expected}`);
+  }
+  return body.confirmation;
 }
 
 async function requireServer(registry, serverId) {
@@ -151,6 +163,22 @@ export function mountDatabaseRoutes(app, { registry, jobRegistry, databaseBindin
     return response.status(202).json({ data: job });
   }));
 
+  app.post('/api/servers/:serverId/databases/:name/backup', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const server = await requireServer(registry, request.params.serverId);
+    const name = requireDatabaseName(request.params.name);
+    exactConfirmationBody(request.body, `backup:${name}`, 'backup');
+    await ensureDatabaseIdle(jobRegistry, server.id);
+    const job = await jobRegistry.enqueue({
+      serverId: server.id,
+      type: OPERATIONS.DATABASE_BACKUP,
+      operation: OPERATIONS.DATABASE_BACKUP,
+      payload: { databaseName: name },
+      resourceType: 'database',
+      resourceId: name,
+    });
+    return response.status(202).json({ data: job });
+  }));
+
   app.delete('/api/servers/:serverId/databases/:name', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const server = await requireServer(registry, request.params.serverId);
     const name = requireDatabaseName(request.params.name);
@@ -186,6 +214,7 @@ export function mountDatabaseRoutes(app, { registry, jobRegistry, databaseBindin
 
 export const databaseHttpInternals = Object.freeze({
   requireDatabaseName,
+  exactConfirmationBody,
   ensureDatabaseIdle,
   latestDatabaseSnapshot,
 });
