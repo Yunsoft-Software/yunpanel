@@ -50,6 +50,9 @@ const SERVICE_CATALOG = Object.freeze([
     configurationChecks: [{ file: '/usr/bin/rspamadm', args: ['configtest'] }],
   }),
   service({
+    id: 'postsrsd', label: 'PostSRSd', category: 'mail', packages: ['postsrsd'], units: ['postsrsd.service'],
+  }),
+  service({
     id: 'roundcube',
     label: 'Roundcube',
     category: 'mail',
