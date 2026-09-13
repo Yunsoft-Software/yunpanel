@@ -3,6 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { getMailDomain, listMailAliases, listMailDomains, listMailboxes } from './mail-client.js';
 import MailAliasesPanel from './MailAliasesPanel.jsx';
 import MailboxesPanel from './MailboxesPanel.jsx';
+import MailConfigurationPanel from './MailConfigurationPanel.jsx';
+import MailDkimDiagnosticsPanel from './MailDkimDiagnosticsPanel.jsx';
 import MailDomainCreateDialog from './MailDomainCreateDialog.jsx';
 import { Badge, Button, EmptyState, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
@@ -49,15 +51,14 @@ function MailDomainList() {
 function MailDomainDetail({ mailDomainId }) {
   const detail = useAsyncResource(async () => {
     const domain = await getMailDomain(mailDomainId);
-    const [mailboxes, aliases] = await Promise.all([
-      listMailboxes(mailDomainId),
-      listMailAliases(mailDomainId),
-    ]);
+    const [mailboxes, aliases] = domain.managementMode === 'local'
+      ? await Promise.all([listMailboxes(mailDomainId), listMailAliases(mailDomainId)])
+      : [[], []];
     return { domain, mailboxes, aliases };
   }, [mailDomainId]);
   const data = detail.data;
   const domain = data?.domain ?? null;
-  return <><nav className="ws-breadcrumb"><Link to="/mail">Mail</Link><span>/ {domain?.domainName ?? mailDomainId}</span></nav><PageHeading title={domain?.domainName ?? 'Mail domain'} description="Mail domain identity, mailbox, alias ve host configuration yönetimi." actions={<Button icon="refresh" onClick={detail.refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Mail domain" />{domain && <><Section title="Domain durumu"><div className="ws-section-body"><KeyValues items={[
+  return <><nav className="ws-breadcrumb"><Link to="/mail">Mail</Link><span>/ {domain?.domainName ?? mailDomainId}</span></nav><PageHeading title={domain?.domainName ?? 'Mail domain'} description="Mail domain identity, mailbox, alias, DKIM ve host configuration yönetimi." actions={<Button icon="refresh" onClick={detail.refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Mail domain" />{domain && <><Section title="Domain durumu"><div className="ws-section-body"><KeyValues items={[
     ['Yönetim modu', domain.managementMode],
     ['Durum', <Badge key="status" state={mailState(domain)}>{domain.status}</Badge>],
     ['Revizyon', domain.revision],
@@ -65,7 +66,7 @@ function MailDomainDetail({ mailDomainId }) {
     ['Mailbox', data.mailboxes?.length ?? 0],
     ['Alias', data.aliases?.length ?? 0],
     ['Son gözlem', formatDate(domain.lastObservedAt)],
-  ]} />{domain.managementMode === 'external' && <p className="ws-muted">External mail domain yalnız takip edilir; local mailbox, alias, DKIM ve host configuration işlemleri bu kayda uygulanmaz.</p>}</div></Section>{domain.managementMode === 'local' ? <><MailboxesPanel domain={domain} mailboxes={data.mailboxes ?? []} onChanged={detail.refresh} /><MailAliasesPanel domain={domain} aliases={data.aliases ?? []} onChanged={detail.refresh} /></> : <Section title="External mail takibi"><EmptyState icon="external" title="Host mail konfigürasyonu bu panel tarafından yönetilmiyor" detail="Bu kayıt external lifecycle identity olarak tutulur. Local mailbox veya alias desired-state oluşturulmaz." /></Section>}</>}</>;
+  ]} />{domain.managementMode === 'external' && <p className="ws-muted">External mail domain yalnız takip edilir; local mailbox, alias, DKIM ve host configuration işlemleri bu kayda uygulanmaz.</p>}</div></Section>{domain.managementMode === 'local' ? <><MailConfigurationPanel domain={domain} onChanged={detail.refresh} /><MailboxesPanel domain={domain} mailboxes={data.mailboxes ?? []} onChanged={detail.refresh} /><MailAliasesPanel domain={domain} aliases={data.aliases ?? []} onChanged={detail.refresh} /><MailDkimDiagnosticsPanel domain={domain} onChanged={detail.refresh} /></> : <Section title="External mail takibi"><EmptyState icon="external" title="Host mail konfigürasyonu bu panel tarafından yönetilmiyor" detail="Bu kayıt external lifecycle identity olarak tutulur. Local mailbox, alias veya DKIM desired-state oluşturulmaz." /></Section>}</>}</>;
 }
 
 export default function MailDomainsPage() {
