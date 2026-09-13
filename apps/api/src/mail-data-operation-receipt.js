@@ -19,6 +19,11 @@ const RESTORE_KEYS = Object.freeze([
   'transactionId', 'backupId', 'preRestoreBackupId', 'contentSha256', 'bytes', 'files', 'directories',
   'restoredPresent', 'applied', 'sideEffects',
 ]);
+const DELETE_KEYS = Object.freeze([
+  'version', 'recordedAt', 'serverId', 'jobId', 'operation', 'mailDomainId', 'resourceId', 'scope', 'identity',
+  'transactionId', 'backupId', 'sourcePresent', 'contentSha256', 'bytes', 'files', 'directories',
+  'deleted', 'sideEffects',
+]);
 
 export class MailDataOperationReceiptError extends Error {
   constructor(code, message) {
@@ -118,9 +123,31 @@ function normalizeRestore(value) {
   });
 }
 
+function normalizeDelete(value) {
+  const normalized = base(value, DELETE_KEYS);
+  if (value.operation !== OPERATIONS.MAIL_DATA_DELETE
+    || value.transactionId !== normalized.jobId || !BACKUP_ID_PATTERN.test(value.transactionId)
+    || typeof value.backupId !== 'string' || !BACKUP_ID_PATTERN.test(value.backupId)
+    || typeof value.resourceId !== 'string' || !UUID_PATTERN.test(value.resourceId)
+    || (value.scope === 'domain' && value.resourceId !== normalized.mailDomainId)
+    || typeof value.sourcePresent !== 'boolean' || value.deleted !== true) {
+    throw new MailDataOperationReceiptError('mail_data_receipt_invalid', 'Mail data delete receipt is invalid');
+  }
+  return Object.freeze({
+    ...normalized,
+    operation: OPERATIONS.MAIL_DATA_DELETE,
+    transactionId: value.transactionId,
+    backupId: value.backupId,
+    resourceId: value.resourceId.toLowerCase(),
+    sourcePresent: value.sourcePresent,
+    deleted: true,
+  });
+}
+
 function normalizeReceipt(value) {
   if (value?.operation === OPERATIONS.MAIL_DATA_BACKUP) return normalizeBackup(value);
   if (value?.operation === OPERATIONS.MAIL_DATA_RESTORE) return normalizeRestore(value);
+  if (value?.operation === OPERATIONS.MAIL_DATA_DELETE) return normalizeDelete(value);
   throw new MailDataOperationReceiptError('mail_data_receipt_invalid', 'Mail data receipt operation is invalid');
 }
 
