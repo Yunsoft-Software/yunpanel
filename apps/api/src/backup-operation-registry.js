@@ -14,6 +14,7 @@ const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const ERROR_CODE_PATTERN = /^[a-z0-9][a-z0-9_.:-]{0,119}$/;
+const STORE_KEYS = new Set(['version', 'operations']);
 const OPERATION_KEYS = new Set([
   'id', 'serverId', 'executionDigest', 'idempotencyKey', 'previewDigest', 'status', 'plan', 'steps',
   'createdAt', 'startedAt', 'finishedAt', 'error',
@@ -32,64 +33,54 @@ export class BackupOperationRegistryError extends Error {
   }
 }
 
-function exactObject(value, keys, code, message) {
+function invalid(message, code = 'backup_operation_state_invalid') {
+  throw new BackupOperationRegistryError(code, message, 409);
+}
+
+function exactObject(value, keys, message) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== keys.size
-    || Object.keys(value).some((key) => !keys.has(key))) {
-    throw new BackupOperationRegistryError(code, message, 409);
-  }
+    || Object.keys(value).some((key) => !keys.has(key))) invalid(message);
   return value;
 }
 
 function uuid(value, label) {
-  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', `${label} is invalid`, 409);
-  }
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) invalid(`${label} is invalid`);
   return value.toLowerCase();
+}
+
+function safeId(value, label) {
+  if (typeof value !== 'string' || !SAFE_ID_PATTERN.test(value)) invalid(`${label} is invalid`);
+  return value;
 }
 
 function timestamp(value, label, { nullable = false } = {}) {
   if (nullable && value === null) return null;
-  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', `${label} is invalid`, 409);
-  }
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) invalid(`${label} is invalid`);
   return new Date(value).toISOString();
-}
-
-function safeId(value, label) {
-  if (typeof value !== 'string' || !SAFE_ID_PATTERN.test(value)) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', `${label} is invalid`, 409);
-  }
-  return value;
 }
 
 function normalizeError(value, { nullable = true } = {}) {
   if (nullable && value === null) return null;
-  exactObject(value, ERROR_KEYS, 'backup_operation_state_invalid', 'Backup operation error is invalid');
+  exactObject(value, ERROR_KEYS, 'Backup operation error is invalid');
   if (typeof value.code !== 'string' || !ERROR_CODE_PATTERN.test(value.code)
     || typeof value.message !== 'string' || value.message.length < 1 || value.message.length > 240
-    || /[\u0000-\u001f\u007f]/.test(value.message)) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', 'Backup operation error is invalid', 409);
-  }
+    || /[\u0000-\u001f\u007f]/.test(value.message)) invalid('Backup operation error is invalid');
   return Object.freeze({ code: value.code, message: value.message });
 }
 
 function normalizeWorkRef(value, { nullable = true } = {}) {
   if (nullable && value === null) return null;
-  exactObject(value, WORK_REF_KEYS, 'backup_operation_state_invalid', 'Backup step work reference is invalid');
-  if (!WORK_KINDS.has(value.kind)) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', 'Backup step work kind is invalid', 409);
-  }
+  exactObject(value, WORK_REF_KEYS, 'Backup step work reference is invalid');
+  if (!WORK_KINDS.has(value.kind)) invalid('Backup step work kind is invalid');
   return Object.freeze({ kind: value.kind, id: safeId(value.id, 'Backup step work id') });
 }
 
 function normalizeEvidence(value, { nullable = true } = {}) {
   if (nullable && value === null) return null;
-  exactObject(value, EVIDENCE_KEYS, 'backup_operation_state_invalid', 'Backup step evidence is invalid');
+  exactObject(value, EVIDENCE_KEYS, 'Backup step evidence is invalid');
   if (typeof value.contentSha256 !== 'string' || !SHA256_PATTERN.test(value.contentSha256)
-    || !Number.isSafeInteger(value.bytes) || value.bytes < 0) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', 'Backup step evidence is invalid', 409);
-  }
+    || !Number.isSafeInteger(value.bytes) || value.bytes < 0) invalid('Backup step evidence is invalid');
   return Object.freeze({
     artifactId: safeId(value.artifactId, 'Backup artifact id'),
     contentSha256: value.contentSha256,
@@ -102,40 +93,31 @@ function same(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function normalizeStepState(value, planStep) {
-  exactObject(value, STEP_KEYS, 'backup_operation_state_invalid', 'Backup operation step state is invalid');
-  if (value.stepId !== planStep.stepId || !STEP_STATUSES.has(value.status)) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', 'Backup operation step identity is invalid', 409);
-  }
+function normalizeStep(value, planStep) {
+  exactObject(value, STEP_KEYS, 'Backup operation step state is invalid');
+  if (value.stepId !== planStep.stepId || !STEP_STATUSES.has(value.status)) invalid('Backup operation step identity is invalid');
   const workRef = normalizeWorkRef(value.workRef);
   const evidence = normalizeEvidence(value.evidence);
   const error = normalizeError(value.error);
   const updatedAt = timestamp(value.updatedAt, 'Backup step update timestamp');
-  if (value.status === 'pending' && (workRef !== null || evidence !== null || error !== null)) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', 'Pending backup step contains execution state', 409);
-  }
-  if (value.status === 'dispatched' && (workRef === null || evidence !== null || error !== null)) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', 'Dispatched backup step state is inconsistent', 409);
-  }
-  if (value.status === 'succeeded' && (workRef === null || evidence === null || error !== null)) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', 'Succeeded backup step state is inconsistent', 409);
-  }
-  if (value.status === 'failed' && (workRef === null || evidence !== null || error === null)) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', 'Failed backup step state is inconsistent', 409);
-  }
+  if (value.status === 'pending' && (workRef || evidence || error)) invalid('Pending backup step contains execution state');
+  if (value.status === 'dispatched' && (!workRef || evidence || error)) invalid('Dispatched backup step state is inconsistent');
+  if (value.status === 'succeeded' && (!workRef || !evidence || error)) invalid('Succeeded backup step state is inconsistent');
+  if (value.status === 'failed' && (!workRef || evidence || !error)) invalid('Failed backup step state is inconsistent');
   return Object.freeze({ stepId: value.stepId, status: value.status, workRef, evidence, error, updatedAt });
 }
 
-function normalizeOperation(value) {
-  exactObject(value, OPERATION_KEYS, 'backup_operation_state_invalid', 'Backup operation state is invalid');
-  let plan;
-  try { plan = normalizeBackupExecutionPlan(value.plan); }
+function normalizePlan(value) {
+  try { return normalizeBackupExecutionPlan(value); }
   catch (error) {
-    if (error instanceof BackupExecutionStateError) {
-      throw new BackupOperationRegistryError('backup_operation_state_invalid', 'Backup execution plan state is invalid', 409);
-    }
+    if (error instanceof BackupExecutionStateError) invalid('Backup execution plan state is invalid');
     throw error;
   }
+}
+
+function normalizeOperation(value) {
+  exactObject(value, OPERATION_KEYS, 'Backup operation state is invalid');
+  const plan = normalizePlan(value.plan);
   const id = uuid(value.id, 'Backup operation id');
   const serverId = uuid(value.serverId, 'Backup operation server id');
   if (serverId !== plan.serverId
@@ -144,36 +126,56 @@ function normalizeOperation(value) {
     || value.previewDigest !== plan.previewDigest
     || !OPERATION_STATUSES.has(value.status)
     || !Array.isArray(value.steps) || value.steps.length !== plan.steps.length) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', 'Backup operation metadata does not match its execution plan', 409);
+    invalid('Backup operation metadata does not match its execution plan');
   }
-  const steps = value.steps.map((step, index) => normalizeStepState(step, plan.steps[index]));
+  const steps = value.steps.map((step, index) => normalizeStep(step, plan.steps[index]));
   const createdAt = timestamp(value.createdAt, 'Backup operation creation timestamp');
   const startedAt = timestamp(value.startedAt, 'Backup operation start timestamp', { nullable: true });
   const finishedAt = timestamp(value.finishedAt, 'Backup operation finish timestamp', { nullable: true });
   const error = normalizeError(value.error);
   const succeeded = steps.filter((step) => step.status === 'succeeded').length;
   const failed = steps.filter((step) => step.status === 'failed').length;
-  if (value.status === 'queued' && (startedAt !== null || finishedAt !== null || error !== null
-      || steps.some((step) => step.status !== 'pending'))
-    || value.status === 'running' && (startedAt === null || finishedAt !== null || error !== null || failed > 0)
-    || value.status === 'succeeded' && (startedAt === null || finishedAt === null || error !== null || succeeded !== steps.length)
-    || value.status === 'failed' && (startedAt === null || finishedAt === null || error === null || failed < 1)) {
-    throw new BackupOperationRegistryError('backup_operation_state_invalid', 'Backup operation lifecycle state is inconsistent', 409);
+  if (value.status === 'queued' && (startedAt || finishedAt || error || steps.some((step) => step.status !== 'pending'))) {
+    invalid('Queued backup operation lifecycle is inconsistent');
+  }
+  if (value.status === 'running' && (!startedAt || finishedAt || error || failed > 0 || succeeded === steps.length)) {
+    invalid('Running backup operation lifecycle is inconsistent');
+  }
+  if (value.status === 'succeeded' && (!startedAt || !finishedAt || error || succeeded !== steps.length)) {
+    invalid('Succeeded backup operation lifecycle is inconsistent');
+  }
+  if (value.status === 'failed' && (!startedAt || !finishedAt || !error || failed < 1)) {
+    invalid('Failed backup operation lifecycle is inconsistent');
   }
   return Object.freeze({
-    id, serverId, executionDigest: plan.executionDigest, idempotencyKey: plan.idempotencyKey,
-    previewDigest: plan.previewDigest, status: value.status, plan, steps: Object.freeze(steps),
-    createdAt, startedAt, finishedAt, error,
+    id,
+    serverId,
+    executionDigest: plan.executionDigest,
+    idempotencyKey: plan.idempotencyKey,
+    previewDigest: plan.previewDigest,
+    status: value.status,
+    plan,
+    steps: Object.freeze(steps),
+    createdAt,
+    startedAt,
+    finishedAt,
+    error,
   });
 }
 
 function normalizeStore(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)
-    || value.version !== STORE_VERSION || !Array.isArray(value.operations)
-    || Object.keys(value).length !== 2 || Object.keys(value).some((key) => !['version', 'operations'].includes(key))) {
+  exactObject(value, STORE_KEYS, 'Backup operation store is invalid');
+  if (value.version !== STORE_VERSION || !Array.isArray(value.operations)) {
     throw new BackupOperationRegistryError('backup_operation_store_invalid', 'Backup operation store is invalid', 409);
   }
-  const operations = value.operations.map(normalizeOperation);
+  let operations;
+  try { operations = value.operations.map(normalizeOperation); }
+  catch (error) {
+    if (error instanceof BackupOperationRegistryError) {
+      throw new BackupOperationRegistryError('backup_operation_store_invalid', 'Backup operation store contains invalid state', 409);
+    }
+    throw error;
+  }
   if (new Set(operations.map((operation) => operation.id)).size !== operations.length
     || new Set(operations.map((operation) => operation.idempotencyKey)).size !== operations.length) {
     throw new BackupOperationRegistryError('backup_operation_store_invalid', 'Backup operation store contains duplicate identities', 409);
@@ -184,7 +186,6 @@ function normalizeStore(value) {
 function publicOperation(operation) {
   return Object.freeze({
     ...operation,
-    plan: operation.plan,
     steps: Object.freeze(operation.steps.map((step) => Object.freeze({ ...step }))),
   });
 }
@@ -230,35 +231,22 @@ export function createBackupOperationRegistry({ filePath = null, now = () => Dat
   }
 
   function mutate(transform) {
-    const operation = mutationTail.catch(() => {}).then(async () => {
+    const task = mutationTail.catch(() => {}).then(async () => {
       await ensureInitialized();
-      const next = await transform(state);
-      if (next.state !== state) await persist(next.state);
-      return next.result;
+      const { state: nextState, result } = await transform(state);
+      if (nextState !== state) await persist(nextState);
+      return result;
     });
-    mutationTail = operation;
-    return operation;
+    mutationTail = task;
+    return task;
   }
 
   async function create(planValue) {
-    let plan;
-    try { plan = normalizeBackupExecutionPlan(planValue); }
-    catch (error) {
-      if (error instanceof BackupExecutionStateError) {
-        throw new BackupOperationRegistryError('backup_execution_plan_invalid', 'Backup execution plan is invalid', 409);
-      }
-      throw error;
-    }
+    const plan = normalizePlan(planValue);
     return mutate((current) => {
       const existing = current.operations.find((operation) => operation.idempotencyKey === plan.idempotencyKey) ?? null;
-      if (existing) {
-        if (existing.executionDigest !== plan.executionDigest) {
-          throw new BackupOperationRegistryError('backup_operation_idempotency_conflict', 'Backup idempotency key is already used for different work', 409);
-        }
-        return { state: current, result: publicOperation(existing) };
-      }
-      if (current.operations.some((operation) => operation.serverId === plan.serverId
-        && ['queued', 'running'].includes(operation.status))) {
+      if (existing) return { state: current, result: publicOperation(existing) };
+      if (current.operations.some((operation) => operation.serverId === plan.serverId && ['queued', 'running'].includes(operation.status))) {
         throw new BackupOperationRegistryError('backup_operation_conflict', 'Another general backup is already active for this Server', 409);
       }
       const createdAt = new Date(now()).toISOString();
@@ -300,15 +288,18 @@ export function createBackupOperationRegistry({ filePath = null, now = () => Dat
       if (operation.status !== 'queued') {
         throw new BackupOperationRegistryError('backup_operation_not_startable', 'Backup operation cannot be started from its current state', 409);
       }
-      const next = normalizeOperation({
+      return replaceOperation(current, index, normalizeOperation({
         ...operation,
         status: 'running',
         startedAt: new Date(now()).toISOString(),
-      });
-      const operations = [...current.operations];
-      operations[index] = next;
-      return { state: { version: STORE_VERSION, operations }, result: publicOperation(next) };
+      }));
     });
+  }
+
+  function replaceOperation(current, index, operation) {
+    const operations = [...current.operations];
+    operations[index] = operation;
+    return { state: { version: STORE_VERSION, operations }, result: publicOperation(operation) };
   }
 
   async function linkStep({ operationId, stepId, workRef } = {}) {
@@ -319,27 +310,24 @@ export function createBackupOperationRegistry({ filePath = null, now = () => Dat
       const index = current.operations.findIndex((operation) => operation.id === id);
       if (index < 0) throw new BackupOperationRegistryError('backup_operation_not_found', 'Backup operation was not found', 404);
       const operation = current.operations[index];
-      if (operation.status !== 'running') {
-        throw new BackupOperationRegistryError('backup_operation_not_running', 'Backup operation is not running', 409);
-      }
+      if (operation.status !== 'running') throw new BackupOperationRegistryError('backup_operation_not_running', 'Backup operation is not running', 409);
       const stepIndex = operation.steps.findIndex((step) => step.stepId === normalizedStepId);
       if (stepIndex < 0) throw new BackupOperationRegistryError('backup_step_not_found', 'Backup operation step was not found', 404);
       const step = operation.steps[stepIndex];
-      if (step.status === 'dispatched' && same(step.workRef, normalizedWorkRef)) return publicOperation(operation);
+      if (step.status === 'dispatched' && same(step.workRef, normalizedWorkRef)) {
+        return { state: current, result: publicOperation(operation) };
+      }
       if (step.status !== 'pending') {
         throw new BackupOperationRegistryError('backup_step_already_dispatched', 'Backup step already has durable execution state', 409);
       }
       const steps = [...operation.steps];
-      steps[stepIndex] = normalizeStepState({
+      steps[stepIndex] = normalizeStep({
         ...step,
         status: 'dispatched',
         workRef: normalizedWorkRef,
         updatedAt: new Date(now()).toISOString(),
       }, operation.plan.steps[stepIndex]);
-      const next = normalizeOperation({ ...operation, steps });
-      const operations = [...current.operations];
-      operations[index] = next;
-      return { state: { version: STORE_VERSION, operations }, result: publicOperation(next) };
+      return replaceOperation(current, index, normalizeOperation({ ...operation, steps }));
     });
   }
 
@@ -356,7 +344,9 @@ export function createBackupOperationRegistry({ filePath = null, now = () => Dat
       if (stepIndex < 0) throw new BackupOperationRegistryError('backup_step_not_found', 'Backup operation step was not found', 404);
       const step = operation.steps[stepIndex];
       if (step.status === 'succeeded') {
-        if (same(step.workRef, normalizedWorkRef) && same(step.evidence, normalizedEvidence)) return publicOperation(operation);
+        if (same(step.workRef, normalizedWorkRef) && same(step.evidence, normalizedEvidence)) {
+          return { state: current, result: publicOperation(operation) };
+        }
         throw new BackupOperationRegistryError('backup_step_completion_conflict', 'Backup step already completed with different evidence', 409);
       }
       if (operation.status !== 'running' || step.status !== 'dispatched' || !same(step.workRef, normalizedWorkRef)) {
@@ -364,22 +354,19 @@ export function createBackupOperationRegistry({ filePath = null, now = () => Dat
       }
       const completedAt = new Date(now()).toISOString();
       const steps = [...operation.steps];
-      steps[stepIndex] = normalizeStepState({
+      steps[stepIndex] = normalizeStep({
         ...step,
         status: 'succeeded',
         evidence: normalizedEvidence,
         updatedAt: completedAt,
       }, operation.plan.steps[stepIndex]);
       const allSucceeded = steps.every((candidate) => candidate.status === 'succeeded');
-      const next = normalizeOperation({
+      return replaceOperation(current, index, normalizeOperation({
         ...operation,
         status: allSucceeded ? 'succeeded' : 'running',
         steps,
         finishedAt: allSucceeded ? completedAt : null,
-      });
-      const operations = [...current.operations];
-      operations[index] = next;
-      return { state: { version: STORE_VERSION, operations }, result: publicOperation(next) };
+      }));
     });
   }
 
@@ -396,7 +383,9 @@ export function createBackupOperationRegistry({ filePath = null, now = () => Dat
       if (stepIndex < 0) throw new BackupOperationRegistryError('backup_step_not_found', 'Backup operation step was not found', 404);
       const step = operation.steps[stepIndex];
       if (step.status === 'failed') {
-        if (same(step.workRef, normalizedWorkRef) && same(step.error, normalizedError)) return publicOperation(operation);
+        if (same(step.workRef, normalizedWorkRef) && same(step.error, normalizedError)) {
+          return { state: current, result: publicOperation(operation) };
+        }
         throw new BackupOperationRegistryError('backup_step_completion_conflict', 'Backup step already failed with different evidence', 409);
       }
       if (operation.status !== 'running' || step.status !== 'dispatched' || !same(step.workRef, normalizedWorkRef)) {
@@ -404,22 +393,19 @@ export function createBackupOperationRegistry({ filePath = null, now = () => Dat
       }
       const finishedAt = new Date(now()).toISOString();
       const steps = [...operation.steps];
-      steps[stepIndex] = normalizeStepState({
+      steps[stepIndex] = normalizeStep({
         ...step,
         status: 'failed',
         error: normalizedError,
         updatedAt: finishedAt,
       }, operation.plan.steps[stepIndex]);
-      const next = normalizeOperation({
+      return replaceOperation(current, index, normalizeOperation({
         ...operation,
         status: 'failed',
         steps,
         finishedAt,
         error: normalizedError,
-      });
-      const operations = [...current.operations];
-      operations[index] = next;
-      return { state: { version: STORE_VERSION, operations }, result: publicOperation(next) };
+      }));
     });
   }
 
