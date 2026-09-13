@@ -96,12 +96,15 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountDatabaseRoutes(app, { registry, jobRegistry }) {
+export function mountDatabaseRoutes(app, { registry, jobRegistry, databaseBindingRegistry = null }) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.delete !== 'function') {
     throw new Error('Express application is required');
   }
   if (!registry || typeof registry.getServer !== 'function') throw new Error('Server registry is required');
   if (!jobRegistry || typeof jobRegistry.enqueue !== 'function' || typeof jobRegistry.listJobs !== 'function') throw new Error('Job registry is required');
+  if (databaseBindingRegistry !== null && typeof databaseBindingRegistry.getByDatabase !== 'function') {
+    throw new Error('Database binding registry is invalid');
+  }
 
   app.get('/api/servers/:serverId/databases', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const server = await requireServer(registry, request.params.serverId);
@@ -146,6 +149,20 @@ export function mountDatabaseRoutes(app, { registry, jobRegistry }) {
     const name = requireDatabaseName(request.params.name);
     if (request.body?.confirmation !== `delete:${name}`) {
       throw new DatabaseHttpError('database_confirmation_required', `Confirm database deletion with delete:${name}`);
+    }
+    if (databaseBindingRegistry) {
+      let binding;
+      try { binding = await databaseBindingRegistry.getByDatabase({ serverId: server.id, databaseName: name }); }
+      catch {
+        throw new DatabaseHttpError('database_binding_state_unavailable', 'Database ownership state could not be verified', 503);
+      }
+      if (binding) {
+        throw new DatabaseHttpError(
+          'database_binding_exists',
+          'Unbind the database from its Website before deleting the schema',
+          409,
+        );
+      }
     }
     await ensureDatabaseIdle(jobRegistry, server.id);
     const job = await jobRegistry.enqueue({
