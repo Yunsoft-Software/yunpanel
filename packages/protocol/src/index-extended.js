@@ -15,9 +15,13 @@ import {
 } from './index.js';
 
 const MAIL_DKIM_APPLY = 'mail.dkim.apply';
+const MAIL_DATA_BACKUP = 'mail.data.backup';
+const MAIL_DATA_RESTORE = 'mail.data.restore';
 const ROUNDCUBE_CONFIG_APPLY = 'roundcube.config.apply';
 const POSTSRSD_SERVICE_ID = 'postsrsd';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const BACKUP_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+const MAILBOX_LOCAL_PART_PATTERN = /^[a-z0-9](?:[a-z0-9._+-]{0,62}[a-z0-9])?$/;
 const TXT_MAX_BYTES = 4096;
 
 export const MANAGED_SERVICE_IDS = Object.freeze([...BASE_MANAGED_SERVICE_IDS, POSTSRSD_SERVICE_ID]);
@@ -26,12 +30,16 @@ export const MANAGED_SERVICE_CONTROL_IDS = Object.freeze([...BASE_MANAGED_SERVIC
 export const OPERATIONS = Object.freeze({
   ...BASE_OPERATIONS,
   MAIL_DKIM_APPLY,
+  MAIL_DATA_BACKUP,
+  MAIL_DATA_RESTORE,
   ROUNDCUBE_CONFIG_APPLY,
 });
 
 export function isKnownOperation(operation) {
   return isBaseKnownOperation(operation)
     || operation === MAIL_DKIM_APPLY
+    || operation === MAIL_DATA_BACKUP
+    || operation === MAIL_DATA_RESTORE
     || operation === ROUNDCUBE_CONFIG_APPLY;
 }
 
@@ -42,6 +50,18 @@ export function isReadOnlyOperation(operation) {
 function canonicalDomain(value) {
   try { return normalizeDomainSet(value, []).primary; }
   catch { return null; }
+}
+
+function canonicalMailbox(value) {
+  if (typeof value !== 'string' || value.length > 254 || value.trim() !== value) return null;
+  const separator = value.indexOf('@');
+  if (separator < 1 || separator !== value.lastIndexOf('@')) return null;
+  const local = value.slice(0, separator).toLowerCase();
+  if (!MAILBOX_LOCAL_PART_PATTERN.test(local) || local.includes('..')) return null;
+  const domain = canonicalDomain(value.slice(separator + 1));
+  if (!domain) return null;
+  const normalized = `${local}@${domain}`;
+  return normalized.length <= 254 ? normalized : null;
 }
 
 function validateMailDkimApply(payload, errors) {
@@ -62,6 +82,45 @@ function validateMailDkimApply(payload, errors) {
   if (typeof payload.previewDigest !== 'string' || !SHA256_PATTERN.test(payload.previewDigest)
     || typeof payload.configurationSha256 !== 'string' || !SHA256_PATTERN.test(payload.configurationSha256)) {
     errors.push(`${MAIL_DKIM_APPLY} digests are invalid`);
+  }
+}
+
+function validateMailDataIdentity(payload, operation, errors) {
+  try {
+    if (assertUuid(payload.mailDomainId, 'mailDomainId') !== payload.mailDomainId) throw new Error('noncanonical');
+  } catch {
+    errors.push(`${operation} mailDomainId is invalid`);
+  }
+  if (!['mailbox', 'domain'].includes(payload.scope)) {
+    errors.push(`${operation} scope is invalid`);
+    return;
+  }
+  const normalized = payload.scope === 'mailbox' ? canonicalMailbox(payload.identity) : canonicalDomain(payload.identity);
+  if (!normalized || normalized !== payload.identity) errors.push(`${operation} identity is invalid`);
+}
+
+function validateMailDataBackup(payload, errors) {
+  const allowed = new Set(['mailDomainId', 'scope', 'identity', 'expectedSnapshotSha256']);
+  if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
+    errors.push(`${MAIL_DATA_BACKUP} contains unsupported arguments`);
+  }
+  validateMailDataIdentity(payload, MAIL_DATA_BACKUP, errors);
+  if (typeof payload.expectedSnapshotSha256 !== 'string' || !SHA256_PATTERN.test(payload.expectedSnapshotSha256)) {
+    errors.push(`${MAIL_DATA_BACKUP} snapshot digest is invalid`);
+  }
+}
+
+function validateMailDataRestore(payload, errors) {
+  const allowed = new Set(['mailDomainId', 'backupId', 'scope', 'identity', 'expectedTargetSnapshotSha256']);
+  if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
+    errors.push(`${MAIL_DATA_RESTORE} contains unsupported arguments`);
+  }
+  validateMailDataIdentity(payload, MAIL_DATA_RESTORE, errors);
+  if (typeof payload.backupId !== 'string' || !BACKUP_ID_PATTERN.test(payload.backupId)) {
+    errors.push(`${MAIL_DATA_RESTORE} backupId is invalid`);
+  }
+  if (typeof payload.expectedTargetSnapshotSha256 !== 'string' || !SHA256_PATTERN.test(payload.expectedTargetSnapshotSha256)) {
+    errors.push(`${MAIL_DATA_RESTORE} target snapshot digest is invalid`);
   }
 }
 
@@ -137,6 +196,8 @@ function validatePostsrsdServiceOperation(operation, payload, errors) {
 function extendedOperation(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   if (value.operation === MAIL_DKIM_APPLY) return 'mail_dkim';
+  if (value.operation === MAIL_DATA_BACKUP) return 'mail_data_backup';
+  if (value.operation === MAIL_DATA_RESTORE) return 'mail_data_restore';
   if (value.operation === ROUNDCUBE_CONFIG_APPLY) return 'roundcube';
   if (value.operation === BASE_OPERATIONS.DNS_RECORD_APPLY && value.payload?.record?.type === 'TXT') return 'dns_txt';
   if (value.payload?.serviceId === POSTSRSD_SERVICE_ID
@@ -159,6 +220,10 @@ export function validateOperationEnvelope(value) {
     errors.push('payload must be an object');
   } else if (extension === 'mail_dkim') {
     validateMailDkimApply(value.payload, errors);
+  } else if (extension === 'mail_data_backup') {
+    validateMailDataBackup(value.payload, errors);
+  } else if (extension === 'mail_data_restore') {
+    validateMailDataRestore(value.payload, errors);
   } else if (extension === 'roundcube') {
     validateRoundcubeConfigApply(value.payload, errors);
   } else if (extension === 'postsrsd_service') {
@@ -174,6 +239,8 @@ export function validateOperationEnvelope(value) {
 
 export function createOperationEnvelope({ id, operation, payload = {} }) {
   const extended = operation === MAIL_DKIM_APPLY
+    || operation === MAIL_DATA_BACKUP
+    || operation === MAIL_DATA_RESTORE
     || operation === ROUNDCUBE_CONFIG_APPLY
     || (operation === BASE_OPERATIONS.DNS_RECORD_APPLY && payload?.record?.type === 'TXT')
     || (payload?.serviceId === POSTSRSD_SERVICE_ID
@@ -191,11 +258,15 @@ export function createOperationEnvelope({ id, operation, payload = {} }) {
 
 export const protocolExtensionInternals = Object.freeze({
   mailDkimApply: MAIL_DKIM_APPLY,
+  mailDataBackup: MAIL_DATA_BACKUP,
+  mailDataRestore: MAIL_DATA_RESTORE,
   roundcubeConfigApply: ROUNDCUBE_CONFIG_APPLY,
   postsrsdServiceId: POSTSRSD_SERVICE_ID,
   readOnlyOperations: READ_ONLY_OPERATIONS,
   txtMaxBytes: TXT_MAX_BYTES,
   validateMailDkimApply,
+  validateMailDataBackup,
+  validateMailDataRestore,
   validateRoundcubeConfigApply,
   validateDnsTxtApply,
   validatePostsrsdServiceOperation,
