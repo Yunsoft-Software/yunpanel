@@ -118,6 +118,55 @@ test('mail data restore pins selected backup and pre-restore identity in termina
   assert.equal(terminal.result.applied, true);
 });
 
+test('mail data delete durably pins resource backup and secret-free absence result', async () => {
+  const registry = createJobRegistry();
+  const queued = await registry.enqueue({
+    serverId,
+    type: 'mail_data_delete',
+    operation: OPERATIONS.MAIL_DATA_DELETE,
+    payload: {
+      mailDomainId,
+      resourceId: mailboxId,
+      backupId: 'mail-backup-selected',
+      scope: 'mailbox',
+      identity: 'owner@example.com',
+      expectedResourceRevision: 3,
+      expectedTargetSnapshotSha256: digest,
+    },
+    resourceType: 'mail_domain',
+    resourceId: mailDomainId,
+    idempotencyKey: `mail-data-delete:${mailDomainId}:${digest}`,
+  });
+  const claimed = await registry.claimNext(serverId);
+  assert.equal(claimed.envelope.operation, OPERATIONS.MAIL_DATA_DELETE);
+  assert.equal(claimed.envelope.payload.resourceId, mailboxId);
+
+  const terminal = await registry.complete({
+    serverId,
+    jobId: queued.id,
+    status: 'succeeded',
+    result: {
+      version: 1,
+      transactionId: queued.id,
+      backupId: 'mail-backup-selected',
+      mailDomainId,
+      resourceId: mailboxId,
+      scope: 'mailbox',
+      identity: 'owner@example.com',
+      sourcePresent: true,
+      contentSha256: 'd'.repeat(64),
+      bytes: 4096,
+      files: 4,
+      directories: 5,
+      deleted: true,
+      sideEffects: true,
+    },
+  });
+  assert.equal(terminal.result.resourceId, mailboxId);
+  assert.equal(terminal.result.deleted, true);
+  assert.doesNotMatch(JSON.stringify(terminal.result), /tombstone|sourcePath|dataPath/);
+});
+
 test('mail data completion rejects private or mismatched result fields', async () => {
   const registry = createJobRegistry();
   const queued = await queuedBackup(registry);
