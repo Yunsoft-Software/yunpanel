@@ -6,6 +6,7 @@ const CREATE_FIELDS = new Set(['mailDomainId', 'address', 'password']);
 const ROTATE_FIELDS = new Set(['expectedRevision', 'password']);
 const UPDATE_FIELDS = new Set(['expectedRevision', 'enabled']);
 const DELETE_FIELDS = new Set(['expectedRevision', 'confirmation']);
+const FINALIZE_DELETE_FIELDS = new Set(['expectedRevision', 'deleteJobId', 'confirmation']);
 
 function exactBody(body, fields, code) {
   if (!body || typeof body !== 'object' || Array.isArray(body)
@@ -44,6 +45,7 @@ export function mountMailboxRoutes(app, {
   mailboxForwardingRegistry = null,
   mailDomainRegistry = null,
   domainRegistry = null,
+  mailDeleteFinalizeService = null,
   localServerId = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function'
@@ -65,8 +67,14 @@ export function mountMailboxRoutes(app, {
   if (mailboxForwardingRegistry !== null && typeof mailboxForwardingRegistry.getForwarding !== 'function') {
     throw new Error('Mailbox forwarding registry is invalid');
   }
+  if (mailDeleteFinalizeService !== null && typeof mailDeleteFinalizeService.finalizeMailbox !== 'function') {
+    throw new Error('Mailbox delete finalizer is invalid');
+  }
   if (localServerId !== null && (!mailDomainRegistry || !domainRegistry)) {
     throw new Error('Local mailbox scope dependencies are required');
+  }
+  if (localServerId !== null && !mailDeleteFinalizeService) {
+    throw new Error('Local mailbox deletion requires the guarded mail data finalizer');
   }
 
   async function localMailDomain(mailDomainId) {
@@ -168,8 +176,13 @@ export function mountMailboxRoutes(app, {
 
   app.delete('/api/mailboxes/:mailboxId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    const body = exactBody(request.body, DELETE_FIELDS, 'mailbox_delete_input_invalid');
     await localMailbox(request.params.mailboxId);
+    if (mailDeleteFinalizeService) {
+      const body = exactBody(request.body, FINALIZE_DELETE_FIELDS, 'mailbox_delete_input_invalid');
+      const result = await mailDeleteFinalizeService.finalizeMailbox({ mailboxId: request.params.mailboxId, ...body });
+      return response.json({ data: result, sideEffects: noHostSideEffects });
+    }
+    const body = exactBody(request.body, DELETE_FIELDS, 'mailbox_delete_input_invalid');
     await assertDeleteDependenciesCleared(request.params.mailboxId);
     await mailboxRegistry.deleteMailbox(request.params.mailboxId, body);
     return response.json({
@@ -184,4 +197,5 @@ export const mailboxHttpInternals = Object.freeze({
   listFilter,
   emptyQuery,
   noHostSideEffects,
+  finalizeDeleteFields: Object.freeze([...FINALIZE_DELETE_FIELDS]),
 });
