@@ -3,6 +3,7 @@ import { createDockerComposeValidator } from '@yunpanel/host-runtime';
 import { DOCKER_COMPOSE_OPERATIONS } from '@yunpanel/protocol';
 import { createDockerComposeEnvironmentRegistry } from './docker-compose-environment-registry.js';
 import { createDockerComposeMaterializer } from './docker-compose-materializer.js';
+import { createDockerComposeOperationReceiptStore } from './docker-compose-operation-receipt.js';
 import { createDockerComposeOperationsService } from './docker-compose-operations.js';
 import { createDockerComposeProjectRegistry } from './docker-compose-project-registry.js';
 import { createDockerRegistryCredentialRegistry } from './docker-registry-credential-registry.js';
@@ -56,11 +57,13 @@ export async function createDockerComposeRuntime({
   serverRegistry,
   jobRegistry,
   validateDockerCompose = createDockerComposeValidator(),
+  receiptStore = createDockerComposeOperationReceiptStore(),
 } = {}) {
   if (!env || typeof env !== 'object' || Array.isArray(env)
     || !serverRegistry || typeof serverRegistry.getServer !== 'function'
     || !jobRegistry || typeof jobRegistry.enqueue !== 'function' || typeof jobRegistry.listJobs !== 'function'
-    || typeof validateDockerCompose !== 'function') {
+    || typeof validateDockerCompose !== 'function'
+    || !receiptStore || typeof receiptStore.read !== 'function' || typeof receiptStore.write !== 'function') {
     throw new DockerComposeRuntimeError(
       'docker_compose_runtime_dependencies_invalid',
       'Docker Compose runtime dependencies are invalid',
@@ -102,7 +105,7 @@ export async function createDockerComposeRuntime({
     credentialRegistry,
     validateDockerCompose,
   });
-  const localOperation = createLocalDockerComposeOperation({ materialize });
+  const localOperation = createLocalDockerComposeOperation({ materialize, receiptStore });
 
   return Object.freeze({
     paths,
@@ -112,6 +115,7 @@ export async function createDockerComposeRuntime({
     operationsService,
     validateDockerCompose,
     materialize,
+    receiptStore,
     localOperation,
     extendLocalOperations(baseOperations) {
       return extendLocalOperations(baseOperations, localOperation);
