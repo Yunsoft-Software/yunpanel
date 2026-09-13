@@ -1,3 +1,4 @@
+import { createBackupDependencyGraph } from './backup-dependency-graph.js';
 import { createBackupManifest } from './backup-manifest.js';
 import { createBackupPlan } from './backup-plan.js';
 import { databaseBackupResources } from './database-backup-resource.js';
@@ -35,6 +36,8 @@ export function createBackupResourceProvider({
   dockerComposeProjectRegistry,
   applicationRegistry,
   applicationEnvironmentRegistry,
+  websiteRegistry,
+  databaseBindingRegistry,
   loadDatabaseInventory,
   mailDomainRegistry,
   domainRegistry,
@@ -51,9 +54,17 @@ export function createBackupResourceProvider({
     applicationEnvironmentRegistry && typeof applicationEnvironmentRegistry.environmentStatus === 'function',
     'Application environment registry is required',
   );
+  requireDependency(websiteRegistry && typeof websiteRegistry.listWebsites === 'function', 'Website registry is required');
+  requireDependency(
+    databaseBindingRegistry && typeof databaseBindingRegistry.listBindings === 'function',
+    'Database binding registry is required',
+  );
   requireDependency(typeof loadDatabaseInventory === 'function', 'Database inventory loader is required');
   requireDependency(mailDomainRegistry && typeof mailDomainRegistry.listMailDomains === 'function', 'Mail Domain registry is required');
-  requireDependency(domainRegistry && typeof domainRegistry.getDomain === 'function', 'Domain registry is required');
+  requireDependency(
+    domainRegistry && typeof domainRegistry.getDomain === 'function' && typeof domainRegistry.listDomains === 'function',
+    'Domain registry is required',
+  );
   requireDependency(
     mailDataOperationsService && typeof mailDataOperationsService.previewBackup === 'function',
     'Mail data backup preview service is required',
@@ -135,6 +146,7 @@ export function createBackupResourceProvider({
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
 
     const resources = [];
+    const scopedMailDomains = [];
     for (const mailDomain of mailDomains) {
       const domain = await sourceRead(
         'backup_mail_domain_state_unavailable',
@@ -156,6 +168,7 @@ export function createBackupResourceProvider({
           409,
         );
       }
+      scopedMailDomains.push(mailDomain);
       const preview = await sourceRead(
         'backup_mail_data_unavailable',
         'Mail data backup state could not be inspected',
@@ -171,16 +184,49 @@ export function createBackupResourceProvider({
         );
       }
     }
-    return Object.freeze(resources.sort((left, right) => left.identity.localeCompare(right.identity)));
+    return Object.freeze({
+      resources: Object.freeze(resources.sort((left, right) => left.identity.localeCompare(right.identity))),
+      mailDomains: Object.freeze(scopedMailDomains),
+    });
+  }
+
+  async function dependencyInventory(serverId) {
+    const [websites, domains, databaseBindings] = await Promise.all([
+      sourceRead(
+        'backup_website_inventory_unavailable',
+        'Website backup dependency inventory could not be read',
+        () => websiteRegistry.listWebsites({ serverId }),
+      ),
+      sourceRead(
+        'backup_domain_inventory_unavailable',
+        'Domain backup dependency inventory could not be read',
+        () => domainRegistry.listDomains(),
+      ),
+      sourceRead(
+        'backup_database_binding_inventory_unavailable',
+        'Database binding backup dependency inventory could not be read',
+        () => databaseBindingRegistry.listBindings({ serverId }),
+      ),
+    ]);
+    return Object.freeze({
+      websites: requireArray(websites, 'backup_website_inventory_unavailable', 'Website backup dependency inventory is invalid'),
+      domains: requireArray(domains, 'backup_domain_inventory_unavailable', 'Domain backup dependency inventory is invalid'),
+      databaseBindings: requireArray(
+        databaseBindings,
+        'backup_database_binding_inventory_unavailable',
+        'Database binding backup dependency inventory is invalid',
+      ),
+    });
   }
 
   async function preview({ serverId, selectedResourceIdentities = null } = {}) {
     const server = await requireServer(serverId);
-    const [projects, applicationSnapshots, databaseResources, mailDataResources] = await Promise.all([
+    const [projects, applicationSnapshots, databaseResources, mail, dependencies] = await Promise.all([
       dockerProjects(server.id),
       applications(server.id),
       databases(server.id),
       mailData(server.id),
+      dependencyInventory(server.id),
     ]);
 
     let baseManifest;
@@ -195,10 +241,29 @@ export function createBackupResourceProvider({
       throw new BackupResourceProviderError('backup_resource_state_invalid', 'Backup resource state is invalid', 409);
     }
 
+    let dependencyGraph;
+    try {
+      dependencyGraph = createBackupDependencyGraph({
+        serverId: server.id,
+        resources: [...baseManifest.resources, ...databaseResources, ...mail.resources],
+        websites: dependencies.websites,
+        domains: dependencies.domains,
+        databaseBindings: dependencies.databaseBindings,
+        mailDomains: mail.mailDomains,
+      });
+    } catch {
+      throw new BackupResourceProviderError(
+        'backup_dependency_state_invalid',
+        'Backup dependency state is inconsistent',
+        409,
+      );
+    }
+
     return createBackupPlan({
       baseManifest,
       databaseResources,
-      mailDataResources,
+      mailDataResources: mail.resources,
+      dependencyGraph,
       selectedResourceIdentities,
     });
   }
