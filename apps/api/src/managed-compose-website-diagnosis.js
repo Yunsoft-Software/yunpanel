@@ -1,6 +1,7 @@
 import { DockerComposeObserverError } from '@yunpanel/host-runtime';
 import {
   ManagedComposeWebsiteBindingError,
+  normalizeManagedComposeWebsiteBinding,
   resolveManagedComposeWebsiteBinding,
 } from './managed-compose-website-binding.js';
 
@@ -106,6 +107,102 @@ function overallStatus(issues) {
   return 'ready';
 }
 
+function unavailableRuntime(project) {
+  return Object.freeze({
+    status: project ? 'unknown' : 'unavailable',
+    containerCount: 0,
+    unhealthyCount: 0,
+    restartingCount: 0,
+    oomKilledCount: 0,
+    deadCount: 0,
+    exitedCount: 0,
+    nonZeroExitCount: 0,
+    exitCodes: Object.freeze([]),
+  });
+}
+
+export async function diagnoseManagedComposeBinding({
+  project,
+  binding,
+  serverId,
+  dockerComposeObserver,
+} = {}) {
+  if (!dockerComposeObserver || typeof dockerComposeObserver.inspect !== 'function') {
+    throw new ManagedComposeWebsiteDiagnosisError(
+      'managed_compose_diagnosis_dependencies_invalid',
+      'Managed Compose diagnosis dependencies are invalid',
+      500,
+    );
+  }
+
+  let normalizedBinding;
+  try {
+    normalizedBinding = normalizeManagedComposeWebsiteBinding(binding, { persisted: true });
+  } catch (error) {
+    if (error instanceof ManagedComposeWebsiteBindingError) {
+      throw new ManagedComposeWebsiteDiagnosisError(error.code, error.message, error.status);
+    }
+    throw error;
+  }
+  if (!normalizedBinding) {
+    throw new ManagedComposeWebsiteDiagnosisError(
+      'managed_compose_binding_required',
+      'Managed Compose binding is required',
+      409,
+    );
+  }
+
+  const issues = [];
+  let target = Object.freeze({ ready: false, host: null, port: null });
+  if (!project) {
+    issues.push(targetIssue(new ManagedComposeWebsiteBindingError(
+      'managed_compose_project_not_found',
+      'Managed Compose project was not found',
+      404,
+    )));
+  } else {
+    try {
+      const resolved = resolveManagedComposeWebsiteBinding({ binding: normalizedBinding, serverId, project });
+      target = Object.freeze({
+        ready: true,
+        host: resolved.proxyTarget.host,
+        port: resolved.proxyTarget.port,
+      });
+    } catch (error) {
+      if (!(error instanceof ManagedComposeWebsiteBindingError)) throw error;
+      issues.push(targetIssue(error));
+    }
+  }
+
+  let runtime = unavailableRuntime(project);
+  if (project) {
+    try {
+      runtime = runtimeSummary(await dockerComposeObserver.inspect({
+        projectName: project.projectName,
+        service: normalizedBinding.serviceName,
+      }));
+      issues.push(...runtimeIssues(runtime));
+    } catch (error) {
+      if (!(error instanceof DockerComposeObserverError)) throw error;
+      issues.push(issue(
+        'compose_runtime_inspection_unavailable',
+        'error',
+        error.code === 'docker_compose_unavailable' ? 'install_or_start_docker' : 'check_docker_service',
+        'Compose service runtime state could not be inspected.',
+      ));
+    }
+  }
+
+  return Object.freeze({
+    version: 1,
+    status: overallStatus(issues),
+    binding: Object.freeze({ ...normalizedBinding }),
+    target,
+    runtime,
+    issues: Object.freeze(issues),
+  });
+}
+
 export function createManagedComposeWebsiteDiagnosisService({
   websiteRegistry,
   dockerComposeProjectRegistry,
@@ -140,66 +237,13 @@ export function createManagedComposeWebsiteDiagnosisService({
     }
 
     const project = await dockerComposeProjectRegistry.getProject(binding.projectId);
-    const issues = [];
-    let target = Object.freeze({ ready: false, host: null, port: null });
-    if (!project) {
-      issues.push(targetIssue(new ManagedComposeWebsiteBindingError(
-        'managed_compose_project_not_found',
-        'Managed Compose project was not found',
-        404,
-      )));
-    } else {
-      try {
-        const resolved = resolveManagedComposeWebsiteBinding({ binding, serverId: website.serverId, project });
-        target = Object.freeze({
-          ready: true,
-          host: resolved.proxyTarget.host,
-          port: resolved.proxyTarget.port,
-        });
-      } catch (error) {
-        if (!(error instanceof ManagedComposeWebsiteBindingError)) throw error;
-        issues.push(targetIssue(error));
-      }
-    }
-
-    let runtime = Object.freeze({
-      status: project ? 'unknown' : 'unavailable',
-      containerCount: 0,
-      unhealthyCount: 0,
-      restartingCount: 0,
-      oomKilledCount: 0,
-      deadCount: 0,
-      exitedCount: 0,
-      nonZeroExitCount: 0,
-      exitCodes: Object.freeze([]),
+    const diagnosis = await diagnoseManagedComposeBinding({
+      project,
+      binding,
+      serverId: website.serverId,
+      dockerComposeObserver,
     });
-    if (project) {
-      try {
-        runtime = runtimeSummary(await dockerComposeObserver.inspect({
-          projectName: project.projectName,
-          service: binding.serviceName,
-        }));
-        issues.push(...runtimeIssues(runtime));
-      } catch (error) {
-        if (!(error instanceof DockerComposeObserverError)) throw error;
-        issues.push(issue(
-          'compose_runtime_inspection_unavailable',
-          'error',
-          error.code === 'docker_compose_unavailable' ? 'install_or_start_docker' : 'check_docker_service',
-          'Compose service runtime state could not be inspected.',
-        ));
-      }
-    }
-
-    return Object.freeze({
-      version: 1,
-      websiteId: website.id,
-      status: overallStatus(issues),
-      binding: Object.freeze({ ...binding }),
-      target,
-      runtime,
-      issues: Object.freeze(issues),
-    });
+    return Object.freeze({ ...diagnosis, websiteId: website.id });
   }
 
   return Object.freeze({ diagnose });
@@ -210,4 +254,5 @@ export const managedComposeWebsiteDiagnosisInternals = Object.freeze({
   runtimeIssues,
   targetIssue,
   overallStatus,
+  unavailableRuntime,
 });
