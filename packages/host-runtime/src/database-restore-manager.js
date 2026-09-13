@@ -11,6 +11,15 @@ const TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const RESTORE_PROGRAMS = Object.freeze(['/usr/bin/mariadb', '/usr/bin/mysql']);
 const MAX_STDERR = 64 * 1024;
+const PROGRESS = Object.freeze({
+  source: 10,
+  preBackup: 30,
+  apply: 40,
+  verify: 80,
+  receipt: 90,
+  rollback: 95,
+  done: 100,
+});
 
 export class DatabaseRestoreError extends Error {
   constructor(code, message) {
@@ -32,6 +41,15 @@ function expectedBackupSha256(value) {
     throw new DatabaseRestoreError('database_restore_backup_digest_invalid', 'Database restore backup digest is invalid');
   }
   return value;
+}
+
+async function emitProgress(recordProgress, stage, percent) {
+  if (!recordProgress) return;
+  try { await recordProgress(Object.freeze({ stage, percent })); }
+  catch {
+    // Progress is bounded observability only. A log sink failure must never
+    // change database transaction semantics or trigger a destructive retry.
+  }
 }
 
 async function spawnRestore(program, args, dumpPath) {
@@ -170,7 +188,10 @@ export function createDatabaseRestoreManager({
     backupId,
     databaseName,
     expectedBackupSha256: requestedBackupSha256,
-  } = {}) {
+  } = {}, { recordProgress = null } = {}) {
+    if (recordProgress !== null && typeof recordProgress !== 'function') {
+      throw new DatabaseRestoreError('database_restore_progress_invalid', 'Database restore progress recorder is invalid');
+    }
     const id = transactionId(requestedTransactionId);
     const expectedSha = expectedBackupSha256(requestedBackupSha256);
     const selected = await backupManager.materializeBackup(backupId);
@@ -181,10 +202,12 @@ export function createDatabaseRestoreManager({
       throw new DatabaseRestoreError('database_restore_backup_stale', 'Selected database backup changed after restore preview');
     }
     await requireLiveDatabase(databaseName, selected.engine);
+    await emitProgress(recordProgress, 'source', PROGRESS.source);
 
     const preRestoreBackupId = `pre-restore:${id}`;
     const preRestore = await backupManager.backup({ backupId: preRestoreBackupId, databaseName });
     const rollbackSource = await backupManager.materializeBackup(preRestoreBackupId);
+    await emitProgress(recordProgress, 'pre_backup', PROGRESS.preBackup);
 
     await mkdir(transactionRoot, { recursive: true, mode: 0o700 });
     await chmod(transactionRoot, 0o700);
@@ -194,7 +217,9 @@ export function createDatabaseRestoreManager({
     await chmod(directory, 0o700);
 
     try {
+      await emitProgress(recordProgress, 'apply', PROGRESS.apply);
       await applyBackup(selected, directory, 'restore-verification.sql');
+      await emitProgress(recordProgress, 'verify', PROGRESS.verify);
       const result = Object.freeze({
         version: 1,
         transactionId: id,
@@ -208,6 +233,7 @@ export function createDatabaseRestoreManager({
         verified: true,
         sideEffects: true,
       });
+      await emitProgress(recordProgress, 'receipt', PROGRESS.receipt);
       try { await receiptStore.write(result); }
       catch {
         throw new DatabaseRestoreError(
@@ -215,11 +241,14 @@ export function createDatabaseRestoreManager({
           'Database restore succeeded but its private completion receipt could not be committed',
         );
       }
+      await emitProgress(recordProgress, 'done', PROGRESS.done);
       return result;
     } catch (error) {
+      await emitProgress(recordProgress, 'rollback', PROGRESS.rollback);
       try {
         await rm(path.join(directory, 'restore-verification.sql'), { force: true });
         await applyBackup(rollbackSource, directory, 'rollback-verification.sql');
+        await emitProgress(recordProgress, 'rollback_verified', PROGRESS.done);
       } catch {
         throw new DatabaseRestoreError(
           'database_restore_rollback_failed',
@@ -239,6 +268,8 @@ export function createDatabaseRestoreManager({
 export const databaseRestoreManagerInternals = Object.freeze({
   defaultTransactionRoot: DEFAULT_TRANSACTION_ROOT,
   restorePrograms: RESTORE_PROGRAMS,
+  progress: PROGRESS,
+  emitProgress,
   spawnRestore,
   defaultRestoreFromFile,
   transactionId,
