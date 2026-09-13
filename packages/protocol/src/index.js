@@ -54,7 +54,20 @@ export const OPERATIONS = Object.freeze({
   APP_NODE_RESTART: 'app.node.restart',
   APP_NODE_STATUS: 'app.node.status',
   APP_NODE_PROCESS: 'app.node.process',
+  DOCKER_COMPOSE_BUILD: 'docker.compose.build',
+  DOCKER_COMPOSE_PULL: 'docker.compose.pull',
+  DOCKER_COMPOSE_START: 'docker.compose.start',
+  DOCKER_COMPOSE_STOP: 'docker.compose.stop',
+  DOCKER_COMPOSE_RESTART: 'docker.compose.restart',
 });
+
+export const DOCKER_COMPOSE_OPERATIONS = Object.freeze([
+  OPERATIONS.DOCKER_COMPOSE_BUILD,
+  OPERATIONS.DOCKER_COMPOSE_PULL,
+  OPERATIONS.DOCKER_COMPOSE_START,
+  OPERATIONS.DOCKER_COMPOSE_STOP,
+  OPERATIONS.DOCKER_COMPOSE_RESTART,
+]);
 
 export const READ_ONLY_OPERATIONS = Object.freeze([
   OPERATIONS.SERVER_INSPECT,
@@ -77,6 +90,7 @@ const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const RESERVED_DATABASE_NAMES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const DNS_RECORD_TYPES = new Set(['A', 'AAAA', 'CNAME']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const REGISTRY_HOST_PATTERN = /^(?:localhost|[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?)(?::[1-9][0-9]{0,4})?$/;
 
 export function isKnownOperation(operation) {
   return typeof operation === 'string' && KNOWN_OPERATIONS.has(operation);
@@ -214,6 +228,38 @@ function validateMailConfigApply(payload, operation, errors) {
   }
 }
 
+function validateDockerComposeOperation(payload, operation, errors) {
+  rejectUnexpectedKeys(payload, [
+    'projectId', 'expectedProjectRevision', 'expectedEnvironmentRevision', 'expectedComposeSha256', 'credentialRevisions',
+  ], operation, errors);
+  try {
+    if (assertUuid(payload.projectId, 'projectId') !== payload.projectId) throw new Error('noncanonical');
+  } catch { errors.push(`${operation} projectId is invalid`); }
+  if (!Number.isSafeInteger(payload.expectedProjectRevision) || payload.expectedProjectRevision < 1
+    || !Number.isSafeInteger(payload.expectedEnvironmentRevision) || payload.expectedEnvironmentRevision < 0
+    || typeof payload.expectedComposeSha256 !== 'string' || !SHA256_PATTERN.test(payload.expectedComposeSha256)) {
+    errors.push(`${operation} desired-state revision pins are invalid`);
+  }
+  if (!Array.isArray(payload.credentialRevisions) || payload.credentialRevisions.length > 32) {
+    errors.push(`${operation} credential revisions are invalid`);
+    return;
+  }
+  const seen = new Set();
+  let previous = null;
+  for (const entry of payload.credentialRevisions) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || Object.keys(entry).length !== 2
+      || typeof entry.registryHost !== 'string' || !REGISTRY_HOST_PATTERN.test(entry.registryHost)
+      || !Number.isSafeInteger(entry.revision) || entry.revision < 1
+      || seen.has(entry.registryHost) || (previous !== null && entry.registryHost.localeCompare(previous) <= 0)) {
+      errors.push(`${operation} credential revision pins are invalid`);
+      return;
+    }
+    seen.add(entry.registryHost);
+    previous = entry.registryHost;
+  }
+}
+
 function rejectUnexpectedKeys(payload, allowedKeys, operation, errors) {
   const allowed = new Set(allowedKeys);
   if (Object.keys(payload).some((key) => !allowed.has(key))) errors.push(`${operation} contains unsupported arguments`);
@@ -262,6 +308,7 @@ function validateMutationPayload(operation, payload, errors) {
 
   if (operation === OPERATIONS.DNS_RECORD_APPLY) validateDnsRecordApply(payload, operation, errors);
   if (operation === OPERATIONS.MAIL_CONFIG_APPLY) validateMailConfigApply(payload, operation, errors);
+  if (DOCKER_COMPOSE_OPERATIONS.includes(operation)) validateDockerComposeOperation(payload, operation, errors);
 
   if (operation === OPERATIONS.DOMAIN_STAGE) {
     rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'nginxSettings', 'tls', 'canonicalRedirect', 'httpsRedirect'], operation, errors);
