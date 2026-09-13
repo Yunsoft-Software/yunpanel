@@ -49,6 +49,22 @@ test('compose project registry bootstrap exposes the shared configured store ide
   assert.equal(typeof bootstrap.projectRegistry.materializeProject, 'function');
 });
 
+test('compose state defaults beside the configured server registry instead of the package directory', () => {
+  const bootstrap = createDockerComposeProjectRegistryBootstrap({
+    env: {
+      YUNPANEL_SERVER_STORE: '/var/lib/yunpanel/control-plane/server-registry.json',
+      YUNPANEL_SECRET_MASTER_KEY: Buffer.alloc(32, 7).toString('base64'),
+    },
+    serverRegistry: { async getServer() { return { id: serverId }; } },
+  });
+
+  assert.deepEqual(bootstrap.paths, {
+    projects: '/var/lib/yunpanel/control-plane/docker-compose-project-registry.json',
+    environments: '/var/lib/yunpanel/control-plane/docker-compose-environment-registry.json',
+    credentials: '/var/lib/yunpanel/control-plane/docker-registry-credential-registry.json',
+  });
+});
+
 test('compose runtime extends rather than replaces existing local operations', async () => {
   const fx = fixture();
   assert.equal(fx.extended.supports(OPERATIONS.SERVER_INSPECT), true);

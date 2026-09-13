@@ -21,13 +21,15 @@ export class DockerComposeRuntimeError extends Error {
 }
 
 function storePaths(env) {
+  const serverStorePath = env.YUNPANEL_SERVER_STORE ?? path.resolve('.data/server-registry.json');
+  const defaultRoot = path.dirname(serverStorePath);
   return Object.freeze({
     projects: env.YUNPANEL_DOCKER_COMPOSE_PROJECT_STORE
-      ?? path.resolve('.data/docker-compose-project-registry.json'),
+      ?? path.join(defaultRoot, 'docker-compose-project-registry.json'),
     environments: env.YUNPANEL_DOCKER_COMPOSE_ENVIRONMENT_STORE
-      ?? path.resolve('.data/docker-compose-environment-registry.json'),
+      ?? path.join(defaultRoot, 'docker-compose-environment-registry.json'),
     credentials: env.YUNPANEL_DOCKER_REGISTRY_CREDENTIAL_STORE
-      ?? path.resolve('.data/docker-registry-credential-registry.json'),
+      ?? path.join(defaultRoot, 'docker-registry-credential-registry.json'),
   });
 }
 

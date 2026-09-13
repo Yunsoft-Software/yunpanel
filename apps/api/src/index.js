@@ -69,10 +69,11 @@ import { createWebsiteRegistry } from './website-registry.js';
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10);
 const serverStorePath = process.env.YUNPANEL_SERVER_STORE ?? path.resolve('.data/server-registry.json');
+const controlPlaneStateRoot = path.dirname(serverStorePath);
 const domainStorePath = process.env.YUNPANEL_DOMAIN_STORE ?? path.resolve('.data/domain-registry.json');
 const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-registry.json');
 const backupOperationStorePath = process.env.YUNPANEL_BACKUP_OPERATION_STORE
-  ?? path.resolve('.data/backup-operation-registry.json');
+  ?? path.join(controlPlaneStateRoot, 'backup-operation-registry.json');
 const jobLogStorePath = path.resolve(path.dirname(jobStorePath), 'job-logs');
 const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.resolve('.data/certificate-registry.json');
 const customCertificateRoot = path.join(path.dirname(certificateStorePath), 'custom-certificates');

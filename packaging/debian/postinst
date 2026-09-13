@@ -50,6 +50,22 @@ if [ -f "$api_env" ]; then
     printf '%s\n' 'YUNPANEL_DATABASE_BINDING_STORE=/var/lib/yunpanel/control-plane/database-binding-registry.json' >>"$api_temp"
     api_changed=1
   fi
+  if ! grep -q '^YUNPANEL_BACKUP_OPERATION_STORE=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_BACKUP_OPERATION_STORE=/var/lib/yunpanel/control-plane/backup-operation-registry.json' >>"$api_temp"
+    api_changed=1
+  fi
+  if ! grep -q '^YUNPANEL_DOCKER_COMPOSE_PROJECT_STORE=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_DOCKER_COMPOSE_PROJECT_STORE=/var/lib/yunpanel/control-plane/docker-compose-project-registry.json' >>"$api_temp"
+    api_changed=1
+  fi
+  if ! grep -q '^YUNPANEL_DOCKER_COMPOSE_ENVIRONMENT_STORE=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_DOCKER_COMPOSE_ENVIRONMENT_STORE=/var/lib/yunpanel/control-plane/docker-compose-environment-registry.json' >>"$api_temp"
+    api_changed=1
+  fi
+  if ! grep -q '^YUNPANEL_DOCKER_REGISTRY_CREDENTIAL_STORE=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_DOCKER_REGISTRY_CREDENTIAL_STORE=/var/lib/yunpanel/control-plane/docker-registry-credential-registry.json' >>"$api_temp"
+    api_changed=1
+  fi
   if ! grep -q '^YUNPANEL_DATABASE_CREDENTIAL_STORE=' "$api_env"; then
     printf '%s\n' 'YUNPANEL_DATABASE_CREDENTIAL_STORE=/var/lib/yunpanel/control-plane/database-credential-registry.json' >>"$api_temp"
     api_changed=1

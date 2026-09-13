@@ -50,5 +50,15 @@ test('packaged gateway authenticates canonical client IP metadata to the root AP
   assert.match(postinst, /printf 'YUNPANEL_INTERNAL_PROXY_TOKEN=%s\\n' "\$proxy_token" >>"\$proxy_temp"/);
   assert.match(postinst, /if \[ -f "\$api_env" \]; then[\s\S]*if ! grep -q '\^YUNPANEL_MAILBOX_STORE=' "\$api_env"; then/);
   assert.match(postinst, /YUNPANEL_MAILBOX_STORE=\/var\/lib\/yunpanel\/control-plane\/mailbox-registry\.json/);
+  assert.match(postinst, /YUNPANEL_BACKUP_OPERATION_STORE=\/var\/lib\/yunpanel\/control-plane\/backup-operation-registry\.json/);
+  assert.match(postinst, /YUNPANEL_DOCKER_COMPOSE_PROJECT_STORE=\/var\/lib\/yunpanel\/control-plane\/docker-compose-project-registry\.json/);
+  assert.match(postinst, /YUNPANEL_DOCKER_COMPOSE_ENVIRONMENT_STORE=\/var\/lib\/yunpanel\/control-plane\/docker-compose-environment-registry\.json/);
+  assert.match(postinst, /YUNPANEL_DOCKER_REGISTRY_CREDENTIAL_STORE=\/var\/lib\/yunpanel\/control-plane\/docker-registry-credential-registry\.json/);
+  for (const variable of [
+    'YUNPANEL_BACKUP_OPERATION_STORE',
+    'YUNPANEL_DOCKER_COMPOSE_PROJECT_STORE',
+    'YUNPANEL_DOCKER_COMPOSE_ENVIRONMENT_STORE',
+    'YUNPANEL_DOCKER_REGISTRY_CREDENTIAL_STORE',
+  ]) assert.match(webUnit, new RegExp(`UnsetEnvironment=.*${variable}`));
   assert.match(postinst, /install -o yunpanel -g yunpanel -m 0600 "\$api_temp" "\$api_env"/);
 });
