@@ -9,6 +9,7 @@ import {
   listDockerProjects,
 } from './docker-compose-client.js';
 import DockerLifecyclePanel from './DockerLifecyclePanel.jsx';
+import DockerProjectCreateDialog from './DockerProjectCreateDialog.jsx';
 import { Badge, Button, EmptyState, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
 
@@ -59,10 +60,11 @@ function runtimeBadge(status) {
 
 function DockerProjectList() {
   const projects = useAsyncResource(() => listDockerProjects(), [], { enabled: true });
+  const [creating, setCreating] = useState(false);
   const items = Array.isArray(projects.data) ? projects.data : [];
-  return <><PageHeading title="Docker" description="Bu sunucuda YunPanel tarafından yönetilen Docker Compose projeleri." actions={<Button icon="refresh" onClick={projects.refresh}>Yenile</Button>} /><LoadNotice resource={projects} label="Docker projeleri" /><Section title="Compose projeleri" description="Compose desired state ve runtime birbirinden ayrı izlenir; container veya port tahmini yapılmaz.">
-    {items.length > 0 ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Proje</th><th>Servis</th><th>Network</th><th>Volume</th><th>Revizyon</th><th /></tr></thead><tbody>{items.map((project) => <tr key={project.id}><td><strong>{project.projectName}</strong><small>{project.id}</small></td><td>{project.services?.length ?? 0}</td><td>{project.networks?.length ?? 0}</td><td>{project.volumes?.length ?? 0}</td><td>{project.revision}</td><td><LinkButton to={`/docker/${encodeURIComponent(project.id)}`}>Yönet</LinkButton></td></tr>)}</tbody></table></div> : projects.status === 'ready' && <EmptyState icon="box" title="Managed Compose projesi yok" detail="Compose proje oluşturma formu bir sonraki adımda bu ekrana bağlanacak. Mevcut external Docker workload kayıtları Managed Compose projesi olarak gösterilmez." />}
-  </Section></>;
+  return <><PageHeading title="Docker" description="Bu sunucuda YunPanel tarafından yönetilen Docker Compose projeleri." actions={<><Button icon="refresh" onClick={projects.refresh}>Yenile</Button><Button variant="primary" icon="plus" onClick={() => setCreating(true)}>Compose projesi ekle</Button></>} /><LoadNotice resource={projects} label="Docker projeleri" /><Section title="Compose projeleri" description="Compose desired state ve runtime birbirinden ayrı izlenir; container veya port tahmini yapılmaz.">
+    {items.length > 0 ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Proje</th><th>Servis</th><th>Network</th><th>Volume</th><th>Revizyon</th><th /></tr></thead><tbody>{items.map((project) => <tr key={project.id}><td><strong>{project.projectName}</strong><small>{project.id}</small></td><td>{project.services?.length ?? 0}</td><td>{project.networks?.length ?? 0}</td><td>{project.volumes?.length ?? 0}</td><td>{project.revision}</td><td><LinkButton to={`/docker/${encodeURIComponent(project.id)}`}>Yönet</LinkButton></td></tr>)}</tbody></table></div> : projects.status === 'ready' && <EmptyState icon="box" title="Managed Compose projesi yok" detail="İlk Compose projesini ekleyin. Mevcut external Docker workload kayıtları Managed Compose projesi olarak gösterilmez." action={<Button variant="primary" icon="plus" onClick={() => setCreating(true)}>Compose projesi ekle</Button>} />}
+  </Section>{creating && <DockerProjectCreateDialog onClose={() => setCreating(false)} />}</>;
 }
 
 function DiagnosisPanel({ project }) {
