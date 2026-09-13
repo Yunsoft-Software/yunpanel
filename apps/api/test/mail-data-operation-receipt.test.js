@@ -13,6 +13,7 @@ import {
 const serverId = randomUUID();
 const jobId = randomUUID();
 const mailDomainId = randomUUID();
+const mailboxId = randomUUID();
 
 async function withStore(run) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-mail-data-receipt-'));
@@ -81,6 +82,35 @@ test('restore receipt pins transaction, selected backup and pre-restore backup',
   assert.equal(receipt.transactionId, jobId);
   assert.equal(receipt.preRestoreBackupId, `pre-restore:${jobId}`);
   assert.equal(receipt.applied, true);
+}));
+
+test('delete receipt pins resource, transaction and verified backup without private paths', async () => withStore(async (store) => {
+  const receipt = await store.write({
+    serverId,
+    jobId,
+    operation: OPERATIONS.MAIL_DATA_DELETE,
+    result: {
+      version: 1,
+      transactionId: jobId,
+      backupId: 'mail-backup-selected',
+      mailDomainId,
+      resourceId: mailboxId,
+      scope: 'mailbox',
+      identity: 'owner@example.com',
+      sourcePresent: true,
+      contentSha256: 'd'.repeat(64),
+      bytes: 300,
+      files: 6,
+      directories: 7,
+      deleted: true,
+      sideEffects: true,
+    },
+  });
+  assert.equal(receipt.operation, OPERATIONS.MAIL_DATA_DELETE);
+  assert.equal(receipt.transactionId, jobId);
+  assert.equal(receipt.resourceId, mailboxId);
+  assert.equal(receipt.deleted, true);
+  assert.doesNotMatch(JSON.stringify(receipt), /sourcePath|dataPath|tombstone/);
 }));
 
 test('receipt reader fails closed on unsafe mode or extra private fields', async () => withStore(async (store) => {
