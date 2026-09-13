@@ -11,7 +11,7 @@ const INACTIVE_UNIT = 'LoadState=loaded\nActiveState=inactive\nSubState=dead\nUn
 
 test('managed service catalog covers the hosting service groups without arbitrary units', () => {
   assert.deepEqual(managedServicePolicy.services.map((entry) => entry.id), [
-    'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'roundcube',
+    'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'postsrsd', 'roundcube',
   ]);
   assert.deepEqual(managedServicePolicy.actions, ['start', 'stop', 'restart']);
   for (const entry of managedServicePolicy.services) {
@@ -129,6 +129,43 @@ test('Roundcube install includes SQLite backend and PHP-FPM while remaining dist
     && args.join(' ') === '-f /usr/share/roundcube/SQL/sqlite.initial.sql'));
   assert.equal(calls.some(([file]) => file === '/usr/bin/systemctl'), false);
   await assert.rejects(manager.control('roundcube', 'restart'), { code: 'managed_service_not_controllable' });
+});
+
+test('PostSRSd installs only the fixed Noble package and managed service unit', async () => {
+  const calls = [];
+  const installed = new Set();
+  let active = false;
+  const manager = createManagedServiceManager({
+    run: async (file, args) => {
+      calls.push([file, args]);
+      if (file === '/usr/bin/dpkg-query') {
+        if (!installed.has('postsrsd')) throw new Error('not installed');
+        return { stdout: 'install ok installed\t1.10-2.1build1' };
+      }
+      if (file === '/usr/bin/apt-get' && args[0] === 'install') {
+        assert.deepEqual(args, ['install', '--yes', '--no-install-recommends', 'postsrsd']);
+        installed.add('postsrsd');
+        return { stdout: '' };
+      }
+      if (file === '/usr/bin/apt-get') return { stdout: '' };
+      if (file === '/usr/bin/systemctl' && args[0] === 'enable') {
+        assert.deepEqual(args, ['enable', '--now', 'postsrsd.service']);
+        active = true;
+        return { stdout: '' };
+      }
+      if (file === '/usr/bin/systemctl') return { stdout: active ? ACTIVE_UNIT : INACTIVE_UNIT };
+      throw new Error('unexpected command');
+    },
+  });
+
+  const result = await manager.install('postsrsd');
+  assert.equal(result.changed, true);
+  assert.equal(result.installed, true);
+  assert.equal(result.active, true);
+  assert.deepEqual(result.packages.map((entry) => entry.packageName), ['postsrsd']);
+  assert.deepEqual(result.units.map((entry) => entry.unit), ['postsrsd.service']);
+  assert.deepEqual(result.health, { status: 'ready', configuration: 'not_applicable' });
+  assert.equal(calls.some(([file, args]) => file === '/usr/bin/apt-get' && args.includes('curl')), false);
 });
 
 test('install refreshes APT, installs only catalog packages and enables the fixed unit', async () => {
