@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import express from 'express';
+import { createDockerComposeApiHandler } from '../src/docker-compose-api-handler.js';
 import { mountDockerWorkloadRoutes } from '../src/docker-workload-http.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
@@ -12,9 +13,6 @@ const management = Object.freeze({
 });
 
 async function listen(t) {
-  const app = express();
-  app.use(express.json());
-  app.use((request, _response, next) => { request.auth = management; next(); });
   const project = {
     id: projectId, serverId, projectName: 'app', revision: 1,
     composeSha256: 'a'.repeat(64), composeBytes: 10,
@@ -38,23 +36,45 @@ async function listen(t) {
     async listCredentials() { return []; },
     async setCredential() { return { projectId, registryHost: 'docker.io', revision: 1, configured: true, usernameConfigured: true }; },
   };
-  mountDockerWorkloadRoutes(app, {
+  const base = express();
+  base.use(express.json());
+  mountDockerWorkloadRoutes(base, {
     dockerWorkloadRegistry: {
       async createWorkload(input) { return { id: 'external-1', state: 'unverified', ...input }; },
       async getWorkload() { return null; },
       async listWorkloads() { return []; },
     },
     localServerId: serverId,
-    dockerComposeProjectRegistry: projectRegistry,
-    dockerComposeEnvironmentRegistry: environmentRegistry,
-    dockerRegistryCredentialRegistry: credentialRegistry,
-    validateDockerCompose: async ({ projectName }) => ({
+  });
+  const validateDockerCompose = async ({ projectName }) => ({
       version: 1, projectName, composeSha256: 'a'.repeat(64), composeBytes: 10,
       serviceCount: 1, services: [{ name: 'web', imageConfigured: true, buildConfigured: false }],
       networks: [], volumes: [], secretCount: 0, configCount: 0, validated: true, sideEffects: false,
-    }),
   });
-  app.use((error, _request, response, _next) => response.status(error.status ?? 500).json({ error: { code: error.code ?? 'internal_error' } }));
+  const app = express();
+  app.use((request, _response, next) => { request.auth = management; next(); });
+  app.use(createDockerComposeApiHandler({
+    baseHandler: base,
+    localServerId: serverId,
+    runtime: {
+      projectRegistry,
+      environmentRegistry,
+      credentialRegistry,
+      validateDockerCompose,
+      operationsService: {
+        async history() { return []; },
+        async preview() { return {}; },
+        async queue() { return {}; },
+      },
+      observer: {
+        async inspect() { return { status: 'absent', containers: [] }; },
+        async logs() { return { containers: [] }; },
+      },
+    },
+  }));
+  app.use((error, _request, response, _next) => response.status(error.status ?? 500).json({
+    error: { code: error.code ?? 'internal_error' },
+  }));
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
