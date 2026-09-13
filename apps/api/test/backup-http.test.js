@@ -17,7 +17,19 @@ function routeFixture(preview = async (input) => ({ ...input, previewDigest: 'a'
   return routes[0].handlers[1];
 }
 
-async function invoke(handler, body) {
+function requestScopedRouteFixture(factory) {
+  const routes = [];
+  const app = {
+    post(path, ...handlers) { routes.push({ path, handlers }); },
+  };
+  mountBackupRoutes(app, { backupResourceProviderForRequest: factory });
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0].path, '/api/backups/preview');
+  assert.equal(routes[0].handlers[0], requirePanelRouteAccess);
+  return routes[0].handlers[1];
+}
+
+async function invoke(handler, body, requestFields = {}) {
   const response = {
     statusCode: 200,
     body: null,
@@ -25,7 +37,7 @@ async function invoke(handler, body) {
     json(value) { this.body = value; return this; },
   };
   let forwarded = null;
-  await handler({ body }, response, (error) => { forwarded = error; });
+  await handler({ body, ...requestFields }, response, (error) => { forwarded = error; });
   return { response, forwarded };
 }
 
@@ -55,6 +67,35 @@ test('general backup preview route defaults to all managed resources', async () 
   const { forwarded } = await invoke(handler, { serverId });
   assert.equal(forwarded, null);
   assert.deepEqual(received, { serverId, selectedResourceIdentities: null });
+});
+
+test('general backup preview route resolves a provider from the authenticated request context', async () => {
+  const requestMarker = Symbol('request-marker');
+  let factoryRequest = null;
+  let received = null;
+  const handler = requestScopedRouteFixture(async (request) => {
+    factoryRequest = request;
+    return {
+      async preview(input) {
+        received = input;
+        return { serverId: input.serverId, previewDigest: 'd'.repeat(64), sideEffects: false };
+      },
+    };
+  });
+  const { response, forwarded } = await invoke(handler, { serverId }, { [requestMarker]: true });
+
+  assert.equal(forwarded, null);
+  assert.equal(factoryRequest[requestMarker], true);
+  assert.deepEqual(received, { serverId, selectedResourceIdentities: null });
+  assert.equal(response.body.data.previewDigest, 'd'.repeat(64));
+});
+
+test('general backup preview route fails closed when request-scoped provider is unavailable', async () => {
+  const handler = requestScopedRouteFixture(async () => null);
+  const { forwarded } = await invoke(handler, { serverId });
+  assert.ok(forwarded instanceof BackupHttpError);
+  assert.equal(forwarded.code, 'backup_preview_unavailable');
+  assert.equal(forwarded.status, 503);
 });
 
 test('general backup preview route rejects malformed or expanded request bodies', async () => {
