@@ -1,12 +1,12 @@
-# Website workspace — current backend boundary
+# Website workspace — current backend and panel boundary
 
-Visual redesign/layout/styling/component polish remains deferred. This document only describes the backend contracts the later UI must consume.
+YunPanel now has a real persistent Website resource and a routed Website workspace. Visual redesign/layout/styling/component polish is still a later phase, but implemented hosting capabilities are no longer represented as placeholder tabs: the workspace consumes real authenticated API contracts and explicit resource relationships.
 
 ## Persistent Website resource
 
-YunPanel has a real persistent Website resource separate from hostname/domain records.
+YunPanel keeps Website identity separate from hostname/domain records.
 
-Implemented backend contracts:
+Core Website contracts include:
 
 - `GET /api/websites`
 - `GET /api/websites/:websiteId`
@@ -23,86 +23,137 @@ Implemented backend contracts:
 - `POST /api/websites/migration/finalize`
 - `POST /api/websites/migration/rollback`
 
-Website state is stored separately through `YUNPANEL_WEBSITE_STORE`. Migration enforcement state is stored through `YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE`. Production startup validates persisted Website server/Application/Docker-workload foreign keys and initializes migration policy before accepting Domain state. Docker tracking is stored separately through `YUNPANEL_DOCKER_WORKLOAD_STORE`.
+Website state is stored separately through `YUNPANEL_WEBSITE_STORE`. Migration enforcement state is stored through `YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE`. Production startup validates persisted Website server/Application/Docker-workload foreign keys before accepting managed Domain state.
 
-Node Application runtime settings use Owner-only `POST /api/applications/:applicationId/configuration-preview` and `POST /api/applications/:applicationId/configuration`. Apply requires the exact desired revision, preview digest and typed confirmation. The managed port is immutable in this flow because it is part of Website/Nginx routing identity. Node major, direct-file or package-script startup, npm/pnpm/yarn, production/development mode and a validated release-contained document root are configurable. A deployed Application retains its separate `activeRuntime` until a successful deploy applies the desired settings; restart, status and rollback use the active or release-specific snapshot rather than silently applying pending configuration.
+The Website ID is not a Domain ID. Backend relationships use explicit foreign keys rather than permanent server/port/root heuristics.
 
-Owner-only `POST /api/applications/:applicationId/process` accepts exactly `enable`, `disable`, `start` or `stop` plus `node-process:<application-id>:<active-release-id>:<action>` confirmation. It queues the active release/runtime snapshot, never a pending desired runtime or arbitrary shell command. Start waits for health and returns an unhealthy service to stopped state. Persisted running process jobs can be recovered only while YunPanel consumers are stopped and exact Application intent plus current systemd/health state proves the requested idempotent final state.
+## Website resource hierarchy in the panel
 
-Owner-only server runtime routes are `GET /api/servers/:serverId/node-runtimes`, `POST /api/servers/:serverId/node-runtimes/inspect` and confirmed `POST /api/servers/:serverId/node-runtimes/:major/install`. Managed installation supports the maintained Node 22/24 LTS lines, verifies the official release checksum and writes only the version-specific `/opt/yunpanel/node-runtimes` tree. The Application's revisioned `nodeMajor` is the selection; a subsequent deploy binds Node, npm/pnpm/yarn lifecycle and systemd PATH to that exact major without replacing YunPanel's packaged runtime.
+The Website detail route is the primary hosting workspace. It exposes real linked-resource state instead of fabricated capability cards.
 
-`POST /api/applications/:applicationId/deploy` accepts only an optional `gitTarget` object with `kind` `branch`, `tag` or `commit` and its bounded `value`; omission retains the configured branch behavior. Commit targets require a full 40-character SHA and the host rejects any different resolved commit. Branch/tag/commit fetch, detached checkout, dependency install and build execute as the deterministic `yunapp-*` site user. Release history retains the requested target and resolved commit separately.
+Current Website-linked surfaces include:
 
-Owner-only `GET|PUT|DELETE /api/applications/:applicationId/github-webhook` manages masked webhook-secret state; PUT accepts only a 32–128 character printable secret and DELETE requires `delete-github-webhook:<application-id>`. GitHub sends `POST /api/webhooks/github/:applicationId`, which is the only webhook path exposed outside the panel client-IP allowlist. It rejects browser cookies, Origin and Authorization, verifies `X-Hub-Signature-256` against the untouched bounded request body, then requires the exact Application repository, configured branch and full pushed commit. Non-push events, other branches and branch deletion are explicit no-ops. The GitHub delivery UUID becomes private durable job idempotency metadata, so a replay returns the original job while different concurrent Application work is rejected by the persistent resource lock.
+- Domain/subdomain hierarchy and SSL/certificate state.
+- Static or Node Application identity, runtime/configuration, environment, deploy history and process controls.
+- Local file manager, Node/Nginx logs and Website-scoped terminal for supported static/Node sites.
+- Explicit database relationships.
+- Explicit mail-domain/mailbox relationships.
+- Explicit external Docker workload relationships.
+- Managed Docker/Compose project relationships.
+- Job/resource navigation so queued and completed operations can return to the affected resource.
 
-Owner-only `GET|PUT|DELETE /api/applications/:applicationId/deployment-credential` manages masked credential metadata, a GitHub token, or an unencrypted SSH deploy key; delete requires `delete-deployment-credential:<application-id>`. The value shares the AES-256-GCM master-key store but is excluded from normal Application environment reads/materialization. The retained legacy agent may fetch it only for an exact same-server Application. Neither deploy job payload/result nor recovery/audit metadata contains credential material.
+Database, mail and Managed Compose relationships are not inferred from hostname, port or filesystem coincidence. Missing/unavailable dependency providers remain explicit rather than being guessed.
 
-Owner Application environment supports single-key edits plus strict `.env` merge/replace import with optimistic revision and typed replacement confirmation. Public environment metadata contains only revision, apply state, timestamps and change counts. A saved revision is not described as active until the exact revision has been materialized by a successful Node deploy/restart/rollback and reconciled to the current release.
+## Application runtime and deployment
 
-An application-backed Website owns stable Website UUID, server/application IDs, runtime type, canonical managed document root and deterministic `yunapp-*` Unix user. A proxy Website is a real resource without an invented application/document root/Unix user and may own one canonical host/port/WebSocket target. A Docker Website instead binds one explicit same-server Docker workload ID; its loopback proxy target is derived from that workload and cannot be supplied separately. One workload cannot be attached to multiple Websites.
+Node Application runtime settings use Owner-only `POST /api/applications/:applicationId/configuration-preview` and `POST /api/applications/:applicationId/configuration`. Apply requires the exact desired revision, preview digest and typed confirmation. The managed port is immutable in this flow because it is part of Website/Nginx routing identity.
 
-Docker workload records currently support only explicit `external` tracking and begin `unverified`. Creation returns `containersChanged=false` and `nginxChanged=false`; it does not claim to inspect Compose files, start a container or activate traffic. Managed Compose lifecycle remains a separate plan item. Read Only accounts may inspect the bounded tracking metadata but cannot create it.
+Node major, direct-file or package-script startup, npm/pnpm/yarn, production/development mode and a validated release-contained document root are configurable. A deployed Application retains its separate `activeRuntime` until a successful deploy applies desired settings; restart, status and rollback use the active or release-specific snapshot rather than silently applying pending configuration.
 
-Website records carry a positive revision. Persisted v1/v2 state is validated and migrated once to v3, adding `dockerWorkloadId=null` without changing existing identity, Application binding or proxy target. Docker-bound state revalidates the exact workload/server/endpoint relation at startup.
+Owner-only `POST /api/applications/:applicationId/process` accepts exactly `enable`, `disable`, `start` or `stop` plus release-bound confirmation. It queues the active release/runtime snapshot, never a pending desired runtime or arbitrary shell command. Start waits for health and returns an unhealthy service to stopped state. Persisted running process jobs can be recovered only when exact Application intent plus current systemd/health state proves the requested idempotent final state.
 
-The Website ID is not a domain ID. Backend relationships use explicit foreign keys rather than permanent server/port/root heuristics.
+Managed Node runtime routes support maintained Node 22/24 LTS lines. Runtime installation verifies the official release checksum and writes only the version-specific `/opt/yunpanel/node-runtimes` tree. Deploy/build/systemd PATH use the selected site major without replacing YunPanel's packaged Node runtime.
+
+Static and Node deploys accept an explicit branch, tag or immutable 40-character commit target. Git fetch runs as the deterministic `yunapp-*` site user and release history retains requested target and resolved commit separately.
+
+Per-Application GitHub webhooks verify the untouched request-body SHA-256 signature, exact repository/configured branch and full pushed commit before entering the shared durable deploy flow. Delivery IDs are private idempotency keys and concurrent work on the same resource is locked by the persistent job registry. GitHub Actions are not used.
+
+Deployment credentials support masked GitHub token or SSH deploy-key metadata backed by the AES-256-GCM master-key store. Credential material is excluded from normal Application environment reads, durable job results and common audit metadata.
+
+Application environment supports single-key edits plus strict `.env` merge/replace import with optimistic revision and typed replacement confirmation. Public environment metadata contains only safe revision/apply metadata; plaintext values do not enter generic job records.
+
+## External Docker workload tracking
+
+External Docker workload records remain explicit `external` tracking resources and begin `unverified`. Creating such a record does not claim that YunPanel inspected Compose, started a container or changed Nginx. A Docker Website binds one explicit same-server workload ID; its loopback proxy target is derived from that workload and one workload cannot be attached to multiple Websites.
+
+This external tracking model is intentionally separate from Managed Docker/Compose projects.
+
+## Managed Docker / Compose
+
+Managed Compose is now a real backend and panel surface rather than a future placeholder.
+
+Implemented source capabilities include:
+
+- Validated Compose desired-state with encrypted project environment and registry credential handling.
+- Durable lifecycle, recovery and operation history.
+- Service-scoped runtime health and bounded logs.
+- Restart-safe Website binding and a validated loopback Nginx target resolved from current Compose state.
+- Secret-free actionable diagnosis and Website/Domain impact relationships.
+- Real Docker project list/detail UI.
+- Storage inventory derived from validated Compose state.
+
+Compose storage metadata distinguishes:
+
+- named volumes,
+- project-contained bind mounts,
+- arbitrary host bind mounts,
+- ephemeral/tmpfs-style storage.
+
+The normalized storage inventory is persisted with project desired-state and shown in the Docker project detail UI. Ephemeral storage is not a backup candidate. Arbitrary host bind paths are explicitly identified and are not automatically admitted into future backups. The remaining Docker storage work is to connect safe named-volume/project-bind policy to the general versioned backup/restore product.
+
+## Mail workspace
+
+Managed mail now has a routed panel workspace backed by real API operations. The current UI exposes mail-domain management, mailbox/alias surfaces, managed configuration apply, DKIM controls/diagnostics, runtime/service operations, queue/log inspection and Roundcube-related state where supported.
+
+Mail configuration and data mutations remain guarded durable operations with secret-safe public results and operation-specific recovery rather than generic retry/force-success behavior. Real Ubuntu/Postfix/Dovecot/Rspamd/DNS/outbound-delivery acceptance remains in `todo.md`; source implementation is not treated as proof that a live provider/host acceptance gate passed.
 
 ## Domain relationship and IDN
 
 Domain records may persist `websiteId`. `GET /api/websites/:websiteId/domains` reads only that explicit field; it does not infer membership from hostname, parent suffix, proxy port or application root.
 
-Legacy domain state without the field opens as `websiteId=null`. A one-way registry primitive can bind an unbound legacy domain to one same-server Website without changing its current Nginx desired/applied revision. Rebinding an already-bound domain is blocked until impact-preview/move semantics exist.
+Legacy Domain state without the field opens as `websiteId=null`. A one-way registry primitive can bind an unbound legacy Domain to one same-server Website without changing its current Nginx desired/applied revision. Rebinding is guarded by explicit preview/migration semantics rather than heuristics.
 
 Shared hostname validation canonicalizes IDN input to ASCII punycode. Unicode/punycode equivalents therefore collide as the same hostname/alias and hierarchy comparisons use one canonical form.
 
 ## Website update and rebind
 
-`POST /api/websites/:websiteId/update-preview` accepts only a `changes` object. Name, application/runtime binding and proxy target are the only update fields. Application-backed roots and Unix users are re-derived from the selected same-server Application; caller-controlled roots/users remain impossible and one Application cannot be attached to multiple Websites.
+`POST /api/websites/:websiteId/update-preview` accepts only a `changes` object. Name, application/runtime binding and proxy target are the update fields. Application-backed roots and Unix users are re-derived from the selected same-server Application; caller-controlled roots/users remain impossible and one Application cannot be attached to multiple Websites.
 
-The preview binds the proposed state to the current Website revision and to a SHA-256 digest of every explicitly linked Domain's safe traffic/certificate revision metadata. It reports whether a later Domain restage is required, but never changes Domain target, Nginx, certificate or live traffic itself. `PATCH /api/websites/:websiteId` requires that exact revision, digest and typed confirmation. Website or linked-Domain drift rejects the apply before mutation. A successful apply increments the Website revision in the private registry file.
+The preview binds proposed state to the current Website revision and to a SHA-256 digest of explicitly linked Domain traffic/certificate metadata. It reports whether later Domain restage is required but does not itself change Domain target, Nginx, certificate or live traffic. `PATCH /api/websites/:websiteId` requires that exact revision, digest and typed confirmation. Website or linked-Domain drift rejects apply before mutation.
 
-Switching an application-backed Website to proxy is explicit: `runtimeType=proxy` and `applicationId=null` are both required. Docker transitions likewise require an exact `dockerWorkloadId`; transitions away must explicitly clear it. Switching back to an Application requires the matching `static` or `node` runtime and clears Docker binding. Proxy hosts accept canonical IP/DNS names only—not URL schemes or paths—and ports remain in the non-privileged `1024..65535` range.
+Switching an application-backed Website to proxy is explicit. Docker transitions likewise require an exact external Docker workload identity; transitions away must explicitly clear it. Proxy hosts accept canonical IP/DNS names only, not URL schemes or paths.
 
-Guarded site-create accepts `source.kind=existing_docker` with only `dockerWorkloadId`. The preview includes the exact tracked workload revision/target, so observation or registry drift invalidates an older digest. The result persists Website and Domain relationships but keeps DNS/certificate/mail/container side effects false.
+Guarded site-create supports existing Application, new static/Node Application, explicit external Docker workload and external proxy sources. The result persists Website/Domain relationships but does not fabricate DNS, certificate, mail or external-container side effects.
 
 ## Migration preview, bind and enforcement
 
-`GET /api/websites/migration/preview` is Owner-only and read-only. It examines current persisted Domain/Website/Application state and reports safe migration decisions without mutating state. Static legacy targets match applications only by exact managed web root; Node targets match only same-server loopback proxy + exact current port. Multiple matches are `ambiguous`; no safe match is `unresolved`.
+`GET /api/websites/migration/preview` is Owner-only and read-only. It examines persisted Domain/Website/Application state and reports deterministic migration decisions without mutation. Static legacy targets match applications only by exact managed web root; Node targets match only same-server loopback proxy plus exact current port. Ambiguous or unresolved state stays explicit.
 
-A single exact application candidate produces either `bind_existing_website` or `create_website_then_bind`. These are migration suggestions only: preview returns `destructive=false`, `autoApply=false` and a deterministic SHA-256 digest.
+`POST /api/websites/migration/bind` requires Domain/Website UUIDs, the exact current preview digest and typed confirmation. The server recomputes current state before mutation; stale or different plans fail closed and a retry of the same completed binding is idempotent.
 
-`POST /api/websites/migration/bind` handles only the existing-Website case. It requires Domain/Website UUIDs, the exact current preview digest and typed confirmation. The server recomputes the current plan before mutation; stale or different plans fail closed. Retry of the same completed binding is idempotent.
+`GET /api/websites/migration/status` returns the current policy beside a fresh preview. Policy starts in `compatibility`. `POST /api/websites/migration/finalize` can switch to `enforced` only when every managed Domain is explicitly bound. In enforced mode new managed Domain creation requires a same-server `websiteId`.
 
-The backend intentionally does not combine Website creation and Domain binding into one call because those registries are independent durable files. For `create_website_then_bind`, the current safe workflow is explicit Website create → new preview → guarded bind.
+`POST /api/websites/migration/rollback` requires the exact enforced digest and returns policy to compatibility mode without rewriting Domain traffic, certificates, releases or Application state. Migration-only binding rollback uses its own durable ledger/receipt and is not a general Domain unbind operation.
 
-`GET /api/websites/migration/status` returns the current policy beside a fresh preview. The versioned policy starts in `compatibility`. `POST /api/websites/migration/finalize` can switch it to `enforced` only when the exact current preview says every managed Domain is already explicitly bound. In enforced mode new managed Domain creation requires a same-server `websiteId`.
+The remaining Website migration gap is the explicit create/bind path for live external-proxy Domain records that are still unbound; automatic inference remains forbidden.
 
-`POST /api/websites/migration/rollback` requires the exact enforced digest and returns policy to compatibility mode. It does not rewrite Domain traffic, certificates, releases or application state. Migration-only binding rollback uses its own durable ledger/receipt and is not a general Domain unbind operation. A migration-created Website that has been revised by an ordinary update is never silently treated as the untouched rollback resource, even if its visible fields were later restored.
+## Job presentation and navigation
 
-Migration bind/finalize/rollback are covered by common management audit without copying body, confirmation or digest material into audit metadata.
+The jobs workspace is wired to real resources. Job rows/details can resolve safe resource links and show lifecycle stage/progress rather than fabricated percentages. Result metadata is allowlisted, diagnosis/error codes are bounded, and deploy/runtime logs are redacted and bounded. There is no generic force-success or blind mutation retry UI.
 
 ## Authentication/access boundary
 
-All Website management enters through the authenticated API listener. Owner management requires normal session/MFA/Origin/CSRF policy. Read Only accounts may read Website collection/detail and explicit Website→domains relation; Website update preview/apply, migration preview/status and all Website/migration mutations remain Owner-only.
+All Website management enters through the authenticated API listener. Owner management requires normal session/MFA/Origin/CSRF policy. Read Only accounts may inspect only their permitted resource GET/HEAD surfaces; privileged Website, migration, job and destructive mutations remain Owner-only.
 
-Caller input cannot set `documentRoot` or `unixUser`; those values are derived from managed application identity.
+Caller input cannot set managed `documentRoot` or `unixUser`; those values are derived from managed Application identity.
 
-## Existing hosting functionality available to the future UI
+## Remaining product work
 
-The later Website UI can build on server inventory/snapshots, static and Node deployment lifecycle, masked/encrypted application env, Nginx stage/activate, managed ACME, managed services, DB inventory/create/delete, durable jobs/recovery, common audit and Owner user administration.
+The Website/Application/Domain foundation, Domain hierarchy, site-create, local files/logs/terminal, Managed Compose, managed mail and job-resource presentation are implemented in source. The highest-value remaining product gaps are tracked only in `plan.md`:
 
-A `202` response is queued/accepted work, not completion.
-
-## Remaining backend work
-
-See `plan.md` C/E/F/G/H/I. Persistent Website foundation, IDN canonicalization, guarded migration, site-create, external lifecycle separation and fail-closed impact preview are implemented. Remaining backend work includes managed Docker/Compose lifecycle, site resource registries such as cron/backup/mailbox, Website/Domain move-delete apply semantics and later UI integration. Static/Node/Docker Website identity relationships are present; Docker tracking is not a substitute for managed container operations.
+- Docker storage backup policy integration.
+- General backup/restore backend and panel UI.
+- Cron/Scheduled Tasks backend and panel UI.
+- Metric history, alert/event model and notification center.
+- The remaining explicit external-proxy Domain migration path and dependency-provider links as backup/cron registries arrive.
+- Migration live-apply/rollback acceptance followed by physical legacy-agent removal.
+- Final enterprise UI/UX, responsive and accessibility polish.
+- Plesk read-only importer, intentionally kept as the final development item.
 
 ## Design status
 
-Do not spend the current development phase on visual Website workspace polish. The existing React workspace may retain compatibility routing/data shapes until a later integration pass. Final enterprise UI/UX is intentionally assigned to a separate model after functionality is complete.
-
-Security behavior, authenticated routing, stale privileged-data handling and destructive confirmation are not optional visual polish and remain subject to `todo.md` acceptance.
+The current React workspace is functional and resource-linked, but final enterprise visual polish is still deferred until the remaining backend modules are closed. Security behavior, authenticated routing, stale privileged-data handling and destructive confirmation are not visual polish and remain mandatory.
 
 ## Validation
 
-Current full Node24/workspace, browser, package persistence, Website foreign-key, migration policy, IDN and migration acceptance are tracked in `todo.md`. Historical UI/model tests are not evidence that the current tree passed. GitHub Actions are not used.
+Current full Node24/workspace, browser, package persistence, real Ubuntu/Compose/mail/provider acceptance, migration/rollback and live service checks are tracked in `todo.md`. Repository code or source tests are not evidence that the current tree passed those real-environment gates. GitHub Actions are not used.
