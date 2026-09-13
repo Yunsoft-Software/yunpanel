@@ -1,6 +1,7 @@
 import {
   createAcmeManager,
   createCloudflareDnsManager,
+  createDatabaseDumpManager,
   createDatabaseManager,
   createMailConfigActivator,
   createMailConfigBackupManager,
@@ -35,6 +36,7 @@ export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.DATABASE_INSPECT,
   OPERATIONS.DATABASE_CREATE,
   OPERATIONS.DATABASE_DELETE,
+  OPERATIONS.DATABASE_BACKUP,
   OPERATIONS.DNS_RECORD_APPLY,
   OPERATIONS.DOMAIN_STAGE,
   OPERATIONS.DOMAIN_ACTIVATE,
@@ -91,12 +93,24 @@ function assertMailExecutionContext(payload, execution) {
   return execution;
 }
 
+function assertDatabaseBackupExecutionContext(payload, execution) {
+  if (!execution || typeof execution !== 'object' || Array.isArray(execution)
+    || typeof execution.jobId !== 'string' || !EXECUTION_ID_PATTERN.test(execution.jobId)
+    || execution.resourceType !== 'database' || execution.resourceId !== payload.databaseName) {
+    const error = new Error('Database backup execution context does not match the queued resource');
+    error.code = 'database_backup_execution_context_invalid';
+    throw error;
+  }
+  return execution;
+}
+
 export function createLocalHostOperations({
   packageManager = createSystemPackageManager({
     restartUnits: ['yunpanel-api.service', 'yunpanel-web.service'],
   }),
   managedServiceManager = createManagedServiceManager(),
   databaseManager = createDatabaseManager(),
+  databaseDumpManager = null,
   databaseCredentialOperation = null,
   nginxManager = createNginxManager(),
   acmeManager = createAcmeManager(),
@@ -160,6 +174,7 @@ export function createLocalHostOperations({
     throw new Error('staticDeploymentReceiptStore must provide write()');
   }
   const deploymentLog = jobLogStore ? (entry) => jobLogStore.record(entry) : null;
+  const resolvedDatabaseDumpManager = databaseDumpManager ?? createDatabaseDumpManager({ databaseManager });
   const resolvedStaticDeploymentManager = staticDeploymentManager ?? createStaticDeploymentManager({ recordLog: deploymentLog });
   const resolvedNodeDeploymentManager = nodeDeploymentManager ?? createNodeDeploymentManager({ recordLog: deploymentLog });
   const resolvedMailConfigManager = mailConfigManager ?? createMailConfigManager();
@@ -180,6 +195,9 @@ export function createLocalHostOperations({
     ? createLocalRoundcubeConfigOperation({ loadConfiguration: loadRoundcubeConfiguration })
     : null);
 
+  if (!resolvedDatabaseDumpManager || typeof resolvedDatabaseDumpManager.backup !== 'function') {
+    throw new Error('databaseDumpManager must provide backup()');
+  }
   if (!resolvedMailConfigManager || typeof resolvedMailConfigManager.stageConfiguration !== 'function') {
     throw new Error('mailConfigManager must provide stageConfiguration()');
   }
@@ -237,6 +255,22 @@ export function createLocalHostOperations({
       // because its optional recovery receipt could not be persisted.
     }
     return result;
+  }
+
+  async function executeDatabaseBackup(payload, execution) {
+    const context = assertDatabaseBackupExecutionContext(payload, execution);
+    const result = await resolvedDatabaseDumpManager.backup({
+      backupId: context.jobId,
+      databaseName: payload.databaseName,
+    });
+    if (!result || typeof result !== 'object' || Array.isArray(result)
+      || result.backupId !== context.jobId || result.databaseName !== payload.databaseName
+      || result.backedUp !== true || result.sideEffects !== true || Object.hasOwn(result, 'dumpPath')) {
+      const error = new Error('Database backup did not confirm the queued private artifact');
+      error.code = 'database_backup_unconfirmed';
+      throw error;
+    }
+    return Object.freeze({ ...result });
   }
 
   async function executeCertificate(payload, execute) {
@@ -446,6 +480,7 @@ export function createLocalHostOperations({
     [OPERATIONS.DATABASE_INSPECT, () => databaseManager.inspect()],
     [OPERATIONS.DATABASE_CREATE, (payload) => databaseManager.createDatabase(payload.name)],
     [OPERATIONS.DATABASE_DELETE, (payload) => databaseManager.dropDatabase(payload.name)],
+    [OPERATIONS.DATABASE_BACKUP, executeDatabaseBackup],
     [OPERATIONS.DNS_RECORD_APPLY, executeDnsRecord],
     [OPERATIONS.DOMAIN_STAGE, (payload) => nginxManager.stageDomain(payload)],
     [OPERATIONS.DOMAIN_ACTIVATE, (payload) => nginxManager.activateDomain(payload)],
@@ -507,4 +542,5 @@ export function createLocalHostOperations({
 
 export const localHostOperationInternals = Object.freeze({
   assertMailExecutionContext,
+  assertDatabaseBackupExecutionContext,
 });
