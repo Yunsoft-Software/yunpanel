@@ -154,11 +154,12 @@ export function createBackupApplicationLocalExecutor({
   }
 
   async function executePrepared(serverId, stepValue, requestedWorkRef) {
-    const { step, application } = await sourceState(serverId, stepValue);
+    const step = normalizeStep(stepValue);
     const expectedWorkRef = workRef(step);
     if (!requestedWorkRef || requestedWorkRef.kind !== expectedWorkRef.kind || requestedWorkRef.id !== expectedWorkRef.id) {
       fail('backup_application_dispatch_intent_invalid', 'Application backup dispatch intent does not match the execution step', 409);
     }
+    const { application } = await sourceState(serverId, step);
 
     let environmentValues;
     try {

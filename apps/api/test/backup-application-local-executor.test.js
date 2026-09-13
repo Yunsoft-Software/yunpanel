@@ -112,7 +112,7 @@ test('Application local executor verifies live state and archives exact active N
 
   const result = await executor.executePrepared(serverId, currentStep, prepared.workRef);
   assert.equal(result.evidence.artifactId, currentStep.stepDigest);
-  assert.equal(calls.status.length, 2);
+  assert.equal(calls.status.length, 1);
   assert.deepEqual(calls.materialize, [{ id: applicationId, options: { expectedRevision: 9 } }]);
   assert.equal(calls.archive.length, 1);
   assert.deepEqual(calls.archive[0].entries, [{
@@ -194,8 +194,10 @@ test('draft Application produces a metadata-only artifact with no release path',
 
 test('Application local executor fails before archive when live state changes after preview', async () => {
   const { executor, calls } = fixture({ applicationValue: application({ desiredRevision: 5 }) });
+  const currentStep = step();
+  const prepared = await executor.prepare(serverId, currentStep);
   await assert.rejects(
-    () => executor.prepare(serverId, step()),
+    () => executor.executePrepared(serverId, currentStep, prepared.workRef),
     (error) => error instanceof BackupApplicationLocalExecutorError
       && error.code === 'backup_application_preview_stale'
       && error.status === 409,
@@ -205,15 +207,18 @@ test('Application local executor fails before archive when live state changes af
 
 test('Application local executor rejects active deployment and stale environment state', async () => {
   const active = fixture({ applicationValue: application({ activeDeploymentId: previousReleaseId }) });
+  const currentStep = step();
+  const activePrepared = await active.executor.prepare(serverId, currentStep);
   await assert.rejects(
-    () => active.executor.prepare(serverId, step()),
+    () => active.executor.executePrepared(serverId, currentStep, activePrepared.workRef),
     (error) => error instanceof BackupApplicationLocalExecutorError
       && error.code === 'backup_application_preview_stale',
   );
 
   const staleEnvironment = fixture({ environmentValue: environment({ savedRevision: 10 }) });
+  const stalePrepared = await staleEnvironment.executor.prepare(serverId, currentStep);
   await assert.rejects(
-    () => staleEnvironment.executor.prepare(serverId, step()),
+    () => staleEnvironment.executor.executePrepared(serverId, currentStep, stalePrepared.workRef),
     (error) => error instanceof BackupApplicationLocalExecutorError
       && error.code === 'backup_application_preview_stale',
   );
@@ -228,4 +233,5 @@ test('Application local executor requires the exact persisted local dispatch int
   );
   assert.equal(calls.materialize.length, 0);
   assert.equal(calls.archive.length, 0);
+  assert.equal(calls.status.length, 0);
 });

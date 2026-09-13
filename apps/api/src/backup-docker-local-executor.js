@@ -206,11 +206,12 @@ export function createBackupDockerLocalExecutor({
   }
 
   async function executePrepared(serverId, stepValue, requestedWorkRef) {
-    const { step, project } = await sourceState(serverId, stepValue);
+    const step = normalizeStep(stepValue);
     const expectedWorkRef = workRef(step);
     if (!requestedWorkRef || requestedWorkRef.kind !== expectedWorkRef.kind || requestedWorkRef.id !== expectedWorkRef.id) {
       fail('backup_docker_dispatch_intent_invalid', 'Docker backup dispatch intent does not match the execution step', 409);
     }
+    const { project } = await sourceState(serverId, step);
     const source = await resolveSource(project, step);
     let evidence;
     try {

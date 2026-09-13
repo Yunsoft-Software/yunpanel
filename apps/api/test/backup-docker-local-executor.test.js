@@ -129,9 +129,11 @@ test('named-volume backup resolves only the exact Compose-managed volume name', 
 });
 
 test('Docker storage backup is blocked without durable lock or while Compose is active', async () => {
+  const currentStep = step();
   const unlocked = fixture({ locked: false });
+  const unlockedPrepared = await unlocked.executor.prepare(serverId, currentStep);
   await assert.rejects(
-    () => unlocked.executor.prepare(serverId, step()),
+    () => unlocked.executor.executePrepared(serverId, currentStep, unlockedPrepared.workRef),
     (error) => error instanceof BackupDockerLocalExecutorError
       && error.code === 'backup_docker_lock_required'
       && error.status === 409,
@@ -139,8 +141,9 @@ test('Docker storage backup is blocked without durable lock or while Compose is 
   assert.equal(unlocked.calls.archive.length, 0);
 
   const running = fixture({ runtimeStatus: 'running' });
+  const runningPrepared = await running.executor.prepare(serverId, currentStep);
   await assert.rejects(
-    () => running.executor.prepare(serverId, step()),
+    () => running.executor.executePrepared(serverId, currentStep, runningPrepared.workRef),
     (error) => error instanceof BackupDockerLocalExecutorError
       && error.code === 'backup_docker_consistency_blocked'
       && error.status === 409,
@@ -152,8 +155,10 @@ test('Docker storage backup rejects pre-existing active lifecycle jobs', async (
   const busy = fixture({
     jobs: [{ operation: OPERATIONS.DOCKER_COMPOSE_RESTART, status: 'queued' }],
   });
+  const currentStep = step();
+  const prepared = await busy.executor.prepare(serverId, currentStep);
   await assert.rejects(
-    () => busy.executor.prepare(serverId, step()),
+    () => busy.executor.executePrepared(serverId, currentStep, prepared.workRef),
     (error) => error instanceof BackupDockerLocalExecutorError
       && error.code === 'backup_docker_job_conflict'
       && error.status === 409,
@@ -168,8 +173,10 @@ test('Docker storage backup fails closed when project revision or mount identity
     project({ ...storage('bind'), source: './other' }),
   ]) {
     const fx = fixture({ projectValue });
+    const currentStep = step();
+    const prepared = await fx.executor.prepare(serverId, currentStep);
     await assert.rejects(
-      () => fx.executor.prepare(serverId, step()),
+      () => fx.executor.executePrepared(serverId, currentStep, prepared.workRef),
       (error) => error instanceof BackupDockerLocalExecutorError
         && error.code === 'backup_docker_preview_stale'
         && error.status === 409,
@@ -180,9 +187,7 @@ test('Docker storage backup fails closed when project revision or mount identity
 
 test('Docker storage backup rechecks consistency before archive and requires exact dispatch intent', async () => {
   const currentStep = step('bind');
-  let inspections = 0;
   const fx = fixture();
-  fx.executor;
   const prepared = await fx.executor.prepare(serverId, currentStep);
   await assert.rejects(
     () => fx.executor.executePrepared(serverId, currentStep, { kind: 'local', id: 'docker-storage-backup:wrong' }),
@@ -191,6 +196,5 @@ test('Docker storage backup rechecks consistency before archive and requires exa
   );
   assert.equal(fx.calls.archive.length, 0);
   assert.deepEqual(prepared.workRef, { kind: 'local', id: `docker-storage-backup:${currentStep.stepDigest}` });
-  inspections += fx.calls.observer.length;
-  assert.equal(inspections >= 2, true);
+  assert.equal(fx.calls.observer.length, 0);
 });
