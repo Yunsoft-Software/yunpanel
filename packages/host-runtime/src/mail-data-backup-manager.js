@@ -455,7 +455,16 @@ export function createMailDataBackupManager({
     return publicManifest(loaded.manifest);
   }
 
-  return Object.freeze({ backup, inspectBackup, finalDirectory });
+  async function materializeBackup(id) {
+    const loaded = await loadManifest(id);
+    if (!loaded) throw new MailDataBackupError('mail_data_backup_not_found', 'Mail data backup was not found');
+    return Object.freeze({
+      manifest: publicManifest(loaded.manifest),
+      dataPath: loaded.dataPath,
+    });
+  }
+
+  return Object.freeze({ backup, inspectBackup, materializeBackup, finalDirectory });
 }
 
 export const mailDataBackupInternals = Object.freeze({
