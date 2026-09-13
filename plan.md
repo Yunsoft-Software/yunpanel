@@ -120,10 +120,10 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 - [x] SMTP/IMAP security ve bounded queue/log backend'i kaynakta hazır: Dovecot client bağlantıları `ssl=required` ve minimum TLS 1.2 policy'sine, Postfix inbound/outbound opportunistic TLS + minimum TLS 1.2 policy'sine bağlandı; `mynetworks` yalnız loopback, SMTP SASL kapalı ve relay policy `permit_mynetworks, reject_unauth_destination` olarak desired-state digest/apply/live-evidence zincirine girdi. Gerçek cert/key material readiness gate'i korunuyor. Mevcut bounded/redacted Postfix/Dovecot/Rspamd journal log rotaları reuse ediliyor ve Owner-only local `postqueue -j` queue görünümü raw body vermeden bounded metadata sunuyor.
 - [x] Authenticated SMTP submission backend'i kaynakta hazır: dedicated Postfix `submission/inet` 587 service'i yalnız TLS altında Dovecot SASL `PLAIN/LOGIN` kullanıyor; global port 25 SASL kapalı kalıyor. Canonical sender-login map authenticated mailbox'ı aynı envelope sender'a bağlıyor ve `reject_sender_login_mismatch` spoofing'i fail-closed tutuyor. Sender-login source/`.db`, `/etc/postfix/main.cf` ve `/etc/postfix/master.cf` aynı transaction backup/rollback zincirinde; `postconf -M/-P` yalnız sabit allowlist ile çalışıyor. Dovecot auth socket'i `/var/spool/postfix/private/auth` için runtime Postfix UID/GID + Unix socket + `0660` live evidence zorunlu ve lost-ack recovery exact master service/override/socket kanıtı olmadan job'ı başarılı saymıyor.
 - [x] Roundcube control-plane ve host lifecycle kaynakta hazır: private `des_key` registry/materialization, deterministic config/PHP-FPM/Nginx preview, secret-free durable `roundcube.config.apply`, private staging, SQLite bootstrap/integrity, PHP/FPM/Nginx validate+reload, dedicated FPM socket, loopback SNI/TLS HTTPS web health, config/FPM/Nginx/DB pre-apply backup + deterministic rollback, versioned secret-free receipt ve current protected desired-state + live web evidence tabanlı `recover-roundcube-config` production/package wiring'e bağlı.
-- [ ] Forwarding dış tesliminde SPF/DMARC bozulmasını gidermek için SRS politikasını açıkça modelle; external forwarding deliverability'yi SRS hazır olmadan garanti edilmiş gibi gösterme.
-- [ ] Mailbox/domain delete impact ile mail data backup/restore ekle.
+- [x] Forwarding dış teslimi için SRS lifecycle kaynakta hazır: encrypted PostSRSd secret prepare/rotate, external forwarding varken SRS readiness blocker'ı, Ubuntu 24.04 PostSRSd 1.x loopback `10001/10002` sender/recipient canonical-map policy'si, protected secret/default staging, apply/teardown, backup/rollback, service/socket/live-map evidence ve lost-ack `recover-mail-config` bağı hazır. Diagnostics SRS eksikken `action_required`, hazırken yalnız `srs_ready` raporluyor ve `deliveryAssurance=not_guaranteed` ile SPF/DMARC teslim garantisi üretmiyor.
+- [x] Mailbox/domain delete-impact ve mail-data lifecycle kaynakta hazır: canonical Maildir inspect, private tree-digest backup, atomic restore + pre-restore backup/rollback, verified-backup zorunlu atomic tombstone delete, secret-free durable `mail.data.backup/restore/delete`, receipt ve `recover-mail-data` lost-ack recovery, exact resource UUID/revision/snapshot pinning ve terminal delete job + fresh impact + data-absence kanıtı olmadan control-plane mailbox/mail-domain kaydını silmeyen guarded finalize akışı production API'ye bağlı.
 
-Üst seviye Mail modülü bu kalan SRS ve mail-data işlerinin tamamı ile gerçek TLS/open-relay/submission/queue/DKIM/Roundcube servis kabulleri bitene kadar hazır sayılmaz.
+Üst seviye Mail modülünün kaynak lifecycle'ı tamamlandı; gerçek TLS/open-relay/submission/queue/DKIM/SRS/Roundcube/mail-data servis ve provider kabulleri `todo.md` tamamlanmadan modül production-ready sayılmaz.
 
 ## H. Docker ve Compose
 
@@ -175,7 +175,7 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 ## M. Package, yayın ve canlı kabul
 
 - [x] 2026-09-12 doğrulanmış baseline kaynak ağacı Node 24 ile API 1129, web 153, agent 74, config 35, host-runtime 100, protocol 24 ve shared 27 olmak üzere toplam 1542 otomatik testten geçti; lint/build yeşildi.
-- [ ] Bu baseline sonrasındaki managed-mail apply/recovery, empty-set teardown, alias lifecycle/config/recovery, quota enforcement/usage, mailbox forwarding/Sieve, mail diagnostics, DKIM key/signing/apply/recovery/teardown, key rotation/delete/retirement evidence, DKIM provider TXT lifecycle, generic DNS TXT, mail TLS/relay security policy, authenticated SMTP submission/master.cf/Dovecot auth socket lifecycle, bounded Postfix queue, Roundcube control-plane + Nginx/PHP-FPM/SQLite/HTTPS health/rollback/recovery/CLI ve ilgili HTTP/production/package wiring değişiklikleri için targeted config-templates + host-runtime + protocol + API testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
+- [ ] Bu baseline sonrasındaki managed-mail apply/recovery, empty-set teardown, alias lifecycle/config/recovery, quota enforcement/usage, mailbox forwarding/Sieve, mail diagnostics, DKIM key/signing/apply/recovery/teardown, key rotation/delete/retirement evidence, DKIM provider TXT lifecycle, generic DNS TXT, mail TLS/relay security policy, authenticated SMTP submission/master.cf/Dovecot auth socket lifecycle, bounded Postfix queue, Roundcube control-plane + Nginx/PHP-FPM/SQLite/HTTPS health/rollback/recovery/CLI, SRS/PostSRSd prepare/apply/teardown/recovery/diagnostics ve mail-data impact/backup/restore/delete/finalize/`recover-mail-data` değişiklikleri için targeted config-templates + host-runtime + protocol + API testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
 - [x] Linux amd64 `0.3.0-9` paketi üretildi ve yalnız onaylı `.44` olmayan YunPanel test sunucusuna yüklendi; API/web/nginx aktif, eski `yun-agent` inactive/disabled doğrulandı.
 - [x] Canlı Owner API smoke'ta tek yerel server, Website/Application/Domain/certificate/job envanteri; site dosya listesi, Node logu, site terminal capability hedefi ve audit filtre/pagination sözleşmesi doğrulandı.
 - [ ] Matching Ubuntu arm64 hostta native `node-pty` dahil clean install ve doğru mimarili `.deb` üretimini doğrula.
@@ -196,13 +196,12 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 ## Uygulama sırası
 
 1. P0 güvenlik, tek-sunucu fail-closed davranışı ve mevcut canlı işlevlerde regresyon bırakma.
-2. Mail lifecycle'ın kalan SRS/data parçaları ve gerçek TLS/submission/queue/DKIM/Roundcube servis kabulü.
-3. Veritabanı user/grant/credential ve dump/restore yaşam döngüsü.
-4. Docker/Compose lifecycle ve Website/Nginx entegrasyonu.
-5. Genel backup/restore ürünü.
-6. Cron, ardından job detail/metrik/bildirim katmanı.
-7. Plesk read-only importer.
-8. İzole migration/rollback kabulünden sonra retained agent kodu ve paket yüzeyinin fiziksel temizliği.
-9. Bütün backend functionality tamamlandıktan sonra ertelenen enterprise UI/UX ve headed browser kabulü.
+2. Mail lifecycle kaynak kodu tamamlandı; gerçek mail kabulü `todo.md` kapısı olarak paralel ilerler, sıradaki ana backend geliştirmesi veritabanı user/grant/credential ve dump/restore yaşam döngüsüdür.
+3. Docker/Compose lifecycle ve Website/Nginx entegrasyonu.
+4. Genel backup/restore ürünü.
+5. Cron, ardından job detail/metrik/bildirim katmanı.
+6. Plesk read-only importer.
+7. İzole migration/rollback kabulünden sonra retained agent kodu ve paket yüzeyinin fiziksel temizliği.
+8. Bütün backend functionality tamamlandıktan sonra ertelenen enterprise UI/UX ve headed browser kabulü.
 
 Her adımda ilgili otomatik testler eklenir, aynı turda `plan.md`/`todo.md` gerçek duruma göre daraltılır ve küçük commit doğrudan `main` üzerine gönderilir.
