@@ -46,9 +46,26 @@ function publishedPorts(service) {
   return Array.isArray(service?.publishedPorts) ? service.publishedPorts : [];
 }
 
+function storageMounts(service) {
+  return Array.isArray(service?.storageMounts) ? service.storageMounts : [];
+}
+
 function portLabel(port) {
   const host = port.hostIp ?? '*';
   return `${host}:${port.publishedPort} → ${port.targetPort}/${port.protocol}`;
+}
+
+function storageKindLabel(mount) {
+  if (mount.kind === 'named_volume') return 'Named volume';
+  if (mount.kind === 'bind' && mount.sourceScope === 'project') return 'Project bind';
+  if (mount.kind === 'bind' && mount.sourceScope === 'host') return 'Host bind';
+  return 'Ephemeral';
+}
+
+function storagePolicyLabel(mount) {
+  if (mount.kind === 'ephemeral') return 'Backup dışı';
+  if (mount.kind === 'bind' && mount.sourceScope === 'host') return 'Varsayılan reddedilir';
+  return 'Backup policy bekliyor';
 }
 
 function runtimeBadge(status) {
@@ -90,6 +107,13 @@ function DiagnosisPanel({ project }) {
   ]} />{result.issues?.length > 0 && <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Sorun</th><th>Aksiyon</th><th>Açıklama</th></tr></thead><tbody>{result.issues.map((item) => <tr key={`${item.code}:${item.action}`}><td><Badge state={item.severity === 'error' ? 'error' : 'warning'}>{item.code}</Badge></td><td><code>{item.action}</code></td><td>{item.message}</td></tr>)}</tbody></table></div>}</>}</div>;
 }
 
+function StoragePanel({ project }) {
+  const mounts = (project.services ?? []).flatMap((service) => storageMounts(service).map((mount) => ({ ...mount, serviceName: service.name })));
+  return <Section title="Depolama" description="Compose doğrulamasından gelen güvenli storage envanteri. Backup policy henüz uygulanmaz; host bind yolları otomatik yedeklemeye alınmaz.">
+    {mounts.length > 0 ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Tür</th><th>Kaynak</th><th>Container hedefi</th><th>Mod</th><th>Backup</th></tr></thead><tbody>{mounts.map((mount) => <tr key={`${mount.serviceName}:${mount.target}`}><td><strong>{mount.serviceName}</strong></td><td>{storageKindLabel(mount)}</td><td><code>{mount.source ?? '—'}</code></td><td><code>{mount.target}</code></td><td>{mount.readOnly ? 'Read only' : 'Read / write'}</td><td><Badge state={mount.kind === 'bind' && mount.sourceScope === 'host' ? 'warning' : mount.kind === 'ephemeral' ? 'off' : 'pending'}>{storagePolicyLabel(mount)}</Badge></td></tr>)}</tbody></table></div> : <EmptyState icon="archive" title="Kalıcı veya ephemeral mount yok" detail="Bu Compose projesinin doğrulanmış servis tanımlarında storage mount bulunmuyor." />}
+  </Section>;
+}
+
 function RuntimePanel({ projectId }) {
   const runtime = useAsyncResource(() => getDockerRuntime(projectId), [projectId]);
   const result = runtime.data;
@@ -119,9 +143,10 @@ function DockerProjectDetail({ projectId }) {
   const detail = useAsyncResource(() => getDockerProject(projectId), [projectId]);
   const data = detail.data;
   const project = data?.project ?? null;
-  return <><nav className="ws-breadcrumb"><Link to="/docker">Docker</Link><span>/ {project?.projectName ?? projectId}</span></nav><PageHeading title={project?.projectName ?? 'Docker projesi'} description="Compose desired state, published target, runtime ve işlem geçmişi." actions={<Button icon="refresh" onClick={detail.refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Docker proje detayı" />{project && <><Section title="Desired state"><div className="ws-section-body"><KeyValues items={[
-    ['Revizyon', project.revision], ['Compose SHA-256', project.composeSha256], ['Servis', project.services?.length ?? 0], ['Network', project.networks?.length ?? 0], ['Volume', project.volumes?.length ?? 0], ['Env revizyonu', data.environment?.revision ?? 0], ['Registry credential', data.credentials?.length ?? 0],
-  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Published ports</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td></tr>)}</tbody></table></div></div></Section><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Transient host port kalıcı Website veya Domain kaydına yazılmadan güncel Compose state’inden çözülür."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
+  const storageCount = project?.services?.reduce((total, service) => total + storageMounts(service).length, 0) ?? 0;
+  return <><nav className="ws-breadcrumb"><Link to="/docker">Docker</Link><span>/ {project?.projectName ?? projectId}</span></nav><PageHeading title={project?.projectName ?? 'Docker projesi'} description="Compose desired state, storage, published target, runtime ve işlem geçmişi." actions={<Button icon="refresh" onClick={detail.refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Docker proje detayı" />{project && <><Section title="Desired state"><div className="ws-section-body"><KeyValues items={[
+    ['Revizyon', project.revision], ['Compose SHA-256', project.composeSha256], ['Servis', project.services?.length ?? 0], ['Network', project.networks?.length ?? 0], ['Named volume', project.volumes?.length ?? 0], ['Mount', storageCount], ['Env revizyonu', data.environment?.revision ?? 0], ['Registry credential', data.credentials?.length ?? 0],
+  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Published ports</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td></tr>)}</tbody></table></div></div></Section><StoragePanel project={project} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Transient host port kalıcı Website veya Domain kaydına yazılmadan güncel Compose state’inden çözülür."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
 }
 
 export default function DockerProjectsPage() {
@@ -129,4 +154,11 @@ export default function DockerProjectsPage() {
   return dockerProjectId ? <DockerProjectDetail projectId={dockerProjectId} /> : <DockerProjectList />;
 }
 
-export const dockerProjectsPageInternals = Object.freeze({ publishedPorts, portLabel, runtimeBadge });
+export const dockerProjectsPageInternals = Object.freeze({
+  publishedPorts,
+  storageMounts,
+  portLabel,
+  storageKindLabel,
+  storagePolicyLabel,
+  runtimeBadge,
+});
