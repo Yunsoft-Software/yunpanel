@@ -21,9 +21,10 @@ function envelope(operation, payload) {
   };
 }
 
-test('mail data backup and restore are known exact-payload operations', () => {
+test('mail data backup restore and delete are known exact-payload operations', () => {
   assert.equal(isKnownOperation(OPERATIONS.MAIL_DATA_BACKUP), true);
   assert.equal(isKnownOperation(OPERATIONS.MAIL_DATA_RESTORE), true);
+  assert.equal(isKnownOperation(OPERATIONS.MAIL_DATA_DELETE), true);
 
   const backupPayload = {
     mailDomainId,
@@ -50,9 +51,24 @@ test('mail data backup and restore are known exact-payload operations', () => {
     ...envelope(OPERATIONS.MAIL_DATA_RESTORE, restorePayload),
     id: 'job-mail-data-0002',
   });
+
+  const deletePayload = {
+    mailDomainId,
+    resourceId: mailboxId,
+    backupId: 'backup-mail-0001',
+    scope: 'mailbox',
+    identity: 'owner@example.com',
+    expectedResourceRevision: 3,
+    expectedTargetSnapshotSha256: digest,
+  };
+  const deletion = createOperationEnvelope({ id: 'job-mail-data-0003', operation: OPERATIONS.MAIL_DATA_DELETE, payload: deletePayload });
+  assert.deepEqual(deletion, {
+    ...envelope(OPERATIONS.MAIL_DATA_DELETE, deletePayload),
+    id: 'job-mail-data-0003',
+  });
 });
 
-test('mail data protocol rejects malformed identities, stale-shaped payloads, missing revision and invalid backup ids', () => {
+test('mail data protocol rejects malformed identities stale-shaped payloads and invalid backup ids', () => {
   for (const candidate of [
     envelope(OPERATIONS.MAIL_DATA_BACKUP, {
       mailDomainId,
@@ -95,12 +111,21 @@ test('mail data protocol rejects malformed identities, stale-shaped payloads, mi
       expectedResourceRevision: 5,
       expectedTargetSnapshotSha256: digest,
     }),
-    envelope(OPERATIONS.MAIL_DATA_RESTORE, {
+    envelope(OPERATIONS.MAIL_DATA_DELETE, {
       mailDomainId,
-      resourceId: mailDomainId,
+      resourceId: mailboxId,
       backupId: 'backup-mail-0001',
       scope: 'domain',
       identity: 'example.com',
+      expectedResourceRevision: 3,
+      expectedTargetSnapshotSha256: digest,
+    }),
+    envelope(OPERATIONS.MAIL_DATA_DELETE, {
+      mailDomainId,
+      resourceId: mailboxId,
+      backupId: 'backup-mail-0001',
+      scope: 'mailbox',
+      identity: 'owner@example.com',
       expectedResourceRevision: 0,
       expectedTargetSnapshotSha256: digest,
     }),
