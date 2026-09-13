@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   getDockerDiagnosis,
@@ -8,7 +8,8 @@ import {
   getDockerRuntime,
   listDockerProjects,
 } from './docker-compose-client.js';
-import { Badge, Button, EmptyState, ErrorNotice, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
+import DockerLifecyclePanel from './DockerLifecyclePanel.jsx';
+import { Badge, Button, EmptyState, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
 
 function useAsyncResource(loader, dependencies = [], { enabled = true } = {}) {
@@ -117,7 +118,7 @@ function DockerProjectDetail({ projectId }) {
   const project = data?.project ?? null;
   return <><nav className="ws-breadcrumb"><Link to="/docker">Docker</Link><span>/ {project?.projectName ?? projectId}</span></nav><PageHeading title={project?.projectName ?? 'Docker projesi'} description="Compose desired state, published target, runtime ve işlem geçmişi." actions={<Button icon="refresh" onClick={detail.refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Docker proje detayı" />{project && <><Section title="Desired state"><div className="ws-section-body"><KeyValues items={[
     ['Revizyon', project.revision], ['Compose SHA-256', project.composeSha256], ['Servis', project.services?.length ?? 0], ['Network', project.networks?.length ?? 0], ['Volume', project.volumes?.length ?? 0], ['Env revizyonu', data.environment?.revision ?? 0], ['Registry credential', data.credentials?.length ?? 0],
-  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Published ports</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td></tr>)}</tbody></table></div></div></Section><Section title="Website / Nginx diagnosis" description="Transient host port kalıcı Website veya Domain kaydına yazılmadan güncel Compose state’inden çözülür."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
+  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Published ports</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td></tr>)}</tbody></table></div></div></Section><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Transient host port kalıcı Website veya Domain kaydına yazılmadan güncel Compose state’inden çözülür."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
 }
 
 export default function DockerProjectsPage() {
