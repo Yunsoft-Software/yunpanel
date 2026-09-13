@@ -9,7 +9,10 @@ test('dashboard requests all summary sources, server/settings/database pages onl
   assert.deepEqual(selected('/databases'), ['servers']);
 });
 test('remaining unimplemented modules and unknown routes do not poll unrelated data', () => {
-  for (const path of ['/mail', '/docker', '/backups', '/invalid', '/settings/unknown', null]) assert.deepEqual(selected(path), []);
+  for (const path of ['/docker', '/backups', '/invalid', '/settings/unknown', null]) assert.deepEqual(selected(path), []);
+});
+test('mail workspace requests its implemented inventory and job dependencies', () => {
+  assert.deepEqual(selected('/mail'), ['domains', 'jobs', 'servers']);
 });
 test('audit owns its bounded history request instead of polling workspace collections', () => {
   assert.deepEqual(selected('/audit'), []);
@@ -32,7 +35,7 @@ test('application forms and advanced tools retain actual resource dependencies',
   assert.deepEqual(selected('/jobs'), ['jobs']);
 });
 test('observed or active jobs keep monitoring after navigation, without unrelated reads', () => {
-  assert.deepEqual(selected('/mail', { observingJob: true }), ['jobs']);
-  assert.deepEqual(selected('/mail', { activeJob: true }), ['jobs']);
-  assert.deepEqual(selected('/mail', { activeJob: false, observingJob: false }), []);
+  assert.deepEqual(selected('/invalid', { observingJob: true }), ['jobs']);
+  assert.deepEqual(selected('/invalid', { activeJob: true }), ['jobs']);
+  assert.deepEqual(selected('/invalid', { activeJob: false, observingJob: false }), []);
 });
