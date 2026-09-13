@@ -6,16 +6,15 @@ Bağlayıcı mimari ve güvenlik kuralları `agents.md` içindedir. Bu ortamda g
 
 Öncelik, panelin gerçek kullanılabilirlik ve Plesk-benzeri ürün tamamlanma oranını en hızlı yükselten işleri bitirmektir. Plesk importer en son geliştirme işi olarak tutulur.
 
-Managed Docker/Compose ve Mail gerçek panel rotalarına bağlıdır. Website detayında Domain/SSL, Application/runtime/env/log/file/terminal ile explicit database/mail/Managed Compose ilişkileri tek site kaynak hiyerarşisinde görünür. Job list/detail kaynak linki, yaşam döngüsü stage/progress, allowlist'li sonuç metadata, güvenli diagnosis/error code ve bounded/redacted deploy log görünümüne sahiptir; generic retry/force-success yolu yoktur.
+Managed Docker/Compose ve Mail gerçek panel rotalarına bağlıdır. Website detayında Domain/SSL, Application/runtime/env/log/file/terminal ile explicit database/mail/Managed Compose ilişkileri tek site kaynak hiyerarşisinde görünür. Job list/detail kaynak linki, yaşam döngüsü stage/progress, allowlist'li sonuç metadata, güvenli diagnosis/error code ve bounded/redacted deploy log görünümüne sahiptir; generic retry/force-success yolu yoktur. Managed Compose public desired-state artık named volume, proje içi bind, host bind ve ephemeral storage mountlarını ayrı sınıflandırıp kalıcı state'te ve panelde gösterir; host bind yolları otomatik backup adayı sayılmaz.
 
-## 1. Docker / Compose — storage ve backup bağı
+## 1. Docker / Compose — backup bağı
 
-Compose desired-state, encrypted project/env/registry credential modeli, validation, durable lifecycle/recovery/history, service-scoped health/log, restart-safe Managed Compose Website binding, stage anında doğrulanmış loopback Nginx target, secret-free actionable diagnosis, Website/Domain impact graph ve gerçek panel UI kaynakta hazırdır. Kalan Docker backend işi storage/backup tarafıdır.
+Compose desired-state, encrypted project/env/registry credential modeli, validation, durable lifecycle/recovery/history, service-scoped health/log, restart-safe Managed Compose Website binding, stage anında doğrulanmış loopback Nginx target, secret-free actionable diagnosis, Website/Domain impact graph, gerçek panel UI ve storage inventory kaynakta hazırdır. Kalan Docker backend işi storage'ı genel backup/restore ürününe güvenli biçimde bağlamaktır.
 
-- [ ] Volume/bind inventory modelini ekle; named volume, bind mount ve ephemeral storage ayrımını public metadata'da açık göster.
-- [ ] Docker volume/bind için backup/restore politikasını genel backup manifestine bağlanabilecek şekilde tasarla; arbitrary host path backup'ını varsayılan olarak reddet.
+- [ ] Named volume ve proje içi bind için backup/restore politikasını versioned genel backup manifestine bağla; ephemeral storage'ı backup dışı bırak, arbitrary host bind path'lerini varsayılan olarak reddet ve restore/impact akışında aynı policy kimliğini koru.
 
-Gerçek Docker Engine/Compose host kabulü, crash/lost-ack provası ve secret/permission kontrolleri `todo.md` içinde kalır.
+Gerçek Docker Engine/Compose host kabulü, crash/lost-ack provası, storage mount sınıflandırmasının gerçek Compose fixture'larıyla doğrulanması ve secret/permission kontrolleri `todo.md` içinde kalır.
 
 ## 2. Website / Domain / Nginx kalanları
 
@@ -69,7 +68,7 @@ Gerçek DNS/Nginx/HTTPS, IDN, certificate ve provider acceptance işleri `todo.m
 
 ## Uygulama sırası
 
-1. Docker volume/bind inventory ve backup policy.
+1. Docker storage backup policy contractını genel backup manifestiyle birlikte kapat.
 2. Genel backup/restore ürünü + UI.
 3. Cron + UI.
 4. Metrik ve bildirim katmanı.
