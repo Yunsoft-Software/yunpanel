@@ -10,6 +10,10 @@ import {
 } from '@yunpanel/protocol';
 import { normalizeGitDeploymentTarget, sanitizeLogMessage } from '@yunpanel/shared';
 import {
+  DatabaseBackupJobResultError,
+  sanitizeDatabaseBackupResult,
+} from './database-backup-job-result.js';
+import {
   DatabaseCredentialJobResultError,
   sanitizeDatabaseCredentialResult,
 } from './database-credential-job-result.js';
@@ -49,6 +53,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DATABASE_INSPECT,
   OPERATIONS.DATABASE_CREATE,
   OPERATIONS.DATABASE_DELETE,
+  OPERATIONS.DATABASE_BACKUP,
   OPERATIONS.DATABASE_CREDENTIAL_APPLY,
   OPERATIONS.DATABASE_CREDENTIAL_DELETE,
   OPERATIONS.DNS_RECORD_APPLY,
@@ -666,6 +671,17 @@ function sanitizeDatabaseResult(job, result) {
   }
 }
 
+function sanitizeDatabaseBackupJobResult(job, result) {
+  try {
+    return sanitizeDatabaseBackupResult(job, result);
+  } catch (error) {
+    if (error instanceof DatabaseBackupJobResultError || error?.code === 'invalid_job_result') {
+      throw new JobRegistryError('invalid_job_result', error.message);
+    }
+    throw error;
+  }
+}
+
 function sanitizeDatabaseCredentialJobResult(job, result) {
   try {
     return sanitizeDatabaseCredentialResult(job, result);
@@ -779,6 +795,7 @@ function sanitizeResult(job, result) {
   if ([OPERATIONS.DATABASE_INSPECT, OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE].includes(job.operation)) {
     return sanitizeDatabaseResult(job, result);
   }
+  if (job.operation === OPERATIONS.DATABASE_BACKUP) return sanitizeDatabaseBackupJobResult(job, result);
   if ([OPERATIONS.DATABASE_CREDENTIAL_APPLY, OPERATIONS.DATABASE_CREDENTIAL_DELETE].includes(job.operation)) {
     return sanitizeDatabaseCredentialJobResult(job, result);
   }
