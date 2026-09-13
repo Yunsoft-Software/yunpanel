@@ -25,6 +25,7 @@ import { createDatabaseCredentialApplyService } from './database-credential-appl
 import { createDatabaseCredentialMaterializer } from './database-credential-materializer.js';
 import { createDatabaseCredentialRegistry } from './database-credential-registry.js';
 import { createDomainRegistry } from './domain-registry.js';
+import { createDomainStageTargetJobRegistry } from './domain-stage-target-job-registry.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDnsProviderCredentialRegistry } from './dns-provider-credential-registry.js';
 import { createDockerComposeApiHandler } from './docker-compose-api-handler.js';
@@ -293,10 +294,16 @@ const liveSessions = createLiveSessionRegistry();
 const authStore = createAuthStore({ filePath: authStorePath, liveSessions });
 const terminalCapabilityRegistry = createTerminalCapabilityRegistry({ liveSessions });
 const terminalProcessManager = createTerminalProcessManager();
-const jobRegistry = createAuditedJobRegistry({
+const auditedJobRegistry = createAuditedJobRegistry({
   registry: durableJobRegistry,
   audit: authStore.audit,
   onAuditError: reportAuditFault,
+});
+const jobRegistry = createDomainStageTargetJobRegistry({
+  registry: auditedJobRegistry,
+  domainRegistry,
+  websiteRegistry,
+  dockerComposeProjectRegistry: dockerComposeProjectBootstrap.projectRegistry,
 });
 const dockerComposeRuntime = await createDockerComposeRuntime({
   env: process.env,
