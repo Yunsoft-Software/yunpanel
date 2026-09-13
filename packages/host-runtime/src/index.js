@@ -216,6 +216,11 @@ export {
   databaseRestoreManagerInternals,
 } from './database-restore-manager.js';
 export {
+  createDatabaseRestoreReceiptStore,
+  DatabaseRestoreReceiptError,
+  databaseRestoreReceiptInternals,
+} from './database-restore-receipt.js';
+export {
   createDatabaseCredentialHostStateStore,
   DatabaseCredentialHostStateError,
   databaseCredentialHostStateInternals,
