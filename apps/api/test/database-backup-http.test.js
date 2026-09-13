@@ -82,10 +82,10 @@ test('database backup route rejects stale, extra or missing confirmation without
 });
 
 test('database backup serializes with every other queued or running database mutation', async () => {
-  const fx = mounted({
-    jobs: [{ operation: OPERATIONS.DATABASE_CREDENTIAL_APPLY, status: 'running' }],
-  });
-  const response = await invoke(fx.handler, { confirmation: `backup:${databaseName}` });
-  assert.equal(response.error?.code, 'database_job_conflict');
-  assert.equal(fx.enqueued.length, 0);
+  for (const operation of [OPERATIONS.DATABASE_CREDENTIAL_APPLY, OPERATIONS.DATABASE_RESTORE]) {
+    const fx = mounted({ jobs: [{ operation, status: 'running' }] });
+    const response = await invoke(fx.handler, { confirmation: `backup:${databaseName}` });
+    assert.equal(response.error?.code, 'database_job_conflict');
+    assert.equal(fx.enqueued.length, 0);
+  }
 });
