@@ -235,6 +235,7 @@ const mailConfigurationService = createMailConfigurationService({
   mailboxForwardingRegistry,
   domainRegistry,
   mailServiceIdentityRegistry,
+  mailSrsConfigurationService,
 });
 const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   filePath: applicationEnvironmentStorePath,
