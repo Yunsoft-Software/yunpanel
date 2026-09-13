@@ -39,8 +39,8 @@ const UNMANAGED_REQUIRED_DIRECTORIES = Object.freeze([
   '/etc/dovecot',
   '/etc/dovecot/conf.d',
   '/etc/rspamd/local.d',
-  '/etc/default',
 ]);
+const SRS_REQUIRED_DIRECTORIES = Object.freeze(['/etc/default']);
 
 export class MailConfigActivationError extends Error {
   constructor(code, message) {
@@ -194,8 +194,11 @@ export function createMailConfigActivator({
     }
   }
 
-  async function assertRequiredDirectoriesSafe() {
-    for (const directoryPath of UNMANAGED_REQUIRED_DIRECTORIES) {
+  async function assertRequiredDirectoriesSafe(plan) {
+    const requiredDirectories = plan.srs?.required === true
+      ? [...UNMANAGED_REQUIRED_DIRECTORIES, ...SRS_REQUIRED_DIRECTORIES]
+      : UNMANAGED_REQUIRED_DIRECTORIES;
+    for (const directoryPath of requiredDirectories) {
       try {
         const metadata = await lstatFn(directoryPath);
         if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error('unsafe directory');
@@ -511,7 +514,7 @@ export function createMailConfigActivator({
       resolveVmailIdentity(),
       resolvePostfixIdentity(),
     ]);
-    await assertRequiredDirectoriesSafe();
+    await assertRequiredDirectoriesSafe(plan);
     await assertLiveMatchesBackup(backup);
 
     let mutationStarted = false;
@@ -554,6 +557,7 @@ export function createMailConfigActivator({
 
 export const mailConfigActivatorInternals = Object.freeze({
   unmanagedRequiredDirectories: UNMANAGED_REQUIRED_DIRECTORIES,
+  srsRequiredDirectories: SRS_REQUIRED_DIRECTORIES,
   newManagedDirectoryMode: NEW_MANAGED_DIRECTORY_MODE,
   sieveSharedMode: SIEVE_SHARED_MODE,
   submissionSocketMode: SUBMISSION_SOCKET_MODE,
