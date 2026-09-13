@@ -164,8 +164,7 @@ test('unbound managed resources stay visible with empty Website/Domain impact', 
     resources: resources().filter((resource) => resource.type !== 'mail_data'),
   }));
 
-  assert.equal(graph.counts.resources, 3);
-  assert.equal(graph.counts.associatedResources, 0);
+  assert.deepEqual(graph.counts, { resources: 3, associatedResources: 0, websites: 0, domains: 0 });
   assert.equal(graph.impacts.every((impact) => impact.websiteIds.length === 0 && impact.domainIds.length === 0), true);
 });
 
@@ -191,7 +190,7 @@ test('backup dependency graph fails closed when a Mail resource loses its domain
   assert.throws(
     () => createBackupDependencyGraph(state({ domains: [] })),
     (error) => error instanceof BackupDependencyGraphError
-      && error.code === 'backup_dependency_website_missing'
+      && error.code === 'backup_dependency_mail_domain_stale'
       && error.status === 409,
   );
 });
