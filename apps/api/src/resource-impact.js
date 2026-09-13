@@ -12,6 +12,7 @@ const ADDITIONAL_TYPES = Object.freeze([
 const SAFE_RESOURCE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const SAFE_REFERENCE_ID = /^[A-Za-z0-9._:@-]{1,160}$/;
 const SAFE_REFERENCE_STATE = /^[A-Za-z0-9._:-]{1,80}$/;
+const COMPOSE_SERVICE_NAME = /^[a-z0-9][a-z0-9_.-]{0,62}$/;
 
 export class ResourceImpactError extends Error {
   constructor(code, message, status = 400) {
@@ -63,6 +64,27 @@ function domainReference(domain) {
   });
 }
 
+function managedComposeBindingReference(binding) {
+  if (binding === null || binding === undefined) return null;
+  if (!binding || typeof binding !== 'object' || Array.isArray(binding)
+    || Object.keys(binding).length !== 4
+    || Object.keys(binding).some((key) => !['projectId', 'serviceName', 'targetPort', 'protocol'].includes(key))
+    || typeof binding.serviceName !== 'string' || !COMPOSE_SERVICE_NAME.test(binding.serviceName)
+    || !Number.isSafeInteger(binding.targetPort) || binding.targetPort < 1 || binding.targetPort > 65535
+    || binding.protocol !== 'tcp') {
+    throw new ResourceImpactError('managed_compose_impact_invalid', 'Managed Compose Website binding metadata is invalid', 409);
+  }
+  let projectId;
+  try { projectId = assertUuid(binding.projectId, 'dockerProjectId'); }
+  catch { throw new ResourceImpactError('managed_compose_impact_invalid', 'Managed Compose Website binding metadata is invalid', 409); }
+  return Object.freeze({
+    projectId,
+    serviceName: binding.serviceName,
+    targetPort: binding.targetPort,
+    protocol: binding.protocol,
+  });
+}
+
 function websiteReference(website) {
   return Object.freeze({
     id: website.id,
@@ -70,6 +92,7 @@ function websiteReference(website) {
     name: website.name,
     applicationId: website.applicationId ?? null,
     dockerWorkloadId: website.dockerWorkloadId ?? null,
+    managedComposeBinding: managedComposeBindingReference(website.managedComposeBinding ?? null),
     runtimeType: website.runtimeType,
     revision: website.revision,
   });
@@ -174,24 +197,26 @@ function blocker(code, resourceType, count = null) {
   return Object.freeze({ code, resourceType, count });
 }
 
-function knownBlockers({ linkedDomains, childDomains, website, application, certificates, activeJobs }) {
+function knownBlockers({ linkedDomains, childDomains, website, application, managedComposeBinding, certificates, activeJobs }) {
   const blockers = [];
   if (linkedDomains.length > 0) blockers.push(blocker('linked_domains_present', 'domain', linkedDomains.length));
   if (childDomains.length > 0) blockers.push(blocker('child_domains_present', 'domain', childDomains.length));
   if (website) blockers.push(blocker('website_binding_present', 'website', 1));
   if (application) blockers.push(blocker('application_binding_present', 'application', 1));
+  if (managedComposeBinding) blockers.push(blocker('managed_compose_binding_present', 'docker_project', 1));
   if (certificates.length > 0) blockers.push(blocker('certificates_present', 'certificate', certificates.length));
   if (activeJobs.length > 0) blockers.push(blocker('active_jobs_present', 'job', activeJobs.length));
   return blockers;
 }
 
-function relevantJobs(jobs, { domainIds, applicationId, dockerWorkloadId, certificateIds }) {
+function relevantJobs(jobs, { domainIds, applicationId, dockerWorkloadId, dockerProjectId, certificateIds }) {
   const domains = new Set(domainIds);
   const certificates = new Set(certificateIds);
   return jobs.filter((job) => ACTIVE_JOB_STATES.has(job.status) && (
     (job.resourceType === 'domain' && domains.has(job.resourceId))
     || (job.resourceType === 'application' && job.resourceId === applicationId)
     || (job.resourceType === 'docker_workload' && job.resourceId === dockerWorkloadId)
+    || (job.resourceType === 'docker_project' && job.resourceId === dockerProjectId)
     || (job.resourceType === 'certificate' && certificates.has(job.resourceId))
   )).map(jobReference).sort((left, right) => left.id.localeCompare(right.id));
 }
@@ -277,6 +302,7 @@ export async function previewResourceImpact({
   if (website?.applicationId && !application) {
     throw new ResourceImpactError('impact_application_reference_missing', 'Website Application reference is unavailable', 409);
   }
+  const managedComposeBinding = managedComposeBindingReference(website?.managedComposeBinding ?? null);
   const impactedDomainIds = new Set([
     ...(resourceType === 'domain' ? [resource.id] : []),
     ...linkedDomains.map((domain) => domain.id),
@@ -294,6 +320,7 @@ export async function previewResourceImpact({
     domainIds: impactedDomainIds,
     applicationId: application?.id ?? null,
     dockerWorkloadId: website?.dockerWorkloadId ?? null,
+    dockerProjectId: managedComposeBinding?.projectId ?? null,
     certificateIds: certificateReferences.map((certificate) => certificate.id),
   });
   const providerContext = Object.freeze({
@@ -304,6 +331,7 @@ export async function previewResourceImpact({
     websiteId: website?.id ?? null,
     applicationId: application?.id ?? null,
     dockerWorkloadId: website?.dockerWorkloadId ?? null,
+    dockerProjectId: managedComposeBinding?.projectId ?? null,
     domainIds: Object.freeze([...impactedDomainIds].sort()),
   });
   const additionalEntries = await Promise.all(ADDITIONAL_TYPES.map(async ([key, type]) => (
@@ -315,6 +343,7 @@ export async function previewResourceImpact({
     childDomains: Object.freeze(childDomains),
     website: resourceType === 'domain' && website ? websiteReference(website) : null,
     application: applicationReference(application),
+    managedComposeBinding,
     dnsZones: Object.freeze(dnsZones),
     mailDomains: Object.freeze(mailDomains),
     certificates: Object.freeze(certificateReferences),
@@ -360,6 +389,7 @@ export const resourceImpactInternals = Object.freeze({
   operationInput,
   resourceIdentity,
   domainReference,
+  managedComposeBindingReference,
   websiteReference,
   applicationReference,
   certificateReference,
