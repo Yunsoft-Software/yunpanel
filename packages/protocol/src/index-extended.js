@@ -17,6 +17,7 @@ import {
 const MAIL_DKIM_APPLY = 'mail.dkim.apply';
 const MAIL_DATA_BACKUP = 'mail.data.backup';
 const MAIL_DATA_RESTORE = 'mail.data.restore';
+const MAIL_DATA_DELETE = 'mail.data.delete';
 const ROUNDCUBE_CONFIG_APPLY = 'roundcube.config.apply';
 const POSTSRSD_SERVICE_ID = 'postsrsd';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -32,6 +33,7 @@ export const OPERATIONS = Object.freeze({
   MAIL_DKIM_APPLY,
   MAIL_DATA_BACKUP,
   MAIL_DATA_RESTORE,
+  MAIL_DATA_DELETE,
   ROUNDCUBE_CONFIG_APPLY,
 });
 
@@ -40,6 +42,7 @@ export function isKnownOperation(operation) {
     || operation === MAIL_DKIM_APPLY
     || operation === MAIL_DATA_BACKUP
     || operation === MAIL_DATA_RESTORE
+    || operation === MAIL_DATA_DELETE
     || operation === ROUNDCUBE_CONFIG_APPLY;
 }
 
@@ -119,20 +122,28 @@ function validateMailDataBackup(payload, errors) {
   }
 }
 
-function validateMailDataRestore(payload, errors) {
+function validateMailDataMutation(payload, operation, errors) {
   const allowed = new Set([
     'mailDomainId', 'resourceId', 'backupId', 'scope', 'identity', 'expectedResourceRevision', 'expectedTargetSnapshotSha256',
   ]);
   if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
-    errors.push(`${MAIL_DATA_RESTORE} contains unsupported arguments`);
+    errors.push(`${operation} contains unsupported arguments`);
   }
-  validateMailDataIdentity(payload, MAIL_DATA_RESTORE, errors);
+  validateMailDataIdentity(payload, operation, errors);
   if (typeof payload.backupId !== 'string' || !BACKUP_ID_PATTERN.test(payload.backupId)) {
-    errors.push(`${MAIL_DATA_RESTORE} backupId is invalid`);
+    errors.push(`${operation} backupId is invalid`);
   }
   if (typeof payload.expectedTargetSnapshotSha256 !== 'string' || !SHA256_PATTERN.test(payload.expectedTargetSnapshotSha256)) {
-    errors.push(`${MAIL_DATA_RESTORE} target snapshot digest is invalid`);
+    errors.push(`${operation} target snapshot digest is invalid`);
   }
+}
+
+function validateMailDataRestore(payload, errors) {
+  validateMailDataMutation(payload, MAIL_DATA_RESTORE, errors);
+}
+
+function validateMailDataDelete(payload, errors) {
+  validateMailDataMutation(payload, MAIL_DATA_DELETE, errors);
 }
 
 function validateRoundcubeConfigApply(payload, errors) {
@@ -209,6 +220,7 @@ function extendedOperation(value) {
   if (value.operation === MAIL_DKIM_APPLY) return 'mail_dkim';
   if (value.operation === MAIL_DATA_BACKUP) return 'mail_data_backup';
   if (value.operation === MAIL_DATA_RESTORE) return 'mail_data_restore';
+  if (value.operation === MAIL_DATA_DELETE) return 'mail_data_delete';
   if (value.operation === ROUNDCUBE_CONFIG_APPLY) return 'roundcube';
   if (value.operation === BASE_OPERATIONS.DNS_RECORD_APPLY && value.payload?.record?.type === 'TXT') return 'dns_txt';
   if (value.payload?.serviceId === POSTSRSD_SERVICE_ID
@@ -235,6 +247,8 @@ export function validateOperationEnvelope(value) {
     validateMailDataBackup(value.payload, errors);
   } else if (extension === 'mail_data_restore') {
     validateMailDataRestore(value.payload, errors);
+  } else if (extension === 'mail_data_delete') {
+    validateMailDataDelete(value.payload, errors);
   } else if (extension === 'roundcube') {
     validateRoundcubeConfigApply(value.payload, errors);
   } else if (extension === 'postsrsd_service') {
@@ -252,6 +266,7 @@ export function createOperationEnvelope({ id, operation, payload = {} }) {
   const extended = operation === MAIL_DKIM_APPLY
     || operation === MAIL_DATA_BACKUP
     || operation === MAIL_DATA_RESTORE
+    || operation === MAIL_DATA_DELETE
     || operation === ROUNDCUBE_CONFIG_APPLY
     || (operation === BASE_OPERATIONS.DNS_RECORD_APPLY && payload?.record?.type === 'TXT')
     || (payload?.serviceId === POSTSRSD_SERVICE_ID
@@ -271,6 +286,7 @@ export const protocolExtensionInternals = Object.freeze({
   mailDkimApply: MAIL_DKIM_APPLY,
   mailDataBackup: MAIL_DATA_BACKUP,
   mailDataRestore: MAIL_DATA_RESTORE,
+  mailDataDelete: MAIL_DATA_DELETE,
   roundcubeConfigApply: ROUNDCUBE_CONFIG_APPLY,
   postsrsdServiceId: POSTSRSD_SERVICE_ID,
   readOnlyOperations: READ_ONLY_OPERATIONS,
@@ -278,6 +294,7 @@ export const protocolExtensionInternals = Object.freeze({
   validateMailDkimApply,
   validateMailDataBackup,
   validateMailDataRestore,
+  validateMailDataDelete,
   validateRoundcubeConfigApply,
   validateDnsTxtApply,
   validatePostsrsdServiceOperation,
