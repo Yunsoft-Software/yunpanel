@@ -332,6 +332,7 @@ export function createMailConfigurationService({
           srsDomain: srs.private.srsDomain,
           secretRevision: srs.private.srsSecretRevision,
           secretSha256: srs.private.secretArtifact.sha256,
+          secretBytes: srs.private.secretArtifact.bytes,
         });
       }
       if (tlsIdentity.identity) preview = bindManagedMailTlsIdentity(preview, tlsIdentity.identity);
