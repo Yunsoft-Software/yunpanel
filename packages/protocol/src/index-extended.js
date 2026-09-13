@@ -88,12 +88,16 @@ function validateMailDkimApply(payload, errors) {
 function validateMailDataIdentity(payload, operation, errors) {
   try {
     if (assertUuid(payload.mailDomainId, 'mailDomainId') !== payload.mailDomainId) throw new Error('noncanonical');
+    if (assertUuid(payload.resourceId, 'resourceId') !== payload.resourceId) throw new Error('noncanonical');
   } catch {
-    errors.push(`${operation} mailDomainId is invalid`);
+    errors.push(`${operation} resource identity is invalid`);
   }
   if (!['mailbox', 'domain'].includes(payload.scope)) {
     errors.push(`${operation} scope is invalid`);
     return;
+  }
+  if (payload.scope === 'domain' && payload.resourceId !== payload.mailDomainId) {
+    errors.push(`${operation} domain resourceId must equal mailDomainId`);
   }
   const normalized = payload.scope === 'mailbox' ? canonicalMailbox(payload.identity) : canonicalDomain(payload.identity);
   if (!normalized || normalized !== payload.identity) errors.push(`${operation} identity is invalid`);
@@ -103,7 +107,9 @@ function validateMailDataIdentity(payload, operation, errors) {
 }
 
 function validateMailDataBackup(payload, errors) {
-  const allowed = new Set(['mailDomainId', 'scope', 'identity', 'expectedResourceRevision', 'expectedSnapshotSha256']);
+  const allowed = new Set([
+    'mailDomainId', 'resourceId', 'scope', 'identity', 'expectedResourceRevision', 'expectedSnapshotSha256',
+  ]);
   if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
     errors.push(`${MAIL_DATA_BACKUP} contains unsupported arguments`);
   }
@@ -114,7 +120,9 @@ function validateMailDataBackup(payload, errors) {
 }
 
 function validateMailDataRestore(payload, errors) {
-  const allowed = new Set(['mailDomainId', 'backupId', 'scope', 'identity', 'expectedResourceRevision', 'expectedTargetSnapshotSha256']);
+  const allowed = new Set([
+    'mailDomainId', 'resourceId', 'backupId', 'scope', 'identity', 'expectedResourceRevision', 'expectedTargetSnapshotSha256',
+  ]);
   if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
     errors.push(`${MAIL_DATA_RESTORE} contains unsupported arguments`);
   }
