@@ -37,6 +37,7 @@ export function mountDatabaseBindingRoutes(app, {
   registry,
   jobRegistry,
   databaseBindingRegistry,
+  databaseCredentialRegistry = null,
   requireDatabaseName,
   ensureDatabaseIdle,
   latestDatabaseSnapshot,
@@ -50,6 +51,7 @@ export function mountDatabaseBindingRoutes(app, {
     || typeof databaseBindingRegistry.unbindDatabase !== 'function'
     || typeof databaseBindingRegistry.getBinding !== 'function'
     || typeof databaseBindingRegistry.listBindings !== 'function'
+    || (databaseCredentialRegistry !== null && typeof databaseCredentialRegistry.getForBinding !== 'function')
     || typeof requireDatabaseName !== 'function' || typeof ensureDatabaseIdle !== 'function'
     || typeof latestDatabaseSnapshot !== 'function') {
     throw new Error('Database binding route dependencies are invalid');
@@ -103,6 +105,20 @@ export function mountDatabaseBindingRoutes(app, {
       throw new DatabaseBindingHttpError('database_binding_not_found', 'Database binding not found', 404);
     }
     await ensureDatabaseIdle(jobRegistry, current.id);
+    if (databaseCredentialRegistry) {
+      let credential;
+      try { credential = await databaseCredentialRegistry.getForBinding(binding.id); }
+      catch {
+        throw new DatabaseBindingHttpError('database_credential_state_unavailable', 'Database credential state could not be verified', 503);
+      }
+      if (credential) {
+        throw new DatabaseBindingHttpError(
+          'database_binding_credential_exists',
+          'Delete the managed database credential before unbinding the database',
+          409,
+        );
+      }
+    }
     const result = await databaseBindingRegistry.unbindDatabase(binding.id, body);
     return response.json({ data: result, sideEffects: { databaseChanged: false } });
   }));
