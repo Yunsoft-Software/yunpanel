@@ -13,7 +13,7 @@ function resourceFactory(label, calls, extra = {}) {
   });
 }
 
-test('mail data recovery runtime reconstructs registries, receipt and backup/live evidence', async () => {
+test('mail data recovery runtime reconstructs registries receipt backup restore and delete evidence', async () => {
   const calls = [];
   const fakeJobRegistry = { marker: 'durable' };
   const fakeMailDomainRegistry = {
@@ -30,6 +30,9 @@ test('mail data recovery runtime reconstructs registries, receipt and backup/liv
   };
   const fakeRestoreManager = {
     async inspectRestored(input) { calls.push(['restore.inspect', input]); return { satisfied: true, result: {} }; },
+  };
+  const fakeDeleteManager = {
+    async inspectDeleted(input) { calls.push(['delete.inspect', input]); return { satisfied: true, result: {} }; },
   };
 
   const result = await runRunningMailDataRecoveryFromStores({
@@ -84,6 +87,10 @@ test('mail data recovery runtime reconstructs registries, receipt and backup/liv
       assert.equal(backupManager, fakeBackupManager);
       return fakeRestoreManager;
     },
+    deleteManagerFactory: ({ backupManager }) => {
+      assert.equal(backupManager, fakeBackupManager);
+      return fakeDeleteManager;
+    },
     serviceStatus: async () => ({ apiActive: false, agentActive: false }),
     recoverCommand: async (input) => {
       assert.equal(input.jobRegistry, fakeJobRegistry);
@@ -95,12 +102,16 @@ test('mail data recovery runtime reconstructs registries, receipt and backup/liv
         await input.inspectRestored({ backupId: 'backup-1', scope: 'mailbox', identity: 'owner@example.com' }),
         { satisfied: true, result: {} },
       );
+      assert.deepEqual(
+        await input.inspectDeleted({ transactionId: jobId, backupId: 'backup-1', scope: 'mailbox', identity: 'owner@example.com' }),
+        { satisfied: true, result: {} },
+      );
       return {
         serverId,
         jobId,
-        operation: 'mail.data.restore',
+        operation: 'mail.data.delete',
         status: 'succeeded',
-        recoveryMethod: 'verified_mail_data_restore_receipt_backup_and_live_state',
+        recoveryMethod: 'verified_mail_data_delete_receipt_backup_and_absence',
         reconciled: true,
       };
     },
@@ -112,6 +123,7 @@ test('mail data recovery runtime reconstructs registries, receipt and backup/liv
   assert.ok(calls.some(([name]) => name === 'receipt.read'));
   assert.ok(calls.some(([name]) => name === 'backup.inspect'));
   assert.ok(calls.some(([name]) => name === 'restore.inspect'));
+  assert.ok(calls.some(([name]) => name === 'delete.inspect'));
 });
 
 test('mail data recovery runtime rejects wrong host before opening protected mailbox state', async () => {
@@ -137,6 +149,7 @@ test('mail data recovery runtime rejects wrong host before opening protected mai
       receiptStoreFactory: () => ({ read: async () => ({}) }),
       backupManagerFactory: () => ({ inspectBackup: async () => null, materializeBackup: async () => null }),
       restoreManagerFactory: () => ({ inspectRestored: async () => ({}) }),
+      deleteManagerFactory: () => ({ inspectDeleted: async () => ({}) }),
       serviceStatus: async () => ({ apiActive: false, agentActive: false }),
       recoverCommand: async () => ({}),
     }),
