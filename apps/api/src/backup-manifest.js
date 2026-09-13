@@ -240,8 +240,7 @@ function normalizeApplicationSnapshot(value) {
   }
   const currentCommitSha = value.currentCommitSha === null ? null : value.currentCommitSha.toLowerCase();
   if ((currentReleaseId === null) !== (currentCommitSha === null)
-    || (currentReleaseId === null && value.appliedRevision !== 0)
-    || (currentReleaseId !== null && value.appliedRevision < 1)) {
+    || (currentReleaseId === null && value.appliedRevision !== 0)) {
     throw new BackupManifestError('backup_manifest_application_invalid', 'Application active release state is invalid');
   }
   return Object.freeze({
@@ -272,6 +271,10 @@ function normalizeApplicationResource(value, expectedServerId = null) {
   if (value.identity !== identity) {
     throw new BackupManifestError('backup_manifest_identity_invalid', 'Backup resource identity does not match its Application identity');
   }
+  const snapshot = normalizeApplicationSnapshot(value.snapshot);
+  if (value.applicationType === 'node' && snapshot.currentReleaseId !== null && snapshot.appliedRevision < 1) {
+    throw new BackupManifestError('backup_manifest_application_invalid', 'Node Application active release requires an applied configuration revision');
+  }
   return Object.freeze({
     identity,
     type: 'application',
@@ -279,7 +282,7 @@ function normalizeApplicationResource(value, expectedServerId = null) {
     applicationId,
     name: safeApplicationName(value.name),
     applicationType: value.applicationType,
-    snapshot: normalizeApplicationSnapshot(value.snapshot),
+    snapshot,
     policy: normalizePolicy(value.policy, applicationBackupPolicy()),
   });
 }
