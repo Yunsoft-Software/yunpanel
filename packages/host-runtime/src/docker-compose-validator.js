@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { access, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { isIP, SocketAddress } from 'node:net';
 import path from 'node:path';
 
 const DEFAULT_ROOT = '/var/lib/yunpanel/docker/compose-validation';
@@ -9,10 +10,12 @@ const MAX_DOCUMENT_BYTES = 512 * 1024;
 const MAX_CONFIG_BYTES = 4 * 1024 * 1024;
 const MAX_ENVIRONMENT_ENTRIES = 256;
 const MAX_ENVIRONMENT_VALUE_BYTES = 64 * 1024;
+const MAX_SERVICE_PORTS = 64;
 const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const ENVIRONMENT_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 const SERVICE_NAME_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,62}$/;
 const RESOURCE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
+const PORT_PROTOCOLS = new Set(['tcp', 'udp']);
 
 export class DockerComposeValidationError extends Error {
   constructor(code, message) {
@@ -99,6 +102,55 @@ function resourceNames(value, field) {
   return names.sort();
 }
 
+function canonicalIp(value) {
+  const family = isIP(value);
+  if (!family) return null;
+  try {
+    return new SocketAddress({ address: value, family: family === 4 ? 'ipv4' : 'ipv6', port: 0 }).address;
+  } catch {
+    return null;
+  }
+}
+
+function portNumber(value) {
+  const number = typeof value === 'string' && /^(?:[1-9][0-9]{0,4})$/.test(value) ? Number(value) : value;
+  return Number.isSafeInteger(number) && number >= 1 && number <= 65535 ? number : null;
+}
+
+function publishedPorts(value) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_SERVICE_PORTS) {
+    throw new DockerComposeValidationError('docker_compose_service_ports_invalid', 'Docker Compose service ports are invalid');
+  }
+  const output = [];
+  const identities = new Set();
+  for (const port of value) {
+    if (!port || typeof port !== 'object' || Array.isArray(port)) {
+      throw new DockerComposeValidationError('docker_compose_service_ports_invalid', 'Docker Compose service ports are invalid');
+    }
+    const targetPort = portNumber(port.target);
+    if (!targetPort) throw new DockerComposeValidationError('docker_compose_service_ports_invalid', 'Docker Compose service target port is invalid');
+    if (port.published === undefined || port.published === null || port.published === '') continue;
+    const publishedPort = portNumber(port.published);
+    const protocol = port.protocol ?? 'tcp';
+    const hostIp = port.host_ip == null || port.host_ip === '' ? null : canonicalIp(port.host_ip);
+    if (!publishedPort || !PORT_PROTOCOLS.has(protocol) || (port.host_ip != null && port.host_ip !== '' && hostIp === null)) {
+      throw new DockerComposeValidationError('docker_compose_service_ports_invalid', 'Docker Compose published port is invalid');
+    }
+    const item = Object.freeze({ hostIp, publishedPort, targetPort, protocol });
+    const identity = `${hostIp ?? '*'}:${publishedPort}/${protocol}`;
+    if (identities.has(identity)) {
+      throw new DockerComposeValidationError('docker_compose_service_ports_invalid', 'Docker Compose published port identities must be unique');
+    }
+    identities.add(identity);
+    output.push(item);
+  }
+  return output.sort((left, right) => (left.hostIp ?? '').localeCompare(right.hostIp ?? '')
+    || left.publishedPort - right.publishedPort
+    || left.targetPort - right.targetPort
+    || left.protocol.localeCompare(right.protocol));
+}
+
 export function summarizeDockerComposeConfig(value, { expectedProjectName, documentSha256, documentBytes } = {}) {
   const expected = projectName(expectedProjectName);
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -120,6 +172,7 @@ export function summarizeDockerComposeConfig(value, { expectedProjectName, docum
       name,
       imageConfigured: typeof service.image === 'string' && service.image.length > 0,
       buildConfigured: service.build !== undefined && service.build !== null,
+      publishedPorts: Object.freeze(publishedPorts(service.ports)),
     });
   }).sort((left, right) => left.name.localeCompare(right.name));
   return Object.freeze({
@@ -223,8 +276,10 @@ export const dockerComposeValidatorInternals = Object.freeze({
   maxDocumentBytes: MAX_DOCUMENT_BYTES,
   maxConfigBytes: MAX_CONFIG_BYTES,
   maxEnvironmentEntries: MAX_ENVIRONMENT_ENTRIES,
+  maxServicePorts: MAX_SERVICE_PORTS,
   projectName,
   composeDocument,
   normalizeEnvironment,
+  publishedPorts,
   findDockerPath,
 });
