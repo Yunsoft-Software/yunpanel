@@ -118,7 +118,7 @@ test('mail data restore pins selected backup and pre-restore identity in termina
   assert.equal(terminal.result.applied, true);
 });
 
-test('mail data delete durably pins resource backup and secret-free absence result', async () => {
+test('mail data delete durably pins resource backup revision and secret-free absence result', async () => {
   const registry = createJobRegistry();
   const queued = await registry.enqueue({
     serverId,
@@ -163,6 +163,7 @@ test('mail data delete durably pins resource backup and secret-free absence resu
     },
   });
   assert.equal(terminal.result.resourceId, mailboxId);
+  assert.equal(terminal.result.expectedResourceRevision, 3);
   assert.equal(terminal.result.deleted, true);
   assert.doesNotMatch(JSON.stringify(terminal.result), /tombstone|sourcePath|dataPath/);
 });
