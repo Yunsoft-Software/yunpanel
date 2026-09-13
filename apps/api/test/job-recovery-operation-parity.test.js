@@ -25,6 +25,7 @@ const recoverySources = [
   'job-running-certificate-recovery.js',
   'job-running-mail-config-recovery.js',
   'job-running-mail-dkim-recovery.js',
+  'job-running-mail-data-recovery.js',
   'job-running-roundcube-config-recovery.js',
 ].map(apiSource);
 
@@ -75,6 +76,7 @@ test('packaged recovery CLI exposes only explicit operation families and no forc
     'recover-service-mutation',
     'recover-mail-config',
     'recover-mail-dkim',
+    'recover-mail-data',
     'recover-roundcube-config',
   ]) {
     assert.match(source, new RegExp(`['\"]${action}['\"]`));
