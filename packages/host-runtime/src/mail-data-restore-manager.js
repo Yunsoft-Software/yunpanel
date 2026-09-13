@@ -194,6 +194,64 @@ export function createMailDataRestoreManager({
     }
   }
 
+  async function contentTree(targetPath, { requireRuntimeOwnership = null } = {}) {
+    const hash = createHash('sha256');
+    let files = 0;
+    let directories = 0;
+    let bytes = 0;
+
+    async function visit(current, relative) {
+      const metadata = await lstatFn(current);
+      if (metadata.isSymbolicLink()) throw new Error('symlink');
+      if (metadata.isDirectory()) {
+        if (requireRuntimeOwnership && ((metadata.mode & 0o7777) !== DIRECTORY_MODE
+          || metadata.uid !== requireRuntimeOwnership.uid || metadata.gid !== requireRuntimeOwnership.gid)) {
+          throw new Error('directory metadata');
+        }
+        if (relative) directories += 1;
+        updateTreeHash(hash, ['d', relative]);
+        const entries = await readdirFn(current, { withFileTypes: true });
+        entries.sort(compareEntryNames);
+        for (const entry of entries) {
+          const nextRelative = relative ? `${relative}/${entry.name}` : entry.name;
+          await visit(path.join(current, entry.name), nextRelative);
+        }
+        return;
+      }
+      if (!metadata.isFile()) throw new Error('file type');
+      if (requireRuntimeOwnership && ((metadata.mode & 0o7777) !== FILE_MODE
+        || metadata.uid !== requireRuntimeOwnership.uid || metadata.gid !== requireRuntimeOwnership.gid)) {
+        throw new Error('file metadata');
+      }
+      let handle;
+      try {
+        handle = await openFn(current, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const fileHash = createHash('sha256');
+        const buffer = Buffer.allocUnsafe(COPY_BUFFER_BYTES);
+        let fileBytes = 0;
+        for (;;) {
+          const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+          if (bytesRead === 0) break;
+          fileHash.update(buffer.subarray(0, bytesRead));
+          fileBytes += bytesRead;
+        }
+        files += 1;
+        bytes += fileBytes;
+        if (!Number.isSafeInteger(bytes)) throw new Error('tree too large');
+        updateTreeHash(hash, ['f', relative, fileBytes, fileHash.digest('hex')]);
+      } finally {
+        try { await handle?.close(); } catch {}
+      }
+    }
+
+    try {
+      await visit(targetPath, '');
+      return Object.freeze({ ok: true, contentSha256: hash.digest('hex'), files, directories, bytes });
+    } catch {
+      return Object.freeze({ ok: false, contentSha256: null, files: 0, directories: 0, bytes: 0 });
+    }
+  }
+
   async function materializeTree(sourceRoot, destinationRoot, vmail) {
     const hash = createHash('sha256');
     let files = 0;
@@ -235,57 +293,14 @@ export function createMailDataRestoreManager({
     return Object.freeze({ contentSha256: hash.digest('hex'), files, directories, bytes });
   }
 
-  async function verifyLiveTree(targetPath, vmail) {
-    const hash = createHash('sha256');
-    let files = 0;
-    let directories = 0;
-    let bytes = 0;
-
-    async function visit(current, relative) {
-      const metadata = await lstatFn(current);
-      if (metadata.isSymbolicLink()) throw new Error('symlink');
-      if (metadata.isDirectory()) {
-        if ((metadata.mode & 0o7777) !== DIRECTORY_MODE || metadata.uid !== vmail.uid || metadata.gid !== vmail.gid) {
-          throw new Error('directory metadata');
-        }
-        if (relative) directories += 1;
-        updateTreeHash(hash, ['d', relative]);
-        const entries = await readdirFn(current, { withFileTypes: true });
-        entries.sort(compareEntryNames);
-        for (const entry of entries) {
-          const nextRelative = relative ? `${relative}/${entry.name}` : entry.name;
-          await visit(path.join(current, entry.name), nextRelative);
-        }
-        return;
-      }
-      if (!metadata.isFile() || (metadata.mode & 0o7777) !== FILE_MODE
-        || metadata.uid !== vmail.uid || metadata.gid !== vmail.gid) throw new Error('file metadata');
-      let handle;
-      try {
-        handle = await openFn(current, constants.O_RDONLY | constants.O_NOFOLLOW);
-        const fileHash = createHash('sha256');
-        const buffer = Buffer.allocUnsafe(COPY_BUFFER_BYTES);
-        let fileBytes = 0;
-        for (;;) {
-          const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
-          if (bytesRead === 0) break;
-          fileHash.update(buffer.subarray(0, bytesRead));
-          fileBytes += bytesRead;
-        }
-        files += 1;
-        bytes += fileBytes;
-        updateTreeHash(hash, ['f', relative, fileBytes, fileHash.digest('hex')]);
-      } finally {
-        try { await handle?.close(); } catch {}
-      }
-    }
-
-    try {
-      await visit(targetPath, '');
-      return Object.freeze({ ok: true, contentSha256: hash.digest('hex'), files, directories, bytes });
-    } catch {
-      return Object.freeze({ ok: false, contentSha256: null, files: 0, directories: 0, bytes: 0 });
-    }
+  async function preStateMatches(targetPath, targetPreviouslyPresent, preRestore) {
+    const state = await pathState(targetPath);
+    if (state.present !== targetPreviouslyPresent) return false;
+    if (!targetPreviouslyPresent) return true;
+    const content = await contentTree(targetPath);
+    return content.ok && content.contentSha256 === preRestore.contentSha256
+      && content.files === preRestore.files && content.directories === preRestore.directories
+      && content.bytes === preRestore.bytes;
   }
 
   async function rollbackSwap(targetPath, previousPath, targetPreviouslyPresent) {
@@ -348,6 +363,10 @@ export function createMailDataRestoreManager({
     if (previousState.present) {
       throw new MailDataRestoreError('mail_data_restore_recovery_required', 'An interrupted mail data restore requires explicit recovery');
     }
+    const targetPreviouslyPresent = target.present;
+    if (!(await preStateMatches(targetPath, targetPreviouslyPresent, preRestore))) {
+      throw new MailDataRestoreError('mail_data_restore_target_changed', 'Mail data changed after the pre-restore backup was created');
+    }
 
     const createdParents = [];
     await ensureManagedParent(targetPath, vmail, createdParents);
@@ -355,7 +374,6 @@ export function createMailDataRestoreManager({
     if (stageState.present) await rmFn(stagePath, { recursive: true, force: true });
 
     let mutationStarted = false;
-    const targetPreviouslyPresent = target.present;
     try {
       const staged = await materializeTree(selected.dataPath, stagePath, vmail);
       if (staged.contentSha256 !== selected.manifest.contentSha256
@@ -364,7 +382,8 @@ export function createMailDataRestoreManager({
         throw new MailDataRestoreError('mail_data_restore_stage_mismatch', 'Staged mail data does not match the selected backup');
       }
       const liveBeforeMutation = await inspectTarget(scope, identity);
-      if (liveBeforeMutation.snapshotSha256 !== expectedTargetSnapshot || liveBeforeMutation.present !== targetPreviouslyPresent) {
+      if (liveBeforeMutation.snapshotSha256 !== expectedTargetSnapshot || liveBeforeMutation.present !== targetPreviouslyPresent
+        || !(await preStateMatches(targetPath, targetPreviouslyPresent, preRestore))) {
         throw new MailDataRestoreError('mail_data_restore_target_stale', 'Mail data target changed before restore activation');
       }
 
@@ -375,7 +394,7 @@ export function createMailDataRestoreManager({
       await renameFn(stagePath, targetPath);
       mutationStarted = true;
 
-      const verified = await verifyLiveTree(targetPath, vmail);
+      const verified = await contentTree(targetPath, { requireRuntimeOwnership: vmail });
       if (!verified.ok || verified.contentSha256 !== selected.manifest.contentSha256
         || verified.files !== selected.manifest.files || verified.directories !== selected.manifest.directories
         || verified.bytes !== selected.manifest.bytes) {
@@ -423,7 +442,7 @@ export function createMailDataRestoreManager({
       return Object.freeze({ satisfied: false, result: null });
     }
     const vmail = await resolveVmailIdentity();
-    const verified = await verifyLiveTree(selected.manifest.sourcePath, vmail);
+    const verified = await contentTree(selected.manifest.sourcePath, { requireRuntimeOwnership: vmail });
     if (!verified.ok || verified.contentSha256 !== selected.manifest.contentSha256
       || verified.files !== selected.manifest.files || verified.directories !== selected.manifest.directories
       || verified.bytes !== selected.manifest.bytes) {
