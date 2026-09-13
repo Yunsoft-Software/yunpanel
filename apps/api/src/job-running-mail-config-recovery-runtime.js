@@ -19,6 +19,8 @@ import { createMailConfigurationService } from './mail-configuration.js';
 import { createMailConfigOperationReceiptStore } from './mail-config-operation-receipt.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { createMailServiceIdentityRegistry } from './mail-service-identity-registry.js';
+import { createMailSrsConfigurationService } from './mail-srs-configuration.js';
+import { createMailSrsSecretRegistry } from './mail-srs-secret-registry.js';
 import { createMailboxForwardingRegistry } from './mailbox-forwarding-registry.js';
 import { createMailboxQuotaRegistry } from './mailbox-quota-registry.js';
 import { createMailboxRegistry } from './mailbox-registry.js';
@@ -60,6 +62,11 @@ function resolveMailRecoveryPaths({ env, packaged, cwd }) {
     path.join(defaultRoot, 'mail-service-identity-registry.json'),
     { packaged, cwd, label: 'mail service identity' },
   );
+  const mailSrsSecretStore = jobRecoveryRuntimeInternals.resolveRecoveryStorePath(
+    env.YUNPANEL_MAIL_SRS_SECRET_STORE,
+    path.join(defaultRoot, 'mail-srs-secret-registry.json'),
+    { packaged, cwd, label: 'mail SRS secret' },
+  );
   return Object.freeze({
     ...base,
     mailDomainStore,
@@ -68,6 +75,7 @@ function resolveMailRecoveryPaths({ env, packaged, cwd }) {
     mailboxForwardingStore,
     mailAliasStore,
     mailServiceIdentityStore,
+    mailSrsSecretStore,
   });
 }
 
@@ -84,6 +92,8 @@ export async function runRunningMailConfigRecoveryFromStores({
   applicationRegistryFactory = createApplicationRegistry,
   mailDomainRegistryFactory = createMailDomainRegistry,
   mailServiceIdentityRegistryFactory = createMailServiceIdentityRegistry,
+  mailSrsSecretRegistryFactory = createMailSrsSecretRegistry,
+  mailSrsConfigurationServiceFactory = createMailSrsConfigurationService,
   mailboxRegistryFactory = createMailboxRegistry,
   mailboxQuotaRegistryFactory = createMailboxQuotaRegistry,
   mailboxForwardingRegistryFactory = createMailboxForwardingRegistry,
@@ -105,6 +115,8 @@ export async function runRunningMailConfigRecoveryFromStores({
     applicationRegistryFactory,
     mailDomainRegistryFactory,
     mailServiceIdentityRegistryFactory,
+    mailSrsSecretRegistryFactory,
+    mailSrsConfigurationServiceFactory,
     mailboxRegistryFactory,
     mailboxQuotaRegistryFactory,
     mailboxForwardingRegistryFactory,
@@ -151,6 +163,23 @@ export async function runRunningMailConfigRecoveryFromStores({
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
     getCertificate: async (certificateId) => certificateRegistry.getCertificate(certificateId),
   }), 'Mail service identity');
+  const mailSrsSecretRegistry = await jobRecoveryRuntimeInternals.initRegistry(mailSrsSecretRegistryFactory({
+    filePath: paths.mailSrsSecretStore,
+    masterKey: env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+    serverExists: async (id) => Boolean(await serverRegistry.getServer(id)),
+  }), 'Mail SRS secret');
+  const mailSrsConfigurationService = mailSrsConfigurationServiceFactory({
+    mailServiceIdentityRegistry,
+    mailSrsSecretRegistry,
+  });
+  if (!mailSrsConfigurationService
+    || typeof mailSrsConfigurationService.previewForServer !== 'function'
+    || typeof mailSrsConfigurationService.materializeForServer !== 'function') {
+    throw new JobRecoveryRuntimeError(
+      'job_recovery_mail_srs_configuration_invalid',
+      'Managed mail recovery SRS configuration provider is invalid',
+    );
+  }
   const mailDomainRegistry = await jobRecoveryRuntimeInternals.initRegistry(mailDomainRegistryFactory({
     filePath: paths.mailDomainStore,
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
@@ -182,6 +211,7 @@ export async function runRunningMailConfigRecoveryFromStores({
     mailAliasRegistry,
     domainRegistry,
     mailServiceIdentityRegistry,
+    mailSrsConfigurationService,
   });
   if (!configurationService || typeof configurationService.materializeTransition !== 'function') {
     throw new JobRecoveryRuntimeError(
