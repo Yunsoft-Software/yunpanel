@@ -28,6 +28,7 @@ test('mail data backup and restore are known exact-payload operations', () => {
     mailDomainId,
     scope: 'mailbox',
     identity: 'owner@example.com',
+    expectedResourceRevision: 3,
     expectedSnapshotSha256: digest,
   };
   const backup = createOperationEnvelope({ id: 'job-mail-data-0001', operation: OPERATIONS.MAIL_DATA_BACKUP, payload: backupPayload });
@@ -38,6 +39,7 @@ test('mail data backup and restore are known exact-payload operations', () => {
     backupId: 'backup-mail-0001',
     scope: 'domain',
     identity: 'example.com',
+    expectedResourceRevision: 5,
     expectedTargetSnapshotSha256: digest,
   };
   const restore = createOperationEnvelope({ id: 'job-mail-data-0002', operation: OPERATIONS.MAIL_DATA_RESTORE, payload: restorePayload });
@@ -47,26 +49,35 @@ test('mail data backup and restore are known exact-payload operations', () => {
   });
 });
 
-test('mail data protocol rejects noncanonical identities, stale-shaped payloads and invalid backup ids', () => {
+test('mail data protocol rejects noncanonical identities, stale-shaped payloads, missing revision and invalid backup ids', () => {
   for (const candidate of [
     envelope(OPERATIONS.MAIL_DATA_BACKUP, {
       mailDomainId,
       scope: 'mailbox',
       identity: 'Owner@Example.COM',
+      expectedResourceRevision: 3,
       expectedSnapshotSha256: digest,
     }),
     envelope(OPERATIONS.MAIL_DATA_BACKUP, {
       mailDomainId,
       scope: 'domain',
       identity: 'example.com',
+      expectedResourceRevision: 5,
       expectedSnapshotSha256: digest,
       secret: 'forbidden',
+    }),
+    envelope(OPERATIONS.MAIL_DATA_BACKUP, {
+      mailDomainId,
+      scope: 'domain',
+      identity: 'example.com',
+      expectedSnapshotSha256: digest,
     }),
     envelope(OPERATIONS.MAIL_DATA_RESTORE, {
       mailDomainId,
       backupId: '../escape',
       scope: 'mailbox',
       identity: 'owner@example.com',
+      expectedResourceRevision: 3,
       expectedTargetSnapshotSha256: digest,
     }),
     envelope(OPERATIONS.MAIL_DATA_RESTORE, {
@@ -74,6 +85,15 @@ test('mail data protocol rejects noncanonical identities, stale-shaped payloads 
       backupId: 'backup-mail-0001',
       scope: 'domain',
       identity: 'EXAMPLE.com',
+      expectedResourceRevision: 5,
+      expectedTargetSnapshotSha256: digest,
+    }),
+    envelope(OPERATIONS.MAIL_DATA_RESTORE, {
+      mailDomainId,
+      backupId: 'backup-mail-0001',
+      scope: 'domain',
+      identity: 'example.com',
+      expectedResourceRevision: 0,
       expectedTargetSnapshotSha256: digest,
     }),
   ]) {
