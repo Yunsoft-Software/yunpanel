@@ -77,6 +77,11 @@ function requestFor(serverId, stepValue) {
   return mailRequest(serverId, step);
 }
 
+function intentFor(stepValue) {
+  const step = requireStep(stepValue);
+  return Object.freeze({ kind: 'job', id: idempotencyKey(step) });
+}
+
 function databaseMatchesInventory(step, inventory) {
   if (!inventory || typeof inventory !== 'object' || Array.isArray(inventory)
     || inventory.engine !== step.input.engine
@@ -161,7 +166,11 @@ export function createBackupChildJobDispatcher({
     throw new BackupChildDispatcherError('backup_child_dependencies_invalid', 'Mail data preview service is required', 503);
   }
 
-  async function prepare(serverId, stepValue) {
+  function intent(stepValue) {
+    return intentFor(stepValue);
+  }
+
+  async function verify(serverId, stepValue) {
     const step = requireStep(stepValue);
     if (step.executorKind === 'database_backup') {
       let jobs;
@@ -195,17 +204,20 @@ export function createBackupChildJobDispatcher({
         fail('backup_mail_preview_stale', 'Mail backup source changed after preview', 409);
       }
     }
-    const request = requestFor(serverId, step);
-    return Object.freeze({
-      workRef: Object.freeze({ kind: 'job', id: request.idempotencyKey }),
-      request,
-    });
+    return true;
+  }
+
+  async function prepare(serverId, stepValue) {
+    await verify(serverId, stepValue);
+    const step = requireStep(stepValue);
+    return Object.freeze({ workRef: intentFor(step), request: requestFor(serverId, step) });
   }
 
   async function enqueuePrepared(serverId, stepValue, workRef) {
     const step = requireStep(stepValue);
     const request = requestFor(serverId, step);
-    if (!workRef || workRef.kind !== 'job' || workRef.id !== request.idempotencyKey) {
+    const expectedIntent = intentFor(step);
+    if (!workRef || workRef.kind !== expectedIntent.kind || workRef.id !== expectedIntent.id) {
       fail('backup_child_dispatch_intent_invalid', 'Backup child dispatch intent does not match the execution step');
     }
     try { return await jobRegistry.enqueue(request); }
@@ -219,12 +231,13 @@ export function createBackupChildJobDispatcher({
     return evidenceFromJob(requireStep(stepValue), job);
   }
 
-  return Object.freeze({ prepare, enqueuePrepared, evidence });
+  return Object.freeze({ intent, verify, prepare, enqueuePrepared, evidence });
 }
 
 export const backupChildDispatcherInternals = Object.freeze({
   databaseOperations: Object.freeze([...DATABASE_OPERATIONS]),
   idempotencyKey,
+  intentFor,
   requestFor,
   databaseMatchesInventory,
   mailMatchesPreview,
