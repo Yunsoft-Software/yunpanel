@@ -14,6 +14,7 @@ import { mountApplicationConfigurationRoutes } from './application-configuration
 import { mountApplicationProcessRoutes } from './application-process-http.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
 import { isBackupHttpError, mountBackupRoutes } from './backup-http.js';
+import { createBackupProductionRuntime } from './backup-production-runtime.js';
 import { createBackupResourceProvider } from './backup-resource-provider.js';
 import { CertificateRegistryError, createCertificateRegistry } from './certificate-registry.js';
 import { CertificateMaterialError, createCertificateMaterialManager } from './certificate-material-manager.js';
@@ -277,6 +278,26 @@ export function createApp({
     jobRegistry,
     localServerId,
   });
+  const backupOperationRegistry = options.backupOperationRegistry ?? null;
+  const backupJobStorePath = options.backupJobStorePath ?? null;
+  const projectBackupLocked = options.projectBackupLocked ?? null;
+  const dockerComposeProjectRegistry = options.dockerComposeProjectRegistry ?? null;
+  const dockerComposeObserver = options.dockerComposeObserver ?? null;
+  const backupRuntime = backupOperationRegistry && backupJobStorePath && projectBackupLocked
+    && dockerComposeProjectRegistry && dockerComposeObserver && applicationEnvironmentRegistry
+    ? createBackupProductionRuntime({
+      jobRegistry,
+      jobStorePath: backupJobStorePath,
+      backupOperationRegistry,
+      applicationRegistry,
+      applicationEnvironmentRegistry,
+      dockerComposeProjectRegistry,
+      dockerComposeObserver,
+      loadDatabaseInventory: (serverId) => databaseHttpInternals.latestDatabaseSnapshot(jobRegistry, serverId),
+      mailDataOperationsService: mailDataOperations,
+      projectBackupLocked,
+    })
+    : null;
   const canCreateDkimDnsService = typeof dnsHostingRegistry?.listZones === 'function'
     && typeof dnsProviderCredentialRegistry?.getForZone === 'function'
     && typeof dnsProviderCredentialRegistry?.materialize === 'function'
@@ -296,19 +317,24 @@ export function createApp({
   app.disable('x-powered-by');
   mountSiteFileRoutes(app, { siteFileManager: files });
   app.use(express.json({ limit: '256kb' }));
+  const backupResourceProviderForRequest = (request) => createBackupResourceProvider({
+    serverRegistry: localRegistry,
+    dockerComposeProjectRegistry: request[DOCKER_COMPOSE_API_CONTEXT]?.projectRegistry ?? dockerComposeProjectRegistry,
+    applicationRegistry,
+    applicationEnvironmentRegistry,
+    websiteRegistry,
+    databaseBindingRegistry,
+    loadDatabaseInventory: (serverId) => databaseHttpInternals.latestDatabaseSnapshot(jobRegistry, serverId),
+    mailDomainRegistry,
+    domainRegistry,
+    mailDataOperationsService: mailDataOperations,
+  });
   mountBackupRoutes(app, {
-    backupResourceProviderForRequest: (request) => createBackupResourceProvider({
-      serverRegistry: localRegistry,
-      dockerComposeProjectRegistry: request[DOCKER_COMPOSE_API_CONTEXT]?.projectRegistry,
-      applicationRegistry,
-      applicationEnvironmentRegistry,
-      websiteRegistry,
-      databaseBindingRegistry,
-      loadDatabaseInventory: (serverId) => databaseHttpInternals.latestDatabaseSnapshot(jobRegistry, serverId),
-      mailDomainRegistry,
-      domainRegistry,
-      mailDataOperationsService: mailDataOperations,
-    }),
+    backupResourceProviderForRequest,
+    ...(backupRuntime ? {
+      backupOperationRegistry,
+      backupOrchestratorForRequest: async (_request, provider) => backupRuntime.createOrchestrator(provider),
+    } : {}),
   });
   mountCertificateRoutes(app, {
     domainRegistry,
