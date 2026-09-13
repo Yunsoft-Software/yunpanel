@@ -9,6 +9,7 @@ import SiteDetailPage from './SiteDetailPage.jsx';
 import ApplicationsPage from './ApplicationsPage.jsx';
 import AuditPage from './AuditPage.jsx';
 import DatabasesPage from './DatabasesPage.jsx';
+import DockerProjectsPage from './DockerProjectsPage.jsx';
 import ReadOnlyDashboardPage from './ReadOnlyDashboardPage.jsx';
 import ReadOnlyWebsitesPage from './ReadOnlyWebsitesPage.jsx';
 import ReadOnlySitePage from './ReadOnlySitePage.jsx';
@@ -43,11 +44,13 @@ function createWorkspaceRouter() {
       { path: 'domains', element: manage(<AdvancedDomainsPage />) },
       { path: 'servers', element: scoped(<ServersPage />, <ReadOnlyServersPage />) },
       { path: 'databases', element: manage(<DatabasesPage />) },
+      { path: 'docker', element: manage(<DockerProjectsPage />) },
+      { path: 'docker/:dockerProjectId', element: manage(<DockerProjectsPage />) },
       { path: 'jobs', element: manage(<JobsPage />) },
       { path: 'audit', element: manage(<AuditPage />) },
       { path: 'settings', element: manage(<SettingsPage />) },
       { path: 'settings/users', element: manage(<UsersPage />) },
-      ...['docker', 'mail', 'backups'].map((name) => ({ path: name, element: manage(<CapabilityPage name={name} />) })),
+      ...['mail', 'backups'].map((name) => ({ path: name, element: manage(<CapabilityPage name={name} />) })),
       { path: '*', element: <NotFoundPage /> },
     ],
   }]);
