@@ -11,6 +11,7 @@ import {
   runTerminalRecoveryFromStores,
 } from '../apps/api/src/job-recovery-runtime.js';
 import { runRunningCertificateRecoveryFromStores } from '../apps/api/src/job-running-certificate-recovery-runtime.js';
+import { runRunningDatabaseCredentialRecoveryFromStores } from '../apps/api/src/job-running-database-credential-recovery-runtime.js';
 import { runRunningDnsRecordRecoveryFromStores } from '../apps/api/src/job-running-dns-record-recovery-runtime.js';
 import { runRunningDomainActivationRecoveryFromStores } from '../apps/api/src/job-running-domain-activation-recovery-runtime.js';
 import { runRunningMailConfigRecoveryFromStores } from '../apps/api/src/job-running-mail-config-recovery-runtime.js';
@@ -49,6 +50,7 @@ const RECOVERY_ACTIONS = Object.freeze([
   'recover-certificate',
   'recover-database-create',
   'recover-database-delete',
+  'recover-database-credential',
   'recover-dns-record',
   'recover-service-control',
   'recover-service-mutation',
@@ -57,7 +59,7 @@ const RECOVERY_ACTIONS = Object.freeze([
   'recover-mail-data',
   'recover-roundcube-config',
 ]);
-const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-process <server-id> <job-id> --confirm | recover-node-runtime-install <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-certificate <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-dns-record <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm | recover-mail-config <server-id> <job-id> --confirm | recover-mail-dkim <server-id> <job-id> --confirm | recover-mail-data <server-id> <job-id> --confirm | recover-roundcube-config <server-id> <job-id> --confirm';
+const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-process <server-id> <job-id> --confirm | recover-node-runtime-install <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-certificate <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-database-credential <server-id> <job-id> --confirm | recover-dns-record <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm | recover-mail-config <server-id> <job-id> --confirm | recover-mail-dkim <server-id> <job-id> --confirm | recover-mail-data <server-id> <job-id> --confirm | recover-roundcube-config <server-id> <job-id> --confirm';
 
 export function parseJobRecoveryArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
@@ -152,6 +154,7 @@ export async function runJobRecoveryCli({
   recoverCertificate = runRunningCertificateRecoveryFromStores,
   recoverDatabaseCreate = runRunningDatabaseCreateRecoveryFromStores,
   recoverDatabaseDelete = runRunningDatabaseDeleteRecoveryFromStores,
+  recoverDatabaseCredential = runRunningDatabaseCredentialRecoveryFromStores,
   recoverDnsRecord = runRunningDnsRecordRecoveryFromStores,
   recoverServiceControl = runRunningServiceControlRecoveryFromStores,
   recoverServiceMutation = runRunningServiceReceiptRecoveryFromStores,
@@ -184,6 +187,7 @@ export async function runJobRecoveryCli({
     else if (parsed.action === 'recover-certificate') handler = recoverCertificate;
     else if (parsed.action === 'recover-database-create') handler = recoverDatabaseCreate;
     else if (parsed.action === 'recover-database-delete') handler = recoverDatabaseDelete;
+    else if (parsed.action === 'recover-database-credential') handler = recoverDatabaseCredential;
     else if (parsed.action === 'recover-dns-record') handler = recoverDnsRecord;
     else if (parsed.action === 'recover-service-control') handler = recoverServiceControl;
     else if (parsed.action === 'recover-service-mutation') handler = recoverServiceMutation;
