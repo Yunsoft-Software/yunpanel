@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseDockerEnvironmentText } from '../src/workspace/DockerConfigPanel.jsx';
+import { parseDockerEnvironmentText } from '../src/workspace/docker-compose-model.js';
 
 test('Docker environment replacement parser preserves value text and rejects duplicate keys', () => {
   assert.deepEqual(parseDockerEnvironmentText('NODE_ENV=production\nAPI_URL=https://example.test?a=b\nEMPTY='), {
