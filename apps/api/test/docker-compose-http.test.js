@@ -28,6 +28,21 @@ function mounted() {
   const environmentState = {
     projectId, revision: 0, keys: [], variableCount: 0, configured: false, updatedAt: null,
   };
+  const operationPreview = {
+    version: 1,
+    action: 'start',
+    operation: 'docker.compose.start',
+    serverId,
+    projectId,
+    projectName: 'shop_app',
+    projectRevision: 1,
+    environmentRevision: 0,
+    composeSha256: 'a'.repeat(64),
+    credentialRevisions: [],
+    previewDigest: 'b'.repeat(64),
+    confirmation: `docker-compose:start:shop_app:${'b'.repeat(64)}`,
+    sideEffects: false,
+  };
   const app = {
     get(path, ...handlers) { routes.push(['GET', path, handlers]); },
     post(path, ...handlers) { routes.push(['POST', path, handlers]); },
@@ -55,6 +70,25 @@ function mounted() {
       return { projectId: id, registryHost: input.registryHost, revision: 1, configured: true, usernameConfigured: true };
     },
   };
+  const operationsService = {
+    async preview(input) {
+      calls.push(['operationPreview', input]);
+      return { ...operationPreview, action: input.action };
+    },
+    async queue(input) {
+      calls.push(['operationQueue', input]);
+      return {
+        previewDigest: input.expectedPreviewDigest,
+        job: {
+          id: '420e65d7-3205-43d7-89aa-8f2d66714ee0',
+          operation: `docker.compose.${input.action}`,
+          resourceType: 'docker_project',
+          resourceId: input.projectId,
+          status: 'queued',
+        },
+      };
+    },
+  };
   const validateDockerCompose = async (input) => {
     calls.push(['validate', input]);
     return {
@@ -71,10 +105,11 @@ function mounted() {
     dockerComposeProjectRegistry: projectRegistry,
     dockerComposeEnvironmentRegistry: environmentRegistry,
     dockerRegistryCredentialRegistry: credentialRegistry,
+    dockerComposeOperationsService: operationsService,
     validateDockerCompose,
     localServerId: serverId,
   });
-  return { routes, calls };
+  return { routes, calls, operationPreview };
 }
 
 function route(fx, method, suffix) {
@@ -122,6 +157,43 @@ test('compose environment is fully validated before revisioned values are persis
   assert.deepEqual(validation.environment, variables);
   assert.ok(fx.calls.some(([name]) => name === 'replaceEnvironment'));
   assert.equal(response.payload.sideEffects, false);
+});
+
+test('compose lifecycle preview is side-effect free and bound to the local project', async () => {
+  const fx = mounted();
+  const response = await invoke(route(fx, 'POST', '/operations/:action/preview'), {
+    params: { dockerProjectId: projectId, action: 'start' },
+    body: {},
+  });
+  assert.equal(response.error, null);
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.sideEffects, false);
+  assert.equal(response.payload.data.previewDigest, fx.operationPreview.previewDigest);
+  assert.deepEqual(fx.calls.find(([name]) => name === 'operationPreview')[1], {
+    projectId,
+    action: 'start',
+  });
+});
+
+test('compose lifecycle queue requires the preview digest and confirmation', async () => {
+  const fx = mounted();
+  const response = await invoke(route(fx, 'POST', '/operations/:action'), {
+    params: { dockerProjectId: projectId, action: 'start' },
+    body: {
+      expectedPreviewDigest: fx.operationPreview.previewDigest,
+      confirmation: fx.operationPreview.confirmation,
+    },
+  });
+  assert.equal(response.error, null);
+  assert.equal(response.status, 202);
+  assert.equal(response.payload.sideEffects, false);
+  assert.equal(response.payload.data.job.status, 'queued');
+  assert.deepEqual(fx.calls.find(([name]) => name === 'operationQueue')[1], {
+    projectId,
+    action: 'start',
+    expectedPreviewDigest: fx.operationPreview.previewDigest,
+    confirmation: fx.operationPreview.confirmation,
+  });
 });
 
 test('registry credential route returns public metadata only', async () => {
