@@ -51,6 +51,11 @@ export {
   mailDataBackupInternals,
 } from './mail-data-backup-manager.js';
 export {
+  createMailDataRestoreManager,
+  MailDataRestoreError,
+  mailDataRestoreInternals,
+} from './mail-data-restore-manager.js';
+export {
   createMailDiagnosticsInspector,
   MailDiagnosticsInspectorError,
   mailDiagnosticsInspectorInternals,
