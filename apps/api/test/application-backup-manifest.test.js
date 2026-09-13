@@ -137,6 +137,44 @@ test('Draft Application backup uses explicit zero environment and release state'
   });
 });
 
+test('deployed static Application preserves registry appliedRevision zero with exact release evidence', () => {
+  const resource = applicationBackupResource(application({
+    type: 'static',
+    desiredRevision: 1,
+    appliedRevision: 0,
+    currentReleaseId: releaseId,
+    currentCommitSha: commitSha,
+  }));
+
+  assert.equal(resource.applicationType, 'static');
+  assert.equal(resource.snapshot.appliedRevision, 0);
+  assert.equal(resource.snapshot.currentReleaseId, releaseId);
+  assert.equal(resource.snapshot.currentCommitSha, commitSha);
+  assert.deepEqual(normalizeBackupManifest(createBackupManifest({
+    serverId,
+    applicationSnapshots: [{ application: application({
+      type: 'static',
+      desiredRevision: 1,
+      appliedRevision: 0,
+      currentReleaseId: releaseId,
+      currentCommitSha: commitSha,
+    }) }],
+  })).resources[0], resource);
+});
+
+test('deployed Node Application still requires an applied configuration revision', () => {
+  assert.throws(
+    () => applicationBackupResource(application({
+      type: 'node',
+      desiredRevision: 4,
+      appliedRevision: 0,
+      currentReleaseId: releaseId,
+      currentCommitSha: commitSha,
+    })),
+    (error) => error instanceof BackupManifestError && error.code === 'backup_manifest_application_invalid',
+  );
+});
+
 test('Application manifest rejects malformed commit state instead of normalizing it away', () => {
   assert.throws(
     () => applicationBackupResource(application({
