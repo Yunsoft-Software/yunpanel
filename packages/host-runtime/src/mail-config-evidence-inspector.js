@@ -134,6 +134,18 @@ export function createMailConfigEvidenceInspector({
     }
   }
 
+  async function removedPostfixParametersSatisfied(plan) {
+    const names = plan.srs?.removePostfixParameters ?? [];
+    if (names.length === 0) return true;
+    let content;
+    try { content = await readFileFn(mailConfigBackupInternals.postfixMainCfPath, 'utf8'); }
+    catch { return false; }
+    const activeLines = String(content).split('\n')
+      .filter((line) => !line.trimStart().startsWith('#'))
+      .join('\n');
+    return names.every((name) => !new RegExp(`^\\s*${name}\\s*=`, 'mi').test(activeLines));
+  }
+
   async function postfixMasterServiceSatisfied(service) {
     const identity = `${service.service}/${service.type}`;
     try {
@@ -168,6 +180,7 @@ export function createMailConfigEvidenceInspector({
     for (const parameter of plan.postfixParameters) {
       if (!(await postfixParameterSatisfied(parameter))) return { satisfied: false, result: null };
     }
+    if (!(await removedPostfixParametersSatisfied(plan))) return { satisfied: false, result: null };
     for (const service of plan.postfixMasterServices) {
       if (!(await postfixMasterServiceSatisfied(service))) return { satisfied: false, result: null };
     }
@@ -180,9 +193,10 @@ export function createMailConfigEvidenceInspector({
     if (!(await inspectSubmissionSocket(postfixIdentity))) return { satisfied: false, result: null };
 
     let readiness;
-    try { readiness = await readinessInspector.inspect(preview); }
+    try { readiness = await readinessInspector.inspect(preview, { phase: 'post' }); }
     catch { return { satisfied: false, result: null }; }
     if (!readiness || readiness.ready !== true || readiness.previewSha256 !== preview.sha256
+      || readiness.phase !== 'post'
       || typeof readiness.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(readiness.sha256)) {
       return { satisfied: false, result: null };
     }
