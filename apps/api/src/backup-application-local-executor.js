@@ -148,8 +148,8 @@ export function createBackupApplicationLocalExecutor({
     return Object.freeze({ step, application, environment });
   }
 
-  async function prepare(serverId, stepValue) {
-    const { step } = await sourceState(serverId, stepValue);
+  async function prepare(_serverId, stepValue) {
+    const step = normalizeStep(stepValue);
     return Object.freeze({ workRef: workRef(step) });
   }
 
