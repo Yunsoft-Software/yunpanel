@@ -18,6 +18,10 @@ import {
   sanitizeDatabaseCredentialResult,
 } from './database-credential-job-result.js';
 import { sanitizeDatabaseJobResult } from './database-job-result.js';
+import {
+  DatabaseRestoreJobResultError,
+  sanitizeDatabaseRestoreResult,
+} from './database-restore-job-result.js';
 import { safeLocalOperationError } from './local-execution-error.js';
 import {
   MailDataJobResultError,
@@ -54,6 +58,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DATABASE_CREATE,
   OPERATIONS.DATABASE_DELETE,
   OPERATIONS.DATABASE_BACKUP,
+  OPERATIONS.DATABASE_RESTORE,
   OPERATIONS.DATABASE_CREDENTIAL_APPLY,
   OPERATIONS.DATABASE_CREDENTIAL_DELETE,
   OPERATIONS.DNS_RECORD_APPLY,
@@ -682,6 +687,17 @@ function sanitizeDatabaseBackupJobResult(job, result) {
   }
 }
 
+function sanitizeDatabaseRestoreJobResult(job, result) {
+  try {
+    return sanitizeDatabaseRestoreResult(job, result);
+  } catch (error) {
+    if (error instanceof DatabaseRestoreJobResultError || error?.code === 'invalid_job_result') {
+      throw new JobRegistryError('invalid_job_result', error.message);
+    }
+    throw error;
+  }
+}
+
 function sanitizeDatabaseCredentialJobResult(job, result) {
   try {
     return sanitizeDatabaseCredentialResult(job, result);
@@ -796,6 +812,7 @@ function sanitizeResult(job, result) {
     return sanitizeDatabaseResult(job, result);
   }
   if (job.operation === OPERATIONS.DATABASE_BACKUP) return sanitizeDatabaseBackupJobResult(job, result);
+  if (job.operation === OPERATIONS.DATABASE_RESTORE) return sanitizeDatabaseRestoreJobResult(job, result);
   if ([OPERATIONS.DATABASE_CREDENTIAL_APPLY, OPERATIONS.DATABASE_CREDENTIAL_DELETE].includes(job.operation)) {
     return sanitizeDatabaseCredentialJobResult(job, result);
   }
