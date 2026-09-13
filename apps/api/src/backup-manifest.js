@@ -23,6 +23,7 @@ const APPLICATION_RESOURCE_KEYS = new Set([
 const APPLICATION_SNAPSHOT_KEYS = new Set([
   'desiredRevision', 'appliedRevision', 'currentReleaseId', 'currentCommitSha', 'environment',
 ]);
+const APPLICATION_INPUT_KEYS = new Set(['application', 'environment']);
 const ENVIRONMENT_SNAPSHOT_KEYS = new Set(['savedRevision', 'appliedRevision', 'appliedReleaseId']);
 const STORAGE_KEYS = new Set(['kind', 'source', 'sourceScope', 'target', 'readOnly']);
 const POLICY_KEYS = new Set(['disposition', 'reason']);
@@ -202,7 +203,7 @@ function normalizeDockerStorageResource(value, expectedServerId = null) {
   });
 }
 
-function normalizeEnvironmentSnapshot(value, applicationId) {
+function normalizeEnvironmentSnapshot(value) {
   const source = value ?? { savedRevision: 0, appliedRevision: null, appliedReleaseId: null };
   if (!source || typeof source !== 'object' || Array.isArray(source)
     || Object.keys(source).length !== ENVIRONMENT_SNAPSHOT_KEYS.size
@@ -233,11 +234,11 @@ function normalizeApplicationSnapshot(value) {
     throw new BackupManifestError('backup_manifest_application_invalid', 'Application revision state is invalid');
   }
   const currentReleaseId = safeUuid(value.currentReleaseId, 'currentReleaseId', { nullable: true });
-  const currentCommitSha = value.currentCommitSha === null
-    ? null
-    : typeof value.currentCommitSha === 'string' && COMMIT_PATTERN.test(value.currentCommitSha)
-      ? value.currentCommitSha.toLowerCase()
-      : null;
+  if (value.currentCommitSha !== null
+    && (typeof value.currentCommitSha !== 'string' || !COMMIT_PATTERN.test(value.currentCommitSha))) {
+    throw new BackupManifestError('backup_manifest_application_invalid', 'Application commit state is invalid');
+  }
+  const currentCommitSha = value.currentCommitSha === null ? null : value.currentCommitSha.toLowerCase();
   if ((currentReleaseId === null) !== (currentCommitSha === null)
     || (currentReleaseId === null && value.appliedRevision !== 0)
     || (currentReleaseId !== null && value.appliedRevision < 1)) {
@@ -437,8 +438,11 @@ export function createBackupManifest({
     resources.push(...dockerStorageBackupResources(project));
   }
   for (const entry of applicationSnapshots) {
+    const keys = entry && typeof entry === 'object' && !Array.isArray(entry) ? Object.keys(entry) : [];
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)
-      || !entry.application || typeof entry.application !== 'object') {
+      || !entry.application || typeof entry.application !== 'object'
+      || keys.length < 1 || keys.length > APPLICATION_INPUT_KEYS.size
+      || keys.some((key) => !APPLICATION_INPUT_KEYS.has(key))) {
       throw new BackupManifestError('backup_manifest_applications_invalid', 'Application snapshot is invalid');
     }
     if (entry.application.serverId !== normalizedServerId) {
