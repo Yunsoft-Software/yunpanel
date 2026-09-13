@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  databaseCredentialRegistryInternals,
+} from '../src/database-credential-registry.js';
+import {
   DatabaseCredentialHttpError,
   mountDatabaseCredentialRoutes,
 } from '../src/database-credential-http.js';
@@ -9,7 +12,7 @@ const serverId = '12345678-1234-4234-8234-123456789012';
 const bindingId = '22345678-1234-4234-8234-123456789012';
 const credentialId = '32345678-1234-4234-8234-123456789012';
 const deleteJobId = 'database-credential-delete-job-0001';
-const username = 'ydb_0123456789abcdef01234567';
+const username = databaseCredentialRegistryInternals.usernameFor(bindingId);
 const digest = 'a'.repeat(64);
 
 function createFakeApp() {

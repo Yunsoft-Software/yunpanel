@@ -45,9 +45,14 @@ function restoreResult(overrides = {}) {
   };
 }
 
+const unusedRestoreManager = Object.freeze({
+  async restore() { throw new Error('restore is not expected in this test'); },
+});
+
 test('database backup uses the job identity as private backup identity and returns safe metadata', async () => {
   const calls = [];
   const operations = createLocalHostOperations({
+    databaseRestoreManager: unusedRestoreManager,
     databaseDumpManager: {
       async backup(input) {
         calls.push(input);
@@ -69,6 +74,7 @@ test('database backup uses the job identity as private backup identity and retur
 test('database backup execution context must match the queued database resource', async () => {
   let executions = 0;
   const operations = createLocalHostOperations({
+    databaseRestoreManager: unusedRestoreManager,
     databaseDumpManager: {
       async backup() { executions += 1; return publicResult(); },
     },
@@ -86,6 +92,7 @@ test('database backup execution context must match the queued database resource'
 
 test('database backup adapter rejects private paths returned by the manager', async () => {
   const operations = createLocalHostOperations({
+    databaseRestoreManager: unusedRestoreManager,
     databaseDumpManager: {
       async backup() { return { ...publicResult(), dumpPath: '/private/dump.sql' }; },
     },
