@@ -89,6 +89,7 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/services\/([^/]+)\/control$/)) && method === 'POST') return { action: 'service.control', resourceType: 'service', resourceId: `${parts[0]}:${parts[1]}` };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/databases\/inspect$/)) && method === 'POST') return { action: 'database.inspect', resourceType: 'server', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/databases$/)) && method === 'POST') return { action: 'database.create', resourceType: 'server', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/databases\/([^/]+)\/backup$/)) && method === 'POST') return { action: 'database.backup', resourceType: 'database', resourceId: parts[1] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/databases\/([^/]+)$/)) && method === 'DELETE') return { action: 'database.delete', resourceType: 'database', resourceId: parts[1] };
   return null;
 }

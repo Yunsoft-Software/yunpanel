@@ -66,6 +66,7 @@ test('current management mutation routes map to bounded action and resource iden
     ['POST', '/api/servers/server-1/services/nginx/control', 'service.control', 'service', 'server-1:nginx'],
     ['POST', '/api/servers/server-1/databases/inspect', 'database.inspect', 'server', 'server-1'],
     ['POST', '/api/servers/server-1/databases', 'database.create', 'server', 'server-1'],
+    ['POST', '/api/servers/server-1/databases/app_db/backup', 'database.backup', 'database', 'app_db'],
     ['DELETE', '/api/servers/server-1/databases/app_db', 'database.delete', 'database', 'app_db'],
   ];
   for (const [method, pathname, action, resourceType, resourceId] of cases) {
