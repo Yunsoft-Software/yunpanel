@@ -17,7 +17,7 @@ export function createDockerComposeApiHandler({
   if (typeof baseHandler !== 'function'
     || !runtime || typeof runtime !== 'object'
     || !runtime.projectRegistry || !runtime.environmentRegistry || !runtime.credentialRegistry
-    || !runtime.operationsService || typeof runtime.validateDockerCompose !== 'function') {
+    || !runtime.operationsService || !runtime.observer || typeof runtime.validateDockerCompose !== 'function') {
     throw new DockerComposeApiHandlerError(
       'docker_compose_api_handler_dependencies_invalid',
       'Docker Compose API handler dependencies are invalid',
@@ -32,6 +32,7 @@ export function createDockerComposeApiHandler({
     dockerComposeEnvironmentRegistry: runtime.environmentRegistry,
     dockerRegistryCredentialRegistry: runtime.credentialRegistry,
     dockerComposeOperationsService: runtime.operationsService,
+    dockerComposeObserver: runtime.observer,
     validateDockerCompose: runtime.validateDockerCompose,
     localServerId,
   });
