@@ -127,6 +127,7 @@ test('mailbox backup preview queues one secret-free mail-domain locked job', asy
       mailDomainId,
       scope: 'mailbox',
       identity: 'owner@example.com',
+      expectedResourceRevision: 3,
       expectedSnapshotSha256: digest,
     },
     resourceType: 'mail_domain',
@@ -181,6 +182,7 @@ test('restore queues selected backup against the same mail-domain resource lock'
     backupId: 'mail-backup-0001',
     scope: 'mailbox',
     identity: 'owner@example.com',
+    expectedResourceRevision: 3,
     expectedTargetSnapshotSha256: digest,
   });
   assert.equal(state.enqueued[0].resourceType, 'mail_domain');
