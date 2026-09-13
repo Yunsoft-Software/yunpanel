@@ -153,6 +153,14 @@ export function createMailDataOperationsService({
     });
   }
 
+  function sameTarget(target, current) {
+    return target.mailDomain.id === current.mailDomainId
+      && target.scope === current.scope
+      && target.resourceId === current.resourceId
+      && target.identity === current.identity
+      && target.revision === current.expectedRevision;
+  }
+
   async function queueBackup({ scope, resourceId, expectedRevision, expectedPreviewDigest, confirmation } = {}) {
     const expected = positiveRevision(expectedRevision);
     const requestedDigest = previewDigest(expectedPreviewDigest);
@@ -163,8 +171,12 @@ export function createMailDataOperationsService({
     if (confirmation !== current.confirmation) {
       throw new MailDataOperationsError('mail_data_backup_confirmation_invalid', 'Mail data backup confirmation is invalid', 409);
     }
+    const target = await resource(scope, resourceId);
+    if (!sameTarget(target, current)) {
+      throw new MailDataOperationsError('mail_data_backup_preview_stale', 'Mail data backup resource changed before enqueue', 409);
+    }
     const job = await jobRegistry.enqueue({
-      serverId: (await resource(scope, resourceId)).domain.serverId,
+      serverId: target.domain.serverId,
       type: 'mail_data_backup',
       operation: OPERATIONS.MAIL_DATA_BACKUP,
       payload: {
@@ -248,6 +260,9 @@ export function createMailDataOperationsService({
       throw new MailDataOperationsError('mail_data_restore_confirmation_invalid', 'Mail data restore confirmation is invalid', 409);
     }
     const target = await resource(scope, resourceId);
+    if (!sameTarget(target, current) || target.mailDomain.status !== 'disabled') {
+      throw new MailDataOperationsError('mail_data_restore_preview_stale', 'Mail data restore resource changed before enqueue', 409);
+    }
     const job = await jobRegistry.enqueue({
       serverId: target.domain.serverId,
       type: 'mail_data_restore',
