@@ -345,6 +345,21 @@ export async function startConfiguredLocalRuntime({
       return;
     }
 
+    if (operation === OPERATIONS.MAIL_DATA_DELETE) {
+      if (resourceType !== 'mail_domain' || resourceId !== payload?.mailDomainId
+        || result?.mailDomainId !== payload.mailDomainId || result.resourceId !== payload.resourceId
+        || result.transactionId !== jobId || result.backupId !== payload.backupId
+        || result.scope !== payload.scope || result.identity !== payload.identity
+        || typeof result.sourcePresent !== 'boolean'
+        || !SHA256_PATTERN.test(payload.expectedTargetSnapshotSha256 ?? '')
+        || !SHA256_PATTERN.test(result.contentSha256 ?? '')
+        || result.deleted !== true || result.sideEffects !== true) {
+        throw new Error('Mail data delete result is not safe recovery evidence');
+      }
+      await mailDataOperationReceipts.write({ serverId, jobId, operation, result });
+      return;
+    }
+
     if (operation === OPERATIONS.ROUNDCUBE_CONFIG_APPLY) {
       if (!roundcubeConfigOperationReceipts || resourceType !== 'server' || resourceId !== serverId
         || !SHA256_PATTERN.test(payload?.previewSha256 ?? '')
