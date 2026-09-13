@@ -17,6 +17,7 @@ async function queuedBackup(registry) {
       mailDomainId,
       scope: 'mailbox',
       identity: 'owner@example.com',
+      expectedResourceRevision: 3,
       expectedSnapshotSha256: digest,
     },
     resourceType: 'mail_domain',
@@ -38,6 +39,7 @@ test('mail data backup durably enqueues, claims and completes with a secret-free
     mailDomainId,
     scope: 'mailbox',
     identity: 'owner@example.com',
+    expectedResourceRevision: 3,
     expectedSnapshotSha256: digest,
   });
 
@@ -78,6 +80,7 @@ test('mail data restore pins selected backup and pre-restore identity in termina
       backupId: 'mail-backup-selected',
       scope: 'domain',
       identity: 'example.com',
+      expectedResourceRevision: 5,
       expectedTargetSnapshotSha256: digest,
     },
     resourceType: 'mail_domain',
