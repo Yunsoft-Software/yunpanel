@@ -5,6 +5,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import { createLocalHostOperations } from '../src/local-host-operations.js';
 
 const mailDomainId = randomUUID();
+const mailboxId = randomUUID();
 const jobId = randomUUID();
 const digest = 'a'.repeat(64);
 
@@ -68,6 +69,7 @@ test('local mail data backup uses job id as backup id and returns only safe evid
   assert.equal(operations.supports(OPERATIONS.MAIL_DATA_BACKUP), true);
   const result = await operations.executeOperation(OPERATIONS.MAIL_DATA_BACKUP, {
     mailDomainId,
+    resourceId: mailboxId,
     scope: 'mailbox',
     identity: 'owner@example.com',
     expectedResourceRevision: 3,
@@ -102,6 +104,7 @@ test('local mail data restore uses job id as transaction and strips private mana
   assert.equal(operations.supports(OPERATIONS.MAIL_DATA_RESTORE), true);
   const result = await operations.executeOperation(OPERATIONS.MAIL_DATA_RESTORE, {
     mailDomainId,
+    resourceId: mailboxId,
     backupId: 'mail-backup-selected',
     scope: 'mailbox',
     identity: 'owner@example.com',
@@ -127,6 +130,7 @@ test('mail data operation rejects wrong execution resource before touching manag
   await assert.rejects(
     operations.executeOperation(OPERATIONS.MAIL_DATA_BACKUP, {
       mailDomainId,
+      resourceId: mailDomainId,
       scope: 'domain',
       identity: 'example.com',
       expectedResourceRevision: 5,
