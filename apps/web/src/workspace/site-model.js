@@ -1,7 +1,7 @@
 const DAY = 86400000;
 const ACTIVE_JOBS = new Set(['queued', 'running']);
 export const SITE_TABS = [
-  ['overview', 'Genel bakış'], ['node', 'Uygulama'], ['deploy', 'Git / Deploy'],
+  ['overview', 'Genel bakış'], ['resources', 'Bağlı kaynaklar'], ['node', 'Uygulama'], ['deploy', 'Git / Deploy'],
   ['domains', 'Alan adları'], ['ssl', 'SSL'], ['files', 'Dosyalar'], ['logs', 'Loglar'],
   ['terminal', 'Terminal'], ['settings', 'Ayarlar'],
 ];
