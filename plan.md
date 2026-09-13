@@ -93,10 +93,11 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 - [x] MariaDB↔MySQL conflict fail-closed detection, engine/version ve non-system database inventory hazır.
 - [x] Unix socket root auth ile database create/delete kalıcı job'ları, recovery ve system-name/injection kontrolleri hazır.
 - [x] Temel veritabanı listeleme/oluşturma/silme arayüzü gerçek API'ye bağlı.
-- [ ] Database'i Website/Application ve site kullanıcısına kalıcı olarak bağla.
-- [ ] DB user CRUD, minimum-privilege grants, parola rotation ve şifreli connection credential lifecycle ekle.
-- [ ] Dump/restore, restore preview, pre-restore backup, progress ve failure rollback ekle.
-- [ ] Gerçek MySQL/MariaDB hostta inspect→create→inspect→drop→inspect ve secret-free receipt kabulünü tamamla.
+- [x] Database ownership kaynak lifecycle'ı hazır: schema kalıcı olarak same-server Website/Application ve deterministik `yunapp-*` site kullanıcısına explicit binding ile bağlanıyor; stale/cross-server/proxy-Docker drift fail-closed, bağlı schema DROP öncesi explicit unbind zorunlu ve binding state restart/upgrade için kalıcı store'da tutuluyor.
+- [x] DB user/grant/credential kaynak lifecycle'ı hazır: binding başına deterministik `ydb_*@localhost`, allowlist'li minimum-privilege grant seti, AES-256-GCM encrypted parola store'u, grant/parola rotation desired-state'i, secret-free durable `database.credential.apply/delete`, host ownership marker + conflict detection, pre-mutation user/grant snapshot rollback, receipt + live marker/grant evidence tabanlı `recover-database-credential`, packaged CLI/parity ve guarded finalize/unbind akışları production wiring'e bağlı.
+- [x] Private database backup kaynak lifecycle'ı hazır: canonical socket-only dump, private `0700/0600` artifact+manifest, SHA-256/size/permission verification, secret/path/SQL taşımayan exact terminal result, durable `database.backup`, Owner typed-confirmation API, job-id backup kimliği ve verified private manifest tabanlı `recover-database-backup` runtime/CLI/parity zinciri kaynakta bağlı.
+- [ ] Restore lifecycle'ını tamamla: host restore manager, queued backup SHA pinning, canonical re-dump verification, `pre-restore:<jobId>` backup + deterministic rollback, restore preview/queue servisi, protocol ve local executor temeli kaynakta hazır; kalan durable `database.restore` job-registry sanitizer/wiring, Owner HTTP route/mount, progress, receipt + lost-ack recovery/runtime/CLI/parity ve production source testleridir.
+- [ ] Gerçek MySQL/MariaDB hostta inspect→create→inspect→drop→inspect, binding/credential apply-rotate-delete, private backup→verify→restore/rollback ve secret-free receipt/recovery kabulünü tamamla.
 
 ## G. Mail ve Roundcube
 
@@ -175,7 +176,7 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 ## M. Package, yayın ve canlı kabul
 
 - [x] 2026-09-12 doğrulanmış baseline kaynak ağacı Node 24 ile API 1129, web 153, agent 74, config 35, host-runtime 100, protocol 24 ve shared 27 olmak üzere toplam 1542 otomatik testten geçti; lint/build yeşildi.
-- [ ] Bu baseline sonrasındaki managed-mail apply/recovery, empty-set teardown, alias lifecycle/config/recovery, quota enforcement/usage, mailbox forwarding/Sieve, mail diagnostics, DKIM key/signing/apply/recovery/teardown, key rotation/delete/retirement evidence, DKIM provider TXT lifecycle, generic DNS TXT, mail TLS/relay security policy, authenticated SMTP submission/master.cf/Dovecot auth socket lifecycle, bounded Postfix queue, Roundcube control-plane + Nginx/PHP-FPM/SQLite/HTTPS health/rollback/recovery/CLI, SRS/PostSRSd prepare/apply/teardown/recovery/diagnostics ve mail-data impact/backup/restore/delete/finalize/`recover-mail-data` değişiklikleri için targeted config-templates + host-runtime + protocol + API testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
+- [ ] Bu baseline sonrasındaki managed-mail apply/recovery, empty-set teardown, alias lifecycle/config/recovery, quota enforcement/usage, mailbox forwarding/Sieve, mail diagnostics, DKIM key/signing/apply/recovery/teardown, key rotation/delete/retirement evidence, DKIM provider TXT lifecycle, generic DNS TXT, mail TLS/relay security policy, authenticated SMTP submission/master.cf/Dovecot auth socket lifecycle, bounded Postfix queue, Roundcube control-plane + Nginx/PHP-FPM/SQLite/HTTPS health/rollback/recovery/CLI, SRS/PostSRSd prepare/apply/teardown/recovery/diagnostics, mail-data impact/backup/restore/delete/finalize/`recover-mail-data` ve database ownership/credential/apply-delete recovery/private dump-backup/restore-temeli değişiklikleri için targeted host-runtime + protocol + API testlerini ve ardından güncel `main` full Node 24 lint/build/test kontrolünü yeniden çalıştır.
 - [x] Linux amd64 `0.3.0-9` paketi üretildi ve yalnız onaylı `.44` olmayan YunPanel test sunucusuna yüklendi; API/web/nginx aktif, eski `yun-agent` inactive/disabled doğrulandı.
 - [x] Canlı Owner API smoke'ta tek yerel server, Website/Application/Domain/certificate/job envanteri; site dosya listesi, Node logu, site terminal capability hedefi ve audit filtre/pagination sözleşmesi doğrulandı.
 - [ ] Matching Ubuntu arm64 hostta native `node-pty` dahil clean install ve doğru mimarili `.deb` üretimini doğrula.
@@ -196,7 +197,7 @@ Gerçek ortam kabul ayrıntıları: `T-FEATURE-ACCEPTANCE` terminal maddesi.
 ## Uygulama sırası
 
 1. P0 güvenlik, tek-sunucu fail-closed davranışı ve mevcut canlı işlevlerde regresyon bırakma.
-2. Mail lifecycle kaynak kodu tamamlandı; gerçek mail kabulü `todo.md` kapısı olarak paralel ilerler, sıradaki ana backend geliştirmesi veritabanı user/grant/credential ve dump/restore yaşam döngüsüdür.
+2. Mail lifecycle kaynak kodu tamamlandı; veritabanı ownership + credential + private backup kaynak katmanı hazır. Sıradaki ana backend işi DB restore durable/recovery/progress zincirini kapatıp ardından Docker/Compose lifecycle'a geçmektir.
 3. Docker/Compose lifecycle ve Website/Nginx entegrasyonu.
 4. Genel backup/restore ürünü.
 5. Cron, ardından job detail/metrik/bildirim katmanı.
