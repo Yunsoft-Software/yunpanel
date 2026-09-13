@@ -137,6 +137,15 @@ export function createBackupDependencyGraph({
   if (new Set(normalizedResources.map((resource) => resource.identity)).size !== normalizedResources.length) {
     throw new BackupDependencyGraphError('backup_dependency_resource_duplicate', 'Backup dependency resources are duplicated', 409);
   }
+  const applicationIds = new Set(normalizedResources
+    .filter((resource) => resource.type === 'application')
+    .map((resource) => resource.applicationId));
+  const databaseNames = new Set(normalizedResources
+    .filter((resource) => resource.type === 'database')
+    .map((resource) => resource.databaseName.toLowerCase()));
+  const mailResourceIds = new Set(normalizedResources
+    .filter((resource) => resource.type === 'mail_data' && resource.scope === 'domain')
+    .map((resource) => resource.mailDomainId));
 
   const websiteList = boundedArray(websites, 'Website')
     .filter((website) => website?.serverId === scopedServerId)
@@ -146,6 +155,11 @@ export function createBackupDependencyGraph({
     throw new BackupDependencyGraphError('backup_dependency_website_duplicate', 'Website dependency identities are duplicated', 409);
   }
   const websiteById = new Map(websiteList.map((website) => [website.id, website]));
+  for (const website of websiteList) {
+    if (website.applicationId !== null && !applicationIds.has(website.applicationId)) {
+      throw new BackupDependencyGraphError('backup_dependency_application_missing', 'Website Application backup dependency is unavailable', 409);
+    }
+  }
 
   const domainList = boundedArray(domains, 'Domain')
     .filter((domain) => domain?.serverId === scopedServerId)
@@ -179,6 +193,9 @@ export function createBackupDependencyGraph({
     if (!website || website.applicationId !== binding.applicationId) {
       throw new BackupDependencyGraphError('backup_dependency_database_binding_stale', 'Database binding ownership is stale', 409);
     }
+    if (!databaseNames.has(binding.databaseName.toLowerCase())) {
+      throw new BackupDependencyGraphError('backup_dependency_database_resource_missing', 'Bound database backup resource is unavailable', 409);
+    }
   }
 
   const mailDomainList = boundedArray(mailDomains, 'Mail Domain')
@@ -192,6 +209,9 @@ export function createBackupDependencyGraph({
   for (const mailDomain of mailDomainList) {
     if (!domainById.has(mailDomain.webDomainId)) {
       throw new BackupDependencyGraphError('backup_dependency_mail_domain_stale', 'Mail Domain web-domain dependency is unavailable', 409);
+    }
+    if (!mailResourceIds.has(mailDomain.id)) {
+      throw new BackupDependencyGraphError('backup_dependency_mail_resource_missing', 'Mail Domain backup resource is unavailable', 409);
     }
   }
 
@@ -257,6 +277,8 @@ export function createBackupDependencyGraph({
   }
 
   const associated = impacts.filter((impact) => impact.websiteIds.length > 0 || impact.domainIds.length > 0).length;
+  const associatedWebsiteIds = new Set(impacts.flatMap((impact) => impact.websiteIds));
+  const associatedDomainIds = new Set(impacts.flatMap((impact) => impact.domainIds));
   return Object.freeze({
     version: GRAPH_VERSION,
     serverId: scopedServerId,
@@ -264,8 +286,8 @@ export function createBackupDependencyGraph({
     counts: Object.freeze({
       resources: impacts.length,
       associatedResources: associated,
-      websites: websiteList.length,
-      domains: domainList.length,
+      websites: associatedWebsiteIds.size,
+      domains: associatedDomainIds.size,
     }),
   });
 }
