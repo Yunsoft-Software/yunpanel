@@ -20,12 +20,22 @@ test('management UI has one implicit local server and no server chooser', async 
 });
 
 test('primary navigation exposes working modules instead of placeholder destinations', async () => {
-  const [layout, model] = await Promise.all([
+  const [layout, model, app, dockerPage, operations] = await Promise.all([
     readFile(new URL('../src/workspace/WorkspaceLayout.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/workspace/site-model.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/WorkspaceApp.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/DockerProjectsPage.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/OperationsPages.jsx', import.meta.url), 'utf8'),
   ]);
-  assert.doesNotMatch(layout, /\['\/(?:docker|mail|backups)'/);
+  assert.match(layout, /\['\/docker', 'Docker', 'box'\]/);
   assert.match(layout, /\['\/audit', 'Denetim', 'shield'\]/);
+  assert.match(app, /path: 'docker', element: manage\(<DockerProjectsPage \/>\)/);
+  assert.match(app, /path: 'docker\/:dockerProjectId', element: manage\(<DockerProjectsPage \/>\)/);
+  assert.match(dockerPage, /getDockerRuntime/);
+  assert.match(dockerPage, /getDockerDiagnosis/);
+  assert.match(dockerPage, /getDockerLogs/);
+  assert.match(dockerPage, /getDockerHistory/);
+  assert.doesNotMatch(operations, /docker: \['Docker'/);
   assert.doesNotMatch(model, /\['(?:mail|databases|cron|backups)'/);
   assert.match(model, /\['files', 'Dosyalar'\]/);
 });
