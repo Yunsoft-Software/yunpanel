@@ -37,6 +37,14 @@ async function listen(t, auth) {
       calls.push(['queueRestore', structuredClone(input)]);
       return { previewDigest: input.expectedPreviewDigest, job: { id: randomUUID(), status: 'queued' } };
     },
+    async previewDelete(input) {
+      calls.push(['previewDelete', structuredClone(input)]);
+      return { expectedRevision: 2, previewDigest: digest, confirmation: 'delete-confirmation', sideEffects: false };
+    },
+    async queueDelete(input) {
+      calls.push(['queueDelete', structuredClone(input)]);
+      return { previewDigest: input.expectedPreviewDigest, job: { id: randomUUID(), status: 'queued' } };
+    },
   };
   const app = express();
   app.use(express.json());
@@ -120,33 +128,68 @@ test('Owner previews and queues domain restore with selected backup id', async (
   ]);
 });
 
+test('Owner previews and queues mailbox data delete with selected verified backup id', async (t) => {
+  const { base, calls } = await listen(t, owner);
+  const preview = await fetch(`${base}/api/mailboxes/${mailboxId}/data/delete-preview`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ backupId: 'mail-backup-0001' }),
+  });
+  assert.equal(preview.status, 200);
+  const previewBody = (await preview.json()).data;
+
+  const queued = await fetch(`${base}/api/mailboxes/${mailboxId}/data/delete`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      backupId: 'mail-backup-0001',
+      expectedRevision: previewBody.expectedRevision,
+      expectedPreviewDigest: previewBody.previewDigest,
+      confirmation: previewBody.confirmation,
+    }),
+  });
+  assert.equal(queued.status, 202);
+  assert.deepEqual(calls, [
+    ['previewDelete', { scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' }],
+    ['queueDelete', {
+      scope: 'mailbox',
+      resourceId: mailboxId,
+      backupId: 'mail-backup-0001',
+      expectedRevision: 2,
+      expectedPreviewDigest: digest,
+      confirmation: 'delete-confirmation',
+    }],
+  ]);
+});
+
 test('mail data routes reject extra fields and query parameters before service execution', async (t) => {
   const { base, calls } = await listen(t, owner);
   const query = await fetch(`${base}/api/mailboxes/${mailboxId}/data/backup-preview?refresh=true`);
   assert.equal(query.status, 400);
   assert.equal((await query.json()).error.code, 'mail_data_query_invalid');
 
-  const extra = await fetch(`${base}/api/mailboxes/${mailboxId}/data/restore-preview`, {
+  const extra = await fetch(`${base}/api/mailboxes/${mailboxId}/data/delete-preview`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ backupId: 'mail-backup-0001', privatePath: '/forbidden' }),
   });
   assert.equal(extra.status, 400);
-  assert.equal((await extra.json()).error.code, 'mail_data_restore_preview_input_invalid');
+  assert.equal((await extra.json()).error.code, 'mail_data_delete_preview_input_invalid');
   assert.deepEqual(calls, []);
 });
 
-test('Read Only may inspect backup preview but cannot queue backup or restore', async (t) => {
+test('Read Only may inspect backup preview but cannot queue backup restore or delete', async (t) => {
   const { base, calls } = await listen(t, readOnly);
   const preview = await fetch(`${base}/api/mailboxes/${mailboxId}/data/backup-preview`);
   assert.equal(preview.status, 200);
-  const mutation = await fetch(`${base}/api/mailboxes/${mailboxId}/data/backup`, {
+  const mutation = await fetch(`${base}/api/mailboxes/${mailboxId}/data/delete`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
+      backupId: 'mail-backup-0001',
       expectedRevision: 2,
       expectedPreviewDigest: digest,
-      confirmation: 'backup-confirmation',
+      confirmation: 'delete-confirmation',
     }),
   });
   assert.equal(mutation.status, 403);
