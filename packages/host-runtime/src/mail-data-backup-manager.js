@@ -81,6 +81,10 @@ function updateTreeHash(hash, tuple) {
   hash.update(`${JSON.stringify(tuple)}\n`);
 }
 
+function compareEntryNames(left, right) {
+  return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+}
+
 function publicManifest(manifest) {
   return Object.freeze({
     version: manifest.version,
@@ -178,10 +182,10 @@ export function createMailDataBackupManager({
         throw new MailDataBackupError('mail_data_backup_source_unsafe', 'Mail data source contains a symbolic link');
       }
       if (metadata.isDirectory()) {
-        directories += 1;
+        if (relative) directories += 1;
         updateTreeHash(hash, ['d', relative, stableMetadata(metadata)]);
         const entries = await readdirFn(current, { withFileTypes: true });
-        entries.sort((left, right) => left.name.localeCompare(right.name));
+        entries.sort(compareEntryNames);
         for (const entry of entries) {
           const nextRelative = relative ? `${relative}/${entry.name}` : entry.name;
           await visit(path.join(current, entry.name), nextRelative);
@@ -257,12 +261,12 @@ export function createMailDataBackupManager({
         throw new MailDataBackupError('mail_data_backup_source_unsafe', 'Mail data source contains a symbolic link');
       }
       if (metadata.isDirectory()) {
-        directories += 1;
+        if (relative) directories += 1;
         await mkdirFn(destinationPath, { mode: DIRECTORY_MODE });
         await chmodFn(destinationPath, DIRECTORY_MODE);
         updateTreeHash(hash, ['d', relative]);
         const entries = await readdirFn(sourcePath, { withFileTypes: true });
-        entries.sort((left, right) => left.name.localeCompare(right.name));
+        entries.sort(compareEntryNames);
         for (const entry of entries) {
           const nextRelative = relative ? `${relative}/${entry.name}` : entry.name;
           await visit(
@@ -300,10 +304,10 @@ export function createMailDataBackupManager({
       if (metadata.isSymbolicLink()) throw new MailDataBackupError('mail_data_backup_corrupt', 'Mail data backup contains a symbolic link');
       if (metadata.isDirectory()) {
         if ((metadata.mode & 0o777) !== DIRECTORY_MODE) throw new MailDataBackupError('mail_data_backup_corrupt', 'Mail data backup directory mode is invalid');
-        directories += 1;
+        if (relative) directories += 1;
         updateTreeHash(hash, ['d', relative]);
         const entries = await readdirFn(current, { withFileTypes: true });
-        entries.sort((left, right) => left.name.localeCompare(right.name));
+        entries.sort(compareEntryNames);
         for (const entry of entries) {
           const nextRelative = relative ? `${relative}/${entry.name}` : entry.name;
           await visit(path.join(current, entry.name), nextRelative);
@@ -411,8 +415,7 @@ export function createMailDataBackupManager({
       } else {
         await mkdirFn(dataPath, { mode: DIRECTORY_MODE });
         await chmodFn(dataPath, DIRECTORY_MODE);
-        const verified = await verifyBackupTree(dataPath);
-        copied = verified;
+        copied = await verifyBackupTree(dataPath);
       }
       const manifest = Object.freeze({
         version: MANIFEST_VERSION,
@@ -467,4 +470,5 @@ export const mailDataBackupInternals = Object.freeze({
   normalizeManifest,
   stableMetadata,
   sameMetadata,
+  compareEntryNames,
 });
