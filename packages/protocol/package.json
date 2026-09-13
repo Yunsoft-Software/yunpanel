@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "exports": "./src/index-database-backup.js",
+  "exports": "./src/index-docker.js",
   "scripts": {
     "test": "node --test"
   },
