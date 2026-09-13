@@ -21,9 +21,19 @@ function validation(document) {
     composeSha256: createHash('sha256').update(document).digest('hex'),
     composeBytes: Buffer.byteLength(document),
     serviceCount: 1,
-    services: [{ name: 'web', imageConfigured: true, buildConfigured: false }],
+    services: [{
+      name: 'web',
+      imageConfigured: true,
+      buildConfigured: false,
+      storageMounts: [
+        { kind: 'named_volume', source: 'data', sourceScope: 'project', target: '/data', readOnly: false },
+        { kind: 'bind', source: './config', sourceScope: 'project', target: '/app/config', readOnly: true },
+        { kind: 'bind', source: '/srv/shared', sourceScope: 'host', target: '/shared', readOnly: false },
+        { kind: 'ephemeral', source: null, sourceScope: null, target: '/run/cache', readOnly: false },
+      ],
+    }],
     networks: ['default'],
-    volumes: [],
+    volumes: ['data'],
     secretCount: 0,
     configCount: 0,
     validated: true,
@@ -45,15 +55,22 @@ async function fixture(t) {
   return { filePath, registry };
 }
 
-test('compose project persists encrypted desired document and safe summary', async (t) => {
+test('compose project persists encrypted desired document and safe storage summary', async (t) => {
   const { filePath, registry } = await fixture(t);
   const project = await registry.createProject({
     projectId, serverId, projectName: 'shop_app', document: first, validation: validation(first),
   });
   assert.equal(project.revision, 1);
   assert.equal(Object.hasOwn(project, 'document'), false);
+  assert.deepEqual(project.services[0].storageMounts, [
+    { kind: 'bind', source: './config', sourceScope: 'project', target: '/app/config', readOnly: true },
+    { kind: 'named_volume', source: 'data', sourceScope: 'project', target: '/data', readOnly: false },
+    { kind: 'ephemeral', source: null, sourceScope: null, target: '/run/cache', readOnly: false },
+    { kind: 'bind', source: '/srv/shared', sourceScope: 'host', target: '/shared', readOnly: false },
+  ]);
   const persisted = await readFile(filePath, 'utf8');
   assert.doesNotMatch(persisted, /nginx:1\.27|services:/i);
+  assert.match(persisted, /"storageMounts"/);
   assert.equal((await registry.materializeProject(projectId, { expectedRevision: 1 })).document, first);
 });
 
@@ -64,6 +81,7 @@ test('compose project update requires current revision and matching validation d
     expectedRevision: 1, document: second, validation: validation(second),
   });
   assert.equal(updated.revision, 2);
+  assert.deepEqual(updated.services[0].storageMounts, validation(second).services[0].storageMounts.sort((left, right) => left.target.localeCompare(right.target)));
   await assert.rejects(
     registry.updateProject(projectId, { expectedRevision: 1, document: first, validation: validation(first) }),
     (error) => error instanceof DockerComposeProjectRegistryError && error.code === 'docker_compose_project_revision_conflict',
