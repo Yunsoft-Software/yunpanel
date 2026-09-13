@@ -2,6 +2,8 @@ import express from 'express';
 import { mountDockerComposeRoutes } from './docker-compose-http.js';
 import { mountDockerStorageBackupRoutes } from './docker-storage-backup-http.js';
 
+export const dockerComposeApiRequestContext = Symbol.for('yunpanel.docker-compose-api-context');
+
 export class DockerComposeApiHandlerError extends Error {
   constructor(code, message) {
     super(message);
@@ -46,6 +48,15 @@ export function createDockerComposeApiHandler({
     return response.status(500).json({
       error: { code: 'internal_error', message: 'Internal server error' },
     });
+  });
+  app.use((request, response, next) => {
+    Object.defineProperty(request, dockerComposeApiRequestContext, {
+      value: Object.freeze({ projectRegistry: runtime.projectRegistry }),
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+    next();
   });
   app.use(baseHandler);
   return app;
