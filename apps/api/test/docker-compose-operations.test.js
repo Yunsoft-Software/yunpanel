@@ -10,7 +10,7 @@ const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';
 const composeSha256 = 'a'.repeat(64);
 
-function fixture({ jobs = [] } = {}) {
+function fixture({ jobs = [], backupLocked = false, backupLockError = null } = {}) {
   const enqueued = [];
   const service = createDockerComposeOperationsService({
     projectRegistry: {
@@ -37,6 +37,11 @@ function fixture({ jobs = [] } = {}) {
         enqueued.push(structuredClone(input));
         return { id: '32345678-1234-4234-8234-123456789012', status: 'queued', ...input };
       },
+    },
+    async projectBackupLocked(id) {
+      assert.equal(id, projectId);
+      if (backupLockError) throw backupLockError;
+      return backupLocked;
     },
   });
   return { service, enqueued };
@@ -105,6 +110,29 @@ test('compose lifecycle queue rejects active project job and stale confirmation 
     (error) => error instanceof DockerComposeOperationsError && error.code === 'docker_compose_confirmation_invalid',
   );
   assert.equal(fx.enqueued.length, 0);
+});
+
+test('compose lifecycle preview is blocked while a durable general backup owns the project', async () => {
+  const locked = fixture({ backupLocked: true });
+  await assert.rejects(
+    () => locked.service.preview({ projectId, action: 'start' }),
+    (error) => error instanceof DockerComposeOperationsError
+      && error.code === 'docker_compose_backup_conflict'
+      && error.status === 409,
+  );
+  assert.equal(locked.enqueued.length, 0);
+});
+
+test('compose lifecycle fails closed when backup lock state is unavailable', async () => {
+  const unavailable = fixture({ backupLockError: new Error('private backup state') });
+  await assert.rejects(
+    () => unavailable.service.preview({ projectId, action: 'restart' }),
+    (error) => error instanceof DockerComposeOperationsError
+      && error.code === 'docker_compose_backup_state_unavailable'
+      && error.status === 503
+      && !error.message.includes('private backup state'),
+  );
+  assert.equal(unavailable.enqueued.length, 0);
 });
 
 test('compose history is sourced from durable jobs and excludes unrelated operations', async () => {
