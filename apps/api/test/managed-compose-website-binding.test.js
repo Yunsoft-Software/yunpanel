@@ -71,6 +71,43 @@ test('normalizes wildcard IPv6 published bindings to local loopback', () => {
   assert.equal(resolved.proxyTarget.port, 49153);
 });
 
+test('accepts an explicit IPv4 loopback published binding', () => {
+  const resolved = resolveManagedComposeWebsiteBinding({
+    binding: binding(),
+    serverId,
+    project: project({
+      services: [{
+        name: 'web',
+        imageConfigured: true,
+        buildConfigured: false,
+        publishedPorts: [{ hostIp: '127.0.0.2', publishedPort: 49154, targetPort: 3000, protocol: 'tcp' }],
+      }],
+    }),
+  });
+
+  assert.equal(resolved.proxyTarget.host, '127.0.0.2');
+});
+
+test('rejects a published binding on a non-loopback interface', () => {
+  assert.throws(
+    () => resolveManagedComposeWebsiteBinding({
+      binding: binding(),
+      serverId,
+      project: project({
+        services: [{
+          name: 'web',
+          imageConfigured: true,
+          buildConfigured: false,
+          publishedPorts: [{ hostIp: '192.0.2.10', publishedPort: 49152, targetPort: 3000, protocol: 'tcp' }],
+        }],
+      }),
+    }),
+    (error) => error instanceof ManagedComposeWebsiteBindingError
+      && error.code === 'managed_compose_published_binding_not_loopback'
+      && error.status === 409,
+  );
+});
+
 test('fails closed when project belongs to another server', () => {
   assert.throws(
     () => resolveManagedComposeWebsiteBinding({ binding: binding(), serverId, project: project({ serverId: otherServerId }) }),
