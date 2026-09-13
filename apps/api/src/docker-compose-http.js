@@ -1,4 +1,4 @@
-import { DockerComposeValidationError } from '@yunpanel/host-runtime';
+import { DockerComposeObserverError, DockerComposeValidationError } from '@yunpanel/host-runtime';
 import { DockerComposeProjectRegistryError } from './docker-compose-project-registry.js';
 import { DockerComposeEnvironmentRegistryError } from './docker-compose-environment-registry.js';
 import { DockerComposeOperationsError } from './docker-compose-operations.js';
@@ -17,6 +17,7 @@ export class DockerComposeHttpError extends Error {
 
 const KNOWN_ERRORS = Object.freeze([
   DockerComposeValidationError,
+  DockerComposeObserverError,
   DockerComposeProjectRegistryError,
   DockerComposeEnvironmentRegistryError,
   DockerComposeOperationsError,
@@ -38,6 +39,22 @@ function optionalEmptyBody(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 0) {
     throw new DockerComposeHttpError('docker_compose_input_invalid', 'Request body must be empty');
   }
+}
+
+function logQuery(query) {
+  const value = query ?? {};
+  const keys = Object.keys(value);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || keys.some((key) => !['service', 'tail'].includes(key))
+    || (value.service !== undefined && typeof value.service !== 'string')
+    || (value.tail !== undefined && (typeof value.tail !== 'string' || !/^[1-9][0-9]{0,3}$/.test(value.tail)))) {
+    throw new DockerComposeHttpError('docker_compose_query_invalid', 'Docker Compose log query is invalid');
+  }
+  const tail = value.tail === undefined ? undefined : Number(value.tail);
+  if (tail !== undefined && !Number.isSafeInteger(tail)) {
+    throw new DockerComposeHttpError('docker_compose_query_invalid', 'Docker Compose log query is invalid');
+  }
+  return { service: value.service ?? null, tail };
 }
 
 function asyncRoute(handler) {
@@ -85,6 +102,7 @@ export function mountDockerComposeRoutes(app, {
   dockerComposeEnvironmentRegistry,
   dockerRegistryCredentialRegistry,
   dockerComposeOperationsService,
+  dockerComposeObserver,
   validateDockerCompose,
   localServerId = null,
 } = {}) {
@@ -111,6 +129,10 @@ export function mountDockerComposeRoutes(app, {
     || typeof dockerComposeOperationsService.preview !== 'function'
     || typeof dockerComposeOperationsService.queue !== 'function') {
     throw new Error('Docker Compose operations service is required');
+  }
+  if (!dockerComposeObserver || typeof dockerComposeObserver.inspect !== 'function'
+    || typeof dockerComposeObserver.logs !== 'function') {
+    throw new Error('Docker Compose observer is required');
   }
   if (typeof validateDockerCompose !== 'function') throw new Error('Docker Compose validator is required');
 
@@ -245,6 +267,24 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: await safeCall(() => dockerComposeOperationsService.history({ projectId: project.id })) });
   }));
 
+  app.get('/api/docker/projects/:dockerProjectId/runtime', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    if (Object.keys(request.query ?? {}).length !== 0) {
+      throw new DockerComposeHttpError('docker_compose_query_invalid', 'Docker Compose runtime does not accept query parameters');
+    }
+    const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
+    return response.json({ data: await safeCall(() => dockerComposeObserver.inspect({ projectName: project.projectName })) });
+  }));
+
+  app.get('/api/docker/projects/:dockerProjectId/logs', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const query = logQuery(request.query);
+    const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
+    return response.json({ data: await safeCall(() => dockerComposeObserver.logs({
+      projectName: project.projectName,
+      service: query.service,
+      ...(query.tail === undefined ? {} : { tail: query.tail }),
+    })) });
+  }));
+
   app.post('/api/docker/projects/:dockerProjectId/operations/:action/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     optionalEmptyBody(request.body);
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
@@ -291,6 +331,7 @@ export function mountDockerComposeRoutes(app, {
 export const dockerComposeHttpInternals = Object.freeze({
   exactBody,
   optionalEmptyBody,
+  logQuery,
   requireLocalServer,
   requireProject,
 });
