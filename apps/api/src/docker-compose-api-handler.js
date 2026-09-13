@@ -1,5 +1,6 @@
 import express from 'express';
 import { mountDockerComposeRoutes } from './docker-compose-http.js';
+import { mountDockerStorageBackupRoutes } from './docker-storage-backup-http.js';
 
 export class DockerComposeApiHandlerError extends Error {
   constructor(code, message) {
@@ -34,6 +35,10 @@ export function createDockerComposeApiHandler({
     dockerComposeOperationsService: runtime.operationsService,
     dockerComposeObserver: runtime.observer,
     validateDockerCompose: runtime.validateDockerCompose,
+    localServerId,
+  });
+  mountDockerStorageBackupRoutes(app, {
+    dockerComposeProjectRegistry: runtime.projectRegistry,
     localServerId,
   });
   app.use((error, request, response, next) => {
