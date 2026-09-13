@@ -25,6 +25,10 @@ export function getDockerProject(projectId) {
   return panelRequest(projectPath(projectId));
 }
 
+export function getDockerStorageBackup(projectId) {
+  return panelRequest(`${projectPath(projectId)}/storage-backup`);
+}
+
 export function validateDockerProject({ serverId, projectName, document, environment = {} } = {}) {
   if (typeof serverId !== 'string' || !serverId) throw new Error('serverId is required');
   if (typeof projectName !== 'string' || !projectName) throw new Error('projectName is required');
