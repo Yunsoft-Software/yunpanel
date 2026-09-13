@@ -65,16 +65,21 @@ export function normalizeManagedComposeWebsiteBinding(value, { persisted = false
 }
 
 function normalizedHost(hostIp) {
-  if (hostIp === null || hostIp === '0.0.0.0') return '127.0.0.1';
-  if (hostIp === '::') return '::1';
-  if (typeof hostIp !== 'string' || isIP(hostIp) === 0) {
+  let host = hostIp;
+  if (host === null || host === '0.0.0.0') host = '127.0.0.1';
+  if (host === '::') host = '::1';
+  const family = typeof host === 'string' ? isIP(host) : 0;
+  const loopback = family === 4 ? host.startsWith('127.') : family === 6 && host === '::1';
+  if (!loopback) {
     throw new ManagedComposeWebsiteBindingError(
-      'managed_compose_published_binding_invalid',
-      'Managed Compose published host binding is invalid',
+      family === 0 ? 'managed_compose_published_binding_invalid' : 'managed_compose_published_binding_not_loopback',
+      family === 0
+        ? 'Managed Compose published host binding is invalid'
+        : 'Managed Compose Website target must be published on loopback or a wildcard host binding',
       409,
     );
   }
-  return hostIp;
+  return host;
 }
 
 export function resolveManagedComposeWebsiteBinding({ binding, serverId, project } = {}) {
