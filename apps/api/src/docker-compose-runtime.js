@@ -101,6 +101,7 @@ export async function createDockerComposeRuntime({
   serverRegistry,
   jobRegistry,
   projectRegistry: providedProjectRegistry = null,
+  projectBackupLocked = async () => false,
   validateDockerCompose = createDockerComposeValidator(),
   observer = createDockerComposeObserver(),
   receiptStore = createDockerComposeOperationReceiptStore(),
@@ -111,6 +112,7 @@ export async function createDockerComposeRuntime({
     || typeof jobRegistry.recovery !== 'function' || typeof jobRegistry.getJob !== 'function'
     || typeof jobRegistry.complete !== 'function' || typeof jobRegistry.beginReconciliation !== 'function'
     || typeof jobRegistry.acknowledgeReconciliation !== 'function'
+    || typeof projectBackupLocked !== 'function'
     || typeof validateDockerCompose !== 'function'
     || !observer || typeof observer.inspect !== 'function' || typeof observer.logs !== 'function'
     || !receiptStore || typeof receiptStore.read !== 'function' || typeof receiptStore.write !== 'function') {
@@ -149,6 +151,7 @@ export async function createDockerComposeRuntime({
     environmentRegistry,
     credentialRegistry,
     jobRegistry,
+    projectBackupLocked,
   });
   const materialize = createDockerComposeMaterializer({
     projectRegistry,
