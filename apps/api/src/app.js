@@ -322,6 +322,9 @@ export function createApp({
     mailDkimRegistry,
     mailDomainRegistry,
     domainRegistry,
+    mailboxRegistry,
+    mailboxForwardingRegistry,
+    mailSrsConfigurationService,
     localServerId,
   });
   if (mailServiceIdentityRegistry) {
