@@ -87,7 +87,8 @@ export function createDockerComposeOperationsService({
     } catch {
       throw new DockerComposeOperationsError('docker_compose_desired_state_unavailable', 'Docker Compose desired state could not be read', 503);
     }
-    if (!project || project.id !== projectId || !Number.isSafeInteger(project.revision) || project.revision < 1
+    if (!project || project.id !== projectId || typeof project.serverId !== 'string' || !project.serverId
+      || !Number.isSafeInteger(project.revision) || project.revision < 1
       || typeof project.composeSha256 !== 'string' || !SHA256_PATTERN.test(project.composeSha256)
       || !environment || environment.projectId !== projectId
       || !Number.isSafeInteger(environment.revision) || environment.revision < 0) {
@@ -98,6 +99,7 @@ export function createDockerComposeOperationsService({
       version: 1,
       action,
       operation: ACTION_TO_OPERATION[action],
+      serverId: project.serverId,
       projectId,
       projectName: project.projectName,
       projectRevision: project.revision,
@@ -127,7 +129,7 @@ export function createDockerComposeOperationsService({
       throw new DockerComposeOperationsError('docker_compose_confirmation_invalid', 'Docker Compose operation confirmation is invalid', 409);
     }
     const job = await jobRegistry.enqueue({
-      serverId: projectId === current.projectId ? undefined : undefined,
+      serverId: current.serverId,
       type: current.operation,
       operation: current.operation,
       payload: {
