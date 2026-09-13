@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   createOperationEnvelope,
+  DOCKER_COMPOSE_OPERATIONS,
   MANAGED_SERVICE_ACTIONS,
   MANAGED_SERVICE_IDS,
   MANAGED_NODE_RUNTIME_MAJORS,
@@ -22,6 +23,10 @@ import {
   DatabaseRestoreJobResultError,
   sanitizeDatabaseRestoreResult,
 } from './database-restore-job-result.js';
+import {
+  DockerComposeJobResultError,
+  sanitizeDockerComposeJobResult,
+} from './docker-compose-job-result.js';
 import { safeLocalOperationError } from './local-execution-error.js';
 import {
   MailDataJobResultError,
@@ -34,7 +39,8 @@ import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
-const RESOURCE_TYPES = new Set(['domain', 'server', 'application', 'certificate', 'backup', 'database', 'dns_zone', 'mail_domain', 'system']);
+const RESOURCE_TYPES = new Set(['domain', 'server', 'application', 'certificate', 'backup', 'database', 'dns_zone', 'mail_domain', 'system', 'docker_project']);
+const DOCKER_COMPOSE_OPERATION_SET = new Set(DOCKER_COMPOSE_OPERATIONS);
 const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DOMAIN_STAGE,
   OPERATIONS.DOMAIN_ACTIVATE,
@@ -68,6 +74,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.MAIL_DATA_RESTORE,
   OPERATIONS.MAIL_DATA_DELETE,
   OPERATIONS.ROUNDCUBE_CONFIG_APPLY,
+  ...DOCKER_COMPOSE_OPERATIONS,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
@@ -709,6 +716,17 @@ function sanitizeDatabaseCredentialJobResult(job, result) {
   }
 }
 
+function sanitizeDockerComposeResult(job, result) {
+  try {
+    return sanitizeDockerComposeJobResult(job, result);
+  } catch (error) {
+    if (error instanceof DockerComposeJobResultError || error?.code === 'invalid_job_result') {
+      throw new JobRegistryError('invalid_job_result', error.message);
+    }
+    throw error;
+  }
+}
+
 function sanitizeDnsRecordResult(job, result) {
   const expectedState = job.payload?.action === 'upsert' ? 'present' : 'absent';
   if (!result || typeof result !== 'object' || Array.isArray(result)
@@ -807,6 +825,7 @@ function sanitizeRoundcubeConfigResult(job, result) {
 }
 
 function sanitizeResult(job, result) {
+  if (DOCKER_COMPOSE_OPERATION_SET.has(job.operation)) return sanitizeDockerComposeResult(job, result);
   if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) return sanitizeManagedServiceResult(job, result);
   if ([OPERATIONS.DATABASE_INSPECT, OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE].includes(job.operation)) {
     return sanitizeDatabaseResult(job, result);
