@@ -15,6 +15,7 @@ export function createMailDomainRegistry(options = {}) {
     }),
     recordObservation: registry.recordObservation,
     transitionLocalStatus: registry.transitionLocalStatus,
+    deleteMailDomain: registry.deleteResource,
     getMailDomain: registry.getResource,
     listMailDomains: registry.listResources,
   });
