@@ -26,6 +26,23 @@ function assertExecution(execution) {
   return execution;
 }
 
+function terminalResult(result, operation) {
+  const terminalField = operation === OPERATIONS.DATABASE_CREDENTIAL_APPLY ? 'applied' : 'deleted';
+  return Object.freeze({
+    version: 1,
+    databaseCredentialId: result.databaseCredentialId,
+    databaseBindingId: result.databaseBindingId,
+    credentialRevision: result.credentialRevision,
+    bindingRevision: result.bindingRevision,
+    databaseName: result.databaseName,
+    username: result.username,
+    host: result.host,
+    desiredStateSha256: result.desiredStateSha256,
+    [terminalField]: true,
+    sideEffects: true,
+  });
+}
+
 export function createLocalDatabaseCredentialOperation({
   materializer,
   manager = createDatabaseCredentialManager(),
@@ -75,22 +92,23 @@ export function createLocalDatabaseCredentialOperation({
         'Database credential host mutation did not confirm the queued desired state',
       );
     }
+    const safeResult = terminalResult(result, operation);
     try {
       await receiptStore.write({
         serverId: context.serverId,
         jobId: context.jobId,
         operation,
-        result,
+        result: safeResult,
       });
     } catch {
       // The host mutation is already complete. A supplementary recovery receipt
       // must never recast successful host work as failed; durable completion is
       // still attempted by the local executor.
     }
-    return Object.freeze({ ...result });
+    return safeResult;
   }
 
   return Object.freeze({ execute });
 }
 
-export const localDatabaseCredentialOperationInternals = Object.freeze({ assertExecution });
+export const localDatabaseCredentialOperationInternals = Object.freeze({ assertExecution, terminalResult });
