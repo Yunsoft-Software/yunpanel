@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { createDockerComposeValidator } from '@yunpanel/host-runtime';
+import { createDockerComposeObserver, createDockerComposeValidator } from '@yunpanel/host-runtime';
 import { DOCKER_COMPOSE_OPERATIONS } from '@yunpanel/protocol';
 import { createDockerComposeEnvironmentRegistry } from './docker-compose-environment-registry.js';
 import { createDockerComposeMaterializer } from './docker-compose-materializer.js';
@@ -58,6 +58,7 @@ export async function createDockerComposeRuntime({
   serverRegistry,
   jobRegistry,
   validateDockerCompose = createDockerComposeValidator(),
+  observer = createDockerComposeObserver(),
   receiptStore = createDockerComposeOperationReceiptStore(),
 } = {}) {
   if (!env || typeof env !== 'object' || Array.isArray(env)
@@ -67,6 +68,7 @@ export async function createDockerComposeRuntime({
     || typeof jobRegistry.complete !== 'function' || typeof jobRegistry.beginReconciliation !== 'function'
     || typeof jobRegistry.acknowledgeReconciliation !== 'function'
     || typeof validateDockerCompose !== 'function'
+    || !observer || typeof observer.inspect !== 'function' || typeof observer.logs !== 'function'
     || !receiptStore || typeof receiptStore.read !== 'function' || typeof receiptStore.write !== 'function') {
     throw new DockerComposeRuntimeError(
       'docker_compose_runtime_dependencies_invalid',
@@ -124,6 +126,7 @@ export async function createDockerComposeRuntime({
     credentialRegistry,
     operationsService,
     validateDockerCompose,
+    observer,
     materialize,
     receiptStore,
     localOperation,
