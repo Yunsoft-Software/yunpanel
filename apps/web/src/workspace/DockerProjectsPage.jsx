@@ -6,6 +6,7 @@ import {
   getDockerLogs,
   getDockerProject,
   getDockerRuntime,
+  getDockerStorageBackup,
   listDockerProjects,
 } from './docker-compose-client.js';
 import DockerConfigPanel from './DockerConfigPanel.jsx';
@@ -62,10 +63,21 @@ function storageKindLabel(mount) {
   return 'Ephemeral';
 }
 
-function storagePolicyLabel(mount) {
-  if (mount.kind === 'ephemeral') return 'Backup dışı';
-  if (mount.kind === 'bind' && mount.sourceScope === 'host') return 'Varsayılan reddedilir';
-  return 'Backup policy bekliyor';
+function storageResourceKey(serviceName, mount) {
+  return JSON.stringify([serviceName, mount?.kind ?? null, mount?.sourceScope ?? null, mount?.source ?? null, mount?.target ?? null]);
+}
+
+function storagePolicyLabel(policy) {
+  if (policy?.disposition === 'include') return "Manifest'e dahil";
+  if (policy?.disposition === 'exclude') return 'Backup dışı';
+  if (policy?.disposition === 'reject') return 'Varsayılan reddedilir';
+  return 'Policy kullanılamıyor';
+}
+
+function storagePolicyBadge(policy) {
+  if (policy?.disposition === 'include') return 'active';
+  if (policy?.disposition === 'reject') return 'warning';
+  return 'off';
 }
 
 function runtimeBadge(status) {
@@ -107,10 +119,24 @@ function DiagnosisPanel({ project }) {
   ]} />{result.issues?.length > 0 && <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Sorun</th><th>Aksiyon</th><th>Açıklama</th></tr></thead><tbody>{result.issues.map((item) => <tr key={`${item.code}:${item.action}`}><td><Badge state={item.severity === 'error' ? 'error' : 'warning'}>{item.code}</Badge></td><td><code>{item.action}</code></td><td>{item.message}</td></tr>)}</tbody></table></div>}</>}</div>;
 }
 
-function StoragePanel({ project }) {
+function StoragePanel({ project, backup }) {
   const mounts = (project.services ?? []).flatMap((service) => storageMounts(service).map((mount) => ({ ...mount, serviceName: service.name })));
-  return <Section title="Depolama" description="Compose doğrulamasından gelen güvenli storage envanteri. Backup policy henüz uygulanmaz; host bind yolları otomatik yedeklemeye alınmaz.">
-    {mounts.length > 0 ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Tür</th><th>Kaynak</th><th>Container hedefi</th><th>Mod</th><th>Backup</th></tr></thead><tbody>{mounts.map((mount) => <tr key={`${mount.serviceName}:${mount.target}`}><td><strong>{mount.serviceName}</strong></td><td>{storageKindLabel(mount)}</td><td><code>{mount.source ?? '—'}</code></td><td><code>{mount.target}</code></td><td>{mount.readOnly ? 'Read only' : 'Read / write'}</td><td><Badge state={mount.kind === 'bind' && mount.sourceScope === 'host' ? 'warning' : mount.kind === 'ephemeral' ? 'off' : 'pending'}>{storagePolicyLabel(mount)}</Badge></td></tr>)}</tbody></table></div> : <EmptyState icon="archive" title="Kalıcı veya ephemeral mount yok" detail="Bu Compose projesinin doğrulanmış servis tanımlarında storage mount bulunmuyor." />}
+  const currentBackup = backup?.projectRevision === project.revision ? backup : null;
+  const policyByMount = new Map((currentBackup?.resources ?? []).map((resource) => [
+    storageResourceKey(resource.serviceName, resource.storage),
+    resource.policy,
+  ]));
+  return <Section title="Depolama" description="Compose storage envanteri versioned backup manifest policy'siyle eşleştirilir. Genel backup executor henüz çalıştırılmaz; arbitrary host bind yolları varsayılan olarak reddedilir.">
+    {currentBackup && <div className="ws-section-body"><KeyValues items={[
+      ['Manifest', `v${currentBackup.manifestVersion}`],
+      ['Dahil', currentBackup.counts?.included ?? 0],
+      ['Backup dışı', currentBackup.counts?.excluded ?? 0],
+      ['Reddedilen', currentBackup.counts?.rejected ?? 0],
+    ]} /></div>}
+    {mounts.length > 0 ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Tür</th><th>Kaynak</th><th>Container hedefi</th><th>Mod</th><th>Backup</th></tr></thead><tbody>{mounts.map((mount) => {
+      const policy = policyByMount.get(storageResourceKey(mount.serviceName, mount)) ?? null;
+      return <tr key={`${mount.serviceName}:${mount.target}`}><td><strong>{mount.serviceName}</strong></td><td>{storageKindLabel(mount)}</td><td><code>{mount.source ?? '—'}</code></td><td><code>{mount.target}</code></td><td>{mount.readOnly ? 'Read only' : 'Read / write'}</td><td><Badge state={storagePolicyBadge(policy)}>{storagePolicyLabel(policy)}</Badge></td></tr>;
+    })}</tbody></table></div> : <EmptyState icon="archive" title="Kalıcı veya ephemeral mount yok" detail="Bu Compose projesinin doğrulanmış servis tanımlarında storage mount bulunmuyor." />}
   </Section>;
 }
 
@@ -143,10 +169,16 @@ function DockerProjectDetail({ projectId }) {
   const detail = useAsyncResource(() => getDockerProject(projectId), [projectId]);
   const data = detail.data;
   const project = data?.project ?? null;
+  const storageBackup = useAsyncResource(
+    () => getDockerStorageBackup(projectId),
+    [projectId, project?.revision ?? 0],
+    { enabled: Boolean(project) },
+  );
   const storageCount = project?.services?.reduce((total, service) => total + storageMounts(service).length, 0) ?? 0;
-  return <><nav className="ws-breadcrumb"><Link to="/docker">Docker</Link><span>/ {project?.projectName ?? projectId}</span></nav><PageHeading title={project?.projectName ?? 'Docker projesi'} description="Compose desired state, storage, published target, runtime ve işlem geçmişi." actions={<Button icon="refresh" onClick={detail.refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Docker proje detayı" />{project && <><Section title="Desired state"><div className="ws-section-body"><KeyValues items={[
+  const refresh = () => { detail.refresh(); storageBackup.refresh(); };
+  return <><nav className="ws-breadcrumb"><Link to="/docker">Docker</Link><span>/ {project?.projectName ?? projectId}</span></nav><PageHeading title={project?.projectName ?? 'Docker projesi'} description="Compose desired state, storage backup policy, published target, runtime ve işlem geçmişi." actions={<Button icon="refresh" onClick={refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Docker proje detayı" />{project && <><Section title="Desired state"><div className="ws-section-body"><KeyValues items={[
     ['Revizyon', project.revision], ['Compose SHA-256', project.composeSha256], ['Servis', project.services?.length ?? 0], ['Network', project.networks?.length ?? 0], ['Named volume', project.volumes?.length ?? 0], ['Mount', storageCount], ['Env revizyonu', data.environment?.revision ?? 0], ['Registry credential', data.credentials?.length ?? 0],
-  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Published ports</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td></tr>)}</tbody></table></div></div></Section><StoragePanel project={project} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Transient host port kalıcı Website veya Domain kaydına yazılmadan güncel Compose state’inden çözülür."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
+  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Published ports</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td></tr>)}</tbody></table></div></div></Section><LoadNotice resource={storageBackup} label="Docker storage backup policy" /><StoragePanel project={project} backup={storageBackup.data} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Transient host port kalıcı Website veya Domain kaydına yazılmadan güncel Compose state’inden çözülür."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
 }
 
 export default function DockerProjectsPage() {
@@ -159,6 +191,8 @@ export const dockerProjectsPageInternals = Object.freeze({
   storageMounts,
   portLabel,
   storageKindLabel,
+  storageResourceKey,
   storagePolicyLabel,
+  storagePolicyBadge,
   runtimeBadge,
 });
