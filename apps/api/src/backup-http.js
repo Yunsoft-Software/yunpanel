@@ -45,15 +45,25 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountBackupRoutes(app, { backupResourceProvider } = {}) {
+export function mountBackupRoutes(app, {
+  backupResourceProvider = null,
+  backupResourceProviderForRequest = null,
+} = {}) {
   if (!app || typeof app.post !== 'function') throw new Error('Express application is required');
-  if (!backupResourceProvider || typeof backupResourceProvider.preview !== 'function') {
+  const staticProviderValid = backupResourceProvider && typeof backupResourceProvider.preview === 'function';
+  if (!staticProviderValid && typeof backupResourceProviderForRequest !== 'function') {
     throw new Error('Backup resource provider is required');
   }
 
   app.post('/api/backups/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const input = previewBody(request.body);
-    const preview = await backupResourceProvider.preview(input);
+    const provider = staticProviderValid
+      ? backupResourceProvider
+      : await backupResourceProviderForRequest(request);
+    if (!provider || typeof provider.preview !== 'function') {
+      throw new BackupHttpError('backup_preview_unavailable', 'Backup preview provider is unavailable', 503);
+    }
+    const preview = await provider.preview(input);
     return response.json({ data: preview });
   }));
 }
