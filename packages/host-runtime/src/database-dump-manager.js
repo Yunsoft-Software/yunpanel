@@ -85,10 +85,11 @@ async function spawnDump(program, args, outputPath) {
       });
       let stderrBytes = 0;
       let settled = false;
+      let timer = null;
       const finish = (error = null) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         if (error) reject(error); else resolve();
       };
       child.stderr.on('data', (chunk) => {
@@ -107,7 +108,7 @@ async function spawnDump(program, args, outputPath) {
         }
         finish();
       });
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         child.kill('SIGKILL');
         finish(new DatabaseDumpError('database_dump_timeout', 'Database dump process timed out'));
       }, 60 * 60 * 1000);
