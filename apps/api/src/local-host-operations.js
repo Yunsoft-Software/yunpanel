@@ -5,6 +5,8 @@ import {
   createMailConfigActivator,
   createMailConfigBackupManager,
   createMailConfigManager,
+  createMailDataBackupManager,
+  createMailDataRestoreManager,
   createMailDkimActivator,
   createManagedServiceManager,
   createNginxManager,
@@ -56,6 +58,11 @@ export const LOCAL_MAIL_CONFIGURATION_OPERATIONS = Object.freeze([
   OPERATIONS.MAIL_DKIM_APPLY,
 ]);
 
+export const LOCAL_MAIL_DATA_OPERATIONS = Object.freeze([
+  OPERATIONS.MAIL_DATA_BACKUP,
+  OPERATIONS.MAIL_DATA_RESTORE,
+]);
+
 export const LOCAL_ROUNDCUBE_CONFIGURATION_OPERATIONS = Object.freeze([
   OPERATIONS.ROUNDCUBE_CONFIG_APPLY,
 ]);
@@ -99,6 +106,8 @@ export function createLocalHostOperations({
   mailConfigBackupManager = null,
   mailConfigActivator = null,
   mailDkimActivator = null,
+  mailDataBackupManager = null,
+  mailDataRestoreManager = null,
   roundcubeConfigOperation = null,
   loadManagedMailConfiguration = null,
   loadManagedDkimConfiguration = null,
@@ -148,6 +157,10 @@ export function createLocalHostOperations({
     backupManager: resolvedMailConfigBackupManager,
   });
   const resolvedMailDkimActivator = mailDkimActivator ?? createMailDkimActivator();
+  const resolvedMailDataBackupManager = mailDataBackupManager ?? createMailDataBackupManager();
+  const resolvedMailDataRestoreManager = mailDataRestoreManager ?? createMailDataRestoreManager({
+    backupManager: resolvedMailDataBackupManager,
+  });
   const resolvedRoundcubeConfigOperation = roundcubeConfigOperation ?? (loadRoundcubeConfiguration
     ? createLocalRoundcubeConfigOperation({ loadConfiguration: loadRoundcubeConfiguration })
     : null);
@@ -163,6 +176,12 @@ export function createLocalHostOperations({
   }
   if (!resolvedMailDkimActivator || typeof resolvedMailDkimActivator.activate !== 'function') {
     throw new Error('mailDkimActivator must provide activate()');
+  }
+  if (!resolvedMailDataBackupManager || typeof resolvedMailDataBackupManager.backup !== 'function') {
+    throw new Error('mailDataBackupManager must provide backup()');
+  }
+  if (!resolvedMailDataRestoreManager || typeof resolvedMailDataRestoreManager.restore !== 'function') {
+    throw new Error('mailDataRestoreManager must provide restore()');
   }
 
   async function withApplicationEnvironment(payload, execute) {
@@ -300,6 +319,72 @@ export function createLocalHostOperations({
     });
   }
 
+  async function executeMailDataBackup(payload, execution) {
+    assertMailExecutionContext(payload, execution);
+    const manifest = await resolvedMailDataBackupManager.backup({
+      backupId: execution.jobId,
+      scope: payload.scope,
+      identity: payload.identity,
+      expectedSnapshotSha256: payload.expectedSnapshotSha256,
+    });
+    if (!manifest || manifest.backupId !== execution.jobId || manifest.scope !== payload.scope
+      || manifest.identity !== payload.identity || manifest.sourceSnapshotSha256 !== payload.expectedSnapshotSha256
+      || typeof manifest.sourcePresent !== 'boolean') {
+      const error = new Error('Mail data backup did not confirm the queued snapshot');
+      error.code = 'mail_data_backup_unconfirmed';
+      throw error;
+    }
+    return Object.freeze({
+      version: 1,
+      backupId: manifest.backupId,
+      mailDomainId: payload.mailDomainId,
+      scope: payload.scope,
+      identity: payload.identity,
+      sourcePresent: manifest.sourcePresent,
+      sourceSnapshotSha256: manifest.sourceSnapshotSha256,
+      contentSha256: manifest.contentSha256,
+      bytes: manifest.bytes,
+      files: manifest.files,
+      directories: manifest.directories,
+      backedUp: true,
+      sideEffects: true,
+    });
+  }
+
+  async function executeMailDataRestore(payload, execution) {
+    assertMailExecutionContext(payload, execution);
+    const activation = await resolvedMailDataRestoreManager.restore({
+      transactionId: execution.jobId,
+      backupId: payload.backupId,
+      scope: payload.scope,
+      identity: payload.identity,
+      expectedTargetSnapshotSha256: payload.expectedTargetSnapshotSha256,
+    });
+    if (!activation || activation.transactionId !== execution.jobId || activation.backupId !== payload.backupId
+      || activation.scope !== payload.scope || activation.identity !== payload.identity
+      || activation.restoredPresent !== true || activation.applied !== true || activation.sideEffects !== true) {
+      const error = new Error('Mail data restore did not confirm the queued restore');
+      error.code = 'mail_data_restore_unconfirmed';
+      throw error;
+    }
+    return Object.freeze({
+      version: 1,
+      transactionId: activation.transactionId,
+      backupId: activation.backupId,
+      preRestoreBackupId: activation.preRestoreBackupId,
+      mailDomainId: payload.mailDomainId,
+      scope: payload.scope,
+      identity: payload.identity,
+      contentSha256: activation.contentSha256,
+      bytes: activation.bytes,
+      files: activation.files,
+      directories: activation.directories,
+      restoredPresent: true,
+      applied: true,
+      sideEffects: true,
+    });
+  }
+
   const handlers = new Map([
     [OPERATIONS.SYSTEM_PACKAGES_INSPECT, () => packageManager.inspect()],
     [OPERATIONS.SYSTEM_SERVICES_INSPECT, (payload) => managedServiceManager.inspect(payload.serviceId ?? null)],
@@ -320,6 +405,8 @@ export function createLocalHostOperations({
     [OPERATIONS.APP_NODE_PROCESS, (payload) => nodeProcessManager.controlNodeProcess(payload)],
     [OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT, () => nodeRuntimeManager.inspect()],
     [OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL, (payload) => nodeRuntimeManager.install(payload.major)],
+    [OPERATIONS.MAIL_DATA_BACKUP, executeMailDataBackup],
+    [OPERATIONS.MAIL_DATA_RESTORE, executeMailDataRestore],
   ]);
 
   if (loadApplicationEnvironment) {
