@@ -221,6 +221,11 @@ export {
   databaseRestoreReceiptInternals,
 } from './database-restore-receipt.js';
 export {
+  createDatabaseRestoreEvidenceInspector,
+  DatabaseRestoreEvidenceError,
+  databaseRestoreEvidenceInternals,
+} from './database-restore-evidence-inspector.js';
+export {
   createDatabaseCredentialHostStateStore,
   DatabaseCredentialHostStateError,
   databaseCredentialHostStateInternals,
