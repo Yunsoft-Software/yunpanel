@@ -48,6 +48,11 @@ export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL,
 ]);
 
+export const LOCAL_DATABASE_CREDENTIAL_OPERATIONS = Object.freeze([
+  OPERATIONS.DATABASE_CREDENTIAL_APPLY,
+  OPERATIONS.DATABASE_CREDENTIAL_DELETE,
+]);
+
 export const LOCAL_NODE_ENVIRONMENT_OPERATIONS = Object.freeze([
   OPERATIONS.APP_NODE_DEPLOY,
   OPERATIONS.APP_NODE_ROLLBACK,
@@ -92,6 +97,7 @@ export function createLocalHostOperations({
   }),
   managedServiceManager = createManagedServiceManager(),
   databaseManager = createDatabaseManager(),
+  databaseCredentialOperation = null,
   nginxManager = createNginxManager(),
   acmeManager = createAcmeManager(),
   cloudflareDnsManager = createCloudflareDnsManager(),
@@ -137,6 +143,9 @@ export function createLocalHostOperations({
   }
   if (loadRoundcubeConfiguration !== null && typeof loadRoundcubeConfiguration !== 'function') {
     throw new Error('loadRoundcubeConfiguration must be a function when configured');
+  }
+  if (databaseCredentialOperation !== null && typeof databaseCredentialOperation?.execute !== 'function') {
+    throw new Error('databaseCredentialOperation must provide execute() when configured');
   }
   if (roundcubeConfigOperation !== null && typeof roundcubeConfigOperation?.execute !== 'function') {
     throw new Error('roundcubeConfigOperation must provide execute() when configured');
@@ -453,6 +462,10 @@ export function createLocalHostOperations({
     [OPERATIONS.MAIL_DATA_DELETE, executeMailDataDelete],
   ]);
 
+  if (databaseCredentialOperation) {
+    handlers.set(OPERATIONS.DATABASE_CREDENTIAL_APPLY, (payload, execution) => databaseCredentialOperation.execute(OPERATIONS.DATABASE_CREDENTIAL_APPLY, payload, execution));
+    handlers.set(OPERATIONS.DATABASE_CREDENTIAL_DELETE, (payload, execution) => databaseCredentialOperation.execute(OPERATIONS.DATABASE_CREDENTIAL_DELETE, payload, execution));
+  }
   if (loadApplicationEnvironment) {
     handlers.set(OPERATIONS.APP_NODE_DEPLOY, (payload) => withApplicationEnvironment(payload, async (hydrated) => resolvedNodeDeploymentManager.deployNode(hydrated, {
       gitCredential: await credentialFor(payload.applicationId),
