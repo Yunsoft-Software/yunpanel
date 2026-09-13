@@ -18,6 +18,7 @@ const POLICY = new Map([
   ['dovecot', definition(['dovecot-imapd'], ['dovecot.service'], true)],
   ['rspamd', definition(['rspamd'], ['rspamd.service'], true)],
   ['roundcube', definition(['roundcube-core'], [], true)],
+  ['postsrsd', definition(['postsrsd'], ['postsrsd.service'])],
 ]);
 
 if (POLICY.size !== MANAGED_SERVICE_IDS.length || MANAGED_SERVICE_IDS.some((id) => !POLICY.has(id))) {
