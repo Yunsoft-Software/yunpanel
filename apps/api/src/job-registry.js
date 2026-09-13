@@ -9,6 +9,10 @@ import {
   OPERATIONS,
 } from '@yunpanel/protocol';
 import { normalizeGitDeploymentTarget, sanitizeLogMessage } from '@yunpanel/shared';
+import {
+  DatabaseCredentialJobResultError,
+  sanitizeDatabaseCredentialResult,
+} from './database-credential-job-result.js';
 import { sanitizeDatabaseJobResult } from './database-job-result.js';
 import { safeLocalOperationError } from './local-execution-error.js';
 import {
@@ -45,6 +49,8 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DATABASE_INSPECT,
   OPERATIONS.DATABASE_CREATE,
   OPERATIONS.DATABASE_DELETE,
+  OPERATIONS.DATABASE_CREDENTIAL_APPLY,
+  OPERATIONS.DATABASE_CREDENTIAL_DELETE,
   OPERATIONS.DNS_RECORD_APPLY,
   OPERATIONS.MAIL_CONFIG_APPLY,
   OPERATIONS.MAIL_DKIM_APPLY,
@@ -660,6 +666,17 @@ function sanitizeDatabaseResult(job, result) {
   }
 }
 
+function sanitizeDatabaseCredentialJobResult(job, result) {
+  try {
+    return sanitizeDatabaseCredentialResult(job, result);
+  } catch (error) {
+    if (error instanceof DatabaseCredentialJobResultError || error?.code === 'invalid_job_result') {
+      throw new JobRegistryError('invalid_job_result', error.message);
+    }
+    throw error;
+  }
+}
+
 function sanitizeDnsRecordResult(job, result) {
   const expectedState = job.payload?.action === 'upsert' ? 'present' : 'absent';
   if (!result || typeof result !== 'object' || Array.isArray(result)
@@ -761,6 +778,9 @@ function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) return sanitizeManagedServiceResult(job, result);
   if ([OPERATIONS.DATABASE_INSPECT, OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE].includes(job.operation)) {
     return sanitizeDatabaseResult(job, result);
+  }
+  if ([OPERATIONS.DATABASE_CREDENTIAL_APPLY, OPERATIONS.DATABASE_CREDENTIAL_DELETE].includes(job.operation)) {
+    return sanitizeDatabaseCredentialJobResult(job, result);
   }
   if (job.operation === OPERATIONS.DNS_RECORD_APPLY) return sanitizeDnsRecordResult(job, result);
   if (job.operation === OPERATIONS.MAIL_CONFIG_APPLY) return sanitizeMailConfigResult(job, result);
