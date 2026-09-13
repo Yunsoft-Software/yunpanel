@@ -8,9 +8,8 @@ Bağlayıcı mimari ve güvenlik kuralları `agents.md` içindedir. Bu ortamda g
 
 ## 1. Yüksek etkili panel entegrasyonları — mevcut ana öncelik
 
-Managed Docker/Compose artık gerçek panel rotasında project create/replace, encrypted env, registry credential metadata/rotation, validation, build/pull/start/stop/restart preview+apply, history, service-scoped runtime health, actionable target diagnosis ve bounded log görünümüne bağlıdır. Sıradaki en yüksek etkili ürün işleri aşağıdadır.
+Managed Docker/Compose ve Mail artık gerçek panel rotalarına bağlıdır. Mail yüzeyinde local/external domain, mailbox, alias, quota/forwarding, host config preview/apply, DKIM + diagnostics, Postfix queue, Postfix/Dovecot/Rspamd log ve Roundcube preview/prepare/apply akışları bulunur. Sıradaki en yüksek etkili ürün işleri aşağıdadır.
 
-- [ ] Mail backend lifecycle'ını gerçek panel yüzeyine bağla: domain, mailbox, alias, quota, forwarding, DKIM, diagnostics, queue/log ve Roundcube yönetimi.
 - [ ] Website detayında Domain/SSL, Application/runtime/env, log, file, terminal, database, mail ve Docker ilişkilerini Plesk-benzeri net bir hiyerarşide birleştir.
 - [ ] Mevcut Job ekranını kaynak linki, stage/progress ve safe error/log metadata ile kullanılabilir hale getir; generic retry/force-success ekleme.
 
@@ -75,7 +74,7 @@ Gerçek DNS/Nginx/HTTPS, IDN, certificate ve provider acceptance işleri `todo.m
 
 ## Uygulama sırası
 
-1. Hazır Mail backend'ini gerçek panel UI'sine bağla; aynı turda Website içi kaynak hiyerarşisini güçlendir.
+1. Website detayında Domain/SSL, Application/runtime/env/log/file/terminal/database/mail/Docker kaynak hiyerarşisini Plesk-benzeri tek yönetim akışında birleştir.
 2. Job detail'i kaynak linki/stage/progress/safe log metadata ile kullanılabilir hale getir.
 3. Docker volume/bind inventory ve backup policy.
 4. Genel backup/restore ürünü + UI.
