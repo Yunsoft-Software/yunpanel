@@ -11,8 +11,9 @@ import { createServerRegistry } from '../src/server-registry.js';
 const origin = 'https://services.example.test';
 const csrfToken = 'services-csrf';
 const servicePackages = {
-  nginx: 'nginx', mariadb: 'mariadb-server', mysql: 'mysql-server', docker: 'docker.io', cron: 'cron',
-  postfix: 'postfix', dovecot: 'dovecot-imapd', rspamd: 'rspamd', roundcube: 'roundcube-core',
+  nginx: ['nginx'], mariadb: ['mariadb-server'], mysql: ['mysql-server'], docker: ['docker.io'], cron: ['cron'],
+  postfix: ['postfix'], dovecot: ['dovecot-imapd', 'dovecot-lmtpd', 'dovecot-sieve'], rspamd: ['rspamd'],
+  roundcube: ['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], postsrsd: ['postsrsd'],
 };
 
 function fakeStore(role = 'owner') {
@@ -71,7 +72,7 @@ function healthyService(id) {
     category: 'ignored',
     installed: true,
     active: !unitless,
-    packages: [{ packageName: servicePackages[id], installed: true, version: '1.0.0-1' }],
+    packages: servicePackages[id].map((packageName) => ({ packageName, installed: true, version: '1.0.0-1' })),
     units: unitless ? [] : [{
       unit: `${id}.service`,
       loadState: 'loaded',

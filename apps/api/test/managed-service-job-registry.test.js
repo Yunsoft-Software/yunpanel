@@ -5,8 +5,9 @@ import { createJobRegistry, JobRegistryError } from '../src/job-registry.js';
 
 const serverId = 'server-1';
 const servicePackages = {
-  nginx: 'nginx', mariadb: 'mariadb-server', mysql: 'mysql-server', docker: 'docker.io', cron: 'cron',
-  postfix: 'postfix', dovecot: 'dovecot-imapd', rspamd: 'rspamd', roundcube: 'roundcube-core',
+  nginx: ['nginx'], mariadb: ['mariadb-server'], mysql: ['mysql-server'], docker: ['docker.io'], cron: ['cron'],
+  postfix: ['postfix'], dovecot: ['dovecot-imapd', 'dovecot-lmtpd', 'dovecot-sieve'], rspamd: ['rspamd'],
+  roundcube: ['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], postsrsd: ['postsrsd'],
 };
 
 function serviceState(id, { installed = false, active = false } = {}) {
@@ -21,7 +22,12 @@ function serviceState(id, { installed = false, active = false } = {}) {
     category: 'must-not-persist',
     installed,
     active: effectiveActive,
-    packages: [{ packageName: servicePackages[id], installed, version: installed ? '1.2.3-1' : null, raw: 'PRIVATE' }],
+    packages: servicePackages[id].map((packageName) => ({
+      packageName,
+      installed,
+      version: installed ? '1.2.3-1' : null,
+      raw: 'PRIVATE',
+    })),
     units: unitless ? [] : [{
       unit: `${id}.service`,
       loadState: installed ? 'loaded' : 'not-found',

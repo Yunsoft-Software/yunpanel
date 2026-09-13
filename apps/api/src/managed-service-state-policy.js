@@ -15,9 +15,9 @@ const POLICY = new Map([
   ['docker', definition(['docker.io'], ['docker.service'])],
   ['cron', definition(['cron'], ['cron.service'])],
   ['postfix', definition(['postfix'], ['postfix.service'], true)],
-  ['dovecot', definition(['dovecot-imapd'], ['dovecot.service'], true)],
+  ['dovecot', definition(['dovecot-imapd', 'dovecot-lmtpd', 'dovecot-sieve'], ['dovecot.service'], true)],
   ['rspamd', definition(['rspamd'], ['rspamd.service'], true)],
-  ['roundcube', definition(['roundcube-core'], [], true)],
+  ['roundcube', definition(['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], [], true)],
   ['postsrsd', definition(['postsrsd'], ['postsrsd.service'])],
 ]);
 

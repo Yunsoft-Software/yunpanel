@@ -50,9 +50,6 @@ const SERVICE_CATALOG = Object.freeze([
     configurationChecks: [{ file: '/usr/bin/rspamadm', args: ['configtest'] }],
   }),
   service({
-    id: 'postsrsd', label: 'PostSRSd', category: 'mail', packages: ['postsrsd'], units: ['postsrsd.service'],
-  }),
-  service({
     id: 'roundcube',
     label: 'Roundcube',
     category: 'mail',
@@ -64,6 +61,9 @@ const SERVICE_CATALOG = Object.freeze([
       { file: '/usr/bin/test', args: ['-f', '/etc/roundcube/config.inc.php'] },
       { file: '/usr/bin/php', args: ['-l', '/etc/roundcube/config.inc.php'] },
     ],
+  }),
+  service({
+    id: 'postsrsd', label: 'PostSRSd', category: 'mail', packages: ['postsrsd'], units: ['postsrsd.service'],
   }),
 ]);
 const SERVICE_BY_ID = new Map(SERVICE_CATALOG.map((entry) => [entry.id, entry]));
