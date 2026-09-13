@@ -7,7 +7,7 @@ const DEFAULT_ROOT = '/var/lib/yunpanel/recovery/docker-compose';
 const ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
-const OPERATIONS = new Map([
+const OPERATION_POLICY = new Map([
   [OPERATIONS.DOCKER_COMPOSE_BUILD, ['build', null]],
   [OPERATIONS.DOCKER_COMPOSE_PULL, ['pull', null]],
   [OPERATIONS.DOCKER_COMPOSE_START, ['start', 'running']],
@@ -28,7 +28,7 @@ function normalize(value) {
     'version', 'serverId', 'jobId', 'operation', 'projectId', 'projectRevision',
     'environmentRevision', 'composeSha256', 'action', 'runtimeState', 'executed', 'sideEffects',
   ]);
-  const expected = OPERATIONS.get(value?.operation);
+  const expected = OPERATION_POLICY.get(value?.operation);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size || Object.keys(value).some((key) => !fields.has(key))
     || value.version !== STORE_VERSION
@@ -119,6 +119,6 @@ export function createDockerComposeOperationReceiptStore({ root = DEFAULT_ROOT }
 
 export const dockerComposeOperationReceiptInternals = Object.freeze({
   defaultRoot: DEFAULT_ROOT,
-  operations: OPERATIONS,
+  operationPolicy: OPERATION_POLICY,
   normalize,
 });
