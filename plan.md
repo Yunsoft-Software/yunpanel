@@ -6,14 +6,9 @@ Bağlayıcı mimari ve güvenlik kuralları `agents.md` içindedir. Bu ortamda g
 
 Öncelik, panelin gerçek kullanılabilirlik ve Plesk-benzeri ürün tamamlanma oranını en hızlı yükselten işleri bitirmektir. Plesk importer en son geliştirme işi olarak tutulur.
 
-## 1. Yüksek etkili panel entegrasyonları — mevcut ana öncelik
+Managed Docker/Compose ve Mail gerçek panel rotalarına bağlıdır. Website detayında Domain/SSL, Application/runtime/env/log/file/terminal ile explicit database/mail/Managed Compose ilişkileri tek site kaynak hiyerarşisinde görünür. Job list/detail kaynak linki, yaşam döngüsü stage/progress, allowlist'li sonuç metadata, güvenli diagnosis/error code ve bounded/redacted deploy log görünümüne sahiptir; generic retry/force-success yolu yoktur.
 
-Managed Docker/Compose ve Mail artık gerçek panel rotalarına bağlıdır. Mail yüzeyinde local/external domain, mailbox, alias, quota/forwarding, host config preview/apply, DKIM + diagnostics, Postfix queue, Postfix/Dovecot/Rspamd log ve Roundcube preview/prepare/apply akışları bulunur. Sıradaki en yüksek etkili ürün işleri aşağıdadır.
-
-- [ ] Website detayında Domain/SSL, Application/runtime/env, log, file, terminal, database, mail ve Docker ilişkilerini Plesk-benzeri net bir hiyerarşide birleştir.
-- [ ] Mevcut Job ekranını kaynak linki, stage/progress ve safe error/log metadata ile kullanılabilir hale getir; generic retry/force-success ekleme.
-
-## 2. Docker / Compose — kalan storage ve backup bağı
+## 1. Docker / Compose — storage ve backup bağı
 
 Compose desired-state, encrypted project/env/registry credential modeli, validation, durable lifecycle/recovery/history, service-scoped health/log, restart-safe Managed Compose Website binding, stage anında doğrulanmış loopback Nginx target, secret-free actionable diagnosis, Website/Domain impact graph ve gerçek panel UI kaynakta hazırdır. Kalan Docker backend işi storage/backup tarafıdır.
 
@@ -22,14 +17,14 @@ Compose desired-state, encrypted project/env/registry credential modeli, validat
 
 Gerçek Docker Engine/Compose host kabulü, crash/lost-ack provası ve secret/permission kontrolleri `todo.md` içinde kalır.
 
-## 3. Website / Domain / Nginx kalanları
+## 2. Website / Domain / Nginx kalanları
 
 - [ ] Canlı state'teki Website'e bağlı olmayan external-proxy Domain kayıtlarını explicit create/bind migrationıyla eşleştir; otomatik tahmin yapma.
 - [ ] Backup ve cron association registry'leri geldikten sonra Website/Domain impact preview'a gerçek dependency provider olarak bağla; gelene kadar blocker `unavailable` kalmalı.
 
 Gerçek DNS/Nginx/HTTPS, IDN, certificate ve provider acceptance işleri `todo.md` içindedir.
 
-## 4. Genel backup / restore ürünü
+## 3. Genel backup / restore ürünü
 
 - [ ] Application release/config/env, database, managed Docker volume/bind ve mail verisini kapsayan versioned backup manifesti ekle.
 - [ ] Local ve S3-compatible target, şifreleme, checksum, retention ve credential lifecycle ekle.
@@ -38,7 +33,7 @@ Gerçek DNS/Nginx/HTTPS, IDN, certificate ve provider acceptance işleri `todo.m
 - [ ] Backup/restore kaynaklarını Website/Application/Database/Docker/Mail impact graph'ına bağla.
 - [ ] Backup/restore backend'i hazır olur olmaz gerçek panel rotasını ve history/restore akışını bağla.
 
-## 5. Cron
+## 4. Cron
 
 - [ ] Website/Application'a bağlı site-user cron registry ve CRUD ekle.
 - [ ] Schedule, timezone, cwd, bounded env, enable/disable, last/next run ve bounded/redacted output ekle.
@@ -47,25 +42,25 @@ Gerçek DNS/Nginx/HTTPS, IDN, certificate ve provider acceptance işleri `todo.m
 - [ ] Cron association'larını Website/Application impact preview ve backup manifestine bağla.
 - [ ] Cron backend'i hazır olur olmaz Website içindeki Scheduled Tasks UI yüzeyine bağla.
 
-## 6. Metrik ve bildirimler
+## 5. Metrik ve bildirimler
 
 - [ ] CPU/RAM/load/disk/inode/service/Application/Docker metric history ve retention ekle.
 - [ ] Disk/inode threshold, service/app/container, deploy, backup ve SSL event modelini ekle.
 - [ ] Panel içi bildirim merkezi ve seçilecek dış kanallar için secret-safe delivery/retry ekle.
 
-## 7. Agentless migration ve legacy agent temizliği
+## 6. Agentless migration ve legacy agent temizliği
 
 - [ ] Migration live-apply katmanına per-target replace, UID/GID drift çözümü, owner/mode/ACL/xattr policy, pre-apply backup, health gate ve deterministic rollback ekle.
 - [ ] İzole migration/rollback kabul kapısı tamamlandıktan sonra retained heartbeat/command/environment/result transportunu, enrollment credential yüzeyini, agent storage kodunu, `yun-agent.service` ve package compatibility parçalarını fiziksel olarak kaldır.
 - [ ] Yeni Git hook, cron, build ve runtime yüzeylerinde `yunapp-*` workload isolation invariantını koru; yalnız Owner Sunucu terminali root kalmalı.
 
-## 8. Enterprise UI/UX son polish
+## 7. Enterprise UI/UX son polish
 
 - [ ] Enterprise layout/styling, navigation hierarchy, data-table/form polish, responsive ve accessibility aşamasını tamamla.
 - [ ] Domain/subdomain/Website hiyerarşisini Plesk benzeri yönetim akışında son haline getir.
 - [ ] Gerçek Chromium/Firefox headed browser, mobil viewport, klavye ve ekran okuyucu kabulünü `todo.md` kapılarıyla tamamla.
 
-## 9. Plesk read-only importer — en son
+## 8. Plesk read-only importer — en son
 
 - [ ] Plesk state'ini değiştirmeyen bounded ve secret-safe discovery/import preview ekle.
 - [ ] Passenger/static/Node, Domain, database, Docker, cron ve mail kaynaklarını external-managed olarak modelle.
@@ -74,15 +69,13 @@ Gerçek DNS/Nginx/HTTPS, IDN, certificate ve provider acceptance işleri `todo.m
 
 ## Uygulama sırası
 
-1. Website detayında Domain/SSL, Application/runtime/env/log/file/terminal/database/mail/Docker kaynak hiyerarşisini Plesk-benzeri tek yönetim akışında birleştir.
-2. Job detail'i kaynak linki/stage/progress/safe log metadata ile kullanılabilir hale getir.
-3. Docker volume/bind inventory ve backup policy.
-4. Genel backup/restore ürünü + UI.
-5. Cron + UI.
-6. Metrik ve bildirim katmanı.
-7. Kalan Website/Domain migration işi ve association provider bağları ilgili kaynaklar hazır oldukça kapatılır.
-8. İzole migration/rollback kabulünden sonra legacy agent kod/paket yüzeyinin fiziksel temizliği.
-9. Enterprise UI/UX polish ve gerçek browser kabulü.
-10. Plesk read-only importer — **son iş**.
+1. Docker volume/bind inventory ve backup policy.
+2. Genel backup/restore ürünü + UI.
+3. Cron + UI.
+4. Metrik ve bildirim katmanı.
+5. Kalan Website/Domain migration işi ve association provider bağları ilgili kaynaklar hazır oldukça kapatılır.
+6. İzole migration/rollback kabulünden sonra legacy agent kod/paket yüzeyinin fiziksel temizliği.
+7. Enterprise UI/UX polish ve gerçek browser kabulü.
+8. Plesk read-only importer — **son iş**.
 
 Her geliştirme diliminde ilgili source testleri aynı değişiklikle eklenir. Bu ortamda yapılamayan gerçek-host/browser/provider/package kabul işleri kod planına geri sokulmaz; `todo.md` içinde tutulur.
