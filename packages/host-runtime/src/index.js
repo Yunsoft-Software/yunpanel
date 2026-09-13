@@ -215,3 +215,8 @@ export {
   DatabaseCredentialManagerError,
   databaseCredentialManagerInternals,
 } from './database-credential-manager.js';
+export {
+  createDatabaseCredentialEvidenceInspector,
+  DatabaseCredentialEvidenceError,
+  databaseCredentialEvidenceInternals,
+} from './database-credential-evidence-inspector.js';
