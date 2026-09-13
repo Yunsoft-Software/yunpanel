@@ -3,6 +3,7 @@ import {
   createCloudflareDnsManager,
   createDatabaseDumpManager,
   createDatabaseManager,
+  createDatabaseRestoreManager,
   createMailConfigActivator,
   createMailConfigBackupManager,
   createMailConfigManager,
@@ -37,6 +38,7 @@ export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.DATABASE_CREATE,
   OPERATIONS.DATABASE_DELETE,
   OPERATIONS.DATABASE_BACKUP,
+  OPERATIONS.DATABASE_RESTORE,
   OPERATIONS.DNS_RECORD_APPLY,
   OPERATIONS.DOMAIN_STAGE,
   OPERATIONS.DOMAIN_ACTIVATE,
@@ -104,6 +106,17 @@ function assertDatabaseBackupExecutionContext(payload, execution) {
   return execution;
 }
 
+function assertDatabaseRestoreExecutionContext(payload, execution) {
+  if (!execution || typeof execution !== 'object' || Array.isArray(execution)
+    || typeof execution.jobId !== 'string' || !EXECUTION_ID_PATTERN.test(execution.jobId)
+    || execution.resourceType !== 'database' || execution.resourceId !== payload.databaseName) {
+    const error = new Error('Database restore execution context does not match the queued resource');
+    error.code = 'database_restore_execution_context_invalid';
+    throw error;
+  }
+  return execution;
+}
+
 export function createLocalHostOperations({
   packageManager = createSystemPackageManager({
     restartUnits: ['yunpanel-api.service', 'yunpanel-web.service'],
@@ -111,6 +124,7 @@ export function createLocalHostOperations({
   managedServiceManager = createManagedServiceManager(),
   databaseManager = createDatabaseManager(),
   databaseDumpManager = null,
+  databaseRestoreManager = null,
   databaseCredentialOperation = null,
   nginxManager = createNginxManager(),
   acmeManager = createAcmeManager(),
@@ -175,6 +189,10 @@ export function createLocalHostOperations({
   }
   const deploymentLog = jobLogStore ? (entry) => jobLogStore.record(entry) : null;
   const resolvedDatabaseDumpManager = databaseDumpManager ?? createDatabaseDumpManager({ databaseManager });
+  const resolvedDatabaseRestoreManager = databaseRestoreManager ?? createDatabaseRestoreManager({
+    databaseManager,
+    backupManager: resolvedDatabaseDumpManager,
+  });
   const resolvedStaticDeploymentManager = staticDeploymentManager ?? createStaticDeploymentManager({ recordLog: deploymentLog });
   const resolvedNodeDeploymentManager = nodeDeploymentManager ?? createNodeDeploymentManager({ recordLog: deploymentLog });
   const resolvedMailConfigManager = mailConfigManager ?? createMailConfigManager();
@@ -197,6 +215,9 @@ export function createLocalHostOperations({
 
   if (!resolvedDatabaseDumpManager || typeof resolvedDatabaseDumpManager.backup !== 'function') {
     throw new Error('databaseDumpManager must provide backup()');
+  }
+  if (!resolvedDatabaseRestoreManager || typeof resolvedDatabaseRestoreManager.restore !== 'function') {
+    throw new Error('databaseRestoreManager must provide restore()');
   }
   if (!resolvedMailConfigManager || typeof resolvedMailConfigManager.stageConfiguration !== 'function') {
     throw new Error('mailConfigManager must provide stageConfiguration()');
@@ -268,6 +289,27 @@ export function createLocalHostOperations({
       || result.backedUp !== true || result.sideEffects !== true || Object.hasOwn(result, 'dumpPath')) {
       const error = new Error('Database backup did not confirm the queued private artifact');
       error.code = 'database_backup_unconfirmed';
+      throw error;
+    }
+    return Object.freeze({ ...result });
+  }
+
+  async function executeDatabaseRestore(payload, execution) {
+    const context = assertDatabaseRestoreExecutionContext(payload, execution);
+    const result = await resolvedDatabaseRestoreManager.restore({
+      transactionId: context.jobId,
+      backupId: payload.backupId,
+      databaseName: payload.databaseName,
+      expectedBackupSha256: payload.expectedBackupSha256,
+    });
+    if (!result || typeof result !== 'object' || Array.isArray(result)
+      || result.transactionId !== context.jobId || result.backupId !== payload.backupId
+      || result.databaseName !== payload.databaseName || result.dumpSha256 !== payload.expectedBackupSha256
+      || result.preRestoreBackupId !== `pre-restore:${context.jobId}`
+      || result.restored !== true || result.verified !== true || result.sideEffects !== true
+      || Object.hasOwn(result, 'dumpPath')) {
+      const error = new Error('Database restore did not confirm the queued restore');
+      error.code = 'database_restore_unconfirmed';
       throw error;
     }
     return Object.freeze({ ...result });
@@ -481,6 +523,7 @@ export function createLocalHostOperations({
     [OPERATIONS.DATABASE_CREATE, (payload) => databaseManager.createDatabase(payload.name)],
     [OPERATIONS.DATABASE_DELETE, (payload) => databaseManager.dropDatabase(payload.name)],
     [OPERATIONS.DATABASE_BACKUP, executeDatabaseBackup],
+    [OPERATIONS.DATABASE_RESTORE, executeDatabaseRestore],
     [OPERATIONS.DNS_RECORD_APPLY, executeDnsRecord],
     [OPERATIONS.DOMAIN_STAGE, (payload) => nginxManager.stageDomain(payload)],
     [OPERATIONS.DOMAIN_ACTIVATE, (payload) => nginxManager.activateDomain(payload)],
@@ -543,4 +586,5 @@ export function createLocalHostOperations({
 export const localHostOperationInternals = Object.freeze({
   assertMailExecutionContext,
   assertDatabaseBackupExecutionContext,
+  assertDatabaseRestoreExecutionContext,
 });
