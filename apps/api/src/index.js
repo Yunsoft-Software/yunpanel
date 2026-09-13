@@ -21,6 +21,9 @@ import { createCertificateMaterialManager } from './certificate-material-manager
 import { startCertificateRenewalScheduler } from './certificate-renewal-scheduler.js';
 import { startConfiguredLocalRuntime } from './configured-local-runtime.js';
 import { createDatabaseBindingRegistry } from './database-binding-registry.js';
+import { createDatabaseCredentialApplyService } from './database-credential-apply-service.js';
+import { createDatabaseCredentialMaterializer } from './database-credential-materializer.js';
+import { createDatabaseCredentialRegistry } from './database-credential-registry.js';
 import { createDomainRegistry } from './domain-registry.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDnsProviderCredentialRegistry } from './dns-provider-credential-registry.js';
@@ -30,6 +33,8 @@ import { createJobRegistry } from './job-registry.js';
 import { createJobLogStore } from './job-log-store.js';
 import { createGithubWebhookHandler } from './github-webhook-http.js';
 import { createLiveSessionRegistry } from './live-session-registry.js';
+import { createLocalDatabaseCredentialOperation } from './local-database-credential-operation.js';
+import { createLocalHostOperations } from './local-host-operations.js';
 import { createMailAliasRegistry } from './mail-alias-registry.js';
 import { createMailConfigurationService } from './mail-configuration.js';
 import { createMailDkimConfigurationService } from './mail-dkim-configuration.js';
@@ -65,6 +70,8 @@ const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.reso
 const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.data/website-registry.json');
 const databaseBindingStorePath = process.env.YUNPANEL_DATABASE_BINDING_STORE
   ?? path.resolve('.data/database-binding-registry.json');
+const databaseCredentialStorePath = process.env.YUNPANEL_DATABASE_CREDENTIAL_STORE
+  ?? path.resolve('.data/database-credential-registry.json');
 const websiteMigrationPolicyStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE ?? path.resolve('.data/website-migration-policy.json');
 const websiteMigrationLedgerStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_LEDGER_STORE ?? path.resolve('.data/website-migration-ledger.json');
 const dnsHostingStorePath = process.env.YUNPANEL_DNS_HOSTING_STORE ?? path.resolve('.data/dns-hosting-registry.json');
@@ -147,6 +154,19 @@ const databaseBindingRegistry = createDatabaseBindingRegistry({
   getApplication: async (applicationId) => applicationRegistry.getApplication(applicationId),
 });
 await databaseBindingRegistry.init();
+const databaseCredentialRegistry = createDatabaseCredentialRegistry({
+  filePath: databaseCredentialStorePath,
+  masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY,
+  getDatabaseBinding: async (bindingId) => databaseBindingRegistry.getBinding(bindingId),
+});
+await databaseCredentialRegistry.init();
+const databaseCredentialMaterializer = createDatabaseCredentialMaterializer({
+  databaseBindingRegistry,
+  databaseCredentialRegistry,
+});
+const localDatabaseCredentialOperation = createLocalDatabaseCredentialOperation({
+  materializer: databaseCredentialMaterializer,
+});
 const websiteMigrationPolicy = createWebsiteMigrationPolicyStore({ filePath: websiteMigrationPolicyStorePath });
 await websiteMigrationPolicy.init();
 const migrationLedger = createWebsiteMigrationLedger({ filePath: websiteMigrationLedgerStorePath });
@@ -267,6 +287,11 @@ const jobRegistry = createAuditedJobRegistry({
   audit: authStore.audit,
   onAuditError: reportAuditFault,
 });
+const databaseCredentialApplyService = createDatabaseCredentialApplyService({
+  databaseBindingRegistry,
+  databaseCredentialRegistry,
+  jobRegistry,
+});
 const applicationDeployQueue = createApplicationDeployQueue({
   applicationRegistry,
   applicationEnvironmentRegistry,
@@ -293,6 +318,8 @@ const listener = createAuthenticatedApi({
     applicationRegistry,
     websiteRegistry,
     databaseBindingRegistry,
+    databaseCredentialRegistry,
+    databaseCredentialApplyService,
     websiteMigrationPolicy,
     migrationLedger,
     dnsHostingRegistry,
@@ -338,6 +365,10 @@ const localRuntime = await startConfiguredLocalRuntime({
   roundcubeConfigurationService,
   dnsProviderCredentialRegistry,
   jobLogStore,
+  createOperations: (options) => createLocalHostOperations({
+    ...options,
+    databaseCredentialOperation: localDatabaseCredentialOperation,
+  }),
   inspectServices: inspectAllowlistedServices,
   inspectDocker,
   inspectNginx,
@@ -376,6 +407,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] application store=${applicationStorePath}`);
   console.log(`[yunpanel-api] website store=${websiteStorePath}`);
   console.log(`[yunpanel-api] database binding store=${databaseBindingStorePath}`);
+  console.log(`[yunpanel-api] database credential store=${databaseCredentialStorePath}`);
   console.log(`[yunpanel-api] website migration policy store=${websiteMigrationPolicyStorePath}`);
   console.log(`[yunpanel-api] website migration ledger store=${websiteMigrationLedgerStorePath}`);
   console.log(`[yunpanel-api] DNS hosting store=${dnsHostingStorePath}`);
