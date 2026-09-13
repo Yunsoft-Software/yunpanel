@@ -17,7 +17,9 @@ import { CertificateRegistryError, createCertificateRegistry } from './certifica
 import { CertificateMaterialError, createCertificateMaterialManager } from './certificate-material-manager.js';
 import { mountCertificateRoutes } from './certificate-http.js';
 import { createApp as createCoreApp } from './core-app.js';
-import { DatabaseHttpError, mountDatabaseRoutes } from './database-http.js';
+import { DatabaseBindingHttpError, mountDatabaseBindingRoutes } from './database-binding-http.js';
+import { DatabaseBindingRegistryError } from './database-binding-registry.js';
+import { DatabaseHttpError, databaseHttpInternals, mountDatabaseRoutes } from './database-http.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import {
   createDnsProviderCredentialRegistry,
@@ -149,6 +151,7 @@ export function createApp({
   dnsProviderCredentialRegistry = createDnsProviderCredentialRegistry({
     getDnsZone: async (dnsZoneId) => dnsHostingRegistry.getZone(dnsZoneId),
   }),
+  databaseBindingRegistry = null,
   dnsReadinessService = null,
   dnsRecordManager = createCloudflareDnsManager(),
   mailDomainRegistry = createMailDomainRegistry({
@@ -423,7 +426,17 @@ export function createApp({
   });
   mountManagedServiceRoutes(app, { registry: localRegistry, jobRegistry });
   mountNodeRuntimeRoutes(app, { registry: localRegistry, jobRegistry });
-  mountDatabaseRoutes(app, { registry: localRegistry, jobRegistry });
+  if (databaseBindingRegistry) {
+    mountDatabaseBindingRoutes(app, {
+      registry: localRegistry,
+      jobRegistry,
+      databaseBindingRegistry,
+      requireDatabaseName: databaseHttpInternals.requireDatabaseName,
+      ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
+      latestDatabaseSnapshot: databaseHttpInternals.latestDatabaseSnapshot,
+    });
+  }
+  mountDatabaseRoutes(app, { registry: localRegistry, jobRegistry, databaseBindingRegistry });
   mountLogRoutes(app, {
     registry, applicationRegistry, jobRegistry, journalLogReader, nginxLogReader, jobLogStore, localServerId,
   });
@@ -434,7 +447,9 @@ export function createApp({
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
     if (
-      error instanceof DatabaseHttpError
+      error instanceof DatabaseBindingHttpError
+      || error instanceof DatabaseBindingRegistryError
+      || error instanceof DatabaseHttpError
       || error instanceof CertificateMaterialError
       || error instanceof CertificateRegistryError
       || error instanceof ApplicationRegistryError
