@@ -43,6 +43,8 @@ import { createMailConfigurationService, MailConfigurationError } from './mail-c
 import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
 import { MailDataHttpError, mountMailDataRoutes } from './mail-data-http.js';
 import { createMailDataOperationsService, MailDataOperationsError } from './mail-data-operations.js';
+import { MailDomainDeleteHttpError, mountMailDomainDeleteRoute } from './mail-domain-delete-http.js';
+import { createMailDeleteFinalizeService, MailDeleteFinalizeError } from './mail-delete-finalize.js';
 import { createMailDeleteImpactService, MailDeleteImpactError } from './mail-delete-impact.js';
 import { mountMailDeleteImpactRoutes } from './mail-delete-impact-http.js';
 import { MailDkimConfigurationError } from './mail-dkim-configuration.js';
@@ -163,6 +165,7 @@ export function createApp({
   mailDataOperationsService = null,
   mailDiagnosticsInspector = createMailDiagnosticsInspector(),
   mailDeleteImpactService = null,
+  mailDeleteFinalizeService = null,
   mailDkimConfigurationService = null,
   mailDkimDnsService = null,
   mailServiceIdentityRegistry = null,
@@ -235,12 +238,24 @@ export function createApp({
     mailDataInspector,
     localServerId,
   });
+  const canCreateMailDeleteFinalize = typeof mailboxRegistry?.deleteMailbox === 'function'
+    && typeof mailDomainRegistry?.deleteMailDomain === 'function'
+    && typeof jobRegistry?.getJob === 'function';
+  const mailDeleteFinalize = mailDeleteFinalizeService ?? (canCreateMailDeleteFinalize
+    ? createMailDeleteFinalizeService({
+      mailboxRegistry,
+      mailDomainRegistry,
+      mailDeleteImpactService: mailDeleteImpact,
+      jobRegistry,
+    })
+    : null);
   const mailDataOperations = mailDataOperationsService ?? createMailDataOperationsService({
     mailDomainRegistry,
     domainRegistry,
     mailboxRegistry,
     mailDataInspector,
     mailDataBackupManager,
+    mailDeleteImpactService: mailDeleteImpact,
     jobRegistry,
     localServerId,
   });
@@ -322,10 +337,12 @@ export function createApp({
     mailboxForwardingRegistry,
     mailDomainRegistry,
     domainRegistry,
+    mailDeleteFinalizeService: mailDeleteFinalize,
     localServerId,
   });
   mountMailDeleteImpactRoutes(app, { mailDeleteImpactService: mailDeleteImpact });
   mountMailDataRoutes(app, { mailDataOperationsService: mailDataOperations });
+  if (mailDeleteFinalize) mountMailDomainDeleteRoute(app, { mailDeleteFinalizeService: mailDeleteFinalize });
   mountMailboxQuotaRoutes(app, {
     mailboxQuotaRegistry,
     mailboxQuotaInspector,
@@ -438,6 +455,8 @@ export function createApp({
       || error instanceof MailDataHttpError
       || error instanceof MailDataInspectorError
       || error instanceof MailDataOperationsError
+      || error instanceof MailDomainDeleteHttpError
+      || error instanceof MailDeleteFinalizeError
       || error instanceof MailDeleteImpactError
       || error instanceof MailDkimConfigurationError
       || error instanceof MailDkimDnsError
