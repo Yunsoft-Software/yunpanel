@@ -19,6 +19,9 @@ import { mountCertificateRoutes } from './certificate-http.js';
 import { createApp as createCoreApp } from './core-app.js';
 import { DatabaseBindingHttpError, mountDatabaseBindingRoutes } from './database-binding-http.js';
 import { DatabaseBindingRegistryError } from './database-binding-registry.js';
+import { createDatabaseCredentialApplyService, DatabaseCredentialApplyError } from './database-credential-apply-service.js';
+import { DatabaseCredentialHttpError, mountDatabaseCredentialRoutes } from './database-credential-http.js';
+import { DatabaseCredentialRegistryError } from './database-credential-registry.js';
 import { DatabaseHttpError, databaseHttpInternals, mountDatabaseRoutes } from './database-http.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import {
@@ -152,6 +155,8 @@ export function createApp({
     getDnsZone: async (dnsZoneId) => dnsHostingRegistry.getZone(dnsZoneId),
   }),
   databaseBindingRegistry = null,
+  databaseCredentialRegistry = null,
+  databaseCredentialApplyService = null,
   dnsReadinessService = null,
   dnsRecordManager = createCloudflareDnsManager(),
   mailDomainRegistry = createMailDomainRegistry({
@@ -220,6 +225,11 @@ export function createApp({
     serverRegistry: registry,
     dnsProviderCredentialRegistry,
   });
+  const databaseCredentialApply = databaseCredentialApplyService ?? (
+    databaseBindingRegistry && databaseCredentialRegistry
+      ? createDatabaseCredentialApplyService({ databaseBindingRegistry, databaseCredentialRegistry, jobRegistry })
+      : null
+  );
   const mailConfig = mailConfigurationService ?? createMailConfigurationService({
     mailDomainRegistry,
     mailboxRegistry,
@@ -431,9 +441,20 @@ export function createApp({
       registry: localRegistry,
       jobRegistry,
       databaseBindingRegistry,
+      databaseCredentialRegistry,
       requireDatabaseName: databaseHttpInternals.requireDatabaseName,
       ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
       latestDatabaseSnapshot: databaseHttpInternals.latestDatabaseSnapshot,
+    });
+  }
+  if (databaseBindingRegistry && databaseCredentialRegistry && databaseCredentialApply) {
+    mountDatabaseCredentialRoutes(app, {
+      registry: localRegistry,
+      databaseBindingRegistry,
+      databaseCredentialRegistry,
+      databaseCredentialApplyService: databaseCredentialApply,
+      jobRegistry,
+      ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
     });
   }
   mountDatabaseRoutes(app, { registry: localRegistry, jobRegistry, databaseBindingRegistry });
@@ -449,6 +470,9 @@ export function createApp({
     if (
       error instanceof DatabaseBindingHttpError
       || error instanceof DatabaseBindingRegistryError
+      || error instanceof DatabaseCredentialApplyError
+      || error instanceof DatabaseCredentialHttpError
+      || error instanceof DatabaseCredentialRegistryError
       || error instanceof DatabaseHttpError
       || error instanceof CertificateMaterialError
       || error instanceof CertificateRegistryError
