@@ -7,6 +7,7 @@ import { createDatabaseDumpManager, databaseDumpManagerInternals } from './datab
 
 const DEFAULT_TRANSACTION_ROOT = '/var/lib/yunpanel/backups/databases/.transactions';
 const TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const RESTORE_PROGRAMS = Object.freeze(['/usr/bin/mariadb', '/usr/bin/mysql']);
 const MAX_STDERR = 64 * 1024;
 
@@ -21,6 +22,13 @@ export class DatabaseRestoreError extends Error {
 function transactionId(value) {
   if (typeof value !== 'string' || !TRANSACTION_ID_PATTERN.test(value)) {
     throw new DatabaseRestoreError('database_restore_transaction_invalid', 'Database restore transaction identity is invalid');
+  }
+  return value;
+}
+
+function expectedBackupSha256(value) {
+  if (typeof value !== 'string' || !SHA256_PATTERN.test(value)) {
+    throw new DatabaseRestoreError('database_restore_backup_digest_invalid', 'Database restore backup digest is invalid');
   }
   return value;
 }
@@ -154,11 +162,20 @@ export function createDatabaseRestoreManager({
     });
   }
 
-  async function restore({ transactionId: requestedTransactionId, backupId, databaseName } = {}) {
+  async function restore({
+    transactionId: requestedTransactionId,
+    backupId,
+    databaseName,
+    expectedBackupSha256: requestedBackupSha256,
+  } = {}) {
     const id = transactionId(requestedTransactionId);
+    const expectedSha = expectedBackupSha256(requestedBackupSha256);
     const selected = await backupManager.materializeBackup(backupId);
     if (!selected || selected.databaseName !== databaseName) {
       throw new DatabaseRestoreError('database_restore_backup_mismatch', 'Selected database backup does not match the restore target');
+    }
+    if (selected.dumpSha256 !== expectedSha) {
+      throw new DatabaseRestoreError('database_restore_backup_stale', 'Selected database backup changed after restore preview');
     }
     await requireLiveDatabase(databaseName, selected.engine);
 
@@ -214,4 +231,5 @@ export const databaseRestoreManagerInternals = Object.freeze({
   spawnRestore,
   defaultRestoreFromFile,
   transactionId,
+  expectedBackupSha256,
 });
