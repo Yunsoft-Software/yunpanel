@@ -16,6 +16,8 @@ import { createAuthenticatedApi, createLiveConnectionAuthenticator } from './aut
 import { createApplicationEnvironmentRegistry } from './application-environment-registry.js';
 import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { createApplicationRegistry } from './application-registry.js';
+import { createBackupOperationRegistry } from './backup-operation-registry.js';
+import { createBackupProjectLockProvider } from './backup-project-lock.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { createCertificateMaterialManager } from './certificate-material-manager.js';
 import { startCertificateRenewalScheduler } from './certificate-renewal-scheduler.js';
@@ -69,6 +71,8 @@ const port = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10);
 const serverStorePath = process.env.YUNPANEL_SERVER_STORE ?? path.resolve('.data/server-registry.json');
 const domainStorePath = process.env.YUNPANEL_DOMAIN_STORE ?? path.resolve('.data/domain-registry.json');
 const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-registry.json');
+const backupOperationStorePath = process.env.YUNPANEL_BACKUP_OPERATION_STORE
+  ?? path.resolve('.data/backup-operation-registry.json');
 const jobLogStorePath = path.resolve(path.dirname(jobStorePath), 'job-logs');
 const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.resolve('.data/certificate-registry.json');
 const customCertificateRoot = path.join(path.dirname(certificateStorePath), 'custom-certificates');
@@ -133,6 +137,9 @@ const durableJobRegistry = createDurableJobRegistry({
   automaticReconciliation: true,
 });
 await durableJobRegistry.init();
+const backupOperationRegistry = createBackupOperationRegistry({ filePath: backupOperationStorePath });
+await backupOperationRegistry.init();
+const projectBackupLocked = createBackupProjectLockProvider({ backupOperationRegistry });
 const certificateRegistry = createCertificateRegistry({ filePath: certificateStorePath, customRoot: customCertificateRoot });
 await certificateRegistry.init();
 const certificateMaterialManager = createCertificateMaterialManager({ customRoot: customCertificateRoot });
@@ -310,6 +317,7 @@ const dockerComposeRuntime = await createDockerComposeRuntime({
   serverRegistry: registry,
   jobRegistry,
   projectRegistry: dockerComposeProjectBootstrap.projectRegistry,
+  projectBackupLocked,
 });
 const databaseCredentialApplyService = createDatabaseCredentialApplyService({
   databaseBindingRegistry,
@@ -430,6 +438,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] server store=${serverStorePath}`);
   console.log(`[yunpanel-api] domain store=${domainStorePath}`);
   console.log(`[yunpanel-api] job store=${jobStorePath}`);
+  console.log(`[yunpanel-api] backup operation store=${backupOperationStorePath}`);
   console.log(`[yunpanel-api] job log store=${jobLogStorePath}`);
   console.log(`[yunpanel-api] certificate store=${certificateStorePath}`);
   console.log(`[yunpanel-api] application store=${applicationStorePath}`);
