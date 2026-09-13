@@ -34,7 +34,7 @@ test('DKIM DNS provider lifecycle is backed by generic bounded TXT protocol and 
     text('job-registry.js'),
   ]);
 
-  assert.match(protocolSource, /record\.type === 'TXT'/);
+  assert.match(protocolSource, /record\.type !== 'TXT'/);
   assert.match(protocolSource, /TXT_MAX_BYTES = 4096/);
   assert.match(cloudflareSource, /RECORD_TYPES = new Set\(\['A', 'AAAA', 'CNAME', 'TXT'\]\)/);
   assert.match(cloudflareSource, /TXT_MAX_BYTES = 4096/);

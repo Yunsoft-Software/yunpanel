@@ -37,9 +37,9 @@ test('smtp submission participates in staging, transactional rollback and lost-a
   ]);
 
   assert.match(manager, /mailSubmissionTemplatePolicy\.senderLoginPath/);
-  assert.match(manager, /MANIFEST_VERSION = 3/);
+  assert.match(manager, /MANIFEST_VERSION = 4/);
 
-  assert.match(backup, /MANIFEST_VERSION = 4/);
+  assert.match(backup, /MANIFEST_VERSION = 5/);
   assert.match(backup, /POSTFIX_MASTER_CF_PATH = '\/etc\/postfix\/master\.cf'/);
   assert.match(backup, /mailSubmissionTemplatePolicy\.senderLoginPath/);
   assert.match(backup, /`\$\{mailSubmissionTemplatePolicy\.senderLoginPath\}\.db`/);
