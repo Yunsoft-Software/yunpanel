@@ -21,7 +21,12 @@ const request = Object.freeze({
   expectedBackupSha256: selectedSha,
 });
 
-async function fixture(t, { failSelected = false, corruptSelected = false, failRollback = false } = {}) {
+async function fixture(t, {
+  failSelected = false,
+  corruptSelected = false,
+  failRollback = false,
+  failReceipt = false,
+} = {}) {
   const transactionRoot = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-db-restore-'));
   t.after(() => rm(transactionRoot, { recursive: true, force: true }));
   const calls = [];
@@ -102,6 +107,13 @@ async function fixture(t, { failSelected = false, corruptSelected = false, failR
     assert.equal(databasePresent, true);
     await writeFile(outputPath, liveContent, { mode: 0o600 });
   };
+  const receiptStore = {
+    async write(value) {
+      calls.push(['receipt', structuredClone(value)]);
+      if (failReceipt) throw new Error('receipt write failed');
+      return { ...value, committedAt: '2026-09-13T04:30:00.000Z' };
+    },
+  };
   return {
     calls,
     state: () => ({ databasePresent, liveContent }),
@@ -109,13 +121,14 @@ async function fixture(t, { failSelected = false, corruptSelected = false, failR
       transactionRoot,
       databaseManager,
       backupManager,
+      receiptStore,
       restoreFromFile,
       dumpToFile,
     }),
   };
 }
 
-test('restore takes a pre-restore backup, replaces the schema and verifies canonical dump digest', async (t) => {
+test('restore takes a pre-restore backup, replaces the schema, verifies digest and commits receipt', async (t) => {
   const fx = await fixture(t);
   const result = await fx.manager.restore(request);
   assert.deepEqual(result, {
@@ -133,6 +146,7 @@ test('restore takes a pre-restore backup, replaces the schema and verifies canon
   });
   assert.equal(fx.state().liveContent, selectedContent);
   assert.equal(fx.calls.filter(([name]) => name === 'backup').length, 1);
+  assert.equal(fx.calls.filter(([name]) => name === 'receipt').length, 1);
   assert.ok(fx.calls.some(([name, value]) => name === 'drop' && value === 'app_main'));
   assert.ok(fx.calls.some(([name, value]) => name === 'restore' && value === '/private/backup-0001/dump.sql'));
 });
@@ -156,6 +170,7 @@ test('restore failure replays and verifies the pre-restore backup before surfaci
   assert.equal(fx.state().liveContent, rollbackContent);
   assert.ok(fx.calls.some(([name, value]) => name === 'restore' && value === '/private/pre-restore/dump.sql'));
   assert.equal(fx.calls.filter(([name]) => name === 'verify-dump').length, 1);
+  assert.equal(fx.calls.filter(([name]) => name === 'receipt').length, 0);
 });
 
 test('digest mismatch triggers rollback and preserves the verification failure code', async (t) => {
@@ -165,6 +180,20 @@ test('digest mismatch triggers rollback and preserves the verification failure c
     (error) => error instanceof DatabaseRestoreError && error.code === 'database_restore_verification_failed',
   );
   assert.equal(fx.state().liveContent, rollbackContent);
+  assert.equal(fx.calls.filter(([name]) => name === 'verify-dump').length, 2);
+  assert.equal(fx.calls.filter(([name]) => name === 'receipt').length, 0);
+});
+
+test('receipt commit failure rolls back and never reports restore success', async (t) => {
+  const fx = await fixture(t, { failReceipt: true });
+  await assert.rejects(
+    fx.manager.restore(request),
+    (error) => error instanceof DatabaseRestoreError && error.code === 'database_restore_receipt_failed',
+  );
+  assert.equal(fx.state().databasePresent, true);
+  assert.equal(fx.state().liveContent, rollbackContent);
+  assert.equal(fx.calls.filter(([name]) => name === 'receipt').length, 1);
+  assert.ok(fx.calls.some(([name, value]) => name === 'restore' && value === '/private/pre-restore/dump.sql'));
   assert.equal(fx.calls.filter(([name]) => name === 'verify-dump').length, 2);
 });
 
