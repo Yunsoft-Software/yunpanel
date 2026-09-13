@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promis
 import path from 'node:path';
 import {
   mailForwardingTemplatePolicy,
+  mailSrsTemplatePolicy,
   mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
   previewManagedMailApplyPlan,
@@ -11,14 +12,14 @@ import {
 const DEFAULT_BACKUP_ROOT = '/var/lib/yunpanel/recovery/mail-config';
 const DIRECTORY_MODE = 0o700;
 const BACKUP_FILE_MODE = 0o600;
-const MANIFEST_VERSION = 4;
+const MANIFEST_VERSION = 5;
 const MANIFEST_FILE = 'manifest.json';
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const TRANSACTION_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const POSTFIX_MAIN_CF_PATH = '/etc/postfix/main.cf';
 const POSTFIX_MASTER_CF_PATH = '/etc/postfix/master.cf';
 
-const PLAN_ARTIFACT_PATHS = Object.freeze([
+const BASE_PLAN_ARTIFACT_PATHS = Object.freeze([
   mailTemplatePolicy.postfixVirtualDomainMapPath,
   mailTemplatePolicy.postfixVirtualMailboxMapPath,
   mailTemplatePolicy.postfixVirtualAliasMapPath,
@@ -28,6 +29,11 @@ const PLAN_ARTIFACT_PATHS = Object.freeze([
   mailTemplatePolicy.dovecotMailConfigPath,
   mailForwardingTemplatePolicy.sievePath,
   mailTemplatePolicy.rspamdProxyConfigPath,
+]);
+const SRS_PLAN_ARTIFACT_PATHS = Object.freeze([
+  ...BASE_PLAN_ARTIFACT_PATHS,
+  mailSrsTemplatePolicy.defaultsPath,
+  mailSrsTemplatePolicy.secretPath,
 ]);
 const POSTFIX_COMPILED_PATHS = Object.freeze([
   `${mailTemplatePolicy.postfixVirtualDomainMapPath}.db`,
@@ -54,6 +60,8 @@ const BACKUP_TARGET_PATHS = Object.freeze([
   mailForwardingTemplatePolicy.sievePath,
   SIEVE_COMPILED_PATH,
   mailTemplatePolicy.rspamdProxyConfigPath,
+  mailSrsTemplatePolicy.defaultsPath,
+  mailSrsTemplatePolicy.secretPath,
 ]);
 const MANAGED_DIRECTORY_PATHS = Object.freeze([
   '/etc/yunpanel',
@@ -91,12 +99,22 @@ function backupName(index, targetPath) {
   return `${String(index).padStart(2, '0')}-${path.basename(targetPath)}.bak`;
 }
 
+function expectedPlanArtifactPaths(plan) {
+  if (!plan || !Array.isArray(plan.requirements)) {
+    throw new MailConfigBackupError('mail_backup_artifact_set_invalid', 'Managed mail apply plan requirements are invalid');
+  }
+  return plan.requirements.includes(mailSrsTemplatePolicy.requirement)
+    ? SRS_PLAN_ARTIFACT_PATHS
+    : BASE_PLAN_ARTIFACT_PATHS;
+}
+
 function assertPlanArtifactSet(plan) {
-  if (!plan || !Array.isArray(plan.artifacts) || plan.artifacts.length !== PLAN_ARTIFACT_PATHS.length) {
+  const expected = expectedPlanArtifactPaths(plan);
+  if (!Array.isArray(plan.artifacts) || plan.artifacts.length !== expected.length) {
     throw new MailConfigBackupError('mail_backup_artifact_set_invalid', 'Managed mail apply plan artifact set is incomplete');
   }
-  for (let index = 0; index < PLAN_ARTIFACT_PATHS.length; index += 1) {
-    if (plan.artifacts[index]?.path !== PLAN_ARTIFACT_PATHS[index]) {
+  for (let index = 0; index < expected.length; index += 1) {
+    if (plan.artifacts[index]?.path !== expected[index]) {
       throw new MailConfigBackupError('mail_backup_artifact_set_invalid', 'Managed mail apply plan artifact order is invalid');
     }
   }
@@ -369,7 +387,9 @@ export function createMailConfigBackupManager({
 
 export const mailConfigBackupInternals = Object.freeze({
   defaultBackupRoot: DEFAULT_BACKUP_ROOT,
-  planArtifactPaths: PLAN_ARTIFACT_PATHS,
+  planArtifactPaths: BASE_PLAN_ARTIFACT_PATHS,
+  basePlanArtifactPaths: BASE_PLAN_ARTIFACT_PATHS,
+  srsPlanArtifactPaths: SRS_PLAN_ARTIFACT_PATHS,
   postfixCompiledPaths: POSTFIX_COMPILED_PATHS,
   sieveCompiledPath: SIEVE_COMPILED_PATH,
   compiledPaths: COMPILED_PATHS,
@@ -383,5 +403,6 @@ export const mailConfigBackupInternals = Object.freeze({
   normalizeTransactionId,
   normalizeManifest,
   normalizeDirectorySnapshot,
+  expectedPlanArtifactPaths,
   assertPlanArtifactSet,
 });
