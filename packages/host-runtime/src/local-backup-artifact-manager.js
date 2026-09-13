@@ -52,7 +52,7 @@ function safeRelativeName(value) {
 }
 
 function normalizeEntries(value) {
-  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_ENTRIES) {
+  if (!Array.isArray(value) || value.length > MAX_ENTRIES) {
     throw new LocalBackupArtifactError('backup_artifact_entries_invalid', 'Backup artifact entries are invalid');
   }
   return value.map((entry) => {
@@ -195,11 +195,14 @@ export function createLocalBackupArtifactManager({
     });
   }
 
-  async function archive({ artifactId, sourceDigest, entries, inlineFiles = [] } = {}) {
+  async function archive({ artifactId, sourceDigest, entries = [], inlineFiles = [] } = {}) {
     const id = digestId(artifactId, 'artifactId');
     const source = digestId(sourceDigest, 'sourceDigest');
     const normalizedEntries = normalizeEntries(entries);
     const normalizedInline = normalizeInlineFiles(inlineFiles);
+    if (normalizedEntries.length === 0 && normalizedInline.length === 0) {
+      throw new LocalBackupArtifactError('backup_artifact_empty', 'Backup artifact does not contain any source');
+    }
     const existing = await inspectExisting(id, source);
     if (existing) return existing;
 
