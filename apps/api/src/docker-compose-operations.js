@@ -50,11 +50,13 @@ export function createDockerComposeOperationsService({
   environmentRegistry,
   credentialRegistry,
   jobRegistry,
+  projectBackupLocked = async () => false,
 } = {}) {
   if (!projectRegistry || typeof projectRegistry.getProject !== 'function'
     || !environmentRegistry || typeof environmentRegistry.getEnvironment !== 'function'
     || !credentialRegistry || typeof credentialRegistry.listCredentials !== 'function'
-    || !jobRegistry || typeof jobRegistry.listJobs !== 'function' || typeof jobRegistry.enqueue !== 'function') {
+    || !jobRegistry || typeof jobRegistry.listJobs !== 'function' || typeof jobRegistry.enqueue !== 'function'
+    || typeof projectBackupLocked !== 'function') {
     throw new DockerComposeOperationsError('docker_compose_operations_dependencies_invalid', 'Docker Compose operation dependencies are unavailable', 503);
   }
 
@@ -70,11 +72,26 @@ export function createDockerComposeOperationsService({
     return jobs.filter((job) => DOCKER_OPERATION_SET.has(job?.operation));
   }
 
+  async function assertBackupUnlocked(projectId) {
+    let locked;
+    try { locked = await projectBackupLocked(projectId); }
+    catch {
+      throw new DockerComposeOperationsError('docker_compose_backup_state_unavailable', 'Docker backup lock state could not be inspected', 503);
+    }
+    if (locked !== true && locked !== false) {
+      throw new DockerComposeOperationsError('docker_compose_backup_state_unavailable', 'Docker backup lock state is invalid', 503);
+    }
+    if (locked) {
+      throw new DockerComposeOperationsError('docker_compose_backup_conflict', 'Docker Compose project is locked by an active backup', 409);
+    }
+  }
+
   async function assertIdle(projectId) {
     const jobs = await listProjectJobs(projectId);
     if (jobs.some((job) => ACTIVE_STATUSES.has(job.status))) {
       throw new DockerComposeOperationsError('docker_compose_job_conflict', 'Another Docker Compose operation is already queued or running', 409);
     }
+    await assertBackupUnlocked(projectId);
   }
 
   async function history({ projectId } = {}) {
