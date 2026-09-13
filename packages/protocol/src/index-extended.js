@@ -14,6 +14,8 @@ import {
   validateOperationEnvelope as validateBaseOperationEnvelope,
 } from './index.js';
 
+const DATABASE_CREDENTIAL_APPLY = 'database.credential.apply';
+const DATABASE_CREDENTIAL_DELETE = 'database.credential.delete';
 const MAIL_DKIM_APPLY = 'mail.dkim.apply';
 const MAIL_DATA_BACKUP = 'mail.data.backup';
 const MAIL_DATA_RESTORE = 'mail.data.restore';
@@ -30,6 +32,8 @@ export const MANAGED_SERVICE_CONTROL_IDS = Object.freeze([...BASE_MANAGED_SERVIC
 
 export const OPERATIONS = Object.freeze({
   ...BASE_OPERATIONS,
+  DATABASE_CREDENTIAL_APPLY,
+  DATABASE_CREDENTIAL_DELETE,
   MAIL_DKIM_APPLY,
   MAIL_DATA_BACKUP,
   MAIL_DATA_RESTORE,
@@ -39,6 +43,8 @@ export const OPERATIONS = Object.freeze({
 
 export function isKnownOperation(operation) {
   return isBaseKnownOperation(operation)
+    || operation === DATABASE_CREDENTIAL_APPLY
+    || operation === DATABASE_CREDENTIAL_DELETE
     || operation === MAIL_DKIM_APPLY
     || operation === MAIL_DATA_BACKUP
     || operation === MAIL_DATA_RESTORE
@@ -65,6 +71,31 @@ function canonicalMailbox(value) {
   if (!domain) return null;
   const normalized = `${local}@${domain}`;
   return normalized.length <= 254 ? normalized : null;
+}
+
+function validateDatabaseCredentialMutation(payload, operation, errors) {
+  const allowed = new Set([
+    'databaseCredentialId', 'databaseBindingId', 'expectedCredentialRevision',
+    'expectedBindingRevision', 'desiredStateSha256',
+  ]);
+  if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
+    errors.push(`${operation} contains unsupported arguments`);
+  }
+  try {
+    if (assertUuid(payload.databaseCredentialId, 'databaseCredentialId') !== payload.databaseCredentialId
+      || assertUuid(payload.databaseBindingId, 'databaseBindingId') !== payload.databaseBindingId) {
+      throw new Error('noncanonical');
+    }
+  } catch {
+    errors.push(`${operation} identities are invalid`);
+  }
+  if (!Number.isSafeInteger(payload.expectedCredentialRevision) || payload.expectedCredentialRevision < 1
+    || !Number.isSafeInteger(payload.expectedBindingRevision) || payload.expectedBindingRevision < 1) {
+    errors.push(`${operation} revisions are invalid`);
+  }
+  if (typeof payload.desiredStateSha256 !== 'string' || !SHA256_PATTERN.test(payload.desiredStateSha256)) {
+    errors.push(`${operation} desired-state digest is invalid`);
+  }
 }
 
 function validateMailDkimApply(payload, errors) {
@@ -217,6 +248,8 @@ function validatePostsrsdServiceOperation(operation, payload, errors) {
 
 function extendedOperation(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (value.operation === DATABASE_CREDENTIAL_APPLY) return 'database_credential';
+  if (value.operation === DATABASE_CREDENTIAL_DELETE) return 'database_credential';
   if (value.operation === MAIL_DKIM_APPLY) return 'mail_dkim';
   if (value.operation === MAIL_DATA_BACKUP) return 'mail_data_backup';
   if (value.operation === MAIL_DATA_RESTORE) return 'mail_data_restore';
@@ -241,6 +274,8 @@ export function validateOperationEnvelope(value) {
   }
   if (!value.payload || typeof value.payload !== 'object' || Array.isArray(value.payload)) {
     errors.push('payload must be an object');
+  } else if (extension === 'database_credential') {
+    validateDatabaseCredentialMutation(value.payload, value.operation, errors);
   } else if (extension === 'mail_dkim') {
     validateMailDkimApply(value.payload, errors);
   } else if (extension === 'mail_data_backup') {
@@ -263,7 +298,9 @@ export function validateOperationEnvelope(value) {
 }
 
 export function createOperationEnvelope({ id, operation, payload = {} }) {
-  const extended = operation === MAIL_DKIM_APPLY
+  const extended = operation === DATABASE_CREDENTIAL_APPLY
+    || operation === DATABASE_CREDENTIAL_DELETE
+    || operation === MAIL_DKIM_APPLY
     || operation === MAIL_DATA_BACKUP
     || operation === MAIL_DATA_RESTORE
     || operation === MAIL_DATA_DELETE
@@ -283,6 +320,8 @@ export function createOperationEnvelope({ id, operation, payload = {} }) {
 }
 
 export const protocolExtensionInternals = Object.freeze({
+  databaseCredentialApply: DATABASE_CREDENTIAL_APPLY,
+  databaseCredentialDelete: DATABASE_CREDENTIAL_DELETE,
   mailDkimApply: MAIL_DKIM_APPLY,
   mailDataBackup: MAIL_DATA_BACKUP,
   mailDataRestore: MAIL_DATA_RESTORE,
@@ -291,6 +330,7 @@ export const protocolExtensionInternals = Object.freeze({
   postsrsdServiceId: POSTSRSD_SERVICE_ID,
   readOnlyOperations: READ_ONLY_OPERATIONS,
   txtMaxBytes: TXT_MAX_BYTES,
+  validateDatabaseCredentialMutation,
   validateMailDkimApply,
   validateMailDataBackup,
   validateMailDataRestore,
