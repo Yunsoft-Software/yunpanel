@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { stat } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { mailSecurityTemplatePolicy, mailTemplatePolicy } from '@yunpanel/config-templates';
+import {
+  mailSecurityTemplatePolicy,
+  mailSrsTemplatePolicy,
+  mailTemplatePolicy,
+} from '@yunpanel/config-templates';
 import { createManagedServiceManager } from './managed-service-manager.js';
 import { parseManagedVmailIdentity } from './mail-vmail-identity.js';
 
@@ -11,8 +15,10 @@ const GETENT = '/usr/bin/getent';
 const DOVECOT = '/usr/sbin/dovecot';
 const DOVECONF = '/usr/bin/doveconf';
 const POSTCONF = '/usr/sbin/postconf';
+const POSTSRSD = '/usr/sbin/postsrsd';
 const SS = '/usr/bin/ss';
 const SIEVEC = '/usr/bin/sievec';
+const SYSTEMCTL = '/usr/bin/systemctl';
 const MAX_OUTPUT = 128 * 1024;
 const BASE_REQUIREMENTS = Object.freeze([
   'postfix',
@@ -37,6 +43,10 @@ const SIEVE_REQUIREMENTS = Object.freeze([
   'managed_domains_excluded_from_mydestination',
   'postfix_relay_policy_verified',
 ]);
+const SRS_SIEVE_REQUIREMENTS = Object.freeze([
+  ...SIEVE_REQUIREMENTS,
+  mailSrsTemplatePolicy.requirement,
+]);
 
 export class MailReadinessError extends Error {
   constructor(code, message) {
@@ -54,7 +64,7 @@ function canonicalRequirementIds(value) {
   if (!Array.isArray(value)) {
     throw new MailReadinessError('mail_readiness_requirements_invalid', 'Managed mail preview readiness requirements are not canonical');
   }
-  for (const allowed of [BASE_REQUIREMENTS, SIEVE_REQUIREMENTS]) {
+  for (const allowed of [BASE_REQUIREMENTS, SIEVE_REQUIREMENTS, SRS_SIEVE_REQUIREMENTS]) {
     if (value.length === allowed.length && value.every((requirement, index) => requirement === allowed[index])) {
       return allowed;
     }
@@ -160,6 +170,16 @@ function candidateTlsPolicySatisfied(preview) {
     && parameters.get('smtpd_tls_auth_only') === 'yes';
 }
 
+function candidateSrsPolicySatisfied(preview) {
+  if (!preview?.srs || preview.srs.required !== true
+    || preview.srs.serviceUnit !== mailSrsTemplatePolicy.serviceUnit) return false;
+  const parameters = previewParameterMap(preview);
+  if (!parameters) return false;
+  return mailSrsTemplatePolicy.postfixParameters.every(
+    (parameter) => parameters.get(parameter.name) === parameter.value,
+  );
+}
+
 function loopbackPortSafe(value) {
   const output = cleanOutput(value);
   if (!output) return true;
@@ -167,6 +187,17 @@ function loopbackPortSafe(value) {
     const columns = line.trim().split(/\s+/);
     const local = columns[3] ?? '';
     if (local !== '127.0.0.1:11332' && local !== '[::1]:11332') return false;
+  }
+  return true;
+}
+
+function exactLoopbackListener(value, port) {
+  const output = cleanOutput(value);
+  if (!output) return false;
+  const expected = `127.0.0.1:${port}`;
+  for (const line of output.split('\n')) {
+    const columns = line.trim().split(/\s+/);
+    if ((columns[3] ?? '') !== expected) return false;
   }
   return true;
 }
@@ -216,10 +247,14 @@ export function createMailReadinessInspector({
     }
   }
 
-  async function inspect(preview) {
+  async function inspect(preview, { phase = 'post' } = {}) {
+    if (!['pre', 'post'].includes(phase)) {
+      throw new MailReadinessError('mail_readiness_phase_invalid', 'Managed mail readiness phase is invalid');
+    }
     const domains = canonicalDomainsFromPreview(preview);
     const requirementIds = canonicalRequirementIds(preview.requirements);
     const requiresSieve = requirementIds.includes('dovecot_sieve');
+    const requiresSrs = requirementIds.includes(mailSrsTemplatePolicy.requirement);
     const [postfix, dovecot, rspamd] = await Promise.all([
       managedServiceManager.inspect('postfix'),
       managedServiceManager.inspect('dovecot'),
@@ -268,6 +303,33 @@ export function createMailReadinessInspector({
     ]);
     const tlsFiles = [dovecotCertExists, dovecotKeyExists, postfixCertExists, postfixKeyExists];
 
+    let srsSatisfied = true;
+    if (requiresSrs) {
+      const [binaryExecutable, unitState] = await Promise.all([
+        executableFileExists(POSTSRSD),
+        runText(SYSTEMCTL, ['show', '-p', 'LoadState', '--value', mailSrsTemplatePolicy.serviceUnit]),
+      ]);
+      const packageReady = binaryExecutable && unitState.ok && unitState.output === 'loaded'
+        && candidateSrsPolicySatisfied(preview);
+      if (phase === 'pre') {
+        srsSatisfied = packageReady;
+      } else {
+        const [active, forwardSocket, reverseSocket, senderMap, recipientMap] = await Promise.all([
+          runText(SYSTEMCTL, ['is-active', '--quiet', mailSrsTemplatePolicy.serviceUnit]),
+          runText(SS, ['-H', '-ltn', `sport = :${mailSrsTemplatePolicy.forwardPort}`]),
+          runText(SS, ['-H', '-ltn', `sport = :${mailSrsTemplatePolicy.reversePort}`]),
+          runText(POSTCONF, ['-h', 'sender_canonical_maps']),
+          runText(POSTCONF, ['-h', 'recipient_canonical_maps']),
+        ]);
+        const expected = new Map(mailSrsTemplatePolicy.postfixParameters.map((parameter) => [parameter.name, parameter.value]));
+        srsSatisfied = packageReady && active.ok
+          && forwardSocket.ok && exactLoopbackListener(forwardSocket.output, mailSrsTemplatePolicy.forwardPort)
+          && reverseSocket.ok && exactLoopbackListener(reverseSocket.output, mailSrsTemplatePolicy.reversePort)
+          && senderMap.ok && senderMap.output === expected.get('sender_canonical_maps')
+          && recipientMap.ok && recipientMap.output === expected.get('recipient_canonical_maps');
+      }
+    }
+
     const variablesValid = myhostname.ok && mydomain.ok
       && /^[a-z0-9.-]+$/i.test(myhostname.output) && /^[a-z0-9.-]+$/i.test(mydomain.output);
     const destinations = variablesValid && mydestination.ok
@@ -293,17 +355,20 @@ export function createMailReadinessInspector({
       ['loopback_11332_available', socketState.ok && loopbackPortSafe(socketState.output)],
       ['managed_domains_excluded_from_mydestination', managedDomainsExcluded],
       ['postfix_relay_policy_verified', candidateRelayPolicySatisfied(preview)],
+      [mailSrsTemplatePolicy.requirement, srsSatisfied],
     ]);
     const requirements = Object.freeze(requirementIds.map((id) => Object.freeze({ id, satisfied: status.get(id) === true })));
     const blockers = Object.freeze(requirements.filter((entry) => !entry.satisfied).map((entry) => entry.id));
     const identity = {
       version: 1,
+      phase,
       previewSha256: preview.sha256,
       requirements,
     };
     return Object.freeze({
       version: 1,
       sha256: sha256(identity),
+      phase,
       previewSha256: preview.sha256,
       ready: blockers.length === 0,
       requirements,
@@ -318,6 +383,9 @@ export function createMailReadinessInspector({
 export const mailReadinessInternals = Object.freeze({
   requirements: BASE_REQUIREMENTS,
   sieveRequirements: SIEVE_REQUIREMENTS,
+  srsSieveRequirements: SRS_SIEVE_REQUIREMENTS,
+  postsrsdPath: POSTSRSD,
+  systemctlPath: SYSTEMCTL,
   sievecPath: SIEVEC,
   commandKey,
   canonicalRequirementIds,
@@ -327,6 +395,8 @@ export const mailReadinessInternals = Object.freeze({
   restrictionTokens,
   candidateRelayPolicySatisfied,
   candidateTlsPolicySatisfied,
+  candidateSrsPolicySatisfied,
   loopbackPortSafe,
+  exactLoopbackListener,
   identityPresent,
 });
