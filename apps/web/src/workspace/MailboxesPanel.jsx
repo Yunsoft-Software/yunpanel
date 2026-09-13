@@ -71,7 +71,11 @@ function PolicyPanel({ mailbox, onChanged }) {
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
   }
   useEffect(() => { refresh(); }, [mailbox.id]);
-  useUnsavedChanges(Boolean((quotaMiB && Number(quotaMiB) * (1024 ** 2) !== quota?.quotaBytes) || destinations));
+  const loaded = quota !== undefined && forwarding !== undefined;
+  const savedQuotaMiB = quota ? String(Math.round(quota.quotaBytes / (1024 ** 2))) : '';
+  const savedMode = forwarding?.mode ?? 'copy';
+  const savedDestinations = forwarding?.destinations?.join('\n') ?? '';
+  useUnsavedChanges(loaded && (quotaMiB !== savedQuotaMiB || mode !== savedMode || destinations !== savedDestinations));
   async function mutate(callback) {
     setBusy(true); setError(null);
     try { await callback(); await refresh(); onChanged?.(); }
