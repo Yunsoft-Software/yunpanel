@@ -71,7 +71,7 @@ async function findDockerPath(accessFn) {
       await accessFn(candidate);
       return candidate;
     } catch {
-      // Continue through the fixed executable allowlist.
+      // Continue through fixed executable allowlist.
     }
   }
   return null;
@@ -172,7 +172,29 @@ function publicBindSource(source, projectDirectory) {
   return Object.freeze({ source: resolved, sourceScope: 'host' });
 }
 
-function storageMounts(value, { projectDirectory = null } = {}) {
+function namedVolumeScope(source, volumeDefinitions, expectedProjectName) {
+  if (!volumeDefinitions || typeof volumeDefinitions !== 'object' || Array.isArray(volumeDefinitions)
+    || !Object.hasOwn(volumeDefinitions, source)) {
+    throw new DockerComposeValidationError('docker_compose_service_storage_invalid', 'Docker Compose named volume definition is unavailable');
+  }
+  const definition = volumeDefinitions[source];
+  if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
+    throw new DockerComposeValidationError('docker_compose_service_storage_invalid', 'Docker Compose named volume definition is invalid');
+  }
+  if (definition.external !== undefined && typeof definition.external !== 'boolean') {
+    throw new DockerComposeValidationError('docker_compose_service_storage_invalid', 'Docker Compose named volume external state is invalid');
+  }
+  if (definition.name !== undefined
+    && (typeof definition.name !== 'string' || !RESOURCE_NAME_PATTERN.test(definition.name))) {
+    throw new DockerComposeValidationError('docker_compose_service_storage_invalid', 'Docker Compose named volume runtime name is invalid');
+  }
+  if (definition.external === true) return 'host';
+  const defaultRuntimeName = `${expectedProjectName}_${source}`;
+  if (definition.name !== undefined && definition.name !== defaultRuntimeName) return 'host';
+  return 'project';
+}
+
+function storageMounts(value, { projectDirectory = null, volumeDefinitions = {}, expectedProjectName } = {}) {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value) || value.length > MAX_SERVICE_MOUNTS) {
     throw new DockerComposeValidationError('docker_compose_service_storage_invalid', 'Docker Compose service storage mounts are invalid');
@@ -211,7 +233,7 @@ function storageMounts(value, { projectDirectory = null } = {}) {
       output.push(Object.freeze({
         kind: 'named_volume',
         source: mount.source,
-        sourceScope: 'project',
+        sourceScope: namedVolumeScope(mount.source, volumeDefinitions, expectedProjectName),
         target: mount.target,
         readOnly,
       }));
@@ -245,6 +267,7 @@ export function summarizeDockerComposeConfig(value, {
   if (serviceEntries.length < 1 || serviceEntries.length > 64) {
     throw new DockerComposeValidationError('docker_compose_service_count_invalid', 'Docker Compose must define between 1 and 64 services');
   }
+  const volumeDefinitions = value.volumes ?? {};
   const services = serviceEntries.map(([name, service]) => {
     if (!SERVICE_NAME_PATTERN.test(name) || !service || typeof service !== 'object' || Array.isArray(service)) {
       throw new DockerComposeValidationError('docker_compose_service_invalid', 'Docker Compose contains an invalid service');
@@ -254,7 +277,11 @@ export function summarizeDockerComposeConfig(value, {
       imageConfigured: typeof service.image === 'string' && service.image.length > 0,
       buildConfigured: service.build !== undefined && service.build !== null,
       publishedPorts: Object.freeze(publishedPorts(service.ports)),
-      storageMounts: Object.freeze(storageMounts(service.volumes, { projectDirectory })),
+      storageMounts: Object.freeze(storageMounts(service.volumes, {
+        projectDirectory,
+        volumeDefinitions,
+        expectedProjectName: expected,
+      })),
     });
   }).sort((left, right) => left.name.localeCompare(right.name));
   return Object.freeze({
@@ -354,18 +381,18 @@ export function createDockerComposeValidator({
 }
 
 export const dockerComposeValidatorInternals = Object.freeze({
-  defaultRoot: DEFAULT_ROOT,
-  dockerPaths: DOCKER_PATHS,
   maxDocumentBytes: MAX_DOCUMENT_BYTES,
   maxConfigBytes: MAX_CONFIG_BYTES,
   maxEnvironmentEntries: MAX_ENVIRONMENT_ENTRIES,
+  maxEnvironmentValueBytes: MAX_ENVIRONMENT_VALUE_BYTES,
   maxServicePorts: MAX_SERVICE_PORTS,
   maxServiceMounts: MAX_SERVICE_MOUNTS,
   projectName,
   composeDocument,
   normalizeEnvironment,
-  publishedPorts,
-  storageMounts,
-  publicBindSource,
   findDockerPath,
+  publishedPorts,
+  publicBindSource,
+  namedVolumeScope,
+  storageMounts,
 });
