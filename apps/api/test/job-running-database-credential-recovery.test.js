@@ -48,9 +48,8 @@ function fixture({ operation = OPERATIONS.DATABASE_CREDENTIAL_APPLY, evidenceOve
     operation,
     resourceType: 'database',
     resourceId: 'app_main',
-    payload: payload(),
   };
-  const context = structuredClone(job);
+  const context = { ...structuredClone(job), payload: payload() };
   const receipt = { serverId, jobId, operation, result: result(operation) };
   const bundle = {
     version: 1,

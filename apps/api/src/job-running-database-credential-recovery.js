@@ -48,11 +48,22 @@ function assertCandidate(candidate, identity) {
 }
 
 function assertContext(context, job, candidate, identity) {
+  const payload = context?.payload;
+  const payloadFields = [
+    'databaseCredentialId', 'databaseBindingId', 'expectedCredentialRevision',
+    'expectedBindingRevision', 'desiredStateSha256',
+  ];
   if (!context || context.id !== identity.jobId || context.serverId !== identity.serverId || context.status !== 'running'
     || context.operation !== candidate.operation || context.operation !== job.operation
     || context.resourceType !== 'database' || context.resourceId !== candidate.resourceId || context.resourceId !== job.resourceId
-    || !context.payload || typeof context.payload !== 'object' || Array.isArray(context.payload)
-    || JSON.stringify(context.payload) !== JSON.stringify(job.payload)) {
+    || !payload || typeof payload !== 'object' || Array.isArray(payload)
+    || Object.keys(payload).length !== payloadFields.length
+    || payloadFields.some((field) => !Object.hasOwn(payload, field))
+    || typeof payload.databaseCredentialId !== 'string' || !UUID_PATTERN.test(payload.databaseCredentialId)
+    || typeof payload.databaseBindingId !== 'string' || !UUID_PATTERN.test(payload.databaseBindingId)
+    || !Number.isSafeInteger(payload.expectedCredentialRevision) || payload.expectedCredentialRevision < 1
+    || !Number.isSafeInteger(payload.expectedBindingRevision) || payload.expectedBindingRevision < 1
+    || typeof payload.desiredStateSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(payload.desiredStateSha256)) {
     throw new JobRunningDatabaseCredentialRecoveryError('job_database_credential_recovery_context_mismatch', 'Private database credential recovery context does not match durable job metadata');
   }
 }
