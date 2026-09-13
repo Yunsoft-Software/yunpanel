@@ -13,6 +13,12 @@ export {
   nginxLogPolicy,
 } from './nginx-log-reader.js';
 export { createDockerInspector, inspectDocker, parseDockerPsOutput } from './docker-inspector.js';
+export {
+  createDockerComposeValidator,
+  DockerComposeValidationError,
+  dockerComposeValidatorInternals,
+  summarizeDockerComposeConfig,
+} from './docker-compose-validator.js';
 export { createNginxInspector, inspectNginx, parseNginxConfigMetadata } from './nginx-inspector.js';
 export { createNginxManager, nginxManager, NginxManagerError } from './nginx-manager.js';
 export {
