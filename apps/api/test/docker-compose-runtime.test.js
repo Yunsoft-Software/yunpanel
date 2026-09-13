@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DOCKER_COMPOSE_OPERATIONS, OPERATIONS } from '@yunpanel/protocol';
-import { dockerComposeRuntimeInternals } from '../src/docker-compose-runtime.js';
+import {
+  createDockerComposeProjectRegistryBootstrap,
+  dockerComposeRuntimeInternals,
+} from '../src/docker-compose-runtime.js';
 
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
@@ -29,6 +32,22 @@ function fixture() {
     extended: dockerComposeRuntimeInternals.extendLocalOperations(baseOperations, localOperation),
   };
 }
+
+test('compose project registry bootstrap exposes the shared configured store identity', () => {
+  const projectStore = '/tmp/yunpanel-compose-projects.json';
+  const bootstrap = createDockerComposeProjectRegistryBootstrap({
+    env: {
+      YUNPANEL_DOCKER_COMPOSE_PROJECT_STORE: projectStore,
+      YUNPANEL_SECRET_MASTER_KEY: Buffer.alloc(32, 7).toString('base64'),
+    },
+    serverRegistry: { async getServer() { return { id: serverId }; } },
+  });
+
+  assert.equal(bootstrap.paths.projects, projectStore);
+  assert.equal(typeof bootstrap.projectRegistry.init, 'function');
+  assert.equal(typeof bootstrap.projectRegistry.getProject, 'function');
+  assert.equal(typeof bootstrap.projectRegistry.materializeProject, 'function');
+});
 
 test('compose runtime extends rather than replaces existing local operations', async () => {
   const fx = fixture();
