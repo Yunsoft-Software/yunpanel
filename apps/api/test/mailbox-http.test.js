@@ -172,6 +172,7 @@ test('local panel hides mailboxes whose mail Domain belongs to another Server', 
     localServerId,
     mailDomainRegistry: { getMailDomain: async (id) => mailDomains.get(id) ?? null },
     domainRegistry: { getDomain: async (id) => webDomains.get(id) ?? null },
+    mailDeleteFinalizeService: { async finalizeMailbox() { throw new Error('not expected'); } },
   });
   assert.deepEqual((await (await request(base, '/api/mailboxes')).json()).data.map((mailbox) => mailbox.id), [localMailbox.id]);
   assert.equal((await request(base, `/api/mailboxes/${remoteMailbox.id}`)).status, 404);

@@ -81,7 +81,11 @@ test('Roundcube package-only install state can be digested without a fabricated 
     id: 'roundcube',
     installed: true,
     active: false,
-    packages: [{ packageName: 'roundcube-core', installed: true, version: '1.6.6+dfsg-2ubuntu0.1' }],
+    packages: [
+      { packageName: 'roundcube-core', installed: true, version: '1.6.6+dfsg-2ubuntu0.1' },
+      { packageName: 'roundcube-sqlite3', installed: true, version: '1.6.6+dfsg-2ubuntu0.1' },
+      { packageName: 'php-fpm', installed: true, version: '2:8.3+93ubuntu2' },
+    ],
     units: [],
     health: { status: 'installed', configuration: 'valid' },
   }, 'roundcube');

@@ -29,7 +29,11 @@ function roundcubeState(version = '1.6.6+dfsg-2ubuntu0.1') {
     id: 'roundcube',
     installed: true,
     active: false,
-    packages: [{ packageName: 'roundcube-core', installed: true, version }],
+    packages: [
+      { packageName: 'roundcube-core', installed: true, version },
+      { packageName: 'roundcube-sqlite3', installed: true, version },
+      { packageName: 'php-fpm', installed: true, version: '2:8.3+93ubuntu2' },
+    ],
     units: [],
     health: { status: 'installed', configuration: 'valid' },
   };
