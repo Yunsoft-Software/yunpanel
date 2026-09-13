@@ -1,3 +1,9 @@
+import path from 'node:path';
+import { createDockerComposeValidator } from '@yunpanel/host-runtime';
+import { createDockerComposeEnvironmentRegistry } from './docker-compose-environment-registry.js';
+import { mountDockerComposeRoutes } from './docker-compose-http.js';
+import { createDockerComposeProjectRegistry } from './docker-compose-project-registry.js';
+import { createDockerRegistryCredentialRegistry } from './docker-registry-credential-registry.js';
 import { DockerWorkloadRegistryError } from './docker-workload-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -31,11 +37,85 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry, localServerId = null } = {}) {
+function defaultComposeDependencies({ localServerId, env, cwd }) {
+  const projectStorePath = env.YUNPANEL_DOCKER_COMPOSE_PROJECT_STORE
+    ?? path.resolve(cwd, '.data/docker-compose-project-registry.json');
+  const environmentStorePath = env.YUNPANEL_DOCKER_COMPOSE_ENVIRONMENT_STORE
+    ?? path.resolve(cwd, '.data/docker-compose-environment-registry.json');
+  const credentialStorePath = env.YUNPANEL_DOCKER_REGISTRY_CREDENTIAL_STORE
+    ?? path.resolve(cwd, '.data/docker-registry-credential-registry.json');
+  const dockerComposeProjectRegistry = createDockerComposeProjectRegistry({
+    filePath: projectStorePath,
+    masterKey: env.YUNPANEL_SECRET_MASTER_KEY,
+    serverExists: async (serverId) => localServerId ? serverId === localServerId : true,
+  });
+  const projectExists = async (projectId) => Boolean(await dockerComposeProjectRegistry.getProject(projectId));
+  const dockerComposeEnvironmentRegistry = createDockerComposeEnvironmentRegistry({
+    filePath: environmentStorePath,
+    masterKey: env.YUNPANEL_SECRET_MASTER_KEY,
+    projectExists,
+  });
+  const dockerRegistryCredentialRegistry = createDockerRegistryCredentialRegistry({
+    filePath: credentialStorePath,
+    masterKey: env.YUNPANEL_SECRET_MASTER_KEY,
+    projectExists,
+  });
+  return Object.freeze({
+    dockerComposeProjectRegistry,
+    dockerComposeEnvironmentRegistry,
+    dockerRegistryCredentialRegistry,
+    validateDockerCompose: createDockerComposeValidator(),
+  });
+}
+
+function composeDependencies(options) {
+  const provided = [
+    options.dockerComposeProjectRegistry,
+    options.dockerComposeEnvironmentRegistry,
+    options.dockerRegistryCredentialRegistry,
+    options.validateDockerCompose,
+  ].filter((value) => value !== null && value !== undefined).length;
+  if (provided !== 0 && provided !== 4) {
+    throw new Error('Docker Compose desired-state dependencies must be provided together');
+  }
+  if (provided === 4) {
+    return Object.freeze({
+      dockerComposeProjectRegistry: options.dockerComposeProjectRegistry,
+      dockerComposeEnvironmentRegistry: options.dockerComposeEnvironmentRegistry,
+      dockerRegistryCredentialRegistry: options.dockerRegistryCredentialRegistry,
+      validateDockerCompose: options.validateDockerCompose,
+    });
+  }
+  return defaultComposeDependencies(options);
+}
+
+export function mountDockerWorkloadRoutes(app, {
+  dockerWorkloadRegistry,
+  localServerId = null,
+  dockerComposeProjectRegistry = null,
+  dockerComposeEnvironmentRegistry = null,
+  dockerRegistryCredentialRegistry = null,
+  validateDockerCompose = null,
+  env = process.env,
+  cwd = process.cwd(),
+} = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
   if (!dockerWorkloadRegistry || typeof dockerWorkloadRegistry.createWorkload !== 'function'
     || typeof dockerWorkloadRegistry.getWorkload !== 'function' || typeof dockerWorkloadRegistry.listWorkloads !== 'function') {
     throw new Error('Docker workload registry is required');
+  }
+
+  if (typeof app.put === 'function') {
+    const managed = composeDependencies({
+      localServerId,
+      dockerComposeProjectRegistry,
+      dockerComposeEnvironmentRegistry,
+      dockerRegistryCredentialRegistry,
+      validateDockerCompose,
+      env,
+      cwd,
+    });
+    mountDockerComposeRoutes(app, { ...managed, localServerId });
   }
 
   app.get('/api/docker/workloads', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -64,4 +144,10 @@ export function mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry, localSe
   }));
 }
 
-export const dockerWorkloadHttpInternals = Object.freeze({ createInput, listFilter, emptyQuery });
+export const dockerWorkloadHttpInternals = Object.freeze({
+  createInput,
+  listFilter,
+  emptyQuery,
+  defaultComposeDependencies,
+  composeDependencies,
+});
