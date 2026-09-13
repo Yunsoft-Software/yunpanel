@@ -177,7 +177,7 @@ export function mountMailboxRoutes(app, {
   app.delete('/api/mailboxes/:mailboxId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
     await localMailbox(request.params.mailboxId);
-    if (mailDeleteFinalizeService) {
+    if (localServerId !== null) {
       const body = exactBody(request.body, FINALIZE_DELETE_FIELDS, 'mailbox_delete_input_invalid');
       const result = await mailDeleteFinalizeService.finalizeMailbox({ mailboxId: request.params.mailboxId, ...body });
       return response.json({ data: result, sideEffects: noHostSideEffects });
