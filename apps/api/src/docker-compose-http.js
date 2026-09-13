@@ -1,7 +1,9 @@
 import { DockerComposeValidationError } from '@yunpanel/host-runtime';
 import { DockerComposeProjectRegistryError } from './docker-compose-project-registry.js';
 import { DockerComposeEnvironmentRegistryError } from './docker-compose-environment-registry.js';
+import { DockerComposeOperationsError } from './docker-compose-operations.js';
 import { DockerRegistryCredentialRegistryError } from './docker-registry-credential-registry.js';
+import { JobRegistryError } from './job-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
 export class DockerComposeHttpError extends Error {
@@ -17,7 +19,9 @@ const KNOWN_ERRORS = Object.freeze([
   DockerComposeValidationError,
   DockerComposeProjectRegistryError,
   DockerComposeEnvironmentRegistryError,
+  DockerComposeOperationsError,
   DockerRegistryCredentialRegistryError,
+  JobRegistryError,
 ]);
 
 function exactBody(body, fields, message) {
@@ -80,6 +84,7 @@ export function mountDockerComposeRoutes(app, {
   dockerComposeProjectRegistry,
   dockerComposeEnvironmentRegistry,
   dockerRegistryCredentialRegistry,
+  dockerComposeOperationsService,
   validateDockerCompose,
   localServerId = null,
 } = {}) {
@@ -101,6 +106,10 @@ export function mountDockerComposeRoutes(app, {
   if (!dockerRegistryCredentialRegistry || typeof dockerRegistryCredentialRegistry.listCredentials !== 'function'
     || typeof dockerRegistryCredentialRegistry.setCredential !== 'function') {
     throw new Error('Docker registry credential registry is required');
+  }
+  if (!dockerComposeOperationsService || typeof dockerComposeOperationsService.preview !== 'function'
+    || typeof dockerComposeOperationsService.queue !== 'function') {
+    throw new Error('Docker Compose operations service is required');
   }
   if (typeof validateDockerCompose !== 'function') throw new Error('Docker Compose validator is required');
 
@@ -225,6 +234,32 @@ export function mountDockerComposeRoutes(app, {
       },
       sideEffects: false,
     });
+  }));
+
+  app.post('/api/docker/projects/:dockerProjectId/operations/:action/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    optionalEmptyBody(request.body);
+    const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
+    const preview = await safeCall(() => dockerComposeOperationsService.preview({
+      projectId: project.id,
+      action: request.params.action,
+    }));
+    return response.json({ data: preview, sideEffects: false });
+  }));
+
+  app.post('/api/docker/projects/:dockerProjectId/operations/:action', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const body = exactBody(
+      request.body,
+      ['expectedPreviewDigest', 'confirmation'],
+      'Send expectedPreviewDigest and confirmation',
+    );
+    const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
+    const queued = await safeCall(() => dockerComposeOperationsService.queue({
+      projectId: project.id,
+      action: request.params.action,
+      expectedPreviewDigest: body.expectedPreviewDigest,
+      confirmation: body.confirmation,
+    }));
+    return response.status(202).json({ data: queued, sideEffects: false });
   }));
 
   app.get('/api/docker/projects/:dockerProjectId/credentials', requirePanelRouteAccess, asyncRoute(async (request, response) => {
