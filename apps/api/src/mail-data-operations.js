@@ -181,6 +181,7 @@ export function createMailDataOperationsService({
       operation: OPERATIONS.MAIL_DATA_BACKUP,
       payload: {
         mailDomainId: current.mailDomainId,
+        resourceId: current.resourceId,
         scope: current.scope,
         identity: current.identity,
         expectedResourceRevision: current.expectedRevision,
@@ -270,6 +271,7 @@ export function createMailDataOperationsService({
       operation: OPERATIONS.MAIL_DATA_RESTORE,
       payload: {
         mailDomainId: current.mailDomainId,
+        resourceId: current.resourceId,
         backupId: current.backupId,
         scope: current.scope,
         identity: current.identity,
