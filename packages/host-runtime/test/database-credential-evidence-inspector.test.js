@@ -23,9 +23,10 @@ function bundle() {
   };
 }
 
-function fixture({ present = true, marker = true, markerDigest = desired, externalGrant = false } = {}) {
+function fixture({ present = true, marker = true, markerDigest = desired, externalGrant = false, calls = [] } = {}) {
   async function runSql(file, sql) {
     assert.equal(file, '/usr/bin/mariadb');
+    calls.push(sql);
     if (sql === 'SELECT VERSION(), @@version_comment;') {
       return { stdout: '10.11.13-MariaDB\tDebian\n', stderr: '' };
     }
@@ -42,7 +43,8 @@ function fixture({ present = true, marker = true, markerDigest = desired, extern
     if (sql.includes('information_schema.USER_PRIVILEGES')
       || sql.includes('information_schema.TABLE_PRIVILEGES')
       || sql.includes('information_schema.COLUMN_PRIVILEGES')
-      || sql.includes('information_schema.ROUTINE_PRIVILEGES')) {
+      || sql.includes('information_schema.ROUTINE_PRIVILEGES')
+      || sql.includes('mysql.procs_priv')) {
       return { stdout: '0\n', stderr: '' };
     }
     throw new Error(`unexpected SQL: ${sql}`);
@@ -72,11 +74,14 @@ function fixture({ present = true, marker = true, markerDigest = desired, extern
 }
 
 test('database credential apply evidence requires exact marker and schema grants', async () => {
-  const healthy = await fixture().inspectApplied(bundle());
+  const calls = [];
+  const healthy = await fixture({ calls }).inspectApplied(bundle());
   assert.equal(healthy.applied, true);
   assert.equal(healthy.markerHealthy, true);
   assert.equal(healthy.grantsHealthy, true);
   assert.equal(healthy.sideEffects, false);
+  assert.equal(calls.some((sql) => sql.includes('mysql.procs_priv')), true);
+  assert.equal(calls.some((sql) => sql.includes('information_schema.ROUTINE_PRIVILEGES')), false);
 
   const stale = await fixture({ markerDigest: 'b'.repeat(64) }).inspectApplied(bundle());
   assert.equal(stale.applied, false);

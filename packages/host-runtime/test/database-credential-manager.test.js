@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createDatabaseCredentialManager,
+  databaseCredentialManagerInternals,
   DatabaseCredentialManagerError,
 } from '../src/database-credential-manager.js';
 
@@ -28,6 +29,17 @@ function applyBundle(overrides = {}) {
     ...overrides,
   };
 }
+
+test('routine privilege evidence uses the engine-specific catalog', () => {
+  assert.match(
+    databaseCredentialManagerInternals.routinePrivilegeSql({ engine: 'mariadb' }, applyBundle()),
+    /mysql\.procs_priv/,
+  );
+  assert.match(
+    databaseCredentialManagerInternals.routinePrivilegeSql({ engine: 'mysql' }, applyBundle()),
+    /information_schema\.ROUTINE_PRIVILEGES/,
+  );
+});
 
 function fakeRuntime({ accountExists = false, marker = null, externalSchema = null, failDesiredEvidence = false } = {}) {
   const calls = [];
@@ -62,7 +74,8 @@ function fakeRuntime({ accountExists = false, marker = null, externalSchema = nu
     if (sql.includes('information_schema.USER_PRIVILEGES')
       || sql.includes('information_schema.TABLE_PRIVILEGES')
       || sql.includes('information_schema.COLUMN_PRIVILEGES')
-      || sql.includes('information_schema.ROUTINE_PRIVILEGES')) {
+      || sql.includes('information_schema.ROUTINE_PRIVILEGES')
+      || sql.includes('mysql.procs_priv')) {
       return { stdout: '0\n', stderr: '' };
     }
     if (sql.includes('CREATE USER IF NOT EXISTS')) {
@@ -113,6 +126,8 @@ test('database credential apply creates one localhost account with only desired 
   assert.match(mutation, /REVOKE ALL PRIVILEGES, GRANT OPTION/);
   assert.match(mutation, /GRANT SELECT, INSERT, UPDATE ON `app_main`\.\*/);
   assert.equal(state.calls.every(([client]) => client === '/usr/bin/mariadb'), true);
+  assert.equal(state.calls.some(([, sql]) => sql.includes('mysql.procs_priv')), true);
+  assert.equal(state.calls.some(([, sql]) => sql.includes('information_schema.ROUTINE_PRIVILEGES')), false);
 });
 
 test('pre-existing unowned or cross-schema account is never modified', async () => {

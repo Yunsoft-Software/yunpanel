@@ -185,6 +185,14 @@ function grantsSatisfied(bundle, evidence) {
   return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
 }
 
+function routinePrivilegeSql(connection, bundle) {
+  if (connection.engine === 'mariadb') {
+    return `SELECT COUNT(*) FROM mysql.procs_priv WHERE User = ${quote(bundle.username)} AND Host = ${quote(bundle.host)} AND Proc_priv <> '';`;
+  }
+  const grantee = `'${bundle.username}'@'${bundle.host}'`;
+  return `SELECT COUNT(*) FROM information_schema.ROUTINE_PRIVILEGES WHERE GRANTEE = ${quote(grantee)};`;
+}
+
 export function createDatabaseCredentialManager({
   runSql = runSqlStdin,
   clientPaths = CLIENT_PATHS,
@@ -245,7 +253,7 @@ export function createDatabaseCredentialManager({
     const globalSql = `SELECT COUNT(*) FROM information_schema.USER_PRIVILEGES WHERE GRANTEE = ${quote(grantee)} AND PRIVILEGE_TYPE <> 'USAGE';`;
     const tableSql = `SELECT COUNT(*) FROM information_schema.TABLE_PRIVILEGES WHERE GRANTEE = ${quote(grantee)};`;
     const columnSql = `SELECT COUNT(*) FROM information_schema.COLUMN_PRIVILEGES WHERE GRANTEE = ${quote(grantee)};`;
-    const routineSql = `SELECT COUNT(*) FROM information_schema.ROUTINE_PRIVILEGES WHERE GRANTEE = ${quote(grantee)};`;
+    const routineSql = routinePrivilegeSql(connection, bundle);
     const [schema, global, table, column, routine] = await Promise.all([
       runSql(connection.client, schemaSql),
       runSql(connection.client, globalSql),
@@ -411,6 +419,7 @@ export const databaseCredentialManagerInternals = Object.freeze({
   parseGrantStatements,
   grantsSafeForManagedMutation,
   grantsSatisfied,
+  routinePrivilegeSql,
   quote,
   account,
 });

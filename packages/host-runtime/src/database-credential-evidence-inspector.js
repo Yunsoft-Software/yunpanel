@@ -88,7 +88,7 @@ export function createDatabaseCredentialEvidenceInspector({
       runSql(connection.client, `SELECT COUNT(*) FROM information_schema.USER_PRIVILEGES WHERE GRANTEE = ${quote(grantee)} AND PRIVILEGE_TYPE <> 'USAGE';`),
       runSql(connection.client, `SELECT COUNT(*) FROM information_schema.TABLE_PRIVILEGES WHERE GRANTEE = ${quote(grantee)};`),
       runSql(connection.client, `SELECT COUNT(*) FROM information_schema.COLUMN_PRIVILEGES WHERE GRANTEE = ${quote(grantee)};`),
-      runSql(connection.client, `SELECT COUNT(*) FROM information_schema.ROUTINE_PRIVILEGES WHERE GRANTEE = ${quote(grantee)};`),
+      runSql(connection.client, databaseCredentialManagerInternals.routinePrivilegeSql(connection, bundle)),
     ]);
     return Object.freeze({
       schema: Object.freeze(databaseCredentialManagerInternals.parsePrivilegeRows(results[0].stdout)),
