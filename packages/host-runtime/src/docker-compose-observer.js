@@ -168,9 +168,10 @@ export function createDockerComposeObserver({ accessFn = access, execFn = execFi
     return { executable, containers: parseContainerRows(output) };
   }
 
-  async function inspect({ projectName: requestedProjectName } = {}) {
+  async function inspect({ projectName: requestedProjectName, service: requestedService = null } = {}) {
     const name = projectName(requestedProjectName);
-    const { executable, containers } = await listContainers(name);
+    const service = serviceName(requestedService);
+    const { executable, containers } = await listContainers(name, service);
     const detailed = [];
     for (const container of containers) {
       let output;
@@ -186,6 +187,7 @@ export function createDockerComposeObserver({ accessFn = access, execFn = execFi
     return Object.freeze({
       version: 1,
       projectName: name,
+      service,
       status: aggregateStatus(detailed),
       containerCount: detailed.length,
       containers: Object.freeze(detailed),
