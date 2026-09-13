@@ -2,10 +2,17 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid, normalizeProxyHost } from '@yunpanel/shared';
+import {
+  ManagedComposeWebsiteBindingError,
+  normalizeManagedComposeWebsiteBinding,
+  resolveManagedComposeWebsiteBinding,
+} from './managed-compose-website-binding.js';
 
-const STORE_VERSION = 3;
+const STORE_VERSION = 4;
 const RUNTIME_TYPES = new Set(['static', 'node', 'docker', 'proxy']);
-const UPDATE_FIELDS = new Set(['name', 'applicationId', 'dockerWorkloadId', 'runtimeType', 'proxyTarget']);
+const UPDATE_FIELDS = new Set([
+  'name', 'applicationId', 'dockerWorkloadId', 'managedComposeBinding', 'runtimeType', 'proxyTarget',
+]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const STATIC_ROOT = '/var/www/yunpanel/apps';
@@ -134,8 +141,25 @@ function dockerBinding(workload, serverId) {
   });
 }
 
+function managedComposeBindingIdentity(binding) {
+  return `${binding.projectId}:${binding.serviceName}:${binding.targetPort}/${binding.protocol}`;
+}
+
+function rethrowManagedComposeError(error) {
+  if (error instanceof ManagedComposeWebsiteBindingError) {
+    throw new WebsiteRegistryError(error.code, error.message, error.status);
+  }
+  throw error;
+}
+
 function publicWebsite(website) {
-  return Object.freeze({ ...website, proxyTarget: website.proxyTarget ? Object.freeze({ ...website.proxyTarget }) : null });
+  return Object.freeze({
+    ...website,
+    managedComposeBinding: website.managedComposeBinding
+      ? Object.freeze({ ...website.managedComposeBinding })
+      : null,
+    proxyTarget: website.proxyTarget ? Object.freeze({ ...website.proxyTarget }) : null,
+  });
 }
 
 function validatePersistedWebsite(value, sourceVersion = STORE_VERSION) {
@@ -146,6 +170,7 @@ function validatePersistedWebsite(value, sourceVersion = STORE_VERSION) {
     allowed.add('proxyTarget');
   }
   if (sourceVersion >= 3) allowed.add('dockerWorkloadId');
+  if (sourceVersion >= 4) allowed.add('managedComposeBinding');
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('invalid website registry entry');
   const id = uuid(value.id, 'websiteId');
   const serverId = uuid(value.serverId, 'serverId');
@@ -159,22 +184,37 @@ function validatePersistedWebsite(value, sourceVersion = STORE_VERSION) {
 
   let applicationId = null;
   let dockerWorkloadId = null;
+  let managedComposeBinding = null;
   let documentRoot = null;
   let unixUser = null;
   let normalizedProxyTarget = null;
   if (runtimeType === 'proxy') {
     if (value.applicationId !== null || value.documentRoot !== null || value.unixUser !== null) throw new Error('invalid website registry entry');
     if (sourceVersion >= 3 && value.dockerWorkloadId !== null) throw new Error('invalid website registry entry');
+    if (sourceVersion >= 4 && value.managedComposeBinding !== null) throw new Error('invalid website registry entry');
     normalizedProxyTarget = sourceVersion === 1 ? null : proxyTarget(value.proxyTarget, { persisted: true });
   } else if (runtimeType === 'docker') {
     if (sourceVersion < 3 || value.applicationId !== null || value.documentRoot !== null || value.unixUser !== null) {
       throw new Error('invalid website registry entry');
     }
-    dockerWorkloadId = uuid(value.dockerWorkloadId, 'dockerWorkloadId');
-    normalizedProxyTarget = proxyTarget(value.proxyTarget, { persisted: true });
+    const hasExternalWorkload = value.dockerWorkloadId !== null;
+    const hasManagedCompose = sourceVersion >= 4 && value.managedComposeBinding !== null;
+    if (hasExternalWorkload === hasManagedCompose) throw new Error('invalid website registry entry');
+    if (hasExternalWorkload) {
+      dockerWorkloadId = uuid(value.dockerWorkloadId, 'dockerWorkloadId');
+      normalizedProxyTarget = proxyTarget(value.proxyTarget, { persisted: true });
+    } else {
+      if (value.proxyTarget !== null) throw new Error('invalid website registry entry');
+      try {
+        managedComposeBinding = normalizeManagedComposeWebsiteBinding(value.managedComposeBinding, { persisted: true });
+      } catch {
+        throw new Error('invalid website registry entry');
+      }
+    }
   } else {
     if (sourceVersion >= 2 && value.proxyTarget !== null) throw new Error('invalid website registry entry');
     if (sourceVersion >= 3 && value.dockerWorkloadId !== null) throw new Error('invalid website registry entry');
+    if (sourceVersion >= 4 && value.managedComposeBinding !== null) throw new Error('invalid website registry entry');
     applicationId = uuid(value.applicationId, 'applicationId');
     const expectedRoot = runtimeType === 'static'
       ? path.posix.join(STATIC_ROOT, applicationId, 'current')
@@ -189,6 +229,7 @@ function validatePersistedWebsite(value, sourceVersion = STORE_VERSION) {
     name: name(value.name),
     applicationId,
     dockerWorkloadId,
+    managedComposeBinding,
     runtimeType,
     documentRoot,
     unixUser,
@@ -205,13 +246,14 @@ export function createWebsiteRegistry({
   serverExists = async () => true,
   getApplication = async () => null,
   getDockerWorkload = async () => null,
+  getDockerComposeProject = async () => null,
 } = {}) {
   let state = emptyState();
   let initialized = false;
   let writeChain = Promise.resolve();
 
   if (typeof now !== 'function' || typeof serverExists !== 'function' || typeof getApplication !== 'function'
-    || typeof getDockerWorkload !== 'function') {
+    || typeof getDockerWorkload !== 'function' || typeof getDockerComposeProject !== 'function') {
     throw new WebsiteRegistryError('invalid_website_registry_dependencies', 'Website registry dependencies are invalid');
   }
 
@@ -226,6 +268,25 @@ export function createWebsiteRegistry({
       await rename(temporaryPath, filePath);
     });
     return writeChain;
+  }
+
+  async function resolveManagedComposeBinding(binding, serverId, { persisted = false } = {}) {
+    let normalized;
+    try {
+      normalized = normalizeManagedComposeWebsiteBinding(binding, { persisted });
+    } catch (error) {
+      rethrowManagedComposeError(error);
+    }
+    let project;
+    try { project = await getDockerComposeProject(normalized.projectId); }
+    catch {
+      throw new WebsiteRegistryError('website_managed_compose_reference_unavailable', 'Website Managed Compose reference could not be verified', 409);
+    }
+    try {
+      return resolveManagedComposeWebsiteBinding({ binding: normalized, serverId, project }).binding;
+    } catch (error) {
+      rethrowManagedComposeError(error);
+    }
   }
 
   async function validatePersistedReferences(websites) {
@@ -249,16 +310,26 @@ export function createWebsiteRegistry({
       }
     }
     for (const website of websites) {
-      if (!website.dockerWorkloadId) continue;
-      let workload;
-      try { workload = await getDockerWorkload(website.dockerWorkloadId); }
-      catch { throw new WebsiteRegistryError('website_docker_reference_unavailable', 'Website Docker workload reference could not be verified', 409); }
-      if (!workload) throw new WebsiteRegistryError('website_docker_reference_missing', 'Persisted Website Docker workload does not exist', 409);
-      const binding = dockerBinding(workload, website.serverId);
-      if (binding.dockerWorkloadId !== website.dockerWorkloadId
-        || binding.runtimeType !== website.runtimeType
-        || JSON.stringify(binding.proxyTarget) !== JSON.stringify(website.proxyTarget)) {
-        throw new WebsiteRegistryError('website_docker_binding_drift', 'Persisted Website Docker binding no longer matches managed state', 409);
+      if (website.dockerWorkloadId) {
+        let workload;
+        try { workload = await getDockerWorkload(website.dockerWorkloadId); }
+        catch { throw new WebsiteRegistryError('website_docker_reference_unavailable', 'Website Docker workload reference could not be verified', 409); }
+        if (!workload) throw new WebsiteRegistryError('website_docker_reference_missing', 'Persisted Website Docker workload does not exist', 409);
+        const binding = dockerBinding(workload, website.serverId);
+        if (binding.dockerWorkloadId !== website.dockerWorkloadId
+          || binding.runtimeType !== website.runtimeType
+          || JSON.stringify(binding.proxyTarget) !== JSON.stringify(website.proxyTarget)) {
+          throw new WebsiteRegistryError('website_docker_binding_drift', 'Persisted Website Docker binding no longer matches managed state', 409);
+        }
+      }
+      if (website.managedComposeBinding) {
+        const binding = await resolveManagedComposeBinding(website.managedComposeBinding, website.serverId, { persisted: true });
+        if (website.runtimeType !== 'docker'
+          || website.dockerWorkloadId !== null
+          || website.proxyTarget !== null
+          || managedComposeBindingIdentity(binding) !== managedComposeBindingIdentity(website.managedComposeBinding)) {
+          throw new WebsiteRegistryError('website_managed_compose_binding_drift', 'Persisted Website Managed Compose binding no longer matches managed state', 409);
+        }
       }
     }
   }
@@ -268,12 +339,13 @@ export function createWebsiteRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, 2, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.websites)) throw new Error('unsupported or invalid website registry state');
+        if (![1, 2, 3, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.websites)) throw new Error('unsupported or invalid website registry state');
         const sourceVersion = parsed.version;
         const websites = parsed.websites.map((website) => validatePersistedWebsite(website, sourceVersion));
         const ids = new Set();
         const applications = new Set();
         const dockerWorkloads = new Set();
+        const managedComposeBindings = new Set();
         for (const website of websites) {
           if (ids.has(website.id)) throw new Error('duplicate website registry identity');
           ids.add(website.id);
@@ -284,6 +356,11 @@ export function createWebsiteRegistry({
           if (website.dockerWorkloadId) {
             if (dockerWorkloads.has(website.dockerWorkloadId)) throw new Error('Docker workload bound to multiple websites');
             dockerWorkloads.add(website.dockerWorkloadId);
+          }
+          if (website.managedComposeBinding) {
+            const identity = managedComposeBindingIdentity(website.managedComposeBinding);
+            if (managedComposeBindings.has(identity)) throw new Error('Managed Compose binding used by multiple websites');
+            managedComposeBindings.add(identity);
           }
         }
         await validatePersistedReferences(websites);
@@ -331,6 +408,7 @@ export function createWebsiteRegistry({
         && existingById.name === normalizedName
         && existingById.applicationId === binding.applicationId
         && existingById.dockerWorkloadId === null
+        && existingById.managedComposeBinding === null
         && existingById.runtimeType === binding.runtimeType
         && existingById.documentRoot === binding.documentRoot
         && existingById.unixUser === binding.unixUser
@@ -350,6 +428,7 @@ export function createWebsiteRegistry({
       name: normalizedName,
       ...binding,
       dockerWorkloadId: null,
+      managedComposeBinding: null,
       proxyTarget: null,
       revision: 1,
       createdAt: timestamp,
@@ -366,12 +445,67 @@ export function createWebsiteRegistry({
     name: displayName,
     applicationId = null,
     dockerWorkloadId = null,
+    managedComposeBinding = null,
     runtimeType = null,
     proxyTarget: requestedProxyTarget = null,
   } = {}) {
     await ensureInitialized();
-    if (applicationId !== null && dockerWorkloadId !== null) {
-      throw new WebsiteRegistryError('website_binding_conflict', 'Website cannot bind both an Application and a Docker workload');
+    const bindingCount = [applicationId, dockerWorkloadId, managedComposeBinding].filter((value) => value !== null).length;
+    if (bindingCount > 1) {
+      throw new WebsiteRegistryError('website_binding_conflict', 'Website can bind only one Application, external Docker workload or Managed Compose service');
+    }
+    if (managedComposeBinding !== null) {
+      if (runtimeType !== 'docker') {
+        throw new WebsiteRegistryError('website_managed_compose_binding_invalid', 'Managed Compose Website requires runtimeType docker');
+      }
+      if (requestedProxyTarget !== null) {
+        throw new WebsiteRegistryError('website_proxy_target_not_applicable', 'Managed Compose Website proxy target is derived from current published port state');
+      }
+      const normalizedServerId = await requireServer(serverId);
+      const binding = await resolveManagedComposeBinding(managedComposeBinding, normalizedServerId);
+      const normalizedWebsiteId = websiteId == null ? randomUUID() : uuid(websiteId, 'websiteId');
+      const normalizedName = name(displayName);
+      const identity = managedComposeBindingIdentity(binding);
+      const existing = state.websites.find((candidate) => candidate.id === normalizedWebsiteId) ?? null;
+      if (existing) {
+        const exact = websiteId !== null
+          && existing.serverId === normalizedServerId
+          && existing.name === normalizedName
+          && existing.applicationId === null
+          && existing.dockerWorkloadId === null
+          && existing.managedComposeBinding !== null
+          && managedComposeBindingIdentity(existing.managedComposeBinding) === identity
+          && existing.runtimeType === 'docker'
+          && existing.documentRoot === null
+          && existing.unixUser === null
+          && existing.proxyTarget === null
+          && existing.revision === 1;
+        if (!exact) throw new WebsiteRegistryError('website_identity_conflict', 'Website identity conflicts with existing state', 409);
+        return publicWebsite(existing);
+      }
+      if (state.websites.some((website) => website.managedComposeBinding
+        && managedComposeBindingIdentity(website.managedComposeBinding) === identity)) {
+        throw new WebsiteRegistryError('managed_compose_binding_already_bound', 'Managed Compose service port is already bound to a Website', 409);
+      }
+      const timestamp = new Date(now()).toISOString();
+      const website = {
+        id: normalizedWebsiteId,
+        serverId: normalizedServerId,
+        name: normalizedName,
+        applicationId: null,
+        dockerWorkloadId: null,
+        managedComposeBinding: binding,
+        runtimeType: 'docker',
+        documentRoot: null,
+        unixUser: null,
+        proxyTarget: null,
+        revision: 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      state.websites.push(website);
+      await persist();
+      return publicWebsite(website);
     }
     if (dockerWorkloadId !== null) {
       if (applicationId !== null || runtimeType !== 'docker') {
@@ -390,7 +524,8 @@ export function createWebsiteRegistry({
       if (existing) {
         const exact = websiteId !== null && existing.serverId === normalizedServerId
           && existing.name === normalizedName && existing.applicationId === null
-          && existing.dockerWorkloadId === binding.dockerWorkloadId && existing.runtimeType === 'docker'
+          && existing.dockerWorkloadId === binding.dockerWorkloadId && existing.managedComposeBinding === null
+          && existing.runtimeType === 'docker'
           && existing.documentRoot === null && existing.unixUser === null
           && JSON.stringify(existing.proxyTarget) === JSON.stringify(binding.proxyTarget) && existing.revision === 1;
         if (!exact) throw new WebsiteRegistryError('website_identity_conflict', 'Website identity conflicts with existing state', 409);
@@ -406,6 +541,7 @@ export function createWebsiteRegistry({
         name: normalizedName,
         applicationId: null,
         dockerWorkloadId: binding.dockerWorkloadId,
+        managedComposeBinding: null,
         runtimeType: 'docker',
         documentRoot: null,
         unixUser: null,
@@ -420,7 +556,7 @@ export function createWebsiteRegistry({
     }
     if (applicationId == null) {
       const normalizedServerId = await requireServer(serverId);
-      if (runtimeType !== 'proxy') throw new WebsiteRegistryError('website_application_required', 'Static and Node Websites require an Application; Docker Websites require a workload');
+      if (runtimeType !== 'proxy') throw new WebsiteRegistryError('website_application_required', 'Static and Node Websites require an Application; Docker Websites require a workload or Managed Compose binding');
       const timestamp = new Date(now()).toISOString();
       const normalizedWebsiteId = websiteId == null ? randomUUID() : uuid(websiteId, 'websiteId');
       const website = {
@@ -429,6 +565,7 @@ export function createWebsiteRegistry({
         name: name(displayName),
         applicationId: null,
         dockerWorkloadId: null,
+        managedComposeBinding: null,
         runtimeType: 'proxy',
         documentRoot: null,
         unixUser: null,
@@ -444,6 +581,7 @@ export function createWebsiteRegistry({
           && existing.name === website.name
           && existing.applicationId === null
           && existing.dockerWorkloadId === null
+          && existing.managedComposeBinding === null
           && existing.runtimeType === 'proxy'
           && existing.documentRoot === null
           && existing.unixUser === null
@@ -472,7 +610,7 @@ export function createWebsiteRegistry({
   function assertUpdateChanges(changes) {
     if (!changes || typeof changes !== 'object' || Array.isArray(changes)
       || Object.keys(changes).length === 0 || Object.keys(changes).some((key) => !UPDATE_FIELDS.has(key))) {
-      throw new WebsiteRegistryError('invalid_website_update', 'Website changes must contain only name, applicationId, dockerWorkloadId, runtimeType or proxyTarget');
+      throw new WebsiteRegistryError('invalid_website_update', 'Website changes must contain only name, applicationId, dockerWorkloadId, managedComposeBinding, runtimeType or proxyTarget');
     }
     return changes;
   }
@@ -483,12 +621,14 @@ export function createWebsiteRegistry({
     const changes = assertUpdateChanges(requestedChanges);
     const hasApplicationId = Object.hasOwn(changes, 'applicationId');
     const hasDockerWorkloadId = Object.hasOwn(changes, 'dockerWorkloadId');
+    const hasManagedComposeBinding = Object.hasOwn(changes, 'managedComposeBinding');
     const hasRuntimeType = Object.hasOwn(changes, 'runtimeType');
-    const bindingRequested = hasApplicationId || hasDockerWorkloadId || hasRuntimeType;
+    const bindingRequested = hasApplicationId || hasDockerWorkloadId || hasManagedComposeBinding || hasRuntimeType;
     const next = {
       name: Object.hasOwn(changes, 'name') ? name(changes.name) : website.name,
       applicationId: website.applicationId,
       dockerWorkloadId: website.dockerWorkloadId,
+      managedComposeBinding: website.managedComposeBinding ? { ...website.managedComposeBinding } : null,
       runtimeType: website.runtimeType,
       documentRoot: website.documentRoot,
       unixUser: website.unixUser,
@@ -499,13 +639,19 @@ export function createWebsiteRegistry({
     if (hasDockerWorkloadId) next.dockerWorkloadId = changes.dockerWorkloadId == null
       ? null
       : uuid(changes.dockerWorkloadId, 'dockerWorkloadId');
+    if (hasManagedComposeBinding) {
+      if (changes.managedComposeBinding === null) next.managedComposeBinding = null;
+      else {
+        try { next.managedComposeBinding = { ...normalizeManagedComposeWebsiteBinding(changes.managedComposeBinding) }; }
+        catch (error) { rethrowManagedComposeError(error); }
+      }
+    }
     if (hasRuntimeType) {
       if (!RUNTIME_TYPES.has(changes.runtimeType)) throw new WebsiteRegistryError('invalid_website_runtime', 'Website runtimeType must be static, node, docker or proxy');
       next.runtimeType = changes.runtimeType;
-    } else if (hasApplicationId) {
-      next.runtimeType = next.applicationId === null ? 'proxy' : next.runtimeType;
-    } else if (hasDockerWorkloadId) {
-      next.runtimeType = next.dockerWorkloadId === null ? 'proxy' : 'docker';
+    } else if (bindingRequested) {
+      if (next.dockerWorkloadId !== null || next.managedComposeBinding !== null) next.runtimeType = 'docker';
+      else if (next.applicationId === null) next.runtimeType = 'proxy';
     }
 
     if (bindingRequested) {
@@ -516,6 +662,9 @@ export function createWebsiteRegistry({
         if (next.dockerWorkloadId !== null) {
           throw new WebsiteRegistryError('website_proxy_docker_conflict', 'Switching to proxy requires dockerWorkloadId to be explicitly null');
         }
+        if (next.managedComposeBinding !== null) {
+          throw new WebsiteRegistryError('website_proxy_managed_compose_conflict', 'Switching to proxy requires managedComposeBinding to be explicitly null');
+        }
         next.documentRoot = null;
         next.unixUser = null;
         if (website.runtimeType !== 'proxy') next.proxyTarget = null;
@@ -523,18 +672,47 @@ export function createWebsiteRegistry({
         if (next.applicationId !== null) {
           throw new WebsiteRegistryError('website_docker_application_conflict', 'Switching to Docker requires applicationId to be explicitly null');
         }
-        if (next.dockerWorkloadId === null) {
-          throw new WebsiteRegistryError('website_docker_workload_required', 'Docker Website requires a workload binding');
+        const dockerBindingCount = [next.dockerWorkloadId, next.managedComposeBinding].filter((value) => value !== null).length;
+        if (dockerBindingCount !== 1) {
+          throw new WebsiteRegistryError('website_docker_binding_required', 'Docker Website requires exactly one external workload or Managed Compose binding');
         }
-        const workload = await getDockerWorkload(next.dockerWorkloadId);
-        const binding = dockerBinding(workload, website.serverId);
-        const conflict = state.websites.find((candidate) => candidate.id !== website.id
-          && candidate.dockerWorkloadId === binding.dockerWorkloadId);
-        if (conflict) throw new WebsiteRegistryError('docker_workload_already_bound', 'Docker workload is already bound to a Website', 409);
-        Object.assign(next, binding, { applicationId: null, documentRoot: null, unixUser: null });
+        if (next.dockerWorkloadId !== null) {
+          const workload = await getDockerWorkload(next.dockerWorkloadId);
+          const binding = dockerBinding(workload, website.serverId);
+          const conflict = state.websites.find((candidate) => candidate.id !== website.id
+            && candidate.dockerWorkloadId === binding.dockerWorkloadId);
+          if (conflict) throw new WebsiteRegistryError('docker_workload_already_bound', 'Docker workload is already bound to a Website', 409);
+          Object.assign(next, binding, {
+            applicationId: null,
+            managedComposeBinding: null,
+            documentRoot: null,
+            unixUser: null,
+          });
+        } else {
+          const binding = await resolveManagedComposeBinding(next.managedComposeBinding, website.serverId);
+          const identity = managedComposeBindingIdentity(binding);
+          const conflict = state.websites.find((candidate) => candidate.id !== website.id
+            && candidate.managedComposeBinding
+            && managedComposeBindingIdentity(candidate.managedComposeBinding) === identity);
+          if (conflict) {
+            throw new WebsiteRegistryError('managed_compose_binding_already_bound', 'Managed Compose service port is already bound to a Website', 409);
+          }
+          Object.assign(next, {
+            applicationId: null,
+            dockerWorkloadId: null,
+            managedComposeBinding: { ...binding },
+            runtimeType: 'docker',
+            documentRoot: null,
+            unixUser: null,
+            proxyTarget: null,
+          });
+        }
       } else {
         if (next.dockerWorkloadId !== null) {
           throw new WebsiteRegistryError('website_application_docker_conflict', 'Switching to an Application requires dockerWorkloadId to be explicitly null');
+        }
+        if (next.managedComposeBinding !== null) {
+          throw new WebsiteRegistryError('website_application_managed_compose_conflict', 'Switching to an Application requires managedComposeBinding to be explicitly null');
         }
         if (next.applicationId === null) throw new WebsiteRegistryError('website_application_required', 'Static and Node websites require an application binding');
         const application = await getApplication(next.applicationId);
@@ -544,7 +722,7 @@ export function createWebsiteRegistry({
         }
         const conflict = state.websites.find((candidate) => candidate.id !== website.id && candidate.applicationId === binding.applicationId);
         if (conflict) throw new WebsiteRegistryError('application_already_bound', 'Application is already bound to a Website', 409);
-        Object.assign(next, binding, { dockerWorkloadId: null, proxyTarget: null });
+        Object.assign(next, binding, { dockerWorkloadId: null, managedComposeBinding: null, proxyTarget: null });
       }
     }
 
@@ -558,6 +736,7 @@ export function createWebsiteRegistry({
     const nameChanged = next.name !== website.name;
     const bindingChanged = next.applicationId !== website.applicationId
       || next.dockerWorkloadId !== website.dockerWorkloadId
+      || JSON.stringify(next.managedComposeBinding) !== JSON.stringify(website.managedComposeBinding)
       || next.runtimeType !== website.runtimeType
       || next.documentRoot !== website.documentRoot
       || next.unixUser !== website.unixUser;
@@ -570,7 +749,10 @@ export function createWebsiteRegistry({
       version: 1,
       websiteId: website.id,
       currentRevision: website.revision,
-      nextWebsite: Object.freeze(next),
+      nextWebsite: Object.freeze({
+        ...next,
+        managedComposeBinding: next.managedComposeBinding ? Object.freeze({ ...next.managedComposeBinding }) : null,
+      }),
       impact: Object.freeze({ nameChanged, bindingChanged, proxyTargetChanged }),
     };
     return Object.freeze({ ...plan, fingerprint: websiteUpdateFingerprint(plan) });
@@ -633,6 +815,7 @@ export function createWebsiteRegistry({
       && website.name === normalizedName
       && website.applicationId === normalizedApplicationId
       && website.dockerWorkloadId === null
+      && website.managedComposeBinding === null
       && website.runtimeType === binding.runtimeType
       && website.documentRoot === binding.documentRoot
       && website.unixUser === binding.unixUser
@@ -680,6 +863,7 @@ export const websiteRegistryInternals = Object.freeze({
   migrationWebsiteId,
   applicationBinding,
   dockerBinding,
+  managedComposeBindingIdentity,
   proxyHost,
   proxyTarget,
   websiteUpdateFingerprint,
