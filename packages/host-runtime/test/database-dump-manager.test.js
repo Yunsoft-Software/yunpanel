@@ -106,10 +106,12 @@ test('checksum, size and permissions are revalidated before materialization', as
   );
 });
 
-test('default dump arguments stay socket-only and credential-free', () => {
+test('default dump arguments stay canonical, socket-only and credential-free', () => {
   const args = databaseDumpManagerInternals.dumpArgs('app_main');
   assert.ok(args.includes('--protocol=socket'));
   assert.ok(args.includes('--single-transaction'));
+  assert.ok(args.includes('--skip-dump-date'));
+  assert.ok(args.includes('--order-by-primary'));
   assert.deepEqual(args.slice(-2), ['--databases', 'app_main']);
   assert.equal(args.some((value) => /password|user=|host=|socket=/i.test(value)), false);
   assert.deepEqual(databaseDumpManagerInternals.dumpPrograms, ['/usr/bin/mariadb-dump', '/usr/bin/mysqldump']);
