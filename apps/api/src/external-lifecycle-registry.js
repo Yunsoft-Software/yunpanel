@@ -60,7 +60,7 @@ function canonicalName(value, prefix) {
 function errorCode(value, status, prefix) {
   if (status === 'degraded') {
     if (typeof value !== 'string' || !ERROR_CODE_PATTERN.test(value)) {
-      throw new ExternalLifecycleRegistryError(`${prefix}_state_invalid`, 'Degraded status requires a bounded authored error code');
+      throw new ExternalLifecycleRegistryError(`invalid_${prefix}_error_code`, 'Degraded status requires a bounded authored error code');
     }
     return value;
   }
