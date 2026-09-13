@@ -6,6 +6,7 @@ import { createDockerComposeMaterializer } from './docker-compose-materializer.j
 import { createDockerComposeOperationReceiptStore } from './docker-compose-operation-receipt.js';
 import { createDockerComposeOperationsService } from './docker-compose-operations.js';
 import { createDockerComposeProjectRegistry } from './docker-compose-project-registry.js';
+import { createDockerComposeRecoveryService } from './docker-compose-recovery.js';
 import { createDockerRegistryCredentialRegistry } from './docker-registry-credential-registry.js';
 import { createLocalDockerComposeOperation } from './local-docker-compose-operation.js';
 
@@ -62,6 +63,9 @@ export async function createDockerComposeRuntime({
   if (!env || typeof env !== 'object' || Array.isArray(env)
     || !serverRegistry || typeof serverRegistry.getServer !== 'function'
     || !jobRegistry || typeof jobRegistry.enqueue !== 'function' || typeof jobRegistry.listJobs !== 'function'
+    || typeof jobRegistry.recovery !== 'function' || typeof jobRegistry.getJob !== 'function'
+    || typeof jobRegistry.complete !== 'function' || typeof jobRegistry.beginReconciliation !== 'function'
+    || typeof jobRegistry.acknowledgeReconciliation !== 'function'
     || typeof validateDockerCompose !== 'function'
     || !receiptStore || typeof receiptStore.read !== 'function' || typeof receiptStore.write !== 'function') {
     throw new DockerComposeRuntimeError(
@@ -106,6 +110,12 @@ export async function createDockerComposeRuntime({
     validateDockerCompose,
   });
   const localOperation = createLocalDockerComposeOperation({ materialize, receiptStore });
+  const recoveryService = createDockerComposeRecoveryService({
+    jobRegistry,
+    receiptStore,
+    reconcileCompletedJob: async () => ({ reconciled: true, error: null }),
+  });
+  const recovery = await recoveryService.recover();
 
   return Object.freeze({
     paths,
@@ -117,6 +127,8 @@ export async function createDockerComposeRuntime({
     materialize,
     receiptStore,
     localOperation,
+    recoveryService,
+    recovery,
     extendLocalOperations(baseOperations) {
       return extendLocalOperations(baseOperations, localOperation);
     },
