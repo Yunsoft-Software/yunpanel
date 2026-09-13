@@ -1,5 +1,6 @@
 import { OPERATIONS } from '@yunpanel/protocol';
 import { JobRegistryError } from './job-registry.js';
+import { mountDatabaseRestoreRoutes } from './database-restore-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { RegistryError } from './server-registry.js';
 
@@ -179,6 +180,10 @@ export function mountDatabaseRoutes(app, { registry, jobRegistry, databaseBindin
     });
     return response.status(202).json({ data: job });
   }));
+
+  if (typeof jobRegistry.getJob === 'function') {
+    mountDatabaseRestoreRoutes(app, { registry, jobRegistry });
+  }
 
   app.delete('/api/servers/:serverId/databases/:name', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const server = await requireServer(registry, request.params.serverId);
