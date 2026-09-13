@@ -56,6 +56,11 @@ export {
   mailDataRestoreInternals,
 } from './mail-data-restore-manager.js';
 export {
+  createMailDataDeleteManager,
+  MailDataDeleteError,
+  mailDataDeleteInternals,
+} from './mail-data-delete-manager.js';
+export {
   createMailDiagnosticsInspector,
   MailDiagnosticsInspectorError,
   mailDiagnosticsInspectorInternals,
