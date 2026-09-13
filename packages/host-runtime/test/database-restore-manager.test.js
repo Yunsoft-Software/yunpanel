@@ -14,6 +14,12 @@ const selectedContent = 'selected canonical dump\n';
 const rollbackContent = 'pre-restore canonical dump\n';
 const selectedSha = digest(selectedContent);
 const rollbackSha = digest(rollbackContent);
+const request = Object.freeze({
+  transactionId: 'restore-0001',
+  backupId: 'backup-0001',
+  databaseName: 'app_main',
+  expectedBackupSha256: selectedSha,
+});
 
 async function fixture(t, { failSelected = false, corruptSelected = false, failRollback = false } = {}) {
   const transactionRoot = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-db-restore-'));
@@ -111,11 +117,7 @@ async function fixture(t, { failSelected = false, corruptSelected = false, failR
 
 test('restore takes a pre-restore backup, replaces the schema and verifies canonical dump digest', async (t) => {
   const fx = await fixture(t);
-  const result = await fx.manager.restore({
-    transactionId: 'restore-0001',
-    backupId: 'backup-0001',
-    databaseName: 'app_main',
-  });
+  const result = await fx.manager.restore(request);
   assert.deepEqual(result, {
     version: 1,
     transactionId: 'restore-0001',
@@ -135,10 +137,19 @@ test('restore takes a pre-restore backup, replaces the schema and verifies canon
   assert.ok(fx.calls.some(([name, value]) => name === 'restore' && value === '/private/backup-0001/dump.sql'));
 });
 
+test('stale selected backup digest fails before target inspection, pre-backup or mutation', async (t) => {
+  const fx = await fixture(t);
+  await assert.rejects(
+    fx.manager.restore({ ...request, expectedBackupSha256: 'c'.repeat(64) }),
+    (error) => error instanceof DatabaseRestoreError && error.code === 'database_restore_backup_stale',
+  );
+  assert.deepEqual(fx.calls, [['materialize', 'backup-0001']]);
+});
+
 test('restore failure replays and verifies the pre-restore backup before surfacing failure', async (t) => {
   const fx = await fixture(t, { failSelected: true });
   await assert.rejects(
-    fx.manager.restore({ transactionId: 'restore-0001', backupId: 'backup-0001', databaseName: 'app_main' }),
+    fx.manager.restore(request),
     (error) => error instanceof DatabaseRestoreError && error.code === 'database_restore_failed',
   );
   assert.equal(fx.state().databasePresent, true);
@@ -150,7 +161,7 @@ test('restore failure replays and verifies the pre-restore backup before surfaci
 test('digest mismatch triggers rollback and preserves the verification failure code', async (t) => {
   const fx = await fixture(t, { corruptSelected: true });
   await assert.rejects(
-    fx.manager.restore({ transactionId: 'restore-0001', backupId: 'backup-0001', databaseName: 'app_main' }),
+    fx.manager.restore(request),
     (error) => error instanceof DatabaseRestoreError && error.code === 'database_restore_verification_failed',
   );
   assert.equal(fx.state().liveContent, rollbackContent);
@@ -160,7 +171,7 @@ test('digest mismatch triggers rollback and preserves the verification failure c
 test('rollback failure is explicit and never reports a restored database', async (t) => {
   const fx = await fixture(t, { failSelected: true, failRollback: true });
   await assert.rejects(
-    fx.manager.restore({ transactionId: 'restore-0001', backupId: 'backup-0001', databaseName: 'app_main' }),
+    fx.manager.restore(request),
     (error) => error instanceof DatabaseRestoreError && error.code === 'database_restore_rollback_failed',
   );
 });
