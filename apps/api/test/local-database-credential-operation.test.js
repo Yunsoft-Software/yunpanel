@@ -6,6 +6,7 @@ import {
   LocalDatabaseCredentialOperationError,
 } from '../src/local-database-credential-operation.js';
 
+const serverId = '42345678-1234-4234-8234-123456789012';
 const credentialId = '12345678-1234-4234-8234-123456789012';
 const bindingId = '22345678-1234-4234-8234-123456789012';
 const jobId = '32345678-1234-4234-8234-123456789012';
@@ -37,10 +38,43 @@ function bundle({ privateValue = true } = {}) {
   };
 }
 
-const execution = Object.freeze({ jobId, resourceType: 'database', resourceId: 'app_main' });
+const execution = Object.freeze({ serverId, jobId, resourceType: 'database', resourceId: 'app_main' });
 
-test('local apply materializes privately and returns only manager evidence', async () => {
+function applyResult() {
+  return {
+    version: 1,
+    databaseCredentialId: credentialId,
+    databaseBindingId: bindingId,
+    credentialRevision: 3,
+    bindingRevision: 1,
+    databaseName: 'app_main',
+    username: 'ydb_0123456789abcdef01234567',
+    host: 'localhost',
+    desiredStateSha256: digest,
+    applied: true,
+    sideEffects: true,
+  };
+}
+
+function deleteResult() {
+  return {
+    version: 1,
+    databaseCredentialId: credentialId,
+    databaseBindingId: bindingId,
+    credentialRevision: 3,
+    bindingRevision: 1,
+    databaseName: 'app_main',
+    username: 'ydb_0123456789abcdef01234567',
+    host: 'localhost',
+    desiredStateSha256: digest,
+    deleted: true,
+    sideEffects: true,
+  };
+}
+
+test('local apply materializes privately and records secret-free recovery evidence', async () => {
   const calls = [];
+  const receipts = [];
   const operation = createLocalDatabaseCredentialOperation({
     materializer: {
       async materialize(input, name) {
@@ -51,55 +85,54 @@ test('local apply materializes privately and returns only manager evidence', asy
     manager: {
       async applyCredential(input) {
         calls.push(['apply', input]);
-        return {
-          version: 1,
-          databaseCredentialId: credentialId,
-          databaseBindingId: bindingId,
-          credentialRevision: 3,
-          bindingRevision: 1,
-          databaseName: 'app_main',
-          username: 'ydb_0123456789abcdef01234567',
-          host: 'localhost',
-          desiredStateSha256: digest,
-          applied: true,
-          sideEffects: true,
-        };
+        return applyResult();
       },
       async deleteCredential() { throw new Error('not used'); },
+    },
+    receiptStore: {
+      async write(input) {
+        calls.push(['receipt', input]);
+        receipts.push(structuredClone(input));
+      },
     },
   });
   const result = await operation.execute(OPERATIONS.DATABASE_CREDENTIAL_APPLY, payload(), execution);
   assert.equal(result.applied, true);
   assert.equal(Object.hasOwn(result, 'password'), false);
-  assert.equal(calls[0][0], 'materialize');
-  assert.equal(calls[1][0], 'apply');
+  assert.deepEqual(calls.map(([name]) => name), ['materialize', 'apply', 'receipt']);
   assert.equal(Object.hasOwn(calls[1][1], 'password'), true);
+  assert.equal(receipts[0].serverId, serverId);
+  assert.equal(receipts[0].jobId, jobId);
+  assert.equal(receipts[0].operation, OPERATIONS.DATABASE_CREDENTIAL_APPLY);
+  assert.equal(Object.hasOwn(receipts[0].result, 'password'), false);
 });
 
-test('local delete does not require private password material', async () => {
+test('local delete does not require private password material and records delete receipt', async () => {
+  const receipts = [];
   const operation = createLocalDatabaseCredentialOperation({
     materializer: { async materialize() { return bundle({ privateValue: false }); } },
     manager: {
       async applyCredential() { throw new Error('not used'); },
-      async deleteCredential() {
-        return {
-          version: 1,
-          databaseCredentialId: credentialId,
-          databaseBindingId: bindingId,
-          credentialRevision: 3,
-          bindingRevision: 1,
-          databaseName: 'app_main',
-          username: 'ydb_0123456789abcdef01234567',
-          host: 'localhost',
-          desiredStateSha256: digest,
-          deleted: true,
-          sideEffects: true,
-        };
-      },
+      async deleteCredential() { return deleteResult(); },
     },
+    receiptStore: { async write(input) { receipts.push(structuredClone(input)); } },
   });
   const result = await operation.execute(OPERATIONS.DATABASE_CREDENTIAL_DELETE, payload(), execution);
   assert.equal(result.deleted, true);
+  assert.equal(receipts[0].operation, OPERATIONS.DATABASE_CREDENTIAL_DELETE);
+});
+
+test('receipt failure never recasts a completed host mutation as failed', async () => {
+  const operation = createLocalDatabaseCredentialOperation({
+    materializer: { async materialize() { return bundle(); } },
+    manager: {
+      async applyCredential() { return applyResult(); },
+      async deleteCredential() { throw new Error('not used'); },
+    },
+    receiptStore: { async write() { throw new Error('disk full'); } },
+  });
+  const result = await operation.execute(OPERATIONS.DATABASE_CREDENTIAL_APPLY, payload(), execution);
+  assert.equal(result.applied, true);
 });
 
 test('execution resource mismatch fails before host manager mutation', async () => {
@@ -113,6 +146,7 @@ test('execution resource mismatch fails before host manager mutation', async () 
   });
   await assert.rejects(
     operation.execute(OPERATIONS.DATABASE_CREDENTIAL_APPLY, payload(), {
+      serverId,
       jobId,
       resourceType: 'database',
       resourceId: 'other_db',
