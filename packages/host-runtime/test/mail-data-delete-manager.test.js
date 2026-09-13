@@ -33,7 +33,9 @@ function mappedFs(sourceRoot) {
   const mapPath = (value) => {
     if (value === CANONICAL_SOURCE) return sourceRoot;
     if (value.startsWith(`${CANONICAL_SOURCE}/`)) return path.join(sourceRoot, value.slice(CANONICAL_SOURCE.length + 1));
-    if (value.startsWith(`${canonicalParent}/.`)) return path.join(localParent, path.basename(value));
+    if (value.startsWith(`${canonicalParent}/.`)) {
+      return path.join(localParent, value.slice(canonicalParent.length + 1));
+    }
     return value;
   };
   return {

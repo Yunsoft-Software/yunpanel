@@ -39,6 +39,7 @@ function fixture() {
   for (const compiledPath of mailConfigBackupInternals.postfixCompiledPaths) {
     files.set(compiledPath, Buffer.from('compiled-map'));
   }
+  files.set(mailConfigBackupInternals.postfixMainCfPath, Buffer.from('# no managed SRS overrides\n'));
   files.set(mailConfigBackupInternals.sieveCompiledPath, Buffer.from('compiled-sieve'));
   return { preview, files };
 }

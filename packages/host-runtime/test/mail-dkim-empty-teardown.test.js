@@ -51,6 +51,7 @@ function mappedFs(root) {
     },
     mkdirFn: (value, options) => mkdir(mapPath(value), options),
     readFileFn: (value, options) => readFile(mapPath(value), options),
+    readdirFn: (value, options) => readdir(mapPath(value), options),
     renameFn: (from, to) => rename(mapPath(from), mapPath(to)),
     rmFn: (value, options) => rm(mapPath(value), options),
     rmdirFn: (value) => rmdir(mapPath(value)),

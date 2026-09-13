@@ -24,8 +24,10 @@ import {
 const CANONICAL_ROOT = '/var/lib/yunpanel';
 const CANONICAL_TARGET = '/var/lib/yunpanel/mail/example.com/owner';
 const SNAPSHOT = 'a'.repeat(64);
-const UID = 5000;
-const GID = 5000;
+const CURRENT_UID = process.getuid?.() ?? 5000;
+const CURRENT_GID = process.getgid?.() ?? 5000;
+const UID = CURRENT_UID === 0 ? 5000 : CURRENT_UID;
+const GID = CURRENT_GID === 0 ? 5000 : CURRENT_GID;
 
 function compareNames(left, right) {
   return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;

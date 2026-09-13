@@ -70,7 +70,7 @@ test('stages the empty managed mail set with protected passwd, sender-login and 
   const sieveArtifact = manifest.artifacts.find((artifact) => artifact.targetPath === mailForwardingTemplatePolicy.sievePath);
   const sievePath = path.join(stageDirectory, sieveArtifact.stagedName);
   assert.equal((await stat(sievePath)).mode & 0o777, 0o640);
-  assert.equal(await readFile(sievePath, 'utf8'), 'require ["envelope", "copy"];\n\n\n');
+  assert.equal(await readFile(sievePath, 'utf8'), 'require ["envelope", "copy"];\n\n');
 
   const mailArtifact = manifest.artifacts.find((artifact) => artifact.targetPath === mailTemplatePolicy.dovecotMailConfigPath);
   const mailConfig = await readFile(path.join(stageDirectory, mailArtifact.stagedName), 'utf8');

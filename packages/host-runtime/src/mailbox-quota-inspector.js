@@ -46,17 +46,22 @@ export function parseDoveadmQuotaTab(value, mailboxAddress) {
     throw new MailboxQuotaInspectorError('mailbox_quota_usage_invalid', 'Dovecot mailbox quota usage output is incomplete');
   }
   const headers = lines[0].split('\t').map((entry) => entry.trim().toLowerCase());
+  const quotaNameIndex = headers.indexOf('quota name');
   const typeIndex = headers.indexOf('type');
   const valueIndex = headers.indexOf('value');
   const limitIndex = headers.indexOf('limit');
   const percentIndex = headers.includes('%') ? headers.indexOf('%') : headers.indexOf('percent');
-  if ([typeIndex, valueIndex, limitIndex, percentIndex].some((index) => index < 0)) {
+  if ([quotaNameIndex, typeIndex, valueIndex, limitIndex, percentIndex].some((index) => index < 0)
+    || new Set(headers).size !== headers.length) {
     throw new MailboxQuotaInspectorError('mailbox_quota_usage_invalid', 'Dovecot mailbox quota usage columns are invalid');
   }
 
   let storage = null;
   for (const line of lines.slice(1)) {
     const columns = line.split('\t');
+    if (columns.length !== headers.length || !(columns[quotaNameIndex] ?? '').trim()) {
+      throw new MailboxQuotaInspectorError('mailbox_quota_usage_invalid', 'Dovecot mailbox quota usage row is invalid');
+    }
     if ((columns[typeIndex] ?? '').trim().toUpperCase() !== 'STORAGE') continue;
     if (storage !== null) {
       throw new MailboxQuotaInspectorError('mailbox_quota_usage_invalid', 'Dovecot returned multiple storage quota rows');
