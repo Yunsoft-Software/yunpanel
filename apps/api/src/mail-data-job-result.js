@@ -88,12 +88,14 @@ export function sanitizeMailDataRestoreResult(job, result) {
 
 export function sanitizeMailDataDeleteResult(job, result) {
   const base = common(job, result, [
-    'version', 'transactionId', 'backupId', 'mailDomainId', 'resourceId', 'scope', 'identity', 'sourcePresent',
-    'contentSha256', 'bytes', 'files', 'directories', 'deleted', 'sideEffects',
+    'version', 'transactionId', 'backupId', 'mailDomainId', 'resourceId', 'expectedResourceRevision',
+    'scope', 'identity', 'sourcePresent', 'contentSha256', 'bytes', 'files', 'directories', 'deleted', 'sideEffects',
   ]);
   if (result.transactionId !== job.id || typeof result.transactionId !== 'string' || !BACKUP_ID_PATTERN.test(result.transactionId)
     || result.backupId !== job.payload.backupId || typeof result.backupId !== 'string' || !BACKUP_ID_PATTERN.test(result.backupId)
     || result.resourceId !== job.payload.resourceId || typeof result.resourceId !== 'string'
+    || result.expectedResourceRevision !== job.payload.expectedResourceRevision
+    || !Number.isSafeInteger(result.expectedResourceRevision) || result.expectedResourceRevision < 1
     || typeof result.sourcePresent !== 'boolean' || result.deleted !== true || result.sideEffects !== true) {
     invalid('Mail data delete result does not confirm the queued deletion');
   }
@@ -102,6 +104,7 @@ export function sanitizeMailDataDeleteResult(job, result) {
     transactionId: result.transactionId,
     backupId: result.backupId,
     resourceId: result.resourceId,
+    expectedResourceRevision: result.expectedResourceRevision,
     sourcePresent: result.sourcePresent,
     deleted: true,
     sideEffects: true,
