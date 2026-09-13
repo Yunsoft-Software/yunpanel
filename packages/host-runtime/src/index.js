@@ -41,6 +41,11 @@ export {
   mailConfigEvidenceInternals,
 } from './mail-config-evidence-inspector.js';
 export {
+  createMailDataInspector,
+  MailDataInspectorError,
+  mailDataInspectorInternals,
+} from './mail-data-inspector.js';
+export {
   createMailDiagnosticsInspector,
   MailDiagnosticsInspectorError,
   mailDiagnosticsInspectorInternals,
