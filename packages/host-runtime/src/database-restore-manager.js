@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createDatabaseManager } from './database-manager.js';
 import { createDatabaseDumpManager, databaseDumpManagerInternals } from './database-dump-manager.js';
+import { createDatabaseRestoreReceiptStore } from './database-restore-receipt.js';
 
 const DEFAULT_TRANSACTION_ROOT = '/var/lib/yunpanel/backups/databases/.transactions';
 const TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -103,12 +104,14 @@ export function createDatabaseRestoreManager({
   transactionRoot = DEFAULT_TRANSACTION_ROOT,
   databaseManager = createDatabaseManager(),
   backupManager = createDatabaseDumpManager({ databaseManager }),
+  receiptStore = createDatabaseRestoreReceiptStore(),
   restoreFromFile = defaultRestoreFromFile,
   dumpToFile = databaseDumpManagerInternals.defaultDumpToFile,
 } = {}) {
   if (typeof transactionRoot !== 'string' || !path.isAbsolute(transactionRoot)
     || !databaseManager || typeof databaseManager.inspect !== 'function' || typeof databaseManager.dropDatabase !== 'function'
     || !backupManager || typeof backupManager.backup !== 'function' || typeof backupManager.materializeBackup !== 'function'
+    || !receiptStore || typeof receiptStore.write !== 'function'
     || typeof restoreFromFile !== 'function' || typeof dumpToFile !== 'function') {
     throw new DatabaseRestoreError('database_restore_dependencies_invalid', 'Database restore dependencies are invalid');
   }
@@ -192,7 +195,7 @@ export function createDatabaseRestoreManager({
 
     try {
       await applyBackup(selected, directory, 'restore-verification.sql');
-      return Object.freeze({
+      const result = Object.freeze({
         version: 1,
         transactionId: id,
         backupId: selected.backupId,
@@ -205,6 +208,14 @@ export function createDatabaseRestoreManager({
         verified: true,
         sideEffects: true,
       });
+      try { await receiptStore.write(result); }
+      catch {
+        throw new DatabaseRestoreError(
+          'database_restore_receipt_failed',
+          'Database restore succeeded but its private completion receipt could not be committed',
+        );
+      }
+      return result;
     } catch (error) {
       try {
         await rm(path.join(directory, 'restore-verification.sql'), { force: true });
