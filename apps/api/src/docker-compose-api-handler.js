@@ -35,6 +35,12 @@ export function createDockerComposeApiHandler({
     validateDockerCompose: runtime.validateDockerCompose,
     localServerId,
   });
+  app.use((error, request, response, next) => {
+    if (response.headersSent) return next(error);
+    return response.status(500).json({
+      error: { code: 'internal_error', message: 'Internal server error' },
+    });
+  });
   app.use(baseHandler);
   return app;
 }
