@@ -62,6 +62,8 @@ function dumpArgs(name) {
     '--single-transaction',
     '--quick',
     '--skip-lock-tables',
+    '--skip-dump-date',
+    '--order-by-primary',
     '--routines',
     '--events',
     '--triggers',
@@ -78,7 +80,7 @@ async function spawnDump(program, args, outputPath) {
     await new Promise((resolve, reject) => {
       const child = spawn(program, args, {
         stdio: ['ignore', handle.fd, 'pipe'],
-        env: { ...process.env, LC_ALL: 'C' },
+        env: { PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' },
         windowsHide: true,
       });
       let stderrBytes = 0;
