@@ -2,36 +2,37 @@
 
 Bu dosya yalnız **kaynakta henüz tamamlanmamış geliştirme işlerini** tutar. Yapılmış işler burada tekrar listelenmez.
 
-Bağlayıcı mimari ve güvenlik kuralları `agents.md` içindedir. Bu ortamda güvenilir biçimde yapılamayan gerçek Ubuntu, browser, package, DNS/provider, servis ve rollback kabulleri `todo.md` içinde tutulur. Geliştirme güncel `main` üzerinde küçük, tek amaçlı commitlerle ilerler; GitHub Actions kullanılmaz.
+Bağlayıcı mimari ve güvenlik kuralları `agents.md` içindedir. Bu ortamda güvenilir biçimde yapılamayan gerçek Node 24, Ubuntu, browser, package, DNS/provider, storage ve rollback kabulleri `todo.md` içinde tutulur. Geliştirme güncel `main` üzerinde küçük, tek amaçlı commitlerle ilerler; GitHub Actions kullanılmaz.
 
 Öncelik, panelin gerçek kullanılabilirlik ve Plesk-benzeri ürün tamamlanma oranını en hızlı yükselten işleri bitirmektir. Plesk importer en son geliştirme işi olarak tutulur.
 
-Managed Docker/Compose ve Mail gerçek panel rotalarına bağlıdır. Website detayında Domain/SSL, Application/runtime/env/log/file/terminal ile explicit database/mail/Managed Compose ilişkileri tek site kaynak hiyerarşisinde görünür. Job list/detail kaynak linki, yaşam döngüsü stage/progress, allowlist'li sonuç metadata, güvenli diagnosis/error code ve bounded/redacted deploy log görünümüne sahiptir; generic retry/force-success yolu yoktur.
+Genel backup preview; Application, Database, Mail Data ve Managed Compose storage kaynaklarını canlı registry/inventory state'inden deterministic plana bağlar. Website/Domain dependency revision kanıtı preview digestine dahildir. Database ve Mail kendi mevcut private backup/restore motorlarını kullanır; bunlar için ikinci dump motoru yazılmaz.
 
-Genel backup preview artık canlı state'ten üretilir. Managed Compose storage için stable versioned resource kimliği ve fail-closed policy hazırdır: named volume/proje bind `include`, ephemeral `exclude`, arbitrary host bind `reject`. Application release/config/env safe snapshot resource modeli, son doğrulanmış database inventory resource modeli ve mevcut guarded Mail Data backup preview'ından türetilen domain-level mail resource modeli aynı deterministic planda birleşir. Preview authenticated Owner management rotasında expose edilir; explicit seçim, policy ve exact source snapshot state preview digestine bağlanır. Database inventory hiç doğrulanmamışsa genel backup preview sessizce database'i atlamaz, yeni inspect ister.
-
-Backup preview aynı zamanda resource başına Website/Domain impact ve dependency revision kanıtını taşır. Application/Managed Compose Website bağı, Database binding revision'ı ve Mail Domain → Web Domain ilişkisi deterministic graph'a bağlıdır; bu association'lardan biri değişirse kaynak bytes/state aynı kalsa bile eski backup preview digest'i geçersiz olur. Stale/missing ownership ilişkileri fail-closed'dur.
-
-Database ve Mail için ayrı bir genel-backup dump motoru yazılmayacaktır: database private dump/restore lifecycle ile mail data backup/restore lifecycle kaynakta zaten durable job, checksum/evidence, preview/recovery ve local execution sınırlarına sahiptir. Genel backup ürünü bunları orkestre eder; mevcut operation-specific recovery'yi bypass etmez.
+Aggregate execution için versioned execution plan doğrulaması, durable parent operation/step state'i, DB/Mail child dispatcher, Application/Docker local executorları, private local resource artifact manager, Docker managed-volume inspector ve persisted parent state'ten türetilen Compose backup lock kaynakta bulunmaktadır. Managed Compose project-relative bind'ler kalıcı private project workspace'e taşınmıştır; secret compose/config staging geçici kalır. Bu parçalar henüz tek production execution lifecycle'ı olarak tamamen wire edilmediği için aşağıdaki backup işleri en yüksek önceliktir.
 
 ## 1. Genel backup / restore ürünü
 
-- [ ] Genel backup execution orchestrator'ını ekle: Database ve Mail için mevcut güvenli backup motorlarını reuse et; Application release/config/env ve Managed Docker named-volume/project-bind için eksik executor'ları ekle. Ephemeral storage'ı atla, arbitrary host bind'i varsayılan reddet.
-- [ ] Local target için versioned aggregate backup manifest/artifact layout, per-resource checksum, aggregate checksum, private permissions ve retention lifecycle ekle.
-- [ ] S3-compatible target, encrypted credential lifecycle, transfer verification ve local staging cleanup ekle.
-- [ ] Aggregate backup job progress/history ve crash/lost-ack recovery ekle; child resource işi successful olmuşsa kör retry yapma, exact durable evidence ile reconcile et.
-- [ ] Genel restore preview/selection katmanını mevcut Database/Mail restore preview'ları ve yeni Application/Docker restore contractlarıyla bağla; veri kaybı etkisi, pre-restore backup, exact manifest/resource revision gate ve typed confirmation ekle.
-- [ ] Application ve Docker restore executor'larına health gate ve deterministic rollback ekle; Database/Mail'in mevcut restore/recovery zincirini yeniden yazma.
-- [ ] Disk-full, bozuk aggregate/per-resource checksum, kesinti ve kısmi restore için mutation-safe recovery modelini ekle.
-- [ ] Backup/restore association'larını Website/Application/Database/Docker/Mail impact graph'ına gerçek dependency provider olarak bağla.
-- [ ] Backend hazır olur olmaz gerçek Backup panel rotasını, history, target/retention ve restore akışını bağla.
+- [ ] Execution orchestrator'ını yeni **intent-before-verify** sözleşmesine geçir: step dispatch intent'i önce durable parent state'e yazılsın; ardından source snapshot/consistency doğrulansın ve child/local executor çalışsın. Verification/execution hatası parent step'i terminal failed yapıp bütün resource lock'larını bırakmalı. DB/Mail child replay aynı deterministic idempotency key ile mevcut işi reconcile etmeli; kör retry yapmamalı.
+- [ ] Orchestrator, child dispatcher ve Application/Docker executor source testlerini yeni intent akışına hizala; crash pencerelerini özellikle `intent persisted -> enqueue/archive öncesi`, `child succeeded -> parent evidence öncesi` ve `parent terminal write` sınırlarında kilitle.
+- [ ] Durable backup operation registry, child dispatcher, Application/Docker local executor, Docker volume inspector ve `projectBackupLocked()` provider'ını production bootstrap/runtime'a bağla. Compose lifecycle service gerçek parent backup lock callback'ini kullanmalı.
+- [ ] Owner-only execution/history API ekle: fresh preview digest + typed confirmation ile aggregate backup başlatma, operation detail/list/progress ve güvenli resource evidence görünümü. Public state artifact filesystem path'i, env value, credential, mail body veya provider raw output taşımamalı.
+- [ ] External/custom Docker named-volume sınıflandırmasını bütün zincirde tamamla: inventory'de görünür kalsın fakat yalnız Compose-managed default local volume `include` olsun; external/custom-name/custom-driver/driver-opts kaynakları fail-closed `reject` policy alsın.
+- [ ] Çalışan Managed Compose storage için deterministic consistency lifecycle ekle. Tercih edilen model durable quiesce/stop → backup → önceki runtime state'e dönüş olmalı; ara kesintide project kilidi ve önceki runtime state recovery evidence ile çözülsün. Bu tamamlanana kadar running workload backup'ı açıkça blocker olarak kalmalı, sessiz live tar yapılmamalı.
+- [ ] Local target için versioned **aggregate** manifest/finalization katmanı ekle: child/local artifact evidence, per-resource checksum, aggregate checksum, operation/preview/execution digestleri, private permissions, atomic commit ve retention lifecycle aynı backup kimliğine bağlansın.
+- [ ] Disk-full/read-only, bozuk receipt/archive/checksum, eksik child artifact, process interruption ve partial aggregate finalization için mutation-safe recovery/fail-closed modeli ekle.
+- [ ] S3-compatible target ekle: encrypted credential registry, target preview/test, upload verification, aggregate manifest/object identity, retry/idempotency, retention ve local staging cleanup.
+- [ ] Genel restore preview/selection katmanını mevcut Database/Mail restore preview'ları ve yeni Application/Docker restore contractlarıyla bağla; veri kaybı etkisi, pre-restore backup, exact manifest/resource/dependency revision gate ve typed confirmation ekle.
+- [ ] Application restore executor'ına release/config/env restore + health gate + deterministic rollback; Docker restore executor'ına project-bind/named-volume restore + runtime health gate + deterministic rollback ekle. Database/Mail'in mevcut restore/recovery zincirini yeniden yazma.
+- [ ] Aggregate restore crash/lost-ack recovery ekle; kısmi restore'da hangi resource mutationının gerçekleştiği durable evidence olmadan yeniden mutation yapma.
+- [ ] Backup operation association'larını Website/Application/Database/Docker/Mail impact provider'ına bağla; active backup/restore işleri move/delete impact içinde gerçek blocker olarak görünsün.
+- [ ] Backend tamamlanınca gerçek Backup panelini bağla: preview/resource selection, target, retention, progress/history, artifact/evidence özeti ve restore akışı.
 
-Gerçek Docker Engine/Compose volume/bind backup-restore kabulü, Database/Mail mevcut motorlarının aggregate orchestrator altında gerçek host kabulü, gerçek S3/local target, disk-full/corrupt archive ve secret/permission kontrolleri `todo.md` içinde kalır.
+Gerçek Docker Engine/Compose volume/bind, Application filesystem/env, Database/Mail aggregate orchestration, local/S3 target, disk-full/corrupt archive, restart/lost-ack ve restore/rollback kabulleri `todo.md` içindedir.
 
 ## 2. Website / Domain / Nginx kalanları
 
 - [ ] Canlı state'teki Website'e bağlı olmayan external-proxy Domain kayıtlarını explicit create/bind migrationıyla eşleştir; otomatik tahmin yapma.
-- [ ] Backup ve cron association registry'leri geldikten sonra Website/Domain impact preview'a gerçek dependency provider olarak bağla; gelene kadar blocker `unavailable` kalmalı.
+- [ ] Backup operation association provider'ı ve ileride cron association registry geldikçe Website/Domain move-delete impact preview'a gerçek dependency provider olarak bağla; bulunmayan provider için blocker `unavailable` kalmalı.
 
 Gerçek DNS/Nginx/HTTPS, IDN, certificate ve provider acceptance işleri `todo.md` içindedir.
 
@@ -71,14 +72,15 @@ Gerçek DNS/Nginx/HTTPS, IDN, certificate ve provider acceptance işleri `todo.m
 
 ## Uygulama sırası
 
-1. Aggregate backup execution + local target.
-2. Backup panel/history/target UI; S3-compatible target + retention.
-3. Aggregate restore orchestration + UI.
-4. Cron + UI.
-5. Metrik ve bildirim katmanı.
-6. Kalan Website/Domain migration işi ve association provider bağları ilgili kaynaklar hazır oldukça kapatılır.
-7. İzole migration/rollback kabulünden sonra legacy agent kod/paket yüzeyinin fiziksel temizliği.
-8. Enterprise UI/UX polish ve gerçek browser kabulü.
-9. Plesk read-only importer — **son iş**.
+1. Backup intent-before-verify orchestration + production wiring.
+2. Aggregate local target/finalization + Docker consistency lifecycle.
+3. Backup execution/history API + panel; ardından S3-compatible target + retention.
+4. Aggregate restore orchestration/executor/recovery + UI.
+5. Cron + UI.
+6. Metrik ve bildirim katmanı.
+7. Kalan Website/Domain migration işi ve association provider bağları ilgili kaynaklar hazır oldukça kapatılır.
+8. İzole migration/rollback kabulünden sonra legacy agent kod/paket yüzeyinin fiziksel temizliği.
+9. Enterprise UI/UX polish ve gerçek browser kabulü.
+10. Plesk read-only importer — **son iş**.
 
-Her geliştirme diliminde ilgili source testleri aynı değişiklikle eklenir. Bu ortamda yapılamayan gerçek-host/browser/provider/package kabul işleri kod planına geri sokulmaz; `todo.md` içinde tutulur.
+Her geliştirme diliminde ilgili source testleri aynı değişiklikle eklenir. Güncel Node 24/full workspace ve gerçek-host kabulleri çalıştırılmadıysa geçmiş source testlerinin varlığı "geçti" diye raporlanmaz. Bu ortamda yapılamayan gerçek-host/browser/provider/package/storage kabul işleri kod planına geri sokulmaz; `todo.md` içinde tutulur.
