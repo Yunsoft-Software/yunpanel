@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
   createDockerComposeManager,
   DockerComposeManagerError,
+  dockerComposeManagerInternals,
 } from '../src/docker-compose-manager.js';
 
 const document = 'services:\n  web:\n    image: example/web:1\n';
@@ -41,26 +42,36 @@ async function fixture(t) {
     },
     execFn: async (file, args, options) => {
       const composePath = args[args.indexOf('-f') + 1];
+      const projectDirectory = args[args.indexOf('--project-directory') + 1];
       const configPath = path.join(options.env.DOCKER_CONFIG, 'config.json');
-      calls.push(['exec', file, [...args], { ...options.env }]);
+      calls.push(['exec', file, [...args], { ...options.env }, options.cwd]);
       assert.equal((await stat(composePath)).mode & 0o777, 0o600);
       assert.equal((await stat(options.env.DOCKER_CONFIG)).mode & 0o777, 0o700);
       assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+      assert.equal((await stat(projectDirectory)).mode & 0o777, 0o700);
       assert.equal(await readFile(composePath, 'utf8'), document);
       assert.match(await readFile(configPath, 'utf8'), /registry\.example/);
       assert.equal(args.includes('credential-value'), false);
       assert.equal(args.includes('build-user'), false);
+      assert.equal(options.cwd, projectDirectory);
     },
   });
   return { root, calls, manager };
 }
 
-test('compose manager uses private staging and fixed start argv without exposing private input in result', async (t) => {
+async function assertPrivateStagingClean(root) {
+  assert.deepEqual(await readdir(path.join(root, 'runs')), []);
+}
+
+test('compose manager separates private staging from the persistent project workspace', async (t) => {
   const fx = await fixture(t);
   const request = input({ composeSha256: await import('node:crypto').then(({ createHash }) => createHash('sha256').update(document).digest('hex')) });
   const result = await fx.manager.start(request);
   const execution = fx.calls.find(([name]) => name === 'exec');
+  const projectDirectory = dockerComposeManagerInternals.projectWorkspacePath(fx.root, request.projectId);
   assert.deepEqual(execution[2].slice(-4), ['up', '-d', '--no-build', '--remove-orphans']);
+  assert.equal(execution[2][execution[2].indexOf('--project-directory') + 1], projectDirectory);
+  assert.equal(execution[4], projectDirectory);
   assert.equal(execution[3].APP_MODE, 'production');
   assert.equal(execution[3].PATH, '/usr/bin:/bin');
   assert.equal(result.action, 'start');
@@ -68,13 +79,32 @@ test('compose manager uses private staging and fixed start argv without exposing
   assert.equal(result.executed, true);
   assert.equal(JSON.stringify(result).includes('credential-value'), false);
   assert.equal(JSON.stringify(result).includes('compose.yaml'), false);
-  assert.deepEqual(await readdir(fx.root), []);
+  assert.deepEqual((await readdir(fx.root)).sort(), ['projects', 'runs']);
+  await assertPrivateStagingClean(fx.root);
+});
+
+test('project-relative state survives lifecycle calls while private compose staging is recreated', async (t) => {
+  const fx = await fixture(t);
+  const { createHash } = await import('node:crypto');
+  const request = input({ composeSha256: createHash('sha256').update(document).digest('hex') });
+  await fx.manager.start(request);
+  const projectDirectory = dockerComposeManagerInternals.projectWorkspacePath(fx.root, request.projectId);
+  await writeFile(path.join(projectDirectory, 'persistent-marker'), 'kept', { mode: 0o600 });
+  await fx.manager.restart(request);
+
+  const executions = fx.calls.filter(([name]) => name === 'exec');
+  assert.equal(executions.length, 2);
+  assert.equal(executions[0][4], projectDirectory);
+  assert.equal(executions[1][4], projectDirectory);
+  assert.equal(await readFile(path.join(projectDirectory, 'persistent-marker'), 'utf8'), 'kept');
+  await assertPrivateStagingClean(fx.root);
 });
 
 test('compose manager maps build pull stop and restart to bounded fixed commands', async (t) => {
   const fx = await fixture(t);
   const { createHash } = await import('node:crypto');
   const request = input({ composeSha256: createHash('sha256').update(document).digest('hex') });
+  const projectDirectory = dockerComposeManagerInternals.projectWorkspacePath(fx.root, request.projectId);
   for (const [method, suffix, state] of [
     ['build', ['build'], null],
     ['pull', ['pull'], null],
@@ -85,9 +115,10 @@ test('compose manager maps build pull stop and restart to bounded fixed commands
     const result = await fx.manager[method](request);
     const execution = fx.calls.find(([name]) => name === 'exec');
     assert.deepEqual(execution[2].slice(-suffix.length), suffix);
+    assert.equal(execution[4], projectDirectory);
     assert.equal(result.action, method);
     assert.equal(result.runtimeState, state);
-    assert.deepEqual(await readdir(fx.root), []);
+    await assertPrivateStagingClean(fx.root);
   }
 });
 
@@ -118,5 +149,6 @@ test('compose manager validates desired state before mutation and cleans private
       && error.code === 'docker_compose_command_failed'
       && !error.message.includes('private docker diagnostic'),
   );
-  assert.deepEqual(await readdir(root), []);
+  await assertPrivateStagingClean(root);
+  assert.deepEqual((await readdir(root)).sort(), ['projects', 'runs']);
 });
