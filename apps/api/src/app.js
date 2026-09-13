@@ -2,6 +2,8 @@ import express from 'express';
 import {
   createCloudflareDnsManager,
   CloudflareDnsManagerError,
+  createMailDataBackupManager,
+  MailDataBackupError,
   createMailDataInspector,
   createMailDiagnosticsInspector,
   MailDataInspectorError,
@@ -39,6 +41,8 @@ import { mountMailAliasRoutes } from './mail-alias-http.js';
 import { createMailAliasRegistry, MailAliasRegistryError } from './mail-alias-registry.js';
 import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
 import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
+import { MailDataHttpError, mountMailDataRoutes } from './mail-data-http.js';
+import { createMailDataOperationsService, MailDataOperationsError } from './mail-data-operations.js';
 import { createMailDeleteImpactService, MailDeleteImpactError } from './mail-delete-impact.js';
 import { mountMailDeleteImpactRoutes } from './mail-delete-impact-http.js';
 import { MailDkimConfigurationError } from './mail-dkim-configuration.js';
@@ -155,6 +159,8 @@ export function createApp({
     getDkimKey: async (mailDomainId) => mailDkimRegistry.getKey(mailDomainId),
   }),
   mailDataInspector = createMailDataInspector(),
+  mailDataBackupManager = createMailDataBackupManager(),
+  mailDataOperationsService = null,
   mailDiagnosticsInspector = createMailDiagnosticsInspector(),
   mailDeleteImpactService = null,
   mailDkimConfigurationService = null,
@@ -227,6 +233,15 @@ export function createApp({
     mailDkimRegistry,
     jobRegistry,
     mailDataInspector,
+    localServerId,
+  });
+  const mailDataOperations = mailDataOperationsService ?? createMailDataOperationsService({
+    mailDomainRegistry,
+    domainRegistry,
+    mailboxRegistry,
+    mailDataInspector,
+    mailDataBackupManager,
+    jobRegistry,
     localServerId,
   });
   const canCreateDkimDnsService = typeof dnsHostingRegistry?.listZones === 'function'
@@ -310,6 +325,7 @@ export function createApp({
     localServerId,
   });
   mountMailDeleteImpactRoutes(app, { mailDeleteImpactService: mailDeleteImpact });
+  mountMailDataRoutes(app, { mailDataOperationsService: mailDataOperations });
   mountMailboxQuotaRoutes(app, {
     mailboxQuotaRegistry,
     mailboxQuotaInspector,
@@ -418,7 +434,10 @@ export function createApp({
       || error instanceof MailAliasRegistryError
       || error instanceof MailConfigurationError
       || error instanceof MailConfigurationHttpError
+      || error instanceof MailDataBackupError
+      || error instanceof MailDataHttpError
       || error instanceof MailDataInspectorError
+      || error instanceof MailDataOperationsError
       || error instanceof MailDeleteImpactError
       || error instanceof MailDkimConfigurationError
       || error instanceof MailDkimDnsError
