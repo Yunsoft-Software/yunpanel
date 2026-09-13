@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   DomainValidationError,
   assertDomainName,
+  normalizeDnsRecordName,
   normalizeDomainSet,
   validateDomainName,
 } from '../src/index.js';
@@ -32,6 +33,14 @@ test('normalizes and de-duplicates aliases after IDN conversion', () => {
     normalizeDomainSet('bücher.example', ['xn--bcher-kva.example', 'shop.bücher.example', 'SHOP.XN--BCHER-KVA.EXAMPLE.']),
     { primary: 'xn--bcher-kva.example', aliases: ['shop.xn--bcher-kva.example'] },
   );
+});
+
+test('normalizes DNS owner names with service labels without treating them as web hostnames', () => {
+  assert.equal(normalizeDnsRecordName('MAIL-2026._DOMAINKEY.BÜCHER.example.'), 'mail-2026._domainkey.xn--bcher-kva.example');
+  assert.equal(normalizeDnsRecordName('_dmarc.example.com'), '_dmarc.example.com');
+  assert.equal(normalizeDnsRecordName('-bad._domainkey.example.com'), '');
+  assert.equal(normalizeDnsRecordName('bad.._domainkey.example.com'), '');
+  assert.equal(normalizeDnsRecordName('../_domainkey.example.com'), '');
 });
 
 test('throws typed validation errors for invalid domains', () => {

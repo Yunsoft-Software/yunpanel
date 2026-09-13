@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isIP, SocketAddress } from 'node:net';
-import { normalizeDomainSet } from '@yunpanel/shared';
+import { normalizeDnsRecordName, normalizeDomainSet } from '@yunpanel/shared';
 
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
 const PROVIDER_ID_PATTERN = /^[a-f0-9]{32}$/i;
@@ -32,6 +32,15 @@ export class CloudflareDnsManagerError extends Error {
 function hostname(value, field) {
   try { return normalizeDomainSet(value, []).primary; }
   catch { throw new CloudflareDnsManagerError(`invalid_${field}`, `${field} must be a canonical DNS hostname`); }
+}
+
+function recordName(value, type) {
+  if (type !== 'TXT') return hostname(value, 'dns_record_name');
+  const name = normalizeDnsRecordName(value);
+  if (!name) {
+    throw new CloudflareDnsManagerError('invalid_dns_record_name', 'dns_record_name must be a canonical DNS record name');
+  }
+  return name;
 }
 
 function address(value, family) {
@@ -69,7 +78,7 @@ function normalizeRecord(value) {
   const type = value.type.toUpperCase();
   return Object.freeze({
     type,
-    name: hostname(value.name, 'dns_record_name'),
+    name: recordName(value.name, type),
     content: recordContent(type, value.content),
     ttl: value.ttl,
     proxied: value.proxied,

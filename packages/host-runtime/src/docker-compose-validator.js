@@ -119,6 +119,10 @@ function portNumber(value) {
   return Number.isSafeInteger(number) && number >= 1 && number <= 65535 ? number : null;
 }
 
+function compareText(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function publishedPorts(value) {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value) || value.length > MAX_SERVICE_PORTS) {
@@ -147,10 +151,10 @@ function publishedPorts(value) {
     identities.add(identity);
     output.push(item);
   }
-  return output.sort((left, right) => (left.hostIp ?? '').localeCompare(right.hostIp ?? '')
+  return output.sort((left, right) => compareText(left.hostIp ?? '', right.hostIp ?? '')
     || left.publishedPort - right.publishedPort
     || left.targetPort - right.targetPort
-    || left.protocol.localeCompare(right.protocol));
+    || compareText(left.protocol, right.protocol));
 }
 
 function safeStoragePath(value, { absolute = true } = {}) {

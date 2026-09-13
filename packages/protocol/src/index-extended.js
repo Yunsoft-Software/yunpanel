@@ -1,6 +1,6 @@
 export * from './index.js';
 
-import { assertUuid, normalizeDomainSet } from '@yunpanel/shared';
+import { assertUuid, normalizeDnsRecordName, normalizeDomainSet } from '@yunpanel/shared';
 import {
   AGENT_PROTOCOL_VERSION,
   MANAGED_SERVICE_ACTIONS,
@@ -217,7 +217,7 @@ function validateDnsTxtApply(payload, errors) {
     errors.push(`${operation} record is invalid`);
     return;
   }
-  const name = canonicalDomain(record.name);
+  const name = normalizeDnsRecordName(record.name);
   const contentBytes = typeof record.content === 'string' ? Buffer.byteLength(record.content) : 0;
   const contentSafe = typeof record.content === 'string' && contentBytes >= 1 && contentBytes <= TXT_MAX_BYTES
     && !/[\u0000-\u001f\u007f]/.test(record.content);

@@ -9,7 +9,7 @@ import {
   MANAGED_SERVICE_IDS,
   OPERATIONS,
   validateOperationEnvelope,
-} from '../src/index.js';
+} from '@yunpanel/protocol';
 
 const id = '12345678-1234-4234-8234-123456789012';
 

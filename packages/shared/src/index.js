@@ -33,6 +33,7 @@ export {
 export {
   DomainValidationError,
   assertDomainName,
+  normalizeDnsRecordName,
   normalizeDomainName,
   normalizeDomainSet,
   validateDomainName,

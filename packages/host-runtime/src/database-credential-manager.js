@@ -173,6 +173,18 @@ function markerMatches(marker, bundle) {
     && marker.username === bundle.username && marker.host === bundle.host;
 }
 
+function grantsSafeForManagedMutation(bundle, evidence) {
+  return evidence.global === 0 && evidence.table === 0 && evidence.column === 0 && evidence.routine === 0
+    && evidence.schema.every((entry) => entry.schema === bundle.databaseName);
+}
+
+function grantsSatisfied(bundle, evidence) {
+  if (!grantsSafeForManagedMutation(bundle, evidence)) return false;
+  const actual = evidence.schema.map((entry) => entry.privilege).sort();
+  const expected = [...bundle.privileges].sort();
+  return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
+}
+
 export function createDatabaseCredentialManager({
   runSql = runSqlStdin,
   clientPaths = CLIENT_PATHS,
@@ -248,18 +260,6 @@ export function createDatabaseCredentialManager({
       column: parseCount(column.stdout),
       routine: parseCount(routine.stdout),
     });
-  }
-
-  function grantsSafeForManagedMutation(bundle, evidence) {
-    return evidence.global === 0 && evidence.table === 0 && evidence.column === 0 && evidence.routine === 0
-      && evidence.schema.every((entry) => entry.schema === bundle.databaseName);
-  }
-
-  function grantsSatisfied(bundle, evidence) {
-    if (!grantsSafeForManagedMutation(bundle, evidence)) return false;
-    const actual = evidence.schema.map((entry) => entry.privilege).sort();
-    const expected = [...bundle.privileges].sort();
-    return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
   }
 
   async function preflightManagedAccount(connection, bundle, marker, accountExists) {

@@ -21,6 +21,18 @@ export function normalizeDomainName(value) {
   }
 }
 
+export function normalizeDnsRecordName(value) {
+  const name = normalizeDomainName(value);
+  if (!name || name.length > 253 || name.includes('*')) return '';
+  const labels = name.split('.');
+  if (labels.length < 2) return '';
+  for (const label of labels) {
+    if (label.length < 1 || label.length > 63
+      || !/^[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?$/.test(label)) return '';
+  }
+  return name;
+}
+
 export function validateDomainName(value) {
   const domain = normalizeDomainName(value);
 

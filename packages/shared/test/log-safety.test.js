@@ -13,11 +13,16 @@ test('redacts common credentials and strips terminal control characters', () => 
   ].join('\n');
   const result = sanitizeLogMessage(input);
   assert.doesNotMatch(result.message, /hunter2|private-token|person:secret|another-secret|github_pat_|eyJabcdefghijk|\u001b/);
-  assert.match(result.message, /Authorization: \[REDACTED\]/);
+  assert.match(result.message, /Authorization: Bearer \[REDACTED\]/);
   assert.match(result.message, /PASSWORD=\[REDACTED\]/);
   assert.match(result.message, /STRIPE_API_TOKEN: \[REDACTED\]/);
   assert.match(result.message, /https:\/\/\[REDACTED\]@example\.test/);
   assert.equal(result.truncated, false);
+});
+
+test('redacts authorization headers once while preserving the authentication scheme', () => {
+  assert.equal(sanitizeLogMessage('Authorization: Bearer abcdefghijklmnop').message, 'Authorization: Bearer [REDACTED]');
+  assert.equal(sanitizeLogMessage('authorization=Basic Zm9vOmJhcg==').message, 'authorization=Basic [REDACTED]');
 });
 
 test('redacts complete and truncated private keys before applying the output bound', () => {
