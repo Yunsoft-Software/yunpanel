@@ -24,6 +24,11 @@ export {
   DockerComposeManagerError,
   dockerComposeManagerInternals,
 } from './docker-compose-manager.js';
+export {
+  createDockerComposeObserver,
+  DockerComposeObserverError,
+  dockerComposeObserverInternals,
+} from './docker-compose-observer.js';
 export { createNginxInspector, inspectNginx, parseNginxConfigMetadata } from './nginx-inspector.js';
 export { createNginxManager, nginxManager, NginxManagerError } from './nginx-manager.js';
 export {
