@@ -159,7 +159,6 @@ export { copyStaticArtifact } from './static-artifact-worker.js';
 export {
   createStaticDeploymentManager,
   StaticDeploymentError,
-  staticDeploymentInternals,
   staticDeploymentManager,
 } from './static-deployment-manager.js';
 export {
