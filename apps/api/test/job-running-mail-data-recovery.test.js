@@ -32,36 +32,58 @@ function base({ operation = OPERATIONS.MAIL_DATA_BACKUP, mailboxRevision = 3, do
     expectedTargetSnapshotSha256: snapshot,
   };
   const calls = [];
-  const result = operation === OPERATIONS.MAIL_DATA_BACKUP ? {
-    version: 1,
-    backupId: jobId,
-    mailDomainId,
-    scope: 'mailbox',
-    identity: 'owner@example.com',
-    sourcePresent: true,
-    sourceSnapshotSha256: snapshot,
-    contentSha256: content,
-    bytes: 100,
-    files: 2,
-    directories: 3,
-    backedUp: true,
-    sideEffects: true,
-  } : {
-    version: 1,
-    transactionId: jobId,
-    backupId: 'mail-backup-selected',
-    preRestoreBackupId: `pre-restore:${jobId}`,
-    mailDomainId,
-    scope: 'mailbox',
-    identity: 'owner@example.com',
-    contentSha256: content,
-    bytes: 100,
-    files: 2,
-    directories: 3,
-    restoredPresent: true,
-    applied: true,
-    sideEffects: true,
-  };
+  let result;
+  if (operation === OPERATIONS.MAIL_DATA_BACKUP) {
+    result = {
+      version: 1,
+      backupId: jobId,
+      mailDomainId,
+      scope: 'mailbox',
+      identity: 'owner@example.com',
+      sourcePresent: true,
+      sourceSnapshotSha256: snapshot,
+      contentSha256: content,
+      bytes: 100,
+      files: 2,
+      directories: 3,
+      backedUp: true,
+      sideEffects: true,
+    };
+  } else if (operation === OPERATIONS.MAIL_DATA_DELETE) {
+    result = {
+      version: 1,
+      transactionId: jobId,
+      backupId: 'mail-backup-selected',
+      mailDomainId,
+      resourceId: mailboxId,
+      scope: 'mailbox',
+      identity: 'owner@example.com',
+      sourcePresent: true,
+      contentSha256: content,
+      bytes: 100,
+      files: 2,
+      directories: 3,
+      deleted: true,
+      sideEffects: true,
+    };
+  } else {
+    result = {
+      version: 1,
+      transactionId: jobId,
+      backupId: 'mail-backup-selected',
+      preRestoreBackupId: `pre-restore:${jobId}`,
+      mailDomainId,
+      scope: 'mailbox',
+      identity: 'owner@example.com',
+      contentSha256: content,
+      bytes: 100,
+      files: 2,
+      directories: 3,
+      restoredPresent: true,
+      applied: true,
+      sideEffects: true,
+    };
+  }
   const receipt = {
     version: 1,
     recordedAt: '2026-09-13T01:30:00.000Z',
@@ -131,6 +153,7 @@ function base({ operation = OPERATIONS.MAIL_DATA_BACKUP, mailboxRevision = 3, do
       inspect: async () => ({
         jobs: [{ jobId, serverId, status: 'running', operation, resourceType: 'mail_domain', resourceId: mailDomainId }],
       }),
+      inspectDeleted: async () => { throw new Error('not used'); },
       reconcile: async ({ job }) => {
         calls.push(['reconcile', job.operation]);
         return { reconciled: true, error: null };
@@ -166,7 +189,7 @@ test('running mail data backup closes only from matching receipt and verified ba
   assert.deepEqual(completion.result, state.result);
 });
 
-test('running mail data restore requires selected backup, pre-restore backup and live restored evidence', async () => {
+test('running mail data restore requires selected backup pre-restore backup and live restored evidence', async () => {
   const state = base({ operation: OPERATIONS.MAIL_DATA_RESTORE });
   state.dependencies.inspectBackup = async (id) => {
     if (id === 'mail-backup-selected') {
@@ -222,11 +245,84 @@ test('running mail data restore requires selected backup, pre-restore backup and
   assert.deepEqual(completion.result, state.result);
 });
 
+test('running mail data delete requires verified backup plus exact target and tombstone absence', async () => {
+  const state = base({ operation: OPERATIONS.MAIL_DATA_DELETE });
+  state.dependencies.inspectBackup = async (id) => {
+    assert.equal(id, 'mail-backup-selected');
+    return {
+      backupId: id,
+      scope: 'mailbox',
+      identity: 'owner@example.com',
+      sourcePresent: true,
+      sourceSnapshotSha256: snapshot,
+      contentSha256: content,
+      bytes: 100,
+      files: 2,
+      directories: 3,
+    };
+  };
+  state.dependencies.inspectRestored = async () => { throw new Error('not used'); };
+  state.dependencies.inspectDeleted = async (input) => {
+    assert.deepEqual(input, {
+      transactionId: jobId,
+      backupId: 'mail-backup-selected',
+      scope: 'mailbox',
+      identity: 'owner@example.com',
+    });
+    return {
+      satisfied: true,
+      result: {
+        version: 1,
+        transactionId: jobId,
+        backupId: 'mail-backup-selected',
+        scope: 'mailbox',
+        identity: 'owner@example.com',
+        sourcePresent: true,
+        contentSha256: content,
+        bytes: 100,
+        files: 2,
+        directories: 3,
+        deleted: true,
+        sideEffects: true,
+      },
+    };
+  };
+
+  const recovered = await recoverRunningMailData(state.dependencies);
+  assert.equal(recovered.operation, OPERATIONS.MAIL_DATA_DELETE);
+  assert.equal(recovered.recoveryMethod, 'verified_mail_data_delete_receipt_backup_and_absence');
+  const completion = state.calls.find(([name]) => name === 'complete')[1];
+  assert.deepEqual(completion.result, state.result);
+});
+
+test('delete recovery rejects unresolved tombstone or live-path evidence', async () => {
+  const state = base({ operation: OPERATIONS.MAIL_DATA_DELETE });
+  state.dependencies.inspectBackup = async () => ({
+    backupId: 'mail-backup-selected',
+    scope: 'mailbox',
+    identity: 'owner@example.com',
+    sourcePresent: true,
+    contentSha256: content,
+    bytes: 100,
+    files: 2,
+    directories: 3,
+  });
+  state.dependencies.inspectRestored = async () => ({ satisfied: false, result: null });
+  state.dependencies.inspectDeleted = async () => ({ satisfied: false, result: null });
+  await assert.rejects(
+    recoverRunningMailData(state.dependencies),
+    (error) => error instanceof JobRunningMailDataRecoveryError
+      && error.code === 'job_mail_data_recovery_evidence_not_satisfied',
+  );
+  assert.equal(state.calls.some(([name]) => name === 'complete'), false);
+});
+
 test('resource revision drift leaves running mail data job unresolved before evidence completion', async () => {
   const state = base({ mailboxRevision: 4 });
   let evidenceRead = false;
   state.dependencies.inspectBackup = async () => { evidenceRead = true; return null; };
   state.dependencies.inspectRestored = async () => { evidenceRead = true; return null; };
+  state.dependencies.inspectDeleted = async () => { evidenceRead = true; return null; };
 
   await assert.rejects(
     recoverRunningMailData(state.dependencies),
