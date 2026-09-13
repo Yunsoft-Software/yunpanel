@@ -49,7 +49,7 @@ test('stages the complete submission-aware mail bundle atomically without return
   });
   const plan = previewManagedMailApplyPlan(preview);
 
-  assert.equal(manifest.version, 3);
+  assert.equal(manifest.version, 4);
   assert.equal(manifest.planSha256, plan.sha256);
   assert.equal(manifest.previewSha256, preview.sha256);
   assert.equal(JSON.stringify(manifest).includes(ARGON2ID_HASH), false);
