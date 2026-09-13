@@ -20,6 +20,7 @@ import { createCertificateRegistry } from './certificate-registry.js';
 import { createCertificateMaterialManager } from './certificate-material-manager.js';
 import { startCertificateRenewalScheduler } from './certificate-renewal-scheduler.js';
 import { startConfiguredLocalRuntime } from './configured-local-runtime.js';
+import { createDatabaseBindingRegistry } from './database-binding-registry.js';
 import { createDomainRegistry } from './domain-registry.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDnsProviderCredentialRegistry } from './dns-provider-credential-registry.js';
@@ -62,6 +63,8 @@ const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.reso
 const customCertificateRoot = path.join(path.dirname(certificateStorePath), 'custom-certificates');
 const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.resolve('.data/application-registry.json');
 const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.data/website-registry.json');
+const databaseBindingStorePath = process.env.YUNPANEL_DATABASE_BINDING_STORE
+  ?? path.resolve('.data/database-binding-registry.json');
 const websiteMigrationPolicyStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE ?? path.resolve('.data/website-migration-policy.json');
 const websiteMigrationLedgerStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_LEDGER_STORE ?? path.resolve('.data/website-migration-ledger.json');
 const dnsHostingStorePath = process.env.YUNPANEL_DNS_HOSTING_STORE ?? path.resolve('.data/dns-hosting-registry.json');
@@ -137,6 +140,13 @@ const websiteRegistry = createWebsiteRegistry({
   getDockerWorkload: async (workloadId) => dockerWorkloadRegistry.getWorkload(workloadId),
 });
 await websiteRegistry.init();
+const databaseBindingRegistry = createDatabaseBindingRegistry({
+  filePath: databaseBindingStorePath,
+  serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+  getWebsite: async (websiteId) => websiteRegistry.getWebsite(websiteId),
+  getApplication: async (applicationId) => applicationRegistry.getApplication(applicationId),
+});
+await databaseBindingRegistry.init();
 const websiteMigrationPolicy = createWebsiteMigrationPolicyStore({ filePath: websiteMigrationPolicyStorePath });
 await websiteMigrationPolicy.init();
 const migrationLedger = createWebsiteMigrationLedger({ filePath: websiteMigrationLedgerStorePath });
@@ -282,6 +292,7 @@ const listener = createAuthenticatedApi({
     certificateMaterialManager,
     applicationRegistry,
     websiteRegistry,
+    databaseBindingRegistry,
     websiteMigrationPolicy,
     migrationLedger,
     dnsHostingRegistry,
@@ -364,6 +375,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] certificate store=${certificateStorePath}`);
   console.log(`[yunpanel-api] application store=${applicationStorePath}`);
   console.log(`[yunpanel-api] website store=${websiteStorePath}`);
+  console.log(`[yunpanel-api] database binding store=${databaseBindingStorePath}`);
   console.log(`[yunpanel-api] website migration policy store=${websiteMigrationPolicyStorePath}`);
   console.log(`[yunpanel-api] website migration ledger store=${websiteMigrationLedgerStorePath}`);
   console.log(`[yunpanel-api] DNS hosting store=${dnsHostingStorePath}`);
