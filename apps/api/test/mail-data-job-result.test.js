@@ -148,8 +148,12 @@ function deleteResult(overrides = {}) {
   };
 }
 
-test('delete sanitizer pins resource backup and transaction while rejecting private paths', () => {
-  assert.deepEqual(sanitizeMailDataDeleteResult(deleteJob(), deleteResult()), deleteResult());
+test('delete sanitizer pins resource backup transaction and queued revision while rejecting private paths', () => {
+  assert.deepEqual(sanitizeMailDataDeleteResult(deleteJob(), deleteResult()), {
+    ...deleteResult(),
+    expectedResourceRevision: 3,
+  });
+  assert.equal(Object.hasOwn(deleteResult(), 'expectedResourceRevision'), false);
   for (const result of [
     deleteResult({ tombstonePath: '/private/tombstone' }),
     deleteResult({ transactionId: 'other-job-0001' }),
