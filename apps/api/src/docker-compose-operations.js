@@ -58,7 +58,7 @@ export function createDockerComposeOperationsService({
     throw new DockerComposeOperationsError('docker_compose_operations_dependencies_invalid', 'Docker Compose operation dependencies are unavailable', 503);
   }
 
-  async function assertIdle(projectId) {
+  async function listProjectJobs(projectId) {
     let jobs;
     try { jobs = await jobRegistry.listJobs({ resourceType: 'docker_project', resourceId: projectId }); }
     catch {
@@ -67,9 +67,21 @@ export function createDockerComposeOperationsService({
     if (!Array.isArray(jobs)) {
       throw new DockerComposeOperationsError('docker_compose_job_state_unavailable', 'Docker Compose job state is invalid', 503);
     }
-    if (jobs.some((job) => DOCKER_OPERATION_SET.has(job.operation) && ACTIVE_STATUSES.has(job.status))) {
+    return jobs.filter((job) => DOCKER_OPERATION_SET.has(job?.operation));
+  }
+
+  async function assertIdle(projectId) {
+    const jobs = await listProjectJobs(projectId);
+    if (jobs.some((job) => ACTIVE_STATUSES.has(job.status))) {
       throw new DockerComposeOperationsError('docker_compose_job_conflict', 'Another Docker Compose operation is already queued or running', 409);
     }
+  }
+
+  async function history({ projectId } = {}) {
+    const jobs = await listProjectJobs(projectId);
+    return Object.freeze(jobs
+      .sort((left, right) => Date.parse(right.createdAt ?? 0) - Date.parse(left.createdAt ?? 0))
+      .map((job) => Object.freeze(structuredClone(job))));
   }
 
   async function preview({ projectId, action: requestedAction } = {}) {
@@ -146,7 +158,7 @@ export function createDockerComposeOperationsService({
     return Object.freeze({ previewDigest: current.previewDigest, job });
   }
 
-  return Object.freeze({ assertIdle, preview, queue });
+  return Object.freeze({ assertIdle, history, preview, queue });
 }
 
 export const dockerComposeOperationsInternals = Object.freeze({
