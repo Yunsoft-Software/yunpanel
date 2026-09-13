@@ -5,6 +5,7 @@ import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.
 import { createDomainActivationReceiptStore } from './domain-activation-receipt.js';
 import { createLocalHostOperations } from './local-host-operations.js';
 import { createMailConfigOperationReceiptStore } from './mail-config-operation-receipt.js';
+import { createMailDataOperationReceiptStore } from './mail-data-operation-receipt.js';
 import { createMailDkimOperationReceiptStore } from './mail-dkim-operation-receipt.js';
 import { resolveLocalRuntimeConfig } from './local-runtime-config.js';
 import { startLocalRuntime } from './local-runtime.js';
@@ -52,6 +53,7 @@ export async function startConfiguredLocalRuntime({
   createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
   createDomainActivationReceipts = createDomainActivationReceiptStore,
   createMailConfigOperationReceipts = createMailConfigOperationReceiptStore,
+  createMailDataOperationReceipts = createMailDataOperationReceiptStore,
   createMailDkimOperationReceipts = createMailDkimOperationReceiptStore,
   createManagedServiceReceipts = createManagedServiceMutationReceiptStore,
   createNodeDeploymentReceipts = createNodeDeploymentReceiptStore,
@@ -93,6 +95,7 @@ export async function startConfiguredLocalRuntime({
     || typeof createDatabaseDeletionReceipts !== 'function'
     || typeof createDomainActivationReceipts !== 'function'
     || typeof createMailConfigOperationReceipts !== 'function'
+    || typeof createMailDataOperationReceipts !== 'function'
     || typeof createMailDkimOperationReceipts !== 'function'
     || typeof createManagedServiceReceipts !== 'function'
     || typeof createNodeDeploymentReceipts !== 'function'
@@ -163,6 +166,10 @@ export async function startConfiguredLocalRuntime({
   const mailConfigOperationReceipts = mailConfigurationService ? createMailConfigOperationReceipts() : null;
   if (mailConfigurationService && (!mailConfigOperationReceipts || typeof mailConfigOperationReceipts.write !== 'function')) {
     throw new ConfiguredLocalRuntimeError('local_mail_config_receipts_invalid', 'Local runtime managed mail operation receipt store is invalid');
+  }
+  const mailDataOperationReceipts = createMailDataOperationReceipts();
+  if (!mailDataOperationReceipts || typeof mailDataOperationReceipts.write !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_mail_data_receipts_invalid', 'Local runtime mail data operation receipt store is invalid');
   }
   const mailDkimOperationReceipts = mailDkimConfigurationService ? createMailDkimOperationReceipts() : null;
   if (mailDkimConfigurationService && (!mailDkimOperationReceipts || typeof mailDkimOperationReceipts.write !== 'function')) {
@@ -305,6 +312,36 @@ export async function startConfiguredLocalRuntime({
         configurationSha256: payload.configurationSha256,
         applied: true,
       });
+      return;
+    }
+
+    if (operation === OPERATIONS.MAIL_DATA_BACKUP) {
+      if (resourceType !== 'mail_domain' || resourceId !== payload?.mailDomainId
+        || result?.mailDomainId !== payload.mailDomainId
+        || result.backupId !== jobId || result.scope !== payload.scope || result.identity !== payload.identity
+        || result.sourceSnapshotSha256 !== payload.expectedSnapshotSha256
+        || typeof result.sourcePresent !== 'boolean'
+        || !SHA256_PATTERN.test(payload.expectedSnapshotSha256 ?? '')
+        || !SHA256_PATTERN.test(result.contentSha256 ?? '')
+        || result.backedUp !== true || result.sideEffects !== true) {
+        throw new Error('Mail data backup result is not safe recovery evidence');
+      }
+      await mailDataOperationReceipts.write({ serverId, jobId, operation, result });
+      return;
+    }
+
+    if (operation === OPERATIONS.MAIL_DATA_RESTORE) {
+      if (resourceType !== 'mail_domain' || resourceId !== payload?.mailDomainId
+        || result?.mailDomainId !== payload.mailDomainId
+        || result.transactionId !== jobId || result.backupId !== payload.backupId
+        || result.preRestoreBackupId !== `pre-restore:${jobId}`
+        || result.scope !== payload.scope || result.identity !== payload.identity
+        || !SHA256_PATTERN.test(payload.expectedTargetSnapshotSha256 ?? '')
+        || !SHA256_PATTERN.test(result.contentSha256 ?? '')
+        || result.restoredPresent !== true || result.applied !== true || result.sideEffects !== true) {
+        throw new Error('Mail data restore result is not safe recovery evidence');
+      }
+      await mailDataOperationReceipts.write({ serverId, jobId, operation, result });
       return;
     }
 
