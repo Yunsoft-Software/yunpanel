@@ -1,0 +1,84 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  AGENT_PROTOCOL_VERSION,
+  createOperationEnvelope,
+  isKnownOperation,
+  OPERATIONS,
+  validateOperationEnvelope,
+} from '../src/index-extended.js';
+
+const mailDomainId = '12345678-1234-4234-8234-123456789012';
+const digest = 'a'.repeat(64);
+
+function envelope(operation, payload) {
+  return {
+    id: 'job-mail-data-0001',
+    operation,
+    payload,
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+  };
+}
+
+test('mail data backup and restore are known exact-payload operations', () => {
+  assert.equal(isKnownOperation(OPERATIONS.MAIL_DATA_BACKUP), true);
+  assert.equal(isKnownOperation(OPERATIONS.MAIL_DATA_RESTORE), true);
+
+  const backupPayload = {
+    mailDomainId,
+    scope: 'mailbox',
+    identity: 'owner@example.com',
+    expectedSnapshotSha256: digest,
+  };
+  const backup = createOperationEnvelope({ id: 'job-mail-data-0001', operation: OPERATIONS.MAIL_DATA_BACKUP, payload: backupPayload });
+  assert.deepEqual(backup, envelope(OPERATIONS.MAIL_DATA_BACKUP, backupPayload));
+
+  const restorePayload = {
+    mailDomainId,
+    backupId: 'backup-mail-0001',
+    scope: 'domain',
+    identity: 'example.com',
+    expectedTargetSnapshotSha256: digest,
+  };
+  const restore = createOperationEnvelope({ id: 'job-mail-data-0002', operation: OPERATIONS.MAIL_DATA_RESTORE, payload: restorePayload });
+  assert.deepEqual(restore, {
+    ...envelope(OPERATIONS.MAIL_DATA_RESTORE, restorePayload),
+    id: 'job-mail-data-0002',
+  });
+});
+
+test('mail data protocol rejects noncanonical identities, stale-shaped payloads and invalid backup ids', () => {
+  for (const candidate of [
+    envelope(OPERATIONS.MAIL_DATA_BACKUP, {
+      mailDomainId,
+      scope: 'mailbox',
+      identity: 'Owner@Example.COM',
+      expectedSnapshotSha256: digest,
+    }),
+    envelope(OPERATIONS.MAIL_DATA_BACKUP, {
+      mailDomainId,
+      scope: 'domain',
+      identity: 'example.com',
+      expectedSnapshotSha256: digest,
+      secret: 'forbidden',
+    }),
+    envelope(OPERATIONS.MAIL_DATA_RESTORE, {
+      mailDomainId,
+      backupId: '../escape',
+      scope: 'mailbox',
+      identity: 'owner@example.com',
+      expectedTargetSnapshotSha256: digest,
+    }),
+    envelope(OPERATIONS.MAIL_DATA_RESTORE, {
+      mailDomainId,
+      backupId: 'backup-mail-0001',
+      scope: 'domain',
+      identity: 'EXAMPLE.com',
+      expectedTargetSnapshotSha256: digest,
+    }),
+  ]) {
+    const result = validateOperationEnvelope(candidate);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.length > 0);
+  }
+});
