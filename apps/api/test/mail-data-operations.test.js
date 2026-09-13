@@ -103,6 +103,7 @@ test('mailbox backup preview queues one secret-free mail-domain locked job', asy
   const state = fixture();
   const preview = await state.service.previewBackup({ scope: 'mailbox', resourceId: mailboxId });
   assert.equal(preview.mailDomainId, mailDomainId);
+  assert.equal(preview.resourceId, mailboxId);
   assert.equal(preview.identity, 'owner@example.com');
   assert.equal(preview.expectedRevision, 3);
   assert.equal(preview.sourcePresent, true);
@@ -125,6 +126,7 @@ test('mailbox backup preview queues one secret-free mail-domain locked job', asy
     operation: OPERATIONS.MAIL_DATA_BACKUP,
     payload: {
       mailDomainId,
+      resourceId: mailboxId,
       scope: 'mailbox',
       identity: 'owner@example.com',
       expectedResourceRevision: 3,
@@ -164,6 +166,7 @@ test('restore queues selected backup against the same mail-domain resource lock'
   const preview = await state.service.previewRestore({
     scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001',
   });
+  assert.equal(preview.resourceId, mailboxId);
   assert.equal(preview.targetSnapshotSha256, digest);
   assert.equal(preview.backupContentSha256, 'd'.repeat(64));
   assert.equal(preview.targetPresent, true);
@@ -179,6 +182,7 @@ test('restore queues selected backup against the same mail-domain resource lock'
   assert.equal(state.enqueued.length, 1);
   assert.deepEqual(state.enqueued[0].payload, {
     mailDomainId,
+    resourceId: mailboxId,
     backupId: 'mail-backup-0001',
     scope: 'mailbox',
     identity: 'owner@example.com',
