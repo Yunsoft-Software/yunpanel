@@ -209,6 +209,7 @@ export function createApp({
     mailboxQuotaRegistry,
     mailboxForwardingRegistry,
     ...(mailServiceIdentityRegistry ? { domainRegistry, mailServiceIdentityRegistry } : {}),
+    ...(mailSrsConfigurationService ? { mailSrsConfigurationService } : {}),
   });
   const canCreateDkimDnsService = typeof dnsHostingRegistry?.listZones === 'function'
     && typeof dnsProviderCredentialRegistry?.getForZone === 'function'
