@@ -33,6 +33,13 @@ export {
 } from './mail.js';
 
 export {
+  MailDataTemplateError,
+  mailDataTemplatePolicy,
+  mailDomainDataPath,
+  mailboxDataPath,
+} from './mail-data.js';
+
+export {
   MailQuotaTemplateError,
   mailQuotaTemplatePolicy,
   previewManagedMailQuotaConfiguration,
