@@ -149,10 +149,18 @@ export function createDockerComposeValidator({
     throw new DockerComposeValidationError('docker_compose_validator_dependencies_invalid', 'Docker Compose validator dependencies are invalid');
   }
 
-  return async function validateDockerCompose({ projectName: requestedProjectName, document: requestedDocument, environment = {} } = {}) {
+  return async function validateDockerCompose({
+    projectName: requestedProjectName,
+    document: requestedDocument,
+    environment = {},
+    interpolate = true,
+  } = {}) {
     const name = projectName(requestedProjectName);
     const source = composeDocument(requestedDocument);
     const normalizedEnvironment = normalizeEnvironment(environment);
+    if (typeof interpolate !== 'boolean') {
+      throw new DockerComposeValidationError('docker_compose_validation_mode_invalid', 'Docker Compose validation mode is invalid');
+    }
     const dockerPath = await findDockerPath(accessFn);
     if (!dockerPath) {
       throw new DockerComposeValidationError('docker_compose_unavailable', 'Docker CLI is not installed on this host');
@@ -168,14 +176,16 @@ export function createDockerComposeValidator({
       await chmod(composePath, 0o600);
       let output;
       try {
+        const configArgs = ['config'];
+        if (!interpolate) configArgs.push('--no-interpolate');
+        configArgs.push('--format', 'json');
         output = await execFn(dockerPath, [
           'compose',
           '--project-name', name,
           '--project-directory', directory,
           '--env-file', '/dev/null',
           '-f', composePath,
-          'config',
-          '--format', 'json',
+          ...configArgs,
         ], {
           cwd: directory,
           env: {
