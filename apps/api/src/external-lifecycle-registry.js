@@ -60,7 +60,7 @@ function canonicalName(value, prefix) {
 function errorCode(value, status, prefix) {
   if (status === 'degraded') {
     if (typeof value !== 'string' || !ERROR_CODE_PATTERN.test(value)) {
-      throw new ExternalLifecycleRegistryError(`invalid_${prefix}_error_code`, 'Degraded status requires a bounded authored error code');
+      throw new ExternalLifecycleRegistryError(`${prefix}_state_invalid`, 'Degraded status requires a bounded authored error code');
     }
     return value;
   }
@@ -341,6 +341,30 @@ export function createExternalLifecycleRegistry({
     return publicResource(resource, options);
   }
 
+  async function deleteResource(resourceId, { expectedRevision, confirmation } = {}) {
+    await ensureInitialized();
+    const normalizedId = id(resourceId, prefix);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new ExternalLifecycleRegistryError(`invalid_${prefix}_revision`, 'A positive expected revision is required');
+    }
+    const index = state[collectionKey].findIndex((candidate) => candidate.id === normalizedId);
+    if (index < 0) throw new ExternalLifecycleRegistryError(`${prefix}_not_found`, `${resourceType} was not found`, 404);
+    const resource = state[collectionKey][index];
+    if (resource.revision !== expectedRevision) {
+      throw new ExternalLifecycleRegistryError(`${prefix}_revision_conflict`, `${resourceType} changed before deletion`, 409);
+    }
+    if (resourceType === 'mail_domain' && resource.managementMode === LOCAL_MANAGEMENT_MODE && resource.status !== 'disabled') {
+      throw new ExternalLifecycleRegistryError('mail_domain_disable_required', 'Disable the local mail domain before deletion', 409);
+    }
+    const expectedConfirmation = `delete-${prefix.replaceAll('_', '-')}:${normalizedId}:${expectedRevision}`;
+    if (confirmation !== expectedConfirmation) {
+      throw new ExternalLifecycleRegistryError(`${prefix}_confirmation_mismatch`, `${resourceType} deletion confirmation does not match`, 409);
+    }
+    state[collectionKey].splice(index, 1);
+    await persist();
+    return Object.freeze({ id: normalizedId, resourceType, deleted: true });
+  }
+
   async function getResource(resourceId) {
     await ensureInitialized();
     const resource = state[collectionKey].find((candidate) => candidate.id === resourceId);
@@ -352,7 +376,7 @@ export function createExternalLifecycleRegistry({
     return state[collectionKey].map((resource) => publicResource(resource, options));
   }
 
-  return Object.freeze({ init, createResource, recordObservation, transitionLocalStatus, getResource, listResources });
+  return Object.freeze({ init, createResource, recordObservation, transitionLocalStatus, deleteResource, getResource, listResources });
 }
 
 export const externalLifecycleRegistryInternals = Object.freeze({
