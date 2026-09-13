@@ -205,3 +205,13 @@ export {
   databaseManagerPolicy,
   databaseManagerInternals,
 } from './database-manager.js';
+export {
+  createDatabaseCredentialHostStateStore,
+  DatabaseCredentialHostStateError,
+  databaseCredentialHostStateInternals,
+} from './database-credential-host-state.js';
+export {
+  createDatabaseCredentialManager,
+  DatabaseCredentialManagerError,
+  databaseCredentialManagerInternals,
+} from './database-credential-manager.js';
