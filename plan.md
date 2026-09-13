@@ -6,33 +6,29 @@ Bağlayıcı mimari ve güvenlik kuralları `agents.md` içindedir. Bu ortamda g
 
 Öncelik, panelin gerçek kullanılabilirlik ve Plesk-benzeri ürün tamamlanma oranını en hızlı yükselten işleri bitirmektir. Plesk importer en son geliştirme işi olarak tutulur.
 
-## 1. Docker / Compose — mevcut ana öncelik
+## 1. Yüksek etkili panel entegrasyonları — mevcut ana öncelik
 
-Compose desired-state, encrypted project/env/registry credential modeli, validation, build/pull/start/stop/restart durable job lifecycle, resource lock, receipt tabanlı lost-ack recovery, durable deploy history, bounded/redacted project runtime health/log backend'i, restart-safe explicit Managed Compose Website binding'i ve stage anında güncel doğrulanmış loopback published porttan üretilen Nginx target'ı kaynakta hazırdır; aşağıdaki işler kalmıştır.
+Managed Docker/Compose artık gerçek panel rotasında project create/replace, encrypted env, registry credential metadata/rotation, validation, build/pull/start/stop/restart preview+apply, history, service-scoped runtime health, actionable target diagnosis ve bounded log görünümüne bağlıdır. Sıradaki en yüksek etkili ürün işleri aşağıdadır.
 
-- [ ] Compose runtime health, container absence/unhealthy/restart/exit ve Nginx target readiness sonuçlarından secret-free actionable diagnosis üret.
-- [ ] Managed Compose binding değişikliği için preview/digest/typed-confirmation ve impact modelini Website/Domain resource graph'ına bağla.
-- [ ] Docker/Compose backend yüzeyini gerçek panel arayüzüne bağla: project create/edit, env, registry credential metadata, validate, lifecycle preview/apply, history, runtime health ve log görünümü.
+- [ ] Mail backend lifecycle'ını gerçek panel yüzeyine bağla: domain, mailbox, alias, quota, forwarding, DKIM, diagnostics, queue/log ve Roundcube yönetimi.
+- [ ] Website detayında Domain/SSL, Application/runtime/env, log, file, terminal, database, mail ve Docker ilişkilerini Plesk-benzeri net bir hiyerarşide birleştir.
+- [ ] Mevcut Job ekranını kaynak linki, stage/progress ve safe error/log metadata ile kullanılabilir hale getir; generic retry/force-success ekleme.
+
+## 2. Docker / Compose — kalan storage ve backup bağı
+
+Compose desired-state, encrypted project/env/registry credential modeli, validation, durable lifecycle/recovery/history, service-scoped health/log, restart-safe Managed Compose Website binding, stage anında doğrulanmış loopback Nginx target, secret-free actionable diagnosis, Website/Domain impact graph ve gerçek panel UI kaynakta hazırdır. Kalan Docker backend işi storage/backup tarafıdır.
+
 - [ ] Volume/bind inventory modelini ekle; named volume, bind mount ve ephemeral storage ayrımını public metadata'da açık göster.
 - [ ] Docker volume/bind için backup/restore politikasını genel backup manifestine bağlanabilecek şekilde tasarla; arbitrary host path backup'ını varsayılan olarak reddet.
 
 Gerçek Docker Engine/Compose host kabulü, crash/lost-ack provası ve secret/permission kontrolleri `todo.md` içinde kalır.
 
-## 2. Website / Domain / Nginx kalanları
+## 3. Website / Domain / Nginx kalanları
 
 - [ ] Canlı state'teki Website'e bağlı olmayan external-proxy Domain kayıtlarını explicit create/bind migrationıyla eşleştir; otomatik tahmin yapma.
 - [ ] Backup ve cron association registry'leri geldikten sonra Website/Domain impact preview'a gerçek dependency provider olarak bağla; gelene kadar blocker `unavailable` kalmalı.
 
 Gerçek DNS/Nginx/HTTPS, IDN, certificate ve provider acceptance işleri `todo.md` içindedir.
-
-## 3. Yüksek etkili panel entegrasyonları
-
-Backend'i hazır veya büyük ölçüde hazır olup ürün yüzeyinde eksik kalan alanlar, yeni düşük öncelikli backend modüllerinden önce panelde görünür hale getirilir.
-
-- [ ] Managed Docker/Compose için gerçek UI rotalarını bağla; placeholder/inert kontrol bırakma.
-- [ ] Mail backend lifecycle'ını gerçek panel yüzeyine bağla: domain, mailbox, alias, quota, forwarding, DKIM, diagnostics, queue/log ve Roundcube yönetimi.
-- [ ] Website detayında Domain/SSL, Application/runtime/env, log, file, terminal, database, mail ve Docker ilişkilerini Plesk-benzeri net bir hiyerarşide birleştir.
-- [ ] Mevcut Job ekranını kaynak linki, stage/progress ve safe error/log metadata ile kullanılabilir hale getir; generic retry/force-success ekleme.
 
 ## 4. Genel backup / restore ürünü
 
@@ -79,14 +75,15 @@ Backend'i hazır veya büyük ölçüde hazır olup ürün yüzeyinde eksik kala
 
 ## Uygulama sırası
 
-1. Managed Compose runtime/target diagnosis + Website/Domain impact graph.
-2. Managed Docker/Compose UI ve hazır Mail backend'inin UI entegrasyonu.
+1. Hazır Mail backend'ini gerçek panel UI'sine bağla; aynı turda Website içi kaynak hiyerarşisini güçlendir.
+2. Job detail'i kaynak linki/stage/progress/safe log metadata ile kullanılabilir hale getir.
 3. Docker volume/bind inventory ve backup policy.
 4. Genel backup/restore ürünü + UI.
 5. Cron + UI.
-6. Job detail kalanları, metrik ve bildirim katmanı.
-7. İzole migration/rollback kabulünden sonra legacy agent kod/paket yüzeyinin fiziksel temizliği.
-8. Enterprise UI/UX polish ve gerçek browser kabulü.
-9. Plesk read-only importer — **son iş**.
+6. Metrik ve bildirim katmanı.
+7. Kalan Website/Domain migration işi ve association provider bağları ilgili kaynaklar hazır oldukça kapatılır.
+8. İzole migration/rollback kabulünden sonra legacy agent kod/paket yüzeyinin fiziksel temizliği.
+9. Enterprise UI/UX polish ve gerçek browser kabulü.
+10. Plesk read-only importer — **son iş**.
 
 Her geliştirme diliminde ilgili source testleri aynı değişiklikle eklenir. Bu ortamda yapılamayan gerçek-host/browser/provider/package kabul işleri kod planına geri sokulmaz; `todo.md` içinde tutulur.
