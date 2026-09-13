@@ -15,6 +15,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import {
   mailForwardingTemplatePolicy,
+  mailSrsTemplatePolicy,
   mailSubmissionTemplatePolicy,
   previewManagedMailApplyPlan,
 } from '@yunpanel/config-templates';
@@ -31,12 +32,14 @@ const SIEVE_SHARED_MODE = 0o640;
 const SUBMISSION_SOCKET_MODE = 0o660;
 const GETENT = '/usr/bin/getent';
 const POSTCONF = '/usr/sbin/postconf';
+const SYSTEMCTL = '/usr/bin/systemctl';
 const MAX_OUTPUT = 128 * 1024;
 const UNMANAGED_REQUIRED_DIRECTORIES = Object.freeze([
   '/etc/postfix',
   '/etc/dovecot',
   '/etc/dovecot/conf.d',
   '/etc/rspamd/local.d',
+  '/etc/default',
 ]);
 
 export class MailConfigActivationError extends Error {
@@ -284,6 +287,24 @@ export function createMailConfigActivator({
     }
   }
 
+  async function assertRemovedPostfixParameters(plan) {
+    const names = plan.srs?.removePostfixParameters ?? [];
+    if (names.length === 0) return;
+    let content;
+    try { content = await readFileFn(mailConfigBackupInternals.postfixMainCfPath, 'utf8'); }
+    catch {
+      throw activationError('mail_postfix_verify_failed', 'Postfix main.cf could not be verified after SRS teardown');
+    }
+    const activeLines = String(content).split('\n')
+      .filter((line) => !line.trimStart().startsWith('#'))
+      .join('\n');
+    for (const name of names) {
+      if (new RegExp(`^\\s*${name}\\s*=`, 'mi').test(activeLines)) {
+        throw activationError('mail_postfix_verify_failed', 'Managed SRS Postfix parameter remained explicitly configured');
+      }
+    }
+  }
+
   async function assertPostfixMasterServices(plan) {
     for (const service of plan.postfixMasterServices) {
       const identity = `${service.service}/${service.type}`;
@@ -291,10 +312,10 @@ export function createMailConfigActivator({
       try {
         serviceOutput = boundedOutput(await run(POSTCONF, ['-M', identity], { timeout: 10_000, maxBuffer: MAX_OUTPUT }));
       } catch {
-        throw activationError('mail_postfix_master_verify_failed', 'Managed Postfix submission service could not be verified');
+        throw activationError('mail_postfix_master_verify_failed', 'Postfix submission service could not be verified');
       }
       if (serviceOutput.replace(/\s+/g, ' ') !== service.definition.replace(/\s+/g, ' ')) {
-        throw activationError('mail_postfix_master_verify_failed', 'Managed Postfix submission service did not match requested state');
+        throw activationError('mail_postfix_master_verify_failed', 'Postfix submission service did not match requested state');
       }
       for (const parameter of service.parameters) {
         const key = `${identity}/${parameter.name}`;
@@ -303,10 +324,10 @@ export function createMailConfigActivator({
         try {
           output = boundedOutput(await run(POSTCONF, ['-P', key], { timeout: 10_000, maxBuffer: MAX_OUTPUT }));
         } catch {
-          throw activationError('mail_postfix_master_verify_failed', 'Managed Postfix submission override could not be verified');
+          throw activationError('mail_postfix_master_verify_failed', 'Postfix submission override could not be verified');
         }
         if (output !== expected) {
-          throw activationError('mail_postfix_master_verify_failed', 'Managed Postfix submission override did not match requested state');
+          throw activationError('mail_postfix_master_verify_failed', 'Postfix submission override did not match requested state');
         }
       }
     }
@@ -368,10 +389,14 @@ export function createMailConfigActivator({
       await runCommand(command, 'mail_postconf_failed', 'Postfix managed parameter update failed');
     }
     await assertPostfixParameters(plan);
+    await assertRemovedPostfixParameters(plan);
     for (const command of plan.stages.configurePostfixMaster) {
       await runCommand(command, 'mail_postfix_master_apply_failed', 'Postfix submission service update failed');
     }
     await assertPostfixMasterServices(plan);
+    for (const command of plan.stages.configureSrs) {
+      await runCommand(command, 'mail_srs_service_restart_failed', 'PostSRSd could not be restarted with the managed SRS configuration');
+    }
     for (const command of plan.stages.validate) {
       await runCommand(command, 'mail_config_validation_failed', 'Managed mail configuration validation failed');
     }
@@ -422,12 +447,29 @@ export function createMailConfigActivator({
     }
   }
 
+  function backupArtifact(backup, targetPath) {
+    return backup.artifacts.find((artifact) => artifact.targetPath === targetPath) ?? null;
+  }
+
+  async function restoreSrsRuntime(backup) {
+    const defaults = backupArtifact(backup, mailSrsTemplatePolicy.defaultsPath);
+    const secret = backupArtifact(backup, mailSrsTemplatePolicy.secretPath);
+    if (!defaults || !secret) {
+      throw activationError('mail_restore_srs_state_invalid', 'Managed SRS rollback metadata is incomplete');
+    }
+    const command = defaults.present && secret.present
+      ? { file: SYSTEMCTL, args: ['restart', mailSrsTemplatePolicy.serviceUnit] }
+      : { file: SYSTEMCTL, args: ['stop', mailSrsTemplatePolicy.serviceUnit] };
+    await runCommand(command, 'mail_restore_srs_runtime_failed', 'Restored PostSRSd runtime state could not be confirmed');
+  }
+
   async function rollback(preview, plan, backup, transactionId) {
     const backupDirectory = backupManager.transactionDirectory(transactionId);
     for (const artifact of [...backup.artifacts].reverse()) {
       await restoreBackupFile(backupDirectory, artifact);
     }
     await removeCreatedDirectories(backup);
+    await restoreSrsRuntime(backup);
     for (const command of plan.rollback.validate) {
       await runCommand(command, 'mail_restore_validation_failed', 'Restored mail configuration validation failed');
     }
@@ -437,7 +479,7 @@ export function createMailConfigActivator({
     for (const command of plan.rollback.health) {
       await runCommand(command, 'mail_restore_health_failed', 'Restored mail service did not become healthy');
     }
-    const readiness = await readinessInspector.inspect(preview);
+    const readiness = await readinessInspector.inspect(preview, { phase: 'pre' });
     if (!readiness.ready || readiness.previewSha256 !== preview.sha256) {
       throw activationError('mail_restore_readiness_failed', 'Restored mail host readiness could not be confirmed');
     }
@@ -446,7 +488,7 @@ export function createMailConfigActivator({
 
   async function activateNow(preview, { transactionId } = {}) {
     const plan = previewManagedMailApplyPlan(preview);
-    const readiness = await readinessInspector.inspect(preview);
+    const readiness = await readinessInspector.inspect(preview, { phase: 'pre' });
     if (!readiness.ready || readiness.previewSha256 !== preview.sha256) {
       throw activationError('mail_host_not_ready', 'Managed mail host readiness requirements are not satisfied');
     }
@@ -478,7 +520,7 @@ export function createMailConfigActivator({
       await createManagedDirectories(backup, markMutation);
       await replaceManagedArtifacts(stage, plan.sha256, markMutation, vmailIdentity.gid);
       await runApplyCommands(plan, vmailIdentity.gid, postfixIdentity);
-      const finalReadiness = await readinessInspector.inspect(preview);
+      const finalReadiness = await readinessInspector.inspect(preview, { phase: 'post' });
       if (!finalReadiness.ready || finalReadiness.previewSha256 !== preview.sha256) {
         throw activationError('mail_post_apply_readiness_failed', 'Managed mail host readiness failed after activation');
       }
@@ -515,4 +557,5 @@ export const mailConfigActivatorInternals = Object.freeze({
   newManagedDirectoryMode: NEW_MANAGED_DIRECTORY_MODE,
   sieveSharedMode: SIEVE_SHARED_MODE,
   submissionSocketMode: SUBMISSION_SOCKET_MODE,
+  systemctlPath: SYSTEMCTL,
 });
