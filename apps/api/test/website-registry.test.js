@@ -12,6 +12,8 @@ const nodeAppId = '340344cf-4e57-4f70-946a-3c6e919e951d';
 const otherNodeAppId = 'c42e06d2-9bd1-4757-b320-5975ef454ee1';
 const dockerWorkloadId = '0bb78242-03a6-429f-9d17-7725c521437c';
 const otherDockerWorkloadId = '294dfeda-c5ba-4e2c-ab4f-e012c5c53880';
+const composeProjectId = 'f65e987b-c69b-4a6f-96f2-7868325da65f';
+const otherComposeProjectId = '4a50a2fd-bde9-40ce-8e91-2c0a27cb28f0';
 
 function applications() {
   return new Map([
@@ -39,6 +41,36 @@ function applications() {
   ]);
 }
 
+function composeProjects() {
+  return new Map([
+    [composeProjectId, {
+      id: composeProjectId,
+      serverId,
+      projectName: 'managed-web',
+      services: [{
+        name: 'web',
+        imageConfigured: true,
+        buildConfigured: false,
+        publishedPorts: [
+          { hostIp: '0.0.0.0', publishedPort: 18080, targetPort: 3000, protocol: 'tcp' },
+          { hostIp: '127.0.0.1', publishedPort: 18443, targetPort: 3443, protocol: 'tcp' },
+        ],
+      }],
+    }],
+    [otherComposeProjectId, {
+      id: otherComposeProjectId,
+      serverId: otherServerId,
+      projectName: 'other-server',
+      services: [{
+        name: 'web',
+        imageConfigured: true,
+        buildConfigured: false,
+        publishedPorts: [{ hostIp: '127.0.0.1', publishedPort: 28080, targetPort: 3000, protocol: 'tcp' }],
+      }],
+    }],
+  ]);
+}
+
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-websites-'));
   const filePath = path.join(root, 'website-registry.json');
@@ -53,16 +85,18 @@ async function fixture(t) {
       proxyTarget: { host: '::1', port: 8081, websocket: false },
     }],
   ]);
+  const projects = composeProjects();
   const registry = createWebsiteRegistry({
     filePath,
     now: () => Date.parse('2026-09-10T20:30:00.000Z'),
     serverExists: async (id) => id === serverId || id === otherServerId,
     getApplication: async (id) => apps.get(id) ?? null,
     getDockerWorkload: async (id) => workloads.get(id) ?? null,
+    getDockerComposeProject: async (id) => projects.get(id) ?? null,
   });
   t.after(() => rm(root, { recursive: true, force: true }));
   await registry.init();
-  return { root, filePath, apps, workloads, registry };
+  return { root, filePath, apps, workloads, projects, registry };
 }
 
 test('application-backed Website gets independent identity and canonical runtime binding', async (t) => {
@@ -77,6 +111,8 @@ test('application-backed Website gets independent identity and canonical runtime
   assert.equal(website.serverId, serverId);
   assert.equal(website.name, 'Marketing Site');
   assert.equal(website.applicationId, staticAppId);
+  assert.equal(website.dockerWorkloadId, null);
+  assert.equal(website.managedComposeBinding, null);
   assert.equal(website.runtimeType, 'static');
   assert.equal(website.documentRoot, `/var/www/yunpanel/apps/${staticAppId}/current`);
   assert.equal(website.unixUser, websiteRegistryInternals.appUnixUser(staticAppId));
@@ -105,6 +141,7 @@ test('Docker Website binds one tracked workload and derives its loopback target'
   });
   assert.equal(website.applicationId, null);
   assert.equal(website.dockerWorkloadId, dockerWorkloadId);
+  assert.equal(website.managedComposeBinding, null);
   assert.equal(website.runtimeType, 'docker');
   assert.equal(website.documentRoot, null);
   assert.equal(website.unixUser, null);
@@ -120,6 +157,83 @@ test('Docker Website binds one tracked workload and derives its loopback target'
       proxyTarget: { host: '127.0.0.1', port: 9999, websocket: true },
     }),
     (error) => error instanceof WebsiteRegistryError && error.code === 'website_proxy_target_not_applicable',
+  );
+});
+
+test('Managed Compose Website persists explicit service identity without transient published target', async (t) => {
+  const { filePath, projects, registry } = await fixture(t);
+  const managedComposeBinding = {
+    projectId: composeProjectId,
+    serviceName: 'web',
+    targetPort: 3000,
+    protocol: 'tcp',
+  };
+  const website = await registry.createWebsite({
+    serverId,
+    name: 'Managed Web',
+    runtimeType: 'docker',
+    managedComposeBinding,
+  });
+
+  assert.equal(website.applicationId, null);
+  assert.equal(website.dockerWorkloadId, null);
+  assert.equal(website.runtimeType, 'docker');
+  assert.deepEqual(website.managedComposeBinding, managedComposeBinding);
+  assert.equal(website.proxyTarget, null);
+
+  const persisted = JSON.parse(await readFile(filePath, 'utf8'));
+  assert.equal(persisted.version, 4);
+  assert.deepEqual(persisted.websites[0].managedComposeBinding, managedComposeBinding);
+  assert.equal(persisted.websites[0].proxyTarget, null);
+  assert.equal(JSON.stringify(persisted).includes('18080'), false);
+
+  projects.set(composeProjectId, {
+    ...projects.get(composeProjectId),
+    services: [{
+      ...projects.get(composeProjectId).services[0],
+      publishedPorts: [{ hostIp: '127.0.0.1', publishedPort: 19090, targetPort: 3000, protocol: 'tcp' }],
+    }],
+  });
+  const reopened = createWebsiteRegistry({
+    filePath,
+    serverExists: async () => true,
+    getDockerComposeProject: async (id) => projects.get(id) ?? null,
+  });
+  await reopened.init();
+  assert.deepEqual((await reopened.getWebsite(website.id)).managedComposeBinding, managedComposeBinding);
+});
+
+test('Managed Compose Website binding is same-server, ready and unique', async (t) => {
+  const { projects, registry } = await fixture(t);
+  const binding = { projectId: composeProjectId, serviceName: 'web', targetPort: 3000, protocol: 'tcp' };
+  await registry.createWebsite({ serverId, name: 'Managed One', runtimeType: 'docker', managedComposeBinding: binding });
+
+  await assert.rejects(
+    registry.createWebsite({ serverId, name: 'Managed Duplicate', runtimeType: 'docker', managedComposeBinding: binding }),
+    (error) => error instanceof WebsiteRegistryError && error.code === 'managed_compose_binding_already_bound',
+  );
+  await assert.rejects(
+    registry.createWebsite({
+      serverId,
+      name: 'Wrong Server',
+      runtimeType: 'docker',
+      managedComposeBinding: { projectId: otherComposeProjectId, serviceName: 'web', targetPort: 3000, protocol: 'tcp' },
+    }),
+    (error) => error instanceof WebsiteRegistryError && error.code === 'website_managed_compose_server_mismatch',
+  );
+
+  projects.set(composeProjectId, {
+    ...projects.get(composeProjectId),
+    services: [{ ...projects.get(composeProjectId).services[0], publishedPorts: [] }],
+  });
+  await assert.rejects(
+    registry.createWebsite({
+      serverId,
+      name: 'Not Ready',
+      runtimeType: 'docker',
+      managedComposeBinding: { ...binding, targetPort: 3443 },
+    }),
+    (error) => error instanceof WebsiteRegistryError && error.code === 'managed_compose_binding_not_ready',
   );
 });
 
@@ -236,6 +350,7 @@ test('v1 Website state migrates once to current revisioned state without changin
   delete legacy.websites[0].revision;
   delete legacy.websites[0].proxyTarget;
   delete legacy.websites[0].dockerWorkloadId;
+  delete legacy.websites[0].managedComposeBinding;
   await writeFile(filePath, JSON.stringify(legacy), { mode: 0o600 });
 
   const reopened = createWebsiteRegistry({
@@ -244,12 +359,19 @@ test('v1 Website state migrates once to current revisioned state without changin
     getApplication: async (id) => apps.get(id) ?? null,
   });
   await reopened.init();
-  assert.deepEqual(await reopened.getWebsite(created.id), { ...created, revision: 1, proxyTarget: null, dockerWorkloadId: null });
+  assert.deepEqual(await reopened.getWebsite(created.id), {
+    ...created,
+    revision: 1,
+    proxyTarget: null,
+    dockerWorkloadId: null,
+    managedComposeBinding: null,
+  });
   const migrated = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(migrated.version, 3);
+  assert.equal(migrated.version, 4);
   assert.equal(migrated.websites[0].revision, 1);
   assert.equal(migrated.websites[0].proxyTarget, null);
   assert.equal(migrated.websites[0].dockerWorkloadId, null);
+  assert.equal(migrated.websites[0].managedComposeBinding, null);
 
   const again = createWebsiteRegistry({
     filePath,
@@ -260,7 +382,7 @@ test('v1 Website state migrates once to current revisioned state without changin
   assert.equal((await again.getWebsite(created.id)).revision, 1);
 });
 
-test('v2 Website state adds a null Docker identity without changing proxy state', async (t) => {
+test('v2 Website state migrates through Docker identity and Managed Compose identity additions', async (t) => {
   const { filePath, registry } = await fixture(t);
   const created = await registry.createWebsite({
     serverId,
@@ -271,14 +393,40 @@ test('v2 Website state adds a null Docker identity without changing proxy state'
   const oldState = JSON.parse(await readFile(filePath, 'utf8'));
   oldState.version = 2;
   delete oldState.websites[0].dockerWorkloadId;
+  delete oldState.websites[0].managedComposeBinding;
   await writeFile(filePath, JSON.stringify(oldState), { mode: 0o600 });
 
   const reopened = createWebsiteRegistry({ filePath, serverExists: async () => true });
   await reopened.init();
-  assert.deepEqual(await reopened.getWebsite(created.id), { ...created, dockerWorkloadId: null });
+  assert.deepEqual(await reopened.getWebsite(created.id), {
+    ...created,
+    dockerWorkloadId: null,
+    managedComposeBinding: null,
+  });
   const migrated = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(migrated.version, 3);
+  assert.equal(migrated.version, 4);
   assert.equal(migrated.websites[0].dockerWorkloadId, null);
+  assert.equal(migrated.websites[0].managedComposeBinding, null);
+});
+
+test('v3 Website state adds a null Managed Compose identity without changing external Docker binding', async (t) => {
+  const { filePath, workloads, registry } = await fixture(t);
+  const created = await registry.createWebsite({ serverId, name: 'V3 Docker', runtimeType: 'docker', dockerWorkloadId });
+  const oldState = JSON.parse(await readFile(filePath, 'utf8'));
+  oldState.version = 3;
+  delete oldState.websites[0].managedComposeBinding;
+  await writeFile(filePath, JSON.stringify(oldState), { mode: 0o600 });
+
+  const reopened = createWebsiteRegistry({
+    filePath,
+    serverExists: async () => true,
+    getDockerWorkload: async (id) => workloads.get(id) ?? null,
+  });
+  await reopened.init();
+  assert.deepEqual(await reopened.getWebsite(created.id), { ...created, managedComposeBinding: null });
+  const migrated = JSON.parse(await readFile(filePath, 'utf8'));
+  assert.equal(migrated.version, 4);
+  assert.equal(migrated.websites[0].managedComposeBinding, null);
 });
 
 test('Website update preview binds exact revision and canonical application impact', async (t) => {
@@ -345,7 +493,7 @@ test('Website rebind keeps application unique and proxy transitions explicit', a
   assert.equal(bind.nextWebsite.proxyTarget, null);
 });
 
-test('Website rebind makes Docker and Application transitions explicit and revisioned', async (t) => {
+test('Website rebind makes external Docker, Managed Compose and Application transitions explicit and revisioned', async (t) => {
   const { registry } = await fixture(t);
   const website = await registry.createWebsite({
     serverId, name: 'Switchable', runtimeType: 'proxy',
@@ -363,11 +511,32 @@ test('Website rebind makes Docker and Application transitions explicit and revis
   });
   assert.equal(dockerWebsite.revision, 2);
 
+  const managedChanges = {
+    runtimeType: 'docker',
+    dockerWorkloadId: null,
+    managedComposeBinding: { projectId: composeProjectId, serviceName: 'web', targetPort: 3000, protocol: 'tcp' },
+  };
+  const managedPreview = await registry.previewWebsiteUpdate(website.id, managedChanges);
+  assert.equal(managedPreview.nextWebsite.dockerWorkloadId, null);
+  assert.deepEqual(managedPreview.nextWebsite.managedComposeBinding, managedChanges.managedComposeBinding);
+  assert.equal(managedPreview.nextWebsite.proxyTarget, null);
+  assert.deepEqual(managedPreview.impact, { nameChanged: false, bindingChanged: true, proxyTargetChanged: true });
+  const managedWebsite = await registry.updateWebsite({
+    websiteId: website.id,
+    expectedRevision: managedPreview.currentRevision,
+    changes: managedChanges,
+    previewFingerprint: managedPreview.fingerprint,
+  });
+  assert.equal(managedWebsite.revision, 3);
+  assert.deepEqual(managedWebsite.managedComposeBinding, managedChanges.managedComposeBinding);
+
   await assert.rejects(
     registry.previewWebsiteUpdate(website.id, { runtimeType: 'static', applicationId: staticAppId }),
-    (error) => error instanceof WebsiteRegistryError && error.code === 'website_application_docker_conflict',
+    (error) => error instanceof WebsiteRegistryError && error.code === 'website_application_managed_compose_conflict',
   );
-  const staticChanges = { runtimeType: 'static', applicationId: staticAppId, dockerWorkloadId: null };
+  const staticChanges = {
+    runtimeType: 'static', applicationId: staticAppId, dockerWorkloadId: null, managedComposeBinding: null,
+  };
   const staticPreview = await registry.previewWebsiteUpdate(website.id, staticChanges);
   const staticWebsite = await registry.updateWebsite({
     websiteId: website.id,
@@ -377,6 +546,7 @@ test('Website rebind makes Docker and Application transitions explicit and revis
   });
   assert.equal(staticWebsite.runtimeType, 'static');
   assert.equal(staticWebsite.dockerWorkloadId, null);
+  assert.equal(staticWebsite.managedComposeBinding, null);
   assert.equal(staticWebsite.applicationId, staticAppId);
   assert.equal(staticWebsite.proxyTarget, null);
 });
@@ -402,6 +572,29 @@ test('Website update rejects no-op and stale fingerprint without mutation', asyn
   assert.equal(preview.currentRevision, 1);
 });
 
+test('persisted Managed Compose binding fails closed when its published target disappears', async (t) => {
+  const { filePath, projects, registry } = await fixture(t);
+  await registry.createWebsite({
+    serverId,
+    name: 'Managed Restart',
+    runtimeType: 'docker',
+    managedComposeBinding: { projectId: composeProjectId, serviceName: 'web', targetPort: 3000, protocol: 'tcp' },
+  });
+  projects.set(composeProjectId, {
+    ...projects.get(composeProjectId),
+    services: [{ ...projects.get(composeProjectId).services[0], publishedPorts: [] }],
+  });
+  const reopened = createWebsiteRegistry({
+    filePath,
+    serverExists: async () => true,
+    getDockerComposeProject: async (id) => projects.get(id) ?? null,
+  });
+  await assert.rejects(
+    reopened.init(),
+    (error) => error instanceof WebsiteRegistryError && error.code === 'managed_compose_binding_not_ready',
+  );
+});
+
 test('corrupt persisted Website bindings fail closed on initialization', async (t) => {
   const { filePath, registry } = await fixture(t);
   const created = await registry.createWebsite({ serverId, name: 'Original', applicationId: staticAppId });
@@ -415,6 +608,7 @@ test('corrupt persisted Website bindings fail closed on initialization', async (
     (state) => { state.websites[0].unexpected = 'field'; },
     (state) => { state.websites[0].revision = 0; },
     (state) => { state.websites[0].proxyTarget = { host: 'example.com', port: 8443, websocket: true }; },
+    (state) => { delete state.websites[0].managedComposeBinding; },
   ]) {
     const state = structuredClone(original);
     mutate(state);
