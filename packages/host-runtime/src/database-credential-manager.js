@@ -118,12 +118,14 @@ function runSqlStdin(file, sql, { timeout = 30_000 } = {}) {
   });
 }
 
-function countOutput(output) {
+function parseCount(output, { max = Number.MAX_SAFE_INTEGER } = {}) {
   const value = String(output ?? '').trim();
-  if (!/^\d+$/.test(value)) throw new DatabaseCredentialManagerError('database_credential_evidence_invalid', 'Database account evidence is invalid');
+  if (!/^\d+$/.test(value)) {
+    throw new DatabaseCredentialManagerError('database_credential_evidence_invalid', 'Database count evidence is invalid');
+  }
   const count = Number(value);
-  if (!Number.isSafeInteger(count) || count < 0 || count > 1) {
-    throw new DatabaseCredentialManagerError('database_credential_evidence_invalid', 'Database account evidence is invalid');
+  if (!Number.isSafeInteger(count) || count < 0 || count > max) {
+    throw new DatabaseCredentialManagerError('database_credential_evidence_invalid', 'Database count evidence is invalid');
   }
   return count;
 }
@@ -198,7 +200,7 @@ export function createDatabaseCredentialManager({
   async function exists(connection, bundle) {
     const sql = `SELECT COUNT(*) FROM mysql.user WHERE User = ${quote(bundle.username)} AND Host = ${quote(bundle.host)};`;
     const { stdout } = await runSql(connection.client, sql);
-    return countOutput(stdout) === 1;
+    return parseCount(stdout, { max: 1 }) === 1;
   }
 
   async function snapshotAccount(connection, bundle, accountExists) {
@@ -241,19 +243,34 @@ export function createDatabaseCredentialManager({
     ]);
     return Object.freeze({
       schema: Object.freeze(parsePrivilegeRows(schema.stdout)),
-      global: countOutput(global.stdout),
-      table: countOutput(table.stdout),
-      column: countOutput(column.stdout),
-      routine: countOutput(routine.stdout),
+      global: parseCount(global.stdout),
+      table: parseCount(table.stdout),
+      column: parseCount(column.stdout),
+      routine: parseCount(routine.stdout),
     });
   }
 
+  function grantsSafeForManagedMutation(bundle, evidence) {
+    return evidence.global === 0 && evidence.table === 0 && evidence.column === 0 && evidence.routine === 0
+      && evidence.schema.every((entry) => entry.schema === bundle.databaseName);
+  }
+
   function grantsSatisfied(bundle, evidence) {
-    if (evidence.global !== 0 || evidence.table !== 0 || evidence.column !== 0 || evidence.routine !== 0) return false;
-    if (evidence.schema.some((entry) => entry.schema !== bundle.databaseName)) return false;
+    if (!grantsSafeForManagedMutation(bundle, evidence)) return false;
     const actual = evidence.schema.map((entry) => entry.privilege).sort();
     const expected = [...bundle.privileges].sort();
     return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
+  }
+
+  async function preflightManagedAccount(connection, bundle, marker, accountExists) {
+    if (accountExists && !marker) {
+      throw new DatabaseCredentialManagerError('database_credential_account_conflict', 'Database account already exists without YunPanel ownership evidence');
+    }
+    if (!accountExists) return;
+    const evidence = await inspectGrants(connection, bundle);
+    if (!grantsSafeForManagedMutation(bundle, evidence)) {
+      throw new DatabaseCredentialManagerError('database_credential_grant_drift', 'Database account has grants outside the managed schema boundary');
+    }
   }
 
   async function applyCredential(input) {
@@ -271,9 +288,7 @@ export function createDatabaseCredentialManager({
       throw new DatabaseCredentialManagerError('database_credential_host_state_mismatch', 'Database credential ownership marker does not match desired state identity');
     }
     const accountExists = await exists(connection, bundle);
-    if (accountExists && !marker) {
-      throw new DatabaseCredentialManagerError('database_credential_account_conflict', 'Database account already exists without YunPanel ownership evidence');
-    }
+    await preflightManagedAccount(connection, bundle, marker, accountExists);
     const snapshot = await snapshotAccount(connection, bundle, accountExists);
     let mutated = false;
     try {
@@ -306,7 +321,6 @@ export function createDatabaseCredentialManager({
       });
       return Object.freeze({
         version: 1,
-        engine: connection.engine,
         databaseCredentialId: bundle.databaseCredentialId,
         databaseBindingId: bundle.databaseBindingId,
         credentialRevision: bundle.credentialRevision,
@@ -344,9 +358,7 @@ export function createDatabaseCredentialManager({
       throw new DatabaseCredentialManagerError('database_credential_host_state_mismatch', 'Database credential ownership marker does not match desired state identity');
     }
     const accountExists = await exists(connection, bundle);
-    if (accountExists && !marker) {
-      throw new DatabaseCredentialManagerError('database_credential_account_conflict', 'Database account exists without YunPanel ownership evidence');
-    }
+    await preflightManagedAccount(connection, bundle, marker, accountExists);
     const snapshot = await snapshotAccount(connection, bundle, accountExists);
     let mutated = false;
     try {
@@ -360,7 +372,6 @@ export function createDatabaseCredentialManager({
       await hostStateStore.remove(bundle.databaseCredentialId);
       return Object.freeze({
         version: 1,
-        engine: connection.engine,
         databaseCredentialId: bundle.databaseCredentialId,
         databaseBindingId: bundle.databaseBindingId,
         credentialRevision: bundle.credentialRevision,
@@ -394,9 +405,11 @@ export const databaseCredentialManagerInternals = Object.freeze({
   allowedPrivileges: ALLOWED_PRIVILEGES,
   normalizeBundle,
   runSqlStdin,
+  parseCount,
   parsePrivilegeRows,
   parseCreateUser,
   parseGrantStatements,
+  grantsSafeForManagedMutation,
   grantsSatisfied,
   quote,
   account,
