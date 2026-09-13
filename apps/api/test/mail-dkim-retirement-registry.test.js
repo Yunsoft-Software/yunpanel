@@ -120,4 +120,4 @@ test('ambiguous current key drift fails closed instead of discarding retirement 
     (error) => error instanceof MailDkimRetirementRegistryError
       && error.code === 'mail_dkim_retirement_state_invalid',
   );
-});
+}));

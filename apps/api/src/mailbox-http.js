@@ -73,9 +73,6 @@ export function mountMailboxRoutes(app, {
   if (localServerId !== null && (!mailDomainRegistry || !domainRegistry)) {
     throw new Error('Local mailbox scope dependencies are required');
   }
-  if (localServerId !== null && !mailDeleteFinalizeService) {
-    throw new Error('Local mailbox deletion requires the guarded mail data finalizer');
-  }
 
   async function localMailDomain(mailDomainId) {
     const mailDomain = await mailDomainRegistry?.getMailDomain(mailDomainId);
@@ -178,6 +175,13 @@ export function mountMailboxRoutes(app, {
     emptyQuery(request.query);
     await localMailbox(request.params.mailboxId);
     if (localServerId !== null) {
+      if (!mailDeleteFinalizeService) {
+        throw new MailboxRegistryError(
+          'mailbox_delete_finalizer_unavailable',
+          'Guarded mailbox data deletion is unavailable',
+          503,
+        );
+      }
       const body = exactBody(request.body, FINALIZE_DELETE_FIELDS, 'mailbox_delete_input_invalid');
       const result = await mailDeleteFinalizeService.finalizeMailbox({ mailboxId: request.params.mailboxId, ...body });
       return response.json({ data: result, sideEffects: noHostSideEffects });

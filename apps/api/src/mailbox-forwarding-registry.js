@@ -272,7 +272,7 @@ export function createMailboxForwardingRegistry({
     await mailbox(id);
     return mutate(async (next) => {
       const existing = next.forwardings.find((candidate) => candidate.mailboxId === id);
-      const expected = revision(expectedRevision, { allowZero: existing == null });
+      const expected = revision(expectedRevision, { allowZero: true });
       if (!existing) {
         if (expected !== 0) {
           throw new MailboxForwardingRegistryError(

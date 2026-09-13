@@ -11,7 +11,7 @@ const mailDomainId = randomUUID();
 const mailboxId = randomUUID();
 const deleteJobId = randomUUID();
 
-function fixture({ mailboxRevision = 3, domainRevision = 5, impactBlocked = false, resultResourceId = mailboxId } = {}) {
+function fixture({ mailboxRevision = 3, domainRevision = 5, impactBlocked = false, resultResourceId = mailboxId, jobResourceRevision = 3 } = {}) {
   const calls = [];
   const mailbox = {
     id: mailboxId,
@@ -39,7 +39,7 @@ function fixture({ mailboxRevision = 3, domainRevision = 5, impactBlocked = fals
       backupId: 'mail-backup-0001',
       mailDomainId,
       resourceId: resultResourceId,
-      expectedResourceRevision: mailboxRevision,
+      expectedResourceRevision: jobResourceRevision,
       scope: 'mailbox',
       identity: 'owner@example.com',
       sourcePresent: true,
