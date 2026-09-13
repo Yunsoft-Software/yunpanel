@@ -14,6 +14,7 @@ import { safeLocalOperationError } from './local-execution-error.js';
 import {
   MailDataJobResultError,
   sanitizeMailDataBackupResult,
+  sanitizeMailDataDeleteResult,
   sanitizeMailDataRestoreResult,
 } from './mail-data-job-result.js';
 import { managedServiceStatePolicy } from './managed-service-state-policy.js';
@@ -49,6 +50,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.MAIL_DKIM_APPLY,
   OPERATIONS.MAIL_DATA_BACKUP,
   OPERATIONS.MAIL_DATA_RESTORE,
+  OPERATIONS.MAIL_DATA_DELETE,
   OPERATIONS.ROUNDCUBE_CONFIG_APPLY,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -720,9 +722,9 @@ function sanitizeMailDkimResult(job, result) {
 
 function sanitizeMailDataResult(job, result) {
   try {
-    return job.operation === OPERATIONS.MAIL_DATA_BACKUP
-      ? sanitizeMailDataBackupResult(job, result)
-      : sanitizeMailDataRestoreResult(job, result);
+    if (job.operation === OPERATIONS.MAIL_DATA_BACKUP) return sanitizeMailDataBackupResult(job, result);
+    if (job.operation === OPERATIONS.MAIL_DATA_DELETE) return sanitizeMailDataDeleteResult(job, result);
+    return sanitizeMailDataRestoreResult(job, result);
   } catch (error) {
     if (error instanceof MailDataJobResultError || error?.code === 'invalid_job_result') {
       throw new JobRegistryError('invalid_job_result', error.message);
@@ -763,7 +765,9 @@ function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.DNS_RECORD_APPLY) return sanitizeDnsRecordResult(job, result);
   if (job.operation === OPERATIONS.MAIL_CONFIG_APPLY) return sanitizeMailConfigResult(job, result);
   if (job.operation === OPERATIONS.MAIL_DKIM_APPLY) return sanitizeMailDkimResult(job, result);
-  if ([OPERATIONS.MAIL_DATA_BACKUP, OPERATIONS.MAIL_DATA_RESTORE].includes(job.operation)) return sanitizeMailDataResult(job, result);
+  if ([OPERATIONS.MAIL_DATA_BACKUP, OPERATIONS.MAIL_DATA_RESTORE, OPERATIONS.MAIL_DATA_DELETE].includes(job.operation)) {
+    return sanitizeMailDataResult(job, result);
+  }
   if (job.operation === OPERATIONS.ROUNDCUBE_CONFIG_APPLY) return sanitizeRoundcubeConfigResult(job, result);
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
