@@ -22,7 +22,7 @@ function fixture() {
     mailboxId: mailbox.id,
     source: mailbox.address,
     mode: 'copy',
-    destinations: ['backup@elsewhere.test'],
+    destinations: ['backup@example.com'],
   }];
   const service = createMailConfigurationService({
     mailDomainRegistry: {
@@ -31,7 +31,9 @@ function fixture() {
     },
     mailboxRegistry: {
       listMailboxes: async () => [{ ...mailbox }],
-      materializeEnabledAccounts: async () => [{ address: mailbox.address, passwordHash: HASH }],
+      materializeEnabledAccounts: async () => mailbox.enabled
+        ? [{ address: mailbox.address, passwordHash: HASH }]
+        : [],
     },
     mailAliasRegistry: { materializeEnabledAliases: async () => [] },
     mailboxQuotaRegistry: { listQuotas: async () => [] },
@@ -62,7 +64,7 @@ test('mail configuration digest and counts change with enabled mailbox forwardin
     mailboxId: 'mailbox-1',
     source: 'owner@example.com',
     mode: 'redirect',
-    destinations: ['other@elsewhere.test'],
+    destinations: ['other@example.com'],
   }]);
   const second = await state.service.previewTransition(transition);
 
@@ -72,7 +74,7 @@ test('mail configuration digest and counts change with enabled mailbox forwardin
   assert.equal(first.configuration.requirements.includes('dovecot_sieve'), true);
   assert.notEqual(first.configurationSha256, second.configurationSha256);
   assert.notEqual(first.previewDigest, second.previewDigest);
-  assert.doesNotMatch(JSON.stringify(first), /backup@elsewhere\.test|redirect :copy/);
+  assert.doesNotMatch(JSON.stringify(first), /backup@example\.com|redirect :copy/);
 });
 
 test('forwarding change after preview is rejected before host materialization', async () => {

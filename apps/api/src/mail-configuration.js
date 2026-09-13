@@ -60,7 +60,7 @@ function publicPostfixParameter(parameter) {
     return Object.freeze({
       name: parameter.name,
       protected: true,
-      valueSha256: digest(parameter.value),
+      valueSha256: createHash('sha256').update(parameter.value).digest('hex'),
     });
   }
   return Object.freeze({ name: parameter.name, value: parameter.value });

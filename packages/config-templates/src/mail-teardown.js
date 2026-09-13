@@ -38,7 +38,6 @@ export function previewManagedMailEmptyConfiguration() {
     Object.freeze({ name: 'virtual_alias_maps', value: `hash:${mailTemplatePolicy.postfixVirtualAliasMapPath}` }),
     Object.freeze({ name: 'virtual_mailbox_domains', value: `hash:${mailTemplatePolicy.postfixVirtualDomainMapPath}` }),
     Object.freeze({ name: 'virtual_mailbox_maps', value: `hash:${mailTemplatePolicy.postfixVirtualMailboxMapPath}` }),
-    Object.freeze({ name: 'virtual_transport', value: 'lmtp:unix:private/dovecot-lmtp' }),
   ].sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
   const artifacts = Object.freeze([
     ...postfix.artifacts,

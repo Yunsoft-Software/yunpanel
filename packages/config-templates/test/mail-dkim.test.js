@@ -70,7 +70,7 @@ test('rejects duplicate domains, unsafe selectors and noncanonical public keys',
     (error) => error instanceof MailDkimTemplateError && error.code === 'invalid_dkim_selector',
   );
   assert.throws(
-    () => renderRspamdDkimSigningConfig([{ domain: 'example.com', selector: 'mail', publicKey: PUBLIC_A.replace(/=$/, '') }]),
+    () => renderRspamdDkimSigningConfig([{ domain: 'example.com', selector: 'mail', publicKey: `${PUBLIC_A}=` }]),
     (error) => error instanceof MailDkimTemplateError && error.code === 'invalid_dkim_public_key',
   );
   assert.equal(mailDkimTemplatePolicy.keyPath('example.com', 'mail'), '/etc/rspamd/dkim/yunpanel/example.com.mail.key');

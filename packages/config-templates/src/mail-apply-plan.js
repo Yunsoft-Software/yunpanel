@@ -150,8 +150,18 @@ function canonicalSrsState(preview, artifacts, postfixParameters) {
   }
   if (!preview.srs || preview.srs.required !== true
     || preview.srs.serviceUnit !== mailSrsTemplatePolicy.serviceUnit
+    || preview.srs.packageName !== mailSrsTemplatePolicy.packageName
+    || preview.srs.forwardEndpoint !== `tcp:${mailSrsTemplatePolicy.listenAddress}:${mailSrsTemplatePolicy.forwardPort}`
+    || preview.srs.reverseEndpoint !== `tcp:${mailSrsTemplatePolicy.listenAddress}:${mailSrsTemplatePolicy.reversePort}`
+    || typeof preview.srs.rewriteDomain !== 'string' || preview.srs.rewriteDomain.length < 1
+    || !Number.isSafeInteger(preview.srs.externalDestinationCount) || preview.srs.externalDestinationCount < 1
+    || !Number.isSafeInteger(preview.srs.secretRevision) || preview.srs.secretRevision < 1
+    || !Number.isSafeInteger(preview.srs.secretBytes) || preview.srs.secretBytes < 1
     || !byPath.has(mailSrsTemplatePolicy.defaultsPath)
-    || !byPath.has(mailSrsTemplatePolicy.secretPath)) {
+    || !byPath.has(mailSrsTemplatePolicy.secretPath)
+    || preview.srs.defaultsSha256 !== byPath.get(mailSrsTemplatePolicy.defaultsPath).sha256
+    || preview.srs.secretSha256 !== byPath.get(mailSrsTemplatePolicy.secretPath).sha256
+    || byPath.get(mailSrsTemplatePolicy.secretPath).sensitive !== true) {
     throw new MailApplyPlanError('invalid_mail_srs_state', 'Active managed SRS state is incomplete');
   }
   for (const expected of mailSrsTemplatePolicy.postfixParameters) {

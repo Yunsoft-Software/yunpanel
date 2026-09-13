@@ -72,7 +72,7 @@ test('non-SRS apply plan explicitly removes all YunPanel SRS canonical overrides
     'sender_canonical_classes',
     'sender_canonical_maps',
   ]);
-  assert.deepEqual(plan.stages.configureSrs.map(commandIdentity), [
+  assert.deepEqual(plan.stages.configurePostfix.filter((command) => command.args[0] === '-X').map(commandIdentity), [
     '/usr/sbin/postconf -X recipient_canonical_classes',
     '/usr/sbin/postconf -X recipient_canonical_maps',
     '/usr/sbin/postconf -X sender_canonical_classes',

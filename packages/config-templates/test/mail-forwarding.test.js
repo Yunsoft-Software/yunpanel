@@ -40,7 +40,7 @@ test('renders deterministic copy and redirect mailbox forwarding policies', () =
 });
 
 test('no forwarding policies produce a safe no-op global sieve script', () => {
-  assert.equal(renderManagedMailboxForwardingSieve([]), 'require ["envelope", "copy"];\n\n\n');
+  assert.equal(renderManagedMailboxForwardingSieve([]), 'require ["envelope", "copy"];\n\n');
 });
 
 test('forwarding preview exposes only fixed compile metadata and deterministic digest', () => {

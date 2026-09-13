@@ -135,6 +135,7 @@ export function previewManagedMailboxForwardingSieve(forwardings = []) {
     bytes: Buffer.byteLength(content),
     policies: normalized.length,
     content,
+    sensitive: false,
     compile: Object.freeze({ file: '/usr/bin/sievec', args: Object.freeze([FORWARDING_SIEVE_PATH]) }),
     sideEffects: false,
   });
