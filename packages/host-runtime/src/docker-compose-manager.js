@@ -115,6 +115,11 @@ function dockerConfig(credentials) {
   return JSON.stringify({ auths });
 }
 
+function projectWorkspacePath(root, projectId) {
+  const digest = createHash('sha256').update(projectId).digest('hex');
+  return path.join(root, 'projects', digest);
+}
+
 export function createDockerComposeManager({
   root = DEFAULT_ROOT,
   accessFn = access,
@@ -142,7 +147,17 @@ export function createDockerComposeManager({
 
     await mkdir(root, { recursive: true, mode: 0o700 });
     await chmod(root, 0o700);
-    const directory = await mkdtemp(path.join(root, `.run-${randomSuffix()}-`));
+    const projectsRoot = path.join(root, 'projects');
+    await mkdir(projectsRoot, { recursive: true, mode: 0o700 });
+    await chmod(projectsRoot, 0o700);
+    const projectDirectory = projectWorkspacePath(root, input.projectId);
+    await mkdir(projectDirectory, { recursive: true, mode: 0o700 });
+    await chmod(projectDirectory, 0o700);
+
+    const runsRoot = path.join(root, 'runs');
+    await mkdir(runsRoot, { recursive: true, mode: 0o700 });
+    await chmod(runsRoot, 0o700);
+    const directory = await mkdtemp(path.join(runsRoot, `.run-${randomSuffix()}-`));
     await chmod(directory, 0o700);
     const composePath = path.join(directory, 'compose.yaml');
     const dockerConfigDir = path.join(directory, 'docker-config');
@@ -158,12 +173,12 @@ export function createDockerComposeManager({
         await execFn(dockerPath, [
           'compose',
           '--project-name', input.projectName,
-          '--project-directory', directory,
+          '--project-directory', projectDirectory,
           '--env-file', '/dev/null',
           '-f', composePath,
           ...command,
         ], {
-          cwd: directory,
+          cwd: projectDirectory,
           timeout: ['build', 'pull'].includes(action) ? 60 * 60 * 1000 : 10 * 60 * 1000,
           env: {
             PATH: '/usr/bin:/bin',
@@ -211,4 +226,5 @@ export const dockerComposeManagerInternals = Object.freeze({
   normalizeEnvironment,
   normalizeCredentials,
   dockerConfig,
+  projectWorkspacePath,
 });
