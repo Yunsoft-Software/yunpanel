@@ -13,6 +13,8 @@ import {
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
 import { mountApplicationProcessRoutes } from './application-process-http.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
+import { isBackupHttpError, mountBackupRoutes } from './backup-http.js';
+import { createBackupResourceProvider } from './backup-resource-provider.js';
 import { CertificateRegistryError, createCertificateRegistry } from './certificate-registry.js';
 import { CertificateMaterialError, createCertificateMaterialManager } from './certificate-material-manager.js';
 import { mountCertificateRoutes } from './certificate-http.js';
@@ -104,6 +106,8 @@ import { createWebsiteMigrationPolicyStore, WebsiteMigrationPolicyError } from '
 import { WebsiteMigrationPreviewError } from './website-migration-preview.js';
 import { WebsiteMigrationRollbackError } from './website-migration-rollback.js';
 import { createWebsiteRegistry, WebsiteRegistryError } from './website-registry.js';
+
+const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
 export { API_VERSION } from './core-app.js';
 
@@ -218,6 +222,7 @@ export function createApp({
   });
   const app = express();
   const localRegistry = localServerRegistryView(registry, localServerId);
+  const applicationEnvironmentRegistry = options.applicationEnvironmentRegistry ?? null;
   const files = siteFileManager ?? createSiteFileManager({ websiteRegistry, localServerId });
   const readiness = dnsReadinessService ?? createDnsReadinessService({
     dnsHostingRegistry,
@@ -291,6 +296,18 @@ export function createApp({
   app.disable('x-powered-by');
   mountSiteFileRoutes(app, { siteFileManager: files });
   app.use(express.json({ limit: '256kb' }));
+  mountBackupRoutes(app, {
+    backupResourceProviderForRequest: (request) => createBackupResourceProvider({
+      serverRegistry: localRegistry,
+      dockerComposeProjectRegistry: request[DOCKER_COMPOSE_API_CONTEXT]?.projectRegistry,
+      applicationRegistry,
+      applicationEnvironmentRegistry,
+      loadDatabaseInventory: (serverId) => databaseHttpInternals.latestDatabaseSnapshot(jobRegistry, serverId),
+      mailDomainRegistry,
+      domainRegistry,
+      mailDataOperationsService: mailDataOperations,
+    }),
+  });
   mountCertificateRoutes(app, {
     domainRegistry,
     certificateRegistry,
@@ -468,7 +485,8 @@ export function createApp({
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
     if (
-      error instanceof DatabaseBindingHttpError
+      isBackupHttpError(error)
+      || error instanceof DatabaseBindingHttpError
       || error instanceof DatabaseBindingRegistryError
       || error instanceof DatabaseCredentialApplyError
       || error instanceof DatabaseCredentialHttpError
