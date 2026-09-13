@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
   createDockerComposeProjectRegistry,
+  dockerComposeProjectRegistryInternals,
   DockerComposeProjectRegistryError,
 } from '../src/docker-compose-project-registry.js';
 
@@ -94,4 +95,43 @@ test('compose project update requires current revision and matching validation d
     }),
     (error) => error instanceof DockerComposeProjectRegistryError && error.code === 'docker_compose_validation_invalid',
   );
+});
+
+test('legacy service summaries restart with empty published ports and storage mounts', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-compose-project-migration-'));
+  const filePath = path.join(root, 'projects.json');
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const masterKey = randomBytes(32);
+  const timestamp = '2026-09-13T05:00:00.000Z';
+  await writeFile(filePath, JSON.stringify({
+    version: 1,
+    projects: [{
+      id: projectId,
+      serverId,
+      projectName: 'shop_app',
+      revision: 1,
+      composeSha256: createHash('sha256').update(first).digest('hex'),
+      composeBytes: Buffer.byteLength(first),
+      services: [{ name: 'web', imageConfigured: true, buildConfigured: false }],
+      networks: ['default'],
+      volumes: [],
+      secretCount: 0,
+      configCount: 0,
+      encryptedDocument: dockerComposeProjectRegistryInternals.encryptDocument(masterKey, projectId, 1, first),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }],
+  }, null, 2), { encoding: 'utf8', mode: 0o600 });
+  const registry = createDockerComposeProjectRegistry({
+    filePath,
+    masterKey,
+    serverExists: async (id) => id === serverId,
+  });
+  await registry.init();
+  const project = await registry.getProject(projectId);
+  assert.deepEqual(project.services[0].publishedPorts, []);
+  assert.deepEqual(project.services[0].storageMounts, []);
+  const migrated = JSON.parse(await readFile(filePath, 'utf8'));
+  assert.deepEqual(migrated.projects[0].services[0].publishedPorts, []);
+  assert.deepEqual(migrated.projects[0].services[0].storageMounts, []);
 });
