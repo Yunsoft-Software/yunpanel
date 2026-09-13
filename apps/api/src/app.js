@@ -302,6 +302,8 @@ export function createApp({
       dockerComposeProjectRegistry: request[DOCKER_COMPOSE_API_CONTEXT]?.projectRegistry,
       applicationRegistry,
       applicationEnvironmentRegistry,
+      websiteRegistry,
+      databaseBindingRegistry,
       loadDatabaseInventory: (serverId) => databaseHttpInternals.latestDatabaseSnapshot(jobRegistry, serverId),
       mailDomainRegistry,
       domainRegistry,
