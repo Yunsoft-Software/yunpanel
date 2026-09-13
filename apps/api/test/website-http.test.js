@@ -33,9 +33,17 @@ async function fixture(t) {
     async createWebsite(input) {
       calls.push(['create', input]);
       const website = {
-        id: 'website-1', serverId: input.serverId, name: input.name, applicationId: input.applicationId,
-        runtimeType: input.runtimeType ?? 'static', documentRoot: '/managed/current', unixUser: 'yunapp-123456789abc',
-        proxyTarget: input.proxyTarget, revision: 1,
+        id: 'website-1',
+        serverId: input.serverId,
+        name: input.name,
+        applicationId: input.applicationId,
+        dockerWorkloadId: input.dockerWorkloadId,
+        managedComposeBinding: input.managedComposeBinding,
+        runtimeType: input.runtimeType ?? 'static',
+        documentRoot: '/managed/current',
+        unixUser: 'yunapp-123456789abc',
+        proxyTarget: input.proxyTarget,
+        revision: 1,
       };
       websites.push(website);
       return { ...website };
@@ -51,7 +59,10 @@ async function fixture(t) {
         nextWebsite: { ...website, ...changes },
         impact: {
           nameChanged: changes.name !== undefined && changes.name !== website.name,
-          bindingChanged: Object.hasOwn(changes, 'applicationId') || Object.hasOwn(changes, 'runtimeType'),
+          bindingChanged: Object.hasOwn(changes, 'applicationId')
+            || Object.hasOwn(changes, 'dockerWorkloadId')
+            || Object.hasOwn(changes, 'managedComposeBinding')
+            || Object.hasOwn(changes, 'runtimeType'),
           proxyTargetChanged: Object.hasOwn(changes, 'proxyTarget'),
         },
         fingerprint: 'a'.repeat(64),
@@ -105,7 +116,10 @@ test('Website collection and detail return actual Website records', async (t) =>
   assert.equal(detail.status, 200);
   assert.equal((await detail.json()).data.name, 'Site');
   assert.deepEqual(f.calls.slice(0, 3), [
-    ['create', { serverId: 'server-1', name: 'Site', applicationId: 'app-1', dockerWorkloadId: null, runtimeType: null, proxyTarget: null }],
+    ['create', {
+      serverId: 'server-1', name: 'Site', applicationId: 'app-1', dockerWorkloadId: null,
+      managedComposeBinding: null, runtimeType: null, proxyTarget: null,
+    }],
     ['list', { serverId: 'server-1' }],
     ['get', 'website-1'],
   ]);
@@ -135,8 +149,62 @@ test('Website create forwards an explicit Docker workload identity without a cal
   const call = f.calls.find(([name]) => name === 'create');
   assert.deepEqual(call, ['create', {
     serverId: 'server-1', name: 'Docker Site', applicationId: null,
-    dockerWorkloadId: 'workload-1', runtimeType: 'docker', proxyTarget: null,
+    dockerWorkloadId: 'workload-1', managedComposeBinding: null, runtimeType: 'docker', proxyTarget: null,
   }]);
+});
+
+test('Website HTTP forwards Managed Compose identity through create and revisioned preview/apply', async (t) => {
+  const f = await fixture(t);
+  const managedComposeBinding = {
+    projectId: 'project-1',
+    serviceName: 'web',
+    targetPort: 3000,
+    protocol: 'tcp',
+  };
+  const created = await f.request('/api/websites', {
+    method: 'POST',
+    body: JSON.stringify({
+      serverId: 'server-1',
+      name: 'Managed Compose Site',
+      applicationId: null,
+      managedComposeBinding,
+      runtimeType: 'docker',
+    }),
+  });
+  assert.equal(created.status, 201);
+  assert.deepEqual(f.calls.find(([name]) => name === 'create'), ['create', {
+    serverId: 'server-1',
+    name: 'Managed Compose Site',
+    applicationId: null,
+    dockerWorkloadId: null,
+    managedComposeBinding,
+    runtimeType: 'docker',
+    proxyTarget: null,
+  }]);
+
+  const nextBinding = { ...managedComposeBinding, targetPort: 3443 };
+  const previewResponse = await f.request('/api/websites/website-1/update-preview', {
+    method: 'POST',
+    body: JSON.stringify({ changes: { managedComposeBinding: nextBinding, runtimeType: 'docker' } }),
+  });
+  assert.equal(previewResponse.status, 200);
+  const preview = (await previewResponse.json()).data;
+  assert.equal(preview.impact.bindingChanged, true);
+  assert.equal(preview.impact.requiresDomainRestage, true);
+
+  const applied = await f.request('/api/websites/website-1', {
+    method: 'PATCH',
+    body: JSON.stringify({
+      revision: preview.currentRevision,
+      changes: { managedComposeBinding: nextBinding, runtimeType: 'docker' },
+      previewDigest: preview.previewDigest,
+      confirmation: preview.confirmation,
+    }),
+  });
+  assert.equal(applied.status, 200);
+  assert.deepEqual((await applied.json()).data.website.managedComposeBinding, nextBinding);
+  assert.equal(f.calls.some(([name, , changes]) => name === 'preview-update'
+    && changes?.managedComposeBinding?.targetPort === 3443), true);
 });
 
 test('Website create rejects caller-controlled root user and unknown fields before registry mutation', async (t) => {
