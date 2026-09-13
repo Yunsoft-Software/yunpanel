@@ -8,13 +8,12 @@ Bağlayıcı mimari ve güvenlik kuralları `agents.md` içindedir. Bu ortamda g
 
 Managed Docker/Compose ve Mail gerçek panel rotalarına bağlıdır. Website detayında Domain/SSL, Application/runtime/env/log/file/terminal ile explicit database/mail/Managed Compose ilişkileri tek site kaynak hiyerarşisinde görünür. Job list/detail kaynak linki, yaşam döngüsü stage/progress, allowlist'li sonuç metadata, güvenli diagnosis/error code ve bounded/redacted deploy log görünümüne sahiptir; generic retry/force-success yolu yoktur.
 
-Managed Compose storage için stable versioned resource kimliği ve fail-closed policy hazırdır: named volume/proje bind `include`, ephemeral `exclude`, arbitrary host bind `reject`. Application release/config/env safe snapshot resource modeli, database inventory resource modeli ve mevcut guarded Mail Data backup preview'ından türetilen mail resource modeli de hazırdır. Multi-resource backup planı default olarak yalnız `include` kaynakları seçer; explicit seçim, policy ve exact source snapshot state deterministic preview digestine bağlanır.
+Genel backup preview artık canlı state'ten üretilir. Managed Compose storage için stable versioned resource kimliği ve fail-closed policy hazırdır: named volume/proje bind `include`, ephemeral `exclude`, arbitrary host bind `reject`. Application release/config/env safe snapshot resource modeli, son doğrulanmış database inventory resource modeli ve mevcut guarded Mail Data backup preview'ından türetilen domain-level mail resource modeli aynı deterministic planda birleşir. Preview authenticated Owner management rotasında expose edilir; explicit seçim, policy ve exact source snapshot state preview digestine bağlanır. Database inventory hiç doğrulanmamışsa genel backup preview sessizce database'i atlamaz, yeni inspect ister.
 
 Database ve Mail için ayrı bir genel-backup dump motoru yazılmayacaktır: database private dump/restore lifecycle ile mail data backup/restore lifecycle kaynakta zaten durable job, checksum/evidence, preview/recovery ve local execution sınırlarına sahiptir. Genel backup ürünü bunları orkestre eder; mevcut operation-specific recovery'yi bypass etmez.
 
 ## 1. Genel backup / restore ürünü
 
-- [ ] Docker/Application/Database/Mail resource provider katmanını gerçek registry/inventory/guarded preview kaynaklarına bağla ve multi-resource backup preview'ı authenticated Owner API'de expose et.
 - [ ] Backup planına Website/Application/Database/Docker/Mail dependency/impact metadata'sını ekle; resource list/state değişiminde eski digest fail-closed kalmalı.
 - [ ] Genel backup execution orchestrator'ını ekle: Database ve Mail için mevcut güvenli backup motorlarını reuse et; Application release/config/env ve Managed Docker named-volume/project-bind için eksik executor'ları ekle. Ephemeral storage'ı atla, arbitrary host bind'i varsayılan reddet.
 - [ ] Local target için versioned aggregate backup manifest/artifact layout, per-resource checksum, aggregate checksum, private permissions ve retention lifecycle ekle.
@@ -71,13 +70,14 @@ Gerçek DNS/Nginx/HTTPS, IDN, certificate ve provider acceptance işleri `todo.m
 
 ## Uygulama sırası
 
-1. Genel backup resource provider + authenticated preview; ardından aggregate execution/local target ve UI.
-2. S3-compatible target + retention; sonra aggregate restore orchestration + UI.
-3. Cron + UI.
-4. Metrik ve bildirim katmanı.
-5. Kalan Website/Domain migration işi ve association provider bağları ilgili kaynaklar hazır oldukça kapatılır.
-6. İzole migration/rollback kabulünden sonra legacy agent kod/paket yüzeyinin fiziksel temizliği.
-7. Enterprise UI/UX polish ve gerçek browser kabulü.
-8. Plesk read-only importer — **son iş**.
+1. Backup dependency/impact metadata; ardından aggregate execution + local target.
+2. Backup panel/history/target UI; S3-compatible target + retention.
+3. Aggregate restore orchestration + UI.
+4. Cron + UI.
+5. Metrik ve bildirim katmanı.
+6. Kalan Website/Domain migration işi ve association provider bağları ilgili kaynaklar hazır oldukça kapatılır.
+7. İzole migration/rollback kabulünden sonra legacy agent kod/paket yüzeyinin fiziksel temizliği.
+8. Enterprise UI/UX polish ve gerçek browser kabulü.
+9. Plesk read-only importer — **son iş**.
 
 Her geliştirme diliminde ilgili source testleri aynı değişiklikle eklenir. Bu ortamda yapılamayan gerçek-host/browser/provider/package kabul işleri kod planına geri sokulmaz; `todo.md` içinde tutulur.
