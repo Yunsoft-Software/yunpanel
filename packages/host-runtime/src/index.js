@@ -19,6 +19,11 @@ export {
   dockerComposeValidatorInternals,
   summarizeDockerComposeConfig,
 } from './docker-compose-validator.js';
+export {
+  createDockerComposeManager,
+  DockerComposeManagerError,
+  dockerComposeManagerInternals,
+} from './docker-compose-manager.js';
 export { createNginxInspector, inspectNginx, parseNginxConfigMetadata } from './nginx-inspector.js';
 export { createNginxManager, nginxManager, NginxManagerError } from './nginx-manager.js';
 export {
