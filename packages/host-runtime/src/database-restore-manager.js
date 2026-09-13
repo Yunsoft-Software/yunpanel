@@ -35,10 +35,11 @@ async function spawnRestore(program, args, dumpPath) {
     });
     let stderrBytes = 0;
     let settled = false;
+    let timer = null;
     const finish = (error = null) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       input.destroy();
       if (error) reject(error); else resolve();
     };
@@ -64,7 +65,7 @@ async function spawnRestore(program, args, dumpPath) {
       }
       finish();
     });
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       child.kill('SIGKILL');
       finish(new DatabaseRestoreError('database_restore_timeout', 'Database restore process timed out'));
     }, 60 * 60 * 1000);
@@ -98,8 +99,7 @@ export function createDatabaseRestoreManager({
   dumpToFile = databaseDumpManagerInternals.defaultDumpToFile,
 } = {}) {
   if (typeof transactionRoot !== 'string' || !path.isAbsolute(transactionRoot)
-    || !databaseManager || typeof databaseManager.inspect !== 'function'
-    || typeof databaseManager.createDatabase !== 'function' || typeof databaseManager.dropDatabase !== 'function'
+    || !databaseManager || typeof databaseManager.inspect !== 'function' || typeof databaseManager.dropDatabase !== 'function'
     || !backupManager || typeof backupManager.backup !== 'function' || typeof backupManager.materializeBackup !== 'function'
     || typeof restoreFromFile !== 'function' || typeof dumpToFile !== 'function') {
     throw new DatabaseRestoreError('database_restore_dependencies_invalid', 'Database restore dependencies are invalid');
@@ -119,7 +119,6 @@ export function createDatabaseRestoreManager({
     if (inventory?.databases?.some((entry) => entry?.name === name)) {
       await databaseManager.dropDatabase(name);
     }
-    await databaseManager.createDatabase(name);
   }
 
   async function verifyLiveDump({ databaseName, expectedSha256, engine, directory, filename }) {
