@@ -14,6 +14,7 @@ import { runRunningCertificateRecoveryFromStores } from '../apps/api/src/job-run
 import { runRunningDnsRecordRecoveryFromStores } from '../apps/api/src/job-running-dns-record-recovery-runtime.js';
 import { runRunningDomainActivationRecoveryFromStores } from '../apps/api/src/job-running-domain-activation-recovery-runtime.js';
 import { runRunningMailConfigRecoveryFromStores } from '../apps/api/src/job-running-mail-config-recovery-runtime.js';
+import { runRunningMailDataRecoveryFromStores } from '../apps/api/src/job-running-mail-data-recovery-runtime.js';
 import { runRunningMailDkimRecoveryFromStores } from '../apps/api/src/job-running-mail-dkim-recovery-runtime.js';
 import { runRunningNodeDeploymentRecoveryFromStores } from '../apps/api/src/job-running-node-deployment-recovery-runtime.js';
 import { runRunningNodeRestartRecoveryFromStores } from '../apps/api/src/job-running-node-restart-recovery-runtime.js';
@@ -53,9 +54,10 @@ const RECOVERY_ACTIONS = Object.freeze([
   'recover-service-mutation',
   'recover-mail-config',
   'recover-mail-dkim',
+  'recover-mail-data',
   'recover-roundcube-config',
 ]);
-const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-process <server-id> <job-id> --confirm | recover-node-runtime-install <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-certificate <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-dns-record <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm | recover-mail-config <server-id> <job-id> --confirm | recover-mail-dkim <server-id> <job-id> --confirm | recover-roundcube-config <server-id> <job-id> --confirm';
+const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-process <server-id> <job-id> --confirm | recover-node-runtime-install <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-certificate <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-dns-record <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm | recover-mail-config <server-id> <job-id> --confirm | recover-mail-dkim <server-id> <job-id> --confirm | recover-mail-data <server-id> <job-id> --confirm | recover-roundcube-config <server-id> <job-id> --confirm';
 
 export function parseJobRecoveryArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
@@ -155,6 +157,7 @@ export async function runJobRecoveryCli({
   recoverServiceMutation = runRunningServiceReceiptRecoveryFromStores,
   recoverMailConfig = runRunningMailConfigRecoveryFromStores,
   recoverMailDkim = runRunningMailDkimRecoveryFromStores,
+  recoverMailData = runRunningMailDataRecoveryFromStores,
   recoverRoundcubeConfig = runRunningRoundcubeConfigRecoveryFromStores,
   recoveryAudit = recordRecoveryAuditOutcome,
   stdout = process.stdout,
@@ -186,6 +189,7 @@ export async function runJobRecoveryCli({
     else if (parsed.action === 'recover-service-mutation') handler = recoverServiceMutation;
     else if (parsed.action === 'recover-mail-config') handler = recoverMailConfig;
     else if (parsed.action === 'recover-mail-dkim') handler = recoverMailDkim;
+    else if (parsed.action === 'recover-mail-data') handler = recoverMailData;
     else handler = recoverRoundcubeConfig;
     if (typeof handler !== 'function') throw new Error('Job recovery mutation dependency is invalid');
     const result = await handler({
