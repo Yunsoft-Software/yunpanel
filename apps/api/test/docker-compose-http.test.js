@@ -43,6 +43,16 @@ function mounted() {
     confirmation: `docker-compose:start:shop_app:${'b'.repeat(64)}`,
     sideEffects: false,
   };
+  const history = [{
+    id: '520e65d7-3205-43d7-89aa-8f2d66714ee0',
+    serverId,
+    operation: 'docker.compose.start',
+    resourceType: 'docker_project',
+    resourceId: projectId,
+    status: 'succeeded',
+    createdAt: '2026-09-13T06:05:00.000Z',
+    result: { action: 'start', runtimeState: 'running' },
+  }];
   const app = {
     get(path, ...handlers) { routes.push(['GET', path, handlers]); },
     post(path, ...handlers) { routes.push(['POST', path, handlers]); },
@@ -71,6 +81,10 @@ function mounted() {
     },
   };
   const operationsService = {
+    async history(input) {
+      calls.push(['operationHistory', input]);
+      return history;
+    },
     async preview(input) {
       calls.push(['operationPreview', input]);
       return { ...operationPreview, action: input.action };
@@ -109,7 +123,7 @@ function mounted() {
     validateDockerCompose,
     localServerId: serverId,
   });
-  return { routes, calls, operationPreview };
+  return { routes, calls, operationPreview, history };
 }
 
 function route(fx, method, suffix) {
@@ -157,6 +171,18 @@ test('compose environment is fully validated before revisioned values are persis
   assert.deepEqual(validation.environment, variables);
   assert.ok(fx.calls.some(([name]) => name === 'replaceEnvironment'));
   assert.equal(response.payload.sideEffects, false);
+});
+
+test('compose deployment history returns only durable public job data for the local project', async () => {
+  const fx = mounted();
+  const response = await invoke(route(fx, 'GET', '/history'), {
+    params: { dockerProjectId: projectId },
+  });
+  assert.equal(response.error, null);
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.payload.data, fx.history);
+  assert.deepEqual(fx.calls.find(([name]) => name === 'operationHistory')[1], { projectId });
+  assert.equal(JSON.stringify(response.payload).includes('payload'), false);
 });
 
 test('compose lifecycle preview is side-effect free and bound to the local project', async () => {
