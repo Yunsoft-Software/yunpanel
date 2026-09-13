@@ -15,7 +15,7 @@ function resourceFactory(label, calls, extra = {}) {
   });
 }
 
-test('managed mail recovery runtime wires private registries, tls identity, receipt, materialization and active evidence', async () => {
+test('managed mail recovery runtime wires private registries, SRS, tls identity, receipt, materialization and active evidence', async () => {
   const calls = [];
   const fakeJobRegistry = { marker: 'durable' };
   const fakeDomainRegistry = {
@@ -29,6 +29,13 @@ test('managed mail recovery runtime wires private registries, tls identity, rece
   const fakeMailServiceIdentityRegistry = {
     async init() { calls.push(['mail-service-identity.init', '/work/state/mail-service-identity.json']); },
     async materializeForServer(id) { calls.push(['mail-service-identity.materialize', id]); return { serverId: id }; },
+  };
+  const fakeMailSrsSecretRegistry = {
+    async init() { calls.push(['mail-srs-secret.init', '/work/state/mail-srs-secret.json']); },
+  };
+  const fakeMailSrsConfigurationService = {
+    async previewForServer(id) { calls.push(['mail-srs.preview', id]); return { ready: true }; },
+    async materializeForServer(id) { calls.push(['mail-srs.materialize', id]); return { serverId: id }; },
   };
   const fakeMailDomainRegistry = {
     async init() { calls.push(['mail-domain.init', '/work/state/mail-domains.json']); },
@@ -61,6 +68,7 @@ test('managed mail recovery runtime wires private registries, tls identity, rece
       YUNPANEL_APPLICATION_STORE: '/work/state/applications.json',
       YUNPANEL_MAIL_DOMAIN_STORE: '/work/state/mail-domains.json',
       YUNPANEL_MAIL_SERVICE_IDENTITY_STORE: '/work/state/mail-service-identity.json',
+      YUNPANEL_MAIL_SRS_SECRET_STORE: '/work/state/mail-srs-secret.json',
       YUNPANEL_MAILBOX_STORE: '/work/state/mailboxes.json',
       YUNPANEL_MAILBOX_QUOTA_STORE: '/work/state/mailbox-quotas.json',
       YUNPANEL_MAILBOX_FORWARDING_STORE: '/work/state/mailbox-forwardings.json',
@@ -80,6 +88,17 @@ test('managed mail recovery runtime wires private registries, tls identity, rece
       assert.equal(typeof getWebDomain, 'function');
       assert.equal(typeof getCertificate, 'function');
       return fakeMailServiceIdentityRegistry;
+    },
+    mailSrsSecretRegistryFactory: ({ filePath, masterKey, serverExists }) => {
+      calls.push(['mail-srs-secret.create', filePath, masterKey]);
+      assert.equal(typeof serverExists, 'function');
+      return fakeMailSrsSecretRegistry;
+    },
+    mailSrsConfigurationServiceFactory: ({ mailServiceIdentityRegistry, mailSrsSecretRegistry }) => {
+      calls.push(['mail-srs-configuration.create']);
+      assert.equal(mailServiceIdentityRegistry, fakeMailServiceIdentityRegistry);
+      assert.equal(mailSrsSecretRegistry, fakeMailSrsSecretRegistry);
+      return fakeMailSrsConfigurationService;
     },
     mailDomainRegistryFactory: ({ filePath, getWebDomain }) => {
       calls.push(['mail-domain.create', filePath]);
@@ -131,6 +150,7 @@ test('managed mail recovery runtime wires private registries, tls identity, rece
       mailAliasRegistry,
       domainRegistry,
       mailServiceIdentityRegistry,
+      mailSrsConfigurationService,
     }) => {
       assert.equal(mailDomainRegistry, fakeMailDomainRegistry);
       assert.equal(mailboxRegistry, fakeMailboxRegistry);
@@ -139,6 +159,7 @@ test('managed mail recovery runtime wires private registries, tls identity, rece
       assert.equal(mailAliasRegistry, fakeMailAliasRegistry);
       assert.equal(domainRegistry, fakeDomainRegistry);
       assert.equal(mailServiceIdentityRegistry, fakeMailServiceIdentityRegistry);
+      assert.equal(mailSrsConfigurationService, fakeMailSrsConfigurationService);
       return {
         async materializeTransition(input, expected) {
           calls.push(['materialize', input, expected]);
@@ -173,12 +194,16 @@ test('managed mail recovery runtime wires private registries, tls identity, rece
   assert.equal(result.reconciled, true);
   assert.equal(result.statePaths.mailDomainStore, '/work/state/mail-domains.json');
   assert.equal(result.statePaths.mailServiceIdentityStore, '/work/state/mail-service-identity.json');
+  assert.equal(result.statePaths.mailSrsSecretStore, '/work/state/mail-srs-secret.json');
   assert.equal(result.statePaths.mailboxStore, '/work/state/mailboxes.json');
   assert.equal(result.statePaths.mailboxQuotaStore, '/work/state/mailbox-quotas.json');
   assert.equal(result.statePaths.mailboxForwardingStore, '/work/state/mailbox-forwardings.json');
   assert.equal(result.statePaths.mailAliasStore, '/work/state/mail-aliases.json');
   assert.ok(calls.some((entry) => entry[0] === 'mail-service-identity.create'
     && entry[1] === '/work/state/mail-service-identity.json'));
+  assert.ok(calls.some((entry) => entry[0] === 'mail-srs-secret.create'
+    && entry[1] === '/work/state/mail-srs-secret.json' && entry[2] === 'private-master-key'));
+  assert.ok(calls.some((entry) => entry[0] === 'mail-srs-configuration.create'));
   assert.ok(calls.some((entry) => entry[0] === 'mail-domain.create' && entry[1] === '/work/state/mail-domains.json'));
   assert.ok(calls.some((entry) => entry[0] === 'mailbox.create'
     && entry[1] === '/work/state/mailboxes.json' && entry[2] === 'private-master-key'));
@@ -207,6 +232,8 @@ test('managed mail recovery runtime rejects wrong host before opening protected 
       certificateRegistryFactory: () => ({ async init() {} }),
       applicationRegistryFactory: () => ({ async init() {} }),
       mailServiceIdentityRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
+      mailSrsSecretRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
+      mailSrsConfigurationServiceFactory: () => { mailRegistries += 1; return { previewForServer: async () => ({}), materializeForServer: async () => ({}) }; },
       mailDomainRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
       mailboxRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
       mailboxQuotaRegistryFactory: () => { mailRegistries += 1; return { async init() {} }; },
