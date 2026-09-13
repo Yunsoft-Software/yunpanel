@@ -3,10 +3,12 @@ import test from 'node:test';
 import {
   MailDataJobResultError,
   sanitizeMailDataBackupResult,
+  sanitizeMailDataDeleteResult,
   sanitizeMailDataRestoreResult,
 } from '../src/mail-data-job-result.js';
 
 const mailDomainId = '12345678-1234-4234-8234-123456789012';
+const mailboxId = '22345678-1234-4234-8234-123456789012';
 const jobId = '87654321-1234-4234-8234-123456789012';
 const digest = 'a'.repeat(64);
 
@@ -15,8 +17,10 @@ function backupJob() {
     id: jobId,
     payload: {
       mailDomainId,
+      resourceId: mailboxId,
       scope: 'mailbox',
       identity: 'owner@example.com',
+      expectedResourceRevision: 3,
       expectedSnapshotSha256: digest,
     },
   };
@@ -62,9 +66,11 @@ function restoreJob() {
     id: jobId,
     payload: {
       mailDomainId,
+      resourceId: mailboxId,
       backupId: 'mail-backup-selected',
       scope: 'mailbox',
       identity: 'owner@example.com',
+      expectedResourceRevision: 3,
       expectedTargetSnapshotSha256: digest,
     },
   };
@@ -102,6 +108,58 @@ test('restore sanitizer pins transaction and pre-restore backup identities', () 
   ]) {
     assert.throws(
       () => sanitizeMailDataRestoreResult(restoreJob(), result),
+      (error) => error instanceof MailDataJobResultError && error.code === 'invalid_job_result',
+    );
+  }
+});
+
+function deleteJob() {
+  return {
+    id: jobId,
+    payload: {
+      mailDomainId,
+      resourceId: mailboxId,
+      backupId: 'mail-backup-selected',
+      scope: 'mailbox',
+      identity: 'owner@example.com',
+      expectedResourceRevision: 3,
+      expectedTargetSnapshotSha256: digest,
+    },
+  };
+}
+
+function deleteResult(overrides = {}) {
+  return {
+    version: 1,
+    transactionId: jobId,
+    backupId: 'mail-backup-selected',
+    mailDomainId,
+    resourceId: mailboxId,
+    scope: 'mailbox',
+    identity: 'owner@example.com',
+    sourcePresent: true,
+    contentSha256: 'e'.repeat(64),
+    bytes: 1024,
+    files: 3,
+    directories: 4,
+    deleted: true,
+    sideEffects: true,
+    ...overrides,
+  };
+}
+
+test('delete sanitizer pins resource backup and transaction while rejecting private paths', () => {
+  assert.deepEqual(sanitizeMailDataDeleteResult(deleteJob(), deleteResult()), deleteResult());
+  for (const result of [
+    deleteResult({ tombstonePath: '/private/tombstone' }),
+    deleteResult({ transactionId: 'other-job-0001' }),
+    deleteResult({ backupId: 'different-backup' }),
+    deleteResult({ resourceId: mailDomainId }),
+    deleteResult({ contentSha256: 'bad' }),
+    deleteResult({ deleted: false }),
+  ]) {
+    assert.throws(
+      () => sanitizeMailDataDeleteResult(deleteJob(), result),
       (error) => error instanceof MailDataJobResultError && error.code === 'invalid_job_result',
     );
   }
