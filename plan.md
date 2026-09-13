@@ -8,21 +8,25 @@ Bağlayıcı mimari ve güvenlik kuralları `agents.md` içindedir. Bu ortamda g
 
 Managed Docker/Compose ve Mail gerçek panel rotalarına bağlıdır. Website detayında Domain/SSL, Application/runtime/env/log/file/terminal ile explicit database/mail/Managed Compose ilişkileri tek site kaynak hiyerarşisinde görünür. Job list/detail kaynak linki, yaşam döngüsü stage/progress, allowlist'li sonuç metadata, güvenli diagnosis/error code ve bounded/redacted deploy log görünümüne sahiptir; generic retry/force-success yolu yoktur.
 
-Managed Compose public desired-state named volume, proje içi bind, host bind ve ephemeral storage mountlarını ayrı sınıflandırır. Docker storage için versioned backup resource kimliği ve fail-closed policy contractı kaynakta hazırdır: named volume/proje bind `include`, ephemeral `exclude`, arbitrary host bind `reject`. Bu policy read-only Docker API ve panelde current project revision'a bağlı olarak gösterilir; genel backup executor veya restore henüz varmış gibi gösterilmez.
+Managed Compose storage için stable versioned resource kimliği ve fail-closed policy hazırdır: named volume/proje bind `include`, ephemeral `exclude`, arbitrary host bind `reject`. Application release/config/env safe snapshot resource modeli, database inventory resource modeli ve mevcut guarded Mail Data backup preview'ından türetilen mail resource modeli de hazırdır. Multi-resource backup planı default olarak yalnız `include` kaynakları seçer; explicit seçim, policy ve exact source snapshot state deterministic preview digestine bağlanır.
+
+Database ve Mail için ayrı bir genel-backup dump motoru yazılmayacaktır: database private dump/restore lifecycle ile mail data backup/restore lifecycle kaynakta zaten durable job, checksum/evidence, preview/recovery ve local execution sınırlarına sahiptir. Genel backup ürünü bunları orkestre eder; mevcut operation-specific recovery'yi bypass etmez.
 
 ## 1. Genel backup / restore ürünü
 
-- [ ] Mevcut versioned Docker storage manifest contractını Application release/config/env, database ve mail kaynak tipleriyle genel backup manifestine genişlet; Docker storage resource identity/policy'sini yeniden hesaplayan ikinci bir model oluşturma.
-- [ ] Backup plan/preview katmanı ekle; seçilen kaynakları, `include/exclude/reject` kararlarını, dependency/impact bilgisini ve exact resource revision/identity'leri deterministic digest ile bağla.
-- [ ] Local ve S3-compatible target, şifreleme, checksum, retention ve credential lifecycle ekle.
-- [ ] Backup execution, bounded progress/history ve crash/lost-ack için operation-specific durable recovery ekle; successful mutation veya archive üretimini kör retry etme.
-- [ ] Restore preview, veri kaybı etkisi, pre-restore backup, exact manifest/resource revision gate, health gate ve deterministic failure rollback ekle.
-- [ ] Disk-full, bozuk archive/checksum, kesinti ve kısmi restore için mutation-safe recovery modelini ekle.
-- [ ] Restore/impact akışında Docker storage'ın mevcut stable resource identity'sini koru; ephemeral storage restore dışı, arbitrary host bind varsayılan reddedilmiş kalmalı.
-- [ ] Backup/restore kaynaklarını Website/Application/Database/Docker/Mail impact graph'ına bağla.
-- [ ] Backend hazır olur olmaz gerçek panel rotasını, backup history ve restore akışını bağla.
+- [ ] Docker/Application/Database/Mail resource provider katmanını gerçek registry/inventory/guarded preview kaynaklarına bağla ve multi-resource backup preview'ı authenticated Owner API'de expose et.
+- [ ] Backup planına Website/Application/Database/Docker/Mail dependency/impact metadata'sını ekle; resource list/state değişiminde eski digest fail-closed kalmalı.
+- [ ] Genel backup execution orchestrator'ını ekle: Database ve Mail için mevcut güvenli backup motorlarını reuse et; Application release/config/env ve Managed Docker named-volume/project-bind için eksik executor'ları ekle. Ephemeral storage'ı atla, arbitrary host bind'i varsayılan reddet.
+- [ ] Local target için versioned aggregate backup manifest/artifact layout, per-resource checksum, aggregate checksum, private permissions ve retention lifecycle ekle.
+- [ ] S3-compatible target, encrypted credential lifecycle, transfer verification ve local staging cleanup ekle.
+- [ ] Aggregate backup job progress/history ve crash/lost-ack recovery ekle; child resource işi successful olmuşsa kör retry yapma, exact durable evidence ile reconcile et.
+- [ ] Genel restore preview/selection katmanını mevcut Database/Mail restore preview'ları ve yeni Application/Docker restore contractlarıyla bağla; veri kaybı etkisi, pre-restore backup, exact manifest/resource revision gate ve typed confirmation ekle.
+- [ ] Application ve Docker restore executor'larına health gate ve deterministic rollback ekle; Database/Mail'in mevcut restore/recovery zincirini yeniden yazma.
+- [ ] Disk-full, bozuk aggregate/per-resource checksum, kesinti ve kısmi restore için mutation-safe recovery modelini ekle.
+- [ ] Backup/restore association'larını Website/Application/Database/Docker/Mail impact graph'ına gerçek dependency provider olarak bağla.
+- [ ] Backend hazır olur olmaz gerçek Backup panel rotasını, history, target/retention ve restore akışını bağla.
 
-Gerçek Docker Engine/Compose volume/bind backup-restore kabulü, gerçek S3/local target, disk-full/corrupt archive ve secret/permission kontrolleri `todo.md` içinde kalır.
+Gerçek Docker Engine/Compose volume/bind backup-restore kabulü, Database/Mail mevcut motorlarının aggregate orchestrator altında gerçek host kabulü, gerçek S3/local target, disk-full/corrupt archive ve secret/permission kontrolleri `todo.md` içinde kalır.
 
 ## 2. Website / Domain / Nginx kalanları
 
@@ -67,12 +71,13 @@ Gerçek DNS/Nginx/HTTPS, IDN, certificate ve provider acceptance işleri `todo.m
 
 ## Uygulama sırası
 
-1. Genel backup manifestini kalan kaynak tipleriyle genişlet; ardından backup preview/execution/restore + UI.
-2. Cron + UI.
-3. Metrik ve bildirim katmanı.
-4. Kalan Website/Domain migration işi ve association provider bağları ilgili kaynaklar hazır oldukça kapatılır.
-5. İzole migration/rollback kabulünden sonra legacy agent kod/paket yüzeyinin fiziksel temizliği.
-6. Enterprise UI/UX polish ve gerçek browser kabulü.
-7. Plesk read-only importer — **son iş**.
+1. Genel backup resource provider + authenticated preview; ardından aggregate execution/local target ve UI.
+2. S3-compatible target + retention; sonra aggregate restore orchestration + UI.
+3. Cron + UI.
+4. Metrik ve bildirim katmanı.
+5. Kalan Website/Domain migration işi ve association provider bağları ilgili kaynaklar hazır oldukça kapatılır.
+6. İzole migration/rollback kabulünden sonra legacy agent kod/paket yüzeyinin fiziksel temizliği.
+7. Enterprise UI/UX polish ve gerçek browser kabulü.
+8. Plesk read-only importer — **son iş**.
 
 Her geliştirme diliminde ilgili source testleri aynı değişiklikle eklenir. Bu ortamda yapılamayan gerçek-host/browser/provider/package kabul işleri kod planına geri sokulmaz; `todo.md` içinde tutulur.
