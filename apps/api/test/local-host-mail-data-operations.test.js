@@ -70,6 +70,7 @@ test('local mail data backup uses job id as backup id and returns only safe evid
     mailDomainId,
     scope: 'mailbox',
     identity: 'owner@example.com',
+    expectedResourceRevision: 3,
     expectedSnapshotSha256: digest,
   }, execution);
   assert.deepEqual(calls, [['backup', {
@@ -104,6 +105,7 @@ test('local mail data restore uses job id as transaction and strips private mana
     backupId: 'mail-backup-selected',
     scope: 'mailbox',
     identity: 'owner@example.com',
+    expectedResourceRevision: 3,
     expectedTargetSnapshotSha256: digest,
   }, execution);
   assert.deepEqual(calls, [['restore', {
@@ -127,6 +129,7 @@ test('mail data operation rejects wrong execution resource before touching manag
       mailDomainId,
       scope: 'domain',
       identity: 'example.com',
+      expectedResourceRevision: 5,
       expectedSnapshotSha256: digest,
     }, {
       jobId,
