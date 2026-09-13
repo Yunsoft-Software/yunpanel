@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { isIP, SocketAddress } from 'node:net';
 import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
@@ -10,6 +11,8 @@ const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SERVICE_NAME_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,62}$/;
 const RESOURCE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
+const PORT_PROTOCOLS = new Set(['tcp', 'udp']);
+const MAX_SERVICE_PORTS = 64;
 
 export class DockerComposeProjectRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -60,6 +63,61 @@ function normalizeNameArray(value, field, pattern = RESOURCE_NAME_PATTERN, maxim
   return [...value].sort();
 }
 
+function canonicalIp(value) {
+  const family = isIP(value);
+  if (!family) return null;
+  try {
+    return new SocketAddress({ address: value, family: family === 4 ? 'ipv4' : 'ipv6', port: 0 }).address;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePublishedPorts(value, code = 'docker_compose_validation_invalid') {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_SERVICE_PORTS) {
+    throw new DockerComposeProjectRegistryError(code, 'Docker Compose published port summary is invalid', code === 'docker_compose_project_state_invalid' ? 409 : 400);
+  }
+  const identities = new Set();
+  const output = value.map((port) => {
+    if (!port || typeof port !== 'object' || Array.isArray(port)
+      || Object.keys(port).length !== 4
+      || Object.keys(port).some((key) => !['hostIp', 'publishedPort', 'targetPort', 'protocol'].includes(key))
+      || (port.hostIp !== null && (typeof port.hostIp !== 'string' || canonicalIp(port.hostIp) !== port.hostIp))
+      || !Number.isSafeInteger(port.publishedPort) || port.publishedPort < 1 || port.publishedPort > 65535
+      || !Number.isSafeInteger(port.targetPort) || port.targetPort < 1 || port.targetPort > 65535
+      || typeof port.protocol !== 'string' || !PORT_PROTOCOLS.has(port.protocol)) {
+      throw new DockerComposeProjectRegistryError(code, 'Docker Compose published port summary is invalid', code === 'docker_compose_project_state_invalid' ? 409 : 400);
+    }
+    const identity = `${port.hostIp ?? '*'}:${port.publishedPort}/${port.protocol}`;
+    if (identities.has(identity)) {
+      throw new DockerComposeProjectRegistryError(code, 'Docker Compose published port summary contains duplicates', code === 'docker_compose_project_state_invalid' ? 409 : 400);
+    }
+    identities.add(identity);
+    return { ...port };
+  });
+  return output.sort((left, right) => (left.hostIp ?? '').localeCompare(right.hostIp ?? '')
+    || left.publishedPort - right.publishedPort
+    || left.targetPort - right.targetPort
+    || left.protocol.localeCompare(right.protocol));
+}
+
+function normalizeServiceSummary(service, code = 'docker_compose_validation_invalid') {
+  if (!service || typeof service !== 'object' || Array.isArray(service)
+    || Object.keys(service).some((key) => !['name', 'imageConfigured', 'buildConfigured', 'publishedPorts'].includes(key))
+    || ![3, 4].includes(Object.keys(service).length)
+    || typeof service.name !== 'string' || !SERVICE_NAME_PATTERN.test(service.name)
+    || typeof service.imageConfigured !== 'boolean' || typeof service.buildConfigured !== 'boolean') {
+    throw new DockerComposeProjectRegistryError(code, 'Docker Compose service summary is invalid', code === 'docker_compose_project_state_invalid' ? 409 : 400);
+  }
+  return {
+    name: service.name,
+    imageConfigured: service.imageConfigured,
+    buildConfigured: service.buildConfigured,
+    publishedPorts: normalizePublishedPorts(service.publishedPorts, code),
+  };
+}
+
 function normalizeValidation(value, projectName, document) {
   const bytes = Buffer.byteLength(document);
   const sha256 = createHash('sha256').update(document).digest('hex');
@@ -73,23 +131,18 @@ function normalizeValidation(value, projectName, document) {
     || !Number.isSafeInteger(value.configCount) || value.configCount < 0 || value.configCount > 128) {
     throw new DockerComposeProjectRegistryError('docker_compose_validation_invalid', 'Docker Compose validation evidence does not match the project document');
   }
-  const serviceNames = [];
-  for (const service of value.services) {
-    if (!service || typeof service !== 'object' || Array.isArray(service)
-      || Object.keys(service).length !== 3
-      || typeof service.name !== 'string' || !SERVICE_NAME_PATTERN.test(service.name)
-      || typeof service.imageConfigured !== 'boolean' || typeof service.buildConfigured !== 'boolean') {
-      throw new DockerComposeProjectRegistryError('docker_compose_validation_invalid', 'Docker Compose service summary is invalid');
-    }
-    serviceNames.push(service.name);
-  }
+  const services = value.services.map((service) => normalizeServiceSummary(service));
+  const serviceNames = services.map((service) => service.name);
   if (new Set(serviceNames).size !== serviceNames.length) {
     throw new DockerComposeProjectRegistryError('docker_compose_validation_invalid', 'Docker Compose service identities must be unique');
   }
   return Object.freeze({
     composeSha256: sha256,
     composeBytes: bytes,
-    services: Object.freeze(value.services.map((service) => Object.freeze({ ...service })).sort((a, b) => a.name.localeCompare(b.name))),
+    services: Object.freeze(services.map((service) => Object.freeze({
+      ...service,
+      publishedPorts: Object.freeze(service.publishedPorts.map((port) => Object.freeze({ ...port }))),
+    })).sort((a, b) => a.name.localeCompare(b.name))),
     networks: Object.freeze(normalizeNameArray(value.networks, 'network')),
     volumes: Object.freeze(normalizeNameArray(value.volumes, 'volume')),
     secretCount: value.secretCount,
@@ -151,6 +204,13 @@ function decryptDocument(masterKey, record) {
   }
 }
 
+function cloneService(service) {
+  return Object.freeze({
+    ...service,
+    publishedPorts: Object.freeze(service.publishedPorts.map((port) => Object.freeze({ ...port }))),
+  });
+}
+
 function publicProject(record) {
   return Object.freeze({
     id: record.id,
@@ -159,7 +219,7 @@ function publicProject(record) {
     revision: record.revision,
     composeSha256: record.composeSha256,
     composeBytes: record.composeBytes,
-    services: Object.freeze(record.services.map((service) => Object.freeze({ ...service }))),
+    services: Object.freeze(record.services.map(cloneService)),
     networks: Object.freeze([...record.networks]),
     volumes: Object.freeze([...record.volumes]),
     secretCount: record.secretCount,
@@ -188,14 +248,9 @@ function validatePersisted(value) {
   if (services.length < 1 || !Array.isArray(value.services) || value.services.length !== services.length) {
     throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project service state is invalid', 409);
   }
-  const normalizedServices = value.services.map((service) => {
-    if (!service || typeof service !== 'object' || Array.isArray(service)
-      || Object.keys(service).length !== 3 || !SERVICE_NAME_PATTERN.test(service.name)
-      || typeof service.imageConfigured !== 'boolean' || typeof service.buildConfigured !== 'boolean') {
-      throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project service state is invalid', 409);
-    }
-    return { ...service };
-  }).sort((a, b) => a.name.localeCompare(b.name));
+  const normalizedServices = value.services
+    .map((service) => normalizeServiceSummary(service, 'docker_compose_project_state_invalid'))
+    .sort((a, b) => a.name.localeCompare(b.name));
   return {
     id: normalizeUuid(value.id, 'dockerProjectId'),
     serverId: normalizeUuid(value.serverId, 'serverId'),
@@ -259,6 +314,8 @@ export function createDockerComposeProjectRegistry({
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((key) => !['version', 'projects'].includes(key))) {
           throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project store is invalid', 409);
         }
+        const needsPublishedPortMigration = parsed.projects.some((project) => Array.isArray(project?.services)
+          && project.services.some((service) => service && typeof service === 'object' && !Object.hasOwn(service, 'publishedPorts')));
         const projects = parsed.projects.map(validatePersisted);
         const ids = new Set();
         const names = new Set();
@@ -272,6 +329,7 @@ export function createDockerComposeProjectRegistry({
           await requireServer(project.serverId, true);
         }
         state = { version: STORE_VERSION, projects };
+        if (needsPublishedPortMigration) await persist();
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
         await persist();
@@ -378,6 +436,7 @@ export function createDockerComposeProjectRegistry({
 export const dockerComposeProjectRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
   normalizeProjectName,
+  normalizePublishedPorts,
   normalizeValidation,
   validatePersisted,
   encryptDocument,
