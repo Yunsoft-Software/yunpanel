@@ -39,7 +39,12 @@ function optionalEmptyBody(body) {
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
-    catch (error) { return next(error); }
+    catch (error) {
+      if (error instanceof DockerComposeHttpError) {
+        return response.status(error.status).json({ error: { code: error.code, message: error.message } });
+      }
+      return next(error);
+    }
   };
 }
 
