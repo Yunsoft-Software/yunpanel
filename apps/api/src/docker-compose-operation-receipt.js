@@ -1,13 +1,19 @@
 import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { DOCKER_COMPOSE_OPERATIONS } from '@yunpanel/protocol';
+import { OPERATIONS } from '@yunpanel/protocol';
 
 const STORE_VERSION = 1;
 const DEFAULT_ROOT = '/var/lib/yunpanel/recovery/docker-compose';
 const ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
-const OPERATION_SET = new Set(DOCKER_COMPOSE_OPERATIONS);
+const OPERATIONS = new Map([
+  [OPERATIONS.DOCKER_COMPOSE_BUILD, ['build', null]],
+  [OPERATIONS.DOCKER_COMPOSE_PULL, ['pull', null]],
+  [OPERATIONS.DOCKER_COMPOSE_START, ['start', 'running']],
+  [OPERATIONS.DOCKER_COMPOSE_STOP, ['stop', 'stopped']],
+  [OPERATIONS.DOCKER_COMPOSE_RESTART, ['restart', 'running']],
+]);
 
 export class DockerComposeOperationReceiptError extends Error {
   constructor(code, message) {
@@ -22,18 +28,17 @@ function normalize(value) {
     'version', 'serverId', 'jobId', 'operation', 'projectId', 'projectRevision',
     'environmentRevision', 'composeSha256', 'action', 'runtimeState', 'executed', 'sideEffects',
   ]);
+  const expected = OPERATIONS.get(value?.operation);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size || Object.keys(value).some((key) => !fields.has(key))
     || value.version !== STORE_VERSION
     || typeof value.serverId !== 'string' || !UUID_PATTERN.test(value.serverId)
     || typeof value.jobId !== 'string' || !ID_PATTERN.test(value.jobId)
-    || !OPERATION_SET.has(value.operation)
+    || !expected || value.action !== expected[0] || value.runtimeState !== expected[1]
     || typeof value.projectId !== 'string' || !UUID_PATTERN.test(value.projectId)
     || !Number.isSafeInteger(value.projectRevision) || value.projectRevision < 1
     || !Number.isSafeInteger(value.environmentRevision) || value.environmentRevision < 0
     || typeof value.composeSha256 !== 'string' || !SHA256_PATTERN.test(value.composeSha256)
-    || !['build', 'pull', 'start', 'stop', 'restart'].includes(value.action)
-    || ![null, 'running', 'stopped'].includes(value.runtimeState)
     || value.executed !== true || value.sideEffects !== true) {
     throw new DockerComposeOperationReceiptError('docker_compose_receipt_invalid', 'Docker Compose operation receipt is invalid');
   }
@@ -114,5 +119,6 @@ export function createDockerComposeOperationReceiptStore({ root = DEFAULT_ROOT }
 
 export const dockerComposeOperationReceiptInternals = Object.freeze({
   defaultRoot: DEFAULT_ROOT,
+  operations: OPERATIONS,
   normalize,
 });
