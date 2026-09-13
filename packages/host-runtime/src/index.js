@@ -30,6 +30,11 @@ export {
   dockerComposeObserverInternals,
 } from './docker-compose-observer.js';
 export {
+  createDockerVolumeInspector,
+  DockerVolumeInspectorError,
+  dockerVolumeInspectorInternals,
+} from './docker-volume-inspector.js';
+export {
   createLocalBackupArtifactManager,
   LocalBackupArtifactError,
   localBackupArtifactInternals,
