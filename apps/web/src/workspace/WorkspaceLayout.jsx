@@ -9,7 +9,7 @@ import './workspace.css';
 
 const navigation = [
   ['/dashboard', 'Genel bakış', 'dashboard'], ['/websites', 'Web siteleri', 'globe'], ['/servers', 'Sunucu', 'server'],
-  ['/databases', 'Veritabanları', 'database'], ['/docker', 'Docker', 'box'], ['/jobs', 'İşler', 'jobs'], ['/audit', 'Denetim', 'shield'], ['/settings', 'Ayarlar', 'settings'],
+  ['/databases', 'Veritabanları', 'database'], ['/docker', 'Docker', 'box'], ['/mail', 'Mail', 'mail'], ['/jobs', 'İşler', 'jobs'], ['/audit', 'Denetim', 'shield'], ['/settings', 'Ayarlar', 'settings'],
 ];
 const readOnlyNavigation = new Set(['/dashboard', '/websites', '/servers']);
 export default function WorkspaceLayout() {
