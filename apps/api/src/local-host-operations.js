@@ -6,6 +6,7 @@ import {
   createMailConfigBackupManager,
   createMailConfigManager,
   createMailDataBackupManager,
+  createMailDataDeleteManager,
   createMailDataRestoreManager,
   createMailDkimActivator,
   createManagedServiceManager,
@@ -61,6 +62,7 @@ export const LOCAL_MAIL_CONFIGURATION_OPERATIONS = Object.freeze([
 export const LOCAL_MAIL_DATA_OPERATIONS = Object.freeze([
   OPERATIONS.MAIL_DATA_BACKUP,
   OPERATIONS.MAIL_DATA_RESTORE,
+  OPERATIONS.MAIL_DATA_DELETE,
 ]);
 
 export const LOCAL_ROUNDCUBE_CONFIGURATION_OPERATIONS = Object.freeze([
@@ -108,6 +110,7 @@ export function createLocalHostOperations({
   mailDkimActivator = null,
   mailDataBackupManager = null,
   mailDataRestoreManager = null,
+  mailDataDeleteManager = null,
   roundcubeConfigOperation = null,
   loadManagedMailConfiguration = null,
   loadManagedDkimConfiguration = null,
@@ -161,6 +164,9 @@ export function createLocalHostOperations({
   const resolvedMailDataRestoreManager = mailDataRestoreManager ?? createMailDataRestoreManager({
     backupManager: resolvedMailDataBackupManager,
   });
+  const resolvedMailDataDeleteManager = mailDataDeleteManager ?? createMailDataDeleteManager({
+    backupManager: resolvedMailDataBackupManager,
+  });
   const resolvedRoundcubeConfigOperation = roundcubeConfigOperation ?? (loadRoundcubeConfiguration
     ? createLocalRoundcubeConfigOperation({ loadConfiguration: loadRoundcubeConfiguration })
     : null);
@@ -182,6 +188,9 @@ export function createLocalHostOperations({
   }
   if (!resolvedMailDataRestoreManager || typeof resolvedMailDataRestoreManager.restore !== 'function') {
     throw new Error('mailDataRestoreManager must provide restore()');
+  }
+  if (!resolvedMailDataDeleteManager || typeof resolvedMailDataDeleteManager.deleteData !== 'function') {
+    throw new Error('mailDataDeleteManager must provide deleteData()');
   }
 
   async function withApplicationEnvironment(payload, execute) {
@@ -385,6 +394,40 @@ export function createLocalHostOperations({
     });
   }
 
+  async function executeMailDataDelete(payload, execution) {
+    assertMailExecutionContext(payload, execution);
+    const deletion = await resolvedMailDataDeleteManager.deleteData({
+      transactionId: execution.jobId,
+      backupId: payload.backupId,
+      scope: payload.scope,
+      identity: payload.identity,
+      expectedTargetSnapshotSha256: payload.expectedTargetSnapshotSha256,
+    });
+    if (!deletion || deletion.transactionId !== execution.jobId || deletion.backupId !== payload.backupId
+      || deletion.scope !== payload.scope || deletion.identity !== payload.identity
+      || typeof deletion.sourcePresent !== 'boolean' || deletion.deleted !== true || deletion.sideEffects !== true) {
+      const error = new Error('Mail data delete did not confirm the queued deletion');
+      error.code = 'mail_data_delete_unconfirmed';
+      throw error;
+    }
+    return Object.freeze({
+      version: 1,
+      transactionId: deletion.transactionId,
+      backupId: deletion.backupId,
+      mailDomainId: payload.mailDomainId,
+      resourceId: payload.resourceId,
+      scope: payload.scope,
+      identity: payload.identity,
+      sourcePresent: deletion.sourcePresent,
+      contentSha256: deletion.contentSha256,
+      bytes: deletion.bytes,
+      files: deletion.files,
+      directories: deletion.directories,
+      deleted: true,
+      sideEffects: true,
+    });
+  }
+
   const handlers = new Map([
     [OPERATIONS.SYSTEM_PACKAGES_INSPECT, () => packageManager.inspect()],
     [OPERATIONS.SYSTEM_SERVICES_INSPECT, (payload) => managedServiceManager.inspect(payload.serviceId ?? null)],
@@ -407,6 +450,7 @@ export function createLocalHostOperations({
     [OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL, (payload) => nodeRuntimeManager.install(payload.major)],
     [OPERATIONS.MAIL_DATA_BACKUP, executeMailDataBackup],
     [OPERATIONS.MAIL_DATA_RESTORE, executeMailDataRestore],
+    [OPERATIONS.MAIL_DATA_DELETE, executeMailDataDelete],
   ]);
 
   if (loadApplicationEnvironment) {
