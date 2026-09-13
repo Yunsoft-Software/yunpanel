@@ -106,3 +106,32 @@ test('compose lifecycle queue rejects active project job and stale confirmation 
   );
   assert.equal(fx.enqueued.length, 0);
 });
+
+test('compose history is sourced from durable jobs and excludes unrelated operations', async () => {
+  const newer = {
+    id: '52345678-1234-4234-8234-123456789012',
+    serverId,
+    operation: OPERATIONS.DOCKER_COMPOSE_RESTART,
+    resourceType: 'docker_project',
+    resourceId: projectId,
+    status: 'succeeded',
+    createdAt: '2026-09-13T10:05:00.000Z',
+    result: { action: 'restart', runtimeState: 'running' },
+  };
+  const older = {
+    id: '42345678-1234-4234-8234-123456789012',
+    serverId,
+    operation: OPERATIONS.DOCKER_COMPOSE_START,
+    resourceType: 'docker_project',
+    resourceId: projectId,
+    status: 'failed',
+    createdAt: '2026-09-13T10:00:00.000Z',
+    error: { code: 'docker_failed' },
+  };
+  const { service } = fixture({
+    jobs: [older, { ...older, operation: OPERATIONS.APP_NODE_RESTART }, newer],
+  });
+  const history = await service.history({ projectId });
+  assert.deepEqual(history, [newer, older]);
+  assert.equal(JSON.stringify(history).includes('payload'), false);
+});
