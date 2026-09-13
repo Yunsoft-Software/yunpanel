@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promis
 import path from 'node:path';
 import {
   mailForwardingTemplatePolicy,
+  mailSrsTemplatePolicy,
   mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
   previewManagedMailApplyPlan,
@@ -10,13 +11,13 @@ import {
 
 const DEFAULT_STAGING_ROOT = '/var/lib/yunpanel/staging/mail';
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
-const MANIFEST_VERSION = 3;
+const MANIFEST_VERSION = 4;
 const MANIFEST_FILE = 'manifest.json';
 const PRIVATE_MODE = 0o600;
 const PUBLIC_MODE = 0o640;
 const DIRECTORY_MODE = 0o700;
 
-const ALLOWED_ARTIFACT_PATHS = Object.freeze([
+const BASE_ARTIFACT_PATHS = Object.freeze([
   mailTemplatePolicy.postfixVirtualDomainMapPath,
   mailTemplatePolicy.postfixVirtualMailboxMapPath,
   mailTemplatePolicy.postfixVirtualAliasMapPath,
@@ -27,7 +28,12 @@ const ALLOWED_ARTIFACT_PATHS = Object.freeze([
   mailForwardingTemplatePolicy.sievePath,
   mailTemplatePolicy.rspamdProxyConfigPath,
 ]);
-const ALLOWED_ARTIFACT_SET = new Set(ALLOWED_ARTIFACT_PATHS);
+const SRS_ARTIFACT_PATHS = Object.freeze([
+  ...BASE_ARTIFACT_PATHS,
+  mailSrsTemplatePolicy.defaultsPath,
+  mailSrsTemplatePolicy.secretPath,
+]);
+const ALLOWED_ARTIFACT_SET = new Set(SRS_ARTIFACT_PATHS);
 
 export class MailConfigManagerError extends Error {
   constructor(code, message) {
@@ -51,6 +57,22 @@ function artifactName(index, targetPath) {
   return `${String(index).padStart(2, '0')}-${path.basename(targetPath)}`;
 }
 
+function expectedArtifactPaths(plan) {
+  if (!plan || !Array.isArray(plan.requirements)) {
+    throw new MailConfigManagerError('mail_artifact_set_invalid', 'Managed mail apply plan requirements are unavailable');
+  }
+  return plan.requirements.includes(mailSrsTemplatePolicy.requirement)
+    ? SRS_ARTIFACT_PATHS
+    : BASE_ARTIFACT_PATHS;
+}
+
+function manifestArtifactPaths(value) {
+  if (!Array.isArray(value)) return null;
+  if (value.length === BASE_ARTIFACT_PATHS.length) return BASE_ARTIFACT_PATHS;
+  if (value.length === SRS_ARTIFACT_PATHS.length) return SRS_ARTIFACT_PATHS;
+  return null;
+}
+
 function normalizeSensitiveArtifacts(values) {
   if (!Array.isArray(values)) {
     throw new MailConfigManagerError('mail_sensitive_artifacts_invalid', 'Sensitive mail artifacts must be an array');
@@ -71,6 +93,7 @@ function normalizeSensitiveArtifacts(values) {
 
 function buildStageManifest(preview, sensitiveArtifacts) {
   const plan = previewManagedMailApplyPlan(preview);
+  const expectedPaths = expectedArtifactPaths(plan);
   const privateContent = normalizeSensitiveArtifacts(sensitiveArtifacts);
   const previewByPath = new Map(preview.artifacts.map((artifact) => [artifact.path, artifact]));
   const requiredSensitive = new Set(plan.artifacts.filter((artifact) => artifact.sensitive).map((artifact) => artifact.path));
@@ -90,7 +113,7 @@ function buildStageManifest(preview, sensitiveArtifacts) {
     if (!ALLOWED_ARTIFACT_SET.has(artifact.path)) {
       throw new MailConfigManagerError('mail_artifact_path_forbidden', 'Managed mail artifact path is not allowlisted');
     }
-    if (artifact.path !== ALLOWED_ARTIFACT_PATHS[index]) {
+    if (artifact.path !== expectedPaths[index]) {
       throw new MailConfigManagerError('mail_artifact_order_invalid', 'Managed mail artifact order is not canonical');
     }
     const source = previewByPath.get(artifact.path);
@@ -112,8 +135,8 @@ function buildStageManifest(preview, sensitiveArtifacts) {
     });
   });
 
-  if (artifacts.length !== ALLOWED_ARTIFACT_PATHS.length
-    || new Set(artifacts.map((artifact) => artifact.targetPath)).size !== ALLOWED_ARTIFACT_PATHS.length) {
+  if (artifacts.length !== expectedPaths.length
+    || new Set(artifacts.map((artifact) => artifact.targetPath)).size !== expectedPaths.length) {
     throw new MailConfigManagerError('mail_artifact_set_invalid', 'Managed mail preview does not contain the complete artifact set');
   }
 
@@ -137,10 +160,11 @@ function buildStageManifest(preview, sensitiveArtifacts) {
 }
 
 function normalizeManifest(value, expectedPlanSha256 = null) {
+  const expectedPaths = manifestArtifactPaths(value?.artifacts);
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== MANIFEST_VERSION
     || typeof value.planSha256 !== 'string' || !CHECKSUM_PATTERN.test(value.planSha256)
     || typeof value.previewSha256 !== 'string' || !CHECKSUM_PATTERN.test(value.previewSha256)
-    || !Array.isArray(value.artifacts) || value.artifacts.length !== ALLOWED_ARTIFACT_PATHS.length) {
+    || !expectedPaths) {
     throw new MailConfigManagerError('mail_stage_manifest_invalid', 'Managed mail staging manifest is invalid');
   }
   if (expectedPlanSha256 !== null && value.planSha256 !== expectedPlanSha256) {
@@ -148,7 +172,7 @@ function normalizeManifest(value, expectedPlanSha256 = null) {
   }
   const seen = new Set();
   const artifacts = value.artifacts.map((artifact, index) => {
-    const expectedPath = ALLOWED_ARTIFACT_PATHS[index];
+    const expectedPath = expectedPaths[index];
     const expectedName = artifactName(index, expectedPath);
     if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)
       || artifact.targetPath !== expectedPath || artifact.stagedName !== expectedName
@@ -242,6 +266,11 @@ export function createMailConfigManager({
       throw new MailConfigManagerError('mail_stage_manifest_invalid', 'Managed mail staging manifest could not be inspected');
     }
     if (manifest.previewSha256 !== plan.previewSha256) return { satisfied: false, result: null };
+    const expectedPaths = expectedArtifactPaths(plan);
+    if (manifest.artifacts.length !== expectedPaths.length
+      || manifest.artifacts.some((artifact, index) => artifact.targetPath !== expectedPaths[index])) {
+      return { satisfied: false, result: null };
+    }
 
     for (const artifact of manifest.artifacts) {
       const stagedPath = path.join(directory, artifact.stagedName);
@@ -271,12 +300,15 @@ export function createMailConfigManager({
 }
 
 export const mailConfigManagerInternals = Object.freeze({
-  allowedArtifactPaths: ALLOWED_ARTIFACT_PATHS,
+  allowedArtifactPaths: SRS_ARTIFACT_PATHS,
+  baseArtifactPaths: BASE_ARTIFACT_PATHS,
+  srsArtifactPaths: SRS_ARTIFACT_PATHS,
   defaultStagingRoot: DEFAULT_STAGING_ROOT,
   directoryMode: DIRECTORY_MODE,
   privateMode: PRIVATE_MODE,
   publicMode: PUBLIC_MODE,
   manifestVersion: MANIFEST_VERSION,
+  expectedArtifactPaths,
   normalizeManifest,
   buildStageManifest,
 });
