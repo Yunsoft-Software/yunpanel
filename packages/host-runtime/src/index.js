@@ -211,6 +211,11 @@ export {
   databaseDumpManagerInternals,
 } from './database-dump-manager.js';
 export {
+  createDatabaseRestoreManager,
+  DatabaseRestoreError,
+  databaseRestoreManagerInternals,
+} from './database-restore-manager.js';
+export {
   createDatabaseCredentialHostStateStore,
   DatabaseCredentialHostStateError,
   databaseCredentialHostStateInternals,
