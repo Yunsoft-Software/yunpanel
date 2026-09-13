@@ -6,8 +6,14 @@ const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const websiteId = '5b504f8f-4341-4a55-a6fb-86c6eb282e61';
 const projectId = '70b6a777-5fdf-4e64-89e8-14bf2e34953e';
 
-function fixture() {
-  const binding = Object.freeze({ projectId, serviceName: 'web', targetPort: 3000, protocol: 'tcp' });
+function fixture(bindingOverrides = {}) {
+  const binding = Object.freeze({
+    projectId,
+    serviceName: 'web',
+    targetPort: 3000,
+    protocol: 'tcp',
+    ...bindingOverrides,
+  });
   const website = Object.freeze({
     id: websiteId,
     serverId,
@@ -94,8 +100,7 @@ test('managed Compose Website impact exposes only binding identity and active pr
 });
 
 test('managed Compose impact rejects malformed binding metadata instead of guessing', async () => {
-  const state = fixture();
-  state.website.managedComposeBinding.targetPort = 0;
+  const state = fixture({ targetPort: 0 });
   await assert.rejects(
     previewResourceImpact({
       resourceType: 'website',
