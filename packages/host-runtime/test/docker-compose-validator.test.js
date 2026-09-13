@@ -27,6 +27,9 @@ test('compose validator stages source privately, uses fixed docker compose confi
     '      - "127.0.0.1:18080:80"',
     '    environment:',
     '      API_TOKEN: ${API_TOKEN}',
+    '    volumes:',
+    '      - data:/data',
+    '      - ./config:/app/config:ro',
     '  worker:',
     '    build: .',
     'volumes:',
@@ -52,6 +55,13 @@ test('compose validator stages source privately, uses fixed docker compose confi
             image: 'example/web:1',
             environment: { API_TOKEN: 'super-secret' },
             ports: [{ mode: 'ingress', host_ip: '127.0.0.1', target: 80, published: '18080', protocol: 'tcp' }],
+            volumes: [
+              { type: 'volume', source: 'data', target: '/data' },
+              { type: 'bind', source: path.join(options.cwd, 'config'), target: '/app/config', read_only: true },
+              { type: 'bind', source: '/srv/shared', target: '/srv/shared' },
+              { type: 'volume', target: '/cache' },
+              { type: 'tmpfs', target: '/run/cache' },
+            ],
           },
           worker: { build: { context: '/private/project' } },
         },
@@ -80,15 +90,22 @@ test('compose validator stages source privately, uses fixed docker compose confi
       imageConfigured: true,
       buildConfigured: false,
       publishedPorts: [{ hostIp: '127.0.0.1', publishedPort: 18080, targetPort: 80, protocol: 'tcp' }],
+      storageMounts: [
+        { kind: 'bind', source: './config', sourceScope: 'project', target: '/app/config', readOnly: true },
+        { kind: 'ephemeral', source: null, sourceScope: null, target: '/cache', readOnly: false },
+        { kind: 'named_volume', source: 'data', sourceScope: 'project', target: '/data', readOnly: false },
+        { kind: 'ephemeral', source: null, sourceScope: null, target: '/run/cache', readOnly: false },
+        { kind: 'bind', source: '/srv/shared', sourceScope: 'host', target: '/srv/shared', readOnly: false },
+      ],
     },
-    { name: 'worker', imageConfigured: false, buildConfigured: true, publishedPorts: [] },
+    { name: 'worker', imageConfigured: false, buildConfigured: true, publishedPorts: [], storageMounts: [] },
   ]);
   assert.deepEqual(result.volumes, ['data']);
   assert.deepEqual(result.networks, ['default']);
   assert.equal(result.validated, true);
   assert.equal(result.sideEffects, false);
   assert.match(result.composeSha256, /^[a-f0-9]{64}$/);
-  assert.doesNotMatch(JSON.stringify(result), /super-secret|API_TOKEN|private\/project|compose\.yaml/i);
+  assert.doesNotMatch(JSON.stringify(result), /super-secret|API_TOKEN|private\/project|compose\.yaml|\.validate-fixed/i);
   assert.deepEqual(await readdir(root), []);
 });
 
@@ -110,6 +127,38 @@ test('compose summary preserves explicit published port identity and does not in
     { hostIp: '0.0.0.0', publishedPort: 8080, targetPort: 80, protocol: 'tcp' },
     { hostIp: '::1', publishedPort: 18443, targetPort: 443, protocol: 'tcp' },
   ]);
+  assert.deepEqual(summary.services[0].storageMounts, []);
+});
+
+test('compose summary classifies named, project bind, host bind and ephemeral mounts', () => {
+  const projectDirectory = '/var/lib/yunpanel/docker/compose-validation/project';
+  const summary = summarizeDockerComposeConfig({
+    name: 'app',
+    services: {
+      web: {
+        volumes: [
+          { type: 'volume', source: 'data', target: '/data' },
+          { type: 'bind', source: `${projectDirectory}/uploads`, target: '/uploads' },
+          { type: 'bind', source: '/mnt/archive', target: '/archive', read_only: true },
+          { type: 'volume', target: '/anonymous' },
+          { type: 'tmpfs', target: '/tmp/runtime' },
+        ],
+      },
+    },
+    volumes: { data: {} },
+  }, {
+    expectedProjectName: 'app',
+    documentSha256: 'a'.repeat(64),
+    documentBytes: 10,
+    projectDirectory,
+  });
+  assert.deepEqual(summary.services[0].storageMounts, [
+    { kind: 'ephemeral', source: null, sourceScope: null, target: '/anonymous', readOnly: false },
+    { kind: 'bind', source: '/mnt/archive', sourceScope: 'host', target: '/archive', readOnly: true },
+    { kind: 'named_volume', source: 'data', sourceScope: 'project', target: '/data', readOnly: false },
+    { kind: 'ephemeral', source: null, sourceScope: null, target: '/tmp/runtime', readOnly: false },
+    { kind: 'bind', source: './uploads', sourceScope: 'project', target: '/uploads', readOnly: false },
+  ]);
 });
 
 test('compose summary rejects invalid or duplicate published port identities', () => {
@@ -129,6 +178,27 @@ test('compose summary rejects invalid or duplicate published port identities', (
       },
     },
   }, base), { code: 'docker_compose_service_ports_invalid' });
+});
+
+test('compose summary rejects ambiguous or unsafe storage mounts', () => {
+  const base = {
+    expectedProjectName: 'app', documentSha256: 'a'.repeat(64), documentBytes: 10, projectDirectory: '/tmp/project',
+  };
+  assert.throws(() => summarizeDockerComposeConfig({
+    name: 'app', services: { web: { volumes: [{ type: 'bind', source: 'relative', target: '/data' }] } },
+  }, base), { code: 'docker_compose_service_storage_invalid' });
+  assert.throws(() => summarizeDockerComposeConfig({
+    name: 'app', services: { web: { volumes: [{ type: 'npipe', source: '/tmp/a', target: '/data' }] } },
+  }, base), { code: 'docker_compose_service_storage_invalid' });
+  assert.throws(() => summarizeDockerComposeConfig({
+    name: 'app', services: { web: { volumes: [{ type: 'volume', source: 'data', target: 'relative' }] } },
+  }, base), { code: 'docker_compose_service_storage_invalid' });
+  assert.throws(() => summarizeDockerComposeConfig({
+    name: 'app', services: { web: { volumes: [
+      { type: 'volume', source: 'data', target: '/data' },
+      { type: 'tmpfs', target: '/data' },
+    ] } },
+  }, base), { code: 'docker_compose_service_storage_invalid' });
 });
 
 test('compose validator fails closed when docker is missing or compose config fails without leaking child diagnostics', async (t) => {
