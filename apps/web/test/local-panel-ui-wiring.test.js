@@ -100,6 +100,24 @@ test('mail route exposes domain, mailbox, alias, configuration, DKIM, queue, log
   assert.match(resources, /enable\('domains', 'servers', 'jobs'\)/);
 });
 
+test('job UI exposes exact resource links, lifecycle stage, safe metadata and bounded deploy logs', async () => {
+  const [table, drawer, presentation] = await Promise.all([
+    readFile(new URL('../src/workspace/JobsTable.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/JobDrawer.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/job-presentation.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(table, /jobResourceTarget/);
+  assert.match(table, /jobLifecycle/);
+  assert.match(drawer, /safeJobResultMetadata/);
+  assert.match(drawer, /job\.diagnosis/);
+  assert.match(drawer, /\/jobs\/\$\{encodeURIComponent\(id\)\}\/logs\/deploy\?limit=50/);
+  assert.match(drawer, /job\.error\.code/);
+  assert.doesNotMatch(drawer, /JSON\.stringify\(job\.result\)|Object\.entries\(job\.result\)/);
+  assert.match(presentation, /DEPLOY_LOG_OPERATIONS/);
+  assert.match(presentation, /SAFE_RESULT_FIELDS/);
+  assert.doesNotMatch(presentation, /privateKey|password|secret|authorization/i);
+});
+
 test('audit route uses the real owner-only history client instead of a placeholder', async () => {
   const [app, page, client, operations] = await Promise.all([
     readFile(new URL('../src/workspace/WorkspaceApp.jsx', import.meta.url), 'utf8'),
