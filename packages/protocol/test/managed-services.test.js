@@ -18,8 +18,12 @@ function validate(operation, payload) {
 }
 
 test('managed hosting service protocol exposes the fixed supported catalog', () => {
-  assert.deepEqual(MANAGED_SERVICE_IDS, ['nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'roundcube']);
-  assert.deepEqual(MANAGED_SERVICE_CONTROL_IDS, ['nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd']);
+  assert.deepEqual(MANAGED_SERVICE_IDS, [
+    'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'roundcube', 'postsrsd',
+  ]);
+  assert.deepEqual(MANAGED_SERVICE_CONTROL_IDS, [
+    'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'postsrsd',
+  ]);
   assert.deepEqual(MANAGED_SERVICE_ACTIONS, ['start', 'stop', 'restart']);
   assert.equal(isReadOnlyOperation(OPERATIONS.SYSTEM_SERVICES_INSPECT), true);
   assert.equal(isReadOnlyOperation(OPERATIONS.SYSTEM_SERVICE_INSTALL), false);
@@ -29,25 +33,43 @@ test('managed hosting service protocol exposes the fixed supported catalog', () 
 test('service inspection accepts either the full catalog or one allowlisted service', () => {
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, {}).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'docker' }).ok, true);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'postsrsd' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'ssh' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'docker', command: 'id' }).ok, false);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'postsrsd', command: 'id' }).ok, false);
 });
 
 test('service install accepts exactly one allowlisted service id', () => {
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'mariadb' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'roundcube' }).ok, true);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'postsrsd' }).ok, true);
+  const envelope = createOperationEnvelope({
+    id,
+    operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
+    payload: { serviceId: 'postsrsd' },
+  });
+  assert.equal(envelope.payload.serviceId, 'postsrsd');
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, {}).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'openssh-server' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'mariadb', packages: ['curl'] }).ok, false);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'postsrsd', packages: ['curl'] }).ok, false);
 });
 
 test('service control accepts only start stop and restart without shell arguments', () => {
   for (const action of MANAGED_SERVICE_ACTIONS) {
     const envelope = createOperationEnvelope({ id, operation: OPERATIONS.SYSTEM_SERVICE_CONTROL, payload: { serviceId: 'nginx', action } });
     assert.equal(envelope.payload.action, action);
+    const srsEnvelope = createOperationEnvelope({
+      id,
+      operation: OPERATIONS.SYSTEM_SERVICE_CONTROL,
+      payload: { serviceId: 'postsrsd', action },
+    });
+    assert.equal(srsEnvelope.payload.action, action);
   }
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'nginx', action: 'enable' }).ok, false);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'postsrsd', action: 'enable' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'nginx', action: 'restart', args: ['--now'] }).ok, false);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'postsrsd', action: 'restart', args: ['--now'] }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'ssh', action: 'restart' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'roundcube', action: 'restart' }).ok, false);
 });
