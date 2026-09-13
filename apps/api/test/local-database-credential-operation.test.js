@@ -43,6 +43,7 @@ const execution = Object.freeze({ serverId, jobId, resourceType: 'database', res
 function applyResult() {
   return {
     version: 1,
+    engine: 'mariadb',
     databaseCredentialId: credentialId,
     databaseBindingId: bindingId,
     credentialRevision: 3,
@@ -59,6 +60,7 @@ function applyResult() {
 function deleteResult() {
   return {
     version: 1,
+    engine: 'mysql',
     databaseCredentialId: credentialId,
     databaseBindingId: bindingId,
     credentialRevision: 3,
@@ -72,7 +74,7 @@ function deleteResult() {
   };
 }
 
-test('local apply materializes privately and records secret-free recovery evidence', async () => {
+test('local apply materializes privately and records exact secret-free recovery evidence', async () => {
   const calls = [];
   const receipts = [];
   const operation = createLocalDatabaseCredentialOperation({
@@ -99,15 +101,19 @@ test('local apply materializes privately and records secret-free recovery eviden
   const result = await operation.execute(OPERATIONS.DATABASE_CREDENTIAL_APPLY, payload(), execution);
   assert.equal(result.applied, true);
   assert.equal(Object.hasOwn(result, 'password'), false);
+  assert.equal(Object.hasOwn(result, 'engine'), false);
+  assert.equal(Object.keys(result).length, 11);
   assert.deepEqual(calls.map(([name]) => name), ['materialize', 'apply', 'receipt']);
   assert.equal(Object.hasOwn(calls[1][1], 'password'), true);
   assert.equal(receipts[0].serverId, serverId);
   assert.equal(receipts[0].jobId, jobId);
   assert.equal(receipts[0].operation, OPERATIONS.DATABASE_CREDENTIAL_APPLY);
   assert.equal(Object.hasOwn(receipts[0].result, 'password'), false);
+  assert.equal(Object.hasOwn(receipts[0].result, 'engine'), false);
+  assert.equal(Object.keys(receipts[0].result).length, 11);
 });
 
-test('local delete does not require private password material and records delete receipt', async () => {
+test('local delete does not require private password material and records normalized delete receipt', async () => {
   const receipts = [];
   const operation = createLocalDatabaseCredentialOperation({
     materializer: { async materialize() { return bundle({ privateValue: false }); } },
@@ -119,7 +125,9 @@ test('local delete does not require private password material and records delete
   });
   const result = await operation.execute(OPERATIONS.DATABASE_CREDENTIAL_DELETE, payload(), execution);
   assert.equal(result.deleted, true);
+  assert.equal(Object.hasOwn(result, 'engine'), false);
   assert.equal(receipts[0].operation, OPERATIONS.DATABASE_CREDENTIAL_DELETE);
+  assert.equal(Object.hasOwn(receipts[0].result, 'engine'), false);
 });
 
 test('receipt failure never recasts a completed host mutation as failed', async () => {
@@ -133,6 +141,7 @@ test('receipt failure never recasts a completed host mutation as failed', async 
   });
   const result = await operation.execute(OPERATIONS.DATABASE_CREDENTIAL_APPLY, payload(), execution);
   assert.equal(result.applied, true);
+  assert.equal(Object.hasOwn(result, 'engine'), false);
 });
 
 test('execution resource mismatch fails before host manager mutation', async () => {
