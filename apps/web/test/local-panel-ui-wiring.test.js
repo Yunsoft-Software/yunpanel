@@ -30,9 +30,12 @@ test('primary navigation exposes working modules instead of placeholder destinat
     readFile(new URL('../src/workspace/OperationsPages.jsx', import.meta.url), 'utf8'),
   ]);
   assert.match(layout, /\['\/docker', 'Docker', 'box'\]/);
+  assert.match(layout, /\['\/mail', 'Mail', 'mail'\]/);
   assert.match(layout, /\['\/audit', 'Denetim', 'shield'\]/);
   assert.match(app, /path: 'docker', element: manage\(<DockerProjectsPage \/>\)/);
   assert.match(app, /path: 'docker\/:dockerProjectId', element: manage\(<DockerProjectsPage \/>\)/);
+  assert.match(app, /path: 'mail', element: manage\(<MailDomainsPage \/>\)/);
+  assert.match(app, /path: 'mail\/:mailDomainId', element: manage\(<MailDomainsPage \/>\)/);
   assert.match(dockerPage, /DockerProjectCreateDialog/);
   assert.match(dockerPage, /DockerConfigPanel/);
   assert.match(dockerPage, /DockerLifecyclePanel/);
@@ -47,8 +50,54 @@ test('primary navigation exposes working modules instead of placeholder destinat
   assert.match(dockerConfig, /setDockerCredential/);
   assert.match(dockerConfig, /validateSavedDockerProject/);
   assert.doesNotMatch(operations, /docker: \['Docker'/);
+  assert.doesNotMatch(operations, /mail: \['Mail'/);
   assert.doesNotMatch(model, /\['(?:mail|databases|cron|backups)'/);
   assert.match(model, /\['files', 'Dosyalar'\]/);
+});
+
+test('mail route exposes domain, mailbox, alias, configuration, DKIM, queue, logs and Roundcube controls', async () => {
+  const [page, mailbox, aliases, config, dkim, operations, client, resources] = await Promise.all([
+    readFile(new URL('../src/workspace/MailDomainsPage.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/MailboxesPanel.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/MailAliasesPanel.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/MailConfigurationPanel.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/MailDkimDiagnosticsPanel.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/MailOperationsPanel.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/mail-operations-client.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/workspace-resources.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(page, /MailDomainCreateDialog/);
+  assert.match(page, /MailboxesPanel/);
+  assert.match(page, /MailAliasesPanel/);
+  assert.match(page, /MailConfigurationPanel/);
+  assert.match(page, /MailDkimDiagnosticsPanel/);
+  assert.match(page, /MailOperationsPanel/);
+  assert.match(mailbox, /createMailbox/);
+  assert.match(mailbox, /setMailboxQuota/);
+  assert.match(mailbox, /setMailboxForwarding/);
+  assert.doesNotMatch(mailbox, /deleteMailbox/);
+  assert.match(aliases, /createMailAlias/);
+  assert.match(aliases, /updateMailAlias/);
+  assert.match(aliases, /deleteMailAlias/);
+  assert.match(config, /previewMailConfiguration/);
+  assert.match(config, /applyMailConfiguration/);
+  assert.match(config, /observe\(job\)/);
+  assert.match(dkim, /createMailDkim/);
+  assert.match(dkim, /rotateMailDkim/);
+  assert.match(dkim, /previewMailDkimApply/);
+  assert.match(dkim, /applyMailDkim/);
+  assert.match(dkim, /getMailDiagnostics/);
+  assert.doesNotMatch(dkim, /deleteMailDkim/);
+  assert.match(operations, /getRoundcubePreview/);
+  assert.match(operations, /prepareRoundcube/);
+  assert.match(operations, /applyRoundcube/);
+  assert.match(operations, /getMailQueue/);
+  assert.match(operations, /getMailServiceLogs/);
+  assert.match(client, /\/roundcube\/config-preview/);
+  assert.match(client, /\/mail\/queue/);
+  assert.match(client, /\['postfix', 'dovecot', 'rspamd'\]/);
+  assert.match(resources, /\/mail/);
+  assert.match(resources, /enable\('domains', 'servers', 'jobs'\)/);
 });
 
 test('audit route uses the real owner-only history client instead of a placeholder', async () => {
