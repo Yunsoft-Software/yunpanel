@@ -107,7 +107,8 @@ export function mountDockerComposeRoutes(app, {
     || typeof dockerRegistryCredentialRegistry.setCredential !== 'function') {
     throw new Error('Docker registry credential registry is required');
   }
-  if (!dockerComposeOperationsService || typeof dockerComposeOperationsService.preview !== 'function'
+  if (!dockerComposeOperationsService || typeof dockerComposeOperationsService.history !== 'function'
+    || typeof dockerComposeOperationsService.preview !== 'function'
     || typeof dockerComposeOperationsService.queue !== 'function') {
     throw new Error('Docker Compose operations service is required');
   }
@@ -234,6 +235,14 @@ export function mountDockerComposeRoutes(app, {
       },
       sideEffects: false,
     });
+  }));
+
+  app.get('/api/docker/projects/:dockerProjectId/history', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    if (Object.keys(request.query ?? {}).length !== 0) {
+      throw new DockerComposeHttpError('docker_compose_query_invalid', 'Docker Compose history does not accept query parameters');
+    }
+    const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
+    return response.json({ data: await safeCall(() => dockerComposeOperationsService.history({ projectId: project.id })) });
   }));
 
   app.post('/api/docker/projects/:dockerProjectId/operations/:action/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
