@@ -7,6 +7,8 @@ import {
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const otherServerId = 'd0bc7f95-bdbd-4375-904f-50c532fc3faa';
+const websiteId = '2c387b02-8747-458a-b509-8f531d4d149e';
+const databaseBindingId = 'd1432e13-edb5-49f5-8f9b-302c407c784b';
 const applicationId = '84e0ccf3-13b7-4abe-b8aa-68fc22d6f2c8';
 const releaseId = '0bb78242-03a6-429f-9d17-7725c521437c';
 const projectId = '5bc2c0f4-948a-4f34-826c-5a9703f9cbf0';
@@ -14,8 +16,21 @@ const inventoryJobId = '1dff50cb-0840-413c-a9d1-d069f8e87743';
 const webDomainId = 'c2591ea3-e1c2-4c37-a194-cc5650acd9ef';
 const mailDomainId = 'f15f21e0-3ce8-47cf-93bf-d45c8c723246';
 
-function fixture({ databaseInventory = undefined, mailPreviewError = null } = {}) {
+function fixture({
+  databaseInventory = undefined,
+  mailPreviewError = null,
+  websiteRevision = 7,
+  bindingRevision = 3,
+} = {}) {
   const calls = { environment: [], mail: [] };
+  const domain = {
+    id: webDomainId,
+    serverId,
+    websiteId,
+    primaryDomain: 'example.com',
+    desiredRevision: 4,
+    appliedRevision: 4,
+  };
   const provider = createBackupResourceProvider({
     serverRegistry: {
       async getServer(id) { return id === serverId ? { id: serverId, executionMode: 'local' } : null; },
@@ -72,6 +87,32 @@ function fixture({ databaseInventory = undefined, mailPreviewError = null } = {}
         };
       },
     },
+    websiteRegistry: {
+      async listWebsites({ serverId: requested }) {
+        assert.equal(requested, serverId);
+        return [{
+          id: websiteId,
+          serverId,
+          name: 'Storefront',
+          revision: websiteRevision,
+          applicationId,
+          managedComposeBinding: { projectId, serviceName: 'web', targetPort: 3000, protocol: 'tcp' },
+        }];
+      },
+    },
+    databaseBindingRegistry: {
+      async listBindings({ serverId: requested }) {
+        assert.equal(requested, serverId);
+        return [{
+          id: databaseBindingId,
+          serverId,
+          databaseName: 'novasis',
+          websiteId,
+          applicationId,
+          revision: bindingRevision,
+        }];
+      },
+    },
     async loadDatabaseInventory(requested) {
       assert.equal(requested, serverId);
       if (databaseInventory !== undefined) return databaseInventory;
@@ -101,7 +142,10 @@ function fixture({ databaseInventory = undefined, mailPreviewError = null } = {}
     },
     domainRegistry: {
       async getDomain(id) {
-        return id === webDomainId ? { id, serverId, primaryDomain: 'example.com' } : null;
+        return id === webDomainId ? domain : null;
+      },
+      async listDomains() {
+        return [domain];
       },
     },
     mailDataOperationsService: {
@@ -130,7 +174,7 @@ function fixture({ databaseInventory = undefined, mailPreviewError = null } = {}
   return { provider, calls };
 }
 
-test('live backup provider gathers Docker, Application, database and domain-level Mail resources', async () => {
+test('live backup provider gathers resources and deterministic Website/Domain impact metadata', async () => {
   const { provider, calls } = fixture();
   const plan = await provider.preview({ serverId });
 
@@ -143,16 +187,29 @@ test('live backup provider gathers Docker, Application, database and domain-leve
   );
   assert.equal(plan.counts.selected, 4);
   assert.equal(plan.counts.excluded, 1);
+  assert.equal(plan.dependencyGraph.version, 1);
+  assert.deepEqual(plan.dependencyGraph.counts, { resources: 5, associatedResources: 5, websites: 1, domains: 1 });
+  assert.equal(plan.dependencyGraph.impacts.every((impact) => impact.websiteIds.includes(websiteId)), true);
+  assert.equal(plan.dependencyGraph.impacts.every((impact) => impact.domainIds.includes(webDomainId)), true);
   assert.deepEqual(calls.environment, [{ id: applicationId, options: { currentReleaseId: releaseId } }]);
   assert.deepEqual(calls.mail, [{ scope: 'domain', resourceId: mailDomainId }]);
   assert.equal(plan.resources.some((resource) => resource.serverId === otherServerId), false);
 });
 
-test('live backup provider produces a stable digest when live evidence is unchanged', async () => {
+test('live backup provider produces a stable digest when source and dependency evidence are unchanged', async () => {
   const first = await fixture().provider.preview({ serverId });
   const second = await fixture().provider.preview({ serverId });
   assert.equal(first.previewDigest, second.previewDigest);
   assert.equal(first.confirmation, second.confirmation);
+});
+
+test('live backup preview digest changes when Website or database-binding dependency revisions change', async () => {
+  const first = await fixture().provider.preview({ serverId });
+  const websiteChanged = await fixture({ websiteRevision: 8 }).provider.preview({ serverId });
+  const bindingChanged = await fixture({ bindingRevision: 4 }).provider.preview({ serverId });
+
+  assert.notEqual(first.previewDigest, websiteChanged.previewDigest);
+  assert.notEqual(first.previewDigest, bindingChanged.previewDigest);
 });
 
 test('live backup provider requires a verified database inventory instead of silently omitting databases', async () => {
