@@ -71,9 +71,9 @@ test('database credential recovery runtime reconstructs current public desired s
       assert.equal(typeof getApplication, 'function');
       return fakeBindingRegistry;
     },
-    databaseCredentialRegistryFactory: ({ filePath, masterKey, getBinding }) => {
+    databaseCredentialRegistryFactory: ({ filePath, masterKey, getDatabaseBinding }) => {
       calls.push(['credential.create', filePath, masterKey]);
-      assert.equal(typeof getBinding, 'function');
+      assert.equal(typeof getDatabaseBinding, 'function');
       return fakeCredentialRegistry;
     },
     materializerFactory: ({ databaseBindingRegistry, databaseCredentialRegistry }) => {
