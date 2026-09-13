@@ -28,7 +28,10 @@ import { createDomainRegistry } from './domain-registry.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDnsProviderCredentialRegistry } from './dns-provider-credential-registry.js';
 import { createDockerComposeApiHandler } from './docker-compose-api-handler.js';
-import { createDockerComposeRuntime } from './docker-compose-runtime.js';
+import {
+  createDockerComposeProjectRegistryBootstrap,
+  createDockerComposeRuntime,
+} from './docker-compose-runtime.js';
 import { createDockerWorkloadRegistry } from './docker-workload-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
@@ -142,11 +145,17 @@ const dockerWorkloadRegistry = createDockerWorkloadRegistry({
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
 });
 await dockerWorkloadRegistry.init();
+const dockerComposeProjectBootstrap = createDockerComposeProjectRegistryBootstrap({
+  env: process.env,
+  serverRegistry: registry,
+});
+await dockerComposeProjectBootstrap.projectRegistry.init();
 const websiteRegistry = createWebsiteRegistry({
   filePath: websiteStorePath,
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
   getApplication: async (applicationId) => applicationRegistry.getApplication(applicationId),
   getDockerWorkload: async (workloadId) => dockerWorkloadRegistry.getWorkload(workloadId),
+  getDockerComposeProject: async (projectId) => dockerComposeProjectBootstrap.projectRegistry.getProject(projectId),
 });
 await websiteRegistry.init();
 const databaseBindingRegistry = createDatabaseBindingRegistry({
@@ -293,6 +302,7 @@ const dockerComposeRuntime = await createDockerComposeRuntime({
   env: process.env,
   serverRegistry: registry,
   jobRegistry,
+  projectRegistry: dockerComposeProjectBootstrap.projectRegistry,
 });
 const databaseCredentialApplyService = createDatabaseCredentialApplyService({
   databaseBindingRegistry,
