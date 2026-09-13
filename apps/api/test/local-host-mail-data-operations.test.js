@@ -54,6 +54,26 @@ function runtime() {
         };
       },
     },
+    mailDataDeleteManager: {
+      async deleteData(input) {
+        calls.push(['delete', structuredClone(input)]);
+        return {
+          version: 1,
+          transactionId: input.transactionId,
+          backupId: input.backupId,
+          scope: input.scope,
+          identity: input.identity,
+          sourcePresent: true,
+          contentSha256: 'e'.repeat(64),
+          bytes: 1024,
+          files: 2,
+          directories: 3,
+          deleted: true,
+          sideEffects: true,
+          tombstonePath: '/private/not-public',
+        };
+      },
+    },
   });
   return { operations, calls };
 }
@@ -123,6 +143,44 @@ test('local mail data restore uses job id as transaction and strips private mana
   assert.equal(result.contentSha256, 'd'.repeat(64));
   assert.equal(result.applied, true);
   assert.doesNotMatch(JSON.stringify(result), /privateDataPath|\/private/);
+});
+
+test('local mail data delete uses job id as transaction and returns only safe deletion evidence', async () => {
+  const { operations, calls } = runtime();
+  assert.equal(operations.supports(OPERATIONS.MAIL_DATA_DELETE), true);
+  const result = await operations.executeOperation(OPERATIONS.MAIL_DATA_DELETE, {
+    mailDomainId,
+    resourceId: mailboxId,
+    backupId: 'mail-backup-selected',
+    scope: 'mailbox',
+    identity: 'owner@example.com',
+    expectedResourceRevision: 3,
+    expectedTargetSnapshotSha256: digest,
+  }, execution);
+  assert.deepEqual(calls, [['delete', {
+    transactionId: jobId,
+    backupId: 'mail-backup-selected',
+    scope: 'mailbox',
+    identity: 'owner@example.com',
+    expectedTargetSnapshotSha256: digest,
+  }]]);
+  assert.deepEqual(result, {
+    version: 1,
+    transactionId: jobId,
+    backupId: 'mail-backup-selected',
+    mailDomainId,
+    resourceId: mailboxId,
+    scope: 'mailbox',
+    identity: 'owner@example.com',
+    sourcePresent: true,
+    contentSha256: 'e'.repeat(64),
+    bytes: 1024,
+    files: 2,
+    directories: 3,
+    deleted: true,
+    sideEffects: true,
+  });
+  assert.doesNotMatch(JSON.stringify(result), /tombstonePath|privateDataPath|\/private/);
 });
 
 test('mail data operation rejects wrong execution resource before touching managers', async () => {
