@@ -9,6 +9,7 @@ import {
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const inventoryJobId = '1dff50cb-0840-413c-a9d1-d069f8e87743';
 const mailDomainId = 'f15f21e0-3ce8-47cf-93bf-d45c8c723246';
+const childJobId = '0bb78242-03a6-429f-9d17-7725c521437c';
 
 function databaseStep(overrides = {}) {
   return {
@@ -78,14 +79,42 @@ function mailPreview(overrides = {}) {
   };
 }
 
-function fixture({ jobs = [], inventory = databaseInventory(), preview = mailPreview() } = {}) {
+function mailExistingJob(status = 'succeeded') {
+  return {
+    id: childJobId,
+    serverId,
+    type: 'mail_data_backup',
+    operation: OPERATIONS.MAIL_DATA_BACKUP,
+    resourceType: 'mail_domain',
+    resourceId: mailDomainId,
+    status,
+    createdAt: '2026-09-13T20:10:00.000Z',
+    startedAt: '2026-09-13T20:10:01.000Z',
+    finishedAt: status === 'succeeded' ? '2026-09-13T20:10:20.000Z' : null,
+    attempts: 1,
+    result: null,
+    error: null,
+  };
+}
+
+function fixture({
+  jobs = [],
+  inventory = databaseInventory(),
+  preview = mailPreview(),
+  existingJob = null,
+} = {}) {
   const enqueued = [];
+  const events = [];
   const registry = {
-    async listJobs() { return jobs; },
+    async listJobs() {
+      events.push('jobs');
+      return jobs;
+    },
     async enqueue(request) {
+      events.push('enqueue');
       enqueued.push(request);
       return {
-        id: '0bb78242-03a6-429f-9d17-7725c521437c',
+        id: childJobId,
         serverId: request.serverId,
         type: request.type,
         operation: request.operation,
@@ -103,19 +132,31 @@ function fixture({ jobs = [], inventory = databaseInventory(), preview = mailPre
   };
   const dispatcher = createBackupChildJobDispatcher({
     jobRegistry: registry,
-    async loadDatabaseInventory() { return inventory; },
+    jobIdempotencyLookup: {
+      async find() {
+        events.push('lookup');
+        return existingJob;
+      },
+    },
+    async loadDatabaseInventory() {
+      events.push('inventory');
+      return inventory;
+    },
     mailDataOperationsService: {
       async previewBackup() {
+        events.push('preview');
         if (preview instanceof Error) throw preview;
         return preview;
       },
     },
   });
-  return { dispatcher, enqueued };
+  return { dispatcher, enqueued, events };
 }
 
-test('database child prepare validates exact inventory and emits deterministic dispatch intent', async () => {
-  const { dispatcher } = fixture();
+test('child prepare emits deterministic intent without reading source state', async () => {
+  const { dispatcher, events } = fixture({
+    inventory: databaseInventory({ databases: [{ name: 'novasis', sizeBytes: 9999 }] }),
+  });
   const prepared = await dispatcher.prepare(serverId, databaseStep());
 
   assert.deepEqual(prepared.workRef, {
@@ -123,56 +164,69 @@ test('database child prepare validates exact inventory and emits deterministic d
     id: `general-backup-step:${'a'.repeat(64)}`,
   });
   assert.equal(prepared.request.operation, OPERATIONS.DATABASE_BACKUP);
-  assert.equal(prepared.request.resourceId, 'novasis');
   assert.deepEqual(prepared.request.payload, { databaseName: 'novasis' });
   assert.equal(prepared.request.idempotencyKey, prepared.workRef.id);
+  assert.deepEqual(events, []);
 });
 
-test('database child prepare fails closed on stale inventory or active database work', async () => {
+test('database child verification fails closed on stale inventory or active database work', async () => {
   const stale = fixture({ inventory: databaseInventory({ databases: [{ name: 'novasis', sizeBytes: 5000 }] }) });
   await assert.rejects(
-    () => stale.dispatcher.prepare(serverId, databaseStep()),
+    () => stale.dispatcher.verify(serverId, databaseStep()),
     (error) => error instanceof BackupChildDispatcherError
       && error.code === 'backup_database_preview_stale'
       && error.status === 409,
   );
 
-  const busy = fixture({
-    jobs: [{ operation: OPERATIONS.DATABASE_INSPECT, status: 'running' }],
-  });
+  const busy = fixture({ jobs: [{ operation: OPERATIONS.DATABASE_INSPECT, status: 'running' }] });
   await assert.rejects(
-    () => busy.dispatcher.prepare(serverId, databaseStep()),
+    () => busy.dispatcher.verify(serverId, databaseStep()),
     (error) => error instanceof BackupChildDispatcherError
       && error.code === 'backup_database_job_conflict'
       && error.status === 409,
   );
 });
 
-test('mail child prepare requires the exact guarded mail snapshot', async () => {
+test('mail child verification requires the exact guarded mail snapshot', async () => {
   const { dispatcher } = fixture();
-  const prepared = await dispatcher.prepare(serverId, mailStep());
-
-  assert.equal(prepared.request.operation, OPERATIONS.MAIL_DATA_BACKUP);
-  assert.equal(prepared.request.resourceType, 'mail_domain');
-  assert.deepEqual(prepared.request.payload, {
-    mailDomainId,
-    resourceId: mailDomainId,
-    scope: 'domain',
-    identity: 'example.com',
-    expectedResourceRevision: 5,
-    expectedSnapshotSha256: 'd'.repeat(64),
-  });
+  assert.equal(await dispatcher.verify(serverId, mailStep()), true);
 
   const stale = fixture({ preview: mailPreview({ bytes: 9999 }) });
   await assert.rejects(
-    () => stale.dispatcher.prepare(serverId, mailStep()),
+    () => stale.dispatcher.verify(serverId, mailStep()),
     (error) => error instanceof BackupChildDispatcherError
       && error.code === 'backup_mail_preview_stale'
       && error.status === 409,
   );
 });
 
-test('prepared child enqueue uses the persisted dispatch intent as the idempotency key', async () => {
+test('dispatch checks for an existing child before verification and only enqueues absent work', async () => {
+  const { dispatcher, events, enqueued } = fixture();
+  const step = mailStep();
+  const workRef = dispatcher.intent(step);
+  const job = await dispatcher.dispatchPrepared(serverId, step, workRef);
+
+  assert.equal(job.status, 'queued');
+  assert.deepEqual(events, ['lookup', 'preview', 'enqueue']);
+  assert.equal(enqueued.length, 1);
+  assert.equal(enqueued[0].idempotencyKey, workRef.id);
+});
+
+test('dispatch reconciles an existing successful child without re-verifying or re-enqueueing', async () => {
+  const existingJob = mailExistingJob('succeeded');
+  const { dispatcher, events, enqueued } = fixture({
+    existingJob,
+    preview: mailPreview({ bytes: 9999 }),
+  });
+  const step = mailStep();
+  const job = await dispatcher.dispatchPrepared(serverId, step, dispatcher.intent(step));
+
+  assert.deepEqual(job, existingJob);
+  assert.deepEqual(events, ['lookup']);
+  assert.equal(enqueued.length, 0);
+});
+
+test('prepared child enqueue requires the persisted deterministic dispatch intent', async () => {
   const { dispatcher, enqueued } = fixture();
   const step = mailStep();
   const prepared = await dispatcher.prepare(serverId, step);
@@ -202,7 +256,7 @@ test('database and mail successful jobs normalize to bounded aggregate artifact 
     finishedAt: '2026-09-13T20:10:10.000Z',
     result: {
       version: 1,
-      backupId: '0bb78242-03a6-429f-9d17-7725c521437c',
+      backupId: childJobId,
       databaseName: 'novasis',
       engine: 'mariadb',
       databaseVersion: '11.4.3-MariaDB',
@@ -214,7 +268,7 @@ test('database and mail successful jobs normalize to bounded aggregate artifact 
     },
   });
   assert.deepEqual(databaseEvidence, {
-    artifactId: '0bb78242-03a6-429f-9d17-7725c521437c',
+    artifactId: childJobId,
     contentSha256: 'f'.repeat(64),
     bytes: 1234,
     createdAt: '2026-09-13T20:10:09.000Z',

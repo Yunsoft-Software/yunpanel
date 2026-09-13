@@ -1,6 +1,7 @@
 import { OPERATIONS } from '@yunpanel/protocol';
 
 const ACTIVE_JOB_STATUSES = new Set(['queued', 'running']);
+const TERMINAL_JOB_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
 const DATABASE_OPERATIONS = new Set([
   OPERATIONS.DATABASE_INSPECT,
   OPERATIONS.DATABASE_CREATE,
@@ -82,6 +83,14 @@ function intentFor(stepValue) {
   return Object.freeze({ kind: 'job', id: idempotencyKey(step) });
 }
 
+function requireIntent(step, workRef) {
+  const expected = intentFor(step);
+  if (!workRef || workRef.kind !== expected.kind || workRef.id !== expected.id) {
+    fail('backup_child_dispatch_intent_invalid', 'Backup child dispatch intent does not match the execution step');
+  }
+  return expected;
+}
+
 function databaseMatchesInventory(step, inventory) {
   if (!inventory || typeof inventory !== 'object' || Array.isArray(inventory)
     || inventory.engine !== step.input.engine
@@ -106,6 +115,17 @@ function mailMatchesPreview(step, preview) {
     && preview.sourcePresent === true
     && preview.bytes === step.input.bytes
     && preview.sideEffects === false);
+}
+
+function jobMatchesRequest(job, request) {
+  return Boolean(job
+    && typeof job.id === 'string' && job.id.length >= 8
+    && [...ACTIVE_JOB_STATUSES, ...TERMINAL_JOB_STATUSES].includes(job.status)
+    && job.serverId === request.serverId
+    && job.type === request.type
+    && job.operation === request.operation
+    && job.resourceType === request.resourceType
+    && job.resourceId === request.resourceId);
 }
 
 function evidenceFromJob(step, job) {
@@ -153,11 +173,15 @@ function evidenceFromJob(step, job) {
 
 export function createBackupChildJobDispatcher({
   jobRegistry,
+  jobIdempotencyLookup,
   loadDatabaseInventory,
   mailDataOperationsService,
 } = {}) {
   if (!jobRegistry || typeof jobRegistry.enqueue !== 'function' || typeof jobRegistry.listJobs !== 'function') {
     throw new BackupChildDispatcherError('backup_child_dependencies_invalid', 'Job registry is required', 503);
+  }
+  if (!jobIdempotencyLookup || typeof jobIdempotencyLookup.find !== 'function') {
+    throw new BackupChildDispatcherError('backup_child_dependencies_invalid', 'Job idempotency lookup is required', 503);
   }
   if (typeof loadDatabaseInventory !== 'function') {
     throw new BackupChildDispatcherError('backup_child_dependencies_invalid', 'Database inventory loader is required', 503);
@@ -208,18 +232,31 @@ export function createBackupChildJobDispatcher({
   }
 
   async function prepare(serverId, stepValue) {
-    await verify(serverId, stepValue);
     const step = requireStep(stepValue);
     return Object.freeze({ workRef: intentFor(step), request: requestFor(serverId, step) });
   }
 
+  async function reconcilePrepared(serverId, stepValue, workRef) {
+    const step = requireStep(stepValue);
+    requireIntent(step, workRef);
+    const request = requestFor(serverId, step);
+    let existing;
+    try { existing = await jobIdempotencyLookup.find(request); }
+    catch (error) {
+      if (typeof error?.code === 'string' && Number.isInteger(error?.status)) throw error;
+      fail('backup_child_lookup_failed', 'Backup child job state could not be reconciled', 503);
+    }
+    if (existing === null) return null;
+    if (!jobMatchesRequest(existing, request)) {
+      fail('backup_child_reconcile_conflict', 'Persisted backup child job does not match the execution step');
+    }
+    return existing;
+  }
+
   async function enqueuePrepared(serverId, stepValue, workRef) {
     const step = requireStep(stepValue);
+    requireIntent(step, workRef);
     const request = requestFor(serverId, step);
-    const expectedIntent = intentFor(step);
-    if (!workRef || workRef.kind !== expectedIntent.kind || workRef.id !== expectedIntent.id) {
-      fail('backup_child_dispatch_intent_invalid', 'Backup child dispatch intent does not match the execution step');
-    }
     try { return await jobRegistry.enqueue(request); }
     catch (error) {
       if (error?.status === 409) throw error;
@@ -227,11 +264,28 @@ export function createBackupChildJobDispatcher({
     }
   }
 
+  async function dispatchPrepared(serverId, stepValue, workRef) {
+    const step = requireStep(stepValue);
+    requireIntent(step, workRef);
+    const existing = await reconcilePrepared(serverId, step, workRef);
+    if (existing) return existing;
+    await verify(serverId, step);
+    return enqueuePrepared(serverId, step, workRef);
+  }
+
   function evidence(stepValue, job) {
     return evidenceFromJob(requireStep(stepValue), job);
   }
 
-  return Object.freeze({ intent, verify, prepare, enqueuePrepared, evidence });
+  return Object.freeze({
+    intent,
+    verify,
+    prepare,
+    reconcilePrepared,
+    enqueuePrepared,
+    dispatchPrepared,
+    evidence,
+  });
 }
 
 export const backupChildDispatcherInternals = Object.freeze({
@@ -239,7 +293,9 @@ export const backupChildDispatcherInternals = Object.freeze({
   idempotencyKey,
   intentFor,
   requestFor,
+  requireIntent,
   databaseMatchesInventory,
   mailMatchesPreview,
+  jobMatchesRequest,
   evidenceFromJob,
 });
