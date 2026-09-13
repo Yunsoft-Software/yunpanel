@@ -12,7 +12,10 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SERVICE_NAME_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,62}$/;
 const RESOURCE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const PORT_PROTOCOLS = new Set(['tcp', 'udp']);
+const STORAGE_KINDS = new Set(['bind', 'ephemeral', 'named_volume']);
+const STORAGE_SCOPES = new Set(['host', 'project']);
 const MAX_SERVICE_PORTS = 64;
+const MAX_SERVICE_MOUNTS = 128;
 
 export class DockerComposeProjectRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -102,10 +105,66 @@ function normalizePublishedPorts(value, code = 'docker_compose_validation_invali
     || left.protocol.localeCompare(right.protocol));
 }
 
+function safeStoragePath(value, { absolute = false } = {}) {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 4096
+    && !/[\u0000-\u001f\u007f]/.test(value) && (!absolute || path.posix.isAbsolute(value));
+}
+
+function validProjectBindSource(value) {
+  if (value === './') return true;
+  if (typeof value !== 'string' || !value.startsWith('./') || !safeStoragePath(value)) return false;
+  const segments = value.slice(2).split('/');
+  return segments.length > 0 && segments.every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
+}
+
+function normalizeStorageMounts(value, code = 'docker_compose_validation_invalid') {
+  if (value === undefined) return [];
+  const status = code === 'docker_compose_project_state_invalid' ? 409 : 400;
+  if (!Array.isArray(value) || value.length > MAX_SERVICE_MOUNTS) {
+    throw new DockerComposeProjectRegistryError(code, 'Docker Compose storage mount summary is invalid', status);
+  }
+  const targets = new Set();
+  const output = value.map((mount) => {
+    if (!mount || typeof mount !== 'object' || Array.isArray(mount)
+      || Object.keys(mount).length !== 5
+      || Object.keys(mount).some((key) => !['kind', 'source', 'sourceScope', 'target', 'readOnly'].includes(key))
+      || typeof mount.kind !== 'string' || !STORAGE_KINDS.has(mount.kind)
+      || !safeStoragePath(mount.target, { absolute: true })
+      || typeof mount.readOnly !== 'boolean' || targets.has(mount.target)) {
+      throw new DockerComposeProjectRegistryError(code, 'Docker Compose storage mount summary is invalid', status);
+    }
+    targets.add(mount.target);
+    if (mount.kind === 'ephemeral') {
+      if (mount.source !== null || mount.sourceScope !== null) {
+        throw new DockerComposeProjectRegistryError(code, 'Docker Compose ephemeral storage identity is invalid', status);
+      }
+      return { ...mount };
+    }
+    if (typeof mount.sourceScope !== 'string' || !STORAGE_SCOPES.has(mount.sourceScope)
+      || typeof mount.source !== 'string') {
+      throw new DockerComposeProjectRegistryError(code, 'Docker Compose storage source identity is invalid', status);
+    }
+    if (mount.kind === 'named_volume') {
+      if (mount.sourceScope !== 'project' || !RESOURCE_NAME_PATTERN.test(mount.source)) {
+        throw new DockerComposeProjectRegistryError(code, 'Docker Compose named volume identity is invalid', status);
+      }
+      return { ...mount };
+    }
+    if ((mount.sourceScope === 'project' && !validProjectBindSource(mount.source))
+      || (mount.sourceScope === 'host' && !safeStoragePath(mount.source, { absolute: true }))) {
+      throw new DockerComposeProjectRegistryError(code, 'Docker Compose bind mount identity is invalid', status);
+    }
+    return { ...mount };
+  });
+  return output.sort((left, right) => left.target.localeCompare(right.target)
+    || left.kind.localeCompare(right.kind)
+    || String(left.source ?? '').localeCompare(String(right.source ?? '')));
+}
+
 function normalizeServiceSummary(service, code = 'docker_compose_validation_invalid') {
   if (!service || typeof service !== 'object' || Array.isArray(service)
-    || Object.keys(service).some((key) => !['name', 'imageConfigured', 'buildConfigured', 'publishedPorts'].includes(key))
-    || ![3, 4].includes(Object.keys(service).length)
+    || Object.keys(service).some((key) => !['name', 'imageConfigured', 'buildConfigured', 'publishedPorts', 'storageMounts'].includes(key))
+    || Object.keys(service).length < 3 || Object.keys(service).length > 5
     || typeof service.name !== 'string' || !SERVICE_NAME_PATTERN.test(service.name)
     || typeof service.imageConfigured !== 'boolean' || typeof service.buildConfigured !== 'boolean') {
     throw new DockerComposeProjectRegistryError(code, 'Docker Compose service summary is invalid', code === 'docker_compose_project_state_invalid' ? 409 : 400);
@@ -115,6 +174,7 @@ function normalizeServiceSummary(service, code = 'docker_compose_validation_inva
     imageConfigured: service.imageConfigured,
     buildConfigured: service.buildConfigured,
     publishedPorts: normalizePublishedPorts(service.publishedPorts, code),
+    storageMounts: normalizeStorageMounts(service.storageMounts, code),
   };
 }
 
@@ -142,6 +202,7 @@ function normalizeValidation(value, projectName, document) {
     services: Object.freeze(services.map((service) => Object.freeze({
       ...service,
       publishedPorts: Object.freeze(service.publishedPorts.map((port) => Object.freeze({ ...port }))),
+      storageMounts: Object.freeze(service.storageMounts.map((mount) => Object.freeze({ ...mount }))),
     })).sort((a, b) => a.name.localeCompare(b.name))),
     networks: Object.freeze(normalizeNameArray(value.networks, 'network')),
     volumes: Object.freeze(normalizeNameArray(value.volumes, 'volume')),
@@ -208,6 +269,7 @@ function cloneService(service) {
   return Object.freeze({
     ...service,
     publishedPorts: Object.freeze(service.publishedPorts.map((port) => Object.freeze({ ...port }))),
+    storageMounts: Object.freeze(service.storageMounts.map((mount) => Object.freeze({ ...mount }))),
   });
 }
 
@@ -314,8 +376,9 @@ export function createDockerComposeProjectRegistry({
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((key) => !['version', 'projects'].includes(key))) {
           throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project store is invalid', 409);
         }
-        const needsPublishedPortMigration = parsed.projects.some((project) => Array.isArray(project?.services)
-          && project.services.some((service) => service && typeof service === 'object' && !Object.hasOwn(service, 'publishedPorts')));
+        const needsServiceSummaryMigration = parsed.projects.some((project) => Array.isArray(project?.services)
+          && project.services.some((service) => service && typeof service === 'object'
+            && (!Object.hasOwn(service, 'publishedPorts') || !Object.hasOwn(service, 'storageMounts'))));
         const projects = parsed.projects.map(validatePersisted);
         const ids = new Set();
         const names = new Set();
@@ -329,7 +392,7 @@ export function createDockerComposeProjectRegistry({
           await requireServer(project.serverId, true);
         }
         state = { version: STORE_VERSION, projects };
-        if (needsPublishedPortMigration) await persist();
+        if (needsServiceSummaryMigration) await persist();
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
         await persist();
@@ -437,6 +500,7 @@ export const dockerComposeProjectRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
   normalizeProjectName,
   normalizePublishedPorts,
+  normalizeStorageMounts,
   normalizeValidation,
   validatePersisted,
   encryptDocument,
