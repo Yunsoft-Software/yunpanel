@@ -11,11 +11,13 @@ const MAX_CONFIG_BYTES = 4 * 1024 * 1024;
 const MAX_ENVIRONMENT_ENTRIES = 256;
 const MAX_ENVIRONMENT_VALUE_BYTES = 64 * 1024;
 const MAX_SERVICE_PORTS = 64;
+const MAX_SERVICE_MOUNTS = 128;
 const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const ENVIRONMENT_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 const SERVICE_NAME_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,62}$/;
 const RESOURCE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const PORT_PROTOCOLS = new Set(['tcp', 'udp']);
+const STORAGE_TYPES = new Set(['bind', 'tmpfs', 'volume']);
 
 export class DockerComposeValidationError extends Error {
   constructor(code, message) {
@@ -151,7 +153,86 @@ function publishedPorts(value) {
     || left.protocol.localeCompare(right.protocol));
 }
 
-export function summarizeDockerComposeConfig(value, { expectedProjectName, documentSha256, documentBytes } = {}) {
+function safeStoragePath(value, { absolute = true } = {}) {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 4096
+    && !/[\u0000-\u001f\u007f]/.test(value) && (!absolute || path.posix.isAbsolute(value));
+}
+
+function publicBindSource(source, projectDirectory) {
+  if (!safeStoragePath(source) || typeof projectDirectory !== 'string' || !path.isAbsolute(projectDirectory)) {
+    throw new DockerComposeValidationError('docker_compose_service_storage_invalid', 'Docker Compose bind mount source is invalid');
+  }
+  const root = path.resolve(projectDirectory);
+  const resolved = path.resolve(source);
+  const relative = path.relative(root, resolved);
+  if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+    const normalized = relative === '' ? './' : `./${relative.split(path.sep).join('/')}`;
+    return Object.freeze({ source: normalized, sourceScope: 'project' });
+  }
+  return Object.freeze({ source: resolved, sourceScope: 'host' });
+}
+
+function storageMounts(value, { projectDirectory = null } = {}) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_SERVICE_MOUNTS) {
+    throw new DockerComposeValidationError('docker_compose_service_storage_invalid', 'Docker Compose service storage mounts are invalid');
+  }
+  const output = [];
+  const targets = new Set();
+  for (const mount of value) {
+    if (!mount || typeof mount !== 'object' || Array.isArray(mount)
+      || typeof mount.type !== 'string' || !STORAGE_TYPES.has(mount.type)
+      || !safeStoragePath(mount.target)
+      || (mount.read_only !== undefined && typeof mount.read_only !== 'boolean')
+      || targets.has(mount.target)) {
+      throw new DockerComposeValidationError('docker_compose_service_storage_invalid', 'Docker Compose service storage mount is invalid');
+    }
+    targets.add(mount.target);
+    const readOnly = mount.read_only === true;
+    if (mount.type === 'bind') {
+      const bind = publicBindSource(mount.source, projectDirectory);
+      output.push(Object.freeze({
+        kind: 'bind',
+        source: bind.source,
+        sourceScope: bind.sourceScope,
+        target: mount.target,
+        readOnly,
+      }));
+      continue;
+    }
+    if (mount.type === 'volume') {
+      if (mount.source === undefined || mount.source === null || mount.source === '') {
+        output.push(Object.freeze({ kind: 'ephemeral', source: null, sourceScope: null, target: mount.target, readOnly }));
+        continue;
+      }
+      if (typeof mount.source !== 'string' || !RESOURCE_NAME_PATTERN.test(mount.source)) {
+        throw new DockerComposeValidationError('docker_compose_service_storage_invalid', 'Docker Compose named volume source is invalid');
+      }
+      output.push(Object.freeze({
+        kind: 'named_volume',
+        source: mount.source,
+        sourceScope: 'project',
+        target: mount.target,
+        readOnly,
+      }));
+      continue;
+    }
+    if (mount.source !== undefined && mount.source !== null && mount.source !== '') {
+      throw new DockerComposeValidationError('docker_compose_service_storage_invalid', 'Docker Compose tmpfs mount source is invalid');
+    }
+    output.push(Object.freeze({ kind: 'ephemeral', source: null, sourceScope: null, target: mount.target, readOnly }));
+  }
+  return output.sort((left, right) => left.target.localeCompare(right.target)
+    || left.kind.localeCompare(right.kind)
+    || String(left.source ?? '').localeCompare(String(right.source ?? '')));
+}
+
+export function summarizeDockerComposeConfig(value, {
+  expectedProjectName,
+  documentSha256,
+  documentBytes,
+  projectDirectory = null,
+} = {}) {
   const expected = projectName(expectedProjectName);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || !value.services || typeof value.services !== 'object' || Array.isArray(value.services)) {
@@ -173,6 +254,7 @@ export function summarizeDockerComposeConfig(value, { expectedProjectName, docum
       imageConfigured: typeof service.image === 'string' && service.image.length > 0,
       buildConfigured: service.build !== undefined && service.build !== null,
       publishedPorts: Object.freeze(publishedPorts(service.ports)),
+      storageMounts: Object.freeze(storageMounts(service.volumes, { projectDirectory })),
     });
   }).sort((left, right) => left.name.localeCompare(right.name));
   return Object.freeze({
@@ -263,6 +345,7 @@ export function createDockerComposeValidator({
         expectedProjectName: name,
         documentSha256: source.sha256,
         documentBytes: source.bytes,
+        projectDirectory: directory,
       });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -277,9 +360,12 @@ export const dockerComposeValidatorInternals = Object.freeze({
   maxConfigBytes: MAX_CONFIG_BYTES,
   maxEnvironmentEntries: MAX_ENVIRONMENT_ENTRIES,
   maxServicePorts: MAX_SERVICE_PORTS,
+  maxServiceMounts: MAX_SERVICE_MOUNTS,
   projectName,
   composeDocument,
   normalizeEnvironment,
   publishedPorts,
+  storageMounts,
+  publicBindSource,
   findDockerPath,
 });
