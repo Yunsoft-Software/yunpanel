@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { mailSrsTemplatePolicy } from './mail-srs.js';
 import { mailSubmissionTemplatePolicy } from './mail-submission.js';
 
 const POSTFIX_SERVICE = 'postfix';
@@ -17,6 +18,7 @@ const VALIDATORS = Object.freeze(new Map([
   ['/usr/bin/doveconf', Object.freeze(['-n'])],
   ['/usr/bin/rspamadm', Object.freeze(['configtest'])],
 ]));
+const SRS_PARAMETER_NAMES = Object.freeze(mailSrsTemplatePolicy.postfixParameters.map((parameter) => parameter.name));
 
 export class MailApplyPlanError extends Error {
   constructor(code, message) {
@@ -130,6 +132,40 @@ function masterServiceCommands(services) {
   return Object.freeze(commands);
 }
 
+function canonicalSrsState(preview, artifacts, postfixParameters) {
+  const required = preview.requirements.includes(mailSrsTemplatePolicy.requirement);
+  const byPath = new Map(artifacts.map((artifact) => [artifact.path, artifact]));
+  const byParameter = new Map(postfixParameters.map((parameter) => [parameter.name, parameter.value]));
+  const hasArtifacts = byPath.has(mailSrsTemplatePolicy.defaultsPath) || byPath.has(mailSrsTemplatePolicy.secretPath);
+  const presentSrsParameters = SRS_PARAMETER_NAMES.filter((name) => byParameter.has(name));
+  if (!required) {
+    if (hasArtifacts || presentSrsParameters.length > 0 || preview.srs !== undefined) {
+      throw new MailApplyPlanError('invalid_mail_srs_state', 'Inactive managed SRS state contains active configuration');
+    }
+    return Object.freeze({
+      required: false,
+      serviceUnit: mailSrsTemplatePolicy.serviceUnit,
+      removePostfixParameters: SRS_PARAMETER_NAMES,
+    });
+  }
+  if (!preview.srs || preview.srs.required !== true
+    || preview.srs.serviceUnit !== mailSrsTemplatePolicy.serviceUnit
+    || !byPath.has(mailSrsTemplatePolicy.defaultsPath)
+    || !byPath.has(mailSrsTemplatePolicy.secretPath)) {
+    throw new MailApplyPlanError('invalid_mail_srs_state', 'Active managed SRS state is incomplete');
+  }
+  for (const expected of mailSrsTemplatePolicy.postfixParameters) {
+    if (byParameter.get(expected.name) !== expected.value) {
+      throw new MailApplyPlanError('invalid_mail_srs_state', 'Managed SRS Postfix parameters are inconsistent');
+    }
+  }
+  return Object.freeze({
+    required: true,
+    serviceUnit: mailSrsTemplatePolicy.serviceUnit,
+    removePostfixParameters: Object.freeze([]),
+  });
+}
+
 export function previewManagedMailApplyPlan(preview) {
   assertPreview(preview);
 
@@ -142,25 +178,32 @@ export function previewManagedMailApplyPlan(preview) {
     }
     return Object.freeze({ name: parameter.name, value: parameter.value });
   }));
+  const srs = canonicalSrsState(preview, artifacts, postfixParameters);
   const postfixMasterServices = canonicalMasterServices(preview.postfixMasterServices);
   const validators = Object.freeze(preview.validate.map(validatorCommand));
 
   const compile = Object.freeze(preview.artifacts
     .filter((artifact) => artifact.compile)
     .map(compileCommand));
-  const configurePostfix = Object.freeze(postfixParameters.map((parameter) => command(
-    '/usr/sbin/postconf',
-    ['-e', `${parameter.name} = ${parameter.value}`],
-  )));
+  const configurePostfix = Object.freeze([
+    ...postfixParameters.map((parameter) => command(
+      '/usr/sbin/postconf',
+      ['-e', `${parameter.name} = ${parameter.value}`],
+    )),
+    ...srs.removePostfixParameters.map((name) => command('/usr/sbin/postconf', ['-X', name])),
+  ]);
   const configurePostfixMaster = masterServiceCommands(postfixMasterServices);
+  const configureSrs = Object.freeze(srs.required
+    ? [command('/usr/bin/systemctl', ['restart', srs.serviceUnit])]
+    : []);
   const reload = Object.freeze(MANAGED_SERVICES.map((service) => command(
     '/usr/bin/systemctl',
     ['reload', service],
   )));
-  const health = Object.freeze(MANAGED_SERVICES.map((service) => command(
-    '/usr/bin/systemctl',
-    ['is-active', '--quiet', service],
-  )));
+  const health = Object.freeze([
+    ...(srs.required ? [command('/usr/bin/systemctl', ['is-active', '--quiet', srs.serviceUnit])] : []),
+    ...MANAGED_SERVICES.map((service) => command('/usr/bin/systemctl', ['is-active', '--quiet', service])),
+  ]);
   const rollbackReload = Object.freeze([...MANAGED_SERVICES].reverse().map((service) => command(
     '/usr/bin/systemctl',
     ['reload', service],
@@ -172,9 +215,12 @@ export function previewManagedMailApplyPlan(preview) {
     artifacts,
     postfixParameters,
     postfixMasterServices,
+    srs,
     validators,
     compile,
+    configurePostfix,
     configurePostfixMaster,
+    configureSrs,
     reload,
     health,
     rollbackReload,
@@ -188,12 +234,14 @@ export function previewManagedMailApplyPlan(preview) {
     artifacts,
     postfixParameters,
     postfixMasterServices,
+    srs,
     stages: Object.freeze({
       backup: Object.freeze(artifacts.map((artifact) => Object.freeze({ path: artifact.path }))),
       write: artifacts,
       compile,
       configurePostfix,
       configurePostfixMaster,
+      configureSrs,
       validate: validators,
       reload,
       health,
@@ -202,7 +250,10 @@ export function previewManagedMailApplyPlan(preview) {
       restore: Object.freeze([...artifacts].reverse().map((artifact) => Object.freeze({ path: artifact.path }))),
       reload: rollbackReload,
       validate: validators,
-      health,
+      health: Object.freeze(MANAGED_SERVICES.map((service) => command(
+        '/usr/bin/systemctl',
+        ['is-active', '--quiet', service],
+      ))),
     }),
     sensitiveMaterialRequired: artifacts.some((artifact) => artifact.sensitive),
     readyToExecute: false,
