@@ -42,7 +42,7 @@ const owner = Object.freeze({
 });
 const readOnly = Object.freeze({
   user: { role: 'read_only' },
-  access: { mode: 'read_only', permissions: ['mail.read'] },
+  access: { mode: 'read_only', permissions: ['mail_domains.read'] },
   security: { managementAllowed: false },
 });
 const publicKey = Buffer.alloc(256, 3).toString('base64');

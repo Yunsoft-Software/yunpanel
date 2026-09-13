@@ -14,7 +14,7 @@ const owner = Object.freeze({
 });
 const readOnly = Object.freeze({
   user: { role: 'read_only' },
-  access: { mode: 'read_only', permissions: ['mail.read'] },
+  access: { mode: 'read_only', permissions: ['mailboxes.read'] },
   security: { managementAllowed: false },
 });
 

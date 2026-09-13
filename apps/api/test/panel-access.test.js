@@ -20,11 +20,21 @@ test('read-only inventory rules are exact and expose only safe Website nested do
     ['/api/dns-zones', 'dns_zones.read'], ['/api/dns-zones/zone-1', 'dns_zones.read'],
     ['/api/mail-domains', 'mail_domains.read'], ['/api/mail-domains/mail-1', 'mail_domains.read'],
     ['/api/mail-domains/mail-1/config-preview', 'mail_domains.read'],
+    ['/api/mail-domains/mail-1/diagnostics', 'mail_domains.read'],
+    ['/api/mail-domains/mail-1/dkim', 'mail_domains.read'],
+    ['/api/mail-domains/mail-1/dkim/retirement', 'mail_domains.read'],
+    ['/api/mail-service-identity', 'mail_domains.read'],
     ['/api/mailboxes', 'mailboxes.read'], ['/api/mailboxes/mailbox-1', 'mailboxes.read'],
+    ['/api/mailboxes/mailbox-1/quota', 'mailboxes.read'],
+    ['/api/mailboxes/mailbox-1/usage', 'mailboxes.read'],
+    ['/api/mailboxes/mailbox-1/forwarding', 'mailboxes.read'],
+    ['/api/mailboxes/mailbox-1/data/backup-preview', 'mailboxes.read'],
+    ['/api/mail-aliases', 'mailboxes.read'], ['/api/mail-aliases/alias-1', 'mailboxes.read'],
   ]) assert.equal(readOnlyPermission('GET', path), permission);
   for (const path of [
     '/api/jobs', '/api/users', '/api/audit', '/api/websites/website-1/environment', '/api/websites/website-1/domains/extra',
     '/api/applications/app-1/environment', '/api/applications/app-1/status', '/api/dev/servers', '/api/servers/server-1/system/packages/inspect',
+    '/api/mail-domains/mail-1/data/restore-preview', '/api/mailboxes/mailbox-1/data/delete-preview',
   ]) assert.equal(readOnlyPermission('GET', path), null);
   assert.equal(readOnlyPermission('POST', '/api/websites'), null);
   assert.equal(readOnlyPermission('POST', '/api/domains'), null);

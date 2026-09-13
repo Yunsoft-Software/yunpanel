@@ -19,8 +19,10 @@ const READ_ONLY_RULES = Object.freeze([
   ['domains.read', /^\/api\/domains(?:\/[^/%]+)?$/],
   ['certificates.read', /^\/api\/certificates(?:\/[^/%]+)?$/],
   ['dns_zones.read', /^\/api\/dns-zones(?:\/[^/%]+)?$/],
-  ['mail_domains.read', /^\/api\/mail-domains(?:\/[^/%]+(?:\/config-preview)?)?$/],
-  ['mailboxes.read', /^\/api\/mailboxes(?:\/[^/%]+)?$/],
+  ['mail_domains.read', /^\/api\/mail-domains(?:\/[^/%]+(?:\/(?:config-preview|diagnostics|dkim(?:\/retirement)?))?)?$/],
+  ['mail_domains.read', /^\/api\/mail-service-identity$/],
+  ['mailboxes.read', /^\/api\/mailboxes(?:\/[^/%]+(?:\/(?:quota|usage|forwarding|data\/backup-preview))?)?$/],
+  ['mailboxes.read', /^\/api\/mail-aliases(?:\/[^/%]+)?$/],
   ['docker_workloads.read', /^\/api\/docker\/workloads(?:\/[^/%]+)?$/],
 ]);
 
