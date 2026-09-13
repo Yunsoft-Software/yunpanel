@@ -53,6 +53,21 @@ function mounted() {
     createdAt: '2026-09-13T06:05:00.000Z',
     result: { action: 'start', runtimeState: 'running' },
   }];
+  const runtimeState = {
+    version: 1,
+    projectName: 'shop_app',
+    status: 'running',
+    containerCount: 1,
+    containers: [{ id: 'a'.repeat(64), name: 'shop-web-1', runtime: { running: true, health: { status: 'healthy', failingStreak: 0 } } }],
+  };
+  const logState = {
+    version: 1,
+    projectName: 'shop_app',
+    service: 'web',
+    tail: 25,
+    containers: [{ id: 'a'.repeat(64), name: 'shop-web-1', lines: ['ready'], unavailable: false }],
+    truncated: false,
+  };
   const app = {
     get(path, ...handlers) { routes.push(['GET', path, handlers]); },
     post(path, ...handlers) { routes.push(['POST', path, handlers]); },
@@ -103,6 +118,16 @@ function mounted() {
       };
     },
   };
+  const observer = {
+    async inspect(input) {
+      calls.push(['runtimeInspect', input]);
+      return runtimeState;
+    },
+    async logs(input) {
+      calls.push(['runtimeLogs', input]);
+      return logState;
+    },
+  };
   const validateDockerCompose = async (input) => {
     calls.push(['validate', input]);
     return {
@@ -120,10 +145,11 @@ function mounted() {
     dockerComposeEnvironmentRegistry: environmentRegistry,
     dockerRegistryCredentialRegistry: credentialRegistry,
     dockerComposeOperationsService: operationsService,
+    dockerComposeObserver: observer,
     validateDockerCompose,
     localServerId: serverId,
   });
-  return { routes, calls, operationPreview, history };
+  return { routes, calls, operationPreview, history, runtimeState, logState };
 }
 
 function route(fx, method, suffix) {
@@ -183,6 +209,36 @@ test('compose deployment history returns only durable public job data for the lo
   assert.deepEqual(response.payload.data, fx.history);
   assert.deepEqual(fx.calls.find(([name]) => name === 'operationHistory')[1], { projectId });
   assert.equal(JSON.stringify(response.payload).includes('payload'), false);
+});
+
+test('compose runtime health is scoped by persisted project name', async () => {
+  const fx = mounted();
+  const response = await invoke(route(fx, 'GET', '/runtime'), {
+    params: { dockerProjectId: projectId },
+  });
+  assert.equal(response.error, null);
+  assert.deepEqual(response.payload.data, fx.runtimeState);
+  assert.deepEqual(fx.calls.find(([name]) => name === 'runtimeInspect')[1], { projectName: 'shop_app' });
+});
+
+test('compose logs accept only bounded service and tail query values', async () => {
+  const fx = mounted();
+  const response = await invoke(route(fx, 'GET', '/logs'), {
+    params: { dockerProjectId: projectId },
+    query: { service: 'web', tail: '25' },
+  });
+  assert.equal(response.error, null);
+  assert.deepEqual(response.payload.data, fx.logState);
+  assert.deepEqual(fx.calls.find(([name]) => name === 'runtimeLogs')[1], {
+    projectName: 'shop_app', service: 'web', tail: 25,
+  });
+
+  const invalid = await invoke(route(fx, 'GET', '/logs'), {
+    params: { dockerProjectId: projectId },
+    query: { tail: '-1' },
+  });
+  assert.equal(invalid.status, 400);
+  assert.equal(invalid.payload.error.code, 'docker_compose_query_invalid');
 });
 
 test('compose lifecycle preview is side-effect free and bound to the local project', async () => {
