@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   createMailDataBackupManager,
+  createMailDataDeleteManager,
   createMailDataRestoreManager,
 } from '@yunpanel/host-runtime';
 import { createApplicationRegistry } from './application-registry.js';
@@ -61,6 +62,7 @@ export async function runRunningMailDataRecoveryFromStores({
   receiptStoreFactory = createMailDataOperationReceiptStore,
   backupManagerFactory = createMailDataBackupManager,
   restoreManagerFactory = createMailDataRestoreManager,
+  deleteManagerFactory = createMailDataDeleteManager,
   serviceStatus = createMigrationServiceStatus(),
   recoverCommand = recoverRunningMailData,
 } = {}) {
@@ -78,6 +80,7 @@ export async function runRunningMailDataRecoveryFromStores({
     receiptStoreFactory,
     backupManagerFactory,
     restoreManagerFactory,
+    deleteManagerFactory,
     serviceStatus,
     recoverCommand,
   ]) {
@@ -139,6 +142,13 @@ export async function runRunningMailDataRecoveryFromStores({
       'Mail data recovery restore evidence provider is invalid',
     );
   }
+  const deleteManager = deleteManagerFactory({ backupManager });
+  if (!deleteManager || typeof deleteManager.inspectDeleted !== 'function') {
+    throw new JobRecoveryRuntimeError(
+      'job_recovery_mail_data_delete_invalid',
+      'Mail data recovery delete evidence provider is invalid',
+    );
+  }
 
   const result = await recoverCommand({
     serverId,
@@ -154,6 +164,7 @@ export async function runRunningMailDataRecoveryFromStores({
     readOperationReceipt: (receiptServerId, receiptJobId) => receiptStore.read(receiptServerId, receiptJobId),
     inspectBackup: (backupId) => backupManager.inspectBackup(backupId),
     inspectRestored: (input) => restoreManager.inspectRestored(input),
+    inspectDeleted: (input) => deleteManager.inspectDeleted(input),
   });
   return Object.freeze({ ...result, statePaths: paths });
 }
