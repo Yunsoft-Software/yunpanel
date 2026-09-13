@@ -18,6 +18,13 @@ function fail(code, message, status = 409) {
   throw new BackupExecutionOrchestratorError(code, message, status);
 }
 
+function safeStepFailure(error, fallbackCode, message) {
+  return Object.freeze({
+    code: typeof error?.code === 'string' && ERROR_CODE_PATTERN.test(error.code) ? error.code : fallbackCode,
+    message,
+  });
+}
+
 function childFailure(job) {
   const code = typeof job?.error?.code === 'string' && ERROR_CODE_PATTERN.test(job.error.code)
     ? job.error.code
@@ -51,8 +58,8 @@ export function createBackupExecutionOrchestrator({
     throw new BackupExecutionOrchestratorError('backup_orchestrator_dependencies_invalid', 'Backup operation registry is required', 503);
   }
   if (!childJobDispatcher
-    || typeof childJobDispatcher.prepare !== 'function'
-    || typeof childJobDispatcher.enqueuePrepared !== 'function'
+    || typeof childJobDispatcher.intent !== 'function'
+    || typeof childJobDispatcher.dispatchPrepared !== 'function'
     || typeof childJobDispatcher.evidence !== 'function') {
     throw new BackupExecutionOrchestratorError('backup_orchestrator_dependencies_invalid', 'Backup child dispatcher is required', 503);
   }
@@ -86,6 +93,16 @@ export function createBackupExecutionOrchestrator({
     return backupOperationRegistry.create(executionPlan);
   }
 
+  async function failDispatchedStep(operation, planStep, stepState, error, fallbackCode, message, childJob = null) {
+    const failed = await backupOperationRegistry.failStep({
+      operationId: operation.id,
+      stepId: planStep.stepId,
+      workRef: stepState.workRef,
+      error: safeStepFailure(error, fallbackCode, message),
+    });
+    return publicAdvance(failed, childJob);
+  }
+
   async function executeLocalStep(operation, planStep, stepState) {
     const executor = localExecutors[planStep.executorKind];
     if (!executor) fail('backup_executor_unavailable', `Backup executor ${planStep.executorKind} is not available`, 503);
@@ -103,23 +120,31 @@ export function createBackupExecutionOrchestrator({
       });
       state = current.steps.find((step) => step.stepId === planStep.stepId);
     }
+    if (!state || state.status !== 'dispatched' || state.workRef?.kind !== 'local') {
+      fail('backup_operation_state_invalid', 'Backup local step is not dispatchable');
+    }
+
     let result;
     try {
       result = await executor.executePrepared(operation.serverId, planStep, state.workRef);
+      if (!result?.evidence) {
+        throw new BackupExecutionOrchestratorError(
+          'backup_local_result_invalid',
+          'Backup local executor returned invalid evidence',
+          503,
+        );
+      }
     } catch (error) {
-      const safeError = {
-        code: typeof error?.code === 'string' && ERROR_CODE_PATTERN.test(error.code) ? error.code : 'backup_local_execution_failed',
-        message: 'Backup local execution failed',
-      };
-      const failed = await backupOperationRegistry.failStep({
-        operationId: current.id,
-        stepId: planStep.stepId,
-        workRef: state.workRef,
-        error: safeError,
-      });
-      return publicAdvance(failed);
+      return failDispatchedStep(
+        current,
+        planStep,
+        state,
+        error,
+        'backup_local_execution_failed',
+        'Backup local execution failed',
+      );
     }
-    if (!result?.evidence) fail('backup_local_result_invalid', 'Backup local executor returned invalid evidence', 503);
+
     const succeeded = await backupOperationRegistry.succeedStep({
       operationId: current.id,
       stepId: planStep.stepId,
@@ -148,30 +173,65 @@ export function createBackupExecutionOrchestrator({
       }
 
       if (stepState.status === 'pending') {
-        const prepared = await childJobDispatcher.prepare(operation.serverId, planStep);
+        const workRef = childJobDispatcher.intent(planStep);
+        if (!workRef || workRef.kind !== 'job') {
+          fail('backup_child_prepare_invalid', 'Backup child dispatcher returned invalid dispatch intent', 503);
+        }
         operation = await backupOperationRegistry.linkStep({
           operationId: operation.id,
           stepId: planStep.stepId,
-          workRef: prepared.workRef,
+          workRef,
         });
       }
       const persistedStep = operation.steps[stepIndex];
-      if (persistedStep.status !== 'dispatched') {
+      if (persistedStep.status !== 'dispatched' || persistedStep.workRef?.kind !== 'job') {
         fail('backup_operation_state_invalid', 'Backup child step is not dispatchable');
       }
-      const childJob = await childJobDispatcher.enqueuePrepared(
-        operation.serverId,
-        planStep,
-        persistedStep.workRef,
-      );
+
+      let childJob;
+      try {
+        childJob = await childJobDispatcher.dispatchPrepared(
+          operation.serverId,
+          planStep,
+          persistedStep.workRef,
+        );
+      } catch (error) {
+        return failDispatchedStep(
+          operation,
+          planStep,
+          persistedStep,
+          error,
+          'backup_child_dispatch_failed',
+          'Backup child dispatch failed',
+        );
+      }
       if (!childJob || typeof childJob.status !== 'string') {
-        fail('backup_child_job_invalid', 'Backup child queue returned invalid state', 503);
+        return failDispatchedStep(
+          operation,
+          planStep,
+          persistedStep,
+          new BackupExecutionOrchestratorError('backup_child_job_invalid', 'Backup child queue returned invalid state', 503),
+          'backup_child_job_invalid',
+          'Backup child dispatch failed',
+        );
       }
       if (childJob.status === 'queued' || childJob.status === 'running') {
         return publicAdvance(operation, childJob);
       }
       if (childJob.status === 'succeeded') {
-        const evidence = childJobDispatcher.evidence(planStep, childJob);
+        let evidence;
+        try { evidence = childJobDispatcher.evidence(planStep, childJob); }
+        catch (error) {
+          return failDispatchedStep(
+            operation,
+            planStep,
+            persistedStep,
+            error,
+            'backup_child_result_invalid',
+            'Backup child evidence is invalid',
+            childJob,
+          );
+        }
         operation = await backupOperationRegistry.succeedStep({
           operationId: operation.id,
           stepId: planStep.stepId,
@@ -179,6 +239,17 @@ export function createBackupExecutionOrchestrator({
           evidence,
         });
         continue;
+      }
+      if (childJob.status !== 'failed' && childJob.status !== 'cancelled') {
+        return failDispatchedStep(
+          operation,
+          planStep,
+          persistedStep,
+          new BackupExecutionOrchestratorError('backup_child_job_invalid', 'Backup child queue returned invalid state', 503),
+          'backup_child_job_invalid',
+          'Backup child dispatch failed',
+          childJob,
+        );
       }
       const failed = await backupOperationRegistry.failStep({
         operationId: operation.id,
@@ -195,6 +266,7 @@ export function createBackupExecutionOrchestrator({
 
 export const backupExecutionOrchestratorInternals = Object.freeze({
   childExecutors: Object.freeze([...CHILD_EXECUTORS]),
+  safeStepFailure,
   childFailure,
   publicAdvance,
 });

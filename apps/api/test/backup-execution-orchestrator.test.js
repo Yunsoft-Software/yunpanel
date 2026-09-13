@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createBackupExecutionOrchestrator, BackupExecutionOrchestratorError } from '../src/backup-execution-orchestrator.js';
+import {
+  createBackupExecutionOrchestrator,
+  BackupExecutionOrchestratorError,
+} from '../src/backup-execution-orchestrator.js';
 import { createBackupOperationRegistry } from '../src/backup-operation-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
@@ -76,17 +79,36 @@ function registry() {
   return createBackupOperationRegistry({ now: clock(), randomId: () => operationId });
 }
 
-test('child orchestration persists dispatch intent and reconciles without re-running prepare', async () => {
-  const calls = { prepare: 0, enqueue: 0, evidence: 0 };
+function unusedChildDispatcher() {
+  return {
+    intent() { throw new Error('child dispatcher must not be used'); },
+    async dispatchPrepared() { throw new Error('child dispatcher must not be used'); },
+    evidence() { throw new Error('child dispatcher must not be used'); },
+  };
+}
+
+test('child orchestration persists intent before dispatch and reconciles without creating a second intent', async () => {
+  const calls = { intent: 0, dispatch: 0, evidence: 0 };
+  const events = [];
   const resource = databaseResource();
-  const childJobDispatcher = {
-    async prepare(_serverId, step) {
-      calls.prepare += 1;
-      return { workRef: { kind: 'job', id: `general-backup-step:${step.stepDigest}` } };
+  const baseRegistry = registry();
+  const operationRegistry = {
+    ...baseRegistry,
+    async linkStep(input) {
+      events.push('link');
+      return baseRegistry.linkStep(input);
     },
-    async enqueuePrepared(_serverId, step) {
-      calls.enqueue += 1;
-      return calls.enqueue === 1
+  };
+  const childJobDispatcher = {
+    intent(step) {
+      calls.intent += 1;
+      events.push('intent');
+      return { kind: 'job', id: `general-backup-step:${step.stepDigest}` };
+    },
+    async dispatchPrepared() {
+      calls.dispatch += 1;
+      events.push('dispatch');
+      return calls.dispatch === 1
         ? {
             id: childJobId,
             operation: 'database.backup',
@@ -116,7 +138,6 @@ test('child orchestration persists dispatch intent and reconciles without re-run
       };
     },
   };
-  const operationRegistry = registry();
   const orchestrator = createBackupExecutionOrchestrator({
     backupResourceProvider: { async preview() { return preview(resource); } },
     backupOperationRegistry: operationRegistry,
@@ -133,16 +154,53 @@ test('child orchestration persists dispatch intent and reconciles without re-run
   assert.equal(first.waiting, true);
   assert.equal(first.operation.status, 'running');
   assert.equal(first.operation.steps[0].status, 'dispatched');
-  assert.equal(calls.prepare, 1);
-  assert.equal(calls.enqueue, 1);
+  assert.deepEqual(events, ['intent', 'link', 'dispatch']);
+  assert.equal(calls.intent, 1);
+  assert.equal(calls.dispatch, 1);
 
   const second = await orchestrator.advance(created.id);
   assert.equal(second.waiting, false);
   assert.equal(second.operation.status, 'succeeded');
   assert.equal(second.operation.steps[0].status, 'succeeded');
-  assert.equal(calls.prepare, 1);
-  assert.equal(calls.enqueue, 2);
+  assert.equal(calls.intent, 1);
+  assert.equal(calls.dispatch, 2);
   assert.equal(calls.evidence, 1);
+  assert.deepEqual(events, ['intent', 'link', 'dispatch', 'dispatch']);
+});
+
+test('child dispatch verification failure terminally fails the parent after intent persistence', async () => {
+  const resource = databaseResource();
+  const orchestrator = createBackupExecutionOrchestrator({
+    backupResourceProvider: { async preview() { return preview(resource); } },
+    backupOperationRegistry: registry(),
+    childJobDispatcher: {
+      intent(step) {
+        return { kind: 'job', id: `general-backup-step:${step.stepDigest}` };
+      },
+      async dispatchPrepared() {
+        const error = new Error('/private/database/socket');
+        error.code = 'backup_database_preview_stale';
+        error.status = 409;
+        throw error;
+      },
+      evidence() { throw new Error('must not be called'); },
+    },
+  });
+  const created = await orchestrator.create({
+    serverId,
+    selectedResourceIdentities: [resource.identity],
+    expectedPreviewDigest: previewDigest,
+    confirmation: `backup:${serverId}:${previewDigest}`,
+  });
+
+  const result = await orchestrator.advance(created.id);
+  assert.equal(result.operation.status, 'failed');
+  assert.equal(result.operation.steps[0].status, 'failed');
+  assert.deepEqual(result.operation.error, {
+    code: 'backup_database_preview_stale',
+    message: 'Backup child dispatch failed',
+  });
+  assert.doesNotMatch(JSON.stringify(result.operation), /private|socket/);
 });
 
 test('failed child job becomes terminal parent failure with bounded error', async () => {
@@ -151,10 +209,10 @@ test('failed child job becomes terminal parent failure with bounded error', asyn
     backupResourceProvider: { async preview() { return preview(resource); } },
     backupOperationRegistry: registry(),
     childJobDispatcher: {
-      async prepare(_serverId, step) {
-        return { workRef: { kind: 'job', id: `general-backup-step:${step.stepDigest}` } };
+      intent(step) {
+        return { kind: 'job', id: `general-backup-step:${step.stepDigest}` };
       },
-      async enqueuePrepared() {
+      async dispatchPrepared() {
         return {
           id: childJobId,
           status: 'failed',
@@ -178,17 +236,51 @@ test('failed child job becomes terminal parent failure with bounded error', asyn
   });
 });
 
+test('invalid successful child evidence terminally fails the parent without replaying the child', async () => {
+  const resource = databaseResource();
+  let dispatches = 0;
+  const orchestrator = createBackupExecutionOrchestrator({
+    backupResourceProvider: { async preview() { return preview(resource); } },
+    backupOperationRegistry: registry(),
+    childJobDispatcher: {
+      intent(step) {
+        return { kind: 'job', id: `general-backup-step:${step.stepDigest}` };
+      },
+      async dispatchPrepared() {
+        dispatches += 1;
+        return { id: childJobId, status: 'succeeded', result: {} };
+      },
+      evidence() {
+        const error = new Error('raw result leaked a private path');
+        error.code = 'backup_child_result_invalid';
+        throw error;
+      },
+    },
+  });
+  const created = await orchestrator.create({
+    serverId,
+    selectedResourceIdentities: [resource.identity],
+    expectedPreviewDigest: previewDigest,
+    confirmation: `backup:${serverId}:${previewDigest}`,
+  });
+
+  const result = await orchestrator.advance(created.id);
+  assert.equal(result.operation.status, 'failed');
+  assert.equal(dispatches, 1);
+  assert.deepEqual(result.operation.error, {
+    code: 'backup_child_result_invalid',
+    message: 'Backup child evidence is invalid',
+  });
+  assert.doesNotMatch(JSON.stringify(result.operation), /private path/);
+});
+
 test('local executor follows the same durable prepare then evidence completion contract', async () => {
   const resource = applicationResource();
   const calls = { prepare: 0, execute: 0 };
   const orchestrator = createBackupExecutionOrchestrator({
     backupResourceProvider: { async preview() { return preview(resource); } },
     backupOperationRegistry: registry(),
-    childJobDispatcher: {
-      async prepare() { throw new Error('child dispatcher must not be used'); },
-      async enqueuePrepared() { throw new Error('child dispatcher must not be used'); },
-      evidence() { throw new Error('child dispatcher must not be used'); },
-    },
+    childJobDispatcher: unusedChildDispatcher(),
     localExecutors: {
       application_snapshot: {
         async prepare(_serverId, step) {
@@ -222,6 +314,42 @@ test('local executor follows the same durable prepare then evidence completion c
   assert.equal(calls.execute, 1);
 });
 
+test('local verification or execution failure terminally fails the parent after durable intent', async () => {
+  const resource = applicationResource();
+  const orchestrator = createBackupExecutionOrchestrator({
+    backupResourceProvider: { async preview() { return preview(resource); } },
+    backupOperationRegistry: registry(),
+    childJobDispatcher: unusedChildDispatcher(),
+    localExecutors: {
+      application_snapshot: {
+        async prepare(_serverId, step) {
+          return { workRef: { kind: 'local', id: `local:${step.stepDigest}` } };
+        },
+        async executePrepared() {
+          const error = new Error('/private/application/release');
+          error.code = 'backup_application_preview_stale';
+          throw error;
+        },
+      },
+    },
+  });
+  const created = await orchestrator.create({
+    serverId,
+    selectedResourceIdentities: [resource.identity],
+    expectedPreviewDigest: previewDigest,
+    confirmation: `backup:${serverId}:${previewDigest}`,
+  });
+
+  const result = await orchestrator.advance(created.id);
+  assert.equal(result.operation.status, 'failed');
+  assert.equal(result.operation.steps[0].status, 'failed');
+  assert.deepEqual(result.operation.error, {
+    code: 'backup_application_preview_stale',
+    message: 'Backup local execution failed',
+  });
+  assert.doesNotMatch(JSON.stringify(result.operation), /private|release/);
+});
+
 test('execution creation fails before durable mutation when a selected executor is unavailable', async () => {
   const resource = applicationResource();
   let created = 0;
@@ -236,8 +364,8 @@ test('execution creation fails before durable mutation when a selected executor 
       async getOperation() {},
     },
     childJobDispatcher: {
-      async prepare() {},
-      async enqueuePrepared() {},
+      intent() {},
+      async dispatchPrepared() {},
       evidence() {},
     },
   });
