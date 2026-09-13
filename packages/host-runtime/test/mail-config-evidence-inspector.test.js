@@ -71,9 +71,10 @@ function inspectorFor({
   const masterParameters = new Map(masterService.parameters.map((entry) => [entry.name, entry.value]));
   return createMailConfigEvidenceInspector({
     readinessInspector: {
-      inspect: async () => ({
+      inspect: async (_candidate, { phase } = {}) => ({
         ready: readinessReady,
         previewSha256: preview.sha256,
+        phase,
         sha256: 'f'.repeat(64),
       }),
     },
