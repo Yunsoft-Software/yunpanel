@@ -75,9 +75,8 @@ export function createDatabaseCredentialMaterializer({ databaseBindingRegistry, 
     return Object.freeze({ credential, binding, identity });
   }
 
-  async function materialize(payload, operation) {
-    const state = await publicState(payload, operation);
-    const bundle = {
+  function publicBundle(state, payload) {
+    return Object.freeze({
       version: 1,
       databaseCredentialId: state.credential.id,
       databaseBindingId: state.binding.id,
@@ -88,7 +87,17 @@ export function createDatabaseCredentialMaterializer({ databaseBindingRegistry, 
       username: state.credential.username,
       host: state.credential.host,
       privileges: Object.freeze([...state.credential.privileges]),
-    };
+    });
+  }
+
+  async function materializePublic(payload, operation) {
+    const state = await publicState(payload, operation);
+    return publicBundle(state, payload);
+  }
+
+  async function materialize(payload, operation) {
+    const state = await publicState(payload, operation);
+    const bundle = publicBundle(state, payload);
     if (operation === OPERATIONS.DATABASE_CREDENTIAL_APPLY) {
       let privateCredential;
       try {
@@ -105,10 +114,10 @@ export function createDatabaseCredentialMaterializer({ databaseBindingRegistry, 
       }
       return Object.freeze({ ...bundle, password: privateCredential.password });
     }
-    return Object.freeze(bundle);
+    return bundle;
   }
 
-  return Object.freeze({ materialize });
+  return Object.freeze({ materialize, materializePublic });
 }
 
 export const databaseCredentialMaterializerInternals = Object.freeze({ digest, validatePayload });
