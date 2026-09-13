@@ -27,6 +27,8 @@ import { createDatabaseCredentialRegistry } from './database-credential-registry
 import { createDomainRegistry } from './domain-registry.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDnsProviderCredentialRegistry } from './dns-provider-credential-registry.js';
+import { createDockerComposeApiHandler } from './docker-compose-api-handler.js';
+import { createDockerComposeRuntime } from './docker-compose-runtime.js';
 import { createDockerWorkloadRegistry } from './docker-workload-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
@@ -287,6 +289,11 @@ const jobRegistry = createAuditedJobRegistry({
   audit: authStore.audit,
   onAuditError: reportAuditFault,
 });
+const dockerComposeRuntime = await createDockerComposeRuntime({
+  env: process.env,
+  serverRegistry: registry,
+  jobRegistry,
+});
 const databaseCredentialApplyService = createDatabaseCredentialApplyService({
   databaseBindingRegistry,
   databaseCredentialRegistry,
@@ -309,42 +316,46 @@ const listener = createAuthenticatedApi({
     queueApplicationDeploy: applicationDeployQueue,
     localServerId,
   }),
-  createHandler: () => createApp({
-    registry,
-    domainRegistry,
-    jobRegistry,
-    certificateRegistry,
-    certificateMaterialManager,
-    applicationRegistry,
-    websiteRegistry,
-    databaseBindingRegistry,
-    databaseCredentialRegistry,
-    databaseCredentialApplyService,
-    websiteMigrationPolicy,
-    migrationLedger,
-    dnsHostingRegistry,
-    dnsProviderCredentialRegistry,
-    mailDomainRegistry,
-    mailDkimRegistry,
-    mailDkimRetirementRegistry,
-    mailDiagnosticsInspector,
-    mailDkimConfigurationService,
-    mailServiceIdentityRegistry,
-    mailSrsConfigurationService,
-    mailboxRegistry,
-    mailboxQuotaRegistry,
-    mailboxForwardingRegistry,
-    mailAliasRegistry,
-    mailConfigurationService,
-    roundcubeConfigurationService,
-    dockerWorkloadRegistry,
-    applicationEnvironmentRegistry,
-    applicationDeployQueue,
-    journalLogReader,
-    nginxLogReader,
-    jobLogStore,
+  createHandler: () => createDockerComposeApiHandler({
+    runtime: dockerComposeRuntime,
     localServerId,
-    terminalCapabilityRegistry,
+    baseHandler: createApp({
+      registry,
+      domainRegistry,
+      jobRegistry,
+      certificateRegistry,
+      certificateMaterialManager,
+      applicationRegistry,
+      websiteRegistry,
+      databaseBindingRegistry,
+      databaseCredentialRegistry,
+      databaseCredentialApplyService,
+      websiteMigrationPolicy,
+      migrationLedger,
+      dnsHostingRegistry,
+      dnsProviderCredentialRegistry,
+      mailDomainRegistry,
+      mailDkimRegistry,
+      mailDkimRetirementRegistry,
+      mailDiagnosticsInspector,
+      mailDkimConfigurationService,
+      mailServiceIdentityRegistry,
+      mailSrsConfigurationService,
+      mailboxRegistry,
+      mailboxQuotaRegistry,
+      mailboxForwardingRegistry,
+      mailAliasRegistry,
+      mailConfigurationService,
+      roundcubeConfigurationService,
+      dockerWorkloadRegistry,
+      applicationEnvironmentRegistry,
+      applicationDeployQueue,
+      journalLogReader,
+      nginxLogReader,
+      jobLogStore,
+      localServerId,
+      terminalCapabilityRegistry,
+    }),
   }),
 });
 
@@ -365,10 +376,10 @@ const localRuntime = await startConfiguredLocalRuntime({
   roundcubeConfigurationService,
   dnsProviderCredentialRegistry,
   jobLogStore,
-  createOperations: (options) => createLocalHostOperations({
+  createOperations: (options) => dockerComposeRuntime.extendLocalOperations(createLocalHostOperations({
     ...options,
     databaseCredentialOperation: localDatabaseCredentialOperation,
-  }),
+  })),
   inspectServices: inspectAllowlistedServices,
   inspectDocker,
   inspectNginx,
@@ -423,6 +434,9 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] mailbox forwarding store=${mailboxForwardingStorePath}`);
   console.log(`[yunpanel-api] mail alias store=${mailAliasStorePath}`);
   console.log(`[yunpanel-api] Docker workload store=${dockerWorkloadStorePath}`);
+  console.log(`[yunpanel-api] Docker Compose project store=${dockerComposeRuntime.paths.projects}`);
+  console.log(`[yunpanel-api] Docker Compose environment store=${dockerComposeRuntime.paths.environments}`);
+  console.log(`[yunpanel-api] Docker registry credential store=${dockerComposeRuntime.paths.credentials}`);
   console.log(`[yunpanel-api] application environment store=${applicationEnvironmentStorePath}`);
   console.log(`[yunpanel-api] secret store=${applicationEnvironmentRegistry.secretStoreConfigured ? 'configured' : 'not configured'}`);
   console.log(`[yunpanel-api] authentication=${authStore.configured() ? 'configured' : 'local setup required'}`);
