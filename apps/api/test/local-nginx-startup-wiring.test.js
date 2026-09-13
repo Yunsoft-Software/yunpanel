@@ -6,7 +6,7 @@ const indexUrl = new URL('../src/index.js', import.meta.url);
 
 test('production local runtime uses the shared Nginx inspector', async () => {
   const source = await readFile(indexUrl, 'utf8');
-  assert.match(source, /import \{ inspectAllowlistedServices, inspectDocker, inspectNginx \} from '@yunpanel\/host-runtime';/);
+  assert.match(source, /import \{[\s\S]*?inspectAllowlistedServices,[\s\S]*?inspectDocker,[\s\S]*?inspectNginx,[\s\S]*?\} from '@yunpanel\/host-runtime';/);
   assert.match(source, /startConfiguredLocalRuntime\(\{[\s\S]*?inspectDocker,[\s\S]*?inspectNginx,[\s\S]*?onError: reportLocalExecutorFault,/);
-  assert.equal((source.match(/\n  inspectNginx,/g) ?? []).length, 1);
+  assert.equal((source.match(/\n  inspectNginx,/g) ?? []).length, 2);
 });

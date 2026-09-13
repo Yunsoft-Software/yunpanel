@@ -19,8 +19,19 @@ test('every durable async queue operation has a local host execution path', asyn
 
   const queued = operationNames(jobSource, /const ASYNC_OPERATIONS = new Set\(\[([\s\S]*?)\]\);/);
   const local = operationNames(localSource, /export const LOCAL_HOST_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
+  const localDatabaseCredentials = operationNames(localSource, /export const LOCAL_DATABASE_CREDENTIAL_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
   const localWithEnvironment = operationNames(localSource, /export const LOCAL_NODE_ENVIRONMENT_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
-  const executable = new Set([...local, ...localWithEnvironment]);
+  const localMailConfiguration = operationNames(localSource, /export const LOCAL_MAIL_CONFIGURATION_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
+  const localMailData = operationNames(localSource, /export const LOCAL_MAIL_DATA_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
+  const localRoundcubeConfiguration = operationNames(localSource, /export const LOCAL_ROUNDCUBE_CONFIGURATION_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
+  const executable = new Set([
+    ...local,
+    ...localDatabaseCredentials,
+    ...localWithEnvironment,
+    ...localMailConfiguration,
+    ...localMailData,
+    ...localRoundcubeConfiguration,
+  ]);
 
   assert.deepEqual([...executable].sort(), [...queued].sort());
 });

@@ -10,7 +10,7 @@ test('production webhook and panel deploy share the audited durable application 
   assert.match(source, /const applicationDeployQueue = createApplicationDeployQueue\(\{[\s\S]*applicationRegistry,[\s\S]*applicationEnvironmentRegistry,[\s\S]*jobRegistry,/);
   assert.match(source, /publicWebhookHandler: createGithubWebhookHandler\(\{[\s\S]*queueApplicationDeploy: applicationDeployQueue,/);
   assert.match(source, /publicWebhookHandler: createGithubWebhookHandler\(\{[\s\S]*localServerId,/);
-  assert.match(source, /createHandler: \(\) => createApp\(\{[\s\S]*applicationDeployQueue,/);
+  assert.match(source, /createHandler: \(\) => createDockerComposeApiHandler\(\{[\s\S]*baseHandler: createApp\(\{[\s\S]*applicationDeployQueue,/);
   assert.doesNotMatch(source, /queueApplicationDeploy: durableJobRegistry/);
 });
 
