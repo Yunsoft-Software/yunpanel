@@ -4,6 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const BACKUP_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const ACTIVE_JOB_STATUSES = new Set(['queued', 'running']);
+const ALLOWED_DELETE_BLOCKERS = new Set(['mail_data_backup_required']);
 
 export class MailDataOperationsError extends Error {
   constructor(code, message, status = 400) {
@@ -45,6 +46,7 @@ export function createMailDataOperationsService({
   mailboxRegistry,
   mailDataInspector,
   mailDataBackupManager,
+  mailDeleteImpactService = null,
   jobRegistry,
   localServerId = null,
 } = {}) {
@@ -54,6 +56,8 @@ export function createMailDataOperationsService({
     || !mailDataInspector || typeof mailDataInspector.inspectMailbox !== 'function'
     || typeof mailDataInspector.inspectDomain !== 'function'
     || !mailDataBackupManager || typeof mailDataBackupManager.inspectBackup !== 'function'
+    || !mailDeleteImpactService || typeof mailDeleteImpactService.inspectMailbox !== 'function'
+    || typeof mailDeleteImpactService.inspectMailDomain !== 'function'
     || !jobRegistry || typeof jobRegistry.listJobs !== 'function' || typeof jobRegistry.enqueue !== 'function') {
     throw new MailDataOperationsError('mail_data_dependencies_invalid', 'Mail data operation dependencies are unavailable', 503);
   }
@@ -121,6 +125,17 @@ export function createMailDataOperationsService({
         : await mailDataInspector.inspectDomain(target.identity);
     } catch {
       throw new MailDataOperationsError('mail_data_inspection_failed', 'Managed mail data could not be inspected', 503);
+    }
+  }
+
+  async function inspectDeleteImpact(target) {
+    try {
+      return target.scope === 'mailbox'
+        ? await mailDeleteImpactService.inspectMailbox(target.resourceId)
+        : await mailDeleteImpactService.inspectMailDomain(target.resourceId);
+    } catch (error) {
+      if (error?.status === 404 || error?.status === 409) throw error;
+      throw new MailDataOperationsError('mail_data_delete_impact_unavailable', 'Mail data delete impact could not be verified', 503);
     }
   }
 
@@ -285,7 +300,109 @@ export function createMailDataOperationsService({
     return Object.freeze({ previewDigest: current.previewDigest, job });
   }
 
-  return Object.freeze({ previewBackup, queueBackup, previewRestore, queueRestore });
+  async function previewDelete({ scope, resourceId, backupId: requestedBackupId } = {}) {
+    const target = await resource(scope, resourceId);
+    if (target.mailDomain.status !== 'disabled') {
+      throw new MailDataOperationsError(
+        'mail_data_delete_domain_disable_required',
+        'Disable and apply the mail domain configuration before deleting mail data',
+        409,
+      );
+    }
+    await assertMailDomainIdle(target.mailDomain.id);
+    const impact = await inspectDeleteImpact(target);
+    const unsafeBlockers = (impact?.blockers ?? []).filter((entry) => !ALLOWED_DELETE_BLOCKERS.has(entry.code));
+    if (unsafeBlockers.length > 0) {
+      throw new MailDataOperationsError(
+        'mail_data_delete_dependencies_exist',
+        'Clear mailbox or mail-domain dependencies before deleting mail data',
+        409,
+      );
+    }
+    const selected = await selectedBackup(requestedBackupId);
+    const current = await inspectData(target);
+    if (selected.scope !== target.scope || selected.identity !== target.identity
+      || selected.sourceSnapshotSha256 !== current.snapshotSha256
+      || selected.sourcePresent !== current.present) {
+      throw new MailDataOperationsError(
+        'mail_data_delete_backup_stale',
+        'Selected verified backup does not match current mail data',
+        409,
+      );
+    }
+    const identity = Object.freeze({
+      version: 1,
+      operation: 'mail_data_delete',
+      mailDomainId: target.mailDomain.id,
+      scope: target.scope,
+      resourceId: target.resourceId,
+      identity: target.identity,
+      expectedRevision: target.revision,
+      backupId: selected.backupId,
+      backupContentSha256: selected.contentSha256,
+      backupBytes: selected.bytes,
+      targetSnapshotSha256: current.snapshotSha256,
+      targetPresent: current.present,
+      targetBytes: current.bytes,
+    });
+    const sha256 = digest(identity);
+    return Object.freeze({
+      ...identity,
+      previewDigest: sha256,
+      confirmation: `delete-mail-data:${target.mailDomain.id}:${sha256}`,
+      sideEffects: false,
+    });
+  }
+
+  async function queueDelete({
+    scope,
+    resourceId,
+    backupId: requestedBackupId,
+    expectedRevision,
+    expectedPreviewDigest,
+    confirmation,
+  } = {}) {
+    const expected = positiveRevision(expectedRevision);
+    const requestedDigest = previewDigest(expectedPreviewDigest);
+    const current = await previewDelete({ scope, resourceId, backupId: requestedBackupId });
+    if (current.expectedRevision !== expected || current.previewDigest !== requestedDigest) {
+      throw new MailDataOperationsError('mail_data_delete_preview_stale', 'Mail data delete preview is stale', 409);
+    }
+    if (confirmation !== current.confirmation) {
+      throw new MailDataOperationsError('mail_data_delete_confirmation_invalid', 'Mail data delete confirmation is invalid', 409);
+    }
+    const target = await resource(scope, resourceId);
+    if (!sameTarget(target, current) || target.mailDomain.status !== 'disabled') {
+      throw new MailDataOperationsError('mail_data_delete_preview_stale', 'Mail data delete resource changed before enqueue', 409);
+    }
+    const job = await jobRegistry.enqueue({
+      serverId: target.domain.serverId,
+      type: 'mail_data_delete',
+      operation: OPERATIONS.MAIL_DATA_DELETE,
+      payload: {
+        mailDomainId: current.mailDomainId,
+        resourceId: current.resourceId,
+        backupId: current.backupId,
+        scope: current.scope,
+        identity: current.identity,
+        expectedResourceRevision: current.expectedRevision,
+        expectedTargetSnapshotSha256: current.targetSnapshotSha256,
+      },
+      resourceType: 'mail_domain',
+      resourceId: current.mailDomainId,
+      idempotencyKey: `mail-data-delete:${current.mailDomainId}:${current.previewDigest}`,
+    });
+    return Object.freeze({ previewDigest: current.previewDigest, job });
+  }
+
+  return Object.freeze({
+    previewBackup,
+    queueBackup,
+    previewRestore,
+    queueRestore,
+    previewDelete,
+    queueDelete,
+  });
 }
 
 export const mailDataOperationsInternals = Object.freeze({
@@ -293,4 +410,5 @@ export const mailDataOperationsInternals = Object.freeze({
   positiveRevision,
   previewDigest,
   backupId,
+  allowedDeleteBlockers: ALLOWED_DELETE_BLOCKERS,
 });
