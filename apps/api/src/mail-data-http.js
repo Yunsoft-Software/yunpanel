@@ -5,6 +5,10 @@ const RESTORE_PREVIEW_FIELDS = new Set(['backupId']);
 const RESTORE_APPLY_FIELDS = new Set([
   'backupId', 'expectedRevision', 'expectedPreviewDigest', 'confirmation',
 ]);
+const DELETE_PREVIEW_FIELDS = new Set(['backupId']);
+const DELETE_APPLY_FIELDS = new Set([
+  'backupId', 'expectedRevision', 'expectedPreviewDigest', 'confirmation',
+]);
 
 export class MailDataHttpError extends Error {
   constructor(code, message, status = 400) {
@@ -76,6 +80,27 @@ function mountScope(app, { prefix, param, scope, service }) {
     });
     return response.status(202).json({ data: result });
   }));
+
+  app.post(`${prefix}/delete-preview`, requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const body = exactBody(request.body, DELETE_PREVIEW_FIELDS, 'mail_data_delete_preview_input_invalid');
+    return response.json({ data: await service.previewDelete({
+      scope,
+      resourceId: request.params[param],
+      backupId: body.backupId,
+    }) });
+  }));
+
+  app.post(`${prefix}/delete`, requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const body = exactBody(request.body, DELETE_APPLY_FIELDS, 'mail_data_delete_input_invalid');
+    const result = await service.queueDelete({
+      scope,
+      resourceId: request.params[param],
+      ...body,
+    });
+    return response.status(202).json({ data: result });
+  }));
 }
 
 export function mountMailDataRoutes(app, { mailDataOperationsService } = {}) {
@@ -85,7 +110,9 @@ export function mountMailDataRoutes(app, { mailDataOperationsService } = {}) {
   if (!mailDataOperationsService || typeof mailDataOperationsService.previewBackup !== 'function'
     || typeof mailDataOperationsService.queueBackup !== 'function'
     || typeof mailDataOperationsService.previewRestore !== 'function'
-    || typeof mailDataOperationsService.queueRestore !== 'function') {
+    || typeof mailDataOperationsService.queueRestore !== 'function'
+    || typeof mailDataOperationsService.previewDelete !== 'function'
+    || typeof mailDataOperationsService.queueDelete !== 'function') {
     throw new Error('Mail data operations service is required');
   }
 
@@ -107,6 +134,8 @@ export const mailDataHttpInternals = Object.freeze({
   backupApplyFields: Object.freeze([...BACKUP_APPLY_FIELDS]),
   restorePreviewFields: Object.freeze([...RESTORE_PREVIEW_FIELDS]),
   restoreApplyFields: Object.freeze([...RESTORE_APPLY_FIELDS]),
+  deletePreviewFields: Object.freeze([...DELETE_PREVIEW_FIELDS]),
+  deleteApplyFields: Object.freeze([...DELETE_APPLY_FIELDS]),
   emptyQuery,
   exactBody,
 });
