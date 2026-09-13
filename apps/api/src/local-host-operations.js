@@ -296,12 +296,20 @@ export function createLocalHostOperations({
 
   async function executeDatabaseRestore(payload, execution) {
     const context = assertDatabaseRestoreExecutionContext(payload, execution);
+    const recordProgress = deploymentLog
+      ? ({ stage, percent }) => deploymentLog({
+        jobId: context.jobId,
+        stage: `db.restore.${stage}`,
+        level: 'info',
+        message: `progress=${percent}`,
+      })
+      : null;
     const result = await resolvedDatabaseRestoreManager.restore({
       transactionId: context.jobId,
       backupId: payload.backupId,
       databaseName: payload.databaseName,
       expectedBackupSha256: payload.expectedBackupSha256,
-    });
+    }, { recordProgress });
     if (!result || typeof result !== 'object' || Array.isArray(result)
       || result.transactionId !== context.jobId || result.backupId !== payload.backupId
       || result.databaseName !== payload.databaseName || result.dumpSha256 !== payload.expectedBackupSha256
