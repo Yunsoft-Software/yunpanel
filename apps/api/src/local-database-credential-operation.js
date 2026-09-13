@@ -2,6 +2,7 @@ import { createDatabaseCredentialManager } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 
 const EXECUTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class LocalDatabaseCredentialOperationError extends Error {
   constructor(code, message) {
@@ -14,6 +15,7 @@ export class LocalDatabaseCredentialOperationError extends Error {
 function assertExecution(execution) {
   if (!execution || typeof execution !== 'object' || Array.isArray(execution)
     || typeof execution.jobId !== 'string' || !EXECUTION_ID_PATTERN.test(execution.jobId)
+    || typeof execution.serverId !== 'string' || !UUID_PATTERN.test(execution.serverId)
     || execution.resourceType !== 'database' || typeof execution.resourceId !== 'string' || !execution.resourceId) {
     throw new LocalDatabaseCredentialOperationError(
       'database_credential_execution_context_invalid',
@@ -26,9 +28,11 @@ function assertExecution(execution) {
 export function createLocalDatabaseCredentialOperation({
   materializer,
   manager = createDatabaseCredentialManager(),
+  receiptStore = null,
 } = {}) {
   if (!materializer || typeof materializer.materialize !== 'function'
-    || !manager || typeof manager.applyCredential !== 'function' || typeof manager.deleteCredential !== 'function') {
+    || !manager || typeof manager.applyCredential !== 'function' || typeof manager.deleteCredential !== 'function'
+    || (receiptStore !== null && typeof receiptStore.write !== 'function')) {
     throw new LocalDatabaseCredentialOperationError(
       'database_credential_operation_dependencies_invalid',
       'Database credential local operation dependencies are invalid',
@@ -69,6 +73,20 @@ export function createLocalDatabaseCredentialOperation({
         'database_credential_activation_unconfirmed',
         'Database credential host mutation did not confirm the queued desired state',
       );
+    }
+    if (receiptStore) {
+      try {
+        await receiptStore.write({
+          serverId: context.serverId,
+          jobId: context.jobId,
+          operation,
+          result,
+        });
+      } catch {
+        // The host mutation is already complete. A supplementary recovery receipt
+        // must never recast successful host work as failed; durable completion is
+        // still attempted by the local executor.
+      }
     }
     return Object.freeze({ ...result });
   }
