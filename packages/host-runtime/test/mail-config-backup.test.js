@@ -95,7 +95,7 @@ test('backs up mail sources, compiled maps/sieve, main.cf/master.cf and managed 
   });
 
   const result = await manager.backupConfiguration(preview(), { transactionId: 'mail-job-0001' });
-  assert.equal(result.version, 4);
+  assert.equal(result.version, 5);
   assert.equal(result.transactionId, 'mail-job-0001');
   assert.equal(result.artifacts.length, mailConfigBackupInternals.targetPaths.length);
   assert.equal(result.directories.length, mailConfigBackupInternals.managedDirectoryPaths.length);
