@@ -345,3 +345,23 @@ test('interrupted compensation is inspected and never blindly repeated', async (
   assert.equal(result.outcome, 'compensated');
   assert.equal(result.operation.steps[0].state, 'compensated');
 });
+
+test('orchestrator reports compensation support from concrete handlers only', () => {
+  const registry = createWebsiteProvisioningRegistry();
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async () => ({ satisfied: true }),
+        compensate: async () => ({ satisfied: true }),
+      },
+      runtime: {
+        apply: async () => ({ satisfied: true }),
+      },
+    },
+  });
+
+  assert.equal(orchestrator.supportsCompensation('unix_identity'), true);
+  assert.equal(orchestrator.supportsCompensation('runtime'), false);
+  assert.equal(orchestrator.supportsCompensation('certificate'), false);
+});
