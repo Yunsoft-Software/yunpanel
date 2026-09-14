@@ -18,8 +18,11 @@ Bir özellik için olgun ve bakımı süren bir araç varsa YunPanel aynı ürü
 
 2026-09-14 kaynak denetimine göre:
 
-- Node.js uygulamaları Passenger ile çalışmıyor. Her uygulama ayrı `yunapp-*` hesabı ve ayrı systemd unit'iyle çalışıyor.
+- Mevcut deploy edilmiş Node uygulamaların control-plane modeli hâlâ direct-systemd compatibility yoludur. Passenger install/inspect, site runtime intent, canonical env include, read-only migration preview ve health-gated direct-systemd → Passenger cutover coordinator kaynakta vardır; ancak ana async job queue, apply/reconciliation ve normal Domain restage authority zinciri tamamlanmadığı için migration henüz production golden path sayılmaz.
+- Direct-systemd → Passenger migration host coordinator'ı release/env/health koruması yapar, Passenger Nginx route'unu health gate arkasında etkinleştirir ve yalnız hedef sağlıklı olduktan sonra eski systemd servisini stop/disable eder. Başarısız hedef health/config/reload eski route'u geri alır; systemd cleanup sonradan başarısız olursa sağlıklı Passenger trafiği korunup `cleanup_required` state bırakılır.
+- Runtime adapter geçişini control-plane'de temsil etmek için durable `ApplicationRuntimeBinding` registry kaynağa eklenmiştir. Bu registry application, release, Website revision, Domain revision/checksum ve source operation ownership evidence'ını tutar; fakat normal Domain target resolution henüz bu authority'ye tamamen bağlanmamıştır.
 - Static ve Node workload için Unix kullanıcı, release dizini, build/deploy ve process izolasyonu var. Canonical Website/Application identity/path contract ve path-bound Unix identity provisioning mevcut; yeni static Website provisioning source akışı deterministic deploy/inspect modeline taşındı, ancak gerçek Ubuntu/package kabulü tamamlanmadı ve bütün host adapter'ları henüz aynı contract'ı tüketmiyor.
+- Yeni Node Website Passenger provisioning parçaları mevcut olsa da release hazırlama ile legacy systemd activation halen aynı Node deployment manager içinde birleşiktir. Yeni Website golden path direct-systemd yaratmadan Passenger'a çıkmadan tamamlanmış sayılmaz.
 - `/applications` bütün uygulamaları sunucu genelinde gösteriyor. Hedef site-merkezli ürün modeline aykırıdır.
 - Dosya ekranı YunPanel'in kendi `site-file-manager` API/UI uygulamasıdır; elFinder/Filestash entegrasyonu değildir.
 - Terminal YunPanel'in kendi `node-pty` + xterm.js WebSocket uygulamasıdır; ttyd entegrasyonu değildir.
@@ -51,12 +54,35 @@ Alias hiçbir Unix kullanıcısı, mailbox veya runtime üretmez. Bağımsız su
 
 Bir Website'in uygulamaları başka Website ekranında görünmez. Sunucu genelindeki process/application envanteri yalnız Owner'ın Sunucu > Gelişmiş/Tanılama alanında bulunabilir; günlük navigasyonda global `Uygulamalar` ürünü yoktur.
 
+### 3.1 Runtime adapter authority
+
+Runtime adapter seçimi Nginx config dosyasından, çalışan process'ten veya Domain `targetType` alanından tahmin edilmez. Canonical control-plane authority `ApplicationRuntimeBinding` kaydıdır.
+
+Bir binding en az şunları taşır:
+
+- `applicationId` ve `serverId`;
+- adapter (`passenger` veya migration dönemi için `direct-systemd` compatibility);
+- durable binding revision;
+- binding'i oluşturan operation ID;
+- exact current release ID;
+- bound Website ID + Website revision;
+- route kapsamındaki Domain ID + desired revision + aktif Nginx checksum evidence;
+- Passenger sağlıklı olsa da legacy cleanup tamamlanmadıysa ayrı `cleanup_required` state.
+
+Binding yalnız host mutation sonucu sağlıkla doğrulandıktan ve current Application/Website/Domain revision'ları migration snapshot'ıyla eşleştiğinde yazılır. Revision drift varsa YunPanel “muhtemelen aynı” diye binding güncellemez; reconciliation fail-closed kalır.
+
+Passenger binding varken normal Domain stage/reload akışı target'ı eski persisted proxy/systemd portundan üretmez. Target resolver binding authority + canonical Application identity/path + bounded Passenger evidence üzerinden Passenger spec üretir. Böylece bir sonraki SSL, Domain update veya Nginx restage sağlıklı Passenger route'unu yanlışlıkla direct-systemd proxy'ye geri çeviremez.
+
+Persisted legacy Node Application için binding henüz yoksa bu yalnız migration compatibility kapsamında `direct-systemd` olarak yorumlanabilir. Yeni Website oluşturma akışı binding yokluğunu direct-systemd yaratmak için kullanmaz; yeni Node Website varsayılanı Passenger'dır.
+
+Bir Website'e birden fazla bağımsız Domain route bağlıysa systemd supervisor tek domain cutover'dan sonra kapatılamaz. Migration bütün route'ları atomik/kanıtlı geçirebilecek model gelene kadar bu durum blocker'dır; aliases aynı Domain route'un parçasıdır ve ayrı blocker değildir.
+
 ## 4. Hazır servis kararları
 
 | Alan | Karar | YunPanel'in sorumluluğu |
 | --- | --- | --- |
 | Web server | Nginx | Site vhost template'i, config test, atomic activate/rollback |
-| Node.js | **Phusion Passenger + Nginx varsayılanı** | Runtime sürümü, startup file, `passenger_user/group`, env, health ve deploy; mevcut systemd process modeli yalnız migration/compatibility adapter'ı |
+| Node.js | **Phusion Passenger + Nginx varsayılanı** | Runtime sürümü, startup file, `passenger_user/group`, env, health, deploy ve durable runtime binding; mevcut systemd process modeli yalnız migration/compatibility adapter'ı |
 | PHP | PHP-FPM, site başına pool/socket | Distro PHP ile başla; çoklu sürümü ancak doğrulanmış paket kaynağıyla ekle; pool kullanıcı/limit/ini ayrımı |
 | Python | venv + Gunicorn/Uvicorn | Ayrı site user/systemd unit; Node Passenger geçişini bloke etmez |
 | Files | **elFinder** | YunPanel session-bound connector token; yalnız site root; connector site kullanıcısı/PHP-FPM pool'u altında. Arşivlenmiş `filebrowser/filebrowser` kullanılmaz |
@@ -97,6 +123,8 @@ Passenger ve PM2 aynı uygulamanın iki supervisor'ı yapılmaz. Yeni Node Websi
 9. DNS, HTTP, runtime, certificate, mail ve hazır araç health sonuçları kaydedilir. Zorunlu adım başarısızsa operation `ready` olmaz; uygulanmış adımlar compensation/rollback kanıtıyla ele alınır.
 
 Static Website'in ilk deploy'u durable provisioning operation ID'sini deterministic deployment/release ID olarak kullanır. Apply önce current release'i inspect eder; aynı deterministic release zaten aktifse mutation tekrarlanmaz. Restart sırasında `applying` static step körlemesine yeniden deploy edilmez, current symlink + real release directory + canonical Unix identity inspect edilerek reconcile edilir. Mevcut static Application Website'e bağlanırken repository yeniden deploy edilmez; var olan canonical current release inspect edilir.
+
+Node Website golden path'te release hazırlama ile supervisor activation ayrı adımlardır. Repository checkout/build/current-release/env hazırlığı Passenger'dan bağımsız ve idempotent olmalı; yeni Node Website hazırlığı sırf release üretmek için systemd unit enable/restart etmemelidir. Passenger runtime evidence başarılı olduktan sonra Nginx activation health-gated yapılır ve runtime binding durable authority olarak commit edilir.
 
 Provisioning policy Settings'te değiştirilebilir: varsayılan runtime, PHP/Node sürümü, local DNS/mail/database oluşturma, nameserver seti, IPv4/IPv6, backup policy ve security profile.
 
@@ -162,7 +190,7 @@ Kademeli emekli edilecek veya compatibility durumuna çekilecek:
 - global `/applications` günlük navigasyonu;
 - yeni Node uygulamalar için direct systemd runtime, Passenger migration tamamlandığında.
 
-Eski kod yeni adapter production acceptance geçmeden silinmez. Migration identity, permissions, release path ve rollback kanıtını korur; yeni ve eski runtime aynı Website için aynı anda aktif edilmez.
+Eski kod yeni adapter production acceptance geçmeden silinmez. Migration identity, permissions, release path ve rollback kanıtını korur; yeni ve eski runtime aynı Website için aynı anda aktif edilmez. Runtime geçişinde “trafik Passenger'da, systemd cleanup kaldı” durumu ayrı `cleanup_required` state olarak korunur; sağlıklı yeni trafiği sırf cleanup tamamlanmadı diye geriye çevirmek yasaktır.
 
 ## 9. Resmi teknik dayanaklar
 
