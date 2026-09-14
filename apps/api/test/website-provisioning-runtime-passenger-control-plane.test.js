@@ -30,7 +30,11 @@ function controlPlaneDependencies() {
       resetPassengerInitialRelease: async () => ({}),
     },
     websiteRegistry: { getWebsite: async () => null },
-    domainRegistry: { getDomain: async () => null },
+    domainRegistry: {
+      getDomain: async () => null,
+      activateProvisionedDomains: async () => [],
+      resetProvisionedDomains: async () => [],
+    },
     runtimeBindingRegistry: {
       getBinding: async () => null,
       activate: async () => ({}),
@@ -39,19 +43,28 @@ function controlPlaneDependencies() {
   };
 }
 
-test('Website provisioning runtime can attach Passenger control-plane handlers after startup', () => {
+test('Website provisioning runtime can attach Domain and Passenger control-plane handlers after startup', () => {
   const runtime = createWebsiteProvisioningRuntime(hostDependencies());
+  assert.equal(runtime.handlers.domain_activation, undefined);
   assert.equal(runtime.handlers.passenger_application_release, undefined);
   assert.equal(runtime.handlers.passenger_authority, undefined);
 
   const dependencies = controlPlaneDependencies();
   assert.deepEqual(runtime.configurePassengerControlPlane(dependencies), { configured: true });
+  assert.equal(typeof runtime.handlers.domain_activation.apply, 'function');
   assert.equal(typeof runtime.handlers.passenger_application_release.apply, 'function');
   assert.equal(typeof runtime.handlers.passenger_authority.apply, 'function');
   assert.deepEqual(runtime.configurePassengerControlPlane(dependencies), { configured: true });
 
   assert.throws(
-    () => runtime.configurePassengerControlPlane({ ...dependencies, domainRegistry: { getDomain: async () => null } }),
+    () => runtime.configurePassengerControlPlane({
+      ...dependencies,
+      domainRegistry: {
+        getDomain: async () => null,
+        activateProvisionedDomains: async () => [],
+        resetProvisionedDomains: async () => [],
+      },
+    }),
     /cannot be replaced/,
   );
 });
