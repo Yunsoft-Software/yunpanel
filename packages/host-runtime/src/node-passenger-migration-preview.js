@@ -4,9 +4,14 @@ import path from 'node:path';
 import { normalizeNodeStatusSpec } from '@yunpanel/shared';
 import { createApplicationIdentity } from './application-identity.js';
 import { nodeStatusInspector } from './node-status-inspector.js';
+import {
+  passengerEnvironmentManager,
+  passengerEnvironmentManagerInternals,
+} from './passenger-environment-manager.js';
 import { createPassengerSiteManager } from './passenger-site-manager.js';
 
-const ENV_ROOT = '/etc/yunpanel/apps';
+const ENV_ROOT = passengerEnvironmentManagerInternals.sourceRoot;
+const PASSENGER_ENV_ROOT = passengerEnvironmentManagerInternals.includeRoot;
 const MANAGED_NODE_ROOT = '/opt/yunpanel/node-runtimes';
 
 export class NodePassengerMigrationPreviewError extends Error {
@@ -47,6 +52,7 @@ function targetIntent(spec) {
     unixUser: identity.unixUser,
     healthPath: spec.runtime.healthPath,
     healthTimeoutSeconds: spec.runtime.healthTimeoutSeconds,
+    environmentInclude: path.posix.join(PASSENGER_ENV_ROOT, `${spec.applicationId}.conf`),
   });
 }
 
@@ -57,16 +63,14 @@ function blocker(code, detail = null) {
 export function createNodePassengerMigrationPreview({
   statusInspector = nodeStatusInspector,
   passengerSiteManager = createPassengerSiteManager(),
+  passengerEnvironment = passengerEnvironmentManager,
   readFileFn = readFile,
-  environmentBindingInspector = async () => Object.freeze({
-    satisfied: false,
-    reason: 'passenger_environment_binding_unavailable',
-  }),
   envRoot = ENV_ROOT,
 } = {}) {
   if (!statusInspector || typeof statusInspector.inspectNodeStatus !== 'function'
     || !passengerSiteManager || typeof passengerSiteManager.inspect !== 'function'
-    || typeof readFileFn !== 'function' || typeof environmentBindingInspector !== 'function'
+    || !passengerEnvironment || typeof passengerEnvironment.inspect !== 'function'
+    || typeof readFileFn !== 'function'
     || typeof envRoot !== 'string' || !path.posix.isAbsolute(envRoot)) {
     throw new NodePassengerMigrationPreviewError('node_passenger_migration_dependencies_invalid', 'Node Passenger migration preview dependencies are invalid');
   }
@@ -101,6 +105,7 @@ export function createNodePassengerMigrationPreview({
   async function preview(rawSpec) {
     const spec = normalizeSpec(rawSpec);
     const blockers = [];
+    const intent = targetIntent(spec);
 
     let source;
     try {
@@ -120,11 +125,10 @@ export function createNodePassengerMigrationPreview({
       blockers.push(blocker('systemd_environment_missing'));
     } else {
       try {
-        environmentBinding = await environmentBindingInspector(Object.freeze({
+        environmentBinding = await passengerEnvironment.inspect(Object.freeze({
           applicationId: spec.applicationId,
-          environmentPath: environment.path,
-          environmentSha256: environment.sha256,
           runtime: spec.runtime,
+          expectedSourceSha256: environment.sha256,
         }));
       } catch (error) {
         environmentBinding = Object.freeze({
@@ -134,10 +138,16 @@ export function createNodePassengerMigrationPreview({
       }
       if (!environmentBinding?.satisfied) {
         blockers.push(blocker('passenger_environment_unready', environmentBinding?.reason ?? 'passenger_environment_binding_unavailable'));
+      } else {
+        if (environmentBinding.sourcePath !== environment.path) {
+          blockers.push(blocker('passenger_environment_source_mismatch'));
+        }
+        if (!intent || environmentBinding.environmentInclude !== intent.environmentInclude) {
+          blockers.push(blocker('passenger_environment_include_mismatch'));
+        }
       }
     }
 
-    const intent = targetIntent(spec);
     let target = null;
     if (!intent) {
       blockers.push(blocker('passenger_start_mode_unsupported', spec.runtime.start.mode));
@@ -177,12 +187,19 @@ export function createNodePassengerMigrationPreview({
         environmentBinding: Object.freeze({
           satisfied: environmentBinding?.satisfied === true,
           reason: environmentBinding?.reason ?? null,
+          sourcePath: environmentBinding?.sourcePath ?? null,
+          environmentInclude: environmentBinding?.environmentInclude ?? null,
+          includeSha256: environmentBinding?.includeSha256 ?? null,
         }),
       }),
       preservation: Object.freeze({
         release: source?.releaseId === spec.releaseId,
         health: source?.healthy === true,
-        environment: environment.present && environmentBinding?.satisfied === true,
+        environment: environment.present
+          && environmentBinding?.satisfied === true
+          && environmentBinding.sourcePath === environment.path
+          && intent !== null
+          && environmentBinding.environmentInclude === intent.environmentInclude,
       }),
       ready,
       blockers: Object.freeze(uniqueBlockers),
@@ -197,5 +214,6 @@ export const nodePassengerMigrationPreviewInternals = Object.freeze({
   normalizeSpec,
   targetIntent,
   ENV_ROOT,
+  PASSENGER_ENV_ROOT,
   MANAGED_NODE_ROOT,
 });

@@ -10,7 +10,15 @@ const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 const releaseId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const currentRoot = `/var/lib/yunpanel/apps/${applicationId}/current`;
 const environmentPath = `/etc/yunpanel/apps/${applicationId}.env`;
-const environmentContent = 'NODE_ENV="production"\nYUNPANEL_APPLICATION_ID="6dcb8908-3f3e-43da-9452-15fd6b51ac76"\nSECRET_VALUE="not-returned"\n';
+const environmentInclude = `/etc/yunpanel/passenger-env/${applicationId}.conf`;
+const environmentContent = [
+  'NODE_ENV="production"',
+  'HOST="127.0.0.1"',
+  'PORT="3123"',
+  `YUNPANEL_APPLICATION_ID="${applicationId}"`,
+  'SECRET_VALUE="not-returned"',
+  '',
+].join('\n');
 
 function spec(overrides = {}) {
   const runtime = {
@@ -52,6 +60,19 @@ function healthySource(overrides = {}) {
   };
 }
 
+function healthyBinding(overrides = {}) {
+  return {
+    satisfied: true,
+    sourcePath: environmentPath,
+    sourceSha256: createHash('sha256').update(environmentContent).digest('hex'),
+    environmentInclude,
+    includeSha256: 'b'.repeat(64),
+    includeBytes: 123,
+    variableCount: 4,
+    ...overrides,
+  };
+}
+
 function manager({
   source = healthySource(),
   target = { satisfied: true, releaseId },
@@ -60,7 +81,7 @@ function manager({
     assert.equal(encoding, 'utf8');
     return environmentContent;
   },
-  environmentBindingInspector = async () => ({ satisfied: true, reason: null }),
+  passengerEnvironmentInspect = async () => healthyBinding(),
   passengerInspect = null,
 } = {}) {
   return createNodePassengerMigrationPreview({
@@ -68,12 +89,12 @@ function manager({
     passengerSiteManager: {
       inspect: passengerInspect ?? (async () => target),
     },
+    passengerEnvironment: { inspect: passengerEnvironmentInspect },
     readFileFn,
-    environmentBindingInspector,
   });
 }
 
-test('Node Passenger migration preview proves release, health, environment and target without mutation', async () => {
+test('Node Passenger migration preview proves exact env binding and target without mutation', async () => {
   let targetIntent;
   let bindingInput;
   const previewer = createNodePassengerMigrationPreview({
@@ -84,14 +105,17 @@ test('Node Passenger migration preview proves release, health, environment and t
         return { satisfied: true, releaseId };
       },
     },
-    readFileFn: async () => environmentContent,
-    environmentBindingInspector: async (input) => {
-      bindingInput = input;
-      return { satisfied: true };
+    passengerEnvironment: {
+      inspect: async (input) => {
+        bindingInput = input;
+        return healthyBinding();
+      },
     },
+    readFileFn: async () => environmentContent,
   });
 
-  const result = await previewer.preview(spec());
+  const input = spec();
+  const result = await previewer.preview(input);
   assert.equal(result.mode, 'read-only');
   assert.equal(result.mutationPerformed, false);
   assert.equal(result.ready, true);
@@ -103,20 +127,28 @@ test('Node Passenger migration preview proves release, health, environment and t
   assert.equal(result.environment.present, true);
   assert.equal(result.environment.sha256, createHash('sha256').update(environmentContent).digest('hex'));
   assert.equal(JSON.stringify(result).includes('not-returned'), false);
-  assert.equal(bindingInput.environmentPath, environmentPath);
-  assert.equal(bindingInput.environmentSha256, result.environment.sha256);
+  assert.deepEqual(bindingInput, {
+    applicationId,
+    runtime: input.runtime,
+    expectedSourceSha256: result.environment.sha256,
+  });
+  assert.equal(result.target.environmentBinding.sourcePath, environmentPath);
+  assert.equal(result.target.environmentBinding.environmentInclude, environmentInclude);
   assert.equal(targetIntent.appRoot, currentRoot);
   assert.equal(targetIntent.documentRoot, currentRoot);
   assert.equal(targetIntent.startupFile, 'server.js');
   assert.equal(targetIntent.nodeCandidates[0], '/opt/yunpanel/node-runtimes/v24/bin/node');
+  assert.equal(targetIntent.environmentInclude, environmentInclude);
   assert.match(targetIntent.unixUser, /^yunapp-[a-f0-9]{12}$/);
 });
 
-test('Node Passenger migration preview blocks when Passenger environment binding is not proven', async () => {
+test('Node Passenger migration preview blocks when durable env include is not ready', async () => {
   const previewer = manager({
-    environmentBindingInspector: async () => ({
+    passengerEnvironmentInspect: async () => ({
       satisfied: false,
-      reason: 'passenger_environment_binding_unavailable',
+      reason: 'passenger_environment_include_missing',
+      sourcePath: environmentPath,
+      environmentInclude,
     }),
   });
 
@@ -125,8 +157,30 @@ test('Node Passenger migration preview blocks when Passenger environment binding
   assert.deepEqual(result.preservation, { release: true, health: true, environment: false });
   assert.deepEqual(result.blockers, [{
     code: 'passenger_environment_unready',
-    detail: 'passenger_environment_binding_unavailable',
+    detail: 'passenger_environment_include_missing',
   }]);
+});
+
+test('Node Passenger migration preview rejects a satisfied env binding from another source path', async () => {
+  const previewer = manager({
+    passengerEnvironmentInspect: async () => healthyBinding({ sourcePath: `/etc/yunpanel/apps/other.env` }),
+  });
+  const result = await previewer.preview(spec());
+  assert.equal(result.ready, false);
+  assert.equal(result.preservation.environment, false);
+  assert.ok(result.blockers.some((entry) => entry.code === 'passenger_environment_source_mismatch'));
+});
+
+test('Node Passenger migration preview rejects a satisfied env binding targeting another include', async () => {
+  const previewer = manager({
+    passengerEnvironmentInspect: async () => healthyBinding({
+      environmentInclude: `/etc/yunpanel/passenger-env/11111111-1111-4111-8111-111111111111.conf`,
+    }),
+  });
+  const result = await previewer.preview(spec());
+  assert.equal(result.ready, false);
+  assert.equal(result.preservation.environment, false);
+  assert.ok(result.blockers.some((entry) => entry.code === 'passenger_environment_include_mismatch'));
 });
 
 test('Node Passenger migration preview keeps an unhealthy systemd source blocked', async () => {
@@ -156,14 +210,23 @@ test('Node Passenger migration preview rejects npm start mode without probing a 
   assert.equal(result.target.intent, null);
   assert.equal(passengerCalls, 0);
   assert.ok(result.blockers.some((entry) => entry.code === 'passenger_start_mode_unsupported'));
+  assert.ok(result.blockers.some((entry) => entry.code === 'passenger_environment_include_mismatch'));
 });
 
-test('Node Passenger migration preview treats a missing source environment as a blocker', async () => {
+test('Node Passenger migration preview treats a missing source environment as a blocker without inspecting Passenger env binding', async () => {
   const error = new Error('missing');
   error.code = 'ENOENT';
-  const previewer = manager({ readFileFn: async () => { throw error; } });
+  let bindingCalls = 0;
+  const previewer = manager({
+    readFileFn: async () => { throw error; },
+    passengerEnvironmentInspect: async () => {
+      bindingCalls += 1;
+      return healthyBinding();
+    },
+  });
   const result = await previewer.preview(spec());
   assert.equal(result.ready, false);
+  assert.equal(bindingCalls, 0);
   assert.deepEqual(result.environment, {
     path: environmentPath,
     present: false,
