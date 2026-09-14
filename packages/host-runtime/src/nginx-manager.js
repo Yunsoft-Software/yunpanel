@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   nginxConfigFileName,
+  renderPassengerSiteConfig,
   renderProxySiteConfig,
   renderStaticSiteConfig,
 } from '@yunpanel/config-templates';
@@ -65,7 +66,14 @@ function renderDomainConfig(spec) {
       nginxSettings: spec.nginxSettings,
     });
   }
-  throw new NginxManagerError('invalid_target_type', 'Domain targetType must be static or proxy');
+  if (spec.targetType === 'passenger') {
+    return renderPassengerSiteConfig({
+      ...common,
+      target: spec.target,
+      nginxSettings: spec.nginxSettings,
+    });
+  }
+  throw new NginxManagerError('invalid_target_type', 'Domain targetType must be static, proxy or passenger');
 }
 
 export function createNginxManager({
