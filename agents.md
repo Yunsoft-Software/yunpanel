@@ -12,13 +12,18 @@ YunPanel, Yunsoft'un Ubuntu sunucularını Plesk'e bağımlı olmadan yönetece�
 
 Kapsam Yunsoft'un gerçek kullanım ihtiyaçlarıdır; reseller, faturalama, hosting paketleri, tüm dağıtımlara destek ve Plesk'in bütün özellikleri bu değişikliğin önkoşulu değildir.
 
+**2026-09-14 hazır-servis kararı:** YunPanel bir kontrol düzlemi ve entegrasyon ürünüdür. Dosya yöneticisi, web terminali, database istemcisi, authoritative DNS, monitoring veya backup arşiv motorunu yeniden yazmayacak; olgun servisleri YunPanel auth/authorization, site izolasyonu, durable lifecycle ve same-origin gateway arkasında birleştirecektir. Bağlayıcı bileşen kararları ve migration sınırı `docs/architecture.md` içindedir. Bu belgeyle çelişen eski özel-ürün planları uygulanmaz.
+
 ## 2. Teknoloji ve destek matrisi
 
 - Frontend React, JavaScript/JSX olacak. TypeScript, `.ts` veya `.tsx` eklenmeyecek.
 - Backend Node.js olacak; mevcut workspace/adapter/test altyapısı mümkün olduğunca kullanılacak.
 - Ubuntu 24.04 LTS, Nginx, Node.js LTS ve systemd ilk destek hedefidir. Çalışan projenin Node/npm sürüm gereksinimleri doğrulanmadan düşürülmeyecek.
-- Docker Engine/Compose, MySQL/MariaDB, ACME, Postfix/Dovecot/Rspamd ve Roundcube ilgili modüller kapsamında desteklenecek. Passenger, eski uygulamalar için compatibility adapter'ıdır.
-- Yeni dependency yalnızca somut ihtiyaçla eklenecek; terminal ve auth gibi alanlarda bakımı yapılan uygun kütüphaneler değerlendirilecek. Güvenlik mekanizmaları sırf dependency azaltmak için el yordamıyla icat edilmeyecek.
+- Yeni Node Website'lerin varsayılanı Nginx + Phusion Passenger ve explicit `passenger_user/group` izolasyonudur. Mevcut direct-systemd Node runtime migration tamamlanana kadar compatibility adapter'ıdır; PM2 ikinci varsayılan supervisor olarak eklenmez.
+- PHP, site başına PHP-FPM pool/socket ile; Python, site user venv + Gunicorn/Uvicorn ile; Docker, Engine/Compose ile desteklenir.
+- Hazır ürün kararı: elFinder, ttyd, phpMyAdmin, Roundcube, PowerDNS Authoritative, Netdata, GoAccess, CrowdSec, restic ve rclone kullanılır. PostgreSQL desteği açıldığında pgAdmin 4; gelişmiş Docker görünümü gerekirse Portainer adapter'ı eklenebilir.
+- Mevcut Certbot/Cloudflare, Nginx, Postfix/Dovecot/Rspamd, systemd ve OpenSSH tabanları korunur. Aynı işi yapan ikinci motor sırf alternatif olduğu için eklenmez.
+- Yeni dependency yalnız somut adapter ihtiyacıyla eklenir. Bakımı durmuş/arşivlenmiş ürün (özellikle `filebrowser/filebrowser`) yeni kurulumda kullanılmaz; vendor security/maintenance durumu paket sürüm politikasıyla izlenir.
 
 ## 3. Agentsiz yönetim mimarisi
 
@@ -27,7 +32,7 @@ Kapsam Yunsoft'un gerçek kullanım ihtiyaçlarıdır; reseller, faturalama, hos
 - Nginx/systemd/ACME/deploy/env/backup/mail/paket operasyonları aynı panel backend'inin dahili adapter ve job katmanında yürütülecek. Farklı isim altında ikinci bir privileged daemon veya yeniden agent enrollment/credential exchange kurulmayacak.
 - Kurulum Owner'a tüm sunucu yönetim yetkilerini hazır sunacak. Normal yönetim için her operasyonda ayrı sudoers/polkit/agent capability onayı istenmeyecek.
 - Root yetkisi frontend'e veya barındırılan uygulamalara verilmez. React arayüzü yalnızca authenticated backend'i çağırır. Public reverse proxy/static serving katmanı root yapmak zorunlu değildir.
-- Node/static build, npm lifecycle scriptleri, Git hook'ları, uygulama süreçleri, site cron'u ve site terminali dedicated site kullanıcısıyla çalışacak. Owner Sunucu terminalinde root shell kullanabilecek.
+- Node/PHP/Python/static build, lifecycle scriptleri, Git hook'ları, uygulama süreçleri, site cron'u, elFinder connector'ı ve site ttyd oturumu dedicated site kullanıcısıyla çalışacak. Owner Sunucu ttyd oturumunda root shell kullanabilecek.
 - API oturum/yetki doğrulaması, girdilerin doğrulanması, secret koruması, config testleri ve kaynak kilitleri kaldırılmayacak. Bunlar agent'a tek tek yetki verme mekanizması değildir.
 - Root backend'in ele geçirilmesinin hostun ele geçirilmesi anlamına geldiği kabul edilerek auth, bağımlılıklar, ağ yüzeyi ve dosya yazma yolları gözden geçirilecek. Authentication kapısı geçilmeden full yetkili sürüm/terminal public olarak yayınlanmayacak.
 
@@ -53,10 +58,15 @@ Kapsam Yunsoft'un gerçek kullanım ihtiyaçlarıdır; reseller, faturalama, hos
 
 ## 6. Website, domain ve subdomain modeli
 
+- Normal ürün kaynağı Website'tır; runtime/application, database, mail, DNS, dosya, log, backup, cron ve terminal bu Website altında görünür. Global uygulama listesi günlük navigasyon değildir; yalnız Owner Sunucu/Tanılama envanteri olabilir.
+- Her bağımsız Website dedicated Unix user/group, home, document root/release, persistent data, tmp, log, backup ve SFTP scope'una sahiptir. Bağımsız subdomain ayrı Website ise ayrı kimlik alır; `shared-site` seçimi açık değilse parent kaynaklarını paylaşmaz.
 - Website kaynak kimliği ile hostname ayrı kavramlardır. Domain, subdomain ve alias türleri; açık parent ve hedef referanslarıyla modellenir.
 - Subdomain bağımsız runtime, document root, env, SSL ve loglara sahip olabilir. Alias başka siteye işaret eder; otomatik bağımsız uygulama veya mailbox oluşturmaz.
 - Parent son iki domain parçasını keserek tahmin edilmez. FQDN/IDN normalizasyonu, label sınırı, duplicate hostname ve döngü kontrolleri uygulanır.
 - DNS hosting, web hostname ve mail domaini ayrı yaşam döngüleridir. Panelde domain yaratılması dış DNS'in değiştiği veya mailin hazır olduğu anlamına gelmez.
+- Local DNS seçilen yeni Website için PowerDNS zone/SOA/NS ve policy'nin istediği A/AAAA/CNAME/MX/TXT kayıtları provisioning operation'ında oluşturulur. Registrar parent delegation ayrıca doğrulanır; tek host iki bağımsız NS gibi sunulmaz.
+- Local mail seçilen Website için shared Roundcube'a giden `webmail.<domain>` DNS ve Nginx kaydı provision edilir. Varsayılan veya parolası bilinen mailbox üretilmez; mailbox explicit parola ile oluşturulur.
+- “Site oluşturuldu” yalnız metadata yazımı değildir: Unix identity, runtime, Nginx, seçili DNS/mail/database/SFTP/log/backup kaynakları durable provisioning planında health-gated olarak tamamlanır veya açıkça partial/failed kalır.
 - Domain/subdomain silmede bağımlılıklar ve etki gösterilir; örtülü cascade yapılmaz. Migration mevcut trafik ve sertifika ilişkilerini bozmamalıdır.
 
 ## 7. DEFERRED — Enterprise UI/UX standardı
@@ -75,21 +85,23 @@ Son tasarım aşamasında korunacak hedefler:
 
 ## 8. Terminal ve dosya erişimi
 
-- Terminal gerçek PTY + xterm.js olacak. WebSocket oturum ve Origin kontrolünden geçecek; başka kullanıcı/oturum terminali devralamayacak.
+- Terminal ttyd ile sağlanır. ttyd kalıcı public daemon olarak açılmaz; YunPanel on-demand one-shot process'i loopback veya Unix socket üzerinde başlatır ve authenticated same-origin gateway üzerinden taşır. Özel node-pty/xterm terminal yalnız ttyd acceptance tamamlanana kadar migration fallback'idir.
 - Site terminali site kullanıcısı ve dizininde; Sunucu terminali Owner için root olarak çalışacak. Host/kullanıcı/dizin bağlamı görünür olacak.
 - Resize, kontrol karakterleri, Unicode ve interaktif programlar desteklenecek. Idle/output/session limitleri ve process-group temizliği uygulanacak.
 - Logout, oturum iptali ve kullanıcı kapatma açık bağlantının yetkisini kaldıracak. Uzun deploy/backup işlemleri terminal yerine kalıcı job ile yürütülecek.
 - Terminal çıktısı güvenilmeyen içeriktir; HTML olarak işlenmez. Ham keystroke, çıktı ve shell history varsayılan olarak merkezi audit'e yazılmaz; oturum açılış/kapanış metadata'sı yazılır.
-- Site dosya görünümünde path traversal ve symlink kaçışı engellenir. Host dosyalarına erişim Owner'ın açık Sunucu bağlamında yapılır; uygulama kullanıcılarına yayılmaz.
+- Site dosya yöneticisi elFinder UI + connector ile sağlanır; connector yalnız Website root'una bağlanır ve site kullanıcısı altında çalışır. YunPanel'in özel file-manager ürünü elFinder kabulünden sonra kaldırılır. Path traversal/symlink kaçışı engellenir; host dosyalarına erişim site connector'ına yayılmaz.
 
 ## 9. Operasyon, konfigürasyon ve audit
 
-- Deploy, build, SSL, backup/restore, Docker ve paket işlemleri kalıcı async job modeliyle yürütülür; queued/running/succeeded/failed/cancelled durumları korunur.
+- Deploy, build, SSL, restic backup/restore, Docker ve paket işlemleri kalıcı async job modeliyle yürütülür; queued/running/succeeded/failed/cancelled durumları korunur.
 - Aynı kaynağa zarar verecek işler kilitlenir. Nginx activation ve paket değişimi gerektiğinde serialize edilir; tekrar deneme idempotency dikkate alınarak yapılır.
 - Nginx/systemd/mail konfigürasyonları adapter/template üzerinden üretilir. Uygulanmadan test edilir; başarısız reload/health durumunda önceki çalışan config/sürüm geri alınır.
 - Normal formlar shell string birleştirmez; doğrulanmış argümanlar kullanır. Yetkili interaktif shell ayrı, kasıtlı bir özelliktir; onu sağlamak form inputlarını shell'e birleştirmeyi meşru kılmaz.
 - Audit actor, action, resource, zaman ve güvenli sonuç metadata'sı tutar. Parola/token/env değerleri ve ham terminal kayıtları audit'e kopyalanmaz.
 - Panel kesilince hosted uygulamalar, Nginx ve mail servisleri çalışmayı sürdürmelidir.
+- Database ve servis envanteri read-only canlı sorgudur; “sunucuyu tara” job'ı günlük UI akışı değildir. Kur/install/start/stop/restart gibi mutation'lar durable job kalır.
+- Backup veri düzlemi restic, remote transport gerektiğinde rclone'dur. YunPanel repository policy, hook, evidence, retention ve restore orchestration yapar; yeni özel archive formatı üretmez.
 
 ## 10. Git, test ve otomasyon
 

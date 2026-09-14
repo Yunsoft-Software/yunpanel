@@ -4,17 +4,19 @@ YunPanel is Yunsoft's website-centric hosting and server control plane for Node.
 
 The project is intentionally scoped around Yunsoft production needs rather than full Plesk feature parity.
 
-## Current architecture
+## Target and current architecture
 
-The management entry point is a routed React workspace with dashboard, one local-server view, website/domain hierarchy, site detail tabs, application/environment controls, tracked jobs and Owner/Read Only access boundaries. Production requires one exact local Server identity; selectors and remote resource access are absent from both the UI and authenticated API.
+The target is a Website-centric control plane around proven hosting services, not a second implementation of those services. YunPanel owns authentication, authorization, resource relationships, isolated site identities, durable orchestration, health/rollback and the same-origin gateway. Passenger, PHP-FPM, elFinder, ttyd, phpMyAdmin, Roundcube, PowerDNS, restic/rclone, Netdata, GoAccess and CrowdSec provide their established product functions. The binding decisions and boundaries are in [docs/architecture.md](docs/architecture.md).
+
+The current management entry point is a routed React workspace with dashboard, one local-server view, website/domain hierarchy, site detail tabs, global application/environment controls, tracked jobs and Owner/Read Only access boundaries. Production requires one exact local Server identity; selectors and remote resource access are absent from both the UI and authenticated API.
 
 The privileged execution target is the local `yunpanel-api` runtime rather than a separate privileged agent. A server can be created directly as a credentialless local-only identity or an existing enrolled server can be migrated to local ownership with guarded CLI tooling. When local execution is enabled, the API maintains host inventory, allowlisted systemd-service, Docker and Nginx snapshots directly from `@yunpanel/host-runtime` and consumes the durable job queue locally.
 
 The old `yun-agent` package/service remains temporarily only as an offline rollback bridge for hosts that were enrolled before the agentless migration. New enrollment-token provisioning, the enrollment HTTP endpoint, the first-enrollment agent client path and its auth bypass are retired. Retained heartbeat/command/environment/result implementation is unreachable in production and returns `agent_transport_removed`; it will be deleted physically after real migration + rollback acceptance.
 
-**The complete hosting target is not implemented yet.** The routed new-site form now uses guarded preview/apply orchestration to create a persistent Website and Domain together, and legacy Domain records expose an explicit Website create/bind repair before terminal or file access. The site workspace exposes the real terminal, active-release file manager and local Node/Nginx log readers. Cron, general-purpose backups, full Docker lifecycle and mail apply remain incomplete and are hidden from primary navigation rather than presented as active modules. Real package/browser/host acceptance gates remain in `todo.md`.
+**The target architecture is not implemented yet.** In particular, current Node apps use dedicated-user systemd units rather than Passenger; the current file manager and PTY are YunPanel-specific implementations; phpMyAdmin, authoritative PowerDNS/NS management and ttyd are absent; Roundcube is not yet a complete new-site `webmail.<domain>` product flow; and the global Applications page violates the final site-centric information architecture. These paths remain only until the replacements pass migration and live acceptance. Cron, restic/rclone backup, Netdata/GoAccess, CrowdSec and the complete provisioning flow are also incomplete.
 
-See [plan.md](plan.md) for remaining implementation work, [todo.md](todo.md) for supported-runtime/browser/package/real-host acceptance, and [agents.md](agents.md) for binding development rules. Completed tasks leave the task lists; implementation history stays in Git. Unless explicitly requested otherwise, work directly on `main` in small commits. Do not add GitHub Actions.
+See [plan.md](plan.md) for remaining implementation work, [todo.md](todo.md) for supported-runtime/browser/package/real-host acceptance, [docs/architecture.md](docs/architecture.md) for the target product architecture, and [agents.md](agents.md) for binding development rules. Completed tasks leave the task lists; implementation history stays in Git. Unless explicitly requested otherwise, work directly on `main` in small commits. Do not add GitHub Actions.
 
 ## Authentication and privilege boundary
 
@@ -161,6 +163,7 @@ No package publication, migration or live deployment occurs merely by updating t
 ## More documentation
 
 - [docs/development.md](docs/development.md) — current agentless development workflow and retained rollback compatibility path.
+- [docs/architecture.md](docs/architecture.md) — target Website-centric, ready-service integration architecture and migration boundary.
 - [docs/local-runtime-migration.md](docs/local-runtime-migration.md) — fresh bootstrap, existing-server migration, durable recovery and rollback.
 - [docs/local-migration-backup.md](docs/local-migration-backup.md) — verified migration backup, restore preview and private staging boundary.
 - [docs/website-workspace.md](docs/website-workspace.md) — current workspace routes and limitations.

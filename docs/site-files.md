@@ -1,5 +1,7 @@
 # Site file-manager boundary
 
+> Migration note (2026-09-14): this document describes the current custom file API. It is a compatibility path, not the target File Manager. `docs/architecture.md` adopts elFinder with a YunPanel session-bound, Website-scoped connector running as the dedicated site user. Do not expand this API into a second general file-manager product while the replacement is pending.
+
 YunPanel's file API is limited to the active release of one local static or Node Website. It does not expose a caller-selected host root. The backend derives the deterministic Application path and `yunapp-*` identity from persisted Website state, resolves `current`, and accepts only an exact UUID release below that same managed Application root.
 
 Every filesystem operation runs in a short-lived worker through fixed `/usr/sbin/runuser -u <site-user> -- <packaged-node> <fixed-worker>` arguments. Request data cannot choose the executable, Unix user or release root. The worker receives a fixed, secret-free environment. The API must run as root so it can enter the site account; the worker itself has only that account's filesystem permissions. Static release ownership remains with the same dedicated site user after artifact verification, while the existing public read modes continue to support Nginx.

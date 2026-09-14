@@ -1,5 +1,7 @@
 # Terminal security and runtime
 
+> Migration note (2026-09-14): this document describes the currently implemented custom `node-pty`/xterm path. It is not the target terminal product. `docs/architecture.md` replaces it with an on-demand, loopback/Unix-socket ttyd adapter behind the same YunPanel auth, Website UID/GID and revocation boundary. Do not add new product features to the custom terminal while that replacement is pending.
+
 YunPanel exposes a real PTY, not a one-shot HTTP command endpoint. The browser first sends an authenticated, CSRF-protected `POST /api/panel/terminal/capabilities` for exactly one local Server or Website. The response contains a random 30-second, single-use capability bound to the current session and user. Only its SHA-256 digest exists in backend memory. Capabilities are never accepted in a URL or query string.
 
 The web gateway upgrades only exact `/api/terminal` for an allowlisted client IP and the configured Origin. It removes caller-supplied forwarding and authorization headers, then supplies its authenticated internal proxy identity. The API repeats peer, cookie, exact Origin, Owner-role and current Owner-MFA validation. The selected WebSocket protocol is `yunpanel-terminal-v1`; the one-time capability travels as a second protocol value and is consumed before PTY creation.
