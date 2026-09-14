@@ -1,3 +1,4 @@
+import { createWebsiteNodeReleaseProvisioningHandler } from './website-node-release-provisioning-handler.js';
 import { createWebsiteProvisioningHandlers } from './website-provisioning-handlers.js';
 import { createWebsiteProvisioningOrchestrator } from './website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from './website-provisioning-registry.js';
@@ -7,6 +8,7 @@ export function createWebsiteProvisioningRuntime({
   now,
   identityManager,
   passengerSiteManager,
+  nodeReleaseManager,
   staticDeploymentManager,
   nginxManager,
 } = {}) {
@@ -14,11 +16,16 @@ export function createWebsiteProvisioningRuntime({
     filePath,
     ...(now ? { now } : {}),
   });
-  const handlers = createWebsiteProvisioningHandlers({
-    ...(identityManager ? { identityManager } : {}),
-    ...(passengerSiteManager ? { passengerSiteManager } : {}),
-    ...(staticDeploymentManager ? { staticDeploymentManager } : {}),
-    ...(nginxManager ? { nginxManager } : {}),
+  const handlers = Object.freeze({
+    ...createWebsiteProvisioningHandlers({
+      ...(identityManager ? { identityManager } : {}),
+      ...(passengerSiteManager ? { passengerSiteManager } : {}),
+      ...(staticDeploymentManager ? { staticDeploymentManager } : {}),
+      ...(nginxManager ? { nginxManager } : {}),
+    }),
+    node_release: createWebsiteNodeReleaseProvisioningHandler({
+      ...(nodeReleaseManager ? { nodeReleaseManager } : {}),
+    }),
   });
   const orchestrator = createWebsiteProvisioningOrchestrator({ registry, handlers });
 
