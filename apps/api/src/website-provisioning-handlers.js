@@ -143,6 +143,23 @@ function passengerRuntimeEvidence(operation) {
   return value;
 }
 
+function passengerEnvironmentEvidence(operation, applicationId) {
+  const step = operation?.steps?.find((candidate) => candidate.id === 'passenger_environment');
+  const value = step?.state === 'succeeded' ? step.evidence : null;
+  if (!value || value.satisfied !== true || value.adapter !== 'passenger-environment'
+    || value.applicationId !== applicationId
+    || !Number.isSafeInteger(value.environmentRevision) || value.environmentRevision < 0
+    || typeof value.environmentInclude !== 'string'
+    || typeof value.includeSha256 !== 'string' || !CHECKSUM_PATTERN.test(value.includeSha256)) {
+    throw new WebsiteProvisioningHandlerError(
+      'website_passenger_environment_evidence_missing',
+      'Passenger environment evidence is required before Nginx activation',
+      409,
+    );
+  }
+  return value;
+}
+
 function nginxSpec({ operation, intent } = {}) {
   if (!intent || typeof intent !== 'object' || Array.isArray(intent)
     || typeof intent.primaryDomain !== 'string'
@@ -158,6 +175,7 @@ function nginxSpec({ operation, intent } = {}) {
   let target = intent.target;
   if (intent.targetType === 'passenger') {
     const runtime = passengerRuntimeEvidence(operation);
+    const environment = passengerEnvironmentEvidence(operation, runtime.applicationId);
     target = Object.freeze({
       appRoot: runtime.appRoot,
       documentRoot: runtime.documentRoot,
@@ -166,6 +184,7 @@ function nginxSpec({ operation, intent } = {}) {
       user: runtime.unixUser,
       group: runtime.unixUser,
       appEnv: intent.target?.appEnv ?? 'production',
+      environmentInclude: environment.environmentInclude,
     });
   }
 
@@ -425,6 +444,7 @@ export const websiteProvisioningHandlerInternals = Object.freeze({
   staticCompensationTarget,
   legacyStaticPending,
   passengerRuntimeEvidence,
+  passengerEnvironmentEvidence,
   nginxSpec,
   nginxEvidence,
   certificatePending,
