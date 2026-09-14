@@ -123,6 +123,8 @@ export function createWebsiteProvisioningHandlers({
   if (!identityManager
     || typeof identityManager.apply !== 'function'
     || typeof identityManager.inspect !== 'function'
+    || typeof identityManager.compensate !== 'function'
+    || typeof identityManager.inspectCompensation !== 'function'
     || !passengerSiteManager
     || typeof passengerSiteManager.apply !== 'function'
     || typeof passengerSiteManager.inspect !== 'function'
@@ -137,6 +139,22 @@ export function createWebsiteProvisioningHandlers({
       'website_provisioning_handler_dependencies_invalid',
       'Website provisioning handler dependencies are invalid',
     );
+  }
+
+  async function applyIdentity({ intent, operationId } = {}) {
+    return identityManager.apply(identityIntent(intent), { operationId });
+  }
+
+  async function inspectIdentity({ intent } = {}) {
+    return identityManager.inspect(identityIntent(intent));
+  }
+
+  async function compensateIdentity({ intent, operationId, evidence } = {}) {
+    return identityManager.compensate(identityIntent(intent), { operationId, evidence });
+  }
+
+  async function inspectIdentityCompensation({ intent, operationId, evidence } = {}) {
+    return identityManager.inspectCompensation(identityIntent(intent), { operationId, evidence });
   }
 
   async function applyRuntime({ intent } = {}) {
@@ -233,8 +251,10 @@ export function createWebsiteProvisioningHandlers({
 
   return Object.freeze({
     unix_identity: Object.freeze({
-      apply: ({ intent } = {}) => identityManager.apply(identityIntent(intent)),
-      inspect: ({ intent } = {}) => identityManager.inspect(identityIntent(intent)),
+      apply: applyIdentity,
+      inspect: inspectIdentity,
+      compensate: compensateIdentity,
+      inspectCompensation: inspectIdentityCompensation,
     }),
     runtime: Object.freeze({
       apply: applyRuntime,
