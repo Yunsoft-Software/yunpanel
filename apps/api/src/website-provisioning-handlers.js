@@ -25,9 +25,21 @@ function identityIntent(intent) {
       400,
     );
   }
+  if (intent.applicationId !== undefined
+    && (typeof intent.applicationId !== 'string' || typeof intent.websiteId !== 'string')) {
+    throw new WebsiteProvisioningHandlerError(
+      'website_identity_intent_invalid',
+      'Website path-bound Unix identity provisioning intent is invalid',
+      400,
+    );
+  }
   return Object.freeze({
     user: intent.unixUser,
     homeDirectory: intent.homeDirectory,
+    ...(typeof intent.applicationId === 'string' ? {
+      websiteId: intent.websiteId,
+      applicationId: intent.applicationId,
+    } : {}),
   });
 }
 
