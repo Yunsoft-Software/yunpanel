@@ -110,6 +110,12 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.equal(release.intent.runtime.port, undefined);
   assert.equal(release.compensation.state, 'pending');
 
+  const environment = plan.steps.find((step) => step.id === 'passenger_environment');
+  assert.equal(environment.kind, 'passenger_environment');
+  assert.equal(environment.intent.adapter, 'passenger-environment');
+  assert.equal(environment.intent.applicationId, applicationId);
+  assert.equal(environment.compensation.state, 'pending');
+
   const runtime = plan.steps.find((step) => step.id === 'runtime');
   assert.equal(runtime.kind, 'runtime');
   assert.equal(runtime.intent.adapter, 'passenger');
@@ -196,6 +202,7 @@ test('new static Website persists deterministic deployment intent with canonical
   assert.equal(runtime.intent.build.outputDir, '.');
   assert.equal(runtime.compensation.state, 'pending');
   assert.equal(plan.steps.some((step) => step.id === 'certificate'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'passenger_environment'), false);
   assert.equal(plan.steps.some((step) => step.id === 'passenger_authority'), false);
 });
 
@@ -235,6 +242,7 @@ test('external proxy provisioning requires Nginx without inventing a site Unix i
   const plan = siteCreateProvisioningPlan(preview);
   assert.equal(plan.steps.some((step) => step.id === 'unix_identity'), false);
   assert.equal(plan.steps.some((step) => step.id === 'runtime'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'passenger_environment'), false);
   assert.equal(plan.steps.some((step) => step.id === 'passenger_authority'), false);
   assert.equal(plan.steps.find((step) => step.id === 'nginx').state, 'pending');
   assert.equal(plan.ready, false);
