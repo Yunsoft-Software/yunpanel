@@ -1,3 +1,4 @@
+import { OPERATIONS } from '@yunpanel/protocol';
 import { DomainRegistryError } from './domain-registry.js';
 
 const REPARENT_PREVIEW_FIELDS = new Set(['parentDomainId']);
@@ -67,24 +68,32 @@ function assertUpdateApplyBody(body) {
   return Object.freeze({ changes: assertUpdateChanges(input.changes), previewDigest: input.previewDigest, confirmation: input.confirmation });
 }
 
-async function assertDomainUpdateIdle(domainId, { jobRegistry = null, certificateRegistry = null } = {}) {
+async function assertDomainUpdateIdle(domain, { jobRegistry = null, certificateRegistry = null, websiteRegistry = null } = {}) {
   const [jobs, certificates] = await Promise.all([
-    jobRegistry?.listJobs ? jobRegistry.listJobs({ resourceType: 'domain', resourceId: domainId }) : [],
+    jobRegistry?.listJobs ? jobRegistry.listJobs({ resourceType: 'domain', resourceId: domain.id }) : [],
     certificateRegistry?.listCertificates ? certificateRegistry.listCertificates() : [],
   ]);
   const domainBusy = jobs.some((job) => job.status === 'queued' || job.status === 'running');
   const certificateBusy = certificates.some((certificate) => (
-    certificate.domainId === domainId && CERTIFICATE_OPERATION_STATES.has(certificate.state)
+    certificate.domainId === domain.id && CERTIFICATE_OPERATION_STATES.has(certificate.state)
   ));
-  if (domainBusy || certificateBusy) {
-    throw new DomainRegistryError('domain_update_operation_conflict', 'Wait for the active Domain or certificate operation to finish before updating routing', 409);
+  let migrationBusy = false;
+  if (!domainBusy && !certificateBusy && domain.websiteId && jobRegistry?.listJobs && websiteRegistry?.getWebsite) {
+    const website = await websiteRegistry.getWebsite(domain.websiteId);
+    if (website?.applicationId) {
+      const applicationJobs = await jobRegistry.listJobs({ resourceType: 'application', resourceId: website.applicationId });
+      migrationBusy = applicationJobs.some((job) => job.operation === OPERATIONS.APP_NODE_PASSENGER_MIGRATE
+        && (job.status === 'queued' || job.status === 'running'));
+    }
+  }
+  if (domainBusy || certificateBusy || migrationBusy) {
+    throw new DomainRegistryError('domain_update_operation_conflict', 'Wait for the active Domain, certificate or runtime migration operation to finish before updating routing', 409);
   }
 }
 
 async function requireLocalDomain(domainRegistry, domainId, localServerId) {
-  if (!localServerId) return null;
   const domain = await domainRegistry.getDomain(domainId);
-  if (!domain || domain.serverId !== localServerId) {
+  if (!domain || (localServerId !== null && localServerId !== undefined && domain.serverId !== localServerId)) {
     throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
   }
   return domain;
@@ -160,9 +169,9 @@ export function createDomainUpdateHandler(domainRegistry, dependencies = {}) {
       if (!domainRegistry || typeof domainRegistry.previewDomainUpdate !== 'function' || typeof domainRegistry.updateDomain !== 'function') {
         throw new DomainRegistryError('domain_update_unavailable', 'Domain update is unavailable', 503);
       }
-      await requireLocalDomain(domainRegistry, request.params.domainId, dependencies.localServerId ?? null);
+      const domain = await requireLocalDomain(domainRegistry, request.params.domainId, dependencies.localServerId ?? null);
       const input = assertUpdateApplyBody(request.body);
-      await assertDomainUpdateIdle(request.params.domainId, dependencies);
+      await assertDomainUpdateIdle(domain, dependencies);
       const preview = await domainRegistry.previewDomainUpdate({ domainId: request.params.domainId, changes: input.changes });
       if (input.previewDigest !== preview.previewDigest) {
         throw new DomainRegistryError('domain_update_preview_stale', 'Domain routing state changed after preview; request a new preview', 409);
