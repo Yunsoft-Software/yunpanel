@@ -6,9 +6,9 @@ Bu dosya yalnız tamamlanmamış ürün/kod işlerini tutar. Hedef ürün mimari
 
 ## P0 — Ürün omurgasını site-merkezli hale getir
 
-- [ ] `WebsiteProvisioningPlan` sözleşmesi ekle: preview; exact confirmation; step/compensation state; Unix identity, runtime, Nginx, DNS, mail/webmail, database, SFTP, logs/analytics ve backup kaynaklarını aynı Website kimliğine bağlasın. Metadata yazılması tek başına `ready` sayılmasın.
-- [ ] Provisioning registry/job lifecycle'ını restart-safe yap. Her step intent'i side effect'ten önce persist edilsin; successful evidence olmadan adım tekrar çalıştırılmasın; partial state ve remediation UI/API'de açık görünsün.
-- [ ] Website başına dedicated Unix user/group, home, document root/current release, persistent data, tmp, logs ve backup scope sözleşmesini tek provider'da birleştir. Mevcut `yunapp-*` identity/path'lerini sebepsiz değiştirme.
+- [ ] Mevcut durable `WebsiteProvisioningPlan`ı kalan gerçek kaynak adapter'larına bağla: certificate/static runtime, DNS, mail/webmail, database, SFTP, logs/analytics ve backup aynı Website kimliği/step/evidence modeli altında ilerlesin. Metadata yazılması tek başına `ready` sayılmasın.
+- [ ] Provisioning recovery yüzeyini tamamla: explicit failed-step retry mevcut; concrete compensation handler/API/UI, restart sonrası interrupted operation reconcile/resume ve step-level remediation UX'i ekle. Evidence olmadan başarılı adım ilerletilmesin ve host mutation körlemesine tekrar edilmesin.
+- [ ] Mevcut dedicated Unix identity/path provider'ını persistent data, tmp, logs, backup, SFTP ve kalan host adapter'larının tamamında fail-closed tek kaynak yap. `yunapp-*` identity/path'lerini sebepsiz değiştirme.
 - [ ] Independent subdomain ile `shared-site` subdomain'i explicit modelle. Alias runtime/user/mailbox üretmesin; independent Website ayrı izolasyon alsın.
 - [ ] Application'ı Website alt kaynağı yap. Yeni runtime/app yalnız site ekranından oluşturulsun; günlük navigasyondaki global `/applications` kaldırılıp yalnız Owner Sunucu > Tanılama envanteri olarak kalsın.
 - [ ] Site silme/move preview'ını yeni runtime, DNS, database user/grant, mail/webmail, SFTP, GoAccess, restic ve cron ilişkileriyle tamamla; örtülü cascade yapma.
@@ -17,8 +17,8 @@ Kabul: yeni bir Website tek akışta dedicated kimlik ve seçilen kaynakları ü
 
 ## P0 — Runtime adapter'ları: Passenger ve PHP-FPM
 
-- [ ] Ubuntu 24.04 Nginx Passenger package/install/health adapter'ını ekle; global `passenger_root`/runtime doğrulaması, config test ve rollback sağla.
-- [ ] Yeni Node Website runtime'ını Passenger varsayılanına geçir. Vhost explicit `passenger_enabled`, startup file, Node binary, app env, `passenger_user` ve `passenger_group` kullansın; user kontrollü raw Passenger/Nginx directive kabul etmesin.
+- [ ] Mevcut Ubuntu 24.04 Passenger install/inspect adapter'ını upgrade, snapshot/rollback ve failure-injection contract'ıyla tamamla; global Passenger/Nginx runtime doğrulaması ve postcondition'lar başarısız mutation'ı eski good state'e döndürsün.
+- [ ] Mevcut Node Website → Passenger → Nginx provisioning yolunu production golden path'e tamamla. Passenger package dependency, env/log target, startup/runtime postcondition ve varsayılan runtime seçimi tek akışta fail-closed olsun; user kontrollü raw Passenger/Nginx directive kabul etmesin.
 - [ ] Mevcut direct-systemd Node uygulamaları için read-only migration preview ekle. Release/env/health korunarak Passenger'a geçiş health-gated olsun; başarısız geçiş eski systemd servisini çalışır bıraksın. Yeni Website'te systemd adapter varsayılan olmasın.
 - [ ] PHP-FPM adapter'ı ekle: distro PHP ile site başına pool/socket, Unix user/group, document root, bounded ini/resource limits, configtest/reload/rollback. Çoklu PHP sürümü ayrı doğrulanmış repository kararı olmadan açılmasın.
 - [ ] Static runtime'ı aynı Website identity/directory contract'ına taşı; mevcut deploy/release/rollback davranışını koru.
