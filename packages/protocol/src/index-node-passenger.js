@@ -2,6 +2,7 @@ export * from './index-docker.js';
 
 import path from 'node:path';
 import {
+  assertUuid,
   normalizeDomainSet,
   normalizeNginxSettings,
   normalizeNodeStatusSpec,
@@ -26,6 +27,13 @@ const DOMAIN_FIELDS = new Set([
   'nginxSettings',
 ]);
 const NODE_FIELDS = new Set(['applicationId', 'releaseId', 'runtime']);
+const AUTHORITY_FIELDS = new Set([
+  'websiteId',
+  'websiteRevision',
+  'domainId',
+  'domainDesiredRevision',
+  'domainAppliedRevision',
+]);
 
 export const OPERATIONS = Object.freeze({
   ...DOCKER_OPERATIONS,
@@ -105,8 +113,31 @@ function validateDomain(value, errors) {
   }
 }
 
+function validateAuthority(value, errors) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== AUTHORITY_FIELDS.size
+    || Object.keys(value).some((field) => !AUTHORITY_FIELDS.has(field))) {
+    errors.push(`${APP_NODE_PASSENGER_MIGRATE} authority is invalid`);
+    return;
+  }
+  try {
+    if (assertUuid(value.websiteId, 'websiteId') !== value.websiteId
+      || assertUuid(value.domainId, 'domainId') !== value.domainId) {
+      throw new Error('noncanonical');
+    }
+  } catch {
+    errors.push(`${APP_NODE_PASSENGER_MIGRATE} authority identities are invalid`);
+  }
+  if (!Number.isSafeInteger(value.websiteRevision) || value.websiteRevision < 1
+    || !Number.isSafeInteger(value.domainDesiredRevision) || value.domainDesiredRevision < 1
+    || !Number.isSafeInteger(value.domainAppliedRevision) || value.domainAppliedRevision < 1
+    || value.domainAppliedRevision !== value.domainDesiredRevision) {
+    errors.push(`${APP_NODE_PASSENGER_MIGRATE} authority revisions are invalid`);
+  }
+}
+
 function validateNodePassengerMigration(payload, errors) {
-  const allowed = new Set(['node', 'domain']);
+  const allowed = new Set(['node', 'domain', 'authority']);
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)
     || Object.keys(payload).length !== allowed.size
     || Object.keys(payload).some((field) => !allowed.has(field))) {
@@ -115,6 +146,7 @@ function validateNodePassengerMigration(payload, errors) {
   }
   validateNode(payload.node, errors);
   validateDomain(payload.domain, errors);
+  validateAuthority(payload.authority, errors);
 }
 
 function isPassengerDomainStage(value) {
@@ -173,5 +205,6 @@ export const nodePassengerProtocolInternals = Object.freeze({
   validateNodePassengerMigration,
   validateNode,
   validateDomain,
+  validateAuthority,
   validatePassengerDomainStage,
 });
