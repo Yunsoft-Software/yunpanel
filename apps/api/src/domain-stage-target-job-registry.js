@@ -40,16 +40,13 @@ function resolvedNginxSettings(domain, resolved, current) {
   });
 }
 
-async function assertPassengerMigrationIdle(registry, websiteRegistry, domain) {
-  if (!domain.websiteId) return;
-  const website = await websiteRegistry.getWebsite(domain.websiteId);
-  if (!website?.applicationId) return;
-  const jobs = await registry.listJobs({ resourceType: 'application', resourceId: website.applicationId });
+async function assertPassengerMigrationIdle(registry) {
+  const jobs = await registry.listJobs();
   if (jobs.some((job) => job.operation === OPERATIONS.APP_NODE_PASSENGER_MIGRATE
     && (job.status === 'queued' || job.status === 'running'))) {
     throw new DomainRegistryError(
       'node_passenger_migration_routing_busy',
-      'Wait for Passenger migration to finish before staging Domain routing',
+      'Wait for Passenger migration to finish before changing Domain, Nginx or certificate routing',
       409,
     );
   }
@@ -73,6 +70,10 @@ export function createDomainStageTargetJobRegistry({
   );
 
   async function enqueue(input) {
+    if ([OPERATIONS.SSL_ISSUE, OPERATIONS.SSL_RENEW].includes(input?.operation)) {
+      await assertPassengerMigrationIdle(registry);
+      return registry.enqueue(input);
+    }
     if (input?.operation !== OPERATIONS.DOMAIN_STAGE) return registry.enqueue(input);
     if (input.resourceType !== 'domain' || typeof input.resourceId !== 'string') {
       throw new DomainRegistryError('domain_stage_resource_invalid', 'Domain stage job resource identity is invalid', 409);
@@ -81,7 +82,7 @@ export function createDomainStageTargetJobRegistry({
     if (!domain || domain.serverId !== input.serverId) {
       throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
     }
-    await assertPassengerMigrationIdle(registry, websiteRegistry, domain);
+    await assertPassengerMigrationIdle(registry);
     const resolved = await resolveWebsiteDomainTarget({
       domain,
       websiteRegistry,
