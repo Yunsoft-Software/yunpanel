@@ -12,6 +12,7 @@
     "./static-deployment-manager": "./src/static-deployment-manager.js",
     "./static-rollback-manager": "./src/static-rollback-manager.js",
     "./website-node-release-manager": "./src/website-node-release-manager.js",
+    "./website-passenger-environment-manager": "./src/website-passenger-environment-manager.js",
     "./website-static-deployment-manager": "./src/website-static-deployment-manager.js",
     "./static-deployment-legacy-fallback": "./src/static-deployment-legacy-fallback.js"
   },
