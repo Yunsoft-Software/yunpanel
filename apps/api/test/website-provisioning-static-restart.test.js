@@ -8,6 +8,7 @@ import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-ru
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
+const previousReleaseId = '3854e385-adfc-42bd-bccf-f655f24cd68f';
 
 const intent = Object.freeze({
   adapter: 'static',
@@ -93,6 +94,20 @@ function runtime(filePath, staticDeploymentManager) {
   });
 }
 
+function appliedEvidence() {
+  return Object.freeze({
+    satisfied: true,
+    adapter: 'static',
+    applicationId,
+    releaseId: operationId,
+    deploymentId: operationId,
+    previousReleaseId,
+    currentRelease: `/var/www/yunpanel/apps/${applicationId}/current`,
+    unixUser: 'yunapp-0123456789ab',
+    homeDirectory: `/var/lib/yunpanel/data/${applicationId}`,
+  });
+}
+
 test('startup reconciles interrupted static deployment by inspection without redeploying', async (t) => {
   const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-static-provisioning-restart-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -110,16 +125,7 @@ test('startup reconciles interrupted static deployment by inspection without red
       inspectCalls += 1;
       assert.equal(spec.applicationId, applicationId);
       assert.equal(spec.deploymentId, operationId);
-      return {
-        satisfied: true,
-        adapter: 'static',
-        applicationId,
-        releaseId: operationId,
-        deploymentId: operationId,
-        currentRelease: `/var/www/yunpanel/apps/${applicationId}/current`,
-        unixUser: 'yunapp-0123456789ab',
-        homeDirectory: `/var/lib/yunpanel/data/${applicationId}`,
-      };
+      return appliedEvidence();
     },
     deployStatic: async () => {
       deployCalls += 1;
@@ -137,5 +143,54 @@ test('startup reconciles interrupted static deployment by inspection without red
   assert.equal(restored.ready, true);
   assert.equal(restored.steps[0].state, 'succeeded');
   assert.equal(restored.steps[0].evidence.releaseId, operationId);
+  assert.deepEqual(await afterRestart.listInterrupted(), []);
+});
+
+test('startup reconciles interrupted static compensation by inspection without rolling back twice', async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-static-compensation-restart-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'operations.json');
+
+  const beforeRestart = runtime(filePath);
+  await beforeRestart.init();
+  await beforeRestart.create(plan());
+  await beforeRestart.registry.beginStep({ operationId, stepId: 'runtime' });
+  await beforeRestart.registry.completeStep({
+    operationId,
+    stepId: 'runtime',
+    evidence: appliedEvidence(),
+  });
+  await beforeRestart.registry.beginCompensation({ operationId, stepId: 'runtime' });
+
+  let inspectCalls = 0;
+  let compensateCalls = 0;
+  const afterRestart = runtime(filePath, {
+    inspectCompensation: async (target) => {
+      inspectCalls += 1;
+      assert.deepEqual(target, { applicationId, deploymentId: operationId, previousReleaseId });
+      return {
+        satisfied: true,
+        adapter: 'static',
+        ...target,
+        releaseId: previousReleaseId,
+        restoredPrevious: true,
+      };
+    },
+    compensateDeployment: async () => {
+      compensateCalls += 1;
+      throw new Error('restart reconcile must not repeat rollback');
+    },
+  });
+
+  const startup = await afterRestart.init();
+  const restored = await afterRestart.get(operationId);
+
+  assert.equal(startup.length, 1);
+  assert.equal(startup[0].outcome, 'compensated');
+  assert.equal(inspectCalls, 1);
+  assert.equal(compensateCalls, 0);
+  assert.equal(restored.steps[0].state, 'compensated');
+  assert.equal(restored.steps[0].compensation.state, 'succeeded');
+  assert.equal(restored.steps[0].compensation.evidence.releaseId, previousReleaseId);
   assert.deepEqual(await afterRestart.listInterrupted(), []);
 });
