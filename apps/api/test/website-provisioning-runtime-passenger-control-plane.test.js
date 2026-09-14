@@ -39,6 +39,7 @@ function controlPlaneDependencies() {
     applicationEnvironmentRegistry: {
       environmentStatus: async () => ({ savedRevision: 0 }),
       materialize: async () => ({}),
+      markApplied: async () => ({}),
     },
     websiteRegistry: { getWebsite: async () => null },
     domainRegistry: {
@@ -59,6 +60,7 @@ test('Website provisioning runtime can attach Domain, environment and Passenger 
   assert.equal(runtime.handlers.domain_activation, undefined);
   assert.equal(runtime.handlers.passenger_environment, undefined);
   assert.equal(runtime.handlers.passenger_application_release, undefined);
+  assert.equal(runtime.handlers.passenger_environment_state, undefined);
   assert.equal(runtime.handlers.passenger_authority, undefined);
 
   const dependencies = controlPlaneDependencies();
@@ -68,13 +70,18 @@ test('Website provisioning runtime can attach Domain, environment and Passenger 
   assert.equal(typeof runtime.handlers.domain_activation.apply, 'function');
   assert.equal(typeof runtime.handlers.passenger_environment.apply, 'function');
   assert.equal(typeof runtime.handlers.passenger_application_release.apply, 'function');
+  assert.equal(typeof runtime.handlers.passenger_environment_state.apply, 'function');
   assert.equal(typeof runtime.handlers.passenger_authority.apply, 'function');
   assert.deepEqual(runtime.configurePassengerEnvironment(dependencies), { configured: true });
   assert.deepEqual(runtime.configurePassengerControlPlane(dependencies), { configured: true });
 
   assert.throws(
     () => runtime.configurePassengerEnvironment({
-      applicationEnvironmentRegistry: { environmentStatus: async () => ({ savedRevision: 0 }), materialize: async () => ({}) },
+      applicationEnvironmentRegistry: {
+        environmentStatus: async () => ({ savedRevision: 0 }),
+        materialize: async () => ({}),
+        markApplied: async () => ({}),
+      },
     }),
     /cannot be replaced/,
   );
@@ -88,5 +95,13 @@ test('Website provisioning runtime can attach Domain, environment and Passenger 
       },
     }),
     /cannot be replaced/,
+  );
+});
+
+test('Passenger control-plane handlers require the environment registry first', () => {
+  const runtime = createWebsiteProvisioningRuntime(hostDependencies());
+  assert.throws(
+    () => runtime.configurePassengerControlPlane(controlPlaneDependencies()),
+    /environment must be configured before Passenger control-plane handlers/,
   );
 });
