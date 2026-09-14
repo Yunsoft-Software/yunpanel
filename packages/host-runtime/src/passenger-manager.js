@@ -21,6 +21,7 @@ const GPG = '/usr/bin/gpg';
 const SYSTEMCTL = '/usr/bin/systemctl';
 const PACKAGE = 'libnginx-mod-http-passenger';
 const VERSION_PATTERN = /^[A-Za-z0-9.+:~_-]{1,120}$/;
+const NGINX_PACKAGE_PATTERN = /^nginx(?:-[a-z0-9.+-]+)?$/;
 const SUPPORTED = Object.freeze({ id: 'ubuntu', versionId: '24.04', codename: 'noble' });
 const APPLY_CHECKPOINTS = Object.freeze([
   'before-repository',
@@ -285,6 +286,43 @@ export function createPassengerManager({
     }
   }
 
+  async function rollbackNginxInstalledByApply() {
+    let owner = null;
+    try {
+      const result = await run(DPKG_QUERY, ['-S', NGINX_PATH], { timeout: 5_000 });
+      owner = nginxPackageOwner(result?.stdout);
+      if (!owner || !NGINX_PACKAGE_PATTERN.test(owner)) {
+        throw new PassengerManagerError('passenger_install_rollback_failed', 'New Nginx package ownership is not safely identifiable');
+      }
+    } catch (error) {
+      if (error instanceof PassengerManagerError) throw error;
+      if (!Number.isInteger(error?.code) || error.code !== 1) {
+        throw new PassengerManagerError('passenger_install_rollback_failed', 'New Nginx package ownership could not be inspected');
+      }
+    }
+
+    if (owner) {
+      const packages = [...new Set(['nginx', owner])];
+      await runSafe(
+        APT_GET,
+        ['remove', '--yes', '--purge', ...packages],
+        { timeout: 10 * 60 * 1000 },
+        'passenger_install_rollback_failed',
+        'New Nginx package could not be removed during Passenger rollback',
+      );
+    }
+
+    try {
+      await lstatFn(NGINX_PATH);
+      throw new PassengerManagerError('passenger_install_rollback_incomplete', 'New Nginx binary remains after Passenger rollback');
+    } catch (error) {
+      if (error instanceof PassengerManagerError) throw error;
+      if (error?.code !== 'ENOENT') {
+        throw new PassengerManagerError('passenger_install_rollback_failed', 'Nginx rollback state could not be verified');
+      }
+    }
+  }
+
   async function rollbackApply({ before, nginxBefore, snapshot }) {
     try {
       if (before.installed) {
@@ -307,27 +345,24 @@ export function createPassengerManager({
           'New Passenger package could not be removed during rollback',
         );
       }
+      if (!nginxBefore.installed) await rollbackNginxInstalledByApply();
       await restoreManagedState(snapshot);
-      if (!nginxBefore.installed) {
-        throw new PassengerManagerError(
-          'passenger_install_rollback_incomplete',
-          'Passenger rollback restored managed configuration but newly installed Nginx still requires verified cleanup',
+      if (nginxBefore.installed) {
+        await runSafe(
+          NGINX_PATH,
+          ['-t'],
+          { timeout: 30_000 },
+          'passenger_install_rollback_failed',
+          'Nginx rejected restored Passenger configuration',
+        );
+        await runSafe(
+          SYSTEMCTL,
+          ['restart', 'nginx'],
+          { timeout: 60_000 },
+          'passenger_install_rollback_failed',
+          'Nginx could not restart after Passenger rollback',
         );
       }
-      await runSafe(
-        NGINX_PATH,
-        ['-t'],
-        { timeout: 30_000 },
-        'passenger_install_rollback_failed',
-        'Nginx rejected restored Passenger configuration',
-      );
-      await runSafe(
-        SYSTEMCTL,
-        ['restart', 'nginx'],
-        { timeout: 60_000 },
-        'passenger_install_rollback_failed',
-        'Nginx could not restart after Passenger rollback',
-      );
       const restored = await inspector.inspect();
       if (restored?.installed !== before.installed
         || (before.installed && restored.installedVersion !== before.installedVersion)
