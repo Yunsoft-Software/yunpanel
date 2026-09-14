@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "exports": "./src/index-docker.js",
+  "exports": "./src/index-node-passenger.js",
   "scripts": {
     "test": "node --test"
   },
