@@ -81,6 +81,13 @@ function state() {
         httpsRedirect: false,
         nginxSettings,
       },
+      authority: {
+        websiteId,
+        websiteRevision: 3,
+        domainId,
+        domainDesiredRevision: 4,
+        domainAppliedRevision: 4,
+      },
     },
     result: {
       state: 'migrated',
@@ -91,13 +98,19 @@ function state() {
   return { application, website, domain, job };
 }
 
-function dependencies(current, { binding = null } = {}) {
+function dependencies(current, { binding = null, extraWebsites = [], extraDomains = [] } = {}) {
   const activations = [];
   return {
     activations,
     applicationRegistry: { async getApplication() { return current.application; } },
-    websiteRegistry: { async listWebsites() { return [current.website]; } },
-    domainRegistry: { async listDomains() { return [current.domain]; } },
+    websiteRegistry: {
+      async getWebsite(id) { return id === current.website.id ? current.website : null; },
+      async listWebsites() { return [current.website, ...extraWebsites]; },
+    },
+    domainRegistry: {
+      async getDomain(id) { return id === current.domain.id ? current.domain : null; },
+      async listDomains() { return [current.domain, ...extraDomains]; },
+    },
     certificateRegistry: { async getCertificate() { return null; } },
     runtimeBindingRegistry: {
       async getBinding() { return binding; },
@@ -109,13 +122,15 @@ function dependencies(current, { binding = null } = {}) {
   };
 }
 
-test('reconciles a successful migration into a revision-bound Passenger runtime binding', async () => {
+test('reconciles a successful migration into the exact queued Passenger runtime authority', async () => {
   const current = state();
   const deps = dependencies(current);
   const result = await reconcileApplicationPassengerMigration({ job: current.job, ...deps });
   assert.equal(result.adapter, 'passenger');
   assert.equal(result.state, 'active');
+  assert.equal(result.websiteId, websiteId);
   assert.equal(result.websiteRevision, 3);
+  assert.equal(result.domains[0].domainId, domainId);
   assert.equal(result.domains[0].desiredRevision, 4);
   assert.equal(result.domains[0].nginxChecksum, 'b'.repeat(64));
   assert.deepEqual(result.passengerTarget, passengerTarget);
@@ -129,7 +144,7 @@ test('persists cleanup-required without pretending systemd cleanup completed', a
   assert.equal(result.state, 'cleanup_required');
 });
 
-test('refuses reconciliation when Domain configuration drifted during host cutover', async () => {
+test('refuses reconciliation when exact Domain configuration drifted during host cutover', async () => {
   const current = state();
   current.domain.nginxSettings = { ...nginxSettings, clientMaxBodySizeMb: 64 };
   await assert.rejects(
@@ -138,12 +153,56 @@ test('refuses reconciliation when Domain configuration drifted during host cutov
   );
 });
 
-test('refuses reconciliation when Website binding moved away from the Application', async () => {
+test('refuses reconciliation when queued Website revision changed', async () => {
   const current = state();
-  current.website.applicationId = '1af41a08-a03d-41dc-afef-a9d1af96785d';
+  current.website.revision = 4;
   await assert.rejects(
     reconcileApplicationPassengerMigration({ job: current.job, ...dependencies(current) }),
     (error) => error?.code === 'node_passenger_migration_website_drift',
+  );
+});
+
+test('refuses reconciliation when queued Domain revision changed', async () => {
+  const current = state();
+  current.domain.desiredRevision = 5;
+  current.domain.appliedRevision = 5;
+  await assert.rejects(
+    reconcileApplicationPassengerMigration({ job: current.job, ...dependencies(current) }),
+    (error) => error?.code === 'node_passenger_migration_domain_drift',
+  );
+});
+
+test('refuses reconciliation if another Website becomes bound to the same Application', async () => {
+  const current = state();
+  const extraWebsite = {
+    id: '1af41a08-a03d-41dc-afef-a9d1af96785d',
+    serverId,
+    applicationId,
+    runtimeType: 'node',
+    revision: 1,
+  };
+  await assert.rejects(
+    reconcileApplicationPassengerMigration({
+      job: current.job,
+      ...dependencies(current, { extraWebsites: [extraWebsite] }),
+    }),
+    (error) => error?.code === 'node_passenger_migration_website_drift',
+  );
+});
+
+test('refuses reconciliation if another Domain route becomes bound to the Website', async () => {
+  const current = state();
+  const extraDomain = {
+    ...current.domain,
+    id: '1af41a08-a03d-41dc-afef-a9d1af96785d',
+    primaryDomain: 'extra.example.com',
+  };
+  await assert.rejects(
+    reconcileApplicationPassengerMigration({
+      job: current.job,
+      ...dependencies(current, { extraDomains: [extraDomain] }),
+    }),
+    (error) => error?.code === 'node_passenger_migration_domain_drift',
   );
 });
 
