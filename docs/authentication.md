@@ -18,6 +18,25 @@ This is not an automatic live deployment. Back up configuration/state and confir
 
 Set `YUNPANEL_PUBLIC_ORIGIN` to the same **exact** public origin in the private API environment (`/etc/yunpanel/control-plane/api.env`) and the restricted gateway environment (`/etc/yunpanel/web/web.env`), for example `https://cryptoraichu.website` without a trailing slash. The API requires this in production and refuses to start with a missing or non-HTTPS origin. Keep `YUNPANEL_ALLOWED_CLIENT_IPS`, any non-default `YUNPANEL_API_HOST`/`YUNPANEL_API_PORT` gateway settings, the loopback listeners and the current Nginx access policy in the gateway environment. The web unit does not load the API environment.
 
+The public Nginx proxy must forward WebSocket upgrades to the restricted web gateway. Its read/send timeout must also be at least the terminal's four-hour absolute lifetime so Nginx does not silently replace YunPanel's authenticated idle/lifetime policy with the default proxy timeout:
+
+```nginx
+location / {
+  proxy_pass http://127.0.0.1:4300;
+  proxy_http_version 1.1;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_read_timeout 4h;
+  proxy_send_timeout 4h;
+}
+```
+
+Do not proxy `/api/terminal` directly to the privileged API listener. The web gateway is the public WebSocket boundary and repeats the allowlist, exact Origin, forwarding identity and session checks before it reaches the API.
+
 Packaged installs generate `/etc/yunpanel/control-plane/proxy.env` as a root-owned `0600` API environment and mirror its token into the root-owned `0600` `/etc/yunpanel/control-plane/proxy.token`. The restricted web service receives that second file through a read-only systemd credential; the token is not placed in the web process environment and the service cannot read control-plane configuration or state. The web gateway removes caller-supplied forwarding headers, resolves exactly one client address from an explicitly trusted immediate proxy (`YUNPANEL_TRUSTED_PROXY_IPS`, loopback by default), and authenticates that address to the API with the scoped credential. The API rejects standard forwarding headers and invalid, unsigned or non-single-hop client metadata. This token only authenticates the local gateway hop; it is not a user session or management bearer credential.
 
 Open tabs coordinate session rotation with a same-origin `BroadcastChannel` that carries only an opaque invalidation signal—never cookies, CSRF values or session data. Login, logout, password/MFA rotation, an unauthorized active request and even an unknown response after a dispatched session mutation make other tabs re-read the HttpOnly cookie. Back-forward-cache restoration does the same through `pageshow`; background polling and server-provided idle/absolute deadlines remain the final reconciliation path.
