@@ -132,6 +132,7 @@ export function siteCreateProvisioningPlan(preview) {
     });
     steps.push(hostStep('unix_identity', 'unix_identity', {
       websiteId: preview.ids.websiteId,
+      applicationId,
       unixUser: preview.plan.website.unixUser,
       homeDirectory: paths.workspace.homeDirectory,
       documentRoot: preview.plan.website.documentRoot,
