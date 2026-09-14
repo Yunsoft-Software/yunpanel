@@ -4,6 +4,8 @@ import {
   createWebsiteIdentityManager,
 } from '@yunpanel/host-runtime';
 
+const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
+
 export class WebsiteProvisioningHandlerError extends Error {
   constructor(code, message, status = 503) {
     super(message);
@@ -128,7 +130,9 @@ export function createWebsiteProvisioningHandlers({
     || typeof nginxManager.stageDomain !== 'function'
     || typeof nginxManager.inspectStagedDomain !== 'function'
     || typeof nginxManager.inspectActiveDomain !== 'function'
-    || typeof nginxManager.activateDomain !== 'function') {
+    || typeof nginxManager.activateDomain !== 'function'
+    || typeof nginxManager.compensateDomain !== 'function'
+    || typeof nginxManager.inspectDomainCompensation !== 'function') {
     throw new WebsiteProvisioningHandlerError(
       'website_provisioning_handler_dependencies_invalid',
       'Website provisioning handler dependencies are invalid',
@@ -197,6 +201,36 @@ export function createWebsiteProvisioningHandlers({
     return nginxEvidence(staged.result);
   }
 
+  async function nginxCompensationTarget(context = {}) {
+    const spec = nginxSpec(context);
+    const persistedChecksum = context.evidence?.checksum;
+    if (typeof persistedChecksum === 'string' && CHECKSUM_PATTERN.test(persistedChecksum)) {
+      return Object.freeze({ primaryDomain: spec.primaryDomain, checksum: persistedChecksum });
+    }
+    const staged = await nginxManager.inspectStagedDomain(spec);
+    if (!staged?.satisfied || typeof staged.result?.checksum !== 'string'
+      || !CHECKSUM_PATTERN.test(staged.result.checksum)) {
+      return null;
+    }
+    return Object.freeze({ primaryDomain: spec.primaryDomain, checksum: staged.result.checksum });
+  }
+
+  async function compensateNginx(context = {}) {
+    const target = await nginxCompensationTarget(context);
+    if (!target) {
+      return Object.freeze({ satisfied: false, reason: 'website_nginx_compensation_stage_unavailable' });
+    }
+    return nginxManager.compensateDomain(target);
+  }
+
+  async function inspectNginxCompensation(context = {}) {
+    const target = await nginxCompensationTarget(context);
+    if (!target) {
+      return Object.freeze({ satisfied: false, reason: 'website_nginx_compensation_stage_unavailable' });
+    }
+    return nginxManager.inspectDomainCompensation(target);
+  }
+
   return Object.freeze({
     unix_identity: Object.freeze({
       apply: ({ intent } = {}) => identityManager.apply(identityIntent(intent)),
@@ -209,6 +243,8 @@ export function createWebsiteProvisioningHandlers({
     nginx: Object.freeze({
       apply: applyNginx,
       inspect: inspectNginx,
+      compensate: compensateNginx,
+      inspectCompensation: inspectNginxCompensation,
     }),
     certificate: Object.freeze({
       apply: ({ intent } = {}) => certificatePending(intent),
