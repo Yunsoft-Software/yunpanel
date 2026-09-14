@@ -94,6 +94,27 @@ test('successful steps require explicit evidence and readiness waits for every r
   assert.deepEqual(ready.progress, { required: 2, completed: 2, remaining: 0 });
 });
 
+test('blocked step persists bounded evidence and can re-enter applying only explicitly', async () => {
+  const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
+  await registry.create(input());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  const blocked = await registry.blockStep({
+    operationId,
+    stepId: 'unix_identity',
+    error: 'website_release_missing',
+    evidence: { satisfied: false, reason: 'website_release_missing' },
+  });
+
+  assert.equal(blocked.steps[0].state, 'blocked');
+  assert.equal(blocked.steps[0].error, 'website_release_missing');
+  assert.deepEqual(blocked.steps[0].evidence, { satisfied: false, reason: 'website_release_missing' });
+  assert.equal(blocked.ready, false);
+
+  const applying = await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  assert.equal(applying.steps[0].state, 'applying');
+  assert.equal(applying.steps[0].error, null);
+});
+
 test('recreating the same operation preserves progressed mutable state', async () => {
   const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
   await registry.create(input());
