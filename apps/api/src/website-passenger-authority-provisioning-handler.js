@@ -55,11 +55,17 @@ function normalizeIntent(context = {}) {
     );
   }
 
+  const environment = succeededStep(operation, 'passenger_environment');
   const release = succeededStep(operation, 'application_release');
   const runtime = succeededStep(operation, 'runtime');
   const nginx = succeededStep(operation, 'nginx');
   const domainActivation = succeededStep(operation, 'domain_activation');
-  if (!release || release.adapter !== 'passenger-application-release'
+  if (!environment || environment.adapter !== 'passenger-environment'
+    || environment.applicationId !== application.id
+    || !Number.isSafeInteger(environment.environmentRevision) || environment.environmentRevision < 0
+    || typeof environment.environmentInclude !== 'string'
+    || typeof environment.includeSha256 !== 'string' || !CHECKSUM_PATTERN.test(environment.includeSha256)
+    || !release || release.adapter !== 'passenger-application-release'
     || release.applicationId !== application.id || release.releaseId !== operationId
     || !runtime || runtime.adapter !== 'passenger' || runtime.applicationId !== application.id
     || runtime.releaseId !== operationId || runtime.unixUser !== website.unixUser
@@ -82,6 +88,7 @@ function normalizeIntent(context = {}) {
     operationId,
     domainIds: Object.freeze([...plannedDomainIds]),
     releaseId: release.releaseId,
+    environment,
     runtime,
     nginx,
     domainActivation,
@@ -89,7 +96,7 @@ function normalizeIntent(context = {}) {
   });
 }
 
-function publicEvidence(binding, checksum) {
+function publicEvidence(binding, checksum, environmentRevision) {
   return Object.freeze({
     satisfied: true,
     adapter: 'passenger-authority',
@@ -98,6 +105,7 @@ function publicEvidence(binding, checksum) {
     releaseId: binding.releaseId,
     bindingRevision: binding.revision,
     websiteRevision: binding.websiteRevision,
+    environmentRevision,
     domainIds: Object.freeze(binding.domains.map((entry) => entry.domainId)),
     nginxChecksum: checksum,
   });
@@ -181,7 +189,7 @@ export function createWebsitePassengerAuthorityProvisioningHandler({
           user: spec.runtime.unixUser,
           group: spec.runtime.unixUser,
           appEnv: spec.appEnv,
-          environmentInclude: null,
+          environmentInclude: spec.environment.environmentInclude,
         }),
       }),
     });
@@ -217,7 +225,7 @@ export function createWebsitePassengerAuthorityProvisioningHandler({
         'Persisted Passenger runtime binding conflicts with provisioning evidence',
       );
     }
-    return publicEvidence(current, spec.nginx.checksum);
+    return publicEvidence(current, spec.nginx.checksum, spec.environment.environmentRevision);
   }
 
   async function apply(context = {}) {
@@ -230,10 +238,10 @@ export function createWebsitePassengerAuthorityProvisioningHandler({
           'Existing Passenger runtime binding conflicts with native provisioning evidence',
         );
       }
-      return publicEvidence(current, spec.nginx.checksum);
+      return publicEvidence(current, spec.nginx.checksum, spec.environment.environmentRevision);
     }
     const activated = await runtimeBindingRegistry.activate(binding, { expectedRevision: 0 });
-    return publicEvidence(activated, spec.nginx.checksum);
+    return publicEvidence(activated, spec.nginx.checksum, spec.environment.environmentRevision);
   }
 
   async function inspectCompensation(context = {}) {
