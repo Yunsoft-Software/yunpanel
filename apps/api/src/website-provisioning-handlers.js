@@ -1,7 +1,7 @@
 import {
   createNginxManager,
   createPassengerSiteManager,
-  createWebsiteIdentityManager,
+  createWebsiteIdentityPathManager,
 } from '@yunpanel/host-runtime';
 
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
@@ -128,7 +128,7 @@ function certificatePending(intent) {
 }
 
 export function createWebsiteProvisioningHandlers({
-  identityManager = createWebsiteIdentityManager(),
+  identityManager = createWebsiteIdentityPathManager(),
   passengerSiteManager = createPassengerSiteManager(),
   nginxManager = createNginxManager(),
 } = {}) {
