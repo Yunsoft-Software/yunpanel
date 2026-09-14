@@ -6,6 +6,12 @@ export {
 } from './nginx.js';
 
 export {
+  PassengerNginxTemplateError,
+  passengerNginxTemplateInternals,
+  renderPassengerNodeDirectives,
+} from './passenger-nginx.js';
+
+export {
   SystemdTemplateError,
   nodeApplicationUser,
   nodeServiceName,
