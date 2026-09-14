@@ -18,9 +18,13 @@ test('Website path contract preserves current managed roots and separates owners
   assert.deepEqual(contract.workspace, {
     authority: 'site_user',
     homeDirectory: `/var/lib/yunpanel/data/${applicationId.toLowerCase()}`,
+    homeMode: 0o750,
     persistentDataDirectory: `/var/lib/yunpanel/data/${applicationId.toLowerCase()}`,
+    persistentDataMode: 0o750,
     temporaryDirectory: `/var/lib/yunpanel/data/${applicationId.toLowerCase()}/tmp`,
+    temporaryMode: 0o700,
     logDirectory: `/var/lib/yunpanel/data/${applicationId.toLowerCase()}/logs`,
+    logMode: 0o750,
     sftpRoot: `/var/lib/yunpanel/data/${applicationId.toLowerCase()}`,
   });
 
@@ -41,6 +45,7 @@ test('Website path contract preserves current managed roots and separates owners
   assert.deepEqual(contract.backup, {
     authority: 'control_plane',
     artifactRoot: '/var/lib/yunpanel/backups/resources',
+    artifactRootMode: 0o700,
     scopeKey: `website:${websiteId.toLowerCase()}`,
   });
 
