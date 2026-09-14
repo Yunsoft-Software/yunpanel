@@ -157,6 +157,11 @@ export {
   systemPackageManagerInternals,
 } from './system-package-manager.js';
 export {
+  createWebsitePathContract,
+  WebsitePathContractError,
+  websitePathContractInternals,
+} from './website-path-contract.js';
+export {
   createWebsiteIdentityManager,
   WebsiteIdentityManagerError,
   websiteIdentityManagerInternals,
