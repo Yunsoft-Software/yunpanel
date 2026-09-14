@@ -49,6 +49,14 @@ async function previewWithProvisioning({ input, dependencies }) {
   });
 }
 
+async function persistProvisioning(plan, registry) {
+  if (!registry) return plan;
+  if (typeof registry.create !== 'function') {
+    throw new SiteCreateError('site_create_dependencies_invalid', 'Website provisioning registry is unavailable', 503);
+  }
+  return registry.create(plan);
+}
+
 export function mountSiteCreateRoutes(app, dependencies = {}) {
   if (!app || typeof app.post !== 'function') throw new Error('Express application is required');
 
@@ -74,10 +82,11 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
       ...dependencies,
     });
     const current = await previewWithProvisioning({ input, dependencies });
+    const provisioning = await persistProvisioning(current.provisioning, dependencies.websiteProvisioningRegistry);
     return response.status(result.created ? 201 : 200).json({
       data: Object.freeze({
         ...result,
-        provisioning: current.provisioning,
+        provisioning,
       }),
     });
   }));
@@ -88,4 +97,5 @@ export const siteCreateHttpInternals = Object.freeze({
   applyBody,
   localInput,
   previewWithProvisioning,
+  persistProvisioning,
 });
