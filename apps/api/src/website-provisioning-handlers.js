@@ -105,6 +105,14 @@ function nginxEvidence(stage) {
   });
 }
 
+function certificatePending(intent) {
+  return Object.freeze({
+    satisfied: false,
+    reason: 'certificate_provisioning_pending',
+    primaryDomain: typeof intent?.primaryDomain === 'string' ? intent.primaryDomain : null,
+  });
+}
+
 export function createWebsiteProvisioningHandlers({
   identityManager = createWebsiteIdentityManager(),
   passengerSiteManager = createPassengerSiteManager(),
@@ -202,6 +210,10 @@ export function createWebsiteProvisioningHandlers({
       apply: applyNginx,
       inspect: inspectNginx,
     }),
+    certificate: Object.freeze({
+      apply: ({ intent } = {}) => certificatePending(intent),
+      inspect: ({ intent } = {}) => certificatePending(intent),
+    }),
   });
 }
 
@@ -211,4 +223,5 @@ export const websiteProvisioningHandlerInternals = Object.freeze({
   passengerRuntimeEvidence,
   nginxSpec,
   nginxEvidence,
+  certificatePending,
 });
