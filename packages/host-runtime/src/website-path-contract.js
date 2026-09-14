@@ -15,6 +15,13 @@ const AUTHORITIES = Object.freeze({
   controlPlane: 'control_plane',
 });
 
+const MODES = Object.freeze({
+  home: 0o750,
+  temporary: 0o700,
+  logs: 0o750,
+  backupArtifacts: 0o700,
+});
+
 export class WebsitePathContractError extends Error {
   constructor(code, message) {
     super(message);
@@ -53,9 +60,13 @@ export function createWebsitePathContract({ websiteId, applicationId } = {}) {
     workspace: Object.freeze({
       authority: AUTHORITIES.siteUser,
       homeDirectory,
+      homeMode: MODES.home,
       persistentDataDirectory: homeDirectory,
+      persistentDataMode: MODES.home,
       temporaryDirectory: path.posix.join(homeDirectory, 'tmp'),
+      temporaryMode: MODES.temporary,
       logDirectory: path.posix.join(homeDirectory, 'logs'),
+      logMode: MODES.logs,
       sftpRoot: homeDirectory,
     }),
     runtime: Object.freeze({
@@ -73,6 +84,7 @@ export function createWebsitePathContract({ websiteId, applicationId } = {}) {
     backup: Object.freeze({
       authority: AUTHORITIES.controlPlane,
       artifactRoot: ROOTS.backupArtifacts,
+      artifactRootMode: MODES.backupArtifacts,
       scopeKey: `website:${normalizedWebsiteId}`,
     }),
   });
@@ -81,6 +93,7 @@ export function createWebsitePathContract({ websiteId, applicationId } = {}) {
 export const websitePathContractInternals = Object.freeze({
   roots: ROOTS,
   authorities: AUTHORITIES,
+  modes: MODES,
   uuidPattern: UUID_PATTERN,
   normalizeUuid,
   directChild,
