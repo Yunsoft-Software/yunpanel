@@ -14,6 +14,7 @@ test('site overview binds provisioning recovery to the persistent Website identi
 
   assert.match(panel, /ConfirmDialog/);
   assert.match(panel, /provisioningConfirmation\(confirm\.action, operation\.operationId/);
+  assert.match(panel, /provisioningRemediation\(step\)/);
   assert.match(panel, /step\.canRetry === true/);
   assert.match(panel, /step\.canCompensate === true/);
   assert.doesNotMatch(panel, /step\.intent|step\.evidence|operation\.resources/);
