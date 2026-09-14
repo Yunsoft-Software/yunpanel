@@ -2,9 +2,10 @@ import { execFile } from 'node:child_process';
 import { lstat, readlink } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { normalizeStaticApplicationSpec } from '@yunpanel/shared';
+import { assertUuid, normalizeStaticApplicationSpec } from '@yunpanel/shared';
 import { createApplicationIdentity } from './application-identity.js';
 import { createStaticDeploymentManager } from './static-deployment-manager.js';
+import { createStaticRollbackManager } from './static-rollback-manager.js';
 
 const execFileAsync = promisify(execFile);
 const GETENT_PATH = '/usr/bin/getent';
@@ -54,7 +55,29 @@ function releaseIdFromTarget(value) {
 }
 
 function missingPath(error) {
-  return error?.code === 'ENOENT' || error?.code === 'EINVAL';
+  return error?.code === 'ENOENT';
+}
+
+function normalizeCompensationTarget(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new WebsiteStaticDeploymentError('website_static_compensation_invalid', 'Website static compensation target is invalid');
+  }
+  let applicationId;
+  let deploymentId;
+  let previousReleaseId;
+  try {
+    applicationId = assertUuid(value.applicationId, 'applicationId');
+    deploymentId = assertUuid(value.deploymentId, 'deploymentId');
+    previousReleaseId = value.previousReleaseId == null
+      ? null
+      : assertUuid(value.previousReleaseId, 'previousReleaseId');
+  } catch {
+    throw new WebsiteStaticDeploymentError('website_static_compensation_invalid', 'Website static compensation target is invalid');
+  }
+  if (previousReleaseId === deploymentId) {
+    throw new WebsiteStaticDeploymentError('website_static_compensation_invalid', 'Previous static release cannot equal the operation-owned release');
+  }
+  return Object.freeze({ applicationId, deploymentId, previousReleaseId });
 }
 
 export function createWebsiteStaticDeploymentManager({
@@ -71,12 +94,17 @@ export function createWebsiteStaticDeploymentManager({
   lstatFn = lstat,
   readlinkFn = readlink,
   createDeploymentManager = createStaticDeploymentManager,
+  rollbackManager = null,
   recordLog = null,
 } = {}) {
   if (typeof run !== 'function' || typeof lstatFn !== 'function' || typeof readlinkFn !== 'function'
     || typeof createDeploymentManager !== 'function'
     || (recordLog !== null && typeof recordLog !== 'function')) {
     throw new WebsiteStaticDeploymentError('website_static_dependencies_invalid', 'Website static deployment dependencies are invalid');
+  }
+  const resolvedRollbackManager = rollbackManager ?? createStaticRollbackManager({ webRoot, lstatFn, readlinkFn });
+  if (!resolvedRollbackManager || typeof resolvedRollbackManager.rollbackStatic !== 'function') {
+    throw new WebsiteStaticDeploymentError('website_static_dependencies_invalid', 'Website static rollback dependency is invalid');
   }
 
   const deploymentLocks = new Map();
@@ -134,6 +162,14 @@ export function createWebsiteStaticDeploymentManager({
         return Object.freeze({
           satisfied: false,
           reason: 'website_static_current_missing',
+          adapter: 'static',
+          applicationId: identity.applicationId,
+        });
+      }
+      if (error?.code === 'EINVAL') {
+        return Object.freeze({
+          satisfied: false,
+          reason: 'website_static_current_invalid',
           adapter: 'static',
           applicationId: identity.applicationId,
         });
@@ -204,6 +240,88 @@ export function createWebsiteStaticDeploymentManager({
     return Object.freeze({ ...current, deploymentId: spec.deploymentId });
   }
 
+  async function inspectCompensation(rawTarget) {
+    const target = normalizeCompensationTarget(rawTarget);
+    const current = await inspectCurrent({ applicationId: target.applicationId });
+
+    if (target.previousReleaseId === null) {
+      if (current.satisfied === false && current.reason === 'website_static_current_missing') {
+        return Object.freeze({
+          satisfied: true,
+          adapter: 'static',
+          applicationId: target.applicationId,
+          deploymentId: target.deploymentId,
+          previousReleaseId: null,
+          restoredPrevious: false,
+        });
+      }
+      return Object.freeze({
+        satisfied: false,
+        reason: current.satisfied === true && current.releaseId !== target.deploymentId
+          ? 'website_static_compensation_drift'
+          : 'website_static_compensation_requires_manual_cleanup',
+        adapter: 'static',
+        applicationId: target.applicationId,
+        deploymentId: target.deploymentId,
+        previousReleaseId: null,
+      });
+    }
+
+    if (current.satisfied !== true) {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'website_static_compensation_drift',
+        adapter: 'static',
+        applicationId: target.applicationId,
+        deploymentId: target.deploymentId,
+        previousReleaseId: target.previousReleaseId,
+      });
+    }
+    if (current.releaseId === target.previousReleaseId) {
+      return Object.freeze({
+        satisfied: true,
+        adapter: 'static',
+        applicationId: target.applicationId,
+        deploymentId: target.deploymentId,
+        previousReleaseId: target.previousReleaseId,
+        releaseId: current.releaseId,
+        restoredPrevious: true,
+      });
+    }
+    return Object.freeze({
+      satisfied: false,
+      reason: current.releaseId === target.deploymentId
+        ? 'website_static_compensation_pending'
+        : 'website_static_compensation_drift',
+      adapter: 'static',
+      applicationId: target.applicationId,
+      deploymentId: target.deploymentId,
+      previousReleaseId: target.previousReleaseId,
+      releaseId: current.releaseId,
+    });
+  }
+
+  async function compensateDeployment(rawTarget) {
+    const target = normalizeCompensationTarget(rawTarget);
+    const before = await inspectCompensation(target);
+    if (before.satisfied === true || target.previousReleaseId === null) return before;
+    if (before.reason !== 'website_static_compensation_pending') return before;
+
+    await resolvedRollbackManager.rollbackStatic({
+      applicationId: target.applicationId,
+      releaseId: target.previousReleaseId,
+      currentReleaseId: target.deploymentId,
+    });
+    const after = await inspectCompensation(target);
+    if (after.satisfied !== true) {
+      throw new WebsiteStaticDeploymentError(
+        'website_static_compensation_unverified',
+        'Website static rollback did not restore the expected previous release',
+      );
+    }
+    return after;
+  }
+
   function deploymentManagerFor(identity) {
     const homeDirectory = identity.paths.workspace.homeDirectory;
     const guardedRun = async (file, args, options = {}) => {
@@ -256,7 +374,14 @@ export function createWebsiteStaticDeploymentManager({
     return tracked;
   }
 
-  return Object.freeze({ deployStatic, inspectIdentity, inspectCurrent, inspectDeployment });
+  return Object.freeze({
+    deployStatic,
+    inspectIdentity,
+    inspectCurrent,
+    inspectDeployment,
+    compensateDeployment,
+    inspectCompensation,
+  });
 }
 
 export const websiteStaticDeploymentInternals = Object.freeze({
@@ -265,5 +390,6 @@ export const websiteStaticDeploymentInternals = Object.freeze({
   missingGetent,
   releaseIdFromTarget,
   missingPath,
+  normalizeCompensationTarget,
   paths: Object.freeze({ GETENT_PATH, USERADD_PATH, RUNUSER_PATH }),
 });
