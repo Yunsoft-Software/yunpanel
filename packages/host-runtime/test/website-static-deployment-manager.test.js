@@ -158,6 +158,17 @@ test('website static current inspection stays unsatisfied when no active release
   assert.equal(result.applicationId, APP_A);
 });
 
+test('website static current inspection distinguishes a non-symlink current path from a missing release', async () => {
+  const manager = createWebsiteStaticDeploymentManager({
+    run: canonicalGetentRun(),
+    readlinkFn: async () => { throw Object.assign(new Error('not symlink'), { code: 'EINVAL' }); },
+  });
+
+  const result = await manager.inspectCurrent({ applicationId: APP_A });
+  assert.equal(result.satisfied, false);
+  assert.equal(result.reason, 'website_static_current_invalid');
+});
+
 test('website static deployment inspection confirms only the deterministic current release', async () => {
   const manager = createWebsiteStaticDeploymentManager({
     run: canonicalGetentRun(),
@@ -176,4 +187,101 @@ test('website static deployment inspection confirms only the deterministic curre
   assert.equal(stale.reason, 'website_static_release_not_current');
   assert.equal(stale.releaseId, DEPLOY_A);
   assert.equal(stale.deploymentId, DEPLOY_B);
+});
+
+test('website static compensation rolls back only when the operation-owned release is still current', async () => {
+  let currentRelease = DEPLOY_A;
+  const rollbackCalls = [];
+  const manager = createWebsiteStaticDeploymentManager({
+    run: canonicalGetentRun(),
+    readlinkFn: async () => `releases/${currentRelease}`,
+    lstatFn: async () => ({ isDirectory: () => true, isSymbolicLink: () => false }),
+    rollbackManager: {
+      rollbackStatic: async (input) => {
+        rollbackCalls.push(input);
+        assert.equal(currentRelease, input.currentReleaseId);
+        currentRelease = input.releaseId;
+        return { releaseId: input.releaseId, previousReleaseId: input.currentReleaseId, active: true };
+      },
+    },
+  });
+
+  const result = await manager.compensateDeployment({
+    applicationId: APP_A,
+    deploymentId: DEPLOY_A,
+    previousReleaseId: DEPLOY_B,
+  });
+
+  assert.equal(result.satisfied, true);
+  assert.equal(result.releaseId, DEPLOY_B);
+  assert.equal(result.restoredPrevious, true);
+  assert.deepEqual(rollbackCalls, [{
+    applicationId: APP_A,
+    releaseId: DEPLOY_B,
+    currentReleaseId: DEPLOY_A,
+  }]);
+});
+
+test('website static compensation is idempotent when the expected previous release is already active', async () => {
+  let rollbackCalls = 0;
+  const manager = createWebsiteStaticDeploymentManager({
+    run: canonicalGetentRun(),
+    readlinkFn: async () => `releases/${DEPLOY_B}`,
+    lstatFn: async () => ({ isDirectory: () => true, isSymbolicLink: () => false }),
+    rollbackManager: {
+      rollbackStatic: async () => { rollbackCalls += 1; return {}; },
+    },
+  });
+
+  const result = await manager.compensateDeployment({
+    applicationId: APP_A,
+    deploymentId: DEPLOY_A,
+    previousReleaseId: DEPLOY_B,
+  });
+  assert.equal(result.satisfied, true);
+  assert.equal(result.restoredPrevious, true);
+  assert.equal(rollbackCalls, 0);
+});
+
+test('website static compensation refuses destructive cleanup when the first deploy has no proven previous release', async () => {
+  let rollbackCalls = 0;
+  const manager = createWebsiteStaticDeploymentManager({
+    run: canonicalGetentRun(),
+    readlinkFn: async () => `releases/${DEPLOY_A}`,
+    lstatFn: async () => ({ isDirectory: () => true, isSymbolicLink: () => false }),
+    rollbackManager: {
+      rollbackStatic: async () => { rollbackCalls += 1; return {}; },
+    },
+  });
+
+  const result = await manager.compensateDeployment({
+    applicationId: APP_A,
+    deploymentId: DEPLOY_A,
+    previousReleaseId: null,
+  });
+  assert.equal(result.satisfied, false);
+  assert.equal(result.reason, 'website_static_compensation_requires_manual_cleanup');
+  assert.equal(rollbackCalls, 0);
+});
+
+test('website static compensation fails closed on current-release drift instead of rolling back another deploy', async () => {
+  const foreignRelease = '1dd31ee8-ddcb-46d1-a1a6-fda8ac7932c0';
+  let rollbackCalls = 0;
+  const manager = createWebsiteStaticDeploymentManager({
+    run: canonicalGetentRun(),
+    readlinkFn: async () => `releases/${foreignRelease}`,
+    lstatFn: async () => ({ isDirectory: () => true, isSymbolicLink: () => false }),
+    rollbackManager: {
+      rollbackStatic: async () => { rollbackCalls += 1; return {}; },
+    },
+  });
+
+  const result = await manager.compensateDeployment({
+    applicationId: APP_A,
+    deploymentId: DEPLOY_A,
+    previousReleaseId: DEPLOY_B,
+  });
+  assert.equal(result.satisfied, false);
+  assert.equal(result.reason, 'website_static_compensation_drift');
+  assert.equal(rollbackCalls, 0);
 });
