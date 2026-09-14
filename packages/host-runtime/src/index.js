@@ -244,11 +244,13 @@ export {
   StaticDeploymentEvidenceError,
   staticDeploymentEvidenceInternals,
 } from './static-deployment-evidence.js';
+export { StaticRollbackError } from './static-rollback-manager.js';
 export {
-  createStaticRollbackManager,
-  StaticRollbackError,
-  staticRollbackManager,
-} from './static-rollback-manager.js';
+  createStaticRollbackRouter as createStaticRollbackManager,
+  StaticRollbackRouterError,
+  staticRollbackRouter as staticRollbackManager,
+  staticRollbackRouterInternals,
+} from './static-rollback-router.js';
 export {
   createStaticRollbackEvidenceInspector,
   StaticRollbackEvidenceError,
