@@ -115,6 +115,36 @@ test('blocked step persists bounded evidence and can re-enter applying only expl
   assert.equal(applying.steps[0].error, null);
 });
 
+test('failed step can be explicitly reset for retry while clearing stale failure evidence', async () => {
+  const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
+  await registry.create(input());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  const failed = await registry.failStep({
+    operationId,
+    stepId: 'unix_identity',
+    error: 'unix_identity_apply_failed',
+    evidence: { attempted: true },
+  });
+  assert.equal(failed.steps[0].state, 'failed');
+
+  const retried = await registry.retryStep({ operationId, stepId: 'unix_identity' });
+  assert.equal(retried.steps[0].state, 'pending');
+  assert.equal(retried.steps[0].error, null);
+  assert.equal(retried.steps[0].evidence, null);
+  assert.equal(retried.steps[0].compensation.state, 'pending');
+});
+
+test('retry rejects steps that are not failed', async () => {
+  const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
+  await registry.create(input());
+
+  await assert.rejects(
+    registry.retryStep({ operationId, stepId: 'unix_identity' }),
+    (error) => error instanceof WebsiteProvisioningRegistryError
+      && error.code === 'website_provisioning_retry_invalid',
+  );
+});
+
 test('recreating the same operation preserves progressed mutable state', async () => {
   const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
   await registry.create(input());
