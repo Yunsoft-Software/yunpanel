@@ -94,15 +94,13 @@ export function createPassengerInspector({
     return parseNginxConfig(`${result?.stdout ?? ''}\n${result?.stderr ?? ''}`);
   }
 
-  async function nodeVersion() {
+  async function optionalSystemNodeVersion() {
     try {
       const result = await run(NODE, ['--version'], { timeout: 5_000 });
       const value = String(result?.stdout ?? '').trim();
-      if (!NODE_VERSION_PATTERN.test(value)) throw new PassengerInspectorError('passenger_node_invalid', 'Managed Node.js binary reported an invalid version');
-      return value;
-    } catch (error) {
-      if (error instanceof PassengerInspectorError) throw error;
-      throw commandFailure(error, 'passenger_node_unavailable', 'Managed Node.js binary is unavailable');
+      return NODE_VERSION_PATTERN.test(value) ? value : null;
+    } catch {
+      return null;
     }
   }
 
@@ -117,15 +115,15 @@ export function createPassengerInspector({
         nginxPassengerRoots: Object.freeze([]),
         moduleLoaded: false,
         installValid: false,
-        nodeVersion: null,
+        systemNodeVersion: null,
         healthy: false,
       });
     }
 
-    const [root, config, node] = await Promise.all([
+    const [root, config, systemNodeVersion] = await Promise.all([
       passengerRoot(),
       nginxConfiguration(),
-      nodeVersion(),
+      optionalSystemNodeVersion(),
     ]);
     await validateInstall();
     const rootConfigured = config.roots.length === 1 && config.roots[0] === root;
@@ -137,7 +135,7 @@ export function createPassengerInspector({
       nginxPassengerRoots: config.roots,
       moduleLoaded: config.moduleLoaded,
       installValid: true,
-      nodeVersion: node,
+      systemNodeVersion,
       healthy: config.moduleLoaded && rootConfigured,
     });
   }
