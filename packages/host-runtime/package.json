@@ -3,7 +3,10 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "exports": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./website-static-deployment-manager": "./src/website-static-deployment-manager.js"
+  },
   "scripts": {
     "test": "node --test"
   },
