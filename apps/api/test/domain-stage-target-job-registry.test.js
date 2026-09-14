@@ -7,8 +7,9 @@ import { createDomainStageTargetJobRegistry } from '../src/domain-stage-target-j
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const websiteId = 'db20d91a-ec70-4d79-bc75-1f70de76d1ea';
 const projectId = '70b6a777-5fdf-4e64-89e8-14bf2e34953e';
+const applicationId = 'b11b9423-44bc-4ca5-ab4c-75170070ab9b';
 
-function fixture({ publishedPorts = null, websiteBinding = true } = {}) {
+function fixture({ publishedPorts = null, websiteBinding = true, passengerBinding = false } = {}) {
   const calls = [];
   const registry = {
     marker: 'base-registry',
@@ -19,6 +20,7 @@ function fixture({ publishedPorts = null, websiteBinding = true } = {}) {
     id: 'domain-1',
     serverId,
     websiteId: websiteBinding ? websiteId : null,
+    desiredRevision: 3,
     targetType: 'proxy',
     target: { upstreamHost: '127.0.0.1', upstreamPort: 18080, websocket: true },
     nginxSettings: { websocket: true },
@@ -26,15 +28,16 @@ function fixture({ publishedPorts = null, websiteBinding = true } = {}) {
   const website = {
     id: websiteId,
     serverId,
-    applicationId: null,
+    revision: 4,
+    applicationId: passengerBinding ? applicationId : null,
     dockerWorkloadId: null,
-    managedComposeBinding: websiteBinding ? {
+    managedComposeBinding: websiteBinding && !passengerBinding ? {
       projectId,
       serviceName: 'web',
       targetPort: 3000,
       protocol: 'tcp',
     } : null,
-    runtimeType: 'docker',
+    runtimeType: passengerBinding ? 'node' : 'docker',
     proxyTarget: null,
   };
   const project = {
@@ -47,6 +50,22 @@ function fixture({ publishedPorts = null, websiteBinding = true } = {}) {
       ],
     }],
   };
+  const application = {
+    id: applicationId,
+    serverId,
+    currentReleaseId: 'release-7',
+  };
+  const runtimeBinding = passengerBinding ? {
+    applicationId,
+    serverId,
+    adapter: 'passenger',
+    state: 'active',
+    releaseId: 'release-7',
+    websiteId,
+    websiteRevision: website.revision,
+    domains: [{ domainId: domain.id, desiredRevision: domain.desiredRevision, nginxChecksum: 'a'.repeat(64) }],
+    passengerTarget: { appRoot: '/var/www/example/current', startupFile: 'server.js' },
+  } : null;
   return {
     calls,
     registry,
@@ -55,6 +74,8 @@ function fixture({ publishedPorts = null, websiteBinding = true } = {}) {
       domainRegistry: { async getDomain(id) { return id === domain.id ? domain : null; } },
       websiteRegistry: { async getWebsite(id) { return id === website.id ? website : null; } },
       dockerComposeProjectRegistry: { async getProject(id) { return id === project.id ? project : null; } },
+      applicationRegistry: { async getApplication(id) { return id === application.id ? application : null; } },
+      runtimeBindingRegistry: { async getBinding(id) { return id === application.id ? runtimeBinding : null; } },
     }),
   };
 }
@@ -124,6 +145,17 @@ test('Managed Compose stage readiness failure prevents job enqueue', async () =>
     fx.decorated.enqueue(stageInput()),
     (error) => error instanceof DomainRegistryError
       && error.code === 'managed_compose_binding_not_ready'
+      && error.status === 409,
+  );
+  assert.equal(fx.calls.length, 0);
+});
+
+test('Passenger runtime binding blocks legacy Domain stage before enqueue', async () => {
+  const fx = fixture({ passengerBinding: true });
+  await assert.rejects(
+    fx.decorated.enqueue(stageInput()),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'passenger_runtime_binding_restage_blocked'
       && error.status === 409,
   );
   assert.equal(fx.calls.length, 0);
