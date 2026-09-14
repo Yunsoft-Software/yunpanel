@@ -44,23 +44,46 @@ const domain = Object.freeze({
   target: Object.freeze({ upstreamHost: '127.0.0.1', upstreamPort: 3100, websocket: true }),
 });
 
-function service({ domains = [domain], hostResult = null } = {}) {
+function defaultHostResult() {
+  return {
+    applicationId,
+    releaseId,
+    mode: 'read-only',
+    mutationPerformed: false,
+    source: {
+      serviceName: 'yunpanel-node-example.service',
+      releaseId,
+      activeState: 'active',
+      healthy: true,
+      port: 3100,
+      healthPath: '/health',
+    },
+    environment: { present: true, sha256: 'a'.repeat(64) },
+    target: {
+      intent: { appRoot: `/var/lib/yunpanel/apps/${applicationId}/current` },
+      inspection: { satisfied: true, nodeBinary: '/usr/bin/node' },
+      environmentBinding: {
+        satisfied: true,
+        sourcePath: `/etc/yunpanel/apps/${applicationId}.env`,
+        environmentInclude: `/etc/nginx/yunpanel/passenger-env/${applicationId}.conf`,
+        includeSha256: 'b'.repeat(64),
+      },
+    },
+    ready: true,
+    blockers: [],
+  };
+}
+
+function service({ domains = [domain], hostResult = null, currentApplication = application } = {}) {
   const calls = [];
   const preview = createApplicationPassengerMigrationPreviewService({
-    applicationRegistry: { async getApplication() { return application; } },
+    applicationRegistry: { async getApplication() { return currentApplication; } },
     websiteRegistry: { async listWebsites() { return [website]; } },
     domainRegistry: { async listDomains() { return domains; } },
     hostPreview: {
       async preview(spec) {
         calls.push(spec);
-        return hostResult ?? {
-          applicationId,
-          releaseId,
-          mode: 'read-only',
-          mutationPerformed: false,
-          ready: true,
-          blockers: [],
-        };
+        return hostResult ?? defaultHostResult();
       },
     },
     localServerId: serverId,
@@ -78,7 +101,23 @@ test('control-plane Passenger preview is read-only and binds persisted applicati
   assert.equal(result.website.revision, 3);
   assert.equal(result.domain.domainId, domainId);
   assert.equal(result.domain.appliedRevision, 4);
+  assert.match(result.previewDigest, /^[a-f0-9]{64}$/);
+  assert.equal(result.confirmation, `migrate-node-passenger:${applicationId}:${result.previewDigest}`);
   assert.deepEqual(calls, [{ applicationId, releaseId, runtime }]);
+});
+
+test('Passenger preview digest is deterministic for the same control-plane and host evidence', async () => {
+  const first = await service().preview.preview(applicationId);
+  const second = await service().preview.preview(applicationId);
+  assert.equal(first.previewDigest, second.previewDigest);
+  assert.equal(first.confirmation, second.confirmation);
+});
+
+test('Passenger preview digest changes when the applied Application revision changes', async () => {
+  const first = await service().preview.preview(applicationId);
+  const changed = Object.freeze({ ...application, desiredRevision: 3, appliedRevision: 3 });
+  const second = await service({ currentApplication: changed }).preview.preview(applicationId);
+  assert.notEqual(first.previewDigest, second.previewDigest);
 });
 
 test('control-plane Passenger preview blocks multiple independent Domain routes before cutover', async () => {
@@ -121,4 +160,5 @@ test('control-plane Passenger preview reports host inspection failure without mu
   const result = await preview.preview(applicationId);
   assert.equal(result.ready, false);
   assert.ok(result.blockers.some((entry) => entry.code === 'host_preview_failed' && entry.detail === 'systemd_not_available'));
+  assert.match(result.previewDigest, /^[a-f0-9]{64}$/);
 });
