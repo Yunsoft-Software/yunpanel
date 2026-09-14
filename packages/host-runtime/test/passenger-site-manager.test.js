@@ -12,6 +12,7 @@ const releaseId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const currentRoot = `/var/lib/yunpanel/apps/${applicationId}/current`;
 const releaseRoot = `/var/lib/yunpanel/apps/${applicationId}/releases/${releaseId}`;
 const managedNode = '/opt/yunpanel/node-runtimes/v24/bin/node';
+const homeDirectory = `/var/lib/yunpanel/data/${applicationId}`;
 
 function intent(overrides = {}) {
   return {
@@ -29,6 +30,32 @@ function intent(overrides = {}) {
     healthPath: '/health',
     healthTimeoutSeconds: 30,
     ...overrides,
+  };
+}
+
+function healthyIdentity(overrides = {}) {
+  return {
+    satisfied: true,
+    user: nodeApplicationUser(applicationId),
+    uid: 2001,
+    gid: 2001,
+    homeDirectory,
+    shell: '/usr/sbin/nologin',
+    homeMode: 0o750,
+    ...overrides,
+  };
+}
+
+function healthyWebsiteIdentityManager({ events = null, overrides = {} } = {}) {
+  return {
+    inspect: async (identityIntent) => {
+      events?.push('inspect-identity');
+      assert.deepEqual(identityIntent, {
+        user: nodeApplicationUser(applicationId),
+        homeDirectory,
+      });
+      return healthyIdentity(overrides);
+    },
   };
 }
 
@@ -71,6 +98,7 @@ test('Passenger Website inspection proves exact Node binary and active managed r
   const fs = readyFilesystem();
   const commands = [];
   const manager = createPassengerSiteManager({
+    websiteIdentityManager: healthyWebsiteIdentityManager(),
     passengerManager: {
       inspect: async () => healthyPassenger(),
       apply: async () => healthyPassenger(),
@@ -90,12 +118,17 @@ test('Passenger Website inspection proves exact Node binary and active managed r
   assert.equal(result.nodeBinary, managedNode);
   assert.equal(result.nodeVersion, 'v24.11.1');
   assert.equal(result.unixUser, nodeApplicationUser(applicationId));
+  assert.equal(result.unixUid, 2001);
+  assert.equal(result.unixGid, 2001);
+  assert.equal(result.homeDirectory, homeDirectory);
+  assert.equal(result.homeMode, 0o750);
   assert.deepEqual(commands, [[managedNode, ['--version']]]);
 });
 
 test('Passenger Website inspection blocks cleanly when shared Passenger is unavailable', async () => {
   let nodeCalls = 0;
   const manager = createPassengerSiteManager({
+    websiteIdentityManager: healthyWebsiteIdentityManager(),
     passengerManager: {
       inspect: async () => ({ installed: false, healthy: false }),
       apply: async () => ({ installed: false, healthy: false }),
@@ -113,8 +146,56 @@ test('Passenger Website inspection blocks cleanly when shared Passenger is unava
   assert.equal(nodeCalls, 0);
 });
 
+test('Passenger Website inspection refuses readiness when canonical identity is missing', async () => {
+  let nodeCalls = 0;
+  const manager = createPassengerSiteManager({
+    websiteIdentityManager: {
+      inspect: async (identityIntent) => ({
+        satisfied: false,
+        reason: 'website_identity_user_missing',
+        ...identityIntent,
+      }),
+    },
+    passengerManager: {
+      inspect: async () => healthyPassenger(),
+      apply: async () => healthyPassenger(),
+    },
+    run: async () => { nodeCalls += 1; return { stdout: 'v24.11.1\n' }; },
+  });
+
+  const result = await manager.inspect(intent());
+  assert.deepEqual(result, {
+    satisfied: false,
+    reason: 'passenger_identity_unavailable',
+    identityReason: 'website_identity_user_missing',
+    adapter: 'passenger',
+    applicationId,
+    unixUser: nodeApplicationUser(applicationId),
+    homeDirectory,
+  });
+  assert.equal(nodeCalls, 0);
+});
+
+test('Passenger Website inspection rejects malformed satisfied identity evidence', async () => {
+  const manager = createPassengerSiteManager({
+    websiteIdentityManager: healthyWebsiteIdentityManager({
+      overrides: { homeMode: 0o755 },
+    }),
+    passengerManager: {
+      inspect: async () => healthyPassenger(),
+      apply: async () => healthyPassenger(),
+    },
+  });
+
+  await assert.rejects(
+    manager.inspect(intent()),
+    (error) => error instanceof PassengerSiteManagerError && error.code === 'passenger_site_identity_drift',
+  );
+});
+
 test('Passenger Website inspection requires the requested Node major', async () => {
   const manager = createPassengerSiteManager({
+    websiteIdentityManager: healthyWebsiteIdentityManager(),
     passengerManager: {
       inspect: async () => healthyPassenger(),
       apply: async () => healthyPassenger(),
@@ -130,6 +211,7 @@ test('Passenger Website inspection requires the requested Node major', async () 
 
 test('Passenger Website inspection keeps missing current release actionable', async () => {
   const manager = createPassengerSiteManager({
+    websiteIdentityManager: healthyWebsiteIdentityManager(),
     passengerManager: {
       inspect: async () => healthyPassenger(),
       apply: async () => healthyPassenger(),
@@ -147,6 +229,7 @@ test('Passenger Website inspection keeps missing current release actionable', as
 test('Passenger Website inspection rejects release escape outside managed releases', async () => {
   const fs = readyFilesystem({ current: '/tmp/escaped-release' });
   const manager = createPassengerSiteManager({
+    websiteIdentityManager: healthyWebsiteIdentityManager(),
     passengerManager: {
       inspect: async () => healthyPassenger(),
       apply: async () => healthyPassenger(),
@@ -164,6 +247,7 @@ test('Passenger Website inspection rejects release escape outside managed releas
 test('Passenger Website inspection rejects a symlink startup file', async () => {
   const fs = readyFilesystem({ startupSymlink: true });
   const manager = createPassengerSiteManager({
+    websiteIdentityManager: healthyWebsiteIdentityManager(),
     passengerManager: {
       inspect: async () => healthyPassenger(),
       apply: async () => healthyPassenger(),
@@ -182,6 +266,7 @@ test('Passenger Website apply installs shared Passenger before proving site read
   const fs = readyFilesystem();
   const events = [];
   const manager = createPassengerSiteManager({
+    websiteIdentityManager: healthyWebsiteIdentityManager({ events }),
     passengerManager: {
       inspect: async () => { events.push('inspect-passenger'); return healthyPassenger(); },
       apply: async () => { events.push('apply-passenger'); return healthyPassenger(); },
@@ -195,6 +280,10 @@ test('Passenger Website apply installs shared Passenger before proving site read
 
   const result = await manager.apply(intent());
   assert.equal(result.satisfied, true);
-  assert.equal(events[0], 'apply-passenger');
-  assert.equal(events[1], 'inspect-passenger');
+  assert.deepEqual(events.slice(0, 4), [
+    'apply-passenger',
+    'inspect-passenger',
+    'inspect-identity',
+    'node:node',
+  ]);
 });

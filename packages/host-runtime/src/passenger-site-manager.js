@@ -2,13 +2,15 @@ import { execFile } from 'node:child_process';
 import { lstat, readlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { nodeApplicationUser } from '@yunpanel/config-templates';
-import { assertUuid } from '@yunpanel/shared';
+import { createApplicationIdentity } from './application-identity.js';
 import { createPassengerManager } from './passenger-manager.js';
+import { createWebsiteIdentityManager } from './website-identity-manager.js';
+import { websitePathContractInternals } from './website-path-contract.js';
 
 const execFileAsync = promisify(execFile);
-const APP_ROOT = '/var/lib/yunpanel/apps';
+const APP_ROOT = websitePathContractInternals.roots.application;
 const MANAGED_NODE_ROOT = '/opt/yunpanel/node-runtimes';
+const NOLOGIN_SHELLS = new Set(['/usr/sbin/nologin', '/sbin/nologin']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_RELATIVE_PATH = /^[A-Za-z0-9._/-]{1,240}$/;
 
@@ -61,15 +63,16 @@ function normalizedIntent(intent) {
     || intent.adapter !== 'passenger') {
     throw new PassengerSiteManagerError('passenger_site_intent_invalid', 'Passenger Website runtime intent is invalid');
   }
-  let applicationId;
-  try { applicationId = assertUuid(intent.applicationId, 'applicationId'); }
+  let identity;
+  try { identity = createApplicationIdentity(intent.applicationId); }
   catch { throw new PassengerSiteManagerError('passenger_site_application_invalid', 'Passenger Website Application identity is invalid'); }
+  const applicationId = identity.applicationId;
   const major = nodeMajor(intent.nodeMajor);
-  const currentRoot = path.posix.join(APP_ROOT, applicationId, 'current');
+  const currentRoot = identity.paths.runtime.currentRelease;
   const appRoot = absoluteWithin(intent.appRoot, currentRoot, 'appRoot');
   const documentRoot = absoluteWithin(intent.documentRoot, appRoot, 'documentRoot');
   const startupFile = relativePath(intent.startupFile, 'startupFile');
-  const expectedUser = nodeApplicationUser(applicationId);
+  const expectedUser = identity.unixUser;
   if (intent.unixUser !== expectedUser) {
     throw new PassengerSiteManagerError('passenger_site_identity_mismatch', 'Passenger Website Unix identity does not match the Application');
   }
@@ -88,6 +91,8 @@ function normalizedIntent(intent) {
     applicationId,
     nodeMajor: major,
     currentRoot,
+    releasesDirectory: identity.paths.runtime.releasesDirectory,
+    homeDirectory: identity.paths.workspace.homeDirectory,
     appRoot,
     documentRoot,
     startupFile,
@@ -104,6 +109,7 @@ function releaseIdFromTarget(target) {
 
 export function createPassengerSiteManager({
   passengerManager = createPassengerManager(),
+  websiteIdentityManager = createWebsiteIdentityManager(),
   run = (file, args, options = {}) => execFileAsync(file, args, {
     encoding: 'utf8',
     timeout: options.timeout ?? 5_000,
@@ -114,6 +120,7 @@ export function createPassengerSiteManager({
   realpathFn = realpath,
 } = {}) {
   if (!passengerManager || typeof passengerManager.inspect !== 'function' || typeof passengerManager.apply !== 'function'
+    || !websiteIdentityManager || typeof websiteIdentityManager.inspect !== 'function'
     || typeof run !== 'function' || typeof lstatFn !== 'function' || typeof readlinkFn !== 'function' || typeof realpathFn !== 'function') {
     throw new PassengerSiteManagerError('passenger_site_dependencies_invalid', 'Passenger Website runtime dependencies are invalid');
   }
@@ -140,7 +147,7 @@ export function createPassengerSiteManager({
     }
     const releaseId = releaseIdFromTarget(linkTarget);
     if (!releaseId) return null;
-    const expectedReleaseRoot = path.posix.join(APP_ROOT, spec.applicationId, 'releases', releaseId);
+    const expectedReleaseRoot = path.posix.join(spec.releasesDirectory, releaseId);
 
     let resolvedCurrent;
     let resolvedAppRoot;
@@ -181,6 +188,28 @@ export function createPassengerSiteManager({
     return Object.freeze({ releaseId, resolvedAppRoot, resolvedDocumentRoot, resolvedStartup });
   }
 
+  async function identityEvidence(spec) {
+    const identity = await websiteIdentityManager.inspect({
+      user: spec.unixUser,
+      homeDirectory: spec.homeDirectory,
+    });
+    if (!identity?.satisfied) {
+      return Object.freeze({
+        satisfied: false,
+        reason: identity?.reason ?? 'website_identity_unverified',
+      });
+    }
+    if (identity.user !== spec.unixUser
+      || identity.homeDirectory !== spec.homeDirectory
+      || !Number.isSafeInteger(identity.uid) || identity.uid < 1
+      || !Number.isSafeInteger(identity.gid) || identity.gid < 1
+      || !NOLOGIN_SHELLS.has(identity.shell)
+      || identity.homeMode !== 0o750) {
+      throw new PassengerSiteManagerError('passenger_site_identity_drift', 'Passenger Website identity evidence does not match canonical managed state');
+    }
+    return identity;
+  }
+
   async function inspectSpec(spec) {
     const passenger = await passengerManager.inspect();
     if (!passenger?.healthy) {
@@ -189,6 +218,18 @@ export function createPassengerSiteManager({
         reason: 'passenger_runtime_unavailable',
         adapter: 'passenger',
         applicationId: spec.applicationId,
+      });
+    }
+    const identity = await identityEvidence(spec);
+    if (!identity.satisfied) {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'passenger_identity_unavailable',
+        identityReason: identity.reason,
+        adapter: 'passenger',
+        applicationId: spec.applicationId,
+        unixUser: spec.unixUser,
+        homeDirectory: spec.homeDirectory,
       });
     }
     const node = await resolveNode(spec);
@@ -225,6 +266,10 @@ export function createPassengerSiteManager({
       documentRoot: spec.documentRoot,
       startupFile: spec.startupFile,
       unixUser: spec.unixUser,
+      unixUid: identity.uid,
+      unixGid: identity.gid,
+      homeDirectory: identity.homeDirectory,
+      homeMode: identity.homeMode,
       passengerVersion: passenger.installedVersion ?? null,
     });
   }
