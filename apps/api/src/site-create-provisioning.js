@@ -70,6 +70,46 @@ function passengerIntent(preview, applicationId, paths = createWebsitePathContra
   return Object.freeze(base);
 }
 
+function staticIntent(preview, applicationId, paths = createWebsitePathContract({
+  websiteId: preview?.ids?.websiteId,
+  applicationId,
+})) {
+  const application = preview.plan.application;
+  if (!application || application.type !== 'static') {
+    throw new Error('Static Website provisioning requires normalized Application state');
+  }
+  if (preview.plan.website.documentRoot !== path.posix.join(paths.static.publishRoot, 'current')) {
+    throw new Error('Static Website document root does not match the managed Website path contract');
+  }
+
+  const base = {
+    websiteId: preview.ids.websiteId,
+    runtimeType: 'static',
+    adapter: 'static',
+    applicationId,
+    homeDirectory: paths.workspace.homeDirectory,
+    buildRoot: paths.static.buildRoot,
+    publishRoot: paths.static.publishRoot,
+  };
+  if (preview.source?.kind !== 'new_static') {
+    return Object.freeze({ ...base, mode: 'bind_existing' });
+  }
+  if (typeof application.repositoryUrl !== 'string' || typeof application.branch !== 'string'
+    || !application.build || typeof application.build !== 'object'
+    || !Number.isInteger(application.retention)) {
+    throw new Error('New static Website provisioning requires complete deployment state');
+  }
+  return Object.freeze({
+    ...base,
+    mode: 'deploy',
+    deploymentId: preview.operationId,
+    repositoryUrl: application.repositoryUrl,
+    branch: application.branch,
+    build: Object.freeze({ ...application.build }),
+    retention: application.retention,
+  });
+}
+
 function websiteAliases(preview) {
   const values = [
     ...(preview.plan.primaryDomain?.aliases ?? []),
@@ -146,15 +186,7 @@ export function siteCreateProvisioningPlan(preview) {
         compensationState: 'not_required',
       }));
     } else {
-      runtimeIntent = Object.freeze({
-        websiteId: preview.ids.websiteId,
-        runtimeType,
-        adapter: 'static',
-        applicationId,
-        homeDirectory: paths.workspace.homeDirectory,
-        buildRoot: paths.static.buildRoot,
-        publishRoot: paths.static.publishRoot,
-      });
+      runtimeIntent = staticIntent(preview, applicationId, paths);
       steps.push(hostStep('runtime', 'runtime', runtimeIntent));
     }
   }
@@ -189,5 +221,6 @@ export function siteCreateProvisioningPlan(preview) {
 
 export const siteCreateProvisioningInternals = Object.freeze({
   passengerIntent,
+  staticIntent,
   websiteAliases,
 });
