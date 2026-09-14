@@ -7,9 +7,10 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountApplicationPassengerMigrationRoutes(app, { previewService } = {}) {
-  if (!app || typeof app.get !== 'function'
-    || !previewService || typeof previewService.preview !== 'function') {
+export function mountApplicationPassengerMigrationRoutes(app, { previewService, migrationService } = {}) {
+  if (!app || typeof app.get !== 'function' || typeof app.post !== 'function'
+    || !previewService || typeof previewService.preview !== 'function'
+    || !migrationService || typeof migrationService.apply !== 'function') {
     throw new Error('Application Passenger migration route dependencies are required');
   }
 
@@ -19,6 +20,15 @@ export function mountApplicationPassengerMigrationRoutes(app, { previewService }
     asyncRoute(async (request, response) => response.json({
       data: await previewService.preview(request.params.applicationId),
     })),
+  );
+
+  app.post(
+    '/api/applications/:applicationId/passenger-migration',
+    requirePanelRouteAccess,
+    asyncRoute(async (request, response) => {
+      const applied = await migrationService.apply(request.params.applicationId, request.body);
+      return response.status(202).json({ data: applied });
+    }),
   );
 }
 
