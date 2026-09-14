@@ -25,6 +25,13 @@ function compensationConfirmation(operationId, provisioningStepId) {
   return `compensate-site-provisioning:${uuid(operationId, 'provisioning operation id')}:${stepId(provisioningStepId)}`;
 }
 
+export function provisioningConfirmation(action, operationId, provisioningStepId = null) {
+  if (action === 'continue') return continueConfirmation(operationId);
+  if (action === 'retry') return retryConfirmation(operationId, provisioningStepId);
+  if (action === 'compensate') return compensationConfirmation(operationId, provisioningStepId);
+  throw new Error('unsupported provisioning recovery action');
+}
+
 export function getLatestWebsiteProvisioning(websiteId, { signal } = {}) {
   const id = uuid(websiteId, 'website id');
   return panelRequest(`/sites/${encodeURIComponent(id)}/provisioning/latest`, { signal });
@@ -34,7 +41,7 @@ export function continueWebsiteProvisioning(operationId) {
   const id = uuid(operationId, 'provisioning operation id');
   return panelRequest(`/sites/provisioning/${encodeURIComponent(id)}/continue`, {
     method: 'POST',
-    body: { confirmation: continueConfirmation(id) },
+    body: { confirmation: provisioningConfirmation('continue', id) },
   });
 }
 
@@ -43,7 +50,7 @@ export function retryWebsiteProvisioningStep(operationId, provisioningStepId) {
   const step = stepId(provisioningStepId);
   return panelRequest(`/sites/provisioning/${encodeURIComponent(id)}/steps/${encodeURIComponent(step)}/retry`, {
     method: 'POST',
-    body: { confirmation: retryConfirmation(id, step) },
+    body: { confirmation: provisioningConfirmation('retry', id, step) },
   });
 }
 
@@ -52,7 +59,7 @@ export function compensateWebsiteProvisioningStep(operationId, provisioningStepI
   const step = stepId(provisioningStepId);
   return panelRequest(`/sites/provisioning/${encodeURIComponent(id)}/steps/${encodeURIComponent(step)}/compensate`, {
     method: 'POST',
-    body: { confirmation: compensationConfirmation(id, step) },
+    body: { confirmation: provisioningConfirmation('compensate', id, step) },
   });
 }
 
