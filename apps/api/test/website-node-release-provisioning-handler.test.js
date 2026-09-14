@@ -39,8 +39,8 @@ test('release handler inspects before mutation and returns operation-owned evide
       calls.push(['inspect', spec]);
       return { satisfied: false, reason: 'website_node_release_receipt_missing' };
     },
-    prepare: async (spec) => {
-      calls.push(['prepare', spec]);
+    prepare: async (spec, options) => {
+      calls.push(['prepare', spec, options]);
       return {
         satisfied: true,
         applicationId,
@@ -60,10 +60,38 @@ test('release handler inspects before mutation and returns operation-owned evide
   assert.equal(result.releaseId, deploymentId);
   assert.deepEqual(calls.map(([kind]) => kind), ['inspect', 'prepare']);
   assert.equal(calls[1][1].runtime.port, undefined);
+  assert.deepEqual(calls[1][2], { gitCredential: null });
 });
 
-test('release handler keeps an already satisfied operation idempotent', async () => {
-  let prepared = false;
+test('release handler materializes private Git credential only when mutation is required', async () => {
+  const credential = { type: 'github_token', token: 'secret-token-value' };
+  let materialized = 0;
+  let receivedOptions = null;
+  const handler = createWebsiteNodeReleaseProvisioningHandler({
+    gitCredentialProvider: async (receivedApplicationId) => {
+      materialized += 1;
+      assert.equal(receivedApplicationId, applicationId);
+      return credential;
+    },
+    nodeReleaseManager: {
+      inspectDeployment: async () => ({ satisfied: false, reason: 'missing' }),
+      prepare: async (_spec, options) => {
+        receivedOptions = options;
+        return { satisfied: true, releaseId: deploymentId };
+      },
+      compensate: async () => ({ satisfied: true }),
+      inspectCompensation: async () => ({ satisfied: true }),
+    },
+  });
+  const result = await handler.apply({ intent: intent() });
+  assert.equal(result.satisfied, true);
+  assert.equal(materialized, 1);
+  assert.deepEqual(receivedOptions, { gitCredential: credential });
+  assert.equal(JSON.stringify(result).includes('secret-token-value'), false);
+});
+
+test('release handler never decrypts Git credential for an already satisfied retry', async () => {
+  let materialized = false;
   const evidence = {
     satisfied: true,
     applicationId,
@@ -73,16 +101,17 @@ test('release handler keeps an already satisfied operation idempotent', async ()
     commitSha: 'a'.repeat(40),
   };
   const handler = createWebsiteNodeReleaseProvisioningHandler({
+    gitCredentialProvider: async () => { materialized = true; return null; },
     nodeReleaseManager: {
       inspectDeployment: async () => evidence,
-      prepare: async () => { prepared = true; return evidence; },
+      prepare: async () => { throw new Error('prepare should not run'); },
       compensate: async () => ({ satisfied: true }),
       inspectCompensation: async () => ({ satisfied: true }),
     },
   });
 
   assert.equal(await handler.apply({ intent: intent() }), evidence);
-  assert.equal(prepared, false);
+  assert.equal(materialized, false);
 });
 
 test('release handler compensation is bound to persisted previous-release evidence', async () => {
