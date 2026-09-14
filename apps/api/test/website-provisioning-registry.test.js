@@ -177,3 +177,47 @@ test('compensation is persisted as an explicit lifecycle', async () => {
   assert.equal(compensated.steps[0].compensation.state, 'succeeded');
   assert.equal(compensated.ready, false);
 });
+
+test('failed compensation restores the stable source state so compensation can be retried', async () => {
+  const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
+  await registry.create(input());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  await registry.completeStep({ operationId, stepId: 'unix_identity', evidence: { uid: 1201 } });
+
+  await registry.beginCompensation({ operationId, stepId: 'unix_identity' });
+  const failedCompensation = await registry.failCompensation({
+    operationId,
+    stepId: 'unix_identity',
+    error: 'unix_identity_compensation_failed',
+  });
+  assert.equal(failedCompensation.steps[0].state, 'succeeded');
+  assert.equal(failedCompensation.steps[0].compensation.state, 'failed');
+  assert.equal(failedCompensation.steps[0].compensation.error, 'unix_identity_compensation_failed');
+
+  const retriedCompensation = await registry.beginCompensation({ operationId, stepId: 'unix_identity' });
+  assert.equal(retriedCompensation.steps[0].state, 'compensating');
+  assert.equal(retriedCompensation.steps[0].compensation.state, 'applying');
+  assert.equal(retriedCompensation.steps[0].compensation.error, null);
+});
+
+test('failed compensation restores a failed provisioning step to failed', async () => {
+  const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
+  await registry.create(input());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  await registry.failStep({
+    operationId,
+    stepId: 'unix_identity',
+    error: 'unix_identity_apply_failed',
+    evidence: { attempted: true },
+  });
+
+  await registry.beginCompensation({ operationId, stepId: 'unix_identity' });
+  const failedCompensation = await registry.failCompensation({
+    operationId,
+    stepId: 'unix_identity',
+    error: 'unix_identity_compensation_failed',
+  });
+  assert.equal(failedCompensation.steps[0].state, 'failed');
+  assert.equal(failedCompensation.steps[0].error, 'unix_identity_apply_failed');
+  assert.equal(failedCompensation.steps[0].compensation.state, 'failed');
+});
