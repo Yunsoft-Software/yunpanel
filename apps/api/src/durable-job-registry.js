@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { createOperationEnvelope } from '@yunpanel/protocol';
 import { createJobRecoveryStore } from './job-recovery-store.js';
 
 const automaticReconciliationAcks = new WeakMap();
@@ -14,6 +16,7 @@ const RECOVERY_CODE = 'durable_job_reconciliation_required';
 const RECOVERY_MESSAGE = 'Persisted running jobs require reconciliation before new job mutations can continue';
 const RECOVERABLE_STATUSES = new Set(['running', 'succeeded', 'failed']);
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed']);
+const JOB_STORE_VERSION = 1;
 
 function safeRecoveryJob(job) {
   const jobId = typeof job?.id === 'string' && job.id.length >= 8 && job.id.length <= 128 ? job.id : null;
@@ -341,6 +344,48 @@ export function createDurableJobRegistry({
     return operation;
   }
 
+  async function getReconciliationJob(jobId) {
+    await init();
+    await mutationTail;
+    assertHealthy();
+    let job;
+    try {
+      job = await registry.getJob(jobId);
+    } catch {
+      throw new DurableJobRegistryError('durable_job_reconciliation_job_unavailable', 'Persisted reconciliation job could not be inspected');
+    }
+    if (!job) return null;
+    const identity = safeRecoveryJob(job);
+    if (!identity || !TERMINAL_STATUSES.has(job.status)
+      || !recovery?.jobs.some((candidate) => recoveryKey(candidate) === recoveryKey(identity))) {
+      throw new DurableJobRegistryError('durable_job_reconciliation_not_pending', 'Job is not a terminal pending reconciliation');
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(await readFile(filePath, 'utf8'));
+    } catch {
+      throw new DurableJobRegistryError('durable_job_reconciliation_payload_unavailable', 'Persisted reconciliation payload could not be read');
+    }
+    if (parsed?.version !== JOB_STORE_VERSION || !Array.isArray(parsed.jobs)) {
+      throw new DurableJobRegistryError('durable_job_reconciliation_payload_invalid', 'Persisted reconciliation payload store is invalid');
+    }
+    const stored = parsed.jobs.find((candidate) => candidate?.id === job.id);
+    if (!stored || stored.serverId !== job.serverId || stored.operation !== job.operation
+      || stored.resourceType !== job.resourceType || stored.resourceId !== job.resourceId
+      || stored.status !== job.status || !stored.payload || typeof stored.payload !== 'object'
+      || Array.isArray(stored.payload)) {
+      throw new DurableJobRegistryError('durable_job_reconciliation_payload_invalid', 'Persisted reconciliation payload identity is invalid');
+    }
+    let envelope;
+    try {
+      envelope = createOperationEnvelope({ id: stored.id, operation: stored.operation, payload: stored.payload });
+    } catch {
+      throw new DurableJobRegistryError('durable_job_reconciliation_payload_incompatible', 'Persisted reconciliation payload does not satisfy the current protocol');
+    }
+    return Object.freeze({ ...job, payload: structuredClone(envelope.payload) });
+  }
+
   async function read(method, args) {
     await init();
     await mutationTail;
@@ -357,6 +402,7 @@ export function createDurableJobRegistry({
     cancel: (...args) => mutate('cancel', args),
     beginReconciliation,
     acknowledgeReconciliation,
+    getReconciliationJob,
     getJob: (...args) => read('getJob', args),
     listJobs: (...args) => read('listJobs', args),
     failure: () => fatal ? { ...fatal } : null,
