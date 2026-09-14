@@ -1,4 +1,5 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
+import { canBeginCompensationInOrder } from './website-provisioning-compensation-order.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -75,7 +76,7 @@ function publicCompensation(compensation) {
   });
 }
 
-function publicStep(step, supportsCompensation = () => false) {
+function publicStep(operation, step, supportsCompensation = () => false) {
   const compensation = publicCompensation(step.compensation);
   return Object.freeze({
     id: step.id,
@@ -87,6 +88,7 @@ function publicStep(step, supportsCompensation = () => false) {
     canRetry: step.state === 'failed' && ['pending', 'not_required'].includes(compensation.state),
     canCompensate: ['succeeded', 'failed'].includes(step.state)
       && ['pending', 'failed'].includes(compensation.state)
+      && canBeginCompensationInOrder(operation, step.id)
       && supportsCompensation(step.kind) === true,
   });
 }
@@ -107,7 +109,7 @@ function publicOperation(operation, supportsCompensation = () => false) {
       : null,
     createdAt: operation.createdAt ?? null,
     updatedAt: operation.updatedAt ?? null,
-    steps: Object.freeze((operation.steps ?? []).map((step) => publicStep(step, supportsCompensation))),
+    steps: Object.freeze((operation.steps ?? []).map((step) => publicStep(operation, step, supportsCompensation))),
   });
 }
 
