@@ -106,7 +106,7 @@ test('interrupted step without safe inspection stays interrupted for remediation
   assert.equal((await registry.get(operationId)).steps[0].state, 'applying');
 });
 
-test('blocked required step never invokes a handler automatically', async () => {
+test('blocked required step without inspection stays blocked and never mutates', async () => {
   const registry = createWebsiteProvisioningRegistry();
   const blockedPlan = plan();
   blockedPlan.steps[0].state = 'blocked';
@@ -126,6 +126,61 @@ test('blocked required step never invokes a handler automatically', async () => 
   assert.equal(result.stepId, 'unix_identity');
   assert.equal(result.actionRequired, 'remediate_or_compensate');
   assert.equal(applyCalls, 0);
+});
+
+test('unsatisfied handler result persists a blocked step instead of false success', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.create(plan());
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async () => ({ satisfied: false, reason: 'website_release_missing' }),
+        inspect: async () => ({ satisfied: false, reason: 'website_release_missing' }),
+      },
+    },
+  });
+
+  const result = await orchestrator.runNext(operationId);
+  assert.equal(result.outcome, 'blocked');
+  assert.equal(result.error, 'website_release_missing');
+  assert.equal(result.operation.steps[0].state, 'blocked');
+  assert.equal(result.operation.steps[0].error, 'website_release_missing');
+  assert.deepEqual(result.operation.steps[0].evidence, { satisfied: false, reason: 'website_release_missing' });
+});
+
+test('confirmed continuation can reconcile a fixed blocked dependency without re-applying it', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.create(plan());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  await registry.blockStep({
+    operationId,
+    stepId: 'unix_identity',
+    error: 'website_release_missing',
+    evidence: { satisfied: false, reason: 'website_release_missing' },
+  });
+  let applyCalls = 0;
+  let inspectCalls = 0;
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async () => { applyCalls += 1; return { uid: 1201 }; },
+        inspect: async () => {
+          inspectCalls += 1;
+          return { satisfied: true, uid: 1201, gid: 1201 };
+        },
+      },
+    },
+  });
+
+  const result = await orchestrator.runNext(operationId);
+  assert.equal(applyCalls, 0);
+  assert.equal(inspectCalls, 1);
+  assert.equal(result.outcome, 'reconciled');
+  assert.equal(result.operation.steps[0].state, 'succeeded');
+  assert.equal(result.operation.steps[0].error, null);
+  assert.deepEqual(result.operation.steps[0].evidence, { satisfied: true, uid: 1201, gid: 1201 });
 });
 
 test('handler failure records bounded failed state instead of advancing', async () => {
