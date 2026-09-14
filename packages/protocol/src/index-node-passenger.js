@@ -5,6 +5,7 @@ import {
   normalizeDomainSet,
   normalizeNginxSettings,
   normalizeNodeStatusSpec,
+  normalizeRelativeBuildPath,
 } from '@yunpanel/shared';
 import {
   AGENT_PROTOCOL_VERSION,
@@ -116,7 +117,28 @@ function validateNodePassengerMigration(payload, errors) {
   validateDomain(payload.domain, errors);
 }
 
+function isPassengerDomainStage(value) {
+  return value?.operation === DOCKER_OPERATIONS.DOMAIN_STAGE && value?.payload?.targetType === 'passenger';
+}
+
+function validatePassengerDomainStage(value) {
+  const startupFile = value?.payload?.target?.startupFile;
+  const baseEnvelope = structuredClone(value);
+  if (baseEnvelope?.payload?.target && typeof baseEnvelope.payload.target === 'object' && !Array.isArray(baseEnvelope.payload.target)) {
+    baseEnvelope.payload.target.startupFile = 'server.js';
+  }
+  const base = validateDockerOperationEnvelope(baseEnvelope);
+  const errors = [...base.errors];
+  try {
+    if (normalizeRelativeBuildPath(startupFile) !== startupFile) throw new Error('noncanonical');
+  } catch {
+    errors.push('domain.stage Passenger target.startupFile is invalid');
+  }
+  return { ok: errors.length === 0, errors };
+}
+
 export function validateOperationEnvelope(value) {
+  if (isPassengerDomainStage(value)) return validatePassengerDomainStage(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.operation !== APP_NODE_PASSENGER_MIGRATE) {
     return validateDockerOperationEnvelope(value);
@@ -137,7 +159,7 @@ export function validateOperationEnvelope(value) {
 }
 
 export function createOperationEnvelope({ id, operation, payload = {} }) {
-  if (operation !== APP_NODE_PASSENGER_MIGRATE) {
+  if (operation !== APP_NODE_PASSENGER_MIGRATE && !(operation === DOCKER_OPERATIONS.DOMAIN_STAGE && payload?.targetType === 'passenger')) {
     return createDockerOperationEnvelope({ id, operation, payload });
   }
   const envelope = { id, operation, payload, protocolVersion: AGENT_PROTOCOL_VERSION };
@@ -151,4 +173,5 @@ export const nodePassengerProtocolInternals = Object.freeze({
   validateNodePassengerMigration,
   validateNode,
   validateDomain,
+  validatePassengerDomainStage,
 });
