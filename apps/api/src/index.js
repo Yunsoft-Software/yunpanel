@@ -15,7 +15,10 @@ import { createAuthStore } from './auth-store.js';
 import { createAuthenticatedApi, createLiveConnectionAuthenticator } from './auth-http.js';
 import { createApplicationEnvironmentRegistry } from './application-environment-registry.js';
 import { createApplicationDeployQueue } from './application-deploy-queue.js';
+import { createApplicationPassengerMigrationPreviewService } from './application-passenger-migration-preview.js';
+import { createApplicationPassengerMigrationService } from './application-passenger-migration-service.js';
 import { createApplicationRegistry } from './application-registry.js';
+import { createApplicationRuntimeBindingRegistry } from './application-runtime-binding-registry.js';
 import { createBackupOperationRegistry } from './backup-operation-registry.js';
 import { createBackupProjectLockProvider } from './backup-project-lock.js';
 import { createCertificateRegistry } from './certificate-registry.js';
@@ -79,6 +82,8 @@ const jobLogStorePath = path.resolve(path.dirname(jobStorePath), 'job-logs');
 const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.resolve('.data/certificate-registry.json');
 const customCertificateRoot = path.join(path.dirname(certificateStorePath), 'custom-certificates');
 const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.resolve('.data/application-registry.json');
+const applicationRuntimeBindingStorePath = process.env.YUNPANEL_APPLICATION_RUNTIME_BINDING_STORE
+  ?? path.join(controlPlaneStateRoot, 'application-runtime-binding-registry.json');
 const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.data/website-registry.json');
 const websiteProvisioningStorePath = process.env.YUNPANEL_WEBSITE_PROVISIONING_STORE
   ?? path.join(controlPlaneStateRoot, 'website-provisioning-registry.json');
@@ -152,6 +157,8 @@ const applicationRegistry = createApplicationRegistry({
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
 });
 await applicationRegistry.init();
+const runtimeBindingRegistry = createApplicationRuntimeBindingRegistry({ filePath: applicationRuntimeBindingStorePath });
+await runtimeBindingRegistry.init();
 const dockerWorkloadRegistry = createDockerWorkloadRegistry({
   filePath: dockerWorkloadStorePath,
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
@@ -335,6 +342,20 @@ const applicationDeployQueue = createApplicationDeployQueue({
   applicationEnvironmentRegistry,
   jobRegistry,
 });
+const applicationPassengerMigrationPreviewService = createApplicationPassengerMigrationPreviewService({
+  applicationRegistry,
+  websiteRegistry,
+  domainRegistry,
+  localServerId,
+});
+const applicationPassengerMigrationService = createApplicationPassengerMigrationService({
+  previewService: applicationPassengerMigrationPreviewService,
+  applicationRegistry,
+  domainRegistry,
+  certificateRegistry,
+  runtimeBindingRegistry,
+  jobRegistry,
+});
 const listener = createAuthenticatedApi({
   store: authStore,
   publicOrigin,
@@ -362,6 +383,9 @@ const listener = createAuthenticatedApi({
       certificateRegistry,
       certificateMaterialManager,
       applicationRegistry,
+      runtimeBindingRegistry,
+      applicationPassengerMigrationPreviewService,
+      applicationPassengerMigrationService,
       websiteRegistry,
       websiteProvisioningRuntime,
       databaseBindingRegistry,
@@ -407,6 +431,8 @@ const localRuntime = await startConfiguredLocalRuntime({
   certificateRegistry,
   applicationRegistry,
   applicationEnvironmentRegistry,
+  websiteRegistry,
+  runtimeBindingRegistry,
   mailDomainRegistry,
   mailConfigurationService,
   mailDkimConfigurationService,
@@ -454,6 +480,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] job log store=${jobLogStorePath}`);
   console.log(`[yunpanel-api] certificate store=${certificateStorePath}`);
   console.log(`[yunpanel-api] application store=${applicationStorePath}`);
+  console.log(`[yunpanel-api] application runtime binding store=${applicationRuntimeBindingStorePath}`);
   console.log(`[yunpanel-api] website store=${websiteStorePath}`);
   console.log(`[yunpanel-api] website provisioning store=${websiteProvisioningStorePath}`);
   console.log(`[yunpanel-api] database binding store=${databaseBindingStorePath}`);
