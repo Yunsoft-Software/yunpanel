@@ -104,6 +104,18 @@ function staticBindingIdentity({ intent, websiteId } = {}) {
   return Object.freeze({ applicationId: normalized.applicationId });
 }
 
+function staticCompensationTarget(context = {}) {
+  const spec = staticDeploymentSpec(context);
+  const previousReleaseId = context.evidence && Object.hasOwn(context.evidence, 'previousReleaseId')
+    ? context.evidence.previousReleaseId
+    : null;
+  return Object.freeze({
+    applicationId: spec.applicationId,
+    deploymentId: spec.deploymentId,
+    previousReleaseId,
+  });
+}
+
 function legacyStaticPending(intent) {
   return Object.freeze({
     satisfied: false,
@@ -203,6 +215,8 @@ export function createWebsiteProvisioningHandlers({
     || typeof staticDeploymentManager.deployStatic !== 'function'
     || typeof staticDeploymentManager.inspectCurrent !== 'function'
     || typeof staticDeploymentManager.inspectDeployment !== 'function'
+    || typeof staticDeploymentManager.compensateDeployment !== 'function'
+    || typeof staticDeploymentManager.inspectCompensation !== 'function'
     || !nginxManager
     || typeof nginxManager.stageDomain !== 'function'
     || typeof nginxManager.inspectStagedDomain !== 'function'
@@ -269,15 +283,41 @@ export function createWebsiteProvisioningHandlers({
     return staticDeploymentManager.inspectDeployment(staticDeploymentSpec(context));
   }
 
+  async function compensateStaticRuntime(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    if (normalized.mode !== 'deploy') {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'website_static_compensation_not_required',
+        adapter: 'static',
+        applicationId: normalized.applicationId ?? null,
+      });
+    }
+    return staticDeploymentManager.compensateDeployment(staticCompensationTarget(context));
+  }
+
+  async function inspectStaticRuntimeCompensation(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    if (normalized.mode !== 'deploy') {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'website_static_compensation_not_required',
+        adapter: 'static',
+        applicationId: normalized.applicationId ?? null,
+      });
+    }
+    return staticDeploymentManager.inspectCompensation(staticCompensationTarget(context));
+  }
+
   async function applyRuntime(context = {}) {
     const normalized = runtimeIntent(context.intent);
-    if (normalized.adapter === 'static') return applyStaticRuntime(context);
+    if (normalized.adapter === 'static') return legacyStaticPending(normalized);
     return passengerSiteManager.apply(normalized);
   }
 
   async function inspectRuntime(context = {}) {
     const normalized = runtimeIntent(context.intent);
-    if (normalized.adapter === 'static') return inspectStaticRuntime(context);
+    if (normalized.adapter === 'static') return legacyStaticPending(normalized);
     return passengerSiteManager.inspect(normalized);
   }
 
@@ -358,6 +398,12 @@ export function createWebsiteProvisioningHandlers({
       apply: applyRuntime,
       inspect: inspectRuntime,
     }),
+    static_runtime: Object.freeze({
+      apply: applyStaticRuntime,
+      inspect: inspectStaticRuntime,
+      compensate: compensateStaticRuntime,
+      inspectCompensation: inspectStaticRuntimeCompensation,
+    }),
     nginx: Object.freeze({
       apply: applyNginx,
       inspect: inspectNginx,
@@ -376,6 +422,7 @@ export const websiteProvisioningHandlerInternals = Object.freeze({
   runtimeIntent,
   staticDeploymentSpec,
   staticBindingIdentity,
+  staticCompensationTarget,
   legacyStaticPending,
   passengerRuntimeEvidence,
   nginxSpec,
