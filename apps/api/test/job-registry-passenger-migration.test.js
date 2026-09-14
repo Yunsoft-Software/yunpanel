@@ -7,6 +7,8 @@ import { createJobRegistry } from '../src/job-registry.js';
 const serverId = '57f8611c-0af7-4d2f-8291-2fe7dbab22fe';
 const applicationId = '11111111-1111-4111-8111-111111111111';
 const releaseId = '22222222-2222-4222-8222-222222222222';
+const websiteId = '33333333-3333-4333-8333-333333333333';
+const domainId = '44444444-4444-4444-8444-444444444444';
 const digest = createHash('sha256').update(applicationId).digest('hex');
 const serviceName = `yunpanel-node-${digest.slice(0, 16)}.service`;
 const applicationUser = `yunapp-${digest.slice(0, 12)}`;
@@ -32,6 +34,13 @@ const payload = Object.freeze({
       websocket: true,
       headers: Object.freeze([]),
     }),
+  }),
+  authority: Object.freeze({
+    websiteId,
+    websiteRevision: 3,
+    domainId,
+    domainDesiredRevision: 4,
+    domainAppliedRevision: 4,
   }),
 });
 const passengerTarget = Object.freeze({
@@ -88,6 +97,7 @@ test('Passenger migration can pass through the durable async queue contract', as
   const claim = await registry.claimNext(serverId);
   assert.equal(claim.job.id, queued.id);
   assert.deepEqual(claim.envelope.payload, payload);
+  assert.deepEqual(claim.envelope.payload.authority, payload.authority);
 
   const completed = await registry.complete({
     serverId,
