@@ -29,6 +29,13 @@ const passengerIntent = Object.freeze({
   healthPath: '/health',
   healthTimeoutSeconds: 30,
 });
+const nginxIntent = Object.freeze({
+  websiteId,
+  primaryDomain: 'example.com',
+  aliases: ['www.example.com'],
+  targetType: 'passenger',
+  target: passengerIntent,
+});
 
 function identityManager() {
   return {
@@ -56,6 +63,8 @@ function nginxManager() {
       result: { configName: 'yunpanel-example.com.conf', checksum: 'a'.repeat(64), active: true },
     }),
     activateDomain: async () => ({ configName: 'yunpanel-example.com.conf', checksum: 'a'.repeat(64), active: true }),
+    compensateDomain: async (input) => ({ satisfied: true, ...input, restoredPrevious: false }),
+    inspectDomainCompensation: async (input) => ({ satisfied: true, ...input, restoredPrevious: false }),
   };
 }
 
@@ -183,13 +192,6 @@ test('Passenger Nginx handler activates only with succeeded runtime evidence', a
     passengerSiteManager: passengerSiteManager(),
     nginxManager: manager,
   });
-  const nginxIntent = {
-    websiteId,
-    primaryDomain: 'example.com',
-    aliases: ['www.example.com'],
-    targetType: 'passenger',
-    target: passengerIntent,
-  };
 
   const result = await handlers.nginx.apply({ operation: passengerOperation(), intent: nginxIntent });
   assert.equal(result.satisfied, true);
@@ -241,11 +243,80 @@ test('Nginx inspection is read-only and requires staged plus active matching che
 
   const result = await handlers.nginx.inspect({
     operation: passengerOperation(),
-    intent: { websiteId, primaryDomain: 'example.com', aliases: [], targetType: 'passenger', target: passengerIntent },
+    intent: nginxIntent,
   });
   assert.equal(result.satisfied, true);
   assert.equal(calls.some((entry) => entry === 'stage'), false);
   assert.deepEqual(calls[1], ['inspect-active', { primaryDomain: 'example.com', checksum: 'c'.repeat(64) }]);
+});
+
+test('Nginx compensation uses persisted step checksum without restaging or reapplying', async () => {
+  const calls = [];
+  const manager = nginxManager();
+  manager.stageDomain = async () => { calls.push('stage'); return {}; };
+  manager.inspectStagedDomain = async () => { calls.push('inspect-stage'); throw new Error('persisted evidence should avoid staging lookup'); };
+  manager.compensateDomain = async (input) => {
+    calls.push(['compensate', input]);
+    return { satisfied: true, ...input, restoredPrevious: true };
+  };
+  manager.inspectDomainCompensation = async (input) => {
+    calls.push(['inspect-compensation', input]);
+    return { satisfied: true, ...input, restoredPrevious: true };
+  };
+  const handlers = createWebsiteProvisioningHandlers({
+    identityManager: identityManager(),
+    passengerSiteManager: passengerSiteManager(),
+    nginxManager: manager,
+  });
+  const evidence = { satisfied: true, configName: 'yunpanel-example.com.conf', checksum: 'd'.repeat(64), active: true };
+
+  const compensated = await handlers.nginx.compensate({
+    operation: passengerOperation(),
+    intent: nginxIntent,
+    evidence,
+  });
+  const inspected = await handlers.nginx.inspectCompensation({
+    operation: passengerOperation(),
+    intent: nginxIntent,
+    evidence,
+  });
+  assert.equal(compensated.satisfied, true);
+  assert.equal(inspected.satisfied, true);
+  assert.deepEqual(calls, [
+    ['compensate', { primaryDomain: 'example.com', checksum: 'd'.repeat(64) }],
+    ['inspect-compensation', { primaryDomain: 'example.com', checksum: 'd'.repeat(64) }],
+  ]);
+});
+
+test('failed Nginx step can derive compensation target from deterministic staged evidence', async () => {
+  const calls = [];
+  const manager = nginxManager();
+  manager.stageDomain = async () => { calls.push('stage'); return {}; };
+  manager.inspectStagedDomain = async (spec) => {
+    calls.push(['inspect-stage', spec.primaryDomain]);
+    return { satisfied: true, result: { configName: 'yunpanel-example.com.conf', checksum: 'e'.repeat(64), bytes: 400 } };
+  };
+  manager.compensateDomain = async (input) => {
+    calls.push(['compensate', input]);
+    return { satisfied: true, ...input, restoredPrevious: false };
+  };
+  const handlers = createWebsiteProvisioningHandlers({
+    identityManager: identityManager(),
+    passengerSiteManager: passengerSiteManager(),
+    nginxManager: manager,
+  });
+
+  const result = await handlers.nginx.compensate({
+    operation: passengerOperation(),
+    intent: nginxIntent,
+    evidence: null,
+  });
+  assert.equal(result.satisfied, true);
+  assert.equal(calls.some((entry) => entry === 'stage'), false);
+  assert.deepEqual(calls, [
+    ['inspect-stage', 'example.com'],
+    ['compensate', { primaryDomain: 'example.com', checksum: 'e'.repeat(64) }],
+  ]);
 });
 
 test('handler factory fails closed when required manager contracts are incomplete', () => {
