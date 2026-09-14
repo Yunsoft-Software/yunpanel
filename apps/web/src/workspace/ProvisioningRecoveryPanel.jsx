@@ -11,6 +11,7 @@ import {
   canContinueProvisioning,
   provisioningBadgeState,
   provisioningOperationLabel,
+  provisioningRemediation,
   provisioningStepLabel,
   provisioningStepStateLabel,
 } from './provisioning-model.js';
@@ -133,16 +134,22 @@ export default function ProvisioningRecoveryPanel({ websiteId, canManage = false
       </div>
       {operation && <div className="ws-table-scroll"><table className="ws-table">
         <thead><tr><th>Adım</th><th>Durum</th><th>Hata / recovery</th><th>İşlem</th></tr></thead>
-        <tbody>{operation.steps.map((step) => <tr key={step.id}>
-          <td><strong>{provisioningStepLabel(step)}</strong><div className="ws-muted"><code>{step.id}</code></div></td>
-          <td><Badge state={provisioningBadgeState(step)}>{provisioningStepStateLabel(step)}</Badge></td>
-          <td>{step.error ? <code>{step.error}</code> : step.compensation?.error ? <code>{step.compensation.error}</code> : <span className="ws-muted">—</span>}</td>
-          <td><div className="ws-actions">
-            {canManage && step.canRetry === true && <Button disabled={busy} onClick={() => setConfirm({ action: 'retry', step })}>Tekrar dene</Button>}
-            {canManage && step.canCompensate === true && <Button variant="danger" disabled={busy} onClick={() => setConfirm({ action: 'compensate', step })}>Geri al</Button>}
-            {(!canManage || (step.canRetry !== true && step.canCompensate !== true)) && <span className="ws-muted">—</span>}
-          </div></td>
-        </tr>)}</tbody>
+        <tbody>{operation.steps.map((step) => {
+          const remediation = provisioningRemediation(step);
+          return <tr key={step.id}>
+            <td><strong>{provisioningStepLabel(step)}</strong><div className="ws-muted"><code>{step.id}</code></div></td>
+            <td><Badge state={provisioningBadgeState(step)}>{provisioningStepStateLabel(step)}</Badge></td>
+            <td>
+              {step.error ? <code>{step.error}</code> : step.compensation?.error ? <code>{step.compensation.error}</code> : <span className="ws-muted">—</span>}
+              {remediation && <div className="ws-muted ws-provisioning-remediation">{remediation}</div>}
+            </td>
+            <td><div className="ws-actions">
+              {canManage && step.canRetry === true && <Button disabled={busy} onClick={() => setConfirm({ action: 'retry', step })}>Tekrar dene</Button>}
+              {canManage && step.canCompensate === true && <Button variant="danger" disabled={busy} onClick={() => setConfirm({ action: 'compensate', step })}>Geri al</Button>}
+              {(!canManage || (step.canRetry !== true && step.canCompensate !== true)) && <span className="ws-muted">—</span>}
+            </div></td>
+          </tr>;
+        })}</tbody>
       </table></div>}
       <div className="ws-section-body"><p className="ws-muted">Retry ve compensation yalnız operation + step’e bağlı yazılı onayla çalışır. Raw intent, evidence ve secret-bearing resource verileri bu ekrana gönderilmez.</p></div>
     </Section>
