@@ -135,11 +135,25 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.equal(nginx.state, 'pending');
   assert.equal(nginx.compensation.state, 'pending');
 
+  const health = plan.steps.find((step) => step.id === 'passenger_health');
+  assert.equal(health.kind, 'passenger_health');
+  assert.equal(health.intent.adapter, 'passenger-health');
+  assert.equal(health.intent.applicationId, applicationId);
+  assert.equal(health.intent.primaryDomain, 'example.com');
+  assert.equal(health.intent.healthPath, '/health');
+  assert.equal(health.intent.timeoutSeconds, 30);
+  assert.equal(health.compensation.state, 'not_required');
+
   const applicationRelease = plan.steps.find((step) => step.id === 'application_release');
   assert.equal(applicationRelease.kind, 'passenger_application_release');
   assert.equal(applicationRelease.intent.applicationId, applicationId);
   assert.equal(applicationRelease.intent.releaseId, operationId);
   assert.equal(applicationRelease.compensation.state, 'pending');
+
+  const environmentState = plan.steps.find((step) => step.id === 'passenger_environment_state');
+  assert.equal(environmentState.kind, 'passenger_environment_state');
+  assert.equal(environmentState.intent.applicationId, applicationId);
+  assert.equal(environmentState.compensation.state, 'not_required');
 
   const authority = plan.steps.find((step) => step.id === 'passenger_authority');
   assert.equal(authority.kind, 'passenger_authority');
@@ -148,6 +162,12 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.deepEqual(authority.intent.domainIds, [domainId]);
   assert.equal(authority.compensation.state, 'pending');
   assert.equal(plan.steps.find((step) => step.id === 'certificate').state, 'pending');
+
+  const ordered = plan.steps.map((step) => step.id);
+  assert.ok(ordered.indexOf('domain_activation') < ordered.indexOf('passenger_health'));
+  assert.ok(ordered.indexOf('passenger_health') < ordered.indexOf('application_release'));
+  assert.ok(ordered.indexOf('application_release') < ordered.indexOf('passenger_environment_state'));
+  assert.ok(ordered.indexOf('passenger_environment_state') < ordered.indexOf('passenger_authority'));
 });
 
 test('Node provisioning rejects document-root drift from the managed Website path contract', () => {
@@ -203,6 +223,8 @@ test('new static Website persists deterministic deployment intent with canonical
   assert.equal(runtime.compensation.state, 'pending');
   assert.equal(plan.steps.some((step) => step.id === 'certificate'), false);
   assert.equal(plan.steps.some((step) => step.id === 'passenger_environment'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'passenger_health'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'passenger_environment_state'), false);
   assert.equal(plan.steps.some((step) => step.id === 'passenger_authority'), false);
 });
 
@@ -243,6 +265,8 @@ test('external proxy provisioning requires Nginx without inventing a site Unix i
   assert.equal(plan.steps.some((step) => step.id === 'unix_identity'), false);
   assert.equal(plan.steps.some((step) => step.id === 'runtime'), false);
   assert.equal(plan.steps.some((step) => step.id === 'passenger_environment'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'passenger_health'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'passenger_environment_state'), false);
   assert.equal(plan.steps.some((step) => step.id === 'passenger_authority'), false);
   assert.equal(plan.steps.find((step) => step.id === 'nginx').state, 'pending');
   assert.equal(plan.ready, false);
