@@ -3,6 +3,7 @@ import path from 'node:path';
 const SAFE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._/-]+$/;
 const STARTUP_FILE = /^[A-Za-z0-9._/-]{1,240}$/;
 const UNIX_IDENTITY = /^yunapp-[a-f0-9]{12}$/;
+const PASSENGER_ENV_ROOT = '/etc/yunpanel/passenger-env';
 
 export class PassengerNginxTemplateError extends Error {
   constructor(code, message) {
@@ -21,6 +22,15 @@ function absolutePath(value, field) {
     throw new PassengerNginxTemplateError('passenger_nginx_path_invalid', `${field} contains unsafe path segments`);
   }
   return value;
+}
+
+function passengerEnvironmentInclude(value) {
+  if (value == null) return null;
+  const normalized = absolutePath(value, 'environmentInclude');
+  if (path.posix.dirname(normalized) !== PASSENGER_ENV_ROOT || !/^[0-9a-f-]{36}\.conf$/i.test(path.posix.basename(normalized))) {
+    throw new PassengerNginxTemplateError('passenger_environment_include_invalid', 'Passenger environment include must use the managed root and Application identity file name');
+  }
+  return normalized;
 }
 
 function startupFile(value) {
@@ -45,6 +55,7 @@ export function renderPassengerNodeDirectives({
   user,
   group = user,
   appEnv = 'production',
+  environmentInclude = null,
 } = {}) {
   const safeAppRoot = absolutePath(appRoot, 'appRoot');
   const safeDocumentRoot = absolutePath(documentRoot, 'documentRoot');
@@ -56,6 +67,7 @@ export function renderPassengerNodeDirectives({
   const safeNodeBinary = absolutePath(nodeBinary, 'nodeBinary');
   const safeUser = unixIdentity(user, 'user');
   const safeGroup = unixIdentity(group, 'group');
+  const safeEnvironmentInclude = passengerEnvironmentInclude(environmentInclude);
   if (!/^[A-Za-z0-9_-]{1,32}$/.test(appEnv)) {
     throw new PassengerNginxTemplateError('passenger_app_env_invalid', 'Passenger app environment is invalid');
   }
@@ -70,11 +82,14 @@ export function renderPassengerNodeDirectives({
     `  passenger_user ${safeUser};`,
     `  passenger_group ${safeGroup};`,
     `  passenger_app_env ${appEnv};`,
+    ...(safeEnvironmentInclude ? [`  include ${safeEnvironmentInclude};`] : []),
   ].join('\n');
 }
 
 export const passengerNginxTemplateInternals = Object.freeze({
   absolutePath,
+  passengerEnvironmentInclude,
   startupFile,
   unixIdentity,
+  passengerEnvironmentRoot: PASSENGER_ENV_ROOT,
 });

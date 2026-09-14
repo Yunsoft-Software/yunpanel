@@ -6,15 +6,18 @@ import {
 } from '../src/passenger-nginx.js';
 
 const user = 'yunapp-0123456789ab';
-const appRoot = '/var/lib/yunpanel/apps/6dcb8908-3f3e-43da-9452-15fd6b51ac76/current';
+const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
+const appRoot = `/var/lib/yunpanel/apps/${applicationId}/current`;
+const environmentInclude = `/etc/yunpanel/passenger-env/${applicationId}.conf`;
 
-test('Passenger Node directives pin runtime and Website identity explicitly', () => {
+test('Passenger Node directives pin runtime, Website identity and managed env include explicitly', () => {
   const config = renderPassengerNodeDirectives({
     appRoot,
     documentRoot: `${appRoot}/public`,
     startupFile: 'server.js',
     nodeBinary: '/opt/yunpanel/node-runtimes/24/bin/node',
     user,
+    environmentInclude,
   });
 
   assert.match(config, /passenger_enabled on;/);
@@ -25,6 +28,27 @@ test('Passenger Node directives pin runtime and Website identity explicitly', ()
   assert.match(config, new RegExp(`passenger_user ${user};`));
   assert.match(config, new RegExp(`passenger_group ${user};`));
   assert.match(config, /passenger_app_env production;/);
+  assert.match(config, new RegExp(`include ${environmentInclude.replaceAll('/', '\\/')};`));
+});
+
+test('Passenger template rejects environment includes outside the managed root', () => {
+  for (const invalid of [
+    `/tmp/${applicationId}.conf`,
+    '/etc/yunpanel/passenger-env/custom.conf',
+    `/etc/yunpanel/passenger-env/${applicationId}.conf/extra`,
+  ]) {
+    assert.throws(
+      () => renderPassengerNodeDirectives({
+        appRoot,
+        documentRoot: appRoot,
+        startupFile: 'server.js',
+        user,
+        environmentInclude: invalid,
+      }),
+      (error) => error instanceof PassengerNginxTemplateError
+        && error.code === 'passenger_environment_include_invalid',
+    );
+  }
 });
 
 test('Passenger template rejects document roots escaping the active release', () => {
