@@ -145,7 +145,8 @@ function passengerRuntimeEvidence(operation) {
 
 function passengerEnvironmentEvidence(operation, applicationId) {
   const step = operation?.steps?.find((candidate) => candidate.id === 'passenger_environment');
-  const value = step?.state === 'succeeded' ? step.evidence : null;
+  if (!step) return null;
+  const value = step.state === 'succeeded' ? step.evidence : null;
   if (!value || value.satisfied !== true || value.adapter !== 'passenger-environment'
     || value.applicationId !== applicationId
     || !Number.isSafeInteger(value.environmentRevision) || value.environmentRevision < 0
@@ -184,7 +185,7 @@ function nginxSpec({ operation, intent } = {}) {
       user: runtime.unixUser,
       group: runtime.unixUser,
       appEnv: intent.target?.appEnv ?? 'production',
-      environmentInclude: environment.environmentInclude,
+      environmentInclude: environment?.environmentInclude ?? null,
     });
   }
 
