@@ -187,7 +187,9 @@ export function siteCreateProvisioningPlan(preview) {
       }));
     } else {
       runtimeIntent = staticIntent(preview, applicationId, paths);
-      steps.push(hostStep('runtime', 'static_runtime', runtimeIntent));
+      steps.push(hostStep('runtime', 'static_runtime', runtimeIntent, {
+        compensationState: runtimeIntent.mode === 'bind_existing' ? 'not_required' : 'pending',
+      }));
     }
   }
 
