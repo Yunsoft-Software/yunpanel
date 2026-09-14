@@ -45,11 +45,12 @@ test('missing packages are reported without leaking command errors', async () =>
   const manager = createManagedServiceManager({
     run: async (file) => {
       if (file === '/usr/bin/dpkg-query') throw Object.assign(new Error('/secret/path'), { stderr: 'sensitive output' });
-      return { stdout: 'LoadState=not-found\nActiveState=inactive\nSubState=dead\nUnitFileState=unknown\n' };
+      return { stdout: 'LoadState=not-found\nActiveState=inactive\nSubState=dead\nUnitFileState=\n' };
     },
   });
   const result = await manager.inspect('rspamd');
   assert.deepEqual(result.packages, [{ packageName: 'rspamd', installed: false, version: null }]);
+  assert.equal(result.units[0].unitFileState, 'unknown');
   assert.equal(result.installed, false);
   assert.equal(result.active, false);
   assert.deepEqual(result.health, { status: 'not_installed', configuration: 'not_checked' });

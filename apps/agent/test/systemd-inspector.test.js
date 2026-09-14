@@ -18,6 +18,22 @@ UnitFileState=enabled
   });
 });
 
+test('normalizes an empty UnitFileState from a missing systemd unit', () => {
+  const parsed = parseSystemdProperties(`
+LoadState=not-found
+ActiveState=inactive
+SubState=dead
+UnitFileState=
+`);
+
+  assert.deepEqual(parsed, {
+    loadState: 'not-found',
+    activeState: 'inactive',
+    subState: 'dead',
+    unitFileState: 'unknown',
+  });
+});
+
 test('systemd inspection policy contains only fixed unit names', () => {
   assert.ok(systemdInspectionPolicy.units.includes('nginx.service'));
   assert.ok(systemdInspectionPolicy.units.includes('docker.service'));

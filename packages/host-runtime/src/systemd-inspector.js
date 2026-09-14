@@ -27,7 +27,7 @@ export function parseSystemdProperties(output) {
     loadState: properties.LoadState ?? 'unknown',
     activeState: properties.ActiveState ?? 'unknown',
     subState: properties.SubState ?? 'unknown',
-    unitFileState: properties.UnitFileState ?? 'unknown',
+    unitFileState: properties.UnitFileState || 'unknown',
   };
 }
 
