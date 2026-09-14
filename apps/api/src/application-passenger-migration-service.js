@@ -3,6 +3,8 @@ import { ApplicationRegistryError } from './application-registry.js';
 import { materializeApplicationPassengerMigrationDomainEnvelope } from './application-passenger-migration-domain.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const ACTIVE_JOB_STATUSES = new Set(['queued', 'running']);
+const ACTIVE_CERTIFICATE_STATES = new Set(['pending', 'validating', 'issuing', 'renewing']);
 
 function applyInput(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -17,6 +19,22 @@ function applyInput(value) {
   return Object.freeze({ previewDigest: value.previewDigest, confirmation: value.confirmation });
 }
 
+async function assertRoutingIdle({ jobRegistry, certificateRegistry, domainId }) {
+  const [jobs, certificates] = await Promise.all([
+    jobRegistry.listJobs({ resourceType: 'domain', resourceId: domainId }),
+    certificateRegistry.listCertificates(),
+  ]);
+  if (jobs.some((job) => ACTIVE_JOB_STATUSES.has(job.status))
+    || certificates.some((certificate) => certificate.domainId === domainId
+      && ACTIVE_CERTIFICATE_STATES.has(certificate.state))) {
+    throw new ApplicationRegistryError(
+      'node_passenger_migration_routing_busy',
+      'Wait for the active Domain or certificate operation to finish before Passenger migration',
+      409,
+    );
+  }
+}
+
 export function createApplicationPassengerMigrationService({
   previewService,
   applicationRegistry,
@@ -29,9 +47,9 @@ export function createApplicationPassengerMigrationService({
     [previewService, ['preview']],
     [applicationRegistry, ['getApplication']],
     [domainRegistry, ['getDomain']],
-    [certificateRegistry, ['getCertificate']],
+    [certificateRegistry, ['getCertificate', 'listCertificates']],
     [runtimeBindingRegistry, ['getBinding']],
-    [jobRegistry, ['enqueue']],
+    [jobRegistry, ['enqueue', 'listJobs']],
   ]) {
     if (!dependency || methods.some((method) => typeof dependency[method] !== 'function')) {
       throw new Error('Application Passenger migration service dependencies are required');
@@ -107,6 +125,7 @@ export function createApplicationPassengerMigrationService({
         409,
       );
     }
+    await assertRoutingIdle({ jobRegistry, certificateRegistry, domainId: domain.id });
     const domainEnvelope = await materializeApplicationPassengerMigrationDomainEnvelope(domain, certificateRegistry);
     const job = await jobRegistry.enqueue({
       serverId: application.serverId,
@@ -130,4 +149,4 @@ export function createApplicationPassengerMigrationService({
   return Object.freeze({ apply });
 }
 
-export const applicationPassengerMigrationServiceInternals = Object.freeze({ applyInput });
+export const applicationPassengerMigrationServiceInternals = Object.freeze({ applyInput, assertRoutingIdle });
