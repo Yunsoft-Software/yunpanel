@@ -107,6 +107,10 @@ import { createWebsiteMigrationPolicyStore, WebsiteMigrationPolicyError } from '
 import { WebsiteMigrationPreviewError } from './website-migration-preview.js';
 import { WebsiteMigrationRollbackError } from './website-migration-rollback.js';
 import { createWebsiteRegistry, WebsiteRegistryError } from './website-registry.js';
+import { WebsiteProvisioningHandlerError } from './website-provisioning-handlers.js';
+import { mountWebsiteProvisioningRoutes, WebsiteProvisioningHttpError } from './website-provisioning-http.js';
+import { WebsiteProvisioningOrchestratorError } from './website-provisioning-orchestrator.js';
+import { WebsiteProvisioningRegistryError } from './website-provisioning-registry.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -206,6 +210,7 @@ export function createApp({
   localServerId = null,
   terminalCapabilityRegistry = null,
   siteFileManager = null,
+  websiteProvisioningRuntime = null,
   ...options
 } = {}) {
   const core = createCoreApp({
@@ -348,7 +353,21 @@ export function createApp({
   app.patch('/api/domains/:domainId', requirePanelRouteAccess, createDomainUpdateHandler(domainRegistry, { jobRegistry, certificateRegistry, localServerId }));
   app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry, { localServerId }));
   app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry, { localServerId }));
-  mountSiteCreateRoutes(app, { registry: localRegistry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry, localServerId });
+  mountSiteCreateRoutes(app, {
+    registry: localRegistry,
+    applicationRegistry,
+    dockerWorkloadRegistry,
+    websiteRegistry,
+    domainRegistry,
+    localServerId,
+    websiteProvisioningRegistry: websiteProvisioningRuntime?.registry ?? null,
+  });
+  if (websiteProvisioningRuntime) {
+    mountWebsiteProvisioningRoutes(app, {
+      registry: websiteProvisioningRuntime.registry,
+      orchestrator: websiteProvisioningRuntime.orchestrator,
+    });
+  }
   mountResourceImpactRoutes(app, {
     registry: localRegistry,
     applicationRegistry,
@@ -576,6 +595,10 @@ export function createApp({
       || error instanceof WebsiteMigrationPolicyError
       || error instanceof WebsiteMigrationPreviewError
       || error instanceof WebsiteMigrationRollbackError
+      || error instanceof WebsiteProvisioningHandlerError
+      || error instanceof WebsiteProvisioningHttpError
+      || error instanceof WebsiteProvisioningOrchestratorError
+      || error instanceof WebsiteProvisioningRegistryError
       || error instanceof WebsiteRegistryError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
