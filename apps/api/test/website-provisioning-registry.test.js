@@ -1,0 +1,115 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import {
+  createWebsiteProvisioningRegistry,
+  WebsiteProvisioningRegistryError,
+} from '../src/website-provisioning-registry.js';
+
+const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
+const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
+
+function input() {
+  return {
+    operationId,
+    websiteId,
+    resources: { website: { id: websiteId } },
+    steps: [
+      {
+        id: 'unix_identity',
+        kind: 'unix_identity',
+        state: 'pending',
+        intent: { user: 'yunapp-example' },
+        compensation: { state: 'pending' },
+      },
+      {
+        id: 'runtime',
+        kind: 'runtime',
+        state: 'pending',
+        intent: { adapter: 'passenger' },
+        compensation: { state: 'pending' },
+      },
+    ],
+  };
+}
+
+test('registry persists applying intent before evidence and recovers interrupted work', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-provisioning-'));
+  const filePath = path.join(directory, 'provisioning.json');
+  let clock = Date.parse('2026-09-14T01:00:00.000Z');
+  try {
+    const registry = createWebsiteProvisioningRegistry({ filePath, now: () => clock });
+    const created = await registry.create(input());
+    assert.equal(created.status, 'pending');
+
+    clock += 1_000;
+    const applying = await registry.beginStep({ operationId, stepId: 'unix_identity' });
+    assert.equal(applying.steps[0].state, 'applying');
+    assert.equal(applying.ready, false);
+
+    const diskState = JSON.parse(await readFile(filePath, 'utf8'));
+    assert.equal(diskState.operations[0].steps[0].state, 'applying');
+    assert.deepEqual(diskState.operations[0].steps[0].intent, { user: 'yunapp-example' });
+    assert.equal(diskState.operations[0].steps[0].evidence, null);
+
+    const restarted = createWebsiteProvisioningRegistry({ filePath, now: () => clock });
+    await restarted.init();
+    const interrupted = await restarted.listInterrupted();
+    assert.equal(interrupted.length, 1);
+    assert.equal(interrupted[0].operationId, operationId);
+    assert.equal(interrupted[0].steps[0].state, 'applying');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('successful steps require explicit evidence and readiness waits for every required step', async () => {
+  const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
+  await registry.create(input());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+
+  await assert.rejects(
+    registry.completeStep({ operationId, stepId: 'unix_identity', evidence: null }),
+    (error) => error instanceof WebsiteProvisioningRegistryError && error.code === 'website_provisioning_evidence_required',
+  );
+
+  const identityComplete = await registry.completeStep({
+    operationId,
+    stepId: 'unix_identity',
+    evidence: { uid: 1201, gid: 1201, home: '/var/lib/yunpanel/sites/example' },
+  });
+  assert.equal(identityComplete.status, 'partial');
+  assert.equal(identityComplete.ready, false);
+
+  await registry.beginStep({ operationId, stepId: 'runtime' });
+  const ready = await registry.completeStep({
+    operationId,
+    stepId: 'runtime',
+    evidence: { adapter: 'passenger', healthy: true },
+  });
+  assert.equal(ready.status, 'ready');
+  assert.equal(ready.ready, true);
+  assert.deepEqual(ready.progress, { required: 2, completed: 2, remaining: 0 });
+});
+
+test('compensation is persisted as an explicit lifecycle', async () => {
+  const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
+  await registry.create(input());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  await registry.completeStep({ operationId, stepId: 'unix_identity', evidence: { uid: 1201 } });
+
+  const compensating = await registry.beginCompensation({ operationId, stepId: 'unix_identity' });
+  assert.equal(compensating.steps[0].state, 'compensating');
+  assert.equal(compensating.steps[0].compensation.state, 'applying');
+
+  const compensated = await registry.completeCompensation({
+    operationId,
+    stepId: 'unix_identity',
+    evidence: { removedUser: true },
+  });
+  assert.equal(compensated.steps[0].state, 'compensated');
+  assert.equal(compensated.steps[0].compensation.state, 'succeeded');
+  assert.equal(compensated.ready, false);
+});
