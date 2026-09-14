@@ -342,6 +342,7 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
     }
     step.compensation.state = 'failed';
     step.compensation.error = failureCode(error, 'compensation error');
+    step.state = step.error === null ? 'succeeded' : 'failed';
     operation.updatedAt = nowIso();
     await persist();
     return publicOperation(operation);
