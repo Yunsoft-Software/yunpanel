@@ -32,7 +32,24 @@ test('Passenger inspector reports healthy only for matching loaded Nginx configu
   assert.deepEqual(result.nginxPassengerRoots, [root]);
   assert.equal(result.moduleLoaded, true);
   assert.equal(result.installValid, true);
-  assert.equal(result.nodeVersion, 'v24.7.0');
+  assert.equal(result.systemNodeVersion, 'v24.7.0');
+  assert.equal(result.healthy, true);
+});
+
+test('Passenger shared health does not require a system Node binary', async () => {
+  const inspector = createPassengerInspector({
+    run: async (file, args) => {
+      if (file === '/usr/bin/node') {
+        const error = new Error('not installed');
+        error.code = 'ENOENT';
+        throw error;
+      }
+      return healthyRun(file, args);
+    },
+  });
+
+  const result = await inspector.inspect();
+  assert.equal(result.systemNodeVersion, null);
   assert.equal(result.healthy, true);
 });
 
@@ -51,6 +68,7 @@ test('missing Passenger package returns a non-healthy capability without running
   assert.equal(result.installed, false);
   assert.equal(result.healthy, false);
   assert.equal(result.passengerRoot, null);
+  assert.equal(result.systemNodeVersion, null);
   assert.deepEqual(calls, [['/usr/bin/dpkg-query', ['-W', '-f=${Status}\t${Version}', 'libnginx-mod-http-passenger']]]);
 });
 
