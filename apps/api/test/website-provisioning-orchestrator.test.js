@@ -96,6 +96,28 @@ test('interrupted step without safe inspection stays interrupted for remediation
   assert.equal((await registry.get(operationId)).steps[0].state, 'applying');
 });
 
+test('blocked required step never invokes a handler automatically', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  const blockedPlan = plan();
+  blockedPlan.steps[0].state = 'blocked';
+  await registry.create(blockedPlan);
+  let applyCalls = 0;
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async () => { applyCalls += 1; return { uid: 1201 }; },
+      },
+    },
+  });
+
+  const result = await orchestrator.runNext(operationId);
+  assert.equal(result.outcome, 'blocked');
+  assert.equal(result.stepId, 'unix_identity');
+  assert.equal(result.actionRequired, 'remediate_or_compensate');
+  assert.equal(applyCalls, 0);
+});
+
 test('handler failure records bounded failed state instead of advancing', async () => {
   const registry = createWebsiteProvisioningRegistry();
   await registry.create(plan());
