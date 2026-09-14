@@ -8,6 +8,7 @@ import {
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
+const previousReleaseId = '3854e385-adfc-42bd-bccf-f655f24cd68f';
 
 const deployIntent = Object.freeze({
   adapter: 'static',
@@ -58,11 +59,18 @@ function nginxManager() {
   };
 }
 
-function handlers(staticDeploymentManager) {
+function handlers(staticDeploymentManager = {}) {
   return createWebsiteProvisioningHandlers({
     identityManager: identityManager(),
     passengerSiteManager: passengerSiteManager(),
-    staticDeploymentManager,
+    staticDeploymentManager: {
+      deployStatic: async () => ({}),
+      inspectCurrent: async () => ({ satisfied: false }),
+      inspectDeployment: async () => ({ satisfied: false }),
+      compensateDeployment: async () => ({ satisfied: false, reason: 'unused' }),
+      inspectCompensation: async () => ({ satisfied: false, reason: 'unused' }),
+      ...staticDeploymentManager,
+    },
     nginxManager: nginxManager(),
   });
 }
@@ -83,13 +91,12 @@ function activeEvidence(releaseId = operationId) {
 test('static Website apply reconciles an already-current deterministic release without redeploying', async () => {
   let deployCalls = 0;
   const seen = [];
-  const runtime = handlers({
+  const provisioning = handlers({
     deployStatic: async () => { deployCalls += 1; return {}; },
-    inspectCurrent: async () => ({ satisfied: false }),
     inspectDeployment: async (spec) => { seen.push(spec); return activeEvidence(); },
   });
 
-  const result = await runtime.runtime.apply({ intent: deployIntent, operationId, websiteId });
+  const result = await provisioning.static_runtime.apply({ intent: deployIntent, operationId, websiteId });
   assert.equal(result.satisfied, true);
   assert.equal(result.releaseId, operationId);
   assert.equal(deployCalls, 0);
@@ -106,8 +113,7 @@ test('static Website apply reconciles an already-current deterministic release w
 test('static Website apply deploys once then verifies the deterministic current release', async () => {
   const calls = [];
   let inspections = 0;
-  const runtime = handlers({
-    inspectCurrent: async () => ({ satisfied: false }),
+  const provisioning = handlers({
     inspectDeployment: async (spec) => {
       calls.push(['inspect', spec.deploymentId]);
       inspections += 1;
@@ -128,7 +134,7 @@ test('static Website apply deploys once then verifies the deterministic current 
     },
   });
 
-  const result = await runtime.runtime.apply({ intent: deployIntent, operationId, websiteId });
+  const result = await provisioning.static_runtime.apply({ intent: deployIntent, operationId, websiteId });
   assert.deepEqual(calls, [
     ['inspect', operationId],
     ['deploy', operationId],
@@ -136,19 +142,19 @@ test('static Website apply deploys once then verifies the deterministic current 
   ]);
   assert.equal(result.satisfied, true);
   assert.equal(result.commitSha, 'a'.repeat(40));
+  assert.equal(result.previousReleaseId, null);
   assert.equal(result.artifactFiles, 4);
   assert.equal(result.artifactBytes, 1024);
 });
 
 test('static Website inspect never mutates and returns deployment inspection directly', async () => {
   let deployCalls = 0;
-  const runtime = handlers({
-    inspectCurrent: async () => ({ satisfied: false }),
+  const provisioning = handlers({
     inspectDeployment: async () => activeEvidence(),
     deployStatic: async () => { deployCalls += 1; return {}; },
   });
 
-  const result = await runtime.runtime.inspect({ intent: deployIntent, operationId, websiteId });
+  const result = await provisioning.static_runtime.inspect({ intent: deployIntent, operationId, websiteId });
   assert.equal(result.satisfied, true);
   assert.equal(result.releaseId, operationId);
   assert.equal(deployCalls, 0);
@@ -166,14 +172,14 @@ test('existing static Application binding inspects current release without redep
     buildRoot: `/var/lib/yunpanel/build/${applicationId}`,
     publishRoot: `/var/www/yunpanel/apps/${applicationId}`,
   });
-  const runtime = handlers({
-    inspectCurrent: async (input) => { calls.push(['current', input]); return activeEvidence('3854e385-adfc-42bd-bccf-f655f24cd68f'); },
+  const provisioning = handlers({
+    inspectCurrent: async (input) => { calls.push(['current', input]); return activeEvidence(previousReleaseId); },
     inspectDeployment: async () => { throw new Error('unexpected deployment inspection'); },
     deployStatic: async () => { throw new Error('unexpected redeploy'); },
   });
 
-  const applied = await runtime.runtime.apply({ intent, operationId, websiteId });
-  const inspected = await runtime.runtime.inspect({ intent, operationId, websiteId });
+  const applied = await provisioning.static_runtime.apply({ intent, operationId, websiteId });
+  const inspected = await provisioning.static_runtime.inspect({ intent, operationId, websiteId });
   assert.equal(applied.satisfied, true);
   assert.equal(inspected.satisfied, true);
   assert.deepEqual(calls, [
@@ -184,21 +190,83 @@ test('existing static Application binding inspects current release without redep
 
 test('static Website deployment intent is operation and Website bound before any host mutation', async () => {
   let calls = 0;
-  const runtime = handlers({
+  const provisioning = handlers({
     inspectCurrent: async () => { calls += 1; return {}; },
     inspectDeployment: async () => { calls += 1; return {}; },
     deployStatic: async () => { calls += 1; return {}; },
   });
 
   await assert.rejects(
-    runtime.runtime.apply({ intent: deployIntent, operationId: '3854e385-adfc-42bd-bccf-f655f24cd68f', websiteId }),
+    provisioning.static_runtime.apply({ intent: deployIntent, operationId: previousReleaseId, websiteId }),
     (error) => error instanceof WebsiteProvisioningHandlerError
       && error.code === 'website_static_runtime_intent_invalid',
   );
   await assert.rejects(
-    runtime.runtime.apply({ intent: deployIntent, operationId, websiteId: '3854e385-adfc-42bd-bccf-f655f24cd68f' }),
+    provisioning.static_runtime.apply({ intent: deployIntent, operationId, websiteId: previousReleaseId }),
     (error) => error instanceof WebsiteProvisioningHandlerError
       && error.code === 'website_static_runtime_intent_invalid',
   );
   assert.equal(calls, 0);
+});
+
+test('static Website compensation passes only durable operation-owned release evidence to host rollback', async () => {
+  const calls = [];
+  const evidence = Object.freeze({
+    ...activeEvidence(),
+    previousReleaseId,
+    commitSha: 'a'.repeat(40),
+    artifactFiles: 4,
+    artifactBytes: 1024,
+  });
+  const provisioning = handlers({
+    compensateDeployment: async (target) => {
+      calls.push(['compensate', target]);
+      return { satisfied: true, ...target, releaseId: previousReleaseId, restoredPrevious: true };
+    },
+    inspectCompensation: async (target) => {
+      calls.push(['inspect-compensation', target]);
+      return { satisfied: true, ...target, releaseId: previousReleaseId, restoredPrevious: true };
+    },
+  });
+
+  const compensated = await provisioning.static_runtime.compensate({
+    intent: deployIntent,
+    operationId,
+    websiteId,
+    evidence,
+  });
+  const inspected = await provisioning.static_runtime.inspectCompensation({
+    intent: deployIntent,
+    operationId,
+    websiteId,
+    evidence,
+  });
+
+  assert.equal(compensated.satisfied, true);
+  assert.equal(inspected.satisfied, true);
+  const expected = { applicationId, deploymentId: operationId, previousReleaseId };
+  assert.deepEqual(calls, [
+    ['compensate', expected],
+    ['inspect-compensation', expected],
+  ]);
+});
+
+test('static Website compensation loses no safety when previous release evidence is unavailable', async () => {
+  const calls = [];
+  const provisioning = handlers({
+    compensateDeployment: async (target) => {
+      calls.push(target);
+      return { satisfied: false, reason: 'website_static_compensation_requires_manual_cleanup', ...target };
+    },
+  });
+
+  const result = await provisioning.static_runtime.compensate({
+    intent: deployIntent,
+    operationId,
+    websiteId,
+    evidence: null,
+  });
+  assert.equal(result.satisfied, false);
+  assert.equal(result.reason, 'website_static_compensation_requires_manual_cleanup');
+  assert.deepEqual(calls, [{ applicationId, deploymentId: operationId, previousReleaseId: null }]);
 });
