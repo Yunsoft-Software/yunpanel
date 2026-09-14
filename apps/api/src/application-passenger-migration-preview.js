@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createNodePassengerMigrationPreview } from '@yunpanel/host-runtime/node-passenger-migration-preview';
 import { ApplicationRegistryError } from './application-registry.js';
 
@@ -34,6 +35,44 @@ function publicDomainBinding(domain) {
     httpsMode: domain.httpsMode,
     targetType: domain.targetType,
   }) : null;
+}
+
+function hostDigestEvidence(host) {
+  if (!host) return null;
+  return Object.freeze({
+    applicationId: host.applicationId ?? null,
+    releaseId: host.releaseId ?? null,
+    ready: host.ready === true,
+    source: host.source ? Object.freeze({
+      serviceName: host.source.serviceName ?? null,
+      releaseId: host.source.releaseId ?? null,
+      activeState: host.source.activeState ?? null,
+      healthy: host.source.healthy === true,
+      port: host.source.port ?? null,
+      healthPath: host.source.healthPath ?? null,
+    }) : null,
+    environment: host.environment ? Object.freeze({
+      present: host.environment.present === true,
+      sha256: host.environment.sha256 ?? null,
+    }) : null,
+    target: host.target ? Object.freeze({
+      intent: host.target.intent ?? null,
+      inspection: host.target.inspection ? Object.freeze({
+        satisfied: host.target.inspection.satisfied === true,
+        nodeBinary: host.target.inspection.nodeBinary ?? null,
+      }) : null,
+      environmentBinding: host.target.environmentBinding ? Object.freeze({
+        satisfied: host.target.environmentBinding.satisfied === true,
+        sourcePath: host.target.environmentBinding.sourcePath ?? null,
+        environmentInclude: host.target.environmentBinding.environmentInclude ?? null,
+        includeSha256: host.target.environmentBinding.includeSha256 ?? null,
+      }) : null,
+    }) : null,
+  });
+}
+
+function previewDigest(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
 export function createApplicationPassengerMigrationPreviewService({
@@ -104,23 +143,37 @@ export function createApplicationPassengerMigrationPreviewService({
     if (host && host.releaseId !== application.currentReleaseId) blockers.push(blocker('host_preview_release_mismatch'));
 
     const uniqueBlockers = [...new Map(blockers.map((entry) => [`${entry.code}:${entry.detail ?? ''}`, entry])).values()];
+    const applicationBinding = Object.freeze({
+      applicationId: application.id,
+      serverId: application.serverId,
+      releaseId: application.currentReleaseId,
+      desiredRevision: application.desiredRevision,
+      appliedRevision: application.appliedRevision,
+    });
+    const websiteBinding = publicWebsiteBinding(website);
+    const domainBinding = publicDomainBinding(domain);
+    const digest = previewDigest({
+      version: 1,
+      application: applicationBinding,
+      website: websiteBinding,
+      domain: domainBinding,
+      domainCount: domains.length,
+      host: hostDigestEvidence(host),
+      blockers: uniqueBlockers,
+    });
     return Object.freeze({
       version: 1,
       mode: 'read-only',
       mutationPerformed: false,
-      application: Object.freeze({
-        applicationId: application.id,
-        serverId: application.serverId,
-        releaseId: application.currentReleaseId,
-        desiredRevision: application.desiredRevision,
-        appliedRevision: application.appliedRevision,
-      }),
-      website: publicWebsiteBinding(website),
-      domain: publicDomainBinding(domain),
+      application: applicationBinding,
+      website: websiteBinding,
+      domain: domainBinding,
       domainCount: domains.length,
       host,
       ready: uniqueBlockers.length === 0 && host?.ready === true,
       blockers: Object.freeze(uniqueBlockers),
+      previewDigest: digest,
+      confirmation: `migrate-node-passenger:${application.id}:${digest}`,
     });
   }
 
@@ -132,4 +185,6 @@ export const applicationPassengerMigrationPreviewInternals = Object.freeze({
   applicationSpec,
   publicWebsiteBinding,
   publicDomainBinding,
+  hostDigestEvidence,
+  previewDigest,
 });
