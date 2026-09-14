@@ -102,6 +102,16 @@ function nodeReleaseIntent(preview, applicationId, paths = createWebsitePathCont
   });
 }
 
+function passengerEnvironmentIntent(preview, applicationId) {
+  if (preview.source?.kind !== 'new_node' || preview.plan.application?.runtimeAdapter !== 'passenger') {
+    throw new Error('Passenger environment provisioning requires a new Passenger Node Website');
+  }
+  return Object.freeze({
+    adapter: 'passenger-environment',
+    applicationId,
+  });
+}
+
 function passengerApplicationReleaseIntent(preview, applicationId) {
   if (preview.source?.kind !== 'new_node' || preview.plan.application?.runtimeAdapter !== 'passenger') {
     throw new Error('Passenger Application release finalization requires a new Passenger Node Website');
@@ -260,6 +270,12 @@ export function siteCreateProvisioningPlan(preview) {
         steps.push(hostStep('node_release', 'node_release', nodeReleaseIntent(preview, applicationId, paths), {
           compensationState: 'pending',
         }));
+        steps.push(hostStep(
+          'passenger_environment',
+          'passenger_environment',
+          passengerEnvironmentIntent(preview, applicationId),
+          { compensationState: 'pending' },
+        ));
       }
       runtimeIntent = passengerIntent(preview, applicationId, paths);
       const blocked = Boolean(runtimeIntent.blocker);
@@ -329,6 +345,7 @@ export function siteCreateProvisioningPlan(preview) {
 export const siteCreateProvisioningInternals = Object.freeze({
   passengerIntent,
   nodeReleaseIntent,
+  passengerEnvironmentIntent,
   passengerApplicationReleaseIntent,
   passengerAuthorityIntent,
   domainActivationIntent,
