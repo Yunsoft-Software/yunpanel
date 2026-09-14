@@ -19,7 +19,18 @@ function nodePreview({ metadataReady = false, httpsMode = 'managed' } = {}) {
       wwwDomainReady: null,
     },
     plan: {
-      application: { id: applicationId, type: 'node' },
+      application: {
+        id: applicationId,
+        type: 'node',
+        runtime: {
+          nodeMajor: 24,
+          mode: 'production',
+          documentRoot: '.',
+          start: { mode: 'node', entryFile: 'server.js', script: null },
+          healthPath: '/health',
+          healthTimeoutSeconds: 30,
+        },
+      },
       dockerWorkload: null,
       website: {
         id: websiteId,
@@ -30,7 +41,9 @@ function nodePreview({ metadataReady = false, httpsMode = 'managed' } = {}) {
       primaryDomain: {
         id: domainId,
         primaryDomain: 'example.com',
+        aliases: [],
         targetType: 'proxy',
+        target: { upstreamHost: '127.0.0.1', upstreamPort: 3100, websocket: true },
         httpsMode,
       },
       wwwDomain: null,
@@ -48,14 +61,41 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.equal(identity.state, 'pending');
   assert.equal(identity.intent.unixUser, 'yunapp-0123456789ab');
   assert.equal(identity.intent.homeDirectory, `/var/lib/yunpanel/data/${applicationId}`);
-  assert.equal(plan.steps.find((step) => step.id === 'runtime').intent.adapter, 'passenger');
-  assert.equal(plan.steps.find((step) => step.id === 'nginx').state, 'pending');
+
+  const runtime = plan.steps.find((step) => step.id === 'runtime');
+  assert.equal(runtime.intent.adapter, 'passenger');
+  assert.equal(runtime.intent.nodeMajor, 24);
+  assert.deepEqual(runtime.intent.nodeCandidates, [
+    '/opt/yunpanel/node-runtimes/v24/bin/node',
+    '/usr/bin/node',
+  ]);
+  assert.equal(runtime.intent.appRoot, `/var/lib/yunpanel/apps/${applicationId}/current`);
+  assert.equal(runtime.intent.startupFile, 'server.js');
+  assert.equal(runtime.state, 'pending');
+
+  const nginx = plan.steps.find((step) => step.id === 'nginx');
+  assert.equal(nginx.intent.targetType, 'passenger');
+  assert.equal(nginx.intent.target.startupFile, 'server.js');
+  assert.equal(nginx.state, 'pending');
   assert.equal(plan.steps.find((step) => step.id === 'certificate').state, 'pending');
+});
+
+test('npm-script Node start is an explicit Passenger blocker instead of an invented command', () => {
+  const preview = nodePreview({ httpsMode: 'off' });
+  preview.plan.application.runtime.start = { mode: 'npm', entryFile: null, script: 'start' };
+
+  const plan = siteCreateProvisioningPlan(preview);
+  const runtime = plan.steps.find((step) => step.id === 'runtime');
+  assert.equal(runtime.state, 'blocked');
+  assert.equal(runtime.error, 'passenger_start_mode_unsupported');
+  assert.equal(runtime.intent.blocker, 'passenger_start_mode_unsupported');
+  assert.equal(plan.status, 'blocked');
 });
 
 test('static Website uses the static runtime adapter and HTTP-only plan omits certificate work', () => {
   const preview = nodePreview({ metadataReady: false, httpsMode: 'off' });
   preview.plan.application.type = 'static';
+  preview.plan.application.runtime = null;
   preview.plan.website.runtimeType = 'static';
 
   const plan = siteCreateProvisioningPlan(preview);
