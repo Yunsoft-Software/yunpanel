@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { createWebsitePathContract } from '@yunpanel/host-runtime';
+import { createApplicationIdentity } from '@yunpanel/host-runtime/application-identity';
 import { createWebsiteProvisioningPlan } from './website-provisioning-plan.js';
 
 const MANAGED_NODE_ROOT = '/opt/yunpanel/node-runtimes';
@@ -166,6 +167,10 @@ export function siteCreateProvisioningPlan(preview) {
   if (runtimeType === 'node' || runtimeType === 'static') {
     const applicationId = preview.plan.application?.id;
     if (!applicationId) throw new Error('Hosted Website provisioning requires an Application identity');
+    const identity = createApplicationIdentity(applicationId);
+    if (preview.plan.website.unixUser !== identity.unixUser) {
+      throw new Error('Website Unix user does not match the managed Application identity');
+    }
     const paths = createWebsitePathContract({
       websiteId: preview.ids.websiteId,
       applicationId,
@@ -173,7 +178,7 @@ export function siteCreateProvisioningPlan(preview) {
     steps.push(hostStep('unix_identity', 'unix_identity', {
       websiteId: preview.ids.websiteId,
       applicationId,
-      unixUser: preview.plan.website.unixUser,
+      unixUser: identity.unixUser,
       homeDirectory: paths.workspace.homeDirectory,
       documentRoot: preview.plan.website.documentRoot,
     }));
