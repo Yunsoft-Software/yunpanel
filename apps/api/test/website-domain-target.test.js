@@ -89,7 +89,11 @@ function passengerDependencies({ bindingOverrides = {}, websiteOverrides = {} } 
           websiteId,
           websiteRevision: websiteValue.revision,
           domains: [{ domainId: 'domain-1', desiredRevision: 3, nginxChecksum: 'a'.repeat(64) }],
-          passengerTarget: { appRoot: '/var/www/example/current', startupFile: 'server.js' },
+          passengerTarget: {
+            appRoot: '/var/www/example/current',
+            startupFile: 'server.js',
+            nodeBinary: '/usr/bin/node',
+          },
           ...bindingOverrides,
         };
       },
@@ -143,34 +147,45 @@ test('Node Website without a runtime binding keeps legacy direct-systemd Domain 
   });
 });
 
-test('Passenger runtime binding blocks legacy Domain restage after cutover', async () => {
-  await assert.rejects(
-    resolveWebsiteDomainTarget({
-      domain: domain(),
-      ...passengerDependencies(),
-    }),
-    (error) => error instanceof DomainRegistryError
-      && error.code === 'passenger_runtime_binding_restage_blocked'
-      && error.status === 409,
-  );
+test('Passenger runtime binding materializes the canonical Passenger Domain target', async () => {
+  const result = await resolveWebsiteDomainTarget({
+    domain: domain(),
+    ...passengerDependencies(),
+  });
+  assert.deepEqual(result, {
+    source: 'passenger',
+    targetType: 'passenger',
+    target: {
+      root: '/var/www/example/current',
+      startupFile: 'server.js',
+      nodeBinary: '/usr/bin/node',
+    },
+  });
 });
 
 test('cleanup-required Passenger binding remains authoritative for Domain restage', async () => {
-  await assert.rejects(
-    resolveWebsiteDomainTarget({
-      domain: domain(),
-      ...passengerDependencies({ bindingOverrides: { state: 'cleanup_required' } }),
-    }),
-    (error) => error instanceof DomainRegistryError
-      && error.code === 'passenger_runtime_binding_restage_blocked'
-      && error.status === 409,
-  );
+  const result = await resolveWebsiteDomainTarget({
+    domain: domain(),
+    ...passengerDependencies({ bindingOverrides: { state: 'cleanup_required' } }),
+  });
+  assert.equal(result.source, 'passenger');
+  assert.equal(result.targetType, 'passenger');
+  assert.equal(result.target.root, '/var/www/example/current');
 });
 
-test('Passenger runtime binding revision drift fails closed before legacy target can be reused', async () => {
+test('Passenger runtime binding allows a newer desired Domain revision to be restaged', async () => {
+  const result = await resolveWebsiteDomainTarget({
+    domain: domain({ desiredRevision: 4 }),
+    ...passengerDependencies(),
+  });
+  assert.equal(result.source, 'passenger');
+  assert.equal(result.targetType, 'passenger');
+});
+
+test('Passenger runtime binding revision regression fails closed before legacy target can be reused', async () => {
   await assert.rejects(
     resolveWebsiteDomainTarget({
-      domain: domain({ desiredRevision: 4 }),
+      domain: domain({ desiredRevision: 2 }),
       ...passengerDependencies(),
     }),
     (error) => error instanceof DomainRegistryError
