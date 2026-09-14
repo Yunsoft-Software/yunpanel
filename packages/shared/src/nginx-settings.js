@@ -2,6 +2,7 @@ const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers']);
 const TARGET_FIELDS = Object.freeze({
   proxy: new Set([...COMMON_FIELDS, 'proxyTimeoutSeconds', 'websocket']),
   static: new Set([...COMMON_FIELDS, 'spaFallback', 'staticAssetCacheSeconds']),
+  passenger: new Set([...COMMON_FIELDS]),
 });
 const BLOCKED_HEADERS = new Set([
   'cache-control',
@@ -82,12 +83,18 @@ function defaults(targetType) {
       headers: Object.freeze([]),
     };
   }
-  throw new NginxSettingsValidationError('invalid_nginx_target_type', 'Nginx settings require a static or proxy target');
+  if (targetType === 'passenger') {
+    return {
+      clientMaxBodySizeMb: null,
+      headers: Object.freeze([]),
+    };
+  }
+  throw new NginxSettingsValidationError('invalid_nginx_target_type', 'Nginx settings require a static, proxy or passenger target');
 }
 
 export function normalizeNginxSettings(targetType, value = {}, base = null) {
   const allowed = TARGET_FIELDS[targetType];
-  if (!allowed) throw new NginxSettingsValidationError('invalid_nginx_target_type', 'Nginx settings require a static or proxy target');
+  if (!allowed) throw new NginxSettingsValidationError('invalid_nginx_target_type', 'Nginx settings require a static, proxy or passenger target');
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).some((field) => !allowed.has(field))) {
     throw new NginxSettingsValidationError('invalid_nginx_settings', 'Nginx settings contain unsupported fields');
@@ -105,10 +112,16 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
       headers: headers(merged.headers),
     });
   }
+  if (targetType === 'static') {
+    return Object.freeze({
+      ...common,
+      spaFallback: boolean(merged.spaFallback, 'spaFallback'),
+      staticAssetCacheSeconds: optionalInteger(merged.staticAssetCacheSeconds, 'staticAssetCacheSeconds', 0, 31_536_000),
+      headers: headers(merged.headers),
+    });
+  }
   return Object.freeze({
     ...common,
-    spaFallback: boolean(merged.spaFallback, 'spaFallback'),
-    staticAssetCacheSeconds: optionalInteger(merged.staticAssetCacheSeconds, 'staticAssetCacheSeconds', 0, 31_536_000),
     headers: headers(merged.headers),
   });
 }
