@@ -37,7 +37,7 @@ function plan() {
     websiteId,
     steps: [{
       id: 'runtime',
-      kind: 'runtime',
+      kind: 'static_runtime',
       state: 'pending',
       intent,
       compensation: { state: 'pending' },
@@ -72,12 +72,23 @@ function nginxManager() {
   };
 }
 
+function completeStaticManager(overrides = {}) {
+  return {
+    deployStatic: async () => { throw new Error('unused'); },
+    inspectCurrent: async () => ({ satisfied: false }),
+    inspectDeployment: async () => ({ satisfied: false }),
+    compensateDeployment: async () => ({ satisfied: false, reason: 'unused' }),
+    inspectCompensation: async () => ({ satisfied: false, reason: 'unused' }),
+    ...overrides,
+  };
+}
+
 function runtime(filePath, staticDeploymentManager) {
   return createWebsiteProvisioningRuntime({
     filePath,
     identityManager: identityManager(),
     passengerSiteManager: passengerSiteManager(),
-    staticDeploymentManager,
+    staticDeploymentManager: completeStaticManager(staticDeploymentManager),
     nginxManager: nginxManager(),
   });
 }
@@ -87,12 +98,7 @@ test('startup reconciles interrupted static deployment by inspection without red
   t.after(() => rm(directory, { recursive: true, force: true }));
   const filePath = path.join(directory, 'operations.json');
 
-  const inertStatic = {
-    deployStatic: async () => { throw new Error('unused'); },
-    inspectCurrent: async () => ({ satisfied: false }),
-    inspectDeployment: async () => ({ satisfied: false }),
-  };
-  const beforeRestart = runtime(filePath, inertStatic);
+  const beforeRestart = runtime(filePath);
   await beforeRestart.init();
   await beforeRestart.create(plan());
   await beforeRestart.registry.beginStep({ operationId, stepId: 'runtime' });
@@ -100,7 +106,6 @@ test('startup reconciles interrupted static deployment by inspection without red
   let inspectCalls = 0;
   let deployCalls = 0;
   const afterRestart = runtime(filePath, {
-    inspectCurrent: async () => ({ satisfied: false }),
     inspectDeployment: async (spec) => {
       inspectCalls += 1;
       assert.equal(spec.applicationId, applicationId);
