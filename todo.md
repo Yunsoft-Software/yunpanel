@@ -15,7 +15,6 @@ Bu bölüm yalnız güncel P0 provisioning/Passenger turundan kalan gerçek Ubun
 
 ## T-BASE — P0 güncel güvenlik ve package kapısı
 
-- [ ] Güncel `main` için desteklenen Node 24 ile temiz `npm ci`, `npm run check` ve matching Ubuntu mimarisinde `.deb` build çalışsın.
 - [ ] Clean install ve önceki paketten upgrade; auth DB/master key, Domain/Website/Application kimlikleri, release'ler, Nginx/certificate, mail/database state'i ve root-owned private izinleri korusun.
 - [ ] Production exact `YUNPANEL_LOCAL_SERVER_ID` + OS hostname olmadan başlamasın; uzak/eski server detail/mutation ve retained agent transport fail-closed kalsın.
 - [ ] Gerçek HTTPS Owner setup/login/TOTP/recovery/session/logout/logout-all/idle/absolute timeout, CSRF, rate-limit ve trusted-proxy sınırı Chromium/Firefox'ta çalışsın.
