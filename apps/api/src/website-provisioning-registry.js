@@ -78,17 +78,26 @@ function normalizeStoredOperation(value) {
   };
 }
 
+function immutableStepDefinition(step) {
+  return {
+    id: step.id,
+    kind: step.kind,
+    required: step.required,
+    intent: step.intent,
+  };
+}
+
 function samePlan(left, right) {
   return JSON.stringify({
     operationId: left.operationId,
     websiteId: left.websiteId,
     resources: left.resources,
-    steps: left.steps,
+    steps: left.steps.map(immutableStepDefinition),
   }) === JSON.stringify({
     operationId: right.operationId,
     websiteId: right.websiteId,
     resources: right.resources,
-    steps: right.steps,
+    steps: right.steps.map(immutableStepDefinition),
   });
 }
 
