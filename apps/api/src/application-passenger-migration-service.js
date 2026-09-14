@@ -4,13 +4,6 @@ import { materializeApplicationPassengerMigrationDomainEnvelope } from './applic
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
-async function ensureApplicationIdle(jobRegistry, applicationId) {
-  const jobs = await jobRegistry.listJobs({ resourceType: 'application', resourceId: applicationId });
-  if (jobs.some((job) => job.status === 'queued' || job.status === 'running')) {
-    throw new ApplicationRegistryError('application_job_conflict', 'An Application operation is already queued or running', 409);
-  }
-}
-
 function applyInput(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== 2
@@ -38,7 +31,7 @@ export function createApplicationPassengerMigrationService({
     [domainRegistry, ['getDomain']],
     [certificateRegistry, ['getCertificate']],
     [runtimeBindingRegistry, ['getBinding']],
-    [jobRegistry, ['listJobs', 'enqueue']],
+    [jobRegistry, ['enqueue']],
   ]) {
     if (!dependency || methods.some((method) => typeof dependency[method] !== 'function')) {
       throw new Error('Application Passenger migration service dependencies are required');
@@ -47,7 +40,6 @@ export function createApplicationPassengerMigrationService({
 
   async function apply(applicationId, rawInput) {
     const input = applyInput(rawInput);
-    await ensureApplicationIdle(jobRegistry, applicationId);
     const preview = await previewService.preview(applicationId);
     if (preview.previewDigest !== input.previewDigest) {
       throw new ApplicationRegistryError(
@@ -138,7 +130,4 @@ export function createApplicationPassengerMigrationService({
   return Object.freeze({ apply });
 }
 
-export const applicationPassengerMigrationServiceInternals = Object.freeze({
-  applyInput,
-  ensureApplicationIdle,
-});
+export const applicationPassengerMigrationServiceInternals = Object.freeze({ applyInput });
