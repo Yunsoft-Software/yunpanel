@@ -18,6 +18,8 @@ test('native PTY dependency is pinned, explicitly approved and makes Debian outp
   assert.match(build, /arm64\) architecture=arm64/);
   assert.match(build, /import \{ spawn \} from "node-pty"/);
   assert.match(build, /docs\/terminal\.md/);
+  assert.match(build, /if \[\[ "\$output_directory" = \/\* \]\]/);
+  assert.match(build, /package_path="\$package_directory\/yunpanel_/);
   assert.match(build, /yunpanel_\$\{version\}_\$\{architecture\}\.deb/);
   assert.doesNotMatch(build, /yunpanel_\$\{version\}_all\.deb/);
 });

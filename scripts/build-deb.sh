@@ -39,6 +39,11 @@ if ! node --input-type=module -e 'import { spawn } from "node-pty"; if (typeof s
 fi
 
 repository_root=$(pwd)
+if [[ "$output_directory" = /* ]]; then
+  package_directory=$output_directory
+else
+  package_directory="$repository_root/$output_directory"
+fi
 build_directory=$(mktemp -d)
 package_root="$build_directory/yunpanel"
 trap 'rm -rf -- "$build_directory"' EXIT
@@ -80,7 +85,7 @@ cp -a apps/web/dist/. "$package_root/usr/share/yunpanel/web/"
 rm -rf -- "$package_root/usr/lib/yunpanel/apps/web/dist" "$package_root/usr/lib/yunpanel/apps/web/test"
 find "$package_root/usr/lib/yunpanel" -type d -name test -prune -exec rm -rf -- {} +
 
-install -d "$repository_root/$output_directory"
-package_path="$repository_root/$output_directory/yunpanel_${version}_${architecture}.deb"
+install -d "$package_directory"
+package_path="$package_directory/yunpanel_${version}_${architecture}.deb"
 dpkg-deb --build --root-owner-group "$package_root" "$package_path" >/dev/null
 printf '%s\n' "$package_path"
