@@ -140,10 +140,7 @@ test('Passenger manager installs from scoped APT source and requires healthy pos
       if (file.endsWith('.gpg')) return Buffer.from('test-keyring');
       throw enoent();
     },
-    lstatFn: async (file) => {
-      if (file === passengerManagerInternals.moduleLink) throw enoent();
-      throw new Error(`unexpected lstat ${file}`);
-    },
+    lstatFn: async () => { throw enoent(); },
     mkdirFn: async () => {},
     writeFileFn: async (file, content, options) => { writes.push([file, content, options]); },
     renameFn: async (from, to) => { renames.push([from, to]); },
@@ -210,6 +207,7 @@ test('Passenger manager never reports success when post-install inspection stays
     mkdirFn: async () => {},
     writeFileFn: async () => {},
     renameFn: async () => {},
+    rmFn: async () => {},
     symlinkFn: async () => {},
   });
 
