@@ -1,0 +1,181 @@
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { assertUuid } from '@yunpanel/shared';
+
+const STORE_VERSION = 1;
+const ADAPTERS = new Set(['direct-systemd', 'passenger']);
+const STATES = new Set(['active', 'cleanup_required']);
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+
+export class ApplicationRuntimeBindingRegistryError extends Error {
+  constructor(code, message, status = 400) {
+    super(message);
+    this.name = 'ApplicationRuntimeBindingRegistryError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+function uuid(value, field) {
+  try { return assertUuid(value, field); }
+  catch { throw new ApplicationRuntimeBindingRegistryError('runtime_binding_identity_invalid', `${field} must be a UUID`); }
+}
+
+function revision(value, field, minimum = 1) {
+  if (!Number.isSafeInteger(value) || value < minimum) {
+    throw new ApplicationRuntimeBindingRegistryError('runtime_binding_revision_invalid', `${field} is invalid`);
+  }
+  return value;
+}
+
+function domains(value) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 32) {
+    throw new ApplicationRuntimeBindingRegistryError('runtime_binding_domains_invalid', 'Runtime binding domains are invalid');
+  }
+  const seen = new Set();
+  return Object.freeze(value.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || Object.keys(entry).length !== 3
+      || seen.has(entry.domainId)) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_domains_invalid', 'Runtime binding domains are invalid');
+    }
+    const normalized = Object.freeze({
+      domainId: uuid(entry.domainId, 'domainId'),
+      desiredRevision: revision(entry.desiredRevision, 'domain desiredRevision'),
+      nginxChecksum: typeof entry.nginxChecksum === 'string' && SHA256_PATTERN.test(entry.nginxChecksum)
+        ? entry.nginxChecksum
+        : (() => { throw new ApplicationRuntimeBindingRegistryError('runtime_binding_checksum_invalid', 'Runtime binding Nginx checksum is invalid'); })(),
+    });
+    seen.add(normalized.domainId);
+    return normalized;
+  }).sort((left, right) => left.domainId.localeCompare(right.domainId))));
+}
+
+function normalizeRecord(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || !ADAPTERS.has(value.adapter) || !STATES.has(value.state)) {
+    throw new ApplicationRuntimeBindingRegistryError('runtime_binding_state_invalid', 'Persisted runtime binding state is invalid', 409);
+  }
+  const normalized = {
+    applicationId: uuid(value.applicationId, 'applicationId'),
+    serverId: uuid(value.serverId, 'serverId'),
+    adapter: value.adapter,
+    state: value.state,
+    revision: revision(value.revision, 'revision'),
+    sourceOperationId: uuid(value.sourceOperationId, 'sourceOperationId'),
+    releaseId: uuid(value.releaseId, 'releaseId'),
+    websiteId: uuid(value.websiteId, 'websiteId'),
+    websiteRevision: revision(value.websiteRevision, 'websiteRevision'),
+    domains: domains(value.domains),
+    updatedAt: value.updatedAt,
+  };
+  if (typeof normalized.updatedAt !== 'string' || Number.isNaN(Date.parse(normalized.updatedAt))) {
+    throw new ApplicationRuntimeBindingRegistryError('runtime_binding_state_invalid', 'Persisted runtime binding timestamp is invalid', 409);
+  }
+  if (normalized.adapter === 'direct-systemd' && normalized.state !== 'active') {
+    throw new ApplicationRuntimeBindingRegistryError('runtime_binding_state_invalid', 'direct-systemd runtime binding cannot require Passenger cleanup', 409);
+  }
+  return Object.freeze(normalized);
+}
+
+function publicRecord(record) {
+  if (!record) return null;
+  return Object.freeze({
+    ...record,
+    domains: Object.freeze(record.domains.map((entry) => Object.freeze({ ...entry }))),
+  });
+}
+
+function sameActivation(left, right) {
+  return left.applicationId === right.applicationId
+    && left.serverId === right.serverId
+    && left.adapter === right.adapter
+    && left.state === right.state
+    && left.sourceOperationId === right.sourceOperationId
+    && left.releaseId === right.releaseId
+    && left.websiteId === right.websiteId
+    && left.websiteRevision === right.websiteRevision
+    && JSON.stringify(left.domains) === JSON.stringify(right.domains);
+}
+
+export function createApplicationRuntimeBindingRegistry({ filePath = null, now = () => Date.now() } = {}) {
+  let state = { version: STORE_VERSION, bindings: [] };
+  let initialized = false;
+  let writeChain = Promise.resolve();
+
+  async function persist() {
+    if (!filePath) return;
+    const directory = path.dirname(filePath);
+    const temporaryPath = `${filePath}.${process.pid}.tmp`;
+    const snapshot = `${JSON.stringify(state, null, 2)}\n`;
+    writeChain = writeChain.then(async () => {
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
+      await rename(temporaryPath, filePath);
+    });
+    return writeChain;
+  }
+
+  async function init() {
+    if (initialized) return;
+    if (filePath) {
+      try {
+        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.bindings)) {
+          throw new ApplicationRuntimeBindingRegistryError('runtime_binding_store_invalid', 'Runtime binding store is invalid', 409);
+        }
+        state = { version: STORE_VERSION, bindings: parsed.bindings.map((entry) => ({ ...normalizeRecord(entry) })) };
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+    }
+    initialized = true;
+  }
+
+  async function ensureInitialized() {
+    if (!initialized) await init();
+  }
+
+  async function getBinding(applicationId) {
+    await ensureInitialized();
+    const id = uuid(applicationId, 'applicationId');
+    return publicRecord(state.bindings.find((entry) => entry.applicationId === id) ?? null);
+  }
+
+  async function activate(input, { expectedRevision = 0 } = {}) {
+    await ensureInitialized();
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_expected_revision_invalid', 'Expected runtime binding revision is invalid');
+    }
+    const candidate = normalizeRecord({
+      ...input,
+      revision: Math.max(1, expectedRevision + 1),
+      updatedAt: new Date(now()).toISOString(),
+    });
+    const index = state.bindings.findIndex((entry) => entry.applicationId === candidate.applicationId);
+    const existing = index < 0 ? null : normalizeRecord(state.bindings[index]);
+    if (existing && sameActivation(existing, candidate)) return publicRecord(existing);
+    const currentRevision = existing?.revision ?? 0;
+    if (currentRevision !== expectedRevision) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_revision_conflict', 'Runtime binding changed after preview', 409);
+    }
+    if (existing && existing.serverId !== candidate.serverId) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_server_conflict', 'Runtime binding cannot move applications between servers', 409);
+    }
+    if (index < 0) state.bindings.push({ ...candidate });
+    else state.bindings[index] = { ...candidate };
+    await persist();
+    return publicRecord(candidate);
+  }
+
+  return Object.freeze({ init, getBinding, activate });
+}
+
+export const applicationRuntimeBindingRegistryInternals = Object.freeze({
+  storeVersion: STORE_VERSION,
+  adapters: Object.freeze([...ADAPTERS]),
+  states: Object.freeze([...STATES]),
+  normalizeRecord,
+  domains,
+  sameActivation,
+});
