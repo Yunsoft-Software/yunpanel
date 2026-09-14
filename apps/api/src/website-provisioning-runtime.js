@@ -20,11 +20,23 @@ export function createWebsiteProvisioningRuntime({
   });
   const orchestrator = createWebsiteProvisioningOrchestrator({ registry, handlers });
 
+  async function init() {
+    await registry.init();
+    const interrupted = await registry.listInterrupted();
+    const reconciled = [];
+    for (const operation of interrupted) {
+      // listInterrupted only returns applying/compensating operations. runNext therefore
+      // takes the inspect-first reconciliation path and never starts a new pending mutation.
+      reconciled.push(await orchestrator.runNext(operation.operationId));
+    }
+    return Object.freeze(reconciled);
+  }
+
   return Object.freeze({
     registry,
     handlers,
     orchestrator,
-    init: () => registry.init(),
+    init,
     get: (operationId) => registry.get(operationId),
     create: (plan) => registry.create(plan),
     runNext: (operationId) => orchestrator.runNext(operationId),
