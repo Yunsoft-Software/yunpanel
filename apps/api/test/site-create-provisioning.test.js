@@ -6,6 +6,7 @@ const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 const domainId = '3854e385-adfc-42bd-bccf-f655f24cd68f';
+const unixUser = 'yunapp-4dc352e64a14';
 
 function nodePreview({ metadataReady = false, httpsMode = 'managed' } = {}) {
   return {
@@ -41,7 +42,7 @@ function nodePreview({ metadataReady = false, httpsMode = 'managed' } = {}) {
       website: {
         id: websiteId,
         runtimeType: 'node',
-        unixUser: 'yunapp-0123456789ab',
+        unixUser,
         documentRoot: `/var/lib/yunpanel/apps/${applicationId}/current`,
       },
       primaryDomain: {
@@ -92,7 +93,7 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   const identity = plan.steps.find((step) => step.id === 'unix_identity');
   assert.equal(identity.state, 'pending');
   assert.equal(identity.compensation.state, 'pending');
-  assert.equal(identity.intent.unixUser, 'yunapp-0123456789ab');
+  assert.equal(identity.intent.unixUser, unixUser);
   assert.equal(identity.intent.homeDirectory, `/var/lib/yunpanel/data/${applicationId}`);
 
   const runtime = plan.steps.find((step) => step.id === 'runtime');
@@ -123,6 +124,16 @@ test('Node provisioning rejects document-root drift from the managed Website pat
   assert.throws(
     () => siteCreateProvisioningPlan(preview),
     /document root does not match the managed Website path contract/,
+  );
+});
+
+test('hosted Website provisioning rejects Unix-user drift before creating host steps', () => {
+  const preview = nodePreview({ httpsMode: 'off' });
+  preview.plan.website.unixUser = 'yunapp-0123456789ab';
+
+  assert.throws(
+    () => siteCreateProvisioningPlan(preview),
+    /Website Unix user does not match the managed Application identity/,
   );
 });
 
