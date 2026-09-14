@@ -126,7 +126,7 @@ function normalizedSource(source) {
         'nodeMajor', 'installMode', 'buildScript', 'startMode', 'start', 'entryFile', 'startScript',
         'healthPath', 'healthTimeoutSeconds', 'restartPolicy',
       ].includes(key))) {
-      throw new SiteCreateError('site_create_node_runtime_invalid', 'Node runtime must omit backend-assigned port and unsupported fields');
+      throw new SiteCreateError('site_create_node_runtime_invalid', 'Passenger Node runtime must omit port and unsupported fields');
     }
     if (source.runtime.start !== undefined && (!source.runtime.start || typeof source.runtime.start !== 'object'
       || Array.isArray(source.runtime.start)
@@ -205,6 +205,7 @@ function stableApplication(application) {
     retention: application.retention,
     build: application.build ?? null,
     runtime: application.runtime ?? null,
+    runtimeAdapter: application.runtimeAdapter ?? null,
     webRoot: application.webRoot ?? null,
   };
 }
@@ -284,6 +285,15 @@ function domainTarget(application, source, dockerWorkload = null) {
     }
     return Object.freeze({ targetType: 'static', target: Object.freeze({ root: application.webRoot, spaFallback: true }) });
   }
+  if (application.runtimeAdapter === 'passenger') {
+    if (application.runtime?.port !== null) {
+      throw new SiteCreateError('site_create_application_runtime_drift', 'Passenger Node Application must not persist a backend port', 409);
+    }
+    return Object.freeze({
+      targetType: 'passenger',
+      target: Object.freeze({ applicationId: application.id }),
+    });
+  }
   if (!application.proxyTarget || application.proxyTarget.host !== '127.0.0.1'
     || !Number.isInteger(application.proxyTarget.port) || application.proxyTarget.port !== application.runtime?.port) {
     throw new SiteCreateError('site_create_application_proxy_drift', 'Selected Node Application proxy target does not match managed runtime state', 409);
@@ -320,7 +330,7 @@ function canonicalState({ applications, dockerWorkloads, websites, domains, excl
 export async function previewSiteCreate({ input, registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry } = {}) {
   for (const [dependency, methods] of [
     [registry, ['getServer']],
-    [applicationRegistry, ['getApplication', 'listApplications', 'allocateNodePort']],
+    [applicationRegistry, ['getApplication', 'listApplications']],
     [dockerWorkloadRegistry, ['getWorkload', 'listWorkloads']],
     [websiteRegistry, ['getWebsite', 'listWebsites']],
     [domainRegistry, ['getDomain', 'listDomains']],
@@ -345,7 +355,7 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
   let application = null;
   let dockerWorkload = null;
   let applicationExpected = null;
-  let assignedPort = null;
+  const assignedPort = null;
   if (normalized.source.kind === 'existing_application') {
     application = applications.find((candidate) => candidate.id === normalized.source.applicationId) ?? null;
     if (!application) throw new SiteCreateError('application_not_found', 'Selected Application does not exist', 404);
@@ -368,6 +378,7 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
       retention: normalized.source.retention,
       build: normalized.source.build,
       runtime: null,
+      runtimeAdapter: null,
       webRoot: `/var/www/yunpanel/apps/${ids.applicationId}/current`,
     };
     const existing = applications.find((candidate) => candidate.id === ids.applicationId) ?? null;
@@ -375,15 +386,8 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
     application = existing ?? applicationExpected;
   } else if (normalized.source.kind === 'new_node') {
     const existing = applications.find((candidate) => candidate.id === ids.applicationId) ?? null;
-    if (existing) assignedPort = existing.runtime?.port;
-    else {
-      const reservedPorts = domains.filter((domain) => domain.serverId === normalized.serverId
-        && domain.targetType === 'proxy' && LOOPBACK_HOSTS.has(domain.target?.upstreamHost))
-        .map((domain) => domain.target.upstreamPort);
-      assignedPort = await applicationRegistry.allocateNodePort({ serverId: normalized.serverId, reservedPorts });
-    }
     let runtime;
-    try { runtime = normalizeNodeRuntimeConfig({ ...normalized.source.runtime, port: assignedPort }); }
+    try { runtime = normalizeNodeRuntimeConfig(normalized.source.runtime, { requirePort: false }); }
     catch (error) {
       if (error instanceof ApplicationValidationError) throw new SiteCreateError(error.code, error.message);
       throw error;
@@ -398,10 +402,11 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
       retention: normalized.source.retention,
       build: null,
       runtime,
+      runtimeAdapter: 'passenger',
       webRoot: null,
     };
     ensureExact(existing, applicationExpected, 'site_create_application_identity_conflict', 'Planned Application identity conflicts with existing state', stableApplication);
-    application = existing ?? { ...applicationExpected, proxyTarget: { host: '127.0.0.1', port: assignedPort } };
+    application = existing ?? applicationExpected;
   }
 
   if (application) {
@@ -576,7 +581,8 @@ export async function createSite({
       name: normalized.name,
       repositoryUrl: normalized.source.repositoryUrl,
       branch: normalized.source.branch,
-      runtime: { ...normalized.source.runtime, port: preview.assignedPort },
+      runtimeAdapter: 'passenger',
+      runtime: normalized.source.runtime,
       retention: normalized.source.retention,
     });
   }
