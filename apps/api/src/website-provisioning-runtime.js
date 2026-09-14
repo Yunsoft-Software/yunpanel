@@ -4,6 +4,7 @@ import { createWebsitePassengerApplicationReleaseProvisioningHandler } from './w
 import { createWebsitePassengerAuthorityProvisioningHandler } from './website-passenger-authority-provisioning-handler.js';
 import { createWebsitePassengerEnvironmentProvisioningHandler } from './website-passenger-environment-provisioning-handler.js';
 import { createWebsitePassengerEnvironmentStateProvisioningHandler } from './website-passenger-environment-state-provisioning-handler.js';
+import { createWebsitePassengerHealthProvisioningHandler } from './website-passenger-health-provisioning-handler.js';
 import { createWebsiteProvisioningHandlers } from './website-provisioning-handlers.js';
 import { createWebsiteProvisioningOrchestrator } from './website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from './website-provisioning-registry.js';
@@ -15,6 +16,7 @@ export function createWebsiteProvisioningRuntime({
   passengerSiteManager,
   nodeReleaseManager,
   passengerEnvironmentManager,
+  passengerHealthInspector,
   staticDeploymentManager,
   nginxManager,
   applicationRegistry = null,
@@ -36,6 +38,9 @@ export function createWebsiteProvisioningRuntime({
     }),
     node_release: createWebsiteNodeReleaseProvisioningHandler({
       ...(nodeReleaseManager ? { nodeReleaseManager } : {}),
+    }),
+    passenger_health: createWebsitePassengerHealthProvisioningHandler({
+      ...(passengerHealthInspector ? { healthInspector: passengerHealthInspector } : {}),
     }),
   };
   let domainControlPlane = null;
