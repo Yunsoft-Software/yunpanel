@@ -47,12 +47,14 @@ function compensationTarget(context = {}) {
 
 export function createWebsiteNodeReleaseProvisioningHandler({
   nodeReleaseManager = createWebsiteNodeReleaseManager(),
+  gitCredentialProvider = null,
 } = {}) {
   if (!nodeReleaseManager
     || typeof nodeReleaseManager.prepare !== 'function'
     || typeof nodeReleaseManager.inspectDeployment !== 'function'
     || typeof nodeReleaseManager.compensate !== 'function'
-    || typeof nodeReleaseManager.inspectCompensation !== 'function') {
+    || typeof nodeReleaseManager.inspectCompensation !== 'function'
+    || (gitCredentialProvider !== null && typeof gitCredentialProvider !== 'function')) {
     throw new WebsiteNodeReleaseProvisioningError(
       'website_node_release_dependencies_invalid',
       'Passenger Node release provisioning dependencies are invalid',
@@ -64,7 +66,10 @@ export function createWebsiteNodeReleaseProvisioningHandler({
     const spec = releaseSpec(intent);
     const current = await nodeReleaseManager.inspectDeployment(spec);
     if (current?.satisfied === true) return current;
-    return nodeReleaseManager.prepare(spec);
+    const gitCredential = gitCredentialProvider
+      ? await gitCredentialProvider(spec.applicationId)
+      : null;
+    return nodeReleaseManager.prepare(spec, { gitCredential });
   }
 
   async function inspect({ intent } = {}) {
