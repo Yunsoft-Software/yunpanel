@@ -52,7 +52,11 @@ function fixture(overrides = {}) {
     executorFactory,
     hostOperations,
     reconcile,
-    jobRegistry: { listJobs: async () => [], claimNext: async () => null, complete: async () => null },
+    jobRegistry: overrides.jobRegistry ?? {
+      listJobs: async () => [],
+      claimNext: async () => null,
+      complete: async () => null,
+    },
     domainRegistry: {},
     certificateRegistry: {},
     applicationRegistry: {},
@@ -104,6 +108,116 @@ test('local runtime acquires ownership, refreshes the bound server and then star
   assert.deepEqual(fx.events.slice(-2).map((event) => event[0]), ['executor.stop', 'lock.release']);
   await runtime.stop();
   assert.equal(fx.events.filter((event) => event[0] === 'lock.release').length, 1);
+});
+
+test('local runtime reconciles pending terminal work before creating the executor', async () => {
+  const jobId = '11111111-1111-4111-8111-111111111111';
+  let pending = true;
+  let reconciledJob = null;
+  const publicJob = {
+    id: jobId,
+    serverId,
+    operation: 'system.packages.inspect',
+    resourceType: 'system',
+    resourceId: serverId,
+    status: 'succeeded',
+    result: { packageName: 'yunpanel' },
+    error: null,
+  };
+  const fx = fixture({
+    jobRegistry: {
+      listJobs: async () => [],
+      claimNext: async () => null,
+      complete: async () => null,
+      recovery: () => pending ? { code: 'durable_job_reconciliation_required', jobs: [{ jobId, serverId }] } : null,
+      getJob: async () => publicJob,
+      getReconciliationJob: async () => ({ ...publicJob, payload: {} }),
+      acknowledgeReconciliation: async () => {
+        pending = false;
+        fx.events.push(['recovery.ack']);
+        return { jobId, serverId, status: 'succeeded', acknowledged: true };
+      },
+    },
+    reconcile: async (input) => {
+      reconciledJob = input.job;
+      fx.events.push(['recovery.reconcile']);
+      return { reconciled: true, error: null };
+    },
+  });
+
+  const runtime = await startWith(fx);
+  assert.deepEqual(reconciledJob.payload, {});
+  assert.deepEqual(fx.events.map((event) => event[0]), [
+    'lock.acquire',
+    'recovery.reconcile',
+    'recovery.ack',
+    'executor.create',
+    'snapshot',
+    'executor.start',
+  ]);
+  await runtime.stop();
+});
+
+test('local runtime refuses to replay persisted running work during startup recovery', async () => {
+  const jobId = '11111111-1111-4111-8111-111111111111';
+  const fx = fixture({
+    jobRegistry: {
+      listJobs: async () => [],
+      claimNext: async () => null,
+      complete: async () => null,
+      recovery: () => ({ code: 'durable_job_reconciliation_required', jobs: [{ jobId, serverId }] }),
+      getJob: async () => ({
+        id: jobId,
+        serverId,
+        operation: 'system.packages.inspect',
+        resourceType: 'system',
+        resourceId: serverId,
+        status: 'running',
+      }),
+      getReconciliationJob: async () => { throw new Error('must not read terminal payload'); },
+      acknowledgeReconciliation: async () => { throw new Error('must not acknowledge'); },
+    },
+  });
+
+  await assert.rejects(
+    startWith(fx),
+    (error) => error instanceof LocalRuntimeError && error.code === 'local_runtime_recovery_required',
+  );
+  assert.equal(fx.events.some((event) => event[0] === 'executor.create'), false);
+  assert.deepEqual(fx.events.map((event) => event[0]), ['lock.acquire', 'lock.release']);
+});
+
+test('startup terminal reconciliation failure prevents executor creation', async () => {
+  const jobId = '11111111-1111-4111-8111-111111111111';
+  const publicJob = {
+    id: jobId,
+    serverId,
+    operation: 'system.packages.inspect',
+    resourceType: 'system',
+    resourceId: serverId,
+    status: 'succeeded',
+    result: {},
+    error: null,
+  };
+  const fx = fixture({
+    jobRegistry: {
+      listJobs: async () => [],
+      claimNext: async () => null,
+      complete: async () => null,
+      recovery: () => ({ code: 'durable_job_reconciliation_required', jobs: [{ jobId, serverId }] }),
+      getJob: async () => publicJob,
+      getReconciliationJob: async () => ({ ...publicJob, payload: {} }),
+      acknowledgeReconciliation: async () => { throw new Error('must not acknowledge'); },
+    },
+    reconcile: async () => { throw new Error('private reconciliation failure'); },
+  });
+
+  await assert.rejects(
+    startWith(fx),
+    (error) => error instanceof LocalRuntimeError && error.code === 'local_runtime_recovery_reconciliation_failed',
+  );
+  assert.equal(fx.events.some((event) => event[0] === 'executor.create'), false);
+  assert.deepEqual(fx.events.map((event) => event[0]), ['lock.acquire', 'lock.release']);
 });
 
 test('local runtime refreshes its server snapshot before the registry offline threshold', async () => {
