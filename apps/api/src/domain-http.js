@@ -68,24 +68,18 @@ function assertUpdateApplyBody(body) {
   return Object.freeze({ changes: assertUpdateChanges(input.changes), previewDigest: input.previewDigest, confirmation: input.confirmation });
 }
 
-async function assertDomainUpdateIdle(domain, { jobRegistry = null, certificateRegistry = null, websiteRegistry = null } = {}) {
-  const [jobs, certificates] = await Promise.all([
+async function assertDomainUpdateIdle(domain, { jobRegistry = null, certificateRegistry = null } = {}) {
+  const [jobs, allJobs, certificates] = await Promise.all([
     jobRegistry?.listJobs ? jobRegistry.listJobs({ resourceType: 'domain', resourceId: domain.id }) : [],
+    jobRegistry?.listJobs ? jobRegistry.listJobs() : [],
     certificateRegistry?.listCertificates ? certificateRegistry.listCertificates() : [],
   ]);
   const domainBusy = jobs.some((job) => job.status === 'queued' || job.status === 'running');
   const certificateBusy = certificates.some((certificate) => (
     certificate.domainId === domain.id && CERTIFICATE_OPERATION_STATES.has(certificate.state)
   ));
-  let migrationBusy = false;
-  if (!domainBusy && !certificateBusy && domain.websiteId && jobRegistry?.listJobs && websiteRegistry?.getWebsite) {
-    const website = await websiteRegistry.getWebsite(domain.websiteId);
-    if (website?.applicationId) {
-      const applicationJobs = await jobRegistry.listJobs({ resourceType: 'application', resourceId: website.applicationId });
-      migrationBusy = applicationJobs.some((job) => job.operation === OPERATIONS.APP_NODE_PASSENGER_MIGRATE
-        && (job.status === 'queued' || job.status === 'running'));
-    }
-  }
+  const migrationBusy = allJobs.some((job) => job.operation === OPERATIONS.APP_NODE_PASSENGER_MIGRATE
+    && (job.status === 'queued' || job.status === 'running'));
   if (domainBusy || certificateBusy || migrationBusy) {
     throw new DomainRegistryError('domain_update_operation_conflict', 'Wait for the active Domain, certificate or runtime migration operation to finish before updating routing', 409);
   }
