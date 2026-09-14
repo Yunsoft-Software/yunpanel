@@ -57,6 +57,7 @@ function normalizeIntent(context = {}) {
 
   const environment = succeededStep(operation, 'passenger_environment');
   const release = succeededStep(operation, 'application_release');
+  const environmentState = succeededStep(operation, 'passenger_environment_state');
   const runtime = succeededStep(operation, 'runtime');
   const nginx = succeededStep(operation, 'nginx');
   const domainActivation = succeededStep(operation, 'domain_activation');
@@ -67,6 +68,11 @@ function normalizeIntent(context = {}) {
     || typeof environment.includeSha256 !== 'string' || !CHECKSUM_PATTERN.test(environment.includeSha256)
     || !release || release.adapter !== 'passenger-application-release'
     || release.applicationId !== application.id || release.releaseId !== operationId
+    || !environmentState || environmentState.adapter !== 'passenger-environment-state'
+    || environmentState.applicationId !== application.id || environmentState.releaseId !== operationId
+    || environmentState.environmentRevision !== environment.environmentRevision
+    || environmentState.appliedRevision !== environment.environmentRevision
+    || environmentState.appliedReleaseId !== operationId
     || !runtime || runtime.adapter !== 'passenger' || runtime.applicationId !== application.id
     || runtime.releaseId !== operationId || runtime.unixUser !== website.unixUser
     || typeof runtime.appRoot !== 'string' || typeof runtime.documentRoot !== 'string'
@@ -89,6 +95,7 @@ function normalizeIntent(context = {}) {
     domainIds: Object.freeze([...plannedDomainIds]),
     releaseId: release.releaseId,
     environment,
+    environmentState,
     runtime,
     nginx,
     domainActivation,
@@ -113,11 +120,13 @@ function publicEvidence(binding, checksum, environmentRevision) {
 
 export function createWebsitePassengerAuthorityProvisioningHandler({
   applicationRegistry,
+  applicationEnvironmentRegistry,
   websiteRegistry,
   domainRegistry,
   runtimeBindingRegistry,
 } = {}) {
   if (!applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
+    || !applicationEnvironmentRegistry || typeof applicationEnvironmentRegistry.environmentStatus !== 'function'
     || !websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
     || !domainRegistry || typeof domainRegistry.getDomain !== 'function'
     || !runtimeBindingRegistry || typeof runtimeBindingRegistry.getBinding !== 'function'
@@ -132,8 +141,9 @@ export function createWebsitePassengerAuthorityProvisioningHandler({
 
   async function expectedBinding(context = {}) {
     const spec = normalizeIntent(context);
-    const [application, website, ...domains] = await Promise.all([
+    const [application, environmentStatus, website, ...domains] = await Promise.all([
       applicationRegistry.getApplication(spec.applicationId),
+      applicationEnvironmentRegistry.environmentStatus(spec.applicationId, { currentReleaseId: spec.releaseId }),
       websiteRegistry.getWebsite(spec.websiteId),
       ...spec.domainIds.map((domainId) => domainRegistry.getDomain(domainId)),
     ]);
@@ -145,6 +155,15 @@ export function createWebsitePassengerAuthorityProvisioningHandler({
       throw new WebsitePassengerAuthorityProvisioningError(
         'website_passenger_authority_resource_drift',
         'Passenger Application or Website authority changed before binding activation',
+      );
+    }
+    if (environmentStatus.savedRevision !== spec.environment.environmentRevision
+      || environmentStatus.appliedRevision !== spec.environment.environmentRevision
+      || environmentStatus.appliedReleaseId !== spec.releaseId
+      || environmentStatus.appliedToRunningProcess !== true) {
+      throw new WebsitePassengerAuthorityProvisioningError(
+        'website_passenger_authority_environment_drift',
+        'Passenger environment changed after release reconciliation',
       );
     }
     const domainEvidence = domains.map((domain, index) => {
