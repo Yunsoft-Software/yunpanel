@@ -222,11 +222,18 @@ export {
   nodeRollbackManager,
 } from './node-rollback-manager.js';
 export { copyStaticArtifact } from './static-artifact-worker.js';
+export { StaticDeploymentError } from './static-deployment-manager.js';
 export {
-  createStaticDeploymentManager,
-  StaticDeploymentError,
-  staticDeploymentManager,
-} from './static-deployment-manager.js';
+  createStaticDeploymentRouter as createStaticDeploymentManager,
+  StaticDeploymentRouterError,
+  staticDeploymentRouter as staticDeploymentManager,
+  staticDeploymentRouterInternals,
+} from './static-deployment-router.js';
+export {
+  createWebsiteStaticDeploymentManager,
+  WebsiteStaticDeploymentError,
+  websiteStaticDeploymentInternals,
+} from './website-static-deployment-manager.js';
 export {
   createStaticDeploymentReceiptStore,
   StaticDeploymentReceiptError,
