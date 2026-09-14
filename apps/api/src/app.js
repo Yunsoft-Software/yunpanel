@@ -233,6 +233,7 @@ export function createApp({
   const applicationEnvironmentRegistry = options.applicationEnvironmentRegistry ?? null;
   const passengerMigrationPreviewService = options.applicationPassengerMigrationPreviewService ?? null;
   const passengerMigrationService = options.applicationPassengerMigrationService ?? null;
+  const runtimeBindingRegistry = options.runtimeBindingRegistry ?? null;
   const files = siteFileManager ?? createSiteFileManager({ websiteRegistry, localServerId });
   const readiness = dnsReadinessService ?? createDnsReadinessService({
     dnsHostingRegistry,
@@ -357,6 +358,17 @@ export function createApp({
   app.patch('/api/domains/:domainId', requirePanelRouteAccess, createDomainUpdateHandler(domainRegistry, { jobRegistry, certificateRegistry, localServerId }));
   app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry, { localServerId }));
   app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry, { localServerId }));
+  if (websiteProvisioningRuntime && runtimeBindingRegistry) {
+    if (typeof websiteProvisioningRuntime.configurePassengerControlPlane !== 'function') {
+      throw new Error('Website provisioning runtime cannot configure Passenger control-plane dependencies');
+    }
+    websiteProvisioningRuntime.configurePassengerControlPlane({
+      applicationRegistry,
+      websiteRegistry,
+      domainRegistry,
+      runtimeBindingRegistry,
+    });
+  }
   mountSiteCreateRoutes(app, {
     registry: localRegistry,
     applicationRegistry,
