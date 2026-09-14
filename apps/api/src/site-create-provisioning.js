@@ -102,6 +102,32 @@ function nodeReleaseIntent(preview, applicationId, paths = createWebsitePathCont
   });
 }
 
+function passengerApplicationReleaseIntent(preview, applicationId) {
+  if (preview.source?.kind !== 'new_node' || preview.plan.application?.runtimeAdapter !== 'passenger') {
+    throw new Error('Passenger Application release finalization requires a new Passenger Node Website');
+  }
+  return Object.freeze({
+    adapter: 'passenger-application-release',
+    applicationId,
+    releaseId: preview.operationId,
+  });
+}
+
+function passengerAuthorityIntent(preview, applicationId) {
+  if (preview.source?.kind !== 'new_node' || preview.plan.application?.runtimeAdapter !== 'passenger') {
+    throw new Error('Passenger runtime authority requires a new Passenger Node Website');
+  }
+  return Object.freeze({
+    adapter: 'passenger-authority',
+    applicationId,
+    websiteId: preview.ids.websiteId,
+    domainIds: Object.freeze([
+      preview.ids.primaryDomainId,
+      preview.ids.wwwDomainId,
+    ].filter(Boolean)),
+  });
+}
+
 function staticIntent(preview, applicationId, paths = createWebsitePathContract({
   websiteId: preview?.ids?.websiteId,
   applicationId,
@@ -243,6 +269,22 @@ export function siteCreateProvisioningPlan(preview) {
     target: runtimeType === 'node' ? runtimeIntent : preview.plan.primaryDomain?.target,
   }));
 
+  if (runtimeType === 'node' && preview.source?.kind === 'new_node') {
+    const applicationId = preview.plan.application?.id;
+    steps.push(hostStep(
+      'application_release',
+      'passenger_application_release',
+      passengerApplicationReleaseIntent(preview, applicationId),
+      { compensationState: 'pending' },
+    ));
+    steps.push(hostStep(
+      'passenger_authority',
+      'passenger_authority',
+      passengerAuthorityIntent(preview, applicationId),
+      { compensationState: 'pending' },
+    ));
+  }
+
   if (preview.plan.primaryDomain?.httpsMode === 'managed') {
     steps.push(hostStep('certificate', 'certificate', {
       websiteId: preview.ids.websiteId,
@@ -265,6 +307,8 @@ export function siteCreateProvisioningPlan(preview) {
 export const siteCreateProvisioningInternals = Object.freeze({
   passengerIntent,
   nodeReleaseIntent,
+  passengerApplicationReleaseIntent,
+  passengerAuthorityIntent,
   staticIntent,
   websiteAliases,
 });
