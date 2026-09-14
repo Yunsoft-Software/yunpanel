@@ -23,13 +23,13 @@ function passengerBindingDrift(message) {
   throw new DomainRegistryError('passenger_runtime_binding_drift', message, 409);
 }
 
-async function guardPassengerRuntimeBinding({
+async function resolvePassengerRuntimeTarget({
   domain,
   website,
   applicationRegistry,
   runtimeBindingRegistry,
 }) {
-  if (website.runtimeType !== 'node' || !website.applicationId) return;
+  if (website.runtimeType !== 'node' || !website.applicationId) return null;
 
   requireDependency(
     runtimeBindingRegistry,
@@ -38,7 +38,7 @@ async function guardPassengerRuntimeBinding({
     'Runtime binding registry is required to resolve Node Website traffic target',
   );
   const binding = await runtimeBindingRegistry.getBinding(website.applicationId);
-  if (!binding || binding.adapter === 'direct-systemd') return;
+  if (!binding || binding.adapter === 'direct-systemd') return null;
   if (binding.adapter !== 'passenger') {
     passengerBindingDrift('Node Website runtime binding adapter is not supported');
   }
@@ -64,15 +64,19 @@ async function guardPassengerRuntimeBinding({
     passengerBindingDrift('Passenger runtime binding Website revision drifted');
   }
   const domainEvidence = binding.domains.find((entry) => entry.domainId === domain.id);
-  if (!domainEvidence || domainEvidence.desiredRevision !== domain.desiredRevision) {
+  if (!domainEvidence || domain.desiredRevision < domainEvidence.desiredRevision) {
     passengerBindingDrift('Passenger runtime binding Domain revision drifted');
   }
 
-  throw new DomainRegistryError(
-    'passenger_runtime_binding_restage_blocked',
-    'Passenger runtime binding is authoritative; legacy proxy Domain staging is blocked until Passenger-aware restaging is used',
-    409,
-  );
+  return Object.freeze({
+    source: 'passenger',
+    targetType: 'passenger',
+    target: Object.freeze({
+      root: binding.passengerTarget.appRoot,
+      startupFile: binding.passengerTarget.startupFile,
+      nodeBinary: binding.passengerTarget.nodeBinary,
+    }),
+  });
 }
 
 export async function resolveWebsiteDomainTarget({
@@ -101,13 +105,13 @@ export async function resolveWebsiteDomainTarget({
 
   const binding = website.managedComposeBinding ?? null;
   if (binding === null) {
-    await guardPassengerRuntimeBinding({
+    const passengerTarget = await resolvePassengerRuntimeTarget({
       domain,
       website,
       applicationRegistry,
       runtimeBindingRegistry,
     });
-    return persistedDomainTarget(domain);
+    return passengerTarget ?? persistedDomainTarget(domain);
   }
   if (website.runtimeType !== 'docker' || website.applicationId !== null
     || website.dockerWorkloadId !== null || website.proxyTarget !== null) {
@@ -159,5 +163,5 @@ export async function resolveWebsiteDomainTarget({
 
 export const websiteDomainTargetInternals = Object.freeze({
   persistedDomainTarget,
-  guardPassengerRuntimeBinding,
+  resolvePassengerRuntimeTarget,
 });
