@@ -2,6 +2,7 @@ import { createWebsiteDomainActivationProvisioningHandler } from './website-doma
 import { createWebsiteNodeReleaseProvisioningHandler } from './website-node-release-provisioning-handler.js';
 import { createWebsitePassengerApplicationReleaseProvisioningHandler } from './website-passenger-application-release-provisioning-handler.js';
 import { createWebsitePassengerAuthorityProvisioningHandler } from './website-passenger-authority-provisioning-handler.js';
+import { createWebsitePassengerEnvironmentProvisioningHandler } from './website-passenger-environment-provisioning-handler.js';
 import { createWebsiteProvisioningHandlers } from './website-provisioning-handlers.js';
 import { createWebsiteProvisioningOrchestrator } from './website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from './website-provisioning-registry.js';
@@ -12,9 +13,11 @@ export function createWebsiteProvisioningRuntime({
   identityManager,
   passengerSiteManager,
   nodeReleaseManager,
+  passengerEnvironmentManager,
   staticDeploymentManager,
   nginxManager,
   applicationRegistry = null,
+  applicationEnvironmentRegistry = null,
   websiteRegistry = null,
   domainRegistry = null,
   runtimeBindingRegistry = null,
@@ -35,6 +38,7 @@ export function createWebsiteProvisioningRuntime({
     }),
   };
   let domainControlPlane = null;
+  let passengerEnvironment = null;
   let passengerControlPlane = null;
 
   function configureDomainControlPlane(dependencies = {}) {
@@ -50,6 +54,23 @@ export function createWebsiteProvisioningRuntime({
       domainRegistry: nextDomainRegistry,
     });
     domainControlPlane = Object.freeze({ domainRegistry: nextDomainRegistry });
+    return Object.freeze({ configured: true });
+  }
+
+  function configurePassengerEnvironment(dependencies = {}) {
+    const nextRegistry = dependencies.applicationEnvironmentRegistry;
+    if (!nextRegistry) throw new Error('Passenger Website environment registry is required');
+    if (passengerEnvironment) {
+      if (passengerEnvironment.applicationEnvironmentRegistry !== nextRegistry) {
+        throw new Error('Passenger Website environment registry cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.passenger_environment = createWebsitePassengerEnvironmentProvisioningHandler({
+      applicationEnvironmentRegistry: nextRegistry,
+      ...(passengerEnvironmentManager ? { environmentManager: passengerEnvironmentManager } : {}),
+    });
+    passengerEnvironment = Object.freeze({ applicationEnvironmentRegistry: nextRegistry });
     return Object.freeze({ configured: true });
   }
 
@@ -92,6 +113,7 @@ export function createWebsiteProvisioningRuntime({
   }
 
   if (domainRegistry) configureDomainControlPlane({ domainRegistry });
+  if (applicationEnvironmentRegistry) configurePassengerEnvironment({ applicationEnvironmentRegistry });
   if (applicationRegistry || websiteRegistry || runtimeBindingRegistry) {
     configurePassengerControlPlane({ applicationRegistry, websiteRegistry, domainRegistry, runtimeBindingRegistry });
   }
@@ -115,6 +137,7 @@ export function createWebsiteProvisioningRuntime({
     handlers,
     orchestrator,
     configureDomainControlPlane,
+    configurePassengerEnvironment,
     configurePassengerControlPlane,
     init,
     get: (operationId) => registry.get(operationId),
