@@ -21,6 +21,10 @@ function handlerFor(handlers, step) {
   return handler;
 }
 
+function compensationSupported(handlers, stepKind) {
+  return Boolean(handlers?.[stepKind] && typeof handlers[stepKind].compensate === 'function');
+}
+
 function compensationHandlerFor(handlers, step) {
   const handler = handlers?.[step.kind];
   if (!handler || typeof handler.compensate !== 'function') {
@@ -348,9 +352,15 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     }
   }
 
-  return Object.freeze({ runNext, retryStep, compensateStep });
+  return Object.freeze({
+    runNext,
+    retryStep,
+    compensateStep,
+    supportsCompensation: (stepKind) => compensationSupported(handlers, stepKind),
+  });
 }
 
 export const websiteProvisioningOrchestratorInternals = Object.freeze({
   handlerContext,
+  compensationSupported,
 });
