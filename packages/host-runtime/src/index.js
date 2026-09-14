@@ -166,6 +166,11 @@ export {
   PassengerInspectorError,
   passengerInspectorInternals,
 } from './passenger-inspector.js';
+export {
+  createPassengerManager,
+  PassengerManagerError,
+  passengerManagerInternals,
+} from './passenger-manager.js';
 export { createNodeStatusInspector, NodeStatusError, nodeStatusInspector, parseNodeServiceProperties } from './node-status-inspector.js';
 export {
   createNodeEnvironmentWriter,
