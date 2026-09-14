@@ -123,6 +123,16 @@ function passengerApplicationReleaseIntent(preview, applicationId) {
   });
 }
 
+function passengerEnvironmentStateIntent(preview, applicationId) {
+  if (preview.source?.kind !== 'new_node' || preview.plan.application?.runtimeAdapter !== 'passenger') {
+    throw new Error('Passenger environment state reconciliation requires a new Passenger Node Website');
+  }
+  return Object.freeze({
+    adapter: 'passenger-environment-state',
+    applicationId,
+  });
+}
+
 function passengerAuthorityIntent(preview, applicationId) {
   if (preview.source?.kind !== 'new_node' || preview.plan.application?.runtimeAdapter !== 'passenger') {
     throw new Error('Passenger runtime authority requires a new Passenger Node Website');
@@ -316,6 +326,12 @@ export function siteCreateProvisioningPlan(preview) {
       { compensationState: 'pending' },
     ));
     steps.push(hostStep(
+      'passenger_environment_state',
+      'passenger_environment_state',
+      passengerEnvironmentStateIntent(preview, applicationId),
+      { compensationState: 'not_required' },
+    ));
+    steps.push(hostStep(
       'passenger_authority',
       'passenger_authority',
       passengerAuthorityIntent(preview, applicationId),
@@ -347,6 +363,7 @@ export const siteCreateProvisioningInternals = Object.freeze({
   nodeReleaseIntent,
   passengerEnvironmentIntent,
   passengerApplicationReleaseIntent,
+  passengerEnvironmentStateIntent,
   passengerAuthorityIntent,
   domainActivationIntent,
   staticIntent,
