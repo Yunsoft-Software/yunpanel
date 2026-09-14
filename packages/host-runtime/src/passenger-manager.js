@@ -8,7 +8,7 @@ const execFileAsync = promisify(execFile);
 const OS_RELEASE = '/etc/os-release';
 const STAGING_ROOT = '/var/lib/yunpanel/staging/passenger';
 const KEY_URL = 'https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key-2025.txt';
-const KEY_PATH = '/etc/apt/trusted.gpg.d/phusion.gpg';
+const KEY_PATH = '/usr/share/keyrings/yunpanel-phusion-passenger.gpg';
 const REPOSITORY_PATH = '/etc/apt/sources.list.d/passenger.list';
 const MODULE_SOURCE = '/usr/share/nginx/modules-available/mod-http-passenger.load';
 const MODULE_LINK = '/etc/nginx/modules-enabled/50-mod-http-passenger.conf';
@@ -59,7 +59,7 @@ function nginxPackageOwner(stdout) {
 }
 
 function repositoryContent() {
-  return `deb https://oss-binaries.phusionpassenger.com/apt/passenger ${SUPPORTED.codename} main\n`;
+  return `deb [signed-by=${KEY_PATH}] https://oss-binaries.phusionpassenger.com/apt/passenger ${SUPPORTED.codename} main\n`;
 }
 
 function commandError(error, code, message) {
@@ -139,6 +139,7 @@ export function createPassengerManager({
 
   async function installRepository() {
     await mkdirFn(STAGING_ROOT, { recursive: true, mode: 0o700 });
+    await mkdirFn(path.dirname(KEY_PATH), { recursive: true, mode: 0o755 });
     const source = path.join(STAGING_ROOT, `phusion-key-${process.pid}.asc`);
     const dearmored = path.join(STAGING_ROOT, `phusion-key-${process.pid}.gpg`);
     await runSafe(
