@@ -64,6 +64,7 @@ import { createTerminalProcessManager } from './terminal-process-manager.js';
 import { createTerminalWebSocketServer } from './terminal-websocket.js';
 import { createWebsiteMigrationLedger } from './website-migration-ledger.js';
 import { createWebsiteMigrationPolicyStore } from './website-migration-policy.js';
+import { createWebsiteProvisioningRuntime } from './website-provisioning-runtime.js';
 import { createWebsiteRegistry } from './website-registry.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
@@ -79,6 +80,8 @@ const certificateStorePath = process.env.YUNPANEL_CERTIFICATE_STORE ?? path.reso
 const customCertificateRoot = path.join(path.dirname(certificateStorePath), 'custom-certificates');
 const applicationStorePath = process.env.YUNPANEL_APPLICATION_STORE ?? path.resolve('.data/application-registry.json');
 const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.data/website-registry.json');
+const websiteProvisioningStorePath = process.env.YUNPANEL_WEBSITE_PROVISIONING_STORE
+  ?? path.join(controlPlaneStateRoot, 'website-provisioning-registry.json');
 const databaseBindingStorePath = process.env.YUNPANEL_DATABASE_BINDING_STORE
   ?? path.resolve('.data/database-binding-registry.json');
 const databaseCredentialStorePath = process.env.YUNPANEL_DATABASE_CREDENTIAL_STORE
@@ -167,6 +170,8 @@ const websiteRegistry = createWebsiteRegistry({
   getDockerComposeProject: async (projectId) => dockerComposeProjectBootstrap.projectRegistry.getProject(projectId),
 });
 await websiteRegistry.init();
+const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({ filePath: websiteProvisioningStorePath });
+await websiteProvisioningRuntime.init();
 const databaseBindingRegistry = createDatabaseBindingRegistry({
   filePath: databaseBindingStorePath,
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
@@ -358,6 +363,7 @@ const listener = createAuthenticatedApi({
       certificateMaterialManager,
       applicationRegistry,
       websiteRegistry,
+      websiteProvisioningRuntime,
       databaseBindingRegistry,
       databaseCredentialRegistry,
       databaseCredentialApplyService,
@@ -449,6 +455,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] certificate store=${certificateStorePath}`);
   console.log(`[yunpanel-api] application store=${applicationStorePath}`);
   console.log(`[yunpanel-api] website store=${websiteStorePath}`);
+  console.log(`[yunpanel-api] website provisioning store=${websiteProvisioningStorePath}`);
   console.log(`[yunpanel-api] database binding store=${databaseBindingStorePath}`);
   console.log(`[yunpanel-api] database credential store=${databaseCredentialStorePath}`);
   console.log(`[yunpanel-api] website migration policy store=${websiteMigrationPolicyStorePath}`);
