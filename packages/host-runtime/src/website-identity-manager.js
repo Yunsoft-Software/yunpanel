@@ -86,7 +86,8 @@ function receiptValue(value, { operationId, intent } = {}) {
     || value.user !== intent.user
     || value.homeDirectory !== intent.homeDirectory
     || (value.uid !== null && (!Number.isSafeInteger(value.uid) || value.uid < 1))
-    || (value.gid !== null && (!Number.isSafeInteger(value.gid) || value.gid < 1))) {
+    || (value.gid !== null && (!Number.isSafeInteger(value.gid) || value.gid < 1))
+    || ((value.uid === null) !== (value.gid === null))) {
     throw new WebsiteIdentityManagerError('website_identity_receipt_invalid', 'Website identity ownership receipt is invalid');
   }
   return Object.freeze({
@@ -250,6 +251,18 @@ export function createWebsiteIdentityManager({
     }
   }
 
+  async function checkpointCreatedIdentity(operationId, intent) {
+    const account = await inspectAccount(intent);
+    const group = await inspectGroup(intent);
+    const home = await inspectHome(intent);
+    if (!account || !group || !home
+      || group.gid !== account.gid || group.members.length !== 0
+      || home.uid !== account.uid || home.gid !== account.gid) {
+      throw new WebsiteIdentityManagerError('website_identity_create_unverified', 'Website Unix identity ownership could not be verified after creation');
+    }
+    return persistReceipt(operationId, intent, { uid: account.uid, gid: account.gid });
+  }
+
   async function apply(rawIntent, { operationId: rawOperationId = null } = {}) {
     const intent = normalizeIntent(rawIntent, homeRoot);
     const operationId = rawOperationId === null ? null : normalizeOperationId(rawOperationId);
@@ -257,6 +270,12 @@ export function createWebsiteIdentityManager({
     const receipt = operationId ? await loadReceipt(operationId, intent) : null;
 
     if (existingAccount) {
+      if (receipt && (receipt.uid === null || receipt.gid === null)) {
+        throw new WebsiteIdentityManagerError('website_identity_partial_state', 'Website Unix identity exists without a durable ownership checkpoint and requires manual remediation');
+      }
+      if (receipt && (receipt.uid !== existingAccount.uid || receipt.gid !== existingAccount.gid)) {
+        throw new WebsiteIdentityManagerError('website_identity_partial_state', 'Website Unix identity ownership does not match the durable operation receipt');
+      }
       const verified = await inspect(intent);
       if (!verified.satisfied) {
         throw new WebsiteIdentityManagerError('website_identity_partial_state', 'Website Unix identity exists without complete managed home state');
@@ -279,6 +298,9 @@ export function createWebsiteIdentityManager({
       const group = await inspectGroup(intent);
       const home = await inspectHome(intent);
       if (group || home) {
+        if (receipt.uid === null || receipt.gid === null) {
+          throw new WebsiteIdentityManagerError('website_identity_partial_state', 'Website identity has partial state without a durable ownership checkpoint and requires manual remediation');
+        }
         throw new WebsiteIdentityManagerError('website_identity_partial_state', 'Website identity has partial operation-owned state that must be compensated before retry');
       }
     }
@@ -295,6 +317,9 @@ export function createWebsiteIdentityManager({
     } catch {
       throw new WebsiteIdentityManagerError('website_identity_create_failed', 'Website Unix identity could not be created');
     }
+
+    await checkpointCreatedIdentity(operationId, intent);
+
     try {
       await run(INSTALL_PATH, ['-d', '-o', intent.user, '-g', intent.user, '-m', '0750', intent.homeDirectory], { timeout: 10_000 });
     } catch {
@@ -304,7 +329,6 @@ export function createWebsiteIdentityManager({
     if (!verified.satisfied) {
       throw new WebsiteIdentityManagerError('website_identity_create_unverified', 'Website Unix identity could not be verified after creation');
     }
-    await persistReceipt(operationId, intent, { uid: verified.uid, gid: verified.gid });
     return Object.freeze({
       ...verified,
       created: true,
@@ -313,52 +337,55 @@ export function createWebsiteIdentityManager({
   }
 
   async function inspectCompensation(rawIntent, {
-    operationId: rawOperationId,
+    operationId: rawOperationId = null,
     evidence = null,
   } = {}) {
     const intent = normalizeIntent(rawIntent, homeRoot);
-    if (evidence?.created === false) {
-      return Object.freeze({ satisfied: true, removedUser: false, preservedExisting: true });
-    }
-    const operationId = normalizeOperationId(rawOperationId);
-    const receipt = await loadReceipt(operationId, intent);
-    const account = await inspectAccount(intent);
+    const operationId = rawOperationId === null ? null : normalizeOperationId(rawOperationId);
+    const receipt = operationId ? await loadReceipt(operationId, intent) : null;
+
     if (!receipt) {
-      if (account) {
-        throw new WebsiteIdentityManagerError('website_identity_compensation_receipt_missing', 'Website identity compensation refused without an ownership receipt');
+      if (evidence?.created === true) {
+        const account = await inspectAccount(intent);
+        if (account) {
+          throw new WebsiteIdentityManagerError('website_identity_compensation_receipt_missing', 'Website identity compensation refused without an ownership receipt');
+        }
       }
-      return Object.freeze({ satisfied: true, removedUser: false, preservedUnownedState: true });
+      return Object.freeze({
+        satisfied: true,
+        removedUser: false,
+        ...(evidence?.created === false ? { preservedExisting: true } : { preservedUnownedState: true }),
+      });
     }
 
-    let uid = receipt.uid;
-    let gid = receipt.gid;
-    if (account) {
-      if ((uid !== null && account.uid !== uid) || (gid !== null && account.gid !== gid)) {
-        throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because account ownership has drifted');
-      }
-      uid = account.uid;
-      gid = account.gid;
-    }
-
+    const account = await inspectAccount(intent);
     const group = await inspectGroup(intent);
-    if (group) {
-      if (gid !== null && group.gid !== gid) {
-        throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because group ownership has drifted');
+    const home = await inspectHome(intent);
+
+    if (receipt.uid === null || receipt.gid === null) {
+      if (account || group || home) {
+        throw new WebsiteIdentityManagerError(
+          'website_identity_compensation_ownership_unknown',
+          'Website identity compensation refused because host state exists without a durable ownership checkpoint',
+        );
       }
-      if (group.members.length !== 0) {
-        throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because the managed group has members');
-      }
-      gid = group.gid;
+      return Object.freeze({
+        satisfied: true,
+        removedUser: true,
+        removedGroup: true,
+        removedHome: true,
+        preservedExisting: false,
+      });
     }
 
-    const home = await inspectHome(intent);
-    if (home) {
-      if (uid === null || gid === null) {
-        throw new WebsiteIdentityManagerError('website_identity_compensation_ownership_unknown', 'Website identity compensation cannot verify home ownership');
-      }
-      if (home.uid !== uid || home.gid !== gid) {
-        throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because home ownership has drifted');
-      }
+    if (account && (account.uid !== receipt.uid || account.gid !== receipt.gid)) {
+      throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because account ownership has drifted');
+    }
+    if (group && (group.gid !== receipt.gid || group.members.length !== 0)) {
+      throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because group ownership has drifted');
+    }
+    if (home && (home.uid !== receipt.uid || home.gid !== receipt.gid)) {
+      throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because home ownership has drifted');
     }
 
     const satisfied = !account && !group && !home;
@@ -368,8 +395,9 @@ export function createWebsiteIdentityManager({
       removedUser: !account,
       removedGroup: !group,
       removedHome: !home,
-      uid,
-      gid,
+      uid: receipt.uid,
+      gid: receipt.gid,
+      preservedExisting: false,
     });
   }
 
@@ -378,26 +406,25 @@ export function createWebsiteIdentityManager({
     evidence = null,
   } = {}) {
     const intent = normalizeIntent(rawIntent, homeRoot);
-    if (evidence?.created === false) {
-      return Object.freeze({ satisfied: true, removedUser: false, preservedExisting: true });
-    }
     const operationId = normalizeOperationId(rawOperationId);
-    let receipt = await loadReceipt(operationId, intent);
+    const receipt = await loadReceipt(operationId, intent);
     if (!receipt) {
       return inspectCompensation(intent, { operationId, evidence });
     }
 
     const initial = await inspectCompensation(intent, { operationId, evidence });
     if (initial.satisfied) return initial;
+    if (receipt.uid === null || receipt.gid === null) {
+      throw new WebsiteIdentityManagerError(
+        'website_identity_compensation_ownership_unknown',
+        'Website identity compensation refused without a durable ownership checkpoint',
+      );
+    }
 
     const account = await inspectAccount(intent);
     if (account) {
-      if ((receipt.uid !== null && receipt.uid !== account.uid)
-        || (receipt.gid !== null && receipt.gid !== account.gid)) {
+      if (receipt.uid !== account.uid || receipt.gid !== account.gid) {
         throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because account ownership has drifted');
-      }
-      if (receipt.uid === null || receipt.gid === null) {
-        receipt = await persistReceipt(operationId, intent, { uid: account.uid, gid: account.gid });
       }
       try { await run(USERDEL_PATH, [intent.user], { timeout: 15_000 }); }
       catch {
@@ -409,7 +436,7 @@ export function createWebsiteIdentityManager({
 
     const group = await inspectGroup(intent);
     if (group) {
-      if (receipt.gid === null || group.gid !== receipt.gid || group.members.length !== 0) {
+      if (group.gid !== receipt.gid || group.members.length !== 0) {
         throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because group ownership has drifted');
       }
       try { await run(GROUPDEL_PATH, [intent.user], { timeout: 15_000 }); }
@@ -422,8 +449,7 @@ export function createWebsiteIdentityManager({
 
     const home = await inspectHome(intent);
     if (home) {
-      if (receipt.uid === null || receipt.gid === null
-        || home.uid !== receipt.uid || home.gid !== receipt.gid) {
+      if (home.uid !== receipt.uid || home.gid !== receipt.gid) {
         throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because home ownership has drifted');
       }
       try { await rmFn(intent.homeDirectory, { recursive: true, force: true }); }
