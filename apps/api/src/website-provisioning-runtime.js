@@ -28,6 +28,7 @@ export function createWebsiteProvisioningRuntime({
     get: (operationId) => registry.get(operationId),
     create: (plan) => registry.create(plan),
     runNext: (operationId) => orchestrator.runNext(operationId),
+    retryStep: (operationId, stepId) => orchestrator.retryStep(operationId, stepId),
     listInterrupted: () => registry.listInterrupted(),
   });
 }
