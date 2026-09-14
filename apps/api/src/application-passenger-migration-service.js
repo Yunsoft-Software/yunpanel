@@ -35,6 +35,16 @@ async function assertRoutingIdle({ jobRegistry, certificateRegistry, domainId })
   }
 }
 
+function authoritySnapshot(preview) {
+  return Object.freeze({
+    websiteId: preview.website.websiteId,
+    websiteRevision: preview.website.revision,
+    domainId: preview.domain.domainId,
+    domainDesiredRevision: preview.domain.desiredRevision,
+    domainAppliedRevision: preview.domain.appliedRevision,
+  });
+}
+
 export function createApplicationPassengerMigrationService({
   previewService,
   applicationRegistry,
@@ -138,6 +148,7 @@ export function createApplicationPassengerMigrationService({
           runtime: application.activeRuntime,
         },
         domain: domainEnvelope,
+        authority: authoritySnapshot(preview),
       },
       resourceType: 'application',
       resourceId: application.id,
@@ -149,4 +160,8 @@ export function createApplicationPassengerMigrationService({
   return Object.freeze({ apply });
 }
 
-export const applicationPassengerMigrationServiceInternals = Object.freeze({ applyInput, assertRoutingIdle });
+export const applicationPassengerMigrationServiceInternals = Object.freeze({
+  applyInput,
+  assertRoutingIdle,
+  authoritySnapshot,
+});
