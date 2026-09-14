@@ -19,7 +19,7 @@ Bir özellik için olgun ve bakımı süren bir araç varsa YunPanel aynı ürü
 2026-09-14 kaynak denetimine göre:
 
 - Node.js uygulamaları Passenger ile çalışmıyor. Her uygulama ayrı `yunapp-*` hesabı ve ayrı systemd unit'iyle çalışıyor.
-- Static ve Node workload için Unix kullanıcı, release dizini, build/deploy ve process izolasyonu var; fakat bu henüz eksiksiz Plesk-benzeri Website provisioning değildir.
+- Static ve Node workload için Unix kullanıcı, release dizini, build/deploy ve process izolasyonu var. Canonical Website/Application identity/path contract ve path-bound Unix identity provisioning mevcut; yeni static Website provisioning source akışı deterministic deploy/inspect modeline taşındı, ancak gerçek Ubuntu/package kabulü tamamlanmadı ve bütün host adapter'ları henüz aynı contract'ı tüketmiyor.
 - `/applications` bütün uygulamaları sunucu genelinde gösteriyor. Hedef site-merkezli ürün modeline aykırıdır.
 - Dosya ekranı YunPanel'in kendi `site-file-manager` API/UI uygulamasıdır; elFinder/Filestash entegrasyonu değildir.
 - Terminal YunPanel'in kendi `node-pty` + xterm.js WebSocket uygulamasıdır; ttyd entegrasyonu değildir.
@@ -44,6 +44,8 @@ Her bağımsız Website şu kimlikleri sahiplenir:
 - siteye bağlı database + least-privilege database user/grant;
 - isteğe bağlı mail domain, mailbox/alias ve `webmail.<domain>` erişimi;
 - DNS zone/record ownership, certificate, cron, SFTP ve trafik raporu.
+
+V1 filesystem ve Unix identity contract'ının tek kaynağı host-runtime `createWebsitePathContract` / `createApplicationIdentity` katmanıdır. Application ID'den mevcut deterministik `yunapp-*` adı korunur. Site HOME, persistent data ve SFTP root `/var/lib/yunpanel/data/<applicationId>`; private tmp bunun altında `tmp` (`0700`), site logs `logs` (`0750`) olur. Runtime release alanı `/var/lib/yunpanel/apps/<applicationId>` ve current release bunun `current` symlink'idir. Static build workspace `/var/lib/yunpanel/build/<applicationId>`, publish root `/var/www/yunpanel/apps/<applicationId>` altında kalabilir fakat build workspace Unix hesabının HOME'u değildir. Backup artifact kasası `/var/lib/yunpanel/backups/resources` site-owned değildir; control-plane/root-private (`0700`) kalır ve Website yalnız logical scope key ile ilişkilendirilir. Adapter'lar bu path/user formüllerini yeniden üretmez; canonical identity/path drift'i mutation öncesi fail-closed olur.
 
 Alias hiçbir Unix kullanıcısı, mailbox veya runtime üretmez. Bağımsız subdomain ayrı Website olarak oluşturulursa ayrı kullanıcı/runtime alır; parent Website altında çalışan subdomain açıkça `shared-site` seçilirse parent kimliğini paylaşır. Bu karar hostname parçalarından tahmin edilmez.
 
@@ -93,6 +95,8 @@ Passenger ve PM2 aynı uygulamanın iki supervisor'ı yapılmaz. Yeni Node Websi
 7. İsteğe bağlı database schema + siteye özel database user/grant oluşturulur; root credential frontend'e verilmez.
 8. SFTP, logs, GoAccess, cron ve restic policy site kimliğine bağlanır.
 9. DNS, HTTP, runtime, certificate, mail ve hazır araç health sonuçları kaydedilir. Zorunlu adım başarısızsa operation `ready` olmaz; uygulanmış adımlar compensation/rollback kanıtıyla ele alınır.
+
+Static Website'in ilk deploy'u durable provisioning operation ID'sini deterministic deployment/release ID olarak kullanır. Apply önce current release'i inspect eder; aynı deterministic release zaten aktifse mutation tekrarlanmaz. Restart sırasında `applying` static step körlemesine yeniden deploy edilmez, current symlink + real release directory + canonical Unix identity inspect edilerek reconcile edilir. Mevcut static Application Website'e bağlanırken repository yeniden deploy edilmez; var olan canonical current release inspect edilir.
 
 Provisioning policy Settings'te değiştirilebilir: varsayılan runtime, PHP/Node sürümü, local DNS/mail/database oluşturma, nameserver seti, IPv4/IPv6, backup policy ve security profile.
 
