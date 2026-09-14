@@ -87,7 +87,7 @@ function passengerTarget(value, adapter) {
     || !safeAbsolutePath(value.appRoot)
     || !safeAbsolutePath(value.documentRoot)
     || !safeAbsolutePath(value.nodeBinary)
-    || !safeAbsolutePath(value.environmentInclude)
+    || (value.environmentInclude !== null && !safeAbsolutePath(value.environmentInclude))
     || typeof value.startupFile !== 'string' || value.startupFile.length > 300
     || !SAFE_RELATIVE_PATH_PATTERN.test(value.startupFile)
     || path.posix.isAbsolute(value.startupFile)
@@ -221,7 +221,28 @@ export function createApplicationRuntimeBindingRegistry({ filePath = null, now =
     return publicRecord(candidate);
   }
 
-  return Object.freeze({ init, getBinding, activate });
+  async function removeOwnedPassenger(applicationId, { sourceOperationId, expectedRevision } = {}) {
+    await ensureInitialized();
+    const id = uuid(applicationId, 'applicationId');
+    const operationId = uuid(sourceOperationId, 'sourceOperationId');
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_expected_revision_invalid', 'Expected runtime binding revision is invalid');
+    }
+    const index = state.bindings.findIndex((entry) => entry.applicationId === id);
+    if (index < 0) return null;
+    const existing = normalizeRecord(state.bindings[index]);
+    if (existing.adapter !== 'passenger' || existing.sourceOperationId !== operationId) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_ownership_conflict', 'Runtime binding is not owned by the requested Passenger operation', 409);
+    }
+    if (existing.revision !== expectedRevision) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_revision_conflict', 'Runtime binding changed after provisioning', 409);
+    }
+    state.bindings.splice(index, 1);
+    await persist();
+    return publicRecord(existing);
+  }
+
+  return Object.freeze({ init, getBinding, activate, removeOwnedPassenger });
 }
 
 export const applicationRuntimeBindingRegistryInternals = Object.freeze({
