@@ -17,7 +17,6 @@ Kabul: yeni bir Website tek akışta dedicated kimlik ve seçilen kaynakları ü
 
 ## P0 — Runtime adapter'ları: Passenger ve PHP-FPM
 
-- [ ] Mevcut Ubuntu 24.04 Passenger install/inspect adapter'ını upgrade, snapshot/rollback ve failure-injection contract'ıyla tamamla; global Passenger/Nginx runtime doğrulaması ve postcondition'lar başarısız mutation'ı eski good state'e döndürsün.
 - [ ] Yeni Node Website production golden path'inde release hazırlama ile supervisor activation'ı ayır. Node release/build/env hazırlanırken geçici systemd unit yaratılmasın; durable Website provisioning doğrudan Passenger runtime evidence → Nginx activation → health zincirini kullansın. Passenger package dependency, env/log target, startup/runtime postcondition ve varsayılan runtime seçimi fail-closed olsun; user kontrollü raw Passenger/Nginx directive kabul etmesin.
 - [ ] PHP-FPM adapter'ı ekle: distro PHP ile site başına pool/socket, Unix user/group, document root, bounded ini/resource limits, configtest/reload/rollback. Çoklu PHP sürümü ayrı doğrulanmış repository kararı olmadan açılmasın.
 - [ ] Static deploy/rollback job intent'ini Website kimliği ve binding revision'ına explicit bağla; canonical-first deploy ve identity-aware rollback router üzerindeki proven-legacy fallback yalnız persisted migration işleri için tanınsın ve real-host acceptance sonrası kaldırılsın. Versioned job schema/idempotency compatibility korunmalı; yeni unbound deploy/rollback legacy yoluna düşmemeli.
