@@ -63,32 +63,7 @@ export function createWebsiteStaticDeploymentManager({
     throw new WebsiteStaticDeploymentError('website_static_dependencies_invalid', 'Website static deployment dependencies are invalid');
   }
 
-  let activeHome = null;
-  async function guardedRun(file, args, options = {}) {
-    if (file === USERADD_PATH) {
-      throw new WebsiteStaticDeploymentError(
-        'website_static_identity_create_forbidden',
-        'Website static deployment cannot create Unix identities outside provisioning',
-      );
-    }
-    if (file === RUNUSER_PATH && activeHome) {
-      return run(file, args, {
-        ...options,
-        env: { ...(options.env ?? {}), HOME: activeHome },
-      });
-    }
-    return run(file, args, options);
-  }
-
-  const deploymentManager = createDeploymentManager({
-    buildRoot,
-    webRoot,
-    run: guardedRun,
-    recordLog,
-  });
-  if (!deploymentManager || typeof deploymentManager.deployStatic !== 'function') {
-    throw new WebsiteStaticDeploymentError('website_static_dependencies_invalid', 'Website static deployment manager is invalid');
-  }
+  const deploymentLocks = new Map();
 
   async function inspectIdentity(identity) {
     let passwdResult;
@@ -119,25 +94,60 @@ export function createWebsiteStaticDeploymentManager({
     return Object.freeze({ account, group });
   }
 
-  async function deployStatic(rawSpec, options = {}) {
-    let spec;
-    try { spec = normalizeStaticApplicationSpec(rawSpec); }
-    catch {
-      throw new WebsiteStaticDeploymentError('invalid_static_deployment', 'Static deployment specification is invalid');
+  function deploymentManagerFor(identity) {
+    const homeDirectory = identity.paths.workspace.homeDirectory;
+    const guardedRun = async (file, args, options = {}) => {
+      if (file === USERADD_PATH) {
+        throw new WebsiteStaticDeploymentError(
+          'website_static_identity_create_forbidden',
+          'Website static deployment cannot create Unix identities outside provisioning',
+        );
+      }
+      if (file === RUNUSER_PATH) {
+        return run(file, args, {
+          ...options,
+          env: { ...(options.env ?? {}), HOME: homeDirectory },
+        });
+      }
+      return run(file, args, options);
+    };
+    const manager = createDeploymentManager({
+      buildRoot,
+      webRoot,
+      run: guardedRun,
+      recordLog,
+    });
+    if (!manager || typeof manager.deployStatic !== 'function') {
+      throw new WebsiteStaticDeploymentError('website_static_dependencies_invalid', 'Website static deployment manager is invalid');
     }
+    return manager;
+  }
+
+  async function deployUnlocked(spec, options) {
     const identity = createApplicationIdentity(spec.applicationId, {
       dataRoot,
       staticBuildRoot: buildRoot,
       staticPublishRoot: webRoot,
     });
     await inspectIdentity(identity);
+    return deploymentManagerFor(identity).deployStatic(spec, options);
+  }
 
-    activeHome = identity.paths.workspace.homeDirectory;
-    try {
-      return await deploymentManager.deployStatic(spec, options);
-    } finally {
-      activeHome = null;
+  function deployStatic(rawSpec, options = {}) {
+    let spec;
+    try { spec = normalizeStaticApplicationSpec(rawSpec); }
+    catch {
+      return Promise.reject(new WebsiteStaticDeploymentError('invalid_static_deployment', 'Static deployment specification is invalid'));
     }
+    const key = spec.applicationId;
+    const previous = deploymentLocks.get(key) ?? Promise.resolve();
+    const runDeployment = previous.catch(() => {}).then(() => deployUnlocked(spec, options));
+    let tracked;
+    tracked = runDeployment.finally(() => {
+      if (deploymentLocks.get(key) === tracked) deploymentLocks.delete(key);
+    });
+    deploymentLocks.set(key, tracked);
+    return tracked;
   }
 
   return Object.freeze({ deployStatic, inspectIdentity });
