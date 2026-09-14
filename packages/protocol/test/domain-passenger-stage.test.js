@@ -28,6 +28,19 @@ test('domain.stage accepts the canonical Passenger routing contract', () => {
   assert.deepEqual(envelope.payload, payload);
 });
 
+test('domain.stage accepts the same nested startup path as the Node runtime contract', () => {
+  const nested = {
+    ...payload,
+    target: { ...payload.target, startupFile: 'src/server.js' },
+  };
+  const envelope = createOperationEnvelope({
+    id: 'passenger-domain-stage-nested',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: nested,
+  });
+  assert.equal(envelope.payload.target.startupFile, 'src/server.js');
+});
+
 test('domain.stage rejects proxy-only settings after Passenger cutover', () => {
   assert.throws(() => createOperationEnvelope({
     id: 'passenger-domain-stage-2',
@@ -48,6 +61,8 @@ test('domain.stage rejects unsafe Passenger runtime paths', () => {
     { ...payload.target, root: '/var/lib/yunpanel/apps/../escape/current' },
     { ...payload.target, nodeBinary: '/opt/yunpanel/../tmp/node' },
     { ...payload.target, startupFile: '../server.js' },
+    { ...payload.target, startupFile: '/server.js' },
+    { ...payload.target, startupFile: 'src//server.js' },
   ]) {
     assert.throws(() => createOperationEnvelope({
       id: 'passenger-domain-stage-3',
