@@ -14,7 +14,12 @@ function metadataStep(id, kind, state, intent) {
   };
 }
 
-function hostStep(id, kind, intent, { required = true, state = 'pending', error = null } = {}) {
+function hostStep(id, kind, intent, {
+  required = true,
+  state = 'pending',
+  error = null,
+  compensationState = 'pending',
+} = {}) {
   return {
     id,
     kind,
@@ -22,7 +27,7 @@ function hostStep(id, kind, intent, { required = true, state = 'pending', error 
     state,
     intent,
     error,
-    compensation: { state: 'pending' },
+    compensation: { state: compensationState },
   };
 }
 
@@ -127,6 +132,7 @@ export function siteCreateProvisioningPlan(preview) {
       steps.push(hostStep('runtime', 'runtime', runtimeIntent, {
         state: blocked ? 'blocked' : 'pending',
         error: blocked ? runtimeIntent.blocker : null,
+        compensationState: 'not_required',
       }));
     } else {
       runtimeIntent = Object.freeze({
