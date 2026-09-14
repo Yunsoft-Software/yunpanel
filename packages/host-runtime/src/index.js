@@ -156,6 +156,11 @@ export {
   SystemPackageManagerError,
   systemPackageManagerInternals,
 } from './system-package-manager.js';
+export {
+  createWebsiteIdentityManager,
+  WebsiteIdentityManagerError,
+  websiteIdentityManagerInternals,
+} from './website-identity-manager.js';
 export { createNodeStatusInspector, NodeStatusError, nodeStatusInspector, parseNodeServiceProperties } from './node-status-inspector.js';
 export {
   createNodeEnvironmentWriter,
