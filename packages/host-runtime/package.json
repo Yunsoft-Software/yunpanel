@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.js",
+    "./application-identity": "./src/application-identity.js",
     "./website-static-deployment-manager": "./src/website-static-deployment-manager.js"
   },
   "scripts": {
