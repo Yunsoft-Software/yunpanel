@@ -20,6 +20,13 @@ const STEP_STATE_LABELS = Object.freeze({
   compensated: 'Geri alındı',
 });
 
+const REMEDIATION_GUIDANCE = Object.freeze({
+  unix_identity: 'Site kullanıcısı, grup ve home dizinini durable UID/GID ownership kaydıyla karşılaştırın. Eksik receipt veya UID/GID/path drift varsa elle düzeltin; ownership doğrulanmadan kullanıcı, grup ya da dizin silmeyin.',
+  runtime: 'Passenger/Nginx paket durumunu, yönetilen Node binary yolunu, app root/startup file ve site UID/GID eşleşmesini doğrulayın. Bağımlılık veya config sorununu giderdikten sonra provisioning’e devam edin; shared Passenger site rollback’iyle kaldırılmaz.',
+  nginx: 'Operation-owned vhost/checksum durumunu ve Nginx config testini doğrulayın. Sahipliği doğrulanmayan veya drift etmiş vhost’u körlemesine ezmeyin/silmeyin; drift’i giderdikten sonra retry, continue veya güvenli geri alma kullanın.',
+  certificate: 'Sertifika ve DNS doğrulama önkoşullarını tamamlayın. Durable certificate evidence oluşmadan siteyi hazır kabul etmeyin; önkoşul düzeldikten sonra provisioning’e devam edin.',
+});
+
 export function provisioningStepLabel(step) {
   return STEP_LABELS[step?.id] ?? STEP_LABELS[step?.kind] ?? step?.id ?? step?.kind ?? 'Provisioning adımı';
 }
@@ -35,6 +42,15 @@ export function provisioningBadgeState(step) {
   if (['applying', 'compensating'].includes(step?.state)) return 'running';
   if (['blocked', 'compensated'].includes(step?.state)) return 'warning';
   return 'unknown';
+}
+
+export function provisioningRemediation(step) {
+  if (!step || ['pending', 'succeeded'].includes(step.state)) return null;
+  if (step.kind === 'runtime' && step.error === 'static_runtime_provisioning_pending') {
+    return 'Static runtime provisioning henüz tamamlanmamış. Static adapter gerçek Website identity/directory contract’ına bağlanıp inspect kanıtı üretmeden bu adımı başarılı saymayın.';
+  }
+  return REMEDIATION_GUIDANCE[step.kind]
+    ?? 'Host durumunu durable ownership/evidence kaydıyla karşılaştırın. Drift veya belirsiz sahipliği elle giderin; aynı mutation’ı körlemesine tekrar etmeyin ve sahipliği doğrulanmayan kaynağı silmeyin.';
 }
 
 export function canContinueProvisioning(operation) {
