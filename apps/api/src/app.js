@@ -358,16 +358,28 @@ export function createApp({
   app.patch('/api/domains/:domainId', requirePanelRouteAccess, createDomainUpdateHandler(domainRegistry, { jobRegistry, certificateRegistry, localServerId }));
   app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry, { localServerId }));
   app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry, { localServerId }));
-  if (websiteProvisioningRuntime && runtimeBindingRegistry) {
-    if (typeof websiteProvisioningRuntime.configurePassengerControlPlane !== 'function') {
-      throw new Error('Website provisioning runtime cannot configure Passenger control-plane dependencies');
+  if (websiteProvisioningRuntime) {
+    if (typeof websiteProvisioningRuntime.configureDomainControlPlane !== 'function') {
+      throw new Error('Website provisioning runtime cannot configure Domain control-plane dependencies');
     }
-    websiteProvisioningRuntime.configurePassengerControlPlane({
-      applicationRegistry,
-      websiteRegistry,
-      domainRegistry,
-      runtimeBindingRegistry,
-    });
+    websiteProvisioningRuntime.configureDomainControlPlane({ domainRegistry });
+    if (applicationEnvironmentRegistry) {
+      if (typeof websiteProvisioningRuntime.configurePassengerEnvironment !== 'function') {
+        throw new Error('Website provisioning runtime cannot configure Passenger environment dependencies');
+      }
+      websiteProvisioningRuntime.configurePassengerEnvironment({ applicationEnvironmentRegistry });
+    }
+    if (runtimeBindingRegistry) {
+      if (typeof websiteProvisioningRuntime.configurePassengerControlPlane !== 'function') {
+        throw new Error('Website provisioning runtime cannot configure Passenger control-plane dependencies');
+      }
+      websiteProvisioningRuntime.configurePassengerControlPlane({
+        applicationRegistry,
+        websiteRegistry,
+        domainRegistry,
+        runtimeBindingRegistry,
+      });
+    }
   }
   mountSiteCreateRoutes(app, {
     registry: localRegistry,
