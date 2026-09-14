@@ -5,6 +5,7 @@ import {
   WebsiteProvisioningHandlerError,
 } from '../src/website-provisioning-handlers.js';
 
+const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 const unixUser = 'yunapp-0123456789ab';
@@ -39,8 +40,10 @@ const nginxIntent = Object.freeze({
 
 function identityManager() {
   return {
-    apply: async () => ({ satisfied: true, uid: 1201, gid: 1201 }),
+    apply: async () => ({ satisfied: true, uid: 1201, gid: 1201, created: true }),
     inspect: async () => ({ satisfied: true, uid: 1201, gid: 1201 }),
+    compensate: async () => ({ satisfied: true, removedUser: true }),
+    inspectCompensation: async () => ({ satisfied: true, removedUser: true }),
   };
 }
 
@@ -93,31 +96,47 @@ function passengerOperation() {
   };
 }
 
-test('identity handler passes only bounded identity fields to host runtime', async () => {
+test('identity handler binds durable operation and bounded identity fields to host runtime', async () => {
   const calls = [];
   const handlers = createWebsiteProvisioningHandlers({
     identityManager: {
-      apply: async (input) => {
-        calls.push(['apply', input]);
-        return { satisfied: true, uid: 1201, gid: 1201 };
+      apply: async (input, options) => {
+        calls.push(['apply', input, options]);
+        return { satisfied: true, uid: 1201, gid: 1201, created: true };
       },
       inspect: async (input) => {
         calls.push(['inspect', input]);
         return { satisfied: true, uid: 1201, gid: 1201 };
       },
+      compensate: async (input, options) => {
+        calls.push(['compensate', input, options]);
+        return { satisfied: true, removedUser: true };
+      },
+      inspectCompensation: async (input, options) => {
+        calls.push(['inspect-compensation', input, options]);
+        return { satisfied: true, removedUser: true };
+      },
     },
     passengerSiteManager: passengerSiteManager(),
     nginxManager: nginxManager(),
   });
+  const evidence = { satisfied: true, uid: 1201, gid: 1201, created: true };
 
-  const applied = await handlers.unix_identity.apply({ intent: identityIntent });
-  const inspected = await handlers.unix_identity.inspect({ intent: identityIntent });
+  const applied = await handlers.unix_identity.apply({ intent: identityIntent, operationId });
+  const inspected = await handlers.unix_identity.inspect({ intent: identityIntent, operationId });
+  const compensated = await handlers.unix_identity.compensate({ intent: identityIntent, operationId, evidence });
+  const compensationInspection = await handlers.unix_identity.inspectCompensation({ intent: identityIntent, operationId, evidence });
 
-  assert.deepEqual(applied, { satisfied: true, uid: 1201, gid: 1201 });
-  assert.deepEqual(inspected, { satisfied: true, uid: 1201, gid: 1201 });
+  assert.equal(applied.created, true);
+  assert.equal(inspected.satisfied, true);
+  assert.equal(compensated.satisfied, true);
+  assert.equal(compensationInspection.satisfied, true);
+  const bounded = { user: identityIntent.unixUser, homeDirectory: identityIntent.homeDirectory };
   assert.deepEqual(calls, [
-    ['apply', { user: identityIntent.unixUser, homeDirectory: identityIntent.homeDirectory }],
-    ['inspect', { user: identityIntent.unixUser, homeDirectory: identityIntent.homeDirectory }],
+    ['apply', bounded, { operationId }],
+    ['inspect', bounded],
+    ['compensate', bounded, { operationId, evidence }],
+    ['inspect-compensation', bounded, { operationId, evidence }],
   ]);
 });
 
@@ -127,13 +146,15 @@ test('identity handler rejects incomplete orchestration intent before host mutat
     identityManager: {
       apply: async () => { calls += 1; return {}; },
       inspect: async () => { calls += 1; return {}; },
+      compensate: async () => { calls += 1; return {}; },
+      inspectCompensation: async () => { calls += 1; return {}; },
     },
     passengerSiteManager: passengerSiteManager(),
     nginxManager: nginxManager(),
   });
 
   await assert.rejects(
-    handlers.unix_identity.apply({ intent: { unixUser: identityIntent.unixUser } }),
+    handlers.unix_identity.apply({ intent: { unixUser: identityIntent.unixUser }, operationId }),
     (error) => error instanceof WebsiteProvisioningHandlerError && error.code === 'website_identity_intent_invalid',
   );
   assert.equal(calls, 0);
