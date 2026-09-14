@@ -2,13 +2,15 @@
 
 YunPanel database module acceptance was completed on the isolated `test` host running Ubuntu 24.04 amd64. The target was verified against `.local/test-server.env` before any connection and was not the excluded `.44` Plesk host.
 
-## Deployed build
+## Database acceptance build
 
 - Package: `yunpanel 0.3.0-2026091404`
 - Application revision: `e67e433`
 - Package SHA-256: `9c6f4b000890cf9d5b61985db1d346b4fe93e63006c74b6da7f9db78ddf57073`
 - Database engine: MariaDB `10.11.14-MariaDB-0ubuntu0.24.04.1`
 - `yunpanel-api` and `yunpanel-web` were active; the retained legacy agent was disabled and inactive.
+
+The database implementation was unchanged in the final `0.3.0-2026091406` package. That package passed the same complete Node 24 workspace check on the local and Ubuntu build trees, and a fresh headed `database.inspect` job succeeded after upgrade.
 
 ## Acceptance evidence
 

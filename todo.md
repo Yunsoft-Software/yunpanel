@@ -30,7 +30,6 @@ Bu dosyada yalnız bu geliştirme oturumunda güvenilir biçimde yapılamayan **
 - [ ] Generic force-success/force-failed, blind mutation retry veya evidence-free journal clear yolu bulunmasın.
 - [ ] Node/static clone/install/build ve runtime dedicated `yunapp-*`; Node systemd unit `NoNewPrivileges=true`, boş capabilities ve bounded writable path kullansın.
 - [ ] Local ownership altında retained legacy heartbeat/command/environment/result 404 `agent_transport_removed` kalsın ve eski agent kimliği/job state'i değişmesin.
-- [ ] Web service process environment/state mountlarında control-plane secrets görünmesin.
 
 ## T-BACKUP — P0/P1 aggregate backup / restore gerçek ortam kabulü
 
