@@ -89,7 +89,16 @@ export async function resolveWebsiteDomainTarget({
   if (!domain || typeof domain !== 'object' || Array.isArray(domain)) {
     throw new DomainRegistryError('invalid_domain_target_state', 'Domain target state is invalid', 409);
   }
-  if (!domain.websiteId) return persistedDomainTarget(domain);
+  if (!domain.websiteId) {
+    if (domain.targetType === 'passenger') {
+      throw new DomainRegistryError(
+        'passenger_runtime_binding_required',
+        'Passenger Domain target requires a Website runtime binding before staging',
+        409,
+      );
+    }
+    return persistedDomainTarget(domain);
+  }
 
   requireDependency(
     websiteRegistry,
@@ -111,7 +120,15 @@ export async function resolveWebsiteDomainTarget({
       applicationRegistry,
       runtimeBindingRegistry,
     });
-    return passengerTarget ?? persistedDomainTarget(domain);
+    if (passengerTarget) return passengerTarget;
+    if (domain.targetType === 'passenger') {
+      throw new DomainRegistryError(
+        'passenger_runtime_binding_required',
+        'Passenger Domain target cannot be staged until the canonical Passenger runtime binding is active',
+        409,
+      );
+    }
+    return persistedDomainTarget(domain);
   }
   if (website.runtimeType !== 'docker' || website.applicationId !== null
     || website.dockerWorkloadId !== null || website.proxyTarget !== null) {
