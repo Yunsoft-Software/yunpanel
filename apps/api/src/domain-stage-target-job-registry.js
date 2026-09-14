@@ -1,4 +1,5 @@
 import { OPERATIONS } from '@yunpanel/protocol';
+import { normalizeNginxSettings } from '@yunpanel/shared';
 import { DomainRegistryError } from './domain-registry.js';
 import { resolveWebsiteDomainTarget } from './website-domain-target.js';
 
@@ -29,6 +30,14 @@ function assertDependencies(
       'Domain stage target job registry dependencies are invalid',
     );
   }
+}
+
+function resolvedNginxSettings(domain, resolved, current) {
+  if (resolved.targetType !== 'passenger') return current;
+  return normalizeNginxSettings('passenger', {
+    clientMaxBodySizeMb: domain.nginxSettings?.clientMaxBodySizeMb ?? null,
+    headers: domain.nginxSettings?.headers ?? [],
+  });
 }
 
 export function createDomainStageTargetJobRegistry({
@@ -70,6 +79,7 @@ export function createDomainStageTargetJobRegistry({
         ...(input.payload ?? {}),
         targetType: resolved.targetType,
         target: resolved.target,
+        nginxSettings: resolvedNginxSettings(domain, resolved, input.payload?.nginxSettings),
       },
     });
   }
@@ -82,3 +92,5 @@ export function createDomainStageTargetJobRegistry({
     },
   });
 }
+
+export const domainStageTargetJobRegistryInternals = Object.freeze({ resolvedNginxSettings });
