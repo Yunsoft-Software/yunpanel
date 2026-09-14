@@ -34,7 +34,24 @@ export function createWebsiteProvisioningRuntime({
       ...(nodeReleaseManager ? { nodeReleaseManager } : {}),
     }),
   };
+  let domainControlPlane = null;
   let passengerControlPlane = null;
+
+  function configureDomainControlPlane(dependencies = {}) {
+    const nextDomainRegistry = dependencies.domainRegistry;
+    if (!nextDomainRegistry) throw new Error('Website Domain provisioning registry is required');
+    if (domainControlPlane) {
+      if (domainControlPlane.domainRegistry !== nextDomainRegistry) {
+        throw new Error('Website Domain provisioning registry cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.domain_activation = createWebsiteDomainActivationProvisioningHandler({
+      domainRegistry: nextDomainRegistry,
+    });
+    domainControlPlane = Object.freeze({ domainRegistry: nextDomainRegistry });
+    return Object.freeze({ configured: true });
+  }
 
   function configurePassengerControlPlane(dependencies = {}) {
     const {
@@ -46,6 +63,7 @@ export function createWebsiteProvisioningRuntime({
     if (!nextApplicationRegistry || !nextWebsiteRegistry || !nextDomainRegistry || !nextRuntimeBindingRegistry) {
       throw new Error('Passenger Website provisioning control-plane dependencies are required');
     }
+    configureDomainControlPlane({ domainRegistry: nextDomainRegistry });
     if (passengerControlPlane) {
       if (passengerControlPlane.applicationRegistry !== nextApplicationRegistry
         || passengerControlPlane.websiteRegistry !== nextWebsiteRegistry
@@ -55,9 +73,6 @@ export function createWebsiteProvisioningRuntime({
       }
       return Object.freeze({ configured: true });
     }
-    handlers.domain_activation = createWebsiteDomainActivationProvisioningHandler({
-      domainRegistry: nextDomainRegistry,
-    });
     handlers.passenger_application_release = createWebsitePassengerApplicationReleaseProvisioningHandler({
       applicationRegistry: nextApplicationRegistry,
     });
@@ -76,7 +91,8 @@ export function createWebsiteProvisioningRuntime({
     return Object.freeze({ configured: true });
   }
 
-  if (applicationRegistry || websiteRegistry || domainRegistry || runtimeBindingRegistry) {
+  if (domainRegistry) configureDomainControlPlane({ domainRegistry });
+  if (applicationRegistry || websiteRegistry || runtimeBindingRegistry) {
     configurePassengerControlPlane({ applicationRegistry, websiteRegistry, domainRegistry, runtimeBindingRegistry });
   }
 
@@ -98,6 +114,7 @@ export function createWebsiteProvisioningRuntime({
     registry,
     handlers,
     orchestrator,
+    configureDomainControlPlane,
     configurePassengerControlPlane,
     init,
     get: (operationId) => registry.get(operationId),
