@@ -58,6 +58,7 @@ function normalizeIntent(context = {}) {
   const release = succeededStep(operation, 'application_release');
   const runtime = succeededStep(operation, 'runtime');
   const nginx = succeededStep(operation, 'nginx');
+  const domainActivation = succeededStep(operation, 'domain_activation');
   if (!release || release.adapter !== 'passenger-application-release'
     || release.applicationId !== application.id || release.releaseId !== operationId
     || !runtime || runtime.adapter !== 'passenger' || runtime.applicationId !== application.id
@@ -65,7 +66,10 @@ function normalizeIntent(context = {}) {
     || typeof runtime.appRoot !== 'string' || typeof runtime.documentRoot !== 'string'
     || typeof runtime.startupFile !== 'string' || typeof runtime.nodeBinary !== 'string'
     || !nginx || nginx.satisfied !== true || typeof nginx.checksum !== 'string'
-    || !CHECKSUM_PATTERN.test(nginx.checksum)) {
+    || !CHECKSUM_PATTERN.test(nginx.checksum)
+    || !domainActivation || domainActivation.adapter !== 'domain-activation'
+    || domainActivation.websiteId !== websiteId
+    || domainActivation.nginxChecksum !== nginx.checksum) {
     throw new WebsitePassengerAuthorityProvisioningError(
       'website_passenger_authority_evidence_invalid',
       'Passenger runtime authority evidence is incomplete or drifted',
@@ -80,6 +84,7 @@ function normalizeIntent(context = {}) {
     releaseId: release.releaseId,
     runtime,
     nginx,
+    domainActivation,
     appEnv: application.runtime.mode ?? 'production',
   });
 }
@@ -139,7 +144,11 @@ export function createWebsitePassengerAuthorityProvisioningHandler({
       if (!domain || domain.id !== domainId || domain.serverId !== application.serverId
         || domain.websiteId !== website.id || domain.targetType !== 'passenger'
         || domain.target?.applicationId !== application.id
-        || !Number.isSafeInteger(domain.desiredRevision) || domain.desiredRevision < 1) {
+        || !Number.isSafeInteger(domain.desiredRevision) || domain.desiredRevision < 1
+        || domain.stagedRevision !== domain.desiredRevision
+        || domain.appliedRevision !== domain.desiredRevision
+        || domain.stagedChecksum !== spec.nginx.checksum
+        || domain.state !== 'active' || domain.lastError !== null) {
         throw new WebsitePassengerAuthorityProvisioningError(
           'website_passenger_authority_domain_drift',
           'Passenger Domain authority changed before binding activation',
