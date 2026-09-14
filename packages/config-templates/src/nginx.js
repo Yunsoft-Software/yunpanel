@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { formatProxyHostForUrl, normalizeDomainSet, normalizeNginxSettings } from '@yunpanel/shared';
+import { renderPassengerNodeDirectives } from './passenger-nginx.js';
 
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
 
@@ -142,6 +143,12 @@ function proxyBody({ host, port, nginxSettings }) {
   return `  location / {\n    proxy_pass http://${host}:${port};\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n    proxy_set_header X-Real-IP $remote_addr;\n    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n    proxy_set_header X-Forwarded-Proto $scheme;${websocketHeaders}${timeout}${renderedHeaders ? `\n${renderedHeaders}` : ''}\n  }`;
 }
 
+function passengerBody({ target, nginxSettings }) {
+  const directives = renderPassengerNodeDirectives(target);
+  const renderedHeaders = headerLines(nginxSettings.headers, '  ');
+  return `${directives}${renderedHeaders ? `\n${renderedHeaders}` : ''}`;
+}
+
 export function renderStaticSiteConfig({
   primaryDomain,
   aliases = [],
@@ -179,6 +186,24 @@ export function renderProxySiteConfig({
   const normalizedTls = normalizeTls(tls);
   const settings = normalizeNginxSettings('proxy', nginxSettings ?? { websocket });
   const body = proxyBody({ host, port, nginxSettings: settings });
+  return renderServerSet({
+    primaryDomain, aliases, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+  });
+}
+
+export function renderPassengerSiteConfig({
+  primaryDomain,
+  aliases = [],
+  target,
+  acmeRoot = '/var/lib/yunpanel/acme',
+  tls = null,
+  canonicalRedirect = false,
+  httpsRedirect = true,
+  nginxSettings = undefined,
+}) {
+  const normalizedTls = normalizeTls(tls);
+  const settings = normalizeNginxSettings('passenger', nginxSettings ?? {});
+  const body = passengerBody({ target, nginxSettings: settings });
   return renderServerSet({
     primaryDomain, aliases, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
   });
