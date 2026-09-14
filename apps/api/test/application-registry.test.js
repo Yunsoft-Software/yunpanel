@@ -160,3 +160,57 @@ test('Passenger Node applications persist no systemd service, localhost proxy or
     (error) => error instanceof ApplicationRegistryError && error.code === 'node_deploy_adapter_mismatch' && error.status === 409,
   );
 });
+
+test('Passenger release finalization is idempotent and initial provisioning can reset only its own release', async () => {
+  const registry = createApplicationRegistry({ serverExists: async () => true });
+  const applicationId = '3f6d7a55-c37c-4e21-8e68-f62f2dbac046';
+  const operationId = '601e1606-5850-4f2f-bfb3-0e117fc28ed4';
+  const application = await registry.createNodeApplication({
+    applicationId,
+    serverId: 'server-1',
+    name: 'Native Passenger',
+    repositoryUrl: 'https://github.com/example/native-passenger',
+    branch: 'main',
+    runtimeAdapter: 'passenger',
+    runtime: { nodeMajor: 24, entryFile: 'dist/server.js' },
+  });
+
+  const activated = await registry.activatePassengerRelease(application.id, {
+    operationId,
+    releaseId: operationId,
+    previousReleaseId: null,
+    commitSha: 'b'.repeat(40),
+    runtime: application.runtime,
+  });
+  assert.equal(activated.currentReleaseId, operationId);
+  assert.equal(activated.previousReleaseId, null);
+  assert.equal(activated.runtimeAdapter, 'passenger');
+  assert.equal(activated.serviceName, null);
+  assert.equal(activated.servicePort, null);
+  assert.equal(activated.proxyTarget, null);
+  assert.equal(activated.releases[0].releaseId, operationId);
+
+  const retried = await registry.activatePassengerRelease(application.id, {
+    operationId,
+    releaseId: operationId,
+    previousReleaseId: null,
+    commitSha: 'b'.repeat(40),
+    runtime: application.runtime,
+  });
+  assert.equal(retried.currentReleaseId, operationId);
+  assert.equal(retried.releases.length, 1);
+
+  await assert.rejects(
+    registry.resetPassengerInitialRelease(application.id, {
+      operationId: 'e09d7610-d88f-4db2-abfa-645666194486',
+      releaseId: operationId,
+    }),
+    (error) => error instanceof ApplicationRegistryError && error.code === 'release_mismatch',
+  );
+
+  const reset = await registry.resetPassengerInitialRelease(application.id, { operationId, releaseId: operationId });
+  assert.equal(reset.currentReleaseId, null);
+  assert.equal(reset.currentCommitSha, null);
+  assert.equal(reset.state, 'draft');
+  assert.equal(reset.releases.length, 0);
+});
