@@ -178,7 +178,6 @@ const websiteRegistry = createWebsiteRegistry({
 });
 await websiteRegistry.init();
 const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({ filePath: websiteProvisioningStorePath });
-await websiteProvisioningRuntime.init();
 const databaseBindingRegistry = createDatabaseBindingRegistry({
   filePath: databaseBindingStorePath,
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
@@ -305,6 +304,15 @@ const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
 });
 await applicationEnvironmentRegistry.init();
+websiteProvisioningRuntime.configureDomainControlPlane({ domainRegistry });
+websiteProvisioningRuntime.configurePassengerEnvironment({ applicationEnvironmentRegistry });
+websiteProvisioningRuntime.configurePassengerControlPlane({
+  applicationRegistry,
+  websiteRegistry,
+  domainRegistry,
+  runtimeBindingRegistry,
+});
+await websiteProvisioningRuntime.init();
 const jobLogStore = createJobLogStore({ directoryPath: jobLogStorePath });
 await jobLogStore.init();
 const journalLogReader = createJournalLogReader();
