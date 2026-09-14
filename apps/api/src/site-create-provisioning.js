@@ -128,6 +128,22 @@ function passengerAuthorityIntent(preview, applicationId) {
   });
 }
 
+function domainActivationIntent(preview) {
+  const domainIds = [
+    preview.ids.primaryDomainId,
+    preview.ids.wwwDomainId,
+  ].filter(Boolean);
+  if (domainIds.length < 1) throw new Error('Website provisioning requires at least one Domain identity');
+  return Object.freeze({
+    adapter: 'domain-activation',
+    websiteId: preview.ids.websiteId,
+    domains: Object.freeze(domainIds.map((domainId) => Object.freeze({
+      domainId,
+      expectedRevision: 1,
+    }))),
+  });
+}
+
 function staticIntent(preview, applicationId, paths = createWebsitePathContract({
   websiteId: preview?.ids?.websiteId,
   applicationId,
@@ -268,6 +284,12 @@ export function siteCreateProvisioningPlan(preview) {
     targetType: runtimeType === 'node' ? 'passenger' : preview.plan.primaryDomain?.targetType,
     target: runtimeType === 'node' ? runtimeIntent : preview.plan.primaryDomain?.target,
   }));
+  steps.push(hostStep(
+    'domain_activation',
+    'domain_activation',
+    domainActivationIntent(preview),
+    { compensationState: 'pending' },
+  ));
 
   if (runtimeType === 'node' && preview.source?.kind === 'new_node') {
     const applicationId = preview.plan.application?.id;
@@ -309,6 +331,7 @@ export const siteCreateProvisioningInternals = Object.freeze({
   nodeReleaseIntent,
   passengerApplicationReleaseIntent,
   passengerAuthorityIntent,
+  domainActivationIntent,
   staticIntent,
   websiteAliases,
 });
