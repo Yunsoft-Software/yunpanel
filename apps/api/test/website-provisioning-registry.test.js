@@ -36,6 +36,39 @@ function input({ operation = operationId } = {}) {
   };
 }
 
+function compensationOrderInput(operation, laterState) {
+  const later = {
+    id: 'runtime',
+    kind: 'runtime',
+    state: laterState,
+    intent: { adapter: 'passenger' },
+    compensation: { state: 'pending' },
+  };
+  if (laterState === 'succeeded') later.evidence = { adapter: 'passenger', healthy: true };
+  if (laterState === 'failed') later.error = 'runtime_apply_failed';
+  if (laterState === 'blocked') later.error = 'runtime_blocked';
+  if (laterState === 'compensating') later.compensation = { state: 'applying' };
+  if (laterState === 'compensated') {
+    later.compensation = { state: 'succeeded', evidence: { removed: true } };
+  }
+  return {
+    operationId: operation,
+    websiteId,
+    resources: { website: { id: websiteId } },
+    steps: [
+      {
+        id: 'unix_identity',
+        kind: 'unix_identity',
+        state: 'succeeded',
+        intent: { user: 'yunapp-example' },
+        evidence: { uid: 1201, gid: 1201 },
+        compensation: { state: 'pending' },
+      },
+      later,
+    ],
+  };
+}
+
 test('registry persists applying intent before evidence and recovers interrupted work', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-provisioning-'));
   const filePath = path.join(directory, 'provisioning.json');
@@ -249,4 +282,38 @@ test('failed compensation restores a failed provisioning step to failed', async 
   assert.equal(failedCompensation.steps[0].state, 'failed');
   assert.equal(failedCompensation.steps[0].error, 'unix_identity_apply_failed');
   assert.equal(failedCompensation.steps[0].compensation.state, 'failed');
+});
+
+test('earlier compensation is blocked while a later step may still own host mutations', async () => {
+  for (const laterState of ['applying', 'succeeded', 'failed', 'compensating']) {
+    const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
+    const currentOperationId = `order-blocked-${laterState}`;
+    await registry.create(compensationOrderInput(currentOperationId, laterState));
+
+    await assert.rejects(
+      registry.beginCompensation({ operationId: currentOperationId, stepId: 'unix_identity' }),
+      (error) => error instanceof WebsiteProvisioningRegistryError
+        && error.code === 'website_provisioning_compensation_order_invalid',
+      `later ${laterState} step must block earlier compensation`,
+    );
+
+    const unchanged = await registry.get(currentOperationId);
+    assert.equal(unchanged.steps[0].state, 'succeeded');
+    assert.equal(unchanged.steps[0].compensation.state, 'pending');
+  }
+});
+
+test('earlier compensation can begin after later steps are inactive or already compensated', async () => {
+  for (const laterState of ['pending', 'blocked', 'compensated']) {
+    const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
+    const currentOperationId = `order-allowed-${laterState}`;
+    await registry.create(compensationOrderInput(currentOperationId, laterState));
+
+    const compensating = await registry.beginCompensation({
+      operationId: currentOperationId,
+      stepId: 'unix_identity',
+    });
+    assert.equal(compensating.steps[0].state, 'compensating');
+    assert.equal(compensating.steps[0].compensation.state, 'applying');
+  }
 });
