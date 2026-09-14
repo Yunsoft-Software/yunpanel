@@ -59,6 +59,7 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.equal(plan.steps.find((step) => step.id === 'website_metadata').state, 'succeeded');
   const identity = plan.steps.find((step) => step.id === 'unix_identity');
   assert.equal(identity.state, 'pending');
+  assert.equal(identity.compensation.state, 'pending');
   assert.equal(identity.intent.unixUser, 'yunapp-0123456789ab');
   assert.equal(identity.intent.homeDirectory, `/var/lib/yunpanel/data/${applicationId}`);
 
@@ -72,11 +73,13 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.equal(runtime.intent.appRoot, `/var/lib/yunpanel/apps/${applicationId}/current`);
   assert.equal(runtime.intent.startupFile, 'server.js');
   assert.equal(runtime.state, 'pending');
+  assert.equal(runtime.compensation.state, 'not_required');
 
   const nginx = plan.steps.find((step) => step.id === 'nginx');
   assert.equal(nginx.intent.targetType, 'passenger');
   assert.equal(nginx.intent.target.startupFile, 'server.js');
   assert.equal(nginx.state, 'pending');
+  assert.equal(nginx.compensation.state, 'pending');
   assert.equal(plan.steps.find((step) => step.id === 'certificate').state, 'pending');
 });
 
@@ -89,6 +92,7 @@ test('npm-script Node start is an explicit Passenger blocker instead of an inven
   assert.equal(runtime.state, 'blocked');
   assert.equal(runtime.error, 'passenger_start_mode_unsupported');
   assert.equal(runtime.intent.blocker, 'passenger_start_mode_unsupported');
+  assert.equal(runtime.compensation.state, 'not_required');
   assert.equal(plan.status, 'blocked');
 });
 
@@ -99,7 +103,9 @@ test('static Website uses the static runtime adapter and HTTP-only plan omits ce
   preview.plan.website.runtimeType = 'static';
 
   const plan = siteCreateProvisioningPlan(preview);
-  assert.equal(plan.steps.find((step) => step.id === 'runtime').intent.adapter, 'static');
+  const runtime = plan.steps.find((step) => step.id === 'runtime');
+  assert.equal(runtime.intent.adapter, 'static');
+  assert.equal(runtime.compensation.state, 'pending');
   assert.equal(plan.steps.some((step) => step.id === 'certificate'), false);
 });
 
