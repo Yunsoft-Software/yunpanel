@@ -57,6 +57,8 @@ function healthSpec(context = {}) {
     );
   }
   return Object.freeze({
+    applicationId: application.id,
+    websiteId,
     primaryDomain: intent.primaryDomain,
     healthPath: intent.healthPath,
     timeoutSeconds: intent.timeoutSeconds,
@@ -75,7 +77,17 @@ export function createWebsitePassengerHealthProvisioningHandler({
   }
 
   async function inspect(context = {}) {
-    return healthInspector.inspect(healthSpec(context));
+    const spec = healthSpec(context);
+    const result = await healthInspector.inspect({
+      primaryDomain: spec.primaryDomain,
+      healthPath: spec.healthPath,
+      timeoutSeconds: spec.timeoutSeconds,
+    });
+    return Object.freeze({
+      ...result,
+      applicationId: spec.applicationId,
+      websiteId: spec.websiteId,
+    });
   }
 
   return Object.freeze({ apply: inspect, inspect });
