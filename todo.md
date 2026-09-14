@@ -10,11 +10,12 @@ Bu maddeler kaynak kod connector ortamında yazılabilir fakat shell/package/liv
 
 - [ ] Güncel `main` çekildikten sonra Node `>=24.11.1` ve npm `>=11` ile temiz `npm ci` ardından `npm run check` çalıştır. Provisioning/Passenger test failure varsa yalnız ilgili küçük fixleri ayrı commitlerle at; test çıktısında secret bırakma.
 - [ ] `apps/api` provisioning registry/orchestrator/HTTP testlerini gerçek checkout üzerinde çalıştır; failed step'in explicit `retry` ile `pending` durumuna dönüp normal durable apply yolundan ilerlediğini, non-failed step retry'sinin reddedildiğini ve operation+step-bound confirmation olmadan mutation yapılmadığını doğrula. Bu connector oturumundaki container `github.com` DNS çözümleyemediği için source testleri burada koşturulamadı.
+- [ ] Güncel provisioning compensation source testlerini gerçek checkout üzerinde çalıştır: Unix identity `operationId`/evidence wiring'i, Nginx rollback receipt'i, compensation restart reconcile'ı ve exact `compensate-site-provisioning:<operationId>:<stepId>` confirmation kontratı geçsin. `useradd` sonrası durable UID/GID checkpoint varsa evidence kaybında operation-owned identity cleanup çalışsın; `useradd` sonucu belirsizken checkpoint oluşmadıysa `userdel`/`groupdel`/home delete kesinlikle yapılmasın. Bu connector oturumunda source testleri koşturulamadı.
 - [ ] `.local/test-server.env` içindeki YunPanel test hostunun `.44` olmadığını doğrula; Ubuntu 24.04 üzerinde `nginx`, `libnginx-mod-http-passenger`/Passenger, `passenger-config`, managed Node 22/24 pathleri ve `nginx -t` gerçek durumunu kaynaktaki inspector beklentileriyle karşılaştır.
 - [ ] Yeni durable Website provisioning store ile API restart testi yap: apply sonrası operation JSON diskte kalsın; `applying` durumda servis kesilip açıldığında aynı mutation ikinci kez körlemesine çalışmasın ve inspect/reconcile yolu kullanılsın.
 - [ ] İki test Website oluşturup `yunapp-*` kullanıcı/group/home sahipliğini, çapraz home/release/data erişim reddini ve Passenger `passenger_user/group` gerçek UID/GID eşleşmesini doğrula.
 - [ ] Passenger package/config veya Node binary eksikliği senaryolarında provisioning `ready` olmasın; actionable blocked/failed state API'de kalsın. Düzelttikten sonra exact `continue-site-provisioning:<operationId>` confirmation ile işlem kaldığı step'ten devam etsin.
-- [ ] Bu turda production wiring tamamlandıktan sonra clean `.deb` build/install/upgrade smoke yap; provisioning state dosyasının package upgrade sırasında korunup root-owned `0600` kaldığını doğrula.
+- [ ] Bu turda production wiring tamamlandıktan sonra clean `.deb` build/install/upgrade smoke yap; provisioning state ve Website identity ownership receipt dosyalarının package upgrade sırasında korunup root-owned private izinlerde kaldığını doğrula.
 
 ## T-BASE — P0 güncel güvenlik ve package kapısı
 
@@ -32,6 +33,7 @@ Bu maddeler kaynak kod connector ortamında yazılabilir fakat shell/package/liv
 - [ ] Independent subdomain ayrı identity alırken `shared-site` açık seçimi parent identity'yi paylaşsın; alias user/runtime/mailbox üretmesin.
 - [ ] Provisioning'i her step sınırında kes: intent sonrası, host mutation sonrası evidence öncesi ve compensation sırasında. Restart kör mutation tekrarlamasın; partial state ve düzeltme adımı görünür olsun.
 - [ ] Gerçek failure injection ile bir provisioning step'ini `failed` duruma düşür; yalnız exact `retry-site-provisioning:<operationId>:<stepId>` confirmation ile retry edilebildiğini, aynı Website identity/path contract'ında normal durable apply/inspect yolundan ilerlediğini ve non-failed/yanlış-step/duplicate retry'nin fail-closed kaldığını doğrula.
+- [ ] Gerçek Ubuntu failure injection ile Unix identity ve Nginx step'lerini compensate et: yalnız exact `compensate-site-provisioning:<operationId>:<stepId>` confirmation mutation yapsın; operation-owned user/group/home ve Nginx vhost geri alınırken önceden var olan identity/vhost korunsun. Compensation ortasında restart sonrası inspect/reconcile devam etsin; UID/GID/checksum drift veya ownership checkpoint eksikliği destructive cleanup yerine actionable fail-closed state bıraksın.
 - [ ] Site move/delete impact gerçek DNS, mail/webmail, database/grant, SFTP, GoAccess, restic, cron ve active job ilişkilerini göstersin; implicit cascade yapmasın.
 
 ## T-RUNTIME — P0 Passenger, PHP-FPM ve hosted app sürekliliği
