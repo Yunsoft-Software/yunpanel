@@ -64,7 +64,11 @@ function fixture({ publishedPorts = null, websiteBinding = true, passengerBindin
     websiteId,
     websiteRevision: website.revision,
     domains: [{ domainId: domain.id, desiredRevision: domain.desiredRevision, nginxChecksum: 'a'.repeat(64) }],
-    passengerTarget: { appRoot: '/var/www/example/current', startupFile: 'server.js' },
+    passengerTarget: {
+      appRoot: '/var/www/example/current',
+      startupFile: 'server.js',
+      nodeBinary: '/usr/bin/node',
+    },
   } : null;
   return {
     calls,
@@ -150,15 +154,17 @@ test('Managed Compose stage readiness failure prevents job enqueue', async () =>
   assert.equal(fx.calls.length, 0);
 });
 
-test('Passenger runtime binding blocks legacy Domain stage before enqueue', async () => {
+test('Passenger runtime binding replaces stale direct-systemd proxy target before enqueue', async () => {
   const fx = fixture({ passengerBinding: true });
-  await assert.rejects(
-    fx.decorated.enqueue(stageInput()),
-    (error) => error instanceof DomainRegistryError
-      && error.code === 'passenger_runtime_binding_restage_blocked'
-      && error.status === 409,
-  );
-  assert.equal(fx.calls.length, 0);
+  const input = stageInput();
+  await fx.decorated.enqueue(input);
+  assert.equal(fx.calls.length, 1);
+  assert.equal(fx.calls[0].payload.targetType, 'passenger');
+  assert.deepEqual(fx.calls[0].payload.target, {
+    root: '/var/www/example/current',
+    startupFile: 'server.js',
+    nodeBinary: '/usr/bin/node',
+  });
 });
 
 test('Domain stage resource mismatch fails closed before enqueue', async () => {
