@@ -14,6 +14,7 @@ const checksum = 'c'.repeat(64);
 const environmentChecksum = 'e'.repeat(64);
 const environmentInclude = `/etc/yunpanel/passenger-env/${applicationId}.conf`;
 const unixUser = 'yunapp-0123456789ab';
+const primaryDomain = 'example.test';
 
 async function fixture() {
   const applicationRegistry = createApplicationRegistry({ serverExists: async () => true });
@@ -100,7 +101,7 @@ async function fixture() {
         runtimeType: 'node',
         unixUser,
       },
-      primaryDomain: { id: primaryDomainId },
+      primaryDomain: { id: primaryDomainId, primaryDomain },
       wwwDomain: { id: wwwDomainId },
     },
     steps: [
@@ -114,6 +115,21 @@ async function fixture() {
           environmentRevision: 2,
           environmentInclude,
           includeSha256: environmentChecksum,
+        },
+      },
+      {
+        id: 'passenger_health',
+        state: 'succeeded',
+        evidence: {
+          satisfied: true,
+          adapter: 'nginx-http-health',
+          applicationId,
+          websiteId,
+          primaryDomain,
+          healthPath: application.runtime.healthPath,
+          statusCode: 200,
+          attempts: 1,
+          route: '127.0.0.1:80',
         },
       },
       {
@@ -235,6 +251,15 @@ test('Passenger authority refuses to bind when Domain activation evidence is not
   await assert.rejects(
     handler.apply(context),
     (error) => error?.code === 'website_passenger_authority_domain_drift',
+  );
+});
+
+test('Passenger authority refuses to bind without healthy route evidence', async () => {
+  const { handler, context } = await fixture();
+  context.operation.steps.find((step) => step.id === 'passenger_health').evidence.statusCode = 503;
+  await assert.rejects(
+    handler.apply(context),
+    (error) => error?.code === 'website_passenger_authority_evidence_invalid',
   );
 });
 
