@@ -542,6 +542,140 @@ export function createApplicationRegistry({
     return publicApplication(application);
   }
 
+  async function activatePassengerRelease(applicationId, {
+    operationId,
+    releaseId,
+    previousReleaseId = null,
+    commitSha,
+    gitTarget: requestedGitTarget = null,
+    runtime: requestedRuntime = null,
+  } = {}) {
+    await ensureInitialized();
+    const application = hydrateApplication(requireApplication(state, normalizeApplicationId(applicationId)));
+    if (application.type !== 'node' || application.runtimeAdapter !== 'passenger') {
+      throw new ApplicationRegistryError('passenger_release_adapter_mismatch', 'Passenger release activation requires a Passenger Node Application', 409);
+    }
+    if (application.activeDeploymentId) {
+      throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
+    }
+    const normalizedOperationId = normalizeUuid(operationId, 'operationId');
+    const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
+    const normalizedPreviousReleaseId = normalizeNullableUuid(previousReleaseId, 'previousReleaseId');
+    if (normalizedOperationId !== normalizedReleaseId) {
+      throw new ApplicationRegistryError('release_mismatch', 'Passenger release must match provisioning operation identity', 409);
+    }
+    if (typeof commitSha !== 'string' || !COMMIT_PATTERN.test(commitSha)) {
+      throw new ApplicationRegistryError('invalid_commit_sha', 'Passenger release commit SHA is invalid');
+    }
+    let gitTarget;
+    try { gitTarget = normalizeGitDeploymentTarget(requestedGitTarget, { defaultBranch: application.branch }); }
+    catch { throw new ApplicationRegistryError('invalid_git_target', 'Passenger release Git target is invalid'); }
+    if (gitTarget.kind === 'commit' && commitSha.toLowerCase() !== gitTarget.value) {
+      throw new ApplicationRegistryError('git_target_mismatch', 'Passenger release commit does not match the requested Git target', 409);
+    }
+    const deployedRuntime = normalizeNodeConfig({
+      repositoryUrl: application.repositoryUrl,
+      branch: application.branch,
+      runtime: requestedRuntime ?? application.runtime,
+      retention: application.retention,
+      runtimeAdapter: application.runtimeAdapter,
+    }).runtime;
+    if (!sameValue(deployedRuntime, application.runtime)) {
+      throw new ApplicationRegistryError('node_runtime_state_drift', 'Passenger release runtime does not match current desired configuration', 409);
+    }
+
+    if (application.currentReleaseId === normalizedReleaseId) {
+      const release = application.releases.find((candidate) => candidate.releaseId === normalizedReleaseId) ?? null;
+      if (!release
+        || application.previousReleaseId !== normalizedPreviousReleaseId
+        || application.currentCommitSha !== commitSha.toLowerCase()
+        || !sameValue(application.currentGitTarget, gitTarget)
+        || !sameValue(application.activeRuntime, deployedRuntime)
+        || application.appliedRevision !== application.desiredRevision
+        || application.serviceName !== null || application.servicePort !== null || application.proxyTarget !== null) {
+        throw new ApplicationRegistryError('passenger_release_state_drift', 'Persisted Passenger release state conflicts with provisioning evidence', 409);
+      }
+      return publicApplication(application);
+    }
+    if (application.currentReleaseId !== normalizedPreviousReleaseId) {
+      throw new ApplicationRegistryError('release_state_drift', 'Passenger previous release does not match control-plane state', 409);
+    }
+
+    const timestamp = new Date(now()).toISOString();
+    application.previousReleaseId = application.currentReleaseId;
+    application.currentReleaseId = normalizedReleaseId;
+    application.currentCommitSha = commitSha.toLowerCase();
+    application.currentGitTarget = gitTarget;
+    application.activeRuntime = structuredClone(deployedRuntime);
+    application.appliedRevision = application.desiredRevision;
+    application.activeDeploymentId = null;
+    application.pendingRollbackReleaseId = null;
+    application.state = 'active';
+    application.lastDeploymentId = normalizedOperationId;
+    application.lastDeployedAt = timestamp;
+    application.lastError = null;
+    application.serviceName = null;
+    application.servicePort = null;
+    application.healthPath = deployedRuntime.healthPath;
+    application.proxyTarget = null;
+    application.updatedAt = timestamp;
+    application.releases = application.releases.filter((release) => release.releaseId !== normalizedReleaseId);
+    application.releases.unshift({
+      releaseId: normalizedReleaseId,
+      deploymentId: normalizedOperationId,
+      commitSha: commitSha.toLowerCase(),
+      gitTarget,
+      artifactFiles: null,
+      artifactBytes: null,
+      deployedAt: timestamp,
+      runtime: structuredClone(deployedRuntime),
+      configurationRevision: application.appliedRevision,
+    });
+    trimReleaseHistory(application);
+    await persist();
+    return publicApplication(application);
+  }
+
+  async function resetPassengerInitialRelease(applicationId, { operationId, releaseId } = {}) {
+    await ensureInitialized();
+    const application = hydrateApplication(requireApplication(state, normalizeApplicationId(applicationId)));
+    if (application.type !== 'node' || application.runtimeAdapter !== 'passenger') {
+      throw new ApplicationRegistryError('passenger_release_adapter_mismatch', 'Passenger release reset requires a Passenger Node Application', 409);
+    }
+    const normalizedOperationId = normalizeUuid(operationId, 'operationId');
+    const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
+    if (normalizedOperationId !== normalizedReleaseId) {
+      throw new ApplicationRegistryError('release_mismatch', 'Passenger release must match provisioning operation identity', 409);
+    }
+    const retainedRelease = application.releases.find((release) => release.releaseId === normalizedReleaseId) ?? null;
+    if (application.currentReleaseId === null && retainedRelease === null) return publicApplication(application);
+    if (application.currentReleaseId !== normalizedReleaseId
+      || application.previousReleaseId !== null
+      || application.lastDeploymentId !== normalizedOperationId) {
+      throw new ApplicationRegistryError('passenger_release_reset_drift', 'Passenger release cannot be reset after control-plane state changed', 409);
+    }
+    application.releases = application.releases.filter((release) => release.releaseId !== normalizedReleaseId);
+    application.currentReleaseId = null;
+    application.previousReleaseId = null;
+    application.currentCommitSha = null;
+    application.currentGitTarget = null;
+    application.activeRuntime = null;
+    application.appliedRevision = 0;
+    application.activeDeploymentId = null;
+    application.pendingRollbackReleaseId = null;
+    application.state = 'draft';
+    application.lastDeploymentId = null;
+    application.lastDeployedAt = null;
+    application.lastError = null;
+    application.serviceName = null;
+    application.servicePort = null;
+    application.healthPath = application.runtime.healthPath;
+    application.proxyTarget = null;
+    application.updatedAt = new Date(now()).toISOString();
+    await persist();
+    return publicApplication(application);
+  }
+
   async function markRollingBack(applicationId, operationId, releaseId) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
@@ -735,6 +869,8 @@ export function createApplicationRegistry({
     allocateNodePort,
     markDeploying,
     markDeployed,
+    activatePassengerRelease,
+    resetPassengerInitialRelease,
     markRollingBack,
     markRolledBack,
     markFailed,
