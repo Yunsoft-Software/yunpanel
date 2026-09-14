@@ -35,6 +35,8 @@ function nginxManager() {
     inspectStagedDomain: async () => ({ satisfied: false, result: null }),
     inspectActiveDomain: async () => ({ satisfied: false, result: null }),
     activateDomain: async () => ({ configName: 'unused', checksum: 'a'.repeat(64), active: true }),
+    compensateDomain: async () => ({ satisfied: true, configName: 'unused', checksum: 'a'.repeat(64) }),
+    inspectDomainCompensation: async () => ({ satisfied: true, configName: 'unused', checksum: 'a'.repeat(64) }),
   };
 }
 
@@ -58,6 +60,7 @@ test('runtime composes registry, injected managers and orchestrator', async () =
 
   assert.equal(result.outcome, 'ready');
   assert.equal(result.operation.ready, true);
+  assert.equal(typeof runtime.compensateStep, 'function');
   assert.deepEqual(calls, [{
     user: 'yunapp-0123456789ab',
     homeDirectory: '/var/lib/yunpanel/data/6dcb8908-3f3e-43da-9452-15fd6b51ac76',
