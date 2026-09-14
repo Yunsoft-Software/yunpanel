@@ -145,3 +145,35 @@ test('parallel website static deploys keep canonical HOME isolated per applicati
   assert.equal(second.observedHome, canonicalIdentity(APP_B).paths.workspace.homeDirectory);
   assert.notEqual(first.observedHome, second.observedHome);
 });
+
+test('website static current inspection stays unsatisfied when no active release exists', async () => {
+  const manager = createWebsiteStaticDeploymentManager({
+    run: canonicalGetentRun(),
+    readlinkFn: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
+  });
+
+  const result = await manager.inspectCurrent({ applicationId: APP_A });
+  assert.equal(result.satisfied, false);
+  assert.equal(result.reason, 'website_static_current_missing');
+  assert.equal(result.applicationId, APP_A);
+});
+
+test('website static deployment inspection confirms only the deterministic current release', async () => {
+  const manager = createWebsiteStaticDeploymentManager({
+    run: canonicalGetentRun(),
+    readlinkFn: async () => `releases/${DEPLOY_A}`,
+    lstatFn: async () => ({ isDirectory: () => true, isSymbolicLink: () => false }),
+  });
+
+  const current = await manager.inspectDeployment(spec(APP_A, DEPLOY_A));
+  assert.equal(current.satisfied, true);
+  assert.equal(current.releaseId, DEPLOY_A);
+  assert.equal(current.deploymentId, DEPLOY_A);
+  assert.equal(current.homeDirectory, canonicalIdentity(APP_A).paths.workspace.homeDirectory);
+
+  const stale = await manager.inspectDeployment(spec(APP_A, DEPLOY_B));
+  assert.equal(stale.satisfied, false);
+  assert.equal(stale.reason, 'website_static_release_not_current');
+  assert.equal(stale.releaseId, DEPLOY_A);
+  assert.equal(stale.deploymentId, DEPLOY_B);
+});
