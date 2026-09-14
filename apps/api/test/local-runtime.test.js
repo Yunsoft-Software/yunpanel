@@ -56,6 +56,8 @@ function fixture(overrides = {}) {
     domainRegistry: {},
     certificateRegistry: {},
     applicationRegistry: {},
+    websiteRegistry: { listWebsites: async () => [] },
+    runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
     getExecutorOptions: () => executorOptions,
   };
 }
@@ -71,6 +73,8 @@ async function startWith(fx, extra = {}) {
     domainRegistry: fx.domainRegistry,
     certificateRegistry: fx.certificateRegistry,
     applicationRegistry: fx.applicationRegistry,
+    websiteRegistry: fx.websiteRegistry,
+    runtimeBindingRegistry: fx.runtimeBindingRegistry,
     hostOperations: fx.hostOperations,
     executorFactory: fx.executorFactory,
     acquireLock: fx.acquireLock,
@@ -172,6 +176,23 @@ test('local reconciliation false result is converted into an executor-halting ex
     fx.getExecutorOptions().reconcileCompletedJob({ id: 'job-1' }),
     (error) => error.code === 'reconcile_domain_failed',
   );
+  await runtime.stop();
+});
+
+test('local runtime forwards Website and runtime binding registries into reconciliation', async () => {
+  let reconciliationInput = null;
+  const fx = fixture({
+    reconcile: async (input) => {
+      reconciliationInput = input;
+      return { reconciled: true, error: null };
+    },
+  });
+  const runtime = await startWith(fx);
+  const job = { id: 'job-1' };
+  await fx.getExecutorOptions().reconcileCompletedJob(job);
+  assert.equal(reconciliationInput.websiteRegistry, fx.websiteRegistry);
+  assert.equal(reconciliationInput.runtimeBindingRegistry, fx.runtimeBindingRegistry);
+  assert.equal(reconciliationInput.job, job);
   await runtime.stop();
 });
 
