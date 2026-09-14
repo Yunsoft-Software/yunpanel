@@ -83,6 +83,16 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.equal(plan.steps.find((step) => step.id === 'certificate').state, 'pending');
 });
 
+test('Node provisioning rejects document-root drift from the managed Website path contract', () => {
+  const preview = nodePreview({ httpsMode: 'off' });
+  preview.plan.website.documentRoot = '/srv/example/current';
+
+  assert.throws(
+    () => siteCreateProvisioningPlan(preview),
+    /document root does not match the managed Website path contract/,
+  );
+});
+
 test('npm-script Node start is an explicit Passenger blocker instead of an invented command', () => {
   const preview = nodePreview({ httpsMode: 'off' });
   preview.plan.application.runtime.start = { mode: 'npm', entryFile: null, script: 'start' };
@@ -96,15 +106,21 @@ test('npm-script Node start is an explicit Passenger blocker instead of an inven
   assert.equal(plan.status, 'blocked');
 });
 
-test('static Website uses the static runtime adapter and HTTP-only plan omits certificate work', () => {
+test('static Website uses canonical workspace/build/publish paths and HTTP-only plan omits certificate work', () => {
   const preview = nodePreview({ metadataReady: false, httpsMode: 'off' });
   preview.plan.application.type = 'static';
   preview.plan.application.runtime = null;
   preview.plan.website.runtimeType = 'static';
 
   const plan = siteCreateProvisioningPlan(preview);
+  const identity = plan.steps.find((step) => step.id === 'unix_identity');
+  assert.equal(identity.intent.homeDirectory, `/var/lib/yunpanel/data/${applicationId}`);
+
   const runtime = plan.steps.find((step) => step.id === 'runtime');
   assert.equal(runtime.intent.adapter, 'static');
+  assert.equal(runtime.intent.homeDirectory, `/var/lib/yunpanel/data/${applicationId}`);
+  assert.equal(runtime.intent.buildRoot, `/var/lib/yunpanel/build/${applicationId}`);
+  assert.equal(runtime.intent.publishRoot, `/var/www/yunpanel/apps/${applicationId}`);
   assert.equal(runtime.compensation.state, 'pending');
   assert.equal(plan.steps.some((step) => step.id === 'certificate'), false);
 });
