@@ -5,12 +5,17 @@ const BLOCKING_LATER_STEP_STATES = new Set([
   'compensating',
 ]);
 
+function blocksEarlierCompensation(step) {
+  if (!step || !BLOCKING_LATER_STEP_STATES.has(step.state)) return false;
+  if (step.state === 'applying' || step.state === 'compensating') return true;
+  return step.compensation?.state !== 'not_required';
+}
+
 export function findBlockingLaterCompensationStep(operation, stepId) {
   const steps = Array.isArray(operation?.steps) ? operation.steps : [];
   const index = steps.findIndex((step) => step?.id === stepId);
   if (index < 0) return null;
-  return steps.slice(index + 1)
-    .find((step) => BLOCKING_LATER_STEP_STATES.has(step?.state)) ?? null;
+  return steps.slice(index + 1).find(blocksEarlierCompensation) ?? null;
 }
 
 export function canBeginCompensationInOrder(operation, stepId) {
@@ -21,4 +26,5 @@ export function canBeginCompensationInOrder(operation, stepId) {
 
 export const websiteProvisioningCompensationOrderInternals = Object.freeze({
   BLOCKING_LATER_STEP_STATES,
+  blocksEarlierCompensation,
 });
