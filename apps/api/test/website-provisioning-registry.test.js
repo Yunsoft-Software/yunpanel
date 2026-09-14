@@ -9,11 +9,12 @@ import {
 } from '../src/website-provisioning-registry.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
+const secondOperationId = '4d5a28d3-67b5-4ff4-854d-508d3f720c4d';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 
-function input() {
+function input({ operation = operationId } = {}) {
   return {
-    operationId,
+    operationId: operation,
     websiteId,
     resources: { website: { id: websiteId } },
     steps: [
@@ -60,6 +61,34 @@ test('registry persists applying intent before evidence and recovers interrupted
     assert.equal(interrupted.length, 1);
     assert.equal(interrupted[0].operationId, operationId);
     assert.equal(interrupted[0].steps[0].state, 'applying');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('latest Website lookup follows durable updatedAt across registry restart', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-provisioning-latest-'));
+  const filePath = path.join(directory, 'provisioning.json');
+  let clock = Date.parse('2026-09-14T01:00:00.000Z');
+  try {
+    const registry = createWebsiteProvisioningRegistry({ filePath, now: () => clock });
+    await registry.create(input({ operation: operationId }));
+    clock += 1_000;
+    await registry.create(input({ operation: secondOperationId }));
+
+    let latest = await registry.getLatestForWebsite(websiteId);
+    assert.equal(latest.operationId, secondOperationId);
+
+    clock += 1_000;
+    await registry.beginStep({ operationId, stepId: 'unix_identity' });
+    latest = await registry.getLatestForWebsite(websiteId);
+    assert.equal(latest.operationId, operationId);
+
+    const restarted = createWebsiteProvisioningRegistry({ filePath, now: () => clock });
+    await restarted.init();
+    latest = await restarted.getLatestForWebsite(websiteId);
+    assert.equal(latest.operationId, operationId);
+    assert.equal(await restarted.getLatestForWebsite('3854e385-adfc-42bd-bccf-f655f24cd68f'), null);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
