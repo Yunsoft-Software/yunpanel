@@ -105,7 +105,8 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     const interrupted = operation.steps.find((step) => step.state === 'applying');
     if (interrupted) return reconcileInterrupted(operation, interrupted);
 
-    const blocked = operation.steps.find((step) => step.required && ['failed', 'compensating', 'compensated'].includes(step.state));
+    const blocked = operation.steps.find((step) => step.required
+      && ['blocked', 'failed', 'compensating', 'compensated'].includes(step.state));
     if (blocked) {
       return Object.freeze({
         operation,
@@ -115,7 +116,7 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
       });
     }
 
-    const step = operation.steps.find((candidate) => candidate.state === 'pending' || candidate.state === 'blocked');
+    const step = operation.steps.find((candidate) => candidate.state === 'pending');
     if (!step) {
       return Object.freeze({ operation, outcome: 'blocked', stepId: null, actionRequired: 'remediate' });
     }
