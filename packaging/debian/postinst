@@ -21,7 +21,7 @@ install -d -o yunpanel -g yunpanel -m 0700 /var/lib/yunpanel/control-plane
 install -d -o root -g root -m 0700 /var/lib/yunpanel/agent
 install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel/roundcube
 install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel/roundcube/tmp
-install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/control-plane
+install -d -o root -g root -m 0700 /etc/yunpanel/control-plane
 install -d -o root -g root -m 0700 /etc/yunpanel/agent
 install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/web
 
@@ -107,7 +107,10 @@ if [ -f "$api_env" ]; then
     api_changed=1
   fi
   if [ "$api_changed" -eq 1 ]; then
-    install -o yunpanel -g yunpanel -m 0600 "$api_temp" "$api_env"
+    install -o root -g root -m 0600 "$api_temp" "$api_env"
+  else
+    chown root:root "$api_env"
+    chmod 0600 "$api_env"
   fi
   rm -f "$api_temp"
 fi

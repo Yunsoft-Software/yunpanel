@@ -60,5 +60,7 @@ test('packaged gateway authenticates canonical client IP metadata to the root AP
     'YUNPANEL_DOCKER_COMPOSE_ENVIRONMENT_STORE',
     'YUNPANEL_DOCKER_REGISTRY_CREDENTIAL_STORE',
   ]) assert.match(webUnit, new RegExp(`UnsetEnvironment=.*${variable}`));
-  assert.match(postinst, /install -o yunpanel -g yunpanel -m 0600 "\$api_temp" "\$api_env"/);
+  assert.match(postinst, /install -d -o root -g root -m 0700 \/etc\/yunpanel\/control-plane/);
+  assert.match(postinst, /install -o root -g root -m 0600 "\$api_temp" "\$api_env"/);
+  assert.match(postinst, /chown root:root "\$api_env"/);
 });
