@@ -59,6 +59,14 @@ function passengerIntent(preview, applicationId) {
   return Object.freeze(base);
 }
 
+function websiteAliases(preview) {
+  const values = [
+    ...(preview.plan.primaryDomain?.aliases ?? []),
+    ...(preview.plan.wwwDomain?.primaryDomain ? [preview.plan.wwwDomain.primaryDomain] : []),
+  ];
+  return Object.freeze([...new Set(values)]);
+}
+
 export function siteCreateProvisioningPlan(preview) {
   if (!preview || typeof preview !== 'object' || !preview.ids?.websiteId || !preview.operationId || !preview.plan?.website) {
     throw new Error('A valid site-create preview is required');
@@ -131,10 +139,11 @@ export function siteCreateProvisioningPlan(preview) {
     }
   }
 
+  const aliases = websiteAliases(preview);
   steps.push(hostStep('nginx', 'nginx', {
     websiteId: preview.ids.websiteId,
     primaryDomain: preview.plan.primaryDomain?.primaryDomain,
-    aliases: preview.plan.primaryDomain?.aliases ?? [],
+    aliases,
     targetType: runtimeType === 'node' ? 'passenger' : preview.plan.primaryDomain?.targetType,
     target: runtimeType === 'node' ? runtimeIntent : preview.plan.primaryDomain?.target,
   }));
@@ -142,8 +151,10 @@ export function siteCreateProvisioningPlan(preview) {
   if (preview.plan.primaryDomain?.httpsMode === 'managed') {
     steps.push(hostStep('certificate', 'certificate', {
       websiteId: preview.ids.websiteId,
+      primaryDomainId: preview.ids.primaryDomainId,
       primaryDomain: preview.plan.primaryDomain.primaryDomain,
-      aliases: preview.plan.primaryDomain.aliases ?? [],
+      aliases,
+      wwwDomainId: preview.ids.wwwDomainId ?? null,
       wwwDomain: preview.plan.wwwDomain?.primaryDomain ?? null,
     }));
   }
@@ -158,4 +169,5 @@ export function siteCreateProvisioningPlan(preview) {
 
 export const siteCreateProvisioningInternals = Object.freeze({
   passengerIntent,
+  websiteAliases,
 });
