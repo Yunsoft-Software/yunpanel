@@ -42,6 +42,8 @@ export async function startConfiguredLocalRuntime({
   certificateRegistry,
   applicationRegistry,
   applicationEnvironmentRegistry,
+  websiteRegistry,
+  runtimeBindingRegistry,
   mailDomainRegistry = null,
   mailConfigurationService = null,
   mailDkimConfigurationService = null,
@@ -72,6 +74,14 @@ export async function startConfiguredLocalRuntime({
   if (!config.enabled) return null;
   if (!applicationEnvironmentRegistry || typeof applicationEnvironmentRegistry.materialize !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_environment_registry_invalid', 'Local runtime requires the application environment registry');
+  }
+  if (!websiteRegistry || typeof websiteRegistry.listWebsites !== 'function'
+    || !runtimeBindingRegistry || typeof runtimeBindingRegistry.getBinding !== 'function'
+    || typeof runtimeBindingRegistry.activate !== 'function') {
+    throw new ConfiguredLocalRuntimeError(
+      'local_runtime_binding_registry_invalid',
+      'Local runtime requires Website and runtime-binding reconciliation registries',
+    );
   }
   if (mailConfigurationService !== null && typeof mailConfigurationService.materializeTransition !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_mail_configuration_invalid', 'Local runtime managed mail configuration provider is invalid');
@@ -502,6 +512,8 @@ export async function startConfiguredLocalRuntime({
     certificateRegistry,
     applicationRegistry,
     applicationEnvironmentRegistry,
+    websiteRegistry,
+    runtimeBindingRegistry,
     mailDomainRegistry,
     hostOperations,
     snapshotProvider,
