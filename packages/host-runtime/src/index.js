@@ -167,6 +167,11 @@ export {
   websiteIdentityManagerInternals,
 } from './website-identity-manager.js';
 export {
+  createWebsiteIdentityPathManager,
+  WebsiteIdentityPathManagerError,
+  websiteIdentityPathManagerInternals,
+} from './website-identity-path-manager.js';
+export {
   createPassengerInspector,
   PassengerInspectorError,
   passengerInspectorInternals,
