@@ -9,12 +9,17 @@ const websiteId = 'db20d91a-ec70-4d79-bc75-1f70de76d1ea';
 const projectId = '70b6a777-5fdf-4e64-89e8-14bf2e34953e';
 const applicationId = 'b11b9423-44bc-4ca5-ab4c-75170070ab9b';
 
-function fixture({ publishedPorts = null, websiteBinding = true, passengerBinding = false } = {}) {
+function fixture({
+  publishedPorts = null,
+  websiteBinding = true,
+  passengerBinding = false,
+  applicationJobs = [],
+} = {}) {
   const calls = [];
   const registry = {
     marker: 'base-registry',
     async enqueue(input) { calls.push(input); return { id: 'job-1', ...input }; },
-    async listJobs() { return []; },
+    async listJobs() { return applicationJobs; },
   };
   const domain = {
     id: 'domain-1',
@@ -181,6 +186,20 @@ test('Passenger runtime binding replaces stale direct-systemd proxy target befor
     headers: [{ name: 'X-App', value: 'yunpanel', always: true }],
   });
   assert.deepEqual(input, stageInput());
+});
+
+test('Domain stage waits while Passenger migration owns the Application route', async () => {
+  const fx = fixture({
+    passengerBinding: true,
+    applicationJobs: [{ operation: OPERATIONS.APP_NODE_PASSENGER_MIGRATE, status: 'running' }],
+  });
+  await assert.rejects(
+    fx.decorated.enqueue(stageInput()),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'node_passenger_migration_routing_busy'
+      && error.status === 409,
+  );
+  assert.equal(fx.calls.length, 0);
 });
 
 test('Domain stage resource mismatch fails closed before enqueue', async () => {
