@@ -94,6 +94,19 @@ test('successful steps require explicit evidence and readiness waits for every r
   assert.deepEqual(ready.progress, { required: 2, completed: 2, remaining: 0 });
 });
 
+test('recreating the same operation preserves progressed mutable state', async () => {
+  const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
+  await registry.create(input());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  await registry.completeStep({ operationId, stepId: 'unix_identity', evidence: { uid: 1201 } });
+
+  const recreated = await registry.create(input());
+  assert.equal(recreated.status, 'partial');
+  assert.equal(recreated.steps[0].state, 'succeeded');
+  assert.deepEqual(recreated.steps[0].evidence, { uid: 1201 });
+  assert.equal(recreated.steps[1].state, 'pending');
+});
+
 test('compensation is persisted as an explicit lifecycle', async () => {
   const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
   await registry.create(input());
