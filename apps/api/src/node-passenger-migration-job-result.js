@@ -1,8 +1,19 @@
 import { createHash } from 'node:crypto';
+import path from 'node:path';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const CODE_PATTERN = /^[a-z0-9_]{1,100}$/;
+const TARGET_FIELDS = new Set([
+  'appRoot',
+  'documentRoot',
+  'startupFile',
+  'nodeBinary',
+  'user',
+  'group',
+  'appEnv',
+  'environmentInclude',
+]);
 
 export class NodePassengerMigrationJobResultError extends Error {
   constructor(code, message) {
@@ -16,11 +27,19 @@ function uuid(value) {
   return typeof value === 'string' && UUID_PATTERN.test(value) ? value.toLowerCase() : null;
 }
 
-function serviceName(applicationId) {
+function applicationHash(applicationId) {
   const normalized = uuid(applicationId);
-  return normalized
-    ? `yunpanel-node-${createHash('sha256').update(normalized).digest('hex').slice(0, 16)}.service`
-    : null;
+  return normalized ? createHash('sha256').update(normalized).digest('hex') : null;
+}
+
+function serviceName(applicationId) {
+  const digest = applicationHash(applicationId);
+  return digest ? `yunpanel-node-${digest.slice(0, 16)}.service` : null;
+}
+
+function applicationUser(applicationId) {
+  const digest = applicationHash(applicationId);
+  return digest ? `yunapp-${digest.slice(0, 12)}` : null;
 }
 
 function safeCode(value) {
@@ -63,6 +82,37 @@ function cleanupEvidence(applicationId, value, migrated) {
   return Object.freeze({ ...result, reason, cause });
 }
 
+function passengerTargetEvidence(job, applicationId, value) {
+  const runtime = job?.payload?.node?.runtime;
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== TARGET_FIELDS.size
+    || Object.keys(value).some((field) => !TARGET_FIELDS.has(field))
+    || !runtime || typeof runtime !== 'object') {
+    throw new NodePassengerMigrationJobResultError('invalid_job_result', 'Passenger migration target evidence is invalid');
+  }
+  const currentRoot = `/var/lib/yunpanel/apps/${applicationId}/current`;
+  const expectedAppRoot = runtime.documentRoot === '.'
+    ? currentRoot
+    : path.posix.join(currentRoot, runtime.documentRoot);
+  const expectedUser = applicationUser(applicationId);
+  const expectedNodeBinaries = new Set([
+    `/opt/yunpanel/node-runtimes/v${runtime.nodeMajor}/bin/node`,
+    '/usr/bin/node',
+  ]);
+  const expectedEnvironmentInclude = `/etc/nginx/yunpanel/passenger-env/${applicationId}.conf`;
+  if (value.appRoot !== expectedAppRoot
+    || value.documentRoot !== expectedAppRoot
+    || value.startupFile !== runtime.start?.entryFile
+    || !expectedNodeBinaries.has(value.nodeBinary)
+    || value.user !== expectedUser
+    || value.group !== expectedUser
+    || value.appEnv !== runtime.mode
+    || value.environmentInclude !== expectedEnvironmentInclude) {
+    throw new NodePassengerMigrationJobResultError('invalid_job_result', 'Passenger migration target evidence does not match queued runtime state');
+  }
+  return Object.freeze({ ...value });
+}
+
 export function sanitizeNodePassengerMigrationResult(job, result) {
   const applicationId = uuid(job?.payload?.node?.applicationId);
   const releaseId = uuid(job?.payload?.node?.releaseId);
@@ -94,11 +144,14 @@ export function sanitizeNodePassengerMigrationResult(job, result) {
     resumed: result.resumed,
     cleanup: cleanupEvidence(applicationId, result.cleanup, migrated),
     nginx: Object.freeze({ sourceChecksum, targetChecksum }),
+    passengerTarget: passengerTargetEvidence(job, applicationId, result.passengerTarget),
   });
 }
 
 export const nodePassengerMigrationJobResultInternals = Object.freeze({
   uuid,
   serviceName,
+  applicationUser,
   cleanupEvidence,
+  passengerTargetEvidence,
 });
