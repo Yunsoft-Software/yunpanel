@@ -11,8 +11,10 @@ import {
   createMailboxQuotaInspector,
 } from '@yunpanel/host-runtime';
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
+import { mountApplicationPassengerMigrationRoutes } from './application-passenger-migration-http.js';
 import { mountApplicationProcessRoutes } from './application-process-http.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
+import { ApplicationRuntimeBindingRegistryError } from './application-runtime-binding-registry.js';
 import { isBackupHttpError, mountBackupRoutes } from './backup-http.js';
 import { createBackupProductionRuntime } from './backup-production-runtime.js';
 import { createBackupResourceProvider } from './backup-resource-provider.js';
@@ -229,6 +231,8 @@ export function createApp({
   const app = express();
   const localRegistry = localServerRegistryView(registry, localServerId);
   const applicationEnvironmentRegistry = options.applicationEnvironmentRegistry ?? null;
+  const passengerMigrationPreviewService = options.applicationPassengerMigrationPreviewService ?? null;
+  const passengerMigrationService = options.applicationPassengerMigrationService ?? null;
   const files = siteFileManager ?? createSiteFileManager({ websiteRegistry, localServerId });
   const readiness = dnsReadinessService ?? createDnsReadinessService({
     dnsHostingRegistry,
@@ -489,6 +493,15 @@ export function createApp({
   mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry, localServerId });
   mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry, localServerId });
   mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry, localServerId });
+  if ((passengerMigrationPreviewService === null) !== (passengerMigrationService === null)) {
+    throw new Error('Application Passenger migration services must be configured together');
+  }
+  if (passengerMigrationPreviewService && passengerMigrationService) {
+    mountApplicationPassengerMigrationRoutes(app, {
+      previewService: passengerMigrationPreviewService,
+      migrationService: passengerMigrationService,
+    });
+  }
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId });
   mountWebsiteMigrationRoutes(app, {
     websiteRegistry,
@@ -533,6 +546,7 @@ export function createApp({
     if (response.headersSent) return next(error);
     if (
       isBackupHttpError(error)
+      || error instanceof ApplicationRuntimeBindingRegistryError
       || error instanceof DatabaseBindingHttpError
       || error instanceof DatabaseBindingRegistryError
       || error instanceof DatabaseCredentialApplyError
