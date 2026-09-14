@@ -219,6 +219,20 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
     return operation ? publicOperation(operation) : null;
   }
 
+  async function getLatestForWebsite(websiteId) {
+    await ensureInitialized();
+    const operation = state.operations
+      .filter((candidate) => candidate.websiteId === websiteId)
+      .sort((left, right) => {
+        const byUpdatedAt = right.updatedAt.localeCompare(left.updatedAt);
+        if (byUpdatedAt !== 0) return byUpdatedAt;
+        const byCreatedAt = right.createdAt.localeCompare(left.createdAt);
+        if (byCreatedAt !== 0) return byCreatedAt;
+        return right.operationId.localeCompare(left.operationId);
+      })[0] ?? null;
+    return operation ? publicOperation(operation) : null;
+  }
+
   async function beginStep({ operationId, stepId } = {}) {
     await ensureInitialized();
     const operation = requireOperation(operationId);
@@ -359,6 +373,7 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
     init,
     create,
     get,
+    getLatestForWebsite,
     beginStep,
     completeStep,
     blockStep,
