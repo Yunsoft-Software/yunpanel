@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { findBlockingLaterCompensationStep } from './website-provisioning-compensation-order.js';
 import {
   createWebsiteProvisioningPlan,
   WebsiteProvisioningPlanError,
@@ -321,6 +322,12 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
     if (!['succeeded', 'failed'].includes(step.state)
       || !['pending', 'failed'].includes(step.compensation.state)) {
       throw new WebsiteProvisioningRegistryError('website_provisioning_transition_invalid', 'Provisioning compensation cannot begin from current state');
+    }
+    if (findBlockingLaterCompensationStep(operation, stepId)) {
+      throw new WebsiteProvisioningRegistryError(
+        'website_provisioning_compensation_order_invalid',
+        'Later provisioning steps must be compensated before this step',
+      );
     }
     step.state = 'compensating';
     step.compensation.state = 'applying';
