@@ -28,6 +28,7 @@ function preview() {
       application: {
         id: applicationId,
         type: 'node',
+        runtimeAdapter: 'passenger',
         runtime: {
           nodeMajor: 24,
           packageManager: 'npm',

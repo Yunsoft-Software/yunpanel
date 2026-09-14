@@ -17,6 +17,8 @@ test('configured local runtime enriches inventory with the legacy-compatible Ngi
     certificateRegistry: {},
     applicationRegistry: {},
     applicationEnvironmentRegistry: { materialize: async () => ({}) },
+    websiteRegistry: { listWebsites: async () => [] },
+    runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
     createOperations: () => ({ operations: [], supports: () => false, executeOperation: async () => null }),
     inspectInventory: async () => ({ hostname: 'host-1.example.local', mode: 'local' }),
     inspectNginx: async () => ({ available: true, version: 'nginx/1.24.0', config: { prefix: '/etc/nginx' } }),

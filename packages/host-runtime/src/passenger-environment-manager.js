@@ -129,6 +129,8 @@ export function createPassengerEnvironmentManager({
   sourceRoot = SOURCE_ROOT,
   includeRoot = INCLUDE_ROOT,
   receiptRoot = RECEIPT_ROOT,
+  requiredUid = 0,
+  requiredGid = 0,
   lstatFn = lstat,
   mkdirFn = mkdir,
   readFileFn = readFile,
@@ -137,6 +139,8 @@ export function createPassengerEnvironmentManager({
   writeFileFn = writeFile,
 } = {}) {
   if (![sourceRoot, includeRoot, receiptRoot].every((value) => typeof value === 'string' && path.posix.isAbsolute(value))
+    || !Number.isSafeInteger(requiredUid) || requiredUid < 0
+    || !Number.isSafeInteger(requiredGid) || requiredGid < 0
     || typeof lstatFn !== 'function' || typeof mkdirFn !== 'function' || typeof readFileFn !== 'function'
     || typeof renameFn !== 'function' || typeof rmFn !== 'function' || typeof writeFileFn !== 'function') {
     throw new PassengerEnvironmentManagerError('passenger_environment_dependencies_invalid', 'Passenger environment manager dependencies are invalid');
@@ -198,7 +202,8 @@ export function createPassengerEnvironmentManager({
       if (error?.code === 'ENOENT') return Object.freeze({ exists: false, content: null, checksum: null, safe: true });
       throw new PassengerEnvironmentManagerError('passenger_environment_include_unavailable', 'Passenger environment include could not be inspected');
     }
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== 0 || stat.gid !== 0 || modeOf(stat) !== INCLUDE_MODE) {
+    if (!stat.isFile() || stat.isSymbolicLink()
+      || stat.uid !== requiredUid || stat.gid !== requiredGid || modeOf(stat) !== INCLUDE_MODE) {
       throw new PassengerEnvironmentManagerError('passenger_environment_include_drift', 'Passenger environment include ownership or file type has drifted');
     }
     let content;

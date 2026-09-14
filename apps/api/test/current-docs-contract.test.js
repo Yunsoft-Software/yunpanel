@@ -47,8 +47,8 @@ test('current docs expose the implemented agentless migration and deferred-desig
 
   assert.match(docs.get('README.md'), /local-runtime\.mjs validate <server-uuid>/);
   assert.match(docs.get('README.md'), /create --backup-dir \/var\/backups\/yunpanel\/migration-<timestamp> --confirm/);
-  assert.match(docs.get('plan.md'), /Migration live-apply katmanına per-target replace/);
-  assert.match(docs.get('todo.md'), /Fresh agentless host:.*API start sonrası `validate` geçmeden functional mutation yapma/);
+  assert.match(docs.get('plan.md'), /Mevcut durable `WebsiteProvisioningPlan`ı kalan gerçek kaynak adapter'larına bağla/);
+  assert.match(docs.get('todo.md'), /Yeni durable Website provisioning store ile API restart testi yap/);
   assert.doesNotMatch(docs.get('plan.md'), /Kalan legacy hata yollarını güvenli tanı kataloğuna bağla/);
   assert.match(docs.get('agents.md'), /DEFERRED — Enterprise UI\/UX standardı/);
   assert.match(docs.get('docs/development.md'), /New enrollment is retired/);

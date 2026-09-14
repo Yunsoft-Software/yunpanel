@@ -38,8 +38,8 @@ function spec(overrides = {}) {
   return {
     applicationId,
     releaseId,
-    runtime,
     ...overrides,
+    runtime,
   };
 }
 

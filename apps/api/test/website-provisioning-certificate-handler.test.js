@@ -7,6 +7,8 @@ function dependencies() {
     identityManager: {
       apply: async () => ({ satisfied: true }),
       inspect: async () => ({ satisfied: true }),
+      compensate: async () => ({ satisfied: true }),
+      inspectCompensation: async () => ({ satisfied: true }),
     },
     passengerSiteManager: {
       apply: async () => ({ satisfied: true }),
@@ -17,6 +19,8 @@ function dependencies() {
       inspectStagedDomain: async () => ({ satisfied: false, result: null }),
       inspectActiveDomain: async () => ({ satisfied: false, result: null }),
       activateDomain: async () => ({ configName: 'unused', checksum: 'a'.repeat(64), active: true }),
+      compensateDomain: async () => ({ satisfied: true }),
+      inspectDomainCompensation: async () => ({ satisfied: true }),
     },
   };
 }

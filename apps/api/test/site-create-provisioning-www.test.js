@@ -11,6 +11,7 @@ const wwwDomainId = 'c20e9df0-6d02-40bf-a876-dc783ee34c7a';
 function preview() {
   return {
     operationId,
+    source: { kind: 'existing_application', applicationId },
     ids: { websiteId, applicationId, primaryDomainId, wwwDomainId },
     steps: {
       applicationReady: true,
@@ -22,6 +23,7 @@ function preview() {
       application: {
         id: applicationId,
         type: 'node',
+        runtimeAdapter: 'passenger',
         runtime: {
           nodeMajor: 24,
           mode: 'production',
@@ -35,7 +37,7 @@ function preview() {
       website: {
         id: websiteId,
         runtimeType: 'node',
-        unixUser: 'yunapp-0123456789ab',
+        unixUser: 'yunapp-4dc352e64a14',
         documentRoot: `/var/lib/yunpanel/apps/${applicationId}/current`,
       },
       primaryDomain: {

@@ -39,6 +39,8 @@ function provisioningRuntime() {
     identityManager: {
       apply: async () => ({ satisfied: true, uid: 1201, gid: 1201 }),
       inspect: async () => ({ satisfied: true, uid: 1201, gid: 1201 }),
+      compensate: async () => ({ satisfied: true }),
+      inspectCompensation: async () => ({ satisfied: true }),
     },
     passengerSiteManager: {
       apply: async () => ({ satisfied: false, reason: 'unused' }),
@@ -57,6 +59,8 @@ function provisioningRuntime() {
       activateDomain: async ({ primaryDomain }) => ({
         configName: `yunpanel-${primaryDomain}.conf`, checksum, active: true,
       }),
+      compensateDomain: async () => ({ satisfied: true }),
+      inspectDomainCompensation: async () => ({ satisfied: true }),
     },
   });
 }
@@ -169,9 +173,15 @@ test('Owner previews, applies and continues durable site provisioning through th
   assert.equal(statusResponse.status, 200);
   assert.equal((await statusResponse.json()).data.operationId, input.operationId);
 
-  const continued = await request(`/api/sites/provisioning/${input.operationId}/continue`, {
+  let continued = await request(`/api/sites/provisioning/${input.operationId}/continue`, {
     body: { confirmation: `continue-site-provisioning:${input.operationId}` },
   });
+  assert.equal(continued.status, 202);
+  for (let attempts = 0; attempts < 8 && continued.status === 202; attempts += 1) {
+    continued = await request(`/api/sites/provisioning/${input.operationId}/continue`, {
+      body: { confirmation: `continue-site-provisioning:${input.operationId}` },
+    });
+  }
   assert.equal(continued.status, 200);
   const continuedData = (await continued.json()).data;
   assert.equal(continuedData.outcome, 'ready');

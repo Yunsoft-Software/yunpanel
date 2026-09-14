@@ -27,6 +27,8 @@ function baseOptions(overrides = {}) {
       domainRegistry: {},
       certificateRegistry: {},
       applicationRegistry: {},
+    websiteRegistry: { listWebsites: async () => [] },
+    runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
       hostOperations: {
         operations: [],
         supports: () => false,

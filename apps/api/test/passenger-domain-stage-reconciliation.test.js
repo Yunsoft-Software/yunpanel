@@ -115,7 +115,7 @@ test('Passenger Domain stage advances only the staged Domain binding evidence', 
   const [{ input, options }] = deps.activations;
   assert.equal(options.expectedRevision, 7);
   assert.equal(input.state, 'cleanup_required');
-  assert.equal(input.sourceOperationId, jobId);
+  assert.equal(input.sourceOperationId, binding().sourceOperationId);
   assert.deepEqual(input.passengerTarget, passengerTarget);
   assert.deepEqual(input.domains, [
     { domainId, desiredRevision: 5, nginxChecksum: newChecksum },

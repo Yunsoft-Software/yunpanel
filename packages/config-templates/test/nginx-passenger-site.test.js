@@ -45,6 +45,6 @@ test('managed TLS keeps Passenger directives only on serving vhost and redirects
 
   const passengerMatches = config.match(/passenger_enabled on;/g) ?? [];
   assert.equal(passengerMatches.length, 1);
-  assert.match(config, /return 301 https:\/\/$host\$request_uri;/);
+  assert.match(config, /return 301 https:\/\/\$host\$request_uri;/);
   assert.match(config, /listen 443 ssl;/);
 });

@@ -50,6 +50,12 @@ function normalizedValues(value) {
   }
   const normalized = {};
   for (const [rawKey, rawValue] of Object.entries(value)) {
+    if (MANAGED_ENVIRONMENT_KEYS.has(rawKey)) {
+      throw new WebsitePassengerEnvironmentError(
+        'website_passenger_environment_reserved_key',
+        'Passenger environment cannot override Passenger-managed application environment keys',
+      );
+    }
     let key;
     let environmentValue;
     try {

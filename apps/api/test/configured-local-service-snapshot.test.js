@@ -18,6 +18,8 @@ test('configured local runtime combines inventory and legacy-compatible service 
     certificateRegistry: {},
     applicationRegistry: {},
     applicationEnvironmentRegistry: { materialize: async () => ({}) },
+    websiteRegistry: { listWebsites: async () => [] },
+    runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
     createOperations: () => ({ operations: [], supports: () => false, executeOperation: async () => null }),
     inspectInventory: async (options) => {
       calls.push(['inventory', options]);

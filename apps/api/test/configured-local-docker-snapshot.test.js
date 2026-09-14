@@ -17,6 +17,8 @@ test('configured local runtime enriches inventory with the legacy-compatible Doc
     certificateRegistry: {},
     applicationRegistry: {},
     applicationEnvironmentRegistry: { materialize: async () => ({}) },
+    websiteRegistry: { listWebsites: async () => [] },
+    runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
     createOperations: () => ({ operations: [], supports: () => false, executeOperation: async () => null }),
     inspectInventory: async () => ({ hostname: 'host-1.example.local', mode: 'local' }),
     inspectDocker: async () => ({ available: true, containers: [{ id: 'abc', name: 'demo' }] }),

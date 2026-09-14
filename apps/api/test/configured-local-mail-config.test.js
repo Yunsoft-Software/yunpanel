@@ -21,6 +21,8 @@ const base = {
   certificateRegistry: {},
   applicationRegistry: {},
   applicationEnvironmentRegistry: { materialize: async () => ({}) },
+    websiteRegistry: { listWebsites: async () => [] },
+    runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
 };
 
 test('configured runtime hydrates managed mail privately and records only secret-free crash evidence', async () => {

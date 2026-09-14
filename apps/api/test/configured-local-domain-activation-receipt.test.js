@@ -21,6 +21,8 @@ async function captureRecorder() {
     certificateRegistry: {},
     applicationRegistry: {},
     applicationEnvironmentRegistry: { materialize: async () => ({}) },
+    websiteRegistry: { listWebsites: async () => [] },
+    runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
     createOperations: () => ({ operations: [], supports: () => true, executeOperation: async () => ({}) }),
     createDatabaseDeletionReceipts: () => ({ write: async () => {} }),
     createDomainActivationReceipts: () => ({ async write(value) { writes.push(value); } }),

@@ -43,6 +43,8 @@ test('agentless runtime persists inventory, services, Docker and Nginx snapshots
     domainRegistry: {},
     certificateRegistry: {},
     applicationRegistry: {},
+    websiteRegistry: { listWebsites: async () => [] },
+    runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
     hostOperations: { operations: [], supports: () => false, executeOperation: async () => null },
     snapshotProvider: async () => ({ inventory, services }),
     executorFactory: () => ({ start() {}, async stop() {} }),

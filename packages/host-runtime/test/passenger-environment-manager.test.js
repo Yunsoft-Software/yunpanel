@@ -11,6 +11,8 @@ import {
 
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 const operationId = '3cf62117-56b3-4db4-98d5-fd7282b2bb0c';
+const currentUid = process.getuid?.() ?? 0;
+const currentGid = process.getgid?.() ?? 0;
 const runtime = {
   mode: 'production',
   port: 3123,
@@ -32,7 +34,13 @@ async function fixture() {
   const receiptRoot = path.join(root, 'receipt');
   await mkdir(sourceRoot, { recursive: true });
   await writeFile(path.join(sourceRoot, `${applicationId}.env`), sourceContent, { mode: 0o600 });
-  const manager = createPassengerEnvironmentManager({ sourceRoot, includeRoot, receiptRoot });
+  const manager = createPassengerEnvironmentManager({
+    sourceRoot,
+    includeRoot,
+    receiptRoot,
+    requiredUid: currentUid,
+    requiredGid: currentGid,
+  });
   return {
     root,
     sourceRoot,
@@ -76,8 +84,8 @@ test('Passenger environment apply writes a root-private include and verifies it 
     const includePath = path.join(f.includeRoot, `${applicationId}.conf`);
     const info = await stat(includePath);
     assert.equal(info.mode & 0o777, 0o600);
-    assert.equal(info.uid, 0);
-    assert.equal(info.gid, 0);
+    assert.equal(info.uid, currentUid);
+    assert.equal(info.gid, currentGid);
     const content = await readFile(includePath, 'utf8');
     assert.equal(content.includes('DATABASE_URL'), true);
     const inspected = await f.manager.inspect({
@@ -154,6 +162,8 @@ test('Passenger environment apply restores previous include when postcondition f
       sourceRoot: f.sourceRoot,
       includeRoot: f.includeRoot,
       receiptRoot: f.receiptRoot,
+      requiredUid: currentUid,
+      requiredGid: currentGid,
       renameFn: async (from, to) => {
         const { rename, chmod } = await import('node:fs/promises');
         await rename(from, to);

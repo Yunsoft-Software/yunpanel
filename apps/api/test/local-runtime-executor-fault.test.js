@@ -29,6 +29,8 @@ async function fixture(onError) {
     domainRegistry: {},
     certificateRegistry: {},
     applicationRegistry: {},
+    websiteRegistry: { listWebsites: async () => [] },
+    runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
     hostOperations: {
       operations: ['system.packages.inspect'],
       supports: () => true,

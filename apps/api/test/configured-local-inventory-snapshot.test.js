@@ -18,6 +18,8 @@ test('configured local runtime supplies host inventory through the guarded snaps
     certificateRegistry: {},
     applicationRegistry: {},
     applicationEnvironmentRegistry: { materialize: async () => ({}) },
+    websiteRegistry: { listWebsites: async () => [] },
+    runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
     createOperations: () => ({ operations: [], supports: () => false, executeOperation: async () => null }),
     inspectInventory: async (options) => {
       calls.push(options);

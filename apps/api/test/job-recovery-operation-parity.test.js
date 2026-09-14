@@ -30,6 +30,7 @@ const recoverySources = [
   'job-running-mail-dkim-recovery.js',
   'job-running-mail-data-recovery.js',
   'job-running-roundcube-config-recovery.js',
+  'application-passenger-migration-reconciliation.js',
 ].map(apiSource);
 
 function operationNames(source, pattern = /OPERATIONS\.([A-Z0-9_]+)/g) {

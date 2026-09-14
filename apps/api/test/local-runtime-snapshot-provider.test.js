@@ -34,6 +34,8 @@ function fixture() {
     domainRegistry: {},
     certificateRegistry: {},
     applicationRegistry: {},
+    websiteRegistry: { listWebsites: async () => [] },
+    runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
     hostOperations: { operations: [], supports: () => false, executeOperation: async () => null },
     executorFactory: () => ({
       start() { starts += 1; },
@@ -54,6 +56,8 @@ async function start(fx, extra = {}) {
     domainRegistry: fx.domainRegistry,
     certificateRegistry: fx.certificateRegistry,
     applicationRegistry: fx.applicationRegistry,
+    websiteRegistry: fx.websiteRegistry,
+    runtimeBindingRegistry: fx.runtimeBindingRegistry,
     hostOperations: fx.hostOperations,
     executorFactory: fx.executorFactory,
     acquireLock: fx.acquireLock,

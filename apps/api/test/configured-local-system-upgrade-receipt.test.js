@@ -16,6 +16,8 @@ async function recorderFixture() {
     runtimeVersion: '0.3.0',
     registry: {}, jobRegistry: {}, domainRegistry: {}, certificateRegistry: {}, applicationRegistry: {},
     applicationEnvironmentRegistry: { materialize: async () => ({}) },
+    websiteRegistry: { listWebsites: async () => [] },
+    runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
     createOperations: () => ({ operations: [], supports: () => true, executeOperation: async () => ({}) }),
     createDatabaseDeletionReceipts: () => ({ write: async () => {} }),
     createDomainActivationReceipts: () => ({ write: async () => {} }),
