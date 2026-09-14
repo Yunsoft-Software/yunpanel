@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createApplicationIdentity } from '../src/application-identity.js';
 import { createStaticRollbackRouter } from '../src/static-rollback-router.js';
 
 const APPLICATION_ID = '2f334b35-03ce-4aa0-a8e4-b2ad4f592541';
 const CURRENT_RELEASE = 'ff830043-9752-4640-83b4-3a1998de78a0';
 const TARGET_RELEASE = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
+const UNIX_USER = createApplicationIdentity(APPLICATION_ID).unixUser;
 const spec = Object.freeze({
   applicationId: APPLICATION_ID,
   releaseId: TARGET_RELEASE,
@@ -58,9 +60,7 @@ test('static rollback permits only positively verified legacy identity migration
   assert.deepEqual(await router.verifyIdentity(APPLICATION_ID), {
     mode: 'legacy',
     applicationId: APPLICATION_ID,
-    unixUser: /^yunapp-[a-f0-9]{12}$/.test((await router.verifyIdentity(APPLICATION_ID)).unixUser)
-      ? (await router.verifyIdentity(APPLICATION_ID)).unixUser
-      : null,
+    unixUser: UNIX_USER,
   });
   calls.length = 0;
   assert.deepEqual(await router.rollbackStatic(spec), result());
