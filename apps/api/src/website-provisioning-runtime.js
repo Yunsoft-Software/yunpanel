@@ -22,10 +22,7 @@ export function createWebsiteProvisioningRuntime({
     filePath,
     ...(now ? { now } : {}),
   });
-  const passengerControlPlaneReady = Boolean(
-    applicationRegistry && websiteRegistry && domainRegistry && runtimeBindingRegistry,
-  );
-  const handlers = Object.freeze({
+  const handlers = {
     ...createWebsiteProvisioningHandlers({
       ...(identityManager ? { identityManager } : {}),
       ...(passengerSiteManager ? { passengerSiteManager } : {}),
@@ -35,18 +32,50 @@ export function createWebsiteProvisioningRuntime({
     node_release: createWebsiteNodeReleaseProvisioningHandler({
       ...(nodeReleaseManager ? { nodeReleaseManager } : {}),
     }),
-    ...(applicationRegistry ? {
-      passenger_application_release: createWebsitePassengerApplicationReleaseProvisioningHandler({ applicationRegistry }),
-    } : {}),
-    ...(passengerControlPlaneReady ? {
-      passenger_authority: createWebsitePassengerAuthorityProvisioningHandler({
-        applicationRegistry,
-        websiteRegistry,
-        domainRegistry,
-        runtimeBindingRegistry,
-      }),
-    } : {}),
-  });
+  };
+  let passengerControlPlane = null;
+
+  function configurePassengerControlPlane(dependencies = {}) {
+    const {
+      applicationRegistry: nextApplicationRegistry,
+      websiteRegistry: nextWebsiteRegistry,
+      domainRegistry: nextDomainRegistry,
+      runtimeBindingRegistry: nextRuntimeBindingRegistry,
+    } = dependencies;
+    if (!nextApplicationRegistry || !nextWebsiteRegistry || !nextDomainRegistry || !nextRuntimeBindingRegistry) {
+      throw new Error('Passenger Website provisioning control-plane dependencies are required');
+    }
+    if (passengerControlPlane) {
+      if (passengerControlPlane.applicationRegistry !== nextApplicationRegistry
+        || passengerControlPlane.websiteRegistry !== nextWebsiteRegistry
+        || passengerControlPlane.domainRegistry !== nextDomainRegistry
+        || passengerControlPlane.runtimeBindingRegistry !== nextRuntimeBindingRegistry) {
+        throw new Error('Passenger Website provisioning control-plane dependencies cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.passenger_application_release = createWebsitePassengerApplicationReleaseProvisioningHandler({
+      applicationRegistry: nextApplicationRegistry,
+    });
+    handlers.passenger_authority = createWebsitePassengerAuthorityProvisioningHandler({
+      applicationRegistry: nextApplicationRegistry,
+      websiteRegistry: nextWebsiteRegistry,
+      domainRegistry: nextDomainRegistry,
+      runtimeBindingRegistry: nextRuntimeBindingRegistry,
+    });
+    passengerControlPlane = Object.freeze({
+      applicationRegistry: nextApplicationRegistry,
+      websiteRegistry: nextWebsiteRegistry,
+      domainRegistry: nextDomainRegistry,
+      runtimeBindingRegistry: nextRuntimeBindingRegistry,
+    });
+    return Object.freeze({ configured: true });
+  }
+
+  if (applicationRegistry || websiteRegistry || domainRegistry || runtimeBindingRegistry) {
+    configurePassengerControlPlane({ applicationRegistry, websiteRegistry, domainRegistry, runtimeBindingRegistry });
+  }
+
   const orchestrator = createWebsiteProvisioningOrchestrator({ registry, handlers });
 
   async function init() {
@@ -65,6 +94,7 @@ export function createWebsiteProvisioningRuntime({
     registry,
     handlers,
     orchestrator,
+    configurePassengerControlPlane,
     init,
     get: (operationId) => registry.get(operationId),
     create: (plan) => registry.create(plan),
