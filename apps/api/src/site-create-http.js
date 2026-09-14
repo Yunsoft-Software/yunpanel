@@ -1,5 +1,6 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createSite, previewSiteCreate, SiteCreateError } from './site-create.js';
+import { siteCreateProvisioningPlan } from './site-create-provisioning.js';
 
 const PREVIEW_FIELDS = new Set(['input']);
 const APPLY_FIELDS = new Set(['input', 'previewDigest', 'confirmation']);
@@ -36,6 +37,18 @@ function asyncRoute(handler) {
   };
 }
 
+function localInput(input, localServerId) {
+  return { ...input, serverId: localServerId ?? input?.serverId };
+}
+
+async function previewWithProvisioning({ input, dependencies }) {
+  const preview = await previewSiteCreate({ input, ...dependencies });
+  return Object.freeze({
+    ...preview,
+    provisioning: siteCreateProvisioningPlan(preview),
+  });
+}
+
 export function mountSiteCreateRoutes(app, dependencies = {}) {
   if (!app || typeof app.post !== 'function') throw new Error('Express application is required');
 
@@ -44,7 +57,8 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
     if (dependencies.localServerId && body.input?.serverId !== dependencies.localServerId) {
       throw new SiteCreateError('local_server_required', 'Sites can be created only on this panel host', 404);
     }
-    return response.json({ data: await previewSiteCreate({ input: { ...body.input, serverId: dependencies.localServerId ?? body.input?.serverId }, ...dependencies }) });
+    const input = localInput(body.input, dependencies.localServerId);
+    return response.json({ data: await previewWithProvisioning({ input, dependencies }) });
   }));
 
   app.post('/api/sites', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -52,14 +66,26 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
     if (dependencies.localServerId && body.input?.serverId !== dependencies.localServerId) {
       throw new SiteCreateError('local_server_required', 'Sites can be created only on this panel host', 404);
     }
+    const input = localInput(body.input, dependencies.localServerId);
     const result = await createSite({
-      input: { ...body.input, serverId: dependencies.localServerId ?? body.input?.serverId },
+      input,
       previewDigest: body.previewDigest,
       confirmation: body.confirmation,
       ...dependencies,
     });
-    return response.status(result.created ? 201 : 200).json({ data: result });
+    const current = await previewWithProvisioning({ input, dependencies });
+    return response.status(result.created ? 201 : 200).json({
+      data: Object.freeze({
+        ...result,
+        provisioning: current.provisioning,
+      }),
+    });
   }));
 }
 
-export const siteCreateHttpInternals = Object.freeze({ previewBody, applyBody });
+export const siteCreateHttpInternals = Object.freeze({
+  previewBody,
+  applyBody,
+  localInput,
+  previewWithProvisioning,
+});
