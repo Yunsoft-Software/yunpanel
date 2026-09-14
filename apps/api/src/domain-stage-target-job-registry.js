@@ -10,11 +10,20 @@ export class DomainStageTargetJobRegistryError extends Error {
   }
 }
 
-function assertDependencies(registry, domainRegistry, websiteRegistry, dockerComposeProjectRegistry) {
+function assertDependencies(
+  registry,
+  domainRegistry,
+  websiteRegistry,
+  dockerComposeProjectRegistry,
+  applicationRegistry,
+  runtimeBindingRegistry,
+) {
   if (!registry || typeof registry.enqueue !== 'function'
     || !domainRegistry || typeof domainRegistry.getDomain !== 'function'
     || !websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
-    || !dockerComposeProjectRegistry || typeof dockerComposeProjectRegistry.getProject !== 'function') {
+    || !dockerComposeProjectRegistry || typeof dockerComposeProjectRegistry.getProject !== 'function'
+    || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
+    || !runtimeBindingRegistry || typeof runtimeBindingRegistry.getBinding !== 'function') {
     throw new DomainStageTargetJobRegistryError(
       'domain_stage_target_dependencies_invalid',
       'Domain stage target job registry dependencies are invalid',
@@ -27,8 +36,17 @@ export function createDomainStageTargetJobRegistry({
   domainRegistry,
   websiteRegistry,
   dockerComposeProjectRegistry,
+  applicationRegistry,
+  runtimeBindingRegistry,
 } = {}) {
-  assertDependencies(registry, domainRegistry, websiteRegistry, dockerComposeProjectRegistry);
+  assertDependencies(
+    registry,
+    domainRegistry,
+    websiteRegistry,
+    dockerComposeProjectRegistry,
+    applicationRegistry,
+    runtimeBindingRegistry,
+  );
 
   async function enqueue(input) {
     if (input?.operation !== OPERATIONS.DOMAIN_STAGE) return registry.enqueue(input);
@@ -43,6 +61,8 @@ export function createDomainStageTargetJobRegistry({
       domain,
       websiteRegistry,
       dockerComposeProjectRegistry,
+      applicationRegistry,
+      runtimeBindingRegistry,
     });
     return registry.enqueue({
       ...input,
