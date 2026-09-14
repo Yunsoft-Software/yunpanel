@@ -208,6 +208,58 @@ test('identity manager requires a durable operation id before creating host stat
   assert.equal(host.calls.some(([file]) => file === '/usr/sbin/useradd'), false);
 });
 
+test('identity compensation removes only operation-owned user group and home', async (t) => {
+  const host = createFakeHost();
+  const manager = await managerFixture(t, host);
+  const evidence = await manager.apply(intent, { operationId });
+
+  const result = await manager.compensate(intent, { operationId, evidence });
+
+  assert.equal(result.satisfied, true);
+  assert.equal(result.removedUser, true);
+  assert.equal(result.removedGroup, true);
+  assert.equal(result.removedHome, true);
+  assert.equal(host.state.userExists, false);
+  assert.equal(host.state.groupExists, false);
+  assert.equal(host.state.homeExists, false);
+  assert.equal(host.calls.some(([file]) => file === '/usr/sbin/userdel'), true);
+  assert.equal(host.calls.some(([file]) => file === '/usr/sbin/groupdel'), true);
+});
+
+test('identity compensation preserves a matching identity that predated the operation', async (t) => {
+  const host = createFakeHost({ userExists: true });
+  const manager = await managerFixture(t, host);
+  const evidence = await manager.apply(intent);
+
+  const result = await manager.compensate(intent, { operationId, evidence });
+
+  assert.deepEqual(result, { satisfied: true, removedUser: false, preservedExisting: true });
+  assert.equal(host.state.userExists, true);
+  assert.equal(host.state.groupExists, true);
+  assert.equal(host.state.homeExists, true);
+  assert.equal(host.calls.some(([file]) => file === '/usr/sbin/userdel'), false);
+  assert.equal(host.calls.some(([file]) => file === '/usr/sbin/groupdel'), false);
+});
+
+test('identity compensation refuses ownership drift before destructive mutation', async (t) => {
+  const host = createFakeHost();
+  const manager = await managerFixture(t, host);
+  const evidence = await manager.apply(intent, { operationId });
+  host.state.groupMembers.push('unexpected-user');
+  const destructiveCallsBefore = host.calls.filter(([file]) => ['/usr/sbin/userdel', '/usr/sbin/groupdel'].includes(file)).length;
+
+  await assert.rejects(
+    manager.compensate(intent, { operationId, evidence }),
+    (error) => error instanceof WebsiteIdentityManagerError && error.code === 'website_identity_compensation_drift',
+  );
+
+  const destructiveCallsAfter = host.calls.filter(([file]) => ['/usr/sbin/userdel', '/usr/sbin/groupdel'].includes(file)).length;
+  assert.equal(destructiveCallsAfter, destructiveCallsBefore);
+  assert.equal(host.state.userExists, true);
+  assert.equal(host.state.groupExists, true);
+  assert.equal(host.state.homeExists, true);
+});
+
 test('identity manager rejects paths outside the managed application data root', async (t) => {
   const host = createFakeHost();
   const manager = await managerFixture(t, host);
