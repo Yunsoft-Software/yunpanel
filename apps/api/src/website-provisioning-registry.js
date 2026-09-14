@@ -280,6 +280,25 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
     return publicOperation(operation);
   }
 
+  async function retryStep({ operationId, stepId } = {}) {
+    await ensureInitialized();
+    const operation = requireOperation(operationId);
+    const step = requireStep(operation, stepId);
+    if (step.state !== 'failed'
+      || !['pending', 'not_required'].includes(step.compensation.state)) {
+      throw new WebsiteProvisioningRegistryError(
+        'website_provisioning_retry_invalid',
+        'Only a failed provisioning step without active compensation can be retried',
+      );
+    }
+    step.state = 'pending';
+    step.error = null;
+    step.evidence = null;
+    operation.updatedAt = nowIso();
+    await persist();
+    return publicOperation(operation);
+  }
+
   async function beginCompensation({ operationId, stepId } = {}) {
     await ensureInitialized();
     const operation = requireOperation(operationId);
@@ -343,6 +362,7 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
     completeStep,
     blockStep,
     failStep,
+    retryStep,
     beginCompensation,
     completeCompensation,
     failCompensation,
