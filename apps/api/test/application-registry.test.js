@@ -85,12 +85,13 @@ test('internal deterministic Application identity is idempotent and rejects conf
 
 test('Node port allocation avoids managed and reserved ports and creation rejects duplicates', async () => {
   const registry = createApplicationRegistry({ serverExists: async () => true });
-  await registry.createNodeApplication({
+  const direct = await registry.createNodeApplication({
     serverId: 'server-1',
     name: 'Existing Node',
     repositoryUrl: 'https://github.com/example/existing-node',
     runtime: { port: 3100 },
   });
+  assert.equal(direct.runtimeAdapter, 'direct-systemd');
   assert.equal(await registry.allocateNodePort({ serverId: 'server-1', reservedPorts: [3101] }), 3102);
   assert.equal(await registry.allocateNodePort({ serverId: 'server-2', reservedPorts: [3100] }), 3101);
 
@@ -102,5 +103,60 @@ test('Node port allocation avoids managed and reserved ports and creation reject
       runtime: { port: 3100 },
     }),
     (error) => error instanceof ApplicationRegistryError && error.code === 'node_port_conflict' && error.status === 409,
+  );
+});
+
+test('Passenger Node applications persist no systemd service, localhost proxy or allocated port', async () => {
+  const registry = createApplicationRegistry({ serverExists: async () => true });
+  const application = await registry.createNodeApplication({
+    applicationId: '8d3de1c5-a95d-4df6-9c0c-39997ed57d60',
+    serverId: 'server-1',
+    name: 'Passenger Node',
+    repositoryUrl: 'https://github.com/example/passenger-node',
+    runtimeAdapter: 'passenger',
+    runtime: {
+      nodeMajor: 24,
+      buildScript: 'build',
+      entryFile: 'dist/server.js',
+      healthPath: '/healthz',
+    },
+  });
+
+  assert.equal(application.runtimeAdapter, 'passenger');
+  assert.equal(application.runtime.port, null);
+  assert.equal(application.serviceName, null);
+  assert.equal(application.servicePort, null);
+  assert.equal(application.proxyTarget, null);
+  assert.equal(await registry.allocateNodePort({ serverId: 'server-1' }), 3100);
+
+  const retried = await registry.createNodeApplication({
+    applicationId: application.id,
+    serverId: 'server-1',
+    name: 'Passenger Node',
+    repositoryUrl: 'https://github.com/example/passenger-node',
+    runtimeAdapter: 'passenger',
+    runtime: {
+      nodeMajor: 24,
+      buildScript: 'build',
+      entryFile: 'dist/server.js',
+      healthPath: '/healthz',
+    },
+  });
+  assert.equal(retried.id, application.id);
+
+  await assert.rejects(
+    registry.createNodeApplication({
+      serverId: 'server-1',
+      name: 'Passenger With Port',
+      repositoryUrl: 'https://github.com/example/passenger-with-port',
+      runtimeAdapter: 'passenger',
+      runtime: { port: 3200 },
+    }),
+    (error) => error instanceof ApplicationRegistryError && error.code === 'invalid_node_port',
+  );
+
+  await assert.rejects(
+    registry.markDeploying(application.id, 'ff830043-9752-4640-83b4-3a1998de78a0'),
+    (error) => error instanceof ApplicationRegistryError && error.code === 'node_deploy_adapter_mismatch' && error.status === 409,
   );
 });
