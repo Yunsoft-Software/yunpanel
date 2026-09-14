@@ -6,12 +6,14 @@ import { resolveWebsiteDomainTarget } from '../src/website-domain-target.js';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const websiteId = 'db20d91a-ec70-4d79-bc75-1f70de76d1ea';
 const projectId = '70b6a777-5fdf-4e64-89e8-14bf2e34953e';
+const applicationId = 'b11b9423-44bc-4ca5-ab4c-75170070ab9b';
 
 function domain(overrides = {}) {
   return {
     id: 'domain-1',
     serverId,
     websiteId,
+    desiredRevision: 3,
     targetType: 'proxy',
     target: { upstreamHost: '127.0.0.1', upstreamPort: 18080, websocket: false },
     nginxSettings: { websocket: false },
@@ -23,6 +25,7 @@ function website(overrides = {}) {
   return {
     id: websiteId,
     serverId,
+    revision: 4,
     applicationId: null,
     dockerWorkloadId: null,
     managedComposeBinding: {
@@ -35,6 +38,15 @@ function website(overrides = {}) {
     proxyTarget: null,
     ...overrides,
   };
+}
+
+function nodeWebsite(overrides = {}) {
+  return website({
+    applicationId,
+    managedComposeBinding: null,
+    runtimeType: 'node',
+    ...overrides,
+  });
 }
 
 function project(publishedPort = 49152, overrides = {}) {
@@ -53,6 +65,35 @@ function dependencies({ websiteValue = website(), projectValue = project() } = {
   return {
     websiteRegistry: { async getWebsite(id) { return id === websiteId ? websiteValue : null; } },
     dockerComposeProjectRegistry: { async getProject(id) { return id === projectId ? projectValue : null; } },
+  };
+}
+
+function passengerDependencies({ bindingOverrides = {}, websiteOverrides = {} } = {}) {
+  const websiteValue = nodeWebsite(websiteOverrides);
+  return {
+    websiteRegistry: { async getWebsite(id) { return id === websiteId ? websiteValue : null; } },
+    applicationRegistry: {
+      async getApplication(id) {
+        return id === applicationId ? { id: applicationId, serverId, currentReleaseId: 'release-7' } : null;
+      },
+    },
+    runtimeBindingRegistry: {
+      async getBinding(id) {
+        if (id !== applicationId) return null;
+        return {
+          applicationId,
+          serverId,
+          adapter: 'passenger',
+          state: 'active',
+          releaseId: 'release-7',
+          websiteId,
+          websiteRevision: websiteValue.revision,
+          domains: [{ domainId: 'domain-1', desiredRevision: 3, nginxChecksum: 'a'.repeat(64) }],
+          passengerTarget: { appRoot: '/var/www/example/current', startupFile: 'server.js' },
+          ...bindingOverrides,
+        };
+      },
+    },
   };
 }
 
@@ -85,6 +126,57 @@ test('non-Compose Website keeps its persisted Domain target', async () => {
     targetType: current.targetType,
     target: current.target,
   });
+});
+
+test('Node Website without a runtime binding keeps legacy direct-systemd Domain compatibility', async () => {
+  const current = domain();
+  const websiteValue = nodeWebsite();
+  const result = await resolveWebsiteDomainTarget({
+    domain: current,
+    websiteRegistry: { async getWebsite() { return websiteValue; } },
+    runtimeBindingRegistry: { async getBinding() { return null; } },
+  });
+  assert.deepEqual(result, {
+    source: 'domain',
+    targetType: current.targetType,
+    target: current.target,
+  });
+});
+
+test('Passenger runtime binding blocks legacy Domain restage after cutover', async () => {
+  await assert.rejects(
+    resolveWebsiteDomainTarget({
+      domain: domain(),
+      ...passengerDependencies(),
+    }),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'passenger_runtime_binding_restage_blocked'
+      && error.status === 409,
+  );
+});
+
+test('cleanup-required Passenger binding remains authoritative for Domain restage', async () => {
+  await assert.rejects(
+    resolveWebsiteDomainTarget({
+      domain: domain(),
+      ...passengerDependencies({ bindingOverrides: { state: 'cleanup_required' } }),
+    }),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'passenger_runtime_binding_restage_blocked'
+      && error.status === 409,
+  );
+});
+
+test('Passenger runtime binding revision drift fails closed before legacy target can be reused', async () => {
+  await assert.rejects(
+    resolveWebsiteDomainTarget({
+      domain: domain({ desiredRevision: 4 }),
+      ...passengerDependencies(),
+    }),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'passenger_runtime_binding_drift'
+      && error.status === 409,
+  );
 });
 
 test('Managed Compose Domain target resolves the current published port without mutating persisted target', async () => {
