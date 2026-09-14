@@ -71,6 +71,37 @@ function passengerIntent(preview, applicationId, paths = createWebsitePathContra
   return Object.freeze(base);
 }
 
+function nodeReleaseIntent(preview, applicationId, paths = createWebsitePathContract({
+  websiteId: preview?.ids?.websiteId,
+  applicationId,
+})) {
+  if (preview.source?.kind !== 'new_node') {
+    throw new Error('Passenger Node release preparation is available only for new Node Websites');
+  }
+  const application = preview.plan.application;
+  const runtime = application?.runtime;
+  if (!runtime || !runtime.start) throw new Error('Node Website release preparation requires normalized runtime state');
+  if (preview.plan.website.documentRoot !== paths.runtime.currentRelease) {
+    throw new Error('Node Website document root does not match the managed Website path contract');
+  }
+  const { port: _legacyPort, ...portlessRuntime } = runtime;
+  return Object.freeze({
+    adapter: 'passenger-release',
+    websiteId: preview.ids.websiteId,
+    applicationId,
+    deploymentId: preview.operationId,
+    repositoryUrl: preview.source.repositoryUrl,
+    branch: preview.source.branch,
+    runtime: Object.freeze({
+      ...portlessRuntime,
+      start: Object.freeze({ ...runtime.start }),
+    }),
+    retention: preview.source.retention,
+    currentRelease: paths.runtime.currentRelease,
+    releasesDirectory: paths.runtime.releasesDirectory,
+  });
+}
+
 function staticIntent(preview, applicationId, paths = createWebsitePathContract({
   websiteId: preview?.ids?.websiteId,
   applicationId,
@@ -183,6 +214,11 @@ export function siteCreateProvisioningPlan(preview) {
       documentRoot: preview.plan.website.documentRoot,
     }));
     if (runtimeType === 'node') {
+      if (preview.source?.kind === 'new_node') {
+        steps.push(hostStep('node_release', 'node_release', nodeReleaseIntent(preview, applicationId, paths), {
+          compensationState: 'pending',
+        }));
+      }
       runtimeIntent = passengerIntent(preview, applicationId, paths);
       const blocked = Boolean(runtimeIntent.blocker);
       steps.push(hostStep('runtime', 'runtime', runtimeIntent, {
@@ -228,6 +264,7 @@ export function siteCreateProvisioningPlan(preview) {
 
 export const siteCreateProvisioningInternals = Object.freeze({
   passengerIntent,
+  nodeReleaseIntent,
   staticIntent,
   websiteAliases,
 });
