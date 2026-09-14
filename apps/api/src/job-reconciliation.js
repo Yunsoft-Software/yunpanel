@@ -204,7 +204,7 @@ async function reconcilePassengerDomainStageBinding({
     serverId: binding.serverId,
     adapter: 'passenger',
     state: binding.state,
-    sourceOperationId: job.id,
+    sourceOperationId: binding.sourceOperationId,
     releaseId: binding.releaseId,
     websiteId: binding.websiteId,
     websiteRevision: binding.websiteRevision,
