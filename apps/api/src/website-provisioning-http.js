@@ -16,6 +16,13 @@ function operationId(value) {
   return value.toLowerCase();
 }
 
+function stepId(value) {
+  if (typeof value !== 'string' || !/^[a-z0-9_]{1,80}$/.test(value)) {
+    throw new WebsiteProvisioningHttpError('website_provisioning_step_invalid', 'Website provisioning step id is invalid');
+  }
+  return value;
+}
+
 function continueBody(body, id) {
   const expected = `continue-site-provisioning:${id}`;
   if (!body || typeof body !== 'object' || Array.isArray(body)
@@ -23,6 +30,18 @@ function continueBody(body, id) {
     throw new WebsiteProvisioningHttpError(
       'website_provisioning_confirmation_required',
       `Confirm provisioning continuation with ${expected}`,
+    );
+  }
+  return expected;
+}
+
+function retryBody(body, id, provisioningStepId) {
+  const expected = `retry-site-provisioning:${id}:${provisioningStepId}`;
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).length !== 1 || body.confirmation !== expected) {
+    throw new WebsiteProvisioningHttpError(
+      'website_provisioning_retry_confirmation_required',
+      `Confirm provisioning retry with ${expected}`,
     );
   }
   return expected;
@@ -38,7 +57,8 @@ function asyncRoute(handler) {
 export function mountWebsiteProvisioningRoutes(app, { registry, orchestrator } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function'
     || !registry || typeof registry.get !== 'function'
-    || !orchestrator || typeof orchestrator.runNext !== 'function') {
+    || !orchestrator || typeof orchestrator.runNext !== 'function'
+    || typeof orchestrator.retryStep !== 'function') {
     throw new Error('Website provisioning HTTP dependencies are required');
   }
 
@@ -62,9 +82,20 @@ export function mountWebsiteProvisioningRoutes(app, { registry, orchestrator } =
     const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
     return response.status(status).json({ data: result });
   }));
+
+  app.post('/api/sites/provisioning/:operationId/steps/:stepId/retry', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const id = operationId(request.params.operationId);
+    const provisioningStepId = stepId(request.params.stepId);
+    retryBody(request.body, id, provisioningStepId);
+    const result = await orchestrator.retryStep(id, provisioningStepId);
+    const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
+    return response.status(status).json({ data: result });
+  }));
 }
 
 export const websiteProvisioningHttpInternals = Object.freeze({
   operationId,
+  stepId,
   continueBody,
+  retryBody,
 });
