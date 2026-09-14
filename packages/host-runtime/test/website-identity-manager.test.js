@@ -95,12 +95,12 @@ function createFakeHost({
   return { state, calls, run, lstatFn, rmFn };
 }
 
-async function managerFixture(t, host) {
+async function managerFixture(t, host, { run = host.run } = {}) {
   const receiptRoot = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-identity-receipts-'));
   t.after(() => rm(receiptRoot, { recursive: true, force: true }));
   return createWebsiteIdentityManager({
     receiptRoot,
-    run: host.run,
+    run,
     lstatFn: host.lstatFn,
     rmFn: host.rmFn,
   });
@@ -234,6 +234,61 @@ test('identity compensation preserves a matching identity that predated the oper
   const result = await manager.compensate(intent, { operationId, evidence });
 
   assert.deepEqual(result, { satisfied: true, removedUser: false, preservedExisting: true });
+  assert.equal(host.state.userExists, true);
+  assert.equal(host.state.groupExists, true);
+  assert.equal(host.state.homeExists, true);
+  assert.equal(host.calls.some(([file]) => file === '/usr/sbin/userdel'), false);
+  assert.equal(host.calls.some(([file]) => file === '/usr/sbin/groupdel'), false);
+});
+
+test('identity compensation uses durable ownership checkpoint when apply fails after useradd', async (t) => {
+  const host = createFakeHost();
+  const manager = await managerFixture(t, host, {
+    run: async (file, args) => {
+      if (file === '/usr/bin/install') throw new Error('simulated install failure');
+      return host.run(file, args);
+    },
+  });
+
+  await assert.rejects(
+    manager.apply(intent, { operationId }),
+    (error) => error instanceof WebsiteIdentityManagerError && error.code === 'website_identity_home_prepare_failed',
+  );
+  assert.equal(host.state.userExists, true);
+
+  const result = await manager.compensate(intent, { operationId, evidence: null });
+  assert.equal(result.satisfied, true);
+  assert.equal(result.removedUser, true);
+  assert.equal(result.removedGroup, true);
+  assert.equal(result.removedHome, true);
+  assert.equal(host.state.userExists, false);
+  assert.equal(host.state.groupExists, false);
+  assert.equal(host.state.homeExists, false);
+});
+
+test('identity compensation refuses destructive cleanup when useradd outcome is uncertain', async (t) => {
+  const host = createFakeHost();
+  const manager = await managerFixture(t, host, {
+    run: async (file, args) => {
+      if (file === '/usr/sbin/useradd') {
+        await host.run(file, args);
+        throw new Error('simulated lost useradd result');
+      }
+      return host.run(file, args);
+    },
+  });
+
+  await assert.rejects(
+    manager.apply(intent, { operationId }),
+    (error) => error instanceof WebsiteIdentityManagerError && error.code === 'website_identity_create_failed',
+  );
+  assert.equal(host.state.userExists, true);
+
+  await assert.rejects(
+    manager.compensate(intent, { operationId, evidence: null }),
+    (error) => error instanceof WebsiteIdentityManagerError
+      && error.code === 'website_identity_compensation_ownership_unknown',
+  );
   assert.equal(host.state.userExists, true);
   assert.equal(host.state.groupExists, true);
   assert.equal(host.state.homeExists, true);
