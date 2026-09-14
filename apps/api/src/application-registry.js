@@ -15,6 +15,7 @@ const STORE_VERSION = 1;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 const NODE_SERVICE_PATTERN = /^yunpanel-node-[a-f0-9]{16}\.service$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const NODE_RUNTIME_ADAPTERS = new Set(['direct-systemd', 'passenger']);
 
 export class ApplicationRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -40,6 +41,13 @@ function normalizeRetention(value) {
   return Number.isInteger(value) && value >= 2 && value <= 20 ? value : 5;
 }
 
+function normalizeRuntimeAdapter(value = 'direct-systemd') {
+  if (!NODE_RUNTIME_ADAPTERS.has(value)) {
+    throw new ApplicationRegistryError('invalid_node_runtime_adapter', 'Node runtime adapter must be direct-systemd or passenger');
+  }
+  return value;
+}
+
 function normalizeStaticConfig({ repositoryUrl, branch, build, retention }) {
   try {
     return {
@@ -54,13 +62,15 @@ function normalizeStaticConfig({ repositoryUrl, branch, build, retention }) {
   }
 }
 
-function normalizeNodeConfig({ repositoryUrl, branch, runtime, retention }) {
+function normalizeNodeConfig({ repositoryUrl, branch, runtime, retention, runtimeAdapter = 'direct-systemd' }) {
+  const adapter = normalizeRuntimeAdapter(runtimeAdapter);
   try {
     return {
       repositoryUrl: normalizeGithubRepositoryUrl(repositoryUrl),
       branch: normalizeGitBranch(branch ?? 'main'),
-      runtime: normalizeNodeRuntimeConfig(runtime),
+      runtime: normalizeNodeRuntimeConfig(runtime, { requirePort: adapter === 'direct-systemd' }),
       retention: normalizeRetention(retention),
+      runtimeAdapter: adapter,
     };
   } catch (error) {
     if (error instanceof ApplicationValidationError) throw new ApplicationRegistryError(error.code, error.message);
@@ -126,7 +136,7 @@ function existingApplication(state, application, { idempotent }) {
   const existing = state.applications.find((candidate) => candidate.id === application.id) ?? null;
   if (!existing) return null;
   if (!idempotent) throw new ApplicationRegistryError('application_identity_conflict', 'Application identity already exists', 409);
-  const fields = ['serverId', 'name', 'type', 'repositoryUrl', 'branch', 'retention', 'build', 'runtime', 'webRoot'];
+  const fields = ['serverId', 'name', 'type', 'repositoryUrl', 'branch', 'retention', 'build', 'runtime', 'runtimeAdapter', 'webRoot'];
   if (fields.some((field) => !sameValue(existing[field] ?? null, application[field] ?? null))) {
     throw new ApplicationRegistryError('application_identity_conflict', 'Application identity conflicts with existing state', 409);
   }
@@ -135,29 +145,41 @@ function existingApplication(state, application, { idempotent }) {
 
 function hydrateApplication(application) {
   if (!application.type) application.type = 'static';
+  if (application.type === 'node') application.runtimeAdapter = normalizeRuntimeAdapter(application.runtimeAdapter ?? 'direct-systemd');
+  else application.runtimeAdapter = null;
   if (!Array.isArray(application.releases)) application.releases = [];
   if (application.pendingRollbackReleaseId === undefined) application.pendingRollbackReleaseId = null;
   if (application.lastRolledBackAt === undefined) application.lastRolledBackAt = null;
   if (application.serviceName === undefined) application.serviceName = null;
-  if (application.servicePort === undefined) application.servicePort = application.runtime?.port ?? null;
+  if (application.servicePort === undefined) {
+    application.servicePort = application.runtimeAdapter === 'direct-systemd' ? application.runtime?.port ?? null : null;
+  }
   if (application.healthPath === undefined) application.healthPath = application.runtime?.healthPath ?? null;
   if (application.proxyTarget === undefined) {
-    application.proxyTarget = application.type === 'node' && application.runtime?.port
+    application.proxyTarget = application.type === 'node' && application.runtimeAdapter === 'direct-systemd' && application.runtime?.port
       ? { host: '127.0.0.1', port: application.runtime.port }
       : null;
   }
+  if (application.type === 'node' && application.runtimeAdapter === 'passenger'
+    && (application.serviceName !== null || application.servicePort !== null || application.proxyTarget !== null)) {
+    throw new ApplicationRegistryError('application_state_invalid', 'Passenger Node application must not persist systemd or localhost proxy state', 409);
+  }
   if (!Number.isSafeInteger(application.desiredRevision) || application.desiredRevision < 1) application.desiredRevision = 1;
   if (application.type === 'node') {
-    application.runtime = normalizeNodeConfig({
+    const nodeConfig = normalizeNodeConfig({
       repositoryUrl: application.repositoryUrl,
       branch: application.branch,
       runtime: application.runtime,
       retention: application.retention,
-    }).runtime;
+      runtimeAdapter: application.runtimeAdapter,
+    });
+    application.runtime = nodeConfig.runtime;
     if (application.activeRuntime === undefined) {
       application.activeRuntime = application.currentReleaseId ? structuredClone(application.runtime) : null;
     } else if (application.activeRuntime !== null) {
-      application.activeRuntime = normalizeNodeRuntimeConfig(application.activeRuntime);
+      application.activeRuntime = normalizeNodeRuntimeConfig(application.activeRuntime, {
+        requirePort: application.runtimeAdapter === 'direct-systemd',
+      });
     }
     if (application.appliedRevision === undefined) {
       application.appliedRevision = application.currentReleaseId ? application.desiredRevision : 0;
@@ -169,7 +191,9 @@ function hydrateApplication(application) {
     }
     application.releases = application.releases.map((release) => ({
       ...release,
-      runtime: normalizeNodeRuntimeConfig(release.runtime ?? application.activeRuntime ?? application.runtime),
+      runtime: normalizeNodeRuntimeConfig(release.runtime ?? application.activeRuntime ?? application.runtime, {
+        requirePort: application.runtimeAdapter === 'direct-systemd',
+      }),
       configurationRevision: Number.isSafeInteger(release.configurationRevision) && release.configurationRevision >= 1
         ? release.configurationRevision
         : application.appliedRevision || 1,
@@ -231,7 +255,7 @@ function trimReleaseHistory(application) {
   application.releases = retained.slice(0, application.retention);
 }
 
-function baseApplication({ id, serverId, name, type, repositoryUrl, branch, retention, timestamp }) {
+function baseApplication({ id, serverId, name, type, repositoryUrl, branch, retention, runtimeAdapter = null, timestamp }) {
   return {
     id,
     serverId,
@@ -240,6 +264,7 @@ function baseApplication({ id, serverId, name, type, repositoryUrl, branch, rete
     repositoryUrl,
     branch,
     retention,
+    runtimeAdapter,
     state: 'draft',
     desiredRevision: 1,
     appliedRevision: 0,
@@ -325,6 +350,7 @@ export function createApplicationRegistry({
         repositoryUrl: config.repositoryUrl,
         branch: config.branch,
         retention: config.retention,
+        runtimeAdapter: null,
         timestamp,
       }),
       build: config.build,
@@ -338,12 +364,22 @@ export function createApplicationRegistry({
     return publicApplication(application);
   }
 
-  async function createNodeApplication({ applicationId = null, serverId, name, repositoryUrl, branch = 'main', runtime, retention = 5 }) {
+  async function createNodeApplication({
+    applicationId = null,
+    serverId,
+    name,
+    repositoryUrl,
+    branch = 'main',
+    runtime,
+    runtimeAdapter = 'direct-systemd',
+    retention = 5,
+  }) {
     await ensureInitialized();
     await ensureServer(serverId);
-    const config = normalizeNodeConfig({ repositoryUrl, branch, runtime, retention });
+    const config = normalizeNodeConfig({ repositoryUrl, branch, runtime, retention, runtimeAdapter });
     const id = applicationId == null ? randomUUID() : normalizeApplicationId(applicationId);
     const timestamp = new Date(now()).toISOString();
+    const directSystemd = config.runtimeAdapter === 'direct-systemd';
     const application = {
       ...baseApplication({
         id,
@@ -353,18 +389,19 @@ export function createApplicationRegistry({
         repositoryUrl: config.repositoryUrl,
         branch: config.branch,
         retention: config.retention,
+        runtimeAdapter: config.runtimeAdapter,
         timestamp,
       }),
       build: null,
       runtime: config.runtime,
       webRoot: null,
-      servicePort: config.runtime.port,
+      servicePort: directSystemd ? config.runtime.port : null,
       healthPath: config.runtime.healthPath,
-      proxyTarget: { host: '127.0.0.1', port: config.runtime.port },
+      proxyTarget: directSystemd ? { host: '127.0.0.1', port: config.runtime.port } : null,
     };
     const existing = existingApplication(state, application, { idempotent: applicationId !== null });
     if (existing) return existing;
-    if (state.applications.some((candidate) => candidate.serverId === serverId
+    if (directSystemd && state.applications.some((candidate) => candidate.serverId === serverId
       && candidate.type === 'node' && candidate.runtime?.port === config.runtime.port)) {
       throw new ApplicationRegistryError('node_port_conflict', 'Node application port is already allocated on this server', 409);
     }
@@ -393,6 +430,9 @@ export function createApplicationRegistry({
   async function markDeploying(applicationId, deploymentId) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
+    if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
+      throw new ApplicationRegistryError('node_deploy_adapter_mismatch', 'Passenger Node releases must use Website provisioning instead of the legacy systemd deploy flow', 409);
+    }
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
     const normalizedDeploymentId = normalizeUuid(deploymentId, 'deploymentId');
     application.state = 'deploying';
@@ -421,6 +461,9 @@ export function createApplicationRegistry({
   }) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
+    if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
+      throw new ApplicationRegistryError('node_deploy_adapter_mismatch', 'Passenger Node releases must use Website provisioning instead of the legacy systemd deploy flow', 409);
+    }
     const normalizedDeploymentId = normalizeUuid(deploymentId, 'deploymentId');
     const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
     const previousValue = previousReleaseId === undefined ? application.currentReleaseId : previousReleaseId;
@@ -445,6 +488,7 @@ export function createApplicationRegistry({
         branch: application.branch,
         runtime: requestedRuntime ?? application.runtime,
         retention: application.retention,
+        runtimeAdapter: application.runtimeAdapter,
       }).runtime;
       if (!sameValue(deployedRuntime, application.runtime)) {
         throw new ApplicationRegistryError('node_runtime_state_drift', 'Node deployment runtime does not match current desired configuration', 409);
@@ -502,6 +546,9 @@ export function createApplicationRegistry({
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
     if (!['static', 'node'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
+    if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
+      throw new ApplicationRegistryError('node_rollback_adapter_mismatch', 'Passenger Node rollback must use Website provisioning instead of the legacy systemd rollback flow', 409);
+    }
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
     if (!application.currentReleaseId) throw new ApplicationRegistryError('application_not_deployed', 'Application has no active release to roll back', 409);
     const normalizedOperationId = normalizeUuid(operationId, 'operationId');
@@ -529,6 +576,9 @@ export function createApplicationRegistry({
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
     if (!['static', 'node'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
+    if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
+      throw new ApplicationRegistryError('node_rollback_adapter_mismatch', 'Passenger Node rollback must use Website provisioning instead of the legacy systemd rollback flow', 409);
+    }
     const normalizedOperationId = normalizeUuid(operationId, 'operationId');
     const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
     const previousValue = previousReleaseId === undefined ? application.currentReleaseId : previousReleaseId;
@@ -604,8 +654,9 @@ export function createApplicationRegistry({
       branch: application.branch,
       runtime: requestedRuntime,
       retention: application.retention,
+      runtimeAdapter: application.runtimeAdapter,
     }).runtime;
-    if (nextRuntime.port !== application.runtime.port) {
+    if (application.runtimeAdapter === 'direct-systemd' && nextRuntime.port !== application.runtime.port) {
       throw new ApplicationRegistryError('node_port_immutable', 'Managed Node port cannot be changed through runtime configuration', 409);
     }
     if (sameValue(nextRuntime, application.runtime)) {
