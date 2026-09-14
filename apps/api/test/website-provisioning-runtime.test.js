@@ -22,7 +22,23 @@ function plan() {
   };
 }
 
-test('runtime composes registry, identity handler and orchestrator', async () => {
+function passengerSiteManager() {
+  return {
+    inspect: async () => ({ satisfied: false, reason: 'unused' }),
+    apply: async () => ({ satisfied: false, reason: 'unused' }),
+  };
+}
+
+function nginxManager() {
+  return {
+    stageDomain: async () => ({ configName: 'unused', checksum: 'a'.repeat(64) }),
+    inspectStagedDomain: async () => ({ satisfied: false, result: null }),
+    inspectActiveDomain: async () => ({ satisfied: false, result: null }),
+    activateDomain: async () => ({ configName: 'unused', checksum: 'a'.repeat(64), active: true }),
+  };
+}
+
+test('runtime composes registry, injected managers and orchestrator', async () => {
   const calls = [];
   const runtime = createWebsiteProvisioningRuntime({
     identityManager: {
@@ -32,6 +48,8 @@ test('runtime composes registry, identity handler and orchestrator', async () =>
         return { satisfied: true, ...intent, uid: 1201, gid: 1201 };
       },
     },
+    passengerSiteManager: passengerSiteManager(),
+    nginxManager: nginxManager(),
   });
 
   await runtime.init();
