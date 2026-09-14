@@ -11,6 +11,8 @@ const primaryDomainId = 'f05764d6-d5e8-4d2a-9bdd-493111b24478';
 const wwwDomainId = 'ab15fe0c-b823-49ba-986a-09b1f48de8fb';
 const operationId = 'ff830043-9752-4640-83b4-3a1998de78a0';
 const checksum = 'c'.repeat(64);
+const environmentChecksum = 'e'.repeat(64);
+const environmentInclude = `/etc/yunpanel/passenger-env/${applicationId}.conf`;
 const unixUser = 'yunapp-0123456789ab';
 
 async function fixture() {
@@ -88,6 +90,18 @@ async function fixture() {
     },
     steps: [
       {
+        id: 'passenger_environment',
+        state: 'succeeded',
+        evidence: {
+          satisfied: true,
+          adapter: 'passenger-environment',
+          applicationId,
+          environmentRevision: 2,
+          environmentInclude,
+          includeSha256: environmentChecksum,
+        },
+      },
+      {
         id: 'application_release',
         state: 'succeeded',
         evidence: {
@@ -157,6 +171,7 @@ test('native Passenger authority persists canonical binding from completed provi
   const applied = await handler.apply(context);
   assert.equal(applied.satisfied, true);
   assert.equal(applied.bindingRevision, 1);
+  assert.equal(applied.environmentRevision, 2);
   assert.deepEqual(applied.domainIds, [wwwDomainId, primaryDomainId].sort());
 
   const binding = await runtimeBindingRegistry.getBinding(applicationId);
@@ -165,7 +180,7 @@ test('native Passenger authority persists canonical binding from completed provi
   assert.equal(binding.sourceOperationId, operationId);
   assert.equal(binding.releaseId, operationId);
   assert.equal(binding.websiteId, websiteId);
-  assert.equal(binding.passengerTarget.environmentInclude, null);
+  assert.equal(binding.passengerTarget.environmentInclude, environmentInclude);
   assert.equal(binding.passengerTarget.user, unixUser);
   assert.deepEqual(binding.domains, [
     { domainId: wwwDomainId, desiredRevision: 1, nginxChecksum: checksum },
