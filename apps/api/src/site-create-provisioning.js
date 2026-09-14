@@ -112,6 +112,21 @@ function passengerEnvironmentIntent(preview, applicationId) {
   });
 }
 
+function passengerHealthIntent(preview, applicationId) {
+  const runtime = preview.plan.application?.runtime;
+  if (preview.source?.kind !== 'new_node' || preview.plan.application?.runtimeAdapter !== 'passenger'
+    || !runtime || typeof runtime.healthPath !== 'string' || !Number.isInteger(runtime.healthTimeoutSeconds)) {
+    throw new Error('Passenger health provisioning requires a new Passenger Node Website');
+  }
+  return Object.freeze({
+    adapter: 'passenger-health',
+    applicationId,
+    primaryDomain: preview.plan.primaryDomain?.primaryDomain,
+    healthPath: runtime.healthPath,
+    timeoutSeconds: runtime.healthTimeoutSeconds,
+  });
+}
+
 function passengerApplicationReleaseIntent(preview, applicationId) {
   if (preview.source?.kind !== 'new_node' || preview.plan.application?.runtimeAdapter !== 'passenger') {
     throw new Error('Passenger Application release finalization requires a new Passenger Node Website');
@@ -320,6 +335,12 @@ export function siteCreateProvisioningPlan(preview) {
   if (runtimeType === 'node' && preview.source?.kind === 'new_node') {
     const applicationId = preview.plan.application?.id;
     steps.push(hostStep(
+      'passenger_health',
+      'passenger_health',
+      passengerHealthIntent(preview, applicationId),
+      { compensationState: 'not_required' },
+    ));
+    steps.push(hostStep(
       'application_release',
       'passenger_application_release',
       passengerApplicationReleaseIntent(preview, applicationId),
@@ -362,6 +383,7 @@ export const siteCreateProvisioningInternals = Object.freeze({
   passengerIntent,
   nodeReleaseIntent,
   passengerEnvironmentIntent,
+  passengerHealthIntent,
   passengerApplicationReleaseIntent,
   passengerEnvironmentStateIntent,
   passengerAuthorityIntent,
