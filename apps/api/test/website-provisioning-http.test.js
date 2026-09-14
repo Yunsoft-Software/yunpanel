@@ -7,6 +7,7 @@ import {
 } from '../src/website-provisioning-http.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
+const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 
 function fakeApp() {
   const routes = { get: new Map(), post: new Map() };
@@ -34,6 +35,50 @@ async function invoke(handler, request) {
   return response;
 }
 
+function durableOperation(overrides = {}) {
+  return {
+    operationId,
+    websiteId,
+    ready: false,
+    status: 'partial',
+    progress: { required: 2, completed: 1, remaining: 1 },
+    createdAt: '2026-09-14T01:00:00.000Z',
+    updatedAt: '2026-09-14T01:01:00.000Z',
+    resources: { database: { password: 'must-never-reach-browser' } },
+    steps: [
+      {
+        id: 'unix_identity',
+        kind: 'unix_identity',
+        required: true,
+        state: 'succeeded',
+        intent: { password: 'intent-secret' },
+        evidence: { uid: 1201, token: 'evidence-secret' },
+        error: null,
+        compensation: { state: 'pending', evidence: null, error: null },
+      },
+      {
+        id: 'nginx',
+        kind: 'nginx',
+        required: true,
+        state: 'failed',
+        intent: { privateDirective: 'hidden' },
+        evidence: null,
+        error: 'website_nginx_activation_failed',
+        compensation: { state: 'failed', evidence: { private: true }, error: 'website_nginx_compensation_failed' },
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function registry(overrides = {}) {
+  return {
+    get: async () => durableOperation(),
+    getLatestForWebsite: async () => durableOperation(),
+    ...overrides,
+  };
+}
+
 function orchestrator(overrides = {}) {
   return {
     runNext: async () => ({}),
@@ -43,11 +88,37 @@ function orchestrator(overrides = {}) {
   };
 }
 
-test('status route returns durable provisioning state', async () => {
+function assertSecretSafeOperation(value) {
+  assert.equal(value.operationId, operationId);
+  assert.equal(value.websiteId, websiteId);
+  assert.equal(value.ready, false);
+  assert.equal(value.status, 'partial');
+  assert.deepEqual(value.progress, { required: 2, completed: 1, remaining: 1 });
+  assert.equal('resources' in value, false);
+  assert.equal('intent' in value.steps[0], false);
+  assert.equal('evidence' in value.steps[0], false);
+  assert.equal('evidence' in value.steps[0].compensation, false);
+  assert.deepEqual(value.steps[1], {
+    id: 'nginx',
+    kind: 'nginx',
+    required: true,
+    state: 'failed',
+    error: 'website_nginx_activation_failed',
+    compensation: {
+      state: 'failed',
+      error: 'website_nginx_compensation_failed',
+    },
+  });
+  assert.equal(JSON.stringify(value).includes('must-never-reach-browser'), false);
+  assert.equal(JSON.stringify(value).includes('intent-secret'), false);
+  assert.equal(JSON.stringify(value).includes('evidence-secret'), false);
+}
+
+test('status route returns only secret-safe durable provisioning state', async () => {
   const app = fakeApp();
-  const operation = { operationId, ready: false, status: 'partial' };
+  const operation = durableOperation();
   mountWebsiteProvisioningRoutes(app, {
-    registry: { get: async (id) => id === operationId ? operation : null },
+    registry: registry({ get: async (id) => id === operationId ? operation : null }),
     orchestrator: orchestrator(),
   });
 
@@ -56,14 +127,54 @@ test('status route returns durable provisioning state', async () => {
     { params: { operationId: operationId.toUpperCase() } },
   );
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.payload, { data: operation });
+  assertSecretSafeOperation(response.payload.data);
+});
+
+test('Website latest provisioning route is restart-safe and returns null when no operation exists', async () => {
+  const app = fakeApp();
+  const calls = [];
+  mountWebsiteProvisioningRoutes(app, {
+    registry: registry({
+      getLatestForWebsite: async (id) => {
+        calls.push(id);
+        return calls.length === 1 ? durableOperation() : null;
+      },
+    }),
+    orchestrator: orchestrator(),
+  });
+  const handler = app.routes.get.get('/api/sites/:websiteId/provisioning/latest');
+
+  const found = await invoke(handler, { params: { websiteId: websiteId.toUpperCase() } });
+  assert.equal(found.statusCode, 200);
+  assertSecretSafeOperation(found.payload.data);
+
+  const missing = await invoke(handler, { params: { websiteId } });
+  assert.equal(missing.statusCode, 200);
+  assert.deepEqual(missing.payload, { data: null });
+  assert.deepEqual(calls, [websiteId, websiteId]);
+});
+
+test('Website latest provisioning route rejects malformed Website ids before registry access', async () => {
+  const app = fakeApp();
+  let calls = 0;
+  mountWebsiteProvisioningRoutes(app, {
+    registry: registry({ getLatestForWebsite: async () => { calls += 1; return null; } }),
+    orchestrator: orchestrator(),
+  });
+
+  await assert.rejects(
+    invoke(app.routes.get.get('/api/sites/:websiteId/provisioning/latest'), { params: { websiteId: '../etc' } }),
+    (error) => error instanceof WebsiteProvisioningHttpError
+      && error.code === 'website_provisioning_website_invalid',
+  );
+  assert.equal(calls, 0);
 });
 
 test('continue route requires exact operation-bound confirmation', async () => {
   const app = fakeApp();
   let runCalls = 0;
   mountWebsiteProvisioningRoutes(app, {
-    registry: { get: async () => ({}) },
+    registry: registry(),
     orchestrator: orchestrator({ runNext: async () => { runCalls += 1; return {}; } }),
   });
   const handler = app.routes.post.get('/api/sites/provisioning/:operationId/continue');
@@ -76,11 +187,15 @@ test('continue route requires exact operation-bound confirmation', async () => {
   assert.equal(runCalls, 0);
 });
 
-test('continue route returns accepted while more provisioning work remains', async () => {
+test('continue route returns accepted while more provisioning work remains and redacts result state', async () => {
   const app = fakeApp();
-  const result = { outcome: 'progressed', operation: { operationId, ready: false, status: 'partial' }, stepId: 'unix_identity' };
+  const result = {
+    outcome: 'progressed',
+    operation: durableOperation(),
+    stepId: 'unix_identity',
+  };
   mountWebsiteProvisioningRoutes(app, {
-    registry: { get: async () => result.operation },
+    registry: registry(),
     orchestrator: orchestrator({
       runNext: async (id) => {
         assert.equal(id, operationId);
@@ -94,14 +209,16 @@ test('continue route returns accepted while more provisioning work remains', asy
     { params: { operationId }, body: { confirmation: `continue-site-provisioning:${operationId}` } },
   );
   assert.equal(response.statusCode, 202);
-  assert.deepEqual(response.payload, { data: result });
+  assert.equal(response.payload.data.outcome, 'progressed');
+  assert.equal(response.payload.data.stepId, 'unix_identity');
+  assertSecretSafeOperation(response.payload.data.operation);
 });
 
 test('retry route requires confirmation bound to operation and step', async () => {
   const app = fakeApp();
   let retryCalls = 0;
   mountWebsiteProvisioningRoutes(app, {
-    registry: { get: async () => ({}) },
+    registry: registry(),
     orchestrator: orchestrator({ retryStep: async () => { retryCalls += 1; return {}; } }),
   });
   const handler = app.routes.post.get('/api/sites/provisioning/:operationId/steps/:stepId/retry');
@@ -121,12 +238,12 @@ test('retry route re-runs only the confirmed failed step', async () => {
   const app = fakeApp();
   const result = {
     outcome: 'progressed',
-    operation: { operationId, ready: false, status: 'partial' },
+    operation: durableOperation(),
     stepId: 'unix_identity',
   };
   const calls = [];
   mountWebsiteProvisioningRoutes(app, {
-    registry: { get: async () => result.operation },
+    registry: registry(),
     orchestrator: orchestrator({
       retryStep: async (id, provisioningStepId) => {
         calls.push([id, provisioningStepId]);
@@ -144,14 +261,14 @@ test('retry route re-runs only the confirmed failed step', async () => {
   );
   assert.equal(response.statusCode, 202);
   assert.deepEqual(calls, [[operationId, 'unix_identity']]);
-  assert.deepEqual(response.payload, { data: result });
+  assertSecretSafeOperation(response.payload.data.operation);
 });
 
 test('compensation route requires confirmation bound to operation and step', async () => {
   const app = fakeApp();
   let compensationCalls = 0;
   mountWebsiteProvisioningRoutes(app, {
-    registry: { get: async () => ({}) },
+    registry: registry(),
     orchestrator: orchestrator({ compensateStep: async () => { compensationCalls += 1; return {}; } }),
   });
   const handler = app.routes.post.get('/api/sites/provisioning/:operationId/steps/:stepId/compensate');
@@ -167,16 +284,16 @@ test('compensation route requires confirmation bound to operation and step', asy
   assert.equal(compensationCalls, 0);
 });
 
-test('compensation route invokes only the exactly confirmed step', async () => {
+test('compensation route invokes only the exactly confirmed step and redacts result state', async () => {
   const app = fakeApp();
   const result = {
     outcome: 'compensated',
-    operation: { operationId, ready: false, status: 'partial' },
+    operation: durableOperation(),
     stepId: 'nginx',
   };
   const calls = [];
   mountWebsiteProvisioningRoutes(app, {
-    registry: { get: async () => result.operation },
+    registry: registry(),
     orchestrator: orchestrator({
       compensateStep: async (id, provisioningStepId) => {
         calls.push([id, provisioningStepId]);
@@ -194,7 +311,7 @@ test('compensation route invokes only the exactly confirmed step', async () => {
   );
   assert.equal(response.statusCode, 200);
   assert.deepEqual(calls, [[operationId, 'nginx']]);
-  assert.deepEqual(response.payload, { data: result });
+  assertSecretSafeOperation(response.payload.data.operation);
 });
 
 test('continue body helper rejects additional fields', () => {
