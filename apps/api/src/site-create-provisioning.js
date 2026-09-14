@@ -1,6 +1,8 @@
+import path from 'node:path';
 import { createWebsiteProvisioningPlan } from './website-provisioning-plan.js';
 
 const APPLICATION_DATA_ROOT = '/var/lib/yunpanel/data';
+const MANAGED_NODE_ROOT = '/opt/yunpanel/node-runtimes';
 
 function metadataStep(id, kind, state, intent) {
   return {
@@ -12,15 +14,49 @@ function metadataStep(id, kind, state, intent) {
   };
 }
 
-function hostStep(id, kind, intent, required = true) {
+function hostStep(id, kind, intent, { required = true, state = 'pending', error = null } = {}) {
   return {
     id,
     kind,
     required,
-    state: 'pending',
+    state,
     intent,
+    error,
     compensation: { state: 'pending' },
   };
+}
+
+function passengerIntent(preview, applicationId) {
+  const application = preview.plan.application;
+  const runtime = application?.runtime;
+  if (!runtime || !runtime.start) throw new Error('Node Website provisioning requires normalized runtime state');
+  const releaseRoot = preview.plan.website.documentRoot;
+  const appRoot = path.posix.resolve(releaseRoot, runtime.documentRoot ?? '.');
+  const base = {
+    adapter: 'passenger',
+    applicationId,
+    websiteId: preview.ids.websiteId,
+    nodeMajor: runtime.nodeMajor,
+    nodeCandidates: Object.freeze([
+      `${MANAGED_NODE_ROOT}/v${runtime.nodeMajor}/bin/node`,
+      '/usr/bin/node',
+    ]),
+    appRoot,
+    documentRoot: appRoot,
+    startupFile: runtime.start.entryFile,
+    startMode: runtime.start.mode,
+    appEnv: runtime.mode,
+    unixUser: preview.plan.website.unixUser,
+    healthPath: runtime.healthPath,
+    healthTimeoutSeconds: runtime.healthTimeoutSeconds,
+  };
+  if (runtime.start.mode !== 'node' || !runtime.start.entryFile) {
+    return Object.freeze({
+      ...base,
+      blocker: 'passenger_start_mode_unsupported',
+    });
+  }
+  return Object.freeze(base);
 }
 
 export function siteCreateProvisioningPlan(preview) {
@@ -67,6 +103,7 @@ export function siteCreateProvisioningPlan(preview) {
   }
 
   const runtimeType = preview.plan.website.runtimeType;
+  let runtimeIntent = null;
   if (runtimeType === 'node' || runtimeType === 'static') {
     const applicationId = preview.plan.application?.id;
     if (!applicationId) throw new Error('Hosted Website provisioning requires an Application identity');
@@ -76,24 +113,37 @@ export function siteCreateProvisioningPlan(preview) {
       homeDirectory: `${APPLICATION_DATA_ROOT}/${applicationId}`,
       documentRoot: preview.plan.website.documentRoot,
     }));
-    steps.push(hostStep('runtime', 'runtime', {
-      websiteId: preview.ids.websiteId,
-      runtimeType,
-      adapter: runtimeType === 'node' ? 'passenger' : 'static',
-      applicationId,
-    }));
+    if (runtimeType === 'node') {
+      runtimeIntent = passengerIntent(preview, applicationId);
+      const blocked = Boolean(runtimeIntent.blocker);
+      steps.push(hostStep('runtime', 'runtime', runtimeIntent, {
+        state: blocked ? 'blocked' : 'pending',
+        error: blocked ? runtimeIntent.blocker : null,
+      }));
+    } else {
+      runtimeIntent = Object.freeze({
+        websiteId: preview.ids.websiteId,
+        runtimeType,
+        adapter: 'static',
+        applicationId,
+      });
+      steps.push(hostStep('runtime', 'runtime', runtimeIntent));
+    }
   }
 
   steps.push(hostStep('nginx', 'nginx', {
     websiteId: preview.ids.websiteId,
     primaryDomain: preview.plan.primaryDomain?.primaryDomain,
-    targetType: preview.plan.primaryDomain?.targetType,
+    aliases: preview.plan.primaryDomain?.aliases ?? [],
+    targetType: runtimeType === 'node' ? 'passenger' : preview.plan.primaryDomain?.targetType,
+    target: runtimeType === 'node' ? runtimeIntent : preview.plan.primaryDomain?.target,
   }));
 
   if (preview.plan.primaryDomain?.httpsMode === 'managed') {
     steps.push(hostStep('certificate', 'certificate', {
       websiteId: preview.ids.websiteId,
       primaryDomain: preview.plan.primaryDomain.primaryDomain,
+      aliases: preview.plan.primaryDomain.aliases ?? [],
       wwwDomain: preview.plan.wwwDomain?.primaryDomain ?? null,
     }));
   }
@@ -105,3 +155,7 @@ export function siteCreateProvisioningPlan(preview) {
     steps,
   });
 }
+
+export const siteCreateProvisioningInternals = Object.freeze({
+  passengerIntent,
+});
