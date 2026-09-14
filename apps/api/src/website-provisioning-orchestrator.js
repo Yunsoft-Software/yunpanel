@@ -48,7 +48,8 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     || typeof registry.beginStep !== 'function'
     || typeof registry.completeStep !== 'function'
     || typeof registry.blockStep !== 'function'
-    || typeof registry.failStep !== 'function') {
+    || typeof registry.failStep !== 'function'
+    || typeof registry.retryStep !== 'function') {
     throw new WebsiteProvisioningOrchestratorError(
       'website_provisioning_dependencies_invalid',
       'Website provisioning orchestrator dependencies are invalid',
@@ -217,7 +218,12 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     }
   }
 
-  return Object.freeze({ runNext });
+  async function retryStep(operationId, stepId) {
+    await registry.retryStep({ operationId, stepId });
+    return runNext(operationId);
+  }
+
+  return Object.freeze({ runNext, retryStep });
 }
 
 export const websiteProvisioningOrchestratorInternals = Object.freeze({
