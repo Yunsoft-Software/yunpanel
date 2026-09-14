@@ -138,9 +138,15 @@ export function createLocalJobExecutor({
       if (!supported) throw halt('execute', claim.job.id);
     }
 
+    // Reconciliation needs the canonical queued payload, but terminal public job
+    // views intentionally omit it. Snapshot before host execution so operation
+    // handlers cannot mutate the evidence later consumed by control-plane state.
+    const jobId = claim.job.id;
+    const reconciliationPayload = cloneEvidenceValue(claim.envelope.payload);
+    if (!reconciliationPayload) throw halt('execute', jobId);
+
     // A host error is the ONLY reason to record a failed operation. Storage and
     // reconciliation failures must never be recast as a host failure.
-    const jobId = claim.job.id;
     let completion;
     try {
       const result = await executeOperation(
@@ -149,7 +155,7 @@ export function createLocalJobExecutor({
         executionContext(claim.job, serverId),
       );
       if (recordExecutionEvidence) {
-        const payloadCopy = cloneEvidenceValue(claim.envelope.payload);
+        const payloadCopy = cloneEvidenceValue(reconciliationPayload);
         const resultCopy = cloneEvidenceValue(result);
         if (payloadCopy && resultCopy) {
           try {
@@ -192,7 +198,11 @@ export function createLocalJobExecutor({
 
     let reconciliation;
     try {
-      reconciliation = await reconcileCompletedJob(terminal);
+      const reconciliationJob = Object.freeze({
+        ...terminal,
+        payload: reconciliationPayload,
+      });
+      reconciliation = await reconcileCompletedJob(reconciliationJob);
       if (journalReconciliation) {
         const acknowledged = await jobRegistry.acknowledgeReconciliation({ serverId, jobId });
         if (!acknowledged || acknowledged.jobId !== jobId || acknowledged.serverId !== serverId
