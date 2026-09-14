@@ -17,6 +17,16 @@ function safeReconciliationCode(error) {
   return `reconcile_${suffix}`;
 }
 
+function passengerDomainStageError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  throw error;
+}
+
+function same(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 async function markEnvironmentApplied(applicationEnvironmentRegistry, job, releaseId) {
   if (!applicationEnvironmentRegistry || typeof applicationEnvironmentRegistry.markApplied !== 'function') return;
   if (![OPERATIONS.APP_NODE_DEPLOY, OPERATIONS.APP_NODE_RESTART, OPERATIONS.APP_NODE_ROLLBACK].includes(job.operation)) return;
@@ -115,6 +125,94 @@ async function reconcileMailDomainJob(mailDomainRegistry, job) {
   });
 }
 
+async function reconcilePassengerDomainStageBinding({
+  job,
+  domain,
+  applicationRegistry,
+  websiteRegistry,
+  runtimeBindingRegistry,
+}) {
+  if (job.payload?.targetType !== 'passenger') return null;
+  if (!applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
+    || !websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
+    || !runtimeBindingRegistry || typeof runtimeBindingRegistry.getBinding !== 'function'
+    || typeof runtimeBindingRegistry.activate !== 'function') {
+    passengerDomainStageError(
+      'passenger_domain_stage_reconciliation_unavailable',
+      'Passenger Domain stage reconciliation dependencies are unavailable',
+    );
+  }
+  if (!domain?.websiteId || domain.id !== job.resourceId || domain.serverId !== job.serverId) {
+    passengerDomainStageError(
+      'passenger_domain_stage_identity_drift',
+      'Passenger Domain stage resource identity changed before reconciliation',
+    );
+  }
+
+  const website = await websiteRegistry.getWebsite(domain.websiteId);
+  if (!website || website.serverId !== domain.serverId || website.runtimeType !== 'node' || !website.applicationId) {
+    passengerDomainStageError(
+      'passenger_domain_stage_website_drift',
+      'Passenger Domain stage Website binding changed before reconciliation',
+    );
+  }
+  const [application, binding] = await Promise.all([
+    applicationRegistry.getApplication(website.applicationId),
+    runtimeBindingRegistry.getBinding(website.applicationId),
+  ]);
+  if (!application || application.type !== 'node' || application.serverId !== domain.serverId
+    || !binding || binding.adapter !== 'passenger' || binding.serverId !== domain.serverId
+    || binding.applicationId !== application.id || binding.websiteId !== website.id
+    || binding.websiteRevision !== website.revision || binding.releaseId !== application.currentReleaseId) {
+    passengerDomainStageError(
+      'passenger_domain_stage_runtime_drift',
+      'Passenger runtime authority changed before Domain stage reconciliation',
+    );
+  }
+
+  const expectedTarget = {
+    root: binding.passengerTarget?.appRoot,
+    startupFile: binding.passengerTarget?.startupFile,
+    nodeBinary: binding.passengerTarget?.nodeBinary,
+  };
+  if (!same(job.payload.target, expectedTarget)) {
+    passengerDomainStageError(
+      'passenger_domain_stage_target_drift',
+      'Passenger Domain stage target does not match current runtime authority',
+    );
+  }
+  const previousEvidence = binding.domains.find((entry) => entry.domainId === domain.id);
+  if (!previousEvidence || previousEvidence.desiredRevision > domain.desiredRevision) {
+    passengerDomainStageError(
+      'passenger_domain_stage_revision_drift',
+      'Passenger Domain stage revision moved behind runtime binding evidence',
+    );
+  }
+
+  const domains = binding.domains.map((entry) => entry.domainId === domain.id ? {
+    domainId: entry.domainId,
+    desiredRevision: domain.desiredRevision,
+    nginxChecksum: job.result.checksum,
+  } : {
+    domainId: entry.domainId,
+    desiredRevision: entry.desiredRevision,
+    nginxChecksum: entry.nginxChecksum,
+  });
+
+  return runtimeBindingRegistry.activate({
+    applicationId: binding.applicationId,
+    serverId: binding.serverId,
+    adapter: 'passenger',
+    state: binding.state,
+    sourceOperationId: job.id,
+    releaseId: binding.releaseId,
+    websiteId: binding.websiteId,
+    websiteRevision: binding.websiteRevision,
+    domains,
+    passengerTarget: binding.passengerTarget,
+  }, { expectedRevision: binding.revision });
+}
+
 async function applyReconciliation({
   domainRegistry,
   certificateRegistry,
@@ -154,7 +252,17 @@ async function applyReconciliation({
       return;
     }
     if (job.operation === OPERATIONS.DOMAIN_STAGE) {
-      await domainRegistry.markStaged(job.resourceId, { checksum: job.result.checksum, configName: job.result.configName });
+      const domain = await domainRegistry.markStaged(job.resourceId, {
+        checksum: job.result.checksum,
+        configName: job.result.configName,
+      });
+      await reconcilePassengerDomainStageBinding({
+        job,
+        domain,
+        applicationRegistry,
+        websiteRegistry,
+        runtimeBindingRegistry,
+      });
       return;
     }
     if (job.operation === OPERATIONS.DOMAIN_ACTIVATE) await domainRegistry.markApplied(job.resourceId, { checksum: job.result.checksum });
@@ -238,4 +346,5 @@ export async function reconcileCompletedJob({
 export const jobReconciliationInternals = Object.freeze({
   safeReconciliationCode,
   reconcileMailDomainJob,
+  reconcilePassengerDomainStageBinding,
 });
