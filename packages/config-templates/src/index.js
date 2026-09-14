@@ -1,6 +1,7 @@
 export {
   NginxTemplateError,
   nginxConfigFileName,
+  renderPassengerSiteConfig,
   renderProxySiteConfig,
   renderStaticSiteConfig,
 } from './nginx.js';
