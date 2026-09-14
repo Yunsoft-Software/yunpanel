@@ -51,15 +51,24 @@ function preview(overrides = {}) {
   };
 }
 
-function service({ currentPreview = preview(), binding = null } = {}) {
+function service({
+  currentPreview = preview(),
+  binding = null,
+  routingJobs = [],
+  certificates = [],
+} = {}) {
   const enqueued = [];
   const migration = createApplicationPassengerMigrationService({
     previewService: { async preview() { return currentPreview; } },
     applicationRegistry: { async getApplication() { return application; } },
     domainRegistry: { async getDomain() { return domain; } },
-    certificateRegistry: { async getCertificate() { return null; } },
+    certificateRegistry: {
+      async getCertificate() { return null; },
+      async listCertificates() { return certificates; },
+    },
     runtimeBindingRegistry: { async getBinding() { return binding; } },
     jobRegistry: {
+      async listJobs() { return routingJobs; },
       async enqueue(input) {
         enqueued.push(input);
         return { id: 'd2fe443b-0fa6-4f98-a061-6f41b7f2684e', ...input };
@@ -118,4 +127,24 @@ test('allows cleanup retry for the exact cleanup-required binding even when sour
   });
   await migration.apply(applicationId, { previewDigest: digest, confirmation });
   assert.equal(enqueued.length, 1);
+});
+
+test('waits for active Domain routing work before Passenger migration', async () => {
+  const { migration, enqueued } = service({ routingJobs: [{ status: 'running' }] });
+  await assert.rejects(
+    migration.apply(applicationId, { previewDigest: digest, confirmation }),
+    (error) => error?.code === 'node_passenger_migration_routing_busy' && error.status === 409,
+  );
+  assert.equal(enqueued.length, 0);
+});
+
+test('waits for certificate mutation before Passenger migration', async () => {
+  const { migration, enqueued } = service({
+    certificates: [{ domainId, state: 'issuing' }],
+  });
+  await assert.rejects(
+    migration.apply(applicationId, { previewDigest: digest, confirmation }),
+    (error) => error?.code === 'node_passenger_migration_routing_busy' && error.status === 409,
+  );
+  assert.equal(enqueued.length, 0);
 });
