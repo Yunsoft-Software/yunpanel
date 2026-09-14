@@ -23,7 +23,12 @@ function fixture({ publishedPorts = null, websiteBinding = true, passengerBindin
     desiredRevision: 3,
     targetType: 'proxy',
     target: { upstreamHost: '127.0.0.1', upstreamPort: 18080, websocket: true },
-    nginxSettings: { websocket: true },
+    nginxSettings: {
+      clientMaxBodySizeMb: 64,
+      proxyTimeoutSeconds: 90,
+      websocket: true,
+      headers: [{ name: 'X-App', value: 'yunpanel', always: true }],
+    },
   };
   const website = {
     id: websiteId,
@@ -94,7 +99,12 @@ function stageInput() {
       aliases: [],
       targetType: 'proxy',
       target: { upstreamHost: '127.0.0.1', upstreamPort: 18080, websocket: true },
-      nginxSettings: { websocket: true },
+      nginxSettings: {
+        clientMaxBodySizeMb: 64,
+        proxyTimeoutSeconds: 90,
+        websocket: true,
+        headers: [{ name: 'X-App', value: 'yunpanel', always: true }],
+      },
       canonicalRedirect: false,
       httpsRedirect: false,
     },
@@ -116,6 +126,7 @@ test('Managed Compose Domain stage replaces stale persisted target before enqueu
     websocket: true,
   });
   assert.equal(fx.calls[0].payload.targetType, 'proxy');
+  assert.deepEqual(fx.calls[0].payload.nginxSettings, input.payload.nginxSettings);
   assert.equal(job.payload.target.upstreamPort, 49152);
   assert.deepEqual(input, original);
 });
@@ -165,6 +176,11 @@ test('Passenger runtime binding replaces stale direct-systemd proxy target befor
     startupFile: 'server.js',
     nodeBinary: '/usr/bin/node',
   });
+  assert.deepEqual(fx.calls[0].payload.nginxSettings, {
+    clientMaxBodySizeMb: 64,
+    headers: [{ name: 'X-App', value: 'yunpanel', always: true }],
+  });
+  assert.deepEqual(input, stageInput());
 });
 
 test('Domain stage resource mismatch fails closed before enqueue', async () => {
