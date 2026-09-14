@@ -94,7 +94,7 @@ const databaseCredentialStorePath = process.env.YUNPANEL_DATABASE_CREDENTIAL_STO
 const websiteMigrationPolicyStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE ?? path.resolve('.data/website-migration-policy.json');
 const websiteMigrationLedgerStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_LEDGER_STORE ?? path.resolve('.data/website-migration-ledger.json');
 const dnsHostingStorePath = process.env.YUNPANEL_DNS_HOSTING_STORE ?? path.resolve('.data/dns-hosting-registry.json');
-const dnsProviderCredentialStorePath = process.env.YUNPANEL_DNS_CREDENTIAL_STORE ?? path.resolve('.data/dns-provider-credential-registry.json');
+const dnsProviderCredentialStorePath = process.env.YUNPANEL_DNS_CREDENTIAL_STORE ?? path.resolve('.data/dns-provider-registry.json');
 const mailDomainStorePath = process.env.YUNPANEL_MAIL_DOMAIN_STORE ?? path.resolve('.data/mail-domain-registry.json');
 const mailDkimRootPath = process.env.YUNPANEL_MAIL_DKIM_ROOT ?? path.resolve('.data/mail-dkim');
 const mailDkimRetirementStorePath = process.env.YUNPANEL_MAIL_DKIM_RETIREMENT_STORE
@@ -324,6 +324,8 @@ const jobRegistry = createDomainStageTargetJobRegistry({
   domainRegistry,
   websiteRegistry,
   dockerComposeProjectRegistry: dockerComposeProjectBootstrap.projectRegistry,
+  applicationRegistry,
+  runtimeBindingRegistry,
 });
 const dockerComposeRuntime = await createDockerComposeRuntime({
   env: process.env,
