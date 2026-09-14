@@ -21,10 +21,22 @@ function handlerFor(handlers, step) {
   return handler;
 }
 
-function publicErrorCode(error) {
+function compensationHandlerFor(handlers, step) {
+  const handler = handlers?.[step.kind];
+  if (!handler || typeof handler.compensate !== 'function') {
+    throw new WebsiteProvisioningOrchestratorError(
+      'website_provisioning_compensation_unavailable',
+      `Provisioning compensation is unavailable for ${step.kind}`,
+      503,
+    );
+  }
+  return handler;
+}
+
+function publicErrorCode(error, fallback = 'website_provisioning_step_failed') {
   const code = typeof error?.code === 'string' && /^[a-z0-9_]{1,80}$/.test(error.code)
     ? error.code
-    : 'website_provisioning_step_failed';
+    : fallback;
   return code;
 }
 
@@ -39,6 +51,8 @@ function handlerContext(operation, step) {
     websiteId: operation.websiteId,
     stepId: step.id,
     intent: step.intent,
+    evidence: step.evidence,
+    compensation: step.compensation,
   });
 }
 
@@ -49,7 +63,10 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     || typeof registry.completeStep !== 'function'
     || typeof registry.blockStep !== 'function'
     || typeof registry.failStep !== 'function'
-    || typeof registry.retryStep !== 'function') {
+    || typeof registry.retryStep !== 'function'
+    || typeof registry.beginCompensation !== 'function'
+    || typeof registry.completeCompensation !== 'function'
+    || typeof registry.failCompensation !== 'function') {
     throw new WebsiteProvisioningOrchestratorError(
       'website_provisioning_dependencies_invalid',
       'Website provisioning orchestrator dependencies are invalid',
@@ -61,6 +78,12 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     const handler = handlerFor(handlers, step);
     if (typeof handler.inspect !== 'function') return null;
     return evidence(await handler.inspect(handlerContext(operation, step)));
+  }
+
+  async function inspectCompensation(operation, step) {
+    const handler = compensationHandlerFor(handlers, step);
+    if (typeof handler.inspectCompensation !== 'function') return null;
+    return evidence(await handler.inspectCompensation(handlerContext(operation, step)));
   }
 
   async function reconcileInterrupted(operation, step) {
@@ -93,6 +116,40 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     return Object.freeze({
       operation: completed,
       outcome: completed.ready ? 'ready' : 'reconciled',
+      stepId: step.id,
+    });
+  }
+
+  async function reconcileInterruptedCompensation(operation, step) {
+    let inspected;
+    try { inspected = await inspectCompensation(operation, step); }
+    catch (error) {
+      return Object.freeze({
+        operation,
+        outcome: 'compensation_interrupted',
+        stepId: step.id,
+        actionRequired: 'inspect_or_remediate_compensation',
+        error: publicErrorCode(error, 'website_provisioning_compensation_inspection_failed'),
+      });
+    }
+
+    if (!inspected || inspected.satisfied !== true) {
+      return Object.freeze({
+        operation,
+        outcome: 'compensation_interrupted',
+        stepId: step.id,
+        actionRequired: 'inspect_or_remediate_compensation',
+      });
+    }
+
+    const completed = await registry.completeCompensation({
+      operationId: operation.operationId,
+      stepId: step.id,
+      evidence: inspected,
+    });
+    return Object.freeze({
+      operation: completed,
+      outcome: 'compensated',
       stepId: step.id,
     });
   }
@@ -152,17 +209,22 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     const interrupted = operation.steps.find((step) => step.state === 'applying');
     if (interrupted) return reconcileInterrupted(operation, interrupted);
 
+    const interruptedCompensation = operation.steps.find((step) => step.state === 'compensating');
+    if (interruptedCompensation) return reconcileInterruptedCompensation(operation, interruptedCompensation);
+
     const blocked = operation.steps.find((step) => step.required && step.state === 'blocked');
     if (blocked) return reconcileBlocked(operation, blocked);
 
     const terminal = operation.steps.find((step) => step.required
-      && ['failed', 'compensating', 'compensated'].includes(step.state));
+      && ['failed', 'compensated'].includes(step.state));
     if (terminal) {
       return Object.freeze({
         operation,
         outcome: 'blocked',
         stepId: terminal.id,
-        actionRequired: 'remediate_or_compensate',
+        actionRequired: terminal.state === 'compensated'
+          ? 'continue_compensation_or_remediate'
+          : 'remediate_or_compensate',
       });
     }
 
@@ -223,7 +285,70 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     return runNext(operationId);
   }
 
-  return Object.freeze({ runNext, retryStep });
+  async function compensateStep(operationId, stepId) {
+    const operation = await registry.get(operationId);
+    if (!operation) {
+      throw new WebsiteProvisioningOrchestratorError(
+        'website_provisioning_not_found',
+        'Website provisioning operation was not found',
+        404,
+      );
+    }
+    const step = operation.steps.find((candidate) => candidate.id === stepId);
+    if (!step) {
+      throw new WebsiteProvisioningOrchestratorError(
+        'website_provisioning_step_not_found',
+        'Website provisioning step was not found',
+        404,
+      );
+    }
+    if (step.compensation.state === 'not_required') {
+      throw new WebsiteProvisioningOrchestratorError(
+        'website_provisioning_compensation_not_required',
+        'Provisioning step does not require compensation',
+      );
+    }
+    if (step.state === 'compensating') return reconcileInterruptedCompensation(operation, step);
+
+    const handler = compensationHandlerFor(handlers, step);
+    const compensating = await registry.beginCompensation({ operationId, stepId });
+    const compensatingStep = compensating.steps.find((candidate) => candidate.id === stepId);
+    try {
+      const result = evidence(await handler.compensate(handlerContext(compensating, compensatingStep)));
+      if (!result || result.satisfied === false) {
+        const code = publicErrorCode(
+          { code: result?.reason },
+          'website_provisioning_compensation_failed',
+        );
+        const failed = await registry.failCompensation({ operationId, stepId, error: code });
+        return Object.freeze({
+          operation: failed,
+          outcome: 'compensation_failed',
+          stepId,
+          actionRequired: 'retry_compensation_or_remediate',
+          error: code,
+        });
+      }
+      const completed = await registry.completeCompensation({
+        operationId,
+        stepId,
+        evidence: result,
+      });
+      return Object.freeze({ operation: completed, outcome: 'compensated', stepId });
+    } catch (error) {
+      const code = publicErrorCode(error, 'website_provisioning_compensation_failed');
+      const failed = await registry.failCompensation({ operationId, stepId, error: code });
+      return Object.freeze({
+        operation: failed,
+        outcome: 'compensation_failed',
+        stepId,
+        actionRequired: 'retry_compensation_or_remediate',
+        error: code,
+      });
+    }
+  }
+
+  return Object.freeze({ runNext, retryStep, compensateStep });
 }
 
 export const websiteProvisioningOrchestratorInternals = Object.freeze({
