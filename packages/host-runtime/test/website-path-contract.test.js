@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  createApplicationPathContract,
   createWebsitePathContract,
   WebsitePathContractError,
   websitePathContractInternals,
@@ -53,6 +54,38 @@ test('Website path contract preserves current managed roots and separates owners
   assert.equal(Object.isFrozen(contract.workspace), true);
   assert.equal(Object.isFrozen(contract.runtime), true);
   assert.equal(Object.isFrozen(contract.backup), true);
+});
+
+test('Application path contract supports dependency-injected roots without changing canonical layout', () => {
+  const contract = createApplicationPathContract(applicationId, {
+    applicationRoot: '/apps',
+    dataRoot: '/data',
+    staticBuildRoot: '/build',
+    staticPublishRoot: '/www',
+  });
+
+  assert.equal(contract.workspace.homeDirectory, `/data/${applicationId.toLowerCase()}`);
+  assert.equal(contract.workspace.temporaryDirectory, `/data/${applicationId.toLowerCase()}/tmp`);
+  assert.equal(contract.runtime.applicationRoot, `/apps/${applicationId.toLowerCase()}`);
+  assert.equal(contract.runtime.releasesDirectory, `/apps/${applicationId.toLowerCase()}/releases`);
+  assert.equal(contract.runtime.currentRelease, `/apps/${applicationId.toLowerCase()}/current`);
+  assert.equal(contract.static.buildRoot, `/build/${applicationId.toLowerCase()}`);
+  assert.equal(contract.static.publishRoot, `/www/${applicationId.toLowerCase()}`);
+});
+
+test('Application path contract rejects relative or filesystem-root managed roots', () => {
+  for (const options of [
+    { applicationRoot: 'apps' },
+    { dataRoot: '/' },
+    { staticBuildRoot: './build' },
+    { staticPublishRoot: '/' },
+  ]) {
+    assert.throws(
+      () => createApplicationPathContract(applicationId, options),
+      (error) => error instanceof WebsitePathContractError
+        && error.code === 'website_path_root_invalid',
+    );
+  }
 });
 
 test('Website path contract rejects malformed identities instead of normalizing paths heuristically', () => {
