@@ -38,6 +38,7 @@ function orchestrator(overrides = {}) {
   return {
     runNext: async () => ({}),
     retryStep: async () => ({}),
+    compensateStep: async () => ({}),
     ...overrides,
   };
 }
@@ -146,12 +147,72 @@ test('retry route re-runs only the confirmed failed step', async () => {
   assert.deepEqual(response.payload, { data: result });
 });
 
+test('compensation route requires confirmation bound to operation and step', async () => {
+  const app = fakeApp();
+  let compensationCalls = 0;
+  mountWebsiteProvisioningRoutes(app, {
+    registry: { get: async () => ({}) },
+    orchestrator: orchestrator({ compensateStep: async () => { compensationCalls += 1; return {}; } }),
+  });
+  const handler = app.routes.post.get('/api/sites/provisioning/:operationId/steps/:stepId/compensate');
+
+  await assert.rejects(
+    invoke(handler, {
+      params: { operationId, stepId: 'nginx' },
+      body: { confirmation: `compensate-site-provisioning:${operationId}:runtime` },
+    }),
+    (error) => error instanceof WebsiteProvisioningHttpError
+      && error.code === 'website_provisioning_compensation_confirmation_required',
+  );
+  assert.equal(compensationCalls, 0);
+});
+
+test('compensation route invokes only the exactly confirmed step', async () => {
+  const app = fakeApp();
+  const result = {
+    outcome: 'compensated',
+    operation: { operationId, ready: false, status: 'partial' },
+    stepId: 'nginx',
+  };
+  const calls = [];
+  mountWebsiteProvisioningRoutes(app, {
+    registry: { get: async () => result.operation },
+    orchestrator: orchestrator({
+      compensateStep: async (id, provisioningStepId) => {
+        calls.push([id, provisioningStepId]);
+        return result;
+      },
+    }),
+  });
+
+  const response = await invoke(
+    app.routes.post.get('/api/sites/provisioning/:operationId/steps/:stepId/compensate'),
+    {
+      params: { operationId, stepId: 'nginx' },
+      body: { confirmation: `compensate-site-provisioning:${operationId}:nginx` },
+    },
+  );
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(calls, [[operationId, 'nginx']]);
+  assert.deepEqual(response.payload, { data: result });
+});
+
 test('continue body helper rejects additional fields', () => {
   assert.throws(
     () => websiteProvisioningHttpInternals.continueBody({
       confirmation: `continue-site-provisioning:${operationId}`,
       extra: true,
     }, operationId),
+    (error) => error instanceof WebsiteProvisioningHttpError,
+  );
+});
+
+test('compensation body helper rejects additional fields', () => {
+  assert.throws(
+    () => websiteProvisioningHttpInternals.compensateBody({
+      confirmation: `compensate-site-provisioning:${operationId}:nginx`,
+      extra: true,
+    }, operationId, 'nginx'),
     (error) => error instanceof WebsiteProvisioningHttpError,
   );
 });
