@@ -3,6 +3,7 @@ import { createWebsiteNodeReleaseProvisioningHandler } from './website-node-rele
 import { createWebsitePassengerApplicationReleaseProvisioningHandler } from './website-passenger-application-release-provisioning-handler.js';
 import { createWebsitePassengerAuthorityProvisioningHandler } from './website-passenger-authority-provisioning-handler.js';
 import { createWebsitePassengerEnvironmentProvisioningHandler } from './website-passenger-environment-provisioning-handler.js';
+import { createWebsitePassengerEnvironmentStateProvisioningHandler } from './website-passenger-environment-state-provisioning-handler.js';
 import { createWebsiteProvisioningHandlers } from './website-provisioning-handlers.js';
 import { createWebsiteProvisioningOrchestrator } from './website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from './website-provisioning-registry.js';
@@ -84,9 +85,14 @@ export function createWebsiteProvisioningRuntime({
     if (!nextApplicationRegistry || !nextWebsiteRegistry || !nextDomainRegistry || !nextRuntimeBindingRegistry) {
       throw new Error('Passenger Website provisioning control-plane dependencies are required');
     }
+    if (!passengerEnvironment) {
+      throw new Error('Passenger Website environment must be configured before Passenger control-plane handlers');
+    }
+    const nextEnvironmentRegistry = passengerEnvironment.applicationEnvironmentRegistry;
     configureDomainControlPlane({ domainRegistry: nextDomainRegistry });
     if (passengerControlPlane) {
       if (passengerControlPlane.applicationRegistry !== nextApplicationRegistry
+        || passengerControlPlane.applicationEnvironmentRegistry !== nextEnvironmentRegistry
         || passengerControlPlane.websiteRegistry !== nextWebsiteRegistry
         || passengerControlPlane.domainRegistry !== nextDomainRegistry
         || passengerControlPlane.runtimeBindingRegistry !== nextRuntimeBindingRegistry) {
@@ -97,14 +103,20 @@ export function createWebsiteProvisioningRuntime({
     handlers.passenger_application_release = createWebsitePassengerApplicationReleaseProvisioningHandler({
       applicationRegistry: nextApplicationRegistry,
     });
+    handlers.passenger_environment_state = createWebsitePassengerEnvironmentStateProvisioningHandler({
+      applicationRegistry: nextApplicationRegistry,
+      applicationEnvironmentRegistry: nextEnvironmentRegistry,
+    });
     handlers.passenger_authority = createWebsitePassengerAuthorityProvisioningHandler({
       applicationRegistry: nextApplicationRegistry,
+      applicationEnvironmentRegistry: nextEnvironmentRegistry,
       websiteRegistry: nextWebsiteRegistry,
       domainRegistry: nextDomainRegistry,
       runtimeBindingRegistry: nextRuntimeBindingRegistry,
     });
     passengerControlPlane = Object.freeze({
       applicationRegistry: nextApplicationRegistry,
+      applicationEnvironmentRegistry: nextEnvironmentRegistry,
       websiteRegistry: nextWebsiteRegistry,
       domainRegistry: nextDomainRegistry,
       runtimeBindingRegistry: nextRuntimeBindingRegistry,
