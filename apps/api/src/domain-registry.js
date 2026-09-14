@@ -13,7 +13,7 @@ import { DomainHierarchyError, validateDomainHierarchy, validateDomainParent } f
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
 const STORE_VERSION = 3;
-const TARGET_TYPES = new Set(['static', 'proxy']);
+const TARGET_TYPES = new Set(['static', 'proxy', 'passenger']);
 const HTTPS_MODES = new Set(['off', 'managed']);
 const UPDATE_FIELDS = new Set(['primaryDomain', 'aliases', 'httpsMode', 'httpsRedirect', 'canonicalRedirect', 'nginxSettings']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -55,6 +55,7 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
     || (domain.targetType === 'static' && domain.target?.spaFallback !== normalizedSettings.spaFallback)) {
     throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain Nginx settings are invalid', 409);
   }
+  validateTarget(domain.targetType, domain.target);
   if (typeof domain.canonicalRedirect !== 'boolean' || typeof domain.httpsRedirect !== 'boolean'
     || !HTTPS_MODES.has(domain.httpsMode) || (domain.httpsMode === 'off' && domain.httpsRedirect)
     || (domain.appliedPrimaryDomain !== null && typeof domain.appliedPrimaryDomain !== 'string')) {
@@ -104,13 +105,20 @@ function publicDomain(domain) {
 }
 
 function validateTarget(targetType, target) {
-  if (!TARGET_TYPES.has(targetType)) throw new DomainRegistryError('invalid_target_type', 'targetType must be static or proxy');
+  if (!TARGET_TYPES.has(targetType)) throw new DomainRegistryError('invalid_target_type', 'targetType must be static, proxy or passenger');
   if (!target || typeof target !== 'object' || Array.isArray(target)) throw new DomainRegistryError('invalid_target', 'target must be an object');
   if (targetType === 'static') {
     if (typeof target.root !== 'string' || target.root.length < 2 || target.root.length > 500 || /[\u0000-\u001f\u007f]/.test(target.root)) {
       throw new DomainRegistryError('invalid_static_root', 'Static target root is invalid');
     }
     return { root: target.root, spaFallback: target.spaFallback !== false };
+  }
+  if (targetType === 'passenger') {
+    if (Object.keys(target).length !== 1 || !Object.hasOwn(target, 'applicationId')) {
+      throw new DomainRegistryError('invalid_passenger_target', 'Passenger Domain target must contain only applicationId');
+    }
+    try { return { applicationId: assertUuid(target.applicationId, 'applicationId') }; }
+    catch { throw new DomainRegistryError('invalid_passenger_target', 'Passenger Domain target Application identity is invalid'); }
   }
   if (!Number.isInteger(target.upstreamPort) || target.upstreamPort < 1024 || target.upstreamPort > 65535) {
     throw new DomainRegistryError('invalid_upstream_port', 'Proxy upstreamPort must be between 1024 and 65535');
@@ -130,15 +138,15 @@ function settings(targetType, value, base = null) {
 }
 
 function settingsFromTarget(targetType, target) {
-  return settings(targetType, targetType === 'proxy'
-    ? { websocket: target?.websocket !== false }
-    : { spaFallback: target?.spaFallback !== false });
+  if (targetType === 'proxy') return settings(targetType, { websocket: target?.websocket !== false });
+  if (targetType === 'static') return settings(targetType, { spaFallback: target?.spaFallback !== false });
+  return settings(targetType, {});
 }
 
 function targetWithSettings(targetType, target, nginxSettings) {
-  return targetType === 'proxy'
-    ? { ...target, websocket: nginxSettings.websocket }
-    : { ...target, spaFallback: nginxSettings.spaFallback };
+  if (targetType === 'proxy') return { ...target, websocket: nginxSettings.websocket };
+  if (targetType === 'static') return { ...target, spaFallback: nginxSettings.spaFallback };
+  return { ...target };
 }
 
 function normalizeDomains(primaryDomain, aliases) {
@@ -512,6 +520,9 @@ export function createDomainRegistry({
     if (conflict) throw new DomainRegistryError('domain_conflict', 'A domain or alias is already managed', 409);
 
     const normalizedTarget = validateTarget(targetType, target);
+    if (targetType === 'passenger' && normalizedWebsiteId === null) {
+      throw new DomainRegistryError('passenger_website_binding_required', 'Passenger Domain targets require an explicit Website binding', 409);
+    }
     const normalizedNginxSettings = settings(
       targetType,
       nginxSettings ?? {},
@@ -674,6 +685,10 @@ export function createDomainRegistry({
 
 export const domainRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
+  targetTypes: Object.freeze([...TARGET_TYPES]),
+  validateTarget,
+  settingsFromTarget,
+  targetWithSettings,
   normalizeWebsiteId,
   normalizeReparentId,
   descendantsOf,
