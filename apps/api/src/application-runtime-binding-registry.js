@@ -33,22 +33,26 @@ function domains(value) {
     throw new ApplicationRuntimeBindingRegistryError('runtime_binding_domains_invalid', 'Runtime binding domains are invalid');
   }
   const seen = new Set();
-  return Object.freeze(value.map((entry) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
-      || Object.keys(entry).length !== 3
-      || seen.has(entry.domainId)) {
+  const normalized = value.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).length !== 3) {
       throw new ApplicationRuntimeBindingRegistryError('runtime_binding_domains_invalid', 'Runtime binding domains are invalid');
     }
-    const normalized = Object.freeze({
-      domainId: uuid(entry.domainId, 'domainId'),
+    const domainId = uuid(entry.domainId, 'domainId');
+    if (seen.has(domainId)) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_domains_invalid', 'Runtime binding domains must be unique');
+    }
+    seen.add(domainId);
+    if (typeof entry.nginxChecksum !== 'string' || !SHA256_PATTERN.test(entry.nginxChecksum)) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_checksum_invalid', 'Runtime binding Nginx checksum is invalid');
+    }
+    return Object.freeze({
+      domainId,
       desiredRevision: revision(entry.desiredRevision, 'domain desiredRevision'),
-      nginxChecksum: typeof entry.nginxChecksum === 'string' && SHA256_PATTERN.test(entry.nginxChecksum)
-        ? entry.nginxChecksum
-        : (() => { throw new ApplicationRuntimeBindingRegistryError('runtime_binding_checksum_invalid', 'Runtime binding Nginx checksum is invalid'); })(),
+      nginxChecksum: entry.nginxChecksum,
     });
-    seen.add(normalized.domainId);
-    return normalized;
-  }).sort((left, right) => left.domainId.localeCompare(right.domainId))));
+  });
+  normalized.sort((left, right) => left.domainId.localeCompare(right.domainId));
+  return Object.freeze(normalized);
 }
 
 function normalizeRecord(value) {
