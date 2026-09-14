@@ -10,6 +10,7 @@ import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
 import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
 import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
 
 const origin = 'https://panel.example.test';
@@ -32,6 +33,34 @@ function fakeStore(role) {
   };
 }
 
+function provisioningRuntime() {
+  const checksum = 'd'.repeat(64);
+  return createWebsiteProvisioningRuntime({
+    identityManager: {
+      apply: async () => ({ satisfied: true, uid: 1201, gid: 1201 }),
+      inspect: async () => ({ satisfied: true, uid: 1201, gid: 1201 }),
+    },
+    passengerSiteManager: {
+      apply: async () => ({ satisfied: false, reason: 'unused' }),
+      inspect: async () => ({ satisfied: false, reason: 'unused' }),
+    },
+    nginxManager: {
+      stageDomain: async (spec) => ({ configName: `yunpanel-${spec.primaryDomain}.conf`, checksum, bytes: 420 }),
+      inspectStagedDomain: async (spec) => ({
+        satisfied: true,
+        result: { configName: `yunpanel-${spec.primaryDomain}.conf`, checksum, bytes: 420 },
+      }),
+      inspectActiveDomain: async ({ primaryDomain }) => ({
+        satisfied: true,
+        result: { configName: `yunpanel-${primaryDomain}.conf`, checksum, active: true },
+      }),
+      activateDomain: async ({ primaryDomain }) => ({
+        configName: `yunpanel-${primaryDomain}.conf`, checksum, active: true,
+      }),
+    },
+  });
+}
+
 async function resources() {
   const registry = createServerRegistry();
   const enrollment = await registry.issueEnrollmentToken({ label: 'site-create-http' });
@@ -51,9 +80,10 @@ async function resources() {
   const getWebDomain = async (id) => domainRegistry.getDomain(id);
   const dnsHostingRegistry = createDnsHostingRegistry({ getWebDomain });
   const mailDomainRegistry = createMailDomainRegistry({ getWebDomain });
+  const websiteProvisioningRuntime = provisioningRuntime();
   await Promise.all([
     applicationRegistry.init(), dockerWorkloadRegistry.init(), websiteRegistry.init(), domainRegistry.init(),
-    dnsHostingRegistry.init(), mailDomainRegistry.init(),
+    dnsHostingRegistry.init(), mailDomainRegistry.init(), websiteProvisioningRuntime.init(),
   ]);
   return {
     registry,
@@ -63,6 +93,7 @@ async function resources() {
     domainRegistry,
     dnsHostingRegistry,
     mailDomainRegistry,
+    websiteProvisioningRuntime,
     serverId: enrolled.server.id,
   };
 }
@@ -77,15 +108,15 @@ async function listener(t, role, state) {
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
   const base = `http://127.0.0.1:${server.address().port}`;
-  return (pathname, { authenticated = true, body } = {}) => fetch(`${base}${pathname}`, {
-    method: 'POST',
+  return (pathname, { authenticated = true, body, method = 'POST' } = {}) => fetch(`${base}${pathname}`, {
+    method,
     headers: {
       ...(authenticated ? { cookie: '__Host-yunpanel_session=valid-session' } : {}),
       origin,
-      'content-type': 'application/json',
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
       'x-csrf-token': csrfToken,
     },
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
 
@@ -102,7 +133,7 @@ function siteInput(serverId) {
   };
 }
 
-test('Owner previews and applies site creation through the authenticated API', async (t) => {
+test('Owner previews, applies and continues durable site provisioning through the authenticated API', async (t) => {
   const state = await resources();
   const request = await listener(t, 'owner', state);
   const input = siteInput(state.serverId);
@@ -127,6 +158,25 @@ test('Owner previews and applies site creation through the authenticated API', a
   const created = (await response.json()).data;
   assert.equal(created.website.id, preview.ids.websiteId);
   assert.equal(created.primaryDomain.id, preview.ids.primaryDomainId);
+  assert.equal(created.provisioning.ready, false);
+  assert.equal(created.provisioning.steps.find((step) => step.id === 'nginx').state, 'pending');
+
+  const persisted = await state.websiteProvisioningRuntime.get(input.operationId);
+  assert.equal(persisted.websiteId, preview.ids.websiteId);
+  assert.equal(persisted.ready, false);
+
+  const statusResponse = await request(`/api/sites/provisioning/${input.operationId}`, { method: 'GET' });
+  assert.equal(statusResponse.status, 200);
+  assert.equal((await statusResponse.json()).data.operationId, input.operationId);
+
+  const continued = await request(`/api/sites/provisioning/${input.operationId}/continue`, {
+    body: { confirmation: `continue-site-provisioning:${input.operationId}` },
+  });
+  assert.equal(continued.status, 200);
+  const continuedData = (await continued.json()).data;
+  assert.equal(continuedData.outcome, 'ready');
+  assert.equal(continuedData.operation.ready, true);
+  assert.equal(continuedData.operation.steps.find((step) => step.id === 'nginx').state, 'succeeded');
 
   const retry = await request('/api/sites', {
     body: { input, previewDigest: preview.previewDigest, confirmation: preview.confirmation },
