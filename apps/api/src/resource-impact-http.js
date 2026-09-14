@@ -1,3 +1,5 @@
+import { mountApplicationPassengerMigrationRoutes } from './application-passenger-migration-http.js';
+import { createApplicationPassengerMigrationPreviewService } from './application-passenger-migration-preview.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { previewResourceImpact, ResourceImpactError } from './resource-impact.js';
 
@@ -49,6 +51,17 @@ export function mountResourceImpactRoutes(app, dependencies = {}) {
 
   app.post('/api/websites/:websiteId/impact-preview', requirePanelRouteAccess, handler('website', 'websiteId'));
   app.post('/api/domains/:domainId/impact-preview', requirePanelRouteAccess, handler('domain', 'domainId'));
+
+  if (dependencies.applicationRegistry && dependencies.websiteRegistry && dependencies.domainRegistry) {
+    mountApplicationPassengerMigrationRoutes(app, {
+      previewService: createApplicationPassengerMigrationPreviewService({
+        applicationRegistry: dependencies.applicationRegistry,
+        websiteRegistry: dependencies.websiteRegistry,
+        domainRegistry: dependencies.domainRegistry,
+        localServerId: dependencies.localServerId ?? null,
+      }),
+    });
+  }
 }
 
 export const resourceImpactHttpInternals = Object.freeze({ impactInput });
