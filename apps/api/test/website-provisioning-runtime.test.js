@@ -53,11 +53,15 @@ function nginxManager() {
   };
 }
 
-async function persistedRuntime(t, manager) {
-  const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-provisioning-runtime-'));
+async function persistedFile(t, prefix) {
+  const directory = await mkdtemp(path.join(tmpdir(), prefix));
   t.after(() => rm(directory, { recursive: true, force: true }));
+  return path.join(directory, 'operations.json');
+}
+
+function runtime({ filePath = null, manager = identityManager() } = {}) {
   return createWebsiteProvisioningRuntime({
-    filePath: path.join(directory, 'operations.json'),
+    filePath,
     identityManager: manager,
     passengerSiteManager: passengerSiteManager(),
     nginxManager: nginxManager(),
@@ -66,68 +70,43 @@ async function persistedRuntime(t, manager) {
 
 test('runtime composes registry, injected managers and orchestrator', async () => {
   const calls = [];
-  const runtime = createWebsiteProvisioningRuntime({
-    identityManager: identityManager({
+  const provisioning = runtime({
+    manager: identityManager({
       inspect: async (intent) => ({ satisfied: true, ...intent, uid: 1201, gid: 1201 }),
       apply: async (intent) => {
         calls.push(intent);
         return { satisfied: true, ...intent, uid: 1201, gid: 1201 };
       },
     }),
-    passengerSiteManager: passengerSiteManager(),
-    nginxManager: nginxManager(),
   });
 
-  assert.deepEqual(await runtime.init(), []);
-  await runtime.create(plan());
-  const result = await runtime.runNext(operationId);
+  assert.deepEqual(await provisioning.init(), []);
+  await provisioning.create(plan());
+  const result = await provisioning.runNext(operationId);
 
   assert.equal(result.outcome, 'ready');
   assert.equal(result.operation.ready, true);
-  assert.equal(typeof runtime.compensateStep, 'function');
+  assert.equal(typeof provisioning.compensateStep, 'function');
   assert.deepEqual(calls, [{
     user: 'yunapp-0123456789ab',
     homeDirectory: '/var/lib/yunpanel/data/6dcb8908-3f3e-43da-9452-15fd6b51ac76',
   }]);
-  assert.deepEqual(await runtime.get(operationId), result.operation);
-  assert.deepEqual(await runtime.listInterrupted(), []);
+  assert.deepEqual(await provisioning.get(operationId), result.operation);
+  assert.deepEqual(await provisioning.listInterrupted(), []);
 });
 
 test('runtime startup reconciles an interrupted apply by inspection without applying again', async (t) => {
-  const first = await persistedRuntime(t, identityManager());
-  await first.init();
-  await first.create(plan());
-  await first.registry.beginStep({ operationId, stepId: 'unix_identity' });
-
-  let inspectCalls = 0;
-  let applyCalls = 0;
-  const second = createWebsiteProvisioningRuntime({
-    filePath: first.registry === undefined ? null : first.registry && first.registry.filePath,
-    identityManager: identityManager(),
-    passengerSiteManager: passengerSiteManager(),
-    nginxManager: nginxManager(),
-  });
-
-  // persistedRuntime intentionally keeps the registry opaque, so create a second runtime
-  // against the same file through an explicit fixture below.
-  assert.ok(second);
-
-  const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-provisioning-restart-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const filePath = path.join(directory, 'operations.json');
-  const beforeRestart = createWebsiteProvisioningRuntime({
-    filePath,
-    identityManager: identityManager(),
-    passengerSiteManager: passengerSiteManager(),
-    nginxManager: nginxManager(),
-  });
+  const filePath = await persistedFile(t, 'yunpanel-provisioning-restart-');
+  const beforeRestart = runtime({ filePath });
   await beforeRestart.init();
   await beforeRestart.create(plan());
   await beforeRestart.registry.beginStep({ operationId, stepId: 'unix_identity' });
 
-  const afterRestart = createWebsiteProvisioningRuntime({
+  let inspectCalls = 0;
+  let applyCalls = 0;
+  const afterRestart = runtime({
     filePath,
-    identityManager: identityManager({
+    manager: identityManager({
       inspect: async (intent) => {
         inspectCalls += 1;
         return { satisfied: true, ...intent, uid: 1201, gid: 1201 };
@@ -137,8 +116,6 @@ test('runtime startup reconciles an interrupted apply by inspection without appl
         throw new Error('startup reconcile must not reapply');
       },
     }),
-    passengerSiteManager: passengerSiteManager(),
-    nginxManager: nginxManager(),
   });
 
   const startup = await afterRestart.init();
@@ -154,31 +131,22 @@ test('runtime startup reconciles an interrupted apply by inspection without appl
 });
 
 test('runtime startup leaves uncertain interrupted apply untouched instead of mutating the host', async (t) => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-provisioning-uncertain-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const filePath = path.join(directory, 'operations.json');
-  const beforeRestart = createWebsiteProvisioningRuntime({
-    filePath,
-    identityManager: identityManager(),
-    passengerSiteManager: passengerSiteManager(),
-    nginxManager: nginxManager(),
-  });
+  const filePath = await persistedFile(t, 'yunpanel-provisioning-uncertain-');
+  const beforeRestart = runtime({ filePath });
   await beforeRestart.init();
   await beforeRestart.create(plan());
   await beforeRestart.registry.beginStep({ operationId, stepId: 'unix_identity' });
 
   let applyCalls = 0;
-  const afterRestart = createWebsiteProvisioningRuntime({
+  const afterRestart = runtime({
     filePath,
-    identityManager: identityManager({
+    manager: identityManager({
       inspect: async () => ({ satisfied: false, reason: 'website_identity_partial_state' }),
       apply: async () => {
         applyCalls += 1;
         throw new Error('startup reconcile must not apply uncertain state');
       },
     }),
-    passengerSiteManager: passengerSiteManager(),
-    nginxManager: nginxManager(),
   });
 
   const startup = await afterRestart.init();
@@ -193,16 +161,12 @@ test('runtime startup leaves uncertain interrupted apply untouched instead of mu
 });
 
 test('runtime startup reconciles interrupted compensation by inspection without compensating again', async (t) => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-provisioning-compensation-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const filePath = path.join(directory, 'operations.json');
-  const beforeRestart = createWebsiteProvisioningRuntime({
+  const filePath = await persistedFile(t, 'yunpanel-provisioning-compensation-');
+  const beforeRestart = runtime({
     filePath,
-    identityManager: identityManager({
+    manager: identityManager({
       apply: async (intent) => ({ satisfied: true, ...intent, uid: 1201, gid: 1201 }),
     }),
-    passengerSiteManager: passengerSiteManager(),
-    nginxManager: nginxManager(),
   });
   await beforeRestart.init();
   await beforeRestart.create(plan());
@@ -211,9 +175,9 @@ test('runtime startup reconciles interrupted compensation by inspection without 
 
   let inspectCalls = 0;
   let compensateCalls = 0;
-  const afterRestart = createWebsiteProvisioningRuntime({
+  const afterRestart = runtime({
     filePath,
-    identityManager: identityManager({
+    manager: identityManager({
       inspectCompensation: async () => {
         inspectCalls += 1;
         return { satisfied: true, removedUser: true, removedGroup: true, removedHome: true };
@@ -223,8 +187,6 @@ test('runtime startup reconciles interrupted compensation by inspection without 
         throw new Error('startup reconcile must not repeat compensation');
       },
     }),
-    passengerSiteManager: passengerSiteManager(),
-    nginxManager: nginxManager(),
   });
 
   const startup = await afterRestart.init();
