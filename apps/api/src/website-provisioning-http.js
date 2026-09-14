@@ -47,6 +47,18 @@ function retryBody(body, id, provisioningStepId) {
   return expected;
 }
 
+function compensateBody(body, id, provisioningStepId) {
+  const expected = `compensate-site-provisioning:${id}:${provisioningStepId}`;
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).length !== 1 || body.confirmation !== expected) {
+    throw new WebsiteProvisioningHttpError(
+      'website_provisioning_compensation_confirmation_required',
+      `Confirm provisioning compensation with ${expected}`,
+    );
+  }
+  return expected;
+}
+
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
@@ -58,7 +70,8 @@ export function mountWebsiteProvisioningRoutes(app, { registry, orchestrator } =
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function'
     || !registry || typeof registry.get !== 'function'
     || !orchestrator || typeof orchestrator.runNext !== 'function'
-    || typeof orchestrator.retryStep !== 'function') {
+    || typeof orchestrator.retryStep !== 'function'
+    || typeof orchestrator.compensateStep !== 'function') {
     throw new Error('Website provisioning HTTP dependencies are required');
   }
 
@@ -91,6 +104,14 @@ export function mountWebsiteProvisioningRoutes(app, { registry, orchestrator } =
     const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
     return response.status(status).json({ data: result });
   }));
+
+  app.post('/api/sites/provisioning/:operationId/steps/:stepId/compensate', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const id = operationId(request.params.operationId);
+    const provisioningStepId = stepId(request.params.stepId);
+    compensateBody(request.body, id, provisioningStepId);
+    const result = await orchestrator.compensateStep(id, provisioningStepId);
+    return response.status(200).json({ data: result });
+  }));
 }
 
 export const websiteProvisioningHttpInternals = Object.freeze({
@@ -98,4 +119,5 @@ export const websiteProvisioningHttpInternals = Object.freeze({
   stepId,
   continueBody,
   retryBody,
+  compensateBody,
 });
