@@ -100,7 +100,7 @@ function assertSecretSafeOperation(value) {
   assert.equal('evidence' in value.steps[0], false);
   assert.equal('evidence' in value.steps[0].compensation, false);
   assert.equal(value.steps[0].canRetry, false);
-  assert.equal(value.steps[0].canCompensate, true);
+  assert.equal(value.steps[0].canCompensate, false);
   assert.deepEqual(value.steps[1], {
     id: 'nginx',
     kind: 'nginx',
@@ -191,6 +191,32 @@ test('public projection does not advertise compensation without a concrete handl
   const projected = websiteProvisioningHttpInternals.publicOperation(operation, () => false);
   assert.equal(projected.steps[0].canRetry, true);
   assert.equal(projected.steps[0].canCompensate, false);
+});
+
+test('public projection advertises earlier compensation only after later host-owning steps are compensated', () => {
+  const operation = durableOperation({
+    steps: [
+      durableOperation().steps[0],
+      {
+        ...durableOperation().steps[1],
+        state: 'compensated',
+        error: null,
+        compensation: {
+          state: 'succeeded',
+          evidence: { private: 'must-stay-server-side' },
+          error: null,
+        },
+      },
+    ],
+  });
+
+  const projected = websiteProvisioningHttpInternals.publicOperation(
+    operation,
+    (kind) => ['unix_identity', 'nginx'].includes(kind),
+  );
+  assert.equal(projected.steps[0].canCompensate, true);
+  assert.equal(projected.steps[1].canCompensate, false);
+  assert.equal(JSON.stringify(projected).includes('must-stay-server-side'), false);
 });
 
 test('continue route requires exact operation-bound confirmation', async () => {
