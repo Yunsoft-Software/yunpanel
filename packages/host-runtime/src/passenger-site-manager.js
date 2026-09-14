@@ -165,20 +165,23 @@ export function createPassengerSiteManager({
     let resolvedStartup;
     let startupInfo;
     try {
+      startupInfo = await lstatFn(startupPath);
+      if (startupInfo.isSymbolicLink()) {
+        throw new PassengerSiteManagerError('passenger_site_startup_invalid', 'Passenger Website startup file must not be a symbolic link');
+      }
       resolvedStartup = await realpathFn(startupPath);
-      startupInfo = await lstatFn(resolvedStartup);
     } catch (error) {
+      if (error instanceof PassengerSiteManagerError) throw error;
       if (error?.code === 'ENOENT') return null;
       throw new PassengerSiteManagerError('passenger_site_startup_inspection_failed', 'Passenger Website startup file could not be inspected');
     }
-    if (!resolvedStartup.startsWith(`${resolvedAppRoot}/`) || !startupInfo.isFile() || startupInfo.isSymbolicLink()) {
+    if (!resolvedStartup.startsWith(`${resolvedAppRoot}/`) || !startupInfo.isFile()) {
       throw new PassengerSiteManagerError('passenger_site_startup_invalid', 'Passenger Website startup file must be a real file inside the active app root');
     }
     return Object.freeze({ releaseId, resolvedAppRoot, resolvedDocumentRoot, resolvedStartup });
   }
 
-  async function inspect(intent) {
-    const spec = normalizedIntent(intent);
+  async function inspectSpec(spec) {
     const passenger = await passengerManager.inspect();
     if (!passenger?.healthy) {
       return Object.freeze({
@@ -226,10 +229,14 @@ export function createPassengerSiteManager({
     });
   }
 
+  async function inspect(intent) {
+    return inspectSpec(normalizedIntent(intent));
+  }
+
   async function apply(intent) {
     const spec = normalizedIntent(intent);
     await passengerManager.apply();
-    return inspect(spec);
+    return inspectSpec(spec);
   }
 
   return Object.freeze({ inspect, apply });
