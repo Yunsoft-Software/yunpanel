@@ -5,8 +5,34 @@ import { sanitizeNodePassengerMigrationResult } from '../src/node-passenger-migr
 
 const APPLICATION_ID = '11111111-1111-4111-8111-111111111111';
 const RELEASE_ID = '22222222-2222-4222-8222-222222222222';
-const SERVICE_NAME = `yunpanel-node-${createHash('sha256').update(APPLICATION_ID).digest('hex').slice(0, 16)}.service`;
-const JOB = Object.freeze({ payload: { node: { applicationId: APPLICATION_ID, releaseId: RELEASE_ID } } });
+const APPLICATION_HASH = createHash('sha256').update(APPLICATION_ID).digest('hex');
+const SERVICE_NAME = `yunpanel-node-${APPLICATION_HASH.slice(0, 16)}.service`;
+const APPLICATION_USER = `yunapp-${APPLICATION_HASH.slice(0, 12)}`;
+const RUNTIME = Object.freeze({
+  nodeMajor: 24,
+  documentRoot: '.',
+  start: Object.freeze({ mode: 'node', entryFile: 'server.js' }),
+  mode: 'production',
+});
+const JOB = Object.freeze({
+  payload: {
+    node: {
+      applicationId: APPLICATION_ID,
+      releaseId: RELEASE_ID,
+      runtime: RUNTIME,
+    },
+  },
+});
+const PASSENGER_TARGET = Object.freeze({
+  appRoot: `/var/lib/yunpanel/apps/${APPLICATION_ID}/current`,
+  documentRoot: `/var/lib/yunpanel/apps/${APPLICATION_ID}/current`,
+  startupFile: 'server.js',
+  nodeBinary: '/opt/yunpanel/node-runtimes/v24/bin/node',
+  user: APPLICATION_USER,
+  group: APPLICATION_USER,
+  appEnv: 'production',
+  environmentInclude: `/etc/nginx/yunpanel/passenger-env/${APPLICATION_ID}.conf`,
+});
 const sha256 = (character) => character.repeat(64);
 
 function migratedResult(overrides = {}) {
@@ -27,6 +53,7 @@ function migratedResult(overrides = {}) {
       sourceChecksum: sha256('a'),
       targetChecksum: sha256('b'),
     },
+    passengerTarget: PASSENGER_TARGET,
     ...overrides,
   };
 }
@@ -35,6 +62,7 @@ test('accepts a fully migrated Passenger result', () => {
   const result = sanitizeNodePassengerMigrationResult(JOB, migratedResult());
   assert.equal(result.satisfied, true);
   assert.equal(result.cleanup.serviceName, SERVICE_NAME);
+  assert.deepEqual(result.passengerTarget, PASSENGER_TARGET);
 });
 
 test('keeps Passenger-active cleanup-required state distinct from migrated success', () => {
@@ -72,4 +100,10 @@ test('rejects identical source and target Nginx checksums', () => {
       targetChecksum: sha256('a'),
     },
   })), /Nginx evidence/);
+});
+
+test('rejects Passenger target evidence that drifts from queued runtime state', () => {
+  assert.throws(() => sanitizeNodePassengerMigrationResult(JOB, migratedResult({
+    passengerTarget: { ...PASSENGER_TARGET, startupFile: 'other.js' },
+  })), /target evidence does not match/);
 });
