@@ -96,6 +96,7 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.equal(identity.intent.homeDirectory, `/var/lib/yunpanel/data/${applicationId}`);
 
   const runtime = plan.steps.find((step) => step.id === 'runtime');
+  assert.equal(runtime.kind, 'runtime');
   assert.equal(runtime.intent.adapter, 'passenger');
   assert.equal(runtime.intent.nodeMajor, 24);
   assert.deepEqual(runtime.intent.nodeCandidates, [
@@ -144,6 +145,7 @@ test('new static Website persists deterministic deployment intent with canonical
   assert.equal(identity.intent.homeDirectory, `/var/lib/yunpanel/data/${applicationId}`);
 
   const runtime = plan.steps.find((step) => step.id === 'runtime');
+  assert.equal(runtime.kind, 'static_runtime');
   assert.equal(runtime.intent.adapter, 'static');
   assert.equal(runtime.intent.mode, 'deploy');
   assert.equal(runtime.intent.deploymentId, operationId);
@@ -162,8 +164,10 @@ test('existing static Application binding inspects current release instead of in
   const plan = siteCreateProvisioningPlan(staticPreview({ existing: true }));
   const runtime = plan.steps.find((step) => step.id === 'runtime');
 
+  assert.equal(runtime.kind, 'static_runtime');
   assert.equal(runtime.intent.adapter, 'static');
   assert.equal(runtime.intent.mode, 'bind_existing');
+  assert.equal(runtime.compensation.state, 'not_required');
   assert.equal(Object.hasOwn(runtime.intent, 'deploymentId'), false);
   assert.equal(Object.hasOwn(runtime.intent, 'repositoryUrl'), false);
 });
