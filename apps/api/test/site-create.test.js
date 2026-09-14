@@ -116,11 +116,11 @@ test('new static site creates deterministic Application, Website and explicit ww
   assert.equal((await state.domainRegistry.listDomains()).length, 1);
 });
 
-test('new Node site assigns a collision-free managed port and models www as an independent child', async () => {
+test('new Node site is Passenger-first and never allocates a localhost backend port', async () => {
   const state = await fixture();
   await state.applicationRegistry.createNodeApplication({
     serverId: state.serverId,
-    name: 'Existing Node',
+    name: 'Existing Legacy Node',
     repositoryUrl: 'https://github.com/example/existing-node',
     runtime: { port: 3100 },
   });
@@ -146,13 +146,22 @@ test('new Node site assigns a collision-free managed port and models www as an i
     source: { kind: 'new_node', repositoryUrl: 'https://github.com/example/node-api', runtime: {} },
   });
   const preview = await previewSiteCreate({ input, ...dependencies(state) });
-  assert.equal(preview.assignedPort, 3102);
-  assert.equal(preview.plan.application.runtime.port, 3102);
+  assert.equal(preview.assignedPort, null);
+  assert.equal(preview.plan.application.runtimeAdapter, 'passenger');
+  assert.equal(preview.plan.application.runtime.port, null);
+  assert.equal(preview.plan.primaryDomain.targetType, 'passenger');
+  assert.deepEqual(preview.plan.primaryDomain.target, { applicationId: preview.ids.applicationId });
 
   const created = await apply(input, state, preview);
-  assert.equal(created.application.runtime.port, 3102);
-  assert.deepEqual(created.application.proxyTarget, { host: '127.0.0.1', port: 3102 });
-  assert.deepEqual(created.primaryDomain.target, { upstreamHost: '127.0.0.1', upstreamPort: 3102, websocket: true });
+  assert.equal(created.application.runtimeAdapter, 'passenger');
+  assert.equal(created.application.runtime.port, null);
+  assert.equal(created.application.serviceName, null);
+  assert.equal(created.application.servicePort, null);
+  assert.equal(created.application.proxyTarget, null);
+  assert.equal(created.primaryDomain.targetType, 'passenger');
+  assert.deepEqual(created.primaryDomain.target, { applicationId: created.application.id });
+  assert.equal(created.wwwDomain.targetType, 'passenger');
+  assert.deepEqual(created.wwwDomain.target, { applicationId: created.application.id });
   assert.equal(created.wwwDomain.primaryDomain, 'www.api.example.test');
   assert.equal(created.wwwDomain.parentDomainId, created.primaryDomain.id);
   assert.equal(created.wwwDomain.websiteId, created.website.id);
@@ -332,14 +341,39 @@ test('site creation requires exact confirmation and rejects reused identities or
   );
 });
 
-test('selected Node Application proxy drift fails closed before a Website is planned', () => {
+test('selected legacy Node Application proxy drift fails closed before a Website is planned', () => {
   assert.throws(
     () => siteCreateInternals.domainTarget({
       id: 'bf6a7374-b440-4380-8ad0-905f63d9ca9e',
       type: 'node',
+      runtimeAdapter: 'direct-systemd',
       runtime: { port: 3100 },
       proxyTarget: { host: 'origin.example.test', port: 3100 },
     }, { kind: 'existing_application' }),
     (error) => error instanceof SiteCreateError && error.code === 'site_create_application_proxy_drift' && error.status === 409,
+  );
+});
+
+test('Passenger Node Application target stays logical and rejects persisted backend ports', () => {
+  const applicationId = 'bf6a7374-b440-4380-8ad0-905f63d9ca9e';
+  assert.deepEqual(
+    siteCreateInternals.domainTarget({
+      id: applicationId,
+      type: 'node',
+      runtimeAdapter: 'passenger',
+      runtime: { port: null },
+      proxyTarget: null,
+    }, { kind: 'existing_application' }),
+    { targetType: 'passenger', target: { applicationId } },
+  );
+  assert.throws(
+    () => siteCreateInternals.domainTarget({
+      id: applicationId,
+      type: 'node',
+      runtimeAdapter: 'passenger',
+      runtime: { port: 3100 },
+      proxyTarget: null,
+    }, { kind: 'existing_application' }),
+    (error) => error instanceof SiteCreateError && error.code === 'site_create_application_runtime_drift' && error.status === 409,
   );
 });
