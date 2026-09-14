@@ -65,6 +65,14 @@ test('runtime binding captures cleanup-required Passenger state without pretendi
   assert.equal(record.state, 'cleanup_required');
 });
 
+test('native Passenger binding may omit a generated environment include', async () => {
+  const registry = createApplicationRuntimeBindingRegistry();
+  const record = await registry.activate(activation({
+    passengerTarget: { ...passengerTarget, environmentInclude: null },
+  }), { expectedRevision: 0 });
+  assert.equal(record.passengerTarget.environmentInclude, null);
+});
+
 test('runtime binding requires exact Website, Domain revision, release, Nginx and Passenger target evidence', async () => {
   const registry = createApplicationRuntimeBindingRegistry();
   for (const candidate of [
@@ -73,6 +81,7 @@ test('runtime binding requires exact Website, Domain revision, release, Nginx an
     activation({ domains: [] }),
     activation({ domains: [{ domainId, desiredRevision: 4, nginxChecksum: 'bad' }] }),
     activation({ passengerTarget: { ...passengerTarget, startupFile: '../escape.js' } }),
+    activation({ passengerTarget: { ...passengerTarget, environmentInclude: 'relative.conf' } }),
     activation({ passengerTarget: null }),
   ]) {
     await assert.rejects(registry.activate(candidate, { expectedRevision: 0 }));
@@ -86,6 +95,37 @@ test('direct-systemd binding cannot carry Passenger target evidence', async () =
     adapter: 'direct-systemd',
     passengerTarget,
   }), { expectedRevision: 0 }));
+});
+
+test('operation-owned Passenger binding removal is revision-bound and idempotent after removal', async () => {
+  const registry = createApplicationRuntimeBindingRegistry();
+  const created = await registry.activate(activation(), { expectedRevision: 0 });
+
+  await assert.rejects(
+    registry.removeOwnedPassenger(applicationId, {
+      sourceOperationId: '1af41a08-a03d-41dc-afef-a9d1af96785d',
+      expectedRevision: created.revision,
+    }),
+    (error) => error?.code === 'runtime_binding_ownership_conflict',
+  );
+  await assert.rejects(
+    registry.removeOwnedPassenger(applicationId, {
+      sourceOperationId: operationId,
+      expectedRevision: created.revision + 1,
+    }),
+    (error) => error?.code === 'runtime_binding_revision_conflict',
+  );
+
+  const removed = await registry.removeOwnedPassenger(applicationId, {
+    sourceOperationId: operationId,
+    expectedRevision: created.revision,
+  });
+  assert.equal(removed.revision, created.revision);
+  assert.equal(await registry.getBinding(applicationId), null);
+  assert.equal(await registry.removeOwnedPassenger(applicationId, {
+    sourceOperationId: operationId,
+    expectedRevision: created.revision,
+  }), null);
 });
 
 test('runtime binding persists only durable evidence and reloads it', async () => {
