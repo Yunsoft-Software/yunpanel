@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.js",
     "./application-identity": "./src/application-identity.js",
+    "./static-deployment-manager": "./src/static-deployment-manager.js",
     "./website-static-deployment-manager": "./src/website-static-deployment-manager.js",
     "./static-deployment-legacy-fallback": "./src/static-deployment-legacy-fallback.js"
   },
