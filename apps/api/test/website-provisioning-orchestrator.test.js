@@ -238,3 +238,110 @@ test('explicit retry resets only the failed step and re-runs it through the norm
   assert.equal(retried.operation.steps[0].error, null);
   assert.equal(retried.operation.steps[1].state, 'pending');
 });
+
+test('compensation intent is persisted before invoking the compensating handler', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.create(plan());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  await registry.completeStep({
+    operationId,
+    stepId: 'unix_identity',
+    evidence: { satisfied: true, uid: 1201, gid: 1201 },
+  });
+  let observedState = null;
+  let observedEvidence = null;
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async () => ({ satisfied: true, uid: 1201 }),
+        compensate: async ({ evidence: stepEvidence }) => {
+          observedState = (await registry.get(operationId)).steps[0].state;
+          observedEvidence = stepEvidence;
+          return { satisfied: true, removedUser: true };
+        },
+      },
+    },
+  });
+
+  const result = await orchestrator.compensateStep(operationId, 'unix_identity');
+  assert.equal(observedState, 'compensating');
+  assert.deepEqual(observedEvidence, { satisfied: true, uid: 1201, gid: 1201 });
+  assert.equal(result.outcome, 'compensated');
+  assert.equal(result.operation.steps[0].state, 'compensated');
+  assert.equal(result.operation.steps[0].compensation.state, 'succeeded');
+  assert.deepEqual(result.operation.steps[0].compensation.evidence, { satisfied: true, removedUser: true });
+});
+
+test('failed compensation returns to the stable step state and can be retried', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.create(plan());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  await registry.completeStep({
+    operationId,
+    stepId: 'unix_identity',
+    evidence: { satisfied: true, uid: 1201 },
+  });
+  let attempts = 0;
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async () => ({ satisfied: true, uid: 1201 }),
+        compensate: async () => {
+          attempts += 1;
+          if (attempts === 1) {
+            const error = new Error('private host details');
+            error.code = 'unix_identity_compensation_failed';
+            throw error;
+          }
+          return { satisfied: true, removedUser: true };
+        },
+      },
+    },
+  });
+
+  const failed = await orchestrator.compensateStep(operationId, 'unix_identity');
+  assert.equal(failed.outcome, 'compensation_failed');
+  assert.equal(failed.error, 'unix_identity_compensation_failed');
+  assert.equal(failed.operation.steps[0].state, 'succeeded');
+  assert.equal(failed.operation.steps[0].compensation.state, 'failed');
+
+  const retried = await orchestrator.compensateStep(operationId, 'unix_identity');
+  assert.equal(attempts, 2);
+  assert.equal(retried.outcome, 'compensated');
+  assert.equal(retried.operation.steps[0].state, 'compensated');
+});
+
+test('interrupted compensation is inspected and never blindly repeated', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.create(plan());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  await registry.completeStep({
+    operationId,
+    stepId: 'unix_identity',
+    evidence: { satisfied: true, uid: 1201 },
+  });
+  await registry.beginCompensation({ operationId, stepId: 'unix_identity' });
+  let compensateCalls = 0;
+  let inspectCalls = 0;
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async () => ({ satisfied: true, uid: 1201 }),
+        compensate: async () => { compensateCalls += 1; return { satisfied: true, removedUser: true }; },
+        inspectCompensation: async () => {
+          inspectCalls += 1;
+          return { satisfied: true, removedUser: true };
+        },
+      },
+    },
+  });
+
+  const result = await orchestrator.runNext(operationId);
+  assert.equal(compensateCalls, 0);
+  assert.equal(inspectCalls, 1);
+  assert.equal(result.outcome, 'compensated');
+  assert.equal(result.operation.steps[0].state, 'compensated');
+});
