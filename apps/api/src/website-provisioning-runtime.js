@@ -29,6 +29,10 @@ export function createWebsiteProvisioningRuntime({
     filePath,
     ...(now ? { now } : {}),
   });
+  const nodeReleaseHandler = (gitCredentialProvider = null) => createWebsiteNodeReleaseProvisioningHandler({
+    ...(nodeReleaseManager ? { nodeReleaseManager } : {}),
+    ...(gitCredentialProvider ? { gitCredentialProvider } : {}),
+  });
   const handlers = {
     ...createWebsiteProvisioningHandlers({
       ...(identityManager ? { identityManager } : {}),
@@ -36,9 +40,7 @@ export function createWebsiteProvisioningRuntime({
       ...(staticDeploymentManager ? { staticDeploymentManager } : {}),
       ...(nginxManager ? { nginxManager } : {}),
     }),
-    node_release: createWebsiteNodeReleaseProvisioningHandler({
-      ...(nodeReleaseManager ? { nodeReleaseManager } : {}),
-    }),
+    node_release: nodeReleaseHandler(),
     passenger_health: createWebsitePassengerHealthProvisioningHandler({
       ...(passengerHealthInspector ? { healthInspector: passengerHealthInspector } : {}),
     }),
@@ -65,7 +67,9 @@ export function createWebsiteProvisioningRuntime({
 
   function configurePassengerEnvironment(dependencies = {}) {
     const nextRegistry = dependencies.applicationEnvironmentRegistry;
-    if (!nextRegistry) throw new Error('Passenger Website environment registry is required');
+    if (!nextRegistry || typeof nextRegistry.materializeDeploymentCredential !== 'function') {
+      throw new Error('Passenger Website environment registry is required');
+    }
     if (passengerEnvironment) {
       if (passengerEnvironment.applicationEnvironmentRegistry !== nextRegistry) {
         throw new Error('Passenger Website environment registry cannot be replaced');
@@ -76,6 +80,9 @@ export function createWebsiteProvisioningRuntime({
       applicationEnvironmentRegistry: nextRegistry,
       ...(passengerEnvironmentManager ? { environmentManager: passengerEnvironmentManager } : {}),
     });
+    handlers.node_release = nodeReleaseHandler(
+      (applicationId) => nextRegistry.materializeDeploymentCredential(applicationId),
+    );
     passengerEnvironment = Object.freeze({ applicationEnvironmentRegistry: nextRegistry });
     return Object.freeze({ configured: true });
   }
