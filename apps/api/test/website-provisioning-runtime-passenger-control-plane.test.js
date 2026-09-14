@@ -18,6 +18,7 @@ function hostDependencies() {
       inspectCompensation: async () => ({}),
       compensate: async () => ({}),
     },
+    passengerHealthInspector: { inspect: async () => ({ satisfied: true }) },
     staticDeploymentManager: {
       deployStatic: async () => ({}), inspectCurrent: async () => ({}), inspectDeployment: async () => ({}),
       compensateDeployment: async () => ({}), inspectCompensation: async () => ({}),
@@ -29,6 +30,15 @@ function hostDependencies() {
   };
 }
 
+function environmentRegistry() {
+  return {
+    environmentStatus: async () => ({ savedRevision: 0 }),
+    materialize: async () => ({}),
+    markApplied: async () => ({}),
+    materializeDeploymentCredential: async () => null,
+  };
+}
+
 function controlPlaneDependencies() {
   return {
     applicationRegistry: {
@@ -36,11 +46,7 @@ function controlPlaneDependencies() {
       activatePassengerRelease: async () => ({}),
       resetPassengerInitialRelease: async () => ({}),
     },
-    applicationEnvironmentRegistry: {
-      environmentStatus: async () => ({ savedRevision: 0 }),
-      materialize: async () => ({}),
-      markApplied: async () => ({}),
-    },
+    applicationEnvironmentRegistry: environmentRegistry(),
     websiteRegistry: { getWebsite: async () => null },
     domainRegistry: {
       getDomain: async () => null,
@@ -57,6 +63,7 @@ function controlPlaneDependencies() {
 
 test('Website provisioning runtime can attach Domain, environment and Passenger control-plane handlers after startup', () => {
   const runtime = createWebsiteProvisioningRuntime(hostDependencies());
+  assert.equal(typeof runtime.handlers.passenger_health.apply, 'function');
   assert.equal(runtime.handlers.domain_activation, undefined);
   assert.equal(runtime.handlers.passenger_environment, undefined);
   assert.equal(runtime.handlers.passenger_application_release, undefined);
@@ -76,13 +83,7 @@ test('Website provisioning runtime can attach Domain, environment and Passenger 
   assert.deepEqual(runtime.configurePassengerControlPlane(dependencies), { configured: true });
 
   assert.throws(
-    () => runtime.configurePassengerEnvironment({
-      applicationEnvironmentRegistry: {
-        environmentStatus: async () => ({ savedRevision: 0 }),
-        materialize: async () => ({}),
-        markApplied: async () => ({}),
-      },
-    }),
+    () => runtime.configurePassengerEnvironment({ applicationEnvironmentRegistry: environmentRegistry() }),
     /cannot be replaced/,
   );
   assert.throws(
