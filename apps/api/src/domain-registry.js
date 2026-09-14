@@ -255,6 +255,30 @@ function updateDigest({ domain, next, hierarchy }) {
   })).digest('hex');
 }
 
+function provisioningDomains(value) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 2) {
+    throw new DomainRegistryError('provisioned_domains_invalid', 'Provisioned Domain evidence must contain one or two Domains');
+  }
+  const seen = new Set();
+  const normalized = value.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || Object.keys(entry).length !== 2
+      || !Object.hasOwn(entry, 'domainId') || !Object.hasOwn(entry, 'expectedRevision')) {
+      throw new DomainRegistryError('provisioned_domains_invalid', 'Provisioned Domain evidence is invalid');
+    }
+    let domainId;
+    try { domainId = assertUuid(entry.domainId, 'domainId'); }
+    catch { throw new DomainRegistryError('provisioned_domains_invalid', 'Provisioned Domain identity is invalid'); }
+    if (seen.has(domainId) || !Number.isSafeInteger(entry.expectedRevision) || entry.expectedRevision < 1) {
+      throw new DomainRegistryError('provisioned_domains_invalid', 'Provisioned Domain evidence is invalid');
+    }
+    seen.add(domainId);
+    return Object.freeze({ domainId, expectedRevision: entry.expectedRevision });
+  });
+  normalized.sort((left, right) => left.domainId.localeCompare(right.domainId));
+  return Object.freeze(normalized);
+}
+
 export function createDomainRegistry({
   filePath = null,
   now = () => Date.now(),
@@ -622,6 +646,127 @@ export function createDomainRegistry({
     return publicDomain(domain);
   }
 
+  async function activateProvisionedDomains({ websiteId, domains, checksum, configName } = {}) {
+    await ensureInitialized();
+    const normalizedWebsiteId = normalizeWebsiteId(websiteId);
+    if (normalizedWebsiteId === null) {
+      throw new DomainRegistryError('provisioned_domains_website_invalid', 'Provisioned Domains require a Website identity');
+    }
+    const expected = provisioningDomains(domains);
+    if (typeof checksum !== 'string' || !SHA256_PATTERN.test(checksum)) {
+      throw new DomainRegistryError('invalid_staged_checksum', 'Provisioned Domain checksum is invalid');
+    }
+    if (typeof configName !== 'string' || configName.length < 1 || configName.length > 300) {
+      throw new DomainRegistryError('invalid_staged_config', 'Provisioned Domain config name is invalid');
+    }
+
+    let changed = false;
+    const targets = expected.map((entry) => {
+      const domain = requireDomain(state, entry.domainId);
+      if (domain.websiteId !== normalizedWebsiteId || domain.desiredRevision !== entry.expectedRevision) {
+        throw new DomainRegistryError('provisioned_domain_state_drift', 'Provisioned Domain identity or desired revision changed before activation', 409);
+      }
+      const active = domain.stagedRevision === entry.expectedRevision
+        && domain.appliedRevision === entry.expectedRevision
+        && domain.stagedChecksum === checksum
+        && domain.stagedConfigName === configName
+        && domain.appliedPrimaryDomain === domain.primaryDomain
+        && domain.state === 'active'
+        && domain.lastError === null;
+      const pristine = domain.certificateId === null
+        && domain.stagedRevision === 0 && domain.appliedRevision === 0
+        && domain.stagedChecksum === null && domain.stagedConfigName === null
+        && domain.lastStagedAt === null && domain.lastAppliedAt === null
+        && domain.appliedPrimaryDomain === null && domain.state === 'draft'
+        && domain.lastError === null;
+      if (!active && !pristine) {
+        throw new DomainRegistryError('provisioned_domain_state_drift', 'Provisioned Domain routing state changed before activation', 409);
+      }
+      changed ||= pristine;
+      return { domain, active };
+    });
+
+    if (changed) {
+      const timestamp = new Date(now()).toISOString();
+      for (const { domain, active } of targets) {
+        if (active) continue;
+        domain.stagedRevision = domain.desiredRevision;
+        domain.stagedChecksum = checksum;
+        domain.stagedConfigName = configName;
+        domain.lastStagedAt = timestamp;
+        domain.appliedRevision = domain.desiredRevision;
+        domain.appliedPrimaryDomain = domain.primaryDomain;
+        domain.lastAppliedAt = timestamp;
+        domain.state = 'active';
+        domain.lastError = null;
+        domain.updatedAt = timestamp;
+      }
+      await persist();
+    }
+    return Object.freeze(targets.map(({ domain }) => Object.freeze(publicDomain(domain))));
+  }
+
+  async function resetProvisionedDomains({ websiteId, domains, checksum, configName } = {}) {
+    await ensureInitialized();
+    const normalizedWebsiteId = normalizeWebsiteId(websiteId);
+    if (normalizedWebsiteId === null) {
+      throw new DomainRegistryError('provisioned_domains_website_invalid', 'Provisioned Domains require a Website identity');
+    }
+    const expected = provisioningDomains(domains);
+    if (typeof checksum !== 'string' || !SHA256_PATTERN.test(checksum)) {
+      throw new DomainRegistryError('invalid_staged_checksum', 'Provisioned Domain checksum is invalid');
+    }
+    if (typeof configName !== 'string' || configName.length < 1 || configName.length > 300) {
+      throw new DomainRegistryError('invalid_staged_config', 'Provisioned Domain config name is invalid');
+    }
+
+    let changed = false;
+    const targets = expected.map((entry) => {
+      const domain = requireDomain(state, entry.domainId);
+      if (domain.websiteId !== normalizedWebsiteId || domain.desiredRevision !== entry.expectedRevision) {
+        throw new DomainRegistryError('provisioned_domain_compensation_drift', 'Provisioned Domain identity or desired revision changed before compensation', 409);
+      }
+      const pristine = domain.certificateId === null
+        && domain.stagedRevision === 0 && domain.appliedRevision === 0
+        && domain.stagedChecksum === null && domain.stagedConfigName === null
+        && domain.lastStagedAt === null && domain.lastAppliedAt === null
+        && domain.appliedPrimaryDomain === null && domain.state === 'draft'
+        && domain.lastError === null;
+      const ownedActive = domain.certificateId === null
+        && domain.stagedRevision === entry.expectedRevision
+        && domain.appliedRevision === entry.expectedRevision
+        && domain.stagedChecksum === checksum
+        && domain.stagedConfigName === configName
+        && domain.appliedPrimaryDomain === domain.primaryDomain
+        && domain.state === 'active'
+        && domain.lastError === null;
+      if (!pristine && !ownedActive) {
+        throw new DomainRegistryError('provisioned_domain_compensation_drift', 'Provisioned Domain routing state changed after activation', 409);
+      }
+      changed ||= ownedActive;
+      return { domain, pristine };
+    });
+
+    if (changed) {
+      const timestamp = new Date(now()).toISOString();
+      for (const { domain, pristine } of targets) {
+        if (pristine) continue;
+        domain.stagedRevision = 0;
+        domain.stagedChecksum = null;
+        domain.stagedConfigName = null;
+        domain.lastStagedAt = null;
+        domain.appliedRevision = 0;
+        domain.appliedPrimaryDomain = null;
+        domain.lastAppliedAt = null;
+        domain.state = 'draft';
+        domain.lastError = null;
+        domain.updatedAt = timestamp;
+      }
+      await persist();
+    }
+    return Object.freeze(targets.map(({ domain }) => Object.freeze(publicDomain(domain))));
+  }
+
   async function markStaged(domainId, { checksum, configName }) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
@@ -677,6 +822,8 @@ export function createDomainRegistry({
     listDomains,
     getDomain,
     attachCertificate,
+    activateProvisionedDomains,
+    resetProvisionedDomains,
     markStaged,
     markApplied,
     markFailed,
@@ -696,6 +843,7 @@ export const domainRegistryInternals = Object.freeze({
   reparentDigest,
   normalizedUpdate,
   updateDigest,
+  provisioningDomains,
   diagnosis,
   hydrateDomain,
 });
