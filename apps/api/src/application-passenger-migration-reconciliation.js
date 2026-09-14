@@ -1,4 +1,5 @@
 import { OPERATIONS } from '@yunpanel/protocol';
+import { materializeApplicationPassengerMigrationDomainEnvelope } from './application-passenger-migration-domain.js';
 
 export class ApplicationPassengerMigrationReconciliationError extends Error {
   constructor(code, message) {
@@ -10,32 +11,6 @@ export class ApplicationPassengerMigrationReconciliationError extends Error {
 
 function same(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function currentDomainEnvelope(domain, certificate = null) {
-  return Object.freeze({
-    primaryDomain: domain.primaryDomain,
-    aliases: Object.freeze([...domain.aliases]),
-    tls: certificate ? Object.freeze({
-      fullchainPath: certificate.fullchainPath,
-      privateKeyPath: certificate.privateKeyPath,
-    }) : null,
-    canonicalRedirect: domain.canonicalRedirect === true,
-    httpsRedirect: domain.httpsRedirect !== false,
-    nginxSettings: Object.freeze(structuredClone(domain.nginxSettings)),
-  });
-}
-
-async function migrationDomainEnvelope(domain, certificateRegistry) {
-  if (!domain.certificateId) return currentDomainEnvelope(domain);
-  const certificate = await certificateRegistry.getCertificate(domain.certificateId);
-  if (!certificate || certificate.state !== 'active' || certificate.staging === true) {
-    throw new ApplicationPassengerMigrationReconciliationError(
-      'node_passenger_migration_certificate_drift',
-      'Passenger migration certificate state changed before reconciliation',
-    );
-  }
-  return currentDomainEnvelope(domain, certificate);
 }
 
 export async function reconcileApplicationPassengerMigration({
@@ -113,7 +88,7 @@ export async function reconcileApplicationPassengerMigration({
     );
   }
 
-  const currentEnvelope = await migrationDomainEnvelope(domain, certificateRegistry);
+  const currentEnvelope = await materializeApplicationPassengerMigrationDomainEnvelope(domain, certificateRegistry);
   if (!same(currentEnvelope, job.payload.domain)) {
     throw new ApplicationPassengerMigrationReconciliationError(
       'node_passenger_migration_domain_drift',
@@ -141,8 +116,4 @@ export async function reconcileApplicationPassengerMigration({
   }, { expectedRevision });
 }
 
-export const applicationPassengerMigrationReconciliationInternals = Object.freeze({
-  same,
-  currentDomainEnvelope,
-  migrationDomainEnvelope,
-});
+export const applicationPassengerMigrationReconciliationInternals = Object.freeze({ same });
