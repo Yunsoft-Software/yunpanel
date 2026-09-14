@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { nodeApplicationUser } from '@yunpanel/config-templates';
 import { createApplicationPathContract } from './website-path-contract.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -19,8 +19,7 @@ function normalizeApplicationId(value) {
 }
 
 export function applicationUnixUser(applicationId) {
-  const normalized = normalizeApplicationId(applicationId);
-  return `yunapp-${createHash('sha256').update(normalized).digest('hex').slice(0, 12)}`;
+  return nodeApplicationUser(normalizeApplicationId(applicationId));
 }
 
 export function createApplicationIdentity(applicationId, pathOptions = {}) {
