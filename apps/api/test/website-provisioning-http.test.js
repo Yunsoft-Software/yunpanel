@@ -84,6 +84,7 @@ function orchestrator(overrides = {}) {
     runNext: async () => ({}),
     retryStep: async () => ({}),
     compensateStep: async () => ({}),
+    supportsCompensation: (kind) => ['unix_identity', 'nginx'].includes(kind),
     ...overrides,
   };
 }
@@ -98,6 +99,8 @@ function assertSecretSafeOperation(value) {
   assert.equal('intent' in value.steps[0], false);
   assert.equal('evidence' in value.steps[0], false);
   assert.equal('evidence' in value.steps[0].compensation, false);
+  assert.equal(value.steps[0].canRetry, false);
+  assert.equal(value.steps[0].canCompensate, true);
   assert.deepEqual(value.steps[1], {
     id: 'nginx',
     kind: 'nginx',
@@ -108,6 +111,8 @@ function assertSecretSafeOperation(value) {
       state: 'failed',
       error: 'website_nginx_compensation_failed',
     },
+    canRetry: false,
+    canCompensate: true,
   });
   assert.equal(JSON.stringify(value).includes('must-never-reach-browser'), false);
   assert.equal(JSON.stringify(value).includes('intent-secret'), false);
@@ -168,6 +173,24 @@ test('Website latest provisioning route rejects malformed Website ids before reg
       && error.code === 'website_provisioning_website_invalid',
   );
   assert.equal(calls, 0);
+});
+
+test('public projection does not advertise compensation without a concrete handler', () => {
+  const operation = durableOperation({
+    steps: [{
+      id: 'runtime',
+      kind: 'runtime',
+      required: true,
+      state: 'failed',
+      intent: { secret: true },
+      evidence: null,
+      error: 'runtime_failed',
+      compensation: { state: 'pending', evidence: null, error: null },
+    }],
+  });
+  const projected = websiteProvisioningHttpInternals.publicOperation(operation, () => false);
+  assert.equal(projected.steps[0].canRetry, true);
+  assert.equal(projected.steps[0].canCompensate, false);
 });
 
 test('continue route requires exact operation-bound confirmation', async () => {
