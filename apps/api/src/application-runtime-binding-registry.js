@@ -6,6 +6,20 @@ const STORE_VERSION = 1;
 const ADAPTERS = new Set(['direct-systemd', 'passenger']);
 const STATES = new Set(['active', 'cleanup_required']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
+const SAFE_PATH_PATTERN = /^\/[A-Za-z0-9._/-]+$/;
+const SAFE_RELATIVE_PATH_PATTERN = /^[A-Za-z0-9._/-]+$/;
+const APP_ENV_PATTERN = /^[A-Za-z0-9._-]{1,40}$/;
+const PASSENGER_TARGET_FIELDS = new Set([
+  'appRoot',
+  'documentRoot',
+  'startupFile',
+  'nodeBinary',
+  'user',
+  'group',
+  'appEnv',
+  'environmentInclude',
+]);
 
 export class ApplicationRuntimeBindingRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -55,6 +69,38 @@ function domains(value) {
   return Object.freeze(normalized);
 }
 
+function safeAbsolutePath(value) {
+  return typeof value === 'string' && value.length <= 500 && SAFE_PATH_PATTERN.test(value)
+    && path.posix.normalize(value) === value && !value.includes('/../') && !value.endsWith('/..');
+}
+
+function passengerTarget(value, adapter) {
+  if (adapter === 'direct-systemd') {
+    if (value !== null && value !== undefined) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_target_invalid', 'direct-systemd runtime binding cannot persist a Passenger target', 409);
+    }
+    return null;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== PASSENGER_TARGET_FIELDS.size
+    || Object.keys(value).some((field) => !PASSENGER_TARGET_FIELDS.has(field))
+    || !safeAbsolutePath(value.appRoot)
+    || !safeAbsolutePath(value.documentRoot)
+    || !safeAbsolutePath(value.nodeBinary)
+    || !safeAbsolutePath(value.environmentInclude)
+    || typeof value.startupFile !== 'string' || value.startupFile.length > 300
+    || !SAFE_RELATIVE_PATH_PATTERN.test(value.startupFile)
+    || path.posix.isAbsolute(value.startupFile)
+    || path.posix.normalize(value.startupFile) !== value.startupFile
+    || value.startupFile.startsWith('../') || value.startupFile.includes('/../')
+    || !APP_USER_PATTERN.test(value.user)
+    || value.group !== value.user
+    || typeof value.appEnv !== 'string' || !APP_ENV_PATTERN.test(value.appEnv)) {
+    throw new ApplicationRuntimeBindingRegistryError('runtime_binding_target_invalid', 'Passenger runtime binding target is invalid', 409);
+  }
+  return Object.freeze({ ...value });
+}
+
 function normalizeRecord(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || !ADAPTERS.has(value.adapter) || !STATES.has(value.state)) {
@@ -71,6 +117,7 @@ function normalizeRecord(value) {
     websiteId: uuid(value.websiteId, 'websiteId'),
     websiteRevision: revision(value.websiteRevision, 'websiteRevision'),
     domains: domains(value.domains),
+    passengerTarget: passengerTarget(value.passengerTarget, value.adapter),
     updatedAt: value.updatedAt,
   };
   if (typeof normalized.updatedAt !== 'string' || Number.isNaN(Date.parse(normalized.updatedAt))) {
@@ -87,6 +134,7 @@ function publicRecord(record) {
   return Object.freeze({
     ...record,
     domains: Object.freeze(record.domains.map((entry) => Object.freeze({ ...entry }))),
+    passengerTarget: record.passengerTarget ? Object.freeze({ ...record.passengerTarget }) : null,
   });
 }
 
@@ -99,7 +147,8 @@ function sameActivation(left, right) {
     && left.releaseId === right.releaseId
     && left.websiteId === right.websiteId
     && left.websiteRevision === right.websiteRevision
-    && JSON.stringify(left.domains) === JSON.stringify(right.domains);
+    && JSON.stringify(left.domains) === JSON.stringify(right.domains)
+    && JSON.stringify(left.passengerTarget) === JSON.stringify(right.passengerTarget);
 }
 
 export function createApplicationRuntimeBindingRegistry({ filePath = null, now = () => Date.now() } = {}) {
@@ -181,5 +230,6 @@ export const applicationRuntimeBindingRegistryInternals = Object.freeze({
   states: Object.freeze([...STATES]),
   normalizeRecord,
   domains,
+  passengerTarget,
   sameActivation,
 });
