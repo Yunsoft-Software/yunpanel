@@ -1,3 +1,4 @@
+import { createWebsiteDomainActivationProvisioningHandler } from './website-domain-activation-provisioning-handler.js';
 import { createWebsiteNodeReleaseProvisioningHandler } from './website-node-release-provisioning-handler.js';
 import { createWebsitePassengerApplicationReleaseProvisioningHandler } from './website-passenger-application-release-provisioning-handler.js';
 import { createWebsitePassengerAuthorityProvisioningHandler } from './website-passenger-authority-provisioning-handler.js';
@@ -54,6 +55,9 @@ export function createWebsiteProvisioningRuntime({
       }
       return Object.freeze({ configured: true });
     }
+    handlers.domain_activation = createWebsiteDomainActivationProvisioningHandler({
+      domainRegistry: nextDomainRegistry,
+    });
     handlers.passenger_application_release = createWebsitePassengerApplicationReleaseProvisioningHandler({
       applicationRegistry: nextApplicationRegistry,
     });
