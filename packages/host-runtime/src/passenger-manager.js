@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readFile, readlink, rename, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { createPassengerInspector } from './passenger-inspector.js';
@@ -22,6 +22,14 @@ const SYSTEMCTL = '/usr/bin/systemctl';
 const PACKAGE = 'libnginx-mod-http-passenger';
 const VERSION_PATTERN = /^[A-Za-z0-9.+:~_-]{1,120}$/;
 const SUPPORTED = Object.freeze({ id: 'ubuntu', versionId: '24.04', codename: 'noble' });
+const APPLY_CHECKPOINTS = Object.freeze([
+  'before-repository',
+  'after-repository',
+  'after-package-install',
+  'after-module-link',
+  'after-nginx-restart',
+  'after-apply-inspection',
+]);
 const UPGRADE_CHECKPOINTS = Object.freeze([
   'before-package-upgrade',
   'after-package-upgrade',
@@ -95,11 +103,13 @@ export function createPassengerManager({
   readFileFn = readFile,
   readlinkFn = readlink,
   renameFn = rename,
+  rmFn = rm,
   symlinkFn = symlink,
   writeFileFn = writeFile,
   checkpoint = async () => {},
 } = {}) {
-  if (!inspector || typeof inspector.inspect !== 'function' || typeof run !== 'function' || typeof checkpoint !== 'function') {
+  if (!inspector || typeof inspector.inspect !== 'function' || typeof run !== 'function'
+    || typeof rmFn !== 'function' || typeof checkpoint !== 'function') {
     throw new PassengerManagerError('passenger_manager_dependencies_invalid', 'Passenger manager dependencies are invalid');
   }
   let activeApply = null;
@@ -160,6 +170,73 @@ export function createPassengerManager({
     await renameFn(temporary, targetPath);
   }
 
+  async function atomicRestore(targetPath, content, mode) {
+    const temporary = `${targetPath}.${process.pid}.rollback.tmp`;
+    await writeFileFn(temporary, content, { mode });
+    await renameFn(temporary, targetPath);
+  }
+
+  async function snapshotManagedPath(targetPath, kind) {
+    let info;
+    try { info = await lstatFn(targetPath); }
+    catch (error) {
+      if (error?.code === 'ENOENT') return Object.freeze({ kind: 'absent' });
+      throw new PassengerManagerError('passenger_install_snapshot_failed', 'Passenger managed state could not be snapshotted');
+    }
+    if (kind === 'link') {
+      if (!info.isSymbolicLink?.()) {
+        throw new PassengerManagerError('passenger_module_link_conflict', 'Passenger Nginx module path is not a symbolic link');
+      }
+      try { return Object.freeze({ kind: 'symlink', target: await readlinkFn(targetPath) }); }
+      catch { throw new PassengerManagerError('passenger_install_snapshot_failed', 'Passenger module link could not be snapshotted'); }
+    }
+    if (!info.isFile?.()) {
+      throw new PassengerManagerError('passenger_install_snapshot_failed', 'Passenger managed file state is not a regular file');
+    }
+    try {
+      return Object.freeze({
+        kind: 'file',
+        content: await readFileFn(targetPath),
+        mode: Number.isInteger(info.mode) ? info.mode & 0o777 : 0o644,
+      });
+    } catch {
+      throw new PassengerManagerError('passenger_install_snapshot_failed', 'Passenger managed file content could not be snapshotted');
+    }
+  }
+
+  async function snapshotManagedState() {
+    const [key, repository, moduleLink] = await Promise.all([
+      snapshotManagedPath(KEY_PATH, 'file'),
+      snapshotManagedPath(REPOSITORY_PATH, 'file'),
+      snapshotManagedPath(MODULE_LINK, 'link'),
+    ]);
+    return Object.freeze({ key, repository, moduleLink });
+  }
+
+  async function restoreManagedPath(targetPath, snapshot) {
+    try {
+      await rmFn(targetPath, { force: true });
+      if (snapshot.kind === 'absent') return;
+      if (snapshot.kind === 'symlink') {
+        await symlinkFn(snapshot.target, targetPath);
+        return;
+      }
+      if (snapshot.kind === 'file') {
+        await atomicRestore(targetPath, snapshot.content, snapshot.mode);
+        return;
+      }
+      throw new Error('unsupported snapshot');
+    } catch {
+      throw new PassengerManagerError('passenger_install_rollback_failed', 'Passenger managed configuration could not be restored');
+    }
+  }
+
+  async function restoreManagedState(snapshot) {
+    await restoreManagedPath(MODULE_LINK, snapshot.moduleLink);
+    await restoreManagedPath(REPOSITORY_PATH, snapshot.repository);
+    await restoreManagedPath(KEY_PATH, snapshot.key);
+  }
+
   async function installRepository() {
     await mkdirFn(STAGING_ROOT, { recursive: true, mode: 0o700 });
     await mkdirFn(path.dirname(KEY_PATH), { recursive: true, mode: 0o755 });
@@ -208,12 +285,70 @@ export function createPassengerManager({
     }
   }
 
+  async function rollbackApply({ before, nginxBefore, snapshot }) {
+    try {
+      if (before.installed) {
+        if (typeof before.installedVersion !== 'string' || !VERSION_PATTERN.test(before.installedVersion)) {
+          throw new PassengerManagerError('passenger_install_rollback_failed', 'Previous Passenger package version is not recoverable');
+        }
+        await runSafe(
+          APT_GET,
+          ['install', '--allow-downgrades', '--yes', '--no-install-recommends', `${PACKAGE}=${before.installedVersion}`],
+          { timeout: 10 * 60 * 1000 },
+          'passenger_install_rollback_failed',
+          'Previous Passenger package could not be restored',
+        );
+      } else {
+        await runSafe(
+          APT_GET,
+          ['remove', '--yes', '--purge', PACKAGE],
+          { timeout: 10 * 60 * 1000 },
+          'passenger_install_rollback_failed',
+          'New Passenger package could not be removed during rollback',
+        );
+      }
+      await restoreManagedState(snapshot);
+      if (!nginxBefore.installed) {
+        throw new PassengerManagerError(
+          'passenger_install_rollback_incomplete',
+          'Passenger rollback restored managed configuration but newly installed Nginx still requires verified cleanup',
+        );
+      }
+      await runSafe(
+        NGINX_PATH,
+        ['-t'],
+        { timeout: 30_000 },
+        'passenger_install_rollback_failed',
+        'Nginx rejected restored Passenger configuration',
+      );
+      await runSafe(
+        SYSTEMCTL,
+        ['restart', 'nginx'],
+        { timeout: 60_000 },
+        'passenger_install_rollback_failed',
+        'Nginx could not restart after Passenger rollback',
+      );
+      const restored = await inspector.inspect();
+      if (restored?.installed !== before.installed
+        || (before.installed && restored.installedVersion !== before.installedVersion)
+        || restored?.healthy !== before.healthy) {
+        throw new PassengerManagerError('passenger_install_rollback_failed', 'Passenger rollback did not restore the previous runtime state');
+      }
+      return restored;
+    } catch (error) {
+      if (error instanceof PassengerManagerError
+        && ['passenger_install_rollback_failed', 'passenger_install_rollback_incomplete'].includes(error.code)) throw error;
+      throw new PassengerManagerError('passenger_install_rollback_failed', 'Passenger rollback could not restore the previous runtime state');
+    }
+  }
+
   async function applyUnlocked() {
     const before = await inspector.inspect();
     if (before.healthy) return Object.freeze({ changed: false, ...before });
 
     await platform();
-    await assertCompatibleNginx();
+    const nginxBefore = await assertCompatibleNginx();
+    const snapshot = await snapshotManagedState();
     await runSafe(
       APT_GET,
       ['update'],
@@ -228,30 +363,47 @@ export function createPassengerManager({
       'passenger_prerequisites_failed',
       'Passenger package prerequisites could not be installed',
     );
-    await installRepository();
-    await runSafe(
-      APT_GET,
-      ['update'],
-      { timeout: 10 * 60 * 1000 },
-      'passenger_repository_update_failed',
-      'Passenger APT repository could not be refreshed',
-    );
-    await runSafe(
-      APT_GET,
-      ['install', '--yes', '--no-install-recommends', 'nginx', PACKAGE],
-      { timeout: 10 * 60 * 1000 },
-      'passenger_package_install_failed',
-      'Passenger Nginx package could not be installed',
-    );
-    await ensureModuleLink();
-    await runSafe(NGINX_PATH, ['-t'], { timeout: 30_000 }, 'passenger_nginx_config_invalid', 'Nginx rejected the Passenger installation');
-    await runSafe(SYSTEMCTL, ['restart', 'nginx'], { timeout: 60_000 }, 'passenger_nginx_restart_failed', 'Nginx could not restart with Passenger enabled');
+    await mutationCheckpoint('before-repository');
+    let mutationAttempted = false;
+    try {
+      mutationAttempted = true;
+      await installRepository();
+      await mutationCheckpoint('after-repository');
+      await runSafe(
+        APT_GET,
+        ['update'],
+        { timeout: 10 * 60 * 1000 },
+        'passenger_repository_update_failed',
+        'Passenger APT repository could not be refreshed',
+      );
+      await runSafe(
+        APT_GET,
+        ['install', '--yes', '--no-install-recommends', 'nginx', PACKAGE],
+        { timeout: 10 * 60 * 1000 },
+        'passenger_package_install_failed',
+        'Passenger Nginx package could not be installed',
+      );
+      await mutationCheckpoint('after-package-install');
+      await ensureModuleLink();
+      await mutationCheckpoint('after-module-link');
+      await runSafe(NGINX_PATH, ['-t'], { timeout: 30_000 }, 'passenger_nginx_config_invalid', 'Nginx rejected the Passenger installation');
+      await runSafe(SYSTEMCTL, ['restart', 'nginx'], { timeout: 60_000 }, 'passenger_nginx_restart_failed', 'Nginx could not restart with Passenger enabled');
+      await mutationCheckpoint('after-nginx-restart');
 
-    const after = await inspector.inspect();
-    if (!after.healthy) {
-      throw new PassengerManagerError('passenger_install_incomplete', 'Passenger installation completed without a healthy Nginx integration');
+      const after = await inspector.inspect();
+      await mutationCheckpoint('after-apply-inspection');
+      if (!after.healthy) {
+        throw new PassengerManagerError('passenger_install_incomplete', 'Passenger installation completed without a healthy Nginx integration');
+      }
+      return Object.freeze({ changed: true, ...after });
+    } catch (error) {
+      if (mutationAttempted) {
+        try { await rollbackApply({ before, nginxBefore, snapshot }); }
+        catch (rollbackError) { throw rollbackError; }
+      }
+      if (error instanceof PassengerManagerError) throw error;
+      throw new PassengerManagerError('passenger_install_failed', 'Passenger installation failed');
     }
-    return Object.freeze({ changed: true, ...after });
   }
 
   async function upgradeCandidate() {
@@ -398,5 +550,6 @@ export const passengerManagerInternals = Object.freeze({
   moduleSource: MODULE_SOURCE,
   moduleLink: MODULE_LINK,
   packageName: PACKAGE,
+  applyCheckpoints: APPLY_CHECKPOINTS,
   upgradeCheckpoints: UPGRADE_CHECKPOINTS,
 });
