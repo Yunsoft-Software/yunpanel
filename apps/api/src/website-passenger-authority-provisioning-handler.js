@@ -40,14 +40,16 @@ function normalizeIntent(context = {}) {
 
   const application = operation.resources?.application;
   const website = operation.resources?.website;
+  const primaryDomain = operation.resources?.primaryDomain;
   const plannedDomainIds = [
-    operation.resources?.primaryDomain?.id,
+    primaryDomain?.id,
     operation.resources?.wwwDomain?.id,
   ].filter(Boolean).sort();
   if (!application || application.id !== intent.applicationId || application.type !== 'node'
     || application.runtimeAdapter !== 'passenger' || !application.runtime
     || !website || website.id !== websiteId || website.applicationId !== application.id
     || website.runtimeType !== 'node'
+    || !primaryDomain || typeof primaryDomain.primaryDomain !== 'string'
     || !same([...intent.domainIds].sort(), plannedDomainIds)) {
     throw new WebsitePassengerAuthorityProvisioningError(
       'website_passenger_authority_plan_drift',
@@ -56,6 +58,7 @@ function normalizeIntent(context = {}) {
   }
 
   const environment = succeededStep(operation, 'passenger_environment');
+  const health = succeededStep(operation, 'passenger_health');
   const release = succeededStep(operation, 'application_release');
   const environmentState = succeededStep(operation, 'passenger_environment_state');
   const runtime = succeededStep(operation, 'runtime');
@@ -66,6 +69,12 @@ function normalizeIntent(context = {}) {
     || !Number.isSafeInteger(environment.environmentRevision) || environment.environmentRevision < 0
     || typeof environment.environmentInclude !== 'string'
     || typeof environment.includeSha256 !== 'string' || !CHECKSUM_PATTERN.test(environment.includeSha256)
+    || !health || health.satisfied !== true || health.adapter !== 'nginx-http-health'
+    || health.applicationId !== application.id || health.websiteId !== websiteId
+    || health.primaryDomain !== primaryDomain.primaryDomain
+    || health.healthPath !== application.runtime.healthPath
+    || !Number.isInteger(health.statusCode) || health.statusCode < 200 || health.statusCode >= 300
+    || health.route !== '127.0.0.1:80'
     || !release || release.adapter !== 'passenger-application-release'
     || release.applicationId !== application.id || release.releaseId !== operationId
     || !environmentState || environmentState.adapter !== 'passenger-environment-state'
@@ -95,6 +104,7 @@ function normalizeIntent(context = {}) {
     domainIds: Object.freeze([...plannedDomainIds]),
     releaseId: release.releaseId,
     environment,
+    health,
     environmentState,
     runtime,
     nginx,
