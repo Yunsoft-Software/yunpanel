@@ -10,6 +10,7 @@ import {
 } from '@yunpanel/config-templates';
 
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
+const ROLLBACK_RECEIPT_VERSION = 1;
 
 export class NginxManagerError extends Error {
   constructor(code, message) {
@@ -76,6 +77,37 @@ function renderDomainConfig(spec) {
   throw new NginxManagerError('invalid_target_type', 'Domain targetType must be static, proxy or passenger');
 }
 
+function fileState(content) {
+  if (content === null) return Object.freeze({ exists: false, checksum: null, content: null });
+  return Object.freeze({ exists: true, checksum: sha256(content), content });
+}
+
+function sameFileState(left, right) {
+  return left.exists === right.exists
+    && left.checksum === right.checksum
+    && left.content === right.content;
+}
+
+function normalizeReceiptState(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || typeof value.exists !== 'boolean') {
+    throw new NginxManagerError('nginx_rollback_receipt_invalid', 'Nginx rollback receipt is invalid');
+  }
+  if (!value.exists) {
+    if (value.content !== null || value.checksum !== null) {
+      throw new NginxManagerError('nginx_rollback_receipt_invalid', 'Nginx rollback receipt is invalid');
+    }
+    return fileState(null);
+  }
+  if (typeof value.content !== 'string'
+    || typeof value.checksum !== 'string'
+    || !CHECKSUM_PATTERN.test(value.checksum)
+    || sha256(value.content) !== value.checksum) {
+    throw new NginxManagerError('nginx_rollback_receipt_invalid', 'Nginx rollback receipt is invalid');
+  }
+  return fileState(value.content);
+}
+
 export function createNginxManager({
   stagingDir = '/var/lib/yunpanel/staging/nginx',
   sitesDir = '/etc/nginx/sites-enabled',
@@ -89,6 +121,7 @@ export function createNginxManager({
   execFn = execFileSafe,
 } = {}) {
   let activationChain = Promise.resolve();
+  const rollbackDir = path.join(stagingDir, 'rollback');
 
   async function atomicWrite(targetPath, content, mode) {
     const temporaryPath = `${targetPath}.${process.pid}.tmp`;
@@ -104,6 +137,101 @@ export function createNginxManager({
       checksum: sha256(config),
       bytes: Buffer.byteLength(config),
     };
+  }
+
+  function rollbackReceiptPath(configName, checksum) {
+    if (typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
+      throw new NginxManagerError('invalid_checksum', 'A SHA-256 configuration checksum is required');
+    }
+    return path.join(rollbackDir, `${configName}.${checksum}.json`);
+  }
+
+  async function captureFile(targetPath, errorCode = 'nginx_rollback_capture_failed') {
+    try { return fileState(await readFileFn(targetPath, 'utf8')); }
+    catch (error) {
+      if (error?.code === 'ENOENT') return fileState(null);
+      throw new NginxManagerError(errorCode, 'Nginx rollback state could not be inspected');
+    }
+  }
+
+  function normalizeRollbackReceipt(value, { primaryDomain, configName, checksum } = {}) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.version !== ROLLBACK_RECEIPT_VERSION
+      || value.primaryDomain !== primaryDomain
+      || value.configName !== configName
+      || value.candidateChecksum !== checksum
+      || (value.previousPrimaryDomain !== null && typeof value.previousPrimaryDomain !== 'string')) {
+      throw new NginxManagerError('nginx_rollback_receipt_invalid', 'Nginx rollback receipt is invalid');
+    }
+    const active = normalizeReceiptState(value.active);
+    let previousActive = null;
+    if (value.previousPrimaryDomain !== null) {
+      if (!value.previousActive) {
+        throw new NginxManagerError('nginx_rollback_receipt_invalid', 'Nginx rollback receipt is invalid');
+      }
+      previousActive = normalizeReceiptState(value.previousActive);
+    } else if (value.previousActive !== null) {
+      throw new NginxManagerError('nginx_rollback_receipt_invalid', 'Nginx rollback receipt is invalid');
+    }
+    return Object.freeze({
+      version: ROLLBACK_RECEIPT_VERSION,
+      primaryDomain,
+      configName,
+      candidateChecksum: checksum,
+      previousPrimaryDomain: value.previousPrimaryDomain,
+      active,
+      previousActive,
+    });
+  }
+
+  async function loadRollbackReceipt({ primaryDomain, configName, checksum } = {}) {
+    const receiptPath = rollbackReceiptPath(configName, checksum);
+    let raw;
+    try { raw = await readFileFn(receiptPath, 'utf8'); }
+    catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw new NginxManagerError('nginx_rollback_receipt_unavailable', 'Nginx rollback receipt could not be read');
+    }
+    try {
+      return normalizeRollbackReceipt(JSON.parse(raw), { primaryDomain, configName, checksum });
+    } catch (error) {
+      if (error instanceof NginxManagerError) throw error;
+      throw new NginxManagerError('nginx_rollback_receipt_invalid', 'Nginx rollback receipt is invalid');
+    }
+  }
+
+  async function persistRollbackReceipt({
+    primaryDomain,
+    configName,
+    checksum,
+    previousPrimaryDomain,
+    active,
+    previousActive,
+  }) {
+    await mkdirFn(rollbackDir, { recursive: true, mode: 0o700 });
+    const receipt = {
+      version: ROLLBACK_RECEIPT_VERSION,
+      primaryDomain,
+      configName,
+      candidateChecksum: checksum,
+      previousPrimaryDomain,
+      active,
+      previousActive,
+    };
+    await atomicWrite(
+      rollbackReceiptPath(configName, checksum),
+      `${JSON.stringify(receipt)}\n`,
+      0o600,
+    );
+    return normalizeRollbackReceipt(receipt, { primaryDomain, configName, checksum });
+  }
+
+  async function restoreFile(targetPath, state, mode = 0o644) {
+    if (!state.exists) {
+      await rmFn(targetPath, { force: true });
+      return;
+    }
+    await atomicWrite(targetPath, state.content, mode);
   }
 
   async function stageDomain(spec) {
@@ -163,12 +291,24 @@ export function createNginxManager({
     return { satisfied: true, result: { configName, checksum, active: true } };
   }
 
-  async function restoreActive(activePath, previousContent) {
-    if (previousContent == null) {
-      await rmFn(activePath, { force: true });
-      return;
-    }
-    await atomicWrite(activePath, previousContent, 0o644);
+  async function activationState({ activePath, previousActivePath }) {
+    return Object.freeze({
+      active: await captureFile(activePath),
+      previousActive: previousActivePath ? await captureFile(previousActivePath) : null,
+    });
+  }
+
+  function stateMatchesReceipt(state, receipt) {
+    return sameFileState(state.active, receipt.active)
+      && (receipt.previousActive === null
+        ? state.previousActive === null
+        : state.previousActive !== null && sameFileState(state.previousActive, receipt.previousActive));
+  }
+
+  function stateMatchesCandidate(state, checksum, hasPreviousPath) {
+    return state.active.exists
+      && state.active.checksum === checksum
+      && (!hasPreviousPath || (state.previousActive !== null && !state.previousActive.exists));
   }
 
   async function activateNow({ primaryDomain, previousPrimaryDomain = null, checksum }) {
@@ -182,23 +322,34 @@ export function createNginxManager({
     const previousActivePath = previousConfigName && previousConfigName !== configName
       ? path.join(sitesDir, previousConfigName)
       : null;
+    const normalizedPreviousPrimaryDomain = previousActivePath ? previousPrimaryDomain : null;
     let candidate;
     try { candidate = await readFileFn(stagePath, 'utf8'); }
     catch { throw new NginxManagerError('staged_config_missing', 'Staged Nginx configuration was not found'); }
     if (sha256(candidate) !== checksum) throw new NginxManagerError('staged_config_changed', 'Staged Nginx configuration checksum does not match');
 
-    let previousContent = null;
-    try { previousContent = await readFileFn(activePath, 'utf8'); }
-    catch (error) { if (error?.code !== 'ENOENT') throw error; }
-    let renamedPreviousContent = null;
-    if (previousActivePath) {
-      try { renamedPreviousContent = await readFileFn(previousActivePath, 'utf8'); }
-      catch (error) { if (error?.code !== 'ENOENT') throw error; }
+    const before = await activationState({ activePath, previousActivePath });
+    let receipt = await loadRollbackReceipt({ primaryDomain, configName, checksum });
+    if (receipt) {
+      if (receipt.previousPrimaryDomain !== normalizedPreviousPrimaryDomain
+        || (!stateMatchesReceipt(before, receipt)
+          && !stateMatchesCandidate(before, checksum, Boolean(previousActivePath)))) {
+        throw new NginxManagerError('nginx_rollback_receipt_conflict', 'Nginx activation rollback receipt conflicts with current state');
+      }
+    } else {
+      receipt = await persistRollbackReceipt({
+        primaryDomain,
+        configName,
+        checksum,
+        previousPrimaryDomain: normalizedPreviousPrimaryDomain,
+        active: before.active,
+        previousActive: before.previousActive,
+      });
     }
 
-    async function restorePreviousConfiguration() {
-      await restoreActive(activePath, previousContent);
-      if (previousActivePath) await restoreActive(previousActivePath, renamedPreviousContent);
+    async function restoreInvocationState() {
+      await restoreFile(activePath, before.active);
+      if (previousActivePath) await restoreFile(previousActivePath, before.previousActive);
     }
 
     try {
@@ -206,21 +357,21 @@ export function createNginxManager({
       await atomicWrite(activePath, candidate, 0o644);
       if (previousActivePath) await rmFn(previousActivePath, { force: true });
     } catch {
-      try { await restorePreviousConfiguration(); }
+      try { await restoreInvocationState(); }
       catch { throw new NginxManagerError('nginx_rollback_failed', 'Nginx activation preparation failed and rollback could not be confirmed'); }
       throw new NginxManagerError('nginx_activation_prepare_failed', 'Nginx activation could not replace the active configuration');
     }
     try {
       await execFn(nginxPath, ['-t']);
     } catch {
-      try { await restorePreviousConfiguration(); }
+      try { await restoreInvocationState(); }
       catch { throw new NginxManagerError('nginx_rollback_failed', 'Nginx rejected the staged configuration and rollback could not be confirmed'); }
       throw new NginxManagerError('nginx_config_invalid', 'Nginx rejected the staged configuration');
     }
     try {
       await execFn(systemctlPath, ['reload', 'nginx']);
     } catch {
-      try { await restorePreviousConfiguration(); }
+      try { await restoreInvocationState(); }
       catch { throw new NginxManagerError('nginx_rollback_failed', 'Nginx reload failed and rollback could not be confirmed'); }
       try {
         await execFn(nginxPath, ['-t']);
@@ -230,7 +381,16 @@ export function createNginxManager({
       }
       throw new NginxManagerError('nginx_reload_failed', 'Nginx reload failed and the previous configuration was restored');
     }
-    return { configName, checksum, active: true };
+    return {
+      configName,
+      checksum,
+      active: true,
+      rollback: {
+        receiptVersion: receipt.version,
+        hadPreviousActive: receipt.active.exists,
+        previousChecksum: receipt.active.checksum,
+      },
+    };
   }
 
   function activateDomain(input) {
@@ -239,7 +399,104 @@ export function createNginxManager({
     return run;
   }
 
-  return { stageDomain, inspectStagedDomain, inspectActiveDomain, activateDomain };
+  async function inspectDomainCompensation({ primaryDomain, checksum } = {}) {
+    if (typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
+      throw new NginxManagerError('invalid_checksum', 'A SHA-256 active configuration checksum is required');
+    }
+    const configName = configNameForDomain(primaryDomain);
+    const receipt = await loadRollbackReceipt({ primaryDomain, configName, checksum });
+    if (!receipt) {
+      return { satisfied: false, reason: 'nginx_compensation_receipt_missing', configName, checksum };
+    }
+    const activePath = path.join(sitesDir, configName);
+    const previousActivePath = receipt.previousPrimaryDomain
+      ? path.join(sitesDir, configNameForDomain(receipt.previousPrimaryDomain))
+      : null;
+    const current = await activationState({ activePath, previousActivePath });
+    if (stateMatchesReceipt(current, receipt)) {
+      return {
+        satisfied: true,
+        configName,
+        checksum,
+        restoredPrevious: receipt.active.exists,
+        previousChecksum: receipt.active.checksum,
+      };
+    }
+    if (stateMatchesCandidate(current, checksum, Boolean(previousActivePath))) {
+      return { satisfied: false, reason: 'nginx_compensation_pending', configName, checksum };
+    }
+    throw new NginxManagerError('nginx_compensation_drift', 'Nginx compensation refused because active state has drifted');
+  }
+
+  async function compensateNow({ primaryDomain, checksum } = {}) {
+    if (typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
+      throw new NginxManagerError('invalid_checksum', 'A SHA-256 active configuration checksum is required');
+    }
+    const configName = configNameForDomain(primaryDomain);
+    const receipt = await loadRollbackReceipt({ primaryDomain, configName, checksum });
+    if (!receipt) {
+      throw new NginxManagerError('nginx_compensation_receipt_missing', 'Nginx compensation rollback receipt is missing');
+    }
+    const activePath = path.join(sitesDir, configName);
+    const previousActivePath = receipt.previousPrimaryDomain
+      ? path.join(sitesDir, configNameForDomain(receipt.previousPrimaryDomain))
+      : null;
+    const before = await activationState({ activePath, previousActivePath });
+    if (stateMatchesReceipt(before, receipt)) return inspectDomainCompensation({ primaryDomain, checksum });
+    if (!stateMatchesCandidate(before, checksum, Boolean(previousActivePath))) {
+      throw new NginxManagerError('nginx_compensation_drift', 'Nginx compensation refused because active state has drifted');
+    }
+
+    async function restoreBeforeCompensation() {
+      await restoreFile(activePath, before.active);
+      if (previousActivePath) await restoreFile(previousActivePath, before.previousActive);
+    }
+
+    try {
+      await restoreFile(activePath, receipt.active);
+      if (previousActivePath) await restoreFile(previousActivePath, receipt.previousActive);
+      await execFn(nginxPath, ['-t']);
+      await execFn(systemctlPath, ['reload', 'nginx']);
+    } catch {
+      try {
+        await restoreBeforeCompensation();
+        await execFn(nginxPath, ['-t']);
+        await execFn(systemctlPath, ['reload', 'nginx']);
+      } catch {
+        throw new NginxManagerError('nginx_compensation_rollback_failed', 'Nginx compensation failed and the active configuration could not be restored');
+      }
+      throw new NginxManagerError('nginx_compensation_failed', 'Nginx compensation failed and the active configuration was restored');
+    }
+
+    const inspected = await inspectDomainCompensation({ primaryDomain, checksum });
+    if (!inspected.satisfied) {
+      throw new NginxManagerError('nginx_compensation_unverified', 'Nginx compensation could not be verified');
+    }
+    return inspected;
+  }
+
+  function compensateDomain(input) {
+    const run = activationChain.catch(() => {}).then(() => compensateNow(input));
+    activationChain = run;
+    return run;
+  }
+
+  return {
+    stageDomain,
+    inspectStagedDomain,
+    inspectActiveDomain,
+    activateDomain,
+    compensateDomain,
+    inspectDomainCompensation,
+  };
 }
 
 export const nginxManager = createNginxManager();
+
+export const nginxManagerInternals = Object.freeze({
+  sha256,
+  fileState,
+  sameFileState,
+  normalizeReceiptState,
+  rollbackReceiptVersion: ROLLBACK_RECEIPT_VERSION,
+});
