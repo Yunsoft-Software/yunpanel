@@ -29,18 +29,25 @@ function nodePreview({ metadataReady = false, httpsMode = 'managed' } = {}) {
       application: {
         id: applicationId,
         type: 'node',
+        runtimeAdapter: 'passenger',
         runtime: {
           nodeMajor: 24,
+          packageManager: 'npm',
+          installMode: 'ci',
+          buildScript: null,
           mode: 'production',
           documentRoot: '.',
           start: { mode: 'node', entryFile: 'server.js', script: null },
+          port: null,
           healthPath: '/health',
           healthTimeoutSeconds: 30,
+          restartPolicy: 'on-failure',
         },
       },
       dockerWorkload: null,
       website: {
         id: websiteId,
+        applicationId,
         runtimeType: 'node',
         unixUser,
         documentRoot: `/var/lib/yunpanel/apps/${applicationId}/current`,
@@ -49,8 +56,8 @@ function nodePreview({ metadataReady = false, httpsMode = 'managed' } = {}) {
         id: domainId,
         primaryDomain: 'example.com',
         aliases: [],
-        targetType: 'proxy',
-        target: { upstreamHost: '127.0.0.1', upstreamPort: 3100, websocket: true },
+        targetType: 'passenger',
+        target: { applicationId },
         httpsMode,
       },
       wwwDomain: null,
@@ -96,6 +103,13 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.equal(identity.intent.unixUser, unixUser);
   assert.equal(identity.intent.homeDirectory, `/var/lib/yunpanel/data/${applicationId}`);
 
+  const release = plan.steps.find((step) => step.id === 'node_release');
+  assert.equal(release.kind, 'node_release');
+  assert.equal(release.intent.adapter, 'passenger-release');
+  assert.equal(release.intent.deploymentId, operationId);
+  assert.equal(release.intent.runtime.port, undefined);
+  assert.equal(release.compensation.state, 'pending');
+
   const runtime = plan.steps.find((step) => step.id === 'runtime');
   assert.equal(runtime.kind, 'runtime');
   assert.equal(runtime.intent.adapter, 'passenger');
@@ -114,6 +128,19 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.equal(nginx.intent.target.startupFile, 'server.js');
   assert.equal(nginx.state, 'pending');
   assert.equal(nginx.compensation.state, 'pending');
+
+  const applicationRelease = plan.steps.find((step) => step.id === 'application_release');
+  assert.equal(applicationRelease.kind, 'passenger_application_release');
+  assert.equal(applicationRelease.intent.applicationId, applicationId);
+  assert.equal(applicationRelease.intent.releaseId, operationId);
+  assert.equal(applicationRelease.compensation.state, 'pending');
+
+  const authority = plan.steps.find((step) => step.id === 'passenger_authority');
+  assert.equal(authority.kind, 'passenger_authority');
+  assert.equal(authority.intent.applicationId, applicationId);
+  assert.equal(authority.intent.websiteId, websiteId);
+  assert.deepEqual(authority.intent.domainIds, [domainId]);
+  assert.equal(authority.compensation.state, 'pending');
   assert.equal(plan.steps.find((step) => step.id === 'certificate').state, 'pending');
 });
 
@@ -169,6 +196,7 @@ test('new static Website persists deterministic deployment intent with canonical
   assert.equal(runtime.intent.build.outputDir, '.');
   assert.equal(runtime.compensation.state, 'pending');
   assert.equal(plan.steps.some((step) => step.id === 'certificate'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'passenger_authority'), false);
 });
 
 test('existing static Application binding inspects current release instead of inventing a redeploy', () => {
@@ -200,11 +228,14 @@ test('external proxy provisioning requires Nginx without inventing a site Unix i
   preview.plan.website.runtimeType = 'proxy';
   preview.plan.website.unixUser = null;
   preview.plan.website.documentRoot = null;
+  preview.plan.primaryDomain.targetType = 'proxy';
+  preview.plan.primaryDomain.target = { upstreamHost: '127.0.0.1', upstreamPort: 8080, websocket: true };
   preview.steps.applicationReady = true;
 
   const plan = siteCreateProvisioningPlan(preview);
   assert.equal(plan.steps.some((step) => step.id === 'unix_identity'), false);
   assert.equal(plan.steps.some((step) => step.id === 'runtime'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'passenger_authority'), false);
   assert.equal(plan.steps.find((step) => step.id === 'nginx').state, 'pending');
   assert.equal(plan.ready, false);
 });
