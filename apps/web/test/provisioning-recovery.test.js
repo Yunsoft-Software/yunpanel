@@ -5,6 +5,7 @@ import {
   canContinueProvisioning,
   provisioningBadgeState,
   provisioningOperationLabel,
+  provisioningRemediation,
   provisioningStepLabel,
   provisioningStepStateLabel,
 } from '../src/workspace/provisioning-model.js';
@@ -59,4 +60,24 @@ test('provisioning presentation maps durable states without exposing host eviden
   assert.equal(provisioningBadgeState(step), 'warning');
   assert.equal(provisioningOperationLabel({ ready: false, steps: [step] }), 'Bloke');
   assert.equal(provisioningOperationLabel({ ready: true, steps: [step] }), 'Hazır');
+});
+
+test('provisioning remediation is handler-specific and fail-closed', () => {
+  assert.equal(provisioningRemediation({ kind: 'unix_identity', state: 'pending' }), null);
+  assert.match(
+    provisioningRemediation({ kind: 'unix_identity', state: 'failed', error: 'website_identity_partial_state' }),
+    /UID\/GID ownership/,
+  );
+  assert.match(
+    provisioningRemediation({ kind: 'runtime', state: 'blocked', error: 'static_runtime_provisioning_pending' }),
+    /Static runtime provisioning/,
+  );
+  assert.match(
+    provisioningRemediation({ kind: 'nginx', state: 'compensating' }),
+    /vhost\/checksum/,
+  );
+  assert.match(
+    provisioningRemediation({ kind: 'future_adapter', state: 'failed' }),
+    /körlemesine tekrar etmeyin/,
+  );
 });
