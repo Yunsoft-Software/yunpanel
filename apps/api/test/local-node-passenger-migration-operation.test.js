@@ -16,6 +16,36 @@ const execution = Object.freeze({
   resourceType: 'application',
   resourceId: applicationId,
 });
+const passengerTarget = Object.freeze({
+  appRoot: `/var/lib/yunpanel/apps/${applicationId}/current`,
+  documentRoot: `/var/lib/yunpanel/apps/${applicationId}/current`,
+  startupFile: 'server.js',
+  nodeBinary: '/opt/yunpanel/node-runtimes/v24/bin/node',
+  user: 'yunapp-0123456789ab',
+  group: 'yunapp-0123456789ab',
+  appEnv: 'production',
+  environmentInclude: `/etc/nginx/yunpanel/passenger-env/${applicationId}.conf`,
+});
+
+function migrationPreview(overrides = {}) {
+  return {
+    target: {
+      intent: {
+        appRoot: passengerTarget.appRoot,
+        documentRoot: passengerTarget.documentRoot,
+        startupFile: passengerTarget.startupFile,
+        unixUser: passengerTarget.user,
+        appEnv: passengerTarget.appEnv,
+        environmentInclude: passengerTarget.environmentInclude,
+      },
+      inspection: {
+        satisfied: true,
+        nodeBinary: passengerTarget.nodeBinary,
+      },
+    },
+    ...overrides,
+  };
+}
 
 test('Passenger migration execution context is bound to the queued application and UUID job', () => {
   assert.equal(assertNodePassengerMigrationExecutionContext(payload, execution), execution);
@@ -33,9 +63,10 @@ test('Passenger migration execution context is bound to the queued application a
   }
 });
 
-test('local Passenger migration forwards the job UUID as operation ownership', async () => {
+test('local Passenger migration forwards job ownership and preserves pre-cutover target evidence', async () => {
   const calls = [];
   const operation = createLocalNodePassengerMigrationOperation({
+    migrationPreview: { async preview() { return migrationPreview(); } },
     migrationManager: {
       async migrate(input) {
         calls.push(input);
@@ -45,13 +76,47 @@ test('local Passenger migration forwards the job UUID as operation ownership', a
   });
 
   const result = await operation.execute(payload, execution);
-  assert.deepEqual(result, { migrated: true, operationId: jobId });
+  assert.deepEqual(result, {
+    migrated: true,
+    operationId: jobId,
+    passengerTarget,
+  });
   assert.deepEqual(calls, [{ operationId: jobId, node: payload.node, domain: payload.domain }]);
 });
 
-test('local Passenger migration rejects mismatched execution before host mutation', async () => {
+test('local Passenger migration rejects missing target evidence before host mutation', async () => {
   let called = false;
   const operation = createLocalNodePassengerMigrationOperation({
+    migrationPreview: {
+      async preview() {
+        return migrationPreview({ target: { intent: null, inspection: null } });
+      },
+    },
+    migrationManager: {
+      async migrate() {
+        called = true;
+        return { migrated: true };
+      },
+    },
+  });
+
+  await assert.rejects(
+    operation.execute(payload, execution),
+    (error) => error?.code === 'node_passenger_migration_target_evidence_unavailable',
+  );
+  assert.equal(called, false);
+});
+
+test('local Passenger migration rejects mismatched execution before preview or host mutation', async () => {
+  let previewed = false;
+  let called = false;
+  const operation = createLocalNodePassengerMigrationOperation({
+    migrationPreview: {
+      async preview() {
+        previewed = true;
+        return migrationPreview();
+      },
+    },
     migrationManager: {
       async migrate() {
         called = true;
@@ -64,5 +129,6 @@ test('local Passenger migration rejects mismatched execution before host mutatio
     operation.execute(payload, { ...execution, resourceId: 'ff830043-9752-4640-83b4-3a1998de78a0' }),
     (error) => error?.code === 'node_passenger_migration_execution_context_invalid',
   );
+  assert.equal(previewed, false);
   assert.equal(called, false);
 });
