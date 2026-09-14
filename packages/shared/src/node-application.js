@@ -29,9 +29,12 @@ function normalizeScriptName(value, fieldName, { nullable = false } = {}) {
   return value;
 }
 
-export function normalizeNodeRuntimeConfig(value = {}) {
+export function normalizeNodeRuntimeConfig(value = {}, { requirePort = true } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ApplicationValidationError('invalid_node_runtime', 'Node runtime config must be an object');
+  }
+  if (typeof requirePort !== 'boolean') {
+    throw new ApplicationValidationError('invalid_node_runtime', 'Node runtime port policy is invalid');
   }
   if (Object.keys(value).some((key) => !RUNTIME_FIELDS.has(key))) {
     throw new ApplicationValidationError('invalid_node_runtime', 'Node runtime config contains unsupported fields');
@@ -80,9 +83,13 @@ export function normalizeNodeRuntimeConfig(value = {}) {
         script: normalizeScriptName(value.startScript ?? value.start?.script ?? 'start', 'startScript'),
       };
 
-  const port = value.port;
-  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-    throw new ApplicationValidationError('invalid_node_port', 'Node application port must be between 1024 and 65535');
+  const port = value.port ?? null;
+  if (requirePort) {
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+      throw new ApplicationValidationError('invalid_node_port', 'Node application port must be between 1024 and 65535');
+    }
+  } else if (port !== null) {
+    throw new ApplicationValidationError('invalid_node_port', 'Passenger Node runtime must omit application port');
   }
 
   const healthPath = value.healthPath ?? '/health';
