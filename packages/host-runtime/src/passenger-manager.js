@@ -14,11 +14,20 @@ const MODULE_SOURCE = '/usr/share/nginx/modules-available/mod-http-passenger.loa
 const MODULE_LINK = '/etc/nginx/modules-enabled/50-mod-http-passenger.conf';
 const NGINX_PATH = '/usr/sbin/nginx';
 const APT_GET = '/usr/bin/apt-get';
+const APT_CACHE = '/usr/bin/apt-cache';
 const DPKG_QUERY = '/usr/bin/dpkg-query';
 const CURL = '/usr/bin/curl';
 const GPG = '/usr/bin/gpg';
 const SYSTEMCTL = '/usr/bin/systemctl';
+const PACKAGE = 'libnginx-mod-http-passenger';
+const VERSION_PATTERN = /^[A-Za-z0-9.+:~_-]{1,120}$/;
 const SUPPORTED = Object.freeze({ id: 'ubuntu', versionId: '24.04', codename: 'noble' });
+const UPGRADE_CHECKPOINTS = Object.freeze([
+  'before-package-upgrade',
+  'after-package-upgrade',
+  'after-nginx-restart',
+  'after-upgrade-inspection',
+]);
 
 export class PassengerManagerError extends Error {
   constructor(code, message) {
@@ -62,6 +71,11 @@ function repositoryContent() {
   return `deb [signed-by=${KEY_PATH}] https://oss-binaries.phusionpassenger.com/apt/passenger ${SUPPORTED.codename} main\n`;
 }
 
+function parseAptPolicy(output) {
+  const candidate = String(output ?? '').match(/^\s*Candidate:\s*(\S+)\s*$/m)?.[1] ?? null;
+  return candidate && candidate !== '(none)' && VERSION_PATTERN.test(candidate) ? candidate : null;
+}
+
 function commandError(error, code, message) {
   const wrapped = new PassengerManagerError(code, message);
   wrapped.exitCode = Number.isInteger(error?.code) ? error.code : null;
@@ -83,15 +97,24 @@ export function createPassengerManager({
   renameFn = rename,
   symlinkFn = symlink,
   writeFileFn = writeFile,
+  checkpoint = async () => {},
 } = {}) {
-  if (!inspector || typeof inspector.inspect !== 'function' || typeof run !== 'function') {
+  if (!inspector || typeof inspector.inspect !== 'function' || typeof run !== 'function' || typeof checkpoint !== 'function') {
     throw new PassengerManagerError('passenger_manager_dependencies_invalid', 'Passenger manager dependencies are invalid');
   }
   let activeApply = null;
+  let activeUpgrade = null;
 
   async function runSafe(file, args, options, code, message) {
     try { return await run(file, args, options); }
     catch (error) { throw commandError(error, code, message); }
+  }
+
+  async function mutationCheckpoint(name) {
+    try { await checkpoint(name); }
+    catch {
+      throw new PassengerManagerError('passenger_failure_injected', `Passenger mutation stopped at ${name}`);
+    }
   }
 
   async function platform() {
@@ -168,7 +191,9 @@ export function createPassengerManager({
   async function ensureModuleLink() {
     try {
       const info = await lstatFn(MODULE_LINK);
-      if (!info.isSymbolicLink()) return;
+      if (!info.isSymbolicLink()) {
+        throw new PassengerManagerError('passenger_module_link_conflict', 'Passenger Nginx module path is not a symbolic link');
+      }
       const target = await readlinkFn(MODULE_LINK);
       if (target === MODULE_SOURCE) return;
       throw new PassengerManagerError('passenger_module_link_conflict', 'Passenger Nginx module link points to an unexpected target');
@@ -213,7 +238,7 @@ export function createPassengerManager({
     );
     await runSafe(
       APT_GET,
-      ['install', '--yes', '--no-install-recommends', 'nginx', 'libnginx-mod-http-passenger'],
+      ['install', '--yes', '--no-install-recommends', 'nginx', PACKAGE],
       { timeout: 10 * 60 * 1000 },
       'passenger_package_install_failed',
       'Passenger Nginx package could not be installed',
@@ -229,14 +254,135 @@ export function createPassengerManager({
     return Object.freeze({ changed: true, ...after });
   }
 
+  async function upgradeCandidate() {
+    const result = await runSafe(
+      APT_CACHE,
+      ['policy', PACKAGE],
+      { timeout: 30_000 },
+      'passenger_upgrade_inspection_failed',
+      'Passenger upgrade candidate could not be inspected',
+    );
+    const candidateVersion = parseAptPolicy(result?.stdout);
+    if (!candidateVersion) {
+      throw new PassengerManagerError('passenger_upgrade_candidate_missing', 'Passenger APT repository does not provide an upgrade candidate');
+    }
+    return candidateVersion;
+  }
+
+  async function rollbackUpgrade(previousVersion) {
+    try {
+      await runSafe(
+        APT_GET,
+        ['install', '--allow-downgrades', '--yes', '--no-install-recommends', `${PACKAGE}=${previousVersion}`],
+        { timeout: 10 * 60 * 1000 },
+        'passenger_upgrade_rollback_failed',
+        'Passenger package rollback failed',
+      );
+      await runSafe(
+        NGINX_PATH,
+        ['-t'],
+        { timeout: 30_000 },
+        'passenger_upgrade_rollback_failed',
+        'Nginx rejected the rolled-back Passenger configuration',
+      );
+      await runSafe(
+        SYSTEMCTL,
+        ['restart', 'nginx'],
+        { timeout: 60_000 },
+        'passenger_upgrade_rollback_failed',
+        'Nginx could not restart after Passenger rollback',
+      );
+      const restored = await inspector.inspect();
+      if (!restored?.healthy || restored.installedVersion !== previousVersion) {
+        throw new PassengerManagerError('passenger_upgrade_rollback_failed', 'Passenger rollback did not restore the previous healthy package');
+      }
+      return restored;
+    } catch (error) {
+      if (error instanceof PassengerManagerError && error.code === 'passenger_upgrade_rollback_failed') throw error;
+      throw new PassengerManagerError('passenger_upgrade_rollback_failed', 'Passenger rollback could not restore the previous healthy package');
+    }
+  }
+
+  async function upgradeUnlocked() {
+    const before = await inspector.inspect();
+    if (!before?.installed || !before.healthy || typeof before.installedVersion !== 'string' || !VERSION_PATTERN.test(before.installedVersion)) {
+      throw new PassengerManagerError('passenger_upgrade_requires_healthy_install', 'Passenger must be healthy before an in-place upgrade');
+    }
+    await platform();
+    await assertCompatibleNginx();
+    await runSafe(
+      APT_GET,
+      ['update'],
+      { timeout: 10 * 60 * 1000 },
+      'passenger_apt_update_failed',
+      'APT package indexes could not be refreshed for Passenger',
+    );
+    const candidateVersion = await upgradeCandidate();
+    if (candidateVersion === before.installedVersion) {
+      return Object.freeze({
+        changed: false,
+        upgraded: false,
+        previousVersion: before.installedVersion,
+        candidateVersion,
+        ...before,
+      });
+    }
+
+    await mutationCheckpoint('before-package-upgrade');
+    let mutationAttempted = false;
+    try {
+      mutationAttempted = true;
+      await runSafe(
+        APT_GET,
+        ['install', '--only-upgrade', '--yes', '--no-install-recommends', PACKAGE],
+        { timeout: 10 * 60 * 1000 },
+        'passenger_package_upgrade_failed',
+        'Passenger package could not be upgraded',
+      );
+      await mutationCheckpoint('after-package-upgrade');
+      await runSafe(NGINX_PATH, ['-t'], { timeout: 30_000 }, 'passenger_nginx_config_invalid', 'Nginx rejected the upgraded Passenger installation');
+      await runSafe(SYSTEMCTL, ['restart', 'nginx'], { timeout: 60_000 }, 'passenger_nginx_restart_failed', 'Nginx could not restart after Passenger upgrade');
+      await mutationCheckpoint('after-nginx-restart');
+      const after = await inspector.inspect();
+      await mutationCheckpoint('after-upgrade-inspection');
+      if (!after?.healthy || after.installedVersion !== candidateVersion || after.installedVersion === before.installedVersion) {
+        throw new PassengerManagerError('passenger_upgrade_incomplete', 'Passenger upgrade did not reach the expected healthy package version');
+      }
+      return Object.freeze({
+        changed: true,
+        upgraded: true,
+        previousVersion: before.installedVersion,
+        candidateVersion,
+        ...after,
+      });
+    } catch (error) {
+      if (mutationAttempted) {
+        try { await rollbackUpgrade(before.installedVersion); }
+        catch (rollbackError) { throw rollbackError; }
+      }
+      if (error instanceof PassengerManagerError) throw error;
+      throw new PassengerManagerError('passenger_upgrade_failed', 'Passenger upgrade failed');
+    }
+  }
+
   async function apply() {
+    if (activeUpgrade) throw new PassengerManagerError('passenger_mutation_in_progress', 'Passenger upgrade is already running');
     if (activeApply) return activeApply;
     activeApply = applyUnlocked();
     try { return await activeApply; }
     finally { activeApply = null; }
   }
 
-  return Object.freeze({ inspect: () => inspector.inspect(), apply });
+  async function upgrade() {
+    if (activeApply || activeUpgrade) {
+      throw new PassengerManagerError('passenger_mutation_in_progress', 'Another Passenger mutation is already running');
+    }
+    activeUpgrade = upgradeUnlocked();
+    try { return await activeUpgrade; }
+    finally { activeUpgrade = null; }
+  }
+
+  return Object.freeze({ inspect: () => inspector.inspect(), apply, upgrade });
 }
 
 export const passengerManagerInternals = Object.freeze({
@@ -244,10 +390,13 @@ export const passengerManagerInternals = Object.freeze({
   supportedPlatform,
   nginxPackageOwner,
   repositoryContent,
+  parseAptPolicy,
   supportedPlatformIdentity: SUPPORTED,
   keyUrl: KEY_URL,
   keyPath: KEY_PATH,
   repositoryPath: REPOSITORY_PATH,
   moduleSource: MODULE_SOURCE,
   moduleLink: MODULE_LINK,
+  packageName: PACKAGE,
+  upgradeCheckpoints: UPGRADE_CHECKPOINTS,
 });
