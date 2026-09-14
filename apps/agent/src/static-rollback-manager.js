@@ -2,4 +2,4 @@ export {
   createStaticRollbackManager,
   StaticRollbackError,
   staticRollbackManager,
-} from '@yunpanel/host-runtime';
+} from '@yunpanel/host-runtime/static-rollback-manager';
