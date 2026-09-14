@@ -14,7 +14,7 @@ import {
 } from '@yunpanel/shared';
 import { isIP, SocketAddress } from 'node:net';
 
-export const AGENT_PROTOCOL_VERSION = 8;
+export const AGENT_PROTOCOL_VERSION = 9;
 
 export const MANAGED_SERVICE_IDS = Object.freeze([
   'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'roundcube',
@@ -54,6 +54,7 @@ export const OPERATIONS = Object.freeze({
   APP_NODE_RESTART: 'app.node.restart',
   APP_NODE_STATUS: 'app.node.status',
   APP_NODE_PROCESS: 'app.node.process',
+  APP_NODE_PASSENGER_MIGRATE: 'app.node.passenger-migrate',
 });
 
 export const READ_ONLY_OPERATIONS = Object.freeze([
@@ -226,6 +227,57 @@ function validateEnvironmentRevision(payload, operation, errors) {
   }
 }
 
+function validatePassengerTarget(target, operation, errors) {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) {
+    errors.push(`${operation} Passenger target must be an object`);
+    return;
+  }
+  rejectUnexpectedKeys(target, ['root', 'startupFile', 'nodeBinary'], `${operation} Passenger target`, errors);
+  validateSafePath(target.root, `${operation} Passenger target.root`, errors);
+  validateSafePath(target.nodeBinary, `${operation} Passenger target.nodeBinary`, errors);
+  if (typeof target.startupFile !== 'string' || target.startupFile.length < 1 || target.startupFile.length > 255
+    || target.startupFile.includes('/') || target.startupFile.includes('\\')
+    || /[\u0000-\u001f\u007f]/.test(target.startupFile)) {
+    errors.push(`${operation} Passenger target.startupFile is invalid`);
+  }
+}
+
+function validatePassengerMigrationDomain(domain, operation, errors) {
+  if (!domain || typeof domain !== 'object' || Array.isArray(domain)) {
+    errors.push(`${operation} domain is invalid`);
+    return;
+  }
+  rejectUnexpectedKeys(domain, [
+    'primaryDomain', 'aliases', 'tls', 'canonicalRedirect', 'httpsRedirect', 'nginxSettings',
+  ], `${operation} domain`, errors);
+  const aliases = Array.isArray(domain.aliases) ? domain.aliases : [];
+  validateDomainList([domain.primaryDomain, ...aliases], `${operation} domain names`, errors);
+  if (!Array.isArray(domain.aliases) || domain.aliases.length > 20) {
+    errors.push(`${operation} domain aliases are invalid`);
+  }
+  if (typeof domain.canonicalRedirect !== 'boolean' || typeof domain.httpsRedirect !== 'boolean') {
+    errors.push(`${operation} domain redirect settings are invalid`);
+  }
+  if (domain.tls !== null) {
+    if (!domain.tls || typeof domain.tls !== 'object' || Array.isArray(domain.tls)) {
+      errors.push(`${operation} domain tls is invalid`);
+    } else {
+      rejectUnexpectedKeys(domain.tls, ['fullchainPath', 'privateKeyPath'], `${operation} domain tls`, errors);
+      validateSafePath(domain.tls.fullchainPath, `${operation} domain tls.fullchainPath`, errors);
+      validateSafePath(domain.tls.privateKeyPath, `${operation} domain tls.privateKeyPath`, errors);
+    }
+  }
+  try {
+    const normalized = normalizeNginxSettings('proxy', domain.nginxSettings ?? {});
+    if (JSON.stringify(normalized) !== JSON.stringify(domain.nginxSettings)) {
+      errors.push(`${operation} domain nginxSettings must be canonical proxy settings`);
+    }
+  } catch (error) {
+    if (error instanceof NginxSettingsValidationError) errors.push(`${operation} domain nginxSettings are invalid`);
+    else throw error;
+  }
+}
+
 function validateMutationPayload(operation, payload, errors) {
   if (operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || operation === OPERATIONS.SYSTEM_UPGRADE
     || operation === OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT || operation === OPERATIONS.DATABASE_INSPECT) {
@@ -267,9 +319,10 @@ function validateMutationPayload(operation, payload, errors) {
     rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'nginxSettings', 'tls', 'canonicalRedirect', 'httpsRedirect'], operation, errors);
     if (typeof payload.primaryDomain !== 'string' || payload.primaryDomain.length < 3 || payload.primaryDomain.length > 253) errors.push('domain.stage primaryDomain is invalid');
     if (payload.aliases !== undefined && (!Array.isArray(payload.aliases) || payload.aliases.length > 20)) errors.push('domain.stage aliases must be an array with at most 20 entries');
-    if (!['static', 'proxy'].includes(payload.targetType)) errors.push('domain.stage targetType must be static or proxy');
+    if (!['static', 'proxy', 'passenger'].includes(payload.targetType)) errors.push('domain.stage targetType must be static, proxy or passenger');
     if (!payload.target || typeof payload.target !== 'object' || Array.isArray(payload.target)) errors.push('domain.stage target must be an object');
-    if (payload.nginxSettings !== undefined && ['static', 'proxy'].includes(payload.targetType)) {
+    if (payload.targetType === 'passenger') validatePassengerTarget(payload.target, 'domain.stage', errors);
+    if (payload.nginxSettings !== undefined && ['static', 'proxy', 'passenger'].includes(payload.targetType)) {
       try {
         const normalized = normalizeNginxSettings(payload.targetType, payload.nginxSettings);
         if (JSON.stringify(normalized) !== JSON.stringify(payload.nginxSettings)
@@ -383,6 +436,16 @@ function validateMutationPayload(operation, payload, errors) {
     } catch (error) {
       errors.push(error instanceof ApplicationValidationError ? error.message : 'app.node.process payload is invalid');
     }
+  }
+
+  if (operation === OPERATIONS.APP_NODE_PASSENGER_MIGRATE) {
+    rejectUnexpectedKeys(payload, ['node', 'domain'], operation, errors);
+    try {
+      normalizeNodeStatusSpec(payload.node);
+    } catch (error) {
+      errors.push(error instanceof ApplicationValidationError ? error.message : 'app.node.passenger-migrate node payload is invalid');
+    }
+    validatePassengerMigrationDomain(payload.domain, operation, errors);
   }
 }
 
