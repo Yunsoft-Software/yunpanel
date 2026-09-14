@@ -37,6 +37,17 @@ function normalizeUuid(value, field) {
   return value.toLowerCase();
 }
 
+function normalizeRoot(value, field) {
+  if (typeof value !== 'string' || !path.posix.isAbsolute(value)) {
+    throw new WebsitePathContractError('website_path_root_invalid', `${field} is invalid`);
+  }
+  const normalized = path.posix.resolve(value);
+  if (normalized === '/') {
+    throw new WebsitePathContractError('website_path_root_invalid', `${field} cannot be filesystem root`);
+  }
+  return normalized;
+}
+
 function directChild(root, id) {
   const value = path.posix.join(root, id);
   if (path.posix.dirname(value) !== root || path.posix.basename(value) !== id) {
@@ -45,17 +56,24 @@ function directChild(root, id) {
   return value;
 }
 
-export function createWebsitePathContract({ websiteId, applicationId } = {}) {
-  const normalizedWebsiteId = normalizeUuid(websiteId, 'websiteId');
+export function createApplicationPathContract(applicationId, {
+  applicationRoot = ROOTS.application,
+  dataRoot = ROOTS.data,
+  staticBuildRoot = ROOTS.staticBuild,
+  staticPublishRoot = ROOTS.staticPublish,
+} = {}) {
   const normalizedApplicationId = normalizeUuid(applicationId, 'applicationId');
+  const managedApplicationRoot = normalizeRoot(applicationRoot, 'applicationRoot');
+  const managedDataRoot = normalizeRoot(dataRoot, 'dataRoot');
+  const managedStaticBuildRoot = normalizeRoot(staticBuildRoot, 'staticBuildRoot');
+  const managedStaticPublishRoot = normalizeRoot(staticPublishRoot, 'staticPublishRoot');
 
-  const homeDirectory = directChild(ROOTS.data, normalizedApplicationId);
-  const applicationRoot = directChild(ROOTS.application, normalizedApplicationId);
-  const staticBuildRoot = directChild(ROOTS.staticBuild, normalizedApplicationId);
-  const staticPublishRoot = directChild(ROOTS.staticPublish, normalizedApplicationId);
+  const homeDirectory = directChild(managedDataRoot, normalizedApplicationId);
+  const applicationDirectory = directChild(managedApplicationRoot, normalizedApplicationId);
+  const staticBuildDirectory = directChild(managedStaticBuildRoot, normalizedApplicationId);
+  const staticPublishDirectory = directChild(managedStaticPublishRoot, normalizedApplicationId);
 
   return Object.freeze({
-    websiteId: normalizedWebsiteId,
     applicationId: normalizedApplicationId,
     workspace: Object.freeze({
       authority: AUTHORITIES.siteUser,
@@ -72,15 +90,28 @@ export function createWebsitePathContract({ websiteId, applicationId } = {}) {
     runtime: Object.freeze({
       containerAuthority: AUTHORITIES.controlPlane,
       releaseAuthority: AUTHORITIES.siteUser,
-      applicationRoot,
-      releasesDirectory: path.posix.join(applicationRoot, 'releases'),
-      currentRelease: path.posix.join(applicationRoot, 'current'),
+      applicationRoot: applicationDirectory,
+      releasesDirectory: path.posix.join(applicationDirectory, 'releases'),
+      currentRelease: path.posix.join(applicationDirectory, 'current'),
     }),
     static: Object.freeze({
       buildAuthority: AUTHORITIES.siteUser,
-      buildRoot: staticBuildRoot,
-      publishRoot: staticPublishRoot,
+      buildRoot: staticBuildDirectory,
+      publishRoot: staticPublishDirectory,
     }),
+  });
+}
+
+export function createWebsitePathContract({ websiteId, applicationId } = {}) {
+  const normalizedWebsiteId = normalizeUuid(websiteId, 'websiteId');
+  const application = createApplicationPathContract(applicationId);
+
+  return Object.freeze({
+    websiteId: normalizedWebsiteId,
+    applicationId: application.applicationId,
+    workspace: application.workspace,
+    runtime: application.runtime,
+    static: application.static,
     backup: Object.freeze({
       authority: AUTHORITIES.controlPlane,
       artifactRoot: ROOTS.backupArtifacts,
@@ -96,5 +127,6 @@ export const websitePathContractInternals = Object.freeze({
   modes: MODES,
   uuidPattern: UUID_PATTERN,
   normalizeUuid,
+  normalizeRoot,
   directChild,
 });
