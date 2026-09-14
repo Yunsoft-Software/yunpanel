@@ -9,6 +9,7 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 Bu maddeler kaynak kod connector ortamında yazılabilir fakat shell/package/live-host yetkisi olmadığı için burada doğrulanamaz. Codex bunları küçük adımlarla uygulasın/doğrulasın; GitHub Actions kullanmasın ve `.44` ile biten Plesk sunucusuna kesinlikle dokunmasın.
 
 - [ ] Güncel `main` çekildikten sonra Node `>=24.11.1` ve npm `>=11` ile temiz `npm ci` ardından `npm run check` çalıştır. Provisioning/Passenger test failure varsa yalnız ilgili küçük fixleri ayrı commitlerle at; test çıktısında secret bırakma.
+- [ ] `apps/api` provisioning registry/orchestrator/HTTP testlerini gerçek checkout üzerinde çalıştır; failed step'in explicit `retry` ile `pending` durumuna dönüp normal durable apply yolundan ilerlediğini, non-failed step retry'sinin reddedildiğini ve operation+step-bound confirmation olmadan mutation yapılmadığını doğrula. Bu connector oturumundaki container `github.com` DNS çözümleyemediği için source testleri burada koşturulamadı.
 - [ ] `.local/test-server.env` içindeki YunPanel test hostunun `.44` olmadığını doğrula; Ubuntu 24.04 üzerinde `nginx`, `libnginx-mod-http-passenger`/Passenger, `passenger-config`, managed Node 22/24 pathleri ve `nginx -t` gerçek durumunu kaynaktaki inspector beklentileriyle karşılaştır.
 - [ ] Yeni durable Website provisioning store ile API restart testi yap: apply sonrası operation JSON diskte kalsın; `applying` durumda servis kesilip açıldığında aynı mutation ikinci kez körlemesine çalışmasın ve inspect/reconcile yolu kullanılsın.
 - [ ] İki test Website oluşturup `yunapp-*` kullanıcı/group/home sahipliğini, çapraz home/release/data erişim reddini ve Passenger `passenger_user/group` gerçek UID/GID eşleşmesini doğrula.
@@ -30,6 +31,7 @@ Bu maddeler kaynak kod connector ortamında yazılabilir fakat shell/package/liv
 - [ ] İki Website ile çapraz izolasyonu gerçek UID/GID altında test et: file/env/release/data/log/socket/terminal/database credential erişimi reddedilsin.
 - [ ] Independent subdomain ayrı identity alırken `shared-site` açık seçimi parent identity'yi paylaşsın; alias user/runtime/mailbox üretmesin.
 - [ ] Provisioning'i her step sınırında kes: intent sonrası, host mutation sonrası evidence öncesi ve compensation sırasında. Restart kör mutation tekrarlamasın; partial state ve düzeltme adımı görünür olsun.
+- [ ] Gerçek failure injection ile bir provisioning step'ini `failed` duruma düşür; yalnız exact `retry-site-provisioning:<operationId>:<stepId>` confirmation ile retry edilebildiğini, aynı Website identity/path contract'ında normal durable apply/inspect yolundan ilerlediğini ve non-failed/yanlış-step/duplicate retry'nin fail-closed kaldığını doğrula.
 - [ ] Site move/delete impact gerçek DNS, mail/webmail, database/grant, SFTP, GoAccess, restic, cron ve active job ilişkilerini göstersin; implicit cascade yapmasın.
 
 ## T-RUNTIME — P0 Passenger, PHP-FPM ve hosted app sürekliliği
