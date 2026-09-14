@@ -34,12 +34,20 @@ async function invoke(handler, request) {
   return response;
 }
 
+function orchestrator(overrides = {}) {
+  return {
+    runNext: async () => ({}),
+    retryStep: async () => ({}),
+    ...overrides,
+  };
+}
+
 test('status route returns durable provisioning state', async () => {
   const app = fakeApp();
   const operation = { operationId, ready: false, status: 'partial' };
   mountWebsiteProvisioningRoutes(app, {
     registry: { get: async (id) => id === operationId ? operation : null },
-    orchestrator: { runNext: async () => ({}) },
+    orchestrator: orchestrator(),
   });
 
   const response = await invoke(
@@ -55,7 +63,7 @@ test('continue route requires exact operation-bound confirmation', async () => {
   let runCalls = 0;
   mountWebsiteProvisioningRoutes(app, {
     registry: { get: async () => ({}) },
-    orchestrator: { runNext: async () => { runCalls += 1; return {}; } },
+    orchestrator: orchestrator({ runNext: async () => { runCalls += 1; return {}; } }),
   });
   const handler = app.routes.post.get('/api/sites/provisioning/:operationId/continue');
 
@@ -72,10 +80,12 @@ test('continue route returns accepted while more provisioning work remains', asy
   const result = { outcome: 'progressed', operation: { operationId, ready: false, status: 'partial' }, stepId: 'unix_identity' };
   mountWebsiteProvisioningRoutes(app, {
     registry: { get: async () => result.operation },
-    orchestrator: { runNext: async (id) => {
-      assert.equal(id, operationId);
-      return result;
-    } },
+    orchestrator: orchestrator({
+      runNext: async (id) => {
+        assert.equal(id, operationId);
+        return result;
+      },
+    }),
   });
 
   const response = await invoke(
@@ -86,6 +96,56 @@ test('continue route returns accepted while more provisioning work remains', asy
   assert.deepEqual(response.payload, { data: result });
 });
 
+test('retry route requires confirmation bound to operation and step', async () => {
+  const app = fakeApp();
+  let retryCalls = 0;
+  mountWebsiteProvisioningRoutes(app, {
+    registry: { get: async () => ({}) },
+    orchestrator: orchestrator({ retryStep: async () => { retryCalls += 1; return {}; } }),
+  });
+  const handler = app.routes.post.get('/api/sites/provisioning/:operationId/steps/:stepId/retry');
+
+  await assert.rejects(
+    invoke(handler, {
+      params: { operationId, stepId: 'unix_identity' },
+      body: { confirmation: `retry-site-provisioning:${operationId}:runtime` },
+    }),
+    (error) => error instanceof WebsiteProvisioningHttpError
+      && error.code === 'website_provisioning_retry_confirmation_required',
+  );
+  assert.equal(retryCalls, 0);
+});
+
+test('retry route re-runs only the confirmed failed step', async () => {
+  const app = fakeApp();
+  const result = {
+    outcome: 'progressed',
+    operation: { operationId, ready: false, status: 'partial' },
+    stepId: 'unix_identity',
+  };
+  const calls = [];
+  mountWebsiteProvisioningRoutes(app, {
+    registry: { get: async () => result.operation },
+    orchestrator: orchestrator({
+      retryStep: async (id, provisioningStepId) => {
+        calls.push([id, provisioningStepId]);
+        return result;
+      },
+    }),
+  });
+
+  const response = await invoke(
+    app.routes.post.get('/api/sites/provisioning/:operationId/steps/:stepId/retry'),
+    {
+      params: { operationId, stepId: 'unix_identity' },
+      body: { confirmation: `retry-site-provisioning:${operationId}:unix_identity` },
+    },
+  );
+  assert.equal(response.statusCode, 202);
+  assert.deepEqual(calls, [[operationId, 'unix_identity']]);
+  assert.deepEqual(response.payload, { data: result });
+});
+
 test('continue body helper rejects additional fields', () => {
   assert.throws(
     () => websiteProvisioningHttpInternals.continueBody({
@@ -93,5 +153,13 @@ test('continue body helper rejects additional fields', () => {
       extra: true,
     }, operationId),
     (error) => error instanceof WebsiteProvisioningHttpError,
+  );
+});
+
+test('retry helper rejects malformed step ids before any orchestration', () => {
+  assert.throws(
+    () => websiteProvisioningHttpInternals.stepId('../runtime'),
+    (error) => error instanceof WebsiteProvisioningHttpError
+      && error.code === 'website_provisioning_step_invalid',
   );
 });
