@@ -33,11 +33,13 @@ test('orchestrator persists applying state before invoking a mutating handler', 
   const registry = createWebsiteProvisioningRegistry();
   await registry.create(plan());
   let observedState = null;
+  let contextOperation = null;
   const orchestrator = createWebsiteProvisioningOrchestrator({
     registry,
     handlers: {
       unix_identity: {
-        apply: async () => {
+        apply: async ({ operation }) => {
+          contextOperation = operation;
           observedState = (await registry.get(operationId)).steps[0].state;
           return { uid: 1201, gid: 1201 };
         },
@@ -47,6 +49,8 @@ test('orchestrator persists applying state before invoking a mutating handler', 
 
   const result = await orchestrator.runNext(operationId);
   assert.equal(observedState, 'applying');
+  assert.equal(contextOperation.operationId, operationId);
+  assert.equal(contextOperation.steps[0].state, 'applying');
   assert.equal(result.outcome, 'progressed');
   assert.equal(result.operation.steps[0].state, 'succeeded');
   assert.equal(result.operation.steps[1].state, 'pending');
@@ -58,12 +62,17 @@ test('orchestrator never blindly re-applies an interrupted step', async () => {
   await registry.beginStep({ operationId, stepId: 'unix_identity' });
   let applyCalls = 0;
   let inspectCalls = 0;
+  let inspectOperation = null;
   const orchestrator = createWebsiteProvisioningOrchestrator({
     registry,
     handlers: {
       unix_identity: {
         apply: async () => { applyCalls += 1; return { uid: 1201 }; },
-        inspect: async () => { inspectCalls += 1; return { satisfied: true, uid: 1201 }; },
+        inspect: async ({ operation }) => {
+          inspectCalls += 1;
+          inspectOperation = operation;
+          return { satisfied: true, uid: 1201 };
+        },
       },
     },
   });
@@ -71,6 +80,7 @@ test('orchestrator never blindly re-applies an interrupted step', async () => {
   const result = await orchestrator.runNext(operationId);
   assert.equal(applyCalls, 0);
   assert.equal(inspectCalls, 1);
+  assert.equal(inspectOperation.steps[0].state, 'applying');
   assert.equal(result.outcome, 'reconciled');
   assert.equal(result.operation.steps[0].state, 'succeeded');
 });
