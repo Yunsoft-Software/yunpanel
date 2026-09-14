@@ -12,6 +12,8 @@ const base = {
   domainRegistry: {},
   certificateRegistry: {},
   applicationRegistry: {},
+  websiteRegistry: { listWebsites: async () => [] },
+  runtimeBindingRegistry: { getBinding: async () => null, activate: async () => null },
 };
 
 test('disabled local runtime does not construct privileged host operations', async () => {
@@ -67,6 +69,8 @@ test('enabled local runtime hydrates Node environment only through the registry 
   assert.equal(startOptions.lockPath, '/var/lib/yunpanel/control-plane/local-executor.lock');
   assert.equal(startOptions.hostOperations.operations.length, 0);
   assert.equal(startOptions.applicationEnvironmentRegistry, applicationEnvironmentRegistry);
+  assert.equal(startOptions.websiteRegistry, base.websiteRegistry);
+  assert.equal(startOptions.runtimeBindingRegistry, base.runtimeBindingRegistry);
   assert.equal(operationOptions.jobLogStore, jobLogStore);
   assert.deepEqual(await operationOptions.loadApplicationEnvironment('app-1', 7), { APP_SECRET: 'runtime-only' });
   assert.deepEqual(await operationOptions.loadDeploymentCredential('app-1'), {
@@ -169,6 +173,21 @@ test('enabled local runtime refuses to start without the environment materialize
       startRuntime: async () => { starts += 1; },
     }),
     (error) => error instanceof ConfiguredLocalRuntimeError && error.code === 'local_environment_registry_invalid',
+  );
+  assert.equal(starts, 0);
+});
+
+test('enabled local runtime refuses to start without runtime binding reconciliation registries', async () => {
+  let starts = 0;
+  await assert.rejects(
+    startConfiguredLocalRuntime({
+      ...base,
+      env: { YUNPANEL_LOCAL_SERVER_ID: serverId },
+      applicationEnvironmentRegistry: { materialize: async () => ({}) },
+      runtimeBindingRegistry: null,
+      startRuntime: async () => { starts += 1; },
+    }),
+    (error) => error instanceof ConfiguredLocalRuntimeError && error.code === 'local_runtime_binding_registry_invalid',
   );
   assert.equal(starts, 0);
 });
