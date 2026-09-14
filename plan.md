@@ -1,13 +1,13 @@
 # YunPanel — Kalan Geliştirme Planı
 
-Bu dosya yalnız tamamlanmamış ürün/kod işlerini tutar. Hedef ürün mimarisi `docs/architecture.md`, bağlayıcı geliştirme kuralları `agents.md`, gerçek Ubuntu/browser/provider kabul işleri `todo.md` içindedir.
+Bu dosya yalnız tamamlanmamış ürün/kod işlerini tutar. Hedef ürün mimarisi `docs/architecture.md`, provisioning recovery sözleşmesi `docs/provisioning-recovery.md`, bağlayıcı geliştirme kuralları `agents.md`, gerçek Ubuntu/browser/provider kabul işleri `todo.md` içindedir.
 
 2026-09-14 yön değişikliği: YunPanel olgun hosting araçlarının yerine kendi File Manager, terminal, database client, DNS server, monitoring veya backup arşiv motorunu yazmayacaktır. Mevcut özel uygulamalar yalnız replacement acceptance tamamlanana kadar migration fallback'idir. Yeni çalışma site-merkezli provisioning ve hazır servis adapter'larına gider.
 
 ## P0 — Ürün omurgasını site-merkezli hale getir
 
 - [ ] Mevcut durable `WebsiteProvisioningPlan`ı kalan gerçek kaynak adapter'larına bağla: certificate/static runtime, DNS, mail/webmail, database, SFTP, logs/analytics ve backup aynı Website kimliği/step/evidence modeli altında ilerlesin. Metadata yazılması tek başına `ready` sayılmasın.
-- [ ] Provisioning recovery yüzeyini tamamla: explicit failed-step retry, durable compensation API/state, secret-safe latest-operation read model ve Site overview step-level continue/retry/compensate UI mevcut; Unix identity ile Nginx operation-owned rollback/compensation kullanıyor. Kalan mutating adapter'lara aynı ownership/evidence sözleşmesini yay ve restart sonrası interrupted apply/compensation için startup reconcile/resume ile handler-specific actionable remediation guidance ekle. Evidence/ownership olmadan başarı veya destructive cleanup üretme; host mutation'ı körlemesine tekrar etme.
+- [ ] Provisioning recovery contract'ını kalan adapter'lara yay: explicit failed-step retry, durable compensation API/state, secret-safe latest-operation read model, Site overview step-level continue/retry/compensate UI, Unix identity + Nginx operation-owned rollback/compensation, startup `listInterrupted()` inspect-first reconcile ve handler-kind bazlı actionable remediation guidance mevcut. Kalan mutating adapter'lar aynı ownership/evidence/recovery sözleşmesini kullanmalı; evidence/ownership olmadan başarı veya destructive cleanup üretme, restart sonrası host mutation'ı körlemesine tekrar etme.
 - [ ] Mevcut operation-bound Unix identity ownership receipt/path provider'ını persistent data, tmp, logs, backup, SFTP ve kalan host adapter'larının tamamında fail-closed tek kaynak yap. `yunapp-*` identity/path'lerini sebepsiz değiştirme.
 - [ ] Independent subdomain ile `shared-site` subdomain'i explicit modelle. Alias runtime/user/mailbox üretmesin; independent Website ayrı izolasyon alsın.
 - [ ] Application'ı Website alt kaynağı yap. Yeni runtime/app yalnız site ekranından oluşturulsun; günlük navigasyondaki global `/applications` kaldırılıp yalnız Owner Sunucu > Tanılama envanteri olarak kalsın.
