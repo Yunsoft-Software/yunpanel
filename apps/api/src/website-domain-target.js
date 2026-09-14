@@ -19,10 +19,68 @@ function requireDependency(value, method, code, message) {
   return value;
 }
 
+function passengerBindingDrift(message) {
+  throw new DomainRegistryError('passenger_runtime_binding_drift', message, 409);
+}
+
+async function guardPassengerRuntimeBinding({
+  domain,
+  website,
+  applicationRegistry,
+  runtimeBindingRegistry,
+}) {
+  if (website.runtimeType !== 'node' || !website.applicationId) return;
+
+  requireDependency(
+    runtimeBindingRegistry,
+    'getBinding',
+    'runtime_binding_registry_unavailable',
+    'Runtime binding registry is required to resolve Node Website traffic target',
+  );
+  const binding = await runtimeBindingRegistry.getBinding(website.applicationId);
+  if (!binding || binding.adapter === 'direct-systemd') return;
+  if (binding.adapter !== 'passenger') {
+    passengerBindingDrift('Node Website runtime binding adapter is not supported');
+  }
+
+  requireDependency(
+    applicationRegistry,
+    'getApplication',
+    'application_registry_unavailable',
+    'Application registry is required to validate Passenger traffic authority',
+  );
+  const application = await applicationRegistry.getApplication(website.applicationId);
+  if (!application) passengerBindingDrift('Passenger runtime binding Application no longer exists');
+  if (application.serverId !== domain.serverId || binding.serverId !== domain.serverId) {
+    passengerBindingDrift('Passenger runtime binding server identity drifted');
+  }
+  if (binding.applicationId !== application.id || binding.websiteId !== website.id) {
+    passengerBindingDrift('Passenger runtime binding resource identity drifted');
+  }
+  if (binding.releaseId !== application.currentReleaseId) {
+    passengerBindingDrift('Passenger runtime binding release drifted from the active Application release');
+  }
+  if (binding.websiteRevision !== website.revision) {
+    passengerBindingDrift('Passenger runtime binding Website revision drifted');
+  }
+  const domainEvidence = binding.domains.find((entry) => entry.domainId === domain.id);
+  if (!domainEvidence || domainEvidence.desiredRevision !== domain.desiredRevision) {
+    passengerBindingDrift('Passenger runtime binding Domain revision drifted');
+  }
+
+  throw new DomainRegistryError(
+    'passenger_runtime_binding_restage_blocked',
+    'Passenger runtime binding is authoritative; legacy proxy Domain staging is blocked until Passenger-aware restaging is used',
+    409,
+  );
+}
+
 export async function resolveWebsiteDomainTarget({
   domain,
   websiteRegistry = null,
   dockerComposeProjectRegistry = null,
+  applicationRegistry = null,
+  runtimeBindingRegistry = null,
 } = {}) {
   if (!domain || typeof domain !== 'object' || Array.isArray(domain)) {
     throw new DomainRegistryError('invalid_domain_target_state', 'Domain target state is invalid', 409);
@@ -42,7 +100,15 @@ export async function resolveWebsiteDomainTarget({
   }
 
   const binding = website.managedComposeBinding ?? null;
-  if (binding === null) return persistedDomainTarget(domain);
+  if (binding === null) {
+    await guardPassengerRuntimeBinding({
+      domain,
+      website,
+      applicationRegistry,
+      runtimeBindingRegistry,
+    });
+    return persistedDomainTarget(domain);
+  }
   if (website.runtimeType !== 'docker' || website.applicationId !== null
     || website.dockerWorkloadId !== null || website.proxyTarget !== null) {
     throw new DomainRegistryError(
@@ -90,3 +156,8 @@ export async function resolveWebsiteDomainTarget({
     }),
   });
 }
+
+export const websiteDomainTargetInternals = Object.freeze({
+  persistedDomainTarget,
+  guardPassengerRuntimeBinding,
+});
