@@ -12,6 +12,16 @@ const domainId = 'f05764d6-d5e8-4d2a-9bdd-493111b24478';
 const operationId = 'd2fe443b-0fa6-4f98-a061-6f41b7f2684e';
 const releaseId = 'ff830043-9752-4640-83b4-3a1998de78a0';
 const checksum = 'a'.repeat(64);
+const passengerTarget = Object.freeze({
+  appRoot: `/var/lib/yunpanel/apps/${applicationId}/current`,
+  documentRoot: `/var/lib/yunpanel/apps/${applicationId}/current`,
+  startupFile: 'server.js',
+  nodeBinary: '/opt/yunpanel/node-runtimes/v24/bin/node',
+  user: 'yunapp-0123456789ab',
+  group: 'yunapp-0123456789ab',
+  appEnv: 'production',
+  environmentInclude: `/etc/nginx/yunpanel/passenger-env/${applicationId}.conf`,
+});
 
 function activation(overrides = {}) {
   return {
@@ -24,6 +34,7 @@ function activation(overrides = {}) {
     websiteId,
     websiteRevision: 3,
     domains: [{ domainId, desiredRevision: 4, nginxChecksum: checksum }],
+    passengerTarget,
     ...overrides,
   };
 }
@@ -35,6 +46,7 @@ test('runtime binding activation is revision-bound and idempotent for the same o
   assert.equal(first.revision, 1);
   assert.equal(first.adapter, 'passenger');
   assert.equal(first.state, 'active');
+  assert.deepEqual(first.passengerTarget, passengerTarget);
 
   clock += 1_000;
   const retry = await registry.activate(activation(), { expectedRevision: 0 });
@@ -53,17 +65,27 @@ test('runtime binding captures cleanup-required Passenger state without pretendi
   assert.equal(record.state, 'cleanup_required');
 });
 
-test('runtime binding requires exact Website, Domain revision, release and Nginx evidence', async () => {
+test('runtime binding requires exact Website, Domain revision, release, Nginx and Passenger target evidence', async () => {
   const registry = createApplicationRuntimeBindingRegistry();
   for (const candidate of [
     activation({ websiteRevision: 0 }),
     activation({ releaseId: 'not-a-uuid' }),
     activation({ domains: [] }),
     activation({ domains: [{ domainId, desiredRevision: 4, nginxChecksum: 'bad' }] }),
+    activation({ passengerTarget: { ...passengerTarget, startupFile: '../escape.js' } }),
+    activation({ passengerTarget: null }),
   ]) {
     await assert.rejects(registry.activate(candidate, { expectedRevision: 0 }));
   }
   assert.equal(await registry.getBinding(applicationId), null);
+});
+
+test('direct-systemd binding cannot carry Passenger target evidence', async () => {
+  const registry = createApplicationRuntimeBindingRegistry();
+  await assert.rejects(registry.activate(activation({
+    adapter: 'direct-systemd',
+    passengerTarget,
+  }), { expectedRevision: 0 }));
 });
 
 test('runtime binding persists only durable evidence and reloads it', async () => {
@@ -77,6 +99,7 @@ test('runtime binding persists only durable evidence and reloads it', async () =
   assert.equal(raw.version, 1);
   assert.equal(raw.bindings.length, 1);
   assert.equal(Object.hasOwn(raw.bindings[0], 'environment'), false);
+  assert.deepEqual(raw.bindings[0].passengerTarget, passengerTarget);
 
   const reloaded = createApplicationRuntimeBindingRegistry({ filePath });
   await reloaded.init();
