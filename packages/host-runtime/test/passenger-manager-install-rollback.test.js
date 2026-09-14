@@ -109,14 +109,26 @@ test('Passenger install failure restores managed config and removes a newly adde
     && file === passengerManagerInternals.moduleLink));
 });
 
-test('fresh-host rollback stays fail-closed instead of blindly removing a newly installed Nginx', async () => {
+test('fresh-host rollback removes only the newly installed Nginx owner and verifies the binary is gone', async () => {
   const commands = [];
   let inspections = 0;
+  let nginxInstalled = false;
   const manager = createPassengerManager({
     inspector: { inspect: async () => { inspections += 1; return unavailable; } },
     run: async (file, args) => {
       commands.push([file, args]);
-      if (file === '/usr/bin/dpkg-query') throw commandFailure(1);
+      if (file === '/usr/bin/dpkg-query') {
+        if (!nginxInstalled) throw commandFailure(1);
+        return { stdout: 'nginx-core:amd64: /usr/sbin/nginx\n' };
+      }
+      if (file === '/usr/bin/apt-get' && args[0] === 'install'
+        && args.includes('nginx') && args.includes(passengerManagerInternals.packageName)) {
+        nginxInstalled = true;
+      }
+      if (file === '/usr/bin/apt-get' && args[0] === 'remove'
+        && args.includes('nginx') && args.includes('nginx-core')) {
+        nginxInstalled = false;
+      }
       return { stdout: '' };
     },
     readFileFn: async (file) => {
@@ -124,7 +136,10 @@ test('fresh-host rollback stays fail-closed instead of blindly removing a newly 
       if (file.endsWith('.gpg')) return Buffer.from('new-keyring');
       throw enoent();
     },
-    lstatFn: async () => { throw enoent(); },
+    lstatFn: async (file) => {
+      if (file === '/usr/sbin/nginx' && nginxInstalled) return regular(0o755);
+      throw enoent();
+    },
     readlinkFn: async () => { throw enoent(); },
     mkdirFn: async () => {},
     writeFileFn: async () => {},
@@ -138,11 +153,51 @@ test('fresh-host rollback stays fail-closed instead of blindly removing a newly 
 
   await assert.rejects(
     manager.apply(),
-    (error) => error instanceof PassengerManagerError && error.code === 'passenger_install_rollback_incomplete',
+    (error) => error instanceof PassengerManagerError && error.code === 'passenger_failure_injected',
   );
-  assert.equal(inspections, 1);
+  assert.equal(inspections, 2);
+  assert.equal(nginxInstalled, false);
   assert.ok(commands.some(([file, args]) => file === '/usr/bin/apt-get'
     && args.join(' ') === `remove --yes --purge ${passengerManagerInternals.packageName}`));
-  assert.equal(commands.some(([file, args]) => file === '/usr/bin/apt-get'
-    && args[0] === 'remove' && args.includes('nginx')), false);
+  assert.ok(commands.some(([file, args]) => file === '/usr/bin/apt-get'
+    && args.join(' ') === 'remove --yes --purge nginx nginx-core'));
+  assert.equal(commands.some(([file, args]) => file === '/usr/bin/apt-get' && args[0] === 'autoremove'), false);
+});
+
+test('fresh-host rollback fails closed when the new Nginx package owner is not safely identifiable', async () => {
+  let nginxInstalled = false;
+  const manager = createPassengerManager({
+    inspector: { inspect: async () => unavailable },
+    run: async (file, args) => {
+      if (file === '/usr/bin/dpkg-query') {
+        if (!nginxInstalled) throw commandFailure(1);
+        return { stdout: 'custom-web: /usr/sbin/nginx\n' };
+      }
+      if (file === '/usr/bin/apt-get' && args[0] === 'install'
+        && args.includes('nginx') && args.includes(passengerManagerInternals.packageName)) {
+        nginxInstalled = true;
+      }
+      return { stdout: '' };
+    },
+    readFileFn: async (file) => {
+      if (file === '/etc/os-release') return ubuntu();
+      if (file.endsWith('.gpg')) return Buffer.from('new-keyring');
+      throw enoent();
+    },
+    lstatFn: async (file) => file === '/usr/sbin/nginx' && nginxInstalled ? regular(0o755) : (() => { throw enoent(); })(),
+    readlinkFn: async () => { throw enoent(); },
+    mkdirFn: async () => {},
+    writeFileFn: async () => {},
+    renameFn: async () => {},
+    rmFn: async () => {},
+    symlinkFn: async () => {},
+    checkpoint: async (name) => {
+      if (name === 'after-package-install') throw new Error('injected');
+    },
+  });
+
+  await assert.rejects(
+    manager.apply(),
+    (error) => error instanceof PassengerManagerError && error.code === 'passenger_install_rollback_failed',
+  );
 });
