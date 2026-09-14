@@ -26,6 +26,7 @@ import {
 } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { normalizeGitDeploymentCredential } from '@yunpanel/shared';
+import { createLocalNodePassengerMigrationOperation } from './local-node-passenger-migration-operation.js';
 import { createLocalRoundcubeConfigOperation } from './local-roundcube-config-operation.js';
 
 export const LOCAL_HOST_OPERATIONS = Object.freeze([
@@ -48,6 +49,7 @@ export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.APP_STATIC_ROLLBACK,
   OPERATIONS.APP_NODE_STATUS,
   OPERATIONS.APP_NODE_PROCESS,
+  OPERATIONS.APP_NODE_PASSENGER_MIGRATE,
   OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT,
   OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL,
 ]);
@@ -136,6 +138,7 @@ export function createLocalHostOperations({
   nodeRollbackManager = createNodeRollbackManager(),
   nodeRestartManager = createNodeRestartManager(),
   nodeProcessManager = createNodeProcessManager(),
+  nodePassengerMigrationOperation = createLocalNodePassengerMigrationOperation(),
   nodeRuntimeManager = createNodeRuntimeManager(),
   nodeStatusInspector = createNodeStatusInspector(),
   mailConfigManager = null,
@@ -180,6 +183,9 @@ export function createLocalHostOperations({
   }
   if (!cloudflareDnsManager || typeof cloudflareDnsManager.applyRecord !== 'function') {
     throw new Error('cloudflareDnsManager must provide applyRecord()');
+  }
+  if (!nodePassengerMigrationOperation || typeof nodePassengerMigrationOperation.execute !== 'function') {
+    throw new Error('nodePassengerMigrationOperation must provide execute()');
   }
   if (jobLogStore !== null && typeof jobLogStore.record !== 'function') {
     throw new Error('jobLogStore must provide record() when configured');
@@ -541,6 +547,7 @@ export function createLocalHostOperations({
     [OPERATIONS.APP_STATIC_ROLLBACK, (payload) => staticRollbackManager.rollbackStatic(payload)],
     [OPERATIONS.APP_NODE_STATUS, (payload) => nodeStatusInspector.inspectNodeStatus(payload)],
     [OPERATIONS.APP_NODE_PROCESS, (payload) => nodeProcessManager.controlNodeProcess(payload)],
+    [OPERATIONS.APP_NODE_PASSENGER_MIGRATE, (payload, execution) => nodePassengerMigrationOperation.execute(payload, execution)],
     [OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT, () => nodeRuntimeManager.inspect()],
     [OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL, (payload) => nodeRuntimeManager.install(payload.major)],
     [OPERATIONS.MAIL_DATA_BACKUP, executeMailDataBackup],
