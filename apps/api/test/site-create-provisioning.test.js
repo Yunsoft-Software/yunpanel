@@ -24,7 +24,7 @@ function nodePreview({ metadataReady = false, httpsMode = 'managed' } = {}) {
       website: {
         id: websiteId,
         runtimeType: 'node',
-        unixUser: 'yunapp-abc123',
+        unixUser: 'yunapp-0123456789ab',
         documentRoot: `/var/lib/yunpanel/apps/${applicationId}/current`,
       },
       primaryDomain: {
@@ -44,7 +44,10 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.equal(plan.ready, false);
   assert.equal(plan.status, 'partial');
   assert.equal(plan.steps.find((step) => step.id === 'website_metadata').state, 'succeeded');
-  assert.equal(plan.steps.find((step) => step.id === 'unix_identity').state, 'pending');
+  const identity = plan.steps.find((step) => step.id === 'unix_identity');
+  assert.equal(identity.state, 'pending');
+  assert.equal(identity.intent.unixUser, 'yunapp-0123456789ab');
+  assert.equal(identity.intent.homeDirectory, `/var/lib/yunpanel/data/${applicationId}`);
   assert.equal(plan.steps.find((step) => step.id === 'runtime').intent.adapter, 'passenger');
   assert.equal(plan.steps.find((step) => step.id === 'nginx').state, 'pending');
   assert.equal(plan.steps.find((step) => step.id === 'certificate').state, 'pending');
