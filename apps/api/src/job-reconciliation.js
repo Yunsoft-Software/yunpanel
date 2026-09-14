@@ -1,4 +1,5 @@
 import { OPERATIONS } from '@yunpanel/protocol';
+import { reconcileApplicationPassengerMigration } from './application-passenger-migration-reconciliation.js';
 import { acknowledgeAutomaticJobReconciliation } from './durable-job-registry.js';
 
 const SAFE_ERROR_CODE = /^[a-z0-9_.-]{1,80}$/;
@@ -119,10 +120,25 @@ async function applyReconciliation({
   certificateRegistry,
   applicationRegistry,
   applicationEnvironmentRegistry,
+  websiteRegistry,
+  runtimeBindingRegistry,
   mailDomainRegistry,
   job,
 }) {
   if (job.resourceType === 'application') {
+    if (job.operation === OPERATIONS.APP_NODE_PASSENGER_MIGRATE) {
+      if (job.status !== 'failed') {
+        await reconcileApplicationPassengerMigration({
+          job,
+          applicationRegistry,
+          websiteRegistry,
+          domainRegistry,
+          certificateRegistry,
+          runtimeBindingRegistry,
+        });
+      }
+      return;
+    }
     await reconcileApplicationJob(applicationRegistry, applicationEnvironmentRegistry, job);
     return;
   }
@@ -181,6 +197,8 @@ export async function reconcileCompletedJob({
   certificateRegistry,
   applicationRegistry,
   applicationEnvironmentRegistry = null,
+  websiteRegistry = null,
+  runtimeBindingRegistry = null,
   mailDomainRegistry = null,
   job,
 }) {
@@ -190,6 +208,8 @@ export async function reconcileCompletedJob({
       certificateRegistry,
       applicationRegistry,
       applicationEnvironmentRegistry,
+      websiteRegistry,
+      runtimeBindingRegistry,
       mailDomainRegistry,
       job,
     });
