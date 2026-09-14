@@ -34,6 +34,20 @@ async function fixture() {
     runtime: application.runtime,
   });
 
+  let environmentStatus = {
+    savedRevision: 2,
+    appliedRevision: 2,
+    appliedReleaseId: operationId,
+    appliedToRunningProcess: true,
+  };
+  const applicationEnvironmentRegistry = {
+    environmentStatus: async (id, options) => {
+      assert.equal(id, applicationId);
+      assert.deepEqual(options, { currentReleaseId: operationId });
+      return { ...environmentStatus };
+    },
+  };
+
   const website = Object.freeze({
     id: websiteId,
     serverId,
@@ -64,6 +78,7 @@ async function fixture() {
   const runtimeBindingRegistry = createApplicationRuntimeBindingRegistry();
   const handler = createWebsitePassengerAuthorityProvisioningHandler({
     applicationRegistry,
+    applicationEnvironmentRegistry,
     websiteRegistry,
     domainRegistry,
     runtimeBindingRegistry,
@@ -109,6 +124,19 @@ async function fixture() {
           adapter: 'passenger-application-release',
           applicationId,
           releaseId: operationId,
+        },
+      },
+      {
+        id: 'passenger_environment_state',
+        state: 'succeeded',
+        evidence: {
+          satisfied: true,
+          adapter: 'passenger-environment-state',
+          applicationId,
+          releaseId: operationId,
+          environmentRevision: 2,
+          appliedRevision: 2,
+          appliedReleaseId: operationId,
         },
       },
       {
@@ -161,7 +189,13 @@ async function fixture() {
     },
     evidence: null,
   };
-  return { handler, context, runtimeBindingRegistry, domains };
+  return {
+    handler,
+    context,
+    runtimeBindingRegistry,
+    domains,
+    setEnvironmentStatus: (value) => { environmentStatus = { ...value }; },
+  };
 }
 
 test('native Passenger authority persists canonical binding from completed provisioning evidence', async () => {
@@ -201,6 +235,20 @@ test('Passenger authority refuses to bind when Domain activation evidence is not
   await assert.rejects(
     handler.apply(context),
     (error) => error?.code === 'website_passenger_authority_domain_drift',
+  );
+});
+
+test('Passenger authority refuses to bind when the saved environment advances after apply', async () => {
+  const { handler, context, setEnvironmentStatus } = await fixture();
+  setEnvironmentStatus({
+    savedRevision: 3,
+    appliedRevision: 2,
+    appliedReleaseId: operationId,
+    appliedToRunningProcess: false,
+  });
+  await assert.rejects(
+    handler.apply(context),
+    (error) => error?.code === 'website_passenger_authority_environment_drift',
   );
 });
 
