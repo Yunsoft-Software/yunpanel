@@ -6,6 +6,8 @@ export function createWebsiteProvisioningRuntime({
   filePath = null,
   now,
   identityManager,
+  passengerSiteManager,
+  nginxManager,
 } = {}) {
   const registry = createWebsiteProvisioningRegistry({
     filePath,
@@ -13,6 +15,8 @@ export function createWebsiteProvisioningRuntime({
   });
   const handlers = createWebsiteProvisioningHandlers({
     ...(identityManager ? { identityManager } : {}),
+    ...(passengerSiteManager ? { passengerSiteManager } : {}),
+    ...(nginxManager ? { nginxManager } : {}),
   });
   const orchestrator = createWebsiteProvisioningOrchestrator({ registry, handlers });
 
