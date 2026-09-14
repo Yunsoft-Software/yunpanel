@@ -75,18 +75,23 @@ function publicCompensation(compensation) {
   });
 }
 
-function publicStep(step) {
+function publicStep(step, supportsCompensation = () => false) {
+  const compensation = publicCompensation(step.compensation);
   return Object.freeze({
     id: step.id,
     kind: step.kind,
     required: step.required !== false,
     state: step.state,
     error: typeof step.error === 'string' ? step.error : null,
-    compensation: publicCompensation(step.compensation),
+    compensation,
+    canRetry: step.state === 'failed' && ['pending', 'not_required'].includes(compensation.state),
+    canCompensate: ['succeeded', 'failed'].includes(step.state)
+      && ['pending', 'failed'].includes(compensation.state)
+      && supportsCompensation(step.kind) === true,
   });
 }
 
-function publicOperation(operation) {
+function publicOperation(operation, supportsCompensation = () => false) {
   if (!operation) return null;
   return Object.freeze({
     operationId: operation.operationId,
@@ -102,18 +107,18 @@ function publicOperation(operation) {
       : null,
     createdAt: operation.createdAt ?? null,
     updatedAt: operation.updatedAt ?? null,
-    steps: Object.freeze((operation.steps ?? []).map(publicStep)),
+    steps: Object.freeze((operation.steps ?? []).map((step) => publicStep(step, supportsCompensation))),
   });
 }
 
-function publicResult(result) {
+function publicResult(result, supportsCompensation = () => false) {
   return Object.freeze({
     operationId: result?.operation?.operationId ?? result?.operationId ?? null,
     outcome: result?.outcome ?? null,
     stepId: result?.stepId ?? null,
     actionRequired: typeof result?.actionRequired === 'string' ? result.actionRequired : null,
     error: typeof result?.error === 'string' ? result.error : null,
-    operation: publicOperation(result?.operation ?? null),
+    operation: publicOperation(result?.operation ?? null, supportsCompensation),
   });
 }
 
@@ -129,14 +134,18 @@ export function mountWebsiteProvisioningRoutes(app, { registry, orchestrator } =
     || !registry || typeof registry.get !== 'function' || typeof registry.getLatestForWebsite !== 'function'
     || !orchestrator || typeof orchestrator.runNext !== 'function'
     || typeof orchestrator.retryStep !== 'function'
-    || typeof orchestrator.compensateStep !== 'function') {
+    || typeof orchestrator.compensateStep !== 'function'
+    || typeof orchestrator.supportsCompensation !== 'function') {
     throw new Error('Website provisioning HTTP dependencies are required');
   }
+
+  const projectOperation = (operation) => publicOperation(operation, orchestrator.supportsCompensation);
+  const projectResult = (result) => publicResult(result, orchestrator.supportsCompensation);
 
   app.get('/api/sites/:websiteId/provisioning/latest', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const id = websiteId(request.params.websiteId);
     const operation = await registry.getLatestForWebsite(id);
-    return response.json({ data: publicOperation(operation) });
+    return response.json({ data: projectOperation(operation) });
   }));
 
   app.get('/api/sites/provisioning/:operationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -149,7 +158,7 @@ export function mountWebsiteProvisioningRoutes(app, { registry, orchestrator } =
         404,
       );
     }
-    return response.json({ data: publicOperation(operation) });
+    return response.json({ data: projectOperation(operation) });
   }));
 
   app.post('/api/sites/provisioning/:operationId/continue', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -157,7 +166,7 @@ export function mountWebsiteProvisioningRoutes(app, { registry, orchestrator } =
     continueBody(request.body, id);
     const result = await orchestrator.runNext(id);
     const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
-    return response.status(status).json({ data: publicResult(result) });
+    return response.status(status).json({ data: projectResult(result) });
   }));
 
   app.post('/api/sites/provisioning/:operationId/steps/:stepId/retry', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -166,7 +175,7 @@ export function mountWebsiteProvisioningRoutes(app, { registry, orchestrator } =
     retryBody(request.body, id, provisioningStepId);
     const result = await orchestrator.retryStep(id, provisioningStepId);
     const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
-    return response.status(status).json({ data: publicResult(result) });
+    return response.status(status).json({ data: projectResult(result) });
   }));
 
   app.post('/api/sites/provisioning/:operationId/steps/:stepId/compensate', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -174,7 +183,7 @@ export function mountWebsiteProvisioningRoutes(app, { registry, orchestrator } =
     const provisioningStepId = stepId(request.params.stepId);
     compensateBody(request.body, id, provisioningStepId);
     const result = await orchestrator.compensateStep(id, provisioningStepId);
-    return response.status(200).json({ data: publicResult(result) });
+    return response.status(200).json({ data: projectResult(result) });
   }));
 }
 
