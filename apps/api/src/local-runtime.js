@@ -83,15 +83,27 @@ function assertBoundServer(server, serverId, hostname) {
   return server;
 }
 
-function validateDependencies({ registry, jobRegistry, domainRegistry, certificateRegistry, applicationRegistry, hostOperations }) {
+function validateDependencies({
+  registry,
+  jobRegistry,
+  domainRegistry,
+  certificateRegistry,
+  applicationRegistry,
+  websiteRegistry,
+  runtimeBindingRegistry,
+  hostOperations,
+}) {
   if (!registry || typeof registry.getServer !== 'function' || typeof registry.updateLocalSnapshot !== 'function') {
     throw new LocalRuntimeError('local_runtime_registry_invalid', 'Local runtime requires the server registry');
   }
   if (!jobRegistry || typeof jobRegistry.claimNext !== 'function' || typeof jobRegistry.listJobs !== 'function' || typeof jobRegistry.complete !== 'function') {
     throw new LocalRuntimeError('local_runtime_jobs_invalid', 'Local runtime requires the job registry');
   }
-  if (!domainRegistry || !certificateRegistry || !applicationRegistry) {
-    throw new LocalRuntimeError('local_runtime_reconciliation_invalid', 'Local runtime requires resource registries');
+  if (!domainRegistry || !certificateRegistry || !applicationRegistry
+    || !websiteRegistry || typeof websiteRegistry.listWebsites !== 'function'
+    || !runtimeBindingRegistry || typeof runtimeBindingRegistry.getBinding !== 'function'
+    || typeof runtimeBindingRegistry.activate !== 'function') {
+    throw new LocalRuntimeError('local_runtime_reconciliation_invalid', 'Local runtime requires resource and runtime-binding registries');
   }
   if (!hostOperations || typeof hostOperations.supports !== 'function' || typeof hostOperations.executeOperation !== 'function') {
     throw new LocalRuntimeError('local_runtime_operations_invalid', 'Local runtime requires host operations');
@@ -131,6 +143,8 @@ export async function startLocalRuntime({
   certificateRegistry,
   applicationRegistry,
   applicationEnvironmentRegistry = null,
+  websiteRegistry = null,
+  runtimeBindingRegistry = null,
   mailDomainRegistry = null,
   hostOperations = createLocalHostOperations(),
   snapshotProvider = null,
@@ -157,7 +171,16 @@ export async function startLocalRuntime({
   if (typeof executorFactory !== 'function' || typeof acquireLock !== 'function' || typeof reconcile !== 'function' || typeof onError !== 'function') {
     throw new LocalRuntimeError('local_runtime_adapter_invalid', 'Local runtime adapter configuration is invalid');
   }
-  validateDependencies({ registry, jobRegistry, domainRegistry, certificateRegistry, applicationRegistry, hostOperations });
+  validateDependencies({
+    registry,
+    jobRegistry,
+    domainRegistry,
+    certificateRegistry,
+    applicationRegistry,
+    websiteRegistry,
+    runtimeBindingRegistry,
+    hostOperations,
+  });
 
   assertBoundServer(await registry.getServer(serverId), serverId, normalizedHostname);
   let lock;
@@ -242,6 +265,8 @@ export async function startLocalRuntime({
         certificateRegistry,
         applicationRegistry,
         applicationEnvironmentRegistry,
+        websiteRegistry,
+        runtimeBindingRegistry,
         mailDomainRegistry,
         job,
       });
