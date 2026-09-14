@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { lstat, readlink } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import { normalizeStaticApplicationSpec } from '@yunpanel/shared';
 import { createApplicationIdentity } from './application-identity.js';
@@ -9,6 +11,7 @@ const GETENT_PATH = '/usr/bin/getent';
 const USERADD_PATH = '/usr/sbin/useradd';
 const RUNUSER_PATH = '/usr/sbin/runuser';
 const NOLOGIN_SHELLS = new Set(['/usr/sbin/nologin', '/sbin/nologin']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class WebsiteStaticDeploymentError extends Error {
   constructor(code, message) {
@@ -44,6 +47,16 @@ function missingGetent(error) {
   return Number.isInteger(error?.code) && error.code === 2;
 }
 
+function releaseIdFromTarget(value) {
+  if (typeof value !== 'string') return null;
+  const match = value.match(/^releases\/([0-9a-f-]{36})$/i);
+  return match && UUID_PATTERN.test(match[1]) ? match[1].toLowerCase() : null;
+}
+
+function missingPath(error) {
+  return error?.code === 'ENOENT' || error?.code === 'EINVAL';
+}
+
 export function createWebsiteStaticDeploymentManager({
   buildRoot = '/var/lib/yunpanel/build',
   webRoot = '/var/www/yunpanel/apps',
@@ -55,10 +68,13 @@ export function createWebsiteStaticDeploymentManager({
     cwd: options.cwd,
     env: options.env,
   }),
+  lstatFn = lstat,
+  readlinkFn = readlink,
   createDeploymentManager = createStaticDeploymentManager,
   recordLog = null,
 } = {}) {
-  if (typeof run !== 'function' || typeof createDeploymentManager !== 'function'
+  if (typeof run !== 'function' || typeof lstatFn !== 'function' || typeof readlinkFn !== 'function'
+    || typeof createDeploymentManager !== 'function'
     || (recordLog !== null && typeof recordLog !== 'function')) {
     throw new WebsiteStaticDeploymentError('website_static_dependencies_invalid', 'Website static deployment dependencies are invalid');
   }
@@ -94,6 +110,100 @@ export function createWebsiteStaticDeploymentManager({
     return Object.freeze({ account, group });
   }
 
+  function identityFor(applicationId) {
+    return createApplicationIdentity(applicationId, {
+      dataRoot,
+      staticBuildRoot: buildRoot,
+      staticPublishRoot: webRoot,
+    });
+  }
+
+  async function inspectCurrent({ applicationId } = {}) {
+    let identity;
+    try { identity = identityFor(applicationId); }
+    catch {
+      throw new WebsiteStaticDeploymentError('invalid_static_deployment', 'Static deployment Application identity is invalid');
+    }
+    await inspectIdentity(identity);
+
+    const currentPath = path.posix.join(identity.paths.static.publishRoot, 'current');
+    let target;
+    try { target = await readlinkFn(currentPath); }
+    catch (error) {
+      if (missingPath(error)) {
+        return Object.freeze({
+          satisfied: false,
+          reason: 'website_static_current_missing',
+          adapter: 'static',
+          applicationId: identity.applicationId,
+        });
+      }
+      throw new WebsiteStaticDeploymentError('website_static_release_inspection_failed', 'Website static current release could not be inspected');
+    }
+    const releaseId = releaseIdFromTarget(target);
+    if (!releaseId) {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'website_static_current_invalid',
+        adapter: 'static',
+        applicationId: identity.applicationId,
+      });
+    }
+
+    const releasePath = path.posix.join(identity.paths.static.publishRoot, 'releases', releaseId);
+    let info;
+    try { info = await lstatFn(releasePath); }
+    catch (error) {
+      if (error?.code === 'ENOENT') {
+        return Object.freeze({
+          satisfied: false,
+          reason: 'website_static_release_missing',
+          adapter: 'static',
+          applicationId: identity.applicationId,
+          releaseId,
+        });
+      }
+      throw new WebsiteStaticDeploymentError('website_static_release_inspection_failed', 'Website static release could not be inspected');
+    }
+    if (!info?.isDirectory?.() || info.isSymbolicLink?.()) {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'website_static_release_invalid',
+        adapter: 'static',
+        applicationId: identity.applicationId,
+        releaseId,
+      });
+    }
+
+    return Object.freeze({
+      satisfied: true,
+      adapter: 'static',
+      applicationId: identity.applicationId,
+      releaseId,
+      currentRelease: currentPath,
+      unixUser: identity.unixUser,
+      homeDirectory: identity.paths.workspace.homeDirectory,
+    });
+  }
+
+  async function inspectDeployment(rawSpec) {
+    let spec;
+    try { spec = normalizeStaticApplicationSpec(rawSpec); }
+    catch {
+      throw new WebsiteStaticDeploymentError('invalid_static_deployment', 'Static deployment specification is invalid');
+    }
+    const current = await inspectCurrent({ applicationId: spec.applicationId });
+    if (current.satisfied !== true || current.releaseId !== spec.deploymentId) {
+      return Object.freeze({
+        ...current,
+        satisfied: false,
+        reason: current.satisfied === true ? 'website_static_release_not_current' : current.reason,
+        deploymentId: spec.deploymentId,
+      });
+    }
+    return Object.freeze({ ...current, deploymentId: spec.deploymentId });
+  }
+
   function deploymentManagerFor(identity) {
     const homeDirectory = identity.paths.workspace.homeDirectory;
     const guardedRun = async (file, args, options = {}) => {
@@ -124,11 +234,7 @@ export function createWebsiteStaticDeploymentManager({
   }
 
   async function deployUnlocked(spec, options) {
-    const identity = createApplicationIdentity(spec.applicationId, {
-      dataRoot,
-      staticBuildRoot: buildRoot,
-      staticPublishRoot: webRoot,
-    });
+    const identity = identityFor(spec.applicationId);
     await inspectIdentity(identity);
     return deploymentManagerFor(identity).deployStatic(spec, options);
   }
@@ -150,12 +256,14 @@ export function createWebsiteStaticDeploymentManager({
     return tracked;
   }
 
-  return Object.freeze({ deployStatic, inspectIdentity });
+  return Object.freeze({ deployStatic, inspectIdentity, inspectCurrent, inspectDeployment });
 }
 
 export const websiteStaticDeploymentInternals = Object.freeze({
   parsePasswd,
   parseGroup,
   missingGetent,
+  releaseIdFromTarget,
+  missingPath,
   paths: Object.freeze({ GETENT_PATH, USERADD_PATH, RUNUSER_PATH }),
 });
