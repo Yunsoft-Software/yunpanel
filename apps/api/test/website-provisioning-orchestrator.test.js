@@ -205,3 +205,36 @@ test('handler failure records bounded failed state instead of advancing', async 
   assert.equal(result.operation.steps[0].state, 'failed');
   assert.equal(result.operation.steps[0].error, 'unix_identity_apply_failed');
 });
+
+test('explicit retry resets only the failed step and re-runs it through the normal durable path', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.create(plan());
+  let attempts = 0;
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async () => {
+          attempts += 1;
+          if (attempts === 1) {
+            const error = new Error('first attempt failed');
+            error.code = 'unix_identity_apply_failed';
+            throw error;
+          }
+          return { satisfied: true, uid: 1201, gid: 1201 };
+        },
+      },
+    },
+  });
+
+  const failed = await orchestrator.runNext(operationId);
+  assert.equal(failed.outcome, 'failed');
+  assert.equal(failed.operation.steps[0].state, 'failed');
+
+  const retried = await orchestrator.retryStep(operationId, 'unix_identity');
+  assert.equal(attempts, 2);
+  assert.equal(retried.outcome, 'progressed');
+  assert.equal(retried.operation.steps[0].state, 'succeeded');
+  assert.equal(retried.operation.steps[0].error, null);
+  assert.equal(retried.operation.steps[1].state, 'pending');
+});
