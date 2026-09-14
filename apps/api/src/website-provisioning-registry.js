@@ -250,6 +250,21 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
     return publicOperation(operation);
   }
 
+  async function blockStep({ operationId, stepId, error, evidence = null } = {}) {
+    await ensureInitialized();
+    const operation = requireOperation(operationId);
+    const step = requireStep(operation, stepId);
+    if (step.state !== 'applying') {
+      throw new WebsiteProvisioningRegistryError('website_provisioning_transition_invalid', 'Only an applying provisioning step can block');
+    }
+    step.state = 'blocked';
+    step.error = failureCode(error);
+    step.evidence = evidence == null ? null : requiredEvidence(evidence);
+    operation.updatedAt = nowIso();
+    await persist();
+    return publicOperation(operation);
+  }
+
   async function failStep({ operationId, stepId, error, evidence = null } = {}) {
     await ensureInitialized();
     const operation = requireOperation(operationId);
@@ -326,6 +341,7 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
     get,
     beginStep,
     completeStep,
+    blockStep,
     failStep,
     beginCompensation,
     completeCompensation,
