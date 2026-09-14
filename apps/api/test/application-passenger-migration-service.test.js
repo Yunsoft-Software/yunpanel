@@ -78,17 +78,24 @@ function service({
   return { migration, enqueued };
 }
 
-test('queues only canonical node and domain state from an exact preview', async () => {
+test('queues canonical node, domain and authority state from an exact preview', async () => {
   const { migration, enqueued } = service();
   const result = await migration.apply(applicationId, { previewDigest: digest, confirmation });
   assert.equal(enqueued.length, 1);
   assert.equal(enqueued[0].operation, OPERATIONS.APP_NODE_PASSENGER_MIGRATE);
   assert.equal(enqueued[0].resourceType, 'application');
   assert.equal(enqueued[0].resourceId, applicationId);
-  assert.deepEqual(Object.keys(enqueued[0].payload).sort(), ['domain', 'node']);
+  assert.deepEqual(Object.keys(enqueued[0].payload).sort(), ['authority', 'domain', 'node']);
   assert.deepEqual(enqueued[0].payload.node, { applicationId, releaseId, runtime });
   assert.equal(enqueued[0].payload.domain.primaryDomain, 'example.com');
   assert.equal(enqueued[0].payload.domain.tls, null);
+  assert.deepEqual(enqueued[0].payload.authority, {
+    websiteId,
+    websiteRevision: 3,
+    domainId,
+    domainDesiredRevision: 4,
+    domainAppliedRevision: 4,
+  });
   assert.equal(enqueued[0].idempotencyKey, `node-passenger-migrate:${applicationId}:${digest}`);
   assert.equal(result.job.operation, OPERATIONS.APP_NODE_PASSENGER_MIGRATE);
 });
@@ -127,6 +134,8 @@ test('allows cleanup retry for the exact cleanup-required binding even when sour
   });
   await migration.apply(applicationId, { previewDigest: digest, confirmation });
   assert.equal(enqueued.length, 1);
+  assert.equal(enqueued[0].payload.authority.websiteId, websiteId);
+  assert.equal(enqueued[0].payload.authority.domainId, domainId);
 });
 
 test('waits for active Domain routing work before Passenger migration', async () => {
