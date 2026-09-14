@@ -3,6 +3,7 @@ import {
   createPassengerSiteManager,
   createWebsiteIdentityPathManager,
 } from '@yunpanel/host-runtime';
+import { createWebsiteStaticDeploymentManager } from '@yunpanel/host-runtime/website-static-deployment-manager';
 
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -52,7 +53,64 @@ function runtimeIntent(intent) {
       400,
     );
   }
+  if (intent.adapter === 'static' && intent.mode !== undefined
+    && !['deploy', 'bind_existing'].includes(intent.mode)) {
+    throw new WebsiteProvisioningHandlerError(
+      'website_static_runtime_intent_invalid',
+      'Website static runtime provisioning mode is invalid',
+      400,
+    );
+  }
   return intent;
+}
+
+function staticDeploymentSpec({ intent, operationId, websiteId } = {}) {
+  const normalized = runtimeIntent(intent);
+  if (normalized.adapter !== 'static' || normalized.mode !== 'deploy'
+    || normalized.websiteId !== websiteId
+    || normalized.deploymentId !== operationId
+    || typeof normalized.applicationId !== 'string'
+    || typeof normalized.repositoryUrl !== 'string'
+    || typeof normalized.branch !== 'string'
+    || !normalized.build || typeof normalized.build !== 'object' || Array.isArray(normalized.build)
+    || !Number.isInteger(normalized.retention)) {
+    throw new WebsiteProvisioningHandlerError(
+      'website_static_runtime_intent_invalid',
+      'Website static deployment intent does not match the durable operation',
+      400,
+    );
+  }
+  return Object.freeze({
+    applicationId: normalized.applicationId,
+    deploymentId: normalized.deploymentId,
+    repositoryUrl: normalized.repositoryUrl,
+    branch: normalized.branch,
+    build: normalized.build,
+    retention: normalized.retention,
+  });
+}
+
+function staticBindingIdentity({ intent, websiteId } = {}) {
+  const normalized = runtimeIntent(intent);
+  if (normalized.adapter !== 'static' || normalized.mode !== 'bind_existing'
+    || normalized.websiteId !== websiteId
+    || typeof normalized.applicationId !== 'string') {
+    throw new WebsiteProvisioningHandlerError(
+      'website_static_runtime_intent_invalid',
+      'Website static binding intent does not match the durable operation',
+      400,
+    );
+  }
+  return Object.freeze({ applicationId: normalized.applicationId });
+}
+
+function legacyStaticPending(intent) {
+  return Object.freeze({
+    satisfied: false,
+    reason: 'static_runtime_provisioning_pending',
+    adapter: 'static',
+    applicationId: intent.applicationId ?? null,
+  });
 }
 
 function passengerRuntimeEvidence(operation) {
@@ -130,6 +188,7 @@ function certificatePending(intent) {
 export function createWebsiteProvisioningHandlers({
   identityManager = createWebsiteIdentityPathManager(),
   passengerSiteManager = createPassengerSiteManager(),
+  staticDeploymentManager = createWebsiteStaticDeploymentManager(),
   nginxManager = createNginxManager(),
 } = {}) {
   if (!identityManager
@@ -140,6 +199,10 @@ export function createWebsiteProvisioningHandlers({
     || !passengerSiteManager
     || typeof passengerSiteManager.apply !== 'function'
     || typeof passengerSiteManager.inspect !== 'function'
+    || !staticDeploymentManager
+    || typeof staticDeploymentManager.deployStatic !== 'function'
+    || typeof staticDeploymentManager.inspectCurrent !== 'function'
+    || typeof staticDeploymentManager.inspectDeployment !== 'function'
     || !nginxManager
     || typeof nginxManager.stageDomain !== 'function'
     || typeof nginxManager.inspectStagedDomain !== 'function'
@@ -169,29 +232,52 @@ export function createWebsiteProvisioningHandlers({
     return identityManager.inspectCompensation(identityIntent(intent), { operationId, evidence });
   }
 
-  async function applyRuntime({ intent } = {}) {
-    const normalized = runtimeIntent(intent);
-    if (normalized.adapter === 'static') {
-      return Object.freeze({
-        satisfied: false,
-        reason: 'static_runtime_provisioning_pending',
-        adapter: 'static',
-        applicationId: normalized.applicationId ?? null,
-      });
+  async function applyStaticRuntime(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    if (normalized.mode === undefined) return legacyStaticPending(normalized);
+    if (normalized.mode === 'bind_existing') {
+      return staticDeploymentManager.inspectCurrent(staticBindingIdentity(context));
     }
+
+    const spec = staticDeploymentSpec(context);
+    const existing = await staticDeploymentManager.inspectDeployment(spec);
+    if (existing?.satisfied === true) return existing;
+
+    const result = await staticDeploymentManager.deployStatic(spec);
+    const inspected = await staticDeploymentManager.inspectDeployment(spec);
+    if (!inspected || inspected.satisfied !== true) {
+      throw new WebsiteProvisioningHandlerError(
+        'website_static_deployment_unverified',
+        'Website static deployment did not activate the deterministic release',
+      );
+    }
+    return Object.freeze({
+      ...inspected,
+      commitSha: typeof result?.commitSha === 'string' ? result.commitSha : null,
+      previousReleaseId: result?.previousReleaseId ?? null,
+      artifactFiles: Number.isInteger(result?.artifactFiles) ? result.artifactFiles : null,
+      artifactBytes: Number.isFinite(result?.artifactBytes) ? result.artifactBytes : null,
+    });
+  }
+
+  async function inspectStaticRuntime(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    if (normalized.mode === undefined) return legacyStaticPending(normalized);
+    if (normalized.mode === 'bind_existing') {
+      return staticDeploymentManager.inspectCurrent(staticBindingIdentity(context));
+    }
+    return staticDeploymentManager.inspectDeployment(staticDeploymentSpec(context));
+  }
+
+  async function applyRuntime(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    if (normalized.adapter === 'static') return applyStaticRuntime(context);
     return passengerSiteManager.apply(normalized);
   }
 
-  async function inspectRuntime({ intent } = {}) {
-    const normalized = runtimeIntent(intent);
-    if (normalized.adapter === 'static') {
-      return Object.freeze({
-        satisfied: false,
-        reason: 'static_runtime_provisioning_pending',
-        adapter: 'static',
-        applicationId: normalized.applicationId ?? null,
-      });
-    }
+  async function inspectRuntime(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    if (normalized.adapter === 'static') return inspectStaticRuntime(context);
     return passengerSiteManager.inspect(normalized);
   }
 
@@ -288,6 +374,9 @@ export function createWebsiteProvisioningHandlers({
 export const websiteProvisioningHandlerInternals = Object.freeze({
   identityIntent,
   runtimeIntent,
+  staticDeploymentSpec,
+  staticBindingIdentity,
+  legacyStaticPending,
   passengerRuntimeEvidence,
   nginxSpec,
   nginxEvidence,
