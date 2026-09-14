@@ -11,6 +11,12 @@ function nodePreview({ metadataReady = false, httpsMode = 'managed' } = {}) {
   return {
     operationId,
     complete: metadataReady,
+    source: {
+      kind: 'new_node',
+      repositoryUrl: 'https://github.com/example/node-app.git',
+      branch: 'main',
+      retention: 5,
+    },
     ids: { websiteId, applicationId, primaryDomainId: domainId, wwwDomainId: null },
     steps: {
       applicationReady: metadataReady,
@@ -49,6 +55,32 @@ function nodePreview({ metadataReady = false, httpsMode = 'managed' } = {}) {
       wwwDomain: null,
     },
   };
+}
+
+function staticPreview({ existing = false } = {}) {
+  const preview = nodePreview({ metadataReady: false, httpsMode: 'off' });
+  preview.source = existing
+    ? { kind: 'existing_application', applicationId }
+    : {
+        kind: 'new_static',
+        repositoryUrl: 'https://github.com/example/static-app.git',
+        branch: 'main',
+        build: { mode: 'none', installMode: null, buildScript: null, outputDir: '.', healthFile: 'index.html' },
+        retention: 5,
+      };
+  preview.plan.application = {
+    id: applicationId,
+    type: 'static',
+    repositoryUrl: 'https://github.com/example/static-app.git',
+    branch: 'main',
+    retention: 5,
+    build: { mode: 'none', installMode: null, buildScript: null, outputDir: '.', healthFile: 'index.html' },
+    runtime: null,
+    webRoot: `/var/www/yunpanel/apps/${applicationId}/current`,
+  };
+  preview.plan.website.runtimeType = 'static';
+  preview.plan.website.documentRoot = `/var/www/yunpanel/apps/${applicationId}/current`;
+  return preview;
 }
 
 test('legacy metadata completeness never makes a new hosted Website provisioning-ready', () => {
@@ -106,27 +138,49 @@ test('npm-script Node start is an explicit Passenger blocker instead of an inven
   assert.equal(plan.status, 'blocked');
 });
 
-test('static Website uses canonical workspace/build/publish paths and HTTP-only plan omits certificate work', () => {
-  const preview = nodePreview({ metadataReady: false, httpsMode: 'off' });
-  preview.plan.application.type = 'static';
-  preview.plan.application.runtime = null;
-  preview.plan.website.runtimeType = 'static';
-
-  const plan = siteCreateProvisioningPlan(preview);
+test('new static Website persists deterministic deployment intent with canonical paths', () => {
+  const plan = siteCreateProvisioningPlan(staticPreview());
   const identity = plan.steps.find((step) => step.id === 'unix_identity');
   assert.equal(identity.intent.homeDirectory, `/var/lib/yunpanel/data/${applicationId}`);
 
   const runtime = plan.steps.find((step) => step.id === 'runtime');
   assert.equal(runtime.intent.adapter, 'static');
+  assert.equal(runtime.intent.mode, 'deploy');
+  assert.equal(runtime.intent.deploymentId, operationId);
   assert.equal(runtime.intent.homeDirectory, `/var/lib/yunpanel/data/${applicationId}`);
   assert.equal(runtime.intent.buildRoot, `/var/lib/yunpanel/build/${applicationId}`);
   assert.equal(runtime.intent.publishRoot, `/var/www/yunpanel/apps/${applicationId}`);
+  assert.equal(runtime.intent.repositoryUrl, 'https://github.com/example/static-app.git');
+  assert.equal(runtime.intent.branch, 'main');
+  assert.equal(runtime.intent.retention, 5);
+  assert.equal(runtime.intent.build.outputDir, '.');
   assert.equal(runtime.compensation.state, 'pending');
   assert.equal(plan.steps.some((step) => step.id === 'certificate'), false);
 });
 
+test('existing static Application binding inspects current release instead of inventing a redeploy', () => {
+  const plan = siteCreateProvisioningPlan(staticPreview({ existing: true }));
+  const runtime = plan.steps.find((step) => step.id === 'runtime');
+
+  assert.equal(runtime.intent.adapter, 'static');
+  assert.equal(runtime.intent.mode, 'bind_existing');
+  assert.equal(Object.hasOwn(runtime.intent, 'deploymentId'), false);
+  assert.equal(Object.hasOwn(runtime.intent, 'repositoryUrl'), false);
+});
+
+test('static Website provisioning rejects publish-root drift from the managed Website path contract', () => {
+  const preview = staticPreview();
+  preview.plan.website.documentRoot = '/srv/static/current';
+
+  assert.throws(
+    () => siteCreateProvisioningPlan(preview),
+    /Static Website document root does not match the managed Website path contract/,
+  );
+});
+
 test('external proxy provisioning requires Nginx without inventing a site Unix identity', () => {
   const preview = nodePreview({ metadataReady: true, httpsMode: 'off' });
+  preview.source = { kind: 'external_proxy', target: { host: '127.0.0.1', port: 8080, websocket: true } };
   preview.plan.application = null;
   preview.plan.website.runtimeType = 'proxy';
   preview.plan.website.unixUser = null;
