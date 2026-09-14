@@ -6,9 +6,18 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { WebSocket, WebSocketServer } from 'ws';
-import { createPanelServer } from '../server.js';
+import { createPanelServer, panelServerInternals } from '../server.js';
 
 const proxyToken = 'p'.repeat(43);
+
+test('web gateway reads the scoped hop token from the systemd credential directory', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-web-credential-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, 'yunpanel-internal-proxy-token'), `${proxyToken}\n`, { mode: 0o600 });
+  assert.equal(panelServerInternals.internalProxyToken({ CREDENTIALS_DIRECTORY: directory }), proxyToken);
+  assert.equal(panelServerInternals.internalProxyToken({ CREDENTIALS_DIRECTORY: 'relative' }), undefined);
+  assert.equal(panelServerInternals.internalProxyToken({ CREDENTIALS_DIRECTORY: path.join(directory, 'missing') }), undefined);
+});
 
 async function listen(server) {
   server.listen(0, '127.0.0.1');

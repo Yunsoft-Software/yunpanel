@@ -40,14 +40,15 @@ test('packaged gateway authenticates canonical client IP metadata to the root AP
     readFile(webUnitUrl, 'utf8'),
     readFile(postinstUrl, 'utf8'),
   ]);
-  for (const unit of [apiUnit, webUnit]) {
-    assert.match(unit, /^EnvironmentFile=\/etc\/yunpanel\/control-plane\/proxy\.env$/m);
-  }
+  assert.match(apiUnit, /^EnvironmentFile=\/etc\/yunpanel\/control-plane\/proxy\.env$/m);
+  assert.doesNotMatch(webUnit, /^EnvironmentFile=\/etc\/yunpanel\/control-plane\/proxy\.env$/m);
+  assert.match(webUnit, /^LoadCredential=yunpanel-internal-proxy-token:\/etc\/yunpanel\/control-plane\/proxy\.token$/m);
   assert.match(postinst, /randomBytes\(32\)\.toString\("base64url"\)/);
   assert.match(postinst, /proxy_token_count=0/);
   assert.match(postinst, /if \[ -f "\$proxy_env" \]; then\n  proxy_token_count=\$\(grep -Ec/);
   assert.match(postinst, /install -o root -g root -m 0600 "\$proxy_temp" "\$proxy_env"/);
   assert.match(postinst, /printf 'YUNPANEL_INTERNAL_PROXY_TOKEN=%s\\n' "\$proxy_token" >>"\$proxy_temp"/);
+  assert.match(postinst, /install -o root -g root -m 0600 "\$proxy_credential_temp" "\$proxy_credential"/);
   assert.match(postinst, /if \[ -f "\$api_env" \]; then[\s\S]*if ! grep -q '\^YUNPANEL_MAILBOX_STORE=' "\$api_env"; then/);
   assert.match(postinst, /YUNPANEL_MAILBOX_STORE=\/var\/lib\/yunpanel\/control-plane\/mailbox-registry\.json/);
   assert.match(postinst, /YUNPANEL_BACKUP_OPERATION_STORE=\/var\/lib\/yunpanel\/control-plane\/backup-operation-registry\.json/);

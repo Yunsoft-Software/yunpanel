@@ -10,8 +10,9 @@ test('web gateway cannot inherit privileged API secrets or read control-plane st
   assert.match(unit, /^NoNewPrivileges=true$/m);
   assert.match(unit, /^ProtectSystem=strict$/m);
   assert.doesNotMatch(unit, /^EnvironmentFile=\/etc\/yunpanel\/control-plane\/api\.env$/m);
-  assert.match(unit, /^EnvironmentFile=\/etc\/yunpanel\/control-plane\/proxy\.env$/m);
+  assert.doesNotMatch(unit, /^EnvironmentFile=\/etc\/yunpanel\/control-plane\/proxy\.env$/m);
   assert.match(unit, /^EnvironmentFile=\/etc\/yunpanel\/web\/web\.env$/m);
+  assert.match(unit, /^LoadCredential=yunpanel-internal-proxy-token:\/etc\/yunpanel\/control-plane\/proxy\.token$/m);
   const unset = unit.match(/^UnsetEnvironment=(.+)$/m)?.[1] ?? '';
   for (const name of [
     'YUNPANEL_SECRET_MASTER_KEY',

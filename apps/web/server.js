@@ -1,4 +1,4 @@
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import http from 'node:http';
 import { isIP } from 'node:net';
@@ -18,6 +18,14 @@ const CONTENT_TYPES = new Map([
 ]);
 const PROXY_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const TRUSTED_PROXY_DEFAULT = '127.0.0.1,::1';
+const PROXY_CREDENTIAL_NAME = 'yunpanel-internal-proxy-token';
+
+function internalProxyToken(env = process.env, readFile = readFileSync) {
+  if (typeof env.YUNPANEL_INTERNAL_PROXY_TOKEN === 'string') return env.YUNPANEL_INTERNAL_PROXY_TOKEN;
+  if (typeof env.CREDENTIALS_DIRECTORY !== 'string' || !path.isAbsolute(env.CREDENTIALS_DIRECTORY)) return undefined;
+  try { return readFile(path.join(env.CREDENTIALS_DIRECTORY, PROXY_CREDENTIAL_NAME), 'utf8').trim(); }
+  catch { return undefined; }
+}
 
 function normalizeIp(value) {
   if (typeof value !== 'string') return null;
@@ -202,7 +210,7 @@ export function createPanelServer({
   apiHost = process.env.YUNPANEL_API_HOST ?? '127.0.0.1',
   apiPort = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10),
   publicOrigin = process.env.YUNPANEL_PUBLIC_ORIGIN,
-  proxyToken = process.env.YUNPANEL_INTERNAL_PROXY_TOKEN,
+  proxyToken = internalProxyToken(),
   trustedProxyIps = process.env.YUNPANEL_TRUSTED_PROXY_IPS ?? TRUSTED_PROXY_DEFAULT,
   webRoot = process.env.YUNPANEL_WEB_ROOT ?? DEFAULT_WEB_ROOT,
 } = {}) {
@@ -246,7 +254,14 @@ export function createPanelServer({
   return server;
 }
 
-export const panelServerInternals = Object.freeze({ normalizeIp, parseIpSet, clientAddress, isGithubWebhookPath, proxyWebSocket });
+export const panelServerInternals = Object.freeze({
+  normalizeIp,
+  parseIpSet,
+  clientAddress,
+  internalProxyToken,
+  isGithubWebhookPath,
+  proxyWebSocket,
+});
 
 export function startPanelServer(options = {}) {
   const host = options.host ?? process.env.YUNPANEL_WEB_HOST ?? '127.0.0.1';

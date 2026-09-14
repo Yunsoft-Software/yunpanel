@@ -40,6 +40,13 @@ if [ "$proxy_token_count" -ne 1 ] || ! grep -Eq '^YUNPANEL_INTERNAL_PROXY_TOKEN=
   install -o root -g root -m 0600 "$proxy_temp" "$proxy_env"
   rm -f "$proxy_temp"
 fi
+proxy_token=$(sed -n 's/^YUNPANEL_INTERNAL_PROXY_TOKEN=//p' "$proxy_env")
+proxy_credential=/etc/yunpanel/control-plane/proxy.token
+proxy_credential_temp=$(mktemp /etc/yunpanel/control-plane/proxy.token.XXXXXX)
+printf '%s\n' "$proxy_token" >"$proxy_credential_temp"
+install -o root -g root -m 0600 "$proxy_credential_temp" "$proxy_credential"
+rm -f "$proxy_credential_temp"
+unset proxy_token
 
 api_env=/etc/yunpanel/control-plane/api.env
 if [ -f "$api_env" ]; then
