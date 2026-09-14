@@ -1,5 +1,7 @@
 import { createWebsiteProvisioningPlan } from './website-provisioning-plan.js';
 
+const APPLICATION_DATA_ROOT = '/var/lib/yunpanel/data';
+
 function metadataStep(id, kind, state, intent) {
   return {
     id,
@@ -66,16 +68,19 @@ export function siteCreateProvisioningPlan(preview) {
 
   const runtimeType = preview.plan.website.runtimeType;
   if (runtimeType === 'node' || runtimeType === 'static') {
+    const applicationId = preview.plan.application?.id;
+    if (!applicationId) throw new Error('Hosted Website provisioning requires an Application identity');
     steps.push(hostStep('unix_identity', 'unix_identity', {
       websiteId: preview.ids.websiteId,
       unixUser: preview.plan.website.unixUser,
+      homeDirectory: `${APPLICATION_DATA_ROOT}/${applicationId}`,
       documentRoot: preview.plan.website.documentRoot,
     }));
     steps.push(hostStep('runtime', 'runtime', {
       websiteId: preview.ids.websiteId,
       runtimeType,
       adapter: runtimeType === 'node' ? 'passenger' : 'static',
-      applicationId: preview.plan.application?.id ?? null,
+      applicationId,
     }));
   }
 
