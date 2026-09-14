@@ -40,23 +40,22 @@ async function fixture() {
     revision: 1,
     unixUser,
   });
+  const activeDomain = (id) => Object.freeze({
+    id,
+    serverId,
+    websiteId,
+    targetType: 'passenger',
+    target: Object.freeze({ applicationId }),
+    desiredRevision: 1,
+    stagedRevision: 1,
+    appliedRevision: 1,
+    stagedChecksum: checksum,
+    state: 'active',
+    lastError: null,
+  });
   const domains = new Map([
-    [primaryDomainId, Object.freeze({
-      id: primaryDomainId,
-      serverId,
-      websiteId,
-      targetType: 'passenger',
-      target: Object.freeze({ applicationId }),
-      desiredRevision: 1,
-    })],
-    [wwwDomainId, Object.freeze({
-      id: wwwDomainId,
-      serverId,
-      websiteId,
-      targetType: 'passenger',
-      target: Object.freeze({ applicationId }),
-      desiredRevision: 1,
-    })],
+    [primaryDomainId, activeDomain(primaryDomainId)],
+    [wwwDomainId, activeDomain(wwwDomainId)],
   ]);
   const websiteRegistry = { getWebsite: async (id) => id === websiteId ? website : null };
   const domainRegistry = { getDomain: async (id) => domains.get(id) ?? null };
@@ -123,6 +122,17 @@ async function fixture() {
           active: true,
         },
       },
+      {
+        id: 'domain_activation',
+        state: 'succeeded',
+        evidence: {
+          satisfied: true,
+          adapter: 'domain-activation',
+          websiteId,
+          nginxChecksum: checksum,
+          nginxConfigName: 'yunpanel-example.test.conf',
+        },
+      },
     ],
   };
   const context = {
@@ -137,7 +147,7 @@ async function fixture() {
     },
     evidence: null,
   };
-  return { handler, context, runtimeBindingRegistry };
+  return { handler, context, runtimeBindingRegistry, domains };
 }
 
 test('native Passenger authority persists canonical binding from completed provisioning evidence', async () => {
@@ -164,6 +174,19 @@ test('native Passenger authority persists canonical binding from completed provi
 
   assert.deepEqual(await handler.apply(context), applied);
   assert.equal((await handler.inspect(context)).satisfied, true);
+});
+
+test('Passenger authority refuses to bind when Domain activation evidence is not live anymore', async () => {
+  const { handler, context, domains } = await fixture();
+  domains.set(primaryDomainId, Object.freeze({
+    ...domains.get(primaryDomainId),
+    state: 'error',
+    lastError: 'nginx_drift',
+  }));
+  await assert.rejects(
+    handler.apply(context),
+    (error) => error?.code === 'website_passenger_authority_domain_drift',
+  );
 });
 
 test('Passenger authority compensation removes only the exact operation-owned binding revision', async () => {
