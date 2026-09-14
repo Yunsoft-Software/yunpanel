@@ -35,6 +35,7 @@ import {
   sanitizeMailDataRestoreResult,
 } from './mail-data-job-result.js';
 import { managedServiceStatePolicy } from './managed-service-state-policy.js';
+import { sanitizeNodePassengerMigrationResult } from './node-passenger-migration-job-result.js';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
 const STORE_VERSION = 1;
@@ -53,6 +54,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.APP_NODE_RESTART,
   OPERATIONS.APP_NODE_STATUS,
   OPERATIONS.APP_NODE_PROCESS,
+  OPERATIONS.APP_NODE_PASSENGER_MIGRATE,
   OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT,
   OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL,
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
@@ -727,6 +729,17 @@ function sanitizeDockerComposeResult(job, result) {
   }
 }
 
+function sanitizeNodePassengerMigrationJobResult(job, result) {
+  try {
+    return sanitizeNodePassengerMigrationResult(job, result);
+  } catch (error) {
+    if (error?.code === 'invalid_job_result') {
+      throw new JobRegistryError('invalid_job_result', error.message);
+    }
+    throw error;
+  }
+}
+
 function sanitizeDnsRecordResult(job, result) {
   const expectedState = job.payload?.action === 'upsert' ? 'present' : 'absent';
   if (!result || typeof result !== 'object' || Array.isArray(result)
@@ -842,6 +855,7 @@ function sanitizeResult(job, result) {
     return sanitizeMailDataResult(job, result);
   }
   if (job.operation === OPERATIONS.ROUNDCUBE_CONFIG_APPLY) return sanitizeRoundcubeConfigResult(job, result);
+  if (job.operation === OPERATIONS.APP_NODE_PASSENGER_MIGRATE) return sanitizeNodePassengerMigrationJobResult(job, result);
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');
   }
