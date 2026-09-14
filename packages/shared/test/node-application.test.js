@@ -70,6 +70,28 @@ test('normalized Node runtime profiles can be normalized again without losing st
   assert.deepEqual(normalizeNodeRuntimeConfig(npmRuntime), npmRuntime);
 });
 
+test('normalizes Passenger Node runtime profiles without allocating a localhost port', () => {
+  const runtime = normalizeNodeRuntimeConfig({
+    nodeMajor: 24,
+    buildScript: 'build',
+    entryFile: 'dist/server.js',
+    healthPath: '/healthz',
+  }, { requirePort: false });
+
+  assert.equal(runtime.port, null);
+  assert.equal(runtime.start.mode, 'node');
+  assert.equal(runtime.start.entryFile, 'dist/server.js');
+  assert.deepEqual(normalizeNodeRuntimeConfig(runtime, { requirePort: false }), runtime);
+  assert.throws(
+    () => normalizeNodeRuntimeConfig({ port: 3100 }, { requirePort: false }),
+    (error) => error instanceof ApplicationValidationError && error.code === 'invalid_node_port',
+  );
+  assert.throws(
+    () => normalizeNodeRuntimeConfig({}, { requirePort: true }),
+    (error) => error instanceof ApplicationValidationError && error.code === 'invalid_node_port',
+  );
+});
+
 test('rejects shell fragments, unsafe entry files, ports and health URLs', () => {
   const invalidProfiles = [
     { port: 3000, startMode: 'npm', startScript: 'start && id' },
