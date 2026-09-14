@@ -1,7 +1,7 @@
 import path from 'node:path';
+import { createWebsitePathContract } from '@yunpanel/host-runtime';
 import { createWebsiteProvisioningPlan } from './website-provisioning-plan.js';
 
-const APPLICATION_DATA_ROOT = '/var/lib/yunpanel/data';
 const MANAGED_NODE_ROOT = '/opt/yunpanel/node-runtimes';
 
 function metadataStep(id, kind, state, intent) {
@@ -31,11 +31,17 @@ function hostStep(id, kind, intent, {
   };
 }
 
-function passengerIntent(preview, applicationId) {
+function passengerIntent(preview, applicationId, paths = createWebsitePathContract({
+  websiteId: preview?.ids?.websiteId,
+  applicationId,
+})) {
   const application = preview.plan.application;
   const runtime = application?.runtime;
   if (!runtime || !runtime.start) throw new Error('Node Website provisioning requires normalized runtime state');
-  const releaseRoot = preview.plan.website.documentRoot;
+  if (preview.plan.website.documentRoot !== paths.runtime.currentRelease) {
+    throw new Error('Node Website document root does not match the managed Website path contract');
+  }
+  const releaseRoot = paths.runtime.currentRelease;
   const appRoot = path.posix.resolve(releaseRoot, runtime.documentRoot ?? '.');
   const base = {
     adapter: 'passenger',
@@ -120,14 +126,18 @@ export function siteCreateProvisioningPlan(preview) {
   if (runtimeType === 'node' || runtimeType === 'static') {
     const applicationId = preview.plan.application?.id;
     if (!applicationId) throw new Error('Hosted Website provisioning requires an Application identity');
+    const paths = createWebsitePathContract({
+      websiteId: preview.ids.websiteId,
+      applicationId,
+    });
     steps.push(hostStep('unix_identity', 'unix_identity', {
       websiteId: preview.ids.websiteId,
       unixUser: preview.plan.website.unixUser,
-      homeDirectory: `${APPLICATION_DATA_ROOT}/${applicationId}`,
+      homeDirectory: paths.workspace.homeDirectory,
       documentRoot: preview.plan.website.documentRoot,
     }));
     if (runtimeType === 'node') {
-      runtimeIntent = passengerIntent(preview, applicationId);
+      runtimeIntent = passengerIntent(preview, applicationId, paths);
       const blocked = Boolean(runtimeIntent.blocker);
       steps.push(hostStep('runtime', 'runtime', runtimeIntent, {
         state: blocked ? 'blocked' : 'pending',
@@ -140,6 +150,9 @@ export function siteCreateProvisioningPlan(preview) {
         runtimeType,
         adapter: 'static',
         applicationId,
+        homeDirectory: paths.workspace.homeDirectory,
+        buildRoot: paths.static.buildRoot,
+        publishRoot: paths.static.publishRoot,
       });
       steps.push(hostStep('runtime', 'runtime', runtimeIntent));
     }
