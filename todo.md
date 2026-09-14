@@ -4,6 +4,17 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
+## T-CODEX-HANDOFF — mevcut P0 turu
+
+Bu maddeler kaynak kod connector ortamında yazılabilir fakat shell/package/live-host yetkisi olmadığı için burada doğrulanamaz. Codex bunları küçük adımlarla uygulasın/doğrulasın; GitHub Actions kullanmasın ve `.44` ile biten Plesk sunucusuna kesinlikle dokunmasın.
+
+- [ ] Güncel `main` çekildikten sonra Node `>=24.11.1` ve npm `>=11` ile temiz `npm ci` ardından `npm run check` çalıştır. Provisioning/Passenger test failure varsa yalnız ilgili küçük fixleri ayrı commitlerle at; test çıktısında secret bırakma.
+- [ ] `.local/test-server.env` içindeki YunPanel test hostunun `.44` olmadığını doğrula; Ubuntu 24.04 üzerinde `nginx`, `libnginx-mod-http-passenger`/Passenger, `passenger-config`, managed Node 22/24 pathleri ve `nginx -t` gerçek durumunu kaynaktaki inspector beklentileriyle karşılaştır.
+- [ ] Yeni durable Website provisioning store ile API restart testi yap: apply sonrası operation JSON diskte kalsın; `applying` durumda servis kesilip açıldığında aynı mutation ikinci kez körlemesine çalışmasın ve inspect/reconcile yolu kullanılsın.
+- [ ] İki test Website oluşturup `yunapp-*` kullanıcı/group/home sahipliğini, çapraz home/release/data erişim reddini ve Passenger `passenger_user/group` gerçek UID/GID eşleşmesini doğrula.
+- [ ] Passenger package/config veya Node binary eksikliği senaryolarında provisioning `ready` olmasın; actionable blocked/failed state API'de kalsın. Düzelttikten sonra exact `continue-site-provisioning:<operationId>` confirmation ile işlem kaldığı step'ten devam etsin.
+- [ ] Bu turda production wiring tamamlandıktan sonra clean `.deb` build/install/upgrade smoke yap; provisioning state dosyasının package upgrade sırasında korunup root-owned `0600` kaldığını doğrula.
+
 ## T-BASE — P0 güncel güvenlik ve package kapısı
 
 - [ ] Güncel `main` için desteklenen Node 24 ile temiz `npm ci`, `npm run check` ve matching Ubuntu mimarisinde `.deb` build çalışsın.
