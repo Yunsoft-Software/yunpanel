@@ -161,6 +161,11 @@ export {
   WebsiteIdentityManagerError,
   websiteIdentityManagerInternals,
 } from './website-identity-manager.js';
+export {
+  createPassengerInspector,
+  PassengerInspectorError,
+  passengerInspectorInternals,
+} from './passenger-inspector.js';
 export { createNodeStatusInspector, NodeStatusError, nodeStatusInspector, parseNodeServiceProperties } from './node-status-inspector.js';
 export {
   createNodeEnvironmentWriter,
