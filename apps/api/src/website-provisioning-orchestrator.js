@@ -32,6 +32,16 @@ function evidence(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
 }
 
+function handlerContext(operation, step) {
+  return Object.freeze({
+    operation,
+    operationId: operation.operationId,
+    websiteId: operation.websiteId,
+    stepId: step.id,
+    intent: step.intent,
+  });
+}
+
 export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} } = {}) {
   if (!registry
     || typeof registry.get !== 'function'
@@ -58,12 +68,7 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
 
     let inspected;
     try {
-      inspected = evidence(await handler.inspect({
-        operationId: operation.operationId,
-        websiteId: operation.websiteId,
-        stepId: step.id,
-        intent: step.intent,
-      }));
+      inspected = evidence(await handler.inspect(handlerContext(operation, step)));
     } catch (error) {
       return Object.freeze({
         operation,
@@ -122,14 +127,10 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     }
 
     const handler = handlerFor(handlers, step);
-    await registry.beginStep({ operationId, stepId: step.id });
+    const applying = await registry.beginStep({ operationId, stepId: step.id });
+    const applyingStep = applying.steps.find((candidate) => candidate.id === step.id);
     try {
-      const result = evidence(await handler.apply({
-        operationId,
-        websiteId: operation.websiteId,
-        stepId: step.id,
-        intent: step.intent,
-      }));
+      const result = evidence(await handler.apply(handlerContext(applying, applyingStep)));
       if (!result) {
         throw new WebsiteProvisioningOrchestratorError(
           'website_provisioning_evidence_required',
@@ -158,3 +159,7 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
 
   return Object.freeze({ runNext });
 }
+
+export const websiteProvisioningOrchestratorInternals = Object.freeze({
+  handlerContext,
+});
