@@ -13,6 +13,7 @@ const EXECUTOR_FAULT_CODES = new Set([
 const EXECUTOR_FAULT_PHASES = new Set(['claim', 'execute', 'complete', 'reconcile']);
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SNAPSHOT_FIELDS = new Set(['inventory', 'services']);
+const TERMINAL_JOB_STATUSES = new Set(['succeeded', 'failed']);
 
 export class LocalRuntimeError extends Error {
   constructor(code, message) {
@@ -130,6 +131,61 @@ function safeFaultError(metadata, message) {
     phase: metadata.phase,
     jobId: metadata.jobId,
   });
+}
+
+async function reconcileStartupRecovery({ jobRegistry, serverId, reconcileJob }) {
+  if (typeof jobRegistry?.recovery !== 'function') return { reconciled: 0, pending: 0 };
+  const snapshot = jobRegistry.recovery();
+  if (snapshot === null) return { reconciled: 0, pending: 0 };
+  if (!snapshot || !Array.isArray(snapshot.jobs)) {
+    throw new LocalRuntimeError('local_runtime_recovery_state_invalid', 'Local job recovery state is invalid');
+  }
+  if (typeof jobRegistry.getJob !== 'function'
+    || typeof jobRegistry.getReconciliationJob !== 'function'
+    || typeof jobRegistry.acknowledgeReconciliation !== 'function') {
+    throw new LocalRuntimeError('local_runtime_recovery_adapter_invalid', 'Local job recovery adapters are incomplete');
+  }
+
+  let reconciled = 0;
+  for (const identity of snapshot.jobs) {
+    if (!identity || identity.serverId !== serverId || typeof identity.jobId !== 'string') {
+      throw new LocalRuntimeError('local_runtime_recovery_state_invalid', 'Local job recovery identity does not match this server');
+    }
+    const job = await jobRegistry.getJob(identity.jobId);
+    if (!job || job.id !== identity.jobId || job.serverId !== serverId) {
+      throw new LocalRuntimeError('local_runtime_recovery_state_invalid', 'Local job recovery record does not match persisted job state');
+    }
+    if (job.status === 'running') continue;
+    if (!TERMINAL_JOB_STATUSES.has(job.status)) {
+      throw new LocalRuntimeError('local_runtime_recovery_state_invalid', 'Local job recovery contains an unsupported job state');
+    }
+
+    let reconciliationJob;
+    try {
+      reconciliationJob = await jobRegistry.getReconciliationJob(job.id);
+      await reconcileJob(reconciliationJob);
+      const acknowledged = await jobRegistry.acknowledgeReconciliation({ serverId, jobId: job.id });
+      if (!acknowledged || acknowledged.acknowledged !== true) {
+        throw new Error('Reconciliation acknowledgement is incomplete');
+      }
+    } catch {
+      throw new LocalRuntimeError(
+        'local_runtime_recovery_reconciliation_failed',
+        'A terminal local job could not be reconciled safely during startup',
+      );
+    }
+    reconciled += 1;
+  }
+
+  const remaining = jobRegistry.recovery();
+  const pending = Array.isArray(remaining?.jobs) ? remaining.jobs.length : 0;
+  if (pending > 0) {
+    throw new LocalRuntimeError(
+      'local_runtime_recovery_required',
+      'Persisted running local jobs require inspect-first recovery before host execution can resume',
+    );
+  }
+  return { reconciled, pending: 0 };
 }
 
 export async function startLocalRuntime({
@@ -255,28 +311,29 @@ export async function startLocalRuntime({
     snapshotTimer.unref?.();
   }
 
+  const reconcileJob = async (job) => {
+    const result = await reconcile({
+      domainRegistry,
+      certificateRegistry,
+      applicationRegistry,
+      applicationEnvironmentRegistry,
+      websiteRegistry,
+      runtimeBindingRegistry,
+      mailDomainRegistry,
+      job,
+    });
+    if (!result || result.reconciled !== true) {
+      const error = new Error('Local job reconciliation did not complete');
+      error.code = result?.error?.code ?? 'local_reconciliation_failed';
+      throw error;
+    }
+    return result;
+  };
+
   try {
     lock = await acquireLock({ filePath: lockPath, serverId });
     assertBoundServer(await registry.getServer(serverId), serverId, normalizedHostname);
-
-    const reconcileJob = async (job) => {
-      const result = await reconcile({
-        domainRegistry,
-        certificateRegistry,
-        applicationRegistry,
-        applicationEnvironmentRegistry,
-        websiteRegistry,
-        runtimeBindingRegistry,
-        mailDomainRegistry,
-        job,
-      });
-      if (!result || result.reconciled !== true) {
-        const error = new Error('Local job reconciliation did not complete');
-        error.code = result?.error?.code ?? 'local_reconciliation_failed';
-        throw error;
-      }
-      return result;
-    };
+    await reconcileStartupRecovery({ jobRegistry, serverId, reconcileJob });
 
     executor = executorFactory({
       serverId,
@@ -322,5 +379,6 @@ export const localRuntimeInternals = Object.freeze({
   normalizeSnapshotPayload,
   normalizeExecutorFault,
   assertBoundServer,
+  reconcileStartupRecovery,
   defaultSnapshotIntervalMs: DEFAULT_SNAPSHOT_INTERVAL_MS,
 });
