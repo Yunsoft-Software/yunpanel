@@ -1,4 +1,4 @@
-import { copyFile, lstat, mkdir, readdir } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const MAX_FILES = 100_000;
@@ -29,7 +29,8 @@ export async function copyStaticArtifact({ sourceDir, targetDir, healthFile = 'i
   const stats = { files: 0, directories: 0, bytes: 0 };
 
   async function copyDirectory(source, target) {
-    await mkdir(target, { recursive: true, mode: 0o755 });
+    await mkdir(target, { recursive: true, mode: 0o750 });
+    await chmod(target, 0o750);
     const entries = await readdir(source, { withFileTypes: true });
 
     for (const entry of entries) {
@@ -54,6 +55,7 @@ export async function copyStaticArtifact({ sourceDir, targetDir, healthFile = 'i
       if (stats.bytes > MAX_BYTES) throw new Error('Artifact exceeds the maximum size');
 
       await copyFile(sourcePath, targetPath);
+      await chmod(targetPath, 0o640);
     }
   }
 
