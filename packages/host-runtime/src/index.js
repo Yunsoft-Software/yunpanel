@@ -172,6 +172,11 @@ export {
   websiteIdentityPathManagerInternals,
 } from './website-identity-path-manager.js';
 export {
+  createPhpFpmSiteManager,
+  PhpFpmSiteManagerError,
+  phpFpmSiteManagerInternals,
+} from './php-fpm-site-manager.js';
+export {
   createPassengerInspector,
   PassengerInspectorError,
   passengerInspectorInternals,
