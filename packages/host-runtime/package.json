@@ -9,6 +9,7 @@
     "./node-passenger-migration-preview": "./src/node-passenger-migration-preview.js",
     "./node-passenger-migration-manager": "./src/node-passenger-migration-manager.js",
     "./passenger-environment-manager": "./src/passenger-environment-manager.js",
+    "./php-site-bootstrap-manager": "./src/php-site-bootstrap-manager.js",
     "./static-deployment-manager": "./src/static-deployment-manager.js",
     "./static-rollback-manager": "./src/static-rollback-manager.js",
     "./website-http-health-inspector": "./src/website-http-health-inspector.js",
