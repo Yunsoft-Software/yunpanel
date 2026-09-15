@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.js",
+    "./powerdns": "./src/powerdns.js",
     "./sftp": "./src/sftp.js"
   },
   "scripts": {
