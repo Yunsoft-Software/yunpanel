@@ -71,6 +71,31 @@ function passengerIntent(preview, applicationId, paths = createWebsitePathContra
   return Object.freeze(base);
 }
 
+function phpFpmIntent(preview, applicationId, paths = createWebsitePathContract({
+  websiteId: preview?.ids?.websiteId,
+  applicationId,
+})) {
+  const application = preview.plan.application;
+  if (!application || application.type !== 'php') {
+    throw new Error('PHP Website provisioning requires normalized PHP Application state');
+  }
+  const documentRoot = preview.plan.website.documentRoot;
+  if (typeof documentRoot !== 'string' || application.webRoot !== documentRoot) {
+    throw new Error('PHP Website document root does not match the Application web root');
+  }
+  const relative = path.posix.relative(paths.runtime.currentRelease, documentRoot);
+  if (relative.startsWith('..') || path.posix.isAbsolute(relative)) {
+    throw new Error('PHP Website document root is outside the managed current release');
+  }
+  return Object.freeze({
+    adapter: 'php-fpm',
+    websiteId: preview.ids.websiteId,
+    applicationId,
+    unixUser: preview.plan.website.unixUser,
+    documentRoot,
+  });
+}
+
 function nodeReleaseIntent(preview, applicationId, paths = createWebsitePathContract({
   websiteId: preview?.ids?.websiteId,
   applicationId,
@@ -272,7 +297,7 @@ export function siteCreateProvisioningPlan(preview) {
 
   const runtimeType = preview.plan.website.runtimeType;
   let runtimeIntent = null;
-  if (runtimeType === 'node' || runtimeType === 'static') {
+  if (runtimeType === 'node' || runtimeType === 'static' || runtimeType === 'php') {
     const applicationId = preview.plan.application?.id;
     if (!applicationId) throw new Error('Hosted Website provisioning requires an Application identity');
     const identity = createApplicationIdentity(applicationId);
@@ -309,6 +334,11 @@ export function siteCreateProvisioningPlan(preview) {
         error: blocked ? runtimeIntent.blocker : null,
         compensationState: 'not_required',
       }));
+    } else if (runtimeType === 'php') {
+      runtimeIntent = phpFpmIntent(preview, applicationId, paths);
+      steps.push(hostStep('php_runtime', 'php_runtime', runtimeIntent, {
+        compensationState: 'pending',
+      }));
     } else {
       runtimeIntent = staticIntent(preview, applicationId, paths);
       steps.push(hostStep('runtime', 'static_runtime', runtimeIntent, {
@@ -322,8 +352,8 @@ export function siteCreateProvisioningPlan(preview) {
     websiteId: preview.ids.websiteId,
     primaryDomain: preview.plan.primaryDomain?.primaryDomain,
     aliases,
-    targetType: runtimeType === 'node' ? 'passenger' : preview.plan.primaryDomain?.targetType,
-    target: runtimeType === 'node' ? runtimeIntent : preview.plan.primaryDomain?.target,
+    targetType: runtimeType === 'node' ? 'passenger' : runtimeType === 'php' ? 'php' : preview.plan.primaryDomain?.targetType,
+    target: runtimeType === 'node' || runtimeType === 'php' ? runtimeIntent : preview.plan.primaryDomain?.target,
   }));
   steps.push(hostStep(
     'domain_activation',
@@ -381,6 +411,7 @@ export function siteCreateProvisioningPlan(preview) {
 
 export const siteCreateProvisioningInternals = Object.freeze({
   passengerIntent,
+  phpFpmIntent,
   nodeReleaseIntent,
   passengerEnvironmentIntent,
   passengerHealthIntent,
