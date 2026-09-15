@@ -50,6 +50,26 @@ function normalizeManualRecord(record, zoneName) {
   });
 }
 
+function expectedSerial(value) {
+  if (value === undefined || value === null) return null;
+  if (!Number.isSafeInteger(value) || value < 1 || value > 4_294_967_295) {
+    throw new PowerDnsManualRrsetManagerError('powerdns_manual_expected_serial_invalid', 'Expected SOA serial is invalid', 400);
+  }
+  return value;
+}
+
+function assertExpectedSerial(zone, value) {
+  const expected = expectedSerial(value);
+  if (expected !== null && zone.serial !== expected) {
+    throw new PowerDnsManualRrsetManagerError(
+      'powerdns_manual_serial_conflict',
+      'Authoritative zone changed; refresh DNS records before applying this mutation',
+      409,
+    );
+  }
+  return expected;
+}
+
 function desiredRrset(record) {
   return Object.freeze({
     name: powerDnsZoneManagerInternals.fqdn(record.owner),
@@ -233,28 +253,37 @@ export function createPowerDnsManualRrsetManager({
     }
   }
 
-  async function getZone({ zoneName, apiKey: rawApiKey } = {}) {
-    let zone;
-    try { zone = await zones.getZone(zoneName, rawApiKey); }
+  async function inspectZone(zoneName, rawApiKey) {
+    try { return await zones.getZone(zoneName, rawApiKey); }
     catch (error) {
       if (error instanceof PowerDnsZoneManagerError) {
         throw new PowerDnsManualRrsetManagerError(error.code, error.message, error.status);
       }
       throw error;
     }
-    return publicZone(zone);
   }
 
-  async function apply({ zoneName, apiKey: rawApiKey, record } = {}) {
+  async function inspectPostcondition(zoneName, rawApiKey) {
+    try { return await inspectZone(zoneName, rawApiKey); }
+    catch {
+      throw new PowerDnsManualRrsetManagerError(
+        'powerdns_manual_postcondition_unavailable',
+        'DNS mutation result is uncertain because the authoritative zone cannot be re-inspected; refresh before retrying',
+        503,
+      );
+    }
+  }
+
+  async function getZone({ zoneName, apiKey: rawApiKey } = {}) {
+    return publicZone(await inspectZone(zoneName, rawApiKey));
+  }
+
+  async function apply({ zoneName, apiKey: rawApiKey, record, expectedSerial: rawExpectedSerial = null } = {}) {
     const normalizedZone = powerDnsZoneManagerInternals.zoneName(zoneName);
     const normalized = normalizeManualRecord(record, normalizedZone);
-    let zone;
-    try { zone = await zones.getZone(normalizedZone, rawApiKey); }
-    catch (error) {
-      if (error instanceof PowerDnsZoneManagerError) throw new PowerDnsManualRrsetManagerError(error.code, error.message, error.status);
-      throw error;
-    }
+    const zone = await inspectZone(normalizedZone, rawApiKey);
     if (!zone) throw new PowerDnsManualRrsetManagerError('powerdns_manual_zone_not_found', 'PowerDNS zone was not found', 404);
+    assertExpectedSerial(zone, rawExpectedSerial);
     const current = findRrset(zone, normalized.owner, normalized.type);
     assertManual(current);
     assertCnameCoexistence(zone, normalized.owner, normalized.type, current);
@@ -262,33 +291,42 @@ export function createPowerDnsManualRrsetManager({
     if (current && powerDnsZoneManagerInternals.sameRecords(current, wanted)) {
       return Object.freeze({ satisfied: true, changed: false, record: publicRrset(current), serial: zone.serial });
     }
-    await patch(normalizedZone, rawApiKey, [wanted]);
-    const after = await zones.getZone(normalizedZone, rawApiKey);
+
+    let mutationError = null;
+    try { await patch(normalizedZone, rawApiKey, [wanted]); }
+    catch (error) { mutationError = error; }
+    const after = await inspectPostcondition(normalizedZone, rawApiKey);
     const verified = after ? findRrset(after, normalized.owner, normalized.type) : null;
-    if (!verified || verified.managed || !powerDnsZoneManagerInternals.sameRecords(verified, wanted)) {
-      throw new PowerDnsManualRrsetManagerError('powerdns_manual_apply_unverified', 'Manual DNS RRset apply could not be verified');
+    if (verified && !verified.managed && powerDnsZoneManagerInternals.sameRecords(verified, wanted)) {
+      return Object.freeze({ satisfied: true, changed: true, record: publicRrset(verified), serial: after.serial });
     }
-    return Object.freeze({ satisfied: true, changed: true, record: publicRrset(verified), serial: after.serial });
+    if (mutationError) throw mutationError;
+    throw new PowerDnsManualRrsetManagerError('powerdns_manual_apply_unverified', 'Manual DNS RRset apply could not be verified');
   }
 
-  async function remove({ zoneName, apiKey: rawApiKey, owner, type } = {}) {
+  async function remove({ zoneName, apiKey: rawApiKey, owner, type, expectedSerial: rawExpectedSerial = null } = {}) {
     const normalizedZone = powerDnsZoneManagerInternals.zoneName(zoneName);
     const normalizedOwner = ownerWithinZone(owner, normalizedZone);
     const normalizedType = String(type ?? '').toUpperCase();
     if (!SUPPORTED_TYPES.has(normalizedType)) {
       throw new PowerDnsManualRrsetManagerError('powerdns_manual_record_type_invalid', 'DNS record type is invalid', 400);
     }
-    const zone = await zones.getZone(normalizedZone, rawApiKey);
+    const zone = await inspectZone(normalizedZone, rawApiKey);
     if (!zone) throw new PowerDnsManualRrsetManagerError('powerdns_manual_zone_not_found', 'PowerDNS zone was not found', 404);
+    assertExpectedSerial(zone, rawExpectedSerial);
     const current = findRrset(zone, normalizedOwner, normalizedType);
     if (!current) return Object.freeze({ satisfied: true, changed: false, owner: normalizedOwner, type: normalizedType, serial: zone.serial });
     assertManual(current);
-    await patch(normalizedZone, rawApiKey, [deleteRrset(current)]);
-    const after = await zones.getZone(normalizedZone, rawApiKey);
-    if (after && findRrset(after, normalizedOwner, normalizedType)) {
-      throw new PowerDnsManualRrsetManagerError('powerdns_manual_delete_unverified', 'Manual DNS RRset deletion could not be verified');
+
+    let mutationError = null;
+    try { await patch(normalizedZone, rawApiKey, [deleteRrset(current)]); }
+    catch (error) { mutationError = error; }
+    const after = await inspectPostcondition(normalizedZone, rawApiKey);
+    if (!after || !findRrset(after, normalizedOwner, normalizedType)) {
+      return Object.freeze({ satisfied: true, changed: true, owner: normalizedOwner, type: normalizedType, serial: after?.serial ?? null });
     }
-    return Object.freeze({ satisfied: true, changed: true, owner: normalizedOwner, type: normalizedType, serial: after?.serial ?? null });
+    if (mutationError) throw mutationError;
+    throw new PowerDnsManualRrsetManagerError('powerdns_manual_delete_unverified', 'Manual DNS RRset deletion could not be verified');
   }
 
   return Object.freeze({ getZone, apply, remove });
@@ -297,6 +335,8 @@ export function createPowerDnsManualRrsetManager({
 export const powerDnsManualRrsetManagerInternals = Object.freeze({
   ownerWithinZone,
   normalizeManualRecord,
+  expectedSerial,
+  assertExpectedSerial,
   desiredRrset,
   unquoteSequence,
   canonicalContent,
