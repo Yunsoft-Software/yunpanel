@@ -8,15 +8,15 @@ import {
   resolveManagedComposeWebsiteBinding,
 } from './managed-compose-website-binding.js';
 
-const STORE_VERSION = 4;
-const RUNTIME_TYPES = new Set(['static', 'node', 'docker', 'proxy']);
+const STORE_VERSION = 5;
+const RUNTIME_TYPES = new Set(['static', 'node', 'php', 'docker', 'proxy']);
 const UPDATE_FIELDS = new Set([
   'name', 'applicationId', 'dockerWorkloadId', 'managedComposeBinding', 'runtimeType', 'proxyTarget',
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const STATIC_ROOT = '/var/www/yunpanel/apps';
-const NODE_ROOT = '/var/lib/yunpanel/apps';
+const APPLICATION_ROOT = '/var/lib/yunpanel/apps';
 const MIGRATION_NAMESPACE = Buffer.from('8af0d7a45c4e4e6bb71a10ce8fba8261', 'hex');
 
 export class WebsiteRegistryError extends Error {
@@ -105,7 +105,7 @@ function applicationBinding(application, serverId) {
   if (uuid(application.serverId, 'serverId') !== serverId) {
     throw new WebsiteRegistryError('website_application_server_mismatch', 'Application belongs to a different server', 409);
   }
-  if (!['static', 'node'].includes(application.type)) {
+  if (!['static', 'node', 'php'].includes(application.type)) {
     throw new WebsiteRegistryError('website_application_type_unsupported', 'Application type cannot be bound to a Website yet', 409);
   }
   let documentRoot;
@@ -115,8 +115,14 @@ function applicationBinding(application, serverId) {
       throw new WebsiteRegistryError('website_application_root_drift', 'Static application document root does not match managed state', 409);
     }
     documentRoot = expected;
+  } else if (application.type === 'php') {
+    const expected = path.posix.join(APPLICATION_ROOT, applicationId, 'current', 'public');
+    if (application.webRoot !== expected) {
+      throw new WebsiteRegistryError('website_application_root_drift', 'PHP application document root does not match managed state', 409);
+    }
+    documentRoot = expected;
   } else {
-    documentRoot = path.posix.join(NODE_ROOT, applicationId, 'current');
+    documentRoot = path.posix.join(APPLICATION_ROOT, applicationId, 'current');
   }
   const unixUser = appUnixUser(applicationId);
   if (!APP_USER_PATTERN.test(unixUser)) throw new WebsiteRegistryError('website_application_user_invalid', 'Application Unix user identity is invalid', 409);
@@ -218,7 +224,9 @@ function validatePersistedWebsite(value, sourceVersion = STORE_VERSION) {
     applicationId = uuid(value.applicationId, 'applicationId');
     const expectedRoot = runtimeType === 'static'
       ? path.posix.join(STATIC_ROOT, applicationId, 'current')
-      : path.posix.join(NODE_ROOT, applicationId, 'current');
+      : runtimeType === 'php'
+        ? path.posix.join(APPLICATION_ROOT, applicationId, 'current', 'public')
+        : path.posix.join(APPLICATION_ROOT, applicationId, 'current');
     if (value.documentRoot !== expectedRoot || value.unixUser !== appUnixUser(applicationId)) throw new Error('invalid website registry entry');
     documentRoot = expectedRoot;
     unixUser = value.unixUser;
@@ -339,7 +347,7 @@ export function createWebsiteRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, 2, 3, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.websites)) throw new Error('unsupported or invalid website registry state');
+        if (![1, 2, 3, 4, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.websites)) throw new Error('unsupported or invalid website registry state');
         const sourceVersion = parsed.version;
         const websites = parsed.websites.map((website) => validatePersistedWebsite(website, sourceVersion));
         const ids = new Set();
@@ -556,7 +564,7 @@ export function createWebsiteRegistry({
     }
     if (applicationId == null) {
       const normalizedServerId = await requireServer(serverId);
-      if (runtimeType !== 'proxy') throw new WebsiteRegistryError('website_application_required', 'Static and Node Websites require an Application; Docker Websites require a workload or Managed Compose binding');
+      if (runtimeType !== 'proxy') throw new WebsiteRegistryError('website_application_required', 'Static, Node and PHP Websites require an Application; Docker Websites require a workload or Managed Compose binding');
       const timestamp = new Date(now()).toISOString();
       const normalizedWebsiteId = websiteId == null ? randomUUID() : uuid(websiteId, 'websiteId');
       const website = {
@@ -647,7 +655,7 @@ export function createWebsiteRegistry({
       }
     }
     if (hasRuntimeType) {
-      if (!RUNTIME_TYPES.has(changes.runtimeType)) throw new WebsiteRegistryError('invalid_website_runtime', 'Website runtimeType must be static, node, docker or proxy');
+      if (!RUNTIME_TYPES.has(changes.runtimeType)) throw new WebsiteRegistryError('invalid_website_runtime', 'Website runtimeType must be static, node, php, docker or proxy');
       next.runtimeType = changes.runtimeType;
     } else if (bindingRequested) {
       if (next.dockerWorkloadId !== null || next.managedComposeBinding !== null) next.runtimeType = 'docker';
@@ -714,7 +722,7 @@ export function createWebsiteRegistry({
         if (next.managedComposeBinding !== null) {
           throw new WebsiteRegistryError('website_application_managed_compose_conflict', 'Switching to an Application requires managedComposeBinding to be explicitly null');
         }
-        if (next.applicationId === null) throw new WebsiteRegistryError('website_application_required', 'Static and Node websites require an application binding');
+        if (next.applicationId === null) throw new WebsiteRegistryError('website_application_required', 'Static, Node and PHP websites require an application binding');
         const application = await getApplication(next.applicationId);
         const binding = applicationBinding(application, website.serverId);
         if (binding.runtimeType !== next.runtimeType) {
