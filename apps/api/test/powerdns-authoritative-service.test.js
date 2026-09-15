@@ -1,0 +1,128 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  createPowerDnsAuthoritativeService,
+  PowerDnsAuthoritativeServiceError,
+} from '../src/powerdns-authoritative-service.js';
+
+const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
+const apiKey = 'A'.repeat(43);
+
+function identity(revision = 3) {
+  return Object.freeze({
+    serverId,
+    revision,
+    settings: Object.freeze({
+      publicIpv4: '203.0.113.10',
+      publicIpv6: null,
+      ns1: Object.freeze({ hostname: 'ns1.example.test', ipv4: '203.0.113.10', ipv6: null, local: true }),
+      ns2: Object.freeze({ hostname: 'ns2.example.test', ipv4: '203.0.113.20', ipv6: null, local: false }),
+      soa: Object.freeze({ primaryNs: 'ns1.example.test', rname: 'hostmaster.example.test', refresh: 3600, retry: 900, expire: 1209600, minimum: 300, ttl: 300 }),
+      dnssecDefault: true,
+      secondaryDns: Object.freeze(['203.0.113.20']),
+    }),
+    warnings: Object.freeze([]),
+  });
+}
+
+function fixture({ hostError = null } = {}) {
+  let secret = null;
+  let currentIdentity = identity();
+  const managerCalls = [];
+  const service = createPowerDnsAuthoritativeService({
+    localServerId: serverId,
+    serverRegistry: { async getServer(id) { return id === serverId ? { id, executionMode: 'local' } : null; } },
+    dnsIdentityRegistry: { async getForServer(id) { return id === serverId ? currentIdentity : null; } },
+    secretRegistry: {
+      async getForServer(id) {
+        return id === serverId && secret ? { serverId, revision: secret.revision, configured: true } : null;
+      },
+      async ensureForServer(id) {
+        if (id !== serverId) throw new Error('wrong server');
+        if (!secret) secret = { revision: 1, apiKey };
+        return { serverId, revision: secret.revision, configured: true };
+      },
+      async materializeForServer(id) {
+        if (id !== serverId || !secret) throw new Error('secret missing');
+        return { serverId, revision: secret.revision, apiKey: secret.apiKey };
+      },
+    },
+    manager: {
+      async inspect(intent) {
+        managerCalls.push(['inspect', intent]);
+        if (hostError) throw hostError;
+        return { satisfied: true, adapter: 'powerdns-authoritative-gsqlite3', apiKey: 'must-not-leak' };
+      },
+      async apply(intent) {
+        managerCalls.push(['apply', intent]);
+        if (hostError) throw hostError;
+        return { satisfied: true, adapter: 'powerdns-authoritative-gsqlite3', apiKey: 'must-not-leak' };
+      },
+    },
+  });
+  return {
+    service,
+    managerCalls,
+    setIdentity(value) { currentIdentity = value; },
+    rotateSecret() { secret = { revision: (secret?.revision ?? 0) + 1, apiKey: 'B'.repeat(43) }; },
+  };
+}
+
+test('PowerDNS preview is secret-free and apply materializes the API key only for the host manager', async () => {
+  const fx = fixture();
+  const preview = await fx.service.preview(serverId);
+  assert.equal(preview.secretRevision, 0);
+  assert.equal(preview.impact.createApiSecret, true);
+  assert.equal(Object.hasOwn(preview, 'apiKey'), false);
+  assert.match(preview.confirmation, new RegExp(`^apply-powerdns-authoritative:${serverId}:3:[a-f0-9]{64}$`));
+
+  const applied = await fx.service.apply(serverId, {
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+  assert.equal(applied.ready, true);
+  assert.equal(applied.secretRevision, 1);
+  assert.equal(Object.hasOwn(applied.host, 'apiKey'), false);
+  assert.equal(fx.managerCalls.length, 1);
+  assert.equal(fx.managerCalls[0][0], 'apply');
+  assert.equal(fx.managerCalls[0][1].apiKey, apiKey);
+  assert.deepEqual(fx.managerCalls[0][1].secondaryDns, ['203.0.113.20']);
+});
+
+test('PowerDNS apply rejects DNS identity drift after preview', async () => {
+  const fx = fixture();
+  const preview = await fx.service.preview(serverId);
+  fx.setIdentity(identity(4));
+
+  await assert.rejects(
+    fx.service.apply(serverId, { previewDigest: preview.previewDigest, confirmation: preview.confirmation }),
+    (error) => error instanceof PowerDnsAuthoritativeServiceError
+      && error.code === 'powerdns_preview_stale'
+      && error.status === 409,
+  );
+  assert.equal(fx.managerCalls.length, 0);
+});
+
+test('PowerDNS host failures retain actionable code but are normalized to 503', async () => {
+  const hostError = new Error('pdns recursor conflict');
+  hostError.code = 'powerdns_recursor_conflict';
+  const fx = fixture({ hostError });
+  const preview = await fx.service.preview(serverId);
+
+  await assert.rejects(
+    fx.service.apply(serverId, { previewDigest: preview.previewDigest, confirmation: preview.confirmation }),
+    (error) => error instanceof PowerDnsAuthoritativeServiceError
+      && error.code === 'powerdns_recursor_conflict'
+      && error.status === 503,
+  );
+});
+
+test('PowerDNS service rejects remote server ids and missing DNS identity', async () => {
+  const fx = fixture();
+  await assert.rejects(
+    fx.service.preview('11111111-1111-4111-8111-111111111111'),
+    (error) => error instanceof PowerDnsAuthoritativeServiceError
+      && error.code === 'powerdns_local_server_required'
+      && error.status === 404,
+  );
+});
