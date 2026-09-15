@@ -59,6 +59,16 @@ function asyncRoute(handler) {
   };
 }
 
+function localServerId(authoritativeService, requestedServerId) {
+  if (typeof authoritativeService?.localServerId !== 'string' || !authoritativeService.localServerId) {
+    throw new PowerDnsHttpError('powerdns_local_server_unavailable', 'PowerDNS local server scope is unavailable', 503);
+  }
+  if (requestedServerId !== authoritativeService.localServerId) {
+    throw new PowerDnsHttpError('powerdns_local_server_required', 'PowerDNS can be managed only on this panel host', 404);
+  }
+  return requestedServerId;
+}
+
 export function mountPowerDnsRoutes(app, {
   dnsIdentityRegistry,
   authoritativeService,
@@ -76,23 +86,26 @@ export function mountPowerDnsRoutes(app, {
   }
 
   app.get('/api/servers/:serverId/dns/identity', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    const identity = await dnsIdentityRegistry.getForServer(request.params.serverId);
+    const serverId = localServerId(authoritativeService, request.params.serverId);
+    const identity = await dnsIdentityRegistry.getForServer(serverId);
     return response.json({ data: identity });
   }));
 
   app.post('/api/servers/:serverId/dns/identity/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const serverId = localServerId(authoritativeService, request.params.serverId);
     const body = identityPreviewBody(request.body);
     const preview = await dnsIdentityRegistry.preview({
-      serverId: request.params.serverId,
+      serverId,
       settings: body.settings,
     });
     return response.json({ data: preview });
   }));
 
   app.post('/api/servers/:serverId/dns/identity/apply', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const serverId = localServerId(authoritativeService, request.params.serverId);
     const body = identityApplyBody(request.body);
     const updated = await dnsIdentityRegistry.update({
-      serverId: request.params.serverId,
+      serverId,
       expectedRevision: body.expectedRevision,
       settings: body.settings,
       previewDigest: body.previewDigest,
@@ -102,18 +115,21 @@ export function mountPowerDnsRoutes(app, {
   }));
 
   app.get('/api/servers/:serverId/dns/authoritative', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    return response.json({ data: await authoritativeService.status(request.params.serverId) });
+    const serverId = localServerId(authoritativeService, request.params.serverId);
+    return response.json({ data: await authoritativeService.status(serverId) });
   }));
 
   app.post('/api/servers/:serverId/dns/authoritative/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const serverId = localServerId(authoritativeService, request.params.serverId);
     requireEmptyBody(request.body);
-    return response.json({ data: await authoritativeService.preview(request.params.serverId) });
+    return response.json({ data: await authoritativeService.preview(serverId) });
   }));
 
   app.post('/api/servers/:serverId/dns/authoritative/apply', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const serverId = localServerId(authoritativeService, request.params.serverId);
     const body = authoritativeApplyBody(request.body);
     return response.json({
-      data: await authoritativeService.apply(request.params.serverId, {
+      data: await authoritativeService.apply(serverId, {
         previewDigest: body.previewDigest,
         confirmation: body.confirmation,
       }),
@@ -126,4 +142,5 @@ export const powerDnsHttpInternals = Object.freeze({
   identityApplyBody,
   authoritativeApplyBody,
   requireEmptyBody,
+  localServerId,
 });
