@@ -1,0 +1,187 @@
+import { createHash } from 'node:crypto';
+import path from 'node:path';
+import { createPowerDnsZoneManager } from '@yunpanel/host-runtime/powerdns-zone-manager';
+import { createPowerDnsSecretRegistry } from './powerdns-secret-registry.js';
+import { WebsiteProvisioningHandlerError } from './website-provisioning-handlers.js';
+
+const API_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+function stateRoot(env) {
+  return path.dirname(env.YUNPANEL_SERVER_STORE ?? path.resolve('.data/server-registry.json'));
+}
+
+function secretStorePath(env) {
+  return env.YUNPANEL_POWERDNS_SECRET_STORE
+    ?? path.join(stateRoot(env), 'powerdns-secret-registry.json');
+}
+
+function snapshotDigest(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function normalizedIntent(context = {}) {
+  const intent = context.intent;
+  const fields = new Set([
+    'adapter', 'serverId', 'webDomainId', 'zoneName', 'templateVersion', 'templateSnapshot',
+    'dnsIdentityRevision', 'serial', 'dnssec', 'records',
+  ]);
+  if (!intent || typeof intent !== 'object' || Array.isArray(intent)
+    || Object.keys(intent).length !== fields.size || Object.keys(intent).some((field) => !fields.has(field))
+    || intent.adapter !== 'powerdns-zone'
+    || typeof intent.serverId !== 'string' || !intent.serverId
+    || typeof intent.webDomainId !== 'string' || !intent.webDomainId
+    || typeof intent.zoneName !== 'string' || !intent.zoneName
+    || !Number.isSafeInteger(intent.templateVersion) || intent.templateVersion < 1
+    || !Array.isArray(intent.templateSnapshot) || intent.templateSnapshot.length < 1
+    || !Number.isSafeInteger(intent.dnsIdentityRevision) || intent.dnsIdentityRevision < 1
+    || !Number.isSafeInteger(intent.serial) || intent.serial < 1
+    || typeof intent.dnssec !== 'boolean'
+    || !Array.isArray(intent.records) || intent.records.length < 2) {
+    throw new WebsiteProvisioningHandlerError(
+      'website_dns_zone_intent_invalid',
+      'Website DNS zone provisioning intent is invalid',
+      400,
+    );
+  }
+  return Object.freeze({
+    ...intent,
+    templateSnapshot: Object.freeze(intent.templateSnapshot.map((entry) => Object.freeze({
+      ...entry,
+      values: Object.freeze([...(entry.values ?? [])]),
+    }))),
+    records: Object.freeze(intent.records.map((entry) => Object.freeze({
+      ...entry,
+      values: Object.freeze([...(entry.values ?? [])]),
+    }))),
+  });
+}
+
+function defaultSecretMaterializer(env = process.env) {
+  let registryPromise = null;
+  async function registryFor(serverId) {
+    if (!registryPromise) {
+      registryPromise = (async () => {
+        const localServerId = env.YUNPANEL_LOCAL_SERVER_ID?.trim() || null;
+        if (!localServerId || localServerId !== serverId) {
+          throw new WebsiteProvisioningHandlerError(
+            'website_dns_zone_local_server_required',
+            'PowerDNS Website zone provisioning is restricted to this panel host',
+            404,
+          );
+        }
+        const registry = createPowerDnsSecretRegistry({
+          filePath: secretStorePath(env),
+          masterKey: env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+          serverExists: async (id) => id === localServerId,
+        });
+        await registry.init();
+        return registry;
+      })();
+    }
+    return registryPromise;
+  }
+  return async (serverId) => (await registryFor(serverId)).materializeForServer(serverId);
+}
+
+function publicEvidence(intent, result) {
+  return Object.freeze({
+    satisfied: true,
+    adapter: 'powerdns-zone',
+    serverId: intent.serverId,
+    webDomainId: intent.webDomainId,
+    zoneName: intent.zoneName,
+    templateVersion: intent.templateVersion,
+    templateSnapshotDigest: snapshotDigest(intent.templateSnapshot),
+    dnsIdentityRevision: intent.dnsIdentityRevision,
+    requestedSerial: intent.serial,
+    observedSerial: result.serial ?? null,
+    dnssec: result.dnssec === true,
+    managedRrsetCount: result.managedRrsetCount ?? intent.records.length,
+    manualRrsetCount: result.manualRrsetCount ?? 0,
+    created: result.created === true,
+    changedRrsetCount: Number.isSafeInteger(result.changedRrsetCount) ? result.changedRrsetCount : 0,
+  });
+}
+
+export function createWebsiteDnsZoneProvisioningHandler({
+  zoneManager = createPowerDnsZoneManager(),
+  materializeSecret = null,
+  env = process.env,
+} = {}) {
+  if (!zoneManager || typeof zoneManager.inspect !== 'function' || typeof zoneManager.apply !== 'function'
+    || typeof zoneManager.compensate !== 'function' || typeof zoneManager.inspectCompensation !== 'function'
+    || (materializeSecret !== null && typeof materializeSecret !== 'function')) {
+    throw new WebsiteProvisioningHandlerError(
+      'website_dns_zone_dependencies_invalid',
+      'Website DNS zone provisioning dependencies are unavailable',
+      503,
+    );
+  }
+  const resolveSecret = materializeSecret ?? defaultSecretMaterializer(env);
+
+  async function secret(serverId) {
+    const materialized = await resolveSecret(serverId);
+    if (!materialized || materialized.serverId !== serverId
+      || typeof materialized.apiKey !== 'string' || !API_KEY_PATTERN.test(materialized.apiKey)) {
+      throw new WebsiteProvisioningHandlerError(
+        'website_dns_zone_secret_invalid',
+        'PowerDNS API key material is unavailable',
+        503,
+      );
+    }
+    return materialized.apiKey;
+  }
+
+  async function inspect(context = {}) {
+    const intent = normalizedIntent(context);
+    const result = await zoneManager.inspect({
+      zoneName: intent.zoneName,
+      apiKey: await secret(intent.serverId),
+      records: intent.records,
+    });
+    if (!result?.satisfied) return Object.freeze({
+      satisfied: false,
+      reason: result?.reason ?? 'website_dns_zone_pending',
+      zoneName: intent.zoneName,
+    });
+    return publicEvidence(intent, result);
+  }
+
+  async function apply(context = {}) {
+    const intent = normalizedIntent(context);
+    const result = await zoneManager.apply({
+      zoneName: intent.zoneName,
+      apiKey: await secret(intent.serverId),
+      records: intent.records,
+      dnssec: intent.dnssec,
+    });
+    if (!result?.satisfied) {
+      throw new WebsiteProvisioningHandlerError(
+        'website_dns_zone_apply_unverified',
+        'PowerDNS Website zone apply did not return verified evidence',
+      );
+    }
+    return publicEvidence(intent, result);
+  }
+
+  async function compensate(context = {}) {
+    const intent = normalizedIntent(context);
+    return zoneManager.compensate({ zoneName: intent.zoneName, apiKey: await secret(intent.serverId) });
+  }
+
+  async function inspectCompensation(context = {}) {
+    const intent = normalizedIntent(context);
+    return zoneManager.inspectCompensation({ zoneName: intent.zoneName, apiKey: await secret(intent.serverId) });
+  }
+
+  return Object.freeze({ apply, inspect, compensate, inspectCompensation });
+}
+
+export const websiteDnsZoneProvisioningInternals = Object.freeze({
+  stateRoot,
+  secretStorePath,
+  snapshotDigest,
+  normalizedIntent,
+  defaultSecretMaterializer,
+  publicEvidence,
+});
