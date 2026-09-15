@@ -48,7 +48,7 @@ export function sftpSitePaths({ applicationId, unixUser } = {}) {
 
 export function renderWebsiteSftpMatch(input = {}) {
   const paths = sftpSitePaths(input);
-  return `Match User ${paths.unixUser}\n  ChrootDirectory ${paths.chrootDirectory}\n  ForceCommand internal-sftp -d /site -u ${sftpTemplatePolicy.umask}\n  PubkeyAuthentication yes\n  PasswordAuthentication no\n  KbdInteractiveAuthentication no\n  PermitTTY no\n  X11Forwarding no\n  AllowTcpForwarding no\n  AllowAgentForwarding no\n`;
+  return `Match User ${paths.unixUser}\n  ChrootDirectory ${paths.chrootDirectory}\n  ForceCommand internal-sftp -d /site -u ${sftpTemplatePolicy.umask}\n  PubkeyAuthentication yes\n  PasswordAuthentication no\n  KbdInteractiveAuthentication no\n  PermitTTY no\n  X11Forwarding no\n  AllowTcpForwarding no\n  AllowAgentForwarding no\n\nMatch all\n`;
 }
 
 export function renderWebsiteSftpMountUnit(input = {}) {
