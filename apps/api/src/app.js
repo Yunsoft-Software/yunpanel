@@ -87,12 +87,16 @@ import { LogHttpError, mountLogRoutes } from './log-http.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
 import { mountNodeRuntimeRoutes, NodeRuntimeHttpError } from './node-runtime-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
+import { PowerDnsAuthoritativeServiceError } from './powerdns-authoritative-service.js';
+import { mountPowerDnsRoutes, PowerDnsHttpError } from './powerdns-http.js';
+import { PowerDnsSecretRegistryError } from './powerdns-secret-registry.js';
 import { ResourceImpactError } from './resource-impact.js';
 import { mountResourceImpactRoutes } from './resource-impact-http.js';
 import { RoundcubeConfigurationError } from './roundcube-configuration.js';
 import { RoundcubeConfigurationHttpError, mountRoundcubeConfigurationRoutes } from './roundcube-configuration-http.js';
 import { RoundcubeSecretRegistryError } from './roundcube-secret-registry.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
+import { ServerDnsIdentityRegistryError } from './server-dns-identity-registry.js';
 import { SiteFileHttpError, mountSiteFileRoutes } from './site-file-http.js';
 import { createSiteFileManager, SiteFileManagerError } from './site-file-manager.js';
 import { SiteFileWorkerError } from './site-file-worker.js';
@@ -165,6 +169,8 @@ export function createApp({
   dnsProviderCredentialRegistry = createDnsProviderCredentialRegistry({
     getDnsZone: async (dnsZoneId) => dnsHostingRegistry.getZone(dnsZoneId),
   }),
+  serverDnsIdentityRegistry = null,
+  powerDnsAuthoritativeService = null,
   databaseBindingRegistry = null,
   databaseCredentialRegistry = null,
   databaseCredentialApplyService = null,
@@ -434,6 +440,15 @@ export function createApp({
     localServerId,
     mailDomainRegistry,
   });
+  if ((serverDnsIdentityRegistry === null) !== (powerDnsAuthoritativeService === null)) {
+    throw new Error('Server DNS identity registry and PowerDNS authoritative service must be configured together');
+  }
+  if (serverDnsIdentityRegistry && powerDnsAuthoritativeService) {
+    mountPowerDnsRoutes(app, {
+      dnsIdentityRegistry: serverDnsIdentityRegistry,
+      authoritativeService: powerDnsAuthoritativeService,
+    });
+  }
   mountMailAliasRoutes(app, { mailAliasRegistry, mailDomainRegistry, domainRegistry, localServerId });
   mountMailboxRoutes(app, {
     mailboxRegistry,
@@ -618,10 +633,14 @@ export function createApp({
       || error instanceof MailboxRegistryError
       || error instanceof MailboxPasswordError
       || error instanceof NodeRuntimeHttpError
+      || error instanceof PowerDnsAuthoritativeServiceError
+      || error instanceof PowerDnsHttpError
+      || error instanceof PowerDnsSecretRegistryError
       || error instanceof ResourceImpactError
       || error instanceof RoundcubeConfigurationError
       || error instanceof RoundcubeConfigurationHttpError
       || error instanceof RoundcubeSecretRegistryError
+      || error instanceof ServerDnsIdentityRegistryError
       || error instanceof SiteFileHttpError
       || error instanceof SiteFileManagerError
       || error instanceof SiteFileWorkerError
