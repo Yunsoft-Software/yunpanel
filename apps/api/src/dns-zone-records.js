@@ -147,27 +147,28 @@ export function createDnsZoneRecordsService({
     throw new DnsZoneRecordsError('dns_zone_records_dependencies_invalid', 'DNS zone record dependencies are unavailable', 503);
   }
 
-  async function context(domainId) {
+  async function requireDomain(domainId) {
     if (typeof domainId !== 'string' || !domainId) throw new DnsZoneRecordsError('dns_zone_domain_id_invalid', 'Domain ID is required');
-    const domain = rootDomain(await mapped(() => domainRegistry.getDomain(domainId)), localServerId);
+    return rootDomain(await mapped(() => domainRegistry.getDomain(domainId)), localServerId);
+  }
+
+  async function secretFor(domain) {
     const secret = await mapped(() => powerDnsSecretRegistry.materializeForServer(domain.serverId));
-    return Object.freeze({ domain, apiKey: secret.apiKey });
+    return secret.apiKey;
   }
 
   async function getZone({ domainId } = {}) {
-    const { domain, apiKey } = await context(domainId);
+    const domain = await requireDomain(domainId);
+    const apiKey = await secretFor(domain);
     const zone = await mapped(() => manager.getZone({ zoneName: domain.primaryDomain, apiKey }));
     if (!zone) throw new DnsZoneRecordsError('dns_zone_not_found', 'Local authoritative DNS zone was not found', 404);
-    return Object.freeze({
-      domainId: domain.id,
-      serverId: domain.serverId,
-      ...zone,
-    });
+    return Object.freeze({ domainId: domain.id, serverId: domain.serverId, ...zone });
   }
 
   async function apply({ domainId, input } = {}) {
-    const { domain, apiKey } = await context(domainId);
+    const domain = await requireDomain(domainId);
     const normalized = normalizeRecord(domain.primaryDomain, input);
+    const apiKey = await secretFor(domain);
     const result = await mapped(() => manager.apply({
       zoneName: domain.primaryDomain,
       apiKey,
@@ -178,8 +179,9 @@ export function createDnsZoneRecordsService({
   }
 
   async function remove({ domainId, input } = {}) {
-    const { domain, apiKey } = await context(domainId);
+    const domain = await requireDomain(domainId);
     const normalized = normalizeDelete(domain.primaryDomain, input);
+    const apiKey = await secretFor(domain);
     const result = await mapped(() => manager.remove({
       zoneName: domain.primaryDomain,
       apiKey,
