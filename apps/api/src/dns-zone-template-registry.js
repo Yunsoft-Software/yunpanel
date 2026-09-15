@@ -6,7 +6,7 @@ import { assertUuid } from '@yunpanel/shared';
 const STORE_VERSION = 1;
 const TEMPLATE_SCHEMA_VERSION = 1;
 const MAX_VERSIONS = 50;
-const ALLOWED_TYPES = new Set(['NS', 'A', 'AAAA', 'CNAME']);
+const ALLOWED_TYPES = new Set(['NS', 'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV']);
 const ALLOWED_CONDITIONS = new Set(['always', 'ipv6']);
 const PLACEHOLDERS = Object.freeze([
   '<domain>',
@@ -61,9 +61,20 @@ function recordKey(value) {
   return value;
 }
 
+function ownerLabel(value) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 63) return false;
+  if (value.startsWith('_')) return /^_[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(value);
+  return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(value);
+}
+
 function owner(value) {
   if (value === '@') return '@';
-  if (typeof value !== 'string' || value.length > 190 || !/^(?:\*\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i.test(value)) {
+  if (typeof value !== 'string' || value.length > 190) {
+    throw new DnsZoneTemplateRegistryError('invalid_dns_template_owner', 'DNS template owner is invalid');
+  }
+  const labels = value.split('.');
+  if (labels[0] === '*') labels.shift();
+  if (labels.length < 1 || labels.some((entry) => !ownerLabel(entry))) {
     throw new DnsZoneTemplateRegistryError('invalid_dns_template_owner', 'DNS template owner is invalid');
   }
   return value.toLowerCase();
@@ -80,6 +91,49 @@ function templateValue(value) {
   return value;
 }
 
+function targetValue(value) {
+  const normalized = templateValue(value);
+  if (/\s/.test(normalized)) {
+    throw new DnsZoneTemplateRegistryError('invalid_dns_template_record', 'DNS template target values cannot contain whitespace');
+  }
+  return normalized;
+}
+
+function uint16(value) {
+  if (!/^\d{1,5}$/.test(value)) return null;
+  const parsed = Number.parseInt(value, 10);
+  return parsed <= 65535 ? parsed : null;
+}
+
+function mxValue(value) {
+  const normalized = templateValue(value).trim();
+  const parts = normalized.split(/\s+/);
+  const priority = uint16(parts[0] ?? '');
+  if (parts.length !== 2 || priority === null) {
+    throw new DnsZoneTemplateRegistryError('invalid_dns_template_record', 'MX template values require priority and target');
+  }
+  return `${priority} ${targetValue(parts[1])}`;
+}
+
+function srvValue(value) {
+  const normalized = templateValue(value).trim();
+  const parts = normalized.split(/\s+/);
+  const priority = uint16(parts[0] ?? '');
+  const weight = uint16(parts[1] ?? '');
+  const port = uint16(parts[2] ?? '');
+  if (parts.length !== 4 || priority === null || weight === null || port === null) {
+    throw new DnsZoneTemplateRegistryError('invalid_dns_template_record', 'SRV template values require priority, weight, port and target');
+  }
+  return `${priority} ${weight} ${port} ${targetValue(parts[3])}`;
+}
+
+function normalizeRecordValues(type, values) {
+  if (type === 'NS' || type === 'CNAME') return values.map(targetValue);
+  if (type === 'MX') return values.map(mxValue);
+  if (type === 'SRV') return values.map(srvValue);
+  return values.map(templateValue);
+}
+
 function normalizeRecord(value) {
   const fields = new Set(['key', 'owner', 'type', 'ttl', 'values', 'condition']);
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -89,12 +143,13 @@ function normalizeRecord(value) {
     || !Array.isArray(value.values) || value.values.length < 1 || value.values.length > 8) {
     throw new DnsZoneTemplateRegistryError('invalid_dns_template_record', 'DNS template record is invalid');
   }
+  const type = value.type.toUpperCase();
   const normalized = Object.freeze({
     key: recordKey(value.key),
     owner: owner(value.owner),
-    type: value.type.toUpperCase(),
+    type,
     ttl: ttl(value.ttl),
-    values: Object.freeze(value.values.map(templateValue)),
+    values: Object.freeze(normalizeRecordValues(type, value.values)),
     condition: value.condition,
   });
   if (normalized.type === 'A' && normalized.values.some((entry) => entry !== '<server-ipv4>')) {
