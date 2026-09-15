@@ -1,6 +1,7 @@
 import {
   createNginxManager,
   createPassengerSiteManager,
+  createPhpFpmSiteManager,
   createWebsiteIdentityPathManager,
 } from '@yunpanel/host-runtime';
 import { createWebsiteStaticDeploymentManager } from '@yunpanel/host-runtime/website-static-deployment-manager';
@@ -62,6 +63,41 @@ function runtimeIntent(intent) {
     );
   }
   return intent;
+}
+
+function phpRuntimeIntent(intent) {
+  const allowed = new Set([
+    'adapter',
+    'websiteId',
+    'applicationId',
+    'unixUser',
+    'documentRoot',
+    'maxChildren',
+    'memoryLimitMb',
+    'maxExecutionSeconds',
+  ]);
+  if (!intent || typeof intent !== 'object' || Array.isArray(intent)
+    || intent.adapter !== 'php-fpm'
+    || Object.keys(intent).some((key) => !allowed.has(key))
+    || typeof intent.websiteId !== 'string'
+    || typeof intent.applicationId !== 'string'
+    || typeof intent.unixUser !== 'string'
+    || typeof intent.documentRoot !== 'string') {
+    throw new WebsiteProvisioningHandlerError(
+      'website_php_runtime_intent_invalid',
+      'Website PHP-FPM provisioning intent is invalid',
+      400,
+    );
+  }
+  return Object.freeze({
+    websiteId: intent.websiteId,
+    applicationId: intent.applicationId,
+    unixUser: intent.unixUser,
+    documentRoot: intent.documentRoot,
+    ...(intent.maxChildren === undefined ? {} : { maxChildren: intent.maxChildren }),
+    ...(intent.memoryLimitMb === undefined ? {} : { memoryLimitMb: intent.memoryLimitMb }),
+    ...(intent.maxExecutionSeconds === undefined ? {} : { maxExecutionSeconds: intent.maxExecutionSeconds }),
+  });
 }
 
 function staticDeploymentSpec({ intent, operationId, websiteId } = {}) {
@@ -143,6 +179,23 @@ function passengerRuntimeEvidence(operation) {
   return value;
 }
 
+function phpRuntimeEvidence(operation) {
+  const step = operation?.steps?.find((candidate) => candidate.id === 'php_runtime');
+  const value = step?.state === 'succeeded' ? step.evidence : null;
+  if (!value || value.satisfied !== true || value.adapter !== 'php-fpm'
+    || typeof value.applicationId !== 'string'
+    || typeof value.documentRoot !== 'string'
+    || typeof value.socketPath !== 'string'
+    || typeof value.unixUser !== 'string') {
+    throw new WebsiteProvisioningHandlerError(
+      'website_php_runtime_evidence_missing',
+      'PHP-FPM runtime evidence is required before Nginx activation',
+      409,
+    );
+  }
+  return value;
+}
+
 function passengerEnvironmentEvidence(operation, applicationId) {
   const step = operation?.steps?.find((candidate) => candidate.id === 'passenger_environment');
   if (!step) return null;
@@ -165,7 +218,7 @@ function nginxSpec({ operation, intent } = {}) {
   if (!intent || typeof intent !== 'object' || Array.isArray(intent)
     || typeof intent.primaryDomain !== 'string'
     || !Array.isArray(intent.aliases)
-    || !['static', 'proxy', 'passenger'].includes(intent.targetType)) {
+    || !['static', 'proxy', 'passenger', 'php'].includes(intent.targetType)) {
     throw new WebsiteProvisioningHandlerError(
       'website_nginx_intent_invalid',
       'Website Nginx provisioning intent is invalid',
@@ -186,6 +239,12 @@ function nginxSpec({ operation, intent } = {}) {
       group: runtime.unixUser,
       appEnv: intent.target?.appEnv ?? 'production',
       environmentInclude: environment?.environmentInclude ?? null,
+    });
+  } else if (intent.targetType === 'php') {
+    const runtime = phpRuntimeEvidence(operation);
+    target = Object.freeze({
+      root: runtime.documentRoot,
+      socketPath: runtime.socketPath,
     });
   }
 
@@ -220,6 +279,7 @@ function certificatePending(intent) {
 export function createWebsiteProvisioningHandlers({
   identityManager = createWebsiteIdentityPathManager(),
   passengerSiteManager = createPassengerSiteManager(),
+  phpFpmSiteManager = createPhpFpmSiteManager(),
   staticDeploymentManager = createWebsiteStaticDeploymentManager(),
   nginxManager = createNginxManager(),
 } = {}) {
@@ -231,6 +291,11 @@ export function createWebsiteProvisioningHandlers({
     || !passengerSiteManager
     || typeof passengerSiteManager.apply !== 'function'
     || typeof passengerSiteManager.inspect !== 'function'
+    || !phpFpmSiteManager
+    || typeof phpFpmSiteManager.apply !== 'function'
+    || typeof phpFpmSiteManager.inspect !== 'function'
+    || typeof phpFpmSiteManager.compensate !== 'function'
+    || typeof phpFpmSiteManager.inspectCompensation !== 'function'
     || !staticDeploymentManager
     || typeof staticDeploymentManager.deployStatic !== 'function'
     || typeof staticDeploymentManager.inspectCurrent !== 'function'
@@ -341,6 +406,22 @@ export function createWebsiteProvisioningHandlers({
     return passengerSiteManager.inspect(normalized);
   }
 
+  async function applyPhpRuntime({ intent, operationId } = {}) {
+    return phpFpmSiteManager.apply(phpRuntimeIntent(intent), { operationId });
+  }
+
+  async function inspectPhpRuntime({ intent } = {}) {
+    return phpFpmSiteManager.inspect(phpRuntimeIntent(intent));
+  }
+
+  async function compensatePhpRuntime({ intent, operationId } = {}) {
+    return phpFpmSiteManager.compensate(phpRuntimeIntent(intent), { operationId });
+  }
+
+  async function inspectPhpRuntimeCompensation({ intent, operationId } = {}) {
+    return phpFpmSiteManager.inspectCompensation(phpRuntimeIntent(intent), { operationId });
+  }
+
   async function applyNginx(context = {}) {
     const spec = nginxSpec(context);
     const stage = await nginxManager.stageDomain(spec);
@@ -418,6 +499,12 @@ export function createWebsiteProvisioningHandlers({
       apply: applyRuntime,
       inspect: inspectRuntime,
     }),
+    php_runtime: Object.freeze({
+      apply: applyPhpRuntime,
+      inspect: inspectPhpRuntime,
+      compensate: compensatePhpRuntime,
+      inspectCompensation: inspectPhpRuntimeCompensation,
+    }),
     static_runtime: Object.freeze({
       apply: applyStaticRuntime,
       inspect: inspectStaticRuntime,
@@ -440,11 +527,13 @@ export function createWebsiteProvisioningHandlers({
 export const websiteProvisioningHandlerInternals = Object.freeze({
   identityIntent,
   runtimeIntent,
+  phpRuntimeIntent,
   staticDeploymentSpec,
   staticBindingIdentity,
   staticCompensationTarget,
   legacyStaticPending,
   passengerRuntimeEvidence,
+  phpRuntimeEvidence,
   passengerEnvironmentEvidence,
   nginxSpec,
   nginxEvidence,
