@@ -173,7 +173,7 @@ test('PHP-FPM site apply installs distro FPM and activates a dedicated Website p
   assert.equal(result.created, true);
   assert.equal(host.packageInstalled(), true);
   assert.equal(host.serviceActive(), true);
-  assert.equal(host.entries.get(configPath)?.mode, 0o640);
+  assert.equal(host.entries.get(configPath)?.mode, 0o600);
   assert.match(host.entries.get(configPath)?.content ?? '', new RegExp(`user = ${unixUser}`));
   assert.match(host.entries.get(configPath)?.content ?? '', new RegExp(`listen = ${socketPath.replaceAll('.', '\\.')}`));
   assert.equal(host.calls.some(([file]) => file === '/usr/bin/apt-get'), true);
@@ -204,7 +204,7 @@ test('PHP-FPM site intent rejects a Unix user that does not match canonical Appl
 
 test('PHP-FPM site apply fails closed on an existing foreign pool configuration', async () => {
   const host = fakeHost({ packageInstalled: true });
-  host.entries.set(configPath, { type: 'file', content: '[foreign]\n', mode: 0o640, uid: 0, gid: 0 });
+  host.entries.set(configPath, { type: 'file', content: '[foreign]\n', mode: 0o600, uid: 0, gid: 0 });
   const siteManager = manager(host);
 
   await assert.rejects(
@@ -245,7 +245,7 @@ test('PHP-FPM compensation refuses destructive restore after pool content drift'
   const host = fakeHost({ packageInstalled: true });
   const siteManager = manager(host);
   await siteManager.apply(intent(), { operationId });
-  host.entries.set(configPath, { type: 'file', content: '[changed-after-apply]\n', mode: 0o640, uid: 0, gid: 0 });
+  host.entries.set(configPath, { type: 'file', content: '[changed-after-apply]\n', mode: 0o600, uid: 0, gid: 0 });
 
   await assert.rejects(
     siteManager.compensate(intent(), { operationId }),
