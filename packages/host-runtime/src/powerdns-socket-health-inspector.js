@@ -57,11 +57,14 @@ function udpExchange(query, { host = LOOPBACK_V4, port = DNS_PORT, timeoutMs = T
   return new Promise((resolve, reject) => {
     const socket = dgram.createSocket('udp4');
     let settled = false;
+    const closeSocket = () => {
+      try { socket.close(() => {}); } catch { /* Socket may not have bound before an early send/error failure. */ }
+    };
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      socket.close(() => {});
+      closeSocket();
       if (error) reject(error); else resolve(value);
     };
     const timer = setTimeout(() => finish(new PowerDnsSocketHealthError('powerdns_udp_timeout', 'PowerDNS UDP/53 probe timed out')), timeoutMs);
