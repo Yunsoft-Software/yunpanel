@@ -1,3 +1,4 @@
+import { createWebsiteDnsZoneProvisioningHandler } from './website-dns-zone-provisioning-handler.js';
 import { createWebsiteDomainActivationProvisioningHandler } from './website-domain-activation-provisioning-handler.js';
 import { createWebsiteNodeReleaseProvisioningHandler } from './website-node-release-provisioning-handler.js';
 import { createWebsitePassengerApplicationReleaseProvisioningHandler } from './website-passenger-application-release-provisioning-handler.js';
@@ -40,6 +41,7 @@ export function createWebsiteProvisioningRuntime({
       ...(staticDeploymentManager ? { staticDeploymentManager } : {}),
       ...(nginxManager ? { nginxManager } : {}),
     }),
+    dns_zone: createWebsiteDnsZoneProvisioningHandler(),
     node_release: nodeReleaseHandler(),
     passenger_health: createWebsitePassengerHealthProvisioningHandler({
       ...(passengerHealthInspector ? { healthInspector: passengerHealthInspector } : {}),
