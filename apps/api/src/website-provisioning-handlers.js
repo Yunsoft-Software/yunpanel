@@ -4,6 +4,7 @@ import {
   createPhpFpmSiteManager,
   createWebsiteIdentityPathManager,
 } from '@yunpanel/host-runtime';
+import { createPhpSiteBootstrapManager } from '@yunpanel/host-runtime/php-site-bootstrap-manager';
 import { createWebsiteStaticDeploymentManager } from '@yunpanel/host-runtime/website-static-deployment-manager';
 
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
@@ -63,6 +64,29 @@ function runtimeIntent(intent) {
     );
   }
   return intent;
+}
+
+function phpBootstrapIntent(intent) {
+  const allowed = new Set(['adapter', 'websiteId', 'applicationId', 'unixUser', 'documentRoot']);
+  if (!intent || typeof intent !== 'object' || Array.isArray(intent)
+    || intent.adapter !== 'php-bootstrap'
+    || Object.keys(intent).some((key) => !allowed.has(key))
+    || typeof intent.websiteId !== 'string'
+    || typeof intent.applicationId !== 'string'
+    || typeof intent.unixUser !== 'string'
+    || typeof intent.documentRoot !== 'string') {
+    throw new WebsiteProvisioningHandlerError(
+      'website_php_bootstrap_intent_invalid',
+      'Website PHP bootstrap provisioning intent is invalid',
+      400,
+    );
+  }
+  return Object.freeze({
+    websiteId: intent.websiteId,
+    applicationId: intent.applicationId,
+    unixUser: intent.unixUser,
+    documentRoot: intent.documentRoot,
+  });
 }
 
 function phpRuntimeIntent(intent) {
@@ -279,6 +303,7 @@ function certificatePending(intent) {
 export function createWebsiteProvisioningHandlers({
   identityManager = createWebsiteIdentityPathManager(),
   passengerSiteManager = createPassengerSiteManager(),
+  phpSiteBootstrapManager = createPhpSiteBootstrapManager(),
   phpFpmSiteManager = createPhpFpmSiteManager(),
   staticDeploymentManager = createWebsiteStaticDeploymentManager(),
   nginxManager = createNginxManager(),
@@ -291,6 +316,11 @@ export function createWebsiteProvisioningHandlers({
     || !passengerSiteManager
     || typeof passengerSiteManager.apply !== 'function'
     || typeof passengerSiteManager.inspect !== 'function'
+    || !phpSiteBootstrapManager
+    || typeof phpSiteBootstrapManager.apply !== 'function'
+    || typeof phpSiteBootstrapManager.inspect !== 'function'
+    || typeof phpSiteBootstrapManager.compensate !== 'function'
+    || typeof phpSiteBootstrapManager.inspectCompensation !== 'function'
     || !phpFpmSiteManager
     || typeof phpFpmSiteManager.apply !== 'function'
     || typeof phpFpmSiteManager.inspect !== 'function'
@@ -329,6 +359,22 @@ export function createWebsiteProvisioningHandlers({
 
   async function inspectIdentityCompensation({ intent, operationId, evidence } = {}) {
     return identityManager.inspectCompensation(identityIntent(intent), { operationId, evidence });
+  }
+
+  async function applyPhpBootstrap({ intent, operationId } = {}) {
+    return phpSiteBootstrapManager.apply(phpBootstrapIntent(intent), { operationId });
+  }
+
+  async function inspectPhpBootstrap({ intent, operationId } = {}) {
+    return phpSiteBootstrapManager.inspect(phpBootstrapIntent(intent), { operationId });
+  }
+
+  async function compensatePhpBootstrap({ intent, operationId } = {}) {
+    return phpSiteBootstrapManager.compensate(phpBootstrapIntent(intent), { operationId });
+  }
+
+  async function inspectPhpBootstrapCompensation({ intent, operationId } = {}) {
+    return phpSiteBootstrapManager.inspectCompensation(phpBootstrapIntent(intent), { operationId });
   }
 
   async function applyStaticRuntime(context = {}) {
@@ -495,6 +541,12 @@ export function createWebsiteProvisioningHandlers({
       compensate: compensateIdentity,
       inspectCompensation: inspectIdentityCompensation,
     }),
+    php_bootstrap: Object.freeze({
+      apply: applyPhpBootstrap,
+      inspect: inspectPhpBootstrap,
+      compensate: compensatePhpBootstrap,
+      inspectCompensation: inspectPhpBootstrapCompensation,
+    }),
     runtime: Object.freeze({
       apply: applyRuntime,
       inspect: inspectRuntime,
@@ -527,6 +579,7 @@ export function createWebsiteProvisioningHandlers({
 export const websiteProvisioningHandlerInternals = Object.freeze({
   identityIntent,
   runtimeIntent,
+  phpBootstrapIntent,
   phpRuntimeIntent,
   staticDeploymentSpec,
   staticBindingIdentity,
