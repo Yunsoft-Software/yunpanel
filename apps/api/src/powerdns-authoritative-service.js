@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { powerDnsTemplatePolicy } from '@yunpanel/config-templates/powerdns';
-import { createPowerDnsAuthoritativeSecureManager } from '@yunpanel/host-runtime/powerdns-authoritative-secure-manager';
+import { createPowerDnsAuthoritativeReadyManager } from '@yunpanel/host-runtime/powerdns-authoritative-ready-manager';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -19,10 +19,7 @@ function digest(value) {
 
 function publicHostState(value) {
   if (!value || typeof value !== 'object') return value;
-  const {
-    apiKey: _apiKey,
-    ...safe
-  } = value;
+  const { apiKey: _apiKey, ...safe } = value;
   return Object.freeze(safe);
 }
 
@@ -43,7 +40,7 @@ export function createPowerDnsAuthoritativeService({
   serverRegistry,
   dnsIdentityRegistry,
   secretRegistry,
-  manager = createPowerDnsAuthoritativeSecureManager(),
+  manager = createPowerDnsAuthoritativeReadyManager(),
 } = {}) {
   if (typeof localServerId !== 'string' || !localServerId
     || !serverRegistry || typeof serverRegistry.getServer !== 'function'
@@ -105,6 +102,7 @@ export function createPowerDnsAuthoritativeService({
       api: Object.freeze({ address: powerDnsTemplatePolicy.apiAddress, port: powerDnsTemplatePolicy.apiPort, public: false }),
       authoritative: true,
       recursive: false,
+      readiness: Object.freeze({ api: true, udp53: true, tcp53: true, recursionDenied: true }),
     });
     const previewDigest = digest(payload);
     return Object.freeze({
