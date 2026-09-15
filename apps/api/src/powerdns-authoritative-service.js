@@ -186,7 +186,7 @@ export function createPowerDnsAuthoritativeService({
     });
   }
 
-  return Object.freeze({ preview, status, apply });
+  return Object.freeze({ localServerId, preview, status, apply });
 }
 
 export const powerDnsAuthoritativeServiceInternals = Object.freeze({ digest, publicHostState, hostFailure });
