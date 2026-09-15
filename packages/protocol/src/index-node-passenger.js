@@ -18,6 +18,7 @@ import {
 
 const APP_NODE_PASSENGER_MIGRATE = 'app.node.passenger-migrate';
 const SAFE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._/-]+$/;
+const PHP_SOCKET_PATTERN = /^\/run\/php\/yunpanel-yunapp-[a-f0-9]{12}\.sock$/;
 const DOMAIN_FIELDS = new Set([
   'primaryDomain',
   'aliases',
@@ -153,6 +154,10 @@ function isPassengerDomainStage(value) {
   return value?.operation === DOCKER_OPERATIONS.DOMAIN_STAGE && value?.payload?.targetType === 'passenger';
 }
 
+function isPhpDomainStage(value) {
+  return value?.operation === DOCKER_OPERATIONS.DOMAIN_STAGE && value?.payload?.targetType === 'php';
+}
+
 function validatePassengerDomainStage(value) {
   const startupFile = value?.payload?.target?.startupFile;
   const baseEnvelope = structuredClone(value);
@@ -169,8 +174,43 @@ function validatePassengerDomainStage(value) {
   return { ok: errors.length === 0, errors };
 }
 
+function validatePhpDomainStage(value) {
+  const target = value?.payload?.target;
+  const baseEnvelope = structuredClone(value);
+  if (baseEnvelope?.payload) {
+    baseEnvelope.payload.targetType = 'passenger';
+    baseEnvelope.payload.target = {
+      root: target?.root,
+      startupFile: 'server.js',
+      nodeBinary: '/usr/bin/node',
+    };
+  }
+  const base = validateDockerOperationEnvelope(baseEnvelope);
+  const errors = [...base.errors];
+  if (!target || typeof target !== 'object' || Array.isArray(target)
+    || Object.keys(target).length !== 2
+    || !Object.hasOwn(target, 'root') || !Object.hasOwn(target, 'socketPath')) {
+    errors.push('domain.stage PHP target must contain only root and socketPath');
+    return { ok: false, errors };
+  }
+  if (typeof target.socketPath !== 'string' || !PHP_SOCKET_PATTERN.test(target.socketPath)
+    || path.posix.normalize(target.socketPath) !== target.socketPath) {
+    errors.push('domain.stage PHP target.socketPath is invalid');
+  }
+  try {
+    const normalized = normalizeNginxSettings('php', value.payload.nginxSettings ?? {});
+    if (JSON.stringify(normalized) !== JSON.stringify(value.payload.nginxSettings ?? {})) {
+      errors.push('domain.stage PHP nginxSettings must be canonical');
+    }
+  } catch {
+    errors.push('domain.stage PHP nginxSettings are invalid');
+  }
+  return { ok: errors.length === 0, errors };
+}
+
 export function validateOperationEnvelope(value) {
   if (isPassengerDomainStage(value)) return validatePassengerDomainStage(value);
+  if (isPhpDomainStage(value)) return validatePhpDomainStage(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.operation !== APP_NODE_PASSENGER_MIGRATE) {
     return validateDockerOperationEnvelope(value);
@@ -191,7 +231,9 @@ export function validateOperationEnvelope(value) {
 }
 
 export function createOperationEnvelope({ id, operation, payload = {} }) {
-  if (operation !== APP_NODE_PASSENGER_MIGRATE && !(operation === DOCKER_OPERATIONS.DOMAIN_STAGE && payload?.targetType === 'passenger')) {
+  const specialDomainStage = operation === DOCKER_OPERATIONS.DOMAIN_STAGE
+    && ['passenger', 'php'].includes(payload?.targetType);
+  if (operation !== APP_NODE_PASSENGER_MIGRATE && !specialDomainStage) {
     return createDockerOperationEnvelope({ id, operation, payload });
   }
   const envelope = { id, operation, payload, protocolVersion: AGENT_PROTOCOL_VERSION };
@@ -207,4 +249,6 @@ export const nodePassengerProtocolInternals = Object.freeze({
   validateDomain,
   validateAuthority,
   validatePassengerDomainStage,
+  validatePhpDomainStage,
+  phpSocketPattern: PHP_SOCKET_PATTERN,
 });
