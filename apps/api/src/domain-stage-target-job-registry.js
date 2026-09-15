@@ -1,4 +1,5 @@
 import { createPhpFpmSiteManager } from '@yunpanel/host-runtime';
+import { createServiceUmaskManager } from '@yunpanel/host-runtime/service-umask-manager';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { normalizeNginxSettings } from '@yunpanel/shared';
 import { DomainRegistryError } from './domain-registry.js';
@@ -20,6 +21,7 @@ function assertDependencies(
   applicationRegistry,
   runtimeBindingRegistry,
   phpFpmSiteManager,
+  serviceUmaskManager,
 ) {
   if (!registry || typeof registry.enqueue !== 'function' || typeof registry.listJobs !== 'function'
     || !domainRegistry || typeof domainRegistry.getDomain !== 'function'
@@ -27,7 +29,8 @@ function assertDependencies(
     || !dockerComposeProjectRegistry || typeof dockerComposeProjectRegistry.getProject !== 'function'
     || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
     || !runtimeBindingRegistry || typeof runtimeBindingRegistry.getBinding !== 'function'
-    || !phpFpmSiteManager || typeof phpFpmSiteManager.inspect !== 'function') {
+    || !phpFpmSiteManager || typeof phpFpmSiteManager.inspect !== 'function'
+    || !serviceUmaskManager || typeof serviceUmaskManager.inspect !== 'function') {
     throw new DomainStageTargetJobRegistryError(
       'domain_stage_target_dependencies_invalid',
       'Domain stage target job registry dependencies are invalid',
@@ -63,6 +66,7 @@ export function createDomainStageTargetJobRegistry({
   applicationRegistry,
   runtimeBindingRegistry,
   phpFpmSiteManager = createPhpFpmSiteManager(),
+  serviceUmaskManager = createServiceUmaskManager(),
 } = {}) {
   assertDependencies(
     registry,
@@ -72,6 +76,7 @@ export function createDomainStageTargetJobRegistry({
     applicationRegistry,
     runtimeBindingRegistry,
     phpFpmSiteManager,
+    serviceUmaskManager,
   );
 
   async function enqueue(input) {
@@ -95,6 +100,7 @@ export function createDomainStageTargetJobRegistry({
       applicationRegistry,
       runtimeBindingRegistry,
       phpFpmSiteManager,
+      serviceUmaskManager,
     });
     return registry.enqueue({
       ...input,
