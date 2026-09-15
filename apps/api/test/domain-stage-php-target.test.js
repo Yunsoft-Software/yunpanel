@@ -11,9 +11,10 @@ const unixUser = 'yunapp-4dc352e64a14';
 const root = `/var/lib/yunpanel/apps/${applicationId}/current/public`;
 const socketPath = `/run/php/yunpanel-${unixUser}.sock`;
 
-function fixture({ runtime = null } = {}) {
+function fixture({ runtime = null, umask = null } = {}) {
   const calls = [];
   const inspectCalls = [];
+  const umaskCalls = [];
   const domain = {
     id: 'domain-php-1',
     serverId,
@@ -70,8 +71,14 @@ function fixture({ runtime = null } = {}) {
         return runtime ?? healthyRuntime;
       },
     },
+    serviceUmaskManager: {
+      async inspect(target) {
+        umaskCalls.push(target);
+        return umask ?? { satisfied: true, adapter: 'systemd-umask', runtime: 'php', umask: '0027' };
+      },
+    },
   });
-  return { calls, inspectCalls, decorated, domain };
+  return { calls, inspectCalls, umaskCalls, decorated, domain };
 }
 
 function input() {
@@ -101,6 +108,7 @@ test('PHP Domain restage replaces logical Application target with live FPM socke
   assert.equal(fx.calls.length, 1);
   assert.equal(fx.inspectCalls.length, 1);
   assert.deepEqual(fx.inspectCalls[0], { websiteId, applicationId, unixUser, documentRoot: root });
+  assert.deepEqual(fx.umaskCalls, ['php']);
   assert.equal(fx.calls[0].payload.targetType, 'php');
   assert.deepEqual(fx.calls[0].payload.target, { root, socketPath });
   assert.deepEqual(fx.calls[0].payload.nginxSettings, request.payload.nginxSettings);
@@ -116,6 +124,19 @@ test('PHP Domain restage fails closed while managed PHP-FPM runtime is not healt
       && error.status === 409,
   );
   assert.equal(fx.calls.length, 0);
+  assert.deepEqual(fx.umaskCalls, []);
+});
+
+test('PHP Domain restage fails closed while service UMask=0027 is not effective', async () => {
+  const fx = fixture({ umask: { satisfied: false, reason: 'service_umask_not_effective' } });
+  await assert.rejects(
+    fx.decorated.enqueue(input()),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'php_runtime_binding_required'
+      && error.status === 409,
+  );
+  assert.equal(fx.calls.length, 0);
+  assert.deepEqual(fx.umaskCalls, ['php']);
 });
 
 test('PHP Domain restage rejects runtime identity or socket drift before enqueue', async () => {
