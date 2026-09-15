@@ -176,8 +176,8 @@ test('DNS zone reapply reports an explicit conflict instead of overwriting a man
 
 test('DNS zone reapply blocks mutation while an unreconciled mail-owned RRset exists', async () => {
   const mail = liveRrset({
-    key: 'mail-spf', owner: 'example.com', type: 'TXT', ttl: 300,
-    values: ['v=spf1 mx -all'], source: 'mail', templateVersion: null,
+    key: 'mail-dmarc', owner: '_dmarc.example.com', type: 'TXT', ttl: 300,
+    values: ['v=DMARC1; p=none'], source: 'mail', templateVersion: null,
   });
   const { service } = fixture({ zone: liveZone({ extraRrsets: [mail] }) });
   const preview = await service.preview({ domainId });
