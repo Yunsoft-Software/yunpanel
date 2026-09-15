@@ -6,7 +6,7 @@ import { assertUuid } from '@yunpanel/shared';
 const STORE_VERSION = 1;
 const TEMPLATE_SCHEMA_VERSION = 1;
 const MAX_VERSIONS = 50;
-const ALLOWED_TYPES = new Set(['NS', 'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV']);
+const ALLOWED_TYPES = new Set(['NS', 'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'CAA', 'SRV']);
 const ALLOWED_CONDITIONS = new Set(['always', 'ipv6']);
 const PLACEHOLDERS = Object.freeze([
   '<domain>',
@@ -127,10 +127,22 @@ function srvValue(value) {
   return `${priority} ${weight} ${port} ${targetValue(parts[3])}`;
 }
 
+function caaValue(value) {
+  const normalized = templateValue(value).trim();
+  const match = normalized.match(/^(\d{1,3})\s+([a-z0-9-]{1,15})\s+(.+)$/i);
+  const flags = match ? Number.parseInt(match[1], 10) : -1;
+  const recordValue = match?.[3]?.trim() ?? '';
+  if (!match || flags < 0 || flags > 255 || !recordValue) {
+    throw new DnsZoneTemplateRegistryError('invalid_dns_template_record', 'CAA template values require flags, tag and value');
+  }
+  return `${flags} ${match[2].toLowerCase()} ${recordValue}`;
+}
+
 function normalizeRecordValues(type, values) {
   if (type === 'NS' || type === 'CNAME') return values.map(targetValue);
   if (type === 'MX') return values.map(mxValue);
   if (type === 'SRV') return values.map(srvValue);
+  if (type === 'CAA') return values.map(caaValue);
   return values.map(templateValue);
 }
 
@@ -389,6 +401,7 @@ export const dnsZoneTemplateInternals = Object.freeze({
   maxVersions: MAX_VERSIONS,
   placeholders: PLACEHOLDERS,
   defaultRecords: DEFAULT_RECORDS,
+  caaValue,
   normalizeRecord,
   normalizeRecords,
   digest,
