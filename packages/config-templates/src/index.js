@@ -13,6 +13,17 @@ export {
 } from './passenger-nginx.js';
 
 export {
+  PhpFpmTemplateError,
+  phpFpmPoolName,
+  phpFpmPoolPath,
+  phpFpmSocketPath,
+  phpFpmTemplateInternals,
+  phpFpmTemplatePolicy,
+  previewWebsitePhpFpmPool,
+  renderWebsitePhpFpmPool,
+} from './php-fpm.js';
+
+export {
   SystemdTemplateError,
   nodeApplicationUser,
   nodeServiceName,
