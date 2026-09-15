@@ -59,7 +59,7 @@ test('Website PHP-FPM identifiers are deterministic per Website Unix identity', 
   assert.equal(first.runtimeUser, unixUser);
   assert.equal(first.runtimeGroup, unixUser);
   assert.equal(first.serviceUnit, 'php8.3-fpm.service');
-  assert.equal(first.artifact.mode, 0o640);
+  assert.equal(first.artifact.mode, 0o600);
   assert.equal(first.artifact.sensitive, false);
   assert.match(first.sha256, /^[a-f0-9]{64}$/);
 });
