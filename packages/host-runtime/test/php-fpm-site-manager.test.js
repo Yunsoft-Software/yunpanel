@@ -8,7 +8,7 @@ import {
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
-const unixUser = 'yunapp-17d50af2c6f0';
+const unixUser = 'yunapp-4dc352e64a14';
 const homeDirectory = `/var/lib/yunpanel/data/${applicationId}`;
 const currentRelease = `/var/lib/yunpanel/apps/${applicationId}/current`;
 const configPath = `/etc/php/8.3/fpm/pool.d/yunpanel-${unixUser}.conf`;
@@ -192,11 +192,11 @@ test('PHP-FPM site apply refuses to provision before canonical Website identity 
   assert.equal(host.calls.some(([file]) => file === '/usr/bin/apt-get'), false);
 });
 
-test('PHP-FPM site intent rejects a Unix user that does not match canonical Application identity', () => {
+test('PHP-FPM site intent rejects a Unix user that does not match canonical Application identity', async () => {
   const host = fakeHost();
   const siteManager = manager(host);
 
-  assert.rejects(
+  await assert.rejects(
     siteManager.inspect(intent({ unixUser: 'yunapp-aaaaaaaaaaaa' })),
     (error) => error instanceof PhpFpmSiteManagerError && error.code === 'php_fpm_site_identity_mismatch',
   );
