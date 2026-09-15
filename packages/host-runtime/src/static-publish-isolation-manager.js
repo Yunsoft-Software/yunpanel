@@ -1,12 +1,11 @@
 import { execFile } from 'node:child_process';
-import { chmod, chown, lstat, readdir, readlink } from 'node:fs/promises';
+import { access, chmod, chown, lstat, readdir, readlink } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { createApplicationIdentity } from './application-identity.js';
 import { createWebsiteIdentityPathManager } from './website-identity-path-manager.js';
 
 const execFileAsync = promisify(execFile);
-const DPKG_QUERY_PATH = '/usr/bin/dpkg-query';
 const APT_GET_PATH = '/usr/bin/apt-get';
 const SETFACL_PATH = '/usr/bin/setfacl';
 const GETFACL_PATH = '/usr/bin/getfacl';
@@ -49,10 +48,6 @@ function missing(error) {
   return error?.code === 'ENOENT';
 }
 
-function packageMissing(error) {
-  return Number.isInteger(error?.code) && error.code === 1;
-}
-
 function aclHas(output, entry) {
   return String(output ?? '').split(/\r?\n/).map((line) => line.trim()).includes(entry);
 }
@@ -65,6 +60,7 @@ export function createStaticPublishIsolationManager({
     maxBuffer: 1024 * 1024,
     env: options.env,
   }),
+  accessFn = access,
   chmodFn = chmod,
   chownFn = chown,
   lstatFn = lstat,
@@ -72,7 +68,8 @@ export function createStaticPublishIsolationManager({
   readlinkFn = readlink,
 } = {}) {
   if (!identityManager || typeof identityManager.inspect !== 'function'
-    || typeof run !== 'function' || typeof chmodFn !== 'function' || typeof chownFn !== 'function'
+    || typeof run !== 'function' || typeof accessFn !== 'function'
+    || typeof chmodFn !== 'function' || typeof chownFn !== 'function'
     || typeof lstatFn !== 'function' || typeof readdirFn !== 'function' || typeof readlinkFn !== 'function') {
     throw new StaticPublishIsolationError('static_publish_isolation_dependencies_invalid', 'Static publish isolation dependencies are invalid');
   }
@@ -91,20 +88,15 @@ export function createStaticPublishIsolationManager({
     return result;
   }
 
-  async function inspectAclPackage() {
+  async function aclToolsAvailable() {
     try {
-      const result = await run(DPKG_QUERY_PATH, ['-W', '-f=${Status}\\t${Version}', ACL_PACKAGE], { timeout: 10_000 });
-      const match = String(result?.stdout ?? '').trim().match(/^install ok installed\\t([^\\s]+)$/);
-      return Object.freeze({ installed: Boolean(match), version: match?.[1] ?? null });
-    } catch (error) {
-      if (packageMissing(error)) return Object.freeze({ installed: false, version: null });
-      throw new StaticPublishIsolationError('static_publish_acl_package_inspection_failed', 'Static publish ACL package state could not be inspected');
-    }
+      await Promise.all([accessFn(SETFACL_PATH), accessFn(GETFACL_PATH)]);
+      return true;
+    } catch { return false; }
   }
 
-  async function ensureAclPackage() {
-    const before = await inspectAclPackage();
-    if (before.installed) return before;
+  async function ensureAclTools() {
+    if (await aclToolsAvailable()) return;
     try {
       await run(APT_GET_PATH, ['install', '--yes', '--no-install-recommends', ACL_PACKAGE], {
         timeout: 10 * 60_000,
@@ -113,9 +105,9 @@ export function createStaticPublishIsolationManager({
     } catch {
       throw new StaticPublishIsolationError('static_publish_acl_package_install_failed', 'POSIX ACL package could not be installed for static isolation');
     }
-    const after = await inspectAclPackage();
-    if (!after.installed) throw new StaticPublishIsolationError('static_publish_acl_package_unverified', 'POSIX ACL package installation could not be verified');
-    return after;
+    if (!(await aclToolsAvailable())) {
+      throw new StaticPublishIsolationError('static_publish_acl_package_unverified', 'POSIX ACL tooling could not be verified after installation');
+    }
   }
 
   async function getAcl(target) {
@@ -184,8 +176,7 @@ export function createStaticPublishIsolationManager({
     const spec = normalizeIntent(rawIntent);
     const identity = await inspectIdentity(spec);
     if (!identity?.satisfied) return Object.freeze({ satisfied: false, reason: identity?.reason ?? 'static_publish_identity_unavailable' });
-    const packageState = await inspectAclPackage();
-    if (!packageState.installed) return Object.freeze({ satisfied: false, reason: 'static_publish_acl_package_missing' });
+    if (!(await aclToolsAvailable())) return Object.freeze({ satisfied: false, reason: 'static_publish_acl_package_missing' });
     for (const target of [spec.publishRoot, spec.releasesRoot]) {
       const result = await assertControlDirectory(target);
       if (!result.satisfied) return result;
@@ -219,7 +210,6 @@ export function createStaticPublishIsolationManager({
       unixUser: spec.identity.unixUser,
       releaseCount: releases.length,
       currentRelease: currentAbsolute,
-      aclPackageVersion: packageState.version,
     });
   }
 
@@ -238,7 +228,7 @@ export function createStaticPublishIsolationManager({
     if (!identity?.satisfied) {
       throw new StaticPublishIsolationError('static_publish_identity_required', 'Website Unix identity must be ready before static publish isolation');
     }
-    await ensureAclPackage();
+    await ensureAclTools();
     for (const target of [spec.publishRoot, spec.releasesRoot]) {
       let info;
       try { info = await lstatFn(target); }
