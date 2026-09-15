@@ -1,5 +1,10 @@
 import path from 'node:path';
 import { createDnsDelegationInspector, DnsDelegationInspectorError } from './dns-delegation-inspector.js';
+import {
+  createDnsZoneReapplyOperationRegistry,
+  DnsZoneReapplyOperationRegistryError,
+} from './dns-zone-reapply-operation-registry.js';
+import { createDnsZoneReapplyRuntime, DnsZoneReapplyRuntimeError } from './dns-zone-reapply-runtime.js';
 import { createDnsZoneReapplyService, DnsZoneReapplyError } from './dns-zone-reapply.js';
 import { createDnsZoneTemplateRegistry, DnsZoneTemplateRegistryError } from './dns-zone-template-registry.js';
 import { createDnsZoneTemplateRollbackService } from './dns-zone-template-rollback.js';
@@ -28,12 +33,7 @@ function exactObject(value, fields, code, message) {
 }
 
 function identityPreviewBody(body) {
-  return exactObject(
-    body,
-    new Set(['settings']),
-    'dns_identity_preview_input_invalid',
-    'Send only server DNS settings',
-  );
+  return exactObject(body, new Set(['settings']), 'dns_identity_preview_input_invalid', 'Send only server DNS settings');
 }
 
 function identityApplyBody(body) {
@@ -100,9 +100,7 @@ function zoneTemplateVersion(value) {
     throw new PowerDnsHttpError('invalid_dns_template_version', 'DNS template version is invalid');
   }
   const version = Number.parseInt(value, 10);
-  if (!Number.isSafeInteger(version)) {
-    throw new PowerDnsHttpError('invalid_dns_template_version', 'DNS template version is invalid');
-  }
+  if (!Number.isSafeInteger(version)) throw new PowerDnsHttpError('invalid_dns_template_version', 'DNS template version is invalid');
   return version;
 }
 
@@ -152,8 +150,7 @@ function stateRoot(env = process.env) {
 }
 
 function zoneTemplateStorePath(env = process.env) {
-  return env.YUNPANEL_DNS_ZONE_TEMPLATE_STORE
-    ?? path.join(stateRoot(env), 'dns-zone-template-registry.json');
+  return env.YUNPANEL_DNS_ZONE_TEMPLATE_STORE ?? path.join(stateRoot(env), 'dns-zone-template-registry.json');
 }
 
 function domainStorePath(env = process.env) {
@@ -161,8 +158,12 @@ function domainStorePath(env = process.env) {
 }
 
 function powerDnsSecretStorePath(env = process.env) {
-  return env.YUNPANEL_POWERDNS_SECRET_STORE
-    ?? path.join(stateRoot(env), 'powerdns-secret-registry.json');
+  return env.YUNPANEL_POWERDNS_SECRET_STORE ?? path.join(stateRoot(env), 'powerdns-secret-registry.json');
+}
+
+function zoneReapplyOperationStorePath(env = process.env) {
+  return env.YUNPANEL_DNS_ZONE_REAPPLY_OPERATION_STORE
+    ?? path.join(stateRoot(env), 'dns-zone-reapply-operations.json');
 }
 
 function defaultZoneTemplateRegistry(authoritativeService, env = process.env) {
@@ -195,12 +196,28 @@ async function defaultZoneReapplyService({
   });
 }
 
+async function defaultZoneReapplyRuntime({
+  dnsIdentityRegistry,
+  dnsZoneTemplateRegistry,
+  authoritativeService,
+  env = process.env,
+} = {}) {
+  const service = await defaultZoneReapplyService({
+    dnsIdentityRegistry,
+    dnsZoneTemplateRegistry,
+    authoritativeService,
+    env,
+  });
+  const registry = createDnsZoneReapplyOperationRegistry({ filePath: zoneReapplyOperationStorePath(env) });
+  const runtime = createDnsZoneReapplyRuntime({ registry, service });
+  await runtime.init();
+  return runtime;
+}
+
 async function templateOperation(operation) {
   try { return await operation(); }
   catch (error) {
-    if (error instanceof DnsZoneTemplateRegistryError) {
-      throw new PowerDnsHttpError(error.code, error.message, error.status);
-    }
+    if (error instanceof DnsZoneTemplateRegistryError) throw new PowerDnsHttpError(error.code, error.message, error.status);
     throw error;
   }
 }
@@ -208,9 +225,7 @@ async function templateOperation(operation) {
 async function delegationOperation(operation) {
   try { return await operation(); }
   catch (error) {
-    if (error instanceof DnsDelegationInspectorError) {
-      throw new PowerDnsHttpError(error.code, error.message, error.status);
-    }
+    if (error instanceof DnsDelegationInspectorError) throw new PowerDnsHttpError(error.code, error.message, error.status);
     throw error;
   }
 }
@@ -218,7 +233,9 @@ async function delegationOperation(operation) {
 async function zoneReapplyOperation(operation) {
   try { return await operation(); }
   catch (error) {
-    if (error instanceof DnsZoneReapplyError) {
+    if (error instanceof DnsZoneReapplyError
+      || error instanceof DnsZoneReapplyRuntimeError
+      || error instanceof DnsZoneReapplyOperationRegistryError) {
       throw new PowerDnsHttpError(error.code, error.message, error.status);
     }
     throw error;
@@ -229,12 +246,10 @@ export function mountPowerDnsRoutes(app, {
   dnsIdentityRegistry,
   dnsZoneTemplateRegistry = null,
   dnsDelegationInspector = null,
-  dnsZoneReapplyService = null,
+  dnsZoneReapplyRuntime = null,
   authoritativeService,
 } = {}) {
-  if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') {
-    throw new Error('Express application is required');
-  }
+  if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
   if (!dnsIdentityRegistry || typeof dnsIdentityRegistry.getForServer !== 'function'
     || typeof dnsIdentityRegistry.preview !== 'function' || typeof dnsIdentityRegistry.update !== 'function') {
     throw new Error('Server DNS identity registry is required');
@@ -252,70 +267,72 @@ export function mountPowerDnsRoutes(app, {
   }
   const rollbackService = createDnsZoneTemplateRollbackService({ registry: templateRegistry });
   const delegationInspector = dnsDelegationInspector ?? createDnsDelegationInspector({ dnsIdentityRegistry });
-  if (typeof delegationInspector.inspect !== 'function') {
-    throw new Error('DNS delegation inspector is required');
+  if (typeof delegationInspector.inspect !== 'function') throw new Error('DNS delegation inspector is required');
+  if (dnsZoneReapplyRuntime !== null
+    && (typeof dnsZoneReapplyRuntime.preview !== 'function' || typeof dnsZoneReapplyRuntime.start !== 'function'
+      || typeof dnsZoneReapplyRuntime.get !== 'function' || typeof dnsZoneReapplyRuntime.listForDomain !== 'function')) {
+    throw new Error('DNS zone reapply runtime is invalid');
   }
-  if (dnsZoneReapplyService !== null
-    && (typeof dnsZoneReapplyService.preview !== 'function' || typeof dnsZoneReapplyService.apply !== 'function')) {
-    throw new Error('DNS zone reapply service is invalid');
-  }
-  let defaultReapplyPromise = null;
-  async function reapplyService() {
-    if (dnsZoneReapplyService) return dnsZoneReapplyService;
-    if (!defaultReapplyPromise) {
-      defaultReapplyPromise = defaultZoneReapplyService({
+
+  let defaultRuntimePromise = null;
+  function reapplyRuntime() {
+    if (dnsZoneReapplyRuntime) return Promise.resolve(dnsZoneReapplyRuntime);
+    if (!defaultRuntimePromise) {
+      defaultRuntimePromise = defaultZoneReapplyRuntime({
         dnsIdentityRegistry,
         dnsZoneTemplateRegistry: templateRegistry,
         authoritativeService,
-      }).catch((error) => {
-        defaultReapplyPromise = null;
-        throw error;
       });
+      defaultRuntimePromise.catch(() => { defaultRuntimePromise = null; });
     }
-    return defaultReapplyPromise;
+    return defaultRuntimePromise;
   }
+  if (!dnsZoneReapplyRuntime) void reapplyRuntime();
 
   app.get('/api/servers/:serverId/dns/identity', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);
-    const identity = await dnsIdentityRegistry.getForServer(serverId);
-    return response.json({ data: identity });
+    return response.json({ data: await dnsIdentityRegistry.getForServer(serverId) });
   }));
 
   app.get('/api/servers/:serverId/dns/delegation', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);
-    const inspection = await delegationOperation(() => delegationInspector.inspect({
-      serverId,
-      domain: request.query?.domain,
-    }));
+    const inspection = await delegationOperation(() => delegationInspector.inspect({ serverId, domain: request.query?.domain }));
     return response.json({ data: inspection });
   }));
 
   app.post('/api/domains/:domainId/dns/reapply-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     requireZoneReapplyPreviewBody(request.body);
-    const service = await reapplyService();
-    const preview = await zoneReapplyOperation(() => service.preview({ domainId: request.params.domainId }));
+    const preview = await zoneReapplyOperation(async () => (await reapplyRuntime()).preview({ domainId: request.params.domainId }));
     return response.json({ data: preview });
   }));
 
   app.post('/api/domains/:domainId/dns/reapply', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = zoneReapplyApplyBody(request.body);
-    const service = await reapplyService();
-    const applied = await zoneReapplyOperation(() => service.apply({
+    const operation = await zoneReapplyOperation(async () => (await reapplyRuntime()).start({
       domainId: request.params.domainId,
       previewDigest: body.previewDigest,
       confirmation: body.confirmation,
     }));
-    return response.json({ data: applied });
+    return response.json({ data: operation });
+  }));
+
+  app.get('/api/domains/:domainId/dns/reapply-operations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const operations = await zoneReapplyOperation(async () => (await reapplyRuntime()).listForDomain(request.params.domainId));
+    return response.json({ data: operations });
+  }));
+
+  app.get('/api/domains/:domainId/dns/reapply-operations/:operationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const operation = await zoneReapplyOperation(async () => (await reapplyRuntime()).get(request.params.operationId));
+    if (!operation || operation.domainId !== request.params.domainId) {
+      throw new PowerDnsHttpError('dns_zone_reapply_operation_not_found', 'DNS zone reapply operation was not found', 404);
+    }
+    return response.json({ data: operation });
   }));
 
   app.post('/api/servers/:serverId/dns/identity/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);
     const body = identityPreviewBody(request.body);
-    const preview = await dnsIdentityRegistry.preview({
-      serverId,
-      settings: body.settings,
-    });
-    return response.json({ data: preview });
+    return response.json({ data: await dnsIdentityRegistry.preview({ serverId, settings: body.settings }) });
   }));
 
   app.post('/api/servers/:serverId/dns/identity/apply', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -333,17 +350,14 @@ export function mountPowerDnsRoutes(app, {
 
   app.get('/api/servers/:serverId/dns/template', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);
-    const template = await templateOperation(() => templateRegistry.ensureForServer(serverId));
-    return response.json({ data: template });
+    return response.json({ data: await templateOperation(() => templateRegistry.ensureForServer(serverId)) });
   }));
 
   app.get('/api/servers/:serverId/dns/template/versions/:version', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);
     const version = zoneTemplateVersion(request.params.version);
     const template = await templateOperation(() => templateRegistry.getVersion(serverId, version));
-    if (!template) {
-      throw new PowerDnsHttpError('dns_template_version_not_found', 'DNS template version was not found', 404);
-    }
+    if (!template) throw new PowerDnsHttpError('dns_template_version_not_found', 'DNS template version was not found', 404);
     return response.json({ data: template });
   }));
 
@@ -409,12 +423,10 @@ export function mountPowerDnsRoutes(app, {
   app.post('/api/servers/:serverId/dns/authoritative/apply', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);
     const body = authoritativeApplyBody(request.body);
-    return response.json({
-      data: await authoritativeService.apply(serverId, {
-        previewDigest: body.previewDigest,
-        confirmation: body.confirmation,
-      }),
-    });
+    return response.json({ data: await authoritativeService.apply(serverId, {
+      previewDigest: body.previewDigest,
+      confirmation: body.confirmation,
+    }) });
   }));
 }
 
@@ -435,8 +447,10 @@ export const powerDnsHttpInternals = Object.freeze({
   zoneTemplateStorePath,
   domainStorePath,
   powerDnsSecretStorePath,
+  zoneReapplyOperationStorePath,
   defaultZoneTemplateRegistry,
   defaultZoneReapplyService,
+  defaultZoneReapplyRuntime,
   templateOperation,
   delegationOperation,
   zoneReapplyOperation,
