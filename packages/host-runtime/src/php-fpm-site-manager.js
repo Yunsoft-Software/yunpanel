@@ -313,6 +313,23 @@ export function createPhpFpmSiteManager({
     return result;
   }
 
+  async function inspectDocumentRoot(spec, identity) {
+    let info;
+    try { info = await lstatFn(spec.templateInput.documentRoot); }
+    catch (error) {
+      if (missingPath(error)) {
+        return Object.freeze({ satisfied: false, reason: 'php_fpm_document_root_missing' });
+      }
+      throw new PhpFpmSiteManagerError('php_fpm_document_root_unavailable', 'PHP-FPM Website document root could not be inspected');
+    }
+    if (!info?.isDirectory?.() || info.isSymbolicLink?.()
+      || info.uid !== identity.uid || info.gid !== identity.gid
+      || (modeOf(info) & 0o007) !== 0 || (modeOf(info) & 0o500) !== 0o500) {
+      throw new PhpFpmSiteManagerError('php_fpm_document_root_drift', 'PHP-FPM Website document root ownership or permissions have drifted');
+    }
+    return Object.freeze({ satisfied: true, mode: modeOf(info) });
+  }
+
   async function inspect(rawIntent) {
     const spec = normalizeIntent(rawIntent);
     const identity = await inspectIdentity(spec);
@@ -324,6 +341,18 @@ export function createPhpFpmSiteManager({
         adapter: 'php-fpm',
         websiteId: spec.websiteId,
         applicationId: spec.applicationId,
+      });
+    }
+
+    const documentRoot = await inspectDocumentRoot(spec, identity);
+    if (!documentRoot.satisfied) {
+      return Object.freeze({
+        satisfied: false,
+        reason: documentRoot.reason,
+        adapter: 'php-fpm',
+        websiteId: spec.websiteId,
+        applicationId: spec.applicationId,
+        documentRoot: spec.templateInput.documentRoot,
       });
     }
 
@@ -419,6 +448,7 @@ export function createPhpFpmSiteManager({
       socketPath,
       serviceUnit: phpFpmTemplatePolicy.serviceUnit,
       documentRoot: spec.templateInput.documentRoot,
+      documentRootMode: documentRoot.mode,
     });
   }
 
@@ -440,6 +470,10 @@ export function createPhpFpmSiteManager({
     const identity = await inspectIdentity(spec);
     if (!identity.satisfied) {
       throw new PhpFpmSiteManagerError('php_fpm_identity_required', 'Website Unix identity must be ready before PHP-FPM pool provisioning');
+    }
+    const documentRoot = await inspectDocumentRoot(spec, identity);
+    if (!documentRoot.satisfied) {
+      throw new PhpFpmSiteManagerError('php_fpm_document_root_required', 'Website document root must be ready before PHP-FPM pool provisioning');
     }
 
     await ensurePackage();
