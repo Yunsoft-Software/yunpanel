@@ -1,5 +1,5 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
-import { createSite, previewSiteCreate, SiteCreateError } from './site-create.js';
+import { createSite, previewSiteCreate, SiteCreateError } from './site-create-isolation-guard.js';
 import { siteCreateProvisioningPlan } from './site-create-provisioning-isolation.js';
 
 const PREVIEW_FIELDS = new Set(['input']);
