@@ -145,6 +145,9 @@ function existingApplication(state, application, { idempotent }) {
 
 function hydrateApplication(application) {
   if (!application.type) application.type = 'static';
+  if (!['static', 'node', 'php'].includes(application.type)) {
+    throw new ApplicationRegistryError('application_state_invalid', 'Application type is not supported by the current registry', 409);
+  }
   if (application.type === 'node') application.runtimeAdapter = normalizeRuntimeAdapter(application.runtimeAdapter ?? 'direct-systemd');
   else application.runtimeAdapter = null;
   if (!Array.isArray(application.releases)) application.releases = [];
@@ -163,6 +166,15 @@ function hydrateApplication(application) {
   if (application.type === 'node' && application.runtimeAdapter === 'passenger'
     && (application.serviceName !== null || application.servicePort !== null || application.proxyTarget !== null)) {
     throw new ApplicationRegistryError('application_state_invalid', 'Passenger Node application must not persist systemd or localhost proxy state', 409);
+  }
+  if (application.type === 'php'
+    && (application.repositoryUrl !== null || application.branch !== null || application.build !== null || application.runtime !== null
+      || application.runtimeAdapter !== null || application.serviceName !== null || application.servicePort !== null
+      || application.healthPath !== null || application.proxyTarget !== null)) {
+    throw new ApplicationRegistryError('application_state_invalid', 'PHP application state contains unsupported runtime or deployment fields', 409);
+  }
+  if (application.type === 'php' && application.webRoot !== `/var/lib/yunpanel/apps/${application.id}/current/public`) {
+    throw new ApplicationRegistryError('application_state_invalid', 'PHP application web root is outside the canonical current release', 409);
   }
   if (!Number.isSafeInteger(application.desiredRevision) || application.desiredRevision < 1) application.desiredRevision = 1;
   if (application.type === 'node') {
@@ -204,25 +216,37 @@ function hydrateApplication(application) {
     application.releases = application.releases.map((release) => ({ ...release, runtime: null, configurationRevision: null }));
   }
 
-  try {
-    application.releases = application.releases.map((release) => ({
-      ...release,
-      gitTarget: normalizeGitDeploymentTarget(release.gitTarget, { defaultBranch: application.branch }),
-    }));
-    if (application.currentGitTarget === undefined) {
-      application.currentGitTarget = application.currentReleaseId
-        ? application.releases.find((release) => release.releaseId === application.currentReleaseId)?.gitTarget
-          ?? normalizeGitDeploymentTarget(null, { defaultBranch: application.branch })
-        : null;
-    } else if (application.currentGitTarget !== null) {
-      application.currentGitTarget = normalizeGitDeploymentTarget(application.currentGitTarget);
+  if (application.type !== 'php') {
+    try {
+      application.releases = application.releases.map((release) => ({
+        ...release,
+        gitTarget: normalizeGitDeploymentTarget(release.gitTarget, { defaultBranch: application.branch }),
+      }));
+      if (application.currentGitTarget === undefined) {
+        application.currentGitTarget = application.currentReleaseId
+          ? application.releases.find((release) => release.releaseId === application.currentReleaseId)?.gitTarget
+            ?? normalizeGitDeploymentTarget(null, { defaultBranch: application.branch })
+          : null;
+      } else if (application.currentGitTarget !== null) {
+        application.currentGitTarget = normalizeGitDeploymentTarget(application.currentGitTarget);
+      }
+    } catch {
+      throw new ApplicationRegistryError('application_state_invalid', 'Application Git deployment target state is invalid', 409);
     }
-  } catch {
-    throw new ApplicationRegistryError('application_state_invalid', 'Application Git deployment target state is invalid', 409);
+  } else {
+    if (application.releases.length !== 0 || application.currentReleaseId !== null || application.previousReleaseId !== null
+      || application.currentCommitSha !== null || application.currentGitTarget !== null || application.activeDeploymentId !== null
+      || application.pendingRollbackReleaseId !== null || application.lastDeploymentId !== null || application.lastDeployedAt !== null
+      || application.lastRolledBackAt !== null) {
+      throw new ApplicationRegistryError('application_state_invalid', 'PHP bootstrap Application must not persist legacy Git deployment state', 409);
+    }
+    application.currentGitTarget = null;
+    application.appliedRevision = 0;
   }
 
   if (
-    application.currentReleaseId
+    application.type !== 'php'
+    && application.currentReleaseId
     && application.currentCommitSha
     && COMMIT_PATTERN.test(application.currentCommitSha)
     && !application.releases.some((release) => release.releaseId === application.currentReleaseId)
@@ -410,6 +434,34 @@ export function createApplicationRegistry({
     return publicApplication(application);
   }
 
+  async function createPhpApplication({ applicationId = null, serverId, name }) {
+    await ensureInitialized();
+    await ensureServer(serverId);
+    const id = applicationId == null ? randomUUID() : normalizeApplicationId(applicationId);
+    const timestamp = new Date(now()).toISOString();
+    const application = {
+      ...baseApplication({
+        id,
+        serverId,
+        name: validateName(name),
+        type: 'php',
+        repositoryUrl: null,
+        branch: null,
+        retention: 2,
+        runtimeAdapter: null,
+        timestamp,
+      }),
+      build: null,
+      runtime: null,
+      webRoot: `/var/lib/yunpanel/apps/${id}/current/public`,
+    };
+    const existing = existingApplication(state, application, { idempotent: applicationId !== null });
+    if (existing) return existing;
+    state.applications.push(application);
+    await persist();
+    return publicApplication(application);
+  }
+
   async function allocateNodePort({ serverId, reservedPorts = [], start = 3100, end = 49151 } = {}) {
     await ensureInitialized();
     await ensureServer(serverId);
@@ -430,6 +482,9 @@ export function createApplicationRegistry({
   async function markDeploying(applicationId, deploymentId) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
+    if (!['static', 'node'].includes(application.type)) {
+      throw new ApplicationRegistryError('deployment_not_supported', 'Legacy deployment flow is not supported for this application type', 409);
+    }
     if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
       throw new ApplicationRegistryError('node_deploy_adapter_mismatch', 'Passenger Node releases must use Website provisioning instead of the legacy systemd deploy flow', 409);
     }
@@ -461,6 +516,9 @@ export function createApplicationRegistry({
   }) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
+    if (!['static', 'node'].includes(application.type)) {
+      throw new ApplicationRegistryError('deployment_not_supported', 'Legacy deployment flow is not supported for this application type', 409);
+    }
     if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
       throw new ApplicationRegistryError('node_deploy_adapter_mismatch', 'Passenger Node releases must use Website provisioning instead of the legacy systemd deploy flow', 409);
     }
@@ -866,6 +924,7 @@ export function createApplicationRegistry({
     init,
     createApplication,
     createNodeApplication,
+    createPhpApplication,
     allocateNodePort,
     markDeploying,
     markDeployed,
