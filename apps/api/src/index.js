@@ -58,9 +58,12 @@ import { createMailSrsSecretRegistry } from './mail-srs-secret-registry.js';
 import { createMailboxForwardingRegistry } from './mailbox-forwarding-registry.js';
 import { createMailboxQuotaRegistry } from './mailbox-quota-registry.js';
 import { createMailboxRegistry } from './mailbox-registry.js';
+import { createPowerDnsAuthoritativeService } from './powerdns-authoritative-service.js';
+import { createPowerDnsSecretRegistry } from './powerdns-secret-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createRoundcubeConfigurationService } from './roundcube-configuration.js';
 import { createRoundcubeSecretRegistry } from './roundcube-secret-registry.js';
+import { createServerDnsIdentityRegistry } from './server-dns-identity-registry.js';
 import { createServerRegistry } from './server-registry.js';
 import { createTerminalCapabilityRegistry } from './terminal-capability-registry.js';
 import { createTerminalProcessManager } from './terminal-process-manager.js';
@@ -95,6 +98,10 @@ const websiteMigrationPolicyStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_P
 const websiteMigrationLedgerStorePath = process.env.YUNPANEL_WEBSITE_MIGRATION_LEDGER_STORE ?? path.resolve('.data/website-migration-ledger.json');
 const dnsHostingStorePath = process.env.YUNPANEL_DNS_HOSTING_STORE ?? path.resolve('.data/dns-hosting-registry.json');
 const dnsProviderCredentialStorePath = process.env.YUNPANEL_DNS_CREDENTIAL_STORE ?? path.resolve('.data/dns-provider-credential-registry.json');
+const serverDnsIdentityStorePath = process.env.YUNPANEL_SERVER_DNS_IDENTITY_STORE
+  ?? path.join(controlPlaneStateRoot, 'server-dns-identity-registry.json');
+const powerDnsSecretStorePath = process.env.YUNPANEL_POWERDNS_SECRET_STORE
+  ?? path.join(controlPlaneStateRoot, 'powerdns-secret-registry.json');
 const mailDomainStorePath = process.env.YUNPANEL_MAIL_DOMAIN_STORE ?? path.resolve('.data/mail-domain-registry.json');
 const mailDkimRootPath = process.env.YUNPANEL_MAIL_DKIM_ROOT ?? path.resolve('.data/mail-dkim');
 const mailDkimRetirementStorePath = process.env.YUNPANEL_MAIL_DKIM_RETIREMENT_STORE
@@ -220,6 +227,25 @@ const dnsProviderCredentialRegistry = createDnsProviderCredentialRegistry({
   getDnsZone: async (dnsZoneId) => dnsHostingRegistry.getZone(dnsZoneId),
 });
 await dnsProviderCredentialRegistry.init();
+const serverDnsIdentityRegistry = createServerDnsIdentityRegistry({
+  filePath: serverDnsIdentityStorePath,
+  serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+});
+await serverDnsIdentityRegistry.init();
+const powerDnsSecretRegistry = createPowerDnsSecretRegistry({
+  filePath: powerDnsSecretStorePath,
+  masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY,
+  serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+});
+await powerDnsSecretRegistry.init();
+const powerDnsAuthoritativeService = localServerId
+  ? createPowerDnsAuthoritativeService({
+    localServerId,
+    serverRegistry: registry,
+    dnsIdentityRegistry: serverDnsIdentityRegistry,
+    secretRegistry: powerDnsSecretRegistry,
+  })
+  : null;
 const mailServiceIdentityRegistry = createMailServiceIdentityRegistry({
   filePath: mailServiceIdentityStorePath,
   getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
@@ -405,6 +431,10 @@ const listener = createAuthenticatedApi({
       migrationLedger,
       dnsHostingRegistry,
       dnsProviderCredentialRegistry,
+      ...(powerDnsAuthoritativeService ? {
+        serverDnsIdentityRegistry,
+        powerDnsAuthoritativeService,
+      } : {}),
       mailDomainRegistry,
       mailDkimRegistry,
       mailDkimRetirementRegistry,
@@ -499,6 +529,8 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] website migration ledger store=${websiteMigrationLedgerStorePath}`);
   console.log(`[yunpanel-api] DNS hosting store=${dnsHostingStorePath}`);
   console.log(`[yunpanel-api] DNS credential store=${dnsProviderCredentialStorePath}`);
+  console.log(`[yunpanel-api] server DNS identity store=${serverDnsIdentityStorePath}`);
+  console.log(`[yunpanel-api] PowerDNS secret store=${powerDnsSecretStorePath}`);
   console.log(`[yunpanel-api] mail Domain store=${mailDomainStorePath}`);
   console.log(`[yunpanel-api] mail DKIM root=${mailDkimRootPath}`);
   console.log(`[yunpanel-api] mail DKIM retirement store=${mailDkimRetirementStorePath}`);
