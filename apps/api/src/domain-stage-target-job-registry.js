@@ -18,13 +18,16 @@ function assertDependencies(
   dockerComposeProjectRegistry,
   applicationRegistry,
   runtimeBindingRegistry,
+  websiteProvisioningRegistry,
 ) {
   if (!registry || typeof registry.enqueue !== 'function' || typeof registry.listJobs !== 'function'
     || !domainRegistry || typeof domainRegistry.getDomain !== 'function'
     || !websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
     || !dockerComposeProjectRegistry || typeof dockerComposeProjectRegistry.getProject !== 'function'
     || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
-    || !runtimeBindingRegistry || typeof runtimeBindingRegistry.getBinding !== 'function') {
+    || !runtimeBindingRegistry || typeof runtimeBindingRegistry.getBinding !== 'function'
+    || (websiteProvisioningRegistry !== null
+      && (!websiteProvisioningRegistry || typeof websiteProvisioningRegistry.getLatestForWebsite !== 'function'))) {
     throw new DomainStageTargetJobRegistryError(
       'domain_stage_target_dependencies_invalid',
       'Domain stage target job registry dependencies are invalid',
@@ -33,8 +36,8 @@ function assertDependencies(
 }
 
 function resolvedNginxSettings(domain, resolved, current) {
-  if (resolved.targetType !== 'passenger') return current;
-  return normalizeNginxSettings('passenger', {
+  if (!['passenger', 'php'].includes(resolved.targetType)) return current;
+  return normalizeNginxSettings(resolved.targetType, {
     clientMaxBodySizeMb: domain.nginxSettings?.clientMaxBodySizeMb ?? null,
     headers: domain.nginxSettings?.headers ?? [],
   });
@@ -59,6 +62,7 @@ export function createDomainStageTargetJobRegistry({
   dockerComposeProjectRegistry,
   applicationRegistry,
   runtimeBindingRegistry,
+  websiteProvisioningRegistry = null,
 } = {}) {
   assertDependencies(
     registry,
@@ -67,6 +71,7 @@ export function createDomainStageTargetJobRegistry({
     dockerComposeProjectRegistry,
     applicationRegistry,
     runtimeBindingRegistry,
+    websiteProvisioningRegistry,
   );
 
   async function enqueue(input) {
@@ -89,6 +94,7 @@ export function createDomainStageTargetJobRegistry({
       dockerComposeProjectRegistry,
       applicationRegistry,
       runtimeBindingRegistry,
+      websiteProvisioningRegistry,
     });
     return registry.enqueue({
       ...input,
