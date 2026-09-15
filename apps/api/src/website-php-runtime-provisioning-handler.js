@@ -1,5 +1,6 @@
 import { createPhpFpmSiteManager } from '@yunpanel/host-runtime';
 import { createPhpSiteContainerManager } from '@yunpanel/host-runtime/php-site-container-manager';
+import { createServiceUmaskManager } from '@yunpanel/host-runtime/service-umask-manager';
 
 export class WebsitePhpRuntimeProvisioningError extends Error {
   constructor(code, message, status = 503) {
@@ -48,10 +49,12 @@ function runtimeIntent(value) {
 export function createWebsitePhpRuntimeProvisioningHandler({
   containerManager = createPhpSiteContainerManager(),
   fpmManager = createPhpFpmSiteManager(),
+  umaskManager = createServiceUmaskManager(),
 } = {}) {
   if (!containerManager || typeof containerManager.apply !== 'function' || typeof containerManager.inspect !== 'function'
     || !fpmManager || typeof fpmManager.apply !== 'function' || typeof fpmManager.inspect !== 'function'
-    || typeof fpmManager.compensate !== 'function' || typeof fpmManager.inspectCompensation !== 'function') {
+    || typeof fpmManager.compensate !== 'function' || typeof fpmManager.inspectCompensation !== 'function'
+    || !umaskManager || typeof umaskManager.apply !== 'function' || typeof umaskManager.inspect !== 'function') {
     throw new WebsitePhpRuntimeProvisioningError(
       'website_php_runtime_dependencies_invalid',
       'Website PHP runtime provisioning dependencies are invalid',
@@ -67,11 +70,25 @@ export function createWebsitePhpRuntimeProvisioningHandler({
         'PHP runtime container lockdown did not return verified evidence',
       );
     }
-    const fpm = await fpmManager.apply(normalized, { operationId });
-    if (!fpm?.satisfied || fpm.adapter !== 'php-fpm') {
+    const initialFpm = await fpmManager.apply(normalized, { operationId });
+    if (!initialFpm?.satisfied || initialFpm.adapter !== 'php-fpm') {
       throw new WebsitePhpRuntimeProvisioningError(
         'website_php_fpm_unverified',
         'PHP-FPM provisioning did not return verified evidence',
+      );
+    }
+    const umask = await umaskManager.apply('php');
+    if (!umask?.satisfied || umask.umask !== '0027') {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_umask_unverified',
+        'PHP-FPM service UMask=0027 could not be verified',
+      );
+    }
+    const fpm = await fpmManager.inspect(normalized);
+    if (!fpm?.satisfied || fpm.adapter !== 'php-fpm') {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_fpm_restart_unverified',
+        'PHP-FPM Website pool did not recover after UMask policy activation',
       );
     }
     return Object.freeze({
@@ -80,6 +97,7 @@ export function createWebsitePhpRuntimeProvisioningHandler({
       containerOwner: container.containerOwner,
       releaseUid: container.releaseUid,
       releaseGid: container.releaseGid,
+      runtimeUmask: umask.umask,
     });
   }
 
@@ -93,6 +111,14 @@ export function createWebsitePhpRuntimeProvisioningHandler({
         containerReason: container?.reason ?? 'php_container_unavailable',
       });
     }
+    const umask = await umaskManager.inspect('php');
+    if (!umask?.satisfied) {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'php_runtime_umask_not_ready',
+        umaskReason: umask?.reason ?? 'service_umask_unavailable',
+      });
+    }
     const fpm = await fpmManager.inspect(normalized);
     if (!fpm?.satisfied) return fpm;
     return Object.freeze({
@@ -101,6 +127,7 @@ export function createWebsitePhpRuntimeProvisioningHandler({
       containerOwner: container.containerOwner,
       releaseUid: container.releaseUid,
       releaseGid: container.releaseGid,
+      runtimeUmask: umask.umask,
     });
   }
 
