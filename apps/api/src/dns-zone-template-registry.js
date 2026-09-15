@@ -19,8 +19,7 @@ const PLACEHOLDERS = Object.freeze([
 ]);
 const PLACEHOLDER_SET = new Set(PLACEHOLDERS);
 const DEFAULT_RECORDS = Object.freeze([
-  Object.freeze({ key: 'apex-ns1', owner: '@', type: 'NS', ttl: null, values: Object.freeze(['<ns1>']), condition: 'always' }),
-  Object.freeze({ key: 'apex-ns2', owner: '@', type: 'NS', ttl: null, values: Object.freeze(['<ns2>']), condition: 'always' }),
+  Object.freeze({ key: 'apex-nameservers', owner: '@', type: 'NS', ttl: null, values: Object.freeze(['<ns1>', '<ns2>']), condition: 'always' }),
   Object.freeze({ key: 'apex-ipv4', owner: '@', type: 'A', ttl: null, values: Object.freeze(['<server-ipv4>']), condition: 'always' }),
   Object.freeze({ key: 'apex-ipv6', owner: '@', type: 'AAAA', ttl: null, values: Object.freeze(['<server-ipv6>']), condition: 'ipv6' }),
   Object.freeze({ key: 'www-alias', owner: 'www', type: 'CNAME', ttl: null, values: Object.freeze(['<domain>']), condition: 'always' }),
