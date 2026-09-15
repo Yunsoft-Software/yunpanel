@@ -16,6 +16,7 @@
     "./powerdns-authoritative-ready-manager": "./src/powerdns-authoritative-ready-manager.js",
     "./powerdns-socket-health-inspector": "./src/powerdns-socket-health-inspector.js",
     "./powerdns-zone-manager": "./src/powerdns-zone-manager.js",
+    "./powerdns-manual-rrset-manager": "./src/powerdns-manual-rrset-manager.js",
     "./service-umask-manager": "./src/service-umask-manager.js",
     "./sftp-site-manager": "./src/sftp-site-manager.js",
     "./static-publish-isolation-manager": "./src/static-publish-isolation-manager.js",
