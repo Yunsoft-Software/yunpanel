@@ -5,7 +5,7 @@ import { createWebsitePassengerAuthorityProvisioningHandler } from './website-pa
 import { createWebsitePassengerEnvironmentProvisioningHandler } from './website-passenger-environment-provisioning-handler.js';
 import { createWebsitePassengerEnvironmentStateProvisioningHandler } from './website-passenger-environment-state-provisioning-handler.js';
 import { createWebsitePassengerHealthProvisioningHandler } from './website-passenger-health-provisioning-handler.js';
-import { createWebsiteProvisioningHandlers } from './website-provisioning-handlers.js';
+import { createWebsiteProvisioningHandlers } from './website-provisioning-handlers-isolation.js';
 import { createWebsiteProvisioningOrchestrator } from './website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from './website-provisioning-registry.js';
 
