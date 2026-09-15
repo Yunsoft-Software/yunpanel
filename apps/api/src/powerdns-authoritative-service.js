@@ -26,6 +26,18 @@ function publicHostState(value) {
   return Object.freeze(safe);
 }
 
+function hostFailure(error) {
+  if (error instanceof PowerDnsAuthoritativeServiceError) return error;
+  if (typeof error?.code === 'string' && error.code.startsWith('powerdns_')) {
+    return new PowerDnsAuthoritativeServiceError(
+      error.code,
+      typeof error.message === 'string' && error.message ? error.message : 'PowerDNS host operation failed',
+      503,
+    );
+  }
+  return error;
+}
+
 export function createPowerDnsAuthoritativeService({
   localServerId,
   serverRegistry,
@@ -126,7 +138,9 @@ export function createPowerDnsAuthoritativeService({
       });
     }
     const materialized = await secretRegistry.materializeForServer(serverId);
-    const host = await manager.inspect(intentFor(identity, materialized));
+    let host;
+    try { host = await manager.inspect(intentFor(identity, materialized)); }
+    catch (error) { throw hostFailure(error); }
     return Object.freeze({
       configured: true,
       ready: host?.satisfied === true,
@@ -158,7 +172,9 @@ export function createPowerDnsAuthoritativeService({
       || (plan.secretRevision === 0 && materialized.revision !== 1)) {
       throw new PowerDnsAuthoritativeServiceError('powerdns_secret_changed', 'PowerDNS API secret changed after preview', 409);
     }
-    const host = await manager.apply(intentFor(identity, materialized));
+    let host;
+    try { host = await manager.apply(intentFor(identity, materialized)); }
+    catch (error) { throw hostFailure(error); }
     return Object.freeze({
       applied: true,
       ready: host?.satisfied === true,
@@ -173,4 +189,4 @@ export function createPowerDnsAuthoritativeService({
   return Object.freeze({ preview, status, apply });
 }
 
-export const powerDnsAuthoritativeServiceInternals = Object.freeze({ digest, publicHostState });
+export const powerDnsAuthoritativeServiceInternals = Object.freeze({ digest, publicHostState, hostFailure });
