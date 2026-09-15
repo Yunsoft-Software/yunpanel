@@ -464,8 +464,8 @@ export function createPhpSiteBootstrapManager({
     }
     await rmFn(spec.currentRelease, { force: true });
     await rmFn(spec.releaseDirectory, { recursive: true, force: true });
-    await rmFn(spec.releasesDirectory, { recursive: false, force: true });
-    await rmFn(spec.applicationRoot, { recursive: false, force: true });
+    await rmFn(spec.releasesDirectory, { recursive: true, force: true });
+    await rmFn(spec.applicationRoot, { recursive: true, force: true });
     receipt = await persistReceipt(spec, 'compensated');
     const after = await inspectCompensation(rawIntent, { operationId });
     if (!after.satisfied) {
