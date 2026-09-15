@@ -3,6 +3,7 @@ const TARGET_FIELDS = Object.freeze({
   proxy: new Set([...COMMON_FIELDS, 'proxyTimeoutSeconds', 'websocket']),
   static: new Set([...COMMON_FIELDS, 'spaFallback', 'staticAssetCacheSeconds']),
   passenger: new Set([...COMMON_FIELDS]),
+  php: new Set([...COMMON_FIELDS]),
 });
 const BLOCKED_HEADERS = new Set([
   'cache-control',
@@ -83,18 +84,18 @@ function defaults(targetType) {
       headers: Object.freeze([]),
     };
   }
-  if (targetType === 'passenger') {
+  if (targetType === 'passenger' || targetType === 'php') {
     return {
       clientMaxBodySizeMb: null,
       headers: Object.freeze([]),
     };
   }
-  throw new NginxSettingsValidationError('invalid_nginx_target_type', 'Nginx settings require a static, proxy or passenger target');
+  throw new NginxSettingsValidationError('invalid_nginx_target_type', 'Nginx settings require a static, proxy, passenger or php target');
 }
 
 export function normalizeNginxSettings(targetType, value = {}, base = null) {
   const allowed = TARGET_FIELDS[targetType];
-  if (!allowed) throw new NginxSettingsValidationError('invalid_nginx_target_type', 'Nginx settings require a static, proxy or passenger target');
+  if (!allowed) throw new NginxSettingsValidationError('invalid_nginx_target_type', 'Nginx settings require a static, proxy, passenger or php target');
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).some((field) => !allowed.has(field))) {
     throw new NginxSettingsValidationError('invalid_nginx_settings', 'Nginx settings contain unsupported fields');
