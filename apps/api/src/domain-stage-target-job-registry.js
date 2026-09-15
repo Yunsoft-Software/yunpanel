@@ -1,3 +1,4 @@
+import { createPhpFpmSiteManager } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { normalizeNginxSettings } from '@yunpanel/shared';
 import { DomainRegistryError } from './domain-registry.js';
@@ -18,7 +19,7 @@ function assertDependencies(
   dockerComposeProjectRegistry,
   applicationRegistry,
   runtimeBindingRegistry,
-  websiteProvisioningRegistry,
+  phpFpmSiteManager,
 ) {
   if (!registry || typeof registry.enqueue !== 'function' || typeof registry.listJobs !== 'function'
     || !domainRegistry || typeof domainRegistry.getDomain !== 'function'
@@ -26,8 +27,7 @@ function assertDependencies(
     || !dockerComposeProjectRegistry || typeof dockerComposeProjectRegistry.getProject !== 'function'
     || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
     || !runtimeBindingRegistry || typeof runtimeBindingRegistry.getBinding !== 'function'
-    || (websiteProvisioningRegistry !== null
-      && (!websiteProvisioningRegistry || typeof websiteProvisioningRegistry.getLatestForWebsite !== 'function'))) {
+    || !phpFpmSiteManager || typeof phpFpmSiteManager.inspect !== 'function') {
     throw new DomainStageTargetJobRegistryError(
       'domain_stage_target_dependencies_invalid',
       'Domain stage target job registry dependencies are invalid',
@@ -62,7 +62,7 @@ export function createDomainStageTargetJobRegistry({
   dockerComposeProjectRegistry,
   applicationRegistry,
   runtimeBindingRegistry,
-  websiteProvisioningRegistry = null,
+  phpFpmSiteManager = createPhpFpmSiteManager(),
 } = {}) {
   assertDependencies(
     registry,
@@ -71,7 +71,7 @@ export function createDomainStageTargetJobRegistry({
     dockerComposeProjectRegistry,
     applicationRegistry,
     runtimeBindingRegistry,
-    websiteProvisioningRegistry,
+    phpFpmSiteManager,
   );
 
   async function enqueue(input) {
@@ -94,7 +94,7 @@ export function createDomainStageTargetJobRegistry({
       dockerComposeProjectRegistry,
       applicationRegistry,
       runtimeBindingRegistry,
-      websiteProvisioningRegistry,
+      phpFpmSiteManager,
     });
     return registry.enqueue({
       ...input,
