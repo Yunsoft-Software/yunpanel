@@ -13,6 +13,7 @@
     "./php-site-container-manager": "./src/php-site-container-manager.js",
     "./service-umask-manager": "./src/service-umask-manager.js",
     "./sftp-site-manager": "./src/sftp-site-manager.js",
+    "./static-publish-isolation-manager": "./src/static-publish-isolation-manager.js",
     "./static-deployment-manager": "./src/static-deployment-manager.js",
     "./static-rollback-manager": "./src/static-rollback-manager.js",
     "./website-http-health-inspector": "./src/website-http-health-inspector.js",
