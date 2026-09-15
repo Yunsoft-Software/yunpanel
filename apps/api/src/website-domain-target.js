@@ -90,6 +90,7 @@ async function resolvePhpRuntimeTarget({
   website,
   applicationRegistry,
   phpFpmSiteManager,
+  serviceUmaskManager,
 }) {
   if (website.runtimeType !== 'php') return null;
   if (!website.applicationId || !website.unixUser || !website.documentRoot) {
@@ -111,6 +112,12 @@ async function resolvePhpRuntimeTarget({
     'php_runtime_inspector_unavailable',
     'PHP-FPM runtime inspector is required to resolve PHP traffic authority',
   );
+  requireDependency(
+    serviceUmaskManager,
+    'inspect',
+    'php_umask_inspector_unavailable',
+    'Managed service umask inspector is required to resolve PHP traffic authority',
+  );
 
   const application = await applicationRegistry.getApplication(website.applicationId);
   if (!application || application.type !== 'php') {
@@ -130,6 +137,14 @@ async function resolvePhpRuntimeTarget({
     throw new DomainRegistryError(
       'php_runtime_binding_required',
       `PHP Domain target cannot be staged until the managed PHP-FPM runtime is healthy${runtime?.reason ? ` (${runtime.reason})` : ''}`,
+      409,
+    );
+  }
+  const umask = await serviceUmaskManager.inspect('php');
+  if (!umask || umask.satisfied !== true || umask.umask !== '0027') {
+    throw new DomainRegistryError(
+      'php_runtime_binding_required',
+      `PHP Domain target cannot be staged until the PHP-FPM UMask=0027 policy is healthy${umask?.reason ? ` (${umask.reason})` : ''}`,
       409,
     );
   }
@@ -156,6 +171,7 @@ export async function resolveWebsiteDomainTarget({
   applicationRegistry = null,
   runtimeBindingRegistry = null,
   phpFpmSiteManager = null,
+  serviceUmaskManager = null,
 } = {}) {
   if (!domain || typeof domain !== 'object' || Array.isArray(domain)) {
     throw new DomainRegistryError('invalid_domain_target_state', 'Domain target state is invalid', 409);
@@ -204,6 +220,7 @@ export async function resolveWebsiteDomainTarget({
       website,
       applicationRegistry,
       phpFpmSiteManager,
+      serviceUmaskManager,
     });
     if (phpTarget) return phpTarget;
     if (domain.targetType === 'passenger') {
