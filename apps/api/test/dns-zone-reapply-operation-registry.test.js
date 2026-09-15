@@ -1,0 +1,115 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  createDnsZoneReapplyOperationRegistry,
+  dnsZoneReapplyOperationPublicView,
+  DnsZoneReapplyOperationRegistryError,
+} from '../src/dns-zone-reapply-operation-registry.js';
+
+const operationId = 'f77d9d70-3f77-4be9-b257-0ade06401fb7';
+const domainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';
+const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
+const previewDigest = 'a'.repeat(64);
+
+function preview() {
+  return Object.freeze({
+    applyAllowed: true,
+    noChanges: false,
+    domainId,
+    serverId,
+    domainRevision: 3,
+    zoneName: 'example.com',
+    templateVersion: 4,
+    dnsIdentityRevision: 2,
+    observedSerial: 2026091501,
+    nextSerial: 2026091601,
+    previewDigest,
+    confirmation: `reapply-dns-zone-template:${domainId}:${previewDigest}`,
+  });
+}
+
+function registry() {
+  return createDnsZoneReapplyOperationRegistry({
+    now: () => Date.parse('2026-09-16T00:00:00.000Z'),
+    idFactory: () => operationId,
+  });
+}
+
+test('DNS zone reapply journal deduplicates an identical active preview and hides confirmation publicly', async () => {
+  const store = registry();
+  await store.init();
+  const first = await store.create(preview());
+  const second = await store.create(preview());
+
+  assert.equal(first.id, operationId);
+  assert.equal(second.id, operationId);
+  assert.equal((await store.listForDomain(domainId)).length, 1);
+  const publicView = dnsZoneReapplyOperationPublicView(first);
+  assert.equal(publicView.status, 'pending');
+  assert.equal(publicView.targetSerial, 2026091601);
+  assert.equal(Object.hasOwn(publicView, 'confirmation'), false);
+  assert.equal(JSON.stringify(publicView).includes('reapply-dns-zone-template:'), false);
+});
+
+test('DNS zone reapply journal persists applying and succeeded evidence transitions', async () => {
+  const store = registry();
+  await store.init();
+  const created = await store.create(preview());
+  const applying = await store.markApplying(created.id);
+
+  assert.equal(applying.status, 'applying');
+  assert.deepEqual((await store.listInterrupted()).map((entry) => entry.id), [created.id]);
+
+  const succeeded = await store.succeed(created.id, {
+    satisfied: true,
+    zoneName: 'example.com',
+    serial: 2026091601,
+    changedRrsetCount: 3,
+    manualRrsetCount: 1,
+  });
+  assert.equal(succeeded.status, 'succeeded');
+  assert.equal(succeeded.result.serial, 2026091601);
+  assert.deepEqual(await store.listInterrupted(), []);
+});
+
+test('DNS zone reapply journal keeps only sanitized failure evidence', async () => {
+  const store = registry();
+  await store.init();
+  const created = await store.create(preview());
+  await store.markApplying(created.id);
+  const failed = await store.fail(created.id, {
+    code: 'powerdns_zone_api_failed',
+    message: 'PowerDNS zone API request failed with status 503',
+  });
+
+  assert.equal(failed.status, 'failed');
+  assert.deepEqual(failed.error, {
+    code: 'powerdns_zone_api_failed',
+    message: 'PowerDNS zone API request failed with status 503',
+  });
+  assert.equal(failed.result, null);
+});
+
+test('DNS zone reapply journal rejects blocked previews and invalid terminal evidence', async () => {
+  const store = registry();
+  await store.init();
+  await assert.rejects(
+    store.create({ ...preview(), applyAllowed: false, confirmation: null }),
+    (error) => error instanceof DnsZoneReapplyOperationRegistryError
+      && error.code === 'dns_zone_reapply_operation_preview_invalid',
+  );
+
+  const created = await store.create(preview());
+  await store.markApplying(created.id);
+  await assert.rejects(
+    store.succeed(created.id, {
+      satisfied: true,
+      zoneName: 'example.com',
+      serial: 0,
+      changedRrsetCount: 1,
+      manualRrsetCount: 0,
+    }),
+    (error) => error instanceof DnsZoneReapplyOperationRegistryError
+      && error.code === 'dns_zone_reapply_operation_state_invalid',
+  );
+});
