@@ -53,7 +53,8 @@ function nextSerial(current, now = Date.now) {
 }
 
 function rootDomain(domain, localServerId) {
-  if (!domain || typeof domain !== 'object' || typeof domain.id !== 'string'
+  if (!domain) throw new DnsZoneReapplyError('domain_not_found', 'Domain not found', 404);
+  if (typeof domain !== 'object' || typeof domain.id !== 'string'
     || typeof domain.serverId !== 'string' || typeof domain.primaryDomain !== 'string'
     || !Array.isArray(domain.aliases)) {
     throw new DnsZoneReapplyError('dns_zone_reapply_domain_invalid', 'Domain state is invalid', 409);
@@ -79,13 +80,14 @@ function recordsForDomain(domain, desired) {
 }
 
 function publicRrset(rrset) {
+  const managed = rrset.managed ?? powerDnsZoneManagerInternals.parseManagedComment(rrset.comments);
   return Object.freeze({
     owner: String(rrset.name ?? '').replace(/\.$/, ''),
     type: rrset.type,
     ttl: rrset.ttl,
-    source: rrset.managed?.source ?? 'manual',
-    key: rrset.managed?.key ?? null,
-    templateVersion: rrset.managed?.templateVersion ?? null,
+    source: managed?.source ?? 'manual',
+    key: managed?.key ?? null,
+    templateVersion: managed?.templateVersion ?? null,
   });
 }
 
@@ -231,7 +233,6 @@ export function createDnsZoneReapplyService({
         'PowerDNS credentials are unavailable',
       ),
     ]);
-    if (!domain) throw new DnsZoneReapplyError('domain_not_found', 'Domain not found', 404);
     if (!identity) throw new DnsZoneReapplyError('dns_zone_reapply_identity_required', 'Server DNS identity is not configured', 409);
 
     const existing = await mapped(
