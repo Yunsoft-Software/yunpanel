@@ -11,30 +11,9 @@ const unixUser = 'yunapp-4dc352e64a14';
 const root = `/var/lib/yunpanel/apps/${applicationId}/current/public`;
 const socketPath = `/run/php/yunpanel-${unixUser}.sock`;
 
-function operation({ runtimeState = 'succeeded', routeState = 'succeeded' } = {}) {
-  return {
-    websiteId,
-    steps: [
-      {
-        id: 'php_bootstrap',
-        state: 'succeeded',
-        evidence: { satisfied: true, adapter: 'php-bootstrap', websiteId, applicationId, unixUser, documentRoot: root },
-      },
-      {
-        id: 'php_runtime',
-        state: runtimeState,
-        evidence: runtimeState === 'succeeded'
-          ? { satisfied: true, adapter: 'php-fpm', websiteId, applicationId, unixUser, documentRoot: root, socketPath }
-          : null,
-      },
-      { id: 'nginx', state: routeState, evidence: routeState === 'succeeded' ? { satisfied: true } : null },
-      { id: 'domain_activation', state: routeState, evidence: routeState === 'succeeded' ? { satisfied: true } : null },
-    ],
-  };
-}
-
-function fixture({ latest = operation() } = {}) {
+function fixture({ runtime = null } = {}) {
   const calls = [];
+  const inspectCalls = [];
   const domain = {
     id: 'domain-php-1',
     serverId,
@@ -65,6 +44,15 @@ function fixture({ latest = operation() } = {}) {
     type: 'php',
     webRoot: root,
   };
+  const healthyRuntime = {
+    satisfied: true,
+    adapter: 'php-fpm',
+    websiteId,
+    applicationId,
+    unixUser,
+    documentRoot: root,
+    socketPath,
+  };
   const registry = {
     async enqueue(value) { calls.push(value); return { id: 'job-php-1', ...value }; },
     async listJobs() { return []; },
@@ -76,9 +64,14 @@ function fixture({ latest = operation() } = {}) {
     dockerComposeProjectRegistry: { async getProject() { return null; } },
     applicationRegistry: { async getApplication(id) { return id === application.id ? application : null; } },
     runtimeBindingRegistry: { async getBinding() { return null; } },
-    websiteProvisioningRegistry: { async getLatestForWebsite(id) { return id === website.id ? latest : null; } },
+    phpFpmSiteManager: {
+      async inspect(value) {
+        inspectCalls.push(value);
+        return runtime ?? healthyRuntime;
+      },
+    },
   });
-  return { calls, decorated, domain };
+  return { calls, inspectCalls, decorated, domain };
 }
 
 function input() {
@@ -100,25 +93,42 @@ function input() {
   };
 }
 
-test('PHP Domain restage replaces logical Application target with proven FPM socket and root', async () => {
+test('PHP Domain restage replaces logical Application target with live FPM socket and root', async () => {
   const fx = fixture();
   const request = input();
   await fx.decorated.enqueue(request);
 
   assert.equal(fx.calls.length, 1);
+  assert.equal(fx.inspectCalls.length, 1);
+  assert.deepEqual(fx.inspectCalls[0], { websiteId, applicationId, unixUser, documentRoot: root });
   assert.equal(fx.calls[0].payload.targetType, 'php');
   assert.deepEqual(fx.calls[0].payload.target, { root, socketPath });
   assert.deepEqual(fx.calls[0].payload.nginxSettings, request.payload.nginxSettings);
   assert.deepEqual(request, input());
 });
 
-test('PHP Domain restage fails closed until initial PHP runtime and route evidence are active', async () => {
-  for (const latest of [null, operation({ runtimeState: 'failed' }), operation({ routeState: 'pending' })]) {
-    const fx = fixture({ latest });
+test('PHP Domain restage fails closed while managed PHP-FPM runtime is not healthy', async () => {
+  const fx = fixture({ runtime: { satisfied: false, reason: 'php_fpm_socket_missing', adapter: 'php-fpm' } });
+  await assert.rejects(
+    fx.decorated.enqueue(input()),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'php_runtime_binding_required'
+      && error.status === 409,
+  );
+  assert.equal(fx.calls.length, 0);
+});
+
+test('PHP Domain restage rejects runtime identity or socket drift before enqueue', async () => {
+  for (const runtime of [
+    { satisfied: true, adapter: 'php-fpm', websiteId, applicationId, unixUser, documentRoot: '/tmp/wrong', socketPath },
+    { satisfied: true, adapter: 'php-fpm', websiteId, applicationId, unixUser, documentRoot: root, socketPath: '/tmp/php.sock' },
+    { satisfied: true, adapter: 'php-fpm', websiteId, applicationId, unixUser: 'yunapp-aaaaaaaaaaaa', documentRoot: root, socketPath },
+  ]) {
+    const fx = fixture({ runtime });
     await assert.rejects(
       fx.decorated.enqueue(input()),
       (error) => error instanceof DomainRegistryError
-        && error.code === 'php_runtime_binding_required'
+        && error.code === 'php_runtime_binding_drift'
         && error.status === 409,
     );
     assert.equal(fx.calls.length, 0);
