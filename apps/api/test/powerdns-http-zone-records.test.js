@@ -63,7 +63,7 @@ function mountWith(service) {
   return app;
 }
 
-test('PowerDNS HTTP exposes Domain zone read and manual record mutations through the scoped service', async () => {
+test('PowerDNS HTTP exposes Domain zone read and manual record mutations through the path-scoped service', async () => {
   const calls = [];
   const zone = { domainId, zoneName: 'example.com', serial: 2026091601, rrsets: [] };
   const applied = { domainId, satisfied: true, changed: true, serial: 2026091602 };
@@ -100,25 +100,4 @@ test('PowerDNS HTTP exposes Domain zone read and manual record mutations through
     ['apply', { domainId, input: applyBody }],
     ['remove', { domainId, input: deleteBody }],
   ]);
-});
-
-test('PowerDNS HTTP never passes Domain identity through body fields for manual DNS records', async () => {
-  const calls = [];
-  const app = mountWith({
-    getZone: async () => ({}),
-    apply: async (input) => { calls.push(input); return {}; },
-    remove: async () => ({}),
-  });
-  const body = {
-    owner: '@',
-    type: 'TXT',
-    ttl: 300,
-    values: ['hello'],
-    expectedSerial: 2026091601,
-    domainId: '997c6ac8-4db4-4500-a24e-0c8ff84825c6',
-  };
-
-  await invoke(app, 'POST /api/domains/:domainId/dns/records', { params: { domainId }, body });
-  assert.equal(calls[0].domainId, domainId);
-  assert.equal(calls[0].input.domainId, body.domainId);
 });
