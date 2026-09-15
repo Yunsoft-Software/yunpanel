@@ -54,7 +54,10 @@ Bu bölüm yalnız güncel P0 provisioning/Passenger turundan kalan gerçek Ubun
 
 ## T-DNS — P0 PowerDNS ve nameserver
 
-- [ ] PowerDNS Authoritative real Ubuntu package, SQL backend, API'nin loopback-only oluşu, secret izinleri, service restart/upgrade ve health endpoint'i doğrulansın.
+- [ ] Fresh Ubuntu 24.04'te source manager'ın kurduğu `pdns-server` + `pdns-backend-sqlite3` + `sqlite3` paketleri, gsqlite3 schema/database izinleri, `root:pdns 0640` managed config, `pdns_server --config=check`, `pdns.service` restart/upgrade ve loopback API health doğrulansın.
+- [ ] Encrypted API-key store/restart/rotation provasında raw key browser/API/audit/job/log/process argv/config içinde görünmesin; `pdns.conf` yalnız `pdnsutil hash-password` çıktısını tutsun.
+- [ ] Local readiness gerçek hostta hem UDP/53 hem TCP/53 loopback probe'u geçsin; dış bir resolver/hosttan public UDP ve TCP 53 erişimi ayrıca doğrulansın ve firewall/NAT engeli local health'i public-ready yapmasın.
+- [ ] Recursive probe gerçek PowerDNS'te RA=false ve REFUSED ile dönsün; `pdns-recursor` kurulu fixture apply'i fail-closed bloklasın ve YunPanel mevcut recursor'ı sessizce kaldırmasın/değiştirmesin.
 - [ ] Zone/RRset create-update-delete/no-op; SOA serial, NS, A/AAAA/CNAME/MX/TXT/CAA/SRV, TTL, wildcard, IDN ve DNSSEC API üzerinden gerçek authoritative cevapla doğrulansın.
 - [ ] New Website local-DNS provisioning'i apex/www/mail/webmail kayıtlarını seçilen policy'ye göre oluştursun; external-DNS Website'e örtülü PowerDNS zone eklemesin.
 - [ ] En az iki bağımsız authoritative endpoint veya onaylı secondary DNS ile delegation/transfer/failover testi yap. Tek host iki NS adıyla healthy gösterilmesin; glue/parent delegation eksikliği actionable kalsın.
