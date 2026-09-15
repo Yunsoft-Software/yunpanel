@@ -13,7 +13,7 @@ import { DomainHierarchyError, validateDomainHierarchy, validateDomainParent } f
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
 const STORE_VERSION = 3;
-const TARGET_TYPES = new Set(['static', 'proxy', 'passenger']);
+const TARGET_TYPES = new Set(['static', 'proxy', 'passenger', 'php']);
 const HTTPS_MODES = new Set(['off', 'managed']);
 const UPDATE_FIELDS = new Set(['primaryDomain', 'aliases', 'httpsMode', 'httpsRedirect', 'canonicalRedirect', 'nginxSettings']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -105,7 +105,7 @@ function publicDomain(domain) {
 }
 
 function validateTarget(targetType, target) {
-  if (!TARGET_TYPES.has(targetType)) throw new DomainRegistryError('invalid_target_type', 'targetType must be static, proxy or passenger');
+  if (!TARGET_TYPES.has(targetType)) throw new DomainRegistryError('invalid_target_type', 'targetType must be static, proxy, passenger or php');
   if (!target || typeof target !== 'object' || Array.isArray(target)) throw new DomainRegistryError('invalid_target', 'target must be an object');
   if (targetType === 'static') {
     if (typeof target.root !== 'string' || target.root.length < 2 || target.root.length > 500 || /[\u0000-\u001f\u007f]/.test(target.root)) {
@@ -113,12 +113,12 @@ function validateTarget(targetType, target) {
     }
     return { root: target.root, spaFallback: target.spaFallback !== false };
   }
-  if (targetType === 'passenger') {
+  if (targetType === 'passenger' || targetType === 'php') {
     if (Object.keys(target).length !== 1 || !Object.hasOwn(target, 'applicationId')) {
-      throw new DomainRegistryError('invalid_passenger_target', 'Passenger Domain target must contain only applicationId');
+      throw new DomainRegistryError(`invalid_${targetType}_target`, `${targetType === 'php' ? 'PHP' : 'Passenger'} Domain target must contain only applicationId`);
     }
     try { return { applicationId: assertUuid(target.applicationId, 'applicationId') }; }
-    catch { throw new DomainRegistryError('invalid_passenger_target', 'Passenger Domain target Application identity is invalid'); }
+    catch { throw new DomainRegistryError(`invalid_${targetType}_target`, `${targetType === 'php' ? 'PHP' : 'Passenger'} Domain target Application identity is invalid`); }
   }
   if (!Number.isInteger(target.upstreamPort) || target.upstreamPort < 1024 || target.upstreamPort > 65535) {
     throw new DomainRegistryError('invalid_upstream_port', 'Proxy upstreamPort must be between 1024 and 65535');
@@ -544,8 +544,8 @@ export function createDomainRegistry({
     if (conflict) throw new DomainRegistryError('domain_conflict', 'A domain or alias is already managed', 409);
 
     const normalizedTarget = validateTarget(targetType, target);
-    if (targetType === 'passenger' && normalizedWebsiteId === null) {
-      throw new DomainRegistryError('passenger_website_binding_required', 'Passenger Domain targets require an explicit Website binding', 409);
+    if (['passenger', 'php'].includes(targetType) && normalizedWebsiteId === null) {
+      throw new DomainRegistryError(`${targetType}_website_binding_required`, `${targetType === 'php' ? 'PHP' : 'Passenger'} Domain targets require an explicit Website binding`, 409);
     }
     const normalizedNginxSettings = settings(
       targetType,
