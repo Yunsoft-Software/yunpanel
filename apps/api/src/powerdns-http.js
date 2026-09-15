@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { createDnsDelegationInspector, DnsDelegationInspectorError } from './dns-delegation-inspector.js';
 import { createDnsZoneTemplateRegistry, DnsZoneTemplateRegistryError } from './dns-zone-template-registry.js';
 import { createDnsZoneTemplateRollbackService } from './dns-zone-template-rollback.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -142,9 +143,20 @@ async function templateOperation(operation) {
   }
 }
 
+async function delegationOperation(operation) {
+  try { return await operation(); }
+  catch (error) {
+    if (error instanceof DnsDelegationInspectorError) {
+      throw new PowerDnsHttpError(error.code, error.message, error.status);
+    }
+    throw error;
+  }
+}
+
 export function mountPowerDnsRoutes(app, {
   dnsIdentityRegistry,
   dnsZoneTemplateRegistry = null,
+  dnsDelegationInspector = null,
   authoritativeService,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') {
@@ -166,11 +178,24 @@ export function mountPowerDnsRoutes(app, {
     throw new Error('DNS zone template registry is required');
   }
   const rollbackService = createDnsZoneTemplateRollbackService({ registry: templateRegistry });
+  const delegationInspector = dnsDelegationInspector ?? createDnsDelegationInspector({ dnsIdentityRegistry });
+  if (typeof delegationInspector.inspect !== 'function') {
+    throw new Error('DNS delegation inspector is required');
+  }
 
   app.get('/api/servers/:serverId/dns/identity', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);
     const identity = await dnsIdentityRegistry.getForServer(serverId);
     return response.json({ data: identity });
+  }));
+
+  app.get('/api/servers/:serverId/dns/delegation', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const serverId = localServerId(authoritativeService, request.params.serverId);
+    const inspection = await delegationOperation(() => delegationInspector.inspect({
+      serverId,
+      domain: request.query?.domain,
+    }));
+    return response.json({ data: inspection });
   }));
 
   app.post('/api/servers/:serverId/dns/identity/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -297,4 +322,5 @@ export const powerDnsHttpInternals = Object.freeze({
   zoneTemplateStorePath,
   defaultZoneTemplateRegistry,
   templateOperation,
+  delegationOperation,
 });
