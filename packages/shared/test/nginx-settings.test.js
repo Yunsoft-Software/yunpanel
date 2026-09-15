@@ -28,12 +28,18 @@ test('normalizes bounded target-specific Nginx settings and partial updates', ()
     staticAssetCacheSeconds: 604800,
     headers: [],
   });
+  assert.deepEqual(normalizeNginxSettings('php', {}), {
+    clientMaxBodySizeMb: null,
+    headers: [],
+  });
 });
 
 test('rejects cross-target, injection-capable and protocol-owned header settings', () => {
   for (const [targetType, value] of [
     ['static', { websocket: true }],
     ['proxy', { spaFallback: true }],
+    ['php', { websocket: true }],
+    ['php', { spaFallback: true }],
     ['proxy', { proxyTimeoutSeconds: 0 }],
     ['static', { staticAssetCacheSeconds: 31_536_001 }],
     ['proxy', { headers: [{ name: 'X-Test', value: 'safe\ninclude /etc/nginx', always: true }] }],
