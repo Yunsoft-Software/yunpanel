@@ -149,6 +149,12 @@ function passengerBody({ target, nginxSettings }) {
   return `${directives}${renderedHeaders ? `\n${renderedHeaders}` : ''}`;
 }
 
+function phpBody({ root, socketPath, nginxSettings }) {
+  const renderedHeaders = headerLines(nginxSettings.headers);
+  const phpHeaders = headerLines(nginxSettings.headers);
+  return `  root ${root};\n  index index.php index.html;\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    try_files $uri $uri/ /index.php?$query_string;\n  }\n\n  location ~ \\.php$ {${phpHeaders ? `\n${phpHeaders}` : ''}\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param DOCUMENT_ROOT $document_root;\n    fastcgi_param HTTPS $https if_not_empty;\n    fastcgi_pass unix:${socketPath};\n  }\n\n  location ~ /\\.(?!well-known/) {\n    deny all;\n  }`;
+}
+
 export function renderStaticSiteConfig({
   primaryDomain,
   aliases = [],
@@ -204,6 +210,30 @@ export function renderPassengerSiteConfig({
   const normalizedTls = normalizeTls(tls);
   const settings = normalizeNginxSettings('passenger', nginxSettings ?? {});
   const body = passengerBody({ target, nginxSettings: settings });
+  return renderServerSet({
+    primaryDomain, aliases, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+  });
+}
+
+export function renderPhpSiteConfig({
+  primaryDomain,
+  aliases = [],
+  root,
+  socketPath,
+  acmeRoot = '/var/lib/yunpanel/acme',
+  tls = null,
+  canonicalRedirect = false,
+  httpsRedirect = true,
+  nginxSettings = undefined,
+}) {
+  const safeRoot = assertSafeAbsolutePath(root, 'root');
+  const safeSocket = assertSafeAbsolutePath(socketPath, 'socketPath');
+  if (!safeSocket.startsWith('/run/php/yunpanel-yunapp-') || !safeSocket.endsWith('.sock')) {
+    throw new NginxTemplateError('invalid_php_socket', 'PHP upstream must use a managed YunPanel Website socket');
+  }
+  const normalizedTls = normalizeTls(tls);
+  const settings = normalizeNginxSettings('php', nginxSettings ?? {});
+  const body = phpBody({ root: safeRoot, socketPath: safeSocket, nginxSettings: settings });
   return renderServerSet({
     primaryDomain, aliases, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
   });
