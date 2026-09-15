@@ -90,27 +90,33 @@ Aşağıdaki isolation parçaları production provisioning path'ine bağlandı; 
 - [x] DNS identity update exact confirmation/revision kontrolü kullanıyor.
 - [x] Aynı host/IP üstündeki ns1/ns2 gerçek redundancy gibi gösterilmiyor; warning state üretiliyor.
 - [x] External secondary seçilip transfer target eksik bırakılırsa warning üretiliyor.
+- [x] PowerDNS host manager source path'i eklendi: `pdns-server` + `pdns-backend-sqlite3` + `sqlite3` install/inspect, vendor include-dir doğrulaması, gsqlite3 schema initialization, protected config/database ve `pdns.service` lifecycle.
+- [x] PowerDNS managed config ve SQLite DB path'leri symlink/non-regular file drift'inde mutation öncesi fail-closed korunuyor.
+- [x] API key `YUNPANEL_SECRET_MASTER_KEY` altında AES-256-GCM encrypted durable store'da tutuluyor; public state yalnız configured/revision bilgisi veriyor.
+- [x] `pdnsutil hash-password` ile config'e yalnız hashed API key yazılıyor; raw key yalnız loopback API çağrısında kısa süreli materialize ediliyor.
+- [x] PowerDNS API `127.0.0.1:8081` ile loopback-only; `pdns_server --config=check` geçmeden service activation/restart yapılmıyor.
+- [x] `pdns-recursor` installed ise authoritative apply fail-closed; YunPanel recursor kurmuyor/açmıyor.
+- [x] Local readiness API health + UDP/53 + TCP/53 + recursion-denied probe ile health-gated; açık recursive resolver davranışı `ready` olamıyor.
+- [x] Secondary DNS source policy explicit IP allowlist kullanıyor; AXFR allowlist/notify yalnız configured secondary adreslerine açılıyor.
+- [x] DNS identity ve authoritative lifecycle authenticated HTTP/API'ye ve production bootstrap'a bağlandı; local-server scope dışı legacy/remote server ID fail-closed.
+- [x] Read Only yalnız DNS identity/authoritative GET status yüzeylerini görebiliyor; preview/apply mutation Owner-management altında kalıyor.
 
 ### Kalan kod işleri
 
-- [ ] PowerDNS Authoritative host manager: `pdns-server` + SQL backend install/inspect/upgrade/config/rollback/health.
-- [ ] SQLite/gsqlite3 backend için root/pdns protected database/config lifecycle oluştur; schema initialization idempotent olsun.
-- [ ] PowerDNS API key'i `YUNPANEL_SECRET_MASTER_KEY` ile encrypted store'da tut; browser/public API/audit/job/log içinde raw key dönme.
-- [ ] PowerDNS HTTP API yalnız loopback'te dinlesin; `pdns_server --config=check` geçmeden service reload/restart etme.
-- [ ] Recursor kurma/açma; authoritative service public recursive resolver davranışı göstermesin.
-- [ ] UDP 53 + TCP 53 local health ve public reachability ayrımı ekle.
-- [ ] DNS identity registry'yi Settings > Network/DNS HTTP/API ve React UI'ına bağla. Server FQDN kaynağı mevcut local server registry/OS hostname contract'ı ile tutarlı kalsın; ikinci bağımsız hostname authority yaratma.
+- [ ] Settings > Network/DNS React UI'ını yeni DNS identity/authoritative API'sine bağla. Server FQDN kaynağı mevcut local server registry/OS hostname contract'ı ile tutarlı kalsın; ikinci bağımsız hostname authority yaratma.
 - [ ] Parent zone/glue/delegation inspector ekle. Registrar kontrolü mümkün değilse exact ns1/ns2 hostname/IP talimatı ve `pending_glue` / `pending_delegation` state göster.
+- [ ] Public UDP/TCP 53 reachability ile local socket health'i ayrı state olarak modelle; public probe yapılamıyorsa local health'i public-ready diye gösterme.
 - [ ] Authoritative NS setini local zone provisioning ve Zone Template'in tek kaynağı yap; adapter kendi NS değerini uydurmasın.
-- [ ] Secondary DNS transfer/notify policy'sini explicit allowlist ile ekle; tek host iki NS adıyla `redundant=true` gösterme.
+- [ ] Secondary DNS transfer/notify policy'sini zone lifecycle ve gerçek AXFR/NOTIFY evidence'ına bağla.
+- [ ] PowerDNS config/package upgrade/rollback lifecycle'ını durable operation evidence ile transactional hale getir; current source manager failure state verir fakat host-level rollback acceptance henüz yok.
 
 ### Host acceptance — `todo.md`
 
 - [ ] Fresh Ubuntu 24.04'te PowerDNS package/backend/config/service/upgrade health geçer.
 - [ ] API yalnız loopback'ten erişilir; raw API key public yüzeye sızmaz.
-- [ ] `dig @ns1` / `dig @ns2` SOA, NS, A authoritative cevap verir; TCP ve UDP 53 geçer.
-- [ ] Recursion isteği açık resolver gibi cevaplanmaz.
-- [ ] Registrar/delegation uyuşmazlığında state `ready` olmaz.
+- [ ] Local UDP/TCP 53 probe ve public `dig @ns1` / `dig @ns2` SOA, NS, A authoritative cevapları geçer.
+- [ ] Recursion isteği RA=false/REFUSED davranışıyla açık resolver olmadığını kanıtlar.
+- [ ] Registrar/glue/delegation uyuşmazlığında state `ready` olmaz.
 
 ## P0.3 — Versioned Plesk-style DNS Zone Template ve zone yönetimi
 
@@ -303,7 +309,7 @@ Recovery:
 # Uygulama sırası — blocker yoksa sapma yok
 
 1. **Website Unix isolation** — source temel büyük ölçüde hazır; independent subdomain, audit API, SFTP key lifecycle ve gerçek host acceptance açık.
-2. **PowerDNS + server ns1/ns2** — DNS identity backend hazır; sıradaki aktif iş PowerDNS host adapter + secret + health.
+2. **PowerDNS + server ns1/ns2** — host manager/secret/local readiness/API production path source-complete; sıradaki aktif iş glue/delegation/public reachability + zone authority entegrasyonu.
 3. **Versioned DNS Zone Template**.
 4. **Mail + shared Roundcube**.
 5. **Database + phpMyAdmin**.
