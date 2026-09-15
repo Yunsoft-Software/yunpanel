@@ -125,6 +125,7 @@ Aşağıdaki isolation parçaları production provisioning path'ine bağlandı; 
 
 - [x] Versioned `DnsZoneTemplate` registry mevcut: `<domain>`, `<server-ipv4>`, `<server-ipv6>`, `<ns1>`, `<ns2>`, `<mail-host>`, `<webmail-host>` placeholder sözleşmesi, immutable version history ve protected disk store kullanıyor.
 - [x] Template preview exact digest + typed confirmation ister; apply yeni immutable version üretir. Historical version GET ve preview/confirmation üzerinden rollback API'si mevcut; template mutation mevcut zonelara otomatik uygulanmıyor.
+- [x] Zone Template authoring ile renderer/provider tip seti CAA dahil eşitlendi; CAA flags/tag/value preview sırasında normalize/validate ediliyor. SOA authority template'e taşınmadı, server DNS identity kaynağı olarak kalıyor.
 - [x] Managed desired-state renderer SOA, NS, A, AAAA, CNAME, MX, TXT, CAA ve SRV değerlerini normalize/validate ediyor; CNAME coexistence ve owner/type source conflict'lerinde fail-closed.
 - [x] Record ownership provider katmanında ayrılıyor: `template`, `mail`, `runtime` YunPanel marker/comment taşır; marker olmayan live RRset `manual` kabul edilir ve managed desired state aynı owner/type'ı sessizce ezmez.
 - [x] PowerDNS zone manager zone get/create/apply/delete-compensation, managed RRset safe diff, no-op verification, SOA serial inspection ve manual RRset conflict korumasını sağlıyor.
@@ -136,13 +137,13 @@ Aşağıdaki isolation parçaları production provisioning path'ine bağlandı; 
 - [x] Re-apply private durable operation journal kullanır (`pending/applying/succeeded/failed`). Restart veya provider timeout sonrası inspect-first çalışır; hedef authoritative state zaten uygulanmışsa ikinci kör PATCH atmadan post-condition evidence ile tamamlar. Operation public view confirmation veya PowerDNS API key içermez.
 - [x] Re-apply manual RRset'leri owner/type çakışmadıkça korur; aynı RRset managed template ile çakışıyorsa preview'da explicit conflict üretip apply'i kapatır. Henüz production mail desired-state bağlı olmadığından mevcut `mail`-owned RRset görülürse destructive reconcile yerine fail-closed blocker üretir.
 - [x] Re-apply HTTP yüzeyi mevcut: preview/apply ile Domain-scoped operation list/status route'ları; operation ID başka Domain path'inden okunamaz.
+- [x] Domain authoritative zone read + manual RRset upsert/delete API'si eklendi. Manual mutation managed `template/mail/runtime` RRset'i ezemez; CNAME coexistence, owner/type/value/TTL canonical validation, wildcard/IDN owner normalization ve `expectedSerial` stale-write koruması kullanır.
+- [x] Manual PowerDNS PATCH sonucu belirsizse provider post-condition yeniden okunur; hedef RRset gerçekten uygulanmış/silinmişse duplicate mutation yerine başarı evidence'ı döner. Public zone view provider TXT/CAA/MX/SRV/SOA wire formatını editlenebilir canonical değerlere çevirir ve ownership source metadata'sını gösterir.
 - [x] Service-aware mail DNS renderer primitive'i mevcut: mail A/AAAA, MX, optional webmail A/AAAA, SPF, DMARC, DKIM ve IMAPS/SMTPS SRV yalnız verilen mail capability intent'ine göre üretiliyor. Mail lifecycle henüz bu intent'i production provisioning'e bağlamıyor.
 
 ### Kalan kod işleri
 
-- [ ] DNS re-apply preview/diff ve durable operation status'unu Domain DNS panel yüzeyine bağla; manual conflict/blocker/serial/template-version farkını kullanıcıya açık göster.
-- [ ] Website/Domain DNS zone read + manual RRset CRUD API'sini ekle; manual add/edit/delete SOA/NS/A/AAAA/CNAME/MX/TXT/CAA/SRV, TTL, wildcard ve IDN validation'ını aynı canonical record modelinden kullansın.
-- [ ] Zone Template authoring validation'ını provider/renderer tipiyle eşitle: özellikle CAA template record desteğini ekle; SOA server DNS identity tarafından üretilmeye devam etsin ve template'te ikinci authority oluşmasın.
+- [ ] Domain DNS panelini zone read/manual CRUD + re-apply preview/diff/durable operation status API'lerine bağla; managed kayıtları read-only, manual kayıtları editable göster; conflict/blocker/serial/template-version farkını açık göster.
 - [ ] Local mail lifecycle tamamlanınca mail capability/DKIM public key intent'ini zone lifecycle'a bağla; bundan sonra re-apply `mail` source'u da desired state ile güvenle reconcile edebilsin; kapalı servis dead mail/webmail/SRV/discovery kaydı üretmesin.
 - [ ] autodiscover/autoconfig yalnız gerçek endpoint hazır olduğunda service-aware DNS desired state'e girsin.
 - [ ] DNSSEC enable/disable/key lifecycle + DS output ekle; parent DS görülmeden secure delegation/ready gösterme.
@@ -151,6 +152,7 @@ Aşağıdaki isolation parçaları production provisioning path'ine bağlandı; 
 ### Host acceptance — `todo.md`
 
 - [ ] Yeni local-DNS domain tek Website operation'ında default authoritative zone alır ve SOA/NS/A/AAAA/www policy gerçek `dig` ile doğrulanır.
+- [ ] Manual RRset add/update/delete/no-op gerçek PowerDNS'te doğrulanır; managed RRset manual endpoint'ten değiştirilemez, stale `expectedSerial` 409 verir, uncertain PATCH sonrası post-condition duplicate mutation'ı önler.
 - [ ] Manual record template re-apply sırasında korunur veya explicit conflict olur; provider timeout/restart injection sonrası operation inspect-first aynı RRset mutation'ını ikinci kez uygulamaz.
 - [ ] Kapalı servis için dead `webmail`/MX/DKIM/discovery record oluşmaz.
 - [ ] DNSSEC/DS/delegation davranışı gerçek resolver ve parent zone ile doğrulanır.
@@ -305,7 +307,7 @@ Recovery:
 
 1. **Website Unix isolation** — source temel büyük ölçüde hazır; independent subdomain, audit API, SFTP key lifecycle ve gerçek host acceptance açık.
 2. **PowerDNS + server ns1/ns2** — host manager/secret/local readiness/API + identity-backed zone authority + read-only delegation inspector source hazır; kalan aktif işler public UDP/TCP reachability ayrımı, panel delegation/glue yüzeyi, secondary transfer evidence ve host acceptance.
-3. **Versioned DNS Zone Template** — create path + durable existing-zone re-apply backend hazır; sıradaki aktif iş manual DNS CRUD, CAA template authoring, mail source entegrasyonu ve DNSSEC.
+3. **Versioned DNS Zone Template** — create path + durable re-apply + manual zone CRUD backend hazır; sıradaki aktif işler DNS panel yüzeyi, mail source entegrasyonu ve DNSSEC/DS lifecycle.
 4. **Mail + shared Roundcube**.
 5. **Database + phpMyAdmin**.
 6. **elFinder**.
