@@ -6,6 +6,7 @@ import {
 } from './dns-zone-reapply-operation-registry.js';
 import { createDnsZoneReapplyRuntime, DnsZoneReapplyRuntimeError } from './dns-zone-reapply-runtime.js';
 import { createDnsZoneReapplyService, DnsZoneReapplyError } from './dns-zone-reapply.js';
+import { createDnsZoneRecordsService, DnsZoneRecordsError } from './dns-zone-records.js';
 import { createDnsZoneTemplateRegistry, DnsZoneTemplateRegistryError } from './dns-zone-template-registry.js';
 import { createDnsZoneTemplateRollbackService } from './dns-zone-template-rollback.js';
 import { createDomainRegistry } from './domain-registry.js';
@@ -173,12 +174,7 @@ function defaultZoneTemplateRegistry(authoritativeService, env = process.env) {
   });
 }
 
-async function defaultZoneReapplyService({
-  dnsIdentityRegistry,
-  dnsZoneTemplateRegistry,
-  authoritativeService,
-  env = process.env,
-} = {}) {
+async function defaultDomainAndSecretRegistries(authoritativeService, env = process.env) {
   const domainRegistry = createDomainRegistry({ filePath: domainStorePath(env) });
   await domainRegistry.init();
   const secretRegistry = createPowerDnsSecretRegistry({
@@ -187,6 +183,16 @@ async function defaultZoneReapplyService({
     serverExists: async (serverId) => serverId === authoritativeService.localServerId,
   });
   await secretRegistry.init();
+  return Object.freeze({ domainRegistry, secretRegistry });
+}
+
+async function defaultZoneReapplyService({
+  dnsIdentityRegistry,
+  dnsZoneTemplateRegistry,
+  authoritativeService,
+  env = process.env,
+} = {}) {
+  const { domainRegistry, secretRegistry } = await defaultDomainAndSecretRegistries(authoritativeService, env);
   return createDnsZoneReapplyService({
     domainRegistry,
     dnsIdentityRegistry,
@@ -212,6 +218,15 @@ async function defaultZoneReapplyRuntime({
   const runtime = createDnsZoneReapplyRuntime({ registry, service });
   await runtime.init();
   return runtime;
+}
+
+async function defaultZoneRecordsService(authoritativeService, env = process.env) {
+  const { domainRegistry, secretRegistry } = await defaultDomainAndSecretRegistries(authoritativeService, env);
+  return createDnsZoneRecordsService({
+    domainRegistry,
+    powerDnsSecretRegistry: secretRegistry,
+    localServerId: authoritativeService.localServerId,
+  });
 }
 
 async function templateOperation(operation) {
@@ -242,11 +257,20 @@ async function zoneReapplyOperation(operation) {
   }
 }
 
+async function zoneRecordsOperation(operation) {
+  try { return await operation(); }
+  catch (error) {
+    if (error instanceof DnsZoneRecordsError) throw new PowerDnsHttpError(error.code, error.message, error.status);
+    throw error;
+  }
+}
+
 export function mountPowerDnsRoutes(app, {
   dnsIdentityRegistry,
   dnsZoneTemplateRegistry = null,
   dnsDelegationInspector = null,
   dnsZoneReapplyRuntime = null,
+  dnsZoneRecordsService = null,
   authoritativeService,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
@@ -273,6 +297,11 @@ export function mountPowerDnsRoutes(app, {
       || typeof dnsZoneReapplyRuntime.get !== 'function' || typeof dnsZoneReapplyRuntime.listForDomain !== 'function')) {
     throw new Error('DNS zone reapply runtime is invalid');
   }
+  if (dnsZoneRecordsService !== null
+    && (typeof dnsZoneRecordsService.getZone !== 'function' || typeof dnsZoneRecordsService.apply !== 'function'
+      || typeof dnsZoneRecordsService.remove !== 'function')) {
+    throw new Error('DNS zone records service is invalid');
+  }
 
   let defaultRuntimePromise = null;
   function reapplyRuntime() {
@@ -289,6 +318,16 @@ export function mountPowerDnsRoutes(app, {
   }
   if (!dnsZoneReapplyRuntime) void reapplyRuntime();
 
+  let defaultRecordsPromise = null;
+  function zoneRecordsService() {
+    if (dnsZoneRecordsService) return Promise.resolve(dnsZoneRecordsService);
+    if (!defaultRecordsPromise) {
+      defaultRecordsPromise = defaultZoneRecordsService(authoritativeService);
+      defaultRecordsPromise.catch(() => { defaultRecordsPromise = null; });
+    }
+    return defaultRecordsPromise;
+  }
+
   app.get('/api/servers/:serverId/dns/identity', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);
     return response.json({ data: await dnsIdentityRegistry.getForServer(serverId) });
@@ -298,6 +337,27 @@ export function mountPowerDnsRoutes(app, {
     const serverId = localServerId(authoritativeService, request.params.serverId);
     const inspection = await delegationOperation(() => delegationInspector.inspect({ serverId, domain: request.query?.domain }));
     return response.json({ data: inspection });
+  }));
+
+  app.get('/api/domains/:domainId/dns/zone', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const zone = await zoneRecordsOperation(async () => (await zoneRecordsService()).getZone({ domainId: request.params.domainId }));
+    return response.json({ data: zone });
+  }));
+
+  app.post('/api/domains/:domainId/dns/records', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const result = await zoneRecordsOperation(async () => (await zoneRecordsService()).apply({
+      domainId: request.params.domainId,
+      input: request.body,
+    }));
+    return response.json({ data: result });
+  }));
+
+  app.post('/api/domains/:domainId/dns/records/delete', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const result = await zoneRecordsOperation(async () => (await zoneRecordsService()).remove({
+      domainId: request.params.domainId,
+      input: request.body,
+    }));
+    return response.json({ data: result });
   }));
 
   app.post('/api/domains/:domainId/dns/reapply-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -449,9 +509,12 @@ export const powerDnsHttpInternals = Object.freeze({
   powerDnsSecretStorePath,
   zoneReapplyOperationStorePath,
   defaultZoneTemplateRegistry,
+  defaultDomainAndSecretRegistries,
   defaultZoneReapplyService,
   defaultZoneReapplyRuntime,
+  defaultZoneRecordsService,
   templateOperation,
   delegationOperation,
   zoneReapplyOperation,
+  zoneRecordsOperation,
 });
