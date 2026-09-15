@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { createDnsZoneTemplateRegistry, DnsZoneTemplateRegistryError } from './dns-zone-template-registry.js';
+import { createDnsZoneTemplateRollbackService } from './dns-zone-template-rollback.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
 export class PowerDnsHttpError extends Error {
@@ -53,6 +54,24 @@ function zoneTemplateApplyBody(body) {
     new Set(['expectedVersion', 'records', 'previewDigest', 'confirmation']),
     'dns_template_apply_input_invalid',
     'Send expectedVersion, records, previewDigest and confirmation',
+  );
+}
+
+function zoneTemplateRollbackPreviewBody(body) {
+  return exactObject(
+    body,
+    new Set(['expectedVersion', 'targetVersion']),
+    'dns_template_rollback_preview_input_invalid',
+    'Send expectedVersion and targetVersion',
+  );
+}
+
+function zoneTemplateRollbackApplyBody(body) {
+  return exactObject(
+    body,
+    new Set(['expectedVersion', 'targetVersion', 'previewDigest', 'confirmation']),
+    'dns_template_rollback_apply_input_invalid',
+    'Send expectedVersion, targetVersion, previewDigest and confirmation',
   );
 }
 
@@ -146,6 +165,7 @@ export function mountPowerDnsRoutes(app, {
     || typeof templateRegistry.update !== 'function') {
     throw new Error('DNS zone template registry is required');
   }
+  const rollbackService = createDnsZoneTemplateRollbackService({ registry: templateRegistry });
 
   app.get('/api/servers/:serverId/dns/identity', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);
@@ -216,6 +236,30 @@ export function mountPowerDnsRoutes(app, {
     return response.json({ data: updated });
   }));
 
+  app.post('/api/servers/:serverId/dns/template/rollback/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const serverId = localServerId(authoritativeService, request.params.serverId);
+    const body = zoneTemplateRollbackPreviewBody(request.body);
+    const preview = await templateOperation(() => rollbackService.preview({
+      serverId,
+      expectedVersion: body.expectedVersion,
+      targetVersion: body.targetVersion,
+    }));
+    return response.json({ data: preview });
+  }));
+
+  app.post('/api/servers/:serverId/dns/template/rollback/apply', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const serverId = localServerId(authoritativeService, request.params.serverId);
+    const body = zoneTemplateRollbackApplyBody(request.body);
+    const updated = await templateOperation(() => rollbackService.apply({
+      serverId,
+      expectedVersion: body.expectedVersion,
+      targetVersion: body.targetVersion,
+      previewDigest: body.previewDigest,
+      confirmation: body.confirmation,
+    }));
+    return response.json({ data: updated });
+  }));
+
   app.get('/api/servers/:serverId/dns/authoritative', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);
     return response.json({ data: await authoritativeService.status(serverId) });
@@ -244,6 +288,8 @@ export const powerDnsHttpInternals = Object.freeze({
   identityApplyBody,
   zoneTemplatePreviewBody,
   zoneTemplateApplyBody,
+  zoneTemplateRollbackPreviewBody,
+  zoneTemplateRollbackApplyBody,
   zoneTemplateVersion,
   authoritativeApplyBody,
   requireEmptyBody,
