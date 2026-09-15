@@ -43,16 +43,9 @@ function localInput(input, localServerId) {
 }
 
 function provisioningPlanner(dependencies) {
-  const hasIdentity = Boolean(dependencies.serverDnsIdentityRegistry);
-  const hasTemplate = Boolean(dependencies.dnsZoneTemplateRegistry);
-  if (hasIdentity !== hasTemplate) {
-    throw new SiteCreateError(
-      'site_create_dns_dependencies_invalid',
-      'Server DNS identity and Zone Template registries must be configured together',
-      503,
-    );
-  }
-  return hasIdentity ? dnsAwareSiteCreateProvisioningPlan : isolatedSiteCreateProvisioningPlan;
+  return dependencies.localServerId
+    ? dnsAwareSiteCreateProvisioningPlan
+    : isolatedSiteCreateProvisioningPlan;
 }
 
 async function previewWithProvisioning({ input, dependencies }) {
