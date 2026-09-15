@@ -14,7 +14,7 @@ import {
 import { DomainHierarchyError, validateDomainParent } from './domain-hierarchy.js';
 
 const SITE_NAMESPACE = Buffer.from('0bcd2cf8883b49f997294b5d225cf15e', 'hex');
-const SOURCE_KINDS = new Set(['existing_application', 'existing_docker', 'new_static', 'new_node', 'external_proxy']);
+const SOURCE_KINDS = new Set(['existing_application', 'existing_docker', 'new_static', 'new_node', 'new_php', 'external_proxy']);
 const WWW_MODES = new Set(['none', 'alias', 'independent']);
 const HTTPS_MODES = new Set(['off', 'managed']);
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
@@ -99,6 +99,10 @@ function normalizedSource(source) {
           websocket: source.target.websocket !== false,
         }),
       });
+    }
+    if (source.kind === 'new_php') {
+      exactObject(source, new Set(['kind']), 'site_create_source_invalid', 'New PHP source accepts only kind');
+      return Object.freeze({ kind: source.kind });
     }
 
     const allowed = source.kind === 'new_static'
@@ -285,6 +289,12 @@ function domainTarget(application, source, dockerWorkload = null) {
     }
     return Object.freeze({ targetType: 'static', target: Object.freeze({ root: application.webRoot, spaFallback: true }) });
   }
+  if (application.type === 'php') {
+    if (application.webRoot !== `/var/lib/yunpanel/apps/${application.id}/current/public`) {
+      throw new SiteCreateError('site_create_application_root_drift', 'Selected PHP Application document root is outside managed state', 409);
+    }
+    return Object.freeze({ targetType: 'php', target: Object.freeze({ applicationId: application.id }) });
+  }
   if (application.runtimeAdapter === 'passenger') {
     if (application.runtime?.port !== null) {
       throw new SiteCreateError('site_create_application_runtime_drift', 'Passenger Node Application must not persist a backend port', 409);
@@ -343,7 +353,7 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
   if (!(await registry.getServer(normalized.serverId))) throw new SiteCreateError('server_not_found', 'Target server does not exist', 404);
 
   const ids = Object.freeze({
-    applicationId: ['new_static', 'new_node'].includes(normalized.source.kind) ? resourceId(normalized.operationId, 'application') : null,
+    applicationId: ['new_static', 'new_node', 'new_php'].includes(normalized.source.kind) ? resourceId(normalized.operationId, 'application') : null,
     websiteId: resourceId(normalized.operationId, 'website'),
     primaryDomainId: resourceId(normalized.operationId, 'primary-domain'),
     wwwDomainId: normalized.wwwMode === 'independent' ? resourceId(normalized.operationId, 'www-domain') : null,
@@ -407,6 +417,23 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
     };
     ensureExact(existing, applicationExpected, 'site_create_application_identity_conflict', 'Planned Application identity conflicts with existing state', stableApplication);
     application = existing ?? applicationExpected;
+  } else if (normalized.source.kind === 'new_php') {
+    const existing = applications.find((candidate) => candidate.id === ids.applicationId) ?? null;
+    applicationExpected = {
+      id: ids.applicationId,
+      serverId: normalized.serverId,
+      name: normalized.name,
+      type: 'php',
+      repositoryUrl: null,
+      branch: null,
+      retention: 2,
+      build: null,
+      runtime: null,
+      runtimeAdapter: null,
+      webRoot: `/var/lib/yunpanel/apps/${ids.applicationId}/current/public`,
+    };
+    ensureExact(existing, applicationExpected, 'site_create_application_identity_conflict', 'Planned PHP Application identity conflicts with existing state', stableApplication);
+    application = existing ?? applicationExpected;
   }
 
   if (application) {
@@ -431,7 +458,8 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
         }
     : {
         id: ids.websiteId, serverId: normalized.serverId, name: normalized.name, applicationId: application.id,
-        dockerWorkloadId: null, runtimeType: application.type, documentRoot: application.type === 'static' ? application.webRoot : `/var/lib/yunpanel/apps/${application.id}/current`,
+        dockerWorkloadId: null, runtimeType: application.type,
+        documentRoot: ['static', 'php'].includes(application.type) ? application.webRoot : `/var/lib/yunpanel/apps/${application.id}/current`,
         unixUser: `yunapp-${createHash('sha256').update(application.id).digest('hex').slice(0, 12)}`, proxyTarget: null, revision: 1,
       };
   const websiteExisting = websites.find((candidate) => candidate.id === ids.websiteId) ?? null;
@@ -584,6 +612,15 @@ export async function createSite({
       runtimeAdapter: 'passenger',
       runtime: normalized.source.runtime,
       retention: normalized.source.retention,
+    });
+  } else if (normalized.source.kind === 'new_php') {
+    if (typeof applicationRegistry.createPhpApplication !== 'function') {
+      throw new SiteCreateError('site_create_dependencies_invalid', 'PHP Application creation is unavailable', 503);
+    }
+    application = await applicationRegistry.createPhpApplication({
+      applicationId: preview.ids.applicationId,
+      serverId: normalized.serverId,
+      name: normalized.name,
     });
   }
 
