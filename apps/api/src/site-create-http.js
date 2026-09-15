@@ -1,6 +1,6 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createSite, previewSiteCreate, SiteCreateError } from './site-create.js';
-import { siteCreateProvisioningPlan } from './site-create-provisioning.js';
+import { siteCreateProvisioningPlan } from './site-create-provisioning-isolation.js';
 
 const PREVIEW_FIELDS = new Set(['input']);
 const APPLY_FIELDS = new Set(['input', 'previewDigest', 'confirmation']);
