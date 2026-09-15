@@ -89,7 +89,7 @@ async function resolvePhpRuntimeTarget({
   domain,
   website,
   applicationRegistry,
-  websiteProvisioningRegistry,
+  phpFpmSiteManager,
 }) {
   if (website.runtimeType !== 'php') return null;
   if (!website.applicationId || !website.unixUser || !website.documentRoot) {
@@ -106,10 +106,10 @@ async function resolvePhpRuntimeTarget({
     'Application registry is required to validate PHP traffic authority',
   );
   requireDependency(
-    websiteProvisioningRegistry,
-    'getLatestForWebsite',
-    'website_provisioning_registry_unavailable',
-    'Website provisioning registry is required to resolve PHP traffic authority',
+    phpFpmSiteManager,
+    'inspect',
+    'php_runtime_inspector_unavailable',
+    'PHP-FPM runtime inspector is required to resolve PHP traffic authority',
   );
 
   const application = await applicationRegistry.getApplication(website.applicationId);
@@ -120,47 +120,31 @@ async function resolvePhpRuntimeTarget({
     phpBindingDrift('PHP Website Application path or server identity drifted');
   }
 
-  const operation = await websiteProvisioningRegistry.getLatestForWebsite(website.id);
-  if (!operation || operation.websiteId !== website.id) {
+  const runtime = await phpFpmSiteManager.inspect({
+    websiteId: website.id,
+    applicationId: application.id,
+    unixUser: website.unixUser,
+    documentRoot: website.documentRoot,
+  });
+  if (!runtime || runtime.satisfied !== true || runtime.adapter !== 'php-fpm') {
     throw new DomainRegistryError(
       'php_runtime_binding_required',
-      'PHP Domain target cannot be staged until Website provisioning evidence exists',
+      `PHP Domain target cannot be staged until the managed PHP-FPM runtime is healthy${runtime?.reason ? ` (${runtime.reason})` : ''}`,
       409,
     );
   }
-  const bootstrap = operation.steps?.find((step) => step.id === 'php_bootstrap');
-  const runtime = operation.steps?.find((step) => step.id === 'php_runtime');
-  const nginx = operation.steps?.find((step) => step.id === 'nginx');
-  const activation = operation.steps?.find((step) => step.id === 'domain_activation');
-  if (bootstrap?.state !== 'succeeded' || runtime?.state !== 'succeeded'
-    || nginx?.state !== 'succeeded' || activation?.state !== 'succeeded') {
-    throw new DomainRegistryError(
-      'php_runtime_binding_required',
-      'PHP Domain target cannot be restaged until initial PHP Website routing is active',
-      409,
-    );
-  }
-
-  const bootstrapEvidence = bootstrap.evidence;
-  const runtimeEvidence = runtime.evidence;
-  if (!bootstrapEvidence || bootstrapEvidence.satisfied !== true || bootstrapEvidence.adapter !== 'php-bootstrap'
-    || bootstrapEvidence.websiteId !== website.id || bootstrapEvidence.applicationId !== application.id
-    || bootstrapEvidence.unixUser !== website.unixUser || bootstrapEvidence.documentRoot !== website.documentRoot) {
-    phpBindingDrift('PHP bootstrap evidence drifted from the Website identity');
-  }
-  if (!runtimeEvidence || runtimeEvidence.satisfied !== true || runtimeEvidence.adapter !== 'php-fpm'
-    || runtimeEvidence.websiteId !== website.id || runtimeEvidence.applicationId !== application.id
-    || runtimeEvidence.unixUser !== website.unixUser || runtimeEvidence.documentRoot !== website.documentRoot
-    || typeof runtimeEvidence.socketPath !== 'string' || !PHP_SOCKET_PATTERN.test(runtimeEvidence.socketPath)) {
-    phpBindingDrift('PHP-FPM evidence drifted from the Website identity');
+  if (runtime.websiteId !== website.id || runtime.applicationId !== application.id
+    || runtime.unixUser !== website.unixUser || runtime.documentRoot !== website.documentRoot
+    || typeof runtime.socketPath !== 'string' || !PHP_SOCKET_PATTERN.test(runtime.socketPath)) {
+    phpBindingDrift('PHP-FPM runtime evidence drifted from the Website identity');
   }
 
   return Object.freeze({
     source: 'php',
     targetType: 'php',
     target: Object.freeze({
-      root: runtimeEvidence.documentRoot,
-      socketPath: runtimeEvidence.socketPath,
+      root: runtime.documentRoot,
+      socketPath: runtime.socketPath,
     }),
   });
 }
@@ -171,7 +155,7 @@ export async function resolveWebsiteDomainTarget({
   dockerComposeProjectRegistry = null,
   applicationRegistry = null,
   runtimeBindingRegistry = null,
-  websiteProvisioningRegistry = null,
+  phpFpmSiteManager = null,
 } = {}) {
   if (!domain || typeof domain !== 'object' || Array.isArray(domain)) {
     throw new DomainRegistryError('invalid_domain_target_state', 'Domain target state is invalid', 409);
@@ -187,7 +171,7 @@ export async function resolveWebsiteDomainTarget({
     if (domain.targetType === 'php') {
       throw new DomainRegistryError(
         'php_runtime_binding_required',
-        'PHP Domain target requires a Website provisioning binding before staging',
+        'PHP Domain target requires a Website runtime binding before staging',
         409,
       );
     }
@@ -219,7 +203,7 @@ export async function resolveWebsiteDomainTarget({
       domain,
       website,
       applicationRegistry,
-      websiteProvisioningRegistry,
+      phpFpmSiteManager,
     });
     if (phpTarget) return phpTarget;
     if (domain.targetType === 'passenger') {
@@ -232,7 +216,7 @@ export async function resolveWebsiteDomainTarget({
     if (domain.targetType === 'php') {
       throw new DomainRegistryError(
         'php_runtime_binding_required',
-        'PHP Domain target cannot be staged until the canonical PHP runtime binding is active',
+        'PHP Domain target cannot be staged until the canonical PHP runtime is active',
         409,
       );
     }
