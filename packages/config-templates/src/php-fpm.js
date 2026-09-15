@@ -57,7 +57,7 @@ export const phpFpmTemplatePolicy = Object.freeze({
   socketOwner: 'www-data',
   socketGroup: 'www-data',
   socketMode: '0660',
-  poolMode: 0o640,
+  poolMode: 0o600,
   defaultMaxChildren: 8,
   defaultMemoryLimitMb: 256,
   defaultMaxExecutionSeconds: 60,
