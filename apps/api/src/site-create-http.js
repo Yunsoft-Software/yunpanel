@@ -1,6 +1,7 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createSite, previewSiteCreate, SiteCreateError } from './site-create-isolation-guard.js';
-import { siteCreateProvisioningPlan } from './site-create-provisioning-isolation.js';
+import { siteCreateProvisioningPlan as dnsAwareSiteCreateProvisioningPlan } from './site-create-dns-provisioning.js';
+import { siteCreateProvisioningPlan as isolatedSiteCreateProvisioningPlan } from './site-create-provisioning-isolation.js';
 
 const PREVIEW_FIELDS = new Set(['input']);
 const APPLY_FIELDS = new Set(['input', 'previewDigest', 'confirmation']);
@@ -41,11 +42,25 @@ function localInput(input, localServerId) {
   return { ...input, serverId: localServerId ?? input?.serverId };
 }
 
+function provisioningPlanner(dependencies) {
+  const hasIdentity = Boolean(dependencies.serverDnsIdentityRegistry);
+  const hasTemplate = Boolean(dependencies.dnsZoneTemplateRegistry);
+  if (hasIdentity !== hasTemplate) {
+    throw new SiteCreateError(
+      'site_create_dns_dependencies_invalid',
+      'Server DNS identity and Zone Template registries must be configured together',
+      503,
+    );
+  }
+  return hasIdentity ? dnsAwareSiteCreateProvisioningPlan : isolatedSiteCreateProvisioningPlan;
+}
+
 async function previewWithProvisioning({ input, dependencies }) {
   const preview = await previewSiteCreate({ input, ...dependencies });
+  const planner = provisioningPlanner(dependencies);
   return Object.freeze({
     ...preview,
-    provisioning: siteCreateProvisioningPlan(preview),
+    provisioning: await planner(preview, dependencies),
   });
 }
 
@@ -96,6 +111,7 @@ export const siteCreateHttpInternals = Object.freeze({
   previewBody,
   applyBody,
   localInput,
+  provisioningPlanner,
   previewWithProvisioning,
   persistProvisioning,
 });
