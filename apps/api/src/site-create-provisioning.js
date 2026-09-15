@@ -71,6 +71,27 @@ function passengerIntent(preview, applicationId, paths = createWebsitePathContra
   return Object.freeze(base);
 }
 
+function phpBootstrapIntent(preview, applicationId, paths = createWebsitePathContract({
+  websiteId: preview?.ids?.websiteId,
+  applicationId,
+})) {
+  const application = preview.plan.application;
+  if (!application || application.type !== 'php') {
+    throw new Error('PHP Website bootstrap requires normalized PHP Application state');
+  }
+  const documentRoot = path.posix.join(paths.runtime.currentRelease, 'public');
+  if (preview.plan.website.documentRoot !== documentRoot || application.webRoot !== documentRoot) {
+    throw new Error('PHP Website bootstrap document root does not match the managed current/public path');
+  }
+  return Object.freeze({
+    adapter: 'php-bootstrap',
+    websiteId: preview.ids.websiteId,
+    applicationId,
+    unixUser: preview.plan.website.unixUser,
+    documentRoot,
+  });
+}
+
 function phpFpmIntent(preview, applicationId, paths = createWebsitePathContract({
   websiteId: preview?.ids?.websiteId,
   applicationId,
@@ -335,6 +356,9 @@ export function siteCreateProvisioningPlan(preview) {
         compensationState: 'not_required',
       }));
     } else if (runtimeType === 'php') {
+      steps.push(hostStep('php_bootstrap', 'php_bootstrap', phpBootstrapIntent(preview, applicationId, paths), {
+        compensationState: 'pending',
+      }));
       runtimeIntent = phpFpmIntent(preview, applicationId, paths);
       steps.push(hostStep('php_runtime', 'php_runtime', runtimeIntent, {
         compensationState: 'pending',
@@ -411,6 +435,7 @@ export function siteCreateProvisioningPlan(preview) {
 
 export const siteCreateProvisioningInternals = Object.freeze({
   passengerIntent,
+  phpBootstrapIntent,
   phpFpmIntent,
   nodeReleaseIntent,
   passengerEnvironmentIntent,
