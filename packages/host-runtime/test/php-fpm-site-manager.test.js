@@ -11,6 +11,7 @@ const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const unixUser = 'yunapp-4dc352e64a14';
 const homeDirectory = `/var/lib/yunpanel/data/${applicationId}`;
 const currentRelease = `/var/lib/yunpanel/apps/${applicationId}/current`;
+const documentRoot = `${currentRelease}/public`;
 const configPath = `/etc/php/8.3/fpm/pool.d/yunpanel-${unixUser}.conf`;
 const socketPath = `/run/php/yunpanel-${unixUser}.sock`;
 
@@ -19,7 +20,7 @@ function intent(overrides = {}) {
     websiteId,
     applicationId,
     unixUser,
-    documentRoot: `${currentRelease}/public`,
+    documentRoot,
     ...overrides,
   };
 }
@@ -55,7 +56,9 @@ function identityManager({ satisfied = true } = {}) {
 }
 
 function fakeHost({ packageInstalled = false, serviceActive = false } = {}) {
-  const entries = new Map();
+  const entries = new Map([
+    [documentRoot, { type: 'directory', mode: 0o750, uid: 1201, gid: 1201 }],
+  ]);
   const calls = [];
 
   const readFileFn = async (file) => {
@@ -88,6 +91,7 @@ function fakeHost({ packageInstalled = false, serviceActive = false } = {}) {
       gid: entry.gid ?? 0,
       mode: entry.mode ?? 0,
       isFile: () => entry.type === 'file',
+      isDirectory: () => entry.type === 'directory',
       isSocket: () => entry.type === 'socket',
       isSymbolicLink: () => false,
     };
@@ -168,6 +172,8 @@ test('PHP-FPM site apply installs distro FPM and activates a dedicated Website p
   assert.equal(result.unixUser, unixUser);
   assert.equal(result.unixUid, 1201);
   assert.equal(result.unixGid, 1201);
+  assert.equal(result.documentRoot, documentRoot);
+  assert.equal(result.documentRootMode, 0o750);
   assert.equal(result.configPath, configPath);
   assert.equal(result.socketPath, socketPath);
   assert.equal(result.created, true);
@@ -190,6 +196,34 @@ test('PHP-FPM site apply refuses to provision before canonical Website identity 
     (error) => error instanceof PhpFpmSiteManagerError && error.code === 'php_fpm_identity_required',
   );
   assert.equal(host.calls.some(([file]) => file === '/usr/bin/apt-get'), false);
+});
+
+test('PHP-FPM site apply refuses to mutate the host before the isolated document root exists', async () => {
+  const host = fakeHost();
+  host.entries.delete(documentRoot);
+  const siteManager = manager(host);
+
+  await assert.rejects(
+    siteManager.apply(intent(), { operationId }),
+    (error) => error instanceof PhpFpmSiteManagerError && error.code === 'php_fpm_document_root_required',
+  );
+  assert.equal(host.calls.some(([file]) => file === '/usr/bin/apt-get'), false);
+  assert.equal(host.entries.has(configPath), false);
+});
+
+test('PHP-FPM site inspection rejects document-root ownership or world-access drift', async () => {
+  for (const entry of [
+    { type: 'directory', mode: 0o750, uid: 1300, gid: 1201 },
+    { type: 'directory', mode: 0o755, uid: 1201, gid: 1201 },
+  ]) {
+    const host = fakeHost({ packageInstalled: true });
+    host.entries.set(documentRoot, entry);
+    const siteManager = manager(host);
+    await assert.rejects(
+      siteManager.inspect(intent()),
+      (error) => error instanceof PhpFpmSiteManagerError && error.code === 'php_fpm_document_root_drift',
+    );
+  }
 });
 
 test('PHP-FPM site intent rejects a Unix user that does not match canonical Application identity', async () => {
