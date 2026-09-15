@@ -13,6 +13,8 @@
     "./php-site-container-manager": "./src/php-site-container-manager.js",
     "./powerdns-authoritative-manager": "./src/powerdns-authoritative-manager.js",
     "./powerdns-authoritative-secure-manager": "./src/powerdns-authoritative-secure-manager.js",
+    "./powerdns-authoritative-ready-manager": "./src/powerdns-authoritative-ready-manager.js",
+    "./powerdns-socket-health-inspector": "./src/powerdns-socket-health-inspector.js",
     "./service-umask-manager": "./src/service-umask-manager.js",
     "./sftp-site-manager": "./src/sftp-site-manager.js",
     "./static-publish-isolation-manager": "./src/static-publish-isolation-manager.js",
