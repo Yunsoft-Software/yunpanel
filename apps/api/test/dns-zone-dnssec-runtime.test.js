@@ -11,12 +11,13 @@ const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const digest = 'b'.repeat(64);
 const ds = '12345 13 2 AABBCCDD';
 
-function state({ enabled = false, parentStatus = 'absent', parentRecords = [], status = null } = {}) {
-  const localDs = enabled ? [ds] : [];
-  const matching = parentStatus === 'present' && parentRecords.includes(ds) ? [ds] : [];
+function state({ enabled = false, localReady = enabled, parentStatus = 'absent', parentRecords = [], status = null } = {}) {
+  const localDs = enabled && localReady ? [ds] : [];
+  const matching = parentStatus === 'present' && parentRecords.includes(ds) && localReady ? [ds] : [];
   const derivedStatus = status ?? (enabled
-    ? parentStatus === 'present' ? (matching.length ? 'secure_ready' : 'parent_ds_mismatch')
-      : parentStatus === 'unverifiable' ? 'parent_ds_unverifiable' : 'pending_parent_ds'
+    ? !localReady ? 'signing_material_incomplete'
+      : parentStatus === 'present' ? (matching.length ? 'secure_ready' : 'parent_ds_mismatch')
+        : parentStatus === 'unverifiable' ? 'parent_ds_unverifiable' : 'pending_parent_ds'
     : parentStatus === 'present' ? 'parent_ds_without_dnssec'
       : parentStatus === 'unverifiable' ? 'insecure_parent_unverifiable' : 'insecure');
   return Object.freeze({
@@ -24,6 +25,7 @@ function state({ enabled = false, parentStatus = 'absent', parentRecords = [], s
     serverId,
     zoneName: 'example.com',
     dnssec: enabled,
+    localReady,
     status: derivedStatus,
     secureReady: derivedStatus === 'secure_ready',
     serial: 2026091601,
@@ -48,6 +50,7 @@ function preview(enabled) {
     zoneName: 'example.com',
     targetEnabled: enabled,
     currentDnssec: !enabled,
+    currentLocalReady: !enabled,
     currentDs: Object.freeze([]),
     parentStatus: 'absent',
     parentRecords: Object.freeze([]),
@@ -121,6 +124,28 @@ test('restart recovery completes an already-applied DNSSEC enable without a seco
   assert.equal(recovery.length, 1);
   assert.equal(recovery[0].recovered, true);
   assert.equal(recovery[0].operation.status, 'succeeded');
+  assert.equal(calls.filter((entry) => entry === 'apply').length, 0);
+});
+
+test('restart recovery does not accept dnssec=true without signing keys and DS evidence', async () => {
+  const blockedPreview = Object.freeze({
+    ...preview(true),
+    currentDnssec: true,
+    currentLocalReady: false,
+    status: 'signing_material_incomplete',
+    blockers: Object.freeze([{ code: 'dnssec_signing_material_incomplete' }]),
+    applyAllowed: false,
+    confirmation: null,
+  });
+  const { calls, registry, runtime, setState } = fixture({ targetEnabled: true, previewValue: blockedPreview });
+  await registry.init();
+  const operation = await registry.create(preview(true));
+  await registry.markApplying(operation.id);
+  setState(state({ enabled: true, localReady: false }));
+
+  const result = await runtime.run(operation.id);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error.code, 'dnssec_preview_stale');
   assert.equal(calls.filter((entry) => entry === 'apply').length, 0);
 });
 
