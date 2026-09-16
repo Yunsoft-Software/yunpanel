@@ -19,6 +19,7 @@
     "./powerdns-manual-rrset-manager": "./src/powerdns-manual-rrset-manager.js",
     "./powerdns-dnssec-manager": "./src/powerdns-dnssec-manager.js",
     "./dns-parent-ds-inspector": "./src/dns-parent-ds-inspector.js",
+    "./dns-secondary-sync-inspector": "./src/dns-secondary-sync-inspector.js",
     "./service-umask-manager": "./src/service-umask-manager.js",
     "./sftp-site-manager": "./src/sftp-site-manager.js",
     "./static-publish-isolation-manager": "./src/static-publish-isolation-manager.js",
