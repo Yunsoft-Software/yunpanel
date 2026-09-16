@@ -1,4 +1,5 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
+import { mountWebsiteIsolationAuditRoutes } from './website-isolation-audit-http.js';
 import { canBeginCompensationInOrder } from './website-provisioning-compensation-order.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -162,6 +163,14 @@ export function mountWebsiteProvisioningRoutes(app, { registry, orchestrator } =
     }
     return response.json({ data: projectOperation(operation) });
   }));
+
+  if (typeof registry.auditIsolation === 'function') {
+    mountWebsiteIsolationAuditRoutes(app, {
+      auditService: Object.freeze({
+        audit: (value) => registry.auditIsolation(websiteId(value)),
+      }),
+    });
+  }
 
   app.post('/api/sites/provisioning/:operationId/continue', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const id = operationId(request.params.operationId);

@@ -1,5 +1,6 @@
 import { createWebsiteDnsZoneProvisioningHandler } from './website-dns-zone-provisioning-handler.js';
 import { createWebsiteDomainActivationProvisioningHandler } from './website-domain-activation-provisioning-handler.js';
+import { createWebsiteIsolationAuditService, WebsiteIsolationAuditError } from './website-isolation-audit.js';
 import { createWebsiteNodeReleaseProvisioningHandler } from './website-node-release-provisioning-handler.js';
 import { createWebsitePassengerApplicationReleaseProvisioningHandler } from './website-passenger-application-release-provisioning-handler.js';
 import { createWebsitePassengerAuthorityProvisioningHandler } from './website-passenger-authority-provisioning-handler.js';
@@ -9,6 +10,10 @@ import { createWebsitePassengerHealthProvisioningHandler } from './website-passe
 import { createWebsiteProvisioningHandlers } from './website-provisioning-handlers-isolation.js';
 import { createWebsiteProvisioningOrchestrator } from './website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from './website-provisioning-registry.js';
+
+function configuredLocalServerId(value = process.env.YUNPANEL_LOCAL_SERVER_ID) {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
 
 export function createWebsiteProvisioningRuntime({
   filePath = null,
@@ -26,9 +31,29 @@ export function createWebsiteProvisioningRuntime({
   domainRegistry = null,
   runtimeBindingRegistry = null,
 } = {}) {
-  const registry = createWebsiteProvisioningRegistry({
+  const durableRegistry = createWebsiteProvisioningRegistry({
     filePath,
     ...(now ? { now } : {}),
+  });
+  let isolationAudit = null;
+  let isolationAuditDependencies = null;
+
+  async function auditIsolation(websiteId) {
+    if (!isolationAudit) {
+      throw new WebsiteIsolationAuditError(
+        'website_isolation_audit_unavailable',
+        'Website isolation audit is not configured',
+        503,
+      );
+    }
+    return isolationAudit.audit(websiteId);
+  }
+
+  const registry = Object.freeze({
+    ...durableRegistry,
+    get auditIsolation() {
+      return isolationAudit ? auditIsolation : null;
+    },
   });
   const nodeReleaseHandler = (gitCredentialProvider = null) => createWebsiteNodeReleaseProvisioningHandler({
     ...(nodeReleaseManager ? { nodeReleaseManager } : {}),
@@ -50,6 +75,45 @@ export function createWebsiteProvisioningRuntime({
   let domainControlPlane = null;
   let passengerEnvironment = null;
   let passengerControlPlane = null;
+
+  function configureIsolationAudit(dependencies = {}) {
+    const nextWebsiteRegistry = dependencies.websiteRegistry;
+    const nextApplicationRegistry = dependencies.applicationRegistry;
+    const nextLocalServerId = configuredLocalServerId(dependencies.localServerId);
+    if (!nextWebsiteRegistry || typeof nextWebsiteRegistry.getWebsite !== 'function'
+      || !nextApplicationRegistry || typeof nextApplicationRegistry.getApplication !== 'function') {
+      throw new Error('Website isolation audit registries are required');
+    }
+    if (isolationAuditDependencies) {
+      if (isolationAuditDependencies.websiteRegistry !== nextWebsiteRegistry
+        || isolationAuditDependencies.applicationRegistry !== nextApplicationRegistry
+        || isolationAuditDependencies.localServerId !== nextLocalServerId) {
+        throw new Error('Website isolation audit dependencies cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+
+    const scopedWebsiteRegistry = nextLocalServerId
+      ? Object.freeze({
+        async getWebsite(websiteId) {
+          const website = await nextWebsiteRegistry.getWebsite(websiteId);
+          return website?.serverId === nextLocalServerId ? website : null;
+        },
+      })
+      : nextWebsiteRegistry;
+    isolationAudit = createWebsiteIsolationAuditService({
+      websiteRegistry: scopedWebsiteRegistry,
+      applicationRegistry: nextApplicationRegistry,
+      provisioningRegistry: registry,
+      provisioningHandlers: handlers,
+    });
+    isolationAuditDependencies = Object.freeze({
+      websiteRegistry: nextWebsiteRegistry,
+      applicationRegistry: nextApplicationRegistry,
+      localServerId: nextLocalServerId,
+    });
+    return Object.freeze({ configured: true });
+  }
 
   function configureDomainControlPlane(dependencies = {}) {
     const nextDomainRegistry = dependencies.domainRegistry;
@@ -104,6 +168,11 @@ export function createWebsiteProvisioningRuntime({
     }
     const nextEnvironmentRegistry = passengerEnvironment.applicationEnvironmentRegistry;
     configureDomainControlPlane({ domainRegistry: nextDomainRegistry });
+    configureIsolationAudit({
+      applicationRegistry: nextApplicationRegistry,
+      websiteRegistry: nextWebsiteRegistry,
+      localServerId: dependencies.localServerId,
+    });
     if (passengerControlPlane) {
       if (passengerControlPlane.applicationRegistry !== nextApplicationRegistry
         || passengerControlPlane.applicationEnvironmentRegistry !== nextEnvironmentRegistry
@@ -140,6 +209,9 @@ export function createWebsiteProvisioningRuntime({
 
   if (domainRegistry) configureDomainControlPlane({ domainRegistry });
   if (applicationEnvironmentRegistry) configurePassengerEnvironment({ applicationEnvironmentRegistry });
+  if (applicationRegistry && websiteRegistry) {
+    configureIsolationAudit({ applicationRegistry, websiteRegistry });
+  }
   if (applicationRegistry || websiteRegistry || runtimeBindingRegistry) {
     configurePassengerControlPlane({ applicationRegistry, websiteRegistry, domainRegistry, runtimeBindingRegistry });
   }
@@ -162,15 +234,21 @@ export function createWebsiteProvisioningRuntime({
     registry,
     handlers,
     orchestrator,
+    configureIsolationAudit,
     configureDomainControlPlane,
     configurePassengerEnvironment,
     configurePassengerControlPlane,
     init,
     get: (operationId) => registry.get(operationId),
     create: (plan) => registry.create(plan),
+    auditIsolation,
     runNext: (operationId) => orchestrator.runNext(operationId),
     retryStep: (operationId, stepId) => orchestrator.retryStep(operationId, stepId),
     compensateStep: (operationId, stepId) => orchestrator.compensateStep(operationId, stepId),
     listInterrupted: () => registry.listInterrupted(),
   });
 }
+
+export const websiteProvisioningRuntimeInternals = Object.freeze({
+  configuredLocalServerId,
+});
