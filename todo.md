@@ -54,14 +54,14 @@ Bu bölüm yalnız güncel P0 provisioning/Passenger turundan kalan gerçek Ubun
 
 ## T-DNS — P0 PowerDNS ve nameserver
 
-- [ ] Fresh Ubuntu 24.04'te source manager'ın kurduğu `pdns-server` + `pdns-backend-sqlite3` + `sqlite3` paketleri, gsqlite3 schema/database izinleri, `root:pdns 0640` managed config, `pdns_server --config=check`, `pdns.service` restart/upgrade ve loopback API health doğrulansın.
+- [ ] Fresh Ubuntu 24.04'te source manager'ın kurduğu `pdns-server` + `pdns-backend-sqlite3` + `sqlite3` + `bind9-dnsutils` paketleri, `/usr/bin/dig`, gsqlite3 schema/database izinleri, `root:pdns 0640` managed config, `pdns_server --config=check`, `pdns.service` restart/upgrade ve loopback API health doğrulansın.
 - [ ] Encrypted API-key store/restart/rotation provasında raw key browser/API/audit/job/log/process argv/config içinde görünmesin; `pdns.conf` yalnız `pdnsutil hash-password` çıktısını tutsun.
 - [ ] Local readiness gerçek hostta hem UDP/53 hem TCP/53 loopback probe'u geçsin; dış bir resolver/hosttan public UDP ve TCP 53 erişimi ayrıca doğrulansın ve firewall/NAT engeli local health'i public-ready yapmasın.
 - [ ] Recursive probe gerçek PowerDNS'te RA=false ve REFUSED ile dönsün; `pdns-recursor` kurulu fixture apply'i fail-closed bloklasın ve YunPanel mevcut recursor'ı sessizce kaldırmasın/değiştirmesin.
 - [ ] Zone/RRset create-update-delete/no-op; SOA serial, NS, A/AAAA/CNAME/MX/TXT/CAA/SRV, TTL, wildcard, IDN ve DNSSEC API üzerinden gerçek authoritative cevapla doğrulansın.
 - [ ] New Website local-DNS provisioning'i apex/www/mail/webmail kayıtlarını seçilen policy'ye göre oluştursun; external-DNS Website'e örtülü PowerDNS zone eklemesin.
 - [ ] En az iki bağımsız authoritative endpoint veya onaylı secondary DNS ile delegation/transfer/failover testi yap. Tek host iki NS adıyla healthy gösterilmesin; glue/parent delegation eksikliği actionable kalsın.
-- [ ] DNSSEC enable/disable, DS bilgisi, rollover ve yanlış parent DS failure'ı gerçek resolver ile test edilsin.
+- [ ] DNSSEC enable gerçek cryptokey/DNSKEY/DS üretsin; parent DS yokken `pending_parent_ds`, matching DS registrar/parent'ta yayınlanınca `secure_ready`, yanlış/eski DS'de `parent_ds_mismatch` kalsın. Parent DS lookup timeout/SERVFAIL/NXDOMAIN durumları `absent` sayılmasın. Disable yalnız parent DS gerçekten kaldırılıp public resolverda verifiably absent olduktan sonra açılsın; preview sonrası DS geri ekleme yarışı mutation'ı bloklasın. Sonraki rollover implementation'ında new-key publication/activation, parent DS propagation, old-DS retirement ve old-key deletion gerçek resolver ile kesintisiz doğrulansın.
 - [ ] Mevcut Cloudflare record ve Certbot DNS-01 akışı external-DNS modunda least-privilege tokenla çalışsın; PowerDNS state'iyle karışmasın; token hiçbir public yüzeye çıkmasın.
 
 ## T-MAIL — P0 Postfix/Dovecot/Rspamd/Roundcube
