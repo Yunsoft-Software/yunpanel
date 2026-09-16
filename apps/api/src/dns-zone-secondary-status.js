@@ -47,6 +47,44 @@ function notifyEvidence(zone) {
   });
 }
 
+export function dnsZoneSecondaryHealthPolicy({ configured, status, ready, sync } = {}) {
+  if (configured === false || status === 'disabled') {
+    return Object.freeze({
+      healthGate: 'not_applicable',
+      severity: 'info',
+      recovery: 'none',
+      automaticMutationAllowed: false,
+    });
+  }
+  if (status === 'synced' && ready === true) {
+    return Object.freeze({
+      healthGate: 'pass',
+      severity: 'healthy',
+      recovery: 'none',
+      automaticMutationAllowed: false,
+    });
+  }
+  if (status === 'primary_kind_required') {
+    return Object.freeze({
+      healthGate: 'block',
+      severity: 'error',
+      recovery: 'manual_intervention',
+      automaticMutationAllowed: false,
+    });
+  }
+  const targetStatuses = Array.isArray(sync?.targets)
+    ? sync.targets.map((target) => target?.status).filter((targetStatus) => typeof targetStatus === 'string')
+    : [];
+  const ahead = targetStatuses.includes('ahead');
+  const expectedWarning = status === 'drift' || status === 'unverifiable';
+  return Object.freeze({
+    healthGate: 'block',
+    severity: ahead || !expectedWarning ? 'error' : 'warning',
+    recovery: 'observe_only',
+    automaticMutationAllowed: false,
+  });
+}
+
 export function createDnsZoneSecondaryStatusService({
   domainRegistry,
   dnsIdentityRegistry,
@@ -79,7 +117,7 @@ export function createDnsZoneSecondaryStatusService({
     }
     const targets = Object.freeze([...(identity.settings?.secondaryDns ?? [])]);
     if (targets.length === 0) {
-      return Object.freeze({
+      const result = {
         version: 1,
         domainId: domain.id,
         serverId: domain.serverId,
@@ -91,7 +129,8 @@ export function createDnsZoneSecondaryStatusService({
         zoneKind: null,
         notify: Object.freeze({ serial: null, notifiedSerial: null, currentSerialNotified: false }),
         sync: Object.freeze({ version: 1, zoneName: domain.primaryDomain, status: 'disabled', ready: true, expectedSerial: null, targets: Object.freeze([]), checkedAt: null }),
-      });
+      };
+      return Object.freeze({ ...result, policy: dnsZoneSecondaryHealthPolicy(result) });
     }
 
     let secret;
@@ -115,7 +154,7 @@ export function createDnsZoneSecondaryStatusService({
     } catch (error) { throw mapped(error); }
     const primary = primaryKind(zone.kind);
     const statusValue = !primary ? 'primary_kind_required' : sync.status;
-    return Object.freeze({
+    const result = {
       version: 1,
       domainId: domain.id,
       serverId: domain.serverId,
@@ -127,7 +166,8 @@ export function createDnsZoneSecondaryStatusService({
       zoneKind: zone.kind,
       notify: notifyEvidence(zone),
       sync,
-    });
+    };
+    return Object.freeze({ ...result, policy: dnsZoneSecondaryHealthPolicy(result) });
   }
 
   return Object.freeze({ status });
