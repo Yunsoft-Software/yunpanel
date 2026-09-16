@@ -80,9 +80,21 @@ export function delegationPresentation(status) {
 
 export function authoritativePresentation(state) {
   if (!state) return Object.freeze({ state: 'unknown', label: 'Durum alınamadı' });
-  if (state.ready) return Object.freeze({ state: 'active', label: 'Local authoritative hazır' });
+  if (state.localReady ?? state.ready) return Object.freeze({ state: 'active', label: 'Local authoritative hazır' });
   if (!state.configured) return Object.freeze({ state: 'off', label: 'PowerDNS yapılandırılmamış' });
   return Object.freeze({ state: 'warning', label: state.reason ?? 'Local health hazır değil' });
+}
+
+export function publicReachabilityPresentation(state) {
+  const status = state?.publicReachability?.status;
+  const value = {
+    ready: ['active', 'Public UDP/TCP 53 hazır'],
+    unreachable: ['error', 'Public DNS portu erişilemiyor'],
+    unverified: ['pending', 'Public erişim doğrulanmadı'],
+    unverifiable: ['warning', 'Public erişim doğrulanamıyor'],
+    blocked: ['off', 'Public kontrol bekliyor'],
+  }[status];
+  return value ? Object.freeze({ state: value[0], label: value[1] }) : Object.freeze({ state: 'unknown', label: status || 'Public durum yok' });
 }
 
 export const networkDnsModelInternals = Object.freeze({ SOA_DEFAULTS, integer, nameserver });
