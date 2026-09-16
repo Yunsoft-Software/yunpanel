@@ -97,27 +97,31 @@ Aşağıdaki isolation parçaları production provisioning path'ine bağlandı; 
 - [x] PowerDNS API `127.0.0.1:8081` ile loopback-only; `pdns_server --config=check` geçmeden service activation/restart yapılmıyor.
 - [x] `pdns-recursor` installed ise authoritative apply fail-closed; YunPanel recursor kurmuyor/açmıyor.
 - [x] Local readiness API health + UDP/53 + TCP/53 + recursion-denied probe ile health-gated; açık recursive resolver davranışı `ready` olamıyor.
+- [x] Public UDP/TCP 53 reachability local socket health'ten ayrıldı. `ready/localReady` local PowerDNS evidence'ını, `publicReady` yalnız external-vantage UDP+TCP evidence'ını, `overallReady` ikisinin birlikte sonucunu temsil ediyor. External probe yoksa `publicReachability=unverified`; local loopback probe public-ready sayılmıyor.
 - [x] Secondary DNS source policy explicit IP allowlist kullanıyor; AXFR allowlist/notify yalnız configured secondary adreslerine açılıyor.
 - [x] DNS identity ve authoritative lifecycle authenticated HTTP/API'ye ve production bootstrap'a bağlandı; local-server scope dışı legacy/remote server ID fail-closed.
 - [x] Read Only yalnız DNS identity/authoritative GET status yüzeylerini görebiliyor; preview/apply mutation Owner-management altında kalıyor.
 - [x] Authoritative NS/SOA identity local zone renderer ve Website DNS provisioning'in tek kaynağı; PowerDNS zone adapter kendi ns1/ns2 değerini uydurmuyor.
 - [x] Inspect-only public delegation/nameserver-address kontrolü eklendi: parent NS görünürlüğünü configured ns1/ns2 ile, NS host A/AAAA çözümünü configured IP'lerle karşılaştırıyor; in-bailiwick address eksikliği `pending_glue`, eksik NS seti `pending_delegation`, transient resolver arızası `unverifiable` oluyor. `GET /api/servers/:serverId/dns/delegation?domain=...` local-server scope'unda read-only açıldı.
+- [x] Settings > Network/DNS React UI gerçek DNS identity, PowerDNS authoritative status/preview/apply ve delegation API'lerine bağlandı. OS/server hostname yalnız referans olarak gösteriliyor; ikinci hostname authority oluşturulmuyor. ns1/ns2, public IP, SOA, DNSSEC default ve secondary target değişikliği typed-confirmation preview üzerinden ilerliyor.
+- [x] Network/DNS paneli local authoritative health ile public UDP/TCP 53 durumunu ayrı badge/state olarak gösteriyor; registrar/delegation paneli observed/expected NS, glue gereksinimi ve exact nameserver/IP talimatı veriyor, registrar hesabında otomatik mutation varmış gibi davranmıyor.
+- [x] Secondary-aware Website DNS provisioning exact `secondaryDns` snapshot'ını durable `dns_zone` intent'ine alıyor. Yeni zonelar `Primary` oluşturuluyor; secondary configured ise mevcut `Native` zone doğrulanarak `Primary`ye geçirilebiliyor ve değişiklik sonrası explicit PowerDNS `/notify` tetikleniyor. `notified_serial` yalnız NOTIFY dispatch/state evidence'ıdır, AXFR tamamlandı diye yorumlanmıyor.
 
 ### Kalan kod işleri
 
-- [ ] Settings > Network/DNS React UI'ını DNS identity/authoritative/delegation API'lerine bağla. Server FQDN kaynağı mevcut local server registry/OS hostname contract'ı ile tutarlı kalsın; ikinci bağımsız hostname authority yaratma.
-- [ ] Public UDP/TCP 53 reachability ile local socket health'i ayrı state olarak modelle; public probe yapılamıyorsa local health'i public-ready diye gösterme.
-- [ ] Delegation inspector sonucunu panelde registrar/glue talimatı, observed/expected NS ve actionable pending state olarak göster; registrar API'si yoksa otomatik düzeltme varmış gibi davranma.
-- [ ] Secondary DNS transfer/notify policy'sini zone lifecycle ve gerçek AXFR/NOTIFY evidence'ına bağla.
+- [ ] Secondary DNS lifecycle'ını tüm zone mutation yollarına tamamla: template re-apply ve manual RRset CRUD da configured secondary topology'yi snapshot/read edip NOTIFY tetiklesin. Remote secondary IP'ye TCP SOA sorgusuyla observed serial evidence ekle; `notified_serial` tek başına transfer başarı kanıtı sayılmasın.
+- [ ] Secondary transfer/failover status API/panel state'i primary serial, notified serial ve her secondary observed SOA serial'ını ayrı raporlasın; timeout/unreachable secondary `ready` olmasın.
 - [ ] PowerDNS config/package upgrade/rollback lifecycle'ını durable operation evidence ile transactional hale getir; current source manager failure state verir fakat host-level rollback acceptance henüz yok.
 
-### Host acceptance — `todo.md`
+### Host/browser acceptance — `todo.md`
 
 - [ ] Fresh Ubuntu 24.04'te PowerDNS package/backend/config/service/upgrade health geçer.
 - [ ] API yalnız loopback'ten erişilir; raw API key public yüzeye sızmaz.
-- [ ] Local UDP/TCP 53 probe ve public `dig @ns1` / `dig @ns2` SOA, NS, A authoritative cevapları geçer.
-- [ ] Recursion isteği RA=false/REFUSED davranışıyla açık resolver olmadığını kanıtlar.
+- [ ] Local UDP/TCP 53 probe ve dış vantage point'ten public UDP/TCP 53 doğrulaması ayrı geçer; firewall/NAT engeli local health'i public-ready yapmaz.
+- [ ] Public `dig @ns1` / `dig @ns2` SOA, NS, A authoritative cevapları ve recursion-denied davranışı gerçek hostta doğrulanır.
 - [ ] Registrar/glue/delegation uyuşmazlığında state `ready` olmaz.
+- [ ] Network/DNS Settings browser akışı Chromium/Firefox'ta DNS identity preview/typed-confirmation, PowerDNS apply, public/local state ve delegation/glue talimatlarını doğru render eder.
+- [ ] Secondary DNS ile Primary/NOTIFY/AXFR ve observed SOA serial gerçek iki endpoint üzerinde doğrulanır.
 
 ## P0.3 — Versioned Plesk-style DNS Zone Template ve zone yönetimi
 
@@ -129,7 +133,7 @@ Aşağıdaki isolation parçaları production provisioning path'ine bağlandı; 
 - [x] Managed desired-state renderer SOA, NS, A, AAAA, CNAME, MX, TXT, CAA ve SRV değerlerini normalize/validate ediyor; CNAME coexistence ve owner/type source conflict'lerinde fail-closed.
 - [x] Record ownership provider katmanında ayrılıyor: `template`, `mail`, `runtime` YunPanel marker/comment taşır; marker olmayan live RRset `manual` kabul edilir ve managed desired state aynı owner/type'ı sessizce ezmez.
 - [x] PowerDNS zone manager zone get/create/apply/delete-compensation, managed RRset safe diff, no-op verification, SOA serial inspection ve manual RRset conflict korumasını sağlıyor.
-- [x] Yeni local root-domain Website create planı current server DNS identity + current template'i mutation öncesi okuyor; template version/snapshot, DNS identity revision, serial, DNSSEC intent ve exact RRset desired state durable `dns_zone` step intent'ine kaydediliyor.
+- [x] Yeni local root-domain Website create planı current server DNS identity + current template'i mutation öncesi okuyor; template version/snapshot, DNS identity revision, secondary DNS topology snapshot, serial, DNSSEC intent ve exact RRset desired state durable `dns_zone` step intent'ine kaydediliyor.
 - [x] `/api/sites` local production scope'unda DNS-aware provisioning planner'a bağlı; `dns_zone` yalnız yardımcı modülde kalmıyor. Development/test scope local server authority yoksa isolation-only planner fallback'i korunuyor.
 - [x] `dns_zone` provisioning handler worker içinde encrypted PowerDNS API token'ını kısa süreli materialize edip zone'u oluşturuyor/apply ediyor; new-zone PowerDNS tarafından otomatik üretilen initial SOA/NS yalnız creation path'inde managed desired state ile güvenli biçimde sahipleniliyor.
 - [x] Default local zone source path'i SOA, apex NS -> configured ns1/ns2, apex A, IPv6 varsa AAAA ve `www` alias policy'sini üretiyor. Default `ftp.<domain>` kaydı üretmiyor.
@@ -145,21 +149,23 @@ Aşağıdaki isolation parçaları production provisioning path'ine bağlandı; 
 - [x] DNSSEC disable parent DS verifiably absent olmadan başlamıyor; apply mutation'ından hemen önce parent DS ikinci kez kontrol edilerek preview sonrasında DS'nin yeniden eklenmesi yarışı fail-closed kapatılıyor. Enable eski/uyumsuz parent DS görürse yeni signing state oluşturmadan bloklanıyor.
 - [x] DNSSEC enable/disable private durable operation journal kullanır (`pending/applying/succeeded/failed`). HTTP apply durable operation döndürür; Domain-scoped operation list/status API'si vardır ve public operation confirmation/API key/private key içermez. Aynı Domain'de farklı ikinci mutation 409 ile bloklanır; aynı request mevcut operation'ı resume eder.
 - [x] DNSSEC restart recovery inspect-first çalışır: enable post-condition yalnız `dnssec=true + localReady + DS` ile succeeded olur; disable yalnız `dnssec=false + parent DS absent` ile succeeded olur. Provider cevabı belirsizse canlı state okunur ve ikinci kör mutation yapılmaz; disable sonrası parent DS yeniden görünürse operation unsafe failure olur, parent DS unverifiable ise operation `applying` kalır.
+- [x] Domain DNS paneli Site Detail `DNS` sekmesine bağlandı. Root zone authoritative RRset'leri ownership source ile listeleniyor; `template/mail/runtime` managed kayıtlar read-only, yalnız `manual` RRset'ler add/edit/delete edilebilir. Subdomain ayrı zone uydurmak yerine parent/root zone'a yönlendirilir.
+- [x] DNS paneli Zone Template re-apply preview/diff, conflict/blocker, SOA serial/template version, durable operation history ve DNSSEC status/DS/parent mismatch state'lerini gösterir. Re-apply ve DNSSEC mutation'ları native `alert/confirm/prompt` yerine typed-confirmation modal zincirini kullanır.
 - [x] Service-aware mail DNS renderer primitive'i mevcut: mail A/AAAA, MX, optional webmail A/AAAA, SPF, DMARC, DKIM ve IMAPS/SMTPS SRV yalnız verilen mail capability intent'ine göre üretiliyor. Mail lifecycle henüz bu intent'i production provisioning'e bağlamıyor.
 
 ### Kalan kod işleri
 
-- [ ] Domain DNS panelini zone read/manual CRUD + re-apply preview/diff/durable operation status + DNSSEC status/DS/registrar action/durable operation API'lerine bağla; managed kayıtları read-only, manual kayıtları editable göster; conflict/blocker/serial/template-version ve DNSSEC parent/signing mismatch durumlarını açık göster.
 - [ ] Local mail lifecycle tamamlanınca mail capability/DKIM public key intent'ini zone lifecycle'a bağla; bundan sonra re-apply `mail` source'u da desired state ile güvenle reconcile edebilsin; kapalı servis dead mail/webmail/SRV/discovery kaydı üretmesin.
 - [ ] autodiscover/autoconfig yalnız gerçek endpoint hazır olduğunda service-aware DNS desired state'e girsin.
 - [ ] DNSSEC key rollover/rotation lifecycle ekle: yeni KSK/CSK üret/publish/activate, parent DS propagation doğrula, eski DS retirement doğrula, eski key deactivate/delete; rollover sırasında secure delegation kesintiye uğramasın ve private key public state/job/audit'e çıkmasın.
 - [ ] Zone suspend/delete/compensation ownership evidence'ını P0.9 lifecycle'ına bağla; manual kayıt içeren zone destructive cleanup'ta fail-closed kalsın.
 
-### Host acceptance — `todo.md`
+### Host/browser acceptance — `todo.md`
 
 - [ ] Yeni local-DNS domain tek Website operation'ında default authoritative zone alır ve SOA/NS/A/AAAA/www policy gerçek `dig` ile doğrulanır.
 - [ ] Manual RRset add/update/delete/no-op gerçek PowerDNS'te doğrulanır; managed RRset manual endpoint'ten değiştirilemez, stale `expectedSerial` 409 verir, uncertain PATCH sonrası post-condition duplicate mutation'ı önler.
 - [ ] Manual record template re-apply sırasında korunur veya explicit conflict olur; provider timeout/restart injection sonrası operation inspect-first aynı RRset mutation'ını ikinci kez uygulamaz.
+- [ ] Site Detail DNS browser yüzeyi root/subdomain ownership, managed read-only/manual editable, conflict/blocker/diff, operation history ve DNSSEC DS/parent state'lerini Chromium/Firefox'ta doğru gösterir.
 - [ ] Kapalı servis için dead `webmail`/MX/DKIM/discovery record oluşmaz.
 - [ ] DNSSEC enable local cryptokey + DS üretir; parent DS yokken `pending_parent_ds`, eşleşen DS yayınlanınca `secure_ready`, yanlış DS'de mismatch kalır. Disable parent DS verifiably absent olmadan çalışmaz. Provider timeout/API restart injection sonrası durable operation inspect-first aynı enable/disable mutation'ını ikinci kez uygulamaz; `dnssec=true` fakat key/DS eksik state succeeded olmaz; gerçek resolver/registrar propagation ve BOGUS önleme doğrulanır.
 
@@ -235,7 +241,7 @@ Apply sırası:
 2. [x] Dedicated Unix user/group + canonical paths.
 3. [x] Runtime site UID/GID ile prepare — mevcut static/Passenger/PHP source path'i isolation-aware.
 4. [ ] Nginx stage/configtest/activate lifecycle'ını full Website create zincirinde finalize et.
-5. [x] Local root-DNS Website için `/api/sites` production path'i current DNS identity + exact Zone Template snapshot/version durable `dns_zone` step'ine alır ve PowerDNS worker handler ile apply eder; gerçek host acceptance `todo.md`'de açık.
+5. [x] Local root-DNS Website için `/api/sites` production path'i current DNS identity + exact Zone Template snapshot/version + secondary DNS topology durable `dns_zone` step'ine alır ve PowerDNS worker handler ile apply eder; secondary varsa Primary/NOTIFY yolu kullanılır. Gerçek host acceptance `todo.md`'de açık.
 6. [ ] DB seçildiyse scoped DB/user/grant.
 7. [ ] Local mail domain + DKIM + DNS intents.
 8. [ ] webmail mapping + shared Roundcube.
@@ -312,8 +318,8 @@ Recovery:
 # Uygulama sırası — blocker yoksa sapma yok
 
 1. **Website Unix isolation** — source temel büyük ölçüde hazır; independent subdomain, audit API, SFTP key lifecycle ve gerçek host acceptance açık.
-2. **PowerDNS + server ns1/ns2** — host manager/secret/local readiness/API + identity-backed zone authority + read-only delegation inspector source hazır; kalan aktif işler public UDP/TCP reachability ayrımı, panel delegation/glue yüzeyi, secondary transfer evidence ve host acceptance.
-3. **Versioned DNS Zone Template** — create path + durable re-apply + manual zone CRUD + durable DNSSEC enable/disable/DS parent-gate backend hazır; sıradaki aktif işler DNS panel yüzeyi, mail source entegrasyonu, DNSSEC rollover ve zone suspend/delete ownership.
+2. **PowerDNS + server ns1/ns2** — identity/host manager/secret/local readiness, public-vs-local readiness ayrımı, Network/DNS Settings ve delegation/glue UI source hazır. Sıradaki aktif işler secondary NOTIFY/transfer evidence'ını tüm zone mutation yollarına tamamlama, remote-secondary SOA status ve PowerDNS durable upgrade/rollback; gerçek host/browser acceptance açık.
+3. **Versioned DNS Zone Template** — create path + durable re-apply + manual zone CRUD + DNS panel + durable DNSSEC enable/disable/DS parent-gate source hazır. Sıradaki aktif işler mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover ve zone suspend/delete ownership.
 4. **Mail + shared Roundcube**.
 5. **Database + phpMyAdmin**.
 6. **elFinder**.
