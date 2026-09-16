@@ -1,5 +1,10 @@
 import path from 'node:path';
 import { createDomainRegistry } from './domain-registry.js';
+import {
+  createDnsZoneDnssecOperationRegistry,
+  DnsZoneDnssecOperationRegistryError,
+} from './dns-zone-dnssec-operation-registry.js';
+import { createDnsZoneDnssecRuntime, DnsZoneDnssecRuntimeError } from './dns-zone-dnssec-runtime.js';
 import { createDnsZoneDnssecService, DnsZoneDnssecError } from './dns-zone-dnssec.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createPowerDnsSecretRegistry, PowerDnsSecretRegistryError } from './powerdns-secret-registry.js';
@@ -55,6 +60,10 @@ function stateRoot(env = process.env) {
   return path.dirname(serverStorePath);
 }
 
+function operationStorePath(env = process.env) {
+  return env.YUNPANEL_DNSSEC_OPERATION_STORE ?? path.join(stateRoot(env), 'dnssec-operations.json');
+}
+
 async function defaultService(authoritativeService, env = process.env) {
   if (typeof authoritativeService?.localServerId !== 'string' || !authoritativeService.localServerId) {
     throw new DnsZoneDnssecHttpError('dnssec_local_server_unavailable', 'Local authoritative DNS server scope is unavailable', 503);
@@ -76,9 +85,21 @@ async function defaultService(authoritativeService, env = process.env) {
   });
 }
 
+async function defaultRuntime(authoritativeService, env = process.env, serviceOverride = null) {
+  const service = serviceOverride ?? await defaultService(authoritativeService, env);
+  const registry = createDnsZoneDnssecOperationRegistry({
+    filePath: serviceOverride ? null : operationStorePath(env),
+  });
+  const runtime = createDnsZoneDnssecRuntime({ registry, service });
+  await runtime.init();
+  return runtime;
+}
+
 function knownError(error) {
   return error instanceof DnsZoneDnssecHttpError
     || error instanceof DnsZoneDnssecError
+    || error instanceof DnsZoneDnssecRuntimeError
+    || error instanceof DnsZoneDnssecOperationRegistryError
     || error instanceof PowerDnsSecretRegistryError;
 }
 
@@ -96,6 +117,7 @@ function route(handler) {
 
 export function mountDnsZoneDnssecRoutes(app, {
   authoritativeService,
+  dnsZoneDnssecRuntime = null,
   dnsZoneDnssecService = null,
   env = process.env,
 } = {}) {
@@ -105,6 +127,15 @@ export function mountDnsZoneDnssecRoutes(app, {
   if (!authoritativeService || typeof authoritativeService.localServerId !== 'string' || !authoritativeService.localServerId) {
     throw new Error('PowerDNS authoritative service is required');
   }
+  if (dnsZoneDnssecRuntime !== null && dnsZoneDnssecService !== null) {
+    throw new Error('Configure either DNSSEC runtime or service, not both');
+  }
+  if (dnsZoneDnssecRuntime !== null
+    && (typeof dnsZoneDnssecRuntime.status !== 'function' || typeof dnsZoneDnssecRuntime.preview !== 'function'
+      || typeof dnsZoneDnssecRuntime.start !== 'function' || typeof dnsZoneDnssecRuntime.get !== 'function'
+      || typeof dnsZoneDnssecRuntime.listForDomain !== 'function')) {
+    throw new Error('DNSSEC runtime is invalid');
+  }
   if (dnsZoneDnssecService !== null
     && (typeof dnsZoneDnssecService.status !== 'function'
       || typeof dnsZoneDnssecService.preview !== 'function'
@@ -112,31 +143,32 @@ export function mountDnsZoneDnssecRoutes(app, {
     throw new Error('DNSSEC service is invalid');
   }
 
-  let servicePromise = null;
-  function service() {
-    if (dnsZoneDnssecService) return Promise.resolve(dnsZoneDnssecService);
-    if (!servicePromise) {
-      servicePromise = defaultService(authoritativeService, env);
-      servicePromise.catch(() => { servicePromise = null; });
+  let runtimePromise = null;
+  function runtime() {
+    if (dnsZoneDnssecRuntime) return Promise.resolve(dnsZoneDnssecRuntime);
+    if (!runtimePromise) {
+      runtimePromise = defaultRuntime(authoritativeService, env, dnsZoneDnssecService);
+      runtimePromise.catch(() => { runtimePromise = null; });
     }
-    return servicePromise;
+    return runtimePromise;
   }
+  if (!dnsZoneDnssecRuntime) void runtime();
 
   app.get('/api/domains/:domainId/dns/dnssec', requirePanelRouteAccess, route(async (request, response) => {
-    return response.json({ data: await (await service()).status({ domainId: request.params.domainId }) });
+    return response.json({ data: await (await runtime()).status({ domainId: request.params.domainId }) });
   }));
 
   app.post('/api/domains/:domainId/dns/dnssec/preview', requirePanelRouteAccess, route(async (request, response) => {
     const body = previewBody(request.body);
     return response.json({
-      data: await (await service()).preview({ domainId: request.params.domainId, enabled: body.enabled }),
+      data: await (await runtime()).preview({ domainId: request.params.domainId, enabled: body.enabled }),
     });
   }));
 
   app.post('/api/domains/:domainId/dns/dnssec/apply', requirePanelRouteAccess, route(async (request, response) => {
     const body = applyBody(request.body);
     return response.json({
-      data: await (await service()).apply({
+      data: await (await runtime()).start({
         domainId: request.params.domainId,
         enabled: body.enabled,
         previewDigest: body.previewDigest,
@@ -144,13 +176,27 @@ export function mountDnsZoneDnssecRoutes(app, {
       }),
     });
   }));
+
+  app.get('/api/domains/:domainId/dns/dnssec/operations', requirePanelRouteAccess, route(async (request, response) => {
+    return response.json({ data: await (await runtime()).listForDomain(request.params.domainId) });
+  }));
+
+  app.get('/api/domains/:domainId/dns/dnssec/operations/:operationId', requirePanelRouteAccess, route(async (request, response) => {
+    const operation = await (await runtime()).get(request.params.operationId);
+    if (!operation || operation.domainId !== request.params.domainId) {
+      throw new DnsZoneDnssecHttpError('dnssec_operation_not_found', 'DNSSEC operation was not found', 404);
+    }
+    return response.json({ data: operation });
+  }));
 }
 
 export const dnsZoneDnssecHttpInternals = Object.freeze({
   previewBody,
   applyBody,
   stateRoot,
+  operationStorePath,
   defaultService,
+  defaultRuntime,
   knownError,
   route,
 });
