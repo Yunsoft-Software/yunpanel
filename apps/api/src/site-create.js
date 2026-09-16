@@ -16,12 +16,12 @@ function assertIndependentWebsiteIsolation(input) {
   return input;
 }
 
-export function previewSiteCreate(options = {}) {
+export async function previewSiteCreate(options = {}) {
   assertIndependentWebsiteIsolation(options.input);
   return previewBaseSiteCreate(options);
 }
 
-export function createSite(options = {}) {
+export async function createSite(options = {}) {
   assertIndependentWebsiteIsolation(options.input);
   return createBaseSite(options);
 }
