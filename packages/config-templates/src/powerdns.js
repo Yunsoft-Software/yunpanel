@@ -7,7 +7,7 @@ const POLICY = Object.freeze({
   apiAddress: '127.0.0.1',
   apiPort: 8081,
   serviceUnit: 'pdns.service',
-  packages: Object.freeze(['pdns-server', 'pdns-backend-sqlite3', 'sqlite3']),
+  packages: Object.freeze(['pdns-server', 'pdns-backend-sqlite3', 'sqlite3', 'bind9-dnsutils']),
 });
 
 export class PowerDnsTemplateError extends Error {
