@@ -17,6 +17,7 @@ function context() {
         { key: 'apex-nameservers', owner: '@', type: 'NS', ttl: null, values: ['<ns1>', '<ns2>'], condition: 'always' },
       ],
       dnsIdentityRevision: 4,
+      secondaryDns: [],
       serial: 2026091501,
       dnssec: false,
       records: [

@@ -147,12 +147,11 @@ test('www none removes the built-in DNS alias so no dead endpoint is published',
   assert.equal(dns.intent.records.some((record) => record.owner === 'www.example.com'), false);
 });
 
-test('independent www receives runtime-owned A and AAAA instead of a CNAME', async () => {
-  const plan = await siteCreateProvisioningPlan(preview({ wwwMode: 'independent' }), dependencies());
-  const records = plan.steps.find((step) => step.id === 'dns_zone').intent.records;
-  assert.equal(records.some((record) => record.key === 'www-alias'), false);
-  assert.equal(records.find((record) => record.key === 'www-runtime-ipv4')?.source, 'runtime');
-  assert.equal(records.find((record) => record.key === 'www-runtime-ipv6')?.type, 'AAAA');
+test('independent www cannot share the parent Website DNS provisioning operation', async () => {
+  await assert.rejects(
+    siteCreateProvisioningPlan(preview({ wwwMode: 'independent' }), dependencies()),
+    /Independent www provisioning requires a dedicated Website operation/,
+  );
 });
 
 test('subdomain Website does not create a delegated authoritative zone implicitly', async () => {

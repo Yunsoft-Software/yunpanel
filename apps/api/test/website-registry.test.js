@@ -182,7 +182,7 @@ test('Managed Compose Website persists explicit service identity without transie
   assert.equal(website.proxyTarget, null);
 
   const persisted = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(persisted.version, 4);
+  assert.equal(persisted.version, 5);
   assert.deepEqual(persisted.websites[0].managedComposeBinding, managedComposeBinding);
   assert.equal(persisted.websites[0].proxyTarget, null);
   assert.equal(JSON.stringify(persisted).includes('18080'), false);
@@ -367,7 +367,7 @@ test('v1 Website state migrates once to current revisioned state without changin
     managedComposeBinding: null,
   });
   const migrated = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(migrated.version, 4);
+  assert.equal(migrated.version, 5);
   assert.equal(migrated.websites[0].revision, 1);
   assert.equal(migrated.websites[0].proxyTarget, null);
   assert.equal(migrated.websites[0].dockerWorkloadId, null);
@@ -404,7 +404,7 @@ test('v2 Website state migrates through Docker identity and Managed Compose iden
     managedComposeBinding: null,
   });
   const migrated = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(migrated.version, 4);
+  assert.equal(migrated.version, 5);
   assert.equal(migrated.websites[0].dockerWorkloadId, null);
   assert.equal(migrated.websites[0].managedComposeBinding, null);
 });
@@ -425,7 +425,7 @@ test('v3 Website state adds a null Managed Compose identity without changing ext
   await reopened.init();
   assert.deepEqual(await reopened.getWebsite(created.id), { ...created, managedComposeBinding: null });
   const migrated = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(migrated.version, 4);
+  assert.equal(migrated.version, 5);
   assert.equal(migrated.websites[0].managedComposeBinding, null);
 });
 

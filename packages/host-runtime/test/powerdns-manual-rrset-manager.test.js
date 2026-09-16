@@ -30,6 +30,14 @@ function zone(rrsets, serial = 2026091601) {
   });
 }
 
+function soa(serial = 2026091601) {
+  return rrset({
+    name: 'example.com.',
+    type: 'SOA',
+    contents: [`ns1.example.com. hostmaster.example.com. ${serial} 3600 900 1209600 300`],
+  });
+}
+
 function response(status = 204) {
   return { status, ok: status >= 200 && status < 300 };
 }
@@ -54,8 +62,9 @@ test('manual RRset manager converts PowerDNS wire content into a safe public zon
 });
 
 test('manual RRset apply PATCHes an unmanaged record and verifies post-condition', async () => {
-  const before = zone([]);
+  const before = zone([soa()]);
   const after = zone([
+    soa(2026091602),
     rrset({ name: 'custom.example.com.', type: 'A', contents: ['198.51.100.44'] }),
   ], 2026091602);
   const inspections = [before, after];
@@ -79,9 +88,21 @@ test('manual RRset apply PATCHes an unmanaged record and verifies post-condition
   assert.equal(result.record.owner, 'custom.example.com');
   assert.equal(requests.length, 1);
   const body = JSON.parse(requests[0].options.body);
+  assert.equal(body.rrsets.length, 2);
   assert.equal(body.rrsets[0].changetype, 'REPLACE');
   assert.deepEqual(body.rrsets[0].comments, []);
   assert.deepEqual(body.rrsets[0].records, [{ content: '198.51.100.44', disabled: false }]);
+  assert.deepEqual(body.rrsets[1], {
+    name: 'example.com.',
+    type: 'SOA',
+    ttl: 300,
+    changetype: 'REPLACE',
+    records: [{
+      content: 'ns1.example.com. hostmaster.example.com. 2026091602 3600 900 1209600 300',
+      disabled: false,
+    }],
+    comments: [],
+  });
 });
 
 test('manual RRset apply is a no-op when the unmanaged live RRset already matches', async () => {
@@ -134,10 +155,11 @@ test('manual RRset manager refuses to overwrite or delete YunPanel-managed RRset
 
 test('manual RRset delete PATCHes only the requested unmanaged owner/type and verifies absence', async () => {
   const existing = rrset({ name: 'custom.example.com.', type: 'TXT', contents: ['"remove-me"'] });
-  const inspections = [zone([existing]), zone([], 2026091602)];
+  const after = zone([soa(2026091602)], 2026091602);
+  const inspections = [zone([soa(), existing]), after];
   const requests = [];
   const manager = createPowerDnsManualRrsetManager({
-    zoneManager: { getZone: async () => inspections.shift() ?? zone([]) },
+    zoneManager: { getZone: async () => inspections.shift() ?? after },
     fetchFn: async (_url, options) => { requests.push(options); return response(); },
   });
 
@@ -145,11 +167,23 @@ test('manual RRset delete PATCHes only the requested unmanaged owner/type and ve
   assert.equal(result.changed, true);
   assert.equal(requests.length, 1);
   const body = JSON.parse(requests[0].body);
+  assert.equal(body.rrsets.length, 2);
   assert.deepEqual(body.rrsets[0], {
     name: 'custom.example.com.',
     type: 'TXT',
     changetype: 'DELETE',
     records: [],
+    comments: [],
+  });
+  assert.deepEqual(body.rrsets[1], {
+    name: 'example.com.',
+    type: 'SOA',
+    ttl: 300,
+    changetype: 'REPLACE',
+    records: [{
+      content: 'ns1.example.com. hostmaster.example.com. 2026091602 3600 900 1209600 300',
+      disabled: false,
+    }],
     comments: [],
   });
 });

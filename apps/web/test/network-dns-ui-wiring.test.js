@@ -30,5 +30,5 @@ test('Network DNS identity uses typed confirmation and does not silently sync ex
   assert.match(panel, /confirmation=\{preview\.confirmation\}/);
   assert.match(panel, /mevcut zonelar otomatik sync edilmez/);
   assert.match(panel, /<ConfirmDialog title="PowerDNS authoritative uygula"/);
-  assert.match(panel, /existingZoneSyncAutomatic/);
+  assert.match(panel, /mevcut zone'lar otomatik template sync edilmez/);
 });

@@ -18,7 +18,7 @@ test('empty file-backed control-plane stores materialize private versioned state
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const stores = [
-    ['website-registry.json', { version: 4, websites: [] }, (filePath) => createWebsiteRegistry({ filePath })],
+    ['website-registry.json', { version: 5, websites: [] }, (filePath) => createWebsiteRegistry({ filePath })],
     ['website-migration-policy.json', {
       version: 1, mode: 'compatibility', enforcedDigest: null, transitionedAt: null,
     }, (filePath) => createWebsiteMigrationPolicyStore({ filePath })],

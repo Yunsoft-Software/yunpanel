@@ -47,7 +47,7 @@ test('current docs expose the implemented agentless migration and deferred-desig
 
   assert.match(docs.get('README.md'), /local-runtime\.mjs validate <server-uuid>/);
   assert.match(docs.get('README.md'), /create --backup-dir \/var\/backups\/yunpanel\/migration-<timestamp> --confirm/);
-  assert.match(docs.get('plan.md'), /Mevcut durable `WebsiteProvisioningPlan`ı kalan gerçek kaynak adapter'larına bağla/);
+  assert.match(docs.get('plan.md'), /SFTP credential desired state\/materialization'ını Website provisioning ownership\/evidence/);
   assert.match(docs.get('todo.md'), /Yeni durable Website provisioning store ile API restart testi yap/);
   assert.doesNotMatch(docs.get('plan.md'), /Kalan legacy hata yollarını güvenli tanı kataloğuna bağla/);
   assert.match(docs.get('agents.md'), /DEFERRED — Enterprise UI\/UX standardı/);

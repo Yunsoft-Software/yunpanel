@@ -29,6 +29,14 @@ function zone(rrsets, serial) {
   });
 }
 
+function soa(serial = 2026091601) {
+  return rrset({
+    name: 'example.com.',
+    type: 'SOA',
+    contents: [`ns1.example.com. hostmaster.example.com. ${serial} 3600 900 1209600 300`],
+  });
+}
+
 test('manual DNS mutation rejects a stale expected SOA serial before PATCH', async () => {
   let patchCalls = 0;
   const manager = createPowerDnsManualRrsetManager({
@@ -51,8 +59,9 @@ test('manual DNS mutation rejects a stale expected SOA serial before PATCH', asy
 });
 
 test('manual DNS apply accepts an uncertain PATCH when post-condition proves the RRset exists', async () => {
-  const before = zone([], 2026091601);
+  const before = zone([soa()], 2026091601);
   const after = zone([
+    soa(2026091602),
     rrset({ name: 'app.example.com.', type: 'A', contents: ['198.51.100.44'] }),
   ], 2026091602);
   const inspections = [before, after];
@@ -74,8 +83,8 @@ test('manual DNS apply accepts an uncertain PATCH when post-condition proves the
 
 test('manual DNS delete accepts an uncertain PATCH when post-condition proves absence', async () => {
   const existing = rrset({ name: 'app.example.com.', type: 'TXT', contents: ['"delete-me"'] });
-  const before = zone([existing], 2026091601);
-  const after = zone([], 2026091602);
+  const before = zone([soa(), existing], 2026091601);
+  const after = zone([soa(2026091602)], 2026091602);
   const inspections = [before, after];
   const manager = createPowerDnsManualRrsetManager({
     zoneManager: { getZone: async () => inspections.shift() ?? after },

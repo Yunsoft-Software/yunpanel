@@ -111,7 +111,13 @@ function SiteWorkspace({ websiteId, tab }) {
     {tab === 'domains' && <DomainOperations domain={domain} />}
     {tab === 'dns' && <DnsPanel key={domain.id} domain={domain} domains={domains.items} canManage={canManage} />}
     {tab === 'ssl' && <><CollectionNotice resource={certificates} label="Sertifikalar" /><SslOperations key={domain.id} domain={domain} /></>}
-    {tab === 'logs' && <><LogsPanel application={application} domain={domain} server={server} /><Section title="Site işlem kayıtları"><CollectionNotice resource={jobs} label="İşlem kayıtları" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={50} />}</Section>}
+    {tab === 'logs' && <>
+      <LogsPanel application={application} domain={domain} server={server} />
+      <Section title="Site işlem kayıtları">
+        <CollectionNotice resource={jobs} label="İşlem kayıtları" />
+        {['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={50} />}
+      </Section>
+    </>}
     {tab === 'terminal' && (domain.websiteId ? <TerminalPanel
       title="Site terminali"
       description={`${domain.primaryDomain} için dedicated site kullanıcısında interaktif PTY.`}

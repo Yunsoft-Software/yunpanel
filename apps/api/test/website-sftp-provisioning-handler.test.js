@@ -39,7 +39,7 @@ test('SFTP handler forwards only canonical Website identity to host manager', as
   }
 });
 
-test('SFTP handler rejects extra caller-controlled filesystem fields', async () => {
+test('SFTP handler rejects extra caller-controlled filesystem fields', () => {
   const handler = createWebsiteSftpProvisioningHandler({
     sftpManager: {
       async apply() { return { satisfied: true }; },
@@ -49,8 +49,8 @@ test('SFTP handler rejects extra caller-controlled filesystem fields', async () 
     },
   });
 
-  await assert.rejects(
-    handler.apply({ intent: { ...intent, root: '/tmp/escape' }, operationId }),
+  assert.throws(
+    () => handler.apply({ intent: { ...intent, root: '/tmp/escape' }, operationId }),
     (error) => error instanceof WebsiteSftpProvisioningError && error.code === 'website_sftp_intent_invalid',
   );
 });

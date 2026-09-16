@@ -84,12 +84,30 @@ function completeStaticManager(overrides = {}) {
   };
 }
 
+function staticPublishIsolationManager() {
+  return {
+    apply: async () => ({
+      satisfied: true,
+      adapter: 'static-publish-isolation',
+      releaseCount: 1,
+      currentRelease: `/var/www/yunpanel/apps/${applicationId}/current`,
+    }),
+    inspect: async () => ({
+      satisfied: true,
+      adapter: 'static-publish-isolation',
+      releaseCount: 1,
+      currentRelease: `/var/www/yunpanel/apps/${applicationId}/current`,
+    }),
+  };
+}
+
 function runtime(filePath, staticDeploymentManager) {
   return createWebsiteProvisioningRuntime({
     filePath,
     identityManager: identityManager(),
     passengerSiteManager: passengerSiteManager(),
     staticDeploymentManager: completeStaticManager(staticDeploymentManager),
+    staticPublishIsolationManager: staticPublishIsolationManager(),
     nginxManager: nginxManager(),
   });
 }
@@ -103,7 +121,7 @@ function appliedEvidence() {
     deploymentId: operationId,
     previousReleaseId,
     currentRelease: `/var/www/yunpanel/apps/${applicationId}/current`,
-    unixUser: 'yunapp-0123456789ab',
+    unixUser: 'yunapp-4dc352e64a14',
     homeDirectory: `/var/lib/yunpanel/data/${applicationId}`,
   });
 }

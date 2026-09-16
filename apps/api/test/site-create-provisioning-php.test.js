@@ -77,6 +77,7 @@ test('PHP Website provisioning orders identity, PHP-FPM and Nginx with no raw so
     'website_metadata',
     'primary_domain_metadata',
     'unix_identity',
+    'php_bootstrap',
     'php_runtime',
     'nginx',
     'domain_activation',
@@ -97,6 +98,16 @@ test('PHP Website provisioning orders identity, PHP-FPM and Nginx with no raw so
   });
   assert.equal(runtime.compensation.state, 'pending');
 
+  const bootstrap = plan.steps.find((step) => step.id === 'php_bootstrap');
+  assert.deepEqual(bootstrap.intent, {
+    adapter: 'php-bootstrap',
+    websiteId,
+    applicationId,
+    unixUser,
+    documentRoot,
+  });
+  assert.equal(bootstrap.compensation.state, 'pending');
+
   const nginx = plan.steps.find((step) => step.id === 'nginx');
   assert.equal(nginx.intent.targetType, 'php');
   assert.equal(nginx.intent.target.adapter, 'php-fpm');
@@ -110,7 +121,7 @@ test('PHP Website provisioning rejects document roots outside canonical current 
 
   assert.throws(
     () => siteCreateProvisioningPlan(preview),
-    /outside the managed current release/,
+    /PHP Website bootstrap document root does not match the managed current\/public path/,
   );
 });
 

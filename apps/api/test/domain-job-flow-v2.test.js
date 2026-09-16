@@ -117,16 +117,19 @@ test('completed jobs are not observable before domain reconciliation finishes', 
   let releaseReconciliation;
   const reconciliationEntered = new Promise((resolve) => { enterReconciliation = resolve; });
   const reconciliationReleased = new Promise((resolve) => { releaseReconciliation = resolve; });
-  domainRegistry.markStaged = async (...args) => {
-    enterReconciliation();
-    await reconciliationReleased;
-    return originalMarkStaged(...args);
-  };
+  const controlledDomainRegistry = Object.freeze({
+    ...domainRegistry,
+    async markStaged(...args) {
+      enterReconciliation();
+      await reconciliationReleased;
+      return originalMarkStaged(...args);
+    },
+  });
   const jobRegistry = createJobRegistry();
   const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
-    domainRegistry,
+    domainRegistry: controlledDomainRegistry,
     jobRegistry,
   }));
 

@@ -107,6 +107,7 @@ test('manual DNS delete normalizes an in-zone FQDN and carries expected serial',
     owner: 'custom.example.com',
     type: 'TXT',
     expectedSerial: 2026091601,
+    notifySecondaries: false,
   });
 });
 
