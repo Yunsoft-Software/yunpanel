@@ -43,12 +43,20 @@ function dsIntersection(left, right) {
   return Object.freeze(right.filter((entry) => expected.has(entry)));
 }
 
+function localSigningReady(authoritative) {
+  return authoritative?.dnssec === true
+    && authoritative?.ready === true
+    && Array.isArray(authoritative.ds)
+    && authoritative.ds.length > 0;
+}
+
 function statusFor(authoritative, parent) {
   if (authoritative.dnssec !== true) {
     if (parent.status === 'present') return 'parent_ds_without_dnssec';
     if (parent.status === 'unverifiable') return 'insecure_parent_unverifiable';
     return 'insecure';
   }
+  if (!localSigningReady(authoritative)) return 'signing_material_incomplete';
   if (parent.status === 'unverifiable') return 'parent_ds_unverifiable';
   if (parent.status === 'absent') return 'pending_parent_ds';
   return dsIntersection(authoritative.ds, parent.records).length > 0 ? 'secure_ready' : 'parent_ds_mismatch';
@@ -56,6 +64,7 @@ function statusFor(authoritative, parent) {
 
 function publicState(domain, authoritative, parent) {
   const matches = dsIntersection(authoritative.ds, parent.records);
+  const localReady = localSigningReady(authoritative);
   const status = statusFor(authoritative, parent);
   return Object.freeze({
     version: 1,
@@ -63,6 +72,7 @@ function publicState(domain, authoritative, parent) {
     serverId: domain.serverId,
     zoneName: domain.primaryDomain,
     dnssec: authoritative.dnssec,
+    localReady,
     status,
     secureReady: status === 'secure_ready',
     serial: authoritative.serial,
@@ -76,7 +86,7 @@ function publicState(domain, authoritative, parent) {
       checkedAt: parent.checkedAt,
     }),
     registrar: Object.freeze({
-      addDs: authoritative.dnssec === true ? authoritative.ds : Object.freeze([]),
+      addDs: localReady ? authoritative.ds : Object.freeze([]),
       removeDsBeforeDisable: authoritative.dnssec === true && parent.status === 'present' ? parent.records : Object.freeze([]),
     }),
   });
@@ -98,6 +108,12 @@ function previewBlockers(state, enabled) {
         records: Object.freeze([]),
       }));
     }
+  } else if (state.dnssec === true && state.localReady !== true) {
+    blockers.push(Object.freeze({
+      code: 'dnssec_signing_material_incomplete',
+      message: 'DNSSEC is marked enabled but local signing keys/DS material are incomplete; repair the signing state before continuing.',
+      records: Object.freeze([]),
+    }));
   } else if (state.dnssec === false && state.parent.status === 'present'
     && state.parent.matchingRecords.length === 0) {
     blockers.push(Object.freeze({
@@ -170,7 +186,10 @@ export function createDnsZoneDnssecService({
     }
     const state = await status({ domainId });
     const blockers = previewBlockers(state, enabled);
-    const noChanges = state.dnssec === enabled;
+    const targetSatisfied = enabled
+      ? state.dnssec === true && state.localReady === true
+      : state.dnssec === false;
+    const noChanges = targetSatisfied;
     const payload = Object.freeze({
       version: 1,
       domainId: state.domainId,
@@ -178,6 +197,7 @@ export function createDnsZoneDnssecService({
       zoneName: state.zoneName,
       targetEnabled: enabled,
       currentDnssec: state.dnssec,
+      currentLocalReady: state.localReady,
       currentDs: state.ds,
       parentStatus: state.parent.status,
       parentRecords: state.parent.records,
@@ -216,7 +236,7 @@ export function createDnsZoneDnssecService({
     }
     if (plan.noChanges) throw new DnsZoneDnssecError('dnssec_no_changes', 'DNSSEC already has the requested state', 409);
     if (!plan.applyAllowed) {
-      throw new DnsZoneDnssecError('dnssec_apply_blocked', 'DNSSEC mutation is blocked by parent delegation state', 409);
+      throw new DnsZoneDnssecError('dnssec_apply_blocked', 'DNSSEC mutation is blocked by signing or parent delegation state', 409);
     }
     if (confirmation !== plan.confirmation) {
       throw new DnsZoneDnssecError('dnssec_confirmation_invalid', 'Exact DNSSEC confirmation is required', 409);
@@ -256,6 +276,7 @@ export const dnsZoneDnssecInternals = Object.freeze({
   digest,
   rootDomain,
   dsIntersection,
+  localSigningReady,
   statusFor,
   publicState,
   previewBlockers,
