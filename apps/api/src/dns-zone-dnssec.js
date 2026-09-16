@@ -76,7 +76,7 @@ function publicState(domain, authoritative, parent) {
       checkedAt: parent.checkedAt,
     }),
     registrar: Object.freeze({
-      addDs: authoritative.dnssec === true && parent.status !== 'present' ? authoritative.ds : Object.freeze([]),
+      addDs: authoritative.dnssec === true ? authoritative.ds : Object.freeze([]),
       removeDsBeforeDisable: authoritative.dnssec === true && parent.status === 'present' ? parent.records : Object.freeze([]),
     }),
   });
@@ -141,6 +141,11 @@ export function createDnsZoneDnssecService({
       throw new DnsZoneDnssecError('dnssec_powerdns_secret_invalid', 'PowerDNS API credential state is invalid', 409);
     }
     return Object.freeze({ domain, apiKey: secret.apiKey });
+  }
+
+  async function inspectParent(domain) {
+    try { return await parentDsInspector.inspect({ domain }); }
+    catch (error) { throw hostFailure(error); }
   }
 
   async function inspectContext(current) {
@@ -218,6 +223,17 @@ export function createDnsZoneDnssecService({
     }
 
     const current = await context(domainId);
+    if (!enabled) {
+      const immediateParent = await inspectParent(current.domain.primaryDomain);
+      if (immediateParent.status !== 'absent') {
+        throw new DnsZoneDnssecError(
+          'dnssec_parent_state_changed',
+          'Parent DS state changed or became unverifiable before DNSSEC disable; request a new preview',
+          409,
+        );
+      }
+    }
+
     let authoritative;
     try {
       authoritative = await (enabled ? manager.enable : manager.disable)({
@@ -225,9 +241,7 @@ export function createDnsZoneDnssecService({
         apiKey: current.apiKey,
       });
     } catch (error) { throw hostFailure(error); }
-    let parent;
-    try { parent = await parentDsInspector.inspect({ domain: current.domain.primaryDomain }); }
-    catch (error) { throw hostFailure(error); }
+    const parent = await inspectParent(current.domain.primaryDomain);
     return Object.freeze({
       applied: true,
       changed: authoritative.changed === true,
