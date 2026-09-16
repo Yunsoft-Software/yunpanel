@@ -8,6 +8,7 @@ import { renderDnsZoneDesiredState } from './dns-zone-desired-state.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const REAPPLY_MANAGED_SOURCES = new Set(['template', 'runtime']);
+const PRIMARY_KINDS = new Set(['Primary', 'Master']);
 
 export class DnsZoneReapplyError extends Error {
   constructor(code, message, status = 400) {
@@ -179,6 +180,33 @@ function diffZone(existing, records) {
   });
 }
 
+function topologyState(existing, secondaryDns) {
+  const configured = Array.isArray(secondaryDns) && secondaryDns.length > 0;
+  if (!configured) return Object.freeze({ configured: false, primaryKindChangeRequired: false, blocker: null });
+  if (PRIMARY_KINDS.has(existing.kind)) {
+    return Object.freeze({ configured: true, primaryKindChangeRequired: false, blocker: null });
+  }
+  if (existing.kind === 'Native') {
+    return Object.freeze({ configured: true, primaryKindChangeRequired: true, blocker: null });
+  }
+  return Object.freeze({
+    configured: true,
+    primaryKindChangeRequired: false,
+    blocker: Object.freeze({
+      code: 'zone_kind_conflict',
+      affectsDesired: true,
+      owner: existing.zoneName,
+      type: 'SOA',
+      ttl: null,
+      source: 'runtime',
+      key: null,
+      templateVersion: null,
+      desiredSource: 'runtime',
+      currentKind: existing.kind ?? null,
+    }),
+  });
+}
+
 async function mapped(operation, fallbackCode, fallbackMessage) {
   try { return await operation(); }
   catch (error) {
@@ -251,6 +279,8 @@ export function createDnsZoneReapplyService({
       throw new DnsZoneReapplyError('dns_zone_reapply_serial_invalid', 'Current authoritative SOA serial is unavailable', 409);
     }
 
+    const secondaryDns = Object.freeze([...(identity.settings?.secondaryDns ?? [])]);
+    const topology = topologyState(existing, secondaryDns);
     const observedDesired = renderDnsZoneDesiredState({
       zoneName: domain.primaryDomain,
       template,
@@ -260,7 +290,11 @@ export function createDnsZoneReapplyService({
     const observedRecords = recordsForDomain(domain, observedDesired);
     const initialDiff = diffZone(existing, observedRecords);
     const desiredBlocked = initialDiff.blockers.some((entry) => entry.affectsDesired === true);
-    const changeRequired = initialDiff.changes.length > 0 || initialDiff.conflicts.length > 0 || desiredBlocked;
+    const changeRequired = initialDiff.changes.length > 0
+      || initialDiff.conflicts.length > 0
+      || desiredBlocked
+      || topology.primaryKindChangeRequired
+      || topology.blocker !== null;
     const serial = changeRequired ? nextSerial(existing.serial, now) : existing.serial;
     const desired = serial === existing.serial ? observedDesired : renderDnsZoneDesiredState({
       zoneName: domain.primaryDomain,
@@ -270,7 +304,10 @@ export function createDnsZoneReapplyService({
     });
     const records = serial === existing.serial ? observedRecords : recordsForDomain(domain, desired);
     const zoneDiff = serial === existing.serial ? initialDiff : diffZone(existing, records);
-    const blockers = zoneDiff.blockers;
+    const blockers = Object.freeze([
+      ...zoneDiff.blockers,
+      ...(topology.blocker ? [topology.blocker] : []),
+    ]);
     const applyAllowed = changeRequired
       && zoneDiff.conflicts.length === 0
       && blockers.length === 0;
@@ -280,6 +317,9 @@ export function createDnsZoneReapplyService({
       serverId: domain.serverId,
       domainRevision: domain.desiredRevision ?? null,
       zoneName: domain.primaryDomain,
+      zoneKind: existing.kind ?? null,
+      primaryKindChangeRequired: topology.primaryKindChangeRequired,
+      secondaryDns,
       templateVersion: desired.templateVersion,
       templateSnapshotDigest: digest(desired.templateSnapshot),
       dnsIdentityRevision: desired.dnsIdentityRevision,
@@ -317,7 +357,7 @@ export function createDnsZoneReapplyService({
     }
     const plan = await preview({ domainId });
     if (plan.noChanges) {
-      throw new DnsZoneReapplyError('dns_zone_reapply_no_changes', 'DNS zone already matches the current Zone Template', 409);
+      throw new DnsZoneReapplyError('dns_zone_reapply_no_changes', 'DNS zone already matches the current Zone Template and secondary DNS topology', 409);
     }
     if (plan.conflicts.length > 0) {
       throw new DnsZoneReapplyError('dns_zone_reapply_manual_conflict', 'Manual DNS RRsets conflict with the current Zone Template', 409);
@@ -325,7 +365,7 @@ export function createDnsZoneReapplyService({
     if (plan.blockers.length > 0) {
       throw new DnsZoneReapplyError(
         'dns_zone_reapply_managed_source_blocked',
-        'DNS zone contains managed sources that this reapply operation cannot safely reconcile yet',
+        'DNS zone contains managed sources or authority topology that this reapply operation cannot safely reconcile',
         409,
       );
     }
@@ -343,6 +383,7 @@ export function createDnsZoneReapplyService({
         apiKey: secret.apiKey,
         records: plan.records,
         dnssec: plan.dnssec,
+        notifySecondaries: plan.secondaryDns.length > 0,
       }),
       'dns_zone_reapply_apply_failed',
       'DNS zone reapply failed',
@@ -351,6 +392,11 @@ export function createDnsZoneReapplyService({
       domainId: plan.domainId,
       serverId: plan.serverId,
       zoneName: plan.zoneName,
+      zoneKind: result.kind ?? plan.zoneKind,
+      primaryKindChanged: result.primaryKindChanged === true,
+      secondaryDns: plan.secondaryDns,
+      notifiedSerial: result.notifiedSerial ?? result.notification?.notifiedSerial ?? null,
+      notifyAccepted: result.notification?.accepted === true,
       templateVersion: plan.templateVersion,
       dnsIdentityRevision: plan.dnsIdentityRevision,
       serial: result.serial ?? plan.nextSerial,
@@ -372,5 +418,6 @@ export const dnsZoneReapplyInternals = Object.freeze({
   publicRrset,
   desiredRrsetMap,
   diffZone,
+  topologyState,
   digest,
 });
