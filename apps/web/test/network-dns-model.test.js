@@ -5,6 +5,7 @@ import {
   delegationPresentation,
   dnsIdentityDraft,
   dnsIdentitySettings,
+  publicReachabilityPresentation,
 } from '../src/workspace/network-dns-model.js';
 
 const identity = {
@@ -58,10 +59,14 @@ test('Network DNS model blocks missing primary identity and duplicate secondary 
   assert.throws(() => dnsIdentitySettings(duplicate), /tekrar etmemeli/);
 });
 
-test('Network DNS status presentation never confuses local PowerDNS health with delegation readiness', () => {
-  assert.deepEqual(authoritativePresentation({ configured: true, ready: true }), { state: 'active', label: 'Local authoritative hazır' });
-  assert.equal(authoritativePresentation({ configured: false, ready: false }).state, 'off');
-  assert.equal(authoritativePresentation({ configured: true, ready: false, reason: 'powerdns_tcp_unavailable' }).state, 'warning');
+test('Network DNS status presentation keeps local, public and delegation readiness independent', () => {
+  assert.deepEqual(authoritativePresentation({ configured: true, localReady: true, ready: true }), { state: 'active', label: 'Local authoritative hazır' });
+  assert.equal(authoritativePresentation({ configured: false, localReady: false, ready: false }).state, 'off');
+  assert.equal(authoritativePresentation({ configured: true, localReady: false, ready: false, reason: 'powerdns_tcp_unavailable' }).state, 'warning');
+  assert.deepEqual(publicReachabilityPresentation({ publicReachability: { status: 'ready' } }), { state: 'active', label: 'Public UDP/TCP 53 hazır' });
+  assert.equal(publicReachabilityPresentation({ publicReachability: { status: 'unverified' } }).state, 'pending');
+  assert.equal(publicReachabilityPresentation({ publicReachability: { status: 'unreachable' } }).state, 'error');
+  assert.equal(publicReachabilityPresentation({ publicReachability: { status: 'unverifiable' } }).state, 'warning');
   assert.deepEqual(delegationPresentation('ready'), { state: 'active', label: 'Delegation hazır' });
   assert.equal(delegationPresentation('pending_glue').state, 'warning');
   assert.equal(delegationPresentation('pending_delegation').state, 'pending');
