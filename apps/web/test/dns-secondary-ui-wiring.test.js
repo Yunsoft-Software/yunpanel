@@ -18,6 +18,7 @@ test('Domain DNS workspace exposes secondary sync evidence without a mutation pa
   assert.match(secondaryPanel, /target\.observedSerial/);
   assert.match(secondaryPanel, /target\.errorCode/);
   assert.match(secondaryPanel, /otomatik Zone Template re-apply/);
-  assert.match(model, /recovery: ready \|\| status === 'disabled' \? 'none' : 'observe_only'/);
+  assert.match(model, /value\?\.policy\?\.healthGate/);
+  assert.match(model, /value\?\.policy\?\.recovery/);
   assert.doesNotMatch(secondaryPanel, /applyDns|previewDns|apiKey|privateKey|window\.(?:alert|confirm|prompt)/i);
 });
