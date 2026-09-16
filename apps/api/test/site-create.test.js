@@ -141,7 +141,7 @@ test('new Node site is Passenger-first and never allocates a localhost backend p
     operationId: NODE_OPERATION,
     name: 'Node API',
     primaryDomain: 'api.example.test',
-    wwwMode: 'independent',
+    wwwMode: 'none',
     httpsMode: 'off',
     source: { kind: 'new_node', repositoryUrl: 'https://github.com/example/node-api', runtime: {} },
   });
@@ -160,11 +160,7 @@ test('new Node site is Passenger-first and never allocates a localhost backend p
   assert.equal(created.application.proxyTarget, null);
   assert.equal(created.primaryDomain.targetType, 'passenger');
   assert.deepEqual(created.primaryDomain.target, { applicationId: created.application.id });
-  assert.equal(created.wwwDomain.targetType, 'passenger');
-  assert.deepEqual(created.wwwDomain.target, { applicationId: created.application.id });
-  assert.equal(created.wwwDomain.primaryDomain, 'www.api.example.test');
-  assert.equal(created.wwwDomain.parentDomainId, created.primaryDomain.id);
-  assert.equal(created.wwwDomain.websiteId, created.website.id);
+  assert.equal(created.wwwDomain, null);
 });
 
 test('existing Application binding stays explicit and cannot be shared by multiple Websites', async () => {
