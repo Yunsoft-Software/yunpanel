@@ -3,6 +3,7 @@ import { DomainValidationError, normalizeDomainSet } from '@yunpanel/shared';
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const COMMENT_PREFIX = 'yunpanel:v1:';
 const SUPPORTED_TYPES = new Set(['SOA', 'NS', 'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'CAA', 'SRV']);
+const PRIMARY_KINDS = new Set(['Primary', 'Master']);
 
 export class PowerDnsZoneManagerError extends Error {
   constructor(code, message, status = 503) {
@@ -205,6 +206,14 @@ function serialFromRrsets(rrsets, normalizedZone) {
   return Number.isSafeInteger(serial) && serial > 0 ? serial : null;
 }
 
+function serialMetadata(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function primaryKind(value) {
+  return PRIMARY_KINDS.has(value);
+}
+
 export function createPowerDnsZoneManager({
   fetchFn = globalThis.fetch,
   apiAddress = '127.0.0.1',
@@ -261,7 +270,53 @@ export function createPowerDnsZoneManager({
       kind: payload.kind ?? null,
       dnssec: payload.dnssec === true,
       serial: serialFromRrsets(rrsets, normalizedZone),
+      notifiedSerial: serialMetadata(payload.notified_serial),
       rrsets: Object.freeze(rrsets),
+    });
+  }
+
+  async function ensurePrimaryZone(existing, normalizedZone, rawApiKey) {
+    if (!existing) return Object.freeze({ zone: existing, changed: false });
+    if (primaryKind(existing.kind)) return Object.freeze({ zone: existing, changed: false });
+    if (existing.kind !== 'Native') {
+      throw new PowerDnsZoneManagerError(
+        'powerdns_zone_kind_conflict',
+        `PowerDNS zone is ${existing.kind ?? 'unknown'} and cannot be silently converted to a primary zone`,
+        409,
+      );
+    }
+    await request(`/zones/${encodeURIComponent(fqdn(normalizedZone))}`, {
+      method: 'PUT',
+      key: rawApiKey,
+      body: { kind: 'Primary' },
+    });
+    const after = await getZone(normalizedZone, rawApiKey);
+    if (!after || !primaryKind(after.kind)) {
+      throw new PowerDnsZoneManagerError('powerdns_zone_primary_kind_unverified', 'PowerDNS primary zone conversion could not be verified');
+    }
+    return Object.freeze({ zone: after, changed: true });
+  }
+
+  async function notifyZone(normalizedZone, rawApiKey) {
+    const current = await getZone(normalizedZone, rawApiKey);
+    if (!current) throw new PowerDnsZoneManagerError('powerdns_zone_not_found', 'PowerDNS zone was not found', 404);
+    if (!primaryKind(current.kind)) {
+      throw new PowerDnsZoneManagerError('powerdns_zone_primary_kind_required', 'PowerDNS NOTIFY requires a primary zone', 409);
+    }
+    await request(`/zones/${encodeURIComponent(fqdn(normalizedZone))}/notify`, {
+      method: 'PUT',
+      key: rawApiKey,
+    });
+    const after = await getZone(normalizedZone, rawApiKey);
+    if (!after) throw new PowerDnsZoneManagerError('powerdns_zone_notify_unverified', 'PowerDNS zone disappeared after NOTIFY');
+    return Object.freeze({
+      accepted: true,
+      zoneName: normalizedZone,
+      serial: after.serial,
+      notifiedSerial: after.notifiedSerial,
+      currentSerialDispatched: Number.isSafeInteger(after.serial)
+        && Number.isSafeInteger(after.notifiedSerial)
+        && after.notifiedSerial >= after.serial,
     });
   }
 
@@ -301,8 +356,11 @@ export function createPowerDnsZoneManager({
     return Object.freeze(changes);
   }
 
-  function inspectAgainstDesired(existing, desired) {
+  function inspectAgainstDesired(existing, desired, { requirePrimary = false } = {}) {
     if (!existing) return Object.freeze({ satisfied: false, reason: 'powerdns_zone_missing' });
+    if (requirePrimary && !primaryKind(existing.kind)) {
+      return Object.freeze({ satisfied: false, reason: 'powerdns_zone_primary_kind_required', kind: existing.kind });
+    }
     const existingMap = new Map(existing.rrsets.map((rrset) => [rrsetKey(rrset), rrset]));
     for (const [key, wanted] of desired.entries()) {
       const current = existingMap.get(key);
@@ -317,34 +375,37 @@ export function createPowerDnsZoneManager({
       satisfied: true,
       adapter: 'powerdns-authoritative-api',
       zoneName: existing.zoneName,
+      kind: existing.kind,
       serial: existing.serial,
+      notifiedSerial: existing.notifiedSerial,
       dnssec: existing.dnssec,
       managedRrsetCount: desired.size,
       manualRrsetCount: existing.rrsets.filter((rrset) => !rrset.managed).length,
     });
   }
 
-  async function inspect({ zoneName: requestedZoneName, apiKey: rawApiKey, records } = {}) {
+  async function inspect({ zoneName: requestedZoneName, apiKey: rawApiKey, records, notifySecondaries = false } = {}) {
     const normalizedZone = zoneName(requestedZoneName);
     const desired = desiredMap(records ?? []);
     desiredNameservers(normalizedZone, desired);
     const existing = await getZone(normalizedZone, rawApiKey);
-    return inspectAgainstDesired(existing, desired);
+    return inspectAgainstDesired(existing, desired, { requirePrimary: notifySecondaries === true });
   }
 
-  async function apply({ zoneName: requestedZoneName, apiKey: rawApiKey, records, dnssec = false } = {}) {
+  async function apply({ zoneName: requestedZoneName, apiKey: rawApiKey, records, dnssec = false, notifySecondaries = false } = {}) {
     const normalizedZone = zoneName(requestedZoneName);
     const desired = desiredMap(records ?? []);
     const nameservers = desiredNameservers(normalizedZone, desired);
     let existing = await getZone(normalizedZone, rawApiKey);
     let created = false;
+    let primaryKindChanged = false;
     if (!existing) {
       await request('/zones', {
         method: 'POST',
         key: rawApiKey,
         body: {
           name: fqdn(normalizedZone),
-          kind: 'Native',
+          kind: 'Primary',
           masters: [],
           nameservers,
           dnssec: dnssec === true,
@@ -353,6 +414,10 @@ export function createPowerDnsZoneManager({
       created = true;
       existing = await getZone(normalizedZone, rawApiKey);
       if (!existing) throw new PowerDnsZoneManagerError('powerdns_zone_create_unverified', 'PowerDNS zone creation could not be verified');
+    } else if (notifySecondaries === true) {
+      const primary = await ensurePrimaryZone(existing, normalizedZone, rawApiKey);
+      existing = primary.zone;
+      primaryKindChanged = primary.changed;
     }
 
     let changes;
@@ -378,12 +443,22 @@ export function createPowerDnsZoneManager({
       throw error;
     }
 
+    let notification = null;
+    if (notifySecondaries === true && (created || primaryKindChanged || changes.length > 0)) {
+      notification = await notifyZone(normalizedZone, rawApiKey);
+    }
     const verifiedZone = await getZone(normalizedZone, rawApiKey);
-    const verified = inspectAgainstDesired(verifiedZone, desired);
+    const verified = inspectAgainstDesired(verifiedZone, desired, { requirePrimary: notifySecondaries === true });
     if (!verified.satisfied) {
       throw new PowerDnsZoneManagerError('powerdns_zone_apply_unverified', `PowerDNS zone apply could not be verified (${verified.reason})`);
     }
-    return Object.freeze({ ...verified, created, changedRrsetCount: changes.length });
+    return Object.freeze({
+      ...verified,
+      created,
+      primaryKindChanged,
+      changedRrsetCount: changes.length,
+      notification,
+    });
   }
 
   async function compensate({ zoneName: requestedZoneName, apiKey: rawApiKey } = {}) {
@@ -412,11 +487,12 @@ export function createPowerDnsZoneManager({
       : Object.freeze({ satisfied: true, zoneName: normalizedZone, deleted: true });
   }
 
-  return Object.freeze({ inspect, apply, compensate, inspectCompensation, getZone });
+  return Object.freeze({ inspect, apply, compensate, inspectCompensation, getZone, notifyZone });
 }
 
 export const powerDnsZoneManagerInternals = Object.freeze({
   commentPrefix: COMMENT_PREFIX,
+  primaryKinds: Object.freeze([...PRIMARY_KINDS]),
   zoneName,
   fqdn,
   escapeQuoted,
@@ -433,4 +509,6 @@ export const powerDnsZoneManagerInternals = Object.freeze({
   sameManagedMetadata,
   desiredMap,
   serialFromRrsets,
+  serialMetadata,
+  primaryKind,
 });
