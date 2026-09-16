@@ -25,10 +25,11 @@ function identity(revision = 3) {
   });
 }
 
-function fixture({ hostError = null } = {}) {
+function fixture({ hostError = null, publicReachability = null } = {}) {
   let secret = null;
   let currentIdentity = identity();
   const managerCalls = [];
+  const publicCalls = [];
   const service = createPowerDnsAuthoritativeService({
     localServerId: serverId,
     serverRegistry: { async getServer(id) { return id === serverId ? { id, executionMode: 'local' } : null; } },
@@ -59,10 +60,14 @@ function fixture({ hostError = null } = {}) {
         return { satisfied: true, adapter: 'powerdns-authoritative-gsqlite3', apiKey: 'must-not-leak' };
       },
     },
+    publicReachabilityInspector: publicReachability ? {
+      async inspect(input) { publicCalls.push(input); return publicReachability; },
+    } : undefined,
   });
   return {
     service,
     managerCalls,
+    publicCalls,
     setIdentity(value) { currentIdentity = value; },
     rotateSecret() { secret = { revision: (secret?.revision ?? 0) + 1, apiKey: 'B'.repeat(43) }; },
   };
@@ -73,6 +78,8 @@ test('PowerDNS preview is secret-free and apply materializes the API key only fo
   const preview = await fx.service.preview(serverId);
   assert.equal(preview.secretRevision, 0);
   assert.equal(preview.impact.createApiSecret, true);
+  assert.equal(preview.readiness.publicUdp53, 'external-vantage-required');
+  assert.equal(preview.readiness.publicTcp53, 'external-vantage-required');
   assert.equal(Object.hasOwn(preview, 'apiKey'), false);
   assert.match(preview.confirmation, new RegExp(`^apply-powerdns-authoritative:${serverId}:3:[a-f0-9]{64}$`));
 
@@ -81,12 +88,42 @@ test('PowerDNS preview is secret-free and apply materializes the API key only fo
     confirmation: preview.confirmation,
   });
   assert.equal(applied.ready, true);
+  assert.equal(applied.localReady, true);
+  assert.equal(applied.publicReady, false);
+  assert.equal(applied.overallReady, false);
+  assert.equal(applied.publicReachability.status, 'unverified');
+  assert.equal(applied.publicReachability.reason, 'external_vantage_probe_unconfigured');
   assert.equal(applied.secretRevision, 1);
   assert.equal(Object.hasOwn(applied.host, 'apiKey'), false);
   assert.equal(fx.managerCalls.length, 1);
   assert.equal(fx.managerCalls[0][0], 'apply');
   assert.equal(fx.managerCalls[0][1].apiKey, apiKey);
   assert.deepEqual(fx.managerCalls[0][1].secondaryDns, ['203.0.113.20']);
+});
+
+test('PowerDNS status promotes public readiness only from external inspector evidence', async () => {
+  const fx = fixture({
+    publicReachability: Object.freeze({
+      version: 1,
+      status: 'ready',
+      ready: true,
+      udp53: true,
+      tcp53: true,
+      reason: null,
+      vantage: 'external-probe-1',
+      targets: Object.freeze({ ipv4: '203.0.113.10', ipv6: null }),
+      checkedAt: '2026-09-16T01:45:00.000Z',
+    }),
+  });
+  const preview = await fx.service.preview(serverId);
+  await fx.service.apply(serverId, { previewDigest: preview.previewDigest, confirmation: preview.confirmation });
+  const status = await fx.service.status(serverId);
+  assert.equal(status.localReady, true);
+  assert.equal(status.publicReady, true);
+  assert.equal(status.overallReady, true);
+  assert.equal(status.publicReachability.vantage, 'external-probe-1');
+  assert.equal(fx.publicCalls.length, 2);
+  assert.equal(fx.publicCalls[0].serverId, serverId);
 });
 
 test('PowerDNS apply rejects DNS identity drift after preview', async () => {
