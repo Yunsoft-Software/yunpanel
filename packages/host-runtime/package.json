@@ -13,6 +13,7 @@
     "./php-site-container-manager": "./src/php-site-container-manager.js",
     "./powerdns-authoritative-manager": "./src/powerdns-authoritative-manager.js",
     "./powerdns-authoritative-secure-manager": "./src/powerdns-authoritative-secure-manager.js",
+    "./powerdns-authoritative-durable-manager": "./src/powerdns-authoritative-durable-manager.js",
     "./powerdns-authoritative-ready-manager": "./src/powerdns-authoritative-ready-manager.js",
     "./powerdns-socket-health-inspector": "./src/powerdns-socket-health-inspector.js",
     "./powerdns-zone-manager": "./src/powerdns-zone-manager.js",
