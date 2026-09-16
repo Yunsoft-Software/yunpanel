@@ -26,6 +26,7 @@ function applicationIdentity(applicationId, unixUser) {
 export const sftpTemplatePolicy = Object.freeze({
   dataRoot: '/var/lib/yunpanel/data',
   chrootRoot: '/var/lib/yunpanel/sftp-chroots',
+  authorizedKeysRoot: '/etc/ssh/yunpanel-authorized-keys',
   sshdDropInRoot: '/etc/ssh/sshd_config.d',
   systemdRoot: '/etc/systemd/system',
   sshServiceUnit: 'ssh.service',
@@ -42,13 +43,14 @@ export function sftpSitePaths({ applicationId, unixUser } = {}) {
     sourceDirectory,
     chrootDirectory,
     mountDirectory,
+    authorizedKeysPath: path.posix.join(sftpTemplatePolicy.authorizedKeysRoot, identity.unixUser),
     sshdConfigPath: path.posix.join(sftpTemplatePolicy.sshdDropInRoot, `90-yunpanel-sftp-${identity.unixUser}.conf`),
   });
 }
 
 export function renderWebsiteSftpMatch(input = {}) {
   const paths = sftpSitePaths(input);
-  return `Match User ${paths.unixUser}\n  ChrootDirectory ${paths.chrootDirectory}\n  ForceCommand internal-sftp -d /site -u ${sftpTemplatePolicy.umask}\n  PubkeyAuthentication yes\n  PasswordAuthentication no\n  KbdInteractiveAuthentication no\n  PermitTTY no\n  X11Forwarding no\n  AllowTcpForwarding no\n  AllowAgentForwarding no\n\nMatch all\n`;
+  return `Match User ${paths.unixUser}\n  ChrootDirectory ${paths.chrootDirectory}\n  ForceCommand internal-sftp -d /site -u ${sftpTemplatePolicy.umask}\n  PubkeyAuthentication yes\n  AuthorizedKeysFile ${paths.authorizedKeysPath}\n  PasswordAuthentication no\n  KbdInteractiveAuthentication no\n  PermitTTY no\n  X11Forwarding no\n  AllowTcpForwarding no\n  AllowAgentForwarding no\n\nMatch all\n`;
 }
 
 export function renderWebsiteSftpMountUnit(input = {}) {
