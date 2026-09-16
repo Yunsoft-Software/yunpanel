@@ -16,6 +16,10 @@ export function getDnsZone(domainId) {
   return panelRequest(domainDnsPath(domainId, '/zone'));
 }
 
+export function getDnsSecondaryStatus(domainId) {
+  return panelRequest(domainDnsPath(domainId, '/secondary'));
+}
+
 export function saveManualDnsRecord(domainId, input) {
   return panelRequest(domainDnsPath(domainId, '/records'), { method: 'POST', body: input });
 }
