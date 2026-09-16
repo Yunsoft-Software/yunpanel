@@ -23,6 +23,7 @@ test('managed PowerDNS config is authoritative-only with loopback API and gsqlit
   assert.match(content, /^local-port=53$/m);
   assert.match(content, /^version-string=anonymous$/m);
   assert.doesNotMatch(content, /recursor/i);
+  assert.equal(powerDnsTemplatePolicy.packages.includes('bind9-dnsutils'), true);
 
   const preview = previewManagedPowerDnsConfig({ apiKeyHash: hash, secondaryDns: [] });
   assert.equal(preview.api.public, false);
