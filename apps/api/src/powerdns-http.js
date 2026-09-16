@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { createDnsDelegationInspector, DnsDelegationInspectorError } from './dns-delegation-inspector.js';
 import { mountDnsZoneDnssecRoutes } from './dns-zone-dnssec-http.js';
+import { mountDnsZoneSecondaryStatusRoutes } from './dns-zone-secondary-status-http.js';
 import {
   createDnsZoneReapplyOperationRegistry,
   DnsZoneReapplyOperationRegistryError,
@@ -330,6 +331,7 @@ export function mountPowerDnsRoutes(app, {
   }
 
   mountDnsZoneDnssecRoutes(app, { authoritativeService });
+  mountDnsZoneSecondaryStatusRoutes(app, { dnsIdentityRegistry, authoritativeService });
 
   app.get('/api/servers/:serverId/dns/identity', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);
