@@ -26,6 +26,25 @@ test('Secondary DNS presentation fails closed for configured unsynced states', (
   assert.equal(dnsSecondaryPresentation(null).blocking, true);
 });
 
+test('Secondary DNS presentation honors backend health gate, severity and recovery policy', () => {
+  assert.deepEqual(
+    dnsSecondaryPresentation({
+      status: 'primary_kind_required',
+      ready: false,
+      policy: { healthGate: 'block', severity: 'error', recovery: 'manual_intervention' },
+    }),
+    { state: 'error', label: 'Primary zone gerekli', ready: false, blocking: true, recovery: 'manual_intervention' },
+  );
+  assert.deepEqual(
+    dnsSecondaryPresentation({
+      status: 'drift',
+      ready: false,
+      policy: { healthGate: 'block', severity: 'error', recovery: 'observe_only' },
+    }),
+    { state: 'error', label: 'Secondary DNS serial farkı', ready: false, blocking: true, recovery: 'observe_only' },
+  );
+});
+
 test('Secondary DNS target presentation distinguishes stale, ahead and unverifiable serials', () => {
   assert.deepEqual(
     dnsSecondaryTargetPresentation({ status: 'synced', ready: true }),
