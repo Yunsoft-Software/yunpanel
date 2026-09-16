@@ -137,11 +137,13 @@ async function mapped(operation) {
 export function createDnsZoneRecordsService({
   domainRegistry,
   powerDnsSecretRegistry,
+  dnsIdentityRegistry = null,
   localServerId,
   manager = createPowerDnsManualRrsetManager(),
 } = {}) {
   if (!domainRegistry || typeof domainRegistry.getDomain !== 'function'
     || !powerDnsSecretRegistry || typeof powerDnsSecretRegistry.materializeForServer !== 'function'
+    || (dnsIdentityRegistry !== null && typeof dnsIdentityRegistry.getForServer !== 'function')
     || typeof localServerId !== 'string' || !localServerId
     || !manager || typeof manager.getZone !== 'function' || typeof manager.apply !== 'function' || typeof manager.remove !== 'function') {
     throw new DnsZoneRecordsError('dns_zone_records_dependencies_invalid', 'DNS zone record dependencies are unavailable', 503);
@@ -157,6 +159,15 @@ export function createDnsZoneRecordsService({
     return secret.apiKey;
   }
 
+  async function notifySecondaries(domain) {
+    if (!dnsIdentityRegistry) return false;
+    const identity = await mapped(() => dnsIdentityRegistry.getForServer(domain.serverId));
+    if (!identity) {
+      throw new DnsZoneRecordsError('dns_zone_identity_required', 'Server DNS identity is unavailable', 409);
+    }
+    return Array.isArray(identity.settings?.secondaryDns) && identity.settings.secondaryDns.length > 0;
+  }
+
   async function getZone({ domainId } = {}) {
     const domain = await requireDomain(domainId);
     const apiKey = await secretFor(domain);
@@ -168,12 +179,14 @@ export function createDnsZoneRecordsService({
   async function apply({ domainId, input } = {}) {
     const domain = await requireDomain(domainId);
     const normalized = normalizeRecord(domain.primaryDomain, input);
+    const shouldNotify = await notifySecondaries(domain);
     const apiKey = await secretFor(domain);
     const result = await mapped(() => manager.apply({
       zoneName: domain.primaryDomain,
       apiKey,
       expectedSerial: normalized.expectedSerial,
       record: normalized.record,
+      notifySecondaries: shouldNotify,
     }));
     return Object.freeze({ domainId: domain.id, serverId: domain.serverId, ...result });
   }
@@ -181,11 +194,13 @@ export function createDnsZoneRecordsService({
   async function remove({ domainId, input } = {}) {
     const domain = await requireDomain(domainId);
     const normalized = normalizeDelete(domain.primaryDomain, input);
+    const shouldNotify = await notifySecondaries(domain);
     const apiKey = await secretFor(domain);
     const result = await mapped(() => manager.remove({
       zoneName: domain.primaryDomain,
       apiKey,
       ...normalized,
+      notifySecondaries: shouldNotify,
     }));
     return Object.freeze({ domainId: domain.id, serverId: domain.serverId, ...result });
   }
