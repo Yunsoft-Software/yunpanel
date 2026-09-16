@@ -141,16 +141,17 @@ Aşağıdaki isolation parçaları production provisioning path'ine bağlandı; 
 - [x] Manual PowerDNS PATCH sonucu belirsizse provider post-condition yeniden okunur; hedef RRset gerçekten uygulanmış/silinmişse duplicate mutation yerine başarı evidence'ı döner. Public zone view provider TXT/CAA/MX/SRV/SOA wire formatını editlenebilir canonical değerlere çevirir ve ownership source metadata'sını gösterir.
 - [x] PowerDNS DNSSEC adapter'ı local zone signing state'ini `dnssec/api_rectify` metadata'sı üzerinden açıp kapatıyor; cryptokey listesinde yalnız public key metadata/DNSKEY/DS/CDS döndürüyor ve `privatekey` hiçbir public state'e taşınmıyor. Provider cevabı mutation sonrasında koparsa canlı post-condition yeniden okunuyor.
 - [x] Parent DS inspector `/usr/bin/dig` ile DS publication'ını gözlüyor: yalnız `NOERROR` + boş DS gerçek `absent`; published DS `present`; timeout/SERVFAIL/NXDOMAIN/parse belirsizliği `unverifiable` ve destructive DNSSEC disable için fail-closed.
-- [x] Domain DNSSEC status/preview/apply backend'i ve authenticated HTTP yüzeyi mevcut. `secure_ready` yalnız parent'taki en az bir DS local PowerDNS DS ile eşleşince veriliyor; `pending_parent_ds`, `parent_ds_mismatch`, `parent_ds_without_dnssec` ve unverifiable state'ler ayrı raporlanıyor. Enable/disable exact preview digest + typed confirmation istiyor.
+- [x] Domain DNSSEC status/preview/apply backend'i ve authenticated HTTP yüzeyi mevcut. `secure_ready` yalnız parent'taki en az bir DS local PowerDNS DS ile eşleşince veriliyor; `pending_parent_ds`, `parent_ds_mismatch`, `parent_ds_without_dnssec`, `signing_material_incomplete` ve unverifiable state'ler ayrı raporlanıyor. `dnssec=true` tek başına başarı sayılmıyor; local active/published signing material + DS evidence hazır olmalı.
 - [x] DNSSEC disable parent DS verifiably absent olmadan başlamıyor; apply mutation'ından hemen önce parent DS ikinci kez kontrol edilerek preview sonrasında DS'nin yeniden eklenmesi yarışı fail-closed kapatılıyor. Enable eski/uyumsuz parent DS görürse yeni signing state oluşturmadan bloklanıyor.
+- [x] DNSSEC enable/disable private durable operation journal kullanır (`pending/applying/succeeded/failed`). HTTP apply durable operation döndürür; Domain-scoped operation list/status API'si vardır ve public operation confirmation/API key/private key içermez. Aynı Domain'de farklı ikinci mutation 409 ile bloklanır; aynı request mevcut operation'ı resume eder.
+- [x] DNSSEC restart recovery inspect-first çalışır: enable post-condition yalnız `dnssec=true + localReady + DS` ile succeeded olur; disable yalnız `dnssec=false + parent DS absent` ile succeeded olur. Provider cevabı belirsizse canlı state okunur ve ikinci kör mutation yapılmaz; disable sonrası parent DS yeniden görünürse operation unsafe failure olur, parent DS unverifiable ise operation `applying` kalır.
 - [x] Service-aware mail DNS renderer primitive'i mevcut: mail A/AAAA, MX, optional webmail A/AAAA, SPF, DMARC, DKIM ve IMAPS/SMTPS SRV yalnız verilen mail capability intent'ine göre üretiliyor. Mail lifecycle henüz bu intent'i production provisioning'e bağlamıyor.
 
 ### Kalan kod işleri
 
-- [ ] Domain DNS panelini zone read/manual CRUD + re-apply preview/diff/durable operation status + DNSSEC status/DS/registrar action API'lerine bağla; managed kayıtları read-only, manual kayıtları editable göster; conflict/blocker/serial/template-version ve DNSSEC parent mismatch durumlarını açık göster.
+- [ ] Domain DNS panelini zone read/manual CRUD + re-apply preview/diff/durable operation status + DNSSEC status/DS/registrar action/durable operation API'lerine bağla; managed kayıtları read-only, manual kayıtları editable göster; conflict/blocker/serial/template-version ve DNSSEC parent/signing mismatch durumlarını açık göster.
 - [ ] Local mail lifecycle tamamlanınca mail capability/DKIM public key intent'ini zone lifecycle'a bağla; bundan sonra re-apply `mail` source'u da desired state ile güvenle reconcile edebilsin; kapalı servis dead mail/webmail/SRV/discovery kaydı üretmesin.
 - [ ] autodiscover/autoconfig yalnız gerçek endpoint hazır olduğunda service-aware DNS desired state'e girsin.
-- [ ] DNSSEC enable/disable mutation'larını private durable operation journal + restart inspect-first recovery ile P0.8 modeline bağla. Current adapter provider timeoutunu aynı process içinde post-condition ile reconcile ediyor; process-crash operation evidence henüz ayrı journal değil.
 - [ ] DNSSEC key rollover/rotation lifecycle ekle: yeni KSK/CSK üret/publish/activate, parent DS propagation doğrula, eski DS retirement doğrula, eski key deactivate/delete; rollover sırasında secure delegation kesintiye uğramasın ve private key public state/job/audit'e çıkmasın.
 - [ ] Zone suspend/delete/compensation ownership evidence'ını P0.9 lifecycle'ına bağla; manual kayıt içeren zone destructive cleanup'ta fail-closed kalsın.
 
@@ -160,7 +161,7 @@ Aşağıdaki isolation parçaları production provisioning path'ine bağlandı; 
 - [ ] Manual RRset add/update/delete/no-op gerçek PowerDNS'te doğrulanır; managed RRset manual endpoint'ten değiştirilemez, stale `expectedSerial` 409 verir, uncertain PATCH sonrası post-condition duplicate mutation'ı önler.
 - [ ] Manual record template re-apply sırasında korunur veya explicit conflict olur; provider timeout/restart injection sonrası operation inspect-first aynı RRset mutation'ını ikinci kez uygulamaz.
 - [ ] Kapalı servis için dead `webmail`/MX/DKIM/discovery record oluşmaz.
-- [ ] DNSSEC enable local cryptokey + DS üretir; parent DS yokken `pending_parent_ds`, eşleşen DS yayınlanınca `secure_ready`, yanlış DS'de mismatch kalır. Disable parent DS verifiably absent olmadan çalışmaz; gerçek resolver/registrar propagation ve BOGUS önleme doğrulanır.
+- [ ] DNSSEC enable local cryptokey + DS üretir; parent DS yokken `pending_parent_ds`, eşleşen DS yayınlanınca `secure_ready`, yanlış DS'de mismatch kalır. Disable parent DS verifiably absent olmadan çalışmaz. Provider timeout/API restart injection sonrası durable operation inspect-first aynı enable/disable mutation'ını ikinci kez uygulamaz; `dnssec=true` fakat key/DS eksik state succeeded olmaz; gerçek resolver/registrar propagation ve BOGUS önleme doğrulanır.
 
 ## P0.4 — Mail: Postfix + Dovecot + Rspamd + shared Roundcube
 
@@ -312,7 +313,7 @@ Recovery:
 
 1. **Website Unix isolation** — source temel büyük ölçüde hazır; independent subdomain, audit API, SFTP key lifecycle ve gerçek host acceptance açık.
 2. **PowerDNS + server ns1/ns2** — host manager/secret/local readiness/API + identity-backed zone authority + read-only delegation inspector source hazır; kalan aktif işler public UDP/TCP reachability ayrımı, panel delegation/glue yüzeyi, secondary transfer evidence ve host acceptance.
-3. **Versioned DNS Zone Template** — create path + durable re-apply + manual zone CRUD + DNSSEC enable/disable/DS parent-gate backend hazır; sıradaki aktif işler DNS panel yüzeyi, mail source entegrasyonu, DNSSEC durable journal/rollover ve zone suspend/delete ownership.
+3. **Versioned DNS Zone Template** — create path + durable re-apply + manual zone CRUD + durable DNSSEC enable/disable/DS parent-gate backend hazır; sıradaki aktif işler DNS panel yüzeyi, mail source entegrasyonu, DNSSEC rollover ve zone suspend/delete ownership.
 4. **Mail + shared Roundcube**.
 5. **Database + phpMyAdmin**.
 6. **elFinder**.
