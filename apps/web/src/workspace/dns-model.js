@@ -95,14 +95,14 @@ export function dnsSecondaryPresentation(value) {
     primary_kind_required: ['error', 'Primary zone gerekli'],
   }[status] ?? ['unknown', status === 'unknown' ? 'Secondary DNS durumu bilinmiyor' : status];
   const stateAllowsReady = status === 'disabled' || status === 'synced';
-  const ready = stateAllowsReady && value?.ready === true;
-  return Object.freeze({
-    state: presentation[0],
-    label: presentation[1],
-    ready,
-    blocking: status === 'disabled' ? false : !ready,
-    recovery: ready || status === 'disabled' ? 'none' : 'observe_only',
-  });
+  const policyGate = typeof value?.policy?.healthGate === 'string' ? value.policy.healthGate : null;
+  const ready = stateAllowsReady && value?.ready === true && policyGate !== 'block';
+  const fallbackBlocking = status === 'disabled' ? false : !ready;
+  const blocking = policyGate === 'block' ? true : policyGate === 'pass' || policyGate === 'not_applicable' ? false : fallbackBlocking;
+  const fallbackRecovery = ready || status === 'disabled' ? 'none' : 'observe_only';
+  const recovery = typeof value?.policy?.recovery === 'string' ? value.policy.recovery : fallbackRecovery;
+  const state = value?.policy?.severity === 'error' ? 'error' : presentation[0];
+  return Object.freeze({ state, label: presentation[1], ready, blocking, recovery });
 }
 
 export function dnsSecondaryTargetPresentation(target) {
