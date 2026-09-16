@@ -24,6 +24,14 @@ function domainName(value) {
   }
 }
 
+function parentName(domain) {
+  const labels = domainName(domain).split('.');
+  if (labels.length < 2) {
+    throw new DnsParentDsInspectorError('dns_parent_ds_domain_invalid', 'DNSSEC parent domain is invalid', 400);
+  }
+  return labels.slice(1).join('.');
+}
+
 function normalizeDs(value) {
   const match = typeof value === 'string' ? value.trim().match(DS_PATTERN) : null;
   if (!match) return null;
@@ -38,6 +46,27 @@ function normalizeDs(value) {
 function parseStatus(stdout) {
   const match = String(stdout ?? '').match(/status:\s*([A-Z]+)[,\s]/);
   return match?.[1] ?? null;
+}
+
+function authoritativeAnswer(stdout) {
+  const match = String(stdout ?? '').match(/;; flags:\s*([^;]+);/);
+  return Boolean(match && match[1].trim().split(/\s+/).includes('aa'));
+}
+
+function parseNameserverAnswers(stdout, parent) {
+  const owner = `${parent}.`;
+  const result = [];
+  for (const rawLine of String(stdout ?? '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith(';')) continue;
+    const parts = line.split(/\s+/);
+    const nsIndex = parts.findIndex((entry) => entry.toUpperCase() === 'NS');
+    if (nsIndex < 0 || nsIndex + 1 >= parts.length) continue;
+    if (parts[0].toLowerCase() !== owner.toLowerCase()) continue;
+    const target = String(parts[nsIndex + 1]).replace(/\.$/, '').toLowerCase();
+    if (target) result.push(target);
+  }
+  return Object.freeze([...new Set(result)].sort());
 }
 
 function parseDsAnswers(stdout, domain) {
@@ -56,21 +85,30 @@ function parseDsAnswers(stdout, domain) {
   return Object.freeze([...new Set(result)].sort());
 }
 
-async function defaultRunDig(domain) {
-  return execFileAsync('/usr/bin/dig', [
-    '+time=2',
-    '+tries=1',
-    '+noall',
-    '+comments',
-    '+answer',
-    'DS',
-    domain,
-  ], {
+async function defaultRunDig(args) {
+  return execFileAsync('/usr/bin/dig', args, {
     encoding: 'utf8',
     timeout: 5_000,
     maxBuffer: 128 * 1024,
     windowsHide: true,
   });
+}
+
+function digError(error) {
+  if (error?.code === 'ENOENT') {
+    throw new DnsParentDsInspectorError(
+      'dns_parent_ds_dig_missing',
+      'bind9-dnsutils is required for parent DS inspection',
+    );
+  }
+  return typeof error?.code === 'string' && error.code ? error.code : 'DIG_FAILED';
+}
+
+function outputFailure(stdout, { requireAuthoritative = false } = {}) {
+  const dnsStatus = parseStatus(stdout);
+  if (dnsStatus !== 'NOERROR') return dnsStatus ? `DNS_${dnsStatus}` : 'DIG_OUTPUT_INVALID';
+  if (requireAuthoritative && !authoritativeAnswer(stdout)) return 'PARENT_NOT_AUTHORITATIVE';
+  return null;
 }
 
 export function createDnsParentDsInspector({
@@ -81,48 +119,72 @@ export function createDnsParentDsInspector({
     throw new DnsParentDsInspectorError('dns_parent_ds_dependencies_invalid', 'Parent DS inspector dependencies are invalid');
   }
 
-  async function inspect({ domain } = {}) {
-    const normalizedDomain = domainName(domain);
-    let stdout;
-    try {
-      ({ stdout } = await runDig(normalizedDomain));
-    } catch (error) {
-      if (error?.code === 'ENOENT') {
-        throw new DnsParentDsInspectorError(
-          'dns_parent_ds_dig_missing',
-          'bind9-dnsutils is required for parent DS inspection',
-        );
-      }
-      return Object.freeze({
-        version: 1,
-        domain: normalizedDomain,
-        status: 'unverifiable',
-        records: Object.freeze([]),
-        errorCode: typeof error?.code === 'string' && error.code ? error.code : 'DIG_FAILED',
-        checkedAt: new Date(now()).toISOString(),
-      });
-    }
-
-    const dnsStatus = parseStatus(stdout);
-    if (dnsStatus !== 'NOERROR') {
-      return Object.freeze({
-        version: 1,
-        domain: normalizedDomain,
-        status: 'unverifiable',
-        records: Object.freeze([]),
-        errorCode: dnsStatus ? `DNS_${dnsStatus}` : 'DIG_OUTPUT_INVALID',
-        checkedAt: new Date(now()).toISOString(),
-      });
-    }
-    const records = parseDsAnswers(stdout, normalizedDomain);
+  function result(domain, status, records, errorCode, nameservers) {
     return Object.freeze({
-      version: 1,
-      domain: normalizedDomain,
-      status: records.length > 0 ? 'present' : 'absent',
-      records,
-      errorCode: null,
+      version: 2,
+      domain,
+      status,
+      records: Object.freeze([...records]),
+      nameservers: Object.freeze([...nameservers]),
+      errorCode,
       checkedAt: new Date(now()).toISOString(),
     });
+  }
+
+  async function inspect({ domain } = {}) {
+    const normalizedDomain = domainName(domain);
+    const parent = parentName(normalizedDomain);
+    let discoveryStdout;
+    try {
+      ({ stdout: discoveryStdout } = await runDig([
+        '+time=2', '+tries=1', '+noall', '+comments', '+answer', 'NS', parent,
+      ]));
+    } catch (error) {
+      return result(normalizedDomain, 'unverifiable', [], digError(error), []);
+    }
+    const discoveryFailure = outputFailure(discoveryStdout);
+    if (discoveryFailure) return result(normalizedDomain, 'unverifiable', [], discoveryFailure, []);
+    const nameservers = parseNameserverAnswers(discoveryStdout, parent);
+    if (nameservers.length < 1) return result(normalizedDomain, 'unverifiable', [], 'PARENT_NS_MISSING', []);
+
+    const observations = await Promise.all(nameservers.map(async (nameserver) => {
+      try {
+        const { stdout } = await runDig([
+          `@${nameserver}`,
+          '+time=2',
+          '+tries=1',
+          '+norecurse',
+          '+noall',
+          '+comments',
+          '+answer',
+          'DS',
+          normalizedDomain,
+        ]);
+        const failure = outputFailure(stdout, { requireAuthoritative: true });
+        if (failure) return Object.freeze({ nameserver, records: Object.freeze([]), errorCode: failure });
+        return Object.freeze({
+          nameserver,
+          records: parseDsAnswers(stdout, normalizedDomain),
+          errorCode: null,
+        });
+      } catch (error) {
+        return Object.freeze({ nameserver, records: Object.freeze([]), errorCode: digError(error) });
+      }
+    }));
+
+    const published = Object.freeze([...new Set(observations.flatMap((entry) => entry.records))].sort());
+    if (published.length > 0) return result(normalizedDomain, 'present', published, null, nameservers);
+    const failed = observations.find((entry) => entry.errorCode !== null);
+    if (failed) {
+      return result(
+        normalizedDomain,
+        'unverifiable',
+        [],
+        `PARENT_NS_${failed.errorCode}`,
+        nameservers,
+      );
+    }
+    return result(normalizedDomain, 'absent', [], null, nameservers);
   }
 
   return Object.freeze({ inspect });
@@ -130,8 +192,13 @@ export function createDnsParentDsInspector({
 
 export const dnsParentDsInspectorInternals = Object.freeze({
   domainName,
+  parentName,
   normalizeDs,
   parseStatus,
+  authoritativeAnswer,
+  parseNameserverAnswers,
   parseDsAnswers,
   defaultRunDig,
+  digError,
+  outputFailure,
 });
