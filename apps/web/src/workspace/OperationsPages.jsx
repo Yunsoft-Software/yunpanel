@@ -4,6 +4,7 @@ import { panelRequest } from '../api.js';
 import DomainManager from '../DomainManager.jsx';
 import SystemUpdatePanel from '../SystemUpdatePanel.jsx';
 import ManagedServicesPanel from './ManagedServicesPanel.jsx';
+import NetworkDnsSettingsPanel from './NetworkDnsSettingsPanel.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Button, CollectionNotice, ConfirmDialog, EmptyState, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { ServerSummary } from './DashboardPage.jsx';
@@ -35,9 +36,9 @@ export function AdvancedDomainsPage() {
   return <><PageHeading title="Gelişmiş alan adı araçları" description="Mevcut kayıt ve sertifika yönetimi korunur. Günlük işlemler için site ekranlarını kullanın." actions={<LinkButton to="/websites">Web siteleri</LinkButton>} /><DomainManager domains={domains.items} domainAccess={domains.status} certificates={certificates.items} certificateAccess={certificates.status} servers={servers.items} onChanged={refreshAll} /></>;
 }
 export function SettingsPage() {
-  const { servers } = useWorkspace();
+  const { servers, domains, canManage } = useWorkspace();
   const server = servers.items.length === 1 ? servers.items[0] : null;
-  return <><PageHeading title="Ayarlar" description="Panel bakım araçları ve yönetim erişimi." /><Section title="Hesap ve erişim"><div className="ws-section-body"><p className="ws-muted">Kendi parolanız, MFA ve oturumlarınız üstteki Hesabım menüsünden yönetilir. Owner hesapları kullanıcı ekleyebilir, düzenleyebilir, kapatabilir ve silebilir; son aktif Owner korunur.</p><LinkButton to="/settings/users" icon="user">Kullanıcıları yönet</LinkButton></div></Section><Section title="YunPanel güncellemeleri"><CollectionNotice resource={servers} label="Yerel sunucu" />{server && servers.status === 'ready' && !import.meta.env.DEV && <div className="ws-section-body"><SystemUpdatePanel key={server.id} server={server} /></div>}</Section>{import.meta.env.DEV && <p className="ws-muted">Paket güncelleme işlemleri geliştirme görünümünde kapalıdır.</p>}<Section title="Gelişmiş araçlar"><div className="ws-section-body ws-actions"><LinkButton to="/applications" icon="code">Uygulamalar</LinkButton><LinkButton to="/domains" icon="globe">Alan adları ve sertifikalar</LinkButton><LinkButton to="/audit" icon="shield">Denetim kayıtları</LinkButton><LinkButton to="/servers" icon="server">Yerel sunucu</LinkButton></div></Section></>;
+  return <><PageHeading title="Ayarlar" description="Panel bakım araçları ve yönetim erişimi." /><Section title="Hesap ve erişim"><div className="ws-section-body"><p className="ws-muted">Kendi parolanız, MFA ve oturumlarınız üstteki Hesabım menüsünden yönetilir. Owner hesapları kullanıcı ekleyebilir, düzenleyebilir, kapatabilir ve silebilir; son aktif Owner korunur.</p><LinkButton to="/settings/users" icon="user">Kullanıcıları yönet</LinkButton></div></Section><CollectionNotice resource={servers} label="Yerel sunucu" />{server && <NetworkDnsSettingsPanel server={server} domains={domains.items} canManage={canManage} />}<Section title="YunPanel güncellemeleri"><CollectionNotice resource={servers} label="Yerel sunucu" />{server && servers.status === 'ready' && !import.meta.env.DEV && <div className="ws-section-body"><SystemUpdatePanel key={server.id} server={server} /></div>}</Section>{import.meta.env.DEV && <p className="ws-muted">Paket güncelleme işlemleri geliştirme görünümünde kapalıdır.</p>}<Section title="Gelişmiş araçlar"><div className="ws-section-body ws-actions"><LinkButton to="/applications" icon="code">Uygulamalar</LinkButton><LinkButton to="/domains" icon="globe">Alan adları ve sertifikalar</LinkButton><LinkButton to="/audit" icon="shield">Denetim kayıtları</LinkButton><LinkButton to="/servers" icon="server">Yerel sunucu</LinkButton></div></Section></>;
 }
 const capabilities = {
   backups: ['Yedekler', 'Yedek hedefleri, retention ve geri yükleme yönetimi henüz uygulanmadı.', 'archive'],
