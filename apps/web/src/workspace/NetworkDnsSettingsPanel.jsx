@@ -13,6 +13,7 @@ import {
   delegationPresentation,
   dnsIdentityDraft,
   dnsIdentitySettings,
+  publicReachabilityPresentation,
 } from './network-dns-model.js';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Modal, Section } from './PanelKit.jsx';
 import './network-dns.css';
@@ -119,6 +120,12 @@ function DelegationPanel({ server, identity, defaultDomain }) {
   </Section>;
 }
 
+function reachabilityValue(value) {
+  if (value === true) return 'Hazır';
+  if (value === false) return 'Erişilemiyor';
+  return 'Doğrulanmadı';
+}
+
 export default function NetworkDnsSettingsPanel({ server, domains = [], canManage = true }) {
   const [identity, setIdentity] = useState(null);
   const [authoritative, setAuthoritative] = useState(null);
@@ -159,6 +166,7 @@ export default function NetworkDnsSettingsPanel({ server, domains = [], canManag
     finally { setBusy(false); }
   }
   const authoritativeState = authoritativePresentation(authoritative);
+  const publicState = publicReachabilityPresentation(authoritative);
   const identityForDialog = identity ?? { serverId: server.id };
 
   return <>
@@ -171,11 +179,13 @@ export default function NetworkDnsSettingsPanel({ server, domains = [], canManag
         ['Secondary transfer targets', identity.settings.secondaryDns?.join(', ') || 'Yok'],
       ]} /><WarningList warnings={identity.warnings} /></> : <EmptyState title="Authoritative DNS kimliği yapılandırılmamış" detail="ns1/ns2, public IP ve SOA bilgileri kaydedilmeden PowerDNS uygulanmaz." icon="globe" />}</div>
     </Section>
-    <div className="ws-equal-columns"><Section title="PowerDNS local health" description="Bu durum yalnız panel hostundaki API/socket/recursion kontrolleridir; public UDP/TCP 53 erişilebilirliğini kanıtlamaz." actions={authoritative && <Badge state={authoritativeState.state}>{authoritativeState.label}</Badge>}><div className="ws-section-body">{identity ? <><KeyValues items={[
+    <div className="ws-equal-columns"><Section title="PowerDNS local / public health" description="Local API/socket health ile internetten UDP/TCP 53 erişilebilirliği ayrı evidence kaynaklarıdır." actions={authoritative && <div className="ws-actions"><Badge state={authoritativeState.state}>{authoritativeState.label}</Badge><Badge state={publicState.state}>{publicState.label}</Badge></div>}><div className="ws-section-body">{identity ? <><KeyValues items={[
       ['Configured', authoritative?.configured ? 'Evet' : 'Hayır'], ['Secret', authoritative?.secretConfigured ? 'Hazır' : 'Eksik'],
       ['Local UDP/53', authoritative?.host?.sockets?.udp53 === true ? 'Hazır' : 'Doğrulanmadı'], ['Local TCP/53', authoritative?.host?.sockets?.tcp53 === true ? 'Hazır' : 'Doğrulanmadı'],
       ['Recursive resolver', authoritative?.host?.sockets?.recursive === false ? 'Kapalı' : 'Doğrulanmadı'],
-    ]} /><div className="ws-notice ws-notice-warn"><div><strong>Public reachability ayrı kapı</strong><p>Local PowerDNS health sağlıklı olsa bile firewall/NAT nedeniyle internetten UDP/TCP 53 kapalı olabilir. Public-ready durumu henüz bu state’den türetilmez.</p></div></div>{canManage && <Button variant="primary" disabled={busy} onClick={preparePowerDns}>{authoritative?.ready ? 'PowerDNS’i yeniden önizle' : 'PowerDNS kurulumunu önizle'}</Button>}</> : <p className="ws-muted">Önce authoritative DNS identity yapılandırılmalı.</p>}</div></Section><DelegationPanel server={server} identity={identity} defaultDomain={defaultDomain} /></div>
+      ['Public UDP/53', reachabilityValue(authoritative?.publicReachability?.udp53)], ['Public TCP/53', reachabilityValue(authoritative?.publicReachability?.tcp53)],
+      ['Public probe vantage', authoritative?.publicReachability?.vantage ?? 'Yapılandırılmadı'], ['Overall authoritative ready', authoritative?.overallReady ? 'Evet' : 'Hayır'],
+    ]} /><div className="ws-notice ws-notice-warn"><div><strong>Public reachability ayrı kapı</strong><p>{authoritative?.publicReachability?.status === 'unverified' ? 'Harici vantage-point probe yapılandırılmadığı için internetten UDP/TCP 53 erişimi doğrulanmadı. Local health bu alanı yeşile çeviremez.' : authoritative?.publicReachability?.status === 'unverifiable' ? `Harici DNS erişimi doğrulanamadı: ${authoritative.publicReachability.reason ?? 'probe hatası'}.` : authoritative?.publicReachability?.status === 'unreachable' ? 'Harici vantage point en az bir DNS protokolünde 53 portuna erişemedi.' : 'Local ve public readiness ayrı izlenir.'}</p></div></div>{canManage && <Button variant="primary" disabled={busy} onClick={preparePowerDns}>{authoritative?.localReady ? 'PowerDNS’i yeniden önizle' : 'PowerDNS kurulumunu önizle'}</Button>}</> : <p className="ws-muted">Önce authoritative DNS identity yapılandırılmalı.</p>}</div></Section><DelegationPanel server={server} identity={identity} defaultDomain={defaultDomain} /></div>
     {identityDialog && <IdentityDialog current={identityForDialog} onClose={() => setIdentityDialog(false)} onApplied={async () => { setIdentityDialog(false); await refresh(); }} />}
     {authoritativePreview && <ConfirmDialog title="PowerDNS authoritative uygula" message={`Paket/config/backend işlemleri uygulanacak. API ${authoritativePreview.api?.address ?? '127.0.0.1'}:${authoritativePreview.api?.port ?? 8081} üzerinde loopback-only kalır; mevcut zone'lar otomatik template sync edilmez.`} confirmation={authoritativePreview.confirmation} busy={busy} error={error} onCancel={() => setAuthoritativePreview(null)} onConfirm={applyPowerDns} confirmLabel="PowerDNS’i uygula" />}
   </>;
