@@ -177,6 +177,7 @@ async function dnsZoneStep(preview, dependencies) {
       templateVersion: desired.templateVersion,
       templateSnapshot: desired.templateSnapshot,
       dnsIdentityRevision: desired.dnsIdentityRevision,
+      secondaryDns: Object.freeze([...dnsIdentity.settings.secondaryDns]),
       serial: desired.serial,
       dnssec: dnsIdentity.settings.dnssecDefault === true,
       records,
