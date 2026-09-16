@@ -6,6 +6,7 @@ import {
 
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const SUPPORTED_TYPES = new Set(['SOA', 'NS', 'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'CAA', 'SRV']);
+const MAX_SERIAL = 4_294_967_295;
 
 export class PowerDnsManualRrsetManagerError extends Error {
   constructor(code, message, status = 503) {
@@ -52,7 +53,7 @@ function normalizeManualRecord(record, zoneName) {
 
 function expectedSerial(value) {
   if (value === undefined || value === null) return null;
-  if (!Number.isSafeInteger(value) || value < 1 || value > 4_294_967_295) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_SERIAL) {
     throw new PowerDnsManualRrsetManagerError('powerdns_manual_expected_serial_invalid', 'Expected SOA serial is invalid', 400);
   }
   return value;
@@ -91,6 +92,42 @@ function deleteRrset(current) {
     changetype: 'DELETE',
     records: Object.freeze([]),
     comments: Object.freeze([]),
+  });
+}
+
+function nextSerial(value) {
+  if (!Number.isSafeInteger(value) || value < 1 || value >= MAX_SERIAL) {
+    throw new PowerDnsManualRrsetManagerError('powerdns_manual_serial_exhausted', 'Authoritative SOA serial cannot be advanced safely', 409);
+  }
+  return value + 1;
+}
+
+function bumpSoaRrset(zone) {
+  const zoneOwner = powerDnsZoneManagerInternals.fqdn(zone.zoneName).toLowerCase();
+  const current = zone.rrsets.find((entry) => entry.name === zoneOwner && entry.type === 'SOA') ?? null;
+  if (!current || current.records.length !== 1 || current.records[0].disabled === true) {
+    throw new PowerDnsManualRrsetManagerError('powerdns_manual_soa_unavailable', 'Authoritative SOA record is unavailable for serial advancement', 409);
+  }
+  const parts = String(current.records[0].content).trim().split(/\s+/);
+  if (parts.length !== 7) {
+    throw new PowerDnsManualRrsetManagerError('powerdns_manual_soa_invalid', 'Authoritative SOA record is invalid', 409);
+  }
+  const observed = Number.parseInt(parts[2], 10);
+  if (observed !== zone.serial) {
+    throw new PowerDnsManualRrsetManagerError('powerdns_manual_soa_serial_invalid', 'Authoritative SOA serial evidence is inconsistent', 409);
+  }
+  const serial = nextSerial(observed);
+  parts[2] = String(serial);
+  return Object.freeze({
+    serial,
+    rrset: Object.freeze({
+      name: current.name,
+      type: 'SOA',
+      ttl: current.ttl,
+      changetype: 'REPLACE',
+      records: Object.freeze([Object.freeze({ content: parts.join(' '), disabled: false })]),
+      comments: current.comments,
+    }),
   });
 }
 
@@ -182,6 +219,7 @@ function publicZone(zone) {
     kind: zone.kind,
     dnssec: zone.dnssec,
     serial: zone.serial,
+    notifiedSerial: zone.notifiedSerial ?? null,
     rrsets: Object.freeze(zone.rrsets.map(publicRrset)),
   });
 }
@@ -274,11 +312,35 @@ export function createPowerDnsManualRrsetManager({
     }
   }
 
+  async function notify(zoneName, rawApiKey, enabled) {
+    if (!enabled) return null;
+    if (typeof zones.notifyZone !== 'function') {
+      throw new PowerDnsManualRrsetManagerError(
+        'powerdns_manual_notify_unavailable',
+        'Secondary DNS is configured but PowerDNS NOTIFY support is unavailable',
+        503,
+      );
+    }
+    try { return await zones.notifyZone(zoneName, rawApiKey); }
+    catch (error) {
+      if (error instanceof PowerDnsZoneManagerError) {
+        throw new PowerDnsManualRrsetManagerError(error.code, error.message, error.status);
+      }
+      throw error;
+    }
+  }
+
   async function getZone({ zoneName, apiKey: rawApiKey } = {}) {
     return publicZone(await inspectZone(zoneName, rawApiKey));
   }
 
-  async function apply({ zoneName, apiKey: rawApiKey, record, expectedSerial: rawExpectedSerial = null } = {}) {
+  async function apply({
+    zoneName,
+    apiKey: rawApiKey,
+    record,
+    expectedSerial: rawExpectedSerial = null,
+    notifySecondaries = false,
+  } = {}) {
     const normalizedZone = powerDnsZoneManagerInternals.zoneName(zoneName);
     const normalized = normalizeManualRecord(record, normalizedZone);
     const zone = await inspectZone(normalizedZone, rawApiKey);
@@ -289,22 +351,41 @@ export function createPowerDnsManualRrsetManager({
     assertCnameCoexistence(zone, normalized.owner, normalized.type, current);
     const wanted = desiredRrset(normalized);
     if (current && powerDnsZoneManagerInternals.sameRecords(current, wanted)) {
-      return Object.freeze({ satisfied: true, changed: false, record: publicRrset(current), serial: zone.serial });
+      return Object.freeze({ satisfied: true, changed: false, record: publicRrset(current), serial: zone.serial, notification: null });
     }
+    const soa = bumpSoaRrset(zone);
+    // Fail before the record mutation if this is an old Native zone that cannot safely notify configured secondaries.
+    if (notifySecondaries) await notify(normalizedZone, rawApiKey, true);
 
     let mutationError = null;
-    try { await patch(normalizedZone, rawApiKey, [wanted]); }
+    try { await patch(normalizedZone, rawApiKey, [wanted, soa.rrset]); }
     catch (error) { mutationError = error; }
     const after = await inspectPostcondition(normalizedZone, rawApiKey);
     const verified = after ? findRrset(after, normalized.owner, normalized.type) : null;
-    if (verified && !verified.managed && powerDnsZoneManagerInternals.sameRecords(verified, wanted)) {
-      return Object.freeze({ satisfied: true, changed: true, record: publicRrset(verified), serial: after.serial });
+    if (verified && !verified.managed && powerDnsZoneManagerInternals.sameRecords(verified, wanted)
+      && after.serial === soa.serial) {
+      const notification = await notify(normalizedZone, rawApiKey, notifySecondaries);
+      return Object.freeze({
+        satisfied: true,
+        changed: true,
+        record: publicRrset(verified),
+        serial: after.serial,
+        notifiedSerial: notification?.notifiedSerial ?? after.notifiedSerial ?? null,
+        notification,
+      });
     }
     if (mutationError) throw mutationError;
     throw new PowerDnsManualRrsetManagerError('powerdns_manual_apply_unverified', 'Manual DNS RRset apply could not be verified');
   }
 
-  async function remove({ zoneName, apiKey: rawApiKey, owner, type, expectedSerial: rawExpectedSerial = null } = {}) {
+  async function remove({
+    zoneName,
+    apiKey: rawApiKey,
+    owner,
+    type,
+    expectedSerial: rawExpectedSerial = null,
+    notifySecondaries = false,
+  } = {}) {
     const normalizedZone = powerDnsZoneManagerInternals.zoneName(zoneName);
     const normalizedOwner = ownerWithinZone(owner, normalizedZone);
     const normalizedType = String(type ?? '').toUpperCase();
@@ -315,15 +396,26 @@ export function createPowerDnsManualRrsetManager({
     if (!zone) throw new PowerDnsManualRrsetManagerError('powerdns_manual_zone_not_found', 'PowerDNS zone was not found', 404);
     assertExpectedSerial(zone, rawExpectedSerial);
     const current = findRrset(zone, normalizedOwner, normalizedType);
-    if (!current) return Object.freeze({ satisfied: true, changed: false, owner: normalizedOwner, type: normalizedType, serial: zone.serial });
+    if (!current) return Object.freeze({ satisfied: true, changed: false, owner: normalizedOwner, type: normalizedType, serial: zone.serial, notification: null });
     assertManual(current);
+    const soa = bumpSoaRrset(zone);
+    if (notifySecondaries) await notify(normalizedZone, rawApiKey, true);
 
     let mutationError = null;
-    try { await patch(normalizedZone, rawApiKey, [deleteRrset(current)]); }
+    try { await patch(normalizedZone, rawApiKey, [deleteRrset(current), soa.rrset]); }
     catch (error) { mutationError = error; }
     const after = await inspectPostcondition(normalizedZone, rawApiKey);
-    if (!after || !findRrset(after, normalizedOwner, normalizedType)) {
-      return Object.freeze({ satisfied: true, changed: true, owner: normalizedOwner, type: normalizedType, serial: after?.serial ?? null });
+    if (after && !findRrset(after, normalizedOwner, normalizedType) && after.serial === soa.serial) {
+      const notification = await notify(normalizedZone, rawApiKey, notifySecondaries);
+      return Object.freeze({
+        satisfied: true,
+        changed: true,
+        owner: normalizedOwner,
+        type: normalizedType,
+        serial: after.serial,
+        notifiedSerial: notification?.notifiedSerial ?? after.notifiedSerial ?? null,
+        notification,
+      });
     }
     if (mutationError) throw mutationError;
     throw new PowerDnsManualRrsetManagerError('powerdns_manual_delete_unverified', 'Manual DNS RRset deletion could not be verified');
@@ -338,6 +430,9 @@ export const powerDnsManualRrsetManagerInternals = Object.freeze({
   expectedSerial,
   assertExpectedSerial,
   desiredRrset,
+  deleteRrset,
+  nextSerial,
+  bumpSoaRrset,
   unquoteSequence,
   canonicalContent,
   publicRrset,
