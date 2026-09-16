@@ -1,8 +1,8 @@
 # YunPanel — Plesk Referanslı Kalan Geliştirme Planı
 
-Bu dosya **yalnız kalan ürün/kod işlerini ve gerçek ortam kabul kapılarını** tutar. Yapılmış işlerin ayrıntılı geçmişi `docs/history/`, hedef mimari `docs/architecture.md`, recovery sözleşmesi `docs/provisioning-recovery.md`, bağlayıcı kurallar `agents.md`, gerçek Ubuntu/browser/provider testleri `todo.md` içindedir.
+Bu dosya **yalnız kalan ürün/kod işlerini** tutar. Yapılmış işlerin ayrıntılı geçmişi `docs/history/`, hedef mimari `docs/architecture.md`, recovery sözleşmesi `docs/provisioning-recovery.md`, bağlayıcı kurallar `agents.md`, gerçek Ubuntu/browser/provider kabul testleri `todo.md` içindedir.
 
-Son DNS çalışma kaydı: `docs/history/powerdns-durable-apply-2026-09-16.md`.
+Son Website isolation incelemesi: `docs/history/website-isolation-audit-2026-09-16.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -15,114 +15,61 @@ Son DNS çalışma kaydı: `docs/history/powerdns-durable-apply-2026-09-16.md`.
 - Homegrown `site-file-manager`, custom node-pty terminal ve benzeri yüzeyler yalnız hazır replacement acceptance geçene kadar migration fallback'idir; genişletilmez.
 - Ekran/model/route varlığı özellik tamamlandı anlamına gelmez. Gerçek servis, izolasyon, lifecycle, health ve failure/recovery acceptance geçmeden `DONE` denmez.
 
-## 1 — Plesk core parity kapıları
-
-Aşağıdaki 7 kapının tümü gerçek Ubuntu host üzerinde geçmeden Plesk core parity tamamlanmış sayılmaz:
-
-- [ ] Website OS isolation
-- [ ] Authoritative DNS + ns1/ns2 + zone template
-- [ ] Mail + Roundcube + external send/receive
-- [ ] Database ownership + phpMyAdmin
-- [ ] Ready-made File Manager + cross-site isolation
-- [ ] TLS/certificate lifecycle
-- [ ] Transactional create/delete/reconcile provisioning
-
----
-
 # P0 — Plesk core parity
 
 ## P0.1 — Website Unix identity ve filesystem isolation
 
-### Kalan kod işleri
-
-- [ ] Gerçek `independent subdomain` create flow'u ayrı Website/Application identity oluştursun; alias hiçbir user/runtime/mailbox üretmesin; `shared-site` yalnız explicit seçim olsun.
+- [ ] Core `site-create.js` doğrudan çağrıldığında stale `wwwMode=independent` yolunun aynı `websiteId` altında `www.<domain>` üretmesini engelle; gerçek ayrı Website/Application implementasyonu tamamlanana kadar core seviyesinde de fail-closed davran.
+- [ ] Gerçek `independent subdomain` create flow'u ayrı Website/Application identity, ayrı Unix user/group, ayrı SFTP scope ve ayrı runtime ownership oluştursun.
+- [ ] Alias/shared-site aynı Website/Application identity'yi kullansın; alias hiçbir ek Unix user/runtime/SFTP/mailbox üretmesin; `shared-site` yalnız explicit seçim olsun.
+- [ ] Isolation provisioning planındaki existing `isolation`, webroot/runtime-dir ve `sftp` step'lerini canonical `websiteId`, `applicationId`, Unix identity ve managed path contract'ına göre doğrula; stale/duplicate/mismatched step fail-closed olsun.
+- [ ] Eksik isolation/SFTP step'lerini idempotent tamamla; doğru existing step ikinci kez üretilmesin.
+- [ ] Regression testleri: core independent guard, gerçek independent resource graph, alias/shared-site tek Website + tek isolation/SFTP unit, stale SFTP identity ve duplicate isolation step.
 - [ ] Inspect-only isolation audit'ini authenticated HTTP/API ve gerekli panel yüzeyine bağla; migration apply ayrı typed-confirmation operation olsun.
 - [ ] SFTP public-key credential lifecycle ekle: Website key add/list/revoke/rotate, root-owned managed `authorized_keys` materialization, secret/private-key browser veya repo state'ine yazılmasın.
-- [ ] SFTP credential değişiklikleri site provisioning ownership/evidence ile idempotent reconcile edilsin.
+- [ ] SFTP credential değişikliklerini site provisioning ownership/evidence ile idempotent reconcile et.
 - [ ] Legacy Website migration apply kör recursive `chown` yapmasın; önce canonical identity/path/runtime drift raporu ve exact değişiklik preview'sı versin.
 
-### Host acceptance — `todo.md`
-
-- [ ] Site A UID'si Site B home/env/release/log/tmp/static publish dosyalarını okuyamaz/yazamaz.
-- [ ] Node Passenger ve PHP-FPM process'leri gerçek OS üzerinde kendi site UID/GID'siyle çalışır.
-- [ ] Static site yalnız Nginx read ACL ile servis edilir; başka `yunapp-*` kullanıcı okuyamaz.
-- [ ] SFTP `..`, absolute path, symlink ve bind-mount escape ile başka siteye kaçamaz.
-- [ ] Panel restart/reconcile ownership ve service policy'yi bozmaz; ikinci apply duplicate identity/chroot/pool oluşturmaz.
+Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
 ## P0.2 — Sunucu kimliği, ns1/ns2 ve PowerDNS Authoritative
 
-### Kaldığımız nokta
+- [ ] Durable PowerDNS journal için operator-visible recovery/control surface tamamla: current/latest operation state, recovery reason, inspect evidence, explicit retry/rollback/resolve aksiyonları, destructive aksiyonlarda typed confirmation + audit.
+- [ ] `recovery_pending` durumunda hiçbir package/config/service mutation'ı kör replay edilmesin.
 
-Network/DNS Settings, DNS identity, local/public readiness ayrımı, delegation/glue inspector, Primary zone + NOTIFY provisioning, manual RRset SOA serial advancement + secondary NOTIFY, Zone Template re-apply secondary topology/NOTIFY, TCP SOA secondary serial inspector ve Domain-scoped secondary sync/status source olarak mevcut. PowerDNS host apply zincirinde candidate config validation failure artık previous managed config'i içerik + uid/gid/mode ile atomik geri yüklüyor; fresh install'da reddedilen candidate dosyası bırakılmıyor. Durable PowerDNS operation journal mutation öncesi `applying` evidence yazıyor, raw API key persist etmiyor ve interrupted/restart retry'da önce `inspect` yapıyor; hedef durum kanıtlanamıyorsa package/config/service mutation'ını kör tekrar etmeyip fail-closed recovery state bırakıyor. Ayrıntı `docs/history/powerdns-durable-apply-2026-09-16.md`.
-
-### Kalan kod işleri
-
-- [ ] Durable PowerDNS journal için operator-visible recovery/control surface tamamla: current/latest operation state ve recovery reason, inspect evidence, explicit retry/rollback/resolve aksiyonları, destructive aksiyonlarda typed confirmation + audit; `recovery_pending` durumunda hiçbir package/config/service mutation'ı kör replay edilmesin.
-
-### Host/browser acceptance — `todo.md`
-
-- [ ] Fresh Ubuntu 24.04'te PowerDNS package/backend/config/service/upgrade health geçer.
-- [ ] API yalnız loopback'ten erişilir; raw API key public yüzeye sızmaz.
-- [ ] Local UDP/TCP 53 ve dış vantage point public UDP/TCP 53 ayrı doğrulanır; firewall/NAT engeli local health'i public-ready yapmaz.
-- [ ] Public `dig @ns1` / `dig @ns2` SOA/NS/A authoritative cevapları ve recursion-denied davranışı geçer.
-- [ ] Registrar/glue/delegation uyuşmazlığında state `ready` olmaz.
-- [ ] Network/DNS Settings Chromium/Firefox'ta DNS identity preview/typed-confirmation, PowerDNS apply, public/local state ve delegation/glue talimatlarını doğru render eder.
-- [ ] En az iki authoritative endpoint veya onaylı secondary ile Primary/NOTIFY/AXFR, serial propagation ve failover doğrulanır; `notified_serial` remote SOA sync yerine başarı kanıtı sayılmaz.
+Gerçek host, public DNS, delegation/glue ve browser kabul kapıları `todo.md` içindedir.
 
 ## P0.3 — Versioned DNS Zone Template ve Domain DNS yönetimi
 
-### Kaldığımız nokta
-
-Create path, versioned template, durable re-apply, manual RRset CRUD, DNS panel, DNSSEC enable/disable + parent DS gate ve operation history source olarak mevcut. Manual RRset mutation ve Zone Template re-apply SOA serial/topology değişimini secondary varsa NOTIFY ile taşır. Ayrıntı `docs/history/dns-ui-secondary-progress-2026-09-16.md`.
-
-### Kalan kod işleri
-
-- [ ] Local mail lifecycle tamamlanınca mail capability/DKIM public key intent'ini zone lifecycle'a bağla; re-apply `mail` source'u da desired state ile güvenle reconcile edebilsin; kapalı servis dead mail/webmail/SRV/discovery kaydı üretmesin.
+- [ ] Local mail lifecycle tamamlanınca mail capability/DKIM public-key intent'ini zone lifecycle'a bağla; re-apply `mail` source'u desired state ile güvenle reconcile etsin; kapalı servis dead mail/webmail/SRV/discovery kaydı üretmesin.
 - [ ] `autodiscover` / `autoconfig` yalnız gerçek endpoint hazır olduğunda service-aware DNS desired state'e girsin.
 - [ ] DNSSEC key rollover/rotation lifecycle ekle: yeni KSK/CSK üret/publish/activate, parent DS propagation doğrula, eski DS retirement doğrula, eski key deactivate/delete; rollover sırasında secure delegation kesilmesin ve private key public state/job/audit'e çıkmasın.
 - [ ] Zone suspend/delete/compensation ownership evidence'ını P0.9 lifecycle'ına bağla; manual kayıt içeren zone destructive cleanup'ta fail-closed kalsın.
 
-### Host/browser acceptance — `todo.md`
-
-- [ ] Yeni local-DNS domain tek Website operation'ında default authoritative zone alır ve SOA/NS/A/AAAA/www policy gerçek `dig` ile doğrulanır.
-- [ ] Manual RRset add/update/delete/no-op gerçek PowerDNS'te doğrulanır; mutation SOA serial'ı doğru artırır, managed RRset manual endpoint'ten değiştirilemez, stale `expectedSerial` 409 verir.
-- [ ] Manual record template re-apply sırasında korunur veya explicit conflict olur; provider timeout/restart injection sonrası operation inspect-first duplicate mutation üretmez.
-- [ ] Site Detail DNS browser yüzeyi root/subdomain ownership, managed read-only/manual editable, conflict/blocker/diff, operation history ve DNSSEC DS/parent state'lerini Chromium/Firefox'ta doğru gösterir.
-- [ ] Kapalı servis için dead `webmail`/MX/DKIM/discovery record oluşmaz.
-- [ ] DNSSEC enable/disable, parent DS propagation, mismatch/unverifiable state ve restart recovery gerçek resolver/registrar ile doğrulanır.
+Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içindedir.
 
 ## P0.4 — Mail: Postfix + Dovecot + Rspamd + shared Roundcube
 
-### Kaldığımız nokta
-
-Mail config materialization/staging, validator, backup/activation/rollback primitives source olarak mevcut; fresh-install rollback yeni oluşturulmuş managed dosyaları da geri temizleyebiliyor. API `MAIL_CONFIG_APPLY` / `MAIL_CONFIG_ROLLBACK` durable job intent'lerini enqueue ediyor. Kalan ana boşluk bu job'ları production worker/executor üzerinden mevcut staging + activator + validator + rollback bileşenlerine bağlayıp restart/timeout recovery ve post-condition evidence ile tamamlamak.
-
-### Kalan kod işleri
-
-- [ ] `MAIL_CONFIG_APPLY` / `MAIL_CONFIG_ROLLBACK` durable job execution zincirini production worker'a bağla: claim/lease/restart semantics, mevcut staging manager + activator + validators + backup/rollback kullanımı, Postfix/Dovecot/Rspamd readiness evidence, interrupted/timeout sonrası inspect/reconcile ve aynı operation'ın API/job retry ile ikinci kez host mutation yapmasını engelleyen replay fence.
-- [ ] SQL-backed virtual mail domain/mailbox/alias/quota/password hash modeli; Website user ile mail storage identity ayrıdır.
-- [ ] Dedicated mail storage identity; Website UID Maildir owner değildir.
-- [ ] Local mail enable domain oluşturur fakat bilinen/default parola mailbox yaratmaz.
+- [ ] `MAIL_CONFIG_APPLY` / `MAIL_CONFIG_ROLLBACK` durable job execution zincirini production worker'a bağla: claim/lease/restart semantics, staging manager + activator + validators + backup/rollback, readiness evidence, inspect/reconcile ve replay fence.
+- [ ] SQL-backed virtual mail domain/mailbox/alias/quota/password-hash modeli ekle; Website user ile mail storage identity ayrı olsun.
+- [ ] Dedicated mail storage identity kullan; Website UID Maildir owner olmasın.
+- [ ] Local mail enable domain oluştursun fakat bilinen/default parola mailbox yaratmasın.
 - [ ] SMTP 25 + submission 587; 465/993 policy; plain auth yalnız TLS altında.
 - [ ] DKIM key lifecycle; private key secret-safe, public key DNS intent.
-- [ ] SPF/DMARC/DKIM desired state mail operation evidence'ıyla bağlı olsun.
-- [ ] Sender-login/relay/rate abuse/Rspamd policy.
-- [ ] Forwarding/alias/SRS lifecycle.
+- [ ] SPF/DMARC/DKIM desired state'i mail operation evidence'ına bağla.
+- [ ] Sender-login/relay/rate abuse/Rspamd policy tamamla.
+- [ ] Forwarding/alias/SRS lifecycle tamamla.
 - [ ] ClamAV optional profile; health yoksa aktif gösterme.
 - [ ] Sunucu başına tek shared Roundcube + dedicated FPM pool/socket + protected config.
-- [ ] Local-mail domain -> `webmail.<domain>` DNS/TLS/Nginx -> shared Roundcube.
-- [ ] Full email + password Dovecot IMAP login, authenticated Postfix submission.
-- [ ] Domain disable/delete yalnız kendi mapping'ini kaldırır; shared instance başka domainler kullanıyorsa kalır.
+- [ ] Local-mail domain -> `webmail.<domain>` DNS/TLS/Nginx -> shared Roundcube mapping'i.
+- [ ] Full email + password Dovecot IMAP login ve authenticated Postfix submission.
+- [ ] Domain disable/delete yalnız kendi Roundcube/webmail mapping'ini kaldırsın; shared instance başka domainler kullanıyorsa kalsın.
 - [ ] Gerçek autodiscover/autoconfig endpoint.
 - [ ] External DNS domain için exact pending DNS requirements/provider apply.
 
-### Host acceptance — `todo.md`
-
-- [ ] Inbound/outbound mail, relay denial, submission TLS/auth, IMAP, quota, DKIM/SPF/DMARC ve multi-domain Roundcube gerçek hostta geçer.
+Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `todo.md` içindedir.
 
 ## P0.5 — Website DB ownership + phpMyAdmin
-
-### Kalan kod işleri
 
 - [ ] MariaDB/MySQL secure install/health baseline; admin secret encrypted store.
 - [ ] DB Website'e explicit bağlı; deterministic unique DB/user naming.
@@ -130,45 +77,41 @@ Mail config materialization/staging, validator, backup/activation/rollback primi
 - [ ] Site Databases CRUD + rotate/revoke + drop preview.
 - [ ] Website create'te opsiyonel initial DB.
 - [ ] Shared hardened phpMyAdmin.
-- [ ] `Open phpMyAdmin` site DB user scope'uyla supported signon/short-lived handoff; root browser'a verilmez.
+- [ ] `Open phpMyAdmin` site DB user scope'uyla supported signon/short-lived handoff; root browser'a verilmesin.
 - [ ] Import/export/dump vendor tooling.
 - [ ] DB create/drop/grant/rotation durable evidence/rollback.
 
 ## P0.6 — elFinder; homegrown File Manager removal
 
-### Kalan kod işleri
-
 - [ ] elFinder shared app/client.
-- [ ] Connector gerçek Website UID/GID altında çalışır; preferred site PHP-FPM pool/socket.
-- [ ] Root canonical Website HOME/SFTP root'tan server-side resolve edilir.
+- [ ] Connector gerçek Website UID/GID altında çalışsın; preferred site PHP-FPM pool/socket.
+- [ ] Root canonical Website HOME/SFTP root'tan server-side resolve edilsin.
 - [ ] Session -> short-lived audience-bound Website token.
 - [ ] Upload/download/edit/rename/move/copy/delete/mkdir/archive via elFinder.
-- [ ] Traversal/symlink/archive escape/special file/secret/cross-site tests.
+- [ ] Traversal/symlink/archive escape/special file/secret/cross-site testleri.
 - [ ] Vendor endpoint public bypass olmasın.
 - [ ] Acceptance sonrası custom `site-file-manager` kaldır.
 - [ ] elFinder site-UID acceptance vermezse homegrown'a dönme; Filestash + localhost SFTP değerlendir.
 
 ## P0.7 — IntegratedToolGateway
 
-### Kalan kod işleri
-
 - [ ] Owner/session authorization + Website scope + short-lived audience token + same-origin proxy + revoke/logout.
-- [ ] Vendor admin portları public açılmaz.
-- [ ] phpMyAdmin/elFinder token başka Website'e replay edilemez.
+- [ ] Vendor admin portları public açılmasın.
+- [ ] phpMyAdmin/elFinder token başka Website'e replay edilemesin.
 - [ ] ttyd on-demand one-shot: site terminali site user/cwd, server terminali Owner root.
 - [ ] ttyd acceptance sonrası custom node-pty/xterm backend kaldır.
-- [ ] Roundcube Owner panel gateway'ine bağlı değildir; mailbox auth kullanır.
+- [ ] Roundcube Owner panel gateway'ine bağlı olmasın; mailbox auth kullansın.
 
 ## P0.8 — Transactional Website/domain provisioning
 
-### Kalan preflight
+### Preflight
 
 - [ ] FQDN/IDN/duplicate/parent/alias conflict preflight'ini final create flow'da birleştir.
 - [ ] Runtime, local/external DNS, local/external/disabled mail, DB, IPv4/IPv6, certificate ve SFTP intent'lerini tek preview'da göster.
 - [ ] Package/service blocker'larını apply öncesi doğrula.
 - [ ] Exact resource preview üret.
 
-### Kalan apply zinciri
+### Apply
 
 - [ ] Website/Application/operation reserve lifecycle'ını finalize et.
 - [ ] Nginx stage/configtest/activate lifecycle'ını full Website create zincirinde finalize et.
@@ -179,26 +122,22 @@ Mail config materialization/staging, validator, backup/activation/rollback primi
 - [ ] Cross-service health postcondition'larını bağla.
 - [ ] Mandatory resource'lar health-gated olmadan Website `ready` olamasın.
 
-### Kalan recovery
+### Recovery
 
-- [ ] Her step durable evidence/ownership; restart önce inspect.
-- [ ] Failure açık `partial/failed`; sahte ready yok.
+- [ ] Her step durable evidence/ownership tutsun; restart önce inspect yapsın.
+- [ ] Failure açık `partial/failed`; sahte ready olmasın.
 - [ ] Retry yalnız failed/unapplied step; revision drift fail-closed.
 - [ ] Compensation reverse order ve yalnız operation-owned resource.
 - [ ] Atomic config + service configtest before reload.
 
 ## P0.9 — Suspend/delete/rollback
 
-### Kalan kod işleri
-
-- [ ] Suspend data silmeden web/runtime erişimini durdurur.
-- [ ] Domain remove ve Website delete ayrıdır.
-- [ ] Delete impact tüm Unix/runtime/Nginx/cert/DNS/mail/DB/SFTP/log/backup bağımlılıklarını gösterir.
+- [ ] Suspend data silmeden web/runtime erişimini durdursun.
+- [ ] Domain remove ve Website delete ayrı operation olsun.
+- [ ] Delete impact tüm Unix/runtime/Nginx/cert/DNS/mail/DB/SFTP/log/backup bağımlılıklarını göstersin.
 - [ ] Mail/DB/file deletion typed confirmation + retention.
-- [ ] Reverse dependency cleanup ownership evidence ile.
-- [ ] Partial deletion retryable state.
-
----
+- [ ] Reverse dependency cleanup ownership evidence ile yapılsın.
+- [ ] Partial deletion retryable state bıraksın.
 
 # P1 — Core parity sonrası
 
@@ -222,7 +161,7 @@ Mail config materialization/staging, validator, backup/activation/rollback primi
 - [ ] Netdata loopback + authenticated gateway.
 - [ ] GoAccess site logs/report/WebSocket.
 - [ ] nftables tek firewall authority.
-- [ ] CrowdSec engine/bouncer; duplicate Fail2ban authority yok.
+- [ ] CrowdSec engine/bouncer; duplicate Fail2ban authority olmasın.
 
 ## P1.4 — Site features/settings
 
@@ -230,9 +169,7 @@ Mail config materialization/staging, validator, backup/activation/rollback primi
 - [ ] WP-CLI site user.
 - [ ] Composer site user.
 - [ ] Redis/Memcached isolation policy.
-- [ ] Settings ekranları gerçek backend state'iyle tamamlanır.
-
----
+- [ ] Settings ekranlarını gerçek backend state'iyle tamamla.
 
 # P2 — Migration temizliği ve son ürün yüzeyi
 
@@ -244,11 +181,9 @@ Mail config materialization/staging, validator, backup/activation/rollback primi
 - [ ] Plesk read-only importer en son: Website/Domain/identity/runtime/DB/DNS/mail/cron/cert/backup preview.
 - [ ] Backend/functionality tamamlandıktan sonra enterprise UI/UX polish.
 
----
-
 # Uygulama sırası — blocker yoksa sapma yok
 
-1. **Website Unix isolation** — independent subdomain, isolation audit API/apply, SFTP key lifecycle, host acceptance.
+1. **Website Unix isolation** — core independent guard; canonical isolation/SFTP plan validation; independent subdomain ayrı Website/Application; alias/shared-site regression; isolation audit API/apply; SFTP key lifecycle.
 2. **PowerDNS operator recovery** — durable journal status/evidence, explicit retry/rollback/resolve, typed confirmation ve fail-closed recovery control surface.
 3. **Mail durable execution** — `MAIL_CONFIG_APPLY/ROLLBACK` production worker/executor wiring, readiness evidence ve replay-safe recovery.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
@@ -259,4 +194,4 @@ Mail config materialization/staging, validator, backup/activation/rollback primi
 9. Runtime migration/backup/monitoring/security/site extras.
 10. Legacy cleanup ve en son UI/UX polish.
 
-Her küçük dilim source test kontratıyla ayrı commit edilir. GitHub Actions kullanılmaz. Gerçek Ubuntu/package/public DNS/SMTP/browser/provider acceptance bu ortamda yapılamıyorsa `todo.md`'ye bırakılır ve ilgili P0 kapısı host acceptance geçmeden `DONE` olmaz.
+Her küçük dilim source test kontratıyla ayrı commit edilir. GitHub Actions kullanılmaz. Gerçek Ubuntu/package/public DNS/SMTP/browser/provider acceptance bu ortamda yapılamıyorsa `todo.md`'ye bırakılır ve ilgili P0 kapısı acceptance geçmeden `DONE` olmaz.
