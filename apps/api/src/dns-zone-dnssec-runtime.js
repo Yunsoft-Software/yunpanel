@@ -252,6 +252,21 @@ export function createDnsZoneDnssecRuntime({ registry, service } = {}) {
       || typeof confirmation !== 'string' || !confirmation) {
       throw new DnsZoneDnssecRuntimeError('dnssec_confirmation_invalid', 'A current DNSSEC preview and exact confirmation are required', 409);
     }
+    let existing;
+    try {
+      existing = (await registry.listForDomain(domainId)).find((entry) => entry.status === 'pending' || entry.status === 'applying') ?? null;
+    } catch (error) { throw mapped(error); }
+    if (existing) {
+      if (existing.targetEnabled === enabled && existing.previewDigest === previewDigest && existing.confirmation === confirmation) {
+        return run(existing.id);
+      }
+      throw new DnsZoneDnssecRuntimeError(
+        'dnssec_operation_conflict',
+        'Another DNSSEC operation is already pending or applying for this Domain',
+        409,
+      );
+    }
+
     const current = await preview({ domainId, enabled });
     if (current.noChanges) throw new DnsZoneDnssecRuntimeError('dnssec_no_changes', 'DNSSEC already has the requested state', 409);
     if (current.applyAllowed !== true || current.previewDigest !== previewDigest || current.confirmation !== confirmation) {
