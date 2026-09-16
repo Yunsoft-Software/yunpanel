@@ -64,24 +64,34 @@ Yapılan değişiklikler:
 - Manual RRset mutation path'i artık her gerçek add/update/delete sırasında authoritative SOA serial'ını güvenli biçimde +1 ilerletiyor. Serial max/drift/invalid SOA state'lerinde fail-closed.
 - Manual RRset service current server DNS identity'deki secondary target varlığını okuyup mutation sonrası NOTIFY tetikliyor; no-op mutation gereksiz serial/notify üretmiyor.
 - `packages/host-runtime/src/dns-secondary-sync-inspector.js` eklendi ve package export'una bağlandı:
-  - configured secondary IP'ye `/usr/bin/dig @<ip> +tcp +norecurse SOA <zone>` ile doğrudan sorgu yapıyor;
+  - configured secondary IP'ye `/usr/bin/dig @<ip> <zone> SOA +tcp +norecurse +time=2 +tries=1` ile doğrudan sorgu yapıyor;
   - yalnız authoritative `aa` cevabı kabul ediyor;
   - observed SOA serial ile primary expected serial'ı karşılaştırıyor;
   - target state `synced`, `stale`, `ahead` veya `unverifiable` oluyor;
   - tüm target'lar synced değilse global `ready=false`;
   - timeout/SERVFAIL/non-authoritative/parse failure başarı sayılmıyor.
 - Secondary serial inspector için source test kontratı eklendi.
+- `apps/api/src/dns-zone-secondary-status.js` ile Domain-scoped secondary status **service** katmanı eklendi:
+  - yalnız local root Domain authoritative zone sahibi olarak kabul ediliyor;
+  - current server DNS identity içindeki exact secondary target seti okunuyor;
+  - PowerDNS primary zone kind/serial/`notified_serial` evidence'ı okunuyor;
+  - secondary sync inspector ile her target'ın observed SOA serial'ı ölçülüyor;
+  - `Primary/Master` olmayan legacy zone `primary_kind_required` olarak fail-closed raporlanıyor;
+  - `notify.currentSerialNotified` ile remote `sync` evidence ayrı tutuluyor;
+  - secondary yoksa gereksiz PowerDNS/dig çağrısı yapılmadan `disabled` state dönüyor.
+- Domain secondary status service için source test kontratı eklendi.
+- Bu service henüz authenticated HTTP route/production bootstrap/panel yüzeyine mount edilmiş değildir; commit adı “inspect Domain secondary DNS sync” olsa da public API tamamlandı diye işaretlenmemiştir.
 
 ## Kaldığımız exact nokta
 
-Secondary DNS lifecycle henüz tamamen tamamlanmış değildir, fakat önceki kayıttan daha ileridedir.
+Secondary DNS lifecycle önemli ölçüde ilerledi fakat tamamen tamamlanmış değildir.
 
 Sıradaki source işleri:
 
-1. **Zone Template re-apply** path'inin current DNS identity içindeki configured secondary topology'yi alıp mutation sonrası NOTIFY tetiklemesi.
-2. Mevcut **secondary sync inspector**'ı Domain/Server status API'sine bağlamak.
-3. Network/DNS panelinde primary serial / PowerDNS `notified_serial` / her secondary observed SOA serial'ını ayrı state olarak göstermek.
-4. `stale`, `ahead`, `unverifiable` target'ların nedenini actionable göstermek; bunların hiçbiri `ready` sayılmamalı.
+1. **Zone Template re-apply** path'inin current DNS identity içindeki configured secondary topology'yi alıp gerçek mutation sonrası NOTIFY tetiklemesi; no-op gereksiz NOTIFY üretmemeli.
+2. Mevcut `dns-zone-secondary-status` service'ini authenticated HTTP route'a ve production bootstrap'a mount etmek; root/local Domain scope ve Read Only GET sınırını korumak.
+3. Network/DNS ve/veya Domain DNS panelinde primary serial / PowerDNS `notified_serial` / her secondary observed SOA serial'ını ayrı state olarak göstermek.
+4. `stale`, `ahead`, `unverifiable`, `primary_kind_required` durumlarını actionable göstermek; bunların hiçbiri `ready` sayılmamalı.
 5. Secondary sync status ile provisioning/re-apply postcondition policy'sinin hangi noktada health gate olacağını explicit tanımlamak; geçici propagation gecikmesi kör retry/duplicate mutation üretmemeli.
 6. Daha sonra PowerDNS config/package upgrade/rollback lifecycle'ını durable operation evidence ile transactional hale getirmek.
 
@@ -92,7 +102,7 @@ Manual RRset CRUD için secondary NOTIFY işi artık açık değildir; bu yol cu
 `todo.md` içindeki T-DNS kapıları geçmeden DNS P0 kapısı DONE değildir. Özellikle:
 
 - public UDP ve TCP 53 dış vantage point'ten doğrulanmalı;
-- Network/DNS ve Site Detail DNS UI Chromium/Firefox'ta gerçek backend ile denenmeli;
+- Network/DNS ve Site Detail DNS UI gerçek browser/backend ile denenmeli;
 - iki authoritative endpoint veya onaylı secondary ile delegation, NOTIFY, AXFR ve failover gözlenmeli;
 - `notified_serial` ile remote secondary SOA serial birbirinden ayrı evidence olarak doğrulanmalı;
 - manual RRset mutation sonrası SOA serial artışı ve secondary observed serial propagation gerçek PowerDNS'te doğrulanmalı;
@@ -135,7 +145,12 @@ Bu turdaki ilgili küçük commitler:
 - `500c9f6` feat: inspect secondary DNS serial sync
 - `31dabe4` chore: export secondary DNS sync inspector
 - `392d7d5` test: cover secondary DNS serial inspection
+- `399ad06` feat: inspect Domain secondary DNS sync
+- `5196fe4` test: cover Domain secondary DNS status
 - `ce5d410` docs: sync DNS panel and secondary notify progress
 - `8e9195a` docs: record DNS UI and secondary progress
+- `6b90133` docs: sync secondary DNS progress after concurrent commits
+- `9dbe859` docs: keep plan focused on remaining YunPanel work
+- `0cbdda6` docs: sync latest secondary DNS status work
 
 GitHub Actions kullanılmadı.
