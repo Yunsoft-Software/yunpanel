@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { powerDnsTemplatePolicy } from '@yunpanel/config-templates/powerdns';
 import { createPowerDnsAuthoritativeReadyManager } from '@yunpanel/host-runtime/powerdns-authoritative-ready-manager';
+import { createPublicDnsReachabilityInspector } from './public-dns-reachability-inspector.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -35,19 +36,57 @@ function hostFailure(error) {
   return error;
 }
 
+function blockedPublicReachability(identity, reason = 'powerdns_not_configured') {
+  return Object.freeze({
+    version: 1,
+    status: 'blocked',
+    ready: false,
+    udp53: null,
+    tcp53: null,
+    reason,
+    vantage: null,
+    targets: Object.freeze({
+      ipv4: identity?.settings?.publicIpv4 ?? null,
+      ipv6: identity?.settings?.publicIpv6 ?? null,
+    }),
+    checkedAt: null,
+  });
+}
+
+function unavailablePublicReachability(identity, error) {
+  return Object.freeze({
+    version: 1,
+    status: 'unverifiable',
+    ready: false,
+    udp53: null,
+    tcp53: null,
+    reason: typeof error?.code === 'string' && error.code
+      ? error.code
+      : 'external_vantage_probe_failed',
+    vantage: null,
+    targets: Object.freeze({
+      ipv4: identity?.settings?.publicIpv4 ?? null,
+      ipv6: identity?.settings?.publicIpv6 ?? null,
+    }),
+    checkedAt: null,
+  });
+}
+
 export function createPowerDnsAuthoritativeService({
   localServerId,
   serverRegistry,
   dnsIdentityRegistry,
   secretRegistry,
   manager = createPowerDnsAuthoritativeReadyManager(),
+  publicReachabilityInspector = createPublicDnsReachabilityInspector(),
 } = {}) {
   if (typeof localServerId !== 'string' || !localServerId
     || !serverRegistry || typeof serverRegistry.getServer !== 'function'
     || !dnsIdentityRegistry || typeof dnsIdentityRegistry.getForServer !== 'function'
     || !secretRegistry || typeof secretRegistry.getForServer !== 'function'
     || typeof secretRegistry.ensureForServer !== 'function' || typeof secretRegistry.materializeForServer !== 'function'
-    || !manager || typeof manager.inspect !== 'function' || typeof manager.apply !== 'function') {
+    || !manager || typeof manager.inspect !== 'function' || typeof manager.apply !== 'function'
+    || !publicReachabilityInspector || typeof publicReachabilityInspector.inspect !== 'function') {
     throw new PowerDnsAuthoritativeServiceError(
       'powerdns_service_dependencies_invalid',
       'PowerDNS authoritative service dependencies are unavailable',
@@ -86,6 +125,11 @@ export function createPowerDnsAuthoritativeService({
     });
   }
 
+  async function inspectPublic(serverId, identity) {
+    try { return await publicReachabilityInspector.inspect({ serverId, identity }); }
+    catch (error) { return unavailablePublicReachability(identity, error); }
+  }
+
   async function preview(serverId = localServerId) {
     const identity = await desired(serverId);
     const secret = await secretRegistry.getForServer(serverId);
@@ -102,7 +146,14 @@ export function createPowerDnsAuthoritativeService({
       api: Object.freeze({ address: powerDnsTemplatePolicy.apiAddress, port: powerDnsTemplatePolicy.apiPort, public: false }),
       authoritative: true,
       recursive: false,
-      readiness: Object.freeze({ api: true, udp53: true, tcp53: true, recursionDenied: true }),
+      readiness: Object.freeze({
+        localApi: true,
+        localUdp53: true,
+        localTcp53: true,
+        recursionDenied: true,
+        publicUdp53: 'external-vantage-required',
+        publicTcp53: 'external-vantage-required',
+      }),
     });
     const previewDigest = digest(payload);
     return Object.freeze({
@@ -125,29 +176,43 @@ export function createPowerDnsAuthoritativeService({
     const identity = await desired(serverId);
     const secret = await secretRegistry.getForServer(serverId);
     if (!secret) {
+      const publicReachability = blockedPublicReachability(identity);
       return Object.freeze({
         configured: false,
         ready: false,
+        localReady: false,
+        publicReady: false,
+        overallReady: false,
         reason: 'powerdns_secret_required',
         serverId,
         dnsIdentityRevision: identity.revision,
         secretConfigured: false,
         warnings: identity.warnings,
+        publicReachability,
       });
     }
     const materialized = await secretRegistry.materializeForServer(serverId);
     let host;
     try { host = await manager.inspect(intentFor(identity, materialized)); }
     catch (error) { throw hostFailure(error); }
+    const localReady = host?.satisfied === true;
+    const publicReachability = localReady
+      ? await inspectPublic(serverId, identity)
+      : blockedPublicReachability(identity, 'powerdns_local_not_ready');
+    const publicReady = publicReachability.ready === true;
     return Object.freeze({
       configured: true,
-      ready: host?.satisfied === true,
+      ready: localReady,
+      localReady,
+      publicReady,
+      overallReady: localReady && publicReady,
       serverId,
       dnsIdentityRevision: identity.revision,
       secretConfigured: true,
       secretRevision: secret.revision,
       warnings: identity.warnings,
       host: publicHostState(host),
+      publicReachability,
     });
   }
 
@@ -173,18 +238,33 @@ export function createPowerDnsAuthoritativeService({
     let host;
     try { host = await manager.apply(intentFor(identity, materialized)); }
     catch (error) { throw hostFailure(error); }
+    const localReady = host?.satisfied === true;
+    const publicReachability = localReady
+      ? await inspectPublic(serverId, identity)
+      : blockedPublicReachability(identity, 'powerdns_local_not_ready');
+    const publicReady = publicReachability.ready === true;
     return Object.freeze({
       applied: true,
-      ready: host?.satisfied === true,
+      ready: localReady,
+      localReady,
+      publicReady,
+      overallReady: localReady && publicReady,
       serverId,
       dnsIdentityRevision: identity.revision,
       secretRevision: materialized.revision,
       warnings: identity.warnings,
       host: publicHostState(host),
+      publicReachability,
     });
   }
 
   return Object.freeze({ localServerId, preview, status, apply });
 }
 
-export const powerDnsAuthoritativeServiceInternals = Object.freeze({ digest, publicHostState, hostFailure });
+export const powerDnsAuthoritativeServiceInternals = Object.freeze({
+  digest,
+  publicHostState,
+  hostFailure,
+  blockedPublicReachability,
+  unavailablePublicReachability,
+});
