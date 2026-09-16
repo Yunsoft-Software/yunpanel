@@ -2,7 +2,7 @@
 
 Bu dosya **yalnız kalan ürün/kod işlerini ve gerçek ortam kabul kapılarını** tutar. Yapılmış işlerin ayrıntılı geçmişi `docs/history/`, hedef mimari `docs/architecture.md`, recovery sözleşmesi `docs/provisioning-recovery.md`, bağlayıcı kurallar `agents.md`, gerçek Ubuntu/browser/provider testleri `todo.md` içindedir.
 
-Son DNS çalışma kaydı: `docs/history/dns-ui-secondary-progress-2026-09-16.md`.
+Son DNS çalışma kaydı: `docs/history/dns-secondary-wiring-2026-09-16.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -53,11 +53,10 @@ Aşağıdaki 7 kapının tümü gerçek Ubuntu host üzerinde geçmeden Plesk co
 
 ### Kaldığımız nokta
 
-Network/DNS Settings, DNS identity, local/public readiness ayrımı, delegation/glue inspector, Primary zone + NOTIFY provisioning, manual RRset SOA serial advancement + secondary NOTIFY, **Zone Template re-apply secondary topology/NOTIFY**, TCP SOA secondary serial inspector ve Domain-scoped secondary sync service source olarak mevcut. Secondary status service primary serial, PowerDNS `notified_serial` ve remote secondary observed SOA serial evidence'ını birbirinden ayırıyor. `dns-zone-secondary-status-http.js` authenticated GET route modülünü tanımlıyor (`/api/domains/:domainId/dns/secondary`), ancak `app.js/index.js` production route composition'ına henüz mount edilmemiş. Ayrıntı `docs/history/dns-ui-secondary-progress-2026-09-16.md`.
+Network/DNS Settings, DNS identity, local/public readiness ayrımı, delegation/glue inspector, Primary zone + NOTIFY provisioning, manual RRset SOA serial advancement + secondary NOTIFY, **Zone Template re-apply secondary topology/NOTIFY**, TCP SOA secondary serial inspector ve Domain-scoped secondary sync service source olarak mevcut. Secondary status service primary serial, PowerDNS `notified_serial` ve remote secondary observed SOA serial evidence'ını birbirinden ayırıyor. `dns-zone-secondary-status-http.js` authenticated GET route'unu (`/api/domains/:domainId/dns/secondary`) tanımlıyor ve route `mountPowerDnsRoutes` üzerinden production composition'a bağlı. Wiring regression contract'ı `apps/api/test/powerdns-secondary-wiring.test.js` ile kilitli. Ayrıntı `docs/history/dns-secondary-wiring-2026-09-16.md`.
 
 ### Kalan kod işleri
 
-- [ ] `mountDnsZoneSecondaryStatusRoutes` route modülünü authenticated application/production composition'a bağla ve source wiring testini ekle. Root/local Domain scope korunmalı; Read Only GET erişebilirken mutation oluşmamalı; PowerDNS API key hiçbir public state'e çıkmamalı.
 - [ ] Network/DNS ve/veya Domain DNS panelinde secondary sync state'i göster: primary serial, `notified_serial`, her secondary observed serial ve `synced` / `stale` / `ahead` / `unverifiable` / `primary_kind_required`; timeout/non-authoritative/serial lag hiçbir durumda `ready` sayılmasın.
 - [ ] Secondary propagation/recovery policy'sini explicit tanımla: geçici serial lag kör re-apply veya duplicate RRset mutation üretmesin; hangi state'in health gate, hangisinin warning olduğu source contract'ta sabit olsun.
 - [ ] PowerDNS config/package upgrade/rollback lifecycle'ını durable operation evidence ile transactional hale getir; restart/timeout sonrası inspect-first, configtest başarısızsa eski çalışan config korunmalı.
@@ -248,7 +247,7 @@ Create path, versioned template, durable re-apply, manual RRset CRUD, DNS panel,
 # Uygulama sırası — blocker yoksa sapma yok
 
 1. **Website Unix isolation** — independent subdomain, isolation audit API/apply, SFTP key lifecycle, host acceptance.
-2. **PowerDNS + ns1/ns2** — sıradaki exact iş: secondary status GET route'unu production app'e mount etmek; ardından panel + health policy; sonra PowerDNS durable upgrade/rollback.
+2. **PowerDNS + ns1/ns2** — sıradaki exact iş: secondary sync state paneli + health/warning policy; sonra PowerDNS durable upgrade/rollback.
 3. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
 4. **Mail + shared Roundcube**.
 5. **Database + phpMyAdmin**.
