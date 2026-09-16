@@ -29,6 +29,15 @@ function plan(runtimeType = 'php') {
   });
 }
 
+function rebuild(current, steps) {
+  return createWebsiteProvisioningPlan({
+    operationId: current.operationId,
+    websiteId: current.websiteId,
+    resources: current.resources,
+    steps,
+  });
+}
+
 test('hosted Website plan inserts isolated SFTP before Nginx activation', () => {
   for (const runtimeType of ['static', 'node', 'php']) {
     const isolated = withWebsiteIsolationSteps(plan(runtimeType));
@@ -58,9 +67,80 @@ test('proxy Website plan does not invent a Unix identity or SFTP jail', () => {
   assert.equal(withWebsiteIsolationSteps(proxy), proxy);
 });
 
-test('isolation plan decoration is idempotent', () => {
+test('isolation plan decoration is idempotent only for the canonical SFTP intent', () => {
   const first = withWebsiteIsolationSteps(plan('php'));
   const second = withWebsiteIsolationSteps(first);
   assert.equal(second, first);
   assert.equal(first.steps.filter((step) => step.id === 'sftp').length, 1);
+});
+
+test('stale SFTP Website or Unix identity fails closed instead of being treated as idempotent', () => {
+  const isolated = withWebsiteIsolationSteps(plan('php'));
+  const stale = rebuild(isolated, isolated.steps.map((step) => step.id === 'sftp'
+    ? { ...step, intent: { ...step.intent, unixUser: 'yunapp-stale000000' } }
+    : step));
+
+  assert.throws(
+    () => withWebsiteIsolationSteps(stale),
+    /SFTP step does not match canonical Website isolation intent/,
+  );
+});
+
+test('duplicate SFTP kinds fail closed even when step ids are unique', () => {
+  const isolated = withWebsiteIsolationSteps(plan('static'));
+  const duplicate = rebuild(isolated, [
+    ...isolated.steps,
+    {
+      id: 'legacy_sftp',
+      kind: 'sftp',
+      state: 'pending',
+      intent: {
+        adapter: 'openssh-internal-sftp',
+        websiteId,
+        applicationId,
+        unixUser,
+      },
+      compensation: { state: 'pending' },
+    },
+  ]);
+
+  assert.throws(
+    () => withWebsiteIsolationSteps(duplicate),
+    /duplicate SFTP isolation steps/,
+  );
+});
+
+test('stale Unix identity ownership blocks SFTP isolation decoration', () => {
+  const staleIdentity = rebuild(plan('node'), plan('node').steps.map((step) => step.id === 'unix_identity'
+    ? { ...step, intent: { ...step.intent, applicationId: '41318df2-d6c5-44ea-ae80-22612eb95433' } }
+    : step));
+
+  assert.throws(
+    () => withWebsiteIsolationSteps(staleIdentity),
+    /Unix identity step does not match canonical Website ownership/,
+  );
+});
+
+test('non-hosted Website with a stray SFTP step fails closed', () => {
+  const proxy = createWebsiteProvisioningPlan({
+    operationId,
+    websiteId,
+    resources: { website: { id: websiteId, applicationId: null, runtimeType: 'proxy', unixUser: null } },
+    steps: [
+      { id: 'website_metadata', kind: 'website_metadata', state: 'succeeded', intent: { websiteId }, compensation: { state: 'not_required' } },
+      {
+        id: 'sftp',
+        kind: 'sftp',
+        state: 'pending',
+        intent: { adapter: 'openssh-internal-sftp', websiteId, applicationId, unixUser },
+        compensation: { state: 'pending' },
+      },
+      { id: 'nginx', kind: 'nginx', state: 'pending', intent: { websiteId }, compensation: { state: 'pending' } },
+    ],
+  });
+
+  assert.throws(
+    () => withWebsiteIsolationSteps(proxy),
+    /Non-hosted Website provisioning must not contain an SFTP isolation step/,
+  );
 });
