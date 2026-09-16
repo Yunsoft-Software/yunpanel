@@ -54,11 +54,21 @@ Bu tasarım site user'ın kendi HOME altındaki `~/.ssh/authorized_keys` dosyas�
 - list response yalnız secret-safe key metadata + materialization status döndürür, raw key taşımaz;
 - empty active-key set de idempotent reconcile edilebilir.
 
+### Authenticated HTTP ve production bootstrap
+
+Bu turda key lifecycle production API composition'ına bağlandı:
+
+- `GET/POST /api/websites/:websiteId/sftp/keys`, revoke, rotate ve explicit reconcile route'ları panel auth guard arkasına alındı;
+- mutation body'leri exact-field doğrulamasıyla sınırlandı; `privateKey` gibi beklenmeyen alanlar service katmanına ulaşmadan reddediliyor;
+- read-only rol yalnız secret-safe listeleme route'una erişebiliyor, mutation'lar Owner management sınırında kalıyor;
+- mutation audit'i yalnız bounded Website kimliği ve action/outcome tutuyor; label veya raw public-key body metadata'ya girmiyor;
+- production bootstrap durable registry'yi control-plane state root altında başlatıyor, yalnız `YUNPANEL_LOCAL_SERVER_ID` kapsamındaki Website'leri kabul ediyor ve root-owned host materializer'a bağlıyor;
+- restart testi durable key metadata'sının korunduğunu, public response'un raw key taşımadığını ve remote Website'in 404 kaldığını kilitliyor.
+
 ## Kalan P0.1 source işleri
 
 - Final Website create/preflight/panel yüzeyinde independent subdomain explicit `parentDomainId` + ayrı Website create olarak sunulmalı; `shared-site` seçimi mevcut Website binding'ini açıkça göstermeli ve default bağımsız Website olmalı.
 - Isolation audit sonucu panelde gösterilmeli; migration apply exact preview/digest + typed confirmation ile operation-owned değişiklikler yapmalı, recursive blind `chown` yapmamalı.
-- SFTP key registry/service için authenticated add/list/revoke/rotate/reconcile HTTP route'ları ve production durable store/runtime bootstrap wiring tamamlanmalı.
 - SFTP key desired state/materialization Website provisioning ownership/evidence ve restart/reconcile lifecycle'ına bağlanmalı.
 - Legacy Website migration apply canonical identity/path/runtime/SFTP drift raporu olmadan destructive ownership repair yapmamalı.
 

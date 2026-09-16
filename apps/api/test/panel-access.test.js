@@ -15,6 +15,7 @@ test('read-only inventory rules are exact and expose only safe Website nested do
   for (const [path, permission] of [
     ['/api/servers', 'servers.read'], ['/api/servers/server-1', 'servers.read'],
     ['/api/websites', 'websites.read'], ['/api/websites/website-1', 'websites.read'], ['/api/websites/website-1/domains', 'websites.read'],
+    ['/api/websites/website-1/sftp/keys', 'websites.read'],
     ['/api/applications', 'applications.read'], ['/api/applications/app-1', 'applications.read'],
     ['/api/domains/domain-1', 'domains.read'], ['/api/certificates/cert-1', 'certificates.read'],
     ['/api/dns-zones', 'dns_zones.read'], ['/api/dns-zones/zone-1', 'dns_zones.read'],
@@ -33,6 +34,7 @@ test('read-only inventory rules are exact and expose only safe Website nested do
   ]) assert.equal(readOnlyPermission('GET', path), permission);
   for (const path of [
     '/api/jobs', '/api/users', '/api/audit', '/api/websites/website-1/environment', '/api/websites/website-1/domains/extra',
+    '/api/websites/website-1/sftp/keys/key-1',
     '/api/applications/app-1/environment', '/api/applications/app-1/status', '/api/dev/servers', '/api/servers/server-1/system/packages/inspect',
     '/api/mail-domains/mail-1/data/restore-preview', '/api/mailboxes/mailbox-1/data/delete-preview',
   ]) assert.equal(readOnlyPermission('GET', path), null);

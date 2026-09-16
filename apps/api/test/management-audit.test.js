@@ -37,6 +37,10 @@ test('current management mutation routes map to bounded action and resource iden
     ['POST', '/api/domains/domain-1/update-preview', 'domain.update.preview', 'domain', 'domain-1'],
     ['PATCH', '/api/domains/domain-1', 'domain.update', 'domain', 'domain-1'],
     ['POST', '/api/websites/website-1/update-preview', 'website.update.preview', 'website', 'website-1'],
+    ['POST', '/api/websites/website-1/sftp/keys', 'website.sftp_key.add', 'website', 'website-1'],
+    ['POST', '/api/websites/website-1/sftp/keys/key-1/revoke', 'website.sftp_key.revoke', 'website', 'website-1'],
+    ['POST', '/api/websites/website-1/sftp/keys/key-1/rotate', 'website.sftp_key.rotate', 'website', 'website-1'],
+    ['POST', '/api/websites/website-1/sftp/keys/reconcile', 'website.sftp_key.reconcile', 'website', 'website-1'],
     ['PUT', '/api/websites/website-1/files/upload', 'website.file.upload', 'website', 'website-1'],
     ['PUT', '/api/websites/website-1/files/text', 'website.file.edit', 'website', 'website-1'],
     ['POST', '/api/websites/website-1/files/mkdir', 'website.file.mkdir', 'website', 'website-1'],
@@ -116,6 +120,27 @@ test('Git credential body never enters common audit metadata', () => {
   assert.deepEqual(events.map((event) => event.action), [
     'application.git_credential.updated', 'application.git_credential.updated',
   ]);
+});
+
+test('SFTP public-key material never enters common audit metadata', () => {
+  const events = [];
+  const response = new Response(201);
+  const publicKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIprivate-looking-public-material';
+  attachManagementAudit({
+    request: {
+      method: 'POST',
+      auth: { user: { id: 'owner-1' } },
+      body: { label: 'Private laptop label', publicKey },
+    },
+    response,
+    pathname: '/api/websites/website-1/sftp/keys',
+    audit: { record(event) { events.push(event); } },
+  });
+  response.emit('finish');
+  assert.deepEqual(events.map((event) => event.action), [
+    'website.sftp_key.add', 'website.sftp_key.add',
+  ]);
+  assert.doesNotMatch(JSON.stringify(events), /private-looking|Private laptop|publicKey|label/);
 });
 
 test('mailbox password and mutation body never enter common audit metadata', () => {

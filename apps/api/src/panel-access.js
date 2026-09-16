@@ -15,7 +15,7 @@ export const READ_ONLY_PERMISSIONS = Object.freeze([
 const READ_ONLY_RULES = Object.freeze([
   ['servers.read', /^\/api\/servers(?:\/[^/%]+)?$/],
   ['servers.read', /^\/api\/servers\/[^/%]+\/dns\/(?:identity|authoritative)$/],
-  ['websites.read', /^\/api\/websites(?:\/[^/%]+(?:\/domains)?)?$/],
+  ['websites.read', /^\/api\/websites(?:\/[^/%]+(?:\/(?:domains|sftp\/keys))?)?$/],
   ['applications.read', /^\/api\/applications(?:\/[^/%]+)?$/],
   ['domains.read', /^\/api\/domains(?:\/[^/%]+)?$/],
   ['certificates.read', /^\/api\/certificates(?:\/[^/%]+)?$/],

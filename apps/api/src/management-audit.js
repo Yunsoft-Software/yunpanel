@@ -33,6 +33,10 @@ export function classifyManagementMutation(method, pathname) {
   if (method === 'POST' && pathname === '/api/websites/migration/rollback') return { action: 'website.migration.rollback', resourceType: 'website_migration', resourceId: 'policy' };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/update-preview$/)) && method === 'POST') return { action: 'website.update.preview', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/impact-preview$/)) && method === 'POST') return { action: 'website.impact.preview', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys$/)) && method === 'POST') return { action: 'website.sftp_key.add', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys\/[^/]+\/revoke$/)) && method === 'POST') return { action: 'website.sftp_key.revoke', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys\/[^/]+\/rotate$/)) && method === 'POST') return { action: 'website.sftp_key.rotate', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys\/reconcile$/)) && method === 'POST') return { action: 'website.sftp_key.reconcile', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files\/upload$/)) && method === 'PUT') return { action: 'website.file.upload', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files\/text$/)) && method === 'PUT') return { action: 'website.file.edit', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files\/mkdir$/)) && method === 'POST') return { action: 'website.file.mkdir', resourceType: 'website', resourceId: parts[0] };

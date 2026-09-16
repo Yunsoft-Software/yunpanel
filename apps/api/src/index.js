@@ -72,6 +72,7 @@ import { createWebsiteMigrationLedger } from './website-migration-ledger.js';
 import { createWebsiteMigrationPolicyStore } from './website-migration-policy.js';
 import { createWebsiteProvisioningRuntime } from './website-provisioning-runtime.js';
 import { createWebsiteRegistry } from './website-registry.js';
+import { createWebsiteSftpKeyRuntime } from './website-sftp-key-runtime.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10);
@@ -90,6 +91,8 @@ const applicationRuntimeBindingStorePath = process.env.YUNPANEL_APPLICATION_RUNT
 const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.data/website-registry.json');
 const websiteProvisioningStorePath = process.env.YUNPANEL_WEBSITE_PROVISIONING_STORE
   ?? path.join(controlPlaneStateRoot, 'website-provisioning-registry.json');
+const websiteSftpKeyStorePath = process.env.YUNPANEL_WEBSITE_SFTP_KEY_STORE
+  ?? path.join(controlPlaneStateRoot, 'website-sftp-key-registry.json');
 const databaseBindingStorePath = process.env.YUNPANEL_DATABASE_BINDING_STORE
   ?? path.resolve('.data/database-binding-registry.json');
 const databaseCredentialStorePath = process.env.YUNPANEL_DATABASE_CREDENTIAL_STORE
@@ -185,6 +188,11 @@ const websiteRegistry = createWebsiteRegistry({
 });
 await websiteRegistry.init();
 const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({ filePath: websiteProvisioningStorePath });
+const websiteSftpKeyRuntime = await createWebsiteSftpKeyRuntime({
+  filePath: websiteSftpKeyStorePath,
+  websiteRegistry,
+  localServerId,
+});
 const databaseBindingRegistry = createDatabaseBindingRegistry({
   filePath: databaseBindingStorePath,
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
@@ -424,6 +432,7 @@ const listener = createAuthenticatedApi({
       applicationPassengerMigrationService,
       websiteRegistry,
       websiteProvisioningRuntime,
+      websiteSftpKeyService: websiteSftpKeyRuntime.service,
       databaseBindingRegistry,
       databaseCredentialRegistry,
       databaseCredentialApplyService,
@@ -523,6 +532,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] application runtime binding store=${applicationRuntimeBindingStorePath}`);
   console.log(`[yunpanel-api] website store=${websiteStorePath}`);
   console.log(`[yunpanel-api] website provisioning store=${websiteProvisioningStorePath}`);
+  console.log(`[yunpanel-api] Website SFTP key store=${websiteSftpKeyStorePath}`);
   console.log(`[yunpanel-api] database binding store=${databaseBindingStorePath}`);
   console.log(`[yunpanel-api] database credential store=${databaseCredentialStorePath}`);
   console.log(`[yunpanel-api] website migration policy store=${websiteMigrationPolicyStorePath}`);

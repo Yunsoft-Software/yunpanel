@@ -52,6 +52,7 @@ function rootOwnedStat(target) {
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-authorized-keys-'));
   t.after(() => rm(root, { recursive: true, force: true }));
+  await chmod(root, 0o755);
   let writes = 0;
   const manager = createSftpAuthorizedKeyManager({
     authorizedKeysRoot: root,

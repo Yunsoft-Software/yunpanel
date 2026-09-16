@@ -117,6 +117,9 @@ import { WebsiteProvisioningHandlerError } from './website-provisioning-handlers
 import { mountWebsiteProvisioningRoutes, WebsiteProvisioningHttpError } from './website-provisioning-http.js';
 import { WebsiteProvisioningOrchestratorError } from './website-provisioning-orchestrator.js';
 import { WebsiteProvisioningRegistryError } from './website-provisioning-registry.js';
+import { mountWebsiteSftpKeyRoutes, WebsiteSftpKeyHttpError } from './website-sftp-key-http.js';
+import { WebsiteSftpKeyRegistryError } from './website-sftp-key-registry.js';
+import { WebsiteSftpKeyServiceError } from './website-sftp-key-service.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -219,6 +222,7 @@ export function createApp({
   terminalCapabilityRegistry = null,
   siteFileManager = null,
   websiteProvisioningRuntime = null,
+  websiteSftpKeyService = null,
   ...options
 } = {}) {
   const core = createCoreApp({
@@ -550,6 +554,9 @@ export function createApp({
     migrationLedger,
     localServerId,
   });
+  if (websiteSftpKeyService) {
+    mountWebsiteSftpKeyRoutes(app, { sftpKeyService: websiteSftpKeyService });
+  }
   mountManagedServiceRoutes(app, { registry: localRegistry, jobRegistry });
   mountNodeRuntimeRoutes(app, { registry: localRegistry, jobRegistry });
   if (databaseBindingRegistry) {
@@ -657,6 +664,9 @@ export function createApp({
       || error instanceof WebsiteProvisioningOrchestratorError
       || error instanceof WebsiteProvisioningRegistryError
       || error instanceof WebsiteRegistryError
+      || error instanceof WebsiteSftpKeyHttpError
+      || error instanceof WebsiteSftpKeyRegistryError
+      || error instanceof WebsiteSftpKeyServiceError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }

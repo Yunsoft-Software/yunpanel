@@ -16,18 +16,20 @@ Bir özellik için olgun ve bakımı süren bir araç varsa YunPanel aynı ürü
 
 ## 2. Mevcut durumun dürüst özeti
 
-2026-09-14 kaynak denetimine göre:
+2026-09-17 kaynak denetimine göre:
 
 - Mevcut deploy edilmiş Node uygulamaların control-plane modeli hâlâ direct-systemd compatibility yoludur. Passenger install/inspect, site runtime intent, canonical env include, read-only migration preview ve health-gated direct-systemd → Passenger cutover coordinator kaynakta vardır; ancak ana async job queue, apply/reconciliation ve normal Domain restage authority zinciri tamamlanmadığı için migration henüz production golden path sayılmaz.
 - Direct-systemd → Passenger migration host coordinator'ı release/env/health koruması yapar, Passenger Nginx route'unu health gate arkasında etkinleştirir ve yalnız hedef sağlıklı olduktan sonra eski systemd servisini stop/disable eder. Başarısız hedef health/config/reload eski route'u geri alır; systemd cleanup sonradan başarısız olursa sağlıklı Passenger trafiği korunup `cleanup_required` state bırakılır.
 - Runtime adapter geçişini control-plane'de temsil etmek için durable `ApplicationRuntimeBinding` registry kaynağa eklenmiştir. Bu registry application, release, Website revision, Domain revision/checksum ve source operation ownership evidence'ını tutar; fakat normal Domain target resolution henüz bu authority'ye tamamen bağlanmamıştır.
 - Static ve Node workload için Unix kullanıcı, release dizini, build/deploy ve process izolasyonu var. Canonical Website/Application identity/path contract ve path-bound Unix identity provisioning mevcut; yeni static Website provisioning source akışı deterministic deploy/inspect modeline taşındı, ancak gerçek Ubuntu/package kabulü tamamlanmadı ve bütün host adapter'ları henüz aynı contract'ı tüketmiyor.
+- PHP Website için site başına PHP-FPM pool/socket, private session/tmp alanı, bootstrap container ve Nginx target source adapter'ları provisioning zincirine bağlanmıştır; gerçek Ubuntu çapraz-site socket/path kabulü hâlâ `todo.md` kapısıdır.
+- OpenSSH internal-sftp site adapter'ı, root-owned `AuthorizedKeysFile`, durable Website public-key registry ve authenticated add/list/revoke/rotate/reconcile API yüzeyi kaynakta vardır. Registry/materialization farkı `reconcile_required` bırakır; provisioning ownership/evidence zinciri ve gerçek OpenSSH login/rotation/package kabulü henüz tamamlanmamıştır.
 - Yeni Node Website Passenger provisioning parçaları mevcut olsa da release hazırlama ile legacy systemd activation halen aynı Node deployment manager içinde birleşiktir. Yeni Website golden path direct-systemd yaratmadan Passenger'a çıkmadan tamamlanmış sayılmaz.
 - `/applications` bütün uygulamaları sunucu genelinde gösteriyor. Hedef site-merkezli ürün modeline aykırıdır.
 - Dosya ekranı YunPanel'in kendi `site-file-manager` API/UI uygulamasıdır; elFinder/Filestash entegrasyonu değildir.
 - Terminal YunPanel'in kendi `node-pty` + xterm.js WebSocket uygulamasıdır; ttyd entegrasyonu değildir.
 - Database ekranı kendi inventory/create/delete akışıdır; phpMyAdmin veya pgAdmin yoktur.
-- DNS tarafında external lifecycle/Cloudflare adapter'ı vardır; authoritative NS sunucusu ve PowerDNS zone yönetimi yoktur.
+- DNS tarafında external lifecycle/Cloudflare adapter'ına ek olarak PowerDNS Authoritative package/config/service adapter'ı, encrypted API-key store, server NS identity, versioned zone template, Website local-DNS provisioning, RRset yönetimi, durable re-apply, DNSSEC ve secondary/delegation gözlemi kaynakta vardır. Operator recovery yüzeyi ile gerçek Ubuntu, public UDP/TCP 53, delegation/glue, transfer/failover ve registrar DNSSEC kabulü tamamlanmadan production-ready sayılmaz.
 - Roundcube için package/config orchestration parçaları vardır; fakat yeni siteyle otomatik `webmail.<domain>`, çalışan webmail endpoint'i ve tam kabul edilmiş lifecycle yoktur.
 - Settings yalnız hesap, güncelleme ve birkaç gelişmiş bağlantı gösterir; sunucu varsayımları ve servis politikaları yönetilemez.
 

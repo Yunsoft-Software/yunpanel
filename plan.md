@@ -22,7 +22,6 @@ Son Website isolation/SFTP ilerlemesi: `docs/history/website-isolation-sftp-prog
 - [ ] Final Website create/preflight/panel yüzeyinde independent subdomain yolunu explicit `parentDomainId` + ayrı Website/Application create olarak sun; stale `wwwMode=independent` resource-sharing yolu geri açılmasın.
 - [ ] `shared-site` seçiminde mevcut Website binding'i açıkça göster ve onaylat; default davranış bağımsız Website olsun, alias hiçbir ek Unix user/runtime/SFTP/mailbox üretmesin.
 - [ ] Isolation audit çıktısını Website panel yüzeyine bağla; migration apply ayrı preview/digest + typed-confirmation operation olsun ve kör recursive `chown` yapmasın.
-- [ ] SFTP public-key lifecycle için authenticated add/list/revoke/rotate/reconcile HTTP yüzeyini ve production durable store/runtime wiring'ini tamamla; public response/audit/log içinde raw key/private key bulunmasın.
 - [ ] SFTP credential desired state/materialization'ını Website provisioning ownership/evidence ve restart/reconcile lifecycle'ına bağla; registry kaydı host materialization'dan saparsa actionable `reconcile_required` state görünür kalsın.
 - [ ] Legacy Website migration apply önce canonical Unix identity/path/runtime/SFTP drift raporu ve exact değişiklik preview'sı versin; operation-owned olmayan dosya/user/runtime üzerinde destructive ownership repair yapmasın.
 
