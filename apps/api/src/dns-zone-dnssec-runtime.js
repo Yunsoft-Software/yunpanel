@@ -45,11 +45,15 @@ function targetAssessment(operation, state) {
     return Object.freeze({ satisfied: false, compromised: false, uncertain: false, reason: 'identity_drift' });
   }
   if (operation.targetEnabled) {
+    const satisfied = state.dnssec === true
+      && state.localReady === true
+      && Array.isArray(state.ds)
+      && state.ds.length > 0;
     return Object.freeze({
-      satisfied: state.dnssec === true,
+      satisfied,
       compromised: false,
       uncertain: false,
-      reason: state.dnssec === true ? null : 'dnssec_not_enabled',
+      reason: satisfied ? null : state.dnssec === true ? 'dnssec_signing_material_incomplete' : 'dnssec_not_enabled',
     });
   }
   if (state.dnssec !== false) {
@@ -169,7 +173,7 @@ export function createDnsZoneDnssecRuntime({ registry, service } = {}) {
     if (inspection.assessment.uncertain) {
       throw new DnsZoneDnssecRuntimeError(
         'dnssec_recovery_parent_unverifiable',
-        'Parent DS state is unverifiable after DNSSEC disable; operation remains applying',
+        'Parent DS state is unverifiable after DNSSEC disable; operation remains applying for safe retry',
         503,
       );
     }
@@ -203,7 +207,7 @@ export function createDnsZoneDnssecRuntime({ registry, service } = {}) {
       catch {
         throw new DnsZoneDnssecRuntimeError(
           'dnssec_postcondition_unavailable',
-          'DNSSEC provider result is uncertain and post-condition cannot be inspected; operation remains applying',
+          'DNSSEC provider result is uncertain and post-condition cannot be inspected; operation remains applying for safe retry',
           503,
         );
       }
@@ -226,7 +230,7 @@ export function createDnsZoneDnssecRuntime({ registry, service } = {}) {
     catch {
       throw new DnsZoneDnssecRuntimeError(
         'dnssec_postcondition_unavailable',
-        'DNSSEC mutation returned but post-condition cannot be inspected; operation remains applying',
+        'DNSSEC mutation returned but post-condition cannot be inspected; operation remains applying for safe retry',
         503,
       );
     }
