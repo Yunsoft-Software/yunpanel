@@ -1,11 +1,11 @@
 import {
-  createPowerDnsAuthoritativeSecureManager,
-} from './powerdns-authoritative-secure-manager.js';
+  createPowerDnsAuthoritativeDurableManager,
+} from './powerdns-authoritative-durable-manager.js';
 import { PowerDnsAuthoritativeManagerError } from './powerdns-authoritative-manager.js';
 import { createPowerDnsSocketHealthInspector } from './powerdns-socket-health-inspector.js';
 
 export function createPowerDnsAuthoritativeReadyManager({
-  manager = createPowerDnsAuthoritativeSecureManager(),
+  manager = createPowerDnsAuthoritativeDurableManager(),
   socketInspector = createPowerDnsSocketHealthInspector(),
 } = {}) {
   if (!manager || typeof manager.inspect !== 'function' || typeof manager.apply !== 'function'
