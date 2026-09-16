@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createDnsZoneSecondaryStatusService,
+  dnsZoneSecondaryHealthPolicy,
   DnsZoneSecondaryStatusError,
 } from '../src/dns-zone-secondary-status.js';
 
@@ -56,6 +57,7 @@ test('secondary DNS status separates PowerDNS notify evidence from observed seco
   assert.equal(result.status, 'synced');
   assert.equal(result.zoneKind, 'Primary');
   assert.deepEqual(result.notify, { serial: 2026091603, notifiedSerial: 2026091603, currentSerialNotified: true });
+  assert.deepEqual(result.policy, { healthGate: 'pass', severity: 'healthy', recovery: 'none', automaticMutationAllowed: false });
   assert.equal(result.sync.targets[0].observedSerial, 2026091603);
   assert.deepEqual(fx.calls[1][1], { zoneName: 'example.com', expectedSerial: 2026091603, targets: ['203.0.113.20'] });
 });
@@ -66,6 +68,7 @@ test('secondary DNS status does not call PowerDNS or dig when no secondary targe
   assert.equal(result.status, 'disabled');
   assert.equal(result.configured, false);
   assert.equal(result.ready, true);
+  assert.deepEqual(result.policy, { healthGate: 'not_applicable', severity: 'info', recovery: 'none', automaticMutationAllowed: false });
   assert.deepEqual(fx.calls, []);
 });
 
@@ -75,6 +78,7 @@ test('secondary DNS status flags legacy Native zones instead of claiming transfe
   assert.equal(result.ready, false);
   assert.equal(result.status, 'primary_kind_required');
   assert.equal(result.sync.status, 'synced');
+  assert.deepEqual(result.policy, { healthGate: 'block', severity: 'error', recovery: 'manual_intervention', automaticMutationAllowed: false });
 });
 
 test('secondary DNS status preserves stale/unverifiable target evidence', async () => {
@@ -95,6 +99,17 @@ test('secondary DNS status preserves stale/unverifiable target evidence', async 
   assert.equal(result.status, 'drift');
   assert.equal(result.notify.currentSerialNotified, false);
   assert.equal(result.sync.targets[0].status, 'stale');
+  assert.deepEqual(result.policy, { healthGate: 'block', severity: 'warning', recovery: 'observe_only', automaticMutationAllowed: false });
+});
+
+test('secondary DNS health policy escalates ahead serials without authorizing automatic mutation', () => {
+  const policy = dnsZoneSecondaryHealthPolicy({
+    configured: true,
+    status: 'drift',
+    ready: false,
+    sync: { targets: [{ status: 'ahead' }] },
+  });
+  assert.deepEqual(policy, { healthGate: 'block', severity: 'error', recovery: 'observe_only', automaticMutationAllowed: false });
 });
 
 test('secondary DNS status enforces root local Domain ownership', async () => {
