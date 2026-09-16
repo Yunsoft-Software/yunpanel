@@ -31,14 +31,14 @@ function IdentityDialog({ current, onClose, onApplied }) {
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  function update(field, value) { setDraft((state) => ({ ...state, [field]: value })); setPreview(null); }
-  function updateNs(role, field, value) { setDraft((state) => ({ ...state, [role]: { ...state[role], [field]: value } })); setPreview(null); }
-  function updateSoa(field, value) { setDraft((state) => ({ ...state, soa: { ...state.soa, [field]: value } })); setPreview(null); }
+  function update(field, value) { setDraft((state) => ({ ...state, [field]: value })); }
+  function updateNs(role, field, value) { setDraft((state) => ({ ...state, [role]: { ...state[role], [field]: value } })); }
+  function updateSoa(field, value) { setDraft((state) => ({ ...state, soa: { ...state.soa, [field]: value } })); }
   async function createPreview(event) {
     event.preventDefault();
     if (busy) return;
     setBusy(true); setError(null); setPreview(null);
-    try { setPreview(await previewServerDnsIdentity(current?.serverId ?? current?.requestedServerId, dnsIdentitySettings(draft))); }
+    try { setPreview(await previewServerDnsIdentity(current.serverId, dnsIdentitySettings(draft))); }
     catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
   }
@@ -48,6 +48,15 @@ function IdentityDialog({ current, onClose, onApplied }) {
     try { await applyServerDnsIdentity(preview.serverId, preview); await onApplied(); }
     catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
+  }
+  if (preview) {
+    const impact = [
+      `revision ${preview.currentRevision} → ${preview.nextRevision}`,
+      preview.impact?.authoritativeDnsRestartRequired ? 'PowerDNS restart gerekli' : null,
+      preview.impact?.delegationMayChange ? 'delegation değişebilir' : null,
+      'mevcut zonelar otomatik sync edilmez',
+    ].filter(Boolean).join(' · ');
+    return <ConfirmDialog title="DNS kimliğini güncelle" message={`NS/SOA kimliği değişecek: ${impact}.`} confirmation={preview.confirmation} busy={busy} error={error} onCancel={() => { setPreview(null); setError(null); }} onConfirm={apply} confirmLabel="DNS kimliğini güncelle" />;
   }
   return <Modal title="Authoritative DNS kimliği" onClose={onClose} busy={busy} wide>
     <form className="ws-form" onSubmit={createPreview}>
@@ -78,16 +87,9 @@ function IdentityDialog({ current, onClose, onApplied }) {
         <h3 className="network-dns-subheading">Zone varsayımları</h3>
         <ChoiceButtons label="Yeni zonelarda DNSSEC varsayılanı" value={draft.dnssecDefault} options={[{ value: false, label: 'Kapalı' }, { value: true, label: 'Açık' }]} onChange={(value) => update('dnssecDefault', value)} />
         <label>Secondary DNS transfer hedefleri<textarea rows={4} value={draft.secondaryDns} onChange={(event) => update('secondaryDns', event.target.value)} placeholder="Her satıra bir IPv4/IPv6 adresi" spellCheck={false} /></label>
-        {preview && <div className="network-dns-preview"><KeyValues items={[
-          ['Mevcut revision', preview.currentRevision], ['Yeni revision', preview.nextRevision],
-          ['PowerDNS restart', preview.impact?.authoritativeDnsRestartRequired ? 'Gerekli' : 'Hayır'],
-          ['Mevcut zonelara otomatik sync', preview.impact?.existingZoneSyncAutomatic ? 'Evet' : 'Hayır'],
-          ['Delegation değişebilir', preview.impact?.delegationMayChange ? 'Evet' : 'Hayır'],
-        ]} /><WarningList warnings={preview.warnings} /></div>}
-        <footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button disabled={busy} type="submit">{busy ? 'Kontrol ediliyor…' : 'Değişikliği önizle'}</Button>{preview && <Button variant="primary" disabled={busy} onClick={() => {}} type="button">Onay ekranını aç</Button>}</footer>
+        <footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button variant="primary" disabled={busy} type="submit">{busy ? 'Kontrol ediliyor…' : 'Değişikliği önizle'}</Button></footer>
       </fieldset>
     </form>
-    {preview && <ConfirmDialog title="DNS kimliğini güncelle" message="NS/SOA kimliği değişecek. Mevcut zonelar otomatik mutate edilmez; gerekiyorsa her zone için ayrı re-apply yapılır." confirmation={preview.confirmation} busy={busy} error={error} onCancel={() => setPreview(null)} onConfirm={apply} confirmLabel="DNS kimliğini güncelle" />}
   </Modal>;
 }
 
@@ -157,7 +159,7 @@ export default function NetworkDnsSettingsPanel({ server, domains = [], canManag
     finally { setBusy(false); }
   }
   const authoritativeState = authoritativePresentation(authoritative);
-  const identityForDialog = identity ? { ...identity } : { serverId: server.id, requestedServerId: server.id };
+  const identityForDialog = identity ?? { serverId: server.id };
 
   return <>
     <Section title="Network / Authoritative DNS" description="PowerDNS, ns1/ns2 ve SOA kimliği. Sunucu hostname authority değişmez." actions={<div className="ws-actions"><Button icon="refresh" disabled={loading || busy} onClick={refresh}>Yenile</Button>{canManage && <Button variant="primary" disabled={busy} onClick={() => setIdentityDialog(true)}>{identity ? 'DNS kimliğini düzenle' : 'DNS kimliğini yapılandır'}</Button>}</div>}>
