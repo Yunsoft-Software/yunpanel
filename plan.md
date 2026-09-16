@@ -2,7 +2,7 @@
 
 Bu dosya **yalnız kalan ürün/kod işlerini** tutar. Yapılmış işlerin ayrıntılı geçmişi `docs/history/`, hedef mimari `docs/architecture.md`, recovery sözleşmesi `docs/provisioning-recovery.md`, bağlayıcı kurallar `agents.md`, gerçek Ubuntu/browser/provider kabul testleri `todo.md` içindedir.
 
-Son Website isolation incelemesi: `docs/history/website-isolation-audit-2026-09-16.md`.
+Son Website isolation/SFTP ilerlemesi: `docs/history/website-isolation-sftp-progress-2026-09-17.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -19,15 +19,12 @@ Son Website isolation incelemesi: `docs/history/website-isolation-audit-2026-09-
 
 ## P0.1 — Website Unix identity ve filesystem isolation
 
-- [ ] Gerçek `independent subdomain` create flow'u ayrı Website/Application identity, ayrı Unix user/group, ayrı SFTP scope ve ayrı runtime ownership oluştursun.
-- [ ] Alias/shared-site aynı Website/Application identity'yi kullansın; alias hiçbir ek Unix user/runtime/SFTP/mailbox üretmesin; `shared-site` yalnız explicit seçim olsun.
-- [ ] Isolation provisioning planındaki existing `isolation` ve webroot/runtime-dir step'lerini canonical `websiteId`, `applicationId`, Unix identity ve managed path contract'ına göre doğrula; stale/duplicate/mismatched step fail-closed olsun.
-- [ ] Eksik isolation/webroot step'lerini idempotent tamamla; doğru existing step ikinci kez üretilmesin.
-- [ ] Regression testleri: gerçek independent resource graph, alias/shared-site tek Website + tek isolation/SFTP unit, stale isolation/webroot identity/path ve duplicate isolation step.
-- [ ] Inspect-only isolation audit'ini authenticated HTTP/API ve gerekli panel yüzeyine bağla; migration apply ayrı typed-confirmation operation olsun.
-- [ ] SFTP public-key credential lifecycle ekle: Website key add/list/revoke/rotate, root-owned managed `authorized_keys` materialization, secret/private-key browser veya repo state'ine yazılmasın.
-- [ ] SFTP credential değişikliklerini site provisioning ownership/evidence ile idempotent reconcile et.
-- [ ] Legacy Website migration apply kör recursive `chown` yapmasın; önce canonical identity/path/runtime drift raporu ve exact değişiklik preview'sı versin.
+- [ ] Final Website create/preflight/panel yüzeyinde independent subdomain yolunu explicit `parentDomainId` + ayrı Website/Application create olarak sun; stale `wwwMode=independent` resource-sharing yolu geri açılmasın.
+- [ ] `shared-site` seçiminde mevcut Website binding'i açıkça göster ve onaylat; default davranış bağımsız Website olsun, alias hiçbir ek Unix user/runtime/SFTP/mailbox üretmesin.
+- [ ] Isolation audit çıktısını Website panel yüzeyine bağla; migration apply ayrı preview/digest + typed-confirmation operation olsun ve kör recursive `chown` yapmasın.
+- [ ] SFTP public-key lifecycle için authenticated add/list/revoke/rotate/reconcile HTTP yüzeyini ve production durable store/runtime wiring'ini tamamla; public response/audit/log içinde raw key/private key bulunmasın.
+- [ ] SFTP credential desired state/materialization'ını Website provisioning ownership/evidence ve restart/reconcile lifecycle'ına bağla; registry kaydı host materialization'dan saparsa actionable `reconcile_required` state görünür kalsın.
+- [ ] Legacy Website migration apply önce canonical Unix identity/path/runtime/SFTP drift raporu ve exact değişiklik preview'sı versin; operation-owned olmayan dosya/user/runtime üzerinde destructive ownership repair yapmasın.
 
 Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
@@ -182,7 +179,7 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 # Uygulama sırası — blocker yoksa sapma yok
 
-1. **Website Unix isolation** — canonical isolation/webroot plan validation; independent subdomain ayrı Website/Application; alias/shared-site regression; isolation audit API/apply; SFTP key lifecycle.
+1. **Website Unix isolation** — final independent/shared-site create yüzeyi; isolation audit panel + migration apply; SFTP key authenticated production wiring + provisioning evidence; legacy migration hardening.
 2. **PowerDNS operator recovery** — durable journal status/evidence, explicit retry/rollback/resolve, typed confirmation ve fail-closed recovery control surface.
 3. **Mail durable execution** — `MAIL_CONFIG_APPLY/ROLLBACK` production worker/executor wiring, readiness evidence ve replay-safe recovery.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
