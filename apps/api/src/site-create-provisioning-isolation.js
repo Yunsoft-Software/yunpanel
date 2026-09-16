@@ -19,6 +19,12 @@ function containsIntent(candidate, expected) {
   return Object.entries(expected).every(([key, value]) => candidate[key] === value);
 }
 
+function assertNoSharedIndependentWww(plan) {
+  if (plan?.resources?.wwwDomain) {
+    throw new Error('Independent www provisioning requires a dedicated Website operation');
+  }
+}
+
 function isolationContract(plan) {
   const website = plan.resources?.website;
   if (!website || !HOSTED_RUNTIME_TYPES.has(website.runtimeType)) return null;
@@ -225,6 +231,7 @@ export function withWebsiteIsolationSteps(plan) {
     throw new Error('A Website provisioning plan is required');
   }
 
+  assertNoSharedIndependentWww(plan);
   const contract = isolationContract(plan);
   const existingSftp = existingSftpStep(plan);
   if (!contract) {
@@ -263,6 +270,7 @@ export function siteCreateProvisioningPlan(preview) {
 
 export const siteCreateProvisioningIsolationInternals = Object.freeze({
   hostedRuntimeTypes: Object.freeze([...HOSTED_RUNTIME_TYPES]),
+  assertNoSharedIndependentWww,
   isolationContract,
   assertUnixIdentityStep,
   assertRuntimePathSteps,

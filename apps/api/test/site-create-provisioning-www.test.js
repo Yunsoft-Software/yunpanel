@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { siteCreateProvisioningPlan } from '../src/site-create-provisioning.js';
+import { siteCreateProvisioningPlan } from '../src/site-create-provisioning-isolation.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
@@ -8,7 +8,7 @@ const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 const primaryDomainId = '3854e385-adfc-42bd-bccf-f655f24cd68f';
 const wwwDomainId = 'c20e9df0-6d02-40bf-a876-dc783ee34c7a';
 
-function preview() {
+function stalePreview() {
   return {
     operationId,
     source: { kind: 'existing_application', applicationId },
@@ -36,6 +36,7 @@ function preview() {
       dockerWorkload: null,
       website: {
         id: websiteId,
+        applicationId,
         runtimeType: 'node',
         unixUser: 'yunapp-4dc352e64a14',
         documentRoot: `/var/lib/yunpanel/apps/${applicationId}/current`,
@@ -44,29 +45,27 @@ function preview() {
         id: primaryDomainId,
         primaryDomain: 'example.com',
         aliases: ['alias.example.com'],
-        targetType: 'proxy',
-        target: { upstreamHost: '127.0.0.1', upstreamPort: 3100, websocket: true },
+        targetType: 'passenger',
+        target: { applicationId },
         httpsMode: 'managed',
       },
       wwwDomain: {
         id: wwwDomainId,
+        websiteId,
         primaryDomain: 'www.example.com',
+        parentDomainId: primaryDomainId,
         aliases: [],
-        targetType: 'proxy',
-        target: { upstreamHost: '127.0.0.1', upstreamPort: 3100, websocket: true },
+        targetType: 'passenger',
+        target: { applicationId },
         httpsMode: 'managed',
       },
     },
   };
 }
 
-test('independent www metadata is also included in Nginx and certificate hostname intent', () => {
-  const plan = siteCreateProvisioningPlan(preview());
-  const nginx = plan.steps.find((step) => step.id === 'nginx');
-  const certificate = plan.steps.find((step) => step.id === 'certificate');
-
-  assert.deepEqual(nginx.intent.aliases, ['alias.example.com', 'www.example.com']);
-  assert.equal(certificate.intent.primaryDomainId, primaryDomainId);
-  assert.equal(certificate.intent.wwwDomainId, wwwDomainId);
-  assert.deepEqual(certificate.intent.aliases, ['alias.example.com', 'www.example.com']);
+test('stale independent www metadata cannot be provisioned on the parent Website identity', () => {
+  assert.throws(
+    () => siteCreateProvisioningPlan(stalePreview()),
+    /Independent www provisioning requires a dedicated Website operation/,
+  );
 });
