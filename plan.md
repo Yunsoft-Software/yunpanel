@@ -2,7 +2,7 @@
 
 Bu dosya **yalnız kalan ürün/kod işlerini ve gerçek ortam kabul kapılarını** tutar. Yapılmış işlerin ayrıntılı geçmişi `docs/history/`, hedef mimari `docs/architecture.md`, recovery sözleşmesi `docs/provisioning-recovery.md`, bağlayıcı kurallar `agents.md`, gerçek Ubuntu/browser/provider testleri `todo.md` içindedir.
 
-Son DNS çalışma kaydı: `docs/history/dns-secondary-health-ui-2026-09-16.md`.
+Son DNS çalışma kaydı: `docs/history/powerdns-durable-apply-2026-09-16.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -53,11 +53,11 @@ Aşağıdaki 7 kapının tümü gerçek Ubuntu host üzerinde geçmeden Plesk co
 
 ### Kaldığımız nokta
 
-Network/DNS Settings, DNS identity, local/public readiness ayrımı, delegation/glue inspector, Primary zone + NOTIFY provisioning, manual RRset SOA serial advancement + secondary NOTIFY, **Zone Template re-apply secondary topology/NOTIFY**, TCP SOA secondary serial inspector ve Domain-scoped secondary sync service source olarak mevcut. Secondary status service primary serial, PowerDNS `notified_serial` ve remote secondary observed SOA serial evidence'ını birbirinden ayırıyor. Authenticated `GET /api/domains/:domainId/dns/secondary` production composition'a bağlı; Domain DNS workspace primary serial, NOTIFY evidence ve her secondary observed serial/error state'ini gösteriyor. API explicit `healthGate / severity / recovery / automaticMutationAllowed` policy döndürüyor; drift/unverifiable kör re-apply veya duplicate mutation başlatmıyor ve frontend backend policy'yi source-of-truth kabul ediyor. Ayrıntı `docs/history/dns-secondary-health-ui-2026-09-16.md`.
+Network/DNS Settings, DNS identity, local/public readiness ayrımı, delegation/glue inspector, Primary zone + NOTIFY provisioning, manual RRset SOA serial advancement + secondary NOTIFY, Zone Template re-apply secondary topology/NOTIFY, TCP SOA secondary serial inspector ve Domain-scoped secondary sync/status source olarak mevcut. PowerDNS host apply zincirinde candidate config validation failure artık previous managed config'i içerik + uid/gid/mode ile atomik geri yüklüyor; fresh install'da reddedilen candidate dosyası bırakılmıyor. Durable PowerDNS operation journal mutation öncesi `applying` evidence yazıyor, raw API key persist etmiyor ve interrupted/restart retry'da önce `inspect` yapıyor; hedef durum kanıtlanamıyorsa package/config/service mutation'ını kör tekrar etmeyip fail-closed recovery state bırakıyor. Ayrıntı `docs/history/powerdns-durable-apply-2026-09-16.md`.
 
 ### Kalan kod işleri
 
-- [ ] PowerDNS config/package upgrade/rollback lifecycle'ını durable operation evidence ile transactional hale getir; restart/timeout sonrası inspect-first, configtest başarısızsa eski çalışan config korunmalı.
+- [ ] Durable PowerDNS journal için operator-visible recovery/control surface tamamla: current/latest operation state ve recovery reason, inspect evidence, explicit retry/rollback/resolve aksiyonları, destructive aksiyonlarda typed confirmation + audit; `recovery_pending` durumunda hiçbir package/config/service mutation'ı kör replay edilmesin.
 
 ### Host/browser acceptance — `todo.md`
 
@@ -93,9 +93,13 @@ Create path, versioned template, durable re-apply, manual RRset CRUD, DNS panel,
 
 ## P0.4 — Mail: Postfix + Dovecot + Rspamd + shared Roundcube
 
+### Kaldığımız nokta
+
+Mail config materialization/staging, validator, backup/activation/rollback primitives source olarak mevcut; fresh-install rollback yeni oluşturulmuş managed dosyaları da geri temizleyebiliyor. API `MAIL_CONFIG_APPLY` / `MAIL_CONFIG_ROLLBACK` durable job intent'lerini enqueue ediyor. Kalan ana boşluk bu job'ları production worker/executor üzerinden mevcut staging + activator + validator + rollback bileşenlerine bağlayıp restart/timeout recovery ve post-condition evidence ile tamamlamak.
+
 ### Kalan kod işleri
 
-- [ ] Postfix/Dovecot/Rspamd tek mail service manager: install/config/inspect/validate/reload/rollback.
+- [ ] `MAIL_CONFIG_APPLY` / `MAIL_CONFIG_ROLLBACK` durable job execution zincirini production worker'a bağla: claim/lease/restart semantics, mevcut staging manager + activator + validators + backup/rollback kullanımı, Postfix/Dovecot/Rspamd readiness evidence, interrupted/timeout sonrası inspect/reconcile ve aynı operation'ın API/job retry ile ikinci kez host mutation yapmasını engelleyen replay fence.
 - [ ] SQL-backed virtual mail domain/mailbox/alias/quota/password hash modeli; Website user ile mail storage identity ayrıdır.
 - [ ] Dedicated mail storage identity; Website UID Maildir owner değildir.
 - [ ] Local mail enable domain oluşturur fakat bilinen/default parola mailbox yaratmaz.
@@ -245,9 +249,9 @@ Create path, versioned template, durable re-apply, manual RRset CRUD, DNS panel,
 # Uygulama sırası — blocker yoksa sapma yok
 
 1. **Website Unix isolation** — independent subdomain, isolation audit API/apply, SFTP key lifecycle, host acceptance.
-2. **PowerDNS + ns1/ns2** — sıradaki exact iş: PowerDNS durable config/package upgrade/rollback; inspect-first recovery ve configtest-before-reload.
-3. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
-4. **Mail + shared Roundcube**.
+2. **PowerDNS operator recovery** — durable journal status/evidence, explicit retry/rollback/resolve, typed confirmation ve fail-closed recovery control surface.
+3. **Mail durable execution** — `MAIL_CONFIG_APPLY/ROLLBACK` production worker/executor wiring, readiness evidence ve replay-safe recovery.
+4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
 5. **Database + phpMyAdmin**.
 6. **elFinder**.
 7. **Transactional create/delete provisioning** parçalarını tek lifecycle'a birleştir.
