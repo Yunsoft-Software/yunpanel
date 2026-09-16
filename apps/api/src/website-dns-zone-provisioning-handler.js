@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isIP } from 'node:net';
 import path from 'node:path';
 import { createPowerDnsZoneManager } from '@yunpanel/host-runtime/powerdns-zone-manager';
 import { createPowerDnsSecretRegistry } from './powerdns-secret-registry.js';
@@ -23,7 +24,7 @@ function normalizedIntent(context = {}) {
   const intent = context.intent;
   const fields = new Set([
     'adapter', 'serverId', 'webDomainId', 'zoneName', 'templateVersion', 'templateSnapshot',
-    'dnsIdentityRevision', 'serial', 'dnssec', 'records',
+    'dnsIdentityRevision', 'secondaryDns', 'serial', 'dnssec', 'records',
   ]);
   if (!intent || typeof intent !== 'object' || Array.isArray(intent)
     || Object.keys(intent).length !== fields.size || Object.keys(intent).some((field) => !fields.has(field))
@@ -34,6 +35,9 @@ function normalizedIntent(context = {}) {
     || !Number.isSafeInteger(intent.templateVersion) || intent.templateVersion < 1
     || !Array.isArray(intent.templateSnapshot) || intent.templateSnapshot.length < 1
     || !Number.isSafeInteger(intent.dnsIdentityRevision) || intent.dnsIdentityRevision < 1
+    || !Array.isArray(intent.secondaryDns) || intent.secondaryDns.length > 8
+    || intent.secondaryDns.some((entry) => typeof entry !== 'string' || !isIP(entry))
+    || new Set(intent.secondaryDns).size !== intent.secondaryDns.length
     || !Number.isSafeInteger(intent.serial) || intent.serial < 1
     || typeof intent.dnssec !== 'boolean'
     || !Array.isArray(intent.records) || intent.records.length < 2) {
@@ -45,6 +49,7 @@ function normalizedIntent(context = {}) {
   }
   return Object.freeze({
     ...intent,
+    secondaryDns: Object.freeze([...intent.secondaryDns].sort()),
     templateSnapshot: Object.freeze(intent.templateSnapshot.map((entry) => Object.freeze({
       ...entry,
       values: Object.freeze([...(entry.values ?? [])]),
@@ -90,15 +95,22 @@ function publicEvidence(intent, result) {
     serverId: intent.serverId,
     webDomainId: intent.webDomainId,
     zoneName: intent.zoneName,
+    zoneKind: result.kind ?? null,
     templateVersion: intent.templateVersion,
     templateSnapshotDigest: snapshotDigest(intent.templateSnapshot),
     dnsIdentityRevision: intent.dnsIdentityRevision,
+    secondaryDns: intent.secondaryDns,
     requestedSerial: intent.serial,
     observedSerial: result.serial ?? null,
+    notifiedSerial: result.notifiedSerial ?? result.notification?.notifiedSerial ?? null,
+    notifyRequested: intent.secondaryDns.length > 0,
+    notifyAccepted: result.notification?.accepted === true,
+    notifyCurrentSerialDispatched: result.notification?.currentSerialDispatched === true,
     dnssec: result.dnssec === true,
     managedRrsetCount: result.managedRrsetCount ?? intent.records.length,
     manualRrsetCount: result.manualRrsetCount ?? 0,
     created: result.created === true,
+    primaryKindChanged: result.primaryKindChanged === true,
     changedRrsetCount: Number.isSafeInteger(result.changedRrsetCount) ? result.changedRrsetCount : 0,
   });
 }
@@ -138,6 +150,7 @@ export function createWebsiteDnsZoneProvisioningHandler({
       zoneName: intent.zoneName,
       apiKey: await secret(intent.serverId),
       records: intent.records,
+      notifySecondaries: intent.secondaryDns.length > 0,
     });
     if (!result?.satisfied) return Object.freeze({
       satisfied: false,
@@ -154,6 +167,7 @@ export function createWebsiteDnsZoneProvisioningHandler({
       apiKey: await secret(intent.serverId),
       records: intent.records,
       dnssec: intent.dnssec,
+      notifySecondaries: intent.secondaryDns.length > 0,
     });
     if (!result?.satisfied) {
       throw new WebsiteProvisioningHandlerError(
