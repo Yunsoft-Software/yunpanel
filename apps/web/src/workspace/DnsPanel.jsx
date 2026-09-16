@@ -3,6 +3,7 @@ import {
   applyDnsReapply,
   applyDnssec,
   deleteManualDnsRecord,
+  getDnsSecondaryStatus,
   getDnsZone,
   getDnssecStatus,
   listDnsReapplyOperations,
@@ -26,6 +27,7 @@ import {
   rootDnsDomain,
 } from './dns-model.js';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Modal, Section } from './PanelKit.jsx';
+import SecondaryDnsStatusPanel from './SecondaryDnsStatusPanel.jsx';
 import { formatDate, siteHref } from './site-model.js';
 import './dns-panel.css';
 
@@ -141,6 +143,7 @@ function OperationsPanel({ reapply, dnssec }) {
 export default function DnsPanel({ domain, domains, canManage }) {
   const root = rootDnsDomain(domain, domains);
   const [zone, setZone] = useState(null);
+  const [secondary, setSecondary] = useState(null);
   const [reapply, setReapply] = useState(null);
   const [dnssec, setDnssec] = useState(null);
   const [reapplyOperations, setReapplyOperations] = useState([]);
@@ -158,12 +161,12 @@ export default function DnsPanel({ domain, domains, canManage }) {
     if (!root || root.id !== domain.id) return;
     setLoading(true); setError(null);
     const results = await Promise.allSettled([
-      getDnsZone(root.id), previewDnsReapply(root.id), getDnssecStatus(root.id),
+      getDnsZone(root.id), getDnsSecondaryStatus(root.id), previewDnsReapply(root.id), getDnssecStatus(root.id),
       listDnsReapplyOperations(root.id), listDnssecOperations(root.id),
     ]);
-    const setters = [setZone, setReapply, setDnssec, setReapplyOperations, setDnssecOperations];
+    const setters = [setZone, setSecondary, setReapply, setDnssec, setReapplyOperations, setDnssecOperations];
     results.forEach((result, index) => { if (result.status === 'fulfilled') setters[index](result.value); });
-    const critical = results.slice(0, 3).find((result) => result.status === 'rejected');
+    const critical = results.slice(0, 4).find((result) => result.status === 'rejected');
     if (critical?.reason?.name !== 'AbortError') setError(critical?.reason?.message ?? null);
     setLoading(false);
   }, [domain.id, root?.id]);
@@ -233,6 +236,7 @@ export default function DnsPanel({ domain, domains, canManage }) {
         ['Zone', zone.zoneName], ['SOA serial', zone.serial], ['Zone türü', zone.kind], ['DNSSEC', zone.dnssec ? 'Signing açık' : 'Kapalı'],
       ]} /><p className="ws-muted">Zone Template, mail ve runtime kayıtları YunPanel ownership marker’ı taşır ve burada read-only görünür. Manual kayıtlar ayrı sahiplikte düzenlenebilir.</p></div><ZoneRecords zone={zone} canManage={canManage} busy={busy} onAdd={() => setRecordDialog({ rrset: null })} onEdit={(rrset) => setRecordDialog({ rrset })} onDelete={setDeleteTarget} /></> : loading ? <div className="ws-loading" role="status"><span className="ws-spinner" />Authoritative zone okunuyor…</div> : <EmptyState title="Zone okunamadı" detail="PowerDNS authoritative zone henüz yok veya backend erişilemiyor." icon="globe" />}
     </Section>
+    <SecondaryDnsStatusPanel state={secondary} loading={loading} busy={busy} onRefresh={refresh} />
     <div className="ws-equal-columns"><ReapplyPanel preview={reapply} loading={loading} canManage={canManage} busy={busy} onRefresh={refresh} onApply={() => setConfirmation({ kind: 'reapply', preview: reapply })} /><DnssecPanel state={dnssec} preview={dnssecPreview} canManage={canManage} busy={busy} onPreview={prepareDnssec} onRefresh={refresh} /></div>
     <OperationsPanel reapply={reapplyOperations} dnssec={dnssecOperations} />
     {recordDialog && zone && <DnsRecordDialog zone={zone} rrset={recordDialog.rrset} onClose={() => setRecordDialog(null)} onSaved={refreshed} />}
