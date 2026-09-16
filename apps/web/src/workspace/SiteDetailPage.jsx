@@ -4,6 +4,7 @@ import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, CollectionNotice, EmptyState, ErrorNotice, Icon, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { SITE_TABS, certificateState, externalSiteUrl, matchingApplications, parentTrail, selectedApplication, siteHref, siteJobs, formatDate } from './site-model.js';
 import { ApplicationOperations, DomainOperations, SslOperations } from './SiteOperations.jsx';
+import DnsPanel from './DnsPanel.jsx';
 import EnvironmentPanel from './EnvironmentPanel.jsx';
 import JobsTable from './JobsTable.jsx';
 import TerminalPanel from './LazyTerminalPanel.jsx';
@@ -101,15 +102,16 @@ function SiteWorkspace({ websiteId, tab }) {
         ['Website runtime', website?.runtimeType ?? 'Legacy / ilişkisiz'],
         ['Uygulama eşleşmesi', application?.name ?? (matches.length > 1 ? 'Birden fazla aday; Uygulama sekmesinden seçin' : 'Bağlı uygulama bulunamadı')],
         ['Son etkinleştirme', formatDate(domain.lastAppliedAt)],
-      ]} /></Section><Section title="Hızlı erişim"><div className="ws-section-body ws-actions"><LinkButton to={siteHref(domain.id, 'resources')} icon="box">Bağlı kaynaklar</LinkButton>{application && <LinkButton to={siteHref(domain.id, 'node')} icon="code">Uygulama</LinkButton>}<LinkButton to={siteHref(domain.id, 'ssl')} icon="shield">SSL</LinkButton><LinkButton to={siteHref(domain.id, 'domains')} icon="globe">Alan adları</LinkButton><LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı</LinkButton></div><div className="ws-section-body"><p className="ws-muted">Siteye bağlı veritabanı, mail ve Docker kimlikleri yalnız explicit registry ilişkilerinden Bağlı kaynaklar sekmesinde gösterilir.</p></div></Section></div>
+      ]} /></Section><Section title="Hızlı erişim"><div className="ws-section-body ws-actions"><LinkButton to={siteHref(domain.id, 'resources')} icon="box">Bağlı kaynaklar</LinkButton>{application && <LinkButton to={siteHref(domain.id, 'node')} icon="code">Uygulama</LinkButton>}<LinkButton to={siteHref(domain.id, 'dns')} icon="globe">DNS</LinkButton><LinkButton to={siteHref(domain.id, 'ssl')} icon="shield">SSL</LinkButton><LinkButton to={siteHref(domain.id, 'domains')} icon="globe">Alan adları</LinkButton><LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı</LinkButton></div><div className="ws-section-body"><p className="ws-muted">Siteye bağlı veritabanı, mail ve Docker kimlikleri yalnız explicit registry ilişkilerinden Bağlı kaynaklar sekmesinde gösterilir.</p></div></Section></div>
       {website && <ProvisioningRecoveryPanel websiteId={website.id} canManage={canManage} onChanged={refreshAll} />}
       <Section title="Bu siteye ait son işlemler"><CollectionNotice resource={jobs} label="İşlemler" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={8} />}</Section>
     </>}
     {tab === 'resources' && <SiteResourcesPanel domain={domain} website={website} application={application} server={server} />}
     {['node', 'deploy'].includes(tab) && <><ApplicationOperations domain={domain} application={application} deployOnly={tab === 'deploy'} disabled={domains.status !== 'ready'} />{application && tab === 'node' && <EnvironmentPanel key={application.id} application={application} />}</>}
     {tab === 'domains' && <DomainOperations domain={domain} />}
+    {tab === 'dns' && <DnsPanel key={domain.id} domain={domain} domains={domains.items} canManage={canManage} />}
     {tab === 'ssl' && <><CollectionNotice resource={certificates} label="Sertifikalar" /><SslOperations key={domain.id} domain={domain} /></>}
-    {tab === 'logs' && <><LogsPanel application={application} domain={domain} server={server} /><Section title="Site işlem kayıtları"><CollectionNotice resource={jobs} label="İşlem kayıtları" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={50} />}</Section></>}
+    {tab === 'logs' && <><LogsPanel application={application} domain={domain} server={server} /><Section title="Site işlem kayıtları"><CollectionNotice resource={jobs} label="İşlem kayıtları" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={50} />}</Section>}
     {tab === 'terminal' && (domain.websiteId ? <TerminalPanel
       title="Site terminali"
       description={`${domain.primaryDomain} için dedicated site kullanıcısında interaktif PTY.`}
