@@ -19,12 +19,11 @@ Son Website isolation incelemesi: `docs/history/website-isolation-audit-2026-09-
 
 ## P0.1 — Website Unix identity ve filesystem isolation
 
-- [ ] Core `site-create.js` doğrudan çağrıldığında stale `wwwMode=independent` yolunun aynı `websiteId` altında `www.<domain>` üretmesini engelle; gerçek ayrı Website/Application implementasyonu tamamlanana kadar core seviyesinde de fail-closed davran.
 - [ ] Gerçek `independent subdomain` create flow'u ayrı Website/Application identity, ayrı Unix user/group, ayrı SFTP scope ve ayrı runtime ownership oluştursun.
 - [ ] Alias/shared-site aynı Website/Application identity'yi kullansın; alias hiçbir ek Unix user/runtime/SFTP/mailbox üretmesin; `shared-site` yalnız explicit seçim olsun.
-- [ ] Isolation provisioning planındaki existing `isolation`, webroot/runtime-dir ve `sftp` step'lerini canonical `websiteId`, `applicationId`, Unix identity ve managed path contract'ına göre doğrula; stale/duplicate/mismatched step fail-closed olsun.
-- [ ] Eksik isolation/SFTP step'lerini idempotent tamamla; doğru existing step ikinci kez üretilmesin.
-- [ ] Regression testleri: core independent guard, gerçek independent resource graph, alias/shared-site tek Website + tek isolation/SFTP unit, stale SFTP identity ve duplicate isolation step.
+- [ ] Isolation provisioning planındaki existing `isolation` ve webroot/runtime-dir step'lerini canonical `websiteId`, `applicationId`, Unix identity ve managed path contract'ına göre doğrula; stale/duplicate/mismatched step fail-closed olsun.
+- [ ] Eksik isolation/webroot step'lerini idempotent tamamla; doğru existing step ikinci kez üretilmesin.
+- [ ] Regression testleri: gerçek independent resource graph, alias/shared-site tek Website + tek isolation/SFTP unit, stale isolation/webroot identity/path ve duplicate isolation step.
 - [ ] Inspect-only isolation audit'ini authenticated HTTP/API ve gerekli panel yüzeyine bağla; migration apply ayrı typed-confirmation operation olsun.
 - [ ] SFTP public-key credential lifecycle ekle: Website key add/list/revoke/rotate, root-owned managed `authorized_keys` materialization, secret/private-key browser veya repo state'ine yazılmasın.
 - [ ] SFTP credential değişikliklerini site provisioning ownership/evidence ile idempotent reconcile et.
@@ -183,7 +182,7 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 # Uygulama sırası — blocker yoksa sapma yok
 
-1. **Website Unix isolation** — core independent guard; canonical isolation/SFTP plan validation; independent subdomain ayrı Website/Application; alias/shared-site regression; isolation audit API/apply; SFTP key lifecycle.
+1. **Website Unix isolation** — canonical isolation/webroot plan validation; independent subdomain ayrı Website/Application; alias/shared-site regression; isolation audit API/apply; SFTP key lifecycle.
 2. **PowerDNS operator recovery** — durable journal status/evidence, explicit retry/rollback/resolve, typed confirmation ve fail-closed recovery control surface.
 3. **Mail durable execution** — `MAIL_CONFIG_APPLY/ROLLBACK` production worker/executor wiring, readiness evidence ve replay-safe recovery.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
