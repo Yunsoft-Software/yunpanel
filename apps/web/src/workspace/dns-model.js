@@ -85,6 +85,41 @@ export function dnssecPresentation(status) {
   return value ? Object.freeze({ state: value[0], label: value[1] }) : Object.freeze({ state: 'unknown', label: status || 'Bilinmiyor' });
 }
 
+export function dnsSecondaryPresentation(value) {
+  const status = typeof value?.status === 'string' ? value.status : 'unknown';
+  const presentation = {
+    disabled: ['off', 'Secondary DNS kapalı'],
+    synced: ['active', 'Secondary DNS senkron'],
+    drift: ['warning', 'Secondary DNS serial farkı'],
+    unverifiable: ['warning', 'Secondary DNS doğrulanamıyor'],
+    primary_kind_required: ['error', 'Primary zone gerekli'],
+  }[status] ?? ['unknown', status === 'unknown' ? 'Secondary DNS durumu bilinmiyor' : status];
+  const stateAllowsReady = status === 'disabled' || status === 'synced';
+  const ready = stateAllowsReady && value?.ready === true;
+  return Object.freeze({
+    state: presentation[0],
+    label: presentation[1],
+    ready,
+    blocking: status === 'disabled' ? false : !ready,
+    recovery: ready || status === 'disabled' ? 'none' : 'observe_only',
+  });
+}
+
+export function dnsSecondaryTargetPresentation(target) {
+  const status = typeof target?.status === 'string' ? target.status : 'unknown';
+  const presentation = {
+    synced: ['active', 'Senkron'],
+    stale: ['warning', 'Primary serial gerisinde'],
+    ahead: ['error', 'Primary serial ilerisinde'],
+    unverifiable: ['warning', 'Doğrulanamıyor'],
+  }[status] ?? ['unknown', status === 'unknown' ? 'Bilinmiyor' : status];
+  return Object.freeze({
+    state: presentation[0],
+    label: presentation[1],
+    ready: status === 'synced' && target?.ready === true,
+  });
+}
+
 export function operationPresentation(operation) {
   if (!operation) return Object.freeze({ state: 'unknown', label: 'İşlem yok' });
   if (operation.status === 'succeeded') return Object.freeze({ state: 'succeeded', label: 'Tamamlandı' });
