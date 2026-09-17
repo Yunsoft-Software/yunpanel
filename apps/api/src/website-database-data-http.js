@@ -77,10 +77,10 @@ function resolveOperationsService(databaseBackupOperationsService, jobRegistry) 
     }
     return databaseBackupOperationsService;
   }
-  if (!jobRegistry || typeof jobRegistry.getJob !== 'function'
-    || typeof jobRegistry.listJobs !== 'function' || typeof jobRegistry.enqueue !== 'function') {
-    throw new Error('Website database restore job registry is required');
+  if (!jobRegistry || typeof jobRegistry.listJobs !== 'function' || typeof jobRegistry.enqueue !== 'function') {
+    throw new Error('Website database job registry is required');
   }
+  if (typeof jobRegistry.getJob !== 'function') return null;
   return createDatabaseBackupOperationsService({
     backupManager: createDatabaseDumpManager(),
     jobRegistry,
@@ -226,57 +226,60 @@ export function mountWebsiteDatabaseDataRoutes(app, {
     return response.status(202).json({ data: { scope: publicScope(scope), job } });
   }));
 
-  app.post(`${prefix}/restore-preview`, requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    emptyQuery(request.query);
-    const body = requireStrings(
-      exactBody(request.body, RESTORE_PREVIEW_FIELDS, 'website_database_restore_preview_input_invalid'),
-      ['backupId'],
-      'website_database_restore_preview_input_invalid',
-    );
-    const scope = await resolveScope({
-      ...request.params,
-      expectedBindingRevision: body.expectedBindingRevision,
-    });
-    const preview = await callOperation(operations, 'previewRestore', {
-      serverId: scope.serverId,
-      databaseName: scope.databaseName,
-      backupId: body.backupId,
-      ownership: {
-        websiteId: scope.websiteId,
-        databaseBindingId: scope.databaseBindingId,
-        expectedBindingRevision: scope.bindingRevision,
-      },
-    });
-    response.set('Cache-Control', 'no-store');
-    return response.json({ data: { ...preview, scope: publicScope(scope) } });
-  }));
+  if (operations) {
+    app.post(`${prefix}/restore-preview`, requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      emptyQuery(request.query);
+      const body = requireStrings(
+        exactBody(request.body, RESTORE_PREVIEW_FIELDS, 'website_database_restore_preview_input_invalid'),
+        ['backupId'],
+        'website_database_restore_preview_input_invalid',
+      );
+      const scope = await resolveScope({
+        ...request.params,
+        expectedBindingRevision: body.expectedBindingRevision,
+      });
+      const preview = await callOperation(operations, 'previewRestore', {
+        serverId: scope.serverId,
+        databaseName: scope.databaseName,
+        backupId: body.backupId,
+        ownership: {
+          websiteId: scope.websiteId,
+          databaseBindingId: scope.databaseBindingId,
+          expectedBindingRevision: scope.bindingRevision,
+        },
+      });
+      response.set('Cache-Control', 'no-store');
+      return response.json({ data: { ...preview, scope: publicScope(scope) } });
+    }));
 
-  app.post(`${prefix}/restore`, requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    emptyQuery(request.query);
-    const body = requireStrings(
-      exactBody(request.body, RESTORE_APPLY_FIELDS, 'website_database_restore_input_invalid'),
-      ['backupId', 'expectedPreviewDigest', 'expectedBackupSha256', 'confirmation'],
-      'website_database_restore_input_invalid',
-    );
-    const scope = await resolveScope({
-      ...request.params,
-      expectedBindingRevision: body.expectedBindingRevision,
-    });
-    const queued = await callOperation(operations, 'queueRestore', {
-      serverId: scope.serverId,
-      databaseName: scope.databaseName,
-      backupId: body.backupId,
-      expectedPreviewDigest: body.expectedPreviewDigest,
-      expectedBackupSha256: body.expectedBackupSha256,
-      confirmation: body.confirmation,
-      ownership: {
-        websiteId: scope.websiteId,
-        databaseBindingId: scope.databaseBindingId,
-        expectedBindingRevision: scope.bindingRevision,
-      },
-    });
-    return response.status(202).json({ data: { ...queued, scope: publicScope(scope) } });
-  }));
+    app.post(`${prefix}/restore`, requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      emptyQuery(request.query);
+      const body = requireStrings(
+        exactBody(request.body, RESTORE_APPLY_FIELDS, 'website_database_restore_input_invalid'),
+        ['backupId', 'expectedPreviewDigest', 'expectedBackupSha256', 'confirmation'],
+        'website_database_restore_input_invalid',
+      );
+      const scope = await resolveScope({
+        ...request.params,
+        expectedBindingRevision: body.expectedBindingRevision,
+      });
+      const queued = await callOperation(operations, 'queueRestore', {
+        serverId: scope.serverId,
+        databaseName: scope.databaseName,
+        backupId: body.backupId,
+        expectedPreviewDigest: body.expectedPreviewDigest,
+        expectedBackupSha256: body.expectedBackupSha256,
+        confirmation: body.confirmation,
+        ownership: {
+          websiteId: scope.websiteId,
+          databaseBindingId: scope.databaseBindingId,
+          expectedBindingRevision: scope.bindingRevision,
+        },
+      });
+      return response.status(202).json({ data: { ...queued, scope: publicScope(scope) } });
+    }));
+
+  }
 
   return Object.freeze({ resolveScope });
 }
