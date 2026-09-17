@@ -35,12 +35,13 @@ import {
   sanitizeMailDataRestoreResult,
 } from './mail-data-job-result.js';
 import { managedServiceStatePolicy } from './managed-service-state-policy.js';
+import { JOB_RESOURCE_TYPES } from './job-resource-types.js';
 import { sanitizeNodePassengerMigrationResult } from './node-passenger-migration-job-result.js';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
-const RESOURCE_TYPES = new Set(['domain', 'server', 'application', 'certificate', 'backup', 'database', 'dns_zone', 'mail_domain', 'system', 'docker_project']);
+const RESOURCE_TYPES = new Set(JOB_RESOURCE_TYPES);
 const DOCKER_COMPOSE_OPERATION_SET = new Set(DOCKER_COMPOSE_OPERATIONS);
 const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DOMAIN_STAGE,

@@ -12,6 +12,7 @@ Bu kayıt P0.4 managed mail configuration lifecycle'ında kaynakta tamamlanan ap
 - Job registry v2 sonucunu exact queued mail domain/status/preview/configuration ile doğrular. Eski running job/recovery kayıtları için v1 sonucu okunabilir kalır; v1'e sonradan backup kimliği yakıştırılmaz.
 - Başarılı apply sonrası root-private operation receipt v2 aynı `backupSha256` değerini kaydeder. Store v1 receipt'i exact eski şemasıyla okuyabilir; yeni yazımlar yalnız v2'dir.
 - Process host mutation'dan sonra fakat job completion acknowledgment'ından önce kesildiyse packaged startup recovery mutation'ı tekrar etmez. Exact receipt, current protected desired-state materialization ve active host evidence aynı configuration/plan/readiness zincirini kanıtlarsa job tamamlanır; eksik veya farklı evidence fail-closed kalır.
+- Packaged recovery context reader güncel durable job registry ile aynı `mail_domain`, `dns_zone` ve `docker_project` resource scope'larını kabul eder. Böylece gerçek mail recovery, test double dışında private queued payload okunurken eski resource allowlist'ine takılmaz.
 - Recovery v2 receipt'teki backup identity'yi bounded job result'ına taşır. Legacy v1 recovery çalışmayı sürdürür ancak `backupSha256` üretmez; bu kayıt gelecekteki explicit rollback için uygun değildir.
 
 ## Regression kapsamı

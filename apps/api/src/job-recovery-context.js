@@ -1,10 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { JOB_RESOURCE_TYPES } from './job-resource-types.js';
 
 const STORE_VERSION = 1;
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
-const RESOURCE_TYPES = new Set(['domain', 'server', 'application', 'certificate', 'backup', 'database', 'system']);
+const RESOURCE_TYPES = new Set(JOB_RESOURCE_TYPES);
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
 
 export class JobRecoveryContextError extends Error {

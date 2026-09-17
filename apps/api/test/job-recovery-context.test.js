@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
+import { JOB_RESOURCE_TYPES } from '../src/job-resource-types.js';
 
 const jobId = '12345678-1234-4234-8234-123456789012';
 
@@ -40,6 +41,32 @@ test('recovery context reader returns payload without exposing result or error',
     context.payload.nested.value = false;
     const raw = JSON.parse(await readFile(filePath, 'utf8'));
     assert.equal(raw.jobs[0].payload.nested.value, true);
+  });
+});
+
+test('recovery context reader accepts every current durable resource scope', async () => {
+  await withTemp(async (root) => {
+    const filePath = path.join(root, 'jobs.json');
+    await writeFile(filePath, JSON.stringify({
+      version: 1,
+      jobs: JOB_RESOURCE_TYPES.map((resourceType, index) => ({
+        id: `12345678-1234-4234-8234-${String(index).padStart(12, '0')}`,
+        serverId: 'server-1',
+        operation: `${resourceType}.operation`,
+        resourceType,
+        resourceId: `${resourceType}-1`,
+        status: 'running',
+        attempts: 1,
+        payload: { resourceType },
+      })),
+    }));
+
+    const reader = createJobRecoveryContextReader({ filePath });
+    for (let index = 0; index < JOB_RESOURCE_TYPES.length; index += 1) {
+      const context = await reader.read(`12345678-1234-4234-8234-${String(index).padStart(12, '0')}`);
+      assert.equal(context.resourceType, JOB_RESOURCE_TYPES[index]);
+      assert.deepEqual(context.payload, { resourceType: JOB_RESOURCE_TYPES[index] });
+    }
   });
 });
 
