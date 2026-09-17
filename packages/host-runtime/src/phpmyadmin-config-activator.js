@@ -73,14 +73,14 @@ const FPM_KEYS = new Set([
 const NGINX_KEYS = new Set([
   'version', 'sha256', 'artifact', 'documentRoot', 'fpmSocketPath', 'gatewaySocketPath',
   'gatewaySocketMode', 'gatewaySocketOwner', 'gatewaySocketGroup', 'signonBridgePath',
-  'internalSignonPath', 'healthPath', 'serviceUnit',
+  'internalSignonPath', 'internalLogoutPath', 'healthPath', 'serviceUnit',
 ]);
 const SIGNON_CONFIG_KEYS = new Set([
   'version', 'sha256', 'artifact', 'signonSession', 'gatewayBasePath',
 ]);
 const SIGNON_BRIDGE_KEYS = new Set([
   'version', 'sha256', 'artifact', 'handoffSocketPath', 'signonSession',
-  'internalSignonPath', 'gatewayBasePath',
+  'internalSignonPath', 'internalLogoutPath', 'gatewayBasePath',
 ]);
 const ARTIFACT_KEYS = new Set(['path', 'sha256', 'bytes', 'sensitive', 'mode']);
 
@@ -123,6 +123,7 @@ function validatePreview(preview) {
     || preview.nginx.gatewaySocketGroup !== phpMyAdminNginxTemplatePolicy.gatewaySocketGroup
     || preview.nginx.signonBridgePath !== phpMyAdminNginxTemplatePolicy.signonBridgePath
     || preview.nginx.internalSignonPath !== phpMyAdminNginxTemplatePolicy.internalSignonPath
+    || preview.nginx.internalLogoutPath !== phpMyAdminNginxTemplatePolicy.internalLogoutPath
     || preview.nginx.healthPath !== phpMyAdminNginxTemplatePolicy.healthPath
     || preview.nginx.serviceUnit !== phpMyAdminNginxTemplatePolicy.serviceUnit
     || !exactKeys(preview.signonConfig, SIGNON_CONFIG_KEYS) || preview.signonConfig.version !== 1
@@ -144,6 +145,7 @@ function validatePreview(preview) {
     || preview.signonBridge.handoffSocketPath !== phpMyAdminSignonTemplatePolicy.handoffSocketPath
     || preview.signonBridge.signonSession !== phpMyAdminSignonTemplatePolicy.signonSession
     || preview.signonBridge.internalSignonPath !== phpMyAdminSignonTemplatePolicy.internalSignonPath
+    || preview.signonBridge.internalLogoutPath !== phpMyAdminSignonTemplatePolicy.internalLogoutPath
     || preview.signonBridge.gatewayBasePath !== phpMyAdminSignonTemplatePolicy.gatewayBasePath) {
     throw activationError(
       'phpmyadmin_activation_preview_invalid',
