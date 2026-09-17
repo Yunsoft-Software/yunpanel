@@ -26,7 +26,7 @@ Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
 ## P0.3 — Versioned DNS Zone Template ve Domain DNS yönetimi
 
-- [ ] Local mail lifecycle tamamlanınca mail capability/DKIM public-key intent'ini zone lifecycle'a bağla; re-apply `mail` source'u desired state ile güvenle reconcile etsin; kapalı servis dead mail/webmail/SRV/discovery kaydı üretmesin.
+- [ ] Local PowerDNS DKIM retirement'ını zone lifecycle ile tamamla: pending previous selector için revision-bound explicit preview/apply eski `mail` RRset'ini kaldırıp retirement state'ini yalnız authoritative post-condition kanıtıyla temizlesin.
 - [ ] `autodiscover` / `autoconfig` yalnız gerçek endpoint hazır olduğunda service-aware DNS desired state'e girsin.
 - [ ] DNSSEC key rollover/rotation lifecycle ekle: yeni KSK/CSK üret/publish/activate, parent DS propagation doğrula, eski DS retirement doğrula, eski key deactivate/delete; rollover sırasında secure delegation kesilmesin ve private key public state/job/audit'e çıkmasın.
 - [ ] Zone suspend/delete/compensation ownership evidence'ını P0.9 lifecycle'ına bağla; manual kayıt içeren zone destructive cleanup'ta fail-closed kalsın.

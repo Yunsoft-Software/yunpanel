@@ -86,6 +86,51 @@ test('adds service-aware local mail records only for enabled services', () => {
   assert.equal(desired.records.find((entry) => entry.key === 'mail-mx').source, 'mail');
 });
 
+test('renders actual STARTTLS endpoints and current plus retiring DKIM records for a shared mail identity', () => {
+  const desired = renderDnsZoneDesiredState({
+    zoneName: 'customer.example',
+    template: template(),
+    dnsIdentity: identity(),
+    serial: 2026091503,
+    mail: {
+      enabled: true,
+      host: 'mail.example.com',
+      imap: true,
+      submission: true,
+      dkimRecords: [
+        { selector: 'current', value: 'v=DKIM1; k=rsa; p=current' },
+        { selector: 'previous', value: 'v=DKIM1; k=rsa; p=previous' },
+      ],
+    },
+  });
+  const byKey = new Map(desired.records.map((entry) => [entry.key, entry]));
+
+  assert.deepEqual(byKey.get('mail-mx').values, ['10 mail.example.com']);
+  assert.deepEqual(byKey.get('mail-imap').values, ['0 1 143 mail.example.com']);
+  assert.deepEqual(byKey.get('mail-submission').values, ['0 1 587 mail.example.com']);
+  assert.equal(byKey.has('mail-ipv4'), false);
+  assert.equal(byKey.has('webmail-ipv4'), false);
+  assert.equal(byKey.has('mail-dkim-current'), true);
+  assert.equal(byKey.has('mail-dkim-previous'), true);
+});
+
+test('rejects duplicate DKIM selector intent before rendering an ambiguous managed RRset', () => {
+  assert.throws(() => renderDnsZoneDesiredState({
+    zoneName: 'example.com',
+    template: template(),
+    dnsIdentity: identity(),
+    serial: 2026091504,
+    mail: {
+      enabled: true,
+      host: 'mail.example.com',
+      dkimRecords: [
+        { selector: 'same', value: 'v=DKIM1; k=rsa; p=one' },
+        { selector: 'same', value: 'v=DKIM1; k=rsa; p=two' },
+      ],
+    },
+  }), (error) => error instanceof DnsZoneDesiredStateError && error.code === 'dns_zone_dkim_invalid');
+});
+
 test('skips template mail placeholders when local mail or webmail is disabled', () => {
   const custom = template([
     { key: 'apex-nameservers', owner: '@', type: 'NS', ttl: null, values: ['<ns1>', '<ns2>'], condition: 'always' },

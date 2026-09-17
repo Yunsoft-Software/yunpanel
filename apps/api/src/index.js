@@ -450,6 +450,7 @@ const listener = createAuthenticatedApi({
       ...(powerDnsAuthoritativeService ? {
         serverDnsIdentityRegistry,
         powerDnsAuthoritativeService,
+        powerDnsSecretRegistry,
       } : {}),
       mailDomainRegistry,
       mailDkimRegistry,

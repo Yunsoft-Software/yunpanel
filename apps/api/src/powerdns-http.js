@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { createDnsDelegationInspector, DnsDelegationInspectorError } from './dns-delegation-inspector.js';
+import { createDnsZoneMailIntentResolver } from './dns-zone-mail-intent.js';
 import { mountDnsZoneDnssecRoutes } from './dns-zone-dnssec-http.js';
 import { mountDnsZoneSecondaryStatusRoutes } from './dns-zone-secondary-status-http.js';
 import {
@@ -229,14 +230,58 @@ async function defaultZoneReapplyService({
   dnsIdentityRegistry,
   dnsZoneTemplateRegistry,
   authoritativeService,
+  domainRegistry = null,
+  powerDnsSecretRegistry = null,
+  mailDomainRegistry = null,
+  mailDkimRegistry = null,
+  mailDkimRetirementRegistry = null,
+  mailServiceIdentityRegistry = null,
+  zoneManager = null,
+  now = Date.now,
   env = process.env,
 } = {}) {
-  const { domainRegistry, secretRegistry } = await defaultDomainAndSecretRegistries(authoritativeService, env);
+  const suppliedRegistryPair = domainRegistry !== null && powerDnsSecretRegistry !== null;
+  if ((domainRegistry === null) !== (powerDnsSecretRegistry === null)) {
+    throw new PowerDnsHttpError(
+      'dns_zone_reapply_registry_dependencies_invalid',
+      'DNS zone reapply Domain and PowerDNS secret registries must be configured together',
+      503,
+    );
+  }
+  const defaults = suppliedRegistryPair
+    ? null
+    : await defaultDomainAndSecretRegistries(authoritativeService, env);
+  const scopedDomainRegistry = suppliedRegistryPair ? domainRegistry : defaults.domainRegistry;
+  const secretRegistry = suppliedRegistryPair ? powerDnsSecretRegistry : defaults.secretRegistry;
+  const mailDependencies = [
+    mailDomainRegistry,
+    mailDkimRegistry,
+    mailDkimRetirementRegistry,
+    mailServiceIdentityRegistry,
+  ];
+  const hasMailIntent = mailDependencies.every((dependency) => dependency !== null);
+  if (!hasMailIntent && mailDependencies.some((dependency) => dependency !== null)) {
+    throw new PowerDnsHttpError(
+      'dns_zone_reapply_mail_dependencies_invalid',
+      'DNS zone reapply mail desired-state dependencies must be configured together',
+      503,
+    );
+  }
   return createDnsZoneReapplyService({
-    domainRegistry,
+    domainRegistry: scopedDomainRegistry,
     dnsIdentityRegistry,
     dnsZoneTemplateRegistry,
     powerDnsSecretRegistry: secretRegistry,
+    ...(hasMailIntent ? {
+      mailIntentResolver: createDnsZoneMailIntentResolver({
+        mailDomainRegistry,
+        mailDkimRegistry,
+        mailDkimRetirementRegistry,
+        mailServiceIdentityRegistry,
+      }),
+    } : {}),
+    ...(zoneManager ? { zoneManager } : {}),
+    now,
     localServerId: authoritativeService.localServerId,
   });
 }
@@ -245,12 +290,24 @@ async function defaultZoneReapplyRuntime({
   dnsIdentityRegistry,
   dnsZoneTemplateRegistry,
   authoritativeService,
+  domainRegistry = null,
+  powerDnsSecretRegistry = null,
+  mailDomainRegistry = null,
+  mailDkimRegistry = null,
+  mailDkimRetirementRegistry = null,
+  mailServiceIdentityRegistry = null,
   env = process.env,
 } = {}) {
   const service = await defaultZoneReapplyService({
     dnsIdentityRegistry,
     dnsZoneTemplateRegistry,
     authoritativeService,
+    domainRegistry,
+    powerDnsSecretRegistry,
+    mailDomainRegistry,
+    mailDkimRegistry,
+    mailDkimRetirementRegistry,
+    mailServiceIdentityRegistry,
     env,
   });
   const registry = createDnsZoneReapplyOperationRegistry({ filePath: zoneReapplyOperationStorePath(env) });
@@ -310,6 +367,12 @@ export function mountPowerDnsRoutes(app, {
   dnsDelegationInspector = null,
   dnsZoneReapplyRuntime = null,
   dnsZoneRecordsService = null,
+  domainRegistry = null,
+  powerDnsSecretRegistry = null,
+  mailDomainRegistry = null,
+  mailDkimRegistry = null,
+  mailDkimRetirementRegistry = null,
+  mailServiceIdentityRegistry = null,
   authoritativeService,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
@@ -352,6 +415,12 @@ export function mountPowerDnsRoutes(app, {
         dnsIdentityRegistry,
         dnsZoneTemplateRegistry: templateRegistry,
         authoritativeService,
+        domainRegistry,
+        powerDnsSecretRegistry,
+        mailDomainRegistry,
+        mailDkimRegistry,
+        mailDkimRetirementRegistry,
+        mailServiceIdentityRegistry,
       });
       defaultRuntimePromise.catch(() => { defaultRuntimePromise = null; });
     }

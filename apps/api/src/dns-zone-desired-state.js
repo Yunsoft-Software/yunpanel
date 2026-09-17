@@ -197,17 +197,17 @@ function soaRecord(zoneName, identity, serial, templateVersion) {
 function mailRecords(zoneName, identity, mail) {
   if (!mail?.enabled) return [];
   const host = fqdn(mail.host, 'mail host');
-  if (host !== `mail.${zoneName}`) {
-    throw new DnsZoneDesiredStateError('dns_zone_mail_host_invalid', 'Local mail host must be mail.<domain>');
-  }
   const result = [
-    record({ key: 'mail-ipv4', owner: host, type: 'A', ttl: null, values: [identity.settings.publicIpv4], source: 'mail' }, identity.settings.soa.ttl),
     record({ key: 'mail-mx', owner: zoneName, type: 'MX', ttl: null, values: [`10 ${host}`], source: 'mail' }, identity.settings.soa.ttl),
     record({ key: 'mail-spf', owner: zoneName, type: 'TXT', ttl: null, values: [mail.spf ?? 'v=spf1 mx -all'], source: 'mail' }, identity.settings.soa.ttl),
     record({ key: 'mail-dmarc', owner: `_dmarc.${zoneName}`, type: 'TXT', ttl: null, values: [mail.dmarc ?? 'v=DMARC1; p=none'], source: 'mail' }, identity.settings.soa.ttl),
   ];
-  if (identity.settings.publicIpv6) {
-    result.push(record({ key: 'mail-ipv6', owner: host, type: 'AAAA', ttl: null, values: [identity.settings.publicIpv6], source: 'mail' }, identity.settings.soa.ttl));
+  const hostAddressOwnedByZone = host === zoneName || host.endsWith(`.${zoneName}`);
+  if (hostAddressOwnedByZone && host !== zoneName) {
+    result.push(record({ key: 'mail-ipv4', owner: host, type: 'A', ttl: null, values: [identity.settings.publicIpv4], source: 'mail' }, identity.settings.soa.ttl));
+    if (identity.settings.publicIpv6) {
+      result.push(record({ key: 'mail-ipv6', owner: host, type: 'AAAA', ttl: null, values: [identity.settings.publicIpv6], source: 'mail' }, identity.settings.soa.ttl));
+    }
   }
   if (mail.webmailEnabled === true) {
     const webmailHost = fqdn(mail.webmailHost, 'webmail host');
@@ -225,17 +225,30 @@ function mailRecords(zoneName, identity, mail) {
   if (mail.smtps === true) {
     result.push(record({ key: 'mail-submissions', owner: `_submissions._tcp.${zoneName}`, type: 'SRV', ttl: null, values: [`0 1 465 ${host}`], source: 'mail' }, identity.settings.soa.ttl));
   }
-  if (mail.dkim) {
-    const selector = typeof mail.dkim.selector === 'string' ? mail.dkim.selector.trim().toLowerCase() : '';
-    if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(selector) || typeof mail.dkim.value !== 'string' || !mail.dkim.value.trim()) {
+  if (mail.imap === true) {
+    result.push(record({ key: 'mail-imap', owner: `_imap._tcp.${zoneName}`, type: 'SRV', ttl: null, values: [`0 1 143 ${host}`], source: 'mail' }, identity.settings.soa.ttl));
+  }
+  if (mail.submission === true) {
+    result.push(record({ key: 'mail-submission', owner: `_submission._tcp.${zoneName}`, type: 'SRV', ttl: null, values: [`0 1 587 ${host}`], source: 'mail' }, identity.settings.soa.ttl));
+  }
+  const dkimRecords = mail.dkimRecords ?? (mail.dkim ? [mail.dkim] : []);
+  if (!Array.isArray(dkimRecords) || dkimRecords.length > 8) {
+    throw new DnsZoneDesiredStateError('dns_zone_dkim_invalid', 'DKIM DNS state is invalid');
+  }
+  const selectors = new Set();
+  for (const dkim of dkimRecords) {
+    const selector = typeof dkim?.selector === 'string' ? dkim.selector.trim().toLowerCase() : '';
+    if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(selector) || selectors.has(selector)
+      || typeof dkim?.value !== 'string' || !dkim.value.trim()) {
       throw new DnsZoneDesiredStateError('dns_zone_dkim_invalid', 'DKIM DNS state is invalid');
     }
+    selectors.add(selector);
     result.push(record({
       key: `mail-dkim-${selector}`,
       owner: `${selector}._domainkey.${zoneName}`,
       type: 'TXT',
       ttl: null,
-      values: [mail.dkim.value],
+      values: [dkim.value],
       source: 'mail',
     }, identity.settings.soa.ttl));
   }

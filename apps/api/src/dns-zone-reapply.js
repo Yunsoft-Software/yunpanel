@@ -105,7 +105,7 @@ function desiredRrsetMap(records) {
   return map;
 }
 
-function diffZone(existing, records) {
+function diffZone(existing, records, reconciledSources = REAPPLY_MANAGED_SOURCES) {
   const desired = desiredRrsetMap(records);
   const current = new Map(existing.rrsets.map((rrset) => [powerDnsZoneManagerInternals.rrsetKey(rrset), rrset]));
   const changes = [];
@@ -159,7 +159,7 @@ function diffZone(existing, records) {
       preservedManual += 1;
       continue;
     }
-    if (REAPPLY_MANAGED_SOURCES.has(observed.managed.source)) {
+    if (reconciledSources.has(observed.managed.source)) {
       changes.push(Object.freeze({ action: 'delete', ...publicRrset(observed) }));
       continue;
     }
@@ -226,6 +226,7 @@ export function createDnsZoneReapplyService({
   dnsIdentityRegistry,
   dnsZoneTemplateRegistry,
   powerDnsSecretRegistry,
+  mailIntentResolver = null,
   localServerId,
   zoneManager = createPowerDnsZoneManager(),
   now = Date.now,
@@ -234,6 +235,7 @@ export function createDnsZoneReapplyService({
     || !dnsIdentityRegistry || typeof dnsIdentityRegistry.getForServer !== 'function'
     || !dnsZoneTemplateRegistry || typeof dnsZoneTemplateRegistry.ensureForServer !== 'function'
     || !powerDnsSecretRegistry || typeof powerDnsSecretRegistry.materializeForServer !== 'function'
+    || (mailIntentResolver !== null && typeof mailIntentResolver?.resolve !== 'function')
     || !zoneManager || typeof zoneManager.getZone !== 'function' || typeof zoneManager.apply !== 'function'
     || typeof localServerId !== 'string' || !localServerId || typeof now !== 'function') {
     throw new DnsZoneReapplyError('dns_zone_reapply_dependencies_invalid', 'DNS zone reapply dependencies are unavailable', 503);
@@ -244,7 +246,7 @@ export function createDnsZoneReapplyService({
       await mapped(() => domainRegistry.getDomain(domainId), 'dns_zone_reapply_domain_unavailable', 'Domain state is unavailable'),
       localServerId,
     );
-    const [identity, template, secret] = await Promise.all([
+    const [identity, template, secret, mailState] = await Promise.all([
       mapped(
         () => dnsIdentityRegistry.getForServer(domain.serverId),
         'dns_zone_reapply_identity_unavailable',
@@ -260,6 +262,13 @@ export function createDnsZoneReapplyService({
         'dns_zone_reapply_secret_unavailable',
         'PowerDNS credentials are unavailable',
       ),
+      mailIntentResolver
+        ? mapped(
+          () => mailIntentResolver.resolve({ domain }),
+          'dns_zone_reapply_mail_state_unavailable',
+          'Mail DNS desired state is unavailable',
+        )
+        : null,
     ]);
     if (!identity) throw new DnsZoneReapplyError('dns_zone_reapply_identity_required', 'Server DNS identity is not configured', 409);
 
@@ -280,15 +289,21 @@ export function createDnsZoneReapplyService({
     }
 
     const secondaryDns = Object.freeze([...(identity.settings?.secondaryDns ?? [])]);
+    const reconciledSources = mailIntentResolver
+      ? new Set([...REAPPLY_MANAGED_SOURCES, 'mail'])
+      : REAPPLY_MANAGED_SOURCES;
+    const mailEvidence = mailState?.evidence ?? Object.freeze({ version: 1, managed: false });
+    const mailStateDigest = digest(mailEvidence);
     const topology = topologyState(existing, secondaryDns);
     const observedDesired = renderDnsZoneDesiredState({
       zoneName: domain.primaryDomain,
       template,
       dnsIdentity: identity,
       serial: existing.serial,
+      mail: mailState?.intent ?? null,
     });
     const observedRecords = recordsForDomain(domain, observedDesired);
-    const initialDiff = diffZone(existing, observedRecords);
+    const initialDiff = diffZone(existing, observedRecords, reconciledSources);
     const desiredBlocked = initialDiff.blockers.some((entry) => entry.affectsDesired === true);
     const changeRequired = initialDiff.changes.length > 0
       || initialDiff.conflicts.length > 0
@@ -301,9 +316,10 @@ export function createDnsZoneReapplyService({
       template,
       dnsIdentity: identity,
       serial,
+      mail: mailState?.intent ?? null,
     });
     const records = serial === existing.serial ? observedRecords : recordsForDomain(domain, desired);
-    const zoneDiff = serial === existing.serial ? initialDiff : diffZone(existing, records);
+    const zoneDiff = serial === existing.serial ? initialDiff : diffZone(existing, records, reconciledSources);
     const blockers = Object.freeze([
       ...zoneDiff.blockers,
       ...(topology.blocker ? [topology.blocker] : []),
@@ -323,6 +339,8 @@ export function createDnsZoneReapplyService({
       templateVersion: desired.templateVersion,
       templateSnapshotDigest: digest(desired.templateSnapshot),
       dnsIdentityRevision: desired.dnsIdentityRevision,
+      mailState: mailEvidence,
+      mailStateDigest,
       observedSerial: existing.serial,
       nextSerial: serial,
       dnssec: existing.dnssec === true,
@@ -399,6 +417,7 @@ export function createDnsZoneReapplyService({
       notifyAccepted: result.notification?.accepted === true,
       templateVersion: plan.templateVersion,
       dnsIdentityRevision: plan.dnsIdentityRevision,
+      mailStateDigest: plan.mailStateDigest,
       serial: result.serial ?? plan.nextSerial,
       changedRrsetCount: result.changedRrsetCount ?? plan.changes.length,
       manualRrsetCount: result.manualRrsetCount ?? plan.preservedManualRrsetCount,

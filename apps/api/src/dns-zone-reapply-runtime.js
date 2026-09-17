@@ -42,6 +42,8 @@ function targetSatisfied(operation, preview) {
     && preview.domainRevision === operation.domainRevision
     && preview.templateVersion === operation.templateVersion
     && preview.dnsIdentityRevision === operation.dnsIdentityRevision
+    && operation.mailStateDigest !== null
+    && preview.mailStateDigest === operation.mailStateDigest
     && Number.isSafeInteger(preview.observedSerial)
     && preview.observedSerial >= operation.targetSerial);
 }
@@ -56,6 +58,8 @@ function currentPreviewMatches(operation, preview) {
     && preview.domainRevision === operation.domainRevision
     && preview.templateVersion === operation.templateVersion
     && preview.dnsIdentityRevision === operation.dnsIdentityRevision
+    && operation.mailStateDigest !== null
+    && preview.mailStateDigest === operation.mailStateDigest
     && preview.observedSerial === operation.observedSerial
     && preview.nextSerial === operation.targetSerial
     && preview.previewDigest === operation.previewDigest

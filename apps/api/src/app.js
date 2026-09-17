@@ -174,6 +174,7 @@ export function createApp({
   }),
   serverDnsIdentityRegistry = null,
   powerDnsAuthoritativeService = null,
+  powerDnsSecretRegistry = null,
   databaseBindingRegistry = null,
   databaseCredentialRegistry = null,
   databaseCredentialApplyService = null,
@@ -455,6 +456,13 @@ export function createApp({
     mountPowerDnsRoutes(app, {
       dnsIdentityRegistry: serverDnsIdentityRegistry,
       authoritativeService: powerDnsAuthoritativeService,
+      ...(powerDnsSecretRegistry ? { domainRegistry, powerDnsSecretRegistry } : {}),
+      ...(mailServiceIdentityRegistry ? {
+        mailDomainRegistry,
+        mailDkimRegistry,
+        mailDkimRetirementRegistry,
+        mailServiceIdentityRegistry,
+      } : {}),
     });
   }
   mountMailAliasRoutes(app, { mailAliasRegistry, mailDomainRegistry, domainRegistry, localServerId });

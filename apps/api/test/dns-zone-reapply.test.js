@@ -70,12 +70,13 @@ function liveRrset(record) {
   });
 }
 
-function liveZone({ sourceTemplate = template(1), serial = 2026091501, extraRrsets = [], domainState = domain } = {}) {
+function liveZone({ sourceTemplate = template(1), serial = 2026091501, extraRrsets = [], domainState = domain, mail = null } = {}) {
   const desired = renderDnsZoneDesiredState({
     zoneName: domainState.primaryDomain,
     template: sourceTemplate,
     dnsIdentity: identity,
     serial,
+    mail,
   });
   const records = dnsZoneReapplyInternals.recordsForDomain(domainState, desired);
   return Object.freeze({
@@ -90,7 +91,7 @@ function liveZone({ sourceTemplate = template(1), serial = 2026091501, extraRrse
 
 function fixture({ currentTemplate = template(2, [
   Object.freeze({ key: 'verification', owner: '@', type: 'TXT', ttl: 300, values: Object.freeze(['yunpanel=verified']), condition: 'always' }),
-]), zone = null, domainState = domain } = {}) {
+]), zone = null, domainState = domain, mailIntentResolver = null } = {}) {
   const calls = [];
   const currentZone = zone ?? liveZone({ domainState });
   const zoneManager = {
@@ -115,6 +116,7 @@ function fixture({ currentTemplate = template(2, [
     dnsIdentityRegistry: { getForServer: async () => identity },
     dnsZoneTemplateRegistry: { ensureForServer: async () => currentTemplate },
     powerDnsSecretRegistry: { materializeForServer: async () => ({ serverId, revision: 2, apiKey }) },
+    mailIntentResolver,
     localServerId: serverId,
     zoneManager,
     now,
@@ -189,6 +191,68 @@ test('DNS zone reapply blocks mutation while an unreconciled mail-owned RRset ex
     service.apply({ domainId, previewDigest: preview.previewDigest, confirmation: preview.confirmation }),
     (error) => error instanceof DnsZoneReapplyError && error.code === 'dns_zone_reapply_managed_source_blocked',
   );
+});
+
+test('DNS zone reapply safely removes operation-owned mail RRsets when local mail is disabled', async () => {
+  const mail = liveRrset({
+    key: 'mail-dmarc', owner: '_dmarc.example.com', type: 'TXT', ttl: 300,
+    values: ['v=DMARC1; p=none'], source: 'mail', templateVersion: null,
+  });
+  const { service } = fixture({
+    zone: liveZone({ extraRrsets: [mail] }),
+    mailIntentResolver: {
+      resolve: async () => ({
+        intent: null,
+        evidence: { version: 1, managed: true, enabled: false, mailDomainId: null },
+      }),
+    },
+  });
+  const preview = await service.preview({ domainId });
+
+  assert.equal(preview.applyAllowed, true);
+  assert.equal(preview.blockers.length, 0);
+  assert.equal(preview.changes.some((entry) => entry.action === 'delete' && entry.source === 'mail'), true);
+  assert.equal(preview.mailState.enabled, false);
+  assert.match(preview.mailStateDigest, /^[a-f0-9]{64}$/);
+});
+
+test('DNS zone reapply includes enabled shared mail endpoints and DKIM public desired state', async () => {
+  const currentTemplate = template(1);
+  const { service } = fixture({
+    currentTemplate,
+    zone: liveZone({ sourceTemplate: currentTemplate }),
+    mailIntentResolver: {
+      resolve: async () => ({
+        intent: {
+          enabled: true,
+          host: 'mail.example.com',
+          imap: true,
+          submission: true,
+          webmailEnabled: false,
+          dkimRecords: [{ selector: 'current', value: 'v=DKIM1; k=rsa; p=current' }],
+        },
+        evidence: {
+          version: 1,
+          managed: true,
+          enabled: true,
+          mailDomainId: 'f77d9d70-3f77-4be9-b257-0ade06401fb7',
+          mailDomainRevision: 2,
+          mailServiceIdentityRevision: 3,
+          dkimRevisions: [1],
+          retirementRevision: null,
+        },
+      }),
+    },
+  });
+  const preview = await service.preview({ domainId });
+  const keys = new Set(preview.records.map((entry) => entry.key));
+
+  assert.equal(preview.applyAllowed, true);
+  assert.equal(keys.has('mail-mx'), true);
+  assert.equal(keys.has('mail-imap'), true);
+  assert.equal(keys.has('mail-submission'), true);
+  assert.equal(keys.has('mail-dkim-current'), true);
+  assert.equal(keys.has('webmail-ipv4'), false);
 });
 
 test('DNS zone reapply applies only an exact current preview', async () => {

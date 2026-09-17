@@ -18,6 +18,7 @@ function plannedPreview(overrides = {}) {
     zoneName: 'example.com',
     templateVersion: 4,
     dnsIdentityRevision: 2,
+    mailStateDigest: 'c'.repeat(64),
     observedSerial: 2026091501,
     nextSerial: 2026091601,
     applyAllowed: true,
@@ -169,4 +170,24 @@ test('runtime init recovers applying operations without making API startup depen
   assert.equal(recovery[0].operationId, operationId);
   assert.equal(recovery[0].recovered, false);
   assert.equal((await store.get(operationId)).status, 'applying');
+});
+
+test('interrupted reapply does not accept a different mail desired state as its original target', async () => {
+  const store = registry();
+  await store.init();
+  const created = await store.create(plannedPreview());
+  await store.markApplying(created.id);
+  let applyCalls = 0;
+  const runtime = createDnsZoneReapplyRuntime({
+    registry: store,
+    service: {
+      preview: async () => satisfiedPreview({ mailStateDigest: 'd'.repeat(64) }),
+      apply: async () => { applyCalls += 1; return {}; },
+    },
+  });
+
+  const recovered = await runtime.run(created.id);
+  assert.equal(recovered.status, 'failed');
+  assert.equal(recovered.error.code, 'dns_zone_reapply_preview_stale');
+  assert.equal(applyCalls, 0);
 });

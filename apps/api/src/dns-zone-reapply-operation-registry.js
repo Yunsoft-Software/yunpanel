@@ -3,7 +3,8 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
+const LEGACY_STORE_VERSION = 1;
 const STATUSES = new Set(['pending', 'applying', 'succeeded', 'failed']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -30,6 +31,14 @@ function timestamp(value) {
 
 function safeInteger(value, field, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   if (!Number.isSafeInteger(value) || value < min || value > max) {
+    throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', `${field} is invalid`, 409);
+  }
+  return value;
+}
+
+function optionalDigest(value, field) {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !SHA256_PATTERN.test(value)) {
     throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', `${field} is invalid`, 409);
   }
   return value;
@@ -67,7 +76,8 @@ function safeResult(value) {
 function persistedOperation(value) {
   const fields = new Set([
     'id', 'domainId', 'serverId', 'zoneName', 'domainRevision', 'templateVersion', 'dnsIdentityRevision',
-    'observedSerial', 'targetSerial', 'previewDigest', 'confirmation', 'status', 'result', 'error', 'createdAt', 'updatedAt',
+    'mailStateDigest', 'observedSerial', 'targetSerial', 'previewDigest', 'confirmation', 'status', 'result', 'error',
+    'createdAt', 'updatedAt',
   ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
@@ -85,6 +95,7 @@ function persistedOperation(value) {
     domainRevision: value.domainRevision === null ? null : safeInteger(value.domainRevision, 'domainRevision', { min: 1 }),
     templateVersion: safeInteger(value.templateVersion, 'templateVersion', { min: 1 }),
     dnsIdentityRevision: safeInteger(value.dnsIdentityRevision, 'dnsIdentityRevision', { min: 1 }),
+    mailStateDigest: optionalDigest(value.mailStateDigest, 'mailStateDigest'),
     observedSerial: safeInteger(value.observedSerial, 'observedSerial', { min: 1, max: 4_294_967_295 }),
     targetSerial: safeInteger(value.targetSerial, 'targetSerial', { min: 1, max: 4_294_967_295 }),
     previewDigest: value.previewDigest,
@@ -120,6 +131,7 @@ export function dnsZoneReapplyOperationPublicView(operation) {
     domainRevision: operation.domainRevision,
     templateVersion: operation.templateVersion,
     dnsIdentityRevision: operation.dnsIdentityRevision,
+    mailStateDigest: operation.mailStateDigest,
     observedSerial: operation.observedSerial,
     targetSerial: operation.targetSerial,
     previewDigest: operation.previewDigest,
@@ -137,6 +149,7 @@ function operationFromPreview(preview, now, idFactory) {
     || typeof preview.zoneName !== 'string' || !preview.zoneName
     || !Number.isSafeInteger(preview.templateVersion) || preview.templateVersion < 1
     || !Number.isSafeInteger(preview.dnsIdentityRevision) || preview.dnsIdentityRevision < 1
+    || typeof preview.mailStateDigest !== 'string' || !SHA256_PATTERN.test(preview.mailStateDigest)
     || !Number.isSafeInteger(preview.observedSerial) || preview.observedSerial < 1
     || !Number.isSafeInteger(preview.nextSerial) || preview.nextSerial < 1
     || typeof preview.previewDigest !== 'string' || !SHA256_PATTERN.test(preview.previewDigest)
@@ -152,6 +165,7 @@ function operationFromPreview(preview, now, idFactory) {
     domainRevision: preview.domainRevision ?? null,
     templateVersion: preview.templateVersion,
     dnsIdentityRevision: preview.dnsIdentityRevision,
+    mailStateDigest: preview.mailStateDigest,
     observedSerial: preview.observedSerial,
     targetSerial: preview.nextSerial,
     previewDigest: preview.previewDigest,
@@ -196,15 +210,18 @@ export function createDnsZoneReapplyOperationRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.operations)
+        if (![LEGACY_STORE_VERSION, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((field) => !['version', 'operations'].includes(field))) {
           throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'DNS zone reapply operation store is invalid', 409);
         }
-        const operations = parsed.operations.map(persistedOperation);
+        const operations = parsed.operations.map((operation) => persistedOperation(
+          parsed.version === LEGACY_STORE_VERSION ? { ...operation, mailStateDigest: null } : operation,
+        ));
         if (new Set(operations.map((entry) => entry.id)).size !== operations.length) {
           throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'DNS zone reapply operation IDs are not unique', 409);
         }
         state = { version: STORE_VERSION, operations };
+        if (parsed.version === LEGACY_STORE_VERSION) await persist();
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
         await persist();
@@ -303,9 +320,11 @@ export function createDnsZoneReapplyOperationRegistry({
 
 export const dnsZoneReapplyOperationRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
+  legacyStoreVersion: LEGACY_STORE_VERSION,
   statuses: Object.freeze([...STATUSES]),
   persistedOperation,
   operationFromPreview,
   safeResult,
   safeError,
+  optionalDigest,
 });

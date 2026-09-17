@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   createDnsZoneReapplyOperationRegistry,
@@ -21,6 +24,7 @@ function preview() {
     zoneName: 'example.com',
     templateVersion: 4,
     dnsIdentityRevision: 2,
+    mailStateDigest: 'c'.repeat(64),
     observedSerial: 2026091501,
     nextSerial: 2026091601,
     previewDigest,
@@ -112,4 +116,39 @@ test('DNS zone reapply journal rejects blocked previews and invalid terminal evi
     (error) => error instanceof DnsZoneReapplyOperationRegistryError
       && error.code === 'dns_zone_reapply_operation_state_invalid',
   );
+});
+
+test('version 1 operation journals migrate without claiming mail desired-state evidence', async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-dns-reapply-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'operations.json');
+  const legacy = {
+    version: 1,
+    operations: [{
+      id: operationId,
+      domainId,
+      serverId,
+      zoneName: 'example.com',
+      domainRevision: 3,
+      templateVersion: 4,
+      dnsIdentityRevision: 2,
+      observedSerial: 2026091501,
+      targetSerial: 2026091601,
+      previewDigest,
+      confirmation: `reapply-dns-zone-template:${domainId}:${previewDigest}`,
+      status: 'applying',
+      result: null,
+      error: null,
+      createdAt: '2026-09-16T00:00:00.000Z',
+      updatedAt: '2026-09-16T00:00:00.000Z',
+    }],
+  };
+  await writeFile(filePath, `${JSON.stringify(legacy)}\n`);
+
+  const store = createDnsZoneReapplyOperationRegistry({ filePath });
+  await store.init();
+  assert.equal((await store.get(operationId)).mailStateDigest, null);
+  const persisted = JSON.parse(await readFile(filePath, 'utf8'));
+  assert.equal(persisted.version, 2);
+  assert.equal(persisted.operations[0].mailStateDigest, null);
 });
