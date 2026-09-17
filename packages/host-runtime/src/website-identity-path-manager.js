@@ -228,7 +228,7 @@ export function createWebsiteIdentityPathManager({
     return Object.freeze({ uid: info.uid, gid: info.gid, mode: statMode(info) });
   }
 
-  async function inspectWorkspace(contract, identity) {
+  async function inspectWorkspaceState(contract, identity) {
     if (!contract) return Object.freeze({ satisfied: true, pathContract: null });
     for (const target of workspaceTargets(contract)) {
       if (!await inspectTarget(target, identity)) return Object.freeze({
@@ -248,7 +248,7 @@ export function createWebsiteIdentityPathManager({
     const identity = await identityManager.inspect(normalized.baseIntent);
     if (!identity?.satisfied || !normalized.contract) return identity;
 
-    const workspace = await inspectWorkspace(normalized.contract, identity);
+    const workspace = await inspectWorkspaceState(normalized.contract, identity);
     if (!workspace.satisfied) {
       return Object.freeze({
         ...identity,
@@ -329,32 +329,86 @@ export function createWebsiteIdentityPathManager({
     return receipt;
   }
 
-  async function apply(rawIntent, options = {}) {
-    const normalized = normalizeIntent(rawIntent);
-    const identity = await identityManager.apply(normalized.baseIntent, options);
-    if (!identity?.satisfied || !normalized.contract) return identity;
+  function requireWorkspaceIdentity(identity) {
+    if (!identity?.satisfied || !Number.isSafeInteger(identity.uid) || identity.uid < 1
+      || !Number.isSafeInteger(identity.gid) || identity.gid < 1) {
+      throw new WebsiteIdentityPathManagerError(
+        'website_identity_workspace_identity_required',
+        'Canonical Website Unix identity must be satisfied before workspace migration',
+      );
+    }
+    return identity;
+  }
 
+  async function inspectWorkspace(rawIntent) {
+    const normalized = normalizeIntent(rawIntent);
+    if (!normalized.contract) {
+      throw new WebsiteIdentityPathManagerError('website_identity_workspace_scope_required', 'Website workspace migration requires canonical Website and Application scope');
+    }
+    const identity = requireWorkspaceIdentity(await identityManager.inspect(normalized.baseIntent));
+    return inspectWorkspaceState(normalized.contract, identity);
+  }
+
+  async function applyWorkspace(rawIntent, options = {}) {
+    const normalized = normalizeIntent(rawIntent);
+    if (!normalized.contract) {
+      throw new WebsiteIdentityPathManagerError('website_identity_workspace_scope_required', 'Website workspace migration requires canonical Website and Application scope');
+    }
     const operationId = normalizeOperationId(options.operationId);
+    const identity = requireWorkspaceIdentity(await identityManager.inspect(normalized.baseIntent));
     const receipt = await prepareWorkspace(normalized, identity, operationId);
-    const verified = await inspect(rawIntent);
-    if (!verified?.satisfied) {
-      throw new WebsiteIdentityPathManagerError('website_identity_workspace_unverified', 'Website workspace could not be verified after preparation');
+    const verified = await inspectWorkspaceState(normalized.contract, identity);
+    if (!verified.satisfied) {
+      throw new WebsiteIdentityPathManagerError('website_identity_workspace_unverified', 'Website workspace could not be verified after migration');
     }
     return Object.freeze({
       ...verified,
-      created: identity.created,
-      receiptVersion: identity.receiptVersion,
       workspaceReceiptVersion: receipt.version,
       createdWorkspaceDirectories: receipt.targets.filter((target) => target.state === 'created').length,
     });
   }
 
-  async function compensate(rawIntent, options = {}) {
+  async function inspectWorkspaceCompensation(rawIntent, options = {}) {
     const normalized = normalizeIntent(rawIntent);
-    if (!normalized.contract) return identityManager.compensate(normalized.baseIntent, options);
+    if (!normalized.contract) {
+      throw new WebsiteIdentityPathManagerError('website_identity_workspace_scope_required', 'Website workspace migration requires canonical Website and Application scope');
+    }
+    const operationId = normalizeOperationId(options.operationId);
+    const receipt = await loadReceipt(operationId, normalized);
+    if (receipt?.state !== 'compensated') {
+      const identity = receipt ? Object.freeze({ uid: receipt.uid, gid: receipt.gid }) : null;
+      for (const target of receipt?.targets ?? []) {
+        const current = await inspectTarget(target, identity);
+        if (!current) continue;
+        if (target.state !== 'created') {
+          throw new WebsiteIdentityPathManagerError(
+            'website_identity_workspace_ownership_unknown',
+            'Website workspace compensation cannot be verified without an ownership checkpoint',
+          );
+        }
+        return Object.freeze({
+          satisfied: false,
+          reason: 'website_identity_workspace_compensation_pending',
+          pendingWorkspace: target.name,
+        });
+      }
+    }
+    return Object.freeze({
+      satisfied: true,
+      workspaceCompensated: true,
+      removedWorkspaceDirectories: receipt?.targets.filter((target) => target.state === 'created').length ?? 0,
+      preservedUnownedWorkspace: receipt === null,
+    });
+  }
+
+  async function compensateWorkspace(rawIntent, options = {}) {
+    const normalized = normalizeIntent(rawIntent);
+    if (!normalized.contract) {
+      throw new WebsiteIdentityPathManagerError('website_identity_workspace_scope_required', 'Website workspace migration requires canonical Website and Application scope');
+    }
     const operationId = normalizeOperationId(options.operationId);
     let receipt = await loadReceipt(operationId, normalized);
-    if (!receipt) return identityManager.compensate(normalized.baseIntent, options);
+    if (!receipt) return inspectWorkspaceCompensation(rawIntent, options);
     if (receipt.state !== 'compensated') {
       const identity = Object.freeze({ uid: receipt.uid, gid: receipt.gid });
       for (const target of [...receipt.targets].reverse()) {
@@ -378,50 +432,73 @@ export function createWebsiteIdentityPathManager({
           throw new WebsiteIdentityPathManagerError('website_identity_workspace_compensation_failed', 'Operation-owned Website workspace directory could not be removed');
         }
       }
+      receipt = await persistReceipt({ ...receipt, state: 'compensated' }, normalized);
     }
-    const identityResult = await identityManager.compensate(normalized.baseIntent, options);
-    if (identityResult?.satisfied !== true) return identityResult;
-    if (receipt.state !== 'compensated') receipt = await persistReceipt({ ...receipt, state: 'compensated' }, normalized);
     return Object.freeze({
-      ...identityResult,
+      satisfied: true,
       workspaceCompensated: true,
       removedWorkspaceDirectories: receipt.targets.filter((target) => target.state === 'created').length,
+      preservedUnownedWorkspace: false,
+    });
+  }
+
+  async function apply(rawIntent, options = {}) {
+    const normalized = normalizeIntent(rawIntent);
+    const identity = await identityManager.apply(normalized.baseIntent, options);
+    if (!identity?.satisfied || !normalized.contract) return identity;
+
+    const operationId = normalizeOperationId(options.operationId);
+    const receipt = await prepareWorkspace(normalized, identity, operationId);
+    const verified = await inspect(rawIntent);
+    if (!verified?.satisfied) {
+      throw new WebsiteIdentityPathManagerError('website_identity_workspace_unverified', 'Website workspace could not be verified after preparation');
+    }
+    return Object.freeze({
+      ...verified,
+      created: identity.created,
+      receiptVersion: identity.receiptVersion,
+      workspaceReceiptVersion: receipt.version,
+      createdWorkspaceDirectories: receipt.targets.filter((target) => target.state === 'created').length,
+    });
+  }
+
+  async function compensate(rawIntent, options = {}) {
+    const normalized = normalizeIntent(rawIntent);
+    if (!normalized.contract) return identityManager.compensate(normalized.baseIntent, options);
+    const workspaceResult = await compensateWorkspace(rawIntent, options);
+    const identityResult = await identityManager.compensate(normalized.baseIntent, options);
+    if (identityResult?.satisfied !== true) return identityResult;
+    if (workspaceResult.preservedUnownedWorkspace) return identityResult;
+    return Object.freeze({
+      ...identityResult,
+      ...workspaceResult,
     });
   }
 
   async function inspectCompensation(rawIntent, options = {}) {
     const normalized = normalizeIntent(rawIntent);
     if (!normalized.contract) return identityManager.inspectCompensation(normalized.baseIntent, options);
-    const operationId = normalizeOperationId(options.operationId);
-    const receipt = await loadReceipt(operationId, normalized);
-    if (receipt?.state !== 'compensated') {
-      const identity = receipt ? Object.freeze({ uid: receipt.uid, gid: receipt.gid }) : null;
-      for (const target of receipt?.targets ?? []) {
-        const current = await inspectTarget(target, identity);
-        if (!current) continue;
-        if (target.state !== 'created') {
-          throw new WebsiteIdentityPathManagerError(
-            'website_identity_workspace_ownership_unknown',
-            'Website workspace compensation cannot be verified without an ownership checkpoint',
-          );
-        }
-        return Object.freeze({
-          satisfied: false,
-          reason: 'website_identity_workspace_compensation_pending',
-          pendingWorkspace: target.name,
-        });
-      }
-    }
+    const workspaceResult = await inspectWorkspaceCompensation(rawIntent, options);
+    if (workspaceResult.satisfied !== true) return workspaceResult;
     const identityResult = await identityManager.inspectCompensation(normalized.baseIntent, options);
     if (identityResult?.satisfied !== true) return identityResult;
+    if (workspaceResult.preservedUnownedWorkspace) return identityResult;
     return Object.freeze({
       ...identityResult,
-      workspaceCompensated: true,
-      removedWorkspaceDirectories: receipt?.targets.filter((target) => target.state === 'created').length ?? 0,
+      ...workspaceResult,
     });
   }
 
-  return Object.freeze({ inspect, apply, compensate, inspectCompensation });
+  return Object.freeze({
+    inspect,
+    apply,
+    compensate,
+    inspectCompensation,
+    inspectWorkspace,
+    applyWorkspace,
+    compensateWorkspace,
+    inspectWorkspaceCompensation,
+  });
 }
 
 export const websiteIdentityPathManagerInternals = Object.freeze({

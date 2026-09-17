@@ -31,13 +31,13 @@ function baseIdentity(overrides = {}) {
   });
 }
 
-function fakeIdentityManager({ created = true } = {}) {
+function fakeIdentityManager({ created = true, inspection = baseIdentity() } = {}) {
   const calls = [];
   return {
     calls,
     inspect: async (intent) => {
       calls.push(['inspect', intent]);
-      return baseIdentity();
+      return inspection;
     },
     apply: async (intent, options) => {
       calls.push(['apply', intent, options]);
@@ -373,6 +373,55 @@ test('path-bound apply rejects expanded ownership receipts before host mutation'
     manager.apply(boundIntent, { operationId }),
     (error) => error instanceof WebsiteIdentityPathManagerError
       && error.code === 'website_identity_path_receipt_invalid',
+  );
+  assert.deepEqual(workspace.calls, []);
+});
+
+test('workspace-only migration creates and compensates scoped directories without mutating Unix identity', async () => {
+  const identityManager = fakeIdentityManager({ created: false });
+  const workspace = fakeWorkspace();
+  const receipts = fakeReceiptStore();
+  const manager = createWebsiteIdentityPathManager({
+    identityManager,
+    run: workspace.run,
+    lstatFn: workspace.lstatFn,
+    rmdirFn: workspace.rmdirFn,
+    ...receipts,
+  });
+
+  const before = await manager.inspectWorkspace(boundIntent);
+  assert.equal(before.satisfied, false);
+  assert.equal(before.missingWorkspace, 'temporary');
+
+  const applied = await manager.applyWorkspace(boundIntent, { operationId });
+  assert.equal(applied.satisfied, true);
+  assert.equal(applied.createdWorkspaceDirectories, 2);
+  assert.equal(identityManager.calls.some(([name]) => name === 'apply'), false);
+
+  const compensated = await manager.compensateWorkspace(boundIntent, { operationId });
+  assert.equal(compensated.satisfied, true);
+  assert.equal(compensated.removedWorkspaceDirectories, 2);
+  assert.equal(identityManager.calls.some(([name]) => name === 'compensate'), false);
+});
+
+test('workspace-only migration requires an already-satisfied canonical Unix identity', async () => {
+  const identityManager = fakeIdentityManager({
+    created: false,
+    inspection: { satisfied: false, reason: 'website_identity_user_missing' },
+  });
+  const workspace = fakeWorkspace();
+  const manager = createWebsiteIdentityPathManager({
+    identityManager,
+    run: workspace.run,
+    lstatFn: workspace.lstatFn,
+    rmdirFn: workspace.rmdirFn,
+    ...fakeReceiptStore(),
+  });
+
+  await assert.rejects(
+    manager.applyWorkspace(boundIntent, { operationId }),
+    (error) => error instanceof WebsiteIdentityPathManagerError
+      && error.code === 'website_identity_workspace_identity_required',
   );
   assert.deepEqual(workspace.calls, []);
 });
