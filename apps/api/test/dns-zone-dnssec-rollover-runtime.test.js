@@ -66,6 +66,7 @@ function fixture({
   failActivateAfterMutation = false,
   staleSecondPreview = false,
   propagationReady = false,
+  parentRecords = [oldDs],
 } = {}) {
   const registry = createDnsZoneDnssecRolloverRegistry({ idFactory: () => operationId });
   const calls = [];
@@ -81,6 +82,19 @@ function fixture({
   let previewCalls = 0;
   const preview = rolloverPreview();
   const service = {
+    status: async () => {
+      calls.push('parent-status');
+      return Object.freeze({
+        version: 1,
+        domainId,
+        serverId,
+        zoneName: 'example.com',
+        dnssec: true,
+        localReady: true,
+        keySetDigest: activatedDigest,
+        parent: Object.freeze({ status: 'present', records: Object.freeze([...parentRecords]) }),
+      });
+    },
     previewRollover: async () => {
       calls.push('preview');
       previewCalls += 1;
@@ -284,8 +298,38 @@ test('activates the new key only after persisting exact DNSKEY TTL propagation a
   assert.equal(operation.evidence.propagation.targetCount, 2);
   assert.deepEqual(fx.calls, [
     'preview', 'preview', 'create', 'publication-preview', 'publish', 'propagation', 'activation-preview', 'activate',
+    'parent-status',
   ]);
   assert.equal(fx.publishMutations(), 1);
+  assert.equal(fx.activateMutations(), 1);
+});
+
+test('waits for a clean double-DS parent state before entering old-DS retirement', async () => {
+  const fx = fixture({ propagationReady: true, parentRecords: [oldDs, newDs] });
+  await fx.runtime.init();
+  const operation = await fx.runtime.start({
+    domainId,
+    previewDigest: fx.preview.previewDigest,
+    confirmation: fx.preview.confirmation,
+  });
+
+  assert.equal(operation.status, 'awaiting_parent_ds_retirement');
+  assert.deepEqual(operation.evidence.parentDs, [oldDs, newDs]);
+  assert.equal(fx.activateMutations(), 1);
+});
+
+test('does not accept a foreign parent DS as completed rollover addition', async () => {
+  const foreignDs = '32345 13 2 11223344';
+  const fx = fixture({ propagationReady: true, parentRecords: [oldDs, newDs, foreignDs] });
+  await fx.runtime.init();
+  const operation = await fx.runtime.start({
+    domainId,
+    previewDigest: fx.preview.previewDigest,
+    confirmation: fx.preview.confirmation,
+  });
+
+  assert.equal(operation.status, 'awaiting_parent_ds_addition');
+  assert.deepEqual(operation.evidence.parentDs, [oldDs]);
   assert.equal(fx.activateMutations(), 1);
 });
 
