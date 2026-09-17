@@ -59,7 +59,7 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 ## P0.5 — Website DB ownership + phpMyAdmin
 
-- [ ] Shared phpMyAdmin FPM/Nginx template bundle'ını dedicated runtime identity + private temp/session dizinleriyle durable stage/validate/activate/rollback akışına bağla; Unix gateway socket ownership/mode ve endpoint health'ini kanıtla.
+- [ ] Staged shared phpMyAdmin FPM/Nginx bundle'ını dedicated runtime identity + private temp/session dizinleriyle durable validate/activate/rollback akışına bağla; Unix gateway socket ownership/mode ve endpoint health'ini kanıtla.
 - [ ] `Open phpMyAdmin` site DB user scope'uyla supported signon/short-lived handoff; root browser'a verilmesin.
 - [ ] phpMyAdmin import/export'u ve mevcut vendor dump/restore lifecycle'ını aynı Website scope/ownership sınırına bağla.
 - [ ] Database delete'i backup requirement, ownership evidence ve retryable P0.9 compensation zincirine bağla.

@@ -138,6 +138,11 @@ export {
   roundcubeConfigEvidenceInternals,
 } from './roundcube-config-evidence-inspector.js';
 export {
+  createPhpMyAdminConfigManager,
+  PhpMyAdminConfigManagerError,
+  phpMyAdminConfigManagerInternals,
+} from './phpmyadmin-config-manager.js';
+export {
   createAcmeManager,
   acmeManager,
   AcmeManagerError,
