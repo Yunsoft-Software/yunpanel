@@ -19,7 +19,7 @@ Son Website isolation/SFTP ilerlemesi: `docs/history/website-isolation-sftp-prog
 
 ## P0.1 — Website Unix identity ve filesystem isolation
 
-- [ ] Isolation migration apply ayrı exact-change preview/digest + typed-confirmation operation olsun; yalnız operation-owned değişiklikleri uygulayıp geri alabilsin ve kör recursive `chown` yapmasın.
+- [ ] Isolation migration apply, audit'in pinlediği exact-change preview/digest + typed confirmation sözleşmesini kullansın; yalnız operation-owned değişiklikleri uygulayıp geri alabilsin ve kör recursive `chown` yapmasın.
 - [ ] Legacy Website migration apply önce canonical Unix identity/path/runtime/SFTP drift raporu ve exact değişiklik preview'sı versin; operation-owned olmayan dosya/user/runtime üzerinde destructive ownership repair yapmasın.
 
 Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.

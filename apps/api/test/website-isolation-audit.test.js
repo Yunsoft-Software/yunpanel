@@ -40,9 +40,9 @@ function operation(runtimeType = 'php') {
     operationId,
     websiteId,
     steps: [
-      { id: 'unix_identity', kind: 'unix_identity', intent: {}, evidence: null, compensation: {} },
-      { id: runtimeStep, kind: runtimeStep, intent: {}, evidence: null, compensation: {} },
-      { id: 'sftp', kind: 'sftp', intent: {}, evidence: null, compensation: {} },
+      { id: 'unix_identity', kind: 'unix_identity', state: 'succeeded', intent: { scope: 'identity' }, evidence: null, compensation: {} },
+      { id: runtimeStep, kind: runtimeStep, state: 'succeeded', intent: { scope: 'runtime' }, evidence: null, compensation: {} },
+      { id: 'sftp', kind: 'sftp', state: 'succeeded', intent: { scope: 'sftp' }, evidence: null, compensation: {} },
     ],
   };
 }
@@ -95,6 +95,7 @@ test('isolation audit produces explicit non-destructive migration preview on dri
   assert.equal(audit.migrationRequired, true);
   assert.equal(audit.migration.autoApply, false);
   assert.equal(audit.migration.destructive, false);
+  assert.equal(audit.migration.applyAvailable, false);
   assert.match(audit.migration.previewDigest, /^[a-f0-9]{64}$/);
   assert.equal(audit.migration.confirmation, `migrate-isolation:${websiteId}:3:${audit.migration.previewDigest}`);
   assert.match(audit.migration.warning, /No ownership, filesystem or runtime mutation/);
@@ -102,6 +103,34 @@ test('isolation audit produces explicit non-destructive migration preview on dri
   assert.equal(audit.findings.some((entry) => entry.code === 'website_isolation_document_root_drift'), true);
   assert.equal(audit.findings.some((entry) => entry.code === 'website_isolation_sftp_not_satisfied'), true);
   assert.equal(audit.inspectedSteps.find((step) => step.stepId === 'sftp').reason, 'sftp_key_reconcile_required');
+  assert.deepEqual(audit.migration.changes.map((change) => [change.id, change.action, change.ownership]), [
+    ['website.unix_identity', 'adopt_canonical_unix_identity', 'legacy_review_required'],
+    ['website.document_root', 'adopt_canonical_document_root', 'legacy_review_required'],
+    ['provisioning.sftp', 'reconcile_isolation_step', 'operation_receipt_required'],
+  ]);
+  assert.deepEqual(audit.migration.changes[0], {
+    id: 'website.unix_identity',
+    action: 'adopt_canonical_unix_identity',
+    ownership: 'legacy_review_required',
+    applyState: 'blocked',
+    current: { unixUser: 'yunapp-aaaaaaaaaaaa' },
+    desired: { unixUser: identity.unixUser },
+  });
+  assert.equal(audit.migration.changes[2].current.stepState, 'succeeded');
+  assert.match(audit.migration.changes[2].current.intentSha256, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(audit.migration).includes('"scope":"sftp"'), false);
+});
+
+test('isolation migration digest pins the inspected exact-change reason', async () => {
+  const first = await service({
+    stepResults: { sftp: { satisfied: false, reason: 'sftp_key_reconcile_required' } },
+  }).audit(websiteId);
+  const second = await service({
+    stepResults: { sftp: { satisfied: false, reason: 'sftp_authorized_keys_file_missing' } },
+  }).audit(websiteId);
+
+  assert.notEqual(first.migration.previewDigest, second.migration.previewDigest);
+  assert.notDeepEqual(first.migration.changes, second.migration.changes);
 });
 
 test('isolation audit fails closed when managed host inspection detects drift', async () => {

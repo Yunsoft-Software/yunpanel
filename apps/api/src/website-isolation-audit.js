@@ -33,6 +33,21 @@ function migrationDigest(core) {
   return createHash('sha256').update(JSON.stringify(core)).digest('hex');
 }
 
+function valueDigest(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function migrationChange({ id, action, current, desired, ownership = 'unverified' }) {
+  return Object.freeze({
+    id,
+    action,
+    ownership,
+    applyState: ownership === 'operation_owned' ? 'requires_explicit_apply' : 'blocked',
+    current: Object.freeze({ ...current }),
+    desired: Object.freeze({ ...desired }),
+  });
+}
+
 function handlerContext(operation, step) {
   return Object.freeze({
     operation,
@@ -91,6 +106,7 @@ export function createWebsiteIsolationAuditService({
     const identity = createApplicationIdentity(application.id);
     const expectedRoot = expectedDocumentRoot(website.runtimeType, identity);
     const findings = [];
+    const changes = [];
     if (website.unixUser !== identity.unixUser) {
       findings.push(finding(
         'website_isolation_unix_user_drift',
@@ -98,6 +114,13 @@ export function createWebsiteIsolationAuditService({
         'Website Unix user does not match the canonical Application identity.',
         'Review the existing account and create an explicit migration plan; do not rename or chown recursively automatically.',
       ));
+      changes.push(migrationChange({
+        id: 'website.unix_identity',
+        action: 'adopt_canonical_unix_identity',
+        ownership: 'legacy_review_required',
+        current: { unixUser: website.unixUser },
+        desired: { unixUser: identity.unixUser },
+      }));
     }
     if (website.documentRoot !== expectedRoot) {
       findings.push(finding(
@@ -106,6 +129,13 @@ export function createWebsiteIsolationAuditService({
         'Website document root does not match the canonical runtime path contract.',
         'Inspect the existing release tree and plan an explicit cutover; do not move files automatically.',
       ));
+      changes.push(migrationChange({
+        id: 'website.document_root',
+        action: 'adopt_canonical_document_root',
+        ownership: 'legacy_review_required',
+        current: { documentRoot: website.documentRoot },
+        desired: { documentRoot: expectedRoot },
+      }));
     }
 
     const operation = provisioningRegistry
@@ -119,6 +149,13 @@ export function createWebsiteIsolationAuditService({
         'Website has no durable provisioning operation that proves isolation state.',
         'Create an explicit adoption/migration operation after reviewing current UID/GID, paths and runtime state.',
       ));
+      changes.push(migrationChange({
+        id: 'provisioning.operation',
+        action: 'create_isolation_adoption_operation',
+        ownership: 'adoption_review_required',
+        current: { operationId: null },
+        desired: { websiteId: website.id, stepIds: ISOLATION_STEPS[website.runtimeType] },
+      }));
     } else {
       for (const stepId of ISOLATION_STEPS[website.runtimeType]) {
         const step = operation.steps.find((candidate) => candidate.id === stepId) ?? null;
@@ -129,6 +166,13 @@ export function createWebsiteIsolationAuditService({
             `Durable Website provisioning is missing the ${stepId} isolation step.`,
             'Preview and apply an explicit Website isolation migration; do not mutate unrelated files.',
           ));
+          changes.push(migrationChange({
+            id: `provisioning.${stepId}`,
+            action: 'add_isolation_step',
+            ownership: 'adoption_review_required',
+            current: { operationId: operation.operationId, stepId, present: false },
+            desired: { operationId: operation.operationId, stepId, present: true },
+          }));
           continue;
         }
         const handler = provisioningHandlers?.[step.kind] ?? null;
@@ -140,6 +184,19 @@ export function createWebsiteIsolationAuditService({
             `Current host state for ${stepId} cannot be inspected through the configured runtime.`,
             'Restore the isolation inspector before migration or readiness decisions.',
           ));
+          changes.push(migrationChange({
+            id: `provisioning.${stepId}`,
+            action: 'reconcile_isolation_step',
+            current: {
+              operationId: operation.operationId,
+              stepId,
+              stepKind: step.kind,
+              stepState: step.state,
+              intentSha256: valueDigest(step.intent),
+              inspection: 'unavailable',
+            },
+            desired: { satisfied: true },
+          }));
           continue;
         }
         try {
@@ -158,6 +215,20 @@ export function createWebsiteIsolationAuditService({
               `${stepId} host isolation is not currently satisfied.`,
               'Inspect the reported drift and use an explicit migration/retry path instead of recursive ownership repair.',
             ));
+            changes.push(migrationChange({
+              id: `provisioning.${stepId}`,
+              action: 'reconcile_isolation_step',
+              ownership: 'operation_receipt_required',
+              current: {
+                operationId: operation.operationId,
+                stepId,
+                stepKind: step.kind,
+                stepState: step.state,
+                intentSha256: valueDigest(step.intent),
+                inspection: result?.reason ?? 'isolation_not_satisfied',
+              },
+              desired: { satisfied: true },
+            }));
           }
         } catch (error) {
           inspectedSteps.push(Object.freeze({
@@ -172,6 +243,20 @@ export function createWebsiteIsolationAuditService({
             `${stepId} inspection detected managed host drift.`,
             'Stop automatic migration and review the host evidence before changing ownership or routing.',
           ));
+          changes.push(migrationChange({
+            id: `provisioning.${stepId}`,
+            action: 'reconcile_isolation_step',
+            ownership: 'host_drift_review_required',
+            current: {
+              operationId: operation.operationId,
+              stepId,
+              stepKind: step.kind,
+              stepState: step.state,
+              intentSha256: valueDigest(step.intent),
+              inspection: typeof error?.code === 'string' ? error.code : 'isolation_inspection_failed',
+            },
+            desired: { satisfied: true },
+          }));
         }
       }
     }
@@ -190,7 +275,7 @@ export function createWebsiteIsolationAuditService({
         temporaryDirectory: identity.paths.workspace.temporaryDirectory,
         logDirectory: identity.paths.workspace.logDirectory,
       }),
-      actions: Object.freeze(findings.map((entry) => Object.freeze({ code: entry.code, action: entry.action }))),
+      changes: Object.freeze(changes),
     });
     const previewDigest = migrationDigest(migrationCore);
 
@@ -204,8 +289,10 @@ export function createWebsiteIsolationAuditService({
       migration: migrationRequired ? Object.freeze({
         destructive: false,
         autoApply: false,
+        applyAvailable: false,
         previewDigest,
         confirmation: `migrate-isolation:${website.id}:${website.revision}:${previewDigest}`,
+        changes: Object.freeze(changes),
         warning: 'Preview only. No ownership, filesystem or runtime mutation is performed by this audit.',
       }) : null,
     });
@@ -219,4 +306,6 @@ export const websiteIsolationAuditInternals = Object.freeze({
   isolationSteps: ISOLATION_STEPS,
   expectedDocumentRoot,
   migrationDigest,
+  valueDigest,
+  migrationChange,
 });

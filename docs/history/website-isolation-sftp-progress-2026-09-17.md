@@ -18,7 +18,7 @@ Bu kayıt 16 Eylül Website isolation audit'inden sonra tamamlanan source-level 
 - `0f457117` authenticated `GET /api/websites/:websiteId/isolation-audit` route kontratını ekledi. Route panel auth guard arkasında, local Website scope kontrolü yapıyor ve audit service hatalarını mevcut Website HTTP error kontratına map ediyor.
 - `ef0a0338` audit'i durable Website provisioning registry ve canlı provisioning handler `inspect()` fonksiyonlarıyla production runtime'a bağladı. Capability yalnız gerekli Website/Application registry bağı hazır olduğunda expose ediliyor; local-server scope fail-closed kalıyor.
 - Website genel bakışı audit sonucunu persistent Website ID üzerinden yüklüyor; canonical user/HOME/document root/tmp/log beklentilerini, denetlenen provisioning adımlarını ve actionable bulguları gösteriyor. Yeniden denetleme salt okunur kalıyor ve API'ye Domain ID gönderilmiyor.
-- Audit inspect-only'dir. Audit sonucu migration gerektiriyorsa raw recursive ownership repair yapmaz; migration apply hâlâ ayrı preview/digest + typed-confirmation operation olarak tamamlanmalıdır.
+- Audit inspect-only'dir. Migration gerektiren metadata, operation ve step farkları artık current/desired değer, ownership gate, step state, bounded inspection reason ve secret-safe intent SHA-256 ile exact değişiklik listesine dönüştürülür. Preview digest bu listeyi pinler ve typed confirmation digest'e bağlıdır. Apply hâlâ kapalıdır; raw recursive ownership repair yapmaz ve operation-owned rollback katmanı tamamlanmadan mutation açılmaz.
 
 ## SFTP public-key lifecycle source durumu
 
