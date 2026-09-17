@@ -2,6 +2,7 @@ import path from 'node:path';
 import { createWebsitePathContract } from '@yunpanel/host-runtime';
 import { createApplicationIdentity } from '@yunpanel/host-runtime/application-identity';
 import { createWebsiteProvisioningPlan } from './website-provisioning-plan.js';
+import { databaseCredentialRegistryInternals } from './database-credential-registry.js';
 
 const MANAGED_NODE_ROOT = '/opt/yunpanel/node-runtimes';
 
@@ -225,6 +226,26 @@ function domainActivationIntent(preview) {
   });
 }
 
+function databaseIntent(preview, applicationId) {
+  const database = preview.plan.database;
+  if (!database || database.serverId !== preview.plan.website.serverId
+    || database.websiteId !== preview.ids.websiteId
+    || database.applicationId !== applicationId
+    || database.unixUser !== preview.plan.website.unixUser
+    || typeof database.databaseName !== 'string') {
+    throw new Error('Website initial database does not match canonical Website ownership');
+  }
+  return Object.freeze({
+    adapter: 'website-database',
+    serverId: database.serverId,
+    databaseName: database.databaseName,
+    websiteId: database.websiteId,
+    applicationId: database.applicationId,
+    unixUser: database.unixUser,
+    privileges: Object.freeze([...databaseCredentialRegistryInternals.defaultPrivileges]),
+  });
+}
+
 function staticIntent(preview, applicationId, paths = createWebsitePathContract({
   websiteId: preview?.ids?.websiteId,
   applicationId,
@@ -336,6 +357,14 @@ export function siteCreateProvisioningPlan(preview) {
       homeDirectory: paths.workspace.homeDirectory,
       documentRoot: preview.plan.website.documentRoot,
     }));
+    if (preview.plan.database) {
+      steps.push(hostStep(
+        'database',
+        'website_database',
+        databaseIntent(preview, applicationId),
+        { compensationState: 'pending' },
+      ));
+    }
     if (runtimeType === 'node') {
       if (preview.source?.kind === 'new_node') {
         steps.push(hostStep('node_release', 'node_release', nodeReleaseIntent(preview, applicationId, paths), {
@@ -444,6 +473,7 @@ export const siteCreateProvisioningInternals = Object.freeze({
   passengerEnvironmentStateIntent,
   passengerAuthorityIntent,
   domainActivationIntent,
+  databaseIntent,
   staticIntent,
   websiteAliases,
 });

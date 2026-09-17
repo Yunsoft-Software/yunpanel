@@ -17,6 +17,8 @@ const SITE_NAMESPACE = Buffer.from('0bcd2cf8883b49f997294b5d225cf15e', 'hex');
 const SOURCE_KINDS = new Set(['existing_application', 'existing_docker', 'new_static', 'new_node', 'new_php', 'external_proxy']);
 const WWW_MODES = new Set(['none', 'alias', 'independent']);
 const HTTPS_MODES = new Set(['off', 'managed']);
+const DATABASE_MODES = new Set(['none', 'create']);
+const DATABASE_SOURCE_KINDS = new Set(['existing_application', 'new_static', 'new_node', 'new_php']);
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -147,10 +149,38 @@ function normalizedSource(source) {
   }
 }
 
+function normalizedDatabase(value, source) {
+  const input = value ?? { mode: 'none' };
+  exactObject(
+    input,
+    new Set(['mode']),
+    'site_create_database_invalid',
+    'Initial database accepts only mode',
+  );
+  if (!DATABASE_MODES.has(input.mode)) {
+    throw new SiteCreateError('site_create_database_invalid', 'Initial database mode must be none or create');
+  }
+  if (input.mode === 'create' && !DATABASE_SOURCE_KINDS.has(source.kind)) {
+    throw new SiteCreateError(
+      'site_create_database_source_unsupported',
+      'Initial database requires a managed Application Website',
+      409,
+    );
+  }
+  return Object.freeze({ mode: input.mode });
+}
+
 function normalizeInput(input) {
-  exactObject(input, new Set([
+  const allowedFields = new Set([
     'operationId', 'serverId', 'name', 'primaryDomain', 'parentDomainId', 'wwwMode', 'httpsMode', 'source',
-  ]), 'site_create_input_invalid', 'Send the complete documented site-create input');
+    'database',
+  ]);
+  const requiredFields = [...allowedFields].filter((field) => field !== 'database');
+  if (!input || typeof input !== 'object' || Array.isArray(input)
+    || Object.keys(input).some((key) => !allowedFields.has(key))
+    || requiredFields.some((field) => !Object.hasOwn(input, field))) {
+    throw new SiteCreateError('site_create_input_invalid', 'Send the complete documented site-create input');
+  }
   if (!WWW_MODES.has(input.wwwMode)) throw new SiteCreateError('site_create_www_mode_invalid', 'wwwMode must be none, alias or independent');
   if (!HTTPS_MODES.has(input.httpsMode)) throw new SiteCreateError('site_create_https_mode_invalid', 'httpsMode must be off or managed');
   const operationId = uuid(input.operationId, 'operationId');
@@ -180,6 +210,7 @@ function normalizeInput(input) {
       throw error;
     }
   }
+  const source = normalizedSource(input.source);
   return Object.freeze({
     operationId,
     serverId,
@@ -190,7 +221,8 @@ function normalizeInput(input) {
     httpsMode: input.httpsMode,
     aliases: Object.freeze(aliases),
     wwwPrimaryDomain,
-    source: normalizedSource(input.source),
+    source,
+    database: normalizedDatabase(input.database, source),
   });
 }
 
@@ -464,6 +496,20 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
       };
   const websiteExisting = websites.find((candidate) => candidate.id === ids.websiteId) ?? null;
   const websiteReady = ensureExact(websiteExisting, websiteExpected, 'site_create_website_identity_conflict', 'Planned Website identity conflicts with existing state', stableWebsite);
+  const databaseExpected = normalized.database.mode === 'create' ? Object.freeze({
+    serverId: normalized.serverId,
+    databaseName: `yp_${createHash('sha256').update(ids.websiteId).digest('hex').slice(0, 32)}`,
+    websiteId: ids.websiteId,
+    applicationId: websiteExpected.applicationId,
+    unixUser: websiteExpected.unixUser,
+  }) : null;
+  if (databaseExpected && (!databaseExpected.applicationId || !databaseExpected.unixUser)) {
+    throw new SiteCreateError(
+      'site_create_database_source_unsupported',
+      'Initial database requires a managed Application Website',
+      409,
+    );
+  }
 
   const primaryExpected = {
     id: ids.primaryDomainId,
@@ -527,6 +573,7 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
       application: applicationExpected ?? (application ? stableApplication(application) : null),
       dockerWorkload: dockerWorkload ? stableDockerWorkload(dockerWorkload) : null,
       website: websiteExpected,
+      database: databaseExpected,
       primaryDomain: primaryExpected,
       wwwDomain: wwwExpected,
     },
@@ -672,6 +719,7 @@ export const siteCreateInternals = Object.freeze({
   resourceId,
   normalizeInput,
   normalizedSource,
+  normalizedDatabase,
   stableApplication,
   stableDockerWorkload,
   stableWebsite,

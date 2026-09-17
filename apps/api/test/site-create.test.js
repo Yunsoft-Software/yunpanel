@@ -116,6 +116,38 @@ test('new static site creates deterministic Application, Website and explicit ww
   assert.equal((await state.domainRegistry.listDomains()).length, 1);
 });
 
+test('optional initial database is deterministic and scoped to the planned Website identity', async () => {
+  const state = await fixture();
+  const input = inputFor(state.serverId, { database: { mode: 'create' } });
+  const preview = await previewSiteCreate({ input, ...dependencies(state) });
+
+  assert.match(preview.plan.database.databaseName, /^yp_[a-f0-9]{32}$/);
+  assert.deepEqual(preview.plan.database, {
+    serverId: state.serverId,
+    databaseName: preview.plan.database.databaseName,
+    websiteId: preview.ids.websiteId,
+    applicationId: preview.ids.applicationId,
+    unixUser: preview.plan.website.unixUser,
+  });
+  const retry = await previewSiteCreate({ input, ...dependencies(state) });
+  assert.deepEqual(retry.plan.database, preview.plan.database);
+  assert.equal(retry.previewDigest, preview.previewDigest);
+});
+
+test('initial database rejects unmanaged proxy and Docker sources', async () => {
+  const state = await fixture();
+  await assert.rejects(
+    previewSiteCreate({
+      input: inputFor(state.serverId, {
+        source: { kind: 'external_proxy', target: { host: '127.0.0.1', port: 4301, websocket: true } },
+        database: { mode: 'create' },
+      }),
+      ...dependencies(state),
+    }),
+    (error) => error instanceof SiteCreateError && error.code === 'site_create_database_source_unsupported',
+  );
+});
+
 test('new Node site is Passenger-first and never allocates a localhost backend port', async () => {
   const state = await fixture();
   await state.applicationRegistry.createNodeApplication({

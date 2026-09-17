@@ -170,6 +170,36 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.ok(ordered.indexOf('passenger_environment_state') < ordered.indexOf('passenger_authority'));
 });
 
+test('optional initial database becomes an ownership-scoped compensatable provisioning step', () => {
+  const preview = nodePreview({ metadataReady: true, httpsMode: 'off' });
+  preview.plan.database = {
+    serverId: '11111111-1111-4111-8111-111111111111',
+    databaseName: 'yp_0123456789abcdef0123456789abcdef',
+    websiteId,
+    applicationId,
+    unixUser,
+  };
+  preview.plan.website.serverId = preview.plan.database.serverId;
+
+  const plan = siteCreateProvisioningPlan(preview);
+  const database = plan.steps.find((step) => step.id === 'database');
+  assert.equal(database.kind, 'website_database');
+  assert.equal(database.required, true);
+  assert.equal(database.state, 'pending');
+  assert.equal(database.compensation.state, 'pending');
+  assert.deepEqual(database.intent, {
+    adapter: 'website-database',
+    ...preview.plan.database,
+    privileges: [
+      'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'INDEX', 'DROP',
+      'REFERENCES', 'CREATE TEMPORARY TABLES', 'LOCK TABLES',
+    ],
+  });
+  const order = plan.steps.map((step) => step.id);
+  assert.ok(order.indexOf('unix_identity') < order.indexOf('database'));
+  assert.ok(order.indexOf('database') < order.indexOf('node_release'));
+});
+
 test('Node provisioning rejects document-root drift from the managed Website path contract', () => {
   const preview = nodePreview({ httpsMode: 'off' });
   preview.plan.website.documentRoot = '/srv/example/current';
