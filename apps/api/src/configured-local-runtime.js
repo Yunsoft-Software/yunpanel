@@ -5,6 +5,7 @@ import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.
 import { createDomainActivationReceiptStore } from './domain-activation-receipt.js';
 import { createLocalHostOperations } from './local-host-operations.js';
 import { createMailConfigOperationReceiptStore } from './mail-config-operation-receipt.js';
+import { createMailConfigRollbackJournal } from './mail-config-rollback-journal.js';
 import { createMailConfigRollbackReceiptStore } from './mail-config-rollback-receipt.js';
 import { createMailDataOperationReceiptStore } from './mail-data-operation-receipt.js';
 import { createMailDkimOperationReceiptStore } from './mail-dkim-operation-receipt.js';
@@ -56,6 +57,7 @@ export async function startConfiguredLocalRuntime({
   createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
   createDomainActivationReceipts = createDomainActivationReceiptStore,
   createMailConfigOperationReceipts = createMailConfigOperationReceiptStore,
+  createMailConfigRollbackJournalStore = createMailConfigRollbackJournal,
   createMailConfigRollbackReceipts = createMailConfigRollbackReceiptStore,
   createMailDataOperationReceipts = createMailDataOperationReceiptStore,
   createMailDkimOperationReceipts = createMailDkimOperationReceiptStore,
@@ -108,6 +110,7 @@ export async function startConfiguredLocalRuntime({
     || typeof createDatabaseDeletionReceipts !== 'function'
     || typeof createDomainActivationReceipts !== 'function'
     || typeof createMailConfigOperationReceipts !== 'function'
+    || typeof createMailConfigRollbackJournalStore !== 'function'
     || typeof createMailConfigRollbackReceipts !== 'function'
     || typeof createMailDataOperationReceipts !== 'function'
     || typeof createMailDkimOperationReceipts !== 'function'
@@ -159,6 +162,12 @@ export async function startConfiguredLocalRuntime({
       expectedPreviewSha256: payload.previewSha256,
     })
     : null;
+  const mailConfigRollbackJournal = mailConfigurationService ? createMailConfigRollbackJournalStore() : null;
+  if (mailConfigurationService && (!mailConfigRollbackJournal
+    || typeof mailConfigRollbackJournal.begin !== 'function'
+    || typeof mailConfigRollbackJournal.transition !== 'function')) {
+    throw new ConfiguredLocalRuntimeError('local_mail_config_rollback_journal_invalid', 'Local runtime managed mail rollback journal is invalid');
+  }
   const hostOperations = createOperations({
     loadApplicationEnvironment: (applicationId, expectedRevision) => applicationEnvironmentRegistry.materialize(applicationId, {
       expectedRevision,
@@ -171,6 +180,7 @@ export async function startConfiguredLocalRuntime({
       : null,
     loadManagedMailConfiguration,
     loadManagedMailRollbackConfiguration,
+    mailConfigRollbackJournal,
     loadManagedDkimConfiguration,
     loadRoundcubeConfiguration,
     jobLogStore,

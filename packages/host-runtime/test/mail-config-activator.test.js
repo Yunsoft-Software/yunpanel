@@ -374,6 +374,34 @@ test('explicit rollback blocks drift before creating a compensation backup or mu
   assert.equal(compensation.satisfied, false);
 }));
 
+test('explicit rollback persists prepared compensation evidence before source mutation', async () => withTempDirectory(async (root) => {
+  const context = await prepare({ root });
+  await context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID });
+  const currentMainCf = await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath));
+  let prepared;
+
+  await assert.rejects(
+    context.activator.rollbackConfiguration(context.preview, {
+      transactionId: 'mail-job-rollback-004',
+      sourceTransactionId: TRANSACTION_ID,
+      sourcePlanSha256: context.backup.planSha256,
+      sourceBackupSha256: context.backup.manifestSha256,
+      async onPrepared(evidence) {
+        prepared = structuredClone(evidence);
+        throw new Error('fixture journal failure');
+      },
+    }),
+    (error) => error instanceof MailConfigActivationError && error.code === 'mail_rollback_journal_failed',
+  );
+
+  assert.equal(prepared.sourceBackupSha256, context.backup.manifestSha256);
+  assert.match(prepared.compensationBackupSha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath)), currentMainCf);
+  for (const artifact of context.preview.artifacts) {
+    assert.equal(sha256(await readFile(context.mapped.mapPath(artifact.path))), artifact.sha256);
+  }
+}));
+
 test('explicit rollback restores its compensation snapshot when source validation fails after mutation', async () => withTempDirectory(async (root) => {
   const context = await prepare({ root, failDoveconfCalls: [2] });
   await context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID });

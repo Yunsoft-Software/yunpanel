@@ -145,6 +145,7 @@ export function createLocalHostOperations({
   mailConfigManager = null,
   mailConfigBackupManager = null,
   mailConfigActivator = null,
+  mailConfigRollbackJournal = null,
   mailDkimActivator = null,
   mailDataBackupManager = null,
   mailDataRestoreManager = null,
@@ -243,6 +244,11 @@ export function createLocalHostOperations({
   if (loadManagedMailRollbackConfiguration
     && typeof resolvedMailConfigActivator.rollbackConfiguration !== 'function') {
     throw new Error('mailConfigActivator must provide rollbackConfiguration() when rollback is configured');
+  }
+  if (loadManagedMailRollbackConfiguration && (!mailConfigRollbackJournal
+    || typeof mailConfigRollbackJournal.begin !== 'function'
+    || typeof mailConfigRollbackJournal.transition !== 'function')) {
+    throw new Error('mailConfigRollbackJournal must provide begin() and transition() when rollback is configured');
   }
   if (!resolvedMailDkimActivator || typeof resolvedMailDkimActivator.activate !== 'function') {
     throw new Error('mailDkimActivator must provide activate()');
@@ -437,12 +443,54 @@ export function createLocalHostOperations({
       error.code = 'mail_rollback_current_bundle_stale';
       throw error;
     }
-    const restored = await resolvedMailConfigActivator.rollbackConfiguration(bundle.preview, {
-      transactionId: execution.jobId,
-      sourceTransactionId: payload.sourceApplyJobId,
-      sourcePlanSha256: payload.sourcePlanSha256,
-      sourceBackupSha256: payload.backupSha256,
-    });
+    let journalStarted = false;
+    let restored;
+    try {
+      restored = await resolvedMailConfigActivator.rollbackConfiguration(bundle.preview, {
+        transactionId: execution.jobId,
+        sourceTransactionId: payload.sourceApplyJobId,
+        sourcePlanSha256: payload.sourcePlanSha256,
+        sourceBackupSha256: payload.backupSha256,
+        onPrepared: async (evidence) => {
+          if (!evidence || evidence.currentConfigurationSha256 !== payload.currentConfigurationSha256
+            || evidence.sourcePlanSha256 !== payload.sourcePlanSha256
+            || evidence.sourceBackupSha256 !== payload.backupSha256
+            || typeof evidence.compensationBackupSha256 !== 'string'
+            || !/^[a-f0-9]{64}$/.test(evidence.compensationBackupSha256)) {
+            const error = new Error('Managed mail rollback prepared evidence is invalid');
+            error.code = 'mail_config_rollback_prepared_invalid';
+            throw error;
+          }
+          await mailConfigRollbackJournal.begin({
+            serverId: execution.serverId,
+            jobId: execution.jobId,
+            mailDomainId: payload.mailDomainId,
+            sourceApplyJobId: payload.sourceApplyJobId,
+            previousRevision: payload.previousRevision,
+            expectedCurrentRevision: payload.expectedCurrentRevision,
+            currentStatus: payload.currentStatus,
+            targetStatus: payload.targetStatus,
+            previewDigest: payload.previewDigest,
+            currentConfigurationSha256: payload.currentConfigurationSha256,
+            sourcePlanSha256: payload.sourcePlanSha256,
+            backupSha256: payload.backupSha256,
+            compensationBackupSha256: evidence.compensationBackupSha256,
+          });
+          journalStarted = true;
+        },
+      });
+    } catch (error) {
+      if (journalStarted) {
+        const compensationFailed = error?.code === 'mail_config_explicit_rollback_compensation_failed';
+        try {
+          await mailConfigRollbackJournal.transition(execution.serverId, execution.jobId, {
+            status: compensationFailed ? 'failed' : 'compensated',
+            lastErrorCode: typeof error?.code === 'string' ? error.code : 'mail_config_explicit_rollback_failed',
+          });
+        } catch {}
+      }
+      throw error;
+    }
     if (!restored || restored.restored !== true || restored.sideEffects !== true
       || restored.currentConfigurationSha256 !== payload.currentConfigurationSha256
       || restored.sourcePlanSha256 !== payload.sourcePlanSha256
@@ -452,6 +500,12 @@ export function createLocalHostOperations({
       const error = new Error('Managed mail rollback did not confirm the queued restore');
       error.code = 'mail_config_rollback_unconfirmed';
       throw error;
+    }
+    try {
+      await mailConfigRollbackJournal.transition(execution.serverId, execution.jobId, { status: 'restored' });
+    } catch {
+      // The restoring_source journal plus exact host/backup evidence remains the
+      // recovery authority. Do not recast a completed host restore as failed.
     }
     return Object.freeze({
       version: 1,

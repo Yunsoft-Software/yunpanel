@@ -214,6 +214,12 @@ test('local managed mail rollback materializes current state privately and retur
       activateConfiguration: async () => ({}),
       rollbackConfiguration: async (preview, options) => {
         calls.push(['rollback', preview, options]);
+        await options.onPrepared({
+          currentConfigurationSha256: CONFIG_DIGEST,
+          sourcePlanSha256: PLAN_DIGEST,
+          sourceBackupSha256: BACKUP_DIGEST,
+          compensationBackupSha256: COMPENSATION_DIGEST,
+        });
         return {
           currentConfigurationSha256: CONFIG_DIGEST,
           sourcePlanSha256: PLAN_DIGEST,
@@ -224,6 +230,10 @@ test('local managed mail rollback materializes current state privately and retur
         };
       },
     },
+    mailConfigRollbackJournal: {
+      async begin(input) { calls.push(['journal.begin', input]); },
+      async transition(serverId, jobId, update) { calls.push(['journal.transition', serverId, jobId, update]); },
+    },
   });
 
   assert.equal(operations.supports(OPERATIONS.MAIL_CONFIG_ROLLBACK), true);
@@ -232,13 +242,21 @@ test('local managed mail rollback materializes current state privately and retur
     rollbackPayload(),
     execution(),
   );
-  assert.deepEqual(calls.map(([name]) => name), ['load', 'rollback']);
-  assert.deepEqual(calls[1][2], {
+  assert.deepEqual(calls.map(([name]) => name), ['load', 'rollback', 'journal.begin', 'journal.transition']);
+  assert.deepEqual({ ...calls[1][2], onPrepared: undefined }, {
     transactionId: execution().jobId,
     sourceTransactionId: 'mail-job-source-0001',
     sourcePlanSha256: PLAN_DIGEST,
     sourceBackupSha256: BACKUP_DIGEST,
+    onPrepared: undefined,
   });
+  assert.equal(typeof calls[1][2].onPrepared, 'function');
+  assert.equal(calls[2][1].compensationBackupSha256, COMPENSATION_DIGEST);
+  assert.deepEqual(calls[3].slice(1), [
+    execution().serverId,
+    execution().jobId,
+    { status: 'restored' },
+  ]);
   assert.deepEqual(result, {
     version: 1,
     ...rollbackPayload(),
@@ -261,10 +279,48 @@ test('local managed mail rollback rejects stale protected current state before h
       activateConfiguration: async () => ({}),
       rollbackConfiguration: async () => { restored = true; },
     },
+    mailConfigRollbackJournal: { begin: async () => {}, transition: async () => {} },
   });
   await assert.rejects(
     operations.executeOperation(OPERATIONS.MAIL_CONFIG_ROLLBACK, rollbackPayload(), execution()),
     { code: 'mail_rollback_current_bundle_stale' },
   );
   assert.equal(restored, false);
+});
+
+test('local managed mail rollback journals compensated host failure without changing the surfaced error', async () => {
+  const transitions = [];
+  const failure = Object.assign(new Error('fixture source validation failure'), { code: 'mail_restore_validation_failed' });
+  const operations = createLocalHostOperations({
+    loadManagedMailRollbackConfiguration: async () => ({
+      state: { mailDomainId: MAIL_DOMAIN_ID, revision: 2, status: 'enabled' },
+      preview: { sha256: CONFIG_DIGEST },
+      sensitiveArtifacts: [],
+    }),
+    mailConfigActivator: {
+      activateConfiguration: async () => ({}),
+      rollbackConfiguration: async (_preview, options) => {
+        await options.onPrepared({
+          currentConfigurationSha256: CONFIG_DIGEST,
+          sourcePlanSha256: PLAN_DIGEST,
+          sourceBackupSha256: BACKUP_DIGEST,
+          compensationBackupSha256: COMPENSATION_DIGEST,
+        });
+        throw failure;
+      },
+    },
+    mailConfigRollbackJournal: {
+      begin: async () => {},
+      async transition(...args) { transitions.push(args); },
+    },
+  });
+  await assert.rejects(
+    operations.executeOperation(OPERATIONS.MAIL_CONFIG_ROLLBACK, rollbackPayload(), execution()),
+    (error) => error === failure,
+  );
+  assert.deepEqual(transitions, [[
+    execution().serverId,
+    execution().jobId,
+    { status: 'compensated', lastErrorCode: 'mail_restore_validation_failed' },
+  ]]);
 });

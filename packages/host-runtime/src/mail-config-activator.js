@@ -540,7 +540,11 @@ export function createMailConfigActivator({
     sourceTransactionId,
     sourcePlanSha256,
     sourceBackupSha256,
+    onPrepared = null,
   } = {}) {
+    if (onPrepared !== null && typeof onPrepared !== 'function') {
+      throw activationError('mail_rollback_prepared_hook_invalid', 'Managed mail rollback prepared hook is invalid');
+    }
     if (transactionId === sourceTransactionId) {
       throw activationError('mail_rollback_transaction_invalid', 'Rollback and source apply transaction ids must be different');
     }
@@ -574,6 +578,19 @@ export function createMailConfigActivator({
     }
     await assertLiveMatchesBackup(compensation);
     await assertCurrentConfiguration(currentPreview, currentPlan);
+    if (onPrepared) {
+      try {
+        await onPrepared(Object.freeze({
+          version: 1,
+          currentConfigurationSha256: currentPreview.sha256,
+          sourcePlanSha256,
+          sourceBackupSha256,
+          compensationBackupSha256: compensation.manifestSha256,
+        }));
+      } catch {
+        throw activationError('mail_rollback_journal_failed', 'Managed mail rollback intent could not be persisted before host mutation');
+      }
+    }
 
     try {
       await restoreBackup(currentPreview, currentPlan, inspectedSource.result, sourceTransactionId);
