@@ -90,12 +90,49 @@ async function reconcileApplicationJob(applicationRegistry, applicationEnvironme
 }
 
 async function reconcileMailDomainJob(mailDomainRegistry, job) {
-  if (job.operation !== OPERATIONS.MAIL_CONFIG_APPLY || job.status === 'failed') return;
+  if (![OPERATIONS.MAIL_CONFIG_APPLY, OPERATIONS.MAIL_CONFIG_ROLLBACK].includes(job.operation)
+    || job.status === 'failed') return;
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
     || typeof mailDomainRegistry.transitionLocalStatus !== 'function') {
     const error = new Error('Mail-domain reconciliation registry is unavailable');
     error.code = 'mail_domain_reconciliation_unavailable';
     throw error;
+  }
+  if (job.operation === OPERATIONS.MAIL_CONFIG_ROLLBACK) {
+    const expectedRevision = job.payload?.expectedCurrentRevision;
+    const currentStatus = job.payload?.currentStatus;
+    const targetStatus = job.result?.targetStatus;
+    const statusChanged = ['disabled', 'enabled'].includes(currentStatus)
+      && ['disabled', 'enabled'].includes(targetStatus)
+      && currentStatus !== targetStatus;
+    const resultingRevision = expectedRevision + (statusChanged ? 1 : 0);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1
+      || job.payload?.previousRevision !== expectedRevision - (statusChanged ? 1 : 0)
+      || job.payload?.targetStatus !== targetStatus
+      || job.result?.mailDomainId !== job.resourceId || job.payload?.mailDomainId !== job.resourceId
+      || job.result?.expectedCurrentRevision !== expectedRevision
+      || job.result?.currentStatus !== currentStatus) {
+      const error = new Error('Mail-domain rollback reconciliation identity is invalid');
+      error.code = 'mail_domain_reconciliation_invalid';
+      throw error;
+    }
+    const current = await mailDomainRegistry.getMailDomain(job.resourceId);
+    if (!current || current.managementMode !== 'local') {
+      const error = new Error('Mail-domain rollback reconciliation target is unavailable');
+      error.code = 'mail_domain_reconciliation_target_unavailable';
+      throw error;
+    }
+    if (current.status === targetStatus && current.revision === resultingRevision) return;
+    if (!statusChanged || current.revision !== expectedRevision || current.status !== currentStatus) {
+      const error = new Error('Mail-domain state changed before rollback reconciliation');
+      error.code = 'mail_domain_reconciliation_conflict';
+      throw error;
+    }
+    await mailDomainRegistry.transitionLocalStatus(job.resourceId, {
+      expectedRevision,
+      status: targetStatus,
+    });
+    return;
   }
   const expectedRevision = job.payload?.expectedRevision;
   const desiredStatus = job.result?.desiredStatus;

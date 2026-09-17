@@ -24,6 +24,31 @@ function succeededJob() {
   };
 }
 
+function succeededRollbackJob({ currentStatus = 'enabled', targetStatus = 'disabled' } = {}) {
+  const expectedCurrentRevision = 5;
+  const statusChanged = currentStatus !== targetStatus;
+  return {
+    id: '33333333-3333-4333-8333-333333333333',
+    operation: OPERATIONS.MAIL_CONFIG_ROLLBACK,
+    resourceType: 'mail_domain',
+    resourceId: MAIL_DOMAIN_ID,
+    status: 'succeeded',
+    payload: {
+      mailDomainId: MAIL_DOMAIN_ID,
+      previousRevision: expectedCurrentRevision - (statusChanged ? 1 : 0),
+      expectedCurrentRevision,
+      currentStatus,
+      targetStatus,
+    },
+    result: {
+      mailDomainId: MAIL_DOMAIN_ID,
+      expectedCurrentRevision,
+      currentStatus,
+      targetStatus,
+    },
+  };
+}
+
 function registry(initial = { status: 'disabled', revision: 4 }) {
   let current = {
     id: MAIL_DOMAIN_ID,
@@ -75,6 +100,42 @@ test('managed mail reconciliation fails closed when desired-state revision drift
   const state = registry({ status: 'disabled', revision: 6 });
   await assert.rejects(
     jobReconciliationInternals.reconcileMailDomainJob(state, succeededJob()),
+    (error) => error.code === 'mail_domain_reconciliation_conflict',
+  );
+  assert.equal(state.transitions(), 0);
+});
+
+test('successful managed mail rollback moves to previous status with a monotonic revision exactly once', async () => {
+  const state = registry({ status: 'enabled', revision: 5 });
+  const job = succeededRollbackJob();
+  await jobReconciliationInternals.reconcileMailDomainJob(state, job);
+  assert.deepEqual(state.state(), {
+    id: MAIL_DOMAIN_ID,
+    managementMode: 'local',
+    status: 'disabled',
+    revision: 6,
+  });
+  assert.equal(state.transitions(), 1);
+
+  await jobReconciliationInternals.reconcileMailDomainJob(state, job);
+  assert.equal(state.transitions(), 1);
+  assert.equal(state.state().revision, 6);
+});
+
+test('same-status managed mail rollback reconciles without inventing a revision transition', async () => {
+  const state = registry({ status: 'enabled', revision: 5 });
+  await jobReconciliationInternals.reconcileMailDomainJob(
+    state,
+    succeededRollbackJob({ currentStatus: 'enabled', targetStatus: 'enabled' }),
+  );
+  assert.equal(state.transitions(), 0);
+  assert.equal(state.state().revision, 5);
+});
+
+test('managed mail rollback reconciliation fails closed on current state drift', async () => {
+  const state = registry({ status: 'disabled', revision: 5 });
+  await assert.rejects(
+    jobReconciliationInternals.reconcileMailDomainJob(state, succeededRollbackJob()),
     (error) => error.code === 'mail_domain_reconciliation_conflict',
   );
   assert.equal(state.transitions(), 0);
