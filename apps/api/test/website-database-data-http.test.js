@@ -254,3 +254,26 @@ test('Website data routes reject caller-selected database names and extra fields
     assert.equal(fx.operationCalls.length, 0);
   }
 });
+
+
+test('Website data routes preserve backup support for read-light job adapters without restore evidence lookup', () => {
+  const routes = [];
+  const app = {
+    post(path, ...handlers) { routes.push([path, handlers]); },
+  };
+  mountWebsiteDatabaseDataRoutes(app, {
+    registry: { async getServer(id) { return id === serverId ? { id } : null; } },
+    websiteRegistry: { async getWebsite() { return null; } },
+    databaseBindingRegistry: { async getBinding() { return null; } },
+    jobRegistry: {
+      async listJobs() { return []; },
+      async enqueue(input) { return { id: 'job-12345678', ...input, status: 'queued' }; },
+    },
+    ensureDatabaseIdle: async () => {},
+  });
+
+  const paths = routes.map(([path]) => path);
+  assert.ok(paths.some((path) => path.endsWith('/backup')));
+  assert.equal(paths.some((path) => path.endsWith('/restore-preview')), false);
+  assert.equal(paths.some((path) => path.endsWith('/restore')), false);
+});
