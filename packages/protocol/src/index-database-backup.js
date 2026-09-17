@@ -13,6 +13,7 @@ const DATABASE_RESTORE = 'database.restore';
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const BACKUP_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const RESERVED_DATABASE_NAMES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 
 export const OPERATIONS = Object.freeze({
@@ -32,9 +33,36 @@ function validDatabaseName(value) {
     && !RESERVED_DATABASE_NAMES.has(value.toLowerCase());
 }
 
+function exactKeys(payload, fields) {
+  return Object.keys(payload).length === fields.size
+    && Object.keys(payload).every((key) => fields.has(key));
+}
+
+function validateWebsiteScope(payload, operation, errors) {
+  const scopeFields = ['websiteId', 'databaseBindingId', 'expectedBindingRevision'];
+  const present = scopeFields.filter((field) => Object.hasOwn(payload, field));
+  if (present.length === 0) return false;
+  if (present.length !== scopeFields.length) {
+    errors.push(`${operation} Website scope is incomplete`);
+    return true;
+  }
+  if (!UUID_PATTERN.test(payload.websiteId ?? '')) {
+    errors.push(`${operation} websiteId is invalid`);
+  }
+  if (!UUID_PATTERN.test(payload.databaseBindingId ?? '')) {
+    errors.push(`${operation} databaseBindingId is invalid`);
+  }
+  if (!Number.isSafeInteger(payload.expectedBindingRevision) || payload.expectedBindingRevision < 1) {
+    errors.push(`${operation} expectedBindingRevision is invalid`);
+  }
+  return true;
+}
+
 function validateDatabaseBackup(payload, errors) {
-  const allowed = new Set(['databaseName']);
-  if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
+  const base = new Set(['databaseName']);
+  const scoped = new Set(['databaseName', 'websiteId', 'databaseBindingId', 'expectedBindingRevision']);
+  const hasScope = validateWebsiteScope(payload, DATABASE_BACKUP, errors);
+  if (!exactKeys(payload, hasScope ? scoped : base)) {
     errors.push(`${DATABASE_BACKUP} contains unsupported arguments`);
   }
   if (!validDatabaseName(payload.databaseName)) {
@@ -43,8 +71,13 @@ function validateDatabaseBackup(payload, errors) {
 }
 
 function validateDatabaseRestore(payload, errors) {
-  const allowed = new Set(['databaseName', 'backupId', 'expectedBackupSha256']);
-  if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
+  const base = new Set(['databaseName', 'backupId', 'expectedBackupSha256']);
+  const scoped = new Set([
+    'databaseName', 'backupId', 'expectedBackupSha256',
+    'websiteId', 'databaseBindingId', 'expectedBindingRevision',
+  ]);
+  const hasScope = validateWebsiteScope(payload, DATABASE_RESTORE, errors);
+  if (!exactKeys(payload, hasScope ? scoped : base)) {
     errors.push(`${DATABASE_RESTORE} contains unsupported arguments`);
   }
   if (!validDatabaseName(payload.databaseName)) {
@@ -95,4 +128,5 @@ export const databaseBackupProtocolInternals = Object.freeze({
   restoreOperation: DATABASE_RESTORE,
   validateDatabaseBackup,
   validateDatabaseRestore,
+  validateWebsiteScope,
 });
