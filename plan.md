@@ -6,6 +6,7 @@ Son Website isolation/SFTP ilerlemesi: `docs/history/website-isolation-sftp-prog
 Son mail durable apply/recovery ilerlemesi: `docs/history/mail-durable-apply-recovery-2026-09-17.md`.
 Son local PowerDNS DKIM retirement ilerlemesi: `docs/history/dns-local-dkim-retirement-2026-09-17.md`.
 Son mail discovery DNS gate ilerlemesi: `docs/history/dns-mail-discovery-gate-2026-09-17.md`.
+Son DNSSEC rollover adapter ilerlemesi: `docs/history/dnssec-rollover-progress-2026-09-17.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -28,7 +29,7 @@ Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
 ## P0.3 — Versioned DNS Zone Template ve Domain DNS yönetimi
 
-- [ ] DNSSEC key rollover/rotation lifecycle ekle: yeni KSK/CSK üret/publish/activate, parent DS propagation doğrula, eski DS retirement doğrula, eski key deactivate/delete; rollover sırasında secure delegation kesilmesin ve private key public state/job/audit'e çıkmasın.
+- [ ] DNSSEC rollover durable lifecycle'ını tamamla: mevcut secret-safe, key-set-digest-bound KSK/CSK create/state/delete host adapter'ını operation journal + preview/apply aşamalarına bağla; yeni key publish/activate ve SOA/secondary propagation kanıtından sonra parent DS geçişini, eski DS retirement doğrulamasından sonra eski key deactivate/delete'i ilerlet; secure delegation kesilmesin.
 - [ ] Zone suspend/delete/compensation ownership evidence'ını P0.9 lifecycle'ına bağla; manual kayıt içeren zone destructive cleanup'ta fail-closed kalsın.
 
 Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içindedir.

@@ -16,23 +16,31 @@ function response(status, payload = null) {
   };
 }
 
-function key() {
+function key({
+  id = 7,
+  keytype = 'csk',
+  active = true,
+  published = true,
+  algorithm = 'ECDSAP256SHA256',
+  bits = 256,
+} = {}) {
+  const keyTag = id === 7 ? 12345 : 22345;
   return {
     type: 'Cryptokey',
-    id: 7,
-    keytype: 'csk',
-    active: true,
-    published: true,
-    dnskey: '257 3 13 AAAATESTDNSKEY',
-    ds: ['12345 13 2 aabbccdd'],
-    cds: ['12345 13 2 AABBCCDD'],
+    id,
+    keytype,
+    active,
+    published,
+    dnskey: `257 3 13 AAAATESTDNSKEY${id}`,
+    ds: [`${keyTag} 13 2 aabbccdd`],
+    cds: [`${keyTag} 13 2 AABBCCDD`],
     privatekey: 'Private-key-format: v1.2\nSECRET',
-    algorithm: 'ECDSAP256SHA256',
-    bits: 256,
+    algorithm,
+    bits,
   };
 }
 
-function fixture({ dnssec = false, failMutationAfterApply = false } = {}) {
+function fixture({ dnssec = false, failMutationAfterApply = false, failKeyMutationAfterApply = null } = {}) {
   const calls = [];
   let enabled = dnssec;
   let keys = enabled ? [key()] : [];
@@ -52,6 +60,30 @@ function fixture({ dnssec = false, failMutationAfterApply = false } = {}) {
     calls.push({ method, path, body: options.body ? JSON.parse(options.body) : null });
     if (method === 'GET' && path.endsWith('/zones/example.com./cryptokeys')) {
       return response(200, structuredClone(keys));
+    }
+    if (method === 'POST' && path.endsWith('/zones/example.com./cryptokeys')) {
+      const body = JSON.parse(options.body);
+      keys.push(key({
+        id: 8,
+        keytype: body.keytype,
+        active: body.active,
+        published: body.published,
+        algorithm: body.algorithm,
+        bits: body.bits,
+      }));
+      if (failKeyMutationAfterApply === 'create') throw Object.assign(new Error('connection reset'), { code: 'ECONNRESET' });
+      return response(201, structuredClone(keys.at(-1)));
+    }
+    if (method === 'PUT' && path.endsWith('/zones/example.com./cryptokeys/8')) {
+      const body = JSON.parse(options.body);
+      keys = keys.map((entry) => (entry.id === 8 ? { ...entry, active: body.active, published: body.published } : entry));
+      if (failKeyMutationAfterApply === 'update') throw Object.assign(new Error('connection reset'), { code: 'ECONNRESET' });
+      return response(204);
+    }
+    if (method === 'DELETE' && path.endsWith('/zones/example.com./cryptokeys/7')) {
+      keys = keys.filter((entry) => entry.id !== 7);
+      if (failKeyMutationAfterApply === 'delete') throw Object.assign(new Error('connection reset'), { code: 'ECONNRESET' });
+      return response(204);
     }
     if (method === 'PUT' && path.endsWith('/zones/example.com.')) {
       const body = JSON.parse(options.body);
@@ -79,6 +111,7 @@ test('normalizes DS records and never exposes PowerDNS private key material', as
   assert.equal(state.ready, true);
   assert.deepEqual(state.ds, ['12345 13 2 AABBCCDD']);
   assert.equal(state.keys[0].keyType, 'csk');
+  assert.match(state.keySetDigest, /^[a-f0-9]{64}$/);
   assert.equal(JSON.stringify(state).includes('SECRET'), false);
   assert.equal(Object.hasOwn(state.keys[0], 'privatekey'), false);
 });
@@ -131,4 +164,154 @@ test('rejects invalid DS state instead of publishing malformed registrar materia
     () => powerDnsDnssecManagerInternals.normalizeDs('99999 13 2 AABB'),
     (error) => error instanceof PowerDnsDnssecManagerError && error.code === 'powerdns_dnssec_key_state_invalid',
   );
+});
+
+test('creates a revision-bound rollover key without accepting or returning private material', async () => {
+  const { calls, manager } = fixture({ dnssec: true });
+  const baseline = await manager.inspect({ zoneName: 'example.com', apiKey });
+  const result = await manager.createRolloverKey({
+    zoneName: 'example.com',
+    apiKey,
+    expectedKeySetDigest: baseline.keySetDigest,
+    expectedKeyIds: baseline.keys.map((entry) => entry.id),
+    keyType: 'csk',
+    algorithm: 'ECDSAP256SHA256',
+    bits: 256,
+    active: false,
+    published: false,
+  });
+
+  assert.equal(result.changed, true);
+  assert.equal(result.createdKey.id, 8);
+  assert.equal(result.createdKey.active, false);
+  assert.equal(JSON.stringify(result).includes('SECRET'), false);
+  const createCall = calls.find((entry) => entry.method === 'POST' && entry.path.endsWith('/cryptokeys'));
+  assert.deepEqual(createCall.body, {
+    keytype: 'CSK',
+    active: false,
+    published: false,
+    algorithm: 'ECDSAP256SHA256',
+    bits: 256,
+  });
+  assert.equal(Object.hasOwn(createCall.body, 'content'), false);
+  assert.equal(Object.hasOwn(createCall.body, 'privatekey'), false);
+});
+
+test('reconciles an uncertain rollover key creation without generating a duplicate key', async () => {
+  const { calls, manager } = fixture({ dnssec: true, failKeyMutationAfterApply: 'create' });
+  const baseline = await manager.inspect({ zoneName: 'example.com', apiKey });
+  const input = {
+    zoneName: 'example.com',
+    apiKey,
+    expectedKeySetDigest: baseline.keySetDigest,
+    expectedKeyIds: [7],
+    keyType: 'csk',
+    algorithm: 'ECDSAP256SHA256',
+    bits: 256,
+    active: false,
+    published: false,
+  };
+
+  const first = await manager.createRolloverKey(input);
+  const retried = await manager.createRolloverKey(input);
+
+  assert.equal(first.changed, true);
+  assert.equal(retried.changed, false);
+  assert.equal(retried.createdKey.id, 8);
+  assert.equal(calls.filter((entry) => entry.method === 'POST' && entry.path.endsWith('/cryptokeys')).length, 1);
+});
+
+test('rejects rollover key creation when the inspected key set changed after preview', async () => {
+  const { calls, manager } = fixture({ dnssec: true });
+  await assert.rejects(
+    manager.createRolloverKey({
+      zoneName: 'example.com',
+      apiKey,
+      expectedKeySetDigest: '0'.repeat(64),
+      expectedKeyIds: [7],
+      keyType: 'csk',
+      algorithm: 'ECDSAP256SHA256',
+      bits: 256,
+      active: false,
+      published: false,
+    }),
+    (error) => error instanceof PowerDnsDnssecManagerError && error.code === 'powerdns_dnssec_key_set_changed',
+  );
+  assert.equal(calls.some((entry) => entry.method === 'POST'), false);
+});
+
+test('updates rollover key publication state against exact before and after digests', async () => {
+  const { calls, manager } = fixture({ dnssec: true, failKeyMutationAfterApply: 'update' });
+  const baseline = await manager.inspect({ zoneName: 'example.com', apiKey });
+  const created = await manager.createRolloverKey({
+    zoneName: 'example.com', apiKey,
+    expectedKeySetDigest: baseline.keySetDigest,
+    expectedKeyIds: [7],
+    keyType: 'csk', algorithm: 'ECDSAP256SHA256', bits: 256,
+    active: false, published: false,
+  });
+  const targetDigest = powerDnsDnssecManagerInternals.keySetDigest(
+    created.keys.map((entry) => (entry.id === 8 ? { ...entry, active: true, published: true } : entry)),
+  );
+  const input = {
+    zoneName: 'example.com', apiKey, keyId: 8,
+    expectedKeySetDigest: created.keySetDigest,
+    expectedTargetKeySetDigest: targetDigest,
+    expectedActive: false, expectedPublished: false,
+    active: true, published: true,
+  };
+  const result = await manager.setRolloverKeyState(input);
+  const retried = await manager.setRolloverKeyState(input);
+
+  assert.equal(result.changed, true);
+  assert.equal(retried.changed, false);
+  assert.equal(result.updatedKey.active, true);
+  assert.equal(result.updatedKey.published, true);
+  assert.equal(result.keySetDigest, targetDigest);
+  assert.equal(calls.some((entry) => entry.method === 'PUT' && entry.path.endsWith('/cryptokeys/8')
+    && entry.body?.active === true && entry.body?.published === true), true);
+  assert.equal(calls.filter((entry) => entry.method === 'PUT' && entry.path.endsWith('/cryptokeys/8')).length, 1);
+});
+
+test('deletes only an exact old key while another active published key preserves signing continuity', async () => {
+  const { calls, manager } = fixture({ dnssec: true, failKeyMutationAfterApply: 'delete' });
+  const baseline = await manager.inspect({ zoneName: 'example.com', apiKey });
+  const created = await manager.createRolloverKey({
+    zoneName: 'example.com', apiKey,
+    expectedKeySetDigest: baseline.keySetDigest,
+    expectedKeyIds: [7],
+    keyType: 'csk', algorithm: 'ECDSAP256SHA256', bits: 256,
+    active: true, published: true,
+  });
+  const remainingDigest = powerDnsDnssecManagerInternals.keySetDigest(
+    created.keys.filter((entry) => entry.id !== 7),
+  );
+  const input = {
+    zoneName: 'example.com', apiKey, keyId: 7,
+    expectedKeySetDigest: created.keySetDigest,
+    expectedRemainingKeySetDigest: remainingDigest,
+  };
+  const result = await manager.deleteRolloverKey(input);
+  const retried = await manager.deleteRolloverKey(input);
+
+  assert.equal(result.changed, true);
+  assert.equal(retried.changed, false);
+  assert.deepEqual(result.keys.map((entry) => entry.id), [8]);
+  assert.equal(result.keySetDigest, remainingDigest);
+  assert.equal(calls.filter((entry) => entry.method === 'DELETE' && entry.path.endsWith('/cryptokeys/7')).length, 1);
+});
+
+test('refuses to delete the only active published DNSSEC key', async () => {
+  const { calls, manager } = fixture({ dnssec: true });
+  const baseline = await manager.inspect({ zoneName: 'example.com', apiKey });
+  const emptyDigest = powerDnsDnssecManagerInternals.keySetDigest([]);
+  await assert.rejects(
+    manager.deleteRolloverKey({
+      zoneName: 'example.com', apiKey, keyId: 7,
+      expectedKeySetDigest: baseline.keySetDigest,
+      expectedRemainingKeySetDigest: emptyDigest,
+    }),
+    (error) => error instanceof PowerDnsDnssecManagerError && error.code === 'powerdns_dnssec_key_delete_unsafe',
+  );
+  assert.equal(calls.some((entry) => entry.method === 'DELETE'), false);
 });
