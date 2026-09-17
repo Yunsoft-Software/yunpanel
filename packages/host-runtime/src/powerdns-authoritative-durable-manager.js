@@ -244,11 +244,13 @@ export function createPowerDnsAuthoritativeDurableManager({
   }
 
   async function mutate(operation, update) {
+    const previous = Date.parse(operation.updatedAt);
+    const current = now();
     return persist({
       ...operation,
       ...update,
       version: STORE_VERSION,
-      updatedAt: new Date(now()).toISOString(),
+      updatedAt: new Date(Math.max(current, previous + 1)).toISOString(),
     });
   }
 
@@ -277,7 +279,7 @@ export function createPowerDnsAuthoritativeDurableManager({
     return publicOperation(await readOperation());
   }
 
-  async function resolveOnce(rawIntent, { operationId, expectedUpdatedAt } = {}) {
+  async function recoveryTarget(rawIntent, { operationId, expectedUpdatedAt } = {}) {
     const spec = powerDnsAuthoritativeManagerInternals.normalizeIntent(rawIntent);
     if (typeof operationId !== 'string' || !operationId
       || typeof expectedUpdatedAt !== 'string' || !expectedUpdatedAt) {
@@ -302,9 +304,14 @@ export function createPowerDnsAuthoritativeDurableManager({
     if (!operationMatches(existing, spec)) {
       throw new PowerDnsAuthoritativeManagerError(
         'powerdns_operation_conflict',
-        'Interrupted PowerDNS apply intent changed and cannot be resolved with current credentials or settings',
+        'Interrupted PowerDNS apply intent changed and cannot be recovered with current credentials or settings',
       );
     }
+    return Object.freeze({ operation: existing, spec });
+  }
+
+  async function resolveOnce(rawIntent, recovery) {
+    const { operation: existing, spec } = await recoveryTarget(rawIntent, recovery);
     return recoverInterrupted(existing, spec);
   }
 
@@ -332,23 +339,7 @@ export function createPowerDnsAuthoritativeDurableManager({
     );
   }
 
-  async function applyOnce(rawIntent) {
-    const spec = powerDnsAuthoritativeManagerInternals.normalizeIntent(rawIntent);
-    const existing = await readOperation();
-    if (existing?.status === 'applying') {
-      if (!operationMatches(existing, spec)) {
-        throw new PowerDnsAuthoritativeManagerError(
-          'powerdns_operation_conflict',
-          'A different interrupted PowerDNS apply must be resolved before changing authoritative DNS intent',
-        );
-      }
-      return recoverInterrupted(existing, spec);
-    }
-
-    const before = await manager.inspect(spec);
-    if (before?.satisfied === true) return before;
-
-    let operation = await createOperation(spec);
+  async function executeApply(operation, spec) {
     let applied;
     try { applied = await manager.apply(spec); }
     catch (error) {
@@ -366,8 +357,7 @@ export function createPowerDnsAuthoritativeDurableManager({
         await mutate(operation, { status: 'failed', result: null, lastError: failure });
         throw error;
       }
-      operation = await mutate(operation, { status: 'applying', result: null, lastError: failure });
-      void operation;
+      await mutate(operation, { status: 'applying', result: null, lastError: failure });
       throw new PowerDnsAuthoritativeManagerError(
         inspectionAvailable ? 'powerdns_apply_outcome_uncertain' : 'powerdns_recovery_inspection_unavailable',
         inspectionAvailable
@@ -381,11 +371,61 @@ export function createPowerDnsAuthoritativeDurableManager({
     return applied;
   }
 
+  async function retryOnce(rawIntent, recovery) {
+    const { operation: existing, spec } = await recoveryTarget(rawIntent, recovery);
+    let before;
+    try { before = await manager.inspect(spec); }
+    catch {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_recovery_inspection_unavailable',
+        'Interrupted PowerDNS apply cannot be retried because current host state could not be inspected',
+      );
+    }
+    if (before?.satisfied === true) {
+      const result = evidenceFromInspection(spec, before);
+      await mutate(existing, { status: 'succeeded', result, lastError: null });
+      return before;
+    }
+    const operation = await mutate(existing, {
+      status: 'applying',
+      result: null,
+      lastError: Object.freeze({
+        code: 'powerdns_explicit_retry_started',
+        message: 'Operator-authorized PowerDNS retry started after current-state inspection',
+      }),
+    });
+    return executeApply(operation, spec);
+  }
+
+  function retry(rawIntent, recovery) {
+    return serializeMutation(() => retryOnce(rawIntent, recovery));
+  }
+
+  async function applyOnce(rawIntent) {
+    const spec = powerDnsAuthoritativeManagerInternals.normalizeIntent(rawIntent);
+    const existing = await readOperation();
+    if (existing?.status === 'applying') {
+      if (!operationMatches(existing, spec)) {
+        throw new PowerDnsAuthoritativeManagerError(
+          'powerdns_operation_conflict',
+          'A different interrupted PowerDNS apply must be resolved before changing authoritative DNS intent',
+        );
+      }
+      return recoverInterrupted(existing, spec);
+    }
+
+    const before = await manager.inspect(spec);
+    if (before?.satisfied === true) return before;
+
+    const operation = await createOperation(spec);
+    return executeApply(operation, spec);
+  }
+
   function apply(rawIntent) {
     return serializeMutation(() => applyOnce(rawIntent));
   }
 
-  return Object.freeze({ inspect, apply, operation, resolve });
+  return Object.freeze({ inspect, apply, operation, resolve, retry });
 }
 
 export const powerDnsAuthoritativeDurableManagerInternals = Object.freeze({

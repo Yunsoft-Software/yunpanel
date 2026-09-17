@@ -300,7 +300,7 @@ export function mountPowerDnsRoutes(app, {
   }
   if (!authoritativeService || typeof authoritativeService.preview !== 'function'
     || typeof authoritativeService.status !== 'function' || typeof authoritativeService.apply !== 'function'
-    || typeof authoritativeService.resolve !== 'function') {
+    || typeof authoritativeService.resolve !== 'function' || typeof authoritativeService.retry !== 'function') {
     throw new Error('PowerDNS authoritative service is required');
   }
   const templateRegistry = dnsZoneTemplateRegistry ?? defaultZoneTemplateRegistry(authoritativeService);
@@ -517,6 +517,12 @@ export function mountPowerDnsRoutes(app, {
     const serverId = localServerId(authoritativeService, request.params.serverId);
     const body = authoritativeRecoveryBody(request.body);
     return response.json({ data: await authoritativeService.resolve(serverId, body) });
+  }));
+
+  app.post('/api/servers/:serverId/dns/authoritative/recovery/retry', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const serverId = localServerId(authoritativeService, request.params.serverId);
+    const body = authoritativeRecoveryBody(request.body);
+    return response.json({ data: await authoritativeService.retry(serverId, body) });
   }));
 }
 

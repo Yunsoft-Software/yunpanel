@@ -62,6 +62,7 @@ test('current management mutation routes map to bounded action and resource iden
     ['POST', '/api/servers/server-1/dns/authoritative/preview', 'dns.authoritative.preview', 'server', 'server-1'],
     ['POST', '/api/servers/server-1/dns/authoritative/apply', 'dns.authoritative.apply', 'server', 'server-1'],
     ['POST', '/api/servers/server-1/dns/authoritative/recovery/resolve', 'dns.authoritative.recovery.resolve', 'server', 'server-1'],
+    ['POST', '/api/servers/server-1/dns/authoritative/recovery/retry', 'dns.authoritative.recovery.retry', 'server', 'server-1'],
     ['POST', '/api/certificates/cert-1/renew', 'certificate.renew', 'certificate', 'cert-1'],
     ['POST', '/api/jobs/job-1/cancel', 'job.cancel', 'job', 'job-1'],
     ['POST', '/api/servers/server-1/system/packages/inspect', 'system.packages.inspect', 'server', 'server-1'],

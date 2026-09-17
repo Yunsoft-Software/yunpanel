@@ -96,7 +96,7 @@ test('PowerDNS durable manager persists applying evidence before host mutation a
     failure: null,
     recovery: { required: false, automaticReplayBlocked: false, reason: null },
     createdAt: appliedAt,
-    updatedAt: appliedAt,
+    updatedAt: '2026-09-16T12:00:00.001Z',
   });
 });
 
@@ -211,6 +211,80 @@ test('PowerDNS recovery resolution rejects a stale journal fence before host ins
     (error) => error.code === 'powerdns_recovery_stale',
   );
   assert.equal(inspectCalls, beforeResolve);
+  assert.equal((await manager.operation()).status, 'applying');
+});
+
+test('PowerDNS explicit retry inspects first and persists authorization before replaying mutation', async () => {
+  const journal = memoryJournal();
+  const operationPath = '/state/powerdns-operation.json';
+  const events = [];
+  let applyCalls = 0;
+  let applied = false;
+  const manager = createPowerDnsAuthoritativeDurableManager({
+    manager: {
+      async inspect() { events.push('inspect'); return applied ? satisfied() : unsatisfied(); },
+      async apply() {
+        applyCalls += 1;
+        events.push(`apply:${applyCalls}`);
+        if (applyCalls === 1) {
+          throw new PowerDnsAuthoritativeManagerError('powerdns_service_activation_failed', 'ambiguous');
+        }
+        const persisted = JSON.parse(journal.files.get(operationPath));
+        assert.equal(persisted.lastError.code, 'powerdns_explicit_retry_started');
+        assert.notEqual(persisted.updatedAt, operation.updatedAt);
+        applied = true;
+        return satisfied();
+      },
+    },
+    operationPath,
+    now: () => Date.parse(appliedAt),
+    idFactory: () => 'operation-retry',
+    ...journal,
+  });
+
+  await assert.rejects(manager.apply(intent()), (error) => error.code === 'powerdns_apply_outcome_uncertain');
+  const operation = await manager.operation();
+  events.length = 0;
+  const result = await manager.retry(intent(), {
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+  });
+
+  assert.equal(result.satisfied, true);
+  assert.deepEqual(events, ['inspect', 'apply:2']);
+  assert.equal(applyCalls, 2);
+  assert.equal((await manager.operation()).status, 'succeeded');
+});
+
+test('PowerDNS explicit retry fails closed when preflight inspection is unavailable', async () => {
+  const journal = memoryJournal();
+  let applyCalls = 0;
+  let inspectCalls = 0;
+  const manager = createPowerDnsAuthoritativeDurableManager({
+    manager: {
+      async inspect() {
+        inspectCalls += 1;
+        if (inspectCalls >= 3) throw new Error('inspection unavailable');
+        return unsatisfied();
+      },
+      async apply() {
+        applyCalls += 1;
+        throw new PowerDnsAuthoritativeManagerError('powerdns_service_activation_failed', 'ambiguous');
+      },
+    },
+    operationPath: '/state/powerdns-operation.json',
+    now: () => Date.parse(appliedAt),
+    idFactory: () => 'operation-retry-blocked',
+    ...journal,
+  });
+
+  await assert.rejects(manager.apply(intent()), (error) => error.code === 'powerdns_apply_outcome_uncertain');
+  const operation = await manager.operation();
+  await assert.rejects(
+    manager.retry(intent(), { operationId: operation.id, expectedUpdatedAt: operation.updatedAt }),
+    (error) => error.code === 'powerdns_recovery_inspection_unavailable',
+  );
+  assert.equal(applyCalls, 1);
   assert.equal((await manager.operation()).status, 'applying');
 });
 

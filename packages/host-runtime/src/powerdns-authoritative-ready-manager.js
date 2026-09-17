@@ -10,6 +10,7 @@ export function createPowerDnsAuthoritativeReadyManager({
 } = {}) {
   if (!manager || typeof manager.inspect !== 'function' || typeof manager.apply !== 'function'
     || typeof manager.operation !== 'function' || typeof manager.resolve !== 'function'
+    || typeof manager.retry !== 'function'
     || !socketInspector || typeof socketInspector.inspect !== 'function') {
     throw new PowerDnsAuthoritativeManagerError(
       'powerdns_ready_manager_dependencies_invalid',
@@ -83,5 +84,23 @@ export function createPowerDnsAuthoritativeReadyManager({
     return Object.freeze({ ...base, sockets });
   }
 
-  return Object.freeze({ inspect, apply, operation, resolve });
+  async function retry(intent, recovery) {
+    const base = await manager.retry(intent, recovery);
+    if (!base?.satisfied) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_retry_unverified',
+        'PowerDNS retry did not return verified base evidence',
+      );
+    }
+    const sockets = await socketState();
+    if (!sockets.satisfied) {
+      throw new PowerDnsAuthoritativeManagerError(
+        sockets.reason ?? 'powerdns_socket_unhealthy',
+        'PowerDNS retry completed with unhealthy DNS socket or recursion policy evidence',
+      );
+    }
+    return Object.freeze({ ...base, sockets });
+  }
+
+  return Object.freeze({ inspect, apply, operation, resolve, retry });
 }

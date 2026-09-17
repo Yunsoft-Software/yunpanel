@@ -59,6 +59,21 @@ export function resolvePowerDnsRecovery(serverId, operation) {
   });
 }
 
+export function retryPowerDnsRecovery(serverId, operation) {
+  if (!operation?.recovery?.required || !operation.id || !operation.updatedAt
+    || !operation.recovery.retryConfirmation) {
+    throw new Error('Current PowerDNS retry operation is required');
+  }
+  return panelRequest(serverDnsPath(serverId, '/authoritative/recovery/retry'), {
+    method: 'POST',
+    body: {
+      operationId: operation.id,
+      expectedUpdatedAt: operation.updatedAt,
+      confirmation: operation.recovery.retryConfirmation,
+    },
+  });
+}
+
 export function inspectDnsDelegation(serverId, domain) {
   if (typeof domain !== 'string' || !domain.trim()) throw new Error('Delegation domain is required');
   return panelRequest(`${serverDnsPath(serverId, '/delegation')}?domain=${encodeURIComponent(domain.trim())}`);

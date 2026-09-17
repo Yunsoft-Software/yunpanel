@@ -31,6 +31,16 @@ function fixture({ hostError = null, publicReachability = null, hostOperation = 
   let currentHostOperation = hostOperation;
   const managerCalls = [];
   const publicCalls = [];
+  function completeHostOperation() {
+    if (currentHostOperation?.status !== 'applying') return;
+    currentHostOperation = Object.freeze({
+      ...currentHostOperation,
+      status: 'succeeded',
+      evidence: Object.freeze({ satisfied: true }),
+      failure: null,
+      recovery: Object.freeze({ required: false, automaticReplayBlocked: false, reason: null }),
+    });
+  }
   const service = createPowerDnsAuthoritativeService({
     localServerId: serverId,
     serverRegistry: { async getServer(id) { return id === serverId ? { id, executionMode: 'local' } : null; } },
@@ -63,15 +73,13 @@ function fixture({ hostError = null, publicReachability = null, hostOperation = 
       async resolve(intent, recovery) {
         managerCalls.push(['resolve', intent, recovery]);
         if (hostError) throw hostError;
-        if (currentHostOperation?.status === 'applying') {
-          currentHostOperation = Object.freeze({
-            ...currentHostOperation,
-            status: 'succeeded',
-            evidence: Object.freeze({ satisfied: true }),
-            failure: null,
-            recovery: Object.freeze({ required: false, automaticReplayBlocked: false, reason: null }),
-          });
-        }
+        completeHostOperation();
+        return { satisfied: true, adapter: 'powerdns-authoritative-gsqlite3', apiKey: 'must-not-leak' };
+      },
+      async retry(intent, recovery) {
+        managerCalls.push(['retry', intent, recovery]);
+        if (hostError) throw hostError;
+        completeHostOperation();
         return { satisfied: true, adapter: 'powerdns-authoritative-gsqlite3', apiKey: 'must-not-leak' };
       },
       async operation() { return currentHostOperation; },
@@ -165,6 +173,7 @@ test('PowerDNS status exposes secret-safe durable operation and recovery evidenc
   assert.equal(status.operation.id, operation.id);
   assert.equal(status.operation.recovery.automaticReplayBlocked, true);
   assert.equal(status.operation.recovery.confirmation, `inspect-powerdns-recovery:${serverId}:operation-1:2026-09-17T12:01:00.000Z`);
+  assert.equal(status.operation.recovery.retryConfirmation, `retry-powerdns-recovery:${serverId}:operation-1:2026-09-17T12:01:00.000Z`);
   assert.equal(JSON.stringify(status.operation).includes('must-not-leak'), false);
 });
 
@@ -242,6 +251,47 @@ test('PowerDNS recovery resolution rejects credential rotation before host inspe
     (error) => error.code === 'powerdns_recovery_credential_changed' && error.status === 409,
   );
   assert.equal(fx.managerCalls.filter(([action]) => action === 'resolve').length, 0);
+});
+
+test('PowerDNS explicit retry requires its separate typed confirmation and recovery fence', async () => {
+  const operation = Object.freeze({
+    version: 1,
+    id: 'operation-explicit-retry',
+    serverId,
+    credentialRevision: 1,
+    secondaryDns: Object.freeze(['203.0.113.20']),
+    status: 'applying',
+    evidence: null,
+    failure: Object.freeze({ code: 'powerdns_service_activation_failed' }),
+    recovery: Object.freeze({ required: true, automaticReplayBlocked: true, reason: 'powerdns_service_activation_failed' }),
+    createdAt: '2026-09-17T12:00:00.000Z',
+    updatedAt: '2026-09-17T12:01:00.000Z',
+  });
+  const fx = fixture({ hostOperation: operation });
+  const preview = await fx.service.preview(serverId);
+  await fx.service.apply(serverId, { previewDigest: preview.previewDigest, confirmation: preview.confirmation });
+  const status = await fx.service.status(serverId);
+
+  await assert.rejects(
+    fx.service.retry(serverId, {
+      operationId: status.operation.id,
+      expectedUpdatedAt: status.operation.updatedAt,
+      confirmation: status.operation.recovery.confirmation,
+    }),
+    (error) => error.code === 'powerdns_recovery_stale' && error.status === 409,
+  );
+  const result = await fx.service.retry(serverId, {
+    operationId: status.operation.id,
+    expectedUpdatedAt: status.operation.updatedAt,
+    confirmation: status.operation.recovery.retryConfirmation,
+  });
+  assert.equal(result.retried, true);
+  assert.equal(result.operation.status, 'succeeded');
+  assert.deepEqual(fx.managerCalls.at(-1)[2], {
+    operationId: 'operation-explicit-retry',
+    expectedUpdatedAt: '2026-09-17T12:01:00.000Z',
+  });
+  assert.equal(fx.managerCalls.filter(([action]) => action === 'retry').length, 1);
 });
 
 test('PowerDNS apply rejects DNS identity drift after preview', async () => {

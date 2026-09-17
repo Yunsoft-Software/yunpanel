@@ -55,6 +55,7 @@ function mountWith(inspector) {
       preview: async () => ({}),
       apply: async () => ({}),
       resolve: async () => ({}),
+      retry: async () => ({}),
     },
   });
   return app;

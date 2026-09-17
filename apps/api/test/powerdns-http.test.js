@@ -53,6 +53,7 @@ function mountWith(templateRegistry) {
       preview: async () => ({}),
       apply: async () => ({}),
       resolve: async () => ({}),
+      retry: async () => ({}),
     },
   });
   return app;
@@ -195,6 +196,7 @@ test('PowerDNS HTTP forwards an exact authoritative recovery fence', async () =>
       preview: async () => ({}),
       apply: async () => ({}),
       resolve: async (...args) => { calls.push(args); return { resolved: true }; },
+      retry: async (...args) => { calls.push(args); return { retried: true }; },
     },
   });
   const body = {
@@ -211,6 +213,14 @@ test('PowerDNS HTTP forwards an exact authoritative recovery fence', async () =>
     { data: { resolved: true } },
   );
   assert.deepEqual(calls, [[serverId, body]]);
+  assert.deepEqual(
+    await invoke(app, 'POST /api/servers/:serverId/dns/authoritative/recovery/retry', {
+      params: { serverId },
+      body,
+    }),
+    { data: { retried: true } },
+  );
+  assert.deepEqual(calls, [[serverId, body], [serverId, body]]);
   await assert.rejects(
     invoke(app, 'POST /api/servers/:serverId/dns/authoritative/recovery/resolve', {
       params: { serverId },
@@ -218,5 +228,5 @@ test('PowerDNS HTTP forwards an exact authoritative recovery fence', async () =>
     }),
     (error) => error instanceof PowerDnsHttpError && error.code === 'powerdns_recovery_input_invalid',
   );
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
 });

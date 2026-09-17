@@ -12,6 +12,7 @@ function base({ satisfied = true } = {}) {
       async apply(intent) { calls.push(['apply', intent]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
       async operation() { calls.push(['operation']); return { id: 'operation-1', status: 'applying' }; },
       async resolve(intent, recovery) { calls.push(['resolve', intent, recovery]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
+      async retry(intent, recovery) { calls.push(['retry', intent, recovery]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
     },
   };
 }
@@ -67,6 +68,19 @@ test('PowerDNS recovery resolution adds socket evidence without applying host mu
   assert.equal(result.satisfied, true);
   assert.equal(result.sockets.udp53, true);
   assert.deepEqual(runtime.calls, [['resolve', intent, recovery]]);
+  assert.deepEqual(health.calls, ['inspect']);
+});
+
+test('PowerDNS explicit retry requires healthy socket evidence after base retry', async () => {
+  const runtime = base();
+  const health = sockets();
+  const manager = createPowerDnsAuthoritativeReadyManager({ manager: runtime.manager, socketInspector: health.inspector });
+  const intent = { serverId: 'server-1' };
+  const recovery = { operationId: 'operation-1', expectedUpdatedAt: '2026-09-17T12:00:00.000Z' };
+
+  const result = await manager.retry(intent, recovery);
+  assert.equal(result.sockets.tcp53, true);
+  assert.deepEqual(runtime.calls, [['retry', intent, recovery]]);
   assert.deepEqual(health.calls, ['inspect']);
 });
 

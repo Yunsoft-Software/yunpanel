@@ -18,6 +18,7 @@ Bu kayıt P0.2 PowerDNS lifecycle hardening diliminde kaynakta tamamlanan işler
 - Durable journal'ın current/latest operation projection'ı API status ve Network DNS paneline bağlandı. Projection operation durumu, API-key revision, secondary topology, tamamlanmış inspect evidence'ı, timestamps ve recovery reason gösterir; raw API key ile persisted hata mesajını public response'a çıkarmaz. `applying` operation panelde `automaticReplayBlocked` olarak görünür.
 - Interrupted operation artık Network DNS panelinden operation ID + journal timestamp fence ile explicit inspect edilebilir. Bu yol package/config/service mutation'ını replay etmez; journal'ı yalnız mevcut host state aynı intent'in tamamlandığını kanıtlarsa `succeeded` kapatır.
 - Aynı süreçte gelen PowerDNS apply/resolve mutasyonları durable manager sınırında serialize edilir. Paralel iki panel isteği package/config/service mutation'ını iki kez başlatamaz; ikinci istek ilk sonucun güncel journal ve host evidence'ını yeniden değerlendirir.
+- Explicit retry ayrı operation/timestamp-bound typed confirmation ve common audit action kullanır. Durable manager retry öncesinde hostu yeniden inspect eder, authorization checkpoint'ini journal'a yazar ve ancak hedef hâlâ eksikse aynı intent'i replay eder; inspect yoksa mutation başlamaz, retry sonucu belirsizse operation yeniden `applying`/automatic-replay-blocked kalır.
 
 ## Regression kapsamı
 

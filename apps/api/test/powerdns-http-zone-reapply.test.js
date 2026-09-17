@@ -57,6 +57,7 @@ function mountWith(reapplyRuntime) {
       preview: async () => ({}),
       apply: async () => ({}),
       resolve: async () => ({}),
+      retry: async () => ({}),
     },
   });
   return app;

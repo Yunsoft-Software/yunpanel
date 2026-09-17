@@ -22,6 +22,10 @@ function recoveryConfirmation(serverId, operation) {
   return `inspect-powerdns-recovery:${serverId}:${operation.id}:${operation.updatedAt}`;
 }
 
+function retryConfirmation(serverId, operation) {
+  return `retry-powerdns-recovery:${serverId}:${operation.id}:${operation.updatedAt}`;
+}
+
 function publicHostState(value) {
   if (!value || typeof value !== 'object') return value;
   const { apiKey: _apiKey, ...safe } = value;
@@ -91,6 +95,7 @@ export function createPowerDnsAuthoritativeService({
     || typeof secretRegistry.ensureForServer !== 'function' || typeof secretRegistry.materializeForServer !== 'function'
     || !manager || typeof manager.inspect !== 'function' || typeof manager.apply !== 'function'
     || typeof manager.operation !== 'function' || typeof manager.resolve !== 'function'
+    || typeof manager.retry !== 'function'
     || !publicReachabilityInspector || typeof publicReachabilityInspector.inspect !== 'function') {
     throw new PowerDnsAuthoritativeServiceError(
       'powerdns_service_dependencies_invalid',
@@ -152,7 +157,76 @@ export function createPowerDnsAuthoritativeService({
       recovery: Object.freeze({
         ...operation.recovery,
         confirmation: recoveryConfirmation(serverId, operation),
+        retryConfirmation: retryConfirmation(serverId, operation),
       }),
+    });
+  }
+
+  async function recoveryContext(serverId, input, confirmationField) {
+    const request = input ?? {};
+    const identity = await desired(serverId);
+    const operation = await currentOperation(serverId);
+    if (!operation?.recovery?.required) {
+      throw new PowerDnsAuthoritativeServiceError(
+        'powerdns_recovery_not_required',
+        'PowerDNS authoritative operation does not require recovery',
+        409,
+      );
+    }
+    if (request.operationId !== operation.id || request.expectedUpdatedAt !== operation.updatedAt
+      || request.confirmation !== operation.recovery[confirmationField]) {
+      throw new PowerDnsAuthoritativeServiceError(
+        'powerdns_recovery_stale',
+        'PowerDNS recovery request is stale or confirmation is invalid',
+        409,
+      );
+    }
+    const secret = await secretRegistry.getForServer(serverId);
+    if (!secret || secret.revision !== operation.credentialRevision) {
+      throw new PowerDnsAuthoritativeServiceError(
+        'powerdns_recovery_credential_changed',
+        'PowerDNS credential revision changed after the interrupted operation',
+        409,
+      );
+    }
+    const materialized = await secretRegistry.materializeForServer(serverId);
+    if (materialized.revision !== operation.credentialRevision) {
+      throw new PowerDnsAuthoritativeServiceError(
+        'powerdns_recovery_credential_changed',
+        'PowerDNS credential revision changed after the interrupted operation',
+        409,
+      );
+    }
+    return Object.freeze({
+      identity,
+      materialized,
+      recovery: Object.freeze({
+        operationId: request.operationId,
+        expectedUpdatedAt: request.expectedUpdatedAt,
+      }),
+    });
+  }
+
+  async function recoveryResult(serverId, identity, materialized, host, outcomeField) {
+    const operation = await currentOperation(serverId);
+    const localReady = host?.satisfied === true;
+    const publicReachability = localReady
+      ? await inspectPublic(serverId, identity)
+      : blockedPublicReachability(identity, 'powerdns_local_not_ready');
+    const publicReady = publicReachability.ready === true;
+    return Object.freeze({
+      [outcomeField]: operation?.status === 'succeeded',
+      ready: localReady,
+      localReady,
+      publicReady,
+      overallReady: localReady && publicReady,
+      serverId,
+      dnsIdentityRevision: identity.revision,
+      secretRevision: materialized.revision,
+      warnings: identity.warnings,
+      host: publicHostState(host),
+      publicReachability,
+      operation,
     });
   }
 
@@ -289,72 +363,29 @@ export function createPowerDnsAuthoritativeService({
     });
   }
 
-  async function resolve(serverId = localServerId, { operationId, expectedUpdatedAt, confirmation } = {}) {
-    const identity = await desired(serverId);
-    const operation = await currentOperation(serverId);
-    if (!operation?.recovery?.required) {
-      throw new PowerDnsAuthoritativeServiceError(
-        'powerdns_recovery_not_required',
-        'PowerDNS authoritative operation does not require recovery',
-        409,
-      );
-    }
-    if (operationId !== operation.id || expectedUpdatedAt !== operation.updatedAt
-      || confirmation !== operation.recovery.confirmation) {
-      throw new PowerDnsAuthoritativeServiceError(
-        'powerdns_recovery_stale',
-        'PowerDNS recovery request is stale or confirmation is invalid',
-        409,
-      );
-    }
-    const secret = await secretRegistry.getForServer(serverId);
-    if (!secret || secret.revision !== operation.credentialRevision) {
-      throw new PowerDnsAuthoritativeServiceError(
-        'powerdns_recovery_credential_changed',
-        'PowerDNS credential revision changed after the interrupted operation',
-        409,
-      );
-    }
-    const materialized = await secretRegistry.materializeForServer(serverId);
-    if (materialized.revision !== operation.credentialRevision) {
-      throw new PowerDnsAuthoritativeServiceError(
-        'powerdns_recovery_credential_changed',
-        'PowerDNS credential revision changed after the interrupted operation',
-        409,
-      );
-    }
+  async function resolve(serverId = localServerId, input = {}) {
+    const { identity, materialized, recovery } = await recoveryContext(serverId, input, 'confirmation');
     let host;
-    try {
-      host = await manager.resolve(intentFor(identity, materialized), { operationId, expectedUpdatedAt });
-    } catch (error) { throw hostFailure(error); }
-    const resolvedOperation = await currentOperation(serverId);
-    const localReady = host?.satisfied === true;
-    const publicReachability = localReady
-      ? await inspectPublic(serverId, identity)
-      : blockedPublicReachability(identity, 'powerdns_local_not_ready');
-    const publicReady = publicReachability.ready === true;
-    return Object.freeze({
-      resolved: resolvedOperation?.status === 'succeeded',
-      ready: localReady,
-      localReady,
-      publicReady,
-      overallReady: localReady && publicReady,
-      serverId,
-      dnsIdentityRevision: identity.revision,
-      secretRevision: materialized.revision,
-      warnings: identity.warnings,
-      host: publicHostState(host),
-      publicReachability,
-      operation: resolvedOperation,
-    });
+    try { host = await manager.resolve(intentFor(identity, materialized), recovery); }
+    catch (error) { throw hostFailure(error); }
+    return recoveryResult(serverId, identity, materialized, host, 'resolved');
   }
 
-  return Object.freeze({ localServerId, preview, status, apply, resolve });
+  async function retry(serverId = localServerId, input = {}) {
+    const { identity, materialized, recovery } = await recoveryContext(serverId, input, 'retryConfirmation');
+    let host;
+    try { host = await manager.retry(intentFor(identity, materialized), recovery); }
+    catch (error) { throw hostFailure(error); }
+    return recoveryResult(serverId, identity, materialized, host, 'retried');
+  }
+
+  return Object.freeze({ localServerId, preview, status, apply, resolve, retry });
 }
 
 export const powerDnsAuthoritativeServiceInternals = Object.freeze({
   digest,
   recoveryConfirmation,
+  retryConfirmation,
   publicHostState,
   hostFailure,
   blockedPublicReachability,
