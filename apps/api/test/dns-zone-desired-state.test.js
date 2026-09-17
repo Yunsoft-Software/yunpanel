@@ -114,6 +114,74 @@ test('renders actual STARTTLS endpoints and current plus retiring DKIM records f
   assert.equal(byKey.has('mail-dkim-previous'), true);
 });
 
+test('publishes discovery hostnames only from exact HTTPS endpoint readiness evidence', () => {
+  const desired = renderDnsZoneDesiredState({
+    zoneName: 'example.com',
+    template: template(),
+    dnsIdentity: identity({ ipv6: '2001:db8::10' }),
+    serial: 2026091504,
+    mail: {
+      enabled: true,
+      host: 'mail.example.com',
+      autodiscoverEnabled: true,
+      autoconfigEnabled: true,
+      discovery: {
+        revision: 5,
+        autodiscover: {
+          hostname: 'autodiscover.example.com',
+          protocol: 'https',
+          path: '/autodiscover/autodiscover.xml',
+        },
+        autoconfig: null,
+      },
+    },
+  });
+  const keys = new Set(desired.records.map((entry) => entry.key));
+
+  assert.equal(keys.has('mail-autodiscover-ipv4'), true);
+  assert.equal(keys.has('mail-autodiscover-ipv6'), true);
+  assert.equal(keys.has('mail-autoconfig-ipv4'), false);
+  assert.equal(keys.has('mail-autoconfig-ipv6'), false);
+});
+
+test('legacy discovery booleans cannot publish dead records and invalid endpoint evidence fails closed', () => {
+  const withoutEvidence = renderDnsZoneDesiredState({
+    zoneName: 'example.com',
+    template: template(),
+    dnsIdentity: identity(),
+    serial: 2026091505,
+    mail: {
+      enabled: true,
+      host: 'mail.example.com',
+      autodiscoverEnabled: true,
+      autoconfigEnabled: true,
+    },
+  });
+  assert.equal(withoutEvidence.records.some((entry) => entry.key.includes('autodiscover')), false);
+  assert.equal(withoutEvidence.records.some((entry) => entry.key.includes('autoconfig')), false);
+
+  assert.throws(() => renderDnsZoneDesiredState({
+    zoneName: 'example.com',
+    template: template(),
+    dnsIdentity: identity(),
+    serial: 2026091506,
+    mail: {
+      enabled: true,
+      host: 'mail.example.com',
+      discovery: {
+        revision: 6,
+        autodiscover: null,
+        autoconfig: {
+          hostname: 'autoconfig.example.com',
+          protocol: 'https',
+          path: '/wrong',
+        },
+      },
+    },
+  }), (error) => error instanceof DnsZoneDesiredStateError
+    && error.code === 'dns_zone_mail_discovery_invalid');
+});
+
 test('rejects duplicate DKIM selector intent before rendering an ambiguous managed RRset', () => {
   assert.throws(() => renderDnsZoneDesiredState({
     zoneName: 'example.com',

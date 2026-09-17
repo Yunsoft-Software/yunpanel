@@ -3,6 +3,10 @@ import { DomainValidationError, normalizeDomainName, normalizeDomainSet } from '
 
 const RECORD_TYPES = new Set(['SOA', 'NS', 'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'CAA', 'SRV']);
 const SOURCES = new Set(['template', 'mail', 'runtime']);
+const MAIL_DISCOVERY_ENDPOINTS = Object.freeze({
+  autodiscover: Object.freeze({ prefix: 'autodiscover', path: '/autodiscover/autodiscover.xml' }),
+  autoconfig: Object.freeze({ prefix: 'autoconfig', path: '/mail/config-v1.1.xml' }),
+});
 
 export class DnsZoneDesiredStateError extends Error {
   constructor(code, message, status = 400) {
@@ -194,6 +198,58 @@ function soaRecord(zoneName, identity, serial, templateVersion) {
   }, soa.ttl);
 }
 
+function mailDiscoveryRecords(zoneName, identity, discovery) {
+  if (discovery === null || discovery === undefined) return [];
+  const fields = new Set(['revision', 'autodiscover', 'autoconfig']);
+  if (!discovery || typeof discovery !== 'object' || Array.isArray(discovery)
+    || Object.keys(discovery).length !== fields.size
+    || Object.keys(discovery).some((field) => !fields.has(field))
+    || !Number.isSafeInteger(discovery.revision) || discovery.revision < 1) {
+    throw new DnsZoneDesiredStateError(
+      'dns_zone_mail_discovery_invalid',
+      'Mail discovery endpoint readiness is invalid',
+      409,
+    );
+  }
+  const result = [];
+  for (const [kind, policy] of Object.entries(MAIL_DISCOVERY_ENDPOINTS)) {
+    const endpoint = discovery[kind];
+    if (endpoint === null) continue;
+    const endpointFields = new Set(['hostname', 'protocol', 'path']);
+    const expectedHostname = `${policy.prefix}.${zoneName}`;
+    if (!endpoint || typeof endpoint !== 'object' || Array.isArray(endpoint)
+      || Object.keys(endpoint).length !== endpointFields.size
+      || Object.keys(endpoint).some((field) => !endpointFields.has(field))
+      || endpoint.hostname !== expectedHostname || endpoint.protocol !== 'https'
+      || endpoint.path !== policy.path) {
+      throw new DnsZoneDesiredStateError(
+        'dns_zone_mail_discovery_invalid',
+        `${kind} endpoint readiness is invalid`,
+        409,
+      );
+    }
+    result.push(record({
+      key: `mail-${kind}-ipv4`,
+      owner: expectedHostname,
+      type: 'A',
+      ttl: null,
+      values: [identity.settings.publicIpv4],
+      source: 'mail',
+    }, identity.settings.soa.ttl));
+    if (identity.settings.publicIpv6) {
+      result.push(record({
+        key: `mail-${kind}-ipv6`,
+        owner: expectedHostname,
+        type: 'AAAA',
+        ttl: null,
+        values: [identity.settings.publicIpv6],
+        source: 'mail',
+      }, identity.settings.soa.ttl));
+    }
+  }
+  return result;
+}
+
 function mailRecords(zoneName, identity, mail) {
   if (!mail?.enabled) return [];
   const host = fqdn(mail.host, 'mail host');
@@ -231,6 +287,7 @@ function mailRecords(zoneName, identity, mail) {
   if (mail.submission === true) {
     result.push(record({ key: 'mail-submission', owner: `_submission._tcp.${zoneName}`, type: 'SRV', ttl: null, values: [`0 1 587 ${host}`], source: 'mail' }, identity.settings.soa.ttl));
   }
+  result.push(...mailDiscoveryRecords(zoneName, identity, mail.discovery));
   const dkimRecords = mail.dkimRecords ?? (mail.dkim ? [mail.dkim] : []);
   if (!Array.isArray(dkimRecords) || dkimRecords.length > 8) {
     throw new DnsZoneDesiredStateError('dns_zone_dkim_invalid', 'DKIM DNS state is invalid');
@@ -323,6 +380,7 @@ export const dnsZoneDesiredStateInternals = Object.freeze({
   substitute,
   templateRecords,
   soaRecord,
+  mailDiscoveryRecords,
   mailRecords,
   validateRecordSet,
 });

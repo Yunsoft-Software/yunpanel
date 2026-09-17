@@ -85,6 +85,21 @@ test('PowerDNS default zone reapply composition consumes live mail and DKIM regi
         ready: true,
       }),
     },
+    mailDiscoveryEndpointResolver: {
+      resolve: async () => ({
+        version: 1,
+        mailDomainId,
+        serverId,
+        revision: 1,
+        autodiscover: {
+          ready: true,
+          hostname: 'autodiscover.example.com',
+          protocol: 'https',
+          path: '/autodiscover/autodiscover.xml',
+        },
+        autoconfig: null,
+      }),
+    },
     zoneManager: {
       getZone: async () => ({
         zoneName: 'example.com',
@@ -105,6 +120,9 @@ test('PowerDNS default zone reapply composition consumes live mail and DKIM regi
   assert.equal(keys.has('mail-dkim-current'), true);
   assert.equal(keys.has('mail-imap'), true);
   assert.equal(keys.has('mail-submission'), true);
+  assert.equal(keys.has('mail-autodiscover-ipv4'), true);
+  assert.equal(keys.has('mail-autoconfig-ipv4'), false);
+  assert.equal(preview.mailState.mailDiscoveryEndpointRevision, 1);
   assert.equal(JSON.stringify(preview).includes('secret'), false);
 });
 

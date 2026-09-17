@@ -33,7 +33,13 @@ function key(selector = 'current', revision = 3) {
   });
 }
 
-function fixture({ domains = [mailDomain], identity = null, currentKey = key(), retirement = null } = {}) {
+function fixture({
+  domains = [mailDomain],
+  identity = null,
+  currentKey = key(),
+  retirement = null,
+  mailDiscoveryEndpointResolver = null,
+} = {}) {
   const resolver = createDnsZoneMailIntentResolver({
     mailDomainRegistry: { listMailDomains: async () => domains },
     mailDkimRegistry: { getKey: async () => currentKey },
@@ -46,6 +52,7 @@ function fixture({ domains = [mailDomain], identity = null, currentKey = key(), 
         ready: true,
       },
     },
+    mailDiscoveryEndpointResolver,
   });
   return resolver.resolve({ domain });
 }
@@ -72,6 +79,7 @@ test('enabled local mail resolves service endpoints and current plus retiring pu
     imap: true,
     submission: true,
     webmailEnabled: false,
+    discovery: null,
     dkimRecords: [
       { selector: 'current', value: 'v=DKIM1; k=rsa; p=current' },
       { selector: 'previous', value: 'v=DKIM1; k=rsa; p=previous' },
@@ -84,11 +92,69 @@ test('enabled local mail resolves service endpoints and current plus retiring pu
     mailDomainId: mailDomain.id,
     mailDomainRevision: 4,
     mailServiceIdentityRevision: 2,
+    mailDiscoveryEndpointRevision: null,
     dkimRevisions: [2, 3],
     retirementPhase: 'dns_retirement_pending',
     retirementRevision: 2,
   });
   assert.equal(JSON.stringify(resolved).includes('private'), false);
+});
+
+test('mail discovery DNS intent requires exact endpoint readiness evidence', async () => {
+  const resolved = await fixture({
+    mailDiscoveryEndpointResolver: {
+      resolve: async ({ mailDomain: requestedMailDomain, domain: requestedDomain }) => {
+        assert.equal(requestedMailDomain.id, mailDomain.id);
+        assert.equal(requestedDomain.id, domain.id);
+        return {
+          version: 1,
+          mailDomainId: mailDomain.id,
+          serverId: domain.serverId,
+          revision: 6,
+          autodiscover: {
+            ready: true,
+            hostname: 'autodiscover.example.com',
+            protocol: 'https',
+            path: '/autodiscover/autodiscover.xml',
+          },
+          autoconfig: null,
+        };
+      },
+    },
+  });
+
+  assert.deepEqual(resolved.intent.discovery, {
+    revision: 6,
+    autodiscover: {
+      hostname: 'autodiscover.example.com',
+      protocol: 'https',
+      path: '/autodiscover/autodiscover.xml',
+    },
+    autoconfig: null,
+  });
+  assert.equal(resolved.evidence.mailDiscoveryEndpointRevision, 6);
+
+  await assert.rejects(
+    fixture({
+      mailDiscoveryEndpointResolver: {
+        resolve: async () => ({
+          version: 1,
+          mailDomainId: mailDomain.id,
+          serverId: domain.serverId,
+          revision: 7,
+          autodiscover: null,
+          autoconfig: {
+            ready: true,
+            hostname: 'autoconfig.example.com',
+            protocol: 'http',
+            path: '/mail/config-v1.1.xml',
+          },
+        }),
+      },
+    }),
+    (error) => error instanceof DnsZoneMailIntentError
+      && error.code === 'dns_zone_mail_discovery_invalid',
+  );
 });
 
 test('disabled or absent local mail produces an explicit empty managed source without endpoint lookups', async () => {

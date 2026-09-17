@@ -199,6 +199,7 @@ export function createApp({
   mailDkimConfigurationService = null,
   mailDkimDnsService = null,
   mailServiceIdentityRegistry = null,
+  mailDiscoveryEndpointResolver = null,
   mailSrsConfigurationService = null,
   mailboxRegistry = createMailboxRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
@@ -463,6 +464,7 @@ export function createApp({
         mailDkimRegistry,
         mailDkimRetirementRegistry,
         mailServiceIdentityRegistry,
+        mailDiscoveryEndpointResolver,
       } : {}),
     });
   }

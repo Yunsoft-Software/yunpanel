@@ -13,4 +13,4 @@ Mail disabled/absent olduğunda intent boştur. Re-apply bu durumda yalnız YunP
 
 Mail-domain, mail-service identity, current DKIM ve retirement revision evidence'ı secret-free SHA-256 kimliğine çevrilir. Durable zone re-apply operation store v2 bu kimliği saklar ve restart recovery exact kimlik eşleşmeden eski operasyonu tamamlanmış saymaz. Store v1 okunup v2'ye taşınır; eski interrupted operation için olmayan mail evidence uydurulmaz.
 
-Bu kaynak değişikliği gerçek PowerDNS, resolver ve mail endpoint kabulü değildir. Kalan host/DNS kanıtları `todo.md` T-DNS ve T-MAIL altında tutulur; local PowerDNS previous-selector retirement mutation'ı `plan.md` içinde açık kod işi olarak kalır.
+Bu kaynak değişikliği gerçek PowerDNS, resolver ve mail endpoint kabulü değildir. Local previous-selector retirement sonradan `docs/history/dns-local-dkim-retirement-2026-09-17.md` içinde tamamlandı; kalan host/DNS kanıtları `todo.md` T-DNS ve T-MAIL altında tutulur.

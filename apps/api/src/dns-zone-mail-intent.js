@@ -7,6 +7,11 @@ export class DnsZoneMailIntentError extends Error {
   }
 }
 
+const DISCOVERY_ENDPOINTS = Object.freeze({
+  autodiscover: Object.freeze({ prefix: 'autodiscover', path: '/autodiscover/autodiscover.xml' }),
+  autoconfig: Object.freeze({ prefix: 'autoconfig', path: '/mail/config-v1.1.xml' }),
+});
+
 function domainScope(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || typeof value.id !== 'string' || !value.id
@@ -90,6 +95,50 @@ function retirementPreview(value, retirement, mailDomainId) {
   return Object.freeze({ phase: 'dns_retirement_applying', revision: retirement.revision + 1 });
 }
 
+function discoveryEndpoint(value, kind, domainName) {
+  if (value === null) return null;
+  const fields = new Set(['ready', 'hostname', 'protocol', 'path']);
+  const policy = DISCOVERY_ENDPOINTS[kind];
+  if (!policy || !value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
+    || value.ready !== true || value.hostname !== `${policy.prefix}.${domainName}`
+    || value.protocol !== 'https' || value.path !== policy.path) {
+    throw new DnsZoneMailIntentError(
+      'dns_zone_mail_discovery_invalid',
+      `${kind} endpoint readiness evidence is invalid`,
+      409,
+    );
+  }
+  return Object.freeze({
+    hostname: value.hostname,
+    protocol: value.protocol,
+    path: value.path,
+  });
+}
+
+function discoveryIntent(value, mailDomain, domain) {
+  if (value === null) return Object.freeze({ intent: null, revision: null });
+  const fields = new Set(['version', 'mailDomainId', 'serverId', 'revision', 'autodiscover', 'autoconfig']);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
+    || value.version !== 1 || value.mailDomainId !== mailDomain.id || value.serverId !== domain.serverId
+    || !Number.isSafeInteger(value.revision) || value.revision < 1) {
+    throw new DnsZoneMailIntentError(
+      'dns_zone_mail_discovery_invalid',
+      'Mail discovery endpoint readiness evidence is invalid',
+      409,
+    );
+  }
+  return Object.freeze({
+    intent: Object.freeze({
+      revision: value.revision,
+      autodiscover: discoveryEndpoint(value.autodiscover, 'autodiscover', domain.primaryDomain),
+      autoconfig: discoveryEndpoint(value.autoconfig, 'autoconfig', domain.primaryDomain),
+    }),
+    revision: value.revision,
+  });
+}
+
 function disabledEvidence(mailDomain = null) {
   return Object.freeze({
     version: 1,
@@ -98,6 +147,7 @@ function disabledEvidence(mailDomain = null) {
     mailDomainId: mailDomain?.id ?? null,
     mailDomainRevision: mailDomain?.revision ?? null,
     mailServiceIdentityRevision: null,
+    mailDiscoveryEndpointRevision: null,
     dkimRevisions: Object.freeze([]),
     retirementPhase: null,
     retirementRevision: null,
@@ -109,11 +159,14 @@ export function createDnsZoneMailIntentResolver({
   mailDkimRegistry,
   mailDkimRetirementRegistry,
   mailServiceIdentityRegistry,
+  mailDiscoveryEndpointResolver = null,
 } = {}) {
   if (!mailDomainRegistry || typeof mailDomainRegistry.listMailDomains !== 'function'
     || !mailDkimRegistry || typeof mailDkimRegistry.getKey !== 'function'
     || !mailDkimRetirementRegistry || typeof mailDkimRetirementRegistry.getRetirement !== 'function'
-    || !mailServiceIdentityRegistry || typeof mailServiceIdentityRegistry.getForServer !== 'function') {
+    || !mailServiceIdentityRegistry || typeof mailServiceIdentityRegistry.getForServer !== 'function'
+    || (mailDiscoveryEndpointResolver !== null
+      && typeof mailDiscoveryEndpointResolver?.resolve !== 'function')) {
     throw new DnsZoneMailIntentError(
       'dns_zone_mail_dependencies_invalid',
       'DNS zone mail intent dependencies are unavailable',
@@ -140,10 +193,13 @@ export function createDnsZoneMailIntentResolver({
       throw new DnsZoneMailIntentError('dns_zone_mail_domain_invalid', 'Local mail-domain state is invalid', 409);
     }
 
-    const [identity, currentKey, retirement] = await Promise.all([
+    const [identity, currentKey, retirement, discoveryState] = await Promise.all([
       mailServiceIdentityRegistry.getForServer(scoped.serverId),
       mailDkimRegistry.getKey(mailDomain.id),
       mailDkimRetirementRegistry.getRetirement(mailDomain.id),
+      mailDiscoveryEndpointResolver
+        ? mailDiscoveryEndpointResolver.resolve({ mailDomain, domain: scoped })
+        : null,
     ]);
     if (!identity || identity.serverId !== scoped.serverId || identity.ready !== true
       || typeof identity.hostname !== 'string' || !identity.hostname
@@ -156,6 +212,7 @@ export function createDnsZoneMailIntentResolver({
     }
 
     const retirementTarget = retirementPreview(retirePendingDkim, retirement, mailDomain.id);
+    const discovery = discoveryIntent(discoveryState, mailDomain, scoped);
     const dkim = [];
     if (currentKey) dkim.push(canonicalDkim(currentKey, mailDomain.id, scoped.primaryDomain, 'Current'));
     const previous = retirementDkim(retirement, mailDomain.id, scoped.primaryDomain, {
@@ -184,6 +241,7 @@ export function createDnsZoneMailIntentResolver({
       mailDomainId: mailDomain.id,
       mailDomainRevision: mailDomain.revision,
       mailServiceIdentityRevision: identity.revision,
+      mailDiscoveryEndpointRevision: discovery.revision,
       dkimRevisions: Object.freeze(dkim.map((entry) => entry.revision).sort((left, right) => left - right)),
       retirementPhase: retirementTarget?.phase ?? retirement?.phase ?? null,
       retirementRevision: retirementTarget?.revision ?? retirement?.revision ?? null,
@@ -195,6 +253,7 @@ export function createDnsZoneMailIntentResolver({
         imap: true,
         submission: true,
         webmailEnabled: false,
+        discovery: discovery.intent,
         dkimRecords,
       }),
       evidence,
@@ -209,5 +268,7 @@ export const dnsZoneMailIntentInternals = Object.freeze({
   canonicalDkim,
   retirementDkim,
   retirementPreview,
+  discoveryEndpoint,
+  discoveryIntent,
   disabledEvidence,
 });

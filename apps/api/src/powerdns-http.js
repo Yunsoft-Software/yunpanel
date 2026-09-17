@@ -238,6 +238,7 @@ async function defaultZoneReapplyService({
   mailDkimRegistry = null,
   mailDkimRetirementRegistry = null,
   mailServiceIdentityRegistry = null,
+  mailDiscoveryEndpointResolver = null,
   zoneManager = null,
   now = Date.now,
   env = process.env,
@@ -262,7 +263,8 @@ async function defaultZoneReapplyService({
     mailServiceIdentityRegistry,
   ];
   const hasMailIntent = mailDependencies.every((dependency) => dependency !== null);
-  if (!hasMailIntent && mailDependencies.some((dependency) => dependency !== null)) {
+  if ((!hasMailIntent && mailDependencies.some((dependency) => dependency !== null))
+    || (mailDiscoveryEndpointResolver !== null && !hasMailIntent)) {
     throw new PowerDnsHttpError(
       'dns_zone_reapply_mail_dependencies_invalid',
       'DNS zone reapply mail desired-state dependencies must be configured together',
@@ -280,6 +282,7 @@ async function defaultZoneReapplyService({
         mailDkimRegistry,
         mailDkimRetirementRegistry,
         mailServiceIdentityRegistry,
+        mailDiscoveryEndpointResolver,
       }),
     } : {}),
     ...(zoneManager ? { zoneManager } : {}),
@@ -298,6 +301,7 @@ async function defaultZoneReapplyRuntime({
   mailDkimRegistry = null,
   mailDkimRetirementRegistry = null,
   mailServiceIdentityRegistry = null,
+  mailDiscoveryEndpointResolver = null,
   env = process.env,
 } = {}) {
   const service = await defaultZoneReapplyService({
@@ -310,6 +314,7 @@ async function defaultZoneReapplyRuntime({
     mailDkimRegistry,
     mailDkimRetirementRegistry,
     mailServiceIdentityRegistry,
+    mailDiscoveryEndpointResolver,
     env,
   });
   const registry = createDnsZoneReapplyOperationRegistry({ filePath: zoneReapplyOperationStorePath(env) });
@@ -389,6 +394,7 @@ export function mountPowerDnsRoutes(app, {
   mailDkimRegistry = null,
   mailDkimRetirementRegistry = null,
   mailServiceIdentityRegistry = null,
+  mailDiscoveryEndpointResolver = null,
   authoritativeService,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
@@ -437,6 +443,7 @@ export function mountPowerDnsRoutes(app, {
         mailDkimRegistry,
         mailDkimRetirementRegistry,
         mailServiceIdentityRegistry,
+        mailDiscoveryEndpointResolver,
       });
       defaultRuntimePromise.catch(() => { defaultRuntimePromise = null; });
     }
