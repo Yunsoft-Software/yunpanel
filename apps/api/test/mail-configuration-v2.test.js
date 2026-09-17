@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+  enableManagedMailSubmission,
+  previewManagedMailEmptyConfiguration,
+  secureManagedMailPreview,
+} from '@yunpanel/config-templates';
 import { createMailConfigurationService, MailConfigurationError } from '../src/mail-configuration.js';
 
 function phc(saltByte, hashByte) {
@@ -125,4 +130,52 @@ test('external mail domains remain excluded from local configuration transitions
     state.service.previewTransition({ mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'enabled' }),
     (error) => error instanceof MailConfigurationError && error.code === 'mail_domain_not_locally_managed' && error.status === 409,
   );
+});
+
+test('protected current-state materialization binds exact revision, status and configuration without inventing a transition', async () => {
+  const enabled = fixture({ candidateStatus: 'enabled' });
+  const currentInput = { mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'enabled' };
+  const publicPreview = await enabled.service.previewTransition(currentInput);
+  const current = await enabled.service.materializeCurrent(currentInput, {
+    expectedConfigurationSha256: publicPreview.configurationSha256,
+  });
+  assert.deepEqual(current.state, {
+    mailDomainId: 'mail-domain-0001',
+    revision: 1,
+    status: 'enabled',
+  });
+  assert.equal(current.preview.sha256, publicPreview.configurationSha256);
+  assert.match(current.sensitiveArtifacts[0].content, /argon2id/);
+
+  await assert.rejects(
+    enabled.service.materializeCurrent({ ...currentInput, status: 'disabled' }, {
+      expectedConfigurationSha256: publicPreview.configurationSha256,
+    }),
+    (error) => error instanceof MailConfigurationError
+      && error.code === 'mail_configuration_current_state_changed' && error.status === 409,
+  );
+});
+
+test('disabled current-state materialization produces the exact protected empty configuration', async () => {
+  const disabled = fixture({ candidateStatus: 'disabled' });
+  const empty = enableManagedMailSubmission(
+    secureManagedMailPreview(previewManagedMailEmptyConfiguration()),
+    [],
+  );
+  const current = await disabled.service.materializeCurrent({
+    mailDomainId: 'mail-domain-0001',
+    expectedRevision: 1,
+    status: 'disabled',
+  }, { expectedConfigurationSha256: empty.sha256 });
+
+  assert.deepEqual(current.state, {
+    mailDomainId: 'mail-domain-0001',
+    revision: 1,
+    status: 'disabled',
+  });
+  assert.equal(current.preview.sha256, empty.sha256);
+  assert.deepEqual(current.sensitiveArtifacts, [{
+    path: '/etc/yunpanel/mail/dovecot/users',
+    content: '',
+  }]);
 });

@@ -158,6 +158,27 @@ export function createMailConfigurationService({
     return Object.freeze({ candidate, input: Object.freeze({ ...normalized }), domains: Object.freeze(domains) });
   }
 
+  async function resolveCurrentState(input) {
+    const normalized = transitionInput(input);
+    const candidate = await mailDomainRegistry.getMailDomain(normalized.mailDomainId);
+    if (!candidate) throw new MailConfigurationError('mail_domain_not_found', 'Mail domain was not found', 404);
+    if (candidate.managementMode !== 'local') {
+      throw new MailConfigurationError('mail_domain_not_locally_managed', 'Mail domain is not locally managed', 409);
+    }
+    if (candidate.revision !== normalized.expectedRevision || candidate.status !== normalized.status) {
+      throw new MailConfigurationError(
+        'mail_configuration_current_state_changed',
+        'Mail domain state changed after the current configuration was selected',
+        409,
+      );
+    }
+    const domains = (await mailDomainRegistry.listMailDomains())
+      .filter((mailDomain) => mailDomain.managementMode === 'local' && mailDomain.status === 'enabled')
+      .map((mailDomain) => mailDomain.domainName)
+      .sort();
+    return Object.freeze({ candidate, input: Object.freeze({ ...normalized }), domains: Object.freeze(domains) });
+  }
+
   async function resolveTlsIdentity(resolved) {
     if (!tlsIdentityConfigured || resolved.domains.length === 0) {
       return Object.freeze({ identity: null, blocker: null, serverId: null });
@@ -367,22 +388,7 @@ export function createMailConfigurationService({
     return transitionPreview(resolved, materialized);
   }
 
-  async function materializeTransition(input, { expectedPreviewDigest, expectedConfigurationSha256 } = {}) {
-    if (typeof expectedPreviewDigest !== 'string' || !SHA256_PATTERN.test(expectedPreviewDigest)
-      || typeof expectedConfigurationSha256 !== 'string' || !SHA256_PATTERN.test(expectedConfigurationSha256)) {
-      throw new MailConfigurationError('mail_configuration_identity_invalid', 'Current mail configuration digests are required', 409);
-    }
-    const resolved = await resolveTransition(input);
-    const materialized = await materializeConfiguration(resolved);
-    if (!materialized.ready || !materialized.preview) {
-      throw new MailConfigurationError('mail_configuration_not_ready', 'Managed mail configuration is not ready to apply', 409);
-    }
-    const publicPreview = transitionPreview(resolved, materialized);
-    if (publicPreview.previewDigest !== expectedPreviewDigest
-      || materialized.preview.sha256 !== expectedConfigurationSha256
-      || publicPreview.configuration?.sha256 !== expectedConfigurationSha256) {
-      throw new MailConfigurationError('mail_configuration_preview_stale', 'Managed mail configuration changed after preview', 409);
-    }
+  function materializeSensitiveArtifacts(resolved, materialized) {
     const passwd = renderDovecotQuotaPasswdFile({
       domains: resolved.domains,
       accounts: materialized.accounts,
@@ -410,6 +416,25 @@ export function createMailConfigurationService({
         content: materialized.srs.secretContent,
       }));
     }
+    return Object.freeze(sensitiveArtifacts);
+  }
+
+  async function materializeTransition(input, { expectedPreviewDigest, expectedConfigurationSha256 } = {}) {
+    if (typeof expectedPreviewDigest !== 'string' || !SHA256_PATTERN.test(expectedPreviewDigest)
+      || typeof expectedConfigurationSha256 !== 'string' || !SHA256_PATTERN.test(expectedConfigurationSha256)) {
+      throw new MailConfigurationError('mail_configuration_identity_invalid', 'Current mail configuration digests are required', 409);
+    }
+    const resolved = await resolveTransition(input);
+    const materialized = await materializeConfiguration(resolved);
+    if (!materialized.ready || !materialized.preview) {
+      throw new MailConfigurationError('mail_configuration_not_ready', 'Managed mail configuration is not ready to apply', 409);
+    }
+    const publicPreview = transitionPreview(resolved, materialized);
+    if (publicPreview.previewDigest !== expectedPreviewDigest
+      || materialized.preview.sha256 !== expectedConfigurationSha256
+      || publicPreview.configuration?.sha256 !== expectedConfigurationSha256) {
+      throw new MailConfigurationError('mail_configuration_preview_stale', 'Managed mail configuration changed after preview', 409);
+    }
     return Object.freeze({
       transition: Object.freeze({
         mailDomainId: resolved.candidate.id,
@@ -418,13 +443,37 @@ export function createMailConfigurationService({
         desiredStatus: resolved.input.status,
       }),
       preview: materialized.preview,
-      sensitiveArtifacts: Object.freeze(sensitiveArtifacts),
+      sensitiveArtifacts: materializeSensitiveArtifacts(resolved, materialized),
+    });
+  }
+
+  async function materializeCurrent(input, { expectedConfigurationSha256 } = {}) {
+    if (typeof expectedConfigurationSha256 !== 'string' || !SHA256_PATTERN.test(expectedConfigurationSha256)) {
+      throw new MailConfigurationError('mail_configuration_identity_invalid', 'Current mail configuration digest is required', 409);
+    }
+    const resolved = await resolveCurrentState(input);
+    const materialized = await materializeConfiguration(resolved);
+    if (!materialized.ready || !materialized.preview) {
+      throw new MailConfigurationError('mail_configuration_not_ready', 'Current managed mail configuration cannot be materialized', 409);
+    }
+    if (materialized.preview.sha256 !== expectedConfigurationSha256) {
+      throw new MailConfigurationError('mail_configuration_preview_stale', 'Current managed mail configuration changed after rollback preview', 409);
+    }
+    return Object.freeze({
+      state: Object.freeze({
+        mailDomainId: resolved.candidate.id,
+        revision: resolved.candidate.revision,
+        status: resolved.candidate.status,
+      }),
+      preview: materialized.preview,
+      sensitiveArtifacts: materializeSensitiveArtifacts(resolved, materialized),
     });
   }
 
   return Object.freeze({
     previewTransition,
     materializeTransition,
+    materializeCurrent,
   });
 }
 
