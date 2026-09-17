@@ -55,6 +55,13 @@ function databaseCredentialPath(serverId, credentialId) {
   return `/servers/${encodeURIComponent(serverId)}/database-credentials/${encodeURIComponent(credentialId)}`;
 }
 
+function websiteDatabaseBindingDataPath(serverId, websiteId, bindingId) {
+  databaseServerPath(serverId);
+  if (typeof websiteId !== 'string' || !websiteId) throw new Error('websiteId is required');
+  if (typeof bindingId !== 'string' || !bindingId) throw new Error('bindingId is required');
+  return `/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}`;
+}
+
 function positiveRevision(value, field) {
   if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${field} must be a positive integer`);
   return value;
@@ -154,6 +161,57 @@ export function createDatabase(serverId, name) {
   });
 }
 
+
+export function createWebsiteDatabaseBackup(serverId, websiteId, bindingId, expectedBindingRevision) {
+  const path = websiteDatabaseBindingDataPath(serverId, websiteId, bindingId);
+  const revision = positiveRevision(expectedBindingRevision, 'expectedBindingRevision');
+  return panelRequest(`${path}/backup`, {
+    method: 'POST',
+    body: {
+      expectedBindingRevision: revision,
+      confirmation: `backup-website-database:${bindingId}:${revision}`,
+    },
+  });
+}
+
+export function previewWebsiteDatabaseRestore(
+  serverId,
+  websiteId,
+  bindingId,
+  expectedBindingRevision,
+  backupId,
+) {
+  const path = websiteDatabaseBindingDataPath(serverId, websiteId, bindingId);
+  const revision = positiveRevision(expectedBindingRevision, 'expectedBindingRevision');
+  if (typeof backupId !== 'string' || !backupId) throw new Error('backupId is required');
+  return panelRequest(`${path}/restore-preview`, {
+    method: 'POST',
+    body: { backupId, expectedBindingRevision: revision },
+  });
+}
+
+export function restoreWebsiteDatabase(
+  serverId,
+  websiteId,
+  bindingId,
+  expectedBindingRevision,
+  preview,
+) {
+  const path = websiteDatabaseBindingDataPath(serverId, websiteId, bindingId);
+  const revision = positiveRevision(expectedBindingRevision, 'expectedBindingRevision');
+  if (!preview || typeof preview !== 'object') throw new Error('database restore preview is required');
+  return panelRequest(`${path}/restore`, {
+    method: 'POST',
+    body: {
+      backupId: preview.backupId,
+      expectedBindingRevision: revision,
+      expectedPreviewDigest: preview.previewDigest,
+      expectedBackupSha256: preview.backupSha256,
+      confirmation: preview.confirmation,
+    },
+  });
+}
+
 export function createDatabaseBackup(serverId, name) {
   return panelRequest(`${databasePath(serverId, name)}/backup`, {
     method: 'POST',
@@ -221,4 +279,4 @@ export async function runJob(path, options) {
 }
 
 export const managedServiceApiInternals = Object.freeze({ managedServiceServerPath, managedServicePath });
-export const databaseApiInternals = Object.freeze({ databaseServerPath, databasePath, databaseCredentialPath, positiveRevision });
+export const databaseApiInternals = Object.freeze({ databaseServerPath, databasePath, databaseCredentialPath, websiteDatabaseBindingDataPath, positiveRevision });
