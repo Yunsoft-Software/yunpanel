@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import {
   phpMyAdminFpmTemplatePolicy,
   phpMyAdminNginxTemplatePolicy,
+  phpMyAdminSignonTemplatePolicy,
 } from '@yunpanel/config-templates';
 import { createPhpMyAdminConfigBackupManager } from './phpmyadmin-config-backup.js';
 import { createPhpMyAdminConfigManager } from './phpmyadmin-config-manager.js';
@@ -19,6 +20,7 @@ const GROUP_NAME_PATTERN = /^[a-z_][a-z0-9_-]{0,31}$/;
 const MAX_OUTPUT = 128 * 1024;
 const GETENT = '/usr/bin/getent';
 const ID = '/usr/bin/id';
+const PHP = '/usr/bin/php';
 const PHP_FPM = '/usr/sbin/php-fpm8.3';
 const NGINX = '/usr/sbin/nginx';
 const CURL = '/usr/bin/curl';
@@ -27,6 +29,7 @@ const ROOT_UID = 0;
 const ROOT_GID = 0;
 const CONFIG_MODE = 0o640;
 const PRIVATE_DIRECTORY_MODE = 0o700;
+const SIGNON_BRIDGE_DIRECTORY_MODE = 0o750;
 const GATEWAY_DIRECTORY_MODE = 0o2770;
 const SOCKET_MODE = 0o660;
 const GATEWAY_DIRECTORY = '/run/yunpanel';
@@ -62,14 +65,22 @@ function exactKeys(value, allowed) {
     && Object.keys(value).every((key) => allowed.has(key));
 }
 
-const BUNDLE_KEYS = new Set(['version', 'fpm', 'nginx']);
+const BUNDLE_KEYS = new Set(['version', 'fpm', 'nginx', 'signonConfig', 'signonBridge']);
 const FPM_KEYS = new Set([
   'version', 'sha256', 'artifact', 'socketPath', 'serviceUnit', 'runtimeUser', 'runtimeGroup',
   'temporaryDirectory', 'sessionDirectory',
 ]);
 const NGINX_KEYS = new Set([
   'version', 'sha256', 'artifact', 'documentRoot', 'fpmSocketPath', 'gatewaySocketPath',
-  'gatewaySocketMode', 'gatewaySocketOwner', 'gatewaySocketGroup', 'healthPath', 'serviceUnit',
+  'gatewaySocketMode', 'gatewaySocketOwner', 'gatewaySocketGroup', 'signonBridgePath',
+  'internalSignonPath', 'healthPath', 'serviceUnit',
+]);
+const SIGNON_CONFIG_KEYS = new Set([
+  'version', 'sha256', 'artifact', 'signonSession', 'gatewayBasePath',
+]);
+const SIGNON_BRIDGE_KEYS = new Set([
+  'version', 'sha256', 'artifact', 'handoffSocketPath', 'signonSession',
+  'internalSignonPath', 'gatewayBasePath',
 ]);
 const ARTIFACT_KEYS = new Set(['path', 'sha256', 'bytes', 'sensitive', 'mode']);
 
@@ -110,8 +121,30 @@ function validatePreview(preview) {
     || preview.nginx.gatewaySocketMode !== phpMyAdminNginxTemplatePolicy.gatewaySocketMode
     || preview.nginx.gatewaySocketOwner !== phpMyAdminNginxTemplatePolicy.gatewaySocketOwner
     || preview.nginx.gatewaySocketGroup !== phpMyAdminNginxTemplatePolicy.gatewaySocketGroup
+    || preview.nginx.signonBridgePath !== phpMyAdminNginxTemplatePolicy.signonBridgePath
+    || preview.nginx.internalSignonPath !== phpMyAdminNginxTemplatePolicy.internalSignonPath
     || preview.nginx.healthPath !== phpMyAdminNginxTemplatePolicy.healthPath
-    || preview.nginx.serviceUnit !== phpMyAdminNginxTemplatePolicy.serviceUnit) {
+    || preview.nginx.serviceUnit !== phpMyAdminNginxTemplatePolicy.serviceUnit
+    || !exactKeys(preview.signonConfig, SIGNON_CONFIG_KEYS) || preview.signonConfig.version !== 1
+    || typeof preview.signonConfig.sha256 !== 'string' || !SHA256_PATTERN.test(preview.signonConfig.sha256)
+    || !validateArtifact(preview.signonConfig.artifact, {
+      path: phpMyAdminSignonTemplatePolicy.configPath,
+      mode: phpMyAdminSignonTemplatePolicy.configMode,
+    })
+    || preview.signonConfig.artifact.sha256 !== preview.signonConfig.sha256
+    || preview.signonConfig.signonSession !== phpMyAdminSignonTemplatePolicy.signonSession
+    || preview.signonConfig.gatewayBasePath !== phpMyAdminSignonTemplatePolicy.gatewayBasePath
+    || !exactKeys(preview.signonBridge, SIGNON_BRIDGE_KEYS) || preview.signonBridge.version !== 1
+    || typeof preview.signonBridge.sha256 !== 'string' || !SHA256_PATTERN.test(preview.signonBridge.sha256)
+    || !validateArtifact(preview.signonBridge.artifact, {
+      path: phpMyAdminSignonTemplatePolicy.bridgePath,
+      mode: phpMyAdminSignonTemplatePolicy.bridgeMode,
+    })
+    || preview.signonBridge.artifact.sha256 !== preview.signonBridge.sha256
+    || preview.signonBridge.handoffSocketPath !== phpMyAdminSignonTemplatePolicy.handoffSocketPath
+    || preview.signonBridge.signonSession !== phpMyAdminSignonTemplatePolicy.signonSession
+    || preview.signonBridge.internalSignonPath !== phpMyAdminSignonTemplatePolicy.internalSignonPath
+    || preview.signonBridge.gatewayBasePath !== phpMyAdminSignonTemplatePolicy.gatewayBasePath) {
     throw activationError(
       'phpmyadmin_activation_preview_invalid',
       'phpMyAdmin activation preview is invalid',
@@ -126,6 +159,8 @@ function previewSha256(preview) {
     version: 1,
     fpmSha256: expected.fpm.sha256,
     nginxSha256: expected.nginx.sha256,
+    signonConfigSha256: expected.signonConfig.sha256,
+    signonBridgeSha256: expected.signonBridge.sha256,
   }));
 }
 
@@ -170,8 +205,12 @@ export function createPhpMyAdminConfigActivator({
 } = {}) {
   if (!configManager || typeof configManager.inspectStagedFpmPool !== 'function'
     || typeof configManager.inspectStagedNginxConfig !== 'function'
+    || typeof configManager.inspectStagedSignonConfig !== 'function'
+    || typeof configManager.inspectStagedSignonBridge !== 'function'
     || typeof configManager.stagedFpmPath !== 'function'
-    || typeof configManager.stagedNginxPath !== 'function') {
+    || typeof configManager.stagedNginxPath !== 'function'
+    || typeof configManager.stagedSignonConfigPath !== 'function'
+    || typeof configManager.stagedSignonBridgePath !== 'function') {
     throw activationError(
       'phpmyadmin_config_manager_invalid',
       'phpMyAdmin staging manager is unavailable',
@@ -273,6 +312,22 @@ export function createPhpMyAdminConfigActivator({
     }
   }
 
+  async function assertSignonBridgeDirectory(runtimeIdentity) {
+    try {
+      const metadata = await lstatFn(phpMyAdminSignonTemplatePolicy.bridgeDirectory);
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()
+        || metadata.uid !== ROOT_UID || metadata.gid !== runtimeIdentity.gid
+        || (metadata.mode & 0o7777) !== SIGNON_BRIDGE_DIRECTORY_MODE) {
+        throw new Error('unsafe signon bridge directory');
+      }
+    } catch {
+      throw activationError(
+        'phpmyadmin_signon_bridge_directory_unsafe',
+        'phpMyAdmin signon bridge directory is unavailable or unsafe',
+      );
+    }
+  }
+
   async function ensureGatewayDirectory(gatewayGroup) {
     let metadata;
     try {
@@ -327,12 +382,12 @@ export function createPhpMyAdminConfigActivator({
     }
   }
 
-  async function atomicReplace(targetPath, content) {
+  async function atomicReplace(targetPath, content, { gid = ROOT_GID, mode = CONFIG_MODE } = {}) {
     const temporaryPath = `${targetPath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
     try {
-      await writeFileFn(temporaryPath, content, { mode: CONFIG_MODE, flag: 'wx' });
-      await chownFn(temporaryPath, ROOT_UID, ROOT_GID);
-      await chmodFn(temporaryPath, CONFIG_MODE);
+      await writeFileFn(temporaryPath, content, { mode, flag: 'wx' });
+      await chownFn(temporaryPath, ROOT_UID, gid);
+      await chmodFn(temporaryPath, mode);
       await renameFn(temporaryPath, targetPath);
     } catch (error) {
       try { await rmFn(temporaryPath, { force: true }); } catch {}
@@ -356,6 +411,10 @@ export function createPhpMyAdminConfigActivator({
       'phpmyadmin_nginx_config_invalid',
       'phpMyAdmin Nginx configuration validation failed',
     );
+  }
+
+  async function validatePhpFile(targetPath, code, message) {
+    await runCommand(PHP, ['-l', targetPath], code, message);
   }
 
   async function reloadFpm() {
@@ -464,6 +523,20 @@ export function createPhpMyAdminConfigActivator({
     try {
       const manifest = await backupManager.loadManifest(transactionId);
       await backupManager.restoreConfiguration(transactionId);
+      if (manifest.files[2]?.exists) {
+        await validatePhpFile(
+          phpMyAdminSignonTemplatePolicy.configPath,
+          'phpmyadmin_signon_config_invalid',
+          'Previous phpMyAdmin signon configuration validation failed',
+        );
+      }
+      if (manifest.files[3]?.exists) {
+        await validatePhpFile(
+          phpMyAdminSignonTemplatePolicy.bridgePath,
+          'phpmyadmin_signon_bridge_invalid',
+          'Previous phpMyAdmin signon bridge validation failed',
+        );
+      }
       await validateFpmConfig();
       await validateNginxConfig();
       await reloadFpm();
@@ -514,21 +587,26 @@ export function createPhpMyAdminConfigActivator({
       }),
       assertParentDirectory('/etc/php/8.3/fpm/pool.d'),
       assertParentDirectory('/etc/nginx/sites-enabled'),
+      assertParentDirectory('/etc/phpmyadmin/conf.d'),
       assertParentDirectory(phpMyAdminNginxTemplatePolicy.documentRoot),
+      assertSignonBridgeDirectory(runtimeIdentity),
     ]);
     await ensureGatewayDirectory(gatewayGroup);
 
-    const [stagedFpm, stagedNginx] = await Promise.all([
+    const [stagedFpm, stagedNginx, stagedSignonConfig, stagedSignonBridge] = await Promise.all([
       configManager.inspectStagedFpmPool(expected.fpm),
       configManager.inspectStagedNginxConfig(expected.nginx),
+      configManager.inspectStagedSignonConfig(expected.signonConfig),
+      configManager.inspectStagedSignonBridge(expected.signonBridge),
     ]);
-    if (!stagedFpm?.satisfied || !stagedNginx?.satisfied) {
+    if (!stagedFpm?.satisfied || !stagedNginx?.satisfied
+      || !stagedSignonConfig?.satisfied || !stagedSignonBridge?.satisfied) {
       throw activationError(
         'phpmyadmin_activation_prerequisite_missing',
         'phpMyAdmin staged configuration is missing',
       );
     }
-    const [fpmContent, nginxContent] = await Promise.all([
+    const [fpmContent, nginxContent, signonConfigContent, signonBridgeContent] = await Promise.all([
       readStaged(
         configManager.stagedFpmPath(expected.fpm.sha256),
         expected.fpm.artifact.sha256,
@@ -539,14 +617,55 @@ export function createPhpMyAdminConfigActivator({
         expected.nginx.artifact.sha256,
         expected.nginx.artifact.bytes,
       ),
+      readStaged(
+        configManager.stagedSignonConfigPath(expected.signonConfig.sha256),
+        expected.signonConfig.artifact.sha256,
+        expected.signonConfig.artifact.bytes,
+      ),
+      readStaged(
+        configManager.stagedSignonBridgePath(expected.signonBridge.sha256),
+        expected.signonBridge.artifact.sha256,
+        expected.signonBridge.artifact.bytes,
+      ),
     ]);
+
+    await validatePhpFile(
+      configManager.stagedSignonConfigPath(expected.signonConfig.sha256),
+      'phpmyadmin_signon_config_invalid',
+      'phpMyAdmin staged signon configuration validation failed',
+    );
+    await validatePhpFile(
+      configManager.stagedSignonBridgePath(expected.signonBridge.sha256),
+      'phpmyadmin_signon_bridge_invalid',
+      'phpMyAdmin staged signon bridge validation failed',
+    );
 
     await backupManager.backupConfiguration(tx);
     let mutationStarted = false;
     try {
       mutationStarted = true;
+      await atomicReplace(
+        phpMyAdminSignonTemplatePolicy.bridgePath,
+        signonBridgeContent,
+        { gid: runtimeIdentity.gid, mode: phpMyAdminSignonTemplatePolicy.bridgeMode },
+      );
       await atomicReplace(phpMyAdminFpmTemplatePolicy.poolPath, fpmContent);
       await atomicReplace(phpMyAdminNginxTemplatePolicy.configPath, nginxContent);
+      await atomicReplace(
+        phpMyAdminSignonTemplatePolicy.configPath,
+        signonConfigContent,
+        { gid: wwwIdentity.gid, mode: phpMyAdminSignonTemplatePolicy.configMode },
+      );
+      await validatePhpFile(
+        phpMyAdminSignonTemplatePolicy.configPath,
+        'phpmyadmin_signon_config_invalid',
+        'phpMyAdmin signon configuration validation failed',
+      );
+      await validatePhpFile(
+        phpMyAdminSignonTemplatePolicy.bridgePath,
+        'phpmyadmin_signon_bridge_invalid',
+        'phpMyAdmin signon bridge validation failed',
+      );
       await validateFpmConfig();
       await validateNginxConfig();
       await reloadFpm();
@@ -559,6 +678,8 @@ export function createPhpMyAdminConfigActivator({
         previewSha256: previewSha256(expected),
         fpmSha256: expected.fpm.sha256,
         nginxSha256: expected.nginx.sha256,
+        signonConfigSha256: expected.signonConfig.sha256,
+        signonBridgeSha256: expected.signonBridge.sha256,
         fpmSocketHealthy: true,
         gatewaySocketHealthy: true,
         httpHealthy: true,
@@ -588,6 +709,7 @@ export function createPhpMyAdminConfigActivator({
 export const phpMyAdminConfigActivatorInternals = Object.freeze({
   getentPath: GETENT,
   idPath: ID,
+  phpPath: PHP,
   phpFpmPath: PHP_FPM,
   nginxPath: NGINX,
   curlPath: CURL,
@@ -595,6 +717,7 @@ export const phpMyAdminConfigActivatorInternals = Object.freeze({
   maxOutput: MAX_OUTPUT,
   configMode: CONFIG_MODE,
   privateDirectoryMode: PRIVATE_DIRECTORY_MODE,
+  signonBridgeDirectoryMode: SIGNON_BRIDGE_DIRECTORY_MODE,
   gatewayDirectoryMode: GATEWAY_DIRECTORY_MODE,
   gatewayDirectory: GATEWAY_DIRECTORY,
   socketMode: SOCKET_MODE,
