@@ -100,6 +100,7 @@ function publicState(domain, authoritative, parent) {
       status: parent.status,
       records: parent.records,
       matchingRecords: matches,
+      ttl: Number.isSafeInteger(parent.ttl) && parent.ttl >= 0 ? parent.ttl : null,
       errorCode: parent.errorCode,
       checkedAt: parent.checkedAt,
     }),

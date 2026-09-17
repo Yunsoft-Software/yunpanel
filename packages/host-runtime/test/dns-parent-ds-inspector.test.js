@@ -52,10 +52,11 @@ test('parent DS inspector returns canonical DS if any parent authoritative names
   });
   const result = await inspector.inspect({ domain: 'Example.COM.' });
 
-  assert.equal(result.version, 2);
+  assert.equal(result.version, 3);
   assert.equal(result.domain, 'example.com');
   assert.equal(result.status, 'present');
   assert.deepEqual(result.records, ['12345 13 2 AABBCCDD']);
+  assert.equal(result.ttl, 3600);
   assert.deepEqual(result.nameservers, ['a.gtld-servers.net', 'b.gtld-servers.net']);
   assert.equal(result.errorCode, null);
   assert.equal(result.checkedAt, '2026-09-16T00:30:00.000Z');
@@ -69,6 +70,7 @@ test('parent DS inspector reports absent only when every discovered parent NS au
 
   assert.equal(result.status, 'absent');
   assert.deepEqual(result.records, []);
+  assert.equal(result.ttl, null);
   assert.equal(result.errorCode, null);
   assert.equal(runtime.calls.filter((args) => args.includes('+norecurse')).length, 2);
 });
@@ -128,4 +130,20 @@ test('parent DS parsers ignore unrelated and malformed answer rows', () => {
   );
   assert.equal(dnsParentDsInspectorInternals.authoritativeAnswer(stdout), true);
   assert.equal(dnsParentDsInspectorInternals.parentName('foo.example.com'), 'example.com');
+});
+
+test('parent DS TTL evidence uses the longest authoritative cache lifetime', async () => {
+  const runtime = runner({
+    'a.gtld-servers.net': dig('NOERROR', [
+      'example.com. 300 IN DS 12345 13 2 AABBCCDD',
+    ], { authoritative: true }),
+    'b.gtld-servers.net': dig('NOERROR', [
+      'example.com. 900 IN DS 12345 13 2 AABBCCDD',
+    ], { authoritative: true }),
+  });
+  const inspector = createDnsParentDsInspector({ runDig: runtime.runDig });
+  const result = await inspector.inspect({ domain: 'example.com' });
+
+  assert.equal(result.status, 'present');
+  assert.equal(result.ttl, 900);
 });
