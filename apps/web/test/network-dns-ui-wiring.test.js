@@ -16,6 +16,7 @@ test('Settings exposes real Network DNS identity, PowerDNS and delegation contro
   assert.match(panel, /applyPowerDnsAuthoritative/);
   assert.match(panel, /resolvePowerDnsRecovery/);
   assert.match(panel, /retryPowerDnsRecovery/);
+  assert.match(panel, /rollbackPowerDnsAuthoritative/);
   assert.match(panel, /inspectDnsDelegation/);
   assert.match(panel, /Sunucu hostname authority değişmez/);
   assert.match(panel, /Public reachability ayrı kapı/);
@@ -23,12 +24,14 @@ test('Settings exposes real Network DNS identity, PowerDNS and delegation contro
   assert.match(panel, /automatic replay kapalı/);
   assert.match(panel, /Recovery durumunu incele/);
   assert.match(panel, /Inspect sonrası retry/);
+  assert.match(panel, /Önceki PowerDNS state'ine dön/);
   assert.match(panel, /Paket, config veya servis mutasyonu yapılmayacak/);
   assert.match(panel, /YunPanel registrar hesabınızda otomatik değişiklik yapmaz/);
   assert.match(client, /\/identity\/preview/);
   assert.match(client, /\/authoritative\/apply/);
   assert.match(client, /\/authoritative\/recovery\/resolve/);
   assert.match(client, /\/authoritative\/recovery\/retry/);
+  assert.match(client, /\/authoritative\/rollback/);
   assert.match(client, /\/delegation/);
   assert.doesNotMatch(panel, /window\.(?:alert|confirm|prompt)|<select|privateKey|apiKey/i);
 });

@@ -54,6 +54,7 @@ function mountWith(templateRegistry) {
       apply: async () => ({}),
       resolve: async () => ({}),
       retry: async () => ({}),
+      rollback: async () => ({}),
     },
   });
   return app;
@@ -197,6 +198,7 @@ test('PowerDNS HTTP forwards an exact authoritative recovery fence', async () =>
       apply: async () => ({}),
       resolve: async (...args) => { calls.push(args); return { resolved: true }; },
       retry: async (...args) => { calls.push(args); return { retried: true }; },
+      rollback: async (...args) => { calls.push(args); return { rolledBack: true }; },
     },
   });
   const body = {
@@ -229,4 +231,27 @@ test('PowerDNS HTTP forwards an exact authoritative recovery fence', async () =>
     (error) => error instanceof PowerDnsHttpError && error.code === 'powerdns_recovery_input_invalid',
   );
   assert.equal(calls.length, 2);
+
+  const rollbackBody = {
+    operationId: 'operation-1',
+    expectedUpdatedAt: '2026-09-17T12:02:00.000Z',
+    snapshotDigest: 'd'.repeat(64),
+    confirmation: `rollback-powerdns:${serverId}:operation-1:2026-09-17T12:02:00.000Z:${'d'.repeat(64)}`,
+  };
+  assert.deepEqual(
+    await invoke(app, 'POST /api/servers/:serverId/dns/authoritative/rollback', {
+      params: { serverId },
+      body: rollbackBody,
+    }),
+    { data: { rolledBack: true } },
+  );
+  assert.deepEqual(calls.at(-1), [serverId, rollbackBody]);
+  await assert.rejects(
+    invoke(app, 'POST /api/servers/:serverId/dns/authoritative/rollback', {
+      params: { serverId },
+      body: { ...rollbackBody, snapshotDigest: 'invalid' },
+    }),
+    (error) => error instanceof PowerDnsHttpError && error.code === 'powerdns_rollback_input_invalid',
+  );
+  assert.equal(calls.length, 3);
 });

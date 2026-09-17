@@ -13,6 +13,7 @@ function base({ satisfied = true } = {}) {
       async operation() { calls.push(['operation']); return { id: 'operation-1', status: 'applying' }; },
       async resolve(intent, recovery) { calls.push(['resolve', intent, recovery]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
       async retry(intent, recovery) { calls.push(['retry', intent, recovery]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
+      async rollback(intent, recovery) { calls.push(['rollback', intent, recovery]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
     },
   };
 }
@@ -81,6 +82,23 @@ test('PowerDNS explicit retry requires healthy socket evidence after base retry'
   const result = await manager.retry(intent, recovery);
   assert.equal(result.sockets.tcp53, true);
   assert.deepEqual(runtime.calls, [['retry', intent, recovery]]);
+  assert.deepEqual(health.calls, ['inspect']);
+});
+
+test('PowerDNS explicit rollback requires healthy authoritative socket evidence', async () => {
+  const runtime = base();
+  const health = sockets();
+  const manager = createPowerDnsAuthoritativeReadyManager({ manager: runtime.manager, socketInspector: health.inspector });
+  const intent = { serverId: 'server-1' };
+  const recovery = {
+    operationId: 'operation-1',
+    expectedUpdatedAt: '2026-09-17T12:00:00.000Z',
+    snapshotDigest: 'a'.repeat(64),
+  };
+
+  const result = await manager.rollback(intent, recovery);
+  assert.equal(result.sockets.recursive, false);
+  assert.deepEqual(runtime.calls, [['rollback', intent, recovery]]);
   assert.deepEqual(health.calls, ['inspect']);
 });
 

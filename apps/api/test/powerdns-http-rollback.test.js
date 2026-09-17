@@ -76,6 +76,7 @@ function fixture() {
       apply: async () => ({}),
       resolve: async () => ({}),
       retry: async () => ({}),
+      rollback: async () => ({}),
     },
   });
   return { app, calls };

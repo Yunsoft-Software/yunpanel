@@ -49,6 +49,7 @@ test('PowerDNS route composition mounts secondary DNS status', () => {
       apply: async () => ({}),
       resolve: async () => ({}),
       retry: async () => ({}),
+      rollback: async () => ({}),
     },
   });
 

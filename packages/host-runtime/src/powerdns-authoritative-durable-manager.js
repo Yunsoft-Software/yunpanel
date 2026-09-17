@@ -7,9 +7,10 @@ import {
   PowerDnsAuthoritativeManagerError,
 } from './powerdns-authoritative-manager.js';
 
-const STORE_VERSION = 1;
+const LEGACY_STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const DEFAULT_OPERATION_PATH = '/var/lib/yunpanel/staging/powerdns/authoritative-operation.json';
-const STATUSES = new Set(['applying', 'succeeded', 'failed']);
+const STATUSES = new Set(['applying', 'succeeded', 'failed', 'rolling_back', 'rolled_back', 'rollback_failed']);
 const OPERATION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const DETERMINISTIC_FAILURE_CODES = new Set([
   'powerdns_recursor_conflict',
@@ -98,7 +99,8 @@ function persistedOperation(value) {
   ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
-    || value.version !== STORE_VERSION || typeof value.id !== 'string' || !OPERATION_ID_PATTERN.test(value.id)
+    || ![LEGACY_STORE_VERSION, STORE_VERSION].includes(value.version)
+    || typeof value.id !== 'string' || !OPERATION_ID_PATTERN.test(value.id)
     || typeof value.serverId !== 'string' || !value.serverId
     || !Number.isSafeInteger(value.apiKeyRevision) || value.apiKeyRevision < 1
     || !STATUSES.has(value.status)) {
@@ -119,11 +121,12 @@ function persistedOperation(value) {
     createdAt: timestamp(value.createdAt),
     updatedAt: timestamp(value.updatedAt),
   });
-  if (operation.status === 'succeeded' && operation.result === null) {
-    throw new PowerDnsAuthoritativeManagerError('powerdns_operation_state_invalid', 'Succeeded PowerDNS operation is missing result evidence');
+  if (['succeeded', 'rolling_back', 'rolled_back', 'rollback_failed'].includes(operation.status)
+    && operation.result === null) {
+    throw new PowerDnsAuthoritativeManagerError('powerdns_operation_state_invalid', 'Completed PowerDNS apply evidence is missing');
   }
-  if (operation.status !== 'succeeded' && operation.result !== null) {
-    throw new PowerDnsAuthoritativeManagerError('powerdns_operation_state_invalid', 'Incomplete PowerDNS operation cannot contain result evidence');
+  if (['applying', 'failed'].includes(operation.status) && operation.result !== null) {
+    throw new PowerDnsAuthoritativeManagerError('powerdns_operation_state_invalid', 'Incomplete PowerDNS apply cannot contain result evidence');
   }
   if (operation.status === 'applying' && operation.lastError !== null
     && !operation.lastError.code.startsWith('powerdns_')) {
@@ -182,10 +185,12 @@ function publicOperation(operation) {
     evidence: operation.result,
     failure: operation.lastError ? Object.freeze({ code: operation.lastError.code }) : null,
     recovery: Object.freeze({
-      required: operation.status === 'applying',
-      automaticReplayBlocked: operation.status === 'applying',
-      reason: operation.status === 'applying'
-        ? operation.lastError?.code ?? 'powerdns_interrupted_apply'
+      required: ['applying', 'rolling_back'].includes(operation.status),
+      automaticReplayBlocked: ['applying', 'rolling_back'].includes(operation.status),
+      reason: ['applying', 'rolling_back'].includes(operation.status)
+        ? operation.lastError?.code ?? (operation.status === 'rolling_back'
+          ? 'powerdns_interrupted_rollback'
+          : 'powerdns_interrupted_apply')
         : null,
     }),
     createdAt: operation.createdAt,
@@ -284,7 +289,34 @@ export function createPowerDnsAuthoritativeDurableManager({
   }
 
   async function operation() {
-    return publicOperation(await readOperation());
+    const current = await readOperation();
+    const projection = publicOperation(current);
+    if (!projection || typeof manager.rollbackStatus !== 'function') return projection;
+    const snapshot = await manager.rollbackStatus({
+      operationId: current.id,
+      serverId: current.serverId,
+      credentialRevision: current.apiKeyRevision,
+    });
+    const completed = current.status === 'rolled_back';
+    const eligible = ['succeeded', 'rolling_back', 'rollback_failed'].includes(current.status);
+    return Object.freeze({
+      ...projection,
+      rollback: Object.freeze({
+        status: current.status === 'rolling_back'
+          ? 'applying'
+          : completed
+            ? 'succeeded'
+            : current.status === 'rollback_failed'
+              ? 'failed'
+              : 'idle',
+        available: snapshot.available === true && eligible,
+        reason: completed ? 'powerdns_rollback_already_completed' : snapshot.reason,
+        snapshotDigest: snapshot.snapshotDigest ?? null,
+        previousSecondaryDns: snapshot.previousSecondaryDns ?? null,
+        snapshotCreatedAt: snapshot.createdAt ?? null,
+        automaticReplayBlocked: current.status === 'rolling_back',
+      }),
+    });
   }
 
   async function recoveryTarget(rawIntent, { operationId, expectedUpdatedAt } = {}) {
@@ -409,9 +441,116 @@ export function createPowerDnsAuthoritativeDurableManager({
     return serializeMutation(() => retryOnce(rawIntent, recovery));
   }
 
+  async function rollbackOnce(rawIntent, recovery = {}) {
+    if (typeof manager.rollback !== 'function' || typeof manager.rollbackStatus !== 'function') {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_unavailable',
+        'PowerDNS durable rollback dependency is unavailable',
+      );
+    }
+    const fields = new Set(['operationId', 'expectedUpdatedAt', 'snapshotDigest']);
+    if (!recovery || typeof recovery !== 'object' || Array.isArray(recovery)
+      || Object.keys(recovery).length !== fields.size
+      || Object.keys(recovery).some((field) => !fields.has(field))
+      || typeof recovery.operationId !== 'string' || !OPERATION_ID_PATTERN.test(recovery.operationId)
+      || typeof recovery.expectedUpdatedAt !== 'string' || !recovery.expectedUpdatedAt
+      || typeof recovery.snapshotDigest !== 'string' || !/^[a-f0-9]{64}$/.test(recovery.snapshotDigest)) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_request_invalid',
+        'PowerDNS rollback requires exact operation, journal revision and snapshot digest',
+      );
+    }
+    const spec = powerDnsAuthoritativeManagerInternals.normalizeIntent(rawIntent);
+    const existing = await readOperation();
+    if (!existing || !['succeeded', 'rolling_back', 'rolled_back', 'rollback_failed'].includes(existing.status)) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_not_available',
+        'PowerDNS operation is not in a rollback-capable state',
+      );
+    }
+    if (existing.id !== recovery.operationId || existing.updatedAt !== recovery.expectedUpdatedAt) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_stale',
+        'PowerDNS rollback request does not match the current operation journal',
+      );
+    }
+    if (!operationMatches(existing, spec)) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_operation_conflict',
+        'PowerDNS rollback intent changed after the selected apply operation',
+      );
+    }
+    const snapshot = await manager.rollbackStatus({
+      operationId: existing.id,
+      serverId: existing.serverId,
+      credentialRevision: existing.apiKeyRevision,
+    });
+    if (snapshot.available !== true || snapshot.snapshotDigest !== recovery.snapshotDigest) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_snapshot_stale',
+        'PowerDNS rollback snapshot is unavailable or no longer matches the request',
+      );
+    }
+    const previousSpec = powerDnsAuthoritativeManagerInternals.normalizeIntent({
+      ...spec,
+      secondaryDns: snapshot.previousSecondaryDns,
+    });
+    if (existing.status === 'rolled_back') {
+      const inspected = await manager.inspect(previousSpec);
+      if (inspected?.satisfied !== true) {
+        throw new PowerDnsAuthoritativeManagerError(
+          'powerdns_rollback_recovery_unverified',
+          'Completed PowerDNS rollback no longer matches current host state',
+        );
+      }
+      return inspected;
+    }
+
+    const rollingBack = existing.status === 'rolling_back'
+      ? existing
+      : await mutate(existing, {
+        status: 'rolling_back',
+        result: existing.result,
+        lastError: Object.freeze({
+          code: 'powerdns_explicit_rollback_started',
+          message: 'Operator-authorized PowerDNS rollback started from an exact snapshot',
+        }),
+      });
+    try {
+      const restored = await manager.rollback(spec, {
+        operationId: rollingBack.id,
+        snapshotDigest: recovery.snapshotDigest,
+      });
+      const result = evidenceFromInspection(previousSpec, restored);
+      await mutate(rollingBack, { status: 'rolled_back', result, lastError: null });
+      return restored;
+    } catch (error) {
+      const failure = safeFailure(error);
+      await mutate(rollingBack, { status: 'rollback_failed', result: rollingBack.result, lastError: failure });
+      throw error;
+    }
+  }
+
+  function rollback(rawIntent, recovery) {
+    return serializeMutation(() => rollbackOnce(rawIntent, recovery));
+  }
+
   async function applyOnce(rawIntent) {
     const spec = powerDnsAuthoritativeManagerInternals.normalizeIntent(rawIntent);
     const existing = await readOperation();
+    if (existing?.status === 'rolling_back') {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_recovery_pending',
+        'Interrupted PowerDNS rollback must be explicitly resolved before applying authoritative intent',
+      );
+    }
+    if (existing?.status === 'rollback_failed'
+      && existing.lastError?.code === 'powerdns_rollback_compensation_failed') {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_recovery_pending',
+        'PowerDNS rollback compensation failed; explicit recovery is required before another apply',
+      );
+    }
     if (existing?.status === 'applying') {
       if (!operationMatches(existing, spec)) {
         throw new PowerDnsAuthoritativeManagerError(
@@ -433,11 +572,12 @@ export function createPowerDnsAuthoritativeDurableManager({
     return serializeMutation(() => applyOnce(rawIntent));
   }
 
-  return Object.freeze({ inspect, apply, operation, resolve, retry });
+  return Object.freeze({ inspect, apply, operation, resolve, retry, rollback });
 }
 
 export const powerDnsAuthoritativeDurableManagerInternals = Object.freeze({
   storeVersion: STORE_VERSION,
+  legacyStoreVersion: LEGACY_STORE_VERSION,
   operationPath: DEFAULT_OPERATION_PATH,
   statuses: Object.freeze([...STATUSES]),
   deterministicFailureCodes: Object.freeze([...DETERMINISTIC_FAILURE_CODES]),

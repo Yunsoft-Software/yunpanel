@@ -74,6 +74,22 @@ export function retryPowerDnsRecovery(serverId, operation) {
   });
 }
 
+export function rollbackPowerDnsAuthoritative(serverId, operation) {
+  if (!operation?.rollback?.available || !operation.id || !operation.updatedAt
+    || !operation.rollback.snapshotDigest || !operation.rollback.confirmation) {
+    throw new Error('Current PowerDNS rollback operation is required');
+  }
+  return panelRequest(serverDnsPath(serverId, '/authoritative/rollback'), {
+    method: 'POST',
+    body: {
+      operationId: operation.id,
+      expectedUpdatedAt: operation.updatedAt,
+      snapshotDigest: operation.rollback.snapshotDigest,
+      confirmation: operation.rollback.confirmation,
+    },
+  });
+}
+
 export function inspectDnsDelegation(serverId, domain) {
   if (typeof domain !== 'string' || !domain.trim()) throw new Error('Delegation domain is required');
   return panelRequest(`${serverDnsPath(serverId, '/delegation')}?domain=${encodeURIComponent(domain.trim())}`);

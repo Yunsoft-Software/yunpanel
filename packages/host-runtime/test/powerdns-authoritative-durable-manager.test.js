@@ -8,6 +8,8 @@ import { PowerDnsAuthoritativeManagerError } from '../src/powerdns-authoritative
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const apiKey = 'A'.repeat(43);
 const appliedAt = '2026-09-16T12:00:00.000Z';
+const snapshotDigest = 'b'.repeat(64);
+const previousSecondaryDns = ['198.51.100.53'];
 
 function intent(overrides = {}) {
   return {
@@ -57,6 +59,53 @@ function memoryJournal() {
   };
 }
 
+function rollbackCapableHost({ rollbackError = null } = {}) {
+  let state = 'missing';
+  const calls = [];
+  return {
+    calls,
+    manager: {
+      async inspect(value) {
+        calls.push(['inspect', value.secondaryDns]);
+        const previous = JSON.stringify(value.secondaryDns) === JSON.stringify(previousSecondaryDns);
+        if ((state === 'current' && !previous) || (state === 'previous' && previous)) {
+          return satisfied({
+            secondaryDns: value.secondaryDns,
+            receipt: { appliedAt: previous ? '2026-09-15T12:00:00.000Z' : appliedAt },
+          });
+        }
+        return unsatisfied('powerdns_config_missing');
+      },
+      async apply() {
+        calls.push(['apply']);
+        state = 'current';
+        return satisfied();
+      },
+      async rollbackStatus() {
+        calls.push(['rollbackStatus']);
+        return {
+          available: true,
+          reason: null,
+          snapshotDigest,
+          previousSecondaryDns,
+          createdAt: '2026-09-16T11:59:00.000Z',
+        };
+      },
+      async rollback(_value, context) {
+        calls.push(['rollback', context]);
+        if (rollbackError) throw rollbackError;
+        state = 'previous';
+        return satisfied({
+          secondaryDns: previousSecondaryDns,
+          receipt: { appliedAt: '2026-09-15T12:00:00.000Z' },
+          rollback: { operationId: context.operationId, snapshotDigest: context.snapshotDigest },
+        });
+      },
+    },
+    setState(value) { state = value; },
+  };
+}
+
 test('PowerDNS durable manager persists applying evidence before host mutation and succeeds with verified evidence', async () => {
   const journal = memoryJournal();
   const operationPath = '/state/powerdns-operation.json';
@@ -89,7 +138,7 @@ test('PowerDNS durable manager persists applying evidence before host mutation a
   assert.equal(persisted.result.packages[0].version, '4.8.3-1ubuntu1');
   assert.equal(persisted.apiKey, undefined);
   assert.deepEqual(await manager.operation(), {
-    version: 1,
+    version: 2,
     id: 'operation-1',
     serverId,
     credentialRevision: 2,
@@ -382,4 +431,179 @@ test('PowerDNS durable manager records rollback snapshot preflight failure witho
   const persisted = JSON.parse(journal.files.get(operationPath));
   assert.equal(persisted.status, 'failed');
   assert.equal(persisted.lastError.code, 'powerdns_rollback_snapshot_failed');
+});
+
+test('PowerDNS durable manager journals explicit rollback before host mutation and records previous-state evidence', async () => {
+  const journal = memoryJournal();
+  const operationPath = '/state/powerdns-operation.json';
+  const host = rollbackCapableHost();
+  const manager = createPowerDnsAuthoritativeDurableManager({
+    manager: host.manager,
+    operationPath,
+    now: () => Date.parse(appliedAt),
+    idFactory: () => 'operation-durable-rollback',
+    ...journal,
+  });
+  await manager.apply(intent());
+  const operation = await manager.operation();
+  assert.deepEqual(operation.rollback, {
+    status: 'idle',
+    available: true,
+    reason: null,
+    snapshotDigest,
+    previousSecondaryDns,
+    snapshotCreatedAt: '2026-09-16T11:59:00.000Z',
+    automaticReplayBlocked: false,
+  });
+
+  const result = await manager.rollback(intent(), {
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    snapshotDigest,
+  });
+
+  assert.equal(result.satisfied, true);
+  const persisted = JSON.parse(journal.files.get(operationPath));
+  assert.equal(persisted.version, 2);
+  assert.equal(persisted.status, 'rolled_back');
+  assert.deepEqual(persisted.result.secondaryDns, previousSecondaryDns);
+  assert.deepEqual(host.calls.find(([name]) => name === 'rollback'), [
+    'rollback',
+    { operationId: 'operation-durable-rollback', snapshotDigest },
+  ]);
+  const completed = await manager.operation();
+  assert.equal(completed.status, 'rolled_back');
+  assert.equal(completed.rollback.status, 'succeeded');
+  assert.equal(completed.rollback.available, false);
+  assert.equal(completed.rollback.reason, 'powerdns_rollback_already_completed');
+});
+
+test('PowerDNS durable rollback rejects a stale snapshot without changing succeeded journal state', async () => {
+  const journal = memoryJournal();
+  const operationPath = '/state/powerdns-operation.json';
+  const host = rollbackCapableHost();
+  const manager = createPowerDnsAuthoritativeDurableManager({
+    manager: host.manager,
+    operationPath,
+    now: () => Date.parse(appliedAt),
+    idFactory: () => 'operation-rollback-stale',
+    ...journal,
+  });
+  await manager.apply(intent());
+  const operation = await manager.operation();
+
+  await assert.rejects(
+    manager.rollback(intent(), {
+      operationId: operation.id,
+      expectedUpdatedAt: operation.updatedAt,
+      snapshotDigest: 'c'.repeat(64),
+    }),
+    (error) => error instanceof PowerDnsAuthoritativeManagerError
+      && error.code === 'powerdns_rollback_snapshot_stale',
+  );
+  assert.equal(JSON.parse(journal.files.get(operationPath)).status, 'succeeded');
+  assert.equal(host.calls.some(([name]) => name === 'rollback'), false);
+});
+
+test('PowerDNS durable manager resumes only an explicit interrupted rollback after restart', async () => {
+  const journal = memoryJournal();
+  const operationPath = '/state/powerdns-operation.json';
+  const host = rollbackCapableHost();
+  const first = createPowerDnsAuthoritativeDurableManager({
+    manager: host.manager,
+    operationPath,
+    now: () => Date.parse(appliedAt),
+    idFactory: () => 'operation-interrupted-rollback',
+    ...journal,
+  });
+  await first.apply(intent());
+  const persisted = JSON.parse(journal.files.get(operationPath));
+  persisted.status = 'rolling_back';
+  persisted.lastError = {
+    code: 'powerdns_explicit_rollback_started',
+    message: 'Operator-authorized PowerDNS rollback started from an exact snapshot',
+  };
+  persisted.updatedAt = '2026-09-16T12:00:01.000Z';
+  journal.files.set(operationPath, JSON.stringify(persisted));
+
+  const restarted = createPowerDnsAuthoritativeDurableManager({
+    manager: host.manager,
+    operationPath,
+    now: () => Date.parse('2026-09-16T12:00:02.000Z'),
+    ...journal,
+  });
+  const interrupted = await restarted.operation();
+  assert.equal(interrupted.status, 'rolling_back');
+  assert.equal(interrupted.recovery.required, true);
+  assert.equal(interrupted.rollback.automaticReplayBlocked, true);
+  await assert.rejects(
+    restarted.apply(intent()),
+    (error) => error.code === 'powerdns_rollback_recovery_pending',
+  );
+
+  await restarted.rollback(intent(), {
+    operationId: interrupted.id,
+    expectedUpdatedAt: interrupted.updatedAt,
+    snapshotDigest,
+  });
+  assert.equal((await restarted.operation()).status, 'rolled_back');
+});
+
+test('PowerDNS durable manager preserves rollback failure evidence and blocks apply after failed compensation', async () => {
+  const journal = memoryJournal();
+  const operationPath = '/state/powerdns-operation.json';
+  const host = rollbackCapableHost({
+    rollbackError: new PowerDnsAuthoritativeManagerError(
+      'powerdns_rollback_compensation_failed',
+      'current state could not be recovered',
+    ),
+  });
+  const manager = createPowerDnsAuthoritativeDurableManager({
+    manager: host.manager,
+    operationPath,
+    now: () => Date.parse(appliedAt),
+    idFactory: () => 'operation-rollback-failed',
+    ...journal,
+  });
+  await manager.apply(intent());
+  const operation = await manager.operation();
+
+  await assert.rejects(
+    manager.rollback(intent(), {
+      operationId: operation.id,
+      expectedUpdatedAt: operation.updatedAt,
+      snapshotDigest,
+    }),
+    (error) => error.code === 'powerdns_rollback_compensation_failed',
+  );
+  const failed = await manager.operation();
+  assert.equal(failed.status, 'rollback_failed');
+  assert.equal(failed.failure.code, 'powerdns_rollback_compensation_failed');
+  assert.equal(failed.rollback.status, 'failed');
+  await assert.rejects(
+    manager.apply(intent()),
+    (error) => error.code === 'powerdns_rollback_recovery_pending',
+  );
+});
+
+test('PowerDNS durable operation reads a legacy version-one journal into version two state', async () => {
+  const journal = memoryJournal();
+  const operationPath = '/state/powerdns-operation.json';
+  const host = rollbackCapableHost();
+  const manager = createPowerDnsAuthoritativeDurableManager({
+    manager: host.manager,
+    operationPath,
+    now: () => Date.parse(appliedAt),
+    idFactory: () => 'operation-legacy-journal',
+    ...journal,
+  });
+  await manager.apply(intent());
+  const legacy = JSON.parse(journal.files.get(operationPath));
+  legacy.version = 1;
+  journal.files.set(operationPath, JSON.stringify(legacy));
+
+  const operation = await manager.operation();
+  assert.equal(operation.version, 2);
+  assert.equal(operation.status, 'succeeded');
+  assert.equal(JSON.parse(journal.files.get(operationPath)).version, 1);
 });

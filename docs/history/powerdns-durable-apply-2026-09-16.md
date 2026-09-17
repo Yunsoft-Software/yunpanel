@@ -27,6 +27,9 @@ Bu kayıt P0.2 PowerDNS lifecycle hardening diliminde kaynakta tamamlanan işler
 - Secure rollback exact operation ID + snapshot digest + server/credential fence'ini doğrular; current config/receipt'i mutation öncesi iki kez okuyup verified current host state ile bağlar. Drift veya stale digest dosya mutation'ından önce reddedilir.
 - Config ve authoritative receipt fixed managed path'lere ayrı atomik replacement ile restore edilir. Aktivasyon/health başarısızsa işlem öncesi current dosyalar geri konur ve current intent yeniden aktive edilir; bu da doğrulanamazsa `powerdns_rollback_compensation_failed` açıkça bırakılır.
 - Aynı snapshot restart sonrasında kullanılabilir. Exact previous dosyalar zaten restore edilmiş ve healthy ise tekrar rollback hiçbir dosya yazımı veya service restart yapmadan idempotent sonuç döndürür.
+- Durable authoritative journal schema v2, eski v1 kaydı okuyarak `rolling_back`, `rolled_back` ve `rollback_failed` durumlarını tutar. Host mutation'dan önce `rolling_back` checkpoint'i yazılır; restart otomatik replay yapmaz, yalnız fresh operation/timestamp/snapshot fence'li explicit rollback devam eder.
+- Durable operation projection rollback availability, snapshot digest, previous secondary topology, snapshot zamanı ve automatic-replay-blocked state'ini secret-free verir. Service exact typed confirmation üretir; authenticated rollback route'u ayrı common audit action'ına bağlıdır.
+- Mevcut Network DNS paneli aynı reusable typed-confirmation dialog ile snapshot rollback'i açar; stale digest/operation gönderemez ve `rolling_back` sırasında apply/recovery butonlarını yanlış yüzeye bağlamaz.
 
 ## Regression kapsamı
 
@@ -43,6 +46,8 @@ Kaynağa aşağıdaki regression testleri eklendi:
 - rollback snapshot'ın restart sonrasında doğrulanması, retry sırasında değişmemesi, raw API key taşımaması ve eksik receipt/credential-rotation durumlarının explicit unavailable kalması.
 - restore aktivasyonunun exact config/receipt kabulü, drift'i service mutation öncesi reddetmesi ve package install çalıştırmaması.
 - restart sonrası snapshot restore, stale digest/current drift reddi, successful idempotence, failed activation compensation ve explicit compensation failure.
+- journal v1→v2 okuma, mutation-before-checkpoint, restart sonrası explicit resume, stale snapshot reddi, rollback-failed evidence ve failed-compensation sonrası apply block;
+- service/HTTP typed confirmation + credential fence + common audit ve frontend exact request wiring.
 
 2026-09-17 snapshot diliminde host-runtime odak testleri desteklenen Node 24 ile çalıştırıldı ve 18/18 geçti. Ardından repository policy, bütün workspace testleri ve production build'i içeren `npm run check` başarıyla tamamlandı. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
 
@@ -52,6 +57,7 @@ Kaynağa aşağıdaki regression testleri eklendi:
 - Process/API kesintisi mutation ile evidence checkpoint arasına enjekte edilip restart sonrası inspect-first davranış doğrulanmalı.
 - Belirsiz apt/systemd sonucunda aynı mutation'ın otomatik ikinci kez çalışmadığı host command loglarıyla kanıtlanmalı.
 - Root-private rollback snapshot'ın gerçek dosya sahipliği/izinleri, process restart sonrası okunması, symlink/tamper reddi ve retry sırasında değişmemesi doğrulanmalı.
-- Secure rollback henüz durable rollback operation/evidence ve authenticated API/audit/panel yüzeyine bağlanmadı.
+- Config/receipt replacement ortasında process kaybı için verified-current compensation dosyaları henüz persist edilmiyor; bu crash window kapanmadan restart-safe rollback tamamlanmış sayılmaz.
+- UDP/TCP/recursion socket evidence ready wrapper'da kontrol edilse de durable `rolled_back` checkpoint'inden sonra çalışıyor; bu health gate transaction/journal başarı sınırının içine taşınmalı.
 - Package upgrade boyunca operation journal, authoritative receipt ve root-owned private izinlerin korunduğu doğrulanmalı.
 - Public UDP/TCP 53, delegation, secondary transfer/failover ve browser yüzeyi ayrı T-DNS kabul kapıları olarak açık kalır.

@@ -102,6 +102,9 @@ export function authoritativeOperationPresentation(operation) {
     applying: ['warning', 'Recovery incelemesi gerekli'],
     succeeded: ['succeeded', 'Uygulama tamamlandı'],
     failed: ['failed', 'Uygulama başarısız'],
+    rolling_back: ['warning', 'Rollback recovery gerekli'],
+    rolled_back: ['succeeded', 'Rollback tamamlandı'],
+    rollback_failed: ['failed', 'Rollback başarısız'],
   }[operation?.status];
   return value
     ? Object.freeze({ state: value[0], label: value[1] })

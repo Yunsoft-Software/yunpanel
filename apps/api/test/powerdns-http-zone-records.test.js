@@ -60,6 +60,7 @@ function mountWith(service) {
       apply: async () => ({}),
       resolve: async () => ({}),
       retry: async () => ({}),
+      rollback: async () => ({}),
     },
   });
   return app;

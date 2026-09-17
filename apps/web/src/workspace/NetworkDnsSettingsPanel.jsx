@@ -8,6 +8,7 @@ import {
   previewPowerDnsAuthoritative,
   previewServerDnsIdentity,
   resolvePowerDnsRecovery,
+  rollbackPowerDnsAuthoritative,
   retryPowerDnsRecovery,
 } from './network-dns-client.js';
 import {
@@ -136,6 +137,7 @@ export default function NetworkDnsSettingsPanel({ server, domains = [], canManag
   const [authoritativePreview, setAuthoritativePreview] = useState(null);
   const [recoveryOperation, setRecoveryOperation] = useState(null);
   const [retryOperation, setRetryOperation] = useState(null);
+  const [rollbackOperation, setRollbackOperation] = useState(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -184,6 +186,13 @@ export default function NetworkDnsSettingsPanel({ server, domains = [], canManag
     catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
   }
+  async function rollbackPowerDns() {
+    if (busy || !rollbackOperation) return;
+    setBusy(true); setError(null);
+    try { await rollbackPowerDnsAuthoritative(server.id, rollbackOperation); setRollbackOperation(null); await refresh(); }
+    catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
+    finally { setBusy(false); }
+  }
   const authoritativeState = authoritativePresentation(authoritative);
   const publicState = publicReachabilityPresentation(authoritative);
   const operationState = authoritativeOperationPresentation(authoritative?.operation);
@@ -205,10 +214,11 @@ export default function NetworkDnsSettingsPanel({ server, domains = [], canManag
       ['Recursive resolver', authoritative?.host?.sockets?.recursive === false ? 'Kapalı' : 'Doğrulanmadı'],
       ['Public UDP/53', reachabilityValue(authoritative?.publicReachability?.udp53)], ['Public TCP/53', reachabilityValue(authoritative?.publicReachability?.tcp53)],
       ['Public probe vantage', authoritative?.publicReachability?.vantage ?? 'Yapılandırılmadı'], ['Overall authoritative ready', authoritative?.overallReady ? 'Evet' : 'Hayır'],
-    ]} />{authoritative?.operation && <div className={`ws-notice ${authoritative.operation.recovery?.required ? 'ws-notice-warn' : ''}`}><div><strong><Badge state={operationState.state}>{operationState.label}</Badge> · Durable operation</strong><p><code>{authoritative.operation.id}</code> · credential revision {authoritative.operation.credentialRevision} · {authoritative.operation.updatedAt}{authoritative.operation.recovery?.required ? ` · automatic replay kapalı: ${authoritative.operation.recovery.reason}` : ''}</p>{canManage && authoritative.operation.recovery?.required && <div className="ws-actions"><Button disabled={busy} onClick={() => setRecoveryOperation(authoritative.operation)}>Recovery durumunu incele</Button><Button variant="danger" disabled={busy} onClick={() => setRetryOperation(authoritative.operation)}>Inspect sonrası retry</Button></div>}</div></div>}<div className="ws-notice ws-notice-warn"><div><strong>Public reachability ayrı kapı</strong><p>{authoritative?.publicReachability?.status === 'unverified' ? 'Harici vantage-point probe yapılandırılmadığı için internetten UDP/TCP 53 erişimi doğrulanmadı. Local health bu alanı yeşile çeviremez.' : authoritative?.publicReachability?.status === 'unverifiable' ? `Harici DNS erişimi doğrulanamadı: ${authoritative.publicReachability.reason ?? 'probe hatası'}.` : authoritative?.publicReachability?.status === 'unreachable' ? 'Harici vantage point en az bir DNS protokolünde 53 portuna erişemedi.' : 'Local ve public readiness ayrı izlenir.'}</p></div></div>{canManage && <Button variant="primary" disabled={busy} onClick={preparePowerDns}>{authoritative?.localReady ? 'PowerDNS’i yeniden önizle' : 'PowerDNS kurulumunu önizle'}</Button>}</> : <p className="ws-muted">Önce authoritative DNS identity yapılandırılmalı.</p>}</div></Section><DelegationPanel server={server} identity={identity} defaultDomain={defaultDomain} /></div>
+    ]} />{authoritative?.operation && <div className={`ws-notice ${authoritative.operation.recovery?.required ? 'ws-notice-warn' : ''}`}><div><strong><Badge state={operationState.state}>{operationState.label}</Badge> · Durable operation</strong><p><code>{authoritative.operation.id}</code> · credential revision {authoritative.operation.credentialRevision} · {authoritative.operation.updatedAt}{authoritative.operation.recovery?.required ? ` · automatic replay kapalı: ${authoritative.operation.recovery.reason}` : ''}</p>{canManage && (authoritative.operation.recovery?.confirmation || authoritative.operation.recovery?.retryConfirmation || authoritative.operation.rollback?.available) && <div className="ws-actions">{authoritative.operation.recovery?.confirmation && <Button disabled={busy} onClick={() => setRecoveryOperation(authoritative.operation)}>Recovery durumunu incele</Button>}{authoritative.operation.recovery?.retryConfirmation && <Button variant="danger" disabled={busy} onClick={() => setRetryOperation(authoritative.operation)}>Inspect sonrası retry</Button>}{authoritative.operation.rollback?.available && <Button variant="danger" disabled={busy} onClick={() => setRollbackOperation(authoritative.operation)}>Önceki PowerDNS state'ine dön</Button>}</div>}</div></div>}<div className="ws-notice ws-notice-warn"><div><strong>Public reachability ayrı kapı</strong><p>{authoritative?.publicReachability?.status === 'unverified' ? 'Harici vantage-point probe yapılandırılmadığı için internetten UDP/TCP 53 erişimi doğrulanmadı. Local health bu alanı yeşile çeviremez.' : authoritative?.publicReachability?.status === 'unverifiable' ? `Harici DNS erişimi doğrulanamadı: ${authoritative.publicReachability.reason ?? 'probe hatası'}.` : authoritative?.publicReachability?.status === 'unreachable' ? 'Harici vantage point en az bir DNS protokolünde 53 portuna erişemedi.' : 'Local ve public readiness ayrı izlenir.'}</p></div></div>{canManage && <Button variant="primary" disabled={busy} onClick={preparePowerDns}>{authoritative?.localReady ? 'PowerDNS’i yeniden önizle' : 'PowerDNS kurulumunu önizle'}</Button>}</> : <p className="ws-muted">Önce authoritative DNS identity yapılandırılmalı.</p>}</div></Section><DelegationPanel server={server} identity={identity} defaultDomain={defaultDomain} /></div>
     {identityDialog && <IdentityDialog current={identityForDialog} onClose={() => setIdentityDialog(false)} onApplied={async () => { setIdentityDialog(false); await refresh(); }} />}
     {authoritativePreview && <ConfirmDialog title="PowerDNS authoritative uygula" message={`Paket/config/backend işlemleri uygulanacak. API ${authoritativePreview.api?.address ?? '127.0.0.1'}:${authoritativePreview.api?.port ?? 8081} üzerinde loopback-only kalır; mevcut zone'lar otomatik template sync edilmez.`} confirmation={authoritativePreview.confirmation} busy={busy} error={error} onCancel={() => setAuthoritativePreview(null)} onConfirm={applyPowerDns} confirmLabel="PowerDNS’i uygula" />}
     {recoveryOperation && <ConfirmDialog title="PowerDNS recovery durumunu incele" message="Paket, config veya servis mutasyonu yapılmayacak. Mevcut host durumu operation intent ile yeniden ölçülecek; yalnız tamamlandığı kanıtlanırsa journal succeeded olarak kapatılacak." confirmation={recoveryOperation.recovery.confirmation} busy={busy} error={error} onCancel={() => setRecoveryOperation(null)} onConfirm={resolvePowerDns} confirmLabel="Recovery’yi incele" />}
     {retryOperation && <ConfirmDialog title="PowerDNS recovery retry" message="Önce güncel host durumu tekrar inspect edilecek. Intent tamamlanmamışsa aynı durable operation altında package/config/service apply yeniden çalıştırılabilir; belirsiz sonuçta automatic replay yine kapalı kalır." confirmation={retryOperation.recovery.retryConfirmation} busy={busy} error={error} onCancel={() => setRetryOperation(null)} onConfirm={retryPowerDns} confirmLabel="Inspect ve retry" />}
+    {rollbackOperation && <ConfirmDialog title="PowerDNS explicit rollback" message={`Managed config ve authoritative receipt, operation-bound snapshot'a döndürülecek; configtest, servis/API ve socket health yeniden doğrulanacak. Önceki secondary topology: ${rollbackOperation.rollback.previousSecondaryDns?.join(', ') || 'yok'}. Başarısız aktivasyonda current state geri yüklenmeye çalışılır.`} confirmation={rollbackOperation.rollback.confirmation} busy={busy} error={error} onCancel={() => setRollbackOperation(null)} onConfirm={rollbackPowerDns} confirmLabel="Snapshot'a rollback yap" />}
   </>;
 }

@@ -26,6 +26,10 @@ function retryConfirmation(serverId, operation) {
   return `retry-powerdns-recovery:${serverId}:${operation.id}:${operation.updatedAt}`;
 }
 
+function rollbackConfirmation(serverId, operation) {
+  return `rollback-powerdns:${serverId}:${operation.id}:${operation.updatedAt}:${operation.rollback.snapshotDigest}`;
+}
+
 function publicHostState(value) {
   if (!value || typeof value !== 'object') return value;
   const { apiKey: _apiKey, ...safe } = value;
@@ -95,7 +99,7 @@ export function createPowerDnsAuthoritativeService({
     || typeof secretRegistry.ensureForServer !== 'function' || typeof secretRegistry.materializeForServer !== 'function'
     || !manager || typeof manager.inspect !== 'function' || typeof manager.apply !== 'function'
     || typeof manager.operation !== 'function' || typeof manager.resolve !== 'function'
-    || typeof manager.retry !== 'function'
+    || typeof manager.retry !== 'function' || typeof manager.rollback !== 'function'
     || !publicReachabilityInspector || typeof publicReachabilityInspector.inspect !== 'function') {
     throw new PowerDnsAuthoritativeServiceError(
       'powerdns_service_dependencies_invalid',
@@ -151,15 +155,28 @@ export function createPowerDnsAuthoritativeService({
         503,
       );
     }
-    if (!operation?.recovery?.required) return operation;
-    return Object.freeze({
-      ...operation,
-      recovery: Object.freeze({
-        ...operation.recovery,
-        confirmation: recoveryConfirmation(serverId, operation),
-        retryConfirmation: retryConfirmation(serverId, operation),
-      }),
-    });
+    if (!operation) return operation;
+    let projection = operation;
+    if (operation.status === 'applying' && operation.recovery?.required) {
+      projection = Object.freeze({
+        ...projection,
+        recovery: Object.freeze({
+          ...operation.recovery,
+          confirmation: recoveryConfirmation(serverId, operation),
+          retryConfirmation: retryConfirmation(serverId, operation),
+        }),
+      });
+    }
+    if (operation.rollback?.available === true) {
+      projection = Object.freeze({
+        ...projection,
+        rollback: Object.freeze({
+          ...operation.rollback,
+          confirmation: rollbackConfirmation(serverId, operation),
+        }),
+      });
+    }
+    return projection;
   }
 
   async function recoveryContext(serverId, input, confirmationField) {
@@ -207,7 +224,54 @@ export function createPowerDnsAuthoritativeService({
     });
   }
 
-  async function recoveryResult(serverId, identity, materialized, host, outcomeField) {
+  async function rollbackContext(serverId, input) {
+    const request = input ?? {};
+    const identity = await desired(serverId);
+    const operation = await currentOperation(serverId);
+    if (!operation?.rollback?.available) {
+      throw new PowerDnsAuthoritativeServiceError(
+        'powerdns_rollback_not_available',
+        'PowerDNS authoritative operation does not have an available rollback snapshot',
+        409,
+      );
+    }
+    if (request.operationId !== operation.id || request.expectedUpdatedAt !== operation.updatedAt
+      || request.snapshotDigest !== operation.rollback.snapshotDigest
+      || request.confirmation !== operation.rollback.confirmation) {
+      throw new PowerDnsAuthoritativeServiceError(
+        'powerdns_rollback_stale',
+        'PowerDNS rollback request is stale or confirmation is invalid',
+        409,
+      );
+    }
+    const secret = await secretRegistry.getForServer(serverId);
+    if (!secret || secret.revision !== operation.credentialRevision) {
+      throw new PowerDnsAuthoritativeServiceError(
+        'powerdns_rollback_credential_changed',
+        'PowerDNS credential revision changed after the selected apply operation',
+        409,
+      );
+    }
+    const materialized = await secretRegistry.materializeForServer(serverId);
+    if (materialized.revision !== operation.credentialRevision) {
+      throw new PowerDnsAuthoritativeServiceError(
+        'powerdns_rollback_credential_changed',
+        'PowerDNS credential revision changed after the selected apply operation',
+        409,
+      );
+    }
+    return Object.freeze({
+      identity,
+      materialized,
+      recovery: Object.freeze({
+        operationId: request.operationId,
+        expectedUpdatedAt: request.expectedUpdatedAt,
+        snapshotDigest: request.snapshotDigest,
+      }),
+    });
+  }
+
+  async function recoveryResult(serverId, identity, materialized, host, outcomeField, successStatus = 'succeeded') {
     const operation = await currentOperation(serverId);
     const localReady = host?.satisfied === true;
     const publicReachability = localReady
@@ -215,7 +279,7 @@ export function createPowerDnsAuthoritativeService({
       : blockedPublicReachability(identity, 'powerdns_local_not_ready');
     const publicReady = publicReachability.ready === true;
     return Object.freeze({
-      [outcomeField]: operation?.status === 'succeeded',
+      [outcomeField]: operation?.status === successStatus,
       ready: localReady,
       localReady,
       publicReady,
@@ -379,13 +443,22 @@ export function createPowerDnsAuthoritativeService({
     return recoveryResult(serverId, identity, materialized, host, 'retried');
   }
 
-  return Object.freeze({ localServerId, preview, status, apply, resolve, retry });
+  async function rollback(serverId = localServerId, input = {}) {
+    const { identity, materialized, recovery } = await rollbackContext(serverId, input);
+    let host;
+    try { host = await manager.rollback(intentFor(identity, materialized), recovery); }
+    catch (error) { throw hostFailure(error); }
+    return recoveryResult(serverId, identity, materialized, host, 'rolledBack', 'rolled_back');
+  }
+
+  return Object.freeze({ localServerId, preview, status, apply, resolve, retry, rollback });
 }
 
 export const powerDnsAuthoritativeServiceInternals = Object.freeze({
   digest,
   recoveryConfirmation,
   retryConfirmation,
+  rollbackConfirmation,
   publicHostState,
   hostFailure,
   blockedPublicReachability,

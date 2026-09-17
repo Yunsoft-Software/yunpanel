@@ -9,6 +9,7 @@ import {
   previewPowerDnsAuthoritative,
   previewServerDnsIdentity,
   resolvePowerDnsRecovery,
+  rollbackPowerDnsAuthoritative,
   retryPowerDnsRecovery,
 } from '../src/workspace/network-dns-client.js';
 import { setSession } from '../src/session-client.js';
@@ -40,6 +41,15 @@ test('Network DNS client uses local-server scoped routes and exact preview confi
     updatedAt: '2026-09-17T12:01:00.000Z',
     recovery: { required: true, retryConfirmation: 'retry-confirm' },
   });
+  await rollbackPowerDnsAuthoritative('server/one', {
+    id: 'operation-1',
+    updatedAt: '2026-09-17T12:02:00.000Z',
+    rollback: {
+      available: true,
+      snapshotDigest: 'c'.repeat(64),
+      confirmation: 'rollback-confirm',
+    },
+  });
   await inspectDnsDelegation('server/one', 'example.com');
 
   assert.deepEqual(calls.map((entry) => [entry.url, entry.options.method]), [
@@ -51,6 +61,7 @@ test('Network DNS client uses local-server scoped routes and exact preview confi
     ['/api/panel/servers/server%2Fone/dns/authoritative/apply', 'POST'],
     ['/api/panel/servers/server%2Fone/dns/authoritative/recovery/resolve', 'POST'],
     ['/api/panel/servers/server%2Fone/dns/authoritative/recovery/retry', 'POST'],
+    ['/api/panel/servers/server%2Fone/dns/authoritative/rollback', 'POST'],
     ['/api/panel/servers/server%2Fone/dns/delegation?domain=example.com', 'GET'],
   ]);
   assert.deepEqual(JSON.parse(calls[2].options.body), {
@@ -66,6 +77,12 @@ test('Network DNS client uses local-server scoped routes and exact preview confi
     operationId: 'operation-1',
     expectedUpdatedAt: '2026-09-17T12:01:00.000Z',
     confirmation: 'retry-confirm',
+  });
+  assert.deepEqual(JSON.parse(calls[8].options.body), {
+    operationId: 'operation-1',
+    expectedUpdatedAt: '2026-09-17T12:02:00.000Z',
+    snapshotDigest: 'c'.repeat(64),
+    confirmation: 'rollback-confirm',
   });
 });
 

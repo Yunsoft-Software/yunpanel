@@ -41,6 +41,21 @@ function fixture({ hostError = null, publicReachability = null, hostOperation = 
       recovery: Object.freeze({ required: false, automaticReplayBlocked: false, reason: null }),
     });
   }
+  function completeRollbackOperation() {
+    if (!currentHostOperation?.rollback?.available) return;
+    currentHostOperation = Object.freeze({
+      ...currentHostOperation,
+      status: 'rolled_back',
+      recovery: Object.freeze({ required: false, automaticReplayBlocked: false, reason: null }),
+      rollback: Object.freeze({
+        ...currentHostOperation.rollback,
+        status: 'succeeded',
+        available: false,
+        reason: 'powerdns_rollback_already_completed',
+        automaticReplayBlocked: false,
+      }),
+    });
+  }
   const service = createPowerDnsAuthoritativeService({
     localServerId: serverId,
     serverRegistry: { async getServer(id) { return id === serverId ? { id, executionMode: 'local' } : null; } },
@@ -80,6 +95,12 @@ function fixture({ hostError = null, publicReachability = null, hostOperation = 
         managerCalls.push(['retry', intent, recovery]);
         if (hostError) throw hostError;
         completeHostOperation();
+        return { satisfied: true, adapter: 'powerdns-authoritative-gsqlite3', apiKey: 'must-not-leak' };
+      },
+      async rollback(intent, recovery) {
+        managerCalls.push(['rollback', intent, recovery]);
+        if (hostError) throw hostError;
+        completeRollbackOperation();
         return { satisfied: true, adapter: 'powerdns-authoritative-gsqlite3', apiKey: 'must-not-leak' };
       },
       async operation() { return currentHostOperation; },
@@ -292,6 +313,63 @@ test('PowerDNS explicit retry requires its separate typed confirmation and recov
     expectedUpdatedAt: '2026-09-17T12:01:00.000Z',
   });
   assert.equal(fx.managerCalls.filter(([action]) => action === 'retry').length, 1);
+});
+
+test('PowerDNS explicit rollback requires operation snapshot and typed confirmation fences', async () => {
+  const operation = Object.freeze({
+    version: 2,
+    id: 'operation-explicit-rollback',
+    serverId,
+    credentialRevision: 1,
+    secondaryDns: Object.freeze(['203.0.113.20']),
+    status: 'succeeded',
+    evidence: Object.freeze({ satisfied: true }),
+    failure: null,
+    recovery: Object.freeze({ required: false, automaticReplayBlocked: false, reason: null }),
+    rollback: Object.freeze({
+      status: 'idle',
+      available: true,
+      reason: null,
+      snapshotDigest: 'c'.repeat(64),
+      previousSecondaryDns: Object.freeze(['198.51.100.53']),
+      snapshotCreatedAt: '2026-09-17T11:59:00.000Z',
+      automaticReplayBlocked: false,
+    }),
+    createdAt: '2026-09-17T12:00:00.000Z',
+    updatedAt: '2026-09-17T12:01:00.000Z',
+  });
+  const fx = fixture({ hostOperation: operation });
+  const preview = await fx.service.preview(serverId);
+  await fx.service.apply(serverId, { previewDigest: preview.previewDigest, confirmation: preview.confirmation });
+  const status = await fx.service.status(serverId);
+  const expectedConfirmation = `rollback-powerdns:${serverId}:${operation.id}:${operation.updatedAt}:${operation.rollback.snapshotDigest}`;
+  assert.equal(status.operation.rollback.confirmation, expectedConfirmation);
+
+  await assert.rejects(
+    fx.service.rollback(serverId, {
+      operationId: operation.id,
+      expectedUpdatedAt: operation.updatedAt,
+      snapshotDigest: operation.rollback.snapshotDigest,
+      confirmation: 'stale-confirmation',
+    }),
+    (error) => error.code === 'powerdns_rollback_stale' && error.status === 409,
+  );
+  assert.equal(fx.managerCalls.filter(([action]) => action === 'rollback').length, 0);
+
+  const result = await fx.service.rollback(serverId, {
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    snapshotDigest: operation.rollback.snapshotDigest,
+    confirmation: expectedConfirmation,
+  });
+  assert.equal(result.rolledBack, true);
+  assert.equal(result.operation.status, 'rolled_back');
+  assert.equal(Object.hasOwn(result.host, 'apiKey'), false);
+  assert.deepEqual(fx.managerCalls.at(-1)[2], {
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    snapshotDigest: operation.rollback.snapshotDigest,
+  });
 });
 
 test('PowerDNS apply rejects DNS identity drift after preview', async () => {

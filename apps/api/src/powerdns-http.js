@@ -134,6 +134,25 @@ function authoritativeRecoveryBody(body) {
   return value;
 }
 
+function authoritativeRollbackBody(body) {
+  const value = exactObject(
+    body,
+    new Set(['operationId', 'expectedUpdatedAt', 'snapshotDigest', 'confirmation']),
+    'powerdns_rollback_input_invalid',
+    'Send operationId, expectedUpdatedAt, snapshotDigest and confirmation',
+  );
+  if (typeof value.operationId !== 'string' || !value.operationId
+    || typeof value.expectedUpdatedAt !== 'string' || !value.expectedUpdatedAt
+    || typeof value.snapshotDigest !== 'string' || !SHA256_PATTERN.test(value.snapshotDigest)
+    || typeof value.confirmation !== 'string' || !value.confirmation) {
+    throw new PowerDnsHttpError(
+      'powerdns_rollback_input_invalid',
+      'Send an exact PowerDNS rollback operation, snapshot digest and confirmation',
+    );
+  }
+  return value;
+}
+
 function requireEmptyBody(body) {
   if (body === undefined || body === null) return;
   if (typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 0) {
@@ -300,7 +319,8 @@ export function mountPowerDnsRoutes(app, {
   }
   if (!authoritativeService || typeof authoritativeService.preview !== 'function'
     || typeof authoritativeService.status !== 'function' || typeof authoritativeService.apply !== 'function'
-    || typeof authoritativeService.resolve !== 'function' || typeof authoritativeService.retry !== 'function') {
+    || typeof authoritativeService.resolve !== 'function' || typeof authoritativeService.retry !== 'function'
+    || typeof authoritativeService.rollback !== 'function') {
     throw new Error('PowerDNS authoritative service is required');
   }
   const templateRegistry = dnsZoneTemplateRegistry ?? defaultZoneTemplateRegistry(authoritativeService);
@@ -524,6 +544,12 @@ export function mountPowerDnsRoutes(app, {
     const body = authoritativeRecoveryBody(request.body);
     return response.json({ data: await authoritativeService.retry(serverId, body) });
   }));
+
+  app.post('/api/servers/:serverId/dns/authoritative/rollback', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const serverId = localServerId(authoritativeService, request.params.serverId);
+    const body = authoritativeRollbackBody(request.body);
+    return response.json({ data: await authoritativeService.rollback(serverId, body) });
+  }));
 }
 
 export const powerDnsHttpInternals = Object.freeze({
@@ -537,6 +563,7 @@ export const powerDnsHttpInternals = Object.freeze({
   zoneTemplateVersion,
   authoritativeApplyBody,
   authoritativeRecoveryBody,
+  authoritativeRollbackBody,
   requireEmptyBody,
   requireZoneReapplyPreviewBody,
   localServerId,

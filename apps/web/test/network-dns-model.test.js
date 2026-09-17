@@ -74,5 +74,8 @@ test('Network DNS status presentation keeps local, public and delegation readine
   assert.equal(delegationPresentation('unverifiable').state, 'warning');
   assert.deepEqual(authoritativeOperationPresentation({ status: 'applying' }), { state: 'warning', label: 'Recovery incelemesi gerekli' });
   assert.equal(authoritativeOperationPresentation({ status: 'failed' }).state, 'failed');
+  assert.deepEqual(authoritativeOperationPresentation({ status: 'rolled_back' }), { state: 'succeeded', label: 'Rollback tamamlandı' });
+  assert.equal(authoritativeOperationPresentation({ status: 'rolling_back' }).state, 'warning');
+  assert.equal(authoritativeOperationPresentation({ status: 'rollback_failed' }).state, 'failed');
   assert.equal(authoritativeOperationPresentation(null).state, 'unknown');
 });

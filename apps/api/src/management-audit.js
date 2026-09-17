@@ -86,6 +86,7 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/dns\/authoritative\/apply$/)) && method === 'POST') return { action: 'dns.authoritative.apply', resourceType: 'server', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/dns\/authoritative\/recovery\/resolve$/)) && method === 'POST') return { action: 'dns.authoritative.recovery.resolve', resourceType: 'server', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/dns\/authoritative\/recovery\/retry$/)) && method === 'POST') return { action: 'dns.authoritative.recovery.retry', resourceType: 'server', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/dns\/authoritative\/rollback$/)) && method === 'POST') return { action: 'dns.authoritative.rollback', resourceType: 'server', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/certificates\/([^/]+)\/renew$/)) && method === 'POST') return { action: 'certificate.renew', resourceType: 'certificate', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/jobs\/([^/]+)\/cancel$/)) && method === 'POST') return { action: 'job.cancel', resourceType: 'job', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/system\/packages\/inspect$/)) && method === 'POST') return { action: 'system.packages.inspect', resourceType: 'server', resourceId: parts[0] };
