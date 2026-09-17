@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   phpMyAdminFpmTemplatePolicy,
   phpMyAdminNginxTemplatePolicy,
+  phpMyAdminSignonTemplatePolicy,
 } from '@yunpanel/config-templates';
 import {
   createPhpMyAdminConfigActivator,
@@ -13,9 +14,13 @@ import {
 const TX = '12345678-1234-4234-8234-123456789012';
 const FPM = Buffer.from('[yunpanel-phpmyadmin]\nlisten = /run/php/yunpanel-phpmyadmin.sock\n');
 const NGINX = Buffer.from('server { listen unix:/run/yunpanel/phpmyadmin-http.sock; }\n');
+const SIGNON_CONFIG = Buffer.from("<?php $cfg['Servers'][$i]['auth_type'] = 'signon';\n");
+const SIGNON_BRIDGE = Buffer.from("<?php echo 'bridge';\n");
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const FPM_SHA = sha256(FPM);
 const NGINX_SHA = sha256(NGINX);
+const SIGNON_CONFIG_SHA = sha256(SIGNON_CONFIG);
+const SIGNON_BRIDGE_SHA = sha256(SIGNON_BRIDGE);
 
 function preview() {
   return {
@@ -53,8 +58,38 @@ function preview() {
       gatewaySocketMode: phpMyAdminNginxTemplatePolicy.gatewaySocketMode,
       gatewaySocketOwner: phpMyAdminNginxTemplatePolicy.gatewaySocketOwner,
       gatewaySocketGroup: phpMyAdminNginxTemplatePolicy.gatewaySocketGroup,
+      signonBridgePath: phpMyAdminNginxTemplatePolicy.signonBridgePath,
+      internalSignonPath: phpMyAdminNginxTemplatePolicy.internalSignonPath,
       healthPath: phpMyAdminNginxTemplatePolicy.healthPath,
       serviceUnit: phpMyAdminNginxTemplatePolicy.serviceUnit,
+    },
+    signonConfig: {
+      version: 1,
+      sha256: SIGNON_CONFIG_SHA,
+      artifact: {
+        path: phpMyAdminSignonTemplatePolicy.configPath,
+        sha256: SIGNON_CONFIG_SHA,
+        bytes: SIGNON_CONFIG.length,
+        sensitive: false,
+        mode: phpMyAdminSignonTemplatePolicy.configMode,
+      },
+      signonSession: phpMyAdminSignonTemplatePolicy.signonSession,
+      gatewayBasePath: phpMyAdminSignonTemplatePolicy.gatewayBasePath,
+    },
+    signonBridge: {
+      version: 1,
+      sha256: SIGNON_BRIDGE_SHA,
+      artifact: {
+        path: phpMyAdminSignonTemplatePolicy.bridgePath,
+        sha256: SIGNON_BRIDGE_SHA,
+        bytes: SIGNON_BRIDGE.length,
+        sensitive: false,
+        mode: phpMyAdminSignonTemplatePolicy.bridgeMode,
+      },
+      handoffSocketPath: phpMyAdminSignonTemplatePolicy.handoffSocketPath,
+      signonSession: phpMyAdminSignonTemplatePolicy.signonSession,
+      internalSignonPath: phpMyAdminSignonTemplatePolicy.internalSignonPath,
+      gatewayBasePath: phpMyAdminSignonTemplatePolicy.gatewayBasePath,
     },
   };
 }
@@ -110,7 +145,7 @@ function fixture({
     gatewayDirectoryExists: true,
   };
   const manifest = {
-    version: 1,
+    version: 2,
     transactionId: TX,
     files: [
       {
@@ -123,13 +158,27 @@ function fixture({
         exists: nginxExisted,
         backupName: nginxExisted ? 'yunpanel-phpmyadmin-nginx.conf' : null,
       },
+      {
+        targetPath: phpMyAdminSignonTemplatePolicy.configPath,
+        exists: false,
+        backupName: null,
+      },
+      {
+        targetPath: phpMyAdminSignonTemplatePolicy.bridgePath,
+        exists: false,
+        backupName: null,
+      },
     ],
   };
   const configManager = {
     inspectStagedFpmPool: async () => ({ satisfied: true, result: {} }),
     inspectStagedNginxConfig: async () => ({ satisfied: true, result: {} }),
+    inspectStagedSignonConfig: async () => ({ satisfied: true, result: {} }),
+    inspectStagedSignonBridge: async () => ({ satisfied: true, result: {} }),
     stagedFpmPath: () => '/stage/yunpanel-phpmyadmin-fpm.conf',
     stagedNginxPath: () => '/stage/yunpanel-phpmyadmin-nginx.conf',
+    stagedSignonConfigPath: () => '/stage/zz-yunpanel.php',
+    stagedSignonBridgePath: () => '/stage/yunpanel-phpmyadmin-signon.php',
   };
   const backupManager = {
     async backupConfiguration(id) {
@@ -143,7 +192,7 @@ function fixture({
     async restoreConfiguration(id) {
       calls.push(['restore', id]);
       state.restored = true;
-      return { version: 1, transactionId: id, restored: true };
+      return { version: 2, transactionId: id, restored: true };
     },
   };
   const run = async (command, args) => {
@@ -174,8 +223,12 @@ function fixture({
     }
     if (target === '/etc/php/8.3/fpm/pool.d'
       || target === '/etc/nginx/sites-enabled'
+      || target === '/etc/phpmyadmin/conf.d'
       || target === phpMyAdminNginxTemplatePolicy.documentRoot) {
       return directory();
+    }
+    if (target === phpMyAdminSignonTemplatePolicy.bridgeDirectory) {
+      return directory({ uid: 0, gid: 2002, mode: 0o750 });
     }
     if (target === '/run/yunpanel') {
       if (!state.gatewayDirectoryExists) throw enoent();
@@ -186,6 +239,12 @@ function fixture({
     }
     if (target === '/stage/yunpanel-phpmyadmin-nginx.conf') {
       return file({ mode: 0o640, size: NGINX.length });
+    }
+    if (target === '/stage/zz-yunpanel.php') {
+      return file({ mode: 0o640, size: SIGNON_CONFIG.length });
+    }
+    if (target === '/stage/yunpanel-phpmyadmin-signon.php') {
+      return file({ mode: 0o640, size: SIGNON_BRIDGE.length });
     }
     if (target === phpMyAdminFpmTemplatePolicy.socketPath) {
       if (state.restored && !fpmExisted) throw enoent();
@@ -212,7 +271,10 @@ function fixture({
     },
     readFileFn: async (target) => {
       if (changedStage && target.includes('fpm')) return Buffer.from('changed');
-      return target.includes('nginx') ? NGINX : FPM;
+      if (target.includes('nginx')) return NGINX;
+      if (target.endsWith('/zz-yunpanel.php')) return SIGNON_CONFIG;
+      if (target.includes('signon')) return SIGNON_BRIDGE;
+      return FPM;
     },
     writeFileFn: async () => {},
     renameFn: async () => {},
@@ -238,9 +300,17 @@ test('activation installs staged configs and proves private FPM and HTTP sockets
   assert.equal(result.applied, true);
   assert.equal(result.fpmSha256, FPM_SHA);
   assert.equal(result.nginxSha256, NGINX_SHA);
+  assert.equal(result.signonConfigSha256, SIGNON_CONFIG_SHA);
+  assert.equal(result.signonBridgeSha256, SIGNON_BRIDGE_SHA);
   assert.equal(result.fpmSocketHealthy, true);
   assert.equal(result.gatewaySocketHealthy, true);
   assert.equal(result.httpHealthy, true);
+  assert.ok(fx.calls.some((entry) => entry[0] === 'run'
+    && entry[1] === '/usr/bin/php' && entry[2][0] === '-l'
+    && entry[2][1] === '/stage/zz-yunpanel.php'));
+  assert.ok(fx.calls.some((entry) => entry[0] === 'run'
+    && entry[1] === '/usr/bin/php' && entry[2][0] === '-l'
+    && entry[2][1] === '/stage/yunpanel-phpmyadmin-signon.php'));
   assert.ok(fx.calls.some((entry) => entry[0] === 'run'
     && entry[1] === '/usr/sbin/php-fpm8.3' && entry[2][0] === '-t'));
   assert.ok(fx.calls.some((entry) => entry[0] === 'run'
