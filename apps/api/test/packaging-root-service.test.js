@@ -34,6 +34,23 @@ test('Debian package description documents the local privileged runtime as the t
   assert.doesNotMatch(control, /privileged allowlisted\n server agent/);
 });
 
+test('Debian package prepares the locked phpMyAdmin runtime identity and private writable paths', async () => {
+  const postinst = await readFile(postinstUrl, 'utf8');
+  assert.match(postinst, /addgroup --system yunpanel-phpmyadmin/);
+  assert.match(postinst, /adduser --system --ingroup yunpanel-phpmyadmin --home \/var\/lib\/yunpanel\/phpmyadmin --no-create-home --shell \/usr\/sbin\/nologin yunpanel-phpmyadmin/);
+  assert.match(postinst, /adduser yunpanel-phpmyadmin www-data/);
+  for (const directory of [
+    '/var/lib/yunpanel/phpmyadmin',
+    '/var/lib/yunpanel/phpmyadmin/tmp',
+    '/var/lib/yunpanel/phpmyadmin/sessions',
+  ]) {
+    assert.match(
+      postinst,
+      new RegExp(`install -d -o yunpanel-phpmyadmin -g yunpanel-phpmyadmin -m 0700 ${directory.replaceAll('/', '\\/')}`),
+    );
+  }
+});
+
 test('packaged gateway authenticates canonical client IP metadata to the root API', async () => {
   const [apiUnit, webUnit, postinst] = await Promise.all([
     readFile(apiUnitUrl, 'utf8'),

@@ -22,7 +22,7 @@ test('phpMyAdmin Nginx template is reachable only through the managed Unix gatew
   assert.equal(preview.artifact.sensitive, false);
   assert.equal(preview.gatewaySocketPath, '/run/yunpanel/phpmyadmin-http.sock');
   assert.equal(preview.gatewaySocketMode, 0o660);
-  assert.equal(preview.gatewaySocketGroup, 'yunpanel-web');
+  assert.equal(preview.gatewaySocketGroup, 'yunpanel');
   assert.equal(preview.healthPath, '/');
 });
 

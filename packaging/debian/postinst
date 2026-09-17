@@ -16,11 +16,23 @@ fi
 if getent group www-data >/dev/null; then
   adduser yunpanel-roundcube www-data >/dev/null 2>&1 || true
 fi
+if ! getent group yunpanel-phpmyadmin >/dev/null; then
+  addgroup --system yunpanel-phpmyadmin >/dev/null
+fi
+if ! id yunpanel-phpmyadmin >/dev/null 2>&1; then
+  adduser --system --ingroup yunpanel-phpmyadmin --home /var/lib/yunpanel/phpmyadmin --no-create-home --shell /usr/sbin/nologin yunpanel-phpmyadmin >/dev/null
+fi
+if getent group www-data >/dev/null; then
+  adduser yunpanel-phpmyadmin www-data >/dev/null 2>&1 || true
+fi
 
 install -d -o yunpanel -g yunpanel -m 0700 /var/lib/yunpanel/control-plane
 install -d -o root -g root -m 0700 /var/lib/yunpanel/agent
 install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel/roundcube
 install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel/roundcube/tmp
+install -d -o yunpanel-phpmyadmin -g yunpanel-phpmyadmin -m 0700 /var/lib/yunpanel/phpmyadmin
+install -d -o yunpanel-phpmyadmin -g yunpanel-phpmyadmin -m 0700 /var/lib/yunpanel/phpmyadmin/tmp
+install -d -o yunpanel-phpmyadmin -g yunpanel-phpmyadmin -m 0700 /var/lib/yunpanel/phpmyadmin/sessions
 install -d -o root -g root -m 0700 /etc/yunpanel/control-plane
 install -d -o root -g root -m 0700 /etc/yunpanel/agent
 install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/web

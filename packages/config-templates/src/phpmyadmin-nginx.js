@@ -35,7 +35,7 @@ export const phpMyAdminNginxTemplatePolicy = Object.freeze({
   configMode: 0o640,
   gatewaySocketMode: 0o660,
   gatewaySocketOwner: 'root',
-  gatewaySocketGroup: 'yunpanel-web',
+  gatewaySocketGroup: 'yunpanel',
   healthPath: '/',
 });
 
