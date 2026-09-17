@@ -16,8 +16,8 @@ const FPM_PREVIEW_KEYS = new Set([
 ]);
 const NGINX_PREVIEW_KEYS = new Set([
   'version', 'sha256', 'artifact', 'documentRoot', 'fpmSocketPath', 'gatewaySocketPath',
-  'gatewaySocketMode', 'gatewaySocketOwner', 'gatewaySocketGroup', 'healthPath',
-  'serviceUnit',
+  'gatewaySocketMode', 'gatewaySocketOwner', 'gatewaySocketGroup', 'signonBridgePath',
+  'internalSignonPath', 'healthPath', 'serviceUnit',
 ]);
 const SIGNON_CONFIG_PREVIEW_KEYS = new Set([
   'version', 'sha256', 'artifact', 'signonSession', 'gatewayBasePath',
@@ -89,6 +89,8 @@ function validateNginxPreview(preview) {
     || value.gatewaySocketMode !== phpMyAdminNginxTemplatePolicy.gatewaySocketMode
     || value.gatewaySocketOwner !== phpMyAdminNginxTemplatePolicy.gatewaySocketOwner
     || value.gatewaySocketGroup !== phpMyAdminNginxTemplatePolicy.gatewaySocketGroup
+    || value.signonBridgePath !== phpMyAdminNginxTemplatePolicy.signonBridgePath
+    || value.internalSignonPath !== phpMyAdminNginxTemplatePolicy.internalSignonPath
     || value.serviceUnit !== phpMyAdminNginxTemplatePolicy.serviceUnit
     || value.healthPath !== phpMyAdminNginxTemplatePolicy.healthPath) {
     throw new PhpMyAdminConfigManagerError('phpmyadmin_nginx_preview_invalid', 'phpMyAdmin Nginx preview is invalid');
