@@ -53,6 +53,11 @@ export function getDatabases(serverId) {
   return panelRequest(databaseServerPath(serverId));
 }
 
+export function getWebsiteDatabaseResources(serverId, websiteId) {
+  if (typeof websiteId !== 'string' || !websiteId) throw new Error('websiteId is required');
+  return panelRequest(`/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-resources`);
+}
+
 export function inspectDatabases(serverId) {
   return panelRequest(`${databaseServerPath(serverId)}/inspect`, { method: 'POST', body: {} });
 }

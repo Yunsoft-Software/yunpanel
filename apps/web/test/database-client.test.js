@@ -4,6 +4,7 @@ import {
   createDatabase,
   deleteDatabase,
   getDatabases,
+  getWebsiteDatabaseResources,
   inspectDatabases,
 } from '../src/api.js';
 import { setSession } from '../src/session-client.js';
@@ -21,19 +22,21 @@ test('database API client uses same-origin panel routes and exact mutation confi
   });
 
   await getDatabases('server/one');
+  await getWebsiteDatabaseResources('server/one', 'website/one');
   await inspectDatabases('server/one');
   await createDatabase('server/one', 'app_main');
   await deleteDatabase('server/one', 'app_main');
 
   assert.deepEqual(calls.map((call) => [call.url, call.options.method]), [
     ['/api/panel/servers/server%2Fone/databases', 'GET'],
+    ['/api/panel/servers/server%2Fone/websites/website%2Fone/database-resources', 'GET'],
     ['/api/panel/servers/server%2Fone/databases/inspect', 'POST'],
     ['/api/panel/servers/server%2Fone/databases', 'POST'],
     ['/api/panel/servers/server%2Fone/databases/app_main', 'DELETE'],
   ]);
-  assert.deepEqual(JSON.parse(calls[2].options.body), { name: 'app_main', confirmation: 'create:app_main' });
-  assert.deepEqual(JSON.parse(calls[3].options.body), { confirmation: 'delete:app_main' });
-  for (const call of calls.slice(1)) assert.equal(call.options.headers['x-csrf-token'], 'csrf-database');
+  assert.deepEqual(JSON.parse(calls[3].options.body), { name: 'app_main', confirmation: 'create:app_main' });
+  assert.deepEqual(JSON.parse(calls[4].options.body), { confirmation: 'delete:app_main' });
+  for (const call of calls.slice(2)) assert.equal(call.options.headers['x-csrf-token'], 'csrf-database');
   setSession(null);
 });
 
@@ -41,6 +44,7 @@ test('database API client rejects missing identities before fetch', async (t) =>
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async () => { calls += 1; return ok({}); });
   assert.throws(() => getDatabases(''), /serverId is required/);
+  assert.throws(() => getWebsiteDatabaseResources('server-1', ''), /websiteId is required/);
   assert.throws(() => createDatabase('server-1', ''), /database name is required/);
   assert.throws(() => deleteDatabase('server-1', ''), /database name is required/);
   assert.equal(calls, 0);

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { databaseInventoryView, formatDatabaseBytes, validDatabaseName } from '../src/workspace/database-model.js';
+import {
+  databaseInventoryView,
+  formatDatabaseBytes,
+  validDatabaseName,
+  websiteDatabaseResourcesView,
+} from '../src/workspace/database-model.js';
 
 test('database names mirror the host/protocol safety boundary', () => {
   assert.equal(validDatabaseName('app_main'), true);
@@ -75,4 +80,64 @@ test('database inventory view sorts safe rows and computes total size without tr
   assert.equal(view.databases[0].ownership.credential.username, ownership.credential.username);
   assert.deepEqual(view.ownership, { bindingCount: 1, credentialCount: 1, missingDatabaseBindingCount: 0 });
   assert.deepEqual(view.snapshot, { jobId: 'job-1', refreshedAt: '2026-09-10T00:00:00.000Z' });
+});
+
+test('Website database resource view keeps only scoped secret-free binding and credential state', () => {
+  const websiteId = '12345678-1234-4234-8234-123456789012';
+  const applicationId = '22345678-1234-4234-8234-123456789012';
+  const result = websiteDatabaseResourcesView({
+    websiteId,
+    applicationId,
+    databases: [{
+      binding: {
+        id: '32345678-1234-4234-8234-123456789012',
+        databaseName: 'app_main',
+        websiteId,
+        applicationId,
+        unixUser: 'yunapp-abcdef012345',
+        revision: 2,
+      },
+      credential: {
+        id: '42345678-1234-4234-8234-123456789012',
+        username: 'ydb_abcdef012345abcdef012345',
+        host: 'localhost',
+        privileges: ['SELECT', 'INSERT'],
+        revision: 3,
+        passwordConfigured: true,
+        passwordUpdatedAt: '2026-09-17T12:00:00.000Z',
+        password: 'drop-me',
+      },
+    }],
+  });
+  assert.deepEqual(result.databases[0], {
+    binding: {
+      id: '32345678-1234-4234-8234-123456789012',
+      databaseName: 'app_main',
+      unixUser: 'yunapp-abcdef012345',
+      revision: 2,
+    },
+    credential: {
+      id: '42345678-1234-4234-8234-123456789012',
+      username: 'ydb_abcdef012345abcdef012345',
+      privileges: ['SELECT', 'INSERT'],
+      revision: 3,
+      passwordUpdatedAt: '2026-09-17T12:00:00.000Z',
+    },
+  });
+  assert.equal(JSON.stringify(result).includes('drop-me'), false);
+  assert.equal(websiteDatabaseResourcesView({
+    websiteId,
+    applicationId,
+    databases: [{
+      binding: {
+        id: '32345678-1234-4234-8234-123456789012',
+        databaseName: 'app_main',
+        websiteId: '52345678-1234-4234-8234-123456789012',
+        applicationId,
+        unixUser: 'yunapp-abcdef012345',
+        revision: 2,
+      },
+      credential: null,
+    }],
+  }), null);
 });

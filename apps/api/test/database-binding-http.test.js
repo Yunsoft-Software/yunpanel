@@ -17,10 +17,14 @@ const owner = Object.freeze({
   security: { managementAllowed: true },
 });
 
-async function listen(t, { snapshot = { databases: [{ name: 'app_db', sizeBytes: 0 }] } } = {}) {
+async function listen(t, {
+  snapshot = { databases: [{ name: 'app_db', sizeBytes: 0 }] },
+  siteBindings = [],
+  siteCredentials = null,
+} = {}) {
   const calls = [];
   const databaseBindingRegistry = {
-    async listBindings(filter) { calls.push(['list', structuredClone(filter)]); return []; },
+    async listBindings(filter) { calls.push(['list', structuredClone(filter)]); return siteBindings; },
     async bindDatabase(input) {
       calls.push(['bind', structuredClone(input)]);
       return {
@@ -47,8 +51,17 @@ async function listen(t, { snapshot = { databases: [{ name: 'app_db', sizeBytes:
   app.use((request, _response, next) => { request.auth = owner; next(); });
   mountDatabaseBindingRoutes(app, {
     registry: { async getServer(id) { return id === serverId ? { id } : null; } },
+    websiteRegistry: {
+      async getWebsite(id) {
+        return id === websiteId ? { id, serverId, applicationId } : null;
+      },
+    },
     jobRegistry: { async listJobs() { return []; } },
     databaseBindingRegistry,
+    databaseCredentialRegistry: siteCredentials === null ? null : {
+      async listCredentials(filter) { calls.push(['credentials', structuredClone(filter)]); return siteCredentials; },
+      async getForBinding() { return null; },
+    },
     requireDatabaseName: (value) => value,
     ensureDatabaseIdle: async () => {},
     latestDatabaseSnapshot: async () => snapshot,
@@ -67,6 +80,91 @@ async function listen(t, { snapshot = { databases: [{ name: 'app_db', sizeBytes:
   t.after(() => new Promise((resolve) => server.close(resolve)));
   return { base: `http://127.0.0.1:${server.address().port}`, calls };
 }
+
+test('Website database resources join only scoped binding and secret-free credential metadata', async (t) => {
+  const binding = {
+    id: bindingId,
+    serverId,
+    databaseName: 'app_db',
+    websiteId,
+    applicationId,
+    unixUser: 'yunapp-abcdef123456',
+    revision: 2,
+    privateBindingState: 'drop-me',
+  };
+  const credential = {
+    id: randomUUID(),
+    databaseBindingId: bindingId,
+    serverId,
+    databaseName: 'app_db',
+    websiteId,
+    applicationId,
+    siteUnixUser: binding.unixUser,
+    username: 'ydb_abcdef012345abcdef012345',
+    host: 'localhost',
+    privileges: ['SELECT', 'INSERT'],
+    revision: 3,
+    passwordConfigured: true,
+    passwordUpdatedAt: '2026-09-17T12:00:00.000Z',
+    password: 'must-not-leak',
+    ciphertext: 'must-not-leak',
+  };
+  const { base, calls } = await listen(t, { siteBindings: [binding], siteCredentials: [credential] });
+  const response = await fetch(`${base}/api/servers/${serverId}/websites/${websiteId}/database-resources`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const body = await response.json();
+  assert.deepEqual(body.data, {
+    websiteId,
+    applicationId,
+    databases: [{
+      binding: {
+        id: bindingId,
+        databaseName: 'app_db',
+        websiteId,
+        applicationId,
+        unixUser: binding.unixUser,
+        revision: 2,
+      },
+      credential: {
+        id: credential.id,
+        username: credential.username,
+        host: 'localhost',
+        privileges: ['SELECT', 'INSERT'],
+        revision: 3,
+        passwordConfigured: true,
+        passwordUpdatedAt: credential.passwordUpdatedAt,
+      },
+    }],
+  });
+  assert.equal(JSON.stringify(body).includes('must-not-leak'), false);
+  assert.deepEqual(calls, [
+    ['list', { serverId, websiteId }],
+    ['credentials', { serverId, websiteId }],
+  ]);
+});
+
+test('Website database resources fail closed on orphan credential state', async (t) => {
+  const credential = {
+    id: randomUUID(),
+    databaseBindingId: bindingId,
+    serverId,
+    databaseName: 'app_db',
+    websiteId,
+    applicationId,
+    siteUnixUser: 'yunapp-abcdef123456',
+    username: 'ydb_abcdef012345abcdef012345',
+    host: 'localhost',
+    privileges: ['SELECT'],
+    revision: 1,
+    passwordConfigured: true,
+    passwordUpdatedAt: '2026-09-17T12:00:00.000Z',
+  };
+  const { base } = await listen(t, { siteCredentials: [credential] });
+  const response = await fetch(`${base}/api/servers/${serverId}/websites/${websiteId}/database-resources`);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, 'website_database_state_unavailable');
+});
 
 test('Owner binds verified database to explicit Website and Application without host mutation', async (t) => {
   const { base, calls } = await listen(t);

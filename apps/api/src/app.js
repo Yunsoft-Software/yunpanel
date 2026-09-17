@@ -579,6 +579,7 @@ export function createApp({
   if (databaseBindingRegistry) {
     mountDatabaseBindingRoutes(app, {
       registry: localRegistry,
+      websiteRegistry,
       jobRegistry,
       databaseBindingRegistry,
       databaseCredentialRegistry,

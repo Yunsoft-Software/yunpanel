@@ -29,6 +29,7 @@ test('production boot persists and injects database ownership bindings', async (
 test('production app mounts binding routes and protects schema deletion with the same registry', async () => {
   const source = await readFile(appUrl, 'utf8');
   assert.match(source, /mountDatabaseBindingRoutes/);
+  assert.match(source, /mountDatabaseBindingRoutes\(app, \{[\s\S]*registry: localRegistry,[\s\S]*websiteRegistry,[\s\S]*databaseBindingRegistry/);
   assert.match(source, /mountDatabaseRoutes\(app, \{[\s\S]*registry: localRegistry,[\s\S]*databaseBindingRegistry,[\s\S]*databaseCredentialRegistry,[\s\S]*databaseInventoryProvider,[\s\S]*databaseHealthProvider,[\s\S]*\}\)/);
   assert.match(source, /DatabaseBindingRegistryError/);
 });

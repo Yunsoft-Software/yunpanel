@@ -12,6 +12,10 @@ const DATABASE_HEALTH_REASONS = new Set([
   'database_remote_root_accounts_present',
   'database_test_schema_present',
 ]);
+const DATABASE_PRIVILEGES = new Set([
+  'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'INDEX', 'DROP',
+  'REFERENCES', 'CREATE TEMPORARY TABLES', 'LOCK TABLES', 'EXECUTE',
+]);
 
 function databaseOwnership(value) {
   if (value === null || value === undefined) return null;
@@ -131,6 +135,48 @@ export function databaseInventoryView(data) {
       refreshedAt: data.snapshot.refreshedAt,
     } : null,
   };
+}
+
+export function websiteDatabaseResourcesView(data) {
+  if (!data || typeof data !== 'object' || !UUID_PATTERN.test(data.websiteId ?? '')
+    || !UUID_PATTERN.test(data.applicationId ?? '') || !Array.isArray(data.databases)) return null;
+  const databases = [];
+  const ids = new Set();
+  for (const entry of data.databases) {
+    const binding = entry?.binding;
+    const credential = entry?.credential;
+    if (!binding || typeof binding !== 'object' || !UUID_PATTERN.test(binding.id ?? '')
+      || ids.has(binding.id) || !validDatabaseName(binding.databaseName)
+      || binding.websiteId !== data.websiteId || binding.applicationId !== data.applicationId
+      || !SITE_USER_PATTERN.test(binding.unixUser ?? '')
+      || !Number.isSafeInteger(binding.revision) || binding.revision < 1) return null;
+    if (credential !== null && (!credential || typeof credential !== 'object'
+      || !UUID_PATTERN.test(credential.id ?? '') || !DATABASE_USER_PATTERN.test(credential.username ?? '')
+      || credential.host !== 'localhost' || !Array.isArray(credential.privileges)
+      || credential.privileges.length < 1 || credential.privileges.length > DATABASE_PRIVILEGES.size
+      || credential.privileges.some((privilege) => !DATABASE_PRIVILEGES.has(privilege))
+      || new Set(credential.privileges).size !== credential.privileges.length
+      || !Number.isSafeInteger(credential.revision) || credential.revision < 1
+      || credential.passwordConfigured !== true || typeof credential.passwordUpdatedAt !== 'string')) return null;
+    ids.add(binding.id);
+    databases.push({
+      binding: {
+        id: binding.id,
+        databaseName: binding.databaseName,
+        unixUser: binding.unixUser,
+        revision: binding.revision,
+      },
+      credential: credential ? {
+        id: credential.id,
+        username: credential.username,
+        privileges: [...credential.privileges],
+        revision: credential.revision,
+        passwordUpdatedAt: credential.passwordUpdatedAt,
+      } : null,
+    });
+  }
+  databases.sort((left, right) => left.binding.databaseName.localeCompare(right.binding.databaseName));
+  return { websiteId: data.websiteId, applicationId: data.applicationId, databases };
 }
 
 export const databaseModelInternals = Object.freeze({

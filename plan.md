@@ -9,6 +9,7 @@ Son mail discovery DNS gate ilerlemesi: `docs/history/dns-mail-discovery-gate-20
 Son DNSSEC rollover adapter ilerlemesi: `docs/history/dnssec-rollover-progress-2026-09-17.md`.
 Son DNS zone compensation ownership ilerlemesi: `docs/history/dns-zone-compensation-ownership-2026-09-17.md`.
 Son database canlı envanter ilerlemesi: `docs/history/database-live-inventory-2026-09-17.md`.
+Son database güvenlik ve Website resource ilerlemesi: `docs/history/database-security-baseline-2026-09-17.md`, `docs/history/database-website-resources-2026-09-17.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -57,7 +58,7 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 ## P0.5 — Website DB ownership + phpMyAdmin
 
-- [ ] Site detayında mevcut binding, credential/grant, rotate/revoke, backup/restore ve drop-preview backend'lerini günlük Website akışında birleştir.
+- [ ] Site detayındaki scoped binding + secret-free credential/grant görünümüne rotate/revoke, backup/restore ve drop-preview eylemlerini mevcut durable backend'lerle ekle.
 - [ ] Website create'te opsiyonel initial DB + scoped credential/grant step'ini durable provisioning'e bağla.
 - [ ] Shared hardened phpMyAdmin.
 - [ ] `Open phpMyAdmin` site DB user scope'uyla supported signon/short-lived handoff; root browser'a verilmesin.
