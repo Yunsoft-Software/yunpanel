@@ -248,6 +248,13 @@ export function createDnsZoneDnssecService({
     return publicState(current.domain, authoritative, parent);
   }
 
+  function rolloverMethod(name) {
+    if (typeof manager[name] !== 'function') {
+      throw new DnsZoneDnssecError('dnssec_rollover_unavailable', 'DNSSEC rollover host capability is unavailable', 503);
+    }
+    return manager[name].bind(manager);
+  }
+
   async function status({ domainId } = {}) {
     return inspectContext(await context(domainId));
   }
@@ -336,6 +343,91 @@ export function createDnsZoneDnssecService({
     });
   }
 
+  async function createRolloverKey({ domainId, expectedKeySetDigest, expectedKeyIds, newKey: target } = {}) {
+    const current = await context(domainId);
+    try {
+      return await rolloverMethod('createRolloverKey')({
+        zoneName: current.domain.primaryDomain,
+        apiKey: current.apiKey,
+        expectedKeySetDigest,
+        expectedKeyIds,
+        keyType: target?.keyType,
+        algorithm: target?.algorithm,
+        bits: target?.bits,
+        active: target?.active,
+        published: target?.published,
+      });
+    } catch (error) { throw hostFailure(error); }
+  }
+
+  async function previewRolloverKeyState({ domainId, keyId, active, published } = {}) {
+    const current = await context(domainId);
+    try {
+      return await rolloverMethod('previewRolloverKeyState')({
+        zoneName: current.domain.primaryDomain,
+        apiKey: current.apiKey,
+        keyId,
+        active,
+        published,
+      });
+    } catch (error) { throw hostFailure(error); }
+  }
+
+  async function setRolloverKeyState({
+    domainId,
+    keyId,
+    expectedKeySetDigest,
+    expectedTargetKeySetDigest,
+    expectedActive,
+    expectedPublished,
+    active,
+    published,
+  } = {}) {
+    const current = await context(domainId);
+    try {
+      return await rolloverMethod('setRolloverKeyState')({
+        zoneName: current.domain.primaryDomain,
+        apiKey: current.apiKey,
+        keyId,
+        expectedKeySetDigest,
+        expectedTargetKeySetDigest,
+        expectedActive,
+        expectedPublished,
+        active,
+        published,
+      });
+    } catch (error) { throw hostFailure(error); }
+  }
+
+  async function previewRolloverKeyDeletion({ domainId, keyId } = {}) {
+    const current = await context(domainId);
+    try {
+      return await rolloverMethod('previewRolloverKeyDeletion')({
+        zoneName: current.domain.primaryDomain,
+        apiKey: current.apiKey,
+        keyId,
+      });
+    } catch (error) { throw hostFailure(error); }
+  }
+
+  async function deleteRolloverKey({
+    domainId,
+    keyId,
+    expectedKeySetDigest,
+    expectedRemainingKeySetDigest,
+  } = {}) {
+    const current = await context(domainId);
+    try {
+      return await rolloverMethod('deleteRolloverKey')({
+        zoneName: current.domain.primaryDomain,
+        apiKey: current.apiKey,
+        keyId,
+        expectedKeySetDigest,
+        expectedRemainingKeySetDigest,
+      });
+    } catch (error) { throw hostFailure(error); }
+  }
+
   async function apply({ domainId, enabled, previewDigest, confirmation } = {}) {
     if (typeof enabled !== 'boolean'
       || typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)
@@ -381,7 +473,17 @@ export function createDnsZoneDnssecService({
     });
   }
 
-  return Object.freeze({ status, preview, previewRollover, apply });
+  return Object.freeze({
+    status,
+    preview,
+    previewRollover,
+    createRolloverKey,
+    previewRolloverKeyState,
+    setRolloverKeyState,
+    previewRolloverKeyDeletion,
+    deleteRolloverKey,
+    apply,
+  });
 }
 
 export const dnsZoneDnssecInternals = Object.freeze({

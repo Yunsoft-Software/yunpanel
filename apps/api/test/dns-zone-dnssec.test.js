@@ -75,6 +75,26 @@ function fixture({ current = authoritative(), parentStates = [parent()], enableR
       currentState = disableResult ?? authoritative({ dnssec: false, changed: true });
       return currentState;
     },
+    createRolloverKey: async (input) => {
+      calls.push(['create-rollover-key', input]);
+      return { changed: true, keySetDigest: 'c'.repeat(64), createdKey: { id: 2, ds: ['22345 13 2 EEFF0011'] } };
+    },
+    previewRolloverKeyState: async (input) => {
+      calls.push(['preview-rollover-key-state', input]);
+      return { keySetDigest: 'c'.repeat(64), targetKeySetDigest: 'd'.repeat(64), targetKey: { id: input.keyId } };
+    },
+    setRolloverKeyState: async (input) => {
+      calls.push(['set-rollover-key-state', input]);
+      return { changed: true, keySetDigest: input.expectedTargetKeySetDigest, updatedKey: { id: input.keyId } };
+    },
+    previewRolloverKeyDeletion: async (input) => {
+      calls.push(['preview-rollover-key-deletion', input]);
+      return { keySetDigest: 'e'.repeat(64), remainingKeySetDigest: 'f'.repeat(64), deletedKey: { id: input.keyId } };
+    },
+    deleteRolloverKey: async (input) => {
+      calls.push(['delete-rollover-key', input]);
+      return { changed: true, keySetDigest: input.expectedRemainingKeySetDigest, deletedKeyId: input.keyId };
+    },
   };
   const parentDsInspector = {
     inspect: async (input) => {
@@ -310,4 +330,49 @@ test('binds rollover preview identity to public key-set digest and parent DS evi
   const left = await first.service.previewRollover({ domainId });
   const right = await second.service.previewRollover({ domainId });
   assert.notEqual(left.previewDigest, right.previewDigest);
+});
+
+test('scopes rollover host mutations through local Domain identity without returning the API key', async () => {
+  const { calls, service } = fixture({
+    current: authoritative({ dnssec: true }),
+    parentStates: [parent('present', [ds])],
+  });
+  const target = { keyType: 'csk', algorithm: 'ECDSAP256SHA256', bits: 256, active: false, published: false };
+  const created = await service.createRolloverKey({
+    domainId,
+    expectedKeySetDigest: 'a'.repeat(64),
+    expectedKeyIds: [1],
+    newKey: target,
+  });
+  const statePreview = await service.previewRolloverKeyState({ domainId, keyId: 2, active: true, published: true });
+  const updated = await service.setRolloverKeyState({
+    domainId,
+    keyId: 2,
+    expectedKeySetDigest: 'c'.repeat(64),
+    expectedTargetKeySetDigest: statePreview.targetKeySetDigest,
+    expectedActive: false,
+    expectedPublished: false,
+    active: true,
+    published: true,
+  });
+  const deletionPreview = await service.previewRolloverKeyDeletion({ domainId, keyId: 1 });
+  const deleted = await service.deleteRolloverKey({
+    domainId,
+    keyId: 1,
+    expectedKeySetDigest: deletionPreview.keySetDigest,
+    expectedRemainingKeySetDigest: deletionPreview.remainingKeySetDigest,
+  });
+
+  assert.equal(created.createdKey.id, 2);
+  assert.equal(updated.updatedKey.id, 2);
+  assert.equal(deleted.deletedKeyId, 1);
+  assert.equal(JSON.stringify({ created, statePreview, updated, deletionPreview, deleted }).includes(apiKey), false);
+  const hostCalls = calls.filter((entry) => entry[0].includes('rollover'));
+  assert.deepEqual(hostCalls.map((entry) => [entry[0], entry[1].zoneName, entry[1].apiKey]), [
+    ['create-rollover-key', 'example.com', apiKey],
+    ['preview-rollover-key-state', 'example.com', apiKey],
+    ['set-rollover-key-state', 'example.com', apiKey],
+    ['preview-rollover-key-deletion', 'example.com', apiKey],
+    ['delete-rollover-key', 'example.com', apiKey],
+  ]);
 });
