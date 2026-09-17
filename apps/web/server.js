@@ -6,6 +6,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const DEFAULT_WEB_ROOT = '/usr/share/yunpanel/web';
+const PHPMYADMIN_PREFIX = '/tools/phpmyadmin';
+const PHPMYADMIN_GATEWAY_ACCESS_PATH = '/api/phpmyadmin-gateway-access';
+const PHPMYADMIN_SOCKET_PATH = '/run/yunpanel/phpmyadmin-http.sock';
 const HOP_BY_HOP_HEADERS = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
   'te', 'trailer', 'transfer-encoding', 'upgrade',
@@ -85,6 +88,114 @@ function sameOriginMutation(request, publicOrigin) {
   return request.headers.origin === publicOrigin && (!fetchSite || ['same-origin', 'none'].includes(fetchSite));
 }
 
+function browserProxyHeaders(request) {
+  const headers = {};
+  for (const [name, value] of Object.entries(request.headers)) {
+    if (!HOP_BY_HOP_HEADERS.has(name) && value !== undefined
+      && !['authorization', 'forwarded', 'host', 'x-forwarded-for', 'x-real-ip',
+        'x-yunpanel-client-ip', 'x-yunpanel-proxy-token'].includes(name)) {
+      headers[name] = value;
+    }
+  }
+  return headers;
+}
+
+function authorizePhpMyAdminGateway(request, {
+  apiHost, apiPort, clientIp, proxyToken,
+}) {
+  return new Promise((resolve) => {
+    const headers = {
+      host: `${apiHost}:${apiPort}`,
+      'x-yunpanel-client-ip': clientIp,
+      'x-yunpanel-proxy-token': proxyToken,
+    };
+    if (typeof request.headers.cookie === 'string') headers.cookie = request.headers.cookie;
+    const upstream = http.request({
+      host: apiHost,
+      port: apiPort,
+      method: 'GET',
+      path: PHPMYADMIN_GATEWAY_ACCESS_PATH,
+      headers,
+    }, (upstreamResponse) => {
+      const status = upstreamResponse.statusCode ?? 503;
+      upstreamResponse.resume();
+      upstreamResponse.once('end', () => resolve(status));
+    });
+    upstream.setTimeout(5_000, () => upstream.destroy(new Error('phpMyAdmin access gate timeout')));
+    upstream.once('error', () => resolve(503));
+    upstream.end();
+  });
+}
+
+function rewritePhpMyAdminLocation(value) {
+  if (typeof value !== 'string' || !value.startsWith('/')) return value;
+  if (value === PHPMYADMIN_PREFIX || value.startsWith(`${PHPMYADMIN_PREFIX}/`)) return value;
+  return `${PHPMYADMIN_PREFIX}${value}`;
+}
+
+function scopePhpMyAdminSetCookie(value) {
+  const rewrite = (cookie) => String(cookie).replace(/;\s*Path=\/(?:;|$)/i, `; Path=${PHPMYADMIN_PREFIX}/;`);
+  if (Array.isArray(value)) return value.map(rewrite);
+  return typeof value === 'string' ? rewrite(value) : value;
+}
+
+function proxyPhpMyAdmin(request, response, {
+  phpMyAdminSocketPath, publicOrigin,
+}) {
+  if (!sameOriginMutation(request, publicOrigin)) {
+    reply(response, 403, 'Cross-origin phpMyAdmin mutations are not allowed.');
+    return;
+  }
+  if (!['GET', 'HEAD', 'POST'].includes(request.method ?? '')) {
+    reply(response, 405, 'Method not allowed.');
+    return;
+  }
+  const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
+  const upstreamPath = requestUrl.pathname.slice(PHPMYADMIN_PREFIX.length) || '/';
+  if (!upstreamPath.startsWith('/')) {
+    reply(response, 404, 'Not found.');
+    return;
+  }
+  const publicUrl = new URL(publicOrigin);
+  const headers = browserProxyHeaders(request);
+  headers.host = publicUrl.host;
+  headers['x-forwarded-proto'] = 'https';
+  headers['x-forwarded-host'] = publicUrl.host;
+  headers['x-forwarded-prefix'] = `${PHPMYADMIN_PREFIX}/`;
+
+  const upstream = http.request({
+    socketPath: phpMyAdminSocketPath,
+    method: request.method,
+    path: `${upstreamPath}${requestUrl.search}`,
+    headers,
+  }, (upstreamResponse) => {
+    const responseHeaders = {};
+    for (const [name, value] of Object.entries(upstreamResponse.headers)) {
+      if (HOP_BY_HOP_HEADERS.has(name) || value === undefined) continue;
+      if (name === 'location') {
+        responseHeaders[name] = rewritePhpMyAdminLocation(value);
+        continue;
+      }
+      if (name === 'set-cookie') {
+        responseHeaders[name] = scopePhpMyAdminSetCookie(value);
+        continue;
+      }
+      responseHeaders[name] = value;
+    }
+    responseHeaders['cache-control'] = 'no-store';
+    responseHeaders['x-robots-tag'] = 'noindex, nofollow, noarchive';
+    response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+    upstreamResponse.pipe(response);
+  });
+  upstream.setTimeout(120_000, () => upstream.destroy(new Error('phpMyAdmin upstream timeout')));
+  upstream.once('error', () => {
+    if (!response.headersSent) reply(response, 503, 'phpMyAdmin is unavailable.');
+    else response.destroy();
+  });
+  request.once('aborted', () => upstream.destroy());
+  request.pipe(upstream);
+}
+
 function isTransportPath(pathname) {
   return pathname === '/api/servers/enroll'
     || /^\/api\/servers\/[^/]+\/(?:heartbeat|commands(?:\/|$)|applications\/[^/]+\/environment$)/.test(pathname);
@@ -103,11 +214,7 @@ function proxyRequest(request, response, { apiHost, apiPort, clientIp, proxyToke
   const upstreamPathname = requestUrl.pathname.startsWith('/api/panel/')
     ? `/api/${requestUrl.pathname.slice('/api/panel/'.length)}` : requestUrl.pathname;
   if (isTransportPath(upstreamPathname)) { reply(response, 404, 'Not found.'); return; }
-  const headers = {};
-  for (const [name, value] of Object.entries(request.headers)) {
-    if (!HOP_BY_HOP_HEADERS.has(name) && value !== undefined
-      && !['authorization', 'forwarded', 'x-forwarded-for', 'x-real-ip', 'x-yunpanel-client-ip', 'x-yunpanel-proxy-token'].includes(name)) headers[name] = value;
-  }
+  const headers = browserProxyHeaders(request);
   headers.host = `${apiHost}:${apiPort}`;
   headers['x-yunpanel-client-ip'] = clientIp;
   headers['x-yunpanel-proxy-token'] = proxyToken;
@@ -140,11 +247,7 @@ function proxyWebSocket(request, socket, head, { apiHost, apiPort, clientIp, pro
     rejectSocket(socket, 403);
     return;
   }
-  const headers = {};
-  for (const [name, value] of Object.entries(request.headers)) {
-    if (!HOP_BY_HOP_HEADERS.has(name) && value !== undefined
-      && !['authorization', 'forwarded', 'x-forwarded-for', 'x-real-ip', 'x-yunpanel-client-ip', 'x-yunpanel-proxy-token'].includes(name)) headers[name] = value;
-  }
+  const headers = browserProxyHeaders(request);
   headers.host = `${apiHost}:${apiPort}`;
   headers.connection = 'Upgrade';
   headers.upgrade = 'websocket';
@@ -211,6 +314,7 @@ export function createPanelServer({
   apiPort = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10),
   publicOrigin = process.env.YUNPANEL_PUBLIC_ORIGIN,
   proxyToken = internalProxyToken(),
+  phpMyAdminSocketPath = PHPMYADMIN_SOCKET_PATH,
   trustedProxyIps = process.env.YUNPANEL_TRUSTED_PROXY_IPS ?? TRUSTED_PROXY_DEFAULT,
   webRoot = process.env.YUNPANEL_WEB_ROOT ?? DEFAULT_WEB_ROOT,
 } = {}) {
@@ -222,6 +326,10 @@ export function createPanelServer({
   if (typeof proxyToken !== 'string' || !PROXY_TOKEN_PATTERN.test(proxyToken)) throw new Error('YUNPANEL_INTERNAL_PROXY_TOKEN is required');
   if (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535) throw new Error('YUNPANEL_API_PORT is invalid');
   if (!publicOrigin || new URL(publicOrigin).origin !== publicOrigin) throw new Error('YUNPANEL_PUBLIC_ORIGIN is required');
+  if (typeof phpMyAdminSocketPath !== 'string' || !path.isAbsolute(phpMyAdminSocketPath)
+    || path.resolve(phpMyAdminSocketPath) !== phpMyAdminSocketPath || phpMyAdminSocketPath === '/') {
+    throw new Error('phpMyAdmin socket path is invalid');
+  }
   const server = http.createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
     const signedWebhook = isGithubWebhookPath(requestUrl.pathname);
@@ -233,6 +341,26 @@ export function createPanelServer({
       proxyRequest(request, response, {
         apiHost, apiPort, clientIp, proxyToken, publicOrigin, signedWebhook: true,
       });
+      return;
+    }
+    if (requestUrl.pathname === PHPMYADMIN_PREFIX) {
+      response.writeHead(308, {
+        'cache-control': 'no-store',
+        location: `${PHPMYADMIN_PREFIX}/${requestUrl.search}`,
+      });
+      response.end();
+      return;
+    }
+    if (requestUrl.pathname.startsWith(`${PHPMYADMIN_PREFIX}/`)) {
+      const accessStatus = await authorizePhpMyAdminGateway(request, {
+        apiHost, apiPort, clientIp, proxyToken,
+      });
+      if (accessStatus !== 204) {
+        const status = accessStatus === 401 || accessStatus === 403 ? accessStatus : 503;
+        reply(response, status, status === 401 ? 'Authentication required.' : 'phpMyAdmin access denied.');
+        return;
+      }
+      proxyPhpMyAdmin(request, response, { phpMyAdminSocketPath, publicOrigin });
       return;
     }
     if (requestUrl.pathname === '/api/health' || requestUrl.pathname.startsWith('/api/panel/') || requestUrl.pathname.startsWith('/api/auth/')) {
@@ -261,6 +389,14 @@ export const panelServerInternals = Object.freeze({
   internalProxyToken,
   isGithubWebhookPath,
   proxyWebSocket,
+  browserProxyHeaders,
+  authorizePhpMyAdminGateway,
+  proxyPhpMyAdmin,
+  rewritePhpMyAdminLocation,
+  scopePhpMyAdminSetCookie,
+  phpMyAdminPrefix: PHPMYADMIN_PREFIX,
+  phpMyAdminGatewayAccessPath: PHPMYADMIN_GATEWAY_ACCESS_PATH,
+  phpMyAdminSocketPath: PHPMYADMIN_SOCKET_PATH,
 });
 
 export function startPanelServer(options = {}) {
