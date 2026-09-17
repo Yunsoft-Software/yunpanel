@@ -58,7 +58,9 @@ async function sha256File(filePath) {
 
 function dumpArgs(name) {
   return [
+    '--no-defaults',
     '--protocol=socket',
+    '--user=root',
     '--single-transaction',
     '--quick',
     '--skip-lock-tables',

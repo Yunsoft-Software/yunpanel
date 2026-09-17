@@ -18,6 +18,9 @@ const ALLOWED_PRIVILEGES = Object.freeze([
 const ALLOWED_PRIVILEGE_SET = new Set(ALLOWED_PRIVILEGES);
 const CONNECTION_QUERY = 'SELECT VERSION(), @@version_comment;';
 const MAX_OUTPUT = 2 * 1024 * 1024;
+const LOCAL_ADMIN_ARGS = Object.freeze([
+  '--no-defaults', '--protocol=socket', '--user=root', '--batch', '--skip-column-names', '--raw',
+]);
 
 export class DatabaseCredentialManagerError extends Error {
   constructor(code, message) {
@@ -69,9 +72,9 @@ function normalizeBundle(value, { requirePassword }) {
 
 function runSqlStdin(file, sql, { timeout = 30_000 } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(file, ['--protocol=socket', '--batch', '--skip-column-names', '--raw'], {
+    const child = spawn(file, LOCAL_ADMIN_ARGS, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, LC_ALL: 'C' },
+      env: databaseManagerInternals.socketAdminEnvironment(),
       windowsHide: true,
     });
     const stdout = [];
@@ -422,4 +425,5 @@ export const databaseCredentialManagerInternals = Object.freeze({
   routinePrivilegeSql,
   quote,
   account,
+  localAdminArgs: LOCAL_ADMIN_ARGS,
 });

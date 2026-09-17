@@ -57,7 +57,7 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 ## P0.5 — Website DB ownership + phpMyAdmin
 
-- [ ] MariaDB/MySQL secure install/health baseline'ını package-active kontrolünün ötesinde tamamla; native Unix-socket admin auth'u tercih et, parola zorunlu profile açılırsa admin secret'ı encrypted store'da tut.
+- [ ] MariaDB/MySQL secure install/health baseline'ını tamamla: host adapter'ın native `root` Unix-socket/no-defaults auth ve anonymous/remote-root/test-schema inspector'ını install completion ile Database health API/UI'ına bağla; parola zorunlu profile açılırsa admin secret'ı encrypted store'da tut.
 - [ ] Site detayında mevcut binding, credential/grant, rotate/revoke, backup/restore ve drop-preview backend'lerini günlük Website akışında birleştir.
 - [ ] Website create'te opsiyonel initial DB + scoped credential/grant step'ini durable provisioning'e bağla.
 - [ ] Shared hardened phpMyAdmin.

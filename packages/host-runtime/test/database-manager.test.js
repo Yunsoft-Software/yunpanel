@@ -23,6 +23,9 @@ function fixture({ mariadb = true } = {}) {
     if (sql === databaseManagerInternals.inventoryQuery) {
       return { stdout: [...databases].sort(([a], [b]) => a.localeCompare(b)).map(([name, size]) => `${hex(name)}\t${size}`).join('\n') + '\n' };
     }
+    if (sql === databaseManagerInternals.securityQuery) {
+      return { stdout: `${hex('root@localhost')}\t${hex('root@localhost')}\t${hex('unix_socket')}\t0\t0\t0\n` };
+    }
     const create = sql.match(/^CREATE DATABASE `([A-Za-z0-9_]{1,64})` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;$/);
     if (create) { databases.set(create[1], 0); return { stdout: '' }; }
     const drop = sql.match(/^DROP DATABASE `([A-Za-z0-9_]{1,64})`;$/);
@@ -42,7 +45,58 @@ test('inspect uses the local socket and returns non-system schema sizes', async 
     { name: 'app_main', sizeBytes: 1024 },
   ]);
   assert.ok(fx.calls.every((call) => call.args.includes('--protocol=socket')));
+  assert.ok(fx.calls.every((call) => call.args[0] === '--no-defaults'));
+  assert.ok(fx.calls.every((call) => call.args.includes('--user=root')));
   assert.equal(fx.calls.some((call) => call.args.some((arg) => arg.includes('password'))), false);
+});
+
+test('security baseline proves native root socket auth and insecure defaults are absent', async () => {
+  const fx = fixture();
+  assert.deepEqual(await fx.manager.inspectSecurityBaseline(), {
+    engine: 'mariadb',
+    version: '10.11.13-MariaDB-0ubuntu0.24.04.1',
+    connection: {
+      protocol: 'socket',
+      adminAccount: 'root@localhost',
+      loginAccount: 'root@localhost',
+      authPlugin: 'unix_socket',
+      nativeSocketAuth: true,
+    },
+    hygiene: {
+      anonymousAccountsAbsent: true,
+      remoteRootAccountsAbsent: true,
+      testSchemaAbsent: true,
+    },
+    ready: true,
+    reason: null,
+  });
+});
+
+test('security baseline reports password auth and insecure defaults without exposing credentials', () => {
+  const baseline = databaseManagerInternals.parseSecurityBaseline(
+    `${hex('root@localhost')}\t${hex('root@localhost')}\t${hex('caching_sha2_password')}\t1\t2\t1\n`,
+    { engine: 'mysql', version: '8.4.0' },
+  );
+  assert.equal(baseline.ready, false);
+  assert.equal(baseline.connection.nativeSocketAuth, false);
+  assert.equal(baseline.reason, 'database_native_socket_admin_auth_required');
+  assert.deepEqual(baseline.hygiene, {
+    anonymousAccountsAbsent: false,
+    remoteRootAccountsAbsent: false,
+    testSchemaAbsent: false,
+  });
+});
+
+test('database client environment drops inherited connection and password overrides', () => {
+  const environment = databaseManagerInternals.socketAdminEnvironment({
+    PATH: '/usr/bin',
+    MYSQL_PWD: 'private',
+    MARIADB_PWD: 'private',
+    MYSQL_HOST: 'remote.example',
+    MYSQL_TCP_PORT: '3307',
+    MYSQL_UNIX_PORT: '/tmp/foreign.sock',
+  });
+  assert.deepEqual(environment, { PATH: '/usr/bin', LC_ALL: 'C' });
 });
 
 test('client discovery falls back from MariaDB CLI to MySQL CLI without credentials', async () => {

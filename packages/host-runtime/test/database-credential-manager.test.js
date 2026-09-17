@@ -41,6 +41,13 @@ test('routine privilege evidence uses the engine-specific catalog', () => {
   );
 });
 
+test('credential SQL client is pinned to native root socket auth without option files', () => {
+  assert.deepEqual(databaseCredentialManagerInternals.localAdminArgs.slice(0, 3), [
+    '--no-defaults', '--protocol=socket', '--user=root',
+  ]);
+  assert.equal(databaseCredentialManagerInternals.localAdminArgs.some((value) => /password/i.test(value)), false);
+});
+
 function fakeRuntime({ accountExists = false, marker = null, externalSchema = null, failDesiredEvidence = false } = {}) {
   const calls = [];
   let exists = accountExists;

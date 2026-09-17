@@ -6,6 +6,16 @@ const CLIENT_PATHS = Object.freeze(['/usr/bin/mariadb', '/usr/bin/mysql']);
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const CONNECTION_QUERY = 'SELECT VERSION(), @@version_comment;';
+const SECURITY_QUERY = `
+SELECT HEX(CURRENT_USER()), HEX(USER()),
+  HEX(COALESCE((SELECT plugin FROM mysql.user WHERE CONCAT(User, '@', Host) = CURRENT_USER() LIMIT 1), '')),
+  (SELECT COUNT(*) FROM mysql.user WHERE User = ''),
+  (SELECT COUNT(*) FROM mysql.user WHERE User = 'root' AND Host <> 'localhost'),
+  (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'test');
+`.trim();
+const INHERITED_CREDENTIAL_ENV = Object.freeze([
+  'MYSQL_PWD', 'MARIADB_PWD', 'MYSQL_HOST', 'MYSQL_TCP_PORT', 'MYSQL_UNIX_PORT',
+]);
 const INVENTORY_QUERY = `
 SELECT HEX(s.SCHEMA_NAME), COALESCE(SUM(t.DATA_LENGTH + t.INDEX_LENGTH), 0)
 FROM information_schema.SCHEMATA AS s
@@ -24,7 +34,13 @@ export class DatabaseManagerError extends Error {
 }
 
 function queryArgs(sql) {
-  return ['--protocol=socket', '--batch', '--skip-column-names', '--raw', `--execute=${sql}`];
+  return ['--no-defaults', '--protocol=socket', '--user=root', '--batch', '--skip-column-names', '--raw', `--execute=${sql}`];
+}
+
+function socketAdminEnvironment(base = process.env) {
+  const environment = { ...base, LC_ALL: 'C' };
+  for (const name of INHERITED_CREDENTIAL_ENV) delete environment[name];
+  return environment;
 }
 
 function requireDatabaseName(value) {
@@ -72,6 +88,65 @@ function parseDatabaseInventory(output) {
   return databases;
 }
 
+function parseHexText(value, { allowEmpty = false, maxLength = 120 } = {}) {
+  if (typeof value !== 'string' || (!allowEmpty && value.length === 0)
+    || value.length > maxLength * 2 || value.length % 2 !== 0 || !/^[0-9A-Fa-f]*$/.test(value)) {
+    throw new DatabaseManagerError('database_security_evidence_invalid', 'Database security evidence is invalid');
+  }
+  const text = Buffer.from(value, 'hex').toString('utf8');
+  if ((!allowEmpty && !text) || text.length > maxLength || /[\u0000-\u001f\u007f]/.test(text)) {
+    throw new DatabaseManagerError('database_security_evidence_invalid', 'Database security evidence is invalid');
+  }
+  return text;
+}
+
+function parseSecurityBaseline(output, connection) {
+  const line = String(output ?? '').trimEnd();
+  const fields = line.split('\t');
+  if (fields.length !== 6 || fields.slice(3).some((value) => !/^\d+$/.test(value))) {
+    throw new DatabaseManagerError('database_security_evidence_invalid', 'Database security evidence is invalid');
+  }
+  const effectiveAccount = parseHexText(fields[0]);
+  const loginAccount = parseHexText(fields[1]);
+  const authPlugin = parseHexText(fields[2], { allowEmpty: true, maxLength: 64 });
+  const counts = fields.slice(3).map(Number);
+  if (counts.some((value) => !Number.isSafeInteger(value) || value < 0 || value > 100_000)) {
+    throw new DatabaseManagerError('database_security_evidence_invalid', 'Database security evidence is invalid');
+  }
+  const nativeSocketAuth = effectiveAccount === 'root@localhost'
+    && loginAccount === 'root@localhost'
+    && ['unix_socket', 'auth_socket'].includes(authPlugin.toLowerCase());
+  const hygiene = Object.freeze({
+    anonymousAccountsAbsent: counts[0] === 0,
+    remoteRootAccountsAbsent: counts[1] === 0,
+    testSchemaAbsent: counts[2] === 0,
+  });
+  const ready = nativeSocketAuth && Object.values(hygiene).every(Boolean);
+  const reason = !nativeSocketAuth
+    ? 'database_native_socket_admin_auth_required'
+    : !hygiene.anonymousAccountsAbsent
+      ? 'database_anonymous_accounts_present'
+      : !hygiene.remoteRootAccountsAbsent
+        ? 'database_remote_root_accounts_present'
+        : !hygiene.testSchemaAbsent
+          ? 'database_test_schema_present'
+          : null;
+  return Object.freeze({
+    engine: connection.engine,
+    version: connection.version,
+    connection: Object.freeze({
+      protocol: 'socket',
+      adminAccount: effectiveAccount,
+      loginAccount,
+      authPlugin,
+      nativeSocketAuth,
+    }),
+    hygiene,
+    ready,
+    reason,
+  });
+}
+
 function createSql(name) {
   return `CREATE DATABASE \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`;
 }
@@ -99,7 +174,7 @@ export function createDatabaseManager({
     return run(client, queryArgs(sql), {
       timeout,
       maxBuffer: 2 * 1024 * 1024,
-      env: { ...process.env, LC_ALL: 'C' },
+      env: socketAdminEnvironment(),
     });
   }
 
@@ -133,6 +208,17 @@ export function createDatabaseManager({
 
   async function inspect() {
     return inventory();
+  }
+
+  async function inspectSecurityBaseline() {
+    const connection = await connect();
+    let stdout;
+    try {
+      ({ stdout } = await runClient(connection.client, SECURITY_QUERY, { timeout: 5_000 }));
+    } catch {
+      throw new DatabaseManagerError('database_security_inspection_failed', 'Database security baseline could not be inspected');
+    }
+    return parseSecurityBaseline(stdout, connection);
   }
 
   async function withMutation(operation) {
@@ -188,7 +274,7 @@ export function createDatabaseManager({
     });
   }
 
-  return { inspect, createDatabase, dropDatabase };
+  return { inspect, inspectSecurityBaseline, createDatabase, dropDatabase };
 }
 
 export const databaseManager = createDatabaseManager();
@@ -202,8 +288,11 @@ export const databaseManagerInternals = Object.freeze({
   inferEngine,
   parseConnection,
   parseDatabaseInventory,
+  parseSecurityBaseline,
   createSql,
   dropSql,
+  socketAdminEnvironment,
   inventoryQuery: INVENTORY_QUERY,
   connectionQuery: CONNECTION_QUERY,
+  securityQuery: SECURITY_QUERY,
 });

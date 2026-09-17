@@ -104,11 +104,7 @@ async function defaultRestoreFromFile({ dumpPath, engine, programs = RESTORE_PRO
   let lastError = null;
   for (const program of ordered) {
     try {
-      await spawnRestore(program, [
-        '--protocol=socket',
-        '--binary-mode=1',
-        '--default-character-set=utf8mb4',
-      ], dumpPath);
+      await spawnRestore(program, restoreArgs(), dumpPath);
       return program;
     } catch (error) {
       lastError = error;
@@ -116,6 +112,16 @@ async function defaultRestoreFromFile({ dumpPath, engine, programs = RESTORE_PRO
     }
   }
   throw lastError ?? new DatabaseRestoreError('database_restore_program_unavailable', 'No supported database restore program is available');
+}
+
+function restoreArgs() {
+  return [
+    '--no-defaults',
+    '--protocol=socket',
+    '--user=root',
+    '--binary-mode=1',
+    '--default-character-set=utf8mb4',
+  ];
 }
 
 export function createDatabaseRestoreManager({
@@ -272,6 +278,7 @@ export const databaseRestoreManagerInternals = Object.freeze({
   emitProgress,
   spawnRestore,
   defaultRestoreFromFile,
+  restoreArgs,
   transactionId,
   expectedBackupSha256,
 });

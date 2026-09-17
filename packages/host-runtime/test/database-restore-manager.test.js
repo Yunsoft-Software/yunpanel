@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   createDatabaseRestoreManager,
   DatabaseRestoreError,
+  databaseRestoreManagerInternals,
 } from '../src/database-restore-manager.js';
 
 const digest = (value) => createHash('sha256').update(value).digest('hex');
@@ -19,6 +20,13 @@ const request = Object.freeze({
   backupId: 'backup-0001',
   databaseName: 'app_main',
   expectedBackupSha256: selectedSha,
+});
+
+test('restore SQL client is pinned to native root socket auth without option files', () => {
+  assert.deepEqual(databaseRestoreManagerInternals.restoreArgs().slice(0, 3), [
+    '--no-defaults', '--protocol=socket', '--user=root',
+  ]);
+  assert.equal(databaseRestoreManagerInternals.restoreArgs().some((value) => /password/i.test(value)), false);
 });
 
 async function fixture(t, {
