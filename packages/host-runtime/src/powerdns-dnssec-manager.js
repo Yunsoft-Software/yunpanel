@@ -304,6 +304,51 @@ export function createPowerDnsDnssecManager({
     return Object.freeze({ ...after, changed: true, createdKey: completed.key });
   }
 
+  async function previewRolloverKeyState({
+    zoneName,
+    apiKey: rawApiKey,
+    keyId: rawKeyId,
+    active,
+    published,
+  } = {}) {
+    const normalizedZone = powerDnsZoneManagerInternals.zoneName(zoneName);
+    const keyId = keyIdentifier(rawKeyId);
+    if (typeof active !== 'boolean' || typeof published !== 'boolean') {
+      throw new PowerDnsDnssecManagerError('powerdns_dnssec_key_target_invalid', 'DNSSEC rollover key state target is invalid', 400);
+    }
+    const current = await inspect({ zoneName: normalizedZone, apiKey: rawApiKey });
+    assertRolloverState(current);
+    const key = current.keys.find((entry) => entry.id === keyId);
+    if (!key) throw new PowerDnsDnssecManagerError('powerdns_dnssec_key_not_found', 'DNSSEC key was not found', 404);
+    const desiredKeys = current.keys.map((entry) => (entry.id === keyId ? { ...entry, active, published } : entry));
+    if (!desiredKeys.some((entry) => entry.active && entry.published && entry.ds.length > 0)) {
+      throw new PowerDnsDnssecManagerError('powerdns_dnssec_key_update_unsafe', 'DNSSEC key update would remove verified signing continuity', 409);
+    }
+    return Object.freeze({
+      ...current,
+      targetKeySetDigest: keySetDigest(desiredKeys),
+      targetKey: Object.freeze({ ...key, active, published }),
+    });
+  }
+
+  async function previewRolloverKeyDeletion({ zoneName, apiKey: rawApiKey, keyId: rawKeyId } = {}) {
+    const normalizedZone = powerDnsZoneManagerInternals.zoneName(zoneName);
+    const keyId = keyIdentifier(rawKeyId);
+    const current = await inspect({ zoneName: normalizedZone, apiKey: rawApiKey });
+    assertRolloverState(current);
+    const key = current.keys.find((entry) => entry.id === keyId);
+    if (!key) throw new PowerDnsDnssecManagerError('powerdns_dnssec_key_not_found', 'DNSSEC key was not found', 404);
+    const remainingKeys = current.keys.filter((entry) => entry.id !== keyId);
+    if (!remainingKeys.some((entry) => entry.active && entry.published && entry.ds.length > 0)) {
+      throw new PowerDnsDnssecManagerError('powerdns_dnssec_key_delete_unsafe', 'DNSSEC key deletion would remove verified signing continuity', 409);
+    }
+    return Object.freeze({
+      ...current,
+      deletedKey: key,
+      remainingKeySetDigest: keySetDigest(remainingKeys),
+    });
+  }
+
   async function setRolloverKeyState({
     zoneName,
     apiKey: rawApiKey,
@@ -467,7 +512,9 @@ export function createPowerDnsDnssecManager({
     enable: (input) => setEnabled({ ...input, enabled: true }),
     disable: (input) => setEnabled({ ...input, enabled: false }),
     createRolloverKey,
+    previewRolloverKeyState,
     setRolloverKeyState,
+    previewRolloverKeyDeletion,
     deleteRolloverKey,
   });
 }

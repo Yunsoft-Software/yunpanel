@@ -250,9 +250,13 @@ test('updates rollover key publication state against exact before and after dige
     keyType: 'csk', algorithm: 'ECDSAP256SHA256', bits: 256,
     active: false, published: false,
   });
-  const targetDigest = powerDnsDnssecManagerInternals.keySetDigest(
-    created.keys.map((entry) => (entry.id === 8 ? { ...entry, active: true, published: true } : entry)),
-  );
+  const statePreview = await manager.previewRolloverKeyState({
+    zoneName: 'example.com', apiKey, keyId: 8, active: true, published: true,
+  });
+  const targetDigest = statePreview.targetKeySetDigest;
+  assert.equal(statePreview.keySetDigest, created.keySetDigest);
+  assert.equal(statePreview.targetKey.active, true);
+  assert.equal(calls.some((entry) => entry.path.endsWith('/cryptokeys/8')), false);
   const input = {
     zoneName: 'example.com', apiKey, keyId: 8,
     expectedKeySetDigest: created.keySetDigest,
@@ -283,9 +287,13 @@ test('deletes only an exact old key while another active published key preserves
     keyType: 'csk', algorithm: 'ECDSAP256SHA256', bits: 256,
     active: true, published: true,
   });
-  const remainingDigest = powerDnsDnssecManagerInternals.keySetDigest(
-    created.keys.filter((entry) => entry.id !== 7),
-  );
+  const deletionPreview = await manager.previewRolloverKeyDeletion({
+    zoneName: 'example.com', apiKey, keyId: 7,
+  });
+  const remainingDigest = deletionPreview.remainingKeySetDigest;
+  assert.equal(deletionPreview.keySetDigest, created.keySetDigest);
+  assert.equal(deletionPreview.deletedKey.id, 7);
+  assert.equal(calls.some((entry) => entry.method === 'DELETE'), false);
   const input = {
     zoneName: 'example.com', apiKey, keyId: 7,
     expectedKeySetDigest: created.keySetDigest,
@@ -305,6 +313,10 @@ test('refuses to delete the only active published DNSSEC key', async () => {
   const { calls, manager } = fixture({ dnssec: true });
   const baseline = await manager.inspect({ zoneName: 'example.com', apiKey });
   const emptyDigest = powerDnsDnssecManagerInternals.keySetDigest([]);
+  await assert.rejects(
+    manager.previewRolloverKeyDeletion({ zoneName: 'example.com', apiKey, keyId: 7 }),
+    (error) => error instanceof PowerDnsDnssecManagerError && error.code === 'powerdns_dnssec_key_delete_unsafe',
+  );
   await assert.rejects(
     manager.deleteRolloverKey({
       zoneName: 'example.com', apiKey, keyId: 7,
