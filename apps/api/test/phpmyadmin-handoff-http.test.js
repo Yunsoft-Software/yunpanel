@@ -153,3 +153,25 @@ test('handoff issuance rejects extra body fields and unknown local server before
   assert.equal((await unknown.json()).error.code, 'server_not_found');
   assert.equal(missing.calls.some(([name]) => name === 'issue'), false);
 });
+
+
+test('phpMyAdmin gateway access requires an authenticated Owner session', async (t) => {
+  const owner = await listen(t);
+  const allowed = await fetch(`${owner.base}/api/phpmyadmin-gateway-access`);
+  assert.equal(allowed.status, 204);
+  assert.equal(allowed.headers.get('cache-control'), 'no-store');
+  assert.equal(allowed.headers.get('pragma'), 'no-cache');
+
+  const readOnly = await listen(t, { role: 'read_only' });
+  const denied = await fetch(`${readOnly.base}/api/phpmyadmin-gateway-access`);
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error.code, 'phpmyadmin_handoff_owner_required');
+  assert.deepEqual(readOnly.calls, []);
+});
+
+test('phpMyAdmin gateway access rejects query-bearing probes', async (t) => {
+  const { base } = await listen(t);
+  const response = await fetch(`${base}/api/phpmyadmin-gateway-access?next=/`);
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, 'phpmyadmin_handoff_query_invalid');
+});
