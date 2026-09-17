@@ -52,6 +52,7 @@ test('phpMyAdmin browser handoff posts the capability without putting it in the 
         url,
         method: options.method,
         credentials: options.credentials,
+        mode: options.mode,
         redirect: options.redirect,
         cache: options.cache,
         referrerPolicy: options.referrerPolicy,
@@ -72,6 +73,7 @@ test('phpMyAdmin browser handoff posts the capability without putting it in the 
     url: '/tools/phpmyadmin/__yunpanel/signon',
     method: 'POST',
     credentials: 'same-origin',
+    mode: 'same-origin',
     redirect: 'follow',
     cache: 'no-store',
     referrerPolicy: 'no-referrer',
@@ -108,6 +110,33 @@ test('phpMyAdmin browser handoff rejects target drift before posting the capabil
     }),
     (error) => error instanceof PhpMyAdminBrowserHandoffError
       && error.code === 'phpmyadmin_handoff_invalid'
+      && !error.message.includes(capability),
+  );
+
+  assert.equal(signonCalls, 0);
+  assert.deepEqual(locationImpl.assigned, []);
+});
+
+
+test('phpMyAdmin browser handoff rejects an already expired capability before signon', async () => {
+  let signonCalls = 0;
+  const locationImpl = browserLocation();
+
+  await assert.rejects(
+    openWebsitePhpMyAdmin({
+      serverId,
+      websiteId,
+      credentialId,
+      issueHandoff: async () => handoff({ expiresAt: 9_999 }),
+      fetchImpl: async () => {
+        signonCalls += 1;
+        return { ok: true, status: 200, url: 'https://panel.example.test/tools/phpmyadmin/' };
+      },
+      locationImpl,
+      now: () => 10_000,
+    }),
+    (error) => error instanceof PhpMyAdminBrowserHandoffError
+      && error.code === 'phpmyadmin_handoff_expired'
       && !error.message.includes(capability),
   );
 
