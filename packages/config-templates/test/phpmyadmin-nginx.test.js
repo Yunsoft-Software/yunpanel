@@ -15,6 +15,9 @@ test('phpMyAdmin Nginx template is reachable only through the managed Unix gatew
   assert.match(content, /^  root \/usr\/share\/phpmyadmin;$/m);
   assert.match(content, /fastcgi_pass unix:\/run\/php\/yunpanel-phpmyadmin\.sock;/);
   assert.match(content, /location ~ \^\/\(\?:setup\|test\|libraries\|templates\)\(\?:\/\|\$\)/);
+  assert.match(content, /^  location = \/__yunpanel\/signon \{$/m);
+  assert.match(content, /fastcgi_param SCRIPT_FILENAME \/usr\/lib\/yunpanel\/phpmyadmin\/signon\.php;/);
+  assert.match(content, /limit_except POST/);
   assert.match(content, /fastcgi_param HTTPS on;/);
   assert.match(content, /X-Robots-Tag "noindex, nofollow, noarchive"/);
   assert.equal(preview.artifact.path, phpMyAdminNginxTemplatePolicy.configPath);
@@ -23,6 +26,8 @@ test('phpMyAdmin Nginx template is reachable only through the managed Unix gatew
   assert.equal(preview.gatewaySocketPath, '/run/yunpanel/phpmyadmin-http.sock');
   assert.equal(preview.gatewaySocketMode, 0o660);
   assert.equal(preview.gatewaySocketGroup, 'yunpanel');
+  assert.equal(preview.signonBridgePath, '/usr/lib/yunpanel/phpmyadmin/signon.php');
+  assert.equal(preview.internalSignonPath, '/__yunpanel/signon');
   assert.equal(preview.healthPath, '/');
 });
 
@@ -38,6 +43,8 @@ test('phpMyAdmin Nginx template rejects alternate roots and sockets', () => {
     { fpmSocketPath: '/run/php/another.sock' },
     { gatewaySocketPath: '/run/yunpanel/../public.sock' },
     { gatewaySocketPath: '/tmp/phpmyadmin.sock' },
+    { signonBridgePath: '/tmp/signon.php' },
+    { internalSignonPath: '/signon' },
   ]) {
     assert.throws(() => renderPhpMyAdminNginxConfig(input), PhpMyAdminNginxTemplateError);
   }
