@@ -369,7 +369,60 @@ export function createPowerDnsAuthoritativeManager({
     return verified;
   }
 
-  return Object.freeze({ inspect, apply });
+  async function activateRestored(rawIntent) {
+    const spec = normalizeIntent(rawIntent);
+    await assertIncludeDirectory();
+    const config = await readOptional(powerDnsTemplatePolicy.configPath);
+    if (config === null) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_config_missing',
+        'Restored PowerDNS managed configuration is missing',
+      );
+    }
+    const restoredHash = apiKeyHashFromConfig(config);
+    if (!restoredHash || renderManagedPowerDnsConfig({
+      apiKeyHash: restoredHash,
+      secondaryDns: spec.secondaryDns,
+    }) !== config) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_config_invalid',
+        'Restored PowerDNS managed configuration does not match rollback intent',
+      );
+    }
+    const receiptRaw = await readOptional(RECEIPT_PATH);
+    if (receiptRaw === null) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_receipt_missing',
+        'Restored PowerDNS authoritative receipt is missing',
+      );
+    }
+    try { receiptValue(JSON.parse(receiptRaw), spec, config); }
+    catch {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_receipt_invalid',
+        'Restored PowerDNS authoritative receipt does not match rollback intent',
+      );
+    }
+
+    await activate(true);
+    const health = await apiHealth(spec.apiKey);
+    if (!health.healthy) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_api_unhealthy',
+        'PowerDNS API did not become healthy after rollback activation',
+      );
+    }
+    const verified = await inspect(spec);
+    if (!verified.satisfied) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_unverified',
+        `PowerDNS rollback activation could not be verified (${verified.reason})`,
+      );
+    }
+    return verified;
+  }
+
+  return Object.freeze({ inspect, apply, activateRestored });
 }
 
 export const powerDnsAuthoritativeManagerInternals = Object.freeze({

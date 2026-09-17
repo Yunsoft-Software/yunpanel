@@ -23,6 +23,7 @@ Bu kayıt P0.2 PowerDNS lifecycle hardening diliminde kaynakta tamamlanan işler
 - Snapshot atomik yazılır; parent dizin `0700`, dosya root-owned `0600` contract'ıyla restart sonrasında yeniden okunur. Public rollback status yalnız availability/reason/digest/önceki secondary topology/zaman alanlarını verir; dosya içerikleri ve API secret public projection'a çıkmaz.
 - Aynı operation'ın explicit retry'si ilk snapshot'ı yeniden kullanır; kısmen uygulanmış state previous state diye snapshot'ı ezemez. Yeni operation eski snapshot'ın yerini ancak kendi pre-mutation snapshot hazırlığı tamamlandığında alır.
 - Previous config/receipt bulunmayan fresh install ve artık materialize edilemeyen eski credential revision açık `rollback unavailable` evidence bırakır. Snapshot güvenliği veya doğrulaması host mutation'dan önce başarısızsa durable operation belirsiz `applying` yerine güvenli `failed` kapanır.
+- Base authoritative manager restore edilmiş config ve receipt'i exact server/credential/topology intent'iyle doğrulayan ayrı aktivasyon primitive'i sunar. Primitive restore dosyalarını yeniden yazmadan vendor `config=check`, service enable/restart, API health ve final inspect uygular; APT/package mutation'ı başlatmaz.
 
 ## Regression kapsamı
 
@@ -37,6 +38,7 @@ Kaynağa aşağıdaki regression testleri eklendi:
 - ready-manager production default'unun durable manager'a bağlı kalması.
 - operation context'in initial apply ve explicit retry'da aynı durable operation ID'sini taşıması;
 - rollback snapshot'ın restart sonrasında doğrulanması, retry sırasında değişmemesi, raw API key taşımaması ve eksik receipt/credential-rotation durumlarının explicit unavailable kalması.
+- restore aktivasyonunun exact config/receipt kabulü, drift'i service mutation öncesi reddetmesi ve package install çalıştırmaması.
 
 2026-09-17 snapshot diliminde host-runtime odak testleri desteklenen Node 24 ile çalıştırıldı ve 18/18 geçti. Ardından repository policy, bütün workspace testleri ve production build'i içeren `npm run check` başarıyla tamamlandı. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
 
@@ -46,6 +48,6 @@ Kaynağa aşağıdaki regression testleri eklendi:
 - Process/API kesintisi mutation ile evidence checkpoint arasına enjekte edilip restart sonrası inspect-first davranış doğrulanmalı.
 - Belirsiz apt/systemd sonucunda aynı mutation'ın otomatik ikinci kez çalışmadığı host command loglarıyla kanıtlanmalı.
 - Root-private rollback snapshot'ın gerçek dosya sahipliği/izinleri, process restart sonrası okunması, symlink/tamper reddi ve retry sırasında değişmemesi doğrulanmalı.
-- Snapshot'tan explicit config + receipt restore, configtest/service health ve başarısız restore compensation henüz kaynakta tamamlanmadı.
+- Snapshot'tan explicit config + receipt dosya restore'u ve başarısız aktivasyon compensation'ı henüz secure manager'a bağlanmadı.
 - Package upgrade boyunca operation journal, authoritative receipt ve root-owned private izinlerin korunduğu doğrulanmalı.
 - Public UDP/TCP 53, delegation, secondary transfer/failover ve browser yüzeyi ayrı T-DNS kabul kapıları olarak açık kalır.
