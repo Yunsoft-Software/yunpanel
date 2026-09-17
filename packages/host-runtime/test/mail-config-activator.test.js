@@ -20,6 +20,7 @@ import {
   mailForwardingTemplatePolicy,
   mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
+  previewManagedMailApplyPlan,
   previewManagedMailSubmissionConfiguration,
   renderDovecotQuotaPasswdFile,
 } from '@yunpanel/config-templates';
@@ -114,6 +115,7 @@ async function prepare({
   root,
   failFirstDoveconf = false,
   failSievec = false,
+  failDoveconfCalls = [],
   invalidVmailIdentity = false,
   invalidPostfixIdentity = false,
   invalidSubmissionSocket = false,
@@ -157,6 +159,8 @@ async function prepare({
   const masterParameters = new Map();
   let masterDefinition = null;
   let doveconfFailuresRemaining = failFirstDoveconf ? 1 : 0;
+  let doveconfCalls = 0;
+  const failedDoveconfCalls = new Set(failDoveconfCalls);
   const run = async (file, args) => {
     calls.push([file, [...args]]);
     if (file === '/usr/bin/getent') {
@@ -224,9 +228,12 @@ async function prepare({
       }
       return { stdout: `${expression}=${masterParameters.get(expression) ?? ''}\n`, stderr: '' };
     }
-    if (file === '/usr/bin/doveconf' && args[0] === '-n' && doveconfFailuresRemaining > 0) {
-      doveconfFailuresRemaining -= 1;
-      throw new Error('fixture validation failure');
+    if (file === '/usr/bin/doveconf' && args[0] === '-n') {
+      doveconfCalls += 1;
+      if (doveconfFailuresRemaining > 0 || failedDoveconfCalls.has(doveconfCalls)) {
+        doveconfFailuresRemaining -= Number(doveconfFailuresRemaining > 0);
+        throw new Error('fixture validation failure');
+      }
     }
     return { stdout: '', stderr: '' };
   };
@@ -234,10 +241,25 @@ async function prepare({
   const activatorLstatFn = async (value) => value === mailSubmissionTemplatePolicy.dovecotAuthSocket
     ? socketStat({ valid: !invalidSubmissionSocket })
     : mapped.lstatFn(value);
+  const evidenceState = { satisfied: true };
+  const evidenceInspector = {
+    inspect: async (candidate) => ({
+      satisfied: evidenceState.satisfied,
+      result: evidenceState.satisfied ? {
+        version: 1,
+        previewSha256: candidate.sha256,
+        planSha256: previewManagedMailApplyPlan(candidate).sha256,
+        readinessSha256: 'b'.repeat(64),
+        applied: true,
+        sideEffects: true,
+      } : null,
+    }),
+  };
   const activator = createMailConfigActivator({
     configManager,
     backupManager,
     readinessInspector,
+    evidenceInspector,
     run,
     ...mapped,
     lstatFn: activatorLstatFn,
@@ -247,6 +269,7 @@ async function prepare({
     backup,
     backupManager,
     calls,
+    evidenceState,
     mapped,
     originalMainCf,
     originalMasterCf,
@@ -300,6 +323,81 @@ test('activates staged mail config with compiled maps/sieve, guarded submission 
     && args[0] === '-P' && args[1] === 'submission/inet/smtpd_tls_security_level=encrypt'), true);
   const reloads = context.calls.filter(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'reload');
   assert.deepEqual(reloads.map(([, args]) => args[1]), ['rspamd', 'dovecot', 'postfix']);
+}));
+
+test('explicit rollback restores the exact identity-bound source backup after fencing current state', async () => withTempDirectory(async (root) => {
+  const context = await prepare({ root });
+  await context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID });
+
+  const result = await context.activator.rollbackConfiguration(context.preview, {
+    transactionId: 'mail-job-rollback-001',
+    sourceTransactionId: TRANSACTION_ID,
+    sourcePlanSha256: context.backup.planSha256,
+    sourceBackupSha256: context.backup.manifestSha256,
+  });
+
+  assert.deepEqual(await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath)), context.originalMainCf);
+  assert.deepEqual(await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMasterCfPath)), context.originalMasterCf);
+  for (const targetPath of context.preview.artifacts.map((artifact) => artifact.path)
+    .concat(mailConfigBackupInternals.compiledPaths)) {
+    await assert.rejects(lstat(context.mapped.mapPath(targetPath)), (error) => error?.code === 'ENOENT');
+  }
+  assert.equal(result.restored, true);
+  assert.equal(result.sourceBackupSha256, context.backup.manifestSha256);
+  assert.doesNotMatch(JSON.stringify(result), /password|argon2|content|path/i);
+  const compensation = await context.backupManager.inspectBackup(context.preview, {
+    transactionId: 'mail-job-rollback-001',
+  });
+  assert.equal(compensation.satisfied, true);
+  assert.equal(compensation.result.manifestSha256, result.compensationBackupSha256);
+}));
+
+test('explicit rollback blocks drift before creating a compensation backup or mutating live state', async () => withTempDirectory(async (root) => {
+  const context = await prepare({ root });
+  await context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID });
+  const currentMainCf = await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath));
+  context.evidenceState.satisfied = false;
+
+  await assert.rejects(
+    context.activator.rollbackConfiguration(context.preview, {
+      transactionId: 'mail-job-rollback-002',
+      sourceTransactionId: TRANSACTION_ID,
+      sourcePlanSha256: context.backup.planSha256,
+      sourceBackupSha256: context.backup.manifestSha256,
+    }),
+    (error) => error instanceof MailConfigActivationError && error.code === 'mail_rollback_current_state_changed',
+  );
+  assert.deepEqual(await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath)), currentMainCf);
+  const compensation = await context.backupManager.inspectBackup(context.preview, {
+    transactionId: 'mail-job-rollback-002',
+  });
+  assert.equal(compensation.satisfied, false);
+}));
+
+test('explicit rollback restores its compensation snapshot when source validation fails after mutation', async () => withTempDirectory(async (root) => {
+  const context = await prepare({ root, failDoveconfCalls: [2] });
+  await context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID });
+  const currentMainCf = await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath));
+  const currentMasterCf = await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMasterCfPath));
+
+  await assert.rejects(
+    context.activator.rollbackConfiguration(context.preview, {
+      transactionId: 'mail-job-rollback-003',
+      sourceTransactionId: TRANSACTION_ID,
+      sourcePlanSha256: context.backup.planSha256,
+      sourceBackupSha256: context.backup.manifestSha256,
+    }),
+    (error) => error instanceof MailConfigActivationError && error.code === 'mail_restore_validation_failed',
+  );
+
+  assert.deepEqual(await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath)), currentMainCf);
+  assert.deepEqual(await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMasterCfPath)), currentMasterCf);
+  for (const artifact of context.preview.artifacts) {
+    assert.equal(sha256(await readFile(context.mapped.mapPath(artifact.path))), artifact.sha256);
+  }
+  for (const directoryPath of mailConfigBackupInternals.managedDirectoryPaths) {
+    assert.equal((await stat(context.mapped.mapPath(directoryPath))).isDirectory(), true);
+  }
 }));
 
 test('restores files, postfix main.cf/master.cf, compiled maps/sieve and newly-created directories after validation failure', async () => withTempDirectory(async (root) => {

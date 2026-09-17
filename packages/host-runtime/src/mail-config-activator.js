@@ -20,6 +20,7 @@ import {
   previewManagedMailApplyPlan,
 } from '@yunpanel/config-templates';
 import { createMailConfigBackupManager, mailConfigBackupInternals } from './mail-config-backup.js';
+import { createMailConfigEvidenceInspector } from './mail-config-evidence-inspector.js';
 import { createMailConfigManager } from './mail-config-manager.js';
 import { createMailReadinessInspector } from './mail-readiness-inspector.js';
 import { parseManagedSystemIdentity, parseManagedVmailIdentity } from './mail-vmail-identity.js';
@@ -75,6 +76,7 @@ export function createMailConfigActivator({
   configManager = createMailConfigManager(),
   backupManager = createMailConfigBackupManager(),
   readinessInspector = createMailReadinessInspector(),
+  evidenceInspector = createMailConfigEvidenceInspector({ readinessInspector }),
   run = (file, args, options = {}) => execFileAsync(file, args, {
     encoding: 'utf8',
     timeout: 30_000,
@@ -98,11 +100,16 @@ export function createMailConfigActivator({
     throw activationError('mail_config_manager_invalid', 'Managed mail staging manager is unavailable');
   }
   if (!backupManager || typeof backupManager.inspectBackup !== 'function'
+    || typeof backupManager.inspectBackupByIdentity !== 'function'
+    || typeof backupManager.backupConfiguration !== 'function'
     || typeof backupManager.transactionDirectory !== 'function') {
     throw activationError('mail_backup_manager_invalid', 'Managed mail backup manager is unavailable');
   }
   if (!readinessInspector || typeof readinessInspector.inspect !== 'function') {
     throw activationError('mail_readiness_inspector_invalid', 'Managed mail readiness inspector is unavailable');
+  }
+  if (!evidenceInspector || typeof evidenceInspector.inspect !== 'function') {
+    throw activationError('mail_evidence_inspector_invalid', 'Managed mail configuration evidence inspector is unavailable');
   }
 
   let activationChain = Promise.resolve();
@@ -450,6 +457,31 @@ export function createMailConfigActivator({
     }
   }
 
+  async function restorePresentDirectories(backup) {
+    for (const directory of backup.directories) {
+      if (!directory.present) continue;
+      try {
+        const metadata = await lstatFn(directory.path);
+        if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+          throw activationError('mail_restore_failed', 'Managed mail rollback directory is unsafe');
+        }
+      } catch (error) {
+        if (!isMissing(error)) {
+          if (error instanceof MailConfigActivationError) throw error;
+          throw activationError('mail_restore_failed', 'Managed mail rollback directory could not be inspected');
+        }
+        try { await mkdirFn(directory.path, { mode: directory.mode }); }
+        catch { throw activationError('mail_restore_failed', 'Managed mail rollback directory could not be recreated'); }
+      }
+      try {
+        await chownFn(directory.path, directory.uid, directory.gid);
+        await chmodFn(directory.path, directory.mode);
+      } catch {
+        throw activationError('mail_restore_failed', 'Managed mail rollback directory metadata could not be restored');
+      }
+    }
+  }
+
   function backupArtifact(backup, targetPath) {
     return backup.artifacts.find((artifact) => artifact.targetPath === targetPath) ?? null;
   }
@@ -466,8 +498,9 @@ export function createMailConfigActivator({
     await runCommand(command, 'mail_restore_srs_runtime_failed', 'Restored PostSRSd runtime state could not be confirmed');
   }
 
-  async function rollback(preview, plan, backup, transactionId) {
+  async function restoreBackup(preview, plan, backup, transactionId) {
     const backupDirectory = backupManager.transactionDirectory(transactionId);
+    await restorePresentDirectories(backup);
     for (const artifact of [...backup.artifacts].reverse()) {
       await restoreBackupFile(backupDirectory, artifact);
     }
@@ -487,6 +520,84 @@ export function createMailConfigActivator({
       throw activationError('mail_restore_readiness_failed', 'Restored mail host readiness could not be confirmed');
     }
     await assertLiveMatchesBackup(backup);
+  }
+
+  async function assertCurrentConfiguration(preview, plan) {
+    let evidence;
+    try { evidence = await evidenceInspector.inspect(preview); }
+    catch {
+      throw activationError('mail_rollback_current_state_changed', 'Current managed mail configuration could not be inspected safely');
+    }
+    if (!evidence?.satisfied || evidence.result?.previewSha256 !== preview.sha256
+      || evidence.result?.planSha256 !== plan.sha256 || evidence.result?.applied !== true) {
+      throw activationError('mail_rollback_current_state_changed', 'Current managed mail configuration no longer matches the rollback preview');
+    }
+    return evidence.result;
+  }
+
+  async function rollbackNow(currentPreview, {
+    transactionId,
+    sourceTransactionId,
+    sourcePlanSha256,
+    sourceBackupSha256,
+  } = {}) {
+    if (transactionId === sourceTransactionId) {
+      throw activationError('mail_rollback_transaction_invalid', 'Rollback and source apply transaction ids must be different');
+    }
+    const currentPlan = previewManagedMailApplyPlan(currentPreview);
+    await assertCurrentConfiguration(currentPreview, currentPlan);
+
+    let inspectedSource;
+    try {
+      inspectedSource = await backupManager.inspectBackupByIdentity({
+        transactionId: sourceTransactionId,
+        planSha256: sourcePlanSha256,
+        previewSha256: currentPreview.sha256,
+        manifestSha256: sourceBackupSha256,
+      });
+    } catch {
+      throw activationError('mail_rollback_source_backup_invalid', 'Rollback source backup identity could not be verified');
+    }
+    if (!inspectedSource?.satisfied) {
+      throw activationError('mail_rollback_source_backup_invalid', 'Rollback source backup is unavailable or no longer matches its evidence');
+    }
+
+    let compensation;
+    try {
+      compensation = await backupManager.backupConfiguration(currentPreview, { transactionId });
+    } catch {
+      throw activationError('mail_rollback_compensation_backup_failed', 'Current managed mail configuration could not be backed up before rollback');
+    }
+    if (compensation.previewSha256 !== currentPreview.sha256
+      || compensation.planSha256 !== currentPlan.sha256) {
+      throw activationError('mail_rollback_compensation_backup_invalid', 'Rollback compensation backup belongs to a different configuration');
+    }
+    await assertLiveMatchesBackup(compensation);
+    await assertCurrentConfiguration(currentPreview, currentPlan);
+
+    try {
+      await restoreBackup(currentPreview, currentPlan, inspectedSource.result, sourceTransactionId);
+    } catch (error) {
+      try { await restoreBackup(currentPreview, currentPlan, compensation, transactionId); }
+      catch {
+        throw activationError(
+          'mail_config_explicit_rollback_compensation_failed',
+          'Managed mail rollback failed and the current configuration could not be restored',
+        );
+      }
+      if (error instanceof MailConfigActivationError) throw error;
+      throw activationError('mail_config_explicit_rollback_failed', 'Managed mail rollback failed and the current configuration was restored');
+    }
+
+    return Object.freeze({
+      version: 1,
+      currentConfigurationSha256: currentPreview.sha256,
+      sourcePlanSha256,
+      sourceBackupSha256,
+      compensationBackupSha256: compensation.manifestSha256,
+      restored: true,
+      sideEffects: true,
+    });
   }
 
   async function activateNow(preview, { transactionId } = {}) {
@@ -537,7 +648,7 @@ export function createMailConfigActivator({
       });
     } catch (error) {
       if (!mutationStarted) throw error;
-      try { await rollback(preview, plan, backup, transactionId); }
+      try { await restoreBackup(preview, plan, backup, transactionId); }
       catch {
         throw activationError('mail_config_rollback_failed', 'Managed mail activation failed and the previous configuration could not be confirmed');
       }
@@ -552,7 +663,13 @@ export function createMailConfigActivator({
     return runActivation;
   }
 
-  return Object.freeze({ activateConfiguration });
+  function rollbackConfiguration(preview, options = {}) {
+    const runRollback = activationChain.catch(() => {}).then(() => rollbackNow(preview, options));
+    activationChain = runRollback;
+    return runRollback;
+  }
+
+  return Object.freeze({ activateConfiguration, rollbackConfiguration });
 }
 
 export const mailConfigActivatorInternals = Object.freeze({
