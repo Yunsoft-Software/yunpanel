@@ -25,7 +25,7 @@ Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
 ## P0.2 — Sunucu kimliği, ns1/ns2 ve PowerDNS Authoritative
 
-- [ ] Persist edilen root-private PowerDNS snapshot'ından config + authoritative receipt'i atomik restore et ve başarısız aktivasyonda current state'e compensate et; ardından durable rollback operation/snapshot-bound typed confirmation + audit yüzeyini bağla.
+- [ ] Secure PowerDNS snapshot restore transaction'ını durable operation journal'a bağla; rollback success/failed/compensation-failed evidence'ını restart-safe tut ve operation/snapshot-bound typed confirmation + audit yüzeyini API/panele aç.
 
 Gerçek host, public DNS, delegation/glue ve browser kabul kapıları `todo.md` içindedir.
 

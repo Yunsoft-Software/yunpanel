@@ -235,6 +235,25 @@ function encodeSnapshotFile(value) {
   });
 }
 
+function decodeSnapshotFile(value) {
+  const normalized = encodedFileSnapshot(value);
+  return Object.freeze({
+    exists: true,
+    content: Buffer.from(normalized.content, 'base64'),
+    uid: normalized.uid,
+    gid: normalized.gid,
+    mode: normalized.mode,
+  });
+}
+
+function sameFileSnapshot(left, right) {
+  if (left?.exists !== right?.exists) return false;
+  if (!left?.exists) return true;
+  return Buffer.isBuffer(left.content) && Buffer.isBuffer(right.content)
+    && left.content.equals(right.content)
+    && left.uid === right.uid && left.gid === right.gid && left.mode === right.mode;
+}
+
 function buildRollbackSnapshot({ operationId, spec, configSnapshot, receiptSnapshot, createdAt }) {
   const unavailable = (reason) => persistedRollbackSnapshot({
     version: ROLLBACK_SNAPSHOT_VERSION,
@@ -306,14 +325,13 @@ function buildRollbackSnapshot({ operationId, spec, configSnapshot, receiptSnaps
   });
 }
 
-async function restoreManagedConfig(snapshot, {
+async function restoreManagedFile(target, snapshot, {
   chmodFn,
   chownFn,
   renameFn,
   rmFn,
   writeFileFn,
-}) {
-  const target = powerDnsTemplatePolicy.configPath;
+}, label = 'rollback') {
   if (!snapshot.exists) {
     await rmFn(target, { force: true });
     return;
@@ -325,7 +343,7 @@ async function restoreManagedConfig(snapshot, {
       'PowerDNS managed configuration snapshot metadata is invalid',
     );
   }
-  const temporary = `${target}.${process.pid}.rollback.tmp`;
+  const temporary = `${target}.${process.pid}.${label}.tmp`;
   try {
     await writeFileFn(temporary, snapshot.content, { mode: snapshot.mode });
     await chownFn(temporary, snapshot.uid, snapshot.gid);
@@ -334,6 +352,19 @@ async function restoreManagedConfig(snapshot, {
   } finally {
     try { await rmFn(temporary, { force: true }); } catch { /* ignored */ }
   }
+}
+
+async function restoreManagedConfig(snapshot, dependencies) {
+  return restoreManagedFile(powerDnsTemplatePolicy.configPath, snapshot, dependencies);
+}
+
+async function restoreManagedReceipt(snapshot, dependencies) {
+  return restoreManagedFile(
+    powerDnsAuthoritativeManagerInternals.paths.RECEIPT_PATH,
+    snapshot,
+    dependencies,
+    'receipt-rollback',
+  );
 }
 
 export function createPowerDnsAuthoritativeSecureManager({
@@ -371,6 +402,20 @@ export function createPowerDnsAuthoritativeSecureManager({
       );
     }
     return value.operationId;
+  }
+
+  function rollbackContext(value) {
+    const fields = new Set(['operationId', 'snapshotDigest']);
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
+      || typeof value.operationId !== 'string' || !OPERATION_ID_PATTERN.test(value.operationId)
+      || typeof value.snapshotDigest !== 'string' || !SNAPSHOT_DIGEST_PATTERN.test(value.snapshotDigest)) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_context_invalid',
+        'PowerDNS rollback requires an exact operation and snapshot digest',
+      );
+    }
+    return Object.freeze({ operationId: value.operationId, snapshotDigest: value.snapshotDigest });
   }
 
   async function readRollbackSnapshot() {
@@ -518,7 +563,116 @@ export function createPowerDnsAuthoritativeSecureManager({
     return result;
   }
 
-  return Object.freeze({ inspect, apply, rollbackStatus });
+  async function rollback(intent, context) {
+    if (typeof manager.activateRestored !== 'function') {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_activation_unavailable',
+        'PowerDNS rollback activation dependency is unavailable',
+      );
+    }
+    const request = rollbackContext(context);
+    const spec = powerDnsAuthoritativeManagerInternals.normalizeIntent(intent);
+    const snapshot = await readRollbackSnapshot();
+    if (!snapshot || snapshot.operationId !== request.operationId
+      || snapshot.serverId !== spec.serverId || snapshot.credentialRevision !== spec.apiKeyRevision) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_snapshot_mismatch',
+        'PowerDNS rollback snapshot does not match the requested operation and credential scope',
+      );
+    }
+    if (!snapshot.available) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_unavailable',
+        `PowerDNS rollback snapshot is unavailable (${snapshot.reason})`,
+      );
+    }
+    if (snapshot.snapshotDigest !== request.snapshotDigest) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_snapshot_stale',
+        'PowerDNS rollback snapshot digest is stale',
+      );
+    }
+
+    await assertManagedPaths();
+    const previousSpec = powerDnsAuthoritativeManagerInternals.normalizeIntent({
+      ...spec,
+      secondaryDns: snapshot.previousSecondaryDns,
+    });
+    const previousConfig = decodeSnapshotFile(snapshot.config);
+    const previousReceipt = decodeSnapshotFile(snapshot.receipt);
+    const currentConfig = await managedConfigSnapshot({ lstatFn, readFileFn });
+    const currentReceipt = await managedReceiptSnapshot({ lstatFn, readFileFn });
+    if (sameFileSnapshot(currentConfig, previousConfig) && sameFileSnapshot(currentReceipt, previousReceipt)) {
+      let verified = null;
+      try { verified = await manager.inspect(previousSpec); } catch { /* activation performs the authoritative check */ }
+      if (verified?.satisfied !== true) verified = await manager.activateRestored(previousSpec);
+      if (verified?.satisfied !== true) {
+        throw new PowerDnsAuthoritativeManagerError(
+          'powerdns_rollback_unverified',
+          'PowerDNS rollback snapshot is restored but its activation is not verified',
+        );
+      }
+      return Object.freeze({
+        ...verified,
+        rollback: Object.freeze({ operationId: snapshot.operationId, snapshotDigest: snapshot.snapshotDigest, alreadyRestored: true }),
+      });
+    }
+
+    let inspected;
+    try { inspected = await manager.inspect(spec); }
+    catch {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_current_state_unverified',
+        'Current PowerDNS state could not be verified before rollback',
+      );
+    }
+    if (inspected?.satisfied !== true) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_current_state_unverified',
+        'Current PowerDNS state is not safe to replace with the rollback snapshot',
+      );
+    }
+    const fencedConfig = await managedConfigSnapshot({ lstatFn, readFileFn });
+    const fencedReceipt = await managedReceiptSnapshot({ lstatFn, readFileFn });
+    if (!sameFileSnapshot(currentConfig, fencedConfig) || !sameFileSnapshot(currentReceipt, fencedReceipt)) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_rollback_current_state_changed',
+        'Current PowerDNS files changed during rollback preflight',
+      );
+    }
+
+    const restorationDependencies = { chmodFn, chownFn, renameFn, rmFn, writeFileFn };
+    try {
+      await restoreManagedConfig(previousConfig, restorationDependencies);
+      await restoreManagedReceipt(previousReceipt, restorationDependencies);
+      const verified = await manager.activateRestored(previousSpec);
+      if (verified?.satisfied !== true) {
+        throw new PowerDnsAuthoritativeManagerError(
+          'powerdns_rollback_unverified',
+          'PowerDNS rollback activation did not produce a verified authoritative state',
+        );
+      }
+      return Object.freeze({
+        ...verified,
+        rollback: Object.freeze({ operationId: snapshot.operationId, snapshotDigest: snapshot.snapshotDigest, alreadyRestored: false }),
+      });
+    } catch (error) {
+      try {
+        await restoreManagedConfig(currentConfig, restorationDependencies);
+        await restoreManagedReceipt(currentReceipt, restorationDependencies);
+        const compensated = await manager.activateRestored(spec);
+        if (compensated?.satisfied !== true) throw new Error('compensation unverified');
+      } catch {
+        throw new PowerDnsAuthoritativeManagerError(
+          'powerdns_rollback_compensation_failed',
+          'PowerDNS rollback failed and the current authoritative state could not be recovered',
+        );
+      }
+      throw error;
+    }
+  }
+
+  return Object.freeze({ inspect, apply, rollbackStatus, rollback });
 }
 
 export const powerDnsAuthoritativeSecureManagerInternals = Object.freeze({
@@ -526,8 +680,12 @@ export const powerDnsAuthoritativeSecureManagerInternals = Object.freeze({
   managedConfigSnapshot,
   managedReceiptSnapshot,
   encodeSnapshotFile,
+  decodeSnapshotFile,
+  sameFileSnapshot,
   buildRollbackSnapshot,
+  restoreManagedFile,
   restoreManagedConfig,
+  restoreManagedReceipt,
   persistedRollbackSnapshot,
   publicRollbackSnapshot,
   rollbackSnapshotPath: DEFAULT_ROLLBACK_SNAPSHOT_PATH,

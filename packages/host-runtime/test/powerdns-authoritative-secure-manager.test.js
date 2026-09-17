@@ -106,6 +106,82 @@ function rollbackFilesystem({ receipt = true } = {}) {
   };
 }
 
+function secureManagerWithFilesystem(filesystem, manager, overrides = {}) {
+  return createPowerDnsAuthoritativeSecureManager({
+    rollbackSnapshotPath: filesystem.snapshotPath,
+    chmodFn: filesystem.chmodFn,
+    chownFn: filesystem.chownFn,
+    lstatFn: filesystem.lstatFn,
+    mkdirFn: filesystem.mkdirFn,
+    readFileFn: filesystem.readFileFn,
+    renameFn: filesystem.renameFn,
+    rmFn: filesystem.rmFn,
+    writeFileFn: filesystem.writeFileFn,
+    manager,
+    ...overrides,
+  });
+}
+
+function rollbackHost(filesystem, {
+  failPreviousActivation = false,
+  failCurrentActivation = false,
+} = {}) {
+  const configPath = powerDnsTemplatePolicy.configPath;
+  const receiptPath = powerDnsAuthoritativeManagerInternals.paths.RECEIPT_PATH;
+  const previousConfig = Buffer.from(filesystem.files.get(configPath));
+  const previousReceipt = Buffer.from(filesystem.files.get(receiptPath));
+  const currentConfigText = renderManagedPowerDnsConfig({
+    apiKeyHash: 'current-managed-api-key-hash-value-0000000000000',
+    secondaryDns: authoritativeIntent().secondaryDns,
+  });
+  const currentConfig = Buffer.from(currentConfigText);
+  const currentReceipt = Buffer.from(`${JSON.stringify({
+    version: 1,
+    serverId,
+    apiKeyRevision: 2,
+    secondaryDns: authoritativeIntent().secondaryDns,
+    configLength: Buffer.byteLength(currentConfigText),
+    appliedAt: '2026-09-17T12:00:00.000Z',
+  })}\n`);
+  const activations = [];
+
+  function isPrevious(value) {
+    return JSON.stringify(value.secondaryDns) === JSON.stringify(filesystem.previousSecondaryDns);
+  }
+
+  const manager = {
+    async inspect(value) {
+      const expectedConfig = isPrevious(value) ? previousConfig : currentConfig;
+      const expectedReceipt = isPrevious(value) ? previousReceipt : currentReceipt;
+      return {
+        satisfied: filesystem.files.get(configPath)?.equals(expectedConfig) === true
+          && filesystem.files.get(receiptPath)?.equals(expectedReceipt) === true,
+        serverId,
+        apiKeyRevision: 2,
+        secondaryDns: value.secondaryDns,
+        receipt: { appliedAt: isPrevious(value) ? '2026-09-17T09:00:00.000Z' : '2026-09-17T12:00:00.000Z' },
+      };
+    },
+    async apply(value) {
+      filesystem.files.set(configPath, Buffer.from(currentConfig));
+      filesystem.files.set(receiptPath, Buffer.from(currentReceipt));
+      return this.inspect(value);
+    },
+    async activateRestored(value) {
+      const previous = isPrevious(value);
+      activations.push(previous ? 'previous' : 'current');
+      if ((previous && failPreviousActivation) || (!previous && failCurrentActivation)) {
+        throw new PowerDnsAuthoritativeManagerError(
+          'powerdns_rollback_api_unhealthy',
+          'activation health check failed',
+        );
+      }
+      return this.inspect(value);
+    },
+  };
+  return { manager, activations, previousConfig, previousReceipt, currentConfig, currentReceipt };
+}
+
 test('PowerDNS secure manager blocks a symlinked SQLite database before host mutation', async () => {
   let applied = false;
   const manager = createPowerDnsAuthoritativeSecureManager({
@@ -410,4 +486,134 @@ test('PowerDNS secure manager keeps credential rotation possible but marks its p
   });
   assert.equal(status.available, false);
   assert.equal(status.reason, 'powerdns_rollback_previous_credential_unavailable');
+});
+
+test('PowerDNS secure manager restores an exact snapshot after restart and keeps rollback idempotent', async () => {
+  const filesystem = rollbackFilesystem();
+  const host = rollbackHost(filesystem);
+  const firstProcess = secureManagerWithFilesystem(filesystem, host.manager);
+  await firstProcess.apply(authoritativeIntent(), { operationId: 'operation-rollback' });
+  const status = await firstProcess.rollbackStatus({
+    operationId: 'operation-rollback',
+    serverId,
+    credentialRevision: 2,
+  });
+
+  const restarted = secureManagerWithFilesystem(filesystem, host.manager);
+  const result = await restarted.rollback(authoritativeIntent(), {
+    operationId: 'operation-rollback',
+    snapshotDigest: status.snapshotDigest,
+  });
+
+  assert.equal(result.satisfied, true);
+  assert.deepEqual(result.rollback, {
+    operationId: 'operation-rollback',
+    snapshotDigest: status.snapshotDigest,
+    alreadyRestored: false,
+  });
+  assert.equal(filesystem.files.get(powerDnsTemplatePolicy.configPath).equals(host.previousConfig), true);
+  assert.equal(filesystem.files.get(powerDnsAuthoritativeManagerInternals.paths.RECEIPT_PATH).equals(host.previousReceipt), true);
+
+  const repeated = await restarted.rollback(authoritativeIntent(), {
+    operationId: 'operation-rollback',
+    snapshotDigest: status.snapshotDigest,
+  });
+  assert.equal(repeated.rollback.alreadyRestored, true);
+  assert.deepEqual(host.activations, ['previous']);
+});
+
+test('PowerDNS secure manager rejects a stale snapshot digest before filesystem mutation', async () => {
+  const filesystem = rollbackFilesystem();
+  const host = rollbackHost(filesystem);
+  const manager = secureManagerWithFilesystem(filesystem, host.manager);
+  await manager.apply(authoritativeIntent(), { operationId: 'operation-stale-digest' });
+  const status = await manager.rollbackStatus({
+    operationId: 'operation-stale-digest',
+    serverId,
+    credentialRevision: 2,
+  });
+  const staleDigest = `${status.snapshotDigest[0] === 'a' ? 'b' : 'a'}${status.snapshotDigest.slice(1)}`;
+
+  await assert.rejects(
+    manager.rollback(authoritativeIntent(), {
+      operationId: 'operation-stale-digest',
+      snapshotDigest: staleDigest,
+    }),
+    (error) => error instanceof PowerDnsAuthoritativeManagerError
+      && error.code === 'powerdns_rollback_snapshot_stale',
+  );
+  assert.equal(filesystem.files.get(powerDnsTemplatePolicy.configPath).equals(host.currentConfig), true);
+  assert.deepEqual(host.activations, []);
+});
+
+test('PowerDNS secure manager compensates a failed rollback activation to the verified current state', async () => {
+  const filesystem = rollbackFilesystem();
+  const host = rollbackHost(filesystem, { failPreviousActivation: true });
+  const manager = secureManagerWithFilesystem(filesystem, host.manager);
+  await manager.apply(authoritativeIntent(), { operationId: 'operation-compensated' });
+  const status = await manager.rollbackStatus({
+    operationId: 'operation-compensated',
+    serverId,
+    credentialRevision: 2,
+  });
+
+  await assert.rejects(
+    manager.rollback(authoritativeIntent(), {
+      operationId: 'operation-compensated',
+      snapshotDigest: status.snapshotDigest,
+    }),
+    (error) => error instanceof PowerDnsAuthoritativeManagerError
+      && error.code === 'powerdns_rollback_api_unhealthy',
+  );
+  assert.equal(filesystem.files.get(powerDnsTemplatePolicy.configPath).equals(host.currentConfig), true);
+  assert.equal(filesystem.files.get(powerDnsAuthoritativeManagerInternals.paths.RECEIPT_PATH).equals(host.currentReceipt), true);
+  assert.deepEqual(host.activations, ['previous', 'current']);
+});
+
+test('PowerDNS secure manager reports explicit failure when rollback compensation cannot reactivate current state', async () => {
+  const filesystem = rollbackFilesystem();
+  const host = rollbackHost(filesystem, { failPreviousActivation: true, failCurrentActivation: true });
+  const manager = secureManagerWithFilesystem(filesystem, host.manager);
+  await manager.apply(authoritativeIntent(), { operationId: 'operation-compensation-failed' });
+  const status = await manager.rollbackStatus({
+    operationId: 'operation-compensation-failed',
+    serverId,
+    credentialRevision: 2,
+  });
+
+  await assert.rejects(
+    manager.rollback(authoritativeIntent(), {
+      operationId: 'operation-compensation-failed',
+      snapshotDigest: status.snapshotDigest,
+    }),
+    (error) => error instanceof PowerDnsAuthoritativeManagerError
+      && error.code === 'powerdns_rollback_compensation_failed',
+  );
+  assert.equal(filesystem.files.get(powerDnsTemplatePolicy.configPath).equals(host.currentConfig), true);
+  assert.deepEqual(host.activations, ['previous', 'current']);
+});
+
+test('PowerDNS secure manager refuses to overwrite unverified current drift', async () => {
+  const filesystem = rollbackFilesystem();
+  const host = rollbackHost(filesystem);
+  const manager = secureManagerWithFilesystem(filesystem, host.manager);
+  await manager.apply(authoritativeIntent(), { operationId: 'operation-current-drift' });
+  const status = await manager.rollbackStatus({
+    operationId: 'operation-current-drift',
+    serverId,
+    credentialRevision: 2,
+  });
+  const drift = Buffer.from('manual-current-drift\n');
+  filesystem.files.set(powerDnsTemplatePolicy.configPath, drift);
+
+  await assert.rejects(
+    manager.rollback(authoritativeIntent(), {
+      operationId: 'operation-current-drift',
+      snapshotDigest: status.snapshotDigest,
+    }),
+    (error) => error instanceof PowerDnsAuthoritativeManagerError
+      && error.code === 'powerdns_rollback_current_state_unverified',
+  );
+  assert.equal(filesystem.files.get(powerDnsTemplatePolicy.configPath).equals(drift), true);
+  assert.deepEqual(host.activations, []);
 });
