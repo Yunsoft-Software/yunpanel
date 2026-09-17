@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertDomainName, assertUuid } from '@yunpanel/shared';
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ALGORITHM_PATTERN = /^[A-Z][A-Z0-9_-]{1,63}$/;
 const KEY_TYPES = new Set(['ksk', 'csk']);
@@ -153,7 +153,7 @@ function propagation(value) {
 }
 
 function evidence(value) {
-  const fields = new Set(['newKeyId', 'keySetDigest', 'newKeyDs', 'serial', 'parentDs', 'propagation']);
+  const fields = new Set(['newKeyId', 'keySetDigest', 'targetKeySetDigest', 'newKeyDs', 'serial', 'parentDs', 'propagation']);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
     || (value.newKeyId !== null && (!Number.isSafeInteger(value.newKeyId) || value.newKeyId < 0))
@@ -163,6 +163,9 @@ function evidence(value) {
   return Object.freeze({
     newKeyId: value.newKeyId,
     keySetDigest: sha256(value.keySetDigest, 'key-set digest'),
+    targetKeySetDigest: value.targetKeySetDigest === null
+      ? null
+      : sha256(value.targetKeySetDigest, 'target key-set digest'),
     newKeyDs: dsRecords(value.newKeyDs, 'new key DS'),
     serial: value.serial,
     parentDs: dsRecords(value.parentDs, 'parent DS'),
@@ -203,12 +206,19 @@ function validateProgress(operation) {
   const requiresNewKey = !['pending', 'creating_key'].includes(operation.status);
   const requiresPropagation = ['activating_key', 'awaiting_parent_ds_addition', 'awaiting_parent_ds_retirement',
     'deactivating_old_key', 'deleting_old_key', 'succeeded'].includes(operation.status);
+  const requiresTargetDigest = ['publishing_key', 'activating_key', 'deactivating_old_key', 'deleting_old_key'].includes(operation.status);
   if (requiresNewKey && (operation.evidence.newKeyId === null
     || operation.evidence.newKeyId === operation.oldKey.id || operation.evidence.newKeyDs.length === 0)) {
     throw invalid('DNSSEC rollover stage is missing new key evidence');
   }
   if (requiresPropagation && operation.evidence.propagation === null) {
     throw invalid('DNSSEC rollover stage is missing propagation evidence');
+  }
+  if (requiresTargetDigest && operation.evidence.targetKeySetDigest === null) {
+    throw invalid('DNSSEC rollover mutation stage is missing target key-set evidence');
+  }
+  if (!requiresTargetDigest && !TERMINAL_STATUSES.has(operation.status) && operation.evidence.targetKeySetDigest !== null) {
+    throw invalid('DNSSEC rollover non-mutation stage cannot retain target key-set evidence');
   }
 }
 
@@ -293,6 +303,7 @@ function operationFromPreview(preview, now, idFactory) {
     evidence: {
       newKeyId: null,
       keySetDigest: preview.expectedKeySetDigest,
+      targetKeySetDigest: null,
       newKeyDs: [],
       serial: null,
       parentDs: preview.parentDs,
@@ -359,15 +370,24 @@ export function createDnsZoneDnssecRolloverRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.operations)
+        if (![1, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((field) => !['version', 'operations'].includes(field))) {
           throw invalid('DNSSEC rollover operation store is invalid');
         }
-        const operations = parsed.operations.map(persistedOperation);
+        const migrated = parsed.version === 1
+          ? parsed.operations.map((entry) => ({
+            ...entry,
+            evidence: entry?.evidence && typeof entry.evidence === 'object' && !Array.isArray(entry.evidence)
+              ? { ...entry.evidence, targetKeySetDigest: null }
+              : entry?.evidence,
+          }))
+          : parsed.operations;
+        const operations = migrated.map(persistedOperation);
         if (new Set(operations.map((entry) => entry.id)).size !== operations.length) {
           throw invalid('DNSSEC rollover operation IDs are not unique');
         }
         state = { version: STORE_VERSION, operations };
+        if (parsed.version === 1) await persist();
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
         await persist();
@@ -455,7 +475,18 @@ export function createDnsZoneDnssecRolloverRegistry({
     if (current.status !== 'deleting_old_key') {
       throw new DnsZoneDnssecRolloverRegistryError('dnssec_rollover_transition_invalid', 'DNSSEC rollover cannot complete from its current stage', 409);
     }
-    return mutate(current.id, { status: 'succeeded', result: normalized, error: null });
+    return mutate(current.id, {
+      status: 'succeeded',
+      evidence: {
+        ...current.evidence,
+        keySetDigest: normalized.keySetDigest,
+        targetKeySetDigest: null,
+        serial: normalized.serial,
+        parentDs: normalized.parentDs,
+      },
+      result: normalized,
+      error: null,
+    });
   }
 
   async function fail(operationId, error) {

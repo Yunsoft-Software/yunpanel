@@ -62,12 +62,13 @@ function preview() {
 function evidence({
   newKeyId = null,
   keySetDigest = initialDigest,
+  targetKeySetDigest = null,
   newKeyDs = [],
   serial = null,
   parentDs = [oldDs],
   propagation = null,
 } = {}) {
-  return Object.freeze({ newKeyId, keySetDigest, newKeyDs, serial, parentDs, propagation });
+  return Object.freeze({ newKeyId, keySetDigest, targetKeySetDigest, newKeyDs, serial, parentDs, propagation });
 }
 
 test('persists a private monotonic DNSSEC rollover journal without confirmation in public view', async () => {
@@ -96,6 +97,7 @@ test('persists a private monotonic DNSSEC rollover journal without confirmation 
   const createdKeyEvidence = evidence({
     newKeyId: 8,
     keySetDigest: 'c'.repeat(64),
+    targetKeySetDigest: 'd'.repeat(64),
     newKeyDs: [newDs],
     serial: 2026091701,
   });
@@ -142,6 +144,7 @@ test('requires new key and propagation evidence before later destructive stages'
   const withNewKey = evidence({
     newKeyId: 8,
     keySetDigest: 'c'.repeat(64),
+    targetKeySetDigest: 'd'.repeat(64),
     newKeyDs: [newDs],
     serial: 2026091701,
   });
@@ -149,11 +152,13 @@ test('requires new key and propagation evidence before later destructive stages'
   await registry.advance(operationId, 'verifying_dnskey_propagation', {
     ...withNewKey,
     keySetDigest: 'd'.repeat(64),
+    targetKeySetDigest: null,
   });
   await assert.rejects(
     registry.advance(operationId, 'activating_key', {
       ...withNewKey,
       keySetDigest: 'd'.repeat(64),
+      targetKeySetDigest: 'e'.repeat(64),
     }),
     (error) => error instanceof DnsZoneDnssecRolloverRegistryError
       && error.code === 'dnssec_rollover_operation_state_invalid',
@@ -168,24 +173,26 @@ test('completes only after old-key deletion stage with exact public result evide
   let current = evidence({
     newKeyId: 8,
     keySetDigest: 'c'.repeat(64),
+    targetKeySetDigest: 'd'.repeat(64),
     newKeyDs: [newDs],
     serial: 2026091701,
   });
   await registry.advance(operationId, 'publishing_key', current);
-  current = { ...current, keySetDigest: 'd'.repeat(64) };
+  current = { ...current, keySetDigest: 'd'.repeat(64), targetKeySetDigest: null };
   await registry.advance(operationId, 'verifying_dnskey_propagation', current);
   current = {
     ...current,
+    targetKeySetDigest: 'e'.repeat(64),
     propagation: { status: 'synced', serial: 2026091702, checkedAt: '2026-09-17T10:05:00.000Z' },
   };
   await registry.advance(operationId, 'activating_key', current);
-  current = { ...current, keySetDigest: 'e'.repeat(64), serial: 2026091702 };
+  current = { ...current, keySetDigest: 'e'.repeat(64), targetKeySetDigest: null, serial: 2026091702 };
   await registry.advance(operationId, 'awaiting_parent_ds_addition', current);
   current = { ...current, parentDs: [oldDs, newDs] };
   await registry.advance(operationId, 'awaiting_parent_ds_retirement', current);
-  current = { ...current, parentDs: [newDs] };
+  current = { ...current, parentDs: [newDs], targetKeySetDigest: 'f'.repeat(64) };
   await registry.advance(operationId, 'deactivating_old_key', current);
-  current = { ...current, keySetDigest: 'f'.repeat(64) };
+  current = { ...current, keySetDigest: 'f'.repeat(64), targetKeySetDigest: '1'.repeat(64) };
   await registry.advance(operationId, 'deleting_old_key', current);
 
   const completed = await registry.succeed(operationId, {
@@ -226,4 +233,21 @@ test('rejects forged preview identity and malformed persisted state without echo
       && !error.message.includes('SECRET'),
   );
   assert.equal((await readFile(filePath, 'utf8')).includes('SECRET'), true);
+});
+
+test('migrates a safe version-one pending journal and rewrites the store as version two', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-dnssec-rollover-v1-'));
+  const filePath = path.join(directory, 'operations.json');
+  const writer = createDnsZoneDnssecRolloverRegistry({ filePath, idFactory: () => operationId });
+  await writer.init();
+  await writer.create(preview());
+  const stored = JSON.parse(await readFile(filePath, 'utf8'));
+  stored.version = 1;
+  delete stored.operations[0].evidence.targetKeySetDigest;
+  await writeFile(filePath, JSON.stringify(stored), { mode: 0o600 });
+
+  const migrated = createDnsZoneDnssecRolloverRegistry({ filePath });
+  await migrated.init();
+  assert.equal((await migrated.get(operationId)).evidence.targetKeySetDigest, null);
+  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, 2);
 });
