@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
-import { createMailConfigEvidenceInspector } from '@yunpanel/host-runtime';
+import { createMailConfigActivator, createMailConfigEvidenceInspector } from '@yunpanel/host-runtime';
+import { OPERATIONS } from '@yunpanel/protocol';
 import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { createDomainRegistry } from './domain-registry.js';
@@ -14,9 +15,12 @@ import {
 import { createJobRecoveryStore } from './job-recovery-store.js';
 import { createJobRegistry } from './job-registry.js';
 import { recoverRunningMailConfig } from './job-running-mail-config-recovery.js';
+import { recoverRunningMailConfigRollback } from './job-running-mail-config-rollback-recovery.js';
 import { createMailAliasRegistry } from './mail-alias-registry.js';
 import { createMailConfigurationService } from './mail-configuration.js';
 import { createMailConfigOperationReceiptStore } from './mail-config-operation-receipt.js';
+import { createMailConfigRollbackJournal } from './mail-config-rollback-journal.js';
+import { createMailConfigRollbackReceiptStore } from './mail-config-rollback-receipt.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { createMailServiceIdentityRegistry } from './mail-service-identity-registry.js';
 import { createMailSrsConfigurationService } from './mail-srs-configuration.js';
@@ -103,10 +107,14 @@ export async function runRunningMailConfigRecoveryFromStores({
   recoveryStoreFactory = createJobRecoveryStore,
   contextReaderFactory = createJobRecoveryContextReader,
   receiptStoreFactory = createMailConfigOperationReceiptStore,
+  rollbackJournalFactory = createMailConfigRollbackJournal,
+  rollbackReceiptStoreFactory = createMailConfigRollbackReceiptStore,
   evidenceInspectorFactory = createMailConfigEvidenceInspector,
+  mailConfigActivatorFactory = createMailConfigActivator,
   mailConfigurationServiceFactory = createMailConfigurationService,
   serviceStatus = createMigrationServiceStatus(),
   recoverCommand = recoverRunningMailConfig,
+  recoverRollbackCommand = recoverRunningMailConfigRollback,
 } = {}) {
   for (const dependency of [
     serverRegistryFactory,
@@ -126,10 +134,14 @@ export async function runRunningMailConfigRecoveryFromStores({
     recoveryStoreFactory,
     contextReaderFactory,
     receiptStoreFactory,
+    rollbackJournalFactory,
+    rollbackReceiptStoreFactory,
     evidenceInspectorFactory,
+    mailConfigActivatorFactory,
     mailConfigurationServiceFactory,
     serviceStatus,
     recoverCommand,
+    recoverRollbackCommand,
   ]) {
     if (typeof dependency !== 'function') {
       throw new JobRecoveryRuntimeError(
@@ -213,41 +225,109 @@ export async function runRunningMailConfigRecoveryFromStores({
     mailServiceIdentityRegistry,
     mailSrsConfigurationService,
   });
-  if (!configurationService || typeof configurationService.materializeTransition !== 'function') {
+  if (!configurationService || typeof configurationService.materializeTransition !== 'function'
+    || typeof configurationService.materializeCurrent !== 'function') {
     throw new JobRecoveryRuntimeError(
       'job_recovery_mail_configuration_invalid',
       'Managed mail recovery configuration provider is invalid',
     );
   }
-  const receiptStore = receiptStoreFactory();
-  if (!receiptStore || typeof receiptStore.read !== 'function') {
+  let recoveryJob;
+  try { recoveryJob = await jobRegistry.getJob(jobId); }
+  catch {
     throw new JobRecoveryRuntimeError(
-      'job_recovery_mail_receipt_invalid',
-      'Managed mail recovery receipt store is invalid',
-    );
-  }
-  const evidenceInspector = evidenceInspectorFactory();
-  if (!evidenceInspector || typeof evidenceInspector.inspect !== 'function') {
-    throw new JobRecoveryRuntimeError(
-      'job_recovery_mail_evidence_invalid',
-      'Managed mail recovery host evidence provider is invalid',
+      'job_recovery_mail_job_read_failed',
+      'Managed mail recovery job could not be read',
     );
   }
 
-  const result = await recoverCommand({
-    serverId,
-    jobId,
-    jobRegistry,
-    domainRegistry,
-    certificateRegistry,
-    applicationRegistry,
-    mailDomainRegistry,
-    serviceStatus,
-    loadJobContext: (id) => contextReader.read(id),
-    materializeTransition: (input, expected) => configurationService.materializeTransition(input, expected),
-    readOperationReceipt: (receiptServerId, receiptJobId) => receiptStore.read(receiptServerId, receiptJobId),
-    inspectActiveEvidence: (preview) => evidenceInspector.inspect(preview),
-  });
+  let result;
+  if (recoveryJob?.operation === OPERATIONS.MAIL_CONFIG_ROLLBACK) {
+    const rollbackJournal = rollbackJournalFactory();
+    if (!rollbackJournal || typeof rollbackJournal.read !== 'function'
+      || typeof rollbackJournal.transition !== 'function') {
+      throw new JobRecoveryRuntimeError(
+        'job_recovery_mail_rollback_journal_invalid',
+        'Managed mail rollback recovery journal is invalid',
+      );
+    }
+    const rollbackReceiptStore = rollbackReceiptStoreFactory();
+    if (!rollbackReceiptStore || typeof rollbackReceiptStore.read !== 'function'
+      || typeof rollbackReceiptStore.write !== 'function') {
+      throw new JobRecoveryRuntimeError(
+        'job_recovery_mail_rollback_receipt_invalid',
+        'Managed mail rollback recovery receipt store is invalid',
+      );
+    }
+    const mailConfigActivator = mailConfigActivatorFactory();
+    if (!mailConfigActivator || typeof mailConfigActivator.inspectRollbackConfiguration !== 'function'
+      || typeof mailConfigActivator.recoverRollbackConfiguration !== 'function') {
+      throw new JobRecoveryRuntimeError(
+        'job_recovery_mail_rollback_activator_invalid',
+        'Managed mail rollback recovery host adapter is invalid',
+      );
+    }
+    result = await recoverRollbackCommand({
+      serverId,
+      jobId,
+      jobRegistry,
+      domainRegistry,
+      certificateRegistry,
+      applicationRegistry,
+      mailDomainRegistry,
+      serviceStatus,
+      loadJobContext: (id) => contextReader.read(id),
+      materializeCurrent: (input, expected) => configurationService.materializeCurrent(input, expected),
+      readRollbackJournal: (journalServerId, journalJobId) => rollbackJournal.read(journalServerId, journalJobId),
+      transitionRollbackJournal: (journalServerId, journalJobId, update) => rollbackJournal.transition(
+        journalServerId,
+        journalJobId,
+        update,
+      ),
+      readRollbackReceipt: (receiptServerId, receiptJobId) => rollbackReceiptStore.read(
+        receiptServerId,
+        receiptJobId,
+      ),
+      writeRollbackReceipt: (input) => rollbackReceiptStore.write(input),
+      inspectRollbackConfiguration: (preview, options) => mailConfigActivator.inspectRollbackConfiguration(
+        preview,
+        options,
+      ),
+      recoverRollbackConfiguration: (preview, options) => mailConfigActivator.recoverRollbackConfiguration(
+        preview,
+        options,
+      ),
+    });
+  } else {
+    const receiptStore = receiptStoreFactory();
+    if (!receiptStore || typeof receiptStore.read !== 'function') {
+      throw new JobRecoveryRuntimeError(
+        'job_recovery_mail_receipt_invalid',
+        'Managed mail recovery receipt store is invalid',
+      );
+    }
+    const evidenceInspector = evidenceInspectorFactory();
+    if (!evidenceInspector || typeof evidenceInspector.inspect !== 'function') {
+      throw new JobRecoveryRuntimeError(
+        'job_recovery_mail_evidence_invalid',
+        'Managed mail recovery host evidence provider is invalid',
+      );
+    }
+    result = await recoverCommand({
+      serverId,
+      jobId,
+      jobRegistry,
+      domainRegistry,
+      certificateRegistry,
+      applicationRegistry,
+      mailDomainRegistry,
+      serviceStatus,
+      loadJobContext: (id) => contextReader.read(id),
+      materializeTransition: (input, expected) => configurationService.materializeTransition(input, expected),
+      readOperationReceipt: (receiptServerId, receiptJobId) => receiptStore.read(receiptServerId, receiptJobId),
+      inspectActiveEvidence: (preview) => evidenceInspector.inspect(preview),
+    });
+  }
   return Object.freeze({ ...result, statePaths: paths });
 }
 

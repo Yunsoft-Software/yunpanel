@@ -17,7 +17,10 @@ function resourceFactory(label, calls, extra = {}) {
 
 test('managed mail recovery runtime wires private registries, SRS, tls identity, receipt, materialization and active evidence', async () => {
   const calls = [];
-  const fakeJobRegistry = { marker: 'durable' };
+  const fakeJobRegistry = {
+    marker: 'durable',
+    async getJob() { return { id: jobId, operation: 'mail.config.apply' }; },
+  };
   const fakeDomainRegistry = {
     async init() { calls.push(['domain.init', '/work/state/domains.json']); },
     async getDomain(id) { calls.push(['domain.get', id]); return { id, serverId }; },
@@ -174,6 +177,7 @@ test('managed mail recovery runtime wires private registries, SRS, tls identity,
             sensitiveArtifacts: [],
           };
         },
+        async materializeCurrent() { throw new Error('not used for apply recovery'); },
       };
     },
     serviceStatus: async () => ({ apiActive: false, agentActive: false }),
@@ -272,4 +276,125 @@ test('managed mail recovery runtime rejects wrong host before opening protected 
   assert.equal(mailRegistries, 0);
   assert.equal(receipts, 0);
   assert.equal(evidence, 0);
+});
+
+test('managed mail recovery runtime dispatches rollback jobs to protected journal, receipt and host recovery adapters', async () => {
+  const calls = [];
+  const fakeJobRegistry = {
+    async getJob(id) {
+      calls.push(['job.get', id]);
+      return { id, operation: 'mail.config.rollback' };
+    },
+  };
+  const simpleRegistry = (extra = {}) => ({ async init() {}, ...extra });
+  const currentBundle = {
+    state: { mailDomainId, revision: 2, status: 'enabled' },
+    preview: { sha256: digest },
+    sensitiveArtifacts: [],
+  };
+
+  const result = await runRunningMailConfigRecoveryFromStores({
+    serverId,
+    jobId,
+    hostname,
+    cwd: '/',
+    env: { YUNPANEL_SECRET_MASTER_KEY: 'private-master-key' },
+    serverRegistryFactory: () => simpleRegistry({
+      async getServer(id) { return { id, hostname }; },
+    }),
+    domainRegistryFactory: () => simpleRegistry({ async getDomain(id) { return { id, serverId }; } }),
+    certificateRegistryFactory: () => simpleRegistry({ async getCertificate(id) { return { id }; } }),
+    applicationRegistryFactory: () => simpleRegistry(),
+    mailServiceIdentityRegistryFactory: () => simpleRegistry(),
+    mailSrsSecretRegistryFactory: () => simpleRegistry(),
+    mailSrsConfigurationServiceFactory: () => ({
+      previewForServer: async () => ({}),
+      materializeForServer: async () => ({}),
+    }),
+    mailDomainRegistryFactory: () => simpleRegistry({
+      async getMailDomain(id) { return { id }; },
+      async transitionLocalStatus() {},
+    }),
+    mailboxRegistryFactory: () => simpleRegistry({
+      async getMailbox(id) { return { id }; },
+      async listMailboxes() { return []; },
+    }),
+    mailboxQuotaRegistryFactory: () => simpleRegistry(),
+    mailboxForwardingRegistryFactory: () => simpleRegistry(),
+    mailAliasRegistryFactory: () => simpleRegistry(),
+    jobRegistryFactory: () => ({}),
+    recoveryStoreFactory: () => ({}),
+    durableRegistryFactory: () => fakeJobRegistry,
+    contextReaderFactory: () => ({ async read(id) { calls.push(['context.read', id]); return { id }; } }),
+    mailConfigurationServiceFactory: () => ({
+      async materializeTransition() { throw new Error('not used for rollback recovery'); },
+      async materializeCurrent(input, expected) {
+        calls.push(['materialize.current', input, expected]);
+        return currentBundle;
+      },
+    }),
+    receiptStoreFactory: () => { throw new Error('apply receipt must stay unopened'); },
+    evidenceInspectorFactory: () => { throw new Error('apply evidence must stay unopened'); },
+    rollbackJournalFactory: () => ({
+      async read(targetServerId, targetJobId) {
+        calls.push(['journal.read', targetServerId, targetJobId]);
+        return { status: 'restoring_source' };
+      },
+      async transition(targetServerId, targetJobId, update) {
+        calls.push(['journal.transition', targetServerId, targetJobId, update]);
+        return { status: update.status };
+      },
+    }),
+    rollbackReceiptStoreFactory: () => ({
+      async read(targetServerId, targetJobId) {
+        calls.push(['rollback-receipt.read', targetServerId, targetJobId]);
+        return null;
+      },
+      async write(input) { calls.push(['rollback-receipt.write', input]); return input; },
+    }),
+    mailConfigActivatorFactory: () => ({
+      async inspectRollbackConfiguration(preview, options) {
+        calls.push(['host.inspect-rollback', preview, options]);
+        return { state: 'mixed' };
+      },
+      async recoverRollbackConfiguration(preview, options) {
+        calls.push(['host.recover-rollback', preview, options]);
+        return { restored: true };
+      },
+    }),
+    serviceStatus: async () => ({ apiActive: false, agentActive: false }),
+    recoverCommand: async () => { throw new Error('apply recovery command must stay unused'); },
+    recoverRollbackCommand: async (input) => {
+      assert.equal(input.jobRegistry, fakeJobRegistry);
+      assert.deepEqual(await input.materializeCurrent(
+        { mailDomainId, expectedRevision: 2, status: 'enabled' },
+        { expectedConfigurationSha256: digest },
+      ), currentBundle);
+      assert.deepEqual(await input.readRollbackJournal(serverId, jobId), { status: 'restoring_source' });
+      assert.deepEqual(
+        await input.transitionRollbackJournal(serverId, jobId, { status: 'restored' }),
+        { status: 'restored' },
+      );
+      assert.equal(await input.readRollbackReceipt(serverId, jobId), null);
+      await input.writeRollbackReceipt({ restored: true });
+      assert.deepEqual(await input.inspectRollbackConfiguration({ sha256: digest }, { transactionId: jobId }), { state: 'mixed' });
+      assert.deepEqual(await input.recoverRollbackConfiguration({ sha256: digest }, { transactionId: jobId }), { restored: true });
+      return {
+        serverId,
+        jobId,
+        operation: 'mail.config.rollback',
+        status: 'succeeded',
+        recoveryMethod: 'verified_mail_config_rollback_journal_backups_and_host_state',
+        reconciled: true,
+      };
+    },
+  });
+
+  assert.equal(result.operation, 'mail.config.rollback');
+  assert.equal(result.reconciled, true);
+  assert.ok(calls.some(([name]) => name === 'materialize.current'));
+  assert.ok(calls.some(([name]) => name === 'journal.read'));
+  assert.ok(calls.some(([name]) => name === 'rollback-receipt.write'));
+  assert.ok(calls.some(([name]) => name === 'host.inspect-rollback'));
+  assert.ok(calls.some(([name]) => name === 'host.recover-rollback'));
 });
