@@ -20,6 +20,8 @@ test('backs up and restores exact phpMyAdmin FPM and Nginx state including previ
   await withTempDirectory(async (root) => {
     const fpmPoolPath = path.join(root, 'pool.conf');
     const nginxConfigPath = path.join(root, 'nginx.conf');
+    const signonConfigPath = path.join(root, 'signon-config.php');
+    const signonBridgePath = path.join(root, 'signon-bridge.php');
     const backupRoot = path.join(root, 'backups');
     await writeFile(fpmPoolPath, 'old-fpm\n', { mode: 0o640 });
     await chmod(fpmPoolPath, 0o640);
@@ -27,24 +29,32 @@ test('backs up and restores exact phpMyAdmin FPM and Nginx state including previ
       backupRoot,
       fpmPoolPath,
       nginxConfigPath,
+      signonConfigPath,
+      signonBridgePath,
       chownFn: async () => {},
     });
 
     const backup = await manager.backupConfiguration(TX);
-    assert.equal(backup.version, 1);
+    assert.equal(backup.version, 2);
     assert.equal(backup.files[0].exists, true);
     assert.equal(backup.files[1].exists, false);
+    assert.equal(backup.files[2].exists, false);
+    assert.equal(backup.files[3].exists, false);
     assert.equal((await stat(backupRoot)).mode & 0o777, 0o700);
     assert.equal((await stat(path.join(manager.transactionDirectory(TX), 'manifest.json'))).mode & 0o777, 0o600);
     assert.equal((await stat(path.join(manager.transactionDirectory(TX), 'yunpanel-phpmyadmin-fpm.conf'))).mode & 0o777, 0o600);
 
     await writeFile(fpmPoolPath, 'new-fpm\n');
     await writeFile(nginxConfigPath, 'new-nginx\n');
+    await writeFile(signonConfigPath, 'new-signon-config\n');
+    await writeFile(signonBridgePath, 'new-signon-bridge\n');
     const restored = await manager.restoreConfiguration(TX);
     assert.equal(restored.restored, true);
     assert.equal(await readFile(fpmPoolPath, 'utf8'), 'old-fpm\n');
     assert.equal((await stat(fpmPoolPath)).mode & 0o777, 0o640);
     await assert.rejects(stat(nginxConfigPath), { code: 'ENOENT' });
+    await assert.rejects(stat(signonConfigPath), { code: 'ENOENT' });
+    await assert.rejects(stat(signonBridgePath), { code: 'ENOENT' });
   });
 });
 
@@ -53,6 +63,8 @@ test('backup rejects symlink live targets and duplicate transactions', async () 
     const fpmPoolPath = path.join(root, 'pool.conf');
     const target = path.join(root, 'real-pool.conf');
     const nginxConfigPath = path.join(root, 'nginx.conf');
+    const signonConfigPath = path.join(root, 'signon-config.php');
+    const signonBridgePath = path.join(root, 'signon-bridge.php');
     await writeFile(target, 'fpm');
     await symlink(target, fpmPoolPath);
     await writeFile(nginxConfigPath, 'nginx');
@@ -60,6 +72,8 @@ test('backup rejects symlink live targets and duplicate transactions', async () 
       backupRoot: path.join(root, 'backups'),
       fpmPoolPath,
       nginxConfigPath,
+      signonConfigPath,
+      signonBridgePath,
     });
     await assert.rejects(
       manager.backupConfiguration(TX),
@@ -82,12 +96,16 @@ test('restore rejects changed backup bytes and expanded manifest state', async (
   await withTempDirectory(async (root) => {
     const fpmPoolPath = path.join(root, 'pool.conf');
     const nginxConfigPath = path.join(root, 'nginx.conf');
+    const signonConfigPath = path.join(root, 'signon-config.php');
+    const signonBridgePath = path.join(root, 'signon-bridge.php');
     await writeFile(fpmPoolPath, 'fpm');
     await writeFile(nginxConfigPath, 'nginx');
     const manager = createPhpMyAdminConfigBackupManager({
       backupRoot: path.join(root, 'backups'),
       fpmPoolPath,
       nginxConfigPath,
+      signonConfigPath,
+      signonBridgePath,
       chownFn: async () => {},
     });
     await manager.backupConfiguration(TX);
