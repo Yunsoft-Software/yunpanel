@@ -70,6 +70,16 @@ export function getWebsiteDatabaseResources(serverId, websiteId) {
   return panelRequest(`/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-resources`);
 }
 
+export function createPhpMyAdminHandoff(serverId, websiteId, credentialId) {
+  databaseServerPath(serverId);
+  if (typeof websiteId !== 'string' || !websiteId) throw new Error('websiteId is required');
+  if (typeof credentialId !== 'string' || !credentialId) throw new Error('credentialId is required');
+  return panelRequest(
+    `/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/phpmyadmin-handoffs`,
+    { method: 'POST', body: { credentialId } },
+  );
+}
+
 export function rotateDatabaseCredential(serverId, credentialId, expectedRevision) {
   const path = databaseCredentialPath(serverId, credentialId);
   const revision = positiveRevision(expectedRevision, 'expectedRevision');
