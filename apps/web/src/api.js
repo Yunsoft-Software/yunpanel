@@ -144,6 +144,13 @@ export function createDatabase(serverId, name) {
   });
 }
 
+export function createDatabaseBackup(serverId, name) {
+  return panelRequest(`${databasePath(serverId, name)}/backup`, {
+    method: 'POST',
+    body: { confirmation: `backup:${name}` },
+  });
+}
+
 export function deleteDatabase(serverId, name) {
   return panelRequest(databasePath(serverId, name), {
     method: 'DELETE',

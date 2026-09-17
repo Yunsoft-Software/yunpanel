@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   applyDatabaseCredential,
   createDatabase,
+  createDatabaseBackup,
   deleteDatabase,
   finalizeDatabaseCredentialDelete,
   getDatabases,
@@ -53,6 +54,7 @@ test('database API client rejects missing identities before fetch', async (t) =>
   assert.throws(() => getWebsiteDatabaseResources('', 'website-1'), /serverId is required/);
   assert.throws(() => getWebsiteDatabaseResources('server-1', ''), /websiteId is required/);
   assert.throws(() => createDatabase('server-1', ''), /database name is required/);
+  assert.throws(() => createDatabaseBackup('server-1', ''), /database name is required/);
   assert.throws(() => deleteDatabase('server-1', ''), /database name is required/);
   assert.throws(() => rotateDatabaseCredential('server-1', '', 1), /credentialId is required/);
   assert.throws(() => rotateDatabaseCredential('server-1', 'credential-1', 0), /expectedRevision must be a positive integer/);
@@ -60,6 +62,24 @@ test('database API client rejects missing identities before fetch', async (t) =>
   assert.throws(() => queueDatabaseCredentialDelete('server-1', 'credential-1', null), /credential delete preview is required/);
   assert.throws(() => finalizeDatabaseCredentialDelete('server-1', 'credential-1', 1, ''), /deleteJobId is required/);
   assert.equal(calls, 0);
+});
+
+test('database backup client queues only the encoded schema with exact confirmation', async (t) => {
+  setSession({ csrfToken: 'csrf-database-backup' });
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url, options });
+    return ok({ id: 'backup-job', operation: 'database.backup', status: 'queued' });
+  });
+
+  await createDatabaseBackup('server/one', 'app_main');
+
+  assert.deepEqual(calls.map((call) => [call.url, call.options.method]), [
+    ['/api/panel/servers/server%2Fone/databases/app_main/backup', 'POST'],
+  ]);
+  assert.deepEqual(JSON.parse(calls[0].options.body), { confirmation: 'backup:app_main' });
+  assert.equal(calls[0].options.headers['x-csrf-token'], 'csrf-database-backup');
+  setSession(null);
 });
 
 test('database credential client pins rotate and apply to exact revisions and preview digest', async (t) => {

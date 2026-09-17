@@ -12,5 +12,7 @@ Site detayındaki Bağlı Kaynaklar ekranı database ownership'i artık sunucu g
 - Apply öncesi geçici hata yeni secret desired-state'ini korur; terminal job failure/cancellation sonrasında yeni kullanıcı onayı yeni revision üretmeden otomatik replay yapılmaz.
 - Credential revoke da Website satırından typed confirmation ile yürür: güncel delete preview exact revision/digest ile durable host delete job'ına çevrilir; registry kaydı yalnız aynı credential/binding state'ine ait başarılı job kanıtından sonra finalize edilir.
 - Revoke schema'yı ve Website binding'i korur. Failed/cancelled veya sonucu okunamayan delete işi otomatik yeniden kuyruğa alınmaz; mevcut job tanısı Owner'a bırakılır.
+- Website satırındaki `Yedek al` eylemi credential varlığına bağlı değildir; exact schema adıyla typed confirmation ister ve mevcut `database.backup` durable job'ını kullanır. Native vendor dump root-private artifact, bounded metadata ve checksum kanıtı üretmeden UI başarı göstermez.
+- Backup job bilinmeyen veya terminal hata durumunda ikinci bir işi otomatik kuyruğa almaz; Owner mevcut job drawer tanısını görür. Başarılı backup kimliği restore seçimi için public job evidence'ında kalır.
 
-Backup/restore ve drop-preview eylemlerinin aynı Website akışına eklenmesi `plan.md` içinde açık kalır. Gerçek iki-site izolasyon, rotation/revoke ve browser kabulü `todo.md` T-DATABASE altındadır.
+Restore ve drop-preview eylemlerinin aynı Website akışına eklenmesi `plan.md` içinde açık kalır. Gerçek iki-site izolasyon, rotation/revoke, backup/restore ve browser kabulü `todo.md` T-DATABASE altındadır.

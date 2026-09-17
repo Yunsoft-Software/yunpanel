@@ -26,3 +26,13 @@ test('Website database credential revoke requires a successful durable delete jo
   assert.match(panel, /Kör replay yapılmadı/);
   assert.match(panel, /Schema ve Website binding silinmez/);
 });
+
+test('Website database backup waits for checksum-validated durable vendor dump completion', async () => {
+  const panel = await readFile(new URL('../src/workspace/SiteResourcesPanel.jsx', import.meta.url), 'utf8');
+  assert.match(panel, /createDatabaseBackup/);
+  assert.match(panel, /waitForJob\(backupJob\.id\)/);
+  assert.match(panel, /resourceBusy\('database', binding\.databaseName\)/);
+  assert.match(panel, /checksum kanıtı oluşmadan başarılı sayılmaz/);
+  assert.match(panel, /backupJob\.status === 'succeeded'/);
+  assert.match(panel, /Kör replay yapılmadı/);
+});

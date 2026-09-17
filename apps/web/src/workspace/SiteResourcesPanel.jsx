@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   applyDatabaseCredential,
+  createDatabaseBackup,
   finalizeDatabaseCredentialDelete,
   getWebsiteDatabaseResources,
   panelRequest,
@@ -33,6 +34,7 @@ export default function SiteResourcesPanel({ domain, website, application, serve
   const [notice, setNotice] = useState(null);
   const [rotateTarget, setRotateTarget] = useState(null);
   const [revokeTarget, setRevokeTarget] = useState(null);
+  const [backupTarget, setBackupTarget] = useState(null);
 
   const load = useCallback(async () => {
     if (!server) return;
@@ -158,6 +160,48 @@ export default function SiteResourcesPanel({ domain, website, application, serve
     }
   }
 
+  async function backupDatabase() {
+    if (!server || !backupTarget || operationPending.current) return;
+    operationPending.current = true;
+    setBusy(true); setError(null); setNotice(null);
+    let backupJob = backupTarget.backupJob;
+    try {
+      if (!backupJob) {
+        backupJob = await createDatabaseBackup(server.id, backupTarget.binding.databaseName);
+        if (!backupJob?.id) throw new Error('Database backup işi oluşturulamadı');
+        setBackupTarget((current) => current?.binding.id === backupTarget.binding.id
+          ? { ...current, backupJob }
+          : current);
+        observe(backupJob);
+        jobs.refresh();
+      }
+      if (['failed', 'cancelled'].includes(backupJob.status)) {
+        throw new Error('Database backup işi terminal hatayla kapandı; job tanısını inceleyin. Kör replay yapılmadı.');
+      }
+      const terminal = backupJob.status === 'succeeded' ? backupJob : await waitForJob(backupJob.id);
+      updateJob(terminal);
+      setBackupTarget(null);
+      setNotice(`${backupTarget.binding.databaseName} vendor dump yedeği doğrulandı. Backup kimliği: ${terminal.result?.backupId ?? terminal.id}`);
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setError(failure.message);
+      jobs.refresh();
+      if (backupJob?.id) {
+        try {
+          const currentJob = await panelRequest(`/jobs/${encodeURIComponent(backupJob.id)}`);
+          updateJob(currentJob);
+          setBackupTarget((current) => current?.binding.id === backupTarget.binding.id
+            ? { ...current, backupJob: currentJob }
+            : current);
+        } catch {
+          // Unknown job outcome stays visible and the UI never queues a second backup automatically.
+        }
+      }
+    } finally {
+      operationPending.current = false;
+      setBusy(false);
+    }
+  }
+
   const compose = website?.managedComposeBinding ?? null;
   const externalDocker = website?.dockerWorkloadId ?? null;
   const mails = mailDomains ?? [];
@@ -194,23 +238,30 @@ export default function SiteResourcesPanel({ domain, website, application, serve
               <td><code>{binding.unixUser}</code></td>
               <td>{credential ? <><code>{credential.username}</code><small>{credential.privileges.join(', ')}</small></> : <span>Credential oluşturulmadı</span>}</td>
               <td>{binding.revision}{credential ? ` / ${credential.revision}` : ''}</td>
-              <td className="ws-row-end">{credential && <div className="ws-actions">
+              <td className="ws-row-end"><div className="ws-actions">
                 <Button
+                  disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
+                  onClick={() => {
+                    setError(null); setNotice(null);
+                    setBackupTarget({ binding, backupJob: null });
+                  }}
+                >Yedek al</Button>
+                {credential && <Button
                   disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
                   onClick={() => {
                     setError(null); setNotice(null);
                     setRotateTarget({ binding, credential, rotatedCredential: null });
                   }}
-                >Parolayı döndür</Button>
-                <Button
+                >Parolayı döndür</Button>}
+                {credential && <Button
                   variant="danger"
                   disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
                   onClick={() => {
                     setError(null); setNotice(null);
                     setRevokeTarget({ binding, credential, deleteJob: null });
                   }}
-                >Credential’ı kaldır</Button>
-              </div>}</td>
+                >Credential’ı kaldır</Button>}
+              </div></td>
             </tr>)}</tbody>
           </table>
         </div> : databaseResources !== undefined && <EmptyState icon="database" title="Bağlı veritabanı yok" detail="Sunucu veritabanları ayrı envanterde olabilir; burada yalnız bu siteye explicit bind edilmiş kayıtlar gösterilir." />}
@@ -253,6 +304,17 @@ export default function SiteResourcesPanel({ domain, website, application, serve
       onCancel={() => { if (!busy) { setRevokeTarget(null); setError(null); } }}
       onConfirm={revokeCredential}
       confirmLabel="Credential’ı kaldır"
+    />}
+    {backupTarget && <ConfirmDialog
+      key={`${backupTarget.binding.id}:${backupTarget.backupJob?.id ?? 'queue'}`}
+      title="Database yedeği al"
+      message={`${backupTarget.binding.databaseName} schema’sı native vendor dump ile root-private backup artifact’ına yazılacak. İş aynı database resource lock’ını kullanır ve checksum kanıtı oluşmadan başarılı sayılmaz.`}
+      confirmation={backupTarget.binding.databaseName}
+      busy={busy}
+      error={error}
+      onCancel={() => { if (!busy) { setBackupTarget(null); setError(null); } }}
+      onConfirm={backupDatabase}
+      confirmLabel="Yedeği başlat"
     />}
   </>;
 }
