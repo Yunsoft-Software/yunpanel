@@ -34,6 +34,7 @@ export function databaseInventoryView(data) {
     version: typeof data?.version === 'string' && data.version ? data.version : null,
     databases,
     totalBytes: databases?.reduce((sum, entry) => sum + entry.sizeBytes, 0) ?? 0,
+    live: data?.live === true,
     snapshot: data?.snapshot?.jobId && data?.snapshot?.refreshedAt ? {
       jobId: data.snapshot.jobId,
       refreshedAt: data.snapshot.refreshedAt,

@@ -1,4 +1,5 @@
 import { OPERATIONS } from '@yunpanel/protocol';
+import { sanitizeDatabaseJobResult } from './database-job-result.js';
 import { JobRegistryError } from './job-registry.js';
 import { mountDatabaseRestoreRoutes } from './database-restore-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -110,6 +111,22 @@ async function latestDatabaseSnapshot(jobRegistry, serverId) {
   };
 }
 
+async function liveDatabaseInventory(databaseInventoryProvider, serverId) {
+  try {
+    const inventory = sanitizeDatabaseJobResult(
+      { operation: OPERATIONS.DATABASE_INSPECT, payload: {} },
+      await databaseInventoryProvider(serverId),
+    );
+    return Object.freeze({ ...inventory, live: true });
+  } catch {
+    throw new DatabaseHttpError(
+      'database_inventory_unavailable',
+      'Live database inventory could not be read from the local server',
+      503,
+    );
+  }
+}
+
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
@@ -117,7 +134,12 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountDatabaseRoutes(app, { registry, jobRegistry, databaseBindingRegistry = null }) {
+export function mountDatabaseRoutes(app, {
+  registry,
+  jobRegistry,
+  databaseBindingRegistry = null,
+  databaseInventoryProvider = null,
+}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.delete !== 'function') {
     throw new Error('Express application is required');
   }
@@ -126,9 +148,16 @@ export function mountDatabaseRoutes(app, { registry, jobRegistry, databaseBindin
   if (databaseBindingRegistry !== null && typeof databaseBindingRegistry.getByDatabase !== 'function') {
     throw new Error('Database binding registry is invalid');
   }
+  if (databaseInventoryProvider !== null && typeof databaseInventoryProvider !== 'function') {
+    throw new Error('Database inventory provider is invalid');
+  }
 
   app.get('/api/servers/:serverId/databases', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const server = await requireServer(registry, request.params.serverId);
+    response.set('Cache-Control', 'no-store');
+    if (databaseInventoryProvider) {
+      return response.json({ data: await liveDatabaseInventory(databaseInventoryProvider, server.id) });
+    }
     const snapshot = await latestDatabaseSnapshot(jobRegistry, server.id);
     return response.json({ data: snapshot ?? { engine: null, version: null, databases: null, snapshot: null } });
   }));
@@ -223,4 +252,5 @@ export const databaseHttpInternals = Object.freeze({
   exactConfirmationBody,
   ensureDatabaseIdle,
   latestDatabaseSnapshot,
+  liveDatabaseInventory,
 });

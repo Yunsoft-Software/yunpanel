@@ -15,12 +15,15 @@ test('production boot persists and injects database ownership bindings', async (
   assert.match(source, /getWebsite: async \(websiteId\) => websiteRegistry\.getWebsite\(websiteId\)/);
   assert.match(source, /getApplication: async \(applicationId\) => applicationRegistry\.getApplication\(applicationId\)/);
   assert.match(source, /databaseBindingRegistry,/);
+  assert.match(source, /const databaseManager = createDatabaseManager\(\);/);
+  assert.match(source, /databaseInventoryProvider: \(\) => databaseManager\.inspect\(\)/);
+  assert.match(source, /databaseManager,[\s\S]*databaseCredentialOperation: localDatabaseCredentialOperation/);
 });
 
 test('production app mounts binding routes and protects schema deletion with the same registry', async () => {
   const source = await readFile(appUrl, 'utf8');
   assert.match(source, /mountDatabaseBindingRoutes/);
-  assert.match(source, /mountDatabaseRoutes\(app, \{ registry: localRegistry, jobRegistry, databaseBindingRegistry \}\)/);
+  assert.match(source, /mountDatabaseRoutes\(app, \{[\s\S]*registry: localRegistry,[\s\S]*databaseBindingRegistry,[\s\S]*databaseInventoryProvider,[\s\S]*\}\)/);
   assert.match(source, /DatabaseBindingRegistryError/);
 });
 

@@ -179,6 +179,7 @@ export function createApp({
   databaseBindingRegistry = null,
   databaseCredentialRegistry = null,
   databaseCredentialApplyService = null,
+  databaseInventoryProvider = null,
   dnsReadinessService = null,
   dnsRecordManager = createCloudflareDnsManager(),
   mailDomainRegistry = createMailDomainRegistry({
@@ -595,7 +596,12 @@ export function createApp({
       ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
     });
   }
-  mountDatabaseRoutes(app, { registry: localRegistry, jobRegistry, databaseBindingRegistry });
+  mountDatabaseRoutes(app, {
+    registry: localRegistry,
+    jobRegistry,
+    databaseBindingRegistry,
+    databaseInventoryProvider,
+  });
   mountLogRoutes(app, {
     registry, applicationRegistry, jobRegistry, journalLogReader, nginxLogReader, jobLogStore, localServerId,
   });

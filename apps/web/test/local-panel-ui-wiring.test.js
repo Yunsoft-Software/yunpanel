@@ -13,6 +13,8 @@ test('management UI has one implicit local server and no server chooser', async 
   const combined = sources.join('\n');
   assert.doesNotMatch(combined, /Sunucu seç|Tüm sunucular|Select server|serverId: ''/);
   assert.match(sources[2], /servers\.items\.length === 1 \? servers\.items\[0\] : null/);
+  assert.match(sources[2], /canlı Unix socket envanteri/);
+  assert.doesNotMatch(sources[2], /inspectDatabases|Sunucuyu tara/);
   assert.match(sources[3], /YunPanel yalnızca kurulu olduğu yerel sunucuyu yönetir/);
   assert.doesNotMatch(sources[3], /ServerManager|enrollment/);
   assert.match(sources[0], /\/sites\/create-preview/);

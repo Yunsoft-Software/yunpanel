@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   createJournalLogReader,
+  createDatabaseManager,
   createMailDiagnosticsInspector,
   createNginxLogReader,
   inspectAllowlistedServices,
@@ -358,6 +359,7 @@ const jobLogStore = createJobLogStore({ directoryPath: jobLogStorePath });
 await jobLogStore.init();
 const journalLogReader = createJournalLogReader();
 const nginxLogReader = createNginxLogReader();
+const databaseManager = createDatabaseManager();
 await prepareRootAuthStateOwnership({ filePath: authStorePath });
 const liveSessions = createLiveSessionRegistry();
 const authStore = createAuthStore({ filePath: authStorePath, liveSessions });
@@ -443,6 +445,7 @@ const listener = createAuthenticatedApi({
       databaseBindingRegistry,
       databaseCredentialRegistry,
       databaseCredentialApplyService,
+      databaseInventoryProvider: () => databaseManager.inspect(),
       websiteMigrationPolicy,
       migrationLedger,
       dnsHostingRegistry,
@@ -498,6 +501,7 @@ const localRuntime = await startConfiguredLocalRuntime({
   jobLogStore,
   createOperations: (options) => dockerComposeRuntime.extendLocalOperations(createLocalHostOperations({
     ...options,
+    databaseManager,
     databaseCredentialOperation: localDatabaseCredentialOperation,
   })),
   inspectServices: inspectAllowlistedServices,

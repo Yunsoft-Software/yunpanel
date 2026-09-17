@@ -29,9 +29,11 @@ test('database inventory view sorts safe rows and computes total size without tr
       { name: 'alpha', sizeBytes: 1024 },
       { name: 'broken-name', sizeBytes: 1 },
     ],
+    live: true,
     snapshot: { jobId: 'job-1', refreshedAt: '2026-09-10T00:00:00.000Z', raw: 'drop' },
   });
   assert.deepEqual(view.databases.map((entry) => entry.name), ['alpha', 'zeta']);
   assert.equal(view.totalBytes, 3072);
+  assert.equal(view.live, true);
   assert.deepEqual(view.snapshot, { jobId: 'job-1', refreshedAt: '2026-09-10T00:00:00.000Z' });
 });

@@ -28,7 +28,13 @@ function fakeStore(role = 'owner') {
   };
 }
 
-async function fixture(t, role = 'owner') {
+async function fixture(t, role = 'owner', {
+  databaseInventoryProvider = async () => ({
+    engine: 'mariadb',
+    version: '10.11.13-MariaDB',
+    databases: [{ name: 'live_db', sizeBytes: 42 }],
+  }),
+} = {}) {
   const registry = createServerRegistry();
   const enrollment = await registry.issueEnrollmentToken({ label: 'database-http' });
   const enrolled = await registry.enrollServer({ token: enrollment.token, hostname: 'database-host' });
@@ -36,7 +42,12 @@ async function fixture(t, role = 'owner') {
   const listener = createAuthenticatedApi({
     store: fakeStore(role),
     publicOrigin: origin,
-    createHandler: () => createApp({ registry, jobRegistry, environment: 'production' }),
+    createHandler: () => createApp({
+      registry,
+      jobRegistry,
+      environment: 'production',
+      databaseInventoryProvider,
+    }),
   });
   const server = http.createServer(listener).listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -65,11 +76,17 @@ async function succeedNextDatabaseJob(jobRegistry, serverId, result) {
   return jobRegistry.complete({ serverId, jobId: claimed.job.id, status: 'succeeded', result });
 }
 
-test('Owner can queue database inspection and empty inventory is explicit before first snapshot', async (t) => {
+test('Owner GET reads live inventory while explicit legacy inspection remains a durable job', async (t) => {
   const { request, jobRegistry, serverId } = await fixture(t);
   const initial = await request(`/api/servers/${serverId}/databases`);
   assert.equal(initial.status, 200);
-  assert.deepEqual((await initial.json()).data, { engine: null, version: null, databases: null, snapshot: null });
+  assert.equal(initial.headers.get('cache-control'), 'no-store');
+  assert.deepEqual((await initial.json()).data, {
+    engine: 'mariadb',
+    version: '10.11.13-MariaDB',
+    databases: [{ name: 'live_db', sizeBytes: 42 }],
+    live: true,
+  });
 
   const response = await request(`/api/servers/${serverId}/databases/inspect`, { method: 'POST', body: {} });
   assert.equal(response.status, 202);
@@ -78,6 +95,20 @@ test('Owner can queue database inspection and empty inventory is explicit before
   assert.equal(job.resourceType, 'database');
   assert.equal(job.resourceId, serverId);
   assert.equal((await jobRegistry.listJobs({ serverId })).length, 1);
+});
+
+test('live database GET fails closed on provider failure or malformed inventory', async (t) => {
+  for (const provider of [
+    async () => { throw new Error('socket path leaked'); },
+    async () => ({ engine: 'mariadb', version: '10.11', databases: [{ name: 'mysql', sizeBytes: 0 }] }),
+  ]) {
+    const { request, serverId } = await fixture(t, 'owner', { databaseInventoryProvider: provider });
+    const response = await request(`/api/servers/${serverId}/databases`);
+    assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(body.error.code, 'database_inventory_unavailable');
+    assert.equal(JSON.stringify(body).includes('socket path leaked'), false);
+  }
 });
 
 test('database create and delete require exact confirmation and validated names', async (t) => {
@@ -120,7 +151,7 @@ test('database mutations are serialized per server', async (t) => {
 });
 
 test('database snapshot merges successful create/delete results after the latest full inspection', async (t) => {
-  const { request, jobRegistry, serverId } = await fixture(t);
+  const { request, jobRegistry, serverId } = await fixture(t, 'owner', { databaseInventoryProvider: null });
   await request(`/api/servers/${serverId}/databases/inspect`, { method: 'POST', body: {} });
   await succeedNextDatabaseJob(jobRegistry, serverId, {
     engine: 'mariadb', version: '10.11.13-MariaDB', databases: [{ name: 'old_db', sizeBytes: 100 }],

@@ -8,6 +8,7 @@ Son local PowerDNS DKIM retirement ilerlemesi: `docs/history/dns-local-dkim-reti
 Son mail discovery DNS gate ilerlemesi: `docs/history/dns-mail-discovery-gate-2026-09-17.md`.
 Son DNSSEC rollover adapter ilerlemesi: `docs/history/dnssec-rollover-progress-2026-09-17.md`.
 Son DNS zone compensation ownership ilerlemesi: `docs/history/dns-zone-compensation-ownership-2026-09-17.md`.
+Son database canlı envanter ilerlemesi: `docs/history/database-live-inventory-2026-09-17.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -56,15 +57,13 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 ## P0.5 — Website DB ownership + phpMyAdmin
 
-- [ ] MariaDB/MySQL secure install/health baseline; admin secret encrypted store.
-- [ ] DB Website'e explicit bağlı; deterministic unique DB/user naming.
-- [ ] Site DB user yalnız bağlı schema'larda grant alır; `*.*` yok.
-- [ ] Site Databases CRUD + rotate/revoke + drop preview.
-- [ ] Website create'te opsiyonel initial DB.
+- [ ] MariaDB/MySQL secure install/health baseline'ını package-active kontrolünün ötesinde tamamla; native Unix-socket admin auth'u tercih et, parola zorunlu profile açılırsa admin secret'ı encrypted store'da tut.
+- [ ] Site detayında mevcut binding, credential/grant, rotate/revoke, backup/restore ve drop-preview backend'lerini günlük Website akışında birleştir.
+- [ ] Website create'te opsiyonel initial DB + scoped credential/grant step'ini durable provisioning'e bağla.
 - [ ] Shared hardened phpMyAdmin.
 - [ ] `Open phpMyAdmin` site DB user scope'uyla supported signon/short-lived handoff; root browser'a verilmesin.
-- [ ] Import/export/dump vendor tooling.
-- [ ] DB create/drop/grant/rotation durable evidence/rollback.
+- [ ] phpMyAdmin import/export'u ve mevcut vendor dump/restore lifecycle'ını aynı Website scope/ownership sınırına bağla.
+- [ ] Database delete'i backup requirement, ownership evidence ve retryable P0.9 compensation zincirine bağla.
 
 ## P0.6 — elFinder; homegrown File Manager removal
 

@@ -3,7 +3,6 @@ import {
   createDatabase,
   deleteDatabase,
   getDatabases,
-  inspectDatabases,
   waitForJob,
 } from '../api.js';
 import {
@@ -18,7 +17,6 @@ import {
 } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { databaseInventoryView, formatDatabaseBytes, validDatabaseName } from './database-model.js';
-import { formatDate } from './site-model.js';
 
 async function queueAndWait(queue, { observe, refreshJobs, updateJob }) {
   const queued = await queue();
@@ -88,10 +86,6 @@ export default function DatabasesPage() {
     }
   }
 
-  async function inspect() {
-    await perform(() => inspectDatabases(server.id));
-  }
-
   async function create(event) {
     event.preventDefault();
     if (!validDatabaseName(name)) {
@@ -116,8 +110,8 @@ export default function DatabasesPage() {
   return <>
     <PageHeading
       title="Veritabanları"
-      description="MySQL/MariaDB veritabanlarını sunucu üzerinde Unix socket üzerinden yönetin. Kullanıcı/grant ve yedek/restore akışları sonraki aşamadadır."
-      actions={<Button icon="refresh" disabled={!server || busy} onClick={load}>Kaydı yenile</Button>}
+      description="MySQL/MariaDB veritabanlarını canlı Unix socket envanteri, Website sahipliği ve durable mutation akışlarıyla yönetin."
+      actions={<Button icon="refresh" disabled={!server || busy} onClick={load}>Yenile</Button>}
     />
     <CollectionNotice resource={servers} label="Yerel sunucu" />
     {!server && ['ready', 'stale'].includes(servers.status) && <Section title="Veritabanları"><EmptyState title="Yerel sunucu kullanılamıyor" detail="Panel yalnız çalıştığı sunucuyu yönetir; yerel sunucu kaydı doğrulanamadı." icon="database" /></Section>}
@@ -125,12 +119,11 @@ export default function DatabasesPage() {
     {server && <>
       <Section
         title={`${serverLabel} · Veritabanı envanteri`}
-        description={inventory.snapshot?.refreshedAt ? `Son doğrulama: ${formatDate(inventory.snapshot.refreshedAt)}` : 'Sunucudan henüz doğrulanmış veritabanı envanteri alınmadı.'}
-        actions={<Button variant="primary" icon="refresh" disabled={busy} onClick={inspect}>{busy ? 'İşlem sürüyor…' : 'Sunucuyu tara'}</Button>}
+        description={inventory.live ? 'Her yenilemede yerel database socket üzerinden canlı okunur.' : 'Canlı envanter henüz kullanılamıyor.'}
       >
         <ErrorNotice error={error} />
         {status === 'loading' && <div className="ws-loading" role="status"><span className="ws-spinner" />Veritabanları yükleniyor…</div>}
-        {status !== 'loading' && inventory.databases === null && <EmptyState title="Henüz veritabanı taraması yok" detail="MySQL/MariaDB engine, sürüm, veritabanı listesi ve boyutlarını görmek için sunucuyu tarayın." icon="database" action={<Button variant="primary" disabled={busy} onClick={inspect}>Veritabanlarını tara</Button>} />}
+        {status !== 'loading' && inventory.databases === null && <EmptyState title="Canlı veritabanı envanteri kullanılamıyor" detail="Database servisi ve yerel socket bağlantısı hazır olduğunda liste burada doğrudan görünür." icon="database" />}
         {Array.isArray(inventory.databases) && <>
           <KeyValues items={[
             ['Engine', engineLabel],
@@ -142,14 +135,14 @@ export default function DatabasesPage() {
         </>}
       </Section>
 
-      <Section title="Yeni veritabanı" description="Şimdilik yalnız veritabanı oluşturulur; uygulama kullanıcısı ve minimum grant akışı sonraki aşamada eklenecek.">
+      <Section title="Yeni veritabanı" description="Schema durable job ile oluşturulur; Website bağı ve least-privilege credential ayrı, açık lifecycle adımlarıdır.">
         <form className="ws-form" onSubmit={create}><label>Veritabanı adı<input value={name} onChange={(event) => setName(event.target.value)} placeholder="ornek_uygulama" maxLength={64} autoComplete="off" spellCheck={false} /></label><div className="ws-actions"><Button variant="primary" type="submit" disabled={busy || !validDatabaseName(name)}>{busy ? 'İşlem sürüyor…' : 'Veritabanı oluştur'}</Button></div></form>
       </Section>
     </>}
 
     {deleteTarget && <ConfirmDialog
       title={`${deleteTarget.name} silinsin mi?`}
-      message="Bu işlem veritabanını DROP DATABASE ile siler. Kullanıcı/grant veya yedek otomasyonu henüz bağlı olmadığı için yalnız gerçekten silmek istediğiniz test/boş veritabanlarında kullanın."
+      message="Bu işlem veritabanını DROP DATABASE ile kalıcı olarak siler. Website bağı varsa backend işlemi engeller; devam etmeden önce güncel bir yedeğiniz olduğundan emin olun."
       confirmation={deleteTarget.name}
       confirmLabel="Veritabanını sil"
       busy={busy}
