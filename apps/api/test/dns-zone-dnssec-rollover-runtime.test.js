@@ -15,6 +15,7 @@ const initialDigest = 'a'.repeat(64);
 const createdDigest = 'c'.repeat(64);
 const publishedDigest = 'd'.repeat(64);
 const activatedDigest = 'e'.repeat(64);
+const deactivatedDigest = 'f'.repeat(64);
 
 function rolloverPreview({ digest = 'b'.repeat(64) } = {}) {
   return Object.freeze({
@@ -46,15 +47,15 @@ function rolloverPreview({ digest = 'b'.repeat(64) } = {}) {
   });
 }
 
-function publicKey({ active = false, published = false } = {}) {
+function publicKey({ id = 8, active = false, published = false } = {}) {
   return Object.freeze({
-    id: 8,
+    id,
     keyType: 'csk',
     active,
     published,
-    dnskey: '257 3 13 AAAANEWKEY',
-    ds: Object.freeze([newDs]),
-    cds: Object.freeze([newDs]),
+    dnskey: id === 7 ? '257 3 13 AAAAOLDKEY' : '257 3 13 AAAANEWKEY',
+    ds: Object.freeze(id === 7 ? [oldDs] : [newDs]),
+    cds: Object.freeze(id === 7 ? [oldDs] : [newDs]),
     algorithm: 'ECDSAP256SHA256',
     bits: 256,
   });
@@ -67,6 +68,7 @@ function fixture({
   staleSecondPreview = false,
   propagationReady = false,
   parentRecords = [oldDs],
+  parentRecordSequence = null,
 } = {}) {
   const registry = createDnsZoneDnssecRolloverRegistry({ idFactory: () => operationId });
   const calls = [];
@@ -80,10 +82,14 @@ function fixture({
   let publishMutations = 0;
   let activateMutations = 0;
   let previewCalls = 0;
+  let parentStatusCalls = 0;
   const preview = rolloverPreview();
   const service = {
     status: async () => {
       calls.push('parent-status');
+      const sequence = parentRecordSequence ?? [parentRecords];
+      const records = sequence[Math.min(parentStatusCalls, sequence.length - 1)];
+      parentStatusCalls += 1;
       return Object.freeze({
         version: 1,
         domainId,
@@ -92,7 +98,7 @@ function fixture({
         dnssec: true,
         localReady: true,
         keySetDigest: activatedDigest,
-        parent: Object.freeze({ status: 'present', records: Object.freeze([...parentRecords]) }),
+        parent: Object.freeze({ status: 'present', records: Object.freeze([...records]) }),
       });
     },
     previewRollover: async () => {
@@ -119,12 +125,12 @@ function fixture({
       });
     },
     previewRolloverKeyState: async (input) => {
-      calls.push(input.active ? 'activation-preview' : 'publication-preview');
-      assert.equal(input.keyId, 8);
+      calls.push(input.keyId === 7 ? 'deactivation-preview' : input.active ? 'activation-preview' : 'publication-preview');
+      assert.equal([7, 8].includes(input.keyId), true);
       return Object.freeze({
-        keySetDigest: published ? publishedDigest : createdDigest,
-        targetKeySetDigest: input.active ? activatedDigest : publishedDigest,
-        targetKey: publicKey({ active: input.active, published: input.published }),
+        keySetDigest: input.keyId === 7 ? activatedDigest : published ? publishedDigest : createdDigest,
+        targetKeySetDigest: input.keyId === 7 ? deactivatedDigest : input.active ? activatedDigest : publishedDigest,
+        targetKey: publicKey({ id: input.keyId, active: input.active, published: input.published }),
       });
     },
     setRolloverKeyState: async (input) => {
@@ -331,6 +337,25 @@ test('does not accept a foreign parent DS as completed rollover addition', async
   assert.equal(operation.status, 'awaiting_parent_ds_addition');
   assert.deepEqual(operation.evidence.parentDs, [oldDs]);
   assert.equal(fx.activateMutations(), 1);
+});
+
+test('persists old-key deactivation target only after old DS is authoritatively retired', async () => {
+  const fx = fixture({
+    propagationReady: true,
+    parentRecordSequence: [[oldDs, newDs], [newDs]],
+  });
+  await fx.runtime.init();
+  const operation = await fx.runtime.start({
+    domainId,
+    previewDigest: fx.preview.previewDigest,
+    confirmation: fx.preview.confirmation,
+  });
+
+  assert.equal(operation.status, 'deactivating_old_key');
+  assert.equal(operation.evidence.keySetDigest, activatedDigest);
+  assert.equal(operation.evidence.targetKeySetDigest, deactivatedDigest);
+  assert.deepEqual(operation.evidence.parentDs, [newDs]);
+  assert.equal(fx.calls.at(-1), 'deactivation-preview');
 });
 
 test('retries an uncertain activation from persisted target digest without duplicate mutation', async () => {

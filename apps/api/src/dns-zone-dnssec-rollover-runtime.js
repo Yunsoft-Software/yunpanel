@@ -213,6 +213,48 @@ function parentAdditionEvidence(operation, state) {
   });
 }
 
+function parentRetirementEvidence(operation, state) {
+  if (!state || state.domainId !== operation.domainId || state.serverId !== operation.serverId
+    || state.zoneName !== operation.zoneName || state.dnssec !== true || state.localReady !== true
+    || state.keySetDigest !== operation.evidence.keySetDigest
+    || !state.parent || !['present', 'absent', 'unverifiable'].includes(state.parent.status)
+    || !Array.isArray(state.parent.records)) {
+    throw new DnsZoneDnssecRolloverRuntimeError(
+      'dnssec_rollover_parent_retirement_evidence_invalid',
+      'DNSSEC rollover parent DS retirement evidence is invalid',
+      503,
+    );
+  }
+  if (state.parent.status !== 'present') return null;
+  const allowed = new Set(operation.evidence.newKeyDs);
+  const oldPresent = state.parent.records.some((record) => operation.oldKey.ds.includes(record));
+  const newPresent = state.parent.records.some((record) => operation.evidence.newKeyDs.includes(record));
+  const foreignPresent = state.parent.records.some((record) => !allowed.has(record));
+  if (oldPresent || !newPresent || foreignPresent) return null;
+  return Object.freeze([...state.parent.records]);
+}
+
+function deactivationTarget(operation, parentDs, preview) {
+  const key = preview?.targetKey;
+  if (!preview || preview.keySetDigest !== operation.evidence.keySetDigest
+    || typeof preview.targetKeySetDigest !== 'string' || !SHA256_PATTERN.test(preview.targetKeySetDigest)
+    || !key || key.id !== operation.oldKey.id || key.keyType !== operation.oldKey.keyType
+    || key.algorithm !== operation.oldKey.algorithm || key.bits !== operation.oldKey.bits
+    || key.active !== false || key.published !== true
+    || !Array.isArray(key.ds) || JSON.stringify(key.ds) !== JSON.stringify(operation.oldKey.ds)) {
+    throw new DnsZoneDnssecRolloverRuntimeError(
+      'dnssec_rollover_deactivation_preview_invalid',
+      'DNSSEC rollover old-key deactivation target evidence is invalid',
+      503,
+    );
+  }
+  return Object.freeze({
+    ...operation.evidence,
+    targetKeySetDigest: preview.targetKeySetDigest,
+    parentDs,
+  });
+}
+
 export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
@@ -237,7 +279,7 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
     let operation = await getRequired(operationId);
     if (operation.status === 'succeeded' || operation.status === 'failed'
       || !['pending', 'creating_key', 'publishing_key', 'verifying_dnskey_propagation', 'activating_key',
-        'awaiting_parent_ds_addition'].includes(operation.status)) {
+        'awaiting_parent_ds_addition', 'awaiting_parent_ds_retirement'].includes(operation.status)) {
       return dnsZoneDnssecRolloverPublicView(operation);
     }
 
@@ -354,6 +396,25 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
       try { operation = await registry.advance(operation.id, 'awaiting_parent_ds_retirement', parentEvidence); }
       catch (error) { throw mapped(error); }
     }
+
+    if (operation.status === 'awaiting_parent_ds_retirement') {
+      let parentDs;
+      try {
+        parentDs = parentRetirementEvidence(operation, await service.status({ domainId: operation.domainId }));
+      } catch (error) { throw mapped(error); }
+      if (parentDs === null) return dnsZoneDnssecRolloverPublicView(operation);
+      let target;
+      try {
+        target = deactivationTarget(operation, parentDs, await service.previewRolloverKeyState({
+          domainId: operation.domainId,
+          keyId: operation.oldKey.id,
+          active: false,
+          published: true,
+        }));
+      } catch (error) { throw mapped(error); }
+      try { operation = await registry.advance(operation.id, 'deactivating_old_key', target); }
+      catch (error) { throw mapped(error); }
+    }
     return dnsZoneDnssecRolloverPublicView(operation);
   }
 
@@ -422,4 +483,6 @@ export const dnsZoneDnssecRolloverRuntimeInternals = Object.freeze({
   activationTarget,
   activatedEvidence,
   parentAdditionEvidence,
+  parentRetirementEvidence,
+  deactivationTarget,
 });
