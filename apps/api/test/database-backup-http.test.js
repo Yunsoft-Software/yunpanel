@@ -9,7 +9,7 @@ import {
 const serverId = '12345678-1234-4234-8234-123456789012';
 const databaseName = 'app_main';
 
-function mounted({ jobs = [] } = {}) {
+function mounted({ jobs = [], binding = null } = {}) {
   const routes = [];
   const enqueued = [];
   const app = {
@@ -27,6 +27,14 @@ function mounted({ jobs = [] } = {}) {
   mountDatabaseRoutes(app, {
     registry: { async getServer(id) { return id === serverId ? { id } : null; } },
     jobRegistry,
+    ...(binding ? {
+      databaseBindingRegistry: {
+        async getByDatabase(input) {
+          assert.deepEqual(input, { serverId, databaseName });
+          return binding;
+        },
+      },
+    } : {}),
   });
   const route = routes.find(([method, path]) => method === 'POST'
     && path === '/api/servers/:serverId/databases/:name/backup');
@@ -88,4 +96,14 @@ test('database backup serializes with every other queued or running database mut
     assert.equal(response.error?.code, 'database_job_conflict');
     assert.equal(fx.enqueued.length, 0);
   }
+});
+
+
+test('database backup requires Website-scoped route when the schema has a managed binding', async () => {
+  const fx = mounted({ binding: { id: 'binding-1', serverId, databaseName } });
+  const response = await invoke(fx.handler, { confirmation: `backup:${databaseName}` });
+  assert.ok(response.error instanceof DatabaseHttpError);
+  assert.equal(response.error.code, 'database_backup_website_scope_required');
+  assert.equal(response.error.status, 409);
+  assert.equal(fx.enqueued.length, 0);
 });
