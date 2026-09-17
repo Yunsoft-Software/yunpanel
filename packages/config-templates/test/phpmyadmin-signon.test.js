@@ -31,12 +31,14 @@ test('phpMyAdmin signon bridge consumes only a capability over the private Unix 
   const content = renderPhpMyAdminSignonBridge();
   assert.ok(content.includes(`const YUNPANEL_HANDOFF_SOCKET = '${phpMyAdminSignonTemplatePolicy.handoffSocketPath}';`));
   assert.match(content, /\$_POST\['capability'\]/);
+  assert.match(content, /count\(\$_POST\) !== 1/);
+  assert.doesNotMatch(content, /\$_POST\['databaseName'\]/);
   assert.match(content, /POST \/consume HTTP\/1\.1/);
   assert.match(content, /PMA_single_signon_user/);
   assert.match(content, /PMA_single_signon_password/);
   assert.match(content, /PMA_single_signon_HMAC_secret/);
   assert.match(content, /PMA_single_signon_cfgupdate/);
-  assert.match(content, /'only_db' => str_replace/);
+  assert.match(content, /'only_db' => str_replace\([^\n]+\$data\['databaseName'\]\)/);
   assert.match(content, /YUNPANEL_SIGNON_ACTION/);
   assert.match(content, /session_destroy\(\)/);
   assert.match(content, /setcookie\(YUNPANEL_SIGNON_SESSION/);
