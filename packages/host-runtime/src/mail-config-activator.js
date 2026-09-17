@@ -201,6 +201,28 @@ export function createMailConfigActivator({
     }
   }
 
+  async function classifyLiveBackupState(source, current) {
+    let sourceMatches = true;
+    let currentMatches = true;
+    let operationOwned = true;
+    for (let index = 0; index < source.directories.length; index += 1) {
+      const sourceMatch = await inspectManagedDirectory(source.directories[index]);
+      const currentMatch = await inspectManagedDirectory(current.directories[index]);
+      sourceMatches = sourceMatches && sourceMatch;
+      currentMatches = currentMatches && currentMatch;
+      operationOwned = operationOwned && (sourceMatch || currentMatch);
+    }
+    for (let index = 0; index < source.artifacts.length; index += 1) {
+      const sourceMatch = await inspectLiveArtifact(source.artifacts[index]);
+      const currentMatch = await inspectLiveArtifact(current.artifacts[index]);
+      sourceMatches = sourceMatches && sourceMatch;
+      currentMatches = currentMatches && currentMatch;
+      operationOwned = operationOwned && (sourceMatch || currentMatch);
+    }
+    const state = sourceMatches ? 'source' : currentMatches ? 'current' : operationOwned ? 'mixed' : 'drifted';
+    return Object.freeze({ state, sourceMatches, currentMatches, operationOwned });
+  }
+
   async function assertRequiredDirectoriesSafe(plan) {
     const requiredDirectories = plan.srs?.required === true
       ? [...UNMANAGED_REQUIRED_DIRECTORIES, ...SRS_REQUIRED_DIRECTORIES]
@@ -617,6 +639,52 @@ export function createMailConfigActivator({
     });
   }
 
+  async function inspectRollbackNow(currentPreview, {
+    transactionId,
+    sourceTransactionId,
+    sourcePlanSha256,
+    sourceBackupSha256,
+    compensationBackupSha256,
+  } = {}) {
+    if (transactionId === sourceTransactionId) {
+      throw activationError('mail_rollback_transaction_invalid', 'Rollback and source apply transaction ids must be different');
+    }
+    const currentPlan = previewManagedMailApplyPlan(currentPreview);
+    let inspectedSource;
+    let inspectedCurrent;
+    try {
+      [inspectedSource, inspectedCurrent] = await Promise.all([
+        backupManager.inspectBackupByIdentity({
+          transactionId: sourceTransactionId,
+          planSha256: sourcePlanSha256,
+          previewSha256: currentPreview.sha256,
+          manifestSha256: sourceBackupSha256,
+        }),
+        backupManager.inspectBackupByIdentity({
+          transactionId,
+          planSha256: currentPlan.sha256,
+          previewSha256: currentPreview.sha256,
+          manifestSha256: compensationBackupSha256,
+        }),
+      ]);
+    } catch {
+      throw activationError('mail_rollback_recovery_backup_invalid', 'Managed mail rollback recovery backup identity could not be verified');
+    }
+    if (!inspectedSource?.satisfied || !inspectedCurrent?.satisfied) {
+      throw activationError('mail_rollback_recovery_backup_invalid', 'Managed mail rollback recovery backups are unavailable or changed');
+    }
+    const classified = await classifyLiveBackupState(inspectedSource.result, inspectedCurrent.result);
+    return Object.freeze({
+      version: 1,
+      currentConfigurationSha256: currentPreview.sha256,
+      sourcePlanSha256,
+      sourceBackupSha256,
+      compensationBackupSha256,
+      ...classified,
+      sideEffects: false,
+    });
+  }
+
   async function activateNow(preview, { transactionId } = {}) {
     const plan = previewManagedMailApplyPlan(preview);
     const readiness = await readinessInspector.inspect(preview, { phase: 'pre' });
@@ -686,7 +754,13 @@ export function createMailConfigActivator({
     return runRollback;
   }
 
-  return Object.freeze({ activateConfiguration, rollbackConfiguration });
+  function inspectRollbackConfiguration(preview, options = {}) {
+    const inspection = activationChain.catch(() => {}).then(() => inspectRollbackNow(preview, options));
+    activationChain = inspection;
+    return inspection;
+  }
+
+  return Object.freeze({ activateConfiguration, rollbackConfiguration, inspectRollbackConfiguration });
 }
 
 export const mailConfigActivatorInternals = Object.freeze({

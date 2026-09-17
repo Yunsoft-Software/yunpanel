@@ -402,6 +402,73 @@ test('explicit rollback persists prepared compensation evidence before source mu
   }
 }));
 
+test('inspects interrupted rollback as current, operation-owned mixed or drifted without side effects', async () => withTempDirectory(async (root) => {
+  const context = await prepare({ root });
+  await context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID });
+  let compensationBackupSha256;
+  const options = {
+    transactionId: 'mail-job-rollback-005',
+    sourceTransactionId: TRANSACTION_ID,
+    sourcePlanSha256: context.backup.planSha256,
+    sourceBackupSha256: context.backup.manifestSha256,
+  };
+
+  await assert.rejects(
+    context.activator.rollbackConfiguration(context.preview, {
+      ...options,
+      async onPrepared(evidence) {
+        compensationBackupSha256 = evidence.compensationBackupSha256;
+        throw new Error('fixture stops before source mutation');
+      },
+    }),
+    (error) => error instanceof MailConfigActivationError && error.code === 'mail_rollback_journal_failed',
+  );
+
+  const current = await context.activator.inspectRollbackConfiguration(context.preview, {
+    ...options,
+    compensationBackupSha256,
+  });
+  assert.deepEqual(
+    {
+      state: current.state,
+      sourceMatches: current.sourceMatches,
+      currentMatches: current.currentMatches,
+      operationOwned: current.operationOwned,
+      sideEffects: current.sideEffects,
+    },
+    { state: 'current', sourceMatches: false, currentMatches: true, operationOwned: true, sideEffects: false },
+  );
+
+  await writeFile(
+    context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath),
+    context.originalMainCf,
+    { mode: 0o644 },
+  );
+  const mixed = await context.activator.inspectRollbackConfiguration(context.preview, {
+    ...options,
+    compensationBackupSha256,
+  });
+  assert.deepEqual(
+    { state: mixed.state, operationOwned: mixed.operationOwned, sideEffects: mixed.sideEffects },
+    { state: 'mixed', operationOwned: true, sideEffects: false },
+  );
+
+  await writeFile(
+    context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath),
+    'foreign drift\n',
+    { mode: 0o644 },
+  );
+  const drifted = await context.activator.inspectRollbackConfiguration(context.preview, {
+    ...options,
+    compensationBackupSha256,
+  });
+  assert.deepEqual(
+    { state: drifted.state, operationOwned: drifted.operationOwned, sideEffects: drifted.sideEffects },
+    { state: 'drifted', operationOwned: false, sideEffects: false },
+  );
+  assert.doesNotMatch(JSON.stringify([current, mixed, drifted]), /password|argon2|content|path/i);
+}));
+
 test('explicit rollback restores its compensation snapshot when source validation fails after mutation', async () => withTempDirectory(async (root) => {
   const context = await prepare({ root, failDoveconfCalls: [2] });
   await context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID });
