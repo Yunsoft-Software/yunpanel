@@ -27,6 +27,7 @@ const recoverySources = [
   'job-running-system-upgrade-recovery.js',
   'job-running-certificate-recovery.js',
   'job-running-mail-config-recovery.js',
+  'job-running-mail-config-rollback-recovery.js',
   'job-running-mail-dkim-recovery.js',
   'job-running-mail-data-recovery.js',
   'job-running-roundcube-config-recovery.js',

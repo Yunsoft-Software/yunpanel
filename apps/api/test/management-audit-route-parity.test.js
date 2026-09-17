@@ -159,6 +159,9 @@ test('managed mail apply and rollback previews have mail-domain audit identities
   assert.deepEqual(classifyManagementMutation('POST', '/api/mail-domains/mail-domain-1/config-rollback-preview'), {
     action: 'mail.configuration.rollback.preview', resourceType: 'mail_domain', resourceId: 'mail-domain-1',
   });
+  assert.deepEqual(classifyManagementMutation('POST', '/api/mail-domains/mail-domain-1/config-rollback'), {
+    action: 'mail.configuration.rollback', resourceType: 'mail_domain', resourceId: 'mail-domain-1',
+  });
 });
 
 test('Node configuration preview and apply have Application-scoped audit identities', () => {

@@ -96,10 +96,13 @@ function sourceApplyJob(overrides = {}) {
 
 async function listen(t, auth, {
   jobs = [],
+  jobSnapshots = null,
   preview = managedPreview(),
   currentMailDomain = localMailDomain,
 } = {}) {
   const enqueued = [];
+  let listedJobs = jobs;
+  let listCall = 0;
   const app = express();
   app.use(express.json());
   app.use((request, _response, next) => { request.auth = auth; next(); });
@@ -130,8 +133,14 @@ async function listen(t, auth, {
       },
     },
     jobRegistry: {
-      async listJobs() { return jobs; },
-      async getJob(id) { return jobs.find((job) => job.id === id) ?? null; },
+      async listJobs() {
+        if (Array.isArray(jobSnapshots) && jobSnapshots.length > 0) {
+          listedJobs = jobSnapshots[Math.min(listCall, jobSnapshots.length - 1)];
+          listCall += 1;
+        }
+        return listedJobs;
+      },
+      async getJob(id) { return listedJobs.find((job) => job.id === id) ?? null; },
       async enqueue(input) {
         enqueued.push(structuredClone(input));
         return { id: randomUUID(), status: 'queued', ...input };
@@ -280,6 +289,117 @@ test('Owner previews rollback only for the latest v3 apply and exact current mai
   assert.doesNotMatch(JSON.stringify(preview), /password|argon2|content|path/i);
 });
 
+test('Owner queues rollback only from the exact current v3 preview and secret-free evidence', async (t) => {
+  const source = sourceApplyJob();
+  const { base, enqueued } = await listen(t, owner, { jobs: [source] });
+  const previewResponse = await request(
+    base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback-preview`,
+    { sourceApplyJobId },
+  );
+  const preview = (await previewResponse.json()).data;
+
+  const response = await request(
+    base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback`,
+    {
+      sourceApplyJobId,
+      previewDigest: preview.previewDigest,
+      confirmation: preview.confirmation,
+    },
+  );
+  assert.equal(response.status, 202);
+  assert.deepEqual(enqueued, [{
+    serverId: localServerId,
+    type: 'mail.config.rollback',
+    operation: 'mail.config.rollback',
+    payload: {
+      mailDomainId: localMailDomain.id,
+      sourceApplyJobId,
+      previousRevision: 1,
+      expectedCurrentRevision: 2,
+      currentStatus: 'enabled',
+      targetStatus: 'disabled',
+      currentConfigurationSha256: configurationSha256,
+      sourcePlanSha256: planSha256,
+      backupSha256,
+      previewDigest: preview.previewDigest,
+    },
+    resourceType: 'mail_domain',
+    resourceId: localMailDomain.id,
+  }]);
+  assert.doesNotMatch(JSON.stringify(enqueued), /confirmation|password|argon2|content|path/i);
+});
+
+test('mail rollback enqueue rejects stale confirmation and active rollback mutation', async (t) => {
+  const source = sourceApplyJob();
+  const staleFixture = await listen(t, owner, { jobs: [source] });
+  const previewResponse = await request(
+    staleFixture.base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback-preview`,
+    { sourceApplyJobId },
+  );
+  const preview = (await previewResponse.json()).data;
+  const stale = await request(
+    staleFixture.base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback`,
+    {
+      sourceApplyJobId,
+      previewDigest: preview.previewDigest,
+      confirmation: `${preview.confirmation}-stale`,
+    },
+  );
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).error.code, 'mail_configuration_rollback_preview_stale');
+  assert.equal(staleFixture.enqueued.length, 0);
+
+  const activeFixture = await listen(t, owner, {
+    jobs: [source, { id: randomUUID(), operation: 'mail.config.rollback', status: 'running' }],
+  });
+  const active = await request(
+    activeFixture.base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback`,
+    {
+      sourceApplyJobId,
+      previewDigest: preview.previewDigest,
+      confirmation: preview.confirmation,
+    },
+  );
+  assert.equal(active.status, 409);
+  assert.equal((await active.json()).error.code, 'mail_configuration_job_conflict');
+  assert.equal(activeFixture.enqueued.length, 0);
+});
+
+test('mail rollback enqueue revalidates global source ordering immediately before durable enqueue', async (t) => {
+  const source = sourceApplyJob();
+  const previewFixture = await listen(t, owner, { jobs: [source] });
+  const previewResponse = await request(
+    previewFixture.base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback-preview`,
+    { sourceApplyJobId },
+  );
+  const preview = (await previewResponse.json()).data;
+  const newerMailDomainId = randomUUID();
+  const newer = sourceApplyJob({
+    id: randomUUID(),
+    resourceId: newerMailDomainId,
+    result: { mailDomainId: newerMailDomainId },
+  });
+  const raceFixture = await listen(t, owner, {
+    jobs: [source],
+    jobSnapshots: [[source], [source, newer]],
+  });
+
+  const response = await request(
+    raceFixture.base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback`,
+    { sourceApplyJobId, previewDigest: preview.previewDigest, confirmation: preview.confirmation },
+  );
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error.code, 'mail_configuration_rollback_superseded');
+  assert.equal(raceFixture.enqueued.length, 0);
+});
+
 test('rollback preview rejects legacy, superseded and control-plane-drifted apply evidence', async (t) => {
   const legacy = sourceApplyJob({ result: { version: 2 } });
   delete legacy.result.previousRevision;
@@ -366,6 +486,11 @@ test('Read Only cannot preview or apply managed mail mutations', async (t) => {
   })).status, 403);
   assert.equal((await request(base, `/api/mail-domains/${localMailDomain.id}/config-rollback-preview`, {
     sourceApplyJobId,
+  })).status, 403);
+  assert.equal((await request(base, `/api/mail-domains/${localMailDomain.id}/config-rollback`, {
+    sourceApplyJobId,
+    previewDigest,
+    confirmation: `rollback-mail-configuration:${localMailDomain.id}:${sourceApplyJobId}:${previewDigest}`,
   })).status, 403);
   assert.equal(enqueued.length, 0);
 });

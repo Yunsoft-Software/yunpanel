@@ -12,10 +12,12 @@ const APPLY_FIELDS = new Set([
   'confirmation',
 ]);
 const ROLLBACK_PREVIEW_FIELDS = new Set(['sourceApplyJobId']);
+const ROLLBACK_FIELDS = new Set(['sourceApplyJobId', 'previewDigest', 'confirmation']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const MANAGED_MAIL_MUTATIONS = new Set([
   OPERATIONS.MAIL_CONFIG_APPLY,
+  OPERATIONS.MAIL_CONFIG_ROLLBACK,
   OPERATIONS.MAIL_DKIM_APPLY,
 ]);
 
@@ -258,6 +260,97 @@ export function mountMailConfigurationRoutes(app, {
         desiredStatus: body.status,
         previewDigest: preview.previewDigest,
         configurationSha256: preview.configuration.sha256,
+      },
+      resourceType: 'mail_domain',
+      resourceId: request.params.mailDomainId,
+    });
+    return response.status(202).json({ data: job });
+  }));
+
+  app.post('/api/mail-domains/:mailDomainId/config-rollback', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const body = exactBody(request.body, ROLLBACK_FIELDS, 'mail_configuration_rollback_input_invalid');
+    if (typeof body.sourceApplyJobId !== 'string' || !JOB_ID_PATTERN.test(body.sourceApplyJobId)
+      || !SHA256_PATTERN.test(body.previewDigest ?? '')
+      || typeof body.confirmation !== 'string' || body.confirmation.length > 512) {
+      throw new MailConfigurationHttpError(
+        'mail_configuration_rollback_confirmation_invalid',
+        'Managed mail rollback confirmation is invalid',
+      );
+    }
+    const scoped = await scopedMailDomain({
+      mailDomainRegistry,
+      domainRegistry,
+      mailDomainId: request.params.mailDomainId,
+      localServerId,
+    });
+    const serverId = scoped.domain.serverId;
+    if (typeof serverId !== 'string' || !serverId) {
+      throw new MailConfigurationHttpError('mail_domain_server_unavailable', 'Mail domain server identity is unavailable', 409);
+    }
+    const jobs = await jobRegistry.listJobs({ serverId });
+    assertMailConfigurationJobsIdle(jobs);
+    const sourceJob = await jobRegistry.getJob(body.sourceApplyJobId);
+    if (!sourceJob || sourceJob.serverId !== serverId) {
+      throw new MailConfigurationHttpError(
+        'mail_configuration_rollback_source_not_found',
+        'Managed mail rollback source job was not found',
+        404,
+      );
+    }
+    const preview = rollbackPreview(scoped.mailDomain, sourceJob, jobs);
+    if (!preview.readyToRollback || body.previewDigest !== preview.previewDigest
+      || body.confirmation !== preview.confirmation) {
+      throw new MailConfigurationHttpError(
+        'mail_configuration_rollback_preview_stale',
+        'Managed mail rollback changed after preview',
+        409,
+      );
+    }
+
+    const refreshed = await scopedMailDomain({
+      mailDomainRegistry,
+      domainRegistry,
+      mailDomainId: request.params.mailDomainId,
+      localServerId,
+    });
+    if (refreshed.domain.serverId !== serverId) {
+      throw new MailConfigurationHttpError('mail_domain_not_found', 'Mail domain was not found', 404);
+    }
+    const refreshedJobs = await jobRegistry.listJobs({ serverId });
+    assertMailConfigurationJobsIdle(refreshedJobs);
+    const refreshedSourceJob = await jobRegistry.getJob(body.sourceApplyJobId);
+    if (!refreshedSourceJob || refreshedSourceJob.serverId !== serverId) {
+      throw new MailConfigurationHttpError(
+        'mail_configuration_rollback_source_not_found',
+        'Managed mail rollback source job was not found',
+        404,
+      );
+    }
+    const refreshedPreview = rollbackPreview(refreshed.mailDomain, refreshedSourceJob, refreshedJobs);
+    if (body.previewDigest !== refreshedPreview.previewDigest
+      || body.confirmation !== refreshedPreview.confirmation) {
+      throw new MailConfigurationHttpError(
+        'mail_configuration_rollback_preview_stale',
+        'Managed mail rollback changed after preview',
+        409,
+      );
+    }
+    const job = await jobRegistry.enqueue({
+      serverId,
+      type: OPERATIONS.MAIL_CONFIG_ROLLBACK,
+      operation: OPERATIONS.MAIL_CONFIG_ROLLBACK,
+      payload: {
+        mailDomainId: request.params.mailDomainId,
+        sourceApplyJobId: refreshedPreview.sourceApplyJobId,
+        previousRevision: refreshedPreview.previousRevision,
+        expectedCurrentRevision: refreshedPreview.expectedCurrentRevision,
+        currentStatus: refreshedPreview.currentStatus,
+        targetStatus: refreshedPreview.targetStatus,
+        currentConfigurationSha256: refreshedPreview.currentConfigurationSha256,
+        sourcePlanSha256: refreshedPreview.sourcePlanSha256,
+        backupSha256: refreshedPreview.backupSha256,
+        previewDigest: refreshedPreview.previewDigest,
       },
       resourceType: 'mail_domain',
       resourceId: request.params.mailDomainId,

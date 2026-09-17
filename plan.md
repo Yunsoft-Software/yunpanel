@@ -35,7 +35,6 @@ Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içi
 
 ## P0.4 — Mail: Postfix + Dovecot + Rspamd + shared Roundcube
 
-- [ ] Tamamlanan strict `MAIL_CONFIG_ROLLBACK` executor/recovery/reconciliation zincirini mevcut v3 rollback preview'a bağlı exact typed-confirmation, active-mutation exclusion, audit ve durable enqueue HTTP yüzeyiyle aç.
 - [ ] SQL-backed virtual mail domain/mailbox/alias/quota/password-hash modeli ekle; Website user ile mail storage identity ayrı olsun.
 - [ ] Dedicated mail storage identity kullan; Website UID Maildir owner olmasın.
 - [ ] Local mail enable domain oluştursun fakat bilinen/default parola mailbox yaratmasın.
