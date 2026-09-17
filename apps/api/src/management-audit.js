@@ -29,6 +29,8 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/mail-domains\/([^/]+)\/config-apply$/)) && method === 'POST') return { action: 'mail.configuration.apply', resourceType: 'mail_domain', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/mail-domains\/([^/]+)\/config-rollback-preview$/)) && method === 'POST') return { action: 'mail.configuration.rollback.preview', resourceType: 'mail_domain', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/mail-domains\/([^/]+)\/config-rollback$/)) && method === 'POST') return { action: 'mail.configuration.rollback', resourceType: 'mail_domain', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/mail-domains\/([^/]+)\/dkim\/local-dns-retirement-preview$/)) && method === 'POST') return { action: 'mail.dkim.local_dns_retirement.preview', resourceType: 'mail_domain', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/mail-domains\/([^/]+)\/dkim\/local-dns-retirement-apply$/)) && method === 'POST') return { action: 'mail.dkim.local_dns_retirement.apply', resourceType: 'mail_domain', resourceId: parts[0] };
   if (method === 'POST' && pathname === '/api/websites') return { action: 'website.create', resourceType: 'website', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/websites/migration/create-website') return { action: 'website.migration.create', resourceType: 'website_migration', resourceId: 'create' };
   if (method === 'POST' && pathname === '/api/websites/migration/bind') return { action: 'website.migration.bind', resourceType: 'website_migration', resourceId: 'bind' };

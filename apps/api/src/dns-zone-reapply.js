@@ -241,7 +241,7 @@ export function createDnsZoneReapplyService({
     throw new DnsZoneReapplyError('dns_zone_reapply_dependencies_invalid', 'DNS zone reapply dependencies are unavailable', 503);
   }
 
-  async function buildPreview(domainId) {
+  async function buildPreview(domainId, retirePendingDkim = null) {
     const domain = rootDomain(
       await mapped(() => domainRegistry.getDomain(domainId), 'dns_zone_reapply_domain_unavailable', 'Domain state is unavailable'),
       localServerId,
@@ -264,7 +264,7 @@ export function createDnsZoneReapplyService({
       ),
       mailIntentResolver
         ? mapped(
-          () => mailIntentResolver.resolve({ domain }),
+          () => mailIntentResolver.resolve({ domain, retirePendingDkim }),
           'dns_zone_reapply_mail_state_unavailable',
           'Mail DNS desired state is unavailable',
         )
@@ -362,11 +362,11 @@ export function createDnsZoneReapplyService({
     });
   }
 
-  async function preview({ domainId } = {}) {
+  async function preview({ domainId, retirePendingDkim = null } = {}) {
     if (typeof domainId !== 'string' || !domainId) {
       throw new DnsZoneReapplyError('dns_zone_reapply_domain_id_invalid', 'Domain ID is required');
     }
-    return buildPreview(domainId);
+    return buildPreview(domainId, retirePendingDkim);
   }
 
   async function apply({ domainId, previewDigest, confirmation } = {}) {

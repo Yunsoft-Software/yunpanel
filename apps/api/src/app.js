@@ -29,6 +29,7 @@ import { DatabaseCredentialHttpError, mountDatabaseCredentialRoutes } from './da
 import { DatabaseCredentialRegistryError } from './database-credential-registry.js';
 import { DatabaseHttpError, databaseHttpInternals, mountDatabaseRoutes } from './database-http.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
+import { DnsZoneMailDkimRetirementHttpError } from './dns-zone-mail-dkim-retirement-http.js';
 import {
   createDnsProviderCredentialRegistry,
   DnsProviderCredentialRegistryError,
@@ -616,6 +617,7 @@ export function createApp({
       || error instanceof ApplicationRegistryError
       || error instanceof DomainRegistryError
       || error instanceof DockerWorkloadRegistryError
+      || error instanceof DnsZoneMailDkimRetirementHttpError
       || error instanceof DnsProviderCredentialRegistryError
       || error instanceof DnsReadinessError
       || error instanceof CloudflareDnsManagerError

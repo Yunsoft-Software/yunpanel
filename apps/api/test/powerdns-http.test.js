@@ -176,6 +176,65 @@ test('PowerDNS HTTP rejects unexpected DNS template body fields before registry 
   assert.equal(called, false);
 });
 
+test('PowerDNS HTTP mounts local DKIM retirement only with the complete local DNS and mail stack', () => {
+  const route = 'POST /api/mail-domains/:mailDomainId/dkim/local-dns-retirement-preview';
+  const incomplete = mountWith({
+    ensureForServer: async () => ({}),
+    getVersion: async () => null,
+    preview: async () => ({}),
+    update: async () => ({}),
+  });
+  assert.equal(incomplete.routes.has(route), false);
+
+  const app = createFakeApp();
+  mountPowerDnsRoutes(app, {
+    dnsIdentityRegistry: {
+      getForServer: async () => null,
+      preview: async () => ({}),
+      update: async () => ({}),
+    },
+    dnsZoneTemplateRegistry: {
+      ensureForServer: async () => ({}),
+      getVersion: async () => null,
+      preview: async () => ({}),
+      update: async () => ({}),
+    },
+    dnsZoneReapplyRuntime: {
+      preview: async () => ({}),
+      start: async () => ({}),
+      get: async () => null,
+      listForDomain: async () => [],
+    },
+    dnsZoneRecordsService: {
+      getZone: async () => ({}),
+      apply: async () => ({}),
+      remove: async () => ({}),
+    },
+    domainRegistry: { getDomain: async () => null },
+    powerDnsSecretRegistry: {},
+    mailDomainRegistry: { getMailDomain: async () => null },
+    mailDkimRegistry: {},
+    mailDkimRetirementRegistry: {
+      getRetirement: async () => null,
+      beginRetirement: async () => null,
+      clearRetirement: async () => null,
+    },
+    mailServiceIdentityRegistry: {},
+    authoritativeService: {
+      localServerId: serverId,
+      status: async () => ({}),
+      preview: async () => ({}),
+      apply: async () => ({}),
+      resolve: async () => ({}),
+      retry: async () => ({}),
+      rollback: async () => ({}),
+    },
+  });
+
+  assert.equal(app.routes.has(route), true);
+  assert.equal(app.routes.has('POST /api/mail-domains/:mailDomainId/dkim/local-dns-retirement-apply'), true);
+});
+
 test('PowerDNS HTTP forwards an exact authoritative recovery fence', async () => {
   const calls = [];
   const app = createFakeApp();

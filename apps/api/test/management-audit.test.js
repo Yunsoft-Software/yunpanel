@@ -32,6 +32,8 @@ test('current management mutation routes map to bounded action and resource iden
     ['POST', '/api/mailboxes/mailbox-1/password', 'mailbox.password.rotate', 'mailbox', 'mailbox-1'],
     ['PATCH', '/api/mailboxes/mailbox-1', 'mailbox.update', 'mailbox', 'mailbox-1'],
     ['DELETE', '/api/mailboxes/mailbox-1', 'mailbox.delete', 'mailbox', 'mailbox-1'],
+    ['POST', '/api/mail-domains/mail-domain-1/dkim/local-dns-retirement-preview', 'mail.dkim.local_dns_retirement.preview', 'mail_domain', 'mail-domain-1'],
+    ['POST', '/api/mail-domains/mail-domain-1/dkim/local-dns-retirement-apply', 'mail.dkim.local_dns_retirement.apply', 'mail_domain', 'mail-domain-1'],
     ['POST', '/api/domains/domain-1/reparent-preview', 'domain.reparent.preview', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/reparent', 'domain.reparent', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/update-preview', 'domain.update.preview', 'domain', 'domain-1'],

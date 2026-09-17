@@ -12,7 +12,8 @@ const STORE_MODE = 0o600;
 const DIRECTORY_MODE = 0o700;
 const PHASE_PREPARED = 'rotation_prepared';
 const PHASE_PENDING = 'dns_retirement_pending';
-const PHASES = new Set([PHASE_PREPARED, PHASE_PENDING]);
+const PHASE_APPLYING = 'dns_retirement_applying';
+const PHASES = new Set([PHASE_PREPARED, PHASE_PENDING, PHASE_APPLYING]);
 
 export class MailDkimRetirementRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -151,7 +152,8 @@ function validatePersisted(record) {
     ? null
     : keyRevision(record.currentKeyRevision, 'currentKeyRevision');
   if ((record.phase === PHASE_PREPARED && currentKeyRevision !== null)
-    || (record.phase === PHASE_PENDING && currentKeyRevision !== previousKeyRevision + 1)) {
+    || ([PHASE_PENDING, PHASE_APPLYING].includes(record.phase)
+      && currentKeyRevision !== previousKeyRevision + 1)) {
     throw new MailDkimRetirementRegistryError(
       'mail_dkim_retirement_state_invalid',
       'DKIM retirement key revisions are inconsistent',
@@ -448,6 +450,74 @@ export function createMailDkimRetirementRegistry({
     });
   }
 
+  async function beginRetirement(mailDomainId, { expectedRevision, confirmation } = {}) {
+    await ensureInitialized();
+    const id = uuid(mailDomainId);
+    const expected = revision(expectedRevision);
+    return mutate(async (next) => {
+      const index = next.retirements.findIndex((record) => record.mailDomainId === id);
+      if (index < 0) {
+        throw new MailDkimRetirementRegistryError(
+          'mail_dkim_retirement_not_found',
+          'DKIM retirement state was not found',
+          404,
+        );
+      }
+      const result = await reconcileRecord(next.retirements[index]);
+      if (result.action === 'remove') {
+        next.retirements.splice(index, 1);
+        throw new MailDkimRetirementRegistryError(
+          'mail_dkim_retirement_not_found',
+          'DKIM retirement state is no longer pending',
+          404,
+        );
+      }
+      if (result.action === 'replace') next.retirements[index] = result.record;
+      const record = next.retirements[index];
+      if (record.phase === PHASE_APPLYING) {
+        if (record.revision !== expected
+          || confirmation !== `begin-dkim-retirement:${id}:${record.previousSelector}:${record.revision}`) {
+          throw new MailDkimRetirementRegistryError(
+            'mail_dkim_retirement_confirmation_mismatch',
+            'DKIM retirement confirmation does not match current applying state',
+            409,
+          );
+        }
+        return publicRecord(record);
+      }
+      if (record.revision !== expected) {
+        throw new MailDkimRetirementRegistryError(
+          'stale_mail_dkim_retirement_revision',
+          'DKIM retirement state changed; refresh and retry',
+          409,
+        );
+      }
+      if (record.phase !== PHASE_PENDING) {
+        throw new MailDkimRetirementRegistryError(
+          'mail_dkim_retirement_not_ready',
+          'DKIM retirement state is not ready to begin',
+          409,
+        );
+      }
+      const expectedConfirmation = `begin-dkim-retirement:${id}:${record.previousSelector}:${record.revision}`;
+      if (confirmation !== expectedConfirmation) {
+        throw new MailDkimRetirementRegistryError(
+          'mail_dkim_retirement_confirmation_mismatch',
+          'DKIM retirement confirmation does not match',
+          409,
+        );
+      }
+      const updated = {
+        ...record,
+        phase: PHASE_APPLYING,
+        revision: record.revision + 1,
+        updatedAt: new Date(now()).toISOString(),
+      };
+      next.retirements[index] = updated;
+      return publicRecord(updated);
+    });
+  }
+
   async function clearRetirement(mailDomainId, { expectedRevision, confirmation } = {}) {
     await ensureInitialized();
     const id = uuid(mailDomainId);
@@ -479,7 +549,7 @@ export function createMailDkimRetirementRegistry({
           409,
         );
       }
-      if (record.phase !== PHASE_PENDING) {
+      if (![PHASE_PENDING, PHASE_APPLYING].includes(record.phase)) {
         throw new MailDkimRetirementRegistryError(
           'mail_dkim_retirement_not_ready',
           'DKIM retirement state is not ready to clear',
@@ -505,6 +575,7 @@ export function createMailDkimRetirementRegistry({
     getRetirement,
     prepareRotation,
     confirmRotation,
+    beginRetirement,
     clearRetirement,
   });
 }
@@ -513,6 +584,6 @@ export const mailDkimRetirementRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
   storeMode: STORE_MODE,
   directoryMode: DIRECTORY_MODE,
-  phases: Object.freeze([PHASE_PREPARED, PHASE_PENDING]),
+  phases: Object.freeze([PHASE_PREPARED, PHASE_PENDING, PHASE_APPLYING]),
   validatePersisted,
 });

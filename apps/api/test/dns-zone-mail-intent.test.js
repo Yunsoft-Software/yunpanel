@@ -85,6 +85,7 @@ test('enabled local mail resolves service endpoints and current plus retiring pu
     mailDomainRevision: 4,
     mailServiceIdentityRevision: 2,
     dkimRevisions: [2, 3],
+    retirementPhase: 'dns_retirement_pending',
     retirementRevision: 2,
   });
   assert.equal(JSON.stringify(resolved).includes('private'), false);
@@ -117,4 +118,48 @@ test('enabled local mail fails closed when the service identity or DKIM ownershi
     fixture({ currentKey: { ...key(), domainName: 'other.example' } }),
     (error) => error instanceof DnsZoneMailIntentError && error.code === 'dns_zone_mail_dkim_invalid',
   );
+});
+
+test('pending retirement preview and persisted applying state exclude only the previous selector', async () => {
+  const retirement = {
+    mailDomainId: mailDomain.id,
+    domainName: mailDomain.domainName,
+    previousSelector: 'previous',
+    previousDnsRecord: {
+      type: 'TXT',
+      name: `previous._domainkey.${mailDomain.domainName}`,
+      value: 'v=DKIM1; k=rsa; p=previous',
+    },
+    phase: 'dns_retirement_pending',
+    revision: 2,
+  };
+  const resolver = createDnsZoneMailIntentResolver({
+    mailDomainRegistry: { listMailDomains: async () => [mailDomain] },
+    mailDkimRegistry: { getKey: async () => key() },
+    mailDkimRetirementRegistry: { getRetirement: async () => retirement },
+    mailServiceIdentityRegistry: {
+      getForServer: async () => ({
+        serverId: domain.serverId, hostname: 'mail.example.com', revision: 2, ready: true,
+      }),
+    },
+  });
+  const preview = await resolver.resolve({
+    domain,
+    retirePendingDkim: {
+      mailDomainId: mailDomain.id,
+      expectedRevision: retirement.revision,
+      selector: retirement.previousSelector,
+    },
+  });
+  assert.deepEqual(preview.intent.dkimRecords, [
+    { selector: 'current', value: 'v=DKIM1; k=rsa; p=current' },
+  ]);
+  assert.equal(preview.evidence.retirementPhase, 'dns_retirement_applying');
+  assert.equal(preview.evidence.retirementRevision, 3);
+
+  retirement.phase = 'dns_retirement_applying';
+  retirement.revision = 3;
+  const applying = await resolver.resolve({ domain });
+  assert.deepEqual(applying.intent.dkimRecords, preview.intent.dkimRecords);
+  assert.deepEqual(applying.evidence, preview.evidence);
 });

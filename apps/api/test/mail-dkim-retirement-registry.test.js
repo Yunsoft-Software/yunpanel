@@ -106,6 +106,51 @@ test('pending DNS retirement blocks another rotation until exact confirmed clear
   assert.equal(await registry.getRetirement(mailDomainId), null);
 });
 
+test('DNS retirement intent persists before provider mutation and survives restart', async () => withTempDirectory(async (root) => {
+  const filePath = path.join(root, 'dkim-retirements.json');
+  let current = key();
+  const first = createMailDkimRetirementRegistry({
+    filePath,
+    now: () => Date.parse('2026-09-17T01:00:00.000Z'),
+    getDkimKey: async () => current,
+  });
+  await first.init();
+  await first.prepareRotation(mailDomainId, { expectedKeyRevision: 1, targetSelector: 'mail-new' });
+  current = key({ selector: 'mail-new', publicKey: PUBLIC_TWO, revision: 2 });
+  const pending = await first.confirmRotation(mailDomainId);
+
+  await assert.rejects(
+    first.beginRetirement(mailDomainId, {
+      expectedRevision: pending.revision,
+      confirmation: 'begin-dkim-retirement:wrong',
+    }),
+    (error) => error instanceof MailDkimRetirementRegistryError
+      && error.code === 'mail_dkim_retirement_confirmation_mismatch',
+  );
+  const applying = await first.beginRetirement(mailDomainId, {
+    expectedRevision: pending.revision,
+    confirmation: `begin-dkim-retirement:${mailDomainId}:mail-old:${pending.revision}`,
+  });
+  assert.equal(applying.phase, 'dns_retirement_applying');
+  assert.equal(applying.revision, pending.revision + 1);
+
+  const reopened = createMailDkimRetirementRegistry({ filePath, getDkimKey: async () => current });
+  await reopened.init();
+  const recovered = await reopened.getRetirement(mailDomainId);
+  assert.equal(recovered.phase, 'dns_retirement_applying');
+  assert.equal(recovered.revision, applying.revision);
+  assert.deepEqual(await reopened.beginRetirement(mailDomainId, {
+    expectedRevision: applying.revision,
+    confirmation: `begin-dkim-retirement:${mailDomainId}:mail-old:${applying.revision}`,
+  }), recovered);
+
+  await reopened.clearRetirement(mailDomainId, {
+    expectedRevision: recovered.revision,
+    confirmation: `clear-dkim-retirement:${mailDomainId}:mail-old:${recovered.revision}`,
+  });
+  assert.equal(await reopened.getRetirement(mailDomainId), null);
+}));
+
 test('ambiguous current key drift fails closed instead of discarding retirement evidence', async () => withTempDirectory(async (root) => {
   const filePath = path.join(root, 'dkim-retirements.json');
   let current = key();

@@ -1,5 +1,7 @@
 import path from 'node:path';
 import { createDnsDelegationInspector, DnsDelegationInspectorError } from './dns-delegation-inspector.js';
+import { mountDnsZoneMailDkimRetirementRoutes } from './dns-zone-mail-dkim-retirement-http.js';
+import { createDnsZoneMailDkimRetirementService } from './dns-zone-mail-dkim-retirement.js';
 import { createDnsZoneMailIntentResolver } from './dns-zone-mail-intent.js';
 import { mountDnsZoneDnssecRoutes } from './dns-zone-dnssec-http.js';
 import { mountDnsZoneSecondaryStatusRoutes } from './dns-zone-secondary-status-http.js';
@@ -316,11 +318,25 @@ async function defaultZoneReapplyRuntime({
   return runtime;
 }
 
-async function defaultZoneRecordsService(authoritativeService, env = process.env) {
-  const { domainRegistry, secretRegistry } = await defaultDomainAndSecretRegistries(authoritativeService, env);
+async function defaultZoneRecordsService(
+  authoritativeService,
+  domainRegistry = null,
+  powerDnsSecretRegistry = null,
+  env = process.env,
+) {
+  if ((domainRegistry === null) !== (powerDnsSecretRegistry === null)) {
+    throw new PowerDnsHttpError(
+      'dns_zone_records_registry_dependencies_invalid',
+      'DNS zone record Domain and PowerDNS secret registries must be configured together',
+      503,
+    );
+  }
+  const defaults = domainRegistry === null
+    ? await defaultDomainAndSecretRegistries(authoritativeService, env)
+    : null;
   return createDnsZoneRecordsService({
-    domainRegistry,
-    powerDnsSecretRegistry: secretRegistry,
+    domainRegistry: domainRegistry ?? defaults.domainRegistry,
+    powerDnsSecretRegistry: powerDnsSecretRegistry ?? defaults.secretRegistry,
     localServerId: authoritativeService.localServerId,
   });
 }
@@ -432,14 +448,54 @@ export function mountPowerDnsRoutes(app, {
   function zoneRecordsService() {
     if (dnsZoneRecordsService) return Promise.resolve(dnsZoneRecordsService);
     if (!defaultRecordsPromise) {
-      defaultRecordsPromise = defaultZoneRecordsService(authoritativeService);
+      defaultRecordsPromise = defaultZoneRecordsService(
+        authoritativeService,
+        domainRegistry,
+        powerDnsSecretRegistry,
+      );
       defaultRecordsPromise.catch(() => { defaultRecordsPromise = null; });
     }
     return defaultRecordsPromise;
   }
 
+  const localDkimRetirementDependencies = [
+    domainRegistry,
+    powerDnsSecretRegistry,
+    mailDomainRegistry,
+    mailDkimRegistry,
+    mailDkimRetirementRegistry,
+    mailServiceIdentityRegistry,
+  ];
+  const hasLocalDkimRetirement = localDkimRetirementDependencies.every((dependency) => dependency !== null);
+  let localDkimRetirementServicePromise = null;
+  function localDkimRetirementService() {
+    if (!hasLocalDkimRetirement) {
+      throw new PowerDnsHttpError(
+        'mail_dkim_local_retirement_dependencies_invalid',
+        'Local DKIM retirement dependencies are unavailable',
+        503,
+      );
+    }
+    if (!localDkimRetirementServicePromise) {
+      localDkimRetirementServicePromise = Promise.all([reapplyRuntime(), zoneRecordsService()])
+        .then(([runtime, recordsService]) => createDnsZoneMailDkimRetirementService({
+          mailDomainRegistry,
+          mailDkimRetirementRegistry,
+          domainRegistry,
+          dnsZoneRecordsService: recordsService,
+          dnsZoneReapplyRuntime: runtime,
+          localServerId: authoritativeService.localServerId,
+        }));
+      localDkimRetirementServicePromise.catch(() => { localDkimRetirementServicePromise = null; });
+    }
+    return localDkimRetirementServicePromise;
+  }
+
   mountDnsZoneDnssecRoutes(app, { authoritativeService });
   mountDnsZoneSecondaryStatusRoutes(app, { dnsIdentityRegistry, authoritativeService });
+  if (hasLocalDkimRetirement) {
+    mountDnsZoneMailDkimRetirementRoutes(app, { serviceForRequest: localDkimRetirementService });
+  }
 
   app.get('/api/servers/:serverId/dns/identity', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);

@@ -38,11 +38,11 @@ function canonicalDkim(record, mailDomainId, domainName, field) {
   });
 }
 
-function retirementDkim(retirement, mailDomainId, domainName) {
+function retirementDkim(retirement, mailDomainId, domainName, { exclude = false } = {}) {
   if (retirement === null) return null;
   if (!retirement || typeof retirement !== 'object' || Array.isArray(retirement)
     || retirement.mailDomainId !== mailDomainId || retirement.domainName !== domainName
-    || retirement.phase !== 'dns_retirement_pending'
+    || !['dns_retirement_pending', 'dns_retirement_applying'].includes(retirement.phase)
     || typeof retirement.previousSelector !== 'string'
     || !/^[a-z0-9][a-z0-9_-]{0,62}$/.test(retirement.previousSelector)
     || !Number.isSafeInteger(retirement.revision) || retirement.revision < 1
@@ -55,11 +55,39 @@ function retirementDkim(retirement, mailDomainId, domainName) {
       409,
     );
   }
+  if (exclude || retirement.phase === 'dns_retirement_applying') return null;
   return Object.freeze({
     selector: retirement.previousSelector,
     value: retirement.previousDnsRecord.value,
     revision: retirement.revision,
   });
+}
+
+function retirementPreview(value, retirement, mailDomainId) {
+  if (value === null) return null;
+  const fields = new Set(['mailDomainId', 'expectedRevision', 'selector']);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
+    || value.mailDomainId !== mailDomainId
+    || !Number.isSafeInteger(value.expectedRevision) || value.expectedRevision < 1
+    || typeof value.selector !== 'string' || !value.selector) {
+    throw new DnsZoneMailIntentError(
+      'dns_zone_mail_retirement_preview_invalid',
+      'DKIM retirement preview identity is invalid',
+      409,
+    );
+  }
+  if (!retirement || retirement.phase !== 'dns_retirement_pending'
+    || retirement.mailDomainId !== value.mailDomainId
+    || retirement.revision !== value.expectedRevision
+    || retirement.previousSelector !== value.selector) {
+    throw new DnsZoneMailIntentError(
+      'dns_zone_mail_retirement_preview_stale',
+      'DKIM retirement state changed before DNS preview',
+      409,
+    );
+  }
+  return Object.freeze({ phase: 'dns_retirement_applying', revision: retirement.revision + 1 });
 }
 
 function disabledEvidence(mailDomain = null) {
@@ -71,6 +99,7 @@ function disabledEvidence(mailDomain = null) {
     mailDomainRevision: mailDomain?.revision ?? null,
     mailServiceIdentityRevision: null,
     dkimRevisions: Object.freeze([]),
+    retirementPhase: null,
     retirementRevision: null,
   });
 }
@@ -92,7 +121,7 @@ export function createDnsZoneMailIntentResolver({
     );
   }
 
-  async function resolve({ domain } = {}) {
+  async function resolve({ domain, retirePendingDkim = null } = {}) {
     const scoped = domainScope(domain);
     const matches = (await mailDomainRegistry.listMailDomains())
       .filter((entry) => entry?.webDomainId === scoped.id && entry?.domainName === scoped.primaryDomain);
@@ -126,9 +155,12 @@ export function createDnsZoneMailIntentResolver({
       );
     }
 
+    const retirementTarget = retirementPreview(retirePendingDkim, retirement, mailDomain.id);
     const dkim = [];
     if (currentKey) dkim.push(canonicalDkim(currentKey, mailDomain.id, scoped.primaryDomain, 'Current'));
-    const previous = retirementDkim(retirement, mailDomain.id, scoped.primaryDomain);
+    const previous = retirementDkim(retirement, mailDomain.id, scoped.primaryDomain, {
+      exclude: retirementTarget !== null,
+    });
     if (previous) dkim.push(previous);
     const bySelector = new Map();
     for (const entry of dkim) {
@@ -153,7 +185,8 @@ export function createDnsZoneMailIntentResolver({
       mailDomainRevision: mailDomain.revision,
       mailServiceIdentityRevision: identity.revision,
       dkimRevisions: Object.freeze(dkim.map((entry) => entry.revision).sort((left, right) => left - right)),
-      retirementRevision: retirement?.revision ?? null,
+      retirementPhase: retirementTarget?.phase ?? retirement?.phase ?? null,
+      retirementRevision: retirementTarget?.revision ?? retirement?.revision ?? null,
     });
     return Object.freeze({
       intent: Object.freeze({
@@ -175,5 +208,6 @@ export const dnsZoneMailIntentInternals = Object.freeze({
   domainScope,
   canonicalDkim,
   retirementDkim,
+  retirementPreview,
   disabledEvidence,
 });

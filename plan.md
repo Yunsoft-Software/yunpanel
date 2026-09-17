@@ -4,6 +4,7 @@ Bu dosya **yalnız kalan ürün/kod işlerini** tutar. Yapılmış işlerin ayr�
 
 Son Website isolation/SFTP ilerlemesi: `docs/history/website-isolation-sftp-progress-2026-09-17.md`.
 Son mail durable apply/recovery ilerlemesi: `docs/history/mail-durable-apply-recovery-2026-09-17.md`.
+Son local PowerDNS DKIM retirement ilerlemesi: `docs/history/dns-local-dkim-retirement-2026-09-17.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -26,7 +27,6 @@ Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
 ## P0.3 — Versioned DNS Zone Template ve Domain DNS yönetimi
 
-- [ ] Local PowerDNS DKIM retirement'ını zone lifecycle ile tamamla: pending previous selector için revision-bound explicit preview/apply eski `mail` RRset'ini kaldırıp retirement state'ini yalnız authoritative post-condition kanıtıyla temizlesin.
 - [ ] `autodiscover` / `autoconfig` yalnız gerçek endpoint hazır olduğunda service-aware DNS desired state'e girsin.
 - [ ] DNSSEC key rollover/rotation lifecycle ekle: yeni KSK/CSK üret/publish/activate, parent DS propagation doğrula, eski DS retirement doğrula, eski key deactivate/delete; rollover sırasında secure delegation kesilmesin ve private key public state/job/audit'e çıkmasın.
 - [ ] Zone suspend/delete/compensation ownership evidence'ını P0.9 lifecycle'ına bağla; manual kayıt içeren zone destructive cleanup'ta fail-closed kalsın.
