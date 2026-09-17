@@ -24,6 +24,7 @@ Bu kayıt P0.4 managed mail configuration lifecycle'ında kaynakta tamamlanan ap
 - Production local operation registry `MAIL_CONFIG_ROLLBACK` job'unu private current materializer'dan host restore primitive'ine taşır. Source transaction/plan/backup identity ile rollback job transaction'ı ayrı kalır; bounded v1 sonucu exact queued provenance ve operation-owned compensation backup digest'ini içerir.
 - Durable job registry rollback operation'ını async mutation olarak tanır ve başarılı sonucu 14 alanlı strict şemayla queued payload'a bağlar. Payload drift'i, malformed compensation digest'i, false success veya expanded path alanı job completion'ı fail-closed reddeder.
 - Başarılı local rollback host dönüşünden sonra ve durable completion acknowledgment'ından önce root-private v1 rollback receipt yazılır. Receipt source apply, previous/current revision-status, preview/current configuration/source plan/source backup ve operation-owned compensation backup digest'lerini exact taşır; sadece strict alan setini kabul eder ve `0700` dizin/`0600` dosya politikası uygular.
+- Root-private rollback journal şeması restore başlamadan source/compensation kimliklerini `restoring_source` durumunda atomik saklar; yalnız `restored`, `compensated` veya `failed` terminal geçişlerini kabul eder. Terminal replay, duplicate intent, revision/status matematiği bozuk state, expanded alan ve unsafe/symlink journal dosyası reddedilir.
 
 ## Regression kapsamı
 
@@ -41,8 +42,9 @@ Bu kayıt P0.4 managed mail configuration lifecycle'ında kaynakta tamamlanan ap
 - Enabled ve disabled current-state protected materialization, status drift reddi ve secret-free public sınır.
 - Local executor current bundle drift'i, exact host restore argümanları, secret-free bounded result ve job registry result/payload eşleşmesi.
 - Rollback receipt write/read, unsafe/symlink ve expanded persisted evidence reddi; configured runtime'ın yalnız exact executor sonucundan receipt üretmesi.
+- Rollback journal begin/terminal transition, monotonic timestamp, bounded failure code, duplicate/terminal replay ve unsafe persistence reddi.
 
-İlk backup-binding odak regresyonunda desteklenen Node 24 ile 23/23, v3 previous-state zinciri regresyonunda 31/31, rollback preview/audit regresyonunda 18/18, rollback protocol regresyonunda 4/4 ve backup identity regresyonunda 4/4 test geçti. Host explicit restore/compensation ile ilişkili config/SRS/backup regresyonu 15/15, host-runtime paketinin tamamı 506/506, current materialization odak regresyonu 12/12, local executor/job contract regresyonu 19/19 ve rollback receipt/runtime odak regresyonu 5/5 geçti; repository policy de başarıyla tamamlandı. Önceki dilimde bütün workspace testleri ve production build'ini içeren `npm run check` başarıyla tamamlandı; build yalnız mevcut büyük chunk uyarısını verdi. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
+İlk backup-binding odak regresyonunda desteklenen Node 24 ile 23/23, v3 previous-state zinciri regresyonunda 31/31, rollback preview/audit regresyonunda 18/18, rollback protocol regresyonunda 4/4 ve backup identity regresyonunda 4/4 test geçti. Host explicit restore/compensation ile ilişkili config/SRS/backup regresyonu 15/15, host-runtime paketinin tamamı 506/506, current materialization odak regresyonu 12/12, local executor/job contract regresyonu 19/19, rollback receipt/runtime odak regresyonu 5/5 ve rollback journal regresyonu 3/3 geçti; repository policy de başarıyla tamamlandı. Önceki dilimde bütün workspace testleri ve production build'ini içeren `npm run check` başarıyla tamamlandı; build yalnız mevcut büyük chunk uyarısını verdi. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
 
 ## Açık kalan sınır
 
