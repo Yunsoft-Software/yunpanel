@@ -27,7 +27,6 @@ function validateHandoff(handoff, expected, now) {
     || handoff.protocol !== PHP_MYADMIN_PROTOCOL
     || !CAPABILITY_PATTERN.test(handoff.capability ?? '')
     || !Number.isInteger(handoff.expiresAt)
-    || handoff.expiresAt <= now
     || !handoff.target
     || typeof handoff.target !== 'object'
     || handoff.target.serverId !== expected.serverId
@@ -37,6 +36,12 @@ function validateHandoff(handoff, expected, now) {
     throw new PhpMyAdminBrowserHandoffError(
       'phpmyadmin_handoff_invalid',
       'phpMyAdmin oturum anahtarı güvenlik sözleşmesiyle eşleşmiyor. Yeniden deneyin.',
+    );
+  }
+  if (handoff.expiresAt <= now) {
+    throw new PhpMyAdminBrowserHandoffError(
+      'phpmyadmin_handoff_expired',
+      'phpMyAdmin oturum anahtarının süresi doldu. Yeniden deneyin.',
     );
   }
   return handoff;
@@ -131,6 +136,7 @@ export async function openWebsitePhpMyAdmin({
     response = await fetchImpl(PHP_MYADMIN_SIGNON_PATH, {
       method: 'POST',
       credentials: 'same-origin',
+      mode: 'same-origin',
       redirect: 'follow',
       cache: 'no-store',
       referrerPolicy: 'no-referrer',
