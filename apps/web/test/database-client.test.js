@@ -5,6 +5,7 @@ import {
   createDatabase,
   createDatabaseBackup,
   createPhpMyAdminHandoff,
+  createWebsiteDatabaseBackup,
   deleteDatabase,
   finalizeDatabaseCredentialDelete,
   getDatabases,
@@ -14,8 +15,10 @@ import {
   previewDatabaseCredentialApply,
   previewDatabaseCredentialDelete,
   previewDatabaseRestore,
+  previewWebsiteDatabaseRestore,
   queueDatabaseCredentialDelete,
   restoreDatabase,
+  restoreWebsiteDatabase,
   rotateDatabaseCredential,
 } from '../src/api.js';
 import { setSession } from '../src/session-client.js';
@@ -92,6 +95,12 @@ test('database API client rejects missing identities before fetch', async (t) =>
   assert.throws(() => createPhpMyAdminHandoff('', 'website-1', 'credential-1'), /serverId is required/);
   assert.throws(() => createPhpMyAdminHandoff('server-1', '', 'credential-1'), /websiteId is required/);
   assert.throws(() => createPhpMyAdminHandoff('server-1', 'website-1', ''), /credentialId is required/);
+  assert.throws(() => createWebsiteDatabaseBackup('', 'website-1', 'binding-1', 1), /serverId is required/);
+  assert.throws(() => createWebsiteDatabaseBackup('server-1', '', 'binding-1', 1), /websiteId is required/);
+  assert.throws(() => createWebsiteDatabaseBackup('server-1', 'website-1', '', 1), /bindingId is required/);
+  assert.throws(() => createWebsiteDatabaseBackup('server-1', 'website-1', 'binding-1', 0), /expectedBindingRevision must be a positive integer/);
+  assert.throws(() => previewWebsiteDatabaseRestore('server-1', 'website-1', 'binding-1', 1, ''), /backupId is required/);
+  assert.throws(() => restoreWebsiteDatabase('server-1', 'website-1', 'binding-1', 1, null), /database restore preview is required/);
   assert.throws(() => createDatabase('server-1', ''), /database name is required/);
   assert.throws(() => createDatabaseBackup('server-1', ''), /database name is required/);
   assert.throws(() => getDatabaseDropPreview('server-1', ''), /database name is required/);
@@ -121,6 +130,62 @@ test('database backup client queues only the encoded schema with exact confirmat
   ]);
   assert.deepEqual(JSON.parse(calls[0].options.body), { confirmation: 'backup:app_main' });
   assert.equal(calls[0].options.headers['x-csrf-token'], 'csrf-database-backup');
+  setSession(null);
+});
+
+test('Website database backup and restore clients pin the binding revision without caller-selected schema names', async (t) => {
+  setSession({ csrfToken: 'csrf-website-database-data' });
+  const calls = [];
+  const preview = {
+    backupId: 'backup/job-one',
+    previewDigest: 'c'.repeat(64),
+    backupSha256: 'd'.repeat(64),
+    confirmation: `restore-database:app_main:${'c'.repeat(64)}`,
+  };
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url, options });
+    return ok(url.endsWith('/restore-preview')
+      ? preview
+      : url.endsWith('/backup')
+        ? { scope: { databaseBindingId: 'binding/one' }, job: { id: 'backup-job', status: 'queued' } }
+        : { scope: { databaseBindingId: 'binding/one' }, job: { id: 'restore-job', status: 'queued' } });
+  });
+
+  await createWebsiteDatabaseBackup('server/one', 'website/one', 'binding/one', 7);
+  const currentPreview = await previewWebsiteDatabaseRestore(
+    'server/one',
+    'website/one',
+    'binding/one',
+    7,
+    'backup/job-one',
+  );
+  await restoreWebsiteDatabase('server/one', 'website/one', 'binding/one', 7, currentPreview);
+
+  const prefix = '/api/panel/servers/server%2Fone/websites/website%2Fone/database-bindings/binding%2Fone';
+  assert.deepEqual(calls.map((call) => [call.url, call.options.method]), [
+    [`${prefix}/backup`, 'POST'],
+    [`${prefix}/restore-preview`, 'POST'],
+    [`${prefix}/restore`, 'POST'],
+  ]);
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    expectedBindingRevision: 7,
+    confirmation: 'backup-website-database:binding/one:7',
+  });
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    backupId: 'backup/job-one',
+    expectedBindingRevision: 7,
+  });
+  assert.deepEqual(JSON.parse(calls[2].options.body), {
+    backupId: 'backup/job-one',
+    expectedBindingRevision: 7,
+    expectedPreviewDigest: 'c'.repeat(64),
+    expectedBackupSha256: 'd'.repeat(64),
+    confirmation: `restore-database:app_main:${'c'.repeat(64)}`,
+  });
+  for (const call of calls) {
+    assert.equal(call.options.headers['x-csrf-token'], 'csrf-website-database-data');
+    assert.doesNotMatch(call.options.body, /databaseName|password|dumpPath|sql/i);
+  }
   setSession(null);
 });
 
