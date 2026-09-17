@@ -5,6 +5,7 @@ const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const BACKUP_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
 const DATABASE_OPERATIONS = new Set([
   OPERATIONS.DATABASE_INSPECT,
@@ -50,6 +51,36 @@ function digest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+function ownershipScope(value) {
+  if (value === null || value === undefined) return null;
+  const fields = ['websiteId', 'databaseBindingId', 'expectedBindingRevision'];
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.length
+    || fields.some((field) => !Object.hasOwn(value, field))
+    || !UUID_PATTERN.test(value.websiteId ?? '')
+    || !UUID_PATTERN.test(value.databaseBindingId ?? '')
+    || !Number.isSafeInteger(value.expectedBindingRevision)
+    || value.expectedBindingRevision < 1) {
+    throw new DatabaseBackupOperationsError(
+      'database_restore_ownership_scope_invalid',
+      'Database restore Website ownership scope is invalid',
+    );
+  }
+  return Object.freeze({
+    websiteId: value.websiteId.toLowerCase(),
+    databaseBindingId: value.databaseBindingId.toLowerCase(),
+    expectedBindingRevision: value.expectedBindingRevision,
+  });
+}
+
+function matchesOwnershipScope(payload, scope) {
+  if (!scope) return true;
+  return payload && typeof payload === 'object' && !Array.isArray(payload)
+    && payload.websiteId === scope.websiteId
+    && payload.databaseBindingId === scope.databaseBindingId
+    && payload.expectedBindingRevision === scope.expectedBindingRevision;
+}
+
 export function createDatabaseBackupOperationsService({ backupManager, jobRegistry } = {}) {
   if (!backupManager || typeof backupManager.inspectBackup !== 'function'
     || !jobRegistry || typeof jobRegistry.getJob !== 'function'
@@ -75,9 +106,10 @@ export function createDatabaseBackupOperationsService({ backupManager, jobRegist
     }
   }
 
-  async function selectedBackup(serverId, requestedBackupId, requestedDatabaseName) {
+  async function selectedBackup(serverId, requestedBackupId, requestedDatabaseName, requestedOwnershipScope = null) {
     const id = backupId(requestedBackupId);
     const name = databaseName(requestedDatabaseName);
+    const scope = ownershipScope(requestedOwnershipScope);
     let job;
     try { job = await jobRegistry.getJob(id); }
     catch {
@@ -89,6 +121,13 @@ export function createDatabaseBackupOperationsService({ backupManager, jobRegist
       || typeof job.result?.dumpSha256 !== 'string' || !SHA256_PATTERN.test(job.result.dumpSha256)
       || job.result?.backedUp !== true || job.result?.sideEffects !== true) {
       throw new DatabaseBackupOperationsError('database_restore_backup_job_mismatch', 'Selected backup does not belong to this server and database', 409);
+    }
+    if (scope && !matchesOwnershipScope(job.payload, scope)) {
+      throw new DatabaseBackupOperationsError(
+        'database_restore_backup_scope_mismatch',
+        'Selected backup does not belong to the current Website database binding revision',
+        409,
+      );
     }
 
     let backup;
@@ -107,13 +146,14 @@ export function createDatabaseBackupOperationsService({ backupManager, jobRegist
     return Object.freeze({ job, backup });
   }
 
-  async function previewRestore({ serverId, databaseName: requestedName, backupId: requestedBackupId } = {}) {
+  async function previewRestore({ serverId, databaseName: requestedName, backupId: requestedBackupId, ownership: requestedOwnership = null } = {}) {
     if (typeof serverId !== 'string' || !serverId) {
       throw new DatabaseBackupOperationsError('database_restore_server_invalid', 'Database restore server identity is invalid');
     }
     const name = databaseName(requestedName);
+    const scope = ownershipScope(requestedOwnership);
     await assertIdle(serverId);
-    const { backup } = await selectedBackup(serverId, requestedBackupId, name);
+    const { backup } = await selectedBackup(serverId, requestedBackupId, name, scope);
     const identity = Object.freeze({
       version: 1,
       operation: 'database_restore',
@@ -124,6 +164,11 @@ export function createDatabaseBackupOperationsService({ backupManager, jobRegist
       backupBytes: backup.dumpBytes,
       engine: backup.engine,
       databaseVersion: backup.databaseVersion,
+      ...(scope ? {
+        websiteId: scope.websiteId,
+        databaseBindingId: scope.databaseBindingId,
+        expectedBindingRevision: scope.expectedBindingRevision,
+      } : {}),
     });
     const previewDigest = digest(identity);
     return Object.freeze({
@@ -141,11 +186,18 @@ export function createDatabaseBackupOperationsService({ backupManager, jobRegist
     expectedPreviewDigest,
     expectedBackupSha256,
     confirmation,
+    ownership: requestedOwnership = null,
   } = {}) {
     const name = databaseName(requestedName);
+    const scope = ownershipScope(requestedOwnership);
     const requestedPreview = sha256(expectedPreviewDigest, 'database_restore_preview_digest_invalid');
     const requestedBackupSha = sha256(expectedBackupSha256, 'database_restore_backup_digest_invalid');
-    const current = await previewRestore({ serverId, databaseName: name, backupId: requestedBackupId });
+    const current = await previewRestore({
+      serverId,
+      databaseName: name,
+      backupId: requestedBackupId,
+      ownership: scope,
+    });
     if (current.previewDigest !== requestedPreview || current.backupSha256 !== requestedBackupSha) {
       throw new DatabaseBackupOperationsError('database_restore_preview_stale', 'Database restore preview is stale', 409);
     }
@@ -160,6 +212,11 @@ export function createDatabaseBackupOperationsService({ backupManager, jobRegist
         databaseName: name,
         backupId: current.backupId,
         expectedBackupSha256: current.backupSha256,
+        ...(scope ? {
+          websiteId: scope.websiteId,
+          databaseBindingId: scope.databaseBindingId,
+          expectedBindingRevision: scope.expectedBindingRevision,
+        } : {}),
       },
       resourceType: 'database',
       resourceId: name,
@@ -176,5 +233,7 @@ export const databaseBackupOperationsInternals = Object.freeze({
   backupId,
   sha256,
   digest,
+  ownershipScope,
+  matchesOwnershipScope,
   databaseOperations: Object.freeze([...DATABASE_OPERATIONS]),
 });
