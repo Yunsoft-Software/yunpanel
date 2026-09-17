@@ -19,6 +19,7 @@ export const phpMyAdminSignonTemplatePolicy = Object.freeze({
   handoffSocketPath: '/run/yunpanel-phpmyadmin/handoff.sock',
   signonSession: 'YunPanelPhpMyAdminSignon',
   internalSignonPath: '/__yunpanel/signon',
+  internalLogoutPath: '/__yunpanel/logout',
   gatewayBasePath: '/tools/phpmyadmin/',
   configMode: 0o640,
   bridgeMode: 0o640,
@@ -39,6 +40,7 @@ if (! is_string($yunpanelHost)
     $yunpanelHost = 'yunpanel.invalid';
 }
 
+$cfg['PmaAbsoluteUri'] = 'https://' . $yunpanelHost . '${policy.gatewayBasePath}';
 $cfg['Servers'][$i]['auth_type'] = 'signon';
 $cfg['Servers'][$i]['host'] = 'localhost';
 $cfg['Servers'][$i]['AllowRoot'] = false;
@@ -53,6 +55,7 @@ $cfg['Servers'][$i]['SignonCookieParams'] = [
     'httponly' => true,
 ];
 $cfg['Servers'][$i]['SignonURL'] = 'https://' . $yunpanelHost . '${policy.gatewayBasePath}__yunpanel/signon';
+$cfg['Servers'][$i]['LogoutURL'] = 'https://' . $yunpanelHost . '${policy.gatewayBasePath}__yunpanel/logout';
 `;
 }
 
@@ -78,6 +81,45 @@ function yunpanel_fail(int $status): never
     exit;
 }
 
+$action = $_SERVER['YUNPANEL_SIGNON_ACTION'] ?? '';
+if ($action === 'logout') {
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
+        header('Allow: GET');
+        yunpanel_fail(405);
+    }
+    ini_set('session.use_cookies', '1');
+    ini_set('session.use_only_cookies', '1');
+    ini_set('session.use_strict_mode', '1');
+    session_name(YUNPANEL_SIGNON_SESSION);
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => YUNPANEL_GATEWAY_BASE,
+        'domain' => '',
+        'secure' => true,
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
+    if (@session_start()) {
+        $_SESSION = [];
+        @session_destroy();
+    }
+    setcookie(YUNPANEL_SIGNON_SESSION, '', [
+        'expires' => time() - 3600,
+        'path' => YUNPANEL_GATEWAY_BASE,
+        'domain' => '',
+        'secure' => true,
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
+    header('Cache-Control: no-store');
+    header('Pragma: no-cache');
+    header('Referrer-Policy: no-referrer');
+    header('Location: /', true, 303);
+    exit;
+}
+if ($action !== 'signon') {
+    yunpanel_fail(404);
+}
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     header('Allow: POST');
     yunpanel_fail(405);
@@ -252,6 +294,7 @@ export function previewPhpMyAdminSignonBridge() {
     handoffSocketPath: phpMyAdminSignonTemplatePolicy.handoffSocketPath,
     signonSession: phpMyAdminSignonTemplatePolicy.signonSession,
     internalSignonPath: phpMyAdminSignonTemplatePolicy.internalSignonPath,
+    internalLogoutPath: phpMyAdminSignonTemplatePolicy.internalLogoutPath,
     gatewayBasePath: phpMyAdminSignonTemplatePolicy.gatewayBasePath,
   });
 }
