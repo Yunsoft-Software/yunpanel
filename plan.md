@@ -58,7 +58,6 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 ## P0.5 — Website DB ownership + phpMyAdmin
 
-- [ ] Website create'te opsiyonel initial DB + scoped credential/grant step'ini durable provisioning'e bağla.
 - [ ] Shared hardened phpMyAdmin.
 - [ ] `Open phpMyAdmin` site DB user scope'uyla supported signon/short-lived handoff; root browser'a verilmesin.
 - [ ] phpMyAdmin import/export'u ve mevcut vendor dump/restore lifecycle'ını aynı Website scope/ownership sınırına bağla.

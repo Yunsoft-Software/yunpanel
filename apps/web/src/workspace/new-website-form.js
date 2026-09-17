@@ -141,6 +141,12 @@ export function siteCreateInputFromForm({ form, operationId, serverId, domain, s
   if (!isSubdomain && form.wwwMode === 'independent') {
     throw new Error('Bağımsız www, üst alan adı seçilmiş ayrı bir Website olarak oluşturulmalıdır.');
   }
+  const source = sourceFromForm(form, selectedApplication);
+  if (form.initialDatabase === true && ![
+    'existing_application', 'new_static', 'new_node', 'new_php',
+  ].includes(source.kind)) {
+    throw new Error('Başlangıç veritabanı yalnız yönetilen Application Website için oluşturulabilir.');
+  }
   return {
     operationId,
     serverId,
@@ -149,7 +155,8 @@ export function siteCreateInputFromForm({ form, operationId, serverId, domain, s
     parentDomainId: domain.parentDomainId,
     wwwMode: isSubdomain ? 'none' : form.wwwMode,
     httpsMode: form.httpsMode,
-    source: sourceFromForm(form, selectedApplication),
+    source,
+    database: { mode: form.initialDatabase === true ? 'create' : 'none' },
   };
 }
 

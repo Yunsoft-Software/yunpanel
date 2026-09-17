@@ -29,6 +29,16 @@ test('production configures SFTP key desired state before provisioning restart r
   assert.ok(keyRuntime >= 0 && keyLifecycle > keyRuntime && provisioningInit > keyLifecycle);
 });
 
+test('production configures durable Website database provisioning before restart reconciliation', () => {
+  const databaseApply = source.indexOf('const databaseCredentialApplyService = createDatabaseCredentialApplyService({');
+  const databaseLifecycle = source.indexOf('websiteProvisioningRuntime.configureDatabaseControlPlane({');
+  const provisioningInit = source.indexOf('await websiteProvisioningRuntime.init();');
+  assert.ok(databaseApply >= 0 && databaseLifecycle > databaseApply && provisioningInit > databaseLifecycle);
+  assert.match(source, /databaseInventoryProvider: websiteDatabaseInventoryProvider,/);
+  assert.match(source, /databaseHealthProvider: websiteDatabaseHealthProvider,/);
+  assert.match(source, /databaseCredentialMaterializer,/);
+});
+
 test('production persists Website isolation migration journal with provisioning state', () => {
   assert.match(source, /const websiteIsolationMigrationStorePath = process\.env\.YUNPANEL_WEBSITE_ISOLATION_MIGRATION_STORE/);
   assert.match(source, /path\.join\(controlPlaneStateRoot, 'website-isolation-migration-registry\.json'\)/);

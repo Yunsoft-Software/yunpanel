@@ -36,6 +36,7 @@ function WebsiteForm({ parentId }) {
     healthPath: '/health',
     outputDir: 'dist',
     targetValue: '',
+    initialDatabase: false,
     httpsMode: 'managed',
   });
   const [operationId] = useState(() => crypto.randomUUID());
@@ -61,7 +62,12 @@ function WebsiteForm({ parentId }) {
   const baseLocked = busy || domains.status !== 'ready' || servers.status !== 'ready';
   const bindingDataPending = (existingType || sharedMode) && (applications.status !== 'ready' || websites.status !== 'ready');
   const locked = baseLocked || Boolean(bindingDataPending);
-  function update(key, value) { setDirty(true); setForm((current) => ({ ...current, [key]: value, ...(['parentDomainId', 'mode', 'sourceMode'].includes(key) ? { applicationId: '', websiteId: '' } : {}) })); }
+  function update(key, value) { setDirty(true); setForm((current) => ({
+    ...current,
+    [key]: value,
+    ...(['parentDomainId', 'mode', 'sourceMode'].includes(key) ? { applicationId: '', websiteId: '' } : {}),
+    ...(key === 'sourceMode' && ['shared_website', 'external_proxy'].includes(value) ? { initialDatabase: false } : {}),
+  })); }
   async function submit(event) {
     event.preventDefault(); if (locked || pending.current) return;
     pending.current = true; setError(null);
@@ -131,7 +137,8 @@ function WebsiteForm({ parentId }) {
           {form.sourceMode === 'external_proxy' && <label>Yerel uygulama portu<input type="number" min={1024} max={65535} value={form.targetValue} required placeholder="4301" onChange={(event) => update('targetValue', event.target.value)} /></label>}
           {form.sourceMode === 'new_php' && <p className="ws-muted">Ayrı Application, Unix kullanıcısı, PHP-FPM pool/socket ve private site yolları provisioning planına eklenir.</p>}
         </div>{existingType && !eligible.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Bu sunucuda kullanılmamış uygun uygulama bulunmuyor. Yeni Application oluşturma seçeneklerinden birini kullanın.</p>}{sharedMode && !sharedWebsites.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Canonical routing hedefi paylaşılabilecek yerel Website bulunmuyor.</p>}{selectedSharedWebsite && <div className="ws-notice ws-notice-warn"><div><strong>{selectedSharedDomain?.primaryDomain ?? selectedSharedWebsite.name} Website bağı paylaşılacak</strong><p>Website <code>{selectedSharedWebsite.id}</code> · runtime {selectedSharedWebsite.runtimeType} · Unix kullanıcı {selectedSharedWebsite.unixUser ?? 'uygulanamaz'}. Bu seçim yeni Application, Unix user, SFTP scope veya mailbox oluşturmaz.</p></div></div>}</div>
-        <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>3. HTTPS</h3><label style={{ marginTop: 16 }}>Sertifika yönetimi<select value={form.httpsMode} onChange={(event) => update('httpsMode', event.target.value)}><option value="managed">Yönetilen HTTPS — sertifika daha sonra istenir</option><option value="off">Şimdilik HTTP</option></select><span className="ws-field-hint">Kayıt oluşturmak sertifika üretmez. DNS ve Nginx doğrulandıktan sonra SSL sekmesinden isteyin.</span></label></div>
+        {!sharedMode && form.sourceMode !== 'external_proxy' && <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>3. Veritabanı</h3><label className="ws-check" style={{ marginTop: 16 }}><input type="checkbox" checked={form.initialDatabase} onChange={(event) => update('initialDatabase', event.target.checked)} /><span><strong>Başlangıç veritabanı ve kullanıcı oluştur</strong><small>Schema adı YunPanel tarafından belirlenir; yalnız bu Website’e bağlı localhost kullanıcısına scoped grant verilir. Parola panel secret store’unda tutulur.</small></span></label></div>}
+        <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>{!sharedMode && form.sourceMode !== 'external_proxy' ? '4' : '3'}. HTTPS</h3><label style={{ marginTop: 16 }}>Sertifika yönetimi<select value={form.httpsMode} onChange={(event) => update('httpsMode', event.target.value)}><option value="managed">Yönetilen HTTPS — sertifika daha sonra istenir</option><option value="off">Şimdilik HTTP</option></select><span className="ws-field-hint">Kayıt oluşturmak sertifika üretmez. DNS ve Nginx doğrulandıktan sonra SSL sekmesinden isteyin.</span></label></div>
         <footer className="ws-form-footer" style={{ marginTop: 24 }}><LinkButton to="/websites">Vazgeç</LinkButton><Button type="submit" variant="primary" icon="plus" disabled={locked || !serverId || (existingType && !form.applicationId) || (sharedMode && !form.websiteId)}>{busy ? 'Oluşturuluyor…' : sharedMode ? 'Website bağını oluştur' : 'Siteyi oluştur'}</Button></footer>
       </fieldset></form>
     </Section>}

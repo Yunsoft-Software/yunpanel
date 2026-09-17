@@ -1,5 +1,6 @@
 import { createWebsiteIdentityPathManager } from '@yunpanel/host-runtime';
 import { createWebsiteDnsZoneProvisioningHandler } from './website-dns-zone-provisioning-handler.js';
+import { createWebsiteDatabaseProvisioningHandler } from './website-database-provisioning-handler.js';
 import { createWebsiteDomainActivationProvisioningHandler } from './website-domain-activation-provisioning-handler.js';
 import { createWebsiteIsolationAuditService, WebsiteIsolationAuditError } from './website-isolation-audit.js';
 import { createWebsiteIsolationMigrationRegistry } from './website-isolation-migration-registry.js';
@@ -99,6 +100,7 @@ export function createWebsiteProvisioningRuntime({
   let passengerEnvironment = null;
   let passengerControlPlane = null;
   let sftpKeyLifecycle = null;
+  let databaseControlPlane = null;
 
   function configureSftpKeys(dependencies = {}) {
     const nextService = dependencies.sftpKeyService;
@@ -257,6 +259,62 @@ export function createWebsiteProvisioningRuntime({
     return Object.freeze({ configured: true });
   }
 
+  function configureDatabaseControlPlane(dependencies = {}) {
+    const {
+      jobRegistry: nextJobRegistry,
+      databaseBindingRegistry: nextBindingRegistry,
+      databaseCredentialRegistry: nextCredentialRegistry,
+      databaseCredentialApplyService: nextApplyService,
+      databaseCredentialMaterializer: nextMaterializer,
+      databaseInventoryProvider: nextInventoryProvider,
+      databaseHealthProvider: nextHealthProvider,
+      evidenceInspector: nextEvidenceInspector,
+      waitForTerminalJob: nextWaitForTerminalJob,
+    } = dependencies;
+    if (!nextJobRegistry || !nextBindingRegistry || !nextCredentialRegistry || !nextApplyService
+      || !nextMaterializer || typeof nextInventoryProvider !== 'function'
+      || typeof nextHealthProvider !== 'function') {
+      throw new Error('Website database provisioning dependencies are required');
+    }
+    if (databaseControlPlane) {
+      if (databaseControlPlane.jobRegistry !== nextJobRegistry
+        || databaseControlPlane.databaseBindingRegistry !== nextBindingRegistry
+        || databaseControlPlane.databaseCredentialRegistry !== nextCredentialRegistry
+        || databaseControlPlane.databaseCredentialApplyService !== nextApplyService
+        || databaseControlPlane.databaseCredentialMaterializer !== nextMaterializer
+        || databaseControlPlane.databaseInventoryProvider !== nextInventoryProvider
+        || databaseControlPlane.databaseHealthProvider !== nextHealthProvider
+        || databaseControlPlane.evidenceInspector !== nextEvidenceInspector
+        || databaseControlPlane.waitForTerminalJob !== nextWaitForTerminalJob) {
+        throw new Error('Website database provisioning dependencies cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.website_database = createWebsiteDatabaseProvisioningHandler({
+      jobRegistry: nextJobRegistry,
+      databaseBindingRegistry: nextBindingRegistry,
+      databaseCredentialRegistry: nextCredentialRegistry,
+      databaseCredentialApplyService: nextApplyService,
+      databaseCredentialMaterializer: nextMaterializer,
+      databaseInventoryProvider: nextInventoryProvider,
+      databaseHealthProvider: nextHealthProvider,
+      ...(nextEvidenceInspector ? { evidenceInspector: nextEvidenceInspector } : {}),
+      ...(nextWaitForTerminalJob ? { waitForTerminalJob: nextWaitForTerminalJob } : {}),
+    });
+    databaseControlPlane = Object.freeze({
+      jobRegistry: nextJobRegistry,
+      databaseBindingRegistry: nextBindingRegistry,
+      databaseCredentialRegistry: nextCredentialRegistry,
+      databaseCredentialApplyService: nextApplyService,
+      databaseCredentialMaterializer: nextMaterializer,
+      databaseInventoryProvider: nextInventoryProvider,
+      databaseHealthProvider: nextHealthProvider,
+      evidenceInspector: nextEvidenceInspector,
+      waitForTerminalJob: nextWaitForTerminalJob,
+    });
+    return Object.freeze({ configured: true });
+  }
+
   if (domainRegistry) configureDomainControlPlane({ domainRegistry });
   if (sftpKeyService) configureSftpKeys({ sftpKeyService });
   if (applicationEnvironmentRegistry) configurePassengerEnvironment({ applicationEnvironmentRegistry });
@@ -294,6 +352,7 @@ export function createWebsiteProvisioningRuntime({
     configureDomainControlPlane,
     configurePassengerEnvironment,
     configurePassengerControlPlane,
+    configureDatabaseControlPlane,
     init,
     get: (operationId) => registry.get(operationId),
     create: (plan) => registry.create(plan),

@@ -354,7 +354,6 @@ websiteProvisioningRuntime.configurePassengerControlPlane({
   runtimeBindingRegistry,
   localServerId,
 });
-await websiteProvisioningRuntime.init();
 const jobLogStore = createJobLogStore({ directoryPath: jobLogStorePath });
 await jobLogStore.init();
 const journalLogReader = createJournalLogReader();
@@ -390,6 +389,18 @@ const databaseCredentialApplyService = createDatabaseCredentialApplyService({
   databaseCredentialRegistry,
   jobRegistry,
 });
+const websiteDatabaseInventoryProvider = () => databaseManager.inspect();
+const websiteDatabaseHealthProvider = () => databaseManager.inspectSecurityBaseline();
+websiteProvisioningRuntime.configureDatabaseControlPlane({
+  jobRegistry,
+  databaseBindingRegistry,
+  databaseCredentialRegistry,
+  databaseCredentialApplyService,
+  databaseCredentialMaterializer,
+  databaseInventoryProvider: websiteDatabaseInventoryProvider,
+  databaseHealthProvider: websiteDatabaseHealthProvider,
+});
+await websiteProvisioningRuntime.init();
 const applicationDeployQueue = createApplicationDeployQueue({
   applicationRegistry,
   applicationEnvironmentRegistry,

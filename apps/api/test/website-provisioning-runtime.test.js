@@ -115,6 +115,45 @@ test('runtime composes registry, injected managers and orchestrator', async () =
   assert.deepEqual(await provisioning.listInterrupted(), []);
 });
 
+test('runtime installs the Website database handler before restart reconciliation', () => {
+  const provisioning = runtime();
+  const jobRegistry = { async enqueue() {}, async getJob() {} };
+  const databaseBindingRegistry = {
+    async getByDatabase() {}, async bindDatabase() {}, async unbindDatabase() {},
+  };
+  const databaseCredentialRegistry = {
+    async getForBinding() {}, async createCredential() {}, async deleteCredential() {}, async listCredentials() {},
+  };
+  const databaseCredentialApplyService = {
+    async previewApply() {}, async queueApply() {}, async previewDelete() {}, async queueDelete() {},
+  };
+  const databaseCredentialMaterializer = { async materializePublic() {} };
+  const databaseInventoryProvider = async () => ({ databases: [] });
+  const databaseHealthProvider = async () => ({ ready: false });
+  const evidenceInspector = { async inspectApplied() {}, async inspectDeleted() {} };
+  const waitForTerminalJob = async (job) => job;
+  const dependencies = {
+    jobRegistry,
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    databaseCredentialApplyService,
+    databaseCredentialMaterializer,
+    databaseInventoryProvider,
+    databaseHealthProvider,
+    evidenceInspector,
+    waitForTerminalJob,
+  };
+
+  assert.deepEqual(provisioning.configureDatabaseControlPlane(dependencies), { configured: true });
+  assert.equal(typeof provisioning.handlers.website_database.apply, 'function');
+  assert.equal(typeof provisioning.handlers.website_database.inspectCompensation, 'function');
+  assert.deepEqual(provisioning.configureDatabaseControlPlane(dependencies), { configured: true });
+  assert.throws(
+    () => provisioning.configureDatabaseControlPlane({ ...dependencies, jobRegistry: { ...jobRegistry } }),
+    /cannot be replaced/,
+  );
+});
+
 test('runtime startup reconciles an interrupted apply by inspection without applying again', async (t) => {
   const filePath = await persistedFile(t, 'yunpanel-provisioning-restart-');
   const beforeRestart = runtime({ filePath });

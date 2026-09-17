@@ -47,6 +47,7 @@ test('independent subdomain input creates a new Application source under the exp
       mode: 'npm', installMode: 'ci', buildScript: 'build', outputDir: 'dist', healthFile: 'index.html',
     },
   });
+  assert.deepEqual(input.database, { mode: 'none' });
 });
 
 test('new Node and PHP modes use dedicated site-create Application contracts', () => {
@@ -57,6 +58,7 @@ test('new Node and PHP modes use dedicated site-create Application contracts', (
   assert.equal(node.source.runtime.nodeMajor, 24);
   assert.equal(node.source.runtime.entryFile, 'server.js');
   assert.equal(Object.hasOwn(node.source.runtime, 'port'), false);
+  assert.deepEqual(node.database, { mode: 'none' });
 
   const php = siteCreateInputFromForm({
     form: form({ sourceMode: 'new_php', wwwMode: 'none' }),
@@ -65,6 +67,28 @@ test('new Node and PHP modes use dedicated site-create Application contracts', (
     domain: { primaryDomain: 'php.example.test', parentDomainId: null },
   });
   assert.deepEqual(php.source, { kind: 'new_php' });
+});
+
+test('managed Website can request an initial scoped database without choosing names or secrets', () => {
+  const input = siteCreateInputFromForm({
+    form: form({ initialDatabase: true }),
+    operationId,
+    serverId,
+    domain: { primaryDomain: 'database.example.test', parentDomainId: null },
+  });
+  assert.deepEqual(input.database, { mode: 'create' });
+  assert.equal(Object.hasOwn(input.database, 'name'), false);
+  assert.equal(Object.hasOwn(input.database, 'password'), false);
+
+  assert.throws(
+    () => siteCreateInputFromForm({
+      form: form({ sourceMode: 'external_proxy', targetValue: '4301', initialDatabase: true }),
+      operationId,
+      serverId,
+      domain: { primaryDomain: 'proxy.example.test', parentDomainId: null },
+    }),
+    /yalnız yönetilen Application Website/,
+  );
 });
 
 test('stale independent-www state never reaches the site-create API', () => {
