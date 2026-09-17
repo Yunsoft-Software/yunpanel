@@ -124,6 +124,27 @@ test('backs up mail sources, compiled maps/sieve, main.cf/master.cf and managed 
   assert.equal(inspected.result.planSha256, result.planSha256);
   assert.equal(inspected.result.manifestSha256, result.manifestSha256);
 
+  const identityBound = await manager.inspectBackupByIdentity({
+    transactionId: result.transactionId,
+    planSha256: result.planSha256,
+    previewSha256: result.previewSha256,
+    manifestSha256: result.manifestSha256,
+  });
+  assert.equal(identityBound.satisfied, true);
+  assert.equal(identityBound.result.manifestSha256, result.manifestSha256);
+  assert.deepEqual(await manager.inspectBackupByIdentity({
+    transactionId: result.transactionId,
+    planSha256: result.planSha256,
+    previewSha256: 'f'.repeat(64),
+    manifestSha256: result.manifestSha256,
+  }), { satisfied: false, result: null });
+  assert.deepEqual(await manager.inspectBackupByIdentity({
+    transactionId: result.transactionId,
+    planSha256: result.planSha256,
+    previewSha256: result.previewSha256,
+    manifestSha256: 'f'.repeat(64),
+  }), { satisfied: false, result: null });
+
   const readsBeforeRetry = liveReads;
   live.set(mailTemplatePolicy.postfixVirtualDomainMapPath, Buffer.from('changed after backup\n'));
   const repeated = await manager.backupConfiguration(preview(), { transactionId: 'mail-job-0001' });
@@ -189,5 +210,14 @@ test('fails closed on symlink-like live targets and invalid transaction ids', as
   await assert.rejects(
     manager.backupConfiguration(preview(), { transactionId: 'mail-job-0003' }),
     (error) => error instanceof MailConfigBackupError && error.code === 'mail_live_artifact_unsafe',
+  );
+  await assert.rejects(
+    manager.inspectBackupByIdentity({
+      transactionId: 'mail-job-0003',
+      planSha256: 'short',
+      previewSha256: 'a'.repeat(64),
+      manifestSha256: 'b'.repeat(64),
+    }),
+    (error) => error instanceof MailConfigBackupError && error.code === 'mail_backup_identity_invalid',
   );
 }));

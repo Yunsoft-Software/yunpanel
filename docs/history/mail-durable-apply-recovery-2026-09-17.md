@@ -17,6 +17,7 @@ Bu kayıt P0.4 managed mail configuration lifecycle'ında kaynakta tamamlanan ap
 - Authenticated rollback preview source apply job ID'sini exact local mail domain ve server scope'unda çözer. Yalnız başarılı v3 evidence, exact current status/revision ve sunucu çapındaki en son başarılı `MAIL_CONFIG_APPLY` kabul edilir; başka bir mail domain apply'ı dahi eski global Postfix/Dovecot snapshot'ını supersede eder.
 - Preview backup/current configuration/plan digest'leri, source apply kimliği, previous status/revision provenance'ı, expected current revision ve monoton resulting revision üzerinden deterministik digest + typed confirmation üretir. Secret, backup path'i veya artifact içeriği public cevaba girmez.
 - `MAIL_CONFIG_ROLLBACK` protocol operation'ı strict ve secret-free bir mutation envelope'u olarak tanımlıdır. Payload source apply job, mail domain, previous/current revision-status matematiği ile current configuration/source plan/backup/preview digest'lerine bağlanır; raw config, backup path'i ve genişletilmiş alanlar reddedilir. Executor hazır olmadığı için bu kontrat henüz HTTP enqueue yüzeyine açılmamıştır.
+- Root-private mail config backup kasası source snapshot'ı artık yalnız transaction ID, source plan digest, applied preview digest ve tam manifest digest birlikte eşleştiğinde açar. Eksik/bozuk digest veya değiştirilmiş artifact fail-closed kalır; çağırana backup içeriği ya da filesystem path'i verilmez.
 
 ## Regression kapsamı
 
@@ -29,8 +30,9 @@ Bu kayıt P0.4 managed mail configuration lifecycle'ında kaynakta tamamlanan ap
 - Restart recovery'nin v3 backup/previous identity'yi koruması, materialized transition drift'ini host inspection öncesi reddetmesi ve v1/v2 kaydı full rollback-capable göstermemesi.
 - Rollback preview'ın v1/v2 evidence, global superseding apply, current control-plane drift, active mail mutation ve cross-server source job'u fail-closed reddetmesi.
 - Rollback protocol envelope'unun operation sınıflandırması, exact revision/status matematiği, digest biçimleri, unsupported alan reddi ve no-op status reconfiguration uyumluluğu.
+- Source mail backup'ın dört parçalı identity ile bulunması; yanlış preview/manifest digest ve malformed kimliğin reddedilmesi.
 
-İlk backup-binding odak regresyonunda desteklenen Node 24 ile 23/23, v3 previous-state zinciri regresyonunda 31/31, rollback preview/audit regresyonunda 18/18 ve rollback protocol regresyonunda 4/4 test geçti. Repository policy rollback protocol değişikliğinde de geçti. Önceki dilimde bütün workspace testleri ve production build'ini içeren `npm run check` başarıyla tamamlandı; build yalnız mevcut büyük chunk uyarısını verdi. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
+İlk backup-binding odak regresyonunda desteklenen Node 24 ile 23/23, v3 previous-state zinciri regresyonunda 31/31, rollback preview/audit regresyonunda 18/18, rollback protocol regresyonunda 4/4 ve backup identity regresyonunda 4/4 test geçti. Repository policy son iki değişiklikte de geçti. Önceki dilimde bütün workspace testleri ve production build'ini içeren `npm run check` başarıyla tamamlandı; build yalnız mevcut büyük chunk uyarısını verdi. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
 
 ## Açık kalan sınır
 

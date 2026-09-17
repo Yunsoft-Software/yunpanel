@@ -89,6 +89,13 @@ function normalizeTransactionId(value) {
   return value;
 }
 
+function normalizeDigest(value, field) {
+  if (typeof value !== 'string' || !CHECKSUM_PATTERN.test(value)) {
+    throw new MailConfigBackupError('mail_backup_identity_invalid', `Managed mail backup ${field} is invalid`);
+  }
+  return value;
+}
+
 function assertRoot(root) {
   if (typeof root !== 'string' || !path.isAbsolute(root) || path.normalize(root) !== root) {
     throw new MailConfigBackupError('mail_backup_root_invalid', 'Managed mail backup root must be an absolute normalized path');
@@ -381,9 +388,33 @@ export function createMailConfigBackupManager({
     return { satisfied: true, result: publicManifest(manifest) };
   }
 
+  async function inspectBackupByIdentity({
+    transactionId,
+    planSha256,
+    previewSha256,
+    manifestSha256,
+  } = {}) {
+    const normalizedTransactionId = normalizeTransactionId(transactionId);
+    const normalizedPlanSha256 = normalizeDigest(planSha256, 'plan digest');
+    const normalizedPreviewSha256 = normalizeDigest(previewSha256, 'preview digest');
+    const normalizedManifestSha256 = normalizeDigest(manifestSha256, 'manifest digest');
+    const directory = transactionDirectory(normalizedTransactionId);
+    const manifest = await loadExistingManifest(directory, normalizedTransactionId, normalizedPlanSha256);
+    if (!manifest || manifest.previewSha256 !== normalizedPreviewSha256) {
+      return { satisfied: false, result: null };
+    }
+    const result = publicManifest(manifest);
+    if (result.manifestSha256 !== normalizedManifestSha256
+      || !(await inspectManifestFiles(directory, manifest))) {
+      return { satisfied: false, result: null };
+    }
+    return { satisfied: true, result };
+  }
+
   return Object.freeze({
     backupConfiguration,
     inspectBackup,
+    inspectBackupByIdentity,
     transactionDirectory,
   });
 }
@@ -404,6 +435,7 @@ export const mailConfigBackupInternals = Object.freeze({
   backupFileMode: BACKUP_FILE_MODE,
   manifestVersion: MANIFEST_VERSION,
   normalizeTransactionId,
+  normalizeDigest,
   normalizeManifest,
   normalizeDirectorySnapshot,
   expectedPlanArtifactPaths,

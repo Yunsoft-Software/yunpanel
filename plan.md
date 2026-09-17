@@ -35,7 +35,7 @@ Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içi
 
 ## P0.4 — Mail: Postfix + Dovecot + Rspamd + shared Roundcube
 
-- [ ] Mevcut strict `MAIL_CONFIG_ROLLBACK` protocol kontratını ve v3 rollback preview'ın operation/backup/current-state-bound typed confirmation'ını kullanan durable job ekle; restore başlamadan current active-config evidence'ını doğrula, restart'ta inspect-first mixed-state/receipt recovery yap ve başarılı rollback sonrası mail-domain status'unu receipt'teki previous status'a monoton revision ile reconcile et.
+- [ ] Mevcut strict `MAIL_CONFIG_ROLLBACK` protocol kontratını, dört parçalı source-backup identity doğrulamasını ve v3 rollback preview'ın operation/backup/current-state-bound typed confirmation'ını kullanan durable job ekle; restore başlamadan current active-config evidence'ını doğrula, restart'ta inspect-first mixed-state/receipt recovery yap ve başarılı rollback sonrası mail-domain status'unu receipt'teki previous status'a monoton revision ile reconcile et.
 - [ ] SQL-backed virtual mail domain/mailbox/alias/quota/password-hash modeli ekle; Website user ile mail storage identity ayrı olsun.
 - [ ] Dedicated mail storage identity kullan; Website UID Maildir owner olmasın.
 - [ ] Local mail enable domain oluştursun fakat bilinen/default parola mailbox yaratmasın.
