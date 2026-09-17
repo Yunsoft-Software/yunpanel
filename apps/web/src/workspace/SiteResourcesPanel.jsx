@@ -207,7 +207,7 @@ export default function SiteResourcesPanel({ domain, website, application, serve
   }
 
   async function backupDatabase() {
-    if (!server || !backupTarget || operationPending.current) return;
+    if (!server || !website || !backupTarget || operationPending.current) return;
     operationPending.current = true;
     setBusy(true); setError(null); setNotice(null);
     let backupJob = backupTarget.backupJob;
@@ -255,7 +255,7 @@ export default function SiteResourcesPanel({ domain, website, application, serve
   }
 
   async function buildRestorePreview() {
-    if (!server || !restoreTarget || operationPending.current) return;
+    if (!server || !website || !restoreTarget || operationPending.current) return;
     operationPending.current = true;
     setBusy(true); setError(null); setNotice(null);
     try {
@@ -270,6 +270,10 @@ export default function SiteResourcesPanel({ domain, website, application, serve
         serverId: server.id,
         databaseName: restoreTarget.binding.databaseName,
         backupId: restoreTarget.backupId,
+        websiteId: website.id,
+        applicationId: website.applicationId,
+        bindingId: restoreTarget.binding.id,
+        bindingRevision: restoreTarget.binding.revision,
       });
       if (!preview) throw new Error('Database restore preview durumu geçersiz');
       setRestoreTarget((current) => current?.binding.id === restoreTarget.binding.id
@@ -284,7 +288,7 @@ export default function SiteResourcesPanel({ domain, website, application, serve
   }
 
   async function restoreDatabaseBackup() {
-    if (!server || !restoreTarget?.preview || operationPending.current) return;
+    if (!server || !website || !restoreTarget?.preview || operationPending.current) return;
     operationPending.current = true;
     setBusy(true); setError(null); setNotice(null);
     let restoreJob = restoreTarget.restoreJob;
@@ -362,7 +366,13 @@ export default function SiteResourcesPanel({ domain, website, application, serve
   const databases = databaseResources?.databases ?? [];
   const backupsByBinding = new Map(databases.map(({ binding }) => [
     binding.id,
-    databaseBackupChoices(jobs.items, { serverId: server?.id, databaseName: binding.databaseName }),
+    databaseBackupChoices(jobs.items, {
+      serverId: server?.id,
+      databaseName: binding.databaseName,
+      websiteId: website?.id,
+      bindingId: binding.id,
+      bindingRevision: binding.revision,
+    }),
   ]));
 
   return <>
