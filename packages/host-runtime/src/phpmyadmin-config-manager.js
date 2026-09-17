@@ -17,14 +17,14 @@ const FPM_PREVIEW_KEYS = new Set([
 const NGINX_PREVIEW_KEYS = new Set([
   'version', 'sha256', 'artifact', 'documentRoot', 'fpmSocketPath', 'gatewaySocketPath',
   'gatewaySocketMode', 'gatewaySocketOwner', 'gatewaySocketGroup', 'signonBridgePath',
-  'internalSignonPath', 'healthPath', 'serviceUnit',
+  'internalSignonPath', 'internalLogoutPath', 'healthPath', 'serviceUnit',
 ]);
 const SIGNON_CONFIG_PREVIEW_KEYS = new Set([
   'version', 'sha256', 'artifact', 'signonSession', 'gatewayBasePath',
 ]);
 const SIGNON_BRIDGE_PREVIEW_KEYS = new Set([
   'version', 'sha256', 'artifact', 'handoffSocketPath', 'signonSession',
-  'internalSignonPath', 'gatewayBasePath',
+  'internalSignonPath', 'internalLogoutPath', 'gatewayBasePath',
 ]);
 const ARTIFACT_KEYS = new Set(['path', 'sha256', 'bytes', 'sensitive', 'mode']);
 
@@ -91,6 +91,7 @@ function validateNginxPreview(preview) {
     || value.gatewaySocketGroup !== phpMyAdminNginxTemplatePolicy.gatewaySocketGroup
     || value.signonBridgePath !== phpMyAdminNginxTemplatePolicy.signonBridgePath
     || value.internalSignonPath !== phpMyAdminNginxTemplatePolicy.internalSignonPath
+    || value.internalLogoutPath !== phpMyAdminNginxTemplatePolicy.internalLogoutPath
     || value.serviceUnit !== phpMyAdminNginxTemplatePolicy.serviceUnit
     || value.healthPath !== phpMyAdminNginxTemplatePolicy.healthPath) {
     throw new PhpMyAdminConfigManagerError('phpmyadmin_nginx_preview_invalid', 'phpMyAdmin Nginx preview is invalid');
@@ -123,6 +124,7 @@ function validateSignonBridgePreview(preview) {
   if (value.handoffSocketPath !== phpMyAdminSignonTemplatePolicy.handoffSocketPath
     || value.signonSession !== phpMyAdminSignonTemplatePolicy.signonSession
     || value.internalSignonPath !== phpMyAdminSignonTemplatePolicy.internalSignonPath
+    || value.internalLogoutPath !== phpMyAdminSignonTemplatePolicy.internalLogoutPath
     || value.gatewayBasePath !== phpMyAdminSignonTemplatePolicy.gatewayBasePath) {
     throw new PhpMyAdminConfigManagerError(
       'phpmyadmin_signon_bridge_preview_invalid',
