@@ -10,6 +10,7 @@ import { createWebsitePassengerHealthProvisioningHandler } from './website-passe
 import { createWebsiteProvisioningHandlers } from './website-provisioning-handlers-isolation.js';
 import { createWebsiteProvisioningOrchestrator } from './website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from './website-provisioning-registry.js';
+import { createWebsiteSftpKeyAwareProvisioningHandler } from './website-sftp-provisioning-handler.js';
 
 function configuredLocalServerId(value = process.env.YUNPANEL_LOCAL_SERVER_ID) {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
@@ -25,12 +26,14 @@ export function createWebsiteProvisioningRuntime({
   passengerHealthInspector,
   staticDeploymentManager,
   staticPublishIsolationManager,
+  sftpSiteManager,
   nginxManager,
   applicationRegistry = null,
   applicationEnvironmentRegistry = null,
   websiteRegistry = null,
   domainRegistry = null,
   runtimeBindingRegistry = null,
+  sftpKeyService = null,
 } = {}) {
   const durableRegistry = createWebsiteProvisioningRegistry({
     filePath,
@@ -66,6 +69,7 @@ export function createWebsiteProvisioningRuntime({
       ...(passengerSiteManager ? { passengerSiteManager } : {}),
       ...(staticDeploymentManager ? { staticDeploymentManager } : {}),
       ...(staticPublishIsolationManager ? { staticPublishIsolationManager } : {}),
+      ...(sftpSiteManager ? { sftpSiteManager } : {}),
       ...(nginxManager ? { nginxManager } : {}),
     }),
     dns_zone: createWebsiteDnsZoneProvisioningHandler(),
@@ -77,6 +81,27 @@ export function createWebsiteProvisioningRuntime({
   let domainControlPlane = null;
   let passengerEnvironment = null;
   let passengerControlPlane = null;
+  let sftpKeyLifecycle = null;
+
+  function configureSftpKeys(dependencies = {}) {
+    const nextService = dependencies.sftpKeyService;
+    if (!nextService || typeof nextService.reconcile !== 'function'
+      || typeof nextService.inspectMaterialization !== 'function') {
+      throw new Error('Website SFTP key lifecycle service is required');
+    }
+    if (sftpKeyLifecycle) {
+      if (sftpKeyLifecycle.sftpKeyService !== nextService) {
+        throw new Error('Website SFTP key lifecycle service cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.sftp = createWebsiteSftpKeyAwareProvisioningHandler({
+      baseHandler: handlers.sftp,
+      sftpKeyService: nextService,
+    });
+    sftpKeyLifecycle = Object.freeze({ sftpKeyService: nextService });
+    return Object.freeze({ configured: true });
+  }
 
   function configureIsolationAudit(dependencies = {}) {
     const nextWebsiteRegistry = dependencies.websiteRegistry;
@@ -210,6 +235,7 @@ export function createWebsiteProvisioningRuntime({
   }
 
   if (domainRegistry) configureDomainControlPlane({ domainRegistry });
+  if (sftpKeyService) configureSftpKeys({ sftpKeyService });
   if (applicationEnvironmentRegistry) configurePassengerEnvironment({ applicationEnvironmentRegistry });
   if (applicationRegistry && websiteRegistry) {
     configureIsolationAudit({ applicationRegistry, websiteRegistry });
@@ -236,6 +262,7 @@ export function createWebsiteProvisioningRuntime({
     registry,
     handlers,
     orchestrator,
+    configureSftpKeys,
     configureIsolationAudit,
     configureDomainControlPlane,
     configurePassengerEnvironment,

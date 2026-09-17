@@ -88,7 +88,7 @@ test('isolation audit is mutation-free and reports an isolated hosted Website', 
 test('isolation audit produces explicit non-destructive migration preview on drift', async () => {
   const audit = await service({
     website: hostedWebsite('php', { unixUser: 'yunapp-aaaaaaaaaaaa', documentRoot: '/srv/legacy/public' }),
-    stepResults: { sftp: { satisfied: false, reason: 'sftp_config_missing' } },
+    stepResults: { sftp: { satisfied: false, reason: 'sftp_key_reconcile_required', keyReason: 'sftp_authorized_keys_outdated' } },
   }).audit(websiteId);
 
   assert.equal(audit.status, 'migration_required');
@@ -101,6 +101,7 @@ test('isolation audit produces explicit non-destructive migration preview on dri
   assert.equal(audit.findings.some((entry) => entry.code === 'website_isolation_unix_user_drift'), true);
   assert.equal(audit.findings.some((entry) => entry.code === 'website_isolation_document_root_drift'), true);
   assert.equal(audit.findings.some((entry) => entry.code === 'website_isolation_sftp_not_satisfied'), true);
+  assert.equal(audit.inspectedSteps.find((step) => step.stepId === 'sftp').reason, 'sftp_key_reconcile_required');
 });
 
 test('isolation audit fails closed when managed host inspection detects drift', async () => {

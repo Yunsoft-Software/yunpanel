@@ -22,6 +22,13 @@ test('production API persists and initializes Website registry explicitly', () =
   assert.match(source, /website store=\$\{websiteStorePath\}/);
 });
 
+test('production configures SFTP key desired state before provisioning restart reconciliation', () => {
+  const keyRuntime = source.indexOf('const websiteSftpKeyRuntime = await createWebsiteSftpKeyRuntime({');
+  const keyLifecycle = source.indexOf('websiteProvisioningRuntime.configureSftpKeys({ sftpKeyService: websiteSftpKeyRuntime.service });');
+  const provisioningInit = source.indexOf('await websiteProvisioningRuntime.init();');
+  assert.ok(keyRuntime >= 0 && keyLifecycle > keyRuntime && provisioningInit > keyLifecycle);
+});
+
 test('production migration policy and ledger initialize before Domain registry', () => {
   assert.match(source, /import \{ createWebsiteMigrationPolicyStore \} from '\.\/website-migration-policy\.js';/);
   assert.match(source, /import \{ createWebsiteMigrationLedger \} from '\.\/website-migration-ledger\.js';/);

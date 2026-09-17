@@ -68,6 +68,15 @@ Bu tasarım site user'ın kendi HOME altındaki `~/.ssh/authorized_keys` dosyas�
 - production bootstrap durable registry'yi control-plane state root altında başlatıyor, yalnız `YUNPANEL_LOCAL_SERVER_ID` kapsamındaki Website'leri kabul ediyor ve root-owned host materializer'a bağlıyor;
 - restart testi durable key metadata'sının korunduğunu, public response'un raw key taşımadığını ve remote Website'in 404 kaldığını kilitliyor.
 
+### Provisioning ownership/evidence ve restart reconcile
+
+Website provisioning `sftp` handler'ı artık internal-sftp chroot/config sonucunu tek başına başarı kabul etmiyor. Base izolasyon sağlandıktan sonra current durable key desired state root-owned `AuthorizedKeysFile` üzerine reconcile ediliyor; step evidence yalnız secret-safe adapter, key count ve SHA-256 kimliği taşıyor.
+
+- Empty key set marker-only deny-all dosya olarak aynı lifecycle'da materialize edilir.
+- Registry/materialization drift'i handler inspect sonucunda `sftp_key_reconcile_required` + bounded reason bırakır; Website izolasyon paneli bunu host mutation yapmadan gösterir.
+- Kesilmiş `applying` SFTP step'i API restartında kör apply/replay yapmaz. Base SFTP ve key materialization birlikte inspect edilmedikçe operation `succeeded` olmaz; explicit key reconcile sonrası aynı interrupted operation evidence ile kapanabilir.
+- SFTP compensation key registry desired state'ini veya root-owned key dosyasını örtülü silmez; destructive cleanup mevcut operation-owned SFTP manager sınırında kalır.
+
 ### Ubuntu package upgrade smoke
 
 Kaynak commit `675579e` için repo dışı `.local/test-server.env` hedefi kullanılmadan önce IPv4 hedefinin `.44` ile bitmediği ve tek adrese çözüldüğü doğrulandı. Yalnız tanımlı Ubuntu 24.04 test hostuna bağlanıldı.
@@ -82,7 +91,6 @@ Kaynak commit `675579e` için repo dışı `.local/test-server.env` hedefi kulla
 ## Kalan P0.1 source işleri
 
 - Isolation migration apply exact değişiklik preview/digest + typed confirmation ile operation-owned değişiklikler yapmalı ve geri alabilmeli; recursive blind `chown` yapmamalı.
-- SFTP key desired state/materialization Website provisioning ownership/evidence ve restart/reconcile lifecycle'ına bağlanmalı.
 - Legacy Website migration apply canonical identity/path/runtime/SFTP drift raporu olmadan destructive ownership repair yapmamalı.
 
 ## Kabul sınırı

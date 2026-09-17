@@ -338,6 +338,7 @@ const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
 });
 await applicationEnvironmentRegistry.init();
+websiteProvisioningRuntime.configureSftpKeys({ sftpKeyService: websiteSftpKeyRuntime.service });
 websiteProvisioningRuntime.configureDomainControlPlane({ domainRegistry });
 websiteProvisioningRuntime.configurePassengerEnvironment({ applicationEnvironmentRegistry });
 websiteProvisioningRuntime.configurePassengerControlPlane({

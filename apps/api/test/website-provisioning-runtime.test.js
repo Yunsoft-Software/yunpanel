@@ -7,6 +7,7 @@ import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-ru
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
+const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 
 function plan({ operation = operationId, website = websiteId } = {}) {
   return {
@@ -19,6 +20,25 @@ function plan({ operation = operationId, website = websiteId } = {}) {
       intent: {
         unixUser: 'yunapp-0123456789ab',
         homeDirectory: '/var/lib/yunpanel/data/6dcb8908-3f3e-43da-9452-15fd6b51ac76',
+      },
+      compensation: { state: 'pending' },
+    }],
+  };
+}
+
+function sftpPlan() {
+  return {
+    operationId,
+    websiteId,
+    steps: [{
+      id: 'sftp',
+      kind: 'sftp',
+      state: 'pending',
+      intent: {
+        adapter: 'openssh-internal-sftp',
+        websiteId,
+        applicationId,
+        unixUser: 'yunapp-4dc352e64a14',
       },
       compensation: { state: 'pending' },
     }],
@@ -199,4 +219,64 @@ test('runtime startup reconciles interrupted compensation by inspection without 
   assert.equal(restored.steps[0].state, 'compensated');
   assert.equal(restored.steps[0].compensation.state, 'succeeded');
   assert.deepEqual(await afterRestart.listInterrupted(), []);
+});
+
+test('runtime restart keeps interrupted SFTP applying until authorized-key desired state is explicitly reconciled', async (t) => {
+  const filePath = await persistedFile(t, 'yunpanel-provisioning-sftp-restart-');
+  const baseManager = {
+    async apply() { return { satisfied: true, adapter: 'openssh-internal-sftp' }; },
+    async inspect() { return { satisfied: true, adapter: 'openssh-internal-sftp' }; },
+    async compensate() { return { satisfied: true }; },
+    async inspectCompensation() { return { satisfied: true }; },
+  };
+  let materialized = false;
+  let baseApplyCalls = 0;
+  let reconcileCalls = 0;
+  const keyService = {
+    async reconcile(id) {
+      assert.equal(id, websiteId);
+      reconcileCalls += 1;
+      materialized = true;
+      return { satisfied: true, adapter: 'openssh-authorized-keys', keyCount: 0, sha256: 'a'.repeat(64) };
+    },
+    async inspectMaterialization(id) {
+      assert.equal(id, websiteId);
+      return materialized
+        ? { satisfied: true, adapter: 'openssh-authorized-keys', keyCount: 0, sha256: 'a'.repeat(64) }
+        : { satisfied: false, reason: 'sftp_authorized_keys_file_missing' };
+    },
+  };
+  const beforeRestart = createWebsiteProvisioningRuntime({
+    filePath,
+    sftpSiteManager: baseManager,
+    sftpKeyService: keyService,
+  });
+  await beforeRestart.init();
+  await beforeRestart.create(sftpPlan());
+  await beforeRestart.registry.beginStep({ operationId, stepId: 'sftp' });
+
+  const afterRestart = createWebsiteProvisioningRuntime({
+    filePath,
+    sftpSiteManager: {
+      ...baseManager,
+      async apply() {
+        baseApplyCalls += 1;
+        throw new Error('startup must not replay SFTP apply');
+      },
+    },
+    sftpKeyService: keyService,
+  });
+  const startup = await afterRestart.init();
+  assert.equal(startup[0].outcome, 'interrupted');
+  assert.equal(startup[0].actionRequired, 'inspect_or_remediate');
+  assert.equal((await afterRestart.get(operationId)).steps[0].state, 'applying');
+  assert.equal(baseApplyCalls, 0);
+  assert.equal(reconcileCalls, 0);
+
+  await keyService.reconcile(websiteId);
+  const recovered = await afterRestart.runNext(operationId);
+  assert.equal(recovered.outcome, 'ready');
+  assert.equal(recovered.operation.steps[0].evidence.authorizedKeyCount, 0);
+  assert.equal(baseApplyCalls, 0);
+  assert.equal(reconcileCalls, 1);
 });

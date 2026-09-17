@@ -30,6 +30,55 @@ function sftpIntent(value) {
   });
 }
 
+function keyMaterialization(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new WebsiteSftpProvisioningError(
+      'sftp_key_reconcile_required',
+      'SFTP authorized-key materialization could not be verified',
+      409,
+    );
+  }
+  if (value.satisfied !== true) {
+    const reason = typeof value.reason === 'string' && /^[a-z0-9_]{1,120}$/.test(value.reason)
+      ? value.reason
+      : 'sftp_authorized_keys_not_satisfied';
+    return Object.freeze({ satisfied: false, reason });
+  }
+  if (value.adapter !== 'openssh-authorized-keys'
+    || !Number.isSafeInteger(value.keyCount) || value.keyCount < 0 || value.keyCount > 100
+    || typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.sha256)) {
+    throw new WebsiteSftpProvisioningError(
+      'sftp_key_reconcile_required',
+      'SFTP authorized-key materialization evidence is invalid',
+      409,
+    );
+  }
+  return Object.freeze({
+    satisfied: true,
+    adapter: value.adapter,
+    keyCount: value.keyCount,
+    sha256: value.sha256,
+  });
+}
+
+function keyAwareEvidence(base, materialization) {
+  if (base?.satisfied !== true) return base;
+  if (materialization.satisfied !== true) {
+    return Object.freeze({
+      ...base,
+      satisfied: false,
+      reason: 'sftp_key_reconcile_required',
+      keyReason: materialization.reason,
+    });
+  }
+  return Object.freeze({
+    ...base,
+    authorizedKeysAdapter: materialization.adapter,
+    authorizedKeyCount: materialization.keyCount,
+    authorizedKeysSha256: materialization.sha256,
+  });
+}
+
 export function createWebsiteSftpProvisioningHandler({
   sftpManager = createSftpSiteManager(),
 } = {}) {
@@ -49,4 +98,60 @@ export function createWebsiteSftpProvisioningHandler({
   });
 }
 
-export const websiteSftpProvisioningInternals = Object.freeze({ sftpIntent });
+export function createWebsiteSftpKeyAwareProvisioningHandler({ baseHandler, sftpKeyService } = {}) {
+  if (!baseHandler || typeof baseHandler.apply !== 'function' || typeof baseHandler.inspect !== 'function'
+    || typeof baseHandler.compensate !== 'function' || typeof baseHandler.inspectCompensation !== 'function'
+    || !sftpKeyService || typeof sftpKeyService.reconcile !== 'function'
+    || typeof sftpKeyService.inspectMaterialization !== 'function') {
+    throw new WebsiteSftpProvisioningError(
+      'website_sftp_key_dependencies_invalid',
+      'Website SFTP key-aware provisioning dependencies are invalid',
+    );
+  }
+
+  function websiteId(context) {
+    const normalized = sftpIntent(context?.intent);
+    if (context?.websiteId !== normalized.websiteId) {
+      throw new WebsiteSftpProvisioningError(
+        'website_sftp_operation_identity_drift',
+        'Website SFTP provisioning operation identity has drifted',
+        409,
+      );
+    }
+    return normalized.websiteId;
+  }
+
+  return Object.freeze({
+    async apply(context = {}) {
+      const id = websiteId(context);
+      const base = await baseHandler.apply(context);
+      if (base?.satisfied !== true) return base;
+      try {
+        return keyAwareEvidence(base, keyMaterialization(await sftpKeyService.reconcile(id)));
+      } catch {
+        throw new WebsiteSftpProvisioningError(
+          'sftp_key_reconcile_required',
+          'SFTP isolation was prepared, but authorized keys require explicit reconciliation',
+          503,
+        );
+      }
+    },
+    async inspect(context = {}) {
+      const id = websiteId(context);
+      const base = await baseHandler.inspect(context);
+      if (base?.satisfied !== true) return base;
+      try {
+        return keyAwareEvidence(base, keyMaterialization(await sftpKeyService.inspectMaterialization(id)));
+      } catch {
+        return keyAwareEvidence(base, Object.freeze({
+          satisfied: false,
+          reason: 'sftp_key_reconcile_required',
+        }));
+      }
+    },
+    compensate: (context = {}) => baseHandler.compensate(context),
+    inspectCompensation: (context = {}) => baseHandler.inspectCompensation(context),
+  });
+}
+
+export const websiteSftpProvisioningInternals = Object.freeze({ sftpIntent, keyMaterialization, keyAwareEvidence });
