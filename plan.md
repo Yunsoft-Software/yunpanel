@@ -29,7 +29,7 @@ Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
 ## P0.3 — Versioned DNS Zone Template ve Domain DNS yönetimi
 
-- [ ] DNSSEC rollover durable lifecycle'ını tamamla: persisted parent RRset TTL kapısından sonra eski key deactivate/delete cleanup'ını her mutation öncesi güncel parent fence, exact key-set target digest, lost-ack/restart güvenliği ve secure delegation korunarak tamamla.
+- [ ] DNSSEC rollover durable lifecycle'ını tamamla: parent-fenced ve lost-ack-safe deactivation sonrasında persisted remaining-key digest'ine bağlı old-key DELETE'i mutation öncesi güncel parent fence, restart güvenliği, final public evidence ve secure delegation korunarak tamamla.
 - [ ] Zone suspend/delete/compensation ownership evidence'ını P0.9 lifecycle'ına bağla; manual kayıt içeren zone destructive cleanup'ta fail-closed kalsın.
 
 Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içindedir.
