@@ -119,13 +119,62 @@ function publishedEvidence(operation, result) {
   });
 }
 
+function verifiedPropagation(operation, result) {
+  if (result?.ready !== true) return null;
+  if (!result || result.version !== 1 || result.zoneName !== operation.zoneName
+    || !['synced', 'disabled'].includes(result.status)
+    || result.expectedSerial !== operation.evidence.serial
+    || !Number.isSafeInteger(result.dnskeyTtl) || result.dnskeyTtl < 0 || result.dnskeyTtl > 2_147_483_647
+    || typeof result.publishedAt !== 'string' || result.publishedAt !== operation.updatedAt
+    || typeof result.eligibleAfter !== 'string' || typeof result.checkedAt !== 'string'
+    || !Array.isArray(result.targets) || result.targets.length < 1 || result.targets.length > 9
+    || result.targets.some((entry) => entry?.ready !== true)) {
+    throw new DnsZoneDnssecRolloverRuntimeError(
+      'dnssec_rollover_propagation_evidence_invalid',
+      'DNSSEC rollover propagation evidence is invalid',
+      503,
+    );
+  }
+  return Object.freeze({
+    status: result.status,
+    serial: result.expectedSerial,
+    dnskeyTtl: result.dnskeyTtl,
+    publishedAt: result.publishedAt,
+    eligibleAfter: result.eligibleAfter,
+    checkedAt: result.checkedAt,
+    targetCount: result.targets.length,
+  });
+}
+
+function activationTarget(operation, propagation, preview) {
+  const key = preview?.targetKey;
+  if (!preview || preview.keySetDigest !== operation.evidence.keySetDigest
+    || typeof preview.targetKeySetDigest !== 'string' || !SHA256_PATTERN.test(preview.targetKeySetDigest)
+    || !key || key.id !== operation.evidence.newKeyId || key.keyType !== operation.newKey.keyType
+    || key.algorithm !== operation.newKey.algorithm || key.bits !== operation.newKey.bits
+    || key.active !== true || key.published !== true
+    || !Array.isArray(key.ds) || JSON.stringify(key.ds) !== JSON.stringify(operation.evidence.newKeyDs)) {
+    throw new DnsZoneDnssecRolloverRuntimeError(
+      'dnssec_rollover_activation_preview_invalid',
+      'DNSSEC rollover activation target evidence is invalid',
+      503,
+    );
+  }
+  return Object.freeze({
+    ...operation.evidence,
+    targetKeySetDigest: preview.targetKeySetDigest,
+    propagation,
+  });
+}
+
 export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
     || typeof registry.listActive !== 'function' || typeof registry.advance !== 'function'
     || typeof registry.fail !== 'function'
     || !service || typeof service.previewRollover !== 'function' || typeof service.createRolloverKey !== 'function'
-    || typeof service.previewRolloverKeyState !== 'function' || typeof service.setRolloverKeyState !== 'function') {
+    || typeof service.previewRolloverKeyState !== 'function' || typeof service.setRolloverKeyState !== 'function'
+    || typeof service.inspectRolloverPropagation !== 'function') {
     throw new DnsZoneDnssecRolloverRuntimeError('dnssec_rollover_runtime_dependencies_invalid', 'DNSSEC rollover runtime dependencies are unavailable', 503);
   }
 
@@ -140,7 +189,7 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
   async function run(operationId) {
     let operation = await getRequired(operationId);
     if (operation.status === 'succeeded' || operation.status === 'failed'
-      || !['pending', 'creating_key', 'publishing_key'].includes(operation.status)) {
+      || !['pending', 'creating_key', 'publishing_key', 'verifying_dnskey_propagation'].includes(operation.status)) {
       return dnsZoneDnssecRolloverPublicView(operation);
     }
 
@@ -201,6 +250,32 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
       } catch (error) { throw mapped(error); }
       const nextEvidence = publishedEvidence(operation, published);
       try { operation = await registry.advance(operation.id, 'verifying_dnskey_propagation', nextEvidence); }
+      catch (error) { throw mapped(error); }
+    }
+
+    if (operation.status === 'verifying_dnskey_propagation') {
+      let propagation;
+      try {
+        propagation = verifiedPropagation(operation, await service.inspectRolloverPropagation({
+          domainId: operation.domainId,
+          newKeyId: operation.evidence.newKeyId,
+          newKeyDs: operation.evidence.newKeyDs,
+          expectedKeySetDigest: operation.evidence.keySetDigest,
+          expectedSerial: operation.evidence.serial,
+          publishedAt: operation.updatedAt,
+        }));
+      } catch (error) { throw mapped(error); }
+      if (propagation === null) return dnsZoneDnssecRolloverPublicView(operation);
+      let target;
+      try {
+        target = activationTarget(operation, propagation, await service.previewRolloverKeyState({
+          domainId: operation.domainId,
+          keyId: operation.evidence.newKeyId,
+          active: true,
+          published: true,
+        }));
+      } catch (error) { throw mapped(error); }
+      try { operation = await registry.advance(operation.id, 'activating_key', target); }
       catch (error) { throw mapped(error); }
     }
     return dnsZoneDnssecRolloverPublicView(operation);
@@ -267,4 +342,6 @@ export const dnsZoneDnssecRolloverRuntimeInternals = Object.freeze({
   createdKeyEvidence,
   publicationTarget,
   publishedEvidence,
+  verifiedPropagation,
+  activationTarget,
 });

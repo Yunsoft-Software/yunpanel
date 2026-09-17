@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertDomainName, assertUuid } from '@yunpanel/shared';
 
-const STORE_VERSION = 2;
+const STORE_VERSION = 3;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ALGORITHM_PATTERN = /^[A-Z][A-Z0-9_-]{1,63}$/;
 const KEY_TYPES = new Set(['ksk', 'csk']);
@@ -142,14 +142,37 @@ function newKey(value) {
 
 function propagation(value) {
   if (value === null) return null;
-  const fields = new Set(['status', 'serial', 'checkedAt']);
+  const fields = new Set([
+    'status', 'serial', 'dnskeyTtl', 'publishedAt', 'eligibleAfter', 'checkedAt', 'targetCount',
+  ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
     || !['synced', 'disabled'].includes(value.status)
-    || !Number.isSafeInteger(value.serial) || value.serial < 1) {
+    || !Number.isSafeInteger(value.serial) || value.serial < 1
+    || !Number.isSafeInteger(value.dnskeyTtl) || value.dnskeyTtl < 0 || value.dnskeyTtl > 2_147_483_647
+    || !Number.isSafeInteger(value.targetCount) || value.targetCount < 1 || value.targetCount > 9
+    || (value.status === 'disabled' && value.targetCount !== 1)
+    || (value.status === 'synced' && value.targetCount < 2)) {
     throw invalid('DNSSEC rollover propagation evidence is invalid');
   }
-  return Object.freeze({ status: value.status, serial: value.serial, checkedAt: timestamp(value.checkedAt) });
+  const publishedAt = timestamp(value.publishedAt);
+  const eligibleAfter = timestamp(value.eligibleAfter);
+  const checkedAt = timestamp(value.checkedAt);
+  let expectedEligibleAfter;
+  try { expectedEligibleAfter = new Date(Date.parse(publishedAt) + (value.dnskeyTtl * 1000)).toISOString(); }
+  catch { throw invalid('DNSSEC rollover propagation TTL evidence is invalid'); }
+  if (eligibleAfter !== expectedEligibleAfter || Date.parse(checkedAt) < Date.parse(eligibleAfter)) {
+    throw invalid('DNSSEC rollover propagation TTL evidence is invalid');
+  }
+  return Object.freeze({
+    status: value.status,
+    serial: value.serial,
+    dnskeyTtl: value.dnskeyTtl,
+    publishedAt,
+    eligibleAfter,
+    checkedAt,
+    targetCount: value.targetCount,
+  });
 }
 
 function evidence(value) {
@@ -214,6 +237,10 @@ function validateProgress(operation) {
   }
   if (requiresPropagation && operation.evidence.propagation === null) {
     throw invalid('DNSSEC rollover stage is missing propagation evidence');
+  }
+  if (operation.status === 'activating_key' && operation.evidence.propagation !== null
+    && operation.evidence.propagation.serial !== operation.evidence.serial) {
+    throw invalid('DNSSEC rollover propagation serial does not match key evidence');
   }
   if (requiresTargetDigest && operation.evidence.targetKeySetDigest === null) {
     throw invalid('DNSSEC rollover mutation stage is missing target key-set evidence');
@@ -371,24 +398,28 @@ export function createDnsZoneDnssecRolloverRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
+        if (![1, 2, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((field) => !['version', 'operations'].includes(field))) {
           throw invalid('DNSSEC rollover operation store is invalid');
         }
-        const migrated = parsed.version === 1
-          ? parsed.operations.map((entry) => ({
-            ...entry,
-            evidence: entry?.evidence && typeof entry.evidence === 'object' && !Array.isArray(entry.evidence)
-              ? { ...entry.evidence, targetKeySetDigest: null }
-              : entry?.evidence,
-          }))
-          : parsed.operations;
+        const migrated = parsed.operations.map((entry) => {
+          const migratedEvidence = entry?.evidence && typeof entry.evidence === 'object' && !Array.isArray(entry.evidence)
+            ? {
+              ...entry.evidence,
+              ...(parsed.version === 1 ? { targetKeySetDigest: null } : {}),
+            }
+            : entry?.evidence;
+          if (parsed.version < STORE_VERSION && migratedEvidence?.propagation !== null) {
+            throw invalid('Legacy DNSSEC propagation evidence cannot be safely migrated');
+          }
+          return { ...entry, evidence: migratedEvidence };
+        });
         const operations = migrated.map(persistedOperation);
         if (new Set(operations.map((entry) => entry.id)).size !== operations.length) {
           throw invalid('DNSSEC rollover operation IDs are not unique');
         }
         state = { version: STORE_VERSION, operations };
-        if (parsed.version === 1) await persist();
+        if (parsed.version < STORE_VERSION) await persist();
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
         await persist();

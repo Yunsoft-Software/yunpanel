@@ -93,7 +93,7 @@ function rolloverOperationStorePath(env = process.env) {
   return env.YUNPANEL_DNSSEC_ROLLOVER_OPERATION_STORE ?? path.join(stateRoot(env), 'dnssec-rollover-operations.json');
 }
 
-async function defaultService(authoritativeService, env = process.env) {
+async function defaultService(authoritativeService, dnsIdentityRegistry, env = process.env) {
   if (typeof authoritativeService?.localServerId !== 'string' || !authoritativeService.localServerId) {
     throw new DnsZoneDnssecHttpError('dnssec_local_server_unavailable', 'Local authoritative DNS server scope is unavailable', 503);
   }
@@ -111,11 +111,12 @@ async function defaultService(authoritativeService, env = process.env) {
     domainRegistry,
     powerDnsSecretRegistry: secretRegistry,
     localServerId: authoritativeService.localServerId,
+    dnsIdentityRegistry,
   });
 }
 
-async function defaultRuntime(authoritativeService, env = process.env, serviceOverride = null) {
-  const service = serviceOverride ?? await defaultService(authoritativeService, env);
+async function defaultRuntime(authoritativeService, dnsIdentityRegistry, env = process.env, serviceOverride = null) {
+  const service = serviceOverride ?? await defaultService(authoritativeService, dnsIdentityRegistry, env);
   const registry = createDnsZoneDnssecOperationRegistry({
     filePath: serviceOverride ? null : operationStorePath(env),
   });
@@ -158,6 +159,7 @@ function route(handler) {
 
 export function mountDnsZoneDnssecRoutes(app, {
   authoritativeService,
+  dnsIdentityRegistry = null,
   dnsZoneDnssecRuntime = null,
   dnsZoneDnssecService = null,
   env = process.env,
@@ -170,6 +172,10 @@ export function mountDnsZoneDnssecRoutes(app, {
   }
   if (dnsZoneDnssecRuntime !== null && dnsZoneDnssecService !== null) {
     throw new Error('Configure either DNSSEC runtime or service, not both');
+  }
+  if (dnsZoneDnssecRuntime === null && dnsZoneDnssecService === null
+    && (!dnsIdentityRegistry || typeof dnsIdentityRegistry.getForServer !== 'function')) {
+    throw new Error('Server DNS identity registry is required');
   }
   if (dnsZoneDnssecRuntime !== null
     && (typeof dnsZoneDnssecRuntime.status !== 'function' || typeof dnsZoneDnssecRuntime.preview !== 'function'
@@ -187,6 +193,7 @@ export function mountDnsZoneDnssecRoutes(app, {
       || typeof dnsZoneDnssecService.createRolloverKey !== 'function'
       || typeof dnsZoneDnssecService.previewRolloverKeyState !== 'function'
       || typeof dnsZoneDnssecService.setRolloverKeyState !== 'function'
+      || typeof dnsZoneDnssecService.inspectRolloverPropagation !== 'function'
       || typeof dnsZoneDnssecService.apply !== 'function')) {
     throw new Error('DNSSEC service is invalid');
   }
@@ -195,7 +202,7 @@ export function mountDnsZoneDnssecRoutes(app, {
   function runtime() {
     if (dnsZoneDnssecRuntime) return Promise.resolve(dnsZoneDnssecRuntime);
     if (!runtimePromise) {
-      runtimePromise = defaultRuntime(authoritativeService, env, dnsZoneDnssecService);
+      runtimePromise = defaultRuntime(authoritativeService, dnsIdentityRegistry, env, dnsZoneDnssecService);
       runtimePromise.catch(() => { runtimePromise = null; });
     }
     return runtimePromise;

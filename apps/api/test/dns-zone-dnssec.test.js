@@ -47,7 +47,14 @@ function parent(status = 'absent', records = []) {
   });
 }
 
-function fixture({ current = authoritative(), parentStates = [parent()], enableResult = null, disableResult = null } = {}) {
+function fixture({
+  current = authoritative(),
+  parentStates = [parent()],
+  enableResult = null,
+  disableResult = null,
+  dnsIdentity = null,
+  propagationResult = null,
+} = {}) {
   const calls = [];
   let currentState = current;
   let parentIndex = 0;
@@ -112,6 +119,18 @@ function fixture({ current = authoritative(), parentStates = [parent()], enableR
       localServerId: serverId,
       manager,
       parentDsInspector,
+      dnsIdentityRegistry: dnsIdentity ? {
+        getForServer: async (id) => {
+          calls.push(['dns-identity', id]);
+          return dnsIdentity;
+        },
+      } : null,
+      keyPropagationInspector: propagationResult ? {
+        inspect: async (input) => {
+          calls.push(['key-propagation', input]);
+          return propagationResult;
+        },
+      } : null,
     }),
   };
 }
@@ -375,4 +394,96 @@ test('scopes rollover host mutations through local Domain identity without retur
     ['preview-rollover-key-deletion', 'example.com', apiKey],
     ['delete-rollover-key', 'example.com', apiKey],
   ]);
+});
+
+test('binds rollover propagation inspection to exact public key state and configured authoritative targets', async () => {
+  const newKeyDs = ['22345 13 2 EEFF0011'];
+  const oldKey = authoritative({ dnssec: true }).keys[0];
+  const newKey = Object.freeze({
+    ...oldKey,
+    id: 2,
+    active: false,
+    published: true,
+    dnskey: '257 3 13 AAAANEWKEYVALUE==',
+    ds: Object.freeze(newKeyDs),
+    cds: Object.freeze(newKeyDs),
+  });
+  const current = Object.freeze({
+    ...authoritative({ dnssec: true }),
+    serial: 2026091702,
+    keySetDigest: 'd'.repeat(64),
+    keys: Object.freeze([oldKey, newKey]),
+    keyCount: 2,
+  });
+  const propagation = Object.freeze({
+    version: 1,
+    zoneName: 'example.com',
+    status: 'synced',
+    ready: true,
+    expectedSerial: 2026091702,
+    dnskeyTtl: 300,
+    publishedAt: '2026-09-17T10:00:00.000Z',
+    eligibleAfter: '2026-09-17T10:05:00.000Z',
+    checkedAt: '2026-09-17T10:05:00.000Z',
+    targets: Object.freeze([]),
+  });
+  const { calls, service } = fixture({
+    current,
+    dnsIdentity: {
+      serverId,
+      settings: {
+        ns1: { ipv4: '203.0.113.20' },
+        secondaryDns: ['203.0.113.21'],
+      },
+    },
+    propagationResult: propagation,
+  });
+
+  const result = await service.inspectRolloverPropagation({
+    domainId,
+    newKeyId: 2,
+    newKeyDs,
+    expectedKeySetDigest: 'd'.repeat(64),
+    expectedSerial: 2026091702,
+    publishedAt: '2026-09-17T10:00:00.000Z',
+  });
+
+  assert.equal(result, propagation);
+  assert.deepEqual(calls.find((entry) => entry[0] === 'key-propagation')[1], {
+    zoneName: 'example.com',
+    expectedSerial: 2026091702,
+    expectedDnskey: '257 3 13 AAAANEWKEYVALUE==',
+    publishedAt: '2026-09-17T10:00:00.000Z',
+    primaryTarget: '203.0.113.20',
+    secondaryTargets: ['203.0.113.21'],
+  });
+  assert.equal(JSON.stringify(calls).includes(apiKey), true);
+  assert.equal(JSON.stringify(result).includes(apiKey), false);
+});
+
+test('rollover propagation fails before resolver inspection if key-set or publication serial drifted', async () => {
+  const current = Object.freeze({
+    ...authoritative({ dnssec: true }),
+    serial: 2026091703,
+    keySetDigest: 'e'.repeat(64),
+  });
+  const { calls, service } = fixture({
+    current,
+    dnsIdentity: { serverId, settings: { ns1: { ipv4: '203.0.113.20' }, secondaryDns: [] } },
+    propagationResult: {},
+  });
+
+  await assert.rejects(
+    service.inspectRolloverPropagation({
+      domainId,
+      newKeyId: 2,
+      newKeyDs: ['22345 13 2 EEFF0011'],
+      expectedKeySetDigest: 'd'.repeat(64),
+      expectedSerial: 2026091702,
+      publishedAt: '2026-09-17T10:00:00.000Z',
+    }),
+    (error) => error instanceof DnsZoneDnssecError
+      && error.code === 'dnssec_rollover_publication_state_changed',
+  );
+  assert.equal(calls.some((entry) => entry[0] === 'key-propagation'), false);
 });

@@ -183,7 +183,16 @@ test('completes only after old-key deletion stage with exact public result evide
   current = {
     ...current,
     targetKeySetDigest: 'e'.repeat(64),
-    propagation: { status: 'synced', serial: 2026091702, checkedAt: '2026-09-17T10:05:00.000Z' },
+    serial: 2026091702,
+    propagation: {
+      status: 'synced',
+      serial: 2026091702,
+      dnskeyTtl: 300,
+      publishedAt: '2026-09-17T10:00:00.000Z',
+      eligibleAfter: '2026-09-17T10:05:00.000Z',
+      checkedAt: '2026-09-17T10:05:00.000Z',
+      targetCount: 2,
+    },
   };
   await registry.advance(operationId, 'activating_key', current);
   current = { ...current, keySetDigest: 'e'.repeat(64), targetKeySetDigest: null, serial: 2026091702 };
@@ -235,7 +244,7 @@ test('rejects forged preview identity and malformed persisted state without echo
   assert.equal((await readFile(filePath, 'utf8')).includes('SECRET'), true);
 });
 
-test('migrates a safe version-one pending journal and rewrites the store as version two', async () => {
+test('migrates a safe version-one pending journal and rewrites the store as version three', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-dnssec-rollover-v1-'));
   const filePath = path.join(directory, 'operations.json');
   const writer = createDnsZoneDnssecRolloverRegistry({ filePath, idFactory: () => operationId });
@@ -249,5 +258,45 @@ test('migrates a safe version-one pending journal and rewrites the store as vers
   const migrated = createDnsZoneDnssecRolloverRegistry({ filePath });
   await migrated.init();
   assert.equal((await migrated.get(operationId)).evidence.targetKeySetDigest, null);
-  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, 2);
+  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, 3);
+});
+
+test('fails closed instead of inventing TTL evidence for a progressed version-two journal', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-dnssec-rollover-v2-'));
+  const filePath = path.join(directory, 'operations.json');
+  const writer = createDnsZoneDnssecRolloverRegistry({ filePath, idFactory: () => operationId });
+  await writer.init();
+  await writer.create(preview());
+  await writer.advance(operationId, 'creating_key', evidence());
+  const publishing = evidence({
+    newKeyId: 8,
+    keySetDigest: 'c'.repeat(64),
+    targetKeySetDigest: 'd'.repeat(64),
+    newKeyDs: [newDs],
+    serial: 2026091701,
+  });
+  await writer.advance(operationId, 'publishing_key', publishing);
+  await writer.advance(operationId, 'verifying_dnskey_propagation', {
+    ...publishing,
+    keySetDigest: 'd'.repeat(64),
+    targetKeySetDigest: null,
+  });
+  const stored = JSON.parse(await readFile(filePath, 'utf8'));
+  stored.version = 2;
+  stored.operations[0].status = 'activating_key';
+  stored.operations[0].evidence.targetKeySetDigest = 'e'.repeat(64);
+  stored.operations[0].evidence.propagation = {
+    status: 'synced',
+    serial: 2026091701,
+    checkedAt: '2026-09-17T10:05:00.000Z',
+  };
+  await writeFile(filePath, JSON.stringify(stored), { mode: 0o600 });
+
+  const migrated = createDnsZoneDnssecRolloverRegistry({ filePath });
+  await assert.rejects(
+    migrated.init(),
+    (error) => error instanceof DnsZoneDnssecRolloverRegistryError
+      && error.code === 'dnssec_rollover_operation_state_invalid'
+      && /cannot be safely migrated/.test(error.message),
+  );
 });

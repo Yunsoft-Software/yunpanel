@@ -14,6 +14,7 @@ const newDs = '22345 13 2 EEFF0011';
 const initialDigest = 'a'.repeat(64);
 const createdDigest = 'c'.repeat(64);
 const publishedDigest = 'd'.repeat(64);
+const activatedDigest = 'e'.repeat(64);
 
 function rolloverPreview({ digest = 'b'.repeat(64) } = {}) {
   return Object.freeze({
@@ -45,11 +46,11 @@ function rolloverPreview({ digest = 'b'.repeat(64) } = {}) {
   });
 }
 
-function publicKey({ published = false } = {}) {
+function publicKey({ active = false, published = false } = {}) {
   return Object.freeze({
     id: 8,
     keyType: 'csk',
-    active: false,
+    active,
     published,
     dnskey: '257 3 13 AAAANEWKEY',
     ds: Object.freeze([newDs]),
@@ -59,7 +60,12 @@ function publicKey({ published = false } = {}) {
   });
 }
 
-function fixture({ failCreateAfterMutation = false, failPublishAfterMutation = false, staleSecondPreview = false } = {}) {
+function fixture({
+  failCreateAfterMutation = false,
+  failPublishAfterMutation = false,
+  staleSecondPreview = false,
+  propagationReady = false,
+} = {}) {
   const registry = createDnsZoneDnssecRolloverRegistry({ idFactory: () => operationId });
   const calls = [];
   let created = false;
@@ -95,12 +101,12 @@ function fixture({ failCreateAfterMutation = false, failPublishAfterMutation = f
       });
     },
     previewRolloverKeyState: async (input) => {
-      calls.push('publication-preview');
+      calls.push(input.active ? 'activation-preview' : 'publication-preview');
       assert.equal(input.keyId, 8);
       return Object.freeze({
         keySetDigest: published ? publishedDigest : createdDigest,
-        targetKeySetDigest: publishedDigest,
-        targetKey: publicKey({ published: true }),
+        targetKeySetDigest: input.active ? activatedDigest : publishedDigest,
+        targetKey: publicKey({ active: input.active, published: input.published }),
       });
     },
     setRolloverKeyState: async (input) => {
@@ -120,6 +126,25 @@ function fixture({ failCreateAfterMutation = false, failPublishAfterMutation = f
         keySetDigest: publishedDigest,
         serial: 2026091702,
         updatedKey: publicKey({ published: true }),
+      });
+    },
+    inspectRolloverPropagation: async (input) => {
+      calls.push('propagation');
+      if (!propagationReady) return Object.freeze({ status: 'waiting_ttl', ready: false });
+      return Object.freeze({
+        version: 1,
+        zoneName: 'example.com',
+        status: 'synced',
+        ready: true,
+        expectedSerial: input.expectedSerial,
+        dnskeyTtl: 300,
+        publishedAt: input.publishedAt,
+        eligibleAfter: new Date(Date.parse(input.publishedAt) + 300_000).toISOString(),
+        checkedAt: new Date(Date.parse(input.publishedAt) + 300_000).toISOString(),
+        targets: Object.freeze([
+          Object.freeze({ ready: true }),
+          Object.freeze({ ready: true }),
+        ]),
       });
     },
   };
@@ -149,7 +174,7 @@ test('journals create and publish intents then stops before DNSKEY propagation a
   assert.equal(operation.evidence.targetKeySetDigest, null);
   assert.equal(operation.evidence.propagation, null);
   assert.equal(Object.hasOwn(operation, 'confirmation'), false);
-  assert.deepEqual(fx.calls, ['preview', 'preview', 'create', 'publication-preview', 'publish']);
+  assert.deepEqual(fx.calls, ['preview', 'preview', 'create', 'publication-preview', 'publish', 'propagation']);
   assert.equal(fx.createMutations(), 1);
   assert.equal(fx.publishMutations(), 1);
 });
@@ -212,6 +237,27 @@ test('restart init resumes an interrupted local mutation but never crosses the p
   assert.equal(recovery[0].recovered, true);
   assert.equal(recovery[0].operation.status, 'verifying_dnskey_propagation');
   assert.equal(fx.createMutations(), 1);
+  assert.equal(fx.publishMutations(), 1);
+});
+
+test('persists exact DNSKEY TTL propagation evidence and activation target before host activation', async () => {
+  const fx = fixture({ propagationReady: true });
+  await fx.runtime.init();
+  const operation = await fx.runtime.start({
+    domainId,
+    previewDigest: fx.preview.previewDigest,
+    confirmation: fx.preview.confirmation,
+  });
+
+  assert.equal(operation.status, 'activating_key');
+  assert.equal(operation.evidence.keySetDigest, publishedDigest);
+  assert.equal(operation.evidence.targetKeySetDigest, activatedDigest);
+  assert.equal(operation.evidence.propagation.status, 'synced');
+  assert.equal(operation.evidence.propagation.dnskeyTtl, 300);
+  assert.equal(operation.evidence.propagation.targetCount, 2);
+  assert.deepEqual(fx.calls, [
+    'preview', 'preview', 'create', 'publication-preview', 'publish', 'propagation', 'activation-preview',
+  ]);
   assert.equal(fx.publishMutations(), 1);
 });
 

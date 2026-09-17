@@ -498,7 +498,7 @@ export function mountPowerDnsRoutes(app, {
     return localDkimRetirementServicePromise;
   }
 
-  mountDnsZoneDnssecRoutes(app, { authoritativeService });
+  mountDnsZoneDnssecRoutes(app, { authoritativeService, dnsIdentityRegistry });
   mountDnsZoneSecondaryStatusRoutes(app, { dnsIdentityRegistry, authoritativeService });
   if (hasLocalDkimRetirement) {
     mountDnsZoneMailDkimRetirementRoutes(app, { serviceForRequest: localDkimRetirementService });

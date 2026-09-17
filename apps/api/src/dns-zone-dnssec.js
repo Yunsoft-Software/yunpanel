@@ -4,6 +4,10 @@ import {
   DnsParentDsInspectorError,
 } from '@yunpanel/host-runtime/dns-parent-ds-inspector';
 import {
+  createDnssecKeyPropagationInspector,
+  DnssecKeyPropagationInspectorError,
+} from '@yunpanel/host-runtime/dnssec-key-propagation-inspector';
+import {
   createPowerDnsDnssecManager,
   PowerDnsDnssecManagerError,
 } from '@yunpanel/host-runtime/powerdns-dnssec-manager';
@@ -199,7 +203,8 @@ function previewBlockers(state, enabled) {
 
 function hostFailure(error) {
   if (error instanceof DnsZoneDnssecError) return error;
-  if (error instanceof PowerDnsDnssecManagerError || error instanceof DnsParentDsInspectorError) {
+  if (error instanceof PowerDnsDnssecManagerError || error instanceof DnsParentDsInspectorError
+    || error instanceof DnssecKeyPropagationInspectorError) {
     return new DnsZoneDnssecError(error.code, error.message, error.status);
   }
   return error;
@@ -211,12 +216,18 @@ export function createDnsZoneDnssecService({
   localServerId,
   manager = createPowerDnsDnssecManager(),
   parentDsInspector = createDnsParentDsInspector(),
+  dnsIdentityRegistry = null,
+  keyPropagationInspector = null,
 } = {}) {
+  const propagationInspector = keyPropagationInspector
+    ?? (dnsIdentityRegistry ? createDnssecKeyPropagationInspector() : null);
   if (!domainRegistry || typeof domainRegistry.getDomain !== 'function'
     || !powerDnsSecretRegistry || typeof powerDnsSecretRegistry.materializeForServer !== 'function'
     || typeof localServerId !== 'string' || !localServerId
     || !manager || typeof manager.inspect !== 'function' || typeof manager.enable !== 'function' || typeof manager.disable !== 'function'
-    || !parentDsInspector || typeof parentDsInspector.inspect !== 'function') {
+    || !parentDsInspector || typeof parentDsInspector.inspect !== 'function'
+    || (dnsIdentityRegistry !== null && typeof dnsIdentityRegistry.getForServer !== 'function')
+    || (keyPropagationInspector !== null && typeof keyPropagationInspector.inspect !== 'function')) {
     throw new DnsZoneDnssecError('dnssec_dependencies_invalid', 'DNSSEC lifecycle dependencies are unavailable', 503);
   }
 
@@ -399,6 +410,87 @@ export function createDnsZoneDnssecService({
     } catch (error) { throw hostFailure(error); }
   }
 
+  async function inspectRolloverPropagation({
+    domainId,
+    newKeyId,
+    newKeyDs,
+    expectedKeySetDigest,
+    expectedSerial,
+    publishedAt,
+  } = {}) {
+    if (!dnsIdentityRegistry || !propagationInspector) {
+      throw new DnsZoneDnssecError(
+        'dnssec_rollover_propagation_unavailable',
+        'DNSSEC rollover propagation inspection is unavailable',
+        503,
+      );
+    }
+    if (!Number.isSafeInteger(newKeyId) || newKeyId < 0
+      || !Array.isArray(newKeyDs) || newKeyDs.length < 1
+      || typeof expectedKeySetDigest !== 'string' || !SHA256_PATTERN.test(expectedKeySetDigest)
+      || !Number.isSafeInteger(expectedSerial) || expectedSerial < 1
+      || typeof publishedAt !== 'string' || !Number.isFinite(Date.parse(publishedAt))
+      || new Date(publishedAt).toISOString() !== publishedAt) {
+      throw new DnsZoneDnssecError(
+        'dnssec_rollover_propagation_input_invalid',
+        'DNSSEC rollover propagation evidence is invalid',
+      );
+    }
+    const current = await context(domainId);
+    let identity;
+    let authoritative;
+    try {
+      [identity, authoritative] = await Promise.all([
+        dnsIdentityRegistry.getForServer(current.domain.serverId),
+        manager.inspect({ zoneName: current.domain.primaryDomain, apiKey: current.apiKey }),
+      ]);
+    } catch (error) {
+      const mapped = hostFailure(error);
+      if (mapped !== error) throw mapped;
+      throw new DnsZoneDnssecError(
+        'dnssec_rollover_propagation_inspection_failed',
+        'DNSSEC rollover propagation state could not be inspected',
+        503,
+      );
+    }
+    if (!identity || identity.serverId !== current.domain.serverId
+      || typeof identity.settings?.ns1?.ipv4 !== 'string'
+      || !Array.isArray(identity.settings?.secondaryDns)) {
+      throw new DnsZoneDnssecError('dnssec_rollover_dns_identity_invalid', 'Server DNS identity is unavailable or invalid', 409);
+    }
+    if (authoritative?.zoneName !== current.domain.primaryDomain
+      || authoritative?.keySetDigest !== expectedKeySetDigest
+      || authoritative?.serial !== expectedSerial) {
+      throw new DnsZoneDnssecError(
+        'dnssec_rollover_publication_state_changed',
+        'DNSSEC publication state changed before propagation could be verified',
+        409,
+      );
+    }
+    const key = Array.isArray(authoritative.keys)
+      ? authoritative.keys.find((entry) => entry?.id === newKeyId)
+      : null;
+    if (!key || key.active !== false || key.published !== true
+      || typeof key.dnskey !== 'string' || !key.dnskey
+      || JSON.stringify(key.ds) !== JSON.stringify(newKeyDs)) {
+      throw new DnsZoneDnssecError(
+        'dnssec_rollover_publication_key_changed',
+        'DNSSEC rollover key no longer matches the published operation evidence',
+        409,
+      );
+    }
+    try {
+      return await propagationInspector.inspect({
+        zoneName: current.domain.primaryDomain,
+        expectedSerial,
+        expectedDnskey: key.dnskey,
+        publishedAt,
+        primaryTarget: identity.settings.ns1.ipv4,
+        secondaryTargets: identity.settings.secondaryDns,
+      });
+    } catch (error) { throw hostFailure(error); }
+  }
+
   async function previewRolloverKeyDeletion({ domainId, keyId } = {}) {
     const current = await context(domainId);
     try {
@@ -480,6 +572,7 @@ export function createDnsZoneDnssecService({
     createRolloverKey,
     previewRolloverKeyState,
     setRolloverKeyState,
+    inspectRolloverPropagation,
     previewRolloverKeyDeletion,
     deleteRolloverKey,
     apply,
