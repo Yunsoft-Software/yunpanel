@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   phpMyAdminFpmTemplatePolicy,
   phpMyAdminNginxTemplatePolicy,
+  phpMyAdminSignonTemplatePolicy,
 } from '@yunpanel/config-templates';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -17,6 +18,13 @@ const NGINX_PREVIEW_KEYS = new Set([
   'version', 'sha256', 'artifact', 'documentRoot', 'fpmSocketPath', 'gatewaySocketPath',
   'gatewaySocketMode', 'gatewaySocketOwner', 'gatewaySocketGroup', 'healthPath',
   'serviceUnit',
+]);
+const SIGNON_CONFIG_PREVIEW_KEYS = new Set([
+  'version', 'sha256', 'artifact', 'signonSession', 'gatewayBasePath',
+]);
+const SIGNON_BRIDGE_PREVIEW_KEYS = new Set([
+  'version', 'sha256', 'artifact', 'handoffSocketPath', 'signonSession',
+  'internalSignonPath', 'gatewayBasePath',
 ]);
 const ARTIFACT_KEYS = new Set(['path', 'sha256', 'bytes', 'sensitive', 'mode']);
 
@@ -88,6 +96,40 @@ function validateNginxPreview(preview) {
   return value;
 }
 
+function validateSignonConfigPreview(preview) {
+  const value = validateArtifactPreview(preview, {
+    path: phpMyAdminSignonTemplatePolicy.configPath,
+    mode: phpMyAdminSignonTemplatePolicy.configMode,
+    previewKeys: SIGNON_CONFIG_PREVIEW_KEYS,
+  }, 'phpmyadmin_signon_config_preview_invalid');
+  if (value.signonSession !== phpMyAdminSignonTemplatePolicy.signonSession
+    || value.gatewayBasePath !== phpMyAdminSignonTemplatePolicy.gatewayBasePath) {
+    throw new PhpMyAdminConfigManagerError(
+      'phpmyadmin_signon_config_preview_invalid',
+      'phpMyAdmin signon config preview is invalid',
+    );
+  }
+  return value;
+}
+
+function validateSignonBridgePreview(preview) {
+  const value = validateArtifactPreview(preview, {
+    path: phpMyAdminSignonTemplatePolicy.bridgePath,
+    mode: phpMyAdminSignonTemplatePolicy.bridgeMode,
+    previewKeys: SIGNON_BRIDGE_PREVIEW_KEYS,
+  }, 'phpmyadmin_signon_bridge_preview_invalid');
+  if (value.handoffSocketPath !== phpMyAdminSignonTemplatePolicy.handoffSocketPath
+    || value.signonSession !== phpMyAdminSignonTemplatePolicy.signonSession
+    || value.internalSignonPath !== phpMyAdminSignonTemplatePolicy.internalSignonPath
+    || value.gatewayBasePath !== phpMyAdminSignonTemplatePolicy.gatewayBasePath) {
+    throw new PhpMyAdminConfigManagerError(
+      'phpmyadmin_signon_bridge_preview_invalid',
+      'phpMyAdmin signon bridge preview is invalid',
+    );
+  }
+  return value;
+}
+
 export function createPhpMyAdminConfigManager({
   stagingRoot = '/var/lib/yunpanel/staging/phpmyadmin',
   chmodFn = chmod,
@@ -123,6 +165,14 @@ export function createPhpMyAdminConfigManager({
 
   function stagedNginxPath(previewSha256) {
     return path.join(stageDirectory(previewSha256), 'yunpanel-phpmyadmin-nginx.conf');
+  }
+
+  function stagedSignonConfigPath(previewSha256) {
+    return path.join(stageDirectory(previewSha256), 'zz-yunpanel.php');
+  }
+
+  function stagedSignonBridgePath(previewSha256) {
+    return path.join(stageDirectory(previewSha256), 'yunpanel-phpmyadmin-signon.php');
   }
 
   async function ensureSafeDirectory(directory) {
@@ -250,15 +300,47 @@ export function createPhpMyAdminConfigManager({
       targetPath: stagedNginxPath,
       resultKey: 'nginxSha256',
     }),
+    stageSignonConfig: (preview, content) => stageArtifact({
+      preview,
+      content,
+      validate: validateSignonConfigPreview,
+      targetPath: stagedSignonConfigPath,
+      resultKey: 'signonConfigSha256',
+      mismatchCode: 'phpmyadmin_signon_config_material_mismatch',
+    }),
+    stageSignonBridge: (preview, content) => stageArtifact({
+      preview,
+      content,
+      validate: validateSignonBridgePreview,
+      targetPath: stagedSignonBridgePath,
+      resultKey: 'signonBridgeSha256',
+      mismatchCode: 'phpmyadmin_signon_bridge_material_mismatch',
+    }),
+    inspectStagedSignonConfig: (preview) => inspectArtifact({
+      preview,
+      validate: validateSignonConfigPreview,
+      targetPath: stagedSignonConfigPath,
+      resultKey: 'signonConfigSha256',
+    }),
+    inspectStagedSignonBridge: (preview) => inspectArtifact({
+      preview,
+      validate: validateSignonBridgePreview,
+      targetPath: stagedSignonBridgePath,
+      resultKey: 'signonBridgeSha256',
+    }),
     stageDirectory,
     stagedFpmPath,
     stagedNginxPath,
+    stagedSignonConfigPath,
+    stagedSignonBridgePath,
   });
 }
 
 export const phpMyAdminConfigManagerInternals = Object.freeze({
   validateFpmPreview,
   validateNginxPreview,
+  validateSignonConfigPreview,
+  validateSignonBridgePreview,
   sha256,
   stageDirectoryMode: STAGE_DIRECTORY_MODE,
   stagedArtifactMode: STAGED_ARTIFACT_MODE,
