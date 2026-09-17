@@ -16,6 +16,7 @@ const boundIntent = Object.freeze({
   websiteId,
   applicationId,
 });
+const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 
 function baseIdentity(overrides = {}) {
   return Object.freeze({
@@ -30,7 +31,7 @@ function baseIdentity(overrides = {}) {
   });
 }
 
-function fakeIdentityManager() {
+function fakeIdentityManager({ created = true } = {}) {
   const calls = [];
   return {
     calls,
@@ -40,7 +41,7 @@ function fakeIdentityManager() {
     },
     apply: async (intent, options) => {
       calls.push(['apply', intent, options]);
-      return baseIdentity({ created: true, receiptVersion: 1 });
+      return baseIdentity({ created, receiptVersion: created ? 1 : null });
     },
     compensate: async (intent, options) => {
       calls.push(['compensate', intent, options]);
@@ -56,6 +57,7 @@ function fakeIdentityManager() {
 function fakeWorkspace() {
   const entries = new Map();
   const calls = [];
+  const removed = [];
   const run = async (file, args) => {
     calls.push([file, [...args]]);
     assert.equal(file, '/usr/bin/install');
@@ -76,23 +78,64 @@ function fakeWorkspace() {
       isDirectory: () => true,
     };
   };
-  return { entries, calls, run, lstatFn };
+  const rmdirFn = async (directory) => {
+    const entry = entries.get(directory);
+    if (!entry) {
+      const error = new Error('missing');
+      error.code = 'ENOENT';
+      throw error;
+    }
+    if (entry.notEmpty) {
+      const error = new Error('not empty');
+      error.code = 'ENOTEMPTY';
+      throw error;
+    }
+    entries.delete(directory);
+    removed.push(directory);
+  };
+  return { entries, calls, removed, run, lstatFn, rmdirFn };
+}
+
+function fakeReceiptStore() {
+  const files = new Map();
+  return {
+    files,
+    mkdirFn: async () => {},
+    readFileFn: async (target) => {
+      if (!files.has(target)) {
+        const error = new Error('missing');
+        error.code = 'ENOENT';
+        throw error;
+      }
+      return files.get(target);
+    },
+    writeFileFn: async (target, content) => { files.set(target, content); },
+    renameFn: async (source, target) => {
+      files.set(target, files.get(source));
+      files.delete(source);
+    },
+  };
 }
 
 test('path-bound identity apply prepares and verifies only site-owned tmp/log workspace', async () => {
   const identityManager = fakeIdentityManager();
   const workspace = fakeWorkspace();
+  const receipts = fakeReceiptStore();
   const manager = createWebsiteIdentityPathManager({
     identityManager,
     run: workspace.run,
     lstatFn: workspace.lstatFn,
+    rmdirFn: workspace.rmdirFn,
+    ...receipts,
   });
 
-  const result = await manager.apply(boundIntent, { operationId: '9ae512c0-a717-4611-943c-6ce2ab0abf16' });
+  const result = await manager.apply(boundIntent, { operationId });
 
   assert.equal(result.satisfied, true);
   assert.equal(result.created, true);
   assert.equal(result.receiptVersion, 1);
+  assert.equal(result.workspaceReceiptVersion, 1);
+  assert.equal(result.createdWorkspaceDirectories, 2);
   assert.equal(result.pathContract.workspace.sftpRoot, baseIntent.homeDirectory);
   assert.equal(result.pathContract.workspace.persistentDataDirectory, baseIntent.homeDirectory);
   assert.equal(result.pathContract.backup.authority, 'control_plane');
@@ -165,7 +208,7 @@ test('legacy identity intents pass through without inventing workspace mutations
     lstatFn: workspace.lstatFn,
   });
 
-  const result = await manager.apply(baseIntent, { operationId: '9ae512c0-a717-4611-943c-6ce2ab0abf16' });
+  const result = await manager.apply(baseIntent, { operationId });
 
   assert.equal(result.satisfied, true);
   assert.equal(result.pathContract, undefined);
@@ -175,11 +218,161 @@ test('legacy identity intents pass through without inventing workspace mutations
 
 test('path-bound compensation delegates destructive ownership decisions to durable identity receipt manager', async () => {
   const identityManager = fakeIdentityManager();
-  const manager = createWebsiteIdentityPathManager({ identityManager });
-  const options = { operationId: '9ae512c0-a717-4611-943c-6ce2ab0abf16', evidence: { created: true } };
+  const manager = createWebsiteIdentityPathManager({ identityManager, ...fakeReceiptStore() });
+  const options = { operationId, evidence: { created: true } };
 
   const result = await manager.compensate(boundIntent, options);
 
   assert.deepEqual(result, { satisfied: true, removedUser: true });
   assert.deepEqual(identityManager.calls[0], ['compensate', baseIntent, options]);
+});
+
+test('path-bound compensation removes only operation-created empty workspace directories', async () => {
+  const identityManager = fakeIdentityManager({ created: false });
+  const workspace = fakeWorkspace();
+  const receipts = fakeReceiptStore();
+  const manager = createWebsiteIdentityPathManager({
+    identityManager,
+    run: workspace.run,
+    lstatFn: workspace.lstatFn,
+    rmdirFn: workspace.rmdirFn,
+    ...receipts,
+  });
+
+  const applied = await manager.apply(boundIntent, { operationId });
+  assert.equal(applied.created, false);
+  assert.equal(applied.createdWorkspaceDirectories, 2);
+
+  const compensated = await manager.compensate(boundIntent, { operationId, evidence: applied });
+  assert.equal(compensated.satisfied, true);
+  assert.equal(compensated.workspaceCompensated, true);
+  assert.equal(compensated.removedWorkspaceDirectories, 2);
+  assert.deepEqual(workspace.removed, [
+    `${baseIntent.homeDirectory}/logs`,
+    `${baseIntent.homeDirectory}/tmp`,
+  ]);
+  assert.equal(identityManager.calls.at(-1)[0], 'compensate');
+
+  const inspected = await manager.inspectCompensation(boundIntent, { operationId, evidence: applied });
+  assert.equal(inspected.satisfied, true);
+  assert.equal(inspected.removedWorkspaceDirectories, 2);
+});
+
+test('path-bound compensation preserves pre-existing workspace directories', async () => {
+  const identityManager = fakeIdentityManager({ created: false });
+  const workspace = fakeWorkspace();
+  const receipts = fakeReceiptStore();
+  workspace.entries.set(`${baseIntent.homeDirectory}/tmp`, { uid: 1201, gid: 1201, mode: 0o700 });
+  workspace.entries.set(`${baseIntent.homeDirectory}/logs`, { uid: 1201, gid: 1201, mode: 0o750 });
+  const manager = createWebsiteIdentityPathManager({
+    identityManager,
+    run: workspace.run,
+    lstatFn: workspace.lstatFn,
+    rmdirFn: workspace.rmdirFn,
+    ...receipts,
+  });
+
+  const applied = await manager.apply(boundIntent, { operationId });
+  assert.equal(applied.createdWorkspaceDirectories, 0);
+  const compensated = await manager.compensate(boundIntent, { operationId, evidence: applied });
+
+  assert.equal(compensated.removedWorkspaceDirectories, 0);
+  assert.deepEqual(workspace.removed, []);
+  assert.equal(workspace.entries.size, 2);
+});
+
+test('path-bound compensation refuses recursive removal when operation-owned workspace contains data', async () => {
+  const identityManager = fakeIdentityManager({ created: false });
+  const workspace = fakeWorkspace();
+  const receipts = fakeReceiptStore();
+  const manager = createWebsiteIdentityPathManager({
+    identityManager,
+    run: workspace.run,
+    lstatFn: workspace.lstatFn,
+    rmdirFn: workspace.rmdirFn,
+    ...receipts,
+  });
+  const applied = await manager.apply(boundIntent, { operationId });
+  workspace.entries.get(`${baseIntent.homeDirectory}/logs`).notEmpty = true;
+
+  await assert.rejects(
+    manager.compensate(boundIntent, { operationId, evidence: applied }),
+    (error) => error instanceof WebsiteIdentityPathManagerError
+      && error.code === 'website_identity_workspace_compensation_not_empty',
+  );
+  assert.equal(identityManager.calls.some(([name]) => name === 'compensate'), false);
+  assert.equal(workspace.entries.has(`${baseIntent.homeDirectory}/logs`), true);
+});
+
+test('path-bound apply fails closed after an uncertain create without an ownership checkpoint', async () => {
+  const identityManager = fakeIdentityManager({ created: false });
+  const workspace = fakeWorkspace();
+  const receipts = fakeReceiptStore();
+  const temporaryDirectory = `${baseIntent.homeDirectory}/tmp`;
+  workspace.entries.set(temporaryDirectory, { uid: 1201, gid: 1201, mode: 0o700 });
+  receipts.files.set(
+    `/var/lib/yunpanel/staging/website-identity-paths/${operationId}.json`,
+    `${JSON.stringify({
+      version: 1,
+      operationId,
+      websiteId,
+      applicationId,
+      user: baseIntent.user,
+      homeDirectory: baseIntent.homeDirectory,
+      uid: 1201,
+      gid: 1201,
+      state: 'active',
+      targets: [{ name: 'temporary', directory: temporaryDirectory, mode: 0o700, state: 'planned' }],
+    })}\n`,
+  );
+  const manager = createWebsiteIdentityPathManager({
+    identityManager,
+    run: workspace.run,
+    lstatFn: workspace.lstatFn,
+    rmdirFn: workspace.rmdirFn,
+    ...receipts,
+  });
+
+  await assert.rejects(
+    manager.apply(boundIntent, { operationId }),
+    (error) => error instanceof WebsiteIdentityPathManagerError
+      && error.code === 'website_identity_workspace_ownership_unknown',
+  );
+  assert.deepEqual(workspace.calls, []);
+});
+
+test('path-bound apply rejects expanded ownership receipts before host mutation', async () => {
+  const identityManager = fakeIdentityManager({ created: false });
+  const workspace = fakeWorkspace();
+  const receipts = fakeReceiptStore();
+  receipts.files.set(
+    `/var/lib/yunpanel/staging/website-identity-paths/${operationId}.json`,
+    `${JSON.stringify({
+      version: 1,
+      operationId,
+      websiteId,
+      applicationId,
+      user: baseIntent.user,
+      homeDirectory: baseIntent.homeDirectory,
+      uid: 1201,
+      gid: 1201,
+      state: 'active',
+      targets: [],
+      recursive: true,
+    })}\n`,
+  );
+  const manager = createWebsiteIdentityPathManager({
+    identityManager,
+    run: workspace.run,
+    lstatFn: workspace.lstatFn,
+    rmdirFn: workspace.rmdirFn,
+    ...receipts,
+  });
+
+  await assert.rejects(
+    manager.apply(boundIntent, { operationId }),
+    (error) => error instanceof WebsiteIdentityPathManagerError
+      && error.code === 'website_identity_path_receipt_invalid',
+  );
+  assert.deepEqual(workspace.calls, []);
 });

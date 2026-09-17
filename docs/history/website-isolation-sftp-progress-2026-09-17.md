@@ -90,6 +90,8 @@ Kaynak commit `675579e` için repo dışı `.local/test-server.env` hedefi kulla
 
 ## Kalan P0.1 source işleri
 
+Isolation apply rollback temeli olarak canonical Website workspace yöneticisi operation-scoped receipt tutar. Receipt yalnız apply öncesi mevcut olmadığı doğrulanan `tmp`/`logs` direct-child dizinlerini sahiplenir ve her create sonrası ayrı checkpoint yazar. Restartta `planned` kalmış fakat hostta bulunan dizin ownership'i tahmin edilmez. Compensation pre-existing dizinlere dokunmaz, yalnız checkpoint'li ve boş operation-owned dizinleri ters sırada non-recursive `rmdir` ile kaldırır; dizin veri içeriyorsa fail-closed kalır ve base Unix identity cleanup'ına ilerlemez.
+
 - Isolation migration apply exact değişiklik preview/digest + typed confirmation ile operation-owned değişiklikler yapmalı ve geri alabilmeli; recursive blind `chown` yapmamalı.
 - Legacy Website migration apply canonical identity/path/runtime/SFTP drift raporu olmadan destructive ownership repair yapmamalı.
 
