@@ -14,7 +14,7 @@ const previewDigest = 'a'.repeat(64);
 const backupSha256 = 'b'.repeat(64);
 const confirmation = `restore-database:${databaseName}:${previewDigest}`;
 
-function mounted({ previewError = null, queueError = null } = {}) {
+function mounted({ previewError = null, queueError = null, binding = null } = {}) {
   const routes = [];
   const calls = [];
   const app = {
@@ -52,6 +52,14 @@ function mounted({ previewError = null, queueError = null } = {}) {
   mountDatabaseRestoreRoutes(app, {
     registry: { async getServer(id) { return id === serverId ? { id } : null; } },
     databaseBackupOperationsService: service,
+    ...(binding ? {
+      databaseBindingRegistry: {
+        async getByDatabase(input) {
+          assert.deepEqual(input, { serverId, databaseName });
+          return binding;
+        },
+      },
+    } : {}),
   });
   return {
     calls,
@@ -132,4 +140,24 @@ test('database restore service errors retain safe HTTP code and status', async (
   assert.ok(response.error instanceof JobRegistryError);
   assert.equal(response.error.code, 'database_restore_backup_evidence_drift');
   assert.equal(response.error.status, 409);
+});
+
+
+test('global restore routes reject managed Website databases before backup evidence is read', async () => {
+  for (const handlerName of ['preview', 'apply']) {
+    const fx = mounted({ binding: { id: 'binding-1', serverId, databaseName } });
+    const body = handlerName === 'preview'
+      ? { backupId }
+      : {
+        backupId,
+        expectedPreviewDigest: previewDigest,
+        expectedBackupSha256: backupSha256,
+        confirmation,
+      };
+    const response = await invoke(fx[handlerName], body);
+    assert.ok(response.error instanceof DatabaseRestoreHttpError);
+    assert.equal(response.error.code, 'database_restore_website_scope_required');
+    assert.equal(response.error.status, 409);
+    assert.equal(fx.calls.length, 0);
+  }
 });
