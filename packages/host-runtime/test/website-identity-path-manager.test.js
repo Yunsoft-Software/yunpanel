@@ -168,6 +168,7 @@ test('path-bound identity inspect reports missing workspace without mutating hos
   assert.equal(result.satisfied, false);
   assert.equal(result.reason, 'website_identity_workspace_missing');
   assert.equal(result.missingWorkspace, 'temporary');
+  assert.deepEqual(result.missingWorkspaces, ['temporary', 'logs']);
   assert.deepEqual(workspace.calls, []);
 });
 

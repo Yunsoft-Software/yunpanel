@@ -133,6 +133,45 @@ test('isolation migration digest pins the inspected exact-change reason', async 
   assert.notDeepEqual(first.migration.changes, second.migration.changes);
 });
 
+test('isolation audit emits exact receipt-bound directory changes for canonical workspace gaps', async () => {
+  const audit = await service({
+    stepResults: {
+      unix_identity: {
+        satisfied: false,
+        reason: 'website_identity_workspace_missing',
+        missingWorkspace: 'temporary',
+        missingWorkspaces: ['temporary', 'logs'],
+      },
+    },
+  }).audit(websiteId);
+
+  assert.equal(audit.migration.changes.length, 1);
+  assert.deepEqual(audit.inspectedSteps[0].missingWorkspaces, ['temporary', 'logs']);
+  assert.deepEqual(audit.migration.changes[0], {
+    id: 'workspace.directories',
+    action: 'create_workspace_directories',
+    ownership: 'operation_receipt_planned',
+    applyState: 'requires_explicit_apply',
+    current: {
+      operationId,
+      stepId: 'unix_identity',
+      stepKind: 'unix_identity',
+      stepState: 'succeeded',
+      intentSha256: audit.migration.changes[0].current.intentSha256,
+      directories: [
+        { name: 'temporary', directory: identity.paths.workspace.temporaryDirectory, present: false },
+        { name: 'logs', directory: identity.paths.workspace.logDirectory, present: false },
+      ],
+    },
+    desired: {
+      directories: [
+        { name: 'temporary', directory: identity.paths.workspace.temporaryDirectory, mode: '0700' },
+        { name: 'logs', directory: identity.paths.workspace.logDirectory, mode: '0750' },
+      ],
+    },
+  });
+});
+
 test('isolation audit fails closed when managed host inspection detects drift', async () => {
   const drift = new Error('drift');
   drift.code = 'website_identity_workspace_drift';

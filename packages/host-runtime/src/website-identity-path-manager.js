@@ -230,11 +230,16 @@ export function createWebsiteIdentityPathManager({
 
   async function inspectWorkspaceState(contract, identity) {
     if (!contract) return Object.freeze({ satisfied: true, pathContract: null });
+    const missingWorkspaces = [];
     for (const target of workspaceTargets(contract)) {
-      if (!await inspectTarget(target, identity)) return Object.freeze({
+      if (!await inspectTarget(target, identity)) missingWorkspaces.push(target.name);
+    }
+    if (missingWorkspaces.length > 0) {
+      return Object.freeze({
         satisfied: false,
         reason: 'website_identity_workspace_missing',
-        missingWorkspace: target.name,
+        missingWorkspace: missingWorkspaces[0],
+        missingWorkspaces: Object.freeze(missingWorkspaces),
       });
     }
     return Object.freeze({
@@ -255,6 +260,7 @@ export function createWebsiteIdentityPathManager({
         satisfied: false,
         reason: workspace.reason,
         missingWorkspace: workspace.missingWorkspace,
+        missingWorkspaces: workspace.missingWorkspaces,
       });
     }
     return Object.freeze({

@@ -37,15 +37,26 @@ function valueDigest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function migrationChange({ id, action, current, desired, ownership = 'unverified' }) {
+function migrationChange({ id, action, current, desired, ownership = 'unverified', applyState = null }) {
   return Object.freeze({
     id,
     action,
     ownership,
-    applyState: ownership === 'operation_owned' ? 'requires_explicit_apply' : 'blocked',
+    applyState: applyState ?? (ownership === 'operation_owned' ? 'requires_explicit_apply' : 'blocked'),
     current: Object.freeze({ ...current }),
     desired: Object.freeze({ ...desired }),
   });
+}
+
+function workspaceDirectories(result, identity) {
+  if (result?.reason !== 'website_identity_workspace_missing' || !Array.isArray(result.missingWorkspaces)) return null;
+  const definitions = Object.freeze({
+    temporary: Object.freeze({ name: 'temporary', directory: identity.paths.workspace.temporaryDirectory, mode: '0700' }),
+    logs: Object.freeze({ name: 'logs', directory: identity.paths.workspace.logDirectory, mode: '0750' }),
+  });
+  const names = [...new Set(result.missingWorkspaces)];
+  if (names.length < 1 || names.some((name) => !definitions[name])) return null;
+  return Object.freeze(names.map((name) => definitions[name]));
 }
 
 function handlerContext(operation, step) {
@@ -202,11 +213,17 @@ export function createWebsiteIsolationAuditService({
         try {
           const result = await handler.inspect(handlerContext(operation, step));
           const satisfied = result?.satisfied === true;
+          const missingWorkspaceDirectories = stepId === 'unix_identity'
+            ? workspaceDirectories(result, identity)
+            : null;
           inspectedSteps.push(Object.freeze({
             stepId,
             kind: step.kind,
             satisfied,
             reason: satisfied ? null : result?.reason ?? 'isolation_not_satisfied',
+            ...(missingWorkspaceDirectories ? {
+              missingWorkspaces: Object.freeze(missingWorkspaceDirectories.map((target) => target.name)),
+            } : {}),
           }));
           if (!satisfied) {
             findings.push(finding(
@@ -215,7 +232,27 @@ export function createWebsiteIsolationAuditService({
               `${stepId} host isolation is not currently satisfied.`,
               'Inspect the reported drift and use an explicit migration/retry path instead of recursive ownership repair.',
             ));
-            changes.push(migrationChange({
+            changes.push(missingWorkspaceDirectories ? migrationChange({
+              id: 'workspace.directories',
+              action: 'create_workspace_directories',
+              ownership: 'operation_receipt_planned',
+              applyState: 'requires_explicit_apply',
+              current: {
+                operationId: operation.operationId,
+                stepId,
+                stepKind: step.kind,
+                stepState: step.state,
+                intentSha256: valueDigest(step.intent),
+                directories: Object.freeze(missingWorkspaceDirectories.map((target) => Object.freeze({
+                  name: target.name,
+                  directory: target.directory,
+                  present: false,
+                }))),
+              },
+              desired: {
+                directories: missingWorkspaceDirectories,
+              },
+            }) : migrationChange({
               id: `provisioning.${stepId}`,
               action: 'reconcile_isolation_step',
               ownership: 'operation_receipt_required',
@@ -308,4 +345,5 @@ export const websiteIsolationAuditInternals = Object.freeze({
   migrationDigest,
   valueDigest,
   migrationChange,
+  workspaceDirectories,
 });
