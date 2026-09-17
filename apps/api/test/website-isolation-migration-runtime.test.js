@@ -185,3 +185,61 @@ test('typed rollback compensates only the migration workspace receipt', async ()
   assert.equal(rolledBack.compensation.removedWorkspaceDirectories, 2);
   assert.equal(workspace.calls.some(([name]) => name === 'compensate'), true);
 });
+
+test('parallel apply and rollback requests share one host mutation flight', async () => {
+  const store = registry();
+  const workspace = manager();
+  const baseApply = workspace.applyWorkspace;
+  const baseCompensate = workspace.compensateWorkspace;
+  let releaseApply;
+  let releaseCompensation;
+  const applyGate = new Promise((resolve) => { releaseApply = resolve; });
+  const compensationGate = new Promise((resolve) => { releaseCompensation = resolve; });
+  let signalApply;
+  let signalCompensation;
+  const applyStarted = new Promise((resolve) => { signalApply = resolve; });
+  const compensationStarted = new Promise((resolve) => { signalCompensation = resolve; });
+  workspace.applyWorkspace = async (...args) => {
+    signalApply();
+    await applyGate;
+    return baseApply(...args);
+  };
+  workspace.compensateWorkspace = async (...args) => {
+    signalCompensation();
+    await compensationGate;
+    return baseCompensate(...args);
+  };
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: store,
+    auditService: { audit: async () => preview() },
+    workspaceManager: workspace,
+  });
+  await runtime.init();
+
+  const firstApply = runtime.start({ websiteId, previewDigest, confirmation });
+  await applyStarted;
+  const secondApply = runtime.start({ websiteId, previewDigest, confirmation });
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseApply();
+  const applied = await Promise.all([firstApply, secondApply]);
+  assert.deepEqual(applied.map((entry) => entry.status), ['succeeded', 'succeeded']);
+  assert.equal(workspace.calls.filter(([name]) => name === 'apply').length, 1);
+
+  const rollbackInput = {
+    operationId,
+    confirmation: `rollback-isolation-migration:${operationId}:${previewDigest}`,
+  };
+  const firstRollback = runtime.rollback(rollbackInput);
+  await compensationStarted;
+  await assert.rejects(
+    runtime.rollback({ ...rollbackInput, confirmation: 'wrong' }),
+    (error) => error instanceof WebsiteIsolationMigrationRuntimeError
+      && error.code === 'website_isolation_migration_rollback_confirmation_invalid',
+  );
+  const secondRollback = runtime.rollback(rollbackInput);
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseCompensation();
+  const rolledBack = await Promise.all([firstRollback, secondRollback]);
+  assert.deepEqual(rolledBack.map((entry) => entry.status), ['compensated', 'compensated']);
+  assert.equal(workspace.calls.filter(([name]) => name === 'compensate').length, 1);
+});

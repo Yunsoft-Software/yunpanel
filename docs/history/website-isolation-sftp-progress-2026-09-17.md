@@ -23,6 +23,7 @@ Bu kayıt 16 Eylül Website isolation audit'inden sonra tamamlanan source-level 
 - Apply intent'i host mutation'dan önce root-private durable migration registry'ye yazılır. Host workspace receipt'i yalnız operation-created direct-child dizinleri sahiplenir. Restartta `applying` state kör replay edilmez; receipt inspection tamamlanmış postcondition'ı kapatır, belirsiz/incomplete state operator müdahalesi için açık kalır.
 - Typed rollback yalnız aynı operation receipt'inin sahip olduğu boş dizinleri non-recursive kaldırır; pre-existing veya veri içeren dizin, Unix account/home, runtime ve SFTP state'i korunur. HTTP yüzeyi migration list/get/apply/rollback endpoint'lerini panel auth ve local Website scope arkasında sunar; raw intent veya secret public projection'a çıkmaz.
 - Website izolasyon paneli stale “apply kapalı” bildiriminden çıkarıldı. Yalnız `applyAvailable` workspace preview'ında exact path/mode/ownership gate gösterilir, mevcut reusable typed-confirmation dialog'u apply'i başlatır; durable operation durumları ve receipt sonucu listelenir, güvenli statülerde operation/digest-bound rollback açılır. Browser `prompt`/`alert` ve storage kullanılmaz.
+- Aynı operation için paralel apply veya rollback istekleri runtime içinde tek host mutation flight'ını paylaşır. İkinci sekme aynı sonucu bekler; workspace adapter'ı eşzamanlı iki kez çalıştırılmaz. Yanlış rollback confirmation aktif flight'a katılamadan reddedilir.
 
 ## SFTP public-key lifecycle source durumu
 

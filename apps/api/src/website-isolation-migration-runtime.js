@@ -107,6 +107,19 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
       503,
     );
   }
+  const applyFlights = new Map();
+  const rollbackFlights = new Map();
+
+  function singleFlight(flights, operationId, execute) {
+    const key = typeof operationId === 'string' ? operationId.toLowerCase() : operationId;
+    const active = flights.get(key);
+    if (active) return active;
+    const flight = Promise.resolve().then(execute).finally(() => {
+      if (flights.get(key) === flight) flights.delete(key);
+    });
+    flights.set(key, flight);
+    return flight;
+  }
 
   async function audit(websiteId) {
     try { return await auditService.audit(websiteId); }
@@ -121,7 +134,7 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
     return operation;
   }
 
-  async function run(operationId) {
+  async function executeRun(operationId) {
     let operation = await getRequired(operationId);
     if (['succeeded', 'failed', 'compensated', 'compensation_failed'].includes(operation.status)) {
       return websiteIsolationMigrationPublicView(operation);
@@ -187,6 +200,10 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
     }
   }
 
+  function run(operationId) {
+    return singleFlight(applyFlights, operationId, () => executeRun(operationId));
+  }
+
   async function start({ websiteId, previewDigest, confirmation } = {}) {
     if (typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)) {
       throw new WebsiteIsolationMigrationRuntimeError('website_isolation_migration_preview_invalid', 'Current Website isolation migration preview digest is required', 400);
@@ -207,16 +224,8 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
     return run(operation.id);
   }
 
-  async function rollback({ operationId, confirmation } = {}) {
+  async function executeRollback(operationId) {
     let operation = await getRequired(operationId);
-    const expected = `rollback-isolation-migration:${operation.id}:${operation.previewDigest}`;
-    if (confirmation !== expected) {
-      throw new WebsiteIsolationMigrationRuntimeError(
-        'website_isolation_migration_rollback_confirmation_invalid',
-        `Confirm Website isolation migration rollback with ${expected}`,
-        400,
-      );
-    }
     if (operation.status === 'compensated') return websiteIsolationMigrationPublicView(operation);
     if (!['succeeded', 'failed', 'compensation_failed', 'compensating'].includes(operation.status)) {
       throw new WebsiteIsolationMigrationRuntimeError('website_isolation_migration_rollback_invalid', 'Website isolation migration cannot be rolled back from its current state');
@@ -239,6 +248,19 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
         safeCode(error, 'website_isolation_migration_compensation_failed'),
       ));
     }
+  }
+
+  async function rollback({ operationId, confirmation } = {}) {
+    const operation = await getRequired(operationId);
+    const expected = `rollback-isolation-migration:${operation.id}:${operation.previewDigest}`;
+    if (confirmation !== expected) {
+      throw new WebsiteIsolationMigrationRuntimeError(
+        'website_isolation_migration_rollback_confirmation_invalid',
+        `Confirm Website isolation migration rollback with ${expected}`,
+        400,
+      );
+    }
+    return singleFlight(rollbackFlights, operation.id, () => executeRollback(operation.id));
   }
 
   async function init() {
