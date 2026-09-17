@@ -13,11 +13,12 @@ import path from 'node:path';
 import {
   phpMyAdminFpmTemplatePolicy,
   phpMyAdminNginxTemplatePolicy,
+  phpMyAdminSignonTemplatePolicy,
 } from '@yunpanel/config-templates';
 
 const TRANSACTION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
-const MANIFEST_VERSION = 1;
+const MANIFEST_VERSION = 2;
 const BACKUP_ROOT_MODE = 0o700;
 const BACKUP_FILE_MODE = 0o600;
 const MAX_CONFIG_BYTES = 1024 * 1024;
@@ -60,6 +61,8 @@ export function createPhpMyAdminConfigBackupManager({
   backupRoot = '/var/lib/yunpanel/backups/phpmyadmin',
   fpmPoolPath = phpMyAdminFpmTemplatePolicy.poolPath,
   nginxConfigPath = phpMyAdminNginxTemplatePolicy.configPath,
+  signonConfigPath = phpMyAdminSignonTemplatePolicy.configPath,
+  signonBridgePath = phpMyAdminSignonTemplatePolicy.bridgePath,
   chmodFn = chmod,
   chownFn = chown,
   lstatFn = lstat,
@@ -80,6 +83,8 @@ export function createPhpMyAdminConfigBackupManager({
   const targets = Object.freeze([
     Object.freeze({ targetPath: fpmPoolPath, backupName: 'yunpanel-phpmyadmin-fpm.conf' }),
     Object.freeze({ targetPath: nginxConfigPath, backupName: 'yunpanel-phpmyadmin-nginx.conf' }),
+    Object.freeze({ targetPath: signonConfigPath, backupName: 'zz-yunpanel.php' }),
+    Object.freeze({ targetPath: signonBridgePath, backupName: 'yunpanel-phpmyadmin-signon.php' }),
   ]);
 
   function transactionDirectory(id) {
