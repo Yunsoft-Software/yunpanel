@@ -187,6 +187,27 @@ function sameManagedMetadata(current, wanted) {
     && current.managed.templateVersion === desired.templateVersion);
 }
 
+function rrsetState(rrset) {
+  return Object.freeze({
+    name: rrset.name,
+    type: rrset.type,
+    ttl: rrset.ttl,
+    records: Object.freeze(rrset.records
+      .map((entry) => `${entry.disabled ? '1' : '0'}\u0000${entry.content}`)
+      .sort()),
+    comments: Object.freeze(rrset.comments
+      .map((entry) => `${String(entry.account ?? '')}\u0000${String(entry.content ?? '')}`)
+      .sort()),
+  });
+}
+
+function sameZoneState(left, right) {
+  if (!left || !right || left.id !== right.id || left.kind !== right.kind || left.dnssec !== right.dnssec) return false;
+  const a = left.rrsets.map(rrsetState).sort((x, y) => rrsetKey(x).localeCompare(rrsetKey(y)));
+  const b = right.rrsets.map(rrsetState).sort((x, y) => rrsetKey(x).localeCompare(rrsetKey(y)));
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 function desiredMap(records) {
   const result = new Map();
   for (const record of records) {
@@ -398,6 +419,7 @@ export function createPowerDnsZoneManager({
     const nameservers = desiredNameservers(normalizedZone, desired);
     let existing = await getZone(normalizedZone, rawApiKey);
     let created = false;
+    let createdBaseline = null;
     let primaryKindChanged = false;
     if (!existing) {
       await request('/zones', {
@@ -414,6 +436,7 @@ export function createPowerDnsZoneManager({
       created = true;
       existing = await getZone(normalizedZone, rawApiKey);
       if (!existing) throw new PowerDnsZoneManagerError('powerdns_zone_create_unverified', 'PowerDNS zone creation could not be verified');
+      createdBaseline = existing;
     } else if (notifySecondaries === true) {
       const primary = await ensurePrimaryZone(existing, normalizedZone, rawApiKey);
       existing = primary.zone;
@@ -423,9 +446,7 @@ export function createPowerDnsZoneManager({
     let changes;
     try { changes = changesFor(existing, desired, { allowUnmanagedReplacement: created }); }
     catch (error) {
-      if (created) {
-        try { await request(`/zones/${encodeURIComponent(fqdn(normalizedZone))}`, { method: 'DELETE', key: rawApiKey }); } catch { /* best effort */ }
-      }
+      if (created) await cleanupCreatedZone(normalizedZone, rawApiKey, createdBaseline, desired);
       throw error;
     }
     try {
@@ -437,9 +458,7 @@ export function createPowerDnsZoneManager({
         });
       }
     } catch (error) {
-      if (created) {
-        try { await request(`/zones/${encodeURIComponent(fqdn(normalizedZone))}`, { method: 'DELETE', key: rawApiKey }); } catch { /* best effort */ }
-      }
+      if (created) await cleanupCreatedZone(normalizedZone, rawApiKey, createdBaseline, desired);
       throw error;
     }
 
@@ -461,30 +480,89 @@ export function createPowerDnsZoneManager({
     });
   }
 
-  async function compensate({ zoneName: requestedZoneName, apiKey: rawApiKey } = {}) {
+  function compensationOwnership(existing, desired) {
+    const unmanaged = existing.rrsets.filter((rrset) => !rrset.managed);
+    if (unmanaged.length > 0) return Object.freeze({
+      satisfied: false,
+      reason: 'powerdns_zone_compensation_manual_records',
+      manualRrsetCount: unmanaged.length,
+    });
+    const inspected = inspectAgainstDesired(existing, desired);
+    if (!inspected.satisfied) return Object.freeze({
+      satisfied: false,
+      reason: 'powerdns_zone_compensation_ownership_drift',
+      ownershipReason: inspected.reason,
+    });
+    return Object.freeze({ satisfied: true, managedRrsetCount: inspected.managedRrsetCount });
+  }
+
+  async function cleanupCreatedZone(normalizedZone, rawApiKey, createdBaseline, desired) {
+    try {
+      const current = await getZone(normalizedZone, rawApiKey);
+      if (!current) return;
+      const ownership = compensationOwnership(current, desired);
+      if (!sameZoneState(current, createdBaseline) && !ownership.satisfied) return;
+      await request(`/zones/${encodeURIComponent(fqdn(normalizedZone))}`, { method: 'DELETE', key: rawApiKey });
+    } catch {
+      // The original apply error remains authoritative. Uncertain cleanup is intentionally preserved.
+    }
+  }
+
+  async function compensate({ zoneName: requestedZoneName, apiKey: rawApiKey, records } = {}) {
     const normalizedZone = zoneName(requestedZoneName);
+    const desired = desiredMap(records ?? []);
+    desiredNameservers(normalizedZone, desired);
     const existing = await getZone(normalizedZone, rawApiKey);
     if (!existing) return Object.freeze({ satisfied: true, zoneName: normalizedZone, deleted: false });
-    const unmanaged = existing.rrsets.filter((rrset) => !rrset.managed);
-    if (unmanaged.length > 0) {
+    const ownership = compensationOwnership(existing, desired);
+    if (ownership.reason === 'powerdns_zone_compensation_manual_records') {
       throw new PowerDnsZoneManagerError(
         'powerdns_zone_compensation_manual_records',
         'PowerDNS zone contains manual records and cannot be removed automatically',
         409,
       );
     }
+    if (!ownership.satisfied) {
+      throw new PowerDnsZoneManagerError(
+        'powerdns_zone_compensation_ownership_drift',
+        'PowerDNS zone no longer matches the exact operation-owned desired state',
+        409,
+      );
+    }
     await request(`/zones/${encodeURIComponent(fqdn(normalizedZone))}`, { method: 'DELETE', key: rawApiKey });
     const after = await getZone(normalizedZone, rawApiKey);
     if (after) throw new PowerDnsZoneManagerError('powerdns_zone_delete_unverified', 'PowerDNS zone deletion could not be verified');
-    return Object.freeze({ satisfied: true, zoneName: normalizedZone, deleted: true });
+    return Object.freeze({
+      satisfied: true,
+      zoneName: normalizedZone,
+      deleted: true,
+      managedRrsetCount: ownership.managedRrsetCount,
+    });
   }
 
-  async function inspectCompensation({ zoneName: requestedZoneName, apiKey: rawApiKey } = {}) {
+  async function inspectCompensation({ zoneName: requestedZoneName, apiKey: rawApiKey, records } = {}) {
     const normalizedZone = zoneName(requestedZoneName);
+    const desired = desiredMap(records ?? []);
+    desiredNameservers(normalizedZone, desired);
     const existing = await getZone(normalizedZone, rawApiKey);
-    return existing
-      ? Object.freeze({ satisfied: false, reason: 'powerdns_zone_still_exists', zoneName: normalizedZone })
-      : Object.freeze({ satisfied: true, zoneName: normalizedZone, deleted: true });
+    if (!existing) return Object.freeze({ satisfied: true, zoneName: normalizedZone, deleted: true });
+    const ownership = compensationOwnership(existing, desired);
+    if (!ownership.satisfied) return Object.freeze({
+      satisfied: false,
+      reason: ownership.reason,
+      zoneName: normalizedZone,
+      ...(ownership.ownershipReason ? { ownershipReason: ownership.ownershipReason } : {}),
+      ...(Number.isSafeInteger(ownership.manualRrsetCount)
+        ? { manualRrsetCount: ownership.manualRrsetCount }
+        : {}),
+    });
+    return Object.freeze({
+      satisfied: false,
+      reason: 'powerdns_zone_still_exists',
+      zoneName: normalizedZone,
+      operationOwned: true,
+      managedRrsetCount: ownership.managedRrsetCount,
+    });
   }
 
   return Object.freeze({ inspect, apply, compensate, inspectCompensation, getZone, notifyZone });
@@ -507,6 +585,8 @@ export const powerDnsZoneManagerInternals = Object.freeze({
   normalizedExistingRrset,
   sameRecords,
   sameManagedMetadata,
+  rrsetState,
+  sameZoneState,
   desiredMap,
   serialFromRrsets,
   serialMetadata,

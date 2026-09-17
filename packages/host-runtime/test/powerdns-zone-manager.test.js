@@ -38,7 +38,7 @@ function desiredRecords() {
   ];
 }
 
-function fakePowerDnsApi({ initialZone = null } = {}) {
+function fakePowerDnsApi({ initialZone = null, failPatch = null } = {}) {
   let zone = initialZone ? structuredClone(initialZone) : null;
   const calls = [];
   const fetchFn = async (url, options = {}) => {
@@ -72,6 +72,10 @@ function fakePowerDnsApi({ initialZone = null } = {}) {
     }
     if (method === 'PATCH' && path.endsWith('/zones/example.com.')) {
       const body = JSON.parse(options.body);
+      if (typeof failPatch === 'function') {
+        zone = failPatch(structuredClone(zone), structuredClone(body)) ?? zone;
+        return response(503, { error: 'injected patch failure' });
+      }
       for (const rrset of body.rrsets) {
         const index = zone.rrsets.findIndex((candidate) => candidate.name === rrset.name && candidate.type === rrset.type);
         if (rrset.changetype === 'DELETE') {
@@ -122,6 +126,40 @@ test('creates a zone then replaces generated SOA and NS with managed RRsets', as
   assert.equal(patch.body.rrsets.every((rrset) => rrset.comments?.[0]?.account === 'yunpanel'), true);
 });
 
+test('cleans up an unchanged operation-created zone after a failed initial patch', async () => {
+  const api = fakePowerDnsApi({ failPatch: (zone) => zone });
+  const manager = createPowerDnsZoneManager({ fetchFn: api.fetchFn });
+  await assert.rejects(
+    manager.apply({ zoneName: 'example.com', apiKey: key, records: desiredRecords() }),
+    (error) => error instanceof PowerDnsZoneManagerError && error.code === 'powerdns_zone_api_failed',
+  );
+  assert.equal(api.zone, null);
+  assert.equal(api.calls.some((call) => call.method === 'DELETE'), true);
+});
+
+test('preserves an operation-created zone when manual data appears during failed apply cleanup', async () => {
+  const api = fakePowerDnsApi({
+    failPatch: (zone) => ({
+      ...zone,
+      rrsets: [
+        ...zone.rrsets,
+        {
+          name: 'manual.example.com.', type: 'TXT', ttl: 300,
+          records: [{ content: '"keep-me"', disabled: false }], comments: [],
+        },
+      ],
+    }),
+  });
+  const manager = createPowerDnsZoneManager({ fetchFn: api.fetchFn });
+  await assert.rejects(
+    manager.apply({ zoneName: 'example.com', apiKey: key, records: desiredRecords() }),
+    (error) => error instanceof PowerDnsZoneManagerError && error.code === 'powerdns_zone_api_failed',
+  );
+  assert.ok(api.zone);
+  assert.equal(api.zone.rrsets.some((rrset) => rrset.name === 'manual.example.com.'), true);
+  assert.equal(api.calls.some((call) => call.method === 'DELETE'), false);
+});
+
 test('fails closed instead of overwriting a manual RRset', async () => {
   const api = fakePowerDnsApi({
     initialZone: {
@@ -163,8 +201,47 @@ test('refuses compensation when a zone has manual RRsets', async () => {
   const api = fakePowerDnsApi({ initialZone: { id: 'example.com.', kind: 'Native', dnssec: false, rrsets: managed } });
   const manager = createPowerDnsZoneManager({ fetchFn: api.fetchFn });
   await assert.rejects(
-    manager.compensate({ zoneName: 'example.com', apiKey: key }),
+    manager.compensate({ zoneName: 'example.com', apiKey: key, records: desiredRecords() }),
     (error) => error instanceof PowerDnsZoneManagerError && error.code === 'powerdns_zone_compensation_manual_records',
   );
   assert.ok(api.zone);
+});
+
+test('deletes a compensation zone only when every RRset matches exact managed intent', async () => {
+  const managed = desiredRecords().map(powerDnsZoneManagerInternals.desiredRrset).map((entry) => structuredClone(entry));
+  const api = fakePowerDnsApi({ initialZone: { id: 'example.com.', kind: 'Primary', dnssec: false, rrsets: managed } });
+  const manager = createPowerDnsZoneManager({ fetchFn: api.fetchFn });
+  const result = await manager.compensate({
+    zoneName: 'example.com',
+    apiKey: key,
+    records: desiredRecords(),
+  });
+  assert.equal(result.satisfied, true);
+  assert.equal(result.deleted, true);
+  assert.equal(result.managedRrsetCount, 4);
+  assert.equal(api.zone, null);
+});
+
+test('refuses compensation when managed RRset ownership metadata drifted', async () => {
+  const managed = desiredRecords().map(powerDnsZoneManagerInternals.desiredRrset).map((entry) => structuredClone(entry));
+  managed[2].comments = [powerDnsZoneManagerInternals.commentFor({
+    ...desiredRecords()[2],
+    key: 'different-owner',
+  })];
+  const api = fakePowerDnsApi({ initialZone: { id: 'example.com.', kind: 'Primary', dnssec: false, rrsets: managed } });
+  const manager = createPowerDnsZoneManager({ fetchFn: api.fetchFn });
+  await assert.rejects(
+    manager.compensate({ zoneName: 'example.com', apiKey: key, records: desiredRecords() }),
+    (error) => error instanceof PowerDnsZoneManagerError && error.code === 'powerdns_zone_compensation_ownership_drift',
+  );
+  assert.ok(api.zone);
+  assert.equal(api.calls.some((call) => call.method === 'DELETE'), false);
+  const inspected = await manager.inspectCompensation({
+    zoneName: 'example.com',
+    apiKey: key,
+    records: desiredRecords(),
+  });
+  assert.equal(inspected.satisfied, false);
+  assert.equal(inspected.reason, 'powerdns_zone_compensation_ownership_drift');
+  assert.equal(inspected.ownershipReason, 'powerdns_zone_record_metadata_drift');
 });

@@ -7,6 +7,7 @@ Son mail durable apply/recovery ilerlemesi: `docs/history/mail-durable-apply-rec
 Son local PowerDNS DKIM retirement ilerlemesi: `docs/history/dns-local-dkim-retirement-2026-09-17.md`.
 Son mail discovery DNS gate ilerlemesi: `docs/history/dns-mail-discovery-gate-2026-09-17.md`.
 Son DNSSEC rollover adapter ilerlemesi: `docs/history/dnssec-rollover-progress-2026-09-17.md`.
+Son DNS zone compensation ownership ilerlemesi: `docs/history/dns-zone-compensation-ownership-2026-09-17.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -29,7 +30,7 @@ Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
 ## P0.3 — Versioned DNS Zone Template ve Domain DNS yönetimi
 
-- [ ] Zone suspend/delete/compensation ownership evidence'ını P0.9 lifecycle'ına bağla; manual kayıt içeren zone destructive cleanup'ta fail-closed kalsın.
+- [ ] Zone suspend/delete lifecycle'ını P0.9'a bağla; pre-existing zone re-apply için exact pre-operation RRset snapshot/record-level rollback evidence'ı ekle ve rollback-unavailable state'i retryable lifecycle'a taşı.
 
 Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içindedir.
 

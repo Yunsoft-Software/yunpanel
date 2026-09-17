@@ -115,6 +115,38 @@ function publicEvidence(intent, result) {
   });
 }
 
+function compensationOwnership(context, intent) {
+  const evidence = context.evidence;
+  const expectedSnapshotDigest = snapshotDigest(intent.templateSnapshot);
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)
+    || evidence.satisfied !== true
+    || evidence.adapter !== 'powerdns-zone'
+    || evidence.serverId !== intent.serverId
+    || evidence.webDomainId !== intent.webDomainId
+    || evidence.zoneName !== intent.zoneName
+    || evidence.templateVersion !== intent.templateVersion
+    || evidence.templateSnapshotDigest !== expectedSnapshotDigest
+    || evidence.dnsIdentityRevision !== intent.dnsIdentityRevision
+    || evidence.requestedSerial !== intent.serial
+    || evidence.dnssec !== intent.dnssec
+    || JSON.stringify(evidence.secondaryDns) !== JSON.stringify(intent.secondaryDns)
+    || typeof evidence.created !== 'boolean'
+    || !Number.isSafeInteger(evidence.changedRrsetCount) || evidence.changedRrsetCount < 0) {
+    throw new WebsiteProvisioningHandlerError(
+      'website_dns_zone_compensation_evidence_invalid',
+      'Website DNS zone compensation requires exact persisted apply ownership evidence',
+      409,
+    );
+  }
+  if (evidence.created === true) return Object.freeze({ operationOwned: true });
+  if (evidence.changedRrsetCount === 0) return Object.freeze({ operationOwned: false });
+  throw new WebsiteProvisioningHandlerError(
+    'website_dns_zone_compensation_rollback_unavailable',
+    'Pre-existing PowerDNS zone changes cannot be removed without an exact pre-operation snapshot',
+    409,
+  );
+}
+
 export function createWebsiteDnsZoneProvisioningHandler({
   zoneManager = createPowerDnsZoneManager(),
   materializeSecret = null,
@@ -180,12 +212,34 @@ export function createWebsiteDnsZoneProvisioningHandler({
 
   async function compensate(context = {}) {
     const intent = normalizedIntent(context);
-    return zoneManager.compensate({ zoneName: intent.zoneName, apiKey: await secret(intent.serverId) });
+    const ownership = compensationOwnership(context, intent);
+    if (!ownership.operationOwned) return Object.freeze({
+      satisfied: true,
+      zoneName: intent.zoneName,
+      deleted: false,
+      preservedPreExisting: true,
+    });
+    return zoneManager.compensate({
+      zoneName: intent.zoneName,
+      apiKey: await secret(intent.serverId),
+      records: intent.records,
+    });
   }
 
   async function inspectCompensation(context = {}) {
     const intent = normalizedIntent(context);
-    return zoneManager.inspectCompensation({ zoneName: intent.zoneName, apiKey: await secret(intent.serverId) });
+    const ownership = compensationOwnership(context, intent);
+    if (!ownership.operationOwned) return Object.freeze({
+      satisfied: true,
+      zoneName: intent.zoneName,
+      deleted: false,
+      preservedPreExisting: true,
+    });
+    return zoneManager.inspectCompensation({
+      zoneName: intent.zoneName,
+      apiKey: await secret(intent.serverId),
+      records: intent.records,
+    });
   }
 
   return Object.freeze({ apply, inspect, compensate, inspectCompensation });
@@ -198,4 +252,5 @@ export const websiteDnsZoneProvisioningInternals = Object.freeze({
   normalizedIntent,
   defaultSecretMaterializer,
   publicEvidence,
+  compensationOwnership,
 });
