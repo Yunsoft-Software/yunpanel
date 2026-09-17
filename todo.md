@@ -85,7 +85,7 @@ Bu bölüm yalnız güncel P0 provisioning/Passenger turundan kalan gerçek Ubun
 ## T-DATABASE — P0 site ownership ve canlı envanter
 
 - [ ] Website'e bağlı MySQL/MariaDB schema + user/grant gerçek local socket üzerinden oluşsun; Site A kullanıcısı Site B schema/table/metadata'sına erişemesin; rotation/revoke eski credential'ı kapatsın.
-- [ ] Database/server GET her sayfa açılışı ve refreshte canlı inventory versin; “sunucuyu tara” job'u gerektirmesin. Create/drop/grant mutation'ları durable job ve post-condition kanıtıyla kalsın.
+- [ ] Database/server GET her sayfa açılışı ve refreshte canlı inventory ile doğru Website binding/secret-free credential durumunu versin; silinmiş schema binding'i açıkça ayrılsın, “sunucuyu tara” job'u gerektirmesin. Create/drop/grant mutation'ları durable job ve post-condition kanıtıyla kalsın.
 - [ ] phpMyAdmin signon sonrası görünen schema seti aynı grant sınırıyla eşleşsin; direct phpMyAdmin URL YunPanel session olmadan erişilemesin.
 - [ ] MariaDB/MySQL backup/restore vendor dump + restic akışında checksum, consistency, pre-restore snapshot ve rollback ile doğrulansın.
 

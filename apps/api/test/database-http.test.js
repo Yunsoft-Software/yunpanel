@@ -5,6 +5,7 @@ import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { createApp } from '../src/app.js';
 import { createAuthenticatedApi } from '../src/auth-http.js';
+import { databaseHttpInternals } from '../src/database-http.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 
@@ -109,6 +110,78 @@ test('live database GET fails closed on provider failure or malformed inventory'
     assert.equal(body.error.code, 'database_inventory_unavailable');
     assert.equal(JSON.stringify(body).includes('socket path leaked'), false);
   }
+});
+
+test('live inventory joins Website binding and secret-safe credential metadata', async () => {
+  const binding = {
+    id: '12345678-1234-4234-8234-123456789012',
+    serverId: '22345678-1234-4234-8234-123456789012',
+    databaseName: 'live_db',
+    websiteId: '32345678-1234-4234-8234-123456789012',
+    applicationId: '42345678-1234-4234-8234-123456789012',
+    unixUser: 'yunapp-abcdef012345',
+    revision: 3,
+  };
+  const credential = {
+    id: '52345678-1234-4234-8234-123456789012',
+    databaseBindingId: binding.id,
+    serverId: binding.serverId,
+    username: 'ydb_abcdef012345abcdef012345',
+    host: 'localhost',
+    privileges: ['SELECT', 'INSERT'],
+    revision: 4,
+    passwordUpdatedAt: '2026-09-17T12:00:00.000Z',
+    password: 'must-not-leak',
+  };
+  const result = await databaseHttpInternals.attachDatabaseOwnership({
+    engine: 'mariadb',
+    version: '10.11',
+    live: true,
+    databases: [{ name: 'live_db', sizeBytes: 42 }, { name: 'free_db', sizeBytes: 0 }],
+  }, {
+    serverId: binding.serverId,
+    databaseBindingRegistry: { async listBindings() { return [binding]; } },
+    databaseCredentialRegistry: { async listCredentials() { return [credential]; } },
+  });
+  assert.deepEqual(result.databases[0].ownership.credential, {
+    id: credential.id,
+    username: credential.username,
+    host: 'localhost',
+    privileges: ['SELECT', 'INSERT'],
+    revision: 4,
+    passwordUpdatedAt: credential.passwordUpdatedAt,
+  });
+  assert.equal(result.databases[1].ownership, null);
+  assert.equal('password' in result.databases[0].ownership.credential, false);
+  assert.deepEqual(result.ownership, {
+    bindingCount: 1,
+    credentialCount: 1,
+    missingDatabaseBindingCount: 0,
+  });
+});
+
+test('live inventory fails closed when credential ownership cannot be joined exactly', async () => {
+  await assert.rejects(
+    databaseHttpInternals.attachDatabaseOwnership({ databases: [] }, {
+      serverId: '22345678-1234-4234-8234-123456789012',
+      databaseBindingRegistry: { async listBindings() { return []; } },
+      databaseCredentialRegistry: {
+        async listCredentials() {
+          return [{
+            id: '52345678-1234-4234-8234-123456789012',
+            databaseBindingId: '12345678-1234-4234-8234-123456789012',
+            serverId: '22345678-1234-4234-8234-123456789012',
+            username: 'ydb_abcdef012345abcdef012345',
+            host: 'localhost',
+            privileges: ['SELECT'],
+            revision: 1,
+            passwordUpdatedAt: '2026-09-17T12:00:00.000Z',
+          }];
+        },
+      },
+    }),
+    (error) => error?.code === 'database_ownership_state_unavailable' && error?.status === 503,
+  );
 });
 
 test('database create and delete require exact confirmation and validated names', async (t) => {

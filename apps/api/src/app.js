@@ -600,6 +600,7 @@ export function createApp({
     registry: localRegistry,
     jobRegistry,
     databaseBindingRegistry,
+    databaseCredentialRegistry,
     databaseInventoryProvider,
   });
   mountLogRoutes(app, {

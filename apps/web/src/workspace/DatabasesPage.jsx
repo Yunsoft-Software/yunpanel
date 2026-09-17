@@ -130,8 +130,13 @@ export default function DatabasesPage() {
             ['Sürüm', inventory.version ?? '—'],
             ['Toplam boyut', formatDatabaseBytes(inventory.totalBytes)],
             ['Veritabanı', inventory.databases.length],
+            ...(inventory.ownership ? [
+              ['Website bağı', inventory.ownership.bindingCount],
+              ['Credential', inventory.ownership.credentialCount],
+              ['Eksik schema bağı', inventory.ownership.missingDatabaseBindingCount],
+            ] : []),
           ]} />
-          {inventory.databases.length === 0 ? <EmptyState title="Kullanıcı veritabanı yok" detail="Sistem şemaları güvenlik için listede gösterilmez. Yeni bir uygulama veritabanı oluşturabilirsiniz." icon="database" /> : <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Veritabanı</th><th>Boyut</th><th className="ws-row-end">İşlem</th></tr></thead><tbody>{inventory.databases.map((database) => <tr key={database.name}><td><strong>{database.name}</strong></td><td>{database.sizeLabel}</td><td className="ws-row-end"><Button variant="danger" disabled={busy} onClick={() => setDeleteTarget(database)}>Sil</Button></td></tr>)}</tbody></table></div>}
+          {inventory.databases.length === 0 ? <EmptyState title="Kullanıcı veritabanı yok" detail="Sistem şemaları güvenlik için listede gösterilmez. Yeni bir uygulama veritabanı oluşturabilirsiniz." icon="database" /> : <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Veritabanı</th><th>Website sahibi</th><th>Boyut</th><th className="ws-row-end">İşlem</th></tr></thead><tbody>{inventory.databases.map((database) => <tr key={database.name}><td><strong>{database.name}</strong></td><td>{database.ownership ? <><strong><code>{database.ownership.unixUser}</code></strong><small>{database.ownership.websiteId}</small><small>{database.ownership.credential ? `DB user: ${database.ownership.credential.username}` : 'Credential oluşturulmadı'}</small></> : <span>Bağlı değil</span>}</td><td>{database.sizeLabel}</td><td className="ws-row-end"><Button variant="danger" disabled={busy} onClick={() => setDeleteTarget(database)}>Sil</Button></td></tr>)}</tbody></table></div>}
         </>}
       </Section>
 

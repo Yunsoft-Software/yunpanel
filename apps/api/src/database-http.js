@@ -127,6 +127,92 @@ async function liveDatabaseInventory(databaseInventoryProvider, serverId) {
   }
 }
 
+async function attachDatabaseOwnership(inventory, {
+  serverId,
+  databaseBindingRegistry,
+  databaseCredentialRegistry,
+}) {
+  if (!databaseBindingRegistry) return inventory;
+  let bindings;
+  let credentials;
+  try {
+    [bindings, credentials] = await Promise.all([
+      databaseBindingRegistry.listBindings({ serverId }),
+      databaseCredentialRegistry
+        ? databaseCredentialRegistry.listCredentials({ serverId })
+        : Promise.resolve([]),
+    ]);
+  } catch {
+    throw new DatabaseHttpError(
+      'database_ownership_state_unavailable',
+      'Database Website ownership state could not be read',
+      503,
+    );
+  }
+  if (!Array.isArray(bindings) || !Array.isArray(credentials)) {
+    throw new DatabaseHttpError(
+      'database_ownership_state_unavailable',
+      'Database Website ownership state is invalid',
+      503,
+    );
+  }
+  const bindingIds = new Set(bindings.map((binding) => binding?.id));
+  const bindingNames = new Set(bindings.map((binding) => binding?.databaseName?.toLowerCase()));
+  if (bindings.some((binding) => !binding || typeof binding !== 'object'
+    || typeof binding.id !== 'string' || typeof binding.databaseName !== 'string'
+    || binding.serverId !== serverId
+    || typeof binding.websiteId !== 'string' || typeof binding.applicationId !== 'string'
+    || typeof binding.unixUser !== 'string' || !Number.isSafeInteger(binding.revision) || binding.revision < 1)
+    || credentials.some((credential) => !credential || typeof credential !== 'object'
+      || typeof credential.id !== 'string' || typeof credential.databaseBindingId !== 'string'
+      || credential.serverId !== serverId || !bindingIds.has(credential.databaseBindingId)
+      || typeof credential.username !== 'string' || credential.host !== 'localhost'
+      || !Array.isArray(credential.privileges) || credential.privileges.some((entry) => typeof entry !== 'string')
+      || !Number.isSafeInteger(credential.revision) || credential.revision < 1
+      || typeof credential.passwordUpdatedAt !== 'string')
+    || bindingIds.size !== bindings.length || bindingNames.size !== bindings.length
+    || new Set(credentials.map((credential) => credential.databaseBindingId)).size !== credentials.length) {
+    throw new DatabaseHttpError(
+      'database_ownership_state_unavailable',
+      'Database Website ownership state is invalid',
+      503,
+    );
+  }
+  const bindingByName = new Map(bindings.map((binding) => [binding.databaseName.toLowerCase(), binding]));
+  const credentialByBinding = new Map(credentials.map((credential) => [credential.databaseBindingId, credential]));
+  const liveNames = new Set(inventory.databases.map((database) => database.name.toLowerCase()));
+  return Object.freeze({
+    ...inventory,
+    databases: Object.freeze(inventory.databases.map((database) => {
+      const binding = bindingByName.get(database.name.toLowerCase()) ?? null;
+      const credential = binding ? credentialByBinding.get(binding.id) ?? null : null;
+      return Object.freeze({
+        ...database,
+        ownership: binding ? Object.freeze({
+          bindingId: binding.id,
+          websiteId: binding.websiteId,
+          applicationId: binding.applicationId,
+          unixUser: binding.unixUser,
+          revision: binding.revision,
+          credential: credential ? Object.freeze({
+            id: credential.id,
+            username: credential.username,
+            host: credential.host,
+            privileges: Object.freeze([...credential.privileges]),
+            revision: credential.revision,
+            passwordUpdatedAt: credential.passwordUpdatedAt,
+          }) : null,
+        }) : null,
+      });
+    })),
+    ownership: Object.freeze({
+      bindingCount: bindings.length,
+      credentialCount: credentials.length,
+      missingDatabaseBindingCount: bindings.filter((binding) => !liveNames.has(binding.databaseName.toLowerCase())).length,
+    }),
+  });
+}
+
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
@@ -138,6 +224,7 @@ export function mountDatabaseRoutes(app, {
   registry,
   jobRegistry,
   databaseBindingRegistry = null,
+  databaseCredentialRegistry = null,
   databaseInventoryProvider = null,
 }) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.delete !== 'function') {
@@ -148,6 +235,11 @@ export function mountDatabaseRoutes(app, {
   if (databaseBindingRegistry !== null && typeof databaseBindingRegistry.getByDatabase !== 'function') {
     throw new Error('Database binding registry is invalid');
   }
+  if (databaseCredentialRegistry !== null && (!databaseBindingRegistry
+    || typeof databaseBindingRegistry.listBindings !== 'function'
+    || typeof databaseCredentialRegistry.listCredentials !== 'function')) {
+    throw new Error('Database credential registry is invalid');
+  }
   if (databaseInventoryProvider !== null && typeof databaseInventoryProvider !== 'function') {
     throw new Error('Database inventory provider is invalid');
   }
@@ -156,10 +248,24 @@ export function mountDatabaseRoutes(app, {
     const server = await requireServer(registry, request.params.serverId);
     response.set('Cache-Control', 'no-store');
     if (databaseInventoryProvider) {
-      return response.json({ data: await liveDatabaseInventory(databaseInventoryProvider, server.id) });
+      const inventory = await liveDatabaseInventory(databaseInventoryProvider, server.id);
+      return response.json({ data: await attachDatabaseOwnership(inventory, {
+        serverId: server.id,
+        databaseBindingRegistry: typeof databaseBindingRegistry?.listBindings === 'function'
+          ? databaseBindingRegistry
+          : null,
+        databaseCredentialRegistry,
+      }) });
     }
     const snapshot = await latestDatabaseSnapshot(jobRegistry, server.id);
-    return response.json({ data: snapshot ?? { engine: null, version: null, databases: null, snapshot: null } });
+    const inventory = snapshot ?? { engine: null, version: null, databases: null, snapshot: null };
+    return response.json({ data: snapshot && typeof databaseBindingRegistry?.listBindings === 'function'
+      ? await attachDatabaseOwnership(inventory, {
+        serverId: server.id,
+        databaseBindingRegistry,
+        databaseCredentialRegistry,
+      })
+      : inventory });
   }));
 
   app.post('/api/servers/:serverId/databases/inspect', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -253,4 +359,5 @@ export const databaseHttpInternals = Object.freeze({
   ensureDatabaseIdle,
   latestDatabaseSnapshot,
   liveDatabaseInventory,
+  attachDatabaseOwnership,
 });
