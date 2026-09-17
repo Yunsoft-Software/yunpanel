@@ -168,6 +168,7 @@ const messages = Object.freeze({
   database_not_found: 'The requested database was not found.',
   database_drop_failed: 'The database could not be deleted.',
   database_drop_unconfirmed: 'Database deletion could not be confirmed after the host operation.',
+  mail_rollback_recovery_current: 'The interrupted mail rollback was safely returned to the current configuration.',
   local_operation_not_migrated: 'This operation has not been migrated to the local runtime.',
   invalid_local_operation_payload: 'The local operation payload is invalid.',
   legacy_operation_failed: 'The legacy host operation failed.',

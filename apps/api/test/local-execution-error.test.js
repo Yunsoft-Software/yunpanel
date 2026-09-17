@@ -41,6 +41,7 @@ test('Node, environment and managed-service diagnostics use authored messages on
     'certificate_private_key_mismatch',
     'certificate_material_unavailable',
     'certificate_metadata_mismatch',
+    'mail_rollback_recovery_current',
   ]) {
     const result = safeLocalOperationError({
       code,
