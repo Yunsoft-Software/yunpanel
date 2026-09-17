@@ -139,3 +139,19 @@ export {
   renderRoundcubeNginxConfig,
   roundcubeNginxTemplatePolicy,
 } from './roundcube-nginx.js';
+
+export {
+  PhpMyAdminFpmTemplateError,
+  phpMyAdminFpmTemplateInternals,
+  phpMyAdminFpmTemplatePolicy,
+  previewPhpMyAdminFpmPool,
+  renderPhpMyAdminFpmPool,
+} from './phpmyadmin-fpm.js';
+
+export {
+  PhpMyAdminNginxTemplateError,
+  phpMyAdminNginxTemplateInternals,
+  phpMyAdminNginxTemplatePolicy,
+  previewPhpMyAdminNginxConfig,
+  renderPhpMyAdminNginxConfig,
+} from './phpmyadmin-nginx.js';

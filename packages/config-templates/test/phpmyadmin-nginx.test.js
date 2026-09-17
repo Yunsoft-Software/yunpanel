@@ -1,0 +1,44 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  PhpMyAdminNginxTemplateError,
+  phpMyAdminNginxTemplatePolicy,
+  previewPhpMyAdminNginxConfig,
+  renderPhpMyAdminNginxConfig,
+} from '../src/index.js';
+
+test('phpMyAdmin Nginx template is reachable only through the managed Unix gateway socket', () => {
+  const content = renderPhpMyAdminNginxConfig();
+  const preview = previewPhpMyAdminNginxConfig();
+  assert.match(content, /^  listen unix:\/run\/yunpanel\/phpmyadmin-http\.sock;$/m);
+  assert.doesNotMatch(content, /listen (?:80|443|127\.)/);
+  assert.match(content, /^  root \/usr\/share\/phpmyadmin;$/m);
+  assert.match(content, /fastcgi_pass unix:\/run\/php\/yunpanel-phpmyadmin\.sock;/);
+  assert.match(content, /location ~ \^\/\(\?:setup\|test\|libraries\|templates\)\(\?:\/\|\$\)/);
+  assert.match(content, /fastcgi_param HTTPS on;/);
+  assert.match(content, /X-Robots-Tag "noindex, nofollow, noarchive"/);
+  assert.equal(preview.artifact.path, phpMyAdminNginxTemplatePolicy.configPath);
+  assert.equal(preview.artifact.sha256, preview.sha256);
+  assert.equal(preview.artifact.sensitive, false);
+  assert.equal(preview.gatewaySocketPath, '/run/yunpanel/phpmyadmin-http.sock');
+  assert.equal(preview.gatewaySocketMode, 0o660);
+  assert.equal(preview.gatewaySocketGroup, 'yunpanel-web');
+  assert.equal(preview.healthPath, '/');
+});
+
+test('phpMyAdmin Nginx preview is deterministic and contains no network endpoint', () => {
+  const first = previewPhpMyAdminNginxConfig();
+  assert.deepEqual(first, previewPhpMyAdminNginxConfig());
+  assert.doesNotMatch(JSON.stringify(first), /https?:\/\//);
+});
+
+test('phpMyAdmin Nginx template rejects alternate roots and sockets', () => {
+  for (const input of [
+    { documentRoot: '/srv/phpmyadmin' },
+    { fpmSocketPath: '/run/php/another.sock' },
+    { gatewaySocketPath: '/run/yunpanel/../public.sock' },
+    { gatewaySocketPath: '/tmp/phpmyadmin.sock' },
+  ]) {
+    assert.throws(() => renderPhpMyAdminNginxConfig(input), PhpMyAdminNginxTemplateError);
+  }
+});
