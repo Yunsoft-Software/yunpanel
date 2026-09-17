@@ -29,7 +29,10 @@ test('Website database credential revoke requires a successful durable delete jo
 
 test('Website database backup waits for checksum-validated durable vendor dump completion', async () => {
   const panel = await readFile(new URL('../src/workspace/SiteResourcesPanel.jsx', import.meta.url), 'utf8');
-  assert.match(panel, /createDatabaseBackup/);
+  assert.match(panel, /createWebsiteDatabaseBackup/);
+  assert.match(panel, /backupTarget\.binding\.id/);
+  assert.match(panel, /backupTarget\.binding\.revision/);
+  assert.match(panel, /website\.id/);
   assert.match(panel, /waitForJob\(backupJob\.id\)/);
   assert.match(panel, /resourceBusy\('database', binding\.databaseName\)/);
   assert.match(panel, /checksum kanıtı oluşmadan başarılı sayılmaz/);
@@ -40,13 +43,17 @@ test('Website database backup waits for checksum-validated durable vendor dump c
 test('Website database restore selects scoped backup evidence and applies an exact verified preview', async () => {
   const panel = await readFile(new URL('../src/workspace/SiteResourcesPanel.jsx', import.meta.url), 'utf8');
   assert.match(panel, /databaseBackupChoices\(jobs\.items/);
-  assert.match(panel, /previewDatabaseRestore/);
+  assert.match(panel, /websiteId: website\?\.id/);
+  assert.match(panel, /bindingId: binding\.id/);
+  assert.match(panel, /bindingRevision: binding\.revision/);
+  assert.match(panel, /previewWebsiteDatabaseRestore/);
   assert.match(panel, /databaseRestorePreviewView/);
-  assert.match(panel, /restoreDatabase/);
+  assert.match(panel, /restoreWebsiteDatabase/);
   assert.match(panel, /waitForJob\(restoreJob\.id\)/);
   assert.match(panel, /pre-restore snapshot/);
   assert.match(panel, /checksum ve post-restore doğrulaması/);
   assert.match(panel, /confirmation=\{restoreTarget\.binding\.databaseName\}/);
+  assert.doesNotMatch(panel, /createDatabaseBackup\(|previewDatabaseRestore\(|restoreDatabase\(/);
 });
 
 test('Website database drop remains a read-only blocker preview without implicit cascade', async () => {
