@@ -270,6 +270,37 @@ export function createPowerDnsAuthoritativeDurableManager({
     return publicOperation(await readOperation());
   }
 
+  async function resolve(rawIntent, { operationId, expectedUpdatedAt } = {}) {
+    const spec = powerDnsAuthoritativeManagerInternals.normalizeIntent(rawIntent);
+    if (typeof operationId !== 'string' || !operationId
+      || typeof expectedUpdatedAt !== 'string' || !expectedUpdatedAt) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_recovery_request_invalid',
+        'PowerDNS recovery requires an exact operation identity and journal revision',
+      );
+    }
+    const existing = await readOperation();
+    if (!existing || existing.status !== 'applying') {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_recovery_not_required',
+        'PowerDNS authoritative operation does not require recovery',
+      );
+    }
+    if (existing.id !== operationId || existing.updatedAt !== expectedUpdatedAt) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_recovery_stale',
+        'PowerDNS recovery request does not match the current operation journal',
+      );
+    }
+    if (!operationMatches(existing, spec)) {
+      throw new PowerDnsAuthoritativeManagerError(
+        'powerdns_operation_conflict',
+        'Interrupted PowerDNS apply intent changed and cannot be resolved with current credentials or settings',
+      );
+    }
+    return recoverInterrupted(existing, spec);
+  }
+
   async function recoverInterrupted(operation, spec) {
     let inspected;
     try { inspected = await manager.inspect(spec); }
@@ -339,7 +370,7 @@ export function createPowerDnsAuthoritativeDurableManager({
     return applied;
   }
 
-  return Object.freeze({ inspect, apply, operation });
+  return Object.freeze({ inspect, apply, operation, resolve });
 }
 
 export const powerDnsAuthoritativeDurableManagerInternals = Object.freeze({

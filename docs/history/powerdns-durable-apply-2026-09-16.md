@@ -16,6 +16,7 @@ Bu kayıt P0.2 PowerDNS lifecycle hardening diliminde kaynakta tamamlanan işler
 - Config validation rollback gibi deterministik ve güvenli failure operation'ı `failed` evidence ile kapatır; belirsiz sonuçlar terminal başarı/başarısızlık diye uydurulmaz.
 - `createPowerDnsAuthoritativeReadyManager()` production default-chain'i durable manager üzerinden çalışır.
 - Durable journal'ın current/latest operation projection'ı API status ve Network DNS paneline bağlandı. Projection operation durumu, API-key revision, secondary topology, tamamlanmış inspect evidence'ı, timestamps ve recovery reason gösterir; raw API key ile persisted hata mesajını public response'a çıkarmaz. `applying` operation panelde `automaticReplayBlocked` olarak görünür.
+- Interrupted operation artık Network DNS panelinden operation ID + journal timestamp fence ile explicit inspect edilebilir. Bu yol package/config/service mutation'ını replay etmez; journal'ı yalnız mevcut host state aynı intent'in tamamlandığını kanıtlarsa `succeeded` kapatır.
 
 ## Regression kapsamı
 

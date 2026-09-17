@@ -11,6 +11,7 @@ function base({ satisfied = true } = {}) {
       async inspect(intent) { calls.push(['inspect', intent]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
       async apply(intent) { calls.push(['apply', intent]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
       async operation() { calls.push(['operation']); return { id: 'operation-1', status: 'applying' }; },
+      async resolve(intent, recovery) { calls.push(['resolve', intent, recovery]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
     },
   };
 }
@@ -53,6 +54,20 @@ test('PowerDNS operation status passes through without probing service sockets',
   assert.deepEqual(await manager.operation(), { id: 'operation-1', status: 'applying' });
   assert.deepEqual(runtime.calls, [['operation']]);
   assert.deepEqual(health.calls, []);
+});
+
+test('PowerDNS recovery resolution adds socket evidence without applying host mutation', async () => {
+  const runtime = base();
+  const health = sockets();
+  const manager = createPowerDnsAuthoritativeReadyManager({ manager: runtime.manager, socketInspector: health.inspector });
+  const intent = { serverId: 'server-1' };
+  const recovery = { operationId: 'operation-1', expectedUpdatedAt: '2026-09-17T12:00:00.000Z' };
+
+  const result = await manager.resolve(intent, recovery);
+  assert.equal(result.satisfied, true);
+  assert.equal(result.sockets.udp53, true);
+  assert.deepEqual(runtime.calls, [['resolve', intent, recovery]]);
+  assert.deepEqual(health.calls, ['inspect']);
 });
 
 test('PowerDNS inspect does not probe sockets while base service is not ready', async () => {

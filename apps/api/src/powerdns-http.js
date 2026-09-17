@@ -116,6 +116,24 @@ function authoritativeApplyBody(body) {
   );
 }
 
+function authoritativeRecoveryBody(body) {
+  const value = exactObject(
+    body,
+    new Set(['operationId', 'expectedUpdatedAt', 'confirmation']),
+    'powerdns_recovery_input_invalid',
+    'Send operationId, expectedUpdatedAt and confirmation',
+  );
+  if (typeof value.operationId !== 'string' || !value.operationId
+    || typeof value.expectedUpdatedAt !== 'string' || !value.expectedUpdatedAt
+    || typeof value.confirmation !== 'string' || !value.confirmation) {
+    throw new PowerDnsHttpError(
+      'powerdns_recovery_input_invalid',
+      'Send an exact PowerDNS recovery operation identity and confirmation',
+    );
+  }
+  return value;
+}
+
 function requireEmptyBody(body) {
   if (body === undefined || body === null) return;
   if (typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 0) {
@@ -281,7 +299,8 @@ export function mountPowerDnsRoutes(app, {
     throw new Error('Server DNS identity registry is required');
   }
   if (!authoritativeService || typeof authoritativeService.preview !== 'function'
-    || typeof authoritativeService.status !== 'function' || typeof authoritativeService.apply !== 'function') {
+    || typeof authoritativeService.status !== 'function' || typeof authoritativeService.apply !== 'function'
+    || typeof authoritativeService.resolve !== 'function') {
     throw new Error('PowerDNS authoritative service is required');
   }
   const templateRegistry = dnsZoneTemplateRegistry ?? defaultZoneTemplateRegistry(authoritativeService);
@@ -493,6 +512,12 @@ export function mountPowerDnsRoutes(app, {
       confirmation: body.confirmation,
     }) });
   }));
+
+  app.post('/api/servers/:serverId/dns/authoritative/recovery/resolve', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const serverId = localServerId(authoritativeService, request.params.serverId);
+    const body = authoritativeRecoveryBody(request.body);
+    return response.json({ data: await authoritativeService.resolve(serverId, body) });
+  }));
 }
 
 export const powerDnsHttpInternals = Object.freeze({
@@ -505,6 +530,7 @@ export const powerDnsHttpInternals = Object.freeze({
   zoneReapplyApplyBody,
   zoneTemplateVersion,
   authoritativeApplyBody,
+  authoritativeRecoveryBody,
   requireEmptyBody,
   requireZoneReapplyPreviewBody,
   localServerId,

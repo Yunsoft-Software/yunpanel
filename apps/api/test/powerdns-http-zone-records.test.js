@@ -58,6 +58,7 @@ function mountWith(service) {
       status: async () => ({}),
       preview: async () => ({}),
       apply: async () => ({}),
+      resolve: async () => ({}),
     },
   });
   return app;

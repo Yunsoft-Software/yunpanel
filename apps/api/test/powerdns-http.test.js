@@ -52,6 +52,7 @@ function mountWith(templateRegistry) {
       status: async () => ({}),
       preview: async () => ({}),
       apply: async () => ({}),
+      resolve: async () => ({}),
     },
   });
   return app;
@@ -171,4 +172,51 @@ test('PowerDNS HTTP rejects unexpected DNS template body fields before registry 
     (error) => error instanceof PowerDnsHttpError && error.code === 'dns_template_preview_input_invalid',
   );
   assert.equal(called, false);
+});
+
+test('PowerDNS HTTP forwards an exact authoritative recovery fence', async () => {
+  const calls = [];
+  const app = createFakeApp();
+  mountPowerDnsRoutes(app, {
+    dnsIdentityRegistry: {
+      getForServer: async () => null,
+      preview: async () => ({}),
+      update: async () => ({}),
+    },
+    dnsZoneTemplateRegistry: {
+      ensureForServer: async () => ({}),
+      getVersion: async () => null,
+      preview: async () => ({}),
+      update: async () => ({}),
+    },
+    authoritativeService: {
+      localServerId: serverId,
+      status: async () => ({}),
+      preview: async () => ({}),
+      apply: async () => ({}),
+      resolve: async (...args) => { calls.push(args); return { resolved: true }; },
+    },
+  });
+  const body = {
+    operationId: 'operation-1',
+    expectedUpdatedAt: '2026-09-17T12:01:00.000Z',
+    confirmation: `inspect-powerdns-recovery:${serverId}:operation-1:2026-09-17T12:01:00.000Z`,
+  };
+
+  assert.deepEqual(
+    await invoke(app, 'POST /api/servers/:serverId/dns/authoritative/recovery/resolve', {
+      params: { serverId },
+      body,
+    }),
+    { data: { resolved: true } },
+  );
+  assert.deepEqual(calls, [[serverId, body]]);
+  await assert.rejects(
+    invoke(app, 'POST /api/servers/:serverId/dns/authoritative/recovery/resolve', {
+      params: { serverId },
+      body: { ...body, unexpected: true },
+    }),
+    (error) => error instanceof PowerDnsHttpError && error.code === 'powerdns_recovery_input_invalid',
+  );
+  assert.equal(calls.length, 1);
 });

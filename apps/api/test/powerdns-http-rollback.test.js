@@ -74,6 +74,7 @@ function fixture() {
       status: async () => ({}),
       preview: async () => ({}),
       apply: async () => ({}),
+      resolve: async () => ({}),
     },
   });
   return { app, calls };

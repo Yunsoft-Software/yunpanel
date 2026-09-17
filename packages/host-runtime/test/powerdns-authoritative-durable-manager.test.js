@@ -175,12 +175,43 @@ test('PowerDNS durable manager closes an interrupted operation from inspect evid
   assert.equal(applyCalls, 1);
 
   ready = true;
-  const recovered = await manager.apply(intent());
+  const operation = await manager.operation();
+  const recovered = await manager.resolve(intent(), {
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+  });
   assert.equal(recovered.satisfied, true);
   assert.equal(applyCalls, 1);
   const persisted = JSON.parse(journal.files.get(operationPath));
   assert.equal(persisted.status, 'succeeded');
   assert.equal(persisted.result.receiptAppliedAt, appliedAt);
+});
+
+test('PowerDNS recovery resolution rejects a stale journal fence before host inspection', async () => {
+  const journal = memoryJournal();
+  const operationPath = '/state/powerdns-operation.json';
+  let inspectCalls = 0;
+  const manager = createPowerDnsAuthoritativeDurableManager({
+    manager: {
+      async inspect() { inspectCalls += 1; return unsatisfied(); },
+      async apply() {
+        throw new PowerDnsAuthoritativeManagerError('powerdns_service_activation_failed', 'ambiguous');
+      },
+    },
+    operationPath,
+    now: () => Date.parse(appliedAt),
+    idFactory: () => 'operation-stale',
+    ...journal,
+  });
+
+  await assert.rejects(manager.apply(intent()), (error) => error.code === 'powerdns_apply_outcome_uncertain');
+  const beforeResolve = inspectCalls;
+  await assert.rejects(
+    manager.resolve(intent(), { operationId: 'another-operation', expectedUpdatedAt: appliedAt }),
+    (error) => error.code === 'powerdns_recovery_stale',
+  );
+  assert.equal(inspectCalls, beforeResolve);
+  assert.equal((await manager.operation()).status, 'applying');
 });
 
 test('PowerDNS durable manager records config validation rollback as a deterministic failed operation', async () => {

@@ -44,6 +44,21 @@ export function applyPowerDnsAuthoritative(serverId, preview) {
   });
 }
 
+export function resolvePowerDnsRecovery(serverId, operation) {
+  if (!operation?.recovery?.required || !operation.id || !operation.updatedAt
+    || !operation.recovery.confirmation) {
+    throw new Error('Current PowerDNS recovery operation is required');
+  }
+  return panelRequest(serverDnsPath(serverId, '/authoritative/recovery/resolve'), {
+    method: 'POST',
+    body: {
+      operationId: operation.id,
+      expectedUpdatedAt: operation.updatedAt,
+      confirmation: operation.recovery.confirmation,
+    },
+  });
+}
+
 export function inspectDnsDelegation(serverId, domain) {
   if (typeof domain !== 'string' || !domain.trim()) throw new Error('Delegation domain is required');
   return panelRequest(`${serverDnsPath(serverId, '/delegation')}?domain=${encodeURIComponent(domain.trim())}`);

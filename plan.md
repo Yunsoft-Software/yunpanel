@@ -25,7 +25,7 @@ Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
 ## P0.2 — Sunucu kimliği, ns1/ns2 ve PowerDNS Authoritative
 
-- [ ] Durable PowerDNS recovery/control surface'ına explicit retry/rollback/resolve aksiyonlarını ekle; destructive aksiyonlar typed confirmation + audit kullansın.
+- [ ] Durable PowerDNS recovery/control surface'ına explicit retry/rollback aksiyonlarını ekle; destructive aksiyonlar typed confirmation + audit kullansın.
 - [ ] `recovery_pending` durumunda hiçbir package/config/service mutation'ı kör replay edilmesin.
 
 Gerçek host, public DNS, delegation/glue ve browser kabul kapıları `todo.md` içindedir.
@@ -175,7 +175,7 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 # Uygulama sırası — blocker yoksa sapma yok
 
 1. **Website Unix isolation** — workspace dışındaki legacy identity/runtime/SFTP migration hardening.
-2. **PowerDNS operator recovery** — durable journal status/evidence, explicit retry/rollback/resolve, typed confirmation ve fail-closed recovery control surface.
+2. **PowerDNS operator recovery** — explicit retry/rollback, typed confirmation ve fail-closed recovery control surface.
 3. **Mail durable execution** — `MAIL_CONFIG_APPLY/ROLLBACK` production worker/executor wiring, readiness evidence ve replay-safe recovery.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
 5. **Database + phpMyAdmin**.
