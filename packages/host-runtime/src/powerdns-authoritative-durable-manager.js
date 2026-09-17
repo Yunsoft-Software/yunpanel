@@ -10,6 +10,7 @@ import {
 const STORE_VERSION = 1;
 const DEFAULT_OPERATION_PATH = '/var/lib/yunpanel/staging/powerdns/authoritative-operation.json';
 const STATUSES = new Set(['applying', 'succeeded', 'failed']);
+const OPERATION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const DETERMINISTIC_FAILURE_CODES = new Set([
   'powerdns_recursor_conflict',
   'powerdns_include_dir_required',
@@ -17,6 +18,13 @@ const DETERMINISTIC_FAILURE_CODES = new Set([
   'powerdns_hash_failed',
   'powerdns_hash_invalid',
   'powerdns_config_invalid',
+  'powerdns_rollback_snapshot_failed',
+  'powerdns_rollback_credential_mismatch',
+  'powerdns_rollback_snapshot_unsafe',
+  'powerdns_rollback_snapshot_invalid',
+  'powerdns_rollback_snapshot_unavailable',
+  'powerdns_rollback_snapshot_conflict',
+  'powerdns_rollback_context_invalid',
 ]);
 
 function timestamp(value) {
@@ -90,7 +98,7 @@ function persistedOperation(value) {
   ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
-    || value.version !== STORE_VERSION || typeof value.id !== 'string' || !value.id
+    || value.version !== STORE_VERSION || typeof value.id !== 'string' || !OPERATION_ID_PATTERN.test(value.id)
     || typeof value.serverId !== 'string' || !value.serverId
     || !Number.isSafeInteger(value.apiKeyRevision) || value.apiKeyRevision < 1
     || !STATUSES.has(value.status)) {
@@ -341,7 +349,7 @@ export function createPowerDnsAuthoritativeDurableManager({
 
   async function executeApply(operation, spec) {
     let applied;
-    try { applied = await manager.apply(spec); }
+    try { applied = await manager.apply(spec, { operationId: operation.id }); }
     catch (error) {
       let after = null;
       let inspectionAvailable = true;

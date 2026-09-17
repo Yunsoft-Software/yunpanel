@@ -61,11 +61,13 @@ test('PowerDNS durable manager persists applying evidence before host mutation a
   const journal = memoryJournal();
   const operationPath = '/state/powerdns-operation.json';
   let applyCalls = 0;
+  let applyContext = null;
   const manager = createPowerDnsAuthoritativeDurableManager({
     manager: {
       async inspect() { return unsatisfied(); },
-      async apply() {
+      async apply(_value, context) {
         applyCalls += 1;
+        applyContext = context;
         const applying = JSON.parse(journal.files.get(operationPath));
         assert.equal(applying.status, 'applying');
         assert.equal(applying.apiKey, undefined);
@@ -80,6 +82,7 @@ test('PowerDNS durable manager persists applying evidence before host mutation a
 
   assert.equal((await manager.apply(intent())).satisfied, true);
   assert.equal(applyCalls, 1);
+  assert.deepEqual(applyContext, { operationId: 'operation-1' });
   const persisted = JSON.parse(journal.files.get(operationPath));
   assert.equal(persisted.status, 'succeeded');
   assert.equal(persisted.result.satisfied, true);
@@ -218,13 +221,15 @@ test('PowerDNS explicit retry inspects first and persists authorization before r
   const journal = memoryJournal();
   const operationPath = '/state/powerdns-operation.json';
   const events = [];
+  const applyContexts = [];
   let applyCalls = 0;
   let applied = false;
   const manager = createPowerDnsAuthoritativeDurableManager({
     manager: {
       async inspect() { events.push('inspect'); return applied ? satisfied() : unsatisfied(); },
-      async apply() {
+      async apply(_value, context) {
         applyCalls += 1;
+        applyContexts.push(context);
         events.push(`apply:${applyCalls}`);
         if (applyCalls === 1) {
           throw new PowerDnsAuthoritativeManagerError('powerdns_service_activation_failed', 'ambiguous');
@@ -253,6 +258,10 @@ test('PowerDNS explicit retry inspects first and persists authorization before r
   assert.equal(result.satisfied, true);
   assert.deepEqual(events, ['inspect', 'apply:2']);
   assert.equal(applyCalls, 2);
+  assert.deepEqual(applyContexts, [
+    { operationId: 'operation-retry' },
+    { operationId: 'operation-retry' },
+  ]);
   assert.equal((await manager.operation()).status, 'succeeded');
 });
 
@@ -344,4 +353,33 @@ test('PowerDNS durable manager records config validation rollback as a determini
   const persisted = JSON.parse(journal.files.get(operationPath));
   assert.equal(persisted.status, 'failed');
   assert.equal(persisted.lastError.code, 'powerdns_config_invalid');
+});
+
+test('PowerDNS durable manager records rollback snapshot preflight failure without uncertain replay state', async () => {
+  const journal = memoryJournal();
+  const operationPath = '/state/powerdns-operation.json';
+  const manager = createPowerDnsAuthoritativeDurableManager({
+    manager: {
+      async inspect() { return unsatisfied('powerdns_config_missing'); },
+      async apply() {
+        throw new PowerDnsAuthoritativeManagerError(
+          'powerdns_rollback_snapshot_failed',
+          'previous state cannot be snapshotted safely',
+        );
+      },
+    },
+    operationPath,
+    now: () => Date.parse(appliedAt),
+    idFactory: () => 'operation-snapshot-failed',
+    ...journal,
+  });
+
+  await assert.rejects(
+    manager.apply(intent()),
+    (error) => error instanceof PowerDnsAuthoritativeManagerError
+      && error.code === 'powerdns_rollback_snapshot_failed',
+  );
+  const persisted = JSON.parse(journal.files.get(operationPath));
+  assert.equal(persisted.status, 'failed');
+  assert.equal(persisted.lastError.code, 'powerdns_rollback_snapshot_failed');
 });
