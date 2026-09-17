@@ -143,6 +143,11 @@ export {
   phpMyAdminConfigManagerInternals,
 } from './phpmyadmin-config-manager.js';
 export {
+  createPhpMyAdminConfigBackupManager,
+  PhpMyAdminConfigBackupError,
+  phpMyAdminConfigBackupInternals,
+} from './phpmyadmin-config-backup.js';
+export {
   createAcmeManager,
   acmeManager,
   AcmeManagerError,
