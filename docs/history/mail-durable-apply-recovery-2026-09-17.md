@@ -23,6 +23,7 @@ Bu kayıt P0.4 managed mail configuration lifecycle'ında kaynakta tamamlanan ap
 - Control-plane mail configuration service'i exact current mail-domain revision/status ve expected configuration digest ile protected current bundle materyalize edebilir. Bu yol normal apply transition/no-op kurallarını kullanmaz; böylece `disabled → disabled` gibi current state için sahte geçiş üretmeden empty managed-set ve sensitive artifacts doğrulanır.
 - Production local operation registry `MAIL_CONFIG_ROLLBACK` job'unu private current materializer'dan host restore primitive'ine taşır. Source transaction/plan/backup identity ile rollback job transaction'ı ayrı kalır; bounded v1 sonucu exact queued provenance ve operation-owned compensation backup digest'ini içerir.
 - Durable job registry rollback operation'ını async mutation olarak tanır ve başarılı sonucu 14 alanlı strict şemayla queued payload'a bağlar. Payload drift'i, malformed compensation digest'i, false success veya expanded path alanı job completion'ı fail-closed reddeder.
+- Başarılı local rollback host dönüşünden sonra ve durable completion acknowledgment'ından önce root-private v1 rollback receipt yazılır. Receipt source apply, previous/current revision-status, preview/current configuration/source plan/source backup ve operation-owned compensation backup digest'lerini exact taşır; sadece strict alan setini kabul eder ve `0700` dizin/`0600` dosya politikası uygular.
 
 ## Regression kapsamı
 
@@ -39,13 +40,14 @@ Bu kayıt P0.4 managed mail configuration lifecycle'ında kaynakta tamamlanan ap
 - Explicit restore başarı yolu, mutation öncesi current drift reddi ve source validation hatasından sonra managed directory'lerle birlikte exact current-state compensation.
 - Enabled ve disabled current-state protected materialization, status drift reddi ve secret-free public sınır.
 - Local executor current bundle drift'i, exact host restore argümanları, secret-free bounded result ve job registry result/payload eşleşmesi.
+- Rollback receipt write/read, unsafe/symlink ve expanded persisted evidence reddi; configured runtime'ın yalnız exact executor sonucundan receipt üretmesi.
 
-İlk backup-binding odak regresyonunda desteklenen Node 24 ile 23/23, v3 previous-state zinciri regresyonunda 31/31, rollback preview/audit regresyonunda 18/18, rollback protocol regresyonunda 4/4 ve backup identity regresyonunda 4/4 test geçti. Host explicit restore/compensation ile ilişkili config/SRS/backup regresyonu 15/15, host-runtime paketinin tamamı 506/506, current materialization odak regresyonu 12/12 ve local executor/job contract regresyonu 19/19 geçti; repository policy de başarıyla tamamlandı. Önceki dilimde bütün workspace testleri ve production build'ini içeren `npm run check` başarıyla tamamlandı; build yalnız mevcut büyük chunk uyarısını verdi. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
+İlk backup-binding odak regresyonunda desteklenen Node 24 ile 23/23, v3 previous-state zinciri regresyonunda 31/31, rollback preview/audit regresyonunda 18/18, rollback protocol regresyonunda 4/4 ve backup identity regresyonunda 4/4 test geçti. Host explicit restore/compensation ile ilişkili config/SRS/backup regresyonu 15/15, host-runtime paketinin tamamı 506/506, current materialization odak regresyonu 12/12, local executor/job contract regresyonu 19/19 ve rollback receipt/runtime odak regresyonu 5/5 geçti; repository policy de başarıyla tamamlandı. Önceki dilimde bütün workspace testleri ve production build'ini içeren `npm run check` başarıyla tamamlandı; build yalnız mevcut büyük chunk uyarısını verdi. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
 
 ## Açık kalan sınır
 
-- `MAIL_CONFIG_ROLLBACK` protocol, local executor ve strict durable job result kontratı hazırdır; authenticated enqueue/typed confirmation yüzeyi receipt/restart recovery tamamlanmadan açılmamıştır.
-- Host primitive ve local executor canlı active-config'i exact current digest'e bağlayıp aynı-process restore hatasında compensation yapar; root-private rollback receipt sınırı henüz eklenmemiştir.
+- `MAIL_CONFIG_ROLLBACK` protocol, local executor, strict durable job result ve successful-restore receipt zinciri hazırdır; authenticated enqueue/typed confirmation yüzeyi restart mixed-state recovery tamamlanmadan açılmamıştır.
+- Host primitive ve local executor canlı active-config'i exact current digest'e bağlayıp aynı-process restore hatasında compensation yapar; successful restore receipt'i hazırdır.
 - Rollback restore/validator/reload/readiness sırasında process kesilirse restart mixed previous/current state'i yalnız operation-owned evidence ile tamamlamalı veya persisted current compensation snapshot'ına dönmelidir.
 - Başarılı host rollback sonrası mail-domain desired/control-plane revision ve status exact previous state'e reconcile edilmelidir.
 - Legacy v1 apply receipt backup identity, v2 receipt previous control-plane identity taşımadığından full explicit rollback unavailable kalmalıdır.

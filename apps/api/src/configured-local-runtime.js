@@ -5,6 +5,7 @@ import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.
 import { createDomainActivationReceiptStore } from './domain-activation-receipt.js';
 import { createLocalHostOperations } from './local-host-operations.js';
 import { createMailConfigOperationReceiptStore } from './mail-config-operation-receipt.js';
+import { createMailConfigRollbackReceiptStore } from './mail-config-rollback-receipt.js';
 import { createMailDataOperationReceiptStore } from './mail-data-operation-receipt.js';
 import { createMailDkimOperationReceiptStore } from './mail-dkim-operation-receipt.js';
 import { resolveLocalRuntimeConfig } from './local-runtime-config.js';
@@ -55,6 +56,7 @@ export async function startConfiguredLocalRuntime({
   createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
   createDomainActivationReceipts = createDomainActivationReceiptStore,
   createMailConfigOperationReceipts = createMailConfigOperationReceiptStore,
+  createMailConfigRollbackReceipts = createMailConfigRollbackReceiptStore,
   createMailDataOperationReceipts = createMailDataOperationReceiptStore,
   createMailDkimOperationReceipts = createMailDkimOperationReceiptStore,
   createManagedServiceReceipts = createManagedServiceMutationReceiptStore,
@@ -106,6 +108,7 @@ export async function startConfiguredLocalRuntime({
     || typeof createDatabaseDeletionReceipts !== 'function'
     || typeof createDomainActivationReceipts !== 'function'
     || typeof createMailConfigOperationReceipts !== 'function'
+    || typeof createMailConfigRollbackReceipts !== 'function'
     || typeof createMailDataOperationReceipts !== 'function'
     || typeof createMailDkimOperationReceipts !== 'function'
     || typeof createManagedServiceReceipts !== 'function'
@@ -187,6 +190,11 @@ export async function startConfiguredLocalRuntime({
   const mailConfigOperationReceipts = mailConfigurationService ? createMailConfigOperationReceipts() : null;
   if (mailConfigurationService && (!mailConfigOperationReceipts || typeof mailConfigOperationReceipts.write !== 'function')) {
     throw new ConfiguredLocalRuntimeError('local_mail_config_receipts_invalid', 'Local runtime managed mail operation receipt store is invalid');
+  }
+  const mailConfigRollbackReceipts = mailConfigurationService ? createMailConfigRollbackReceipts() : null;
+  if (mailConfigurationService
+    && (!mailConfigRollbackReceipts || typeof mailConfigRollbackReceipts.write !== 'function')) {
+    throw new ConfiguredLocalRuntimeError('local_mail_config_rollback_receipts_invalid', 'Local runtime managed mail rollback receipt store is invalid');
   }
   const mailDataOperationReceipts = createMailDataOperationReceipts();
   if (!mailDataOperationReceipts || typeof mailDataOperationReceipts.write !== 'function') {
@@ -315,6 +323,40 @@ export async function startConfiguredLocalRuntime({
         backupSha256: result.backupSha256,
         readinessSha256: result.readinessSha256,
         applied: true,
+      });
+      return;
+    }
+
+    if (operation === OPERATIONS.MAIL_CONFIG_ROLLBACK) {
+      if (!mailConfigRollbackReceipts || resourceType !== 'mail_domain'
+        || resourceId !== payload?.mailDomainId || result?.mailDomainId !== payload.mailDomainId
+        || result.sourceApplyJobId !== payload.sourceApplyJobId
+        || result.previousRevision !== payload.previousRevision
+        || result.expectedCurrentRevision !== payload.expectedCurrentRevision
+        || result.currentStatus !== payload.currentStatus || result.targetStatus !== payload.targetStatus
+        || result.previewDigest !== payload.previewDigest
+        || result.currentConfigurationSha256 !== payload.currentConfigurationSha256
+        || result.sourcePlanSha256 !== payload.sourcePlanSha256
+        || result.backupSha256 !== payload.backupSha256
+        || !SHA256_PATTERN.test(result.compensationBackupSha256 ?? '')
+        || result.restored !== true || result.sideEffects !== true) {
+        throw new Error('Managed mail rollback result is not safe recovery evidence');
+      }
+      await mailConfigRollbackReceipts.write({
+        serverId,
+        jobId,
+        mailDomainId: payload.mailDomainId,
+        sourceApplyJobId: payload.sourceApplyJobId,
+        previousRevision: payload.previousRevision,
+        expectedCurrentRevision: payload.expectedCurrentRevision,
+        currentStatus: payload.currentStatus,
+        targetStatus: payload.targetStatus,
+        previewDigest: payload.previewDigest,
+        currentConfigurationSha256: payload.currentConfigurationSha256,
+        sourcePlanSha256: payload.sourcePlanSha256,
+        backupSha256: payload.backupSha256,
+        compensationBackupSha256: result.compensationBackupSha256,
+        restored: true,
       });
       return;
     }

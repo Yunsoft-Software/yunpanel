@@ -32,6 +32,7 @@ test('configured runtime hydrates managed mail privately and records only secret
   const materializations = [];
   const currentMaterializations = [];
   const receipts = [];
+  const rollbackReceipts = [];
   const mailDomainRegistry = { transitionLocalStatus: async () => ({}) };
   const mailConfigurationService = {
     async materializeTransition(input, expected) {
@@ -64,6 +65,9 @@ test('configured runtime hydrates managed mail privately and records only secret
     mailConfigurationService,
     createMailConfigOperationReceipts: () => ({
       async write(value) { receipts.push(structuredClone(value)); },
+    }),
+    createMailConfigRollbackReceipts: () => ({
+      async write(value) { rollbackReceipts.push(structuredClone(value)); },
     }),
     createOperations: (options) => {
       operationOptions = options;
@@ -147,6 +151,30 @@ test('configured runtime hydrates managed mail privately and records only secret
     applied: true,
   }]);
   assert.doesNotMatch(JSON.stringify(receipts), /must-not-enter-receipt|argon2|password|content/i);
+
+  await startOptions.recordExecutionEvidence({
+    serverId,
+    jobId: 'mail-job-rollback-0001',
+    operation: OPERATIONS.MAIL_CONFIG_ROLLBACK,
+    resourceType: 'mail_domain',
+    resourceId: mailDomainId,
+    payload: rollbackPayload,
+    result: {
+      version: 1,
+      ...rollbackPayload,
+      compensationBackupSha256: 'f'.repeat(64),
+      restored: true,
+      sideEffects: true,
+    },
+  });
+  assert.deepEqual(rollbackReceipts, [{
+    serverId,
+    jobId: 'mail-job-rollback-0001',
+    ...rollbackPayload,
+    compensationBackupSha256: 'f'.repeat(64),
+    restored: true,
+  }]);
+  assert.doesNotMatch(JSON.stringify(rollbackReceipts), /rollback-private|argon2|password|content|path/i);
 });
 
 test('configured runtime refuses managed mail without reconciliation registry', async () => {
