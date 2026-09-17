@@ -28,6 +28,8 @@ import { createDatabaseCredentialApplyService, DatabaseCredentialApplyError } fr
 import { DatabaseCredentialHttpError, mountDatabaseCredentialRoutes } from './database-credential-http.js';
 import { DatabaseCredentialRegistryError } from './database-credential-registry.js';
 import { DatabaseHttpError, databaseHttpInternals, mountDatabaseRoutes } from './database-http.js';
+import { mountPhpMyAdminHandoffRoutes } from './phpmyadmin-handoff-http.js';
+import { PhpMyAdminHandoffError } from './phpmyadmin-handoff-service.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { DnsZoneMailDkimRetirementHttpError } from './dns-zone-mail-dkim-retirement-http.js';
 import {
@@ -179,6 +181,7 @@ export function createApp({
   databaseBindingRegistry = null,
   databaseCredentialRegistry = null,
   databaseCredentialApplyService = null,
+  phpMyAdminHandoffService = null,
   databaseInventoryProvider = null,
   databaseHealthProvider = null,
   dnsReadinessService = null,
@@ -598,6 +601,12 @@ export function createApp({
       ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
     });
   }
+  if (phpMyAdminHandoffService) {
+    mountPhpMyAdminHandoffRoutes(app, {
+      registry: localRegistry,
+      phpMyAdminHandoffService,
+    });
+  }
   mountDatabaseRoutes(app, {
     registry: localRegistry,
     jobRegistry,
@@ -624,6 +633,7 @@ export function createApp({
       || error instanceof DatabaseCredentialHttpError
       || error instanceof DatabaseCredentialRegistryError
       || error instanceof DatabaseHttpError
+      || error instanceof PhpMyAdminHandoffError
       || error instanceof CertificateMaterialError
       || error instanceof CertificateRegistryError
       || error instanceof ApplicationRegistryError
