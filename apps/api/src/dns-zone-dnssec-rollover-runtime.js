@@ -167,6 +167,28 @@ function activationTarget(operation, propagation, preview) {
   });
 }
 
+function activatedEvidence(operation, result) {
+  const key = result?.updatedKey;
+  if (!result || result.keySetDigest !== operation.evidence.targetKeySetDigest
+    || !Number.isSafeInteger(result.serial) || result.serial < 1
+    || !key || key.id !== operation.evidence.newKeyId || key.keyType !== operation.newKey.keyType
+    || key.algorithm !== operation.newKey.algorithm || key.bits !== operation.newKey.bits
+    || key.active !== true || key.published !== true
+    || !Array.isArray(key.ds) || JSON.stringify(key.ds) !== JSON.stringify(operation.evidence.newKeyDs)) {
+    throw new DnsZoneDnssecRolloverRuntimeError(
+      'dnssec_rollover_activation_evidence_invalid',
+      'DNSSEC rollover activation evidence is invalid',
+      503,
+    );
+  }
+  return Object.freeze({
+    ...operation.evidence,
+    keySetDigest: result.keySetDigest,
+    targetKeySetDigest: null,
+    serial: result.serial,
+  });
+}
+
 export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
@@ -189,7 +211,7 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
   async function run(operationId) {
     let operation = await getRequired(operationId);
     if (operation.status === 'succeeded' || operation.status === 'failed'
-      || !['pending', 'creating_key', 'publishing_key', 'verifying_dnskey_propagation'].includes(operation.status)) {
+      || !['pending', 'creating_key', 'publishing_key', 'verifying_dnskey_propagation', 'activating_key'].includes(operation.status)) {
       return dnsZoneDnssecRolloverPublicView(operation);
     }
 
@@ -278,6 +300,24 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
       try { operation = await registry.advance(operation.id, 'activating_key', target); }
       catch (error) { throw mapped(error); }
     }
+
+    if (operation.status === 'activating_key') {
+      let activated;
+      try {
+        activated = activatedEvidence(operation, await service.setRolloverKeyState({
+          domainId: operation.domainId,
+          keyId: operation.evidence.newKeyId,
+          expectedKeySetDigest: operation.evidence.keySetDigest,
+          expectedTargetKeySetDigest: operation.evidence.targetKeySetDigest,
+          expectedActive: false,
+          expectedPublished: true,
+          active: true,
+          published: true,
+        }));
+      } catch (error) { throw mapped(error); }
+      try { operation = await registry.advance(operation.id, 'awaiting_parent_ds_addition', activated); }
+      catch (error) { throw mapped(error); }
+    }
     return dnsZoneDnssecRolloverPublicView(operation);
   }
 
@@ -344,4 +384,5 @@ export const dnsZoneDnssecRolloverRuntimeInternals = Object.freeze({
   publishedEvidence,
   verifiedPropagation,
   activationTarget,
+  activatedEvidence,
 });
