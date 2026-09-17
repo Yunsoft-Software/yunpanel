@@ -132,7 +132,13 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountWebsiteProvisioningRoutes(app, { registry, orchestrator } = {}) {
+export function mountWebsiteProvisioningRoutes(app, {
+  registry,
+  orchestrator,
+  isolationMigration = null,
+  websiteRegistry = null,
+  localServerId = null,
+} = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function'
     || !registry || typeof registry.get !== 'function' || typeof registry.getLatestForWebsite !== 'function'
     || !orchestrator || typeof orchestrator.runNext !== 'function'
@@ -169,6 +175,8 @@ export function mountWebsiteProvisioningRoutes(app, { registry, orchestrator } =
       auditService: Object.freeze({
         audit: (value) => registry.auditIsolation(websiteId(value)),
       }),
+      ...(isolationMigration ? { migrationRuntime: isolationMigration } : {}),
+      ...(websiteRegistry ? { websiteRegistry, localServerId } : {}),
     });
   }
 

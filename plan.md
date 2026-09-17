@@ -19,8 +19,7 @@ Son Website isolation/SFTP ilerlemesi: `docs/history/website-isolation-sftp-prog
 
 ## P0.1 — Website Unix identity ve filesystem isolation
 
-- [ ] Isolation migration apply, audit'in pinlediği exact-change preview/digest + typed confirmation sözleşmesini kullansın; yalnız operation-owned değişiklikleri uygulayıp geri alabilsin ve kör recursive `chown` yapmasın.
-- [ ] Legacy Website migration apply önce canonical Unix identity/path/runtime/SFTP drift raporu ve exact değişiklik preview'sı versin; operation-owned olmayan dosya/user/runtime üzerinde destructive ownership repair yapmasın.
+- [ ] Legacy Website migration apply kapsamını canonical Unix identity/path/runtime/SFTP drift'ine genişlet; mevcut receipt-bound `tmp`/`logs` workspace repair dışındaki her adapter exact değişiklik preview'sı versin, yalnız operation-owned değişiklikleri geri alsın ve kör recursive `chown` yapmasın.
 
 Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
@@ -175,7 +174,7 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 # Uygulama sırası — blocker yoksa sapma yok
 
-1. **Website Unix isolation** — isolation migration apply ve legacy migration hardening.
+1. **Website Unix isolation** — workspace dışındaki legacy identity/runtime/SFTP migration hardening.
 2. **PowerDNS operator recovery** — durable journal status/evidence, explicit retry/rollback/resolve, typed confirmation ve fail-closed recovery control surface.
 3. **Mail durable execution** — `MAIL_CONFIG_APPLY/ROLLBACK` production worker/executor wiring, readiness evidence ve replay-safe recovery.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.

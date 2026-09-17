@@ -11,10 +11,11 @@ const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const localServerId = '28dc1532-a2cb-4f29-9e0d-05f793652fa3';
 
 function fakeApp() {
-  const routes = { get: new Map() };
+  const routes = { get: new Map(), post: new Map() };
   return {
     routes,
     get(path, ...handlers) { routes.get.set(path, handlers); },
+    post(path, ...handlers) { routes.post.set(path, handlers); },
   };
 }
 
@@ -110,4 +111,103 @@ test('Website isolation audit service errors map into the existing Website HTTP 
 test('audit error mapper leaves unrelated failures untouched', () => {
   const error = new Error('boom');
   assert.equal(websiteIsolationAuditHttpInternals.mappedAuditError(error), error);
+});
+
+test('Website isolation migration routes forward exact apply and rollback contracts', async () => {
+  const app = fakeApp();
+  const calls = [];
+  const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
+  const previewDigest = 'a'.repeat(64);
+  mountWebsiteIsolationAuditRoutes(app, {
+    auditService: { audit: async () => ({}) },
+    migrationRuntime: {
+      async start(input) {
+        calls.push(['start', input]);
+        return { id: operationId, websiteId, status: 'succeeded' };
+      },
+      async rollback(input) {
+        calls.push(['rollback', input]);
+        return { id: operationId, websiteId, status: 'compensated' };
+      },
+      async get(id) { return { id, websiteId, status: 'succeeded' }; },
+      async listForWebsite(id) { return [{ id: operationId, websiteId: id }]; },
+    },
+  });
+
+  const apply = app.routes.post.get('/api/websites/:websiteId/isolation-migrations').at(-1);
+  const applied = await invoke(apply, {
+    params: { websiteId },
+    body: { expectedPreviewDigest: previewDigest, confirmation: `migrate-isolation:${websiteId}:3:${previewDigest}` },
+  });
+  assert.equal(applied.nextError, null);
+  assert.equal(applied.response.payload.data.status, 'succeeded');
+
+  const rollback = app.routes.post.get('/api/websites/:websiteId/isolation-migrations/:operationId/rollback').at(-1);
+  const rolledBack = await invoke(rollback, {
+    params: { websiteId, operationId },
+    body: { confirmation: `rollback-isolation-migration:${operationId}:${previewDigest}` },
+  });
+  assert.equal(rolledBack.nextError, null);
+  assert.equal(rolledBack.response.payload.data.status, 'compensated');
+  assert.deepEqual(calls, [
+    ['start', {
+      websiteId,
+      previewDigest,
+      confirmation: `migrate-isolation:${websiteId}:3:${previewDigest}`,
+    }],
+    ['rollback', {
+      operationId,
+      confirmation: `rollback-isolation-migration:${operationId}:${previewDigest}`,
+    }],
+  ]);
+});
+
+test('Website isolation migration routes reject expanded apply bodies before runtime', async () => {
+  const app = fakeApp();
+  let started = false;
+  mountWebsiteIsolationAuditRoutes(app, {
+    auditService: { audit: async () => ({}) },
+    migrationRuntime: {
+      async start() { started = true; return {}; },
+      async rollback() { return {}; },
+      async get() { return { websiteId }; },
+      async listForWebsite() { return []; },
+    },
+  });
+  const apply = app.routes.post.get('/api/websites/:websiteId/isolation-migrations').at(-1);
+  const result = await invoke(apply, {
+    params: { websiteId },
+    body: { expectedPreviewDigest: 'a'.repeat(64), confirmation: 'value', recursive: true },
+  });
+  assert.equal(started, false);
+  assert.ok(result.nextError instanceof WebsiteRegistryError);
+  assert.equal(result.nextError.code, 'website_isolation_migration_input_invalid');
+});
+
+test('Website isolation migration apply hides remote Website before mutation', async () => {
+  const app = fakeApp();
+  let started = false;
+  mountWebsiteIsolationAuditRoutes(app, {
+    websiteRegistry: {
+      getWebsite: async (id) => ({ id, serverId: '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7' }),
+    },
+    localServerId,
+    auditService: { audit: async () => ({}) },
+    migrationRuntime: {
+      async start() { started = true; return {}; },
+      async rollback() { return {}; },
+      async get() { return { websiteId }; },
+      async listForWebsite() { return []; },
+    },
+  });
+
+  const apply = app.routes.post.get('/api/websites/:websiteId/isolation-migrations').at(-1);
+  const result = await invoke(apply, {
+    params: { websiteId },
+    body: { expectedPreviewDigest: 'a'.repeat(64), confirmation: 'value' },
+  });
+  assert.equal(started, false);
+  assert.ok(result.nextError instanceof WebsiteRegistryError);
+  assert.equal(result.nextError.code, 'website_not_found');
+  assert.equal(result.nextError.status, 404);
 });

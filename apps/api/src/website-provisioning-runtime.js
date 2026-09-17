@@ -1,6 +1,9 @@
+import { createWebsiteIdentityPathManager } from '@yunpanel/host-runtime';
 import { createWebsiteDnsZoneProvisioningHandler } from './website-dns-zone-provisioning-handler.js';
 import { createWebsiteDomainActivationProvisioningHandler } from './website-domain-activation-provisioning-handler.js';
 import { createWebsiteIsolationAuditService, WebsiteIsolationAuditError } from './website-isolation-audit.js';
+import { createWebsiteIsolationMigrationRegistry } from './website-isolation-migration-registry.js';
+import { createWebsiteIsolationMigrationRuntime } from './website-isolation-migration-runtime.js';
 import { createWebsiteNodeReleaseProvisioningHandler } from './website-node-release-provisioning-handler.js';
 import { createWebsitePassengerApplicationReleaseProvisioningHandler } from './website-passenger-application-release-provisioning-handler.js';
 import { createWebsitePassengerAuthorityProvisioningHandler } from './website-passenger-authority-provisioning-handler.js';
@@ -18,8 +21,10 @@ function configuredLocalServerId(value = process.env.YUNPANEL_LOCAL_SERVER_ID) {
 
 export function createWebsiteProvisioningRuntime({
   filePath = null,
+  isolationMigrationFilePath = null,
   now,
   identityManager,
+  isolationWorkspaceManager = null,
   passengerSiteManager,
   nodeReleaseManager,
   passengerEnvironmentManager,
@@ -35,11 +40,23 @@ export function createWebsiteProvisioningRuntime({
   runtimeBindingRegistry = null,
   sftpKeyService = null,
 } = {}) {
+  const resolvedIdentityManager = identityManager ?? createWebsiteIdentityPathManager();
+  const workspaceMigrationManager = isolationWorkspaceManager ?? (typeof resolvedIdentityManager.inspectWorkspaceOperation === 'function'
+    && typeof resolvedIdentityManager.applyWorkspace === 'function'
+    && typeof resolvedIdentityManager.inspectWorkspaceCompensation === 'function'
+    && typeof resolvedIdentityManager.compensateWorkspace === 'function'
+    ? resolvedIdentityManager
+    : createWebsiteIdentityPathManager());
   const durableRegistry = createWebsiteProvisioningRegistry({
     filePath,
     ...(now ? { now } : {}),
   });
+  const isolationMigrationRegistry = createWebsiteIsolationMigrationRegistry({
+    filePath: isolationMigrationFilePath,
+    ...(now ? { now } : {}),
+  });
   let isolationAudit = null;
+  let isolationMigration = null;
   let isolationAuditDependencies = null;
 
   async function auditIsolation(websiteId) {
@@ -65,7 +82,7 @@ export function createWebsiteProvisioningRuntime({
   });
   const handlers = {
     ...createWebsiteProvisioningHandlers({
-      ...(identityManager ? { identityManager } : {}),
+      identityManager: resolvedIdentityManager,
       ...(passengerSiteManager ? { passengerSiteManager } : {}),
       ...(staticDeploymentManager ? { staticDeploymentManager } : {}),
       ...(staticPublishIsolationManager ? { staticPublishIsolationManager } : {}),
@@ -133,6 +150,12 @@ export function createWebsiteProvisioningRuntime({
       applicationRegistry: nextApplicationRegistry,
       provisioningRegistry: registry,
       provisioningHandlers: handlers,
+      workspaceMigrationAvailable: true,
+    });
+    isolationMigration = createWebsiteIsolationMigrationRuntime({
+      registry: isolationMigrationRegistry,
+      auditService: isolationAudit,
+      workspaceManager: workspaceMigrationManager,
     });
     isolationAuditDependencies = Object.freeze({
       websiteRegistry: nextWebsiteRegistry,
@@ -248,6 +271,7 @@ export function createWebsiteProvisioningRuntime({
 
   async function init() {
     await registry.init();
+    if (isolationMigration) await isolationMigration.init();
     const interrupted = await registry.listInterrupted();
     const reconciled = [];
     for (const operation of interrupted) {
@@ -262,6 +286,9 @@ export function createWebsiteProvisioningRuntime({
     registry,
     handlers,
     orchestrator,
+    get isolationMigration() {
+      return isolationMigration;
+    },
     configureSftpKeys,
     configureIsolationAudit,
     configureDomainControlPlane,

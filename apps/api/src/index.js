@@ -91,6 +91,8 @@ const applicationRuntimeBindingStorePath = process.env.YUNPANEL_APPLICATION_RUNT
 const websiteStorePath = process.env.YUNPANEL_WEBSITE_STORE ?? path.resolve('.data/website-registry.json');
 const websiteProvisioningStorePath = process.env.YUNPANEL_WEBSITE_PROVISIONING_STORE
   ?? path.join(controlPlaneStateRoot, 'website-provisioning-registry.json');
+const websiteIsolationMigrationStorePath = process.env.YUNPANEL_WEBSITE_ISOLATION_MIGRATION_STORE
+  ?? path.join(controlPlaneStateRoot, 'website-isolation-migration-registry.json');
 const websiteSftpKeyStorePath = process.env.YUNPANEL_WEBSITE_SFTP_KEY_STORE
   ?? path.join(controlPlaneStateRoot, 'website-sftp-key-registry.json');
 const databaseBindingStorePath = process.env.YUNPANEL_DATABASE_BINDING_STORE
@@ -187,7 +189,10 @@ const websiteRegistry = createWebsiteRegistry({
   getDockerComposeProject: async (projectId) => dockerComposeProjectBootstrap.projectRegistry.getProject(projectId),
 });
 await websiteRegistry.init();
-const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({ filePath: websiteProvisioningStorePath });
+const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({
+  filePath: websiteProvisioningStorePath,
+  isolationMigrationFilePath: websiteIsolationMigrationStorePath,
+});
 const websiteSftpKeyRuntime = await createWebsiteSftpKeyRuntime({
   filePath: websiteSftpKeyStorePath,
   websiteRegistry,
@@ -346,6 +351,7 @@ websiteProvisioningRuntime.configurePassengerControlPlane({
   websiteRegistry,
   domainRegistry,
   runtimeBindingRegistry,
+  localServerId,
 });
 await websiteProvisioningRuntime.init();
 const jobLogStore = createJobLogStore({ directoryPath: jobLogStorePath });
@@ -533,6 +539,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] application runtime binding store=${applicationRuntimeBindingStorePath}`);
   console.log(`[yunpanel-api] website store=${websiteStorePath}`);
   console.log(`[yunpanel-api] website provisioning store=${websiteProvisioningStorePath}`);
+  console.log(`[yunpanel-api] website isolation migration store=${websiteIsolationMigrationStorePath}`);
   console.log(`[yunpanel-api] Website SFTP key store=${websiteSftpKeyStorePath}`);
   console.log(`[yunpanel-api] database binding store=${databaseBindingStorePath}`);
   console.log(`[yunpanel-api] database credential store=${databaseCredentialStorePath}`);

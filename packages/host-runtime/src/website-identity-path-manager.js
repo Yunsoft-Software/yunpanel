@@ -355,6 +355,33 @@ export function createWebsiteIdentityPathManager({
     return inspectWorkspaceState(normalized.contract, identity);
   }
 
+  async function inspectWorkspaceOperation(rawIntent, options = {}) {
+    const normalized = normalizeIntent(rawIntent);
+    if (!normalized.contract) {
+      throw new WebsiteIdentityPathManagerError('website_identity_workspace_scope_required', 'Website workspace migration requires canonical Website and Application scope');
+    }
+    const operationId = normalizeOperationId(options.operationId);
+    const identity = requireWorkspaceIdentity(await identityManager.inspect(normalized.baseIntent));
+    const inspected = await inspectWorkspaceState(normalized.contract, identity);
+    if (!inspected.satisfied) return inspected;
+    const receipt = await loadReceipt(operationId, normalized);
+    if (!receipt) return Object.freeze({ ...inspected, createdWorkspaceDirectories: 0 });
+    if (receipt.state === 'compensated') {
+      return Object.freeze({ satisfied: false, reason: 'website_identity_workspace_operation_compensated' });
+    }
+    if (receipt.targets.some((target) => target.state !== 'created')) {
+      throw new WebsiteIdentityPathManagerError(
+        'website_identity_workspace_ownership_unknown',
+        'Website workspace operation completed without durable ownership checkpoints',
+      );
+    }
+    return Object.freeze({
+      ...inspected,
+      workspaceReceiptVersion: receipt.version,
+      createdWorkspaceDirectories: receipt.targets.length,
+    });
+  }
+
   async function applyWorkspace(rawIntent, options = {}) {
     const normalized = normalizeIntent(rawIntent);
     if (!normalized.contract) {
@@ -501,6 +528,7 @@ export function createWebsiteIdentityPathManager({
     compensate,
     inspectCompensation,
     inspectWorkspace,
+    inspectWorkspaceOperation,
     applyWorkspace,
     compensateWorkspace,
     inspectWorkspaceCompensation,

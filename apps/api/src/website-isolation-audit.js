@@ -76,6 +76,7 @@ export function createWebsiteIsolationAuditService({
   applicationRegistry,
   provisioningRegistry = null,
   provisioningHandlers = null,
+  workspaceMigrationAvailable = false,
 } = {}) {
   if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
     || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
@@ -315,6 +316,10 @@ export function createWebsiteIsolationAuditService({
       changes: Object.freeze(changes),
     });
     const previewDigest = migrationDigest(migrationCore);
+    const applyAvailable = workspaceMigrationAvailable === true
+      && changes.length === 1
+      && changes[0].action === 'create_workspace_directories'
+      && changes[0].applyState === 'requires_explicit_apply';
 
     return Object.freeze({
       ...migrationCore,
@@ -326,11 +331,13 @@ export function createWebsiteIsolationAuditService({
       migration: migrationRequired ? Object.freeze({
         destructive: false,
         autoApply: false,
-        applyAvailable: false,
+        applyAvailable,
         previewDigest,
         confirmation: `migrate-isolation:${website.id}:${website.revision}:${previewDigest}`,
         changes: Object.freeze(changes),
-        warning: 'Preview only. No ownership, filesystem or runtime mutation is performed by this audit.',
+        warning: applyAvailable
+          ? 'Apply creates only the listed operation-receipted workspace directories; it does not rename users, move files or change ownership recursively.'
+          : 'Preview only. No ownership, filesystem or runtime mutation is performed by this audit.',
       }) : null,
     });
   }

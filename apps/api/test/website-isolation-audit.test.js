@@ -53,6 +53,7 @@ function service({
   currentApplication = application(runtimeType),
   latest = operation(runtimeType),
   stepResults = {},
+  workspaceMigrationAvailable = false,
 } = {}) {
   const handlers = {};
   for (const kind of ['unix_identity', 'runtime', 'php_runtime', 'sftp']) {
@@ -69,6 +70,7 @@ function service({
     applicationRegistry: { async getApplication(id) { return id === applicationId ? currentApplication : null; } },
     provisioningRegistry: { async getLatestForWebsite(id) { return id === websiteId ? latest : null; } },
     provisioningHandlers: handlers,
+    workspaceMigrationAvailable,
   });
 }
 
@@ -135,6 +137,7 @@ test('isolation migration digest pins the inspected exact-change reason', async 
 
 test('isolation audit emits exact receipt-bound directory changes for canonical workspace gaps', async () => {
   const audit = await service({
+    workspaceMigrationAvailable: true,
     stepResults: {
       unix_identity: {
         satisfied: false,
@@ -146,6 +149,8 @@ test('isolation audit emits exact receipt-bound directory changes for canonical 
   }).audit(websiteId);
 
   assert.equal(audit.migration.changes.length, 1);
+  assert.equal(audit.migration.applyAvailable, true);
+  assert.match(audit.migration.warning, /does not rename users/);
   assert.deepEqual(audit.inspectedSteps[0].missingWorkspaces, ['temporary', 'logs']);
   assert.deepEqual(audit.migration.changes[0], {
     id: 'workspace.directories',

@@ -83,6 +83,8 @@ test('runtime exposes isolation audit only after configuration and scopes it to 
 
   runtime.configureIsolationAudit({ websiteRegistry, applicationRegistry, localServerId });
   assert.equal(typeof runtime.registry.auditIsolation, 'function');
+  assert.equal(typeof runtime.isolationMigration?.start, 'function');
+  assert.equal(typeof runtime.isolationMigration?.rollback, 'function');
 
   const local = await runtime.registry.auditIsolation(websiteId);
   assert.equal(local.websiteId, websiteId);

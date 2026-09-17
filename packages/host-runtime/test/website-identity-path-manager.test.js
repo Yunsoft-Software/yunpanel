@@ -398,6 +398,9 @@ test('workspace-only migration creates and compensates scoped directories withou
   assert.equal(applied.satisfied, true);
   assert.equal(applied.createdWorkspaceDirectories, 2);
   assert.equal(identityManager.calls.some(([name]) => name === 'apply'), false);
+  const inspectedOperation = await manager.inspectWorkspaceOperation(boundIntent, { operationId });
+  assert.equal(inspectedOperation.workspaceReceiptVersion, 1);
+  assert.equal(inspectedOperation.createdWorkspaceDirectories, 2);
 
   const compensated = await manager.compensateWorkspace(boundIntent, { operationId });
   assert.equal(compensated.satisfied, true);

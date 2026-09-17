@@ -29,6 +29,15 @@ test('production configures SFTP key desired state before provisioning restart r
   assert.ok(keyRuntime >= 0 && keyLifecycle > keyRuntime && provisioningInit > keyLifecycle);
 });
 
+test('production persists Website isolation migration journal with provisioning state', () => {
+  assert.match(source, /const websiteIsolationMigrationStorePath = process\.env\.YUNPANEL_WEBSITE_ISOLATION_MIGRATION_STORE/);
+  assert.match(source, /path\.join\(controlPlaneStateRoot, 'website-isolation-migration-registry\.json'\)/);
+  assert.match(source, /isolationMigrationFilePath: websiteIsolationMigrationStorePath,/);
+  assert.match(source, /configurePassengerControlPlane\(\{[\s\S]*?runtimeBindingRegistry,[\s\S]*?localServerId,[\s\S]*?\}\);/);
+  assert.match(source, /website isolation migration store=\$\{websiteIsolationMigrationStorePath\}/);
+  assert.match(envExample, /^YUNPANEL_WEBSITE_ISOLATION_MIGRATION_STORE=\.data\/website-isolation-migration-registry\.json$/m);
+});
+
 test('production migration policy and ledger initialize before Domain registry', () => {
   assert.match(source, /import \{ createWebsiteMigrationPolicyStore \} from '\.\/website-migration-policy\.js';/);
   assert.match(source, /import \{ createWebsiteMigrationLedger \} from '\.\/website-migration-ledger\.js';/);

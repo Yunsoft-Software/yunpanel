@@ -18,7 +18,10 @@ Bu kayıt 16 Eylül Website isolation audit'inden sonra tamamlanan source-level 
 - `0f457117` authenticated `GET /api/websites/:websiteId/isolation-audit` route kontratını ekledi. Route panel auth guard arkasında, local Website scope kontrolü yapıyor ve audit service hatalarını mevcut Website HTTP error kontratına map ediyor.
 - `ef0a0338` audit'i durable Website provisioning registry ve canlı provisioning handler `inspect()` fonksiyonlarıyla production runtime'a bağladı. Capability yalnız gerekli Website/Application registry bağı hazır olduğunda expose ediliyor; local-server scope fail-closed kalıyor.
 - Website genel bakışı audit sonucunu persistent Website ID üzerinden yüklüyor; canonical user/HOME/document root/tmp/log beklentilerini, denetlenen provisioning adımlarını ve actionable bulguları gösteriyor. Yeniden denetleme salt okunur kalıyor ve API'ye Domain ID gönderilmiyor.
-- Audit inspect-only'dir. Migration gerektiren metadata, operation ve step farkları artık current/desired değer, ownership gate, step state, bounded inspection reason ve secret-safe intent SHA-256 ile exact değişiklik listesine dönüştürülür. Preview digest bu listeyi pinler ve typed confirmation digest'e bağlıdır. Apply hâlâ kapalıdır; raw recursive ownership repair yapmaz ve operation-owned rollback katmanı tamamlanmadan mutation açılmaz.
+- Audit inspect-only kalır. Migration gerektiren metadata, operation ve step farkları current/desired değer, ownership gate, step state, bounded inspection reason ve secret-safe intent SHA-256 ile exact değişiklik listesine dönüştürülür. Preview digest bu listeyi pinler ve typed confirmation digest'e bağlıdır.
+- Tek fark canonical workspace `tmp`/`logs` eksikliği olduğunda audit `applyAvailable=true` verir. Authenticated apply exact body, preview digest ve typed confirmation'ı yeniden doğrular; canonical user/home/path dışındaki journal intent'ini reddeder.
+- Apply intent'i host mutation'dan önce root-private durable migration registry'ye yazılır. Host workspace receipt'i yalnız operation-created direct-child dizinleri sahiplenir. Restartta `applying` state kör replay edilmez; receipt inspection tamamlanmış postcondition'ı kapatır, belirsiz/incomplete state operator müdahalesi için açık kalır.
+- Typed rollback yalnız aynı operation receipt'inin sahip olduğu boş dizinleri non-recursive kaldırır; pre-existing veya veri içeren dizin, Unix account/home, runtime ve SFTP state'i korunur. HTTP yüzeyi migration list/get/apply/rollback endpoint'lerini panel auth ve local Website scope arkasında sunar; raw intent veya secret public projection'a çıkmaz.
 
 ## SFTP public-key lifecycle source durumu
 
@@ -88,12 +91,14 @@ Kaynak commit `675579e` için repo dışı `.local/test-server.env` hedefi kulla
 - `/var/lib/yunpanel/control-plane/website-provisioning-registry.json` byte-for-byte korundu ve `root:root 0600` kaldı. Yeni production bootstrap `/var/lib/yunpanel/control-plane/website-sftp-key-registry.json` dosyasını `root:root 0600` oluşturdu.
 - Test hostunda `/var/lib/yunpanel/staging/website-identities` altında gerçek ownership receipt fixture'ı yoktu. Bu nedenle receipt içeriğinin upgrade boyunca korunması kanıtlanmış sayılmadı; `todo.md` yalnız bu kalan fixture kabulüne daraltıldı.
 
+## Workspace migration apply/rollback source durumu
+
+Canonical Website workspace yöneticisi operation-scoped receipt tutar. Receipt yalnız apply öncesi mevcut olmadığı doğrulanan `tmp`/`logs` direct-child dizinlerini sahiplenir ve her create sonrası ayrı checkpoint yazar. Restartta `planned` kalmış fakat hostta bulunan dizin ownership'i tahmin edilmez. Compensation pre-existing dizinlere dokunmaz, yalnız checkpoint'li ve boş operation-owned dizinleri ters sırada non-recursive `rmdir` ile kaldırır; dizin veri içeriyorsa fail-closed kalır ve base Unix identity cleanup'ına ilerlemez. Workspace-only inspect/apply/compensation yüzeyi mevcut canonical Unix identity'yi zorunlu tutar fakat user/home create veya delete çağırmaz. Inspect bütün eksik workspace direct-child'larını birlikte raporlar; audit bunları exact path/mode ve `operation_receipt_planned` ownership gate'iyle digest'e dahil eder. API migration journal'ı pending/applying/succeeded/failed/compensating/compensated durumlarını ve secret-safe evidence'ı disk üzerinde korur.
+
 ## Kalan P0.1 source işleri
 
-Isolation apply rollback temeli olarak canonical Website workspace yöneticisi operation-scoped receipt tutar. Receipt yalnız apply öncesi mevcut olmadığı doğrulanan `tmp`/`logs` direct-child dizinlerini sahiplenir ve her create sonrası ayrı checkpoint yazar. Restartta `planned` kalmış fakat hostta bulunan dizin ownership'i tahmin edilmez. Compensation pre-existing dizinlere dokunmaz, yalnız checkpoint'li ve boş operation-owned dizinleri ters sırada non-recursive `rmdir` ile kaldırır; dizin veri içeriyorsa fail-closed kalır ve base Unix identity cleanup'ına ilerlemez. Workspace-only inspect/apply/compensation yüzeyi mevcut canonical Unix identity'yi zorunlu tutar fakat user/home create veya delete çağırmaz; isolation migration bunu tam identity provisioning'den bağımsız kullanabilir. Inspect bütün eksik workspace direct-child'larını birlikte raporlar; audit bunları exact path/mode ve `operation_receipt_planned` ownership gate'iyle digest'e dahil eder.
-
-- Isolation migration apply exact değişiklik preview/digest + typed confirmation ile operation-owned değişiklikler yapmalı ve geri alabilmeli; recursive blind `chown` yapmamalı.
-- Legacy Website migration apply canonical identity/path/runtime/SFTP drift raporu olmadan destructive ownership repair yapmamalı.
+- Workspace dışındaki legacy Unix identity/path/runtime/SFTP drift'leri exact adapter preview ve ayrı operation ownership kanıtı olmadan destructive repair'e açılmamalı.
+- Her yeni migration adapter'ı restart inspection, stale revision/digest, operation-owned compensation ve data-preserving rollback testlerini aynı durable lifecycle'a eklemeli.
 
 ## Kabul sınırı
 

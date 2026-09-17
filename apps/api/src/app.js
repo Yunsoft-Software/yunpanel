@@ -388,6 +388,7 @@ export function createApp({
         websiteRegistry,
         domainRegistry,
         runtimeBindingRegistry,
+        localServerId,
       });
     }
   }
@@ -404,6 +405,9 @@ export function createApp({
     mountWebsiteProvisioningRoutes(app, {
       registry: websiteProvisioningRuntime.registry,
       orchestrator: websiteProvisioningRuntime.orchestrator,
+      isolationMigration: websiteProvisioningRuntime.isolationMigration,
+      websiteRegistry,
+      localServerId,
     });
   }
   mountResourceImpactRoutes(app, {
