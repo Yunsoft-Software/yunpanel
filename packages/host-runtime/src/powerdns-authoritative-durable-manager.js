@@ -521,6 +521,12 @@ export function createPowerDnsAuthoritativeDurableManager({
         operationId: rollingBack.id,
         snapshotDigest: recovery.snapshotDigest,
       });
+      if (restored?.sockets?.satisfied !== true) {
+        throw new PowerDnsAuthoritativeManagerError(
+          'powerdns_rollback_socket_evidence_missing',
+          'PowerDNS rollback cannot close before healthy UDP, TCP and recursion-policy evidence is verified',
+        );
+      }
       const result = evidenceFromInspection(previousSpec, restored);
       await mutate(rollingBack, { status: 'rolled_back', result, lastError: null });
       return restored;

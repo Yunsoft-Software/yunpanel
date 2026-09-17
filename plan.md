@@ -23,12 +23,6 @@ Son Website isolation/SFTP ilerlemesi: `docs/history/website-isolation-sftp-prog
 
 Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
-## P0.2 — Sunucu kimliği, ns1/ns2 ve PowerDNS Authoritative
-
-- [ ] PowerDNS rollback başlamadan verified current config + receipt compensation snapshot'ını root-private persist et; config/receipt replacement ortasında process ölürse mixed state'i exact previous/current bytes ile güvenle tamamla veya geri al. UDP/TCP/recursion health'i durable journal `rolled_back` kapanmadan transaction içine dahil et.
-
-Gerçek host, public DNS, delegation/glue ve browser kabul kapıları `todo.md` içindedir.
-
 ## P0.3 — Versioned DNS Zone Template ve Domain DNS yönetimi
 
 - [ ] Local mail lifecycle tamamlanınca mail capability/DKIM public-key intent'ini zone lifecycle'a bağla; re-apply `mail` source'u desired state ile güvenle reconcile etsin; kapalı servis dead mail/webmail/SRV/discovery kaydı üretmesin.

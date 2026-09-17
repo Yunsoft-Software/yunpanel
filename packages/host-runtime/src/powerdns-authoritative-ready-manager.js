@@ -32,7 +32,7 @@ export function createPowerDnsAuthoritativeReadyManager({
   async function inspect(intent) {
     const base = await manager.inspect(intent);
     if (!base?.satisfied) return base;
-    const sockets = await socketState();
+    const sockets = base.sockets?.satisfied === true ? base.sockets : await socketState();
     if (!sockets.satisfied) {
       return Object.freeze({
         ...base,
@@ -110,7 +110,7 @@ export function createPowerDnsAuthoritativeReadyManager({
         'PowerDNS rollback did not return verified base evidence',
       );
     }
-    const sockets = await socketState();
+    const sockets = base.sockets?.satisfied === true ? base.sockets : await socketState();
     if (!sockets.satisfied) {
       throw new PowerDnsAuthoritativeManagerError(
         sockets.reason ?? 'powerdns_socket_unhealthy',

@@ -59,7 +59,7 @@ function memoryJournal() {
   };
 }
 
-function rollbackCapableHost({ rollbackError = null } = {}) {
+function rollbackCapableHost({ rollbackError = null, rollbackSockets = true } = {}) {
   let state = 'missing';
   const calls = [];
   return {
@@ -98,6 +98,9 @@ function rollbackCapableHost({ rollbackError = null } = {}) {
         return satisfied({
           secondaryDns: previousSecondaryDns,
           receipt: { appliedAt: '2026-09-15T12:00:00.000Z' },
+          ...(rollbackSockets
+            ? { sockets: { satisfied: true, udp53: true, tcp53: true, recursive: false } }
+            : {}),
           rollback: { operationId: context.operationId, snapshotDigest: context.snapshotDigest },
         });
       },
@@ -476,6 +479,34 @@ test('PowerDNS durable manager journals explicit rollback before host mutation a
   assert.equal(completed.rollback.status, 'succeeded');
   assert.equal(completed.rollback.available, false);
   assert.equal(completed.rollback.reason, 'powerdns_rollback_already_completed');
+});
+
+test('PowerDNS durable manager does not close rollback before authoritative socket evidence', async () => {
+  const journal = memoryJournal();
+  const operationPath = '/state/powerdns-operation.json';
+  const host = rollbackCapableHost({ rollbackSockets: false });
+  const manager = createPowerDnsAuthoritativeDurableManager({
+    manager: host.manager,
+    operationPath,
+    now: () => Date.parse(appliedAt),
+    idFactory: () => 'operation-rollback-socket-gate',
+    ...journal,
+  });
+  await manager.apply(intent());
+  const operation = await manager.operation();
+
+  await assert.rejects(
+    manager.rollback(intent(), {
+      operationId: operation.id,
+      expectedUpdatedAt: operation.updatedAt,
+      snapshotDigest,
+    }),
+    (error) => error instanceof PowerDnsAuthoritativeManagerError
+      && error.code === 'powerdns_rollback_socket_evidence_missing',
+  );
+  const persisted = JSON.parse(journal.files.get(operationPath));
+  assert.equal(persisted.status, 'rollback_failed');
+  assert.equal(persisted.lastError.code, 'powerdns_rollback_socket_evidence_missing');
 });
 
 test('PowerDNS durable rollback rejects a stale snapshot without changing succeeded journal state', async () => {

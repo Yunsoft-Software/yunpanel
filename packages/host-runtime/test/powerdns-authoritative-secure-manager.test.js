@@ -48,6 +48,7 @@ function rollbackFilesystem({ receipt = true } = {}) {
   const databasePath = powerDnsTemplatePolicy.databasePath;
   const receiptPath = powerDnsAuthoritativeManagerInternals.paths.RECEIPT_PATH;
   const snapshotPath = powerDnsAuthoritativeSecureManagerInternals.rollbackSnapshotPath;
+  const compensationPath = powerDnsAuthoritativeSecureManagerInternals.rollbackCompensationPath;
   const previousSecondaryDns = ['198.51.100.53'];
   const config = renderManagedPowerDnsConfig({
     apiKeyHash: 'previous-managed-api-key-hash-value-000000000000',
@@ -71,7 +72,9 @@ function rollbackFilesystem({ receipt = true } = {}) {
   ]);
   return {
     files,
+    metadata,
     snapshotPath,
+    compensationPath,
     previousSecondaryDns,
     async chmodFn(target, mode) {
       const current = metadata.get(target);
@@ -109,6 +112,8 @@ function rollbackFilesystem({ receipt = true } = {}) {
 function secureManagerWithFilesystem(filesystem, manager, overrides = {}) {
   return createPowerDnsAuthoritativeSecureManager({
     rollbackSnapshotPath: filesystem.snapshotPath,
+    rollbackCompensationPath: filesystem.compensationPath,
+    socketInspector: { async inspect() { return { satisfied: true, udp53: true, tcp53: true, recursive: false }; } },
     chmodFn: filesystem.chmodFn,
     chownFn: filesystem.chownFn,
     lstatFn: filesystem.lstatFn,
@@ -506,6 +511,7 @@ test('PowerDNS secure manager restores an exact snapshot after restart and keeps
   });
 
   assert.equal(result.satisfied, true);
+  assert.deepEqual(result.sockets, { satisfied: true, udp53: true, tcp53: true, recursive: false });
   assert.deepEqual(result.rollback, {
     operationId: 'operation-rollback',
     snapshotDigest: status.snapshotDigest,
@@ -520,6 +526,150 @@ test('PowerDNS secure manager restores an exact snapshot after restart and keeps
   });
   assert.equal(repeated.rollback.alreadyRestored, true);
   assert.deepEqual(host.activations, ['previous']);
+});
+
+test('PowerDNS secure manager persists private current-state compensation and completes mixed files after restart', async () => {
+  const filesystem = rollbackFilesystem();
+  const host = rollbackHost(filesystem);
+  const firstProcess = secureManagerWithFilesystem(filesystem, host.manager, {
+    now: () => Date.parse('2026-09-17T13:00:00.000Z'),
+  });
+  await firstProcess.apply(authoritativeIntent(), { operationId: 'operation-mixed-restart' });
+  const status = await firstProcess.rollbackStatus({
+    operationId: 'operation-mixed-restart',
+    serverId,
+    credentialRevision: 2,
+  });
+  await firstProcess.rollback(authoritativeIntent(), {
+    operationId: 'operation-mixed-restart',
+    snapshotDigest: status.snapshotDigest,
+  });
+
+  const compensation = JSON.parse(filesystem.files.get(filesystem.compensationPath).toString('utf8'));
+  assert.equal(compensation.operationId, 'operation-mixed-restart');
+  assert.equal(compensation.rollbackSnapshotDigest, status.snapshotDigest);
+  assert.equal(compensation.createdAt, '2026-09-17T13:00:00.000Z');
+  assert.match(compensation.compensationDigest, /^[a-f0-9]{64}$/);
+  assert.equal(typeof compensation.config.content, 'string');
+  assert.equal(typeof compensation.receipt.content, 'string');
+  assert.doesNotMatch(JSON.stringify(compensation), new RegExp(apiKey));
+  assert.equal(filesystem.metadata.get(filesystem.compensationPath).uid, 0);
+  assert.equal(filesystem.metadata.get(filesystem.compensationPath).mode & 0o777, 0o600);
+
+  filesystem.files.set(powerDnsTemplatePolicy.configPath, Buffer.from(host.previousConfig));
+  filesystem.files.set(powerDnsAuthoritativeManagerInternals.paths.RECEIPT_PATH, Buffer.from(host.currentReceipt));
+  const restarted = secureManagerWithFilesystem(filesystem, host.manager);
+  const configFirst = await restarted.rollback(authoritativeIntent(), {
+    operationId: 'operation-mixed-restart',
+    snapshotDigest: status.snapshotDigest,
+  });
+  assert.equal(configFirst.rollback.alreadyRestored, false);
+  assert.equal(filesystem.files.get(powerDnsTemplatePolicy.configPath).equals(host.previousConfig), true);
+  assert.equal(filesystem.files.get(powerDnsAuthoritativeManagerInternals.paths.RECEIPT_PATH).equals(host.previousReceipt), true);
+
+  filesystem.files.set(powerDnsTemplatePolicy.configPath, Buffer.from(host.currentConfig));
+  filesystem.files.set(powerDnsAuthoritativeManagerInternals.paths.RECEIPT_PATH, Buffer.from(host.previousReceipt));
+  const receiptFirst = await restarted.rollback(authoritativeIntent(), {
+    operationId: 'operation-mixed-restart',
+    snapshotDigest: status.snapshotDigest,
+  });
+  assert.equal(receiptFirst.rollback.alreadyRestored, false);
+  assert.equal(filesystem.files.get(powerDnsTemplatePolicy.configPath).equals(host.previousConfig), true);
+  assert.equal(filesystem.files.get(powerDnsAuthoritativeManagerInternals.paths.RECEIPT_PATH).equals(host.previousReceipt), true);
+});
+
+test('PowerDNS secure manager includes socket policy in rollback and compensates an unhealthy restored service', async () => {
+  const filesystem = rollbackFilesystem();
+  const host = rollbackHost(filesystem);
+  let socketChecks = 0;
+  const manager = secureManagerWithFilesystem(filesystem, host.manager, {
+    socketInspector: {
+      async inspect() {
+        socketChecks += 1;
+        return socketChecks === 1
+          ? { satisfied: false, reason: 'powerdns_tcp_unavailable' }
+          : { satisfied: true, udp53: true, tcp53: true, recursive: false };
+      },
+    },
+  });
+  await manager.apply(authoritativeIntent(), { operationId: 'operation-socket-compensation' });
+  const status = await manager.rollbackStatus({
+    operationId: 'operation-socket-compensation',
+    serverId,
+    credentialRevision: 2,
+  });
+
+  await assert.rejects(
+    manager.rollback(authoritativeIntent(), {
+      operationId: 'operation-socket-compensation',
+      snapshotDigest: status.snapshotDigest,
+    }),
+    (error) => error instanceof PowerDnsAuthoritativeManagerError
+      && error.code === 'powerdns_tcp_unavailable',
+  );
+  assert.equal(socketChecks, 2);
+  assert.equal(filesystem.files.get(powerDnsTemplatePolicy.configPath).equals(host.currentConfig), true);
+  assert.equal(filesystem.files.get(powerDnsAuthoritativeManagerInternals.paths.RECEIPT_PATH).equals(host.currentReceipt), true);
+  assert.deepEqual(host.activations, ['previous', 'current']);
+});
+
+test('PowerDNS secure manager rechecks live files after persisting compensation', async () => {
+  const filesystem = rollbackFilesystem();
+  const host = rollbackHost(filesystem);
+  const drift = Buffer.from('external-config-drift\n');
+  const manager = secureManagerWithFilesystem(filesystem, host.manager, {
+    async renameFn(from, to) {
+      await filesystem.renameFn(from, to);
+      if (to === filesystem.compensationPath) {
+        filesystem.files.set(powerDnsTemplatePolicy.configPath, drift);
+      }
+    },
+  });
+  await manager.apply(authoritativeIntent(), { operationId: 'operation-post-persist-drift' });
+  const status = await manager.rollbackStatus({
+    operationId: 'operation-post-persist-drift',
+    serverId,
+    credentialRevision: 2,
+  });
+
+  await assert.rejects(
+    manager.rollback(authoritativeIntent(), {
+      operationId: 'operation-post-persist-drift',
+      snapshotDigest: status.snapshotDigest,
+    }),
+    (error) => error instanceof PowerDnsAuthoritativeManagerError
+      && error.code === 'powerdns_rollback_current_state_changed',
+  );
+  assert.equal(filesystem.files.get(powerDnsTemplatePolicy.configPath).equals(drift), true);
+  assert.deepEqual(host.activations, []);
+});
+
+test('PowerDNS secure manager rejects a non-private persisted compensation before rollback mutation', async () => {
+  const filesystem = rollbackFilesystem();
+  const host = rollbackHost(filesystem);
+  const manager = secureManagerWithFilesystem(filesystem, host.manager);
+  await manager.apply(authoritativeIntent(), { operationId: 'operation-unsafe-compensation' });
+  const status = await manager.rollbackStatus({
+    operationId: 'operation-unsafe-compensation',
+    serverId,
+    credentialRevision: 2,
+  });
+  await manager.rollback(authoritativeIntent(), {
+    operationId: 'operation-unsafe-compensation',
+    snapshotDigest: status.snapshotDigest,
+  });
+  const metadata = filesystem.metadata.get(filesystem.compensationPath);
+  filesystem.metadata.set(filesystem.compensationPath, { ...metadata, mode: 0o100644 });
+
+  await assert.rejects(
+    manager.rollback(authoritativeIntent(), {
+      operationId: 'operation-unsafe-compensation',
+      snapshotDigest: status.snapshotDigest,
+    }),
+    (error) => error instanceof PowerDnsAuthoritativeManagerError
+      && error.code === 'powerdns_rollback_compensation_unsafe',
+  );
+  assert.equal(filesystem.files.get(powerDnsTemplatePolicy.configPath).equals(host.previousConfig), true);
 });
 
 test('PowerDNS secure manager rejects a stale snapshot digest before filesystem mutation', async () => {

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createPowerDnsAuthoritativeReadyManager } from '../src/powerdns-authoritative-ready-manager.js';
 import { PowerDnsAuthoritativeManagerError } from '../src/powerdns-authoritative-manager.js';
 
-function base({ satisfied = true } = {}) {
+function base({ satisfied = true, rollbackSockets = null } = {}) {
   const calls = [];
   return {
     calls,
@@ -13,7 +13,10 @@ function base({ satisfied = true } = {}) {
       async operation() { calls.push(['operation']); return { id: 'operation-1', status: 'applying' }; },
       async resolve(intent, recovery) { calls.push(['resolve', intent, recovery]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
       async retry(intent, recovery) { calls.push(['retry', intent, recovery]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
-      async rollback(intent, recovery) { calls.push(['rollback', intent, recovery]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
+      async rollback(intent, recovery) {
+        calls.push(['rollback', intent, recovery]);
+        return { satisfied, adapter: 'powerdns-authoritative-gsqlite3', ...(rollbackSockets ? { sockets: rollbackSockets } : {}) };
+      },
     },
   };
 }
@@ -100,6 +103,22 @@ test('PowerDNS explicit rollback requires healthy authoritative socket evidence'
   assert.equal(result.sockets.recursive, false);
   assert.deepEqual(runtime.calls, [['rollback', intent, recovery]]);
   assert.deepEqual(health.calls, ['inspect']);
+});
+
+test('PowerDNS explicit rollback reuses socket evidence verified inside the durable transaction', async () => {
+  const verifiedSockets = { satisfied: true, udp53: true, tcp53: true, recursive: false };
+  const runtime = base({ rollbackSockets: verifiedSockets });
+  const health = sockets({ satisfied: false });
+  const manager = createPowerDnsAuthoritativeReadyManager({ manager: runtime.manager, socketInspector: health.inspector });
+
+  const result = await manager.rollback({}, {
+    operationId: 'operation-1',
+    expectedUpdatedAt: '2026-09-17T12:00:00.000Z',
+    snapshotDigest: 'a'.repeat(64),
+  });
+
+  assert.equal(result.sockets, verifiedSockets);
+  assert.deepEqual(health.calls, []);
 });
 
 test('PowerDNS inspect does not probe sockets while base service is not ready', async () => {

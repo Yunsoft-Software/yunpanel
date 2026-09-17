@@ -26,8 +26,11 @@ Bu kayıt P0.2 PowerDNS lifecycle hardening diliminde kaynakta tamamlanan işler
 - Base authoritative manager restore edilmiş config ve receipt'i exact server/credential/topology intent'iyle doğrulayan ayrı aktivasyon primitive'i sunar. Primitive restore dosyalarını yeniden yazmadan vendor `config=check`, service enable/restart, API health ve final inspect uygular; APT/package mutation'ı başlatmaz.
 - Secure rollback exact operation ID + snapshot digest + server/credential fence'ini doğrular; current config/receipt'i mutation öncesi iki kez okuyup verified current host state ile bağlar. Drift veya stale digest dosya mutation'ından önce reddedilir.
 - Config ve authoritative receipt fixed managed path'lere ayrı atomik replacement ile restore edilir. Aktivasyon/health başarısızsa işlem öncesi current dosyalar geri konur ve current intent yeniden aktive edilir; bu da doğrulanamazsa `powerdns_rollback_compensation_failed` açıkça bırakılır.
+- Verified current config + receipt, ilk rollback dosya mutation'ından önce operation/snapshot-bound SHA-256 kimlikli ayrı compensation snapshot'ına atomik yazılır. Parent `0700`, dosya root-owned `0600` contract'ıyla restart sonrasında okunur; public operation/API projection bu dosya içeriklerini taşımaz.
+- Restart/retry canlı config ve receipt'i exact previous/current snapshot bytes ile ayrı ayrı sınıflandırır. Config previous + receipt current veya tersi operation-owned mixed state previous hedefe tamamlanır; iki snapshot dışında kalan manual/concurrent drift mutation başlamadan reddedilir. Compensation snapshot yazıldıktan sonra canlı dosyalar tekrar okunarak persistence aralığındaki drift de fence'e alınır.
+- Restore edilen previous state vendor activation/final inspect yanında UDP/53, TCP/53 ve recursion-policy probe'undan geçmeden secure transaction başarılı dönmez. Socket gate başarısızlığında persisted current snapshot geri yüklenip current activation ve socket policy yeniden doğrulanır.
 - Aynı snapshot restart sonrasında kullanılabilir. Exact previous dosyalar zaten restore edilmiş ve healthy ise tekrar rollback hiçbir dosya yazımı veya service restart yapmadan idempotent sonuç döndürür.
-- Durable authoritative journal schema v2, eski v1 kaydı okuyarak `rolling_back`, `rolled_back` ve `rollback_failed` durumlarını tutar. Host mutation'dan önce `rolling_back` checkpoint'i yazılır; restart otomatik replay yapmaz, yalnız fresh operation/timestamp/snapshot fence'li explicit rollback devam eder.
+- Durable authoritative journal schema v2, eski v1 kaydı okuyarak `rolling_back`, `rolled_back` ve `rollback_failed` durumlarını tutar. Host mutation'dan önce `rolling_back` checkpoint'i yazılır; restart otomatik replay yapmaz, yalnız fresh operation/timestamp/snapshot fence'li explicit rollback devam eder. Secure manager healthy socket evidence döndürmeden journal `rolled_back` kapanmaz.
 - Durable operation projection rollback availability, snapshot digest, previous secondary topology, snapshot zamanı ve automatic-replay-blocked state'ini secret-free verir. Service exact typed confirmation üretir; authenticated rollback route'u ayrı common audit action'ına bağlıdır.
 - Mevcut Network DNS paneli aynı reusable typed-confirmation dialog ile snapshot rollback'i açar; stale digest/operation gönderemez ve `rolling_back` sırasında apply/recovery butonlarını yanlış yüzeye bağlamaz.
 
@@ -48,16 +51,17 @@ Kaynağa aşağıdaki regression testleri eklendi:
 - restart sonrası snapshot restore, stale digest/current drift reddi, successful idempotence, failed activation compensation ve explicit compensation failure.
 - journal v1→v2 okuma, mutation-before-checkpoint, restart sonrası explicit resume, stale snapshot reddi, rollback-failed evidence ve failed-compensation sonrası apply block;
 - service/HTTP typed confirmation + credential fence + common audit ve frontend exact request wiring.
+- root-private current-state compensation persistence, her iki config/receipt mixed-state sırasının restart sonrası tamamlanması, post-persist drift fence'i ve unsafe compensation mode reddi;
+- rollback socket failure sonrası current compensation + socket revalidation ve socket evidence olmadan durable `rolled_back` checkpoint'inin kapanmaması.
 
-2026-09-17 snapshot diliminde host-runtime odak testleri desteklenen Node 24 ile çalıştırıldı ve 18/18 geçti. Ardından repository policy, bütün workspace testleri ve production build'i içeren `npm run check` başarıyla tamamlandı. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
+2026-09-17 snapshot, control-surface ve compensation/socket dilimlerinde repository policy, bütün workspace testleri ve production build'i içeren `npm run check` başarıyla tamamlandı. Son dilimin host-runtime odak testleri desteklenen Node 24 ile 42/42, tam host-runtime paketi 503/503 geçti. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
 
 ## Açık kalan acceptance / lifecycle sınırı
 
 - Fresh Ubuntu 24.04 üzerinde gerçek `pdns-server` configtest/service/package failure injection yapılmalı.
 - Process/API kesintisi mutation ile evidence checkpoint arasına enjekte edilip restart sonrası inspect-first davranış doğrulanmalı.
 - Belirsiz apt/systemd sonucunda aynı mutation'ın otomatik ikinci kez çalışmadığı host command loglarıyla kanıtlanmalı.
-- Root-private rollback snapshot'ın gerçek dosya sahipliği/izinleri, process restart sonrası okunması, symlink/tamper reddi ve retry sırasında değişmemesi doğrulanmalı.
-- Config/receipt replacement ortasında process kaybı için verified-current compensation dosyaları henüz persist edilmiyor; bu crash window kapanmadan restart-safe rollback tamamlanmış sayılmaz.
-- UDP/TCP/recursion socket evidence ready wrapper'da kontrol edilse de durable `rolled_back` checkpoint'inden sonra çalışıyor; bu health gate transaction/journal başarı sınırının içine taşınmalı.
+- Root-private rollback ve current-state compensation snapshot'larının gerçek dosya sahipliği/izinleri, process restart sonrası okunması, symlink/tamper reddi ve retry sırasında değişmemesi doğrulanmalı.
+- Process config/receipt replacement'ın iki sırası arasında öldürülerek restart sonrası exact mixed-state completion; socket failure noktasında öldürülerek persisted-current compensation ve journal kapanış sırası gerçek hostta doğrulanmalı.
 - Package upgrade boyunca operation journal, authoritative receipt ve root-owned private izinlerin korunduğu doğrulanmalı.
 - Public UDP/TCP 53, delegation, secondary transfer/failover ve browser yüzeyi ayrı T-DNS kabul kapıları olarak açık kalır.
