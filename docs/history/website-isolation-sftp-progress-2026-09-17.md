@@ -16,6 +16,7 @@ Bu kayıt 16 Eylül Website isolation audit'inden sonra tamamlanan source-level 
 
 - `0f457117` authenticated `GET /api/websites/:websiteId/isolation-audit` route kontratını ekledi. Route panel auth guard arkasında, local Website scope kontrolü yapıyor ve audit service hatalarını mevcut Website HTTP error kontratına map ediyor.
 - `ef0a0338` audit'i durable Website provisioning registry ve canlı provisioning handler `inspect()` fonksiyonlarıyla production runtime'a bağladı. Capability yalnız gerekli Website/Application registry bağı hazır olduğunda expose ediliyor; local-server scope fail-closed kalıyor.
+- Website genel bakışı audit sonucunu persistent Website ID üzerinden yüklüyor; canonical user/HOME/document root/tmp/log beklentilerini, denetlenen provisioning adımlarını ve actionable bulguları gösteriyor. Yeniden denetleme salt okunur kalıyor ve API'ye Domain ID gönderilmiyor.
 - Audit inspect-only'dir. Audit sonucu migration gerektiriyorsa raw recursive ownership repair yapmaz; migration apply hâlâ ayrı preview/digest + typed-confirmation operation olarak tamamlanmalıdır.
 
 ## SFTP public-key lifecycle source durumu
@@ -80,7 +81,7 @@ Kaynak commit `675579e` için repo dışı `.local/test-server.env` hedefi kulla
 ## Kalan P0.1 source işleri
 
 - `shared-site` seçimi mevcut Website binding'ini açıkça göstermeli ve default bağımsız Website olmalı; alias yeni Unix user/runtime/SFTP/mailbox üretmemeli.
-- Isolation audit sonucu panelde gösterilmeli; migration apply exact preview/digest + typed confirmation ile operation-owned değişiklikler yapmalı, recursive blind `chown` yapmamalı.
+- Isolation migration apply exact değişiklik preview/digest + typed confirmation ile operation-owned değişiklikler yapmalı ve geri alabilmeli; recursive blind `chown` yapmamalı.
 - SFTP key desired state/materialization Website provisioning ownership/evidence ve restart/reconcile lifecycle'ına bağlanmalı.
 - Legacy Website migration apply canonical identity/path/runtime/SFTP drift raporu olmadan destructive ownership repair yapmamalı.
 

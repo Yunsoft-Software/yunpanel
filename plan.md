@@ -20,7 +20,7 @@ Son Website isolation/SFTP ilerlemesi: `docs/history/website-isolation-sftp-prog
 ## P0.1 — Website Unix identity ve filesystem isolation
 
 - [ ] `shared-site` seçiminde mevcut Website binding'i açıkça göster ve onaylat; default davranış bağımsız Website olsun, alias hiçbir ek Unix user/runtime/SFTP/mailbox üretmesin.
-- [ ] Isolation audit çıktısını Website panel yüzeyine bağla; migration apply ayrı preview/digest + typed-confirmation operation olsun ve kör recursive `chown` yapmasın.
+- [ ] Isolation migration apply ayrı exact-change preview/digest + typed-confirmation operation olsun; yalnız operation-owned değişiklikleri uygulayıp geri alabilsin ve kör recursive `chown` yapmasın.
 - [ ] SFTP credential desired state/materialization'ını Website provisioning ownership/evidence ve restart/reconcile lifecycle'ına bağla; registry kaydı host materialization'dan saparsa actionable `reconcile_required` state görünür kalsın.
 - [ ] Legacy Website migration apply önce canonical Unix identity/path/runtime/SFTP drift raporu ve exact değişiklik preview'sı versin; operation-owned olmayan dosya/user/runtime üzerinde destructive ownership repair yapmasın.
 
@@ -177,7 +177,7 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 # Uygulama sırası — blocker yoksa sapma yok
 
-1. **Website Unix isolation** — final independent/shared-site create yüzeyi; isolation audit panel + migration apply; SFTP key authenticated production wiring + provisioning evidence; legacy migration hardening.
+1. **Website Unix isolation** — shared-site create yüzeyi; isolation migration apply; SFTP provisioning evidence; legacy migration hardening.
 2. **PowerDNS operator recovery** — durable journal status/evidence, explicit retry/rollback/resolve, typed confirmation ve fail-closed recovery control surface.
 3. **Mail durable execution** — `MAIL_CONFIG_APPLY/ROLLBACK` production worker/executor wiring, readiness evidence ve replay-safe recovery.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.

@@ -12,6 +12,7 @@ import FilesPanel from './FilesPanel.jsx';
 import LogsPanel from './LogsPanel.jsx';
 import SiteResourcesPanel from './SiteResourcesPanel.jsx';
 import ProvisioningRecoveryPanel from './ProvisioningRecoveryPanel.jsx';
+import WebsiteIsolationPanel from './WebsiteIsolationPanel.jsx';
 import { panelRequest } from '../api.js';
 
 function LegacyWebsiteRepair({ domain, canManage, onChanged }) {
@@ -104,6 +105,7 @@ function SiteWorkspace({ websiteId, tab }) {
         ['Son etkinleştirme', formatDate(domain.lastAppliedAt)],
       ]} /></Section><Section title="Hızlı erişim"><div className="ws-section-body ws-actions"><LinkButton to={siteHref(domain.id, 'resources')} icon="box">Bağlı kaynaklar</LinkButton>{application && <LinkButton to={siteHref(domain.id, 'node')} icon="code">Uygulama</LinkButton>}<LinkButton to={siteHref(domain.id, 'dns')} icon="globe">DNS</LinkButton><LinkButton to={siteHref(domain.id, 'ssl')} icon="shield">SSL</LinkButton><LinkButton to={siteHref(domain.id, 'domains')} icon="globe">Alan adları</LinkButton><LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı</LinkButton></div><div className="ws-section-body"><p className="ws-muted">Siteye bağlı veritabanı, mail ve Docker kimlikleri yalnız explicit registry ilişkilerinden Bağlı kaynaklar sekmesinde gösterilir.</p></div></Section></div>
       {website && <ProvisioningRecoveryPanel websiteId={website.id} canManage={canManage} onChanged={refreshAll} />}
+      {website && <WebsiteIsolationPanel websiteId={website.id} />}
       <Section title="Bu siteye ait son işlemler"><CollectionNotice resource={jobs} label="İşlemler" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={8} />}</Section>
     </>}
     {tab === 'resources' && <SiteResourcesPanel domain={domain} website={website} application={application} server={server} />}

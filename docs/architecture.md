@@ -54,6 +54,8 @@ V1 filesystem ve Unix identity contract'ının tek kaynağı host-runtime `creat
 
 Alias hiçbir Unix kullanıcısı, mailbox veya runtime üretmez. Bağımsız subdomain ayrı Website olarak oluşturulursa ayrı kullanıcı/runtime alır; parent Website altında çalışan subdomain açıkça `shared-site` seçilirse parent kimliğini paylaşır. Bu karar hostname parçalarından tahmin edilmez. Final Website create yüzeyi bağımsız subdomain'i explicit `parentDomainId` ile yeni Node/static/PHP Application veya kullanılmamış bir Application üzerinden ayrı Site create operation'ına çevirir. Başka Website'e bağlı Application seçilemez; eski `wwwMode=independent` aynı-Website paylaşım yolu UI ve API sınırında kapalıdır.
 
+Website genel bakışındaki izolasyon denetimi canonical Unix kullanıcısı ve yolları durable provisioning operation + canlı handler inspection kanıtıyla karşılaştırır. Bu yüzey salt okunurdur; migration gerektiğinde bulguyu ve güvenli sonraki adımı gösterir fakat ayrı exact-change preview/digest, typed confirmation ve rollback sözleşmesi tamamlanmadan host mutation başlatmaz.
+
 Bir Website'in uygulamaları başka Website ekranında görünmez. Sunucu genelindeki process/application envanteri yalnız Owner'ın Sunucu > Gelişmiş/Tanılama alanında bulunabilir; günlük navigasyonda global `Uygulamalar` ürünü yoktur.
 
 ### 3.1 Runtime adapter authority
