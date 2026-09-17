@@ -28,6 +28,7 @@ Bu kayıt P0.4 managed mail configuration lifecycle'ında kaynakta tamamlanan ap
 - Host restore primitive'i compensation backup'ı alıp current evidence'ı yeniden doğruladıktan sonra, fakat ilk source artifact mutation'ından önce durable `onPrepared` kapısını çağırır. Journal begin başarısızsa canlı source restore başlamaz.
 - Local executor prepared evidence'ı queued rollback payload'ına bağlayıp `restoring_source` journal'ı yazar; başarılı restore'u `restored`, güvenli current compensation'ı `compensated`, doğrulanamayan compensation'ı `failed` yapar. Terminal journal yazımı host restore başarısını tersine çevirmediğinden kesinti halinde non-terminal journal inspect-first recovery authority olarak kalır.
 - Host rollback inspector source ve compensation snapshot'larının exact operation/digest identity'sini yeniden doğrular. Canlı artifact/directory durumunu salt-okunur biçimde `source`, `current`, iki persisted snapshot'tan oluşan operation-owned `mixed` veya yabancı `drifted` olarak sınıflandırır; public sonucu raw path/içerik taşımaz.
+- Host recovery primitive'i exact `current` sınıfında mutation yapmadan güvenli hata verir, `drifted` state'i reddeder, `source` state'i validator/reload/health ile yeniden doğrular ve yalnız operation-owned `mixed` state'i source snapshot'a tamamlar. Recovery sırasında source doğrulanamazsa exact current compensation snapshot'ı restore edilir; compensation da doğrulanamazsa ayrı terminal hata üretilir.
 
 ## Regression kapsamı
 
@@ -47,7 +48,7 @@ Bu kayıt P0.4 managed mail configuration lifecycle'ında kaynakta tamamlanan ap
 - Rollback receipt write/read, unsafe/symlink ve expanded persisted evidence reddi; configured runtime'ın yalnız exact executor sonucundan receipt üretmesi.
 - Rollback journal begin/terminal transition, monotonic timestamp, bounded failure code, duplicate/terminal replay ve unsafe persistence reddi.
 - Prepared hook persistence failure'ının source mutation öncesi bloklanması; local executor'ın restored/compensated terminal journal sınıflandırması.
-- Rollback inspector'ın source/current/mixed/drifted sınıflandırması, operation-owned sınırı ve side-effect-free bounded sonucu.
+- Rollback inspector'ın source/current/mixed/drifted sınıflandırması, operation-owned sınırı ve side-effect-free bounded sonucu; current/drifted fail-closed recovery ile source/mixed health-gated completion.
 
 İlk backup-binding odak regresyonunda desteklenen Node 24 ile 23/23, v3 previous-state zinciri regresyonunda 31/31, rollback preview/audit regresyonunda 18/18, rollback protocol regresyonunda 4/4 ve backup identity regresyonunda 4/4 test geçti. Host explicit restore/compensation ile ilişkili config/SRS/backup regresyonu 15/15, host-runtime paketinin tamamı 506/506, current materialization odak regresyonu 12/12, local executor/job contract regresyonu 19/19, rollback receipt/runtime odak regresyonu 5/5 ve rollback journal regresyonu 3/3 geçti. Journal/host mutation entegrasyonu odak grubunda 23/23 test ve rollback inspector'ın genişlettiği activator dosyasında 11/11 test ile repository policy başarıyla tamamlandı. Önceki dilimde bütün workspace testleri ve production build'ini içeren `npm run check` başarıyla tamamlandı; build yalnız mevcut büyük chunk uyarısını verdi. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
 
@@ -55,6 +56,6 @@ Bu kayıt P0.4 managed mail configuration lifecycle'ında kaynakta tamamlanan ap
 
 - `MAIL_CONFIG_ROLLBACK` protocol, local executor, strict durable job result ve successful-restore receipt zinciri hazırdır; authenticated enqueue/typed confirmation yüzeyi restart mixed-state recovery tamamlanmadan açılmamıştır.
 - Host primitive ve local executor canlı active-config'i exact current digest'e bağlayıp aynı-process restore hatasında compensation yapar; successful restore receipt'i hazırdır.
-- Rollback restore/validator/reload/readiness sırasında process kesilirse restart resolver persisted journal ve inspector sınıflandırmasıyla operation-owned mixed state'i source hedefe tamamlamalı; current state'i mutation yapmadan güvenli failure olarak kapatmalı ve drift'i fail-closed bırakmalıdır.
+- Rollback restore/validator/reload/readiness sırasında process kesilirse packaged restart resolver persisted job/journal context'ini host inspector/recovery primitive'ine bağlamalı; source completion receipt üretmeli, current state'i güvenli failure olarak kapatmalı ve drift'i fail-closed bırakmalıdır.
 - Başarılı host rollback sonrası mail-domain desired/control-plane revision ve status exact previous state'e reconcile edilmelidir.
 - Legacy v1 apply receipt backup identity, v2 receipt previous control-plane identity taşımadığından full explicit rollback unavailable kalmalıdır.

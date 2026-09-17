@@ -402,7 +402,7 @@ test('explicit rollback persists prepared compensation evidence before source mu
   }
 }));
 
-test('inspects interrupted rollback as current, operation-owned mixed or drifted without side effects', async () => withTempDirectory(async (root) => {
+test('inspects and recovers interrupted rollback without overwriting current or drifted state', async () => withTempDirectory(async (root) => {
   const context = await prepare({ root });
   await context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID });
   let compensationBackupSha256;
@@ -438,6 +438,13 @@ test('inspects interrupted rollback as current, operation-owned mixed or drifted
     },
     { state: 'current', sourceMatches: false, currentMatches: true, operationOwned: true, sideEffects: false },
   );
+  await assert.rejects(
+    context.activator.recoverRollbackConfiguration(context.preview, {
+      ...options,
+      compensationBackupSha256,
+    }),
+    (error) => error instanceof MailConfigActivationError && error.code === 'mail_rollback_recovery_current',
+  );
 
   await writeFile(
     context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath),
@@ -452,6 +459,26 @@ test('inspects interrupted rollback as current, operation-owned mixed or drifted
     { state: mixed.state, operationOwned: mixed.operationOwned, sideEffects: mixed.sideEffects },
     { state: 'mixed', operationOwned: true, sideEffects: false },
   );
+  const recovered = await context.activator.recoverRollbackConfiguration(context.preview, {
+    ...options,
+    compensationBackupSha256,
+  });
+  assert.equal(recovered.restored, true);
+  assert.equal(recovered.sideEffects, true);
+  assert.deepEqual(
+    await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath)),
+    context.originalMainCf,
+  );
+  const source = await context.activator.inspectRollbackConfiguration(context.preview, {
+    ...options,
+    compensationBackupSha256,
+  });
+  assert.equal(source.state, 'source');
+  const reconfirmed = await context.activator.recoverRollbackConfiguration(context.preview, {
+    ...options,
+    compensationBackupSha256,
+  });
+  assert.equal(reconfirmed.restored, true);
 
   await writeFile(
     context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath),
@@ -465,6 +492,13 @@ test('inspects interrupted rollback as current, operation-owned mixed or drifted
   assert.deepEqual(
     { state: drifted.state, operationOwned: drifted.operationOwned, sideEffects: drifted.sideEffects },
     { state: 'drifted', operationOwned: false, sideEffects: false },
+  );
+  await assert.rejects(
+    context.activator.recoverRollbackConfiguration(context.preview, {
+      ...options,
+      compensationBackupSha256,
+    }),
+    (error) => error instanceof MailConfigActivationError && error.code === 'mail_rollback_recovery_drifted',
   );
   assert.doesNotMatch(JSON.stringify([current, mixed, drifted]), /password|argon2|content|path/i);
 }));

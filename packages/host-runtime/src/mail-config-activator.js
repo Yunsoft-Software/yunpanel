@@ -520,13 +520,7 @@ export function createMailConfigActivator({
     await runCommand(command, 'mail_restore_srs_runtime_failed', 'Restored PostSRSd runtime state could not be confirmed');
   }
 
-  async function restoreBackup(preview, plan, backup, transactionId) {
-    const backupDirectory = backupManager.transactionDirectory(transactionId);
-    await restorePresentDirectories(backup);
-    for (const artifact of [...backup.artifacts].reverse()) {
-      await restoreBackupFile(backupDirectory, artifact);
-    }
-    await removeCreatedDirectories(backup);
+  async function confirmRestoredBackup(preview, plan, backup) {
     await restoreSrsRuntime(backup);
     for (const command of plan.rollback.validate) {
       await runCommand(command, 'mail_restore_validation_failed', 'Restored mail configuration validation failed');
@@ -542,6 +536,16 @@ export function createMailConfigActivator({
       throw activationError('mail_restore_readiness_failed', 'Restored mail host readiness could not be confirmed');
     }
     await assertLiveMatchesBackup(backup);
+  }
+
+  async function restoreBackup(preview, plan, backup, transactionId) {
+    const backupDirectory = backupManager.transactionDirectory(transactionId);
+    await restorePresentDirectories(backup);
+    for (const artifact of [...backup.artifacts].reverse()) {
+      await restoreBackupFile(backupDirectory, artifact);
+    }
+    await removeCreatedDirectories(backup);
+    await confirmRestoredBackup(preview, plan, backup);
   }
 
   async function assertCurrentConfiguration(preview, plan) {
@@ -639,7 +643,7 @@ export function createMailConfigActivator({
     });
   }
 
-  async function inspectRollbackNow(currentPreview, {
+  async function loadRollbackRecoveryState(currentPreview, {
     transactionId,
     sourceTransactionId,
     sourcePlanSha256,
@@ -675,13 +679,73 @@ export function createMailConfigActivator({
     }
     const classified = await classifyLiveBackupState(inspectedSource.result, inspectedCurrent.result);
     return Object.freeze({
+      currentPlan,
+      source: inspectedSource.result,
+      current: inspectedCurrent.result,
+      classified,
+    });
+  }
+
+  async function inspectRollbackNow(currentPreview, options = {}) {
+    const recovery = await loadRollbackRecoveryState(currentPreview, options);
+    return Object.freeze({
       version: 1,
       currentConfigurationSha256: currentPreview.sha256,
-      sourcePlanSha256,
-      sourceBackupSha256,
-      compensationBackupSha256,
-      ...classified,
+      sourcePlanSha256: options.sourcePlanSha256,
+      sourceBackupSha256: options.sourceBackupSha256,
+      compensationBackupSha256: options.compensationBackupSha256,
+      ...recovery.classified,
       sideEffects: false,
+    });
+  }
+
+  async function recoverRollbackNow(currentPreview, options = {}) {
+    const recovery = await loadRollbackRecoveryState(currentPreview, options);
+    if (recovery.classified.state === 'current') {
+      throw activationError('mail_rollback_recovery_current', 'Managed mail rollback did not mutate the current configuration');
+    }
+    if (recovery.classified.state === 'drifted' || !recovery.classified.operationOwned) {
+      throw activationError('mail_rollback_recovery_drifted', 'Managed mail rollback recovery found unowned live configuration drift');
+    }
+
+    try {
+      if (recovery.classified.state === 'source') {
+        await assertLiveMatchesBackup(recovery.source);
+        await confirmRestoredBackup(currentPreview, recovery.currentPlan, recovery.source);
+      } else {
+        await restoreBackup(
+          currentPreview,
+          recovery.currentPlan,
+          recovery.source,
+          options.sourceTransactionId,
+        );
+      }
+    } catch (error) {
+      try {
+        await restoreBackup(
+          currentPreview,
+          recovery.currentPlan,
+          recovery.current,
+          options.transactionId,
+        );
+      } catch {
+        throw activationError(
+          'mail_config_explicit_rollback_compensation_failed',
+          'Managed mail rollback recovery failed and the current configuration could not be restored',
+        );
+      }
+      if (error instanceof MailConfigActivationError) throw error;
+      throw activationError('mail_config_explicit_rollback_failed', 'Managed mail rollback recovery failed and the current configuration was restored');
+    }
+
+    return Object.freeze({
+      version: 1,
+      currentConfigurationSha256: currentPreview.sha256,
+      sourcePlanSha256: options.sourcePlanSha256,
+      sourceBackupSha256: options.sourceBackupSha256,
+      compensationBackupSha256: options.compensationBackupSha256,
+      restored: true,
+      sideEffects: true,
     });
   }
 
@@ -760,7 +824,18 @@ export function createMailConfigActivator({
     return inspection;
   }
 
-  return Object.freeze({ activateConfiguration, rollbackConfiguration, inspectRollbackConfiguration });
+  function recoverRollbackConfiguration(preview, options = {}) {
+    const recovery = activationChain.catch(() => {}).then(() => recoverRollbackNow(preview, options));
+    activationChain = recovery;
+    return recovery;
+  }
+
+  return Object.freeze({
+    activateConfiguration,
+    rollbackConfiguration,
+    inspectRollbackConfiguration,
+    recoverRollbackConfiguration,
+  });
 }
 
 export const mailConfigActivatorInternals = Object.freeze({
