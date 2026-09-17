@@ -56,7 +56,7 @@ Bu tasarım site user'ın kendi HOME altındaki `~/.ssh/authorized_keys` dosyas�
 
 ### Authenticated HTTP ve production bootstrap
 
-Bu turda key lifecycle production API composition'ına bağlandı:
+`41967b5` ile key lifecycle production API composition'ına bağlandı:
 
 - `GET/POST /api/websites/:websiteId/sftp/keys`, revoke, rotate ve explicit reconcile route'ları panel auth guard arkasına alındı;
 - mutation body'leri exact-field doğrulamasıyla sınırlandı; `privateKey` gibi beklenmeyen alanlar service katmanına ulaşmadan reddediliyor;
@@ -64,6 +64,17 @@ Bu turda key lifecycle production API composition'ına bağlandı:
 - mutation audit'i yalnız bounded Website kimliği ve action/outcome tutuyor; label veya raw public-key body metadata'ya girmiyor;
 - production bootstrap durable registry'yi control-plane state root altında başlatıyor, yalnız `YUNPANEL_LOCAL_SERVER_ID` kapsamındaki Website'leri kabul ediyor ve root-owned host materializer'a bağlıyor;
 - restart testi durable key metadata'sının korunduğunu, public response'un raw key taşımadığını ve remote Website'in 404 kaldığını kilitliyor.
+
+### Ubuntu package upgrade smoke
+
+Kaynak commit `675579e` için repo dışı `.local/test-server.env` hedefi kullanılmadan önce IPv4 hedefinin `.44` ile bitmediği ve tek adrese çözüldüğü doğrulandı. Yalnız tanımlı Ubuntu 24.04 test hostuna bağlanıldı.
+
+- Hostun kendi amd64/Node `v24.20.0` ortamında temiz `npm ci`, tam `npm run check` ve production Vite build geçti; `yunpanel_0.3.0-2026091701_amd64.deb` üretildi. Paket SHA-256 değeri `353c10480960ff5acca3a140d261eed20257fcfe66d1874bbe86cc705fff9cd0` olarak doğrulandı.
+- Upgrade öncesi packaged `local-runtime validate` geçti, durable recovery state `clear`, aktif job sayısı sıfır, `yun-agent` inactive/disabled ve Nginx active idi.
+- Resmi migration backup oluşturulup tekrar doğrulandı; ardından `0.3.0-2026091502` paketinden `0.3.0-2026091701` paketine upgrade edildi.
+- Upgrade sonrası `dpkg -V`, API health, web gateway, `local-runtime validate`, recovery state ve `nginx -t` kapıları geçti. Legacy agent kapalı kaldı.
+- `/var/lib/yunpanel/control-plane/website-provisioning-registry.json` byte-for-byte korundu ve `root:root 0600` kaldı. Yeni production bootstrap `/var/lib/yunpanel/control-plane/website-sftp-key-registry.json` dosyasını `root:root 0600` oluşturdu.
+- Test hostunda `/var/lib/yunpanel/staging/website-identities` altında gerçek ownership receipt fixture'ı yoktu. Bu nedenle receipt içeriğinin upgrade boyunca korunması kanıtlanmış sayılmadı; `todo.md` yalnız bu kalan fixture kabulüne daraltıldı.
 
 ## Kalan P0.1 source işleri
 
@@ -74,6 +85,6 @@ Bu turda key lifecycle production API composition'ına bağlandı:
 
 ## Kabul sınırı
 
-Bu source-level ilerleme gerçek Ubuntu acceptance yerine geçmez. `todo.md` içindeki gerçek UID/GID isolation, chroot escape, AuthorizedKeysFile owner/mode, real SSH public-key login, revoke/rotate, cross-site rejection, restart/reconcile ve package upgrade kabul maddeleri geçmeden Website isolation/SFTP P0.1 tamamlanmış sayılmaz.
+Bu source-level ilerleme ve package upgrade smoke, gerçek Website fixture acceptance yerine geçmez. `todo.md` içindeki gerçek UID/GID isolation, ownership receipt preservation, chroot escape, AuthorizedKeysFile owner/mode, real SSH public-key login, revoke/rotate, cross-site rejection ve restart/reconcile maddeleri geçmeden Website isolation/SFTP P0.1 tamamlanmış sayılmaz.
 
 GitHub Actions kullanılmadı. Source test kontratları repoya eklendi; bu ortamda gerçek Ubuntu/OpenSSH kabul testi çalıştırılmış gibi değerlendirilmez.
