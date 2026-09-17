@@ -14,6 +14,7 @@ const localWebDomain = { id: randomUUID(), serverId: localServerId };
 const remoteWebDomain = { id: randomUUID(), serverId: remoteServerId };
 const localMailDomain = {
   id: randomUUID(), domainName: 'example.com', managementMode: 'local', webDomainId: localWebDomain.id,
+  status: 'enabled', revision: 2,
 };
 const remoteMailDomain = {
   id: randomUUID(), domainName: 'remote.example', managementMode: 'local', webDomainId: remoteWebDomain.id,
@@ -21,6 +22,10 @@ const remoteMailDomain = {
 const previewDigest = 'a'.repeat(64);
 const configurationSha256 = 'b'.repeat(64);
 const confirmation = `apply-mail-configuration:${localMailDomain.id}:${previewDigest}`;
+const sourceApplyJobId = randomUUID();
+const backupSha256 = 'c'.repeat(64);
+const planSha256 = 'd'.repeat(64);
+const readinessSha256 = 'e'.repeat(64);
 const owner = Object.freeze({
   user: { role: 'owner' },
   access: { mode: 'management', permissions: ['*'] },
@@ -60,7 +65,40 @@ function managedPreview() {
   });
 }
 
-async function listen(t, auth, { jobs = [], preview = managedPreview() } = {}) {
+function sourceApplyJob(overrides = {}) {
+  const result = {
+    version: 3,
+    mailDomainId: localMailDomain.id,
+    previousRevision: 1,
+    previousStatus: 'disabled',
+    desiredStatus: 'enabled',
+    previewDigest,
+    configurationSha256,
+    planSha256,
+    backupSha256,
+    readinessSha256,
+    applied: true,
+    sideEffects: true,
+    ...overrides.result,
+  };
+  return {
+    id: sourceApplyJobId,
+    serverId: localServerId,
+    operation: 'mail.config.apply',
+    resourceType: 'mail_domain',
+    resourceId: localMailDomain.id,
+    status: 'succeeded',
+    result,
+    ...overrides,
+    result,
+  };
+}
+
+async function listen(t, auth, {
+  jobs = [],
+  preview = managedPreview(),
+  currentMailDomain = localMailDomain,
+} = {}) {
   const enqueued = [];
   const app = express();
   app.use(express.json());
@@ -79,7 +117,7 @@ async function listen(t, auth, { jobs = [], preview = managedPreview() } = {}) {
     },
     mailDomainRegistry: {
       async getMailDomain(id) {
-        if (id === localMailDomain.id) return localMailDomain;
+        if (id === localMailDomain.id) return currentMailDomain;
         if (id === remoteMailDomain.id) return remoteMailDomain;
         return null;
       },
@@ -93,6 +131,7 @@ async function listen(t, auth, { jobs = [], preview = managedPreview() } = {}) {
     },
     jobRegistry: {
       async listJobs() { return jobs; },
+      async getJob(id) { return jobs.find((job) => job.id === id) ?? null; },
       async enqueue(input) {
         enqueued.push(structuredClone(input));
         return { id: randomUUID(), status: 'queued', ...input };
@@ -196,6 +235,122 @@ test('managed mail apply rejects stale confirmation, concurrent apply and remote
   assert.equal((await remote.json()).error.code, 'mail_domain_not_found');
 });
 
+test('Owner previews rollback only for the latest v3 apply and exact current mail-domain state', async (t) => {
+  const source = sourceApplyJob();
+  const { base } = await listen(t, owner, { jobs: [source] });
+  const response = await request(
+    base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback-preview`,
+    { sourceApplyJobId },
+  );
+  assert.equal(response.status, 200);
+  const preview = (await response.json()).data;
+  assert.deepEqual({
+    operation: preview.operation,
+    sourceApplyJobId: preview.sourceApplyJobId,
+    previousRevision: preview.previousRevision,
+    expectedCurrentRevision: preview.expectedCurrentRevision,
+    currentStatus: preview.currentStatus,
+    targetStatus: preview.targetStatus,
+    resultingRevision: preview.resultingRevision,
+    currentConfigurationSha256: preview.currentConfigurationSha256,
+    sourcePlanSha256: preview.sourcePlanSha256,
+    backupSha256: preview.backupSha256,
+    readyToRollback: preview.readyToRollback,
+    sideEffects: preview.sideEffects,
+  }, {
+    operation: 'mail_configuration_rollback',
+    sourceApplyJobId,
+    previousRevision: 1,
+    expectedCurrentRevision: 2,
+    currentStatus: 'enabled',
+    targetStatus: 'disabled',
+    resultingRevision: 3,
+    currentConfigurationSha256: configurationSha256,
+    sourcePlanSha256: planSha256,
+    backupSha256,
+    readyToRollback: true,
+    sideEffects: false,
+  });
+  assert.match(preview.previewDigest, /^[a-f0-9]{64}$/);
+  assert.equal(
+    preview.confirmation,
+    `rollback-mail-configuration:${localMailDomain.id}:${sourceApplyJobId}:${preview.previewDigest}`,
+  );
+  assert.doesNotMatch(JSON.stringify(preview), /password|argon2|content|path/i);
+});
+
+test('rollback preview rejects legacy, superseded and control-plane-drifted apply evidence', async (t) => {
+  const legacy = sourceApplyJob({ result: { version: 2 } });
+  delete legacy.result.previousRevision;
+  delete legacy.result.previousStatus;
+  const legacyFixture = await listen(t, owner, { jobs: [legacy] });
+  const legacyResponse = await request(
+    legacyFixture.base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback-preview`,
+    { sourceApplyJobId },
+  );
+  assert.equal(legacyResponse.status, 409);
+  assert.equal((await legacyResponse.json()).error.code, 'mail_configuration_rollback_unavailable');
+
+  const source = sourceApplyJob();
+  const newerMailDomainId = randomUUID();
+  const newer = sourceApplyJob({
+    id: randomUUID(),
+    resourceId: newerMailDomainId,
+    result: { mailDomainId: newerMailDomainId },
+  });
+  const supersededFixture = await listen(t, owner, { jobs: [source, newer] });
+  const superseded = await request(
+    supersededFixture.base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback-preview`,
+    { sourceApplyJobId },
+  );
+  assert.equal(superseded.status, 409);
+  assert.equal((await superseded.json()).error.code, 'mail_configuration_rollback_superseded');
+
+  const driftedFixture = await listen(t, owner, {
+    jobs: [source],
+    currentMailDomain: { ...localMailDomain, revision: 3 },
+  });
+  const drifted = await request(
+    driftedFixture.base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback-preview`,
+    { sourceApplyJobId },
+  );
+  assert.equal(drifted.status, 409);
+  assert.equal((await drifted.json()).error.code, 'mail_configuration_rollback_state_changed');
+
+  const activeFixture = await listen(t, owner, {
+    jobs: [source, { id: randomUUID(), operation: 'mail.dkim.apply', status: 'running' }],
+  });
+  const active = await request(
+    activeFixture.base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback-preview`,
+    { sourceApplyJobId },
+  );
+  assert.equal(active.status, 409);
+  assert.equal((await active.json()).error.code, 'mail_configuration_job_conflict');
+
+  const remoteSource = sourceApplyJob({ serverId: remoteServerId });
+  const remoteSourceFixture = await listen(t, owner, { jobs: [remoteSource] });
+  const remoteSourceResponse = await request(
+    remoteSourceFixture.base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback-preview`,
+    { sourceApplyJobId },
+  );
+  assert.equal(remoteSourceResponse.status, 404);
+  assert.equal((await remoteSourceResponse.json()).error.code, 'mail_configuration_rollback_source_not_found');
+
+  const expanded = await request(
+    legacyFixture.base,
+    `/api/mail-domains/${localMailDomain.id}/config-rollback-preview`,
+    { sourceApplyJobId, backupPath: '/forbidden' },
+  );
+  assert.equal(expanded.status, 400);
+  assert.equal((await expanded.json()).error.code, 'mail_configuration_rollback_preview_input_invalid');
+});
+
 test('Read Only cannot preview or apply managed mail mutations', async (t) => {
   const { base, enqueued } = await listen(t, readOnly);
   assert.equal((await request(base, `/api/mail-domains/${localMailDomain.id}/config-preview`, {
@@ -208,6 +363,9 @@ test('Read Only cannot preview or apply managed mail mutations', async (t) => {
     previewDigest,
     configurationSha256,
     confirmation,
+  })).status, 403);
+  assert.equal((await request(base, `/api/mail-domains/${localMailDomain.id}/config-rollback-preview`, {
+    sourceApplyJobId,
   })).status, 403);
   assert.equal(enqueued.length, 0);
 });

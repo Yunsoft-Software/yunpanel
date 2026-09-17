@@ -149,6 +149,18 @@ test('mailbox mutations have bounded common audit identities', () => {
   });
 });
 
+test('managed mail apply and rollback previews have mail-domain audit identities', () => {
+  assert.deepEqual(classifyManagementMutation('POST', '/api/mail-domains/mail-domain-1/config-preview'), {
+    action: 'mail.configuration.preview', resourceType: 'mail_domain', resourceId: 'mail-domain-1',
+  });
+  assert.deepEqual(classifyManagementMutation('POST', '/api/mail-domains/mail-domain-1/config-apply'), {
+    action: 'mail.configuration.apply', resourceType: 'mail_domain', resourceId: 'mail-domain-1',
+  });
+  assert.deepEqual(classifyManagementMutation('POST', '/api/mail-domains/mail-domain-1/config-rollback-preview'), {
+    action: 'mail.configuration.rollback.preview', resourceType: 'mail_domain', resourceId: 'mail-domain-1',
+  });
+});
+
 test('Node configuration preview and apply have Application-scoped audit identities', () => {
   assert.deepEqual(classifyManagementMutation('POST', '/api/applications/application-1/configuration-preview'), {
     action: 'application.configuration.preview', resourceType: 'application', resourceId: 'application-1',

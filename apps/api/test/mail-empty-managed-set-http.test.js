@@ -61,6 +61,7 @@ async function startFixture(t) {
     domainRegistry: { getDomain: async (id) => id === webDomain.id ? webDomain : null },
     jobRegistry: {
       listJobs: async () => [],
+      getJob: async () => null,
       enqueue: async (input) => {
         enqueued.push(structuredClone(input));
         return { id: randomUUID(), status: 'queued', ...input };

@@ -14,6 +14,8 @@ Bu kayıt P0.4 managed mail configuration lifecycle'ında kaynakta tamamlanan ap
 - Process host mutation'dan sonra fakat job completion acknowledgment'ından önce kesildiyse packaged startup recovery mutation'ı tekrar etmez. Exact receipt, current protected desired-state materialization ve active host evidence aynı configuration/plan/readiness zincirini kanıtlarsa job tamamlanır; eksik veya farklı evidence fail-closed kalır.
 - Packaged recovery context reader güncel durable job registry ile aynı `mail_domain`, `dns_zone` ve `docker_project` resource scope'larını kabul eder. Böylece gerçek mail recovery, test double dışında private queued payload okunurken eski resource allowlist'ine takılmaz.
 - Recovery v3 receipt'teki backup ve previous control-plane identity'yi bounded job result'ına taşır. Legacy v1/v2 recovery çalışmayı sürdürür fakat eksik evidence uydurmaz; bu kayıtlar full control-plane explicit rollback için uygun değildir.
+- Authenticated rollback preview source apply job ID'sini exact local mail domain ve server scope'unda çözer. Yalnız başarılı v3 evidence, exact current status/revision ve sunucu çapındaki en son başarılı `MAIL_CONFIG_APPLY` kabul edilir; başka bir mail domain apply'ı dahi eski global Postfix/Dovecot snapshot'ını supersede eder.
+- Preview backup/current configuration/plan digest'leri, source apply kimliği, previous status/revision provenance'ı, expected current revision ve monoton resulting revision üzerinden deterministik digest + typed confirmation üretir. Secret, backup path'i veya artifact içeriği public cevaba girmez.
 
 ## Regression kapsamı
 
@@ -24,12 +26,13 @@ Bu kayıt P0.4 managed mail configuration lifecycle'ında kaynakta tamamlanan ap
 - Receipt v3 write/read, invalid backup/previous state reddi ve strict v1/v2 schema read compatibility.
 - Configured local runtime'ın yalnız v3 apply evidence'ıyla receipt yazması.
 - Restart recovery'nin v3 backup/previous identity'yi koruması, materialized transition drift'ini host inspection öncesi reddetmesi ve v1/v2 kaydı full rollback-capable göstermemesi.
+- Rollback preview'ın v1/v2 evidence, global superseding apply, current control-plane drift, active mail mutation ve cross-server source job'u fail-closed reddetmesi.
 
-İlk backup-binding odak regresyonunda desteklenen Node 24 ile 23/23, v3 previous-state zinciri regresyonunda 31/31 test geçti. Son değişiklikte repository policy, bütün workspace testleri ve production build'ini içeren `npm run check` de başarıyla tamamlandı; build yalnız mevcut büyük chunk uyarısını verdi. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
+İlk backup-binding odak regresyonunda desteklenen Node 24 ile 23/23, v3 previous-state zinciri regresyonunda 31/31 ve rollback preview/audit regresyonunda 18/18 test geçti. Son değişiklikte repository policy, bütün workspace testleri ve production build'ini içeren `npm run check` de başarıyla tamamlandı; build yalnız mevcut büyük chunk uyarısını verdi. Gerçek host acceptance çalıştırılmadı; GitHub Actions kullanılmadı.
 
 ## Açık kalan sınır
 
-- `MAIL_CONFIG_ROLLBACK` için authenticated preview, operation/backup/previous-state-bound typed confirmation ve ayrı durable job henüz yoktur.
+- `MAIL_CONFIG_ROLLBACK` protocol/enqueue/executor ve typed confirmation doğrulayan durable job henüz yoktur.
 - Restore başlamadan canlı active-config state'i exact expected current digest'e bağlanmalı; manual/concurrent drift ezilmemelidir.
 - Rollback restore/validator/reload/readiness sırasında kesilirse restart mixed previous/current state'i yalnız operation-owned evidence ile tamamlamalı veya current state'e güvenli compensation yapmalıdır.
 - Başarılı host rollback sonrası mail-domain desired/control-plane revision ve status exact previous state'e reconcile edilmelidir.

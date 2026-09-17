@@ -25,6 +25,9 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/mailboxes\/([^/]+)\/password$/)) && method === 'POST') return { action: 'mailbox.password.rotate', resourceType: 'mailbox', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/mailboxes\/([^/]+)$/)) && method === 'PATCH') return { action: 'mailbox.update', resourceType: 'mailbox', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/mailboxes\/([^/]+)$/)) && method === 'DELETE') return { action: 'mailbox.delete', resourceType: 'mailbox', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/mail-domains\/([^/]+)\/config-preview$/)) && method === 'POST') return { action: 'mail.configuration.preview', resourceType: 'mail_domain', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/mail-domains\/([^/]+)\/config-apply$/)) && method === 'POST') return { action: 'mail.configuration.apply', resourceType: 'mail_domain', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/mail-domains\/([^/]+)\/config-rollback-preview$/)) && method === 'POST') return { action: 'mail.configuration.rollback.preview', resourceType: 'mail_domain', resourceId: parts[0] };
   if (method === 'POST' && pathname === '/api/websites') return { action: 'website.create', resourceType: 'website', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/websites/migration/create-website') return { action: 'website.migration.create', resourceType: 'website_migration', resourceId: 'create' };
   if (method === 'POST' && pathname === '/api/websites/migration/bind') return { action: 'website.migration.bind', resourceType: 'website_migration', resourceId: 'bind' };

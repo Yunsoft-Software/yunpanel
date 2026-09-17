@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { JobRegistryError } from './job-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -10,7 +11,9 @@ const APPLY_FIELDS = new Set([
   'configurationSha256',
   'confirmation',
 ]);
+const ROLLBACK_PREVIEW_FIELDS = new Set(['sourceApplyJobId']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const MANAGED_MAIL_MUTATIONS = new Set([
   OPERATIONS.MAIL_CONFIG_APPLY,
   OPERATIONS.MAIL_DKIM_APPLY,
@@ -62,7 +65,11 @@ async function scopedMailDomain({ mailDomainRegistry, domainRegistry, mailDomain
 
 export async function ensureMailConfigurationIdle(jobRegistry, serverId) {
   const jobs = await jobRegistry.listJobs({ serverId });
-  if (jobs.some((job) => MANAGED_MAIL_MUTATIONS.has(job.operation)
+  assertMailConfigurationJobsIdle(jobs);
+}
+
+function assertMailConfigurationJobsIdle(jobs) {
+  if (!Array.isArray(jobs) || jobs.some((job) => MANAGED_MAIL_MUTATIONS.has(job.operation)
     && (job.status === 'queued' || job.status === 'running'))) {
     throw new JobRegistryError(
       'mail_configuration_job_conflict',
@@ -70,6 +77,72 @@ export async function ensureMailConfigurationIdle(jobRegistry, serverId) {
       409,
     );
   }
+}
+
+function rollbackPreview(mailDomain, sourceJob, jobs) {
+  const result = sourceJob?.result;
+  if (!sourceJob || sourceJob.status !== 'succeeded' || sourceJob.operation !== OPERATIONS.MAIL_CONFIG_APPLY
+    || sourceJob.resourceType !== 'mail_domain' || sourceJob.resourceId !== mailDomain.id
+    || result?.version !== 3 || result.applied !== true || result.sideEffects !== true
+    || result.mailDomainId !== mailDomain.id
+    || !Number.isSafeInteger(result.previousRevision) || result.previousRevision < 1
+    || !['disabled', 'enabled'].includes(result.previousStatus)
+    || !['disabled', 'enabled'].includes(result.desiredStatus)
+    || !SHA256_PATTERN.test(result.configurationSha256 ?? '')
+    || !SHA256_PATTERN.test(result.planSha256 ?? '')
+    || !SHA256_PATTERN.test(result.backupSha256 ?? '')
+    || !SHA256_PATTERN.test(result.readinessSha256 ?? '')) {
+    throw new MailConfigurationHttpError(
+      'mail_configuration_rollback_unavailable',
+      'Managed mail apply does not have complete rollback evidence',
+      409,
+    );
+  }
+  const sourceIndexes = jobs
+    .map((job, index) => job?.id === sourceJob.id ? index : -1)
+    .filter((index) => index >= 0);
+  const latestSuccessfulApplyIndex = jobs.findLastIndex(
+    (job) => job?.operation === OPERATIONS.MAIL_CONFIG_APPLY && job.status === 'succeeded',
+  );
+  if (sourceIndexes.length !== 1 || sourceIndexes[0] !== latestSuccessfulApplyIndex) {
+    throw new MailConfigurationHttpError(
+      'mail_configuration_rollback_superseded',
+      'Managed mail apply was superseded by a newer global configuration',
+      409,
+    );
+  }
+  const changedStatus = result.previousStatus !== result.desiredStatus;
+  const expectedCurrentRevision = result.previousRevision + (changedStatus ? 1 : 0);
+  if (mailDomain.managementMode !== 'local' || mailDomain.status !== result.desiredStatus
+    || mailDomain.revision !== expectedCurrentRevision) {
+    throw new MailConfigurationHttpError(
+      'mail_configuration_rollback_state_changed',
+      'Mail domain state changed after the selected apply',
+      409,
+    );
+  }
+  const identity = Object.freeze({
+    version: 1,
+    operation: 'mail_configuration_rollback',
+    mailDomainId: mailDomain.id,
+    sourceApplyJobId: sourceJob.id,
+    previousRevision: result.previousRevision,
+    expectedCurrentRevision,
+    currentStatus: result.desiredStatus,
+    targetStatus: result.previousStatus,
+    resultingRevision: expectedCurrentRevision + (changedStatus ? 1 : 0),
+    currentConfigurationSha256: result.configurationSha256,
+    sourcePlanSha256: result.planSha256,
+    backupSha256: result.backupSha256,
+  });
+  const previewDigest = createHash('sha256').update(JSON.stringify(identity)).digest('hex');
+  return Object.freeze({
+    ...identity,
+    previewDigest,
+    confirmation: `rollback-mail-configuration:${mailDomain.id}:${sourceJob.id}:${previewDigest}`,
+    readyToRollback: true,
+    sideEffects: false,
+  });
 }
 
 export function mountMailConfigurationRoutes(app, {
@@ -89,7 +162,8 @@ export function mountMailConfigurationRoutes(app, {
   if (!domainRegistry || typeof domainRegistry.getDomain !== 'function') {
     throw new Error('Domain registry is required');
   }
-  if (!jobRegistry || typeof jobRegistry.enqueue !== 'function' || typeof jobRegistry.listJobs !== 'function') {
+  if (!jobRegistry || typeof jobRegistry.enqueue !== 'function' || typeof jobRegistry.getJob !== 'function'
+    || typeof jobRegistry.listJobs !== 'function') {
     throw new Error('Job registry is required');
   }
 
@@ -108,6 +182,38 @@ export function mountMailConfigurationRoutes(app, {
       status: body.status,
     });
     return response.json({ data: preview });
+  }));
+
+  app.post('/api/mail-domains/:mailDomainId/config-rollback-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const body = exactBody(
+      request.body,
+      ROLLBACK_PREVIEW_FIELDS,
+      'mail_configuration_rollback_preview_input_invalid',
+    );
+    if (typeof body.sourceApplyJobId !== 'string' || !JOB_ID_PATTERN.test(body.sourceApplyJobId)) {
+      throw new MailConfigurationHttpError(
+        'mail_configuration_rollback_source_invalid',
+        'Managed mail rollback source job identity is invalid',
+      );
+    }
+    const scoped = await scopedMailDomain({
+      mailDomainRegistry,
+      domainRegistry,
+      mailDomainId: request.params.mailDomainId,
+      localServerId,
+    });
+    const jobs = await jobRegistry.listJobs({ serverId: scoped.domain.serverId });
+    assertMailConfigurationJobsIdle(jobs);
+    const sourceJob = await jobRegistry.getJob(body.sourceApplyJobId);
+    if (!sourceJob || sourceJob.serverId !== scoped.domain.serverId) {
+      throw new MailConfigurationHttpError(
+        'mail_configuration_rollback_source_not_found',
+        'Managed mail rollback source job was not found',
+        404,
+      );
+    }
+    return response.json({ data: rollbackPreview(scoped.mailDomain, sourceJob, jobs) });
   }));
 
   app.post('/api/mail-domains/:mailDomainId/config-apply', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -165,5 +271,7 @@ export const mailConfigurationHttpInternals = Object.freeze({
   emptyQuery,
   scopedMailDomain,
   ensureMailConfigurationIdle,
+  assertMailConfigurationJobsIdle,
+  rollbackPreview,
   managedMailMutations: MANAGED_MAIL_MUTATIONS,
 });
