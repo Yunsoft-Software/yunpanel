@@ -30,6 +30,7 @@ import { DatabaseCredentialRegistryError } from './database-credential-registry.
 import { DatabaseHttpError, databaseHttpInternals, mountDatabaseRoutes } from './database-http.js';
 import { mountPhpMyAdminHandoffRoutes } from './phpmyadmin-handoff-http.js';
 import { PhpMyAdminHandoffError } from './phpmyadmin-handoff-service.js';
+import { mountWebsiteDatabaseDataRoutes } from './website-database-data-http.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { DnsZoneMailDkimRetirementHttpError } from './dns-zone-mail-dkim-retirement-http.js';
 import {
@@ -589,6 +590,15 @@ export function createApp({
       requireDatabaseName: databaseHttpInternals.requireDatabaseName,
       ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
       latestDatabaseSnapshot: databaseHttpInternals.latestDatabaseSnapshot,
+    });
+  }
+  if (databaseBindingRegistry) {
+    mountWebsiteDatabaseDataRoutes(app, {
+      registry: localRegistry,
+      websiteRegistry,
+      databaseBindingRegistry,
+      jobRegistry,
+      ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
     });
   }
   if (databaseBindingRegistry && databaseCredentialRegistry && databaseCredentialApply) {
