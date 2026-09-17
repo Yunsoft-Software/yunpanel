@@ -10,6 +10,7 @@ const previewDigest = 'a'.repeat(64);
 const configurationSha256 = 'b'.repeat(64);
 const planSha256 = 'c'.repeat(64);
 const readinessSha256 = 'd'.repeat(64);
+const backupSha256 = 'e'.repeat(64);
 
 function fixture({ receipt = undefined, evidence = undefined } = {}) {
   const events = [];
@@ -58,8 +59,9 @@ function fixture({ receipt = undefined, evidence = undefined } = {}) {
       readOperationReceipt: async () => {
         events.push('receipt');
         return receipt === undefined ? {
+          version: 2,
           serverId, jobId, mailDomainId, desiredStatus: 'enabled', previewDigest,
-          configurationSha256, planSha256, readinessSha256, applied: true,
+          configurationSha256, planSha256, backupSha256, readinessSha256, applied: true,
         } : receipt;
       },
       materializeTransition: async () => {
@@ -105,10 +107,31 @@ test('managed mail host drift leaves running job unresolved', async () => {
 test('managed mail receipt digest mismatch is rejected before desired-state materialization', async () => {
   const fx = fixture({
     receipt: {
+      version: 2,
       serverId, jobId, mailDomainId, desiredStatus: 'enabled', previewDigest,
-      configurationSha256: 'e'.repeat(64), planSha256, readinessSha256, applied: true,
+      configurationSha256: 'f'.repeat(64), planSha256, backupSha256, readinessSha256, applied: true,
     },
   });
   await assert.rejects(recoverRunningMailConfig(fx.options), { code: 'job_mail_config_recovery_receipt_mismatch' });
   assert.deepEqual(fx.events, ['get', 'context', 'receipt']);
+});
+
+test('legacy managed mail recovery remains available without claiming rollback backup identity', async () => {
+  const fx = fixture({
+    receipt: {
+      version: 1,
+      serverId, jobId, mailDomainId, desiredStatus: 'enabled', previewDigest,
+      configurationSha256, planSha256, readinessSha256, applied: true,
+    },
+  });
+  let completedResult;
+  const originalComplete = fx.options.jobRegistry.complete;
+  fx.options.jobRegistry.complete = async (input) => {
+    completedResult = input.result;
+    return originalComplete(input);
+  };
+
+  await recoverRunningMailConfig(fx.options);
+  assert.equal(completedResult.version, 1);
+  assert.equal(Object.hasOwn(completedResult, 'backupSha256'), false);
 });

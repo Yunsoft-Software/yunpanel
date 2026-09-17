@@ -1,7 +1,8 @@
 import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const STORE_VERSION = 1;
+const LEGACY_STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const DEFAULT_ROOT = '/var/lib/yunpanel/recovery/mail-config-operations';
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -10,8 +11,9 @@ const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const STATUS_SET = new Set(['disabled', 'enabled']);
 const RECEIPT_KEYS = Object.freeze([
   'version', 'recordedAt', 'serverId', 'jobId', 'mailDomainId', 'desiredStatus',
-  'previewDigest', 'configurationSha256', 'planSha256', 'readinessSha256', 'applied',
+  'previewDigest', 'configurationSha256', 'planSha256', 'backupSha256', 'readinessSha256', 'applied',
 ]);
+const LEGACY_RECEIPT_KEYS = Object.freeze(RECEIPT_KEYS.filter((key) => key !== 'backupSha256'));
 
 export class MailConfigOperationReceiptError extends Error {
   constructor(code, message) {
@@ -44,9 +46,12 @@ function normalizeChecksum(value, field) {
 }
 
 function normalizeReceipt(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== STORE_VERSION
-    || Object.keys(value).length !== RECEIPT_KEYS.length
-    || Object.keys(value).some((key) => !RECEIPT_KEYS.includes(key))) {
+  const expectedKeys = value?.version === STORE_VERSION
+    ? RECEIPT_KEYS
+    : value?.version === LEGACY_STORE_VERSION ? LEGACY_RECEIPT_KEYS : null;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !expectedKeys
+    || Object.keys(value).length !== expectedKeys.length
+    || Object.keys(value).some((key) => !expectedKeys.includes(key))) {
     throw new MailConfigOperationReceiptError('mail_config_receipt_invalid', 'Managed mail operation receipt is invalid');
   }
   const identity = normalizeIdentity(value.serverId, value.jobId);
@@ -55,7 +60,7 @@ function normalizeReceipt(value) {
     throw new MailConfigOperationReceiptError('mail_config_receipt_invalid', 'Managed mail operation receipt state is invalid');
   }
   return Object.freeze({
-    version: STORE_VERSION,
+    version: value.version,
     recordedAt: new Date(value.recordedAt).toISOString(),
     ...identity,
     mailDomainId: normalizeMailDomainId(value.mailDomainId),
@@ -63,6 +68,9 @@ function normalizeReceipt(value) {
     previewDigest: normalizeChecksum(value.previewDigest, 'previewDigest'),
     configurationSha256: normalizeChecksum(value.configurationSha256, 'configurationSha256'),
     planSha256: normalizeChecksum(value.planSha256, 'planSha256'),
+    ...(value.version === STORE_VERSION
+      ? { backupSha256: normalizeChecksum(value.backupSha256, 'backupSha256') }
+      : {}),
     readinessSha256: normalizeChecksum(value.readinessSha256, 'readinessSha256'),
     applied: true,
   });
@@ -98,6 +106,7 @@ export function createMailConfigOperationReceiptStore({
       previewDigest: input?.previewDigest,
       configurationSha256: input?.configurationSha256,
       planSha256: input?.planSha256,
+      backupSha256: input?.backupSha256,
       readinessSha256: input?.readinessSha256,
       applied: input?.applied,
     });
@@ -142,6 +151,7 @@ export function createMailConfigOperationReceiptStore({
 
 export const mailConfigOperationReceiptInternals = Object.freeze({
   storeVersion: STORE_VERSION,
+  legacyStoreVersion: LEGACY_STORE_VERSION,
   defaultRoot: DEFAULT_ROOT,
   normalizeIdentity,
   normalizeMailDomainId,

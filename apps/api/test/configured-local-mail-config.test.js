@@ -10,6 +10,7 @@ const previewDigest = 'a'.repeat(64);
 const configurationSha256 = 'b'.repeat(64);
 const planSha256 = 'c'.repeat(64);
 const readinessSha256 = 'd'.repeat(64);
+const backupSha256 = 'e'.repeat(64);
 
 const base = {
   hostname: 'host-1.example.local',
@@ -82,12 +83,13 @@ test('configured runtime hydrates managed mail privately and records only secret
     resourceId: mailDomainId,
     payload,
     result: {
-      version: 1,
+      version: 2,
       mailDomainId,
       desiredStatus: 'enabled',
       previewDigest,
       configurationSha256,
       planSha256,
+      backupSha256,
       readinessSha256,
       applied: true,
       sideEffects: true,
@@ -102,6 +104,7 @@ test('configured runtime hydrates managed mail privately and records only secret
     previewDigest,
     configurationSha256,
     planSha256,
+    backupSha256,
     readinessSha256,
     applied: true,
   }]);

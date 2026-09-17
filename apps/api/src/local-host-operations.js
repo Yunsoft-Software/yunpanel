@@ -368,25 +368,34 @@ export function createLocalHostOperations({
     await resolvedMailConfigManager.stageConfiguration(bundle.preview, {
       sensitiveArtifacts: bundle.sensitiveArtifacts,
     });
-    await resolvedMailConfigBackupManager.backupConfiguration(bundle.preview, {
+    const backup = await resolvedMailConfigBackupManager.backupConfiguration(bundle.preview, {
       transactionId: execution.jobId,
     });
+    if (!backup || backup.previewSha256 !== payload.configurationSha256
+      || typeof backup.planSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(backup.planSha256)
+      || typeof backup.manifestSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(backup.manifestSha256)) {
+      const error = new Error('Managed mail backup did not confirm an exact rollback snapshot');
+      error.code = 'mail_config_backup_unconfirmed';
+      throw error;
+    }
     const activation = await resolvedMailConfigActivator.activateConfiguration(bundle.preview, {
       transactionId: execution.jobId,
     });
     if (!activation || activation.applied !== true || activation.sideEffects !== true
-      || activation.previewSha256 !== payload.configurationSha256) {
+      || activation.previewSha256 !== payload.configurationSha256
+      || activation.planSha256 !== backup.planSha256) {
       const error = new Error('Managed mail activation did not confirm the queued configuration');
       error.code = 'mail_config_activation_unconfirmed';
       throw error;
     }
     return Object.freeze({
-      version: 1,
+      version: 2,
       mailDomainId: payload.mailDomainId,
       desiredStatus: payload.desiredStatus,
       previewDigest: payload.previewDigest,
       configurationSha256: payload.configurationSha256,
       planSha256: activation.planSha256,
+      backupSha256: backup.manifestSha256,
       readinessSha256: activation.readinessSha256,
       applied: true,
       sideEffects: true,

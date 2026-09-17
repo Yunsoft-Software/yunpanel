@@ -8,6 +8,7 @@ const CONFIG_DIGEST = 'a'.repeat(64);
 const PREVIEW_DIGEST = 'b'.repeat(64);
 const PLAN_DIGEST = 'c'.repeat(64);
 const READINESS_DIGEST = 'd'.repeat(64);
+const BACKUP_DIGEST = 'e'.repeat(64);
 const PASSWORD_HASH = '$argon2id$protected';
 
 function payload() {
@@ -48,7 +49,11 @@ test('local managed mail execution keeps protected material private and preserve
     mailConfigBackupManager: {
       backupConfiguration: async (input, options) => {
         calls.push(['backup', input, options]);
-        return { backedUp: true };
+        return {
+          previewSha256: CONFIG_DIGEST,
+          planSha256: PLAN_DIGEST,
+          manifestSha256: BACKUP_DIGEST,
+        };
       },
     },
     mailConfigActivator: {
@@ -72,12 +77,13 @@ test('local managed mail execution keeps protected material private and preserve
   assert.equal(calls[2][2].transactionId, execution().jobId);
   assert.equal(calls[3][2].transactionId, execution().jobId);
   assert.deepEqual(result, {
-    version: 1,
+    version: 2,
     mailDomainId: MAIL_DOMAIN_ID,
     desiredStatus: 'enabled',
     previewDigest: PREVIEW_DIGEST,
     configurationSha256: CONFIG_DIGEST,
     planSha256: PLAN_DIGEST,
+    backupSha256: BACKUP_DIGEST,
     readinessSha256: READINESS_DIGEST,
     applied: true,
     sideEffects: true,
@@ -102,6 +108,28 @@ test('stale managed mail materialization stops before staging backup or activati
     (error) => error.code === 'mail_configuration_preview_stale',
   );
   assert.deepEqual(calls, []);
+});
+
+test('managed mail execution rejects unbound backup evidence before activation', async () => {
+  let activated = false;
+  const operations = createLocalHostOperations({
+    loadManagedMailConfiguration: async () => ({ preview: { sha256: CONFIG_DIGEST }, sensitiveArtifacts: [] }),
+    mailConfigManager: { stageConfiguration: async () => ({}) },
+    mailConfigBackupManager: {
+      backupConfiguration: async () => ({
+        previewSha256: CONFIG_DIGEST,
+        planSha256: PLAN_DIGEST,
+        manifestSha256: 'invalid',
+      }),
+    },
+    mailConfigActivator: { activateConfiguration: async () => { activated = true; return {}; } },
+  });
+
+  await assert.rejects(
+    operations.executeOperation(OPERATIONS.MAIL_CONFIG_APPLY, payload(), execution()),
+    (error) => error.code === 'mail_config_backup_unconfirmed',
+  );
+  assert.equal(activated, false);
 });
 
 test('managed mail execution context must match the queued mail-domain resource', async () => {

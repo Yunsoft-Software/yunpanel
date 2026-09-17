@@ -21,7 +21,8 @@ function input(overrides = {}) {
     previewDigest: 'a'.repeat(64),
     configurationSha256: 'b'.repeat(64),
     planSha256: 'c'.repeat(64),
-    readinessSha256: 'd'.repeat(64),
+    backupSha256: 'd'.repeat(64),
+    readinessSha256: 'e'.repeat(64),
     applied: true,
     ...overrides,
   };
@@ -58,6 +59,7 @@ test('managed mail receipt rejects forged status, digests and applied state', as
     input({ desiredStatus: 'ready' }),
     input({ previewDigest: 'short' }),
     input({ configurationSha256: 'e'.repeat(63) }),
+    input({ backupSha256: 'e'.repeat(63) }),
     input({ applied: false }),
     input({ mailDomainId: 'not-a-uuid' }),
   ]) {
@@ -66,4 +68,31 @@ test('managed mail receipt rejects forged status, digests and applied state', as
       (error) => error instanceof MailConfigOperationReceiptError,
     );
   }
+});
+
+test('managed mail receipt reads legacy apply evidence without inventing a backup binding', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-mail-receipt-legacy-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const files = new Map();
+  const target = path.join(root, SERVER_ID, `${JOB_ID}.json`);
+  const legacy = input();
+  delete legacy.backupSha256;
+  const persisted = {
+    version: 1,
+    recordedAt: '2026-09-12T12:00:00.000Z',
+    ...legacy,
+  };
+  files.set(target, JSON.stringify(persisted));
+  const store = createMailConfigOperationReceiptStore({
+    root,
+    async lstatFn(pathname) {
+      if (!files.has(pathname)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      return { isFile: () => true, isSymbolicLink: () => false, mode: 0o100600 };
+    },
+    async readFileFn(pathname) { return files.get(pathname); },
+  });
+
+  const read = await store.read(SERVER_ID, JOB_ID);
+  assert.equal(read.version, 1);
+  assert.equal(Object.hasOwn(read, 'backupSha256'), false);
 });

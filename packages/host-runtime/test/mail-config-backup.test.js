@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -97,6 +98,8 @@ test('backs up mail sources, compiled maps/sieve, main.cf/master.cf and managed 
   const result = await manager.backupConfiguration(preview(), { transactionId: 'mail-job-0001' });
   assert.equal(result.version, 5);
   assert.equal(result.transactionId, 'mail-job-0001');
+  const { manifestSha256, ...manifest } = result;
+  assert.equal(manifestSha256, createHash('sha256').update(JSON.stringify(manifest)).digest('hex'));
   assert.equal(result.artifacts.length, mailConfigBackupInternals.targetPaths.length);
   assert.equal(result.directories.length, mailConfigBackupInternals.managedDirectoryPaths.length);
   assert.equal(JSON.stringify(result).includes(ARGON2ID_HASH), false);
@@ -119,11 +122,13 @@ test('backs up mail sources, compiled maps/sieve, main.cf/master.cf and managed 
   const inspected = await manager.inspectBackup(preview(), { transactionId: 'mail-job-0001' });
   assert.equal(inspected.satisfied, true);
   assert.equal(inspected.result.planSha256, result.planSha256);
+  assert.equal(inspected.result.manifestSha256, result.manifestSha256);
 
   const readsBeforeRetry = liveReads;
   live.set(mailTemplatePolicy.postfixVirtualDomainMapPath, Buffer.from('changed after backup\n'));
   const repeated = await manager.backupConfiguration(preview(), { transactionId: 'mail-job-0001' });
   assert.equal(repeated.planSha256, result.planSha256);
+  assert.equal(repeated.manifestSha256, result.manifestSha256);
   assert.equal(liveReads, readsBeforeRetry);
 }));
 

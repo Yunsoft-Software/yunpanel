@@ -273,6 +273,7 @@ export async function startConfiguredLocalRuntime({
 
     if (operation === OPERATIONS.MAIL_CONFIG_APPLY) {
       if (!mailConfigOperationReceipts || resourceType !== 'mail_domain'
+        || result?.version !== 2
         || resourceId !== payload?.mailDomainId || result?.mailDomainId !== payload.mailDomainId
         || result.desiredStatus !== payload.desiredStatus
         || result.previewDigest !== payload.previewDigest
@@ -283,6 +284,7 @@ export async function startConfiguredLocalRuntime({
         || !SHA256_PATTERN.test(payload.previewDigest ?? '')
         || !SHA256_PATTERN.test(payload.configurationSha256 ?? '')
         || !SHA256_PATTERN.test(result.planSha256 ?? '')
+        || !SHA256_PATTERN.test(result.backupSha256 ?? '')
         || !SHA256_PATTERN.test(result.readinessSha256 ?? '')
         || result.applied !== true || result.sideEffects !== true) {
         throw new Error('Managed mail result is not safe recovery evidence');
@@ -295,6 +297,7 @@ export async function startConfiguredLocalRuntime({
         previewDigest: payload.previewDigest,
         configurationSha256: payload.configurationSha256,
         planSha256: result.planSha256,
+        backupSha256: result.backupSha256,
         readinessSha256: result.readinessSha256,
         applied: true,
       });

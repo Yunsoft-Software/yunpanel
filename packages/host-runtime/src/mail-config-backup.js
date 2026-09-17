@@ -121,7 +121,10 @@ function assertPlanArtifactSet(plan) {
 }
 
 function publicManifest(manifest) {
-  return structuredClone(manifest);
+  return Object.freeze({
+    ...structuredClone(manifest),
+    manifestSha256: sha256(JSON.stringify(manifest)),
+  });
 }
 
 function normalizeDirectorySnapshot(value, expectedPath) {

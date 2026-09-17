@@ -3,6 +3,7 @@
 Bu dosya **yalnız kalan ürün/kod işlerini** tutar. Yapılmış işlerin ayrıntılı geçmişi `docs/history/`, hedef mimari `docs/architecture.md`, recovery sözleşmesi `docs/provisioning-recovery.md`, bağlayıcı kurallar `agents.md`, gerçek Ubuntu/browser/provider kabul testleri `todo.md` içindedir.
 
 Son Website isolation/SFTP ilerlemesi: `docs/history/website-isolation-sftp-progress-2026-09-17.md`.
+Son mail durable apply/recovery ilerlemesi: `docs/history/mail-durable-apply-recovery-2026-09-17.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -34,7 +35,7 @@ Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içi
 
 ## P0.4 — Mail: Postfix + Dovecot + Rspamd + shared Roundcube
 
-- [ ] `MAIL_CONFIG_APPLY` / `MAIL_CONFIG_ROLLBACK` durable job execution zincirini production worker'a bağla: claim/lease/restart semantics, staging manager + activator + validators + backup/rollback, readiness evidence, inspect/reconcile ve replay fence.
+- [ ] `MAIL_CONFIG_ROLLBACK` için v2 apply receipt + exact `backupSha256` fence'ine bağlı explicit preview/typed confirmation/durable job ekle; restore başlamadan current active-config evidence'ını doğrula, restart'ta inspect-first mixed-state/receipt recovery yap ve başarılı rollback sonrası mail-domain control-plane state'ini exact previous revision/status ile reconcile et.
 - [ ] SQL-backed virtual mail domain/mailbox/alias/quota/password-hash modeli ekle; Website user ile mail storage identity ayrı olsun.
 - [ ] Dedicated mail storage identity kullan; Website UID Maildir owner olmasın.
 - [ ] Local mail enable domain oluştursun fakat bilinen/default parola mailbox yaratmasın.
@@ -169,7 +170,7 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 1. **Website Unix isolation** — workspace dışındaki legacy identity/runtime/SFTP migration hardening.
 2. **PowerDNS operator recovery** — restart-sonrası güvenli explicit rollback, typed confirmation ve fail-closed recovery control surface.
-3. **Mail durable execution** — `MAIL_CONFIG_APPLY/ROLLBACK` production worker/executor wiring, readiness evidence ve replay-safe recovery.
+3. **Mail explicit rollback** — v2 apply receipt'in exact backup identity'sine bağlı preview, durable restore, compensation/restart recovery ve control-plane reconciliation.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
 5. **Database + phpMyAdmin**.
 6. **elFinder**.

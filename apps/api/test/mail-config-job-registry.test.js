@@ -8,6 +8,7 @@ const PREVIEW_DIGEST = 'a'.repeat(64);
 const CONFIG_DIGEST = 'b'.repeat(64);
 const PLAN_DIGEST = 'c'.repeat(64);
 const READINESS_DIGEST = 'd'.repeat(64);
+const BACKUP_DIGEST = 'e'.repeat(64);
 
 function payload() {
   return {
@@ -21,12 +22,13 @@ function payload() {
 
 function result(overrides = {}) {
   return {
-    version: 1,
+    version: 2,
     mailDomainId: MAIL_DOMAIN_ID,
     desiredStatus: 'enabled',
     previewDigest: PREVIEW_DIGEST,
     configurationSha256: CONFIG_DIGEST,
     planSha256: PLAN_DIGEST,
+    backupSha256: BACKUP_DIGEST,
     readinessSha256: READINESS_DIGEST,
     applied: true,
     sideEffects: true,
@@ -70,6 +72,7 @@ test('managed mail configuration result must match the queued transition exactly
     result({ configurationSha256: 'e'.repeat(64) }),
     result({ previewDigest: 'f'.repeat(64) }),
     result({ planSha256: 'short' }),
+    result({ backupSha256: 'short' }),
     result({ applied: false }),
     result({ sideEffects: false }),
   ]) {
@@ -88,4 +91,25 @@ test('managed mail configuration result must match the queued transition exactly
       (error) => error instanceof JobRegistryError && error.code === 'invalid_job_result',
     );
   }
+});
+
+test('legacy managed mail result remains readable for pre-backup-binding recovery', async () => {
+  const registry = createJobRegistry();
+  const queued = await registry.enqueue({
+    serverId: 'local-server',
+    type: 'mail.config.apply',
+    operation: OPERATIONS.MAIL_CONFIG_APPLY,
+    payload: payload(),
+    resourceType: 'mail_domain',
+    resourceId: MAIL_DOMAIN_ID,
+  });
+  await registry.claimNext('local-server');
+  const legacy = result({ version: 1 });
+  delete legacy.backupSha256;
+
+  const completed = await registry.complete({
+    serverId: 'local-server', jobId: queued.id, status: 'succeeded', result: legacy,
+  });
+  assert.equal(completed.result.version, 1);
+  assert.equal(Object.hasOwn(completed.result, 'backupSha256'), false);
 });

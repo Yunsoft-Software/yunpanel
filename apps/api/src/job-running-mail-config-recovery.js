@@ -65,11 +65,15 @@ function recoveryIntent(context, job, candidate, identity) {
 }
 
 function assertReceipt(receipt, identity, intent) {
-  if (!receipt || receipt.serverId !== identity.serverId || receipt.jobId !== identity.jobId
+  if (!receipt || ![1, 2].includes(receipt.version)
+    || receipt.serverId !== identity.serverId || receipt.jobId !== identity.jobId
     || receipt.mailDomainId !== intent.mailDomainId || receipt.desiredStatus !== intent.desiredStatus
     || receipt.previewDigest !== intent.previewDigest || receipt.configurationSha256 !== intent.configurationSha256
     || typeof receipt.planSha256 !== 'string' || !CHECKSUM_PATTERN.test(receipt.planSha256)
     || typeof receipt.readinessSha256 !== 'string' || !CHECKSUM_PATTERN.test(receipt.readinessSha256)
+    || (receipt.version === 1 && Object.hasOwn(receipt, 'backupSha256'))
+    || (receipt.version === 2
+      && (typeof receipt.backupSha256 !== 'string' || !CHECKSUM_PATTERN.test(receipt.backupSha256)))
     || receipt.applied !== true) {
     throw new JobRunningMailConfigRecoveryError('job_mail_config_recovery_receipt_mismatch', 'Managed mail operation receipt does not match the running job');
   }
@@ -175,12 +179,13 @@ export async function recoverRunningMailConfig({
   }
 
   const result = Object.freeze({
-    version: 1,
+    version: receipt.version,
     mailDomainId: intent.mailDomainId,
     desiredStatus: intent.desiredStatus,
     previewDigest: intent.previewDigest,
     configurationSha256: intent.configurationSha256,
     planSha256: evidence.result.planSha256,
+    ...(receipt.version === 2 ? { backupSha256: receipt.backupSha256 } : {}),
     readinessSha256: evidence.result.readinessSha256,
     applied: true,
     sideEffects: true,
