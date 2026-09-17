@@ -22,6 +22,7 @@ test('phpMyAdmin FPM pool uses one dedicated identity, socket and private sessio
   assert.match(content, /^php_admin_flag\[session\.cookie_secure\] = on$/m);
   assert.match(content, /^php_admin_flag\[session\.cookie_httponly\] = on$/m);
   assert.match(content, /^php_admin_value\[session\.cookie_samesite\] = Strict$/m);
+  assert.match(content, /^php_admin_value\[session\.cookie_path\] = \/tools\/phpmyadmin\/$/m);
   assert.match(content, /^php_admin_value\[session\.save_path\] = \/var\/lib\/yunpanel\/phpmyadmin\/sessions$/m);
   assert.match(content, /^php_admin_value\[upload_tmp_dir\] = \/var\/lib\/yunpanel\/phpmyadmin\/tmp$/m);
 });
