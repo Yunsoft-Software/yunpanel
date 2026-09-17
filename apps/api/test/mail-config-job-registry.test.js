@@ -9,6 +9,7 @@ const CONFIG_DIGEST = 'b'.repeat(64);
 const PLAN_DIGEST = 'c'.repeat(64);
 const READINESS_DIGEST = 'd'.repeat(64);
 const BACKUP_DIGEST = 'e'.repeat(64);
+const COMPENSATION_DIGEST = 'f'.repeat(64);
 
 function payload() {
   return {
@@ -33,6 +34,32 @@ function result(overrides = {}) {
     backupSha256: BACKUP_DIGEST,
     readinessSha256: READINESS_DIGEST,
     applied: true,
+    sideEffects: true,
+    ...overrides,
+  };
+}
+
+function rollbackPayload() {
+  return {
+    mailDomainId: MAIL_DOMAIN_ID,
+    sourceApplyJobId: 'mail-job-source-0001',
+    previousRevision: 1,
+    expectedCurrentRevision: 2,
+    currentStatus: 'enabled',
+    targetStatus: 'disabled',
+    currentConfigurationSha256: CONFIG_DIGEST,
+    sourcePlanSha256: PLAN_DIGEST,
+    backupSha256: BACKUP_DIGEST,
+    previewDigest: PREVIEW_DIGEST,
+  };
+}
+
+function rollbackResult(overrides = {}) {
+  return {
+    version: 1,
+    ...rollbackPayload(),
+    compensationBackupSha256: COMPENSATION_DIGEST,
+    restored: true,
     sideEffects: true,
     ...overrides,
   };
@@ -141,4 +168,47 @@ test('backup-bound version two managed mail result remains readable without prev
   assert.equal(completed.result.version, 2);
   assert.equal(completed.result.backupSha256, BACKUP_DIGEST);
   assert.equal(Object.hasOwn(completed.result, 'previousStatus'), false);
+});
+
+test('managed mail rollback result is exact, bounded and tied to its compensation snapshot', async () => {
+  const registry = createJobRegistry();
+  const queued = await registry.enqueue({
+    serverId: 'local-server',
+    type: OPERATIONS.MAIL_CONFIG_ROLLBACK,
+    operation: OPERATIONS.MAIL_CONFIG_ROLLBACK,
+    payload: rollbackPayload(),
+    resourceType: 'mail_domain',
+    resourceId: MAIL_DOMAIN_ID,
+  });
+  await registry.claimNext('local-server');
+  const completed = await registry.complete({
+    serverId: 'local-server', jobId: queued.id, status: 'succeeded', result: rollbackResult(),
+  });
+  assert.deepEqual(completed.result, rollbackResult());
+  assert.doesNotMatch(JSON.stringify(completed), /password|content|path/i);
+});
+
+test('managed mail rollback result rejects payload drift, malformed evidence and expanded fields', async () => {
+  for (const invalid of [
+    rollbackResult({ targetStatus: 'enabled' }),
+    rollbackResult({ backupSha256: 'a'.repeat(64) }),
+    rollbackResult({ compensationBackupSha256: 'short' }),
+    rollbackResult({ restored: false }),
+    rollbackResult({ backupPath: '/forbidden' }),
+  ]) {
+    const registry = createJobRegistry();
+    const queued = await registry.enqueue({
+      serverId: 'local-server',
+      type: OPERATIONS.MAIL_CONFIG_ROLLBACK,
+      operation: OPERATIONS.MAIL_CONFIG_ROLLBACK,
+      payload: rollbackPayload(),
+      resourceType: 'mail_domain',
+      resourceId: MAIL_DOMAIN_ID,
+    });
+    await registry.claimNext('local-server');
+    await assert.rejects(
+      registry.complete({ serverId: 'local-server', jobId: queued.id, status: 'succeeded', result: invalid }),
+      (error) => error instanceof JobRegistryError && error.code === 'invalid_job_result',
+    );
+  }
 });

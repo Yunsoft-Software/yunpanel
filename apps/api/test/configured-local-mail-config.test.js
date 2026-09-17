@@ -30,6 +30,7 @@ test('configured runtime hydrates managed mail privately and records only secret
   let operationOptions;
   let startOptions;
   const materializations = [];
+  const currentMaterializations = [];
   const receipts = [];
   const mailDomainRegistry = { transitionLocalStatus: async () => ({}) };
   const mailConfigurationService = {
@@ -44,6 +45,14 @@ test('configured runtime hydrates managed mail privately and records only secret
         },
         preview: { sha256: configurationSha256 },
         sensitiveArtifacts: [{ path: '/etc/yunpanel/mail/dovecot/users', content: 'must-not-enter-receipt' }],
+      };
+    },
+    async materializeCurrent(input, expected) {
+      currentMaterializations.push([input, expected]);
+      return {
+        state: { mailDomainId, revision: input.expectedRevision, status: input.status },
+        preview: { sha256: configurationSha256 },
+        sensitiveArtifacts: [{ path: '/etc/yunpanel/mail/dovecot/users', content: 'rollback-private' }],
       };
     },
   };
@@ -79,6 +88,25 @@ test('configured runtime hydrates managed mail privately and records only secret
   assert.deepEqual(materializations, [[
     { mailDomainId, expectedRevision: 3, status: 'enabled' },
     { expectedPreviewDigest: previewDigest, expectedConfigurationSha256: configurationSha256 },
+  ]]);
+
+  const rollbackPayload = {
+    mailDomainId,
+    sourceApplyJobId: 'mail-job-source-0001',
+    previousRevision: 3,
+    expectedCurrentRevision: 4,
+    currentStatus: 'enabled',
+    targetStatus: 'disabled',
+    previewDigest,
+    currentConfigurationSha256: configurationSha256,
+    sourcePlanSha256: planSha256,
+    backupSha256,
+  };
+  const currentBundle = await operationOptions.loadManagedMailRollbackConfiguration(rollbackPayload);
+  assert.match(currentBundle.sensitiveArtifacts[0].content, /rollback-private/);
+  assert.deepEqual(currentMaterializations, [[
+    { mailDomainId, expectedRevision: 4, status: 'enabled' },
+    { expectedConfigurationSha256: configurationSha256 },
   ]]);
 
   await startOptions.recordExecutionEvidence({
@@ -126,7 +154,10 @@ test('configured runtime refuses managed mail without reconciliation registry', 
     startConfiguredLocalRuntime({
       ...base,
       env: { YUNPANEL_LOCAL_SERVER_ID: serverId },
-      mailConfigurationService: { materializeTransition: async () => ({}) },
+      mailConfigurationService: {
+        materializeTransition: async () => ({}),
+        materializeCurrent: async () => ({}),
+      },
     }),
     { code: 'local_mail_domain_registry_invalid' },
   );

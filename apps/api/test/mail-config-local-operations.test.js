@@ -9,6 +9,7 @@ const PREVIEW_DIGEST = 'b'.repeat(64);
 const PLAN_DIGEST = 'c'.repeat(64);
 const READINESS_DIGEST = 'd'.repeat(64);
 const BACKUP_DIGEST = 'e'.repeat(64);
+const COMPENSATION_DIGEST = 'f'.repeat(64);
 const PASSWORD_HASH = '$argon2id$protected';
 
 function payload() {
@@ -37,6 +38,22 @@ function transition(overrides = {}) {
     previousRevision: 1,
     previousStatus: 'disabled',
     desiredStatus: 'enabled',
+    ...overrides,
+  };
+}
+
+function rollbackPayload(overrides = {}) {
+  return {
+    mailDomainId: MAIL_DOMAIN_ID,
+    sourceApplyJobId: 'mail-job-source-0001',
+    previousRevision: 1,
+    expectedCurrentRevision: 2,
+    currentStatus: 'enabled',
+    targetStatus: 'disabled',
+    currentConfigurationSha256: CONFIG_DIGEST,
+    sourcePlanSha256: PLAN_DIGEST,
+    backupSha256: BACKUP_DIGEST,
+    previewDigest: PREVIEW_DIGEST,
     ...overrides,
   };
 }
@@ -180,4 +197,74 @@ test('managed mail execution context must match the queued mail-domain resource'
     (error) => error.code === 'mail_execution_context_invalid',
   );
   assert.equal(loaded, false);
+});
+
+test('local managed mail rollback materializes current state privately and returns bounded restore evidence', async () => {
+  const calls = [];
+  const operations = createLocalHostOperations({
+    loadManagedMailRollbackConfiguration: async (input) => {
+      calls.push(['load', input]);
+      return {
+        state: { mailDomainId: MAIL_DOMAIN_ID, revision: 2, status: 'enabled' },
+        preview: { sha256: CONFIG_DIGEST },
+        sensitiveArtifacts: [{ path: '/etc/yunpanel/mail/dovecot/users', content: PASSWORD_HASH }],
+      };
+    },
+    mailConfigActivator: {
+      activateConfiguration: async () => ({}),
+      rollbackConfiguration: async (preview, options) => {
+        calls.push(['rollback', preview, options]);
+        return {
+          currentConfigurationSha256: CONFIG_DIGEST,
+          sourcePlanSha256: PLAN_DIGEST,
+          sourceBackupSha256: BACKUP_DIGEST,
+          compensationBackupSha256: COMPENSATION_DIGEST,
+          restored: true,
+          sideEffects: true,
+        };
+      },
+    },
+  });
+
+  assert.equal(operations.supports(OPERATIONS.MAIL_CONFIG_ROLLBACK), true);
+  const result = await operations.executeOperation(
+    OPERATIONS.MAIL_CONFIG_ROLLBACK,
+    rollbackPayload(),
+    execution(),
+  );
+  assert.deepEqual(calls.map(([name]) => name), ['load', 'rollback']);
+  assert.deepEqual(calls[1][2], {
+    transactionId: execution().jobId,
+    sourceTransactionId: 'mail-job-source-0001',
+    sourcePlanSha256: PLAN_DIGEST,
+    sourceBackupSha256: BACKUP_DIGEST,
+  });
+  assert.deepEqual(result, {
+    version: 1,
+    ...rollbackPayload(),
+    compensationBackupSha256: COMPENSATION_DIGEST,
+    restored: true,
+    sideEffects: true,
+  });
+  assert.doesNotMatch(JSON.stringify(result), /argon2|password|content|path/i);
+});
+
+test('local managed mail rollback rejects stale protected current state before host restore', async () => {
+  let restored = false;
+  const operations = createLocalHostOperations({
+    loadManagedMailRollbackConfiguration: async () => ({
+      state: { mailDomainId: MAIL_DOMAIN_ID, revision: 3, status: 'enabled' },
+      preview: { sha256: CONFIG_DIGEST },
+      sensitiveArtifacts: [],
+    }),
+    mailConfigActivator: {
+      activateConfiguration: async () => ({}),
+      rollbackConfiguration: async () => { restored = true; },
+    },
+  });
+  await assert.rejects(
+    operations.executeOperation(OPERATIONS.MAIL_CONFIG_ROLLBACK, rollbackPayload(), execution()),
+    { code: 'mail_rollback_current_bundle_stale' },
+  );
+  assert.equal(restored, false);
 });

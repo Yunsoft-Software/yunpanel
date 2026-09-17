@@ -72,6 +72,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.DATABASE_CREDENTIAL_DELETE,
   OPERATIONS.DNS_RECORD_APPLY,
   OPERATIONS.MAIL_CONFIG_APPLY,
+  OPERATIONS.MAIL_CONFIG_ROLLBACK,
   OPERATIONS.MAIL_DKIM_APPLY,
   OPERATIONS.MAIL_DATA_BACKUP,
   OPERATIONS.MAIL_DATA_RESTORE,
@@ -792,6 +793,42 @@ function sanitizeMailConfigResult(job, result) {
   };
 }
 
+function sanitizeMailConfigRollbackResult(job, result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)
+    || Object.keys(result).length !== 14
+    || result.version !== 1 || result.restored !== true || result.sideEffects !== true
+    || result.mailDomainId !== job.payload?.mailDomainId
+    || result.sourceApplyJobId !== job.payload?.sourceApplyJobId
+    || result.previousRevision !== job.payload?.previousRevision
+    || result.expectedCurrentRevision !== job.payload?.expectedCurrentRevision
+    || result.currentStatus !== job.payload?.currentStatus
+    || result.targetStatus !== job.payload?.targetStatus
+    || result.previewDigest !== job.payload?.previewDigest
+    || result.currentConfigurationSha256 !== job.payload?.currentConfigurationSha256
+    || result.sourcePlanSha256 !== job.payload?.sourcePlanSha256
+    || result.backupSha256 !== job.payload?.backupSha256
+    || typeof result.compensationBackupSha256 !== 'string'
+    || !SHA256_PATTERN.test(result.compensationBackupSha256)) {
+    throw new JobRegistryError('invalid_job_result', 'Managed mail rollback result does not match the queued restore');
+  }
+  return {
+    version: 1,
+    mailDomainId: result.mailDomainId,
+    sourceApplyJobId: result.sourceApplyJobId,
+    previousRevision: result.previousRevision,
+    expectedCurrentRevision: result.expectedCurrentRevision,
+    currentStatus: result.currentStatus,
+    targetStatus: result.targetStatus,
+    previewDigest: result.previewDigest,
+    currentConfigurationSha256: result.currentConfigurationSha256,
+    sourcePlanSha256: result.sourcePlanSha256,
+    backupSha256: result.backupSha256,
+    compensationBackupSha256: result.compensationBackupSha256,
+    restored: true,
+    sideEffects: true,
+  };
+}
+
 function sanitizeMailDkimResult(job, result) {
   if (!result || typeof result !== 'object' || Array.isArray(result)
     || Object.keys(result).length !== 7
@@ -863,6 +900,7 @@ function sanitizeResult(job, result) {
   }
   if (job.operation === OPERATIONS.DNS_RECORD_APPLY) return sanitizeDnsRecordResult(job, result);
   if (job.operation === OPERATIONS.MAIL_CONFIG_APPLY) return sanitizeMailConfigResult(job, result);
+  if (job.operation === OPERATIONS.MAIL_CONFIG_ROLLBACK) return sanitizeMailConfigRollbackResult(job, result);
   if (job.operation === OPERATIONS.MAIL_DKIM_APPLY) return sanitizeMailDkimResult(job, result);
   if ([OPERATIONS.MAIL_DATA_BACKUP, OPERATIONS.MAIL_DATA_RESTORE, OPERATIONS.MAIL_DATA_DELETE].includes(job.operation)) {
     return sanitizeMailDataResult(job, result);

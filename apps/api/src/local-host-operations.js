@@ -67,6 +67,7 @@ export const LOCAL_NODE_ENVIRONMENT_OPERATIONS = Object.freeze([
 
 export const LOCAL_MAIL_CONFIGURATION_OPERATIONS = Object.freeze([
   OPERATIONS.MAIL_CONFIG_APPLY,
+  OPERATIONS.MAIL_CONFIG_ROLLBACK,
   OPERATIONS.MAIL_DKIM_APPLY,
 ]);
 
@@ -150,6 +151,7 @@ export function createLocalHostOperations({
   mailDataDeleteManager = null,
   roundcubeConfigOperation = null,
   loadManagedMailConfiguration = null,
+  loadManagedMailRollbackConfiguration = null,
   loadManagedDkimConfiguration = null,
   loadRoundcubeConfiguration = null,
   loadApplicationEnvironment = null,
@@ -168,6 +170,10 @@ export function createLocalHostOperations({
   }
   if (loadManagedMailConfiguration !== null && typeof loadManagedMailConfiguration !== 'function') {
     throw new Error('loadManagedMailConfiguration must be a function when configured');
+  }
+  if (loadManagedMailRollbackConfiguration !== null
+    && typeof loadManagedMailRollbackConfiguration !== 'function') {
+    throw new Error('loadManagedMailRollbackConfiguration must be a function when configured');
   }
   if (loadManagedDkimConfiguration !== null && typeof loadManagedDkimConfiguration !== 'function') {
     throw new Error('loadManagedDkimConfiguration must be a function when configured');
@@ -233,6 +239,10 @@ export function createLocalHostOperations({
   }
   if (!resolvedMailConfigActivator || typeof resolvedMailConfigActivator.activateConfiguration !== 'function') {
     throw new Error('mailConfigActivator must provide activateConfiguration()');
+  }
+  if (loadManagedMailRollbackConfiguration
+    && typeof resolvedMailConfigActivator.rollbackConfiguration !== 'function') {
+    throw new Error('mailConfigActivator must provide rollbackConfiguration() when rollback is configured');
   }
   if (!resolvedMailDkimActivator || typeof resolvedMailDkimActivator.activate !== 'function') {
     throw new Error('mailDkimActivator must provide activate()');
@@ -413,6 +423,54 @@ export function createLocalHostOperations({
     });
   }
 
+  async function executeManagedMailRollback(payload, execution) {
+    assertMailExecutionContext(payload, execution);
+    const bundle = await loadManagedMailRollbackConfiguration(payload);
+    if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)
+      || !bundle.preview || !Array.isArray(bundle.sensitiveArtifacts)
+      || !bundle.state || typeof bundle.state !== 'object' || Array.isArray(bundle.state)
+      || bundle.state.mailDomainId !== payload.mailDomainId
+      || bundle.state.revision !== payload.expectedCurrentRevision
+      || bundle.state.status !== payload.currentStatus
+      || bundle.preview.sha256 !== payload.currentConfigurationSha256) {
+      const error = new Error('Managed mail rollback provider returned stale current state');
+      error.code = 'mail_rollback_current_bundle_stale';
+      throw error;
+    }
+    const restored = await resolvedMailConfigActivator.rollbackConfiguration(bundle.preview, {
+      transactionId: execution.jobId,
+      sourceTransactionId: payload.sourceApplyJobId,
+      sourcePlanSha256: payload.sourcePlanSha256,
+      sourceBackupSha256: payload.backupSha256,
+    });
+    if (!restored || restored.restored !== true || restored.sideEffects !== true
+      || restored.currentConfigurationSha256 !== payload.currentConfigurationSha256
+      || restored.sourcePlanSha256 !== payload.sourcePlanSha256
+      || restored.sourceBackupSha256 !== payload.backupSha256
+      || typeof restored.compensationBackupSha256 !== 'string'
+      || !/^[a-f0-9]{64}$/.test(restored.compensationBackupSha256)) {
+      const error = new Error('Managed mail rollback did not confirm the queued restore');
+      error.code = 'mail_config_rollback_unconfirmed';
+      throw error;
+    }
+    return Object.freeze({
+      version: 1,
+      mailDomainId: payload.mailDomainId,
+      sourceApplyJobId: payload.sourceApplyJobId,
+      previousRevision: payload.previousRevision,
+      expectedCurrentRevision: payload.expectedCurrentRevision,
+      currentStatus: payload.currentStatus,
+      targetStatus: payload.targetStatus,
+      previewDigest: payload.previewDigest,
+      currentConfigurationSha256: payload.currentConfigurationSha256,
+      sourcePlanSha256: payload.sourcePlanSha256,
+      backupSha256: payload.backupSha256,
+      compensationBackupSha256: restored.compensationBackupSha256,
+      restored: true,
+      sideEffects: true,
+    });
+  }
+
   async function executeManagedDkimConfiguration(payload, execution) {
     assertMailExecutionContext(payload, execution);
     const bundle = await loadManagedDkimConfiguration(payload);
@@ -588,6 +646,9 @@ export function createLocalHostOperations({
   }
   if (loadManagedMailConfiguration) {
     handlers.set(OPERATIONS.MAIL_CONFIG_APPLY, executeManagedMailConfiguration);
+  }
+  if (loadManagedMailRollbackConfiguration) {
+    handlers.set(OPERATIONS.MAIL_CONFIG_ROLLBACK, executeManagedMailRollback);
   }
   if (loadManagedDkimConfiguration) {
     handlers.set(OPERATIONS.MAIL_DKIM_APPLY, executeManagedDkimConfiguration);

@@ -83,7 +83,8 @@ export async function startConfiguredLocalRuntime({
       'Local runtime requires Website and runtime-binding reconciliation registries',
     );
   }
-  if (mailConfigurationService !== null && typeof mailConfigurationService.materializeTransition !== 'function') {
+  if (mailConfigurationService !== null && (typeof mailConfigurationService.materializeTransition !== 'function'
+    || typeof mailConfigurationService.materializeCurrent !== 'function')) {
     throw new ConfiguredLocalRuntimeError('local_mail_configuration_invalid', 'Local runtime managed mail configuration provider is invalid');
   }
   if (mailDkimConfigurationService !== null && typeof mailDkimConfigurationService.materializeApply !== 'function') {
@@ -132,6 +133,15 @@ export async function startConfiguredLocalRuntime({
       expectedConfigurationSha256: payload.configurationSha256,
     })
     : null;
+  const loadManagedMailRollbackConfiguration = mailConfigurationService
+    ? (payload) => mailConfigurationService.materializeCurrent({
+      mailDomainId: payload.mailDomainId,
+      expectedRevision: payload.expectedCurrentRevision,
+      status: payload.currentStatus,
+    }, {
+      expectedConfigurationSha256: payload.currentConfigurationSha256,
+    })
+    : null;
   const loadManagedDkimConfiguration = mailDkimConfigurationService
     ? (payload) => mailDkimConfigurationService.materializeApply({
       mailDomainId: payload.mailDomainId,
@@ -157,6 +167,7 @@ export async function startConfiguredLocalRuntime({
       ? (credentialId) => dnsProviderCredentialRegistry.materialize(credentialId)
       : null,
     loadManagedMailConfiguration,
+    loadManagedMailRollbackConfiguration,
     loadManagedDkimConfiguration,
     loadRoundcubeConfiguration,
     jobLogStore,
