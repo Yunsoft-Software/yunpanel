@@ -3,6 +3,15 @@ const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const SITE_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const DATABASE_USER_PATTERN = /^ydb_[a-f0-9]{24}$/;
+const DATABASE_ACCOUNT_PATTERN = /^[A-Za-z0-9_.$-]{1,64}@[A-Za-z0-9_.:%-]{1,255}$/;
+const DATABASE_AUTH_PLUGIN_PATTERN = /^[A-Za-z0-9_]{0,64}$/;
+const DATABASE_HEALTH_REASONS = new Set([
+  'database_security_inspection_unavailable',
+  'database_native_socket_admin_auth_required',
+  'database_anonymous_accounts_present',
+  'database_remote_root_accounts_present',
+  'database_test_schema_present',
+]);
 
 function databaseOwnership(value) {
   if (value === null || value === undefined) return null;
@@ -30,6 +39,40 @@ function databaseOwnership(value) {
     unixUser: value.unixUser,
     revision: value.revision,
     credential,
+  };
+}
+
+function databaseHealth(value) {
+  if (!value || typeof value !== 'object' || typeof value.ready !== 'boolean'
+    || !DATABASE_HEALTH_REASONS.has(value.reason ?? '') && value.reason !== null) return null;
+  if (value.available === false && value.ready === false
+    && value.reason === 'database_security_inspection_unavailable') {
+    return { available: false, ready: false, reason: value.reason, connection: null, hygiene: null };
+  }
+  if (value.available !== true || !value.connection || typeof value.connection !== 'object'
+    || value.connection.protocol !== 'socket'
+    || !DATABASE_ACCOUNT_PATTERN.test(value.connection.adminAccount ?? '')
+    || !DATABASE_ACCOUNT_PATTERN.test(value.connection.loginAccount ?? '')
+    || !DATABASE_AUTH_PLUGIN_PATTERN.test(value.connection.authPlugin ?? '')
+    || typeof value.connection.nativeSocketAuth !== 'boolean'
+    || !value.hygiene || typeof value.hygiene !== 'object'
+    || typeof value.hygiene.anonymousAccountsAbsent !== 'boolean'
+    || typeof value.hygiene.remoteRootAccountsAbsent !== 'boolean'
+    || typeof value.hygiene.testSchemaAbsent !== 'boolean') return null;
+  return {
+    available: true,
+    ready: value.ready,
+    reason: value.reason,
+    connection: {
+      adminAccount: value.connection.adminAccount,
+      authPlugin: value.connection.authPlugin,
+      nativeSocketAuth: value.connection.nativeSocketAuth,
+    },
+    hygiene: {
+      anonymousAccountsAbsent: value.hygiene.anonymousAccountsAbsent,
+      remoteRootAccountsAbsent: value.hygiene.remoteRootAccountsAbsent,
+      testSchemaAbsent: value.hygiene.testSchemaAbsent,
+    },
   };
 }
 
@@ -72,6 +115,7 @@ export function databaseInventoryView(data) {
     databases,
     totalBytes: databases?.reduce((sum, entry) => sum + entry.sizeBytes, 0) ?? 0,
     live: data?.live === true,
+    health: databaseHealth(data?.health),
     ownership: data?.ownership
       && Number.isSafeInteger(data.ownership.bindingCount) && data.ownership.bindingCount >= 0
       && Number.isSafeInteger(data.ownership.credentialCount) && data.ownership.credentialCount >= 0
@@ -93,4 +137,5 @@ export const databaseModelInternals = Object.freeze({
   databaseNamePattern: DATABASE_NAME_PATTERN,
   reservedDatabases: Object.freeze([...RESERVED_DATABASES]),
   databaseOwnership,
+  databaseHealth,
 });

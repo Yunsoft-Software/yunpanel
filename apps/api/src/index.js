@@ -446,6 +446,7 @@ const listener = createAuthenticatedApi({
       databaseCredentialRegistry,
       databaseCredentialApplyService,
       databaseInventoryProvider: () => databaseManager.inspect(),
+      databaseHealthProvider: () => databaseManager.inspectSecurityBaseline(),
       websiteMigrationPolicy,
       migrationLedger,
       dnsHostingRegistry,

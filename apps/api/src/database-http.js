@@ -21,6 +21,14 @@ const INVENTORY_OPERATIONS = new Set([
 ]);
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
+const DATABASE_SECURITY_REASONS = new Set([
+  'database_native_socket_admin_auth_required',
+  'database_anonymous_accounts_present',
+  'database_remote_root_accounts_present',
+  'database_test_schema_present',
+]);
+const DATABASE_ACCOUNT_PATTERN = /^[A-Za-z0-9_.$-]{1,64}@[A-Za-z0-9_.:%-]{1,255}$/;
+const DATABASE_AUTH_PLUGIN_PATTERN = /^[A-Za-z0-9_]{0,64}$/;
 
 export class DatabaseHttpError extends Error {
   constructor(code, message, status = 400) {
@@ -127,6 +135,84 @@ async function liveDatabaseInventory(databaseInventoryProvider, serverId) {
   }
 }
 
+function unavailableDatabaseHealth() {
+  return Object.freeze({
+    available: false,
+    ready: false,
+    reason: 'database_security_inspection_unavailable',
+    connection: null,
+    hygiene: null,
+  });
+}
+
+function sanitizeDatabaseHealth(value, inventory) {
+  const rootFields = new Set(['engine', 'version', 'connection', 'hygiene', 'ready', 'reason']);
+  const connectionFields = new Set(['protocol', 'adminAccount', 'loginAccount', 'authPlugin', 'nativeSocketAuth']);
+  const hygieneFields = new Set(['anonymousAccountsAbsent', 'remoteRootAccountsAbsent', 'testSchemaAbsent']);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== rootFields.size || Object.keys(value).some((field) => !rootFields.has(field))
+    || value.engine !== inventory.engine || value.version !== inventory.version
+    || !value.connection || typeof value.connection !== 'object' || Array.isArray(value.connection)
+    || Object.keys(value.connection).length !== connectionFields.size
+    || Object.keys(value.connection).some((field) => !connectionFields.has(field))
+    || value.connection.protocol !== 'socket'
+    || !DATABASE_ACCOUNT_PATTERN.test(value.connection.adminAccount ?? '')
+    || !DATABASE_ACCOUNT_PATTERN.test(value.connection.loginAccount ?? '')
+    || !DATABASE_AUTH_PLUGIN_PATTERN.test(value.connection.authPlugin ?? '')
+    || typeof value.connection.nativeSocketAuth !== 'boolean'
+    || !value.hygiene || typeof value.hygiene !== 'object' || Array.isArray(value.hygiene)
+    || Object.keys(value.hygiene).length !== hygieneFields.size
+    || Object.keys(value.hygiene).some((field) => !hygieneFields.has(field))
+    || [...hygieneFields].some((field) => typeof value.hygiene[field] !== 'boolean')
+    || typeof value.ready !== 'boolean') {
+    throw new DatabaseHttpError('database_security_state_invalid', 'Database security state is invalid', 503);
+  }
+  const expectedReady = value.connection.nativeSocketAuth
+    && value.hygiene.anonymousAccountsAbsent
+    && value.hygiene.remoteRootAccountsAbsent
+    && value.hygiene.testSchemaAbsent;
+  const expectedReason = !value.connection.nativeSocketAuth
+    ? 'database_native_socket_admin_auth_required'
+    : !value.hygiene.anonymousAccountsAbsent
+      ? 'database_anonymous_accounts_present'
+      : !value.hygiene.remoteRootAccountsAbsent
+        ? 'database_remote_root_accounts_present'
+        : !value.hygiene.testSchemaAbsent
+          ? 'database_test_schema_present'
+          : null;
+  if (value.ready !== expectedReady || value.reason !== expectedReason
+    || (value.reason !== null && !DATABASE_SECURITY_REASONS.has(value.reason))) {
+    throw new DatabaseHttpError('database_security_state_invalid', 'Database security state is inconsistent', 503);
+  }
+  return Object.freeze({
+    available: true,
+    ready: value.ready,
+    reason: value.reason,
+    connection: Object.freeze({
+      protocol: 'socket',
+      adminAccount: value.connection.adminAccount,
+      loginAccount: value.connection.loginAccount,
+      authPlugin: value.connection.authPlugin,
+      nativeSocketAuth: value.connection.nativeSocketAuth,
+    }),
+    hygiene: Object.freeze({
+      anonymousAccountsAbsent: value.hygiene.anonymousAccountsAbsent,
+      remoteRootAccountsAbsent: value.hygiene.remoteRootAccountsAbsent,
+      testSchemaAbsent: value.hygiene.testSchemaAbsent,
+    }),
+  });
+}
+
+async function attachDatabaseHealth(inventory, databaseHealthProvider, serverId) {
+  if (!databaseHealthProvider) return inventory;
+  try {
+    const health = sanitizeDatabaseHealth(await databaseHealthProvider(serverId), inventory);
+    return Object.freeze({ ...inventory, health });
+  } catch {
+    return Object.freeze({ ...inventory, health: unavailableDatabaseHealth() });
+  }
+}
+
 async function attachDatabaseOwnership(inventory, {
   serverId,
   databaseBindingRegistry,
@@ -226,6 +312,7 @@ export function mountDatabaseRoutes(app, {
   databaseBindingRegistry = null,
   databaseCredentialRegistry = null,
   databaseInventoryProvider = null,
+  databaseHealthProvider = null,
 }) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.delete !== 'function') {
     throw new Error('Express application is required');
@@ -243,19 +330,23 @@ export function mountDatabaseRoutes(app, {
   if (databaseInventoryProvider !== null && typeof databaseInventoryProvider !== 'function') {
     throw new Error('Database inventory provider is invalid');
   }
+  if (databaseHealthProvider !== null && typeof databaseHealthProvider !== 'function') {
+    throw new Error('Database health provider is invalid');
+  }
 
   app.get('/api/servers/:serverId/databases', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const server = await requireServer(registry, request.params.serverId);
     response.set('Cache-Control', 'no-store');
     if (databaseInventoryProvider) {
-      const inventory = await liveDatabaseInventory(databaseInventoryProvider, server.id);
-      return response.json({ data: await attachDatabaseOwnership(inventory, {
+      const liveInventory = await liveDatabaseInventory(databaseInventoryProvider, server.id);
+      const inventory = await attachDatabaseOwnership(liveInventory, {
         serverId: server.id,
         databaseBindingRegistry: typeof databaseBindingRegistry?.listBindings === 'function'
           ? databaseBindingRegistry
           : null,
         databaseCredentialRegistry,
-      }) });
+      });
+      return response.json({ data: await attachDatabaseHealth(inventory, databaseHealthProvider, server.id) });
     }
     const snapshot = await latestDatabaseSnapshot(jobRegistry, server.id);
     const inventory = snapshot ?? { engine: null, version: null, databases: null, snapshot: null };
@@ -359,5 +450,7 @@ export const databaseHttpInternals = Object.freeze({
   ensureDatabaseIdle,
   latestDatabaseSnapshot,
   liveDatabaseInventory,
+  sanitizeDatabaseHealth,
+  attachDatabaseHealth,
   attachDatabaseOwnership,
 });

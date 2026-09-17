@@ -35,6 +35,24 @@ async function fixture(t, role = 'owner', {
     version: '10.11.13-MariaDB',
     databases: [{ name: 'live_db', sizeBytes: 42 }],
   }),
+  databaseHealthProvider = async () => ({
+    engine: 'mariadb',
+    version: '10.11.13-MariaDB',
+    connection: {
+      protocol: 'socket',
+      adminAccount: 'root@localhost',
+      loginAccount: 'root@localhost',
+      authPlugin: 'unix_socket',
+      nativeSocketAuth: true,
+    },
+    hygiene: {
+      anonymousAccountsAbsent: true,
+      remoteRootAccountsAbsent: true,
+      testSchemaAbsent: true,
+    },
+    ready: true,
+    reason: null,
+  }),
 } = {}) {
   const registry = createServerRegistry();
   const enrollment = await registry.issueEnrollmentToken({ label: 'database-http' });
@@ -48,6 +66,7 @@ async function fixture(t, role = 'owner', {
       jobRegistry,
       environment: 'production',
       databaseInventoryProvider,
+      databaseHealthProvider,
     }),
   });
   const server = http.createServer(listener).listen(0, '127.0.0.1');
@@ -87,6 +106,23 @@ test('Owner GET reads live inventory while explicit legacy inspection remains a 
     version: '10.11.13-MariaDB',
     databases: [{ name: 'live_db', sizeBytes: 42 }],
     live: true,
+    health: {
+      available: true,
+      ready: true,
+      reason: null,
+      connection: {
+        protocol: 'socket',
+        adminAccount: 'root@localhost',
+        loginAccount: 'root@localhost',
+        authPlugin: 'unix_socket',
+        nativeSocketAuth: true,
+      },
+      hygiene: {
+        anonymousAccountsAbsent: true,
+        remoteRootAccountsAbsent: true,
+        testSchemaAbsent: true,
+      },
+    },
   });
 
   const response = await request(`/api/servers/${serverId}/databases/inspect`, { method: 'POST', body: {} });
@@ -96,6 +132,53 @@ test('Owner GET reads live inventory while explicit legacy inspection remains a 
   assert.equal(job.resourceType, 'database');
   assert.equal(job.resourceId, serverId);
   assert.equal((await jobRegistry.listJobs({ serverId })).length, 1);
+});
+
+test('live database GET reports security inspection failure as unavailable without leaking provider errors', async (t) => {
+  const { request, serverId } = await fixture(t, 'owner', {
+    databaseHealthProvider: async () => { throw new Error('private database detail'); },
+  });
+  const response = await request(`/api/servers/${serverId}/databases`);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.data.health, {
+    available: false,
+    ready: false,
+    reason: 'database_security_inspection_unavailable',
+    connection: null,
+    hygiene: null,
+  });
+  assert.equal(JSON.stringify(body).includes('private database detail'), false);
+});
+
+test('database health rejects engine drift and inconsistent ready evidence', async () => {
+  const inventory = { engine: 'mariadb', version: '10.11', databases: [] };
+  const baseline = {
+    engine: 'mysql',
+    version: '10.11',
+    connection: {
+      protocol: 'socket',
+      adminAccount: 'root@localhost',
+      loginAccount: 'root@localhost',
+      authPlugin: 'auth_socket',
+      nativeSocketAuth: true,
+    },
+    hygiene: {
+      anonymousAccountsAbsent: true,
+      remoteRootAccountsAbsent: true,
+      testSchemaAbsent: true,
+    },
+    ready: true,
+    reason: null,
+  };
+  const drifted = await databaseHttpInternals.attachDatabaseHealth(inventory, async () => baseline, 'server-id');
+  assert.equal(drifted.health.available, false);
+  const inconsistent = await databaseHttpInternals.attachDatabaseHealth(inventory, async () => ({
+    ...baseline,
+    engine: 'mariadb',
+    ready: false,
+  }), 'server-id');
+  assert.equal(inconsistent.health.available, false);
 });
 
 test('live database GET fails closed on provider failure or malformed inventory', async (t) => {

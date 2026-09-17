@@ -18,6 +18,14 @@ import {
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { databaseInventoryView, formatDatabaseBytes, validDatabaseName } from './database-model.js';
 
+const SECURITY_REASON_LABELS = Object.freeze({
+  database_security_inspection_unavailable: 'Güvenlik kanıtı okunamadı',
+  database_native_socket_admin_auth_required: 'Native root socket auth gerekli',
+  database_anonymous_accounts_present: 'Anonim hesap mevcut',
+  database_remote_root_accounts_present: 'Uzak root hesabı mevcut',
+  database_test_schema_present: 'Test schema mevcut',
+});
+
 async function queueAndWait(queue, { observe, refreshJobs, updateJob }) {
   const queued = await queue();
   observe(queued);
@@ -106,6 +114,19 @@ export default function DatabasesPage() {
 
   const serverLabel = server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu';
   const engineLabel = inventory.engine === 'mariadb' ? 'MariaDB' : inventory.engine === 'mysql' ? 'MySQL' : '—';
+  const securityLabel = inventory.health?.ready
+    ? 'Hazır'
+    : inventory.health?.available === false
+      ? 'Doğrulanamadı'
+      : inventory.health
+        ? 'Aksiyon gerekli'
+        : '—';
+  const adminAuthLabel = inventory.health?.connection
+    ? `${inventory.health.connection.adminAccount} · ${inventory.health.connection.authPlugin || 'plugin yok'}`
+    : '—';
+  const securityReasonLabel = inventory.health?.reason
+    ? SECURITY_REASON_LABELS[inventory.health.reason] ?? 'Bilinmeyen güvenlik durumu'
+    : '—';
 
   return <>
     <PageHeading
@@ -130,6 +151,9 @@ export default function DatabasesPage() {
             ['Sürüm', inventory.version ?? '—'],
             ['Toplam boyut', formatDatabaseBytes(inventory.totalBytes)],
             ['Veritabanı', inventory.databases.length],
+            ['DB güvenlik baseline', securityLabel],
+            ['Admin socket auth', adminAuthLabel],
+            ['Güvenlik tanısı', securityReasonLabel],
             ...(inventory.ownership ? [
               ['Website bağı', inventory.ownership.bindingCount],
               ['Credential', inventory.ownership.credentialCount],

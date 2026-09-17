@@ -43,12 +43,35 @@ test('database inventory view sorts safe rows and computes total size without tr
       { name: 'broken-name', sizeBytes: 1 },
     ],
     live: true,
+    health: {
+      available: true,
+      ready: true,
+      reason: null,
+      connection: {
+        protocol: 'socket',
+        adminAccount: 'root@localhost',
+        loginAccount: 'root@localhost',
+        authPlugin: 'unix_socket',
+        nativeSocketAuth: true,
+      },
+      hygiene: {
+        anonymousAccountsAbsent: true,
+        remoteRootAccountsAbsent: true,
+        testSchemaAbsent: true,
+      },
+    },
     ownership: { bindingCount: 1, credentialCount: 1, missingDatabaseBindingCount: 0 },
     snapshot: { jobId: 'job-1', refreshedAt: '2026-09-10T00:00:00.000Z', raw: 'drop' },
   });
   assert.deepEqual(view.databases.map((entry) => entry.name), ['alpha', 'zeta']);
   assert.equal(view.totalBytes, 3072);
   assert.equal(view.live, true);
+  assert.equal(view.health.ready, true);
+  assert.deepEqual(view.health.connection, {
+    adminAccount: 'root@localhost',
+    authPlugin: 'unix_socket',
+    nativeSocketAuth: true,
+  });
   assert.equal(view.databases[0].ownership.credential.username, ownership.credential.username);
   assert.deepEqual(view.ownership, { bindingCount: 1, credentialCount: 1, missingDatabaseBindingCount: 0 });
   assert.deepEqual(view.snapshot, { jobId: 'job-1', refreshedAt: '2026-09-10T00:00:00.000Z' });

@@ -180,6 +180,7 @@ export function createApp({
   databaseCredentialRegistry = null,
   databaseCredentialApplyService = null,
   databaseInventoryProvider = null,
+  databaseHealthProvider = null,
   dnsReadinessService = null,
   dnsRecordManager = createCloudflareDnsManager(),
   mailDomainRegistry = createMailDomainRegistry({
@@ -602,6 +603,7 @@ export function createApp({
     databaseBindingRegistry,
     databaseCredentialRegistry,
     databaseInventoryProvider,
+    databaseHealthProvider,
   });
   mountLogRoutes(app, {
     registry, applicationRegistry, jobRegistry, journalLogReader, nginxLogReader, jobLogStore, localServerId,
