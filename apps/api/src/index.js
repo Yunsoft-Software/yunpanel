@@ -61,6 +61,7 @@ import { createMailboxQuotaRegistry } from './mailbox-quota-registry.js';
 import { createMailboxRegistry } from './mailbox-registry.js';
 import { createPowerDnsAuthoritativeService } from './powerdns-authoritative-service.js';
 import { createPhpMyAdminHandoffService } from './phpmyadmin-handoff-service.js';
+import { startPhpMyAdminHandoffSocket } from './phpmyadmin-handoff-socket.js';
 import { createPowerDnsSecretRegistry } from './powerdns-secret-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createRoundcubeConfigurationService } from './roundcube-configuration.js';
@@ -144,6 +145,11 @@ function reportLocalExecutorFault(error) {
   const phase = typeof error?.phase === 'string' ? error.phase : 'unknown';
   const jobId = typeof error?.jobId === 'string' ? error.jobId : 'none';
   console.error(`[yunpanel-api] local executor fault code=${code} phase=${phase} job=${jobId}`);
+}
+
+function reportPhpMyAdminHandoffFault(error) {
+  const code = typeof error?.code === 'string' ? error.code : 'phpmyadmin_handoff_socket_fault';
+  console.error(`[yunpanel-api] phpMyAdmin handoff unavailable code=${code}`);
 }
 
 function reportAuditFault(metadata) {
@@ -397,6 +403,14 @@ const phpMyAdminHandoffService = createPhpMyAdminHandoffService({
   jobRegistry,
   liveSessions,
 });
+let phpMyAdminHandoffRuntime = null;
+if (localServerId) {
+  try {
+    phpMyAdminHandoffRuntime = await startPhpMyAdminHandoffSocket({ phpMyAdminHandoffService });
+  } catch (error) {
+    reportPhpMyAdminHandoffFault(error);
+  }
+}
 const websiteDatabaseInventoryProvider = () => databaseManager.inspect();
 const websiteDatabaseHealthProvider = () => databaseManager.inspectSecurityBaseline();
 websiteProvisioningRuntime.configureDatabaseControlPlane({
@@ -464,7 +478,7 @@ const listener = createAuthenticatedApi({
       databaseBindingRegistry,
       databaseCredentialRegistry,
       databaseCredentialApplyService,
-      phpMyAdminHandoffService,
+      phpMyAdminHandoffService: phpMyAdminHandoffRuntime ? phpMyAdminHandoffService : null,
       databaseInventoryProvider: () => databaseManager.inspect(),
       databaseHealthProvider: () => databaseManager.inspectSecurityBaseline(),
       websiteMigrationPolicy,
@@ -592,6 +606,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] application environment store=${applicationEnvironmentStorePath}`);
   console.log(`[yunpanel-api] secret store=${applicationEnvironmentRegistry.secretStoreConfigured ? 'configured' : 'not configured'}`);
   console.log(`[yunpanel-api] authentication=${authStore.configured() ? 'configured' : 'local setup required'}`);
+  console.log(`[yunpanel-api] phpMyAdmin handoff=${phpMyAdminHandoffRuntime ? 'enabled' : 'disabled'}`);
   console.log(`[yunpanel-api] local execution=${localRuntime ? `enabled server=${localRuntime.serverId} operations=${localRuntime.operations.length}` : 'disabled'}`);
   console.log(`[yunpanel-api] site files=${localServerId ? `enabled server=${localServerId}` : 'disabled'}`);
 });
@@ -602,6 +617,10 @@ async function shutdown(signal) {
   shuttingDown = true;
   console.log(`[yunpanel-api] received ${signal}, shutting down`);
   renewalScheduler.stop();
+  if (phpMyAdminHandoffRuntime) {
+    try { await phpMyAdminHandoffRuntime.close(); }
+    catch { console.error('[yunpanel-api] phpMyAdmin handoff shutdown failed'); }
+  }
   liveSessions.closeAll('server_shutdown');
   terminalWebSocket.closeAll('server_shutdown');
   const closePromise = new Promise((resolve) => {
