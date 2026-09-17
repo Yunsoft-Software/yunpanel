@@ -8,5 +8,7 @@ PowerDNS DNSSEC host adapter'ı rollover için secret-safe ve optimistic-concurr
 - Publish/activate/deactivate primitive'i exact before/after digest'leriyle çalışır. Hedef state'e ulaşılmış belirsiz mutation restart/retry'da yeniden doğrulanıp rectification tamamlanır.
 - Delete primitive'i exact remaining-key digest'i gerektirir ve başka bir active+published DS taşıyan key yoksa fail-closed kalır. Lost-ack delete yeniden gönderilmeden authoritative key koleksiyonuyla uzlaştırılır.
 - Her cryptokey mutasyonu sonrasında zone rectification ve public collection post-condition kontrolü zorunludur.
+- Rollover preflight yalnız mevcut durum `secure_ready`, public key-set digest'i geçerli, parent DS kümesi tek active+published KSK/CSK'ye bütünüyle bağlı ve başka KSK/CSK artığı yoksa apply'e izin verir.
+- Preflight seçilen eski key kimliği ile aynı algorithm/bits yeni-key hedefini ve create→publish→DNSKEY propagation→activate→parent DS addition/retirement→old-key cleanup aşamalarını preview digest'ine bağlar. Authenticated GET preview endpoint'i salt-okunurdur ve private materyal taşımaz.
 
 Bu dilim host mutation temelidir; durable rollover operation journal'ı, SOA/secondary propagation kapıları, parent DS change/retirement aşamaları ve authenticated HTTP/audit yüzeyi `plan.md` içinde açık kalır. Gerçek PowerDNS ve process-kill kabulü `todo.md` T-DNS kapsamındadır.

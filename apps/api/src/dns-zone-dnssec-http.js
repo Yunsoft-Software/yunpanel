@@ -132,6 +132,7 @@ export function mountDnsZoneDnssecRoutes(app, {
   }
   if (dnsZoneDnssecRuntime !== null
     && (typeof dnsZoneDnssecRuntime.status !== 'function' || typeof dnsZoneDnssecRuntime.preview !== 'function'
+      || typeof dnsZoneDnssecRuntime.previewRollover !== 'function'
       || typeof dnsZoneDnssecRuntime.start !== 'function' || typeof dnsZoneDnssecRuntime.get !== 'function'
       || typeof dnsZoneDnssecRuntime.listForDomain !== 'function')) {
     throw new Error('DNSSEC runtime is invalid');
@@ -139,6 +140,7 @@ export function mountDnsZoneDnssecRoutes(app, {
   if (dnsZoneDnssecService !== null
     && (typeof dnsZoneDnssecService.status !== 'function'
       || typeof dnsZoneDnssecService.preview !== 'function'
+      || typeof dnsZoneDnssecService.previewRollover !== 'function'
       || typeof dnsZoneDnssecService.apply !== 'function')) {
     throw new Error('DNSSEC service is invalid');
   }
@@ -162,6 +164,12 @@ export function mountDnsZoneDnssecRoutes(app, {
     const body = previewBody(request.body);
     return response.json({
       data: await (await runtime()).preview({ domainId: request.params.domainId, enabled: body.enabled }),
+    });
+  }));
+
+  app.get('/api/domains/:domainId/dns/dnssec/rollover/preview', requirePanelRouteAccess, route(async (request, response) => {
+    return response.json({
+      data: await (await runtime()).previewRollover({ domainId: request.params.domainId }),
     });
   }));
 

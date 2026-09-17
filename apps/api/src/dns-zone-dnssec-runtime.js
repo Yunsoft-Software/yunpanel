@@ -122,6 +122,14 @@ export function createDnsZoneDnssecRuntime({ registry, service } = {}) {
     catch (error) { throw mapped(error); }
   }
 
+  async function previewRollover(input) {
+    if (typeof service.previewRollover !== 'function') {
+      throw new DnsZoneDnssecRuntimeError('dnssec_rollover_unavailable', 'DNSSEC rollover preview is unavailable', 503);
+    }
+    try { return await service.previewRollover(input); }
+    catch (error) { throw mapped(error); }
+  }
+
   async function inspectTarget(operation) {
     const current = await status({ domainId: operation.domainId });
     return Object.freeze({ current, assessment: targetAssessment(operation, current) });
@@ -311,7 +319,7 @@ export function createDnsZoneDnssecRuntime({ registry, service } = {}) {
     return Object.freeze(recovery);
   }
 
-  return Object.freeze({ init, status, preview, start, run, get, listForDomain });
+  return Object.freeze({ init, status, preview, previewRollover, start, run, get, listForDomain });
 }
 
 export const dnsZoneDnssecRuntimeInternals = Object.freeze({

@@ -68,9 +68,17 @@ test('Domain DNSSEC HTTP forwards status, preview and durable apply without prov
     },
     error: null,
   };
+  const rolloverPreview = {
+    action: 'dnssec_key_rollover',
+    domainId,
+    applyAllowed: true,
+    previewDigest: 'c'.repeat(64),
+    confirmation: `rollover-dnssec:${domainId}:${'c'.repeat(64)}`,
+  };
   const runtime = {
     status: async (input) => { calls.push(['status', input]); return { domainId, status: 'insecure' }; },
     preview: async (input) => { calls.push(['preview', input]); return preview; },
+    previewRollover: async (input) => { calls.push(['rollover-preview', input]); return rolloverPreview; },
     start: async (input) => { calls.push(['start', input]); return operation; },
     listForDomain: async (input) => { calls.push(['list', input]); return [operation]; },
     get: async (input) => { calls.push(['get', input]); return operation; },
@@ -90,6 +98,11 @@ test('Domain DNSSEC HTTP forwards status, preview and durable apply without prov
     body: { enabled: true },
   });
   assert.deepEqual(previewResponse.payload, { data: preview });
+
+  const rollover = await invoke(app, 'GET /api/domains/:domainId/dns/dnssec/rollover/preview', {
+    params: { domainId },
+  });
+  assert.deepEqual(rollover.payload, { data: rolloverPreview });
 
   const applied = await invoke(app, 'POST /api/domains/:domainId/dns/dnssec/apply', {
     params: { domainId },
@@ -114,6 +127,7 @@ test('Domain DNSSEC HTTP forwards status, preview and durable apply without prov
   assert.deepEqual(calls, [
     ['status', { domainId }],
     ['preview', { domainId, enabled: true }],
+    ['rollover-preview', { domainId }],
     ['start', {
       domainId,
       enabled: true,
@@ -132,6 +146,7 @@ test('Domain DNSSEC HTTP hides an operation that belongs to another Domain path'
     dnsZoneDnssecRuntime: {
       status: async () => ({}),
       preview: async () => ({}),
+      previewRollover: async () => ({}),
       start: async () => ({}),
       listForDomain: async () => [],
       get: async () => ({ id: operationId, domainId: '997c6ac8-4db4-4500-a24e-0c8ff84825c6' }),
@@ -153,6 +168,7 @@ test('Domain DNSSEC HTTP rejects malformed mutation bodies before runtime calls'
     dnsZoneDnssecRuntime: {
       status: async () => ({}),
       preview: async () => { calls += 1; return {}; },
+      previewRollover: async () => ({}),
       start: async () => { calls += 1; return {}; },
       get: async () => null,
       listForDomain: async () => [],
@@ -181,7 +197,9 @@ test('DNSSEC HTTP mount requires a local authoritative service', () => {
       const app = fakeApp();
       mountDnsZoneDnssecRoutes(app, {
         authoritativeService: { localServerId: '' },
-        dnsZoneDnssecRuntime: { status() {}, preview() {}, start() {}, get() {}, listForDomain() {} },
+        dnsZoneDnssecRuntime: {
+          status() {}, preview() {}, previewRollover() {}, start() {}, get() {}, listForDomain() {},
+        },
       });
     },
     /PowerDNS authoritative service is required/,

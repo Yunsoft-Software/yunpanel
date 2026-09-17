@@ -16,6 +16,7 @@ function authoritative({ dnssec = false, records = dnssec ? [ds] : [], changed =
     zoneName: 'example.com',
     dnssec,
     serial: 2026091601,
+    keySetDigest: dnssec ? 'a'.repeat(64) : 'b'.repeat(64),
     keys: Object.freeze(dnssec ? [Object.freeze({
       id: 1,
       keyType: 'csk',
@@ -218,4 +219,95 @@ test('requires root local authoritative Domain scope before materializing DNS cr
     (error) => error instanceof DnsZoneDnssecError && error.code === 'dnssec_root_domain_required',
   );
   assert.equal(secretRead, false);
+});
+
+test('previews a secure digest-bound KSK/CSK rollover without exposing private material', async () => {
+  const { calls, service } = fixture({
+    current: authoritative({ dnssec: true }),
+    parentStates: [parent('present', [ds])],
+  });
+  const preview = await service.previewRollover({ domainId });
+
+  assert.equal(preview.applyAllowed, true);
+  assert.equal(preview.action, 'dnssec_key_rollover');
+  assert.equal(preview.expectedKeySetDigest, 'a'.repeat(64));
+  assert.deepEqual(preview.expectedKeyIds, [1]);
+  assert.deepEqual(preview.oldKey, {
+    id: 1,
+    keyType: 'csk',
+    algorithm: 'ECDSAP256SHA256',
+    bits: 256,
+    ds: [ds],
+  });
+  assert.deepEqual(preview.newKey, {
+    keyType: 'csk',
+    algorithm: 'ECDSAP256SHA256',
+    bits: 256,
+    active: false,
+    published: false,
+  });
+  assert.deepEqual(preview.stages, [
+    'create_new_key',
+    'publish_new_key',
+    'verify_dnskey_propagation',
+    'activate_new_key',
+    'await_parent_ds_addition',
+    'await_old_ds_retirement',
+    'deactivate_old_key',
+    'delete_old_key',
+  ]);
+  assert.match(preview.confirmation, new RegExp(`^rollover-dnssec:${domainId}:`));
+  assert.equal(JSON.stringify(preview).includes('private'), false);
+  assert.deepEqual(calls.map((entry) => entry[0]), ['inspect', 'parent']);
+});
+
+test('blocks rollover unless current parent delegation is securely bound to one key', async () => {
+  const stale = '54321 13 2 DDEEFF00';
+  const { service } = fixture({
+    current: authoritative({ dnssec: true }),
+    parentStates: [parent('present', [stale])],
+  });
+  const preview = await service.previewRollover({ domainId });
+
+  assert.equal(preview.applyAllowed, false);
+  assert.equal(preview.confirmation, null);
+  assert.equal(preview.oldKey, null);
+  assert.equal(preview.blockers.some((entry) => entry.code === 'dnssec_rollover_secure_delegation_required'), true);
+  assert.equal(preview.blockers.some((entry) => entry.code === 'dnssec_rollover_current_key_ambiguous'), true);
+});
+
+test('blocks rollover when another KSK/CSK artifact indicates an unfinished rotation', async () => {
+  const current = authoritative({ dnssec: true });
+  const second = Object.freeze({
+    ...current.keys[0],
+    id: 2,
+    active: false,
+    published: false,
+    ds: Object.freeze(['22345 13 2 EEFF0011']),
+    cds: Object.freeze(['22345 13 2 EEFF0011']),
+  });
+  const { service } = fixture({
+    current: Object.freeze({ ...current, keys: Object.freeze([...current.keys, second]), keyCount: 2 }),
+    parentStates: [parent('present', [ds])],
+  });
+  const preview = await service.previewRollover({ domainId });
+
+  assert.equal(preview.applyAllowed, false);
+  assert.equal(preview.blockers.some((entry) => entry.code === 'dnssec_rollover_key_artifact_present'), true);
+});
+
+test('binds rollover preview identity to public key-set digest and parent DS evidence', async () => {
+  const first = fixture({
+    current: authoritative({ dnssec: true }),
+    parentStates: [parent('present', [ds])],
+  });
+  const drifted = authoritative({ dnssec: true });
+  const second = fixture({
+    current: Object.freeze({ ...drifted, keySetDigest: 'c'.repeat(64) }),
+    parentStates: [parent('present', [ds])],
+  });
+
+  const left = await first.service.previewRollover({ domainId });
+  const right = await second.service.previewRollover({ domainId });
+  assert.notEqual(left.previewDigest, right.previewDigest);
 });

@@ -9,6 +9,17 @@ import {
 } from '@yunpanel/host-runtime/powerdns-dnssec-manager';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const ROLLOVER_KEY_TYPES = new Set(['ksk', 'csk']);
+const ROLLOVER_STAGES = Object.freeze([
+  'create_new_key',
+  'publish_new_key',
+  'verify_dnskey_propagation',
+  'activate_new_key',
+  'await_parent_ds_addition',
+  'await_old_ds_retirement',
+  'deactivate_old_key',
+  'delete_old_key',
+]);
 
 export class DnsZoneDnssecError extends Error {
   constructor(code, message, status = 400) {
@@ -77,6 +88,9 @@ function publicState(domain, authoritative, parent) {
     secureReady: status === 'secure_ready',
     serial: authoritative.serial,
     keys: authoritative.keys,
+    keySetDigest: typeof authoritative.keySetDigest === 'string' && SHA256_PATTERN.test(authoritative.keySetDigest)
+      ? authoritative.keySetDigest
+      : null,
     ds: authoritative.ds,
     parent: Object.freeze({
       status: parent.status,
@@ -90,6 +104,64 @@ function publicState(domain, authoritative, parent) {
       removeDsBeforeDisable: authoritative.dnssec === true && parent.status === 'present' ? parent.records : Object.freeze([]),
     }),
   });
+}
+
+function rolloverKeyView(key) {
+  return Object.freeze({
+    id: key.id,
+    keyType: key.keyType,
+    algorithm: key.algorithm,
+    bits: key.bits,
+    ds: Object.freeze([...key.ds]),
+  });
+}
+
+function rolloverPreflight(state) {
+  const blockers = [];
+  if (state.secureReady !== true) {
+    blockers.push(Object.freeze({
+      code: 'dnssec_rollover_secure_delegation_required',
+      message: 'DNSSEC rollover requires a currently verified secure delegation.',
+    }));
+  }
+  if (typeof state.keySetDigest !== 'string' || !SHA256_PATTERN.test(state.keySetDigest)) {
+    blockers.push(Object.freeze({
+      code: 'dnssec_rollover_key_evidence_invalid',
+      message: 'The current public DNSSEC key-set identity is unavailable.',
+    }));
+  }
+  const keys = Array.isArray(state.keys) ? state.keys : [];
+  const signingKeys = keys.filter((entry) => ROLLOVER_KEY_TYPES.has(entry?.keyType));
+  const parentBound = signingKeys.filter((entry) => entry.active === true && entry.published === true
+    && Array.isArray(entry.ds) && dsIntersection(entry.ds, state.parent.matchingRecords).length > 0);
+  if (parentBound.length !== 1) {
+    blockers.push(Object.freeze({
+      code: 'dnssec_rollover_current_key_ambiguous',
+      message: 'Exactly one active published KSK/CSK must own the current parent DS set.',
+    }));
+  }
+  const oldKey = parentBound.length === 1 ? parentBound[0] : null;
+  if (oldKey && signingKeys.some((entry) => entry.id !== oldKey.id)) {
+    blockers.push(Object.freeze({
+      code: 'dnssec_rollover_key_artifact_present',
+      message: 'Another KSK/CSK is already present; reconcile the existing rollover state first.',
+    }));
+  }
+  if (oldKey && state.parent.records.some((record) => !oldKey.ds.includes(record))) {
+    blockers.push(Object.freeze({
+      code: 'dnssec_rollover_parent_ds_ambiguous',
+      message: 'Every published parent DS must belong to the selected current key before rollover starts.',
+    }));
+  }
+  if (oldKey && (!Number.isSafeInteger(oldKey.id) || oldKey.id < 0
+    || typeof oldKey.algorithm !== 'string' || !oldKey.algorithm
+    || !Number.isSafeInteger(oldKey.bits) || oldKey.bits < 1)) {
+    blockers.push(Object.freeze({
+      code: 'dnssec_rollover_current_key_invalid',
+      message: 'The selected current key does not have complete public generation metadata.',
+    }));
+  }
+  return Object.freeze({ blockers: Object.freeze(blockers), oldKey });
 }
 
 function previewBlockers(state, enabled) {
@@ -224,6 +296,46 @@ export function createDnsZoneDnssecService({
     });
   }
 
+  async function previewRollover({ domainId } = {}) {
+    const state = await status({ domainId });
+    const preflight = rolloverPreflight(state);
+    const oldKey = preflight.oldKey ? rolloverKeyView(preflight.oldKey) : null;
+    const newKey = oldKey ? Object.freeze({
+      keyType: oldKey.keyType,
+      algorithm: oldKey.algorithm,
+      bits: oldKey.bits,
+      active: false,
+      published: false,
+    }) : null;
+    const payload = Object.freeze({
+      version: 1,
+      action: 'dnssec_key_rollover',
+      domainId: state.domainId,
+      serverId: state.serverId,
+      zoneName: state.zoneName,
+      expectedKeySetDigest: state.keySetDigest,
+      expectedKeyIds: Object.freeze((Array.isArray(state.keys) ? state.keys : []).map((entry) => entry.id).sort((left, right) => left - right)),
+      oldKey,
+      newKey,
+      parentDs: state.parent.records,
+      stages: ROLLOVER_STAGES,
+      blockers: preflight.blockers,
+    });
+    const previewDigest = digest(payload);
+    const applyAllowed = preflight.blockers.length === 0;
+    return Object.freeze({
+      ...payload,
+      applyAllowed,
+      previewDigest,
+      confirmation: applyAllowed ? `rollover-dnssec:${state.domainId}:${previewDigest}` : null,
+      impact: Object.freeze({
+        authoritativeKeyMutation: true,
+        registrarActionsRequired: true,
+        oldKeyDeletionDeferredUntilParentRetirement: true,
+      }),
+    });
+  }
+
   async function apply({ domainId, enabled, previewDigest, confirmation } = {}) {
     if (typeof enabled !== 'boolean'
       || typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)
@@ -269,7 +381,7 @@ export function createDnsZoneDnssecService({
     });
   }
 
-  return Object.freeze({ status, preview, apply });
+  return Object.freeze({ status, preview, previewRollover, apply });
 }
 
 export const dnsZoneDnssecInternals = Object.freeze({
@@ -280,5 +392,8 @@ export const dnsZoneDnssecInternals = Object.freeze({
   statusFor,
   publicState,
   previewBlockers,
+  rolloverKeyView,
+  rolloverPreflight,
+  rolloverStages: ROLLOVER_STAGES,
   hostFailure,
 });
