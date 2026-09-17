@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { databaseManager } from './database-manager.js';
 import { parseSystemdProperties } from './systemd-inspector.js';
 
 const execFileAsync = promisify(execFile);
@@ -103,7 +104,11 @@ export function createManagedServiceManager({
     windowsHide: true,
     ...options,
   }),
+  databaseSecurityInspector = null,
 } = {}) {
+  if (databaseSecurityInspector !== null && typeof databaseSecurityInspector !== 'function') {
+    throw new ManagedServiceError('managed_service_dependencies_invalid', 'Database security inspector is invalid');
+  }
   let activeMutation = null;
 
   async function inspectPackage(packageName) {
@@ -242,6 +247,20 @@ export function createManagedServiceManager({
       const after = await inspectOne(serviceId);
       if (!after.installed) throw new ManagedServiceError('managed_service_install_incomplete', `${definition.label} package installation could not be confirmed`);
       if (definition.units.length > 0 && !after.active) throw new ManagedServiceError('managed_service_not_active', `${definition.label} is installed but not active`);
+      if (definition.category === 'database') {
+        if (!databaseSecurityInspector) {
+          throw new ManagedServiceError('managed_database_security_inspection_unavailable', `${definition.label} security baseline is unavailable`);
+        }
+        let baseline;
+        try { baseline = await databaseSecurityInspector(); }
+        catch {
+          throw new ManagedServiceError('managed_database_security_inspection_failed', `${definition.label} security baseline could not be inspected`);
+        }
+        if (!baseline || baseline.engine !== serviceId || baseline.ready !== true
+          || baseline.connection?.protocol !== 'socket' || baseline.connection?.nativeSocketAuth !== true) {
+          throw new ManagedServiceError('managed_database_security_not_ready', `${definition.label} security baseline is not ready`);
+        }
+      }
       return { ...after, changed: !before.installed };
     });
   }
@@ -274,7 +293,9 @@ export function createManagedServiceManager({
   return { inspect, install, control };
 }
 
-export const managedServiceManager = createManagedServiceManager();
+export const managedServiceManager = createManagedServiceManager({
+  databaseSecurityInspector: () => databaseManager.inspectSecurityBaseline(),
+});
 export const managedServicePolicy = Object.freeze({
   dpkgQueryPath: DPKG_QUERY,
   aptGetPath: APT_GET,

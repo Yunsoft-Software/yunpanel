@@ -9,5 +9,6 @@ MySQL/MariaDB host işlemlerinin örtülü credential fallback'ı kaldırıldı 
 - Host adapter testleri no-defaults/socket/root argümanlarını, environment redaction'ı, sağlıklı native auth'u ve insecure/password-auth sonucunu kapsar.
 - Production Database GET aynı manager'ın security baseline'ını inventory engine/version kimliğiyle fence'ler ve strict alan allowlist'iyle yayınlar. Provider hatası, malformed evidence, engine/version drift'i veya tutarsız `ready/reason` güvenli `database_security_inspection_unavailable` durumuna düşer; raw hata response'a çıkmaz.
 - Database ekranı baseline hazır durumunu, admin account/auth plugin'ini ve aksiyon reason'ını canlı envanterle birlikte gösterir.
+- MariaDB/MySQL managed-service install ancak paket kurulumu, active unit ve exact engine'e ait `ready=true` native socket security evidence'ı birlikte sağlanınca başarılı döner. Inspector eksik/hatalı, password-auth, insecure default veya engine drift'i durumlarında job completion'a başarılı host sonucu ulaşmaz; tekrar deneme kurulu servisi yeniden gözleyip aynı gate'i çalıştırır.
 
-Gerçek Ubuntu kabulü `todo.md` T-DATABASE altında kalır. Bu host kanıtının managed-service install completion'a bağlanması planın açık işidir.
+Gerçek Ubuntu kabulü `todo.md` T-DATABASE altında kalır. Parola zorunlu alternatif admin profile açılmamıştır; ileride açılırsa credential encrypted store dışında tutulamaz.

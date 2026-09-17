@@ -4,11 +4,15 @@ import test from 'node:test';
 
 const indexUrl = new URL('../src/index.js', import.meta.url);
 const appUrl = new URL('../src/app.js', import.meta.url);
+const localHostOperationsUrl = new URL('../src/local-host-operations.js', import.meta.url);
 const envUrl = new URL('../../../.env.example', import.meta.url);
 const postinstUrl = new URL('../../../packaging/debian/postinst', import.meta.url);
 
 test('production boot persists and injects database ownership bindings', async () => {
-  const source = await readFile(indexUrl, 'utf8');
+  const [source, localHostOperations] = await Promise.all([
+    readFile(indexUrl, 'utf8'),
+    readFile(localHostOperationsUrl, 'utf8'),
+  ]);
   assert.match(source, /createDatabaseBindingRegistry/);
   assert.match(source, /YUNPANEL_DATABASE_BINDING_STORE/);
   assert.match(source, /database-binding-registry\.json/);
@@ -19,6 +23,7 @@ test('production boot persists and injects database ownership bindings', async (
   assert.match(source, /databaseInventoryProvider: \(\) => databaseManager\.inspect\(\)/);
   assert.match(source, /databaseHealthProvider: \(\) => databaseManager\.inspectSecurityBaseline\(\)/);
   assert.match(source, /databaseManager,[\s\S]*databaseCredentialOperation: localDatabaseCredentialOperation/);
+  assert.match(localHostOperations, /createManagedServiceManager\(\{[\s\S]*databaseSecurityInspector: \(\) => databaseManager\.inspectSecurityBaseline\(\)/);
 });
 
 test('production app mounts binding routes and protects schema deletion with the same registry', async () => {

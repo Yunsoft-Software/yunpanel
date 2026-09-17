@@ -124,7 +124,7 @@ export function createLocalHostOperations({
   packageManager = createSystemPackageManager({
     restartUnits: ['yunpanel-api.service', 'yunpanel-web.service'],
   }),
-  managedServiceManager = createManagedServiceManager(),
+  managedServiceManager = null,
   databaseManager = createDatabaseManager(),
   databaseDumpManager = null,
   databaseRestoreManager = null,
@@ -201,6 +201,9 @@ export function createLocalHostOperations({
     throw new Error('staticDeploymentReceiptStore must provide write()');
   }
   const deploymentLog = jobLogStore ? (entry) => jobLogStore.record(entry) : null;
+  const resolvedManagedServiceManager = managedServiceManager ?? createManagedServiceManager({
+    databaseSecurityInspector: () => databaseManager.inspectSecurityBaseline(),
+  });
   const resolvedDatabaseDumpManager = databaseDumpManager ?? createDatabaseDumpManager({ databaseManager });
   const resolvedDatabaseRestoreManager = databaseRestoreManager ?? createDatabaseRestoreManager({
     databaseManager,
@@ -661,9 +664,9 @@ export function createLocalHostOperations({
 
   const handlers = new Map([
     [OPERATIONS.SYSTEM_PACKAGES_INSPECT, () => packageManager.inspect()],
-    [OPERATIONS.SYSTEM_SERVICES_INSPECT, (payload) => managedServiceManager.inspect(payload.serviceId ?? null)],
-    [OPERATIONS.SYSTEM_SERVICE_INSTALL, (payload) => managedServiceManager.install(payload.serviceId)],
-    [OPERATIONS.SYSTEM_SERVICE_CONTROL, (payload) => managedServiceManager.control(payload.serviceId, payload.action)],
+    [OPERATIONS.SYSTEM_SERVICES_INSPECT, (payload) => resolvedManagedServiceManager.inspect(payload.serviceId ?? null)],
+    [OPERATIONS.SYSTEM_SERVICE_INSTALL, (payload) => resolvedManagedServiceManager.install(payload.serviceId)],
+    [OPERATIONS.SYSTEM_SERVICE_CONTROL, (payload) => resolvedManagedServiceManager.control(payload.serviceId, payload.action)],
     [OPERATIONS.SYSTEM_UPGRADE, () => packageManager.upgrade()],
     [OPERATIONS.DATABASE_INSPECT, () => databaseManager.inspect()],
     [OPERATIONS.DATABASE_CREATE, (payload) => databaseManager.createDatabase(payload.name)],

@@ -173,7 +173,16 @@ test('install refreshes APT, installs only catalog packages and enables the fixe
   const calls = [];
   const installed = new Set();
   let mariadbActive = false;
+  let securityInspections = 0;
   const manager = createManagedServiceManager({
+    databaseSecurityInspector: async () => {
+      securityInspections += 1;
+      return {
+        engine: 'mariadb',
+        ready: true,
+        connection: { protocol: 'socket', nativeSocketAuth: true },
+      };
+    },
     run: async (file, args) => {
       calls.push([file, args]);
       if (file === '/usr/bin/dpkg-query') {
@@ -199,6 +208,38 @@ test('install refreshes APT, installs only catalog packages and enables the fixe
     'install', '--yes', '--no-install-recommends', 'mariadb-server',
   ]);
   assert.ok(calls.some(([file, args]) => file === '/usr/bin/systemctl' && args.join(' ') === 'enable --now mariadb.service'));
+  assert.equal(securityInspections, 1);
+});
+
+test('database install fails closed when native socket security baseline is unavailable or not ready', async () => {
+  const run = async (file) => {
+    if (file === '/usr/bin/dpkg-query') return { stdout: 'install ok installed\t1:10.11' };
+    if (file === '/usr/bin/systemctl') return { stdout: ACTIVE_UNIT };
+    throw new Error('unexpected command');
+  };
+  const cases = [
+    [null, 'managed_database_security_inspection_unavailable'],
+    [async () => { throw new Error('private socket path'); }, 'managed_database_security_inspection_failed'],
+    [async () => ({
+      engine: 'mariadb',
+      ready: false,
+      connection: { protocol: 'socket', nativeSocketAuth: false },
+    }), 'managed_database_security_not_ready'],
+    [async () => ({
+      engine: 'mysql',
+      ready: true,
+      connection: { protocol: 'socket', nativeSocketAuth: true },
+    }), 'managed_database_security_not_ready'],
+  ];
+  for (const [databaseSecurityInspector, code] of cases) {
+    const manager = createManagedServiceManager({ run, databaseSecurityInspector });
+    await assert.rejects(
+      manager.install('mariadb'),
+      (error) => error instanceof ManagedServiceError
+        && error.code === code
+        && !error.message.includes('private socket path'),
+    );
+  }
 });
 
 test('database install fails closed when the conflicting engine is already installed', async () => {
