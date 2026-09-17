@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-test('site overview binds read-only isolation audit to the persistent Website identity', async () => {
+test('site overview binds isolation audit and receipt migration controls to the persistent Website identity', async () => {
   const [site, panel, client] = await Promise.all([
     readFile(new URL('../src/workspace/SiteDetailPage.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/workspace/WebsiteIsolationPanel.jsx', import.meta.url), 'utf8'),
@@ -12,10 +12,13 @@ test('site overview binds read-only isolation audit to the persistent Website id
   assert.match(site, /WebsiteIsolationPanel websiteId=\{website\.id\}/);
   assert.doesNotMatch(site, /WebsiteIsolationPanel websiteId=\{domain\.id\}/);
   assert.match(client, /\/websites\/\$\{encodeURIComponent\(normalized\)\}\/isolation-audit/);
-  assert.match(panel, /Migration apply henüz kapalı/);
+  assert.match(client, /\/websites\/\$\{encodeURIComponent\(normalized\)\}\/isolation-migrations/);
+  assert.match(panel, /ConfirmDialog/);
+  assert.match(panel, /applyWebsiteIsolationMigration/);
+  assert.match(panel, /rollbackWebsiteIsolationMigration/);
+  assert.match(panel, /audit\.migration\?\.applyAvailable/);
   assert.match(panel, /audit\.expected\?\.unixUser/);
   assert.match(panel, /audit\.inspectedSteps/);
   assert.match(panel, /audit\.findings/);
-  assert.doesNotMatch(panel, /method:\s*'POST'|method:\s*'PUT'|method:\s*'DELETE'/);
   assert.doesNotMatch(panel, /window\.prompt|window\.confirm|window\.alert|localStorage|sessionStorage/);
 });

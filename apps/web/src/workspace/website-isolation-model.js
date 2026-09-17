@@ -13,6 +13,16 @@ const STEP_LABELS = Object.freeze({
   sftp: 'SFTP izolasyonu',
 });
 
+const MIGRATION_STATUSES = Object.freeze({
+  pending: Object.freeze({ badge: 'pending', label: 'Bekliyor' }),
+  applying: Object.freeze({ badge: 'running', label: 'Uygulanıyor / inceleme gerekli' }),
+  succeeded: Object.freeze({ badge: 'succeeded', label: 'Uygulandı' }),
+  failed: Object.freeze({ badge: 'failed', label: 'Başarısız' }),
+  compensating: Object.freeze({ badge: 'running', label: 'Geri alınıyor / inceleme gerekli' }),
+  compensated: Object.freeze({ badge: 'off', label: 'Geri alındı' }),
+  compensation_failed: Object.freeze({ badge: 'failed', label: 'Geri alma başarısız' }),
+});
+
 export function isolationStatusPresentation(audit) {
   if (audit?.status === 'isolated') return Object.freeze({ badge: 'succeeded', label: 'İzole' });
   if (audit?.status === 'migration_required') return Object.freeze({ badge: 'warning', label: 'Migration gerekli' });
@@ -40,4 +50,8 @@ export function isolationFindingPresentation(finding) {
   if (finding?.severity === 'critical') return Object.freeze({ badge: 'failed', label: 'Kritik' });
   if (finding?.severity === 'action_required') return Object.freeze({ badge: 'warning', label: 'İşlem gerekli' });
   return Object.freeze({ badge: 'unknown', label: 'İnceleme gerekli' });
+}
+
+export function isolationMigrationStatusPresentation(operation) {
+  return MIGRATION_STATUSES[operation?.status] ?? Object.freeze({ badge: 'unknown', label: 'Bilinmiyor' });
 }
