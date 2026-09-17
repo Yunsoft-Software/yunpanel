@@ -188,6 +188,43 @@ test('database backup choices keep only exact successful server and schema evide
   assert.equal(JSON.stringify(choices).includes('/private/'), false);
 });
 
+test('Website backup choices require exact binding ownership evidence', () => {
+  const backupId = '52345678-1234-4234-8234-123456789012';
+  const websiteId = '22345678-1234-4234-8234-123456789012';
+  const bindingId = '32345678-1234-4234-8234-123456789012';
+  const valid = {
+    id: backupId,
+    serverId,
+    operation: 'database.backup',
+    status: 'succeeded',
+    resourceType: 'database',
+    resourceId: 'app_main',
+    payload: {
+      databaseName: 'app_main',
+      websiteId,
+      databaseBindingId: bindingId,
+      expectedBindingRevision: 7,
+    },
+    result: {
+      version: 1,
+      backupId,
+      databaseName: 'app_main',
+      engine: 'mariadb',
+      databaseVersion: '10.11.13-MariaDB',
+      dumpSha256: 'a'.repeat(64),
+      dumpBytes: 4096,
+      createdAt: '2026-09-17T12:00:00.000Z',
+      backedUp: true,
+      sideEffects: true,
+    },
+  };
+  const expected = { serverId, databaseName: 'app_main', websiteId, bindingId, bindingRevision: 7 };
+  assert.deepEqual(databaseBackupChoices([valid], expected).map((entry) => entry.id), [backupId]);
+  assert.deepEqual(databaseBackupChoices([{ ...valid, payload: { ...valid.payload, expectedBindingRevision: 6 } }], expected), []);
+  assert.deepEqual(databaseBackupChoices([{ ...valid, payload: { databaseName: 'app_main' } }], expected), []);
+  assert.deepEqual(databaseBackupChoices([valid], { ...expected, bindingId: '42345678-1234-4234-8234-123456789012' }), []);
+});
+
 test('database restore preview stays bound to the selected server schema backup and digest', () => {
   const backupId = '52345678-1234-4234-8234-123456789012';
   const previewDigest = 'b'.repeat(64);
@@ -211,6 +248,59 @@ test('database restore preview stays bound to the selected server schema backup 
   assert.equal(JSON.stringify(view).includes('/private/'), false);
   assert.equal(databaseRestorePreviewView({ ...input, databaseName: 'other_db' }, { serverId, databaseName: 'app_main', backupId }), null);
   assert.equal(databaseRestorePreviewView({ ...input, confirmation: 'restore-anything' }, { serverId, databaseName: 'app_main', backupId }), null);
+});
+
+test('Website restore preview requires exact route and ownership scope evidence', () => {
+  const backupId = '52345678-1234-4234-8234-123456789012';
+  const websiteId = '22345678-1234-4234-8234-123456789012';
+  const applicationId = '32345678-1234-4234-8234-123456789012';
+  const bindingId = '42345678-1234-4234-8234-123456789012';
+  const previewDigest = 'b'.repeat(64);
+  const input = {
+    version: 1,
+    operation: 'database_restore',
+    serverId,
+    databaseName: 'app_main',
+    backupId,
+    backupSha256: 'a'.repeat(64),
+    backupBytes: 4096,
+    engine: 'mariadb',
+    databaseVersion: '10.11.13-MariaDB',
+    websiteId,
+    databaseBindingId: bindingId,
+    expectedBindingRevision: 7,
+    previewDigest,
+    confirmation: `restore-database:app_main:${previewDigest}`,
+    sideEffects: false,
+    scope: {
+      serverId,
+      websiteId,
+      applicationId,
+      databaseBindingId: bindingId,
+      bindingRevision: 7,
+      databaseName: 'app_main',
+    },
+  };
+  const expected = {
+    serverId,
+    databaseName: 'app_main',
+    backupId,
+    websiteId,
+    applicationId,
+    bindingId,
+    bindingRevision: 7,
+  };
+  const view = databaseRestorePreviewView(input, expected);
+  assert.equal(view.databaseBindingId, bindingId);
+  assert.equal(view.bindingRevision, 7);
+  assert.equal(databaseRestorePreviewView(
+    { ...input, expectedBindingRevision: 6 },
+    expected,
+  ), null);
+  assert.equal(databaseRestorePreviewView(
+    { ...input, scope: { ...input.scope, websiteId: '62345678-1234-4234-8234-123456789012' } },
+    expected,
+  ), null);
 });
 
 test('database drop preview keeps exact scoped impact and rejects inconsistent blockers', () => {
