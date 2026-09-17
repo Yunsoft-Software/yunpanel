@@ -15,3 +15,14 @@ test('Website database password rotation uses exact durable apply flow without e
   assert.match(panel, /resourceBusy\('database', binding\.databaseName\)/);
   assert.doesNotMatch(panel, /window\.(?:prompt|confirm|alert)|type="password"|setPassword/);
 });
+
+test('Website database credential revoke requires a successful durable delete job before finalization', async () => {
+  const panel = await readFile(new URL('../src/workspace/SiteResourcesPanel.jsx', import.meta.url), 'utf8');
+  assert.match(panel, /previewDatabaseCredentialDelete/);
+  assert.match(panel, /queueDatabaseCredentialDelete/);
+  assert.match(panel, /waitForJob\(deleteJob\.id\)/);
+  assert.match(panel, /finalizeDatabaseCredentialDelete/);
+  assert.match(panel, /deleteJob\.status === 'succeeded'/);
+  assert.match(panel, /Kör replay yapılmadı/);
+  assert.match(panel, /Schema ve Website binding silinmez/);
+});

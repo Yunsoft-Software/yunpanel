@@ -10,5 +10,7 @@ Site detayındaki Bağlı Kaynaklar ekranı database ownership'i artık sunucu g
 - Site Owner credential parolasını Website satırından typed confirmation ile döndürebilir. UI mevcut credential revision'ını backend'e pinler; güncel apply preview'daki credential/binding revision, desired-state SHA-256 ve confirmation değerlerini değiştirmeden durable apply job'ına taşır.
 - İş database resource lock'ına bağlanır, job drawer'da izlenir ve başarılı terminal sonuçtan sonra Website kaynağı yenilenir. Üretilen parola hiçbir request input'una, frontend state'ine, response alanına veya job metadata'sına girmez.
 - Apply öncesi geçici hata yeni secret desired-state'ini korur; terminal job failure/cancellation sonrasında yeni kullanıcı onayı yeni revision üretmeden otomatik replay yapılmaz.
+- Credential revoke da Website satırından typed confirmation ile yürür: güncel delete preview exact revision/digest ile durable host delete job'ına çevrilir; registry kaydı yalnız aynı credential/binding state'ine ait başarılı job kanıtından sonra finalize edilir.
+- Revoke schema'yı ve Website binding'i korur. Failed/cancelled veya sonucu okunamayan delete işi otomatik yeniden kuyruğa alınmaz; mevcut job tanısı Owner'a bırakılır.
 
-Revoke, backup/restore ve drop-preview eylemlerinin aynı Website akışına eklenmesi `plan.md` içinde açık kalır. Gerçek iki-site izolasyon, rotation/revoke ve browser kabulü `todo.md` T-DATABASE altındadır.
+Backup/restore ve drop-preview eylemlerinin aynı Website akışına eklenmesi `plan.md` içinde açık kalır. Gerçek iki-site izolasyon, rotation/revoke ve browser kabulü `todo.md` T-DATABASE altındadır.

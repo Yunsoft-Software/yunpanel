@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   applyDatabaseCredential,
+  finalizeDatabaseCredentialDelete,
   getWebsiteDatabaseResources,
   panelRequest,
   previewDatabaseCredentialApply,
+  previewDatabaseCredentialDelete,
+  queueDatabaseCredentialDelete,
   rotateDatabaseCredential,
   waitForJob,
 } from '../api.js';
@@ -29,6 +32,7 @@ export default function SiteResourcesPanel({ domain, website, application, serve
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
   const [rotateTarget, setRotateTarget] = useState(null);
+  const [revokeTarget, setRevokeTarget] = useState(null);
 
   const load = useCallback(async () => {
     if (!server) return;
@@ -100,6 +104,60 @@ export default function SiteResourcesPanel({ domain, website, application, serve
     }
   }
 
+  async function revokeCredential() {
+    if (!server || !revokeTarget || operationPending.current) return;
+    operationPending.current = true;
+    setBusy(true); setError(null); setNotice(null);
+    let deleteJob = revokeTarget.deleteJob;
+    try {
+      if (!deleteJob) {
+        const preview = await previewDatabaseCredentialDelete(server.id, revokeTarget.credential.id);
+        const queued = await queueDatabaseCredentialDelete(server.id, revokeTarget.credential.id, preview);
+        deleteJob = queued?.job;
+        if (!deleteJob?.id) throw new Error('Database credential delete işi oluşturulamadı');
+        setRevokeTarget((current) => current?.credential.id === revokeTarget.credential.id
+          ? { ...current, deleteJob }
+          : current);
+        observe(deleteJob);
+        jobs.refresh();
+      }
+      if (['failed', 'cancelled'].includes(deleteJob.status)) {
+        throw new Error('Credential delete işi terminal hatayla kapandı; job tanısını inceleyin. Kör replay yapılmadı.');
+      }
+      const terminal = deleteJob.status === 'succeeded' ? deleteJob : await waitForJob(deleteJob.id);
+      updateJob(terminal);
+      setRevokeTarget((current) => current?.credential.id === revokeTarget.credential.id
+        ? { ...current, deleteJob: terminal }
+        : current);
+      await finalizeDatabaseCredentialDelete(
+        server.id,
+        revokeTarget.credential.id,
+        revokeTarget.credential.revision,
+        terminal.id,
+      );
+      await load();
+      setRevokeTarget(null);
+      setNotice(`${revokeTarget.credential.username} hesabı hosttan kaldırıldı ve credential kaydı başarılı job kanıtıyla finalize edildi. Schema ve Website binding korundu.`);
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setError(failure.message);
+      jobs.refresh();
+      if (deleteJob?.id) {
+        try {
+          const currentJob = await panelRequest(`/jobs/${encodeURIComponent(deleteJob.id)}`);
+          updateJob(currentJob);
+          setRevokeTarget((current) => current?.credential.id === revokeTarget.credential.id
+            ? { ...current, deleteJob: currentJob }
+            : current);
+        } catch {
+          // Unknown job outcome stays visible as an error and is never replayed automatically.
+        }
+      }
+    } finally {
+      operationPending.current = false;
+      setBusy(false);
+    }
+  }
+
   const compose = website?.managedComposeBinding ?? null;
   const externalDocker = website?.dockerWorkloadId ?? null;
   const mails = mailDomains ?? [];
@@ -136,13 +194,23 @@ export default function SiteResourcesPanel({ domain, website, application, serve
               <td><code>{binding.unixUser}</code></td>
               <td>{credential ? <><code>{credential.username}</code><small>{credential.privileges.join(', ')}</small></> : <span>Credential oluşturulmadı</span>}</td>
               <td>{binding.revision}{credential ? ` / ${credential.revision}` : ''}</td>
-              <td className="ws-row-end">{credential && <Button
-                disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
-                onClick={() => {
-                  setError(null); setNotice(null);
-                  setRotateTarget({ binding, credential, rotatedCredential: null });
-                }}
-              >Parolayı döndür</Button>}</td>
+              <td className="ws-row-end">{credential && <div className="ws-actions">
+                <Button
+                  disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
+                  onClick={() => {
+                    setError(null); setNotice(null);
+                    setRotateTarget({ binding, credential, rotatedCredential: null });
+                  }}
+                >Parolayı döndür</Button>
+                <Button
+                  variant="danger"
+                  disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
+                  onClick={() => {
+                    setError(null); setNotice(null);
+                    setRevokeTarget({ binding, credential, deleteJob: null });
+                  }}
+                >Credential’ı kaldır</Button>
+              </div>}</td>
             </tr>)}</tbody>
           </table>
         </div> : databaseResources !== undefined && <EmptyState icon="database" title="Bağlı veritabanı yok" detail="Sunucu veritabanları ayrı envanterde olabilir; burada yalnız bu siteye explicit bind edilmiş kayıtlar gösterilir." />}
@@ -174,6 +242,17 @@ export default function SiteResourcesPanel({ domain, website, application, serve
       onCancel={() => { if (!busy) { setRotateTarget(null); setError(null); } }}
       onConfirm={rotateCredential}
       confirmLabel="Parolayı döndür ve uygula"
+    />}
+    {revokeTarget && <ConfirmDialog
+      key={`${revokeTarget.credential.id}:${revokeTarget.deleteJob?.id ?? 'preview'}`}
+      title="Database credential’ını kaldır"
+      message={`${revokeTarget.binding.databaseName} için ${revokeTarget.credential.username} hesabı önce hosttan durable job ile kaldırılacak, ardından yalnız başarılı exact job kanıtıyla credential kaydı finalize edilecek. Schema ve Website binding silinmez; bu hesabı kullanan bağlantılar kesilir.`}
+      confirmation={revokeTarget.credential.username}
+      busy={busy}
+      error={error}
+      onCancel={() => { if (!busy) { setRevokeTarget(null); setError(null); } }}
+      onConfirm={revokeCredential}
+      confirmLabel="Credential’ı kaldır"
     />}
   </>;
 }

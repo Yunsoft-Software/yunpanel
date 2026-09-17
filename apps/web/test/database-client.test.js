@@ -4,10 +4,13 @@ import {
   applyDatabaseCredential,
   createDatabase,
   deleteDatabase,
+  finalizeDatabaseCredentialDelete,
   getDatabases,
   getWebsiteDatabaseResources,
   inspectDatabases,
   previewDatabaseCredentialApply,
+  previewDatabaseCredentialDelete,
+  queueDatabaseCredentialDelete,
   rotateDatabaseCredential,
 } from '../src/api.js';
 import { setSession } from '../src/session-client.js';
@@ -54,6 +57,8 @@ test('database API client rejects missing identities before fetch', async (t) =>
   assert.throws(() => rotateDatabaseCredential('server-1', '', 1), /credentialId is required/);
   assert.throws(() => rotateDatabaseCredential('server-1', 'credential-1', 0), /expectedRevision must be a positive integer/);
   assert.throws(() => applyDatabaseCredential('server-1', 'credential-1', null), /credential apply preview is required/);
+  assert.throws(() => queueDatabaseCredentialDelete('server-1', 'credential-1', null), /credential delete preview is required/);
+  assert.throws(() => finalizeDatabaseCredentialDelete('server-1', 'credential-1', 1, ''), /deleteJobId is required/);
   assert.equal(calls, 0);
 });
 
@@ -93,6 +98,47 @@ test('database credential client pins rotate and apply to exact revisions and pr
   });
   assert.equal(calls[0].options.headers['x-csrf-token'], 'csrf-credential');
   assert.equal(calls[2].options.headers['x-csrf-token'], 'csrf-credential');
+  assert.doesNotMatch(calls.map((call) => call.options.body ?? '').join('\n'), /"password"\s*:/i);
+  setSession(null);
+});
+
+test('database credential delete client queues exact preview and finalizes only from job evidence', async (t) => {
+  setSession({ csrfToken: 'csrf-credential-delete' });
+  const calls = [];
+  const digest = 'b'.repeat(64);
+  const preview = {
+    expectedCredentialRevision: 5,
+    expectedBindingRevision: 2,
+    desiredStateSha256: digest,
+    confirmation: `delete-database-credential:credential/one:${digest}`,
+  };
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url, options });
+    return ok(url.endsWith('/delete-preview') ? preview : { id: 'safe-public-metadata' });
+  });
+
+  const currentPreview = await previewDatabaseCredentialDelete('server/one', 'credential/one');
+  await queueDatabaseCredentialDelete('server/one', 'credential/one', currentPreview);
+  await finalizeDatabaseCredentialDelete('server/one', 'credential/one', 5, 'job/one');
+
+  assert.deepEqual(calls.map((call) => [call.url, call.options.method]), [
+    ['/api/panel/servers/server%2Fone/database-credentials/credential%2Fone/delete-preview', 'GET'],
+    ['/api/panel/servers/server%2Fone/database-credentials/credential%2Fone/delete', 'POST'],
+    ['/api/panel/servers/server%2Fone/database-credentials/credential%2Fone', 'DELETE'],
+  ]);
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    expectedCredentialRevision: 5,
+    expectedBindingRevision: 2,
+    expectedDesiredStateSha256: digest,
+    confirmation: `delete-database-credential:credential/one:${digest}`,
+  });
+  assert.deepEqual(JSON.parse(calls[2].options.body), {
+    expectedRevision: 5,
+    deleteJobId: 'job/one',
+    confirmation: 'finalize-database-credential-delete:credential/one:5:job/one',
+  });
+  assert.equal(calls[1].options.headers['x-csrf-token'], 'csrf-credential-delete');
+  assert.equal(calls[2].options.headers['x-csrf-token'], 'csrf-credential-delete');
   assert.doesNotMatch(calls.map((call) => call.options.body ?? '').join('\n'), /"password"\s*:/i);
   setSession(null);
 });

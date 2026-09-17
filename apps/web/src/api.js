@@ -100,6 +100,38 @@ export function applyDatabaseCredential(serverId, credentialId, preview) {
   });
 }
 
+export function previewDatabaseCredentialDelete(serverId, credentialId) {
+  return panelRequest(`${databaseCredentialPath(serverId, credentialId)}/delete-preview`);
+}
+
+export function queueDatabaseCredentialDelete(serverId, credentialId, preview) {
+  const path = databaseCredentialPath(serverId, credentialId);
+  if (!preview || typeof preview !== 'object') throw new Error('credential delete preview is required');
+  return panelRequest(`${path}/delete`, {
+    method: 'POST',
+    body: {
+      expectedCredentialRevision: positiveRevision(preview.expectedCredentialRevision, 'expectedCredentialRevision'),
+      expectedBindingRevision: positiveRevision(preview.expectedBindingRevision, 'expectedBindingRevision'),
+      expectedDesiredStateSha256: preview.desiredStateSha256,
+      confirmation: preview.confirmation,
+    },
+  });
+}
+
+export function finalizeDatabaseCredentialDelete(serverId, credentialId, expectedRevision, deleteJobId) {
+  const path = databaseCredentialPath(serverId, credentialId);
+  const revision = positiveRevision(expectedRevision, 'expectedRevision');
+  if (typeof deleteJobId !== 'string' || !deleteJobId) throw new Error('deleteJobId is required');
+  return panelRequest(path, {
+    method: 'DELETE',
+    body: {
+      expectedRevision: revision,
+      deleteJobId,
+      confirmation: `finalize-database-credential-delete:${credentialId}:${revision}:${deleteJobId}`,
+    },
+  });
+}
+
 export function inspectDatabases(serverId) {
   return panelRequest(`${databaseServerPath(serverId)}/inspect`, { method: 'POST', body: {} });
 }
