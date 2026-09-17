@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { phpMyAdminSignonTemplatePolicy } from './phpmyadmin-signon.js';
 
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
 
@@ -77,7 +78,7 @@ export function renderPhpMyAdminFpmPool({
     'sessionDirectory',
   );
 
-  return `[${phpMyAdminFpmTemplatePolicy.poolName}]\nuser = ${user}\ngroup = ${group}\nlisten = ${socket}\nlisten.owner = ${owner}\nlisten.group = ${socketGroupName}\nlisten.mode = ${phpMyAdminFpmTemplatePolicy.socketMode}\npm = ondemand\npm.max_children = 10\npm.process_idle_timeout = 10s\npm.max_requests = 500\nclear_env = yes\ncatch_workers_output = no\nsecurity.limit_extensions = .php\nphp_admin_flag[display_errors] = off\nphp_admin_flag[log_errors] = on\nphp_admin_flag[expose_php] = off\nphp_admin_flag[session.use_strict_mode] = on\nphp_admin_flag[session.cookie_secure] = on\nphp_admin_flag[session.cookie_httponly] = on\nphp_admin_value[session.cookie_samesite] = Strict\nphp_admin_value[session.save_path] = ${sessions}\nphp_admin_value[sys_temp_dir] = ${temp}\nphp_admin_value[upload_tmp_dir] = ${temp}\nphp_admin_value[upload_max_filesize] = 128M\nphp_admin_value[post_max_size] = 128M\n`;
+  return `[${phpMyAdminFpmTemplatePolicy.poolName}]\nuser = ${user}\ngroup = ${group}\nlisten = ${socket}\nlisten.owner = ${owner}\nlisten.group = ${socketGroupName}\nlisten.mode = ${phpMyAdminFpmTemplatePolicy.socketMode}\npm = ondemand\npm.max_children = 10\npm.process_idle_timeout = 10s\npm.max_requests = 500\nclear_env = yes\ncatch_workers_output = no\nsecurity.limit_extensions = .php\nphp_admin_flag[display_errors] = off\nphp_admin_flag[log_errors] = on\nphp_admin_flag[expose_php] = off\nphp_admin_flag[session.use_strict_mode] = on\nphp_admin_flag[session.cookie_secure] = on\nphp_admin_flag[session.cookie_httponly] = on\nphp_admin_value[session.cookie_samesite] = Strict\nphp_admin_value[session.cookie_path] = ${phpMyAdminSignonTemplatePolicy.gatewayBasePath}\nphp_admin_value[session.save_path] = ${sessions}\nphp_admin_value[sys_temp_dir] = ${temp}\nphp_admin_value[upload_tmp_dir] = ${temp}\nphp_admin_value[upload_max_filesize] = 128M\nphp_admin_value[post_max_size] = 128M\n`;
 }
 
 export function previewPhpMyAdminFpmPool(input = {}) {
