@@ -85,6 +85,19 @@ test('PowerDNS durable manager persists applying evidence before host mutation a
   assert.equal(persisted.result.satisfied, true);
   assert.equal(persisted.result.packages[0].version, '4.8.3-1ubuntu1');
   assert.equal(persisted.apiKey, undefined);
+  assert.deepEqual(await manager.operation(), {
+    version: 1,
+    id: 'operation-1',
+    serverId,
+    credentialRevision: 2,
+    secondaryDns: ['203.0.113.20'],
+    status: 'succeeded',
+    evidence: persisted.result,
+    failure: null,
+    recovery: { required: false, automaticReplayBlocked: false, reason: null },
+    createdAt: appliedAt,
+    updatedAt: appliedAt,
+  });
 });
 
 test('PowerDNS durable manager never replays an interrupted applying mutation before recovery inspection proves completion', async () => {
@@ -119,6 +132,13 @@ test('PowerDNS durable manager never replays an interrupted applying mutation be
   );
   assert.equal(applyCalls, 1);
   assert.equal(JSON.parse(journal.files.get(operationPath)).status, 'applying');
+  const operation = await manager.operation();
+  assert.equal(operation.status, 'applying');
+  assert.equal(operation.recovery.required, true);
+  assert.equal(operation.recovery.automaticReplayBlocked, true);
+  assert.equal(operation.recovery.reason, 'powerdns_service_activation_failed');
+  assert.deepEqual(operation.failure, { code: 'powerdns_service_activation_failed' });
+  assert.equal(Object.hasOwn(operation.failure, 'message'), false);
 
   await assert.rejects(
     manager.apply(intent()),

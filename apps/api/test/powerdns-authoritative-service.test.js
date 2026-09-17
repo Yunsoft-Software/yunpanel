@@ -25,7 +25,7 @@ function identity(revision = 3) {
   });
 }
 
-function fixture({ hostError = null, publicReachability = null } = {}) {
+function fixture({ hostError = null, publicReachability = null, hostOperation = null } = {}) {
   let secret = null;
   let currentIdentity = identity();
   const managerCalls = [];
@@ -59,6 +59,7 @@ function fixture({ hostError = null, publicReachability = null } = {}) {
         if (hostError) throw hostError;
         return { satisfied: true, adapter: 'powerdns-authoritative-gsqlite3', apiKey: 'must-not-leak' };
       },
+      async operation() { return hostOperation; },
     },
     publicReachabilityInspector: publicReachability ? {
       async inspect(input) { publicCalls.push(input); return publicReachability; },
@@ -124,6 +125,30 @@ test('PowerDNS status promotes public readiness only from external inspector evi
   assert.equal(status.publicReachability.vantage, 'external-probe-1');
   assert.equal(fx.publicCalls.length, 2);
   assert.equal(fx.publicCalls[0].serverId, serverId);
+});
+
+test('PowerDNS status exposes secret-safe durable operation and recovery evidence', async () => {
+  const operation = Object.freeze({
+    version: 1,
+    id: 'operation-1',
+    serverId,
+    credentialRevision: 1,
+    secondaryDns: Object.freeze(['203.0.113.20']),
+    status: 'applying',
+    evidence: null,
+    failure: Object.freeze({ code: 'powerdns_service_activation_failed' }),
+    recovery: Object.freeze({ required: true, automaticReplayBlocked: true, reason: 'powerdns_service_activation_failed' }),
+    createdAt: '2026-09-17T12:00:00.000Z',
+    updatedAt: '2026-09-17T12:01:00.000Z',
+  });
+  const fx = fixture({ hostOperation: operation });
+  const preview = await fx.service.preview(serverId);
+  await fx.service.apply(serverId, { previewDigest: preview.previewDigest, confirmation: preview.confirmation });
+
+  const status = await fx.service.status(serverId);
+  assert.equal(status.operation, operation);
+  assert.equal(status.operation.recovery.automaticReplayBlocked, true);
+  assert.equal(JSON.stringify(status.operation).includes('must-not-leak'), false);
 });
 
 test('PowerDNS apply rejects DNS identity drift after preview', async () => {

@@ -10,6 +10,7 @@ function base({ satisfied = true } = {}) {
     manager: {
       async inspect(intent) { calls.push(['inspect', intent]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
       async apply(intent) { calls.push(['apply', intent]); return { satisfied, adapter: 'powerdns-authoritative-gsqlite3' }; },
+      async operation() { calls.push(['operation']); return { id: 'operation-1', status: 'applying' }; },
     },
   };
 }
@@ -42,6 +43,16 @@ test('PowerDNS inspect includes DNS socket evidence only after base readiness pa
   assert.equal(result.sockets.recursive, false);
   assert.deepEqual(runtime.calls, [['inspect', intent]]);
   assert.deepEqual(health.calls, ['inspect']);
+});
+
+test('PowerDNS operation status passes through without probing service sockets', async () => {
+  const runtime = base();
+  const health = sockets();
+  const manager = createPowerDnsAuthoritativeReadyManager({ manager: runtime.manager, socketInspector: health.inspector });
+
+  assert.deepEqual(await manager.operation(), { id: 'operation-1', status: 'applying' });
+  assert.deepEqual(runtime.calls, [['operation']]);
+  assert.deepEqual(health.calls, []);
 });
 
 test('PowerDNS inspect does not probe sockets while base service is not ready', async () => {

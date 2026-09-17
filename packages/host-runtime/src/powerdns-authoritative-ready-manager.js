@@ -9,6 +9,7 @@ export function createPowerDnsAuthoritativeReadyManager({
   socketInspector = createPowerDnsSocketHealthInspector(),
 } = {}) {
   if (!manager || typeof manager.inspect !== 'function' || typeof manager.apply !== 'function'
+    || typeof manager.operation !== 'function'
     || !socketInspector || typeof socketInspector.inspect !== 'function') {
     throw new PowerDnsAuthoritativeManagerError(
       'powerdns_ready_manager_dependencies_invalid',
@@ -60,5 +61,9 @@ export function createPowerDnsAuthoritativeReadyManager({
     return Object.freeze({ ...base, sockets });
   }
 
-  return Object.freeze({ inspect, apply });
+  async function operation() {
+    return manager.operation();
+  }
+
+  return Object.freeze({ inspect, apply, operation });
 }

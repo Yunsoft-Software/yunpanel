@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  authoritativeOperationPresentation,
   authoritativePresentation,
   delegationPresentation,
   dnsIdentityDraft,
@@ -71,4 +72,7 @@ test('Network DNS status presentation keeps local, public and delegation readine
   assert.equal(delegationPresentation('pending_glue').state, 'warning');
   assert.equal(delegationPresentation('pending_delegation').state, 'pending');
   assert.equal(delegationPresentation('unverifiable').state, 'warning');
+  assert.deepEqual(authoritativeOperationPresentation({ status: 'applying' }), { state: 'warning', label: 'Recovery incelemesi gerekli' });
+  assert.equal(authoritativeOperationPresentation({ status: 'failed' }).state, 'failed');
+  assert.equal(authoritativeOperationPresentation(null).state, 'unknown');
 });

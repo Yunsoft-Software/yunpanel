@@ -9,6 +9,7 @@ import {
   previewServerDnsIdentity,
 } from './network-dns-client.js';
 import {
+  authoritativeOperationPresentation,
   authoritativePresentation,
   delegationPresentation,
   dnsIdentityDraft,
@@ -167,6 +168,7 @@ export default function NetworkDnsSettingsPanel({ server, domains = [], canManag
   }
   const authoritativeState = authoritativePresentation(authoritative);
   const publicState = publicReachabilityPresentation(authoritative);
+  const operationState = authoritativeOperationPresentation(authoritative?.operation);
   const identityForDialog = identity ?? { serverId: server.id };
 
   return <>
@@ -185,7 +187,7 @@ export default function NetworkDnsSettingsPanel({ server, domains = [], canManag
       ['Recursive resolver', authoritative?.host?.sockets?.recursive === false ? 'Kapalı' : 'Doğrulanmadı'],
       ['Public UDP/53', reachabilityValue(authoritative?.publicReachability?.udp53)], ['Public TCP/53', reachabilityValue(authoritative?.publicReachability?.tcp53)],
       ['Public probe vantage', authoritative?.publicReachability?.vantage ?? 'Yapılandırılmadı'], ['Overall authoritative ready', authoritative?.overallReady ? 'Evet' : 'Hayır'],
-    ]} /><div className="ws-notice ws-notice-warn"><div><strong>Public reachability ayrı kapı</strong><p>{authoritative?.publicReachability?.status === 'unverified' ? 'Harici vantage-point probe yapılandırılmadığı için internetten UDP/TCP 53 erişimi doğrulanmadı. Local health bu alanı yeşile çeviremez.' : authoritative?.publicReachability?.status === 'unverifiable' ? `Harici DNS erişimi doğrulanamadı: ${authoritative.publicReachability.reason ?? 'probe hatası'}.` : authoritative?.publicReachability?.status === 'unreachable' ? 'Harici vantage point en az bir DNS protokolünde 53 portuna erişemedi.' : 'Local ve public readiness ayrı izlenir.'}</p></div></div>{canManage && <Button variant="primary" disabled={busy} onClick={preparePowerDns}>{authoritative?.localReady ? 'PowerDNS’i yeniden önizle' : 'PowerDNS kurulumunu önizle'}</Button>}</> : <p className="ws-muted">Önce authoritative DNS identity yapılandırılmalı.</p>}</div></Section><DelegationPanel server={server} identity={identity} defaultDomain={defaultDomain} /></div>
+    ]} />{authoritative?.operation && <div className={`ws-notice ${authoritative.operation.recovery?.required ? 'ws-notice-warn' : ''}`}><div><strong><Badge state={operationState.state}>{operationState.label}</Badge> · Durable operation</strong><p><code>{authoritative.operation.id}</code> · credential revision {authoritative.operation.credentialRevision} · {authoritative.operation.updatedAt}{authoritative.operation.recovery?.required ? ` · automatic replay kapalı: ${authoritative.operation.recovery.reason}` : ''}</p></div></div>}<div className="ws-notice ws-notice-warn"><div><strong>Public reachability ayrı kapı</strong><p>{authoritative?.publicReachability?.status === 'unverified' ? 'Harici vantage-point probe yapılandırılmadığı için internetten UDP/TCP 53 erişimi doğrulanmadı. Local health bu alanı yeşile çeviremez.' : authoritative?.publicReachability?.status === 'unverifiable' ? `Harici DNS erişimi doğrulanamadı: ${authoritative.publicReachability.reason ?? 'probe hatası'}.` : authoritative?.publicReachability?.status === 'unreachable' ? 'Harici vantage point en az bir DNS protokolünde 53 portuna erişemedi.' : 'Local ve public readiness ayrı izlenir.'}</p></div></div>{canManage && <Button variant="primary" disabled={busy} onClick={preparePowerDns}>{authoritative?.localReady ? 'PowerDNS’i yeniden önizle' : 'PowerDNS kurulumunu önizle'}</Button>}</> : <p className="ws-muted">Önce authoritative DNS identity yapılandırılmalı.</p>}</div></Section><DelegationPanel server={server} identity={identity} defaultDomain={defaultDomain} /></div>
     {identityDialog && <IdentityDialog current={identityForDialog} onClose={() => setIdentityDialog(false)} onApplied={async () => { setIdentityDialog(false); await refresh(); }} />}
     {authoritativePreview && <ConfirmDialog title="PowerDNS authoritative uygula" message={`Paket/config/backend işlemleri uygulanacak. API ${authoritativePreview.api?.address ?? '127.0.0.1'}:${authoritativePreview.api?.port ?? 8081} üzerinde loopback-only kalır; mevcut zone'lar otomatik template sync edilmez.`} confirmation={authoritativePreview.confirmation} busy={busy} error={error} onCancel={() => setAuthoritativePreview(null)} onConfirm={applyPowerDns} confirmLabel="PowerDNS’i uygula" />}
   </>;

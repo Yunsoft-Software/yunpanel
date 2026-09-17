@@ -97,4 +97,15 @@ export function publicReachabilityPresentation(state) {
   return value ? Object.freeze({ state: value[0], label: value[1] }) : Object.freeze({ state: 'unknown', label: status || 'Public durum yok' });
 }
 
+export function authoritativeOperationPresentation(operation) {
+  const value = {
+    applying: ['warning', 'Recovery incelemesi gerekli'],
+    succeeded: ['succeeded', 'Uygulama tamamlandı'],
+    failed: ['failed', 'Uygulama başarısız'],
+  }[operation?.status];
+  return value
+    ? Object.freeze({ state: value[0], label: value[1] })
+    : Object.freeze({ state: 'unknown', label: operation?.status ?? 'Operation yok' });
+}
+
 export const networkDnsModelInternals = Object.freeze({ SOA_DEFAULTS, integer, nameserver });

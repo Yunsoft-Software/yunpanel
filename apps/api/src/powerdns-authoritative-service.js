@@ -86,6 +86,7 @@ export function createPowerDnsAuthoritativeService({
     || !secretRegistry || typeof secretRegistry.getForServer !== 'function'
     || typeof secretRegistry.ensureForServer !== 'function' || typeof secretRegistry.materializeForServer !== 'function'
     || !manager || typeof manager.inspect !== 'function' || typeof manager.apply !== 'function'
+    || typeof manager.operation !== 'function'
     || !publicReachabilityInspector || typeof publicReachabilityInspector.inspect !== 'function') {
     throw new PowerDnsAuthoritativeServiceError(
       'powerdns_service_dependencies_invalid',
@@ -128,6 +129,20 @@ export function createPowerDnsAuthoritativeService({
   async function inspectPublic(serverId, identity) {
     try { return await publicReachabilityInspector.inspect({ serverId, identity }); }
     catch (error) { return unavailablePublicReachability(identity, error); }
+  }
+
+  async function currentOperation(serverId) {
+    let operation;
+    try { operation = await manager.operation(); }
+    catch (error) { throw hostFailure(error); }
+    if (operation && operation.serverId !== serverId) {
+      throw new PowerDnsAuthoritativeServiceError(
+        'powerdns_operation_scope_invalid',
+        'PowerDNS operation journal belongs to another server identity',
+        503,
+      );
+    }
+    return operation;
   }
 
   async function preview(serverId = localServerId) {
@@ -174,6 +189,7 @@ export function createPowerDnsAuthoritativeService({
 
   async function status(serverId = localServerId) {
     const identity = await desired(serverId);
+    const operation = await currentOperation(serverId);
     const secret = await secretRegistry.getForServer(serverId);
     if (!secret) {
       const publicReachability = blockedPublicReachability(identity);
@@ -189,6 +205,7 @@ export function createPowerDnsAuthoritativeService({
         secretConfigured: false,
         warnings: identity.warnings,
         publicReachability,
+        operation,
       });
     }
     const materialized = await secretRegistry.materializeForServer(serverId);
@@ -213,6 +230,7 @@ export function createPowerDnsAuthoritativeService({
       warnings: identity.warnings,
       host: publicHostState(host),
       publicReachability,
+      operation,
     });
   }
 
@@ -238,6 +256,7 @@ export function createPowerDnsAuthoritativeService({
     let host;
     try { host = await manager.apply(intentFor(identity, materialized)); }
     catch (error) { throw hostFailure(error); }
+    const operation = await currentOperation(serverId);
     const localReady = host?.satisfied === true;
     const publicReachability = localReady
       ? await inspectPublic(serverId, identity)
@@ -255,6 +274,7 @@ export function createPowerDnsAuthoritativeService({
       warnings: identity.warnings,
       host: publicHostState(host),
       publicReachability,
+      operation,
     });
   }
 

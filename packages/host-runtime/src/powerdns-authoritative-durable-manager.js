@@ -162,6 +162,29 @@ function evidenceFromInspection(spec, inspected) {
   });
 }
 
+function publicOperation(operation) {
+  if (!operation) return null;
+  return Object.freeze({
+    version: operation.version,
+    id: operation.id,
+    serverId: operation.serverId,
+    credentialRevision: operation.apiKeyRevision,
+    secondaryDns: operation.secondaryDns,
+    status: operation.status,
+    evidence: operation.result,
+    failure: operation.lastError ? Object.freeze({ code: operation.lastError.code }) : null,
+    recovery: Object.freeze({
+      required: operation.status === 'applying',
+      automaticReplayBlocked: operation.status === 'applying',
+      reason: operation.status === 'applying'
+        ? operation.lastError?.code ?? 'powerdns_interrupted_apply'
+        : null,
+    }),
+    createdAt: operation.createdAt,
+    updatedAt: operation.updatedAt,
+  });
+}
+
 export function createPowerDnsAuthoritativeDurableManager({
   manager = createPowerDnsAuthoritativeSecureManager(),
   operationPath = DEFAULT_OPERATION_PATH,
@@ -243,6 +266,10 @@ export function createPowerDnsAuthoritativeDurableManager({
     return manager.inspect(spec);
   }
 
+  async function operation() {
+    return publicOperation(await readOperation());
+  }
+
   async function recoverInterrupted(operation, spec) {
     let inspected;
     try { inspected = await manager.inspect(spec); }
@@ -312,7 +339,7 @@ export function createPowerDnsAuthoritativeDurableManager({
     return applied;
   }
 
-  return Object.freeze({ inspect, apply });
+  return Object.freeze({ inspect, apply, operation });
 }
 
 export const powerDnsAuthoritativeDurableManagerInternals = Object.freeze({
@@ -324,4 +351,5 @@ export const powerDnsAuthoritativeDurableManagerInternals = Object.freeze({
   safeFailure,
   operationMatches,
   evidenceFromInspection,
+  publicOperation,
 });

@@ -17,6 +17,8 @@ test('Settings exposes real Network DNS identity, PowerDNS and delegation contro
   assert.match(panel, /inspectDnsDelegation/);
   assert.match(panel, /Sunucu hostname authority değişmez/);
   assert.match(panel, /Public reachability ayrı kapı/);
+  assert.match(panel, /Durable operation/);
+  assert.match(panel, /automatic replay kapalı/);
   assert.match(panel, /YunPanel registrar hesabınızda otomatik değişiklik yapmaz/);
   assert.match(client, /\/identity\/preview/);
   assert.match(client, /\/authoritative\/apply/);
