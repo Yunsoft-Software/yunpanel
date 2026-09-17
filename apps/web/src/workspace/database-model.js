@@ -5,6 +5,8 @@ const SITE_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const DATABASE_USER_PATTERN = /^ydb_[a-f0-9]{24}$/;
 const DATABASE_ACCOUNT_PATTERN = /^[A-Za-z0-9_.$-]{1,64}@[A-Za-z0-9_.:%-]{1,255}$/;
 const DATABASE_AUTH_PLUGIN_PATTERN = /^[A-Za-z0-9_]{0,64}$/;
+const BACKUP_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const DATABASE_HEALTH_REASONS = new Set([
   'database_security_inspection_unavailable',
   'database_native_socket_admin_auth_required',
@@ -179,9 +181,65 @@ export function websiteDatabaseResourcesView(data) {
   return { websiteId: data.websiteId, applicationId: data.applicationId, databases };
 }
 
+export function databaseBackupChoices(jobs, { serverId, databaseName } = {}) {
+  if (!Array.isArray(jobs) || !UUID_PATTERN.test(serverId ?? '') || !validDatabaseName(databaseName)) return [];
+  const choices = [];
+  const ids = new Set();
+  for (const job of jobs) {
+    const result = job?.result;
+    if (!job || typeof job !== 'object' || !BACKUP_ID_PATTERN.test(job.id ?? '') || ids.has(job.id)
+      || job.serverId !== serverId || job.operation !== 'database.backup' || job.status !== 'succeeded'
+      || job.resourceType !== 'database' || job.resourceId !== databaseName
+      || !result || typeof result !== 'object' || result.version !== 1 || result.backupId !== job.id
+      || result.databaseName !== databaseName || !['mariadb', 'mysql'].includes(result.engine)
+      || typeof result.databaseVersion !== 'string' || result.databaseVersion.length < 1 || result.databaseVersion.length > 120
+      || /[\u0000-\u001f\u007f]/.test(result.databaseVersion)
+      || !SHA256_PATTERN.test(result.dumpSha256 ?? '')
+      || !Number.isSafeInteger(result.dumpBytes) || result.dumpBytes < 1
+      || typeof result.createdAt !== 'string' || !Number.isFinite(Date.parse(result.createdAt))
+      || result.backedUp !== true || result.sideEffects !== true) continue;
+    ids.add(job.id);
+    choices.push({
+      id: job.id,
+      createdAt: new Date(result.createdAt).toISOString(),
+      dumpBytes: result.dumpBytes,
+      engine: result.engine,
+      databaseVersion: result.databaseVersion,
+      dumpSha256: result.dumpSha256,
+    });
+  }
+  return choices.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export function databaseRestorePreviewView(value, { serverId, databaseName, backupId } = {}) {
+  if (!value || typeof value !== 'object' || value.version !== 1 || value.operation !== 'database_restore'
+    || value.serverId !== serverId || value.databaseName !== databaseName || value.backupId !== backupId
+    || !UUID_PATTERN.test(serverId ?? '') || !validDatabaseName(databaseName) || !BACKUP_ID_PATTERN.test(backupId ?? '')
+    || !SHA256_PATTERN.test(value.backupSha256 ?? '') || !SHA256_PATTERN.test(value.previewDigest ?? '')
+    || !Number.isSafeInteger(value.backupBytes) || value.backupBytes < 1
+    || !['mariadb', 'mysql'].includes(value.engine)
+    || typeof value.databaseVersion !== 'string' || value.databaseVersion.length < 1 || value.databaseVersion.length > 120
+    || /[\u0000-\u001f\u007f]/.test(value.databaseVersion)
+    || value.confirmation !== `restore-database:${databaseName}:${value.previewDigest}`
+    || value.sideEffects !== false) return null;
+  return {
+    serverId,
+    databaseName,
+    backupId,
+    backupSha256: value.backupSha256,
+    backupBytes: value.backupBytes,
+    engine: value.engine,
+    databaseVersion: value.databaseVersion,
+    previewDigest: value.previewDigest,
+    confirmation: value.confirmation,
+  };
+}
+
 export const databaseModelInternals = Object.freeze({
   databaseNamePattern: DATABASE_NAME_PATTERN,
   reservedDatabases: Object.freeze([...RESERVED_DATABASES]),
   databaseOwnership,
   databaseHealth,
+  backupIdPattern: BACKUP_ID_PATTERN,
+  sha256Pattern: SHA256_PATTERN,
 });

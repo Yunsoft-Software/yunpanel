@@ -7,11 +7,18 @@ import {
   panelRequest,
   previewDatabaseCredentialApply,
   previewDatabaseCredentialDelete,
+  previewDatabaseRestore,
   queueDatabaseCredentialDelete,
+  restoreDatabase,
   rotateDatabaseCredential,
   waitForJob,
 } from '../api.js';
-import { websiteDatabaseResourcesView } from './database-model.js';
+import {
+  databaseBackupChoices,
+  databaseRestorePreviewView,
+  formatDatabaseBytes,
+  websiteDatabaseResourcesView,
+} from './database-model.js';
 import {
   Badge,
   Button,
@@ -20,6 +27,7 @@ import {
   ErrorNotice,
   KeyValues,
   LinkButton,
+  Modal,
   Section,
 } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
@@ -35,6 +43,7 @@ export default function SiteResourcesPanel({ domain, website, application, serve
   const [rotateTarget, setRotateTarget] = useState(null);
   const [revokeTarget, setRevokeTarget] = useState(null);
   const [backupTarget, setBackupTarget] = useState(null);
+  const [restoreTarget, setRestoreTarget] = useState(null);
 
   const load = useCallback(async () => {
     if (!server) return;
@@ -202,10 +211,89 @@ export default function SiteResourcesPanel({ domain, website, application, serve
     }
   }
 
+  async function buildRestorePreview() {
+    if (!server || !restoreTarget || operationPending.current) return;
+    operationPending.current = true;
+    setBusy(true); setError(null); setNotice(null);
+    try {
+      const raw = await previewDatabaseRestore(
+        server.id,
+        restoreTarget.binding.databaseName,
+        restoreTarget.backupId,
+      );
+      const preview = databaseRestorePreviewView(raw, {
+        serverId: server.id,
+        databaseName: restoreTarget.binding.databaseName,
+        backupId: restoreTarget.backupId,
+      });
+      if (!preview) throw new Error('Database restore preview durumu geçersiz');
+      setRestoreTarget((current) => current?.binding.id === restoreTarget.binding.id
+        ? { ...current, preview, restoreJob: null }
+        : current);
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setError(failure.message);
+    } finally {
+      operationPending.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function restoreDatabaseBackup() {
+    if (!server || !restoreTarget?.preview || operationPending.current) return;
+    operationPending.current = true;
+    setBusy(true); setError(null); setNotice(null);
+    let restoreJob = restoreTarget.restoreJob;
+    try {
+      if (!restoreJob) {
+        const queued = await restoreDatabase(
+          server.id,
+          restoreTarget.binding.databaseName,
+          restoreTarget.preview,
+        );
+        restoreJob = queued?.job;
+        if (!restoreJob?.id) throw new Error('Database restore işi oluşturulamadı');
+        setRestoreTarget((current) => current?.binding.id === restoreTarget.binding.id
+          ? { ...current, restoreJob }
+          : current);
+        observe(restoreJob);
+        jobs.refresh();
+      }
+      if (['failed', 'cancelled'].includes(restoreJob.status)) {
+        throw new Error('Database restore işi terminal hatayla kapandı; job tanısını inceleyin. Kör replay yapılmadı.');
+      }
+      const terminal = restoreJob.status === 'succeeded' ? restoreJob : await waitForJob(restoreJob.id);
+      updateJob(terminal);
+      await load();
+      setRestoreTarget(null);
+      setNotice(`${restoreTarget.binding.databaseName} ${restoreTarget.backupId} yedeğinden doğrulandı ve geri yüklendi. Pre-restore backup: ${terminal.result?.preRestoreBackupId ?? 'job sonucunda kayıtlı'}`);
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setError(failure.message);
+      jobs.refresh();
+      if (restoreJob?.id) {
+        try {
+          const currentJob = await panelRequest(`/jobs/${encodeURIComponent(restoreJob.id)}`);
+          updateJob(currentJob);
+          setRestoreTarget((current) => current?.binding.id === restoreTarget.binding.id
+            ? { ...current, restoreJob: currentJob }
+            : current);
+        } catch {
+          // Unknown restore outcome is never replayed automatically.
+        }
+      }
+    } finally {
+      operationPending.current = false;
+      setBusy(false);
+    }
+  }
+
   const compose = website?.managedComposeBinding ?? null;
   const externalDocker = website?.dockerWorkloadId ?? null;
   const mails = mailDomains ?? [];
   const databases = databaseResources?.databases ?? [];
+  const backupsByBinding = new Map(databases.map(({ binding }) => [
+    binding.id,
+    databaseBackupChoices(jobs.items, { serverId: server?.id, databaseName: binding.databaseName }),
+  ]));
 
   return <>
     <Section
@@ -246,6 +334,16 @@ export default function SiteResourcesPanel({ domain, website, application, serve
                     setBackupTarget({ binding, backupJob: null });
                   }}
                 >Yedek al</Button>
+                <Button
+                  disabled={busy || !canManage || resourceBusy('database', binding.databaseName) || !backupsByBinding.get(binding.id)?.length}
+                  title={backupsByBinding.get(binding.id)?.length ? 'Doğrulanmış bir vendor dump yedeğini geri yükle' : 'Bu schema için başarılı backup job kanıtı yok'}
+                  onClick={() => {
+                    setError(null); setNotice(null);
+                    const choices = backupsByBinding.get(binding.id) ?? [];
+                    if (!choices.length) return;
+                    setRestoreTarget({ binding, choices, backupId: choices[0].id, preview: null, restoreJob: null });
+                  }}
+                >Geri yükle</Button>
                 {credential && <Button
                   disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
                   onClick={() => {
@@ -315,6 +413,37 @@ export default function SiteResourcesPanel({ domain, website, application, serve
       onCancel={() => { if (!busy) { setBackupTarget(null); setError(null); } }}
       onConfirm={backupDatabase}
       confirmLabel="Yedeği başlat"
+    />}
+    {restoreTarget && !restoreTarget.preview && <Modal
+      title="Database yedeğini seç"
+      busy={busy}
+      onClose={() => { if (!busy) { setRestoreTarget(null); setError(null); } }}
+    >
+      <ErrorNotice error={error} />
+      <form onSubmit={(event) => { event.preventDefault(); buildRestorePreview(); }}>
+        <label>Doğrulanmış backup
+          <select
+            value={restoreTarget.backupId}
+            onChange={(event) => setRestoreTarget({ ...restoreTarget, backupId: event.target.value, preview: null, restoreJob: null })}
+            disabled={busy}
+          >
+            {restoreTarget.choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.createdAt} · {formatDatabaseBytes(choice.dumpBytes)} · {choice.id}</option>)}
+          </select>
+        </label>
+        <p className="ws-muted">Yalnız bu local server ve schema için checksum-validated başarılı database.backup job’ları listelenir.</p>
+        <footer className="ws-modal-footer"><Button disabled={busy} onClick={() => setRestoreTarget(null)}>Vazgeç</Button><Button variant="primary" type="submit" disabled={busy}>{busy ? 'Hazırlanıyor…' : 'Restore preview oluştur'}</Button></footer>
+      </form>
+    </Modal>}
+    {restoreTarget?.preview && <ConfirmDialog
+      key={`${restoreTarget.binding.id}:${restoreTarget.backupId}:${restoreTarget.restoreJob?.id ?? 'apply'}`}
+      title="Database yedeğini geri yükle"
+      message={`${restoreTarget.binding.databaseName} schema’sı ${restoreTarget.backupId} yedeğine döndürülecek (${formatDatabaseBytes(restoreTarget.preview.backupBytes)}, ${restoreTarget.preview.engine}). Restore önce pre-restore snapshot alır; checksum ve post-restore doğrulaması tamamlanmadan başarılı sayılmaz.`}
+      confirmation={restoreTarget.binding.databaseName}
+      busy={busy}
+      error={error}
+      onCancel={() => { if (!busy) { setRestoreTarget({ ...restoreTarget, preview: null, restoreJob: null }); setError(null); } }}
+      onConfirm={restoreDatabaseBackup}
+      confirmLabel="Yedeği geri yükle"
     />}
   </>;
 }

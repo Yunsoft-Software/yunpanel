@@ -14,5 +14,8 @@ Site detayındaki Bağlı Kaynaklar ekranı database ownership'i artık sunucu g
 - Revoke schema'yı ve Website binding'i korur. Failed/cancelled veya sonucu okunamayan delete işi otomatik yeniden kuyruğa alınmaz; mevcut job tanısı Owner'a bırakılır.
 - Website satırındaki `Yedek al` eylemi credential varlığına bağlı değildir; exact schema adıyla typed confirmation ister ve mevcut `database.backup` durable job'ını kullanır. Native vendor dump root-private artifact, bounded metadata ve checksum kanıtı üretmeden UI başarı göstermez.
 - Backup job bilinmeyen veya terminal hata durumunda ikinci bir işi otomatik kuyruğa almaz; Owner mevcut job drawer tanısını görür. Başarılı backup kimliği restore seçimi için public job evidence'ında kalır.
+- Restore seçicisi yalnız aynı local server ve schema için terminal `database.backup` job'ı ile exact `result.backupId`, engine, checksum, byte ve timestamp kanıtı eşleşen allowlisted kayıtları gösterir; private dump path veya bilinmeyen result alanlarını UI modeline taşımaz.
+- Seçilen artifact backend restore preview'ında yeniden doğrulanır. UI server/schema/backup identity, preview SHA-256, backup SHA-256 ve confirmation bağını fail-closed kontrol eder; typed schema onayından sonra exact preview durable restore job'ına çevrilir.
+- Başarılı restore pre-restore vendor dump kimliği, checksum ve post-restore verification kanıtı olmadan terminal başarı sayılmaz. Failed/cancelled veya belirsiz restore otomatik replay edilmez.
 
-Restore ve drop-preview eylemlerinin aynı Website akışına eklenmesi `plan.md` içinde açık kalır. Gerçek iki-site izolasyon, rotation/revoke, backup/restore ve browser kabulü `todo.md` T-DATABASE altındadır.
+Drop-preview eyleminin aynı Website akışına eklenmesi `plan.md` içinde açık kalır. Gerçek iki-site izolasyon, rotation/revoke, backup/restore ve browser kabulü `todo.md` T-DATABASE altındadır.

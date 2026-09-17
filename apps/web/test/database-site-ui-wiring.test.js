@@ -36,3 +36,15 @@ test('Website database backup waits for checksum-validated durable vendor dump c
   assert.match(panel, /backupJob\.status === 'succeeded'/);
   assert.match(panel, /Kör replay yapılmadı/);
 });
+
+test('Website database restore selects scoped backup evidence and applies an exact verified preview', async () => {
+  const panel = await readFile(new URL('../src/workspace/SiteResourcesPanel.jsx', import.meta.url), 'utf8');
+  assert.match(panel, /databaseBackupChoices\(jobs\.items/);
+  assert.match(panel, /previewDatabaseRestore/);
+  assert.match(panel, /databaseRestorePreviewView/);
+  assert.match(panel, /restoreDatabase/);
+  assert.match(panel, /waitForJob\(restoreJob\.id\)/);
+  assert.match(panel, /pre-restore snapshot/);
+  assert.match(panel, /checksum ve post-restore doğrulaması/);
+  assert.match(panel, /confirmation=\{restoreTarget\.binding\.databaseName\}/);
+});

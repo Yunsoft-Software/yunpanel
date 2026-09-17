@@ -151,6 +151,27 @@ export function createDatabaseBackup(serverId, name) {
   });
 }
 
+export function previewDatabaseRestore(serverId, name, backupId) {
+  if (typeof backupId !== 'string' || !backupId) throw new Error('backupId is required');
+  return panelRequest(`${databasePath(serverId, name)}/restore-preview`, {
+    method: 'POST',
+    body: { backupId },
+  });
+}
+
+export function restoreDatabase(serverId, name, preview) {
+  if (!preview || typeof preview !== 'object') throw new Error('database restore preview is required');
+  return panelRequest(`${databasePath(serverId, name)}/restore`, {
+    method: 'POST',
+    body: {
+      backupId: preview.backupId,
+      expectedPreviewDigest: preview.previewDigest,
+      expectedBackupSha256: preview.backupSha256,
+      confirmation: preview.confirmation,
+    },
+  });
+}
+
 export function deleteDatabase(serverId, name) {
   return panelRequest(databasePath(serverId, name), {
     method: 'DELETE',

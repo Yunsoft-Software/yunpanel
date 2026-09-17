@@ -11,7 +11,9 @@ import {
   inspectDatabases,
   previewDatabaseCredentialApply,
   previewDatabaseCredentialDelete,
+  previewDatabaseRestore,
   queueDatabaseCredentialDelete,
+  restoreDatabase,
   rotateDatabaseCredential,
 } from '../src/api.js';
 import { setSession } from '../src/session-client.js';
@@ -55,6 +57,8 @@ test('database API client rejects missing identities before fetch', async (t) =>
   assert.throws(() => getWebsiteDatabaseResources('server-1', ''), /websiteId is required/);
   assert.throws(() => createDatabase('server-1', ''), /database name is required/);
   assert.throws(() => createDatabaseBackup('server-1', ''), /database name is required/);
+  assert.throws(() => previewDatabaseRestore('server-1', 'app_main', ''), /backupId is required/);
+  assert.throws(() => restoreDatabase('server-1', 'app_main', null), /database restore preview is required/);
   assert.throws(() => deleteDatabase('server-1', ''), /database name is required/);
   assert.throws(() => rotateDatabaseCredential('server-1', '', 1), /credentialId is required/);
   assert.throws(() => rotateDatabaseCredential('server-1', 'credential-1', 0), /expectedRevision must be a positive integer/);
@@ -79,6 +83,39 @@ test('database backup client queues only the encoded schema with exact confirmat
   ]);
   assert.deepEqual(JSON.parse(calls[0].options.body), { confirmation: 'backup:app_main' });
   assert.equal(calls[0].options.headers['x-csrf-token'], 'csrf-database-backup');
+  setSession(null);
+});
+
+test('database restore client applies only the selected backend preview identity and checksum', async (t) => {
+  setSession({ csrfToken: 'csrf-database-restore' });
+  const calls = [];
+  const preview = {
+    backupId: 'backup/job-one',
+    previewDigest: 'c'.repeat(64),
+    backupSha256: 'd'.repeat(64),
+    confirmation: `restore-database:app_main:${'c'.repeat(64)}`,
+  };
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url, options });
+    return ok(url.endsWith('/restore-preview') ? preview : { job: { id: 'restore-job', status: 'queued' } });
+  });
+
+  const currentPreview = await previewDatabaseRestore('server/one', 'app_main', 'backup/job-one');
+  await restoreDatabase('server/one', 'app_main', currentPreview);
+
+  assert.deepEqual(calls.map((call) => [call.url, call.options.method]), [
+    ['/api/panel/servers/server%2Fone/databases/app_main/restore-preview', 'POST'],
+    ['/api/panel/servers/server%2Fone/databases/app_main/restore', 'POST'],
+  ]);
+  assert.deepEqual(JSON.parse(calls[0].options.body), { backupId: 'backup/job-one' });
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    backupId: 'backup/job-one',
+    expectedPreviewDigest: 'c'.repeat(64),
+    expectedBackupSha256: 'd'.repeat(64),
+    confirmation: `restore-database:app_main:${'c'.repeat(64)}`,
+  });
+  assert.equal(calls[0].options.headers['x-csrf-token'], 'csrf-database-restore');
+  assert.equal(calls[1].options.headers['x-csrf-token'], 'csrf-database-restore');
   setSession(null);
 });
 

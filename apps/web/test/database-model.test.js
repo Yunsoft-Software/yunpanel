@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  databaseBackupChoices,
   databaseInventoryView,
+  databaseRestorePreviewView,
   formatDatabaseBytes,
   validDatabaseName,
   websiteDatabaseResourcesView,
 } from '../src/workspace/database-model.js';
+
+const serverId = '12345678-1234-4234-8234-123456789012';
 
 test('database names mirror the host/protocol safety boundary', () => {
   assert.equal(validDatabaseName('app_main'), true);
@@ -140,4 +144,70 @@ test('Website database resource view keeps only scoped secret-free binding and c
       credential: null,
     }],
   }), null);
+});
+
+test('database backup choices keep only exact successful server and schema evidence', () => {
+  const backupId = '52345678-1234-4234-8234-123456789012';
+  const valid = {
+    id: backupId,
+    serverId,
+    operation: 'database.backup',
+    status: 'succeeded',
+    resourceType: 'database',
+    resourceId: 'app_main',
+    result: {
+      version: 1,
+      backupId,
+      databaseName: 'app_main',
+      engine: 'mariadb',
+      databaseVersion: '10.11.13-MariaDB',
+      dumpSha256: 'a'.repeat(64),
+      dumpBytes: 4096,
+      createdAt: '2026-09-17T12:00:00.000Z',
+      backedUp: true,
+      sideEffects: true,
+      dumpPath: '/private/ignored.sql',
+    },
+  };
+  const choices = databaseBackupChoices([
+    { ...valid, id: '62345678-1234-4234-8234-123456789012', serverId: '72345678-1234-4234-8234-123456789012' },
+    { ...valid, id: '82345678-1234-4234-8234-123456789012', resourceId: 'other_db' },
+    { ...valid, id: '92345678-1234-4234-8234-123456789012', status: 'failed' },
+    valid,
+  ], { serverId, databaseName: 'app_main' });
+  assert.equal(choices.length, 1);
+  assert.deepEqual(choices[0], {
+    id: backupId,
+    createdAt: '2026-09-17T12:00:00.000Z',
+    dumpBytes: 4096,
+    engine: 'mariadb',
+    databaseVersion: '10.11.13-MariaDB',
+    dumpSha256: 'a'.repeat(64),
+  });
+  assert.equal(JSON.stringify(choices).includes('/private/'), false);
+});
+
+test('database restore preview stays bound to the selected server schema backup and digest', () => {
+  const backupId = '52345678-1234-4234-8234-123456789012';
+  const previewDigest = 'b'.repeat(64);
+  const input = {
+    version: 1,
+    operation: 'database_restore',
+    serverId,
+    databaseName: 'app_main',
+    backupId,
+    backupSha256: 'a'.repeat(64),
+    backupBytes: 4096,
+    engine: 'mariadb',
+    databaseVersion: '10.11.13-MariaDB',
+    previewDigest,
+    confirmation: `restore-database:app_main:${previewDigest}`,
+    sideEffects: false,
+    dumpPath: '/private/ignored.sql',
+  };
+  const view = databaseRestorePreviewView(input, { serverId, databaseName: 'app_main', backupId });
+  assert.equal(view.previewDigest, previewDigest);
+  assert.equal(JSON.stringify(view).includes('/private/'), false);
+  assert.equal(databaseRestorePreviewView({ ...input, databaseName: 'other_db' }, { serverId, databaseName: 'app_main', backupId }), null);
+  assert.equal(databaseRestorePreviewView({ ...input, confirmation: 'restore-anything' }, { serverId, databaseName: 'app_main', backupId }), null);
 });
