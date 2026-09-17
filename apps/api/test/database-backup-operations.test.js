@@ -10,6 +10,9 @@ const serverId = '12345678-1234-4234-8234-123456789012';
 const backupId = '22345678-1234-4234-8234-123456789012';
 const databaseName = 'app_main';
 const dumpSha256 = 'a'.repeat(64);
+const websiteId = '42345678-1234-4234-8234-123456789012';
+const databaseBindingId = '52345678-1234-4234-8234-123456789012';
+const ownership = Object.freeze({ websiteId, databaseBindingId, expectedBindingRevision: 7 });
 
 function backup() {
   return {
@@ -35,6 +38,7 @@ function fixture({ backupArtifact = backup(), backupJob = null, jobs = [] } = {}
     resourceType: 'database',
     resourceId: databaseName,
     status: 'succeeded',
+    payload: { databaseName },
     result: backup(),
   };
   const service = createDatabaseBackupOperationsService({
@@ -76,6 +80,72 @@ test('restore queue pins backup checksum and exact preview digest', async () => 
   assert.equal(enqueued[0].operation, OPERATIONS.DATABASE_RESTORE);
   assert.equal(enqueued[0].resourceId, databaseName);
   assert.equal(queued.backupSha256, dumpSha256);
+});
+
+
+test('Website-scoped restore requires backup ownership evidence and carries it into the queued restore', async () => {
+  const scopedBackupJob = {
+    id: backupId,
+    serverId,
+    operation: OPERATIONS.DATABASE_BACKUP,
+    resourceType: 'database',
+    resourceId: databaseName,
+    status: 'succeeded',
+    payload: { databaseName, ...ownership },
+    result: backup(),
+  };
+  const { service, enqueued } = fixture({ backupJob: scopedBackupJob });
+  const preview = await service.previewRestore({
+    serverId,
+    databaseName,
+    backupId,
+    ownership,
+  });
+  assert.equal(preview.websiteId, websiteId);
+  assert.equal(preview.databaseBindingId, databaseBindingId);
+  assert.equal(preview.expectedBindingRevision, 7);
+
+  await service.queueRestore({
+    serverId,
+    databaseName,
+    backupId,
+    ownership,
+    expectedPreviewDigest: preview.previewDigest,
+    expectedBackupSha256: preview.backupSha256,
+    confirmation: preview.confirmation,
+  });
+  assert.deepEqual(enqueued[0].payload, {
+    databaseName,
+    backupId,
+    expectedBackupSha256: dumpSha256,
+    websiteId,
+    databaseBindingId,
+    expectedBindingRevision: 7,
+  });
+});
+
+test('Website-scoped restore rejects backup evidence from another binding revision', async () => {
+  const scopedBackupJob = {
+    id: backupId,
+    serverId,
+    operation: OPERATIONS.DATABASE_BACKUP,
+    resourceType: 'database',
+    resourceId: databaseName,
+    status: 'succeeded',
+    payload: { databaseName, ...ownership },
+    result: backup(),
+  };
+  const { service } = fixture({ backupJob: scopedBackupJob });
+  await assert.rejects(
+    service.previewRestore({
+      serverId,
+      databaseName,
+      backupId,
+      ownership: { ...ownership, expectedBindingRevision: 8 },
+    }),
+    (error) => error instanceof DatabaseBackupOperationsError
+      && error.code === 'database_restore_backup_scope_mismatch',
+  );
 });
 
 test('restore rejects backup job/server mismatch and artifact drift', async () => {
