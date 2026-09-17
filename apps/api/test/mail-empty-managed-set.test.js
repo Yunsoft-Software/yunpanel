@@ -65,6 +65,12 @@ test('empty managed-set private materialization writes an empty Dovecot passwd f
     expectedConfigurationSha256: preview.configurationSha256,
   });
 
+  assert.deepEqual(bundle.transition, {
+    mailDomainId: 'mail-domain-0001',
+    previousRevision: 1,
+    previousStatus: 'enabled',
+    desiredStatus: 'disabled',
+  });
   assert.equal(bundle.preview.sha256, preview.configurationSha256);
   assert.equal(bundle.sensitiveArtifacts.length, 1);
   assert.equal(bundle.sensitiveArtifacts[0].path, '/etc/yunpanel/mail/dovecot/users');

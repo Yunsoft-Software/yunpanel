@@ -273,8 +273,10 @@ export async function startConfiguredLocalRuntime({
 
     if (operation === OPERATIONS.MAIL_CONFIG_APPLY) {
       if (!mailConfigOperationReceipts || resourceType !== 'mail_domain'
-        || result?.version !== 2
+        || result?.version !== 3
         || resourceId !== payload?.mailDomainId || result?.mailDomainId !== payload.mailDomainId
+        || result.previousRevision !== payload.expectedRevision
+        || !['disabled', 'enabled'].includes(result.previousStatus)
         || result.desiredStatus !== payload.desiredStatus
         || result.previewDigest !== payload.previewDigest
         || result.configurationSha256 !== payload.configurationSha256
@@ -293,6 +295,8 @@ export async function startConfiguredLocalRuntime({
         serverId,
         jobId,
         mailDomainId: payload.mailDomainId,
+        previousRevision: result.previousRevision,
+        previousStatus: result.previousStatus,
         desiredStatus: payload.desiredStatus,
         previewDigest: payload.previewDigest,
         configurationSha256: payload.configurationSha256,

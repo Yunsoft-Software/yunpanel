@@ -31,6 +31,16 @@ function execution(overrides = {}) {
   };
 }
 
+function transition(overrides = {}) {
+  return {
+    mailDomainId: MAIL_DOMAIN_ID,
+    previousRevision: 1,
+    previousStatus: 'disabled',
+    desiredStatus: 'enabled',
+    ...overrides,
+  };
+}
+
 test('local managed mail execution keeps protected material private and preserves stage backup activate order', async () => {
   const calls = [];
   const preview = { sha256: CONFIG_DIGEST };
@@ -38,7 +48,7 @@ test('local managed mail execution keeps protected material private and preserve
   const operations = createLocalHostOperations({
     loadManagedMailConfiguration: async (input) => {
       calls.push(['load', input]);
-      return { preview, sensitiveArtifacts };
+      return { transition: transition(), preview, sensitiveArtifacts };
     },
     mailConfigManager: {
       stageConfiguration: async (input, options) => {
@@ -77,8 +87,10 @@ test('local managed mail execution keeps protected material private and preserve
   assert.equal(calls[2][2].transactionId, execution().jobId);
   assert.equal(calls[3][2].transactionId, execution().jobId);
   assert.deepEqual(result, {
-    version: 2,
+    version: 3,
     mailDomainId: MAIL_DOMAIN_ID,
+    previousRevision: 1,
+    previousStatus: 'disabled',
     desiredStatus: 'enabled',
     previewDigest: PREVIEW_DIGEST,
     configurationSha256: CONFIG_DIGEST,
@@ -113,7 +125,9 @@ test('stale managed mail materialization stops before staging backup or activati
 test('managed mail execution rejects unbound backup evidence before activation', async () => {
   let activated = false;
   const operations = createLocalHostOperations({
-    loadManagedMailConfiguration: async () => ({ preview: { sha256: CONFIG_DIGEST }, sensitiveArtifacts: [] }),
+    loadManagedMailConfiguration: async () => ({
+      transition: transition(), preview: { sha256: CONFIG_DIGEST }, sensitiveArtifacts: [],
+    }),
     mailConfigManager: { stageConfiguration: async () => ({}) },
     mailConfigBackupManager: {
       backupConfiguration: async () => ({
@@ -130,6 +144,26 @@ test('managed mail execution rejects unbound backup evidence before activation',
     (error) => error.code === 'mail_config_backup_unconfirmed',
   );
   assert.equal(activated, false);
+});
+
+test('managed mail execution rejects transition drift before staging', async () => {
+  let staged = false;
+  const operations = createLocalHostOperations({
+    loadManagedMailConfiguration: async () => ({
+      transition: transition({ previousRevision: 2 }),
+      preview: { sha256: CONFIG_DIGEST },
+      sensitiveArtifacts: [],
+    }),
+    mailConfigManager: { stageConfiguration: async () => { staged = true; } },
+    mailConfigBackupManager: { backupConfiguration: async () => ({}) },
+    mailConfigActivator: { activateConfiguration: async () => ({}) },
+  });
+
+  await assert.rejects(
+    operations.executeOperation(OPERATIONS.MAIL_CONFIG_APPLY, payload(), execution()),
+    (error) => error.code === 'mail_configuration_transition_stale',
+  );
+  assert.equal(staged, false);
 });
 
 test('managed mail execution context must match the queued mail-domain resource', async () => {

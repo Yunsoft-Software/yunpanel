@@ -35,7 +35,7 @@ Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içi
 
 ## P0.4 — Mail: Postfix + Dovecot + Rspamd + shared Roundcube
 
-- [ ] `MAIL_CONFIG_ROLLBACK` için v2 apply receipt + exact `backupSha256` fence'ine bağlı explicit preview/typed confirmation/durable job ekle; restore başlamadan current active-config evidence'ını doğrula, restart'ta inspect-first mixed-state/receipt recovery yap ve başarılı rollback sonrası mail-domain control-plane state'ini exact previous revision/status ile reconcile et.
+- [ ] `MAIL_CONFIG_ROLLBACK` için v3 apply receipt + exact `backupSha256` + previous revision/status fence'ine bağlı explicit preview/typed confirmation/durable job ekle; restore başlamadan current active-config evidence'ını doğrula, restart'ta inspect-first mixed-state/receipt recovery yap ve başarılı rollback sonrası mail-domain control-plane state'ini exact previous revision/status ile reconcile et.
 - [ ] SQL-backed virtual mail domain/mailbox/alias/quota/password-hash modeli ekle; Website user ile mail storage identity ayrı olsun.
 - [ ] Dedicated mail storage identity kullan; Website UID Maildir owner olmasın.
 - [ ] Local mail enable domain oluştursun fakat bilinen/default parola mailbox yaratmasın.
@@ -170,7 +170,7 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 1. **Website Unix isolation** — workspace dışındaki legacy identity/runtime/SFTP migration hardening.
 2. **PowerDNS operator recovery** — restart-sonrası güvenli explicit rollback, typed confirmation ve fail-closed recovery control surface.
-3. **Mail explicit rollback** — v2 apply receipt'in exact backup identity'sine bağlı preview, durable restore, compensation/restart recovery ve control-plane reconciliation.
+3. **Mail explicit rollback** — v3 apply receipt'in exact backup ve previous control-plane identity'sine bağlı preview, durable restore, compensation/restart recovery ve reconciliation.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
 5. **Database + phpMyAdmin**.
 6. **elFinder**.

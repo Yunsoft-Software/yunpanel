@@ -163,7 +163,16 @@ test('managed mail recovery runtime wires private registries, SRS, tls identity,
       return {
         async materializeTransition(input, expected) {
           calls.push(['materialize', input, expected]);
-          return { preview: { sha256: digest }, sensitiveArtifacts: [] };
+          return {
+            transition: {
+              mailDomainId: input.mailDomainId,
+              previousRevision: input.expectedRevision,
+              previousStatus: 'disabled',
+              desiredStatus: input.status,
+            },
+            preview: { sha256: digest },
+            sensitiveArtifacts: [],
+          };
         },
       };
     },
@@ -177,7 +186,16 @@ test('managed mail recovery runtime wires private registries, SRS, tls identity,
           { mailDomainId, expectedRevision: 1, status: 'enabled' },
           { expectedPreviewDigest: digest, expectedConfigurationSha256: digest },
         ),
-        { preview: { sha256: digest }, sensitiveArtifacts: [] },
+        {
+          transition: {
+            mailDomainId,
+            previousRevision: 1,
+            previousStatus: 'disabled',
+            desiredStatus: 'enabled',
+          },
+          preview: { sha256: digest },
+          sensitiveArtifacts: [],
+        },
       );
       assert.deepEqual(await input.inspectActiveEvidence({ sha256: digest }), { satisfied: true, result: {} });
       return {

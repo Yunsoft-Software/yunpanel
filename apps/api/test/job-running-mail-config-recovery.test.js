@@ -59,14 +59,19 @@ function fixture({ receipt = undefined, evidence = undefined } = {}) {
       readOperationReceipt: async () => {
         events.push('receipt');
         return receipt === undefined ? {
-          version: 2,
+          version: 3,
           serverId, jobId, mailDomainId, desiredStatus: 'enabled', previewDigest,
+          previousRevision: 4, previousStatus: 'disabled',
           configurationSha256, planSha256, backupSha256, readinessSha256, applied: true,
         } : receipt;
       },
       materializeTransition: async () => {
         events.push('materialize');
-        return { preview: { sha256: configurationSha256 }, sensitiveArtifacts: [{ content: 'must-not-escape' }] };
+        return {
+          transition: { mailDomainId, previousRevision: 4, previousStatus: 'disabled', desiredStatus: 'enabled' },
+          preview: { sha256: configurationSha256 },
+          sensitiveArtifacts: [{ content: 'must-not-escape' }],
+        };
       },
       inspectActiveEvidence: async () => {
         events.push('evidence');
@@ -107,13 +112,32 @@ test('managed mail host drift leaves running job unresolved', async () => {
 test('managed mail receipt digest mismatch is rejected before desired-state materialization', async () => {
   const fx = fixture({
     receipt: {
-      version: 2,
+      version: 3,
       serverId, jobId, mailDomainId, desiredStatus: 'enabled', previewDigest,
+      previousRevision: 4, previousStatus: 'disabled',
       configurationSha256: 'f'.repeat(64), planSha256, backupSha256, readinessSha256, applied: true,
     },
   });
   await assert.rejects(recoverRunningMailConfig(fx.options), { code: 'job_mail_config_recovery_receipt_mismatch' });
   assert.deepEqual(fx.events, ['get', 'context', 'receipt']);
+});
+
+test('version three recovery rejects previous control-plane drift before host inspection', async () => {
+  const fx = fixture();
+  const originalMaterialize = fx.options.materializeTransition;
+  fx.options.materializeTransition = async (...args) => {
+    const bundle = await originalMaterialize(...args);
+    return {
+      ...bundle,
+      transition: { ...bundle.transition, previousStatus: 'enabled' },
+    };
+  };
+
+  await assert.rejects(
+    recoverRunningMailConfig(fx.options),
+    { code: 'job_mail_config_recovery_materialization_invalid' },
+  );
+  assert.deepEqual(fx.events, ['get', 'context', 'receipt', 'materialize']);
 });
 
 test('legacy managed mail recovery remains available without claiming rollback backup identity', async () => {
@@ -134,4 +158,25 @@ test('legacy managed mail recovery remains available without claiming rollback b
   await recoverRunningMailConfig(fx.options);
   assert.equal(completedResult.version, 1);
   assert.equal(Object.hasOwn(completedResult, 'backupSha256'), false);
+});
+
+test('version two managed mail recovery preserves backup identity without inventing previous state', async () => {
+  const fx = fixture({
+    receipt: {
+      version: 2,
+      serverId, jobId, mailDomainId, desiredStatus: 'enabled', previewDigest,
+      configurationSha256, planSha256, backupSha256, readinessSha256, applied: true,
+    },
+  });
+  let completedResult;
+  const originalComplete = fx.options.jobRegistry.complete;
+  fx.options.jobRegistry.complete = async (input) => {
+    completedResult = input.result;
+    return originalComplete(input);
+  };
+
+  await recoverRunningMailConfig(fx.options);
+  assert.equal(completedResult.version, 2);
+  assert.equal(completedResult.backupSha256, backupSha256);
+  assert.equal(Object.hasOwn(completedResult, 'previousStatus'), false);
 });

@@ -17,6 +17,8 @@ function input(overrides = {}) {
     serverId: SERVER_ID,
     jobId: JOB_ID,
     mailDomainId: MAIL_DOMAIN_ID,
+    previousRevision: 4,
+    previousStatus: 'disabled',
     desiredStatus: 'enabled',
     previewDigest: 'a'.repeat(64),
     configurationSha256: 'b'.repeat(64),
@@ -57,6 +59,8 @@ test('managed mail receipt rejects forged status, digests and applied state', as
 
   for (const invalid of [
     input({ desiredStatus: 'ready' }),
+    input({ previousRevision: 0 }),
+    input({ previousStatus: 'ready' }),
     input({ previewDigest: 'short' }),
     input({ configurationSha256: 'e'.repeat(63) }),
     input({ backupSha256: 'e'.repeat(63) }),
@@ -77,6 +81,8 @@ test('managed mail receipt reads legacy apply evidence without inventing a backu
   const target = path.join(root, SERVER_ID, `${JOB_ID}.json`);
   const legacy = input();
   delete legacy.backupSha256;
+  delete legacy.previousRevision;
+  delete legacy.previousStatus;
   const persisted = {
     version: 1,
     recordedAt: '2026-09-12T12:00:00.000Z',
@@ -95,4 +101,32 @@ test('managed mail receipt reads legacy apply evidence without inventing a backu
   const read = await store.read(SERVER_ID, JOB_ID);
   assert.equal(read.version, 1);
   assert.equal(Object.hasOwn(read, 'backupSha256'), false);
+});
+
+test('managed mail receipt reads version two backup evidence without inventing previous control-plane state', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-mail-receipt-v2-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const files = new Map();
+  const target = path.join(root, SERVER_ID, `${JOB_ID}.json`);
+  const backupBound = input();
+  delete backupBound.previousRevision;
+  delete backupBound.previousStatus;
+  files.set(target, JSON.stringify({
+    version: 2,
+    recordedAt: '2026-09-12T12:00:00.000Z',
+    ...backupBound,
+  }));
+  const store = createMailConfigOperationReceiptStore({
+    root,
+    async lstatFn(pathname) {
+      if (!files.has(pathname)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      return { isFile: () => true, isSymbolicLink: () => false, mode: 0o100600 };
+    },
+    async readFileFn(pathname) { return files.get(pathname); },
+  });
+
+  const read = await store.read(SERVER_ID, JOB_ID);
+  assert.equal(read.version, 2);
+  assert.equal(read.backupSha256, backupBound.backupSha256);
+  assert.equal(Object.hasOwn(read, 'previousStatus'), false);
 });

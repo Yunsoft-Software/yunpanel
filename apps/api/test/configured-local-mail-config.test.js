@@ -36,6 +36,12 @@ test('configured runtime hydrates managed mail privately and records only secret
     async materializeTransition(input, expected) {
       materializations.push([input, expected]);
       return {
+        transition: {
+          mailDomainId,
+          previousRevision: input.expectedRevision,
+          previousStatus: 'disabled',
+          desiredStatus: input.status,
+        },
         preview: { sha256: configurationSha256 },
         sensitiveArtifacts: [{ path: '/etc/yunpanel/mail/dovecot/users', content: 'must-not-enter-receipt' }],
       };
@@ -83,8 +89,10 @@ test('configured runtime hydrates managed mail privately and records only secret
     resourceId: mailDomainId,
     payload,
     result: {
-      version: 2,
+      version: 3,
       mailDomainId,
+      previousRevision: 3,
+      previousStatus: 'disabled',
       desiredStatus: 'enabled',
       previewDigest,
       configurationSha256,
@@ -100,6 +108,8 @@ test('configured runtime hydrates managed mail privately and records only secret
     serverId,
     jobId,
     mailDomainId,
+    previousRevision: 3,
+    previousStatus: 'disabled',
     desiredStatus: 'enabled',
     previewDigest,
     configurationSha256,

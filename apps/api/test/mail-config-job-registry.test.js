@@ -22,8 +22,10 @@ function payload() {
 
 function result(overrides = {}) {
   return {
-    version: 2,
+    version: 3,
     mailDomainId: MAIL_DOMAIN_ID,
+    previousRevision: 1,
+    previousStatus: 'disabled',
     desiredStatus: 'enabled',
     previewDigest: PREVIEW_DIGEST,
     configurationSha256: CONFIG_DIGEST,
@@ -73,6 +75,8 @@ test('managed mail configuration result must match the queued transition exactly
     result({ previewDigest: 'f'.repeat(64) }),
     result({ planSha256: 'short' }),
     result({ backupSha256: 'short' }),
+    result({ previousRevision: 2 }),
+    result({ previousStatus: 'ready' }),
     result({ applied: false }),
     result({ sideEffects: false }),
   ]) {
@@ -106,10 +110,35 @@ test('legacy managed mail result remains readable for pre-backup-binding recover
   await registry.claimNext('local-server');
   const legacy = result({ version: 1 });
   delete legacy.backupSha256;
+  delete legacy.previousRevision;
+  delete legacy.previousStatus;
 
   const completed = await registry.complete({
     serverId: 'local-server', jobId: queued.id, status: 'succeeded', result: legacy,
   });
   assert.equal(completed.result.version, 1);
   assert.equal(Object.hasOwn(completed.result, 'backupSha256'), false);
+});
+
+test('backup-bound version two managed mail result remains readable without previous control-plane identity', async () => {
+  const registry = createJobRegistry();
+  const queued = await registry.enqueue({
+    serverId: 'local-server',
+    type: 'mail.config.apply',
+    operation: OPERATIONS.MAIL_CONFIG_APPLY,
+    payload: payload(),
+    resourceType: 'mail_domain',
+    resourceId: MAIL_DOMAIN_ID,
+  });
+  await registry.claimNext('local-server');
+  const backupBound = result({ version: 2 });
+  delete backupBound.previousRevision;
+  delete backupBound.previousStatus;
+
+  const completed = await registry.complete({
+    serverId: 'local-server', jobId: queued.id, status: 'succeeded', result: backupBound,
+  });
+  assert.equal(completed.result.version, 2);
+  assert.equal(completed.result.backupSha256, BACKUP_DIGEST);
+  assert.equal(Object.hasOwn(completed.result, 'previousStatus'), false);
 });

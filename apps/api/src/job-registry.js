@@ -759,25 +759,33 @@ function sanitizeDnsRecordResult(job, result) {
 function sanitizeMailConfigResult(job, result) {
   const version = result?.version;
   if (!result || typeof result !== 'object' || Array.isArray(result)
-    || ![1, 2].includes(version) || result.applied !== true || result.sideEffects !== true
+    || ![1, 2, 3].includes(version) || result.applied !== true || result.sideEffects !== true
     || result.mailDomainId !== job.payload?.mailDomainId
     || result.desiredStatus !== job.payload?.desiredStatus
     || result.previewDigest !== job.payload?.previewDigest
     || result.configurationSha256 !== job.payload?.configurationSha256
     || typeof result.planSha256 !== 'string' || !SHA256_PATTERN.test(result.planSha256)
     || (version === 1 && Object.hasOwn(result, 'backupSha256'))
-    || (version === 2 && (typeof result.backupSha256 !== 'string' || !SHA256_PATTERN.test(result.backupSha256)))
+    || (version < 3 && (Object.hasOwn(result, 'previousRevision') || Object.hasOwn(result, 'previousStatus')))
+    || (version >= 2 && (typeof result.backupSha256 !== 'string' || !SHA256_PATTERN.test(result.backupSha256)))
+    || (version === 3 && (!Number.isSafeInteger(result.previousRevision) || result.previousRevision < 1
+      || result.previousRevision !== job.payload?.expectedRevision
+      || !['disabled', 'enabled'].includes(result.previousStatus)))
     || typeof result.readinessSha256 !== 'string' || !SHA256_PATTERN.test(result.readinessSha256)) {
     throw new JobRegistryError('invalid_job_result', 'Managed mail result does not match the queued transition');
   }
   return {
     version,
     mailDomainId: result.mailDomainId,
+    ...(version === 3 ? {
+      previousRevision: result.previousRevision,
+      previousStatus: result.previousStatus,
+    } : {}),
     desiredStatus: result.desiredStatus,
     previewDigest: result.previewDigest,
     configurationSha256: result.configurationSha256,
     planSha256: result.planSha256,
-    ...(version === 2 ? { backupSha256: result.backupSha256 } : {}),
+    ...(version >= 2 ? { backupSha256: result.backupSha256 } : {}),
     readinessSha256: result.readinessSha256,
     applied: true,
     sideEffects: true,

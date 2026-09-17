@@ -364,6 +364,15 @@ export function createLocalHostOperations({
       error.code = 'mail_configuration_preview_stale';
       throw error;
     }
+    if (!bundle.transition || typeof bundle.transition !== 'object' || Array.isArray(bundle.transition)
+      || bundle.transition.mailDomainId !== payload.mailDomainId
+      || bundle.transition.previousRevision !== payload.expectedRevision
+      || !['disabled', 'enabled'].includes(bundle.transition.previousStatus)
+      || bundle.transition.desiredStatus !== payload.desiredStatus) {
+      const error = new Error('Managed mail configuration provider returned stale transition state');
+      error.code = 'mail_configuration_transition_stale';
+      throw error;
+    }
 
     await resolvedMailConfigManager.stageConfiguration(bundle.preview, {
       sensitiveArtifacts: bundle.sensitiveArtifacts,
@@ -389,8 +398,10 @@ export function createLocalHostOperations({
       throw error;
     }
     return Object.freeze({
-      version: 2,
+      version: 3,
       mailDomainId: payload.mailDomainId,
+      previousRevision: bundle.transition.previousRevision,
+      previousStatus: bundle.transition.previousStatus,
       desiredStatus: payload.desiredStatus,
       previewDigest: payload.previewDigest,
       configurationSha256: payload.configurationSha256,

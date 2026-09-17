@@ -65,15 +65,20 @@ function recoveryIntent(context, job, candidate, identity) {
 }
 
 function assertReceipt(receipt, identity, intent) {
-  if (!receipt || ![1, 2].includes(receipt.version)
+  if (!receipt || ![1, 2, 3].includes(receipt.version)
     || receipt.serverId !== identity.serverId || receipt.jobId !== identity.jobId
     || receipt.mailDomainId !== intent.mailDomainId || receipt.desiredStatus !== intent.desiredStatus
     || receipt.previewDigest !== intent.previewDigest || receipt.configurationSha256 !== intent.configurationSha256
     || typeof receipt.planSha256 !== 'string' || !CHECKSUM_PATTERN.test(receipt.planSha256)
     || typeof receipt.readinessSha256 !== 'string' || !CHECKSUM_PATTERN.test(receipt.readinessSha256)
     || (receipt.version === 1 && Object.hasOwn(receipt, 'backupSha256'))
-    || (receipt.version === 2
+    || (receipt.version < 3
+      && (Object.hasOwn(receipt, 'previousRevision') || Object.hasOwn(receipt, 'previousStatus')))
+    || (receipt.version >= 2
       && (typeof receipt.backupSha256 !== 'string' || !CHECKSUM_PATTERN.test(receipt.backupSha256)))
+    || (receipt.version === 3
+      && (receipt.previousRevision !== intent.expectedRevision
+        || !['disabled', 'enabled'].includes(receipt.previousStatus)))
     || receipt.applied !== true) {
     throw new JobRunningMailConfigRecoveryError('job_mail_config_recovery_receipt_mismatch', 'Managed mail operation receipt does not match the running job');
   }
@@ -161,7 +166,12 @@ export async function recoverRunningMailConfig({
   } catch {
     throw new JobRunningMailConfigRecoveryError('job_mail_config_recovery_materialization_failed', 'Current protected managed mail desired state does not match the recovery intent');
   }
-  if (!bundle?.preview || bundle.preview.sha256 !== intent.configurationSha256) {
+  if (!bundle?.preview || bundle.preview.sha256 !== intent.configurationSha256
+    || (receipt.version === 3 && (!bundle.transition
+      || bundle.transition.mailDomainId !== intent.mailDomainId
+      || bundle.transition.previousRevision !== receipt.previousRevision
+      || bundle.transition.previousStatus !== receipt.previousStatus
+      || bundle.transition.desiredStatus !== intent.desiredStatus))) {
     throw new JobRunningMailConfigRecoveryError('job_mail_config_recovery_materialization_invalid', 'Managed mail recovery materialization is inconsistent');
   }
 
@@ -181,11 +191,15 @@ export async function recoverRunningMailConfig({
   const result = Object.freeze({
     version: receipt.version,
     mailDomainId: intent.mailDomainId,
+    ...(receipt.version === 3 ? {
+      previousRevision: receipt.previousRevision,
+      previousStatus: receipt.previousStatus,
+    } : {}),
     desiredStatus: intent.desiredStatus,
     previewDigest: intent.previewDigest,
     configurationSha256: intent.configurationSha256,
     planSha256: evidence.result.planSha256,
-    ...(receipt.version === 2 ? { backupSha256: receipt.backupSha256 } : {}),
+    ...(receipt.version >= 2 ? { backupSha256: receipt.backupSha256 } : {}),
     readinessSha256: evidence.result.readinessSha256,
     applied: true,
     sideEffects: true,

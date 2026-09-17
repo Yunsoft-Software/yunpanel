@@ -411,6 +411,12 @@ export function createMailConfigurationService({
       }));
     }
     return Object.freeze({
+      transition: Object.freeze({
+        mailDomainId: resolved.candidate.id,
+        previousRevision: resolved.candidate.revision,
+        previousStatus: resolved.candidate.status,
+        desiredStatus: resolved.input.status,
+      }),
       preview: materialized.preview,
       sensitiveArtifacts: Object.freeze(sensitiveArtifacts),
     });
