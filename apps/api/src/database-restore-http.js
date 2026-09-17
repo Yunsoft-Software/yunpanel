@@ -51,6 +51,26 @@ async function requireServer(registry, serverId) {
   return server;
 }
 
+async function requireGlobalRestoreScope(databaseBindingRegistry, serverId, databaseName) {
+  if (!databaseBindingRegistry) return;
+  let binding;
+  try { binding = await databaseBindingRegistry.getByDatabase({ serverId, databaseName }); }
+  catch {
+    throw new DatabaseRestoreHttpError(
+      'database_ownership_state_unavailable',
+      'Database Website ownership state could not be read',
+      503,
+    );
+  }
+  if (binding) {
+    throw new DatabaseRestoreHttpError(
+      'database_restore_website_scope_required',
+      'Managed Website databases must use the Website-scoped restore route',
+      409,
+    );
+  }
+}
+
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
@@ -91,15 +111,20 @@ export function mountDatabaseRestoreRoutes(app, {
   registry,
   jobRegistry = null,
   databaseBackupOperationsService = null,
+  databaseBindingRegistry = null,
 }) {
   if (!app || typeof app.post !== 'function') throw new Error('Express application is required');
   if (!registry || typeof registry.getServer !== 'function') throw new Error('Server registry is required');
+  if (databaseBindingRegistry !== null && typeof databaseBindingRegistry.getByDatabase !== 'function') {
+    throw new Error('Database binding registry is invalid');
+  }
   const operations = resolveOperationsService(databaseBackupOperationsService, jobRegistry);
 
   app.post('/api/servers/:serverId/databases/:name/restore-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const server = await requireServer(registry, request.params.serverId);
     const databaseName = requireDatabaseName(request.params.name);
     const body = restorePreviewBody(request.body);
+    await requireGlobalRestoreScope(databaseBindingRegistry, server.id, databaseName);
     const preview = await callOperation(operations, 'previewRestore', {
       serverId: server.id,
       databaseName,
@@ -112,6 +137,7 @@ export function mountDatabaseRestoreRoutes(app, {
     const server = await requireServer(registry, request.params.serverId);
     const databaseName = requireDatabaseName(request.params.name);
     const body = restoreApplyBody(request.body);
+    await requireGlobalRestoreScope(databaseBindingRegistry, server.id, databaseName);
     const queued = await callOperation(operations, 'queueRestore', {
       serverId: server.id,
       databaseName,
@@ -126,4 +152,5 @@ export const databaseRestoreHttpInternals = Object.freeze({
   restorePreviewBody,
   restoreApplyBody,
   resolveOperationsService,
+  requireGlobalRestoreScope,
 });
