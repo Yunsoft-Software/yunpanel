@@ -7,6 +7,7 @@ const STORE_VERSION = 1;
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
+const HOSTED_RUNTIME_TYPES = new Set(['static', 'node', 'php']);
 
 export class DatabaseBindingRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -124,12 +125,12 @@ export function createDatabaseBindingRegistry({
     if (website.serverId !== normalizedServerId) {
       throw new DatabaseBindingRegistryError('database_binding_website_server_mismatch', 'Website belongs to a different server', 409);
     }
-    if (!['static', 'node'].includes(website.runtimeType)
+    if (!HOSTED_RUNTIME_TYPES.has(website.runtimeType)
       || typeof website.applicationId !== 'string' || !website.applicationId
       || typeof website.unixUser !== 'string' || !APP_USER_PATTERN.test(website.unixUser)) {
       throw new DatabaseBindingRegistryError(
         'database_binding_website_unsupported',
-        'Database binding requires a managed static or Node Website with a site user',
+        'Database binding requires a managed static, Node or PHP Website with a site user',
         409,
       );
     }
@@ -305,4 +306,5 @@ export const databaseBindingRegistryInternals = Object.freeze({
   databaseName,
   normalizePersisted,
   appUserPattern: APP_USER_PATTERN,
+  hostedRuntimeTypes: Object.freeze([...HOSTED_RUNTIME_TYPES]),
 });

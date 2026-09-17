@@ -57,6 +57,33 @@ test('database binding persists exact Website Application and site-user ownershi
   assert.deepEqual(await reopened.getByDatabase({ serverId, databaseName: 'app_db' }), binding);
 });
 
+test('database binding accepts managed PHP Website ownership', async () => {
+  const registry = createDatabaseBindingRegistry({
+    ...dependencies({
+      getWebsite: async (id) => id === websiteId ? {
+        id,
+        serverId,
+        applicationId,
+        runtimeType: 'php',
+        unixUser,
+      } : null,
+      getApplication: async (id) => id === applicationId ? {
+        id,
+        serverId,
+        type: 'php',
+      } : null,
+    }),
+  });
+  const binding = await registry.bindDatabase({
+    serverId,
+    databaseName: 'php_app',
+    websiteId,
+    confirmation: `bind-database:${serverId}:php_app:${websiteId}`,
+  });
+  assert.equal(binding.applicationId, applicationId);
+  assert.equal(binding.unixUser, unixUser);
+});
+
 test('database binding rejects cross-server unsupported Website and explicit Application mismatch', async () => {
   for (const [overrides, code] of [
     [{ getWebsite: async () => ({ id: websiteId, serverId: '44444444-4444-4444-8444-444444444444', applicationId, runtimeType: 'node', unixUser }) }, 'database_binding_website_server_mismatch'],
