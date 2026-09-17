@@ -155,3 +155,13 @@ export {
   previewPhpMyAdminNginxConfig,
   renderPhpMyAdminNginxConfig,
 } from './phpmyadmin-nginx.js';
+
+export {
+  PhpMyAdminSignonTemplateError,
+  phpMyAdminSignonTemplateInternals,
+  phpMyAdminSignonTemplatePolicy,
+  previewPhpMyAdminSignonBridge,
+  previewPhpMyAdminSignonConfig,
+  renderPhpMyAdminSignonBridge,
+  renderPhpMyAdminSignonConfig,
+} from './phpmyadmin-signon.js';
