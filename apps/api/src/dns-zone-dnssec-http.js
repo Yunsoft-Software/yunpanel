@@ -4,6 +4,14 @@ import {
   createDnsZoneDnssecOperationRegistry,
   DnsZoneDnssecOperationRegistryError,
 } from './dns-zone-dnssec-operation-registry.js';
+import {
+  createDnsZoneDnssecRolloverRegistry,
+  DnsZoneDnssecRolloverRegistryError,
+} from './dns-zone-dnssec-rollover-registry.js';
+import {
+  createDnsZoneDnssecRolloverRuntime,
+  DnsZoneDnssecRolloverRuntimeError,
+} from './dns-zone-dnssec-rollover-runtime.js';
 import { createDnsZoneDnssecRuntime, DnsZoneDnssecRuntimeError } from './dns-zone-dnssec-runtime.js';
 import { createDnsZoneDnssecService, DnsZoneDnssecError } from './dns-zone-dnssec.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -55,6 +63,23 @@ function applyBody(body) {
   return value;
 }
 
+function rolloverApplyBody(body) {
+  const value = exactObject(
+    body,
+    new Set(['previewDigest', 'confirmation']),
+    'dnssec_rollover_apply_input_invalid',
+    'Send previewDigest and confirmation',
+  );
+  if (typeof value.previewDigest !== 'string' || !SHA256_PATTERN.test(value.previewDigest)
+    || typeof value.confirmation !== 'string' || !value.confirmation) {
+    throw new DnsZoneDnssecHttpError(
+      'dnssec_rollover_apply_input_invalid',
+      'Send a current previewDigest and exact confirmation',
+    );
+  }
+  return value;
+}
+
 function stateRoot(env = process.env) {
   const serverStorePath = env.YUNPANEL_SERVER_STORE ?? path.resolve('.data/server-registry.json');
   return path.dirname(serverStorePath);
@@ -62,6 +87,10 @@ function stateRoot(env = process.env) {
 
 function operationStorePath(env = process.env) {
   return env.YUNPANEL_DNSSEC_OPERATION_STORE ?? path.join(stateRoot(env), 'dnssec-operations.json');
+}
+
+function rolloverOperationStorePath(env = process.env) {
+  return env.YUNPANEL_DNSSEC_ROLLOVER_OPERATION_STORE ?? path.join(stateRoot(env), 'dnssec-rollover-operations.json');
 }
 
 async function defaultService(authoritativeService, env = process.env) {
@@ -91,8 +120,18 @@ async function defaultRuntime(authoritativeService, env = process.env, serviceOv
     filePath: serviceOverride ? null : operationStorePath(env),
   });
   const runtime = createDnsZoneDnssecRuntime({ registry, service });
+  const rolloverRegistry = createDnsZoneDnssecRolloverRegistry({
+    filePath: serviceOverride ? null : rolloverOperationStorePath(env),
+  });
+  const rolloverRuntime = createDnsZoneDnssecRolloverRuntime({ registry: rolloverRegistry, service });
   await runtime.init();
-  return runtime;
+  await rolloverRuntime.init();
+  return Object.freeze({
+    ...runtime,
+    startRollover: rolloverRuntime.start,
+    getRollover: rolloverRuntime.get,
+    listRolloversForDomain: rolloverRuntime.listForDomain,
+  });
 }
 
 function knownError(error) {
@@ -100,6 +139,8 @@ function knownError(error) {
     || error instanceof DnsZoneDnssecError
     || error instanceof DnsZoneDnssecRuntimeError
     || error instanceof DnsZoneDnssecOperationRegistryError
+    || error instanceof DnsZoneDnssecRolloverRuntimeError
+    || error instanceof DnsZoneDnssecRolloverRegistryError
     || error instanceof PowerDnsSecretRegistryError;
 }
 
@@ -134,13 +175,18 @@ export function mountDnsZoneDnssecRoutes(app, {
     && (typeof dnsZoneDnssecRuntime.status !== 'function' || typeof dnsZoneDnssecRuntime.preview !== 'function'
       || typeof dnsZoneDnssecRuntime.previewRollover !== 'function'
       || typeof dnsZoneDnssecRuntime.start !== 'function' || typeof dnsZoneDnssecRuntime.get !== 'function'
-      || typeof dnsZoneDnssecRuntime.listForDomain !== 'function')) {
+      || typeof dnsZoneDnssecRuntime.listForDomain !== 'function'
+      || typeof dnsZoneDnssecRuntime.startRollover !== 'function' || typeof dnsZoneDnssecRuntime.getRollover !== 'function'
+      || typeof dnsZoneDnssecRuntime.listRolloversForDomain !== 'function')) {
     throw new Error('DNSSEC runtime is invalid');
   }
   if (dnsZoneDnssecService !== null
     && (typeof dnsZoneDnssecService.status !== 'function'
       || typeof dnsZoneDnssecService.preview !== 'function'
       || typeof dnsZoneDnssecService.previewRollover !== 'function'
+      || typeof dnsZoneDnssecService.createRolloverKey !== 'function'
+      || typeof dnsZoneDnssecService.previewRolloverKeyState !== 'function'
+      || typeof dnsZoneDnssecService.setRolloverKeyState !== 'function'
       || typeof dnsZoneDnssecService.apply !== 'function')) {
     throw new Error('DNSSEC service is invalid');
   }
@@ -173,6 +219,29 @@ export function mountDnsZoneDnssecRoutes(app, {
     });
   }));
 
+  app.post('/api/domains/:domainId/dns/dnssec/rollover/apply', requirePanelRouteAccess, route(async (request, response) => {
+    const body = rolloverApplyBody(request.body);
+    return response.status(202).json({
+      data: await (await runtime()).startRollover({
+        domainId: request.params.domainId,
+        previewDigest: body.previewDigest,
+        confirmation: body.confirmation,
+      }),
+    });
+  }));
+
+  app.get('/api/domains/:domainId/dns/dnssec/rollover/operations', requirePanelRouteAccess, route(async (request, response) => {
+    return response.json({ data: await (await runtime()).listRolloversForDomain(request.params.domainId) });
+  }));
+
+  app.get('/api/domains/:domainId/dns/dnssec/rollover/operations/:operationId', requirePanelRouteAccess, route(async (request, response) => {
+    const operation = await (await runtime()).getRollover(request.params.operationId);
+    if (!operation || operation.domainId !== request.params.domainId) {
+      throw new DnsZoneDnssecHttpError('dnssec_rollover_operation_not_found', 'DNSSEC rollover operation was not found', 404);
+    }
+    return response.json({ data: operation });
+  }));
+
   app.post('/api/domains/:domainId/dns/dnssec/apply', requirePanelRouteAccess, route(async (request, response) => {
     const body = applyBody(request.body);
     return response.json({
@@ -201,8 +270,10 @@ export function mountDnsZoneDnssecRoutes(app, {
 export const dnsZoneDnssecHttpInternals = Object.freeze({
   previewBody,
   applyBody,
+  rolloverApplyBody,
   stateRoot,
   operationStorePath,
+  rolloverOperationStorePath,
   defaultService,
   defaultRuntime,
   knownError,

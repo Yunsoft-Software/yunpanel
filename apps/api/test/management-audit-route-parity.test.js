@@ -22,6 +22,7 @@ const SOURCE_FILES = [
   'node-runtime-http.js',
   'database-http.js',
   'site-file-http.js',
+  'dns-zone-dnssec-http.js',
 ];
 const ROUTE_PATTERN = /app\.(post|put|patch|delete)\(\s*'([^']+)'\s*,\s*requirePanelRouteAccess\b/g;
 
