@@ -12,7 +12,7 @@ export function workspaceResources(pathname, { observingJob = false, activeJob =
   else if (/^\/websites\/[^/]+(?:\/[^/]+)?$/.test(path)) {
     enable('domains', 'websites', 'applications', 'certificates', 'servers');
     const tab = path.split('/')[3] || 'overview';
-    if (['overview', 'node', 'deploy', 'domains', 'ssl', 'logs'].includes(tab)) enable('jobs');
+    if (['overview', 'node', 'deploy', 'domains', 'ssl', 'logs', 'resources'].includes(tab)) enable('jobs');
   } else if (path === '/applications') enable('applications', 'servers', 'jobs');
   else if (path === '/applications/new') enable('applications', 'servers');
   else if (path === '/domains') enable('domains', 'certificates', 'servers');

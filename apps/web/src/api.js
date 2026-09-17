@@ -49,13 +49,55 @@ function databasePath(serverId, name) {
   return `${databaseServerPath(serverId)}/${encodeURIComponent(name)}`;
 }
 
+function databaseCredentialPath(serverId, credentialId) {
+  databaseServerPath(serverId);
+  if (typeof credentialId !== 'string' || !credentialId) throw new Error('credentialId is required');
+  return `/servers/${encodeURIComponent(serverId)}/database-credentials/${encodeURIComponent(credentialId)}`;
+}
+
+function positiveRevision(value, field) {
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${field} must be a positive integer`);
+  return value;
+}
+
 export function getDatabases(serverId) {
   return panelRequest(databaseServerPath(serverId));
 }
 
 export function getWebsiteDatabaseResources(serverId, websiteId) {
+  databaseServerPath(serverId);
   if (typeof websiteId !== 'string' || !websiteId) throw new Error('websiteId is required');
   return panelRequest(`/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-resources`);
+}
+
+export function rotateDatabaseCredential(serverId, credentialId, expectedRevision) {
+  const path = databaseCredentialPath(serverId, credentialId);
+  const revision = positiveRevision(expectedRevision, 'expectedRevision');
+  return panelRequest(`${path}/password/rotate`, {
+    method: 'POST',
+    body: {
+      expectedRevision: revision,
+      confirmation: `rotate-database-password:${credentialId}:${revision}`,
+    },
+  });
+}
+
+export function previewDatabaseCredentialApply(serverId, credentialId) {
+  return panelRequest(`${databaseCredentialPath(serverId, credentialId)}/apply-preview`);
+}
+
+export function applyDatabaseCredential(serverId, credentialId, preview) {
+  const path = databaseCredentialPath(serverId, credentialId);
+  if (!preview || typeof preview !== 'object') throw new Error('credential apply preview is required');
+  return panelRequest(`${path}/apply`, {
+    method: 'POST',
+    body: {
+      expectedCredentialRevision: positiveRevision(preview.expectedCredentialRevision, 'expectedCredentialRevision'),
+      expectedBindingRevision: positiveRevision(preview.expectedBindingRevision, 'expectedBindingRevision'),
+      expectedDesiredStateSha256: preview.desiredStateSha256,
+      confirmation: preview.confirmation,
+    },
+  });
 }
 
 export function inspectDatabases(serverId) {
@@ -105,4 +147,4 @@ export async function runJob(path, options) {
 }
 
 export const managedServiceApiInternals = Object.freeze({ managedServiceServerPath, managedServicePath });
-export const databaseApiInternals = Object.freeze({ databaseServerPath, databasePath });
+export const databaseApiInternals = Object.freeze({ databaseServerPath, databasePath, databaseCredentialPath, positiveRevision });

@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  applyDatabaseCredential,
   createDatabase,
   deleteDatabase,
   getDatabases,
   getWebsiteDatabaseResources,
   inspectDatabases,
+  previewDatabaseCredentialApply,
+  rotateDatabaseCredential,
 } from '../src/api.js';
 import { setSession } from '../src/session-client.js';
 
@@ -44,8 +47,52 @@ test('database API client rejects missing identities before fetch', async (t) =>
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async () => { calls += 1; return ok({}); });
   assert.throws(() => getDatabases(''), /serverId is required/);
+  assert.throws(() => getWebsiteDatabaseResources('', 'website-1'), /serverId is required/);
   assert.throws(() => getWebsiteDatabaseResources('server-1', ''), /websiteId is required/);
   assert.throws(() => createDatabase('server-1', ''), /database name is required/);
   assert.throws(() => deleteDatabase('server-1', ''), /database name is required/);
+  assert.throws(() => rotateDatabaseCredential('server-1', '', 1), /credentialId is required/);
+  assert.throws(() => rotateDatabaseCredential('server-1', 'credential-1', 0), /expectedRevision must be a positive integer/);
+  assert.throws(() => applyDatabaseCredential('server-1', 'credential-1', null), /credential apply preview is required/);
   assert.equal(calls, 0);
+});
+
+test('database credential client pins rotate and apply to exact revisions and preview digest', async (t) => {
+  setSession({ csrfToken: 'csrf-credential' });
+  const calls = [];
+  const digest = 'a'.repeat(64);
+  const preview = {
+    expectedCredentialRevision: 4,
+    expectedBindingRevision: 2,
+    desiredStateSha256: digest,
+    confirmation: `apply-database-credential:credential/one:${digest}`,
+  };
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url, options });
+    return ok(url.endsWith('/apply-preview') ? preview : { id: 'safe-public-metadata' });
+  });
+
+  await rotateDatabaseCredential('server/one', 'credential/one', 3);
+  const currentPreview = await previewDatabaseCredentialApply('server/one', 'credential/one');
+  await applyDatabaseCredential('server/one', 'credential/one', currentPreview);
+
+  assert.deepEqual(calls.map((call) => [call.url, call.options.method]), [
+    ['/api/panel/servers/server%2Fone/database-credentials/credential%2Fone/password/rotate', 'POST'],
+    ['/api/panel/servers/server%2Fone/database-credentials/credential%2Fone/apply-preview', 'GET'],
+    ['/api/panel/servers/server%2Fone/database-credentials/credential%2Fone/apply', 'POST'],
+  ]);
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    expectedRevision: 3,
+    confirmation: 'rotate-database-password:credential/one:3',
+  });
+  assert.deepEqual(JSON.parse(calls[2].options.body), {
+    expectedCredentialRevision: 4,
+    expectedBindingRevision: 2,
+    expectedDesiredStateSha256: digest,
+    confirmation: `apply-database-credential:credential/one:${digest}`,
+  });
+  assert.equal(calls[0].options.headers['x-csrf-token'], 'csrf-credential');
+  assert.equal(calls[2].options.headers['x-csrf-token'], 'csrf-credential');
+  assert.doesNotMatch(calls.map((call) => call.options.body ?? '').join('\n'), /"password"\s*:/i);
+  setSession(null);
 });
