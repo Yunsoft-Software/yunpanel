@@ -34,6 +34,7 @@ export const phpMyAdminNginxTemplatePolicy = Object.freeze({
   gatewaySocketPath: '/run/yunpanel/phpmyadmin-http.sock',
   signonBridgePath: phpMyAdminSignonTemplatePolicy.bridgePath,
   internalSignonPath: phpMyAdminSignonTemplatePolicy.internalSignonPath,
+  internalLogoutPath: phpMyAdminSignonTemplatePolicy.internalLogoutPath,
   serviceUnit: 'nginx.service',
   configMode: 0o640,
   gatewaySocketMode: 0o660,
@@ -48,6 +49,7 @@ export function renderPhpMyAdminNginxConfig({
   gatewaySocketPath = phpMyAdminNginxTemplatePolicy.gatewaySocketPath,
   signonBridgePath = phpMyAdminNginxTemplatePolicy.signonBridgePath,
   internalSignonPath = phpMyAdminNginxTemplatePolicy.internalSignonPath,
+  internalLogoutPath = phpMyAdminNginxTemplatePolicy.internalLogoutPath,
 } = {}) {
   const root = exactPath(documentRoot, phpMyAdminNginxTemplatePolicy.documentRoot, 'documentRoot');
   const fpmSocket = exactPath(fpmSocketPath, phpMyAdminNginxTemplatePolicy.fpmSocketPath, 'fpmSocketPath');
@@ -66,8 +68,13 @@ export function renderPhpMyAdminNginxConfig({
     phpMyAdminNginxTemplatePolicy.internalSignonPath,
     'internalSignonPath',
   );
+  const logoutPath = exactPath(
+    internalLogoutPath,
+    phpMyAdminNginxTemplatePolicy.internalLogoutPath,
+    'internalLogoutPath',
+  );
 
-  return `server {\n  listen unix:${gatewaySocket};\n  server_name localhost;\n  server_tokens off;\n  access_log off;\n\n  root ${root};\n  index index.php;\n  client_max_body_size 128m;\n\n  add_header X-Content-Type-Options "nosniff" always;\n  add_header X-Frame-Options "SAMEORIGIN" always;\n  add_header Referrer-Policy "same-origin" always;\n  add_header X-Robots-Tag "noindex, nofollow, noarchive" always;\n\n  location ~ ^/(?:setup|test|libraries|templates)(?:/|$) {\n    deny all;\n  }\n\n  location ~ /\\. {\n    deny all;\n  }\n\n  location / {\n    try_files $uri $uri/ /index.php?$query_string;\n  }\n\n  location = ${signonPath} {\n    limit_except POST {\n      deny all;\n    }\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME ${bridge};\n    fastcgi_param SCRIPT_NAME ${signonPath};\n    fastcgi_param HTTPS on;\n    fastcgi_param HTTP_PROXY \"\";\n    fastcgi_pass unix:${fpmSocket};\n    fastcgi_connect_timeout 5s;\n    fastcgi_send_timeout 10s;\n    fastcgi_read_timeout 10s;\n  }\n\n  location ~ \\.php$ {\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param HTTPS on;\n    fastcgi_param HTTP_PROXY "";\n    fastcgi_pass unix:${fpmSocket};\n    fastcgi_connect_timeout 10s;\n    fastcgi_send_timeout 120s;\n    fastcgi_read_timeout 120s;\n  }\n}\n`;
+  return `server {\n  listen unix:${gatewaySocket};\n  server_name localhost;\n  server_tokens off;\n  access_log off;\n\n  root ${root};\n  index index.php;\n  client_max_body_size 128m;\n\n  add_header X-Content-Type-Options "nosniff" always;\n  add_header X-Frame-Options "SAMEORIGIN" always;\n  add_header Referrer-Policy "same-origin" always;\n  add_header X-Robots-Tag "noindex, nofollow, noarchive" always;\n\n  location ~ ^/(?:setup|test|libraries|templates)(?:/|$) {\n    deny all;\n  }\n\n  location ~ /\\. {\n    deny all;\n  }\n\n  location / {\n    try_files $uri $uri/ /index.php?$query_string;\n  }\n\n  location = ${signonPath} {\n    limit_except POST {\n      deny all;\n    }\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME ${bridge};\n    fastcgi_param SCRIPT_NAME ${signonPath};\n    fastcgi_param YUNPANEL_SIGNON_ACTION signon;\n    fastcgi_param HTTPS on;\n    fastcgi_param HTTP_PROXY \"\";\n    fastcgi_pass unix:${fpmSocket};\n    fastcgi_connect_timeout 5s;\n    fastcgi_send_timeout 10s;\n    fastcgi_read_timeout 10s;\n  }\n\n  location = ${logoutPath} {\n    limit_except GET {\n      deny all;\n    }\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME ${bridge};\n    fastcgi_param SCRIPT_NAME ${logoutPath};\n    fastcgi_param YUNPANEL_SIGNON_ACTION logout;\n    fastcgi_param HTTPS on;\n    fastcgi_param HTTP_PROXY \"\";\n    fastcgi_pass unix:${fpmSocket};\n    fastcgi_connect_timeout 5s;\n    fastcgi_send_timeout 10s;\n    fastcgi_read_timeout 10s;\n  }\n\n  location ~ \\.php$ {\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param HTTPS on;\n    fastcgi_param HTTP_PROXY "";\n    fastcgi_pass unix:${fpmSocket};\n    fastcgi_connect_timeout 10s;\n    fastcgi_send_timeout 120s;\n    fastcgi_read_timeout 120s;\n  }\n}\n`;
 }
 
 export function previewPhpMyAdminNginxConfig(input = {}) {
@@ -91,6 +98,7 @@ export function previewPhpMyAdminNginxConfig(input = {}) {
     gatewaySocketGroup: phpMyAdminNginxTemplatePolicy.gatewaySocketGroup,
     signonBridgePath: phpMyAdminNginxTemplatePolicy.signonBridgePath,
     internalSignonPath: phpMyAdminNginxTemplatePolicy.internalSignonPath,
+    internalLogoutPath: phpMyAdminNginxTemplatePolicy.internalLogoutPath,
     serviceUnit: phpMyAdminNginxTemplatePolicy.serviceUnit,
     healthPath: phpMyAdminNginxTemplatePolicy.healthPath,
   });
