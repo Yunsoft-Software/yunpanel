@@ -11,6 +11,7 @@ Bu kayıt 16 Eylül Website isolation audit'inden sonra tamamlanan source-level 
 - `2d2366e7` regression kontratı independent subdomain'in explicit `parentDomainId` ile ayrı Site create yolundan ayrı Application, Website, Unix identity ve SFTP scope aldığını kilitliyor.
 - `ee584241` ile explicit Domain→Website binding, gerçek Website runtime bilgisi varsa trafik target'ıyla da doğrulanıyor. Static root, PHP/Passenger Application ID ve proxy upstream Website binding'inden saparsa Domain create fail-closed; retained legacy direct-systemd migration uyumluluğu ayrı tutuluyor.
 - Final Website create yüzeyi explicit parent seçilen subdomain'i yeni Node/static/PHP Application veya kullanılmamış bir Application ile aynı preview/digest korumalı Site create operation'ına bağlıyor. Başka Website'e bağlı Application seçenekleri listeden çıkarılıyor; `wwwMode=independent` seçeneği kaldırıldı ve stale form state'i API'ye ulaşmadan reddediliyor.
+- Aynı create yüzeyindeki explicit `shared-site` seçeneği mevcut Website'in canonical Domain/runtime/Unix binding'ini gösterip typed confirmation istiyor. Desteklenen target backend Domain→Website guard'ında tekrar doğrulanıyor; ambiguous legacy/managed Compose target'ları seçenek olmuyor. Bu yol yalnız yeni Domain binding'i oluşturuyor; `www` alias aynı kayıtta kalıyor ve yeni Application, Unix user, runtime, SFTP scope veya mailbox üretilmiyor.
 
 ## Isolation audit HTTP/runtime
 
@@ -80,7 +81,6 @@ Kaynak commit `675579e` için repo dışı `.local/test-server.env` hedefi kulla
 
 ## Kalan P0.1 source işleri
 
-- `shared-site` seçimi mevcut Website binding'ini açıkça göstermeli ve default bağımsız Website olmalı; alias yeni Unix user/runtime/SFTP/mailbox üretmemeli.
 - Isolation migration apply exact değişiklik preview/digest + typed confirmation ile operation-owned değişiklikler yapmalı ve geri alabilmeli; recursive blind `chown` yapmamalı.
 - SFTP key desired state/materialization Website provisioning ownership/evidence ve restart/reconcile lifecycle'ına bağlanmalı.
 - Legacy Website migration apply canonical identity/path/runtime/SFTP drift raporu olmadan destructive ownership repair yapmamalı.

@@ -21,6 +21,69 @@ export function availableExistingApplications({ applications = [], websites = []
     && !boundApplicationIds.has(application.id));
 }
 
+function applicationForWebsite(website, applications) {
+  if (!website?.applicationId) return null;
+  return applications.find((application) => application.id === website.applicationId
+    && application.serverId === website.serverId) ?? null;
+}
+
+export function sharedWebsiteTarget(website, applications = []) {
+  if (!website || typeof website !== 'object') return null;
+  const application = applicationForWebsite(website, applications);
+  if (website.runtimeType === 'static' && application?.type === 'static'
+    && website.documentRoot === application.webRoot) {
+    return { targetType: 'static', target: { root: website.documentRoot, spaFallback: true } };
+  }
+  if (website.runtimeType === 'php' && application?.type === 'php') {
+    return { targetType: 'php', target: { applicationId: application.id } };
+  }
+  if (website.runtimeType === 'node' && application?.type === 'node'
+    && application.runtimeAdapter === 'passenger') {
+    return { targetType: 'passenger', target: { applicationId: application.id } };
+  }
+  if (['docker', 'proxy'].includes(website.runtimeType) && website.proxyTarget) {
+    const { host, port, websocket } = website.proxyTarget;
+    if (typeof host === 'string' && Number.isInteger(port) && typeof websocket === 'boolean') {
+      return { targetType: 'proxy', target: { upstreamHost: host, upstreamPort: port, websocket } };
+    }
+  }
+  return null;
+}
+
+export function availableSharedWebsites({ websites = [], applications = [], serverId } = {}) {
+  if (typeof serverId !== 'string' || !serverId) return [];
+  return websites.filter((website) => website.serverId === serverId
+    && sharedWebsiteTarget(website, applications) !== null);
+}
+
+export function sharedWebsiteConfirmation(primaryDomain, websiteId) {
+  return `share-site:${requiredText(primaryDomain, 'Alan adı gereklidir.')}:${requiredText(websiteId, 'Website kimliği gereklidir.')}`;
+}
+
+export function sharedDomainCreateInput({ domain, website, applications = [], wwwMode = 'none' } = {}) {
+  if (!domain || !website || domain.serverId !== website.serverId) {
+    throw new Error('Paylaşılacak Website bu alan adıyla aynı yerel sunucuda olmalıdır.');
+  }
+  const routing = sharedWebsiteTarget(website, applications);
+  if (!routing) throw new Error('Seçilen Website güvenli shared-site routing için uygun değil.');
+  if (domain.parentDomainId === null && wwwMode === 'alias' && domain.primaryDomain.startsWith('www.')) {
+    throw new Error('www ile başlayan alan adı için ayrıca www alias oluşturulamaz.');
+  }
+  const aliases = domain.parentDomainId === null && wwwMode === 'alias'
+    ? [`www.${domain.primaryDomain}`]
+    : [];
+  return {
+    serverId: domain.serverId,
+    websiteId: website.id,
+    primaryDomain: domain.primaryDomain,
+    parentDomainId: domain.parentDomainId,
+    aliases,
+    targetType: routing.targetType,
+    target: routing.target,
+    httpsMode: domain.httpsMode,
+  };
+}
+
 function sourceFromForm(form, selectedApplication) {
   if (form.sourceMode === 'new_node') {
     return {
@@ -90,4 +153,4 @@ export function siteCreateInputFromForm({ form, operationId, serverId, domain, s
   };
 }
 
-export const newWebsiteFormInternals = Object.freeze({ sourceFromForm });
+export const newWebsiteFormInternals = Object.freeze({ applicationForWebsite, sourceFromForm });

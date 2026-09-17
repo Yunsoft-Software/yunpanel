@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   availableExistingApplications,
+  availableSharedWebsites,
   existingApplicationType,
+  sharedDomainCreateInput,
+  sharedWebsiteConfirmation,
   siteCreateInputFromForm,
 } from '../src/workspace/new-website-form.js';
 
@@ -103,5 +106,55 @@ test('existing Application input requires the selected source type', () => {
       selectedApplication: { id: 'static-app', type: 'static' },
     }),
     /kullanılmamış uygun uygulamayı/,
+  );
+});
+
+test('shared-site creates only a Domain binding with the selected Website canonical target', () => {
+  const applicationId = '5a5ea77f-2d7d-43f7-a455-1ed9e5cb41be';
+  const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
+  const applications = [{
+    id: applicationId, serverId, type: 'node', runtimeAdapter: 'passenger', name: 'API',
+  }];
+  const website = {
+    id: websiteId, serverId, name: 'API Website', applicationId, runtimeType: 'node',
+    documentRoot: `/var/lib/yunpanel/apps/${applicationId}/current`, unixUser: 'yunapp-123456789abc',
+  };
+  assert.deepEqual(availableSharedWebsites({ websites: [website], applications, serverId }), [website]);
+
+  const input = sharedDomainCreateInput({
+    domain: { serverId, primaryDomain: 'example.test', parentDomainId: null, httpsMode: 'managed' },
+    website,
+    applications,
+    wwwMode: 'alias',
+  });
+  assert.deepEqual(input, {
+    serverId,
+    websiteId,
+    primaryDomain: 'example.test',
+    parentDomainId: null,
+    aliases: ['www.example.test'],
+    targetType: 'passenger',
+    target: { applicationId },
+    httpsMode: 'managed',
+  });
+  assert.equal(Object.hasOwn(input, 'application'), false);
+  assert.equal(Object.hasOwn(input, 'unixUser'), false);
+  assert.equal(sharedWebsiteConfirmation(input.primaryDomain, input.websiteId), `share-site:example.test:${websiteId}`);
+});
+
+test('shared-site excludes ambiguous legacy and unmanaged Website routing', () => {
+  const applicationId = '5a5ea77f-2d7d-43f7-a455-1ed9e5cb41be';
+  const applications = [{ id: applicationId, serverId, type: 'node', runtimeAdapter: 'direct-systemd' }];
+  const legacy = { id: 'legacy', serverId, applicationId, runtimeType: 'node' };
+  const managedCompose = { id: 'compose', serverId, applicationId: null, runtimeType: 'docker', proxyTarget: null };
+  const remote = { id: 'remote', serverId: 'remote', applicationId, runtimeType: 'node' };
+  assert.deepEqual(availableSharedWebsites({ websites: [legacy, managedCompose, remote], applications, serverId }), []);
+  assert.throws(
+    () => sharedDomainCreateInput({
+      domain: { serverId, primaryDomain: 'api.example.test', parentDomainId, httpsMode: 'off' },
+      website: legacy,
+      applications,
+    }),
+    /uygun değil/,
   );
 });

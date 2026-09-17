@@ -126,6 +126,23 @@ test('PHP and Passenger Domain bindings require the Website Application identity
   assert.equal(node.websiteId, nodeWebsiteId);
 });
 
+test('shared-site www alias remains one Domain bound to the existing Website', async () => {
+  const domains = registry();
+  const created = await domains.createDomain(baseInput({
+    websiteId: nodeWebsiteId,
+    primaryDomain: 'shared-node.example.test',
+    aliases: ['www.shared-node.example.test'],
+    httpsMode: 'managed',
+    targetType: 'passenger',
+    target: { applicationId: nodeApplicationId },
+  }));
+
+  assert.equal(created.websiteId, nodeWebsiteId);
+  assert.deepEqual(created.aliases, ['www.shared-node.example.test']);
+  assert.equal(created.parentDomainId, null);
+  assert.equal((await domains.listDomains()).length, 1);
+});
+
 test('proxy-backed Website binding rejects a different upstream', async () => {
   const domains = registry();
   await assert.rejects(
