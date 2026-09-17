@@ -60,6 +60,7 @@ import { createMailboxForwardingRegistry } from './mailbox-forwarding-registry.j
 import { createMailboxQuotaRegistry } from './mailbox-quota-registry.js';
 import { createMailboxRegistry } from './mailbox-registry.js';
 import { createPowerDnsAuthoritativeService } from './powerdns-authoritative-service.js';
+import { createPhpMyAdminHandoffService } from './phpmyadmin-handoff-service.js';
 import { createPowerDnsSecretRegistry } from './powerdns-secret-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createRoundcubeConfigurationService } from './roundcube-configuration.js';
@@ -389,6 +390,13 @@ const databaseCredentialApplyService = createDatabaseCredentialApplyService({
   databaseCredentialRegistry,
   jobRegistry,
 });
+const phpMyAdminHandoffService = createPhpMyAdminHandoffService({
+  databaseBindingRegistry,
+  databaseCredentialRegistry,
+  databaseCredentialApplyService,
+  jobRegistry,
+  liveSessions,
+});
 const websiteDatabaseInventoryProvider = () => databaseManager.inspect();
 const websiteDatabaseHealthProvider = () => databaseManager.inspectSecurityBaseline();
 websiteProvisioningRuntime.configureDatabaseControlPlane({
@@ -456,6 +464,7 @@ const listener = createAuthenticatedApi({
       databaseBindingRegistry,
       databaseCredentialRegistry,
       databaseCredentialApplyService,
+      phpMyAdminHandoffService,
       databaseInventoryProvider: () => databaseManager.inspect(),
       databaseHealthProvider: () => databaseManager.inspectSecurityBaseline(),
       websiteMigrationPolicy,
