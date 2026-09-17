@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   applyDatabaseCredential,
   createDatabaseBackup,
+  createPhpMyAdminHandoff,
   finalizeDatabaseCredentialDelete,
   getDatabaseDropPreview,
   getWebsiteDatabaseResources,
@@ -33,6 +34,7 @@ import {
   Section,
 } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
+import { openWebsitePhpMyAdmin } from './phpmyadmin-client.js';
 
 const DROP_BLOCKER_LABELS = Object.freeze({
   database_not_found: 'Canlı schema bulunamadı; metadata silme işlemi başlatılamaz.',
@@ -56,6 +58,7 @@ export default function SiteResourcesPanel({ domain, website, application, serve
   const [backupTarget, setBackupTarget] = useState(null);
   const [restoreTarget, setRestoreTarget] = useState(null);
   const [dropImpact, setDropImpact] = useState(null);
+  const [phpMyAdminOpeningCredentialId, setPhpMyAdminOpeningCredentialId] = useState(null);
 
   const load = useCallback(async () => {
     if (!server) return;
@@ -77,6 +80,28 @@ export default function SiteResourcesPanel({ domain, website, application, serve
   }, [server?.id, domain.id, website?.id, application?.id]);
 
   useEffect(() => { load(); }, [load]);
+
+
+  async function openPhpMyAdmin(credential) {
+    if (!server || !website || !credential || operationPending.current) return;
+    operationPending.current = true;
+    setBusy(true); setError(null); setNotice(null);
+    setPhpMyAdminOpeningCredentialId(credential.id);
+    try {
+      await openWebsitePhpMyAdmin({
+        serverId: server.id,
+        websiteId: website.id,
+        credentialId: credential.id,
+        issueHandoff: createPhpMyAdminHandoff,
+      });
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setError(failure.message);
+    } finally {
+      operationPending.current = false;
+      setPhpMyAdminOpeningCredentialId(null);
+      setBusy(false);
+    }
+  }
 
   async function rotateCredential() {
     if (!server || !rotateTarget || operationPending.current) return;
@@ -362,6 +387,11 @@ export default function SiteResourcesPanel({ domain, website, application, serve
               <td>{credential ? <><code>{credential.username}</code><small>{credential.privileges.join(', ')}</small></> : <span>Credential oluşturulmadı</span>}</td>
               <td>{binding.revision}{credential ? ` / ${credential.revision}` : ''}</td>
               <td className="ws-row-end"><div className="ws-actions">
+                {credential && <Button
+                  disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
+                  title="Bu Website credential kapsamıyla phpMyAdmin aç"
+                  onClick={() => openPhpMyAdmin(credential)}
+                >{phpMyAdminOpeningCredentialId === credential.id ? 'phpMyAdmin açılıyor…' : 'phpMyAdmin aç'}</Button>}
                 <Button
                   disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
                   onClick={() => {
