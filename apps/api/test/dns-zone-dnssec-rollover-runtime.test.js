@@ -67,6 +67,7 @@ function fixture({
   failPublishAfterMutation = false,
   failActivateAfterMutation = false,
   failDeactivateAfterMutation = false,
+  failDeleteAfterMutation = false,
   staleSecondPreview = false,
   propagationReady = false,
   parentRecords = [oldDs],
@@ -80,14 +81,17 @@ function fixture({
   let published = false;
   let activated = false;
   let deactivated = false;
+  let deleted = false;
   let createFailurePending = failCreateAfterMutation;
   let publishFailurePending = failPublishAfterMutation;
   let activateFailurePending = failActivateAfterMutation;
   let deactivateFailurePending = failDeactivateAfterMutation;
+  let deleteFailurePending = failDeleteAfterMutation;
   let createMutations = 0;
   let publishMutations = 0;
   let activateMutations = 0;
   let deactivateMutations = 0;
+  let deleteMutations = 0;
   let previewCalls = 0;
   let parentStatusCalls = 0;
   const preview = rolloverPreview();
@@ -107,7 +111,7 @@ function fixture({
         zoneName: 'example.com',
         dnssec: true,
         localReady: true,
-        keySetDigest: deactivated ? deactivatedDigest : activatedDigest,
+        keySetDigest: deleted ? deletedDigest : deactivated ? deactivatedDigest : activatedDigest,
         parent: Object.freeze({
           status: 'present',
           records: Object.freeze([...records]),
@@ -225,6 +229,27 @@ function fixture({
         ]),
       });
     },
+    deleteRolloverKey: async (input) => {
+      calls.push('delete');
+      assert.equal(input.keyId, 7);
+      assert.equal(input.expectedKeySetDigest, deactivatedDigest);
+      assert.equal(input.expectedRemainingKeySetDigest, deletedDigest);
+      if (!deleted) {
+        deleted = true;
+        deleteMutations += 1;
+      }
+      if (deleteFailurePending) {
+        deleteFailurePending = false;
+        throw new Error('connection reset after delete');
+      }
+      return Object.freeze({
+        changed: deleteMutations === 1,
+        keySetDigest: deletedDigest,
+        serial: 2026091705,
+        deletedKeyId: 7,
+        keys: Object.freeze([publicKey({ active: true, published: true })]),
+      });
+    },
     inspectRolloverPropagation: async (input) => {
       calls.push('propagation');
       if (!propagationReady) return Object.freeze({ status: 'waiting_ttl', ready: false });
@@ -256,6 +281,7 @@ function fixture({
     publishMutations: () => publishMutations,
     activateMutations: () => activateMutations,
     deactivateMutations: () => deactivateMutations,
+    deleteMutations: () => deleteMutations,
   };
 }
 
@@ -393,7 +419,7 @@ test('does not accept a foreign parent DS as completed rollover addition', async
   assert.equal(fx.activateMutations(), 1);
 });
 
-test('persists old-DS absence, waits the parent RRset TTL and deactivates the old key', async () => {
+test('persists old-DS absence, waits the parent RRset TTL and completes old-key cleanup', async () => {
   const fx = fixture({
     propagationReady: true,
     parentRecordSequence: [[oldDs, newDs], [newDs]],
@@ -421,13 +447,23 @@ test('persists old-DS absence, waits the parent RRset TTL and deactivates the ol
   assert.notEqual(fx.calls.at(-1), 'deactivation-preview');
 
   const operation = await fx.runtime.run(operationId);
-  assert.equal(operation.status, 'deleting_old_key');
-  assert.equal(operation.evidence.keySetDigest, deactivatedDigest);
-  assert.equal(operation.evidence.targetKeySetDigest, deletedDigest);
+  assert.equal(operation.status, 'succeeded');
+  assert.equal(operation.evidence.keySetDigest, deletedDigest);
+  assert.equal(operation.evidence.targetKeySetDigest, null);
   assert.equal(operation.evidence.parentRetirement.checkedAt, '2026-09-17T10:06:00.000Z');
   assert.deepEqual(operation.evidence.parentDs, [newDs]);
-  assert.deepEqual(fx.calls.slice(-4), ['deactivation-preview', 'parent-status', 'deactivate', 'deletion-preview']);
+  assert.deepEqual(fx.calls.slice(-6), [
+    'deactivation-preview', 'parent-status', 'deactivate', 'deletion-preview', 'parent-status', 'delete',
+  ]);
+  assert.deepEqual(operation.result, {
+    oldKeyId: 7,
+    newKeyId: 8,
+    keySetDigest: deletedDigest,
+    serial: 2026091705,
+    parentDs: [newDs],
+  });
   assert.equal(fx.deactivateMutations(), 1);
+  assert.equal(fx.deleteMutations(), 1);
 });
 
 test('resets the parent TTL gate if the old DS reappears before key deactivation', async () => {
@@ -460,7 +496,7 @@ test('resets the parent TTL gate if the old DS reappears before key deactivation
   assert.equal(restartedWait.evidence.parentRetirement.eligibleAfter, '2026-09-17T10:11:00.000Z');
 
   const operation = await fx.runtime.run(operationId);
-  assert.equal(operation.status, 'deleting_old_key');
+  assert.equal(operation.status, 'succeeded');
   assert.equal(operation.evidence.parentRetirement.checkedAt, '2026-09-17T10:11:00.000Z');
 });
 
@@ -487,7 +523,7 @@ test('restart recovery preserves the first parent DS absence and its TTL deadlin
   const recovery = await restarted.init();
   assert.equal(recovery.length, 1);
   assert.equal(recovery[0].recovered, true);
-  assert.equal(recovery[0].operation.status, 'deleting_old_key');
+  assert.equal(recovery[0].operation.status, 'succeeded');
   assert.equal(recovery[0].operation.evidence.parentRetirement.observedAt, '2026-09-17T10:01:00.000Z');
   assert.equal(recovery[0].operation.evidence.parentRetirement.checkedAt, '2026-09-17T10:06:00.000Z');
 });
@@ -546,10 +582,73 @@ test('retries an uncertain old-key deactivation without a duplicate mutation', a
   assert.equal(interrupted.evidence.targetKeySetDigest, deactivatedDigest);
 
   const recovered = await fx.runtime.run(operationId);
-  assert.equal(recovered.status, 'deleting_old_key');
-  assert.equal(recovered.evidence.keySetDigest, deactivatedDigest);
-  assert.equal(recovered.evidence.targetKeySetDigest, deletedDigest);
+  assert.equal(recovered.status, 'succeeded');
+  assert.equal(recovered.evidence.keySetDigest, deletedDigest);
+  assert.equal(recovered.evidence.targetKeySetDigest, null);
   assert.equal(fx.deactivateMutations(), 1);
+  assert.equal(fx.deleteMutations(), 1);
+});
+
+test('rechecks clean parent DS evidence immediately before old-key deletion', async () => {
+  const fx = fixture({
+    propagationReady: true,
+    parentRecordSequence: [[oldDs, newDs], [newDs], [newDs], [newDs], [newDs], [oldDs, newDs]],
+    parentCheckedAtSequence: [
+      '2026-09-17T10:00:00.000Z',
+      '2026-09-17T10:01:00.000Z',
+      '2026-09-17T10:04:00.000Z',
+      '2026-09-17T10:06:00.000Z',
+      '2026-09-17T10:06:01.000Z',
+      '2026-09-17T10:06:02.000Z',
+    ],
+  });
+  await fx.runtime.init();
+  const waiting = await fx.runtime.start({
+    domainId,
+    previewDigest: fx.preview.previewDigest,
+    confirmation: fx.preview.confirmation,
+  });
+  assert.equal(waiting.status, 'waiting_parent_ds_ttl');
+
+  const operation = await fx.runtime.run(operationId);
+  assert.equal(operation.status, 'deleting_old_key');
+  assert.equal(operation.evidence.keySetDigest, deactivatedDigest);
+  assert.equal(operation.evidence.targetKeySetDigest, deletedDigest);
+  assert.equal(fx.deactivateMutations(), 1);
+  assert.equal(fx.deleteMutations(), 0);
+  assert.notEqual(fx.calls.at(-1), 'delete');
+});
+
+test('retries an uncertain old-key deletion without a duplicate mutation', async () => {
+  const fx = fixture({
+    propagationReady: true,
+    failDeleteAfterMutation: true,
+    parentRecordSequence: [[oldDs, newDs], [newDs]],
+    parentCheckedAtSequence: [
+      '2026-09-17T10:00:00.000Z',
+      '2026-09-17T10:01:00.000Z',
+      '2026-09-17T10:04:00.000Z',
+      '2026-09-17T10:06:00.000Z',
+    ],
+  });
+  await fx.runtime.init();
+  const waiting = await fx.runtime.start({
+    domainId,
+    previewDigest: fx.preview.previewDigest,
+    confirmation: fx.preview.confirmation,
+  });
+  assert.equal(waiting.status, 'waiting_parent_ds_ttl');
+
+  await assert.rejects(fx.runtime.run(operationId), /connection reset after delete/);
+  const interrupted = await fx.registry.get(operationId);
+  assert.equal(interrupted.status, 'deleting_old_key');
+  assert.equal(interrupted.evidence.keySetDigest, deactivatedDigest);
+  assert.equal(interrupted.evidence.targetKeySetDigest, deletedDigest);
+
+  const recovered = await fx.runtime.run(operationId);
+  assert.equal(recovered.status, 'succeeded');
+  assert.equal(recovered.result.keySetDigest, deletedDigest);
+  assert.equal(fx.deleteMutations(), 1);
 });
 
 test('retries an uncertain activation from persisted target digest without duplicate mutation', async () => {

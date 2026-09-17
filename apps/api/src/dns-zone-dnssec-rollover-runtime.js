@@ -340,16 +340,45 @@ function deletionTarget(operation, deactivated, preview) {
   return Object.freeze({ ...deactivated, targetKeySetDigest: preview.remainingKeySetDigest });
 }
 
+function deletedResult(operation, result, parentEvidence) {
+  const remainingKey = Array.isArray(result?.keys)
+    ? result.keys.find((entry) => entry?.id === operation.evidence.newKeyId)
+    : null;
+  if (!result || result.keySetDigest !== operation.evidence.targetKeySetDigest
+    || !Number.isSafeInteger(result.serial) || result.serial < 1
+    || result.deletedKeyId !== operation.oldKey.id
+    || (Array.isArray(result.keys) && result.keys.some((entry) => entry?.id === operation.oldKey.id))
+    || !remainingKey || remainingKey.keyType !== operation.newKey.keyType
+    || remainingKey.algorithm !== operation.newKey.algorithm || remainingKey.bits !== operation.newKey.bits
+    || remainingKey.active !== true || remainingKey.published !== true
+    || !Array.isArray(remainingKey.ds)
+    || JSON.stringify(remainingKey.ds) !== JSON.stringify(operation.evidence.newKeyDs)
+    || !parentEvidence || JSON.stringify(parentEvidence.parentDs) !== JSON.stringify(operation.evidence.parentDs)) {
+    throw new DnsZoneDnssecRolloverRuntimeError(
+      'dnssec_rollover_deletion_evidence_invalid',
+      'DNSSEC rollover old-key deletion evidence is invalid',
+      503,
+    );
+  }
+  return Object.freeze({
+    oldKeyId: operation.oldKey.id,
+    newKeyId: operation.evidence.newKeyId,
+    keySetDigest: result.keySetDigest,
+    serial: result.serial,
+    parentDs: parentEvidence.parentDs,
+  });
+}
+
 export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
     || typeof registry.listActive !== 'function' || typeof registry.advance !== 'function'
     || typeof registry.resetParentRetirement !== 'function'
-    || typeof registry.fail !== 'function'
+    || typeof registry.succeed !== 'function' || typeof registry.fail !== 'function'
     || !service || typeof service.status !== 'function'
     || typeof service.previewRollover !== 'function' || typeof service.createRolloverKey !== 'function'
     || typeof service.previewRolloverKeyState !== 'function' || typeof service.setRolloverKeyState !== 'function'
-    || typeof service.previewRolloverKeyDeletion !== 'function'
+    || typeof service.previewRolloverKeyDeletion !== 'function' || typeof service.deleteRolloverKey !== 'function'
     || typeof service.inspectRolloverPropagation !== 'function') {
     throw new DnsZoneDnssecRolloverRuntimeError('dnssec_rollover_runtime_dependencies_invalid', 'DNSSEC rollover runtime dependencies are unavailable', 503);
   }
@@ -367,7 +396,7 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
     if (operation.status === 'succeeded' || operation.status === 'failed'
       || !['pending', 'creating_key', 'publishing_key', 'verifying_dnskey_propagation', 'activating_key',
         'awaiting_parent_ds_addition', 'awaiting_parent_ds_retirement', 'waiting_parent_ds_ttl',
-        'deactivating_old_key']
+        'deactivating_old_key', 'deleting_old_key']
         .includes(operation.status)) {
       return dnsZoneDnssecRolloverPublicView(operation);
     }
@@ -566,6 +595,33 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
       try { operation = await registry.advance(operation.id, 'deleting_old_key', target); }
       catch (error) { throw mapped(error); }
     }
+
+    if (operation.status === 'deleting_old_key') {
+      let parentEvidence;
+      try {
+        const observation = parentRetirementEvidence(
+          operation,
+          await service.status({ domainId: operation.domainId }),
+          { allowedKeySetDigests: [operation.evidence.keySetDigest, operation.evidence.targetKeySetDigest] },
+        );
+        parentEvidence = observation === null
+          ? null
+          : completedParentRetirementEvidence(operation, observation);
+      } catch (error) { throw mapped(error); }
+      if (parentEvidence === null) return dnsZoneDnssecRolloverPublicView(operation);
+
+      let result;
+      try {
+        result = deletedResult(operation, await service.deleteRolloverKey({
+          domainId: operation.domainId,
+          keyId: operation.oldKey.id,
+          expectedKeySetDigest: operation.evidence.keySetDigest,
+          expectedRemainingKeySetDigest: operation.evidence.targetKeySetDigest,
+        }), parentEvidence);
+      } catch (error) { throw mapped(error); }
+      try { operation = await registry.succeed(operation.id, result); }
+      catch (error) { throw mapped(error); }
+    }
     return dnsZoneDnssecRolloverPublicView(operation);
   }
 
@@ -640,4 +696,5 @@ export const dnsZoneDnssecRolloverRuntimeInternals = Object.freeze({
   deactivationTarget,
   deactivatedEvidence,
   deletionTarget,
+  deletedResult,
 });
