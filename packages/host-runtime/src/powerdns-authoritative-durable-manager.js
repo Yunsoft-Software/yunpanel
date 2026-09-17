@@ -207,6 +207,13 @@ export function createPowerDnsAuthoritativeDurableManager({
   }
 
   let writeChain = Promise.resolve();
+  let mutationChain = Promise.resolve();
+
+  function serializeMutation(operation) {
+    const execution = mutationChain.then(operation, operation);
+    mutationChain = execution.catch(() => {});
+    return execution;
+  }
 
   async function readOperation() {
     try { return persistedOperation(JSON.parse(await readFileFn(operationPath, 'utf8'))); }
@@ -270,7 +277,7 @@ export function createPowerDnsAuthoritativeDurableManager({
     return publicOperation(await readOperation());
   }
 
-  async function resolve(rawIntent, { operationId, expectedUpdatedAt } = {}) {
+  async function resolveOnce(rawIntent, { operationId, expectedUpdatedAt } = {}) {
     const spec = powerDnsAuthoritativeManagerInternals.normalizeIntent(rawIntent);
     if (typeof operationId !== 'string' || !operationId
       || typeof expectedUpdatedAt !== 'string' || !expectedUpdatedAt) {
@@ -301,6 +308,10 @@ export function createPowerDnsAuthoritativeDurableManager({
     return recoverInterrupted(existing, spec);
   }
 
+  function resolve(rawIntent, recovery) {
+    return serializeMutation(() => resolveOnce(rawIntent, recovery));
+  }
+
   async function recoverInterrupted(operation, spec) {
     let inspected;
     try { inspected = await manager.inspect(spec); }
@@ -321,7 +332,7 @@ export function createPowerDnsAuthoritativeDurableManager({
     );
   }
 
-  async function apply(rawIntent) {
+  async function applyOnce(rawIntent) {
     const spec = powerDnsAuthoritativeManagerInternals.normalizeIntent(rawIntent);
     const existing = await readOperation();
     if (existing?.status === 'applying') {
@@ -368,6 +379,10 @@ export function createPowerDnsAuthoritativeDurableManager({
     const result = evidenceFromInspection(spec, applied);
     await mutate(operation, { status: 'succeeded', result, lastError: null });
     return applied;
+  }
+
+  function apply(rawIntent) {
+    return serializeMutation(() => applyOnce(rawIntent));
   }
 
   return Object.freeze({ inspect, apply, operation, resolve });

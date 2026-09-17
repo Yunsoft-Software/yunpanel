@@ -26,7 +26,6 @@ Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 ## P0.2 — Sunucu kimliği, ns1/ns2 ve PowerDNS Authoritative
 
 - [ ] Durable PowerDNS recovery/control surface'ına explicit retry/rollback aksiyonlarını ekle; destructive aksiyonlar typed confirmation + audit kullansın.
-- [ ] `recovery_pending` durumunda hiçbir package/config/service mutation'ı kör replay edilmesin.
 
 Gerçek host, public DNS, delegation/glue ve browser kabul kapıları `todo.md` içindedir.
 

@@ -214,6 +214,39 @@ test('PowerDNS recovery resolution rejects a stale journal fence before host ins
   assert.equal((await manager.operation()).status, 'applying');
 });
 
+test('PowerDNS durable manager serializes concurrent apply requests before host mutation', async () => {
+  const journal = memoryJournal();
+  let applied = false;
+  let applyCalls = 0;
+  let releaseApply;
+  const applyGate = new Promise((resolve) => { releaseApply = resolve; });
+  const manager = createPowerDnsAuthoritativeDurableManager({
+    manager: {
+      async inspect() { return applied ? satisfied() : unsatisfied(); },
+      async apply() {
+        applyCalls += 1;
+        await applyGate;
+        applied = true;
+        return satisfied();
+      },
+    },
+    operationPath: '/state/powerdns-operation.json',
+    now: () => Date.parse(appliedAt),
+    idFactory: () => 'operation-concurrent',
+    ...journal,
+  });
+
+  const first = manager.apply(intent());
+  const second = manager.apply(intent());
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(applyCalls, 1);
+  releaseApply();
+  const results = await Promise.all([first, second]);
+  assert.equal(applyCalls, 1);
+  assert.equal(results.every((result) => result.satisfied === true), true);
+  assert.equal((await manager.operation()).status, 'succeeded');
+});
+
 test('PowerDNS durable manager records config validation rollback as a deterministic failed operation', async () => {
   const journal = memoryJournal();
   const operationPath = '/state/powerdns-operation.json';
