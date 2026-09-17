@@ -69,6 +69,8 @@ function fixture({
   propagationReady = false,
   parentRecords = [oldDs],
   parentRecordSequence = null,
+  parentTtl = 300,
+  parentCheckedAtSequence = null,
 } = {}) {
   const registry = createDnsZoneDnssecRolloverRegistry({ idFactory: () => operationId });
   const calls = [];
@@ -88,7 +90,10 @@ function fixture({
     status: async () => {
       calls.push('parent-status');
       const sequence = parentRecordSequence ?? [parentRecords];
-      const records = sequence[Math.min(parentStatusCalls, sequence.length - 1)];
+      const index = parentStatusCalls;
+      const records = sequence[Math.min(index, sequence.length - 1)];
+      const checkedSequence = parentCheckedAtSequence ?? ['2026-09-17T10:00:00.000Z'];
+      const checkedAt = checkedSequence[Math.min(index, checkedSequence.length - 1)];
       parentStatusCalls += 1;
       return Object.freeze({
         version: 1,
@@ -98,7 +103,12 @@ function fixture({
         dnssec: true,
         localReady: true,
         keySetDigest: activatedDigest,
-        parent: Object.freeze({ status: 'present', records: Object.freeze([...records]) }),
+        parent: Object.freeze({
+          status: 'present',
+          records: Object.freeze([...records]),
+          ttl: parentTtl,
+          checkedAt,
+        }),
       });
     },
     previewRollover: async () => {
@@ -198,6 +208,7 @@ function fixture({
     calls,
     registry,
     runtime,
+    service,
     preview,
     createMutations: () => createMutations,
     publishMutations: () => publishMutations,
@@ -339,23 +350,102 @@ test('does not accept a foreign parent DS as completed rollover addition', async
   assert.equal(fx.activateMutations(), 1);
 });
 
-test('persists old-key deactivation target only after old DS is authoritatively retired', async () => {
+test('persists old-DS absence and waits the parent RRset TTL before preparing key deactivation', async () => {
   const fx = fixture({
     propagationReady: true,
     parentRecordSequence: [[oldDs, newDs], [newDs]],
+    parentCheckedAtSequence: [
+      '2026-09-17T10:00:00.000Z',
+      '2026-09-17T10:01:00.000Z',
+      '2026-09-17T10:04:00.000Z',
+      '2026-09-17T10:06:00.000Z',
+    ],
   });
   await fx.runtime.init();
-  const operation = await fx.runtime.start({
+  const waiting = await fx.runtime.start({
     domainId,
     previewDigest: fx.preview.previewDigest,
     confirmation: fx.preview.confirmation,
   });
 
+  assert.equal(waiting.status, 'waiting_parent_ds_ttl');
+  assert.deepEqual(waiting.evidence.parentRetirement, {
+    ttl: 300,
+    observedAt: '2026-09-17T10:01:00.000Z',
+    eligibleAfter: '2026-09-17T10:06:00.000Z',
+    checkedAt: null,
+  });
+  assert.notEqual(fx.calls.at(-1), 'deactivation-preview');
+
+  const operation = await fx.runtime.run(operationId);
   assert.equal(operation.status, 'deactivating_old_key');
   assert.equal(operation.evidence.keySetDigest, activatedDigest);
   assert.equal(operation.evidence.targetKeySetDigest, deactivatedDigest);
+  assert.equal(operation.evidence.parentRetirement.checkedAt, '2026-09-17T10:06:00.000Z');
   assert.deepEqual(operation.evidence.parentDs, [newDs]);
   assert.equal(fx.calls.at(-1), 'deactivation-preview');
+});
+
+test('resets the parent TTL gate if the old DS reappears before key deactivation', async () => {
+  const fx = fixture({
+    propagationReady: true,
+    parentRecordSequence: [[oldDs, newDs], [newDs], [oldDs, newDs], [newDs], [newDs], [newDs]],
+    parentCheckedAtSequence: [
+      '2026-09-17T10:00:00.000Z',
+      '2026-09-17T10:01:00.000Z',
+      '2026-09-17T10:04:00.000Z',
+      '2026-09-17T10:06:00.000Z',
+      '2026-09-17T10:06:00.000Z',
+      '2026-09-17T10:11:00.000Z',
+    ],
+  });
+  await fx.runtime.init();
+  const reset = await fx.runtime.start({
+    domainId,
+    previewDigest: fx.preview.previewDigest,
+    confirmation: fx.preview.confirmation,
+  });
+
+  assert.equal(reset.status, 'awaiting_parent_ds_retirement');
+  assert.equal(reset.evidence.parentRetirement, null);
+  assert.notEqual(fx.calls.at(-1), 'deactivation-preview');
+
+  const restartedWait = await fx.runtime.run(operationId);
+  assert.equal(restartedWait.status, 'waiting_parent_ds_ttl');
+  assert.equal(restartedWait.evidence.parentRetirement.observedAt, '2026-09-17T10:06:00.000Z');
+  assert.equal(restartedWait.evidence.parentRetirement.eligibleAfter, '2026-09-17T10:11:00.000Z');
+
+  const operation = await fx.runtime.run(operationId);
+  assert.equal(operation.status, 'deactivating_old_key');
+  assert.equal(operation.evidence.parentRetirement.checkedAt, '2026-09-17T10:11:00.000Z');
+});
+
+test('restart recovery preserves the first parent DS absence and its TTL deadline', async () => {
+  const fx = fixture({
+    propagationReady: true,
+    parentRecordSequence: [[oldDs, newDs], [newDs], [newDs], [newDs]],
+    parentCheckedAtSequence: [
+      '2026-09-17T10:00:00.000Z',
+      '2026-09-17T10:01:00.000Z',
+      '2026-09-17T10:04:00.000Z',
+      '2026-09-17T10:06:00.000Z',
+    ],
+  });
+  await fx.runtime.init();
+  const waiting = await fx.runtime.start({
+    domainId,
+    previewDigest: fx.preview.previewDigest,
+    confirmation: fx.preview.confirmation,
+  });
+  assert.equal(waiting.status, 'waiting_parent_ds_ttl');
+
+  const restarted = createDnsZoneDnssecRolloverRuntime({ registry: fx.registry, service: fx.service });
+  const recovery = await restarted.init();
+  assert.equal(recovery.length, 1);
+  assert.equal(recovery[0].recovered, true);
+  assert.equal(recovery[0].operation.status, 'deactivating_old_key');
+  assert.equal(recovery[0].operation.evidence.parentRetirement.observedAt, '2026-09-17T10:01:00.000Z');
+  assert.equal(recovery[0].operation.evidence.parentRetirement.checkedAt, '2026-09-17T10:06:00.000Z');
 });
 
 test('retries an uncertain activation from persisted target digest without duplicate mutation', async () => {

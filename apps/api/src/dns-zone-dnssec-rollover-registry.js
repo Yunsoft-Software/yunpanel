@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertDomainName, assertUuid } from '@yunpanel/shared';
 
-const STORE_VERSION = 3;
+const STORE_VERSION = 4;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ALGORITHM_PATTERN = /^[A-Z][A-Z0-9_-]{1,63}$/;
 const KEY_TYPES = new Set(['ksk', 'csk']);
@@ -26,6 +26,7 @@ const STATUSES = Object.freeze([
   'activating_key',
   'awaiting_parent_ds_addition',
   'awaiting_parent_ds_retirement',
+  'waiting_parent_ds_ttl',
   'deactivating_old_key',
   'deleting_old_key',
   'succeeded',
@@ -40,7 +41,8 @@ const NEXT_STATUS = Object.freeze({
   verifying_dnskey_propagation: 'activating_key',
   activating_key: 'awaiting_parent_ds_addition',
   awaiting_parent_ds_addition: 'awaiting_parent_ds_retirement',
-  awaiting_parent_ds_retirement: 'deactivating_old_key',
+  awaiting_parent_ds_retirement: 'waiting_parent_ds_ttl',
+  waiting_parent_ds_ttl: 'deactivating_old_key',
   deactivating_old_key: 'deleting_old_key',
 });
 
@@ -175,8 +177,32 @@ function propagation(value) {
   });
 }
 
+function parentRetirement(value) {
+  if (value === null) return null;
+  const fields = new Set(['ttl', 'observedAt', 'eligibleAfter', 'checkedAt']);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
+    || !Number.isSafeInteger(value.ttl) || value.ttl < 0 || value.ttl > 2_147_483_647) {
+    throw invalid('DNSSEC rollover parent retirement evidence is invalid');
+  }
+  const observedAt = timestamp(value.observedAt);
+  const eligibleAfter = timestamp(value.eligibleAfter);
+  const checkedAt = value.checkedAt === null ? null : timestamp(value.checkedAt);
+  let expectedEligibleAfter;
+  try { expectedEligibleAfter = new Date(Date.parse(observedAt) + (value.ttl * 1000)).toISOString(); }
+  catch { throw invalid('DNSSEC rollover parent retirement TTL evidence is invalid'); }
+  if (eligibleAfter !== expectedEligibleAfter
+    || (checkedAt !== null && Date.parse(checkedAt) < Date.parse(eligibleAfter))) {
+    throw invalid('DNSSEC rollover parent retirement TTL evidence is invalid');
+  }
+  return Object.freeze({ ttl: value.ttl, observedAt, eligibleAfter, checkedAt });
+}
+
 function evidence(value) {
-  const fields = new Set(['newKeyId', 'keySetDigest', 'targetKeySetDigest', 'newKeyDs', 'serial', 'parentDs', 'propagation']);
+  const fields = new Set([
+    'newKeyId', 'keySetDigest', 'targetKeySetDigest', 'newKeyDs', 'serial', 'parentDs', 'propagation',
+    'parentRetirement',
+  ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
     || (value.newKeyId !== null && (!Number.isSafeInteger(value.newKeyId) || value.newKeyId < 0))
@@ -193,6 +219,7 @@ function evidence(value) {
     serial: value.serial,
     parentDs: dsRecords(value.parentDs, 'parent DS'),
     propagation: propagation(value.propagation),
+    parentRetirement: parentRetirement(value.parentRetirement),
   });
 }
 
@@ -229,7 +256,11 @@ function validateProgress(operation) {
   if (operation.status === 'failed') return;
   const requiresNewKey = !['pending', 'creating_key'].includes(operation.status);
   const requiresPropagation = ['activating_key', 'awaiting_parent_ds_addition', 'awaiting_parent_ds_retirement',
-    'deactivating_old_key', 'deleting_old_key', 'succeeded'].includes(operation.status);
+    'waiting_parent_ds_ttl', 'deactivating_old_key', 'deleting_old_key', 'succeeded'].includes(operation.status);
+  const requiresParentRetirement = ['waiting_parent_ds_ttl', 'deactivating_old_key', 'deleting_old_key',
+    'succeeded'].includes(operation.status);
+  const requiresCompletedParentRetirement = ['deactivating_old_key', 'deleting_old_key', 'succeeded']
+    .includes(operation.status);
   const requiresTargetDigest = ['publishing_key', 'activating_key', 'deactivating_old_key', 'deleting_old_key'].includes(operation.status);
   if (requiresNewKey && (operation.evidence.newKeyId === null
     || operation.evidence.newKeyId === operation.oldKey.id || operation.evidence.newKeyDs.length === 0)) {
@@ -241,6 +272,18 @@ function validateProgress(operation) {
   if (operation.status === 'activating_key' && operation.evidence.propagation !== null
     && operation.evidence.propagation.serial !== operation.evidence.serial) {
     throw invalid('DNSSEC rollover propagation serial does not match key evidence');
+  }
+  if (requiresParentRetirement && operation.evidence.parentRetirement === null) {
+    throw invalid('DNSSEC rollover stage is missing parent retirement evidence');
+  }
+  if (!requiresParentRetirement && operation.evidence.parentRetirement !== null) {
+    throw invalid('DNSSEC rollover stage cannot contain parent retirement evidence');
+  }
+  if (requiresCompletedParentRetirement && operation.evidence.parentRetirement.checkedAt === null) {
+    throw invalid('DNSSEC rollover stage is missing completed parent retirement TTL evidence');
+  }
+  if (operation.status === 'waiting_parent_ds_ttl' && operation.evidence.parentRetirement.checkedAt !== null) {
+    throw invalid('DNSSEC rollover waiting stage cannot contain completed parent retirement TTL evidence');
   }
   if (requiresTargetDigest && operation.evidence.targetKeySetDigest === null) {
     throw invalid('DNSSEC rollover mutation stage is missing target key-set evidence');
@@ -336,6 +379,7 @@ function operationFromPreview(preview, now, idFactory) {
       serial: null,
       parentDs: preview.parentDs,
       propagation: null,
+      parentRetirement: null,
     },
     result: null,
     error: null,
@@ -398,7 +442,7 @@ export function createDnsZoneDnssecRolloverRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, 2, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
+        if (![1, 2, 3, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((field) => !['version', 'operations'].includes(field))) {
           throw invalid('DNSSEC rollover operation store is invalid');
         }
@@ -407,10 +451,15 @@ export function createDnsZoneDnssecRolloverRegistry({
             ? {
               ...entry.evidence,
               ...(parsed.version === 1 ? { targetKeySetDigest: null } : {}),
+              ...(parsed.version < STORE_VERSION ? { parentRetirement: null } : {}),
             }
             : entry?.evidence;
           if (parsed.version < STORE_VERSION && migratedEvidence?.propagation !== null) {
-            throw invalid('Legacy DNSSEC propagation evidence cannot be safely migrated');
+            const statusRequiresParentRetirement = ['deactivating_old_key', 'deleting_old_key', 'succeeded']
+              .includes(entry?.status);
+            if (parsed.version < 3 || statusRequiresParentRetirement) {
+              throw invalid('Legacy DNSSEC rollover evidence cannot be safely migrated');
+            }
           }
           return { ...entry, evidence: migratedEvidence };
         });
@@ -494,6 +543,25 @@ export function createDnsZoneDnssecRolloverRegistry({
     return mutate(current.id, { status: targetStatus, evidence: normalizedEvidence, result: null, error: null });
   }
 
+  async function resetParentRetirement(operationId) {
+    const current = await get(operationId);
+    if (!current) throw new DnsZoneDnssecRolloverRegistryError('dnssec_rollover_operation_not_found', 'DNSSEC rollover operation was not found', 404);
+    if (current.status === 'awaiting_parent_ds_retirement') return current;
+    if (current.status !== 'waiting_parent_ds_ttl') {
+      throw new DnsZoneDnssecRolloverRegistryError(
+        'dnssec_rollover_transition_invalid',
+        'DNSSEC rollover parent retirement wait cannot be reset from its current stage',
+        409,
+      );
+    }
+    return mutate(current.id, {
+      status: 'awaiting_parent_ds_retirement',
+      evidence: { ...current.evidence, parentRetirement: null },
+      result: null,
+      error: null,
+    });
+  }
+
   async function succeed(operationId, result) {
     const current = await get(operationId);
     if (!current) throw new DnsZoneDnssecRolloverRegistryError('dnssec_rollover_operation_not_found', 'DNSSEC rollover operation was not found', 404);
@@ -531,7 +599,7 @@ export function createDnsZoneDnssecRolloverRegistry({
     return mutate(current.id, { status: 'failed', result: null, error: safeError(error) });
   }
 
-  return Object.freeze({ init, create, get, listForDomain, listActive, advance, succeed, fail });
+  return Object.freeze({ init, create, get, listForDomain, listActive, advance, resetParentRetirement, succeed, fail });
 }
 
 export const dnsZoneDnssecRolloverRegistryInternals = Object.freeze({

@@ -94,6 +94,7 @@ function publicationTarget(operation, created, preview) {
     serial: created.serial,
     parentDs: operation.initialParentDs,
     propagation: null,
+    parentRetirement: null,
   });
 }
 
@@ -231,10 +232,46 @@ function parentRetirementEvidence(operation, state) {
   const newPresent = state.parent.records.some((record) => operation.evidence.newKeyDs.includes(record));
   const foreignPresent = state.parent.records.some((record) => !allowed.has(record));
   if (oldPresent || !newPresent || foreignPresent) return null;
-  return Object.freeze([...state.parent.records]);
+  if (!Number.isSafeInteger(state.parent.ttl) || state.parent.ttl < 0 || state.parent.ttl > 2_147_483_647
+    || typeof state.parent.checkedAt !== 'string' || !Number.isFinite(Date.parse(state.parent.checkedAt))
+    || new Date(state.parent.checkedAt).toISOString() !== state.parent.checkedAt) {
+    throw new DnsZoneDnssecRolloverRuntimeError(
+      'dnssec_rollover_parent_retirement_ttl_invalid',
+      'DNSSEC rollover parent DS retirement TTL evidence is invalid',
+      503,
+    );
+  }
+  return Object.freeze({
+    parentDs: Object.freeze([...state.parent.records]),
+    ttl: state.parent.ttl,
+    checkedAt: state.parent.checkedAt,
+  });
 }
 
-function deactivationTarget(operation, parentDs, preview) {
+function parentRetirementWaitEvidence(operation, observation) {
+  return Object.freeze({
+    ...operation.evidence,
+    parentDs: observation.parentDs,
+    parentRetirement: Object.freeze({
+      ttl: observation.ttl,
+      observedAt: observation.checkedAt,
+      eligibleAfter: new Date(Date.parse(observation.checkedAt) + (observation.ttl * 1000)).toISOString(),
+      checkedAt: null,
+    }),
+  });
+}
+
+function completedParentRetirementEvidence(operation, observation) {
+  const retirement = operation.evidence.parentRetirement;
+  if (!retirement || JSON.stringify(observation.parentDs) !== JSON.stringify(operation.evidence.parentDs)
+    || Date.parse(observation.checkedAt) < Date.parse(retirement.eligibleAfter)) return null;
+  return Object.freeze({
+    ...operation.evidence,
+    parentRetirement: Object.freeze({ ...retirement, checkedAt: observation.checkedAt }),
+  });
+}
+
+function deactivationTarget(operation, completedEvidence, preview) {
   const key = preview?.targetKey;
   if (!preview || preview.keySetDigest !== operation.evidence.keySetDigest
     || typeof preview.targetKeySetDigest !== 'string' || !SHA256_PATTERN.test(preview.targetKeySetDigest)
@@ -249,9 +286,8 @@ function deactivationTarget(operation, parentDs, preview) {
     );
   }
   return Object.freeze({
-    ...operation.evidence,
+    ...completedEvidence,
     targetKeySetDigest: preview.targetKeySetDigest,
-    parentDs,
   });
 }
 
@@ -259,6 +295,7 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
     || typeof registry.listActive !== 'function' || typeof registry.advance !== 'function'
+    || typeof registry.resetParentRetirement !== 'function'
     || typeof registry.fail !== 'function'
     || !service || typeof service.status !== 'function'
     || typeof service.previewRollover !== 'function' || typeof service.createRolloverKey !== 'function'
@@ -279,7 +316,8 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
     let operation = await getRequired(operationId);
     if (operation.status === 'succeeded' || operation.status === 'failed'
       || !['pending', 'creating_key', 'publishing_key', 'verifying_dnskey_propagation', 'activating_key',
-        'awaiting_parent_ds_addition', 'awaiting_parent_ds_retirement'].includes(operation.status)) {
+        'awaiting_parent_ds_addition', 'awaiting_parent_ds_retirement', 'waiting_parent_ds_ttl']
+        .includes(operation.status)) {
       return dnsZoneDnssecRolloverPublicView(operation);
     }
 
@@ -398,14 +436,37 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
     }
 
     if (operation.status === 'awaiting_parent_ds_retirement') {
-      let parentDs;
+      let observation;
       try {
-        parentDs = parentRetirementEvidence(operation, await service.status({ domainId: operation.domainId }));
+        observation = parentRetirementEvidence(operation, await service.status({ domainId: operation.domainId }));
       } catch (error) { throw mapped(error); }
-      if (parentDs === null) return dnsZoneDnssecRolloverPublicView(operation);
+      if (observation === null) return dnsZoneDnssecRolloverPublicView(operation);
+      try {
+        operation = await registry.advance(
+          operation.id,
+          'waiting_parent_ds_ttl',
+          parentRetirementWaitEvidence(operation, observation),
+        );
+      } catch (error) { throw mapped(error); }
+    }
+
+    if (operation.status === 'waiting_parent_ds_ttl') {
+      let completedEvidence;
+      try {
+        const observation = parentRetirementEvidence(
+          operation,
+          await service.status({ domainId: operation.domainId }),
+        );
+        if (observation === null) {
+          operation = await registry.resetParentRetirement(operation.id);
+          return dnsZoneDnssecRolloverPublicView(operation);
+        }
+        completedEvidence = completedParentRetirementEvidence(operation, observation);
+      } catch (error) { throw mapped(error); }
+      if (completedEvidence === null) return dnsZoneDnssecRolloverPublicView(operation);
       let target;
       try {
-        target = deactivationTarget(operation, parentDs, await service.previewRolloverKeyState({
+        target = deactivationTarget(operation, completedEvidence, await service.previewRolloverKeyState({
           domainId: operation.domainId,
           keyId: operation.oldKey.id,
           active: false,
@@ -484,5 +545,7 @@ export const dnsZoneDnssecRolloverRuntimeInternals = Object.freeze({
   activatedEvidence,
   parentAdditionEvidence,
   parentRetirementEvidence,
+  parentRetirementWaitEvidence,
+  completedParentRetirementEvidence,
   deactivationTarget,
 });

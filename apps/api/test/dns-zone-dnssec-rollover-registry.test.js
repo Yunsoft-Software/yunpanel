@@ -67,8 +67,18 @@ function evidence({
   serial = null,
   parentDs = [oldDs],
   propagation = null,
+  parentRetirement = null,
 } = {}) {
-  return Object.freeze({ newKeyId, keySetDigest, targetKeySetDigest, newKeyDs, serial, parentDs, propagation });
+  return Object.freeze({
+    newKeyId,
+    keySetDigest,
+    targetKeySetDigest,
+    newKeyDs,
+    serial,
+    parentDs,
+    propagation,
+    parentRetirement,
+  });
 }
 
 test('persists a private monotonic DNSSEC rollover journal without confirmation in public view', async () => {
@@ -127,6 +137,62 @@ test('allows only the exact next rollover stage and makes same-stage evidence id
     registry.advance(operationId, 'creating_key', evidence({ keySetDigest: 'd'.repeat(64) })),
     (error) => error instanceof DnsZoneDnssecRolloverRegistryError && error.code === 'dnssec_rollover_evidence_conflict',
   );
+});
+
+test('only resets an interrupted parent retirement TTL gate to the verification stage', async () => {
+  const registry = createDnsZoneDnssecRolloverRegistry({ idFactory: () => operationId });
+  await registry.init();
+  await registry.create(preview());
+  await assert.rejects(
+    registry.resetParentRetirement(operationId),
+    (error) => error instanceof DnsZoneDnssecRolloverRegistryError && error.code === 'dnssec_rollover_transition_invalid',
+  );
+
+  await registry.advance(operationId, 'creating_key', evidence());
+  let current = evidence({
+    newKeyId: 8,
+    keySetDigest: 'c'.repeat(64),
+    targetKeySetDigest: 'd'.repeat(64),
+    newKeyDs: [newDs],
+    serial: 2026091701,
+  });
+  await registry.advance(operationId, 'publishing_key', current);
+  current = { ...current, keySetDigest: 'd'.repeat(64), targetKeySetDigest: null };
+  await registry.advance(operationId, 'verifying_dnskey_propagation', current);
+  current = {
+    ...current,
+    targetKeySetDigest: 'e'.repeat(64),
+    propagation: {
+      status: 'synced',
+      serial: 2026091701,
+      dnskeyTtl: 300,
+      publishedAt: '2026-09-17T10:00:00.000Z',
+      eligibleAfter: '2026-09-17T10:05:00.000Z',
+      checkedAt: '2026-09-17T10:05:00.000Z',
+      targetCount: 2,
+    },
+  };
+  await registry.advance(operationId, 'activating_key', current);
+  current = { ...current, keySetDigest: 'e'.repeat(64), targetKeySetDigest: null };
+  await registry.advance(operationId, 'awaiting_parent_ds_addition', current);
+  current = { ...current, parentDs: [oldDs, newDs] };
+  await registry.advance(operationId, 'awaiting_parent_ds_retirement', current);
+  current = {
+    ...current,
+    parentDs: [newDs],
+    parentRetirement: {
+      ttl: 300,
+      observedAt: '2026-09-17T10:06:00.000Z',
+      eligibleAfter: '2026-09-17T10:11:00.000Z',
+      checkedAt: null,
+    },
+  };
+  await registry.advance(operationId, 'waiting_parent_ds_ttl', current);
+
+  const reset = await registry.resetParentRetirement(operationId);
+  assert.equal(reset.status, 'awaiting_parent_ds_retirement');
+  assert.equal(reset.evidence.parentRetirement, null);
+  assert.equal(await registry.resetParentRetirement(operationId), reset);
 });
 
 test('requires new key and propagation evidence before later destructive stages', async () => {
@@ -199,7 +265,25 @@ test('completes only after old-key deletion stage with exact public result evide
   await registry.advance(operationId, 'awaiting_parent_ds_addition', current);
   current = { ...current, parentDs: [oldDs, newDs] };
   await registry.advance(operationId, 'awaiting_parent_ds_retirement', current);
-  current = { ...current, parentDs: [newDs], targetKeySetDigest: 'f'.repeat(64) };
+  current = {
+    ...current,
+    parentDs: [newDs],
+    parentRetirement: {
+      ttl: 300,
+      observedAt: '2026-09-17T10:00:00.000Z',
+      eligibleAfter: '2026-09-17T10:05:00.000Z',
+      checkedAt: null,
+    },
+  };
+  await registry.advance(operationId, 'waiting_parent_ds_ttl', current);
+  current = {
+    ...current,
+    targetKeySetDigest: 'f'.repeat(64),
+    parentRetirement: {
+      ...current.parentRetirement,
+      checkedAt: '2026-09-17T10:05:00.000Z',
+    },
+  };
   await registry.advance(operationId, 'deactivating_old_key', current);
   current = { ...current, keySetDigest: 'f'.repeat(64), targetKeySetDigest: '1'.repeat(64) };
   await registry.advance(operationId, 'deleting_old_key', current);
@@ -244,7 +328,7 @@ test('rejects forged preview identity and malformed persisted state without echo
   assert.equal((await readFile(filePath, 'utf8')).includes('SECRET'), true);
 });
 
-test('migrates a safe version-one pending journal and rewrites the store as version three', async () => {
+test('migrates a safe version-one pending journal and rewrites the store as version four', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-dnssec-rollover-v1-'));
   const filePath = path.join(directory, 'operations.json');
   const writer = createDnsZoneDnssecRolloverRegistry({ filePath, idFactory: () => operationId });
@@ -258,7 +342,7 @@ test('migrates a safe version-one pending journal and rewrites the store as vers
   const migrated = createDnsZoneDnssecRolloverRegistry({ filePath });
   await migrated.init();
   assert.equal((await migrated.get(operationId)).evidence.targetKeySetDigest, null);
-  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, 3);
+  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, 4);
 });
 
 test('fails closed instead of inventing TTL evidence for a progressed version-two journal', async () => {
