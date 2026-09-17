@@ -43,6 +43,7 @@ export const OPERATIONS = Object.freeze({
   DATABASE_DELETE: 'database.delete',
   DNS_RECORD_APPLY: 'dns.record.apply',
   MAIL_CONFIG_APPLY: 'mail.config.apply',
+  MAIL_CONFIG_ROLLBACK: 'mail.config.rollback',
   DOMAIN_STAGE: 'domain.stage',
   DOMAIN_ACTIVATE: 'domain.activate',
   SSL_ISSUE: 'ssl.issue',
@@ -78,6 +79,7 @@ const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const RESERVED_DATABASE_NAMES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const DNS_RECORD_TYPES = new Set(['A', 'AAAA', 'CNAME']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 
 export function isKnownOperation(operation) {
   return typeof operation === 'string' && KNOWN_OPERATIONS.has(operation);
@@ -215,6 +217,44 @@ function validateMailConfigApply(payload, operation, errors) {
   }
 }
 
+function validateMailConfigRollback(payload, operation, errors) {
+  rejectUnexpectedKeys(payload, [
+    'mailDomainId',
+    'sourceApplyJobId',
+    'previousRevision',
+    'expectedCurrentRevision',
+    'currentStatus',
+    'targetStatus',
+    'currentConfigurationSha256',
+    'sourcePlanSha256',
+    'backupSha256',
+    'previewDigest',
+  ], operation, errors);
+  try {
+    if (assertUuid(payload.mailDomainId, 'mailDomainId') !== payload.mailDomainId) throw new Error('noncanonical');
+  } catch { errors.push(`${operation} mailDomainId is invalid`); }
+  if (typeof payload.sourceApplyJobId !== 'string' || !JOB_ID_PATTERN.test(payload.sourceApplyJobId)) {
+    errors.push(`${operation} sourceApplyJobId is invalid`);
+  }
+  const statusesValid = ['disabled', 'enabled'].includes(payload.currentStatus)
+    && ['disabled', 'enabled'].includes(payload.targetStatus);
+  const changedStatus = statusesValid && payload.currentStatus !== payload.targetStatus;
+  if (!Number.isSafeInteger(payload.previousRevision) || payload.previousRevision < 1
+    || !Number.isSafeInteger(payload.expectedCurrentRevision) || payload.expectedCurrentRevision < 1
+    || payload.expectedCurrentRevision !== payload.previousRevision + (changedStatus ? 1 : 0)) {
+    errors.push(`${operation} revisions are invalid`);
+  }
+  if (!statusesValid) errors.push(`${operation} statuses are invalid`);
+  for (const field of [
+    'currentConfigurationSha256', 'sourcePlanSha256', 'backupSha256', 'previewDigest',
+  ]) {
+    if (typeof payload[field] !== 'string' || !SHA256_PATTERN.test(payload[field])) {
+      errors.push(`${operation} digests are invalid`);
+      break;
+    }
+  }
+}
+
 function rejectUnexpectedKeys(payload, allowedKeys, operation, errors) {
   const allowed = new Set(allowedKeys);
   if (Object.keys(payload).some((key) => !allowed.has(key))) errors.push(`${operation} contains unsupported arguments`);
@@ -314,6 +354,7 @@ function validateMutationPayload(operation, payload, errors) {
 
   if (operation === OPERATIONS.DNS_RECORD_APPLY) validateDnsRecordApply(payload, operation, errors);
   if (operation === OPERATIONS.MAIL_CONFIG_APPLY) validateMailConfigApply(payload, operation, errors);
+  if (operation === OPERATIONS.MAIL_CONFIG_ROLLBACK) validateMailConfigRollback(payload, operation, errors);
 
   if (operation === OPERATIONS.DOMAIN_STAGE) {
     rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'nginxSettings', 'tls', 'canonicalRedirect', 'httpsRedirect'], operation, errors);
