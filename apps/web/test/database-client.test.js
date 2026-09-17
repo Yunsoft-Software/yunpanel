@@ -4,6 +4,7 @@ import {
   applyDatabaseCredential,
   createDatabase,
   createDatabaseBackup,
+  createPhpMyAdminHandoff,
   deleteDatabase,
   finalizeDatabaseCredentialDelete,
   getDatabases,
@@ -50,12 +51,47 @@ test('database API client uses same-origin panel routes and exact mutation confi
   setSession(null);
 });
 
+
+test('phpMyAdmin handoff client mints only a scoped capability request', async (t) => {
+  setSession({ csrfToken: 'csrf-phpmyadmin-handoff' });
+  const calls = [];
+  const capability = 'A'.repeat(43);
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url, options });
+    return ok({
+      capability,
+      expiresAt: 50_000,
+      protocol: 'yunpanel-phpmyadmin-signon-v1',
+      target: {
+        serverId: 'server/one',
+        websiteId: 'website/one',
+        databaseCredentialId: 'credential/one',
+        databaseName: 'app_main',
+      },
+    });
+  });
+
+  const result = await createPhpMyAdminHandoff('server/one', 'website/one', 'credential/one');
+
+  assert.equal(result.capability, capability);
+  assert.deepEqual(calls.map((call) => [call.url, call.options.method]), [
+    ['/api/panel/servers/server%2Fone/websites/website%2Fone/phpmyadmin-handoffs', 'POST'],
+  ]);
+  assert.deepEqual(JSON.parse(calls[0].options.body), { credentialId: 'credential/one' });
+  assert.equal(calls[0].options.headers['x-csrf-token'], 'csrf-phpmyadmin-handoff');
+  assert.doesNotMatch(calls[0].options.body, /password|capability/i);
+  setSession(null);
+});
+
 test('database API client rejects missing identities before fetch', async (t) => {
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async () => { calls += 1; return ok({}); });
   assert.throws(() => getDatabases(''), /serverId is required/);
   assert.throws(() => getWebsiteDatabaseResources('', 'website-1'), /serverId is required/);
   assert.throws(() => getWebsiteDatabaseResources('server-1', ''), /websiteId is required/);
+  assert.throws(() => createPhpMyAdminHandoff('', 'website-1', 'credential-1'), /serverId is required/);
+  assert.throws(() => createPhpMyAdminHandoff('server-1', '', 'credential-1'), /websiteId is required/);
+  assert.throws(() => createPhpMyAdminHandoff('server-1', 'website-1', ''), /credentialId is required/);
   assert.throws(() => createDatabase('server-1', ''), /database name is required/);
   assert.throws(() => createDatabaseBackup('server-1', ''), /database name is required/);
   assert.throws(() => getDatabaseDropPreview('server-1', ''), /database name is required/);
