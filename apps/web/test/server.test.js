@@ -257,3 +257,164 @@ test('terminal WebSocket gateway rejects wrong Origin, client IP, path and query
   await rejected('/api/terminal?token=forbidden', { origin: 'https://panel.example.com', 'x-real-ip': '203.0.113.8' }, 404);
   assert.equal(upgrades, 0);
 });
+
+
+test('phpMyAdmin gateway authenticates Owner access before proxying the vendor Unix socket', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-phpmyadmin-web-'));
+  const socketPath = path.join(directory, 'phpmyadmin.sock');
+  const vendorRequests = [];
+  const vendor = http.createServer((request, response) => {
+    vendorRequests.push({
+      method: request.method,
+      url: request.url,
+      host: request.headers.host,
+      cookie: request.headers.cookie,
+      internalToken: request.headers['x-yunpanel-proxy-token'],
+      forwardedPrefix: request.headers['x-forwarded-prefix'],
+      forwardedProto: request.headers['x-forwarded-proto'],
+    });
+    response.writeHead(302, {
+      location: '/index.php?route=/database/structure',
+      'set-cookie': 'phpMyAdmin=fixture; Path=/; Secure; HttpOnly',
+      'content-type': 'text/plain',
+    });
+    response.end('redirect');
+  });
+  vendor.listen(socketPath);
+  await once(vendor, 'listening');
+
+  const accessRequests = [];
+  const api = http.createServer((request, response) => {
+    accessRequests.push({
+      method: request.method,
+      url: request.url,
+      cookie: request.headers.cookie,
+      proxyToken: request.headers['x-yunpanel-proxy-token'],
+      clientIp: request.headers['x-yunpanel-client-ip'],
+    });
+    if (request.url !== '/api/phpmyadmin-gateway-access') {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    response.writeHead(request.headers.cookie === '__Host-yunpanel_session=owner' ? 204 : 403, {
+      'cache-control': 'no-store',
+    });
+    response.end();
+  });
+  const apiPort = await listen(api);
+  const webRoot = path.join(directory, 'web');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(webRoot));
+  await writeFile(path.join(webRoot, 'index.html'), '<title>YunPanel</title>');
+  const panel = createPanelServer({
+    allowedClientIps: '203.0.113.8',
+    apiPort,
+    proxyToken,
+    publicOrigin: 'https://panel.example.com',
+    phpMyAdminSocketPath: socketPath,
+    webRoot,
+  });
+  const panelPort = await listen(panel);
+  t.after(async () => {
+    await close(panel);
+    await close(api);
+    await new Promise((resolve) => vendor.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  const response = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/phpmyadmin/index.php?route=/sql`,
+    {
+      redirect: 'manual',
+      headers: {
+        'x-real-ip': '203.0.113.8',
+        cookie: '__Host-yunpanel_session=owner',
+      },
+    },
+  );
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get('location'), '/tools/phpmyadmin/index.php?route=/database/structure');
+  assert.match(response.headers.get('set-cookie'), /Path=\/tools\/phpmyadmin\//);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(response.headers.get('x-robots-tag'), 'noindex, nofollow, noarchive');
+  assert.deepEqual(accessRequests, [{
+    method: 'GET',
+    url: '/api/phpmyadmin-gateway-access',
+    cookie: '__Host-yunpanel_session=owner',
+    proxyToken,
+    clientIp: '203.0.113.8',
+  }]);
+  assert.deepEqual(vendorRequests, [{
+    method: 'GET',
+    url: '/index.php?route=/sql',
+    host: 'panel.example.com',
+    cookie: '__Host-yunpanel_session=owner',
+    internalToken: undefined,
+    forwardedPrefix: '/tools/phpmyadmin/',
+    forwardedProto: 'https',
+  }]);
+});
+
+test('phpMyAdmin vendor socket is not reached for unauthenticated or cross-origin browser requests', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-phpmyadmin-web-deny-'));
+  const socketPath = path.join(directory, 'phpmyadmin.sock');
+  let vendorRequests = 0;
+  const vendor = http.createServer((_request, response) => {
+    vendorRequests += 1;
+    response.end('vendor');
+  });
+  vendor.listen(socketPath);
+  await once(vendor, 'listening');
+
+  const api = http.createServer((request, response) => {
+    response.writeHead(request.headers.cookie === '__Host-yunpanel_session=owner' ? 204 : 403);
+    response.end();
+  });
+  const apiPort = await listen(api);
+  const webRoot = path.join(directory, 'web');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(webRoot));
+  await writeFile(path.join(webRoot, 'index.html'), '<title>YunPanel</title>');
+  const panel = createPanelServer({
+    allowedClientIps: '203.0.113.8',
+    apiPort,
+    proxyToken,
+    publicOrigin: 'https://panel.example.com',
+    phpMyAdminSocketPath: socketPath,
+    webRoot,
+  });
+  const panelPort = await listen(panel);
+  t.after(async () => {
+    await close(panel);
+    await close(api);
+    await new Promise((resolve) => vendor.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  });
+  const url = `http://127.0.0.1:${panelPort}/tools/phpmyadmin/index.php`;
+  const denied = await fetch(url, {
+    headers: { 'x-real-ip': '203.0.113.8' },
+  });
+  assert.equal(denied.status, 403);
+
+  const crossOrigin = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'x-real-ip': '203.0.113.8',
+      cookie: '__Host-yunpanel_session=owner',
+      origin: 'https://attacker.example',
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: 'token=ignored',
+  });
+  assert.equal(crossOrigin.status, 403);
+  assert.equal(vendorRequests, 0);
+});
+
+test('phpMyAdmin gateway canonicalizes the trailing slash without touching the vendor socket', async (t) => {
+  const app = await fixture(t, (_request, response) => {
+    response.writeHead(500);
+    response.end();
+  });
+  const response = await app.request('/tools/phpmyadmin?db=test', { redirect: 'manual' });
+  assert.equal(response.status, 308);
+  assert.equal(response.headers.get('location'), '/tools/phpmyadmin/?db=test');
+});
