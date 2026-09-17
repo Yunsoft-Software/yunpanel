@@ -528,6 +528,24 @@ export function mountDatabaseRoutes(app, {
     const server = await requireServer(registry, request.params.serverId);
     const name = requireDatabaseName(request.params.name);
     exactConfirmationBody(request.body, `backup:${name}`, 'backup');
+    if (databaseBindingRegistry) {
+      let binding;
+      try { binding = await databaseBindingRegistry.getByDatabase({ serverId: server.id, databaseName: name }); }
+      catch {
+        throw new DatabaseHttpError(
+          'database_ownership_state_unavailable',
+          'Database Website ownership state could not be read',
+          503,
+        );
+      }
+      if (binding) {
+        throw new DatabaseHttpError(
+          'database_backup_website_scope_required',
+          'Managed Website databases must use the Website-scoped backup route',
+          409,
+        );
+      }
+    }
     await ensureDatabaseIdle(jobRegistry, server.id);
     const job = await jobRegistry.enqueue({
       serverId: server.id,
@@ -556,7 +574,7 @@ export function mountDatabaseRoutes(app, {
   }));
 
   if (typeof jobRegistry.getJob === 'function') {
-    mountDatabaseRestoreRoutes(app, { registry, jobRegistry });
+    mountDatabaseRestoreRoutes(app, { registry, jobRegistry, databaseBindingRegistry });
   }
 
   app.delete('/api/servers/:serverId/databases/:name', requirePanelRouteAccess, asyncRoute(async (request, response) => {
