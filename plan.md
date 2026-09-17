@@ -13,6 +13,7 @@ Son database güvenlik ve Website resource ilerlemesi: `docs/history/database-se
 Son phpMyAdmin managed-package ilerlemesi: `docs/history/phpmyadmin-package-baseline-2026-09-17.md`.
 Son phpMyAdmin protected signon/gateway ilerlemesi: `docs/history/phpmyadmin-signon-handoff-progress-2026-09-18.md`.
 Son phpMyAdmin browser handoff UI ilerlemesi: `docs/history/phpmyadmin-browser-handoff-2026-09-18.md`.
+Son Website database data scope ilerlemesi: `docs/history/database-website-data-scope-2026-09-18.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -61,7 +62,6 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 ## P0.5 — Website DB ownership + phpMyAdmin
 
-- [ ] phpMyAdmin import/export'u ve mevcut vendor dump/restore lifecycle'ını aynı Website scope/ownership sınırına bağla.
 - [ ] Database delete'i backup requirement, ownership evidence ve retryable P0.9 compensation zincirine bağla.
 
 ## P0.6 — elFinder; homegrown File Manager removal
