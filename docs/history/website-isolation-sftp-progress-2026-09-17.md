@@ -10,6 +10,7 @@ Bu kayıt 16 Eylül Website isolation audit'inden sonra tamamlanan source-level 
 - `0fc98259` ile provisioning planner, aynı Website identity altında stale independent-www metadata görürse fail-closed davranıyor; eski test yanlış resource-sharing davranışını artık kabul etmiyor.
 - `2d2366e7` regression kontratı independent subdomain'in explicit `parentDomainId` ile ayrı Site create yolundan ayrı Application, Website, Unix identity ve SFTP scope aldığını kilitliyor.
 - `ee584241` ile explicit Domain→Website binding, gerçek Website runtime bilgisi varsa trafik target'ıyla da doğrulanıyor. Static root, PHP/Passenger Application ID ve proxy upstream Website binding'inden saparsa Domain create fail-closed; retained legacy direct-systemd migration uyumluluğu ayrı tutuluyor.
+- Final Website create yüzeyi explicit parent seçilen subdomain'i yeni Node/static/PHP Application veya kullanılmamış bir Application ile aynı preview/digest korumalı Site create operation'ına bağlıyor. Başka Website'e bağlı Application seçenekleri listeden çıkarılıyor; `wwwMode=independent` seçeneği kaldırıldı ve stale form state'i API'ye ulaşmadan reddediliyor.
 
 ## Isolation audit HTTP/runtime
 
@@ -78,7 +79,7 @@ Kaynak commit `675579e` için repo dışı `.local/test-server.env` hedefi kulla
 
 ## Kalan P0.1 source işleri
 
-- Final Website create/preflight/panel yüzeyinde independent subdomain explicit `parentDomainId` + ayrı Website create olarak sunulmalı; `shared-site` seçimi mevcut Website binding'ini açıkça göstermeli ve default bağımsız Website olmalı.
+- `shared-site` seçimi mevcut Website binding'ini açıkça göstermeli ve default bağımsız Website olmalı; alias yeni Unix user/runtime/SFTP/mailbox üretmemeli.
 - Isolation audit sonucu panelde gösterilmeli; migration apply exact preview/digest + typed confirmation ile operation-owned değişiklikler yapmalı, recursive blind `chown` yapmamalı.
 - SFTP key desired state/materialization Website provisioning ownership/evidence ve restart/reconcile lifecycle'ına bağlanmalı.
 - Legacy Website migration apply canonical identity/path/runtime/SFTP drift raporu olmadan destructive ownership repair yapmamalı.

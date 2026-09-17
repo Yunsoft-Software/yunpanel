@@ -19,7 +19,7 @@ test('audit owns its bounded history request instead of polling workspace collec
 });
 test('website list and creation request their dependencies without a job inventory', () => {
   assert.deepEqual(selected('/websites'), ['applications', 'certificates', 'domains', 'servers']);
-  assert.deepEqual(selected('/websites/new'), ['applications', 'domains', 'servers']);
+  assert.deepEqual(selected('/websites/new'), ['applications', 'domains', 'servers', 'websites']);
 });
 test('site operation tabs retain required locks and job history', () => {
   for (const tab of ['overview', 'node', 'deploy', 'domains', 'ssl', 'logs']) assert.equal(workspaceResources(`/websites/example/${tab}`).jobs, true);

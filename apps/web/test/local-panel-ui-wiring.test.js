@@ -17,6 +17,10 @@ test('management UI has one implicit local server and no server chooser', async 
   assert.doesNotMatch(sources[3], /ServerManager|enrollment/);
   assert.match(sources[0], /\/sites\/create-preview/);
   assert.match(sources[0], /previewDigest: preview\.previewDigest/);
+  assert.match(sources[0], /Yeni Node\.js 24 \/ Passenger uygulaması/);
+  assert.match(sources[0], /Yeni PHP-FPM uygulaması/);
+  assert.match(sources[0], /Bağımsız www için bu Website’i oluşturduktan sonra/);
+  assert.doesNotMatch(sources[0], /<option value="independent"/);
 });
 
 test('primary navigation exposes working modules instead of placeholder destinations', async () => {
