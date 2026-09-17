@@ -64,6 +64,18 @@ const SERVICE_CATALOG = Object.freeze([
     ],
   }),
   service({
+    id: 'phpmyadmin',
+    label: 'phpMyAdmin',
+    category: 'database_tool',
+    packages: ['phpmyadmin', 'php-fpm', 'php-mysql'],
+    units: [],
+    configurationChecks: [
+      { file: '/usr/bin/test', args: ['-f', '/usr/share/phpmyadmin/index.php'] },
+      { file: '/usr/bin/test', args: ['-f', '/etc/phpmyadmin/config.inc.php'] },
+      { file: '/usr/bin/php', args: ['-l', '/etc/phpmyadmin/config.inc.php'] },
+    ],
+  }),
+  service({
     id: 'postsrsd', label: 'PostSRSd', category: 'mail', packages: ['postsrsd'], units: ['postsrsd.service'],
   }),
 ]);

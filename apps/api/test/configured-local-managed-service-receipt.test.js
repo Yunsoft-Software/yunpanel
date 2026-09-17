@@ -126,6 +126,38 @@ test('configured runtime records package-only Roundcube install evidence without
   }]);
 });
 
+test('configured runtime records package-only phpMyAdmin install evidence without requiring a systemd unit', async () => {
+  const { writes, recorder } = await captureRecorder();
+  const result = {
+    id: 'phpmyadmin',
+    installed: true,
+    active: false,
+    packages: [
+      { packageName: 'phpmyadmin', installed: true, version: '5.2.1+dfsg-3' },
+      { packageName: 'php-fpm', installed: true, version: '2:8.3+93ubuntu2' },
+      { packageName: 'php-mysql', installed: true, version: '2:8.3+93ubuntu2' },
+    ],
+    units: [],
+    health: { status: 'installed', configuration: 'valid' },
+    changed: true,
+  };
+  await recorder({
+    serverId,
+    jobId: '52345678-1234-4234-8234-123456789012',
+    operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
+    payload: { serviceId: 'phpmyadmin' },
+    result,
+  });
+  assert.deepEqual(writes, [{
+    serverId,
+    jobId: '52345678-1234-4234-8234-123456789012',
+    operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
+    serviceId: 'phpmyadmin',
+    changed: true,
+    state: result,
+  }]);
+});
+
 test('configured runtime refuses to record mismatched service evidence', async () => {
   const { writes, recorder } = await captureRecorder();
   await assert.rejects(

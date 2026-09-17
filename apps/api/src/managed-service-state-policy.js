@@ -18,6 +18,7 @@ const POLICY = new Map([
   ['dovecot', definition(['dovecot-imapd', 'dovecot-lmtpd', 'dovecot-sieve'], ['dovecot.service'], true)],
   ['rspamd', definition(['rspamd'], ['rspamd.service'], true)],
   ['roundcube', definition(['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], [], true)],
+  ['phpmyadmin', definition(['phpmyadmin', 'php-fpm', 'php-mysql'], [], true)],
   ['postsrsd', definition(['postsrsd'], ['postsrsd.service'])],
 ]);
 

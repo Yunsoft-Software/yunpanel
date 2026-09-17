@@ -17,9 +17,11 @@ import { isIP, SocketAddress } from 'node:net';
 export const AGENT_PROTOCOL_VERSION = 9;
 
 export const MANAGED_SERVICE_IDS = Object.freeze([
-  'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'roundcube',
+  'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin',
 ]);
-export const MANAGED_SERVICE_CONTROL_IDS = Object.freeze(MANAGED_SERVICE_IDS.filter((id) => id !== 'roundcube'));
+export const MANAGED_SERVICE_CONTROL_IDS = Object.freeze(
+  MANAGED_SERVICE_IDS.filter((id) => !['roundcube', 'phpmyadmin'].includes(id)),
+);
 export const MANAGED_SERVICE_ACTIONS = Object.freeze(['start', 'stop', 'restart']);
 export const MANAGED_NODE_RUNTIME_MAJORS = SHARED_MANAGED_NODE_RUNTIME_MAJORS;
 const MANAGED_SERVICE_ID_SET = new Set(MANAGED_SERVICE_IDS);

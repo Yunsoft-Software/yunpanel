@@ -13,7 +13,8 @@ const csrfToken = 'services-csrf';
 const servicePackages = {
   nginx: ['nginx'], mariadb: ['mariadb-server'], mysql: ['mysql-server'], docker: ['docker.io'], cron: ['cron'],
   postfix: ['postfix'], dovecot: ['dovecot-imapd', 'dovecot-lmtpd', 'dovecot-sieve'], rspamd: ['rspamd'],
-  roundcube: ['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], postsrsd: ['postsrsd'],
+  roundcube: ['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], phpmyadmin: ['phpmyadmin', 'php-fpm', 'php-mysql'],
+  postsrsd: ['postsrsd'],
 };
 
 function fakeStore(role = 'owner') {
@@ -65,7 +66,7 @@ async function fixture(t, role = 'owner') {
 }
 
 function healthyService(id) {
-  const unitless = id === 'roundcube';
+  const unitless = ['roundcube', 'phpmyadmin'].includes(id);
   return {
     id,
     label: `ignored-${id}`,
@@ -83,7 +84,7 @@ function healthyService(id) {
     }],
     health: {
       status: unitless ? 'installed' : 'ready',
-      configuration: ['postfix', 'dovecot', 'rspamd', 'roundcube'].includes(id) ? 'valid' : 'not_applicable',
+      configuration: ['postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin'].includes(id) ? 'valid' : 'not_applicable',
     },
   };
 }
@@ -131,6 +132,13 @@ test('service installation requires exact confirmation and queues only an allowl
     body: { confirmation: 'install:roundcube' },
   });
   assert.equal(roundcubeResponse.status, 202);
+
+  const phpMyAdmin = await fixture(t);
+  const phpMyAdminResponse = await phpMyAdmin.request(`/api/servers/${phpMyAdmin.serverId}/services/phpmyadmin/install`, {
+    method: 'POST',
+    body: { confirmation: 'install:phpmyadmin' },
+  });
+  assert.equal(phpMyAdminResponse.status, 202);
 });
 
 test('service control validates action confirmation and serializes server system work', async (t) => {
@@ -147,15 +155,17 @@ test('service control validates action confirmation and serializes server system
   assert.equal((await conflict.json()).error.code, 'system_job_conflict');
 });
 
-test('Roundcube cannot be queued as a systemd control operation', async (t) => {
-  const { request, jobRegistry, serverId } = await fixture(t);
-  const response = await request(`/api/servers/${serverId}/services/roundcube/control`, {
-    method: 'POST',
-    body: { action: 'restart', confirmation: 'control:roundcube:restart' },
-  });
-  assert.equal(response.status, 400);
-  assert.equal((await response.json()).error.code, 'managed_service_not_controllable');
-  assert.equal((await jobRegistry.listJobs()).length, 0);
+test('package-only managed applications cannot be queued as systemd control operations', async (t) => {
+  for (const serviceId of ['roundcube', 'phpmyadmin']) {
+    const { request, jobRegistry, serverId } = await fixture(t);
+    const response = await request(`/api/servers/${serverId}/services/${serviceId}/control`, {
+      method: 'POST',
+      body: { action: 'restart', confirmation: `control:${serviceId}:restart` },
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error.code, 'managed_service_not_controllable');
+    assert.equal((await jobRegistry.listJobs()).length, 0);
+  }
 });
 
 test('latest successful full inspection is readable inside the standard data envelope', async (t) => {

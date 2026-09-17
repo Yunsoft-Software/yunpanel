@@ -10,6 +10,7 @@ Son DNSSEC rollover adapter ilerlemesi: `docs/history/dnssec-rollover-progress-2
 Son DNS zone compensation ownership ilerlemesi: `docs/history/dns-zone-compensation-ownership-2026-09-17.md`.
 Son database canlı envanter ilerlemesi: `docs/history/database-live-inventory-2026-09-17.md`.
 Son database güvenlik ve Website resource ilerlemesi: `docs/history/database-security-baseline-2026-09-17.md`, `docs/history/database-website-resources-2026-09-17.md`.
+Son phpMyAdmin managed-package ilerlemesi: `docs/history/phpmyadmin-package-baseline-2026-09-17.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -58,7 +59,7 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 ## P0.5 — Website DB ownership + phpMyAdmin
 
-- [ ] Shared hardened phpMyAdmin.
+- [ ] Shared phpMyAdmin için dedicated runtime identity, FPM pool/socket, protected Nginx/gateway config ve endpoint health/rollback zinciri.
 - [ ] `Open phpMyAdmin` site DB user scope'uyla supported signon/short-lived handoff; root browser'a verilmesin.
 - [ ] phpMyAdmin import/export'u ve mevcut vendor dump/restore lifecycle'ını aynı Website scope/ownership sınırına bağla.
 - [ ] Database delete'i backup requirement, ownership evidence ve retryable P0.9 compensation zincirine bağla.

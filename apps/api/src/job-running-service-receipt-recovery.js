@@ -2,6 +2,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import { inspectDurableJobRecovery } from './job-recovery-inspection.js';
 import { reconcileCompletedJob } from './job-reconciliation.js';
 import { managedServiceStateDigest } from './managed-service-mutation-receipt.js';
+import { managedServiceStatePolicy } from './managed-service-state-policy.js';
 
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -77,11 +78,12 @@ function assertReceipt(receipt, identity, intent) {
 }
 
 function installedServiceEvidence(snapshot, serviceId) {
+  const policy = managedServiceStatePolicy(serviceId);
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)
+    || !policy
     || snapshot.id !== serviceId || snapshot.installed !== true
-    || !Array.isArray(snapshot.packages) || snapshot.packages.length < 1
-    || !Array.isArray(snapshot.units)
-    || (serviceId === 'roundcube' ? snapshot.units.length !== 0 : snapshot.units.length < 1)
+    || !Array.isArray(snapshot.packages) || snapshot.packages.length !== policy.packages.length
+    || !Array.isArray(snapshot.units) || snapshot.units.length !== policy.units.length
     || snapshot.packages.some((entry) => !entry || entry.installed !== true)
     || snapshot.units.some((entry) => !entry || entry.inspectionError !== false || entry.activeState !== 'active')
     || snapshot.active !== (snapshot.units.length > 0)) {

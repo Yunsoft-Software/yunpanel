@@ -39,6 +39,21 @@ function roundcubeState(version = '1.6.6+dfsg-2ubuntu0.1') {
   };
 }
 
+function phpMyAdminState(version = '5.2.1+dfsg-3') {
+  return {
+    id: 'phpmyadmin',
+    installed: true,
+    active: false,
+    packages: [
+      { packageName: 'phpmyadmin', installed: true, version },
+      { packageName: 'php-fpm', installed: true, version: '2:8.3+93ubuntu2' },
+      { packageName: 'php-mysql', installed: true, version: '2:8.3+93ubuntu2' },
+    ],
+    units: [],
+    health: { status: 'installed', configuration: 'valid' },
+  };
+}
+
 function fixture({
   operation = OPERATIONS.SYSTEM_SERVICE_INSTALL,
   action = null,
@@ -48,7 +63,9 @@ function fixture({
 } = {}) {
   const events = [];
   let status = 'running';
-  const recordedState = serviceId === 'roundcube' ? roundcubeState() : activeState();
+  const recordedState = serviceId === 'roundcube'
+    ? roundcubeState()
+    : serviceId === 'phpmyadmin' ? phpMyAdminState() : activeState();
   const defaultReceipt = operation === OPERATIONS.SYSTEM_SERVICE_INSTALL
     ? { serverId, jobId, operation, serviceId, action: null, changed: true, stateDigest: managedServiceStateDigest(recordedState, serviceId) }
     : { serverId, jobId, operation, serviceId, action: 'restart', changed: null, stateDigest: managedServiceStateDigest(recordedState, serviceId) };
@@ -108,6 +125,15 @@ test('receipt-backed recovery accepts an installed Roundcube package without a f
   const fx = fixture({ serviceId: 'roundcube' });
   const result = await recoverRunningServiceReceiptMutation(fx.options);
   assert.equal(result.serviceId, 'roundcube');
+  assert.equal(result.action, null);
+  assert.equal(result.recoveryMethod, 'verified_managed_service_receipt_and_state');
+  assert.deepEqual(fx.events, ['get', 'context', 'receipt', 'evidence', 'begin', 'complete', 'reconcile', 'ack']);
+});
+
+test('receipt-backed recovery accepts installed phpMyAdmin packages without a fabricated systemd unit', async () => {
+  const fx = fixture({ serviceId: 'phpmyadmin' });
+  const result = await recoverRunningServiceReceiptMutation(fx.options);
+  assert.equal(result.serviceId, 'phpmyadmin');
   assert.equal(result.action, null);
   assert.equal(result.recoveryMethod, 'verified_managed_service_receipt_and_state');
   assert.deepEqual(fx.events, ['get', 'context', 'receipt', 'evidence', 'begin', 'complete', 'reconcile', 'ack']);

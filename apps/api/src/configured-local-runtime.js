@@ -1,5 +1,5 @@
 import { inspectHostInventory } from '@yunpanel/host-runtime';
-import { OPERATIONS } from '@yunpanel/protocol';
+import { MANAGED_SERVICE_CONTROL_IDS, OPERATIONS } from '@yunpanel/protocol';
 import { createCertificateOperationReceiptStore } from './certificate-operation-receipt.js';
 import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.js';
 import { createDomainActivationReceiptStore } from './domain-activation-receipt.js';
@@ -525,9 +525,9 @@ export async function startConfiguredLocalRuntime({
     }
 
     if (operation === OPERATIONS.SYSTEM_SERVICE_INSTALL) {
-      const unitlessRoundcube = payload?.serviceId === 'roundcube';
+      const unitlessApplication = !MANAGED_SERVICE_CONTROL_IDS.includes(payload?.serviceId);
       if (!result || result.id !== payload?.serviceId || result.installed !== true
-        || (unitlessRoundcube ? result.active !== false || !Array.isArray(result.units) || result.units.length !== 0 : result.active !== true)
+        || (unitlessApplication ? result.active !== false || !Array.isArray(result.units) || result.units.length !== 0 : result.active !== true)
         || typeof result.changed !== 'boolean') {
         throw new Error('Managed service install result is not safe recovery evidence');
       }
