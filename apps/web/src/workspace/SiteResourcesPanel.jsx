@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   applyDatabaseCredential,
-  createDatabaseBackup,
   createPhpMyAdminHandoff,
+  createWebsiteDatabaseBackup,
   finalizeDatabaseCredentialDelete,
   getDatabaseDropPreview,
   getWebsiteDatabaseResources,
   panelRequest,
   previewDatabaseCredentialApply,
   previewDatabaseCredentialDelete,
-  previewDatabaseRestore,
+  previewWebsiteDatabaseRestore,
   queueDatabaseCredentialDelete,
-  restoreDatabase,
+  restoreWebsiteDatabase,
   rotateDatabaseCredential,
   waitForJob,
 } from '../api.js';
@@ -213,7 +213,13 @@ export default function SiteResourcesPanel({ domain, website, application, serve
     let backupJob = backupTarget.backupJob;
     try {
       if (!backupJob) {
-        backupJob = await createDatabaseBackup(server.id, backupTarget.binding.databaseName);
+        const queued = await createWebsiteDatabaseBackup(
+          server.id,
+          website.id,
+          backupTarget.binding.id,
+          backupTarget.binding.revision,
+        );
+        backupJob = queued?.job;
         if (!backupJob?.id) throw new Error('Database backup işi oluşturulamadı');
         setBackupTarget((current) => current?.binding.id === backupTarget.binding.id
           ? { ...current, backupJob }
@@ -253,9 +259,11 @@ export default function SiteResourcesPanel({ domain, website, application, serve
     operationPending.current = true;
     setBusy(true); setError(null); setNotice(null);
     try {
-      const raw = await previewDatabaseRestore(
+      const raw = await previewWebsiteDatabaseRestore(
         server.id,
-        restoreTarget.binding.databaseName,
+        website.id,
+        restoreTarget.binding.id,
+        restoreTarget.binding.revision,
         restoreTarget.backupId,
       );
       const preview = databaseRestorePreviewView(raw, {
@@ -282,9 +290,11 @@ export default function SiteResourcesPanel({ domain, website, application, serve
     let restoreJob = restoreTarget.restoreJob;
     try {
       if (!restoreJob) {
-        const queued = await restoreDatabase(
+        const queued = await restoreWebsiteDatabase(
           server.id,
-          restoreTarget.binding.databaseName,
+          website.id,
+          restoreTarget.binding.id,
+          restoreTarget.binding.revision,
           restoreTarget.preview,
         );
         restoreJob = queued?.job;
