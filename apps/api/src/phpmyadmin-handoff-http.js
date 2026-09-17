@@ -32,11 +32,24 @@ function asyncRoute(handler) {
   };
 }
 
+function requireOwnerManagement(auth) {
+  if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string'
+    || auth.user.role !== 'owner' || auth.access?.mode !== 'management'
+    || auth.security?.managementAllowed !== true) {
+    throw new PhpMyAdminHandoffError(
+      'phpmyadmin_handoff_owner_required',
+      'phpMyAdmin requires an authenticated Owner session',
+      403,
+    );
+  }
+  return auth;
+}
+
 export function mountPhpMyAdminHandoffRoutes(app, {
   registry,
   phpMyAdminHandoffService,
 } = {}) {
-  if (!app || typeof app.post !== 'function'
+  if (!app || typeof app.get !== 'function' || typeof app.post !== 'function'
     || !registry || typeof registry.getServer !== 'function'
     || !phpMyAdminHandoffService || typeof phpMyAdminHandoffService.issue !== 'function') {
     throw new TypeError('phpMyAdmin handoff HTTP dependencies are required');
@@ -47,16 +60,7 @@ export function mountPhpMyAdminHandoffRoutes(app, {
     requirePanelRouteAccess,
     asyncRoute(async (request, response) => {
       emptyQuery(request.query);
-      const auth = request.auth;
-      if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string'
-        || auth.user.role !== 'owner' || auth.access?.mode !== 'management'
-        || auth.security?.managementAllowed !== true) {
-        throw new PhpMyAdminHandoffError(
-          'phpmyadmin_handoff_owner_required',
-          'phpMyAdmin requires an authenticated Owner session',
-          403,
-        );
-      }
+      const auth = requireOwnerManagement(request.auth);
       const server = await registry.getServer(request.params.serverId);
       if (!server) {
         throw new PhpMyAdminHandoffError(
@@ -78,10 +82,23 @@ export function mountPhpMyAdminHandoffRoutes(app, {
       return response.status(201).json({ data: handoff });
     }),
   );
+
+  app.get(
+    '/api/phpmyadmin-gateway-access',
+    requirePanelRouteAccess,
+    asyncRoute(async (request, response) => {
+      emptyQuery(request.query);
+      requireOwnerManagement(request.auth);
+      response.set('Cache-Control', 'no-store');
+      response.set('Pragma', 'no-cache');
+      return response.status(204).end();
+    }),
+  );
 }
 
 export const phpMyAdminHandoffHttpInternals = Object.freeze({
   bodyFields: Object.freeze([...BODY_FIELDS]),
   exactBody,
   emptyQuery,
+  requireOwnerManagement,
 });
