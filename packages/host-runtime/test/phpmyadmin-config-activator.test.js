@@ -60,6 +60,7 @@ function preview() {
       gatewaySocketGroup: phpMyAdminNginxTemplatePolicy.gatewaySocketGroup,
       signonBridgePath: phpMyAdminNginxTemplatePolicy.signonBridgePath,
       internalSignonPath: phpMyAdminNginxTemplatePolicy.internalSignonPath,
+      internalLogoutPath: phpMyAdminNginxTemplatePolicy.internalLogoutPath,
       healthPath: phpMyAdminNginxTemplatePolicy.healthPath,
       serviceUnit: phpMyAdminNginxTemplatePolicy.serviceUnit,
     },
@@ -89,6 +90,7 @@ function preview() {
       handoffSocketPath: phpMyAdminSignonTemplatePolicy.handoffSocketPath,
       signonSession: phpMyAdminSignonTemplatePolicy.signonSession,
       internalSignonPath: phpMyAdminSignonTemplatePolicy.internalSignonPath,
+      internalLogoutPath: phpMyAdminSignonTemplatePolicy.internalLogoutPath,
       gatewayBasePath: phpMyAdminSignonTemplatePolicy.gatewayBasePath,
     },
   };
