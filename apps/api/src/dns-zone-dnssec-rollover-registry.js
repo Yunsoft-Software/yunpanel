@@ -203,6 +203,7 @@ function safeResult(value) {
 }
 
 function validateProgress(operation) {
+  if (operation.status === 'failed') return;
   const requiresNewKey = !['pending', 'creating_key'].includes(operation.status);
   const requiresPropagation = ['activating_key', 'awaiting_parent_ds_addition', 'awaiting_parent_ds_retirement',
     'deactivating_old_key', 'deleting_old_key', 'succeeded'].includes(operation.status);

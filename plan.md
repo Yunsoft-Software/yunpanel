@@ -29,7 +29,7 @@ Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
 ## P0.3 — Versioned DNS Zone Template ve Domain DNS yönetimi
 
-- [ ] DNSSEC rollover durable lifecycle'ını tamamla: mevcut secret-safe KSK/CSK host adapter'ı, local-Domain-scoped service bridge, secure-delegation-bound preflight ve monoton root-private operation journal'ını runtime/apply/restart recovery'ye bağla; yeni key publish/activate ve SOA/secondary propagation kanıtından sonra parent DS geçişini, eski DS retirement doğrulamasından sonra eski key deactivate/delete'i ilerlet; secure delegation kesilmesin.
+- [ ] DNSSEC rollover durable lifecycle'ını tamamla: create+publish aşamalarını lost-ack/restart-safe çalıştırıp DNSKEY propagation kapısında duran mevcut runtime'ı SOA/secondary propagation doğrulamasına, activation'a, parent DS addition/retirement bekleme aşamalarına ve eski key deactivate/delete cleanup'ına bağla; authenticated apply/audit/store wiring'i ekle ve secure delegation'ı kesme.
 - [ ] Zone suspend/delete/compensation ownership evidence'ını P0.9 lifecycle'ına bağla; manual kayıt içeren zone destructive cleanup'ta fail-closed kalsın.
 
 Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içindedir.
