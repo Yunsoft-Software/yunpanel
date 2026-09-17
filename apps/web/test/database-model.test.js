@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   databaseBackupChoices,
+  databaseDropPreviewView,
   databaseInventoryView,
   databaseRestorePreviewView,
   formatDatabaseBytes,
@@ -210,4 +211,44 @@ test('database restore preview stays bound to the selected server schema backup 
   assert.equal(JSON.stringify(view).includes('/private/'), false);
   assert.equal(databaseRestorePreviewView({ ...input, databaseName: 'other_db' }, { serverId, databaseName: 'app_main', backupId }), null);
   assert.equal(databaseRestorePreviewView({ ...input, confirmation: 'restore-anything' }, { serverId, databaseName: 'app_main', backupId }), null);
+});
+
+test('database drop preview keeps exact scoped impact and rejects inconsistent blockers', () => {
+  const bindingId = '42345678-1234-4234-8234-123456789012';
+  const websiteId = '22345678-1234-4234-8234-123456789012';
+  const applicationId = '32345678-1234-4234-8234-123456789012';
+  const input = {
+    version: 1,
+    serverId,
+    databaseName: 'app_main',
+    exists: true,
+    binding: { id: bindingId, websiteId, applicationId, unixUser: 'yunapp-abcdef012345', revision: 2 },
+    credential: {
+      id: '52345678-1234-4234-8234-123456789012',
+      username: 'ydb_abcdef012345abcdef012345',
+      revision: 3,
+      ciphertext: 'private',
+    },
+    latestBackup: {
+      backupId: '62345678-1234-4234-8234-123456789012',
+      engine: 'mariadb',
+      databaseVersion: '10.11.13-MariaDB',
+      dumpSha256: 'a'.repeat(64),
+      dumpBytes: 4096,
+      createdAt: '2026-09-17T12:00:00.000Z',
+      dumpPath: '/private/ignored.sql',
+    },
+    activeJobs: [],
+    blockers: ['database_credential_exists', 'database_binding_exists', 'database_delete_safety_chain_pending'],
+    readyToDrop: false,
+    previewDigest: 'b'.repeat(64),
+    sideEffects: false,
+  };
+  const expected = { serverId, databaseName: 'app_main', bindingId, websiteId, applicationId };
+  const view = databaseDropPreviewView(input, expected);
+  assert.equal(view.binding.id, bindingId);
+  assert.equal(view.latestBackup.backupId, input.latestBackup.backupId);
+  assert.equal(JSON.stringify(view).includes('private'), false);
+  assert.equal(databaseDropPreviewView({ ...input, binding: { ...input.binding, websiteId: '72345678-1234-4234-8234-123456789012' } }, expected), null);
+  assert.equal(databaseDropPreviewView({ ...input, blockers: ['database_binding_exists', 'database_delete_safety_chain_pending'] }, expected), null);
 });

@@ -18,6 +18,18 @@ const DATABASE_PRIVILEGES = new Set([
   'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'INDEX', 'DROP',
   'REFERENCES', 'CREATE TEMPORARY TABLES', 'LOCK TABLES', 'EXECUTE',
 ]);
+const DATABASE_DROP_BLOCKERS = new Set([
+  'database_not_found',
+  'database_credential_exists',
+  'database_binding_exists',
+  'database_backup_required',
+  'database_job_active',
+  'database_delete_safety_chain_pending',
+]);
+const DATABASE_ACTIVE_OPERATIONS = new Set([
+  'database.inspect', 'database.create', 'database.delete', 'database.backup', 'database.restore',
+  'database.credential.apply', 'database.credential.delete',
+]);
 
 function databaseOwnership(value) {
   if (value === null || value === undefined) return null;
@@ -235,6 +247,77 @@ export function databaseRestorePreviewView(value, { serverId, databaseName, back
   };
 }
 
+export function databaseDropPreviewView(value, {
+  serverId, databaseName, bindingId, websiteId, applicationId,
+} = {}) {
+  if (!value || typeof value !== 'object' || value.version !== 1 || value.serverId !== serverId
+    || value.databaseName !== databaseName || !UUID_PATTERN.test(serverId ?? '')
+    || !validDatabaseName(databaseName) || !UUID_PATTERN.test(bindingId ?? '')
+    || typeof value.exists !== 'boolean' || value.readyToDrop !== false || value.sideEffects !== false
+    || !SHA256_PATTERN.test(value.previewDigest ?? '')
+    || !value.binding || typeof value.binding !== 'object' || value.binding.id !== bindingId
+    || value.binding.websiteId !== websiteId || value.binding.applicationId !== applicationId
+    || !UUID_PATTERN.test(websiteId ?? '') || !UUID_PATTERN.test(applicationId ?? '')
+    || !SITE_USER_PATTERN.test(value.binding.unixUser ?? '')
+    || !Number.isSafeInteger(value.binding.revision) || value.binding.revision < 1
+    || !Array.isArray(value.activeJobs) || value.activeJobs.length > 100
+    || !Array.isArray(value.blockers) || value.blockers.length < 1
+    || value.blockers.some((code) => !DATABASE_DROP_BLOCKERS.has(code))
+    || new Set(value.blockers).size !== value.blockers.length
+    || !value.blockers.includes('database_binding_exists')
+    || !value.blockers.includes('database_delete_safety_chain_pending')) return null;
+  const credential = value.credential === null ? null : value.credential;
+  if (credential !== null && (!credential || typeof credential !== 'object'
+    || !UUID_PATTERN.test(credential.id ?? '') || !DATABASE_USER_PATTERN.test(credential.username ?? '')
+    || !Number.isSafeInteger(credential.revision) || credential.revision < 1)) return null;
+  const latestBackup = value.latestBackup === null ? null : value.latestBackup;
+  if (latestBackup !== null && (!latestBackup || typeof latestBackup !== 'object'
+    || !BACKUP_ID_PATTERN.test(latestBackup.backupId ?? '')
+    || !['mariadb', 'mysql'].includes(latestBackup.engine)
+    || typeof latestBackup.databaseVersion !== 'string' || latestBackup.databaseVersion.length < 1
+    || latestBackup.databaseVersion.length > 120 || /[\u0000-\u001f\u007f]/.test(latestBackup.databaseVersion)
+    || !SHA256_PATTERN.test(latestBackup.dumpSha256 ?? '')
+    || !Number.isSafeInteger(latestBackup.dumpBytes) || latestBackup.dumpBytes < 1
+    || typeof latestBackup.createdAt !== 'string' || !Number.isFinite(Date.parse(latestBackup.createdAt)))) return null;
+  const activeJobs = [];
+  const jobIds = new Set();
+  for (const job of value.activeJobs) {
+    if (!job || typeof job !== 'object' || !BACKUP_ID_PATTERN.test(job.id ?? '') || jobIds.has(job.id)
+      || !DATABASE_ACTIVE_OPERATIONS.has(job.operation) || !['queued', 'running'].includes(job.status)) return null;
+    jobIds.add(job.id);
+    activeJobs.push({ id: job.id, operation: job.operation, status: job.status });
+  }
+  if (value.blockers.includes('database_not_found') === value.exists
+    || value.blockers.includes('database_credential_exists') !== (credential !== null)
+    || value.blockers.includes('database_backup_required') !== (latestBackup === null)
+    || value.blockers.includes('database_job_active') !== (activeJobs.length > 0)) return null;
+  return {
+    serverId,
+    databaseName,
+    exists: value.exists,
+    binding: {
+      id: bindingId,
+      websiteId: value.binding.websiteId,
+      applicationId: value.binding.applicationId,
+      unixUser: value.binding.unixUser,
+      revision: value.binding.revision,
+    },
+    credential: credential ? { id: credential.id, username: credential.username, revision: credential.revision } : null,
+    latestBackup: latestBackup ? {
+      backupId: latestBackup.backupId,
+      engine: latestBackup.engine,
+      databaseVersion: latestBackup.databaseVersion,
+      dumpSha256: latestBackup.dumpSha256,
+      dumpBytes: latestBackup.dumpBytes,
+      createdAt: new Date(latestBackup.createdAt).toISOString(),
+    } : null,
+    activeJobs,
+    blockers: [...value.blockers],
+    readyToDrop: false,
+    previewDigest: value.previewDigest,
+  };
+}
+
 export const databaseModelInternals = Object.freeze({
   databaseNamePattern: DATABASE_NAME_PATTERN,
   reservedDatabases: Object.freeze([...RESERVED_DATABASES]),
@@ -242,4 +325,6 @@ export const databaseModelInternals = Object.freeze({
   databaseHealth,
   backupIdPattern: BACKUP_ID_PATTERN,
   sha256Pattern: SHA256_PATTERN,
+  databaseDropBlockers: Object.freeze([...DATABASE_DROP_BLOCKERS]),
+  databaseActiveOperations: Object.freeze([...DATABASE_ACTIVE_OPERATIONS]),
 });

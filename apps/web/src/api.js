@@ -151,6 +151,10 @@ export function createDatabaseBackup(serverId, name) {
   });
 }
 
+export function getDatabaseDropPreview(serverId, name) {
+  return panelRequest(`${databasePath(serverId, name)}/drop-preview`);
+}
+
 export function previewDatabaseRestore(serverId, name, backupId) {
   if (typeof backupId !== 'string' || !backupId) throw new Error('backupId is required');
   return panelRequest(`${databasePath(serverId, name)}/restore-preview`, {

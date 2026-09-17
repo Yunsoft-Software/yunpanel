@@ -7,6 +7,7 @@ import {
   deleteDatabase,
   finalizeDatabaseCredentialDelete,
   getDatabases,
+  getDatabaseDropPreview,
   getWebsiteDatabaseResources,
   inspectDatabases,
   previewDatabaseCredentialApply,
@@ -57,6 +58,7 @@ test('database API client rejects missing identities before fetch', async (t) =>
   assert.throws(() => getWebsiteDatabaseResources('server-1', ''), /websiteId is required/);
   assert.throws(() => createDatabase('server-1', ''), /database name is required/);
   assert.throws(() => createDatabaseBackup('server-1', ''), /database name is required/);
+  assert.throws(() => getDatabaseDropPreview('server-1', ''), /database name is required/);
   assert.throws(() => previewDatabaseRestore('server-1', 'app_main', ''), /backupId is required/);
   assert.throws(() => restoreDatabase('server-1', 'app_main', null), /database restore preview is required/);
   assert.throws(() => deleteDatabase('server-1', ''), /database name is required/);
@@ -84,6 +86,20 @@ test('database backup client queues only the encoded schema with exact confirmat
   assert.deepEqual(JSON.parse(calls[0].options.body), { confirmation: 'backup:app_main' });
   assert.equal(calls[0].options.headers['x-csrf-token'], 'csrf-database-backup');
   setSession(null);
+});
+
+test('database drop preview client uses a read-only same-origin schema route', async (t) => {
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url, options });
+    return ok({ version: 1, readyToDrop: false, sideEffects: false });
+  });
+
+  await getDatabaseDropPreview('server/one', 'app_main');
+
+  assert.deepEqual(calls.map((call) => [call.url, call.options.method, call.options.body]), [
+    ['/api/panel/servers/server%2Fone/databases/app_main/drop-preview', 'GET', undefined],
+  ]);
 });
 
 test('database restore client applies only the selected backend preview identity and checksum', async (t) => {

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { sanitizeDatabaseJobResult } from './database-job-result.js';
 import { JobRegistryError } from './job-registry.js';
@@ -29,6 +30,7 @@ const DATABASE_SECURITY_REASONS = new Set([
 ]);
 const DATABASE_ACCOUNT_PATTERN = /^[A-Za-z0-9_.$-]{1,64}@[A-Za-z0-9_.:%-]{1,255}$/;
 const DATABASE_AUTH_PLUGIN_PATTERN = /^[A-Za-z0-9_]{0,64}$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 export class DatabaseHttpError extends Error {
   constructor(code, message, status = 400) {
@@ -55,6 +57,12 @@ function exactConfirmationBody(body, expected, action) {
     throw new DatabaseHttpError('database_confirmation_required', `Confirm database ${action} with ${expected}`);
   }
   return body.confirmation;
+}
+
+function emptyQuery(query) {
+  if (Object.keys(query ?? {}).length !== 0) {
+    throw new DatabaseHttpError('database_drop_preview_query_invalid', 'Database drop preview does not accept query parameters');
+  }
 }
 
 async function requireServer(registry, serverId) {
@@ -299,6 +307,131 @@ async function attachDatabaseOwnership(inventory, {
   });
 }
 
+function databaseBackupEvidence(job, { serverId, databaseName }) {
+  const result = job?.result;
+  if (!job || job.serverId !== serverId || job.operation !== OPERATIONS.DATABASE_BACKUP
+    || job.status !== 'succeeded' || job.resourceType !== 'database' || job.resourceId !== databaseName) return null;
+  if (!result || typeof result !== 'object' || result.version !== 1 || result.backupId !== job.id
+    || result.databaseName !== databaseName || !['mariadb', 'mysql'].includes(result.engine)
+    || typeof result.databaseVersion !== 'string' || result.databaseVersion.length < 1 || result.databaseVersion.length > 120
+    || typeof result.dumpSha256 !== 'string' || !SHA256_PATTERN.test(result.dumpSha256)
+    || !Number.isSafeInteger(result.dumpBytes) || result.dumpBytes < 1
+    || typeof result.createdAt !== 'string' || !Number.isFinite(Date.parse(result.createdAt))
+    || result.backedUp !== true || result.sideEffects !== true) {
+    throw new DatabaseHttpError('database_drop_backup_state_invalid', 'Database backup evidence is invalid', 503);
+  }
+  return Object.freeze({
+    backupId: job.id,
+    engine: result.engine,
+    databaseVersion: result.databaseVersion,
+    dumpSha256: result.dumpSha256,
+    dumpBytes: result.dumpBytes,
+    createdAt: new Date(result.createdAt).toISOString(),
+  });
+}
+
+async function databaseDropPreview({
+  serverId,
+  databaseName,
+  jobRegistry,
+  databaseBindingRegistry,
+  databaseCredentialRegistry,
+  databaseInventoryProvider,
+}) {
+  if (!databaseBindingRegistry || typeof databaseBindingRegistry.getByDatabase !== 'function'
+    || !databaseCredentialRegistry || typeof databaseCredentialRegistry.listCredentials !== 'function'
+    || typeof databaseInventoryProvider !== 'function') {
+    throw new DatabaseHttpError('database_drop_preview_unavailable', 'Database drop preview dependencies are unavailable', 503);
+  }
+  let inventory;
+  let binding;
+  let credentials;
+  let jobs;
+  try {
+    [inventory, binding, credentials, jobs] = await Promise.all([
+      liveDatabaseInventory(databaseInventoryProvider, serverId),
+      databaseBindingRegistry.getByDatabase({ serverId, databaseName }),
+      databaseCredentialRegistry.listCredentials({ serverId }),
+      jobRegistry.listJobs({ serverId }),
+    ]);
+  } catch (error) {
+    if (error instanceof DatabaseHttpError) throw error;
+    throw new DatabaseHttpError('database_drop_preview_unavailable', 'Database drop preview state could not be read', 503);
+  }
+  if (!Array.isArray(credentials) || !Array.isArray(jobs)) {
+    throw new DatabaseHttpError('database_drop_preview_state_invalid', 'Database drop preview state is invalid', 503);
+  }
+  if (binding && (binding.serverId !== serverId || binding.databaseName !== databaseName
+    || typeof binding.id !== 'string' || typeof binding.websiteId !== 'string'
+    || typeof binding.applicationId !== 'string' || typeof binding.unixUser !== 'string'
+    || !Number.isSafeInteger(binding.revision) || binding.revision < 1)) {
+    throw new DatabaseHttpError('database_drop_preview_state_invalid', 'Database binding state is invalid', 503);
+  }
+  if (credentials.some((credential) => !credential || typeof credential !== 'object'
+    || typeof credential.id !== 'string' || typeof credential.databaseBindingId !== 'string'
+    || credential.serverId !== serverId || typeof credential.databaseName !== 'string'
+    || typeof credential.websiteId !== 'string' || typeof credential.applicationId !== 'string'
+    || typeof credential.siteUnixUser !== 'string' || typeof credential.username !== 'string'
+    || credential.host !== 'localhost' || !Number.isSafeInteger(credential.revision) || credential.revision < 1)) {
+    throw new DatabaseHttpError('database_drop_preview_state_invalid', 'Database credential state is invalid', 503);
+  }
+  const relatedCredentials = credentials.filter((credential) => credential.databaseName === databaseName
+    || binding && credential.databaseBindingId === binding.id);
+  if (relatedCredentials.length > 1 || relatedCredentials.some((credential) => !binding
+    || credential.databaseBindingId !== binding.id || credential.serverId !== serverId
+    || credential.websiteId !== binding.websiteId || credential.applicationId !== binding.applicationId
+    || credential.siteUnixUser !== binding.unixUser || typeof credential.id !== 'string'
+    || typeof credential.username !== 'string' || credential.host !== 'localhost'
+    || !Number.isSafeInteger(credential.revision) || credential.revision < 1)) {
+    throw new DatabaseHttpError('database_drop_preview_state_invalid', 'Database credential state is invalid', 503);
+  }
+  const credential = relatedCredentials[0] ?? null;
+  const backupEvidence = jobs
+    .map((job) => databaseBackupEvidence(job, { serverId, databaseName }))
+    .filter(Boolean)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const activeJobs = jobs
+    .filter((job) => DATABASE_OPERATIONS.has(job?.operation) && ['queued', 'running'].includes(job?.status))
+    .map((job) => Object.freeze({ id: job.id, operation: job.operation, status: job.status }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const exists = inventory.databases.some((database) => database.name === databaseName);
+  const latestBackup = backupEvidence[0] ?? null;
+  const blockers = [];
+  if (!exists) blockers.push('database_not_found');
+  if (credential) blockers.push('database_credential_exists');
+  if (binding) blockers.push('database_binding_exists');
+  if (!latestBackup) blockers.push('database_backup_required');
+  if (activeJobs.length) blockers.push('database_job_active');
+  blockers.push('database_delete_safety_chain_pending');
+  const identity = Object.freeze({
+    version: 1,
+    serverId,
+    databaseName,
+    exists,
+    binding: binding ? Object.freeze({
+      id: binding.id,
+      websiteId: binding.websiteId,
+      applicationId: binding.applicationId,
+      unixUser: binding.unixUser,
+      revision: binding.revision,
+    }) : null,
+    credential: credential ? Object.freeze({
+      id: credential.id,
+      username: credential.username,
+      revision: credential.revision,
+    }) : null,
+    latestBackup,
+    activeJobs: Object.freeze(activeJobs),
+    blockers: Object.freeze(blockers),
+    readyToDrop: false,
+  });
+  return Object.freeze({
+    ...identity,
+    previewDigest: createHash('sha256').update(JSON.stringify(identity)).digest('hex'),
+    sideEffects: false,
+  });
+}
+
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
@@ -407,6 +540,21 @@ export function mountDatabaseRoutes(app, {
     return response.status(202).json({ data: job });
   }));
 
+  app.get('/api/servers/:serverId/databases/:name/drop-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const server = await requireServer(registry, request.params.serverId);
+    const name = requireDatabaseName(request.params.name);
+    response.set('Cache-Control', 'no-store');
+    return response.json({ data: await databaseDropPreview({
+      serverId: server.id,
+      databaseName: name,
+      jobRegistry,
+      databaseBindingRegistry,
+      databaseCredentialRegistry,
+      databaseInventoryProvider,
+    }) });
+  }));
+
   if (typeof jobRegistry.getJob === 'function') {
     mountDatabaseRestoreRoutes(app, { registry, jobRegistry });
   }
@@ -453,4 +601,7 @@ export const databaseHttpInternals = Object.freeze({
   sanitizeDatabaseHealth,
   attachDatabaseHealth,
   attachDatabaseOwnership,
+  databaseBackupEvidence,
+  databaseDropPreview,
+  emptyQuery,
 });

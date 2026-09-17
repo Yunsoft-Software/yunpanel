@@ -3,6 +3,7 @@ import {
   applyDatabaseCredential,
   createDatabaseBackup,
   finalizeDatabaseCredentialDelete,
+  getDatabaseDropPreview,
   getWebsiteDatabaseResources,
   panelRequest,
   previewDatabaseCredentialApply,
@@ -15,6 +16,7 @@ import {
 } from '../api.js';
 import {
   databaseBackupChoices,
+  databaseDropPreviewView,
   databaseRestorePreviewView,
   formatDatabaseBytes,
   websiteDatabaseResourcesView,
@@ -32,6 +34,15 @@ import {
 } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 
+const DROP_BLOCKER_LABELS = Object.freeze({
+  database_not_found: 'Canlı schema bulunamadı; metadata silme işlemi başlatılamaz.',
+  database_credential_exists: 'Önce managed database credential kaldırılmalı.',
+  database_binding_exists: 'Önce Website database binding açıkça kaldırılmalı.',
+  database_backup_required: 'Doğrulanmış başarılı vendor dump yedeği gerekli.',
+  database_job_active: 'Başka bir database işi queued/running durumda.',
+  database_delete_safety_chain_pending: 'Backup requirement, ownership evidence ve retryable compensation zinciri henüz tamamlanmadı.',
+});
+
 export default function SiteResourcesPanel({ domain, website, application, server }) {
   const { jobs, observe, resourceBusy, updateJob, canManage } = useWorkspace();
   const operationPending = useRef(false);
@@ -44,6 +55,7 @@ export default function SiteResourcesPanel({ domain, website, application, serve
   const [revokeTarget, setRevokeTarget] = useState(null);
   const [backupTarget, setBackupTarget] = useState(null);
   const [restoreTarget, setRestoreTarget] = useState(null);
+  const [dropImpact, setDropImpact] = useState(null);
 
   const load = useCallback(async () => {
     if (!server) return;
@@ -286,6 +298,29 @@ export default function SiteResourcesPanel({ domain, website, application, serve
     }
   }
 
+  async function previewDatabaseDrop(binding) {
+    if (!server || !website || operationPending.current) return;
+    operationPending.current = true;
+    setBusy(true); setError(null); setNotice(null); setDropImpact(null);
+    try {
+      const raw = await getDatabaseDropPreview(server.id, binding.databaseName);
+      const preview = databaseDropPreviewView(raw, {
+        serverId: server.id,
+        databaseName: binding.databaseName,
+        bindingId: binding.id,
+        websiteId: website.id,
+        applicationId: website.applicationId,
+      });
+      if (!preview) throw new Error('Database drop preview durumu geçersiz');
+      setDropImpact(preview);
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setError(failure.message);
+    } finally {
+      operationPending.current = false;
+      setBusy(false);
+    }
+  }
+
   const compose = website?.managedComposeBinding ?? null;
   const externalDocker = website?.dockerWorkloadId ?? null;
   const mails = mailDomains ?? [];
@@ -344,6 +379,11 @@ export default function SiteResourcesPanel({ domain, website, application, serve
                     setRestoreTarget({ binding, choices, backupId: choices[0].id, preview: null, restoreJob: null });
                   }}
                 >Geri yükle</Button>
+                <Button
+                  variant="danger"
+                  disabled={busy}
+                  onClick={() => previewDatabaseDrop(binding)}
+                >Silme önizleme</Button>
                 {credential && <Button
                   disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
                   onClick={() => {
@@ -445,5 +485,20 @@ export default function SiteResourcesPanel({ domain, website, application, serve
       onConfirm={restoreDatabaseBackup}
       confirmLabel="Yedeği geri yükle"
     />}
+    {dropImpact && <Modal title="Database silme etkisi" onClose={() => setDropImpact(null)}>
+      <KeyValues items={[
+        ['Schema', dropImpact.databaseName],
+        ['Canlı schema', dropImpact.exists ? 'Mevcut' : 'Bulunamadı'],
+        ['Website binding', `${dropImpact.binding.id} · rev ${dropImpact.binding.revision}`],
+        ['Credential', dropImpact.credential ? `${dropImpact.credential.username} · rev ${dropImpact.credential.revision}` : 'Yok'],
+        ['Son doğrulanmış backup', dropImpact.latestBackup ? `${dropImpact.latestBackup.backupId} · ${formatDatabaseBytes(dropImpact.latestBackup.dumpBytes)}` : 'Yok'],
+        ['Aktif DB işi', dropImpact.activeJobs.length],
+        ['Preview digest', dropImpact.previewDigest],
+      ]} />
+      <div className="ws-notice ws-notice-warn" role="status"><div><strong>Schema drop kapalı</strong><p>Bu salt-okunur preview hiçbir kaynağı silmez. Aşağıdaki blocker’lar çözülmeden delete işi açılamaz.</p></div></div>
+      <ul>{dropImpact.blockers.map((code) => <li key={code}><strong>{code}</strong>: {DROP_BLOCKER_LABELS[code]}</li>)}</ul>
+      {dropImpact.activeJobs.length > 0 && <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>İş</th><th>Operation</th><th>Durum</th></tr></thead><tbody>{dropImpact.activeJobs.map((job) => <tr key={job.id}><td><code>{job.id}</code></td><td>{job.operation}</td><td><Badge state={job.status}>{job.status}</Badge></td></tr>)}</tbody></table></div>}
+      <footer className="ws-modal-footer"><Button onClick={() => setDropImpact(null)}>Kapat</Button></footer>
+    </Modal>}
   </>;
 }

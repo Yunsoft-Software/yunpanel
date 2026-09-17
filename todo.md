@@ -86,7 +86,7 @@ Bu bölüm yalnız güncel P0 provisioning/Passenger turundan kalan gerçek Ubun
 
 - [ ] Website'e bağlı MySQL/MariaDB schema + user/grant gerçek local socket üzerinden oluşsun; Site A kullanıcısı Site B schema/table/metadata'sına erişemesin ve Website Bağlı Kaynaklar endpoint/UI'ı yalnız kendi binding + secret-free credential/grant durumunu göstersin; rotation/revoke eski credential'ı kapatsın.
 - [ ] Fresh Ubuntu 24.04 MariaDB/MySQL kurulumunda YunPanel'in `--no-defaults --protocol=socket --user=root` bağlantısı option-file/environment parolasına ihtiyaç duymadan çalışsın; effective/login account `root@localhost`, plugin `unix_socket`/`auth_socket`, anonymous account/remote root/`test` schema sayıları sıfır doğrulansın.
-- [ ] Database/server GET her sayfa açılışı ve refreshte canlı inventory ile doğru Website binding/secret-free credential durumunu versin; silinmiş schema binding'i açıkça ayrılsın, “sunucuyu tara” job'u gerektirmesin. Create/drop/grant mutation'ları durable job ve post-condition kanıtıyla kalsın.
+- [ ] Database/server GET her sayfa açılışı ve refreshte canlı inventory ile doğru Website binding/secret-free credential durumunu versin; silinmiş schema binding'i açıkça ayrılsın, “sunucuyu tara” job'u gerektirmesin. Website drop preview gerçek schema/binding/credential/backup/active-job blocker'larını secret-free göstersin ve hiçbir cascade başlatmasın. Create/drop/grant mutation'ları durable job ve post-condition kanıtıyla kalsın.
 - [ ] phpMyAdmin signon sonrası görünen schema seti aynı grant sınırıyla eşleşsin; direct phpMyAdmin URL YunPanel session olmadan erişilemesin.
 - [ ] MariaDB/MySQL backup/restore vendor dump + restic akışında checksum, consistency, pre-restore snapshot ve rollback ile doğrulansın.
 

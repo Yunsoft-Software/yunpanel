@@ -48,3 +48,13 @@ test('Website database restore selects scoped backup evidence and applies an exa
   assert.match(panel, /checksum ve post-restore doğrulaması/);
   assert.match(panel, /confirmation=\{restoreTarget\.binding\.databaseName\}/);
 });
+
+test('Website database drop remains a read-only blocker preview without implicit cascade', async () => {
+  const panel = await readFile(new URL('../src/workspace/SiteResourcesPanel.jsx', import.meta.url), 'utf8');
+  assert.match(panel, /getDatabaseDropPreview/);
+  assert.match(panel, /databaseDropPreviewView/);
+  assert.match(panel, /Silme önizleme/);
+  assert.match(panel, /Bu salt-okunur preview hiçbir kaynağı silmez/);
+  assert.match(panel, /database_delete_safety_chain_pending/);
+  assert.doesNotMatch(panel, /deleteDatabase\(/);
+});
