@@ -33,6 +33,7 @@ install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel
 install -d -o yunpanel-phpmyadmin -g yunpanel-phpmyadmin -m 0700 /var/lib/yunpanel/phpmyadmin
 install -d -o yunpanel-phpmyadmin -g yunpanel-phpmyadmin -m 0700 /var/lib/yunpanel/phpmyadmin/tmp
 install -d -o yunpanel-phpmyadmin -g yunpanel-phpmyadmin -m 0700 /var/lib/yunpanel/phpmyadmin/sessions
+install -d -o root -g yunpanel -m 2770 /run/yunpanel
 install -d -o root -g root -m 0700 /etc/yunpanel/control-plane
 install -d -o root -g root -m 0700 /etc/yunpanel/agent
 install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/web
