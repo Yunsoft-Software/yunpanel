@@ -486,10 +486,12 @@ export function createDnsZoneDnssecRolloverRegistry({
     const id = uuid(operationId, 'operationId');
     const index = state.operations.findIndex((entry) => entry.id === id);
     if (index < 0) throw new DnsZoneDnssecRolloverRegistryError('dnssec_rollover_operation_not_found', 'DNSSEC rollover operation was not found', 404);
+    const observedNow = new Date(now()).getTime();
+    const nextUpdatedAt = new Date(Math.max(observedNow, Date.parse(state.operations[index].updatedAt) + 1)).toISOString();
     const next = persistedOperation({
       ...state.operations[index],
       ...update,
-      updatedAt: new Date(now()).toISOString(),
+      updatedAt: nextUpdatedAt,
     });
     state.operations[index] = next;
     await persist();

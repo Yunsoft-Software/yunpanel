@@ -86,6 +86,19 @@ test('Domain DNSSEC HTTP forwards status, preview and durable apply without prov
     evidence: { newKeyId: 8, keySetDigest: 'd'.repeat(64), targetKeySetDigest: null },
     result: null,
     error: null,
+    updatedAt: '2026-09-17T10:00:00.000Z',
+  };
+  const rolloverContinuePreview = {
+    version: 1,
+    action: 'dnssec_rollover_continue',
+    operationId,
+    domainId,
+    status: rolloverOperation.status,
+    expectedUpdatedAt: rolloverOperation.updatedAt,
+    continueAllowed: true,
+    reason: null,
+    previewDigest: 'e'.repeat(64),
+    confirmation: `continue-dnssec-rollover:${operationId}:${rolloverOperation.updatedAt}:${'e'.repeat(64)}`,
   };
   const runtime = {
     status: async (input) => { calls.push(['status', input]); return { domainId, status: 'insecure' }; },
@@ -94,6 +107,11 @@ test('Domain DNSSEC HTTP forwards status, preview and durable apply without prov
     startRollover: async (input) => { calls.push(['rollover-start', input]); return rolloverOperation; },
     listRolloversForDomain: async (input) => { calls.push(['rollover-list', input]); return [rolloverOperation]; },
     getRollover: async (input) => { calls.push(['rollover-get', input]); return rolloverOperation; },
+    previewRolloverContinue: async (input) => { calls.push(['rollover-continue-preview', input]); return rolloverContinuePreview; },
+    continueRollover: async (input) => {
+      calls.push(['rollover-continue', input]);
+      return { advanced: false, waiting: true, terminal: false, operation: rolloverOperation };
+    },
     start: async (input) => { calls.push(['start', input]); return operation; },
     listForDomain: async (input) => { calls.push(['list', input]); return [operation]; },
     get: async (input) => { calls.push(['get', input]); return operation; },
@@ -135,6 +153,26 @@ test('Domain DNSSEC HTTP forwards status, preview and durable apply without prov
     params: { domainId, operationId },
   });
   assert.equal(rolloverSingle.payload.data.id, operationId);
+  const rolloverContinuation = await invoke(
+    app,
+    'GET /api/domains/:domainId/dns/dnssec/rollover/operations/:operationId/continue-preview',
+    { params: { domainId, operationId } },
+  );
+  assert.deepEqual(rolloverContinuation.payload, { data: rolloverContinuePreview });
+  const rolloverContinued = await invoke(
+    app,
+    'POST /api/domains/:domainId/dns/dnssec/rollover/operations/:operationId/continue',
+    {
+      params: { domainId, operationId },
+      body: {
+        expectedUpdatedAt: rolloverContinuePreview.expectedUpdatedAt,
+        previewDigest: rolloverContinuePreview.previewDigest,
+        confirmation: rolloverContinuePreview.confirmation,
+      },
+    },
+  );
+  assert.equal(rolloverContinued.statusCode, 202);
+  assert.equal(rolloverContinued.payload.data.waiting, true);
 
   const applied = await invoke(app, 'POST /api/domains/:domainId/dns/dnssec/apply', {
     params: { domainId },
@@ -167,6 +205,14 @@ test('Domain DNSSEC HTTP forwards status, preview and durable apply without prov
     }],
     ['rollover-list', domainId],
     ['rollover-get', operationId],
+    ['rollover-continue-preview', { domainId, operationId }],
+    ['rollover-continue', {
+      domainId,
+      operationId,
+      expectedUpdatedAt: rolloverContinuePreview.expectedUpdatedAt,
+      previewDigest: rolloverContinuePreview.previewDigest,
+      confirmation: rolloverContinuePreview.confirmation,
+    }],
     ['start', {
       domainId,
       enabled: true,
@@ -189,6 +235,8 @@ test('Domain DNSSEC HTTP hides an operation that belongs to another Domain path'
       startRollover: async () => ({}),
       listRolloversForDomain: async () => [],
       getRollover: async () => ({}),
+      previewRolloverContinue: async () => ({}),
+      continueRollover: async () => ({}),
       start: async () => ({}),
       listForDomain: async () => [],
       get: async () => ({ id: operationId, domainId: '997c6ac8-4db4-4500-a24e-0c8ff84825c6' }),
@@ -213,6 +261,8 @@ test('Domain DNSSEC HTTP hides a rollover operation that belongs to another Doma
       startRollover: async () => ({}),
       listRolloversForDomain: async () => [],
       getRollover: async () => ({ id: operationId, domainId: '997c6ac8-4db4-4500-a24e-0c8ff84825c6' }),
+      previewRolloverContinue: async () => ({}),
+      continueRollover: async () => ({}),
       start: async () => ({}),
       listForDomain: async () => [],
       get: async () => ({}),
@@ -238,6 +288,8 @@ test('Domain DNSSEC HTTP rejects malformed mutation bodies before runtime calls'
       startRollover: async () => { calls += 1; return {}; },
       listRolloversForDomain: async () => [],
       getRollover: async () => null,
+      previewRolloverContinue: async () => ({}),
+      continueRollover: async () => { calls += 1; return {}; },
       start: async () => { calls += 1; return {}; },
       get: async () => null,
       listForDomain: async () => [],
@@ -263,6 +315,16 @@ test('Domain DNSSEC HTTP rejects malformed mutation bodies before runtime calls'
   });
   assert.equal(badRollover.statusCode, 400);
   assert.equal(badRollover.payload.error.code, 'dnssec_rollover_apply_input_invalid');
+  const badContinue = await invoke(
+    app,
+    'POST /api/domains/:domainId/dns/dnssec/rollover/operations/:operationId/continue',
+    {
+      params: { domainId, operationId },
+      body: { expectedUpdatedAt: 'not-a-date', previewDigest: 'not-a-digest', confirmation: 'anything' },
+    },
+  );
+  assert.equal(badContinue.statusCode, 400);
+  assert.equal(badContinue.payload.error.code, 'dnssec_rollover_continue_input_invalid');
   assert.equal(calls, 0);
 });
 
@@ -275,6 +337,7 @@ test('DNSSEC HTTP mount requires a local authoritative service', () => {
         dnsZoneDnssecRuntime: {
           status() {}, preview() {}, previewRollover() {}, start() {}, get() {}, listForDomain() {},
           startRollover() {}, getRollover() {}, listRolloversForDomain() {},
+          previewRolloverContinue() {}, continueRollover() {},
         },
       });
     },

@@ -126,6 +126,7 @@ test('allows only the exact next rollover stage and makes same-stage evidence id
   await registry.init();
   await registry.create(preview());
   const creating = await registry.advance(operationId, 'creating_key', evidence());
+  assert.equal(Date.parse(creating.updatedAt) > Date.parse((await registry.get(operationId)).createdAt), true);
   const retried = await registry.advance(operationId, 'creating_key', evidence());
   assert.equal(retried, creating);
 

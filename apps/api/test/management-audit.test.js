@@ -54,6 +54,7 @@ test('current management mutation routes map to bounded action and resource iden
     ['POST', '/api/domains/domain-1/dns/dnssec/preview', 'dns.dnssec.preview', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/dns/dnssec/apply', 'dns.dnssec.apply', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/dns/dnssec/rollover/apply', 'dns.dnssec.rollover.apply', 'domain', 'domain-1'],
+    ['POST', '/api/domains/domain-1/dns/dnssec/rollover/operations/operation-1/continue', 'dns.dnssec.rollover.continue', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/certificates/custom-preview', 'certificate.custom.preview', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/certificates/custom', 'certificate.custom.import', 'domain', 'domain-1'],
     ['POST', '/api/domains/domain-1/certificates/certificate-1/select-preview', 'certificate.select.preview', 'domain', 'domain-1'],

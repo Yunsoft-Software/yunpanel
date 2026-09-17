@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   dnsZoneDnssecRolloverPublicView,
   DnsZoneDnssecRolloverRegistryError,
@@ -5,6 +6,7 @@ import {
 import { DnsZoneDnssecError } from './dns-zone-dnssec.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const TERMINAL_STATUSES = new Set(['succeeded', 'failed']);
 
 export class DnsZoneDnssecRolloverRuntimeError extends Error {
   constructor(code, message, status = 400) {
@@ -30,6 +32,28 @@ function safeFailure(error, fallbackCode = 'dnssec_rollover_operation_failed', f
     return Object.freeze({ code: error.code, message: error.message });
   }
   return Object.freeze({ code: fallbackCode, message: fallbackMessage });
+}
+
+function continuationPreview(operation) {
+  const terminal = TERMINAL_STATUSES.has(operation.status);
+  const payload = Object.freeze({
+    version: 1,
+    action: 'dnssec_rollover_continue',
+    operationId: operation.id,
+    domainId: operation.domainId,
+    status: operation.status,
+    expectedUpdatedAt: operation.updatedAt,
+    continueAllowed: !terminal,
+    reason: terminal ? 'operation_terminal' : null,
+  });
+  const previewDigest = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  return Object.freeze({
+    ...payload,
+    previewDigest,
+    confirmation: terminal
+      ? null
+      : `continue-dnssec-rollover:${operation.id}:${operation.updatedAt}:${previewDigest}`,
+  });
 }
 
 function currentPreviewMatches(operation, preview) {
@@ -391,8 +415,15 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
     return operation;
   }
 
-  async function run(operationId) {
+  async function run(operationId, { expectedUpdatedAt = null } = {}) {
     let operation = await getRequired(operationId);
+    if (expectedUpdatedAt !== null && operation.updatedAt !== expectedUpdatedAt) {
+      throw new DnsZoneDnssecRolloverRuntimeError(
+        'dnssec_rollover_continue_stale',
+        'DNSSEC rollover operation changed after the continuation preview',
+        409,
+      );
+    }
     if (operation.status === 'succeeded' || operation.status === 'failed'
       || !['pending', 'creating_key', 'publishing_key', 'verifying_dnskey_propagation', 'activating_key',
         'awaiting_parent_ds_addition', 'awaiting_parent_ds_retirement', 'waiting_parent_ds_ttl',
@@ -654,6 +685,71 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
     return dnsZoneDnssecRolloverPublicView(await getRequired(operationId));
   }
 
+  async function scopedOperation(domainId, operationId) {
+    const operation = await getRequired(operationId);
+    if (operation.domainId !== domainId) {
+      throw new DnsZoneDnssecRolloverRuntimeError(
+        'dnssec_rollover_operation_not_found',
+        'DNSSEC rollover operation was not found',
+        404,
+      );
+    }
+    return operation;
+  }
+
+  async function previewContinue({ domainId, operationId } = {}) {
+    return continuationPreview(await scopedOperation(domainId, operationId));
+  }
+
+  async function continueOperation({
+    domainId,
+    operationId,
+    expectedUpdatedAt,
+    previewDigest,
+    confirmation,
+  } = {}) {
+    if (typeof expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(expectedUpdatedAt))
+      || new Date(expectedUpdatedAt).toISOString() !== expectedUpdatedAt
+      || typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)
+      || typeof confirmation !== 'string' || confirmation.length < 1 || confirmation.length > 500) {
+      throw new DnsZoneDnssecRolloverRuntimeError(
+        'dnssec_rollover_continue_confirmation_invalid',
+        'A current DNSSEC rollover continuation preview and exact confirmation are required',
+        409,
+      );
+    }
+    const operation = await scopedOperation(domainId, operationId);
+    const preview = continuationPreview(operation);
+    if (preview.expectedUpdatedAt !== expectedUpdatedAt || preview.previewDigest !== previewDigest) {
+      throw new DnsZoneDnssecRolloverRuntimeError(
+        'dnssec_rollover_continue_stale',
+        'DNSSEC rollover operation changed after the continuation preview',
+        409,
+      );
+    }
+    if (!preview.continueAllowed) {
+      throw new DnsZoneDnssecRolloverRuntimeError(
+        'dnssec_rollover_operation_terminal',
+        'DNSSEC rollover operation is already terminal',
+        409,
+      );
+    }
+    if (preview.confirmation !== confirmation) {
+      throw new DnsZoneDnssecRolloverRuntimeError(
+        'dnssec_rollover_continue_confirmation_invalid',
+        'Exact DNSSEC rollover continuation confirmation is required',
+        409,
+      );
+    }
+    const advanced = await run(operation.id, { expectedUpdatedAt });
+    return Object.freeze({
+      advanced: advanced.updatedAt !== expectedUpdatedAt,
+      waiting: advanced.updatedAt === expectedUpdatedAt && !TERMINAL_STATUSES.has(advanced.status),
+      terminal: TERMINAL_STATUSES.has(advanced.status),
+      operation: advanced,
+    });
+  }
+
   async function listForDomain(domainId) {
     try { return Object.freeze((await registry.listForDomain(domainId)).map(dnsZoneDnssecRolloverPublicView)); }
     catch (error) { throw mapped(error); }
@@ -677,11 +773,12 @@ export function createDnsZoneDnssecRolloverRuntime({ registry, service } = {}) {
     return Object.freeze(recovery);
   }
 
-  return Object.freeze({ init, start, run, get, listForDomain });
+  return Object.freeze({ init, start, run, get, listForDomain, previewContinue, continueOperation });
 }
 
 export const dnsZoneDnssecRolloverRuntimeInternals = Object.freeze({
   safeFailure,
+  continuationPreview,
   currentPreviewMatches,
   createdKeyEvidence,
   publicationTarget,

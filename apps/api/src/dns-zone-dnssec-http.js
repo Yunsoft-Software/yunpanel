@@ -80,6 +80,25 @@ function rolloverApplyBody(body) {
   return value;
 }
 
+function rolloverContinueBody(body) {
+  const value = exactObject(
+    body,
+    new Set(['expectedUpdatedAt', 'previewDigest', 'confirmation']),
+    'dnssec_rollover_continue_input_invalid',
+    'Send expectedUpdatedAt, previewDigest and confirmation',
+  );
+  if (typeof value.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(value.expectedUpdatedAt))
+    || new Date(value.expectedUpdatedAt).toISOString() !== value.expectedUpdatedAt
+    || typeof value.previewDigest !== 'string' || !SHA256_PATTERN.test(value.previewDigest)
+    || typeof value.confirmation !== 'string' || value.confirmation.length < 1 || value.confirmation.length > 500) {
+    throw new DnsZoneDnssecHttpError(
+      'dnssec_rollover_continue_input_invalid',
+      'Send a current operation revision, previewDigest and exact confirmation',
+    );
+  }
+  return value;
+}
+
 function stateRoot(env = process.env) {
   const serverStorePath = env.YUNPANEL_SERVER_STORE ?? path.resolve('.data/server-registry.json');
   return path.dirname(serverStorePath);
@@ -132,6 +151,8 @@ async function defaultRuntime(authoritativeService, dnsIdentityRegistry, env = p
     startRollover: rolloverRuntime.start,
     getRollover: rolloverRuntime.get,
     listRolloversForDomain: rolloverRuntime.listForDomain,
+    previewRolloverContinue: rolloverRuntime.previewContinue,
+    continueRollover: rolloverRuntime.continueOperation,
   });
 }
 
@@ -183,7 +204,9 @@ export function mountDnsZoneDnssecRoutes(app, {
       || typeof dnsZoneDnssecRuntime.start !== 'function' || typeof dnsZoneDnssecRuntime.get !== 'function'
       || typeof dnsZoneDnssecRuntime.listForDomain !== 'function'
       || typeof dnsZoneDnssecRuntime.startRollover !== 'function' || typeof dnsZoneDnssecRuntime.getRollover !== 'function'
-      || typeof dnsZoneDnssecRuntime.listRolloversForDomain !== 'function')) {
+      || typeof dnsZoneDnssecRuntime.listRolloversForDomain !== 'function'
+      || typeof dnsZoneDnssecRuntime.previewRolloverContinue !== 'function'
+      || typeof dnsZoneDnssecRuntime.continueRollover !== 'function')) {
     throw new Error('DNSSEC runtime is invalid');
   }
   if (dnsZoneDnssecService !== null
@@ -194,6 +217,8 @@ export function mountDnsZoneDnssecRoutes(app, {
       || typeof dnsZoneDnssecService.previewRolloverKeyState !== 'function'
       || typeof dnsZoneDnssecService.setRolloverKeyState !== 'function'
       || typeof dnsZoneDnssecService.inspectRolloverPropagation !== 'function'
+      || typeof dnsZoneDnssecService.previewRolloverKeyDeletion !== 'function'
+      || typeof dnsZoneDnssecService.deleteRolloverKey !== 'function'
       || typeof dnsZoneDnssecService.apply !== 'function')) {
     throw new Error('DNSSEC service is invalid');
   }
@@ -249,6 +274,28 @@ export function mountDnsZoneDnssecRoutes(app, {
     return response.json({ data: operation });
   }));
 
+  app.get('/api/domains/:domainId/dns/dnssec/rollover/operations/:operationId/continue-preview', requirePanelRouteAccess, route(async (request, response) => {
+    return response.json({
+      data: await (await runtime()).previewRolloverContinue({
+        domainId: request.params.domainId,
+        operationId: request.params.operationId,
+      }),
+    });
+  }));
+
+  app.post('/api/domains/:domainId/dns/dnssec/rollover/operations/:operationId/continue', requirePanelRouteAccess, route(async (request, response) => {
+    const body = rolloverContinueBody(request.body);
+    return response.status(202).json({
+      data: await (await runtime()).continueRollover({
+        domainId: request.params.domainId,
+        operationId: request.params.operationId,
+        expectedUpdatedAt: body.expectedUpdatedAt,
+        previewDigest: body.previewDigest,
+        confirmation: body.confirmation,
+      }),
+    });
+  }));
+
   app.post('/api/domains/:domainId/dns/dnssec/apply', requirePanelRouteAccess, route(async (request, response) => {
     const body = applyBody(request.body);
     return response.json({
@@ -278,6 +325,7 @@ export const dnsZoneDnssecHttpInternals = Object.freeze({
   previewBody,
   applyBody,
   rolloverApplyBody,
+  rolloverContinueBody,
   stateRoot,
   operationStorePath,
   rolloverOperationStorePath,

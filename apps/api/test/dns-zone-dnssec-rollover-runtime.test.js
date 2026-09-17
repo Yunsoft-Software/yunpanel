@@ -669,6 +669,80 @@ test('retries an uncertain activation from persisted target digest without dupli
   assert.equal(fx.activateMutations(), 1);
 });
 
+test('continuation preview advances only the exact current operation revision', async () => {
+  const fx = fixture();
+  await fx.runtime.init();
+  const operation = await fx.runtime.start({
+    domainId,
+    previewDigest: fx.preview.previewDigest,
+    confirmation: fx.preview.confirmation,
+  });
+  assert.equal(operation.status, 'verifying_dnskey_propagation');
+
+  const preview = await fx.runtime.previewContinue({ domainId, operationId });
+  assert.equal(preview.action, 'dnssec_rollover_continue');
+  assert.equal(preview.operationId, operationId);
+  assert.equal(preview.expectedUpdatedAt, operation.updatedAt);
+  assert.equal(preview.continueAllowed, true);
+  assert.match(preview.confirmation, new RegExp(`^continue-dnssec-rollover:${operationId}:`));
+
+  const result = await fx.runtime.continueOperation({
+    domainId,
+    operationId,
+    expectedUpdatedAt: preview.expectedUpdatedAt,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+  assert.equal(result.advanced, false);
+  assert.equal(result.waiting, true);
+  assert.equal(result.terminal, false);
+  assert.equal(result.operation.updatedAt, operation.updatedAt);
+});
+
+test('continuation rejects stale, terminal and cross-Domain operation references', async () => {
+  const fx = fixture();
+  await fx.runtime.init();
+  await fx.runtime.start({
+    domainId,
+    previewDigest: fx.preview.previewDigest,
+    confirmation: fx.preview.confirmation,
+  });
+  const preview = await fx.runtime.previewContinue({ domainId, operationId });
+  await fx.registry.fail(operationId, { code: 'operator_stopped', message: 'Operator stopped the operation' });
+
+  await assert.rejects(
+    fx.runtime.continueOperation({
+      domainId,
+      operationId,
+      expectedUpdatedAt: preview.expectedUpdatedAt,
+      previewDigest: preview.previewDigest,
+      confirmation: preview.confirmation,
+    }),
+    (error) => error instanceof DnsZoneDnssecRolloverRuntimeError
+      && error.code === 'dnssec_rollover_continue_stale',
+  );
+
+  const terminal = await fx.runtime.previewContinue({ domainId, operationId });
+  assert.equal(terminal.continueAllowed, false);
+  assert.equal(terminal.confirmation, null);
+  await assert.rejects(
+    fx.runtime.continueOperation({
+      domainId,
+      operationId,
+      expectedUpdatedAt: terminal.expectedUpdatedAt,
+      previewDigest: terminal.previewDigest,
+      confirmation: 'continue-terminal-operation',
+    }),
+    (error) => error instanceof DnsZoneDnssecRolloverRuntimeError
+      && error.code === 'dnssec_rollover_operation_terminal',
+  );
+  await assert.rejects(
+    fx.runtime.previewContinue({ domainId: '997c6ac8-4db4-4500-a24e-0c8ff84825c6', operationId }),
+    (error) => error instanceof DnsZoneDnssecRolloverRuntimeError
+      && error.code === 'dnssec_rollover_operation_not_found',
+  );
+});
+
 test('rejects malformed start confirmation before journaling or host mutation', async () => {
   const fx = fixture();
   await fx.runtime.init();
