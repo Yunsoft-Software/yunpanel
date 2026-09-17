@@ -193,8 +193,17 @@ export function websiteDatabaseResourcesView(data) {
   return { websiteId: data.websiteId, applicationId: data.applicationId, databases };
 }
 
-export function databaseBackupChoices(jobs, { serverId, databaseName } = {}) {
+export function databaseBackupChoices(jobs, {
+  serverId,
+  databaseName,
+  websiteId = null,
+  bindingId = null,
+  bindingRevision = null,
+} = {}) {
   if (!Array.isArray(jobs) || !UUID_PATTERN.test(serverId ?? '') || !validDatabaseName(databaseName)) return [];
+  const scoped = websiteId !== null || bindingId !== null || bindingRevision !== null;
+  if (scoped && (!UUID_PATTERN.test(websiteId ?? '') || !UUID_PATTERN.test(bindingId ?? '')
+    || !Number.isSafeInteger(bindingRevision) || bindingRevision < 1)) return [];
   const choices = [];
   const ids = new Set();
   for (const job of jobs) {
@@ -202,6 +211,11 @@ export function databaseBackupChoices(jobs, { serverId, databaseName } = {}) {
     if (!job || typeof job !== 'object' || !BACKUP_ID_PATTERN.test(job.id ?? '') || ids.has(job.id)
       || job.serverId !== serverId || job.operation !== 'database.backup' || job.status !== 'succeeded'
       || job.resourceType !== 'database' || job.resourceId !== databaseName
+      || (scoped && (!job.payload || typeof job.payload !== 'object' || Array.isArray(job.payload)
+        || job.payload.databaseName !== databaseName
+        || job.payload.websiteId !== websiteId
+        || job.payload.databaseBindingId !== bindingId
+        || job.payload.expectedBindingRevision !== bindingRevision))
       || !result || typeof result !== 'object' || result.version !== 1 || result.backupId !== job.id
       || result.databaseName !== databaseName || !['mariadb', 'mysql'].includes(result.engine)
       || typeof result.databaseVersion !== 'string' || result.databaseVersion.length < 1 || result.databaseVersion.length > 120
@@ -223,7 +237,16 @@ export function databaseBackupChoices(jobs, { serverId, databaseName } = {}) {
   return choices.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
-export function databaseRestorePreviewView(value, { serverId, databaseName, backupId } = {}) {
+export function databaseRestorePreviewView(value, {
+  serverId,
+  databaseName,
+  backupId,
+  websiteId = null,
+  applicationId = null,
+  bindingId = null,
+  bindingRevision = null,
+} = {}) {
+  const scoped = websiteId !== null || applicationId !== null || bindingId !== null || bindingRevision !== null;
   if (!value || typeof value !== 'object' || value.version !== 1 || value.operation !== 'database_restore'
     || value.serverId !== serverId || value.databaseName !== databaseName || value.backupId !== backupId
     || !UUID_PATTERN.test(serverId ?? '') || !validDatabaseName(databaseName) || !BACKUP_ID_PATTERN.test(backupId ?? '')
@@ -234,6 +257,14 @@ export function databaseRestorePreviewView(value, { serverId, databaseName, back
     || /[\u0000-\u001f\u007f]/.test(value.databaseVersion)
     || value.confirmation !== `restore-database:${databaseName}:${value.previewDigest}`
     || value.sideEffects !== false) return null;
+  if (scoped && (!UUID_PATTERN.test(websiteId ?? '') || !UUID_PATTERN.test(applicationId ?? '')
+    || !UUID_PATTERN.test(bindingId ?? '') || !Number.isSafeInteger(bindingRevision) || bindingRevision < 1
+    || value.websiteId !== websiteId || value.databaseBindingId !== bindingId
+    || value.expectedBindingRevision !== bindingRevision
+    || !value.scope || typeof value.scope !== 'object' || Array.isArray(value.scope)
+    || value.scope.serverId !== serverId || value.scope.websiteId !== websiteId
+    || value.scope.applicationId !== applicationId || value.scope.databaseBindingId !== bindingId
+    || value.scope.bindingRevision !== bindingRevision || value.scope.databaseName !== databaseName)) return null;
   return {
     serverId,
     databaseName,
@@ -244,6 +275,12 @@ export function databaseRestorePreviewView(value, { serverId, databaseName, back
     databaseVersion: value.databaseVersion,
     previewDigest: value.previewDigest,
     confirmation: value.confirmation,
+    ...(scoped ? {
+      websiteId,
+      applicationId,
+      databaseBindingId: bindingId,
+      bindingRevision,
+    } : {}),
   };
 }
 
