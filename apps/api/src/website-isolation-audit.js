@@ -274,6 +274,140 @@ async function inspectSftpMigrationPreview(handler, context, scope) {
   }
 }
 
+function boundedPassengerMigrationPreview(value, { applicationId, identity } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== 1 || value.adapter !== 'passenger'
+    || typeof value.satisfied !== 'boolean'
+    || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
+    || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
+    || !Array.isArray(value.differences) || value.differences.length > 20
+    || value.differences.some((code) => typeof code !== 'string' || !/^[a-z0-9_]{1,120}$/.test(code))
+    || value.desired.applicationId !== applicationId
+    || value.desired.unixUser !== identity?.unixUser
+    || value.desired.homeDirectory !== identity?.paths?.workspace?.homeDirectory
+    || value.desired.currentRoot !== identity?.paths?.runtime?.currentRelease
+    || value.desired.releasesDirectory !== identity?.paths?.runtime?.releasesDirectory
+    || !Number.isInteger(value.desired.nodeMajor) || value.desired.nodeMajor < 20 || value.desired.nodeMajor > 40
+    || !Array.isArray(value.desired.nodeCandidates) || value.desired.nodeCandidates.length < 1 || value.desired.nodeCandidates.length > 3
+    || value.desired.nodeCandidates.some((candidate) => boundedText(candidate, 512) === null || !candidate.startsWith('/'))
+    || boundedText(value.desired.appRoot) === null || !value.desired.appRoot.startsWith(value.desired.currentRoot)
+    || boundedText(value.desired.documentRoot) === null || !value.desired.documentRoot.startsWith(value.desired.appRoot)
+    || boundedText(value.desired.startupFile, 240) === null || value.desired.startupFile.startsWith('/')) {
+    return null;
+  }
+
+  const passenger = value.current.passenger;
+  if (!passenger || typeof passenger !== 'object' || Array.isArray(passenger)
+    || typeof passenger.healthy !== 'boolean'
+    || (passenger.installedVersion !== null && boundedText(passenger.installedVersion, 80) === null)) return null;
+
+  const currentIdentity = value.current.identity;
+  if (!currentIdentity || typeof currentIdentity !== 'object' || Array.isArray(currentIdentity)
+    || typeof currentIdentity.satisfied !== 'boolean') return null;
+  let identityProjection;
+  if (currentIdentity.satisfied) {
+    if (!Number.isSafeInteger(currentIdentity.uid) || currentIdentity.uid < 1
+      || !Number.isSafeInteger(currentIdentity.gid) || currentIdentity.gid < 1
+      || currentIdentity.homeDirectory !== identity.paths.workspace.homeDirectory
+      || !['/usr/sbin/nologin', '/sbin/nologin'].includes(currentIdentity.shell)
+      || currentIdentity.homeMode !== '0750') return null;
+    identityProjection = Object.freeze({
+      satisfied: true,
+      uid: currentIdentity.uid,
+      gid: currentIdentity.gid,
+      homeDirectory: currentIdentity.homeDirectory,
+      shell: currentIdentity.shell,
+      homeMode: currentIdentity.homeMode,
+    });
+  } else {
+    if (typeof currentIdentity.reason !== 'string' || !/^[a-z0-9_]{1,120}$/.test(currentIdentity.reason)) return null;
+    identityProjection = Object.freeze({ satisfied: false, reason: currentIdentity.reason });
+  }
+
+  if (!Array.isArray(value.current.nodeCandidates)
+    || value.current.nodeCandidates.length !== value.desired.nodeCandidates.length) return null;
+  const nodeCandidates = [];
+  for (const candidate of value.current.nodeCandidates) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)
+      || !value.desired.nodeCandidates.includes(candidate.path)
+      || typeof candidate.available !== 'boolean'
+      || typeof candidate.matchesRequestedMajor !== 'boolean'
+      || (candidate.version !== null && !/^v\d{1,2}\.\d+\.\d+$/.test(candidate.version))) return null;
+    nodeCandidates.push(Object.freeze({
+      path: candidate.path,
+      available: candidate.available,
+      version: candidate.version,
+      matchesRequestedMajor: candidate.matchesRequestedMajor,
+    }));
+  }
+
+  const currentReleaseTarget = value.current.currentReleaseTarget === null
+    ? null
+    : boundedText(value.current.currentReleaseTarget, 512);
+  if (value.current.currentReleaseTarget !== null && currentReleaseTarget === null) return null;
+  const currentReleaseTargetError = value.current.currentReleaseTargetError === null
+    ? null
+    : value.current.currentReleaseTargetError;
+  if (currentReleaseTargetError !== null
+    && (typeof currentReleaseTargetError !== 'string' || !/^[a-z0-9_]{1,120}$/.test(currentReleaseTargetError))) return null;
+
+  let release = null;
+  if (value.current.release !== null) {
+    const candidate = value.current.release;
+    const roots = [candidate?.resolvedAppRoot, candidate?.resolvedDocumentRoot, candidate?.resolvedStartup];
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)
+      || typeof candidate.releaseId !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate.releaseId)
+      || roots.some((entry) => boundedText(entry) === null
+        || !entry.startsWith(`${identity.paths.runtime.releasesDirectory}/`))) return null;
+    release = Object.freeze({
+      releaseId: candidate.releaseId.toLowerCase(),
+      resolvedAppRoot: candidate.resolvedAppRoot,
+      resolvedDocumentRoot: candidate.resolvedDocumentRoot,
+      resolvedStartup: candidate.resolvedStartup,
+    });
+  }
+
+  return Object.freeze({
+    version: 1,
+    adapter: 'passenger',
+    satisfied: value.satisfied,
+    current: Object.freeze({
+      passenger: Object.freeze({
+        healthy: passenger.healthy,
+        installedVersion: passenger.installedVersion,
+      }),
+      identity: identityProjection,
+      nodeCandidates: Object.freeze(nodeCandidates),
+      currentReleaseTarget,
+      currentReleaseTargetError,
+      release,
+    }),
+    desired: Object.freeze({
+      applicationId,
+      nodeMajor: value.desired.nodeMajor,
+      nodeCandidates: Object.freeze([...value.desired.nodeCandidates]),
+      currentRoot: value.desired.currentRoot,
+      releasesDirectory: value.desired.releasesDirectory,
+      homeDirectory: value.desired.homeDirectory,
+      appRoot: value.desired.appRoot,
+      documentRoot: value.desired.documentRoot,
+      startupFile: value.desired.startupFile,
+      unixUser: value.desired.unixUser,
+    }),
+    differences: Object.freeze([...value.differences]),
+  });
+}
+
+async function inspectPassengerMigrationPreview(handler, context, scope) {
+  if (!handler || typeof handler.previewMigration !== 'function') return null;
+  try {
+    return boundedPassengerMigrationPreview(await handler.previewMigration(context), scope);
+  } catch {
+    return null;
+  }
+}
+
 function migrationChange({ id, action, current, desired, ownership = 'unverified', applyState = null }) {
   return Object.freeze({
     id,
@@ -465,6 +599,12 @@ export function createWebsiteIsolationAuditService({
               identity,
             })
             : null;
+          const passengerMigrationPreview = !satisfied && stepId === 'runtime'
+            ? await inspectPassengerMigrationPreview(handler, context, {
+              applicationId: application.id,
+              identity,
+            })
+            : null;
           inspectedSteps.push(Object.freeze({
             stepId,
             kind: step.kind,
@@ -475,6 +615,7 @@ export function createWebsiteIsolationAuditService({
             } : {}),
             ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
             ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
+            ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
           }));
           if (!satisfied) {
             findings.push(finding(
@@ -516,6 +657,7 @@ export function createWebsiteIsolationAuditService({
                 inspection: result?.reason ?? 'isolation_not_satisfied',
                 ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
                 ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
+                ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
               },
               desired: { satisfied: true },
             }));
@@ -532,6 +674,12 @@ export function createWebsiteIsolationAuditService({
               identity,
             })
             : null;
+          const passengerMigrationPreview = stepId === 'runtime'
+            ? await inspectPassengerMigrationPreview(handler, context, {
+              applicationId: application.id,
+              identity,
+            })
+            : null;
           inspectedSteps.push(Object.freeze({
             stepId,
             kind: step.kind,
@@ -539,6 +687,7 @@ export function createWebsiteIsolationAuditService({
             reason: typeof error?.code === 'string' ? error.code : 'isolation_inspection_failed',
             ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
             ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
+            ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
           }));
           findings.push(finding(
             `website_isolation_${stepId}_drift`,
@@ -559,6 +708,7 @@ export function createWebsiteIsolationAuditService({
               inspection: typeof error?.code === 'string' ? error.code : 'isolation_inspection_failed',
               ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
               ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
+              ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
             },
             desired: { satisfied: true },
           }));
@@ -624,4 +774,6 @@ export const websiteIsolationAuditInternals = Object.freeze({
   inspectIdentityMigrationPreview,
   boundedSftpMigrationPreview,
   inspectSftpMigrationPreview,
+  boundedPassengerMigrationPreview,
+  inspectPassengerMigrationPreview,
 });
