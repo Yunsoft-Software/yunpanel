@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rename, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -125,14 +125,14 @@ export function createWebsiteIdentityManager({
   readFileFn = readFile,
   readdirFn = readdir,
   renameFn = rename,
-  rmFn = rm,
+  rmdirFn = rmdir,
   writeFileFn = writeFile,
 } = {}) {
   if (typeof homeRoot !== 'string' || !path.posix.isAbsolute(homeRoot)
     || typeof receiptRoot !== 'string' || !path.posix.isAbsolute(receiptRoot)
     || typeof run !== 'function' || typeof lstatFn !== 'function'
     || typeof mkdirFn !== 'function' || typeof readFileFn !== 'function' || typeof readdirFn !== 'function'
-    || typeof renameFn !== 'function' || typeof rmFn !== 'function'
+    || typeof renameFn !== 'function' || typeof rmdirFn !== 'function'
     || typeof writeFileFn !== 'function') {
     throw new WebsiteIdentityManagerError('website_identity_dependencies_invalid', 'Website identity manager dependencies are invalid');
   }
@@ -609,7 +609,7 @@ export function createWebsiteIdentityManager({
       if (home.uid !== receipt.uid || home.gid !== receipt.gid) {
         throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because home ownership has drifted');
       }
-      try { await rmFn(intent.homeDirectory, { recursive: false, force: false }); }
+      try { await rmdirFn(intent.homeDirectory); }
       catch (error) {
         if (!['ENOTEMPTY', 'EEXIST'].includes(error?.code)) {
           throw new WebsiteIdentityManagerError('website_identity_compensation_home_failed', 'Website home directory could not be removed safely');

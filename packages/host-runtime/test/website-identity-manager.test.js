@@ -95,16 +95,16 @@ function createFakeHost({
     if (!state.homeExists) throw missingError('ENOENT');
     return [...state.homeEntries];
   };
-  const rmFn = async (targetPath, options = {}) => {
+  const rmdirFn = async (targetPath) => {
     assert.equal(targetPath, intent.homeDirectory);
-    if (options.recursive === false && state.homeEntries.length > 0) {
+    if (state.homeEntries.length > 0) {
       const error = new Error('not empty');
       error.code = 'ENOTEMPTY';
       throw error;
     }
     state.homeExists = false;
   };
-  return { state, calls, run, lstatFn, readdirFn, rmFn };
+  return { state, calls, run, lstatFn, readdirFn, rmdirFn };
 }
 
 async function managerFixture(t, host, { run = host.run } = {}) {
@@ -115,7 +115,7 @@ async function managerFixture(t, host, { run = host.run } = {}) {
     run,
     lstatFn: host.lstatFn,
     readdirFn: host.readdirFn,
-    rmFn: host.rmFn,
+    rmdirFn: host.rmdirFn,
   });
 }
 
