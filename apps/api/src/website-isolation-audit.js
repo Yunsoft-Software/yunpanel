@@ -121,10 +121,16 @@ function boundedIdentityMigrationPreview(value) {
   });
 }
 
-async function inspectIdentityMigrationPreview(handler, context) {
-  if (!handler || typeof handler.previewMigration !== 'function') return null;
+async function inspectIdentityMigrationPreview(handler, context, identity) {
+  if (!handler || typeof handler.previewMigration !== 'function' || !identity) return null;
   try {
-    return boundedIdentityMigrationPreview(await handler.previewMigration(context));
+    const preview = boundedIdentityMigrationPreview(await handler.previewMigration(context));
+    if (!preview
+      || preview.desired.user !== identity.unixUser
+      || preview.desired.homeDirectory !== identity.paths.workspace.homeDirectory) {
+      return null;
+    }
+    return preview;
   } catch {
     return null;
   }
@@ -312,7 +318,7 @@ export function createWebsiteIsolationAuditService({
             ? workspaceDirectories(result, identity)
             : null;
           const identityMigrationPreview = !satisfied && stepId === 'unix_identity' && !missingWorkspaceDirectories
-            ? await inspectIdentityMigrationPreview(handler, context)
+            ? await inspectIdentityMigrationPreview(handler, context, identity)
             : null;
           inspectedSteps.push(Object.freeze({
             stepId,
@@ -370,7 +376,7 @@ export function createWebsiteIsolationAuditService({
         } catch (error) {
           const context = handlerContext(operation, step);
           const identityMigrationPreview = stepId === 'unix_identity'
-            ? await inspectIdentityMigrationPreview(handler, context)
+            ? await inspectIdentityMigrationPreview(handler, context, identity)
             : null;
           inspectedSteps.push(Object.freeze({
             stepId,
