@@ -103,8 +103,48 @@ export function createWebsiteSftpProvisioningHandler({
       }
       return sftpManager.previewMigration(sftpIntent(intent), { operationId });
     },
+    inspectMigrationOperation: ({ intent, operationId } = {}) => {
+      if (typeof sftpManager.inspectMigrationOperation !== 'function') {
+        throw new WebsiteSftpProvisioningError(
+          'website_sftp_migration_lifecycle_unavailable',
+          'Website SFTP migration lifecycle is unavailable',
+          503,
+        );
+      }
+      return sftpManager.inspectMigrationOperation(sftpIntent(intent), { operationId });
+    },
+    applyMigration: ({ intent, operationId } = {}) => {
+      if (typeof sftpManager.applyMigration !== 'function') {
+        throw new WebsiteSftpProvisioningError(
+          'website_sftp_migration_lifecycle_unavailable',
+          'Website SFTP migration lifecycle is unavailable',
+          503,
+        );
+      }
+      return sftpManager.applyMigration(sftpIntent(intent), { operationId });
+    },
     compensate: ({ intent, operationId } = {}) => sftpManager.compensate(sftpIntent(intent), { operationId }),
     inspectCompensation: ({ intent, operationId } = {}) => sftpManager.inspectCompensation(sftpIntent(intent), { operationId }),
+    inspectMigrationCompensation: ({ intent, operationId } = {}) => {
+      if (typeof sftpManager.inspectMigrationCompensation !== 'function') {
+        throw new WebsiteSftpProvisioningError(
+          'website_sftp_migration_lifecycle_unavailable',
+          'Website SFTP migration lifecycle is unavailable',
+          503,
+        );
+      }
+      return sftpManager.inspectMigrationCompensation(sftpIntent(intent), { operationId });
+    },
+    compensateMigration: ({ intent, operationId } = {}) => {
+      if (typeof sftpManager.compensateMigration !== 'function') {
+        throw new WebsiteSftpProvisioningError(
+          'website_sftp_migration_lifecycle_unavailable',
+          'Website SFTP migration lifecycle is unavailable',
+          503,
+        );
+      }
+      return sftpManager.compensateMigration(sftpIntent(intent), { operationId });
+    },
   });
 }
 
@@ -183,8 +223,66 @@ export function createWebsiteSftpKeyAwareProvisioningHandler({ baseHandler, sftp
         authorizedKeys,
       });
     },
+    async inspectMigrationOperation(context = {}) {
+      const id = websiteId(context);
+      if (typeof baseHandler.inspectMigrationOperation !== 'function') {
+        throw new WebsiteSftpProvisioningError(
+          'website_sftp_migration_lifecycle_unavailable',
+          'Website SFTP migration lifecycle is unavailable',
+          503,
+        );
+      }
+      const base = await baseHandler.inspectMigrationOperation(context);
+      if (base?.satisfied !== true) return base;
+      try {
+        return keyAwareEvidence(base, keyMaterialization(await sftpKeyService.inspectMaterialization(id)));
+      } catch {
+        return keyAwareEvidence(base, Object.freeze({ satisfied: false, reason: 'sftp_key_reconcile_required' }));
+      }
+    },
+    async applyMigration(context = {}) {
+      const id = websiteId(context);
+      if (typeof baseHandler.applyMigration !== 'function') {
+        throw new WebsiteSftpProvisioningError(
+          'website_sftp_migration_lifecycle_unavailable',
+          'Website SFTP migration lifecycle is unavailable',
+          503,
+        );
+      }
+      const base = await baseHandler.applyMigration(context);
+      if (base?.satisfied !== true) return base;
+      try {
+        return keyAwareEvidence(base, keyMaterialization(await sftpKeyService.reconcile(id)));
+      } catch {
+        throw new WebsiteSftpProvisioningError(
+          'sftp_key_reconcile_required',
+          'SFTP isolation was prepared, but authorized keys require explicit reconciliation',
+          503,
+        );
+      }
+    },
     compensate: (context = {}) => baseHandler.compensate(context),
     inspectCompensation: (context = {}) => baseHandler.inspectCompensation(context),
+    inspectMigrationCompensation: (context = {}) => {
+      if (typeof baseHandler.inspectMigrationCompensation !== 'function') {
+        throw new WebsiteSftpProvisioningError(
+          'website_sftp_migration_lifecycle_unavailable',
+          'Website SFTP migration lifecycle is unavailable',
+          503,
+        );
+      }
+      return baseHandler.inspectMigrationCompensation(context);
+    },
+    compensateMigration: (context = {}) => {
+      if (typeof baseHandler.compensateMigration !== 'function') {
+        throw new WebsiteSftpProvisioningError(
+          'website_sftp_migration_lifecycle_unavailable',
+          'Website SFTP migration lifecycle is unavailable',
+          503,
+        );
+      }
+      return baseHandler.compensateMigration(context);
+    },
   });
 }
 
