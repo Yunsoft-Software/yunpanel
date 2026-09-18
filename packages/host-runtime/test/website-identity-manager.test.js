@@ -395,3 +395,58 @@ test('identity migration preview recognizes an already canonical identity', asyn
   assert.deepEqual(preview.current.group, { gid: 1201, memberCount: 0 });
   assert.deepEqual(preview.current.home, { uid: 1201, gid: 1201, mode: '0750' });
 });
+
+
+test('identity operation inspection proves only receipt-owned completed creation without replaying mutation', async (t) => {
+  const host = createFakeHost();
+  const manager = await managerFixture(t, host);
+  await manager.apply(intent, { operationId });
+  const mutationCallsBefore = host.calls.filter(([file]) => ['/usr/sbin/useradd', '/usr/bin/install'].includes(file)).length;
+
+  const inspected = await manager.inspectOperation(intent, { operationId });
+
+  assert.deepEqual(inspected, {
+    satisfied: true,
+    identityReceiptVersion: 1,
+    createdUnixIdentity: true,
+  });
+  const mutationCallsAfter = host.calls.filter(([file]) => ['/usr/sbin/useradd', '/usr/bin/install'].includes(file)).length;
+  assert.equal(mutationCallsAfter, mutationCallsBefore);
+});
+
+test('identity operation inspection does not adopt a matching pre-existing identity without a receipt', async (t) => {
+  const host = createFakeHost({ userExists: true });
+  const manager = await managerFixture(t, host);
+
+  const inspected = await manager.inspectOperation(intent, { operationId });
+
+  assert.deepEqual(inspected, {
+    satisfied: false,
+    reason: 'website_identity_operation_receipt_missing',
+  });
+  assert.equal(host.calls.some(([file]) => ['/usr/sbin/useradd', '/usr/sbin/userdel', '/usr/sbin/groupdel', '/usr/bin/install'].includes(file)), false);
+});
+
+test('identity operation inspection fails closed when host state exists before an ownership checkpoint', async (t) => {
+  const host = createFakeHost();
+  const manager = await managerFixture(t, host, {
+    run: async (file, args) => {
+      if (file === '/usr/sbin/useradd') {
+        await host.run(file, args);
+        throw new Error('simulated lost useradd result');
+      }
+      return host.run(file, args);
+    },
+  });
+  await assert.rejects(
+    manager.apply(intent, { operationId }),
+    (error) => error instanceof WebsiteIdentityManagerError && error.code === 'website_identity_create_failed',
+  );
+
+  await assert.rejects(
+    manager.inspectOperation(intent, { operationId }),
+    (error) => error instanceof WebsiteIdentityManagerError
+      && error.code === 'website_identity_operation_ownership_unknown',
+  );
+  assert.equal(host.calls.some(([file]) => ['/usr/sbin/userdel', '/usr/sbin/groupdel'].includes(file)), false);
+});
