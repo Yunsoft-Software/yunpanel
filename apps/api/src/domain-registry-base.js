@@ -12,9 +12,10 @@ import {
 import { DomainHierarchyError, validateDomainHierarchy, validateDomainParent } from './domain-hierarchy.js';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
-const STORE_VERSION = 3;
+const STORE_VERSION = 4;
 const TARGET_TYPES = new Set(['static', 'proxy', 'passenger', 'php']);
 const HTTPS_MODES = new Set(['off', 'managed']);
+const DOMAIN_STATES = new Set(['draft', 'staged', 'active', 'suspended', 'error']);
 const UPDATE_FIELDS = new Set(['primaryDomain', 'aliases', 'httpsMode', 'httpsRedirect', 'canonicalRedirect', 'nginxSettings']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -49,6 +50,11 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
     }
   }
   if (sourceVersion < 3) domain.nginxSettings = settingsFromTarget(domain.targetType, domain.target);
+  if (sourceVersion < 4) {
+    domain.suspensionOperationId = null;
+    domain.suspendedAt = null;
+    domain.suspendedChecksum = null;
+  }
   const normalizedSettings = settings(domain.targetType, domain.nginxSettings);
   if (JSON.stringify(normalizedSettings) !== JSON.stringify(domain.nginxSettings)
     || (domain.targetType === 'proxy' && domain.target?.websocket !== normalizedSettings.websocket)
@@ -67,10 +73,35 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
   if (domain.lastError !== null && (typeof domain.lastError !== 'string' || !/^[a-z0-9_]{1,120}$/.test(domain.lastError))) {
     throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain error metadata is invalid', 409);
   }
+  if (!DOMAIN_STATES.has(domain.state)
+    || (domain.suspensionOperationId !== null
+      && (typeof domain.suspensionOperationId !== 'string'
+        || !/^[A-Za-z0-9._:-]{1,128}$/.test(domain.suspensionOperationId)))
+    || (domain.suspendedAt !== null
+      && (typeof domain.suspendedAt !== 'string'
+        || !Number.isFinite(Date.parse(domain.suspendedAt))
+        || new Date(domain.suspendedAt).toISOString() !== domain.suspendedAt))
+    || (domain.suspendedChecksum !== null
+      && (typeof domain.suspendedChecksum !== 'string' || !SHA256_PATTERN.test(domain.suspendedChecksum))
+    )
+    || (domain.state === 'suspended'
+      && (domain.suspensionOperationId === null || domain.suspendedAt === null || domain.suspendedChecksum === null))
+    || (domain.state !== 'suspended'
+      && (domain.suspensionOperationId !== null || domain.suspendedAt !== null || domain.suspendedChecksum !== null))) {
+    throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain suspension metadata is invalid', 409);
+  }
   return domain;
 }
 
 function diagnosis(domain) {
+  if (domain.state === 'suspended') {
+    return Object.freeze({
+      severity: 'action_required',
+      code: 'domain_suspended',
+      message: 'Domain traffic is suspended.',
+      action: 'Resume the Domain to restore the retained Nginx configuration.',
+    });
+  }
   if (domain.lastError) {
     return operationErrorDiagnosis('nginx', domain.lastError);
   }
@@ -165,6 +196,42 @@ function requireDomain(state, domainId) {
   const domain = state.domains.find((candidate) => candidate.id === domainId);
   if (!domain) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
   return domain;
+}
+
+function suspensionOperationId(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(value)) {
+    throw new DomainRegistryError(
+      'invalid_domain_suspension_operation_id',
+      'Domain suspension operation id is invalid',
+    );
+  }
+  return value;
+}
+
+function suspensionChecksum(value) {
+  if (typeof value !== 'string' || !SHA256_PATTERN.test(value)) {
+    throw new DomainRegistryError(
+      'invalid_domain_suspension_checksum',
+      'Domain suspension checksum is invalid',
+    );
+  }
+  return value;
+}
+
+function assertSuspendable(domain, { expectedRevision, checksum }) {
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1
+    || domain.desiredRevision !== expectedRevision
+    || domain.stagedRevision !== expectedRevision
+    || domain.appliedRevision !== expectedRevision
+    || domain.stagedChecksum !== checksum
+    || domain.appliedPrimaryDomain !== domain.primaryDomain
+    || domain.lastError !== null) {
+    throw new DomainRegistryError(
+      'domain_suspension_state_drift',
+      'Domain routing state changed before suspension',
+      409,
+    );
+  }
 }
 
 function normalizeReparentId(value, field, { nullable = false } = {}) {
@@ -322,7 +389,7 @@ export function createDomainRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, 2, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.domains)) throw new Error('unsupported or invalid domain registry state');
+        if (![1, 2, 3, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.domains)) throw new Error('unsupported or invalid domain registry state');
         try {
           validateDomainHierarchy(parsed.domains);
           parsed.domains.forEach((domain) => hydrateDomain(domain, parsed.version));
@@ -390,6 +457,13 @@ export function createDomainRegistry({
   function buildDomainUpdatePreview(domainId, changes) {
     const normalizedDomainId = normalizeReparentId(domainId, 'domainId');
     const domain = requireDomain(state, normalizedDomainId);
+    if (domain.state === 'suspended') {
+      throw new DomainRegistryError(
+        'domain_suspended_update_blocked',
+        'Resume the Domain before changing routing settings',
+        409,
+      );
+    }
     const next = normalizedUpdate(domain, changes);
     const hostnameChanged = next.primaryDomain !== domain.primaryDomain
       || JSON.stringify(next.aliases) !== JSON.stringify(domain.aliases);
@@ -561,7 +635,9 @@ export function createDomainRegistry({
       httpsMode, httpsRedirect, canonicalRedirect,
       certificateId: null, appliedPrimaryDomain: null,
       state: 'draft', desiredRevision: 1, stagedRevision: 0, stagedChecksum: null, stagedConfigName: null,
-      lastStagedAt: null, appliedRevision: 0, lastAppliedAt: null, lastError: null, createdAt: timestamp, updatedAt: timestamp,
+      lastStagedAt: null, appliedRevision: 0, lastAppliedAt: null, lastError: null,
+      suspensionOperationId: null, suspendedAt: null, suspendedChecksum: null,
+      createdAt: timestamp, updatedAt: timestamp,
     };
     const existing = state.domains.find((candidate) => candidate.id === normalizedDomainId) ?? null;
     if (existing) {
@@ -624,6 +700,13 @@ export function createDomainRegistry({
   async function attachCertificate(domainId, certificateId, { domains = null } = {}) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
+    if (domain.state === 'suspended') {
+      throw new DomainRegistryError(
+        'domain_suspended_update_blocked',
+        'Resume the Domain before changing certificate routing state',
+        409,
+      );
+    }
     if (domain.httpsMode !== 'managed') throw new DomainRegistryError('https_not_managed', 'Certificate can only be attached to a managed HTTPS domain', 409);
     if (typeof certificateId !== 'string' || !certificateId) throw new DomainRegistryError('invalid_certificate', 'certificateId is required');
     if (domains !== null) {
@@ -770,6 +853,13 @@ export function createDomainRegistry({
   async function markStaged(domainId, { checksum, configName }) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
+    if (domain.state === 'suspended') {
+      throw new DomainRegistryError(
+        'domain_suspended_stage_blocked',
+        'Resume the Domain before staging routing changes',
+        409,
+      );
+    }
     if (typeof checksum !== 'string' || !SHA256_PATTERN.test(checksum)) throw new DomainRegistryError('invalid_staged_checksum', 'Staged domain checksum is invalid');
     if (typeof configName !== 'string' || configName.length < 1 || configName.length > 300) throw new DomainRegistryError('invalid_staged_config', 'Staged domain config name is invalid');
     const timestamp = new Date(now()).toISOString();
@@ -787,6 +877,13 @@ export function createDomainRegistry({
   async function markApplied(domainId, { checksum } = {}) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
+    if (domain.state === 'suspended') {
+      throw new DomainRegistryError(
+        'domain_suspended_activation_blocked',
+        'Resume the Domain through the suspension lifecycle before activation',
+        409,
+      );
+    }
     if (domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum) throw new DomainRegistryError('staged_revision_required', 'Current desired domain revision has not been staged', 409);
     if (checksum !== domain.stagedChecksum) throw new DomainRegistryError('staged_checksum_mismatch', 'Activated checksum does not match staged desired state', 409);
     const timestamp = new Date(now()).toISOString();
@@ -795,6 +892,86 @@ export function createDomainRegistry({
     domain.state = 'active';
     domain.lastAppliedAt = timestamp;
     domain.lastError = null;
+    domain.updatedAt = timestamp;
+    await persist();
+    return publicDomain(domain);
+  }
+
+  async function markSuspended(domainId, {
+    expectedRevision,
+    checksum,
+    operationId,
+  } = {}) {
+    await ensureInitialized();
+    const domain = requireDomain(state, domainId);
+    const expectedChecksum = suspensionChecksum(checksum);
+    const expectedOperationId = suspensionOperationId(operationId);
+    if (domain.state === 'suspended') {
+      if (domain.desiredRevision !== expectedRevision
+        || domain.suspendedChecksum !== expectedChecksum
+        || domain.suspensionOperationId !== expectedOperationId) {
+        throw new DomainRegistryError(
+          'domain_suspension_state_drift',
+          'Domain is already suspended by different routing evidence',
+          409,
+        );
+      }
+      return publicDomain(domain);
+    }
+    if (domain.state !== 'active') {
+      throw new DomainRegistryError(
+        'domain_suspension_active_required',
+        'Only an active Domain can be suspended',
+        409,
+      );
+    }
+    assertSuspendable(domain, { expectedRevision, checksum: expectedChecksum });
+    const timestamp = new Date(now()).toISOString();
+    domain.state = 'suspended';
+    domain.suspensionOperationId = expectedOperationId;
+    domain.suspendedAt = timestamp;
+    domain.suspendedChecksum = expectedChecksum;
+    domain.updatedAt = timestamp;
+    await persist();
+    return publicDomain(domain);
+  }
+
+  async function markResumed(domainId, {
+    expectedRevision,
+    checksum,
+    operationId,
+  } = {}) {
+    await ensureInitialized();
+    const domain = requireDomain(state, domainId);
+    const expectedChecksum = suspensionChecksum(checksum);
+    const expectedOperationId = suspensionOperationId(operationId);
+    if (domain.state === 'active'
+      && domain.suspensionOperationId === null
+      && domain.suspendedAt === null
+      && domain.suspendedChecksum === null) {
+      return publicDomain(domain);
+    }
+    if (domain.state !== 'suspended'
+      || domain.desiredRevision !== expectedRevision
+      || domain.stagedRevision !== expectedRevision
+      || domain.appliedRevision !== expectedRevision
+      || domain.stagedChecksum !== expectedChecksum
+      || domain.suspendedChecksum !== expectedChecksum
+      || domain.suspensionOperationId !== expectedOperationId
+      || domain.appliedPrimaryDomain !== domain.primaryDomain
+      || domain.lastError !== null) {
+      throw new DomainRegistryError(
+        'domain_resume_state_drift',
+        'Domain suspension state changed before resume',
+        409,
+      );
+    }
+    const timestamp = new Date(now()).toISOString();
+    domain.state = 'active';
+    domain.suspensionOperationId = null;
+    domain.suspendedAt = null;
+    domain.suspendedChecksum = null;
+    domain.lastAppliedAt = timestamp;
     domain.updatedAt = timestamp;
     await persist();
     return publicDomain(domain);
@@ -826,6 +1003,8 @@ export function createDomainRegistry({
     resetProvisionedDomains,
     markStaged,
     markApplied,
+    markSuspended,
+    markResumed,
     markFailed,
   };
 }
@@ -833,6 +1012,7 @@ export function createDomainRegistry({
 export const domainRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
   targetTypes: Object.freeze([...TARGET_TYPES]),
+  domainStates: Object.freeze([...DOMAIN_STATES]),
   validateTarget,
   settingsFromTarget,
   targetWithSettings,
