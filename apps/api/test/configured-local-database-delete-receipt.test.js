@@ -4,6 +4,9 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import { startConfiguredLocalRuntime } from '../src/configured-local-runtime.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
+const websiteId = '12345678-1234-4234-8234-123456789012';
+const databaseBindingId = '22345678-1234-4234-8234-123456789012';
+const backupId = '32345678-1234-4234-8234-123456789012';
 
 async function captureRecorder() {
   const writes = [];
@@ -44,7 +47,14 @@ test('configured runtime records only successful database delete evidence', asyn
     serverId,
     jobId: '12345678-1234-4234-8234-123456789012',
     operation: OPERATIONS.DATABASE_DELETE,
-    payload: { name: 'app_db' },
+    payload: {
+      name: 'app_db',
+      websiteId,
+      databaseBindingId,
+      expectedBindingRevision: 7,
+      backupId,
+      expectedBackupSha256: 'a'.repeat(64),
+    },
     result,
   });
   await recorder({
@@ -59,8 +69,39 @@ test('configured runtime records only successful database delete evidence', asyn
     serverId,
     jobId: '12345678-1234-4234-8234-123456789012',
     databaseName: 'app_db',
+    ownership: {
+      websiteId,
+      databaseBindingId,
+      expectedBindingRevision: 7,
+      backupId,
+      expectedBackupSha256: 'a'.repeat(64),
+    },
     result,
   }]);
+});
+
+test('configured runtime keeps legacy unscoped database delete receipt support', async () => {
+  const { writes, recorder } = await captureRecorder();
+  const result = {
+    engine: 'mariadb',
+    version: '11.4.5-MariaDB',
+    database: { name: 'legacy_db', sizeBytes: 0 },
+    deleted: true,
+  };
+  await recorder({
+    serverId,
+    jobId: '42345678-1234-4234-8234-123456789012',
+    operation: OPERATIONS.DATABASE_DELETE,
+    payload: { name: 'legacy_db' },
+    result,
+  });
+  assert.deepEqual(writes.at(-1), {
+    serverId,
+    jobId: '42345678-1234-4234-8234-123456789012',
+    databaseName: 'legacy_db',
+    ownership: null,
+    result,
+  });
 });
 
 test('configured runtime rejects an invalid database deletion receipt store', async () => {
