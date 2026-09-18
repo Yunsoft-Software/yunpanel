@@ -79,6 +79,10 @@ function fixture({
   currentZone = null,
   provisioningOperations = null,
   retentionPolicy = null,
+  mailDomains = [],
+  jobs = [],
+  mailInventoryError = null,
+  jobInventoryError = null,
   secretError = null,
   zoneError = null,
 } = {}) {
@@ -104,6 +108,19 @@ function fixture({
         },
       },
     }),
+    mailDomainRegistry: {
+      async listMailDomains() {
+        if (mailInventoryError) throw mailInventoryError;
+        return mailDomains;
+      },
+    },
+    jobRegistry: {
+      async listJobs(filter) {
+        assert.deepEqual(filter, { resourceType: 'domain', resourceId: currentDomain.id });
+        if (jobInventoryError) throw jobInventoryError;
+        return jobs;
+      },
+    },
     powerDnsSecretRegistry: {
       async materializeForServer(serverId) {
         secretCalls += 1;
@@ -809,6 +826,52 @@ test('subdomain impact never materializes root PowerDNS credentials or claims zo
   assert.deepEqual(preview.blockers, []);
   assert.equal(preview.retirementPlanReady, true);
   assert.deepEqual(fx.calls(), { secretCalls: 0, zoneCalls: 0 });
+});
+
+test('retirement impact blocks local mail-domain dependencies and active Domain jobs', async () => {
+  const currentZone = zone({ rrsets: [managedRrset()] });
+  const preview = await fixture({
+    currentZone,
+    mailDomains: [{
+      id: 'mail-domain-1',
+      webDomainId: rootId,
+      domainName: 'example.com',
+    }],
+    jobs: [{
+      id: 'domain-job-1',
+      resourceType: 'domain',
+      resourceId: rootId,
+      status: 'running',
+    }],
+  }).service.preview({ domainId: rootId });
+
+  assert.deepEqual(preview.dependencies.mail, {
+    status: 'available',
+    count: 1,
+    ids: ['mail-domain-1'],
+  });
+  assert.deepEqual(preview.dependencies.jobs, {
+    status: 'available',
+    count: 1,
+    ids: ['domain-job-1'],
+  });
+  assert.equal(preview.blockers.includes('dns_zone_mail_dependencies_present'), true);
+  assert.equal(preview.blockers.includes('dns_zone_domain_jobs_active'), true);
+});
+
+test('mail and Domain job inventory failures are explicit instead of being treated as empty', async () => {
+  for (const [setup, code] of [
+    [{ mailInventoryError: new Error('mail registry offline') }, 'dns_zone_retirement_mail_inventory_unavailable'],
+    [{ jobInventoryError: new Error('job registry offline') }, 'dns_zone_retirement_job_inventory_unavailable'],
+  ]) {
+    const fx = fixture({ currentZone: zone(), ...setup });
+    await assert.rejects(
+      fx.service.preview({ domainId: rootId }),
+      (error) => error instanceof DnsZoneRetirementError
+        && error.code === code
+        && error.status === 503,
+    );
+  }
 });
 
 test('authoritative inspection fails closed when credentials or provider state are unavailable', async () => {
