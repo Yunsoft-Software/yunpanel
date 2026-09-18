@@ -415,21 +415,33 @@ export function createPhpSiteContainerManager({
     if (!identity.satisfied) {
       throw new PhpSiteContainerManagerError('php_site_container_migration_identity_required', 'Website identity must remain canonical during PHP container migration');
     }
-    const [applicationRoot, releasesDirectory, releaseDirectory, releaseDocumentRoot, currentRelease] = await Promise.all([
-      statPath(spec.applicationRoot, 'directory'),
-      statPath(spec.releasesDirectory, 'directory'),
-      statPath(spec.releaseDirectory, 'directory'),
-      statPath(spec.releaseDocumentRoot, 'directory'),
-      statPath(spec.currentRelease, 'symlink'),
-    ]);
+    let paths;
+    try {
+      paths = await Promise.all([
+        statPath(spec.applicationRoot, 'directory'),
+        statPath(spec.releasesDirectory, 'directory'),
+        statPath(spec.releaseDirectory, 'directory'),
+        statPath(spec.releaseDocumentRoot, 'directory'),
+        statPath(spec.currentRelease, 'symlink'),
+      ]);
+    } catch (error) {
+      if (error?.code === 'php_site_container_path_drift') {
+        throw new PhpSiteContainerManagerError(
+          'php_site_container_migration_path_type_drift',
+          'PHP container migration path types changed after preview',
+        );
+      }
+      throw error;
+    }
+    const [applicationRoot, releasesDirectory, releaseDirectory, releaseDocumentRoot, currentRelease] = paths;
     if (![applicationRoot, releasesDirectory, releaseDirectory, releaseDocumentRoot, currentRelease].every(Boolean)) {
       throw new PhpSiteContainerManagerError('php_site_container_migration_path_missing', 'PHP container migration requires the existing canonical release tree');
     }
-    if (applicationRoot.directory !== true || applicationRoot.symbolicLink === true
-      || releasesDirectory.directory !== true || releasesDirectory.symbolicLink === true
-      || releaseDirectory.directory !== true || releaseDirectory.symbolicLink === true
-      || releaseDocumentRoot.directory !== true || releaseDocumentRoot.symbolicLink === true
-      || currentRelease.symbolicLink !== true) {
+    if (!applicationRoot.isDirectory() || applicationRoot.isSymbolicLink()
+      || !releasesDirectory.isDirectory() || releasesDirectory.isSymbolicLink()
+      || !releaseDirectory.isDirectory() || releaseDirectory.isSymbolicLink()
+      || !releaseDocumentRoot.isDirectory() || releaseDocumentRoot.isSymbolicLink()
+      || !currentRelease.isSymbolicLink()) {
       throw new PhpSiteContainerManagerError('php_site_container_migration_path_type_drift', 'PHP container migration path types changed after preview');
     }
     if (releaseDirectory.uid !== identity.uid || releaseDirectory.gid !== identity.gid || modeOf(releaseDirectory) !== 0o750

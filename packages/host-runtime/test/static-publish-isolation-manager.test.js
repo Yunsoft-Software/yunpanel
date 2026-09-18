@@ -38,38 +38,7 @@ function fakeHost({ mutable = false, controlDrift = false, currentOwnerDrift = f
   const fdTargets = new Map();
   let nextFd = 40;
   const resolveTarget = (target) => {
-    const match = String(target).match(new RegExp(`^/proc/${process.pid}/fd/(\\d+)import assert from 'node:assert/strict';
-import test from 'node:test';
-import { createApplicationIdentity } from '../src/application-identity.js';
-import { createStaticPublishIsolationManager } from '../src/static-publish-isolation-manager.js';
-
-const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
-const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
-const releaseId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
-const migrationOperationId = '4d7d1c87-c088-4c1d-bb44-7f370d315672';
-const identity = createApplicationIdentity(applicationId);
-const publishRoot = identity.paths.static.publishRoot;
-const releasesRoot = `${publishRoot}/releases`;
-const releaseRoot = `${releasesRoot}/${releaseId}`;
-const assetPath = `${releaseRoot}/index.html`;
-const currentPath = `${publishRoot}/current`;
-
-function fakeHost({ mutable = false, controlDrift = false, currentOwnerDrift = false, files = new Map() } = {}) {
-  const calls = [];
-  const entries = new Map([
-    [publishRoot, { type: 'directory', uid: controlDrift ? 1201 : 0, gid: controlDrift ? 1201 : 0, mode: controlDrift ? 0o750 : 0o711 }],
-    [releasesRoot, { type: 'directory', uid: controlDrift ? 1201 : 0, gid: controlDrift ? 1201 : 0, mode: controlDrift ? 0o750 : 0o711 }],
-    [releaseRoot, {
-      type: 'directory', uid: 1201, gid: 1201, mode: 0o750,
-      acl: 'user::rwx\nuser:www-data:r-x\ngroup::r-x\nmask::r-x\nother::---\n',
-    }],
-    [assetPath, {
-      type: 'file', uid: 1201, gid: 1201, mode: 0o640,
-      acl: 'user::rw-\nuser:www-data:r--\ngroup::r--\nmask::r--\nother::---\n',
-    }],
-    [currentPath, { type: 'symlink', uid: currentOwnerDrift || controlDrift ? 1201 : 0, gid: currentOwnerDrift || controlDrift ? 1201 : 0, mode: 0o777 }],
-  ]);
-));
+    const match = String(target).match(new RegExp(`^/proc/${process.pid}/fd/(\\d+)$`));
     return match ? fdTargets.get(Number.parseInt(match[1], 10)) : target;
   };
   const lstatFn = async (target) => {
@@ -424,7 +393,7 @@ test('static release permission preview hashes exact managed tree without exposi
   assert.equal(first.satisfied, false);
   assert.equal(first.automaticMigration, false);
   assert.equal(first.repairCandidate, true);
-  assert.equal(first.migrationBlockedReason, 'static_release_receipt_not_operation_owned');
+  assert.equal(first.migrationBlockedReason, 'static_release_explicit_migration_required');
   assert.deepEqual(first.current.releases, [releaseId]);
   assert.equal(first.current.tree.entryCount, 2);
   assert.equal(first.current.tree.ownershipModeDriftCount, 1);

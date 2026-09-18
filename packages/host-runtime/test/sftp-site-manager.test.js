@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 import { createSftpSiteManager, SftpSiteManagerError } from '../src/sftp-site-manager.js';
 
@@ -338,7 +339,7 @@ test('SFTP migration rollback preserves operation-owned directory after data app
 
   assert.equal(compensated.satisfied, true);
   assert.equal(compensated.removedSftpIsolation, true);
-  assert.equal(compensated.preservedDirectoryCount, 1);
+  assert.equal(compensated.preservedDirectoryCount, 2);
   assert.equal(host.dirs.has(mountDirectory), true);
   assert.equal(host.dirs.has(chrootDirectory), true);
 

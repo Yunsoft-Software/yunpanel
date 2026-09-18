@@ -278,8 +278,7 @@ test('PHP container migration rollback refuses path type drift after receipt own
   const value = manager(fake, receipts.dependencies);
   await value.applyMigration(intent(), { operationId, migrationOperationId });
   const root = fake.entries.get(applicationRoot);
-  root.directory = false;
-  root.symbolicLink = true;
+  root.type = 'symlink';
 
   await assert.rejects(
     value.compensateMigration(intent(), { operationId, migrationOperationId }),
