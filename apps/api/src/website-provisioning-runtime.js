@@ -45,12 +45,18 @@ export function createWebsiteProvisioningRuntime({
   sftpKeyService = null,
 } = {}) {
   const resolvedIdentityManager = identityManager ?? createWebsiteIdentityPathManager();
-  const workspaceMigrationManager = isolationWorkspaceManager ?? (typeof resolvedIdentityManager.inspectWorkspaceOperation === 'function'
+  const workspaceMigrationManager = isolationWorkspaceManager ?? (
+    typeof resolvedIdentityManager.inspectWorkspaceOperation === 'function'
     && typeof resolvedIdentityManager.applyWorkspace === 'function'
     && typeof resolvedIdentityManager.inspectWorkspaceCompensation === 'function'
     && typeof resolvedIdentityManager.compensateWorkspace === 'function'
-    ? resolvedIdentityManager
-    : createWebsiteIdentityPathManager());
+    && typeof resolvedIdentityManager.inspectIdentityOperation === 'function'
+    && typeof resolvedIdentityManager.applyIdentityMigration === 'function'
+    && typeof resolvedIdentityManager.inspectIdentityMigrationCompensation === 'function'
+    && typeof resolvedIdentityManager.compensateIdentityMigration === 'function'
+      ? resolvedIdentityManager
+      : createWebsiteIdentityPathManager()
+  );
   const durableRegistry = createWebsiteProvisioningRegistry({
     filePath,
     ...(now ? { now } : {}),
@@ -159,6 +165,7 @@ export function createWebsiteProvisioningRuntime({
       provisioningRegistry: registry,
       provisioningHandlers: handlers,
       workspaceMigrationAvailable: true,
+      identityMigrationAvailable: true,
     });
     isolationMigration = createWebsiteIsolationMigrationRuntime({
       registry: isolationMigrationRegistry,
