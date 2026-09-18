@@ -37,6 +37,9 @@ import { createDomainSuspensionRuntime } from './domain-suspension-runtime.js';
 import { createDomainSuspensionService } from './domain-suspension.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDnsProviderCredentialRegistry } from './dns-provider-credential-registry.js';
+import { createDnsZoneRetirementOperationRegistry } from './dns-zone-retirement-operation-registry.js';
+import { createDnsZoneRetirementRuntime } from './dns-zone-retirement-runtime.js';
+import { createDnsZoneRetirementService } from './dns-zone-retirement.js';
 import { createDockerComposeApiHandler } from './docker-compose-api-handler.js';
 import {
   createDockerComposeProjectRegistryBootstrap,
@@ -118,6 +121,8 @@ const serverDnsIdentityStorePath = process.env.YUNPANEL_SERVER_DNS_IDENTITY_STOR
   ?? path.join(controlPlaneStateRoot, 'server-dns-identity-registry.json');
 const powerDnsSecretStorePath = process.env.YUNPANEL_POWERDNS_SECRET_STORE
   ?? path.join(controlPlaneStateRoot, 'powerdns-secret-registry.json');
+const dnsZoneRetirementOperationStorePath = process.env.YUNPANEL_DNS_ZONE_RETIREMENT_OPERATION_STORE
+  ?? path.join(controlPlaneStateRoot, 'dns-zone-retirement-operations.json');
 const mailDomainStorePath = process.env.YUNPANEL_MAIL_DOMAIN_STORE ?? path.resolve('.data/mail-domain-registry.json');
 const mailDkimRootPath = process.env.YUNPANEL_MAIL_DKIM_ROOT ?? path.resolve('.data/mail-dkim');
 const mailDkimRetirementStorePath = process.env.YUNPANEL_MAIL_DKIM_RETIREMENT_STORE
@@ -422,6 +427,30 @@ const domainSuspensionRuntime = localServerId
   })
   : null;
 if (domainSuspensionRuntime) await domainSuspensionRuntime.init();
+const dnsZoneRetirementService = localServerId && powerDnsSecretRegistry
+  ? createDnsZoneRetirementService({
+    domainRegistry,
+    powerDnsSecretRegistry,
+    provisioningRegistry: typeof websiteProvisioningRuntime?.registry?.listForDnsZone === 'function'
+      ? websiteProvisioningRuntime.registry
+      : null,
+    mailDomainRegistry,
+    jobRegistry,
+    retentionPolicy: dnsZoneSnapshotRetentionDays === null
+      ? null
+      : { snapshotRetentionDays: dnsZoneSnapshotRetentionDays },
+    localServerId,
+  })
+  : null;
+const dnsZoneRetirementRuntime = dnsZoneRetirementService
+  ? createDnsZoneRetirementRuntime({
+    registry: createDnsZoneRetirementOperationRegistry({
+      filePath: dnsZoneRetirementOperationStorePath,
+    }),
+    service: dnsZoneRetirementService,
+  })
+  : null;
+if (dnsZoneRetirementRuntime) await dnsZoneRetirementRuntime.init();
 const dockerComposeRuntime = await createDockerComposeRuntime({
   env: process.env,
   serverRegistry: registry,
@@ -530,6 +559,8 @@ const listener = createAuthenticatedApi({
       domainRegistry,
       jobRegistry,
       domainSuspensionRuntime,
+      dnsZoneRetirementImpactService: dnsZoneRetirementService,
+      dnsZoneRetirementRuntime,
       backupOperationRegistry,
       backupJobStorePath: jobStorePath,
       projectBackupLocked,
@@ -646,6 +677,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] server store=${serverStorePath}`);
   console.log(`[yunpanel-api] domain store=${domainStorePath}`);
   console.log(`[yunpanel-api] domain suspension operation store=${domainSuspensionOperationStorePath}`);
+  console.log(`[yunpanel-api] DNS zone retirement operation store=${dnsZoneRetirementOperationStorePath}`);
   console.log(`[yunpanel-api] job store=${jobStorePath}`);
   console.log(`[yunpanel-api] backup operation store=${backupOperationStorePath}`);
   console.log(`[yunpanel-api] job log store=${jobLogStorePath}`);
