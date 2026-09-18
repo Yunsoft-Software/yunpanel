@@ -349,9 +349,39 @@ function validateMutationPayload(operation, payload, errors) {
     if (typeof payload.action !== 'string' || !MANAGED_SERVICE_ACTION_SET.has(payload.action)) errors.push('system.service.control action is invalid');
   }
 
-  if (operation === OPERATIONS.DATABASE_CREATE || operation === OPERATIONS.DATABASE_DELETE) {
+  if (operation === OPERATIONS.DATABASE_CREATE) {
     rejectUnexpectedKeys(payload, ['name'], operation, errors);
     validateDatabaseName(payload.name, `${operation} name`, errors);
+  }
+
+  if (operation === OPERATIONS.DATABASE_DELETE) {
+    const scopeFields = [
+      'websiteId', 'databaseBindingId', 'expectedBindingRevision',
+      'backupId', 'expectedBackupSha256',
+    ];
+    const hasScope = scopeFields.some((field) => Object.hasOwn(payload, field));
+    rejectUnexpectedKeys(payload, hasScope ? ['name', ...scopeFields] : ['name'], operation, errors);
+    validateDatabaseName(payload.name, `${operation} name`, errors);
+    if (hasScope) {
+      if (!scopeFields.every((field) => Object.hasOwn(payload, field))) {
+        errors.push('database.delete Website scope is incomplete');
+      }
+      try {
+        assertUuid(payload.websiteId, 'websiteId');
+        assertUuid(payload.databaseBindingId, 'databaseBindingId');
+      } catch {
+        errors.push('database.delete Website scope identities are invalid');
+      }
+      if (!Number.isSafeInteger(payload.expectedBindingRevision) || payload.expectedBindingRevision < 1) {
+        errors.push('database.delete expectedBindingRevision is invalid');
+      }
+      if (typeof payload.backupId !== 'string' || !JOB_ID_PATTERN.test(payload.backupId)) {
+        errors.push('database.delete backupId is invalid');
+      }
+      if (typeof payload.expectedBackupSha256 !== 'string' || !SHA256_PATTERN.test(payload.expectedBackupSha256)) {
+        errors.push('database.delete expectedBackupSha256 is invalid');
+      }
+    }
   }
 
   if (operation === OPERATIONS.DNS_RECORD_APPLY) validateDnsRecordApply(payload, operation, errors);
