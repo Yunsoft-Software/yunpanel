@@ -369,6 +369,8 @@ export function createPassengerSiteManager({
       version: 1,
       adapter: 'passenger',
       satisfied: differences.length === 0,
+      automaticMigration: false,
+      migrationBlockedReason: 'passenger_legacy_runtime_not_operation_owned',
       current: Object.freeze({
         passenger,
         identity,
