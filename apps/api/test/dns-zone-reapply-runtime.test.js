@@ -27,9 +27,29 @@ const sourceZoneSnapshot = Object.freeze({
   })]),
 });
 const sourceZoneDigest = createHash('sha256').update(JSON.stringify(sourceZoneSnapshot)).digest('hex');
+const appliedZoneSnapshot = Object.freeze({
+  ...sourceZoneSnapshot,
+  kind: 'Primary',
+  rrsets: Object.freeze(sourceZoneSnapshot.rrsets.map((rrset) => rrset.type === 'SOA'
+    ? Object.freeze({
+      ...rrset,
+      records: Object.freeze(rrset.records.map((record) => Object.freeze({
+        ...record,
+        content: record.content.replace('2026091501', '2026091601'),
+      }))),
+    })
+    : rrset)),
+});
+const appliedZoneDigest = createHash('sha256').update(JSON.stringify(appliedZoneSnapshot)).digest('hex');
 
 function rollbackEvidence() {
-  return Object.freeze({ version: 1, sourceZoneDigest, snapshot: sourceZoneSnapshot });
+  return Object.freeze({
+    version: 2,
+    sourceZoneDigest,
+    sourceZoneSnapshot,
+    appliedZoneDigest,
+    appliedZoneSnapshot,
+  });
 }
 
 function plannedPreview(overrides = {}) {
@@ -56,6 +76,7 @@ function plannedPreview(overrides = {}) {
 
 function satisfiedPreview(overrides = {}) {
   return plannedPreview({
+    sourceZoneDigest: appliedZoneDigest,
     observedSerial: 2026091601,
     nextSerial: 2026091601,
     applyAllowed: false,
@@ -76,7 +97,10 @@ test('durable DNS zone reapply journals before provider mutation and completes w
   const store = registry();
   const calls = [];
   const service = {
-    captureRollbackSnapshot: async () => rollbackEvidence(),
+    captureRollbackSnapshot: async ({ preview }) => {
+      assert.equal(preview.sourceZoneDigest, sourceZoneDigest);
+      return rollbackEvidence();
+    },
     preview: async (input) => { calls.push(['preview', input]); return plannedPreview(); },
     apply: async (input) => {
       calls.push(['apply', input]);
@@ -112,7 +136,10 @@ test('interrupted DNS zone reapply inspects first and never repeats an already s
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
-      captureRollbackSnapshot: async () => rollbackEvidence(),
+      captureRollbackSnapshot: async ({ preview }) => {
+      assert.equal(preview.sourceZoneDigest, sourceZoneDigest);
+      return rollbackEvidence();
+    },
       preview: async () => satisfiedPreview(),
       apply: async () => { applyCalls += 1; throw new Error('must not run'); },
     },
@@ -132,7 +159,10 @@ test('provider timeout after mutation is reconciled from the authoritative post-
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
-      captureRollbackSnapshot: async () => rollbackEvidence(),
+      captureRollbackSnapshot: async ({ preview }) => {
+      assert.equal(preview.sourceZoneDigest, sourceZoneDigest);
+      return rollbackEvidence();
+    },
       preview: async () => state === 'planned' ? plannedPreview() : satisfiedPreview(),
       apply: async () => {
         applyCalls += 1;
@@ -158,7 +188,10 @@ test('journaled DNS zone reapply fails closed if the preview changes before prov
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
-      captureRollbackSnapshot: async () => rollbackEvidence(),
+      captureRollbackSnapshot: async ({ preview }) => {
+      assert.equal(preview.sourceZoneDigest, sourceZoneDigest);
+      return rollbackEvidence();
+    },
       preview: async () => {
         previewCalls += 1;
         return previewCalls === 1
@@ -184,7 +217,10 @@ test('runtime init recovers applying operations without making API startup depen
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
-      captureRollbackSnapshot: async () => rollbackEvidence(),
+      captureRollbackSnapshot: async ({ preview }) => {
+      assert.equal(preview.sourceZoneDigest, sourceZoneDigest);
+      return rollbackEvidence();
+    },
       preview: async () => {
         const error = new Error('temporary DNS API outage');
         error.code = 'powerdns_zone_api_unavailable';
@@ -210,7 +246,10 @@ test('interrupted reapply does not accept a different mail desired state as its 
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
-      captureRollbackSnapshot: async () => rollbackEvidence(),
+      captureRollbackSnapshot: async ({ preview }) => {
+      assert.equal(preview.sourceZoneDigest, sourceZoneDigest);
+      return rollbackEvidence();
+    },
       preview: async () => satisfiedPreview({ mailStateDigest: 'd'.repeat(64) }),
       apply: async () => { applyCalls += 1; return {}; },
     },
@@ -230,7 +269,10 @@ test('journaled DNS zone reapply fails closed if exact source-zone evidence drif
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
-      captureRollbackSnapshot: async () => rollbackEvidence(),
+      captureRollbackSnapshot: async ({ preview }) => {
+      assert.equal(preview.sourceZoneDigest, sourceZoneDigest);
+      return rollbackEvidence();
+    },
       preview: async () => {
         previewCalls += 1;
         return previewCalls === 1
@@ -243,6 +285,28 @@ test('journaled DNS zone reapply fails closed if exact source-zone evidence drif
   await runtime.init();
 
   const failed = await runtime.start({ domainId, previewDigest, confirmation });
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.error.code, 'dns_zone_reapply_preview_stale');
+  assert.equal(applyCalls, 0);
+});
+
+
+test('recovery refuses a no-op target when the exact final zone digest is not the journaled after-state', async () => {
+  const store = registry();
+  await store.init();
+  const created = await store.create(plannedPreview(), rollbackEvidence());
+  await store.markApplying(created.id);
+  let applyCalls = 0;
+  const runtime = createDnsZoneReapplyRuntime({
+    registry: store,
+    service: {
+      captureRollbackSnapshot: async () => rollbackEvidence(),
+      preview: async () => satisfiedPreview({ sourceZoneDigest: 'f'.repeat(64) }),
+      apply: async () => { applyCalls += 1; return {}; },
+    },
+  });
+
+  const failed = await runtime.run(created.id);
   assert.equal(failed.status, 'failed');
   assert.equal(failed.error.code, 'dns_zone_reapply_preview_stale');
   assert.equal(applyCalls, 0);
