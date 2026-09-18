@@ -103,13 +103,40 @@ function evidenceFromApply(operation, result) {
   });
 }
 
+function rollbackConfirmation(operation) {
+  return `rollback-dns-zone-reapply:${operation.domainId}:${operation.id}:${operation.updatedAt}:${operation.sourceZoneDigest}:${operation.appliedZoneDigest}`;
+}
+
+function rollbackResultEvidence(operation, result) {
+  if (!result || result.satisfied !== true || result.zoneName !== operation.zoneName
+    || !Number.isSafeInteger(result.restoredRrsetCount) || result.restoredRrsetCount < 0
+    || typeof result.kindRestored !== 'boolean'
+    || result.sourceZoneDigest !== operation.sourceZoneDigest) {
+    throw new DnsZoneReapplyRuntimeError(
+      'dns_zone_reapply_rollback_evidence_invalid',
+      'DNS provider did not return valid rollback post-condition evidence',
+      503,
+    );
+  }
+  return Object.freeze({
+    satisfied: true,
+    zoneName: operation.zoneName,
+    restoredRrsetCount: result.restoredRrsetCount,
+    kindRestored: result.kindRestored,
+    sourceZoneDigest: operation.sourceZoneDigest,
+  });
+}
+
 export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
-    || typeof registry.listInterrupted !== 'function' || typeof registry.markApplying !== 'function'
-    || typeof registry.succeed !== 'function' || typeof registry.fail !== 'function'
+    || typeof registry.listInterrupted !== 'function' || typeof registry.listInterruptedRollbacks !== 'function'
+    || typeof registry.markApplying !== 'function' || typeof registry.succeed !== 'function' || typeof registry.fail !== 'function'
+    || typeof registry.markRollingBack !== 'function' || typeof registry.succeedRollback !== 'function'
+    || typeof registry.failRollback !== 'function'
     || !service || typeof service.preview !== 'function'
-    || typeof service.captureRollbackSnapshot !== 'function' || typeof service.apply !== 'function') {
+    || typeof service.captureRollbackSnapshot !== 'function' || typeof service.apply !== 'function'
+    || typeof service.inspectRollback !== 'function' || typeof service.rollback !== 'function') {
     throw new DnsZoneReapplyRuntimeError(
       'dns_zone_reapply_runtime_dependencies_invalid',
       'DNS zone reapply runtime dependencies are unavailable',
@@ -132,6 +159,71 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
     return dnsZoneReapplyOperationPublicView(completed);
   }
 
+  async function inspectRollback(operation) {
+    if (operation.sourceZoneSnapshot === null || operation.appliedZoneSnapshot === null
+      || operation.sourceZoneDigest === null || operation.appliedZoneDigest === null) {
+      throw new DnsZoneReapplyRuntimeError(
+        'dns_zone_reapply_rollback_evidence_missing',
+        'DNS zone reapply operation has no exact before/after rollback evidence',
+        409,
+      );
+    }
+    let inspected;
+    try {
+      inspected = await service.inspectRollback({
+        domainId: operation.domainId,
+        before: operation.sourceZoneSnapshot,
+        after: operation.appliedZoneSnapshot,
+      });
+    } catch (error) { throw mapped(error); }
+    if (!inspected || inspected.zoneName !== operation.zoneName
+      || inspected.sourceZoneDigest !== operation.sourceZoneDigest
+      || inspected.appliedZoneDigest !== operation.appliedZoneDigest
+      || typeof inspected.satisfied !== 'boolean'
+      || typeof inspected.repairCandidate !== 'boolean') {
+      throw new DnsZoneReapplyRuntimeError(
+        'dns_zone_reapply_rollback_inspection_invalid',
+        'DNS rollback inspection did not match the journaled before/after evidence',
+        503,
+      );
+    }
+    return inspected;
+  }
+
+  async function reconcileInterruptedRollback(operation) {
+    let inspected;
+    try { inspected = await inspectRollback(operation); }
+    catch (error) {
+      if (Number(error?.status) === 409) {
+        const failed = await registry.failRollback(
+          operation.id,
+          safeFailure(error, 'dns_zone_reapply_rollback_drift', 'DNS zone rollback state drifted'),
+        );
+        return dnsZoneReapplyOperationPublicView(failed);
+      }
+      throw new DnsZoneReapplyRuntimeError(
+        'dns_zone_reapply_rollback_recovery_pending',
+        'Interrupted DNS zone rollback cannot be reconciled because current zone state is unavailable',
+        503,
+      );
+    }
+    if (inspected.satisfied) {
+      const completed = await registry.succeedRollback(operation.id, {
+        satisfied: true,
+        zoneName: operation.zoneName,
+        restoredRrsetCount: 0,
+        kindRestored: false,
+        sourceZoneDigest: operation.sourceZoneDigest,
+      });
+      return dnsZoneReapplyOperationPublicView(completed);
+    }
+    const failed = await registry.failRollback(operation.id, {
+      code: 'dns_zone_reapply_rollback_interrupted',
+      message: 'Interrupted DNS zone rollback was inspected; automatic mutation replay remains blocked',
+    });
+    return dnsZoneReapplyOperationPublicView(failed);
+  }
+
   async function run(operationId) {
     let operation;
     try { operation = await registry.get(operationId); }
@@ -139,7 +231,7 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
     if (!operation) {
       throw new DnsZoneReapplyRuntimeError('dns_zone_reapply_operation_not_found', 'DNS zone reapply operation was not found', 404);
     }
-    if (operation.status === 'succeeded' || operation.status === 'failed') {
+    if (!['pending', 'applying'].includes(operation.status)) {
       return dnsZoneReapplyOperationPublicView(operation);
     }
     if (operation.status === 'pending') {
@@ -220,6 +312,22 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
       return dnsZoneReapplyOperationPublicView(await registry.fail(operation.id, failure));
     }
 
+    let afterApply;
+    try { afterApply = await inspectTarget(operation); }
+    catch {
+      throw new DnsZoneReapplyRuntimeError(
+        'dns_zone_reapply_postcondition_unavailable',
+        'DNS provider returned success but the exact journaled after-state cannot be inspected; operation remains applying',
+        503,
+      );
+    }
+    if (!afterApply.satisfied) {
+      throw new DnsZoneReapplyRuntimeError(
+        'dns_zone_reapply_postcondition_unverified',
+        'DNS provider returned success but the exact journaled after-state is not proven; operation remains applying',
+        503,
+      );
+    }
     try {
       return dnsZoneReapplyOperationPublicView(await registry.succeed(operation.id, evidence));
     } catch (error) { throw mapped(error); }
@@ -258,6 +366,120 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
     return run(operation.id);
   }
 
+  async function rollbackPreview({ domainId, operationId } = {}) {
+    let operation;
+    try { operation = await registry.get(operationId); }
+    catch (error) { throw mapped(error); }
+    if (!operation || operation.domainId !== domainId) {
+      throw new DnsZoneReapplyRuntimeError('dns_zone_reapply_operation_not_found', 'DNS zone reapply operation was not found', 404);
+    }
+    if (operation.status === 'rolling_back') {
+      await reconcileInterruptedRollback(operation);
+      operation = await registry.get(operation.id);
+    }
+    if (!['succeeded', 'rollback_failed', 'rolled_back'].includes(operation.status)) {
+      throw new DnsZoneReapplyRuntimeError(
+        'dns_zone_reapply_rollback_not_available',
+        'DNS zone reapply operation is not eligible for rollback',
+        409,
+      );
+    }
+    const inspected = await inspectRollback(operation);
+    const publicOperation = dnsZoneReapplyOperationPublicView(operation);
+    return Object.freeze({
+      operation: publicOperation,
+      inspection: inspected,
+      confirmation: publicOperation.rollback.available
+        ? rollbackConfirmation(operation)
+        : null,
+    });
+  }
+
+  async function rollback({
+    domainId,
+    operationId,
+    expectedUpdatedAt,
+    sourceZoneDigest,
+    appliedZoneDigest,
+    confirmation,
+  } = {}) {
+    let operation;
+    try { operation = await registry.get(operationId); }
+    catch (error) { throw mapped(error); }
+    if (!operation || operation.domainId !== domainId) {
+      throw new DnsZoneReapplyRuntimeError('dns_zone_reapply_operation_not_found', 'DNS zone reapply operation was not found', 404);
+    }
+    const publicOperation = dnsZoneReapplyOperationPublicView(operation);
+    if (!publicOperation.rollback.available) {
+      throw new DnsZoneReapplyRuntimeError('dns_zone_reapply_rollback_not_available', 'DNS zone reapply rollback is not available', 409);
+    }
+    if (expectedUpdatedAt !== operation.updatedAt
+      || sourceZoneDigest !== operation.sourceZoneDigest
+      || appliedZoneDigest !== operation.appliedZoneDigest
+      || confirmation !== rollbackConfirmation(operation)) {
+      throw new DnsZoneReapplyRuntimeError(
+        'dns_zone_reapply_rollback_stale',
+        'DNS zone rollback request is stale or confirmation is invalid',
+        409,
+      );
+    }
+
+    const before = await inspectRollback(operation);
+    try { operation = await registry.markRollingBack(operation.id); }
+    catch (error) { throw mapped(error); }
+    if (before.satisfied) {
+      return dnsZoneReapplyOperationPublicView(await registry.succeedRollback(operation.id, {
+        satisfied: true,
+        zoneName: operation.zoneName,
+        restoredRrsetCount: 0,
+        kindRestored: false,
+        sourceZoneDigest: operation.sourceZoneDigest,
+      }));
+    }
+
+    let result;
+    try {
+      result = await service.rollback({
+        domainId: operation.domainId,
+        before: operation.sourceZoneSnapshot,
+        after: operation.appliedZoneSnapshot,
+      });
+      const evidence = rollbackResultEvidence(operation, result);
+      return dnsZoneReapplyOperationPublicView(await registry.succeedRollback(operation.id, evidence));
+    } catch (rollbackError) {
+      let inspected;
+      try { inspected = await inspectRollback(operation); }
+      catch (inspectionError) {
+        if (Number(inspectionError?.status) === 409) {
+          const failed = await registry.failRollback(
+            operation.id,
+            safeFailure(inspectionError, 'dns_zone_reapply_rollback_drift', 'DNS zone rollback state drifted'),
+          );
+          return dnsZoneReapplyOperationPublicView(failed);
+        }
+        throw new DnsZoneReapplyRuntimeError(
+          'dns_zone_reapply_rollback_recovery_pending',
+          'DNS zone rollback result is uncertain and current zone state cannot be inspected; automatic replay is blocked',
+          503,
+        );
+      }
+      if (inspected.satisfied) {
+        return dnsZoneReapplyOperationPublicView(await registry.succeedRollback(operation.id, {
+          satisfied: true,
+          zoneName: operation.zoneName,
+          restoredRrsetCount: 0,
+          kindRestored: false,
+          sourceZoneDigest: operation.sourceZoneDigest,
+        }));
+      }
+      const failed = await registry.failRollback(
+        operation.id,
+        safeFailure(rollbackError, 'dns_zone_reapply_rollback_failed', 'DNS zone rollback failed'),
+      );
+      return dnsZoneReapplyOperationPublicView(failed);
+    }
+  }
+
   async function get(operationId) {
     try { return dnsZoneReapplyOperationPublicView(await registry.get(operationId)); }
     catch (error) { throw mapped(error); }
@@ -284,10 +506,35 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
         }));
       }
     }
+    const interruptedRollbacks = await registry.listInterruptedRollbacks();
+    for (const operation of interruptedRollbacks) {
+      try {
+        recovery.push(Object.freeze({
+          operationId: operation.id,
+          recovered: true,
+          operation: await reconcileInterruptedRollback(operation),
+        }));
+      } catch (error) {
+        recovery.push(Object.freeze({
+          operationId: operation.id,
+          recovered: false,
+          error: safeFailure(error, 'dns_zone_reapply_rollback_recovery_pending', 'DNS zone rollback recovery remains pending'),
+        }));
+      }
+    }
     return Object.freeze(recovery);
   }
 
-  return Object.freeze({ init, preview, start, run, get, listForDomain });
+  return Object.freeze({
+    init,
+    preview,
+    start,
+    run,
+    rollbackPreview,
+    rollback,
+    get,
+    listForDomain,
+  });
 }
 
 export const dnsZoneReapplyRuntimeInternals = Object.freeze({
@@ -296,4 +543,6 @@ export const dnsZoneReapplyRuntimeInternals = Object.freeze({
   currentPreviewMatches,
   evidenceFromPreview,
   evidenceFromApply,
+  rollbackConfirmation,
+  rollbackResultEvidence,
 });
