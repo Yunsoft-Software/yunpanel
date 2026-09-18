@@ -91,6 +91,37 @@ function staticPreview({ existing = false } = {}) {
   return preview;
 }
 
+test('Node, static and PHP hosted Websites all require the elFinder Files runtime step', () => {
+  const previews = [
+    nodePreview({ metadataReady: false, httpsMode: 'off' }),
+    staticPreview(),
+  ];
+  const php = nodePreview({ metadataReady: false, httpsMode: 'off' });
+  php.source = { kind: 'existing_application', applicationId };
+  php.plan.application = {
+    id: applicationId,
+    type: 'php',
+    runtimeAdapter: 'php-fpm',
+    runtime: null,
+    webRoot: `/var/lib/yunpanel/apps/${applicationId}/current/public`,
+  };
+  php.plan.website.runtimeType = 'php';
+  php.plan.website.documentRoot = php.plan.application.webRoot;
+  previews.push(php);
+
+  for (const preview of previews) {
+    const plan = siteCreateProvisioningPlan(preview);
+    const elfinder = plan.steps.find((step) => step.id === 'elfinder');
+    assert.ok(elfinder);
+    assert.equal(elfinder.required, true);
+    assert.equal(elfinder.kind, 'elfinder');
+    assert.equal(elfinder.intent.adapter, 'elfinder-fpm');
+    assert.equal(elfinder.intent.websiteId, websiteId);
+    assert.equal(elfinder.intent.applicationId, applicationId);
+    assert.equal(elfinder.intent.unixUser, unixUser);
+  }
+});
+
 test('legacy metadata completeness never makes a new hosted Website provisioning-ready', () => {
   const plan = siteCreateProvisioningPlan(nodePreview({ metadataReady: true }));
 
@@ -102,6 +133,20 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.equal(identity.compensation.state, 'pending');
   assert.equal(identity.intent.unixUser, unixUser);
   assert.equal(identity.intent.homeDirectory, `/var/lib/yunpanel/data/${applicationId}`);
+
+  const elfinder = plan.steps.find((step) => step.id === 'elfinder');
+  assert.equal(elfinder.kind, 'elfinder');
+  assert.equal(elfinder.required, true);
+  assert.equal(elfinder.state, 'pending');
+  assert.deepEqual(elfinder.intent, {
+    adapter: 'elfinder-fpm',
+    websiteId,
+    applicationId,
+    unixUser,
+  });
+  assert.equal(elfinder.compensation.state, 'pending');
+  assert.ok(plan.steps.findIndex((step) => step.id === 'elfinder')
+    > plan.steps.findIndex((step) => step.id === 'unix_identity'));
 
   const release = plan.steps.find((step) => step.id === 'node_release');
   assert.equal(release.kind, 'node_release');
