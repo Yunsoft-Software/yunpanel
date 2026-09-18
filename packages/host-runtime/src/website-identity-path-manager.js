@@ -248,6 +248,27 @@ export function createWebsiteIdentityPathManager({
     });
   }
 
+  async function previewMigration(rawIntent) {
+    const normalized = normalizeIntent(rawIntent);
+    if (typeof identityManager.previewMigration !== 'function') {
+      throw new WebsiteIdentityPathManagerError(
+        'website_identity_migration_preview_unavailable',
+        'Website Unix identity migration preview is unavailable',
+      );
+    }
+    const preview = await identityManager.previewMigration(normalized.baseIntent);
+    if (!preview || typeof preview !== 'object' || Array.isArray(preview)) {
+      throw new WebsiteIdentityPathManagerError(
+        'website_identity_migration_preview_invalid',
+        'Website Unix identity migration preview is invalid',
+      );
+    }
+    return Object.freeze({
+      ...preview,
+      pathContract: contractEvidence(normalized.contract),
+    });
+  }
+
   async function inspect(rawIntent) {
     const normalized = normalizeIntent(rawIntent);
     const identity = await identityManager.inspect(normalized.baseIntent);
@@ -524,6 +545,7 @@ export function createWebsiteIdentityPathManager({
 
   return Object.freeze({
     inspect,
+    previewMigration,
     apply,
     compensate,
     inspectCompensation,
