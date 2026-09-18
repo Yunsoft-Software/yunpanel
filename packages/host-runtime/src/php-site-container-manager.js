@@ -425,6 +425,13 @@ export function createPhpSiteContainerManager({
     if (![applicationRoot, releasesDirectory, releaseDirectory, releaseDocumentRoot, currentRelease].every(Boolean)) {
       throw new PhpSiteContainerManagerError('php_site_container_migration_path_missing', 'PHP container migration requires the existing canonical release tree');
     }
+    if (applicationRoot.directory !== true || applicationRoot.symbolicLink === true
+      || releasesDirectory.directory !== true || releasesDirectory.symbolicLink === true
+      || releaseDirectory.directory !== true || releaseDirectory.symbolicLink === true
+      || releaseDocumentRoot.directory !== true || releaseDocumentRoot.symbolicLink === true
+      || currentRelease.symbolicLink !== true) {
+      throw new PhpSiteContainerManagerError('php_site_container_migration_path_type_drift', 'PHP container migration path types changed after preview');
+    }
     if (releaseDirectory.uid !== identity.uid || releaseDirectory.gid !== identity.gid || modeOf(releaseDirectory) !== 0o750
       || releaseDocumentRoot.uid !== identity.uid || releaseDocumentRoot.gid !== identity.gid || modeOf(releaseDocumentRoot) !== 0o750) {
       throw new PhpSiteContainerManagerError('php_site_container_migration_release_drift', 'PHP container migration will not mutate release content ownership or permissions');
