@@ -226,6 +226,116 @@ test('impact digest changes with relevant descendants and ignores no dependency 
   assert.equal(second.safeToApply, false);
 });
 
+test('delete impact binds authoritative DNS retirement digests and blockers into the main dependency graph', async () => {
+  const state = await fixture();
+  const providerCalls = [];
+  const first = await previewResourceImpact({
+    resourceType: 'domain',
+    resourceId: state.domain.id,
+    operation: 'delete',
+    ...dependencies(state),
+    dnsRetirementImpactProvider: async (context) => {
+      providerCalls.push(context);
+      return [{
+        domainId: state.domain.id,
+        state: 'blocked',
+        previewDigest: 'a'.repeat(64),
+        zoneSnapshotDigest: 'b'.repeat(64),
+        blockers: ['dns_zone_delete_retention_policy_required'],
+      }, {
+        domainId: state.child.id,
+        state: 'ready',
+        previewDigest: 'c'.repeat(64),
+        zoneSnapshotDigest: null,
+        blockers: [],
+      }];
+    },
+  });
+
+  assert.equal(providerCalls.length, 1);
+  assert.deepEqual(providerCalls[0].domainIds, [state.child.id, state.domain.id].sort());
+  assert.deepEqual(first.dependencies.authoritativeDns, {
+    status: 'available',
+    items: [{
+      domainId: state.child.id,
+      state: 'ready',
+      previewDigest: 'c'.repeat(64),
+      zoneSnapshotDigest: null,
+      blockers: [],
+    }, {
+      domainId: state.domain.id,
+      state: 'blocked',
+      previewDigest: 'a'.repeat(64),
+      zoneSnapshotDigest: 'b'.repeat(64),
+      blockers: ['dns_zone_delete_retention_policy_required'],
+    }],
+  });
+  assert.ok(first.blockers.some((item) => item.code === 'authoritative_dns_retirement_blocked'
+    && item.resourceType === 'authoritative_dns' && item.count === 1));
+
+  const second = await previewResourceImpact({
+    resourceType: 'domain',
+    resourceId: state.domain.id,
+    operation: 'delete',
+    ...dependencies(state),
+    dnsRetirementImpactProvider: async () => [{
+      domainId: state.domain.id,
+      state: 'blocked',
+      previewDigest: 'd'.repeat(64),
+      zoneSnapshotDigest: 'e'.repeat(64),
+      blockers: ['dns_zone_manual_rrsets_present'],
+    }],
+  });
+  assert.notEqual(second.previewDigest, first.previewDigest);
+
+  const move = await previewResourceImpact({
+    resourceType: 'domain',
+    resourceId: state.domain.id,
+    operation: 'move',
+    targetServerId: state.targetServerId,
+    ...dependencies(state),
+    dnsRetirementImpactProvider: async () => {
+      throw new Error('must not inspect retirement for move');
+    },
+  });
+  assert.equal(Object.hasOwn(move.dependencies, 'authoritativeDns'), false);
+});
+
+test('authoritative DNS impact provider fails closed on unavailable or malformed evidence', async () => {
+  const state = await fixture();
+  await assert.rejects(
+    previewResourceImpact({
+      resourceType: 'domain',
+      resourceId: state.domain.id,
+      operation: 'delete',
+      ...dependencies(state),
+      dnsRetirementImpactProvider: async () => { throw new Error('PowerDNS offline'); },
+    }),
+    (error) => error instanceof ResourceImpactError
+      && error.code === 'authoritative_dns_impact_unavailable'
+      && error.status === 503,
+  );
+
+  await assert.rejects(
+    previewResourceImpact({
+      resourceType: 'domain',
+      resourceId: state.domain.id,
+      operation: 'delete',
+      ...dependencies(state),
+      dnsRetirementImpactProvider: async () => [{
+        domainId: state.domain.id,
+        state: 'ready',
+        previewDigest: 'a'.repeat(64),
+        zoneSnapshotDigest: null,
+        blockers: ['should_not_exist'],
+      }],
+    }),
+    (error) => error instanceof ResourceImpactError
+      && error.code === 'authoritative_dns_impact_invalid'
+      && error.status === 503,
+  );
+});
+
 test('additional dependency providers expose only bounded references and fail closed on bad metadata', async () => {
   const state = await fixture();
   await assert.rejects(
