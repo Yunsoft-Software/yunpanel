@@ -151,6 +151,24 @@ export function createWebsitePhpRuntimeProvisioningHandler({
       fpmManager.previewMigration(normalized, { operationId }),
       umaskManager.inspect('php'),
     ]);
+    let fpmRuntime;
+    try { fpmRuntime = await fpmManager.inspect(normalized); }
+    catch (error) {
+      fpmRuntime = Object.freeze({
+        satisfied: false,
+        reason: typeof error?.code === 'string' && /^[a-z0-9_]{1,120}$/.test(error.code)
+          ? error.code
+          : 'php_fpm_runtime_inspection_failed',
+      });
+    }
+    const fpmRuntimeEvidence = fpmRuntime?.satisfied === true
+      ? Object.freeze({ satisfied: true })
+      : Object.freeze({
+        satisfied: false,
+        reason: typeof fpmRuntime?.reason === 'string' && /^[a-z0-9_]{1,120}$/.test(fpmRuntime.reason)
+          ? fpmRuntime.reason
+          : 'php_fpm_runtime_not_ready',
+      });
     const umaskEvidence = umask?.satisfied === true && umask.umask === '0027'
       ? Object.freeze({ satisfied: true, umask: '0027' })
       : Object.freeze({
@@ -162,20 +180,26 @@ export function createWebsitePhpRuntimeProvisioningHandler({
     const differences = [
       ...(Array.isArray(container?.differences) ? container.differences : ['php_container_preview_invalid']),
       ...(Array.isArray(fpm?.differences) ? fpm.differences : ['php_fpm_preview_invalid']),
+      ...(fpmRuntimeEvidence.satisfied ? [] : ['php_fpm_runtime_not_ready']),
       ...(umaskEvidence.satisfied ? [] : ['php_runtime_umask_not_ready']),
     ];
 
     const safeCreateCandidate = container?.satisfied === true
       && fpm?.safeCreateCandidate === true
       && umaskEvidence.satisfied === true;
+    const safeContainerMigrationCandidate = container?.safeMigrationCandidate === true
+      && fpmRuntimeEvidence.satisfied === true
+      && umaskEvidence.satisfied === true;
     return Object.freeze({
       version: 1,
       adapter: 'php-runtime',
-      satisfied: container?.satisfied === true && fpm?.satisfied === true && umaskEvidence.satisfied === true,
+      satisfied: container?.satisfied === true && fpmRuntimeEvidence.satisfied === true && umaskEvidence.satisfied === true,
       safeCreateCandidate,
+      safeContainerMigrationCandidate,
       current: Object.freeze({
         container,
         fpm,
+        fpmRuntime: fpmRuntimeEvidence,
         umask: umaskEvidence,
       }),
       desired: Object.freeze({
@@ -186,6 +210,86 @@ export function createWebsitePhpRuntimeProvisioningHandler({
         runtimeUmask: '0027',
       }),
       differences: Object.freeze([...new Set(differences)]),
+    });
+  }
+
+  async function inspectContainerMigrationOperation(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    const releaseOperationId = containerOperationId(context.operationId, context.releaseOperationId);
+    if (typeof containerManager.inspectMigrationOperation !== 'function') {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_container_migration_lifecycle_unavailable',
+        'Website PHP container migration lifecycle is unavailable',
+        503,
+      );
+    }
+    return containerManager.inspectMigrationOperation(normalized, {
+      operationId: releaseOperationId,
+      migrationOperationId: context.operationId,
+    });
+  }
+
+  async function applyContainerMigration(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    const releaseOperationId = containerOperationId(context.operationId, context.releaseOperationId);
+    if (typeof containerManager.applyMigration !== 'function') {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_container_migration_lifecycle_unavailable',
+        'Website PHP container migration lifecycle is unavailable',
+        503,
+      );
+    }
+    const preview = await previewMigration(context);
+    if (preview.safeContainerMigrationCandidate !== true) {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_container_migration_not_safe',
+        'Website PHP container migration requires exact control-plane metadata drift with healthy site FPM and shared UMask state',
+        409,
+      );
+    }
+    const migrated = await containerManager.applyMigration(normalized, {
+      operationId: releaseOperationId,
+      migrationOperationId: context.operationId,
+    });
+    if (!migrated?.satisfied || migrated.phpContainerReceiptVersion !== 1 || migrated.migratedPhpContainer !== true) {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_container_migration_unverified',
+        'Website PHP container migration did not return durable ownership evidence',
+        503,
+      );
+    }
+    return inspectContainerMigrationOperation(context);
+  }
+
+  async function inspectContainerMigrationCompensation(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    const releaseOperationId = containerOperationId(context.operationId, context.releaseOperationId);
+    if (typeof containerManager.inspectMigrationCompensation !== 'function') {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_container_migration_lifecycle_unavailable',
+        'Website PHP container migration lifecycle is unavailable',
+        503,
+      );
+    }
+    return containerManager.inspectMigrationCompensation(normalized, {
+      operationId: releaseOperationId,
+      migrationOperationId: context.operationId,
+    });
+  }
+
+  async function compensateContainerMigration(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    const releaseOperationId = containerOperationId(context.operationId, context.releaseOperationId);
+    if (typeof containerManager.compensateMigration !== 'function') {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_container_migration_lifecycle_unavailable',
+        'Website PHP container migration lifecycle is unavailable',
+        503,
+      );
+    }
+    return containerManager.compensateMigration(normalized, {
+      operationId: releaseOperationId,
+      migrationOperationId: context.operationId,
     });
   }
 
@@ -276,6 +380,10 @@ export function createWebsitePhpRuntimeProvisioningHandler({
     apply,
     inspect,
     previewMigration,
+    inspectContainerMigrationOperation,
+    applyContainerMigration,
+    inspectContainerMigrationCompensation,
+    compensateContainerMigration,
     inspectMigrationOperation,
     applyMigration,
     compensateMigration,
