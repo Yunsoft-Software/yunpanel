@@ -842,9 +842,9 @@ function boundedStaticRuntimeMigrationPreview(value, scope) {
     || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
     || value.desired.websiteId !== scope.websiteId
     || value.desired.applicationId !== scope.applicationId
-    || !['deploy', 'bind_existing'].includes(value.desired.mode)
+    || !['deploy', 'bind_existing', 'legacy_unresolved'].includes(value.desired.mode)
     || (value.desired.mode === 'deploy' && value.desired.deploymentId !== scope.operationId)
-    || (value.desired.mode === 'bind_existing' && value.desired.deploymentId !== null)) return null;
+    || (value.desired.mode !== 'deploy' && value.desired.deploymentId !== null)) return null;
 
   const runtime = boundedStaticRuntimeState(value.current.runtime, scope);
   const isolation = boundedStaticPublishPreview(value.current.isolation, scope);
@@ -1024,7 +1024,10 @@ export function createWebsiteIsolationAuditService({
           }));
           continue;
         }
-        const handler = provisioningHandlers?.[step.kind] ?? null;
+        const inspectionKind = stepId === 'runtime' && website.runtimeType === 'static'
+          ? 'static_runtime'
+          : step.kind;
+        const handler = provisioningHandlers?.[inspectionKind] ?? null;
         if (!handler || typeof handler.inspect !== 'function') {
           inspectedSteps.push(Object.freeze({ stepId, kind: step.kind, satisfied: null, reason: 'inspect_unavailable' }));
           findings.push(finding(
