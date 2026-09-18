@@ -719,6 +719,9 @@ export function createPanelServer({
   publicOrigin = process.env.YUNPANEL_PUBLIC_ORIGIN,
   proxyToken = internalProxyToken(),
   phpMyAdminSocketPath = PHPMYADMIN_SOCKET_PATH,
+  elFinderSocketPath = ELFINDER_GATEWAY_SOCKET_PATH,
+  elFinderHandoffSocketPath = ELFINDER_HANDOFF_SOCKET_PATH,
+  elFinderGatewaySessions = createElFinderGatewaySessions(),
   trustedProxyIps = process.env.YUNPANEL_TRUSTED_PROXY_IPS ?? TRUSTED_PROXY_DEFAULT,
   webRoot = process.env.YUNPANEL_WEB_ROOT ?? DEFAULT_WEB_ROOT,
 } = {}) {
@@ -734,6 +737,21 @@ export function createPanelServer({
     || path.resolve(phpMyAdminSocketPath) !== phpMyAdminSocketPath || phpMyAdminSocketPath === '/') {
     throw new Error('phpMyAdmin socket path is invalid');
   }
+  for (const [label, socketPath] of [
+    ['elFinder gateway', elFinderSocketPath],
+    ['elFinder handoff', elFinderHandoffSocketPath],
+  ]) {
+    if (typeof socketPath !== 'string' || !path.isAbsolute(socketPath)
+      || path.resolve(socketPath) !== socketPath || socketPath === '/') {
+      throw new Error(`${label} socket path is invalid`);
+    }
+  }
+  if (!elFinderGatewaySessions
+    || typeof elFinderGatewaySessions.issue !== 'function'
+    || typeof elFinderGatewaySessions.resolve !== 'function'
+    || typeof elFinderGatewaySessions.revoke !== 'function') {
+    throw new Error('elFinder gateway session registry is invalid');
+  }
   const server = http.createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
     const signedWebhook = isGithubWebhookPath(requestUrl.pathname);
@@ -744,6 +762,63 @@ export function createPanelServer({
     if (signedWebhook) {
       proxyRequest(request, response, {
         apiHost, apiPort, clientIp, proxyToken, publicOrigin, signedWebhook: true,
+      });
+      return;
+    }
+    if (requestUrl.pathname === ELFINDER_PREFIX) {
+      response.writeHead(308, {
+        'cache-control': 'no-store',
+        location: `${ELFINDER_PREFIX}/${requestUrl.search}`,
+      });
+      response.end();
+      return;
+    }
+    if (requestUrl.pathname.startsWith(`${ELFINDER_PREFIX}/`)) {
+      const accessStatus = await authorizeElFinderGateway(request, {
+        apiHost, apiPort, clientIp, proxyToken,
+      });
+      if (accessStatus !== 204) {
+        const status = accessStatus === 401 || accessStatus === 403 ? accessStatus : 503;
+        reply(response, status, status === 401 ? 'Authentication required.' : 'elFinder access denied.');
+        return;
+      }
+
+      if (requestUrl.pathname === `${ELFINDER_PREFIX}${ELFINDER_HANDOFF_PATH}`) {
+        if (requestUrl.search) {
+          reply(response, 400, 'elFinder handoff does not accept query parameters.');
+          return;
+        }
+        try {
+          await establishElFinderGatewaySession(request, response, {
+            sessions: elFinderGatewaySessions,
+            publicOrigin,
+            handoffSocketPath: elFinderHandoffSocketPath,
+          });
+        } catch (error) {
+          if (response.headersSent || response.destroyed) {
+            response.destroy();
+            return;
+          }
+          if (error instanceof ElFinderGatewayError) {
+            reply(response, error.status, error.message);
+          } else {
+            reply(response, 503, 'elFinder handoff is unavailable.');
+          }
+        }
+        return;
+      }
+
+      const connector = requestUrl.pathname === `${ELFINDER_PREFIX}/connector.php`;
+      const bundle = connector
+        ? resolveElFinderGatewayBundle(request, {
+            sessions: elFinderGatewaySessions,
+            publicOrigin,
+          })
+        : null;
+      proxyElFinder(request, response, {
+        elFinderSocketPath,
+        publicOrigin,
+        bundle,
       });
       return;
     }
