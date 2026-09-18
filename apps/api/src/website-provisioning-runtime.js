@@ -179,6 +179,12 @@ export function createWebsiteProvisioningRuntime({
         && typeof handlers.php_runtime?.inspectMigrationCompensation === 'function'
         && typeof handlers.php_runtime?.compensateMigration === 'function'
       ),
+      phpContainerMigrationAvailable: Boolean(
+        typeof handlers.php_runtime?.inspectContainerMigrationOperation === 'function'
+        && typeof handlers.php_runtime?.applyContainerMigration === 'function'
+        && typeof handlers.php_runtime?.inspectContainerMigrationCompensation === 'function'
+        && typeof handlers.php_runtime?.compensateContainerMigration === 'function'
+      ),
     });
     isolationMigration = createWebsiteIsolationMigrationRuntime({
       registry: isolationMigrationRegistry,
