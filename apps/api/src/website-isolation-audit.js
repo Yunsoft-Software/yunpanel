@@ -168,7 +168,7 @@ function boundedSftpDirectoryState(value) {
 
 function boundedSftpMigrationPreview(value, { websiteId, applicationId, identity } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || value.version !== 1 || typeof value.satisfied !== 'boolean'
+    || value.version !== 1 || typeof value.satisfied !== 'boolean' || typeof value.safeCreateCandidate !== 'boolean'
     || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
     || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
     || !Array.isArray(value.differences) || value.differences.length > 30
@@ -233,6 +233,7 @@ function boundedSftpMigrationPreview(value, { websiteId, applicationId, identity
   return Object.freeze({
     version: 1,
     satisfied: value.satisfied,
+    safeCreateCandidate: value.safeCreateCandidate,
     current: Object.freeze({
       receiptState: value.current.receiptState,
       receiptError: value.current.receiptError,
