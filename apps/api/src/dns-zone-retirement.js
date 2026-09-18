@@ -487,6 +487,7 @@ export function createDnsZoneRetirementService({
       snapshotDigest,
       ownershipEvidenceDigest: current.zone.ownershipOrigin.evidenceDigest,
       snapshotRetentionDays: current.retention.snapshotRetentionDays,
+      confirmation: current.confirmation,
       snapshot,
     });
   }
