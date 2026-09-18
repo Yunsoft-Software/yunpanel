@@ -516,10 +516,12 @@ export function createDnsZoneReapplyOperationRegistry({
     const index = state.operations.findIndex((entry) => entry.id === id);
     if (index < 0) throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_not_found', 'DNS zone reapply operation was not found', 404);
     const current = state.operations[index];
+    const previousTimestamp = Date.parse(current.updatedAt);
+    const currentTimestamp = now();
     const next = persistedOperation({
       ...current,
       ...update,
-      updatedAt: new Date(now()).toISOString(),
+      updatedAt: new Date(Math.max(currentTimestamp, previousTimestamp + 1)).toISOString(),
     });
     state.operations[index] = next;
     await persist();
