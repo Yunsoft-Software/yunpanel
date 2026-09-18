@@ -623,6 +623,7 @@ test('isolation audit pins bounded static release and publish isolation drift in
     adapter: 'static-runtime',
     satisfied: false,
     safeControlMigrationCandidate: false,
+    releaseRepairCandidate: false,
     automaticMigration: false,
     migrationBlockedReason: 'static_legacy_permissions_not_operation_owned',
     current: {
@@ -697,6 +698,43 @@ test('isolation audit pins bounded static release and publish isolation drift in
         differences: ['static_publish_acl_drift'],
         rawSecret: 'do-not-project',
       },
+      releasePermissions: {
+        version: 1,
+        adapter: 'static-release-permissions',
+        satisfied: false,
+        automaticMigration: false,
+        repairCandidate: true,
+        migrationBlockedReason: 'static_release_receipt_not_operation_owned',
+        current: {
+          identity: {
+            satisfied: true,
+            uid: 1201,
+            gid: 1201,
+            homeDirectory: identity.paths.workspace.homeDirectory,
+          },
+          aclToolsAvailable: true,
+          currentTarget: 'releases/f73cc6ac-07e8-4d22-b29a-741154687d20',
+          currentTargetError: null,
+          releases: ['f73cc6ac-07e8-4d22-b29a-741154687d20'],
+          tree: {
+            sha256: 'e'.repeat(64),
+            entryCount: 2,
+            ownershipModeDriftCount: 0,
+            aclDriftCount: 1,
+          },
+        },
+        desired: {
+          websiteId,
+          applicationId,
+          unixUser: identity.unixUser,
+          releasesRoot: `${publishRoot}/releases`,
+          releaseDirectoryMode: '0750',
+          releaseFileMode: '0640',
+          nginxDirectoryAcl: 'user:www-data:r-x',
+          nginxFileAcl: 'user:www-data:r--',
+        },
+        differences: ['static_publish_acl_drift'],
+      },
     },
     desired: {
       websiteId,
@@ -717,7 +755,10 @@ test('isolation audit pins bounded static release and publish isolation drift in
     .current.staticRuntimeMigrationPreview;
   assert.equal(preview.adapter, 'static-runtime');
   assert.equal(preview.safeControlMigrationCandidate, false);
+  assert.equal(preview.releaseRepairCandidate, false);
   assert.equal(preview.current.isolation.safeMigrationCandidate, false);
+  assert.equal(preview.current.releasePermissions.repairCandidate, true);
+  assert.equal(preview.current.releasePermissions.current.tree.aclDriftCount, 1);
   assert.equal(preview.current.runtime.deploymentId, releaseId);
   assert.equal(preview.current.isolation.current.publishRoot.mode, '0711');
   assert.equal(preview.current.isolation.current.releases[0].reason, 'static_publish_acl_drift');
@@ -745,6 +786,15 @@ test('isolation audit pins bounded static release and publish isolation drift in
                 ...staticPreview.current.isolation.current.current,
                 target: 'releases/3854e385-adfc-42bd-bccf-f655f24cd68f',
               },
+            },
+            differences: ['static_publish_current_drift'],
+          },
+          releasePermissions: {
+            ...staticPreview.current.releasePermissions,
+            repairCandidate: false,
+            current: {
+              ...staticPreview.current.releasePermissions.current,
+              currentTarget: 'releases/3854e385-adfc-42bd-bccf-f655f24cd68f',
             },
             differences: ['static_publish_current_drift'],
           },
@@ -779,6 +829,7 @@ test('isolation audit opens static control metadata repair only when releases an
     adapter: 'static-runtime',
     satisfied: false,
     safeControlMigrationCandidate: true,
+    releaseRepairCandidate: false,
     automaticMigration: false,
     migrationBlockedReason: 'static_legacy_permissions_not_operation_owned',
     current: {
@@ -823,6 +874,43 @@ test('isolation audit opens static control metadata repair only when releases an
         },
         desired,
         differences: ['static_publish_container_drift', 'static_publish_current_drift'],
+      },
+      releasePermissions: {
+        version: 1,
+        adapter: 'static-release-permissions',
+        satisfied: true,
+        automaticMigration: false,
+        repairCandidate: false,
+        migrationBlockedReason: 'static_release_receipt_not_operation_owned',
+        current: {
+          identity: {
+            satisfied: true,
+            uid: 1201,
+            gid: 1201,
+            homeDirectory: identity.paths.workspace.homeDirectory,
+          },
+          aclToolsAvailable: true,
+          currentTarget: `releases/${managedReleaseId}`,
+          currentTargetError: null,
+          releases: [managedReleaseId],
+          tree: {
+            sha256: 'f'.repeat(64),
+            entryCount: 2,
+            ownershipModeDriftCount: 0,
+            aclDriftCount: 0,
+          },
+        },
+        desired: {
+          websiteId,
+          applicationId,
+          unixUser: identity.unixUser,
+          releasesRoot: `${publishRoot}/releases`,
+          releaseDirectoryMode: '0750',
+          releaseFileMode: '0640',
+          nginxDirectoryAcl: 'user:www-data:r-x',
+          nginxFileAcl: 'user:www-data:r--',
+        },
+        differences: [],
       },
     },
     desired: {
