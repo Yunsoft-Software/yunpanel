@@ -25,6 +25,7 @@ function preview() {
     templateVersion: 4,
     dnsIdentityRevision: 2,
     mailStateDigest: 'c'.repeat(64),
+    sourceZoneDigest: 'd'.repeat(64),
     observedSerial: 2026091501,
     nextSerial: 2026091601,
     previewDigest,
@@ -51,6 +52,8 @@ test('DNS zone reapply journal deduplicates an identical active preview and hide
   const publicView = dnsZoneReapplyOperationPublicView(first);
   assert.equal(publicView.status, 'pending');
   assert.equal(publicView.targetSerial, 2026091601);
+  assert.equal(first.sourceZoneDigest, 'd'.repeat(64));
+  assert.equal(Object.hasOwn(publicView, 'sourceZoneDigest'), false);
   assert.equal(Object.hasOwn(publicView, 'confirmation'), false);
   assert.equal(JSON.stringify(publicView).includes('reapply-dns-zone-template:'), false);
 });
@@ -148,7 +151,48 @@ test('version 1 operation journals migrate without claiming mail desired-state e
   const store = createDnsZoneReapplyOperationRegistry({ filePath });
   await store.init();
   assert.equal((await store.get(operationId)).mailStateDigest, null);
+  assert.equal((await store.get(operationId)).sourceZoneDigest, null);
   const persisted = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(persisted.version, 2);
+  assert.equal(persisted.version, 3);
   assert.equal(persisted.operations[0].mailStateDigest, null);
+  assert.equal(persisted.operations[0].sourceZoneDigest, null);
+});
+
+
+test('version 2 operation journals migrate without inventing exact source-zone evidence', async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-dns-reapply-v2-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'operations.json');
+  const previous = {
+    version: 2,
+    operations: [{
+      id: operationId,
+      domainId,
+      serverId,
+      zoneName: 'example.com',
+      domainRevision: 3,
+      templateVersion: 4,
+      dnsIdentityRevision: 2,
+      mailStateDigest: 'c'.repeat(64),
+      observedSerial: 2026091501,
+      targetSerial: 2026091601,
+      previewDigest,
+      confirmation: `reapply-dns-zone-template:${domainId}:${previewDigest}`,
+      status: 'applying',
+      result: null,
+      error: null,
+      createdAt: '2026-09-16T00:00:00.000Z',
+      updatedAt: '2026-09-16T00:00:00.000Z',
+    }],
+  };
+  await writeFile(filePath, `${JSON.stringify(previous)}\n`);
+
+  const store = createDnsZoneReapplyOperationRegistry({ filePath });
+  await store.init();
+  const migrated = await store.get(operationId);
+  assert.equal(migrated.mailStateDigest, 'c'.repeat(64));
+  assert.equal(migrated.sourceZoneDigest, null);
+  const persisted = JSON.parse(await readFile(filePath, 'utf8'));
+  assert.equal(persisted.version, 3);
+  assert.equal(persisted.operations[0].sourceZoneDigest, null);
 });
