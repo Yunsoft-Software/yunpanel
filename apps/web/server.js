@@ -825,12 +825,19 @@ export function createPanelServer({
       }
 
       const connector = requestUrl.pathname === `${ELFINDER_PREFIX}/connector.php`;
-      const bundle = connector
+      const protectedAsset = connector
+        || requestUrl.pathname.startsWith(`${ELFINDER_PREFIX}/vendor/`)
+        || requestUrl.pathname.startsWith(`${ELFINDER_PREFIX}/assets/`);
+      const bundle = protectedAsset
         ? resolveElFinderGatewayBundle(request, {
             sessions: elFinderGatewaySessions,
             publicOrigin,
           })
         : null;
+      if (protectedAsset && !bundle) {
+        reply(response, 401, 'Open Website Files from YunPanel again.');
+        return;
+      }
       proxyElFinder(request, response, {
         elFinderSocketPath,
         publicOrigin,
