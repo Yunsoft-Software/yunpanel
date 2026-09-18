@@ -32,6 +32,9 @@ import { createDatabaseCredentialMaterializer } from './database-credential-mate
 import { createDatabaseCredentialRegistry } from './database-credential-registry.js';
 import { createDomainRegistry } from './domain-registry.js';
 import { createDomainStageTargetJobRegistry } from './domain-stage-target-job-registry.js';
+import { createDomainSuspensionOperationRegistry } from './domain-suspension-operation-registry.js';
+import { createDomainSuspensionRuntime } from './domain-suspension-runtime.js';
+import { createDomainSuspensionService } from './domain-suspension.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDnsProviderCredentialRegistry } from './dns-provider-credential-registry.js';
 import { createDockerComposeApiHandler } from './docker-compose-api-handler.js';
@@ -85,6 +88,8 @@ const port = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10);
 const serverStorePath = process.env.YUNPANEL_SERVER_STORE ?? path.resolve('.data/server-registry.json');
 const controlPlaneStateRoot = path.dirname(serverStorePath);
 const domainStorePath = process.env.YUNPANEL_DOMAIN_STORE ?? path.resolve('.data/domain-registry.json');
+const domainSuspensionOperationStorePath = process.env.YUNPANEL_DOMAIN_SUSPENSION_OPERATION_STORE
+  ?? path.join(controlPlaneStateRoot, 'domain-suspension-operations.json');
 const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-registry.json');
 const backupOperationStorePath = process.env.YUNPANEL_BACKUP_OPERATION_STORE
   ?? path.join(controlPlaneStateRoot, 'backup-operation-registry.json');
@@ -404,6 +409,19 @@ const jobRegistry = createDomainStageTargetJobRegistry({
   applicationRegistry,
   runtimeBindingRegistry,
 });
+const domainSuspensionRuntime = localServerId
+  ? createDomainSuspensionRuntime({
+    registry: createDomainSuspensionOperationRegistry({
+      filePath: domainSuspensionOperationStorePath,
+    }),
+    service: createDomainSuspensionService({
+      domainRegistry,
+      jobRegistry,
+      localServerId,
+    }),
+  })
+  : null;
+if (domainSuspensionRuntime) await domainSuspensionRuntime.init();
 const dockerComposeRuntime = await createDockerComposeRuntime({
   env: process.env,
   serverRegistry: registry,
@@ -511,6 +529,7 @@ const listener = createAuthenticatedApi({
       registry,
       domainRegistry,
       jobRegistry,
+      domainSuspensionRuntime,
       backupOperationRegistry,
       backupJobStorePath: jobStorePath,
       projectBackupLocked,
@@ -626,6 +645,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] listening on http://${host}:${port}`);
   console.log(`[yunpanel-api] server store=${serverStorePath}`);
   console.log(`[yunpanel-api] domain store=${domainStorePath}`);
+  console.log(`[yunpanel-api] domain suspension operation store=${domainSuspensionOperationStorePath}`);
   console.log(`[yunpanel-api] job store=${jobStorePath}`);
   console.log(`[yunpanel-api] backup operation store=${backupOperationStorePath}`);
   console.log(`[yunpanel-api] job log store=${jobLogStorePath}`);
