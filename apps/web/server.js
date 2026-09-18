@@ -113,8 +113,8 @@ function browserProxyHeaders(request) {
   return headers;
 }
 
-function authorizePhpMyAdminGateway(request, {
-  apiHost, apiPort, clientIp, proxyToken,
+function authorizeToolGateway(request, {
+  apiHost, apiPort, clientIp, proxyToken, accessPath, label,
 }) {
   return new Promise((resolve) => {
     const headers = {
@@ -127,16 +127,32 @@ function authorizePhpMyAdminGateway(request, {
       host: apiHost,
       port: apiPort,
       method: 'GET',
-      path: PHPMYADMIN_GATEWAY_ACCESS_PATH,
+      path: accessPath,
       headers,
     }, (upstreamResponse) => {
       const status = upstreamResponse.statusCode ?? 503;
       upstreamResponse.resume();
       upstreamResponse.once('end', () => resolve(status));
     });
-    upstream.setTimeout(5_000, () => upstream.destroy(new Error('phpMyAdmin access gate timeout')));
+    upstream.setTimeout(5_000, () => upstream.destroy(new Error(`${label} access gate timeout`)));
     upstream.once('error', () => resolve(503));
     upstream.end();
+  });
+}
+
+function authorizePhpMyAdminGateway(request, options) {
+  return authorizeToolGateway(request, {
+    ...options,
+    accessPath: PHPMYADMIN_GATEWAY_ACCESS_PATH,
+    label: 'phpMyAdmin',
+  });
+}
+
+function authorizeElFinderGateway(request, options) {
+  return authorizeToolGateway(request, {
+    ...options,
+    accessPath: ELFINDER_GATEWAY_ACCESS_PATH,
+    label: 'elFinder',
   });
 }
 
