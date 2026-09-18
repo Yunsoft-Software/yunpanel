@@ -27,8 +27,6 @@ export function renderElFinderClientIndex() {
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=2">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <title>YunPanel Files</title>
-  <link rel="stylesheet" href="${p.jqueryUiCssPath}">
-  <link rel="stylesheet" href="${p.elFinderCssPath}">
   <style>
     html,body,#elfinder{height:100%;margin:0}
     body{overflow:hidden;background:#fff}
@@ -38,9 +36,6 @@ export function renderElFinderClientIndex() {
 <body>
   <div id="elfinder" aria-label="Website file manager"></div>
   <div id="yunpanel-elfinder-error" role="alert"></div>
-  <script src="${p.jqueryPath}"></script>
-  <script src="${p.jqueryUiScriptPath}"></script>
-  <script src="${p.elFinderScriptPath}"></script>
   <script src="${p.gatewayBasePath}yunpanel-client.js"></script>
 </body>
 </html>
@@ -63,6 +58,38 @@ export function renderElFinderClientScript() {
       errorBox.textContent = message;
       errorBox.style.display = 'block';
     }
+  }
+
+  function loadStyle(href) {
+    return new Promise((resolve, reject) => {
+      const element = document.createElement('link');
+      element.rel = 'stylesheet';
+      element.href = href;
+      element.onload = () => resolve();
+      element.onerror = () => reject(new Error('asset failed'));
+      document.head.appendChild(element);
+    });
+  }
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const element = document.createElement('script');
+      element.src = src;
+      element.async = false;
+      element.onload = () => resolve();
+      element.onerror = () => reject(new Error('asset failed'));
+      document.head.appendChild(element);
+    });
+  }
+
+  async function loadApplicationAssets() {
+    await Promise.all([
+      loadStyle('${p.jqueryUiCssPath}'),
+      loadStyle('${p.elFinderCssPath}')
+    ]);
+    await loadScript('${p.jqueryPath}');
+    await loadScript('${p.jqueryUiScriptPath}');
+    await loadScript('${p.elFinderScriptPath}');
   }
 
   function start() {
@@ -123,8 +150,9 @@ export function renderElFinderClientScript() {
     credentials: 'same-origin',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ capability })
-  }).then((response) => {
+  }).then(async (response) => {
     if (response.status !== 204) throw new Error('handoff rejected');
+    await loadApplicationAssets();
     start();
   }).catch(() => {
     fail('Website Files session could not be started. Reopen it from YunPanel.');
