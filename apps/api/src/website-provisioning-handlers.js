@@ -353,6 +353,17 @@ export function createWebsiteProvisioningHandlers({
     return identityManager.inspect(identityIntent(intent));
   }
 
+  async function previewIdentityMigration({ intent } = {}) {
+    if (typeof identityManager.previewMigration !== 'function') {
+      throw new WebsiteProvisioningHandlerError(
+        'website_identity_migration_preview_unavailable',
+        'Website Unix identity migration preview is unavailable',
+        503,
+      );
+    }
+    return identityManager.previewMigration(identityIntent(intent));
+  }
+
   async function compensateIdentity({ intent, operationId, evidence } = {}) {
     return identityManager.compensate(identityIntent(intent), { operationId, evidence });
   }
@@ -538,6 +549,7 @@ export function createWebsiteProvisioningHandlers({
     unix_identity: Object.freeze({
       apply: applyIdentity,
       inspect: inspectIdentity,
+      previewMigration: previewIdentityMigration,
       compensate: compensateIdentity,
       inspectCompensation: inspectIdentityCompensation,
     }),
