@@ -218,6 +218,9 @@ test('elFinder installs only PHP runtime dependencies and validates the packaged
   }
   assert.ok(calls.some(([file, args]) => file === '/usr/bin/php'
     && args.join(' ') === '-l /usr/share/yunpanel/elfinder/connector.php'));
+  assert.ok(calls.some(([file, args]) => file === '/usr/bin/php'
+    && args[0] === '-r' && args[1].includes('posix_geteuid')
+    && args[1].includes('mb_strlen') && args[1].includes('ZipArchive')));
   assert.equal(calls.some(([file]) => file === '/usr/bin/systemctl'), false);
   await assert.rejects(manager.control('elfinder', 'restart'), { code: 'managed_service_not_controllable' });
 });
