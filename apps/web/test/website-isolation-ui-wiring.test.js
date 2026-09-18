@@ -19,6 +19,9 @@ test('site overview binds isolation audit and receipt migration controls to the 
   assert.match(panel, /audit\.migration\?\.applyAvailable/);
   assert.match(panel, /create_canonical_unix_identity/);
   assert.match(panel, /create_sftp_isolation/);
+  assert.match(panel, /create_php_fpm_pool/);
+  assert.match(panel, /adapter === 'php'/);
+  assert.match(panel, /PHP-FPM pool migration/);
   assert.match(panel, /adapter === 'sftp'/);
   assert.match(panel, /SFTP migration/);
   assert.match(panel, /preservedHomeData/);
