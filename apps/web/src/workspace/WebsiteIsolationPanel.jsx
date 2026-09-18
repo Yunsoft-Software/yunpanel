@@ -20,13 +20,23 @@ function migrationAction(audit) {
 }
 
 function identityMigrationOperation(operation) {
-  return Array.isArray(operation?.targets) && operation.targets.length === 0;
+  return operation?.adapter === 'identity'
+    || (operation?.adapter == null && Array.isArray(operation?.targets) && operation.targets.length === 0);
+}
+
+function sftpMigrationOperation(operation) {
+  return operation?.adapter === 'sftp';
 }
 
 function migrationResultText(operation) {
   if (operation?.result) {
     if (identityMigrationOperation(operation)) {
       return operation.result.createdUnixIdentity ? 'Unix identity oluşturuldu' : 'Unix identity doğrulandı';
+    }
+    if (sftpMigrationOperation(operation)) {
+      return operation.result.activatedSftpIsolation
+        ? `SFTP izolasyonu aktif · ${operation.result.authorizedKeyCount ?? 0} anahtar`
+        : 'SFTP izolasyonu doğrulandı';
     }
     return `${operation.result.createdWorkspaceDirectories ?? 0} dizin oluşturuldu`;
   }
@@ -35,6 +45,7 @@ function migrationResultText(operation) {
       if (operation.compensation.preservedHomeData) return 'User/group geri alındı; HOME verisi korundu';
       return operation.compensation.removedHome ? 'Unix identity ve boş HOME geri alındı' : 'Unix identity geri alındı';
     }
+    if (sftpMigrationOperation(operation)) return 'Receipt-owned SFTP izolasyonu geri alındı';
     return `${operation.compensation.removedWorkspaceDirectories ?? 0} dizin kaldırıldı`;
   }
   return '—';
@@ -102,6 +113,8 @@ export default function WebsiteIsolationPanel({ websiteId }) {
   const activeMigrationAction = migrationAction(audit);
   const identityApplyAvailable = audit?.migration?.applyAvailable
     && activeMigrationAction === 'create_canonical_unix_identity';
+  const sftpApplyAvailable = audit?.migration?.applyAvailable
+    && activeMigrationAction === 'create_sftp_isolation';
 
   return <Section
     title="Website izolasyon denetimi"
@@ -138,7 +151,7 @@ export default function WebsiteIsolationPanel({ websiteId }) {
       })}</tbody>
     </table></div>}
     {audit?.applicable && audit.findings?.length === 0 && <EmptyState icon="check" title="İzolasyon doğrulandı" detail="Canonical Website kimliği ve denetlenebilen host izolasyon adımları mevcut desired state ile uyumlu." />}
-    {audit?.migrationRequired && <div className="ws-section-body"><div className="ws-notice ws-notice-warn"><div><strong>{audit.migration?.applyAvailable ? (identityApplyAvailable ? 'Unix identity migration uygulanabilir' : 'Workspace migration uygulanabilir') : 'Bu drift için migration apply kapalı'}</strong><p>{audit.migration?.warning}</p>{audit.migration?.applyAvailable && <Button variant="primary" disabled={busy} onClick={() => setConfirmation({ kind: 'apply' })}>Exact değişiklikleri uygula</Button>}</div></div></div>}
+    {audit?.migrationRequired && <div className="ws-section-body"><div className="ws-notice ws-notice-warn"><div><strong>{audit.migration?.applyAvailable ? (identityApplyAvailable ? 'Unix identity migration uygulanabilir' : sftpApplyAvailable ? 'SFTP migration uygulanabilir' : 'Workspace migration uygulanabilir') : 'Bu drift için migration apply kapalı'}</strong><p>{audit.migration?.warning}</p>{audit.migration?.applyAvailable && <Button variant="primary" disabled={busy} onClick={() => setConfirmation({ kind: 'apply' })}>Exact değişiklikleri uygula</Button>}</div></div></div>}
     {audit?.migration?.changes?.some((change) => change.desired?.directories?.length > 0) && <div className="ws-table-scroll"><table className="ws-table">
       <thead><tr><th>Migration hedefi</th><th>Path</th><th>Mode</th><th>Ownership kapısı</th></tr></thead>
       <tbody>{audit.migration.changes.flatMap((change) => (change.desired?.directories ?? []).map((directory) => <tr key={`${change.action}:${directory.name}`}><td><code>{directory.name}</code></td><td><code>{directory.directory}</code></td><td><code>{directory.mode}</code></td><td><code>{change.ownership}</code></td></tr>))}</tbody>
@@ -149,10 +162,10 @@ export default function WebsiteIsolationPanel({ websiteId }) {
       <tbody>{[...migrations].reverse().map((operation) => {
         const presentation = isolationMigrationStatusPresentation(operation);
         const canRollback = ['succeeded', 'failed', 'compensation_failed'].includes(operation.status);
-        return <tr key={operation.id}><td><Badge state={presentation.badge}>{presentation.label}</Badge>{operation.error && <div className="ws-muted"><code>{operation.error}</code></div>}</td><td><code>{operation.id}</code><div className="ws-muted">{identityMigrationOperation(operation) ? 'Unix identity' : operation.targets?.map((target) => target.name).join(', ')}</div></td><td>{migrationResultText(operation)}</td><td>{canRollback ? <Button variant="danger" disabled={busy} onClick={() => setConfirmation({ kind: 'rollback', operation })}>Receipt rollback</Button> : '—'}</td></tr>;
+        return <tr key={operation.id}><td><Badge state={presentation.badge}>{presentation.label}</Badge>{operation.error && <div className="ws-muted"><code>{operation.error}</code></div>}</td><td><code>{operation.id}</code><div className="ws-muted">{identityMigrationOperation(operation) ? 'Unix identity' : sftpMigrationOperation(operation) ? 'SFTP isolation' : operation.targets?.map((target) => target.name).join(', ')}</div></td><td>{migrationResultText(operation)}</td><td>{canRollback ? <Button variant="danger" disabled={busy} onClick={() => setConfirmation({ kind: 'rollback', operation })}>Receipt rollback</Button> : '—'}</td></tr>;
       })}</tbody>
     </table></div>}
-    {confirmation?.kind === 'apply' && audit?.migration?.applyAvailable && <ConfirmDialog title={identityApplyAvailable ? 'Unix identity izolasyon migration’ını uygula' : 'Workspace izolasyon migration’ını uygula'} message={identityApplyAvailable ? 'Yalnız preview’da all-missing olduğu doğrulanan canonical Unix user/group/HOME durable receipt ile oluşturulacak. Önceden var olan identity/HOME state değiştirilmez; rollback HOME içeriğini recursive silmez.' : 'Yalnız preview’da listelenen eksik tmp/log direct-child dizinleri operation receipt ile oluşturulacak. Unix hesabı, mevcut veri, runtime ve SFTP değiştirilmeyecek.'} confirmation={audit.migration.confirmation} busy={busy} error={migrationError} onCancel={() => { setConfirmation(null); setMigrationError(null); }} onConfirm={() => mutate((signal) => applyWebsiteIsolationMigration(websiteId, audit.migration, { signal }))} confirmLabel="Migration’ı uygula" />}
-    {confirmation?.kind === 'rollback' && <ConfirmDialog title={identityMigrationOperation(confirmation.operation) ? 'Unix identity migration receipt’ini geri al' : 'Workspace migration receipt’ini geri al'} message={identityMigrationOperation(confirmation.operation) ? 'Yalnız bu operation’ın oluşturduğu canonical user/group geri alınır. HOME boşsa kaldırılır; veri içeriyorsa recursive silinmeden korunur.' : 'Yalnız bu operation’ın oluşturduğu ve hâlâ boş olan dizinler kaldırılacak. Veri içeren veya önceden var olan dizinler korunur.'} confirmation={websiteIsolationRollbackConfirmation(confirmation.operation)} busy={busy} error={migrationError} onCancel={() => { setConfirmation(null); setMigrationError(null); }} onConfirm={() => mutate((signal) => rollbackWebsiteIsolationMigration(websiteId, confirmation.operation, { signal }))} confirmLabel="Receipt rollback" />}
+    {confirmation?.kind === 'apply' && audit?.migration?.applyAvailable && <ConfirmDialog title={identityApplyAvailable ? 'Unix identity izolasyon migration’ını uygula' : sftpApplyAvailable ? 'SFTP izolasyon migration’ını uygula' : 'Workspace izolasyon migration’ını uygula'} message={identityApplyAvailable ? 'Yalnız preview’da all-missing olduğu doğrulanan canonical Unix user/group/HOME durable receipt ile oluşturulacak. Önceden var olan identity/HOME state değiştirilmez; rollback HOME içeriğini recursive silmez.' : sftpApplyAvailable ? 'Yalnız preview’da all-missing olduğu doğrulanan site-specific SFTP chroot/mount/config/unit state durable receipt ile oluşturulacak. Foreign artifact varsa apply bloklanır; rollback yalnız receipt-owned artifact ve boş operation-created dizinleri kaldırır.' : 'Yalnız preview’da listelenen eksik tmp/log direct-child dizinleri operation receipt ile oluşturulacak. Unix hesabı, mevcut veri, runtime ve SFTP değiştirilmeyecek.'} confirmation={audit.migration.confirmation} busy={busy} error={migrationError} onCancel={() => { setConfirmation(null); setMigrationError(null); }} onConfirm={() => mutate((signal) => applyWebsiteIsolationMigration(websiteId, audit.migration, { signal }))} confirmLabel="Migration’ı uygula" />}
+    {confirmation?.kind === 'rollback' && <ConfirmDialog title={identityMigrationOperation(confirmation.operation) ? 'Unix identity migration receipt’ini geri al' : sftpMigrationOperation(confirmation.operation) ? 'SFTP migration receipt’ini geri al' : 'Workspace migration receipt’ini geri al'} message={identityMigrationOperation(confirmation.operation) ? 'Yalnız bu operation’ın oluşturduğu canonical user/group geri alınır. HOME boşsa kaldırılır; veri içeriyorsa recursive silinmeden korunur.' : sftpMigrationOperation(confirmation.operation) ? 'Yalnız receipt-owned SSH config, systemd mount unit ve operation-created boş chroot/mount dizinleri geri alınır. Veri içeren dizinler korunur; key registry silinmez.' : 'Yalnız bu operation’ın oluşturduğu ve hâlâ boş olan dizinler kaldırılacak. Veri içeren veya önceden var olan dizinler korunur.'} confirmation={websiteIsolationRollbackConfirmation(confirmation.operation)} busy={busy} error={migrationError} onCancel={() => { setConfirmation(null); setMigrationError(null); }} onConfirm={() => mutate((signal) => rollbackWebsiteIsolationMigration(websiteId, confirmation.operation, { signal }))} confirmLabel="Receipt rollback" />}
   </Section>;
 }
