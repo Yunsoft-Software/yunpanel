@@ -78,6 +78,7 @@ function fixture({
   domains = null,
   currentZone = null,
   provisioningOperations = null,
+  retentionPolicy = null,
   secretError = null,
   zoneError = null,
 } = {}) {
@@ -86,14 +87,19 @@ function fixture({
   const allDomains = domains ?? [currentDomain];
   const service = createDnsZoneRetirementService({
     localServerId,
+    retentionPolicy,
     domainRegistry: {
       async getDomain(id) { return id === currentDomain.id ? currentDomain : null; },
       async listDomains() { return allDomains; },
     },
     ...(provisioningOperations === null ? {} : {
       provisioningRegistry: {
-        async listForWebsite(id) {
-          assert.equal(id, currentDomain.websiteId);
+        async listForDnsZone(scope) {
+          assert.deepEqual(scope, {
+            serverId: currentDomain.serverId,
+            webDomainId: currentDomain.id,
+            zoneName: currentDomain.primaryDomain,
+          });
           return provisioningOperations;
         },
       },
@@ -263,6 +269,372 @@ test('durable Website provisioning created=true evidence proves zone origin but 
   assert.equal(preview.blockers.includes('dns_zone_delete_ownership_evidence_required'), false);
   assert.equal(preview.retirementPlanReady, false);
   assert.equal(JSON.stringify(preview).includes('203.0.113.10'), false);
+});
+
+test('configured snapshot retention unlocks typed zone retirement after Website binding is removed', async () => {
+  const root = domain({ websiteId: null });
+  const intent = {
+    adapter: 'powerdns-zone',
+    serverId: localServerId,
+    webDomainId: rootId,
+    zoneName: 'example.com',
+    templateVersion: 7,
+    templateSnapshot: [
+      { key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+      { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+    ],
+    dnsIdentityRevision: 2,
+    secondaryDns: [],
+    serial: 2026091801,
+    dnssec: false,
+    records: [
+      { key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+      { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+    ],
+  };
+  const evidence = websiteDnsZoneProvisioningInternals.publicEvidence(
+    websiteDnsZoneProvisioningInternals.normalizedIntent({ intent }),
+    {
+      kind: 'Primary',
+      serial: 2026091801,
+      dnssec: false,
+      managedRrsetCount: 2,
+      manualRrsetCount: 0,
+      created: true,
+      primaryKindChanged: false,
+      changedRrsetCount: 2,
+    },
+  );
+  const operationId = '72345678-1234-4234-8234-123456789012';
+  const provisioningOperations = [{
+    operationId,
+    websiteId,
+    updatedAt: '2026-09-18T16:00:00.000Z',
+    steps: [{
+      id: 'dns_zone',
+      kind: 'dns_zone',
+      state: 'succeeded',
+      intent,
+      evidence,
+      compensation: { state: 'pending', evidence: null, error: null },
+    }],
+  }];
+
+  const preview = await fixture({
+    currentDomain: root,
+    domains: [root],
+    currentZone: zone({ rrsets: [managedRrset()] }),
+    provisioningOperations,
+    retentionPolicy: { snapshotRetentionDays: 30 },
+  }).service.preview({ domainId: rootId });
+
+  assert.equal(preview.zone.ownershipOrigin.status, 'provisioning_created');
+  assert.equal(preview.zone.ownershipOrigin.operationId, operationId);
+  assert.deepEqual(preview.retention, { configured: true, snapshotRetentionDays: 30 });
+  assert.deepEqual(preview.blockers, []);
+  assert.equal(preview.retirementPlanReady, true);
+  assert.match(preview.confirmation, new RegExp(
+    `^retire-authoritative-zone:${rootId}:4:[a-f0-9]{64}:[a-f0-9]{64}:30:[a-f0-9]{64}import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  DnsZoneRetirementError,
+  createDnsZoneRetirementService,
+  dnsZoneRetirementInternals,
+} from '../src/dns-zone-retirement.js';
+import { powerDnsZoneManagerInternals } from '@yunpanel/host-runtime/powerdns-zone-manager';
+import { websiteDnsZoneProvisioningInternals } from '../src/website-dns-zone-provisioning-handler.js';
+
+const rootId = '12345678-1234-4234-8234-123456789012';
+const childId = '22345678-1234-4234-8234-123456789012';
+const websiteId = '32345678-1234-4234-8234-123456789012';
+const localServerId = '42345678-1234-4234-8234-123456789012';
+const certificateId = 'cert-1';
+const apiKey = 'a'.repeat(43);
+
+function domain(overrides = {}) {
+  return {
+    id: rootId,
+    serverId: localServerId,
+    websiteId: null,
+    primaryDomain: 'example.com',
+    parentDomainId: null,
+    aliases: ['www.example.com'],
+    certificateId: null,
+    desiredRevision: 4,
+    stagedRevision: 0,
+    appliedRevision: 0,
+    appliedPrimaryDomain: null,
+    state: 'draft',
+    ...overrides,
+  };
+}
+
+function managedRrset({
+  name = 'example.com.',
+  type = 'A',
+  content = '203.0.113.10',
+  source = 'template',
+  key = 'apex-a',
+} = {}) {
+  return {
+    name,
+    type,
+    ttl: 300,
+    records: [{ content, disabled: false }],
+    comments: [powerDnsZoneManagerInternals.commentFor({
+      source,
+      key,
+      templateVersion: 7,
+    })],
+  };
+}
+
+function manualRrset() {
+  return {
+    name: 'manual.example.com.',
+    type: 'TXT',
+    ttl: 300,
+    records: [{ content: '"keep-me"', disabled: false }],
+    comments: [],
+  };
+}
+
+function zone({ dnssec = false, rrsets = [managedRrset()] } = {}) {
+  return {
+    zoneName: 'example.com',
+    id: 'example.com.',
+    kind: 'Primary',
+    dnssec,
+    rrsets,
+  };
+}
+
+function fixture({
+  currentDomain = domain(),
+  domains = null,
+  currentZone = null,
+  provisioningOperations = null,
+  retentionPolicy = null,
+  secretError = null,
+  zoneError = null,
+} = {}) {
+  let secretCalls = 0;
+  let zoneCalls = 0;
+  const allDomains = domains ?? [currentDomain];
+  const service = createDnsZoneRetirementService({
+    localServerId,
+    retentionPolicy,
+    domainRegistry: {
+      async getDomain(id) { return id === currentDomain.id ? currentDomain : null; },
+      async listDomains() { return allDomains; },
+    },
+    ...(provisioningOperations === null ? {} : {
+      provisioningRegistry: {
+        async listForDnsZone(scope) {
+          assert.deepEqual(scope, {
+            serverId: currentDomain.serverId,
+            webDomainId: currentDomain.id,
+            zoneName: currentDomain.primaryDomain,
+          });
+          return provisioningOperations;
+        },
+      },
+    }),
+    powerDnsSecretRegistry: {
+      async materializeForServer(serverId) {
+        secretCalls += 1;
+        assert.equal(serverId, localServerId);
+        if (secretError) throw secretError;
+        return { serverId, apiKey };
+      },
+    },
+    zoneManager: {
+      async getZone(zoneName, key) {
+        zoneCalls += 1;
+        assert.equal(zoneName, currentDomain.primaryDomain);
+        assert.equal(key, apiKey);
+        if (zoneError) throw zoneError;
+        return currentZone;
+      },
+    },
+  });
+  return {
+    service,
+    calls() { return { secretCalls, zoneCalls }; },
+  };
+}
+
+test('root Domain retirement impact binds hierarchy, routing, certificate and exact live zone digest', async () => {
+  const root = domain({
+    websiteId,
+    certificateId,
+    stagedRevision: 4,
+    appliedRevision: 4,
+    appliedPrimaryDomain: 'example.com',
+    state: 'active',
+  });
+  const child = domain({
+    id: childId,
+    websiteId: null,
+    primaryDomain: 'api.example.com',
+    parentDomainId: rootId,
+    aliases: [],
+    certificateId: null,
+    desiredRevision: 2,
+    stagedRevision: 0,
+    appliedRevision: 0,
+    state: 'draft',
+  });
+  const currentZone = zone({
+    dnssec: true,
+    rrsets: [managedRrset(), manualRrset()],
+  });
+  const fx = fixture({ currentDomain: root, domains: [root, child], currentZone });
+
+  const preview = await fx.service.preview({ domainId: rootId });
+
+  assert.equal(preview.version, 1);
+  assert.equal(preview.operation, 'dns_zone_retirement_impact');
+  assert.equal(preview.sideEffects, false);
+  assert.equal(preview.confirmation, null);
+  assert.match(preview.previewDigest, /^[a-f0-9]{64}$/);
+  assert.equal(preview.hierarchy.descendantCount, 1);
+  assert.deepEqual(preview.hierarchy.descendants, [{
+    id: childId,
+    primaryDomain: 'api.example.com',
+    parentDomainId: rootId,
+    websiteId: null,
+  }]);
+  assert.equal(preview.routing.active, true);
+  assert.equal(preview.zone.exists, true);
+  assert.match(preview.zone.snapshotDigest, /^[a-f0-9]{64}$/);
+  assert.equal(preview.zone.rrsetCount, 2);
+  assert.equal(preview.zone.managedRrsetCount, 1);
+  assert.equal(preview.zone.manualRrsetCount, 1);
+  assert.equal(preview.zone.ownership, 'mixed_unproven');
+  assert.deepEqual(preview.blockers, [
+    'domain_descendants_present',
+    'domain_website_binding_present',
+    'domain_certificate_present',
+    'domain_routing_active',
+    'dns_zone_delete_ownership_evidence_required',
+    'dns_zone_manual_rrsets_present',
+    'dns_zone_dnssec_retirement_required',
+  ]);
+  assert.equal(preview.retirementPlanReady, false);
+  assert.deepEqual(fx.calls(), { secretCalls: 1, zoneCalls: 1 });
+});
+
+test('all-managed RRsets still do not prove operation-created whole-zone ownership', async () => {
+  const currentZone = zone({ rrsets: [managedRrset()] });
+  const fx = fixture({ currentZone });
+  const preview = await fx.service.preview({ domainId: rootId });
+
+  assert.equal(preview.zone.ownership, 'managed_rrsets_unproven');
+  assert.equal(preview.zone.managedRrsetCount, 1);
+  assert.equal(preview.zone.manualRrsetCount, 0);
+  assert.deepEqual(preview.blockers, ['dns_zone_delete_ownership_evidence_required']);
+  assert.equal(preview.retirementPlanReady, false);
+});
+
+test('durable Website provisioning created=true evidence proves zone origin but retention still blocks deletion', async () => {
+  const root = domain({ websiteId });
+  const intent = {
+    adapter: 'powerdns-zone',
+    serverId: localServerId,
+    webDomainId: rootId,
+    zoneName: 'example.com',
+    templateVersion: 7,
+    templateSnapshot: [
+      { key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+      { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+    ],
+    dnsIdentityRevision: 2,
+    secondaryDns: [],
+    serial: 2026091801,
+    dnssec: false,
+    records: [
+      { key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+      { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+    ],
+  };
+  const evidence = websiteDnsZoneProvisioningInternals.publicEvidence(
+    websiteDnsZoneProvisioningInternals.normalizedIntent({ intent }),
+    {
+      kind: 'Primary',
+      serial: 2026091801,
+      dnssec: false,
+      managedRrsetCount: 2,
+      manualRrsetCount: 0,
+      created: true,
+      primaryKindChanged: false,
+      changedRrsetCount: 2,
+    },
+  );
+  const operationId = '52345678-1234-4234-8234-123456789012';
+  const provisioningOperations = [{
+    operationId,
+    websiteId,
+    updatedAt: '2026-09-18T16:00:00.000Z',
+    steps: [{
+      id: 'dns_zone',
+      kind: 'dns_zone',
+      state: 'succeeded',
+      intent,
+      evidence,
+      compensation: { state: 'pending', evidence: null, error: null },
+    }],
+  }];
+  const fx = fixture({
+    currentDomain: root,
+    domains: [root],
+    currentZone: zone({ rrsets: [managedRrset()] }),
+    provisioningOperations,
+  });
+
+  const preview = await fx.service.preview({ domainId: rootId });
+
+  assert.equal(preview.zone.ownership, 'provisioning_created');
+  assert.equal(preview.zone.ownershipOrigin.status, 'provisioning_created');
+  assert.equal(preview.zone.ownershipOrigin.operationId, operationId);
+  assert.match(preview.zone.ownershipOrigin.evidenceDigest, /^[a-f0-9]{64}$/);
+  assert.deepEqual(preview.blockers, [
+    'domain_website_binding_present',
+    'dns_zone_delete_retention_policy_required',
+  ]);
+  assert.equal(preview.blockers.includes('dns_zone_delete_ownership_evidence_required'), false);
+  assert.equal(preview.retirementPlanReady, false);
+  assert.equal(JSON.stringify(preview).includes('203.0.113.10'), false);
+});
+
+,
+  ));
+  assert.equal(preview.sideEffects, false);
+
+  const changedPolicy = await fixture({
+    currentDomain: root,
+    domains: [root],
+    currentZone: zone({ rrsets: [managedRrset()] }),
+    provisioningOperations,
+    retentionPolicy: { snapshotRetentionDays: 31 },
+  }).service.preview({ domainId: rootId });
+  assert.notEqual(changedPolicy.previewDigest, preview.previewDigest);
+  assert.notEqual(changedPolicy.confirmation, preview.confirmation);
+});
+
+test('invalid DNS zone retention policy is rejected at service construction', () => {
+  for (const retentionPolicy of [
+    { snapshotRetentionDays: 0 },
+    { snapshotRetentionDays: 3651 },
+    { snapshotRetentionDays: '30' },
+    { snapshotRetentionDays: 30, extra: true },
+  ]) {
+    assert.throws(
+      () => fixture({ retentionPolicy }),
+      (error) => error instanceof DnsZoneRetirementError
+        && error.code === 'dns_zone_retirement_policy_invalid',
+    );
+  }
 });
 
 test('compensated or mismatched provisioning evidence never proves current zone ownership', async () => {
