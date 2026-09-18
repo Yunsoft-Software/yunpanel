@@ -190,6 +190,42 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
     return inspected;
   }
 
+  async function failFromObservedState(operation, fallbackFailure) {
+    if (operation.sourceZoneSnapshot === null || operation.appliedZoneSnapshot === null
+      || operation.sourceZoneDigest === null || operation.appliedZoneDigest === null) {
+      return dnsZoneReapplyOperationPublicView(await registry.fail(operation.id, {
+        code: 'dns_zone_reapply_rollback_evidence_missing',
+        message: 'DNS zone reapply operation predates exact before/after rollback evidence and cannot be replayed safely',
+      }));
+    }
+
+    let rollbackInspection;
+    try { rollbackInspection = await inspectRollback(operation); }
+    catch (error) {
+      if (Number(error?.status) !== 409) {
+        throw new DnsZoneReapplyRuntimeError(
+          'dns_zone_reapply_recovery_inspection_unavailable',
+          'DNS zone reapply state is uncertain and rollback ownership cannot be inspected; operation remains applying',
+          503,
+        );
+      }
+      return dnsZoneReapplyOperationPublicView(await registry.fail(
+        operation.id,
+        safeFailure(error, 'dns_zone_reapply_rollback_drift', 'DNS zone state drifted outside the journaled reapply operation'),
+      ));
+    }
+
+    const failure = rollbackInspection.satisfied
+      ? fallbackFailure
+      : rollbackInspection.repairCandidate
+        ? Object.freeze({
+          code: 'dns_zone_reapply_partial_apply_detected',
+          message: 'DNS zone contains an operation-owned mixed before/after state; exact rollback is available',
+        })
+        : fallbackFailure;
+    return dnsZoneReapplyOperationPublicView(await registry.fail(operation.id, failure));
+  }
+
   async function reconcileInterruptedRollback(operation) {
     let inspected;
     try { inspected = await inspectRollback(operation); }
@@ -254,17 +290,11 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
     }
 
     if (!currentPreviewMatches(operation, inspection.current)) {
-      const failure = operation.sourceZoneDigest === null || operation.appliedZoneDigest === null
-        ? Object.freeze({
-          code: 'dns_zone_reapply_rollback_evidence_missing',
-          message: 'DNS zone reapply operation predates exact before/after rollback evidence and cannot be replayed safely',
-        })
-        : Object.freeze({
+      try {
+        return await failFromObservedState(operation, Object.freeze({
           code: 'dns_zone_reapply_preview_stale',
           message: 'DNS zone, Domain, Zone Template or server DNS identity changed after the operation was journaled',
-        });
-      try {
-        return dnsZoneReapplyOperationPublicView(await registry.fail(operation.id, failure));
+        }));
       } catch (error) { throw mapped(error); }
     }
 
@@ -290,9 +320,8 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
         catch (error) { throw mapped(error); }
       }
       const failure = safeFailure(applyError);
-      try {
-        return dnsZoneReapplyOperationPublicView(await registry.fail(operation.id, failure));
-      } catch (error) { throw mapped(error); }
+      try { return await failFromObservedState(operation, failure); }
+      catch (error) { throw mapped(error); }
     }
 
     let evidence;
@@ -309,7 +338,7 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
       }
       if (after.satisfied) return completeFromInspection(operation, after.current);
       const failure = safeFailure(error, 'dns_zone_reapply_evidence_invalid', 'DNS provider evidence is invalid');
-      return dnsZoneReapplyOperationPublicView(await registry.fail(operation.id, failure));
+      return failFromObservedState(operation, failure);
     }
 
     let afterApply;
@@ -322,11 +351,12 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
       );
     }
     if (!afterApply.satisfied) {
-      throw new DnsZoneReapplyRuntimeError(
-        'dns_zone_reapply_postcondition_unverified',
-        'DNS provider returned success but the exact journaled after-state is not proven; operation remains applying',
-        503,
-      );
+      try {
+        return await failFromObservedState(operation, Object.freeze({
+          code: 'dns_zone_reapply_postcondition_unverified',
+          message: 'DNS provider returned success but the exact journaled after-state is not proven',
+        }));
+      } catch (error) { throw mapped(error); }
     }
     try {
       return dnsZoneReapplyOperationPublicView(await registry.succeed(operation.id, evidence));
@@ -377,7 +407,7 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
       await reconcileInterruptedRollback(operation);
       operation = await registry.get(operation.id);
     }
-    if (!['succeeded', 'rollback_failed', 'rolled_back'].includes(operation.status)) {
+    if (!['succeeded', 'failed', 'rollback_failed', 'rolled_back'].includes(operation.status)) {
       throw new DnsZoneReapplyRuntimeError(
         'dns_zone_reapply_rollback_not_available',
         'DNS zone reapply operation is not eligible for rollback',
