@@ -60,6 +60,8 @@ function currentPreviewMatches(operation, preview) {
     && preview.dnsIdentityRevision === operation.dnsIdentityRevision
     && operation.mailStateDigest !== null
     && preview.mailStateDigest === operation.mailStateDigest
+    && operation.sourceZoneDigest !== null
+    && preview.sourceZoneDigest === operation.sourceZoneDigest
     && preview.observedSerial === operation.observedSerial
     && preview.nextSerial === operation.targetSerial
     && preview.previewDigest === operation.previewDigest
@@ -156,10 +158,15 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
     }
 
     if (!currentPreviewMatches(operation, inspection.current)) {
-      const failure = Object.freeze({
-        code: 'dns_zone_reapply_preview_stale',
-        message: 'DNS zone, Domain, Zone Template or server DNS identity changed after the operation was journaled',
-      });
+      const failure = operation.sourceZoneDigest === null
+        ? Object.freeze({
+          code: 'dns_zone_reapply_source_evidence_missing',
+          message: 'DNS zone reapply operation predates exact source-zone evidence and cannot be replayed safely',
+        })
+        : Object.freeze({
+          code: 'dns_zone_reapply_preview_stale',
+          message: 'DNS zone, Domain, Zone Template or server DNS identity changed after the operation was journaled',
+        });
       try {
         return dnsZoneReapplyOperationPublicView(await registry.fail(operation.id, failure));
       } catch (error) { throw mapped(error); }
