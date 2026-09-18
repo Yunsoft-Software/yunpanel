@@ -494,7 +494,7 @@ export default function SiteResourcesPanel({ domain, website, application, serve
                 >Geri yükle</Button>
                 <Button
                   variant="danger"
-                  disabled={busy}
+                  disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
                   onClick={() => previewDatabaseDrop(binding)}
                 >Silme önizleme</Button>
                 {credential && <Button
@@ -598,20 +598,44 @@ export default function SiteResourcesPanel({ domain, website, application, serve
       onConfirm={restoreDatabaseBackup}
       confirmLabel="Yedeği geri yükle"
     />}
-    {dropImpact && <Modal title="Database silme etkisi" onClose={() => setDropImpact(null)}>
+    {dropImpact && <Modal title="Database silme etkisi" onClose={() => { if (!busy) setDropImpact(null); }}>
       <KeyValues items={[
         ['Schema', dropImpact.databaseName],
         ['Canlı schema', dropImpact.exists ? 'Mevcut' : 'Bulunamadı'],
-        ['Website binding', `${dropImpact.binding.id} · rev ${dropImpact.binding.revision}`],
+        ['Website binding', `${dropImpact.bindingId} · rev ${dropImpact.bindingRevision}`],
         ['Credential', dropImpact.credential ? `${dropImpact.credential.username} · rev ${dropImpact.credential.revision}` : 'Yok'],
-        ['Son doğrulanmış backup', dropImpact.latestBackup ? `${dropImpact.latestBackup.backupId} · ${formatDatabaseBytes(dropImpact.latestBackup.dumpBytes)}` : 'Yok'],
+        ['Current binding backup', dropImpact.backup ? `${dropImpact.backup.backupId} · ${formatDatabaseBytes(dropImpact.backup.dumpBytes)}` : 'Yok'],
         ['Aktif DB işi', dropImpact.activeJobs.length],
         ['Preview digest', dropImpact.previewDigest],
       ]} />
-      <div className="ws-notice ws-notice-warn" role="status"><div><strong>Schema drop kapalı</strong><p>Bu salt-okunur preview hiçbir kaynağı silmez. Aşağıdaki blocker’lar çözülmeden delete işi açılamaz.</p></div></div>
-      <ul>{dropImpact.blockers.map((code) => <li key={code}><strong>{code}</strong>: {DROP_BLOCKER_LABELS[code]}</li>)}</ul>
+      {dropImpact.readyToDelete
+        ? <div className="ws-notice" role="status"><div><strong>Silme önkoşulları hazır</strong><p>Credential kaldırılmış ve current binding revizyonuna ait doğrulanmış backup mevcut. DROP job sırasında binding korunur; binding yalnız başarılı job ve canlı schema yokluğu doğrulandıktan sonra finalize edilir.</p></div></div>
+        : <div className="ws-notice ws-notice-warn" role="status"><div><strong>Silme engelli</strong><p>Bu preview hiçbir kaynağı silmez. Aşağıdaki blocker’lar çözülmeden DROP job oluşturulmaz.</p></div></div>}
+      {dropImpact.blockers.length > 0 && <ul>{dropImpact.blockers.map((code) => <li key={code}><strong>{code}</strong>: {DELETE_BLOCKER_LABELS[code]}</li>)}</ul>}
       {dropImpact.activeJobs.length > 0 && <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>İş</th><th>Operation</th><th>Durum</th></tr></thead><tbody>{dropImpact.activeJobs.map((job) => <tr key={job.id}><td><code>{job.id}</code></td><td>{job.operation}</td><td><Badge state={job.status}>{job.status}</Badge></td></tr>)}</tbody></table></div>}
-      <footer className="ws-modal-footer"><Button onClick={() => setDropImpact(null)}>Kapat</Button></footer>
+      <footer className="ws-modal-footer">
+        <Button disabled={busy} onClick={() => setDropImpact(null)}>Kapat</Button>
+        {dropImpact.readyToDelete && <Button
+          variant="danger"
+          disabled={busy || !canManage}
+          onClick={() => {
+            setError(null);
+            setDeleteTarget({ ...dropImpact, deleteJob: null });
+            setDropImpact(null);
+          }}
+        >Silme onayına geç</Button>}
+      </footer>
     </Modal>}
+    {deleteTarget && <ConfirmDialog
+      key={`${deleteTarget.bindingId}:${deleteTarget.bindingRevision}:${deleteTarget.deleteJob?.id ?? 'queue'}`}
+      title="Database kalıcı olarak silinsin mi?"
+      message={`${deleteTarget.databaseName} schema’sı current binding revizyonuna ait doğrulanmış ${deleteTarget.backup?.backupId ?? 'backup'} yedeği fence’iyle DROP edilecek. Binding DROP sırasında korunur ve yalnız successful job + canlı schema yokluğu kanıtından sonra kaldırılır. Bu işlem çalışan uygulamanın database erişimini kalıcı olarak keser.`}
+      confirmation={deleteTarget.databaseName}
+      busy={busy}
+      error={error}
+      onCancel={() => { if (!busy) { setDeleteTarget(null); setError(null); } }}
+      onConfirm={deleteDatabaseLifecycle}
+      confirmLabel={deleteTarget.deleteJob?.status === 'succeeded' ? 'Binding finalization’ı yeniden dene' : 'Database’i sil'}
+    />}
   </>;
 }
