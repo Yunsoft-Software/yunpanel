@@ -52,6 +52,12 @@ function aclHas(output, entry) {
   return String(output ?? '').split(/\r?\n/).map((line) => line.trim()).includes(entry);
 }
 
+function releaseIdFromTarget(value) {
+  if (typeof value !== 'string') return null;
+  const match = value.match(/^releases\/([0-9a-f-]{36})$/i);
+  return match && UUID_PATTERN.test(match[1]) ? match[1].toLowerCase() : null;
+}
+
 export function createStaticPublishIsolationManager({
   identityManager = createWebsiteIdentityPathManager(),
   run = (file, args, options = {}) => execFileAsync(file, args, {
@@ -266,7 +272,9 @@ export function createStaticPublishIsolationManager({
       if (!missing(error)) {
         current = Object.freeze({
           present: false,
-          error: typeof error?.code === 'string' ? error.code : 'static_publish_current_inspection_failed',
+          error: error?.code === 'EINVAL'
+            ? 'static_publish_current_invalid'
+            : 'static_publish_current_inspection_failed',
         });
       }
     }
@@ -420,6 +428,7 @@ export function createStaticPublishIsolationManager({
 export const staticPublishIsolationInternals = Object.freeze({
   normalizeIntent,
   aclHas,
+  releaseIdFromTarget,
   modeOf,
   aclPackage: ACL_PACKAGE,
 });
