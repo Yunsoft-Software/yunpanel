@@ -2,7 +2,7 @@
 
 Bu belge YunPanel Website provisioning akışının restart, retry ve compensation davranışını tanımlar. Ürün hedefleri `docs/architecture.md`, kalan implementasyon işleri `plan.md`, gerçek Ubuntu/package/browser kabul kapıları `todo.md` içindedir.
 
-## Kaynakta mevcut durum — 2026-09-14
+## Kaynakta mevcut durum — 2026-09-18
 
 Mevcut durable provisioning akışı aşağıdaki recovery parçalarına sahiptir:
 
@@ -95,6 +95,39 @@ Pre-existing local PowerDNS zone re-apply, Website provisioning compensation'ın
 - Eski journal sürümlerinde bulunmayan before/after evidence migrate edilirken uydurulmaz; eksik evidence otomatik replay veya exact rollback açmaz.
 
 Gerçek PowerDNS kill/timeout/mixed-state ve manual RRset kabulü `todo.md` T-DNS altında açık kalır.
+
+## Authoritative DNS zone retirement recovery
+
+Zone retirement, zone re-apply rollback'ından ayrı bir destructive lifecycle'dır.
+
+- Public impact yalnız exact zone snapshot digest/kind/DNSSEC/RRset ownership özetini taşır; record content public response'a çıkmaz.
+- Whole-zone delete ownership yalnız durable provisioning history'deki exact `dns_zone` step + `created=true` evidence'ından türetilir. RRset managed comments tek başına delete ownership değildir.
+- Child Domain, Website/certificate/routing bağı, local mail-domain, active Domain job, manual RRset, DNSSEC ve ownership belirsizliği retirement blocker'dır.
+- Snapshot retention policy explicit olmak zorundadır; default retention uydurulmaz.
+- Destructive start öncesi preview digest + typed confirmation + Domain revision + live zone digest yeniden doğrulanır ve full snapshot root-private durable journal'a yazılır.
+- Host DELETE exact retained snapshot eşleşmeden çalışmaz. Zone drift, foreign/manual RRset veya DNSSEC enabled state fail-closed kalır.
+- `deleting` restart'ta mutation replay edilmez. Zone absent ise journal yalnız evidence ile `deleted` kapanır; exact snapshot hâlâ mevcutsa explicit retry gerekir; üçüncü state drift'te operation fail olur.
+- Snapshot, deletion tamamlandıktan sonra policy-bound `retainUntil` deadline'ına kadar private operation evidence olarak tutulur.
+- Standalone public start/retry delete route'u yoktur. Bu runtime yalnız üst Domain/Website reverse-dependency delete orchestrator'ı tarafından çağrılmalıdır.
+
+Gerçek PowerDNS DELETE lost-ack, process-kill, snapshot tamper ve retention kabulü `todo.md` T-DNS altında açık kalır.
+
+## Domain suspend/resume recovery
+
+Domain-level suspend, Website delete/suspend'tan ayrı bir traffic-control lifecycle'dır.
+
+- Preview active desired/staged/applied revision, exact staged Nginx checksum, active Domain jobs ve live Nginx deactivation state'ini tek digest'e bağlar.
+- Suspend mutation öncesi durable operation journal'a yazılır. Nginx activation compensation receipt'i yeniden kullanılmaz; ayrı deactivation receipt exact active bytes/checksum'u mutation öncesi pinler.
+- Suspend Nginx vhost'u kaldırır, `nginx -t` + reload doğrular ve ancak host postcondition kanıtlandıktan sonra Domain registry `suspended` state'ine geçirilir.
+- Host mutation başarılı fakat control-plane commit başarısızsa exact retained vhost restore edilerek active state'e compensation denenir. Compensation belirsizse ikinci host mutation kör replay edilmez.
+- `suspending` restart'ta vhost hâlâ active ise automatic deactivation yapılmaz; typed retry gerekir. Vhost operation-owned receipt ile zaten deactivated ise yalnız Domain state reconcile edilir.
+- Resume aynı suspension operation'ı içinde yürür. Exact deactivation receipt'ten vhost geri yüklenir, configtest/reload doğrulanır, sonra Domain active state'e geçirilir.
+- Resume control-plane commit başarısızsa exact vhost yeniden deactivate edilerek suspended state korunur.
+- `resuming` restart'ta host hâlâ suspended ise automatic restore yapılmaz; typed resume retry gerekir. Host exact restored ise yalnız control-plane resume state'i reconcile edilir.
+- Suspended Domain generic update/stage/activate/certificate/failure yollarından değiştirilemez. Resume ownership operation ID + exact revision/checksum ile korunur.
+- Bu lifecycle yalnız Domain public web route'unu suspend eder; Website process/runtime'ının tamamını durdurduğunu iddia etmez.
+
+Gerçek Nginx configtest/reload/process-kill/restart kabulü `todo.md` T-PROVISIONING altında açık kalır.
 
 ## Retry ve continue kuralı
 
