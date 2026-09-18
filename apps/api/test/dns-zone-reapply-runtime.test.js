@@ -115,6 +115,25 @@ function rollbackService(overrides = {}) {
   };
 }
 
+function sourceStateInspection() {
+  return {
+    satisfied: true,
+    repairCandidate: true,
+    zoneName: 'example.com',
+    sourceZoneDigest,
+    appliedZoneDigest,
+    pendingRrsetCount: 0,
+    kindChangeRequired: false,
+  };
+}
+
+function throwRollbackDrift() {
+  const error = new Error('foreign DNS state drift');
+  error.code = 'powerdns_zone_restore_drift';
+  error.status = 409;
+  throw error;
+}
+
 async function succeededOperation(store) {
   await store.init();
   const created = await store.create(plannedPreview(), rollbackEvidence());
@@ -231,7 +250,7 @@ test('journaled DNS zone reapply fails closed if the preview changes before prov
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
-      ...rollbackService(),
+      ...rollbackService({ inspectRollback: async () => sourceStateInspection() }),
       captureRollbackSnapshot: async ({ preview }) => {
       assert.equal(preview.sourceZoneDigest, sourceZoneDigest);
       return rollbackEvidence();
@@ -282,7 +301,7 @@ test('runtime init recovers applying operations without making API startup depen
   assert.equal((await store.get(operationId)).status, 'applying');
 });
 
-test('interrupted reapply does not accept a different mail desired state as its original target', async () => {
+test('interrupted reapply accepts the exact journaled after-state even if current mail desired state moved', async () => {
   const store = registry();
   await store.init();
   const created = await store.create(plannedPreview(), rollbackEvidence());
@@ -292,18 +311,15 @@ test('interrupted reapply does not accept a different mail desired state as its 
     registry: store,
     service: {
       ...rollbackService(),
-      captureRollbackSnapshot: async ({ preview }) => {
-      assert.equal(preview.sourceZoneDigest, sourceZoneDigest);
-      return rollbackEvidence();
-    },
+      captureRollbackSnapshot: async () => rollbackEvidence(),
       preview: async () => satisfiedPreview({ mailStateDigest: 'd'.repeat(64) }),
       apply: async () => { applyCalls += 1; return {}; },
     },
   });
 
   const recovered = await runtime.run(created.id);
-  assert.equal(recovered.status, 'failed');
-  assert.equal(recovered.error.code, 'dns_zone_reapply_preview_stale');
+  assert.equal(recovered.status, 'succeeded');
+  assert.equal(recovered.result.serial, 2026091601);
   assert.equal(applyCalls, 0);
 });
 
@@ -315,7 +331,7 @@ test('journaled DNS zone reapply fails closed if exact source-zone evidence drif
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
-      ...rollbackService(),
+      ...rollbackService({ inspectRollback: async () => throwRollbackDrift() }),
       captureRollbackSnapshot: async ({ preview }) => {
       assert.equal(preview.sourceZoneDigest, sourceZoneDigest);
       return rollbackEvidence();
@@ -347,7 +363,7 @@ test('recovery refuses a no-op target when the exact final zone digest is not th
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
-      ...rollbackService(),
+      ...rollbackService({ inspectRollback: async () => throwRollbackDrift() }),
       captureRollbackSnapshot: async () => rollbackEvidence(),
       preview: async () => satisfiedPreview({ sourceZoneDigest: 'f'.repeat(64) }),
       apply: async () => { applyCalls += 1; return {}; },
@@ -360,6 +376,36 @@ test('recovery refuses a no-op target when the exact final zone digest is not th
   assert.equal(applyCalls, 0);
 });
 
+
+test('operation-owned mixed reapply state fails closed but keeps exact rollback available', async () => {
+  const store = registry();
+  let previewCalls = 0;
+  const runtime = createDnsZoneReapplyRuntime({
+    registry: store,
+    service: {
+      ...rollbackService(),
+      captureRollbackSnapshot: async () => rollbackEvidence(),
+      preview: async () => {
+        previewCalls += 1;
+        return previewCalls === 1
+          ? plannedPreview()
+          : plannedPreview({ sourceZoneDigest: 'e'.repeat(64) });
+      },
+      apply: async () => { throw new Error('must not run'); },
+    },
+  });
+  await runtime.init();
+
+  const failed = await runtime.start({ domainId, previewDigest, confirmation });
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.error.code, 'dns_zone_reapply_partial_apply_detected');
+  assert.equal(failed.rollback.available, true);
+
+  const preview = await runtime.rollbackPreview({ domainId, operationId });
+  assert.equal(preview.operation.status, 'failed');
+  assert.equal(preview.operation.rollback.available, true);
+  assert.match(preview.confirmation, /^rollback-dns-zone-reapply:/);
+});
 
 test('durable DNS zone reapply rollback requires exact typed confirmation and restores the journaled before-state', async () => {
   const store = registry();
