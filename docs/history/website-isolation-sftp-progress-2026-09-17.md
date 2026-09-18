@@ -170,3 +170,11 @@ GitHub Actions kullanılmadı. Source test kontratları repoya eklendi; bu ortam
 - `b5d52b66`, `2fa6bef2`, `9c2d779e`, `ebb5d21e` ve takip test commitleri audit, typed `adapter=php` journal, restart-safe executor ve production bootstrap zincirini tamamladı. Stale preview/revision fail-closed kalır; restart completed receipt'i inspect ile kapatır.
 - `4948134f` + `e7138220` paneli PHP pool migration operation'ını ayrı gösterir ve shared runtime/container ownership'in mutation kapsamı dışında olduğunu confirmation copy'sinde açıklar.
 - PHP container ownership/path drift'i bilinçli olarak otomatik migration'a açılmadı; mevcut container manager'ın chown/chmod mutation'ı operation-owned rollback evidence taşımadığı için bu state fail-closed kalır. Gerçek host kabulü `todo.md` T-PROVISIONING altındadır.
+
+
+### 18 Eylül checkpoint — legacy runtime mutation authority bilinçli blokajı
+
+- `8fad41e8` Passenger legacy runtime preview'ına explicit `automaticMigration=false` ve `migrationBlockedReason=passenger_legacy_runtime_not_operation_owned` ekledi. Shared Passenger/package/runtime state'i ile mevcut release/runtime drift'i yalnız bounded evidence olarak görünür; operation-owned rollback authority oluşmadan isolation migration apply'e çevrilmez.
+- `a59bbfa6` static runtime preview'ında aynı sınırı `automaticMigration=false` ve `migrationBlockedReason=static_legacy_permissions_not_operation_owned` ile görünür hale getirdi. Legacy publish/release permission veya ACL drift'i receipt-backed ownership kanıtı olmadan otomatik chmod/chown/setfacl mutation'ına açılmaz.
+- `d14eba9a` isolation audit projection'ını bu iki blocked-authority alanını canonical ve bounded biçimde digest'e dahil edecek şekilde sertleştirdi. Böylece Passenger/static drift preview'ı “uygulanabilir migration” gibi yorumlanamaz ve blocked reason değişirse eski typed confirmation/evidence geçerli sayılmaz.
+- Bu checkpoint'te P0.1 source durumunda Unix identity, workspace, SFTP ve yalnız-missing PHP-FPM pool için durable safe-create lifecycle vardır. Passenger legacy runtime, static legacy permissions ve PHP container ownership/path drift'i operation-owned receipt/rollback authority olmadan fail-closed kalır. Sonraki source nöbeti bu runtime/path ownership sınırlarından devam etmelidir.
