@@ -89,6 +89,9 @@ export function createWebsiteProvisioningHandlers(options = {}) {
     ...base,
     elfinder: createWebsiteElFinderProvisioningHandler({
       ...(options.elFinderFpmSiteManager ? { fpmManager: options.elFinderFpmSiteManager } : {}),
+      ...(options.elFinderSharedApplicationManager
+        ? { sharedApplicationManager: options.elFinderSharedApplicationManager } : {}),
+      ...(options.elFinderGatewayManager ? { gatewayManager: options.elFinderGatewayManager } : {}),
       umaskManager,
     }),
     runtime: passengerRuntimeHandler(base.runtime, umaskManager),
