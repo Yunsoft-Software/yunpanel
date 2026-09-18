@@ -159,6 +159,10 @@ if command -v systemctl >/dev/null 2>&1; then
     [ -f /etc/yunpanel/control-plane/api.env ] && systemctl start yunpanel-api.service || true
     [ -f /etc/yunpanel/agent/agent.env ] && systemctl start yun-agent.service || true
     [ -f /etc/yunpanel/web/web.env ] && systemctl start yunpanel-web.service || true
+  else
+    [ -f /etc/yunpanel/control-plane/api.env ] && systemctl try-restart yunpanel-api.service || true
+    [ -f /etc/yunpanel/web/web.env ] && systemctl try-restart yunpanel-web.service || true
+    [ -f /etc/yunpanel/agent/agent.env ] && systemctl try-restart yun-agent.service || true
   fi
 fi
 
