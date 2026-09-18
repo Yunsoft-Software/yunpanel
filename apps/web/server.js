@@ -1119,8 +1119,13 @@ export const panelServerInternals = Object.freeze({
   browserProxyHeaders,
   authorizePhpMyAdminGateway,
   authorizeElFinderGateway,
+  authorizeTtydGateway,
   proxyPhpMyAdmin,
   proxyElFinder,
+  proxyTtyd,
+  proxyTtydWebSocket,
+  parseTtydGatewayPath,
+  ttydSocketPath,
   rewritePhpMyAdminLocation,
   rewriteElFinderLocation,
   scopePhpMyAdminSetCookie,
@@ -1140,6 +1145,10 @@ export const panelServerInternals = Object.freeze({
   elFinderHandoffSocketPath: ELFINDER_HANDOFF_SOCKET_PATH,
   elFinderHandoffPath: ELFINDER_HANDOFF_PATH,
   elFinderSessionTtlMs: ELFINDER_SESSION_TTL_MS,
+  ttydPrefix: TTYD_PREFIX,
+  ttydGatewayAccessPath: TTYD_GATEWAY_ACCESS_PATH,
+  ttydSocketRoot: TTYD_SOCKET_ROOT,
+  ttydAuthHeader: TTYD_AUTH_HEADER,
 });
 
 export function startPanelServer(options = {}) {
