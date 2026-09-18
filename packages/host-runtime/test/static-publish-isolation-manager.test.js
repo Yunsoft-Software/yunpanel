@@ -317,3 +317,43 @@ test('static control migration rollback fails closed on foreign metadata or path
     );
   }
 });
+
+
+test('static release permission preview hashes exact managed tree without exposing file paths or ACL text', async () => {
+  const host = fakeHost();
+  host.entries.get(assetPath).mode = 0o644;
+  const value = manager(host);
+
+  const first = await value.previewReleaseMigration({ websiteId, applicationId });
+
+  assert.equal(first.version, 1);
+  assert.equal(first.adapter, 'static-release-permissions');
+  assert.equal(first.satisfied, false);
+  assert.equal(first.automaticMigration, false);
+  assert.equal(first.repairCandidate, true);
+  assert.equal(first.migrationBlockedReason, 'static_release_receipt_not_operation_owned');
+  assert.deepEqual(first.current.releases, [releaseId]);
+  assert.equal(first.current.tree.entryCount, 2);
+  assert.equal(first.current.tree.ownershipModeDriftCount, 1);
+  assert.equal(first.current.tree.aclDriftCount, 0);
+  assert.match(first.current.tree.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(first.differences.includes('static_publish_release_drift'), true);
+  assert.equal(JSON.stringify(first).includes(assetPath), false);
+  assert.equal(JSON.stringify(first).includes('user:www-data:r--'), true);
+  assert.equal(JSON.stringify(first).includes('index.html'), false);
+
+  host.entries.get(assetPath).mode = 0o600;
+  const second = await value.previewReleaseMigration({ websiteId, applicationId });
+  assert.notEqual(first.current.tree.sha256, second.current.tree.sha256);
+});
+
+test('static release permission preview fails closed when current target is not a managed release', async () => {
+  const host = fakeHost();
+  host.entries.get(assetPath).mode = 0o644;
+  host.readlinkFn = async () => 'releases/3854e385-adfc-42bd-bccf-f655f24cd68f';
+
+  const preview = await manager(host).previewReleaseMigration({ websiteId, applicationId });
+
+  assert.equal(preview.repairCandidate, false);
+  assert.equal(preview.differences.includes('static_publish_current_drift'), true);
+});
