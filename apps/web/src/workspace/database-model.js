@@ -330,6 +330,14 @@ export function websiteDatabaseDeletePreviewView(value, {
     || !Number.isSafeInteger(backup.dumpBytes) || backup.dumpBytes < 1
     || typeof backup.createdAt !== 'string' || !Number.isFinite(Date.parse(backup.createdAt)))) return null;
 
+  const completedDelete = value.completedDelete === null ? null : value.completedDelete;
+  if (completedDelete !== null && (!completedDelete || typeof completedDelete !== 'object'
+    || !BACKUP_ID_PATTERN.test(completedDelete.jobId ?? '')
+    || !BACKUP_ID_PATTERN.test(completedDelete.backupId ?? '')
+    || !SHA256_PATTERN.test(completedDelete.backupSha256 ?? '')
+    || completedDelete.finishedAt !== null
+      && (typeof completedDelete.finishedAt !== 'string' || !Number.isFinite(Date.parse(completedDelete.finishedAt))))) return null;
+
   const activeJobs = [];
   const ids = new Set();
   for (const job of value.activeJobs) {
@@ -340,14 +348,21 @@ export function websiteDatabaseDeletePreviewView(value, {
     activeJobs.push({ id: job.id, operation: job.operation, status: job.status });
   }
 
-  if (value.blockers.includes('database_not_found') === value.exists
+  const expectedReadyToDelete = value.exists && value.blockers.length === 0;
+  const expectedReadyToFinalize = !value.exists && completedDelete !== null
+    && credential === null && activeJobs.length === 0 && value.blockers.length === 0;
+  if (value.blockers.includes('database_not_found') !== (!value.exists && completedDelete === null)
     || value.blockers.includes('database_credential_exists') !== (credential !== null)
-    || value.blockers.includes('database_current_binding_backup_required') !== (backup === null)
+    || value.blockers.includes('database_current_binding_backup_required') !== (value.exists && backup === null)
     || value.blockers.includes('database_job_active') !== (activeJobs.length > 0)
-    || value.readyToDelete !== (value.blockers.length === 0)
+    || value.readyToDelete !== expectedReadyToDelete
+    || typeof value.readyToFinalize !== 'boolean' || value.readyToFinalize !== expectedReadyToFinalize
     || (value.readyToDelete && value.confirmation !==
       `delete-website-database:${bindingId}:${bindingRevision}:${value.previewDigest}`)
-    || (!value.readyToDelete && value.confirmation !== null)) return null;
+    || (!value.readyToDelete && value.confirmation !== null)
+    || (value.readyToFinalize && value.finalizeConfirmation !==
+      `finalize-website-database-delete:${bindingId}:${bindingRevision}:${completedDelete.jobId}`)
+    || (!value.readyToFinalize && value.finalizeConfirmation !== null)) return null;
 
   return {
     serverId,
@@ -370,11 +385,19 @@ export function websiteDatabaseDeletePreviewView(value, {
       dumpBytes: backup.dumpBytes,
       createdAt: new Date(backup.createdAt).toISOString(),
     } : null,
+    completedDelete: completedDelete ? {
+      jobId: completedDelete.jobId,
+      backupId: completedDelete.backupId,
+      backupSha256: completedDelete.backupSha256,
+      finishedAt: completedDelete.finishedAt === null ? null : new Date(completedDelete.finishedAt).toISOString(),
+    } : null,
     activeJobs,
     blockers: [...value.blockers],
     readyToDelete: value.readyToDelete,
+    readyToFinalize: value.readyToFinalize,
     previewDigest: value.previewDigest,
     confirmation: value.confirmation,
+    finalizeConfirmation: value.finalizeConfirmation,
   };
 }
 
