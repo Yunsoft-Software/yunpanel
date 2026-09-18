@@ -58,6 +58,7 @@ function service({
   identityMigrationAvailable = false,
   sftpMigrationAvailable = false,
   phpMigrationAvailable = false,
+  phpContainerMigrationAvailable = false,
 } = {}) {
   const handlers = {};
   for (const kind of ['unix_identity', 'runtime', 'static_runtime', 'php_runtime', 'sftp']) {
@@ -82,6 +83,7 @@ function service({
     identityMigrationAvailable,
     sftpMigrationAvailable,
     phpMigrationAvailable,
+    phpContainerMigrationAvailable,
   });
 }
 
@@ -761,11 +763,13 @@ test('isolation audit opens PHP migration only when the exact site pool is the s
     adapter: 'php-runtime',
     satisfied: false,
     safeCreateCandidate: true,
+    safeContainerMigrationCandidate: false,
     current: {
       container: {
         version: 1,
         adapter: 'php-container',
         satisfied: true,
+        safeMigrationCandidate: false,
         current: {
           identity: { satisfied: true, uid: 1201, gid: 1201, homeDirectory: identity.paths.workspace.homeDirectory },
           applicationRoot: directory(0, 0, '0755'),
@@ -828,8 +832,9 @@ test('isolation audit opens PHP migration only when the exact site pool is the s
           socketMode: '0660',
           serviceUnit: 'php8.3-fpm.service',
         },
-        differences: ['php_fpm_receipt_missing', 'php_fpm_pool_missing', 'php_fpm_socket_missing'],
+        differences: ['php_fpm_receipt_missing', 'php_fpm_pool_missing', 'php_fpm_socket_missing', 'php_fpm_runtime_not_ready'],
       },
+      fpmRuntime: { satisfied: false, reason: 'php_fpm_pool_missing' },
       umask: { satisfied: true, umask: '0027' },
     },
     desired: {
@@ -879,11 +884,13 @@ test('isolation audit pins bounded PHP container, FPM and UMask drift into the m
     adapter: 'php-runtime',
     satisfied: false,
     safeCreateCandidate: false,
+    safeContainerMigrationCandidate: false,
     current: {
       container: {
         version: 1,
         adapter: 'php-container',
         satisfied: false,
+        safeMigrationCandidate: true,
         current: {
           identity: {
             satisfied: true,
@@ -966,6 +973,7 @@ test('isolation audit pins bounded PHP container, FPM and UMask drift into the m
           'php_fpm_socket_missing',
         ],
       },
+      fpmRuntime: { satisfied: false, reason: 'php_fpm_package_missing' },
       umask: { satisfied: false, reason: 'service_umask_not_effective' },
     },
     desired: {
@@ -982,6 +990,7 @@ test('isolation audit pins bounded PHP container, FPM and UMask drift into the m
       'php_fpm_pool_missing',
       'php_fpm_service_inactive',
       'php_fpm_socket_missing',
+      'php_fpm_runtime_not_ready',
       'php_runtime_umask_not_ready',
     ],
     rawSecret: 'do-not-project',
@@ -999,6 +1008,10 @@ test('isolation audit pins bounded PHP container, FPM and UMask drift into the m
   assert.equal(preview.current.container.current.applicationRoot.uid, 1201);
   assert.equal(preview.current.fpm.current.pool.present, false);
   assert.equal(preview.current.fpm.current.receipt.state, null);
+  assert.deepEqual(preview.current.fpmRuntime, {
+    satisfied: false,
+    reason: 'php_fpm_package_missing',
+  });
   assert.deepEqual(preview.current.umask, {
     satisfied: false,
     reason: 'service_umask_not_effective',
