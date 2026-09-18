@@ -7,9 +7,12 @@ import {
   createPhpMyAdminHandoff,
   createWebsiteDatabaseBackup,
   deleteDatabase,
+  deleteWebsiteDatabase,
+  finalizeWebsiteDatabaseDelete,
   finalizeDatabaseCredentialDelete,
   getDatabases,
   getDatabaseDropPreview,
+  getWebsiteDatabaseDeletePreview,
   getWebsiteDatabaseResources,
   inspectDatabases,
   previewDatabaseCredentialApply,
@@ -101,6 +104,8 @@ test('database API client rejects missing identities before fetch', async (t) =>
   assert.throws(() => createWebsiteDatabaseBackup('server-1', 'website-1', 'binding-1', 0), /expectedBindingRevision must be a positive integer/);
   assert.throws(() => previewWebsiteDatabaseRestore('server-1', 'website-1', 'binding-1', 1, ''), /backupId is required/);
   assert.throws(() => restoreWebsiteDatabase('server-1', 'website-1', 'binding-1', 1, null), /database restore preview is required/);
+  assert.throws(() => deleteWebsiteDatabase('server-1', 'website-1', 'binding-1', 1, null), /database delete preview is required/);
+  assert.throws(() => finalizeWebsiteDatabaseDelete('server-1', 'website-1', 'binding-1', 1, ''), /deleteJobId is required/);
   assert.throws(() => createDatabase('server-1', ''), /database name is required/);
   assert.throws(() => createDatabaseBackup('server-1', ''), /database name is required/);
   assert.throws(() => getDatabaseDropPreview('server-1', ''), /database name is required/);
@@ -186,6 +191,54 @@ test('Website database backup and restore clients pin the binding revision witho
     assert.equal(call.options.headers['x-csrf-token'], 'csrf-website-database-data');
     assert.doesNotMatch(call.options.body, /databaseName|password|dumpPath|sql/i);
   }
+  setSession(null);
+});
+
+test('Website database delete client pins preview, DROP and finalization to the binding revision', async (t) => {
+  setSession({ csrfToken: 'csrf-website-database-delete' });
+  const calls = [];
+  const preview = {
+    previewDigest: 'e'.repeat(64),
+    confirmation: `delete-website-database:binding/one:7:${'e'.repeat(64)}`,
+    backup: {
+      backupId: 'backup/job-one',
+      dumpSha256: 'f'.repeat(64),
+    },
+  };
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url, options });
+    return ok(url.endsWith('/delete-preview')
+      ? preview
+      : url.endsWith('/delete-finalize')
+        ? { id: 'binding/one', databaseName: 'app_main', unbound: true, finalizedFromJobId: 'delete/job-one' }
+        : { job: { id: 'delete/job-one', status: 'queued' } });
+  });
+
+  const current = await getWebsiteDatabaseDeletePreview('server/one', 'website/one', 'binding/one');
+  await deleteWebsiteDatabase('server/one', 'website/one', 'binding/one', 7, current);
+  await finalizeWebsiteDatabaseDelete('server/one', 'website/one', 'binding/one', 7, 'delete/job-one');
+
+  const prefix = '/api/panel/servers/server%2Fone/websites/website%2Fone/database-bindings/binding%2Fone';
+  assert.deepEqual(calls.map((call) => [call.url, call.options.method]), [
+    [`${prefix}/delete-preview`, 'GET'],
+    [`${prefix}/delete`, 'POST'],
+    [`${prefix}/delete-finalize`, 'POST'],
+  ]);
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    expectedBindingRevision: 7,
+    expectedPreviewDigest: 'e'.repeat(64),
+    expectedBackupId: 'backup/job-one',
+    expectedBackupSha256: 'f'.repeat(64),
+    confirmation: `delete-website-database:binding/one:7:${'e'.repeat(64)}`,
+  });
+  assert.deepEqual(JSON.parse(calls[2].options.body), {
+    expectedBindingRevision: 7,
+    deleteJobId: 'delete/job-one',
+    confirmation: 'finalize-website-database-delete:binding/one:7:delete/job-one',
+  });
+  assert.equal(calls[1].options.headers['x-csrf-token'], 'csrf-website-database-delete');
+  assert.equal(calls[2].options.headers['x-csrf-token'], 'csrf-website-database-delete');
+  assert.doesNotMatch(calls.slice(1).map((call) => call.options.body).join('\n'), /databaseName|password|sql|dumpPath/i);
   setSession(null);
 });
 
