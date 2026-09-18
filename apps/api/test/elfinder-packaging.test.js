@@ -18,6 +18,7 @@ test('Debian package prepares a dedicated elFinder broker identity without broad
   );
   assert.doesNotMatch(postinst, /adduser yunpanel-elfinder www-data/);
   assert.doesNotMatch(postinst, /adduser yunpanel-elfinder yunpanel/);
+  assert.match(postinst, /adduser yunpanel yunpanel-elfinder/);
 
   assert.match(postinst, /install -d -o yunpanel-elfinder -g yunpanel-elfinder -m 0700 \/var\/lib\/yunpanel\/elfinder/);
   assert.match(postinst, /install -d -o root -g yunpanel-elfinder -m 0750 \/run\/yunpanel-elfinder/);
