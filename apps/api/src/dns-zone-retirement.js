@@ -3,12 +3,14 @@ import {
   createPowerDnsZoneManager,
   powerDnsZoneManagerInternals,
 } from '@yunpanel/host-runtime/powerdns-zone-manager';
+import { websiteDnsZoneProvisioningInternals } from './website-dns-zone-provisioning-handler.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ROOT_ZONE_BLOCKERS = Object.freeze({
   ownership: 'dns_zone_delete_ownership_evidence_required',
   manual: 'dns_zone_manual_rrsets_present',
   dnssec: 'dns_zone_dnssec_retirement_required',
+  retention: 'dns_zone_delete_retention_policy_required',
 });
 
 export class DnsZoneRetirementError extends Error {
@@ -105,16 +107,94 @@ function zoneImpact(zone) {
   });
 }
 
+function provisioningOwnership(domain, operations) {
+  if ((domain.parentDomainId ?? null) !== null) {
+    return Object.freeze({ status: 'parent_zone_owned', operationId: null, evidenceDigest: null });
+  }
+  if ((domain.websiteId ?? null) === null) {
+    return Object.freeze({ status: 'website_unbound', operationId: null, evidenceDigest: null });
+  }
+  if (operations === null) {
+    return Object.freeze({ status: 'unavailable', operationId: null, evidenceDigest: null });
+  }
+  if (!Array.isArray(operations)) {
+    throw new DnsZoneRetirementError(
+      'dns_zone_retirement_provisioning_history_invalid',
+      'Website provisioning history is invalid',
+      503,
+    );
+  }
+
+  const candidates = [];
+  let invalidEvidenceCount = 0;
+  for (const operation of operations) {
+    if (!operation || operation.websiteId !== domain.websiteId || !Array.isArray(operation.steps)) continue;
+    for (const step of operation.steps) {
+      if (!step || step.kind !== 'dns_zone' || step.state !== 'succeeded'
+        || step.compensation?.state === 'succeeded' || !step.evidence || step.evidence.created !== true) {
+        continue;
+      }
+      try {
+        const ownership = websiteDnsZoneProvisioningInternals.compensationOwnership(
+          { intent: step.intent, evidence: step.evidence },
+          websiteDnsZoneProvisioningInternals.normalizedIntent({ intent: step.intent }),
+        );
+        if (!ownership.operationOwned
+          || step.intent.serverId !== domain.serverId
+          || step.intent.webDomainId !== domain.id
+          || step.intent.zoneName !== domain.primaryDomain) {
+          invalidEvidenceCount += 1;
+          continue;
+        }
+        candidates.push(Object.freeze({
+          operationId: operation.operationId,
+          updatedAt: operation.updatedAt,
+          evidenceDigest: digest({
+            operationId: operation.operationId,
+            intent: step.intent,
+            evidence: step.evidence,
+          }),
+        }));
+      } catch {
+        invalidEvidenceCount += 1;
+      }
+    }
+  }
+
+  if (candidates.length === 1) {
+    return Object.freeze({
+      status: 'provisioning_created',
+      operationId: candidates[0].operationId,
+      updatedAt: candidates[0].updatedAt,
+      evidenceDigest: candidates[0].evidenceDigest,
+    });
+  }
+  if (candidates.length > 1) {
+    return Object.freeze({
+      status: 'ambiguous',
+      operationId: null,
+      evidenceDigest: null,
+      candidateCount: candidates.length,
+    });
+  }
+  return Object.freeze({
+    status: invalidEvidenceCount > 0 ? 'invalid' : 'not_found',
+    operationId: null,
+    evidenceDigest: null,
+  });
+}
+
 function routingActive(domain) {
   return domain.appliedRevision > 0
     || domain.stagedRevision > 0
     || ['active', 'staged'].includes(domain.state);
 }
 
-function previewIdentity(domain, relatedDomains, authoritativeZone) {
+function previewIdentity(domain, relatedDomains, authoritativeZone, ownershipOrigin = null) {
   const children = descendants(relatedDomains, domain.id);
   const root = (domain.parentDomainId ?? null) === null;
-  const zone = root ? zoneImpact(authoritativeZone) : Object.freeze({
+  const ownership = ownershipOrigin ?? provisioningOwnership(domain, null);
+  const zoneBase = root ? zoneImpact(authoritativeZone) : Object.freeze({
     exists: false,
     snapshotDigest: null,
     kind: null,
@@ -124,13 +204,24 @@ function previewIdentity(domain, relatedDomains, authoritativeZone) {
     manualRrsetCount: 0,
     ownership: 'parent_zone_owned',
   });
+  const zone = Object.freeze({
+    ...zoneBase,
+    ownership: root && zoneBase.exists && ownership.status === 'provisioning_created'
+      ? (zoneBase.manualRrsetCount > 0 ? 'provisioning_created_mixed' : 'provisioning_created')
+      : zoneBase.ownership,
+    ownershipOrigin: ownership,
+  });
   const blockers = [];
   if (children.length > 0) blockers.push('domain_descendants_present');
   if ((domain.websiteId ?? null) !== null) blockers.push('domain_website_binding_present');
   if ((domain.certificateId ?? null) !== null) blockers.push('domain_certificate_present');
   if (routingActive(domain)) blockers.push('domain_routing_active');
   if (root && zone.exists) {
-    blockers.push(ROOT_ZONE_BLOCKERS.ownership);
+    if (ownership.status !== 'provisioning_created') {
+      blockers.push(ROOT_ZONE_BLOCKERS.ownership);
+    } else {
+      blockers.push(ROOT_ZONE_BLOCKERS.retention);
+    }
     if (zone.manualRrsetCount > 0) blockers.push(ROOT_ZONE_BLOCKERS.manual);
     if (zone.dnssec) blockers.push(ROOT_ZONE_BLOCKERS.dnssec);
   }
@@ -168,12 +259,14 @@ function previewIdentity(domain, relatedDomains, authoritativeZone) {
 export function createDnsZoneRetirementService({
   domainRegistry,
   powerDnsSecretRegistry,
+  provisioningRegistry = null,
   zoneManager = createPowerDnsZoneManager(),
   localServerId,
 } = {}) {
   if (!domainRegistry || typeof domainRegistry.getDomain !== 'function'
     || typeof domainRegistry.listDomains !== 'function'
     || !powerDnsSecretRegistry || typeof powerDnsSecretRegistry.materializeForServer !== 'function'
+    || (provisioningRegistry !== null && typeof provisioningRegistry.listForWebsite !== 'function')
     || !zoneManager || typeof zoneManager.getZone !== 'function'
     || typeof localServerId !== 'string' || !localServerId) {
     throw new DnsZoneRetirementError(
@@ -201,6 +294,19 @@ export function createDnsZoneRetirementService({
         503,
       );
     }
+
+    let provisioningOperations = null;
+    if ((domain.websiteId ?? null) !== null && provisioningRegistry !== null) {
+      try { provisioningOperations = await provisioningRegistry.listForWebsite(domain.websiteId); }
+      catch {
+        throw new DnsZoneRetirementError(
+          'dns_zone_retirement_provisioning_history_unavailable',
+          'Website provisioning ownership history could not be inspected',
+          503,
+        );
+      }
+    }
+    const ownershipOrigin = provisioningOwnership(domain, provisioningOperations);
 
     let authoritativeZone = null;
     if ((domain.parentDomainId ?? null) === null) {
@@ -230,7 +336,7 @@ export function createDnsZoneRetirementService({
       }
     }
 
-    const identity = previewIdentity(domain, relatedDomains, authoritativeZone);
+    const identity = previewIdentity(domain, relatedDomains, authoritativeZone, ownershipOrigin);
     const previewDigest = digest(identity);
     if (!SHA256_PATTERN.test(previewDigest)) {
       throw new DnsZoneRetirementError(
@@ -256,6 +362,7 @@ export const dnsZoneRetirementInternals = Object.freeze({
   localDomain,
   descendants,
   zoneImpact,
+  provisioningOwnership,
   routingActive,
   previewIdentity,
 });
