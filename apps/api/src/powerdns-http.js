@@ -359,6 +359,7 @@ async function defaultZoneRetirementService(
   authoritativeService,
   domainRegistry = null,
   powerDnsSecretRegistry = null,
+  provisioningRegistry = null,
   env = process.env,
 ) {
   if ((domainRegistry === null) !== (powerDnsSecretRegistry === null)) {
@@ -371,9 +372,17 @@ async function defaultZoneRetirementService(
   const defaults = domainRegistry === null
     ? await defaultDomainAndSecretRegistries(authoritativeService, env)
     : null;
+  if (provisioningRegistry !== null && typeof provisioningRegistry.listForWebsite !== 'function') {
+    throw new PowerDnsHttpError(
+      'dns_zone_retirement_provisioning_registry_invalid',
+      'Website provisioning history is unavailable for DNS zone ownership inspection',
+      503,
+    );
+  }
   return createDnsZoneRetirementService({
     domainRegistry: domainRegistry ?? defaults.domainRegistry,
     powerDnsSecretRegistry: powerDnsSecretRegistry ?? defaults.secretRegistry,
+    provisioningRegistry,
     localServerId: authoritativeService.localServerId,
   });
 }
@@ -456,6 +465,7 @@ export function mountPowerDnsRoutes(app, {
   dnsZoneRetirementService = null,
   domainRegistry = null,
   powerDnsSecretRegistry = null,
+  websiteProvisioningRegistry = null,
   mailDomainRegistry = null,
   mailDkimRegistry = null,
   mailDkimRetirementRegistry = null,
@@ -498,6 +508,11 @@ export function mountPowerDnsRoutes(app, {
 
   if (dnsZoneRetirementService !== null && typeof dnsZoneRetirementService.preview !== 'function') {
     throw new Error('DNS zone retirement service is invalid');
+  }
+
+  if (websiteProvisioningRegistry !== null
+    && typeof websiteProvisioningRegistry.listForWebsite !== 'function') {
+    throw new Error('Website provisioning registry is invalid for DNS zone retirement');
   }
 
   let defaultRuntimePromise = null;
@@ -544,6 +559,7 @@ export function mountPowerDnsRoutes(app, {
         authoritativeService,
         domainRegistry,
         powerDnsSecretRegistry,
+        websiteProvisioningRegistry,
       );
       defaultRetirementPromise.catch(() => { defaultRetirementPromise = null; });
     }
