@@ -39,6 +39,41 @@ if ! node --input-type=module -e 'import { spawn } from "node-pty"; if (typeof s
 fi
 
 repository_root=$(pwd)
+elfinder_version=2.1.70
+elfinder_commit=e7ea668fd569fc9903fb1c431d47d58f2daad2f2
+elfinder_vendor_root=${ELFINDER_VENDOR_ROOT:-"$repository_root/.local/vendor/elfinder"}
+if [[ ! -d "$elfinder_vendor_root/.git" ]]; then
+  printf 'pinned elFinder vendor tree is missing; run scripts/fetch-elfinder-vendor.sh or set ELFINDER_VENDOR_ROOT\n' >&2
+  exit 1
+fi
+if [[ "$(git -C "$elfinder_vendor_root" rev-parse HEAD 2>/dev/null || true)" != "$elfinder_commit" ]]; then
+  printf 'elFinder vendor tree must be pinned to %s\n' "$elfinder_commit" >&2
+  exit 1
+fi
+if [[ "$(git -C "$elfinder_vendor_root" rev-list -n 1 "$elfinder_version" 2>/dev/null || true)" != "$elfinder_commit" ]]; then
+  printf 'elFinder vendor tag %s does not resolve to pinned commit\n' "$elfinder_version" >&2
+  exit 1
+fi
+if [[ -n "$(git -C "$elfinder_vendor_root" status --porcelain --untracked-files=all)" ]]; then
+  printf 'elFinder vendor tree must be clean before packaging\n' >&2
+  exit 1
+fi
+elfinder_required=(
+  LICENSE.md
+  elfinder.html
+  css/elfinder.min.css
+  js/elfinder.min.js
+  php/autoload.php
+  php/elFinder.class.php
+  php/elFinderConnector.class.php
+  php/elFinderVolumeLocalFileSystem.class.php
+)
+for file in "${elfinder_required[@]}"; do
+  if [[ ! -f "$elfinder_vendor_root/$file" ]]; then
+    printf 'elFinder vendor tree is missing required file: %s\n' "$file" >&2
+    exit 1
+  fi
+done
 if [[ "$output_directory" = /* ]]; then
   package_directory=$output_directory
 else
@@ -55,6 +90,7 @@ install -d "$package_root/usr/lib/yunpanel/scripts"
 install -d "$package_root/usr/lib/systemd/system"
 install -d "$package_root/usr/lib/tmpfiles.d"
 install -d "$package_root/usr/share/yunpanel/web"
+install -d "$package_root/usr/share/yunpanel/elfinder/vendor/elfinder"
 install -d "$package_root/usr/share/doc/yunpanel"
 
 sed -e "s/@VERSION@/$version/" -e "s/@ARCHITECTURE@/$architecture/" packaging/debian/control >"$package_root/DEBIAN/control"
@@ -84,6 +120,15 @@ cp -a apps/api apps/agent apps/web "$package_root/usr/lib/yunpanel/apps/"
 cp -a packages/. "$package_root/usr/lib/yunpanel/packages/"
 cp -a node_modules "$package_root/usr/lib/yunpanel/"
 cp -a apps/web/dist/. "$package_root/usr/share/yunpanel/web/"
+cp -a "$elfinder_vendor_root/." "$package_root/usr/share/yunpanel/elfinder/vendor/elfinder/"
+rm -rf -- "$package_root/usr/share/yunpanel/elfinder/vendor/elfinder/.git"
+node --input-type=module - <<'NODE' >"$package_root/usr/share/yunpanel/elfinder/connector.php"
+import { renderElFinderConnector } from './packages/config-templates/src/index.js';
+process.stdout.write(renderElFinderConnector());
+NODE
+chmod 0644 "$package_root/usr/share/yunpanel/elfinder/connector.php"
+printf '%s\n' "$elfinder_version $elfinder_commit" >"$package_root/usr/share/yunpanel/elfinder/VERSION"
+chmod 0644 "$package_root/usr/share/yunpanel/elfinder/VERSION"
 rm -rf -- "$package_root/usr/lib/yunpanel/apps/web/dist" "$package_root/usr/lib/yunpanel/apps/web/test"
 find "$package_root/usr/lib/yunpanel" -type d -name test -prune -exec rm -rf -- {} +
 
