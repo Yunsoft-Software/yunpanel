@@ -4,7 +4,14 @@ import '@xterm/xterm/css/xterm.css';
 import { useEffect, useRef, useState } from 'react';
 import { panelRequest } from '../api.js';
 import { Button, ErrorNotice, Section } from './PanelKit.jsx';
-import { createTerminalWebSocket, parseTerminalMessage, terminalClientInternals } from './terminal-client.js';
+import {
+  createTerminalWebSocket,
+  normalizeTerminalCapability,
+  normalizeTtydSession,
+  parseTerminalMessage,
+  terminalClientInternals,
+  ttydSessionPath,
+} from './terminal-client.js';
 import './terminal.css';
 
 const statusLabels = {
@@ -39,11 +46,14 @@ export default function TerminalPanel({ target, title, description, unavailable 
   const terminal = useRef(null);
   const fit = useRef(null);
   const socket = useRef(null);
+  const ttydSessionRef = useRef(null);
   const connected = useRef(false);
   const attempt = useRef(0);
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState(null);
   const [context, setContext] = useState(null);
+  const [mode, setMode] = useState(null);
+  const [ttydSession, setTtydSession] = useState(null);
   const body = issueBody(target);
 
   function writeNotice(message) {
@@ -88,6 +98,14 @@ export default function TerminalPanel({ target, title, description, unavailable 
       const active = socket.current;
       socket.current = null;
       if (active && active.readyState < WebSocket.CLOSING) active.close(1000, 'view_closed');
+      const activeTtyd = ttydSessionRef.current;
+      ttydSessionRef.current = null;
+      if (activeTtyd) {
+        void panelRequest(ttydSessionPath(activeTtyd.sessionId), {
+          method: 'DELETE',
+          body: {},
+        }).catch(() => {});
+      }
       observer?.disconnect();
       input.dispose();
       resize.dispose();
@@ -97,7 +115,7 @@ export default function TerminalPanel({ target, title, description, unavailable 
     };
   }, []);
 
-  async function connect() {
+  async function connectLegacy() {
     if (!body || ['issuing', 'connecting', 'open'].includes(status)) return;
     const currentAttempt = attempt.current + 1;
     attempt.current = currentAttempt;
@@ -129,6 +147,7 @@ export default function TerminalPanel({ target, title, description, unavailable 
             return;
           }
           connected.current = true;
+          setMode('legacy');
           setContext(message.target);
           setStatus('open');
           terminal.current?.reset();
@@ -148,6 +167,7 @@ export default function TerminalPanel({ target, title, description, unavailable 
         connected.current = false;
         socket.current = null;
         setContext(null);
+        setMode(null);
         setStatus(event.wasClean ? 'closed' : 'error');
         writeNotice(closeMessage(event.code));
       });
@@ -157,20 +177,78 @@ export default function TerminalPanel({ target, title, description, unavailable 
     } catch (failure) {
       if (attempt.current !== currentAttempt || failure.name === 'AbortError') return;
       setStatus('error');
+      setMode(null);
       setError(failure.message);
       writeNotice('Terminal açılamadı.');
     }
   }
 
-  function disconnect() {
+  function disconnectLegacy() {
     attempt.current += 1;
     connected.current = false;
     const active = socket.current;
     socket.current = null;
     if (active && active.readyState < WebSocket.CLOSING) active.close(1000, 'owner_closed');
     setStatus('closed');
+    setMode(null);
     setContext(null);
     writeNotice('Terminal kullanıcı tarafından kapatıldı.');
+  }
+
+  async function connectTtyd() {
+    if (!body || ['issuing', 'connecting', 'open'].includes(status)) return;
+    const currentAttempt = attempt.current + 1;
+    attempt.current = currentAttempt;
+    setError(null);
+    setContext(null);
+    setMode(null);
+    setStatus('issuing');
+    try {
+      const rawCapability = await panelRequest('/terminal/capabilities', {
+        method: 'POST',
+        body,
+      });
+      const capability = normalizeTerminalCapability(rawCapability);
+      if (attempt.current !== currentAttempt) return;
+
+      setStatus('connecting');
+      const rawSession = await panelRequest('/terminal/ttyd-sessions', {
+        method: 'POST',
+        body: { capability: capability.capability },
+      });
+      if (attempt.current !== currentAttempt) return;
+      const session = normalizeTtydSession(rawSession, capability.target);
+      ttydSessionRef.current = session;
+      setTtydSession(session);
+      setContext(session.target);
+      setMode('ttyd');
+      setStatus('open');
+    } catch (failure) {
+      if (attempt.current !== currentAttempt || failure.name === 'AbortError') return;
+      setStatus('error');
+      setMode(null);
+      setError(failure.message);
+    }
+  }
+
+  async function disconnectTtyd() {
+    const active = ttydSessionRef.current;
+    if (!active) return;
+    attempt.current += 1;
+    ttydSessionRef.current = null;
+    setTtydSession(null);
+    setContext(null);
+    setMode(null);
+    setStatus('closed');
+    setError(null);
+    try {
+      await panelRequest(ttydSessionPath(active.sessionId), {
+        method: 'DELETE',
+        body: {},
+      });
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setError(failure.message);
+    }
   }
 
   return <Section title={title} description={description} actions={<div className="ws-actions"><span className="ws-muted" role="status">{statusLabels[status]}</span>{status === 'open' ? <Button onClick={disconnect}>Bağlantıyı kapat</Button> : <Button variant="primary" icon="terminal" onClick={connect} disabled={!body || ['issuing', 'connecting'].includes(status)}>{status === 'closed' || status === 'error' ? 'Yeniden bağlan' : 'Terminali aç'}</Button>}</div>}>
