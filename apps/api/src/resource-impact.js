@@ -13,6 +13,9 @@ const SAFE_RESOURCE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const SAFE_REFERENCE_ID = /^[A-Za-z0-9._:@-]{1,160}$/;
 const SAFE_REFERENCE_STATE = /^[A-Za-z0-9._:-]{1,80}$/;
 const COMPOSE_SERVICE_NAME = /^[a-z0-9][a-z0-9_.-]{0,62}$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const DNS_RETIREMENT_STATES = new Set(['ready', 'blocked', 'not_applicable']);
+const SAFE_BLOCKER_CODE = /^[a-z0-9_]{1,120}$/;
 
 export class ResourceImpactError extends Error {
   constructor(code, message, status = 400) {
@@ -193,6 +196,68 @@ async function additionalBucket(provider, type, context) {
   return Object.freeze({ status: 'available', items: Object.freeze(items) });
 }
 
+function sanitizeDnsRetirementReference(value) {
+  const fields = new Set(['domainId', 'state', 'previewDigest', 'zoneSnapshotDigest', 'blockers']);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.size || Object.keys(value).some((key) => !fields.has(key))
+    || typeof value.domainId !== 'string' || !SAFE_RESOURCE_ID.test(value.domainId)
+    || !DNS_RETIREMENT_STATES.has(value.state)
+    || typeof value.previewDigest !== 'string' || !SHA256_PATTERN.test(value.previewDigest)
+    || (value.zoneSnapshotDigest !== null
+      && (typeof value.zoneSnapshotDigest !== 'string' || !SHA256_PATTERN.test(value.zoneSnapshotDigest)))
+    || !Array.isArray(value.blockers) || value.blockers.length > 32
+    || value.blockers.some((code) => typeof code !== 'string' || !SAFE_BLOCKER_CODE.test(code))
+    || new Set(value.blockers).size !== value.blockers.length
+    || (value.state === 'ready' && value.blockers.length !== 0)
+    || (value.state === 'blocked' && value.blockers.length === 0)) {
+    throw new ResourceImpactError(
+      'authoritative_dns_impact_invalid',
+      'Authoritative DNS retirement impact provider returned invalid metadata',
+      503,
+    );
+  }
+  return Object.freeze({
+    domainId: value.domainId,
+    state: value.state,
+    previewDigest: value.previewDigest,
+    zoneSnapshotDigest: value.zoneSnapshotDigest,
+    blockers: Object.freeze([...value.blockers]),
+  });
+}
+
+async function authoritativeDnsBucket(provider, context) {
+  if (provider === null || provider === undefined) return null;
+  if (typeof provider !== 'function') {
+    throw new ResourceImpactError('impact_dependencies_invalid', 'Authoritative DNS impact provider is invalid', 503);
+  }
+  let values;
+  try { values = await provider(context); }
+  catch {
+    throw new ResourceImpactError(
+      'authoritative_dns_impact_unavailable',
+      'Authoritative DNS retirement impact is unavailable',
+      503,
+    );
+  }
+  if (!Array.isArray(values) || values.length > 500) {
+    throw new ResourceImpactError(
+      'authoritative_dns_impact_invalid',
+      'Authoritative DNS retirement impact provider returned invalid metadata',
+      503,
+    );
+  }
+  const items = values.map(sanitizeDnsRetirementReference)
+    .sort((left, right) => left.domainId.localeCompare(right.domainId));
+  if (new Set(items.map((item) => item.domainId)).size !== items.length) {
+    throw new ResourceImpactError(
+      'authoritative_dns_impact_invalid',
+      'Authoritative DNS retirement impact contains duplicate Domain identities',
+      503,
+    );
+  }
+  return Object.freeze({ status: 'available', items: Object.freeze(items) });
+}
+
 function blocker(code, resourceType, count = null) {
   return Object.freeze({ code, resourceType, count });
 }
@@ -235,6 +300,7 @@ export async function previewResourceImpact({
   dnsHostingRegistry,
   mailDomainRegistry,
   additionalProviders = {},
+  dnsRetirementImpactProvider = null,
 } = {}) {
   if (!['website', 'domain'].includes(resourceType)) {
     throw new ResourceImpactError('impact_resource_type_invalid', 'Impact resource type must be website or domain');
@@ -252,7 +318,8 @@ export async function previewResourceImpact({
   if (dependencies.some(([dependency, methods]) => !dependency
     || methods.some((method) => typeof dependency[method] !== 'function'))
     || !additionalProviders || typeof additionalProviders !== 'object' || Array.isArray(additionalProviders)
-    || Object.keys(additionalProviders).some((key) => !ADDITIONAL_TYPES.some(([allowed]) => allowed === key))) {
+    || Object.keys(additionalProviders).some((key) => !ADDITIONAL_TYPES.some(([allowed]) => allowed === key))
+    || (dnsRetirementImpactProvider !== null && typeof dnsRetirementImpactProvider !== 'function')) {
     throw new ResourceImpactError('impact_dependencies_invalid', 'Impact preview dependencies are unavailable', 503);
   }
   const normalizedResourceId = resourceIdentity(resourceId, resourceType);
@@ -338,6 +405,9 @@ export async function previewResourceImpact({
     [key, await additionalBucket(additionalProviders[key], type, providerContext)]
   )));
   const additional = Object.fromEntries(additionalEntries);
+  const authoritativeDns = requested.operation === 'delete'
+    ? await authoritativeDnsBucket(dnsRetirementImpactProvider, providerContext)
+    : null;
   const dependencySet = Object.freeze({
     linkedDomains: Object.freeze(linkedDomains),
     childDomains: Object.freeze(childDomains),
@@ -349,10 +419,17 @@ export async function previewResourceImpact({
     certificates: Object.freeze(certificateReferences),
     activeJobs: Object.freeze(activeJobs),
     ...additional,
+    ...(authoritativeDns === null ? {} : { authoritativeDns }),
   });
   const blockers = knownBlockers(dependencySet);
   if (dnsZones.length > 0) blockers.push(blocker('dns_zones_present', 'dns_zone', dnsZones.length));
   if (mailDomains.length > 0) blockers.push(blocker('mail_domains_present', 'mail_domain', mailDomains.length));
+  if (authoritativeDns !== null) {
+    const blocked = authoritativeDns.items.filter((item) => item.state === 'blocked');
+    if (blocked.length > 0) {
+      blockers.push(blocker('authoritative_dns_retirement_blocked', 'authoritative_dns', blocked.length));
+    }
+  }
   for (const [key, type] of ADDITIONAL_TYPES) {
     const bucket = additional[key];
     if (bucket.status === 'unavailable') blockers.push(blocker('dependency_inventory_unavailable', type));
@@ -398,5 +475,7 @@ export const resourceImpactInternals = Object.freeze({
   descendants,
   sanitizeAdditionalReference,
   additionalBucket,
+  sanitizeDnsRetirementReference,
+  authoritativeDnsBucket,
   relevantJobs,
 });
