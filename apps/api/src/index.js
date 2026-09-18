@@ -478,10 +478,13 @@ const listener = createAuthenticatedApi({
   toolGatewayAuthorizer: ({ gateway, request, session }) => {
     if (gateway.id !== 'ttyd') return false;
     const toolSessionId = request.headers['x-yunpanel-tool-session'];
-    if (typeof toolSessionId !== 'string' || toolSessionId.includes(',')) return false;
+    const transport = request.headers['x-yunpanel-tool-transport'];
+    if (typeof toolSessionId !== 'string' || toolSessionId.includes(',')
+      || !['http', 'websocket'].includes(transport)) return false;
     return Boolean(ttydSessionManager.authorize(toolSessionId, {
       ownerSessionId: session.id,
       userId: session.user.id,
+      markConnected: transport === 'websocket',
     }));
   },
   publicWebhookHandler: createGithubWebhookHandler({
