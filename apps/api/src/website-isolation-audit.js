@@ -1018,6 +1018,8 @@ function boundedStaticRuntimeMigrationPreview(value, scope) {
   const isolation = boundedStaticPublishPreview(value.current.isolation, scope);
   const releasePermissions = boundedStaticReleasePreview(value.current.releasePermissions, scope);
   if (!runtime || !isolation || !releasePermissions) return null;
+  if (isolation.current.current.present === true
+    && releasePermissions.current.currentTarget !== isolation.current.current.target) return null;
   const expectedSatisfied = runtime.satisfied === true && isolation.satisfied === true;
   const expectedSafeControlMigrationCandidate = runtime.satisfied === true && isolation.safeMigrationCandidate === true;
   const expectedReleaseRepairCandidate = runtime.satisfied === true && releasePermissions.repairCandidate === true;
