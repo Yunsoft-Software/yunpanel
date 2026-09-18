@@ -680,6 +680,354 @@ export function createStaticPublishIsolationManager({
     });
   }
 
+  function desiredReleaseMode(type) {
+    return type === 'directory' ? 0o750 : 0o640;
+  }
+
+  async function releaseMigrationState(spec) {
+    const identity = await inspectIdentity(spec);
+    if (!identity?.satisfied) {
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_identity_required',
+        'Static release migration requires the canonical Website identity',
+      );
+    }
+    if (!(await aclToolsAvailable())) {
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_acl_unavailable',
+        'Static release migration requires existing POSIX ACL tooling',
+      );
+    }
+
+    let publishInfo;
+    let releasesInfo;
+    let currentInfo;
+    try {
+      [publishInfo, releasesInfo, currentInfo] = await Promise.all([
+        lstatFn(spec.publishRoot),
+        lstatFn(spec.releasesRoot),
+        lstatFn(spec.currentPath),
+      ]);
+    } catch (error) {
+      if (missing(error)) {
+        throw new StaticPublishIsolationError(
+          'static_publish_release_migration_path_missing',
+          'Static release migration requires the existing managed publish tree',
+        );
+      }
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_path_unavailable',
+        'Static release migration paths could not be inspected',
+      );
+    }
+    if (!publishInfo?.isDirectory?.() || publishInfo.isSymbolicLink?.()
+      || !releasesInfo?.isDirectory?.() || releasesInfo.isSymbolicLink?.()
+      || !currentInfo?.isSymbolicLink?.()) {
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_path_type_drift',
+        'Static release migration path types are not canonical',
+      );
+    }
+
+    const snapshot = await collectReleaseRepairSnapshot(spec, identity);
+    if (snapshot.entries.length < 1) {
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_release_missing',
+        'Static release migration requires at least one managed release',
+      );
+    }
+    let currentTarget;
+    try { currentTarget = await readlinkFn(spec.currentPath); }
+    catch {
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_current_unavailable',
+        'Static release migration current target could not be read',
+      );
+    }
+    const currentReleaseId = releaseIdFromTarget(currentTarget);
+    if (!currentReleaseId || !snapshot.releases.includes(currentReleaseId)) {
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_current_drift',
+        'Static release migration current target is not a managed release',
+      );
+    }
+    return Object.freeze({ identity, snapshot, currentTarget });
+  }
+
+  function releaseEntryState(current, previous, receipt) {
+    if (current.relativePath !== previous.relativePath
+      || current.type !== previous.type
+      || current.dev !== previous.dev
+      || current.ino !== previous.ino) return null;
+    const desiredMode = desiredReleaseMode(previous.type);
+    const previousMatch = current.uid === previous.uid
+      && current.gid === previous.gid
+      && current.mode === previous.mode
+      && current.acl === previous.acl;
+    if (previousMatch) return 'previous';
+
+    const afterChown = current.uid === receipt.desiredUid
+      && current.gid === receipt.desiredGid
+      && current.mode === previous.mode
+      && current.acl === previous.acl;
+    if (afterChown) return 'after_chown';
+
+    const afterChmod = current.uid === receipt.desiredUid
+      && current.gid === receipt.desiredGid
+      && current.mode === desiredMode
+      && current.acl === modeAdjustedReleaseAcl(previous.acl, previous.type);
+    if (afterChmod) return 'after_chmod';
+
+    const desired = current.uid === receipt.desiredUid
+      && current.gid === receipt.desiredGid
+      && current.mode === desiredMode
+      && current.acl === previous.desiredAcl;
+    if (desired) return 'desired';
+    return null;
+  }
+
+  function releaseSnapshotStates(state, receipt) {
+    if (state.currentTarget !== receipt.currentTarget
+      || state.snapshot.entries.length !== receipt.entries.length) {
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_drift',
+        'Static release topology changed after the migration receipt checkpoint',
+      );
+    }
+    const states = [];
+    for (let index = 0; index < receipt.entries.length; index += 1) {
+      const current = state.snapshot.entries[index];
+      const previous = receipt.entries[index];
+      const entryState = releaseEntryState(current, previous, receipt);
+      if (!entryState) {
+        throw new StaticPublishIsolationError(
+          'static_publish_release_migration_drift',
+          'Static release entry changed outside the migration-owned state transition',
+        );
+      }
+      states.push(entryState);
+    }
+    return Object.freeze(states);
+  }
+
+  async function setReleaseAcl(target, acl, operationId, index) {
+    await mkdirFn(releaseMigrationReceiptRoot, { recursive: true, mode: 0o700 });
+    const aclPath = path.posix.join(releaseMigrationReceiptRoot, `${operationId}.${index}.acl`);
+    try {
+      await atomicWrite(aclPath, acl, 0o600);
+      await run(SETFACL_PATH, [`--set-file=${aclPath}`, target], { timeout: 10_000 });
+    } catch {
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_acl_apply_failed',
+        'Static release ACL could not be applied',
+      );
+    } finally {
+      await rmFn(aclPath, { force: true }).catch(() => {});
+    }
+  }
+
+  async function mutateReleaseEntry(spec, receipt, previous, currentState, targetState, index) {
+    const target = path.posix.join(spec.releasesRoot, previous.relativePath);
+    const desired = targetState === 'desired'
+      ? Object.freeze({
+        uid: receipt.desiredUid,
+        gid: receipt.desiredGid,
+        mode: desiredReleaseMode(previous.type),
+        acl: previous.desiredAcl,
+      })
+      : Object.freeze({
+        uid: previous.uid,
+        gid: previous.gid,
+        mode: previous.mode,
+        acl: previous.acl,
+      });
+
+    let handle;
+    try {
+      handle = await openFn(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_CLOEXEC);
+      const info = await handle.stat();
+      const expectedType = previous.type === 'directory' ? info?.isDirectory?.() : info?.isFile?.();
+      if (!expectedType || info.dev !== previous.dev || info.ino !== previous.ino) {
+        throw new StaticPublishIsolationError(
+          'static_publish_release_migration_drift',
+          'Static release inode changed after the migration receipt checkpoint',
+        );
+      }
+      const fdPath = `/proc/${process.pid}/fd/${handle.fd}`;
+      const currentAcl = canonicalAcl(await getAcl(fdPath));
+      const current = Object.freeze({
+        relativePath: previous.relativePath,
+        type: previous.type,
+        uid: info.uid,
+        gid: info.gid,
+        mode: modeOf(info),
+        dev: info.dev,
+        ino: info.ino,
+        acl: currentAcl,
+      });
+      if (releaseEntryState(current, previous, receipt) !== currentState) {
+        throw new StaticPublishIsolationError(
+          'static_publish_release_migration_drift',
+          'Static release entry changed before its migration mutation',
+        );
+      }
+
+      await handle.chown(desired.uid, desired.gid);
+      await handle.chmod(desired.mode);
+      await setReleaseAcl(fdPath, desired.acl, receipt.operationId, index);
+    } catch (error) {
+      if (error instanceof StaticPublishIsolationError) throw error;
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_apply_failed',
+        'Static release metadata could not be changed safely',
+      );
+    } finally {
+      await handle?.close().catch(() => {});
+    }
+  }
+
+  async function inspectReleaseMigrationOperation(rawIntent, { operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const operationId = normalizeOperationId(rawOperationId);
+    let receipt = await loadReleaseMigrationReceipt(operationId, spec);
+    if (!receipt) {
+      return Object.freeze({ satisfied: false, reason: 'static_publish_release_receipt_missing' });
+    }
+    if (receipt.state === 'compensated') {
+      return Object.freeze({ satisfied: false, reason: 'static_publish_release_migration_compensated' });
+    }
+    const state = await releaseMigrationState(spec);
+    const states = releaseSnapshotStates(state, receipt);
+    if (!states.every((entryState) => entryState === 'desired')) {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'static_publish_release_migration_incomplete',
+      });
+    }
+    if (receipt.state !== 'active') {
+      receipt = await persistReleaseMigrationReceipt(operationId, spec, { ...receipt, state: 'active' });
+    }
+    return Object.freeze({
+      satisfied: true,
+      staticReleaseReceiptVersion: RELEASE_MIGRATION_RECEIPT_VERSION,
+      migratedStaticReleasePermissions: true,
+      treeSha256: receipt.treeSha256,
+      receiptState: receipt.state,
+    });
+  }
+
+  async function applyReleaseMigration(rawIntent, { operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const operationId = normalizeOperationId(rawOperationId);
+    let receipt = await loadReleaseMigrationReceipt(operationId, spec);
+    if (receipt?.state === 'compensated') {
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_compensated',
+        'Compensated static release migration cannot be re-applied',
+      );
+    }
+
+    if (!receipt) {
+      const preview = await previewReleaseMigration(rawIntent);
+      if (preview.satisfied === true) {
+        throw new StaticPublishIsolationError(
+          'static_publish_release_migration_not_operation_owned',
+          'Canonical static release state is not owned by this migration operation',
+        );
+      }
+      if (preview.repairCandidate !== true || !preview.current.tree) {
+        throw new StaticPublishIsolationError(
+          'static_publish_release_migration_not_safe',
+          'Static release migration requires a bounded managed release drift preview',
+        );
+      }
+      const state = await releaseMigrationState(spec);
+      if (releaseSnapshotDigest(state.snapshot.entries) !== preview.current.tree.sha256
+        || state.currentTarget !== preview.current.currentTarget) {
+        throw new StaticPublishIsolationError(
+          'static_publish_release_migration_preview_stale',
+          'Static release state changed before the durable receipt checkpoint',
+        );
+      }
+      receipt = await persistReleaseMigrationReceipt(operationId, spec, {
+        desiredUid: state.identity.uid,
+        desiredGid: state.identity.gid,
+        currentTarget: state.currentTarget,
+        treeSha256: preview.current.tree.sha256,
+        entries: state.snapshot.entries,
+        state: 'prepared',
+      });
+    }
+
+    const before = await releaseMigrationState(spec);
+    const states = releaseSnapshotStates(before, receipt);
+    for (let index = 0; index < receipt.entries.length; index += 1) {
+      if (states[index] === 'desired') continue;
+      await mutateReleaseEntry(spec, receipt, receipt.entries[index], states[index], 'desired', index);
+    }
+
+    const verified = await inspectReleaseMigrationOperation(rawIntent, { operationId });
+    if (!verified.satisfied) {
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_unverified',
+        'Static release migration could not be verified',
+      );
+    }
+    return verified;
+  }
+
+  async function inspectReleaseMigrationCompensation(rawIntent, { operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const operationId = normalizeOperationId(rawOperationId);
+    const receipt = await loadReleaseMigrationReceipt(operationId, spec);
+    if (!receipt) {
+      return Object.freeze({ satisfied: false, reason: 'static_publish_release_receipt_missing' });
+    }
+    const state = await releaseMigrationState(spec);
+    const states = releaseSnapshotStates(state, receipt);
+    const restored = states.every((entryState) => entryState === 'previous');
+    return Object.freeze({
+      satisfied: restored,
+      restoredStaticReleasePermissions: restored,
+      treeSha256: receipt.treeSha256,
+      receiptState: receipt.state,
+      ...(restored ? {} : { reason: 'static_publish_release_migration_compensation_pending' }),
+    });
+  }
+
+  async function compensateReleaseMigration(rawIntent, { operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const operationId = normalizeOperationId(rawOperationId);
+    let receipt = await loadReleaseMigrationReceipt(operationId, spec);
+    if (!receipt) {
+      throw new StaticPublishIsolationError(
+        'static_publish_release_receipt_missing',
+        'Static release migration receipt is required for rollback',
+      );
+    }
+    if (receipt.state === 'compensated') {
+      return inspectReleaseMigrationCompensation(rawIntent, { operationId });
+    }
+
+    const before = await releaseMigrationState(spec);
+    const states = releaseSnapshotStates(before, receipt);
+    for (let index = 0; index < receipt.entries.length; index += 1) {
+      if (states[index] === 'previous') continue;
+      await mutateReleaseEntry(spec, receipt, receipt.entries[index], states[index], 'previous', index);
+    }
+
+    let after = await inspectReleaseMigrationCompensation(rawIntent, { operationId });
+    if (!after.satisfied) {
+      throw new StaticPublishIsolationError(
+        'static_publish_release_migration_compensation_unverified',
+        'Static release migration rollback could not be verified',
+      );
+    }
+    receipt = await persistReleaseMigrationReceipt(operationId, spec, { ...receipt, state: 'compensated' });
+    after = await inspectReleaseMigrationCompensation(rawIntent, { operationId });
+    return Object.freeze({ ...after, receiptState: receipt.state });
+  }
+
   async function previewMigration(rawIntent) {
     const spec = normalizeIntent(rawIntent);
 
@@ -1209,6 +1557,10 @@ export function createStaticPublishIsolationManager({
     inspect,
     previewMigration,
     previewReleaseMigration,
+    inspectReleaseMigrationOperation,
+    applyReleaseMigration,
+    inspectReleaseMigrationCompensation,
+    compensateReleaseMigration,
     inspectMigrationOperation,
     applyMigration,
     inspectMigrationCompensation,
