@@ -573,8 +573,8 @@ export function createSftpSiteManager({
     const before = await inspectCompensation(rawIntent, { operationId: id });
     if (before.satisfied) {
       receipt = await persistReceipt(id, spec, unitName, 'compensated', {
-      createdDirectories: receipt.createdDirectories,
-    });
+        createdDirectories: receipt.createdDirectories,
+      });
       return Object.freeze({ ...before, receiptState: receipt.state });
     }
     if (before.reason === 'sftp_compensation_drift') {
@@ -603,9 +603,11 @@ export function createSftpSiteManager({
       if (error instanceof SftpSiteManagerError) throw error;
       throw new SftpSiteManagerError('sftp_compensation_failed', 'SFTP Website isolation could not be removed safely');
     }
-    receipt = await persistReceipt(id, spec, unitName, 'compensated');
     const after = await inspectCompensation(rawIntent, { operationId: id });
     if (!after.satisfied) throw new SftpSiteManagerError('sftp_compensation_unverified', 'SFTP Website compensation could not be verified');
+    receipt = await persistReceipt(id, spec, unitName, 'compensated', {
+      createdDirectories: receipt.createdDirectories,
+    });
     return Object.freeze({ ...after, receiptState: receipt.state });
   }
 
