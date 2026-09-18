@@ -274,7 +274,7 @@ export function createApp({
       ? createDnsZoneRetirementService({
         domainRegistry,
         powerDnsSecretRegistry,
-        provisioningRegistry: typeof websiteProvisioningRuntime?.registry?.listForWebsite === 'function'
+        provisioningRegistry: typeof websiteProvisioningRuntime?.registry?.listForDnsZone === 'function'
           ? websiteProvisioningRuntime.registry
           : null,
         localServerId,
@@ -502,7 +502,7 @@ export function createApp({
       authoritativeService: powerDnsAuthoritativeService,
       ...(powerDnsSecretRegistry ? { domainRegistry, powerDnsSecretRegistry } : {}),
       ...(dnsRetirementImpact ? { dnsZoneRetirementService: dnsRetirementImpact } : {}),
-      ...(typeof websiteProvisioningRuntime?.registry?.listForWebsite === 'function'
+      ...(typeof websiteProvisioningRuntime?.registry?.listForDnsZone === 'function'
         ? { websiteProvisioningRegistry: websiteProvisioningRuntime.registry }
         : {}),
       ...(mailServiceIdentityRegistry ? {
