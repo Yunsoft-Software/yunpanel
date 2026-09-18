@@ -491,6 +491,163 @@ test('isolation audit rejects Passenger preview paths that only share a string p
   assert.equal(audit.inspectedSteps.find((step) => step.stepId === 'runtime').passengerMigrationPreview, undefined);
 });
 
+
+test('isolation audit pins bounded PHP container, FPM and UMask drift into the migration digest', async () => {
+  const releaseDirectory = `${identity.paths.runtime.releasesDirectory}/${operationId}`;
+  const healthyDirectory = (uid, gid, mode) => ({
+    present: true,
+    directory: true,
+    symbolicLink: false,
+    uid,
+    gid,
+    mode,
+  });
+  const phpPreview = {
+    version: 1,
+    adapter: 'php-runtime',
+    satisfied: false,
+    current: {
+      container: {
+        version: 1,
+        adapter: 'php-container',
+        satisfied: false,
+        current: {
+          identity: {
+            satisfied: true,
+            uid: 1201,
+            gid: 1201,
+            homeDirectory: identity.paths.workspace.homeDirectory,
+          },
+          applicationRoot: healthyDirectory(1201, 1201, '0750'),
+          releasesDirectory: healthyDirectory(1201, 1201, '0750'),
+          releaseDirectory: healthyDirectory(1201, 1201, '0750'),
+          releaseDocumentRoot: healthyDirectory(1201, 1201, '0750'),
+          currentRelease: {
+            present: true,
+            directory: false,
+            symbolicLink: true,
+            uid: 1201,
+            gid: 1201,
+            mode: '0777',
+          },
+          currentTarget: releaseDirectory,
+          currentTargetError: null,
+        },
+        desired: {
+          websiteId,
+          applicationId,
+          releaseId: operationId,
+          unixUser: identity.unixUser,
+          documentRoot: `${identity.paths.runtime.currentRelease}/public`,
+          applicationRoot: identity.paths.runtime.applicationRoot,
+          releasesDirectory: identity.paths.runtime.releasesDirectory,
+          currentRelease: identity.paths.runtime.currentRelease,
+          releaseDirectory,
+          releaseDocumentRoot: `${releaseDirectory}/public`,
+          controlDirectoryMode: '0755',
+          releaseDirectoryMode: '0750',
+        },
+        differences: ['php_site_container_control_plane_drift'],
+      },
+      fpm: {
+        version: 1,
+        adapter: 'php-fpm',
+        satisfied: false,
+        current: {
+          identity: {
+            satisfied: true,
+            uid: 1201,
+            gid: 1201,
+            homeDirectory: identity.paths.workspace.homeDirectory,
+            homeMode: '0750',
+          },
+          documentRoot: healthyDirectory(1201, 1201, '0750'),
+          package: { installed: false, version: null },
+          receipt: { state: null, mutated: null, previousConfigSha256: null, error: null },
+          pool: { present: false, sha256: null, matchesDesired: false, readError: null },
+          configValid: null,
+          serviceActive: false,
+          socket: { present: false },
+        },
+        desired: {
+          websiteId,
+          applicationId,
+          unixUser: identity.unixUser,
+          homeDirectory: identity.paths.workspace.homeDirectory,
+          documentRoot: `${identity.paths.runtime.currentRelease}/public`,
+          packageName: 'php8.3-fpm',
+          phpVersion: '8.3',
+          configPath: `/etc/php/8.3/fpm/pool.d/yunpanel-${identity.unixUser}.conf`,
+          configSha256: 'd'.repeat(64),
+          configMode: '0600',
+          socketPath: `/run/php/yunpanel-${identity.unixUser}.sock`,
+          socketMode: '0660',
+          serviceUnit: 'php8.3-fpm.service',
+        },
+        differences: [
+          'php_fpm_package_missing',
+          'php_fpm_receipt_missing',
+          'php_fpm_pool_missing',
+          'php_fpm_service_inactive',
+          'php_fpm_socket_missing',
+        ],
+      },
+      umask: { satisfied: false, reason: 'service_umask_not_effective' },
+    },
+    desired: {
+      websiteId,
+      applicationId,
+      unixUser: identity.unixUser,
+      documentRoot: `${identity.paths.runtime.currentRelease}/public`,
+      runtimeUmask: '0027',
+    },
+    differences: [
+      'php_site_container_control_plane_drift',
+      'php_fpm_package_missing',
+      'php_fpm_receipt_missing',
+      'php_fpm_pool_missing',
+      'php_fpm_service_inactive',
+      'php_fpm_socket_missing',
+      'php_runtime_umask_not_ready',
+    ],
+    rawSecret: 'do-not-project',
+  };
+
+  const first = await service({
+    runtimeType: 'php',
+    stepResults: { php_runtime: { satisfied: false, reason: 'php_container_not_ready' } },
+    migrationPreviews: { php_runtime: phpPreview },
+  }).audit(websiteId);
+
+  const preview = first.migration.changes.find((change) => change.id === 'provisioning.php_runtime')
+    .current.phpRuntimeMigrationPreview;
+  assert.equal(preview.adapter, 'php-runtime');
+  assert.equal(preview.current.container.current.applicationRoot.uid, 1201);
+  assert.equal(preview.current.fpm.current.pool.present, false);
+  assert.equal(preview.current.fpm.current.receipt.state, null);
+  assert.deepEqual(preview.current.umask, {
+    satisfied: false,
+    reason: 'service_umask_not_effective',
+  });
+  assert.equal(JSON.stringify(first.migration).includes('do-not-project'), false);
+  assert.deepEqual(first.inspectedSteps.find((step) => step.stepId === 'php_runtime').phpRuntimeMigrationPreview, preview);
+
+  const second = await service({
+    runtimeType: 'php',
+    stepResults: { php_runtime: { satisfied: false, reason: 'php_runtime_umask_not_ready' } },
+    migrationPreviews: {
+      php_runtime: {
+        ...phpPreview,
+        current: {
+          ...phpPreview.current,
+          umask: { satisfied: false, reason: 'service_umask_unavailable' },
+        },
+      },
+    },
+  }).audit(websiteId);
+  assert.notEqual(first.migration.previewDigest, second.migration.previewDigest);
+});
+
 test('isolation audit fails closed when managed host inspection detects drift', async () => {
   const drift = new Error('drift');
   drift.code = 'website_identity_workspace_drift';
