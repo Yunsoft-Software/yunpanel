@@ -250,6 +250,13 @@ export function createAuthenticatedApi({
       checkOrigin(request);
       if (!safeEqual(request.headers['x-csrf-token'], session.csrfToken)) throw new AuthError('csrf_invalid', 'Session verification failed. Reload the page.', 403);
     }
+    if (['/api/phpmyadmin-gateway-access', '/api/elfinder-gateway-access'].includes(pathname)) {
+      if (!SAFE_METHODS.has(request.method)) {
+        throw new AuthError('method_not_allowed', 'Use GET or HEAD.', 405);
+      }
+      ownerPolicy.requireManagement(session);
+      return json(response, 204);
+    }
     if (pathname.startsWith('/api/auth/')) {
       if (pathname === '/api/auth/session' && request.method === 'GET') return json(response, 200, { data: ownerPolicy.describe(session) });
       if (pathname === '/api/auth/security' && request.method === 'GET') return json(response, 200, { data: ownerPolicy.describe(session).security });
