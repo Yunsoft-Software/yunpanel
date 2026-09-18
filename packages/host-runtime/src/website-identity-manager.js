@@ -174,14 +174,19 @@ export function createWebsiteIdentityManager({
     return receiptValue(receipt, { operationId, intent });
   }
 
-  async function inspectAccount(intent) {
+  async function lookupAccount(intent) {
     let result;
     try { result = await run(GETENT_PATH, ['passwd', intent.user], { timeout: 5_000 }); }
     catch (error) {
       if (missingCommandState(error)) return null;
       throw new WebsiteIdentityManagerError('website_identity_inspection_failed', 'Website Unix identity inspection failed');
     }
-    const account = parsePasswdLine(result?.stdout, intent.user);
+    return parsePasswdLine(result?.stdout, intent.user);
+  }
+
+  async function inspectAccount(intent) {
+    const account = await lookupAccount(intent);
+    if (!account) return null;
     if (account.homeDirectory !== intent.homeDirectory || !NOLOGIN_SHELLS.has(account.shell)) {
       throw new WebsiteIdentityManagerError('website_identity_drift', 'Existing Website Unix identity does not match managed state');
     }
@@ -209,6 +214,84 @@ export function createWebsiteIdentityManager({
       throw new WebsiteIdentityManagerError('website_identity_home_drift', 'Website home path is not a managed directory');
     }
     return Object.freeze({ uid: stat.uid, gid: stat.gid, mode: modeOf(stat) });
+  }
+
+  async function previewMigration(rawIntent) {
+    const intent = normalizeIntent(rawIntent, homeRoot);
+    const account = await lookupAccount(intent);
+    const group = await inspectGroup(intent);
+    const home = await inspectHome(intent);
+    const differences = [];
+
+    if (!account) {
+      differences.push('website_identity_user_missing');
+    } else {
+      if (account.homeDirectory !== intent.homeDirectory) differences.push('website_identity_account_home_drift');
+      if (!NOLOGIN_SHELLS.has(account.shell)) differences.push('website_identity_account_shell_drift');
+    }
+
+    if (!group) {
+      differences.push('website_identity_group_missing');
+    } else {
+      if (account && group.gid !== account.gid) differences.push('website_identity_group_gid_drift');
+      if (group.members.length !== 0) differences.push('website_identity_group_members_drift');
+      if (!account) differences.push('website_identity_group_conflict');
+    }
+
+    if (!home) {
+      differences.push('website_identity_home_missing');
+    } else {
+      if (account && (home.uid !== account.uid || home.gid !== account.gid)) {
+        differences.push('website_identity_home_owner_drift');
+      }
+      if (home.mode !== MANAGED_HOME_MODE) differences.push('website_identity_home_mode_drift');
+      if (!account) differences.push('website_identity_home_conflict');
+    }
+
+    const satisfied = Boolean(
+      account
+      && group
+      && home
+      && account.homeDirectory === intent.homeDirectory
+      && NOLOGIN_SHELLS.has(account.shell)
+      && group.gid === account.gid
+      && group.members.length === 0
+      && home.uid === account.uid
+      && home.gid === account.gid
+      && home.mode === MANAGED_HOME_MODE
+    );
+
+    return Object.freeze({
+      version: 1,
+      satisfied,
+      safeCreateCandidate: !account && !group && !home,
+      current: Object.freeze({
+        account: account ? Object.freeze({
+          uid: account.uid,
+          gid: account.gid,
+          homeDirectory: account.homeDirectory,
+          shell: account.shell,
+        }) : null,
+        group: group ? Object.freeze({
+          gid: group.gid,
+          memberCount: group.members.length,
+        }) : null,
+        home: home ? Object.freeze({
+          uid: home.uid,
+          gid: home.gid,
+          mode: home.mode.toString(8).padStart(4, '0'),
+        }) : null,
+      }),
+      desired: Object.freeze({
+        user: intent.user,
+        homeDirectory: intent.homeDirectory,
+        shellPolicy: 'nologin',
+        privateGroup: true,
+        groupMemberCount: 0,
+        homeMode: MANAGED_HOME_MODE.toString(8).padStart(4, '0'),
+      }),
+      differences: Object.freeze([...new Set(differences)]),
+    });
   }
 
   async function inspect(rawIntent) {
@@ -465,7 +548,7 @@ export function createWebsiteIdentityManager({
     return verified;
   }
 
-  return Object.freeze({ inspect, apply, compensate, inspectCompensation });
+  return Object.freeze({ inspect, previewMigration, apply, compensate, inspectCompensation });
 }
 
 export const websiteIdentityManagerInternals = Object.freeze({
