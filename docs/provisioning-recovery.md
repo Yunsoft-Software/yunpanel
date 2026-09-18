@@ -51,6 +51,28 @@ Destructive rollback yalnız operation'ın sahipliği kanıtlanabilen kaynağa u
 - Checksum/ownership eşleşmiyorsa var olan vhost körlemesine ezilmez veya silinmez.
 - Shared Passenger runtime site-level compensation kapsamına girmez; server-owned dependency olarak korunur.
 
+## Website isolation migration recovery
+
+Website isolation audit'ten açılan migration apply normal provisioning retry yolu değildir. Ayrı durable isolation migration journal'ı exact Website revision + preview digest + typed confirmation'a bağlıdır.
+
+Kaynakta apply authority verilen dar operation türleri:
+
+- `workspace`: yalnız preview'da eksik olduğu kanıtlanan canonical `tmp`/`logs` direct-child dizinleri;
+- `identity`: yalnız canonical Unix user/group/HOME üçlüsünün tamamı eksikken safe-create;
+- `sftp`: yalnız site-specific SSH drop-in, mount unit, chroot/mount ve receipt state'i safe-create şartını sağlarken; authorized-key desired state ayrıca root-owned materialization ile reconcile edilir;
+- `php`: yalnız PHP container ownership/path, shared package/service ve `UMask=0027` zaten canonical iken eksik site-specific FPM pool.
+
+Bu journal'da mutation öncesi operation intent'i persist edilir. `applying` veya `compensating` state ile restart edilirse adapter önce read-only operation receipt/host inspection çalıştırır; completed postcondition kanıtlanırsa journal kapatılır, kanıtlanamıyorsa aynı mutation otomatik replay edilmez.
+
+Rollback sınırı operation türüne göre dardır:
+
+- workspace yalnız operation-created ve boş direct-child dizinleri non-recursive kaldırır;
+- identity receipt-owned user/group'u geri alır; HOME boşsa non-recursive kaldırabilir, veri içeriyorsa koruyup `preservedHomeData` evidence'ı bırakır;
+- SFTP receipt-owned SSH config/unit ve operation-created boş chroot/mount dizinlerini kaldırır; veri içeren dizinleri ve durable key desired state'ini korur;
+- PHP yalnız receipt-owned site pool'u restore/remove eder; shared package/service, UMask ve container ownership'e dokunmaz.
+
+Passenger legacy runtime ve static legacy permissions preview'ları explicit blocked-authority state taşır (`automaticMigration=false`). PHP container ownership/path drift'i de receipt-backed rollback authority olmadan apply'e çevrilmez. Bu drift'ler exact preview digest'e girer fakat automatic/typed migration mutation'ı başlatmaz.
+
 ## Retry ve continue kuralı
 
 Retry bir bypass yolu değildir.
