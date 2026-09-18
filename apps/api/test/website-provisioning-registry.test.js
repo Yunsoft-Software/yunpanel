@@ -166,6 +166,52 @@ test('Website operation history is durable and ordered by current journal revisi
   }
 });
 
+test('DNS zone ownership history lookup survives Website unbinding concerns and filters exact zone identity', async () => {
+  const registry = createWebsiteProvisioningRegistry({
+    now: () => Date.parse('2026-09-14T01:00:00.000Z'),
+  });
+  const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
+  const webDomainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';
+  const zoneName = 'example.com';
+  await registry.create({
+    operationId,
+    websiteId,
+    resources: { website: { id: websiteId } },
+    steps: [{
+      id: 'dns_zone',
+      kind: 'dns_zone',
+      state: 'pending',
+      intent: { serverId, webDomainId, zoneName },
+      compensation: { state: 'pending' },
+    }],
+  });
+  await registry.create({
+    operationId: secondOperationId,
+    websiteId,
+    resources: { website: { id: websiteId } },
+    steps: [{
+      id: 'dns_zone',
+      kind: 'dns_zone',
+      state: 'pending',
+      intent: { serverId, webDomainId: 'other-domain', zoneName },
+      compensation: { state: 'pending' },
+    }],
+  });
+
+  const matching = await registry.listForDnsZone({ serverId, webDomainId, zoneName });
+  assert.deepEqual(matching.map((operation) => operation.operationId), [operationId]);
+
+  assert.deepEqual(
+    await registry.listForDnsZone({ serverId, webDomainId, zoneName: 'other.example.com' }),
+    [],
+  );
+  await assert.rejects(
+    registry.listForDnsZone({ serverId: '', webDomainId, zoneName }),
+    (error) => error instanceof WebsiteProvisioningRegistryError
+      && error.code === 'website_provisioning_dns_zone_scope_invalid',
+  );
+});
+
 test('successful steps require explicit evidence and readiness waits for every required step', async () => {
   const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
   await registry.create(input());
