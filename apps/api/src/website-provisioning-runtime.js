@@ -166,11 +166,19 @@ export function createWebsiteProvisioningRuntime({
       provisioningHandlers: handlers,
       workspaceMigrationAvailable: true,
       identityMigrationAvailable: true,
+      sftpMigrationAvailable: Boolean(
+        sftpKeyLifecycle
+        && typeof handlers.sftp?.inspectMigrationOperation === 'function'
+        && typeof handlers.sftp?.applyMigration === 'function'
+        && typeof handlers.sftp?.inspectMigrationCompensation === 'function'
+        && typeof handlers.sftp?.compensateMigration === 'function'
+      ),
     });
     isolationMigration = createWebsiteIsolationMigrationRuntime({
       registry: isolationMigrationRegistry,
       auditService: isolationAudit,
       workspaceManager: workspaceMigrationManager,
+      migrationHandlers: handlers,
     });
     isolationAuditDependencies = Object.freeze({
       websiteRegistry: nextWebsiteRegistry,
