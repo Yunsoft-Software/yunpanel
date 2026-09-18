@@ -138,17 +138,10 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
       if (typeof isolationManager.inspectMigrationOperation !== 'function') {
         umaskFailure('website_static_control_migration_lifecycle_unavailable', 'Static control migration lifecycle is unavailable');
       }
-      const [runtime, isolation] = await Promise.all([
-        baseRuntime.inspect(context),
-        isolationManager.inspectMigrationOperation(isolationIntent(context), { operationId: context.operationId }),
-      ]);
-      if (runtime?.satisfied !== true) {
-        return Object.freeze({
-          satisfied: false,
-          reason: 'static_runtime_not_ready',
-          runtimeReason: runtime?.reason ?? 'static_runtime_unavailable',
-        });
-      }
+      const isolation = await isolationManager.inspectMigrationOperation(
+        isolationIntent(context),
+        { operationId: context.operationId },
+      );
       if (!isolation?.satisfied) return isolation;
       return Object.freeze({
         ...isolation,
@@ -156,11 +149,12 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
       });
     },
     async applyControlMigration(context = {}) {
-      if (typeof isolationManager.applyMigration !== 'function') {
+      if (typeof isolationManager.applyMigration !== 'function'
+        || typeof isolationManager.previewMigration !== 'function') {
         umaskFailure('website_static_control_migration_lifecycle_unavailable', 'Static control migration lifecycle is unavailable');
       }
-      const preview = await this.previewMigration(context);
-      if (preview.safeControlMigrationCandidate !== true) {
+      const preview = await isolationManager.previewMigration(isolationIntent(context));
+      if (preview.safeMigrationCandidate !== true) {
         umaskFailure(
           'website_static_control_migration_not_safe',
           'Static control migration requires healthy release content and ACL state with only control-plane metadata drift',
