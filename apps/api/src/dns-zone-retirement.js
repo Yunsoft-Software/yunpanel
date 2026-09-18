@@ -11,6 +11,10 @@ const ROOT_ZONE_BLOCKERS = Object.freeze({
   manual: 'dns_zone_manual_rrsets_present',
   dnssec: 'dns_zone_dnssec_retirement_required',
   retention: 'dns_zone_delete_retention_policy_required',
+  mail: 'dns_zone_mail_dependencies_present',
+  mailInventory: 'dns_zone_mail_dependency_inventory_unavailable',
+  jobs: 'dns_zone_domain_jobs_active',
+  jobInventory: 'dns_zone_job_inventory_unavailable',
 });
 const MAX_RETENTION_DAYS = 3650;
 
@@ -218,11 +222,16 @@ function previewIdentity(
   authoritativeZone,
   ownershipOrigin = null,
   rawRetentionPolicy = null,
+  dependencyImpact = null,
 ) {
   const children = descendants(relatedDomains, domain.id);
   const root = (domain.parentDomainId ?? null) === null;
   const ownership = ownershipOrigin ?? provisioningOwnership(domain, null);
   const retention = retentionPolicy(rawRetentionPolicy);
+  const dependencies = dependencyImpact ?? Object.freeze({
+    mail: Object.freeze({ status: 'unavailable', count: 0, ids: Object.freeze([]) }),
+    jobs: Object.freeze({ status: 'unavailable', count: 0, ids: Object.freeze([]) }),
+  });
   const zoneBase = root ? zoneImpact(authoritativeZone) : Object.freeze({
     exists: false,
     snapshotDigest: null,
@@ -246,6 +255,10 @@ function previewIdentity(
   if ((domain.certificateId ?? null) !== null) blockers.push('domain_certificate_present');
   if (routingActive(domain)) blockers.push('domain_routing_active');
   if (root && zone.exists) {
+    if (dependencies.mail.status !== 'available') blockers.push(ROOT_ZONE_BLOCKERS.mailInventory);
+    else if (dependencies.mail.count > 0) blockers.push(ROOT_ZONE_BLOCKERS.mail);
+    if (dependencies.jobs.status !== 'available') blockers.push(ROOT_ZONE_BLOCKERS.jobInventory);
+    else if (dependencies.jobs.count > 0) blockers.push(ROOT_ZONE_BLOCKERS.jobs);
     if (ownership.status !== 'provisioning_created') {
       blockers.push(ROOT_ZONE_BLOCKERS.ownership);
     } else if (!retention.configured) {
@@ -281,6 +294,7 @@ function previewIdentity(
     }),
     zone,
     retention,
+    dependencies,
     blockers: Object.freeze(blockers),
     retirementPlanReady: blockers.length === 0,
   });
@@ -290,6 +304,8 @@ export function createDnsZoneRetirementService({
   domainRegistry,
   powerDnsSecretRegistry,
   provisioningRegistry = null,
+  mailDomainRegistry = null,
+  jobRegistry = null,
   retentionPolicy: rawRetentionPolicy = null,
   zoneManager = createPowerDnsZoneManager(),
   localServerId,
@@ -298,6 +314,8 @@ export function createDnsZoneRetirementService({
     || typeof domainRegistry.listDomains !== 'function'
     || !powerDnsSecretRegistry || typeof powerDnsSecretRegistry.materializeForServer !== 'function'
     || (provisioningRegistry !== null && typeof provisioningRegistry.listForDnsZone !== 'function')
+    || (mailDomainRegistry !== null && typeof mailDomainRegistry.listMailDomains !== 'function')
+    || (jobRegistry !== null && typeof jobRegistry.listJobs !== 'function')
     || !zoneManager || typeof zoneManager.getZone !== 'function'
     || typeof zoneManager.inspectSnapshotDeletion !== 'function'
     || typeof zoneManager.deleteSnapshot !== 'function'
@@ -367,6 +385,55 @@ export function createDnsZoneRetirementService({
     }
     const ownershipOrigin = provisioningOwnership(domain, provisioningOperations);
 
+    let mailDependencies = null;
+    if (mailDomainRegistry !== null) {
+      try {
+        const allMailDomains = await mailDomainRegistry.listMailDomains();
+        if (!Array.isArray(allMailDomains)) throw new Error('invalid mail inventory');
+        mailDependencies = allMailDomains
+          .filter((entry) => entry?.webDomainId === domain.id)
+          .map((entry) => String(entry.id))
+          .filter((id) => id.length > 0 && id.length <= 128)
+          .sort();
+      } catch {
+        throw new DnsZoneRetirementError(
+          'dns_zone_retirement_mail_inventory_unavailable',
+          'Mail-domain dependencies could not be inspected',
+          503,
+        );
+      }
+    }
+    let domainJobs = null;
+    if (jobRegistry !== null) {
+      try {
+        const jobs = await jobRegistry.listJobs({ resourceType: 'domain', resourceId: domain.id });
+        if (!Array.isArray(jobs)) throw new Error('invalid job inventory');
+        domainJobs = jobs
+          .filter((job) => ['queued', 'running'].includes(job?.status))
+          .map((job) => String(job.id))
+          .filter((id) => id.length > 0 && id.length <= 128)
+          .sort();
+      } catch {
+        throw new DnsZoneRetirementError(
+          'dns_zone_retirement_job_inventory_unavailable',
+          'Active Domain jobs could not be inspected',
+          503,
+        );
+      }
+    }
+    const dependencyImpact = Object.freeze({
+      mail: Object.freeze({
+        status: mailDependencies === null ? 'unavailable' : 'available',
+        count: mailDependencies?.length ?? 0,
+        ids: Object.freeze(mailDependencies ?? []),
+      }),
+      jobs: Object.freeze({
+        status: domainJobs === null ? 'unavailable' : 'available',
+        count: domainJobs?.length ?? 0,
+        ids: Object.freeze(domainJobs ?? []),
+      }),
+    });
+
     let authoritativeZone = null;
     if ((domain.parentDomainId ?? null) === null) {
       const secret = await materializeSecret(domain.serverId);
@@ -388,6 +455,7 @@ export function createDnsZoneRetirementService({
       configuredRetentionPolicy.configured
         ? { snapshotRetentionDays: configuredRetentionPolicy.snapshotRetentionDays }
         : null,
+      dependencyImpact,
     );
     const previewDigest = digest(identity);
     if (!SHA256_PATTERN.test(previewDigest)) {
