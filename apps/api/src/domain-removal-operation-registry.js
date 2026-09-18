@@ -453,7 +453,7 @@ export function createDomainRemovalOperationRegistry({
 
   async function markStepRunning(operationId, stepId) {
     const operation = requireOperation(await get(operationId));
-    if (['failed', 'removed'].includes(operation.status)) {
+    if (operation.status === 'removed') {
       throw new DomainRemovalOperationRegistryError(
         'domain_removal_operation_not_runnable',
         'Domain removal operation cannot run from its current state',
