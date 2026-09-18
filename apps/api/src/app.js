@@ -97,6 +97,7 @@ import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { PowerDnsAuthoritativeServiceError } from './powerdns-authoritative-service.js';
 import { mountPowerDnsRoutes, PowerDnsHttpError } from './powerdns-http.js';
 import { PowerDnsSecretRegistryError } from './powerdns-secret-registry.js';
+import { createDnsZoneRetirementService } from './dns-zone-retirement.js';
 import { ResourceImpactError } from './resource-impact.js';
 import { mountResourceImpactRoutes } from './resource-impact-http.js';
 import { RoundcubeConfigurationError } from './roundcube-configuration.js';
@@ -184,6 +185,7 @@ export function createApp({
   serverDnsIdentityRegistry = null,
   powerDnsAuthoritativeService = null,
   powerDnsSecretRegistry = null,
+  dnsZoneRetirementImpactService = null,
   databaseBindingRegistry = null,
   databaseCredentialRegistry = null,
   databaseCredentialApplyService = null,
@@ -267,6 +269,21 @@ export function createApp({
     serverRegistry: registry,
     dnsProviderCredentialRegistry,
   });
+  const dnsRetirementImpact = dnsZoneRetirementImpactService ?? (
+    localServerId && powerDnsSecretRegistry
+      ? createDnsZoneRetirementService({
+        domainRegistry,
+        powerDnsSecretRegistry,
+        provisioningRegistry: typeof websiteProvisioningRuntime?.registry?.listForWebsite === 'function'
+          ? websiteProvisioningRuntime.registry
+          : null,
+        localServerId,
+      })
+      : null
+  );
+  if (dnsRetirementImpact !== null && typeof dnsRetirementImpact.preview !== 'function') {
+    throw new Error('DNS zone retirement impact service is invalid');
+  }
   const databaseCredentialApply = databaseCredentialApplyService ?? (
     databaseBindingRegistry && databaseCredentialRegistry
       ? createDatabaseCredentialApplyService({ databaseBindingRegistry, databaseCredentialRegistry, jobRegistry })
@@ -436,6 +453,18 @@ export function createApp({
     dnsHostingRegistry,
     mailDomainRegistry,
     localServerId,
+    ...(dnsRetirementImpact ? {
+      dnsRetirementImpactProvider: async ({ domainIds }) => Promise.all(domainIds.map(async (domainId) => {
+        const preview = await dnsRetirementImpact.preview({ domainId });
+        return Object.freeze({
+          domainId,
+          state: preview.retirementPlanReady ? 'ready' : 'blocked',
+          previewDigest: preview.previewDigest,
+          zoneSnapshotDigest: preview.zone.snapshotDigest,
+          blockers: Object.freeze([...preview.blockers]),
+        });
+      })),
+    } : {}),
     additionalProviders: {
       dockerWorkloads: async ({ dockerWorkloadId }) => {
         if (!dockerWorkloadId) return [];
@@ -472,6 +501,7 @@ export function createApp({
       dnsIdentityRegistry: serverDnsIdentityRegistry,
       authoritativeService: powerDnsAuthoritativeService,
       ...(powerDnsSecretRegistry ? { domainRegistry, powerDnsSecretRegistry } : {}),
+      ...(dnsRetirementImpact ? { dnsZoneRetirementService: dnsRetirementImpact } : {}),
       ...(typeof websiteProvisioningRuntime?.registry?.listForWebsite === 'function'
         ? { websiteProvisioningRegistry: websiteProvisioningRuntime.registry }
         : {}),
