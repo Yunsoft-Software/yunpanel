@@ -19,7 +19,8 @@ function validate(operation, payload) {
 
 test('managed hosting service protocol exposes the fixed supported catalog', () => {
   assert.deepEqual(MANAGED_SERVICE_IDS, [
-    'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin', 'postsrsd',
+    'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
+    'roundcube', 'phpmyadmin', 'elfinder', 'postsrsd',
   ]);
   assert.deepEqual(MANAGED_SERVICE_CONTROL_IDS, [
     'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'postsrsd',
@@ -43,6 +44,7 @@ test('service install accepts exactly one allowlisted service id', () => {
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'mariadb' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'roundcube' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'phpmyadmin' }).ok, true);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'elfinder' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'postsrsd' }).ok, true);
   const envelope = createOperationEnvelope({
     id,
@@ -74,4 +76,5 @@ test('service control accepts only start stop and restart without shell argument
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'ssh', action: 'restart' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'roundcube', action: 'restart' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'phpmyadmin', action: 'restart' }).ok, false);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'elfinder', action: 'restart' }).ok, false);
 });
