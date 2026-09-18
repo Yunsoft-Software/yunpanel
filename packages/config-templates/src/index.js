@@ -141,6 +141,13 @@ export {
 } from './roundcube-nginx.js';
 
 export {
+  elFinderConnectorTemplateInternals,
+  elFinderConnectorTemplatePolicy,
+  previewElFinderConnector,
+  renderElFinderConnector,
+} from './elfinder-connector.js';
+
+export {
   ElFinderFpmTemplateError,
   elFinderFpmPoolName,
   elFinderFpmPoolPath,
