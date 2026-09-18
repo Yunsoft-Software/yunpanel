@@ -859,7 +859,7 @@ function boundedStaticReleasePreview(value, scope) {
     || typeof value.satisfied !== 'boolean'
     || value.automaticMigration !== false
     || typeof value.repairCandidate !== 'boolean'
-    || value.migrationBlockedReason !== 'static_release_receipt_not_operation_owned'
+    || value.migrationBlockedReason !== 'static_release_explicit_migration_required'
     || !differences
     || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
     || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
@@ -932,7 +932,7 @@ function boundedStaticReleasePreview(value, scope) {
     satisfied: value.satisfied,
     automaticMigration: false,
     repairCandidate: value.repairCandidate,
-    migrationBlockedReason: 'static_release_receipt_not_operation_owned',
+    migrationBlockedReason: 'static_release_explicit_migration_required',
     current: Object.freeze({
       identity,
       aclToolsAvailable: value.current.aclToolsAvailable,
@@ -1004,7 +1004,7 @@ function boundedStaticRuntimeMigrationPreview(value, scope) {
     || typeof value.safeControlMigrationCandidate !== 'boolean'
     || typeof value.releaseRepairCandidate !== 'boolean'
     || value.automaticMigration !== false
-    || !['static_legacy_permissions_not_operation_owned', 'static_release_receipt_not_operation_owned'].includes(value.migrationBlockedReason)
+    || !['static_legacy_permissions_not_operation_owned', 'static_release_explicit_migration_required'].includes(value.migrationBlockedReason)
     || !differences
     || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
     || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
@@ -1024,7 +1024,7 @@ function boundedStaticRuntimeMigrationPreview(value, scope) {
   const expectedSafeControlMigrationCandidate = runtime.satisfied === true && isolation.safeMigrationCandidate === true;
   const expectedReleaseRepairCandidate = runtime.satisfied === true && releasePermissions.repairCandidate === true;
   const expectedBlockedReason = expectedReleaseRepairCandidate
-    ? 'static_release_receipt_not_operation_owned'
+    ? 'static_release_explicit_migration_required'
     : 'static_legacy_permissions_not_operation_owned';
   if (value.satisfied !== expectedSatisfied
     || value.safeControlMigrationCandidate !== expectedSafeControlMigrationCandidate
@@ -1104,6 +1104,7 @@ export function createWebsiteIsolationAuditService({
   phpMigrationAvailable = false,
   phpContainerMigrationAvailable = false,
   staticControlMigrationAvailable = false,
+  staticReleaseMigrationAvailable = false,
 } = {}) {
   if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
     || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
@@ -1311,6 +1312,9 @@ export function createWebsiteIsolationAuditService({
               && phpRuntimeMigrationPreview?.safeContainerMigrationCandidate === true;
             const safeStaticControlRepair = stepId === 'runtime' && website.runtimeType === 'static'
               && staticRuntimeMigrationPreview?.safeControlMigrationCandidate === true;
+            const safeStaticReleaseRepair = stepId === 'runtime' && website.runtimeType === 'static'
+              && staticRuntimeMigrationPreview?.releaseRepairCandidate === true
+              && staticRuntimeMigrationPreview?.current?.releasePermissions?.current?.tree !== null;
             changes.push(missingWorkspaceDirectories ? migrationChange({
               id: 'workspace.directories',
               action: 'create_workspace_directories',
@@ -1343,11 +1347,13 @@ export function createWebsiteIsolationAuditService({
                       ? 'repair_php_container_metadata'
                       : safeStaticControlRepair
                         ? 'repair_static_control_metadata'
-                        : 'reconcile_isolation_step',
-              ownership: safeIdentityCreate || safeSftpCreate || safePhpPoolCreate || safePhpContainerRepair || safeStaticControlRepair
+                        : safeStaticReleaseRepair
+                          ? 'repair_static_release_permissions'
+                          : 'reconcile_isolation_step',
+              ownership: safeIdentityCreate || safeSftpCreate || safePhpPoolCreate || safePhpContainerRepair || safeStaticControlRepair || safeStaticReleaseRepair
                 ? 'operation_receipt_planned'
                 : 'operation_receipt_required',
-              applyState: safeIdentityCreate || safeSftpCreate || safePhpPoolCreate || safePhpContainerRepair || safeStaticControlRepair ? 'requires_explicit_apply' : null,
+              applyState: safeIdentityCreate || safeSftpCreate || safePhpPoolCreate || safePhpContainerRepair || safeStaticControlRepair || safeStaticReleaseRepair ? 'requires_explicit_apply' : null,
               current: {
                 operationId: operation.operationId,
                 stepId,
@@ -1371,7 +1377,12 @@ export function createWebsiteIsolationAuditService({
                       ? { phpContainer: phpRuntimeMigrationPreview.current.container.desired }
                       : safeStaticControlRepair
                         ? { staticControl: staticRuntimeMigrationPreview.current.isolation.desired }
-                        : { satisfied: true },
+                        : safeStaticReleaseRepair
+                          ? {
+                            staticRelease: staticRuntimeMigrationPreview.current.releasePermissions.desired,
+                            treeSha256: staticRuntimeMigrationPreview.current.releasePermissions.current.tree.sha256,
+                          }
+                          : { satisfied: true },
             }));
           }
         } catch (error) {
@@ -1429,17 +1440,22 @@ export function createWebsiteIsolationAuditService({
             && phpRuntimeMigrationPreview?.safeContainerMigrationCandidate === true;
           const safeStaticControlRepair = stepId === 'runtime' && website.runtimeType === 'static'
             && staticRuntimeMigrationPreview?.safeControlMigrationCandidate === true;
+          const safeStaticReleaseRepair = stepId === 'runtime' && website.runtimeType === 'static'
+            && staticRuntimeMigrationPreview?.releaseRepairCandidate === true
+            && staticRuntimeMigrationPreview?.current?.releasePermissions?.current?.tree !== null;
           changes.push(migrationChange({
             id: `provisioning.${stepId}`,
             action: safePhpContainerRepair
               ? 'repair_php_container_metadata'
               : safeStaticControlRepair
                 ? 'repair_static_control_metadata'
-                : 'reconcile_isolation_step',
-            ownership: safePhpContainerRepair || safeStaticControlRepair
+                : safeStaticReleaseRepair
+                  ? 'repair_static_release_permissions'
+                  : 'reconcile_isolation_step',
+            ownership: safePhpContainerRepair || safeStaticControlRepair || safeStaticReleaseRepair
               ? 'operation_receipt_planned'
               : 'host_drift_review_required',
-            applyState: safePhpContainerRepair || safeStaticControlRepair ? 'requires_explicit_apply' : null,
+            applyState: safePhpContainerRepair || safeStaticControlRepair || safeStaticReleaseRepair ? 'requires_explicit_apply' : null,
             current: {
               operationId: operation.operationId,
               stepId,
@@ -1457,7 +1473,12 @@ export function createWebsiteIsolationAuditService({
               ? { phpContainer: phpRuntimeMigrationPreview.current.container.desired }
               : safeStaticControlRepair
                 ? { staticControl: staticRuntimeMigrationPreview.current.isolation.desired }
-                : { satisfied: true },
+                : safeStaticReleaseRepair
+                  ? {
+                    staticRelease: staticRuntimeMigrationPreview.current.releasePermissions.desired,
+                    treeSha256: staticRuntimeMigrationPreview.current.releasePermissions.current.tree.sha256,
+                  }
+                  : { satisfied: true },
           }));
         }
       }
@@ -1489,6 +1510,7 @@ export function createWebsiteIsolationAuditService({
         || (phpMigrationAvailable === true && changes[0].action === 'create_php_fpm_pool')
         || (phpContainerMigrationAvailable === true && changes[0].action === 'repair_php_container_metadata')
         || (staticControlMigrationAvailable === true && changes[0].action === 'repair_static_control_metadata')
+        || (staticReleaseMigrationAvailable === true && changes[0].action === 'repair_static_release_permissions')
       );
 
     return Object.freeze({
@@ -1516,7 +1538,9 @@ export function createWebsiteIsolationAuditService({
                   ? 'Apply changes only applicationRoot, releasesDirectory and current symlink control-plane UID/GID/mode under a durable receipt; release content stays site-owned and no recursive chown, chmod or remove is performed.'
                   : changes[0].action === 'repair_static_control_metadata'
                     ? 'Apply changes only static publishRoot, releasesRoot and current symlink control-plane UID/GID/mode under a durable receipt; release files and Nginx ACLs must already be healthy and are never recursively repaired by this migration.'
-                    : 'Apply creates only the listed operation-receipted workspace directories; it does not rename users, move files or change ownership recursively.')
+                    : changes[0].action === 'repair_static_release_permissions'
+                      ? 'Apply repairs only the digest-pinned managed static release entries under a root-private receipt; each inode previous UID/GID/mode/ACL is checkpointed and changed entry-by-entry without recursive chown/chmod/setfacl. New, removed or foreign-drifted entries block apply or rollback.'
+                      : 'Apply creates only the listed operation-receipted workspace directories; it does not rename users, move files or change ownership recursively.')
           : 'Preview only. No ownership, filesystem or runtime mutation is performed by this audit.',
       }) : null,
     });
