@@ -156,6 +156,256 @@ function authorizeElFinderGateway(request, options) {
   });
 }
 
+class ElFinderGatewayError extends Error {
+  constructor(status, code, message) {
+    super(message);
+    this.name = 'ElFinderGatewayError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function applicationUser(applicationId) {
+  return `yunapp-${sha256(applicationId).slice(0, 12)}`;
+}
+
+function readSingleCookie(request, name) {
+  const entries = String(request.headers.cookie ?? '')
+    .split(';')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.startsWith(`${name}=`));
+  if (entries.length !== 1) return null;
+  const value = entries[0].slice(name.length + 1);
+  return value.length > 0 ? value : null;
+}
+
+function panelSessionDigest(request) {
+  const production = readSingleCookie(request, '__Host-yunpanel_session');
+  const development = readSingleCookie(request, 'yunpanel_session');
+  if (production && development) return null;
+  const value = production ?? development;
+  return value ? sha256(value) : null;
+}
+
+function elFinderSessionCookieName(publicOrigin) {
+  return new URL(publicOrigin).protocol === 'https:'
+    ? '__Secure-yunpanel_elfinder'
+    : 'yunpanel_elfinder';
+}
+
+function createElFinderGatewaySessions({
+  now = Date.now,
+  ttlMs = ELFINDER_SESSION_TTL_MS,
+  maxSessions = ELFINDER_SESSION_LIMIT,
+} = {}) {
+  if (typeof now !== 'function'
+    || !Number.isSafeInteger(ttlMs) || ttlMs < 60_000 || ttlMs > 12 * 60 * 60 * 1000
+    || !Number.isSafeInteger(maxSessions) || maxSessions < 1 || maxSessions > 1_000) {
+    throw new TypeError('elFinder gateway session policy is invalid');
+  }
+  const sessions = new Map();
+
+  function prune() {
+    const current = now();
+    for (const [key, record] of sessions) {
+      if (record.expiresAt <= current) sessions.delete(key);
+    }
+    while (sessions.size >= maxSessions) sessions.delete(sessions.keys().next().value);
+  }
+
+  function issue(bundle, authDigest) {
+    if (!validElFinderBundle(bundle) || typeof authDigest !== 'string'
+      || !/^[a-f0-9]{64}$/.test(authDigest)) {
+      throw new TypeError('elFinder gateway session input is invalid');
+    }
+    prune();
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = now() + ttlMs;
+    sessions.set(sha256(token), Object.freeze({ bundle, authDigest, expiresAt }));
+    return Object.freeze({ token, expiresAt });
+  }
+
+  function resolve(token, authDigest) {
+    if (typeof token !== 'string' || !CAPABILITY_PATTERN.test(token)
+      || typeof authDigest !== 'string' || !/^[a-f0-9]{64}$/.test(authDigest)) return null;
+    prune();
+    const record = sessions.get(sha256(token));
+    if (!record || record.expiresAt <= now() || record.authDigest !== authDigest) return null;
+    return record.bundle;
+  }
+
+  function revoke(token) {
+    if (typeof token !== 'string' || !CAPABILITY_PATTERN.test(token)) return false;
+    return sessions.delete(sha256(token));
+  }
+
+  return Object.freeze({ issue, resolve, revoke, size: () => sessions.size });
+}
+
+function validElFinderBundle(bundle) {
+  if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)
+    || bundle.version !== 1 || bundle.protocol !== 'yunpanel-elfinder-handoff-v1'
+    || bundle.audience !== 'elfinder'
+    || !UUID_PATTERN.test(bundle.serverId ?? '')
+    || !UUID_PATTERN.test(bundle.websiteId ?? '')
+    || !Number.isSafeInteger(bundle.websiteRevision) || bundle.websiteRevision < 1
+    || !UUID_PATTERN.test(bundle.applicationId ?? '')
+    || !APP_USER_PATTERN.test(bundle.unixUser ?? '')
+    || !Number.isSafeInteger(bundle.expiresAt)) return false;
+  const applicationId = bundle.applicationId.toLowerCase();
+  return bundle.unixUser === applicationUser(applicationId)
+    && bundle.root === `/var/lib/yunpanel/data/${applicationId}`;
+}
+
+function readElFinderHandoffBody(request) {
+  return new Promise((resolve, reject) => {
+    const contentType = String(request.headers['content-type'] ?? '').toLowerCase();
+    if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/.test(contentType)) {
+      reject(new ElFinderGatewayError(415, 'elfinder_gateway_json_required', 'Send application/json.'));
+      return;
+    }
+    let bytes = 0;
+    const chunks = [];
+    request.on('data', (chunk) => {
+      bytes += chunk.length;
+      if (bytes > 1024) {
+        reject(new ElFinderGatewayError(413, 'elfinder_gateway_body_too_large', 'Request is too large.'));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on('end', () => {
+      try {
+        const value = JSON.parse(Buffer.concat(chunks, bytes).toString('utf8'));
+        if (!value || typeof value !== 'object' || Array.isArray(value)
+          || Object.keys(value).length !== 1
+          || typeof value.capability !== 'string'
+          || !CAPABILITY_PATTERN.test(value.capability)) {
+          throw new Error('invalid payload');
+        }
+        resolve(value.capability);
+      } catch {
+        reject(new ElFinderGatewayError(400, 'elfinder_gateway_request_invalid', 'elFinder handoff request is invalid.'));
+      }
+    });
+    request.on('aborted', () => {
+      reject(new ElFinderGatewayError(400, 'elfinder_gateway_request_aborted', 'elFinder handoff request was interrupted.'));
+    });
+    request.on('error', () => {
+      reject(new ElFinderGatewayError(400, 'elfinder_gateway_request_failed', 'elFinder handoff request failed.'));
+    });
+  });
+}
+
+function consumeElFinderHandoff(capability, {
+  handoffSocketPath = ELFINDER_HANDOFF_SOCKET_PATH,
+  requestImpl = http.request,
+} = {}) {
+  if (typeof capability !== 'string' || !CAPABILITY_PATTERN.test(capability)) {
+    return Promise.reject(new ElFinderGatewayError(
+      400,
+      'elfinder_gateway_capability_invalid',
+      'elFinder handoff is invalid.',
+    ));
+  }
+  if (typeof handoffSocketPath !== 'string' || !path.isAbsolute(handoffSocketPath)
+    || path.resolve(handoffSocketPath) !== handoffSocketPath || handoffSocketPath === '/') {
+    return Promise.reject(new ElFinderGatewayError(
+      503,
+      'elfinder_gateway_handoff_unavailable',
+      'elFinder handoff service is unavailable.',
+    ));
+  }
+
+  const body = JSON.stringify({ capability });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    const upstream = requestImpl({
+      socketPath: handoffSocketPath,
+      method: 'POST',
+      path: '/consume',
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'content-length': Buffer.byteLength(body),
+      },
+    }, (upstreamResponse) => {
+      const chunks = [];
+      let bytes = 0;
+      upstreamResponse.on('data', (chunk) => {
+        bytes += chunk.length;
+        if (bytes > 8 * 1024) {
+          upstreamResponse.destroy();
+          fail(new ElFinderGatewayError(
+            503,
+            'elfinder_gateway_handoff_invalid',
+            'elFinder handoff response is invalid.',
+          ));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      upstreamResponse.on('end', () => {
+        if (settled) return;
+        const status = upstreamResponse.statusCode ?? 503;
+        let payload;
+        try { payload = JSON.parse(Buffer.concat(chunks, bytes).toString('utf8')); }
+        catch {
+          fail(new ElFinderGatewayError(
+            503,
+            'elfinder_gateway_handoff_invalid',
+            'elFinder handoff response is invalid.',
+          ));
+          return;
+        }
+        if (status !== 200) {
+          const safeStatus = [400, 401, 403, 404, 409, 429, 503].includes(status) ? status : 503;
+          fail(new ElFinderGatewayError(
+            safeStatus,
+            payload?.error?.code ?? 'elfinder_gateway_handoff_rejected',
+            'elFinder handoff was rejected.',
+          ));
+          return;
+        }
+        if (!validElFinderBundle(payload?.data)) {
+          fail(new ElFinderGatewayError(
+            503,
+            'elfinder_gateway_handoff_invalid',
+            'elFinder handoff response is invalid.',
+          ));
+          return;
+        }
+        settled = true;
+        resolve(Object.freeze({ ...payload.data }));
+      });
+    });
+    upstream.setTimeout(5_000, () => upstream.destroy(new Error('elFinder handoff timeout')));
+    upstream.once('error', () => {
+      fail(new ElFinderGatewayError(
+        503,
+        'elfinder_gateway_handoff_unavailable',
+        'elFinder handoff service is unavailable.',
+      ));
+    });
+    upstream.end(body);
+  });
+}
+
+function elFinderSessionCookie(session, publicOrigin) {
+  const secure = new URL(publicOrigin).protocol === 'https:';
+  const maxAge = Math.max(1, Math.floor((session.expiresAt - Date.now()) / 1000));
+  return `${elFinderSessionCookieName(publicOrigin)}=${session.token}; Path=${ELFINDER_PREFIX}/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
+}
+
 function rewritePhpMyAdminLocation(value) {
   if (typeof value !== 'string' || !value.startsWith('/')) return value;
   if (value === PHPMYADMIN_PREFIX || value.startsWith(`${PHPMYADMIN_PREFIX}/`)) return value;
