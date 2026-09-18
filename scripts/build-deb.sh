@@ -126,7 +126,18 @@ node --input-type=module - <<'NODE' >"$package_root/usr/share/yunpanel/elfinder/
 import { renderElFinderConnector } from './packages/config-templates/src/index.js';
 process.stdout.write(renderElFinderConnector());
 NODE
-chmod 0644 "$package_root/usr/share/yunpanel/elfinder/connector.php"
+node --input-type=module - <<'NODE' >"$package_root/usr/share/yunpanel/elfinder/index.html"
+import { renderElFinderClientIndex } from './packages/config-templates/src/index.js';
+process.stdout.write(renderElFinderClientIndex());
+NODE
+node --input-type=module - <<'NODE' >"$package_root/usr/share/yunpanel/elfinder/yunpanel-client.js"
+import { renderElFinderClientScript } from './packages/config-templates/src/index.js';
+process.stdout.write(renderElFinderClientScript());
+NODE
+chmod 0644 \
+  "$package_root/usr/share/yunpanel/elfinder/connector.php" \
+  "$package_root/usr/share/yunpanel/elfinder/index.html" \
+  "$package_root/usr/share/yunpanel/elfinder/yunpanel-client.js"
 printf '%s\n' "$elfinder_version $elfinder_commit" >"$package_root/usr/share/yunpanel/elfinder/VERSION"
 chmod 0644 "$package_root/usr/share/yunpanel/elfinder/VERSION"
 rm -rf -- "$package_root/usr/lib/yunpanel/apps/web/dist" "$package_root/usr/lib/yunpanel/apps/web/test"
