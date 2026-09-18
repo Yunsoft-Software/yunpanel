@@ -25,6 +25,13 @@ test('elFinder client points only at protected connector and disables external p
   const script = renderElFinderClientScript();
   assert.match(script, /url: '\/tools\/elfinder\/connector\.php'/);
   assert.match(script, /requestType: 'post'/);
+  assert.match(script, /\^#handoff=\(\[A-Za-z0-9_-\]\{43\}\)\$/);
+  assert.match(script, /history\.replaceState/);
+  assert.match(script, /fetch\('\/tools\/elfinder\/__yunpanel\/handoff'/);
+  assert.match(script, /credentials: 'same-origin'/);
+  assert.match(script, /body: JSON\.stringify\(\{ capability \}\)/);
+  assert.match(script, /response\.status !== 204/);
+  assert.doesNotMatch(script, /[?&]handoff=/);
   assert.match(script, /sharecadMimes: \[\]/);
   assert.match(script, /googleDocsMimes: \[\]/);
   assert.match(script, /officeOnlineMimes: \[\]/);
@@ -39,6 +46,7 @@ test('elFinder browser client preview is deterministic and pins fixed package pa
   assert.deepEqual(a, b);
   assert.equal(a.gatewayBasePath, '/tools/elfinder/');
   assert.equal(a.connectorPath, '/tools/elfinder/connector.php');
+  assert.equal(a.handoffPath, '/tools/elfinder/__yunpanel/handoff');
   assert.deepEqual(a.artifacts.map((item) => [item.path, item.mode, item.sensitive]), [
     ['/usr/share/yunpanel/elfinder/index.html', 0o644, false],
     ['/usr/share/yunpanel/elfinder/yunpanel-client.js', 0o644, false],
