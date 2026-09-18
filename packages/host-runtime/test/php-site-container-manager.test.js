@@ -122,3 +122,45 @@ test('PHP container lockdown refuses release ownership or current-target drift',
     (error) => error instanceof PhpSiteContainerManagerError && error.code === 'php_site_container_current_drift',
   );
 });
+
+
+test('PHP container migration preview reports exact ownership transition without changing host state', async () => {
+  const fake = host();
+  const value = manager(fake);
+
+  const preview = await value.previewMigration(intent(), { operationId });
+
+  assert.equal(preview.version, 1);
+  assert.equal(preview.adapter, 'php-container');
+  assert.equal(preview.satisfied, false);
+  assert.equal(preview.current.identity.uid, 1201);
+  assert.equal(preview.current.applicationRoot.uid, 1201);
+  assert.equal(preview.current.applicationRoot.mode, '0750');
+  assert.equal(preview.current.releaseDirectory.uid, 1201);
+  assert.equal(preview.current.currentTarget, releaseDirectory);
+  assert.equal(preview.desired.applicationRoot, applicationRoot);
+  assert.equal(preview.desired.releaseDirectory, releaseDirectory);
+  assert.equal(preview.differences.includes('php_site_container_control_plane_drift'), true);
+  assert.deepEqual(fake.calls, []);
+  assert.equal(fake.entries.get(applicationRoot).uid, 1201);
+  assert.equal(fake.entries.get(currentRelease).uid, 1201);
+});
+
+test('PHP container migration preview becomes satisfied after exact lockdown and pins current-target drift', async () => {
+  const fake = host();
+  const value = manager(fake);
+  await value.apply(intent(), { operationId });
+
+  const healthy = await value.previewMigration(intent(), { operationId });
+  assert.equal(healthy.satisfied, true);
+  assert.deepEqual(healthy.differences, []);
+  assert.equal(healthy.current.applicationRoot.uid, 0);
+  assert.equal(healthy.current.releasesDirectory.mode, '0755');
+  assert.equal(healthy.current.currentRelease.symbolicLink, true);
+
+  fake.entries.get(currentRelease).target = '/tmp/escaped-release';
+  const drift = await value.previewMigration(intent(), { operationId });
+  assert.equal(drift.satisfied, false);
+  assert.equal(drift.current.currentTarget, '/tmp/escaped-release');
+  assert.equal(drift.differences.includes('php_site_container_current_drift'), true);
+});
