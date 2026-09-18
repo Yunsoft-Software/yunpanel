@@ -548,6 +548,22 @@ export function createStaticPublishIsolationManager({
     }
 
     const aclAvailable = await aclToolsAvailable();
+    let releaseRootError = null;
+    try {
+      const [publishInfo, releasesInfo] = await Promise.all([
+        lstatFn(spec.publishRoot),
+        lstatFn(spec.releasesRoot),
+      ]);
+      if (!publishInfo?.isDirectory?.() || publishInfo.isSymbolicLink?.()
+        || !releasesInfo?.isDirectory?.() || releasesInfo.isSymbolicLink?.()) {
+        releaseRootError = 'static_publish_release_root_drift';
+      }
+    } catch (error) {
+      releaseRootError = missing(error)
+        ? 'static_publish_release_root_missing'
+        : 'static_publish_release_root_unavailable';
+    }
+
     let currentTarget = null;
     let currentTargetError = null;
     try {
@@ -569,7 +585,7 @@ export function createStaticPublishIsolationManager({
       differences: Object.freeze([]),
     });
     let summaryError = null;
-    if (identity.satisfied && aclAvailable) {
+    if (identity.satisfied && aclAvailable && releaseRootError === null) {
       try { summary = await releaseTreeSummary(spec, identity); }
       catch (error) {
         summaryError = typeof error?.code === 'string'
@@ -583,6 +599,7 @@ export function createStaticPublishIsolationManager({
     const differences = [
       ...(identity.satisfied ? [] : [identity.reason]),
       ...(aclAvailable ? [] : ['static_publish_acl_package_missing']),
+      ...(releaseRootError ? [releaseRootError] : []),
       ...(summaryError ? [summaryError] : summary.differences),
       ...(currentTargetError ? [currentTargetError] : []),
       ...(!currentTargetError && !currentTargetManaged ? ['static_publish_current_drift'] : []),
@@ -591,6 +608,7 @@ export function createStaticPublishIsolationManager({
     const satisfied = uniqueDifferences.length === 0;
     const repairCandidate = identity.satisfied === true
       && aclAvailable === true
+      && releaseRootError === null
       && summaryError === null
       && summary.tree !== null
       && summary.tree.entryCount > 0
@@ -610,6 +628,7 @@ export function createStaticPublishIsolationManager({
       current: Object.freeze({
         identity,
         aclToolsAvailable: aclAvailable,
+        releaseRootError,
         currentTarget,
         currentTargetError,
         releases: summary.releases,
