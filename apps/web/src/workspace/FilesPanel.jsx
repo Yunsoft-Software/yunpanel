@@ -104,7 +104,7 @@ export default function FilesPanel({ serverId, websiteId }) {
     <Section
       title="Site dosyaları"
       description="Birincil dosya yöneticisi elFinder'dır; işlemler canonical Website HOME içinde site kullanıcısı yetkileriyle çalışır."
-      actions={<div className="ws-actions"><Button variant="primary" icon="folder" disabled={busy} onClick={openElFinder}>{busy ? 'Hazırlanıyor…' : 'elFinder ile aç'}</Button><Button icon="refresh" disabled={busy} onClick={() => load(path)}>Legacy görünümü yenile</Button></div>}
+      actions={<div className="ws-actions"><Button variant="primary" icon="file" disabled={busy} onClick={openElFinder}>{busy ? 'Hazırlanıyor…' : 'elFinder ile aç'}</Button><Button icon="refresh" disabled={busy} onClick={() => load(path)}>Legacy görünümü yenile</Button></div>}
     >
       <ErrorNotice error={error} />
       <div className="ws-section-body ws-actions"><Button disabled={busy || !path} onClick={() => load(parentPath(path))}>Üst klasör</Button><strong>/{path}</strong></div>
