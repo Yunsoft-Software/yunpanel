@@ -25,3 +25,11 @@ test('Debian package prepares a dedicated elFinder broker identity without broad
   assert.match(postinst, /install -d -o root -g yunpanel-elfinder -m 0750 \/usr\/lib\/yunpanel\/elfinder/);
   assert.match(tmpfiles, /^d \/run\/yunpanel-elfinder 0750 root yunpanel-elfinder - -$/m);
 });
+
+
+test('package upgrade restarts the restricted web service so new broker group membership takes effect', async () => {
+  const postinst = await readFile(postinstUrl, 'utf8');
+  assert.match(postinst, /adduser yunpanel yunpanel-elfinder/);
+  assert.match(postinst, /systemctl try-restart yunpanel-api\.service/);
+  assert.match(postinst, /systemctl try-restart yunpanel-web\.service/);
+});
