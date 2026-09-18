@@ -31,15 +31,9 @@ Son ttyd/IntegratedToolGateway ilerlemesi: `docs/history/ttyd-integrated-gateway
 
 # P0 — Plesk core parity
 
-## P0.1 — Website Unix identity ve filesystem isolation
-
-- [ ] Legacy Website path/runtime migration apply/rollback kapsamını tamamla; Unix identity, SFTP, yalnız-missing PHP-FPM site-pool, exact PHP control-plane container metadata ve static control-plane `publishRoot`/`releasesRoot`/`current` metadata repair için durable operation-owned lifecycle kaynakta tamamlandı. Static control repair yalnız release ağacı ownership/mode + Nginx ACL açısından zaten sağlıklıyken açılır; receipt mutation öncesi previous UID/GID/mode + current target'ı pinler, restart inspect-first çalışır ve foreign/path-type/target drift'inde rollback fail-closed kalır. Direct-systemd → Passenger legacy runtime ayrı canonical cutover workflow'una handoff edilir ve isolation journal'da `automaticMigration=false` kalır. Kalan P0.1 source işi static managed release dosya/dizin ownership-mode ve Nginx read ACL drift'i için bounded, operation-owned, restart-inspectable ve exact rollback authority kurmaktır; kör recursive `chown`/`chmod`/`setfacl`/`rm` yapılmasın.
-
-Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
-
 ## P0.3 — Versioned DNS Zone Template ve Domain DNS yönetimi
 
-- [ ] Zone suspend/delete lifecycle'ını P0.9'a bağla; pre-existing zone re-apply için exact pre-operation RRset snapshot/record-level rollback evidence'ı ekle ve rollback-unavailable state'i retryable lifecycle'a taşı.
+- [ ] Zone suspend/delete lifecycle'ını P0.9'a bağla; delete/suspend impact preview, reverse-dependency ownership evidence, retention/typed confirmation ve restart-safe retryable lifecycle aynı operation modelini kullansın.
 
 Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içindedir.
 
@@ -158,13 +152,11 @@ Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözl
 
 # Uygulama sırası — blocker yoksa sapma yok
 
-1. **Website Unix isolation** — static managed release ownership/mode + Nginx read ACL drift'i için receipt-backed authority'yi tamamla; static control metadata, identity, SFTP, PHP-FPM pool, exact PHP container repair ve Passenger handoff source lifecycle tamamlandı. Foreign/unmanaged filesystem state fail-closed kalır.
-2. **PowerDNS operator recovery** — restart-sonrası güvenli explicit rollback, typed confirmation ve fail-closed recovery control surface.
-3. **Mail explicit rollback** — mevcut v3 backup/previous-state preview'ından durable restore, compensation/restart recovery ve monoton control-plane reconciliation.
-4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
-5. **Transactional create/delete provisioning** parçalarını tek lifecycle'a birleştir.
-6. **TLS/autodiscover/recovery hardening**.
-7. Runtime migration/backup/monitoring/security/site extras.
-8. Legacy cleanup ve en son UI/UX polish.
+1. **DNS suspend/delete lifecycle** — mevcut versioned template, durable re-apply ve exact before/after rollback authority'sini P0.9 reverse-dependency/retention modeline bağla.
+2. **Mail core parity** — SQL-backed virtual domain/mailbox/alias/quota/storage identity, authenticated SMTP/IMAP, DKIM/SPF/DMARC policy ve shared Roundcube/webmail lifecycle'ını tamamla.
+3. **Transactional create/delete provisioning** — Website/Domain/runtime/DNS/mail/DB/certificate/SFTP adımlarını tek durable lifecycle ve reverse-order compensation zincirine birleştir.
+4. **TLS/autodiscover/recovery hardening** ve cross-service health kapıları.
+5. Runtime migration/backup/monitoring/security/site extras.
+6. Legacy cleanup ve en son UI/UX polish.
 
 Her küçük dilim source test kontratıyla ayrı commit edilir. GitHub Actions kullanılmaz. Gerçek Ubuntu/package/public DNS/SMTP/browser/provider acceptance bu ortamda yapılamıyorsa `todo.md`'ye bırakılır ve ilgili P0 kapısı acceptance geçmeden `DONE` olmaz.
