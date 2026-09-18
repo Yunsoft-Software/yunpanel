@@ -59,9 +59,9 @@ function target(value) {
 }
 
 function intent(value) {
-  const fields = new Set(['websiteId', 'applicationId', 'user', 'homeDirectory', 'targets', 'adapter']);
+  const fields = new Set(['websiteId', 'applicationId', 'user', 'homeDirectory', 'targets', 'adapter', 'sourceOperationId']);
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || ![5, 6].includes(Object.keys(value).length) || Object.keys(value).some((field) => !fields.has(field))
+    || ![5, 6, 7].includes(Object.keys(value).length) || Object.keys(value).some((field) => !fields.has(field))
     || typeof value.user !== 'string' || !USER_PATTERN.test(value.user)
     || typeof value.homeDirectory !== 'string' || !value.homeDirectory.startsWith('/')
     || !Array.isArray(value.targets) || value.targets.length > 2) {
@@ -69,9 +69,12 @@ function intent(value) {
   }
   const targets = value.targets.map(target);
   const adapter = value.adapter ?? (targets.length === 0 ? 'identity' : 'workspace');
+  const sourceOperationId = value.sourceOperationId === undefined ? null : uuid(value.sourceOperationId, 'sourceOperationId');
   if (!['workspace', 'identity', 'sftp', 'php'].includes(adapter)
     || (adapter === 'workspace' && targets.length < 1)
-    || (adapter !== 'workspace' && targets.length !== 0)) {
+    || (adapter !== 'workspace' && targets.length !== 0)
+    || (adapter === 'php' && sourceOperationId === null)
+    || (adapter !== 'php' && sourceOperationId !== null)) {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', 'Website isolation migration adapter is invalid');
   }
   if (new Set(targets.map((entry) => entry.name)).size !== targets.length) {
@@ -105,6 +108,7 @@ function intent(value) {
     homeDirectory: value.homeDirectory,
     targets: Object.freeze(targets),
     adapter,
+    ...(sourceOperationId === null ? {} : { sourceOperationId }),
   });
 }
 
@@ -227,6 +231,7 @@ function operationFromAudit(audit, now, idFactory) {
   const identityCreate = change?.action === 'create_canonical_unix_identity';
   const sftpCreate = change?.action === 'create_sftp_isolation';
   const phpCreate = change?.action === 'create_php_fpm_pool';
+  const sourceOperationId = phpCreate ? uuid(change?.current?.operationId, 'sourceOperationId') : null;
   const adapter = identityCreate ? 'identity' : sftpCreate ? 'sftp' : phpCreate ? 'php' : 'workspace';
   const targets = change?.action === 'create_workspace_directories'
     ? change.desired?.directories
@@ -276,6 +281,7 @@ function operationFromAudit(audit, now, idFactory) {
       homeDirectory: audit.expected.homeDirectory,
       targets,
       adapter,
+      ...(sourceOperationId === null ? {} : { sourceOperationId }),
     },
     status: 'pending',
     result: null,
