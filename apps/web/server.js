@@ -900,6 +900,7 @@ export function createPanelServer({
   elFinderSocketPath = ELFINDER_GATEWAY_SOCKET_PATH,
   elFinderHandoffSocketPath = ELFINDER_HANDOFF_SOCKET_PATH,
   elFinderGatewaySessions = createElFinderGatewaySessions(),
+  ttydSocketRoot = TTYD_SOCKET_ROOT,
   trustedProxyIps = process.env.YUNPANEL_TRUSTED_PROXY_IPS ?? TRUSTED_PROXY_DEFAULT,
   webRoot = process.env.YUNPANEL_WEB_ROOT ?? DEFAULT_WEB_ROOT,
 } = {}) {
@@ -930,6 +931,10 @@ export function createPanelServer({
     || typeof elFinderGatewaySessions.revoke !== 'function') {
     throw new Error('elFinder gateway session registry is invalid');
   }
+  if (typeof ttydSocketRoot !== 'string' || !path.isAbsolute(ttydSocketRoot)
+    || path.resolve(ttydSocketRoot) !== ttydSocketRoot || ttydSocketRoot === '/') {
+    throw new Error('ttyd socket root is invalid');
+  }
   const server = http.createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
     const signedWebhook = isGithubWebhookPath(requestUrl.pathname);
@@ -940,6 +945,30 @@ export function createPanelServer({
     if (signedWebhook) {
       proxyRequest(request, response, {
         apiHost, apiPort, clientIp, proxyToken, publicOrigin, signedWebhook: true,
+      });
+      return;
+    }
+    const ttydRoute = parseTtydGatewayPath(requestUrl.pathname);
+    if (ttydRoute) {
+      const accessStatus = await authorizeTtydGateway(request, ttydRoute.sessionId, {
+        apiHost, apiPort, clientIp, proxyToken,
+      });
+      if (accessStatus !== 204) {
+        const status = accessStatus === 401 || accessStatus === 403 || accessStatus === 404
+          ? accessStatus
+          : 503;
+        reply(response, status, status === 401 ? 'Authentication required.' : 'Terminal access denied.');
+        return;
+      }
+      const sessionSocket = ttydSocketPath(ttydSocketRoot, ttydRoute.sessionId);
+      if (!sessionSocket) {
+        reply(response, 404, 'Not found.');
+        return;
+      }
+      proxyTtyd(request, response, {
+        socketPath: sessionSocket,
+        publicOrigin,
+        route: ttydRoute,
       });
       return;
     }
@@ -1040,6 +1069,34 @@ export function createPanelServer({
     catch { rejectSocket(socket, 400); return; }
     const clientIp = clientAddress(request, trustedProxies);
     if (!clientIp || !allowedClients.has(clientIp)) { rejectSocket(socket, 403); return; }
+    const ttydRoute = parseTtydGatewayPath(requestUrl.pathname);
+    if (ttydRoute) {
+      void authorizeTtydGateway(request, ttydRoute.sessionId, {
+        apiHost, apiPort, clientIp, proxyToken,
+      }).then((accessStatus) => {
+        if (socket.destroyed) return;
+        if (accessStatus !== 204) {
+          rejectSocket(
+            socket,
+            accessStatus === 401 || accessStatus === 403 || accessStatus === 404
+              ? accessStatus
+              : 503,
+          );
+          return;
+        }
+        const sessionSocket = ttydSocketPath(ttydSocketRoot, ttydRoute.sessionId);
+        if (!sessionSocket) {
+          rejectSocket(socket, 404);
+          return;
+        }
+        proxyTtydWebSocket(request, socket, head, {
+          socketPath: sessionSocket,
+          publicOrigin,
+          route: ttydRoute,
+        });
+      }).catch(() => rejectSocket(socket, 503));
+      return;
+    }
     if (requestUrl.pathname !== '/api/terminal' || requestUrl.search) { rejectSocket(socket, 404); return; }
     proxyWebSocket(request, socket, head, { apiHost, apiPort, clientIp, proxyToken, publicOrigin });
   });
