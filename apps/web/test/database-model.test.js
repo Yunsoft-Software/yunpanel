@@ -6,6 +6,7 @@ import {
   databaseInventoryView,
   databaseRestorePreviewView,
   formatDatabaseBytes,
+  websiteDatabaseDeletePreviewView,
   validDatabaseName,
   websiteDatabaseResourcesView,
 } from '../src/workspace/database-model.js';
@@ -301,6 +302,123 @@ test('Website restore preview requires exact route and ownership scope evidence'
     { ...input, scope: { ...input.scope, websiteId: '62345678-1234-4234-8234-123456789012' } },
     expected,
   ), null);
+});
+
+test('Website database delete preview requires exact current ownership and backup evidence', () => {
+  const websiteId = '22345678-1234-4234-8234-123456789012';
+  const applicationId = '32345678-1234-4234-8234-123456789012';
+  const bindingId = '42345678-1234-4234-8234-123456789012';
+  const backupId = '52345678-1234-4234-8234-123456789012';
+  const previewDigest = 'b'.repeat(64);
+  const input = {
+    version: 1,
+    operation: 'website_database_delete',
+    scope: {
+      serverId,
+      websiteId,
+      applicationId,
+      databaseBindingId: bindingId,
+      bindingRevision: 7,
+      databaseName: 'app_main',
+    },
+    exists: true,
+    credential: null,
+    backup: {
+      backupId,
+      engine: 'mariadb',
+      databaseVersion: '10.11.13-MariaDB',
+      dumpSha256: 'a'.repeat(64),
+      dumpBytes: 4096,
+      createdAt: '2026-09-18T00:00:00.000Z',
+    },
+    activeJobs: [],
+    blockers: [],
+    readyToDelete: true,
+    previewDigest,
+    confirmation: `delete-website-database:${bindingId}:7:${previewDigest}`,
+    sideEffects: false,
+  };
+  const expected = {
+    serverId,
+    websiteId,
+    applicationId,
+    bindingId,
+    bindingRevision: 7,
+    databaseName: 'app_main',
+  };
+  const view = websiteDatabaseDeletePreviewView(input, expected);
+  assert.equal(view.readyToDelete, true);
+  assert.equal(view.backup.backupId, backupId);
+  assert.equal(view.confirmation, input.confirmation);
+
+  assert.equal(websiteDatabaseDeletePreviewView({
+    ...input,
+    scope: { ...input.scope, bindingRevision: 6 },
+  }, expected), null);
+  assert.equal(websiteDatabaseDeletePreviewView({
+    ...input,
+    blockers: ['database_current_binding_backup_required'],
+    backup: input.backup,
+    readyToDelete: false,
+    confirmation: null,
+  }, expected), null);
+});
+
+test('Website database delete preview validates blockers against live state', () => {
+  const websiteId = '22345678-1234-4234-8234-123456789012';
+  const applicationId = '32345678-1234-4234-8234-123456789012';
+  const bindingId = '42345678-1234-4234-8234-123456789012';
+  const previewDigest = 'c'.repeat(64);
+  const input = {
+    version: 1,
+    operation: 'website_database_delete',
+    scope: {
+      serverId,
+      websiteId,
+      applicationId,
+      databaseBindingId: bindingId,
+      bindingRevision: 7,
+      databaseName: 'app_main',
+    },
+    exists: true,
+    credential: {
+      id: '52345678-1234-4234-8234-123456789012',
+      username: 'ydb_abcdef012345abcdef012345',
+      revision: 3,
+    },
+    backup: null,
+    activeJobs: [{
+      id: '62345678-1234-4234-8234-123456789012',
+      operation: 'database.restore',
+      status: 'running',
+    }],
+    blockers: [
+      'database_credential_exists',
+      'database_current_binding_backup_required',
+      'database_job_active',
+    ],
+    readyToDelete: false,
+    previewDigest,
+    confirmation: null,
+    sideEffects: false,
+  };
+  const expected = {
+    serverId,
+    websiteId,
+    applicationId,
+    bindingId,
+    bindingRevision: 7,
+    databaseName: 'app_main',
+  };
+  const view = websiteDatabaseDeletePreviewView(input, expected);
+  assert.equal(view.readyToDelete, false);
+  assert.equal(view.credential.username, input.credential.username);
+  assert.equal(view.backup, null);
+  assert.equal(view.activeJobs.length, 1);
+  assert.equal(websiteDatabaseDeletePreviewView({
+    ...input,
+    blockers: ['database_credential_exists'],
+  }, expected), null);
 });
 
 test('database drop preview keeps exact scoped impact and rejects inconsistent blockers', () => {
