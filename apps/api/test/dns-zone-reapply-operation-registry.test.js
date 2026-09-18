@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,6 +14,28 @@ const operationId = 'f77d9d70-3f77-4be9-b257-0ade06401fb7';
 const domainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const previewDigest = 'a'.repeat(64);
+const sourceZoneSnapshot = Object.freeze({
+  version: 1,
+  zoneName: 'example.com',
+  id: 'example.com.',
+  kind: 'Native',
+  dnssec: false,
+  rrsets: Object.freeze([Object.freeze({
+    name: 'example.com.',
+    type: 'SOA',
+    ttl: 300,
+    records: Object.freeze([Object.freeze({
+      content: 'ns1.host.example. hostmaster.host.example. 2026091501 3600 900 1209600 300',
+      disabled: false,
+    })]),
+    comments: Object.freeze([Object.freeze({ account: 'yunpanel', content: 'managed source snapshot' })]),
+  })]),
+});
+const sourceZoneDigest = createHash('sha256').update(JSON.stringify(sourceZoneSnapshot)).digest('hex');
+
+function rollbackEvidence() {
+  return Object.freeze({ version: 1, sourceZoneDigest, snapshot: sourceZoneSnapshot });
+}
 
 function preview() {
   return Object.freeze({
@@ -25,7 +48,7 @@ function preview() {
     templateVersion: 4,
     dnsIdentityRevision: 2,
     mailStateDigest: 'c'.repeat(64),
-    sourceZoneDigest: 'd'.repeat(64),
+    sourceZoneDigest,
     observedSerial: 2026091501,
     nextSerial: 2026091601,
     previewDigest,
@@ -43,8 +66,8 @@ function registry() {
 test('DNS zone reapply journal deduplicates an identical active preview and hides confirmation publicly', async () => {
   const store = registry();
   await store.init();
-  const first = await store.create(preview());
-  const second = await store.create(preview());
+  const first = await store.create(preview(), rollbackEvidence());
+  const second = await store.create(preview(), rollbackEvidence());
 
   assert.equal(first.id, operationId);
   assert.equal(second.id, operationId);
@@ -52,7 +75,7 @@ test('DNS zone reapply journal deduplicates an identical active preview and hide
   const publicView = dnsZoneReapplyOperationPublicView(first);
   assert.equal(publicView.status, 'pending');
   assert.equal(publicView.targetSerial, 2026091601);
-  assert.equal(first.sourceZoneDigest, 'd'.repeat(64));
+  assert.equal(first.sourceZoneDigest, sourceZoneDigest);
   assert.equal(Object.hasOwn(publicView, 'sourceZoneDigest'), false);
   assert.equal(Object.hasOwn(publicView, 'confirmation'), false);
   assert.equal(JSON.stringify(publicView).includes('reapply-dns-zone-template:'), false);
@@ -61,7 +84,7 @@ test('DNS zone reapply journal deduplicates an identical active preview and hide
 test('DNS zone reapply journal persists applying and succeeded evidence transitions', async () => {
   const store = registry();
   await store.init();
-  const created = await store.create(preview());
+  const created = await store.create(preview(), rollbackEvidence());
   const applying = await store.markApplying(created.id);
 
   assert.equal(applying.status, 'applying');
@@ -82,7 +105,7 @@ test('DNS zone reapply journal persists applying and succeeded evidence transiti
 test('DNS zone reapply journal keeps only sanitized failure evidence', async () => {
   const store = registry();
   await store.init();
-  const created = await store.create(preview());
+  const created = await store.create(preview(), rollbackEvidence());
   await store.markApplying(created.id);
   const failed = await store.fail(created.id, {
     code: 'powerdns_zone_api_failed',
@@ -106,7 +129,7 @@ test('DNS zone reapply journal rejects blocked previews and invalid terminal evi
       && error.code === 'dns_zone_reapply_operation_preview_invalid',
   );
 
-  const created = await store.create(preview());
+  const created = await store.create(preview(), rollbackEvidence());
   await store.markApplying(created.id);
   await assert.rejects(
     store.succeed(created.id, {
