@@ -623,6 +623,8 @@ test('isolation audit pins bounded static release and publish isolation drift in
     adapter: 'static-runtime',
     satisfied: false,
     safeControlMigrationCandidate: false,
+    automaticMigration: false,
+    migrationBlockedReason: 'static_legacy_permissions_not_operation_owned',
     current: {
       runtime: {
         satisfied: false,
