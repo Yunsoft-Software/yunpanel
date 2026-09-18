@@ -136,6 +136,144 @@ async function inspectIdentityMigrationPreview(handler, context, identity) {
   }
 }
 
+function boundedSha256(value, { nullable = false } = {}) {
+  if (nullable && value === null) return null;
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value) ? value : undefined;
+}
+
+function boundedSftpDirectoryState(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.present !== 'boolean') return null;
+  if (value.present === false) return Object.freeze({ present: false });
+  if (typeof value.directory !== 'boolean' || typeof value.symbolicLink !== 'boolean'
+    || !Number.isSafeInteger(value.uid) || value.uid < 0
+    || !Number.isSafeInteger(value.gid) || value.gid < 0
+    || typeof value.mode !== 'string' || !/^0[0-7]{3}$/.test(value.mode)) return null;
+  return Object.freeze({
+    present: true,
+    directory: value.directory,
+    symbolicLink: value.symbolicLink,
+    uid: value.uid,
+    gid: value.gid,
+    mode: value.mode,
+  });
+}
+
+function boundedSftpMigrationPreview(value, { websiteId, applicationId, identity } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== 1 || typeof value.satisfied !== 'boolean'
+    || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
+    || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
+    || !Array.isArray(value.differences) || value.differences.length > 30
+    || value.differences.some((code) => typeof code !== 'string' || !/^[a-z0-9_]{1,120}$/.test(code))
+    || value.desired.websiteId !== websiteId
+    || value.desired.applicationId !== applicationId
+    || value.desired.unixUser !== identity?.unixUser
+    || value.desired.sourceDirectory !== identity?.paths?.workspace?.sftpRoot) return null;
+
+  const configSha256 = boundedSha256(value.current.sshdConfig?.sha256, { nullable: true });
+  const mountSha256 = boundedSha256(value.current.mountUnit?.sha256, { nullable: true });
+  const desiredSshdSha256 = boundedSha256(value.desired.sshdSha256);
+  const desiredMountSha256 = boundedSha256(value.desired.mountSha256);
+  const chrootRoot = boundedSftpDirectoryState(value.current.chrootRoot);
+  const chrootDirectory = boundedSftpDirectoryState(value.current.chrootDirectory);
+  const mountDirectory = boundedSftpDirectoryState(value.current.mountDirectory);
+  const desiredPaths = [
+    value.desired.chrootRoot,
+    value.desired.chrootDirectory,
+    value.desired.mountDirectory,
+    value.desired.sshdConfigPath,
+  ];
+  if (configSha256 === undefined || mountSha256 === undefined
+    || desiredSshdSha256 === undefined || desiredMountSha256 === undefined
+    || !chrootRoot || !chrootDirectory || !mountDirectory
+    || desiredPaths.some((entry) => boundedText(entry) === null || !entry.startsWith('/'))
+    || boundedText(value.desired.unitName, 255) === null
+    || value.desired.directoryMode !== '0755'
+    || value.desired.directoryUid !== 0 || value.desired.directoryGid !== 0
+    || typeof value.current.sshdConfig?.present !== 'boolean'
+    || typeof value.current.sshdConfig?.matchesDesired !== 'boolean'
+    || typeof value.current.mountUnit?.present !== 'boolean'
+    || typeof value.current.mountUnit?.matchesDesired !== 'boolean'
+    || typeof value.current.mountUnit?.active !== 'boolean'
+    || typeof value.current.sshdConfigValid !== 'boolean'
+    || (value.current.receiptState !== null && !['prepared', 'active', 'compensated'].includes(value.current.receiptState))
+    || (value.current.receiptError !== null
+      && (typeof value.current.receiptError !== 'string' || !/^[a-z0-9_]{1,120}$/.test(value.current.receiptError)))) {
+    return null;
+  }
+
+  let authorizedKeys = null;
+  if (value.authorizedKeys !== undefined) {
+    if (!value.authorizedKeys || typeof value.authorizedKeys !== 'object' || Array.isArray(value.authorizedKeys)
+      || typeof value.authorizedKeys.satisfied !== 'boolean') return null;
+    if (value.authorizedKeys.satisfied) {
+      if (value.authorizedKeys.adapter !== 'openssh-authorized-keys'
+        || !Number.isSafeInteger(value.authorizedKeys.keyCount) || value.authorizedKeys.keyCount < 0 || value.authorizedKeys.keyCount > 100
+        || boundedSha256(value.authorizedKeys.sha256) === undefined) return null;
+      authorizedKeys = Object.freeze({
+        satisfied: true,
+        adapter: 'openssh-authorized-keys',
+        keyCount: value.authorizedKeys.keyCount,
+        sha256: value.authorizedKeys.sha256,
+      });
+    } else {
+      if (typeof value.authorizedKeys.reason !== 'string' || !/^[a-z0-9_]{1,120}$/.test(value.authorizedKeys.reason)) return null;
+      authorizedKeys = Object.freeze({ satisfied: false, reason: value.authorizedKeys.reason });
+    }
+  }
+
+  return Object.freeze({
+    version: 1,
+    satisfied: value.satisfied,
+    current: Object.freeze({
+      receiptState: value.current.receiptState,
+      receiptError: value.current.receiptError,
+      sshdConfig: Object.freeze({
+        present: value.current.sshdConfig.present,
+        sha256: configSha256,
+        matchesDesired: value.current.sshdConfig.matchesDesired,
+      }),
+      mountUnit: Object.freeze({
+        present: value.current.mountUnit.present,
+        sha256: mountSha256,
+        matchesDesired: value.current.mountUnit.matchesDesired,
+        active: value.current.mountUnit.active,
+      }),
+      chrootRoot,
+      chrootDirectory,
+      mountDirectory,
+      sshdConfigValid: value.current.sshdConfigValid,
+    }),
+    desired: Object.freeze({
+      websiteId,
+      applicationId,
+      unixUser: identity.unixUser,
+      sourceDirectory: identity.paths.workspace.sftpRoot,
+      chrootRoot: value.desired.chrootRoot,
+      chrootDirectory: value.desired.chrootDirectory,
+      mountDirectory: value.desired.mountDirectory,
+      sshdConfigPath: value.desired.sshdConfigPath,
+      unitName: value.desired.unitName,
+      sshdSha256: desiredSshdSha256,
+      mountSha256: desiredMountSha256,
+      directoryMode: '0755',
+      directoryUid: 0,
+      directoryGid: 0,
+    }),
+    ...(authorizedKeys ? { authorizedKeys } : {}),
+    differences: Object.freeze([...value.differences]),
+  });
+}
+
+async function inspectSftpMigrationPreview(handler, context, scope) {
+  if (!handler || typeof handler.previewMigration !== 'function') return null;
+  try {
+    return boundedSftpMigrationPreview(await handler.previewMigration(context), scope);
+  } catch {
+    return null;
+  }
+}
+
 function migrationChange({ id, action, current, desired, ownership = 'unverified', applyState = null }) {
   return Object.freeze({
     id,
@@ -320,6 +458,13 @@ export function createWebsiteIsolationAuditService({
           const identityMigrationPreview = !satisfied && stepId === 'unix_identity' && !missingWorkspaceDirectories
             ? await inspectIdentityMigrationPreview(handler, context, identity)
             : null;
+          const sftpMigrationPreview = !satisfied && stepId === 'sftp'
+            ? await inspectSftpMigrationPreview(handler, context, {
+              websiteId: website.id,
+              applicationId: application.id,
+              identity,
+            })
+            : null;
           inspectedSteps.push(Object.freeze({
             stepId,
             kind: step.kind,
@@ -329,6 +474,7 @@ export function createWebsiteIsolationAuditService({
               missingWorkspaces: Object.freeze(missingWorkspaceDirectories.map((target) => target.name)),
             } : {}),
             ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
+            ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
           }));
           if (!satisfied) {
             findings.push(finding(
@@ -369,6 +515,7 @@ export function createWebsiteIsolationAuditService({
                 intentSha256: valueDigest(step.intent),
                 inspection: result?.reason ?? 'isolation_not_satisfied',
                 ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
+                ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
               },
               desired: { satisfied: true },
             }));
@@ -378,12 +525,20 @@ export function createWebsiteIsolationAuditService({
           const identityMigrationPreview = stepId === 'unix_identity'
             ? await inspectIdentityMigrationPreview(handler, context, identity)
             : null;
+          const sftpMigrationPreview = stepId === 'sftp'
+            ? await inspectSftpMigrationPreview(handler, context, {
+              websiteId: website.id,
+              applicationId: application.id,
+              identity,
+            })
+            : null;
           inspectedSteps.push(Object.freeze({
             stepId,
             kind: step.kind,
             satisfied: false,
             reason: typeof error?.code === 'string' ? error.code : 'isolation_inspection_failed',
             ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
+            ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
           }));
           findings.push(finding(
             `website_isolation_${stepId}_drift`,
@@ -403,6 +558,7 @@ export function createWebsiteIsolationAuditService({
               intentSha256: valueDigest(step.intent),
               inspection: typeof error?.code === 'string' ? error.code : 'isolation_inspection_failed',
               ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
+              ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
             },
             desired: { satisfied: true },
           }));
@@ -466,4 +622,6 @@ export const websiteIsolationAuditInternals = Object.freeze({
   workspaceDirectories,
   boundedIdentityMigrationPreview,
   inspectIdentityMigrationPreview,
+  boundedSftpMigrationPreview,
+  inspectSftpMigrationPreview,
 });
