@@ -147,6 +147,7 @@ test('Static migration preview combines current deployment state with exact publ
         version: 1,
         adapter: 'static-publish-isolation',
         satisfied: false,
+        safeMigrationCandidate: false,
         current: {},
         desired: {},
         differences: ['static_publish_acl_drift'],
@@ -168,6 +169,7 @@ test('Static migration preview combines current deployment state with exact publ
   assert.equal(preview.version, 1);
   assert.equal(preview.adapter, 'static-runtime');
   assert.equal(preview.satisfied, false);
+  assert.equal(preview.safeControlMigrationCandidate, false);
   assert.equal(preview.current.runtime.reason, 'website_static_release_not_current');
   assert.equal(preview.current.isolation.adapter, 'static-publish-isolation');
   assert.deepEqual(preview.desired, {
@@ -181,6 +183,71 @@ test('Static migration preview combines current deployment state with exact publ
     'static_publish_acl_drift',
   ]);
   assert.deepEqual(calls.map(([name]) => name), ['runtime-inspect', 'isolation-preview']);
+});
+
+test('Static control migration delegates only to receipt-backed publish metadata lifecycle', async () => {
+  const calls = [];
+  const base = {
+    async apply() { throw new Error('normal static apply must not run'); },
+    async inspect(context) {
+      calls.push(['runtime-inspect', context]);
+      return { satisfied: true, adapter: 'static', applicationId: 'application-1' };
+    },
+    async compensate() { throw new Error('normal static compensation must not run'); },
+    async inspectCompensation() { throw new Error('normal static compensation inspect must not run'); },
+  };
+  const isolation = {
+    async apply() { throw new Error('normal isolation apply must not run'); },
+    async inspect() { throw new Error('normal isolation inspect must not run'); },
+    async previewMigration(value) {
+      calls.push(['migration-preview', value]);
+      return {
+        version: 1,
+        adapter: 'static-publish-isolation',
+        satisfied: false,
+        safeMigrationCandidate: true,
+        current: {},
+        desired: {},
+        differences: ['static_publish_container_drift'],
+      };
+    },
+    async inspectMigrationOperation(value, options) {
+      calls.push(['migration-inspect', value, options]);
+      return { satisfied: true, staticControlReceiptVersion: 1, migratedStaticControlMetadata: true };
+    },
+    async applyMigration(value, options) {
+      calls.push(['migration-apply', value, options]);
+      return { satisfied: true, staticControlReceiptVersion: 1, migratedStaticControlMetadata: true };
+    },
+    async inspectMigrationCompensation(value, options) {
+      calls.push(['migration-compensation-inspect', value, options]);
+      return { satisfied: true, restoredStaticControlMetadata: true, receiptState: 'active' };
+    },
+    async compensateMigration(value, options) {
+      calls.push(['migration-compensate', value, options]);
+      return { satisfied: true, restoredStaticControlMetadata: true, receiptState: 'compensated' };
+    },
+  };
+  const handler = websiteProvisioningIsolationInternals.staticRuntimeHandler(base, isolation);
+  const context = {
+    operationId: '12345678-1234-4234-8234-123456789012',
+    intent: { websiteId: 'website-1', applicationId: 'application-1' },
+  };
+
+  const applied = await handler.applyControlMigration(context);
+  assert.equal(applied.staticControlReceiptVersion, 1);
+  assert.equal(applied.staticRuntimeMigration, true);
+  assert.deepEqual(calls.map(([name]) => name), ['migration-preview', 'migration-apply', 'migration-inspect']);
+  assert.equal(calls.some(([name]) => name === 'runtime-inspect'), false);
+
+  const pending = await handler.inspectControlMigrationCompensation(context);
+  assert.deepEqual(pending, {
+    satisfied: false,
+    reason: 'static_publish_migration_compensation_receipt_pending',
+  });
+  const rolledBack = await handler.compensateControlMigration(context);
+  assert.equal(rolledBack.restoredStaticControlMetadata, true);
+  assert.equal(calls.some(([name]) => name === 'migration-compensate'), true);
 });
 
 test('Static runtime inspect fails closed when publish ACL or ownership drifted', async () => {
