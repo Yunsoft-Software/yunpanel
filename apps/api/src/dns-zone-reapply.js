@@ -24,42 +24,40 @@ function digest(value) {
 }
 
 function sourceZoneState(zone) {
-  if (!zone || typeof zone !== 'object' || !Array.isArray(zone.rrsets)
-    || typeof zone.zoneName !== 'string' || !zone.zoneName || typeof zone.id !== 'string' || !zone.id) {
-    throw new DnsZoneReapplyError('dns_zone_reapply_zone_invalid', 'Authoritative DNS zone state is invalid', 409);
+  try { return powerDnsZoneManagerInternals.zoneSnapshot(zone); }
+  catch (error) {
+    if (error instanceof PowerDnsZoneManagerError) {
+      throw new DnsZoneReapplyError('dns_zone_reapply_zone_invalid', error.message, 409);
+    }
+    throw error;
   }
-  const rrsets = zone.rrsets.map((rrset) => Object.freeze({
-    name: String(rrset.name ?? '').toLowerCase(),
-    type: String(rrset.type ?? '').toUpperCase(),
-    ttl: Number.isSafeInteger(rrset.ttl) ? rrset.ttl : null,
-    records: Object.freeze((rrset.records ?? [])
-      .map((entry) => Object.freeze({ content: String(entry?.content ?? ''), disabled: entry?.disabled === true }))
-      .sort((left, right) => `${left.disabled ? '1' : '0'}\u0000${left.content}`.localeCompare(
-        `${right.disabled ? '1' : '0'}\u0000${right.content}`,
-      ))),
-    comments: Object.freeze((rrset.comments ?? [])
-      .map((entry) => Object.freeze({
-        account: String(entry?.account ?? ''),
-        content: String(entry?.content ?? ''),
-      }))
-      .sort((left, right) => `${left.account}\u0000${left.content}`.localeCompare(
-        `${right.account}\u0000${right.content}`,
-      ))),
-  })).sort((left, right) => powerDnsZoneManagerInternals.rrsetKey(left).localeCompare(
-    powerDnsZoneManagerInternals.rrsetKey(right),
-  ));
-  return Object.freeze({
-    version: 1,
-    zoneName: zone.zoneName,
-    id: zone.id,
-    kind: zone.kind ?? null,
-    dnssec: zone.dnssec === true,
-    rrsets: Object.freeze(rrsets),
-  });
 }
 
 function sourceZoneDigest(zone) {
   return digest(sourceZoneState(zone));
+}
+
+function expectedAppliedZoneSnapshot(existing, preview, reconcileMail = false) {
+  const before = sourceZoneState(existing);
+  const desired = desiredRrsetMap(preview.records ?? []);
+  const reconciledSources = reconcileMail
+    ? new Set([...REAPPLY_MANAGED_SOURCES, 'mail'])
+    : REAPPLY_MANAGED_SOURCES;
+  const rrsets = new Map(before.rrsets.map((rrset) => [powerDnsZoneManagerInternals.rrsetKey(rrset), rrset]));
+
+  for (const [key, rrset] of rrsets.entries()) {
+    const managed = powerDnsZoneManagerInternals.parseManagedComment(rrset.comments);
+    if (managed && reconciledSources.has(managed.source) && !desired.has(key)) rrsets.delete(key);
+  }
+  for (const [key, rrset] of desired.entries()) rrsets.set(key, rrset);
+
+  return sourceZoneState({
+    zoneName: before.zoneName,
+    id: before.id,
+    kind: preview.primaryKindChangeRequired === true ? 'Primary' : before.kind,
+    dnssec: before.dnssec,
+    rrsets: [...rrsets.values()],
+  });
 }
 
 function serialFloor(now = Date.now) {
@@ -409,11 +407,14 @@ export function createDnsZoneReapplyService({
     return buildPreview(domainId, retirePendingDkim);
   }
 
-  async function captureRollbackSnapshot({ domainId, sourceZoneDigest: expectedSourceZoneDigest } = {}) {
-    if (typeof expectedSourceZoneDigest !== 'string' || !SHA256_PATTERN.test(expectedSourceZoneDigest)) {
+  async function captureRollbackSnapshot({ domainId, preview: expectedPreview } = {}) {
+    if (!expectedPreview || expectedPreview.applyAllowed !== true
+      || expectedPreview.domainId !== domainId
+      || typeof expectedPreview.sourceZoneDigest !== 'string'
+      || !SHA256_PATTERN.test(expectedPreview.sourceZoneDigest)) {
       throw new DnsZoneReapplyError(
         'dns_zone_reapply_source_digest_invalid',
-        'A current source-zone digest is required before rollback evidence can be captured',
+        'A current applyable preview is required before rollback evidence can be captured',
         409,
       );
     }
@@ -421,6 +422,9 @@ export function createDnsZoneReapplyService({
       await mapped(() => domainRegistry.getDomain(domainId), 'dns_zone_reapply_domain_unavailable', 'Domain state is unavailable'),
       localServerId,
     );
+    if (expectedPreview.serverId !== domain.serverId || expectedPreview.zoneName !== domain.primaryDomain) {
+      throw new DnsZoneReapplyError('dns_zone_reapply_preview_stale', 'DNS zone reapply preview no longer matches the Domain', 409);
+    }
     const secret = await mapped(
       () => powerDnsSecretRegistry.materializeForServer(domain.serverId),
       'dns_zone_reapply_secret_unavailable',
@@ -434,19 +438,23 @@ export function createDnsZoneReapplyService({
     if (!existing) {
       throw new DnsZoneReapplyError('dns_zone_reapply_zone_missing', 'Domain does not currently have a local authoritative PowerDNS zone', 409);
     }
-    const snapshot = sourceZoneState(existing);
-    const snapshotDigest = digest(snapshot);
-    if (snapshotDigest !== expectedSourceZoneDigest) {
+    const sourceZoneSnapshot = sourceZoneState(existing);
+    const actualSourceZoneDigest = digest(sourceZoneSnapshot);
+    if (actualSourceZoneDigest !== expectedPreview.sourceZoneDigest) {
       throw new DnsZoneReapplyError(
         'dns_zone_reapply_preview_stale',
         'Authoritative DNS zone changed before rollback evidence was journaled',
         409,
       );
     }
+    const appliedZoneSnapshot = expectedAppliedZoneSnapshot(existing, expectedPreview, mailIntentResolver !== null);
+    const appliedZoneDigest = digest(appliedZoneSnapshot);
     return Object.freeze({
-      version: 1,
-      sourceZoneDigest: snapshotDigest,
-      snapshot,
+      version: 2,
+      sourceZoneDigest: actualSourceZoneDigest,
+      sourceZoneSnapshot,
+      appliedZoneDigest,
+      appliedZoneSnapshot,
     });
   }
 
@@ -521,5 +529,6 @@ export const dnsZoneReapplyInternals = Object.freeze({
   topologyState,
   sourceZoneState,
   sourceZoneDigest,
+  expectedAppliedZoneSnapshot,
   digest,
 });
