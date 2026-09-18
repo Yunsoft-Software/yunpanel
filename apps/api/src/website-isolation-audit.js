@@ -416,6 +416,272 @@ async function inspectPassengerMigrationPreview(handler, context, scope) {
   }
 }
 
+function boundedFsState(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.present !== 'boolean') return null;
+  if (value.present === false) return Object.freeze({ present: false });
+  if (!Number.isSafeInteger(value.uid) || value.uid < 0
+    || !Number.isSafeInteger(value.gid) || value.gid < 0
+    || typeof value.mode !== 'string' || !/^0[0-7]{3}$/.test(value.mode)) return null;
+  const projected = {
+    present: true,
+    uid: value.uid,
+    gid: value.gid,
+    mode: value.mode,
+  };
+  for (const field of ['file', 'directory', 'socket', 'symbolicLink']) {
+    if (value[field] !== undefined) {
+      if (typeof value[field] !== 'boolean') return null;
+      projected[field] = value[field];
+    }
+  }
+  return Object.freeze(projected);
+}
+
+function boundedReason(value) {
+  return typeof value === 'string' && /^[a-z0-9_]{1,120}$/.test(value) ? value : null;
+}
+
+function boundedPreviewDifferences(value, max = 40) {
+  return Array.isArray(value)
+    && value.length <= max
+    && value.every((code) => boundedReason(code) !== null)
+    ? Object.freeze([...value])
+    : null;
+}
+
+function boundedPhpIdentity(value, expectedHome) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.satisfied !== 'boolean') return null;
+  if (!value.satisfied) {
+    const reason = boundedReason(value.reason);
+    return reason ? Object.freeze({ satisfied: false, reason }) : null;
+  }
+  if (!Number.isSafeInteger(value.uid) || value.uid < 1
+    || !Number.isSafeInteger(value.gid) || value.gid < 1
+    || value.homeDirectory !== expectedHome) return null;
+  const projected = {
+    satisfied: true,
+    uid: value.uid,
+    gid: value.gid,
+    homeDirectory: value.homeDirectory,
+  };
+  if (value.homeMode !== undefined) {
+    if (typeof value.homeMode !== 'string' || !/^0[0-7]{3}$/.test(value.homeMode)) return null;
+    projected.homeMode = value.homeMode;
+  }
+  return Object.freeze(projected);
+}
+
+function boundedPhpContainerPreview(value, scope) {
+  const differences = boundedPreviewDifferences(value?.differences);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== 1 || value.adapter !== 'php-container'
+    || typeof value.satisfied !== 'boolean' || !differences
+    || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
+    || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
+    || value.desired.websiteId !== scope.websiteId
+    || value.desired.applicationId !== scope.applicationId
+    || value.desired.releaseId !== scope.operationId
+    || value.desired.unixUser !== scope.identity?.unixUser
+    || value.desired.documentRoot !== path.posix.join(scope.identity?.paths?.runtime?.currentRelease ?? '', 'public')
+    || value.desired.applicationRoot !== scope.identity?.paths?.runtime?.applicationRoot
+    || value.desired.releasesDirectory !== scope.identity?.paths?.runtime?.releasesDirectory
+    || value.desired.currentRelease !== scope.identity?.paths?.runtime?.currentRelease
+    || value.desired.releaseDirectory !== path.posix.join(scope.identity?.paths?.runtime?.releasesDirectory ?? '', scope.operationId)
+    || value.desired.releaseDocumentRoot !== path.posix.join(scope.identity?.paths?.runtime?.releasesDirectory ?? '', scope.operationId, 'public')
+    || value.desired.controlDirectoryMode !== '0755'
+    || value.desired.releaseDirectoryMode !== '0750') return null;
+
+  const identity = boundedPhpIdentity(value.current.identity, scope.identity.paths.workspace.homeDirectory);
+  const applicationRoot = boundedFsState(value.current.applicationRoot);
+  const releasesDirectory = boundedFsState(value.current.releasesDirectory);
+  const releaseDirectory = boundedFsState(value.current.releaseDirectory);
+  const releaseDocumentRoot = boundedFsState(value.current.releaseDocumentRoot);
+  const currentRelease = boundedFsState(value.current.currentRelease);
+  if (!identity || !applicationRoot || !releasesDirectory || !releaseDirectory || !releaseDocumentRoot || !currentRelease) return null;
+  const currentTarget = value.current.currentTarget === null ? null : boundedText(value.current.currentTarget);
+  const currentTargetError = value.current.currentTargetError === null ? null : boundedReason(value.current.currentTargetError);
+  if ((value.current.currentTarget !== null && currentTarget === null)
+    || (value.current.currentTargetError !== null && currentTargetError === null)) return null;
+
+  return Object.freeze({
+    version: 1,
+    adapter: 'php-container',
+    satisfied: value.satisfied,
+    current: Object.freeze({
+      identity,
+      applicationRoot,
+      releasesDirectory,
+      releaseDirectory,
+      releaseDocumentRoot,
+      currentRelease,
+      currentTarget,
+      currentTargetError,
+    }),
+    desired: Object.freeze({
+      websiteId: scope.websiteId,
+      applicationId: scope.applicationId,
+      releaseId: scope.operationId,
+      unixUser: scope.identity.unixUser,
+      documentRoot: value.desired.documentRoot,
+      applicationRoot: value.desired.applicationRoot,
+      releasesDirectory: value.desired.releasesDirectory,
+      currentRelease: value.desired.currentRelease,
+      releaseDirectory: value.desired.releaseDirectory,
+      releaseDocumentRoot: value.desired.releaseDocumentRoot,
+      controlDirectoryMode: '0755',
+      releaseDirectoryMode: '0750',
+    }),
+    differences,
+  });
+}
+
+function boundedPhpFpmPreview(value, scope) {
+  const differences = boundedPreviewDifferences(value?.differences);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== 1 || value.adapter !== 'php-fpm'
+    || typeof value.satisfied !== 'boolean' || !differences
+    || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
+    || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
+    || value.desired.websiteId !== scope.websiteId
+    || value.desired.applicationId !== scope.applicationId
+    || value.desired.unixUser !== scope.identity?.unixUser
+    || value.desired.homeDirectory !== scope.identity?.paths?.workspace?.homeDirectory
+    || value.desired.documentRoot !== path.posix.join(scope.identity?.paths?.runtime?.currentRelease ?? '', 'public')
+    || boundedText(value.desired.packageName, 80) === null
+    || boundedText(value.desired.phpVersion, 40) === null
+    || boundedText(value.desired.configPath) === null || !value.desired.configPath.startsWith('/')
+    || boundedSha256(value.desired.configSha256) === undefined
+    || value.desired.configMode !== '0600'
+    || boundedText(value.desired.socketPath) === null || !value.desired.socketPath.startsWith('/')
+    || value.desired.socketMode !== '0660'
+    || boundedText(value.desired.serviceUnit, 160) === null) return null;
+
+  const identity = boundedPhpIdentity(value.current.identity, scope.identity.paths.workspace.homeDirectory);
+  const documentRoot = boundedFsState(value.current.documentRoot);
+  const socket = boundedFsState(value.current.socket);
+  if (!identity || !documentRoot || !socket) return null;
+
+  const packageState = value.current.package;
+  if (!packageState || typeof packageState !== 'object' || Array.isArray(packageState)
+    || typeof packageState.installed !== 'boolean'
+    || (packageState.version !== null && boundedText(packageState.version, 120) === null)) return null;
+
+  const receipt = value.current.receipt;
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)
+    || (receipt.state !== null && !['prepared', 'active', 'compensated'].includes(receipt.state))
+    || (receipt.mutated !== null && typeof receipt.mutated !== 'boolean')
+    || boundedSha256(receipt.previousConfigSha256, { nullable: true }) === undefined
+    || (receipt.error !== null && boundedReason(receipt.error) === null)) return null;
+
+  const pool = value.current.pool;
+  if (!pool || typeof pool !== 'object' || Array.isArray(pool) || typeof pool.present !== 'boolean'
+    || boundedSha256(pool.sha256, { nullable: true }) === undefined
+    || typeof pool.matchesDesired !== 'boolean'
+    || (pool.readError !== null && boundedReason(pool.readError) === null)) return null;
+  const poolState = boundedFsState(pool);
+  if (!poolState) return null;
+  if (value.current.configValid !== null && typeof value.current.configValid !== 'boolean') return null;
+  if (typeof value.current.serviceActive !== 'boolean') return null;
+
+  return Object.freeze({
+    version: 1,
+    adapter: 'php-fpm',
+    satisfied: value.satisfied,
+    current: Object.freeze({
+      identity,
+      documentRoot,
+      package: Object.freeze({
+        installed: packageState.installed,
+        version: packageState.version,
+      }),
+      receipt: Object.freeze({
+        state: receipt.state,
+        mutated: receipt.mutated,
+        previousConfigSha256: receipt.previousConfigSha256,
+        error: receipt.error,
+      }),
+      pool: Object.freeze({
+        ...poolState,
+        sha256: pool.sha256,
+        matchesDesired: pool.matchesDesired,
+        readError: pool.readError,
+      }),
+      configValid: value.current.configValid,
+      serviceActive: value.current.serviceActive,
+      socket,
+    }),
+    desired: Object.freeze({
+      websiteId: scope.websiteId,
+      applicationId: scope.applicationId,
+      unixUser: scope.identity.unixUser,
+      homeDirectory: scope.identity.paths.workspace.homeDirectory,
+      documentRoot: value.desired.documentRoot,
+      packageName: value.desired.packageName,
+      phpVersion: value.desired.phpVersion,
+      configPath: value.desired.configPath,
+      configSha256: value.desired.configSha256,
+      configMode: '0600',
+      socketPath: value.desired.socketPath,
+      socketMode: '0660',
+      serviceUnit: value.desired.serviceUnit,
+    }),
+    differences,
+  });
+}
+
+function boundedPhpRuntimeMigrationPreview(value, scope) {
+  const differences = boundedPreviewDifferences(value?.differences);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== 1 || value.adapter !== 'php-runtime'
+    || typeof value.satisfied !== 'boolean' || !differences
+    || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
+    || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
+    || value.desired.websiteId !== scope.websiteId
+    || value.desired.applicationId !== scope.applicationId
+    || value.desired.unixUser !== scope.identity?.unixUser
+    || value.desired.documentRoot !== path.posix.join(scope.identity?.paths?.runtime?.currentRelease ?? '', 'public')
+    || value.desired.runtimeUmask !== '0027') return null;
+
+  const container = boundedPhpContainerPreview(value.current.container, scope);
+  const fpm = boundedPhpFpmPreview(value.current.fpm, scope);
+  const umask = value.current.umask;
+  if (!container || !fpm || !umask || typeof umask !== 'object' || Array.isArray(umask)
+    || typeof umask.satisfied !== 'boolean') return null;
+  let umaskProjection;
+  if (umask.satisfied) {
+    if (umask.umask !== '0027') return null;
+    umaskProjection = Object.freeze({ satisfied: true, umask: '0027' });
+  } else {
+    const reason = boundedReason(umask.reason);
+    if (!reason) return null;
+    umaskProjection = Object.freeze({ satisfied: false, reason });
+  }
+
+  return Object.freeze({
+    version: 1,
+    adapter: 'php-runtime',
+    satisfied: value.satisfied,
+    current: Object.freeze({ container, fpm, umask: umaskProjection }),
+    desired: Object.freeze({
+      websiteId: scope.websiteId,
+      applicationId: scope.applicationId,
+      unixUser: scope.identity.unixUser,
+      documentRoot: value.desired.documentRoot,
+      runtimeUmask: '0027',
+    }),
+    differences,
+  });
+}
+
+async function inspectPhpRuntimeMigrationPreview(handler, context, scope) {
+  if (!handler || typeof handler.previewMigration !== 'function') return null;
+  try {
+    return boundedPhpRuntimeMigrationPreview(await handler.previewMigration(context), scope);
+  } catch {
+    return null;
+  }
+}
+
 function migrationChange({ id, action, current, desired, ownership = 'unverified', applyState = null }) {
   return Object.freeze({
     id,
@@ -613,6 +879,14 @@ export function createWebsiteIsolationAuditService({
               identity,
             })
             : null;
+          const phpRuntimeMigrationPreview = !satisfied && stepId === 'php_runtime'
+            ? await inspectPhpRuntimeMigrationPreview(handler, context, {
+              websiteId: website.id,
+              applicationId: application.id,
+              operationId: operation.operationId,
+              identity,
+            })
+            : null;
           inspectedSteps.push(Object.freeze({
             stepId,
             kind: step.kind,
@@ -624,6 +898,7 @@ export function createWebsiteIsolationAuditService({
             ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
             ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
             ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
+            ...(phpRuntimeMigrationPreview ? { phpRuntimeMigrationPreview } : {}),
           }));
           if (!satisfied) {
             findings.push(finding(
@@ -666,6 +941,7 @@ export function createWebsiteIsolationAuditService({
                 ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
                 ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
                 ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
+                ...(phpRuntimeMigrationPreview ? { phpRuntimeMigrationPreview } : {}),
               },
               desired: { satisfied: true },
             }));
@@ -688,6 +964,14 @@ export function createWebsiteIsolationAuditService({
               identity,
             })
             : null;
+          const phpRuntimeMigrationPreview = stepId === 'php_runtime'
+            ? await inspectPhpRuntimeMigrationPreview(handler, context, {
+              websiteId: website.id,
+              applicationId: application.id,
+              operationId: operation.operationId,
+              identity,
+            })
+            : null;
           inspectedSteps.push(Object.freeze({
             stepId,
             kind: step.kind,
@@ -696,6 +980,7 @@ export function createWebsiteIsolationAuditService({
             ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
             ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
             ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
+            ...(phpRuntimeMigrationPreview ? { phpRuntimeMigrationPreview } : {}),
           }));
           findings.push(finding(
             `website_isolation_${stepId}_drift`,
@@ -717,6 +1002,7 @@ export function createWebsiteIsolationAuditService({
               ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
               ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
               ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
+              ...(phpRuntimeMigrationPreview ? { phpRuntimeMigrationPreview } : {}),
             },
             desired: { satisfied: true },
           }));
@@ -785,4 +1071,9 @@ export const websiteIsolationAuditInternals = Object.freeze({
   inspectSftpMigrationPreview,
   boundedPassengerMigrationPreview,
   inspectPassengerMigrationPreview,
+  boundedFsState,
+  boundedPhpContainerPreview,
+  boundedPhpFpmPreview,
+  boundedPhpRuntimeMigrationPreview,
+  inspectPhpRuntimeMigrationPreview,
 });
