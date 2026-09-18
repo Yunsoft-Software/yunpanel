@@ -155,3 +155,22 @@ test('static publish migration preview reports release ownership drift without r
   assert.equal(host.entries.get(assetPath).mode, 0o644);
   assert.equal(host.calls.some(([file]) => ['/usr/bin/apt-get', '/usr/bin/chown', '/usr/bin/setfacl'].includes(file)), false);
 });
+
+
+test('static publish migration preview normalizes a non-symlink current path into bounded drift', async () => {
+  const host = fakeHost();
+  host.readlinkFn = async () => {
+    const error = new Error('not a symlink');
+    error.code = 'EINVAL';
+    throw error;
+  };
+
+  const preview = await manager(host).previewMigration({ websiteId, applicationId });
+
+  assert.equal(preview.satisfied, false);
+  assert.deepEqual(preview.current.current, {
+    present: false,
+    error: 'static_publish_current_invalid',
+  });
+  assert.equal(preview.differences.includes('static_publish_current_invalid'), true);
+});
