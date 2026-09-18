@@ -83,6 +83,19 @@ function staticControlContext(operation) {
   });
 }
 
+function staticReleaseContext(operation) {
+  return Object.freeze({
+    operationId: operation.id,
+    sourceOperationId: operation.intent.sourceOperationId,
+    expectedTreeSha256: operation.intent.sourceStateSha256,
+    websiteId: operation.websiteId,
+    intent: Object.freeze({
+      websiteId: operation.websiteId,
+      applicationId: operation.applicationId,
+    }),
+  });
+}
+
 function exactIdentityTarget(operation, change) {
   return Boolean(change?.action === 'create_canonical_unix_identity'
     && change.current?.identityMigrationPreview?.safeCreateCandidate === true
@@ -150,6 +163,25 @@ function exactStaticControlTarget(operation, change) {
     && change.desired?.staticControl?.aclPackage === 'acl');
 }
 
+function exactStaticReleaseTarget(operation, change) {
+  const identity = createApplicationIdentity(operation.applicationId);
+  const releasesRoot = `${identity.paths.static.publishRoot}/releases`;
+  return Boolean(change?.action === 'repair_static_release_permissions'
+    && change.current?.operationId === operation.intent.sourceOperationId
+    && change.current?.staticRuntimeMigrationPreview?.releaseRepairCandidate === true
+    && change.current?.staticRuntimeMigrationPreview?.current?.releasePermissions?.repairCandidate === true
+    && change.current?.staticRuntimeMigrationPreview?.current?.releasePermissions?.current?.tree?.sha256 === operation.intent.sourceStateSha256
+    && change.desired?.treeSha256 === operation.intent.sourceStateSha256
+    && change.desired?.staticRelease?.websiteId === operation.websiteId
+    && change.desired?.staticRelease?.applicationId === operation.applicationId
+    && change.desired?.staticRelease?.unixUser === operation.intent.user
+    && change.desired?.staticRelease?.releasesRoot === releasesRoot
+    && change.desired?.staticRelease?.releaseDirectoryMode === '0750'
+    && change.desired?.staticRelease?.releaseFileMode === '0640'
+    && change.desired?.staticRelease?.nginxDirectoryAcl === 'user:www-data:r-x'
+    && change.desired?.staticRelease?.nginxFileAcl === 'user:www-data:r--');
+}
+
 function exactTargets(operation, audit) {
   const change = audit?.migration?.changes?.length === 1 ? audit.migration.changes[0] : null;
   const kind = migrationKind(operation);
@@ -163,7 +195,9 @@ function exactTargets(operation, audit) {
           ? exactPhpContainerTarget(operation, change)
           : kind === 'static_control'
             ? exactStaticControlTarget(operation, change)
-            : change?.action === 'create_workspace_directories'
+            : kind === 'static_release'
+              ? exactStaticReleaseTarget(operation, change)
+              : change?.action === 'create_workspace_directories'
         && JSON.stringify(change.desired?.directories) === JSON.stringify(operation.intent.targets);
   return Boolean(audit?.websiteId === operation.websiteId
     && audit.applicationId === operation.applicationId
@@ -401,6 +435,51 @@ function staticControlCompensationEvidence(value) {
   return Object.freeze({ satisfied: true, restoredStaticControlMetadata: true });
 }
 
+function staticReleaseApplyEvidence(value, expectedTreeSha256) {
+  if (!value || value.satisfied !== true
+    || value.staticReleaseReceiptVersion !== 1
+    || value.migratedStaticReleasePermissions !== true
+    || typeof value.treeSha256 !== 'string'
+    || !SHA256_PATTERN.test(value.treeSha256)
+    || value.treeSha256 !== expectedTreeSha256) {
+    throw new WebsiteIsolationMigrationRuntimeError(
+      'website_isolation_migration_evidence_invalid',
+      'Website static release migration did not return exact operation ownership evidence',
+      503,
+    );
+  }
+  return Object.freeze({
+    satisfied: true,
+    staticReleaseReceiptVersion: 1,
+    migratedStaticReleasePermissions: true,
+    treeSha256: value.treeSha256,
+  });
+}
+
+function staticReleaseInspectionEvidence(value, expectedTreeSha256) {
+  if (!value || value.satisfied !== true) return null;
+  return staticReleaseApplyEvidence(value, expectedTreeSha256);
+}
+
+function staticReleaseCompensationEvidence(value, expectedTreeSha256) {
+  if (!value || value.satisfied !== true
+    || value.restoredStaticReleasePermissions !== true
+    || typeof value.treeSha256 !== 'string'
+    || !SHA256_PATTERN.test(value.treeSha256)
+    || value.treeSha256 !== expectedTreeSha256) {
+    throw new WebsiteIsolationMigrationRuntimeError(
+      'website_isolation_migration_compensation_evidence_invalid',
+      'Website static release migration rollback did not return exact operation ownership evidence',
+      503,
+    );
+  }
+  return Object.freeze({
+    satisfied: true,
+    restoredStaticReleasePermissions: true,
+    treeSha256: value.treeSha256,
+  });
+}
+
 export function createWebsiteIsolationMigrationRuntime({
   registry,
   auditService,
@@ -512,6 +591,15 @@ export function createWebsiteIsolationMigrationRuntime({
         await registry.fail(operation.id, 'website_isolation_migration_handler_unavailable'),
       );
     }
+    if (kind === 'static_release' && (!staticHandler
+      || typeof staticHandler.inspectReleaseMigrationOperation !== 'function'
+      || typeof staticHandler.applyReleaseMigration !== 'function'
+      || typeof staticHandler.inspectReleaseMigrationCompensation !== 'function'
+      || typeof staticHandler.compensateReleaseMigration !== 'function')) {
+      return websiteIsolationMigrationPublicView(
+        await registry.fail(operation.id, 'website_isolation_migration_handler_unavailable'),
+      );
+    }
     let inspected;
     try {
       inspected = kind === 'identity'
@@ -524,7 +612,9 @@ export function createWebsiteIsolationMigrationRuntime({
               ? await phpHandler.inspectContainerMigrationOperation(phpContext(operation))
               : kind === 'static_control'
                 ? await staticHandler.inspectControlMigrationOperation(staticControlContext(operation))
-                : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
+                : kind === 'static_release'
+                  ? await staticHandler.inspectReleaseMigrationOperation(staticReleaseContext(operation))
+                  : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
     }
     catch (error) {
       if (!mayApply) {
@@ -547,7 +637,9 @@ export function createWebsiteIsolationMigrationRuntime({
             ? phpContainerInspectionEvidence(inspected)
             : kind === 'static_control'
               ? staticControlInspectionEvidence(inspected)
-              : inspectionEvidence(inspected);
+              : kind === 'static_release'
+                ? staticReleaseInspectionEvidence(inspected, operation.intent.sourceStateSha256)
+                : inspectionEvidence(inspected);
     if (alreadySatisfied) {
       try { return websiteIsolationMigrationPublicView(await registry.succeed(operation.id, alreadySatisfied)); }
       catch (error) { throw mapped(error); }
@@ -594,7 +686,9 @@ export function createWebsiteIsolationMigrationRuntime({
                 ? await phpHandler.inspectContainerMigrationOperation(phpContext(operation))
                 : kind === 'static_control'
                   ? await staticHandler.inspectControlMigrationOperation(staticControlContext(operation))
-                  : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
+                  : kind === 'static_release'
+                    ? await staticHandler.inspectReleaseMigrationOperation(staticReleaseContext(operation))
+                    : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
         const postcondition = kind === 'identity'
           ? identityInspectionEvidence(postInspection)
           : kind === 'sftp'
@@ -605,7 +699,9 @@ export function createWebsiteIsolationMigrationRuntime({
                 ? phpContainerInspectionEvidence(postInspection)
                 : kind === 'static_control'
                   ? staticControlInspectionEvidence(postInspection)
-                  : inspectionEvidence(postInspection);
+                  : kind === 'static_release'
+                    ? staticReleaseInspectionEvidence(postInspection, operation.intent.sourceStateSha256)
+                    : inspectionEvidence(postInspection);
         if (postcondition) {
           return websiteIsolationMigrationPublicView(await registry.succeed(operation.id, postcondition));
         }
@@ -669,7 +765,9 @@ export function createWebsiteIsolationMigrationRuntime({
               ? await phpHandler.inspectContainerMigrationCompensation(phpContext(operation))
               : kind === 'static_control'
                 ? await staticHandler.inspectControlMigrationCompensation(staticControlContext(operation))
-                : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
+                : kind === 'static_release'
+                  ? await staticHandler.inspectReleaseMigrationCompensation(staticReleaseContext(operation))
+                  : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
       if (inspected?.satisfied === true) {
         const evidence = kind === 'identity'
           ? identityCompensationEvidence(inspected)
@@ -681,7 +779,9 @@ export function createWebsiteIsolationMigrationRuntime({
                 ? phpContainerCompensationEvidence(inspected)
                 : kind === 'static_control'
                   ? staticControlCompensationEvidence(inspected)
-                  : compensationEvidence(inspected);
+                  : kind === 'static_release'
+                    ? staticReleaseCompensationEvidence(inspected, operation.intent.sourceStateSha256)
+                    : compensationEvidence(inspected);
         return websiteIsolationMigrationPublicView(await registry.compensate(operation.id, evidence));
       }
       const result = kind === 'identity'
@@ -697,7 +797,12 @@ export function createWebsiteIsolationMigrationRuntime({
               ? phpContainerCompensationEvidence(await phpHandler.compensateContainerMigration(phpContext(operation)))
               : kind === 'static_control'
                 ? staticControlCompensationEvidence(await staticHandler.compensateControlMigration(staticControlContext(operation)))
-                : compensationEvidence(await workspaceManager.compensateWorkspace(intent, { operationId: operation.id }));
+                : kind === 'static_release'
+                  ? staticReleaseCompensationEvidence(
+                    await staticHandler.compensateReleaseMigration(staticReleaseContext(operation)),
+                    operation.intent.sourceStateSha256,
+                  )
+                  : compensationEvidence(await workspaceManager.compensateWorkspace(intent, { operationId: operation.id }));
       return websiteIsolationMigrationPublicView(await registry.compensate(operation.id, result));
     } catch (error) {
       return websiteIsolationMigrationPublicView(await registry.failCompensation(
@@ -740,7 +845,9 @@ export function createWebsiteIsolationMigrationRuntime({
                   ? await migrationHandlers.php_runtime?.inspectContainerMigrationOperation(phpContext(operation))
                   : kind === 'static_control'
                     ? await migrationHandlers.static_runtime?.inspectControlMigrationOperation(staticControlContext(operation))
-                    : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
+                    : kind === 'static_release'
+                      ? await migrationHandlers.static_runtime?.inspectReleaseMigrationOperation(staticReleaseContext(operation))
+                      : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
           const result = kind === 'identity'
             ? identityInspectionEvidence(inspected)
             : kind === 'sftp'
@@ -751,7 +858,9 @@ export function createWebsiteIsolationMigrationRuntime({
                   ? phpContainerInspectionEvidence(inspected)
                   : kind === 'static_control'
                     ? staticControlInspectionEvidence(inspected)
-                    : inspectionEvidence(inspected);
+                    : kind === 'static_release'
+                      ? staticReleaseInspectionEvidence(inspected, operation.intent.sourceStateSha256)
+                      : inspectionEvidence(inspected);
           if (result) {
             recovery.push(Object.freeze({ operationId: operation.id, recovered: true }));
             await registry.succeed(operation.id, result);
@@ -772,7 +881,9 @@ export function createWebsiteIsolationMigrationRuntime({
                   ? await migrationHandlers.php_runtime?.inspectContainerMigrationCompensation(phpContext(operation))
                   : kind === 'static_control'
                     ? await migrationHandlers.static_runtime?.inspectControlMigrationCompensation(staticControlContext(operation))
-                    : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
+                    : kind === 'static_release'
+                      ? await migrationHandlers.static_runtime?.inspectReleaseMigrationCompensation(staticReleaseContext(operation))
+                      : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
           if (result?.satisfied === true) {
             recovery.push(Object.freeze({ operationId: operation.id, recovered: true }));
             await registry.compensate(
@@ -787,7 +898,9 @@ export function createWebsiteIsolationMigrationRuntime({
                       ? phpContainerCompensationEvidence(result)
                       : kind === 'static_control'
                         ? staticControlCompensationEvidence(result)
-                        : compensationEvidence(result),
+                        : kind === 'static_release'
+                          ? staticReleaseCompensationEvidence(result, operation.intent.sourceStateSha256)
+                          : compensationEvidence(result),
             );
           } else {
             recovery.push(Object.freeze({ operationId: operation.id, recovered: false, reason: 'compensation_incomplete' }));
@@ -818,11 +931,13 @@ export const websiteIsolationMigrationRuntimeInternals = Object.freeze({
   exactPhpTarget,
   exactPhpContainerTarget,
   exactStaticControlTarget,
+  exactStaticReleaseTarget,
   migrationKind,
   workspaceIntent,
   sftpContext,
   phpContext,
   staticControlContext,
+  staticReleaseContext,
   applyEvidence,
   inspectionEvidence,
   compensationEvidence,
@@ -841,4 +956,7 @@ export const websiteIsolationMigrationRuntimeInternals = Object.freeze({
   staticControlApplyEvidence,
   staticControlInspectionEvidence,
   staticControlCompensationEvidence,
+  staticReleaseApplyEvidence,
+  staticReleaseInspectionEvidence,
+  staticReleaseCompensationEvidence,
 });
