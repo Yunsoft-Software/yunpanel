@@ -16,6 +16,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const MIGRATION_RECEIPT_ROOT = '/var/lib/yunpanel/staging/static-control-migrations';
 const MIGRATION_RECEIPT_VERSION = 1;
 const MIGRATION_RECEIPT_STATES = new Set(['prepared', 'active', 'compensated']);
+const MAX_RELEASE_PREVIEW_ENTRIES = 50_000;
 
 export class StaticPublishIsolationError extends Error {
   constructor(code, message) {
@@ -296,6 +297,175 @@ export function createStaticPublishIsolationManager({
       if (!aclHas(acl, expectedAcl)) {
         throw new StaticPublishIsolationError('static_publish_acl_drift', 'Static publish Nginx ACL has drifted');
       }
+    });
+  }
+
+  async function releaseTreeSummary(spec, identity) {
+    const releases = await releaseDirectories(spec);
+    if (releases.length < 1) {
+      return Object.freeze({
+        releases: Object.freeze([]),
+        tree: null,
+        differences: Object.freeze(['static_publish_release_missing']),
+      });
+    }
+
+    const digestEntries = [];
+    let ownershipModeDriftCount = 0;
+    let aclDriftCount = 0;
+    for (const release of releases) {
+      await walk(release, async (entryPath, info, type) => {
+        if (digestEntries.length >= MAX_RELEASE_PREVIEW_ENTRIES) {
+          throw new StaticPublishIsolationError(
+            'static_publish_release_preview_too_large',
+            'Static publish release tree exceeds the bounded migration preview limit',
+          );
+        }
+        const relativePath = path.posix.relative(spec.releasesRoot, entryPath);
+        if (!relativePath || path.posix.isAbsolute(relativePath)
+          || relativePath.split('/').includes('..')) {
+          throw new StaticPublishIsolationError(
+            'static_publish_release_preview_escape',
+            'Static publish release preview escaped the managed release root',
+          );
+        }
+        const expectedMode = type === 'directory' ? 0o750 : 0o640;
+        const expectedAcl = type === 'directory' ? 'user:www-data:r-x' : 'user:www-data:r--';
+        const acl = await getAcl(entryPath);
+        const ownershipModeSatisfied = info.uid === identity.uid
+          && info.gid === identity.gid
+          && modeOf(info) === expectedMode;
+        const aclSatisfied = aclHas(acl, expectedAcl);
+        if (!ownershipModeSatisfied) ownershipModeDriftCount += 1;
+        if (!aclSatisfied) aclDriftCount += 1;
+        digestEntries.push(Object.freeze({
+          relativePath,
+          type,
+          uid: info.uid,
+          gid: info.gid,
+          mode: modeOf(info).toString(8).padStart(4, '0'),
+          aclSha256: sha256(acl),
+        }));
+      });
+    }
+    digestEntries.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+    return Object.freeze({
+      releases: Object.freeze(releases.map((release) => path.posix.basename(release))),
+      tree: Object.freeze({
+        sha256: sha256(JSON.stringify(digestEntries)),
+        entryCount: digestEntries.length,
+        ownershipModeDriftCount,
+        aclDriftCount,
+      }),
+      differences: Object.freeze([
+        ...(ownershipModeDriftCount > 0 ? ['static_publish_release_drift'] : []),
+        ...(aclDriftCount > 0 ? ['static_publish_acl_drift'] : []),
+      ]),
+    });
+  }
+
+  async function previewReleaseMigration(rawIntent) {
+    const spec = normalizeIntent(rawIntent);
+    let identity;
+    try {
+      const value = await inspectIdentity(spec);
+      identity = value?.satisfied === true
+        ? Object.freeze({
+          satisfied: true,
+          uid: value.uid,
+          gid: value.gid,
+          homeDirectory: value.homeDirectory,
+        })
+        : Object.freeze({
+          satisfied: false,
+          reason: value?.reason ?? 'static_publish_identity_unavailable',
+        });
+    } catch (error) {
+      identity = Object.freeze({
+        satisfied: false,
+        reason: typeof error?.code === 'string' ? error.code : 'static_publish_identity_inspection_failed',
+      });
+    }
+
+    const aclAvailable = await aclToolsAvailable();
+    let currentTarget = null;
+    let currentTargetError = null;
+    try {
+      const info = await lstatFn(spec.currentPath);
+      if (!info?.isSymbolicLink?.()) {
+        currentTargetError = 'static_publish_current_invalid';
+      } else {
+        currentTarget = await readlinkFn(spec.currentPath);
+      }
+    } catch (error) {
+      currentTargetError = missing(error)
+        ? 'static_publish_current_missing'
+        : 'static_publish_current_inspection_failed';
+    }
+
+    let summary = Object.freeze({
+      releases: Object.freeze([]),
+      tree: null,
+      differences: Object.freeze([]),
+    });
+    let summaryError = null;
+    if (identity.satisfied && aclAvailable) {
+      try { summary = await releaseTreeSummary(spec, identity); }
+      catch (error) {
+        summaryError = typeof error?.code === 'string'
+          ? error.code
+          : 'static_publish_release_preview_failed';
+      }
+    }
+
+    const currentReleaseId = currentTarget === null ? null : releaseIdFromTarget(currentTarget);
+    const currentTargetManaged = currentReleaseId !== null && summary.releases.includes(currentReleaseId);
+    const differences = [
+      ...(identity.satisfied ? [] : [identity.reason]),
+      ...(aclAvailable ? [] : ['static_publish_acl_package_missing']),
+      ...(summaryError ? [summaryError] : summary.differences),
+      ...(currentTargetError ? [currentTargetError] : []),
+      ...(!currentTargetError && !currentTargetManaged ? ['static_publish_current_drift'] : []),
+    ];
+    const uniqueDifferences = [...new Set(differences)];
+    const satisfied = uniqueDifferences.length === 0;
+    const repairCandidate = identity.satisfied === true
+      && aclAvailable === true
+      && summaryError === null
+      && summary.tree !== null
+      && summary.tree.entryCount > 0
+      && currentTargetManaged
+      && (summary.tree.ownershipModeDriftCount > 0 || summary.tree.aclDriftCount > 0)
+      && uniqueDifferences.every((code) => (
+        code === 'static_publish_release_drift' || code === 'static_publish_acl_drift'
+      ));
+
+    return Object.freeze({
+      version: 1,
+      adapter: 'static-release-permissions',
+      satisfied,
+      automaticMigration: false,
+      repairCandidate,
+      migrationBlockedReason: 'static_release_receipt_not_operation_owned',
+      current: Object.freeze({
+        identity,
+        aclToolsAvailable: aclAvailable,
+        currentTarget,
+        currentTargetError,
+        releases: summary.releases,
+        tree: summary.tree,
+      }),
+      desired: Object.freeze({
+        websiteId: spec.websiteId,
+        applicationId: spec.applicationId,
+        unixUser: spec.identity.unixUser,
+        releasesRoot: spec.releasesRoot,
+        releaseDirectoryMode: '0750',
+        releaseFileMode: '0640',
+        nginxDirectoryAcl: 'user:www-data:r-x',
+        nginxFileAcl: 'user:www-data:r--',
+      }),
+      differences: Object.freeze(uniqueDifferences),
     });
   }
 
@@ -827,6 +997,7 @@ export function createStaticPublishIsolationManager({
   return Object.freeze({
     inspect,
     previewMigration,
+    previewReleaseMigration,
     inspectMigrationOperation,
     applyMigration,
     inspectMigrationCompensation,
@@ -844,5 +1015,6 @@ export const staticPublishIsolationInternals = Object.freeze({
   normalizeMigrationReceipt,
   aclPackage: ACL_PACKAGE,
   migrationReceiptVersion: MIGRATION_RECEIPT_VERSION,
+  maxReleasePreviewEntries: MAX_RELEASE_PREVIEW_ENTRIES,
   paths: Object.freeze({ MIGRATION_RECEIPT_ROOT }),
 });
