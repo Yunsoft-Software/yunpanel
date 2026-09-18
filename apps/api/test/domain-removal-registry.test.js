@@ -104,6 +104,82 @@ test('finalization refuses child Domain dependencies', async () => {
   assert.ok(await registry.getDomain(domainId));
 });
 
+test('Website removal detachment is exact, idempotent and suspension-bound', async () => {
+  const registry = createDomainRegistry({
+    getWebsite: async (id) => id === websiteId ? { id, serverId: 'local' } : null,
+  });
+  const suspended = await createSuspendedDomain(registry, { websiteId });
+
+  const detached = await registry.detachWebsiteForRemoval(domainId, {
+    expectedWebsiteId: websiteId,
+    expectedRevision: suspended.desiredRevision,
+    checksum,
+    suspensionOperationId: operationId,
+  });
+  assert.equal(detached.changed, true);
+  assert.equal(detached.detachedWebsiteId, websiteId);
+  assert.equal(detached.domain.websiteId, null);
+  assert.equal(detached.domain.state, 'suspended');
+
+  const retried = await registry.detachWebsiteForRemoval(domainId, {
+    expectedWebsiteId: websiteId,
+    expectedRevision: suspended.desiredRevision,
+    checksum,
+    suspensionOperationId: operationId,
+  });
+  assert.equal(retried.changed, false);
+  assert.equal(retried.domain.websiteId, null);
+
+  await assert.rejects(
+    registry.detachWebsiteForRemoval(domainId, {
+      expectedWebsiteId: websiteId,
+      expectedRevision: suspended.desiredRevision,
+      checksum,
+      suspensionOperationId: otherOperationId,
+    }),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'domain_removal_suspension_evidence_invalid',
+  );
+});
+
+test('certificate removal detachment preserves certificate resource and clears only exact Domain binding', async () => {
+  const registry = createDomainRegistry();
+  const suspended = await createSuspendedDomain(registry, {
+    httpsMode: 'managed',
+    certificateId: 'certificate-1',
+  });
+
+  const detached = await registry.detachCertificateForRemoval(domainId, {
+    expectedCertificateId: 'certificate-1',
+    expectedRevision: suspended.desiredRevision,
+    checksum,
+    suspensionOperationId: operationId,
+  });
+  assert.equal(detached.changed, true);
+  assert.equal(detached.detachedCertificateId, 'certificate-1');
+  assert.equal(detached.domain.certificateId, null);
+  assert.equal(detached.domain.state, 'suspended');
+
+  const retried = await registry.detachCertificateForRemoval(domainId, {
+    expectedCertificateId: 'certificate-1',
+    expectedRevision: suspended.desiredRevision,
+    checksum,
+    suspensionOperationId: operationId,
+  });
+  assert.equal(retried.changed, false);
+
+  await assert.rejects(
+    registry.detachCertificateForRemoval(domainId, {
+      expectedCertificateId: 'other-certificate',
+      expectedRevision: suspended.desiredRevision,
+      checksum,
+      suspensionOperationId: operationId,
+    }),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'domain_removal_certificate_binding_drift',
+  );
+});
+
 test('finalization refuses Website binding until reverse dependency cleanup detached it', async () => {
   const registry = createDomainRegistry({
     getWebsite: async (id) => id === websiteId ? { id, serverId: 'local' } : null,
