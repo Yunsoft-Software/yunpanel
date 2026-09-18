@@ -26,7 +26,10 @@ function baseReapplyRuntime() {
   };
 }
 
-function mountWith(retirementService) {
+function mountWith(retirementService, retirementRuntime = {
+  get: async () => null,
+  listForDomain: async () => [],
+}) {
   const app = fakeApp();
   mountPowerDnsRoutes(app, {
     dnsIdentityRegistry: {
@@ -42,7 +45,13 @@ function mountWith(retirementService) {
     },
     dnsDelegationInspector: { inspect: async () => ({ state: 'ready' }) },
     dnsZoneReapplyRuntime: baseReapplyRuntime(),
-    dnsZoneRetirementService: retirementService,
+    dnsZoneRetirementService: {
+      captureDeletionSnapshot: async () => ({}),
+      inspectDeletion: async () => ({}),
+      deleteCapturedSnapshot: async () => ({}),
+      ...retirementService,
+    },
+    dnsZoneRetirementRuntime: retirementRuntime,
     authoritativeService: {
       localServerId: serverId,
       status: async () => ({}),
@@ -114,6 +123,79 @@ test('PowerDNS HTTP exposes read-only Domain DNS retirement impact with no-store
   assert.equal(response.payload.data.sideEffects, false);
 });
 
+test('PowerDNS HTTP exposes read-only durable retirement operation list/detail without private snapshot data', async () => {
+  const operationId = 'f77d9d70-3f77-4be9-b257-0ade06401fb7';
+  const calls = [];
+  const operation = {
+    id: operationId,
+    domainId,
+    serverId,
+    zoneName: 'example.com',
+    domainRevision: 4,
+    previewDigest: 'a'.repeat(64),
+    snapshotDigest: 'b'.repeat(64),
+    ownershipEvidenceDigest: 'c'.repeat(64),
+    snapshotRetentionDays: 30,
+    status: 'deleting',
+    result: null,
+    error: null,
+    recovery: {
+      required: true,
+      automaticReplayBlocked: true,
+      retryable: true,
+      retryConfirmation: `retry-dns-zone-retirement:${domainId}:${operationId}:2026-09-18T16:00:00.000Z:${'b'.repeat(64)}`,
+      reason: 'dns_zone_retirement_interrupted_delete',
+    },
+    createdAt: '2026-09-18T16:00:00.000Z',
+    updatedAt: '2026-09-18T16:00:00.000Z',
+  };
+  const app = mountWith({ preview: async () => ({}) }, {
+    listForDomain: async (id) => { calls.push(['list', id]); return [operation]; },
+    get: async (id) => { calls.push(['get', id]); return operation; },
+  });
+
+  const list = await invoke(app, 'GET /api/domains/:domainId/dns/retirement-operations', {
+    params: { domainId },
+    query: {},
+  });
+  const detail = await invoke(app, 'GET /api/domains/:domainId/dns/retirement-operations/:operationId', {
+    params: { domainId, operationId },
+    query: {},
+  });
+
+  assert.deepEqual(list, { data: [operation] });
+  assert.deepEqual(detail, { data: operation });
+  assert.deepEqual(calls, [['list', domainId], ['get', operationId]]);
+  assert.equal(JSON.stringify(operation).includes('snapshot":'), false);
+  assert.equal(JSON.stringify(operation).includes('confirmation":'), false);
+});
+
+test('retirement operation detail is Domain-scoped and rejects query expansion', async () => {
+  const operationId = 'f77d9d70-3f77-4be9-b257-0ade06401fb7';
+  const otherDomainId = '997c6ac8-4db4-4500-a24e-0c8ff84825c6';
+  const app = mountWith({ preview: async () => ({}) }, {
+    listForDomain: async () => [],
+    get: async () => ({ id: operationId, domainId, status: 'deleted' }),
+  });
+
+  await assert.rejects(
+    invoke(app, 'GET /api/domains/:domainId/dns/retirement-operations/:operationId', {
+      params: { domainId: otherDomainId, operationId },
+      query: {},
+    }),
+    (error) => error instanceof PowerDnsHttpError
+      && error.code === 'dns_zone_retirement_operation_not_found',
+  );
+  await assert.rejects(
+    invoke(app, 'GET /api/domains/:domainId/dns/retirement-operations', {
+      params: { domainId },
+      query: { include: 'snapshot' },
+    }),
+    (error) => error instanceof PowerDnsHttpError
+      && error.code === 'dns_zone_retirement_operation_query_invalid',
+  );
+});
+
 test('retirement impact rejects query expansion before service inspection', async () => {
   let calls = 0;
   const app = mountWith({ preview: async () => { calls += 1; return {}; } });
@@ -159,6 +241,10 @@ test('PowerDNS route mounting rejects malformed injected retirement services', (
       dnsDelegationInspector: { inspect: async () => ({ state: 'ready' }) },
       dnsZoneReapplyRuntime: baseReapplyRuntime(),
       dnsZoneRetirementService: {},
+      dnsZoneRetirementRuntime: {
+        get: async () => null,
+        listForDomain: async () => [],
+      },
       authoritativeService: {
         localServerId: serverId,
         status: async () => ({}),
