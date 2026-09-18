@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
-import { powerDnsZoneManagerInternals } from '@yunpanel/host-runtime/powerdns-zone-manager';
+import {
+  createPowerDnsZoneManager,
+  powerDnsZoneManagerInternals,
+} from '@yunpanel/host-runtime/powerdns-zone-manager';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ROOT_ZONE_BLOCKERS = Object.freeze({
@@ -165,7 +168,7 @@ function previewIdentity(domain, relatedDomains, authoritativeZone) {
 export function createDnsZoneRetirementService({
   domainRegistry,
   powerDnsSecretRegistry,
-  zoneManager,
+  zoneManager = createPowerDnsZoneManager(),
   localServerId,
 } = {}) {
   if (!domainRegistry || typeof domainRegistry.getDomain !== 'function'
