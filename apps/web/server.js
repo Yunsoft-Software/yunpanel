@@ -269,17 +269,25 @@ function readElFinderHandoffBody(request) {
       return;
     }
     let bytes = 0;
+    let rejected = false;
     const chunks = [];
     request.on('data', (chunk) => {
       bytes += chunk.length;
       if (bytes > 1024) {
-        reject(new ElFinderGatewayError(413, 'elfinder_gateway_body_too_large', 'Request is too large.'));
-        request.destroy();
+        if (!rejected) {
+          rejected = true;
+          reject(new ElFinderGatewayError(
+            413,
+            'elfinder_gateway_body_too_large',
+            'Request is too large.',
+          ));
+        }
         return;
       }
-      chunks.push(chunk);
+      if (!rejected) chunks.push(chunk);
     });
     request.on('end', () => {
+      if (rejected) return;
       try {
         const value = JSON.parse(Buffer.concat(chunks, bytes).toString('utf8'));
         if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -294,10 +302,18 @@ function readElFinderHandoffBody(request) {
       }
     });
     request.on('aborted', () => {
-      reject(new ElFinderGatewayError(400, 'elfinder_gateway_request_aborted', 'elFinder handoff request was interrupted.'));
+      if (!rejected) reject(new ElFinderGatewayError(
+        400,
+        'elfinder_gateway_request_aborted',
+        'elFinder handoff request was interrupted.',
+      ));
     });
     request.on('error', () => {
-      reject(new ElFinderGatewayError(400, 'elfinder_gateway_request_failed', 'elFinder handoff request failed.'));
+      if (!rejected) reject(new ElFinderGatewayError(
+        400,
+        'elfinder_gateway_request_failed',
+        'elFinder handoff request failed.',
+      ));
     });
   });
 }
