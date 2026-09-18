@@ -191,6 +191,12 @@ export function createWebsiteProvisioningRuntime({
         && typeof handlers.static_runtime?.inspectControlMigrationCompensation === 'function'
         && typeof handlers.static_runtime?.compensateControlMigration === 'function'
       ),
+      staticReleaseMigrationAvailable: Boolean(
+        typeof handlers.static_runtime?.inspectReleaseMigrationOperation === 'function'
+        && typeof handlers.static_runtime?.applyReleaseMigration === 'function'
+        && typeof handlers.static_runtime?.inspectReleaseMigrationCompensation === 'function'
+        && typeof handlers.static_runtime?.compensateReleaseMigration === 'function'
+      ),
     });
     isolationMigration = createWebsiteIsolationMigrationRuntime({
       registry: isolationMigrationRegistry,
