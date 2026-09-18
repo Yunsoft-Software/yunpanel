@@ -184,12 +184,22 @@ test('ttyd one-shot site session uses only a private Unix socket and fixed safe 
   assert.equal(spawnCall.options.env.HOME, `/var/lib/yunpanel/data/${applicationId}`);
   assert.equal(spawnCall.options.env.YUNPANEL_SECRET_MASTER_KEY, undefined);
 
+  const startupTimer = fx.timers.find((timer) => timer.ms === 60_000);
   const authorized = fx.manager.authorize(sessionId, {
     ownerSessionId: 'owner-session',
     userId: 'owner-user',
   });
   assert.equal(authorized.socketPath, `/run/yunpanel/ttyd/${sessionId}.sock`);
   assert.equal(authorized.authHeader, 'X-YunPanel-TTYD-Auth');
+  assert.equal(startupTimer.cleared, false);
+
+  const websocketAuthorized = fx.manager.authorize(sessionId, {
+    ownerSessionId: 'owner-session',
+    userId: 'owner-user',
+    markConnected: true,
+  });
+  assert.equal(websocketAuthorized.sessionId, sessionId);
+  assert.equal(startupTimer.cleared, true);
   assert.equal(fx.manager.authorize(sessionId, {
     ownerSessionId: 'other-session',
     userId: 'owner-user',
