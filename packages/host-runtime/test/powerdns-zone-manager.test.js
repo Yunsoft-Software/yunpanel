@@ -70,6 +70,11 @@ function fakePowerDnsApi({ initialZone = null, failPatch = null } = {}) {
       };
       return response(201, structuredClone(zone));
     }
+    if (method === 'PUT' && path.endsWith('/zones/example.com.')) {
+      const body = JSON.parse(options.body);
+      zone = { ...zone, ...body };
+      return response(204);
+    }
     if (method === 'PATCH' && path.endsWith('/zones/example.com.')) {
       const body = JSON.parse(options.body);
       if (typeof failPatch === 'function') {
@@ -244,4 +249,102 @@ test('refuses compensation when managed RRset ownership metadata drifted', async
   assert.equal(inspected.satisfied, false);
   assert.equal(inspected.reason, 'powerdns_zone_compensation_ownership_drift');
   assert.equal(inspected.ownershipReason, 'powerdns_zone_record_metadata_drift');
+});
+
+
+test('restores a pre-reapply PowerDNS snapshot without deleting preserved manual RRsets', async () => {
+  const beforeManaged = desiredRecords().map(powerDnsZoneManagerInternals.desiredRrset).map((entry) => structuredClone(entry));
+  const manual = {
+    name: 'manual.example.com.', type: 'TXT', ttl: 300,
+    records: [{ content: '"keep-me"', disabled: false }], comments: [],
+  };
+  const beforeZone = {
+    zoneName: 'example.com',
+    id: 'example.com.',
+    kind: 'Native',
+    dnssec: false,
+    rrsets: [...beforeManaged, structuredClone(manual)],
+  };
+  const afterManaged = structuredClone(beforeManaged);
+  afterManaged[0].records[0].content = afterManaged[0].records[0].content.replace('2026091501', '2026091601');
+  afterManaged[2].records[0].content = '203.0.113.11';
+  afterManaged.push({
+    name: 'verify.example.com.', type: 'TXT', ttl: 300, changetype: 'REPLACE',
+    records: [{ content: '"new-managed-record"', disabled: false }],
+    comments: [powerDnsZoneManagerInternals.commentFor({
+      key: 'verification', source: 'template', templateVersion: 8,
+    })],
+  });
+  const afterZone = {
+    zoneName: 'example.com',
+    id: 'example.com.',
+    kind: 'Primary',
+    dnssec: false,
+    rrsets: [...afterManaged, structuredClone(manual)],
+  };
+  const before = powerDnsZoneManagerInternals.zoneSnapshot(beforeZone);
+  const after = powerDnsZoneManagerInternals.zoneSnapshot(afterZone);
+  const api = fakePowerDnsApi({
+    initialZone: {
+      id: afterZone.id,
+      kind: afterZone.kind,
+      dnssec: afterZone.dnssec,
+      rrsets: structuredClone(afterZone.rrsets),
+    },
+  });
+  const manager = createPowerDnsZoneManager({ fetchFn: api.fetchFn });
+
+  const preview = await manager.inspectSnapshotRestore({
+    zoneName: 'example.com', apiKey: key, before, after,
+  });
+  assert.equal(preview.satisfied, false);
+  assert.equal(preview.repairCandidate, true);
+  assert.equal(preview.kindChangeRequired, true);
+
+  const restored = await manager.restoreSnapshot({
+    zoneName: 'example.com', apiKey: key, before, after,
+  });
+  assert.equal(restored.satisfied, true);
+  assert.equal(restored.kindRestored, true);
+  const current = await manager.getZone('example.com', key);
+  assert.equal(powerDnsZoneManagerInternals.sameZoneState(current, before), true);
+  assert.equal(current.rrsets.some((rrset) => rrset.name === 'manual.example.com.'), true);
+  assert.equal(api.calls.some((call) => call.method === 'DELETE'), false);
+});
+
+test('refuses snapshot restore when an unrelated RRset appears after reapply', async () => {
+  const beforeZone = {
+    zoneName: 'example.com',
+    id: 'example.com.',
+    kind: 'Native',
+    dnssec: false,
+    rrsets: desiredRecords().map(powerDnsZoneManagerInternals.desiredRrset).map((entry) => structuredClone(entry)),
+  };
+  const afterZone = structuredClone(beforeZone);
+  afterZone.kind = 'Primary';
+  afterZone.rrsets[0].records[0].content = afterZone.rrsets[0].records[0].content.replace('2026091501', '2026091601');
+  const before = powerDnsZoneManagerInternals.zoneSnapshot(beforeZone);
+  const after = powerDnsZoneManagerInternals.zoneSnapshot(afterZone);
+  const api = fakePowerDnsApi({
+    initialZone: {
+      id: afterZone.id,
+      kind: afterZone.kind,
+      dnssec: afterZone.dnssec,
+      rrsets: [
+        ...structuredClone(afterZone.rrsets),
+        {
+          name: 'foreign.example.com.', type: 'A', ttl: 300,
+          records: [{ content: '198.51.100.99', disabled: false }], comments: [],
+        },
+      ],
+    },
+  });
+  const manager = createPowerDnsZoneManager({ fetchFn: api.fetchFn });
+
+  await assert.rejects(
+    manager.restoreSnapshot({ zoneName: 'example.com', apiKey: key, before, after }),
+    (error) => error instanceof PowerDnsZoneManagerError && error.code === 'powerdns_zone_restore_drift',
+  );
+  assert.equal(api.calls.some((call) => call.method === 'PATCH'), false);
+  assert.equal(api.calls.some((call) => call.method === 'PUT'), false);
 });
