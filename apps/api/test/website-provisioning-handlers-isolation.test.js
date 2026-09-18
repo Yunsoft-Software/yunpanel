@@ -12,6 +12,17 @@ function baseRuntime({ satisfied = true } = {}) {
     handler: {
       async apply(context) { calls.push(['apply', context]); return { satisfied, adapter: 'passenger', unixUser: 'yunapp-test' }; },
       async inspect(context) { calls.push(['inspect', context]); return { satisfied, adapter: 'passenger', unixUser: 'yunapp-test' }; },
+      async previewMigration(context) {
+        calls.push(['preview-migration', context]);
+        return {
+          version: 1,
+          adapter: 'passenger',
+          satisfied,
+          current: {},
+          desired: {},
+          differences: satisfied ? [] : ['passenger_runtime_unavailable'],
+        };
+      },
     },
   };
 }
@@ -63,6 +74,25 @@ test('Passenger wrapper does not mutate shared service policy if base runtime is
   assert.deepEqual(policy.calls, []);
 });
 
+
+test('Passenger migration preview survives the isolation wrapper and pins shared UMask drift', async () => {
+  const base = baseRuntime();
+  const policy = umask({ satisfied: false });
+  const handler = websiteProvisioningIsolationInternals.passengerRuntimeHandler(base.handler, policy.manager);
+
+  const preview = await handler.previewMigration({ intent: { adapter: 'passenger' } });
+
+  assert.equal(preview.adapter, 'passenger');
+  assert.equal(preview.satisfied, false);
+  assert.deepEqual(preview.runtimeUmask, {
+    satisfied: false,
+    reason: 'service_umask_not_effective',
+  });
+  assert.deepEqual(preview.differences, ['passenger_runtime_umask_not_ready']);
+  assert.deepEqual(base.calls.map(([name]) => name), ['preview-migration']);
+  assert.deepEqual(policy.calls, [['inspect', 'passenger']]);
+});
+
 test('Static runtime isolates retained publish releases before Nginx routing can proceed', async () => {
   const calls = [];
   const base = {
@@ -88,6 +118,69 @@ test('Static runtime isolates retained publish releases before Nginx routing can
   assert.equal(applied.publishIsolated, true);
   assert.equal(applied.isolatedReleaseCount, 3);
   assert.equal(inspected.publishIsolated, true);
+});
+
+test('Static migration preview combines current deployment state with exact publish isolation evidence', async () => {
+  const calls = [];
+  const base = {
+    async apply() { throw new Error('unused'); },
+    async inspect(context) {
+      calls.push(['runtime-inspect', context]);
+      return {
+        satisfied: false,
+        reason: 'website_static_release_not_current',
+        adapter: 'static',
+        applicationId: 'application-1',
+        releaseId: 'release-old',
+        deploymentId: 'release-new',
+      };
+    },
+    async compensate() { return { satisfied: true }; },
+    async inspectCompensation() { return { satisfied: true }; },
+  };
+  const isolation = {
+    async apply() { throw new Error('unused'); },
+    async inspect() { throw new Error('unused'); },
+    async previewMigration(value) {
+      calls.push(['isolation-preview', value]);
+      return {
+        version: 1,
+        adapter: 'static-publish-isolation',
+        satisfied: false,
+        current: {},
+        desired: {},
+        differences: ['static_publish_acl_drift'],
+      };
+    },
+  };
+  const handler = websiteProvisioningIsolationInternals.staticRuntimeHandler(base, isolation);
+  const context = {
+    intent: {
+      websiteId: 'website-1',
+      applicationId: 'application-1',
+      mode: 'deploy',
+      deploymentId: 'release-new',
+    },
+  };
+
+  const preview = await handler.previewMigration(context);
+
+  assert.equal(preview.version, 1);
+  assert.equal(preview.adapter, 'static-runtime');
+  assert.equal(preview.satisfied, false);
+  assert.equal(preview.current.runtime.reason, 'website_static_release_not_current');
+  assert.equal(preview.current.isolation.adapter, 'static-publish-isolation');
+  assert.deepEqual(preview.desired, {
+    websiteId: 'website-1',
+    applicationId: 'application-1',
+    mode: 'deploy',
+    deploymentId: 'release-new',
+  });
+  assert.deepEqual(preview.differences, [
+    'website_static_release_not_current',
+    'static_publish_acl_drift',
+  ]);
+  assert.deepEqual(calls.map(([name]) => name), ['runtime-inspect', 'isolation-preview']);
 });
 
 test('Static runtime inspect fails closed when publish ACL or ownership drifted', async () => {
