@@ -52,6 +52,8 @@ import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from './doc
 import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
 import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
+import { mountElFinderHandoffRoutes } from './elfinder-handoff-http.js';
+import { ElFinderHandoffError } from './elfinder-handoff-service.js';
 import { mountMailAliasRoutes } from './mail-alias-http.js';
 import { createMailAliasRegistry, MailAliasRegistryError } from './mail-alias-registry.js';
 import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
@@ -184,6 +186,7 @@ export function createApp({
   databaseCredentialRegistry = null,
   databaseCredentialApplyService = null,
   phpMyAdminHandoffService = null,
+  elFinderHandoffService = null,
   databaseInventoryProvider = null,
   databaseHealthProvider = null,
   dnsReadinessService = null,
@@ -630,6 +633,12 @@ export function createApp({
       phpMyAdminHandoffService,
     });
   }
+  if (elFinderHandoffService) {
+    mountElFinderHandoffRoutes(app, {
+      registry: localRegistry,
+      elFinderHandoffService,
+    });
+  }
   mountDatabaseRoutes(app, {
     registry: localRegistry,
     jobRegistry,
@@ -658,6 +667,7 @@ export function createApp({
       || error instanceof DatabaseHttpError
       || error instanceof WebsiteDatabaseDeleteHttpError
       || error instanceof PhpMyAdminHandoffError
+      || error instanceof ElFinderHandoffError
       || error instanceof CertificateMaterialError
       || error instanceof CertificateRegistryError
       || error instanceof ApplicationRegistryError
