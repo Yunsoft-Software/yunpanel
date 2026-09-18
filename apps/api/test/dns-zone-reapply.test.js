@@ -182,6 +182,41 @@ test('DNS zone reapply source digest changes when preserved manual RRset content
   assert.equal(second.preservedManualRrsetCount, 1);
 });
 
+test('DNS zone reapply journals exact before and expected after snapshots before mutation', async () => {
+  const manual = Object.freeze({
+    name: 'custom.example.com.',
+    type: 'A',
+    ttl: 300,
+    records: Object.freeze([{ content: '198.51.100.55', disabled: false }]),
+    comments: Object.freeze([]),
+    managed: null,
+  });
+  const { service } = fixture({ zone: liveZone({ extraRrsets: [manual] }) });
+  const preview = await service.preview({ domainId });
+  const evidence = await service.captureRollbackSnapshot({ domainId, preview });
+
+  assert.equal(evidence.version, 2);
+  assert.equal(evidence.sourceZoneDigest, preview.sourceZoneDigest);
+  assert.match(evidence.appliedZoneDigest, /^[a-f0-9]{64}$/);
+  assert.notEqual(evidence.appliedZoneDigest, evidence.sourceZoneDigest);
+  assert.equal(
+    evidence.sourceZoneSnapshot.rrsets.some((rrset) => rrset.name === 'custom.example.com.'),
+    true,
+  );
+  assert.equal(
+    evidence.appliedZoneSnapshot.rrsets.some((rrset) => rrset.name === 'custom.example.com.'),
+    true,
+  );
+  assert.equal(
+    evidence.appliedZoneSnapshot.rrsets.some((rrset) => rrset.type === 'TXT'
+      && rrset.records.some((record) => record.content.includes('yunpanel=verified'))),
+    true,
+  );
+  const soa = evidence.appliedZoneSnapshot.rrsets.find((rrset) => rrset.type === 'SOA');
+  assert.ok(soa);
+  assert.match(soa.records[0].content, / 2026091601 /);
+});
+
 test('DNS zone reapply reports an explicit conflict instead of overwriting a manual RRset', async () => {
   const zone = liveZone();
   const rrsets = zone.rrsets.map((entry) => entry.type === 'A' && entry.name === 'example.com.'
