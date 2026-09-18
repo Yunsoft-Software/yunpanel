@@ -18,6 +18,7 @@ Son Website database delete lifecycle ilerlemesi: `docs/history/database-delete-
 Son elFinder scoped handoff/FPM ilerlemesi: `docs/history/elfinder-scoped-handoff-progress-2026-09-18.md`.
 Son ttyd/IntegratedToolGateway ilerlemesi: `docs/history/ttyd-integrated-gateway-progress-2026-09-18.md`.
 Son Domain suspension ve DNS retirement ilerlemesi: `docs/history/domain-suspension-dns-retirement-progress-2026-09-18.md`.
+Son Passenger/provisioning canlı kabulü: `docs/history/passenger-provisioning-live-acceptance-2026-09-19.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 

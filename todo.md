@@ -4,15 +4,6 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
-## T-CODEX-HANDOFF — mevcut P0 turu
-
-Bu bölüm yalnız güncel P0 provisioning/Passenger turundan kalan gerçek Ubuntu ve package kabullerini tutar. Kaynak testleri Node 24 kapısında tamamlanmıştır; sonuç `docs/history/passenger-provisioning-preflight-2026-09-15.md` içindedir.
-- [ ] Yeni durable Website provisioning store ile API restart testi yap: apply sonrası operation JSON diskte kalsın; `applying` durumda servis kesilip açıldığında aynı mutation ikinci kez körlemesine çalışmasın ve inspect/reconcile yolu kullanılsın.
-- [ ] İki test Website oluşturup `yunapp-*` kullanıcı/group/home sahipliğini, çapraz home/release/data erişim reddini ve Passenger `passenger_user/group` gerçek UID/GID eşleşmesini doğrula.
-- [ ] Test hostunda canonical static Website deploy/rollback mevcut provisioned `yunapp-*` hesabını kullansın ve hesabın HOME'unu `/var/lib/yunpanel/build/<applicationId>` olarak değiştirmesin. Ayrı migration fixture'ında yalnız önceden var olan HOME=`/var/lib/yunpanel/build/<applicationId>` legacy hesabı fallback ile deploy/rollback edebilsin; hesap yoksa, group/home drift varsa veya deploy sırasında identity kaybolursa `useradd` çalışmasın ve rollback `current` symlink'ine dokunmadan fail-closed kalsın. `/var/lib/yunpanel/backups/resources` site user'a chown edilmesin ve root/control-plane private scope olarak kalsın.
-- [ ] Passenger package/config veya Node binary eksikliği senaryolarında provisioning `ready` olmasın; actionable blocked/failed state API'de kalsın. Düzelttikten sonra exact `continue-site-provisioning:<operationId>` confirmation ile işlem kaldığı step'ten devam etsin.
-- [ ] En az bir gerçek Website identity ownership receipt fixture'ı bulunan test hostunda package upgrade'i tekrarla; `/var/lib/yunpanel/staging/website-identities` ve `/var/lib/yunpanel/staging/website-identity-paths` root:root `0700`, receipt dosyaları root:root `0600` ve içerik hash'leri upgrade boyunca korunsun. Workspace receipt için pre-existing `tmp/log` korunması, operation-created boş dizinin compensation ile kalkması ve veri içeren dizinin recursive silinmeden fail-closed kalması doğrulansın.
-
 ## T-BASE — P0 güncel güvenlik ve package kapısı
 
 - [ ] Clean install ve önceki paketten upgrade; auth DB/master key, Domain/Website/Application kimlikleri, release'ler, Nginx/certificate, mail/database state'i ve root-owned private izinleri korusun.

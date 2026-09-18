@@ -14,6 +14,7 @@ const currentDocs = [
   'docs/local-executor-safety.md',
   'docs/local-migration-backup.md',
   'docs/local-runtime-migration.md',
+  'docs/history/passenger-provisioning-live-acceptance-2026-09-19.md',
   'docs/website-workspace.md',
 ];
 
@@ -50,7 +51,11 @@ test('current docs expose the implemented agentless migration and deferred-desig
   assert.match(docs.get('README.md'), /create --backup-dir \/var\/backups\/yunpanel\/migration-<timestamp> --confirm/);
   assert.doesNotMatch(docs.get('plan.md'), /SFTP credential desired state\/materialization'ını Website provisioning ownership\/evidence/);
   assert.match(docs.get('docs/architecture.md'), /SFTP provisioning adımı ancak key desired state/);
-  assert.match(docs.get('todo.md'), /Yeni durable Website provisioning store ile API restart testi yap/);
+  assert.doesNotMatch(docs.get('todo.md'), /Yeni durable Website provisioning store ile API restart testi yap/);
+  assert.match(
+    docs.get('docs/history/passenger-provisioning-live-acceptance-2026-09-19.md'),
+    /mutation körlemesine tekrarlanmadı/,
+  );
   assert.doesNotMatch(docs.get('plan.md'), /Kalan legacy hata yollarını güvenli tanı kataloğuna bağla/);
   assert.match(docs.get('agents.md'), /DEFERRED — Enterprise UI\/UX standardı/);
   assert.match(docs.get('docs/development.md'), /New enrollment is retired/);
