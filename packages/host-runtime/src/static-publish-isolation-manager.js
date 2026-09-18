@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { access, chmod, chown, lstat, mkdir, readFile, readdir, readlink, rename, rm, writeFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { access, chmod, chown, lstat, mkdir, open, readFile, readdir, readlink, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { createApplicationIdentity } from './application-identity.js';
@@ -110,6 +111,8 @@ function releaseSnapshotDigest(entries) {
     uid: entry.uid,
     gid: entry.gid,
     mode: entry.mode,
+    dev: entry.dev,
+    ino: entry.ino,
     aclSha256: sha256(entry.acl),
   }))));
 }
@@ -120,6 +123,8 @@ function normalizeReleaseReceiptEntry(value) {
     || !Number.isSafeInteger(value.uid) || value.uid < 0
     || !Number.isSafeInteger(value.gid) || value.gid < 0
     || !Number.isSafeInteger(value.mode) || value.mode < 0 || value.mode > 0o777
+    || !Number.isSafeInteger(value.dev) || value.dev < 0
+    || !Number.isSafeInteger(value.ino) || value.ino < 0
     || typeof value.acl !== 'string' || Buffer.byteLength(value.acl, 'utf8') > 65_536
     || typeof value.desiredAcl !== 'string' || Buffer.byteLength(value.desiredAcl, 'utf8') > 65_536) {
     throw new StaticPublishIsolationError('static_publish_release_receipt_invalid', 'Static release receipt entry is invalid');
@@ -137,6 +142,8 @@ function normalizeReleaseReceiptEntry(value) {
     uid: value.uid,
     gid: value.gid,
     mode: value.mode,
+    dev: value.dev,
+    ino: value.ino,
     acl,
     desiredAcl,
   });
@@ -267,6 +274,7 @@ export function createStaticPublishIsolationManager({
   chownFn = chown,
   lstatFn = lstat,
   mkdirFn = mkdir,
+  openFn = open,
   readFileFn = readFile,
   readdirFn = readdir,
   readlinkFn = readlink,
@@ -277,8 +285,8 @@ export function createStaticPublishIsolationManager({
   if (!identityManager || typeof identityManager.inspect !== 'function'
     || typeof run !== 'function' || typeof accessFn !== 'function'
     || typeof chmodFn !== 'function' || typeof chownFn !== 'function'
-    || typeof lstatFn !== 'function' || typeof mkdirFn !== 'function' || typeof readFileFn !== 'function'
-    || typeof readdirFn !== 'function' || typeof readlinkFn !== 'function' || typeof renameFn !== 'function'
+    || typeof lstatFn !== 'function' || typeof mkdirFn !== 'function' || typeof openFn !== 'function'
+    || typeof readFileFn !== 'function' || typeof readdirFn !== 'function' || typeof readlinkFn !== 'function' || typeof renameFn !== 'function'
     || typeof rmFn !== 'function' || typeof writeFileFn !== 'function') {
     throw new StaticPublishIsolationError('static_publish_isolation_dependencies_invalid', 'Static publish isolation dependencies are invalid');
   }
@@ -488,12 +496,20 @@ export function createStaticPublishIsolationManager({
             'Static publish release ACL snapshot exceeds the bounded migration preview limit',
           );
         }
+        if (!Number.isSafeInteger(info.dev) || info.dev < 0 || !Number.isSafeInteger(info.ino) || info.ino < 0) {
+          throw new StaticPublishIsolationError(
+            'static_publish_release_identity_unavailable',
+            'Static publish release inode identity could not be verified',
+          );
+        }
         entries.push(Object.freeze({
           relativePath,
           type,
           uid: info.uid,
           gid: info.gid,
           mode: modeOf(info),
+          dev: info.dev,
+          ino: info.ino,
           acl,
           desiredAcl: desiredReleaseAcl(acl, type),
         }));
