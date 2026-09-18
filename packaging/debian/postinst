@@ -25,6 +25,12 @@ fi
 if getent group www-data >/dev/null; then
   adduser yunpanel-phpmyadmin www-data >/dev/null 2>&1 || true
 fi
+if ! getent group yunpanel-elfinder >/dev/null; then
+  addgroup --system yunpanel-elfinder >/dev/null
+fi
+if ! id yunpanel-elfinder >/dev/null 2>&1; then
+  adduser --system --ingroup yunpanel-elfinder --home /var/lib/yunpanel/elfinder --no-create-home --shell /usr/sbin/nologin yunpanel-elfinder >/dev/null
+fi
 
 install -d -o yunpanel -g yunpanel -m 0700 /var/lib/yunpanel/control-plane
 install -d -o root -g root -m 0700 /var/lib/yunpanel/agent
@@ -33,9 +39,12 @@ install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel
 install -d -o yunpanel-phpmyadmin -g yunpanel-phpmyadmin -m 0700 /var/lib/yunpanel/phpmyadmin
 install -d -o yunpanel-phpmyadmin -g yunpanel-phpmyadmin -m 0700 /var/lib/yunpanel/phpmyadmin/tmp
 install -d -o yunpanel-phpmyadmin -g yunpanel-phpmyadmin -m 0700 /var/lib/yunpanel/phpmyadmin/sessions
+install -d -o yunpanel-elfinder -g yunpanel-elfinder -m 0700 /var/lib/yunpanel/elfinder
 install -d -o root -g yunpanel -m 2770 /run/yunpanel
 install -d -o root -g yunpanel-phpmyadmin -m 0750 /run/yunpanel-phpmyadmin
 install -d -o root -g yunpanel-phpmyadmin -m 0750 /usr/lib/yunpanel/phpmyadmin
+install -d -o root -g yunpanel-elfinder -m 0750 /run/yunpanel-elfinder
+install -d -o root -g yunpanel-elfinder -m 0750 /usr/lib/yunpanel/elfinder
 install -d -o root -g root -m 0700 /etc/yunpanel/control-plane
 install -d -o root -g root -m 0700 /etc/yunpanel/agent
 install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/web
