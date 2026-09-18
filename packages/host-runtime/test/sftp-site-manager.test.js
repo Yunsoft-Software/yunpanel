@@ -23,6 +23,7 @@ function fakeHost() {
   const dirs = new Map();
   const activeUnits = new Set();
   const calls = [];
+  const removals = [];
   const writeFileFn = async (target, content, options = {}) => {
     files.set(target, { content: String(content), mode: options.mode ?? 0o600 });
   };
@@ -37,7 +38,8 @@ function fakeHost() {
     files.set(target, value);
     files.delete(source);
   };
-  const rmFn = async (target) => {
+  const rmFn = async (target, options = {}) => {
+    removals.push([target, { ...options }]);
     files.delete(target);
     dirs.delete(target);
   };
@@ -78,7 +80,7 @@ function fakeHost() {
     }
     throw new Error(`unexpected command ${file} ${args.join(' ')}`);
   };
-  return { files, dirs, activeUnits, calls, run, writeFileFn, readFileFn, renameFn, rmFn, mkdirFn, lstatFn };
+  return { files, dirs, activeUnits, calls, removals, run, writeFileFn, readFileFn, renameFn, rmFn, mkdirFn, lstatFn };
 }
 
 function manager(host) {
@@ -145,7 +147,7 @@ test('SFTP provisioning refuses foreign pre-existing artifacts without an owners
   assert.equal(host.activeUnits.size, 0);
 });
 
-test('SFTP compensation removes only exact operation-owned SSH and mount artifacts', async () => {
+test('SFTP compensation removes receipt-owned config and unit while preserving unowned chroot directories', async () => {
   const host = fakeHost();
   const value = manager(host);
   await value.apply(intent(), { operationId });
@@ -157,7 +159,9 @@ test('SFTP compensation removes only exact operation-owned SSH and mount artifac
   assert.equal(host.files.has(sshdConfigPath), false);
   assert.equal(host.files.has(unitPath), false);
   assert.equal(host.activeUnits.has(unitName), false);
-  assert.equal(host.dirs.has(chrootDirectory), false);
+  assert.equal(host.dirs.has(chrootDirectory), true);
+  assert.equal(host.dirs.has(mountDirectory), true);
+  assert.equal(host.removals.some(([target]) => [chrootDirectory, mountDirectory].includes(target)), false);
 });
 
 test('SFTP compensation fails closed after managed SSH config drift', async () => {
