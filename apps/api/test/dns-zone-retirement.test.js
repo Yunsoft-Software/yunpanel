@@ -388,6 +388,85 @@ test('configured snapshot retention unlocks typed zone retirement after Website 
   assert.notEqual(changedPolicy.confirmation, preview.confirmation);
 });
 
+test('exact suspended routing evidence unlocks retirement without clearing applied revisions', async () => {
+  const suspended = domain({
+    websiteId: null,
+    stagedRevision: 4,
+    appliedRevision: 4,
+    appliedPrimaryDomain: 'example.com',
+    stagedChecksum: 'f'.repeat(64),
+    suspendedChecksum: 'f'.repeat(64),
+    suspensionOperationId: 'suspension-operation-1',
+    lastError: null,
+    state: 'suspended',
+  });
+  const intent = {
+    adapter: 'powerdns-zone',
+    serverId: localServerId,
+    webDomainId: rootId,
+    zoneName: 'example.com',
+    templateVersion: 7,
+    templateSnapshot: [
+      { key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+      { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+    ],
+    dnsIdentityRevision: 2,
+    secondaryDns: [],
+    serial: 2026091801,
+    dnssec: false,
+    records: [
+      { key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+      { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+    ],
+  };
+  const evidence = websiteDnsZoneProvisioningInternals.publicEvidence(
+    websiteDnsZoneProvisioningInternals.normalizedIntent({ intent }),
+    {
+      kind: 'Primary',
+      serial: 2026091801,
+      dnssec: false,
+      managedRrsetCount: 1,
+      manualRrsetCount: 0,
+      created: true,
+      primaryKindChanged: false,
+      changedRrsetCount: 1,
+    },
+  );
+  const preview = await fixture({
+    currentDomain: suspended,
+    domains: [suspended],
+    currentZone: zone({ rrsets: [managedRrset()] }),
+    provisioningOperations: [{
+      operationId: '92345678-1234-4234-8234-123456789012',
+      websiteId,
+      updatedAt: '2026-09-18T16:00:00.000Z',
+      steps: [{
+        id: 'dns_zone',
+        kind: 'dns_zone',
+        state: 'succeeded',
+        intent,
+        evidence,
+        compensation: { state: 'pending', evidence: null, error: null },
+      }],
+    }],
+    retentionPolicy: { snapshotRetentionDays: 30 },
+  }).service.preview({ domainId: rootId });
+
+  assert.equal(preview.routing.active, false);
+  assert.equal(preview.blockers.includes('domain_routing_active'), false);
+  assert.equal(preview.retirementPlanReady, true);
+  assert.ok(preview.confirmation);
+});
+
+test('suspended label without exact ownership evidence remains routing-active', () => {
+  assert.equal(dnsZoneRetirementInternals.routingActive(domain({
+    stagedRevision: 4,
+    appliedRevision: 4,
+    appliedPrimaryDomain: 'example.com',
+    state: 'suspended',
+  })), true);
+});
+
 test('invalid DNS zone retention policy is rejected at service construction', () => {
   for (const retentionPolicy of [
     { snapshotRetentionDays: 0 },

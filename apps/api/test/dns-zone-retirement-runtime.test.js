@@ -208,6 +208,19 @@ test('durable zone retirement journals private snapshot before exact provider de
   assert.deepEqual(privateOperation.snapshot, snapshot);
 });
 
+test('runtime exposes the current read-only retirement preview for parent orchestration', async () => {
+  const store = registry();
+  const fx = serviceFixture();
+  const runtime = createDnsZoneRetirementRuntime({ registry: store, service: fx.service });
+
+  const current = await runtime.preview({ domainId });
+
+  assert.equal(current.previewDigest, previewDigest);
+  assert.equal(current.confirmation, retirementConfirmation);
+  assert.equal(fx.counts().captureCalls, 0);
+  assert.equal(fx.counts().deleteCalls, 0);
+});
+
 test('provider lost acknowledgement is reconciled from absent post-condition without a second DELETE', async () => {
   const store = registry();
   const fx = serviceFixture({ deleteMode: 'lost_ack' });
@@ -224,6 +237,31 @@ test('provider lost acknowledgement is reconciled from absent post-condition wit
   assert.equal(completed.result.changed, false);
   assert.equal(fx.counts().deleteCalls, 1);
   assert.ok(fx.counts().inspectCalls >= 2);
+});
+
+test('exact recreated zone receives a new retirement operation instead of reusing old deletion evidence', async () => {
+  let clock = Date.parse('2026-09-18T16:00:00.000Z');
+  const ids = ['retirement-operation-1', 'retirement-operation-2'];
+  const store = createDnsZoneRetirementOperationRegistry({
+    now: () => clock++,
+    idFactory: () => ids.shift(),
+  });
+  const first = await store.create(capture());
+  await store.markDeleting(first.id);
+  await store.succeed(first.id, { changed: true, snapshotDigest });
+  const fx = serviceFixture({ initialState: 'present' });
+  const runtime = createDnsZoneRetirementRuntime({ registry: store, service: fx.service });
+
+  const completed = await runtime.start({
+    domainId,
+    previewDigest,
+    confirmation: retirementConfirmation,
+  });
+
+  assert.equal(completed.id, 'retirement-operation-2');
+  assert.equal(completed.status, 'deleted');
+  assert.equal(fx.counts().deleteCalls, 1);
+  assert.equal((await runtime.listForDomain(domainId)).length, 2);
 });
 
 test('startup inspects interrupted delete but never automatically replays mutation while snapshot is present', async () => {

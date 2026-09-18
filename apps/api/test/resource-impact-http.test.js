@@ -115,6 +115,7 @@ test('production Domain delete impact includes injected authoritative DNS retire
             evidenceDigest: 'b'.repeat(64),
           },
         },
+        retention: { configured: false, snapshotRetentionDays: null },
         blockers: ['dns_zone_delete_retention_policy_required'],
         retirementPlanReady: false,
         previewDigest: 'c'.repeat(64),
@@ -145,6 +146,8 @@ test('production Domain delete impact includes injected authoritative DNS retire
         state: 'blocked',
         previewDigest: 'c'.repeat(64),
         zoneSnapshotDigest: 'a'.repeat(64),
+        ownershipEvidenceDigest: 'b'.repeat(64),
+        snapshotRetentionDays: null,
         blockers: ['dns_zone_delete_retention_policy_required'],
       }],
     });

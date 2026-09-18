@@ -241,12 +241,16 @@ test('delete impact binds authoritative DNS retirement digests and blockers into
         state: 'blocked',
         previewDigest: 'a'.repeat(64),
         zoneSnapshotDigest: 'b'.repeat(64),
+        ownershipEvidenceDigest: 'f'.repeat(64),
+        snapshotRetentionDays: null,
         blockers: ['dns_zone_delete_retention_policy_required'],
       }, {
         domainId: state.child.id,
         state: 'ready',
         previewDigest: 'c'.repeat(64),
         zoneSnapshotDigest: null,
+        ownershipEvidenceDigest: null,
+        snapshotRetentionDays: null,
         blockers: [],
       }];
     },
@@ -259,12 +263,16 @@ test('delete impact binds authoritative DNS retirement digests and blockers into
     state: 'ready',
     previewDigest: 'c'.repeat(64),
     zoneSnapshotDigest: null,
+    ownershipEvidenceDigest: null,
+    snapshotRetentionDays: null,
     blockers: [],
   }, {
     domainId: state.domain.id,
     state: 'blocked',
     previewDigest: 'a'.repeat(64),
     zoneSnapshotDigest: 'b'.repeat(64),
+    ownershipEvidenceDigest: 'f'.repeat(64),
+    snapshotRetentionDays: null,
     blockers: ['dns_zone_delete_retention_policy_required'],
   }].sort((left, right) => left.domainId.localeCompare(right.domainId));
   assert.deepEqual(first.dependencies.authoritativeDns, {
@@ -284,10 +292,29 @@ test('delete impact binds authoritative DNS retirement digests and blockers into
       state: 'blocked',
       previewDigest: 'd'.repeat(64),
       zoneSnapshotDigest: 'e'.repeat(64),
+      ownershipEvidenceDigest: 'f'.repeat(64),
+      snapshotRetentionDays: 30,
       blockers: ['dns_zone_manual_rrsets_present'],
     }],
   });
   assert.notEqual(second.previewDigest, first.previewDigest);
+
+  const changedRetention = await previewResourceImpact({
+    resourceType: 'domain',
+    resourceId: state.domain.id,
+    operation: 'delete',
+    ...dependencies(state),
+    dnsRetirementImpactProvider: async () => [{
+      domainId: state.domain.id,
+      state: 'blocked',
+      previewDigest: 'a'.repeat(64),
+      zoneSnapshotDigest: 'b'.repeat(64),
+      ownershipEvidenceDigest: 'f'.repeat(64),
+      snapshotRetentionDays: 31,
+      blockers: ['domain_routing_active'],
+    }],
+  });
+  assert.notEqual(changedRetention.previewDigest, first.previewDigest);
 
   const move = await previewResourceImpact({
     resourceType: 'domain',
@@ -328,6 +355,8 @@ test('authoritative DNS impact provider fails closed on unavailable or malformed
         state: 'ready',
         previewDigest: 'a'.repeat(64),
         zoneSnapshotDigest: null,
+        ownershipEvidenceDigest: null,
+        snapshotRetentionDays: null,
         blockers: ['should_not_exist'],
       }],
     }),

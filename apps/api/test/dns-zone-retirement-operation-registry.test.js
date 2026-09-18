@@ -151,6 +151,27 @@ test('failed retirement can re-enter deleting only explicitly and clears stale f
   assert.equal(retried.error, null);
 });
 
+test('completed retirement is not reused as ownership evidence for an exact recreated zone', async () => {
+  let clock = Date.parse('2026-09-18T16:00:00.000Z');
+  const ids = ['retirement-operation-1', 'retirement-operation-2'];
+  const registry = createDnsZoneRetirementOperationRegistry({
+    now: () => clock++,
+    idFactory: () => ids.shift(),
+  });
+  const first = await registry.create(capture());
+  await registry.markDeleting(first.id);
+  await registry.succeed(first.id, {
+    changed: true,
+    snapshotDigest: first.snapshotDigest,
+  });
+
+  const recreated = await registry.create(capture());
+
+  assert.equal(recreated.id, 'retirement-operation-2');
+  assert.equal(recreated.status, 'pending');
+  assert.equal((await registry.listForDomain(domainId)).length, 2);
+});
+
 test('retirement journal rejects snapshot digest mismatch and tampered persisted snapshots', async (t) => {
   const registry = createDnsZoneRetirementOperationRegistry({
     now: () => Date.parse('2026-09-18T16:00:00.000Z'),

@@ -9,6 +9,7 @@ import {
 const checksum = 'a'.repeat(64);
 const dnsPreviewDigest = 'b'.repeat(64);
 const zoneSnapshotDigest = 'c'.repeat(64);
+const ownershipEvidenceDigest = 'e'.repeat(64);
 
 function domain(overrides = {}) {
   return {
@@ -51,6 +52,8 @@ function impact(currentDomain = domain(), overrides = {}) {
         state: 'blocked',
         previewDigest: dnsPreviewDigest,
         zoneSnapshotDigest,
+        ownershipEvidenceDigest,
+        snapshotRetentionDays: 30,
         blockers: [
           'domain_website_binding_present',
           'domain_certificate_present',
@@ -108,6 +111,8 @@ test('pins current resource-impact evidence into a deterministic Domain removal 
   assert.equal(preview.plan.websiteId, 'website-1');
   assert.deepEqual(preview.plan.certificateIds, ['certificate-1']);
   assert.equal(preview.plan.authoritativeDns.previewDigest, dnsPreviewDigest);
+  assert.equal(preview.plan.authoritativeDns.ownershipEvidenceDigest, ownershipEvidenceDigest);
+  assert.equal(preview.plan.authoritativeDns.snapshotRetentionDays, 30);
   assert.match(preview.previewDigest, /^[a-f0-9]{64}$/);
   assert.equal(
     preview.confirmation,
@@ -152,6 +157,8 @@ test('non-orchestratable authoritative DNS blocker fails closed', () => {
             state: 'blocked',
             previewDigest: dnsPreviewDigest,
             zoneSnapshotDigest,
+            ownershipEvidenceDigest,
+            snapshotRetentionDays: 30,
             blockers: ['dns_zone_manual_rrsets_present'],
           }],
         },

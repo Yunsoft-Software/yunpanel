@@ -7,7 +7,10 @@ import {
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ROUTING_CHILD_STATUSES = new Set(['pending', 'suspending', 'suspended', 'failed']);
-const CONTROL_PLANE_STEP_KINDS = new Set(['website_binding', 'metadata_finalization']);
+const CONTINUABLE_STEP_KINDS = new Set([
+  'website_binding', 'authoritative_dns', 'metadata_finalization',
+]);
+const DNS_RETIREMENT_CHILD_STATUSES = new Set(['pending', 'deleting', 'deleted', 'failed']);
 
 export class DomainRemovalRuntimeError extends Error {
   constructor(code, message, status = 400) {
@@ -59,7 +62,7 @@ function publicOperation(operation) {
   const routingRetryable = step?.kind === 'routing_suspend'
     && ['running', 'blocked', 'failed'].includes(step.status)
     && operation.status !== 'removed';
-  const stepContinuable = step && CONTROL_PLANE_STEP_KINDS.has(step.kind)
+  const stepContinuable = step && CONTINUABLE_STEP_KINDS.has(step.kind)
     && ['pending', 'running', 'blocked', 'failed'].includes(step.status)
     && operation.status !== 'removed';
   return Object.freeze({
@@ -192,11 +195,102 @@ function metadataFinalizationConfirmation(operation, suspensionId) {
   return `finalize-domain-remove:${operation.domainId}:${suspensionId}:${operation.domainRevision}:${operation.checksum}`;
 }
 
+function exactDnsRetirementPreview(operation, preview) {
+  const expected = operation.plan.authoritativeDns;
+  return Boolean(expected
+    && expected.zoneSnapshotDigest !== null
+    && expected.ownershipEvidenceDigest !== null
+    && Number.isSafeInteger(expected.snapshotRetentionDays)
+    && preview?.version === 1
+    && preview.operation === 'dns_zone_retirement_impact'
+    && preview.retirementPlanReady === true
+    && Array.isArray(preview.blockers)
+    && preview.blockers.length === 0
+    && typeof preview.previewDigest === 'string'
+    && SHA256_PATTERN.test(preview.previewDigest)
+    && typeof preview.confirmation === 'string'
+    && preview.confirmation.length > 0
+    && preview.domain?.id === operation.domainId
+    && preview.domain?.serverId === operation.serverId
+    && preview.domain?.primaryDomain === operation.primaryDomain
+    && preview.domain?.desiredRevision === operation.domainRevision
+    && preview.domain?.websiteId === null
+    && preview.domain?.certificateId === null
+    && preview.domain?.state === 'suspended'
+    && preview.hierarchy?.descendantCount === 0
+    && Array.isArray(preview.hierarchy?.descendants)
+    && preview.hierarchy.descendants.length === 0
+    && preview.routing?.active === false
+    && preview.zone?.exists === true
+    && preview.zone?.snapshotDigest === expected.zoneSnapshotDigest
+    && preview.zone?.ownershipOrigin?.evidenceDigest === expected.ownershipEvidenceDigest
+    && preview.retention?.configured === true
+    && preview.retention?.snapshotRetentionDays === expected.snapshotRetentionDays);
+}
+
+function exactDnsRetirementChild(operation, child) {
+  const expected = operation.plan.authoritativeDns;
+  const parentCreatedAt = Date.parse(operation.createdAt);
+  const childCreatedAt = Date.parse(child?.createdAt);
+  return Boolean(expected
+    && child
+    && typeof child.id === 'string'
+    && Number.isFinite(parentCreatedAt)
+    && Number.isFinite(childCreatedAt)
+    && childCreatedAt >= parentCreatedAt
+    && child.domainId === operation.domainId
+    && child.serverId === operation.serverId
+    && child.zoneName === operation.primaryDomain
+    && child.domainRevision === operation.domainRevision
+    && child.snapshotDigest === expected.zoneSnapshotDigest
+    && child.ownershipEvidenceDigest === expected.ownershipEvidenceDigest
+    && child.snapshotRetentionDays === expected.snapshotRetentionDays
+    && DNS_RETIREMENT_CHILD_STATUSES.has(child.status));
+}
+
+function dnsRetirementEvidence(operation, child) {
+  const deletedAtMs = Date.parse(child?.result?.deletedAt);
+  const retainUntilMs = Date.parse(child?.result?.retainUntil);
+  if (!exactDnsRetirementChild(operation, child)
+    || child.status !== 'deleted'
+    || child.result?.deleted !== true
+    || child.result?.snapshotDigest !== child.snapshotDigest
+    || typeof child.result?.deletedAt !== 'string'
+    || typeof child.result?.retainUntil !== 'string'
+    || !Number.isFinite(deletedAtMs) || !Number.isFinite(retainUntilMs)
+    || new Date(deletedAtMs).toISOString() !== child.result.deletedAt
+    || new Date(retainUntilMs).toISOString() !== child.result.retainUntil
+    || retainUntilMs - deletedAtMs !== child.snapshotRetentionDays * 24 * 60 * 60 * 1000) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_dns_evidence_invalid',
+      'DNS retirement child operation did not prove exact authoritative zone deletion',
+      409,
+    );
+  }
+  return Object.freeze({
+    referenceId: child.id,
+    evidenceDigest: digest({
+      kind: 'authoritative_dns',
+      operationId: child.id,
+      domainId: child.domainId,
+      serverId: child.serverId,
+      zoneName: child.zoneName,
+      domainRevision: child.domainRevision,
+      snapshotDigest: child.snapshotDigest,
+      ownershipEvidenceDigest: child.ownershipEvidenceDigest,
+      snapshotRetentionDays: child.snapshotRetentionDays,
+      deletedAt: child.result.deletedAt,
+      retainUntil: child.result.retainUntil,
+    }),
+  });
+}
+
 export function createDomainRemovalRuntime({
   registry,
   previewProvider,
   suspensionRuntime,
   domainRegistry = null,
+  dnsZoneRetirementRuntime = null,
 } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
@@ -213,6 +307,12 @@ export function createDomainRemovalRuntime({
       typeof domainRegistry?.getDomain !== 'function'
       || typeof domainRegistry?.detachWebsiteForRemoval !== 'function'
       || typeof domainRegistry?.finalizeDomainRemoval !== 'function'
+    ))
+    || (dnsZoneRetirementRuntime !== null && (
+      typeof dnsZoneRetirementRuntime?.preview !== 'function'
+      || typeof dnsZoneRetirementRuntime?.start !== 'function'
+      || typeof dnsZoneRetirementRuntime?.retry !== 'function'
+      || typeof dnsZoneRetirementRuntime?.listForDomain !== 'function'
     ))) {
     throw new DomainRemovalRuntimeError(
       'domain_removal_runtime_dependencies_invalid',
@@ -230,6 +330,17 @@ export function createDomainRemovalRuntime({
       );
     }
     return domainRegistry;
+  }
+
+  function requireDnsZoneRetirementRuntime() {
+    if (!dnsZoneRetirementRuntime) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_dns_retirement_unavailable',
+        'Domain removal authoritative DNS step handler is unavailable',
+        503,
+      );
+    }
+    return dnsZoneRetirementRuntime;
   }
 
   async function loadOperation(operationId) {
@@ -445,12 +556,161 @@ export function createDomainRemovalRuntime({
     return publicOperation(await completeControlPlaneStep(operation, step, evidence));
   }
 
+  async function dnsRetirementChild(operation, runtime) {
+    let values;
+    try { values = await runtime.listForDomain(operation.domainId); }
+    catch (error) { throw mapped(error); }
+    if (!Array.isArray(values)) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_dns_inventory_invalid',
+        'DNS retirement child operation inventory is invalid',
+        503,
+      );
+    }
+    const candidates = values.filter((child) => exactDnsRetirementChild(operation, child));
+    if (candidates.length > 1) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_dns_operation_ambiguous',
+        'Multiple DNS retirement child operations match the removal intent',
+        409,
+      );
+    }
+    return candidates[0] ?? null;
+  }
+
+  async function currentDnsRetirementPreview(operation, runtime) {
+    let preview;
+    try { preview = await runtime.preview({ domainId: operation.domainId }); }
+    catch (error) { throw mapped(error); }
+    if (!exactDnsRetirementPreview(operation, preview)) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_dns_preview_drift',
+        'Authoritative DNS retirement state no longer matches the journaled removal intent',
+        409,
+      );
+    }
+    return preview;
+  }
+
+  async function continueDnsRetirementChild(operation, child, runtime) {
+    if (child?.status === 'deleted') return child;
+    if (child && ['deleting', 'failed'].includes(child.status)) {
+      if (child.recovery?.retryable !== true
+        || typeof child.recovery?.retryConfirmation !== 'string') {
+        throw new DomainRemovalRuntimeError(
+          'domain_removal_dns_retry_evidence_invalid',
+          'DNS retirement child operation retry evidence is unavailable',
+          409,
+        );
+      }
+      try {
+        return await runtime.retry({
+          domainId: operation.domainId,
+          operationId: child.id,
+          expectedUpdatedAt: child.updatedAt,
+          snapshotDigest: child.snapshotDigest,
+          confirmation: child.recovery.retryConfirmation,
+        });
+      } catch (error) { throw mapped(error); }
+    }
+    const preview = await currentDnsRetirementPreview(operation, runtime);
+    try {
+      return await runtime.start({
+        domainId: operation.domainId,
+        previewDigest: preview.previewDigest,
+        confirmation: preview.confirmation,
+      });
+    } catch (error) { throw mapped(error); }
+  }
+
+  async function runAuthoritativeDns(operationId, { allowMutation } = {}) {
+    const manager = requireDomainRegistry();
+    const runtime = requireDnsZoneRetirementRuntime();
+    const prepared = await runningStep(await loadOperation(operationId), 'authoritative_dns');
+    const { operation, step } = prepared;
+    const planned = operation.plan.authoritativeDns;
+    if (step.resourceId !== operation.domainId
+      || !planned || planned.zoneSnapshotDigest === null
+      || planned.ownershipEvidenceDigest === null
+      || !Number.isSafeInteger(planned.snapshotRetentionDays)) {
+      return publicOperation(await failControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_dns_plan_invalid',
+        'Authoritative DNS step does not contain exact journaled ownership and retention evidence',
+        409,
+      )));
+    }
+    const suspensionId = suspensionOperationId(operation);
+    let domain;
+    try { domain = await manager.getDomain(operation.domainId); }
+    catch (error) {
+      if (!allowMutation) throw mapped(error);
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    if (!exactSuspendedDomain(operation, domain, suspensionId)
+      || domain.websiteId !== null || domain.certificateId !== null) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_dns_domain_drift',
+        'Domain state no longer matches authoritative DNS retirement prerequisites',
+        409,
+      )));
+    }
+    let child;
+    try { child = await dnsRetirementChild(operation, runtime); }
+    catch (error) {
+      if (!allowMutation) throw error;
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    if (child?.status === 'deleted') {
+      return publicOperation(await completeControlPlaneStep(
+        operation,
+        step,
+        dnsRetirementEvidence(operation, child),
+      ));
+    }
+    if (!allowMutation) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_dns_retry_required',
+        child
+          ? 'DNS retirement child operation requires explicit continuation'
+          : 'DNS retirement child operation was not started before interruption',
+        409,
+      )));
+    }
+    let result;
+    try { result = await continueDnsRetirementChild(operation, child, runtime); }
+    catch (error) {
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    if (!exactDnsRetirementChild(operation, result)) {
+      return publicOperation(await failControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_dns_result_invalid',
+        'DNS retirement child operation result does not match journaled removal intent',
+        503,
+      )));
+    }
+    if (result.status !== 'deleted') {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        result.error?.code ?? 'domain_removal_dns_retry_required',
+        result.error?.message ?? 'DNS retirement child operation requires explicit continuation',
+        409,
+      )));
+    }
+    return publicOperation(await completeControlPlaneStep(
+      operation,
+      step,
+      dnsRetirementEvidence(operation, result),
+    ));
+  }
+
   async function runControlPlaneStep(operationId, { allowMutation } = {}) {
     const operation = await loadOperation(operationId);
     const step = firstIncomplete(operation);
     if (!step) return publicOperation(operation);
     if (step.kind === 'website_binding') {
       return runWebsiteBinding(operation.id, { allowMutation });
+    }
+    if (step.kind === 'authoritative_dns') {
+      return runAuthoritativeDns(operation.id, { allowMutation });
     }
     if (step.kind === 'metadata_finalization') {
       return runMetadataFinalization(operation.id, { allowMutation });
@@ -766,7 +1026,7 @@ export function createDomainRemovalRuntime({
       );
     }
     const step = firstIncomplete(operation);
-    if (!step || !CONTROL_PLANE_STEP_KINDS.has(step.kind)
+    if (!step || !CONTINUABLE_STEP_KINDS.has(step.kind)
       || !['pending', 'running', 'blocked', 'failed'].includes(step.status)
       || stepId !== step.id
       || expectedUpdatedAt !== operation.updatedAt
@@ -794,7 +1054,7 @@ export function createDomainRemovalRuntime({
         }),
       });
     }
-    if (CONTROL_PLANE_STEP_KINDS.has(step.kind)) {
+    if (CONTINUABLE_STEP_KINDS.has(step.kind)) {
       const result = await runControlPlaneStep(operation.id, { allowMutation: false });
       const recoveredStep = result.steps.find((candidate) => candidate.id === step.id);
       return Object.freeze({
@@ -902,4 +1162,7 @@ export const domainRemovalRuntimeInternals = Object.freeze({
   websiteBindingEvidence,
   metadataFinalizationEvidence,
   metadataFinalizationConfirmation,
+  exactDnsRetirementPreview,
+  exactDnsRetirementChild,
+  dnsRetirementEvidence,
 });

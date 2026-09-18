@@ -334,7 +334,7 @@ export function createDnsZoneRetirementOperationRegistry({
     const duplicate = state.operations.find((operation) => (
       operation.domainId === capture?.domainId
       && operation.snapshotDigest === capture?.snapshotDigest
-      && ['pending', 'deleting', 'deleted'].includes(operation.status)
+      && ['pending', 'deleting'].includes(operation.status)
     ));
     if (duplicate) return duplicate;
     const operation = operationFromCapture(capture, now, idFactory);

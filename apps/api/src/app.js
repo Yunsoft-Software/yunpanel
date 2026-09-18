@@ -473,6 +473,12 @@ export function createApp({
           state: preview.retirementPlanReady ? 'ready' : 'blocked',
           previewDigest: preview.previewDigest,
           zoneSnapshotDigest: preview.zone.snapshotDigest,
+          ownershipEvidenceDigest: preview.zone.exists
+            ? preview.zone.ownershipOrigin?.evidenceDigest ?? null
+            : null,
+          snapshotRetentionDays: preview.zone.exists && preview.retention.configured
+            ? preview.retention.snapshotRetentionDays
+            : null,
           blockers: Object.freeze([...preview.blockers]),
         });
       })),

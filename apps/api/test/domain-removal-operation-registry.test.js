@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   createDomainRemovalOperationRegistry,
   domainRemovalOperationPublicView,
+  domainRemovalOperationRegistryInternals,
   DomainRemovalOperationRegistryError,
 } from '../src/domain-removal-operation-registry.js';
 
@@ -16,6 +17,7 @@ const previewDigest = 'c'.repeat(64);
 const dnsPreviewDigest = 'd'.repeat(64);
 const zoneSnapshotDigest = 'e'.repeat(64);
 const evidenceDigest = 'f'.repeat(64);
+const ownershipEvidenceDigest = '1'.repeat(64);
 
 function preview() {
   return {
@@ -64,6 +66,8 @@ function preview() {
         state: 'blocked',
         previewDigest: dnsPreviewDigest,
         zoneSnapshotDigest,
+        ownershipEvidenceDigest,
+        snapshotRetentionDays: 30,
         blockers: ['domain_routing_active', 'domain_website_binding_present'],
       },
     },
@@ -123,6 +127,18 @@ test('omits authoritative DNS mutation when the removal plan has no local zone',
 
   assert.equal(operation.steps.some((step) => step.kind === 'authoritative_dns'), false);
   assert.equal(operation.steps.at(-1).kind, 'metadata_finalization');
+});
+
+test('legacy journal plans load fail-closed without inventing DNS ownership or retention evidence', () => {
+  const legacy = preview().plan;
+  delete legacy.authoritativeDns.ownershipEvidenceDigest;
+  delete legacy.authoritativeDns.snapshotRetentionDays;
+
+  const normalized = domainRemovalOperationRegistryInternals.normalizedPlan(legacy);
+
+  assert.equal(normalized.authoritativeDns.zoneSnapshotDigest, zoneSnapshotDigest);
+  assert.equal(normalized.authoritativeDns.ownershipEvidenceDigest, null);
+  assert.equal(normalized.authoritativeDns.snapshotRetentionDays, null);
 });
 
 test('enforces journal order and allows failed or blocked current step retry', async () => {

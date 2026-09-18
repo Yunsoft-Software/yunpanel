@@ -269,7 +269,15 @@ function authoritativeDnsReference(dependencies, domainId) {
   }
   const item = matching[0];
   if (!['ready', 'blocked', 'not_applicable'].includes(item.state)
-    || !Array.isArray(item.blockers) || item.blockers.length > 32) {
+    || !Array.isArray(item.blockers) || item.blockers.length > 32
+    || (item.ownershipEvidenceDigest !== null
+      && (typeof item.ownershipEvidenceDigest !== 'string'
+        || !SHA256_PATTERN.test(item.ownershipEvidenceDigest)))
+    || (item.snapshotRetentionDays !== null
+      && (!Number.isSafeInteger(item.snapshotRetentionDays)
+        || item.snapshotRetentionDays < 1 || item.snapshotRetentionDays > 3650))
+    || (item.zoneSnapshotDigest === null
+      && (item.ownershipEvidenceDigest !== null || item.snapshotRetentionDays !== null))) {
     throw new DomainRemovalPlanError(
       'domain_removal_impact_invalid',
       'Authoritative DNS retirement reference is invalid',
@@ -290,6 +298,10 @@ function authoritativeDnsReference(dependencies, domainId) {
     zoneSnapshotDigest: item.zoneSnapshotDigest === null
       ? null
       : safeDigest(item.zoneSnapshotDigest, 'authoritativeDnsZoneSnapshotDigest'),
+    ownershipEvidenceDigest: item.ownershipEvidenceDigest === null
+      ? null
+      : safeDigest(item.ownershipEvidenceDigest, 'authoritativeDnsOwnershipEvidenceDigest'),
+    snapshotRetentionDays: item.snapshotRetentionDays,
     blockers: Object.freeze(blockers),
   });
 }
@@ -362,6 +374,14 @@ function hardBlockers(blockers, plan) {
   if (plan.authoritativeDns?.state === 'blocked') {
     for (const code of plan.authoritativeDns.blockers) {
       if (!ORCHESTRATABLE_DNS_BLOCKERS.has(code)) hard.push(code);
+    }
+  }
+  if (plan.authoritativeDns?.zoneSnapshotDigest !== null) {
+    if (plan.authoritativeDns.ownershipEvidenceDigest === null) {
+      hard.push('dns_zone_delete_ownership_evidence_required');
+    }
+    if (plan.authoritativeDns.snapshotRetentionDays === null) {
+      hard.push('dns_zone_delete_retention_policy_required');
     }
   }
   return Object.freeze([...new Set(hard)].sort());

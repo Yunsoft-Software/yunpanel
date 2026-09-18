@@ -125,6 +125,11 @@ export function createDnsZoneRetirementRuntime({ registry, service } = {}) {
     );
   }
 
+  async function preview({ domainId } = {}) {
+    try { return await service.preview({ domainId }); }
+    catch (error) { throw mapped(error); }
+  }
+
   async function inspect(operation) {
     let result;
     try {
@@ -149,10 +154,7 @@ export function createDnsZoneRetirementRuntime({ registry, service } = {}) {
   }
 
   async function currentPreview(operation) {
-    let preview;
-    try { preview = await service.preview({ domainId: operation.domainId }); }
-    catch (error) { throw mapped(error); }
-    return preview;
+    return preview({ domainId: operation.domainId });
   }
 
   async function execute(operationId) {
@@ -406,6 +408,7 @@ export function createDnsZoneRetirementRuntime({ registry, service } = {}) {
 
   return Object.freeze({
     init,
+    preview,
     start,
     retry,
     get,

@@ -197,7 +197,10 @@ async function additionalBucket(provider, type, context) {
 }
 
 function sanitizeDnsRetirementReference(value) {
-  const fields = new Set(['domainId', 'state', 'previewDigest', 'zoneSnapshotDigest', 'blockers']);
+  const fields = new Set([
+    'domainId', 'state', 'previewDigest', 'zoneSnapshotDigest',
+    'ownershipEvidenceDigest', 'snapshotRetentionDays', 'blockers',
+  ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size || Object.keys(value).some((key) => !fields.has(key))
     || typeof value.domainId !== 'string' || !SAFE_RESOURCE_ID.test(value.domainId)
@@ -205,6 +208,14 @@ function sanitizeDnsRetirementReference(value) {
     || typeof value.previewDigest !== 'string' || !SHA256_PATTERN.test(value.previewDigest)
     || (value.zoneSnapshotDigest !== null
       && (typeof value.zoneSnapshotDigest !== 'string' || !SHA256_PATTERN.test(value.zoneSnapshotDigest)))
+    || (value.ownershipEvidenceDigest !== null
+      && (typeof value.ownershipEvidenceDigest !== 'string'
+        || !SHA256_PATTERN.test(value.ownershipEvidenceDigest)))
+    || (value.snapshotRetentionDays !== null
+      && (!Number.isSafeInteger(value.snapshotRetentionDays)
+        || value.snapshotRetentionDays < 1 || value.snapshotRetentionDays > 3650))
+    || (value.zoneSnapshotDigest === null
+      && (value.ownershipEvidenceDigest !== null || value.snapshotRetentionDays !== null))
     || !Array.isArray(value.blockers) || value.blockers.length > 32
     || value.blockers.some((code) => typeof code !== 'string' || !SAFE_BLOCKER_CODE.test(code))
     || new Set(value.blockers).size !== value.blockers.length
@@ -221,6 +232,8 @@ function sanitizeDnsRetirementReference(value) {
     state: value.state,
     previewDigest: value.previewDigest,
     zoneSnapshotDigest: value.zoneSnapshotDigest,
+    ownershipEvidenceDigest: value.ownershipEvidenceDigest,
+    snapshotRetentionDays: value.snapshotRetentionDays,
     blockers: Object.freeze([...value.blockers]),
   });
 }

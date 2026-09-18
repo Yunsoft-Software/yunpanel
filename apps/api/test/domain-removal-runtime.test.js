@@ -13,6 +13,7 @@ const previewDigest = 'c'.repeat(64);
 const suspensionPreviewDigest = 'd'.repeat(64);
 const dnsPreviewDigest = 'e'.repeat(64);
 const zoneSnapshotDigest = 'f'.repeat(64);
+const ownershipEvidenceDigest = '1'.repeat(64);
 
 function removalPreview({ suspended = false } = {}) {
   const suspensionOperationId = suspended ? 'suspension-operation-1' : null;
@@ -61,6 +62,8 @@ function removalPreview({ suspended = false } = {}) {
         state: 'blocked',
         previewDigest: dnsPreviewDigest,
         zoneSnapshotDigest,
+        ownershipEvidenceDigest,
+        snapshotRetentionDays: 30,
         blockers: suspended
           ? ['domain_website_binding_present', 'domain_certificate_present']
           : ['domain_routing_active', 'domain_website_binding_present', 'domain_certificate_present'],
@@ -97,6 +100,35 @@ function leafRemovalPreview() {
     },
     previewDigest: leafPreviewDigest,
     confirmation: `start-domain-remove:domain-1:4:${leafPreviewDigest}`,
+  };
+}
+
+function authoritativeRemovalPreview() {
+  const base = leafRemovalPreview();
+  const authoritativePreviewDigest = '6'.repeat(64);
+  return {
+    ...base,
+    impact: {
+      ...base.impact,
+      blockers: [
+        'authoritative_dns_retirement_blocked',
+        'impact_apply_not_implemented',
+        'website_binding_present',
+      ],
+    },
+    plan: {
+      ...base.plan,
+      authoritativeDns: {
+        state: 'blocked',
+        previewDigest: dnsPreviewDigest,
+        zoneSnapshotDigest,
+        ownershipEvidenceDigest,
+        snapshotRetentionDays: 30,
+        blockers: ['domain_routing_active', 'domain_website_binding_present'],
+      },
+    },
+    previewDigest: authoritativePreviewDigest,
+    confirmation: `start-domain-remove:domain-1:4:${authoritativePreviewDigest}`,
   };
 }
 
@@ -236,12 +268,131 @@ function completedSuspensionRuntime() {
   };
 }
 
+function dnsRetirementPreview(overrides = {}) {
+  return {
+    version: 1,
+    operation: 'dns_zone_retirement_impact',
+    domain: {
+      id: 'domain-1',
+      serverId: 'local',
+      primaryDomain: 'example.com',
+      websiteId: null,
+      certificateId: null,
+      desiredRevision: 4,
+      state: 'suspended',
+    },
+    hierarchy: { descendantCount: 0, descendants: [] },
+    routing: { active: false },
+    zone: {
+      exists: true,
+      snapshotDigest: zoneSnapshotDigest,
+      ownershipOrigin: { evidenceDigest: ownershipEvidenceDigest },
+    },
+    retention: { configured: true, snapshotRetentionDays: 30 },
+    blockers: [],
+    retirementPlanReady: true,
+    previewDigest: '5'.repeat(64),
+    confirmation: 'retire-authoritative-zone-confirmation',
+    sideEffects: false,
+    ...overrides,
+  };
+}
+
+function dnsRetirementChild({ status = 'deleted', updatedAt = '2026-09-18T21:00:00.000Z' } = {}) {
+  return {
+    id: 'dns-retirement-operation-1',
+    domainId: 'domain-1',
+    serverId: 'local',
+    zoneName: 'example.com',
+    domainRevision: 4,
+    previewDigest: '5'.repeat(64),
+    snapshotDigest: zoneSnapshotDigest,
+    ownershipEvidenceDigest,
+    snapshotRetentionDays: 30,
+    status,
+    result: status === 'deleted' ? {
+      deleted: true,
+      changed: true,
+      snapshotDigest: zoneSnapshotDigest,
+      deletedAt: '2026-09-18T21:00:00.000Z',
+      retainUntil: '2026-10-18T21:00:00.000Z',
+    } : null,
+    error: status === 'failed'
+      ? { code: 'powerdns_zone_api_failed', message: 'PowerDNS delete failed' }
+      : null,
+    recovery: {
+      required: status === 'deleting',
+      automaticReplayBlocked: status === 'deleting',
+      reason: status === 'deleting' ? 'dns_zone_retirement_interrupted_delete' : null,
+      retryable: ['deleting', 'failed'].includes(status),
+      retryConfirmation: ['deleting', 'failed'].includes(status) ? 'retry-dns-child' : null,
+    },
+    createdAt: '2026-09-18T20:59:00.000Z',
+    updatedAt,
+  };
+}
+
+function dnsRetirementRuntimeFixture({ initialChild = null, preview = dnsRetirementPreview() } = {}) {
+  let child = initialChild;
+  let previewCalls = 0;
+  let startCalls = 0;
+  let retryCalls = 0;
+  let listCalls = 0;
+  return {
+    runtime: {
+      async preview(input) {
+        previewCalls += 1;
+        assert.deepEqual(input, { domainId: 'domain-1' });
+        return preview;
+      },
+      async start(input) {
+        startCalls += 1;
+        assert.deepEqual(input, {
+          domainId: 'domain-1',
+          previewDigest: '5'.repeat(64),
+          confirmation: 'retire-authoritative-zone-confirmation',
+        });
+        child = dnsRetirementChild();
+        return child;
+      },
+      async retry(input) {
+        retryCalls += 1;
+        assert.deepEqual(input, {
+          domainId: 'domain-1',
+          operationId: 'dns-retirement-operation-1',
+          expectedUpdatedAt: child.updatedAt,
+          snapshotDigest: zoneSnapshotDigest,
+          confirmation: 'retry-dns-child',
+        });
+        child = dnsRetirementChild({ updatedAt: '2026-09-18T21:01:00.000Z' });
+        return child;
+      },
+      async listForDomain(id) {
+        listCalls += 1;
+        assert.equal(id, 'domain-1');
+        return child ? [child] : [];
+      },
+    },
+    counts: () => ({ previewCalls, startCalls, retryCalls, listCalls }),
+    child: () => child,
+  };
+}
+
 async function completeRoutingStep(registry, preview = leafRemovalPreview()) {
   const operation = await registry.create(preview);
   const running = await registry.markStepRunning(operation.id, operation.steps[0].id);
   return registry.succeedStep(running.id, running.steps[0].id, {
     referenceId: 'suspension-operation-1',
     evidenceDigest: '8'.repeat(64),
+  });
+}
+
+async function completeWebsiteStep(registry, preview = authoritativeRemovalPreview()) {
+  let operation = await completeRoutingStep(registry, preview);
+  operation = await registry.markStepRunning(operation.id, operation.steps[1].id);
+  return registry.succeedStep(operation.id, operation.steps[1].id, {
+    referenceId: 'website-1',
+    evidenceDigest: '7'.repeat(64),
   });
 }
 
@@ -510,6 +661,200 @@ test('explicit continuations detach Website binding and finalize leaf Domain met
   assert.equal(operation.steps[2].result.referenceId, 'domain-1');
   assert.deepEqual(domains.counts(), { detachCalls: 1, finalizeCalls: 1 });
   assert.equal(operation.actions.stepContinuationConfirmation, null);
+});
+
+test('parent continuation runs exact durable DNS retirement before Domain metadata finalization', async () => {
+  const registry = createRegistry();
+  const preview = authoritativeRemovalPreview();
+  const domains = domainRegistryFixture();
+  const dns = dnsRetirementRuntimeFixture();
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    dnsZoneRetirementRuntime: dns.runtime,
+  });
+
+  let operation = await runtime.start({
+    domainId: preview.domain.id,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+  assert.equal(operation.steps[1].kind, 'website_binding');
+  assert.equal(operation.steps[1].status, 'succeeded');
+  assert.equal(operation.steps[2].kind, 'authoritative_dns');
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[2].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+  assert.equal(operation.steps[2].status, 'succeeded');
+  assert.equal(operation.steps[2].result.referenceId, 'dns-retirement-operation-1');
+  assert.equal(operation.steps[3].kind, 'metadata_finalization');
+  assert.deepEqual(dns.counts(), {
+    previewCalls: 1,
+    startCalls: 1,
+    retryCalls: 0,
+    listCalls: 1,
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[3].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+  assert.equal(operation.status, 'removed');
+  assert.deepEqual(domains.counts(), { detachCalls: 1, finalizeCalls: 1 });
+});
+
+test('startup closes running authoritative DNS step from exact deleted child without replay', async () => {
+  const registry = createRegistry();
+  let operation = await completeWebsiteStep(registry);
+  operation = await registry.markStepRunning(operation.id, operation.steps[2].id);
+  const domains = domainRegistryFixture({ websiteId: null });
+  const dns = dnsRetirementRuntimeFixture({ initialChild: dnsRetirementChild() });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => authoritativeRemovalPreview(),
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    dnsZoneRetirementRuntime: dns.runtime,
+  });
+
+  const recovery = await runtime.init();
+
+  assert.equal(recovery[0].recovered, true);
+  assert.equal(recovery[0].operation.steps[2].status, 'succeeded');
+  assert.deepEqual(dns.counts(), {
+    previewCalls: 0,
+    startCalls: 0,
+    retryCalls: 0,
+    listCalls: 1,
+  });
+});
+
+test('parent ignores matching DNS retirement evidence created before its own journal', async () => {
+  const registry = createRegistry();
+  let operation = await completeWebsiteStep(registry);
+  operation = await registry.markStepRunning(operation.id, operation.steps[2].id);
+  const domains = domainRegistryFixture({ websiteId: null });
+  const oldChild = dnsRetirementChild();
+  oldChild.createdAt = '2026-09-18T20:00:00.000Z';
+  const dns = dnsRetirementRuntimeFixture({ initialChild: oldChild });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => authoritativeRemovalPreview(),
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    dnsZoneRetirementRuntime: dns.runtime,
+  });
+
+  const recovery = await runtime.init();
+
+  assert.equal(recovery[0].recovered, false);
+  assert.equal(recovery[0].operation.steps[2].status, 'blocked');
+  assert.equal(dns.counts().startCalls, 0);
+  assert.equal(dns.counts().retryCalls, 0);
+});
+
+test('startup blocks incomplete DNS child and explicit parent continuation uses child retry fence', async () => {
+  const registry = createRegistry();
+  let operation = await completeWebsiteStep(registry);
+  operation = await registry.markStepRunning(operation.id, operation.steps[2].id);
+  const domains = domainRegistryFixture({ websiteId: null });
+  const dns = dnsRetirementRuntimeFixture({
+    initialChild: dnsRetirementChild({ status: 'deleting' }),
+  });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => authoritativeRemovalPreview(),
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    dnsZoneRetirementRuntime: dns.runtime,
+  });
+
+  const recovery = await runtime.init();
+  assert.equal(recovery[0].recovered, false);
+  assert.equal(recovery[0].operation.steps[2].status, 'blocked');
+  assert.equal(dns.counts().retryCalls, 0);
+
+  operation = recovery[0].operation;
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[2].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+  assert.equal(operation.steps[2].status, 'succeeded');
+  assert.equal(dns.counts().retryCalls, 1);
+  assert.equal(dns.counts().startCalls, 0);
+});
+
+test('authoritative DNS policy drift fails parent step before child mutation', async () => {
+  const registry = createRegistry();
+  const preview = authoritativeRemovalPreview();
+  const domains = domainRegistryFixture();
+  const dns = dnsRetirementRuntimeFixture({
+    preview: dnsRetirementPreview({
+      retention: { configured: true, snapshotRetentionDays: 31 },
+    }),
+  });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    dnsZoneRetirementRuntime: dns.runtime,
+  });
+  let operation = await runtime.start({
+    domainId: preview.domain.id,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[2].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+
+  assert.equal(operation.steps[2].status, 'failed');
+  assert.equal(operation.steps[2].error.code, 'domain_removal_dns_preview_drift');
+  assert.deepEqual(dns.counts(), {
+    previewCalls: 1,
+    startCalls: 0,
+    retryCalls: 0,
+    listCalls: 1,
+  });
 });
 
 test('startup closes a running Website detachment from exact absent post-condition without replay', async () => {

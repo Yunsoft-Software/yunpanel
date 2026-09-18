@@ -159,14 +159,29 @@ function normalizedPlan(value) {
   };
   let authoritativeDns = null;
   if (value.authoritativeDns !== null && value.authoritativeDns !== undefined) {
-    const dnsFields = new Set(['state', 'previewDigest', 'zoneSnapshotDigest', 'blockers']);
+    const legacyDnsFields = new Set(['state', 'previewDigest', 'zoneSnapshotDigest', 'blockers']);
+    const dnsFields = new Set([
+      ...legacyDnsFields, 'ownershipEvidenceDigest', 'snapshotRetentionDays',
+    ]);
     const dns = value.authoritativeDns;
+    const keys = Object.keys(dns ?? {});
+    const legacyShape = keys.length === legacyDnsFields.size
+      && keys.every((field) => legacyDnsFields.has(field));
+    const currentShape = keys.length === dnsFields.size
+      && keys.every((field) => dnsFields.has(field));
     if (!dns || typeof dns !== 'object' || Array.isArray(dns)
-      || Object.keys(dns).length !== dnsFields.size
-      || Object.keys(dns).some((field) => !dnsFields.has(field))
+      || (!legacyShape && !currentShape)
       || !['ready', 'blocked', 'not_applicable'].includes(dns.state)
       || !Array.isArray(dns.blockers) || dns.blockers.length > 32
-      || dns.blockers.some((code) => typeof code !== 'string' || !SAFE_CODE.test(code))) {
+      || dns.blockers.some((code) => typeof code !== 'string' || !SAFE_CODE.test(code))
+      || (currentShape && dns.ownershipEvidenceDigest !== null
+        && (typeof dns.ownershipEvidenceDigest !== 'string'
+          || !SHA256_PATTERN.test(dns.ownershipEvidenceDigest)))
+      || (currentShape && dns.snapshotRetentionDays !== null
+        && (!Number.isSafeInteger(dns.snapshotRetentionDays)
+          || dns.snapshotRetentionDays < 1 || dns.snapshotRetentionDays > 3650))
+      || (currentShape && dns.zoneSnapshotDigest === null
+        && (dns.ownershipEvidenceDigest !== null || dns.snapshotRetentionDays !== null))) {
       throw invalid('Authoritative DNS removal plan is invalid');
     }
     const blockers = [...dns.blockers].sort();
@@ -179,6 +194,8 @@ function normalizedPlan(value) {
       zoneSnapshotDigest: dns.zoneSnapshotDigest === null
         ? null
         : safeDigest(dns.zoneSnapshotDigest, 'authoritativeDnsZoneSnapshotDigest'),
+      ownershipEvidenceDigest: currentShape ? dns.ownershipEvidenceDigest : null,
+      snapshotRetentionDays: currentShape ? dns.snapshotRetentionDays : null,
       blockers: Object.freeze(blockers),
     });
   }

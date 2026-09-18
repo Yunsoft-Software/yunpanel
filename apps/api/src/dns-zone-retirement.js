@@ -211,6 +211,17 @@ function provisioningOwnership(domain, operations) {
 }
 
 function routingActive(domain) {
+  const exactSuspension = domain.state === 'suspended'
+    && domain.stagedRevision === domain.desiredRevision
+    && domain.appliedRevision === domain.desiredRevision
+    && domain.appliedPrimaryDomain === domain.primaryDomain
+    && typeof domain.stagedChecksum === 'string'
+    && SHA256_PATTERN.test(domain.stagedChecksum)
+    && domain.suspendedChecksum === domain.stagedChecksum
+    && typeof domain.suspensionOperationId === 'string'
+    && domain.suspensionOperationId.length > 0
+    && domain.lastError === null;
+  if (exactSuspension) return false;
   return domain.appliedRevision > 0
     || domain.stagedRevision > 0
     || ['active', 'staged'].includes(domain.state);
