@@ -18,6 +18,9 @@ test('site overview binds isolation audit and receipt migration controls to the 
   assert.match(panel, /rollbackWebsiteIsolationMigration/);
   assert.match(panel, /audit\.migration\?\.applyAvailable/);
   assert.match(panel, /create_canonical_unix_identity/);
+  assert.match(panel, /create_sftp_isolation/);
+  assert.match(panel, /adapter === 'sftp'/);
+  assert.match(panel, /SFTP migration/);
   assert.match(panel, /preservedHomeData/);
   assert.match(panel, /Unix identity migration/);
   assert.match(panel, /audit\.expected\?\.unixUser/);
