@@ -45,12 +45,14 @@ function digest(value) {
 export function createElFinderHandoffService({
   websiteRegistry,
   localServerId,
+  runtimeInspector,
   liveSessions = null,
   now = Date.now,
   ttlMs = DEFAULT_TTL_MS,
   maxHandoffs = DEFAULT_LIMIT,
 } = {}) {
-  if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function') {
+  if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
+    || typeof runtimeInspector !== 'function') {
     throw new ElFinderHandoffError(
       'elfinder_handoff_dependencies_invalid',
       'elFinder handoff dependencies are unavailable',
@@ -153,6 +155,35 @@ export function createElFinderHandoffService({
       throw new ElFinderHandoffError(
         'elfinder_handoff_path_contract_invalid',
         'Website filesystem root is outside the canonical site workspace',
+        409,
+      );
+    }
+
+    let runtime;
+    try {
+      runtime = await runtimeInspector(Object.freeze({
+        adapter: 'elfinder-fpm',
+        websiteId: normalizedWebsiteId,
+        applicationId,
+        unixUser: expectedUser,
+      }));
+    } catch {
+      throw new ElFinderHandoffError(
+        'elfinder_handoff_runtime_unavailable',
+        'elFinder runtime state could not be verified',
+        503,
+      );
+    }
+    const expectedSocket = `/run/php/yunpanel-elfinder-${expectedUser}.sock`;
+    if (!runtime || runtime.satisfied !== true || runtime.adapter !== 'elfinder-fpm'
+      || runtime.websiteId !== normalizedWebsiteId || runtime.applicationId !== applicationId
+      || runtime.unixUser !== expectedUser || runtime.root !== root
+      || runtime.socketPath !== expectedSocket
+      || runtime.connectorPath !== '/usr/share/yunpanel/elfinder/connector.php'
+      || runtime.runtimeUmask !== '0027') {
+      throw new ElFinderHandoffError(
+        'elfinder_handoff_runtime_not_ready',
+        'Website Files runtime is not ready',
         409,
       );
     }
