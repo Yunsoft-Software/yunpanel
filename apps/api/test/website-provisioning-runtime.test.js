@@ -411,3 +411,13 @@ test('runtime exposes SFTP migration lifecycle only after key-aware SFTP configu
   assert.equal(typeof provisioning.handlers.sftp.inspectMigrationCompensation, 'function');
   assert.equal(typeof provisioning.handlers.sftp.compensateMigration, 'function');
 });
+
+
+test('runtime exposes the PHP pool migration lifecycle on the canonical PHP handler', () => {
+  const provisioning = createWebsiteProvisioningRuntime();
+  assert.equal(typeof provisioning.handlers.php_runtime.previewMigration, 'function');
+  assert.equal(typeof provisioning.handlers.php_runtime.inspectMigrationOperation, 'function');
+  assert.equal(typeof provisioning.handlers.php_runtime.applyMigration, 'function');
+  assert.equal(typeof provisioning.handlers.php_runtime.inspectMigrationCompensation, 'function');
+  assert.equal(typeof provisioning.handlers.php_runtime.compensateMigration, 'function');
+});
