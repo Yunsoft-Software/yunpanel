@@ -274,6 +274,7 @@ export function createDnsZoneReapplyService({
     || !powerDnsSecretRegistry || typeof powerDnsSecretRegistry.materializeForServer !== 'function'
     || (mailIntentResolver !== null && typeof mailIntentResolver?.resolve !== 'function')
     || !zoneManager || typeof zoneManager.getZone !== 'function' || typeof zoneManager.apply !== 'function'
+    || typeof zoneManager.inspectSnapshotRestore !== 'function' || typeof zoneManager.restoreSnapshot !== 'function'
     || typeof localServerId !== 'string' || !localServerId || typeof now !== 'function') {
     throw new DnsZoneReapplyError('dns_zone_reapply_dependencies_invalid', 'DNS zone reapply dependencies are unavailable', 503);
   }
@@ -458,6 +459,47 @@ export function createDnsZoneReapplyService({
     });
   }
 
+  async function rollbackContext(domainId) {
+    const domain = rootDomain(
+      await mapped(() => domainRegistry.getDomain(domainId), 'dns_zone_reapply_domain_unavailable', 'Domain state is unavailable'),
+      localServerId,
+    );
+    const secret = await mapped(
+      () => powerDnsSecretRegistry.materializeForServer(domain.serverId),
+      'dns_zone_reapply_secret_unavailable',
+      'PowerDNS credentials are unavailable',
+    );
+    return Object.freeze({ domain, secret });
+  }
+
+  async function inspectRollback({ domainId, before, after } = {}) {
+    const { domain, secret } = await rollbackContext(domainId);
+    return mapped(
+      () => zoneManager.inspectSnapshotRestore({
+        zoneName: domain.primaryDomain,
+        apiKey: secret.apiKey,
+        before,
+        after,
+      }),
+      'dns_zone_reapply_rollback_inspection_failed',
+      'DNS zone rollback state could not be inspected',
+    );
+  }
+
+  async function rollback({ domainId, before, after } = {}) {
+    const { domain, secret } = await rollbackContext(domainId);
+    return mapped(
+      () => zoneManager.restoreSnapshot({
+        zoneName: domain.primaryDomain,
+        apiKey: secret.apiKey,
+        before,
+        after,
+      }),
+      'dns_zone_reapply_rollback_failed',
+      'DNS zone rollback failed',
+    );
+  }
+
   async function apply({ domainId, previewDigest, confirmation } = {}) {
     if (typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)) {
       throw new DnsZoneReapplyError('dns_zone_reapply_confirmation_invalid', 'A current DNS zone reapply preview digest is required', 409);
@@ -515,7 +557,13 @@ export function createDnsZoneReapplyService({
     });
   }
 
-  return Object.freeze({ preview, captureRollbackSnapshot, apply });
+  return Object.freeze({
+    preview,
+    captureRollbackSnapshot,
+    apply,
+    inspectRollback,
+    rollback,
+  });
 }
 
 export const dnsZoneReapplyInternals = Object.freeze({
