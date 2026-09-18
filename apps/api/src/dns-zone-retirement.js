@@ -12,6 +12,8 @@ const ROOT_ZONE_BLOCKERS = Object.freeze({
   dnssec: 'dns_zone_dnssec_retirement_required',
   retention: 'dns_zone_delete_retention_policy_required',
 });
+const MAX_RETENTION_DAYS = 3650;
+
 
 export class DnsZoneRetirementError extends Error {
   constructor(code, message, status = 400) {
@@ -24,6 +26,27 @@ export class DnsZoneRetirementError extends Error {
 
 function digest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function retentionPolicy(value) {
+  if (value === null || value === undefined) {
+    return Object.freeze({ configured: false, snapshotRetentionDays: null });
+  }
+  const fields = new Set(['snapshotRetentionDays']);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
+    || !Number.isSafeInteger(value.snapshotRetentionDays)
+    || value.snapshotRetentionDays < 1 || value.snapshotRetentionDays > MAX_RETENTION_DAYS) {
+    throw new DnsZoneRetirementError(
+      'dns_zone_retirement_policy_invalid',
+      'DNS zone retirement retention policy is invalid',
+      500,
+    );
+  }
+  return Object.freeze({
+    configured: true,
+    snapshotRetentionDays: value.snapshotRetentionDays,
+  });
 }
 
 function localDomain(domain, localServerId) {
@@ -190,10 +213,17 @@ function routingActive(domain) {
     || ['active', 'staged'].includes(domain.state);
 }
 
-function previewIdentity(domain, relatedDomains, authoritativeZone, ownershipOrigin = null) {
+function previewIdentity(
+  domain,
+  relatedDomains,
+  authoritativeZone,
+  ownershipOrigin = null,
+  rawRetentionPolicy = null,
+) {
   const children = descendants(relatedDomains, domain.id);
   const root = (domain.parentDomainId ?? null) === null;
   const ownership = ownershipOrigin ?? provisioningOwnership(domain, null);
+  const retention = retentionPolicy(rawRetentionPolicy);
   const zoneBase = root ? zoneImpact(authoritativeZone) : Object.freeze({
     exists: false,
     snapshotDigest: null,
@@ -219,7 +249,7 @@ function previewIdentity(domain, relatedDomains, authoritativeZone, ownershipOri
   if (root && zone.exists) {
     if (ownership.status !== 'provisioning_created') {
       blockers.push(ROOT_ZONE_BLOCKERS.ownership);
-    } else {
+    } else if (!retention.configured) {
       blockers.push(ROOT_ZONE_BLOCKERS.retention);
     }
     if (zone.manualRrsetCount > 0) blockers.push(ROOT_ZONE_BLOCKERS.manual);
@@ -251,6 +281,7 @@ function previewIdentity(domain, relatedDomains, authoritativeZone, ownershipOri
       appliedPrimaryDomain: domain.appliedPrimaryDomain ?? null,
     }),
     zone,
+    retention,
     blockers: Object.freeze(blockers),
     retirementPlanReady: blockers.length === 0,
   });
@@ -260,6 +291,7 @@ export function createDnsZoneRetirementService({
   domainRegistry,
   powerDnsSecretRegistry,
   provisioningRegistry = null,
+  retentionPolicy: rawRetentionPolicy = null,
   zoneManager = createPowerDnsZoneManager(),
   localServerId,
 } = {}) {
@@ -275,6 +307,7 @@ export function createDnsZoneRetirementService({
       500,
     );
   }
+  const configuredRetentionPolicy = retentionPolicy(rawRetentionPolicy);
 
   async function preview({ domainId } = {}) {
     const domain = localDomain(await domainRegistry.getDomain(domainId), localServerId);
@@ -336,7 +369,13 @@ export function createDnsZoneRetirementService({
       }
     }
 
-    const identity = previewIdentity(domain, relatedDomains, authoritativeZone, ownershipOrigin);
+    const identity = previewIdentity(
+      domain,
+      relatedDomains,
+      authoritativeZone,
+      ownershipOrigin,
+      configuredRetentionPolicy.configured ? configuredRetentionPolicy : null,
+    );
     const previewDigest = digest(identity);
     if (!SHA256_PATTERN.test(previewDigest)) {
       throw new DnsZoneRetirementError(
@@ -345,10 +384,13 @@ export function createDnsZoneRetirementService({
         503,
       );
     }
+    const confirmation = identity.retirementPlanReady && identity.zone.exists
+      ? `retire-authoritative-zone:${domain.id}:${domain.desiredRevision}:${identity.zone.snapshotDigest}:${identity.zone.ownershipOrigin.evidenceDigest}:${identity.retention.snapshotRetentionDays}:${previewDigest}`
+      : null;
     return Object.freeze({
       ...identity,
       previewDigest,
-      confirmation: null,
+      confirmation,
       sideEffects: false,
     });
   }
@@ -358,7 +400,9 @@ export function createDnsZoneRetirementService({
 
 export const dnsZoneRetirementInternals = Object.freeze({
   rootZoneBlockers: ROOT_ZONE_BLOCKERS,
+  maxRetentionDays: MAX_RETENTION_DAYS,
   digest,
+  retentionPolicy,
   localDomain,
   descendants,
   zoneImpact,
