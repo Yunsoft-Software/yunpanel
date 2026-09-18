@@ -12,6 +12,14 @@ import {
 import { createDnsZoneReapplyRuntime, DnsZoneReapplyRuntimeError } from './dns-zone-reapply-runtime.js';
 import { createDnsZoneReapplyService, DnsZoneReapplyError } from './dns-zone-reapply.js';
 import { createDnsZoneRecordsService, DnsZoneRecordsError } from './dns-zone-records.js';
+import {
+  createDnsZoneRetirementOperationRegistry,
+  DnsZoneRetirementOperationRegistryError,
+} from './dns-zone-retirement-operation-registry.js';
+import {
+  createDnsZoneRetirementRuntime,
+  DnsZoneRetirementRuntimeError,
+} from './dns-zone-retirement-runtime.js';
 import { createDnsZoneRetirementService, DnsZoneRetirementError } from './dns-zone-retirement.js';
 import { createDnsZoneTemplateRegistry, DnsZoneTemplateRegistryError } from './dns-zone-template-registry.js';
 import { createDnsZoneTemplateRollbackService } from './dns-zone-template-rollback.js';
@@ -241,6 +249,11 @@ function zoneReapplyOperationStorePath(env = process.env) {
     ?? path.join(stateRoot(env), 'dns-zone-reapply-operations.json');
 }
 
+function zoneRetirementOperationStorePath(env = process.env) {
+  return env.YUNPANEL_DNS_ZONE_RETIREMENT_OPERATION_STORE
+    ?? path.join(stateRoot(env), 'dns-zone-retirement-operations.json');
+}
+
 function defaultZoneTemplateRegistry(authoritativeService, env = process.env) {
   return createDnsZoneTemplateRegistry({
     filePath: zoneTemplateStorePath(env),
@@ -391,6 +404,28 @@ async function defaultZoneRetirementService(
   });
 }
 
+async function defaultZoneRetirementRuntime({
+  service,
+  env = process.env,
+} = {}) {
+  if (!service || typeof service.preview !== 'function'
+    || typeof service.captureDeletionSnapshot !== 'function'
+    || typeof service.inspectDeletion !== 'function'
+    || typeof service.deleteCapturedSnapshot !== 'function') {
+    throw new PowerDnsHttpError(
+      'dns_zone_retirement_runtime_dependencies_invalid',
+      'DNS zone retirement runtime service is unavailable',
+      503,
+    );
+  }
+  const registry = createDnsZoneRetirementOperationRegistry({
+    filePath: zoneRetirementOperationStorePath(env),
+  });
+  const runtime = createDnsZoneRetirementRuntime({ registry, service });
+  await runtime.init();
+  return runtime;
+}
+
 async function defaultZoneRecordsService(
   authoritativeService,
   domainRegistry = null,
@@ -453,7 +488,9 @@ async function zoneRecordsOperation(operation) {
 async function zoneRetirementOperation(operation) {
   try { return await operation(); }
   catch (error) {
-    if (error instanceof DnsZoneRetirementError) {
+    if (error instanceof DnsZoneRetirementError
+      || error instanceof DnsZoneRetirementRuntimeError
+      || error instanceof DnsZoneRetirementOperationRegistryError) {
       throw new PowerDnsHttpError(error.code, error.message, error.status);
     }
     throw error;
@@ -467,6 +504,7 @@ export function mountPowerDnsRoutes(app, {
   dnsZoneReapplyRuntime = null,
   dnsZoneRecordsService = null,
   dnsZoneRetirementService = null,
+  dnsZoneRetirementRuntime = null,
   domainRegistry = null,
   powerDnsSecretRegistry = null,
   websiteProvisioningRegistry = null,
@@ -511,8 +549,17 @@ export function mountPowerDnsRoutes(app, {
     throw new Error('DNS zone records service is invalid');
   }
 
-  if (dnsZoneRetirementService !== null && typeof dnsZoneRetirementService.preview !== 'function') {
+  if (dnsZoneRetirementService !== null
+    && (typeof dnsZoneRetirementService.preview !== 'function'
+      || typeof dnsZoneRetirementService.captureDeletionSnapshot !== 'function'
+      || typeof dnsZoneRetirementService.inspectDeletion !== 'function'
+      || typeof dnsZoneRetirementService.deleteCapturedSnapshot !== 'function')) {
     throw new Error('DNS zone retirement service is invalid');
+  }
+  if (dnsZoneRetirementRuntime !== null
+    && (typeof dnsZoneRetirementRuntime.get !== 'function'
+      || typeof dnsZoneRetirementRuntime.listForDomain !== 'function')) {
+    throw new Error('DNS zone retirement runtime is invalid');
   }
 
   if (websiteProvisioningRegistry !== null
@@ -573,6 +620,18 @@ export function mountPowerDnsRoutes(app, {
     return defaultRetirementPromise;
   }
 
+  let defaultRetirementRuntimePromise = null;
+  function zoneRetirementRuntime() {
+    if (dnsZoneRetirementRuntime) return Promise.resolve(dnsZoneRetirementRuntime);
+    if (!defaultRetirementRuntimePromise) {
+      defaultRetirementRuntimePromise = zoneRetirementService()
+        .then((service) => defaultZoneRetirementRuntime({ service }));
+      defaultRetirementRuntimePromise.catch(() => { defaultRetirementRuntimePromise = null; });
+    }
+    return defaultRetirementRuntimePromise;
+  }
+  if (!dnsZoneRetirementRuntime) void zoneRetirementRuntime();
+
   const localDkimRetirementDependencies = [
     domainRegistry,
     powerDnsSecretRegistry,
@@ -624,6 +683,41 @@ export function mountPowerDnsRoutes(app, {
     );
     response.set('Cache-Control', 'no-store');
     return response.json({ data: preview });
+  }));
+
+  app.get('/api/domains/:domainId/dns/retirement-operations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    if (Object.keys(request.query ?? {}).length !== 0) {
+      throw new PowerDnsHttpError(
+        'dns_zone_retirement_operation_query_invalid',
+        'DNS zone retirement operation list does not accept query parameters',
+      );
+    }
+    const operations = await zoneRetirementOperation(
+      async () => (await zoneRetirementRuntime()).listForDomain(request.params.domainId),
+    );
+    response.set('Cache-Control', 'no-store');
+    return response.json({ data: operations });
+  }));
+
+  app.get('/api/domains/:domainId/dns/retirement-operations/:operationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    if (Object.keys(request.query ?? {}).length !== 0) {
+      throw new PowerDnsHttpError(
+        'dns_zone_retirement_operation_query_invalid',
+        'DNS zone retirement operation detail does not accept query parameters',
+      );
+    }
+    const operation = await zoneRetirementOperation(
+      async () => (await zoneRetirementRuntime()).get(request.params.operationId),
+    );
+    if (!operation || operation.domainId !== request.params.domainId) {
+      throw new PowerDnsHttpError(
+        'dns_zone_retirement_operation_not_found',
+        'DNS zone retirement operation was not found',
+        404,
+      );
+    }
+    response.set('Cache-Control', 'no-store');
+    return response.json({ data: operation });
   }));
 
   app.get('/api/servers/:serverId/dns/identity', requirePanelRouteAccess, asyncRoute(async (request, response) => {
