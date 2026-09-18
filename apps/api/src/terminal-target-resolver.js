@@ -92,6 +92,8 @@ export async function resolveTerminalTarget(target, {
       home: '/root',
       cwd: '/root',
       env: terminalEnvironment({ user: 'root', home: '/root' }),
+      directFile: SHELL_PATH,
+      directArgs: Object.freeze(['--login']),
     });
   }
 
@@ -110,6 +112,8 @@ export async function resolveTerminalTarget(target, {
     home: account.home,
     cwd: target.cwd,
     env: terminalEnvironment(account),
+    directFile: SHELL_PATH,
+    directArgs: Object.freeze(['--noprofile', '--norc', '-i']),
   });
 }
 
