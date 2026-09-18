@@ -30,8 +30,10 @@ test('production app mounts binding routes and protects schema deletion with the
   const source = await readFile(appUrl, 'utf8');
   assert.match(source, /mountDatabaseBindingRoutes/);
   assert.match(source, /mountWebsiteDatabaseDataRoutes/);
+  assert.match(source, /mountWebsiteDatabaseDeleteRoutes/);
   assert.match(source, /mountDatabaseBindingRoutes\(app, \{[\s\S]*registry: localRegistry,[\s\S]*websiteRegistry,[\s\S]*databaseBindingRegistry/);
   assert.match(source, /mountWebsiteDatabaseDataRoutes\(app, \{[\s\S]*registry: localRegistry,[\s\S]*websiteRegistry,[\s\S]*databaseBindingRegistry,[\s\S]*ensureDatabaseIdle: databaseHttpInternals\.ensureDatabaseIdle/);
+  assert.match(source, /mountWebsiteDatabaseDeleteRoutes\(app, \{[\s\S]*registry: localRegistry,[\s\S]*websiteRegistry,[\s\S]*databaseBindingRegistry,[\s\S]*databaseCredentialRegistry,[\s\S]*databaseInventoryProvider,[\s\S]*ensureDatabaseIdle: databaseHttpInternals\.ensureDatabaseIdle/);
   assert.match(source, /mountDatabaseRoutes\(app, \{[\s\S]*registry: localRegistry,[\s\S]*databaseBindingRegistry,[\s\S]*databaseCredentialRegistry,[\s\S]*databaseInventoryProvider,[\s\S]*databaseHealthProvider,[\s\S]*\}\)/);
   assert.match(source, /DatabaseBindingRegistryError/);
 });
