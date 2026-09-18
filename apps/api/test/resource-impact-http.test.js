@@ -82,6 +82,80 @@ test('Owner receives fail-closed Website and Domain impact previews without a mu
   });
 });
 
+test('production Domain delete impact includes injected authoritative DNS retirement evidence', async () => {
+  const state = await fixture();
+  let calls = 0;
+  const dnsZoneRetirementImpactService = {
+    preview: async ({ domainId }) => {
+      calls += 1;
+      return {
+        version: 1,
+        operation: 'dns_zone_retirement_impact',
+        domain: { id: domainId, serverId: state.domain.serverId, primaryDomain: state.domain.primaryDomain },
+        hierarchy: { descendantCount: 0, descendants: [] },
+        routing: {
+          active: false,
+          stagedRevision: 0,
+          appliedRevision: 0,
+          appliedPrimaryDomain: null,
+        },
+        zone: {
+          exists: true,
+          snapshotDigest: 'a'.repeat(64),
+          kind: 'Primary',
+          dnssec: false,
+          rrsetCount: 4,
+          managedRrsetCount: 4,
+          manualRrsetCount: 0,
+          ownership: 'provisioning_created',
+          ownershipOrigin: {
+            status: 'provisioning_created',
+            operationId: '52345678-1234-4234-8234-123456789012',
+            updatedAt: '2026-09-18T16:00:00.000Z',
+            evidenceDigest: 'b'.repeat(64),
+          },
+        },
+        blockers: ['dns_zone_delete_retention_policy_required'],
+        retirementPlanReady: false,
+        previewDigest: 'c'.repeat(64),
+        confirmation: null,
+        sideEffects: false,
+      };
+    },
+  };
+  const app = withPanelContext(createApp({
+    ...state,
+    environment: 'production',
+    dnsZoneRetirementImpactService,
+  }), ownerManagementContext);
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(
+      baseUrl,
+      `/api/domains/${state.domain.id}/impact-preview`,
+      { operation: 'delete' },
+    );
+    assert.equal(response.status, 200);
+    const preview = (await response.json()).data;
+    assert.equal(calls, 1);
+    assert.deepEqual(preview.dependencies.authoritativeDns, {
+      status: 'available',
+      items: [{
+        domainId: state.domain.id,
+        state: 'blocked',
+        previewDigest: 'c'.repeat(64),
+        zoneSnapshotDigest: 'a'.repeat(64),
+        blockers: ['dns_zone_delete_retention_policy_required'],
+      }],
+    });
+    assert.ok(preview.blockers.some((item) => (
+      item.code === 'authoritative_dns_retirement_blocked'
+      && item.resourceType === 'authoritative_dns'
+      && item.count === 1
+    )));
+  });
+});
+
 test('anonymous and Read Only requests cannot enter impact preview POST routes', async () => {
   const state = await fixture();
   await withServer(createApp({ ...state, environment: 'production' }), async (baseUrl) => {
