@@ -287,3 +287,64 @@ test('Passenger Website apply installs shared Passenger before proving site read
     'node:node',
   ]);
 });
+
+
+test('Passenger migration preview snapshots runtime, identity, Node candidates and active release without apply', async () => {
+  const fs = readyFilesystem();
+  let applyCalls = 0;
+  const manager = createPassengerSiteManager({
+    websiteIdentityManager: healthyWebsiteIdentityManager(),
+    passengerManager: {
+      inspect: async () => healthyPassenger(),
+      apply: async () => { applyCalls += 1; return healthyPassenger(); },
+    },
+    run: async (file) => {
+      if (file === managedNode) return { stdout: 'v24.11.1\n' };
+      throw enoent();
+    },
+    ...fs,
+  });
+
+  const preview = await manager.previewMigration(intent());
+
+  assert.equal(preview.version, 1);
+  assert.equal(preview.adapter, 'passenger');
+  assert.equal(preview.satisfied, true);
+  assert.deepEqual(preview.current.passenger, {
+    healthy: true,
+    installedVersion: '6.0.27-1~noble1',
+  });
+  assert.equal(preview.current.identity.homeMode, '0750');
+  assert.deepEqual(preview.current.nodeCandidates, [
+    { path: managedNode, available: true, version: 'v24.11.1', matchesRequestedMajor: true },
+    { path: '/usr/bin/node', available: false, version: null, matchesRequestedMajor: false },
+  ]);
+  assert.equal(preview.current.currentReleaseTarget, `releases/${releaseId}`);
+  assert.equal(preview.current.release.releaseId, releaseId);
+  assert.equal(preview.desired.currentRoot, currentRoot);
+  assert.equal(preview.desired.unixUser, nodeApplicationUser(applicationId));
+  assert.deepEqual(preview.differences, []);
+  assert.equal(applyCalls, 0);
+});
+
+test('Passenger migration preview exposes release escape as bounded drift without mutation', async () => {
+  const fs = readyFilesystem({ current: '/tmp/escaped-release' });
+  let applyCalls = 0;
+  const manager = createPassengerSiteManager({
+    websiteIdentityManager: healthyWebsiteIdentityManager(),
+    passengerManager: {
+      inspect: async () => healthyPassenger(),
+      apply: async () => { applyCalls += 1; return healthyPassenger(); },
+    },
+    run: async (file) => file === managedNode ? { stdout: 'v24.11.1\n' } : Promise.reject(enoent()),
+    ...fs,
+  });
+
+  const preview = await manager.previewMigration(intent());
+
+  assert.equal(preview.satisfied, false);
+  assert.equal(preview.current.currentReleaseTarget, `releases/${releaseId}`);
+  assert.equal(preview.current.release, null);
+  assert.equal(preview.differences.includes('passenger_site_release_escape'), true);
+  assert.equal(applyCalls, 0);
+});
