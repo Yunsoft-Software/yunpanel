@@ -76,6 +76,20 @@ const SERVICE_CATALOG = Object.freeze([
     ],
   }),
   service({
+    id: 'elfinder',
+    label: 'elFinder',
+    category: 'file_tool',
+    packages: ['php-fpm', 'php-mbstring', 'php-zip'],
+    units: [],
+    configurationChecks: [
+      { file: '/usr/bin/test', args: ['-f', '/usr/share/yunpanel/elfinder/VERSION'] },
+      { file: '/usr/bin/test', args: ['-f', '/usr/share/yunpanel/elfinder/vendor/elfinder/elfinder.html'] },
+      { file: '/usr/bin/test', args: ['-f', '/usr/share/yunpanel/elfinder/vendor/elfinder/php/autoload.php'] },
+      { file: '/usr/bin/test', args: ['-f', '/usr/share/yunpanel/elfinder/connector.php'] },
+      { file: '/usr/bin/php', args: ['-l', '/usr/share/yunpanel/elfinder/connector.php'] },
+    ],
+  }),
+  service({
     id: 'postsrsd', label: 'PostSRSd', category: 'mail', packages: ['postsrsd'], units: ['postsrsd.service'],
   }),
 ]);
