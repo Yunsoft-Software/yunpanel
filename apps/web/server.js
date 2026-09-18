@@ -475,6 +475,131 @@ function proxyPhpMyAdmin(request, response, {
   request.pipe(upstream);
 }
 
+function rewriteElFinderLocation(value) {
+  if (typeof value !== 'string' || !value.startsWith('/')) return value;
+  if (value === ELFINDER_PREFIX || value.startsWith(`${ELFINDER_PREFIX}/`)) return value;
+  return `${ELFINDER_PREFIX}${value}`;
+}
+
+function resolveElFinderGatewayBundle(request, { sessions, publicOrigin }) {
+  const authDigest = panelSessionDigest(request);
+  if (!authDigest) return null;
+  const token = readSingleCookie(request, elFinderSessionCookieName(publicOrigin));
+  if (!token) return null;
+  return sessions.resolve(token, authDigest);
+}
+
+async function establishElFinderGatewaySession(request, response, {
+  sessions, publicOrigin, handoffSocketPath,
+}) {
+  if (request.method !== 'POST') {
+    throw new ElFinderGatewayError(405, 'elfinder_gateway_method_not_allowed', 'Use POST.');
+  }
+  if (!sameOriginMutation(request, publicOrigin)) {
+    throw new ElFinderGatewayError(
+      403,
+      'elfinder_gateway_origin_forbidden',
+      'Cross-origin elFinder handoff is not allowed.',
+    );
+  }
+  const authDigest = panelSessionDigest(request);
+  if (!authDigest) {
+    throw new ElFinderGatewayError(
+      401,
+      'elfinder_gateway_session_missing',
+      'Authentication required.',
+    );
+  }
+  const capability = await readElFinderHandoffBody(request);
+  const bundle = await consumeElFinderHandoff(capability, { handoffSocketPath });
+  const session = sessions.issue(bundle, authDigest);
+  response.writeHead(204, {
+    'cache-control': 'no-store',
+    'set-cookie': elFinderSessionCookie(session, publicOrigin),
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+  });
+  response.end();
+}
+
+function proxyElFinder(request, response, {
+  elFinderSocketPath, publicOrigin, bundle = null,
+}) {
+  if (!sameOriginMutation(request, publicOrigin)) {
+    reply(response, 403, 'Cross-origin elFinder mutations are not allowed.');
+    return;
+  }
+  if (!['GET', 'HEAD', 'POST'].includes(request.method ?? '')) {
+    reply(response, 405, 'Method not allowed.');
+    return;
+  }
+
+  const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
+  const upstreamPath = requestUrl.pathname.slice(ELFINDER_PREFIX.length) || '/';
+  if (!upstreamPath.startsWith('/') || upstreamPath.includes('..')) {
+    reply(response, 404, 'Not found.');
+    return;
+  }
+  const connector = upstreamPath === '/connector.php';
+  if (request.method === 'POST' && !connector) {
+    reply(response, 405, 'Method not allowed.');
+    return;
+  }
+  if (connector && !validElFinderBundle(bundle)) {
+    reply(response, 401, 'Open Website Files from YunPanel again.');
+    return;
+  }
+
+  const publicUrl = new URL(publicOrigin);
+  const headers = browserProxyHeaders(request);
+  delete headers.cookie;
+  headers.host = publicUrl.host;
+  headers['x-forwarded-proto'] = publicUrl.protocol.slice(0, -1);
+  headers['x-forwarded-host'] = publicUrl.host;
+  headers['x-forwarded-prefix'] = `${ELFINDER_PREFIX}/`;
+  if (connector) {
+    headers['x-yunpanel-elfinder-unix-user'] = bundle.unixUser;
+    headers['x-yunpanel-elfinder-website-id'] = bundle.websiteId;
+    headers['x-yunpanel-elfinder-application-id'] = bundle.applicationId;
+  }
+
+  const upstream = http.request({
+    socketPath: elFinderSocketPath,
+    method: request.method,
+    path: `${upstreamPath}${requestUrl.search}`,
+    headers,
+  }, (upstreamResponse) => {
+    const responseHeaders = {};
+    for (const [name, value] of Object.entries(upstreamResponse.headers)) {
+      if (HOP_BY_HOP_HEADERS.has(name) || value === undefined || name === 'set-cookie') continue;
+      responseHeaders[name] = name === 'location' ? rewriteElFinderLocation(value) : value;
+    }
+    responseHeaders['cache-control'] = 'no-store';
+    responseHeaders['x-robots-tag'] = 'noindex, nofollow, noarchive';
+    responseHeaders['x-frame-options'] = 'SAMEORIGIN';
+    responseHeaders['content-security-policy'] = [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "connect-src 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join('; ');
+    response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+    upstreamResponse.pipe(response);
+  });
+  upstream.setTimeout(120_000, () => upstream.destroy(new Error('elFinder upstream timeout')));
+  upstream.once('error', () => {
+    if (!response.headersSent) reply(response, 503, 'elFinder is unavailable.');
+    else response.destroy();
+  });
+  request.once('aborted', () => upstream.destroy());
+  request.pipe(upstream);
+}
+
 function isTransportPath(pathname) {
   return pathname === '/api/servers/enroll'
     || /^\/api\/servers\/[^/]+\/(?:heartbeat|commands(?:\/|$)|applications\/[^/]+\/environment$)/.test(pathname);
