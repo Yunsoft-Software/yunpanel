@@ -56,14 +56,22 @@ test('Website database restore selects scoped backup evidence and applies an exa
   assert.doesNotMatch(panel, /createDatabaseBackup\(|previewDatabaseRestore\(|restoreDatabase\(/);
 });
 
-test('Website database drop remains a read-only blocker preview without implicit cascade', async () => {
+test('Website database delete uses scoped preview, durable DROP and evidence-gated binding finalization', async () => {
   const panel = await readFile(new URL('../src/workspace/SiteResourcesPanel.jsx', import.meta.url), 'utf8');
-  assert.match(panel, /getDatabaseDropPreview/);
-  assert.match(panel, /databaseDropPreviewView/);
+  assert.match(panel, /getWebsiteDatabaseDeletePreview/);
+  assert.match(panel, /websiteDatabaseDeletePreviewView/);
+  assert.match(panel, /deleteWebsiteDatabase/);
+  assert.match(panel, /finalizeWebsiteDatabaseDelete/);
+  assert.match(panel, /waitForJob\(deleteJob\.id\)/);
+  assert.match(panel, /deleteJob\.status === 'succeeded'/);
+  assert.match(panel, /Kör replay yapılmadı/);
   assert.match(panel, /Silme önizleme/);
-  assert.match(panel, /Bu salt-okunur preview hiçbir kaynağı silmez/);
-  assert.match(panel, /database_delete_safety_chain_pending/);
-  assert.doesNotMatch(panel, /deleteDatabase\(/);
+  assert.match(panel, /Silme onayına geç/);
+  assert.match(panel, /confirmation=\{deleteTarget\.databaseName\}/);
+  assert.match(panel, /current binding revizyonuna ait doğrulanmış/);
+  assert.match(panel, /Binding finalization’ı yeniden dene/);
+  assert.doesNotMatch(panel, /getDatabaseDropPreview|databaseDropPreviewView|database_delete_safety_chain_pending/);
+  assert.doesNotMatch(panel, /window\.(?:prompt|confirm|alert)/);
 });
 
 
