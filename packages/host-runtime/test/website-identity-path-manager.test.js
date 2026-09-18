@@ -31,13 +31,28 @@ function baseIdentity(overrides = {}) {
   });
 }
 
-function fakeIdentityManager({ created = true, inspection = baseIdentity() } = {}) {
+function fakeIdentityManager({
+  created = true,
+  inspection = baseIdentity(),
+  migrationPreview = {
+    version: 1,
+    satisfied: true,
+    safeCreateCandidate: false,
+    current: { account: { uid: 1201, gid: 1201 }, group: { gid: 1201, memberCount: 0 }, home: { uid: 1201, gid: 1201, mode: '0750' } },
+    desired: { user: baseIntent.user, homeDirectory: baseIntent.homeDirectory },
+    differences: [],
+  },
+} = {}) {
   const calls = [];
   return {
     calls,
     inspect: async (intent) => {
       calls.push(['inspect', intent]);
       return inspection;
+    },
+    previewMigration: async (intent) => {
+      calls.push(['previewMigration', intent]);
+      return migrationPreview;
     },
     apply: async (intent, options) => {
       calls.push(['apply', intent, options]);
@@ -427,5 +442,36 @@ test('workspace-only migration requires an already-satisfied canonical Unix iden
     (error) => error instanceof WebsiteIdentityPathManagerError
       && error.code === 'website_identity_workspace_identity_required',
   );
+  assert.deepEqual(workspace.calls, []);
+});
+
+
+test('path-bound migration preview delegates read-only identity evidence and adds canonical path contract', async () => {
+  const identityManager = fakeIdentityManager({
+    migrationPreview: {
+      version: 1,
+      satisfied: false,
+      safeCreateCandidate: true,
+      current: { account: null, group: null, home: null },
+      desired: { user: baseIntent.user, homeDirectory: baseIntent.homeDirectory },
+      differences: ['website_identity_user_missing'],
+    },
+  });
+  const workspace = fakeWorkspace();
+  const manager = createWebsiteIdentityPathManager({
+    identityManager,
+    run: workspace.run,
+    lstatFn: workspace.lstatFn,
+  });
+
+  const preview = await manager.previewMigration(boundIntent);
+
+  assert.equal(preview.safeCreateCandidate, true);
+  assert.deepEqual(preview.differences, ['website_identity_user_missing']);
+  assert.equal(preview.pathContract.websiteId, websiteId);
+  assert.equal(preview.pathContract.applicationId, applicationId);
+  assert.equal(preview.pathContract.workspace.homeDirectory, baseIntent.homeDirectory);
+  assert.equal(preview.pathContract.backup.authority, 'control_plane');
+  assert.deepEqual(identityManager.calls, [['previewMigration', baseIntent]]);
   assert.deepEqual(workspace.calls, []);
 });
