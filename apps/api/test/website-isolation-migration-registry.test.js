@@ -10,6 +10,7 @@ import {
 } from '../src/website-isolation-migration-registry.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
+const sourceOperationId = '4d7d1c87-c088-4c1d-bb44-7f370d315672';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 const applicationUser = 'yunapp-4dc352e64a14';
@@ -150,6 +151,7 @@ function phpAudit() {
         action: 'create_php_fpm_pool',
         applyState: 'requires_explicit_apply',
         current: {
+          operationId: sourceOperationId,
           phpRuntimeMigrationPreview: {
             version: 1,
             adapter: 'php-runtime',
@@ -361,6 +363,7 @@ test('isolation migration registry journals typed PHP pool ownership and rollbac
 
   const created = await store.create(phpAudit());
   assert.equal(created.intent.adapter, 'php');
+  assert.equal(created.intent.sourceOperationId, sourceOperationId);
   assert.deepEqual(created.intent.targets, []);
 
   await store.markApplying(operationId);
