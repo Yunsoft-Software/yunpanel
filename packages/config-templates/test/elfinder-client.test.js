@@ -7,16 +7,16 @@ import {
   renderElFinderClientScript,
 } from '../src/elfinder-client.js';
 
-test('elFinder browser shell loads only same-origin local assets', () => {
+test('elFinder browser shell exposes only the minimal same-origin bootstrap before handoff', () => {
   const html = renderElFinderClientIndex();
+  assert.ok(html.includes('/tools/elfinder/yunpanel-client.js'));
   for (const path of [
     '/tools/elfinder/assets/jquery/jquery.min.js',
     '/tools/elfinder/assets/jquery-ui/jquery-ui.min.js',
     '/tools/elfinder/assets/jquery-ui/jquery-ui.min.css',
     '/tools/elfinder/vendor/js/elfinder.min.js',
     '/tools/elfinder/vendor/css/elfinder.min.css',
-    '/tools/elfinder/yunpanel-client.js',
-  ]) assert.ok(html.includes(path), path);
+  ]) assert.equal(html.includes(path), false, path);
   assert.doesNotMatch(html, /https?:\/\/|\/\/code\.jquery|cdnjs|jsdelivr/i);
   assert.match(html, /noindex,nofollow,noarchive/);
 });
@@ -31,6 +31,15 @@ test('elFinder client points only at protected connector and disables external p
   assert.match(script, /credentials: 'same-origin'/);
   assert.match(script, /body: JSON\.stringify\(\{ capability \}\)/);
   assert.match(script, /response\.status !== 204/);
+  assert.match(script, /loadApplicationAssets/);
+  for (const path of [
+    '/tools/elfinder/assets/jquery/jquery.min.js',
+    '/tools/elfinder/assets/jquery-ui/jquery-ui.min.js',
+    '/tools/elfinder/assets/jquery-ui/jquery-ui.min.css',
+    '/tools/elfinder/vendor/js/elfinder.min.js',
+    '/tools/elfinder/vendor/css/elfinder.min.css',
+  ]) assert.ok(script.includes(path), path);
+  assert.match(script, /await loadApplicationAssets\(\);\s*start\(\);/);
   assert.doesNotMatch(script, /[?&]handoff=/);
   assert.match(script, /sharecadMimes: \[\]/);
   assert.match(script, /googleDocsMimes: \[\]/);
