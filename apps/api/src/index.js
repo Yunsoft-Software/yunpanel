@@ -133,6 +133,10 @@ const authStorePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(ser
 const internalProxyToken = process.env.YUNPANEL_INTERNAL_PROXY_TOKEN;
 const publicOrigin = process.env.YUNPANEL_PUBLIC_ORIGIN ?? (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:5173' : undefined);
 const localServerId = process.env.YUNPANEL_LOCAL_SERVER_ID?.trim() || null;
+const dnsZoneRetentionDaysRaw = process.env.YUNPANEL_DNS_ZONE_SNAPSHOT_RETENTION_DAYS?.trim() || null;
+const dnsZoneSnapshotRetentionDays = dnsZoneRetentionDaysRaw === null
+  ? null
+  : Number.parseInt(dnsZoneRetentionDaysRaw, 10);
 const certificateRenewalIntervalMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS ?? `${6 * 60 * 60 * 1000}`, 10);
 const certificateRenewBeforeMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEW_BEFORE_MS ?? `${30 * 24 * 60 * 60 * 1000}`, 10);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('YUNPANEL_API_PORT must be a valid TCP port');
@@ -141,6 +145,13 @@ if (process.env.NODE_ENV !== 'development' && !/^[A-Za-z0-9_-]{43}$/.test(intern
 }
 if (process.env.NODE_ENV !== 'development' && !localServerId) {
   throw new Error('YUNPANEL_LOCAL_SERVER_ID is required in production');
+}
+if (dnsZoneRetentionDaysRaw !== null
+  && (!/^[1-9]\d*$/.test(dnsZoneRetentionDaysRaw)
+    || !Number.isSafeInteger(dnsZoneSnapshotRetentionDays)
+    || dnsZoneSnapshotRetentionDays < 1
+    || dnsZoneSnapshotRetentionDays > 3650)) {
+  throw new Error('YUNPANEL_DNS_ZONE_SNAPSHOT_RETENTION_DAYS must be an integer between 1 and 3650');
 }
 
 function reportLocalExecutorFault(error) {
@@ -530,6 +541,9 @@ const listener = createAuthenticatedApi({
         powerDnsAuthoritativeService,
         powerDnsSecretRegistry,
       } : {}),
+      ...(dnsZoneSnapshotRetentionDays === null ? {} : {
+        dnsZoneRetirementPolicy: { snapshotRetentionDays: dnsZoneSnapshotRetentionDays },
+      }),
       mailDomainRegistry,
       mailDkimRegistry,
       mailDkimRetirementRegistry,
