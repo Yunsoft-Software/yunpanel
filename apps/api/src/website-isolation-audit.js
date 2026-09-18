@@ -46,6 +46,14 @@ function boundedText(value, maxLength = 1024) {
     : null;
 }
 
+function boundedPathWithin(value, root) {
+  return boundedText(value) !== null
+    && boundedText(root) !== null
+    && value.startsWith('/')
+    && root.startsWith('/')
+    && (value === root || value.startsWith(`${root}/`));
+}
+
 function boundedIdentityMigrationPreview(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.version !== 1
@@ -290,8 +298,8 @@ function boundedPassengerMigrationPreview(value, { applicationId, identity } = {
     || !Number.isInteger(value.desired.nodeMajor) || value.desired.nodeMajor < 20 || value.desired.nodeMajor > 40
     || !Array.isArray(value.desired.nodeCandidates) || value.desired.nodeCandidates.length < 1 || value.desired.nodeCandidates.length > 3
     || value.desired.nodeCandidates.some((candidate) => boundedText(candidate, 512) === null || !candidate.startsWith('/'))
-    || boundedText(value.desired.appRoot) === null || !value.desired.appRoot.startsWith(value.desired.currentRoot)
-    || boundedText(value.desired.documentRoot) === null || !value.desired.documentRoot.startsWith(value.desired.appRoot)
+    || !boundedPathWithin(value.desired.appRoot, value.desired.currentRoot)
+    || !boundedPathWithin(value.desired.documentRoot, value.desired.appRoot)
     || boundedText(value.desired.startupFile, 240) === null || value.desired.startupFile.startsWith('/')) {
     return null;
   }
@@ -770,6 +778,7 @@ export const websiteIsolationAuditInternals = Object.freeze({
   valueDigest,
   migrationChange,
   workspaceDirectories,
+  boundedPathWithin,
   boundedIdentityMigrationPreview,
   inspectIdentityMigrationPreview,
   boundedSftpMigrationPreview,
