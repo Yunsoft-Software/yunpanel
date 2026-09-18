@@ -151,8 +151,50 @@ test('isolated provisioning handler set exposes elFinder with the injected per-W
     },
   };
   const policy = umask();
+  const sharedCalls = [];
+  const gatewayCalls = [];
   const handlers = createWebsiteProvisioningHandlers({
     elFinderFpmSiteManager: fpmManager,
+    elFinderSharedApplicationManager: {
+      async install(id) {
+        sharedCalls.push(['install', id]);
+        return {
+          id,
+          installed: true,
+          units: [],
+          health: { status: 'installed', configuration: 'valid' },
+        };
+      },
+      async inspect(id) {
+        sharedCalls.push(['inspect', id]);
+        return {
+          id,
+          installed: true,
+          units: [],
+          health: { status: 'installed', configuration: 'valid' },
+        };
+      },
+    },
+    elFinderGatewayManager: {
+      async apply() {
+        gatewayCalls.push('apply');
+        return {
+          satisfied: true,
+          adapter: 'elfinder-nginx-gateway',
+          gatewaySocketPath: '/run/yunpanel/elfinder-http.sock',
+          configSha256: 'a'.repeat(64),
+        };
+      },
+      async inspect() {
+        gatewayCalls.push('inspect');
+        return {
+          satisfied: true,
+          adapter: 'elfinder-nginx-gateway',
+          gatewaySocketPath: '/run/yunpanel/elfinder-http.sock',
+          configSha256: 'a'.repeat(64),
+        };
+      },
+    },
     serviceUmaskManager: policy.manager,
   });
   const context = {
@@ -169,5 +211,7 @@ test('isolated provisioning handler set exposes elFinder with the injected per-W
   assert.equal(result.satisfied, true);
   assert.equal(result.runtimeUmask, '0027');
   assert.deepEqual(calls.map(([name]) => name), ['apply', 'inspect']);
+  assert.deepEqual(sharedCalls, [['install', 'elfinder']]);
+  assert.deepEqual(gatewayCalls, ['apply']);
   assert.deepEqual(policy.calls, [['apply', 'php']]);
 });
