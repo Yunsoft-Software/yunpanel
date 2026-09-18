@@ -589,6 +589,33 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
   assert.equal(missingToolSession.status, 401);
   assert.equal(vendorRequests.length, 1);
 
+  const missingVendorSession = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/elfinder/vendor/js/elfinder.min.js`,
+    {
+      headers: {
+        'x-real-ip': '203.0.113.8',
+        cookie: '__Host-yunpanel_session=owner',
+      },
+    },
+  );
+  assert.equal(missingVendorSession.status, 401);
+  assert.equal(vendorRequests.length, 1);
+
+  const vendorAsset = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/elfinder/vendor/js/elfinder.min.js`,
+    {
+      headers: {
+        'x-real-ip': '203.0.113.8',
+        cookie: `__Host-yunpanel_session=owner; ${toolCookie}`,
+      },
+    },
+  );
+  assert.equal(vendorAsset.status, 200);
+  assert.equal(vendorRequests.length, 2);
+  assert.equal(vendorRequests[1].url, '/vendor/js/elfinder.min.js');
+  assert.equal(vendorRequests[1].unixUser, undefined);
+  assert.equal(vendorRequests[1].cookie, undefined);
+
   const wrongPanelSession = await fetch(
     `http://127.0.0.1:${panelPort}/tools/elfinder/connector.php`,
     {
@@ -603,7 +630,7 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
     },
   );
   assert.equal(wrongPanelSession.status, 403);
-  assert.equal(vendorRequests.length, 1);
+  assert.equal(vendorRequests.length, 2);
 
   assert.ok(accessRequests.length >= 4);
   assert.ok(accessRequests.every((entry) => entry.url === '/api/elfinder-gateway-access'));
