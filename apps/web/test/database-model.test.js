@@ -331,11 +331,14 @@ test('Website database delete preview requires exact current ownership and backu
       dumpBytes: 4096,
       createdAt: '2026-09-18T00:00:00.000Z',
     },
+    completedDelete: null,
     activeJobs: [],
     blockers: [],
     readyToDelete: true,
+    readyToFinalize: false,
     previewDigest,
     confirmation: `delete-website-database:${bindingId}:7:${previewDigest}`,
+    finalizeConfirmation: null,
     sideEffects: false,
   };
   const expected = {
@@ -387,6 +390,7 @@ test('Website database delete preview validates blockers against live state', ()
       revision: 3,
     },
     backup: null,
+    completedDelete: null,
     activeJobs: [{
       id: '62345678-1234-4234-8234-123456789012',
       operation: 'database.restore',
@@ -398,8 +402,10 @@ test('Website database delete preview validates blockers against live state', ()
       'database_job_active',
     ],
     readyToDelete: false,
+    readyToFinalize: false,
     previewDigest,
     confirmation: null,
+    finalizeConfirmation: null,
     sideEffects: false,
   };
   const expected = {
@@ -418,6 +424,71 @@ test('Website database delete preview validates blockers against live state', ()
   assert.equal(websiteDatabaseDeletePreviewView({
     ...input,
     blockers: ['database_credential_exists'],
+  }, expected), null);
+});
+
+test('Website database delete preview resumes finalization from exact successful DROP evidence', () => {
+  const websiteId = '22345678-1234-4234-8234-123456789012';
+  const applicationId = '32345678-1234-4234-8234-123456789012';
+  const bindingId = '42345678-1234-4234-8234-123456789012';
+  const deleteJobId = '52345678-1234-4234-8234-123456789012';
+  const backupId = '62345678-1234-4234-8234-123456789012';
+  const previewDigest = 'd'.repeat(64);
+  const input = {
+    version: 1,
+    operation: 'website_database_delete',
+    scope: {
+      serverId,
+      websiteId,
+      applicationId,
+      databaseBindingId: bindingId,
+      bindingRevision: 7,
+      databaseName: 'app_main',
+    },
+    exists: false,
+    credential: null,
+    backup: null,
+    completedDelete: {
+      jobId: deleteJobId,
+      backupId,
+      backupSha256: 'a'.repeat(64),
+      finishedAt: '2026-09-18T00:05:00.000Z',
+    },
+    activeJobs: [],
+    blockers: [],
+    readyToDelete: false,
+    readyToFinalize: true,
+    previewDigest,
+    confirmation: null,
+    finalizeConfirmation: `finalize-website-database-delete:${bindingId}:7:${deleteJobId}`,
+    sideEffects: false,
+  };
+  const expected = {
+    serverId,
+    websiteId,
+    applicationId,
+    bindingId,
+    bindingRevision: 7,
+    databaseName: 'app_main',
+  };
+
+  const view = websiteDatabaseDeletePreviewView(input, expected);
+  assert.equal(view.readyToFinalize, true);
+  assert.equal(view.completedDelete.jobId, deleteJobId);
+  assert.equal(view.finalizeConfirmation, input.finalizeConfirmation);
+
+  assert.equal(websiteDatabaseDeletePreviewView({
+    ...input,
+    completedDelete: { ...input.completedDelete, backupSha256: 'bad' },
+  }, expected), null);
+  assert.equal(websiteDatabaseDeletePreviewView({
+    ...input,
+    readyToFinalize: false,
+    finalizeConfirmation: null,
+  }, expected), null);
+  assert.equal(websiteDatabaseDeletePreviewView({
+    ...input,
+    finalizeConfirmation: `finalize-website-database-delete:${bindingId}:7:wrong-job`,
   }, expected), null);
 });
 
