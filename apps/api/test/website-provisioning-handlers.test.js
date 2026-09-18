@@ -59,6 +59,14 @@ function passengerSiteManager() {
   return {
     apply: async () => ({ satisfied: true, adapter: 'passenger' }),
     inspect: async () => ({ satisfied: true, adapter: 'passenger' }),
+    previewMigration: async () => ({
+      version: 1,
+      adapter: 'passenger',
+      satisfied: true,
+      current: {},
+      desired: {},
+      differences: [],
+    }),
   };
 }
 
@@ -189,6 +197,10 @@ test('Passenger runtime handler delegates exact orchestration intent to host run
   const passenger = {
     apply: async (input) => { calls.push(['apply', input]); return { satisfied: true, adapter: 'passenger', nodeBinary: input.nodeCandidates[0] }; },
     inspect: async (input) => { calls.push(['inspect', input]); return { satisfied: true, adapter: 'passenger', nodeBinary: input.nodeCandidates[0] }; },
+    previewMigration: async (input) => {
+      calls.push(['preview-migration', input]);
+      return { version: 1, adapter: 'passenger', satisfied: true, current: {}, desired: {}, differences: [] };
+    },
   };
   const handlers = createWebsiteProvisioningHandlers({
     identityManager: identityManager(),
@@ -198,9 +210,11 @@ test('Passenger runtime handler delegates exact orchestration intent to host run
 
   await handlers.runtime.apply({ intent: passengerIntent });
   await handlers.runtime.inspect({ intent: passengerIntent });
+  await handlers.runtime.previewMigration({ intent: passengerIntent });
   assert.deepEqual(calls, [
     ['apply', passengerIntent],
     ['inspect', passengerIntent],
+    ['preview-migration', passengerIntent],
   ]);
 });
 
