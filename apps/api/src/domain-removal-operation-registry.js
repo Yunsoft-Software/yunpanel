@@ -124,10 +124,11 @@ function normalizedPlan(value) {
     || Object.keys(value).some((field) => !fields.has(field))) {
     throw invalid('Domain removal operation plan is invalid');
   }
-  const ids = (items, field) => {
+  const ids = (items, field, { preserveOrder = false } = {}) => {
     if (!Array.isArray(items) || items.length > 500) throw invalid(`${field} plan is invalid`);
-    const normalized = items.map((item) => safeId(item, field)).sort();
+    const normalized = items.map((item) => safeId(item, field));
     if (new Set(normalized).size !== normalized.length) throw invalid(`${field} plan has duplicates`);
+    if (!preserveOrder) normalized.sort();
     return Object.freeze(normalized);
   };
   const optionalId = (item, field) => item === null || item === undefined
@@ -182,7 +183,7 @@ function normalizedPlan(value) {
     });
   }
   return Object.freeze({
-    childDomainIds: ids(value.childDomainIds, 'childDomainId'),
+    childDomainIds: ids(value.childDomainIds, 'childDomainId', { preserveOrder: true }),
     websiteId: optionalId(value.websiteId, 'websiteId'),
     applicationId: optionalId(value.applicationId, 'applicationId'),
     managedComposeProjectId: optionalId(value.managedComposeProjectId, 'managedComposeProjectId'),
