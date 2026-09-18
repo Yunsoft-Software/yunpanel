@@ -610,7 +610,9 @@ export default function SiteResourcesPanel({ domain, website, application, serve
       ]} />
       {dropImpact.readyToDelete
         ? <div className="ws-notice" role="status"><div><strong>Silme önkoşulları hazır</strong><p>Credential kaldırılmış ve current binding revizyonuna ait doğrulanmış backup mevcut. DROP job sırasında binding korunur; binding yalnız başarılı job ve canlı schema yokluğu doğrulandıktan sonra finalize edilir.</p></div></div>
-        : <div className="ws-notice ws-notice-warn" role="status"><div><strong>Silme engelli</strong><p>Bu preview hiçbir kaynağı silmez. Aşağıdaki blocker’lar çözülmeden DROP job oluşturulmaz.</p></div></div>}
+        : dropImpact.readyToFinalize
+          ? <div className="ws-notice" role="status"><div><strong>DROP tamamlandı, binding finalization bekliyor</strong><p>Schema artık hostta yok ve exact scoped delete job kanıtlandı. Yeni DROP kuyruğa alınmadan yalnız Website binding finalization tamamlanacak.</p></div></div>
+          : <div className="ws-notice ws-notice-warn" role="status"><div><strong>Silme engelli</strong><p>Bu preview hiçbir kaynağı silmez. Aşağıdaki blocker’lar çözülmeden DROP job oluşturulmaz.</p></div></div>}
       {dropImpact.blockers.length > 0 && <ul>{dropImpact.blockers.map((code) => <li key={code}><strong>{code}</strong>: {DELETE_BLOCKER_LABELS[code]}</li>)}</ul>}
       {dropImpact.activeJobs.length > 0 && <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>İş</th><th>Operation</th><th>Durum</th></tr></thead><tbody>{dropImpact.activeJobs.map((job) => <tr key={job.id}><td><code>{job.id}</code></td><td>{job.operation}</td><td><Badge state={job.status}>{job.status}</Badge></td></tr>)}</tbody></table></div>}
       <footer className="ws-modal-footer">
@@ -624,18 +626,34 @@ export default function SiteResourcesPanel({ domain, website, application, serve
             setDropImpact(null);
           }}
         >Silme onayına geç</Button>}
+        {dropImpact.readyToFinalize && <Button
+          variant="primary"
+          disabled={busy || !canManage}
+          onClick={() => {
+            setError(null);
+            setDeleteTarget({
+              ...dropImpact,
+              deleteJob: { id: dropImpact.completedDelete.jobId, status: 'succeeded' },
+            });
+            setDropImpact(null);
+          }}
+        >Binding finalization’ı tamamla</Button>}
       </footer>
     </Modal>}
     {deleteTarget && <ConfirmDialog
       key={`${deleteTarget.bindingId}:${deleteTarget.bindingRevision}:${deleteTarget.deleteJob?.id ?? 'queue'}`}
-      title="Database kalıcı olarak silinsin mi?"
-      message={`${deleteTarget.databaseName} schema’sı current binding revizyonuna ait doğrulanmış ${deleteTarget.backup?.backupId ?? 'backup'} yedeği fence’iyle DROP edilecek. Binding DROP sırasında korunur ve yalnız successful job + canlı schema yokluğu kanıtından sonra kaldırılır. Bu işlem çalışan uygulamanın database erişimini kalıcı olarak keser.`}
+      title={deleteTarget.deleteJob?.status === 'succeeded'
+        ? 'Database binding finalization tamamlansın mı?'
+        : 'Database kalıcı olarak silinsin mi?'}
+      message={deleteTarget.deleteJob?.status === 'succeeded'
+        ? `${deleteTarget.databaseName} schema’sı için successful scoped DROP job zaten kanıtlandı. Yeni DROP oluşturulmayacak; canlı schema yokluğu ve credential yokluğu tekrar doğrulanıp yalnız Website binding finalization tamamlanacak.`
+        : `${deleteTarget.databaseName} schema’sı current binding revizyonuna ait doğrulanmış ${deleteTarget.backup?.backupId ?? 'backup'} yedeği fence’iyle DROP edilecek. Binding DROP sırasında korunur ve yalnız successful job + canlı schema yokluğu kanıtından sonra kaldırılır. Bu işlem çalışan uygulamanın database erişimini kalıcı olarak keser.`}
       confirmation={deleteTarget.databaseName}
       busy={busy}
       error={error}
       onCancel={() => { if (!busy) { setDeleteTarget(null); setError(null); } }}
       onConfirm={deleteDatabaseLifecycle}
-      confirmLabel={deleteTarget.deleteJob?.status === 'succeeded' ? 'Binding finalization’ı yeniden dene' : 'Database’i sil'}
+      confirmLabel={deleteTarget.deleteJob?.status === 'succeeded' ? 'Binding finalization’ı tamamla' : 'Database’i sil'}
     />}
   </>;
 }
