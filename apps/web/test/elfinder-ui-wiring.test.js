@@ -17,7 +17,9 @@ test('Files panel uses the elFinder handoff as the primary action without removi
   assert.match(filesPanel, /serverId,/);
   assert.match(filesPanel, /websiteId,/);
   assert.match(filesPanel, /elFinder ile aç/);
+  assert.match(filesPanel, /legacyAvailable = \['static', 'node'\]\.includes\(runtimeType\)/);
   assert.match(filesPanel, /Legacy görünümü yenile/);
+  assert.match(filesPanel, /Bu runtime için legacy dosya API’si kullanılmaz/);
   assert.match(api, /\/elfinder-handoffs/);
   assert.match(api, /method: 'POST', body: \{\}/);
 });
@@ -27,6 +29,10 @@ test('PHP Websites expose Files and Terminal through the managed Website identit
   assert.match(source, /\['static', 'node', 'php'\]\.includes\(website\.runtimeType\)/);
   assert.match(
     source,
-    /<FilesPanel serverId=\{domain\.serverId\} websiteId=\{domain\.websiteId\}/,
+    /<FilesPanel serverId=\{domain\.serverId\} websiteId=\{domain\.websiteId\} runtimeType=\{website\?\.runtimeType\}/,
+  );
+  assert.match(
+    source,
+    /\['files', 'terminal'\]\.includes\(key\)\) return canManage && \(managedWebsite \|\| legacyManagedTarget\)/,
   );
 });
