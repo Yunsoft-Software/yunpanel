@@ -120,6 +120,28 @@ function fixture({
         if (zoneError) throw zoneError;
         return currentZone;
       },
+      async inspectSnapshotDeletion({ zoneName, apiKey: suppliedKey, snapshot }) {
+        assert.equal(zoneName, currentDomain.primaryDomain);
+        assert.equal(suppliedKey, apiKey);
+        return {
+          satisfied: currentZone === null,
+          deleteCandidate: currentZone !== null,
+          deleted: currentZone === null,
+          zoneName,
+          snapshotDigest: dnsZoneRetirementInternals.digest(snapshot),
+        };
+      },
+      async deleteSnapshot({ zoneName, apiKey: suppliedKey, snapshot }) {
+        assert.equal(zoneName, currentDomain.primaryDomain);
+        assert.equal(suppliedKey, apiKey);
+        return {
+          satisfied: true,
+          deleted: true,
+          changed: currentZone !== null,
+          zoneName,
+          snapshotDigest: dnsZoneRetirementInternals.digest(snapshot),
+        };
+      },
     },
   });
   return {
@@ -635,6 +657,93 @@ test('invalid DNS zone retention policy is rejected at service construction', ()
         && error.code === 'dns_zone_retirement_policy_invalid',
     );
   }
+});
+
+test('private deletion capture revalidates exact retirement preview without exposing RRset content publicly', async () => {
+  const root = domain({ websiteId: null });
+  const intent = {
+    adapter: 'powerdns-zone',
+    serverId: localServerId,
+    webDomainId: rootId,
+    zoneName: 'example.com',
+    templateVersion: 7,
+    templateSnapshot: [
+      { key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+      { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+    ],
+    dnsIdentityRevision: 2,
+    secondaryDns: [],
+    serial: 2026091801,
+    dnssec: false,
+    records: [
+      { key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+      { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+    ],
+  };
+  const evidence = websiteDnsZoneProvisioningInternals.publicEvidence(
+    websiteDnsZoneProvisioningInternals.normalizedIntent({ intent }),
+    {
+      kind: 'Primary',
+      serial: 2026091801,
+      dnssec: false,
+      managedRrsetCount: 2,
+      manualRrsetCount: 0,
+      created: true,
+      primaryKindChanged: false,
+      changedRrsetCount: 2,
+    },
+  );
+  const provisioningOperations = [{
+    operationId: '82345678-1234-4234-8234-123456789012',
+    websiteId,
+    updatedAt: '2026-09-18T16:00:00.000Z',
+    steps: [{
+      id: 'dns_zone',
+      kind: 'dns_zone',
+      state: 'succeeded',
+      intent,
+      evidence,
+      compensation: { state: 'pending', evidence: null, error: null },
+    }],
+  }];
+  const fx = fixture({
+    currentDomain: root,
+    currentZone: zone({ rrsets: [managedRrset()] }),
+    provisioningOperations,
+    retentionPolicy: { snapshotRetentionDays: 30 },
+  });
+  const preview = await fx.service.preview({ domainId: rootId });
+  assert.equal(preview.retirementPlanReady, true);
+  assert.equal(JSON.stringify(preview).includes('203.0.113.10'), false);
+
+  const capture = await fx.service.captureDeletionSnapshot({
+    domainId: rootId,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+  assert.equal(capture.version, 1);
+  assert.equal(capture.domainId, rootId);
+  assert.equal(capture.serverId, localServerId);
+  assert.equal(capture.zoneName, 'example.com');
+  assert.equal(capture.domainRevision, 4);
+  assert.equal(capture.previewDigest, preview.previewDigest);
+  assert.equal(capture.snapshotDigest, preview.zone.snapshotDigest);
+  assert.equal(capture.ownershipEvidenceDigest, preview.zone.ownershipOrigin.evidenceDigest);
+  assert.equal(capture.snapshotRetentionDays, 30);
+  assert.equal(
+    capture.snapshot.rrsets.some((rrset) => rrset.records.some((record) => record.content.includes('203.0.113.10'))),
+    true,
+  );
+
+  await assert.rejects(
+    fx.service.captureDeletionSnapshot({
+      domainId: rootId,
+      previewDigest: preview.previewDigest,
+      confirmation: 'wrong',
+    }),
+    (error) => error instanceof DnsZoneRetirementError
+      && error.code === 'dns_zone_retirement_preview_stale',
+  );
 });
 
 test('compensated or mismatched provisioning evidence never proves current zone ownership', async () => {
