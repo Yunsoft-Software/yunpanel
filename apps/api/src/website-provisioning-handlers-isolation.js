@@ -104,23 +104,32 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
       if (typeof isolationManager.previewMigration !== 'function') {
         umaskFailure('website_static_migration_preview_unavailable', 'Static publish migration preview is unavailable');
       }
-      const [runtime, isolation] = await Promise.all([
+      const [runtime, isolation, releasePermissions] = await Promise.all([
         baseRuntime.inspect(context),
         isolationManager.previewMigration(isolationIntent(context)),
+        typeof isolationManager.previewReleaseMigration === 'function'
+          ? isolationManager.previewReleaseMigration(isolationIntent(context))
+          : Promise.resolve(null),
       ]);
       const reason = runtime?.satisfied === true ? null : runtime?.reason ?? 'static_runtime_unavailable';
       const safeControlMigrationCandidate = runtime?.satisfied === true
         && isolation?.safeMigrationCandidate === true;
+      const releaseRepairCandidate = runtime?.satisfied === true
+        && releasePermissions?.repairCandidate === true;
       return Object.freeze({
         version: 1,
         adapter: 'static-runtime',
         satisfied: runtime?.satisfied === true && isolation?.satisfied === true,
         safeControlMigrationCandidate,
+        releaseRepairCandidate,
         automaticMigration: false,
-        migrationBlockedReason: 'static_legacy_permissions_not_operation_owned',
+        migrationBlockedReason: releaseRepairCandidate
+          ? 'static_release_receipt_not_operation_owned'
+          : 'static_legacy_permissions_not_operation_owned',
         current: Object.freeze({
           runtime,
           isolation,
+          releasePermissions,
         }),
         desired: Object.freeze({
           websiteId: context.intent?.websiteId ?? null,
@@ -128,10 +137,13 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
           mode: context.intent?.mode ?? 'legacy_unresolved',
           deploymentId: context.intent?.deploymentId ?? null,
         }),
-        differences: Object.freeze([
+        differences: Object.freeze([...new Set([
           ...(reason ? [reason] : []),
           ...(Array.isArray(isolation?.differences) ? isolation.differences : ['static_publish_preview_invalid']),
-        ]),
+          ...(releasePermissions && Array.isArray(releasePermissions.differences)
+            ? releasePermissions.differences
+            : []),
+        ])]),
       });
     },
     async inspectControlMigrationOperation(context = {}) {
