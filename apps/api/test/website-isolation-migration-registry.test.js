@@ -127,6 +127,45 @@ function sftpAudit() {
   };
 }
 
+function phpAudit() {
+  const identity = createApplicationIdentity(applicationId);
+  const desired = {
+    websiteId,
+    applicationId,
+    unixUser: applicationUser,
+    documentRoot: `${identity.paths.runtime.currentRelease}/public`,
+    runtimeUmask: '0027',
+  };
+  return {
+    applicable: true,
+    migrationRequired: true,
+    websiteId,
+    applicationId,
+    websiteRevision: 3,
+    expected: { unixUser: applicationUser, homeDirectory },
+    migration: {
+      applyAvailable: true,
+      previewDigest,
+      changes: [{
+        action: 'create_php_fpm_pool',
+        applyState: 'requires_explicit_apply',
+        current: {
+          phpRuntimeMigrationPreview: {
+            version: 1,
+            adapter: 'php-runtime',
+            satisfied: false,
+            safeCreateCandidate: true,
+            current: {},
+            desired,
+            differences: ['php_fpm_pool_missing'],
+          },
+        },
+        desired: { phpRuntime: desired },
+      }],
+    },
+  };
+}
+
 function registry() {
   return createWebsiteIsolationMigrationRegistry({
     now: () => Date.parse('2026-09-17T12:00:00.000Z'),
@@ -307,6 +346,53 @@ test('isolation migration registry rejects SFTP journaling when safe-create evid
   await store.init();
   const unsafe = sftpAudit();
   unsafe.migration.changes[0].current.sftpMigrationPreview.safeCreateCandidate = false;
+
+  await assert.rejects(
+    store.create(unsafe),
+    (error) => error instanceof WebsiteIsolationMigrationRegistryError
+      && error.code === 'website_isolation_migration_preview_invalid',
+  );
+});
+
+
+test('isolation migration registry journals typed PHP pool ownership and rollback evidence', async () => {
+  const store = registry();
+  await store.init();
+
+  const created = await store.create(phpAudit());
+  assert.equal(created.intent.adapter, 'php');
+  assert.deepEqual(created.intent.targets, []);
+
+  await store.markApplying(operationId);
+  const succeeded = await store.succeed(operationId, {
+    satisfied: true,
+    phpFpmReceiptVersion: 1,
+    createdPhpFpmPool: true,
+  });
+  assert.deepEqual(succeeded.result, {
+    satisfied: true,
+    phpFpmReceiptVersion: 1,
+    createdPhpFpmPool: true,
+  });
+
+  await store.markCompensating(operationId);
+  const compensated = await store.compensate(operationId, {
+    satisfied: true,
+    restoredPrevious: false,
+    preservedExisting: false,
+  });
+  assert.deepEqual(compensated.compensation, {
+    satisfied: true,
+    restoredPrevious: false,
+    preservedExisting: false,
+  });
+});
+
+test('isolation migration registry rejects PHP pool journaling when safe-create evidence is lost', async () => {
+  const store = registry();
+  await store.init();
+  const unsafe = phpAudit();
+  unsafe.migration.changes[0].current.phpRuntimeMigrationPreview.safeCreateCandidate = false;
 
   await assert.rejects(
     store.create(unsafe),
