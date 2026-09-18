@@ -26,6 +26,12 @@ const DATABASE_DROP_BLOCKERS = new Set([
   'database_job_active',
   'database_delete_safety_chain_pending',
 ]);
+const WEBSITE_DATABASE_DELETE_BLOCKERS = new Set([
+  'database_not_found',
+  'database_credential_exists',
+  'database_current_binding_backup_required',
+  'database_job_active',
+]);
 const DATABASE_ACTIVE_OPERATIONS = new Set([
   'database.inspect', 'database.create', 'database.delete', 'database.backup', 'database.restore',
   'database.credential.apply', 'database.credential.delete',
@@ -284,6 +290,94 @@ export function databaseRestorePreviewView(value, {
   };
 }
 
+export function websiteDatabaseDeletePreviewView(value, {
+  serverId,
+  websiteId,
+  applicationId,
+  bindingId,
+  bindingRevision,
+  databaseName,
+} = {}) {
+  if (!value || typeof value !== 'object' || value.version !== 1
+    || value.operation !== 'website_database_delete'
+    || !value.scope || typeof value.scope !== 'object' || Array.isArray(value.scope)
+    || value.scope.serverId !== serverId || value.scope.websiteId !== websiteId
+    || value.scope.applicationId !== applicationId || value.scope.databaseBindingId !== bindingId
+    || value.scope.bindingRevision !== bindingRevision || value.scope.databaseName !== databaseName
+    || !UUID_PATTERN.test(serverId ?? '') || !UUID_PATTERN.test(websiteId ?? '')
+    || !UUID_PATTERN.test(applicationId ?? '') || !UUID_PATTERN.test(bindingId ?? '')
+    || !Number.isSafeInteger(bindingRevision) || bindingRevision < 1
+    || !validDatabaseName(databaseName) || typeof value.exists !== 'boolean'
+    || !Array.isArray(value.blockers) || value.blockers.length > WEBSITE_DATABASE_DELETE_BLOCKERS.size
+    || value.blockers.some((code) => !WEBSITE_DATABASE_DELETE_BLOCKERS.has(code))
+    || new Set(value.blockers).size !== value.blockers.length
+    || !Array.isArray(value.activeJobs) || value.activeJobs.length > 100
+    || typeof value.readyToDelete !== 'boolean' || !SHA256_PATTERN.test(value.previewDigest ?? '')
+    || value.sideEffects !== false) return null;
+
+  const credential = value.credential === null ? null : value.credential;
+  if (credential !== null && (!credential || typeof credential !== 'object'
+    || !UUID_PATTERN.test(credential.id ?? '') || !DATABASE_USER_PATTERN.test(credential.username ?? '')
+    || !Number.isSafeInteger(credential.revision) || credential.revision < 1)) return null;
+
+  const backup = value.backup === null ? null : value.backup;
+  if (backup !== null && (!backup || typeof backup !== 'object'
+    || !BACKUP_ID_PATTERN.test(backup.backupId ?? '')
+    || !['mariadb', 'mysql'].includes(backup.engine)
+    || typeof backup.databaseVersion !== 'string' || backup.databaseVersion.length < 1
+    || backup.databaseVersion.length > 120 || /[\u0000-\u001f\u007f]/.test(backup.databaseVersion)
+    || !SHA256_PATTERN.test(backup.dumpSha256 ?? '')
+    || !Number.isSafeInteger(backup.dumpBytes) || backup.dumpBytes < 1
+    || typeof backup.createdAt !== 'string' || !Number.isFinite(Date.parse(backup.createdAt)))) return null;
+
+  const activeJobs = [];
+  const ids = new Set();
+  for (const job of value.activeJobs) {
+    if (!job || typeof job !== 'object' || !BACKUP_ID_PATTERN.test(job.id ?? '') || ids.has(job.id)
+      || !DATABASE_ACTIVE_OPERATIONS.has(job.operation)
+      || !['queued', 'running'].includes(job.status)) return null;
+    ids.add(job.id);
+    activeJobs.push({ id: job.id, operation: job.operation, status: job.status });
+  }
+
+  if (value.blockers.includes('database_not_found') === value.exists
+    || value.blockers.includes('database_credential_exists') !== (credential !== null)
+    || value.blockers.includes('database_current_binding_backup_required') !== (backup === null)
+    || value.blockers.includes('database_job_active') !== (activeJobs.length > 0)
+    || value.readyToDelete !== (value.blockers.length === 0)
+    || (value.readyToDelete && value.confirmation !==
+      `delete-website-database:${bindingId}:${bindingRevision}:${value.previewDigest}`)
+    || (!value.readyToDelete && value.confirmation !== null)) return null;
+
+  return {
+    serverId,
+    websiteId,
+    applicationId,
+    bindingId,
+    bindingRevision,
+    databaseName,
+    exists: value.exists,
+    credential: credential ? {
+      id: credential.id,
+      username: credential.username,
+      revision: credential.revision,
+    } : null,
+    backup: backup ? {
+      backupId: backup.backupId,
+      engine: backup.engine,
+      databaseVersion: backup.databaseVersion,
+      dumpSha256: backup.dumpSha256,
+      dumpBytes: backup.dumpBytes,
+      createdAt: new Date(backup.createdAt).toISOString(),
+    } : null,
+    activeJobs,
+    blockers: [...value.blockers],
+    readyToDelete: value.readyToDelete,
+    previewDigest: value.previewDigest,
+    confirmation: value.confirmation,
+  };
+}
+
 export function databaseDropPreviewView(value, {
   serverId, databaseName, bindingId, websiteId, applicationId,
 } = {}) {
@@ -363,5 +457,6 @@ export const databaseModelInternals = Object.freeze({
   backupIdPattern: BACKUP_ID_PATTERN,
   sha256Pattern: SHA256_PATTERN,
   databaseDropBlockers: Object.freeze([...DATABASE_DROP_BLOCKERS]),
+  websiteDatabaseDeleteBlockers: Object.freeze([...WEBSITE_DATABASE_DELETE_BLOCKERS]),
   databaseActiveOperations: Object.freeze([...DATABASE_ACTIVE_OPERATIONS]),
 });
