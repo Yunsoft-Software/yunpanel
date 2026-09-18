@@ -357,6 +357,140 @@ test('isolation audit pins bounded SFTP host and authorized-key drift into the m
   assert.notEqual(first.migration.previewDigest, second.migration.previewDigest);
 });
 
+
+test('isolation audit pins bounded Passenger runtime drift into the migration digest', async () => {
+  const passengerPreview = {
+    version: 1,
+    adapter: 'passenger',
+    satisfied: false,
+    current: {
+      passenger: { healthy: true, installedVersion: '6.0.27-1~noble1' },
+      identity: {
+        satisfied: true,
+        uid: 1201,
+        gid: 1201,
+        homeDirectory: identity.paths.workspace.homeDirectory,
+        shell: '/usr/sbin/nologin',
+        homeMode: '0750',
+      },
+      nodeCandidates: [
+        {
+          path: '/opt/yunpanel/node-runtimes/v24/bin/node',
+          available: false,
+          version: null,
+          matchesRequestedMajor: false,
+        },
+        {
+          path: '/usr/bin/node',
+          available: true,
+          version: 'v22.19.0',
+          matchesRequestedMajor: false,
+        },
+      ],
+      currentReleaseTarget: 'releases/f73cc6ac-07e8-4d22-b29a-741154687d20',
+      currentReleaseTargetError: null,
+      release: null,
+    },
+    desired: {
+      applicationId,
+      nodeMajor: 24,
+      nodeCandidates: ['/opt/yunpanel/node-runtimes/v24/bin/node', '/usr/bin/node'],
+      currentRoot: identity.paths.runtime.currentRelease,
+      releasesDirectory: identity.paths.runtime.releasesDirectory,
+      homeDirectory: identity.paths.workspace.homeDirectory,
+      appRoot: identity.paths.runtime.currentRelease,
+      documentRoot: identity.paths.runtime.currentRelease,
+      startupFile: 'server.js',
+      unixUser: identity.unixUser,
+    },
+    differences: ['passenger_node_unavailable', 'passenger_release_unavailable'],
+    rawSecret: 'do-not-project',
+  };
+  const first = await service({
+    runtimeType: 'node',
+    stepResults: { runtime: { satisfied: false, reason: 'passenger_node_unavailable' } },
+    migrationPreviews: { runtime: passengerPreview },
+  }).audit(websiteId);
+
+  const preview = first.migration.changes.find((change) => change.id === 'provisioning.runtime')
+    .current.passengerMigrationPreview;
+  assert.equal(preview.adapter, 'passenger');
+  assert.equal(preview.current.passenger.healthy, true);
+  assert.equal(preview.current.identity.homeMode, '0750');
+  assert.equal(preview.current.nodeCandidates[1].version, 'v22.19.0');
+  assert.equal(preview.current.release, null);
+  assert.equal(preview.desired.applicationId, applicationId);
+  assert.equal(JSON.stringify(first.migration).includes('do-not-project'), false);
+  assert.deepEqual(first.inspectedSteps.find((step) => step.stepId === 'runtime').passengerMigrationPreview, preview);
+
+  const second = await service({
+    runtimeType: 'node',
+    stepResults: { runtime: { satisfied: false, reason: 'passenger_runtime_unavailable' } },
+    migrationPreviews: {
+      runtime: {
+        ...passengerPreview,
+        current: {
+          ...passengerPreview.current,
+          passenger: { healthy: false, installedVersion: null },
+        },
+        differences: ['passenger_runtime_unavailable', ...passengerPreview.differences],
+      },
+    },
+  }).audit(websiteId);
+  assert.notEqual(first.migration.previewDigest, second.migration.previewDigest);
+});
+
+test('isolation audit rejects Passenger preview paths that only share a string prefix with canonical roots', async () => {
+  const audit = await service({
+    runtimeType: 'node',
+    stepResults: { runtime: { satisfied: false, reason: 'passenger_release_unavailable' } },
+    migrationPreviews: {
+      runtime: {
+        version: 1,
+        adapter: 'passenger',
+        satisfied: false,
+        current: {
+          passenger: { healthy: true, installedVersion: '6.0.27-1~noble1' },
+          identity: {
+            satisfied: true,
+            uid: 1201,
+            gid: 1201,
+            homeDirectory: identity.paths.workspace.homeDirectory,
+            shell: '/usr/sbin/nologin',
+            homeMode: '0750',
+          },
+          nodeCandidates: [{
+            path: '/opt/yunpanel/node-runtimes/v24/bin/node',
+            available: true,
+            version: 'v24.11.1',
+            matchesRequestedMajor: true,
+          }],
+          currentReleaseTarget: null,
+          currentReleaseTargetError: 'passenger_release_unavailable',
+          release: null,
+        },
+        desired: {
+          applicationId,
+          nodeMajor: 24,
+          nodeCandidates: ['/opt/yunpanel/node-runtimes/v24/bin/node'],
+          currentRoot: identity.paths.runtime.currentRelease,
+          releasesDirectory: identity.paths.runtime.releasesDirectory,
+          homeDirectory: identity.paths.workspace.homeDirectory,
+          appRoot: `${identity.paths.runtime.currentRelease}-escape`,
+          documentRoot: `${identity.paths.runtime.currentRelease}-escape/public`,
+          startupFile: 'server.js',
+          unixUser: identity.unixUser,
+        },
+        differences: ['passenger_release_unavailable'],
+      },
+    },
+  }).audit(websiteId);
+
+  const change = audit.migration.changes.find((entry) => entry.id === 'provisioning.runtime');
+  assert.equal(change.current.passengerMigrationPreview, undefined);
+  assert.equal(audit.inspectedSteps.find((step) => step.stepId === 'runtime').passengerMigrationPreview, undefined);
+});
+
 test('isolation audit fails closed when managed host inspection detects drift', async () => {
   const drift = new Error('drift');
   drift.code = 'website_identity_workspace_drift';
