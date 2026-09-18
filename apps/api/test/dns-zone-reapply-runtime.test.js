@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { createDnsZoneReapplyOperationRegistry } from '../src/dns-zone-reapply-operation-registry.js';
 import { createDnsZoneReapplyRuntime } from '../src/dns-zone-reapply-runtime.js';
@@ -8,6 +9,28 @@ const domainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const previewDigest = 'a'.repeat(64);
 const confirmation = `reapply-dns-zone-template:${domainId}:${previewDigest}`;
+const sourceZoneSnapshot = Object.freeze({
+  version: 1,
+  zoneName: 'example.com',
+  id: 'example.com.',
+  kind: 'Native',
+  dnssec: false,
+  rrsets: Object.freeze([Object.freeze({
+    name: 'example.com.',
+    type: 'SOA',
+    ttl: 300,
+    records: Object.freeze([Object.freeze({
+      content: 'ns1.host.example. hostmaster.host.example. 2026091501 3600 900 1209600 300',
+      disabled: false,
+    })]),
+    comments: Object.freeze([Object.freeze({ account: 'yunpanel', content: 'managed source snapshot' })]),
+  })]),
+});
+const sourceZoneDigest = createHash('sha256').update(JSON.stringify(sourceZoneSnapshot)).digest('hex');
+
+function rollbackEvidence() {
+  return Object.freeze({ version: 1, sourceZoneDigest, snapshot: sourceZoneSnapshot });
+}
 
 function plannedPreview(overrides = {}) {
   return Object.freeze({
@@ -19,7 +42,7 @@ function plannedPreview(overrides = {}) {
     templateVersion: 4,
     dnsIdentityRevision: 2,
     mailStateDigest: 'c'.repeat(64),
-    sourceZoneDigest: 'd'.repeat(64),
+    sourceZoneDigest,
     observedSerial: 2026091501,
     nextSerial: 2026091601,
     applyAllowed: true,
@@ -53,6 +76,7 @@ test('durable DNS zone reapply journals before provider mutation and completes w
   const store = registry();
   const calls = [];
   const service = {
+    captureRollbackSnapshot: async () => rollbackEvidence(),
     preview: async (input) => { calls.push(['preview', input]); return plannedPreview(); },
     apply: async (input) => {
       calls.push(['apply', input]);
@@ -82,12 +106,13 @@ test('durable DNS zone reapply journals before provider mutation and completes w
 test('interrupted DNS zone reapply inspects first and never repeats an already satisfied provider mutation', async () => {
   const store = registry();
   await store.init();
-  const created = await store.create(plannedPreview());
+  const created = await store.create(plannedPreview(), rollbackEvidence());
   await store.markApplying(created.id);
   let applyCalls = 0;
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
+      captureRollbackSnapshot: async () => rollbackEvidence(),
       preview: async () => satisfiedPreview(),
       apply: async () => { applyCalls += 1; throw new Error('must not run'); },
     },
@@ -107,6 +132,7 @@ test('provider timeout after mutation is reconciled from the authoritative post-
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
+      captureRollbackSnapshot: async () => rollbackEvidence(),
       preview: async () => state === 'planned' ? plannedPreview() : satisfiedPreview(),
       apply: async () => {
         applyCalls += 1;
@@ -132,6 +158,7 @@ test('journaled DNS zone reapply fails closed if the preview changes before prov
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
+      captureRollbackSnapshot: async () => rollbackEvidence(),
       preview: async () => {
         previewCalls += 1;
         return previewCalls === 1
@@ -152,11 +179,12 @@ test('journaled DNS zone reapply fails closed if the preview changes before prov
 test('runtime init recovers applying operations without making API startup depend on temporary DNS reachability', async () => {
   const store = registry();
   await store.init();
-  const created = await store.create(plannedPreview());
+  const created = await store.create(plannedPreview(), rollbackEvidence());
   await store.markApplying(created.id);
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
+      captureRollbackSnapshot: async () => rollbackEvidence(),
       preview: async () => {
         const error = new Error('temporary DNS API outage');
         error.code = 'powerdns_zone_api_unavailable';
@@ -176,12 +204,13 @@ test('runtime init recovers applying operations without making API startup depen
 test('interrupted reapply does not accept a different mail desired state as its original target', async () => {
   const store = registry();
   await store.init();
-  const created = await store.create(plannedPreview());
+  const created = await store.create(plannedPreview(), rollbackEvidence());
   await store.markApplying(created.id);
   let applyCalls = 0;
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
+      captureRollbackSnapshot: async () => rollbackEvidence(),
       preview: async () => satisfiedPreview({ mailStateDigest: 'd'.repeat(64) }),
       apply: async () => { applyCalls += 1; return {}; },
     },
@@ -201,6 +230,7 @@ test('journaled DNS zone reapply fails closed if exact source-zone evidence drif
   const runtime = createDnsZoneReapplyRuntime({
     registry: store,
     service: {
+      captureRollbackSnapshot: async () => rollbackEvidence(),
       preview: async () => {
         previewCalls += 1;
         return previewCalls === 1
