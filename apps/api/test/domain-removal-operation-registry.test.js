@@ -1,0 +1,218 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import {
+  createDomainRemovalOperationRegistry,
+  domainRemovalOperationPublicView,
+  DomainRemovalOperationRegistryError,
+} from '../src/domain-removal-operation-registry.js';
+
+const checksum = 'a'.repeat(64);
+const impactDigest = 'b'.repeat(64);
+const previewDigest = 'c'.repeat(64);
+const dnsPreviewDigest = 'd'.repeat(64);
+const zoneSnapshotDigest = 'e'.repeat(64);
+const evidenceDigest = 'f'.repeat(64);
+
+function preview() {
+  return {
+    version: 1,
+    operation: 'domain_remove',
+    domain: {
+      id: 'domain-1',
+      serverId: 'local',
+      primaryDomain: 'example.com',
+      websiteId: 'website-1',
+      certificateId: 'certificate-1',
+      parentDomainId: null,
+      state: 'active',
+      desiredRevision: 4,
+      checksum,
+      suspensionOperationId: null,
+    },
+    impact: {
+      previewDigest: impactDigest,
+      confirmation: `delete:domain:domain-1:${impactDigest}`,
+      blockers: [
+        'authoritative_dns_retirement_blocked',
+        'certificates_present',
+        'child_domains_present',
+        'impact_apply_not_implemented',
+        'mail_domains_present',
+        'website_binding_present',
+      ],
+    },
+    plan: {
+      childDomainIds: ['child-domain-1'],
+      websiteId: 'website-1',
+      applicationId: 'application-1',
+      managedComposeProjectId: null,
+      certificateIds: ['certificate-1'],
+      dnsZoneIds: ['external-zone-1'],
+      mailDomainIds: ['mail-domain-1'],
+      activeJobIds: [],
+      additional: {
+        mailboxes: { status: 'available', ids: [] },
+        backups: { status: 'available', ids: [] },
+        crons: { status: 'available', ids: [] },
+        dockerWorkloads: { status: 'available', ids: [] },
+      },
+      authoritativeDns: {
+        state: 'blocked',
+        previewDigest: dnsPreviewDigest,
+        zoneSnapshotDigest,
+        blockers: ['domain_routing_active', 'domain_website_binding_present'],
+      },
+    },
+    hardBlockers: [],
+    readyToStart: true,
+    previewDigest,
+    confirmation: `start-domain-remove:domain-1:4:${previewDigest}`,
+    sideEffects: false,
+  };
+}
+
+test('journals deterministic reverse-dependency steps and preserves private start confirmations', async () => {
+  const registry = createDomainRemovalOperationRegistry({
+    idFactory: () => 'operation-1',
+    now: () => Date.parse('2026-09-18T20:00:00.000Z'),
+  });
+  const operation = await registry.create(preview());
+
+  assert.equal(operation.id, 'operation-1');
+  assert.deepEqual(
+    operation.steps.map((step) => step.kind),
+    [
+      'routing_suspend',
+      'child_domain',
+      'certificate',
+      'mail_domain',
+      'external_dns_zone',
+      'website_binding',
+      'authoritative_dns',
+      'metadata_finalization',
+    ],
+  );
+  assert.equal(operation.steps[0].resourceId, 'domain-1');
+  assert.equal(operation.steps.at(-1).resourceId, 'domain-1');
+
+  const duplicate = await registry.create(preview());
+  assert.equal(duplicate.id, operation.id);
+
+  const publicView = domainRemovalOperationPublicView(operation);
+  assert.equal(publicView.impactPreviewDigest, impactDigest);
+  assert.equal(Object.hasOwn(publicView, 'impactConfirmation'), false);
+  assert.equal(Object.hasOwn(publicView, 'startConfirmation'), false);
+});
+
+test('enforces journal order and allows failed or blocked current step retry', async () => {
+  let clock = Date.parse('2026-09-18T20:00:00.000Z');
+  const registry = createDomainRemovalOperationRegistry({
+    idFactory: () => 'operation-1',
+    now: () => clock++,
+  });
+  let operation = await registry.create(preview());
+  const [routing, child] = operation.steps;
+
+  await assert.rejects(
+    registry.markStepRunning(operation.id, child.id),
+    (error) => error instanceof DomainRemovalOperationRegistryError
+      && error.code === 'domain_removal_step_out_of_order',
+  );
+
+  operation = await registry.markStepRunning(operation.id, routing.id);
+  assert.equal(operation.status, 'running');
+  assert.equal((await registry.listInterrupted()).length, 1);
+
+  operation = await registry.failStep(operation.id, routing.id, {
+    code: 'domain_suspend_failed',
+    message: 'Suspend failed',
+  });
+  assert.equal(operation.status, 'failed');
+
+  operation = await registry.markStepRunning(operation.id, routing.id);
+  operation = await registry.succeedStep(operation.id, routing.id, {
+    referenceId: 'suspension-operation-1',
+    evidenceDigest,
+  });
+  assert.equal(operation.steps[0].status, 'succeeded');
+
+  operation = await registry.blockStep(operation.id, child.id, {
+    code: 'child_domain_removal_pending',
+    message: 'Child Domain removal is still pending',
+  });
+  assert.equal(operation.status, 'blocked');
+
+  operation = await registry.markStepRunning(operation.id, child.id);
+  operation = await registry.succeedStep(operation.id, child.id, {
+    referenceId: 'child-removal-operation-1',
+    evidenceDigest,
+  });
+  assert.equal(operation.steps[1].status, 'succeeded');
+});
+
+test('persists root-private running state and reloads interrupted operation without replay', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-domain-removal-'));
+  const stateDir = path.join(root, 'state');
+  const filePath = path.join(stateDir, 'domain-removal-operations.json');
+  let clock = Date.parse('2026-09-18T20:00:00.000Z');
+  try {
+    const first = createDomainRemovalOperationRegistry({
+      filePath,
+      idFactory: () => 'operation-1',
+      now: () => clock++,
+    });
+    await first.init();
+    let operation = await first.create(preview());
+    operation = await first.markStepRunning(operation.id, operation.steps[0].id);
+
+    const raw = JSON.parse(await readFile(filePath, 'utf8'));
+    assert.equal(raw.version, 1);
+    assert.equal(raw.operations[0].steps[0].status, 'running');
+    assert.equal((await stat(stateDir)).mode & 0o777, 0o700);
+    assert.equal((await stat(filePath)).mode & 0o777, 0o600);
+
+    const second = createDomainRemovalOperationRegistry({
+      filePath,
+      now: () => clock++,
+    });
+    const recovery = await second.init();
+    assert.equal(recovery, undefined);
+    const interrupted = await second.listInterrupted();
+    assert.equal(interrupted.length, 1);
+    assert.equal(interrupted[0].id, 'operation-1');
+    assert.equal(interrupted[0].steps[0].status, 'running');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('operation becomes removed only after every journaled step succeeds', async () => {
+  let clock = Date.parse('2026-09-18T20:00:00.000Z');
+  const registry = createDomainRemovalOperationRegistry({
+    idFactory: () => 'operation-1',
+    now: () => clock++,
+  });
+  let operation = await registry.create(preview());
+
+  while (operation.status !== 'removed') {
+    const step = operation.steps.find((candidate) => candidate.status !== 'succeeded');
+    operation = await registry.markStepRunning(operation.id, step.id);
+    operation = await registry.succeedStep(operation.id, step.id, {
+      referenceId: `evidence-${step.kind}`,
+      evidenceDigest,
+    });
+  }
+
+  assert.equal(operation.status, 'removed');
+  assert.equal(operation.steps.every((step) => step.status === 'succeeded'), true);
+  assert.equal((await registry.listInterrupted()).length, 0);
+  await assert.rejects(
+    registry.markStepRunning(operation.id, operation.steps.at(-1).id),
+    (error) => error instanceof DomainRemovalOperationRegistryError
+      && error.code === 'domain_removal_operation_not_runnable',
+  );
+});
