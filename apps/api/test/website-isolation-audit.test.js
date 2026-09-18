@@ -844,7 +844,7 @@ test('isolation audit opens PHP migration only when the exact site pool is the s
       documentRoot: `${identity.paths.runtime.currentRelease}/public`,
       runtimeUmask: '0027',
     },
-    differences: ['php_fpm_receipt_missing', 'php_fpm_pool_missing', 'php_fpm_socket_missing'],
+    differences: ['php_fpm_receipt_missing', 'php_fpm_pool_missing', 'php_fpm_socket_missing', 'php_fpm_runtime_not_ready'],
   };
   const audit = await service({
     runtimeType: 'php',
@@ -864,6 +864,125 @@ test('isolation audit opens PHP migration only when the exact site pool is the s
     phpMigrationAvailable: true,
     stepResults: { php_runtime: { satisfied: false, reason: 'php_container_not_ready' } },
     migrationPreviews: { php_runtime: { ...phpPreview, safeCreateCandidate: false } },
+  }).audit(websiteId);
+  assert.equal(blocked.migration.applyAvailable, false);
+  assert.equal(blocked.migration.changes[0].action, 'reconcile_isolation_step');
+});
+
+test('isolation audit opens exact PHP container metadata repair without touching release content', async () => {
+  const releaseDirectory = `${identity.paths.runtime.releasesDirectory}/${operationId}`;
+  const directory = (uid, gid, mode) => ({ present: true, directory: true, symbolicLink: false, uid, gid, mode });
+  const containerDesired = {
+    websiteId,
+    applicationId,
+    releaseId: operationId,
+    unixUser: identity.unixUser,
+    documentRoot: `${identity.paths.runtime.currentRelease}/public`,
+    applicationRoot: identity.paths.runtime.applicationRoot,
+    releasesDirectory: identity.paths.runtime.releasesDirectory,
+    currentRelease: identity.paths.runtime.currentRelease,
+    releaseDirectory,
+    releaseDocumentRoot: `${releaseDirectory}/public`,
+    controlDirectoryMode: '0755',
+    releaseDirectoryMode: '0750',
+  };
+  const preview = {
+    version: 1,
+    adapter: 'php-runtime',
+    satisfied: false,
+    safeCreateCandidate: false,
+    safeContainerMigrationCandidate: true,
+    current: {
+      container: {
+        version: 1,
+        adapter: 'php-container',
+        satisfied: false,
+        safeMigrationCandidate: true,
+        current: {
+          identity: { satisfied: true, uid: 1201, gid: 1201, homeDirectory: identity.paths.workspace.homeDirectory },
+          applicationRoot: directory(1201, 1201, '0750'),
+          releasesDirectory: directory(1201, 1201, '0750'),
+          releaseDirectory: directory(1201, 1201, '0750'),
+          releaseDocumentRoot: directory(1201, 1201, '0750'),
+          currentRelease: { present: true, directory: false, symbolicLink: true, uid: 1201, gid: 1201, mode: '0777' },
+          currentTarget: releaseDirectory,
+          currentTargetError: null,
+        },
+        desired: containerDesired,
+        differences: ['php_site_container_control_plane_drift'],
+      },
+      fpm: {
+        version: 1,
+        adapter: 'php-fpm',
+        satisfied: false,
+        safeCreateCandidate: false,
+        current: {
+          identity: { satisfied: true, uid: 1201, gid: 1201, homeDirectory: identity.paths.workspace.homeDirectory, homeMode: '0750' },
+          documentRoot: directory(1201, 1201, '0750'),
+          package: { installed: true, version: '8.3.0' },
+          receipt: { state: null, mutated: null, previousConfigSha256: null, error: null },
+          pool: { present: true, file: true, uid: 0, gid: 0, mode: '0600', sha256: 'd'.repeat(64), matchesDesired: true, readError: null },
+          configValid: true,
+          serviceActive: true,
+          socket: { present: true, socket: true, uid: 1201, gid: 1201, mode: '0660' },
+        },
+        desired: {
+          websiteId,
+          applicationId,
+          unixUser: identity.unixUser,
+          homeDirectory: identity.paths.workspace.homeDirectory,
+          documentRoot: `${identity.paths.runtime.currentRelease}/public`,
+          packageName: 'php8.3-fpm',
+          phpVersion: '8.3',
+          configPath: `/etc/php/8.3/fpm/pool.d/yunpanel-${identity.unixUser}.conf`,
+          configSha256: 'd'.repeat(64),
+          configMode: '0600',
+          socketPath: `/run/php/yunpanel-${identity.unixUser}.sock`,
+          socketMode: '0660',
+          serviceUnit: 'php8.3-fpm.service',
+        },
+        differences: ['php_fpm_receipt_missing'],
+      },
+      fpmRuntime: { satisfied: true },
+      umask: { satisfied: true, umask: '0027' },
+    },
+    desired: {
+      websiteId,
+      applicationId,
+      unixUser: identity.unixUser,
+      documentRoot: `${identity.paths.runtime.currentRelease}/public`,
+      runtimeUmask: '0027',
+    },
+    differences: ['php_site_container_control_plane_drift', 'php_fpm_receipt_missing'],
+  };
+  const drift = Object.assign(new Error('container drift'), { code: 'php_site_container_control_plane_drift' });
+  const audit = await service({
+    runtimeType: 'php',
+    phpContainerMigrationAvailable: true,
+    stepResults: { php_runtime: drift },
+    migrationPreviews: { php_runtime: preview },
+  }).audit(websiteId);
+
+  assert.equal(audit.migration.applyAvailable, true);
+  assert.equal(audit.migration.changes[0].action, 'repair_php_container_metadata');
+  assert.equal(audit.migration.changes[0].ownership, 'operation_receipt_planned');
+  assert.deepEqual(audit.migration.changes[0].desired, { phpContainer: containerDesired });
+  assert.match(audit.migration.warning, /no recursive chown, chmod or remove/);
+
+  const blocked = await service({
+    runtimeType: 'php',
+    phpContainerMigrationAvailable: true,
+    stepResults: { php_runtime: drift },
+    migrationPreviews: {
+      php_runtime: {
+        ...preview,
+        safeContainerMigrationCandidate: false,
+        current: {
+          ...preview.current,
+          container: { ...preview.current.container, safeMigrationCandidate: false },
+        },
+      },
+    },
   }).audit(websiteId);
   assert.equal(blocked.migration.applyAvailable, false);
   assert.equal(blocked.migration.changes[0].action, 'reconcile_isolation_step');
