@@ -271,10 +271,17 @@ export function createWebsitePhpRuntimeProvisioningHandler({
         503,
       );
     }
-    return containerManager.inspectMigrationCompensation(normalized, {
+    const inspected = await containerManager.inspectMigrationCompensation(normalized, {
       operationId: releaseOperationId,
       migrationOperationId: context.operationId,
     });
+    if (inspected?.satisfied === true && inspected.receiptState !== 'compensated') {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'php_site_container_migration_compensation_receipt_pending',
+      });
+    }
+    return inspected;
   }
 
   async function compensateContainerMigration(context = {}) {
