@@ -162,6 +162,46 @@ export function createDatabase(serverId, name) {
 }
 
 
+export function getWebsiteDatabaseDeletePreview(serverId, websiteId, bindingId) {
+  return panelRequest(`${websiteDatabaseBindingDataPath(serverId, websiteId, bindingId)}/delete-preview`);
+}
+
+export function deleteWebsiteDatabase(serverId, websiteId, bindingId, expectedBindingRevision, preview) {
+  const path = websiteDatabaseBindingDataPath(serverId, websiteId, bindingId);
+  const revision = positiveRevision(expectedBindingRevision, 'expectedBindingRevision');
+  if (!preview || typeof preview !== 'object') throw new Error('database delete preview is required');
+  return panelRequest(`${path}/delete`, {
+    method: 'POST',
+    body: {
+      expectedBindingRevision: revision,
+      expectedPreviewDigest: preview.previewDigest,
+      expectedBackupId: preview.backup?.backupId,
+      expectedBackupSha256: preview.backup?.dumpSha256,
+      confirmation: preview.confirmation,
+    },
+  });
+}
+
+export function finalizeWebsiteDatabaseDelete(
+  serverId,
+  websiteId,
+  bindingId,
+  expectedBindingRevision,
+  deleteJobId,
+) {
+  const path = websiteDatabaseBindingDataPath(serverId, websiteId, bindingId);
+  const revision = positiveRevision(expectedBindingRevision, 'expectedBindingRevision');
+  if (typeof deleteJobId !== 'string' || !deleteJobId) throw new Error('deleteJobId is required');
+  return panelRequest(`${path}/delete-finalize`, {
+    method: 'POST',
+    body: {
+      expectedBindingRevision: revision,
+      deleteJobId,
+      confirmation: `finalize-website-database-delete:${bindingId}:${revision}:${deleteJobId}`,
+    },
+  });
+}
+
 export function createWebsiteDatabaseBackup(serverId, websiteId, bindingId, expectedBindingRevision) {
   const path = websiteDatabaseBindingDataPath(serverId, websiteId, bindingId);
   const revision = positiveRevision(expectedBindingRevision, 'expectedBindingRevision');
