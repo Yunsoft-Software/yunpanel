@@ -47,6 +47,10 @@ import {
   createDomainUpdateHandler,
   createDomainUpdatePreviewHandler,
 } from './domain-http.js';
+import {
+  DomainSuspensionHttpError,
+  mountDomainSuspensionRoutes,
+} from './domain-suspension-http.js';
 import { mountDockerWorkloadRoutes } from './docker-workload-http.js';
 import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from './docker-workload-registry.js';
 import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
@@ -242,6 +246,7 @@ export function createApp({
   siteFileManager = null,
   websiteProvisioningRuntime = null,
   websiteSftpKeyService = null,
+  domainSuspensionRuntime = null,
   ...options
 } = {}) {
   const core = createCoreApp({
@@ -405,6 +410,9 @@ export function createApp({
   app.patch('/api/domains/:domainId', requirePanelRouteAccess, createDomainUpdateHandler(domainRegistry, { jobRegistry, certificateRegistry, localServerId }));
   app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry, { localServerId }));
   app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry, { localServerId }));
+  if (domainSuspensionRuntime) {
+    mountDomainSuspensionRoutes(app, { runtime: domainSuspensionRuntime });
+  }
   if (websiteProvisioningRuntime) {
     if (typeof websiteProvisioningRuntime.configureDomainControlPlane !== 'function') {
       throw new Error('Website provisioning runtime cannot configure Domain control-plane dependencies');
@@ -724,6 +732,7 @@ export function createApp({
       || error instanceof CertificateRegistryError
       || error instanceof ApplicationRegistryError
       || error instanceof DomainRegistryError
+      || error instanceof DomainSuspensionHttpError
       || error instanceof DockerWorkloadRegistryError
       || error instanceof DnsZoneMailDkimRetirementHttpError
       || error instanceof DnsProviderCredentialRegistryError
