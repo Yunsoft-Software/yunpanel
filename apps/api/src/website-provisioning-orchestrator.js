@@ -170,12 +170,36 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
         error: publicErrorCode(error),
       });
     }
-    if (!inspected || inspected.satisfied !== true) {
+    if (!inspected) {
       return Object.freeze({
         operation,
         outcome: 'blocked',
         stepId: step.id,
         actionRequired: 'remediate_or_compensate',
+      });
+    }
+
+    if (inspected.satisfied !== true) {
+      const code = publicErrorCode(
+        { code: inspected.reason },
+        'website_provisioning_blocked',
+      );
+      // Refresh the durable blocker through the normal applying -> blocked
+      // transition. If the process stops between these writes, startup takes
+      // the inspect-only interrupted path and still never replays apply.
+      await registry.beginStep({ operationId: operation.operationId, stepId: step.id });
+      const refreshed = await registry.blockStep({
+        operationId: operation.operationId,
+        stepId: step.id,
+        error: code,
+        evidence: inspected,
+      });
+      return Object.freeze({
+        operation: refreshed,
+        outcome: 'blocked',
+        stepId: step.id,
+        actionRequired: 'remediate_or_compensate',
+        error: code,
       });
     }
 

@@ -183,6 +183,45 @@ test('confirmed continuation can reconcile a fixed blocked dependency without re
   assert.deepEqual(result.operation.steps[0].evidence, { satisfied: true, uid: 1201, gid: 1201 });
 });
 
+test('blocked continuation refreshes actionable inspection evidence without re-applying', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.create(plan());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  await registry.blockStep({
+    operationId,
+    stepId: 'unix_identity',
+    error: 'passenger_runtime_unavailable',
+    evidence: { satisfied: false, reason: 'passenger_runtime_unavailable' },
+  });
+  let applyCalls = 0;
+  let inspectCalls = 0;
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async () => { applyCalls += 1; return { satisfied: true }; },
+        inspect: async () => {
+          inspectCalls += 1;
+          return { satisfied: false, reason: 'passenger_node_unavailable', nodeMajor: 24 };
+        },
+      },
+    },
+  });
+
+  const result = await orchestrator.runNext(operationId);
+  assert.equal(applyCalls, 0);
+  assert.equal(inspectCalls, 1);
+  assert.equal(result.outcome, 'blocked');
+  assert.equal(result.error, 'passenger_node_unavailable');
+  assert.equal(result.operation.steps[0].state, 'blocked');
+  assert.equal(result.operation.steps[0].error, 'passenger_node_unavailable');
+  assert.deepEqual(result.operation.steps[0].evidence, {
+    satisfied: false,
+    reason: 'passenger_node_unavailable',
+    nodeMajor: 24,
+  });
+});
+
 test('handler failure records bounded failed state instead of advancing', async () => {
   const registry = createWebsiteProvisioningRegistry();
   await registry.create(plan());
