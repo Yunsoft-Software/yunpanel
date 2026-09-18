@@ -47,6 +47,8 @@ test('configured runtime records only successful database delete evidence', asyn
     serverId,
     jobId: '12345678-1234-4234-8234-123456789012',
     operation: OPERATIONS.DATABASE_DELETE,
+    resourceType: 'database',
+    resourceId: 'app_db',
     payload: {
       name: 'app_db',
       websiteId,
@@ -61,6 +63,8 @@ test('configured runtime records only successful database delete evidence', asyn
     serverId,
     jobId: '22345678-1234-4234-8234-123456789012',
     operation: OPERATIONS.DATABASE_CREATE,
+    resourceType: 'database',
+    resourceId: 'other_db',
     payload: { name: 'other_db' },
     result: { created: true },
   });
@@ -92,6 +96,8 @@ test('configured runtime keeps legacy unscoped database delete receipt support',
     serverId,
     jobId: '42345678-1234-4234-8234-123456789012',
     operation: OPERATIONS.DATABASE_DELETE,
+    resourceType: 'database',
+    resourceId: 'legacy_db',
     payload: { name: 'legacy_db' },
     result,
   });
@@ -102,6 +108,28 @@ test('configured runtime keeps legacy unscoped database delete receipt support',
     ownership: null,
     result,
   });
+});
+
+test('configured runtime rejects database delete evidence with a mismatched job resource identity', async () => {
+  const { writes, recorder } = await captureRecorder();
+  await assert.rejects(
+    recorder({
+      serverId,
+      jobId: '52345678-1234-4234-8234-123456789012',
+      operation: OPERATIONS.DATABASE_DELETE,
+      resourceType: 'database',
+      resourceId: 'other_db',
+      payload: { name: 'app_db' },
+      result: {
+        engine: 'mariadb',
+        version: '11.4.5-MariaDB',
+        database: { name: 'app_db', sizeBytes: 0 },
+        deleted: true,
+      },
+    }),
+    /not safe recovery evidence/,
+  );
+  assert.equal(writes.length, 0);
 });
 
 test('configured runtime rejects an invalid database deletion receipt store', async () => {
