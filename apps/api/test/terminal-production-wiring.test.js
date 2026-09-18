@@ -11,6 +11,7 @@ test('production binds terminal upgrade to the common auth, live-session, PTY an
     'const authStore = createAuthStore({ filePath: authStorePath, liveSessions });',
     'const terminalCapabilityRegistry = createTerminalCapabilityRegistry({ liveSessions });',
     'const terminalProcessManager = createTerminalProcessManager();',
+    'const ttydSessionManager = createTtydSessionManager({ liveSessions });',
     'const terminalAuthenticator = createLiveConnectionAuthenticator({',
     'const terminalWebSocket = createTerminalWebSocketServer({',
     'terminalCapabilityRegistry,',
@@ -18,6 +19,10 @@ test('production binds terminal upgrade to the common auth, live-session, PTY an
     'liveSessions,',
     'audit: authStore.audit,',
     "server.on('upgrade', terminalWebSocket.handleUpgrade);",
+    'ttydSessionManager,',
+    "gateway.id !== 'ttyd'",
+    "request.headers['x-yunpanel-tool-session']",
+    'ttydSessionManager.authorize(toolSessionId, {',
   ]) assert.match(source, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotMatch(source, /server\.on\('upgrade',[^\n]+404 Not Found/);
 });
@@ -25,9 +30,20 @@ test('production binds terminal upgrade to the common auth, live-session, PTY an
 test('production shutdown revokes sockets and unused capabilities before closing auth storage', async () => {
   const source = await readFile(indexUrl, 'utf8');
   const revokeIndex = source.indexOf("liveSessions.closeAll('server_shutdown');");
+  const ttydIndex = source.indexOf("ttydSessionManager.closeAll('server_shutdown');");
   const transportIndex = source.indexOf("terminalWebSocket.closeAll('server_shutdown');");
   const authCloseIndex = source.indexOf('authStore.close();');
   assert.ok(revokeIndex >= 0);
-  assert.ok(transportIndex > revokeIndex);
+  assert.ok(ttydIndex > revokeIndex);
+  assert.ok(transportIndex > ttydIndex);
   assert.ok(authCloseIndex > transportIndex);
+});
+
+
+test('production createApp mounts the authenticated ttyd session bridge', async () => {
+  const source = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.match(source, /mountTtydSessionRoutes/);
+  assert.match(source, /ttydSessionManager = null/);
+  assert.match(source, /if \(ttydSessionManager\) \{[\s\S]*mountTtydSessionRoutes\(app, \{[\s\S]*terminalCapabilityRegistry,[\s\S]*ttydSessionManager/);
+  assert.match(source, /error instanceof TtydSessionError/);
 });
