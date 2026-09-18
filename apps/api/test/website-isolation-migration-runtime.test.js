@@ -7,6 +7,7 @@ import {
 } from '../src/website-isolation-migration-runtime.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
+const sourceOperationId = '4d7d1c87-c088-4c1d-bb44-7f370d315672';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 const applicationUser = 'yunapp-4dc352e64a14';
@@ -278,6 +279,7 @@ function phpPreview(overrides = {}) {
         action: 'create_php_fpm_pool',
         applyState: 'requires_explicit_apply',
         current: {
+          operationId: sourceOperationId,
           phpRuntimeMigrationPreview: {
             version: 1,
             adapter: 'php-runtime',
@@ -659,6 +661,10 @@ test('PHP pool isolation migration applies only through the typed PHP migration 
     createdPhpFpmPool: true,
   });
   assert.deepEqual(handler.calls.map(([name]) => name), ['inspect-php-operation', 'apply-php']);
+  assert.equal(handler.calls[0][1].releaseOperationId, sourceOperationId);
+  assert.equal(handler.calls[0][1].operationId, operationId);
+  assert.equal(handler.calls[1][1].releaseOperationId, sourceOperationId);
+  assert.equal(handler.calls[1][1].operationId, operationId);
 });
 
 test('PHP pool migration restart closes a completed receipt without replaying pool creation', async () => {
@@ -669,6 +675,7 @@ test('PHP pool migration restart closes a completed receipt without replaying po
   const handler = phpMigrationHandler();
   await handler.applyMigration({
     operationId,
+    releaseOperationId: sourceOperationId,
     websiteId,
     intent: {
       adapter: 'php-fpm',
