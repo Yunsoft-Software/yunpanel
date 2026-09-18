@@ -9,6 +9,7 @@ import {
 const domainId = '12345678-1234-4234-8234-123456789012';
 const childId = '22345678-1234-4234-8234-123456789012';
 const operationId = '32345678-1234-4234-8234-123456789012';
+const otherOperationId = '52345678-1234-4234-8234-123456789012';
 const websiteId = '42345678-1234-4234-8234-123456789012';
 const checksum = 'a'.repeat(64);
 
@@ -149,6 +150,17 @@ test('certificate removal detachment preserves certificate resource and clears o
     certificateId: 'certificate-1',
   });
 
+  await assert.rejects(
+    registry.detachCertificateForRemoval(domainId, {
+      expectedCertificateId: 'other-certificate',
+      expectedRevision: suspended.desiredRevision,
+      checksum,
+      suspensionOperationId: operationId,
+    }),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'domain_removal_certificate_binding_drift',
+  );
+
   const detached = await registry.detachCertificateForRemoval(domainId, {
     expectedCertificateId: 'certificate-1',
     expectedRevision: suspended.desiredRevision,
@@ -167,17 +179,6 @@ test('certificate removal detachment preserves certificate resource and clears o
     suspensionOperationId: operationId,
   });
   assert.equal(retried.changed, false);
-
-  await assert.rejects(
-    registry.detachCertificateForRemoval(domainId, {
-      expectedCertificateId: 'other-certificate',
-      expectedRevision: suspended.desiredRevision,
-      checksum,
-      suspensionOperationId: operationId,
-    }),
-    (error) => error instanceof DomainRegistryError
-      && error.code === 'domain_removal_certificate_binding_drift',
-  );
 });
 
 test('finalization refuses Website binding until reverse dependency cleanup detached it', async () => {

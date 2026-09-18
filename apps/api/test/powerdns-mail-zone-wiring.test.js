@@ -103,12 +103,15 @@ test('PowerDNS default zone reapply composition consumes live mail and DKIM regi
     zoneManager: {
       getZone: async () => ({
         zoneName: 'example.com',
+        id: 'example.com.',
         kind: 'Native',
         dnssec: false,
         serial: 2026091601,
         rrsets: [],
       }),
       apply: async () => { throw new Error('preview must not mutate'); },
+      inspectSnapshotRestore: async () => { throw new Error('preview must not inspect rollback'); },
+      restoreSnapshot: async () => { throw new Error('preview must not restore'); },
     },
     now: () => Date.parse('2026-09-17T00:00:00.000Z'),
   });

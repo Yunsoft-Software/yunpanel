@@ -481,6 +481,8 @@ test('isolation audit pins bounded Passenger runtime drift into the migration di
     version: 1,
     adapter: 'passenger',
     satisfied: false,
+    automaticMigration: false,
+    migrationBlockedReason: 'passenger_legacy_runtime_not_operation_owned',
     current: {
       passenger: { healthy: true, installedVersion: '6.0.27-1~noble1' },
       identity: {
@@ -572,6 +574,8 @@ test('isolation audit rejects Passenger preview paths that only share a string p
         version: 1,
         adapter: 'passenger',
         satisfied: false,
+        automaticMigration: false,
+        migrationBlockedReason: 'passenger_legacy_runtime_not_operation_owned',
         current: {
           passenger: { healthy: true, installedVersion: '6.0.27-1~noble1' },
           identity: {
@@ -704,7 +708,7 @@ test('isolation audit pins bounded static release and publish isolation drift in
         satisfied: false,
         automaticMigration: false,
         repairCandidate: true,
-        migrationBlockedReason: 'static_release_receipt_not_operation_owned',
+        migrationBlockedReason: 'static_release_explicit_migration_required',
         current: {
           identity: {
             satisfied: true,
@@ -881,7 +885,7 @@ test('isolation audit opens static control metadata repair only when releases an
         satisfied: true,
         automaticMigration: false,
         repairCandidate: false,
-        migrationBlockedReason: 'static_release_receipt_not_operation_owned',
+        migrationBlockedReason: 'static_release_explicit_migration_required',
         current: {
           identity: {
             satisfied: true,

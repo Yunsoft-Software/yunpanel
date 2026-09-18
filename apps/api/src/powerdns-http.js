@@ -387,7 +387,7 @@ async function defaultZoneRetirementService(
   const defaults = domainRegistry === null
     ? await defaultDomainAndSecretRegistries(authoritativeService, env)
     : null;
-  if (provisioningRegistry !== null && typeof provisioningRegistry.listForWebsite !== 'function') {
+  if (provisioningRegistry !== null && typeof provisioningRegistry.listForDnsZone !== 'function') {
     throw new PowerDnsHttpError(
       'dns_zone_retirement_provisioning_registry_invalid',
       'Website provisioning history is unavailable for DNS zone ownership inspection',

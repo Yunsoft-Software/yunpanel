@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createDomainRegistry, DomainRegistryError } from '../src/domain-registry.js';
+import { createDomainRegistry, DomainRegistryError, domainRegistryInternals } from '../src/domain-registry.js';
 
 const input = (primaryDomain = 'old.example.com', overrides = {}) => ({
   serverId: 'local', primaryDomain, aliases: ['www.old.example.com'], targetType: 'proxy',
@@ -121,7 +121,7 @@ test('Domain diagnosis maps safe errors to concrete actions without copying host
   assert.doesNotMatch(JSON.stringify(boundedHostile.diagnosis), /token_deadbeef/);
 });
 
-test('version one Domain state hydrates without rewrite and persists version three on mutation', async (t) => {
+test('version one Domain state hydrates without rewrite and persists the current version on mutation', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-domain-update-'));
   const filePath = path.join(directory, 'domains.json');
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -147,7 +147,7 @@ test('version one Domain state hydrates without rewrite and persists version thr
   const changes = { canonicalRedirect: true };
   const preview = await registry.previewDomainUpdate({ domainId: domain.id, changes });
   await registry.updateDomain({ domainId: domain.id, changes, previewDigest: preview.previewDigest });
-  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, 3);
+  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, domainRegistryInternals.storeVersion);
 });
 
 test('version two Domain state derives Nginx settings from its exact legacy target without eager rewrite', async (t) => {
@@ -173,7 +173,7 @@ test('version two Domain state derives Nginx settings from its exact legacy targ
   const changes = { nginxSettings: { proxyTimeoutSeconds: 45 } };
   const preview = await registry.previewDomainUpdate({ domainId: domain.id, changes });
   await registry.updateDomain({ domainId: domain.id, changes, previewDigest: preview.previewDigest });
-  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, 3);
+  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, domainRegistryInternals.storeVersion);
 });
 
 test('Domain Nginx settings preview exposes an exact diff and applies target invariants', async () => {

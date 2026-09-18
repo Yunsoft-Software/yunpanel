@@ -65,11 +65,14 @@ function mountWith(retirementService, retirementRuntime = {
   return app;
 }
 
-async function invoke(app, {
-  params = { domainId },
-  query = {},
-} = {}) {
-  const handler = app.routes.get('GET /api/domains/:domainId/dns/retirement-impact');
+async function invoke(app, keyOrOptions = {}, maybeOptions = {}) {
+  const key = typeof keyOrOptions === 'string'
+    ? keyOrOptions
+    : 'GET /api/domains/:domainId/dns/retirement-impact';
+  const { params = { domainId }, query = {} } = typeof keyOrOptions === 'string'
+    ? maybeOptions
+    : keyOrOptions;
+  const handler = app.routes.get(key);
   assert.ok(handler);
   let payload = null;
   let forwarded = null;
@@ -163,8 +166,10 @@ test('PowerDNS HTTP exposes read-only durable retirement operation list/detail w
     query: {},
   });
 
-  assert.deepEqual(list, { data: [operation] });
-  assert.deepEqual(detail, { data: operation });
+  assert.equal(list.forwarded, null);
+  assert.equal(detail.forwarded, null);
+  assert.deepEqual(list.payload, { data: [operation] });
+  assert.deepEqual(detail.payload, { data: operation });
   assert.deepEqual(calls, [['list', domainId], ['get', operationId]]);
   assert.equal(JSON.stringify(operation).includes('snapshot":'), false);
   assert.equal(JSON.stringify(operation).includes('confirmation":'), false);
@@ -178,22 +183,19 @@ test('retirement operation detail is Domain-scoped and rejects query expansion',
     get: async () => ({ id: operationId, domainId, status: 'deleted' }),
   });
 
-  await assert.rejects(
-    invoke(app, 'GET /api/domains/:domainId/dns/retirement-operations/:operationId', {
-      params: { domainId: otherDomainId, operationId },
-      query: {},
-    }),
-    (error) => error instanceof PowerDnsHttpError
-      && error.code === 'dns_zone_retirement_operation_not_found',
-  );
-  await assert.rejects(
-    invoke(app, 'GET /api/domains/:domainId/dns/retirement-operations', {
-      params: { domainId },
-      query: { include: 'snapshot' },
-    }),
-    (error) => error instanceof PowerDnsHttpError
-      && error.code === 'dns_zone_retirement_operation_query_invalid',
-  );
+  const wrongDomain = await invoke(app, 'GET /api/domains/:domainId/dns/retirement-operations/:operationId', {
+    params: { domainId: otherDomainId, operationId },
+    query: {},
+  });
+  assert.ok(wrongDomain.forwarded instanceof PowerDnsHttpError);
+  assert.equal(wrongDomain.forwarded.code, 'dns_zone_retirement_operation_not_found');
+
+  const expanded = await invoke(app, 'GET /api/domains/:domainId/dns/retirement-operations', {
+    params: { domainId },
+    query: { include: 'snapshot' },
+  });
+  assert.ok(expanded.forwarded instanceof PowerDnsHttpError);
+  assert.equal(expanded.forwarded.code, 'dns_zone_retirement_operation_query_invalid');
 });
 
 test('retirement impact rejects query expansion before service inspection', async () => {

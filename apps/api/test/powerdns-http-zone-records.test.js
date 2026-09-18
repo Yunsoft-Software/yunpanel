@@ -49,6 +49,8 @@ function mountWith(service) {
     dnsZoneReapplyRuntime: {
       preview: async () => ({}),
       start: async () => ({}),
+      rollbackPreview: async () => ({}),
+      rollback: async () => ({}),
       get: async () => null,
       listForDomain: async () => [],
     },

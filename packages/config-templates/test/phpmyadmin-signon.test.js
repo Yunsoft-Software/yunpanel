@@ -42,7 +42,7 @@ test('phpMyAdmin signon bridge consumes only a capability over the private Unix 
   assert.match(content, /YUNPANEL_SIGNON_ACTION/);
   assert.match(content, /session_destroy\(\)/);
   assert.match(content, /setcookie\(YUNPANEL_SIGNON_SESSION/);
-  assert.match(content, /Location: '\/'/);
+  assert.match(content, /header\('Location: \/', true, 303\);/);
   assert.match(content, /Location: ' \. YUNPANEL_GATEWAY_BASE/);
   assert.equal(content.includes('root\', \'\''), false);
 

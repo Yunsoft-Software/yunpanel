@@ -241,8 +241,8 @@ function persistedOperation(value) {
     createdAt: timestamp(value.createdAt),
     updatedAt: timestamp(value.updatedAt),
   });
-  if ((operation.sourceZoneDigest === null) !== (operation.sourceZoneSnapshot === null)
-    || (operation.appliedZoneDigest === null) !== (operation.appliedZoneSnapshot === null)) {
+  if ((operation.sourceZoneSnapshot !== null && operation.sourceZoneDigest === null)
+    || (operation.appliedZoneSnapshot !== null && operation.appliedZoneDigest === null)) {
     throw new DnsZoneReapplyOperationRegistryError(
       'dns_zone_reapply_operation_state_invalid',
       'DNS zone reapply rollback snapshot evidence is incomplete',

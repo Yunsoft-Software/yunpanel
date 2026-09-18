@@ -165,7 +165,7 @@ test('phpMyAdmin gateway access requires an authenticated Owner session', async 
   const readOnly = await listen(t, { role: 'read_only' });
   const denied = await fetch(`${readOnly.base}/api/phpmyadmin-gateway-access`);
   assert.equal(denied.status, 403);
-  assert.equal((await denied.json()).error.code, 'phpmyadmin_handoff_owner_required');
+  assert.equal((await denied.json()).error.code, 'forbidden');
   assert.deepEqual(readOnly.calls, []);
 });
 

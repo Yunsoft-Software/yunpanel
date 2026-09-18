@@ -14,6 +14,7 @@ const servicePackages = {
   nginx: ['nginx'], mariadb: ['mariadb-server'], mysql: ['mysql-server'], docker: ['docker.io'], cron: ['cron'],
   postfix: ['postfix'], dovecot: ['dovecot-imapd', 'dovecot-lmtpd', 'dovecot-sieve'], rspamd: ['rspamd'],
   roundcube: ['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], phpmyadmin: ['phpmyadmin', 'php-fpm', 'php-mysql'],
+  elfinder: ['php-fpm', 'php-mbstring', 'php-zip', 'libjs-jquery', 'libjs-jquery-ui'],
   postsrsd: ['postsrsd'],
 };
 
@@ -66,7 +67,7 @@ async function fixture(t, role = 'owner') {
 }
 
 function healthyService(id) {
-  const unitless = ['roundcube', 'phpmyadmin'].includes(id);
+  const unitless = ['roundcube', 'phpmyadmin', 'elfinder'].includes(id);
   return {
     id,
     label: `ignored-${id}`,
@@ -84,7 +85,7 @@ function healthyService(id) {
     }],
     health: {
       status: unitless ? 'installed' : 'ready',
-      configuration: ['postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin'].includes(id) ? 'valid' : 'not_applicable',
+      configuration: ['postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin', 'elfinder'].includes(id) ? 'valid' : 'not_applicable',
     },
   };
 }
@@ -156,7 +157,7 @@ test('service control validates action confirmation and serializes server system
 });
 
 test('package-only managed applications cannot be queued as systemd control operations', async (t) => {
-  for (const serviceId of ['roundcube', 'phpmyadmin']) {
+  for (const serviceId of ['roundcube', 'phpmyadmin', 'elfinder']) {
     const { request, jobRegistry, serverId } = await fixture(t);
     const response = await request(`/api/servers/${serverId}/services/${serviceId}/control`, {
       method: 'POST',

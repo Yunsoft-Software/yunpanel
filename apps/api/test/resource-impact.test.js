@@ -254,21 +254,22 @@ test('delete impact binds authoritative DNS retirement digests and blockers into
 
   assert.equal(providerCalls.length, 1);
   assert.deepEqual(providerCalls[0].domainIds, [state.child.id, state.domain.id].sort());
+  const expectedAuthoritativeDns = [{
+    domainId: state.child.id,
+    state: 'ready',
+    previewDigest: 'c'.repeat(64),
+    zoneSnapshotDigest: null,
+    blockers: [],
+  }, {
+    domainId: state.domain.id,
+    state: 'blocked',
+    previewDigest: 'a'.repeat(64),
+    zoneSnapshotDigest: 'b'.repeat(64),
+    blockers: ['dns_zone_delete_retention_policy_required'],
+  }].sort((left, right) => left.domainId.localeCompare(right.domainId));
   assert.deepEqual(first.dependencies.authoritativeDns, {
     status: 'available',
-    items: [{
-      domainId: state.child.id,
-      state: 'ready',
-      previewDigest: 'c'.repeat(64),
-      zoneSnapshotDigest: null,
-      blockers: [],
-    }, {
-      domainId: state.domain.id,
-      state: 'blocked',
-      previewDigest: 'a'.repeat(64),
-      zoneSnapshotDigest: 'b'.repeat(64),
-      blockers: ['dns_zone_delete_retention_policy_required'],
-    }],
+    items: expectedAuthoritativeDns,
   });
   assert.ok(first.blockers.some((item) => item.code === 'authoritative_dns_retirement_blocked'
     && item.resourceType === 'authoritative_dns' && item.count === 1));

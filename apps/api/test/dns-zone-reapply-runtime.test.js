@@ -349,7 +349,7 @@ test('journaled DNS zone reapply fails closed if exact source-zone evidence drif
 
   const failed = await runtime.start({ domainId, previewDigest, confirmation });
   assert.equal(failed.status, 'failed');
-  assert.equal(failed.error.code, 'dns_zone_reapply_preview_stale');
+  assert.equal(failed.error.code, 'powerdns_zone_restore_drift');
   assert.equal(applyCalls, 0);
 });
 
@@ -372,7 +372,7 @@ test('recovery refuses a no-op target when the exact final zone digest is not th
 
   const failed = await runtime.run(created.id);
   assert.equal(failed.status, 'failed');
-  assert.equal(failed.error.code, 'dns_zone_reapply_preview_stale');
+  assert.equal(failed.error.code, 'powerdns_zone_restore_drift');
   assert.equal(applyCalls, 0);
 });
 

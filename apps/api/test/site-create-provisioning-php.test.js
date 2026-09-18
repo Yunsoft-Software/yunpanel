@@ -77,6 +77,7 @@ test('PHP Website provisioning orders identity, PHP-FPM and Nginx with no raw so
     'website_metadata',
     'primary_domain_metadata',
     'unix_identity',
+    'elfinder',
     'php_bootstrap',
     'php_runtime',
     'nginx',

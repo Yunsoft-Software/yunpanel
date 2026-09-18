@@ -157,7 +157,7 @@ test('ttyd one-shot site session uses only a private Unix socket and fixed safe 
   const spawnCall = fx.calls.spawn[0];
   assert.equal(spawnCall.file, '/usr/bin/ttyd');
   const args = spawnCall.args;
-  assert.deepEqual(args.slice(0, 18), [
+  assert.deepEqual(args.slice(0, 19), [
     '--interface', `/run/yunpanel/ttyd/${sessionId}.sock`,
     '--socket-owner', 'yunpanel:yunpanel',
     '--writable',
@@ -168,6 +168,7 @@ test('ttyd one-shot site session uses only a private Unix socket and fixed safe 
     '--cwd', siteTarget.cwd,
     '--base-path', `/tools/ttyd/${sessionId}`,
     '--auth-header', 'X-YunPanel-TTYD-Auth',
+    '--terminal-type', 'xterm-256color',
   ]);
   assert.ok(args.includes('--terminal-type'));
   assert.equal(args[args.indexOf('--uid') + 1], '901');
@@ -324,8 +325,11 @@ test('ttyd session rejects unsafe runtime, socket root, non-root API and concurr
 test('ttyd argv policy pins one-shot writable origin-checked reverse-proxy mode', () => {
   const resolved = {
     cwd: '/root',
-    file: '/bin/bash',
-    args: ['--login'],
+    user: 'root',
+    uid: 0,
+    gid: 0,
+    directFile: '/bin/bash',
+    directArgs: ['--login'],
   };
   const args = ttydSessionInternals.ttydArgs({
     sessionId,

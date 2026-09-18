@@ -26,7 +26,7 @@ function localDomain(domain, localServerId) {
     || !Number.isSafeInteger(domain.stagedRevision) || domain.stagedRevision < 0
     || !Number.isSafeInteger(domain.appliedRevision) || domain.appliedRevision < 0
     || (domain.stagedChecksum !== null
-      && (typeof domain.stagedChecksum !== 'string' || !SHA256_PATTERN.test(domain.stagedChecksum))) {
+      && (typeof domain.stagedChecksum !== 'string' || !SHA256_PATTERN.test(domain.stagedChecksum)))) {
     throw new DomainSuspensionError(
       'domain_suspension_domain_invalid',
       'Domain routing state is invalid for suspension',
@@ -61,13 +61,6 @@ function controlPlaneSuspendState(domain, {
     && domain.appliedPrimaryDomain === domain.primaryDomain
     && domain.lastError === null) return 'suspended';
   if (domain.state === 'active'
-    && domain.desiredRevision === expectedRevision
-    && domain.stagedRevision === expectedRevision
-    && domain.appliedRevision === expectedRevision
-    && domain.stagedChecksum === checksum
-    && domain.appliedPrimaryDomain === domain.primaryDomain
-    && domain.lastError === null) return 'active';
-  if (domain.state === 'active'
     && domain.lastSuspensionOperationId === operationId
     && domain.desiredRevision === expectedRevision
     && domain.stagedRevision === expectedRevision
@@ -75,6 +68,13 @@ function controlPlaneSuspendState(domain, {
     && domain.stagedChecksum === checksum
     && domain.appliedPrimaryDomain === domain.primaryDomain
     && domain.lastError === null) return 'resumed';
+  if (domain.state === 'active'
+    && domain.desiredRevision === expectedRevision
+    && domain.stagedRevision === expectedRevision
+    && domain.appliedRevision === expectedRevision
+    && domain.stagedChecksum === checksum
+    && domain.appliedPrimaryDomain === domain.primaryDomain
+    && domain.lastError === null) return 'active';
   return 'drift';
 }
 

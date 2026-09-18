@@ -19,6 +19,7 @@ const POLICY = new Map([
   ['rspamd', definition(['rspamd'], ['rspamd.service'], true)],
   ['roundcube', definition(['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], [], true)],
   ['phpmyadmin', definition(['phpmyadmin', 'php-fpm', 'php-mysql'], [], true)],
+  ['elfinder', definition(['php-fpm', 'php-mbstring', 'php-zip', 'libjs-jquery', 'libjs-jquery-ui'], [], true)],
   ['postsrsd', definition(['postsrsd'], ['postsrsd.service'])],
 ]);
 

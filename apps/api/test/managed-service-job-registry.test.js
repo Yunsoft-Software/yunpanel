@@ -8,15 +8,16 @@ const servicePackages = {
   nginx: ['nginx'], mariadb: ['mariadb-server'], mysql: ['mysql-server'], docker: ['docker.io'], cron: ['cron'],
   postfix: ['postfix'], dovecot: ['dovecot-imapd', 'dovecot-lmtpd', 'dovecot-sieve'], rspamd: ['rspamd'],
   roundcube: ['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], phpmyadmin: ['phpmyadmin', 'php-fpm', 'php-mysql'],
+  elfinder: ['php-fpm', 'php-mbstring', 'php-zip', 'libjs-jquery', 'libjs-jquery-ui'],
   postsrsd: ['postsrsd'],
 };
 
 function serviceState(id, { installed = false, active = false } = {}) {
-  const unitless = ['roundcube', 'phpmyadmin'].includes(id);
+  const unitless = ['roundcube', 'phpmyadmin', 'elfinder'].includes(id);
   const effectiveActive = unitless ? false : active;
   const configuration = !installed
     ? 'not_checked'
-    : ['postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin'].includes(id) ? 'valid' : 'not_applicable';
+    : ['postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin', 'elfinder'].includes(id) ? 'valid' : 'not_applicable';
   return {
     id,
     label: 'must-not-persist',
