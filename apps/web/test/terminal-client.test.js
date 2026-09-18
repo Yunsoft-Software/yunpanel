@@ -3,8 +3,10 @@ import test from 'node:test';
 import {
   createTerminalWebSocket,
   normalizeTerminalCapability,
+  normalizeTtydSession,
   parseTerminalMessage,
   terminalWebSocketUrl,
+  ttydSessionPath,
 } from '../src/workspace/terminal-client.js';
 
 const capability = Object.freeze({
@@ -40,4 +42,36 @@ test('capability and server messages fail closed on target or shape drift', () =
   });
   assert.throws(() => parseTerminalMessage(JSON.stringify({ type: 'output', data: 'ok', html: '<img>' })));
   assert.throws(() => parseTerminalMessage(JSON.stringify({ type: 'ready', sessionId: 'bad', target: capability.target })));
+});
+
+
+test('ttyd session response stays bound to the capability target and canonical same-origin base path', () => {
+  const sessionId = '12345678-1234-4234-8234-123456789012';
+  const value = {
+    version: 1,
+    protocol: 'yunpanel-ttyd-v1',
+    audience: 'terminal',
+    sessionId,
+    target: capability.target,
+    basePath: `/tools/ttyd/${sessionId}/`,
+    expiresAt: Date.now() + 60_000,
+  };
+  const normalized = normalizeTtydSession(value, capability.target);
+  assert.equal(normalized.sessionId, sessionId);
+  assert.equal(normalized.basePath, `/tools/ttyd/${sessionId}/`);
+  assert.equal(ttydSessionPath(sessionId), `/terminal/ttyd-sessions/${sessionId}`);
+
+  assert.throws(() => normalizeTtydSession({
+    ...value,
+    target: { scope: 'server', serverId: 'other', user: 'root', cwd: '/root' },
+  }, capability.target));
+  assert.throws(() => normalizeTtydSession({
+    ...value,
+    basePath: '/tools/ttyd/other/',
+  }, capability.target));
+  assert.throws(() => normalizeTtydSession({
+    ...value,
+    socketPath: '/run/yunpanel/ttyd/private.sock',
+  }, capability.target));
+  assert.throws(() => ttydSessionPath('not-a-uuid'));
 });
