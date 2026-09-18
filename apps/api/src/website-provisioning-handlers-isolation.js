@@ -35,6 +35,30 @@ function passengerRuntimeHandler(baseRuntime, umaskManager) {
       }
       return Object.freeze({ ...result, runtimeUmask: policy.umask });
     },
+    async previewMigration(context = {}) {
+      if (typeof baseRuntime.previewMigration !== 'function') {
+        umaskFailure('website_passenger_migration_preview_unavailable', 'Passenger migration preview is unavailable');
+      }
+      const [runtime, policy] = await Promise.all([
+        baseRuntime.previewMigration(context),
+        umaskManager.inspect('passenger'),
+      ]);
+      const umask = policy?.satisfied === true && policy.umask === '0027'
+        ? Object.freeze({ satisfied: true, umask: '0027' })
+        : Object.freeze({
+          satisfied: false,
+          reason: policy?.reason ?? 'service_umask_unavailable',
+        });
+      return Object.freeze({
+        ...runtime,
+        runtimeUmask: umask,
+        satisfied: runtime?.satisfied === true && umask.satisfied === true,
+        differences: Object.freeze([
+          ...(Array.isArray(runtime?.differences) ? runtime.differences : ['passenger_runtime_preview_invalid']),
+          ...(umask.satisfied ? [] : ['passenger_runtime_umask_not_ready']),
+        ]),
+      });
+    },
   });
 }
 
@@ -74,6 +98,35 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
         publishIsolated: true,
         isolatedReleaseCount: isolation.releaseCount,
         isolatedCurrentRelease: isolation.currentRelease,
+      });
+    },
+    async previewMigration(context = {}) {
+      if (typeof isolationManager.previewMigration !== 'function') {
+        umaskFailure('website_static_migration_preview_unavailable', 'Static publish migration preview is unavailable');
+      }
+      const [runtime, isolation] = await Promise.all([
+        baseRuntime.inspect(context),
+        isolationManager.previewMigration(isolationIntent(context)),
+      ]);
+      const reason = runtime?.satisfied === true ? null : runtime?.reason ?? 'static_runtime_unavailable';
+      return Object.freeze({
+        version: 1,
+        adapter: 'static-runtime',
+        satisfied: runtime?.satisfied === true && isolation?.satisfied === true,
+        current: Object.freeze({
+          runtime,
+          isolation,
+        }),
+        desired: Object.freeze({
+          websiteId: context.intent?.websiteId ?? null,
+          applicationId: context.intent?.applicationId ?? null,
+          mode: context.intent?.mode ?? null,
+          deploymentId: context.intent?.deploymentId ?? null,
+        }),
+        differences: Object.freeze([
+          ...(reason ? [reason] : []),
+          ...(Array.isArray(isolation?.differences) ? isolation.differences : ['static_publish_preview_invalid']),
+        ]),
       });
     },
     compensate: (context = {}) => baseRuntime.compensate(context),
