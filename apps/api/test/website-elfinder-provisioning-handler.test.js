@@ -50,6 +50,46 @@ function fpmManager({ inspectSatisfied = true } = {}) {
   };
 }
 
+function sharedApplicationManager({ ready = true } = {}) {
+  const calls = [];
+  const result = () => ({
+    id: 'elfinder',
+    installed: ready,
+    active: false,
+    units: [],
+    health: {
+      status: ready ? 'installed' : 'configuration_invalid',
+      configuration: ready ? 'valid' : 'invalid',
+    },
+  });
+  return {
+    calls,
+    manager: {
+      async install(id) { calls.push(['install', id]); return result(); },
+      async inspect(id) { calls.push(['inspect', id]); return result(); },
+    },
+  };
+}
+
+function gatewayManager({ ready = true } = {}) {
+  const calls = [];
+  const result = () => ready
+    ? {
+        satisfied: true,
+        adapter: 'elfinder-nginx-gateway',
+        gatewaySocketPath: '/run/yunpanel/elfinder-http.sock',
+        configSha256: 'a'.repeat(64),
+      }
+    : { satisfied: false, reason: 'elfinder_gateway_socket_missing' };
+  return {
+    calls,
+    manager: {
+      async apply() { calls.push(['apply']); return result(); },
+      async inspect() { calls.push(['inspect']); return result(); },
+    },
+  };
+}
+
 function umaskManager({ satisfied = true } = {}) {
   const calls = [];
   return {
@@ -70,8 +110,12 @@ function umaskManager({ satisfied = true } = {}) {
 test('Website elFinder provisioning applies exact FPM identity and verifies shared PHP umask', async () => {
   const fpm = fpmManager();
   const umask = umaskManager();
+  const shared = sharedApplicationManager();
+  const gateway = gatewayManager();
   const handler = createWebsiteElFinderProvisioningHandler({
     fpmManager: fpm.manager,
+    sharedApplicationManager: shared.manager,
+    gatewayManager: gateway.manager,
     umaskManager: umask.manager,
   });
 
@@ -89,7 +133,11 @@ test('Website elFinder provisioning applies exact FPM identity and verifies shar
     ['apply', normalized, { operationId }],
     ['inspect', normalized],
   ]);
+  assert.deepEqual(shared.calls, [['install', 'elfinder']]);
   assert.deepEqual(umask.calls, [['apply', 'php']]);
+  assert.deepEqual(gateway.calls, [['apply']]);
+  assert.equal(result.sharedApplicationReady, true);
+  assert.equal(result.gatewaySocketPath, '/run/yunpanel/elfinder-http.sock');
 });
 
 test('Website elFinder inspection is read-only and reports FPM or umask readiness', async () => {
@@ -98,6 +146,8 @@ test('Website elFinder inspection is read-only and reports FPM or umask readines
     const umask = umaskManager();
     const handler = createWebsiteElFinderProvisioningHandler({
       fpmManager: fpm.manager,
+      sharedApplicationManager: sharedApplicationManager().manager,
+      gatewayManager: gatewayManager().manager,
       umaskManager: umask.manager,
     });
     const result = await handler.inspect({ intent });
@@ -111,6 +161,8 @@ test('Website elFinder inspection is read-only and reports FPM or umask readines
     const umask = umaskManager({ satisfied: false });
     const handler = createWebsiteElFinderProvisioningHandler({
       fpmManager: fpm.manager,
+      sharedApplicationManager: sharedApplicationManager().manager,
+      gatewayManager: gatewayManager().manager,
       umaskManager: umask.manager,
     });
     const result = await handler.inspect({ intent });
@@ -120,10 +172,38 @@ test('Website elFinder inspection is read-only and reports FPM or umask readines
   }
 });
 
+test('Website elFinder inspection reports shared application and gateway readiness independently', async () => {
+  {
+    const handler = createWebsiteElFinderProvisioningHandler({
+      fpmManager: fpmManager().manager,
+      sharedApplicationManager: sharedApplicationManager({ ready: false }).manager,
+      gatewayManager: gatewayManager().manager,
+      umaskManager: umaskManager().manager,
+    });
+    const result = await handler.inspect({ intent });
+    assert.deepEqual(result, { satisfied: false, reason: 'elfinder_shared_runtime_not_ready' });
+  }
+
+  {
+    const handler = createWebsiteElFinderProvisioningHandler({
+      fpmManager: fpmManager().manager,
+      sharedApplicationManager: sharedApplicationManager().manager,
+      gatewayManager: gatewayManager({ ready: false }).manager,
+      umaskManager: umaskManager().manager,
+    });
+    const result = await handler.inspect({ intent });
+    assert.equal(result.satisfied, false);
+    assert.equal(result.reason, 'elfinder_gateway_not_ready');
+    assert.equal(result.gatewayReason, 'elfinder_gateway_socket_missing');
+  }
+});
+
 test('Website elFinder compensation delegates only operation-owned FPM state', async () => {
   const fpm = fpmManager();
   const handler = createWebsiteElFinderProvisioningHandler({
     fpmManager: fpm.manager,
+    sharedApplicationManager: sharedApplicationManager().manager,
+    gatewayManager: gatewayManager().manager,
     umaskManager: umaskManager().manager,
   });
 
@@ -148,6 +228,8 @@ test('Website elFinder handler rejects forged or expanded orchestration intent b
   const fpm = fpmManager();
   const handler = createWebsiteElFinderProvisioningHandler({
     fpmManager: fpm.manager,
+    sharedApplicationManager: sharedApplicationManager().manager,
+    gatewayManager: gatewayManager().manager,
     umaskManager: umaskManager().manager,
   });
 
@@ -169,6 +251,8 @@ test('Website elFinder apply fails closed if FPM does not survive shared service
   const fpm = fpmManager({ inspectSatisfied: false });
   const handler = createWebsiteElFinderProvisioningHandler({
     fpmManager: fpm.manager,
+    sharedApplicationManager: sharedApplicationManager().manager,
+    gatewayManager: gatewayManager().manager,
     umaskManager: umaskManager().manager,
   });
 
