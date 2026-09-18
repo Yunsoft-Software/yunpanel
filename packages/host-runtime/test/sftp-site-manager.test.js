@@ -24,6 +24,7 @@ function fakeHost() {
   const activeUnits = new Set();
   const calls = [];
   const removals = [];
+  const directoryEntries = new Map();
   const writeFileFn = async (target, content, options = {}) => {
     files.set(target, { content: String(content), mode: options.mode ?? 0o600 });
   };
@@ -55,6 +56,22 @@ function fakeHost() {
       isSymbolicLink: () => false,
     };
   };
+  const readdirFn = async (target) => {
+    if (!dirs.has(target)) { const error = new Error('missing'); error.code = 'ENOENT'; throw error; }
+    const nested = [...dirs.keys()]
+      .filter((candidate) => candidate !== target && path.posix.dirname(candidate) === target)
+      .map((candidate) => path.posix.basename(candidate));
+    return [...new Set([...(directoryEntries.get(target) ?? []), ...nested])];
+  };
+  const rmdirFn = async (target) => {
+    const entries = await readdirFn(target);
+    if (entries.length > 0) {
+      const error = new Error('not empty');
+      error.code = 'ENOTEMPTY';
+      throw error;
+    }
+    dirs.delete(target);
+  };
   const run = async (file, args) => {
     calls.push([file, [...args]]);
     if (file === '/usr/bin/systemd-escape') return { stdout: `${unitName}\n` };
@@ -80,7 +97,23 @@ function fakeHost() {
     }
     throw new Error(`unexpected command ${file} ${args.join(' ')}`);
   };
-  return { files, dirs, activeUnits, calls, removals, run, writeFileFn, readFileFn, renameFn, rmFn, mkdirFn, lstatFn };
+  return {
+    files,
+    dirs,
+    activeUnits,
+    calls,
+    removals,
+    directoryEntries,
+    run,
+    writeFileFn,
+    readFileFn,
+    readdirFn,
+    renameFn,
+    rmFn,
+    rmdirFn,
+    mkdirFn,
+    lstatFn,
+  };
 }
 
 function manager(host) {
@@ -94,8 +127,10 @@ function manager(host) {
     run: host.run,
     writeFileFn: host.writeFileFn,
     readFileFn: host.readFileFn,
+    readdirFn: host.readdirFn,
     renameFn: host.renameFn,
     rmFn: host.rmFn,
+    rmdirFn: host.rmdirFn,
     mkdirFn: host.mkdirFn,
     lstatFn: host.lstatFn,
   });
@@ -147,7 +182,7 @@ test('SFTP provisioning refuses foreign pre-existing artifacts without an owners
   assert.equal(host.activeUnits.size, 0);
 });
 
-test('SFTP compensation removes receipt-owned config and unit while preserving unowned chroot directories', async () => {
+test('SFTP compensation removes empty operation-owned directories but keeps the shared chroot root', async () => {
   const host = fakeHost();
   const value = manager(host);
   await value.apply(intent(), { operationId });
@@ -156,11 +191,13 @@ test('SFTP compensation removes receipt-owned config and unit while preserving u
 
   assert.equal(result.satisfied, true);
   assert.equal(result.removed, true);
+  assert.equal(result.preservedDirectoryCount, 0);
   assert.equal(host.files.has(sshdConfigPath), false);
   assert.equal(host.files.has(unitPath), false);
   assert.equal(host.activeUnits.has(unitName), false);
-  assert.equal(host.dirs.has(chrootDirectory), true);
-  assert.equal(host.dirs.has(mountDirectory), true);
+  assert.equal(host.dirs.has(chrootDirectory), false);
+  assert.equal(host.dirs.has(mountDirectory), false);
+  assert.equal(host.dirs.has(chrootRoot), true);
   assert.equal(host.removals.some(([target]) => [chrootDirectory, mountDirectory].includes(target)), false);
 });
 
@@ -286,6 +323,26 @@ test('SFTP migration compensation removes only receipt-owned artifacts and keeps
   assert.equal(compensated.removedSftpIsolation, true);
   assert.equal(inspected.satisfied, true);
   assert.equal(inspected.removedSftpIsolation, true);
-  assert.equal(host.dirs.has(chrootDirectory), true);
+  assert.equal(host.dirs.has(chrootDirectory), false);
+  assert.equal(host.dirs.has(mountDirectory), false);
+});
+
+
+test('SFTP migration rollback preserves operation-owned directory after data appears', async () => {
+  const host = fakeHost();
+  const value = manager(host);
+  await value.applyMigration(intent(), { operationId });
+  host.directoryEntries.set(mountDirectory, ['customer-data.txt']);
+
+  const compensated = await value.compensateMigration(intent(), { operationId });
+
+  assert.equal(compensated.satisfied, true);
+  assert.equal(compensated.removedSftpIsolation, true);
+  assert.equal(compensated.preservedDirectoryCount, 1);
   assert.equal(host.dirs.has(mountDirectory), true);
+  assert.equal(host.dirs.has(chrootDirectory), true);
+
+  const inspected = await value.inspectMigrationCompensation(intent(), { operationId });
+  assert.equal(inspected.satisfied, true);
+  assert.equal(inspected.removedSftpIsolation, true);
 });
