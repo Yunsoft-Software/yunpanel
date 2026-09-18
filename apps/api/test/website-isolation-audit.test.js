@@ -55,6 +55,7 @@ function service({
   stepResults = {},
   migrationPreviews = {},
   workspaceMigrationAvailable = false,
+  identityMigrationAvailable = false,
 } = {}) {
   const handlers = {};
   for (const kind of ['unix_identity', 'runtime', 'static_runtime', 'php_runtime', 'sftp']) {
@@ -76,6 +77,7 @@ function service({
     provisioningRegistry: { async getLatestForWebsite(id) { return id === websiteId ? latest : null; } },
     provisioningHandlers: handlers,
     workspaceMigrationAvailable,
+    identityMigrationAvailable,
   });
 }
 
@@ -180,6 +182,56 @@ test('isolation audit emits exact receipt-bound directory changes for canonical 
       ],
     },
   });
+});
+
+test('isolation audit opens apply only for an all-missing canonical Unix identity preview', async () => {
+  const preview = {
+    version: 1,
+    satisfied: false,
+    safeCreateCandidate: true,
+    current: { account: null, group: null, home: null },
+    desired: {
+      user: identity.unixUser,
+      homeDirectory: identity.paths.workspace.homeDirectory,
+      shellPolicy: 'nologin',
+      privateGroup: true,
+      groupMemberCount: 0,
+      homeMode: '0750',
+    },
+    differences: [
+      'website_identity_user_missing',
+      'website_identity_group_missing',
+      'website_identity_home_missing',
+    ],
+  };
+  const audit = await service({
+    identityMigrationAvailable: true,
+    stepResults: { unix_identity: { satisfied: false, reason: 'website_identity_user_missing' } },
+    migrationPreviews: { unix_identity: preview },
+  }).audit(websiteId);
+
+  assert.equal(audit.migration.applyAvailable, true);
+  assert.match(audit.migration.warning, /all-missing canonical Unix user\/group\/HOME/);
+  assert.equal(audit.migration.changes[0].action, 'create_canonical_unix_identity');
+  assert.equal(audit.migration.changes[0].ownership, 'operation_receipt_planned');
+  assert.equal(audit.migration.changes[0].applyState, 'requires_explicit_apply');
+  assert.deepEqual(audit.migration.changes[0].desired, { identity: preview.desired });
+
+  const blocked = await service({
+    identityMigrationAvailable: true,
+    stepResults: { unix_identity: { satisfied: false, reason: 'website_identity_home_drift' } },
+    migrationPreviews: {
+      unix_identity: {
+        ...preview,
+        safeCreateCandidate: false,
+        current: { account: null, group: null, home: { uid: 1201, gid: 1201, mode: '0755' } },
+        differences: ['website_identity_home_conflict'],
+      },
+    },
+  }).audit(websiteId);
+  assert.equal(blocked.migration.applyAvailable, false);
+  assert.equal(blocked.migration.changes[0].action, 'reconcile_isolation_step');
+  assert.equal(blocked.migration.changes[0].applyState, 'blocked');
 });
 
 test('isolation audit pins a public-safe Unix identity migration preview into drift digest', async () => {
