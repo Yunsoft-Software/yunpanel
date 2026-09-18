@@ -105,7 +105,8 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
     || typeof registry.listInterrupted !== 'function' || typeof registry.markApplying !== 'function'
     || typeof registry.succeed !== 'function' || typeof registry.fail !== 'function'
-    || !service || typeof service.preview !== 'function' || typeof service.apply !== 'function') {
+    || !service || typeof service.preview !== 'function'
+    || typeof service.captureRollbackSnapshot !== 'function' || typeof service.apply !== 'function') {
     throw new DnsZoneReapplyRuntimeError(
       'dns_zone_reapply_runtime_dependencies_invalid',
       'DNS zone reapply runtime dependencies are unavailable',
@@ -241,8 +242,15 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
         409,
       );
     }
+    let rollbackEvidence;
+    try {
+      rollbackEvidence = await service.captureRollbackSnapshot({
+        domainId,
+        sourceZoneDigest: current.sourceZoneDigest,
+      });
+    } catch (error) { throw mapped(error); }
     let operation;
-    try { operation = await registry.create(current); }
+    try { operation = await registry.create(current, rollbackEvidence); }
     catch (error) { throw mapped(error); }
     return run(operation.id);
   }
