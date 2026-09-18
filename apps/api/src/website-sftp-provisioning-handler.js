@@ -93,6 +93,16 @@ export function createWebsiteSftpProvisioningHandler({
   return Object.freeze({
     apply: ({ intent, operationId } = {}) => sftpManager.apply(sftpIntent(intent), { operationId }),
     inspect: ({ intent, operationId } = {}) => sftpManager.inspect(sftpIntent(intent), { operationId }),
+    previewMigration: ({ intent, operationId } = {}) => {
+      if (typeof sftpManager.previewMigration !== 'function') {
+        throw new WebsiteSftpProvisioningError(
+          'website_sftp_migration_preview_unavailable',
+          'Website SFTP migration preview is unavailable',
+          503,
+        );
+      }
+      return sftpManager.previewMigration(sftpIntent(intent), { operationId });
+    },
     compensate: ({ intent, operationId } = {}) => sftpManager.compensate(sftpIntent(intent), { operationId }),
     inspectCompensation: ({ intent, operationId } = {}) => sftpManager.inspectCompensation(sftpIntent(intent), { operationId }),
   });
@@ -148,6 +158,30 @@ export function createWebsiteSftpKeyAwareProvisioningHandler({ baseHandler, sftp
           reason: 'sftp_key_reconcile_required',
         }));
       }
+    },
+    async previewMigration(context = {}) {
+      const id = websiteId(context);
+      if (typeof baseHandler.previewMigration !== 'function') {
+        throw new WebsiteSftpProvisioningError(
+          'website_sftp_migration_preview_unavailable',
+          'Website SFTP migration preview is unavailable',
+          503,
+        );
+      }
+      const base = await baseHandler.previewMigration(context);
+      let authorizedKeys;
+      try {
+        authorizedKeys = keyMaterialization(await sftpKeyService.inspectMaterialization(id));
+      } catch {
+        authorizedKeys = Object.freeze({
+          satisfied: false,
+          reason: 'sftp_key_reconcile_required',
+        });
+      }
+      return Object.freeze({
+        ...base,
+        authorizedKeys,
+      });
     },
     compensate: (context = {}) => baseHandler.compensate(context),
     inspectCompensation: (context = {}) => baseHandler.inspectCompensation(context),
