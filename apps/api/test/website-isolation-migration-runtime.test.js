@@ -368,6 +368,81 @@ function phpContainerMigrationHandler() {
   };
 }
 
+function staticControlPreview(overrides = {}) {
+  const identity = createApplicationIdentity(applicationId);
+  const publishRoot = identity.paths.static.publishRoot;
+  const desired = {
+    websiteId,
+    applicationId,
+    unixUser: applicationUser,
+    homeDirectory,
+    publishRoot,
+    releasesRoot: `${publishRoot}/releases`,
+    currentPath: `${publishRoot}/current`,
+    controlDirectoryMode: '0711',
+    releaseDirectoryMode: '0750',
+    releaseFileMode: '0640',
+    nginxDirectoryAcl: 'user:www-data:r-x',
+    nginxFileAcl: 'user:www-data:r--',
+    aclPackage: 'acl',
+  };
+  return preview({
+    ...overrides,
+    migration: {
+      applyAvailable: true,
+      previewDigest,
+      confirmation,
+      changes: [{
+        action: 'repair_static_control_metadata',
+        applyState: 'requires_explicit_apply',
+        current: {
+          operationId: sourceOperationId,
+          staticRuntimeMigrationPreview: {
+            safeControlMigrationCandidate: true,
+            current: {
+              isolation: { safeMigrationCandidate: true },
+            },
+          },
+        },
+        desired: { staticControl: desired },
+      }],
+    },
+  });
+}
+
+function staticControlMigrationHandler() {
+  let active = false;
+  let compensated = false;
+  const calls = [];
+  return {
+    calls,
+    async inspectControlMigrationOperation(context) {
+      calls.push(['inspect-static-control-operation', context]);
+      return active
+        ? { satisfied: true, staticControlReceiptVersion: 1, migratedStaticControlMetadata: true }
+        : { satisfied: false, reason: 'static_publish_migration_receipt_missing' };
+    },
+    async applyControlMigration(context) {
+      calls.push(['apply-static-control', context]);
+      active = true;
+      compensated = false;
+      return { satisfied: true, staticControlReceiptVersion: 1, migratedStaticControlMetadata: true };
+    },
+    async inspectControlMigrationCompensation(context) {
+      calls.push(['inspect-static-control-compensation', context]);
+      return compensated
+        ? { satisfied: true, restoredStaticControlMetadata: true }
+        : { satisfied: false, reason: 'static_publish_migration_compensation_pending' };
+    },
+    async compensateControlMigration(context) {
+      calls.push(['compensate-static-control', context]);
+      active = false;
+      compensated = true;
+      return { satisfied: true, restoredStaticControlMetadata: true };
+    },
+  };
+}
+
 function phpMigrationHandler() {
   let active = false;
   let compensated = false;
@@ -881,4 +956,84 @@ test('PHP container metadata rollback uses only its receipt-owned compensation',
     restoredPhpContainerMetadata: true,
   });
   assert.equal(handler.calls.some(([name]) => name === 'compensate-php-container'), true);
+});
+
+
+test('static control metadata migration applies only through its typed receipt handler', async () => {
+  const handler = staticControlMigrationHandler();
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: registry(),
+    auditService: { audit: async () => staticControlPreview() },
+    workspaceManager: identityManager(),
+    migrationHandlers: { static_runtime: handler },
+  });
+  await runtime.init();
+
+  const result = await runtime.start({ websiteId, previewDigest, confirmation });
+
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.adapter, 'static_control');
+  assert.deepEqual(result.result, {
+    satisfied: true,
+    staticControlReceiptVersion: 1,
+    migratedStaticControlMetadata: true,
+  });
+  assert.deepEqual(handler.calls.map(([name]) => name), [
+    'inspect-static-control-operation',
+    'apply-static-control',
+  ]);
+  assert.equal(handler.calls[0][1].sourceOperationId, sourceOperationId);
+  assert.equal(handler.calls[0][1].operationId, operationId);
+  assert.deepEqual(handler.calls[1][1].intent, { websiteId, applicationId });
+});
+
+test('static control metadata migration restart closes receipt without replaying mutation', async () => {
+  const store = registry();
+  await store.init();
+  const created = await store.create(staticControlPreview());
+  await store.markApplying(created.id);
+  const handler = staticControlMigrationHandler();
+  await handler.applyControlMigration({
+    operationId,
+    sourceOperationId,
+    websiteId,
+    intent: { websiteId, applicationId },
+  });
+  handler.calls.length = 0;
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: store,
+    auditService: { audit: async () => staticControlPreview() },
+    workspaceManager: identityManager(),
+    migrationHandlers: { static_runtime: handler },
+  });
+
+  const recovery = await runtime.init();
+
+  assert.deepEqual(recovery, [{ operationId, recovered: true }]);
+  assert.equal((await runtime.get(operationId)).status, 'succeeded');
+  assert.deepEqual(handler.calls.map(([name]) => name), ['inspect-static-control-operation']);
+});
+
+test('static control metadata rollback uses only its receipt-owned compensation', async () => {
+  const handler = staticControlMigrationHandler();
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: registry(),
+    auditService: { audit: async () => staticControlPreview() },
+    workspaceManager: identityManager(),
+    migrationHandlers: { static_runtime: handler },
+  });
+  await runtime.init();
+  await runtime.start({ websiteId, previewDigest, confirmation });
+
+  const result = await runtime.rollback({
+    operationId,
+    confirmation: `rollback-isolation-migration:${operationId}:${previewDigest}`,
+  });
+
+  assert.equal(result.status, 'compensated');
+  assert.deepEqual(result.compensation, {
+    satisfied: true,
+    restoredStaticControlMetadata: true,
+  });
+  assert.equal(handler.calls.some(([name]) => name === 'compensate-static-control'), true);
 });
