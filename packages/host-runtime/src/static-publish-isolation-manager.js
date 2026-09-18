@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { access, chmod, chown, lstat, readdir, readlink } from 'node:fs/promises';
+import { access, chmod, chown, lstat, mkdir, readFile, readdir, readlink, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { createApplicationIdentity } from './application-identity.js';
@@ -12,6 +13,9 @@ const GETFACL_PATH = '/usr/bin/getfacl';
 const CHOWN_PATH = '/usr/bin/chown';
 const ACL_PACKAGE = 'acl';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MIGRATION_RECEIPT_ROOT = '/var/lib/yunpanel/staging/static-control-migrations';
+const MIGRATION_RECEIPT_VERSION = 1;
+const MIGRATION_RECEIPT_STATES = new Set(['prepared', 'active', 'compensated']);
 
 export class StaticPublishIsolationError extends Error {
   constructor(code, message) {
@@ -44,6 +48,70 @@ function modeOf(stat) {
   return Number(stat?.mode ?? 0) & 0o777;
 }
 
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function normalizeOperationId(value) {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
+    throw new StaticPublishIsolationError('static_publish_migration_operation_invalid', 'Static publish migration operation id is invalid');
+  }
+  return value.toLowerCase();
+}
+
+function migrationSpecDigest(spec) {
+  return sha256(JSON.stringify({
+    version: 1,
+    websiteId: spec.websiteId,
+    applicationId: spec.applicationId,
+    publishRoot: spec.publishRoot,
+    releasesRoot: spec.releasesRoot,
+    currentPath: spec.currentPath,
+  }));
+}
+
+function receiptMetadata(value, { symlink = false } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || !Number.isSafeInteger(value.uid) || value.uid < 0
+    || !Number.isSafeInteger(value.gid) || value.gid < 0
+    || (!symlink && (!Number.isSafeInteger(value.mode) || value.mode < 0 || value.mode > 0o777))) {
+    throw new StaticPublishIsolationError('static_publish_migration_receipt_invalid', 'Static publish migration receipt metadata is invalid');
+  }
+  return Object.freeze({
+    uid: value.uid,
+    gid: value.gid,
+    ...(symlink ? {} : { mode: value.mode }),
+  });
+}
+
+function normalizeMigrationReceipt(value, { operationId, spec } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== MIGRATION_RECEIPT_VERSION
+    || value.operationId !== operationId
+    || value.websiteId !== spec.websiteId
+    || value.applicationId !== spec.applicationId
+    || value.specDigest !== migrationSpecDigest(spec)
+    || !MIGRATION_RECEIPT_STATES.has(value.state)
+    || typeof value.currentTarget !== 'string' || releaseIdFromTarget(value.currentTarget) === null
+    || !value.previous || typeof value.previous !== 'object' || Array.isArray(value.previous)) {
+    throw new StaticPublishIsolationError('static_publish_migration_receipt_invalid', 'Static publish migration receipt is invalid');
+  }
+  return Object.freeze({
+    version: MIGRATION_RECEIPT_VERSION,
+    operationId,
+    websiteId: spec.websiteId,
+    applicationId: spec.applicationId,
+    specDigest: value.specDigest,
+    currentTarget: value.currentTarget,
+    previous: Object.freeze({
+      publishRoot: receiptMetadata(value.previous.publishRoot),
+      releasesRoot: receiptMetadata(value.previous.releasesRoot),
+      current: receiptMetadata(value.previous.current, { symlink: true }),
+    }),
+    state: value.state,
+  });
+}
+
 function missing(error) {
   return error?.code === 'ENOENT';
 }
@@ -59,6 +127,7 @@ function releaseIdFromTarget(value) {
 }
 
 export function createStaticPublishIsolationManager({
+  migrationReceiptRoot = MIGRATION_RECEIPT_ROOT,
   identityManager = createWebsiteIdentityPathManager(),
   run = (file, args, options = {}) => execFileAsync(file, args, {
     encoding: 'utf8',
@@ -70,14 +139,66 @@ export function createStaticPublishIsolationManager({
   chmodFn = chmod,
   chownFn = chown,
   lstatFn = lstat,
+  mkdirFn = mkdir,
+  readFileFn = readFile,
   readdirFn = readdir,
   readlinkFn = readlink,
+  renameFn = rename,
+  rmFn = rm,
+  writeFileFn = writeFile,
 } = {}) {
   if (!identityManager || typeof identityManager.inspect !== 'function'
     || typeof run !== 'function' || typeof accessFn !== 'function'
     || typeof chmodFn !== 'function' || typeof chownFn !== 'function'
-    || typeof lstatFn !== 'function' || typeof readdirFn !== 'function' || typeof readlinkFn !== 'function') {
+    || typeof lstatFn !== 'function' || typeof mkdirFn !== 'function' || typeof readFileFn !== 'function'
+    || typeof readdirFn !== 'function' || typeof readlinkFn !== 'function' || typeof renameFn !== 'function'
+    || typeof rmFn !== 'function' || typeof writeFileFn !== 'function') {
     throw new StaticPublishIsolationError('static_publish_isolation_dependencies_invalid', 'Static publish isolation dependencies are invalid');
+  }
+
+  function migrationReceiptPath(operationId) {
+    return path.posix.join(migrationReceiptRoot, `${operationId}.json`);
+  }
+
+  async function atomicWrite(targetPath, content, mode) {
+    const temporaryPath = `${targetPath}.${process.pid}.tmp`;
+    await rmFn(temporaryPath, { force: true }).catch(() => {});
+    try {
+      await writeFileFn(temporaryPath, content, { encoding: 'utf8', mode });
+      await renameFn(temporaryPath, targetPath);
+    } finally {
+      await rmFn(temporaryPath, { force: true }).catch(() => {});
+    }
+  }
+
+  async function loadMigrationReceipt(operationId, spec) {
+    let raw;
+    try { raw = await readFileFn(migrationReceiptPath(operationId), 'utf8'); }
+    catch (error) {
+      if (missing(error)) return null;
+      throw new StaticPublishIsolationError('static_publish_migration_receipt_unavailable', 'Static publish migration receipt could not be read');
+    }
+    try { return normalizeMigrationReceipt(JSON.parse(raw), { operationId, spec }); }
+    catch (error) {
+      if (error instanceof StaticPublishIsolationError) throw error;
+      throw new StaticPublishIsolationError('static_publish_migration_receipt_invalid', 'Static publish migration receipt is invalid');
+    }
+  }
+
+  async function persistMigrationReceipt(operationId, spec, value) {
+    await mkdirFn(migrationReceiptRoot, { recursive: true, mode: 0o700 });
+    const receipt = {
+      version: MIGRATION_RECEIPT_VERSION,
+      operationId,
+      websiteId: spec.websiteId,
+      applicationId: spec.applicationId,
+      specDigest: migrationSpecDigest(spec),
+      currentTarget: value.currentTarget,
+      previous: value.previous,
+      state: value.state,
+    };
+    await atomicWrite(migrationReceiptPath(operationId), `${JSON.stringify(receipt)}\n`, 0o600);
+    return normalizeMigrationReceipt(receipt, { operationId, spec });
   }
 
   async function inspectIdentity(spec) {
@@ -430,5 +551,9 @@ export const staticPublishIsolationInternals = Object.freeze({
   aclHas,
   releaseIdFromTarget,
   modeOf,
+  migrationSpecDigest,
+  normalizeMigrationReceipt,
   aclPackage: ACL_PACKAGE,
+  migrationReceiptVersion: MIGRATION_RECEIPT_VERSION,
+  paths: Object.freeze({ MIGRATION_RECEIPT_ROOT }),
 });
