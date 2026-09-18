@@ -45,6 +45,8 @@ import { createJobRegistry } from './job-registry.js';
 import { createJobLogStore } from './job-log-store.js';
 import { createGithubWebhookHandler } from './github-webhook-http.js';
 import { createLiveSessionRegistry } from './live-session-registry.js';
+import { createElFinderHandoffService } from './elfinder-handoff-service.js';
+import { startElFinderHandoffSocket } from './elfinder-handoff-socket.js';
 import { createLocalDatabaseCredentialOperation } from './local-database-credential-operation.js';
 import { createLocalHostOperations } from './local-host-operations.js';
 import { createMailAliasRegistry } from './mail-alias-registry.js';
@@ -150,6 +152,11 @@ function reportLocalExecutorFault(error) {
 function reportPhpMyAdminHandoffFault(error) {
   const code = typeof error?.code === 'string' ? error.code : 'phpmyadmin_handoff_socket_fault';
   console.error(`[yunpanel-api] phpMyAdmin handoff unavailable code=${code}`);
+}
+
+function reportElFinderHandoffFault(error) {
+  const code = typeof error?.code === 'string' ? error.code : 'elfinder_handoff_socket_fault';
+  console.error(`[yunpanel-api] elFinder handoff unavailable code=${code}`);
 }
 
 function reportAuditFault(metadata) {
@@ -411,6 +418,21 @@ if (localServerId) {
     reportPhpMyAdminHandoffFault(error);
   }
 }
+const elFinderHandoffService = localServerId
+  ? createElFinderHandoffService({
+    websiteRegistry,
+    localServerId,
+    liveSessions,
+  })
+  : null;
+let elFinderHandoffRuntime = null;
+if (elFinderHandoffService) {
+  try {
+    elFinderHandoffRuntime = await startElFinderHandoffSocket({ elFinderHandoffService });
+  } catch (error) {
+    reportElFinderHandoffFault(error);
+  }
+}
 const websiteDatabaseInventoryProvider = () => databaseManager.inspect();
 const websiteDatabaseHealthProvider = () => databaseManager.inspectSecurityBaseline();
 websiteProvisioningRuntime.configureDatabaseControlPlane({
@@ -479,6 +501,7 @@ const listener = createAuthenticatedApi({
       databaseCredentialRegistry,
       databaseCredentialApplyService,
       phpMyAdminHandoffService: phpMyAdminHandoffRuntime ? phpMyAdminHandoffService : null,
+      elFinderHandoffService: elFinderHandoffRuntime ? elFinderHandoffService : null,
       databaseInventoryProvider: () => databaseManager.inspect(),
       databaseHealthProvider: () => databaseManager.inspectSecurityBaseline(),
       websiteMigrationPolicy,
@@ -607,6 +630,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] secret store=${applicationEnvironmentRegistry.secretStoreConfigured ? 'configured' : 'not configured'}`);
   console.log(`[yunpanel-api] authentication=${authStore.configured() ? 'configured' : 'local setup required'}`);
   console.log(`[yunpanel-api] phpMyAdmin handoff=${phpMyAdminHandoffRuntime ? 'enabled' : 'disabled'}`);
+  console.log(`[yunpanel-api] elFinder handoff=${elFinderHandoffRuntime ? 'enabled' : 'disabled'}`);
   console.log(`[yunpanel-api] local execution=${localRuntime ? `enabled server=${localRuntime.serverId} operations=${localRuntime.operations.length}` : 'disabled'}`);
   console.log(`[yunpanel-api] site files=${localServerId ? `enabled server=${localServerId}` : 'disabled'}`);
 });
@@ -620,6 +644,10 @@ async function shutdown(signal) {
   if (phpMyAdminHandoffRuntime) {
     try { await phpMyAdminHandoffRuntime.close(); }
     catch { console.error('[yunpanel-api] phpMyAdmin handoff shutdown failed'); }
+  }
+  if (elFinderHandoffRuntime) {
+    try { await elFinderHandoffRuntime.close(); }
+    catch { console.error('[yunpanel-api] elFinder handoff shutdown failed'); }
   }
   liveSessions.closeAll('server_shutdown');
   terminalWebSocket.closeAll('server_shutdown');
