@@ -764,6 +764,12 @@ export function createStaticPublishIsolationManager({
       && current.gid === previous.gid
       && current.mode === previous.mode
       && current.acl === previous.acl;
+    const desired = current.uid === receipt.desiredUid
+      && current.gid === receipt.desiredGid
+      && current.mode === desiredMode
+      && current.acl === previous.desiredAcl;
+    if (previousMatch && desired) return 'unchanged';
+    if (desired) return 'desired';
     if (previousMatch) return 'previous';
 
     const afterChown = current.uid === receipt.desiredUid
@@ -777,12 +783,6 @@ export function createStaticPublishIsolationManager({
       && current.mode === desiredMode
       && current.acl === modeAdjustedReleaseAcl(previous.acl, previous.type);
     if (afterChmod) return 'after_chmod';
-
-    const desired = current.uid === receipt.desiredUid
-      && current.gid === receipt.desiredGid
-      && current.mode === desiredMode
-      && current.acl === previous.desiredAcl;
-    if (desired) return 'desired';
     return null;
   }
 
@@ -898,7 +898,7 @@ export function createStaticPublishIsolationManager({
     }
     const state = await releaseMigrationState(spec);
     const states = releaseSnapshotStates(state, receipt);
-    if (!states.every((entryState) => entryState === 'desired')) {
+    if (!states.every((entryState) => entryState === 'desired' || entryState === 'unchanged')) {
       return Object.freeze({
         satisfied: false,
         reason: 'static_publish_release_migration_incomplete',
@@ -962,7 +962,7 @@ export function createStaticPublishIsolationManager({
     const before = await releaseMigrationState(spec);
     const states = releaseSnapshotStates(before, receipt);
     for (let index = 0; index < receipt.entries.length; index += 1) {
-      if (states[index] === 'desired') continue;
+      if (states[index] === 'desired' || states[index] === 'unchanged') continue;
       await mutateReleaseEntry(spec, receipt, receipt.entries[index], states[index], 'desired', index);
     }
 
@@ -985,7 +985,7 @@ export function createStaticPublishIsolationManager({
     }
     const state = await releaseMigrationState(spec);
     const states = releaseSnapshotStates(state, receipt);
-    const restored = states.every((entryState) => entryState === 'previous');
+    const restored = states.every((entryState) => entryState === 'previous' || entryState === 'unchanged');
     return Object.freeze({
       satisfied: restored,
       restoredStaticReleasePermissions: restored,
@@ -1012,7 +1012,7 @@ export function createStaticPublishIsolationManager({
     const before = await releaseMigrationState(spec);
     const states = releaseSnapshotStates(before, receipt);
     for (let index = 0; index < receipt.entries.length; index += 1) {
-      if (states[index] === 'previous') continue;
+      if (states[index] === 'previous' || states[index] === 'unchanged') continue;
       await mutateReleaseEntry(spec, receipt, receipt.entries[index], states[index], 'previous', index);
     }
 
