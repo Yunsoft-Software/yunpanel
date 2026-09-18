@@ -45,7 +45,6 @@ function migrationKind(operation) {
 function sftpContext(operation) {
   return Object.freeze({
     operationId: operation.id,
-    releaseOperationId: operation.intent.sourceOperationId,
     websiteId: operation.websiteId,
     intent: Object.freeze({
       adapter: 'openssh-internal-sftp',
@@ -60,6 +59,7 @@ function phpContext(operation) {
   const identity = createApplicationIdentity(operation.applicationId);
   return Object.freeze({
     operationId: operation.id,
+    releaseOperationId: operation.intent.sourceOperationId,
     websiteId: operation.websiteId,
     intent: Object.freeze({
       adapter: 'php-fpm',
