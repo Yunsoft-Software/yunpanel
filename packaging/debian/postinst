@@ -31,6 +31,9 @@ fi
 if ! id yunpanel-elfinder >/dev/null 2>&1; then
   adduser --system --ingroup yunpanel-elfinder --home /var/lib/yunpanel/elfinder --no-create-home --shell /usr/sbin/nologin yunpanel-elfinder >/dev/null
 fi
+if id yunpanel >/dev/null 2>&1; then
+  adduser yunpanel yunpanel-elfinder >/dev/null 2>&1 || true
+fi
 
 install -d -o yunpanel -g yunpanel -m 0700 /var/lib/yunpanel/control-plane
 install -d -o root -g root -m 0700 /var/lib/yunpanel/agent
