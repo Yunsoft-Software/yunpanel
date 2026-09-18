@@ -376,6 +376,20 @@ function boundedPassengerMigrationPreview(value, { applicationId, identity } = {
     });
   }
 
+  let runtimeUmask = null;
+  if (value.runtimeUmask !== undefined) {
+    if (!value.runtimeUmask || typeof value.runtimeUmask !== 'object' || Array.isArray(value.runtimeUmask)
+      || typeof value.runtimeUmask.satisfied !== 'boolean') return null;
+    if (value.runtimeUmask.satisfied) {
+      if (value.runtimeUmask.umask !== '0027') return null;
+      runtimeUmask = Object.freeze({ satisfied: true, umask: '0027' });
+    } else {
+      const reason = boundedReason(value.runtimeUmask.reason);
+      if (!reason) return null;
+      runtimeUmask = Object.freeze({ satisfied: false, reason });
+    }
+  }
+
   return Object.freeze({
     version: 1,
     adapter: 'passenger',
@@ -390,6 +404,7 @@ function boundedPassengerMigrationPreview(value, { applicationId, identity } = {
       currentReleaseTarget,
       currentReleaseTargetError,
       release,
+      ...(runtimeUmask ? { runtimeUmask } : {}),
     }),
     desired: Object.freeze({
       applicationId,
@@ -682,6 +697,183 @@ async function inspectPhpRuntimeMigrationPreview(handler, context, scope) {
   }
 }
 
+function boundedStaticPublishPreview(value, scope) {
+  const differences = boundedPreviewDifferences(value?.differences);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== 1 || value.adapter !== 'static-publish-isolation'
+    || typeof value.satisfied !== 'boolean' || !differences
+    || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
+    || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
+    || value.desired.websiteId !== scope.websiteId
+    || value.desired.applicationId !== scope.applicationId
+    || value.desired.unixUser !== scope.identity?.unixUser
+    || value.desired.homeDirectory !== scope.identity?.paths?.workspace?.homeDirectory
+    || value.desired.publishRoot !== scope.identity?.paths?.static?.publishRoot
+    || value.desired.releasesRoot !== path.posix.join(scope.identity?.paths?.static?.publishRoot ?? '', 'releases')
+    || value.desired.currentPath !== path.posix.join(scope.identity?.paths?.static?.publishRoot ?? '', 'current')
+    || value.desired.controlDirectoryMode !== '0711'
+    || value.desired.releaseDirectoryMode !== '0750'
+    || value.desired.releaseFileMode !== '0640'
+    || value.desired.nginxDirectoryAcl !== 'user:www-data:r-x'
+    || value.desired.nginxFileAcl !== 'user:www-data:r--'
+    || value.desired.aclPackage !== 'acl') return null;
+
+  const identity = boundedPhpIdentity(value.current.identity, scope.identity.paths.workspace.homeDirectory);
+  const publishRoot = boundedFsState(value.current.publishRoot);
+  const releasesRoot = boundedFsState(value.current.releasesRoot);
+  if (!identity || !publishRoot || !releasesRoot || typeof value.current.aclToolsAvailable !== 'boolean'
+    || !Array.isArray(value.current.releases) || value.current.releases.length > 100) return null;
+
+  const releases = [];
+  for (const release of value.current.releases) {
+    if (!release || typeof release !== 'object' || Array.isArray(release)
+      || typeof release.releaseId !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(release.releaseId)
+      || typeof release.satisfied !== 'boolean'
+      || (release.reason !== null && boundedReason(release.reason) === null)) return null;
+    releases.push(Object.freeze({
+      releaseId: release.releaseId.toLowerCase(),
+      satisfied: release.satisfied,
+      reason: release.reason,
+    }));
+  }
+
+  const current = value.current.current;
+  if (!current || typeof current !== 'object' || Array.isArray(current) || typeof current.present !== 'boolean') return null;
+  let currentProjection;
+  if (!current.present) {
+    if (current.error !== undefined && boundedReason(current.error) === null) return null;
+    currentProjection = Object.freeze({
+      present: false,
+      ...(current.error === undefined ? {} : { error: current.error }),
+    });
+  } else {
+    if (typeof current.symbolicLink !== 'boolean'
+      || !Number.isSafeInteger(current.uid) || current.uid < 0
+      || !Number.isSafeInteger(current.gid) || current.gid < 0
+      || boundedText(current.target, 512) === null) return null;
+    currentProjection = Object.freeze({
+      present: true,
+      symbolicLink: current.symbolicLink,
+      uid: current.uid,
+      gid: current.gid,
+      target: current.target,
+    });
+  }
+
+  return Object.freeze({
+    version: 1,
+    adapter: 'static-publish-isolation',
+    satisfied: value.satisfied,
+    current: Object.freeze({
+      identity,
+      aclToolsAvailable: value.current.aclToolsAvailable,
+      publishRoot,
+      releasesRoot,
+      releases: Object.freeze(releases),
+      current: currentProjection,
+    }),
+    desired: Object.freeze({
+      websiteId: scope.websiteId,
+      applicationId: scope.applicationId,
+      unixUser: scope.identity.unixUser,
+      homeDirectory: scope.identity.paths.workspace.homeDirectory,
+      publishRoot: value.desired.publishRoot,
+      releasesRoot: value.desired.releasesRoot,
+      currentPath: value.desired.currentPath,
+      controlDirectoryMode: '0711',
+      releaseDirectoryMode: '0750',
+      releaseFileMode: '0640',
+      nginxDirectoryAcl: 'user:www-data:r-x',
+      nginxFileAcl: 'user:www-data:r--',
+      aclPackage: 'acl',
+    }),
+    differences,
+  });
+}
+
+function boundedStaticRuntimeState(value, scope) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.adapter !== 'static'
+    || value.applicationId !== scope.applicationId
+    || typeof value.satisfied !== 'boolean') return null;
+  const projected = {
+    satisfied: value.satisfied,
+    adapter: 'static',
+    applicationId: scope.applicationId,
+  };
+  if (value.reason !== undefined) {
+    const reason = boundedReason(value.reason);
+    if (!reason) return null;
+    projected.reason = reason;
+  }
+  if (value.releaseId !== undefined) {
+    if (typeof value.releaseId !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.releaseId)) return null;
+    projected.releaseId = value.releaseId.toLowerCase();
+  }
+  if (value.deploymentId !== undefined) {
+    if (typeof value.deploymentId !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.deploymentId)) return null;
+    projected.deploymentId = value.deploymentId.toLowerCase();
+  }
+  if (value.currentRelease !== undefined) {
+    const expected = path.posix.join(scope.identity.paths.static.publishRoot, 'current');
+    if (value.currentRelease !== expected) return null;
+    projected.currentRelease = expected;
+  }
+  if (value.unixUser !== undefined) {
+    if (value.unixUser !== scope.identity.unixUser) return null;
+    projected.unixUser = value.unixUser;
+  }
+  if (value.homeDirectory !== undefined) {
+    if (value.homeDirectory !== scope.identity.paths.workspace.homeDirectory) return null;
+    projected.homeDirectory = value.homeDirectory;
+  }
+  return Object.freeze(projected);
+}
+
+function boundedStaticRuntimeMigrationPreview(value, scope) {
+  const differences = boundedPreviewDifferences(value?.differences);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== 1 || value.adapter !== 'static-runtime'
+    || typeof value.satisfied !== 'boolean' || !differences
+    || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
+    || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
+    || value.desired.websiteId !== scope.websiteId
+    || value.desired.applicationId !== scope.applicationId
+    || !['deploy', 'bind_existing'].includes(value.desired.mode)
+    || (value.desired.mode === 'deploy' && value.desired.deploymentId !== scope.operationId)
+    || (value.desired.mode === 'bind_existing' && value.desired.deploymentId !== null)) return null;
+
+  const runtime = boundedStaticRuntimeState(value.current.runtime, scope);
+  const isolation = boundedStaticPublishPreview(value.current.isolation, scope);
+  if (!runtime || !isolation) return null;
+
+  return Object.freeze({
+    version: 1,
+    adapter: 'static-runtime',
+    satisfied: value.satisfied,
+    current: Object.freeze({ runtime, isolation }),
+    desired: Object.freeze({
+      websiteId: scope.websiteId,
+      applicationId: scope.applicationId,
+      mode: value.desired.mode,
+      deploymentId: value.desired.deploymentId,
+    }),
+    differences,
+  });
+}
+
+async function inspectStaticRuntimeMigrationPreview(handler, context, scope) {
+  if (!handler || typeof handler.previewMigration !== 'function') return null;
+  try {
+    return boundedStaticRuntimeMigrationPreview(await handler.previewMigration(context), scope);
+  } catch {
+    return null;
+  }
+}
+
 function migrationChange({ id, action, current, desired, ownership = 'unverified', applyState = null }) {
   return Object.freeze({
     id,
@@ -873,9 +1065,17 @@ export function createWebsiteIsolationAuditService({
               identity,
             })
             : null;
-          const passengerMigrationPreview = !satisfied && stepId === 'runtime'
+          const passengerMigrationPreview = !satisfied && stepId === 'runtime' && website.runtimeType === 'node'
             ? await inspectPassengerMigrationPreview(handler, context, {
               applicationId: application.id,
+              identity,
+            })
+            : null;
+          const staticRuntimeMigrationPreview = !satisfied && stepId === 'runtime' && website.runtimeType === 'static'
+            ? await inspectStaticRuntimeMigrationPreview(handler, context, {
+              websiteId: website.id,
+              applicationId: application.id,
+              operationId: operation.operationId,
               identity,
             })
             : null;
@@ -898,6 +1098,7 @@ export function createWebsiteIsolationAuditService({
             ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
             ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
             ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
+            ...(staticRuntimeMigrationPreview ? { staticRuntimeMigrationPreview } : {}),
             ...(phpRuntimeMigrationPreview ? { phpRuntimeMigrationPreview } : {}),
           }));
           if (!satisfied) {
@@ -941,6 +1142,7 @@ export function createWebsiteIsolationAuditService({
                 ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
                 ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
                 ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
+                ...(staticRuntimeMigrationPreview ? { staticRuntimeMigrationPreview } : {}),
                 ...(phpRuntimeMigrationPreview ? { phpRuntimeMigrationPreview } : {}),
               },
               desired: { satisfied: true },
@@ -958,9 +1160,17 @@ export function createWebsiteIsolationAuditService({
               identity,
             })
             : null;
-          const passengerMigrationPreview = stepId === 'runtime'
+          const passengerMigrationPreview = stepId === 'runtime' && website.runtimeType === 'node'
             ? await inspectPassengerMigrationPreview(handler, context, {
               applicationId: application.id,
+              identity,
+            })
+            : null;
+          const staticRuntimeMigrationPreview = stepId === 'runtime' && website.runtimeType === 'static'
+            ? await inspectStaticRuntimeMigrationPreview(handler, context, {
+              websiteId: website.id,
+              applicationId: application.id,
+              operationId: operation.operationId,
               identity,
             })
             : null;
@@ -980,6 +1190,7 @@ export function createWebsiteIsolationAuditService({
             ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
             ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
             ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
+            ...(staticRuntimeMigrationPreview ? { staticRuntimeMigrationPreview } : {}),
             ...(phpRuntimeMigrationPreview ? { phpRuntimeMigrationPreview } : {}),
           }));
           findings.push(finding(
@@ -1002,6 +1213,7 @@ export function createWebsiteIsolationAuditService({
               ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
               ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
               ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
+              ...(staticRuntimeMigrationPreview ? { staticRuntimeMigrationPreview } : {}),
               ...(phpRuntimeMigrationPreview ? { phpRuntimeMigrationPreview } : {}),
             },
             desired: { satisfied: true },
@@ -1076,4 +1288,8 @@ export const websiteIsolationAuditInternals = Object.freeze({
   boundedPhpFpmPreview,
   boundedPhpRuntimeMigrationPreview,
   inspectPhpRuntimeMigrationPreview,
+  boundedStaticPublishPreview,
+  boundedStaticRuntimeState,
+  boundedStaticRuntimeMigrationPreview,
+  inspectStaticRuntimeMigrationPreview,
 });
