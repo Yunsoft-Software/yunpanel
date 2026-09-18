@@ -156,6 +156,14 @@ export {
 } from './elfinder-connector.js';
 
 export {
+  ElFinderNginxTemplateError,
+  elFinderNginxTemplateInternals,
+  elFinderNginxTemplatePolicy,
+  previewElFinderNginxConfig,
+  renderElFinderNginxConfig,
+} from './elfinder-nginx.js';
+
+export {
   ElFinderFpmTemplateError,
   elFinderFpmPoolName,
   elFinderFpmPoolPath,
