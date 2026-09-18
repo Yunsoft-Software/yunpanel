@@ -391,6 +391,7 @@ test('isolation audit pins bounded Passenger runtime drift into the migration di
       currentReleaseTargetError: null,
       release: null,
     },
+    runtimeUmask: { satisfied: false, reason: 'service_umask_not_effective' },
     desired: {
       applicationId,
       nodeMajor: 24,
@@ -419,6 +420,10 @@ test('isolation audit pins bounded Passenger runtime drift into the migration di
   assert.equal(preview.current.identity.homeMode, '0750');
   assert.equal(preview.current.nodeCandidates[1].version, 'v22.19.0');
   assert.equal(preview.current.release, null);
+  assert.deepEqual(preview.current.runtimeUmask, {
+    satisfied: false,
+    reason: 'service_umask_not_effective',
+  });
   assert.equal(preview.desired.applicationId, applicationId);
   assert.equal(JSON.stringify(first.migration).includes('do-not-project'), false);
   assert.deepEqual(first.inspectedSteps.find((step) => step.stepId === 'runtime').passengerMigrationPreview, preview);
@@ -491,6 +496,141 @@ test('isolation audit rejects Passenger preview paths that only share a string p
   assert.equal(audit.inspectedSteps.find((step) => step.stepId === 'runtime').passengerMigrationPreview, undefined);
 });
 
+
+test('isolation audit pins bounded static release and publish isolation drift into the migration digest', async () => {
+  const releaseId = operationId;
+  const publishRoot = identity.paths.static.publishRoot;
+  const staticPreview = {
+    version: 1,
+    adapter: 'static-runtime',
+    satisfied: false,
+    current: {
+      runtime: {
+        satisfied: false,
+        reason: 'website_static_release_not_current',
+        adapter: 'static',
+        applicationId,
+        releaseId: 'f73cc6ac-07e8-4d22-b29a-741154687d20',
+        deploymentId: releaseId,
+        currentRelease: `${publishRoot}/current`,
+        unixUser: identity.unixUser,
+        homeDirectory: identity.paths.workspace.homeDirectory,
+      },
+      isolation: {
+        version: 1,
+        adapter: 'static-publish-isolation',
+        satisfied: false,
+        current: {
+          identity: {
+            satisfied: true,
+            uid: 1201,
+            gid: 1201,
+            homeDirectory: identity.paths.workspace.homeDirectory,
+          },
+          aclToolsAvailable: true,
+          publishRoot: {
+            present: true,
+            directory: true,
+            symbolicLink: false,
+            uid: 0,
+            gid: 0,
+            mode: '0711',
+          },
+          releasesRoot: {
+            present: true,
+            directory: true,
+            symbolicLink: false,
+            uid: 0,
+            gid: 0,
+            mode: '0711',
+          },
+          releases: [{
+            releaseId: 'f73cc6ac-07e8-4d22-b29a-741154687d20',
+            satisfied: false,
+            reason: 'static_publish_acl_drift',
+          }],
+          current: {
+            present: true,
+            symbolicLink: true,
+            uid: 0,
+            gid: 0,
+            target: 'releases/f73cc6ac-07e8-4d22-b29a-741154687d20',
+          },
+        },
+        desired: {
+          websiteId,
+          applicationId,
+          unixUser: identity.unixUser,
+          homeDirectory: identity.paths.workspace.homeDirectory,
+          publishRoot,
+          releasesRoot: `${publishRoot}/releases`,
+          currentPath: `${publishRoot}/current`,
+          controlDirectoryMode: '0711',
+          releaseDirectoryMode: '0750',
+          releaseFileMode: '0640',
+          nginxDirectoryAcl: 'user:www-data:r-x',
+          nginxFileAcl: 'user:www-data:r--',
+          aclPackage: 'acl',
+        },
+        differences: ['static_publish_acl_drift'],
+        rawSecret: 'do-not-project',
+      },
+    },
+    desired: {
+      websiteId,
+      applicationId,
+      mode: 'deploy',
+      deploymentId: releaseId,
+    },
+    differences: ['website_static_release_not_current', 'static_publish_acl_drift'],
+  };
+
+  const first = await service({
+    runtimeType: 'static',
+    stepResults: { runtime: { satisfied: false, reason: 'website_static_release_not_current' } },
+    migrationPreviews: { runtime: staticPreview },
+  }).audit(websiteId);
+
+  const preview = first.migration.changes.find((change) => change.id === 'provisioning.runtime')
+    .current.staticRuntimeMigrationPreview;
+  assert.equal(preview.adapter, 'static-runtime');
+  assert.equal(preview.current.runtime.deploymentId, releaseId);
+  assert.equal(preview.current.isolation.current.publishRoot.mode, '0711');
+  assert.equal(preview.current.isolation.current.releases[0].reason, 'static_publish_acl_drift');
+  assert.equal(preview.current.isolation.current.current.target, 'releases/f73cc6ac-07e8-4d22-b29a-741154687d20');
+  assert.equal(JSON.stringify(first.migration).includes('do-not-project'), false);
+  assert.equal(first.inspectedSteps.find((step) => step.stepId === 'runtime').passengerMigrationPreview, undefined);
+  assert.deepEqual(
+    first.inspectedSteps.find((step) => step.stepId === 'runtime').staticRuntimeMigrationPreview,
+    preview,
+  );
+
+  const second = await service({
+    runtimeType: 'static',
+    stepResults: { runtime: { satisfied: false, reason: 'static_publish_current_drift' } },
+    migrationPreviews: {
+      runtime: {
+        ...staticPreview,
+        current: {
+          ...staticPreview.current,
+          isolation: {
+            ...staticPreview.current.isolation,
+            current: {
+              ...staticPreview.current.isolation.current,
+              current: {
+                ...staticPreview.current.isolation.current.current,
+                target: 'releases/3854e385-adfc-42bd-bccf-f655f24cd68f',
+              },
+            },
+            differences: ['static_publish_current_drift'],
+          },
+        },
+        differences: ['static_publish_current_drift'],
+      },
+    },
+  }).audit(websiteId);
+  assert.notEqual(first.migration.previewDigest, second.migration.previewDigest);
+});
 
 test('isolation audit pins bounded PHP container, FPM and UMask drift into the migration digest', async () => {
   const releaseDirectory = `${identity.paths.runtime.releasesDirectory}/${operationId}`;
