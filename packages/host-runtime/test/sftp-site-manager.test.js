@@ -176,3 +176,51 @@ test('SFTP compensation fails closed after managed SSH config drift', async () =
   );
   assert.equal(host.activeUnits.has(unitName), true);
 });
+
+
+test('SFTP migration preview reports exact artifact state without exposing config contents or mutating host state', async () => {
+  const host = fakeHost();
+  const value = manager(host);
+  await value.apply(intent(), { operationId });
+  const callsBefore = host.calls.length;
+
+  const preview = await value.previewMigration(intent(), { operationId });
+
+  assert.equal(preview.version, 1);
+  assert.equal(preview.satisfied, true);
+  assert.equal(preview.current.receiptState, 'active');
+  assert.equal(preview.current.sshdConfig.present, true);
+  assert.equal(preview.current.sshdConfig.matchesDesired, true);
+  assert.match(preview.current.sshdConfig.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(preview.current.mountUnit.active, true);
+  assert.equal(preview.current.chrootDirectory.mode, '0755');
+  assert.equal(preview.desired.sourceDirectory, sourceDirectory);
+  assert.equal(preview.desired.chrootDirectory, chrootDirectory);
+  assert.deepEqual(preview.differences, []);
+  assert.equal(JSON.stringify(preview).includes('ForceCommand'), false);
+  assert.equal(JSON.stringify(preview).includes(`Match User ${unixUser}`), false);
+
+  const previewCalls = host.calls.slice(callsBefore);
+  assert.equal(previewCalls.some(([file, args]) => file === '/usr/bin/install'
+    || (file === '/usr/bin/systemctl' && ['enable', 'disable', 'reload', 'daemon-reload'].includes(args[0]))), false);
+});
+
+test('SFTP migration preview keeps legacy state blocked when ownership receipt and artifacts are absent', async () => {
+  const host = fakeHost();
+  const value = manager(host);
+
+  const preview = await value.previewMigration(intent(), { operationId });
+
+  assert.equal(preview.satisfied, false);
+  assert.equal(preview.current.receiptState, null);
+  assert.equal(preview.current.sshdConfig.present, false);
+  assert.equal(preview.current.mountUnit.present, false);
+  assert.equal(preview.current.mountUnit.active, false);
+  assert.equal(preview.current.chrootDirectory.present, false);
+  assert.equal(preview.differences.includes('sftp_receipt_missing'), true);
+  assert.equal(preview.differences.includes('sftp_sshd_config_missing'), true);
+  assert.equal(preview.differences.includes('sftp_mount_unit_missing'), true);
+  assert.equal(preview.differences.includes('sftp_mount_inactive'), true);
+  assert.equal(host.calls.some(([file, args]) => file === '/usr/bin/install'
+    || (file === '/usr/bin/systemctl' && ['enable', 'disable', 'reload', 'daemon-reload'].includes(args[0]))), false);
+});
