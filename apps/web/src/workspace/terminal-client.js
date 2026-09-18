@@ -2,6 +2,9 @@ const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const ID_PATTERN = /^[0-9a-f-]{36}$/i;
 const PROTOCOL = 'yunpanel-terminal-v1';
 const CAPABILITY_PREFIX = 'yunpanel-terminal-capability.';
+const TTYD_PROTOCOL = 'yunpanel-ttyd-v1';
+const TTYD_AUDIENCE = 'terminal';
+const TTYD_SESSION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function exactObject(value, fields) {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -26,6 +29,34 @@ export function normalizeTerminalCapability(value, now = Date.now()) {
     || !Number.isSafeInteger(value.expiresAt) || value.expiresAt <= now
     || !targetIdentity(value.target)) throw new Error('API geçerli bir terminal yetkisi döndürmedi.');
   return Object.freeze({ ...value, target: Object.freeze({ ...value.target }) });
+}
+
+export function normalizeTtydSession(value, expectedTarget, now = Date.now()) {
+  if (!exactObject(value, [
+    'version', 'protocol', 'audience', 'sessionId', 'target', 'basePath', 'expiresAt',
+  ])
+    || value.version !== 1
+    || value.protocol !== TTYD_PROTOCOL
+    || value.audience !== TTYD_AUDIENCE
+    || !TTYD_SESSION_PATTERN.test(value.sessionId ?? '')
+    || !Number.isSafeInteger(value.expiresAt) || value.expiresAt <= now
+    || !targetIdentity(value.target)
+    || targetIdentity(value.target) !== targetIdentity(expectedTarget)
+    || value.basePath !== `/tools/ttyd/${value.sessionId.toLowerCase()}/`) {
+    throw new Error('API geçerli bir ttyd terminal oturumu döndürmedi.');
+  }
+  return Object.freeze({
+    ...value,
+    sessionId: value.sessionId.toLowerCase(),
+    target: Object.freeze({ ...value.target }),
+  });
+}
+
+export function ttydSessionPath(sessionId) {
+  if (typeof sessionId !== 'string' || !TTYD_SESSION_PATTERN.test(sessionId)) {
+    throw new Error('Terminal oturum kimliği geçersiz.');
+  }
+  return `/terminal/ttyd-sessions/${encodeURIComponent(sessionId.toLowerCase())}`;
 }
 
 export function terminalWebSocketUrl(locationLike = globalThis.location) {
@@ -70,4 +101,10 @@ export function parseTerminalMessage(raw) {
   throw new Error('Terminal iletisi geçersiz.');
 }
 
-export const terminalClientInternals = Object.freeze({ protocol: PROTOCOL, capabilityPrefix: CAPABILITY_PREFIX, targetIdentity });
+export const terminalClientInternals = Object.freeze({
+  protocol: PROTOCOL,
+  capabilityPrefix: CAPABILITY_PREFIX,
+  ttydProtocol: TTYD_PROTOCOL,
+  ttydAudience: TTYD_AUDIENCE,
+  targetIdentity,
+});
