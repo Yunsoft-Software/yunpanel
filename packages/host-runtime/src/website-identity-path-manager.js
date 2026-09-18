@@ -367,6 +367,91 @@ export function createWebsiteIdentityPathManager({
     return identity;
   }
 
+  function requireIdentityMigrationScope(normalized) {
+    if (!normalized.contract) {
+      throw new WebsiteIdentityPathManagerError(
+        'website_identity_migration_scope_required',
+        'Website Unix identity migration requires canonical Website and Application scope',
+      );
+    }
+    return normalized;
+  }
+
+  async function inspectIdentityOperation(rawIntent, options = {}) {
+    const normalized = requireIdentityMigrationScope(normalizeIntent(rawIntent));
+    if (typeof identityManager.inspectOperation !== 'function') {
+      throw new WebsiteIdentityPathManagerError(
+        'website_identity_operation_inspection_unavailable',
+        'Website Unix identity operation inspection is unavailable',
+      );
+    }
+    const result = await identityManager.inspectOperation(normalized.baseIntent, {
+      operationId: normalizeOperationId(options.operationId),
+    });
+    return Object.freeze({
+      ...result,
+      pathContract: contractEvidence(normalized.contract),
+    });
+  }
+
+  async function applyIdentityMigration(rawIntent, options = {}) {
+    const normalized = requireIdentityMigrationScope(normalizeIntent(rawIntent));
+    const preview = await previewMigration(rawIntent);
+    if (preview.satisfied === true) {
+      return Object.freeze({
+        satisfied: true,
+        createdUnixIdentity: false,
+        preservedExisting: true,
+        pathContract: contractEvidence(normalized.contract),
+      });
+    }
+    if (preview.safeCreateCandidate !== true) {
+      throw new WebsiteIdentityPathManagerError(
+        'website_identity_migration_not_safe_create',
+        'Website Unix identity migration is blocked because canonical user, group or HOME state already exists',
+      );
+    }
+    const result = await identityManager.apply(normalized.baseIntent, {
+      operationId: normalizeOperationId(options.operationId),
+    });
+    if (!result?.satisfied || result.created !== true || result.receiptVersion !== 1) {
+      throw new WebsiteIdentityPathManagerError(
+        'website_identity_migration_unverified',
+        'Website Unix identity migration did not return durable creation evidence',
+      );
+    }
+    return Object.freeze({
+      ...result,
+      createdUnixIdentity: true,
+      identityReceiptVersion: result.receiptVersion,
+      pathContract: contractEvidence(normalized.contract),
+    });
+  }
+
+  async function compensateIdentityMigration(rawIntent, options = {}) {
+    const normalized = requireIdentityMigrationScope(normalizeIntent(rawIntent));
+    const result = await identityManager.compensate(normalized.baseIntent, {
+      operationId: normalizeOperationId(options.operationId),
+      evidence: options.evidence ?? null,
+    });
+    return Object.freeze({
+      ...result,
+      pathContract: contractEvidence(normalized.contract),
+    });
+  }
+
+  async function inspectIdentityMigrationCompensation(rawIntent, options = {}) {
+    const normalized = requireIdentityMigrationScope(normalizeIntent(rawIntent));
+    const result = await identityManager.inspectCompensation(normalized.baseIntent, {
+      operationId: normalizeOperationId(options.operationId),
+      evidence: options.evidence ?? null,
+    });
+    return Object.freeze({
+      ...result,
+      pathContract: contractEvidence(normalized.contract),
+    });
+  }
+
   async function inspectWorkspace(rawIntent) {
     const normalized = normalizeIntent(rawIntent);
     if (!normalized.contract) {
@@ -549,6 +634,10 @@ export function createWebsiteIdentityPathManager({
     apply,
     compensate,
     inspectCompensation,
+    inspectIdentityOperation,
+    applyIdentityMigration,
+    compensateIdentityMigration,
+    inspectIdentityMigrationCompensation,
     inspectWorkspace,
     inspectWorkspaceOperation,
     applyWorkspace,
