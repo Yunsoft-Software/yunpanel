@@ -120,7 +120,7 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
         desired: Object.freeze({
           websiteId: context.intent?.websiteId ?? null,
           applicationId: context.intent?.applicationId ?? null,
-          mode: context.intent?.mode ?? null,
+          mode: context.intent?.mode ?? 'legacy_unresolved',
           deploymentId: context.intent?.deploymentId ?? null,
         }),
         differences: Object.freeze([
