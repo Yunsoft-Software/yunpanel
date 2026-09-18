@@ -540,6 +540,11 @@ export function createDomainSuspensionRuntime({ registry, service } = {}) {
     }
   }
 
+  async function preview(input) {
+    try { return await service.preview(input); }
+    catch (error) { throw mapped(error); }
+  }
+
   async function start({ domainId, previewDigest, confirmation } = {}) {
     if (typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)
       || typeof confirmation !== 'string' || !confirmation) {
@@ -722,6 +727,7 @@ export function createDomainSuspensionRuntime({ registry, service } = {}) {
 
   return Object.freeze({
     init,
+    preview,
     start,
     retrySuspend,
     resume,
