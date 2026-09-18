@@ -61,6 +61,29 @@ function assertReceipt(receipt, context, identity) {
     || receipt.result.deleted !== true || receipt.result.database?.name !== context.payload.name) {
     throw new JobRunningDatabaseDeleteRecoveryError('job_database_delete_recovery_receipt_mismatch', 'Database deletion receipt does not match the durable job');
   }
+
+  const scopeFields = [
+    'websiteId', 'databaseBindingId', 'expectedBindingRevision',
+    'backupId', 'expectedBackupSha256',
+  ];
+  const scopedContext = scopeFields.some((field) => Object.hasOwn(context.payload, field));
+  if (receipt.ownership === null) {
+    if (scopedContext) {
+      throw new JobRunningDatabaseDeleteRecoveryError(
+        'job_database_delete_recovery_receipt_mismatch',
+        'Scoped database deletion receipt lost ownership evidence',
+      );
+    }
+    return;
+  }
+  if (!receipt.ownership || typeof receipt.ownership !== 'object' || Array.isArray(receipt.ownership)
+    || !scopeFields.every((field) => Object.hasOwn(context.payload, field))
+    || scopeFields.some((field) => receipt.ownership[field] !== context.payload[field])) {
+    throw new JobRunningDatabaseDeleteRecoveryError(
+      'job_database_delete_recovery_receipt_mismatch',
+      'Database deletion ownership receipt does not match the durable job',
+    );
+  }
 }
 
 function confirmDatabaseAbsent(snapshot, receipt) {
