@@ -44,6 +44,8 @@ function targetSatisfied(operation, preview) {
     && preview.dnsIdentityRevision === operation.dnsIdentityRevision
     && operation.mailStateDigest !== null
     && preview.mailStateDigest === operation.mailStateDigest
+    && operation.appliedZoneDigest !== null
+    && preview.sourceZoneDigest === operation.appliedZoneDigest
     && Number.isSafeInteger(preview.observedSerial)
     && preview.observedSerial >= operation.targetSerial);
 }
@@ -61,6 +63,7 @@ function currentPreviewMatches(operation, preview) {
     && operation.mailStateDigest !== null
     && preview.mailStateDigest === operation.mailStateDigest
     && operation.sourceZoneDigest !== null
+    && operation.appliedZoneDigest !== null
     && preview.sourceZoneDigest === operation.sourceZoneDigest
     && preview.observedSerial === operation.observedSerial
     && preview.nextSerial === operation.targetSerial
@@ -159,10 +162,10 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
     }
 
     if (!currentPreviewMatches(operation, inspection.current)) {
-      const failure = operation.sourceZoneDigest === null
+      const failure = operation.sourceZoneDigest === null || operation.appliedZoneDigest === null
         ? Object.freeze({
-          code: 'dns_zone_reapply_source_evidence_missing',
-          message: 'DNS zone reapply operation predates exact source-zone evidence and cannot be replayed safely',
+          code: 'dns_zone_reapply_rollback_evidence_missing',
+          message: 'DNS zone reapply operation predates exact before/after rollback evidence and cannot be replayed safely',
         })
         : Object.freeze({
           code: 'dns_zone_reapply_preview_stale',
@@ -246,7 +249,7 @@ export function createDnsZoneReapplyRuntime({ registry, service } = {}) {
     try {
       rollbackEvidence = await service.captureRollbackSnapshot({
         domainId,
-        sourceZoneDigest: current.sourceZoneDigest,
+        preview: current,
       });
     } catch (error) { throw mapped(error); }
     let operation;
