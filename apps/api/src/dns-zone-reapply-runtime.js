@@ -35,15 +35,9 @@ function mapped(error) {
 
 function targetSatisfied(operation, preview) {
   return Boolean(preview
-    && preview.noChanges === true
     && preview.domainId === operation.domainId
     && preview.serverId === operation.serverId
     && preview.zoneName === operation.zoneName
-    && preview.domainRevision === operation.domainRevision
-    && preview.templateVersion === operation.templateVersion
-    && preview.dnsIdentityRevision === operation.dnsIdentityRevision
-    && operation.mailStateDigest !== null
-    && preview.mailStateDigest === operation.mailStateDigest
     && operation.appliedZoneDigest !== null
     && preview.sourceZoneDigest === operation.appliedZoneDigest
     && Number.isSafeInteger(preview.observedSerial)
