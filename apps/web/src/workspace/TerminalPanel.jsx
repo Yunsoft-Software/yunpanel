@@ -251,11 +251,44 @@ export default function TerminalPanel({ target, title, description, unavailable 
     }
   }
 
-  return <Section title={title} description={description} actions={<div className="ws-actions"><span className="ws-muted" role="status">{statusLabels[status]}</span>{status === 'open' ? <Button onClick={disconnect}>Bağlantıyı kapat</Button> : <Button variant="primary" icon="terminal" onClick={connect} disabled={!body || ['issuing', 'connecting'].includes(status)}>{status === 'closed' || status === 'error' ? 'Yeniden bağlan' : 'Terminali aç'}</Button>}</div>}>
+  const pending = ['issuing', 'connecting'].includes(status);
+  return <Section
+    title={title}
+    description={description}
+    actions={<div className="ws-actions">
+      <span className="ws-muted" role="status">{statusLabels[status]}</span>
+      {status === 'open' && mode === 'ttyd' && <Button onClick={disconnectTtyd}>Terminali kapat</Button>}
+      {status === 'open' && mode === 'legacy' && <Button onClick={disconnectLegacy}>Legacy bağlantıyı kapat</Button>}
+      {status !== 'open' && <>
+        <Button
+          variant="primary"
+          icon="terminal"
+          onClick={connectTtyd}
+          disabled={!body || pending}
+        >{status === 'closed' || status === 'error' ? 'ttyd ile yeniden aç' : 'ttyd ile aç'}</Button>
+        <Button
+          onClick={connectLegacy}
+          disabled={!body || pending}
+        >Legacy gömülü terminal</Button>
+      </>}
+    </div>}
+  >
     {unavailable && <div className="ws-notice ws-notice-warn"><span>{unavailable}</span></div>}
     <ErrorNotice error={error} />
     <div className="ws-terminal-context" aria-label="Terminal bağlamı"><span>{context?.user ?? (target?.scope === 'server' ? 'root' : 'Site kullanıcısı')}</span><span>{context?.cwd ?? 'Bağlantı açıldığında çalışma dizini doğrulanır'}</span></div>
-    <div ref={container} className="ws-terminal-surface" aria-label={title} />
+    {ttydSession && <iframe
+      className="ws-terminal-frame"
+      src={ttydSession.basePath}
+      title={`${title} · ttyd`}
+      referrerPolicy="no-referrer"
+    />}
+    <div
+      ref={container}
+      className="ws-terminal-surface"
+      aria-label={title}
+      hidden={Boolean(ttydSession)}
+    />
+    {!ttydSession && mode !== 'legacy' && <p className="ws-muted ws-terminal-migration-note">Birincil terminal ttyd'dir. Legacy gömülü xterm yalnız gerçek host kabulü tamamlanana kadar migration fallback olarak tutulur.</p>}
   </Section>;
 }
 
