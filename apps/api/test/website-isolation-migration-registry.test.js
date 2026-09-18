@@ -168,6 +168,48 @@ function phpAudit() {
   };
 }
 
+function phpContainerAudit() {
+  const identity = createApplicationIdentity(applicationId);
+  const desired = {
+    websiteId,
+    applicationId,
+    releaseId: sourceOperationId,
+    unixUser: applicationUser,
+    documentRoot: `${identity.paths.runtime.currentRelease}/public`,
+    applicationRoot: identity.paths.runtime.applicationRoot,
+    releasesDirectory: identity.paths.runtime.releasesDirectory,
+    currentRelease: identity.paths.runtime.currentRelease,
+    releaseDirectory: `${identity.paths.runtime.releasesDirectory}/${sourceOperationId}`,
+    releaseDocumentRoot: `${identity.paths.runtime.releasesDirectory}/${sourceOperationId}/public`,
+    controlDirectoryMode: '0755',
+    releaseDirectoryMode: '0750',
+  };
+  return {
+    applicable: true,
+    migrationRequired: true,
+    websiteId,
+    applicationId,
+    websiteRevision: 3,
+    expected: { unixUser: applicationUser, homeDirectory },
+    migration: {
+      applyAvailable: true,
+      previewDigest,
+      changes: [{
+        action: 'repair_php_container_metadata',
+        applyState: 'requires_explicit_apply',
+        current: {
+          operationId: sourceOperationId,
+          phpRuntimeMigrationPreview: {
+            safeContainerMigrationCandidate: true,
+            current: { container: { safeMigrationCandidate: true } },
+          },
+        },
+        desired: { phpContainer: desired },
+      }],
+    },
+  };
+}
+
 function registry() {
   return createWebsiteIsolationMigrationRegistry({
     now: () => Date.parse('2026-09-17T12:00:00.000Z'),
@@ -396,6 +438,52 @@ test('isolation migration registry rejects PHP pool journaling when safe-create 
   await store.init();
   const unsafe = phpAudit();
   unsafe.migration.changes[0].current.phpRuntimeMigrationPreview.safeCreateCandidate = false;
+
+  await assert.rejects(
+    store.create(unsafe),
+    (error) => error instanceof WebsiteIsolationMigrationRegistryError
+      && error.code === 'website_isolation_migration_preview_invalid',
+  );
+});
+
+
+test('isolation migration registry journals typed PHP container metadata ownership and rollback evidence', async () => {
+  const store = registry();
+  await store.init();
+
+  const created = await store.create(phpContainerAudit());
+  assert.equal(created.intent.adapter, 'php_container');
+  assert.equal(created.intent.sourceOperationId, sourceOperationId);
+  assert.deepEqual(created.intent.targets, []);
+
+  await store.markApplying(operationId);
+  const succeeded = await store.succeed(operationId, {
+    satisfied: true,
+    phpContainerReceiptVersion: 1,
+    migratedPhpContainer: true,
+  });
+  assert.deepEqual(succeeded.result, {
+    satisfied: true,
+    phpContainerReceiptVersion: 1,
+    migratedPhpContainer: true,
+  });
+
+  await store.markCompensating(operationId);
+  const compensated = await store.compensate(operationId, {
+    satisfied: true,
+    restoredPhpContainerMetadata: true,
+  });
+  assert.deepEqual(compensated.compensation, {
+    satisfied: true,
+    restoredPhpContainerMetadata: true,
+  });
+});
+
+test('isolation migration registry rejects PHP container journaling without exact safe metadata authority', async () => {
+  const store = registry();
+  await store.init();
+  const unsafe = phpContainerAudit();
+  unsafe.migration.changes[0].current.phpRuntimeMigrationPreview.safeContainerMigrationCandidate = false;
 
   await assert.rejects(
     store.create(unsafe),
