@@ -17,6 +17,7 @@ Son Website database data scope ilerlemesi: `docs/history/database-website-data-
 Son Website database delete lifecycle ilerlemesi: `docs/history/database-delete-lifecycle-2026-09-18.md`.
 Son elFinder scoped handoff/FPM ilerlemesi: `docs/history/elfinder-scoped-handoff-progress-2026-09-18.md`.
 Son ttyd/IntegratedToolGateway ilerlemesi: `docs/history/ttyd-integrated-gateway-progress-2026-09-18.md`.
+Son Domain suspension ve DNS retirement ilerlemesi: `docs/history/domain-suspension-dns-retirement-progress-2026-09-18.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -33,7 +34,10 @@ Son ttyd/IntegratedToolGateway ilerlemesi: `docs/history/ttyd-integrated-gateway
 
 ## P0.3 — Versioned DNS Zone Template ve Domain DNS yönetimi
 
-- [ ] Zone suspend/delete lifecycle'ını P0.9'a bağla; delete/suspend impact preview, reverse-dependency ownership evidence, retention/typed confirmation ve restart-safe retryable lifecycle aynı operation modelini kullansın.
+Kaynakta authoritative zone retirement impact, exact provisioning-origin ownership evidence, explicit snapshot retention policy, private retained snapshot journal, exact snapshot-bound PowerDNS delete primitive ve inspect-only restart recovery hazırdır. Standalone destructive DNS delete route'u özellikle açılmadı; mutation yalnız P0.9 Domain/Website reverse-dependency delete orchestrator'ı içinden çağrılacaktır.
+
+- [ ] Domain delete orchestrator'ında local authoritative zone retirement step'ini mail/certificate/routing bağımlılıkları temizlendikten sonra çalıştır; external DNS ve parent delegation ayrı lifecycle olarak kalsın.
+- [ ] DNSSEC açık zone deletion'da parent DS retirement/propagation tamamlanmadan destructive PowerDNS step'ini açma.
 
 Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içindedir.
 
@@ -101,12 +105,15 @@ Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözl
 
 ## P0.9 — Suspend/delete/rollback
 
-- [ ] Suspend data silmeden web/runtime erişimini durdursun.
-- [ ] Domain remove ve Website delete ayrı operation olsun.
-- [ ] Delete impact tüm Unix/runtime/Nginx/cert/DNS/mail/DB/SFTP/log/backup bağımlılıklarını göstersin.
-- [ ] Mail/DB/file deletion typed confirmation + retention.
-- [ ] Reverse dependency cleanup ownership evidence ile yapılsın.
-- [ ] Partial deletion retryable state bıraksın.
+Domain-level web traffic suspend/resume source lifecycle tamamlandı: exact Nginx checksum-bound deactivation receipt, explicit `suspended` Domain state, durable suspend→resume operation, typed preview/retry/resume confirmation, restart inspect-only reconciliation ve failure compensation kaynakta vardır. Bu işlem Domain vhost trafiğini durdurur; Website process/runtime lifecycle'ını durdurduğu iddia edilmez.
+
+- [ ] Website-wide suspend tüm bağlı Domain route'larını ve seçilen runtime/process erişimini operation-owned tek lifecycle'da durdursun; bir Domain suspend başarısızsa partial state/retry açık kalsın.
+- [ ] Domain remove ve Website delete ayrı durable operation olsun; standalone authoritative DNS delete route'u açma.
+- [ ] Mevcut delete impact graph'ını Unix/runtime/Nginx/cert/DNS/mail/DB/SFTP/log/backup bağımlılıklarının tamamı için final orchestrator precondition'ı yap.
+- [ ] Domain delete reverse order: routing suspend/deactivate → certificate/webmail/mail/external-DNS bağımlılıkları → authoritative DNS retirement → Domain metadata finalization. Her destructive step operation-owned evidence kullansın.
+- [ ] Website delete bağlı Domain delete operation'ları bitmeden Website/Application/Unix/runtime/file cleanup'a geçmesin.
+- [ ] Mail/DB/file deletion typed confirmation + retention ve mevcut backup evidence zincirlerini üst delete operation'a bağla.
+- [ ] Partial deletion retryable state bıraksın; restart hiçbir destructive step'i kör replay etmesin.
 
 # P1 — Core parity sonrası
 
@@ -152,7 +159,7 @@ Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözl
 
 # Uygulama sırası — blocker yoksa sapma yok
 
-1. **DNS suspend/delete lifecycle** — mevcut versioned template, durable re-apply ve exact before/after rollback authority'sini P0.9 reverse-dependency/retention modeline bağla.
+1. **Domain/Website delete orchestrator** — hazır Domain suspend/resume, authoritative DNS retirement, resource-impact, mail/DB delete safety ve ownership evidence parçalarını reverse-order durable P0.9 lifecycle'a bağla.
 2. **Mail core parity** — SQL-backed virtual domain/mailbox/alias/quota/storage identity, authenticated SMTP/IMAP, DKIM/SPF/DMARC policy ve shared Roundcube/webmail lifecycle'ını tamamla.
 3. **Transactional create/delete provisioning** — Website/Domain/runtime/DNS/mail/DB/certificate/SFTP adımlarını tek durable lifecycle ve reverse-order compensation zincirine birleştir.
 4. **TLS/autodiscover/recovery hardening** ve cross-service health kapıları.
