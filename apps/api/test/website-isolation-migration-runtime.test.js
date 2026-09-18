@@ -296,6 +296,77 @@ function phpPreview(overrides = {}) {
   });
 }
 
+function phpContainerPreview(overrides = {}) {
+  const identity = createApplicationIdentity(applicationId);
+  const desired = {
+    websiteId,
+    applicationId,
+    releaseId: sourceOperationId,
+    unixUser: applicationUser,
+    documentRoot: `${identity.paths.runtime.currentRelease}/public`,
+    applicationRoot: identity.paths.runtime.applicationRoot,
+    releasesDirectory: identity.paths.runtime.releasesDirectory,
+    currentRelease: identity.paths.runtime.currentRelease,
+    releaseDirectory: `${identity.paths.runtime.releasesDirectory}/${sourceOperationId}`,
+    releaseDocumentRoot: `${identity.paths.runtime.releasesDirectory}/${sourceOperationId}/public`,
+    controlDirectoryMode: '0755',
+    releaseDirectoryMode: '0750',
+  };
+  return preview({
+    ...overrides,
+    migration: {
+      applyAvailable: true,
+      previewDigest,
+      confirmation,
+      changes: [{
+        action: 'repair_php_container_metadata',
+        applyState: 'requires_explicit_apply',
+        current: {
+          operationId: sourceOperationId,
+          phpRuntimeMigrationPreview: {
+            safeContainerMigrationCandidate: true,
+            current: { container: { safeMigrationCandidate: true } },
+          },
+        },
+        desired: { phpContainer: desired },
+      }],
+    },
+  });
+}
+
+function phpContainerMigrationHandler() {
+  let active = false;
+  let compensated = false;
+  const calls = [];
+  return {
+    calls,
+    async inspectContainerMigrationOperation(context) {
+      calls.push(['inspect-php-container-operation', context]);
+      return active
+        ? { satisfied: true, phpContainerReceiptVersion: 1, migratedPhpContainer: true }
+        : { satisfied: false, reason: 'php_site_container_migration_receipt_missing' };
+    },
+    async applyContainerMigration(context) {
+      calls.push(['apply-php-container', context]);
+      active = true;
+      compensated = false;
+      return { satisfied: true, phpContainerReceiptVersion: 1, migratedPhpContainer: true };
+    },
+    async inspectContainerMigrationCompensation(context) {
+      calls.push(['inspect-php-container-compensation', context]);
+      return compensated
+        ? { satisfied: true, restoredPhpContainerMetadata: true }
+        : { satisfied: false, reason: 'php_site_container_migration_compensation_pending' };
+    },
+    async compensateContainerMigration(context) {
+      calls.push(['compensate-php-container', context]);
+      active = false;
+      compensated = true;
+      return { satisfied: true, restoredPhpContainerMetadata: true };
+    },
+  };
+}
+
 function phpMigrationHandler() {
   let active = false;
   let compensated = false;
@@ -723,4 +794,90 @@ test('PHP pool migration rollback uses only receipt-owned FPM compensation', asy
     preservedExisting: false,
   });
   assert.equal(handler.calls.some(([name]) => name === 'compensate-php'), true);
+});
+
+
+test('PHP container metadata migration applies only through its typed receipt handler', async () => {
+  const handler = phpContainerMigrationHandler();
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: registry(),
+    auditService: { audit: async () => phpContainerPreview() },
+    workspaceManager: identityManager(),
+    migrationHandlers: { php_runtime: handler },
+  });
+  await runtime.init();
+
+  const result = await runtime.start({ websiteId, previewDigest, confirmation });
+
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.adapter, 'php_container');
+  assert.deepEqual(result.result, {
+    satisfied: true,
+    phpContainerReceiptVersion: 1,
+    migratedPhpContainer: true,
+  });
+  assert.deepEqual(handler.calls.map(([name]) => name), [
+    'inspect-php-container-operation',
+    'apply-php-container',
+  ]);
+  assert.equal(handler.calls[0][1].releaseOperationId, sourceOperationId);
+  assert.equal(handler.calls[0][1].operationId, operationId);
+  assert.equal(handler.calls[1][1].releaseOperationId, sourceOperationId);
+});
+
+test('PHP container metadata migration restart closes receipt without replaying ownership mutation', async () => {
+  const store = registry();
+  await store.init();
+  const created = await store.create(phpContainerPreview());
+  await store.markApplying(created.id);
+  const handler = phpContainerMigrationHandler();
+  await handler.applyContainerMigration({
+    operationId,
+    releaseOperationId: sourceOperationId,
+    websiteId,
+    intent: {
+      adapter: 'php-fpm',
+      websiteId,
+      applicationId,
+      unixUser: applicationUser,
+      documentRoot: `/var/lib/yunpanel/apps/${applicationId}/current/public`,
+    },
+  });
+  handler.calls.length = 0;
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: store,
+    auditService: { audit: async () => phpContainerPreview() },
+    workspaceManager: identityManager(),
+    migrationHandlers: { php_runtime: handler },
+  });
+
+  const recovery = await runtime.init();
+
+  assert.deepEqual(recovery, [{ operationId, recovered: true }]);
+  assert.equal((await runtime.get(operationId)).status, 'succeeded');
+  assert.deepEqual(handler.calls.map(([name]) => name), ['inspect-php-container-operation']);
+});
+
+test('PHP container metadata rollback uses only its receipt-owned compensation', async () => {
+  const handler = phpContainerMigrationHandler();
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: registry(),
+    auditService: { audit: async () => phpContainerPreview() },
+    workspaceManager: identityManager(),
+    migrationHandlers: { php_runtime: handler },
+  });
+  await runtime.init();
+  await runtime.start({ websiteId, previewDigest, confirmation });
+
+  const result = await runtime.rollback({
+    operationId,
+    confirmation: `rollback-isolation-migration:${operationId}:${previewDigest}`,
+  });
+
+  assert.equal(result.status, 'compensated');
+  assert.deepEqual(result.compensation, {
+    satisfied: true,
+    restoredPhpContainerMetadata: true,
+  });
+  assert.equal(handler.calls.some(([name]) => name === 'compensate-php-container'), true);
 });
