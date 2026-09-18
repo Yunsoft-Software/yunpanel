@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { powerDnsZoneManagerInternals } from '@yunpanel/host-runtime';
+import { powerDnsZoneManagerInternals } from '@yunpanel/host-runtime/powerdns-zone-manager';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ROOT_ZONE_BLOCKERS = Object.freeze({
