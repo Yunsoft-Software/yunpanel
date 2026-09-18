@@ -19,6 +19,7 @@ function plannedPreview(overrides = {}) {
     templateVersion: 4,
     dnsIdentityRevision: 2,
     mailStateDigest: 'c'.repeat(64),
+    sourceZoneDigest: 'd'.repeat(64),
     observedSerial: 2026091501,
     nextSerial: 2026091601,
     applyAllowed: true,
@@ -189,5 +190,30 @@ test('interrupted reapply does not accept a different mail desired state as its 
   const recovered = await runtime.run(created.id);
   assert.equal(recovered.status, 'failed');
   assert.equal(recovered.error.code, 'dns_zone_reapply_preview_stale');
+  assert.equal(applyCalls, 0);
+});
+
+
+test('journaled DNS zone reapply fails closed if exact source-zone evidence drifts', async () => {
+  const store = registry();
+  let previewCalls = 0;
+  let applyCalls = 0;
+  const runtime = createDnsZoneReapplyRuntime({
+    registry: store,
+    service: {
+      preview: async () => {
+        previewCalls += 1;
+        return previewCalls === 1
+          ? plannedPreview()
+          : plannedPreview({ sourceZoneDigest: 'e'.repeat(64) });
+      },
+      apply: async () => { applyCalls += 1; return {}; },
+    },
+  });
+  await runtime.init();
+
+  const failed = await runtime.start({ domainId, previewDigest, confirmation });
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.error.code, 'dns_zone_reapply_preview_stale');
   assert.equal(applyCalls, 0);
 });
