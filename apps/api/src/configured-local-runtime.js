@@ -277,6 +277,9 @@ export async function startConfiguredLocalRuntime({
     }
 
     if (operation === OPERATIONS.DATABASE_DELETE) {
+      if (resourceType !== 'database' || resourceId !== payload?.name) {
+        throw new Error('Database deletion result is not safe recovery evidence');
+      }
       const deleteScopeFields = [
         'websiteId', 'databaseBindingId', 'expectedBindingRevision',
         'backupId', 'expectedBackupSha256',
