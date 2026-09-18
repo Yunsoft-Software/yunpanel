@@ -246,6 +246,137 @@ function zoneSnapshotDigest(zone) {
   return createHash('sha256').update(JSON.stringify(zoneSnapshot(zone))).digest('hex');
 }
 
+function sameRrsetState(left, right) {
+  if (left === null || right === null) return left === right;
+  return JSON.stringify(rrsetState(left)) === JSON.stringify(rrsetState(right));
+}
+
+function normalizeRollbackSnapshot(value, normalizedZone) {
+  const snapshot = zoneSnapshot(value);
+  let snapshotZone;
+  try { snapshotZone = zoneName(snapshot.zoneName); }
+  catch {
+    throw new PowerDnsZoneManagerError('powerdns_zone_restore_snapshot_invalid', 'PowerDNS rollback snapshot zone is invalid', 409);
+  }
+  if (snapshot.version !== 1 || snapshotZone !== normalizedZone || snapshot.id !== fqdn(normalizedZone)
+    || !['Native', 'Primary', 'Master'].includes(snapshot.kind)
+    || snapshot.rrsets.length < 1
+    || snapshot.rrsets.some((rrset) => !rrset.name || !/^[A-Z0-9-]{1,64}$/.test(rrset.type)
+      || !Number.isSafeInteger(rrset.ttl) || rrset.ttl < 0
+      || (rrset.name !== fqdn(normalizedZone) && !rrset.name.endsWith(`.${normalizedZone}.`)))) {
+    throw new PowerDnsZoneManagerError(
+      'powerdns_zone_restore_snapshot_invalid',
+      'PowerDNS rollback snapshot does not match the requested authoritative zone',
+      409,
+    );
+  }
+  const keys = snapshot.rrsets.map(rrsetKey);
+  if (new Set(keys).size !== keys.length) {
+    throw new PowerDnsZoneManagerError('powerdns_zone_restore_snapshot_invalid', 'PowerDNS rollback snapshot contains duplicate RRsets', 409);
+  }
+  return snapshot;
+}
+
+function replacementRrset(rrset) {
+  return Object.freeze({
+    name: rrset.name,
+    type: rrset.type,
+    ttl: rrset.ttl,
+    changetype: 'REPLACE',
+    records: Object.freeze(rrset.records.map((entry) => Object.freeze({
+      content: entry.content,
+      disabled: entry.disabled === true,
+    }))),
+    comments: Object.freeze(rrset.comments.map((entry) => Object.freeze({
+      account: String(entry.account ?? ''),
+      content: String(entry.content ?? ''),
+    }))),
+  });
+}
+
+function deletionRrset(rrset) {
+  return Object.freeze({
+    name: rrset.name,
+    type: rrset.type,
+    changetype: 'DELETE',
+    records: Object.freeze([]),
+    comments: Object.freeze([]),
+  });
+}
+
+function rollbackSnapshotPlan(current, beforeSnapshot, afterSnapshot) {
+  if (!current) {
+    throw new PowerDnsZoneManagerError('powerdns_zone_restore_zone_missing', 'PowerDNS rollback target zone is missing', 409);
+  }
+  if (beforeSnapshot.zoneName !== afterSnapshot.zoneName || beforeSnapshot.id !== afterSnapshot.id
+    || beforeSnapshot.dnssec !== afterSnapshot.dnssec
+    || current.id !== beforeSnapshot.id || current.dnssec !== beforeSnapshot.dnssec) {
+    throw new PowerDnsZoneManagerError(
+      'powerdns_zone_restore_drift',
+      'PowerDNS rollback target topology changed outside the reapply operation',
+      409,
+    );
+  }
+
+  let kindChangeRequired = false;
+  if (beforeSnapshot.kind === afterSnapshot.kind) {
+    if (current.kind !== beforeSnapshot.kind) {
+      throw new PowerDnsZoneManagerError('powerdns_zone_restore_drift', 'PowerDNS zone kind changed outside the reapply operation', 409);
+    }
+  } else if (current.kind === afterSnapshot.kind) {
+    kindChangeRequired = true;
+  } else if (current.kind !== beforeSnapshot.kind) {
+    throw new PowerDnsZoneManagerError('powerdns_zone_restore_drift', 'PowerDNS zone kind is not owned by the reapply operation', 409);
+  }
+
+  const before = new Map(beforeSnapshot.rrsets.map((rrset) => [rrsetKey(rrset), rrset]));
+  const after = new Map(afterSnapshot.rrsets.map((rrset) => [rrsetKey(rrset), rrset]));
+  const observed = new Map(current.rrsets.map((rrset) => [rrsetKey(rrset), rrset]));
+  for (const key of observed.keys()) {
+    if (!before.has(key) && !after.has(key)) {
+      throw new PowerDnsZoneManagerError(
+        'powerdns_zone_restore_drift',
+        'PowerDNS zone contains RRsets created outside the reapply operation',
+        409,
+      );
+    }
+  }
+
+  const changes = [];
+  const keys = new Set([...before.keys(), ...after.keys()]);
+  for (const key of keys) {
+    const previous = before.get(key) ?? null;
+    const applied = after.get(key) ?? null;
+    const present = observed.get(key) ?? null;
+    if (sameRrsetState(previous, applied)) {
+      if (!sameRrsetState(present, previous)) {
+        throw new PowerDnsZoneManagerError(
+          'powerdns_zone_restore_drift',
+          'PowerDNS unchanged RRset drifted outside the reapply operation',
+          409,
+        );
+      }
+      continue;
+    }
+    if (sameRrsetState(present, previous)) continue;
+    if (!sameRrsetState(present, applied)) {
+      throw new PowerDnsZoneManagerError(
+        'powerdns_zone_restore_drift',
+        'PowerDNS RRset is neither the operation before-state nor after-state',
+        409,
+      );
+    }
+    changes.push(previous === null ? deletionRrset(applied) : replacementRrset(previous));
+  }
+
+  return Object.freeze({
+    satisfied: changes.length === 0 && !kindChangeRequired,
+    repairCandidate: true,
+    changes: Object.freeze(changes),
+    kindChangeRequired,
+  });
+}
+
 function desiredMap(records) {
   const result = new Map();
   for (const record of records) {
@@ -546,6 +677,83 @@ export function createPowerDnsZoneManager({
     }
   }
 
+  async function inspectSnapshotRestore({
+    zoneName: requestedZoneName,
+    apiKey: rawApiKey,
+    before: rawBefore,
+    after: rawAfter,
+  } = {}) {
+    const normalizedZone = zoneName(requestedZoneName);
+    const before = normalizeRollbackSnapshot(rawBefore, normalizedZone);
+    const after = normalizeRollbackSnapshot(rawAfter, normalizedZone);
+    const current = await getZone(normalizedZone, rawApiKey);
+    const plan = rollbackSnapshotPlan(current, before, after);
+    return Object.freeze({
+      satisfied: plan.satisfied,
+      repairCandidate: plan.repairCandidate,
+      zoneName: normalizedZone,
+      sourceZoneDigest: createHash('sha256').update(JSON.stringify(before)).digest('hex'),
+      appliedZoneDigest: createHash('sha256').update(JSON.stringify(after)).digest('hex'),
+      pendingRrsetCount: plan.changes.length,
+      kindChangeRequired: plan.kindChangeRequired,
+    });
+  }
+
+  async function restoreSnapshot({
+    zoneName: requestedZoneName,
+    apiKey: rawApiKey,
+    before: rawBefore,
+    after: rawAfter,
+  } = {}) {
+    const normalizedZone = zoneName(requestedZoneName);
+    const before = normalizeRollbackSnapshot(rawBefore, normalizedZone);
+    const after = normalizeRollbackSnapshot(rawAfter, normalizedZone);
+    let current = await getZone(normalizedZone, rawApiKey);
+    let plan = rollbackSnapshotPlan(current, before, after);
+    if (plan.satisfied) {
+      return Object.freeze({
+        satisfied: true,
+        zoneName: normalizedZone,
+        restoredRrsetCount: 0,
+        kindRestored: false,
+        sourceZoneDigest: createHash('sha256').update(JSON.stringify(before)).digest('hex'),
+      });
+    }
+
+    const restoredRrsetCount = plan.changes.length;
+    const kindRestored = plan.kindChangeRequired;
+    if (plan.changes.length > 0) {
+      await request(`/zones/${encodeURIComponent(fqdn(normalizedZone))}`, {
+        method: 'PATCH',
+        key: rawApiKey,
+        body: { rrsets: plan.changes },
+      });
+    }
+    if (plan.kindChangeRequired) {
+      await request(`/zones/${encodeURIComponent(fqdn(normalizedZone))}`, {
+        method: 'PUT',
+        key: rawApiKey,
+        body: { kind: before.kind },
+      });
+    }
+
+    current = await getZone(normalizedZone, rawApiKey);
+    plan = rollbackSnapshotPlan(current, before, after);
+    if (!plan.satisfied || !sameZoneState(current, before)) {
+      throw new PowerDnsZoneManagerError(
+        'powerdns_zone_restore_unverified',
+        'PowerDNS rollback snapshot could not be verified after mutation',
+      );
+    }
+    return Object.freeze({
+      satisfied: true,
+      zoneName: normalizedZone,
+      restoredRrsetCount,
+      kindRestored,
+      sourceZoneDigest: createHash('sha256').update(JSON.stringify(before)).digest('hex'),
+    });
+  }
+
   async function compensate({ zoneName: requestedZoneName, apiKey: rawApiKey, records } = {}) {
     const normalizedZone = zoneName(requestedZoneName);
     const desired = desiredMap(records ?? []);
@@ -603,7 +811,16 @@ export function createPowerDnsZoneManager({
     });
   }
 
-  return Object.freeze({ inspect, apply, compensate, inspectCompensation, getZone, notifyZone });
+  return Object.freeze({
+    inspect,
+    apply,
+    inspectSnapshotRestore,
+    restoreSnapshot,
+    compensate,
+    inspectCompensation,
+    getZone,
+    notifyZone,
+  });
 }
 
 export const powerDnsZoneManagerInternals = Object.freeze({
@@ -627,6 +844,11 @@ export const powerDnsZoneManagerInternals = Object.freeze({
   sameZoneState,
   zoneSnapshot,
   zoneSnapshotDigest,
+  sameRrsetState,
+  normalizeRollbackSnapshot,
+  replacementRrset,
+  deletionRrset,
+  rollbackSnapshotPlan,
   desiredMap,
   serialFromRrsets,
   serialMetadata,
