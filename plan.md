@@ -33,7 +33,8 @@ Son ttyd/IntegratedToolGateway ilerlemesi: `docs/history/ttyd-integrated-gateway
 
 ## P0.1 — Website Unix identity ve filesystem isolation
 
-- [ ] Legacy Website migration apply kapsamını canonical Unix identity/path/runtime/SFTP drift'ine genişlet; mevcut receipt-bound `tmp`/`logs` workspace repair dışındaki her adapter exact değişiklik preview'sı versin, yalnız operation-owned değişiklikleri geri alsın ve kör recursive `chown` yapmasın.
+- [ ] Canonical Unix identity migration apply yolunu yalnız exact preview'daki all-missing safe-create state için aç; durable receipt + restart inspection zorunlu olsun, pre-existing user/group/HOME drift'i fail-closed kalsın ve rollback HOME içeriğini recursive silmesin.
+- [ ] Legacy Website path/runtime/SFTP migration apply kapsamını tamamla; Unix identity ve SFTP exact bounded preview artık var, runtime adapter'ları da exact current/desired evidence versin. Apply/rollback yalnız operation-owned değişiklikleri kapsasın; kör recursive `chown`/`rm` yapılmasın.
 
 Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
@@ -158,7 +159,7 @@ Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözl
 
 # Uygulama sırası — blocker yoksa sapma yok
 
-1. **Website Unix isolation** — workspace dışındaki legacy identity/runtime/SFTP migration hardening.
+1. **Website Unix isolation** — safe-create identity operation + runtime exact drift preview + operation-owned legacy migration apply/rollback.
 2. **PowerDNS operator recovery** — restart-sonrası güvenli explicit rollback, typed confirmation ve fail-closed recovery control surface.
 3. **Mail explicit rollback** — mevcut v3 backup/previous-state preview'ından durable restore, compensation/restart recovery ve monoton control-plane reconciliation.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
