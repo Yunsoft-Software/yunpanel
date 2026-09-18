@@ -81,6 +81,52 @@ function identityAudit() {
   };
 }
 
+function sftpAudit() {
+  const desired = {
+    websiteId,
+    applicationId,
+    unixUser: applicationUser,
+    sourceDirectory: `${homeDirectory}`,
+    chrootRoot: '/var/lib/yunpanel/sftp-chroots',
+    chrootDirectory: `/var/lib/yunpanel/sftp-chroots/${applicationId}`,
+    mountDirectory: `/var/lib/yunpanel/sftp-chroots/${applicationId}/site`,
+    sshdConfigPath: `/etc/ssh/sshd_config.d/90-yunpanel-sftp-${applicationUser}.conf`,
+    unitName: 'yunpanel-test.mount',
+    sshdSha256: 'b'.repeat(64),
+    mountSha256: 'c'.repeat(64),
+    directoryMode: '0755',
+    directoryUid: 0,
+    directoryGid: 0,
+  };
+  return {
+    applicable: true,
+    migrationRequired: true,
+    websiteId,
+    applicationId,
+    websiteRevision: 3,
+    expected: { unixUser: applicationUser, homeDirectory },
+    migration: {
+      applyAvailable: true,
+      previewDigest,
+      changes: [{
+        action: 'create_sftp_isolation',
+        applyState: 'requires_explicit_apply',
+        current: {
+          sftpMigrationPreview: {
+            version: 1,
+            satisfied: false,
+            safeCreateCandidate: true,
+            current: {},
+            desired,
+            differences: ['sftp_receipt_missing'],
+          },
+        },
+        desired: { sftp: desired },
+      }],
+    },
+  };
+}
+
 function registry() {
   return createWebsiteIsolationMigrationRegistry({
     now: () => Date.parse('2026-09-17T12:00:00.000Z'),
@@ -211,6 +257,56 @@ test('isolation migration registry rejects identity journaling unless preview pr
   await store.init();
   const unsafe = identityAudit();
   unsafe.migration.changes[0].current.identityMigrationPreview.safeCreateCandidate = false;
+
+  await assert.rejects(
+    store.create(unsafe),
+    (error) => error instanceof WebsiteIsolationMigrationRegistryError
+      && error.code === 'website_isolation_migration_preview_invalid',
+  );
+});
+
+
+test('isolation migration registry journals typed SFTP receipt and key evidence', async () => {
+  const store = registry();
+  await store.init();
+
+  const created = await store.create(sftpAudit());
+  assert.equal(created.intent.adapter, 'sftp');
+  assert.deepEqual(created.intent.targets, []);
+  assert.equal(websiteIsolationMigrationPublicView(created).adapter, 'sftp');
+
+  await store.markApplying(operationId);
+  const succeeded = await store.succeed(operationId, {
+    satisfied: true,
+    sftpReceiptVersion: 1,
+    activatedSftpIsolation: true,
+    authorizedKeyCount: 2,
+    authorizedKeysSha256: 'd'.repeat(64),
+  });
+  assert.deepEqual(succeeded.result, {
+    satisfied: true,
+    sftpReceiptVersion: 1,
+    activatedSftpIsolation: true,
+    authorizedKeyCount: 2,
+    authorizedKeysSha256: 'd'.repeat(64),
+  });
+
+  await store.markCompensating(operationId);
+  const compensated = await store.compensate(operationId, {
+    satisfied: true,
+    removedSftpIsolation: true,
+  });
+  assert.deepEqual(compensated.compensation, {
+    satisfied: true,
+    removedSftpIsolation: true,
+  });
+});
+
+test('isolation migration registry rejects SFTP journaling when safe-create evidence is lost', async () => {
+  const store = registry();
+  await store.init();
+  const unsafe = sftpAudit();
+  unsafe.migration.changes[0].current.sftpMigrationPreview.safeCreateCandidate = false;
 
   await assert.rejects(
     store.create(unsafe),
