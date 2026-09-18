@@ -15,6 +15,7 @@ Son phpMyAdmin protected signon/gateway ilerlemesi: `docs/history/phpmyadmin-sig
 Son phpMyAdmin browser handoff UI ilerlemesi: `docs/history/phpmyadmin-browser-handoff-2026-09-18.md`.
 Son Website database data scope ilerlemesi: `docs/history/database-website-data-scope-2026-09-18.md`.
 Son Website database delete lifecycle ilerlemesi: `docs/history/database-delete-lifecycle-2026-09-18.md`.
+Son elFinder scoped handoff/FPM ilerlemesi: `docs/history/elfinder-scoped-handoff-progress-2026-09-18.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -63,13 +64,12 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 ## P0.6 — elFinder; homegrown File Manager removal
 
-- [ ] elFinder shared app/client.
-- [ ] Connector gerçek Website UID/GID altında çalışsın; preferred site PHP-FPM pool/socket.
-- [ ] Root canonical Website HOME/SFTP root'tan server-side resolve edilsin.
-- [ ] Session -> short-lived audience-bound Website token.
+- [ ] elFinder shared vendor app/client package layout'ını ve hardened connector artifact'ını fixed paths altında materyalize et.
+- [ ] Per-Website PHP-FPM pool/socket template'ini gerçek materialization + configtest + reload + rollback lifecycle'ına bağla.
+- [ ] Same-origin protected gateway'i short-lived elFinder handoff consume + exact Website FPM socket seçimiyle bağla; vendor endpoint public bypass olmasın.
+- [ ] Website Files action/client'i handoff üzerinden shared elFinder UI'a bağla.
 - [ ] Upload/download/edit/rename/move/copy/delete/mkdir/archive via elFinder.
 - [ ] Traversal/symlink/archive escape/special file/secret/cross-site testleri.
-- [ ] Vendor endpoint public bypass olmasın.
 - [ ] Acceptance sonrası custom `site-file-manager` kaldır.
 - [ ] elFinder site-UID acceptance vermezse homegrown'a dönme; Filestash + localhost SFTP değerlendir.
 
