@@ -304,6 +304,27 @@ function deletionRrset(rrset) {
   });
 }
 
+function snapshotDeletionPlan(current, snapshot) {
+  if (snapshot.dnssec) {
+    throw new PowerDnsZoneManagerError(
+      'powerdns_zone_snapshot_delete_dnssec_enabled',
+      'PowerDNS zone snapshot deletion requires DNSSEC to be retired first',
+      409,
+    );
+  }
+  if (!current) {
+    return Object.freeze({ satisfied: true, deleteCandidate: false, deleted: true });
+  }
+  if (!sameZoneState(current, snapshot)) {
+    throw new PowerDnsZoneManagerError(
+      'powerdns_zone_snapshot_delete_drift',
+      'PowerDNS zone no longer matches the exact retained deletion snapshot',
+      409,
+    );
+  }
+  return Object.freeze({ satisfied: false, deleteCandidate: true, deleted: false });
+}
+
 function rollbackSnapshotPlan(current, beforeSnapshot, afterSnapshot) {
   if (!current) {
     throw new PowerDnsZoneManagerError('powerdns_zone_restore_zone_missing', 'PowerDNS rollback target zone is missing', 409);
@@ -677,6 +698,63 @@ export function createPowerDnsZoneManager({
     }
   }
 
+  async function inspectSnapshotDeletion({
+    zoneName: requestedZoneName,
+    apiKey: rawApiKey,
+    snapshot: rawSnapshot,
+  } = {}) {
+    const normalizedZone = zoneName(requestedZoneName);
+    const snapshot = normalizeRollbackSnapshot(rawSnapshot, normalizedZone);
+    const current = await getZone(normalizedZone, rawApiKey);
+    const plan = snapshotDeletionPlan(current, snapshot);
+    return Object.freeze({
+      satisfied: plan.satisfied,
+      deleteCandidate: plan.deleteCandidate,
+      deleted: plan.deleted,
+      zoneName: normalizedZone,
+      snapshotDigest: createHash('sha256').update(JSON.stringify(snapshot)).digest('hex'),
+    });
+  }
+
+  async function deleteSnapshot({
+    zoneName: requestedZoneName,
+    apiKey: rawApiKey,
+    snapshot: rawSnapshot,
+  } = {}) {
+    const normalizedZone = zoneName(requestedZoneName);
+    const snapshot = normalizeRollbackSnapshot(rawSnapshot, normalizedZone);
+    const current = await getZone(normalizedZone, rawApiKey);
+    const plan = snapshotDeletionPlan(current, snapshot);
+    const snapshotDigest = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+    if (plan.satisfied) {
+      return Object.freeze({
+        satisfied: true,
+        deleted: true,
+        changed: false,
+        zoneName: normalizedZone,
+        snapshotDigest,
+      });
+    }
+    await request(`/zones/${encodeURIComponent(fqdn(normalizedZone))}`, {
+      method: 'DELETE',
+      key: rawApiKey,
+    });
+    const after = await getZone(normalizedZone, rawApiKey);
+    if (after) {
+      throw new PowerDnsZoneManagerError(
+        'powerdns_zone_snapshot_delete_unverified',
+        'PowerDNS zone snapshot deletion could not be verified',
+      );
+    }
+    return Object.freeze({
+      satisfied: true,
+      deleted: true,
+      changed: true,
+      zoneName: normalizedZone,
+      snapshotDigest,
+    });
+  }
+
   async function inspectSnapshotRestore({
     zoneName: requestedZoneName,
     apiKey: rawApiKey,
@@ -814,6 +892,8 @@ export function createPowerDnsZoneManager({
   return Object.freeze({
     inspect,
     apply,
+    inspectSnapshotDeletion,
+    deleteSnapshot,
     inspectSnapshotRestore,
     restoreSnapshot,
     compensate,
@@ -849,6 +929,7 @@ export const powerDnsZoneManagerInternals = Object.freeze({
   replacementRrset,
   deletionRrset,
   rollbackSnapshotPlan,
+  snapshotDeletionPlan,
   desiredMap,
   serialFromRrsets,
   serialMetadata,
