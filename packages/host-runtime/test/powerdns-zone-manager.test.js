@@ -348,3 +348,96 @@ test('refuses snapshot restore when an unrelated RRset appears after reapply', a
   assert.equal(api.calls.some((call) => call.method === 'PATCH'), false);
   assert.equal(api.calls.some((call) => call.method === 'PUT'), false);
 });
+
+
+test('deletes an authoritative zone only from the exact retained snapshot and is idempotent after deletion', async () => {
+  const rrsets = desiredRecords()
+    .map(powerDnsZoneManagerInternals.desiredRrset)
+    .map((entry) => structuredClone(entry));
+  const api = fakePowerDnsApi({
+    initialZone: { id: 'example.com.', kind: 'Primary', dnssec: false, rrsets },
+  });
+  const manager = createPowerDnsZoneManager({ fetchFn: api.fetchFn });
+  const current = await manager.getZone('example.com', key);
+  const snapshot = powerDnsZoneManagerInternals.zoneSnapshot(current);
+
+  const inspected = await manager.inspectSnapshotDeletion({
+    zoneName: 'example.com',
+    apiKey: key,
+    snapshot,
+  });
+  assert.equal(inspected.satisfied, false);
+  assert.equal(inspected.deleteCandidate, true);
+  assert.equal(inspected.deleted, false);
+  assert.match(inspected.snapshotDigest, /^[a-f0-9]{64}$/);
+  assert.equal(api.calls.filter((call) => call.method === 'DELETE').length, 0);
+
+  const deleted = await manager.deleteSnapshot({
+    zoneName: 'example.com',
+    apiKey: key,
+    snapshot,
+  });
+  assert.equal(deleted.satisfied, true);
+  assert.equal(deleted.deleted, true);
+  assert.equal(deleted.changed, true);
+  assert.equal(api.zone, null);
+  assert.equal(api.calls.filter((call) => call.method === 'DELETE').length, 1);
+
+  const retried = await manager.deleteSnapshot({
+    zoneName: 'example.com',
+    apiKey: key,
+    snapshot,
+  });
+  assert.equal(retried.satisfied, true);
+  assert.equal(retried.changed, false);
+  assert.equal(api.calls.filter((call) => call.method === 'DELETE').length, 1);
+});
+
+test('snapshot-bound zone deletion refuses live RRset drift without issuing DELETE', async () => {
+  const rrsets = desiredRecords()
+    .map(powerDnsZoneManagerInternals.desiredRrset)
+    .map((entry) => structuredClone(entry));
+  const api = fakePowerDnsApi({
+    initialZone: { id: 'example.com.', kind: 'Primary', dnssec: false, rrsets },
+  });
+  const manager = createPowerDnsZoneManager({ fetchFn: api.fetchFn });
+  const snapshot = powerDnsZoneManagerInternals.zoneSnapshot(
+    await manager.getZone('example.com', key),
+  );
+  api.zone.rrsets.push({
+    name: 'foreign.example.com.',
+    type: 'TXT',
+    ttl: 300,
+    records: [{ content: '"appeared-after-preview"', disabled: false }],
+    comments: [],
+  });
+
+  await assert.rejects(
+    manager.deleteSnapshot({ zoneName: 'example.com', apiKey: key, snapshot }),
+    (error) => error instanceof PowerDnsZoneManagerError
+      && error.code === 'powerdns_zone_snapshot_delete_drift',
+  );
+  assert.ok(api.zone);
+  assert.equal(api.calls.filter((call) => call.method === 'DELETE').length, 0);
+});
+
+test('snapshot-bound zone deletion requires DNSSEC retirement before destructive mutation', async () => {
+  const rrsets = desiredRecords()
+    .map(powerDnsZoneManagerInternals.desiredRrset)
+    .map((entry) => structuredClone(entry));
+  const api = fakePowerDnsApi({
+    initialZone: { id: 'example.com.', kind: 'Primary', dnssec: true, rrsets },
+  });
+  const manager = createPowerDnsZoneManager({ fetchFn: api.fetchFn });
+  const snapshot = powerDnsZoneManagerInternals.zoneSnapshot(
+    await manager.getZone('example.com', key),
+  );
+
+  await assert.rejects(
+    manager.deleteSnapshot({ zoneName: 'example.com', apiKey: key, snapshot }),
+    (error) => error instanceof PowerDnsZoneManagerError
+      && error.code === 'powerdns_zone_snapshot_delete_dnssec_enabled',
+  );
+  assert.ok(api.zone);
+  assert.equal(api.calls.filter((call) => call.method === 'DELETE').length, 0);
+});
