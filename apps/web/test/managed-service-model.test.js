@@ -10,7 +10,10 @@ import {
 
 test('service status distinguishes missing, stopped, active and inspection failures', () => {
   assert.deepEqual(managedServiceStatus({ installed: false }), { state: 'unknown', label: 'Kurulu değil' });
-  assert.deepEqual(managedServiceStatus({ installed: true, active: false, units: [] }), { state: 'off', label: 'Durduruldu' });
+  assert.deepEqual(
+    managedServiceStatus({ installed: true, active: false, units: [] }),
+    { state: 'active', label: 'Kurulu' },
+  );
   assert.deepEqual(managedServiceStatus({ installed: true, active: true }), { state: 'active', label: 'Çalışıyor' });
   assert.deepEqual(managedServiceStatus({ installed: true, active: false, units: [{ inspectionError: true }] }), { state: 'warning', label: 'Durum doğrulanamadı' });
 });
@@ -22,6 +25,29 @@ test('installed service exposes lifecycle actions but not reinstall', () => {
   assert.deepEqual(managedServiceActions({ id: 'nginx', installed: true, active: false }), {
     install: false, start: true, stop: false, restart: true, conflict: null,
   });
+});
+
+test('unitless managed applications expose install only and never fabricated service controls', () => {
+  assert.deepEqual(managedServiceActions({
+    id: 'elfinder',
+    installed: true,
+    active: false,
+    units: [],
+  }), {
+    install: false, start: false, stop: false, restart: false, conflict: null,
+  });
+  assert.deepEqual(managedServiceStatus({
+    installed: true,
+    active: false,
+    units: [],
+    health: { status: 'installed', configuration: 'valid' },
+  }), { state: 'active', label: 'Kurulu' });
+  assert.deepEqual(managedServiceStatus({
+    installed: true,
+    active: false,
+    units: [],
+    health: { status: 'configuration_invalid', configuration: 'invalid' },
+  }), { state: 'warning', label: 'Yapılandırma hatalı' });
 });
 
 test('MySQL and MariaDB conflicts are visible before installation', () => {
@@ -38,6 +64,8 @@ test('MySQL and MariaDB conflicts are visible before installation', () => {
 
 test('service metadata provides category labels and package versions', () => {
   assert.equal(managedServiceCategoryLabel('database'), 'Veritabanı');
+  assert.equal(managedServiceCategoryLabel('database_tool'), 'Veritabanı aracı');
+  assert.equal(managedServiceCategoryLabel('file_tool'), 'Dosya yöneticisi');
   assert.equal(managedServiceCategoryLabel('custom'), 'custom');
   assert.equal(managedServiceVersion({ packages: [{ version: '1.2.3' }, { version: null }] }), '1.2.3');
   assert.equal(managedServiceVersion({ packages: [] }), null);
