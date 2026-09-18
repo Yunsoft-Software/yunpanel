@@ -56,6 +56,7 @@ function service({
   migrationPreviews = {},
   workspaceMigrationAvailable = false,
   identityMigrationAvailable = false,
+  sftpMigrationAvailable = false,
 } = {}) {
   const handlers = {};
   for (const kind of ['unix_identity', 'runtime', 'static_runtime', 'php_runtime', 'sftp']) {
@@ -78,6 +79,7 @@ function service({
     provisioningHandlers: handlers,
     workspaceMigrationAvailable,
     identityMigrationAvailable,
+    sftpMigrationAvailable,
   });
 }
 
@@ -332,6 +334,62 @@ test('isolation audit ignores Unix identity migration previews that target a non
   const change = audit.migration.changes.find((entry) => entry.id === 'provisioning.unix_identity');
   assert.equal(change.current.identityMigrationPreview, undefined);
   assert.equal(audit.inspectedSteps[0].identityMigrationPreview, undefined);
+});
+
+test('isolation audit opens SFTP apply only for an exact safe-create preview', async () => {
+  const chrootRoot = '/var/lib/yunpanel/sftp-chroots';
+  const preview = {
+    version: 1,
+    satisfied: false,
+    safeCreateCandidate: true,
+    current: {
+      receiptState: null,
+      receiptError: null,
+      sshdConfig: { present: false, sha256: null, matchesDesired: false },
+      mountUnit: { present: false, sha256: null, matchesDesired: false, active: false },
+      chrootRoot: { present: false },
+      chrootDirectory: { present: false },
+      mountDirectory: { present: false },
+      sshdConfigValid: true,
+    },
+    desired: {
+      websiteId,
+      applicationId,
+      unixUser: identity.unixUser,
+      sourceDirectory: identity.paths.workspace.sftpRoot,
+      chrootRoot,
+      chrootDirectory: `${chrootRoot}/${applicationId}`,
+      mountDirectory: `${chrootRoot}/${applicationId}/site`,
+      sshdConfigPath: `/etc/ssh/sshd_config.d/90-yunpanel-sftp-${identity.unixUser}.conf`,
+      unitName: 'yunpanel-test.mount',
+      sshdSha256: 'b'.repeat(64),
+      mountSha256: 'c'.repeat(64),
+      directoryMode: '0755',
+      directoryUid: 0,
+      directoryGid: 0,
+    },
+    authorizedKeys: { satisfied: false, reason: 'sftp_authorized_keys_file_missing' },
+    differences: ['sftp_receipt_missing', 'sftp_sshd_config_missing', 'sftp_mount_unit_missing', 'sftp_mount_inactive'],
+  };
+  const audit = await service({
+    sftpMigrationAvailable: true,
+    stepResults: { sftp: { satisfied: false, reason: 'sftp_site_not_active' } },
+    migrationPreviews: { sftp: preview },
+  }).audit(websiteId);
+
+  assert.equal(audit.migration.applyAvailable, true);
+  assert.equal(audit.migration.changes.length, 1);
+  assert.equal(audit.migration.changes[0].action, 'create_sftp_isolation');
+  assert.equal(audit.migration.changes[0].ownership, 'operation_receipt_planned');
+  assert.deepEqual(audit.migration.changes[0].desired, { sftp: preview.desired });
+
+  const blocked = await service({
+    sftpMigrationAvailable: true,
+    stepResults: { sftp: { satisfied: false, reason: 'sftp_artifact_drift' } },
+    migrationPreviews: { sftp: { ...preview, safeCreateCandidate: false } },
+  }).audit(websiteId);
+  assert.equal(blocked.migration.applyAvailable, false);
+  assert.equal(blocked.migration.changes[0].action, 'reconcile_isolation_step');
 });
 
 test('isolation audit pins bounded SFTP host and authorized-key drift into the migration digest', async () => {
