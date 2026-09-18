@@ -274,6 +274,125 @@ export function createPassengerSiteManager({
     });
   }
 
+  async function previewMigration(intent) {
+    const spec = normalizedIntent(intent);
+    let passenger;
+    try {
+      const value = await passengerManager.inspect();
+      passenger = Object.freeze({
+        healthy: value?.healthy === true,
+        installedVersion: typeof value?.installedVersion === 'string' ? value.installedVersion : null,
+      });
+    } catch {
+      passenger = Object.freeze({ healthy: false, installedVersion: null });
+    }
+
+    let identity;
+    try {
+      const value = await identityEvidence(spec);
+      identity = value?.satisfied === true
+        ? Object.freeze({
+          satisfied: true,
+          uid: value.uid,
+          gid: value.gid,
+          homeDirectory: value.homeDirectory,
+          shell: value.shell,
+          homeMode: value.homeMode.toString(8).padStart(4, '0'),
+        })
+        : Object.freeze({
+          satisfied: false,
+          reason: value?.reason ?? 'website_identity_unverified',
+        });
+    } catch (error) {
+      identity = Object.freeze({
+        satisfied: false,
+        reason: typeof error?.code === 'string' ? error.code : 'passenger_site_identity_inspection_failed',
+      });
+    }
+
+    const nodeCandidates = [];
+    for (const candidate of spec.nodeCandidates) {
+      try {
+        const result = await run(candidate, ['--version'], { timeout: 5_000 });
+        const rawVersion = String(result?.stdout ?? '').trim();
+        const version = parseNodeVersion(rawVersion, spec.nodeMajor);
+        nodeCandidates.push(Object.freeze({
+          path: candidate,
+          available: true,
+          version: /^v\d{1,2}\.\d+\.\d+$/.test(rawVersion) ? rawVersion : null,
+          matchesRequestedMajor: version !== null,
+        }));
+      } catch {
+        nodeCandidates.push(Object.freeze({
+          path: candidate,
+          available: false,
+          version: null,
+          matchesRequestedMajor: false,
+        }));
+      }
+    }
+
+    let currentReleaseTarget = null;
+    let currentReleaseTargetError = null;
+    try { currentReleaseTarget = await readlinkFn(spec.currentRoot); }
+    catch (error) {
+      currentReleaseTargetError = error?.code === 'ENOENT' || error?.code === 'EINVAL'
+        ? 'passenger_release_unavailable'
+        : 'passenger_site_release_inspection_failed';
+    }
+
+    let release = null;
+    let releaseError = null;
+    try {
+      const value = await releaseEvidence(spec);
+      if (value) {
+        release = Object.freeze({
+          releaseId: value.releaseId,
+          resolvedAppRoot: value.resolvedAppRoot,
+          resolvedDocumentRoot: value.resolvedDocumentRoot,
+          resolvedStartup: value.resolvedStartup,
+        });
+      } else {
+        releaseError = 'passenger_release_unavailable';
+      }
+    } catch (error) {
+      releaseError = typeof error?.code === 'string' ? error.code : 'passenger_site_release_inspection_failed';
+    }
+
+    const differences = [];
+    if (!passenger.healthy) differences.push('passenger_runtime_unavailable');
+    if (!identity.satisfied) differences.push(identity.reason);
+    if (!nodeCandidates.some((candidate) => candidate.matchesRequestedMajor)) differences.push('passenger_node_unavailable');
+    if (!release) differences.push(releaseError ?? currentReleaseTargetError ?? 'passenger_release_unavailable');
+
+    return Object.freeze({
+      version: 1,
+      adapter: 'passenger',
+      satisfied: differences.length === 0,
+      current: Object.freeze({
+        passenger,
+        identity,
+        nodeCandidates: Object.freeze(nodeCandidates),
+        currentReleaseTarget,
+        currentReleaseTargetError,
+        release,
+      }),
+      desired: Object.freeze({
+        applicationId: spec.applicationId,
+        nodeMajor: spec.nodeMajor,
+        nodeCandidates: spec.nodeCandidates,
+        currentRoot: spec.currentRoot,
+        releasesDirectory: spec.releasesDirectory,
+        homeDirectory: spec.homeDirectory,
+        appRoot: spec.appRoot,
+        documentRoot: spec.documentRoot,
+        startupFile: spec.startupFile,
+        unixUser: spec.unixUser,
+      }),
+      differences: Object.freeze([...new Set(differences)]),
+    });
+  }
+
   async function inspect(intent) {
     return inspectSpec(normalizedIntent(intent));
   }
@@ -284,7 +403,7 @@ export function createPassengerSiteManager({
     return inspectSpec(spec);
   }
 
-  return Object.freeze({ inspect, apply });
+  return Object.freeze({ inspect, previewMigration, apply });
 }
 
 export const passengerSiteManagerInternals = Object.freeze({
