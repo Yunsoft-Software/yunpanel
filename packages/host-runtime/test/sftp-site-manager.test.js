@@ -240,3 +240,52 @@ test('SFTP migration preview blocks safe-create when a foreign site artifact alr
   assert.equal(host.calls.some(([file, args]) => file === '/usr/bin/install'
     || (file === '/usr/bin/systemctl' && ['enable', 'disable', 'reload', 'daemon-reload'].includes(args[0]))), false);
 });
+
+
+test('SFTP migration lifecycle applies only exact safe-create state and exposes durable receipt evidence', async () => {
+  const host = fakeHost();
+  const value = manager(host);
+
+  const applied = await value.applyMigration(intent(), { operationId });
+  const inspected = await value.inspectMigrationOperation(intent(), { operationId });
+
+  assert.equal(applied.satisfied, true);
+  assert.equal(applied.sftpReceiptVersion, 1);
+  assert.equal(applied.activatedSftpIsolation, true);
+  assert.equal(inspected.satisfied, true);
+  assert.equal(inspected.sftpReceiptVersion, 1);
+  assert.equal(inspected.activatedSftpIsolation, true);
+});
+
+test('SFTP migration lifecycle refuses pre-existing site-specific state before mutation', async () => {
+  const host = fakeHost();
+  host.files.set(sshdConfigPath, { content: 'Match User foreign\n', mode: 0o600 });
+  const value = manager(host);
+  const callsBefore = host.calls.length;
+
+  await assert.rejects(
+    value.applyMigration(intent(), { operationId }),
+    (error) => error instanceof SftpSiteManagerError && error.code === 'sftp_migration_not_safe_create',
+  );
+
+  const mutationCalls = host.calls.slice(callsBefore)
+    .filter(([file, args]) => file === '/usr/bin/install'
+      || (file === '/usr/bin/systemctl' && ['enable', 'disable', 'reload', 'daemon-reload'].includes(args[0])));
+  assert.deepEqual(mutationCalls, []);
+});
+
+test('SFTP migration compensation removes only receipt-owned artifacts and keeps site directories', async () => {
+  const host = fakeHost();
+  const value = manager(host);
+  await value.applyMigration(intent(), { operationId });
+
+  const compensated = await value.compensateMigration(intent(), { operationId });
+  const inspected = await value.inspectMigrationCompensation(intent(), { operationId });
+
+  assert.equal(compensated.satisfied, true);
+  assert.equal(compensated.removedSftpIsolation, true);
+  assert.equal(inspected.satisfied, true);
+  assert.equal(inspected.removedSftpIsolation, true);
+  assert.equal(host.dirs.has(chrootDirectory), true);
+  assert.equal(host.dirs.has(mountDirectory), true);
+});
