@@ -129,6 +129,21 @@ Domain-level suspend, Website delete/suspend'tan ayrı bir traffic-control lifec
 
 Gerçek Nginx configtest/reload/process-kill/restart kabulü `todo.md` T-PROVISIONING altında açık kalır.
 
+## Domain removal parent recovery
+
+Domain delete, Domain suspend operation'ından ayrı bir parent journal kullanır. Parent intent current resource-impact preview digest'i, exact Domain revision/checksum'u ve dependency kimliklerini mutation öncesi pinler.
+
+- Descendant Domain cleanup sırası hierarchy'den deterministic deepest-first üretilir. Disconnected veya cyclic dependency inventory journal'a alınmaz.
+- Parent step journal root-private kalır; start/impact confirmation değerleri public operation response'a taşınmaz.
+- İlk step `routing_suspend` yeni bir Nginx mutation adapter'ı yazmaz; mevcut durable `DomainSuspensionRuntime` child operation'ını kullanır.
+- Parent routing step `running` durumunda process kesilirse startup yalnız matching child suspension operation'ını okur. Exact child `suspended` evidence varsa parent step reconcile edilir.
+- Child `suspending`/`failed`/yok ise startup `start` veya `retrySuspend` çağırmaz. Parent step `blocked` olur ve explicit typed routing retry bekler.
+- Explicit parent retry stale `updatedAt`, checksum veya confirmation ile çalışmaz. Matching child retry varsa child'ın kendi current typed confirmation'ı kullanılır.
+- Zaten suspended Domain parent preview'ında exact `suspensionOperationId` pinlenir. Bu operation bulunamazsa, revision/checksum drift ederse veya birden fazla unpinned candidate varsa removal fail-closed kalır.
+- Certificate/mail/external-DNS destructive lifecycle'ları ve kalan reverse-order step handler'ları tamamlanmadan parent operation public full-delete apply authority'si değildir.
+
+Gerçek parent/child process-kill, restart ve duplicate-mutation kabulü `todo.md` T-PROVISIONING altında açık kalır.
+
 ## Retry ve continue kuralı
 
 Retry bir bypass yolu değildir.
