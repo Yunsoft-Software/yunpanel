@@ -16,6 +16,12 @@ const ELFINDER_GATEWAY = integratedToolGateway('elfinder');
 const ELFINDER_PREFIX = ELFINDER_GATEWAY.publicPrefix;
 const ELFINDER_GATEWAY_ACCESS_PATH = ELFINDER_GATEWAY.accessPath;
 const ELFINDER_GATEWAY_SOCKET_PATH = ELFINDER_GATEWAY.socketPath;
+const TTYD_GATEWAY = integratedToolGateway('ttyd');
+const TTYD_PREFIX = TTYD_GATEWAY.publicPrefix;
+const TTYD_GATEWAY_ACCESS_PATH = TTYD_GATEWAY.accessPath;
+const TTYD_SOCKET_ROOT = TTYD_GATEWAY.socketRoot;
+const TTYD_AUTH_HEADER = 'x-yunpanel-ttyd-auth';
+const TTYD_SESSION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ELFINDER_HANDOFF_SOCKET_PATH = '/run/yunpanel-elfinder/handoff.sock';
 const ELFINDER_HANDOFF_PATH = '/__yunpanel/handoff';
 const ELFINDER_SESSION_TTL_MS = 60 * 60 * 1000;
@@ -107,7 +113,8 @@ function browserProxyHeaders(request) {
   for (const [name, value] of Object.entries(request.headers)) {
     if (!HOP_BY_HOP_HEADERS.has(name) && value !== undefined
       && !['authorization', 'forwarded', 'host', 'x-forwarded-for', 'x-real-ip',
-        'x-yunpanel-client-ip', 'x-yunpanel-proxy-token',
+        'x-yunpanel-client-ip', 'x-yunpanel-proxy-token', 'x-yunpanel-tool-session',
+        'x-yunpanel-ttyd-auth',
         'x-yunpanel-elfinder-unix-user', 'x-yunpanel-elfinder-website-id',
         'x-yunpanel-elfinder-application-id'].includes(name)) {
       headers[name] = value;
@@ -117,7 +124,7 @@ function browserProxyHeaders(request) {
 }
 
 function authorizeToolGateway(request, {
-  apiHost, apiPort, clientIp, proxyToken, accessPath, label,
+  apiHost, apiPort, clientIp, proxyToken, accessPath, label, extraHeaders = null,
 }) {
   return new Promise((resolve) => {
     const headers = {
@@ -126,6 +133,16 @@ function authorizeToolGateway(request, {
       'x-yunpanel-proxy-token': proxyToken,
     };
     if (typeof request.headers.cookie === 'string') headers.cookie = request.headers.cookie;
+    if (extraHeaders) {
+      for (const [name, value] of Object.entries(extraHeaders)) {
+        if (typeof value !== 'string' || !/^[a-z0-9-]+$/.test(name)
+          || /[\r\n]/.test(value)) {
+          resolve(503);
+          return;
+        }
+        headers[name] = value;
+      }
+    }
     const upstream = http.request({
       host: apiHost,
       port: apiPort,
@@ -156,6 +173,15 @@ function authorizeElFinderGateway(request, options) {
     ...options,
     accessPath: ELFINDER_GATEWAY_ACCESS_PATH,
     label: 'elFinder',
+  });
+}
+
+function authorizeTtydGateway(request, sessionId, options) {
+  return authorizeToolGateway(request, {
+    ...options,
+    accessPath: TTYD_GATEWAY_ACCESS_PATH,
+    label: 'ttyd',
+    extraHeaders: { 'x-yunpanel-tool-session': sessionId },
   });
 }
 
