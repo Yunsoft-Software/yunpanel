@@ -511,7 +511,7 @@ export function mountPowerDnsRoutes(app, {
   }
 
   if (websiteProvisioningRegistry !== null
-    && typeof websiteProvisioningRegistry.listForWebsite !== 'function') {
+    && typeof websiteProvisioningRegistry.listForDnsZone !== 'function') {
     throw new Error('Website provisioning registry is invalid for DNS zone retirement');
   }
 
