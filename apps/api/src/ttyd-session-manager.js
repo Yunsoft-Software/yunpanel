@@ -452,6 +452,14 @@ export function createTtydSessionManager({
     return terminateRecord(record, reason);
   }
 
+  function terminateOwned(sessionId, { ownerSessionId, userId } = {}) {
+    if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) return false;
+    const record = sessions.get(sessionId);
+    if (!record || record.closed || record.exited
+      || record.ownerSessionId !== ownerSessionId || record.userId !== userId) return false;
+    return terminateRecord(record, 'owner_closed');
+  }
+
   function closeAll(reason = 'server_shutdown') {
     for (const record of [...sessions.values()]) terminateRecord(record, reason);
   }
@@ -460,6 +468,7 @@ export function createTtydSessionManager({
     start,
     authorize,
     terminate,
+    terminateOwned,
     closeAll,
     size: () => sessions.size,
   });
