@@ -3,8 +3,10 @@ import {
   applyDatabaseCredential,
   createPhpMyAdminHandoff,
   createWebsiteDatabaseBackup,
+  deleteWebsiteDatabase,
   finalizeDatabaseCredentialDelete,
-  getDatabaseDropPreview,
+  finalizeWebsiteDatabaseDelete,
+  getWebsiteDatabaseDeletePreview,
   getWebsiteDatabaseResources,
   panelRequest,
   previewDatabaseCredentialApply,
@@ -17,8 +19,8 @@ import {
 } from '../api.js';
 import {
   databaseBackupChoices,
-  databaseDropPreviewView,
   databaseRestorePreviewView,
+  websiteDatabaseDeletePreviewView,
   formatDatabaseBytes,
   websiteDatabaseResourcesView,
 } from './database-model.js';
@@ -36,13 +38,11 @@ import {
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { openWebsitePhpMyAdmin } from './phpmyadmin-client.js';
 
-const DROP_BLOCKER_LABELS = Object.freeze({
-  database_not_found: 'Canlı schema bulunamadı; metadata silme işlemi başlatılamaz.',
+const DELETE_BLOCKER_LABELS = Object.freeze({
+  database_not_found: 'Canlı schema bulunamadı; binding finalize edilemez.',
   database_credential_exists: 'Önce managed database credential kaldırılmalı.',
-  database_binding_exists: 'Önce Website database binding açıkça kaldırılmalı.',
-  database_backup_required: 'Doğrulanmış başarılı vendor dump yedeği gerekli.',
+  database_current_binding_backup_required: 'Mevcut Website binding revizyonuna ait doğrulanmış vendor dump yedeği gerekli.',
   database_job_active: 'Başka bir database işi queued/running durumda.',
-  database_delete_safety_chain_pending: 'Backup requirement, ownership evidence ve retryable compensation zinciri henüz tamamlanmadı.',
 });
 
 export default function SiteResourcesPanel({ domain, website, application, server }) {
@@ -58,6 +58,7 @@ export default function SiteResourcesPanel({ domain, website, application, serve
   const [backupTarget, setBackupTarget] = useState(null);
   const [restoreTarget, setRestoreTarget] = useState(null);
   const [dropImpact, setDropImpact] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [phpMyAdminOpeningCredentialId, setPhpMyAdminOpeningCredentialId] = useState(null);
 
   const load = useCallback(async () => {
@@ -340,20 +341,82 @@ export default function SiteResourcesPanel({ domain, website, application, serve
   async function previewDatabaseDrop(binding) {
     if (!server || !website || operationPending.current) return;
     operationPending.current = true;
-    setBusy(true); setError(null); setNotice(null); setDropImpact(null);
+    setBusy(true); setError(null); setNotice(null); setDropImpact(null); setDeleteTarget(null);
     try {
-      const raw = await getDatabaseDropPreview(server.id, binding.databaseName);
-      const preview = databaseDropPreviewView(raw, {
+      const raw = await getWebsiteDatabaseDeletePreview(server.id, website.id, binding.id);
+      const preview = websiteDatabaseDeletePreviewView(raw, {
         serverId: server.id,
-        databaseName: binding.databaseName,
-        bindingId: binding.id,
         websiteId: website.id,
         applicationId: website.applicationId,
+        bindingId: binding.id,
+        bindingRevision: binding.revision,
+        databaseName: binding.databaseName,
       });
-      if (!preview) throw new Error('Database drop preview durumu geçersiz');
+      if (!preview) throw new Error('Website database delete preview durumu geçersiz');
       setDropImpact(preview);
     } catch (failure) {
       if (failure.name !== 'AbortError') setError(failure.message);
+    } finally {
+      operationPending.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function deleteDatabaseLifecycle() {
+    if (!server || !website || !deleteTarget || operationPending.current) return;
+    operationPending.current = true;
+    setBusy(true); setError(null); setNotice(null);
+    let deleteJob = deleteTarget.deleteJob;
+    try {
+      if (!deleteJob) {
+        const queued = await deleteWebsiteDatabase(
+          server.id,
+          website.id,
+          deleteTarget.bindingId,
+          deleteTarget.bindingRevision,
+          deleteTarget,
+        );
+        deleteJob = queued?.job;
+        if (!deleteJob?.id) throw new Error('Database delete işi oluşturulamadı');
+        setDeleteTarget((current) => current?.bindingId === deleteTarget.bindingId
+          ? { ...current, deleteJob }
+          : current);
+        observe(deleteJob);
+        jobs.refresh();
+      }
+      if (['failed', 'cancelled'].includes(deleteJob.status)) {
+        throw new Error('Database delete işi terminal hatayla kapandı; job tanısını inceleyin. Kör replay yapılmadı.');
+      }
+      const terminal = deleteJob.status === 'succeeded' ? deleteJob : await waitForJob(deleteJob.id);
+      updateJob(terminal);
+      setDeleteTarget((current) => current?.bindingId === deleteTarget.bindingId
+        ? { ...current, deleteJob: terminal }
+        : current);
+      await finalizeWebsiteDatabaseDelete(
+        server.id,
+        website.id,
+        deleteTarget.bindingId,
+        deleteTarget.bindingRevision,
+        terminal.id,
+      );
+      await load();
+      setDeleteTarget(null);
+      setDropImpact(null);
+      setNotice(`${deleteTarget.databaseName} schema’sı doğrulanmış scoped backup kanıtıyla silindi ve Website binding’i başarılı DROP job kanıtından sonra finalize edildi.`);
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setError(failure.message);
+      jobs.refresh();
+      if (deleteJob?.id) {
+        try {
+          const currentJob = await panelRequest(`/jobs/${encodeURIComponent(deleteJob.id)}`);
+          updateJob(currentJob);
+          setDeleteTarget((current) => current?.bindingId === deleteTarget.bindingId
+            ? { ...current, deleteJob: currentJob }
+            : current);
+        } catch {
+          // Unknown delete outcome remains visible; a second DROP is never queued automatically.
+        }
+      }
     } finally {
       operationPending.current = false;
       setBusy(false);
