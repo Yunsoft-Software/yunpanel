@@ -9,7 +9,7 @@ test('production boot creates elFinder handoff state from Website registry and l
   const source = await readFile(indexUrl, 'utf8');
   assert.match(source, /createElFinderHandoffService/);
   assert.match(source, /startElFinderHandoffSocket/);
-  assert.match(source, /createElFinderHandoffService\(\{[\s\S]*websiteRegistry,[\s\S]*localServerId,[\s\S]*liveSessions/);
+  assert.match(source, /createElFinderHandoffService\(\{[\s\S]*websiteRegistry,[\s\S]*localServerId,[\s\S]*runtimeInspector:[\s\S]*websiteProvisioningRuntime\.handlers\.elfinder\.inspect[\s\S]*liveSessions/);
   assert.match(source, /elFinderHandoffRuntime = await startElFinderHandoffSocket\(\{ elFinderHandoffService \}\)/);
   assert.match(
     source,
