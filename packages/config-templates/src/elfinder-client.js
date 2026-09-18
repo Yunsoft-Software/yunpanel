@@ -10,6 +10,7 @@ export const elFinderClientTemplatePolicy = Object.freeze({
   mode: 0o644,
   gatewayBasePath: '/tools/elfinder/',
   connectorPath: '/tools/elfinder/connector.php',
+  handoffPath: '/tools/elfinder/__yunpanel/handoff',
   jqueryPath: '/tools/elfinder/assets/jquery/jquery.min.js',
   jqueryUiScriptPath: '/tools/elfinder/assets/jquery-ui/jquery-ui.min.js',
   jqueryUiCssPath: '/tools/elfinder/assets/jquery-ui/jquery-ui.min.css',
@@ -53,6 +54,8 @@ export function renderElFinderClientScript() {
 
   const errorBox = document.getElementById('yunpanel-elfinder-error');
   const mount = document.getElementById('elfinder');
+  const handoffMatch = window.location.hash.match(/^#handoff=([A-Za-z0-9_-]{43})$/);
+  const capability = handoffMatch?.[1] ?? null;
 
   function fail(message) {
     if (mount) mount.style.display = 'none';
@@ -62,50 +65,70 @@ export function renderElFinderClientScript() {
     }
   }
 
-  if (!window.jQuery || !window.jQuery.ui || typeof window.jQuery.fn?.elfinder !== 'function') {
-    fail('File manager assets could not be loaded.');
+  function start() {
+    if (!window.jQuery || !window.jQuery.ui || typeof window.jQuery.fn?.elfinder !== 'function') {
+      fail('File manager assets could not be loaded.');
+      return;
+    }
+
+    try {
+      window.jQuery(mount).elfinder({
+        url: '${p.connectorPath}',
+        lang: 'en',
+        height: '100%',
+        resizable: false,
+        rememberLastDir: false,
+        useBrowserHistory: false,
+        requestType: 'post',
+        commands: [
+          'open', 'reload', 'home', 'up', 'back', 'forward',
+          'getfile', 'quicklook', 'download', 'rm', 'duplicate', 'rename',
+          'mkdir', 'mkfile', 'upload', 'copy', 'cut', 'paste', 'edit',
+          'extract', 'archive', 'search', 'view', 'sort', 'help'
+        ],
+        commandsOptions: {
+          quicklook: {
+            sharecadMimes: [],
+            googleDocsMimes: [],
+            officeOnlineMimes: []
+          },
+          edit: {
+            extraOptions: {
+              creativeCloudApiKey: '',
+              managerUrl: ''
+            }
+          }
+        },
+        bootCallback(fm) {
+          fm.bind('error', () => {
+            if (errorBox) {
+              errorBox.textContent = 'A file operation failed. Reopen Website Files from YunPanel.';
+            }
+          });
+        }
+      });
+    } catch {
+      fail('File manager could not be started.');
+    }
+  }
+
+  if (!capability) {
+    fail('Open Website Files from YunPanel.');
     return;
   }
 
-  try {
-    window.jQuery(mount).elfinder({
-      url: '${p.connectorPath}',
-      lang: 'en',
-      height: '100%',
-      resizable: false,
-      rememberLastDir: false,
-      useBrowserHistory: false,
-      requestType: 'post',
-      commands: [
-        'open', 'reload', 'home', 'up', 'back', 'forward',
-        'getfile', 'quicklook', 'download', 'rm', 'duplicate', 'rename',
-        'mkdir', 'mkfile', 'upload', 'copy', 'cut', 'paste', 'edit',
-        'extract', 'archive', 'search', 'view', 'sort', 'help'
-      ],
-      commandsOptions: {
-        quicklook: {
-          sharecadMimes: [],
-          googleDocsMimes: [],
-          officeOnlineMimes: []
-        },
-        edit: {
-          extraOptions: {
-            creativeCloudApiKey: '',
-            managerUrl: ''
-          }
-        }
-      },
-      bootCallback(fm) {
-        fm.bind('error', () => {
-          if (errorBox) {
-            errorBox.textContent = 'A file operation failed. Refresh the view and inspect the panel status.';
-          }
-        });
-      }
-    });
-  } catch {
-    fail('File manager could not be started.');
-  }
+  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  fetch('${p.handoffPath}', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ capability })
+  }).then((response) => {
+    if (response.status !== 204) throw new Error('handoff rejected');
+    start();
+  }).catch(() => {
+    fail('Website Files session could not be started. Reopen it from YunPanel.');
+  });
 })();
 `;
 }
@@ -128,6 +151,7 @@ export function previewElFinderClient() {
     version: 1,
     gatewayBasePath: elFinderClientTemplatePolicy.gatewayBasePath,
     connectorPath: elFinderClientTemplatePolicy.connectorPath,
+    handoffPath: elFinderClientTemplatePolicy.handoffPath,
     artifacts: Object.freeze([
       preview(index, elFinderClientTemplatePolicy.indexPath),
       preview(client, elFinderClientTemplatePolicy.clientPath),
