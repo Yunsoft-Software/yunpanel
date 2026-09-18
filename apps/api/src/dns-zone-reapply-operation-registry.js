@@ -1,11 +1,12 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
 
-const STORE_VERSION = 3;
+const STORE_VERSION = 4;
 const LEGACY_STORE_VERSION = 1;
 const PREVIOUS_STORE_VERSION = 2;
+const SOURCE_DIGEST_STORE_VERSION = 3;
 const STATUSES = new Set(['pending', 'applying', 'succeeded', 'failed']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -45,6 +46,81 @@ function optionalDigest(value, field) {
   return value;
 }
 
+function snapshotDigest(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function safeSnapshotString(value, field, max = 16_384) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > max) {
+    throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', `${field} is invalid`, 409);
+  }
+  return value;
+}
+
+function safeSourceZoneSnapshot(value, expectedDigest) {
+  if (value === null) return null;
+  const rootFields = new Set(['version', 'zoneName', 'id', 'kind', 'dnssec', 'rrsets']);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== rootFields.size || Object.keys(value).some((field) => !rootFields.has(field))
+    || value.version !== 1 || typeof value.dnssec !== 'boolean' || !Array.isArray(value.rrsets)
+    || value.rrsets.length < 1 || value.rrsets.length > 10_000) {
+    throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'DNS zone reapply source snapshot is invalid', 409);
+  }
+  const rrsets = Object.freeze(value.rrsets.map((rrset) => {
+    const rrsetFields = new Set(['name', 'type', 'ttl', 'records', 'comments']);
+    if (!rrset || typeof rrset !== 'object' || Array.isArray(rrset)
+      || Object.keys(rrset).length !== rrsetFields.size || Object.keys(rrset).some((field) => !rrsetFields.has(field))
+      || typeof rrset.type !== 'string' || !/^[A-Z0-9-]{1,32}$/.test(rrset.type)
+      || (rrset.ttl !== null && (!Number.isSafeInteger(rrset.ttl) || rrset.ttl < 0 || rrset.ttl > 2_147_483_647))
+      || !Array.isArray(rrset.records) || rrset.records.length > 10_000
+      || !Array.isArray(rrset.comments) || rrset.comments.length > 10_000) {
+      throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'DNS zone reapply source RRset snapshot is invalid', 409);
+    }
+    return Object.freeze({
+      name: safeSnapshotString(rrset.name, 'sourceZoneSnapshot.rrset.name', 1024),
+      type: rrset.type,
+      ttl: rrset.ttl,
+      records: Object.freeze(rrset.records.map((record) => {
+        const fields = new Set(['content', 'disabled']);
+        if (!record || typeof record !== 'object' || Array.isArray(record)
+          || Object.keys(record).length !== fields.size || Object.keys(record).some((field) => !fields.has(field))
+          || typeof record.content !== 'string' || record.content.length > 16_384
+          || typeof record.disabled !== 'boolean') {
+          throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'DNS zone reapply source record snapshot is invalid', 409);
+        }
+        return Object.freeze({ content: record.content, disabled: record.disabled });
+      })),
+      comments: Object.freeze(rrset.comments.map((comment) => {
+        const fields = new Set(['account', 'content']);
+        if (!comment || typeof comment !== 'object' || Array.isArray(comment)
+          || Object.keys(comment).length !== fields.size || Object.keys(comment).some((field) => !fields.has(field))
+          || typeof comment.account !== 'string' || comment.account.length > 1024
+          || typeof comment.content !== 'string' || comment.content.length > 16_384) {
+          throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'DNS zone reapply source comment snapshot is invalid', 409);
+        }
+        return Object.freeze({ account: comment.account, content: comment.content });
+      })),
+    });
+  }));
+  const snapshot = Object.freeze({
+    version: 1,
+    zoneName: safeSnapshotString(value.zoneName, 'sourceZoneSnapshot.zoneName', 1024),
+    id: safeSnapshotString(value.id, 'sourceZoneSnapshot.id', 1024),
+    kind: value.kind === null ? null : safeSnapshotString(value.kind, 'sourceZoneSnapshot.kind', 64),
+    dnssec: value.dnssec,
+    rrsets,
+  });
+  if (typeof expectedDigest !== 'string' || !SHA256_PATTERN.test(expectedDigest)
+    || snapshotDigest(snapshot) !== expectedDigest) {
+    throw new DnsZoneReapplyOperationRegistryError(
+      'dns_zone_reapply_operation_state_invalid',
+      'DNS zone reapply source snapshot digest does not match operation evidence',
+      409,
+    );
+  }
+  return snapshot;
+}
+
 function safeError(value) {
   if (value === null) return null;
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -77,7 +153,7 @@ function safeResult(value) {
 function persistedOperation(value) {
   const fields = new Set([
     'id', 'domainId', 'serverId', 'zoneName', 'domainRevision', 'templateVersion', 'dnsIdentityRevision',
-    'mailStateDigest', 'sourceZoneDigest', 'observedSerial', 'targetSerial', 'previewDigest', 'confirmation', 'status', 'result', 'error',
+    'mailStateDigest', 'sourceZoneDigest', 'sourceZoneSnapshot', 'observedSerial', 'targetSerial', 'previewDigest', 'confirmation', 'status', 'result', 'error',
     'createdAt', 'updatedAt',
   ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -98,6 +174,9 @@ function persistedOperation(value) {
     dnsIdentityRevision: safeInteger(value.dnsIdentityRevision, 'dnsIdentityRevision', { min: 1 }),
     mailStateDigest: optionalDigest(value.mailStateDigest, 'mailStateDigest'),
     sourceZoneDigest: optionalDigest(value.sourceZoneDigest, 'sourceZoneDigest'),
+    sourceZoneSnapshot: value.sourceZoneSnapshot === null
+      ? null
+      : safeSourceZoneSnapshot(value.sourceZoneSnapshot, value.sourceZoneDigest),
     observedSerial: safeInteger(value.observedSerial, 'observedSerial', { min: 1, max: 4_294_967_295 }),
     targetSerial: safeInteger(value.targetSerial, 'targetSerial', { min: 1, max: 4_294_967_295 }),
     previewDigest: value.previewDigest,
@@ -145,7 +224,7 @@ export function dnsZoneReapplyOperationPublicView(operation) {
   });
 }
 
-function operationFromPreview(preview, now, idFactory) {
+function operationFromPreview(preview, rollbackEvidence, now, idFactory) {
   if (!preview || preview.applyAllowed !== true || preview.noChanges === true
     || typeof preview.domainId !== 'string' || typeof preview.serverId !== 'string'
     || typeof preview.zoneName !== 'string' || !preview.zoneName
@@ -159,6 +238,16 @@ function operationFromPreview(preview, now, idFactory) {
     || typeof preview.confirmation !== 'string' || !preview.confirmation) {
     throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_preview_invalid', 'DNS zone reapply preview cannot be journaled', 409);
   }
+  if (!rollbackEvidence || rollbackEvidence.version !== 1
+    || rollbackEvidence.sourceZoneDigest !== preview.sourceZoneDigest
+    || !rollbackEvidence.snapshot || typeof rollbackEvidence.snapshot !== 'object') {
+    throw new DnsZoneReapplyOperationRegistryError(
+      'dns_zone_reapply_operation_source_snapshot_invalid',
+      'DNS zone reapply operation requires exact pre-operation source snapshot evidence',
+      409,
+    );
+  }
+  const sourceZoneSnapshot = safeSourceZoneSnapshot(rollbackEvidence.snapshot, preview.sourceZoneDigest);
   const timestampValue = new Date(now()).toISOString();
   return persistedOperation({
     id: idFactory(),
@@ -170,6 +259,7 @@ function operationFromPreview(preview, now, idFactory) {
     dnsIdentityRevision: preview.dnsIdentityRevision,
     mailStateDigest: preview.mailStateDigest,
     sourceZoneDigest: preview.sourceZoneDigest,
+    sourceZoneSnapshot,
     observedSerial: preview.observedSerial,
     targetSerial: preview.nextSerial,
     previewDigest: preview.previewDigest,
@@ -214,16 +304,18 @@ export function createDnsZoneReapplyOperationRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![LEGACY_STORE_VERSION, PREVIOUS_STORE_VERSION, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
+        if (![LEGACY_STORE_VERSION, PREVIOUS_STORE_VERSION, SOURCE_DIGEST_STORE_VERSION, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((field) => !['version', 'operations'].includes(field))) {
           throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'DNS zone reapply operation store is invalid', 409);
         }
         const operations = parsed.operations.map((operation) => persistedOperation(
           parsed.version === LEGACY_STORE_VERSION
-            ? { ...operation, mailStateDigest: null, sourceZoneDigest: null }
+            ? { ...operation, mailStateDigest: null, sourceZoneDigest: null, sourceZoneSnapshot: null }
             : parsed.version === PREVIOUS_STORE_VERSION
-              ? { ...operation, sourceZoneDigest: null }
-              : operation,
+              ? { ...operation, sourceZoneDigest: null, sourceZoneSnapshot: null }
+              : parsed.version === SOURCE_DIGEST_STORE_VERSION
+                ? { ...operation, sourceZoneSnapshot: null }
+                : operation,
         ));
         if (new Set(operations.map((entry) => entry.id)).size !== operations.length) {
           throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'DNS zone reapply operation IDs are not unique', 409);
@@ -242,13 +334,22 @@ export function createDnsZoneReapplyOperationRegistry({
     if (!initialized) await init();
   }
 
-  async function create(preview) {
+  async function create(preview, rollbackEvidence) {
     await ensureInitialized();
     const duplicate = state.operations.find((entry) => entry.domainId === preview?.domainId
       && entry.previewDigest === preview?.previewDigest
       && ['pending', 'applying', 'succeeded'].includes(entry.status));
-    if (duplicate) return duplicate;
-    const operation = operationFromPreview(preview, now, idFactory);
+    if (duplicate) {
+      if (duplicate.sourceZoneSnapshot === null) {
+        throw new DnsZoneReapplyOperationRegistryError(
+          'dns_zone_reapply_operation_source_snapshot_missing',
+          'Existing DNS zone reapply operation predates exact rollback snapshot evidence',
+          409,
+        );
+      }
+      return duplicate;
+    }
+    const operation = operationFromPreview(preview, rollbackEvidence, now, idFactory);
     state.operations.push(operation);
     await persist();
     return operation;
@@ -330,10 +431,13 @@ export const dnsZoneReapplyOperationRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
   legacyStoreVersion: LEGACY_STORE_VERSION,
   previousStoreVersion: PREVIOUS_STORE_VERSION,
+  sourceDigestStoreVersion: SOURCE_DIGEST_STORE_VERSION,
   statuses: Object.freeze([...STATUSES]),
   persistedOperation,
   operationFromPreview,
   safeResult,
   safeError,
   optionalDigest,
+  safeSourceZoneSnapshot,
+  snapshotDigest,
 });
