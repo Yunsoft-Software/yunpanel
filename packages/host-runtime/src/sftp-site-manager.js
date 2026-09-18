@@ -223,6 +223,115 @@ export function createSftpSiteManager({
     catch { throw new SftpSiteManagerError('sftp_sshd_config_invalid', 'OpenSSH rejected the managed SFTP configuration'); }
   }
 
+  async function inspectDirectoryState(target) {
+    let info;
+    try { info = await lstatFn(target); }
+    catch (error) {
+      if (missing(error)) return Object.freeze({ present: false });
+      throw new SftpSiteManagerError('sftp_chroot_unavailable', 'SFTP chroot directory could not be inspected');
+    }
+    return Object.freeze({
+      present: true,
+      directory: Boolean(info?.isDirectory?.()),
+      symbolicLink: Boolean(info?.isSymbolicLink?.()),
+      uid: Number.isSafeInteger(info?.uid) ? info.uid : null,
+      gid: Number.isSafeInteger(info?.gid) ? info.gid : null,
+      mode: modeOf(info).toString(8).padStart(4, '0'),
+    });
+  }
+
+  async function previewMigration(rawIntent, { operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const id = operationId(rawOperationId);
+    const unitName = await unitNameFor(spec);
+    const desiredSshdSha256 = sha256(spec.sshdConfig);
+    const desiredMountSha256 = sha256(spec.mountUnit);
+    const [config, mount, chrootRootState, chrootState, mountState, active] = await Promise.all([
+      readOptional(spec.paths.sshdConfigPath),
+      readOptional(unitPath(unitName)),
+      inspectDirectoryState(sftpTemplatePolicy.chrootRoot),
+      inspectDirectoryState(spec.paths.chrootDirectory),
+      inspectDirectoryState(spec.paths.mountDirectory),
+      mountActive(unitName),
+    ]);
+
+    let receipt = null;
+    let receiptError = null;
+    try { receipt = await loadReceipt(id, spec, unitName); }
+    catch (error) {
+      receiptError = typeof error?.code === 'string' && /^[a-z0-9_]{1,120}$/.test(error.code)
+        ? error.code
+        : 'sftp_receipt_invalid';
+    }
+
+    let sshdConfigValid = true;
+    try { await validateSshd(); }
+    catch { sshdConfigValid = false; }
+
+    const directorySatisfied = (value) => value.present === true
+      && value.directory === true
+      && value.symbolicLink === false
+      && value.uid === 0
+      && value.gid === 0
+      && value.mode === '0755';
+    const configSha256 = config === null ? null : sha256(config);
+    const mountSha256 = mount === null ? null : sha256(mount);
+    const differences = [];
+    if (receiptError) differences.push(receiptError);
+    else if (!receipt) differences.push('sftp_receipt_missing');
+    else if (receipt.state !== 'active') differences.push(`sftp_receipt_${receipt.state}`);
+    if (!directorySatisfied(chrootRootState)) differences.push('sftp_chroot_root_drift');
+    if (!directorySatisfied(chrootState)) differences.push('sftp_chroot_directory_drift');
+    if (!directorySatisfied(mountState)) differences.push('sftp_mount_directory_drift');
+    if (config === null) differences.push('sftp_sshd_config_missing');
+    else if (configSha256 !== desiredSshdSha256) differences.push('sftp_sshd_config_drift');
+    if (mount === null) differences.push('sftp_mount_unit_missing');
+    else if (mountSha256 !== desiredMountSha256) differences.push('sftp_mount_unit_drift');
+    if (!active) differences.push('sftp_mount_inactive');
+    if (!sshdConfigValid) differences.push('sftp_sshd_config_invalid');
+
+    return Object.freeze({
+      version: 1,
+      satisfied: differences.length === 0,
+      current: Object.freeze({
+        receiptState: receipt?.state ?? null,
+        receiptError,
+        sshdConfig: Object.freeze({
+          present: config !== null,
+          sha256: configSha256,
+          matchesDesired: configSha256 === desiredSshdSha256,
+        }),
+        mountUnit: Object.freeze({
+          present: mount !== null,
+          sha256: mountSha256,
+          matchesDesired: mountSha256 === desiredMountSha256,
+          active,
+        }),
+        chrootRoot: chrootRootState,
+        chrootDirectory: chrootState,
+        mountDirectory: mountState,
+        sshdConfigValid,
+      }),
+      desired: Object.freeze({
+        websiteId: spec.websiteId,
+        applicationId: spec.applicationId,
+        unixUser: spec.unixUser,
+        sourceDirectory: spec.paths.sourceDirectory,
+        chrootRoot: sftpTemplatePolicy.chrootRoot,
+        chrootDirectory: spec.paths.chrootDirectory,
+        mountDirectory: spec.paths.mountDirectory,
+        sshdConfigPath: spec.paths.sshdConfigPath,
+        unitName,
+        sshdSha256: desiredSshdSha256,
+        mountSha256: desiredMountSha256,
+        directoryMode: '0755',
+        directoryUid: 0,
+        directoryGid: 0,
+      }),
+      differences: Object.freeze(differences),
+    });
+  }
+
   async function inspect(rawIntent, { operationId: rawOperationId } = {}) {
     const spec = normalizeIntent(rawIntent);
     const id = operationId(rawOperationId);
@@ -356,7 +465,7 @@ export function createSftpSiteManager({
     return Object.freeze({ ...after, receiptState: receipt.state });
   }
 
-  return Object.freeze({ inspect, apply, inspectCompensation, compensate });
+  return Object.freeze({ inspect, previewMigration, apply, inspectCompensation, compensate });
 }
 
 export const sftpSiteManagerInternals = Object.freeze({
