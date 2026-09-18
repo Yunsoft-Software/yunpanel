@@ -150,3 +150,14 @@ GitHub Actions kullanılmadı. Source test kontratları repoya eklendi; bu ortam
 - `57710c82` + `1bfbc148` production provisioning bootstrap identity migration capability'sini açtı ve eksik lifecycle metodu olan custom migration manager'ı kabul etmeyen composition kontratını kilitledi.
 - `0ce28081` + `0b8ecf0f` Website isolation panelini identity/workspace operation türüne göre doğru copy/evidence gösterecek şekilde güncelledi. Identity rollback HOME verisini koruduğunda panel bunu `preservedHomeData` olarak görünür kılar; workspace-only metinleri identity operation'a yanlış uygulanmaz.
 - Böylece P0.1 identity safe-create source lifecycle tamamlandı. Gerçek Ubuntu UID/GID, restart-cut ve HOME-data rollback kabulü `todo.md` kapısıdır. Kalan source işi legacy path/SFTP/Passenger/PHP/static mutation'larını yalnız operation-owned evidence ve exact current digest altında güvenle apply/rollback edilebilir hale getirmektir.
+
+
+### 18 Eylül continuation — SFTP safe-create durable migration
+
+- `f1a0f0fc` + `c3656cc3` SFTP migration preview'ına explicit `safeCreateCandidate` ekledi. Apply authority yalnız receipt/config/unit/site chroot/mount state'i tamamen eksikken ve shared chroot root canonical ya da eksikken açılır; foreign site-specific artifact preview aşamasında mutation öncesi bloklanır.
+- `a5e4c171` + `e055e6e8` host SFTP manager'a normal provisioning'den ayrı migration lifecycle ekledi: inspect/apply/compensation restart inspection yüzeyleri durable SFTP receipt evidence'ı üretir.
+- `7433bd1f` + `42b441e6` migration lifecycle'ını key-aware provisioning handler'a taşıdı. Safe SFTP apply sonrasında current desired authorized-key set root-owned materialization'a reconcile edilir; key reconcile başarısızsa operation sahte başarı dönmez.
+- `e0c32fae`, `dd784a5e`, `e84b9274` ve `c30fc241` isolation audit + durable migration journal/runtime'ını typed `adapter=sftp` operation'a genişletti. Current preview digest/revision yeniden doğrulanır; restart receipt + key materialization inspection ile tamamlanmış operation'ı kapatır ve incomplete state'i kör replay etmez.
+- `6b0754c2` + `12d75ea3` SFTP receipt'e operation-created chroot/mount directory checkpoint'leri ekledi. Pre-existing canonical directory yeniden sahiplenilmez veya mutate edilmez; rollback config/unit removal ve unmount sonrasında yalnız checkpoint'li boş directory'leri non-recursive kaldırır. Directory içinde veri görünürse korunur.
+- `e1ab6e5f` + `83ba92e5` paneli persisted migration `adapter` alanına göre workspace/identity/SFTP operation'larını ayıracak şekilde güncelledi; SFTP apply/rollback copy'si exact ownership sınırını açıkça gösterir.
+- `9fbb5948` ile P0.1 source planı runtime/path migration'a daraldı. Gerçek OpenSSH/systemd/key login/restart/data-preserving rollback acceptance `todo.md` içinde kalır.
