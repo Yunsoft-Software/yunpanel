@@ -16,7 +16,7 @@ function sizeLabel(value) {
   return `${(value / (1024 ** 2)).toFixed(1)} MB`;
 }
 
-export default function FilesPanel({ serverId, websiteId }) {
+export default function FilesPanel({ serverId, websiteId, runtimeType }) {
   const [path, setPath] = useState('');
   const [listing, setListing] = useState(null);
   const [editor, setEditor] = useState(null);
@@ -24,6 +24,7 @@ export default function FilesPanel({ serverId, websiteId }) {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const legacyAvailable = ['static', 'node'].includes(runtimeType);
 
   async function openElFinder() {
     if (busy) return;
@@ -49,7 +50,10 @@ export default function FilesPanel({ serverId, websiteId }) {
     finally { setBusy(false); }
   }, [path, websiteId]);
 
-  useEffect(() => { void load(''); }, [websiteId]);
+  useEffect(() => {
+    if (legacyAvailable) void load('');
+    else { setPath(''); setListing(null); setEditor(null); }
+  }, [websiteId, legacyAvailable]);
 
   async function openFile(file) {
     setBusy(true); setError(null);
@@ -104,13 +108,15 @@ export default function FilesPanel({ serverId, websiteId }) {
     <Section
       title="Site dosyaları"
       description="Birincil dosya yöneticisi elFinder'dır; işlemler canonical Website HOME içinde site kullanıcısı yetkileriyle çalışır."
-      actions={<div className="ws-actions"><Button variant="primary" icon="file" disabled={busy} onClick={openElFinder}>{busy ? 'Hazırlanıyor…' : 'elFinder ile aç'}</Button><Button icon="refresh" disabled={busy} onClick={() => load(path)}>Legacy görünümü yenile</Button></div>}
+      actions={<div className="ws-actions"><Button variant="primary" icon="file" disabled={busy} onClick={openElFinder}>{busy ? 'Hazırlanıyor…' : 'elFinder ile aç'}</Button>{legacyAvailable && <Button icon="refresh" disabled={busy} onClick={() => load(path)}>Legacy görünümü yenile</Button>}</div>}
     >
       <ErrorNotice error={error} />
+      {legacyAvailable ? <>
       <div className="ws-section-body ws-actions"><Button disabled={busy || !path} onClick={() => load(parentPath(path))}>Üst klasör</Button><strong>/{path}</strong></div>
       {busy && !listing && <div className="ws-loading" role="status"><span className="ws-spinner" />Dosyalar yükleniyor…</div>}
       {listing?.entries?.length ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Ad</th><th>Tür</th><th>Boyut</th><th>Yetki</th><th className="ws-row-end">İşlem</th></tr></thead><tbody>{listing.entries.map((entry) => <tr key={entry.path}><td><strong>{entry.name}</strong></td><td>{entry.type === 'directory' ? 'Klasör' : entry.type === 'file' ? 'Dosya' : entry.type}</td><td>{sizeLabel(entry.size)}</td><td>{entry.mode}</td><td className="ws-row-end"><div className="ws-actions">{entry.type === 'directory' && <Button disabled={busy} onClick={() => load(entry.path)}>Aç</Button>}{entry.type === 'file' && <><Button disabled={busy} onClick={() => openFile(entry)}>Düzenle</Button><a className="ws-button ws-button-secondary" href={`/api/panel/websites/${encodeURIComponent(websiteId)}/files/download?path=${encodeURIComponent(entry.path)}`}>İndir</a></>}<Button variant="danger" disabled={busy} onClick={() => setDeleteTarget(entry)}>Sil</Button></div></td></tr>)}</tbody></table></div> : listing && <EmptyState title="Klasör boş" detail="Bu dizinde henüz dosya veya klasör yok." icon="file" />}
       <form className="ws-form ws-section-body" onSubmit={createFolder}><label>Yeni klasör adı<input value={folderName} onChange={(event) => setFolderName(event.target.value)} maxLength={255} autoComplete="off" /></label><div className="ws-actions"><Button type="submit" variant="primary" disabled={busy || !folderName.trim() || folderName.includes('/')}>Klasör oluştur</Button></div></form>
+      </> : <div className="ws-section-body"><p className="ws-muted">Bu runtime için legacy dosya API’si kullanılmaz. Dosyaları elFinder üzerinden yönetin.</p></div>}
     </Section>
     {editor && <Section title={editor.path} description="Kaydetme sırasında dosyanın siz açtıktan sonra değişmediği doğrulanır."><form className="ws-form" onSubmit={save}><ErrorNotice error={error} /><label>Dosya içeriği<textarea rows={22} value={editor.content} onChange={(event) => setEditor((current) => ({ ...current, content: event.target.value }))} spellCheck={false} /></label><footer className="ws-form-footer"><Button disabled={busy} onClick={() => setEditor(null)}>Kapat</Button><Button type="submit" variant="primary" disabled={busy}>Kaydet</Button></footer></form></Section>}
     {deleteTarget && <ConfirmDialog title={`${deleteTarget.name} silinsin mi?`} message="Dosya veya boş klasör aktif release içinden kalıcı olarak silinecek." confirmation={deleteTarget.name} confirmLabel="Sil" busy={busy} error={error} onCancel={() => setDeleteTarget(null)} onConfirm={remove} />}
