@@ -707,6 +707,129 @@ export function createDomainRegistry({
     return publicDomain(domain);
   }
 
+  function assertRemovalSuspension(domain, {
+    expectedRevision,
+    checksum,
+    suspensionOperationId: expectedSuspensionOperationId,
+  } = {}) {
+    const expectedChecksum = suspensionChecksum(checksum);
+    const expectedOperationId = suspensionOperationId(expectedSuspensionOperationId);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1
+      || domain.state !== 'suspended'
+      || domain.desiredRevision !== expectedRevision
+      || domain.stagedRevision !== expectedRevision
+      || domain.appliedRevision !== expectedRevision
+      || domain.stagedChecksum !== expectedChecksum
+      || domain.suspendedChecksum !== expectedChecksum
+      || domain.suspensionOperationId !== expectedOperationId
+      || domain.appliedPrimaryDomain !== domain.primaryDomain
+      || domain.lastError !== null) {
+      throw new DomainRegistryError(
+        'domain_removal_suspension_evidence_invalid',
+        'Domain removal dependency changes require exact suspended routing evidence',
+        409,
+      );
+    }
+    return Object.freeze({
+      expectedRevision,
+      checksum: expectedChecksum,
+      suspensionOperationId: expectedOperationId,
+    });
+  }
+
+  async function detachWebsiteForRemoval(domainId, {
+    expectedWebsiteId,
+    expectedRevision,
+    checksum,
+    suspensionOperationId: expectedSuspensionOperationId,
+  } = {}) {
+    await ensureInitialized();
+    const domain = requireDomain(state, domainId);
+    const suspension = assertRemovalSuspension(domain, {
+      expectedRevision,
+      checksum,
+      suspensionOperationId: expectedSuspensionOperationId,
+    });
+    const websiteId = normalizeWebsiteId(expectedWebsiteId);
+    if (websiteId === null) {
+      throw new DomainRegistryError(
+        'domain_removal_website_id_invalid',
+        'Domain removal requires the exact Website binding identity',
+      );
+    }
+    if (domain.websiteId === null) {
+      return Object.freeze({
+        changed: false,
+        domain: publicDomain(domain),
+        detachedWebsiteId: websiteId,
+        suspension,
+      });
+    }
+    if (domain.websiteId !== websiteId) {
+      throw new DomainRegistryError(
+        'domain_removal_website_binding_drift',
+        'Domain Website binding changed before removal cleanup',
+        409,
+      );
+    }
+    domain.websiteId = null;
+    domain.updatedAt = new Date(now()).toISOString();
+    await persist();
+    return Object.freeze({
+      changed: true,
+      domain: publicDomain(domain),
+      detachedWebsiteId: websiteId,
+      suspension,
+    });
+  }
+
+  async function detachCertificateForRemoval(domainId, {
+    expectedCertificateId,
+    expectedRevision,
+    checksum,
+    suspensionOperationId: expectedSuspensionOperationId,
+  } = {}) {
+    await ensureInitialized();
+    const domain = requireDomain(state, domainId);
+    const suspension = assertRemovalSuspension(domain, {
+      expectedRevision,
+      checksum,
+      suspensionOperationId: expectedSuspensionOperationId,
+    });
+    if (typeof expectedCertificateId !== 'string' || expectedCertificateId.length < 1
+      || expectedCertificateId.length > 256
+      || /[\u0000-\u001f\u007f]/.test(expectedCertificateId)) {
+      throw new DomainRegistryError(
+        'domain_removal_certificate_id_invalid',
+        'Domain removal requires the exact certificate binding identity',
+      );
+    }
+    if (domain.certificateId === null) {
+      return Object.freeze({
+        changed: false,
+        domain: publicDomain(domain),
+        detachedCertificateId: expectedCertificateId,
+        suspension,
+      });
+    }
+    if (domain.certificateId !== expectedCertificateId) {
+      throw new DomainRegistryError(
+        'domain_removal_certificate_binding_drift',
+        'Domain certificate binding changed before removal cleanup',
+        409,
+      );
+    }
+    domain.certificateId = null;
+    domain.updatedAt = new Date(now()).toISOString();
+    await persist();
+    return Object.freeze({
+      changed: true,
+      domain: publicDomain(domain),
+      detachedCertificateId: expectedCertificateId,
+      suspension,
+    });
+  }
+
   async function listDomains() {
     await ensureInitialized();
     return state.domains.map((domain) => publicDomain(hydrateDomain(domain)));
@@ -1126,6 +1249,8 @@ export function createDomainRegistry({
     reparentDomain,
     bindWebsite,
     rollbackWebsiteBinding,
+    detachWebsiteForRemoval,
+    detachCertificateForRemoval,
     listDomains,
     getDomain,
     attachCertificate,
