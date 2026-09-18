@@ -330,6 +330,172 @@ export function createPhpFpmSiteManager({
     return Object.freeze({ satisfied: true, mode: modeOf(info) });
   }
 
+  async function previewMigration(rawIntent, { operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const operationId = normalizeOperationId(rawOperationId);
+    const configPath = phpFpmPoolPath(spec.unixUser);
+    const socketPath = phpFpmSocketPath(spec.unixUser);
+
+    let identity;
+    try {
+      const value = await inspectIdentity(spec);
+      identity = value?.satisfied === true
+        ? Object.freeze({
+          satisfied: true,
+          uid: value.uid,
+          gid: value.gid,
+          homeDirectory: value.homeDirectory,
+          homeMode: Number(value.homeMode).toString(8).padStart(4, '0'),
+        })
+        : Object.freeze({
+          satisfied: false,
+          reason: value?.reason ?? 'website_identity_unverified',
+        });
+    } catch (error) {
+      identity = Object.freeze({
+        satisfied: false,
+        reason: typeof error?.code === 'string' ? error.code : 'php_fpm_identity_inspection_failed',
+      });
+    }
+
+    async function pathState(target) {
+      try {
+        const info = await lstatFn(target);
+        return Object.freeze({
+          present: true,
+          file: Boolean(info?.isFile?.()),
+          directory: Boolean(info?.isDirectory?.()),
+          socket: Boolean(info?.isSocket?.()),
+          symbolicLink: Boolean(info?.isSymbolicLink?.()),
+          uid: Number.isSafeInteger(info?.uid) ? info.uid : null,
+          gid: Number.isSafeInteger(info?.gid) ? info.gid : null,
+          mode: modeOf(info).toString(8).padStart(4, '0'),
+        });
+      } catch (error) {
+        if (missingPath(error)) return Object.freeze({ present: false });
+        throw new PhpFpmSiteManagerError('php_fpm_path_inspection_failed', 'PHP-FPM Website path could not be inspected');
+      }
+    }
+
+    const [documentRootState, packageState, configState, socketState] = await Promise.all([
+      pathState(spec.templateInput.documentRoot),
+      inspectPackage(),
+      pathState(configPath),
+      pathState(socketPath),
+    ]);
+
+    let configSha256 = null;
+    let configReadError = null;
+    if (configState.present) {
+      try {
+        const config = await readFileFn(configPath, 'utf8');
+        configSha256 = sha256(config);
+      } catch (error) {
+        configReadError = missingPath(error) ? 'php_fpm_pool_missing' : 'php_fpm_config_unavailable';
+      }
+    }
+
+    let receipt = null;
+    let receiptError = null;
+    try { receipt = await loadReceipt(operationId, spec); }
+    catch (error) {
+      receiptError = typeof error?.code === 'string' && /^[a-z0-9_]{1,120}$/.test(error.code)
+        ? error.code
+        : 'php_fpm_receipt_invalid';
+    }
+
+    let configValid = null;
+    if (packageState.installed) {
+      try {
+        await configTest();
+        configValid = true;
+      } catch {
+        configValid = false;
+      }
+    }
+    const active = await serviceActive();
+
+    const differences = [];
+    if (!identity.satisfied) differences.push(identity.reason);
+    if (!documentRootState.present) {
+      differences.push('php_fpm_document_root_missing');
+    } else if (!identity.satisfied
+      || documentRootState.directory !== true
+      || documentRootState.symbolicLink !== false
+      || documentRootState.uid !== identity.uid
+      || documentRootState.gid !== identity.gid
+      || (Number.parseInt(documentRootState.mode, 8) & 0o007) !== 0
+      || (Number.parseInt(documentRootState.mode, 8) & 0o500) !== 0o500) {
+      differences.push('php_fpm_document_root_drift');
+    }
+    if (!packageState.installed) differences.push('php_fpm_package_missing');
+    if (receiptError) differences.push(receiptError);
+    else if (!receipt) differences.push('php_fpm_receipt_missing');
+    else if (receipt.state !== 'active') differences.push(`php_fpm_receipt_${receipt.state}`);
+    if (!configState.present || configReadError === 'php_fpm_pool_missing') {
+      differences.push('php_fpm_pool_missing');
+    } else if (configReadError
+      || configState.file !== true
+      || configState.symbolicLink !== false
+      || configState.uid !== 0
+      || configState.gid !== 0
+      || configState.mode !== phpFpmTemplatePolicy.poolMode.toString(8).padStart(4, '0')
+      || configSha256 !== spec.preview.sha256) {
+      differences.push(configReadError ?? 'php_fpm_pool_drift');
+    }
+    if (configValid === false) differences.push('php_fpm_config_invalid');
+    if (!active) differences.push('php_fpm_service_inactive');
+    if (!socketState.present) {
+      differences.push('php_fpm_socket_missing');
+    } else if (socketState.socket !== true || socketState.symbolicLink !== false || socketState.mode !== '0660') {
+      differences.push('php_fpm_socket_drift');
+    }
+
+    return Object.freeze({
+      version: 1,
+      adapter: 'php-fpm',
+      satisfied: differences.length === 0,
+      current: Object.freeze({
+        identity,
+        documentRoot: documentRootState,
+        package: packageState,
+        receipt: Object.freeze({
+          state: receipt?.state ?? null,
+          mutated: receipt?.mutated ?? null,
+          previousConfigSha256: receipt?.previousConfig === null || receipt?.previousConfig === undefined
+            ? null
+            : sha256(receipt.previousConfig),
+          error: receiptError,
+        }),
+        pool: Object.freeze({
+          ...configState,
+          sha256: configSha256,
+          matchesDesired: configSha256 === spec.preview.sha256,
+          readError: configReadError,
+        }),
+        configValid,
+        serviceActive: active,
+        socket: socketState,
+      }),
+      desired: Object.freeze({
+        websiteId: spec.websiteId,
+        applicationId: spec.applicationId,
+        unixUser: spec.unixUser,
+        homeDirectory: spec.identity.paths.workspace.homeDirectory,
+        documentRoot: spec.templateInput.documentRoot,
+        packageName: PACKAGE_NAME,
+        phpVersion: phpFpmTemplatePolicy.phpVersion,
+        configPath,
+        configSha256: spec.preview.sha256,
+        configMode: phpFpmTemplatePolicy.poolMode.toString(8).padStart(4, '0'),
+        socketPath,
+        socketMode: '0660',
+        serviceUnit: phpFpmTemplatePolicy.serviceUnit,
+      }),
+      differences: Object.freeze([...new Set(differences)]),
+    });
+  }
+
   async function inspect(rawIntent) {
     const spec = normalizeIntent(rawIntent);
     const identity = await inspectIdentity(spec);
@@ -584,7 +750,7 @@ export function createPhpFpmSiteManager({
     return Object.freeze({ ...after, receiptState: receipt.state });
   }
 
-  return Object.freeze({ inspect, apply, compensate, inspectCompensation });
+  return Object.freeze({ inspect, previewMigration, apply, compensate, inspectCompensation });
 }
 
 export const phpFpmSiteManagerInternals = Object.freeze({
