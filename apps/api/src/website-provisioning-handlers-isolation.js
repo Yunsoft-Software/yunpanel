@@ -124,7 +124,7 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
         releaseRepairCandidate,
         automaticMigration: false,
         migrationBlockedReason: releaseRepairCandidate
-          ? 'static_release_receipt_not_operation_owned'
+          ? 'static_release_explicit_migration_required'
           : 'static_legacy_permissions_not_operation_owned',
         current: Object.freeze({
           runtime,
@@ -146,6 +146,71 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
         ])]),
       });
     },
+    async inspectReleaseMigrationOperation(context = {}) {
+      if (typeof isolationManager.inspectReleaseMigrationOperation !== 'function') {
+        umaskFailure('website_static_release_migration_lifecycle_unavailable', 'Static release migration lifecycle is unavailable');
+      }
+      const result = await isolationManager.inspectReleaseMigrationOperation(
+        isolationIntent(context),
+        { operationId: context.operationId },
+      );
+      if (!result?.satisfied) return result;
+      return Object.freeze({ ...result, staticRuntimeMigration: true });
+    },
+    async applyReleaseMigration(context = {}) {
+      if (typeof isolationManager.previewReleaseMigration !== 'function'
+        || typeof isolationManager.applyReleaseMigration !== 'function') {
+        umaskFailure('website_static_release_migration_lifecycle_unavailable', 'Static release migration lifecycle is unavailable');
+      }
+      const preview = await isolationManager.previewReleaseMigration(isolationIntent(context));
+      if (preview.repairCandidate !== true) {
+        umaskFailure(
+          'website_static_release_migration_not_safe',
+          'Static release migration requires exact managed ownership, mode or ACL drift with a stable current target',
+        );
+      }
+      const result = await isolationManager.applyReleaseMigration(
+        isolationIntent(context),
+        { operationId: context.operationId },
+      );
+      if (!result?.satisfied
+        || result.staticReleaseReceiptVersion !== 1
+        || result.migratedStaticReleasePermissions !== true
+        || typeof result.treeSha256 !== 'string'
+        || !/^[a-f0-9]{64}$/.test(result.treeSha256)) {
+        umaskFailure(
+          'website_static_release_migration_unverified',
+          'Static release migration did not return durable ownership evidence',
+        );
+      }
+      return this.inspectReleaseMigrationOperation(context);
+    },
+    async inspectReleaseMigrationCompensation(context = {}) {
+      if (typeof isolationManager.inspectReleaseMigrationCompensation !== 'function') {
+        umaskFailure('website_static_release_migration_lifecycle_unavailable', 'Static release migration lifecycle is unavailable');
+      }
+      const inspected = await isolationManager.inspectReleaseMigrationCompensation(
+        isolationIntent(context),
+        { operationId: context.operationId },
+      );
+      if (inspected?.satisfied === true && inspected.receiptState !== 'compensated') {
+        return Object.freeze({
+          satisfied: false,
+          reason: 'static_publish_release_migration_compensation_receipt_pending',
+        });
+      }
+      return inspected;
+    },
+    async compensateReleaseMigration(context = {}) {
+      if (typeof isolationManager.compensateReleaseMigration !== 'function') {
+        umaskFailure('website_static_release_migration_lifecycle_unavailable', 'Static release migration lifecycle is unavailable');
+      }
+      return isolationManager.compensateReleaseMigration(
+        isolationIntent(context),
+        { operationId: context.operationId },
+      );
+    },
+
     async inspectControlMigrationOperation(context = {}) {
       if (typeof isolationManager.inspectMigrationOperation !== 'function') {
         umaskFailure('website_static_control_migration_lifecycle_unavailable', 'Static control migration lifecycle is unavailable');
