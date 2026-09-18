@@ -125,7 +125,7 @@ export function renderElFinderNginxConfig({
   }
 
   location ^~ /vendor/ {
-    try_files $uri =404;
+    alias ${root}/vendor/elfinder/;
   }
 
   location = / {
