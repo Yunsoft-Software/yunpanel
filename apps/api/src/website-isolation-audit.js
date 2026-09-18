@@ -691,6 +691,16 @@ function boundedPhpRuntimeMigrationPreview(value, scope) {
     if (!reason) return null;
     umaskProjection = Object.freeze({ satisfied: false, reason });
   }
+  if (fpmRuntimeProjection.satisfied === true && (
+    fpm.current.identity.satisfied !== true
+    || fpm.current.documentRoot.present !== true
+    || fpm.current.package.installed !== true
+    || fpm.current.pool.present !== true
+    || fpm.current.pool.matchesDesired !== true
+    || fpm.current.configValid !== true
+    || fpm.current.serviceActive !== true
+    || fpm.current.socket.present !== true
+  )) return null;
   const expectedSafeCreate = container.satisfied === true
     && fpm.safeCreateCandidate === true
     && umaskProjection.satisfied === true;
