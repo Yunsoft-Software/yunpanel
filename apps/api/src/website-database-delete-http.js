@@ -81,6 +81,38 @@ function asyncRoute(handler) {
   };
 }
 
+function jobTimestamp(job) {
+  for (const field of ['finishedAt', 'startedAt', 'createdAt']) {
+    if (typeof job?.[field] === 'string' && Number.isFinite(Date.parse(job[field]))) {
+      return Date.parse(job[field]);
+    }
+  }
+  return Number.NEGATIVE_INFINITY;
+}
+
+function completedDeleteEvidence(job, scope) {
+  const payload = job?.payload;
+  const result = job?.result;
+  if (!job || job.serverId !== scope.serverId || job.operation !== OPERATIONS.DATABASE_DELETE
+    || job.status !== 'succeeded' || job.resourceType !== 'database' || job.resourceId !== scope.databaseName
+    || !payload || typeof payload !== 'object' || Array.isArray(payload)
+    || payload.name !== scope.databaseName || payload.websiteId !== scope.websiteId
+    || payload.databaseBindingId !== scope.databaseBindingId
+    || payload.expectedBindingRevision !== scope.bindingRevision
+    || typeof payload.backupId !== 'string' || !JOB_ID_PATTERN.test(payload.backupId)
+    || typeof payload.expectedBackupSha256 !== 'string' || !SHA256_PATTERN.test(payload.expectedBackupSha256)
+    || !result || typeof result !== 'object' || Array.isArray(result)
+    || result.deleted !== true || result.database?.name !== scope.databaseName) return null;
+  return Object.freeze({
+    jobId: job.id,
+    backupId: payload.backupId,
+    backupSha256: payload.expectedBackupSha256,
+    finishedAt: Number.isFinite(jobTimestamp(job))
+      ? new Date(jobTimestamp(job)).toISOString()
+      : null,
+  });
+}
+
 function backupEvidence(job, scope) {
   const result = job?.result;
   const payload = job?.payload;
@@ -229,6 +261,11 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
       .filter(Boolean)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     const backup = backups[0] ?? null;
+    const completedDeletes = jobs
+      .map((job) => ({ evidence: completedDeleteEvidence(job, scope), timestamp: jobTimestamp(job) }))
+      .filter((entry) => entry.evidence)
+      .sort((left, right) => right.timestamp - left.timestamp);
+    const completedDelete = completedDeletes[0]?.evidence ?? null;
     const activeJobs = jobs
       .filter((job) => ACTIVE_DATABASE_OPERATIONS.has(job?.operation)
         && ['queued', 'running'].includes(job?.status))
@@ -236,11 +273,13 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
       .sort((left, right) => left.id.localeCompare(right.id));
 
     const blockers = [];
-    if (!exists) blockers.push('database_not_found');
+    if (!exists && !completedDelete) blockers.push('database_not_found');
     if (credential) blockers.push('database_credential_exists');
-    if (!backup) blockers.push('database_current_binding_backup_required');
+    if (exists && !backup) blockers.push('database_current_binding_backup_required');
     if (activeJobs.length) blockers.push('database_job_active');
-    const readyToDelete = blockers.length === 0;
+    const readyToDelete = exists && blockers.length === 0;
+    const readyToFinalize = !exists && completedDelete !== null
+      && !credential && activeJobs.length === 0;
     const identity = Object.freeze({
       version: 1,
       operation: 'website_database_delete',
@@ -259,9 +298,11 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
         revision: credential.revision,
       }) : null,
       backup,
+      completedDelete,
       activeJobs: Object.freeze(activeJobs),
       blockers: Object.freeze(blockers),
       readyToDelete,
+      readyToFinalize,
     });
     const previewDigest = digest(identity);
     return Object.freeze({
@@ -269,6 +310,9 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
       previewDigest,
       confirmation: readyToDelete
         ? `delete-website-database:${scope.databaseBindingId}:${scope.bindingRevision}:${previewDigest}`
+        : null,
+      finalizeConfirmation: readyToFinalize
+        ? `finalize-website-database-delete:${scope.databaseBindingId}:${scope.bindingRevision}:${completedDelete.jobId}`
         : null,
       sideEffects: false,
     });
@@ -484,4 +528,6 @@ export const websiteDatabaseDeleteHttpInternals = Object.freeze({
   validDatabaseName,
   digest,
   backupEvidence,
+  completedDeleteEvidence,
+  jobTimestamp,
 });
