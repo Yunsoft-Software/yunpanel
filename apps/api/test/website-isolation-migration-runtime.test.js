@@ -259,6 +259,74 @@ function sftpMigrationHandler() {
   };
 }
 
+function phpPreview(overrides = {}) {
+  const documentRoot = `/var/lib/yunpanel/apps/${applicationId}/current/public`;
+  const desired = {
+    websiteId,
+    applicationId,
+    unixUser: applicationUser,
+    documentRoot,
+    runtimeUmask: '0027',
+  };
+  return preview({
+    ...overrides,
+    migration: {
+      applyAvailable: true,
+      previewDigest,
+      confirmation,
+      changes: [{
+        action: 'create_php_fpm_pool',
+        applyState: 'requires_explicit_apply',
+        current: {
+          phpRuntimeMigrationPreview: {
+            version: 1,
+            adapter: 'php-runtime',
+            satisfied: false,
+            safeCreateCandidate: true,
+            current: {},
+            desired,
+            differences: ['php_fpm_pool_missing'],
+          },
+        },
+        desired: { phpRuntime: desired },
+      }],
+    },
+  });
+}
+
+function phpMigrationHandler() {
+  let active = false;
+  let compensated = false;
+  const calls = [];
+  return {
+    calls,
+    async inspectMigrationOperation(context) {
+      calls.push(['inspect-php-operation', context]);
+      return active
+        ? { satisfied: true, phpFpmReceiptVersion: 1, createdPhpFpmPool: true }
+        : { satisfied: false, reason: 'php_fpm_receipt_missing' };
+    },
+    async applyMigration(context) {
+      calls.push(['apply-php', context]);
+      active = true;
+      compensated = false;
+      return { satisfied: true, phpFpmReceiptVersion: 1, createdPhpFpmPool: true };
+    },
+    async inspectMigrationCompensation(context) {
+      calls.push(['inspect-php-compensation', context]);
+      return compensated
+        ? { satisfied: true, restoredPrevious: false, preservedExisting: false }
+        : { satisfied: false, reason: 'php_fpm_compensation_pending' };
+    },
+    async compensateMigration(context) {
+      calls.push(['compensate-php', context]);
+      active = false;
+      compensated = true;
+      return { satisfied: true, restoredPrevious: false, preservedExisting: false };
+    },
+  };
+}
+
 test('workspace isolation migration journals before exact apply and returns receipt evidence', async () => {
   const store = registry();
   const workspace = manager();
@@ -567,4 +635,85 @@ test('SFTP isolation typed rollback uses only migration compensation handler', a
   assert.equal(result.status, 'compensated');
   assert.deepEqual(result.compensation, { satisfied: true, removedSftpIsolation: true });
   assert.equal(handler.calls.some(([name]) => name === 'compensate-sftp'), true);
+});
+
+
+test('PHP pool isolation migration applies only through the typed PHP migration handler', async () => {
+  const handler = phpMigrationHandler();
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: registry(),
+    auditService: { audit: async () => phpPreview() },
+    workspaceManager: identityManager(),
+    migrationHandlers: { php_runtime: handler },
+  });
+  await runtime.init();
+
+  const result = await runtime.start({ websiteId, previewDigest, confirmation });
+
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.adapter, 'php');
+  assert.deepEqual(result.targets, []);
+  assert.deepEqual(result.result, {
+    satisfied: true,
+    phpFpmReceiptVersion: 1,
+    createdPhpFpmPool: true,
+  });
+  assert.deepEqual(handler.calls.map(([name]) => name), ['inspect-php-operation', 'apply-php']);
+});
+
+test('PHP pool migration restart closes a completed receipt without replaying pool creation', async () => {
+  const store = registry();
+  await store.init();
+  const created = await store.create(phpPreview());
+  await store.markApplying(created.id);
+  const handler = phpMigrationHandler();
+  await handler.applyMigration({
+    operationId,
+    websiteId,
+    intent: {
+      adapter: 'php-fpm',
+      websiteId,
+      applicationId,
+      unixUser: applicationUser,
+      documentRoot: `/var/lib/yunpanel/apps/${applicationId}/current/public`,
+    },
+  });
+  handler.calls.length = 0;
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: store,
+    auditService: { audit: async () => phpPreview() },
+    workspaceManager: identityManager(),
+    migrationHandlers: { php_runtime: handler },
+  });
+
+  const recovery = await runtime.init();
+
+  assert.deepEqual(recovery, [{ operationId, recovered: true }]);
+  assert.equal((await runtime.get(operationId)).status, 'succeeded');
+  assert.deepEqual(handler.calls.map(([name]) => name), ['inspect-php-operation']);
+});
+
+test('PHP pool migration rollback uses only receipt-owned FPM compensation', async () => {
+  const handler = phpMigrationHandler();
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: registry(),
+    auditService: { audit: async () => phpPreview() },
+    workspaceManager: identityManager(),
+    migrationHandlers: { php_runtime: handler },
+  });
+  await runtime.init();
+  await runtime.start({ websiteId, previewDigest, confirmation });
+
+  const result = await runtime.rollback({
+    operationId,
+    confirmation: `rollback-isolation-migration:${operationId}:${previewDigest}`,
+  });
+
+  assert.equal(result.status, 'compensated');
+  assert.deepEqual(result.compensation, {
+    satisfied: true,
+    restoredPrevious: false,
+    preservedExisting: false,
+  });
+  assert.equal(handler.calls.some(([name]) => name === 'compensate-php'), true);
 });
