@@ -188,6 +188,7 @@ test('SFTP migration preview reports exact artifact state without exposing confi
 
   assert.equal(preview.version, 1);
   assert.equal(preview.satisfied, true);
+  assert.equal(preview.safeCreateCandidate, false);
   assert.equal(preview.current.receiptState, 'active');
   assert.equal(preview.current.sshdConfig.present, true);
   assert.equal(preview.current.sshdConfig.matchesDesired, true);
@@ -212,6 +213,7 @@ test('SFTP migration preview keeps legacy state blocked when ownership receipt a
   const preview = await value.previewMigration(intent(), { operationId });
 
   assert.equal(preview.satisfied, false);
+  assert.equal(preview.safeCreateCandidate, true);
   assert.equal(preview.current.receiptState, null);
   assert.equal(preview.current.sshdConfig.present, false);
   assert.equal(preview.current.mountUnit.present, false);
@@ -221,6 +223,20 @@ test('SFTP migration preview keeps legacy state blocked when ownership receipt a
   assert.equal(preview.differences.includes('sftp_sshd_config_missing'), true);
   assert.equal(preview.differences.includes('sftp_mount_unit_missing'), true);
   assert.equal(preview.differences.includes('sftp_mount_inactive'), true);
+  assert.equal(host.calls.some(([file, args]) => file === '/usr/bin/install'
+    || (file === '/usr/bin/systemctl' && ['enable', 'disable', 'reload', 'daemon-reload'].includes(args[0]))), false);
+});
+
+
+test('SFTP migration preview blocks safe-create when a foreign site artifact already exists', async () => {
+  const host = fakeHost();
+  host.files.set(sshdConfigPath, { content: 'Match User foreign\n', mode: 0o600 });
+  const value = manager(host);
+
+  const preview = await value.previewMigration(intent(), { operationId });
+
+  assert.equal(preview.safeCreateCandidate, false);
+  assert.equal(preview.differences.includes('sftp_sshd_config_drift'), true);
   assert.equal(host.calls.some(([file, args]) => file === '/usr/bin/install'
     || (file === '/usr/bin/systemctl' && ['enable', 'disable', 'reload', 'daemon-reload'].includes(args[0]))), false);
 });
