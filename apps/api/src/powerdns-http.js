@@ -101,6 +101,37 @@ function zoneReapplyApplyBody(body) {
   return value;
 }
 
+function zoneReapplyRollbackPreviewBody(body) {
+  if (body === undefined || body === null) return;
+  if (typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 0) {
+    throw new PowerDnsHttpError(
+      'dns_zone_reapply_rollback_preview_input_invalid',
+      'DNS zone reapply rollback preview does not accept request fields',
+    );
+  }
+}
+
+function zoneReapplyRollbackBody(body) {
+  const value = exactObject(
+    body,
+    new Set(['expectedUpdatedAt', 'sourceZoneDigest', 'appliedZoneDigest', 'confirmation']),
+    'dns_zone_reapply_rollback_input_invalid',
+    'Send expectedUpdatedAt, sourceZoneDigest, appliedZoneDigest and confirmation',
+  );
+  if (typeof value.expectedUpdatedAt !== 'string' || !value.expectedUpdatedAt
+    || !Number.isFinite(Date.parse(value.expectedUpdatedAt))
+    || new Date(value.expectedUpdatedAt).toISOString() !== value.expectedUpdatedAt
+    || typeof value.sourceZoneDigest !== 'string' || !SHA256_PATTERN.test(value.sourceZoneDigest)
+    || typeof value.appliedZoneDigest !== 'string' || !SHA256_PATTERN.test(value.appliedZoneDigest)
+    || typeof value.confirmation !== 'string' || !value.confirmation) {
+    throw new PowerDnsHttpError(
+      'dns_zone_reapply_rollback_input_invalid',
+      'Send an exact rollback journal revision, before/after digests and confirmation',
+    );
+  }
+  return value;
+}
+
 function zoneTemplateVersion(value) {
   if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
     throw new PowerDnsHttpError('invalid_dns_template_version', 'DNS template version is invalid');
@@ -420,6 +451,7 @@ export function mountPowerDnsRoutes(app, {
   if (typeof delegationInspector.inspect !== 'function') throw new Error('DNS delegation inspector is required');
   if (dnsZoneReapplyRuntime !== null
     && (typeof dnsZoneReapplyRuntime.preview !== 'function' || typeof dnsZoneReapplyRuntime.start !== 'function'
+      || typeof dnsZoneReapplyRuntime.rollbackPreview !== 'function' || typeof dnsZoneReapplyRuntime.rollback !== 'function'
       || typeof dnsZoneReapplyRuntime.get !== 'function' || typeof dnsZoneReapplyRuntime.listForDomain !== 'function')) {
     throw new Error('DNS zone reapply runtime is invalid');
   }
@@ -562,6 +594,28 @@ export function mountPowerDnsRoutes(app, {
     if (!operation || operation.domainId !== request.params.domainId) {
       throw new PowerDnsHttpError('dns_zone_reapply_operation_not_found', 'DNS zone reapply operation was not found', 404);
     }
+    return response.json({ data: operation });
+  }));
+
+  app.post('/api/domains/:domainId/dns/reapply-operations/:operationId/rollback-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    zoneReapplyRollbackPreviewBody(request.body);
+    const preview = await zoneReapplyOperation(async () => (await reapplyRuntime()).rollbackPreview({
+      domainId: request.params.domainId,
+      operationId: request.params.operationId,
+    }));
+    return response.json({ data: preview });
+  }));
+
+  app.post('/api/domains/:domainId/dns/reapply-operations/:operationId/rollback', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const body = zoneReapplyRollbackBody(request.body);
+    const operation = await zoneReapplyOperation(async () => (await reapplyRuntime()).rollback({
+      domainId: request.params.domainId,
+      operationId: request.params.operationId,
+      expectedUpdatedAt: body.expectedUpdatedAt,
+      sourceZoneDigest: body.sourceZoneDigest,
+      appliedZoneDigest: body.appliedZoneDigest,
+      confirmation: body.confirmation,
+    }));
     return response.json({ data: operation });
   }));
 
