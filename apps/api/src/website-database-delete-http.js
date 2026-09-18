@@ -358,25 +358,61 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
         'Website database delete finalization request is invalid',
       );
     }
-    const scope = await resolveScope({
-      ...request.params,
-      expectedBindingRevision: body.expectedBindingRevision,
-    });
 
+    const server = await registry.getServer(request.params.serverId);
+    if (!server) throw new WebsiteDatabaseDeleteHttpError('server_not_found', 'Server not found', 404);
+    const website = await websiteRegistry.getWebsite(request.params.websiteId);
+    if (!website || website.serverId !== server.id) {
+      throw new WebsiteDatabaseDeleteHttpError('website_not_found', 'Website not found', 404);
+    }
+
+    let binding;
     let credential;
     let job;
     let inventory;
     try {
-      [credential, job, inventory] = await Promise.all([
-        databaseCredentialRegistry.getForBinding(scope.databaseBindingId),
+      [binding, credential, job, inventory] = await Promise.all([
+        databaseBindingRegistry.getBinding(request.params.bindingId),
+        databaseCredentialRegistry.getForBinding(request.params.bindingId),
         jobRegistry.getJob(body.deleteJobId),
-        databaseInventoryProvider(scope.serverId),
+        databaseInventoryProvider(server.id),
       ]);
     } catch {
       throw new WebsiteDatabaseDeleteHttpError(
         'website_database_delete_finalize_state_unavailable',
         'Website database delete finalization state could not be read',
         503,
+      );
+    }
+
+    const payload = job?.payload;
+    const result = job?.result;
+    if (!job || job.status !== 'succeeded' || job.operation !== OPERATIONS.DATABASE_DELETE
+      || job.serverId !== server.id || job.resourceType !== 'database'
+      || !payload || typeof payload !== 'object' || Array.isArray(payload)
+      || !validDatabaseName(payload.name)
+      || job.resourceId !== payload.name
+      || payload.websiteId !== website.id
+      || payload.databaseBindingId !== request.params.bindingId
+      || payload.expectedBindingRevision !== body.expectedBindingRevision
+      || typeof payload.backupId !== 'string' || !JOB_ID_PATTERN.test(payload.backupId)
+      || typeof payload.expectedBackupSha256 !== 'string' || !SHA256_PATTERN.test(payload.expectedBackupSha256)
+      || !result || typeof result !== 'object' || Array.isArray(result)
+      || result.deleted !== true || result.database?.name !== payload.name) {
+      throw new WebsiteDatabaseDeleteHttpError(
+        'website_database_delete_job_evidence_missing',
+        'A matching successful Website database delete job is required',
+        409,
+      );
+    }
+
+    if (binding && (binding.id !== request.params.bindingId || binding.serverId !== server.id
+      || binding.websiteId !== website.id || binding.applicationId !== website.applicationId
+      || binding.databaseName !== payload.name || binding.revision !== body.expectedBindingRevision)) {
+      throw new WebsiteDatabaseDeleteHttpError(
+        'website_database_delete_binding_drift',
+        'Database binding no longer matches the successful delete job',
+        409,
       );
     }
     if (credential) {
@@ -393,7 +429,7 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
         503,
       );
     }
-    if (inventory.databases.some((database) => database?.name === scope.databaseName)) {
+    if (inventory.databases.some((database) => database?.name === payload.name)) {
       throw new WebsiteDatabaseDeleteHttpError(
         'website_database_delete_schema_present',
         'Database schema is still present; binding cannot be finalized',
@@ -401,28 +437,8 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
       );
     }
 
-    const payload = job?.payload;
-    const result = job?.result;
-    if (!job || job.status !== 'succeeded' || job.operation !== OPERATIONS.DATABASE_DELETE
-      || job.serverId !== scope.serverId || job.resourceType !== 'database'
-      || job.resourceId !== scope.databaseName
-      || !payload || typeof payload !== 'object' || Array.isArray(payload)
-      || payload.name !== scope.databaseName
-      || payload.websiteId !== scope.websiteId
-      || payload.databaseBindingId !== scope.databaseBindingId
-      || payload.expectedBindingRevision !== scope.bindingRevision
-      || typeof payload.backupId !== 'string' || !JOB_ID_PATTERN.test(payload.backupId)
-      || typeof payload.expectedBackupSha256 !== 'string' || !SHA256_PATTERN.test(payload.expectedBackupSha256)
-      || !result || typeof result !== 'object' || Array.isArray(result)
-      || result.deleted !== true || result.database?.name !== scope.databaseName) {
-      throw new WebsiteDatabaseDeleteHttpError(
-        'website_database_delete_job_evidence_missing',
-        'A matching successful Website database delete job is required',
-        409,
-      );
-    }
     const expectedConfirmation =
-      `finalize-website-database-delete:${scope.databaseBindingId}:${scope.bindingRevision}:${job.id}`;
+      `finalize-website-database-delete:${request.params.bindingId}:${body.expectedBindingRevision}:${job.id}`;
     if (body.confirmation !== expectedConfirmation) {
       throw new WebsiteDatabaseDeleteHttpError(
         'website_database_delete_finalize_confirmation_invalid',
@@ -431,12 +447,25 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
       );
     }
 
-    const unbound = await databaseBindingRegistry.unbindDatabase(scope.databaseBindingId, {
-      expectedRevision: scope.bindingRevision,
-      confirmation: `unbind-database:${scope.databaseBindingId}:${scope.bindingRevision}`,
+    if (!binding) {
+      return response.json({ data: {
+        id: request.params.bindingId,
+        databaseName: payload.name,
+        unbound: true,
+        alreadyFinalized: true,
+        finalizedFromJobId: job.id,
+        backupId: payload.backupId,
+        backupSha256: payload.expectedBackupSha256,
+      }, sideEffects: { databaseChanged: false } });
+    }
+
+    const unbound = await databaseBindingRegistry.unbindDatabase(request.params.bindingId, {
+      expectedRevision: body.expectedBindingRevision,
+      confirmation: `unbind-database:${request.params.bindingId}:${body.expectedBindingRevision}`,
     });
     return response.json({ data: {
       ...unbound,
+      alreadyFinalized: false,
       finalizedFromJobId: job.id,
       backupId: payload.backupId,
       backupSha256: payload.expectedBackupSha256,
