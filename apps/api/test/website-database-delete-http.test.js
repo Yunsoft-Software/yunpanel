@@ -240,6 +240,44 @@ test('Website delete preview blocks credential, stale/unscoped backup and active
   }]);
 });
 
+test('Website delete preview resumes binding finalization after a successful scoped DROP survives reload', async () => {
+  const completed = {
+    ...deleteJob(),
+    finishedAt: '2026-09-18T00:05:00.000Z',
+  };
+  const fx = fixture({
+    jobs: [backupJob(), completed],
+    inventoryDatabases: [],
+  });
+  const response = await invoke(fx.preview);
+
+  assert.equal(response.error, null);
+  assert.equal(response.payload.data.readyToDelete, false);
+  assert.equal(response.payload.data.readyToFinalize, true);
+  assert.deepEqual(response.payload.data.blockers, []);
+  assert.equal(response.payload.data.completedDelete.jobId, deleteJobId);
+  assert.equal(response.payload.data.completedDelete.backupId, backupId);
+  assert.equal(response.payload.data.finalizeConfirmation,
+    `finalize-website-database-delete:${bindingId}:7:${deleteJobId}`);
+  assert.equal(response.payload.data.confirmation, null);
+});
+
+test('Website delete preview does not treat unrelated successful DELETE evidence as finalizable', async () => {
+  const fx = fixture({
+    jobs: [backupJob(), {
+      ...deleteJob(),
+      payload: { ...deleteJob().payload, expectedBindingRevision: 6 },
+      finishedAt: '2026-09-18T00:05:00.000Z',
+    }],
+    inventoryDatabases: [],
+  });
+  const response = await invoke(fx.preview);
+
+  assert.equal(response.payload.data.readyToFinalize, false);
+  assert.deepEqual(response.payload.data.blockers, ['database_not_found']);
+  assert.equal(response.payload.data.completedDelete, null);
+});
+
 test('Website delete queues a scoped DROP while preserving binding metadata', async () => {
   const fx = fixture();
   const preview = (await invoke(fx.preview)).payload.data;
