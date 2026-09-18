@@ -21,11 +21,18 @@ function localTarget(serverId, localServerId) {
 }
 
 function managedSiteCwd(website) {
-  if (!['static', 'node'].includes(website.runtimeType) || !APP_USER_PATTERN.test(website.unixUser ?? '')) {
+  if (!['static', 'node', 'php'].includes(website.runtimeType)
+    || !APP_USER_PATTERN.test(website.unixUser ?? '')) {
     throw new TerminalCapabilityError('site_terminal_unsupported', 'This Website does not have an isolated site user', 409);
   }
-  const cwd = path.posix.normalize(website.documentRoot ?? '');
-  if (!SITE_ROOTS.some((root) => cwd.startsWith(root)) || !cwd.endsWith('/current')) {
+  const documentRoot = path.posix.normalize(website.documentRoot ?? '');
+  if (!SITE_ROOTS.some((root) => documentRoot.startsWith(root))) {
+    throw new TerminalCapabilityError('site_terminal_target_invalid', 'Website terminal directory is outside managed application storage', 409);
+  }
+  const cwd = website.runtimeType === 'php'
+    ? (documentRoot.endsWith('/current/public') ? path.posix.dirname(documentRoot) : null)
+    : (documentRoot.endsWith('/current') ? documentRoot : null);
+  if (!cwd || !cwd.endsWith('/current')) {
     throw new TerminalCapabilityError('site_terminal_target_invalid', 'Website terminal directory is outside managed application storage', 409);
   }
   return cwd;
