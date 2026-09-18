@@ -341,6 +341,36 @@ export function createSftpSiteManager({
     });
   }
 
+  async function inspectMigrationOperation(rawIntent, options = {}) {
+    const result = await inspect(rawIntent, options);
+    if (result?.satisfied !== true) return result;
+    return Object.freeze({
+      ...result,
+      sftpReceiptVersion: RECEIPT_VERSION,
+      activatedSftpIsolation: true,
+    });
+  }
+
+  async function applyMigration(rawIntent, options = {}) {
+    const preview = await previewMigration(rawIntent, options);
+    if (preview.satisfied === true) return inspectMigrationOperation(rawIntent, options);
+    if (preview.safeCreateCandidate !== true) {
+      throw new SftpSiteManagerError(
+        'sftp_migration_not_safe_create',
+        'SFTP migration is blocked because site-specific isolation state already exists',
+      );
+    }
+    const result = await apply(rawIntent, options);
+    if (result?.satisfied !== true || result.receiptState !== 'active') {
+      throw new SftpSiteManagerError('sftp_migration_unverified', 'SFTP migration did not return durable ownership evidence');
+    }
+    return Object.freeze({
+      ...result,
+      sftpReceiptVersion: RECEIPT_VERSION,
+      activatedSftpIsolation: true,
+    });
+  }
+
   async function inspect(rawIntent, { operationId: rawOperationId } = {}) {
     const spec = normalizeIntent(rawIntent);
     const id = operationId(rawOperationId);
@@ -442,6 +472,24 @@ export function createSftpSiteManager({
     return Object.freeze({ satisfied: false, reason: 'sftp_compensation_pending' });
   }
 
+  async function inspectMigrationCompensation(rawIntent, options = {}) {
+    const result = await inspectCompensation(rawIntent, options);
+    if (result?.satisfied !== true) return result;
+    return Object.freeze({
+      ...result,
+      removedSftpIsolation: true,
+    });
+  }
+
+  async function compensateMigration(rawIntent, options = {}) {
+    const result = await compensate(rawIntent, options);
+    if (result?.satisfied !== true) return result;
+    return Object.freeze({
+      ...result,
+      removedSftpIsolation: true,
+    });
+  }
+
   async function compensate(rawIntent, { operationId: rawOperationId } = {}) {
     const spec = normalizeIntent(rawIntent);
     const id = operationId(rawOperationId);
@@ -474,7 +522,17 @@ export function createSftpSiteManager({
     return Object.freeze({ ...after, receiptState: receipt.state });
   }
 
-  return Object.freeze({ inspect, previewMigration, apply, inspectCompensation, compensate });
+  return Object.freeze({
+    inspect,
+    previewMigration,
+    inspectMigrationOperation,
+    applyMigration,
+    apply,
+    inspectCompensation,
+    inspectMigrationCompensation,
+    compensateMigration,
+    compensate,
+  });
 }
 
 export const sftpSiteManagerInternals = Object.freeze({
