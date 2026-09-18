@@ -31,6 +31,7 @@ function createFakeHost({
   gid = 1201,
   homeMode = 0o750,
   groupMembers = [],
+  homeEntries = [],
 } = {}) {
   const state = {
     userExists,
@@ -42,6 +43,7 @@ function createFakeHost({
     gid,
     homeMode,
     groupMembers: [...groupMembers],
+    homeEntries: [...homeEntries],
   };
   const calls = [];
   const run = async (file, args) => {
@@ -88,11 +90,21 @@ function createFakeHost({
       isDirectory: () => true,
     };
   };
-  const rmFn = async (targetPath) => {
+  const readdirFn = async (targetPath) => {
     assert.equal(targetPath, intent.homeDirectory);
+    if (!state.homeExists) throw missingError('ENOENT');
+    return [...state.homeEntries];
+  };
+  const rmFn = async (targetPath, options = {}) => {
+    assert.equal(targetPath, intent.homeDirectory);
+    if (options.recursive === false && state.homeEntries.length > 0) {
+      const error = new Error('not empty');
+      error.code = 'ENOTEMPTY';
+      throw error;
+    }
     state.homeExists = false;
   };
-  return { state, calls, run, lstatFn, rmFn };
+  return { state, calls, run, lstatFn, readdirFn, rmFn };
 }
 
 async function managerFixture(t, host, { run = host.run } = {}) {
@@ -102,6 +114,7 @@ async function managerFixture(t, host, { run = host.run } = {}) {
     receiptRoot,
     run,
     lstatFn: host.lstatFn,
+    readdirFn: host.readdirFn,
     rmFn: host.rmFn,
   });
 }
@@ -224,6 +237,28 @@ test('identity compensation removes only operation-owned user group and home', a
   assert.equal(host.state.homeExists, false);
   assert.equal(host.calls.some(([file]) => file === '/usr/sbin/userdel'), true);
   assert.equal(host.calls.some(([file]) => file === '/usr/sbin/groupdel'), true);
+});
+
+test('identity compensation preserves nonempty operation-owned home data instead of recursively deleting it', async (t) => {
+  const host = createFakeHost({ homeEntries: ['customer-data.db'] });
+  const manager = await managerFixture(t, host);
+  const evidence = await manager.apply(intent, { operationId });
+
+  const result = await manager.compensate(intent, { operationId, evidence });
+
+  assert.equal(result.satisfied, true);
+  assert.equal(result.removedUser, true);
+  assert.equal(result.removedGroup, true);
+  assert.equal(result.removedHome, false);
+  assert.equal(result.preservedHomeData, true);
+  assert.equal(host.state.userExists, false);
+  assert.equal(host.state.groupExists, false);
+  assert.equal(host.state.homeExists, true);
+  assert.deepEqual(host.state.homeEntries, ['customer-data.db']);
+
+  const restartedInspection = await manager.inspectCompensation(intent, { operationId, evidence });
+  assert.equal(restartedInspection.satisfied, true);
+  assert.equal(restartedInspection.preservedHomeData, true);
 });
 
 test('identity compensation preserves a matching identity that predated the operation', async (t) => {
