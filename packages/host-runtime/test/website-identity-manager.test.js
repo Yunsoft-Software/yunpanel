@@ -323,3 +323,75 @@ test('identity manager rejects paths outside the managed application data root',
     (error) => error instanceof WebsiteIdentityManagerError && error.code === 'website_identity_home_invalid',
   );
 });
+
+
+test('identity migration preview reports an exact safe-create candidate without mutating host state', async (t) => {
+  const host = createFakeHost();
+  const manager = await managerFixture(t, host);
+
+  const preview = await manager.previewMigration(intent);
+
+  assert.equal(preview.version, 1);
+  assert.equal(preview.satisfied, false);
+  assert.equal(preview.safeCreateCandidate, true);
+  assert.deepEqual(preview.current, { account: null, group: null, home: null });
+  assert.deepEqual(preview.desired, {
+    user: intent.user,
+    homeDirectory: intent.homeDirectory,
+    shellPolicy: 'nologin',
+    privateGroup: true,
+    groupMemberCount: 0,
+    homeMode: '0750',
+  });
+  assert.deepEqual(preview.differences, [
+    'website_identity_user_missing',
+    'website_identity_group_missing',
+    'website_identity_home_missing',
+  ]);
+  assert.equal(host.calls.some(([file]) => ['/usr/sbin/useradd', '/usr/sbin/userdel', '/usr/sbin/groupdel', '/usr/bin/install'].includes(file)), false);
+});
+
+test('identity migration preview exposes bounded drift details without leaking group member names', async (t) => {
+  const host = createFakeHost({
+    userExists: true,
+    homeDirectory: '/var/lib/yunpanel/data/11111111-1111-4111-8111-111111111111',
+    shell: '/bin/bash',
+    homeMode: 0o755,
+    groupMembers: ['another-user'],
+  });
+  const manager = await managerFixture(t, host);
+
+  const preview = await manager.previewMigration(intent);
+
+  assert.equal(preview.satisfied, false);
+  assert.equal(preview.safeCreateCandidate, false);
+  assert.deepEqual(preview.current.account, {
+    uid: 1201,
+    gid: 1201,
+    homeDirectory: '/var/lib/yunpanel/data/11111111-1111-4111-8111-111111111111',
+    shell: '/bin/bash',
+  });
+  assert.deepEqual(preview.current.group, { gid: 1201, memberCount: 1 });
+  assert.deepEqual(preview.current.home, { uid: 1201, gid: 1201, mode: '0755' });
+  assert.deepEqual(preview.differences, [
+    'website_identity_account_home_drift',
+    'website_identity_account_shell_drift',
+    'website_identity_group_members_drift',
+    'website_identity_home_mode_drift',
+  ]);
+  assert.equal(JSON.stringify(preview).includes('another-user'), false);
+  assert.equal(host.calls.some(([file]) => ['/usr/sbin/useradd', '/usr/sbin/userdel', '/usr/sbin/groupdel', '/usr/bin/install'].includes(file)), false);
+});
+
+test('identity migration preview recognizes an already canonical identity', async (t) => {
+  const host = createFakeHost({ userExists: true });
+  const manager = await managerFixture(t, host);
+
+  const preview = await manager.previewMigration(intent);
+
+  assert.equal(preview.satisfied, true);
+  assert.equal(preview.safeCreateCandidate, false);
+  assert.deepEqual(preview.differences, []);
+  assert.deepEqual(preview.current.group, { gid: 1201, memberCount: 0 });
+  assert.deepEqual(preview.current.home, { uid: 1201, gid: 1201, mode: '0750' });
+});
