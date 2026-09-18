@@ -19,6 +19,10 @@ test('SFTP handler forwards only canonical Website identity to host manager', as
   const manager = {
     async apply(value, options) { calls.push(['apply', value, options]); return { satisfied: true, adapter: 'openssh-internal-sftp' }; },
     async inspect(value, options) { calls.push(['inspect', value, options]); return { satisfied: true, adapter: 'openssh-internal-sftp' }; },
+    async previewMigration(value, options) {
+      calls.push(['previewMigration', value, options]);
+      return { version: 1, satisfied: true, current: {}, desired: {}, differences: [] };
+    },
     async compensate(value, options) { calls.push(['compensate', value, options]); return { satisfied: true }; },
     async inspectCompensation(value, options) { calls.push(['inspectCompensation', value, options]); return { satisfied: true }; },
   };
@@ -26,10 +30,11 @@ test('SFTP handler forwards only canonical Website identity to host manager', as
 
   await handler.apply({ intent, operationId });
   await handler.inspect({ intent, operationId });
+  await handler.previewMigration({ intent, operationId });
   await handler.compensate({ intent, operationId });
   await handler.inspectCompensation({ intent, operationId });
 
-  assert.deepEqual(calls.map(([name]) => name), ['apply', 'inspect', 'compensate', 'inspectCompensation']);
+  assert.deepEqual(calls.map(([name]) => name), ['apply', 'inspect', 'previewMigration', 'compensate', 'inspectCompensation']);
   for (const [, value, options] of calls) {
     assert.deepEqual(value, {
       websiteId: intent.websiteId,
@@ -60,6 +65,10 @@ function baseHandler(calls, { satisfied = true } = {}) {
   return {
     async apply(context) { calls.push(['base-apply', context]); return { satisfied, adapter: 'openssh-internal-sftp' }; },
     async inspect(context) { calls.push(['base-inspect', context]); return { satisfied, adapter: 'openssh-internal-sftp' }; },
+    async previewMigration(context) {
+      calls.push(['base-preview-migration', context]);
+      return { version: 1, satisfied, current: {}, desired: {}, differences: satisfied ? [] : ['sftp_drift'] };
+    },
     async compensate(context) { calls.push(['base-compensate', context]); return { satisfied: true }; },
     async inspectCompensation(context) { calls.push(['base-inspect-compensation', context]); return { satisfied: true }; },
   };
@@ -159,4 +168,33 @@ test('SFTP key lifecycle rejects provisioning operation identity drift', async (
     (error) => error instanceof WebsiteSftpProvisioningError
       && error.code === 'website_sftp_operation_identity_drift',
   );
+});
+
+
+test('SFTP key-aware migration preview combines base artifact drift with secret-safe key materialization evidence', async () => {
+  const calls = [];
+  const handler = createWebsiteSftpKeyAwareProvisioningHandler({
+    baseHandler: baseHandler(calls),
+    sftpKeyService: {
+      async reconcile() { throw new Error('not used'); },
+      async inspectMaterialization(websiteId) {
+        calls.push(['keys-inspect', websiteId]);
+        return { satisfied: true, adapter: 'openssh-authorized-keys', keyCount: 2, sha256: 'b'.repeat(64) };
+      },
+    },
+  });
+  const context = { websiteId: intent.websiteId, intent, operationId };
+
+  const preview = await handler.previewMigration(context);
+
+  assert.equal(preview.version, 1);
+  assert.equal(preview.satisfied, true);
+  assert.deepEqual(preview.authorizedKeys, {
+    satisfied: true,
+    adapter: 'openssh-authorized-keys',
+    keyCount: 2,
+    sha256: 'b'.repeat(64),
+  });
+  assert.deepEqual(calls.map(([name]) => name), ['base-preview-migration', 'keys-inspect']);
+  assert.equal(JSON.stringify(preview).includes('ssh-rsa'), false);
 });
