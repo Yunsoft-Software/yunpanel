@@ -276,6 +276,14 @@ export function createSftpSiteManager({
       && value.mode === '0755';
     const configSha256 = config === null ? null : sha256(config);
     const mountSha256 = mount === null ? null : sha256(mount);
+    const safeCreateCandidate = !receipt && receiptError === null
+      && (chrootRootState.present === false || directorySatisfied(chrootRootState))
+      && chrootState.present === false
+      && mountState.present === false
+      && config === null
+      && mount === null
+      && active === false
+      && sshdConfigValid === true;
     const differences = [];
     if (receiptError) differences.push(receiptError);
     else if (!receipt) differences.push('sftp_receipt_missing');
@@ -293,6 +301,7 @@ export function createSftpSiteManager({
     return Object.freeze({
       version: 1,
       satisfied: differences.length === 0,
+      safeCreateCandidate,
       current: Object.freeze({
         receiptState: receipt?.state ?? null,
         receiptError,
