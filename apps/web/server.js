@@ -948,8 +948,14 @@ export function createPanelServer({
       });
       return;
     }
-    const ttydRoute = parseTtydGatewayPath(requestUrl.pathname);
-    if (ttydRoute) {
+    const ttydPath = requestUrl.pathname === TTYD_PREFIX
+      || requestUrl.pathname.startsWith(`${TTYD_PREFIX}/`);
+    const ttydRoute = ttydPath ? parseTtydGatewayPath(requestUrl.pathname) : null;
+    if (ttydPath) {
+      if (!ttydRoute) {
+        reply(response, 404, 'Not found.');
+        return;
+      }
       const accessStatus = await authorizeTtydGateway(request, ttydRoute.sessionId, {
         apiHost, apiPort, clientIp, proxyToken,
       });
