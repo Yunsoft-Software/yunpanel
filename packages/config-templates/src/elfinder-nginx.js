@@ -80,7 +80,7 @@ export function renderElFinderNginxConfig({
     deny all;
   }
 
-  location ~ ^/(?:VERSION|connector\\.php(?:/|$)|vendor/elfinder\\.html|vendor/php/|vendor/files/|vendor/README|vendor/LICENSE|vendor/composer|vendor/package) {
+  location ~ ^/(?:VERSION|connector\\.php(?:/|$)) {
     deny all;
   }
 
@@ -124,8 +124,24 @@ export function renderElFinderNginxConfig({
     alias ${jqueryUi}/;
   }
 
+  location ^~ /vendor/js/ {
+    alias ${root}/vendor/elfinder/js/;
+  }
+
+  location ^~ /vendor/css/ {
+    alias ${root}/vendor/elfinder/css/;
+  }
+
+  location ^~ /vendor/img/ {
+    alias ${root}/vendor/elfinder/img/;
+  }
+
+  location ^~ /vendor/sounds/ {
+    alias ${root}/vendor/elfinder/sounds/;
+  }
+
   location ^~ /vendor/ {
-    alias ${root}/vendor/elfinder/;
+    return 404;
   }
 
   location = / {
