@@ -64,14 +64,10 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 ## P0.6 — elFinder; homegrown File Manager removal
 
-- [ ] elFinder shared vendor app/client package layout'ını ve hardened connector artifact'ını fixed paths altında materyalize et.
-- [ ] Per-Website PHP-FPM pool/socket template'ini gerçek materialization + configtest + reload + rollback lifecycle'ına bağla.
-- [ ] Same-origin protected gateway'i short-lived elFinder handoff consume + exact Website FPM socket seçimiyle bağla; vendor endpoint public bypass olmasın.
-- [ ] Website Files action/client'i handoff üzerinden shared elFinder UI'a bağla.
-- [ ] Upload/download/edit/rename/move/copy/delete/mkdir/archive via elFinder.
-- [ ] Traversal/symlink/archive escape/special file/secret/cross-site testleri.
-- [ ] Acceptance sonrası custom `site-file-manager` kaldır.
-- [ ] elFinder site-UID acceptance vermezse homegrown'a dönme; Filestash + localhost SFTP değerlendir.
+Kaynak kod tarafındaki shared vendor package, hardened connector, per-Website FPM materialization, private Nginx gateway, Owner handoff/session bridge ve Files UI wiring tamamlandı. Gerçek Ubuntu/browser/filesystem isolation kabul kapıları `todo.md` T-TOOLS altındadır.
+
+- [ ] T-TOOLS elFinder kabulü geçtikten sonra custom `site-file-manager` HTTP/worker/backend/UI fallback yollarını kaldır; package upgrade/rollback'te orphan session/process bırakma.
+- [ ] elFinder site-UID acceptance gerçek hostta başarısız olursa homegrown'a dönme; Filestash + localhost SFTP alternatifini ayrı adapter olarak değerlendir.
 
 ## P0.7 — IntegratedToolGateway
 
