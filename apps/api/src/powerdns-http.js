@@ -360,6 +360,8 @@ async function defaultZoneRetirementService(
   domainRegistry = null,
   powerDnsSecretRegistry = null,
   provisioningRegistry = null,
+  mailDomainRegistry = null,
+  jobRegistry = null,
   env = process.env,
 ) {
   if ((domainRegistry === null) !== (powerDnsSecretRegistry === null)) {
@@ -383,6 +385,8 @@ async function defaultZoneRetirementService(
     domainRegistry: domainRegistry ?? defaults.domainRegistry,
     powerDnsSecretRegistry: powerDnsSecretRegistry ?? defaults.secretRegistry,
     provisioningRegistry,
+    mailDomainRegistry,
+    jobRegistry,
     localServerId: authoritativeService.localServerId,
   });
 }
@@ -466,6 +470,7 @@ export function mountPowerDnsRoutes(app, {
   domainRegistry = null,
   powerDnsSecretRegistry = null,
   websiteProvisioningRegistry = null,
+  jobRegistry = null,
   mailDomainRegistry = null,
   mailDkimRegistry = null,
   mailDkimRetirementRegistry = null,
@@ -560,6 +565,8 @@ export function mountPowerDnsRoutes(app, {
         domainRegistry,
         powerDnsSecretRegistry,
         websiteProvisioningRegistry,
+        mailDomainRegistry,
+        jobRegistry,
       );
       defaultRetirementPromise.catch(() => { defaultRetirementPromise = null; });
     }
