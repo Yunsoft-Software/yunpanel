@@ -666,9 +666,31 @@ export function createDomainSuspensionRuntime({ registry, service } = {}) {
     const recovery = [];
     for (const operation of interrupted) {
       try {
-        recovery.push(operation.status === 'suspending'
+        const result = operation.status === 'suspending'
           ? await runSuspend(operation.id, { allowHostMutation: false })
-          : await runResume(operation.id, { allowHostMutation: false }));
+          : await runResume(operation.id, { allowHostMutation: false });
+        if (result && typeof result === 'object' && Object.hasOwn(result, 'recovered')) {
+          recovery.push(result);
+        } else {
+          const terminal = operation.status === 'suspending'
+            ? result?.status === 'suspended'
+            : result?.status === 'resumed';
+          recovery.push(Object.freeze({
+            operationId: operation.id,
+            recovered: terminal,
+            operation: result ?? null,
+            ...(terminal ? {} : {
+              error: Object.freeze({
+                code: operation.status === 'suspending'
+                  ? 'domain_suspension_recovery_pending'
+                  : 'domain_resume_recovery_pending',
+                message: operation.status === 'suspending'
+                  ? 'Domain suspension recovery remains pending'
+                  : 'Domain resume recovery remains pending',
+              }),
+            }),
+          }));
+        }
       } catch (error) {
         recovery.push(Object.freeze({
           operationId: operation.id,
