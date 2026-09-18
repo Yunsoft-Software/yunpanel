@@ -366,3 +366,35 @@ test('DNS zone reapply journal persists rollback lifecycle with monotonic revisi
   assert.equal(Object.hasOwn(publicView, 'sourceZoneSnapshot'), false);
   assert.equal(JSON.stringify(publicView).includes('managed source snapshot'), false);
 });
+
+
+test('failed partial reapply keeps rollback lifecycle available without invented apply success evidence', async () => {
+  const store = registry();
+  await store.init();
+  const created = await store.create(preview(), rollbackEvidence());
+  await store.markApplying(created.id);
+  const failed = await store.fail(created.id, {
+    code: 'dns_zone_reapply_partial_apply_detected',
+    message: 'operation-owned mixed before/after state',
+  });
+
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.result, null);
+  assert.equal(dnsZoneReapplyOperationPublicView(failed).rollback.available, true);
+
+  const rollingBack = await store.markRollingBack(created.id);
+  assert.equal(rollingBack.status, 'rolling_back');
+  assert.equal(rollingBack.result, null);
+  assert.equal(rollingBack.error.code, 'dns_zone_reapply_partial_apply_detected');
+
+  const rolledBack = await store.succeedRollback(created.id, {
+    satisfied: true,
+    zoneName: 'example.com',
+    restoredRrsetCount: 1,
+    kindRestored: false,
+    sourceZoneDigest,
+  });
+  assert.equal(rolledBack.status, 'rolled_back');
+  assert.equal(rolledBack.result, null);
+  assert.equal(rolledBack.rollbackResult.sourceZoneDigest, sourceZoneDigest);
+});
