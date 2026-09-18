@@ -656,7 +656,7 @@ export function createStaticPublishIsolationManager({
       satisfied,
       automaticMigration: false,
       repairCandidate,
-      migrationBlockedReason: 'static_release_receipt_not_operation_owned',
+      migrationBlockedReason: 'static_release_explicit_migration_required',
       current: Object.freeze({
         identity,
         aclToolsAvailable: aclAvailable,
