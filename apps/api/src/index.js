@@ -422,6 +422,9 @@ const elFinderHandoffService = localServerId
   ? createElFinderHandoffService({
     websiteRegistry,
     localServerId,
+    runtimeInspector: (intent) => websiteProvisioningRuntime.handlers.elfinder.inspect({
+      intent,
+    }),
     liveSessions,
   })
   : null;
