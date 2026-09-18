@@ -67,10 +67,26 @@ function baseHandler(calls, { satisfied = true } = {}) {
     async inspect(context) { calls.push(['base-inspect', context]); return { satisfied, adapter: 'openssh-internal-sftp' }; },
     async previewMigration(context) {
       calls.push(['base-preview-migration', context]);
-      return { version: 1, satisfied, current: {}, desired: {}, differences: satisfied ? [] : ['sftp_drift'] };
+      return { version: 1, satisfied, safeCreateCandidate: !satisfied, current: {}, desired: {}, differences: satisfied ? [] : ['sftp_drift'] };
+    },
+    async inspectMigrationOperation(context) {
+      calls.push(['base-inspect-migration-operation', context]);
+      return { satisfied, adapter: 'openssh-internal-sftp', sftpReceiptVersion: 1, activatedSftpIsolation: satisfied };
+    },
+    async applyMigration(context) {
+      calls.push(['base-apply-migration', context]);
+      return { satisfied: true, adapter: 'openssh-internal-sftp', sftpReceiptVersion: 1, activatedSftpIsolation: true };
     },
     async compensate(context) { calls.push(['base-compensate', context]); return { satisfied: true }; },
     async inspectCompensation(context) { calls.push(['base-inspect-compensation', context]); return { satisfied: true }; },
+    async inspectMigrationCompensation(context) {
+      calls.push(['base-inspect-migration-compensation', context]);
+      return { satisfied: true, removedSftpIsolation: true };
+    },
+    async compensateMigration(context) {
+      calls.push(['base-compensate-migration', context]);
+      return { satisfied: true, removedSftpIsolation: true };
+    },
   };
 }
 
@@ -197,4 +213,60 @@ test('SFTP key-aware migration preview combines base artifact drift with secret-
   });
   assert.deepEqual(calls.map(([name]) => name), ['base-preview-migration', 'keys-inspect']);
   assert.equal(JSON.stringify(preview).includes('ssh-rsa'), false);
+});
+
+
+test('SFTP key-aware migration lifecycle reconciles key desired state only after receipt-owned safe apply', async () => {
+  const calls = [];
+  const handler = createWebsiteSftpKeyAwareProvisioningHandler({
+    baseHandler: baseHandler(calls, { satisfied: false }),
+    sftpKeyService: {
+      async reconcile(websiteId) {
+        calls.push(['keys-reconcile', websiteId]);
+        return { satisfied: true, adapter: 'openssh-authorized-keys', keyCount: 1, sha256: 'c'.repeat(64) };
+      },
+      async inspectMaterialization(websiteId) {
+        calls.push(['keys-inspect', websiteId]);
+        return { satisfied: true, adapter: 'openssh-authorized-keys', keyCount: 1, sha256: 'c'.repeat(64) };
+      },
+    },
+  });
+  const context = { websiteId: intent.websiteId, intent, operationId };
+
+  const applied = await handler.applyMigration(context);
+  assert.equal(applied.satisfied, true);
+  assert.equal(applied.sftpReceiptVersion, 1);
+  assert.equal(applied.activatedSftpIsolation, true);
+  assert.equal(applied.authorizedKeyCount, 1);
+  assert.equal(applied.authorizedKeysSha256, 'c'.repeat(64));
+
+  const inspected = await handler.inspectMigrationOperation(context);
+  assert.equal(inspected.satisfied, false);
+  assert.deepEqual(calls.map(([name]) => name), [
+    'base-apply-migration',
+    'keys-reconcile',
+    'base-inspect-migration-operation',
+  ]);
+});
+
+test('SFTP key-aware migration compensation preserves key registry ownership boundary', async () => {
+  const calls = [];
+  const handler = createWebsiteSftpKeyAwareProvisioningHandler({
+    baseHandler: baseHandler(calls),
+    sftpKeyService: {
+      async reconcile() { calls.push(['unexpected-reconcile']); return {}; },
+      async inspectMaterialization() { calls.push(['unexpected-key-inspect']); return {}; },
+    },
+  });
+  const context = { websiteId: intent.websiteId, intent, operationId };
+
+  const inspected = await handler.inspectMigrationCompensation(context);
+  const compensated = await handler.compensateMigration(context);
+
+  assert.equal(inspected.removedSftpIsolation, true);
+  assert.equal(compensated.removedSftpIsolation, true);
+  assert.deepEqual(calls.map(([name]) => name), [
+    'base-inspect-migration-compensation',
+    'base-compensate-migration',
+  ]);
 });
