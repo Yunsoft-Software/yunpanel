@@ -115,10 +115,12 @@ function persistedStep(value) {
 
 function normalizedPlan(value) {
   const fields = new Set([
-    'childDomainIds', 'websiteId', 'certificateIds', 'dnsZoneIds', 'mailDomainIds',
-    'authoritativeDns',
+    'childDomainIds', 'websiteId', 'applicationId', 'managedComposeProjectId',
+    'certificateIds', 'dnsZoneIds', 'mailDomainIds', 'activeJobIds',
+    'additional', 'authoritativeDns',
   ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.size
     || Object.keys(value).some((field) => !fields.has(field))) {
     throw invalid('Domain removal operation plan is invalid');
   }
@@ -127,6 +129,32 @@ function normalizedPlan(value) {
     const normalized = items.map((item) => safeId(item, field)).sort();
     if (new Set(normalized).size !== normalized.length) throw invalid(`${field} plan has duplicates`);
     return Object.freeze(normalized);
+  };
+  const optionalId = (item, field) => item === null || item === undefined
+    ? null
+    : safeId(item, field);
+  const normalizedAdditional = (additional) => {
+    const additionalFields = new Set(['mailboxes', 'backups', 'crons', 'dockerWorkloads']);
+    if (!additional || typeof additional !== 'object' || Array.isArray(additional)
+      || Object.keys(additional).length !== additionalFields.size
+      || Object.keys(additional).some((field) => !additionalFields.has(field))) {
+      throw invalid('Domain removal additional dependency plan is invalid');
+    }
+    const bucket = (entry, field) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+        || Object.keys(entry).length !== 2
+        || Object.keys(entry).some((key) => !['status', 'ids'].includes(key))
+        || !['available', 'unavailable'].includes(entry.status)) {
+        throw invalid(`${field} dependency plan is invalid`);
+      }
+      return Object.freeze({ status: entry.status, ids: ids(entry.ids, `${field}Id`) });
+    };
+    return Object.freeze({
+      mailboxes: bucket(additional.mailboxes, 'mailbox'),
+      backups: bucket(additional.backups, 'backup'),
+      crons: bucket(additional.crons, 'cron'),
+      dockerWorkloads: bucket(additional.dockerWorkloads, 'docker'),
+    });
   };
   let authoritativeDns = null;
   if (value.authoritativeDns !== null && value.authoritativeDns !== undefined) {
@@ -140,27 +168,32 @@ function normalizedPlan(value) {
       || dns.blockers.some((code) => typeof code !== 'string' || !SAFE_CODE.test(code))) {
       throw invalid('Authoritative DNS removal plan is invalid');
     }
+    const blockers = [...dns.blockers].sort();
+    if (new Set(blockers).size !== blockers.length) {
+      throw invalid('Authoritative DNS removal plan has duplicate blockers');
+    }
     authoritativeDns = Object.freeze({
       state: dns.state,
       previewDigest: safeDigest(dns.previewDigest, 'authoritativeDnsPreviewDigest'),
       zoneSnapshotDigest: dns.zoneSnapshotDigest === null
         ? null
         : safeDigest(dns.zoneSnapshotDigest, 'authoritativeDnsZoneSnapshotDigest'),
-      blockers: Object.freeze([...dns.blockers].sort()),
+      blockers: Object.freeze(blockers),
     });
   }
   return Object.freeze({
-    childDomainIds: ids(value.childDomainIds ?? [], 'childDomainId'),
-    websiteId: value.websiteId === null || value.websiteId === undefined
-      ? null
-      : safeId(value.websiteId, 'websiteId'),
-    certificateIds: ids(value.certificateIds ?? [], 'certificateId'),
-    dnsZoneIds: ids(value.dnsZoneIds ?? [], 'dnsZoneId'),
-    mailDomainIds: ids(value.mailDomainIds ?? [], 'mailDomainId'),
+    childDomainIds: ids(value.childDomainIds, 'childDomainId'),
+    websiteId: optionalId(value.websiteId, 'websiteId'),
+    applicationId: optionalId(value.applicationId, 'applicationId'),
+    managedComposeProjectId: optionalId(value.managedComposeProjectId, 'managedComposeProjectId'),
+    certificateIds: ids(value.certificateIds, 'certificateId'),
+    dnsZoneIds: ids(value.dnsZoneIds, 'dnsZoneId'),
+    mailDomainIds: ids(value.mailDomainIds, 'mailDomainId'),
+    activeJobIds: ids(value.activeJobIds, 'activeJobId'),
+    additional: normalizedAdditional(value.additional),
     authoritativeDns,
   });
 }
-
 function buildSteps(preview, createdAt) {
   const plan = normalizedPlan(preview.plan);
   const steps = [];
