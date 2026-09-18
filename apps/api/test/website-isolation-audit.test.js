@@ -281,6 +281,82 @@ test('isolation audit ignores Unix identity migration previews that target a non
   assert.equal(audit.inspectedSteps[0].identityMigrationPreview, undefined);
 });
 
+test('isolation audit pins bounded SFTP host and authorized-key drift into the migration digest', async () => {
+  const chrootRoot = '/var/lib/yunpanel/sftp-chroots';
+  const sftpPreview = {
+    version: 1,
+    satisfied: false,
+    current: {
+      receiptState: null,
+      receiptError: null,
+      sshdConfig: { present: false, sha256: null, matchesDesired: false },
+      mountUnit: { present: false, sha256: null, matchesDesired: false, active: false },
+      chrootRoot: { present: false },
+      chrootDirectory: { present: false },
+      mountDirectory: { present: false },
+      sshdConfigValid: true,
+    },
+    desired: {
+      websiteId,
+      applicationId,
+      unixUser: identity.unixUser,
+      sourceDirectory: identity.paths.workspace.sftpRoot,
+      chrootRoot,
+      chrootDirectory: `${chrootRoot}/${applicationId}`,
+      mountDirectory: `${chrootRoot}/${applicationId}/site`,
+      sshdConfigPath: `/etc/ssh/sshd_config.d/90-yunpanel-sftp-${identity.unixUser}.conf`,
+      unitName: 'yunpanel-test.mount',
+      sshdSha256: 'b'.repeat(64),
+      mountSha256: 'c'.repeat(64),
+      directoryMode: '0755',
+      directoryUid: 0,
+      directoryGid: 0,
+    },
+    authorizedKeys: { satisfied: false, reason: 'sftp_authorized_keys_outdated' },
+    differences: ['sftp_receipt_missing', 'sftp_sshd_config_missing', 'sftp_mount_unit_missing', 'sftp_mount_inactive'],
+    rawSecret: 'do-not-project',
+  };
+  const first = await service({
+    stepResults: {
+      sftp: {
+        satisfied: false,
+        reason: 'sftp_key_reconcile_required',
+        keyReason: 'sftp_authorized_keys_outdated',
+      },
+    },
+    migrationPreviews: { sftp: sftpPreview },
+  }).audit(websiteId);
+
+  const preview = first.migration.changes.find((change) => change.id === 'provisioning.sftp')
+    .current.sftpMigrationPreview;
+  assert.equal(preview.current.receiptState, null);
+  assert.equal(preview.current.sshdConfig.sha256, null);
+  assert.equal(preview.current.mountUnit.active, false);
+  assert.deepEqual(preview.authorizedKeys, {
+    satisfied: false,
+    reason: 'sftp_authorized_keys_outdated',
+  });
+  assert.equal(JSON.stringify(first.migration).includes('do-not-project'), false);
+  assert.deepEqual(first.inspectedSteps.find((step) => step.stepId === 'sftp').sftpMigrationPreview, preview);
+
+  const second = await service({
+    stepResults: {
+      sftp: {
+        satisfied: false,
+        reason: 'sftp_key_reconcile_required',
+        keyReason: 'sftp_authorized_keys_outdated',
+      },
+    },
+    migrationPreviews: {
+      sftp: {
+        ...sftpPreview,
+        authorizedKeys: { satisfied: false, reason: 'sftp_authorized_keys_file_missing' },
+      },
+    },
+  }).audit(websiteId);
+  assert.notEqual(first.migration.previewDigest, second.migration.previewDigest);
+});
+
 test('isolation audit fails closed when managed host inspection detects drift', async () => {
   const drift = new Error('drift');
   drift.code = 'website_identity_workspace_drift';
