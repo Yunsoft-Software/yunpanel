@@ -176,9 +176,10 @@ test('version 1 operation journals migrate without claiming mail desired-state e
   assert.equal((await store.get(operationId)).mailStateDigest, null);
   assert.equal((await store.get(operationId)).sourceZoneDigest, null);
   const persisted = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(persisted.version, 3);
+  assert.equal(persisted.version, 4);
   assert.equal(persisted.operations[0].mailStateDigest, null);
   assert.equal(persisted.operations[0].sourceZoneDigest, null);
+  assert.equal(persisted.operations[0].sourceZoneSnapshot, null);
 });
 
 
@@ -216,6 +217,47 @@ test('version 2 operation journals migrate without inventing exact source-zone e
   assert.equal(migrated.mailStateDigest, 'c'.repeat(64));
   assert.equal(migrated.sourceZoneDigest, null);
   const persisted = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(persisted.version, 3);
+  assert.equal(persisted.version, 4);
   assert.equal(persisted.operations[0].sourceZoneDigest, null);
+  assert.equal(persisted.operations[0].sourceZoneSnapshot, null);
+});
+
+
+test('version 3 operation journals keep source digest but do not invent rollback snapshot evidence', async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-dns-reapply-v3-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'operations.json');
+  const previous = {
+    version: 3,
+    operations: [{
+      id: operationId,
+      domainId,
+      serverId,
+      zoneName: 'example.com',
+      domainRevision: 3,
+      templateVersion: 4,
+      dnsIdentityRevision: 2,
+      mailStateDigest: 'c'.repeat(64),
+      sourceZoneDigest,
+      observedSerial: 2026091501,
+      targetSerial: 2026091601,
+      previewDigest,
+      confirmation: `reapply-dns-zone-template:${domainId}:${previewDigest}`,
+      status: 'applying',
+      result: null,
+      error: null,
+      createdAt: '2026-09-16T00:00:00.000Z',
+      updatedAt: '2026-09-16T00:00:00.000Z',
+    }],
+  };
+  await writeFile(filePath, `${JSON.stringify(previous)}\n`);
+
+  const store = createDnsZoneReapplyOperationRegistry({ filePath });
+  await store.init();
+  const migrated = await store.get(operationId);
+  assert.equal(migrated.sourceZoneDigest, sourceZoneDigest);
+  assert.equal(migrated.sourceZoneSnapshot, null);
+  const persisted = JSON.parse(await readFile(filePath, 'utf8'));
+  assert.equal(persisted.version, 4);
+  assert.equal(persisted.operations[0].sourceZoneSnapshot, null);
 });
