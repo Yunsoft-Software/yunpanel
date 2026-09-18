@@ -98,6 +98,24 @@ function exactPhpTarget(operation, change) {
     && change.desired?.phpRuntime?.runtimeUmask === '0027');
 }
 
+function exactPhpContainerTarget(operation, change) {
+  const identity = createApplicationIdentity(operation.applicationId);
+  return Boolean(change?.action === 'repair_php_container_metadata'
+    && change.current?.operationId === operation.intent.sourceOperationId
+    && change.current?.phpRuntimeMigrationPreview?.safeContainerMigrationCandidate === true
+    && change.current?.phpRuntimeMigrationPreview?.current?.container?.safeMigrationCandidate === true
+    && change.desired?.phpContainer?.websiteId === operation.websiteId
+    && change.desired?.phpContainer?.applicationId === operation.applicationId
+    && change.desired?.phpContainer?.releaseId === operation.intent.sourceOperationId
+    && change.desired?.phpContainer?.unixUser === operation.intent.user
+    && change.desired?.phpContainer?.documentRoot === `${identity.paths.runtime.currentRelease}/public`
+    && change.desired?.phpContainer?.applicationRoot === identity.paths.runtime.applicationRoot
+    && change.desired?.phpContainer?.releasesDirectory === identity.paths.runtime.releasesDirectory
+    && change.desired?.phpContainer?.currentRelease === identity.paths.runtime.currentRelease
+    && change.desired?.phpContainer?.releaseDirectory === `${identity.paths.runtime.releasesDirectory}/${operation.intent.sourceOperationId}`
+    && change.desired?.phpContainer?.releaseDocumentRoot === `${identity.paths.runtime.releasesDirectory}/${operation.intent.sourceOperationId}/public`);
+}
+
 function exactTargets(operation, audit) {
   const change = audit?.migration?.changes?.length === 1 ? audit.migration.changes[0] : null;
   const kind = migrationKind(operation);
@@ -107,7 +125,9 @@ function exactTargets(operation, audit) {
       ? exactSftpTarget(operation, change)
       : kind === 'php'
         ? exactPhpTarget(operation, change)
-        : change?.action === 'create_workspace_directories'
+        : kind === 'php_container'
+          ? exactPhpContainerTarget(operation, change)
+          : change?.action === 'create_workspace_directories'
         && JSON.stringify(change.desired?.directories) === JSON.stringify(operation.intent.targets);
   return Boolean(audit?.websiteId === operation.websiteId
     && audit.applicationId === operation.applicationId
@@ -279,6 +299,39 @@ function phpCompensationEvidence(value) {
   });
 }
 
+function phpContainerApplyEvidence(value) {
+  if (!value || value.satisfied !== true
+    || value.phpContainerReceiptVersion !== 1
+    || value.migratedPhpContainer !== true) {
+    throw new WebsiteIsolationMigrationRuntimeError(
+      'website_isolation_migration_evidence_invalid',
+      'Website PHP container migration did not return valid operation ownership evidence',
+      503,
+    );
+  }
+  return Object.freeze({
+    satisfied: true,
+    phpContainerReceiptVersion: 1,
+    migratedPhpContainer: true,
+  });
+}
+
+function phpContainerInspectionEvidence(value) {
+  if (!value || value.satisfied !== true) return null;
+  return phpContainerApplyEvidence(value);
+}
+
+function phpContainerCompensationEvidence(value) {
+  if (!value || value.satisfied !== true || value.restoredPhpContainerMetadata !== true) {
+    throw new WebsiteIsolationMigrationRuntimeError(
+      'website_isolation_migration_compensation_evidence_invalid',
+      'Website PHP container migration rollback did not return valid ownership evidence',
+      503,
+    );
+  }
+  return Object.freeze({ satisfied: true, restoredPhpContainerMetadata: true });
+}
+
 export function createWebsiteIsolationMigrationRuntime({
   registry,
   auditService,
@@ -371,6 +424,15 @@ export function createWebsiteIsolationMigrationRuntime({
         await registry.fail(operation.id, 'website_isolation_migration_handler_unavailable'),
       );
     }
+    if (kind === 'php_container' && (!phpHandler
+      || typeof phpHandler.inspectContainerMigrationOperation !== 'function'
+      || typeof phpHandler.applyContainerMigration !== 'function'
+      || typeof phpHandler.inspectContainerMigrationCompensation !== 'function'
+      || typeof phpHandler.compensateContainerMigration !== 'function')) {
+      return websiteIsolationMigrationPublicView(
+        await registry.fail(operation.id, 'website_isolation_migration_handler_unavailable'),
+      );
+    }
     let inspected;
     try {
       inspected = kind === 'identity'
@@ -379,7 +441,9 @@ export function createWebsiteIsolationMigrationRuntime({
           ? await sftpHandler.inspectMigrationOperation(sftpContext(operation))
           : kind === 'php'
             ? await phpHandler.inspectMigrationOperation(phpContext(operation))
-            : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
+            : kind === 'php_container'
+              ? await phpHandler.inspectContainerMigrationOperation(phpContext(operation))
+              : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
     }
     catch (error) {
       if (!mayApply) {
@@ -398,7 +462,9 @@ export function createWebsiteIsolationMigrationRuntime({
         ? sftpInspectionEvidence(inspected)
         : kind === 'php'
           ? phpInspectionEvidence(inspected)
-          : inspectionEvidence(inspected);
+          : kind === 'php_container'
+            ? phpContainerInspectionEvidence(inspected)
+            : inspectionEvidence(inspected);
     if (alreadySatisfied) {
       try { return websiteIsolationMigrationPublicView(await registry.succeed(operation.id, alreadySatisfied)); }
       catch (error) { throw mapped(error); }
@@ -427,7 +493,9 @@ export function createWebsiteIsolationMigrationRuntime({
           ? sftpApplyEvidence(await sftpHandler.applyMigration(sftpContext(operation)))
           : kind === 'php'
             ? phpApplyEvidence(await phpHandler.applyMigration(phpContext(operation)))
-            : applyEvidence(await workspaceManager.applyWorkspace(intent, { operationId: operation.id }));
+            : kind === 'php_container'
+              ? phpContainerApplyEvidence(await phpHandler.applyContainerMigration(phpContext(operation)))
+              : applyEvidence(await workspaceManager.applyWorkspace(intent, { operationId: operation.id }));
       return websiteIsolationMigrationPublicView(await registry.succeed(operation.id, result));
     } catch (error) {
       try {
@@ -437,14 +505,18 @@ export function createWebsiteIsolationMigrationRuntime({
             ? await sftpHandler.inspectMigrationOperation(sftpContext(operation))
             : kind === 'php'
               ? await phpHandler.inspectMigrationOperation(phpContext(operation))
-              : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
+              : kind === 'php_container'
+                ? await phpHandler.inspectContainerMigrationOperation(phpContext(operation))
+                : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
         const postcondition = kind === 'identity'
           ? identityInspectionEvidence(postInspection)
           : kind === 'sftp'
             ? sftpInspectionEvidence(postInspection)
             : kind === 'php'
               ? phpInspectionEvidence(postInspection)
-              : inspectionEvidence(postInspection);
+              : kind === 'php_container'
+                ? phpContainerInspectionEvidence(postInspection)
+                : inspectionEvidence(postInspection);
         if (postcondition) {
           return websiteIsolationMigrationPublicView(await registry.succeed(operation.id, postcondition));
         }
@@ -503,7 +575,9 @@ export function createWebsiteIsolationMigrationRuntime({
           ? await sftpHandler.inspectMigrationCompensation(sftpContext(operation))
           : kind === 'php'
             ? await phpHandler.inspectMigrationCompensation(phpContext(operation))
-            : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
+            : kind === 'php_container'
+              ? await phpHandler.inspectContainerMigrationCompensation(phpContext(operation))
+              : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
       if (inspected?.satisfied === true) {
         const evidence = kind === 'identity'
           ? identityCompensationEvidence(inspected)
@@ -511,7 +585,9 @@ export function createWebsiteIsolationMigrationRuntime({
             ? sftpCompensationEvidence(inspected)
             : kind === 'php'
               ? phpCompensationEvidence(inspected)
-              : compensationEvidence(inspected);
+              : kind === 'php_container'
+                ? phpContainerCompensationEvidence(inspected)
+                : compensationEvidence(inspected);
         return websiteIsolationMigrationPublicView(await registry.compensate(operation.id, evidence));
       }
       const result = kind === 'identity'
@@ -523,7 +599,9 @@ export function createWebsiteIsolationMigrationRuntime({
           ? sftpCompensationEvidence(await sftpHandler.compensateMigration(sftpContext(operation)))
           : kind === 'php'
             ? phpCompensationEvidence(await phpHandler.compensateMigration(phpContext(operation)))
-            : compensationEvidence(await workspaceManager.compensateWorkspace(intent, { operationId: operation.id }));
+            : kind === 'php_container'
+              ? phpContainerCompensationEvidence(await phpHandler.compensateContainerMigration(phpContext(operation)))
+              : compensationEvidence(await workspaceManager.compensateWorkspace(intent, { operationId: operation.id }));
       return websiteIsolationMigrationPublicView(await registry.compensate(operation.id, result));
     } catch (error) {
       return websiteIsolationMigrationPublicView(await registry.failCompensation(
@@ -562,14 +640,18 @@ export function createWebsiteIsolationMigrationRuntime({
               ? await migrationHandlers.sftp?.inspectMigrationOperation(sftpContext(operation))
               : kind === 'php'
                 ? await migrationHandlers.php_runtime?.inspectMigrationOperation(phpContext(operation))
-                : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
+                : kind === 'php_container'
+                  ? await migrationHandlers.php_runtime?.inspectContainerMigrationOperation(phpContext(operation))
+                  : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
           const result = kind === 'identity'
             ? identityInspectionEvidence(inspected)
             : kind === 'sftp'
               ? sftpInspectionEvidence(inspected)
               : kind === 'php'
                 ? phpInspectionEvidence(inspected)
-                : inspectionEvidence(inspected);
+                : kind === 'php_container'
+                  ? phpContainerInspectionEvidence(inspected)
+                  : inspectionEvidence(inspected);
           if (result) {
             recovery.push(Object.freeze({ operationId: operation.id, recovered: true }));
             await registry.succeed(operation.id, result);
@@ -586,7 +668,9 @@ export function createWebsiteIsolationMigrationRuntime({
               ? await migrationHandlers.sftp?.inspectMigrationCompensation(sftpContext(operation))
               : kind === 'php'
                 ? await migrationHandlers.php_runtime?.inspectMigrationCompensation(phpContext(operation))
-                : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
+                : kind === 'php_container'
+                  ? await migrationHandlers.php_runtime?.inspectContainerMigrationCompensation(phpContext(operation))
+                  : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
           if (result?.satisfied === true) {
             recovery.push(Object.freeze({ operationId: operation.id, recovered: true }));
             await registry.compensate(
@@ -597,7 +681,9 @@ export function createWebsiteIsolationMigrationRuntime({
                   ? sftpCompensationEvidence(result)
                   : kind === 'php'
                     ? phpCompensationEvidence(result)
-                    : compensationEvidence(result),
+                    : kind === 'php_container'
+                      ? phpContainerCompensationEvidence(result)
+                      : compensationEvidence(result),
             );
           } else {
             recovery.push(Object.freeze({ operationId: operation.id, recovered: false, reason: 'compensation_incomplete' }));
