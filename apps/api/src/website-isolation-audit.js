@@ -287,6 +287,8 @@ function boundedPassengerMigrationPreview(value, { applicationId, identity } = {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.version !== 1 || value.adapter !== 'passenger'
     || typeof value.satisfied !== 'boolean'
+    || value.automaticMigration !== false
+    || value.migrationBlockedReason !== 'passenger_legacy_runtime_not_operation_owned'
     || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
     || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
     || !Array.isArray(value.differences) || value.differences.length > 20
@@ -395,6 +397,8 @@ function boundedPassengerMigrationPreview(value, { applicationId, identity } = {
     version: 1,
     adapter: 'passenger',
     satisfied: value.satisfied,
+    automaticMigration: false,
+    migrationBlockedReason: 'passenger_legacy_runtime_not_operation_owned',
     current: Object.freeze({
       passenger: Object.freeze({
         healthy: passenger.healthy,
@@ -840,7 +844,10 @@ function boundedStaticRuntimeMigrationPreview(value, scope) {
   const differences = boundedPreviewDifferences(value?.differences);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.version !== 1 || value.adapter !== 'static-runtime'
-    || typeof value.satisfied !== 'boolean' || !differences
+    || typeof value.satisfied !== 'boolean'
+    || value.automaticMigration !== false
+    || value.migrationBlockedReason !== 'static_legacy_permissions_not_operation_owned'
+    || !differences
     || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
     || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
     || value.desired.websiteId !== scope.websiteId
@@ -857,6 +864,8 @@ function boundedStaticRuntimeMigrationPreview(value, scope) {
     version: 1,
     adapter: 'static-runtime',
     satisfied: value.satisfied,
+    automaticMigration: false,
+    migrationBlockedReason: 'static_legacy_permissions_not_operation_owned',
     current: Object.freeze({ runtime, isolation }),
     desired: Object.freeze({
       websiteId: scope.websiteId,
