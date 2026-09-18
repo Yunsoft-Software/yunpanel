@@ -74,11 +74,13 @@ function SiteWorkspace({ websiteId, tab }) {
   const website = websites.items.find((item) => item.id === domain.websiteId);
   const application = applications.items.find((item) => item.id === website?.applicationId)
     ?? selectedApplication(domain, applications.items, params.get('application'));
-  const managedWebsite = website && ['static', 'node', 'php'].includes(website.runtimeType);
+  const managedFilesWebsite = website && ['static', 'node', 'php'].includes(website.runtimeType);
+  const managedTerminalWebsite = website && ['static', 'node'].includes(website.runtimeType);
   const legacyManagedTarget = !domain.websiteId && Boolean(application);
   const tabs = SITE_TABS.filter(([key]) => {
     if (['node', 'deploy'].includes(key)) return Boolean(application);
-    if (['files', 'terminal'].includes(key)) return canManage && (managedWebsite || legacyManagedTarget);
+    if (key === 'files') return canManage && (managedFilesWebsite || legacyManagedTarget);
+    if (key === 'terminal') return canManage && (managedTerminalWebsite || legacyManagedTarget);
     return true;
   });
   if (!tabs.some(([key]) => key === tab)) return <EmptyState title="Bu hedefte bu araç kullanılamaz" detail="Yalnız bu sitenin gerçek çalışma türüyle desteklenen yönetim araçları gösterilir." action={<LinkButton to={siteHref(domain.id)}>Siteye dön</LinkButton>} />;
