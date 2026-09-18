@@ -109,10 +109,13 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
         isolationManager.previewMigration(isolationIntent(context)),
       ]);
       const reason = runtime?.satisfied === true ? null : runtime?.reason ?? 'static_runtime_unavailable';
+      const safeControlMigrationCandidate = runtime?.satisfied === true
+        && isolation?.safeMigrationCandidate === true;
       return Object.freeze({
         version: 1,
         adapter: 'static-runtime',
         satisfied: runtime?.satisfied === true && isolation?.satisfied === true,
+        safeControlMigrationCandidate,
         automaticMigration: false,
         migrationBlockedReason: 'static_legacy_permissions_not_operation_owned',
         current: Object.freeze({
@@ -130,6 +133,74 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
           ...(Array.isArray(isolation?.differences) ? isolation.differences : ['static_publish_preview_invalid']),
         ]),
       });
+    },
+    async inspectControlMigrationOperation(context = {}) {
+      if (typeof isolationManager.inspectMigrationOperation !== 'function') {
+        umaskFailure('website_static_control_migration_lifecycle_unavailable', 'Static control migration lifecycle is unavailable');
+      }
+      const [runtime, isolation] = await Promise.all([
+        baseRuntime.inspect(context),
+        isolationManager.inspectMigrationOperation(isolationIntent(context), { operationId: context.operationId }),
+      ]);
+      if (runtime?.satisfied !== true) {
+        return Object.freeze({
+          satisfied: false,
+          reason: 'static_runtime_not_ready',
+          runtimeReason: runtime?.reason ?? 'static_runtime_unavailable',
+        });
+      }
+      if (!isolation?.satisfied) return isolation;
+      return Object.freeze({
+        ...isolation,
+        staticRuntimeMigration: true,
+      });
+    },
+    async applyControlMigration(context = {}) {
+      if (typeof isolationManager.applyMigration !== 'function') {
+        umaskFailure('website_static_control_migration_lifecycle_unavailable', 'Static control migration lifecycle is unavailable');
+      }
+      const preview = await this.previewMigration(context);
+      if (preview.safeControlMigrationCandidate !== true) {
+        umaskFailure(
+          'website_static_control_migration_not_safe',
+          'Static control migration requires healthy release content and ACL state with only control-plane metadata drift',
+        );
+      }
+      const isolation = await isolationManager.applyMigration(
+        isolationIntent(context),
+        { operationId: context.operationId },
+      );
+      if (!isolation?.satisfied
+        || isolation.staticControlReceiptVersion !== 1
+        || isolation.migratedStaticControlMetadata !== true) {
+        umaskFailure('website_static_control_migration_unverified', 'Static control migration did not return durable ownership evidence');
+      }
+      return this.inspectControlMigrationOperation(context);
+    },
+    async inspectControlMigrationCompensation(context = {}) {
+      if (typeof isolationManager.inspectMigrationCompensation !== 'function') {
+        umaskFailure('website_static_control_migration_lifecycle_unavailable', 'Static control migration lifecycle is unavailable');
+      }
+      const inspected = await isolationManager.inspectMigrationCompensation(
+        isolationIntent(context),
+        { operationId: context.operationId },
+      );
+      if (inspected?.satisfied === true && inspected.receiptState !== 'compensated') {
+        return Object.freeze({
+          satisfied: false,
+          reason: 'static_publish_migration_compensation_receipt_pending',
+        });
+      }
+      return inspected;
+    },
+    async compensateControlMigration(context = {}) {
+      if (typeof isolationManager.compensateMigration !== 'function') {
+        umaskFailure('website_static_control_migration_lifecycle_unavailable', 'Static control migration lifecycle is unavailable');
+      }
+      return isolationManager.compensateMigration(
+        isolationIntent(context),
+        { operationId: context.operationId },
+      );
     },
     compensate: (context = {}) => baseRuntime.compensate(context),
     inspectCompensation: (context = {}) => baseRuntime.inspectCompensation(context),
