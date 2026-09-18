@@ -323,6 +323,57 @@ export function createWebsiteIdentityManager({
     return Object.freeze({ satisfied: true, ...account, homeMode: home.mode });
   }
 
+  async function inspectOperation(rawIntent, { operationId: rawOperationId } = {}) {
+    const intent = normalizeIntent(rawIntent, homeRoot);
+    const operationId = normalizeOperationId(rawOperationId);
+    const receipt = await loadReceipt(operationId, intent);
+    if (!receipt) {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'website_identity_operation_receipt_missing',
+      });
+    }
+
+    const account = await lookupAccount(intent);
+    const group = await inspectGroup(intent);
+    const home = await inspectHome(intent);
+
+    if (receipt.uid === null || receipt.gid === null) {
+      if (account || group || home) {
+        throw new WebsiteIdentityManagerError(
+          'website_identity_operation_ownership_unknown',
+          'Website Unix identity exists without a durable ownership checkpoint',
+        );
+      }
+      return Object.freeze({
+        satisfied: false,
+        reason: 'website_identity_operation_pending',
+      });
+    }
+
+    if (!account || !group || !home) {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'website_identity_operation_incomplete',
+      });
+    }
+    if (account.uid !== receipt.uid || account.gid !== receipt.gid
+      || account.homeDirectory !== intent.homeDirectory || !NOLOGIN_SHELLS.has(account.shell)
+      || group.gid !== receipt.gid || group.members.length !== 0
+      || home.uid !== receipt.uid || home.gid !== receipt.gid || home.mode !== MANAGED_HOME_MODE) {
+      throw new WebsiteIdentityManagerError(
+        'website_identity_operation_receipt_drift',
+        'Website Unix identity no longer matches its durable ownership checkpoint',
+      );
+    }
+
+    return Object.freeze({
+      satisfied: true,
+      identityReceiptVersion: receipt.version,
+      createdUnixIdentity: true,
+    });
+  }
+
   async function assertCreationPreconditions(intent) {
     const group = await inspectGroup(intent);
     if (group) {
@@ -548,7 +599,14 @@ export function createWebsiteIdentityManager({
     return verified;
   }
 
-  return Object.freeze({ inspect, previewMigration, apply, compensate, inspectCompensation });
+  return Object.freeze({
+    inspect,
+    previewMigration,
+    inspectOperation,
+    apply,
+    compensate,
+    inspectCompensation,
+  });
 }
 
 export const websiteIdentityManagerInternals = Object.freeze({
