@@ -249,18 +249,17 @@ function persistedOperation(value) {
       409,
     );
   }
-  const applyCompleted = ['succeeded', 'rolling_back', 'rolled_back', 'rollback_failed'].includes(operation.status);
-  if (applyCompleted && operation.result === null) {
-    throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'Completed DNS zone reapply operation is missing apply result evidence', 409);
+  if (operation.status === 'succeeded' && operation.result === null) {
+    throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'Succeeded DNS zone reapply operation is missing apply result evidence', 409);
   }
-  if (!applyCompleted && operation.result !== null) {
+  if (['pending', 'applying', 'failed'].includes(operation.status) && operation.result !== null) {
     throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'Incomplete DNS zone reapply operation cannot contain apply result evidence', 409);
   }
   if (operation.status === 'failed' && operation.error === null) {
     throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'Failed DNS zone reapply operation is missing error evidence', 409);
   }
-  if (operation.status !== 'failed' && operation.error !== null) {
-    throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'Non-failed DNS zone reapply operation cannot contain apply error evidence', 409);
+  if (['pending', 'applying', 'succeeded'].includes(operation.status) && operation.error !== null) {
+    throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'Active or succeeded DNS zone reapply operation cannot contain apply error evidence', 409);
   }
   if (operation.status === 'rolled_back' && operation.rollbackResult === null) {
     throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'Completed DNS zone rollback is missing result evidence', 409);
@@ -295,7 +294,7 @@ export function dnsZoneReapplyOperationPublicView(operation) {
     result: publicResult(operation.result),
     error: operation.error,
     rollback: Object.freeze({
-      available: ['succeeded', 'rollback_failed'].includes(operation.status)
+      available: ['succeeded', 'failed', 'rollback_failed'].includes(operation.status)
         && operation.sourceZoneSnapshot !== null && operation.appliedZoneSnapshot !== null,
       status: operation.status === 'rolling_back'
         ? 'applying'
@@ -568,7 +567,7 @@ export function createDnsZoneReapplyOperationRegistry({
     const current = await get(operationId);
     if (!current) throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_not_found', 'DNS zone reapply operation was not found', 404);
     if (current.status === 'rolling_back') return current;
-    if (!['succeeded', 'rollback_failed'].includes(current.status)) {
+    if (!['succeeded', 'failed', 'rollback_failed'].includes(current.status)) {
       throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_rollback_not_available', 'DNS zone reapply operation cannot be rolled back from its current state', 409);
     }
     if (current.sourceZoneSnapshot === null || current.appliedZoneSnapshot === null) {
