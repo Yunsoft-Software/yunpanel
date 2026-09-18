@@ -37,6 +37,99 @@ function valueDigest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+function boundedText(value, maxLength = 1024) {
+  return typeof value === 'string'
+    && value.length >= 1
+    && value.length <= maxLength
+    && !/[\u0000-\u001f\u007f]/.test(value)
+    ? value
+    : null;
+}
+
+function boundedIdentityMigrationPreview(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== 1
+    || typeof value.satisfied !== 'boolean'
+    || typeof value.safeCreateCandidate !== 'boolean'
+    || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
+    || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
+    || !Array.isArray(value.differences) || value.differences.length > 20
+    || value.differences.some((code) => typeof code !== 'string' || !/^[a-z0-9_]{1,120}$/.test(code))) {
+    return null;
+  }
+
+  const account = value.current.account === null ? null : value.current.account;
+  const group = value.current.group === null ? null : value.current.group;
+  const home = value.current.home === null ? null : value.current.home;
+  if ((account !== null && (
+    !account || typeof account !== 'object' || Array.isArray(account)
+    || !Number.isSafeInteger(account.uid) || account.uid < 1
+    || !Number.isSafeInteger(account.gid) || account.gid < 1
+    || boundedText(account.homeDirectory) === null
+    || boundedText(account.shell, 256) === null
+  )) || (group !== null && (
+    !group || typeof group !== 'object' || Array.isArray(group)
+    || !Number.isSafeInteger(group.gid) || group.gid < 1
+    || !Number.isSafeInteger(group.memberCount) || group.memberCount < 0 || group.memberCount > 10_000
+  )) || (home !== null && (
+    !home || typeof home !== 'object' || Array.isArray(home)
+    || !Number.isSafeInteger(home.uid) || home.uid < 1
+    || !Number.isSafeInteger(home.gid) || home.gid < 1
+    || typeof home.mode !== 'string' || !/^0[0-7]{3}$/.test(home.mode)
+  ))) return null;
+
+  const desiredUser = boundedText(value.desired.user, 64);
+  const desiredHome = boundedText(value.desired.homeDirectory);
+  if (!desiredUser || !desiredHome
+    || value.desired.shellPolicy !== 'nologin'
+    || value.desired.privateGroup !== true
+    || value.desired.groupMemberCount !== 0
+    || typeof value.desired.homeMode !== 'string' || !/^0[0-7]{3}$/.test(value.desired.homeMode)) {
+    return null;
+  }
+
+  return Object.freeze({
+    version: 1,
+    satisfied: value.satisfied,
+    safeCreateCandidate: value.safeCreateCandidate,
+    current: Object.freeze({
+      account: account ? Object.freeze({
+        uid: account.uid,
+        gid: account.gid,
+        homeDirectory: account.homeDirectory,
+        shell: account.shell,
+      }) : null,
+      group: group ? Object.freeze({
+        gid: group.gid,
+        memberCount: group.memberCount,
+      }) : null,
+      home: home ? Object.freeze({
+        uid: home.uid,
+        gid: home.gid,
+        mode: home.mode,
+      }) : null,
+    }),
+    desired: Object.freeze({
+      user: desiredUser,
+      homeDirectory: desiredHome,
+      shellPolicy: 'nologin',
+      privateGroup: true,
+      groupMemberCount: 0,
+      homeMode: value.desired.homeMode,
+    }),
+    differences: Object.freeze([...value.differences]),
+  });
+}
+
+async function inspectIdentityMigrationPreview(handler, context) {
+  if (!handler || typeof handler.previewMigration !== 'function') return null;
+  try {
+    return boundedIdentityMigrationPreview(await handler.previewMigration(context));
+  } catch {
+    return null;
+  }
+}
+
 function migrationChange({ id, action, current, desired, ownership = 'unverified', applyState = null }) {
   return Object.freeze({
     id,
@@ -212,10 +305,14 @@ export function createWebsiteIsolationAuditService({
           continue;
         }
         try {
-          const result = await handler.inspect(handlerContext(operation, step));
+          const context = handlerContext(operation, step);
+          const result = await handler.inspect(context);
           const satisfied = result?.satisfied === true;
           const missingWorkspaceDirectories = stepId === 'unix_identity'
             ? workspaceDirectories(result, identity)
+            : null;
+          const identityMigrationPreview = !satisfied && stepId === 'unix_identity' && !missingWorkspaceDirectories
+            ? await inspectIdentityMigrationPreview(handler, context)
             : null;
           inspectedSteps.push(Object.freeze({
             stepId,
@@ -225,6 +322,7 @@ export function createWebsiteIsolationAuditService({
             ...(missingWorkspaceDirectories ? {
               missingWorkspaces: Object.freeze(missingWorkspaceDirectories.map((target) => target.name)),
             } : {}),
+            ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
           }));
           if (!satisfied) {
             findings.push(finding(
@@ -264,16 +362,22 @@ export function createWebsiteIsolationAuditService({
                 stepState: step.state,
                 intentSha256: valueDigest(step.intent),
                 inspection: result?.reason ?? 'isolation_not_satisfied',
+                ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
               },
               desired: { satisfied: true },
             }));
           }
         } catch (error) {
+          const context = handlerContext(operation, step);
+          const identityMigrationPreview = stepId === 'unix_identity'
+            ? await inspectIdentityMigrationPreview(handler, context)
+            : null;
           inspectedSteps.push(Object.freeze({
             stepId,
             kind: step.kind,
             satisfied: false,
             reason: typeof error?.code === 'string' ? error.code : 'isolation_inspection_failed',
+            ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
           }));
           findings.push(finding(
             `website_isolation_${stepId}_drift`,
@@ -292,6 +396,7 @@ export function createWebsiteIsolationAuditService({
               stepState: step.state,
               intentSha256: valueDigest(step.intent),
               inspection: typeof error?.code === 'string' ? error.code : 'isolation_inspection_failed',
+              ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
             },
             desired: { satisfied: true },
           }));
@@ -353,4 +458,6 @@ export const websiteIsolationAuditInternals = Object.freeze({
   valueDigest,
   migrationChange,
   workspaceDirectories,
+  boundedIdentityMigrationPreview,
+  inspectIdentityMigrationPreview,
 });
