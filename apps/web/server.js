@@ -21,6 +21,7 @@ const TTYD_PREFIX = TTYD_GATEWAY.publicPrefix;
 const TTYD_GATEWAY_ACCESS_PATH = TTYD_GATEWAY.accessPath;
 const TTYD_SOCKET_ROOT = TTYD_GATEWAY.socketRoot;
 const TTYD_AUTH_HEADER = 'x-yunpanel-ttyd-auth';
+const TTYD_REAUTHORIZE_MS = 15_000;
 const TTYD_SESSION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ELFINDER_HANDOFF_SOCKET_PATH = '/run/yunpanel-elfinder/handoff.sock';
 const ELFINDER_HANDOFF_PATH = '/__yunpanel/handoff';
@@ -720,12 +721,22 @@ function proxyTtyd(request, response, {
 }
 
 function proxyTtydWebSocket(request, socket, head, {
-  socketPath, publicOrigin, route,
+  socketPath,
+  publicOrigin,
+  route,
+  reauthorize = null,
+  reauthorizeIntervalMs = TTYD_REAUTHORIZE_MS,
+  setIntervalFn = setInterval,
+  clearIntervalFn = clearInterval,
 }) {
   const fetchSite = request.headers['sec-fetch-site'];
   if (!route || !socketPath || request.method !== 'GET'
     || request.headers.origin !== publicOrigin
-    || (fetchSite && !['same-origin', 'none'].includes(fetchSite))) {
+    || (fetchSite && !['same-origin', 'none'].includes(fetchSite))
+    || (reauthorize !== null && typeof reauthorize !== 'function')
+    || !Number.isSafeInteger(reauthorizeIntervalMs)
+    || reauthorizeIntervalMs < 5_000 || reauthorizeIntervalMs > 60_000
+    || typeof setIntervalFn !== 'function' || typeof clearIntervalFn !== 'function') {
     rejectSocket(socket, 403);
     return;
   }
@@ -764,8 +775,42 @@ function proxyTtydWebSocket(request, socket, head, {
     if (upstreamHead.length) socket.write(upstreamHead);
     if (head.length) upstreamSocket.write(head);
     socket.pipe(upstreamSocket).pipe(socket);
+
+    let authorizationCheck = null;
+    let authorizationPending = false;
+    const clearAuthorizationCheck = () => {
+      if (authorizationCheck !== null) {
+        clearIntervalFn(authorizationCheck);
+        authorizationCheck = null;
+      }
+    };
+    if (reauthorize) {
+      authorizationCheck = setIntervalFn(() => {
+        if (authorizationPending || socket.destroyed || upstreamSocket.destroyed) return;
+        authorizationPending = true;
+        Promise.resolve()
+          .then(() => reauthorize())
+          .then((status) => {
+            if (status !== 204) {
+              clearAuthorizationCheck();
+              upstreamSocket.destroy();
+              socket.destroy();
+            }
+          })
+          .catch(() => {
+            clearAuthorizationCheck();
+            upstreamSocket.destroy();
+            socket.destroy();
+          })
+          .finally(() => { authorizationPending = false; });
+      }, reauthorizeIntervalMs);
+      authorizationCheck?.unref?.();
+    }
+
     socket.on('error', () => upstreamSocket.destroy());
     upstreamSocket.on('error', () => socket.destroy());
+    socket.on('close', clearAuthorizationCheck);
+    upstreamSocket.on('close', clearAuthorizationCheck);
   });
   upstream.on('response', (upstreamResponse) => {
     upstreamResponse.resume();
@@ -1103,6 +1148,9 @@ export function createPanelServer({
           socketPath: sessionSocket,
           publicOrigin,
           route: ttydRoute,
+          reauthorize: () => authorizeTtydGateway(request, ttydRoute.sessionId, 'websocket', {
+            apiHost, apiPort, clientIp, proxyToken,
+          }),
         });
       }).catch(() => rejectSocket(socket, 503));
       return;
@@ -1153,6 +1201,7 @@ export const panelServerInternals = Object.freeze({
   ttydGatewayAccessPath: TTYD_GATEWAY_ACCESS_PATH,
   ttydSocketRoot: TTYD_SOCKET_ROOT,
   ttydAuthHeader: TTYD_AUTH_HEADER,
+  ttydReauthorizeMs: TTYD_REAUTHORIZE_MS,
 });
 
 export function startPanelServer(options = {}) {
