@@ -141,6 +141,17 @@ export {
 } from './roundcube-nginx.js';
 
 export {
+  ElFinderFpmTemplateError,
+  elFinderFpmPoolName,
+  elFinderFpmPoolPath,
+  elFinderFpmSocketPath,
+  elFinderFpmTemplateInternals,
+  elFinderFpmTemplatePolicy,
+  previewElFinderFpmPool,
+  renderElFinderFpmPool,
+} from './elfinder-fpm.js';
+
+export {
   PhpMyAdminFpmTemplateError,
   phpMyAdminFpmTemplateInternals,
   phpMyAdminFpmTemplatePolicy,
