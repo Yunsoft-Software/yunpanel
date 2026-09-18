@@ -54,6 +54,10 @@ function fakeIdentityManager({
       calls.push(['previewMigration', intent]);
       return migrationPreview;
     },
+    inspectOperation: async (intent, options) => {
+      calls.push(['inspectOperation', intent, options]);
+      return { satisfied: true, identityReceiptVersion: 1, createdUnixIdentity: true };
+    },
     apply: async (intent, options) => {
       calls.push(['apply', intent, options]);
       return baseIdentity({ created, receiptVersion: created ? 1 : null });
@@ -473,5 +477,92 @@ test('path-bound migration preview delegates read-only identity evidence and add
   assert.equal(preview.pathContract.workspace.homeDirectory, baseIntent.homeDirectory);
   assert.equal(preview.pathContract.backup.authority, 'control_plane');
   assert.deepEqual(identityManager.calls, [['previewMigration', baseIntent]]);
+  assert.deepEqual(workspace.calls, []);
+});
+
+
+test('identity-only migration creates only an all-missing canonical identity and leaves workspace untouched', async () => {
+  const identityManager = fakeIdentityManager({
+    migrationPreview: {
+      version: 1,
+      satisfied: false,
+      safeCreateCandidate: true,
+      current: { account: null, group: null, home: null },
+      desired: { user: baseIntent.user, homeDirectory: baseIntent.homeDirectory },
+      differences: ['website_identity_user_missing', 'website_identity_group_missing', 'website_identity_home_missing'],
+    },
+  });
+  const workspace = fakeWorkspace();
+  const manager = createWebsiteIdentityPathManager({
+    identityManager,
+    run: workspace.run,
+    lstatFn: workspace.lstatFn,
+    ...fakeReceiptStore(),
+  });
+
+  const applied = await manager.applyIdentityMigration(boundIntent, { operationId });
+
+  assert.equal(applied.satisfied, true);
+  assert.equal(applied.createdUnixIdentity, true);
+  assert.equal(applied.identityReceiptVersion, 1);
+  assert.equal(applied.pathContract.applicationId, applicationId);
+  assert.deepEqual(identityManager.calls.map(([name]) => name), ['previewMigration', 'apply']);
+  assert.deepEqual(workspace.calls, []);
+});
+
+test('identity-only migration fails closed on pre-existing canonical-scope drift before mutation', async () => {
+  const identityManager = fakeIdentityManager({
+    migrationPreview: {
+      version: 1,
+      satisfied: false,
+      safeCreateCandidate: false,
+      current: {
+        account: { uid: 1201, gid: 1201, homeDirectory: '/srv/legacy', shell: '/bin/bash' },
+        group: { gid: 1201, memberCount: 0 },
+        home: null,
+      },
+      desired: { user: baseIntent.user, homeDirectory: baseIntent.homeDirectory },
+      differences: ['website_identity_account_home_drift'],
+    },
+  });
+  const manager = createWebsiteIdentityPathManager({ identityManager });
+
+  await assert.rejects(
+    manager.applyIdentityMigration(boundIntent, { operationId }),
+    (error) => error instanceof WebsiteIdentityPathManagerError
+      && error.code === 'website_identity_migration_not_safe_create',
+  );
+  assert.deepEqual(identityManager.calls.map(([name]) => name), ['previewMigration']);
+});
+
+test('identity-only migration restart inspection delegates only to durable identity receipt state', async () => {
+  const identityManager = fakeIdentityManager();
+  const manager = createWebsiteIdentityPathManager({ identityManager });
+
+  const inspected = await manager.inspectIdentityOperation(boundIntent, { operationId });
+
+  assert.equal(inspected.satisfied, true);
+  assert.equal(inspected.identityReceiptVersion, 1);
+  assert.equal(inspected.pathContract.websiteId, websiteId);
+  assert.deepEqual(identityManager.calls, [['inspectOperation', baseIntent, { operationId }]]);
+});
+
+test('identity-only migration compensation does not touch workspace receipts or directories', async () => {
+  const identityManager = fakeIdentityManager();
+  const workspace = fakeWorkspace();
+  const manager = createWebsiteIdentityPathManager({
+    identityManager,
+    run: workspace.run,
+    lstatFn: workspace.lstatFn,
+    ...fakeReceiptStore(),
+  });
+  const evidence = { satisfied: true, created: true, receiptVersion: 1 };
+
+  const compensated = await manager.compensateIdentityMigration(boundIntent, { operationId, evidence });
+  const inspected = await manager.inspectIdentityMigrationCompensation(boundIntent, { operationId, evidence });
+
+  assert.equal(compensated.satisfied, true);
+  assert.equal(inspected.satisfied, true);
+  assert.deepEqual(identityManager.calls.map(([name]) => name), ['compensate', 'inspectCompensation']);
   assert.deepEqual(workspace.calls, []);
 });
