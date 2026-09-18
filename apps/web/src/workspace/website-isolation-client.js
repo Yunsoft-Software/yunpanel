@@ -8,6 +8,34 @@ function websiteId(value) {
   return value.toLowerCase();
 }
 
+
+function applicationId(value) {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) throw new Error('application id is invalid');
+  return value.toLowerCase();
+}
+
+export function getPassengerMigrationPreview(id, { signal } = {}) {
+  const normalized = applicationId(id);
+  return panelRequest(`/applications/${encodeURIComponent(normalized)}/passenger-migration-preview`, { signal });
+}
+
+export function applyPassengerMigration(id, preview, { signal } = {}) {
+  const normalized = applicationId(id);
+  if (!preview || preview.ready !== true
+    || typeof preview.previewDigest !== 'string' || !SHA256_PATTERN.test(preview.previewDigest)
+    || typeof preview.confirmation !== 'string' || preview.confirmation.length < 1) {
+    throw new Error('Current Passenger migration preview is required');
+  }
+  return panelRequest(`/applications/${encodeURIComponent(normalized)}/passenger-migration`, {
+    method: 'POST',
+    signal,
+    body: {
+      previewDigest: preview.previewDigest,
+      confirmation: preview.confirmation,
+    },
+  });
+}
+
 export function getWebsiteIsolationAudit(id, { signal } = {}) {
   const normalized = websiteId(id);
   return panelRequest(`/websites/${encodeURIComponent(normalized)}/isolation-audit`, { signal });
@@ -54,4 +82,4 @@ export function rollbackWebsiteIsolationMigration(id, operation, { signal } = {}
   });
 }
 
-export const websiteIsolationClientInternals = Object.freeze({ websiteId, sha256Pattern: SHA256_PATTERN });
+export const websiteIsolationClientInternals = Object.freeze({ websiteId, applicationId, sha256Pattern: SHA256_PATTERN });
