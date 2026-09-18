@@ -229,6 +229,15 @@ function suspensionChecksum(value) {
   return value;
 }
 
+function removalConfirmation({
+  domainId,
+  operationId,
+  expectedRevision,
+  checksum,
+}) {
+  return `finalize-domain-remove:${domainId}:${operationId}:${expectedRevision}:${checksum}`;
+}
+
 function assertSuspendable(domain, { expectedRevision, checksum }) {
   if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1
     || domain.desiredRevision !== expectedRevision
@@ -998,6 +1007,99 @@ export function createDomainRegistry({
     return publicDomain(domain);
   }
 
+  async function finalizeDomainRemoval(domainId, {
+    operationId,
+    expectedRevision,
+    checksum,
+    confirmation,
+  } = {}) {
+    await ensureInitialized();
+    const normalizedDomainId = normalizeReparentId(domainId, 'domainId');
+    const domain = requireDomain(state, normalizedDomainId);
+    const expectedOperationId = suspensionOperationId(operationId);
+    const expectedChecksum = suspensionChecksum(checksum);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new DomainRegistryError(
+        'invalid_domain_removal_revision',
+        'Domain removal expected revision is invalid',
+      );
+    }
+    const expectedConfirmation = removalConfirmation({
+      domainId: domain.id,
+      operationId: expectedOperationId,
+      expectedRevision,
+      checksum: expectedChecksum,
+    });
+    if (confirmation !== expectedConfirmation) {
+      throw new DomainRegistryError(
+        'domain_removal_confirmation_invalid',
+        'Domain removal finalization confirmation is invalid',
+        409,
+      );
+    }
+    const descendants = descendantsOf(state.domains, domain.id);
+    if (descendants.length > 0) {
+      throw new DomainRegistryError(
+        'domain_removal_descendants_present',
+        'Domain cannot be finalized while child Domains remain',
+        409,
+      );
+    }
+    if (domain.websiteId !== null) {
+      throw new DomainRegistryError(
+        'domain_removal_website_binding_present',
+        'Domain cannot be finalized while Website binding remains',
+        409,
+      );
+    }
+    if (domain.certificateId !== null) {
+      throw new DomainRegistryError(
+        'domain_removal_certificate_present',
+        'Domain cannot be finalized while certificate binding remains',
+        409,
+      );
+    }
+    if (domain.state !== 'suspended'
+      || domain.desiredRevision !== expectedRevision
+      || domain.stagedRevision !== expectedRevision
+      || domain.appliedRevision !== expectedRevision
+      || domain.stagedChecksum !== expectedChecksum
+      || domain.suspendedChecksum !== expectedChecksum
+      || domain.suspensionOperationId !== expectedOperationId
+      || domain.appliedPrimaryDomain !== domain.primaryDomain
+      || domain.lastError !== null) {
+      throw new DomainRegistryError(
+        'domain_removal_suspension_evidence_invalid',
+        'Domain removal finalization requires exact suspended routing evidence',
+        409,
+      );
+    }
+
+    const removed = Object.freeze({
+      id: domain.id,
+      serverId: domain.serverId,
+      primaryDomain: domain.primaryDomain,
+      parentDomainId: domain.parentDomainId ?? null,
+      desiredRevision: domain.desiredRevision,
+      suspensionOperationId: domain.suspensionOperationId,
+      suspendedChecksum: domain.suspendedChecksum,
+    });
+    state.domains = state.domains.filter((candidate) => candidate.id !== domain.id);
+    try { validateDomainHierarchy(state.domains); }
+    catch (error) {
+      if (error instanceof DomainHierarchyError) {
+        throw new DomainRegistryError(error.code, error.message, error.status);
+      }
+      throw error;
+    }
+    await persist();
+    return Object.freeze({
+      removed: true,
+      domain: removed,
+      confirmation: expectedConfirmation,
+    });
+  }
+
   async function markFailed(domainId, errorCode) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
@@ -1033,6 +1135,7 @@ export function createDomainRegistry({
     markApplied,
     markSuspended,
     markResumed,
+    finalizeDomainRemoval,
     markFailed,
   };
 }
@@ -1051,6 +1154,7 @@ export const domainRegistryInternals = Object.freeze({
   reparentDigest,
   normalizedUpdate,
   updateDigest,
+  removalConfirmation,
   provisioningDomains,
   diagnosis,
   hydrateDomain,
