@@ -42,6 +42,14 @@ function identityManager() {
   return {
     apply: async () => ({ satisfied: true, uid: 1201, gid: 1201, created: true }),
     inspect: async () => ({ satisfied: true, uid: 1201, gid: 1201 }),
+    previewMigration: async () => ({
+      version: 1,
+      satisfied: true,
+      safeCreateCandidate: false,
+      current: { account: { uid: 1201, gid: 1201 }, group: { gid: 1201, memberCount: 0 }, home: { uid: 1201, gid: 1201, mode: '0750' } },
+      desired: { user: unixUser, homeDirectory: identityIntent.homeDirectory },
+      differences: [],
+    }),
     compensate: async () => ({ satisfied: true, removedUser: true }),
     inspectCompensation: async () => ({ satisfied: true, removedUser: true }),
   };
@@ -108,6 +116,17 @@ test('identity handler binds durable operation and bounded identity fields to ho
         calls.push(['inspect', input]);
         return { satisfied: true, uid: 1201, gid: 1201 };
       },
+      previewMigration: async (input) => {
+        calls.push(['preview-migration', input]);
+        return {
+          version: 1,
+          satisfied: true,
+          safeCreateCandidate: false,
+          current: { account: { uid: 1201, gid: 1201 }, group: { gid: 1201, memberCount: 0 }, home: { uid: 1201, gid: 1201, mode: '0750' } },
+          desired: { user: input.user, homeDirectory: input.homeDirectory },
+          differences: [],
+        };
+      },
       compensate: async (input, options) => {
         calls.push(['compensate', input, options]);
         return { satisfied: true, removedUser: true };
@@ -124,17 +143,21 @@ test('identity handler binds durable operation and bounded identity fields to ho
 
   const applied = await handlers.unix_identity.apply({ intent: identityIntent, operationId });
   const inspected = await handlers.unix_identity.inspect({ intent: identityIntent, operationId });
+  const migrationPreview = await handlers.unix_identity.previewMigration({ intent: identityIntent, operationId });
   const compensated = await handlers.unix_identity.compensate({ intent: identityIntent, operationId, evidence });
   const compensationInspection = await handlers.unix_identity.inspectCompensation({ intent: identityIntent, operationId, evidence });
 
   assert.equal(applied.created, true);
   assert.equal(inspected.satisfied, true);
+  assert.equal(migrationPreview.satisfied, true);
+  assert.equal(migrationPreview.safeCreateCandidate, false);
   assert.equal(compensated.satisfied, true);
   assert.equal(compensationInspection.satisfied, true);
   const bounded = { user: identityIntent.unixUser, homeDirectory: identityIntent.homeDirectory };
   assert.deepEqual(calls, [
     ['apply', bounded, { operationId }],
     ['inspect', bounded],
+    ['preview-migration', bounded],
     ['compensate', bounded, { operationId, evidence }],
     ['inspect-compensation', bounded, { operationId, evidence }],
   ]);
@@ -146,6 +169,7 @@ test('identity handler rejects incomplete orchestration intent before host mutat
     identityManager: {
       apply: async () => { calls += 1; return {}; },
       inspect: async () => { calls += 1; return {}; },
+      previewMigration: async () => { calls += 1; return {}; },
       compensate: async () => { calls += 1; return {}; },
       inspectCompensation: async () => { calls += 1; return {}; },
     },
