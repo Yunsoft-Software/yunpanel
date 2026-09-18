@@ -306,15 +306,20 @@ function buildSteps(preview, createdAt) {
 }
 
 function persistedOperation(value) {
-  const fields = new Set([
+  const legacyFields = new Set([
     'id', 'domainId', 'serverId', 'primaryDomain', 'domainRevision', 'checksum',
     'sourceSuspensionOperationId', 'impactPreviewDigest', 'impactConfirmation',
     'previewDigest', 'startConfirmation', 'plan', 'status', 'steps', 'error',
     'createdAt', 'updatedAt',
   ]);
+  const fields = new Set([...legacyFields, 'parentOperationId']);
+  const keys = Object.keys(value ?? {});
+  const legacyShape = keys.length === legacyFields.size
+    && keys.every((field) => legacyFields.has(field));
+  const currentShape = keys.length === fields.size
+    && keys.every((field) => fields.has(field));
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).length !== fields.size
-    || Object.keys(value).some((field) => !fields.has(field))
+    || (!legacyShape && !currentShape)
     || !OPERATION_STATUSES.has(value.status)
     || typeof value.primaryDomain !== 'string' || value.primaryDomain.length < 1
     || value.primaryDomain.length > 253 || /[\u0000-\u001f\u007f]/.test(value.primaryDomain)
@@ -331,6 +336,9 @@ function persistedOperation(value) {
   }
   const operation = Object.freeze({
     id: safeId(value.id, 'operationId'),
+    parentOperationId: currentShape && value.parentOperationId !== null
+      ? safeId(value.parentOperationId, 'parentOperationId')
+      : null,
     domainId: safeId(value.domainId, 'domainId'),
     serverId: safeId(value.serverId, 'serverId'),
     primaryDomain: value.primaryDomain,
@@ -351,6 +359,9 @@ function persistedOperation(value) {
   if (new Set(operation.steps.map((step) => step.id)).size !== operation.steps.length) {
     throw invalid('Domain removal step IDs are not unique');
   }
+  if (operation.parentOperationId === operation.id) {
+    throw invalid('Domain removal operation cannot own itself');
+  }
   const unfinished = operation.steps.filter((step) => step.status !== 'succeeded');
   if (operation.status === 'removed' && unfinished.length > 0) {
     throw invalid('Removed Domain operation has unfinished steps');
@@ -368,7 +379,7 @@ function persistedOperation(value) {
   return operation;
 }
 
-function operationFromPreview(preview, now, idFactory) {
+function operationFromPreview(preview, now, idFactory, parentOperationId = null) {
   if (!preview || preview.version !== 1 || preview.operation !== 'domain_remove'
     || preview.readyToStart !== true || !Array.isArray(preview.hardBlockers)
     || preview.hardBlockers.length !== 0
@@ -394,6 +405,7 @@ function operationFromPreview(preview, now, idFactory) {
   const { plan, steps } = buildSteps(preview, createdAt);
   return persistedOperation({
     id: idFactory(),
+    parentOperationId,
     domainId: preview.domain.id,
     serverId: preview.domain.serverId,
     primaryDomain: preview.domain.primaryDomain,
@@ -417,6 +429,7 @@ export function domainRemovalOperationPublicView(operation) {
   if (!operation) return null;
   return Object.freeze({
     id: operation.id,
+    parentOperationId: operation.parentOperationId,
     domainId: operation.domainId,
     serverId: operation.serverId,
     primaryDomain: operation.primaryDomain,
@@ -482,6 +495,15 @@ export function createDomainRemovalOperationRegistry({
       if (new Set(operations.map((operation) => operation.id)).size !== operations.length) {
         throw invalid('Domain removal operation IDs are not unique');
       }
+      const byId = new Map(operations.map((operation) => [operation.id, operation]));
+      for (const operation of operations) {
+        if (operation.parentOperationId === null) continue;
+        const parent = byId.get(operation.parentOperationId);
+        if (!parent || parent.domainId === operation.domainId
+          || Date.parse(parent.createdAt) > Date.parse(operation.createdAt)) {
+          throw invalid('Domain removal parent operation reference is invalid');
+        }
+      }
       state = { version: STORE_VERSION, operations };
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
@@ -494,16 +516,48 @@ export function createDomainRemovalOperationRegistry({
     if (!initialized) await init();
   }
 
-  async function create(preview) {
+  async function create(preview, { parentOperationId = null } = {}) {
     await ensureInitialized();
+    const normalizedParentOperationId = parentOperationId === null
+      ? null
+      : safeId(parentOperationId, 'parentOperationId');
+    if (normalizedParentOperationId !== null) {
+      const parent = state.operations.find((operation) => operation.id === normalizedParentOperationId);
+      if (!parent || parent.status === 'removed' || parent.domainId === preview?.domain?.id) {
+        throw new DomainRemovalOperationRegistryError(
+          'domain_removal_parent_operation_invalid',
+          'Child Domain removal requires one active parent operation',
+          409,
+        );
+      }
+    }
     const duplicate = state.operations.find((operation) => (
       operation.domainId === preview?.domain?.id
       && operation.domainRevision === preview?.domain?.desiredRevision
       && operation.previewDigest === preview?.previewDigest
+      && operation.parentOperationId === normalizedParentOperationId
       && operation.status !== 'removed'
     ));
     if (duplicate) return duplicate;
-    const operation = operationFromPreview(preview, now, idFactory);
+    const conflict = state.operations.find((operation) => (
+      operation.domainId === preview?.domain?.id && operation.status !== 'removed'
+    ));
+    if (conflict) {
+      throw new DomainRemovalOperationRegistryError(
+        'domain_removal_operation_conflict',
+        'Another Domain removal operation already owns this Domain',
+        409,
+      );
+    }
+    const operation = operationFromPreview(
+      preview,
+      now,
+      idFactory,
+      normalizedParentOperationId,
+    );
+    if (state.operations.some((candidate) => candidate.id === operation.id)) {
+      throw invalid('Domain removal operation ID is not unique');
+    }
     state.operations.push(operation);
     await persist();
     return operation;

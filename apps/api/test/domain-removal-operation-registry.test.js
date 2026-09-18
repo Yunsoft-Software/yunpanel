@@ -99,6 +99,7 @@ test('journals deterministic reverse-dependency steps and preserves private star
   const operation = await registry.create(preview());
 
   assert.equal(operation.id, 'operation-1');
+  assert.equal(operation.parentOperationId, null);
   assert.deepEqual(
     operation.steps.map((step) => step.kind),
     [
@@ -120,8 +121,50 @@ test('journals deterministic reverse-dependency steps and preserves private star
 
   const publicView = domainRemovalOperationPublicView(operation);
   assert.equal(publicView.impactPreviewDigest, impactDigest);
+  assert.equal(publicView.parentOperationId, null);
   assert.equal(Object.hasOwn(publicView, 'impactConfirmation'), false);
   assert.equal(Object.hasOwn(publicView, 'startConfirmation'), false);
+});
+
+test('binds child operations to one parent and blocks concurrent Domain removal ownership', async () => {
+  let nextId = 0;
+  const registry = createDomainRemovalOperationRegistry({
+    idFactory: () => `operation-${++nextId}`,
+    now: () => Date.parse('2026-09-18T20:00:00.000Z') + nextId,
+  });
+  const parent = await registry.create(preview());
+  const ownedPreview = preview();
+  ownedPreview.domain = {
+    ...ownedPreview.domain,
+    id: 'owned-domain-1',
+    primaryDomain: 'owned.example.com',
+  };
+  ownedPreview.impact = {
+    ...ownedPreview.impact,
+    confirmation: `delete:domain:owned-domain-1:${ownedPreview.impact.previewDigest}`,
+  };
+  ownedPreview.previewDigest = '8'.repeat(64);
+  ownedPreview.confirmation = `start-domain-remove:owned-domain-1:4:${ownedPreview.previewDigest}`;
+  await assert.rejects(
+    registry.create(ownedPreview, { parentOperationId: 'missing-parent' }),
+    (error) => error instanceof DomainRemovalOperationRegistryError
+      && error.code === 'domain_removal_parent_operation_invalid',
+  );
+  const child = await registry.create(ownedPreview, { parentOperationId: parent.id });
+  assert.equal(child.parentOperationId, parent.id);
+  assert.equal(domainRemovalOperationPublicView(child).parentOperationId, parent.id);
+
+  const duplicate = await registry.create(ownedPreview, { parentOperationId: parent.id });
+  assert.equal(duplicate.id, child.id);
+
+  const conflicting = ownedPreview;
+  conflicting.previewDigest = '9'.repeat(64);
+  conflicting.confirmation = `start-domain-remove:owned-domain-1:4:${conflicting.previewDigest}`;
+  await assert.rejects(
+    registry.create(conflicting, { parentOperationId: parent.id }),
+    (error) => error instanceof DomainRemovalOperationRegistryError
+      && error.code === 'domain_removal_operation_conflict',
+  );
 });
 
 test('omits authoritative DNS mutation when the removal plan has no local zone', async () => {
@@ -161,6 +204,20 @@ test('legacy journal plans load without inventing exact child Domain intent evid
 
   assert.deepEqual(normalized.childDomainIds, ['child-domain-1']);
   assert.equal(normalized.childDomains, null);
+});
+
+test('legacy operations load without inventing parent ownership', () => {
+  const current = domainRemovalOperationRegistryInternals.operationFromPreview(
+    preview(),
+    () => Date.parse('2026-09-18T20:00:00.000Z'),
+    () => 'operation-1',
+  );
+  const legacy = JSON.parse(JSON.stringify(current));
+  delete legacy.parentOperationId;
+
+  const normalized = domainRemovalOperationRegistryInternals.persistedOperation(legacy);
+
+  assert.equal(normalized.parentOperationId, null);
 });
 
 test('new operations reject missing or drifted child Domain intent evidence', async () => {

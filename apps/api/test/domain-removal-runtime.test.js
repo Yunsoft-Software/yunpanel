@@ -14,6 +14,7 @@ const suspensionPreviewDigest = 'd'.repeat(64);
 const dnsPreviewDigest = 'e'.repeat(64);
 const zoneSnapshotDigest = 'f'.repeat(64);
 const ownershipEvidenceDigest = '1'.repeat(64);
+const childChecksum = '2'.repeat(64);
 
 function removalPreview({ suspended = false } = {}) {
   const suspensionOperationId = suspended ? 'suspension-operation-1' : null;
@@ -116,6 +117,61 @@ function leafRemovalPreview() {
   };
 }
 
+function childRemovalPreview(overrides = {}) {
+  const childPreviewDigest = '3'.repeat(64);
+  const childImpactDigest = '4'.repeat(64);
+  const base = {
+    version: 1,
+    operation: 'domain_remove',
+    domain: {
+      id: 'child-domain-1',
+      serverId: 'local',
+      primaryDomain: 'api.example.com',
+      websiteId: 'website-2',
+      certificateId: null,
+      parentDomainId: 'domain-1',
+      state: 'active',
+      desiredRevision: 2,
+      checksum: childChecksum,
+      suspensionOperationId: null,
+    },
+    impact: {
+      previewDigest: childImpactDigest,
+      confirmation: `delete:domain:child-domain-1:${childImpactDigest}`,
+      blockers: ['application_binding_present', 'impact_apply_not_implemented', 'website_binding_present'],
+    },
+    plan: {
+      childDomainIds: [],
+      childDomains: [],
+      websiteId: 'website-2',
+      applicationId: 'application-2',
+      managedComposeProjectId: null,
+      certificateIds: [],
+      dnsZoneIds: [],
+      mailDomainIds: [],
+      activeJobIds: [],
+      additional: {
+        mailboxes: { status: 'available', ids: [] },
+        backups: { status: 'available', ids: [] },
+        crons: { status: 'available', ids: [] },
+        dockerWorkloads: { status: 'available', ids: [] },
+      },
+      authoritativeDns: null,
+    },
+    hardBlockers: [],
+    readyToStart: true,
+    previewDigest: childPreviewDigest,
+    confirmation: `start-domain-remove:child-domain-1:2:${childPreviewDigest}`,
+    sideEffects: false,
+  };
+  return {
+    ...base,
+    ...overrides,
+    domain: { ...base.domain, ...(overrides.domain ?? {}) },
+    plan: { ...base.plan, ...(overrides.plan ?? {}) },
+  };
+}
+
 function authoritativeRemovalPreview() {
   const base = leafRemovalPreview();
   const authoritativePreviewDigest = '6'.repeat(64);
@@ -203,6 +259,138 @@ function createRegistry() {
   });
 }
 
+function createNestedRegistry() {
+  let clock = Date.parse('2026-09-18T20:31:00.000Z');
+  let nextId = 0;
+  return createDomainRemovalOperationRegistry({
+    idFactory: () => `removal-operation-${++nextId}`,
+    now: () => clock++,
+  });
+}
+
+function childDomainControlPlaneFixture() {
+  let current = {
+    id: 'child-domain-1',
+    serverId: 'local',
+    primaryDomain: 'api.example.com',
+    websiteId: 'website-2',
+    certificateId: null,
+    state: 'active',
+    desiredRevision: 2,
+    stagedRevision: 2,
+    appliedRevision: 2,
+    stagedChecksum: childChecksum,
+    suspendedChecksum: null,
+    suspensionOperationId: null,
+    appliedPrimaryDomain: 'api.example.com',
+    lastError: null,
+  };
+  let detachCalls = 0;
+  let finalizeCalls = 0;
+  return {
+    manager: {
+      async getDomain(id) {
+        assert.equal(id, 'child-domain-1');
+        return current ? { ...current } : null;
+      },
+      async detachWebsiteForRemoval(id, input) {
+        detachCalls += 1;
+        assert.equal(id, 'child-domain-1');
+        assert.deepEqual(input, {
+          expectedWebsiteId: 'website-2',
+          expectedRevision: 2,
+          checksum: childChecksum,
+          suspensionOperationId: 'child-suspension-operation-1',
+        });
+        current = { ...current, websiteId: null };
+        return {
+          changed: true,
+          detachedWebsiteId: 'website-2',
+          domain: { ...current },
+        };
+      },
+      async finalizeDomainRemoval(id, input) {
+        finalizeCalls += 1;
+        assert.equal(id, 'child-domain-1');
+        assert.deepEqual(input, {
+          operationId: 'child-suspension-operation-1',
+          expectedRevision: 2,
+          checksum: childChecksum,
+          confirmation: `finalize-domain-remove:child-domain-1:child-suspension-operation-1:2:${childChecksum}`,
+        });
+        const removed = {
+          id: current.id,
+          serverId: current.serverId,
+          primaryDomain: current.primaryDomain,
+          desiredRevision: current.desiredRevision,
+          suspensionOperationId: current.suspensionOperationId,
+          suspendedChecksum: current.suspendedChecksum,
+        };
+        current = null;
+        return { removed: true, domain: removed };
+      },
+    },
+    suspend() {
+      current = {
+        ...current,
+        state: 'suspended',
+        suspendedChecksum: childChecksum,
+        suspensionOperationId: 'child-suspension-operation-1',
+      };
+    },
+    counts: () => ({ detachCalls, finalizeCalls }),
+  };
+}
+
+function childSuspensionPreview() {
+  return {
+    version: 1,
+    operation: 'domain_suspend',
+    readyToSuspend: true,
+    blockers: [],
+    domain: {
+      id: 'child-domain-1',
+      serverId: 'local',
+      primaryDomain: 'api.example.com',
+      desiredRevision: 2,
+      stagedRevision: 2,
+      appliedRevision: 2,
+      stagedChecksum: childChecksum,
+    },
+    previewDigest: '7'.repeat(64),
+    confirmation: 'suspend-child-confirmation',
+  };
+}
+
+function suspendedChildDomain() {
+  return {
+    id: 'child-suspension-operation-1',
+    domainId: 'child-domain-1',
+    serverId: 'local',
+    primaryDomain: 'api.example.com',
+    domainRevision: 2,
+    checksum: childChecksum,
+    previewDigest: '7'.repeat(64),
+    status: 'suspended',
+    suspendResult: {
+      suspended: true,
+      hostChanged: true,
+      suspendedAt: '2026-09-18T20:40:00.000Z',
+    },
+    suspendError: null,
+    resumeResult: null,
+    resumeError: null,
+    recovery: { required: false, phase: null, automaticReplayBlocked: false },
+    actions: {
+      suspendRetryConfirmation: null,
+      resumeConfirmation: 'resume-child-confirmation',
+      resumeRetryConfirmation: null,
+    },
+    createdAt: '2026-09-18T20:39:00.000Z',
+    updatedAt: '2026-09-18T20:40:00.000Z',
+  };
+}
+
 function domainRegistryFixture({ websiteId = 'website-1', present = true } = {}) {
   let current = present ? {
     id: 'domain-1',
@@ -278,6 +466,35 @@ function completedSuspensionRuntime() {
     retrySuspend: async () => { throw new Error('unexpected retry'); },
     get: async () => null,
     listForDomain: async () => [],
+  };
+}
+
+function nestedSuspensionRuntime(domains, { allowMutation = true } = {}) {
+  let starts = 0;
+  return {
+    runtime: {
+      async preview({ domainId }) {
+        if (domainId === 'domain-1') return suspensionPreview();
+        assert.equal(domainId, 'child-domain-1');
+        return childSuspensionPreview();
+      },
+      async start(input) {
+        starts += 1;
+        if (!allowMutation) throw new Error('unexpected child mutation');
+        if (input.domainId === 'domain-1') return suspendedChild();
+        assert.deepEqual(input, {
+          domainId: 'child-domain-1',
+          previewDigest: '7'.repeat(64),
+          confirmation: 'suspend-child-confirmation',
+        });
+        domains.suspend();
+        return suspendedChildDomain();
+      },
+      async retrySuspend() { throw new Error('unexpected retry'); },
+      async get() { return null; },
+      async listForDomain() { return []; },
+    },
+    counts: () => ({ starts }),
   };
 }
 
@@ -447,6 +664,160 @@ test('explicit removal start delegates routing mutation to durable Domain suspen
   assert.match(operation.steps[0].result.evidenceDigest, /^[a-f0-9]{64}$/);
   assert.equal(operation.steps[1].kind, 'child_domain');
   assert.equal(operation.steps[1].status, 'pending');
+});
+
+test('explicit parent continuations drive one parent-owned leaf child Domain operation at a time', async () => {
+  const registry = createNestedRegistry();
+  const parentPreview = removalPreview();
+  const childPreview = childRemovalPreview();
+  const domains = childDomainControlPlaneFixture();
+  const suspensions = nestedSuspensionRuntime(domains);
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async ({ domainId }) => (
+      domainId === 'domain-1' ? parentPreview : childPreview
+    ),
+    suspensionRuntime: suspensions.runtime,
+    domainRegistry: domains.manager,
+  });
+
+  let operation = await runtime.start({
+    domainId: parentPreview.domain.id,
+    previewDigest: parentPreview.previewDigest,
+    confirmation: parentPreview.confirmation,
+  });
+  assert.equal(operation.steps[1].kind, 'child_domain');
+  assert.ok(operation.actions.stepContinuationConfirmation);
+
+  const continueParent = () => runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+
+  operation = await continueParent();
+  assert.equal(operation.steps[1].status, 'blocked');
+  assert.equal(suspensions.counts().starts, 2);
+  let childOperations = await registry.listForDomain('child-domain-1');
+  assert.equal(childOperations.length, 1);
+  assert.equal(childOperations[0].parentOperationId, operation.id);
+  assert.equal(childOperations[0].steps[0].status, 'succeeded');
+  assert.equal(childOperations[0].steps[1].kind, 'website_binding');
+
+  operation = await continueParent();
+  assert.equal(operation.steps[1].status, 'blocked');
+  childOperations = await registry.listForDomain('child-domain-1');
+  assert.equal(childOperations[0].steps[1].status, 'succeeded');
+  assert.equal(childOperations[0].steps[2].kind, 'metadata_finalization');
+
+  operation = await continueParent();
+  assert.equal(operation.steps[1].status, 'succeeded');
+  assert.equal(operation.steps[1].result.referenceId, childOperations[0].id);
+  assert.match(operation.steps[1].result.evidenceDigest, /^[a-f0-9]{64}$/);
+  assert.equal(operation.steps[2].kind, 'certificate');
+  childOperations = await registry.listForDomain('child-domain-1');
+  assert.equal(childOperations[0].status, 'removed');
+  assert.deepEqual(domains.counts(), { detachCalls: 1, finalizeCalls: 1 });
+});
+
+test('startup closes a running child step only from an exact parent-owned removed operation', async () => {
+  const registry = createNestedRegistry();
+  let parent = await completeRoutingStep(registry, removalPreview());
+  parent = await registry.markStepRunning(parent.id, parent.steps[1].id);
+  let child = await registry.create(childRemovalPreview(), { parentOperationId: parent.id });
+  while (child.status !== 'removed') {
+    const step = child.steps.find((candidate) => candidate.status !== 'succeeded');
+    child = await registry.markStepRunning(child.id, step.id);
+    child = await registry.succeedStep(child.id, step.id, {
+      referenceId: step.kind === 'routing_suspend'
+        ? 'child-suspension-operation-1'
+        : step.kind === 'website_binding' ? 'website-2' : 'child-domain-1',
+      evidenceDigest: '8'.repeat(64),
+    });
+  }
+  const domains = childDomainControlPlaneFixture();
+  const suspensions = nestedSuspensionRuntime(domains, { allowMutation: false });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => { throw new Error('startup must not create a child preview'); },
+    suspensionRuntime: suspensions.runtime,
+    domainRegistry: domains.manager,
+  });
+
+  const recovery = await runtime.init();
+
+  assert.equal(recovery.length, 1);
+  assert.equal(recovery[0].recovered, true);
+  assert.equal(recovery[0].operation.steps[1].status, 'succeeded');
+  assert.equal(recovery[0].operation.steps[1].result.referenceId, child.id);
+  assert.equal(suspensions.counts().starts, 0);
+  assert.deepEqual(domains.counts(), { detachCalls: 0, finalizeCalls: 0 });
+});
+
+test('startup blocks an incomplete child operation without replaying its mutation', async () => {
+  const registry = createNestedRegistry();
+  let parent = await completeRoutingStep(registry, removalPreview());
+  parent = await registry.markStepRunning(parent.id, parent.steps[1].id);
+  const child = await registry.create(childRemovalPreview(), { parentOperationId: parent.id });
+  const domains = childDomainControlPlaneFixture();
+  const suspensions = nestedSuspensionRuntime(domains, { allowMutation: false });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => { throw new Error('startup must not create a child preview'); },
+    suspensionRuntime: suspensions.runtime,
+    domainRegistry: domains.manager,
+  });
+
+  const recovery = await runtime.init();
+
+  assert.equal(recovery.length, 1);
+  assert.equal(recovery[0].recovered, false);
+  assert.equal(recovery[0].operation.steps[1].status, 'blocked');
+  assert.equal(recovery[0].operation.steps[1].error.code, 'domain_removal_child_retry_required');
+  assert.ok(recovery[0].operation.actions.stepContinuationConfirmation);
+  assert.equal((await registry.get(child.id)).steps[0].status, 'pending');
+  assert.equal(suspensions.counts().starts, 0);
+});
+
+test('child dependency drift blocks before a child journal or routing mutation is created', async () => {
+  const registry = createNestedRegistry();
+  const parentPreview = removalPreview();
+  const driftedChild = childRemovalPreview({
+    plan: { dnsZoneIds: ['new-external-zone'] },
+  });
+  const domains = childDomainControlPlaneFixture();
+  const suspensions = nestedSuspensionRuntime(domains);
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async ({ domainId }) => (
+      domainId === 'domain-1' ? parentPreview : driftedChild
+    ),
+    suspensionRuntime: suspensions.runtime,
+    domainRegistry: domains.manager,
+  });
+  let operation = await runtime.start({
+    domainId: parentPreview.domain.id,
+    previewDigest: parentPreview.previewDigest,
+    confirmation: parentPreview.confirmation,
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+
+  assert.equal(operation.steps[1].status, 'blocked');
+  assert.equal(operation.steps[1].error.code, 'domain_removal_child_preview_drift');
+  assert.equal((await registry.listForDomain('child-domain-1')).length, 0);
+  assert.equal(suspensions.counts().starts, 1);
+  assert.deepEqual(domains.counts(), { detachCalls: 0, finalizeCalls: 0 });
 });
 
 test('startup reconciles completed child suspension without replaying host mutation', async () => {

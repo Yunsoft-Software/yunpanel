@@ -8,7 +8,7 @@ import {
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ROUTING_CHILD_STATUSES = new Set(['pending', 'suspending', 'suspended', 'failed']);
 const CONTINUABLE_STEP_KINDS = new Set([
-  'website_binding', 'authoritative_dns', 'metadata_finalization',
+  'child_domain', 'website_binding', 'authoritative_dns', 'metadata_finalization',
 ]);
 const DNS_RETIREMENT_CHILD_STATUSES = new Set(['pending', 'deleting', 'deleted', 'failed']);
 
@@ -285,6 +285,137 @@ function dnsRetirementEvidence(operation, child) {
   });
 }
 
+function childDomainIntent(operation, step) {
+  if (!Array.isArray(operation.plan.childDomains)) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_child_intent_missing',
+      'Legacy Domain removal journal has no exact child Domain intent evidence',
+      409,
+    );
+  }
+  const matches = operation.plan.childDomains.filter((child) => child.id === step.resourceId);
+  if (matches.length !== 1) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_child_plan_invalid',
+      'Child Domain step does not match one exact journaled intent',
+      409,
+    );
+  }
+  return matches[0];
+}
+
+function idsWithin(values, allowed) {
+  if (!Array.isArray(values) || !Array.isArray(allowed)) return false;
+  const allowedIds = new Set(allowed);
+  return values.every((value) => allowedIds.has(value));
+}
+
+function noAuthoritativeDnsRetirement(plan) {
+  return plan === null || Boolean(plan
+    && plan.state === 'not_applicable'
+    && plan.zoneSnapshotDigest === null
+    && plan.ownershipEvidenceDigest === null
+    && plan.snapshotRetentionDays === null
+    && Array.isArray(plan.blockers)
+    && plan.blockers.length === 0);
+}
+
+function childPlanWithinParent(operation, intent, plan) {
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)
+    || !Array.isArray(plan.childDomainIds) || plan.childDomainIds.length !== 0
+    || !Array.isArray(plan.childDomains) || plan.childDomains.length !== 0
+    || plan.websiteId !== intent.websiteId
+    || !noAuthoritativeDnsRetirement(plan.authoritativeDns)
+    || !Array.isArray(plan.activeJobIds) || plan.activeJobIds.length !== 0
+    || !idsWithin(plan.certificateIds, operation.plan.certificateIds)
+    || !idsWithin(plan.dnsZoneIds, operation.plan.dnsZoneIds)
+    || !idsWithin(plan.mailDomainIds, operation.plan.mailDomainIds)) {
+    return false;
+  }
+  for (const name of ['mailboxes', 'backups', 'crons', 'dockerWorkloads']) {
+    const bucket = plan.additional?.[name];
+    const parentBucket = operation.plan.additional?.[name];
+    if (bucket?.status !== 'available' || parentBucket?.status !== 'available'
+      || !idsWithin(bucket.ids, parentBucket.ids)) return false;
+  }
+  return true;
+}
+
+function exactChildRemovalPreview(operation, intent, preview) {
+  return Boolean(preview
+    && preview.version === 1
+    && preview.operation === 'domain_remove'
+    && preview.readyToStart === true
+    && Array.isArray(preview.hardBlockers)
+    && preview.hardBlockers.length === 0
+    && preview.domain?.id === intent.id
+    && preview.domain?.serverId === intent.serverId
+    && preview.domain?.primaryDomain === intent.primaryDomain
+    && preview.domain?.websiteId === intent.websiteId
+    && preview.domain?.certificateId === intent.certificateId
+    && preview.domain?.parentDomainId === intent.parentDomainId
+    && preview.domain?.state === intent.state
+    && preview.domain?.desiredRevision === intent.desiredRevision
+    && preview.domain?.checksum === intent.checksum
+    && (preview.domain?.suspensionOperationId ?? null) === intent.suspensionOperationId
+    && typeof preview.previewDigest === 'string'
+    && SHA256_PATTERN.test(preview.previewDigest)
+    && typeof preview.confirmation === 'string'
+    && preview.confirmation.length > 0
+    && childPlanWithinParent(operation, intent, preview.plan));
+}
+
+function exactChildRemovalOperation(operation, intent, child) {
+  const parentCreatedAt = Date.parse(operation.createdAt);
+  const childCreatedAt = Date.parse(child?.createdAt);
+  return Boolean(child
+    && child.parentOperationId === operation.id
+    && Number.isFinite(parentCreatedAt)
+    && Number.isFinite(childCreatedAt)
+    && childCreatedAt >= parentCreatedAt
+    && child.domainId === intent.id
+    && child.serverId === intent.serverId
+    && child.primaryDomain === intent.primaryDomain
+    && child.domainRevision === intent.desiredRevision
+    && child.checksum === intent.checksum
+    && child.sourceSuspensionOperationId === intent.suspensionOperationId
+    && childPlanWithinParent(operation, intent, child.plan));
+}
+
+function childRemovalEvidence(operation, intent, child) {
+  const finalStep = child?.steps?.at(-1);
+  if (!exactChildRemovalOperation(operation, intent, child)
+    || child.status !== 'removed'
+    || !Array.isArray(child.steps)
+    || child.steps.some((step) => step.status !== 'succeeded')
+    || finalStep?.kind !== 'metadata_finalization'
+    || finalStep.result?.referenceId !== intent.id
+    || typeof finalStep.result?.evidenceDigest !== 'string'
+    || !SHA256_PATTERN.test(finalStep.result.evidenceDigest)) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_child_evidence_invalid',
+      'Child Domain operation did not prove exact metadata removal',
+      409,
+    );
+  }
+  return Object.freeze({
+    referenceId: child.id,
+    evidenceDigest: digest({
+      kind: 'child_domain',
+      parentOperationId: operation.id,
+      childOperationId: child.id,
+      domainId: intent.id,
+      serverId: intent.serverId,
+      primaryDomain: intent.primaryDomain,
+      domainRevision: intent.desiredRevision,
+      checksum: intent.checksum,
+      previewDigest: child.previewDigest,
+      metadataEvidenceDigest: finalStep.result.evidenceDigest,
+      removedAt: child.updatedAt,
+    }),
+  });
+}
+
 export function createDomainRemovalRuntime({
   registry,
   previewProvider,
@@ -409,6 +540,151 @@ export function createDomainRemovalRuntime({
   async function completeControlPlaneStep(operation, step, result) {
     try { return await registry.succeedStep(operation.id, step.id, result); }
     catch (error) { throw mapped(error); }
+  }
+
+  async function discoverChildDomainOperation(operation, intent) {
+    let values;
+    try { values = await registry.listForDomain(intent.id); }
+    catch (error) { throw mapped(error); }
+    if (!Array.isArray(values)) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_child_inventory_invalid',
+        'Child Domain removal operation inventory is invalid',
+        503,
+      );
+    }
+    const candidates = values.filter((child) => (
+      exactChildRemovalOperation(operation, intent, child)
+    ));
+    if (candidates.length > 1) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_child_operation_ambiguous',
+        'Multiple child Domain operations match the parent removal intent',
+        409,
+      );
+    }
+    return candidates[0] ?? null;
+  }
+
+  async function currentChildDomainPreview(operation, intent) {
+    let preview;
+    try { preview = await previewProvider({ domainId: intent.id }); }
+    catch (error) { throw mapped(error); }
+    if (!exactChildRemovalPreview(operation, intent, preview)) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_child_preview_drift',
+        'Child Domain removal state no longer matches the parent journaled intent',
+        409,
+      );
+    }
+    return preview;
+  }
+
+  async function startChildDomainRemoval(operation, intent) {
+    const preview = await currentChildDomainPreview(operation, intent);
+    let child;
+    try { child = await registry.create(preview, { parentOperationId: operation.id }); }
+    catch (error) { throw mapped(error); }
+    if (!exactChildRemovalOperation(operation, intent, child)
+      || !currentPreviewMatches(child, preview)) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_child_operation_drift',
+        'Child Domain journal does not match the parent-owned removal intent',
+        409,
+      );
+    }
+    return runRouting(child.id, { allowHostMutation: true });
+  }
+
+  async function continueChildDomainRemoval(child) {
+    if (child.status === 'removed') return child;
+    if (child.actions?.routingRetryConfirmation) {
+      return retryRouting({
+        domainId: child.domainId,
+        operationId: child.id,
+        expectedUpdatedAt: child.updatedAt,
+        checksum: child.checksum,
+        confirmation: child.actions.routingRetryConfirmation,
+      });
+    }
+    if (child.actions?.stepContinuationConfirmation) {
+      const step = firstIncomplete(child);
+      return continueStep({
+        domainId: child.domainId,
+        operationId: child.id,
+        expectedUpdatedAt: child.updatedAt,
+        stepId: step.id,
+        checksum: child.checksum,
+        confirmation: child.actions.stepContinuationConfirmation,
+      });
+    }
+    return child;
+  }
+
+  async function runChildDomain(operationId, { allowMutation } = {}) {
+    requireDomainRegistry();
+    const prepared = await runningStep(await loadOperation(operationId), 'child_domain');
+    const { operation, step } = prepared;
+    let intent;
+    try { intent = childDomainIntent(operation, step); }
+    catch (error) {
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    let child;
+    try { child = await discoverChildDomainOperation(operation, intent); }
+    catch (error) {
+      if (Number(error?.status) === 409) {
+        return publicOperation(await blockControlPlaneStep(operation, step, error));
+      }
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    if (child?.status === 'removed') {
+      return publicOperation(await completeControlPlaneStep(
+        operation,
+        step,
+        childRemovalEvidence(operation, intent, child),
+      ));
+    }
+    if (!allowMutation) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_child_retry_required',
+        child
+          ? 'Child Domain operation requires explicit continuation'
+          : 'Child Domain operation was not started before interruption',
+        409,
+      )));
+    }
+    let result;
+    try {
+      result = child
+        ? await continueChildDomainRemoval(publicOperation(child))
+        : await startChildDomainRemoval(operation, intent);
+    } catch (error) {
+      if (Number(error?.status) === 409) {
+        return publicOperation(await blockControlPlaneStep(operation, step, error));
+      }
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    if (!exactChildRemovalOperation(operation, intent, result)) {
+      return publicOperation(await failControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_child_result_invalid',
+        'Child Domain operation result does not match the parent journaled intent',
+        503,
+      )));
+    }
+    if (result.status !== 'removed') {
+      const pending = firstIncomplete(result);
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        pending?.error?.code ?? 'domain_removal_child_retry_required',
+        pending?.error?.message ?? 'Child Domain operation requires explicit continuation',
+        409,
+      )));
+    }
+    return publicOperation(await completeControlPlaneStep(
+      operation,
+      step,
+      childRemovalEvidence(operation, intent, result),
+    ));
   }
 
   async function runWebsiteBinding(operationId, { allowMutation } = {}) {
@@ -706,6 +982,9 @@ export function createDomainRemovalRuntime({
     const operation = await loadOperation(operationId);
     const step = firstIncomplete(operation);
     if (!step) return publicOperation(operation);
+    if (step.kind === 'child_domain') {
+      return runChildDomain(operation.id, { allowMutation });
+    }
     if (step.kind === 'website_binding') {
       return runWebsiteBinding(operation.id, { allowMutation });
     }
@@ -1165,4 +1444,10 @@ export const domainRemovalRuntimeInternals = Object.freeze({
   exactDnsRetirementPreview,
   exactDnsRetirementChild,
   dnsRetirementEvidence,
+  childDomainIntent,
+  noAuthoritativeDnsRetirement,
+  childPlanWithinParent,
+  exactChildRemovalPreview,
+  exactChildRemovalOperation,
+  childRemovalEvidence,
 });
