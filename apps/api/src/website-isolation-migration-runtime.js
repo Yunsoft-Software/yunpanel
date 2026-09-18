@@ -36,15 +36,29 @@ function workspaceIntent(operation) {
   });
 }
 
+function migrationKind(operation) {
+  return operation?.intent?.targets?.length === 0 ? 'identity' : 'workspace';
+}
+
+function exactIdentityTarget(operation, change) {
+  return Boolean(change?.action === 'create_canonical_unix_identity'
+    && change.current?.identityMigrationPreview?.safeCreateCandidate === true
+    && change.desired?.identity?.user === operation.intent.user
+    && change.desired?.identity?.homeDirectory === operation.intent.homeDirectory);
+}
+
 function exactTargets(operation, audit) {
   const change = audit?.migration?.changes?.length === 1 ? audit.migration.changes[0] : null;
+  const exactChange = migrationKind(operation) === 'identity'
+    ? exactIdentityTarget(operation, change)
+    : change?.action === 'create_workspace_directories'
+      && JSON.stringify(change.desired?.directories) === JSON.stringify(operation.intent.targets);
   return Boolean(audit?.websiteId === operation.websiteId
     && audit.applicationId === operation.applicationId
     && audit.websiteRevision === operation.websiteRevision
     && audit.migration?.applyAvailable === true
     && audit.migration.previewDigest === operation.previewDigest
-    && change?.action === 'create_workspace_directories'
-    && JSON.stringify(change.desired?.directories) === JSON.stringify(operation.intent.targets));
+    && exactChange);
 }
 
 function applyEvidence(value) {
@@ -88,6 +102,49 @@ function compensationEvidence(value) {
   });
 }
 
+function identityApplyEvidence(value) {
+  if (!value || value.satisfied !== true
+    || value.identityReceiptVersion !== 1
+    || value.createdUnixIdentity !== true) {
+    throw new WebsiteIsolationMigrationRuntimeError(
+      'website_isolation_migration_evidence_invalid',
+      'Website Unix identity migration did not return valid operation ownership evidence',
+      503,
+    );
+  }
+  return Object.freeze({
+    satisfied: true,
+    identityReceiptVersion: 1,
+    createdUnixIdentity: true,
+  });
+}
+
+function identityInspectionEvidence(value) {
+  if (!value || value.satisfied !== true) return null;
+  return identityApplyEvidence(value);
+}
+
+function identityCompensationEvidence(value) {
+  if (!value || value.satisfied !== true
+    || typeof value.removedUser !== 'boolean'
+    || typeof value.removedGroup !== 'boolean'
+    || typeof value.removedHome !== 'boolean'
+    || (value.preservedHomeData !== undefined && typeof value.preservedHomeData !== 'boolean')) {
+    throw new WebsiteIsolationMigrationRuntimeError(
+      'website_isolation_migration_compensation_evidence_invalid',
+      'Website Unix identity migration rollback did not return valid ownership evidence',
+      503,
+    );
+  }
+  return Object.freeze({
+    satisfied: true,
+    removedUser: value.removedUser,
+    removedGroup: value.removedGroup,
+    removedHome: value.removedHome,
+    ...(value.preservedHomeData === undefined ? {} : { preservedHomeData: value.preservedHomeData }),
+  });
+}
+
 export function createWebsiteIsolationMigrationRuntime({ registry, auditService, workspaceManager } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForWebsite !== 'function'
@@ -100,7 +157,11 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
     || typeof workspaceManager.inspectWorkspaceOperation !== 'function'
     || typeof workspaceManager.applyWorkspace !== 'function'
     || typeof workspaceManager.inspectWorkspaceCompensation !== 'function'
-    || typeof workspaceManager.compensateWorkspace !== 'function') {
+    || typeof workspaceManager.compensateWorkspace !== 'function'
+    || typeof workspaceManager.inspectIdentityOperation !== 'function'
+    || typeof workspaceManager.applyIdentityMigration !== 'function'
+    || typeof workspaceManager.inspectIdentityMigrationCompensation !== 'function'
+    || typeof workspaceManager.compensateIdentityMigration !== 'function') {
     throw new WebsiteIsolationMigrationRuntimeError(
       'website_isolation_migration_dependencies_invalid',
       'Website isolation migration dependencies are unavailable',
@@ -149,8 +210,12 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
     }
 
     const intent = workspaceIntent(operation);
+    const kind = migrationKind(operation);
+    const inspectOperation = kind === 'identity'
+      ? workspaceManager.inspectIdentityOperation
+      : workspaceManager.inspectWorkspaceOperation;
     let inspected;
-    try { inspected = await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id }); }
+    try { inspected = await inspectOperation(intent, { operationId: operation.id }); }
     catch (error) {
       if (!mayApply) {
         throw new WebsiteIsolationMigrationRuntimeError(
@@ -162,7 +227,9 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
       try { return websiteIsolationMigrationPublicView(await registry.fail(operation.id, safeCode(error, 'website_isolation_migration_inspection_failed'))); }
       catch (registryError) { throw mapped(registryError); }
     }
-    const alreadySatisfied = inspectionEvidence(inspected);
+    const alreadySatisfied = kind === 'identity'
+      ? identityInspectionEvidence(inspected)
+      : inspectionEvidence(inspected);
     if (alreadySatisfied) {
       try { return websiteIsolationMigrationPublicView(await registry.succeed(operation.id, alreadySatisfied)); }
       catch (error) { throw mapped(error); }
@@ -185,11 +252,18 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
     }
 
     try {
-      const result = applyEvidence(await workspaceManager.applyWorkspace(intent, { operationId: operation.id }));
+      const result = kind === 'identity'
+        ? identityApplyEvidence(await workspaceManager.applyIdentityMigration(intent, { operationId: operation.id }))
+        : applyEvidence(await workspaceManager.applyWorkspace(intent, { operationId: operation.id }));
       return websiteIsolationMigrationPublicView(await registry.succeed(operation.id, result));
     } catch (error) {
       try {
-        const postcondition = inspectionEvidence(await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id }));
+        const postInspection = kind === 'identity'
+          ? await workspaceManager.inspectIdentityOperation(intent, { operationId: operation.id })
+          : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
+        const postcondition = kind === 'identity'
+          ? identityInspectionEvidence(postInspection)
+          : inspectionEvidence(postInspection);
         if (postcondition) {
           return websiteIsolationMigrationPublicView(await registry.succeed(operation.id, postcondition));
         }
@@ -235,12 +309,26 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
       catch (error) { throw mapped(error); }
     }
     const intent = workspaceIntent(operation);
+    const kind = migrationKind(operation);
     try {
-      const inspected = await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
+      const inspected = kind === 'identity'
+        ? await workspaceManager.inspectIdentityMigrationCompensation(intent, {
+          operationId: operation.id,
+          evidence: operation.result,
+        })
+        : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
       if (inspected?.satisfied === true) {
-        return websiteIsolationMigrationPublicView(await registry.compensate(operation.id, compensationEvidence(inspected)));
+        const evidence = kind === 'identity'
+          ? identityCompensationEvidence(inspected)
+          : compensationEvidence(inspected);
+        return websiteIsolationMigrationPublicView(await registry.compensate(operation.id, evidence));
       }
-      const result = compensationEvidence(await workspaceManager.compensateWorkspace(intent, { operationId: operation.id }));
+      const result = kind === 'identity'
+        ? identityCompensationEvidence(await workspaceManager.compensateIdentityMigration(intent, {
+          operationId: operation.id,
+          evidence: operation.result,
+        }))
+        : compensationEvidence(await workspaceManager.compensateWorkspace(intent, { operationId: operation.id }));
       return websiteIsolationMigrationPublicView(await registry.compensate(operation.id, result));
     } catch (error) {
       return websiteIsolationMigrationPublicView(await registry.failCompensation(
@@ -270,9 +358,15 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
     const recovery = [];
     for (const operation of interrupted) {
       const intent = workspaceIntent(operation);
+      const kind = migrationKind(operation);
       try {
         if (operation.status === 'applying') {
-          const result = inspectionEvidence(await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id }));
+          const inspected = kind === 'identity'
+            ? await workspaceManager.inspectIdentityOperation(intent, { operationId: operation.id })
+            : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
+          const result = kind === 'identity'
+            ? identityInspectionEvidence(inspected)
+            : inspectionEvidence(inspected);
           if (result) {
             recovery.push(Object.freeze({ operationId: operation.id, recovered: true }));
             await registry.succeed(operation.id, result);
@@ -280,10 +374,18 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
             recovery.push(Object.freeze({ operationId: operation.id, recovered: false, reason: 'apply_incomplete' }));
           }
         } else {
-          const result = await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
+          const result = kind === 'identity'
+            ? await workspaceManager.inspectIdentityMigrationCompensation(intent, {
+              operationId: operation.id,
+              evidence: operation.result,
+            })
+            : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
           if (result?.satisfied === true) {
             recovery.push(Object.freeze({ operationId: operation.id, recovered: true }));
-            await registry.compensate(operation.id, compensationEvidence(result));
+            await registry.compensate(
+              operation.id,
+              kind === 'identity' ? identityCompensationEvidence(result) : compensationEvidence(result),
+            );
           } else {
             recovery.push(Object.freeze({ operationId: operation.id, recovered: false, reason: 'compensation_incomplete' }));
           }
@@ -308,8 +410,13 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
 
 export const websiteIsolationMigrationRuntimeInternals = Object.freeze({
   exactTargets,
+  exactIdentityTarget,
+  migrationKind,
   workspaceIntent,
   applyEvidence,
   inspectionEvidence,
   compensationEvidence,
+  identityApplyEvidence,
+  identityInspectionEvidence,
+  identityCompensationEvidence,
 });
