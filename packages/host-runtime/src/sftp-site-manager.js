@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import {
@@ -86,15 +86,23 @@ function normalizeUnitName(value) {
 }
 
 function receiptValue(value, { id, spec, unitName } = {}) {
+  const createdDirectories = value?.createdDirectories ?? [];
+  const allowedCreatedDirectories = new Set([spec?.paths?.chrootDirectory, spec?.paths?.mountDirectory]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.version !== RECEIPT_VERSION || value.operationId !== id
     || value.websiteId !== spec.websiteId || value.applicationId !== spec.applicationId
     || value.unixUser !== spec.unixUser || value.unitName !== unitName
     || value.sshdSha256 !== sha256(spec.sshdConfig) || value.mountSha256 !== sha256(spec.mountUnit)
-    || !['prepared', 'active', 'compensated'].includes(value.state)) {
+    || !['prepared', 'active', 'compensated'].includes(value.state)
+    || !Array.isArray(createdDirectories) || createdDirectories.length > 2
+    || new Set(createdDirectories).size !== createdDirectories.length
+    || createdDirectories.some((entry) => typeof entry !== 'string' || !allowedCreatedDirectories.has(entry))) {
     throw new SftpSiteManagerError('sftp_receipt_invalid', 'SFTP Website operation receipt is invalid');
   }
-  return Object.freeze({ ...value });
+  return Object.freeze({
+    ...value,
+    createdDirectories: Object.freeze([...createdDirectories]),
+  });
 }
 
 export function createSftpSiteManager({
@@ -108,14 +116,16 @@ export function createSftpSiteManager({
   lstatFn = lstat,
   mkdirFn = mkdir,
   readFileFn = readFile,
+  readdirFn = readdir,
   renameFn = rename,
   rmFn = rm,
+  rmdirFn = rmdir,
   writeFileFn = writeFile,
 } = {}) {
   if (!identityManager || typeof identityManager.inspect !== 'function'
     || typeof run !== 'function' || typeof lstatFn !== 'function' || typeof mkdirFn !== 'function'
-    || typeof readFileFn !== 'function' || typeof renameFn !== 'function'
-    || typeof rmFn !== 'function' || typeof writeFileFn !== 'function') {
+    || typeof readFileFn !== 'function' || typeof readdirFn !== 'function' || typeof renameFn !== 'function'
+    || typeof rmFn !== 'function' || typeof rmdirFn !== 'function' || typeof writeFileFn !== 'function') {
     throw new SftpSiteManagerError('sftp_dependencies_invalid', 'SFTP Website manager dependencies are invalid');
   }
 
@@ -166,7 +176,7 @@ export function createSftpSiteManager({
     }
   }
 
-  async function persistReceipt(id, spec, unitName, state) {
+  async function persistReceipt(id, spec, unitName, state, { createdDirectories = [] } = {}) {
     await mkdirFn(receiptRoot, { recursive: true, mode: 0o700 });
     const receipt = {
       version: RECEIPT_VERSION,
@@ -178,6 +188,7 @@ export function createSftpSiteManager({
       sshdSha256: sha256(spec.sshdConfig),
       mountSha256: sha256(spec.mountUnit),
       state,
+      createdDirectories: [...createdDirectories],
     };
     await atomicWrite(receiptPath(id), `${JSON.stringify(receipt)}\n`, 0o600);
     return receiptValue(receipt, { id, spec, unitName });
@@ -196,6 +207,31 @@ export function createSftpSiteManager({
       throw new SftpSiteManagerError('sftp_identity_drift', 'SFTP Website Unix identity drifted');
     }
     return value;
+  }
+
+  async function directoryEntries(target) {
+    try {
+      const entries = await readdirFn(target);
+      if (!Array.isArray(entries)) throw new Error('invalid directory listing');
+      return entries;
+    } catch (error) {
+      if (missing(error)) return null;
+      throw new SftpSiteManagerError('sftp_chroot_unavailable', 'SFTP chroot directory contents could not be inspected');
+    }
+  }
+
+  async function ensureRootDirectory(target, { operationOwned = false, receipt = null, id = null, spec = null, unitName = null } = {}) {
+    const state = await inspectDirectoryState(target);
+    if (state.present) {
+      if (!state.directory || state.symbolicLink || state.uid !== 0 || state.gid !== 0 || state.mode !== '0755') {
+        throw new SftpSiteManagerError('sftp_chroot_drift', 'SFTP chroot directory ownership or mode drifted');
+      }
+      return receipt;
+    }
+    await run(INSTALL_PATH, ['-d', '-o', 'root', '-g', 'root', '-m', '0755', target], { timeout: 10_000 });
+    if (!operationOwned) return receipt;
+    const createdDirectories = [...(receipt?.createdDirectories ?? []), target];
+    return persistReceipt(id, spec, unitName, 'prepared', { createdDirectories });
   }
 
   async function inspectRootDirectory(target) {
@@ -433,9 +469,21 @@ export function createSftpSiteManager({
     }
 
     try {
-      for (const target of [sftpTemplatePolicy.chrootRoot, spec.paths.chrootDirectory, spec.paths.mountDirectory]) {
-        await run(INSTALL_PATH, ['-d', '-o', 'root', '-g', 'root', '-m', '0755', target], { timeout: 10_000 });
-      }
+      receipt = await ensureRootDirectory(sftpTemplatePolicy.chrootRoot, { receipt });
+      receipt = await ensureRootDirectory(spec.paths.chrootDirectory, {
+        operationOwned: true,
+        receipt,
+        id,
+        spec,
+        unitName,
+      });
+      receipt = await ensureRootDirectory(spec.paths.mountDirectory, {
+        operationOwned: true,
+        receipt,
+        id,
+        spec,
+        unitName,
+      });
       await mkdirFn(sftpTemplatePolicy.systemdRoot, { recursive: true, mode: 0o755 });
       await mkdirFn(sftpTemplatePolicy.sshdDropInRoot, { recursive: true, mode: 0o755 });
       await atomicWrite(unitPath(unitName), spec.mountUnit, 0o600);
@@ -449,7 +497,9 @@ export function createSftpSiteManager({
       throw new SftpSiteManagerError('sftp_apply_failed', 'SFTP Website isolation could not be activated');
     }
 
-    receipt = await persistReceipt(id, spec, unitName, 'active');
+    receipt = await persistReceipt(id, spec, unitName, 'active', {
+      createdDirectories: receipt.createdDirectories,
+    });
     const verified = await inspect(rawIntent, { operationId: id });
     if (!verified.satisfied) throw new SftpSiteManagerError('sftp_apply_unverified', 'SFTP Website isolation could not be verified');
     return Object.freeze({ ...verified, receiptState: receipt.state });
@@ -464,7 +514,31 @@ export function createSftpSiteManager({
     const config = await readOptional(spec.paths.sshdConfigPath);
     const mount = await readOptional(unitPath(unitName));
     if (config === null && mount === null && !(await mountActive(unitName))) {
-      return Object.freeze({ satisfied: true, removed: true });
+      const preservedDirectories = [];
+      const pendingDirectories = [];
+      for (const target of [...receipt.createdDirectories].reverse()) {
+        const state = await inspectDirectoryState(target);
+        if (!state.present) continue;
+        if (!state.directory || state.symbolicLink || state.uid !== 0 || state.gid !== 0 || state.mode !== '0755') {
+          return Object.freeze({ satisfied: false, reason: 'sftp_compensation_drift' });
+        }
+        const entries = await directoryEntries(target);
+        if (entries === null) continue;
+        if (entries.length > 0) preservedDirectories.push(target);
+        else pendingDirectories.push(target);
+      }
+      return pendingDirectories.length === 0
+        ? Object.freeze({
+          satisfied: true,
+          removed: true,
+          preservedDirectoryCount: preservedDirectories.length,
+        })
+        : Object.freeze({
+          satisfied: false,
+          reason: 'sftp_compensation_pending',
+          pendingDirectoryCount: pendingDirectories.length,
+          preservedDirectoryCount: preservedDirectories.length,
+        });
     }
     if ((config !== null && config !== spec.sshdConfig) || (mount !== null && mount !== spec.mountUnit)) {
       return Object.freeze({ satisfied: false, reason: 'sftp_compensation_drift' });
@@ -498,7 +572,9 @@ export function createSftpSiteManager({
     if (!receipt || receipt.state === 'compensated') return Object.freeze({ satisfied: true, removed: true });
     const before = await inspectCompensation(rawIntent, { operationId: id });
     if (before.satisfied) {
-      receipt = await persistReceipt(id, spec, unitName, 'compensated');
+      receipt = await persistReceipt(id, spec, unitName, 'compensated', {
+      createdDirectories: receipt.createdDirectories,
+    });
       return Object.freeze({ ...before, receiptState: receipt.state });
     }
     if (before.reason === 'sftp_compensation_drift') {
@@ -512,6 +588,17 @@ export function createSftpSiteManager({
       await run(SYSTEMCTL_PATH, ['disable', '--now', unitName], { timeout: 60_000 });
       await rmFn(unitPath(unitName), { force: true });
       await run(SYSTEMCTL_PATH, ['daemon-reload'], { timeout: 30_000 });
+      for (const target of [...receipt.createdDirectories].reverse()) {
+        try { await rmdirFn(target); }
+        catch (error) {
+          if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error?.code)) {
+            throw new SftpSiteManagerError(
+              'sftp_compensation_directory_failed',
+              'Operation-owned SFTP directory could not be removed safely',
+            );
+          }
+        }
+      }
     } catch (error) {
       if (error instanceof SftpSiteManagerError) throw error;
       throw new SftpSiteManagerError('sftp_compensation_failed', 'SFTP Website isolation could not be removed safely');
