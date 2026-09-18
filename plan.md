@@ -33,7 +33,7 @@ Son ttyd/IntegratedToolGateway ilerlemesi: `docs/history/ttyd-integrated-gateway
 
 ## P0.1 — Website Unix identity ve filesystem isolation
 
-- [ ] Legacy Website path/runtime migration apply/rollback kapsamını tamamla; Unix identity, SFTP ve yalnız-missing PHP-FPM site-pool safe-create durable lifecycle kaynakta tamamlandı. Passenger Node/static exact bounded preview mevcut; PHP container ownership drift'i de receipt-backed authority oluşana kadar fail-closed. Kalan runtime/path mutation'ları yalnız current preview digest'i hâlâ geçerliyken ve operation ownership evidence exact kaynağı kanıtlarken açılsın; pre-existing state fail-closed kalsın ve kör recursive `chown`/`rm` yapılmasın.
+- [ ] Legacy Website path/runtime migration apply/rollback kapsamını tamamla; Unix identity, SFTP, yalnız-missing PHP-FPM site-pool ve exact PHP control-plane container metadata (`applicationRoot`/`releasesDirectory`/`current`) için durable operation-owned lifecycle kaynakta tamamlandı. PHP metadata repair yalnız release content site-owned/canonical, current target exact, FPM runtime sağlıklı ve `UMask=0027` iken açılır; receipt mutation öncesi previous UID/GID/mode'u pinler, restart inspect-first çalışır ve rollback yabancı/path-type drift'inde fail-closed kalır. Passenger Node/static exact bounded preview mevcut fakat mutation authority hâlâ blocked. Kalan Passenger/static/path mutation'ları yalnız current preview digest geçerliyken ve operation ownership evidence exact kaynağı kanıtlarken açılsın; pre-existing state fail-closed kalsın ve kör recursive `chown`/`chmod`/`rm` yapılmasın.
 
 Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
@@ -158,7 +158,7 @@ Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözl
 
 # Uygulama sırası — blocker yoksa sapma yok
 
-1. **Website Unix isolation** — Passenger/static/path ve receipt'siz PHP container drift için operation-owned legacy migration sınırlarını tamamla; identity, SFTP ve PHP-FPM pool safe-create source lifecycle tamamlandı.
+1. **Website Unix isolation** — Passenger/static legacy mutation authority sınırlarını tamamla; identity, SFTP, PHP-FPM pool safe-create ve exact PHP container control-plane metadata repair source lifecycle tamamlandı. Geniş PHP release/content/path drift'i fail-closed kalır.
 2. **PowerDNS operator recovery** — restart-sonrası güvenli explicit rollback, typed confirmation ve fail-closed recovery control surface.
 3. **Mail explicit rollback** — mevcut v3 backup/previous-state preview'ından durable restore, compensation/restart recovery ve monoton control-plane reconciliation.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
