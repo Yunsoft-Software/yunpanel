@@ -57,15 +57,16 @@ function service({
   workspaceMigrationAvailable = false,
 } = {}) {
   const handlers = {};
-  for (const kind of ['unix_identity', 'runtime', 'php_runtime', 'sftp']) {
+  for (const kind of ['unix_identity', 'runtime', 'static_runtime', 'php_runtime', 'sftp']) {
+    const sourceKind = kind === 'static_runtime' ? 'runtime' : kind;
     handlers[kind] = {
       async inspect() {
-        const result = stepResults[kind] ?? { satisfied: true };
+        const result = stepResults[sourceKind] ?? { satisfied: true };
         if (result instanceof Error) throw result;
         return result;
       },
       async previewMigration() {
-        return migrationPreviews[kind] ?? null;
+        return migrationPreviews[sourceKind] ?? null;
       },
     };
   }
