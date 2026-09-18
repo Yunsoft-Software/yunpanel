@@ -155,6 +155,13 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
         { operationId: context.operationId },
       );
       if (!result?.satisfied) return result;
+      if (typeof context.expectedTreeSha256 === 'string'
+        && result.treeSha256 !== context.expectedTreeSha256) {
+        umaskFailure(
+          'website_static_release_migration_evidence_mismatch',
+          'Static release migration receipt does not match the expected release tree digest',
+        );
+      }
       return Object.freeze({ ...result, staticRuntimeMigration: true });
     },
     async applyReleaseMigration(context = {}) {
@@ -163,6 +170,13 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
         umaskFailure('website_static_release_migration_lifecycle_unavailable', 'Static release migration lifecycle is unavailable');
       }
       const preview = await isolationManager.previewReleaseMigration(isolationIntent(context));
+      if (typeof context.expectedTreeSha256 === 'string'
+        && preview.current?.tree?.sha256 !== context.expectedTreeSha256) {
+        umaskFailure(
+          'website_static_release_migration_preview_stale',
+          'Static release tree changed after the migration preview was journaled',
+        );
+      }
       if (preview.repairCandidate !== true) {
         umaskFailure(
           'website_static_release_migration_not_safe',
@@ -177,7 +191,9 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
         || result.staticReleaseReceiptVersion !== 1
         || result.migratedStaticReleasePermissions !== true
         || typeof result.treeSha256 !== 'string'
-        || !/^[a-f0-9]{64}$/.test(result.treeSha256)) {
+        || !/^[a-f0-9]{64}$/.test(result.treeSha256)
+        || (typeof context.expectedTreeSha256 === 'string'
+          && result.treeSha256 !== context.expectedTreeSha256)) {
         umaskFailure(
           'website_static_release_migration_unverified',
           'Static release migration did not return durable ownership evidence',
@@ -193,6 +209,14 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
         isolationIntent(context),
         { operationId: context.operationId },
       );
+      if (inspected?.satisfied === true
+        && typeof context.expectedTreeSha256 === 'string'
+        && inspected.treeSha256 !== context.expectedTreeSha256) {
+        umaskFailure(
+          'website_static_release_migration_evidence_mismatch',
+          'Static release rollback receipt does not match the expected release tree digest',
+        );
+      }
       if (inspected?.satisfied === true && inspected.receiptState !== 'compensated') {
         return Object.freeze({
           satisfied: false,
@@ -205,10 +229,20 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
       if (typeof isolationManager.compensateReleaseMigration !== 'function') {
         umaskFailure('website_static_release_migration_lifecycle_unavailable', 'Static release migration lifecycle is unavailable');
       }
-      return isolationManager.compensateReleaseMigration(
+      const result = await isolationManager.compensateReleaseMigration(
         isolationIntent(context),
         { operationId: context.operationId },
       );
+      if (!result?.satisfied
+        || result.restoredStaticReleasePermissions !== true
+        || (typeof context.expectedTreeSha256 === 'string'
+          && result.treeSha256 !== context.expectedTreeSha256)) {
+        umaskFailure(
+          'website_static_release_migration_compensation_unverified',
+          'Static release rollback did not return exact receipt ownership evidence',
+        );
+      }
+      return result;
     },
 
     async inspectControlMigrationOperation(context = {}) {
