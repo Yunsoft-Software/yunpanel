@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, readFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import http from 'node:http';
@@ -9,6 +10,16 @@ const DEFAULT_WEB_ROOT = '/usr/share/yunpanel/web';
 const PHPMYADMIN_PREFIX = '/tools/phpmyadmin';
 const PHPMYADMIN_GATEWAY_ACCESS_PATH = '/api/phpmyadmin-gateway-access';
 const PHPMYADMIN_SOCKET_PATH = '/run/yunpanel/phpmyadmin-http.sock';
+const ELFINDER_PREFIX = '/tools/elfinder';
+const ELFINDER_GATEWAY_ACCESS_PATH = '/api/elfinder-gateway-access';
+const ELFINDER_GATEWAY_SOCKET_PATH = '/run/yunpanel/elfinder-http.sock';
+const ELFINDER_HANDOFF_SOCKET_PATH = '/run/yunpanel-elfinder/handoff.sock';
+const ELFINDER_HANDOFF_PATH = '/__yunpanel/handoff';
+const ELFINDER_SESSION_TTL_MS = 60 * 60 * 1000;
+const ELFINDER_SESSION_LIMIT = 100;
+const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const HOP_BY_HOP_HEADERS = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
   'te', 'trailer', 'transfer-encoding', 'upgrade',
@@ -93,7 +104,9 @@ function browserProxyHeaders(request) {
   for (const [name, value] of Object.entries(request.headers)) {
     if (!HOP_BY_HOP_HEADERS.has(name) && value !== undefined
       && !['authorization', 'forwarded', 'host', 'x-forwarded-for', 'x-real-ip',
-        'x-yunpanel-client-ip', 'x-yunpanel-proxy-token'].includes(name)) {
+        'x-yunpanel-client-ip', 'x-yunpanel-proxy-token',
+        'x-yunpanel-elfinder-unix-user', 'x-yunpanel-elfinder-website-id',
+        'x-yunpanel-elfinder-application-id'].includes(name)) {
       headers[name] = value;
     }
   }
