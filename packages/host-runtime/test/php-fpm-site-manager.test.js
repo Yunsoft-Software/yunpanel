@@ -287,3 +287,70 @@ test('PHP-FPM compensation refuses destructive restore after pool content drift'
   );
   assert.equal(host.entries.get(configPath)?.content, '[changed-after-apply]\n');
 });
+
+
+test('PHP-FPM migration preview snapshots pool ownership, receipt, service and socket without mutation', async () => {
+  const host = fakeHost();
+  const siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  const mutationCallsBefore = host.calls.filter(([file, args]) => file === '/usr/bin/apt-get'
+    || (file === '/usr/bin/systemctl' && ['enable', 'reload'].includes(args[0]))).length;
+
+  const preview = await siteManager.previewMigration(intent(), { operationId });
+
+  assert.equal(preview.version, 1);
+  assert.equal(preview.adapter, 'php-fpm');
+  assert.equal(preview.satisfied, true);
+  assert.deepEqual(preview.current.identity, {
+    satisfied: true,
+    uid: 1201,
+    gid: 1201,
+    homeDirectory,
+    homeMode: '0750',
+  });
+  assert.equal(preview.current.documentRoot.mode, '0750');
+  assert.equal(preview.current.package.installed, true);
+  assert.equal(preview.current.receipt.state, 'active');
+  assert.equal(preview.current.receipt.mutated, true);
+  assert.equal(preview.current.pool.present, true);
+  assert.equal(preview.current.pool.matchesDesired, true);
+  assert.match(preview.current.pool.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(preview.current.configValid, true);
+  assert.equal(preview.current.serviceActive, true);
+  assert.equal(preview.current.socket.socket, true);
+  assert.equal(preview.current.socket.mode, '0660');
+  assert.equal(preview.desired.configPath, configPath);
+  assert.equal(preview.desired.socketPath, socketPath);
+  assert.deepEqual(preview.differences, []);
+  assert.equal(JSON.stringify(preview).includes(`user = ${unixUser}`), false);
+
+  const mutationCallsAfter = host.calls.filter(([file, args]) => file === '/usr/bin/apt-get'
+    || (file === '/usr/bin/systemctl' && ['enable', 'reload'].includes(args[0]))).length;
+  assert.equal(mutationCallsAfter, mutationCallsBefore);
+});
+
+test('PHP-FPM migration preview reports foreign legacy pool drift without adopting or overwriting it', async () => {
+  const host = fakeHost({ packageInstalled: true, serviceActive: true });
+  host.entries.set(configPath, {
+    type: 'file',
+    content: '[foreign]\nuser = attacker\n',
+    mode: 0o600,
+    uid: 0,
+    gid: 0,
+  });
+  const siteManager = manager(host);
+
+  const preview = await siteManager.previewMigration(intent(), { operationId });
+
+  assert.equal(preview.satisfied, false);
+  assert.equal(preview.current.receipt.state, null);
+  assert.equal(preview.current.pool.present, true);
+  assert.equal(preview.current.pool.matchesDesired, false);
+  assert.match(preview.current.pool.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(preview.differences.includes('php_fpm_receipt_missing'), true);
+  assert.equal(preview.differences.includes('php_fpm_pool_drift'), true);
+  assert.equal(JSON.stringify(preview).includes('attacker'), false);
+  assert.equal(host.entries.get(configPath)?.content, '[foreign]\nuser = attacker\n');
+  assert.equal(host.calls.some(([file, args]) => file === '/usr/bin/apt-get'
+    || (file === '/usr/bin/systemctl' && ['enable', 'reload'].includes(args[0]))), false);
+});
