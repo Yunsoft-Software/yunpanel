@@ -275,6 +275,8 @@ export function createApp({
       ? createDnsZoneRetirementService({
         domainRegistry,
         powerDnsSecretRegistry,
+        mailDomainRegistry,
+        jobRegistry,
         provisioningRegistry: typeof websiteProvisioningRuntime?.registry?.listForDnsZone === 'function'
           ? websiteProvisioningRuntime.registry
           : null,
@@ -502,6 +504,7 @@ export function createApp({
     mountPowerDnsRoutes(app, {
       dnsIdentityRegistry: serverDnsIdentityRegistry,
       authoritativeService: powerDnsAuthoritativeService,
+      jobRegistry,
       ...(powerDnsSecretRegistry ? { domainRegistry, powerDnsSecretRegistry } : {}),
       ...(dnsRetirementImpact ? { dnsZoneRetirementService: dnsRetirementImpact } : {}),
       ...(typeof websiteProvisioningRuntime?.registry?.listForDnsZone === 'function'
