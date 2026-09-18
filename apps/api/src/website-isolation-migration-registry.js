@@ -59,15 +59,21 @@ function target(value) {
 }
 
 function intent(value) {
-  const fields = new Set(['websiteId', 'applicationId', 'user', 'homeDirectory', 'targets']);
+  const fields = new Set(['websiteId', 'applicationId', 'user', 'homeDirectory', 'targets', 'adapter']);
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
+    || ![5, 6].includes(Object.keys(value).length) || Object.keys(value).some((field) => !fields.has(field))
     || typeof value.user !== 'string' || !USER_PATTERN.test(value.user)
     || typeof value.homeDirectory !== 'string' || !value.homeDirectory.startsWith('/')
     || !Array.isArray(value.targets) || value.targets.length > 2) {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', 'Website isolation migration intent is invalid');
   }
   const targets = value.targets.map(target);
+  const adapter = value.adapter ?? (targets.length === 0 ? 'identity' : 'workspace');
+  if (!['workspace', 'identity', 'sftp'].includes(adapter)
+    || (adapter === 'workspace' && targets.length < 1)
+    || (adapter !== 'workspace' && targets.length !== 0)) {
+    throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', 'Website isolation migration adapter is invalid');
+  }
   if (new Set(targets.map((entry) => entry.name)).size !== targets.length) {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', 'Website isolation migration targets are not unique');
   }
@@ -98,6 +104,7 @@ function intent(value) {
     user: value.user,
     homeDirectory: value.homeDirectory,
     targets: Object.freeze(targets),
+    adapter,
   });
 }
 
@@ -114,17 +121,27 @@ function evidence(value, field) {
     'removedGroup',
     'removedHome',
     'preservedHomeData',
+    'sftpReceiptVersion',
+    'activatedSftpIsolation',
+    'removedSftpIsolation',
+    'authorizedKeyCount',
+    'authorizedKeysSha256',
   ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).some((key) => !fields.has(key))
     || value.satisfied !== true
     || (value.workspaceReceiptVersion !== undefined && value.workspaceReceiptVersion !== 1)
     || (value.identityReceiptVersion !== undefined && value.identityReceiptVersion !== 1)
+    || (value.sftpReceiptVersion !== undefined && value.sftpReceiptVersion !== 1)
+    || (value.authorizedKeyCount !== undefined
+      && (!Number.isSafeInteger(value.authorizedKeyCount) || value.authorizedKeyCount < 0 || value.authorizedKeyCount > 100))
+    || (value.authorizedKeysSha256 !== undefined
+      && (typeof value.authorizedKeysSha256 !== 'string' || !SHA256_PATTERN.test(value.authorizedKeysSha256)))
     || (value.createdWorkspaceDirectories !== undefined
       && (!Number.isSafeInteger(value.createdWorkspaceDirectories) || value.createdWorkspaceDirectories < 0 || value.createdWorkspaceDirectories > 2))
     || (value.removedWorkspaceDirectories !== undefined
       && (!Number.isSafeInteger(value.removedWorkspaceDirectories) || value.removedWorkspaceDirectories < 0 || value.removedWorkspaceDirectories > 2))
-    || ['createdUnixIdentity', 'removedUser', 'removedGroup', 'removedHome', 'preservedHomeData']
+    || ['createdUnixIdentity', 'removedUser', 'removedGroup', 'removedHome', 'preservedHomeData', 'activatedSftpIsolation', 'removedSftpIsolation']
       .some((key) => value[key] !== undefined && typeof value[key] !== 'boolean')) {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', `${field} is invalid`);
   }
@@ -139,6 +156,11 @@ function evidence(value, field) {
     ...(value.removedGroup === undefined ? {} : { removedGroup: value.removedGroup }),
     ...(value.removedHome === undefined ? {} : { removedHome: value.removedHome }),
     ...(value.preservedHomeData === undefined ? {} : { preservedHomeData: value.preservedHomeData }),
+    ...(value.sftpReceiptVersion === undefined ? {} : { sftpReceiptVersion: value.sftpReceiptVersion }),
+    ...(value.activatedSftpIsolation === undefined ? {} : { activatedSftpIsolation: value.activatedSftpIsolation }),
+    ...(value.removedSftpIsolation === undefined ? {} : { removedSftpIsolation: value.removedSftpIsolation }),
+    ...(value.authorizedKeyCount === undefined ? {} : { authorizedKeyCount: value.authorizedKeyCount }),
+    ...(value.authorizedKeysSha256 === undefined ? {} : { authorizedKeysSha256: value.authorizedKeysSha256 }),
   });
 }
 
@@ -194,9 +216,11 @@ function operationFromAudit(audit, now, idFactory) {
   const migration = audit?.migration;
   const change = migration?.changes?.length === 1 ? migration.changes[0] : null;
   const identityCreate = change?.action === 'create_canonical_unix_identity';
+  const sftpCreate = change?.action === 'create_sftp_isolation';
+  const adapter = identityCreate ? 'identity' : sftpCreate ? 'sftp' : 'workspace';
   const targets = change?.action === 'create_workspace_directories'
     ? change.desired?.directories
-    : identityCreate
+    : identityCreate || sftpCreate
       ? []
       : null;
   if (audit?.applicable !== true || audit.migrationRequired !== true
@@ -206,6 +230,13 @@ function operationFromAudit(audit, now, idFactory) {
       change.current?.identityMigrationPreview?.safeCreateCandidate !== true
       || change.desired?.identity?.user !== audit.expected?.unixUser
       || change.desired?.identity?.homeDirectory !== audit.expected?.homeDirectory
+    ))
+    || (sftpCreate && (
+      change.current?.sftpMigrationPreview?.safeCreateCandidate !== true
+      || change.desired?.sftp?.websiteId !== audit.websiteId
+      || change.desired?.sftp?.applicationId !== audit.applicationId
+      || change.desired?.sftp?.unixUser !== audit.expected?.unixUser
+      || change.desired?.sftp?.sourceDirectory !== createApplicationIdentity(audit.applicationId).paths.workspace.sftpRoot
     ))
     || typeof audit.expected?.unixUser !== 'string' || typeof audit.expected?.homeDirectory !== 'string') {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_preview_invalid', 'Website isolation migration preview cannot be journaled');
@@ -223,6 +254,7 @@ function operationFromAudit(audit, now, idFactory) {
       user: audit.expected.unixUser,
       homeDirectory: audit.expected.homeDirectory,
       targets,
+      adapter,
     },
     status: 'pending',
     result: null,
@@ -241,6 +273,7 @@ export function websiteIsolationMigrationPublicView(operation) {
     applicationId: operation.applicationId,
     websiteRevision: operation.websiteRevision,
     previewDigest: operation.previewDigest,
+    adapter: operation.intent.adapter,
     targets: operation.intent.targets,
     status: operation.status,
     result: operation.result,
