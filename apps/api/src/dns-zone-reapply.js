@@ -23,6 +23,28 @@ function digest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+function sourceZoneState(zone) {
+  if (!zone || typeof zone !== 'object' || !Array.isArray(zone.rrsets)) {
+    throw new DnsZoneReapplyError('dns_zone_reapply_zone_invalid', 'Authoritative DNS zone state is invalid', 409);
+  }
+  const rrsets = zone.rrsets
+    .map((rrset) => powerDnsZoneManagerInternals.rrsetState(rrset))
+    .sort((left, right) => powerDnsZoneManagerInternals.rrsetKey(left).localeCompare(
+      powerDnsZoneManagerInternals.rrsetKey(right),
+    ));
+  return Object.freeze({
+    zoneName: zone.zoneName,
+    id: zone.id,
+    kind: zone.kind ?? null,
+    dnssec: zone.dnssec === true,
+    rrsets: Object.freeze(rrsets),
+  });
+}
+
+function sourceZoneDigest(zone) {
+  return digest(sourceZoneState(zone));
+}
+
 function serialFloor(now = Date.now) {
   const value = now();
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -341,6 +363,7 @@ export function createDnsZoneReapplyService({
       dnsIdentityRevision: desired.dnsIdentityRevision,
       mailState: mailEvidence,
       mailStateDigest,
+      sourceZoneDigest: sourceZoneDigest(existing),
       observedSerial: existing.serial,
       nextSerial: serial,
       dnssec: existing.dnssec === true,
@@ -438,5 +461,7 @@ export const dnsZoneReapplyInternals = Object.freeze({
   desiredRrsetMap,
   diffZone,
   topologyState,
+  sourceZoneState,
+  sourceZoneDigest,
   digest,
 });
