@@ -128,3 +128,74 @@ test('PHP runtime compensation removes only FPM state and preserves shared servi
   await handler.inspectCompensation({ intent: intent(), operationId });
   assert.deepEqual(calls.map(([name]) => name), ['compensate', 'inspect']);
 });
+
+
+test('PHP runtime migration preview combines container, FPM and UMask evidence without apply calls', async () => {
+  const calls = [];
+  const containerPreview = {
+    version: 1,
+    adapter: 'php-container',
+    satisfied: false,
+    current: { applicationRoot: { present: true, uid: 1201, gid: 1201, mode: '0750' } },
+    desired: { websiteId, applicationId, unixUser, documentRoot },
+    differences: ['php_site_container_control_plane_drift'],
+  };
+  const fpmPreview = {
+    version: 1,
+    adapter: 'php-fpm',
+    satisfied: false,
+    current: { pool: { present: false, sha256: null } },
+    desired: { websiteId, applicationId, unixUser, documentRoot },
+    differences: ['php_fpm_pool_missing'],
+  };
+  const handler = createWebsitePhpRuntimeProvisioningHandler({
+    containerManager: {
+      async apply() { calls.push('unexpected-container-apply'); return {}; },
+      async inspect() { return { satisfied: false }; },
+      async previewMigration(value, options) {
+        calls.push(['container-preview', value, options]);
+        return containerPreview;
+      },
+    },
+    fpmManager: {
+      async apply() { calls.push('unexpected-fpm-apply'); return {}; },
+      async inspect() { return { satisfied: false }; },
+      async previewMigration(value, options) {
+        calls.push(['fpm-preview', value, options]);
+        return fpmPreview;
+      },
+      async compensate() { return { satisfied: true }; },
+      async inspectCompensation() { return { satisfied: true }; },
+    },
+    umaskManager: {
+      async apply() { calls.push('unexpected-umask-apply'); return {}; },
+      async inspect(runtime) {
+        calls.push(['umask-preview', runtime]);
+        return { satisfied: false, reason: 'service_umask_not_effective' };
+      },
+    },
+  });
+
+  const preview = await handler.previewMigration({ intent: intent(), operationId });
+
+  assert.equal(preview.version, 1);
+  assert.equal(preview.adapter, 'php-runtime');
+  assert.equal(preview.satisfied, false);
+  assert.equal(preview.current.container, containerPreview);
+  assert.equal(preview.current.fpm, fpmPreview);
+  assert.deepEqual(preview.current.umask, {
+    satisfied: false,
+    reason: 'service_umask_not_effective',
+  });
+  assert.equal(preview.desired.runtimeUmask, '0027');
+  assert.deepEqual(preview.differences, [
+    'php_site_container_control_plane_drift',
+    'php_fpm_pool_missing',
+    'php_runtime_umask_not_ready',
+  ]);
+  assert.deepEqual(calls.map((entry) => Array.isArray(entry) ? entry[0] : entry), [
+    'container-preview',
+    'fpm-preview',
+    'umask-preview',
+  ]);
+});
