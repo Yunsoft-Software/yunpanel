@@ -66,9 +66,25 @@ function canonicalAcl(value) {
   return `${[...new Set(lines)].sort().join('\n')}\n`;
 }
 
+function modeAdjustedReleaseAcl(previousAcl, type) {
+  const ownerPermission = type === 'directory' ? 'rwx' : 'rw-';
+  const groupPermission = type === 'directory' ? 'r-x' : 'r--';
+  const otherPermission = '---';
+  const lines = canonicalAcl(previousAcl).trim().split('\n').filter(Boolean);
+  const hasMask = lines.some((line) => line.startsWith('mask::'));
+  const adjusted = lines.map((line) => {
+    if (line.startsWith('user::')) return `user::${ownerPermission}`;
+    if (line.startsWith('other::')) return `other::${otherPermission}`;
+    if (hasMask && line.startsWith('mask::')) return `mask::${groupPermission}`;
+    if (!hasMask && line.startsWith('group::')) return `group::${groupPermission}`;
+    return line;
+  });
+  return `${[...new Set(adjusted)].sort().join('\n')}\n`;
+}
+
 function desiredReleaseAcl(previousAcl, type) {
   const permission = type === 'directory' ? 'r-x' : 'r--';
-  const lines = canonicalAcl(previousAcl).trim().split('\n').filter(Boolean);
+  const lines = modeAdjustedReleaseAcl(previousAcl, type).trim().split('\n').filter(Boolean);
   const retained = lines.filter((line) => !line.startsWith('user:www-data:') && !line.startsWith('mask::'));
   retained.push(`user:www-data:${permission}`, `mask::${permission}`);
   return `${[...new Set(retained)].sort().join('\n')}\n`;
@@ -1193,6 +1209,7 @@ export const staticPublishIsolationInternals = Object.freeze({
   migrationSpecDigest,
   normalizeMigrationReceipt,
   canonicalAcl,
+  modeAdjustedReleaseAcl,
   desiredReleaseAcl,
   releaseSnapshotDigest,
   normalizeReleaseMigrationReceipt,
