@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { DomainValidationError, normalizeDomainSet } from '@yunpanel/shared';
 
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -206,6 +207,43 @@ function sameZoneState(left, right) {
   const a = left.rrsets.map(rrsetState).sort((x, y) => rrsetKey(x).localeCompare(rrsetKey(y)));
   const b = right.rrsets.map(rrsetState).sort((x, y) => rrsetKey(x).localeCompare(rrsetKey(y)));
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function zoneSnapshot(zone) {
+  if (!zone || typeof zone !== 'object' || !Array.isArray(zone.rrsets)
+    || typeof zone.zoneName !== 'string' || !zone.zoneName || typeof zone.id !== 'string' || !zone.id) {
+    throw new PowerDnsZoneManagerError('powerdns_zone_snapshot_invalid', 'PowerDNS zone snapshot source is invalid', 409);
+  }
+  const rrsets = zone.rrsets.map((rrset) => Object.freeze({
+    name: String(rrset.name ?? '').toLowerCase(),
+    type: String(rrset.type ?? '').toUpperCase(),
+    ttl: Number.isSafeInteger(rrset.ttl) ? rrset.ttl : null,
+    records: Object.freeze((rrset.records ?? [])
+      .map((entry) => Object.freeze({ content: String(entry?.content ?? ''), disabled: entry?.disabled === true }))
+      .sort((left, right) => `${left.disabled ? '1' : '0'}\u0000${left.content}`.localeCompare(
+        `${right.disabled ? '1' : '0'}\u0000${right.content}`,
+      ))),
+    comments: Object.freeze((rrset.comments ?? [])
+      .map((entry) => Object.freeze({
+        account: String(entry?.account ?? ''),
+        content: String(entry?.content ?? ''),
+      }))
+      .sort((left, right) => `${left.account}\u0000${left.content}`.localeCompare(
+        `${right.account}\u0000${right.content}`,
+      ))),
+  })).sort((left, right) => rrsetKey(left).localeCompare(rrsetKey(right)));
+  return Object.freeze({
+    version: 1,
+    zoneName: zone.zoneName,
+    id: zone.id,
+    kind: zone.kind ?? null,
+    dnssec: zone.dnssec === true,
+    rrsets: Object.freeze(rrsets),
+  });
+}
+
+function zoneSnapshotDigest(zone) {
+  return createHash('sha256').update(JSON.stringify(zoneSnapshot(zone))).digest('hex');
 }
 
 function desiredMap(records) {
@@ -587,6 +625,8 @@ export const powerDnsZoneManagerInternals = Object.freeze({
   sameManagedMetadata,
   rrsetState,
   sameZoneState,
+  zoneSnapshot,
+  zoneSnapshotDigest,
   desiredMap,
   serialFromRrsets,
   serialMetadata,
