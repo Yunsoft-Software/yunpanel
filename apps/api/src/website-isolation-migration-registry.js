@@ -64,7 +64,7 @@ function intent(value) {
     || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
     || typeof value.user !== 'string' || !USER_PATTERN.test(value.user)
     || typeof value.homeDirectory !== 'string' || !value.homeDirectory.startsWith('/')
-    || !Array.isArray(value.targets) || value.targets.length < 1 || value.targets.length > 2) {
+    || !Array.isArray(value.targets) || value.targets.length > 2) {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', 'Website isolation migration intent is invalid');
   }
   const targets = value.targets.map(target);
@@ -103,15 +103,29 @@ function intent(value) {
 
 function evidence(value, field) {
   if (value === null) return null;
-  const fields = new Set(['satisfied', 'workspaceReceiptVersion', 'createdWorkspaceDirectories', 'removedWorkspaceDirectories']);
+  const fields = new Set([
+    'satisfied',
+    'workspaceReceiptVersion',
+    'createdWorkspaceDirectories',
+    'removedWorkspaceDirectories',
+    'identityReceiptVersion',
+    'createdUnixIdentity',
+    'removedUser',
+    'removedGroup',
+    'removedHome',
+    'preservedHomeData',
+  ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).some((key) => !fields.has(key))
     || value.satisfied !== true
     || (value.workspaceReceiptVersion !== undefined && value.workspaceReceiptVersion !== 1)
+    || (value.identityReceiptVersion !== undefined && value.identityReceiptVersion !== 1)
     || (value.createdWorkspaceDirectories !== undefined
       && (!Number.isSafeInteger(value.createdWorkspaceDirectories) || value.createdWorkspaceDirectories < 0 || value.createdWorkspaceDirectories > 2))
     || (value.removedWorkspaceDirectories !== undefined
-      && (!Number.isSafeInteger(value.removedWorkspaceDirectories) || value.removedWorkspaceDirectories < 0 || value.removedWorkspaceDirectories > 2))) {
+      && (!Number.isSafeInteger(value.removedWorkspaceDirectories) || value.removedWorkspaceDirectories < 0 || value.removedWorkspaceDirectories > 2))
+    || ['createdUnixIdentity', 'removedUser', 'removedGroup', 'removedHome', 'preservedHomeData']
+      .some((key) => value[key] !== undefined && typeof value[key] !== 'boolean')) {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', `${field} is invalid`);
   }
   return Object.freeze({
@@ -119,6 +133,12 @@ function evidence(value, field) {
     ...(value.workspaceReceiptVersion === undefined ? {} : { workspaceReceiptVersion: value.workspaceReceiptVersion }),
     ...(value.createdWorkspaceDirectories === undefined ? {} : { createdWorkspaceDirectories: value.createdWorkspaceDirectories }),
     ...(value.removedWorkspaceDirectories === undefined ? {} : { removedWorkspaceDirectories: value.removedWorkspaceDirectories }),
+    ...(value.identityReceiptVersion === undefined ? {} : { identityReceiptVersion: value.identityReceiptVersion }),
+    ...(value.createdUnixIdentity === undefined ? {} : { createdUnixIdentity: value.createdUnixIdentity }),
+    ...(value.removedUser === undefined ? {} : { removedUser: value.removedUser }),
+    ...(value.removedGroup === undefined ? {} : { removedGroup: value.removedGroup }),
+    ...(value.removedHome === undefined ? {} : { removedHome: value.removedHome }),
+    ...(value.preservedHomeData === undefined ? {} : { preservedHomeData: value.preservedHomeData }),
   });
 }
 
@@ -173,10 +193,20 @@ function persistedOperation(value) {
 function operationFromAudit(audit, now, idFactory) {
   const migration = audit?.migration;
   const change = migration?.changes?.length === 1 ? migration.changes[0] : null;
-  const targets = change?.action === 'create_workspace_directories' ? change.desired?.directories : null;
+  const identityCreate = change?.action === 'create_canonical_unix_identity';
+  const targets = change?.action === 'create_workspace_directories'
+    ? change.desired?.directories
+    : identityCreate
+      ? []
+      : null;
   if (audit?.applicable !== true || audit.migrationRequired !== true
     || migration?.applyAvailable !== true || change?.applyState !== 'requires_explicit_apply'
-    || !Array.isArray(targets) || targets.length < 1
+    || !Array.isArray(targets) || targets.length > 2
+    || (identityCreate && (
+      change.current?.identityMigrationPreview?.safeCreateCandidate !== true
+      || change.desired?.identity?.user !== audit.expected?.unixUser
+      || change.desired?.identity?.homeDirectory !== audit.expected?.homeDirectory
+    ))
     || typeof audit.expected?.unixUser !== 'string' || typeof audit.expected?.homeDirectory !== 'string') {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_preview_invalid', 'Website isolation migration preview cannot be journaled');
   }
