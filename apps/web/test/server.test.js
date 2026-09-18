@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
@@ -417,4 +418,286 @@ test('phpMyAdmin gateway canonicalizes the trailing slash without touching the v
   const response = await app.request('/tools/phpmyadmin?db=test', { redirect: 'manual' });
   assert.equal(response.status, 308);
   assert.equal(response.headers.get('location'), '/tools/phpmyadmin/?db=test');
+});
+
+
+test('elFinder gateway consumes a fragment handoff once and injects only server-verified Website identity', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-elfinder-web-'));
+  const gatewaySocketPath = path.join(directory, 'elfinder-http.sock');
+  const handoffSocketPath = path.join(directory, 'elfinder-handoff.sock');
+  const applicationId = '22345678-1234-4234-8234-123456789012';
+  const websiteId = '12345678-1234-4234-8234-123456789012';
+  const serverId = '32345678-1234-4234-8234-123456789012';
+  const unixUser = `yunapp-${createHash('sha256').update(applicationId).digest('hex').slice(0, 12)}`;
+  const capability = 'c'.repeat(43);
+  const handoffRequests = [];
+
+  const handoff = http.createServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      handoffRequests.push({
+        method: request.method,
+        url: request.url,
+        body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+      });
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({
+        data: {
+          version: 1,
+          protocol: 'yunpanel-elfinder-handoff-v1',
+          audience: 'elfinder',
+          serverId,
+          websiteId,
+          websiteRevision: 7,
+          applicationId,
+          unixUser,
+          root: `/var/lib/yunpanel/data/${applicationId}`,
+          expiresAt: Date.now() + 30_000,
+        },
+      }));
+    });
+  });
+  handoff.listen(handoffSocketPath);
+  await once(handoff, 'listening');
+
+  const vendorRequests = [];
+  const gateway = http.createServer((request, response) => {
+    vendorRequests.push({
+      method: request.method,
+      url: request.url,
+      unixUser: request.headers['x-yunpanel-elfinder-unix-user'],
+      websiteId: request.headers['x-yunpanel-elfinder-website-id'],
+      applicationId: request.headers['x-yunpanel-elfinder-application-id'],
+      cookie: request.headers.cookie,
+    });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end('{"ok":true}');
+  });
+  gateway.listen(gatewaySocketPath);
+  await once(gateway, 'listening');
+
+  const accessRequests = [];
+  const api = http.createServer((request, response) => {
+    accessRequests.push({
+      url: request.url,
+      cookie: request.headers.cookie,
+      proxyToken: request.headers['x-yunpanel-proxy-token'],
+      clientIp: request.headers['x-yunpanel-client-ip'],
+    });
+    if (request.url !== '/api/elfinder-gateway-access') {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    response.writeHead(request.headers.cookie === '__Host-yunpanel_session=owner' ? 204 : 403);
+    response.end();
+  });
+  const apiPort = await listen(api);
+
+  const webRoot = path.join(directory, 'web');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(webRoot));
+  await writeFile(path.join(webRoot, 'index.html'), '<title>YunPanel</title>');
+
+  const panel = createPanelServer({
+    allowedClientIps: '203.0.113.8',
+    apiPort,
+    proxyToken,
+    publicOrigin: 'https://panel.example.com',
+    elFinderSocketPath: gatewaySocketPath,
+    elFinderHandoffSocketPath: handoffSocketPath,
+    webRoot,
+  });
+  const panelPort = await listen(panel);
+
+  t.after(async () => {
+    await close(panel);
+    await close(api);
+    await new Promise((resolve) => gateway.close(() => resolve()));
+    await new Promise((resolve) => handoff.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  const bootstrap = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/elfinder/__yunpanel/handoff`,
+    {
+      method: 'POST',
+      headers: {
+        'x-real-ip': '203.0.113.8',
+        cookie: '__Host-yunpanel_session=owner',
+        origin: 'https://panel.example.com',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ capability }),
+    },
+  );
+  assert.equal(bootstrap.status, 204);
+  const setCookie = bootstrap.headers.get('set-cookie');
+  assert.match(setCookie, /^__Secure-yunpanel_elfinder=[A-Za-z0-9_-]{43};/);
+  assert.match(setCookie, /Path=\/tools\/elfinder\//);
+  assert.match(setCookie, /HttpOnly/);
+  assert.match(setCookie, /SameSite=Strict/);
+  assert.match(setCookie, /Secure/);
+  const toolCookie = setCookie.split(';')[0];
+
+  assert.deepEqual(handoffRequests, [{
+    method: 'POST',
+    url: '/consume',
+    body: { capability },
+  }]);
+  assert.equal(vendorRequests.length, 0);
+
+  const connector = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/elfinder/connector.php`,
+    {
+      method: 'POST',
+      headers: {
+        'x-real-ip': '203.0.113.8',
+        cookie: `__Host-yunpanel_session=owner; ${toolCookie}`,
+        origin: 'https://panel.example.com',
+        'content-type': 'application/x-www-form-urlencoded',
+        'x-yunpanel-elfinder-unix-user': 'yunapp-ffffffffffff',
+        'x-yunpanel-elfinder-website-id': 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+        'x-yunpanel-elfinder-application-id': 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      },
+      body: 'cmd=open&target=l1_Lw',
+    },
+  );
+  assert.equal(connector.status, 200);
+  assert.deepEqual(vendorRequests, [{
+    method: 'POST',
+    url: '/connector.php',
+    unixUser,
+    websiteId,
+    applicationId,
+    cookie: undefined,
+  }]);
+
+  const missingToolSession = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/elfinder/connector.php`,
+    {
+      method: 'POST',
+      headers: {
+        'x-real-ip': '203.0.113.8',
+        cookie: '__Host-yunpanel_session=owner',
+        origin: 'https://panel.example.com',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: 'cmd=open',
+    },
+  );
+  assert.equal(missingToolSession.status, 401);
+  assert.equal(vendorRequests.length, 1);
+
+  const wrongPanelSession = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/elfinder/connector.php`,
+    {
+      method: 'POST',
+      headers: {
+        'x-real-ip': '203.0.113.8',
+        cookie: `__Host-yunpanel_session=other-owner; ${toolCookie}`,
+        origin: 'https://panel.example.com',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: 'cmd=open',
+    },
+  );
+  assert.equal(wrongPanelSession.status, 403);
+  assert.equal(vendorRequests.length, 1);
+
+  assert.ok(accessRequests.length >= 4);
+  assert.ok(accessRequests.every((entry) => entry.url === '/api/elfinder-gateway-access'));
+  assert.ok(accessRequests.every((entry) => entry.proxyToken === proxyToken));
+  assert.ok(accessRequests.every((entry) => entry.clientIp === '203.0.113.8'));
+});
+
+test('elFinder gateway rejects query handoff, cross-origin bootstrap and direct connector access', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-elfinder-web-deny-'));
+  const gatewaySocketPath = path.join(directory, 'elfinder-http.sock');
+  const handoffSocketPath = path.join(directory, 'elfinder-handoff.sock');
+  let gatewayRequests = 0;
+  let handoffRequests = 0;
+
+  const gateway = http.createServer((_request, response) => {
+    gatewayRequests += 1;
+    response.end('vendor');
+  });
+  gateway.listen(gatewaySocketPath);
+  await once(gateway, 'listening');
+
+  const handoff = http.createServer((_request, response) => {
+    handoffRequests += 1;
+    response.writeHead(500);
+    response.end();
+  });
+  handoff.listen(handoffSocketPath);
+  await once(handoff, 'listening');
+
+  const api = http.createServer((request, response) => {
+    response.writeHead(
+      request.url === '/api/elfinder-gateway-access'
+        && request.headers.cookie === '__Host-yunpanel_session=owner'
+        ? 204 : 403,
+    );
+    response.end();
+  });
+  const apiPort = await listen(api);
+  const webRoot = path.join(directory, 'web');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(webRoot));
+  await writeFile(path.join(webRoot, 'index.html'), '<title>YunPanel</title>');
+  const panel = createPanelServer({
+    allowedClientIps: '203.0.113.8',
+    apiPort,
+    proxyToken,
+    publicOrigin: 'https://panel.example.com',
+    elFinderSocketPath: gatewaySocketPath,
+    elFinderHandoffSocketPath: handoffSocketPath,
+    webRoot,
+  });
+  const panelPort = await listen(panel);
+  t.after(async () => {
+    await close(panel);
+    await close(api);
+    await new Promise((resolve) => gateway.close(() => resolve()));
+    await new Promise((resolve) => handoff.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  const baseHeaders = {
+    'x-real-ip': '203.0.113.8',
+    cookie: '__Host-yunpanel_session=owner',
+    'content-type': 'application/json',
+  };
+  assert.equal((await fetch(
+    `http://127.0.0.1:${panelPort}/tools/elfinder/__yunpanel/handoff?capability=${'x'.repeat(43)}`,
+    {
+      method: 'POST',
+      headers: { ...baseHeaders, origin: 'https://panel.example.com' },
+      body: JSON.stringify({ capability: 'x'.repeat(43) }),
+    },
+  )).status, 400);
+  assert.equal((await fetch(
+    `http://127.0.0.1:${panelPort}/tools/elfinder/__yunpanel/handoff`,
+    {
+      method: 'POST',
+      headers: { ...baseHeaders, origin: 'https://attacker.example' },
+      body: JSON.stringify({ capability: 'x'.repeat(43) }),
+    },
+  )).status, 403);
+  assert.equal((await fetch(
+    `http://127.0.0.1:${panelPort}/tools/elfinder/connector.php`,
+    {
+      method: 'POST',
+      headers: {
+        'x-real-ip': '203.0.113.8',
+        cookie: '__Host-yunpanel_session=owner',
+        origin: 'https://panel.example.com',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: 'cmd=open',
+    },
+  )).status, 401);
+
+  assert.equal(handoffRequests, 0);
+  assert.equal(gatewayRequests, 0);
 });
