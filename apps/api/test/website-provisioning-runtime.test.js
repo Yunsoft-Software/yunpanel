@@ -374,3 +374,40 @@ test('runtime enables durable Unix identity isolation migration only with the co
   assert.equal(typeof provisioning.isolationMigration?.start, 'function');
   assert.equal(typeof provisioning.isolationMigration?.rollback, 'function');
 });
+
+
+test('runtime exposes SFTP migration lifecycle only after key-aware SFTP configuration', () => {
+  const provisioning = createWebsiteProvisioningRuntime({
+    sftpSiteManager: {
+      async apply() { return { satisfied: true, adapter: 'openssh-internal-sftp' }; },
+      async inspect() { return { satisfied: false, reason: 'sftp_site_not_active' }; },
+      async previewMigration() {
+        return { version: 1, satisfied: false, safeCreateCandidate: true, current: {}, desired: {}, differences: [] };
+      },
+      async inspectMigrationOperation() { return { satisfied: false, reason: 'sftp_site_not_active' }; },
+      async applyMigration() {
+        return { satisfied: true, sftpReceiptVersion: 1, activatedSftpIsolation: true };
+      },
+      async compensate() { return { satisfied: true, removed: true }; },
+      async inspectCompensation() { return { satisfied: true, removed: true }; },
+      async inspectMigrationCompensation() { return { satisfied: true, removedSftpIsolation: true }; },
+      async compensateMigration() { return { satisfied: true, removedSftpIsolation: true }; },
+    },
+  });
+
+  assert.equal(typeof provisioning.handlers.sftp.applyMigration, 'function');
+  provisioning.configureSftpKeys({
+    sftpKeyService: {
+      async reconcile() {
+        return { satisfied: true, adapter: 'openssh-authorized-keys', keyCount: 0, sha256: 'a'.repeat(64) };
+      },
+      async inspectMaterialization() {
+        return { satisfied: true, adapter: 'openssh-authorized-keys', keyCount: 0, sha256: 'a'.repeat(64) };
+      },
+    },
+  });
+  assert.equal(typeof provisioning.handlers.sftp.inspectMigrationOperation, 'function');
+  assert.equal(typeof provisioning.handlers.sftp.applyMigration, 'function');
+  assert.equal(typeof provisioning.handlers.sftp.inspectMigrationCompensation, 'function');
+  assert.equal(typeof provisioning.handlers.sftp.compensateMigration, 'function');
+});
