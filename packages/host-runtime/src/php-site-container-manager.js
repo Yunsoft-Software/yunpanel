@@ -114,6 +114,123 @@ export function createPhpSiteContainerManager({
     }
   }
 
+  async function previewMigration(rawIntent, { operationId } = {}) {
+    const spec = normalizeIntent(rawIntent, operationId);
+    let identity;
+    try {
+      const value = await identityEvidence(spec);
+      identity = value?.satisfied === true
+        ? Object.freeze({
+          satisfied: true,
+          uid: value.uid,
+          gid: value.gid,
+          homeDirectory: value.homeDirectory,
+        })
+        : Object.freeze({
+          satisfied: false,
+          reason: value?.reason ?? 'website_identity_unavailable',
+        });
+    } catch (error) {
+      identity = Object.freeze({
+        satisfied: false,
+        reason: typeof error?.code === 'string' ? error.code : 'php_site_container_identity_inspection_failed',
+      });
+    }
+
+    async function state(target) {
+      try {
+        const info = await lstatFn(target);
+        return Object.freeze({
+          present: true,
+          directory: Boolean(info?.isDirectory?.()),
+          symbolicLink: Boolean(info?.isSymbolicLink?.()),
+          uid: Number.isSafeInteger(info?.uid) ? info.uid : null,
+          gid: Number.isSafeInteger(info?.gid) ? info.gid : null,
+          mode: modeOf(info).toString(8).padStart(4, '0'),
+        });
+      } catch (error) {
+        if (missing(error)) return Object.freeze({ present: false });
+        throw new PhpSiteContainerManagerError('php_site_container_path_unavailable', 'PHP Website runtime container could not be inspected');
+      }
+    }
+
+    const [applicationRoot, releasesDirectory, releaseDirectory, releaseDocumentRoot, currentRelease] = await Promise.all([
+      state(spec.applicationRoot),
+      state(spec.releasesDirectory),
+      state(spec.releaseDirectory),
+      state(spec.releaseDocumentRoot),
+      state(spec.currentRelease),
+    ]);
+
+    let currentTarget = null;
+    let currentTargetError = null;
+    if (currentRelease.present && currentRelease.symbolicLink) {
+      try { currentTarget = await readlinkFn(spec.currentRelease); }
+      catch { currentTargetError = 'php_site_container_current_unavailable'; }
+    }
+
+    const differences = [];
+    if (!identity.satisfied) differences.push(identity.reason);
+    const entries = [applicationRoot, releasesDirectory, releaseDirectory, releaseDocumentRoot, currentRelease];
+    if (entries.some((entry) => !entry.present)) differences.push('php_site_container_path_missing');
+    if (applicationRoot.present && (
+      !applicationRoot.directory || applicationRoot.symbolicLink || applicationRoot.uid !== 0
+      || applicationRoot.gid !== 0 || applicationRoot.mode !== '0755'
+    )) differences.push('php_site_container_control_plane_drift');
+    if (releasesDirectory.present && (
+      !releasesDirectory.directory || releasesDirectory.symbolicLink || releasesDirectory.uid !== 0
+      || releasesDirectory.gid !== 0 || releasesDirectory.mode !== '0755'
+    )) differences.push('php_site_container_control_plane_drift');
+    if (currentRelease.present && (
+      !currentRelease.symbolicLink || currentRelease.uid !== 0 || currentRelease.gid !== 0
+    )) differences.push('php_site_container_control_plane_drift');
+    if (identity.satisfied && releaseDirectory.present && (
+      !releaseDirectory.directory || releaseDirectory.symbolicLink
+      || releaseDirectory.uid !== identity.uid || releaseDirectory.gid !== identity.gid
+      || releaseDirectory.mode !== '0750'
+    )) differences.push('php_site_container_release_drift');
+    if (identity.satisfied && releaseDocumentRoot.present && (
+      !releaseDocumentRoot.directory || releaseDocumentRoot.symbolicLink
+      || releaseDocumentRoot.uid !== identity.uid || releaseDocumentRoot.gid !== identity.gid
+      || releaseDocumentRoot.mode !== '0750'
+    )) differences.push('php_site_container_release_drift');
+    if (currentTargetError) differences.push(currentTargetError);
+    else if (currentRelease.present && currentRelease.symbolicLink && currentTarget !== spec.releaseDirectory) {
+      differences.push('php_site_container_current_drift');
+    }
+
+    return Object.freeze({
+      version: 1,
+      adapter: 'php-container',
+      satisfied: differences.length === 0,
+      current: Object.freeze({
+        identity,
+        applicationRoot,
+        releasesDirectory,
+        releaseDirectory,
+        releaseDocumentRoot,
+        currentRelease,
+        currentTarget,
+        currentTargetError,
+      }),
+      desired: Object.freeze({
+        websiteId: spec.websiteId,
+        applicationId: spec.applicationId,
+        releaseId: spec.releaseId,
+        unixUser: spec.unixUser,
+        documentRoot: spec.documentRoot,
+        applicationRoot: spec.applicationRoot,
+        releasesDirectory: spec.releasesDirectory,
+        currentRelease: spec.currentRelease,
+        releaseDirectory: spec.releaseDirectory,
+        releaseDocumentRoot: spec.releaseDocumentRoot,
+        controlDirectoryMode: '0755',
+        releaseDirectoryMode: '0750',
+      }),
+      differences: Object.freeze([...new Set(differences)]),
+    });
+  }
+
   async function inspect(rawIntent, { operationId } = {}) {
     const spec = normalizeIntent(rawIntent, operationId);
     const identity = await identityEvidence(spec);
@@ -204,7 +321,7 @@ export function createPhpSiteContainerManager({
     return verified;
   }
 
-  return Object.freeze({ inspect, apply });
+  return Object.freeze({ inspect, previewMigration, apply });
 }
 
 export const phpSiteContainerManagerInternals = Object.freeze({
