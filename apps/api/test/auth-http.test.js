@@ -147,6 +147,34 @@ test('session listing and logout use the same backend-verified session', async (
   assert.equal((await app.request('/api/servers', { headers: { cookie } })).status, 401);
 });
 
+test('tool gateway access gates require the live management Owner session and bypass core handlers', async (t) => {
+  const app = await fixture(t);
+  for (const pathname of ['/api/phpmyadmin-gateway-access', '/api/elfinder-gateway-access']) {
+    assert.equal((await app.request(pathname)).status, 401);
+    assert.equal((await app.request(pathname, { headers: { cookie } })).status, 204);
+    assert.equal((await app.request(pathname, {
+      method: 'POST',
+      headers: mutationHeaders,
+      body: {},
+    })).status, 405);
+  }
+  assert.equal(app.calls(), 0);
+});
+
+test('read-only role cannot enter protected tool gateways', async (t) => {
+  const store = fakeStore();
+  const getSession = store.getSession;
+  store.getSession = (token) => {
+    const session = getSession(token);
+    return session && { ...session, user: { ...session.user, role: 'read_only' } };
+  };
+  const app = await fixture(t, { store });
+  for (const pathname of ['/api/phpmyadmin-gateway-access', '/api/elfinder-gateway-access']) {
+    assert.equal((await app.request(pathname, { headers: { cookie } })).status, 403);
+  }
+  assert.equal(app.calls(), 0);
+});
+
 test('read-only role reaches only its explicitly declared inventory surface', async (t) => {
   const store = fakeStore();
   const getSession = store.getSession;
