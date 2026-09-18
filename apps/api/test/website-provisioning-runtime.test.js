@@ -319,3 +319,58 @@ test('runtime restart keeps interrupted SFTP applying until authorized-key desir
   assert.equal(baseApplyCalls, 0);
   assert.equal(reconcileCalls, 1);
 });
+
+
+test('runtime enables durable Unix identity isolation migration only with the complete lifecycle manager', () => {
+  const lifecycleManager = {
+    async inspectWorkspace() { return { satisfied: true }; },
+    async inspectWorkspaceOperation() { return { satisfied: true, createdWorkspaceDirectories: 0 }; },
+    async applyWorkspace() { return { satisfied: true, workspaceReceiptVersion: 1, createdWorkspaceDirectories: 0 }; },
+    async inspectWorkspaceCompensation() { return { satisfied: true, removedWorkspaceDirectories: 0 }; },
+    async compensateWorkspace() { return { satisfied: true, removedWorkspaceDirectories: 0 }; },
+    async inspectIdentityOperation() {
+      return { satisfied: false, reason: 'website_identity_operation_receipt_missing' };
+    },
+    async applyIdentityMigration() {
+      return { satisfied: true, identityReceiptVersion: 1, createdUnixIdentity: true };
+    },
+    async inspectIdentityMigrationCompensation() {
+      return { satisfied: true, removedUser: true, removedGroup: true, removedHome: true };
+    },
+    async compensateIdentityMigration() {
+      return { satisfied: true, removedUser: true, removedGroup: true, removedHome: true };
+    },
+  };
+  const provisioning = createWebsiteProvisioningRuntime({
+    isolationWorkspaceManager: lifecycleManager,
+  });
+  const websiteRegistry = {
+    async getWebsite(id) {
+      return id === websiteId ? {
+        id: websiteId,
+        serverId: '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7',
+        applicationId,
+        runtimeType: 'php',
+        unixUser: 'yunapp-4dc352e64a14',
+        documentRoot: `/var/lib/yunpanel/apps/${applicationId}/current/public`,
+        revision: 1,
+      } : null;
+    },
+  };
+  const applicationRegistry = {
+    async getApplication(id) {
+      return id === applicationId ? {
+        id: applicationId,
+        serverId: '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7',
+        type: 'php',
+      } : null;
+    },
+  };
+
+  assert.deepEqual(
+    provisioning.configureIsolationAudit({ websiteRegistry, applicationRegistry }),
+    { configured: true },
+  );
+  assert.equal(typeof provisioning.isolationMigration?.start, 'function');
+  assert.equal(typeof provisioning.isolationMigration?.rollback, 'function');
+});
