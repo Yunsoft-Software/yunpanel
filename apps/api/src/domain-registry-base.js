@@ -95,7 +95,8 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
         || new Date(domain.lastResumedAt).toISOString() !== domain.lastResumedAt))
     || ((domain.lastSuspensionOperationId === null) !== (domain.lastResumedAt === null))
     || (domain.state === 'suspended'
-      && (domain.suspensionOperationId === null || domain.suspendedAt === null || domain.suspendedChecksum === null))
+      && (domain.suspensionOperationId === null || domain.suspendedAt === null
+        || domain.suspendedChecksum === null || domain.lastError !== null))
     || (domain.state !== 'suspended'
       && (domain.suspensionOperationId !== null || domain.suspendedAt !== null || domain.suspendedChecksum !== null))) {
     throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain suspension metadata is invalid', 409);
@@ -1000,6 +1001,13 @@ export function createDomainRegistry({
   async function markFailed(domainId, errorCode) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
+    if (domain.state === 'suspended') {
+      throw new DomainRegistryError(
+        'domain_suspended_failure_blocked',
+        'Suspended Domain state can be changed only through the resume lifecycle',
+        409,
+      );
+    }
     domain.state = 'error';
     domain.lastError = typeof errorCode === 'string' && /^[a-z0-9_]{1,120}$/.test(errorCode) ? errorCode : 'apply_failed';
     domain.updatedAt = new Date(now()).toISOString();
