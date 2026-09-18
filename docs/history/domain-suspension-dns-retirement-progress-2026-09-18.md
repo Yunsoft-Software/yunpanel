@@ -44,14 +44,28 @@ Bu checkpoint'ten sonra delete orchestrator'a doğrudan kullanılacak üç kayna
 - Local authoritative DNS retirement service/runtime artık API bootstrap'ta tek shared instance olarak initialize edilir ve durable operation store'u control-plane state root altında tutulur. Public standalone destructive start/retry route'u yine açılmamıştır; üst Domain/Website delete orchestrator'ı beklenir.
 - Bu primitive'ler reverse-order durable Domain delete operation journal'ı yerine geçmez. Resource-impact digest pinleme, child operation/evidence ve restart recovery hâlâ açık iştir.
 
+## Durable Domain removal parent operation
+
+P0.9 Domain delete orchestrator'ının ilk durable parent katmanı da kaynakta eklendi.
+
+- Side-effect-free removal planner current Domain state'ini resource-impact `previewDigest`/confirmation ile birleştirir; exact Domain revision, staged/applied Nginx checksum, current Website/certificate binding'leri, external DNS/mail dependency kimlikleri, additional dependency inventory ve authoritative DNS retirement digest'ini tek parent preview digest'ine pinler.
+- Active Domain job, unavailable dependency inventory veya authoritative DNS tarafındaki manual RRset/DNSSEC/ownership/retention/inventory gibi üst orchestrator tarafından güvenle çözülemeyen blocker'lar parent start'ı fail-closed kapatır.
+- Descendant Domain listesi alfabetik cascade değildir. Parent/child topology doğrulanır, disconnected/cyclic inventory reddedilir ve removal plan en derin descendant'tan doğrudan child'a doğru deterministic sıra üretir.
+- Parent removal operation root-private durable JSON journal'dır. Step sırası routing suspend → deepest-first child Domains → certificate → mail domain → external DNS → Website binding → authoritative DNS → metadata finalization olarak pinlenir; exact impact/start confirmation public view'a çıkmaz.
+- İlk gerçek step `routing_suspend` mevcut `DomainSuspensionRuntime`ı child operation olarak kullanır. Yeni bir Nginx lifecycle yazılmaz.
+- Parent restart `running` routing step'inde child suspension operation'larını salt-okunur inceler. Exact child `suspended` evidence varsa parent step kapanır; child incomplete/failed/yoksa parent `blocked` olur ve explicit retry bekler. Startup child `start`/`retrySuspend` çağırmaz.
+- Parent explicit routing retry current parent `updatedAt` + checksum + typed confirmation'a bağlıdır. Matching failed/suspending child varsa onun kendi typed retry confirmation'ı kullanılır; yoksa current suspension preview tekrar doğrulanarak child start edilir.
+- Zaten suspended Domain için parent exact `suspensionOperationId`'yi reuse eder; foreign/ambiguous suspension operation state fail-closed kalır.
+- Certificate, mail-domain ve external-DNS kaynaklarında full destructive lifecycle henüz olmadığı için parent journal bu step'leri başarılı varsaymaz ve public Domain delete apply yüzeyi henüz açılmamıştır.
+
 ## Test durumu
 
 Bu checkpoint'te ilgili source test dosyaları ve failure-injection contract'ları repository'ye küçük commitlerle eklendi. Bu ortamda repository checkout + Node workspace test suite'i çalıştırılmadı; bu nedenle yeni testler için pass sayısı iddia edilmez.
 
 ## Kalan P0.9 işi
 
-1. Domain delete durable orchestrator: mevcut resource-impact preview'ı operation intent'ine pinle.
-2. Reverse-order dependency cleanup/finalize adımları: routing suspend/deactivate, certificate/mail/webmail/external DNS, authoritative DNS retirement, Domain metadata finalization.
+1. Domain delete parent journal'ındaki deepest-first child Domain, certificate/mail/webmail/external DNS, Website detach, authoritative DNS ve metadata finalization handler'larını tamamla.
+2. Certificate/mail-domain/external-DNS için operation-owned destructive lifecycle ve inspect-first restart recovery ekle; kaynak gerçekten temizlenmeden parent step'i başarılı sayma.
 3. Website delete: bağlı Domain delete operation'larını child operation/evidence olarak bitirip sonra runtime/Unix/files/database/SFTP/log/backup cleanup'a ilerle.
 4. Website-wide suspend: bütün bağlı Domain route'ları + seçilen runtime/process access lifecycle.
 5. Gerçek Ubuntu/Nginx/PowerDNS process-kill, reload, restart, browser ve provider kabulü.
