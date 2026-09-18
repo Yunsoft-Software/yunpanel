@@ -253,6 +253,34 @@ test('isolation audit pins a public-safe Unix identity migration preview into dr
   assert.notEqual(first.migration.previewDigest, second.migration.previewDigest);
 });
 
+test('isolation audit ignores Unix identity migration previews that target a non-canonical identity', async () => {
+  const drift = Object.assign(new Error('drift'), { code: 'website_identity_drift' });
+  const audit = await service({
+    stepResults: { unix_identity: drift },
+    migrationPreviews: {
+      unix_identity: {
+        version: 1,
+        satisfied: false,
+        safeCreateCandidate: true,
+        current: { account: null, group: null, home: null },
+        desired: {
+          user: 'yunapp-aaaaaaaaaaaa',
+          homeDirectory: identity.paths.workspace.homeDirectory,
+          shellPolicy: 'nologin',
+          privateGroup: true,
+          groupMemberCount: 0,
+          homeMode: '0750',
+        },
+        differences: ['website_identity_user_missing'],
+      },
+    },
+  }).audit(websiteId);
+
+  const change = audit.migration.changes.find((entry) => entry.id === 'provisioning.unix_identity');
+  assert.equal(change.current.identityMigrationPreview, undefined);
+  assert.equal(audit.inspectedSteps[0].identityMigrationPreview, undefined);
+});
+
 test('isolation audit fails closed when managed host inspection detects drift', async () => {
   const drift = new Error('drift');
   drift.code = 'website_identity_workspace_drift';
