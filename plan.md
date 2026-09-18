@@ -34,7 +34,7 @@ Son Domain suspension ve DNS retirement ilerlemesi: `docs/history/domain-suspens
 
 ## P0.3 — Versioned DNS Zone Template ve Domain DNS yönetimi
 
-Kaynakta authoritative zone retirement impact, exact provisioning-origin ownership evidence, explicit snapshot retention policy, private retained snapshot journal, exact snapshot-bound PowerDNS delete primitive ve inspect-only restart recovery hazırdır. Standalone destructive DNS delete route'u özellikle açılmadı; mutation yalnız P0.9 Domain/Website reverse-dependency delete orchestrator'ı içinden çağrılacaktır.
+Kaynakta authoritative zone retirement impact, exact provisioning-origin ownership evidence, explicit snapshot retention policy, private retained snapshot journal, exact snapshot-bound PowerDNS delete primitive ve inspect-only restart recovery hazırdır. Durable DNS retirement service/runtime artık production API bootstrap'ında tek shared instance olarak root-private operation store ile initialize edilir. Standalone destructive DNS delete route'u özellikle açılmadı; mutation yalnız P0.9 Domain/Website reverse-dependency delete orchestrator'ı içinden çağrılacaktır.
 
 - [ ] Domain delete orchestrator'ında local authoritative zone retirement step'ini mail/certificate/routing bağımlılıkları temizlendikten sonra çalıştır; external DNS ve parent delegation ayrı lifecycle olarak kalsın.
 - [ ] DNSSEC açık zone deletion'da parent DS retirement/propagation tamamlanmadan destructive PowerDNS step'ini açma.
@@ -105,7 +105,7 @@ Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözl
 
 ## P0.9 — Suspend/delete/rollback
 
-Domain-level web traffic suspend/resume source lifecycle tamamlandı: exact Nginx checksum-bound deactivation receipt, explicit `suspended` Domain state, durable suspend→resume operation, typed preview/retry/resume confirmation, restart inspect-only reconciliation ve failure compensation kaynakta vardır. Bu işlem Domain vhost trafiğini durdurur; Website process/runtime lifecycle'ını durdurduğu iddia edilmez.
+Domain-level web traffic suspend/resume source lifecycle tamamlandı: exact Nginx checksum-bound deactivation receipt, explicit `suspended` Domain state, durable suspend→resume operation, typed preview/retry/resume confirmation, restart inspect-only reconciliation ve failure compensation kaynakta vardır. Exact suspended revision/checksum/operation evidence altında Website ve certificate binding'lerini idempotent olarak detach eden removal primitive'leri ile child/Website/certificate dependency kalmadığında typed confirmation isteyen Domain metadata finalization primitive'i de kaynakta hazırdır. Bu işlem Domain vhost trafiğini durdurur; Website process/runtime lifecycle'ını durdurduğu iddia edilmez ve bu primitive'ler tek başına full delete orchestrator sayılmaz.
 
 - [ ] Website-wide suspend tüm bağlı Domain route'larını ve seçilen runtime/process erişimini operation-owned tek lifecycle'da durdursun; bir Domain suspend başarısızsa partial state/retry açık kalsın.
 - [ ] Domain remove ve Website delete ayrı durable operation olsun; standalone authoritative DNS delete route'u açma.
