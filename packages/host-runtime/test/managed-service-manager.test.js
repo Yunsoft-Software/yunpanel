@@ -197,16 +197,22 @@ test('elFinder installs only PHP runtime dependencies and validates the packaged
   assert.deepEqual(result.units, []);
   assert.deepEqual(result.health, { status: 'installed', configuration: 'valid' });
   assert.deepEqual(result.packages.map((entry) => entry.packageName), [
-    'php-fpm', 'php-mbstring', 'php-zip',
+    'php-fpm', 'php-mbstring', 'php-zip', 'libjs-jquery', 'libjs-jquery-ui',
   ]);
   assert.deepEqual(calls.find(([file, args]) => file === '/usr/bin/apt-get' && args[0] === 'install')?.[1], [
-    'install', '--yes', '--no-install-recommends', 'php-fpm', 'php-mbstring', 'php-zip',
+    'install', '--yes', '--no-install-recommends',
+    'php-fpm', 'php-mbstring', 'php-zip', 'libjs-jquery', 'libjs-jquery-ui',
   ]);
   for (const expected of [
     '-f /usr/share/yunpanel/elfinder/VERSION',
+    '-f /usr/share/yunpanel/elfinder/index.html',
+    '-f /usr/share/yunpanel/elfinder/yunpanel-client.js',
     '-f /usr/share/yunpanel/elfinder/vendor/elfinder/elfinder.html',
     '-f /usr/share/yunpanel/elfinder/vendor/elfinder/php/autoload.php',
     '-f /usr/share/yunpanel/elfinder/connector.php',
+    '-f /usr/share/javascript/jquery/jquery.min.js',
+    '-f /usr/share/javascript/jquery-ui/jquery-ui.min.js',
+    '-f /usr/share/javascript/jquery-ui/themes/base/jquery-ui.min.css',
   ]) {
     assert.ok(calls.some(([file, args]) => file === '/usr/bin/test' && args.join(' ') === expected));
   }
