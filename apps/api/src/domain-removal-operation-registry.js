@@ -216,7 +216,9 @@ function buildSteps(preview, createdAt) {
   for (const id of plan.mailDomainIds) add('mail_domain', id);
   for (const id of plan.dnsZoneIds) add('external_dns_zone', id);
   if (plan.websiteId !== null) add('website_binding', plan.websiteId);
-  if (plan.authoritativeDns?.zoneSnapshotDigest !== null) add('authoritative_dns', preview.domain.id);
+  if (plan.authoritativeDns !== null && plan.authoritativeDns.zoneSnapshotDigest !== null) {
+    add('authoritative_dns', preview.domain.id);
+  }
   add('metadata_finalization', preview.domain.id);
   return Object.freeze({ plan, steps: Object.freeze(steps) });
 }

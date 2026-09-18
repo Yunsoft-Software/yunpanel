@@ -108,6 +108,23 @@ test('journals deterministic reverse-dependency steps and preserves private star
   assert.equal(Object.hasOwn(publicView, 'startConfirmation'), false);
 });
 
+test('omits authoritative DNS mutation when the removal plan has no local zone', async () => {
+  const withoutAuthoritativeDns = preview();
+  withoutAuthoritativeDns.plan = {
+    ...withoutAuthoritativeDns.plan,
+    authoritativeDns: null,
+  };
+  const registry = createDomainRemovalOperationRegistry({
+    idFactory: () => 'operation-1',
+    now: () => Date.parse('2026-09-18T20:00:00.000Z'),
+  });
+
+  const operation = await registry.create(withoutAuthoritativeDns);
+
+  assert.equal(operation.steps.some((step) => step.kind === 'authoritative_dns'), false);
+  assert.equal(operation.steps.at(-1).kind, 'metadata_finalization');
+});
+
 test('enforces journal order and allows failed or blocked current step retry', async () => {
   let clock = Date.parse('2026-09-18T20:00:00.000Z');
   const registry = createDomainRemovalOperationRegistry({

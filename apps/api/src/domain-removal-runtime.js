@@ -7,6 +7,7 @@ import {
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ROUTING_CHILD_STATUSES = new Set(['pending', 'suspending', 'suspended', 'failed']);
+const CONTROL_PLANE_STEP_KINDS = new Set(['website_binding', 'metadata_finalization']);
 
 export class DomainRemovalRuntimeError extends Error {
   constructor(code, message, status = 400) {
@@ -43,6 +44,10 @@ function routingRetryConfirmation(operation) {
   return `retry-domain-remove-routing:${operation.domainId}:${operation.id}:${operation.updatedAt}:${operation.checksum}`;
 }
 
+function stepContinuationConfirmation(operation, step) {
+  return `continue-domain-remove-step:${operation.domainId}:${operation.id}:${step.id}:${operation.updatedAt}:${operation.checksum}`;
+}
+
 function firstIncomplete(operation) {
   return operation.steps.find((step) => step.status !== 'succeeded') ?? null;
 }
@@ -54,11 +59,17 @@ function publicOperation(operation) {
   const routingRetryable = step?.kind === 'routing_suspend'
     && ['running', 'blocked', 'failed'].includes(step.status)
     && operation.status !== 'removed';
+  const stepContinuable = step && CONTROL_PLANE_STEP_KINDS.has(step.kind)
+    && ['pending', 'running', 'blocked', 'failed'].includes(step.status)
+    && operation.status !== 'removed';
   return Object.freeze({
     ...base,
     actions: Object.freeze({
       routingRetryConfirmation: routingRetryable
         ? routingRetryConfirmation(operation)
+        : null,
+      stepContinuationConfirmation: stepContinuable
+        ? stepContinuationConfirmation(operation, step)
         : null,
     }),
   });
@@ -118,10 +129,74 @@ function completedSuspensionEvidence(operation, child) {
   });
 }
 
+function suspensionOperationId(operation) {
+  const routing = operation.steps.find((step) => step.kind === 'routing_suspend');
+  if (routing?.status !== 'succeeded' || typeof routing.result?.referenceId !== 'string') {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_routing_evidence_missing',
+      'Domain removal dependency mutation requires completed routing suspension evidence',
+      409,
+    );
+  }
+  return routing.result.referenceId;
+}
+
+function exactSuspendedDomain(operation, domain, expectedSuspensionOperationId) {
+  return Boolean(domain
+    && domain.id === operation.domainId
+    && domain.serverId === operation.serverId
+    && domain.primaryDomain === operation.primaryDomain
+    && domain.state === 'suspended'
+    && domain.desiredRevision === operation.domainRevision
+    && domain.stagedRevision === operation.domainRevision
+    && domain.appliedRevision === operation.domainRevision
+    && domain.stagedChecksum === operation.checksum
+    && domain.suspendedChecksum === operation.checksum
+    && domain.suspensionOperationId === expectedSuspensionOperationId
+    && domain.appliedPrimaryDomain === operation.primaryDomain
+    && domain.lastError === null);
+}
+
+function websiteBindingEvidence(operation, websiteId, suspensionId) {
+  return Object.freeze({
+    referenceId: websiteId,
+    evidenceDigest: digest({
+      kind: 'website_binding',
+      domainId: operation.domainId,
+      websiteId,
+      domainRevision: operation.domainRevision,
+      checksum: operation.checksum,
+      suspensionOperationId: suspensionId,
+      detached: true,
+    }),
+  });
+}
+
+function metadataFinalizationEvidence(operation, suspensionId) {
+  return Object.freeze({
+    referenceId: operation.domainId,
+    evidenceDigest: digest({
+      kind: 'metadata_finalization',
+      domainId: operation.domainId,
+      serverId: operation.serverId,
+      primaryDomain: operation.primaryDomain,
+      domainRevision: operation.domainRevision,
+      checksum: operation.checksum,
+      suspensionOperationId: suspensionId,
+      removed: true,
+    }),
+  });
+}
+
+function metadataFinalizationConfirmation(operation, suspensionId) {
+  return `finalize-domain-remove:${operation.domainId}:${suspensionId}:${operation.domainRevision}:${operation.checksum}`;
+}
+
 export function createDomainRemovalRuntime({
   registry,
   previewProvider,
   suspensionRuntime,
+  domainRegistry = null,
 } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
@@ -133,11 +208,257 @@ export function createDomainRemovalRuntime({
     || typeof suspensionRuntime.start !== 'function'
     || typeof suspensionRuntime.retrySuspend !== 'function'
     || typeof suspensionRuntime.get !== 'function'
-    || typeof suspensionRuntime.listForDomain !== 'function') {
+    || typeof suspensionRuntime.listForDomain !== 'function'
+    || (domainRegistry !== null && (
+      typeof domainRegistry?.getDomain !== 'function'
+      || typeof domainRegistry?.detachWebsiteForRemoval !== 'function'
+      || typeof domainRegistry?.finalizeDomainRemoval !== 'function'
+    ))) {
     throw new DomainRemovalRuntimeError(
       'domain_removal_runtime_dependencies_invalid',
       'Domain removal runtime dependencies are unavailable',
       503,
+    );
+  }
+
+  function requireDomainRegistry() {
+    if (!domainRegistry) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_control_plane_unavailable',
+        'Domain removal control-plane step handler is unavailable',
+        503,
+      );
+    }
+    return domainRegistry;
+  }
+
+  async function loadOperation(operationId) {
+    let operation;
+    try { operation = await registry.get(operationId); }
+    catch (error) { throw mapped(error); }
+    if (!operation) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_operation_not_found',
+        'Domain removal operation was not found',
+        404,
+      );
+    }
+    return operation;
+  }
+
+  async function runningStep(operation, expectedKind) {
+    const first = firstIncomplete(operation);
+    if (!first || first.kind !== expectedKind) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_step_out_of_order',
+        'Domain removal step does not match the next journaled dependency',
+        409,
+      );
+    }
+    const wasRunning = first.status === 'running';
+    if (!wasRunning) {
+      try { operation = await registry.markStepRunning(operation.id, first.id); }
+      catch (error) { throw mapped(error); }
+    }
+    const step = firstIncomplete(operation);
+    if (!step || step.kind !== expectedKind || step.status !== 'running') {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_step_state_invalid',
+        'Domain removal step state changed unexpectedly',
+        409,
+      );
+    }
+    return Object.freeze({ operation, step, wasRunning });
+  }
+
+  async function blockControlPlaneStep(operation, step, error) {
+    try {
+      return await registry.blockStep(
+        operation.id,
+        step.id,
+        safeFailure(
+          error,
+          'domain_removal_step_retry_required',
+          'Domain removal step requires explicit retry',
+        ),
+      );
+    } catch (registryError) { throw mapped(registryError); }
+  }
+
+  async function failControlPlaneStep(operation, step, error) {
+    try {
+      return await registry.failStep(
+        operation.id,
+        step.id,
+        safeFailure(error, 'domain_removal_step_failed', 'Domain removal step failed'),
+      );
+    } catch (registryError) { throw mapped(registryError); }
+  }
+
+  async function completeControlPlaneStep(operation, step, result) {
+    try { return await registry.succeedStep(operation.id, step.id, result); }
+    catch (error) { throw mapped(error); }
+  }
+
+  async function runWebsiteBinding(operationId, { allowMutation } = {}) {
+    const manager = requireDomainRegistry();
+    const prepared = await runningStep(await loadOperation(operationId), 'website_binding');
+    const { operation, step, wasRunning } = prepared;
+    const expectedWebsiteId = operation.plan.websiteId;
+    if (expectedWebsiteId === null || step.resourceId !== expectedWebsiteId) {
+      return publicOperation(await failControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_website_plan_invalid',
+        'Domain removal Website step does not match journaled dependency identity',
+        409,
+      )));
+    }
+    const suspensionId = suspensionOperationId(operation);
+    let domain;
+    try { domain = await manager.getDomain(operation.domainId); }
+    catch (error) { return publicOperation(await failControlPlaneStep(operation, step, error)); }
+    if (!exactSuspendedDomain(operation, domain, suspensionId)) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_website_domain_drift',
+        'Domain state no longer matches journaled Website detachment evidence',
+        409,
+      )));
+    }
+    const evidence = websiteBindingEvidence(operation, expectedWebsiteId, suspensionId);
+    if (domain.websiteId === null) {
+      if (!wasRunning && !allowMutation) {
+        return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+          'domain_removal_website_detachment_unowned',
+          'Website binding disappeared before this removal step owned the mutation',
+          409,
+        )));
+      }
+      return publicOperation(await completeControlPlaneStep(operation, step, evidence));
+    }
+    if (domain.websiteId !== expectedWebsiteId) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_website_binding_drift',
+        'Domain Website binding changed before removal cleanup',
+        409,
+      )));
+    }
+    if (!allowMutation) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_website_detach_retry_required',
+        'Website binding is still present; explicit removal continuation is required',
+        409,
+      )));
+    }
+    let detached;
+    try {
+      detached = await manager.detachWebsiteForRemoval(operation.domainId, {
+        expectedWebsiteId,
+        expectedRevision: operation.domainRevision,
+        checksum: operation.checksum,
+        suspensionOperationId: suspensionId,
+      });
+    } catch (error) {
+      if (Number(error?.status) === 409) {
+        return publicOperation(await blockControlPlaneStep(operation, step, error));
+      }
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    if (detached?.detachedWebsiteId !== expectedWebsiteId
+      || detached.domain?.websiteId !== null
+      || !exactSuspendedDomain(operation, detached.domain, suspensionId)) {
+      return publicOperation(await failControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_website_result_invalid',
+        'Website detachment result did not prove the journaled post-condition',
+        503,
+      )));
+    }
+    return publicOperation(await completeControlPlaneStep(operation, step, evidence));
+  }
+
+  async function runMetadataFinalization(operationId, { allowMutation } = {}) {
+    const manager = requireDomainRegistry();
+    const prepared = await runningStep(await loadOperation(operationId), 'metadata_finalization');
+    const { operation, step, wasRunning } = prepared;
+    if (step.resourceId !== operation.domainId) {
+      return publicOperation(await failControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_metadata_plan_invalid',
+        'Domain metadata finalization does not match journaled identity',
+        409,
+      )));
+    }
+    const suspensionId = suspensionOperationId(operation);
+    const evidence = metadataFinalizationEvidence(operation, suspensionId);
+    let domain;
+    try { domain = await manager.getDomain(operation.domainId); }
+    catch (error) { return publicOperation(await failControlPlaneStep(operation, step, error)); }
+    if (domain === null) {
+      if (!wasRunning) {
+        return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+          'domain_removal_metadata_absence_unowned',
+          'Domain metadata disappeared before this removal step owned the mutation',
+          409,
+        )));
+      }
+      return publicOperation(await completeControlPlaneStep(operation, step, evidence));
+    }
+    if (!exactSuspendedDomain(operation, domain, suspensionId)
+      || domain.websiteId !== null || domain.certificateId !== null) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_metadata_domain_drift',
+        'Domain metadata no longer matches finalization prerequisites',
+        409,
+      )));
+    }
+    if (!allowMutation) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_metadata_retry_required',
+        'Domain metadata remains present; explicit removal continuation is required',
+        409,
+      )));
+    }
+    let finalized;
+    try {
+      finalized = await manager.finalizeDomainRemoval(operation.domainId, {
+        operationId: suspensionId,
+        expectedRevision: operation.domainRevision,
+        checksum: operation.checksum,
+        confirmation: metadataFinalizationConfirmation(operation, suspensionId),
+      });
+    } catch (error) {
+      if (Number(error?.status) === 409) {
+        return publicOperation(await blockControlPlaneStep(operation, step, error));
+      }
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    if (finalized?.removed !== true
+      || finalized.domain?.id !== operation.domainId
+      || finalized.domain?.serverId !== operation.serverId
+      || finalized.domain?.primaryDomain !== operation.primaryDomain
+      || finalized.domain?.desiredRevision !== operation.domainRevision
+      || finalized.domain?.suspensionOperationId !== suspensionId
+      || finalized.domain?.suspendedChecksum !== operation.checksum) {
+      return publicOperation(await failControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_metadata_result_invalid',
+        'Domain metadata finalization did not prove the journaled post-condition',
+        503,
+      )));
+    }
+    return publicOperation(await completeControlPlaneStep(operation, step, evidence));
+  }
+
+  async function runControlPlaneStep(operationId, { allowMutation } = {}) {
+    const operation = await loadOperation(operationId);
+    const step = firstIncomplete(operation);
+    if (!step) return publicOperation(operation);
+    if (step.kind === 'website_binding') {
+      return runWebsiteBinding(operation.id, { allowMutation });
+    }
+    if (step.kind === 'metadata_finalization') {
+      return runMetadataFinalization(operation.id, { allowMutation });
+    }
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_step_handler_unavailable',
+      'The next Domain removal dependency does not yet have a destructive lifecycle handler',
+      409,
     );
   }
 
@@ -428,6 +749,38 @@ export function createDomainRemovalRuntime({
     return runRouting(operation.id, { allowHostMutation: true });
   }
 
+  async function continueStep({
+    domainId,
+    operationId,
+    expectedUpdatedAt,
+    stepId,
+    checksum,
+    confirmation,
+  } = {}) {
+    const operation = await loadOperation(operationId);
+    if (operation.domainId !== domainId) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_operation_not_found',
+        'Domain removal operation was not found',
+        404,
+      );
+    }
+    const step = firstIncomplete(operation);
+    if (!step || !CONTROL_PLANE_STEP_KINDS.has(step.kind)
+      || !['pending', 'running', 'blocked', 'failed'].includes(step.status)
+      || stepId !== step.id
+      || expectedUpdatedAt !== operation.updatedAt
+      || checksum !== operation.checksum
+      || confirmation !== stepContinuationConfirmation(operation, step)) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_step_continuation_stale',
+        'Domain removal step continuation is stale or confirmation is invalid',
+        409,
+      );
+    }
+    return runControlPlaneStep(operation.id, { allowMutation: true });
+  }
+
   async function reconcileInterrupted(operation) {
     const step = firstIncomplete(operation);
     if (!step || step.status !== 'running') {
@@ -439,6 +792,25 @@ export function createDomainRemovalRuntime({
           code: 'domain_removal_recovery_state_invalid',
           message: 'Domain removal interrupted state is invalid',
         }),
+      });
+    }
+    if (CONTROL_PLANE_STEP_KINDS.has(step.kind)) {
+      const result = await runControlPlaneStep(operation.id, { allowMutation: false });
+      const recoveredStep = result.steps.find((candidate) => candidate.id === step.id);
+      return Object.freeze({
+        operationId: operation.id,
+        recovered: recoveredStep?.status === 'succeeded',
+        operation: result,
+        ...(
+          recoveredStep?.status === 'succeeded'
+            ? {}
+            : {
+              error: Object.freeze({
+                code: 'domain_removal_step_retry_required',
+                message: 'Domain removal step requires explicit retry',
+              }),
+            }
+        ),
       });
     }
     if (step.kind !== 'routing_suspend') {
@@ -509,6 +881,7 @@ export function createDomainRemovalRuntime({
     preview,
     start,
     retryRouting,
+    continueStep,
     get,
     listForDomain,
   });
@@ -518,9 +891,15 @@ export const domainRemovalRuntimeInternals = Object.freeze({
   digest,
   safeFailure,
   routingRetryConfirmation,
+  stepContinuationConfirmation,
   firstIncomplete,
   publicOperation,
   currentPreviewMatches,
   exactSuspensionChild,
   completedSuspensionEvidence,
+  suspensionOperationId,
+  exactSuspendedDomain,
+  websiteBindingEvidence,
+  metadataFinalizationEvidence,
+  metadataFinalizationConfirmation,
 });
