@@ -21,3 +21,20 @@
 .ws-terminal-surface .xterm {
   height: 100%;
 }
+
+
+.ws-terminal-frame {
+  width: 100%;
+  min-height: 560px;
+  border: 0;
+  background: #0b1020;
+}
+
+.ws-terminal-surface[hidden] {
+  display: none;
+}
+
+.ws-terminal-migration-note {
+  margin: 0;
+  padding: 10px 14px 14px;
+}
