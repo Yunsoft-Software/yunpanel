@@ -6,10 +6,21 @@ import { recoverRunningDatabaseDelete } from '../src/job-running-database-delete
 const serverId = 'server-1';
 const jobId = '12345678-1234-4234-8234-123456789012';
 const databaseName = 'app_db';
+const websiteId = '22345678-1234-4234-8234-123456789012';
+const databaseBindingId = '32345678-1234-4234-8234-123456789012';
+const backupId = '42345678-1234-4234-8234-123456789012';
+const ownership = Object.freeze({
+  websiteId,
+  databaseBindingId,
+  expectedBindingRevision: 7,
+  backupId,
+  expectedBackupSha256: 'a'.repeat(64),
+});
 const receipt = Object.freeze({
   serverId,
   jobId,
   databaseName,
+  ownership: null,
   result: {
     engine: 'mariadb',
     version: '11.4.5-MariaDB',
@@ -23,6 +34,7 @@ function fixture({
   storedReceipt = receipt,
   databases = [],
   engine = 'mariadb',
+  payload = { name: databaseName },
 } = {}) {
   const events = [];
   let status = 'running';
@@ -59,7 +71,7 @@ function fixture({
       }),
       loadJobContext: async () => {
         events.push('context');
-        return { id: jobId, serverId, status: 'running', operation, resourceType: 'database', resourceId: databaseName, payload: { name: databaseName } };
+        return { id: jobId, serverId, status: 'running', operation, resourceType: 'database', resourceId: databaseName, payload };
       },
       readDeletionReceipt: async () => {
         events.push('receipt');
@@ -82,6 +94,35 @@ test('database delete recovery requires receipt and current absence before journ
   const result = await recoverRunningDatabaseDelete(fx.options);
   assert.equal(result.recoveryMethod, 'verified_database_deletion_receipt_and_absence');
   assert.deepEqual(fx.events, ['get', 'context', 'receipt', 'evidence', 'begin', 'complete', 'reconcile', 'ack']);
+});
+
+test('scoped database delete recovery requires exact ownership receipt evidence', async () => {
+  const payload = { name: databaseName, ...ownership };
+  const fx = fixture({
+    payload,
+    storedReceipt: { ...receipt, ownership },
+  });
+  const result = await recoverRunningDatabaseDelete(fx.options);
+  assert.equal(result.recoveryMethod, 'verified_database_deletion_receipt_and_absence');
+  assert.deepEqual(fx.events, ['get', 'context', 'receipt', 'evidence', 'begin', 'complete', 'reconcile', 'ack']);
+});
+
+test('scoped database delete recovery rejects missing or drifted ownership receipt evidence', async () => {
+  for (const storedReceipt of [
+    receipt,
+    { ...receipt, ownership: { ...ownership, expectedBindingRevision: 8 } },
+    { ...receipt, ownership: { ...ownership, backupId: '52345678-1234-4234-8234-123456789012' } },
+  ]) {
+    const fx = fixture({
+      payload: { name: databaseName, ...ownership },
+      storedReceipt,
+    });
+    await assert.rejects(
+      recoverRunningDatabaseDelete(fx.options),
+      { code: 'job_database_delete_recovery_receipt_mismatch' },
+    );
+    assert.deepEqual(fx.events, ['get', 'context', 'receipt']);
+  }
 });
 
 test('missing deletion receipt leaves running job untouched', async () => {
