@@ -374,7 +374,9 @@ export function createDnsZoneRetirementService({
       relatedDomains,
       authoritativeZone,
       ownershipOrigin,
-      configuredRetentionPolicy.configured ? configuredRetentionPolicy : null,
+      configuredRetentionPolicy.configured
+        ? { snapshotRetentionDays: configuredRetentionPolicy.snapshotRetentionDays }
+        : null,
     );
     const previewDigest = digest(identity);
     if (!SHA256_PATTERN.test(previewDigest)) {
