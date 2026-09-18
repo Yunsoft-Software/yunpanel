@@ -14,6 +14,7 @@ Son phpMyAdmin managed-package ilerlemesi: `docs/history/phpmyadmin-package-base
 Son phpMyAdmin protected signon/gateway ilerlemesi: `docs/history/phpmyadmin-signon-handoff-progress-2026-09-18.md`.
 Son phpMyAdmin browser handoff UI ilerlemesi: `docs/history/phpmyadmin-browser-handoff-2026-09-18.md`.
 Son Website database data scope ilerlemesi: `docs/history/database-website-data-scope-2026-09-18.md`.
+Son Website database delete lifecycle ilerlemesi: `docs/history/database-delete-lifecycle-2026-09-18.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -59,10 +60,6 @@ Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içi
 - [ ] External DNS domain için exact pending DNS requirements/provider apply.
 
 Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `todo.md` içindedir.
-
-## P0.5 — Website DB ownership + phpMyAdmin
-
-- [ ] Database delete'i backup requirement, ownership evidence ve retryable P0.9 compensation zincirine bağla.
 
 ## P0.6 — elFinder; homegrown File Manager removal
 
@@ -170,11 +167,10 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 2. **PowerDNS operator recovery** — restart-sonrası güvenli explicit rollback, typed confirmation ve fail-closed recovery control surface.
 3. **Mail explicit rollback** — mevcut v3 backup/previous-state preview'ından durable restore, compensation/restart recovery ve monoton control-plane reconciliation.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
-5. **Database + phpMyAdmin**.
-6. **elFinder**.
-7. **Transactional create/delete provisioning** parçalarını tek lifecycle'a birleştir.
-8. **TLS/autodiscover/recovery hardening**.
-9. Runtime migration/backup/monitoring/security/site extras.
-10. Legacy cleanup ve en son UI/UX polish.
+5. **elFinder**.
+6. **Transactional create/delete provisioning** parçalarını tek lifecycle'a birleştir.
+7. **TLS/autodiscover/recovery hardening**.
+8. Runtime migration/backup/monitoring/security/site extras.
+9. Legacy cleanup ve en son UI/UX polish.
 
 Her küçük dilim source test kontratıyla ayrı commit edilir. GitHub Actions kullanılmaz. Gerçek Ubuntu/package/public DNS/SMTP/browser/provider acceptance bu ortamda yapılamıyorsa `todo.md`'ye bırakılır ve ilgili P0 kapısı acceptance geçmeden `DONE` olmaz.
