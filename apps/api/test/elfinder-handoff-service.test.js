@@ -23,7 +23,12 @@ function website(overrides = {}) {
   };
 }
 
-function fixture({ initialWebsite = website(), now = 10_000, liveSessions = null } = {}) {
+function fixture({
+  initialWebsite = website(),
+  now = 10_000,
+  liveSessions = null,
+  runtimeInspection = null,
+} = {}) {
   let currentWebsite = initialWebsite;
   let clock = now;
   const service = createElFinderHandoffService({
@@ -33,6 +38,17 @@ function fixture({ initialWebsite = website(), now = 10_000, liveSessions = null
       },
     },
     localServerId: serverId,
+    runtimeInspector: runtimeInspection ?? (async (intent) => ({
+      satisfied: true,
+      adapter: 'elfinder-fpm',
+      websiteId: intent.websiteId,
+      applicationId: intent.applicationId,
+      unixUser: intent.unixUser,
+      root: `/var/lib/yunpanel/data/${intent.applicationId}`,
+      socketPath: `/run/php/yunpanel-elfinder-${intent.unixUser}.sock`,
+      connectorPath: '/usr/share/yunpanel/elfinder/connector.php',
+      runtimeUmask: '0027',
+    })),
     liveSessions,
     now: () => clock,
   });
@@ -128,6 +144,53 @@ test('elFinder handoff rejects remote, unsupported and forged Website targets be
     );
     assert.equal(fx.service.size(), 0);
   }
+});
+
+test('elFinder handoff fails closed when the per-Website Files runtime is not proven healthy', async () => {
+  for (const runtimeInspection of [
+    async () => ({ satisfied: false, reason: 'elfinder_fpm_socket_missing' }),
+    async (intent) => ({
+      satisfied: true,
+      adapter: 'elfinder-fpm',
+      websiteId: intent.websiteId,
+      applicationId: intent.applicationId,
+      unixUser: intent.unixUser,
+      root: `/var/lib/yunpanel/data/${intent.applicationId}`,
+      socketPath: '/run/php/forged.sock',
+      connectorPath: '/usr/share/yunpanel/elfinder/connector.php',
+      runtimeUmask: '0027',
+    }),
+  ]) {
+    const fx = fixture({ runtimeInspection });
+    await assert.rejects(
+      fx.service.issue({
+        sessionId: 'owner-session',
+        userId: 'owner-user',
+        serverId,
+        websiteId,
+      }),
+      (error) => error instanceof ElFinderHandoffError
+        && error.code === 'elfinder_handoff_runtime_not_ready'
+        && error.status === 409,
+    );
+    assert.equal(fx.service.size(), 0);
+  }
+
+  const unavailable = fixture({
+    runtimeInspection: async () => { throw new Error('private host detail'); },
+  });
+  await assert.rejects(
+    unavailable.service.issue({
+      sessionId: 'owner-session',
+      userId: 'owner-user',
+      serverId,
+      websiteId,
+    }),
+    (error) => error instanceof ElFinderHandoffError
+      && error.code === 'elfinder_handoff_runtime_unavailable'
+      && error.status === 503
+      && !error.message.includes('private host detail'),
+  );
 });
 
 test('elFinder handoff expires and is revoked with its Owner session', async () => {
