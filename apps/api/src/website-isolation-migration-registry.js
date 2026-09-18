@@ -69,7 +69,7 @@ function intent(value) {
   }
   const targets = value.targets.map(target);
   const adapter = value.adapter ?? (targets.length === 0 ? 'identity' : 'workspace');
-  if (!['workspace', 'identity', 'sftp'].includes(adapter)
+  if (!['workspace', 'identity', 'sftp', 'php'].includes(adapter)
     || (adapter === 'workspace' && targets.length < 1)
     || (adapter !== 'workspace' && targets.length !== 0)) {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', 'Website isolation migration adapter is invalid');
@@ -126,6 +126,10 @@ function evidence(value, field) {
     'removedSftpIsolation',
     'authorizedKeyCount',
     'authorizedKeysSha256',
+    'phpFpmReceiptVersion',
+    'createdPhpFpmPool',
+    'restoredPrevious',
+    'preservedExisting',
   ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).some((key) => !fields.has(key))
@@ -133,6 +137,7 @@ function evidence(value, field) {
     || (value.workspaceReceiptVersion !== undefined && value.workspaceReceiptVersion !== 1)
     || (value.identityReceiptVersion !== undefined && value.identityReceiptVersion !== 1)
     || (value.sftpReceiptVersion !== undefined && value.sftpReceiptVersion !== 1)
+    || (value.phpFpmReceiptVersion !== undefined && value.phpFpmReceiptVersion !== 1)
     || (value.authorizedKeyCount !== undefined
       && (!Number.isSafeInteger(value.authorizedKeyCount) || value.authorizedKeyCount < 0 || value.authorizedKeyCount > 100))
     || (value.authorizedKeysSha256 !== undefined
@@ -141,7 +146,7 @@ function evidence(value, field) {
       && (!Number.isSafeInteger(value.createdWorkspaceDirectories) || value.createdWorkspaceDirectories < 0 || value.createdWorkspaceDirectories > 2))
     || (value.removedWorkspaceDirectories !== undefined
       && (!Number.isSafeInteger(value.removedWorkspaceDirectories) || value.removedWorkspaceDirectories < 0 || value.removedWorkspaceDirectories > 2))
-    || ['createdUnixIdentity', 'removedUser', 'removedGroup', 'removedHome', 'preservedHomeData', 'activatedSftpIsolation', 'removedSftpIsolation']
+    || ['createdUnixIdentity', 'removedUser', 'removedGroup', 'removedHome', 'preservedHomeData', 'activatedSftpIsolation', 'removedSftpIsolation', 'createdPhpFpmPool', 'restoredPrevious', 'preservedExisting']
       .some((key) => value[key] !== undefined && typeof value[key] !== 'boolean')) {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', `${field} is invalid`);
   }
@@ -161,6 +166,10 @@ function evidence(value, field) {
     ...(value.removedSftpIsolation === undefined ? {} : { removedSftpIsolation: value.removedSftpIsolation }),
     ...(value.authorizedKeyCount === undefined ? {} : { authorizedKeyCount: value.authorizedKeyCount }),
     ...(value.authorizedKeysSha256 === undefined ? {} : { authorizedKeysSha256: value.authorizedKeysSha256 }),
+    ...(value.phpFpmReceiptVersion === undefined ? {} : { phpFpmReceiptVersion: value.phpFpmReceiptVersion }),
+    ...(value.createdPhpFpmPool === undefined ? {} : { createdPhpFpmPool: value.createdPhpFpmPool }),
+    ...(value.restoredPrevious === undefined ? {} : { restoredPrevious: value.restoredPrevious }),
+    ...(value.preservedExisting === undefined ? {} : { preservedExisting: value.preservedExisting }),
   });
 }
 
@@ -217,10 +226,11 @@ function operationFromAudit(audit, now, idFactory) {
   const change = migration?.changes?.length === 1 ? migration.changes[0] : null;
   const identityCreate = change?.action === 'create_canonical_unix_identity';
   const sftpCreate = change?.action === 'create_sftp_isolation';
-  const adapter = identityCreate ? 'identity' : sftpCreate ? 'sftp' : 'workspace';
+  const phpCreate = change?.action === 'create_php_fpm_pool';
+  const adapter = identityCreate ? 'identity' : sftpCreate ? 'sftp' : phpCreate ? 'php' : 'workspace';
   const targets = change?.action === 'create_workspace_directories'
     ? change.desired?.directories
-    : identityCreate || sftpCreate
+    : identityCreate || sftpCreate || phpCreate
       ? []
       : null;
   if (audit?.applicable !== true || audit.migrationRequired !== true
@@ -237,6 +247,17 @@ function operationFromAudit(audit, now, idFactory) {
       || change.desired?.sftp?.applicationId !== audit.applicationId
       || change.desired?.sftp?.unixUser !== audit.expected?.unixUser
       || change.desired?.sftp?.sourceDirectory !== createApplicationIdentity(audit.applicationId).paths.workspace.sftpRoot
+    ))
+    || (phpCreate && (
+      change.current?.phpRuntimeMigrationPreview?.safeCreateCandidate !== true
+      || change.desired?.phpRuntime?.websiteId !== audit.websiteId
+      || change.desired?.phpRuntime?.applicationId !== audit.applicationId
+      || change.desired?.phpRuntime?.unixUser !== audit.expected?.unixUser
+      || change.desired?.phpRuntime?.documentRoot !== path.posix.join(
+        createApplicationIdentity(audit.applicationId).paths.runtime.currentRelease,
+        'public',
+      )
+      || change.desired?.phpRuntime?.runtimeUmask !== '0027'
     ))
     || typeof audit.expected?.unixUser !== 'string' || typeof audit.expected?.homeDirectory !== 'string') {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_preview_invalid', 'Website isolation migration preview cannot be journaled');
