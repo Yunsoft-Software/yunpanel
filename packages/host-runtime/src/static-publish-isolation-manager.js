@@ -428,10 +428,35 @@ export function createStaticPublishIsolationManager({
       }
     }
 
+    const currentReleaseId = current.present && current.symbolicLink
+      ? releaseIdFromTarget(current.target)
+      : null;
+    const uniqueDifferences = [...new Set(differences)];
+    const safeMigrationCandidate = uniqueDifferences.length > 0
+      && identity.satisfied === true
+      && aclAvailable === true
+      && publishRootState.present === true
+      && publishRootState.directory === true
+      && publishRootState.symbolicLink === false
+      && releasesRootState.present === true
+      && releasesRootState.directory === true
+      && releasesRootState.symbolicLink === false
+      && releaseListError === null
+      && releaseStates.length > 0
+      && releaseStates.every((entry) => entry.satisfied === true)
+      && current.present === true
+      && current.symbolicLink === true
+      && currentReleaseId !== null
+      && releaseStates.some((entry) => entry.releaseId === currentReleaseId)
+      && uniqueDifferences.every((code) => (
+        code === 'static_publish_container_drift' || code === 'static_publish_current_drift'
+      ));
+
     return Object.freeze({
       version: 1,
       adapter: 'static-publish-isolation',
       satisfied: differences.length === 0,
+      safeMigrationCandidate,
       current: Object.freeze({
         identity,
         aclToolsAvailable: aclAvailable,
@@ -455,7 +480,7 @@ export function createStaticPublishIsolationManager({
         nginxFileAcl: 'user:www-data:r--',
         aclPackage: ACL_PACKAGE,
       }),
-      differences: Object.freeze([...new Set(differences)]),
+      differences: Object.freeze(uniqueDifferences),
     });
   }
 
@@ -498,6 +523,262 @@ export function createStaticPublishIsolationManager({
       releaseCount: releases.length,
       currentRelease: currentAbsolute,
     });
+  }
+
+  async function migrationSnapshot(spec) {
+    const identity = await inspectIdentity(spec);
+    if (!identity?.satisfied) {
+      throw new StaticPublishIsolationError('static_publish_migration_identity_required', 'Static publish migration requires the canonical Website identity');
+    }
+    if (!(await aclToolsAvailable())) {
+      throw new StaticPublishIsolationError('static_publish_migration_acl_unavailable', 'Static publish migration requires existing POSIX ACL tooling');
+    }
+
+    let publishInfo;
+    let releasesInfo;
+    let currentInfo;
+    try {
+      [publishInfo, releasesInfo, currentInfo] = await Promise.all([
+        lstatFn(spec.publishRoot),
+        lstatFn(spec.releasesRoot),
+        lstatFn(spec.currentPath),
+      ]);
+    } catch (error) {
+      if (missing(error)) {
+        throw new StaticPublishIsolationError('static_publish_migration_path_missing', 'Static publish migration requires the existing publish tree');
+      }
+      throw new StaticPublishIsolationError('static_publish_migration_path_unavailable', 'Static publish migration paths could not be inspected');
+    }
+    if (!publishInfo?.isDirectory?.() || publishInfo.isSymbolicLink?.()
+      || !releasesInfo?.isDirectory?.() || releasesInfo.isSymbolicLink?.()
+      || !currentInfo?.isSymbolicLink?.()) {
+      throw new StaticPublishIsolationError('static_publish_migration_path_type_drift', 'Static publish migration path types changed after preview');
+    }
+
+    const releases = await releaseDirectories(spec);
+    if (releases.length < 1) {
+      throw new StaticPublishIsolationError('static_publish_migration_release_missing', 'Static publish migration requires at least one managed release');
+    }
+    for (const release of releases) await inspectRelease(release, identity);
+
+    let currentTarget;
+    try { currentTarget = await readlinkFn(spec.currentPath); }
+    catch {
+      throw new StaticPublishIsolationError('static_publish_migration_current_unavailable', 'Static publish migration current release could not be read');
+    }
+    const releaseId = releaseIdFromTarget(currentTarget);
+    const currentAbsolute = releaseId ? path.posix.join(spec.releasesRoot, releaseId) : null;
+    if (!releaseId || !currentAbsolute || !releases.includes(currentAbsolute)) {
+      throw new StaticPublishIsolationError('static_publish_migration_current_drift', 'Static publish migration current release target is unmanaged');
+    }
+
+    return Object.freeze({
+      publishRoot: Object.freeze({ uid: publishInfo.uid, gid: publishInfo.gid, mode: modeOf(publishInfo) }),
+      releasesRoot: Object.freeze({ uid: releasesInfo.uid, gid: releasesInfo.gid, mode: modeOf(releasesInfo) }),
+      current: Object.freeze({ uid: currentInfo.uid, gid: currentInfo.gid }),
+      currentTarget,
+    });
+  }
+
+  function metadataMatches(current, expected, { symlink = false } = {}) {
+    return current.uid === expected.uid && current.gid === expected.gid && (symlink || current.mode === expected.mode);
+  }
+
+  function desiredMigrationMetadata() {
+    return Object.freeze({
+      publishRoot: Object.freeze({ uid: 0, gid: 0, mode: 0o711 }),
+      releasesRoot: Object.freeze({ uid: 0, gid: 0, mode: 0o711 }),
+      current: Object.freeze({ uid: 0, gid: 0 }),
+    });
+  }
+
+  function assertReceiptCompatibleSnapshot(snapshot, receipt) {
+    if (snapshot.currentTarget !== receipt.currentTarget) {
+      throw new StaticPublishIsolationError('static_publish_migration_current_drift', 'Static publish current release changed after the migration receipt checkpoint');
+    }
+    const desired = desiredMigrationMetadata();
+    for (const name of ['publishRoot', 'releasesRoot']) {
+      if (!metadataMatches(snapshot[name], receipt.previous[name]) && !metadataMatches(snapshot[name], desired[name])) {
+        throw new StaticPublishIsolationError('static_publish_migration_drift', 'Static publish control metadata changed after the migration receipt checkpoint');
+      }
+    }
+    if (!metadataMatches(snapshot.current, receipt.previous.current, { symlink: true })
+      && !metadataMatches(snapshot.current, desired.current, { symlink: true })) {
+      throw new StaticPublishIsolationError('static_publish_migration_drift', 'Static publish current symlink ownership changed after the migration receipt checkpoint');
+    }
+  }
+
+  async function inspectMigrationOperation(rawIntent, { operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const operationId = normalizeOperationId(rawOperationId);
+    let receipt = await loadMigrationReceipt(operationId, spec);
+    if (!receipt) return Object.freeze({ satisfied: false, reason: 'static_publish_migration_receipt_missing' });
+    if (receipt.state === 'compensated') {
+      return Object.freeze({ satisfied: false, reason: 'static_publish_migration_compensated' });
+    }
+
+    const snapshot = await migrationSnapshot(spec);
+    assertReceiptCompatibleSnapshot(snapshot, receipt);
+    const desired = desiredMigrationMetadata();
+    const satisfied = metadataMatches(snapshot.publishRoot, desired.publishRoot)
+      && metadataMatches(snapshot.releasesRoot, desired.releasesRoot)
+      && metadataMatches(snapshot.current, desired.current, { symlink: true });
+    if (!satisfied) {
+      return Object.freeze({ satisfied: false, reason: 'static_publish_migration_incomplete' });
+    }
+    if (receipt.state !== 'active') {
+      receipt = await persistMigrationReceipt(operationId, spec, { ...receipt, state: 'active' });
+    }
+    return Object.freeze({
+      satisfied: true,
+      staticControlReceiptVersion: MIGRATION_RECEIPT_VERSION,
+      migratedStaticControlMetadata: true,
+      receiptState: receipt.state,
+    });
+  }
+
+  async function applyMigration(rawIntent, { operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const operationId = normalizeOperationId(rawOperationId);
+    let receipt = await loadMigrationReceipt(operationId, spec);
+    if (receipt?.state === 'compensated') {
+      throw new StaticPublishIsolationError('static_publish_migration_compensated', 'Compensated static publish migration cannot be re-applied');
+    }
+    if (!receipt) {
+      const preview = await previewMigration(rawIntent);
+      if (preview.satisfied === true) {
+        throw new StaticPublishIsolationError('static_publish_migration_not_operation_owned', 'Canonical static control metadata is not owned by this migration operation');
+      }
+      if (preview.safeMigrationCandidate !== true) {
+        throw new StaticPublishIsolationError('static_publish_migration_not_safe', 'Static publish migration is limited to exact non-recursive control-plane metadata repair');
+      }
+      receipt = await persistMigrationReceipt(operationId, spec, {
+        currentTarget: preview.current.current.target,
+        previous: {
+          publishRoot: {
+            uid: preview.current.publishRoot.uid,
+            gid: preview.current.publishRoot.gid,
+            mode: Number.parseInt(preview.current.publishRoot.mode, 8),
+          },
+          releasesRoot: {
+            uid: preview.current.releasesRoot.uid,
+            gid: preview.current.releasesRoot.gid,
+            mode: Number.parseInt(preview.current.releasesRoot.mode, 8),
+          },
+          current: {
+            uid: preview.current.current.uid,
+            gid: preview.current.current.gid,
+          },
+        },
+        state: 'prepared',
+      });
+    }
+
+    const snapshot = await migrationSnapshot(spec);
+    assertReceiptCompatibleSnapshot(snapshot, receipt);
+    const desired = desiredMigrationMetadata();
+    try {
+      if (snapshot.publishRoot.uid !== desired.publishRoot.uid || snapshot.publishRoot.gid !== desired.publishRoot.gid) {
+        await run(CHOWN_PATH, ['root:root', spec.publishRoot], { timeout: 10_000 });
+      }
+      if (snapshot.publishRoot.mode !== desired.publishRoot.mode) await chmodFn(spec.publishRoot, 0o711);
+      if (snapshot.releasesRoot.uid !== desired.releasesRoot.uid || snapshot.releasesRoot.gid !== desired.releasesRoot.gid) {
+        await run(CHOWN_PATH, ['root:root', spec.releasesRoot], { timeout: 10_000 });
+      }
+      if (snapshot.releasesRoot.mode !== desired.releasesRoot.mode) await chmodFn(spec.releasesRoot, 0o711);
+      if (!metadataMatches(snapshot.current, desired.current, { symlink: true })) {
+        await run(CHOWN_PATH, ['-h', 'root:root', spec.currentPath], { timeout: 10_000 });
+      }
+    } catch {
+      throw new StaticPublishIsolationError('static_publish_migration_apply_failed', 'Static publish control metadata could not be applied');
+    }
+
+    const verified = await inspectMigrationOperation(rawIntent, { operationId });
+    if (!verified.satisfied) {
+      throw new StaticPublishIsolationError('static_publish_migration_unverified', 'Static publish control metadata could not be verified');
+    }
+    return verified;
+  }
+
+  async function inspectMigrationCompensation(rawIntent, { operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const operationId = normalizeOperationId(rawOperationId);
+    const receipt = await loadMigrationReceipt(operationId, spec);
+    if (!receipt) return Object.freeze({ satisfied: false, reason: 'static_publish_migration_receipt_missing' });
+
+    const snapshot = await migrationSnapshot(spec);
+    if (snapshot.currentTarget !== receipt.currentTarget) {
+      return Object.freeze({ satisfied: false, reason: 'static_publish_migration_compensation_drift' });
+    }
+    const desired = desiredMigrationMetadata();
+    for (const name of ['publishRoot', 'releasesRoot']) {
+      if (!metadataMatches(snapshot[name], receipt.previous[name]) && !metadataMatches(snapshot[name], desired[name])) {
+        return Object.freeze({ satisfied: false, reason: 'static_publish_migration_compensation_drift' });
+      }
+    }
+    if (!metadataMatches(snapshot.current, receipt.previous.current, { symlink: true })
+      && !metadataMatches(snapshot.current, desired.current, { symlink: true })) {
+      return Object.freeze({ satisfied: false, reason: 'static_publish_migration_compensation_drift' });
+    }
+    const restored = metadataMatches(snapshot.publishRoot, receipt.previous.publishRoot)
+      && metadataMatches(snapshot.releasesRoot, receipt.previous.releasesRoot)
+      && metadataMatches(snapshot.current, receipt.previous.current, { symlink: true });
+    return Object.freeze({
+      satisfied: restored,
+      restoredStaticControlMetadata: restored,
+      receiptState: receipt.state,
+      ...(restored ? {} : { reason: 'static_publish_migration_compensation_pending' }),
+    });
+  }
+
+  async function compensateMigration(rawIntent, { operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const operationId = normalizeOperationId(rawOperationId);
+    let receipt = await loadMigrationReceipt(operationId, spec);
+    if (!receipt) {
+      throw new StaticPublishIsolationError('static_publish_migration_receipt_missing', 'Static publish migration receipt is required for rollback');
+    }
+    if (receipt.state === 'compensated') return inspectMigrationCompensation(rawIntent, { operationId });
+
+    const before = await inspectMigrationCompensation(rawIntent, { operationId });
+    if (before.reason === 'static_publish_migration_compensation_drift') {
+      throw new StaticPublishIsolationError('static_publish_migration_compensation_drift', 'Static publish metadata changed after migration and cannot be safely restored');
+    }
+    if (!before.satisfied) {
+      const snapshot = await migrationSnapshot(spec);
+      const desired = desiredMigrationMetadata();
+      try {
+        if (!metadataMatches(snapshot.current, receipt.previous.current, { symlink: true })) {
+          if (!metadataMatches(snapshot.current, desired.current, { symlink: true })) {
+            throw new StaticPublishIsolationError('static_publish_migration_compensation_drift', 'Static current symlink ownership changed after migration');
+          }
+          await run(CHOWN_PATH, ['-h', `${receipt.previous.current.uid}:${receipt.previous.current.gid}`, spec.currentPath], { timeout: 10_000 });
+        }
+        for (const [name, target] of [
+          ['releasesRoot', spec.releasesRoot],
+          ['publishRoot', spec.publishRoot],
+        ]) {
+          if (!metadataMatches(snapshot[name], receipt.previous[name])) {
+            if (!metadataMatches(snapshot[name], desired[name])) {
+              throw new StaticPublishIsolationError('static_publish_migration_compensation_drift', 'Static publish control metadata changed after migration');
+            }
+            await run(CHOWN_PATH, [`${receipt.previous[name].uid}:${receipt.previous[name].gid}`, target], { timeout: 10_000 });
+            await chmodFn(target, receipt.previous[name].mode);
+          }
+        }
+      } catch (error) {
+        if (error instanceof StaticPublishIsolationError) throw error;
+        throw new StaticPublishIsolationError('static_publish_migration_compensation_failed', 'Static publish control metadata could not be restored');
+      }
+    }
+
+    let after = await inspectMigrationCompensation(rawIntent, { operationId });
+    if (!after.satisfied) {
+      throw new StaticPublishIsolationError('static_publish_migration_compensation_unverified', 'Static publish migration rollback could not be verified');
+    }
+    receipt = await persistMigrationReceipt(operationId, spec, { ...receipt, state: 'compensated' });
+    after = await inspectMigrationCompensation(rawIntent, { operationId });
+    return Object.freeze({ ...after, receiptState: receipt.state });
   }
 
   async function secureRelease(target, identity) {
@@ -543,7 +824,15 @@ export function createStaticPublishIsolationManager({
     return verified;
   }
 
-  return Object.freeze({ inspect, previewMigration, apply });
+  return Object.freeze({
+    inspect,
+    previewMigration,
+    inspectMigrationOperation,
+    applyMigration,
+    inspectMigrationCompensation,
+    compensateMigration,
+    apply,
+  });
 }
 
 export const staticPublishIsolationInternals = Object.freeze({
