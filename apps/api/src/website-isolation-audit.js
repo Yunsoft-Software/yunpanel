@@ -916,6 +916,7 @@ export function createWebsiteIsolationAuditService({
   provisioningHandlers = null,
   workspaceMigrationAvailable = false,
   identityMigrationAvailable = false,
+  sftpMigrationAvailable = false,
 } = {}) {
   if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
     || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
@@ -1115,6 +1116,8 @@ export function createWebsiteIsolationAuditService({
             ));
             const safeIdentityCreate = stepId === 'unix_identity'
               && identityMigrationPreview?.safeCreateCandidate === true;
+            const safeSftpCreate = stepId === 'sftp'
+              && sftpMigrationPreview?.safeCreateCandidate === true;
             changes.push(missingWorkspaceDirectories ? migrationChange({
               id: 'workspace.directories',
               action: 'create_workspace_directories',
@@ -1137,9 +1140,15 @@ export function createWebsiteIsolationAuditService({
               },
             }) : migrationChange({
               id: `provisioning.${stepId}`,
-              action: safeIdentityCreate ? 'create_canonical_unix_identity' : 'reconcile_isolation_step',
-              ownership: safeIdentityCreate ? 'operation_receipt_planned' : 'operation_receipt_required',
-              applyState: safeIdentityCreate ? 'requires_explicit_apply' : null,
+              action: safeIdentityCreate
+                ? 'create_canonical_unix_identity'
+                : safeSftpCreate
+                  ? 'create_sftp_isolation'
+                  : 'reconcile_isolation_step',
+              ownership: safeIdentityCreate || safeSftpCreate
+                ? 'operation_receipt_planned'
+                : 'operation_receipt_required',
+              applyState: safeIdentityCreate || safeSftpCreate ? 'requires_explicit_apply' : null,
               current: {
                 operationId: operation.operationId,
                 stepId,
@@ -1155,7 +1164,9 @@ export function createWebsiteIsolationAuditService({
               },
               desired: safeIdentityCreate
                 ? { identity: identityMigrationPreview.desired }
-                : { satisfied: true },
+                : safeSftpCreate
+                  ? { sftp: sftpMigrationPreview.desired }
+                  : { satisfied: true },
             }));
           }
         } catch (error) {
@@ -1254,6 +1265,7 @@ export function createWebsiteIsolationAuditService({
       && (
         (workspaceMigrationAvailable === true && changes[0].action === 'create_workspace_directories')
         || (identityMigrationAvailable === true && changes[0].action === 'create_canonical_unix_identity')
+        || (sftpMigrationAvailable === true && changes[0].action === 'create_sftp_isolation')
       );
 
     return Object.freeze({
@@ -1273,7 +1285,9 @@ export function createWebsiteIsolationAuditService({
         warning: applyAvailable
           ? (changes[0].action === 'create_canonical_unix_identity'
             ? 'Apply creates only the all-missing canonical Unix user/group/HOME under a durable receipt; pre-existing state is blocked and rollback never removes HOME contents recursively.'
-            : 'Apply creates only the listed operation-receipted workspace directories; it does not rename users, move files or change ownership recursively.')
+            : changes[0].action === 'create_sftp_isolation'
+              ? 'Apply creates only the all-missing site-specific SFTP chroot/mount/config/unit state under a durable receipt; foreign artifacts stay blocked and rollback preserves chroot/mount directories.'
+              : 'Apply creates only the listed operation-receipted workspace directories; it does not rename users, move files or change ownership recursively.')
           : 'Preview only. No ownership, filesystem or runtime mutation is performed by this audit.',
       }) : null,
     });
