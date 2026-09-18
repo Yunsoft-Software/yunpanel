@@ -3,10 +3,11 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
 
-const STORE_VERSION = 4;
+const STORE_VERSION = 5;
 const LEGACY_STORE_VERSION = 1;
 const PREVIOUS_STORE_VERSION = 2;
 const SOURCE_DIGEST_STORE_VERSION = 3;
+const SOURCE_SNAPSHOT_STORE_VERSION = 4;
 const STATUSES = new Set(['pending', 'applying', 'succeeded', 'failed']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -171,14 +172,14 @@ function publicResult(value) {
     serial: value.serial,
     changedRrsetCount: value.changedRrsetCount,
     manualRrsetCount: value.manualRrsetCount,
-    appliedZoneDigest: value.appliedZoneDigest,
   });
 }
 
 function persistedOperation(value) {
   const fields = new Set([
     'id', 'domainId', 'serverId', 'zoneName', 'domainRevision', 'templateVersion', 'dnsIdentityRevision',
-    'mailStateDigest', 'sourceZoneDigest', 'sourceZoneSnapshot', 'observedSerial', 'targetSerial', 'previewDigest', 'confirmation', 'status', 'result', 'error',
+    'mailStateDigest', 'sourceZoneDigest', 'sourceZoneSnapshot', 'appliedZoneDigest', 'appliedZoneSnapshot',
+    'observedSerial', 'targetSerial', 'previewDigest', 'confirmation', 'status', 'result', 'error',
     'createdAt', 'updatedAt',
   ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -202,6 +203,10 @@ function persistedOperation(value) {
     sourceZoneSnapshot: value.sourceZoneSnapshot === null
       ? null
       : safeSourceZoneSnapshot(value.sourceZoneSnapshot, value.sourceZoneDigest),
+    appliedZoneDigest: optionalDigest(value.appliedZoneDigest, 'appliedZoneDigest'),
+    appliedZoneSnapshot: value.appliedZoneSnapshot === null
+      ? null
+      : safeSourceZoneSnapshot(value.appliedZoneSnapshot, value.appliedZoneDigest),
     observedSerial: safeInteger(value.observedSerial, 'observedSerial', { min: 1, max: 4_294_967_295 }),
     targetSerial: safeInteger(value.targetSerial, 'targetSerial', { min: 1, max: 4_294_967_295 }),
     previewDigest: value.previewDigest,
@@ -212,6 +217,14 @@ function persistedOperation(value) {
     createdAt: timestamp(value.createdAt),
     updatedAt: timestamp(value.updatedAt),
   });
+  if ((operation.sourceZoneDigest === null) !== (operation.sourceZoneSnapshot === null)
+    || (operation.appliedZoneDigest === null) !== (operation.appliedZoneSnapshot === null)) {
+    throw new DnsZoneReapplyOperationRegistryError(
+      'dns_zone_reapply_operation_state_invalid',
+      'DNS zone reapply rollback snapshot evidence is incomplete',
+      409,
+    );
+  }
   if (operation.status === 'succeeded' && operation.result === null) {
     throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'Succeeded DNS zone reapply operation is missing result evidence', 409);
   }
@@ -263,16 +276,25 @@ function operationFromPreview(preview, rollbackEvidence, now, idFactory) {
     || typeof preview.confirmation !== 'string' || !preview.confirmation) {
     throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_preview_invalid', 'DNS zone reapply preview cannot be journaled', 409);
   }
-  if (!rollbackEvidence || rollbackEvidence.version !== 1
+  if (!rollbackEvidence || rollbackEvidence.version !== 2
     || rollbackEvidence.sourceZoneDigest !== preview.sourceZoneDigest
-    || !rollbackEvidence.snapshot || typeof rollbackEvidence.snapshot !== 'object') {
+    || !rollbackEvidence.sourceZoneSnapshot || typeof rollbackEvidence.sourceZoneSnapshot !== 'object'
+    || typeof rollbackEvidence.appliedZoneDigest !== 'string' || !SHA256_PATTERN.test(rollbackEvidence.appliedZoneDigest)
+    || !rollbackEvidence.appliedZoneSnapshot || typeof rollbackEvidence.appliedZoneSnapshot !== 'object') {
     throw new DnsZoneReapplyOperationRegistryError(
       'dns_zone_reapply_operation_source_snapshot_invalid',
-      'DNS zone reapply operation requires exact pre-operation source snapshot evidence',
+      'DNS zone reapply operation requires exact before/after rollback snapshot evidence',
       409,
     );
   }
-  const sourceZoneSnapshot = safeSourceZoneSnapshot(rollbackEvidence.snapshot, preview.sourceZoneDigest);
+  const sourceZoneSnapshot = safeSourceZoneSnapshot(
+    rollbackEvidence.sourceZoneSnapshot,
+    preview.sourceZoneDigest,
+  );
+  const appliedZoneSnapshot = safeSourceZoneSnapshot(
+    rollbackEvidence.appliedZoneSnapshot,
+    rollbackEvidence.appliedZoneDigest,
+  );
   const timestampValue = new Date(now()).toISOString();
   return persistedOperation({
     id: idFactory(),
@@ -285,6 +307,8 @@ function operationFromPreview(preview, rollbackEvidence, now, idFactory) {
     mailStateDigest: preview.mailStateDigest,
     sourceZoneDigest: preview.sourceZoneDigest,
     sourceZoneSnapshot,
+    appliedZoneDigest: rollbackEvidence.appliedZoneDigest,
+    appliedZoneSnapshot,
     observedSerial: preview.observedSerial,
     targetSerial: preview.nextSerial,
     previewDigest: preview.previewDigest,
@@ -329,18 +353,38 @@ export function createDnsZoneReapplyOperationRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![LEGACY_STORE_VERSION, PREVIOUS_STORE_VERSION, SOURCE_DIGEST_STORE_VERSION, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
+        if (![LEGACY_STORE_VERSION, PREVIOUS_STORE_VERSION, SOURCE_DIGEST_STORE_VERSION, SOURCE_SNAPSHOT_STORE_VERSION, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((field) => !['version', 'operations'].includes(field))) {
           throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'DNS zone reapply operation store is invalid', 409);
         }
         const operations = parsed.operations.map((operation) => persistedOperation(
           parsed.version === LEGACY_STORE_VERSION
-            ? { ...operation, mailStateDigest: null, sourceZoneDigest: null, sourceZoneSnapshot: null }
+            ? {
+              ...operation,
+              mailStateDigest: null,
+              sourceZoneDigest: null,
+              sourceZoneSnapshot: null,
+              appliedZoneDigest: null,
+              appliedZoneSnapshot: null,
+            }
             : parsed.version === PREVIOUS_STORE_VERSION
-              ? { ...operation, sourceZoneDigest: null, sourceZoneSnapshot: null }
+              ? {
+                ...operation,
+                sourceZoneDigest: null,
+                sourceZoneSnapshot: null,
+                appliedZoneDigest: null,
+                appliedZoneSnapshot: null,
+              }
               : parsed.version === SOURCE_DIGEST_STORE_VERSION
-                ? { ...operation, sourceZoneSnapshot: null }
-                : operation,
+                ? {
+                  ...operation,
+                  sourceZoneSnapshot: null,
+                  appliedZoneDigest: null,
+                  appliedZoneSnapshot: null,
+                }
+                : parsed.version === SOURCE_SNAPSHOT_STORE_VERSION
+                  ? { ...operation, appliedZoneDigest: null, appliedZoneSnapshot: null }
+                  : operation,
         ));
         if (new Set(operations.map((entry) => entry.id)).size !== operations.length) {
           throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'DNS zone reapply operation IDs are not unique', 409);
@@ -457,6 +501,7 @@ export const dnsZoneReapplyOperationRegistryInternals = Object.freeze({
   legacyStoreVersion: LEGACY_STORE_VERSION,
   previousStoreVersion: PREVIOUS_STORE_VERSION,
   sourceDigestStoreVersion: SOURCE_DIGEST_STORE_VERSION,
+  sourceSnapshotStoreVersion: SOURCE_SNAPSHOT_STORE_VERSION,
   statuses: Object.freeze([...STATUSES]),
   persistedOperation,
   operationFromPreview,
