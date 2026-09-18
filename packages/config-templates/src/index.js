@@ -141,6 +141,14 @@ export {
 } from './roundcube-nginx.js';
 
 export {
+  elFinderClientTemplateInternals,
+  elFinderClientTemplatePolicy,
+  previewElFinderClient,
+  renderElFinderClientIndex,
+  renderElFinderClientScript,
+} from './elfinder-client.js';
+
+export {
   elFinderConnectorTemplateInternals,
   elFinderConnectorTemplatePolicy,
   previewElFinderConnector,
