@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { websiteProvisioningIsolationInternals } from '../src/website-provisioning-handlers-isolation.js';
+import {
+  createWebsiteProvisioningHandlers,
+  websiteProvisioningIsolationInternals,
+} from '../src/website-provisioning-handlers-isolation.js';
 
 function baseRuntime({ satisfied = true } = {}) {
   const calls = [];
@@ -124,4 +127,47 @@ test('Static compensation remains owned by the existing release rollback lifecyc
   await handler.compensate(context);
   await handler.inspectCompensation(context);
   assert.deepEqual(calls.map(([name]) => name), ['compensate', 'inspect']);
+});
+
+
+test('isolated provisioning handler set exposes elFinder with the injected per-Website FPM manager', async () => {
+  const calls = [];
+  const fpmManager = {
+    async apply(input, options) {
+      calls.push(['apply', input, options]);
+      return { satisfied: true, adapter: 'elfinder-fpm', socketPath: '/run/php/elfinder.sock' };
+    },
+    async inspect(input) {
+      calls.push(['inspect', input]);
+      return { satisfied: true, adapter: 'elfinder-fpm', socketPath: '/run/php/elfinder.sock' };
+    },
+    async compensate(input, options) {
+      calls.push(['compensate', input, options]);
+      return { satisfied: true };
+    },
+    async inspectCompensation(input, options) {
+      calls.push(['inspect-compensation', input, options]);
+      return { satisfied: true };
+    },
+  };
+  const policy = umask();
+  const handlers = createWebsiteProvisioningHandlers({
+    elFinderFpmSiteManager: fpmManager,
+    serviceUmaskManager: policy.manager,
+  });
+  const context = {
+    operationId: '12345678-1234-4234-8234-123456789012',
+    intent: {
+      adapter: 'elfinder-fpm',
+      websiteId: '22345678-1234-4234-8234-123456789012',
+      applicationId: '32345678-1234-4234-8234-123456789012',
+      unixUser: 'yunapp-abcdef123456',
+    },
+  };
+
+  const result = await handlers.elfinder.apply(context);
+  assert.equal(result.satisfied, true);
+  assert.equal(result.runtimeUmask, '0027');
+  assert.deepEqual(calls.map(([name]) => name), ['apply', 'inspect']);
+  assert.deepEqual(policy.calls, [['apply', 'php']]);
 });
