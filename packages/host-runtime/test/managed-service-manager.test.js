@@ -11,12 +11,13 @@ const INACTIVE_UNIT = 'LoadState=loaded\nActiveState=inactive\nSubState=dead\nUn
 
 test('managed service catalog covers the hosting service groups without arbitrary units', () => {
   assert.deepEqual(managedServicePolicy.services.map((entry) => entry.id), [
-    'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin', 'postsrsd',
+    'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
+    'roundcube', 'phpmyadmin', 'elfinder', 'postsrsd',
   ]);
   assert.deepEqual(managedServicePolicy.actions, ['start', 'stop', 'restart']);
   for (const entry of managedServicePolicy.services) {
     assert.ok(entry.packages.length > 0);
-    assert.equal(entry.units.length > 0, !['roundcube', 'phpmyadmin'].includes(entry.id));
+    assert.equal(entry.units.length > 0, !['roundcube', 'phpmyadmin', 'elfinder'].includes(entry.id));
     assert.ok(entry.units.every((unit) => unit.endsWith('.service')));
   }
 });
@@ -167,6 +168,52 @@ test('phpMyAdmin install uses the fixed package and configuration allowlist with
     && args.join(' ') === '-l /etc/phpmyadmin/config.inc.php'));
   assert.equal(calls.some(([file]) => file === '/usr/bin/systemctl'), false);
   await assert.rejects(manager.control('phpmyadmin', 'restart'), { code: 'managed_service_not_controllable' });
+});
+
+test('elFinder installs only PHP runtime dependencies and validates the packaged shared application', async () => {
+  const calls = [];
+  const installed = new Set();
+  const manager = createManagedServiceManager({
+    run: async (file, args) => {
+      calls.push([file, args]);
+      if (file === '/usr/bin/dpkg-query') {
+        const packageName = args.at(-1);
+        if (!installed.has(packageName)) throw new Error('not installed');
+        return { stdout: 'install ok installed\t8.3' };
+      }
+      if (file === '/usr/bin/apt-get' && args[0] === 'install') {
+        for (const packageName of args.slice(3)) installed.add(packageName);
+        return { stdout: '' };
+      }
+      if (file === '/usr/bin/apt-get' || file === '/usr/bin/test' || file === '/usr/bin/php') return { stdout: '' };
+      throw new Error('unexpected command');
+    },
+  });
+
+  const result = await manager.install('elfinder');
+  assert.equal(result.changed, true);
+  assert.equal(result.installed, true);
+  assert.equal(result.active, false);
+  assert.deepEqual(result.units, []);
+  assert.deepEqual(result.health, { status: 'installed', configuration: 'valid' });
+  assert.deepEqual(result.packages.map((entry) => entry.packageName), [
+    'php-fpm', 'php-mbstring', 'php-zip',
+  ]);
+  assert.deepEqual(calls.find(([file, args]) => file === '/usr/bin/apt-get' && args[0] === 'install')?.[1], [
+    'install', '--yes', '--no-install-recommends', 'php-fpm', 'php-mbstring', 'php-zip',
+  ]);
+  for (const expected of [
+    '-f /usr/share/yunpanel/elfinder/VERSION',
+    '-f /usr/share/yunpanel/elfinder/vendor/elfinder/elfinder.html',
+    '-f /usr/share/yunpanel/elfinder/vendor/elfinder/php/autoload.php',
+    '-f /usr/share/yunpanel/elfinder/connector.php',
+  ]) {
+    assert.ok(calls.some(([file, args]) => file === '/usr/bin/test' && args.join(' ') === expected));
+  }
+  assert.ok(calls.some(([file, args]) => file === '/usr/bin/php'
+    && args.join(' ') === '-l /usr/share/yunpanel/elfinder/connector.php'));
+  assert.equal(calls.some(([file]) => file === '/usr/bin/systemctl'), false);
+  await assert.rejects(manager.control('elfinder', 'restart'), { code: 'managed_service_not_controllable' });
 });
 
 test('PostSRSd installs only the fixed Noble package and managed service unit', async () => {
