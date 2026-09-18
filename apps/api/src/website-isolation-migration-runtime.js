@@ -45,6 +45,7 @@ function migrationKind(operation) {
 function sftpContext(operation) {
   return Object.freeze({
     operationId: operation.id,
+    releaseOperationId: operation.intent.sourceOperationId,
     websiteId: operation.websiteId,
     intent: Object.freeze({
       adapter: 'openssh-internal-sftp',
@@ -88,6 +89,7 @@ function exactSftpTarget(operation, change) {
 function exactPhpTarget(operation, change) {
   const identity = createApplicationIdentity(operation.applicationId);
   return Boolean(change?.action === 'create_php_fpm_pool'
+    && change.current?.operationId === operation.intent.sourceOperationId
     && change.current?.phpRuntimeMigrationPreview?.safeCreateCandidate === true
     && change.desired?.phpRuntime?.websiteId === operation.websiteId
     && change.desired?.phpRuntime?.applicationId === operation.applicationId
