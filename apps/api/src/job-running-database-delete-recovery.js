@@ -67,7 +67,7 @@ function assertReceipt(receipt, context, identity) {
     'backupId', 'expectedBackupSha256',
   ];
   const scopedContext = scopeFields.some((field) => Object.hasOwn(context.payload, field));
-  if (receipt.ownership === null) {
+  if (receipt.ownership === null || receipt.ownership === undefined) {
     if (scopedContext) {
       throw new JobRunningDatabaseDeleteRecoveryError(
         'job_database_delete_recovery_receipt_mismatch',
