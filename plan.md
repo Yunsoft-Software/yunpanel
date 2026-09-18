@@ -34,7 +34,7 @@ Son ttyd/IntegratedToolGateway ilerlemesi: `docs/history/ttyd-integrated-gateway
 ## P0.1 — Website Unix identity ve filesystem isolation
 
 - [ ] Canonical Unix identity migration apply yolunu yalnız exact preview'daki all-missing safe-create state için aç; durable receipt + restart inspection zorunlu olsun, pre-existing user/group/HOME drift'i fail-closed kalsın ve rollback HOME içeriğini recursive silmesin.
-- [ ] Legacy Website path/runtime/SFTP migration apply kapsamını tamamla; Unix identity ve SFTP exact bounded preview artık var, runtime adapter'ları da exact current/desired evidence versin. Apply/rollback yalnız operation-owned değişiklikleri kapsasın; kör recursive `chown`/`rm` yapılmasın.
+- [ ] Legacy Website path/runtime/SFTP migration apply kapsamını tamamla; Unix identity, SFTP, Passenger Node ve PHP runtime exact bounded preview artık var. Static runtime exact current/desired preview'ını tamamla; ardından apply/rollback yalnız operation-owned değişiklikleri kapsasın ve kör recursive `chown`/`rm` yapılmasın.
 
 Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
