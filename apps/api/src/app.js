@@ -111,6 +111,8 @@ import { SiteCreateError } from './site-create.js';
 import { mountSiteCreateRoutes } from './site-create-http.js';
 import { mountTerminalCapabilityRoutes } from './terminal-capability-http.js';
 import { TerminalCapabilityError } from './terminal-capability-registry.js';
+import { mountTtydSessionRoutes } from './ttyd-session-http.js';
+import { TtydSessionError } from './ttyd-session-manager.js';
 import { mountWebsiteRoutes } from './website-http.js';
 import { WebsiteMigrationBindError } from './website-migration-bind.js';
 import { WebsiteMigrationCreateError } from './website-migration-create.js';
@@ -233,6 +235,7 @@ export function createApp({
   jobLogStore = null,
   localServerId = null,
   terminalCapabilityRegistry = null,
+  ttydSessionManager = null,
   siteFileManager = null,
   websiteProvisioningRuntime = null,
   websiteSftpKeyService = null,
@@ -653,6 +656,12 @@ export function createApp({
   mountTerminalCapabilityRoutes(app, {
     terminalCapabilityRegistry, serverRegistry: registry, websiteRegistry, localServerId,
   });
+  if (ttydSessionManager) {
+    mountTtydSessionRoutes(app, {
+      terminalCapabilityRegistry,
+      ttydSessionManager,
+    });
+  }
   app.use(core);
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
@@ -723,6 +732,7 @@ export function createApp({
       || error instanceof SiteFileWorkerError
       || error instanceof SiteCreateError
       || error instanceof TerminalCapabilityError
+      || error instanceof TtydSessionError
       || error instanceof WebsiteMigrationBindError
       || error instanceof WebsiteMigrationCreateError
       || error instanceof WebsiteMigrationLedgerError
