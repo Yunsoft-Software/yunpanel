@@ -209,12 +209,11 @@ function createElFinderGatewaySessions({
   }
   const sessions = new Map();
 
-  function prune() {
+  function pruneExpired() {
     const current = now();
     for (const [key, record] of sessions) {
       if (record.expiresAt <= current) sessions.delete(key);
     }
-    while (sessions.size >= maxSessions) sessions.delete(sessions.keys().next().value);
   }
 
   function issue(bundle, authDigest) {
@@ -222,7 +221,8 @@ function createElFinderGatewaySessions({
       || !/^[a-f0-9]{64}$/.test(authDigest)) {
       throw new TypeError('elFinder gateway session input is invalid');
     }
-    prune();
+    pruneExpired();
+    while (sessions.size >= maxSessions) sessions.delete(sessions.keys().next().value);
     const token = randomBytes(32).toString('base64url');
     const expiresAt = now() + ttlMs;
     sessions.set(sha256(token), Object.freeze({ bundle, authDigest, expiresAt }));
@@ -232,7 +232,7 @@ function createElFinderGatewaySessions({
   function resolve(token, authDigest) {
     if (typeof token !== 'string' || !CAPABILITY_PATTERN.test(token)
       || typeof authDigest !== 'string' || !/^[a-f0-9]{64}$/.test(authDigest)) return null;
-    prune();
+    pruneExpired();
     const record = sessions.get(sha256(token));
     if (!record || record.expiresAt <= now() || record.authDigest !== authDigest) return null;
     return record.bundle;
