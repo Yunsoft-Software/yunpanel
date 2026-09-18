@@ -113,6 +113,8 @@ function staticRuntimeHandler(baseRuntime, isolationManager) {
         version: 1,
         adapter: 'static-runtime',
         satisfied: runtime?.satisfied === true && isolation?.satisfied === true,
+        automaticMigration: false,
+        migrationBlockedReason: 'static_legacy_permissions_not_operation_owned',
         current: Object.freeze({
           runtime,
           isolation,
