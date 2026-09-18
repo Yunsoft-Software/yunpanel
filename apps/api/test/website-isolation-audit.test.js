@@ -339,6 +339,7 @@ test('isolation audit pins bounded SFTP host and authorized-key drift into the m
   const sftpPreview = {
     version: 1,
     satisfied: false,
+    safeCreateCandidate: true,
     current: {
       receiptState: null,
       receiptError: null,
