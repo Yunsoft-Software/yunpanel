@@ -7,7 +7,10 @@ const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
-const RECEIPT_KEYS = Object.freeze(['version', 'recordedAt', 'serverId', 'jobId', 'databaseName', 'result']);
+const RECEIPT_KEYS = Object.freeze(['version', 'recordedAt', 'serverId', 'jobId', 'databaseName', 'ownership', 'result']);
+const OWNERSHIP_KEYS = Object.freeze(['websiteId', 'databaseBindingId', 'expectedBindingRevision', 'backupId', 'expectedBackupSha256']);
+const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const RESULT_KEYS = Object.freeze(['engine', 'version', 'database', 'deleted']);
 const DATABASE_KEYS = Object.freeze(['name', 'sizeBytes']);
 
@@ -32,6 +35,31 @@ function normalizeIdentity(serverId, jobId) {
     throw new DatabaseDeletionReceiptError('database_deletion_receipt_identity_invalid', 'Database deletion receipt identity is invalid');
   }
   return { serverId, jobId };
+}
+
+
+function normalizeOwnership(value) {
+  if (value === null || value === undefined) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== OWNERSHIP_KEYS.length
+    || Object.keys(value).some((key) => !OWNERSHIP_KEYS.includes(key))
+    || !UUID_PATTERN.test(value.websiteId ?? '')
+    || !UUID_PATTERN.test(value.databaseBindingId ?? '')
+    || !Number.isSafeInteger(value.expectedBindingRevision) || value.expectedBindingRevision < 1
+    || typeof value.backupId !== 'string' || !JOB_ID_PATTERN.test(value.backupId)
+    || typeof value.expectedBackupSha256 !== 'string' || !SHA256_PATTERN.test(value.expectedBackupSha256)) {
+    throw new DatabaseDeletionReceiptError(
+      'database_deletion_receipt_ownership_invalid',
+      'Database deletion receipt ownership evidence is invalid',
+    );
+  }
+  return Object.freeze({
+    websiteId: value.websiteId.toLowerCase(),
+    databaseBindingId: value.databaseBindingId.toLowerCase(),
+    expectedBindingRevision: value.expectedBindingRevision,
+    backupId: value.backupId,
+    expectedBackupSha256: value.expectedBackupSha256,
+  });
 }
 
 function normalizeResult(value, databaseName) {
@@ -72,6 +100,7 @@ function normalizeReceipt(value) {
     serverId,
     jobId,
     databaseName,
+    ownership: normalizeOwnership(value.ownership),
     result: normalizeResult(value.result, databaseName),
   });
 }
@@ -94,7 +123,7 @@ export function createDatabaseDeletionReceiptStore({
     return path.join(root, identity.serverId, `${identity.jobId}.json`);
   }
 
-  async function write({ serverId, jobId, databaseName, result }) {
+  async function write({ serverId, jobId, databaseName, ownership = null, result }) {
     const identity = normalizeIdentity(serverId, jobId);
     const name = normalizeDatabaseName(databaseName);
     const receipt = normalizeReceipt({
@@ -102,6 +131,7 @@ export function createDatabaseDeletionReceiptStore({
       recordedAt: new Date(now()).toISOString(),
       ...identity,
       databaseName: name,
+      ownership,
       result,
     });
     const directory = path.join(root, identity.serverId);
@@ -142,6 +172,7 @@ export const databaseDeletionReceiptInternals = Object.freeze({
   defaultRoot: DEFAULT_ROOT,
   normalizeDatabaseName,
   normalizeIdentity,
+  normalizeOwnership,
   normalizeResult,
   normalizeReceipt,
 });
