@@ -57,6 +57,7 @@ function service({
   workspaceMigrationAvailable = false,
   identityMigrationAvailable = false,
   sftpMigrationAvailable = false,
+  phpMigrationAvailable = false,
 } = {}) {
   const handlers = {};
   for (const kind of ['unix_identity', 'runtime', 'static_runtime', 'php_runtime', 'sftp']) {
@@ -80,6 +81,7 @@ function service({
     workspaceMigrationAvailable,
     identityMigrationAvailable,
     sftpMigrationAvailable,
+    phpMigrationAvailable,
   });
 }
 
@@ -744,6 +746,124 @@ test('isolation audit pins bounded static release and publish isolation drift in
   assert.notEqual(first.migration.previewDigest, second.migration.previewDigest);
 });
 
+test('isolation audit opens PHP migration only when the exact site pool is the sole safe-create mutation', async () => {
+  const releaseDirectory = `${identity.paths.runtime.releasesDirectory}/${operationId}`;
+  const directory = (uid, gid, mode) => ({
+    present: true,
+    directory: true,
+    symbolicLink: false,
+    uid,
+    gid,
+    mode,
+  });
+  const phpPreview = {
+    version: 1,
+    adapter: 'php-runtime',
+    satisfied: false,
+    safeCreateCandidate: true,
+    current: {
+      container: {
+        version: 1,
+        adapter: 'php-container',
+        satisfied: true,
+        current: {
+          identity: { satisfied: true, uid: 1201, gid: 1201, homeDirectory: identity.paths.workspace.homeDirectory },
+          applicationRoot: directory(0, 0, '0755'),
+          releasesDirectory: directory(0, 0, '0755'),
+          releaseDirectory: directory(1201, 1201, '0750'),
+          releaseDocumentRoot: directory(1201, 1201, '0750'),
+          currentRelease: { present: true, directory: false, symbolicLink: true, uid: 0, gid: 0, mode: '0777' },
+          currentTarget: releaseDirectory,
+          currentTargetError: null,
+        },
+        desired: {
+          websiteId,
+          applicationId,
+          releaseId: operationId,
+          unixUser: identity.unixUser,
+          documentRoot: `${identity.paths.runtime.currentRelease}/public`,
+          applicationRoot: identity.paths.runtime.applicationRoot,
+          releasesDirectory: identity.paths.runtime.releasesDirectory,
+          currentRelease: identity.paths.runtime.currentRelease,
+          releaseDirectory,
+          releaseDocumentRoot: `${releaseDirectory}/public`,
+          controlDirectoryMode: '0755',
+          releaseDirectoryMode: '0750',
+        },
+        differences: [],
+      },
+      fpm: {
+        version: 1,
+        adapter: 'php-fpm',
+        satisfied: false,
+        safeCreateCandidate: true,
+        current: {
+          identity: {
+            satisfied: true,
+            uid: 1201,
+            gid: 1201,
+            homeDirectory: identity.paths.workspace.homeDirectory,
+            homeMode: '0750',
+          },
+          documentRoot: directory(1201, 1201, '0750'),
+          package: { installed: true, version: '8.3.0' },
+          receipt: { state: null, mutated: null, previousConfigSha256: null, error: null },
+          pool: { present: false, sha256: null, matchesDesired: false, readError: null },
+          configValid: true,
+          serviceActive: true,
+          socket: { present: false },
+        },
+        desired: {
+          websiteId,
+          applicationId,
+          unixUser: identity.unixUser,
+          homeDirectory: identity.paths.workspace.homeDirectory,
+          documentRoot: `${identity.paths.runtime.currentRelease}/public`,
+          packageName: 'php8.3-fpm',
+          phpVersion: '8.3',
+          configPath: `/etc/php/8.3/fpm/pool.d/yunpanel-${identity.unixUser}.conf`,
+          configSha256: 'd'.repeat(64),
+          configMode: '0600',
+          socketPath: `/run/php/yunpanel-${identity.unixUser}.sock`,
+          socketMode: '0660',
+          serviceUnit: 'php8.3-fpm.service',
+        },
+        differences: ['php_fpm_receipt_missing', 'php_fpm_pool_missing', 'php_fpm_socket_missing'],
+      },
+      umask: { satisfied: true, umask: '0027' },
+    },
+    desired: {
+      websiteId,
+      applicationId,
+      unixUser: identity.unixUser,
+      documentRoot: `${identity.paths.runtime.currentRelease}/public`,
+      runtimeUmask: '0027',
+    },
+    differences: ['php_fpm_receipt_missing', 'php_fpm_pool_missing', 'php_fpm_socket_missing'],
+  };
+  const audit = await service({
+    runtimeType: 'php',
+    phpMigrationAvailable: true,
+    stepResults: { php_runtime: { satisfied: false, reason: 'php_fpm_pool_missing' } },
+    migrationPreviews: { php_runtime: phpPreview },
+  }).audit(websiteId);
+
+  assert.equal(audit.migration.applyAvailable, true);
+  assert.equal(audit.migration.changes.length, 1);
+  assert.equal(audit.migration.changes[0].action, 'create_php_fpm_pool');
+  assert.equal(audit.migration.changes[0].ownership, 'operation_receipt_planned');
+  assert.deepEqual(audit.migration.changes[0].desired, { phpRuntime: phpPreview.desired });
+
+  const blocked = await service({
+    runtimeType: 'php',
+    phpMigrationAvailable: true,
+    stepResults: { php_runtime: { satisfied: false, reason: 'php_container_not_ready' } },
+    migrationPreviews: { php_runtime: { ...phpPreview, safeCreateCandidate: false } },
+  }).audit(websiteId);
+  assert.equal(blocked.migration.applyAvailable, false);
+  assert.equal(blocked.migration.changes[0].action, 'reconcile_isolation_step');
+});
+
 test('isolation audit pins bounded PHP container, FPM and UMask drift into the migration digest', async () => {
   const releaseDirectory = `${identity.paths.runtime.releasesDirectory}/${operationId}`;
   const healthyDirectory = (uid, gid, mode) => ({
@@ -758,6 +878,7 @@ test('isolation audit pins bounded PHP container, FPM and UMask drift into the m
     version: 1,
     adapter: 'php-runtime',
     satisfied: false,
+    safeCreateCandidate: false,
     current: {
       container: {
         version: 1,
@@ -805,6 +926,7 @@ test('isolation audit pins bounded PHP container, FPM and UMask drift into the m
         version: 1,
         adapter: 'php-fpm',
         satisfied: false,
+        safeCreateCandidate: false,
         current: {
           identity: {
             satisfied: true,
