@@ -161,3 +161,12 @@ GitHub Actions kullanılmadı. Source test kontratları repoya eklendi; bu ortam
 - `6b0754c2` + `12d75ea3` SFTP receipt'e operation-created chroot/mount directory checkpoint'leri ekledi. Pre-existing canonical directory yeniden sahiplenilmez veya mutate edilmez; rollback config/unit removal ve unmount sonrasında yalnız checkpoint'li boş directory'leri non-recursive kaldırır. Directory içinde veri görünürse korunur.
 - `e1ab6e5f` + `83ba92e5` paneli persisted migration `adapter` alanına göre workspace/identity/SFTP operation'larını ayıracak şekilde güncelledi; SFTP apply/rollback copy'si exact ownership sınırını açıkça gösterir.
 - `9fbb5948` ile P0.1 source planı runtime/path migration'a daraldı. Gerçek OpenSSH/systemd/key login/restart/data-preserving rollback acceptance `todo.md` içinde kalır.
+
+
+### 18 Eylül continuation — PHP-FPM site-pool safe-create migration
+
+- `dd26a86b` + `0ba93a2a` PHP-FPM host manager'da yalnız shared package/service ve canonical Website document root zaten sağlıklıyken, mevcut site pool/receipt yoksa `safeCreateCandidate` üretip site pool'u durable receipt ile oluşturan migration lifecycle'ını ekledi. Migration package kurmaz veya shared service enable etmez.
+- `d8530b8d` + `ba0204cb` PHP runtime handler'ını container ownership + shared `UMask=0027` zaten canonical olma şartına bağladı; apply yalnız FPM pool lifecycle'ına gider, container manager veya UMask apply çağrılmaz.
+- `b5d52b66`, `2fa6bef2`, `9c2d779e`, `ebb5d21e` ve takip test commitleri audit, typed `adapter=php` journal, restart-safe executor ve production bootstrap zincirini tamamladı. Stale preview/revision fail-closed kalır; restart completed receipt'i inspect ile kapatır.
+- `4948134f` + `e7138220` paneli PHP pool migration operation'ını ayrı gösterir ve shared runtime/container ownership'in mutation kapsamı dışında olduğunu confirmation copy'sinde açıklar.
+- PHP container ownership/path drift'i bilinçli olarak otomatik migration'a açılmadı; mevcut container manager'ın chown/chmod mutation'ı operation-owned rollback evidence taşımadığı için bu state fail-closed kalır. Gerçek host kabulü `todo.md` T-PROVISIONING altındadır.
