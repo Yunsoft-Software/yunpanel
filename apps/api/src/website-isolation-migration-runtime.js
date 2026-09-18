@@ -37,7 +37,21 @@ function workspaceIntent(operation) {
 }
 
 function migrationKind(operation) {
-  return operation?.intent?.targets?.length === 0 ? 'identity' : 'workspace';
+  return operation?.intent?.adapter
+    ?? (operation?.intent?.targets?.length === 0 ? 'identity' : 'workspace');
+}
+
+function sftpContext(operation) {
+  return Object.freeze({
+    operationId: operation.id,
+    websiteId: operation.websiteId,
+    intent: Object.freeze({
+      adapter: 'openssh-internal-sftp',
+      websiteId: operation.websiteId,
+      applicationId: operation.applicationId,
+      unixUser: operation.intent.user,
+    }),
+  });
 }
 
 function exactIdentityTarget(operation, change) {
@@ -47,12 +61,23 @@ function exactIdentityTarget(operation, change) {
     && change.desired?.identity?.homeDirectory === operation.intent.homeDirectory);
 }
 
+function exactSftpTarget(operation, change) {
+  return Boolean(change?.action === 'create_sftp_isolation'
+    && change.current?.sftpMigrationPreview?.safeCreateCandidate === true
+    && change.desired?.sftp?.websiteId === operation.websiteId
+    && change.desired?.sftp?.applicationId === operation.applicationId
+    && change.desired?.sftp?.unixUser === operation.intent.user);
+}
+
 function exactTargets(operation, audit) {
   const change = audit?.migration?.changes?.length === 1 ? audit.migration.changes[0] : null;
-  const exactChange = migrationKind(operation) === 'identity'
+  const kind = migrationKind(operation);
+  const exactChange = kind === 'identity'
     ? exactIdentityTarget(operation, change)
-    : change?.action === 'create_workspace_directories'
-      && JSON.stringify(change.desired?.directories) === JSON.stringify(operation.intent.targets);
+    : kind === 'sftp'
+      ? exactSftpTarget(operation, change)
+      : change?.action === 'create_workspace_directories'
+        && JSON.stringify(change.desired?.directories) === JSON.stringify(operation.intent.targets);
   return Boolean(audit?.websiteId === operation.websiteId
     && audit.applicationId === operation.applicationId
     && audit.websiteRevision === operation.websiteRevision
@@ -145,7 +170,49 @@ function identityCompensationEvidence(value) {
   });
 }
 
-export function createWebsiteIsolationMigrationRuntime({ registry, auditService, workspaceManager } = {}) {
+function sftpApplyEvidence(value) {
+  if (!value || value.satisfied !== true
+    || value.sftpReceiptVersion !== 1
+    || value.activatedSftpIsolation !== true
+    || !Number.isSafeInteger(value.authorizedKeyCount) || value.authorizedKeyCount < 0 || value.authorizedKeyCount > 100
+    || typeof value.authorizedKeysSha256 !== 'string' || !SHA256_PATTERN.test(value.authorizedKeysSha256)) {
+    throw new WebsiteIsolationMigrationRuntimeError(
+      'website_isolation_migration_evidence_invalid',
+      'Website SFTP migration did not return valid operation ownership evidence',
+      503,
+    );
+  }
+  return Object.freeze({
+    satisfied: true,
+    sftpReceiptVersion: 1,
+    activatedSftpIsolation: true,
+    authorizedKeyCount: value.authorizedKeyCount,
+    authorizedKeysSha256: value.authorizedKeysSha256,
+  });
+}
+
+function sftpInspectionEvidence(value) {
+  if (!value || value.satisfied !== true) return null;
+  return sftpApplyEvidence(value);
+}
+
+function sftpCompensationEvidence(value) {
+  if (!value || value.satisfied !== true || value.removedSftpIsolation !== true) {
+    throw new WebsiteIsolationMigrationRuntimeError(
+      'website_isolation_migration_compensation_evidence_invalid',
+      'Website SFTP migration rollback did not return valid ownership evidence',
+      503,
+    );
+  }
+  return Object.freeze({ satisfied: true, removedSftpIsolation: true });
+}
+
+export function createWebsiteIsolationMigrationRuntime({
+  registry,
+  auditService,
+  workspaceManager,
+  migrationHandlers = {},
+} = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForWebsite !== 'function'
     || typeof registry.listInterrupted !== 'function' || typeof registry.markApplying !== 'function'
@@ -161,7 +228,8 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
     || typeof workspaceManager.inspectIdentityOperation !== 'function'
     || typeof workspaceManager.applyIdentityMigration !== 'function'
     || typeof workspaceManager.inspectIdentityMigrationCompensation !== 'function'
-    || typeof workspaceManager.compensateIdentityMigration !== 'function') {
+    || typeof workspaceManager.compensateIdentityMigration !== 'function'
+    || !migrationHandlers || typeof migrationHandlers !== 'object' || Array.isArray(migrationHandlers)) {
     throw new WebsiteIsolationMigrationRuntimeError(
       'website_isolation_migration_dependencies_invalid',
       'Website isolation migration dependencies are unavailable',
@@ -211,11 +279,24 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
 
     const intent = workspaceIntent(operation);
     const kind = migrationKind(operation);
-    const inspectOperation = kind === 'identity'
-      ? workspaceManager.inspectIdentityOperation
-      : workspaceManager.inspectWorkspaceOperation;
+    const sftpHandler = migrationHandlers.sftp;
+    if (kind === 'sftp' && (!sftpHandler
+      || typeof sftpHandler.inspectMigrationOperation !== 'function'
+      || typeof sftpHandler.applyMigration !== 'function'
+      || typeof sftpHandler.inspectMigrationCompensation !== 'function'
+      || typeof sftpHandler.compensateMigration !== 'function')) {
+      return websiteIsolationMigrationPublicView(
+        await registry.fail(operation.id, 'website_isolation_migration_handler_unavailable'),
+      );
+    }
     let inspected;
-    try { inspected = await inspectOperation(intent, { operationId: operation.id }); }
+    try {
+      inspected = kind === 'identity'
+        ? await workspaceManager.inspectIdentityOperation(intent, { operationId: operation.id })
+        : kind === 'sftp'
+          ? await sftpHandler.inspectMigrationOperation(sftpContext(operation))
+          : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
+    }
     catch (error) {
       if (!mayApply) {
         throw new WebsiteIsolationMigrationRuntimeError(
@@ -229,7 +310,9 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
     }
     const alreadySatisfied = kind === 'identity'
       ? identityInspectionEvidence(inspected)
-      : inspectionEvidence(inspected);
+      : kind === 'sftp'
+        ? sftpInspectionEvidence(inspected)
+        : inspectionEvidence(inspected);
     if (alreadySatisfied) {
       try { return websiteIsolationMigrationPublicView(await registry.succeed(operation.id, alreadySatisfied)); }
       catch (error) { throw mapped(error); }
@@ -254,16 +337,22 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
     try {
       const result = kind === 'identity'
         ? identityApplyEvidence(await workspaceManager.applyIdentityMigration(intent, { operationId: operation.id }))
-        : applyEvidence(await workspaceManager.applyWorkspace(intent, { operationId: operation.id }));
+        : kind === 'sftp'
+          ? sftpApplyEvidence(await sftpHandler.applyMigration(sftpContext(operation)))
+          : applyEvidence(await workspaceManager.applyWorkspace(intent, { operationId: operation.id }));
       return websiteIsolationMigrationPublicView(await registry.succeed(operation.id, result));
     } catch (error) {
       try {
         const postInspection = kind === 'identity'
           ? await workspaceManager.inspectIdentityOperation(intent, { operationId: operation.id })
-          : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
+          : kind === 'sftp'
+            ? await sftpHandler.inspectMigrationOperation(sftpContext(operation))
+            : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
         const postcondition = kind === 'identity'
           ? identityInspectionEvidence(postInspection)
-          : inspectionEvidence(postInspection);
+          : kind === 'sftp'
+            ? sftpInspectionEvidence(postInspection)
+            : inspectionEvidence(postInspection);
         if (postcondition) {
           return websiteIsolationMigrationPublicView(await registry.succeed(operation.id, postcondition));
         }
@@ -310,17 +399,22 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
     }
     const intent = workspaceIntent(operation);
     const kind = migrationKind(operation);
+    const sftpHandler = migrationHandlers.sftp;
     try {
       const inspected = kind === 'identity'
         ? await workspaceManager.inspectIdentityMigrationCompensation(intent, {
           operationId: operation.id,
           evidence: operation.result,
         })
-        : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
+        : kind === 'sftp'
+          ? await sftpHandler.inspectMigrationCompensation(sftpContext(operation))
+          : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
       if (inspected?.satisfied === true) {
         const evidence = kind === 'identity'
           ? identityCompensationEvidence(inspected)
-          : compensationEvidence(inspected);
+          : kind === 'sftp'
+            ? sftpCompensationEvidence(inspected)
+            : compensationEvidence(inspected);
         return websiteIsolationMigrationPublicView(await registry.compensate(operation.id, evidence));
       }
       const result = kind === 'identity'
@@ -328,7 +422,9 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
           operationId: operation.id,
           evidence: operation.result,
         }))
-        : compensationEvidence(await workspaceManager.compensateWorkspace(intent, { operationId: operation.id }));
+        : kind === 'sftp'
+          ? sftpCompensationEvidence(await sftpHandler.compensateMigration(sftpContext(operation)))
+          : compensationEvidence(await workspaceManager.compensateWorkspace(intent, { operationId: operation.id }));
       return websiteIsolationMigrationPublicView(await registry.compensate(operation.id, result));
     } catch (error) {
       return websiteIsolationMigrationPublicView(await registry.failCompensation(
@@ -363,10 +459,14 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
         if (operation.status === 'applying') {
           const inspected = kind === 'identity'
             ? await workspaceManager.inspectIdentityOperation(intent, { operationId: operation.id })
-            : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
+            : kind === 'sftp'
+              ? await migrationHandlers.sftp?.inspectMigrationOperation(sftpContext(operation))
+              : await workspaceManager.inspectWorkspaceOperation(intent, { operationId: operation.id });
           const result = kind === 'identity'
             ? identityInspectionEvidence(inspected)
-            : inspectionEvidence(inspected);
+            : kind === 'sftp'
+              ? sftpInspectionEvidence(inspected)
+              : inspectionEvidence(inspected);
           if (result) {
             recovery.push(Object.freeze({ operationId: operation.id, recovered: true }));
             await registry.succeed(operation.id, result);
@@ -379,12 +479,18 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
               operationId: operation.id,
               evidence: operation.result,
             })
-            : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
+            : kind === 'sftp'
+              ? await migrationHandlers.sftp?.inspectMigrationCompensation(sftpContext(operation))
+              : await workspaceManager.inspectWorkspaceCompensation(intent, { operationId: operation.id });
           if (result?.satisfied === true) {
             recovery.push(Object.freeze({ operationId: operation.id, recovered: true }));
             await registry.compensate(
               operation.id,
-              kind === 'identity' ? identityCompensationEvidence(result) : compensationEvidence(result),
+              kind === 'identity'
+                ? identityCompensationEvidence(result)
+                : kind === 'sftp'
+                  ? sftpCompensationEvidence(result)
+                  : compensationEvidence(result),
             );
           } else {
             recovery.push(Object.freeze({ operationId: operation.id, recovered: false, reason: 'compensation_incomplete' }));
@@ -411,12 +517,17 @@ export function createWebsiteIsolationMigrationRuntime({ registry, auditService,
 export const websiteIsolationMigrationRuntimeInternals = Object.freeze({
   exactTargets,
   exactIdentityTarget,
+  exactSftpTarget,
   migrationKind,
   workspaceIntent,
+  sftpContext,
   applyEvidence,
   inspectionEvidence,
   compensationEvidence,
   identityApplyEvidence,
   identityInspectionEvidence,
   identityCompensationEvidence,
+  sftpApplyEvidence,
+  sftpInspectionEvidence,
+  sftpCompensationEvidence,
 });
