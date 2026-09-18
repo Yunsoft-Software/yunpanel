@@ -77,6 +77,15 @@ export function getWebsiteDatabaseResources(serverId, websiteId) {
   return panelRequest(`/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-resources`);
 }
 
+export function createElFinderHandoff(serverId, websiteId) {
+  databaseServerPath(serverId);
+  if (typeof websiteId !== 'string' || !websiteId) throw new Error('websiteId is required');
+  return panelRequest(
+    `/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/elfinder-handoffs`,
+    { method: 'POST', body: {} },
+  );
+}
+
 export function createPhpMyAdminHandoff(serverId, websiteId, credentialId) {
   databaseServerPath(serverId);
   if (typeof websiteId !== 'string' || !websiteId) throw new Error('websiteId is required');
