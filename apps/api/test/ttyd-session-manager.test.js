@@ -248,6 +248,31 @@ test('ttyd session is bound to live Owner session and revocation kills the proce
   assert.ok(fx.calls.rm.includes(`/run/yunpanel/ttyd/${sessionId}.sock`));
 });
 
+test('ttyd explicit close is bound to the Owner session and user', async () => {
+  const fx = fixture();
+  await fx.manager.start({
+    ownerSessionId: 'owner-session',
+    userId: 'owner-user',
+    target: siteTarget,
+  });
+
+  assert.equal(fx.manager.terminateOwned(sessionId, {
+    ownerSessionId: 'other-session',
+    userId: 'owner-user',
+  }), false);
+  assert.equal(fx.calls.signals.length, 0);
+
+  assert.equal(fx.manager.terminateOwned(sessionId, {
+    ownerSessionId: 'owner-session',
+    userId: 'owner-user',
+  }), true);
+  assert.deepEqual(fx.calls.signals, [[4321, 'SIGHUP']]);
+  assert.equal(fx.manager.terminateOwned(sessionId, {
+    ownerSessionId: 'owner-session',
+    userId: 'owner-user',
+  }), false);
+});
+
 test('ttyd startup timeout closes a session that never reaches the gateway', async () => {
   const fx = fixture();
   await fx.manager.start({
