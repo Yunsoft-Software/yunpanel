@@ -110,6 +110,28 @@ function fixture({ currentTemplate = template(2, [
         manualRrsetCount: currentZone.rrsets.filter((entry) => !entry.managed).length,
       };
     },
+    inspectSnapshotRestore: async (input) => {
+      calls.push(['inspectSnapshotRestore', input]);
+      return {
+        satisfied: false,
+        repairCandidate: true,
+        zoneName: input.zoneName,
+        sourceZoneDigest: dnsZoneReapplyInternals.digest(input.before),
+        appliedZoneDigest: dnsZoneReapplyInternals.digest(input.after),
+        pendingRrsetCount: 1,
+        kindChangeRequired: false,
+      };
+    },
+    restoreSnapshot: async (input) => {
+      calls.push(['restoreSnapshot', input]);
+      return {
+        satisfied: true,
+        zoneName: input.zoneName,
+        restoredRrsetCount: 1,
+        kindRestored: false,
+        sourceZoneDigest: dnsZoneReapplyInternals.digest(input.before),
+      };
+    },
   };
   const service = createDnsZoneReapplyService({
     domainRegistry: { getDomain: async (id) => id === domainState.id ? domainState : null },
