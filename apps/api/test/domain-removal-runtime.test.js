@@ -45,6 +45,18 @@ function removalPreview({ suspended = false } = {}) {
     },
     plan: {
       childDomainIds: ['child-domain-1'],
+      childDomains: [{
+        id: 'child-domain-1',
+        serverId: 'local',
+        primaryDomain: 'api.example.com',
+        websiteId: 'website-2',
+        certificateId: null,
+        parentDomainId: 'domain-1',
+        state: 'active',
+        desiredRevision: 2,
+        checksum: '2'.repeat(64),
+        suspensionOperationId: null,
+      }],
       websiteId: 'website-1',
       applicationId: 'application-1',
       managedComposeProjectId: null,
@@ -93,6 +105,7 @@ function leafRemovalPreview() {
     plan: {
       ...base.plan,
       childDomainIds: [],
+      childDomains: [],
       certificateIds: [],
       dnsZoneIds: [],
       mailDomainIds: [],

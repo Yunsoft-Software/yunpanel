@@ -93,7 +93,7 @@ function normalizedIds(values, field) {
   return Object.freeze(ids);
 }
 
-function orderedChildDomainIds(values, rootDomainId) {
+function orderedChildDomains(values, rootDomain) {
   if (!Array.isArray(values) || values.length > 500) {
     throw new DomainRemovalPlanError(
       'domain_removal_preview_invalid',
@@ -102,16 +102,23 @@ function orderedChildDomainIds(values, rootDomainId) {
     );
   }
   const entries = values.map((value) => {
-    const id = safeId(value?.id, 'childDomainId');
-    const parentDomainId = safeId(value?.parentDomainId, 'childDomainParentId');
-    if (id === rootDomainId) {
+    const snapshot = domainSnapshot(value);
+    const parentDomainId = safeId(snapshot.parentDomainId, 'childDomainParentId');
+    if (snapshot.id === rootDomain.id) {
       throw new DomainRemovalPlanError(
         'domain_removal_preview_invalid',
         'Domain removal child inventory contains its own root Domain',
         409,
       );
     }
-    return Object.freeze({ id, parentDomainId });
+    if (snapshot.serverId !== rootDomain.serverId) {
+      throw new DomainRemovalPlanError(
+        'domain_removal_impact_stale',
+        'Domain removal child inventory crosses the root Domain server boundary',
+        409,
+      );
+    }
+    return Object.freeze({ ...snapshot, parentDomainId });
   });
   if (new Set(entries.map((entry) => entry.id)).size !== entries.length) {
     throw new DomainRemovalPlanError(
@@ -134,7 +141,7 @@ function orderedChildDomainIds(values, rootDomainId) {
     }
     resolving.add(entry.id);
     let depth;
-    if (entry.parentDomainId === rootDomainId) {
+    if (entry.parentDomainId === rootDomain.id) {
       depth = 1;
     } else {
       const parent = byId.get(entry.parentDomainId);
@@ -155,7 +162,7 @@ function orderedChildDomainIds(values, rootDomainId) {
   return Object.freeze(entries
     .map((entry) => Object.freeze({ ...entry, depth: depths.get(entry.id) }))
     .sort((left, right) => right.depth - left.depth || left.id.localeCompare(right.id))
-    .map((entry) => entry.id));
+    .map(({ depth, ...entry }) => Object.freeze(entry)));
 }
 
 function normalizedBucket(bucket, field) {
@@ -199,6 +206,16 @@ function domainSnapshot(domain) {
     throw new DomainRemovalPlanError(
       'domain_removal_suspension_evidence_invalid',
       'Suspended Domain removal planning requires exact suspension ownership evidence',
+      409,
+    );
+  }
+  if (!suspended && (
+    (domain.suspendedChecksum !== null && domain.suspendedChecksum !== undefined)
+    || (domain.suspensionOperationId !== null && domain.suspensionOperationId !== undefined)
+  )) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_suspension_evidence_invalid',
+      'Active Domain removal planning rejects stale suspension ownership evidence',
       409,
     );
   }
@@ -338,8 +355,10 @@ function dependencyPlan(dependencies, domain) {
     dockerWorkloads: normalizedBucket(dependencies.dockerWorkloads, 'docker'),
   });
   const activeJobs = normalizedIds(dependencies.activeJobs ?? [], 'job');
+  const childDomains = orderedChildDomains(dependencies.childDomains ?? [], domain);
   return Object.freeze({
-    childDomainIds: orderedChildDomainIds(dependencies.childDomains ?? [], domain.id),
+    childDomainIds: Object.freeze(childDomains.map((child) => child.id)),
+    childDomains,
     websiteId: website?.id ?? null,
     applicationId: dependencies.application?.id
       ? safeId(dependencies.application.id, 'applicationId')
@@ -448,7 +467,7 @@ export const domainRemovalPlanInternals = Object.freeze({
   digest,
   domainSnapshot,
   impactBlockers,
-  orderedChildDomainIds,
+  orderedChildDomains,
   authoritativeDnsReference,
   dependencyPlan,
   hardBlockers,

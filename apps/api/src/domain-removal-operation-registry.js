@@ -114,14 +114,19 @@ function persistedStep(value) {
 }
 
 function normalizedPlan(value) {
-  const fields = new Set([
+  const legacyFields = new Set([
     'childDomainIds', 'websiteId', 'applicationId', 'managedComposeProjectId',
     'certificateIds', 'dnsZoneIds', 'mailDomainIds', 'activeJobIds',
     'additional', 'authoritativeDns',
   ]);
+  const fields = new Set([...legacyFields, 'childDomains']);
+  const planKeys = Object.keys(value ?? {});
+  const legacyShape = planKeys.length === legacyFields.size
+    && planKeys.every((field) => legacyFields.has(field));
+  const currentShape = planKeys.length === fields.size
+    && planKeys.every((field) => fields.has(field));
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).length !== fields.size
-    || Object.keys(value).some((field) => !fields.has(field))) {
+    || (!legacyShape && !currentShape)) {
     throw invalid('Domain removal operation plan is invalid');
   }
   const ids = (items, field, { preserveOrder = false } = {}) => {
@@ -134,6 +139,62 @@ function normalizedPlan(value) {
   const optionalId = (item, field) => item === null || item === undefined
     ? null
     : safeId(item, field);
+  const childDomainIds = ids(value.childDomainIds, 'childDomainId', { preserveOrder: true });
+  const normalizedChildDomains = (items) => {
+    if (!currentShape || items === null) return null;
+    if (!Array.isArray(items) || items.length !== childDomainIds.length) {
+      throw invalid('Child Domain intent evidence is invalid');
+    }
+    const childFields = new Set([
+      'id', 'serverId', 'primaryDomain', 'websiteId', 'certificateId', 'parentDomainId',
+      'state', 'desiredRevision', 'checksum', 'suspensionOperationId',
+    ]);
+    const snapshots = items.map((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)
+        || Object.keys(item).length !== childFields.size
+        || Object.keys(item).some((field) => !childFields.has(field))
+        || item.id !== childDomainIds[index]
+        || typeof item.primaryDomain !== 'string' || item.primaryDomain.length < 1
+        || item.primaryDomain.length > 253 || /[\u0000-\u001f\u007f]/.test(item.primaryDomain)
+        || !['active', 'suspended'].includes(item.state)
+        || !Number.isSafeInteger(item.desiredRevision) || item.desiredRevision < 1
+        || (item.state === 'active' && item.suspensionOperationId !== null)
+        || (item.state === 'suspended' && (typeof item.suspensionOperationId !== 'string'
+          || !SAFE_ID.test(item.suspensionOperationId)))) {
+        throw invalid('Child Domain intent evidence is invalid');
+      }
+      return Object.freeze({
+        id: safeId(item.id, 'childDomainId'),
+        serverId: safeId(item.serverId, 'childDomainServerId'),
+        primaryDomain: item.primaryDomain,
+        websiteId: optionalId(item.websiteId, 'childDomainWebsiteId'),
+        certificateId: optionalId(item.certificateId, 'childDomainCertificateId'),
+        parentDomainId: safeId(item.parentDomainId, 'childDomainParentId'),
+        state: item.state,
+        desiredRevision: item.desiredRevision,
+        checksum: safeDigest(item.checksum, 'childDomainChecksum'),
+        suspensionOperationId: item.suspensionOperationId,
+      });
+    });
+    const childIds = new Set(childDomainIds);
+    const indexes = new Map(childDomainIds.map((id, index) => [id, index]));
+    const externalParents = new Set();
+    const servers = new Set(snapshots.map((item) => item.serverId));
+    for (const [index, snapshot] of snapshots.entries()) {
+      if (childIds.has(snapshot.parentDomainId)) {
+        if (indexes.get(snapshot.parentDomainId) <= index) {
+          throw invalid('Child Domain intent evidence is not ordered deepest-first');
+        }
+      } else {
+        externalParents.add(snapshot.parentDomainId);
+      }
+    }
+    if (servers.size > 1 || (snapshots.length > 0 && externalParents.size !== 1)) {
+      throw invalid('Child Domain intent hierarchy is invalid');
+    }
+    return Object.freeze(snapshots);
+  };
+  const childDomains = normalizedChildDomains(value.childDomains);
   const normalizedAdditional = (additional) => {
     const additionalFields = new Set(['mailboxes', 'backups', 'crons', 'dockerWorkloads']);
     if (!additional || typeof additional !== 'object' || Array.isArray(additional)
@@ -200,7 +261,8 @@ function normalizedPlan(value) {
     });
   }
   return Object.freeze({
-    childDomainIds: ids(value.childDomainIds, 'childDomainId', { preserveOrder: true }),
+    childDomainIds,
+    childDomains,
     websiteId: optionalId(value.websiteId, 'websiteId'),
     applicationId: optionalId(value.applicationId, 'applicationId'),
     managedComposeProjectId: optionalId(value.managedComposeProjectId, 'managedComposeProjectId'),
@@ -214,6 +276,9 @@ function normalizedPlan(value) {
 }
 function buildSteps(preview, createdAt) {
   const plan = normalizedPlan(preview.plan);
+  if (plan.childDomains === null) {
+    throw invalid('Domain removal preview lacks exact child Domain intent evidence');
+  }
   const steps = [];
   const add = (kind, resourceId) => {
     steps.push(persistedStep({

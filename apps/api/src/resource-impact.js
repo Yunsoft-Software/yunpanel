@@ -63,7 +63,12 @@ function domainReference(domain) {
     httpsMode: domain.httpsMode,
     certificateId: domain.certificateId ?? null,
     desiredRevision: domain.desiredRevision,
+    stagedRevision: domain.stagedRevision,
     appliedRevision: domain.appliedRevision,
+    appliedPrimaryDomain: domain.appliedPrimaryDomain ?? null,
+    stagedChecksum: domain.stagedChecksum ?? null,
+    suspendedChecksum: domain.suspendedChecksum ?? null,
+    suspensionOperationId: domain.suspensionOperationId ?? null,
   });
 }
 

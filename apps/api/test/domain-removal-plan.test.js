@@ -31,9 +31,32 @@ function domain(overrides = {}) {
   };
 }
 
+function childDomain(id = 'child-domain-1', parentDomainId = 'domain-1', overrides = {}) {
+  const primaryDomain = `${id}.example.com`;
+  return {
+    id,
+    serverId: 'local',
+    primaryDomain,
+    websiteId: `website-${id}`,
+    certificateId: null,
+    parentDomainId,
+    state: 'active',
+    desiredRevision: 2,
+    stagedRevision: 2,
+    appliedRevision: 2,
+    appliedPrimaryDomain: primaryDomain,
+    stagedChecksum: '2'.repeat(64),
+    suspendedChecksum: null,
+    suspensionOperationId: null,
+    ...overrides,
+  };
+}
+
 function impact(currentDomain = domain(), overrides = {}) {
   const dependencies = {
-    childDomains: [{ id: 'child-domain-1', parentDomainId: currentDomain.id }],
+    childDomains: [childDomain('child-domain-1', currentDomain.id, {
+      serverId: currentDomain.serverId,
+    })],
     website: { id: currentDomain.websiteId },
     application: { id: 'application-1' },
     managedComposeBinding: null,
@@ -108,6 +131,18 @@ test('pins current resource-impact evidence into a deterministic Domain removal 
   assert.equal(preview.readyToStart, true);
   assert.deepEqual(preview.hardBlockers, []);
   assert.deepEqual(preview.plan.childDomainIds, ['child-domain-1']);
+  assert.deepEqual(preview.plan.childDomains, [{
+    id: 'child-domain-1',
+    serverId: 'local',
+    primaryDomain: 'child-domain-1.example.com',
+    websiteId: 'website-child-domain-1',
+    certificateId: null,
+    parentDomainId: 'domain-1',
+    state: 'active',
+    desiredRevision: 2,
+    checksum: '2'.repeat(64),
+    suspensionOperationId: null,
+  }]);
   assert.equal(preview.plan.websiteId, 'website-1');
   assert.deepEqual(preview.plan.certificateIds, ['certificate-1']);
   assert.equal(preview.plan.authoritativeDns.previewDigest, dnsPreviewDigest);
@@ -206,7 +241,7 @@ test('dependency drift changes the Domain removal preview digest', () => {
     ...changedImpact.dependencies,
     childDomains: [
       ...changedImpact.dependencies.childDomains,
-      { id: 'child-domain-2', parentDomainId: currentDomain.id },
+      childDomain('child-domain-2', currentDomain.id),
     ],
   };
   const second = createDomainRemovalPreview({
@@ -217,6 +252,61 @@ test('dependency drift changes the Domain removal preview digest', () => {
   assert.notEqual(first.previewDigest, second.previewDigest);
 });
 
+test('child Domain revision and checksum drift changes the parent removal intent', () => {
+  const currentDomain = domain();
+  const first = createDomainRemovalPreview({
+    domain: currentDomain,
+    impact: impact(currentDomain),
+  });
+  const changedImpact = impact(currentDomain);
+  changedImpact.dependencies = {
+    ...changedImpact.dependencies,
+    childDomains: [childDomain('child-domain-1', currentDomain.id, {
+      desiredRevision: 3,
+      stagedRevision: 3,
+      appliedRevision: 3,
+      stagedChecksum: '3'.repeat(64),
+    })],
+  };
+  const second = createDomainRemovalPreview({
+    domain: currentDomain,
+    impact: changedImpact,
+  });
+
+  assert.notEqual(first.previewDigest, second.previewDigest);
+  assert.equal(second.plan.childDomains[0].desiredRevision, 3);
+  assert.equal(second.plan.childDomains[0].checksum, '3'.repeat(64));
+});
+
+test('rejects unstable or cross-server child Domain intent before journaling', () => {
+  const currentDomain = domain();
+  const unstableImpact = impact(currentDomain);
+  unstableImpact.dependencies = {
+    ...unstableImpact.dependencies,
+    childDomains: [childDomain('child-domain-1', currentDomain.id, {
+      stagedRevision: 1,
+    })],
+  };
+  assert.throws(
+    () => createDomainRemovalPreview({ domain: currentDomain, impact: unstableImpact }),
+    (error) => error instanceof DomainRemovalPlanError
+      && error.code === 'domain_removal_domain_not_stable',
+  );
+
+  const crossServerImpact = impact(currentDomain);
+  crossServerImpact.dependencies = {
+    ...crossServerImpact.dependencies,
+    childDomains: [childDomain('child-domain-1', currentDomain.id, {
+      serverId: 'different-server',
+    })],
+  };
+  assert.throws(
+    () => createDomainRemovalPreview({ domain: currentDomain, impact: crossServerImpact }),
+    (error) => error instanceof DomainRemovalPlanError
+      && error.code === 'domain_removal_impact_stale',
+  );
+});
+
 
 test('orders descendant Domain cleanup deepest-first before direct children', () => {
   const currentDomain = domain();
@@ -224,10 +314,10 @@ test('orders descendant Domain cleanup deepest-first before direct children', ()
   nestedImpact.dependencies = {
     ...nestedImpact.dependencies,
     childDomains: [
-      { id: 'child-b', parentDomainId: currentDomain.id },
-      { id: 'grandchild-a', parentDomainId: 'child-a' },
-      { id: 'child-a', parentDomainId: currentDomain.id },
-      { id: 'grandchild-b', parentDomainId: 'child-b' },
+      childDomain('child-b', currentDomain.id),
+      childDomain('grandchild-a', 'child-a'),
+      childDomain('child-a', currentDomain.id),
+      childDomain('grandchild-b', 'child-b'),
     ],
   };
   const preview = createDomainRemovalPreview({
@@ -239,6 +329,10 @@ test('orders descendant Domain cleanup deepest-first before direct children', ()
     preview.plan.childDomainIds,
     ['grandchild-a', 'grandchild-b', 'child-a', 'child-b'],
   );
+  assert.deepEqual(
+    preview.plan.childDomains.map((child) => child.id),
+    preview.plan.childDomainIds,
+  );
 });
 
 test('rejects disconnected descendant inventory instead of guessing cascade order', () => {
@@ -246,7 +340,7 @@ test('rejects disconnected descendant inventory instead of guessing cascade orde
   const brokenImpact = impact(currentDomain);
   brokenImpact.dependencies = {
     ...brokenImpact.dependencies,
-    childDomains: [{ id: 'child-domain-1', parentDomainId: 'foreign-parent' }],
+    childDomains: [childDomain('child-domain-1', 'foreign-parent')],
   };
 
   assert.throws(

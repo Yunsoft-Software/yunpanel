@@ -49,6 +49,18 @@ function preview() {
     },
     plan: {
       childDomainIds: ['child-domain-1'],
+      childDomains: [{
+        id: 'child-domain-1',
+        serverId: 'local',
+        primaryDomain: 'api.example.com',
+        websiteId: 'website-2',
+        certificateId: null,
+        parentDomainId: 'domain-1',
+        state: 'active',
+        desiredRevision: 2,
+        checksum: '2'.repeat(64),
+        suspensionOperationId: null,
+      }],
       websiteId: 'website-1',
       applicationId: 'application-1',
       managedComposeProjectId: null,
@@ -139,6 +151,42 @@ test('legacy journal plans load fail-closed without inventing DNS ownership or r
   assert.equal(normalized.authoritativeDns.zoneSnapshotDigest, zoneSnapshotDigest);
   assert.equal(normalized.authoritativeDns.ownershipEvidenceDigest, null);
   assert.equal(normalized.authoritativeDns.snapshotRetentionDays, null);
+});
+
+test('legacy journal plans load without inventing exact child Domain intent evidence', () => {
+  const legacy = preview().plan;
+  delete legacy.childDomains;
+
+  const normalized = domainRemovalOperationRegistryInternals.normalizedPlan(legacy);
+
+  assert.deepEqual(normalized.childDomainIds, ['child-domain-1']);
+  assert.equal(normalized.childDomains, null);
+});
+
+test('new operations reject missing or drifted child Domain intent evidence', async () => {
+  const registry = createDomainRemovalOperationRegistry({
+    idFactory: () => 'operation-1',
+    now: () => Date.parse('2026-09-18T20:00:00.000Z'),
+  });
+  const legacy = preview();
+  delete legacy.plan.childDomains;
+
+  await assert.rejects(
+    registry.create(legacy),
+    (error) => error instanceof DomainRemovalOperationRegistryError
+      && error.code === 'domain_removal_operation_state_invalid',
+  );
+
+  const drifted = preview();
+  drifted.plan.childDomains[0] = {
+    ...drifted.plan.childDomains[0],
+    id: 'different-child',
+  };
+  await assert.rejects(
+    registry.create(drifted),
+    (error) => error instanceof DomainRemovalOperationRegistryError
+      && error.code === 'domain_removal_operation_state_invalid',
+  );
 });
 
 test('enforces journal order and allows failed or blocked current step retry', async () => {

@@ -190,6 +190,14 @@ test('Domain move preview includes child Website/Application/certificate state a
   assert.equal(preview.dependencies.website.id, state.website.id);
   assert.equal(preview.dependencies.application.id, state.application.id);
   assert.deepEqual(preview.dependencies.childDomains.map((item) => item.id), [state.child.id]);
+  assert.equal(preview.dependencies.childDomains[0].desiredRevision, state.child.desiredRevision);
+  assert.equal(preview.dependencies.childDomains[0].stagedRevision, state.child.stagedRevision);
+  assert.equal(preview.dependencies.childDomains[0].appliedRevision, state.child.appliedRevision);
+  assert.equal(preview.dependencies.childDomains[0].stagedChecksum, state.child.stagedChecksum);
+  assert.equal(
+    preview.dependencies.childDomains[0].suspensionOperationId,
+    state.child.suspensionOperationId,
+  );
   assert.equal(preview.dependencies.certificates[0].id, state.certificate.id);
   assert.equal(preview.confirmation, `move:domain:${state.domain.id}:${state.targetServerId}:${preview.previewDigest}`);
 
