@@ -59,9 +59,9 @@ function target(value) {
 }
 
 function intent(value) {
-  const fields = new Set(['websiteId', 'applicationId', 'user', 'homeDirectory', 'targets', 'adapter', 'sourceOperationId']);
+  const fields = new Set(['websiteId', 'applicationId', 'user', 'homeDirectory', 'targets', 'adapter', 'sourceOperationId', 'sourceStateSha256']);
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || ![5, 6, 7].includes(Object.keys(value).length) || Object.keys(value).some((field) => !fields.has(field))
+    || ![5, 6, 7, 8].includes(Object.keys(value).length) || Object.keys(value).some((field) => !fields.has(field))
     || typeof value.user !== 'string' || !USER_PATTERN.test(value.user)
     || typeof value.homeDirectory !== 'string' || !value.homeDirectory.startsWith('/')
     || !Array.isArray(value.targets) || value.targets.length > 2) {
@@ -70,11 +70,17 @@ function intent(value) {
   const targets = value.targets.map(target);
   const adapter = value.adapter ?? (targets.length === 0 ? 'identity' : 'workspace');
   const sourceOperationId = value.sourceOperationId === undefined ? null : uuid(value.sourceOperationId, 'sourceOperationId');
-  if (!['workspace', 'identity', 'sftp', 'php', 'php_container', 'static_control'].includes(adapter)
+  const sourceStateSha256 = value.sourceStateSha256 === undefined ? null : value.sourceStateSha256;
+  if (sourceStateSha256 !== null && (typeof sourceStateSha256 !== 'string' || !SHA256_PATTERN.test(sourceStateSha256))) {
+    throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', 'Website isolation migration source state digest is invalid');
+  }
+  if (!['workspace', 'identity', 'sftp', 'php', 'php_container', 'static_control', 'static_release'].includes(adapter)
     || (adapter === 'workspace' && targets.length < 1)
     || (adapter !== 'workspace' && targets.length !== 0)
-    || (['php', 'php_container', 'static_control'].includes(adapter) && sourceOperationId === null)
-    || (!['php', 'php_container', 'static_control'].includes(adapter) && sourceOperationId !== null)) {
+    || (['php', 'php_container', 'static_control', 'static_release'].includes(adapter) && sourceOperationId === null)
+    || (!['php', 'php_container', 'static_control', 'static_release'].includes(adapter) && sourceOperationId !== null)
+    || (adapter === 'static_release' && sourceStateSha256 === null)
+    || (adapter !== 'static_release' && sourceStateSha256 !== null)) {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', 'Website isolation migration adapter is invalid');
   }
   if (new Set(targets.map((entry) => entry.name)).size !== targets.length) {
@@ -109,6 +115,7 @@ function intent(value) {
     targets: Object.freeze(targets),
     adapter,
     ...(sourceOperationId === null ? {} : { sourceOperationId }),
+    ...(sourceStateSha256 === null ? {} : { sourceStateSha256 }),
   });
 }
 
@@ -138,6 +145,10 @@ function evidence(value, field) {
     'staticControlReceiptVersion',
     'migratedStaticControlMetadata',
     'restoredStaticControlMetadata',
+    'staticReleaseReceiptVersion',
+    'migratedStaticReleasePermissions',
+    'restoredStaticReleasePermissions',
+    'treeSha256',
     'restoredPrevious',
     'preservedExisting',
   ]);
@@ -150,6 +161,9 @@ function evidence(value, field) {
     || (value.phpFpmReceiptVersion !== undefined && value.phpFpmReceiptVersion !== 1)
     || (value.phpContainerReceiptVersion !== undefined && value.phpContainerReceiptVersion !== 1)
     || (value.staticControlReceiptVersion !== undefined && value.staticControlReceiptVersion !== 1)
+    || (value.staticReleaseReceiptVersion !== undefined && value.staticReleaseReceiptVersion !== 1)
+    || (value.treeSha256 !== undefined
+      && (typeof value.treeSha256 !== 'string' || !SHA256_PATTERN.test(value.treeSha256)))
     || (value.authorizedKeyCount !== undefined
       && (!Number.isSafeInteger(value.authorizedKeyCount) || value.authorizedKeyCount < 0 || value.authorizedKeyCount > 100))
     || (value.authorizedKeysSha256 !== undefined
@@ -158,7 +172,7 @@ function evidence(value, field) {
       && (!Number.isSafeInteger(value.createdWorkspaceDirectories) || value.createdWorkspaceDirectories < 0 || value.createdWorkspaceDirectories > 2))
     || (value.removedWorkspaceDirectories !== undefined
       && (!Number.isSafeInteger(value.removedWorkspaceDirectories) || value.removedWorkspaceDirectories < 0 || value.removedWorkspaceDirectories > 2))
-    || ['createdUnixIdentity', 'removedUser', 'removedGroup', 'removedHome', 'preservedHomeData', 'activatedSftpIsolation', 'removedSftpIsolation', 'createdPhpFpmPool', 'migratedPhpContainer', 'restoredPhpContainerMetadata', 'migratedStaticControlMetadata', 'restoredStaticControlMetadata', 'restoredPrevious', 'preservedExisting']
+    || ['createdUnixIdentity', 'removedUser', 'removedGroup', 'removedHome', 'preservedHomeData', 'activatedSftpIsolation', 'removedSftpIsolation', 'createdPhpFpmPool', 'migratedPhpContainer', 'restoredPhpContainerMetadata', 'migratedStaticControlMetadata', 'restoredStaticControlMetadata', 'migratedStaticReleasePermissions', 'restoredStaticReleasePermissions', 'restoredPrevious', 'preservedExisting']
       .some((key) => value[key] !== undefined && typeof value[key] !== 'boolean')) {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', `${field} is invalid`);
   }
@@ -186,6 +200,10 @@ function evidence(value, field) {
     ...(value.staticControlReceiptVersion === undefined ? {} : { staticControlReceiptVersion: value.staticControlReceiptVersion }),
     ...(value.migratedStaticControlMetadata === undefined ? {} : { migratedStaticControlMetadata: value.migratedStaticControlMetadata }),
     ...(value.restoredStaticControlMetadata === undefined ? {} : { restoredStaticControlMetadata: value.restoredStaticControlMetadata }),
+    ...(value.staticReleaseReceiptVersion === undefined ? {} : { staticReleaseReceiptVersion: value.staticReleaseReceiptVersion }),
+    ...(value.migratedStaticReleasePermissions === undefined ? {} : { migratedStaticReleasePermissions: value.migratedStaticReleasePermissions }),
+    ...(value.restoredStaticReleasePermissions === undefined ? {} : { restoredStaticReleasePermissions: value.restoredStaticReleasePermissions }),
+    ...(value.treeSha256 === undefined ? {} : { treeSha256: value.treeSha256 }),
     ...(value.restoredPrevious === undefined ? {} : { restoredPrevious: value.restoredPrevious }),
     ...(value.preservedExisting === undefined ? {} : { preservedExisting: value.preservedExisting }),
   });
@@ -247,9 +265,11 @@ function operationFromAudit(audit, now, idFactory) {
   const phpCreate = change?.action === 'create_php_fpm_pool';
   const phpContainerRepair = change?.action === 'repair_php_container_metadata';
   const staticControlRepair = change?.action === 'repair_static_control_metadata';
-  const sourceOperationId = phpCreate || phpContainerRepair || staticControlRepair
+  const staticReleaseRepair = change?.action === 'repair_static_release_permissions';
+  const sourceOperationId = phpCreate || phpContainerRepair || staticControlRepair || staticReleaseRepair
     ? uuid(change?.current?.operationId, 'sourceOperationId')
     : null;
+  const sourceStateSha256 = staticReleaseRepair ? change?.desired?.treeSha256 ?? null : null;
   const adapter = identityCreate
     ? 'identity'
     : sftpCreate
@@ -260,10 +280,12 @@ function operationFromAudit(audit, now, idFactory) {
           ? 'php_container'
           : staticControlRepair
             ? 'static_control'
-            : 'workspace';
+            : staticReleaseRepair
+              ? 'static_release'
+              : 'workspace';
   const targets = change?.action === 'create_workspace_directories'
     ? change.desired?.directories
-    : identityCreate || sftpCreate || phpCreate || phpContainerRepair || staticControlRepair
+    : identityCreate || sftpCreate || phpCreate || phpContainerRepair || staticControlRepair || staticReleaseRepair
       ? []
       : null;
   if (audit?.applicable !== true || audit.migrationRequired !== true
@@ -341,6 +363,24 @@ function operationFromAudit(audit, now, idFactory) {
       || change.desired?.staticControl?.nginxFileAcl !== 'user:www-data:r--'
       || change.desired?.staticControl?.aclPackage !== 'acl'
     ))
+    || (staticReleaseRepair && (
+      change.current?.staticRuntimeMigrationPreview?.releaseRepairCandidate !== true
+      || change.current?.staticRuntimeMigrationPreview?.current?.releasePermissions?.repairCandidate !== true
+      || change.current?.staticRuntimeMigrationPreview?.current?.releasePermissions?.current?.tree?.sha256 !== sourceStateSha256
+      || change.desired?.treeSha256 !== sourceStateSha256
+      || typeof sourceStateSha256 !== 'string' || !SHA256_PATTERN.test(sourceStateSha256)
+      || change.desired?.staticRelease?.websiteId !== audit.websiteId
+      || change.desired?.staticRelease?.applicationId !== audit.applicationId
+      || change.desired?.staticRelease?.unixUser !== audit.expected?.unixUser
+      || change.desired?.staticRelease?.releasesRoot !== path.posix.join(
+        createApplicationIdentity(audit.applicationId).paths.static.publishRoot,
+        'releases',
+      )
+      || change.desired?.staticRelease?.releaseDirectoryMode !== '0750'
+      || change.desired?.staticRelease?.releaseFileMode !== '0640'
+      || change.desired?.staticRelease?.nginxDirectoryAcl !== 'user:www-data:r-x'
+      || change.desired?.staticRelease?.nginxFileAcl !== 'user:www-data:r--'
+    ))
     || typeof audit.expected?.unixUser !== 'string' || typeof audit.expected?.homeDirectory !== 'string') {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_preview_invalid', 'Website isolation migration preview cannot be journaled');
   }
@@ -359,6 +399,7 @@ function operationFromAudit(audit, now, idFactory) {
       targets,
       adapter,
       ...(sourceOperationId === null ? {} : { sourceOperationId }),
+      ...(sourceStateSha256 === null ? {} : { sourceStateSha256 }),
     },
     status: 'pending',
     result: null,
