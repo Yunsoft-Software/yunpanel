@@ -21,10 +21,14 @@ test('API auth and public web gateway share the reusable integrated-tool descrip
   assert.match(web, /integratedToolGateway/);
   assert.match(web, /integratedToolGateway\('phpmyadmin'\)/);
   assert.match(web, /integratedToolGateway\('elfinder'\)/);
+  assert.match(web, /integratedToolGateway\('ttyd'\)/);
   assert.match(web, /PHPMYADMIN_GATEWAY\.publicPrefix/);
   assert.match(web, /PHPMYADMIN_GATEWAY\.accessPath/);
   assert.match(web, /PHPMYADMIN_GATEWAY\.socketPath/);
   assert.match(web, /ELFINDER_GATEWAY\.publicPrefix/);
   assert.match(web, /ELFINDER_GATEWAY\.accessPath/);
   assert.match(web, /ELFINDER_GATEWAY\.socketPath/);
+  assert.match(web, /TTYD_GATEWAY\.publicPrefix/);
+  assert.match(web, /TTYD_GATEWAY\.accessPath/);
+  assert.match(web, /TTYD_GATEWAY\.socketRoot/);
 });
