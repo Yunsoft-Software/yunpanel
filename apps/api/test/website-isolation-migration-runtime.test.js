@@ -81,6 +81,94 @@ function manager({ initiallySatisfied = false, applyError = null, compensationEr
       satisfied = false;
       return { satisfied: true, removedWorkspaceDirectories: 2 };
     },
+    async inspectIdentityOperation() {
+      return { satisfied: false, reason: 'website_identity_operation_receipt_missing' };
+    },
+    async applyIdentityMigration() {
+      throw new Error('identity migration not configured in workspace test');
+    },
+    async inspectIdentityMigrationCompensation() {
+      return { satisfied: true, removedUser: false, removedGroup: false, removedHome: false };
+    },
+    async compensateIdentityMigration() {
+      throw new Error('identity migration not configured in workspace test');
+    },
+  };
+}
+
+function identityPreview(overrides = {}) {
+  const desired = {
+    user: applicationUser,
+    homeDirectory,
+    shellPolicy: 'nologin',
+    privateGroup: true,
+    groupMemberCount: 0,
+    homeMode: '0750',
+  };
+  return preview({
+    ...overrides,
+    migration: {
+      applyAvailable: true,
+      previewDigest,
+      confirmation,
+      changes: [{
+        action: 'create_canonical_unix_identity',
+        applyState: 'requires_explicit_apply',
+        current: {
+          identityMigrationPreview: {
+            version: 1,
+            satisfied: false,
+            safeCreateCandidate: true,
+            current: { account: null, group: null, home: null },
+            desired,
+            differences: [
+              'website_identity_user_missing',
+              'website_identity_group_missing',
+              'website_identity_home_missing',
+            ],
+          },
+        },
+        desired: { identity: desired },
+      }],
+    },
+  });
+}
+
+function identityManager() {
+  let created = false;
+  let compensated = false;
+  const calls = [];
+  return {
+    calls,
+    async inspectWorkspace() { return { satisfied: true }; },
+    async inspectWorkspaceOperation() { return { satisfied: true, createdWorkspaceDirectories: 0 }; },
+    async applyWorkspace() { throw new Error('workspace migration not configured'); },
+    async inspectWorkspaceCompensation() { return { satisfied: true, removedWorkspaceDirectories: 0 }; },
+    async compensateWorkspace() { throw new Error('workspace migration not configured'); },
+    async inspectIdentityOperation(intent, options) {
+      calls.push(['inspect-identity-operation', intent, options]);
+      return created
+        ? { satisfied: true, identityReceiptVersion: 1, createdUnixIdentity: true }
+        : { satisfied: false, reason: 'website_identity_operation_receipt_missing' };
+    },
+    async applyIdentityMigration(intent, options) {
+      calls.push(['apply-identity', intent, options]);
+      created = true;
+      compensated = false;
+      return { satisfied: true, identityReceiptVersion: 1, createdUnixIdentity: true };
+    },
+    async inspectIdentityMigrationCompensation(intent, options) {
+      calls.push(['inspect-identity-compensation', intent, options]);
+      return compensated
+        ? { satisfied: true, removedUser: true, removedGroup: true, removedHome: false, preservedHomeData: true }
+        : { satisfied: false, reason: 'website_identity_compensation_pending' };
+    },
+    async compensateIdentityMigration(intent, options) {
+      calls.push(['compensate-identity', intent, options]);
+      compensated = true;
+      created = false;
+      return { satisfied: true, removedUser: true, removedGroup: true, removedHome: false, preservedHomeData: true };
+    },
   };
 }
 
@@ -242,4 +330,80 @@ test('parallel apply and rollback requests share one host mutation flight', asyn
   const rolledBack = await Promise.all([firstRollback, secondRollback]);
   assert.deepEqual(rolledBack.map((entry) => entry.status), ['compensated', 'compensated']);
   assert.equal(workspace.calls.filter(([name]) => name === 'compensate').length, 1);
+});
+
+
+test('Unix identity migration journals exact safe-create target and returns durable receipt evidence', async () => {
+  const store = registry();
+  const manager = identityManager();
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: store,
+    auditService: { audit: async () => identityPreview() },
+    workspaceManager: manager,
+  });
+  await runtime.init();
+
+  const result = await runtime.start({ websiteId, previewDigest, confirmation });
+
+  assert.equal(result.status, 'succeeded');
+  assert.deepEqual(result.targets, []);
+  assert.deepEqual(result.result, {
+    satisfied: true,
+    identityReceiptVersion: 1,
+    createdUnixIdentity: true,
+  });
+  assert.deepEqual(manager.calls.map(([name]) => name), ['inspect-identity-operation', 'apply-identity']);
+});
+
+test('Unix identity migration restart inspection closes completed receipt without replaying user creation', async () => {
+  const store = registry();
+  await store.init();
+  const created = await store.create(identityPreview());
+  await store.markApplying(created.id);
+  const manager = identityManager();
+  await manager.applyIdentityMigration({
+    websiteId,
+    applicationId,
+    user: applicationUser,
+    homeDirectory,
+  }, { operationId });
+
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: store,
+    auditService: { audit: async () => identityPreview() },
+    workspaceManager: manager,
+  });
+  manager.calls.length = 0;
+
+  const recovery = await runtime.init();
+
+  assert.deepEqual(recovery, [{ operationId, recovered: true }]);
+  assert.equal((await runtime.get(operationId)).status, 'succeeded');
+  assert.deepEqual(manager.calls.map(([name]) => name), ['inspect-identity-operation']);
+});
+
+test('Unix identity typed rollback preserves nonempty HOME evidence', async () => {
+  const manager = identityManager();
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: registry(),
+    auditService: { audit: async () => identityPreview() },
+    workspaceManager: manager,
+  });
+  await runtime.init();
+  await runtime.start({ websiteId, previewDigest, confirmation });
+
+  const result = await runtime.rollback({
+    operationId,
+    confirmation: `rollback-isolation-migration:${operationId}:${previewDigest}`,
+  });
+
+  assert.equal(result.status, 'compensated');
+  assert.deepEqual(result.compensation, {
+    satisfied: true,
+    removedUser: true,
+    removedGroup: true,
+    removedHome: false,
+    preservedHomeData: true,
+  });
+  assert.equal(manager.calls.some(([name]) => name === 'compensate-identity'), true);
 });
