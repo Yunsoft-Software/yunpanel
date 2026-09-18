@@ -93,6 +93,71 @@ function normalizedIds(values, field) {
   return Object.freeze(ids);
 }
 
+function orderedChildDomainIds(values, rootDomainId) {
+  if (!Array.isArray(values) || values.length > 500) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_preview_invalid',
+      'childDomain dependency inventory is invalid',
+      409,
+    );
+  }
+  const entries = values.map((value) => {
+    const id = safeId(value?.id, 'childDomainId');
+    const parentDomainId = safeId(value?.parentDomainId, 'childDomainParentId');
+    if (id === rootDomainId) {
+      throw new DomainRemovalPlanError(
+        'domain_removal_preview_invalid',
+        'Domain removal child inventory contains its own root Domain',
+        409,
+      );
+    }
+    return Object.freeze({ id, parentDomainId });
+  });
+  if (new Set(entries.map((entry) => entry.id)).size !== entries.length) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_preview_invalid',
+      'childDomain dependency inventory contains duplicate identities',
+      409,
+    );
+  }
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const depths = new Map();
+  const resolving = new Set();
+  const depthOf = (entry) => {
+    if (depths.has(entry.id)) return depths.get(entry.id);
+    if (resolving.has(entry.id)) {
+      throw new DomainRemovalPlanError(
+        'domain_removal_preview_invalid',
+        'Domain removal child inventory contains a hierarchy cycle',
+        409,
+      );
+    }
+    resolving.add(entry.id);
+    let depth;
+    if (entry.parentDomainId === rootDomainId) {
+      depth = 1;
+    } else {
+      const parent = byId.get(entry.parentDomainId);
+      if (!parent) {
+        throw new DomainRemovalPlanError(
+          'domain_removal_preview_invalid',
+          'Domain removal child inventory is disconnected from the root Domain',
+          409,
+        );
+      }
+      depth = depthOf(parent) + 1;
+    }
+    resolving.delete(entry.id);
+    depths.set(entry.id, depth);
+    return depth;
+  };
+  for (const entry of entries) depthOf(entry);
+  return Object.freeze(entries
+    .map((entry) => Object.freeze({ ...entry, depth: depths.get(entry.id) }))
+    .sort((left, right) => right.depth - left.depth || left.id.localeCompare(right.id))
+    .map((entry) => entry.id));
+}
+
 function normalizedBucket(bucket, field) {
   if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)
     || !['available', 'unavailable'].includes(bucket.status)
@@ -262,7 +327,7 @@ function dependencyPlan(dependencies, domain) {
   });
   const activeJobs = normalizedIds(dependencies.activeJobs ?? [], 'job');
   return Object.freeze({
-    childDomainIds: normalizedIds(dependencies.childDomains ?? [], 'childDomain'),
+    childDomainIds: orderedChildDomainIds(dependencies.childDomains ?? [], domain.id),
     websiteId: website?.id ?? null,
     applicationId: dependencies.application?.id
       ? safeId(dependencies.application.id, 'applicationId')
@@ -363,6 +428,7 @@ export const domainRemovalPlanInternals = Object.freeze({
   digest,
   domainSnapshot,
   impactBlockers,
+  orderedChildDomainIds,
   authoritativeDnsReference,
   dependencyPlan,
   hardBlockers,
