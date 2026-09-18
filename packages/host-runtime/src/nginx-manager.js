@@ -12,6 +12,7 @@ import {
 
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const ROLLBACK_RECEIPT_VERSION = 1;
+const DEACTIVATION_RECEIPT_VERSION = 1;
 
 export class NginxManagerError extends Error {
   constructor(code, message) {
@@ -131,6 +132,7 @@ export function createNginxManager({
 } = {}) {
   let activationChain = Promise.resolve();
   const rollbackDir = path.join(stagingDir, 'rollback');
+  const deactivationDir = path.join(stagingDir, 'deactivation');
 
   async function atomicWrite(targetPath, content, mode) {
     const temporaryPath = `${targetPath}.${process.pid}.tmp`;
@@ -233,6 +235,79 @@ export function createNginxManager({
       0o600,
     );
     return normalizeRollbackReceipt(receipt, { primaryDomain, configName, checksum });
+  }
+
+  function deactivationReceiptPath(configName, checksum) {
+    if (typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
+      throw new NginxManagerError('invalid_checksum', 'A SHA-256 active configuration checksum is required');
+    }
+    return path.join(deactivationDir, `${configName}.${checksum}.json`);
+  }
+
+  function normalizeDeactivationReceipt(value, { primaryDomain, configName, checksum } = {}) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.version !== DEACTIVATION_RECEIPT_VERSION
+      || value.primaryDomain !== primaryDomain
+      || value.configName !== configName
+      || value.activeChecksum !== checksum) {
+      throw new NginxManagerError(
+        'nginx_deactivation_receipt_invalid',
+        'Nginx deactivation receipt is invalid',
+      );
+    }
+    const active = normalizeReceiptState(value.active);
+    if (!active.exists || active.checksum !== checksum) {
+      throw new NginxManagerError(
+        'nginx_deactivation_receipt_invalid',
+        'Nginx deactivation receipt does not match the expected active configuration',
+      );
+    }
+    return Object.freeze({
+      version: DEACTIVATION_RECEIPT_VERSION,
+      primaryDomain,
+      configName,
+      activeChecksum: checksum,
+      active,
+    });
+  }
+
+  async function loadDeactivationReceipt({ primaryDomain, configName, checksum } = {}) {
+    let raw;
+    try {
+      raw = await readFileFn(deactivationReceiptPath(configName, checksum), 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw new NginxManagerError(
+        'nginx_deactivation_receipt_unavailable',
+        'Nginx deactivation receipt could not be read',
+      );
+    }
+    try {
+      return normalizeDeactivationReceipt(JSON.parse(raw), { primaryDomain, configName, checksum });
+    } catch (error) {
+      if (error instanceof NginxManagerError) throw error;
+      throw new NginxManagerError(
+        'nginx_deactivation_receipt_invalid',
+        'Nginx deactivation receipt is invalid',
+      );
+    }
+  }
+
+  async function persistDeactivationReceipt({ primaryDomain, configName, checksum, active }) {
+    await mkdirFn(deactivationDir, { recursive: true, mode: 0o700 });
+    const receipt = {
+      version: DEACTIVATION_RECEIPT_VERSION,
+      primaryDomain,
+      configName,
+      activeChecksum: checksum,
+      active,
+    };
+    await atomicWrite(
+      deactivationReceiptPath(configName, checksum),
+      `${JSON.stringify(receipt)}\n`,
+      0o600,
+    );
+    return normalizeDeactivationReceipt(receipt, { primaryDomain, configName, checksum });
   }
 
   async function restoreFile(targetPath, state, mode = 0o644) {
@@ -490,6 +565,246 @@ export function createNginxManager({
     return run;
   }
 
+  async function inspectDomainDeactivation({ primaryDomain, checksum } = {}) {
+    if (typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
+      throw new NginxManagerError('invalid_checksum', 'A SHA-256 active configuration checksum is required');
+    }
+    const configName = configNameForDomain(primaryDomain);
+    const activePath = path.join(sitesDir, configName);
+    const receipt = await loadDeactivationReceipt({ primaryDomain, configName, checksum });
+    const current = await captureFile(activePath, 'nginx_deactivation_inspection_failed');
+
+    if (!current.exists) {
+      if (!receipt) {
+        return {
+          satisfied: false,
+          deactivationCandidate: false,
+          restorable: false,
+          reason: 'nginx_deactivation_unowned_absence',
+          configName,
+          checksum,
+        };
+      }
+      return {
+        satisfied: true,
+        deactivationCandidate: false,
+        deactivated: true,
+        restorable: true,
+        configName,
+        checksum,
+        receiptVersion: receipt.version,
+      };
+    }
+    if (current.checksum !== checksum) {
+      throw new NginxManagerError(
+        'nginx_deactivation_drift',
+        'Nginx deactivation refused because active configuration checksum drifted',
+      );
+    }
+    if (receipt && !sameFileState(current, receipt.active)) {
+      throw new NginxManagerError(
+        'nginx_deactivation_drift',
+        'Nginx deactivation refused because active configuration differs from retained receipt',
+      );
+    }
+    return {
+      satisfied: false,
+      deactivationCandidate: true,
+      restorable: Boolean(receipt),
+      configName,
+      checksum,
+      receiptVersion: receipt?.version ?? null,
+    };
+  }
+
+  async function deactivateNow({ primaryDomain, checksum } = {}) {
+    const inspection = await inspectDomainDeactivation({ primaryDomain, checksum });
+    if (inspection.satisfied) {
+      return {
+        ...inspection,
+        changed: false,
+      };
+    }
+    if (!inspection.deactivationCandidate) {
+      throw new NginxManagerError(
+        'nginx_deactivation_unowned_absence',
+        'Nginx deactivation cannot claim an already absent active configuration',
+      );
+    }
+
+    const configName = configNameForDomain(primaryDomain);
+    const activePath = path.join(sitesDir, configName);
+    const before = await captureFile(activePath, 'nginx_deactivation_inspection_failed');
+    if (!before.exists || before.checksum !== checksum) {
+      throw new NginxManagerError(
+        'nginx_deactivation_drift',
+        'Nginx active configuration changed before deactivation',
+      );
+    }
+    let receipt = await loadDeactivationReceipt({ primaryDomain, configName, checksum });
+    if (!receipt) {
+      receipt = await persistDeactivationReceipt({
+        primaryDomain,
+        configName,
+        checksum,
+        active: before,
+      });
+    } else if (!sameFileState(before, receipt.active)) {
+      throw new NginxManagerError(
+        'nginx_deactivation_drift',
+        'Nginx active configuration no longer matches retained deactivation receipt',
+      );
+    }
+
+    async function restoreActive() {
+      await restoreFile(activePath, receipt.active);
+    }
+
+    try {
+      await rmFn(activePath, { force: true });
+      await execFn(nginxPath, ['-t']);
+      await execFn(systemctlPath, ['reload', 'nginx']);
+    } catch {
+      try {
+        await restoreActive();
+        await execFn(nginxPath, ['-t']);
+        await execFn(systemctlPath, ['reload', 'nginx']);
+      } catch {
+        throw new NginxManagerError(
+          'nginx_deactivation_rollback_failed',
+          'Nginx deactivation failed and the exact active configuration could not be restored',
+        );
+      }
+      throw new NginxManagerError(
+        'nginx_deactivation_failed',
+        'Nginx deactivation failed and the exact active configuration was restored',
+      );
+    }
+
+    const verified = await inspectDomainDeactivation({ primaryDomain, checksum });
+    if (!verified.satisfied) {
+      throw new NginxManagerError(
+        'nginx_deactivation_unverified',
+        'Nginx deactivation could not be verified',
+      );
+    }
+    return {
+      ...verified,
+      changed: true,
+    };
+  }
+
+  function deactivateDomain(input) {
+    const run = activationChain.catch(() => {}).then(() => deactivateNow(input));
+    activationChain = run;
+    return run;
+  }
+
+  async function inspectDomainDeactivationRollback({ primaryDomain, checksum } = {}) {
+    if (typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
+      throw new NginxManagerError('invalid_checksum', 'A SHA-256 active configuration checksum is required');
+    }
+    const configName = configNameForDomain(primaryDomain);
+    const receipt = await loadDeactivationReceipt({ primaryDomain, configName, checksum });
+    if (!receipt) {
+      return {
+        satisfied: false,
+        reason: 'nginx_deactivation_receipt_missing',
+        configName,
+        checksum,
+      };
+    }
+    const activePath = path.join(sitesDir, configName);
+    const current = await captureFile(activePath, 'nginx_deactivation_rollback_inspection_failed');
+    if (!current.exists) {
+      return {
+        satisfied: false,
+        reason: 'nginx_deactivation_rollback_pending',
+        configName,
+        checksum,
+      };
+    }
+    if (!sameFileState(current, receipt.active)) {
+      throw new NginxManagerError(
+        'nginx_deactivation_rollback_drift',
+        'Nginx deactivation rollback refused because active state drifted',
+      );
+    }
+    return {
+      satisfied: true,
+      restored: true,
+      configName,
+      checksum,
+      receiptVersion: receipt.version,
+    };
+  }
+
+  async function rollbackDeactivationNow({ primaryDomain, checksum } = {}) {
+    const inspected = await inspectDomainDeactivationRollback({ primaryDomain, checksum });
+    if (inspected.satisfied) {
+      return {
+        ...inspected,
+        changed: false,
+      };
+    }
+    if (inspected.reason === 'nginx_deactivation_receipt_missing') {
+      throw new NginxManagerError(
+        'nginx_deactivation_receipt_missing',
+        'Nginx deactivation rollback receipt is missing',
+      );
+    }
+
+    const configName = configNameForDomain(primaryDomain);
+    const receipt = await loadDeactivationReceipt({ primaryDomain, configName, checksum });
+    const activePath = path.join(sitesDir, configName);
+    const before = await captureFile(activePath, 'nginx_deactivation_rollback_inspection_failed');
+    if (before.exists) {
+      throw new NginxManagerError(
+        'nginx_deactivation_rollback_drift',
+        'Nginx deactivation rollback refused because active configuration unexpectedly exists',
+      );
+    }
+
+    try {
+      await restoreFile(activePath, receipt.active);
+      await execFn(nginxPath, ['-t']);
+      await execFn(systemctlPath, ['reload', 'nginx']);
+    } catch {
+      try {
+        await rmFn(activePath, { force: true });
+        await execFn(nginxPath, ['-t']);
+        await execFn(systemctlPath, ['reload', 'nginx']);
+      } catch {
+        throw new NginxManagerError(
+          'nginx_deactivation_restore_rollback_failed',
+          'Nginx deactivation rollback failed and suspended state could not be restored',
+        );
+      }
+      throw new NginxManagerError(
+        'nginx_deactivation_restore_failed',
+        'Nginx deactivation rollback failed and suspended state was restored',
+      );
+    }
+
+    const verified = await inspectDomainDeactivationRollback({ primaryDomain, checksum });
+    if (!verified.satisfied) {
+      throw new NginxManagerError(
+        'nginx_deactivation_restore_unverified',
+        'Nginx deactivation rollback could not be verified',
+      );
+    }
+    return {
+      ...verified,
+      changed: true,
+    };
+  }
+
+  function rollbackDomainDeactivation(input) {
+    const run = activationChain.catch(() => {}).then(() => rollbackDeactivationNow(input));
+    activationChain = run;
+    return run;
+  }
+
   return {
     stageDomain,
     inspectStagedDomain,
@@ -497,6 +812,10 @@ export function createNginxManager({
     activateDomain,
     compensateDomain,
     inspectDomainCompensation,
+    inspectDomainDeactivation,
+    deactivateDomain,
+    inspectDomainDeactivationRollback,
+    rollbackDomainDeactivation,
   };
 }
 
@@ -508,4 +827,5 @@ export const nginxManagerInternals = Object.freeze({
   sameFileState,
   normalizeReceiptState,
   rollbackReceiptVersion: ROLLBACK_RECEIPT_VERSION,
+  deactivationReceiptVersion: DEACTIVATION_RECEIPT_VERSION,
 });
