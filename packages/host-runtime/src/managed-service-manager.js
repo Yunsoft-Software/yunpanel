@@ -92,6 +92,10 @@ const SERVICE_CATALOG = Object.freeze([
       { file: '/usr/bin/test', args: ['-f', '/usr/share/javascript/jquery-ui/jquery-ui.min.js'] },
       { file: '/usr/bin/test', args: ['-f', '/usr/share/javascript/jquery-ui/themes/base/jquery-ui.min.css'] },
       { file: '/usr/bin/php', args: ['-l', '/usr/share/yunpanel/elfinder/connector.php'] },
+      {
+        file: '/usr/bin/php',
+        args: ['-r', 'exit(function_exists("posix_geteuid") && function_exists("posix_getpwuid") && function_exists("mb_strlen") && class_exists("ZipArchive") ? 0 : 1);'],
+      },
     ],
   }),
   service({
