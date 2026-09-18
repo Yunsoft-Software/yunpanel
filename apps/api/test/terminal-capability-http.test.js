@@ -78,6 +78,50 @@ test('Owner issues exact local root and isolated Website capabilities without a 
   assert.equal(JSON.stringify(site.payload).includes('command'), false);
 });
 
+test('PHP Website terminal derives release current from managed current/public document root', async (t) => {
+  const php = await fixture(t, OWNER_CONTEXT, {
+    websiteRegistry: {
+      async getWebsite(websiteId) {
+        if (websiteId !== WEBSITE_ID) return null;
+        return {
+          id: WEBSITE_ID,
+          serverId: SERVER_ID,
+          runtimeType: 'php',
+          unixUser: 'yunapp-123456789abc',
+          documentRoot: '/var/lib/yunpanel/apps/22345678-1234-4234-8234-123456789012/current/public',
+        };
+      },
+    },
+  });
+  const response = await request(php.baseUrl, { scope: 'site', websiteId: WEBSITE_ID });
+  assert.equal(response.response.status, 201);
+  assert.deepEqual(response.payload.data.target, {
+    scope: 'site',
+    serverId: SERVER_ID,
+    websiteId: WEBSITE_ID,
+    user: 'yunapp-123456789abc',
+    cwd: '/var/lib/yunpanel/apps/22345678-1234-4234-8234-123456789012/current',
+  });
+});
+
+test('PHP terminal rejects noncanonical document roots instead of falling back to HOME or arbitrary cwd', async (t) => {
+  const php = await fixture(t, OWNER_CONTEXT, {
+    websiteRegistry: {
+      async getWebsite() {
+        return {
+          id: WEBSITE_ID,
+          serverId: SERVER_ID,
+          runtimeType: 'php',
+          unixUser: 'yunapp-123456789abc',
+          documentRoot: '/var/lib/yunpanel/data/22345678-1234-4234-8234-123456789012/public',
+        };
+      },
+    },
+  });
+  const response = await request(php.baseUrl, { scope: 'site', websiteId: WEBSITE_ID });
+  assert.equal(response.payload.error.code, 'site_terminal_target_invalid');
+});
+
 test('terminal capability rejects remote, unsupported Website and extra request fields', async (t) => {
   const remote = await fixture(t, OWNER_CONTEXT, { localServerId: '216e4db8-468b-4e2f-a021-3ab31e0f4123' });
   assert.equal((await request(remote.baseUrl, { scope: 'server', serverId: SERVER_ID })).payload.error.code, 'terminal_remote_server_unsupported');
