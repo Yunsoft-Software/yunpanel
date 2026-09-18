@@ -301,6 +301,7 @@ test('PHP-FPM migration preview snapshots pool ownership, receipt, service and s
   assert.equal(preview.version, 1);
   assert.equal(preview.adapter, 'php-fpm');
   assert.equal(preview.satisfied, true);
+  assert.equal(preview.safeCreateCandidate, false);
   assert.deepEqual(preview.current.identity, {
     satisfied: true,
     uid: 1201,
@@ -343,6 +344,7 @@ test('PHP-FPM migration preview reports foreign legacy pool drift without adopti
   const preview = await siteManager.previewMigration(intent(), { operationId });
 
   assert.equal(preview.satisfied, false);
+  assert.equal(preview.safeCreateCandidate, false);
   assert.equal(preview.current.receipt.state, null);
   assert.equal(preview.current.pool.present, true);
   assert.equal(preview.current.pool.matchesDesired, false);
@@ -353,4 +355,73 @@ test('PHP-FPM migration preview reports foreign legacy pool drift without adopti
   assert.equal(host.entries.get(configPath)?.content, '[foreign]\nuser = attacker\n');
   assert.equal(host.calls.some(([file, args]) => file === '/usr/bin/apt-get'
     || (file === '/usr/bin/systemctl' && ['enable', 'reload'].includes(args[0]))), false);
+});
+
+
+test('PHP-FPM migration preview marks only an already-running shared service with no site pool as safe-create', async () => {
+  const host = fakeHost({ packageInstalled: true, serviceActive: true });
+  const siteManager = manager(host);
+
+  const preview = await siteManager.previewMigration(intent(), { operationId });
+
+  assert.equal(preview.satisfied, false);
+  assert.equal(preview.safeCreateCandidate, true);
+  assert.equal(preview.current.package.installed, true);
+  assert.equal(preview.current.serviceActive, true);
+  assert.equal(preview.current.pool.present, false);
+  assert.equal(preview.current.receipt.state, null);
+  assert.equal(preview.differences.includes('php_fpm_pool_missing'), true);
+  assert.equal(host.calls.some(([file]) => file === '/usr/bin/apt-get'), false);
+});
+
+test('PHP-FPM migration lifecycle creates only a receipt-owned missing pool without installing or enabling shared runtime', async () => {
+  const host = fakeHost({ packageInstalled: true, serviceActive: true });
+  const siteManager = manager(host);
+  const callsBefore = host.calls.length;
+
+  const applied = await siteManager.applyMigration(intent(), { operationId });
+  const inspected = await siteManager.inspectMigrationOperation(intent(), { operationId });
+
+  assert.equal(applied.satisfied, true);
+  assert.equal(applied.phpFpmReceiptVersion, 1);
+  assert.equal(applied.createdPhpFpmPool, true);
+  assert.equal(inspected.satisfied, true);
+  assert.equal(inspected.phpFpmReceiptVersion, 1);
+  assert.equal(inspected.createdPhpFpmPool, true);
+  const migrationCalls = host.calls.slice(callsBefore);
+  assert.equal(migrationCalls.some(([file]) => file === '/usr/bin/apt-get'), false);
+  assert.equal(migrationCalls.some(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'enable'), false);
+  assert.equal(migrationCalls.some(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'reload'), true);
+});
+
+test('PHP-FPM migration lifecycle refuses missing package or inactive shared service before site mutation', async () => {
+  for (const shared of [
+    { packageInstalled: false, serviceActive: false },
+    { packageInstalled: true, serviceActive: false },
+  ]) {
+    const host = fakeHost(shared);
+    const siteManager = manager(host);
+    await assert.rejects(
+      siteManager.applyMigration(intent(), { operationId }),
+      (error) => error instanceof PhpFpmSiteManagerError && error.code === 'php_fpm_migration_not_safe_create',
+    );
+    assert.equal(host.entries.has(configPath), false);
+    assert.equal(host.calls.some(([file]) => file === '/usr/bin/apt-get'), false);
+    assert.equal(host.calls.some(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'enable'), false);
+  }
+});
+
+test('PHP-FPM migration rollback removes only the receipt-owned pool and preserves shared service', async () => {
+  const host = fakeHost({ packageInstalled: true, serviceActive: true });
+  const siteManager = manager(host);
+  await siteManager.applyMigration(intent(), { operationId });
+
+  const compensated = await siteManager.compensate(intent(), { operationId });
+
+  assert.equal(compensated.satisfied, true);
+  assert.equal(compensated.restoredPrevious, false);
+  assert.equal(compensated.preservedExisting, false);
+  assert.equal(host.entries.has(configPath), false);
+  assert.equal(host.serviceActive(), true);
+  assert.equal(host.calls.some(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'disable'), false);
 });
