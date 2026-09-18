@@ -506,7 +506,12 @@ export function createApp({
       authoritativeService: powerDnsAuthoritativeService,
       jobRegistry,
       ...(powerDnsSecretRegistry ? { domainRegistry, powerDnsSecretRegistry } : {}),
-      ...(dnsRetirementImpact ? { dnsZoneRetirementService: dnsRetirementImpact } : {}),
+      ...(dnsRetirementImpact
+        && typeof dnsRetirementImpact.captureDeletionSnapshot === 'function'
+        && typeof dnsRetirementImpact.inspectDeletion === 'function'
+        && typeof dnsRetirementImpact.deleteCapturedSnapshot === 'function'
+        ? { dnsZoneRetirementService: dnsRetirementImpact }
+        : {}),
       ...(typeof websiteProvisioningRuntime?.registry?.listForDnsZone === 'function'
         ? { websiteProvisioningRegistry: websiteProvisioningRuntime.registry }
         : {}),
