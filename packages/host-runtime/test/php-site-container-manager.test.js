@@ -270,3 +270,20 @@ test('PHP container migration rollback fails closed after unrelated metadata dri
   assert.equal(fake.entries.get(releasesDirectory).uid, 0);
   assert.equal(fake.entries.get(currentRelease).uid, 0);
 });
+
+
+test('PHP container migration rollback refuses path type drift after receipt ownership', async () => {
+  const fake = host();
+  const receipts = receiptFs();
+  const value = manager(fake, receipts.dependencies);
+  await value.applyMigration(intent(), { operationId, migrationOperationId });
+  const root = fake.entries.get(applicationRoot);
+  root.directory = false;
+  root.symbolicLink = true;
+
+  await assert.rejects(
+    value.compensateMigration(intent(), { operationId, migrationOperationId }),
+    (error) => error instanceof PhpSiteContainerManagerError
+      && error.code === 'php_site_container_migration_path_type_drift',
+  );
+});
