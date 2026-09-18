@@ -9,6 +9,10 @@ import {
 } from '../src/index.js';
 
 const id = '12345678-1234-4234-8234-123456789012';
+const websiteId = '22345678-1234-4234-8234-123456789012';
+const bindingId = '32345678-1234-4234-8234-123456789012';
+const backupId = '42345678-1234-4234-8234-123456789012';
+const backupSha256 = 'a'.repeat(64);
 
 function validate(operation, payload) {
   return validateOperationEnvelope({ id, operation, payload, protocolVersion: AGENT_PROTOCOL_VERSION });
@@ -27,6 +31,28 @@ test('database create and delete accept only bounded safe non-system names', () 
       assert.equal(validate(operation, { name }).ok, false, `${operation} accepted ${name}`);
     }
     assert.equal(validate(operation, { name: 'safe_db', extra: true }).ok, false);
+  }
+});
+
+test('database delete accepts an all-or-none Website ownership and backup fence', () => {
+  const scoped = {
+    name: 'customer_42',
+    websiteId,
+    databaseBindingId: bindingId,
+    expectedBindingRevision: 7,
+    backupId,
+    expectedBackupSha256: backupSha256,
+  };
+  assert.equal(validate(OPERATIONS.DATABASE_DELETE, scoped).ok, true);
+  for (const payload of [
+    { name: 'customer_42', websiteId },
+    { ...scoped, expectedBindingRevision: 0 },
+    { ...scoped, databaseBindingId: 'not-a-uuid' },
+    { ...scoped, backupId: 'short' },
+    { ...scoped, expectedBackupSha256: 'bad' },
+    { ...scoped, sql: 'DROP DATABASE other_db' },
+  ]) {
+    assert.equal(validate(OPERATIONS.DATABASE_DELETE, payload).ok, false);
   }
 });
 
