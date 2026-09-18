@@ -645,6 +645,139 @@ function proxyElFinder(request, response, {
   request.pipe(upstream);
 }
 
+function parseTtydGatewayPath(pathname) {
+  if (typeof pathname !== 'string' || !pathname.startsWith(`${TTYD_PREFIX}/`)) return null;
+  const remainder = pathname.slice(TTYD_PREFIX.length + 1);
+  const slash = remainder.indexOf('/');
+  const sessionId = (slash === -1 ? remainder : remainder.slice(0, slash)).toLowerCase();
+  if (!TTYD_SESSION_PATTERN.test(sessionId)) return null;
+  const suffix = slash === -1 ? '' : remainder.slice(slash);
+  if (suffix.includes('..') || /%2e/i.test(suffix) || /[\u0000-\u001f\u007f]/.test(suffix)) return null;
+  return Object.freeze({
+    sessionId,
+    basePath: `${TTYD_PREFIX}/${sessionId}`,
+    upstreamPath: `${TTYD_PREFIX}/${sessionId}${suffix}`,
+  });
+}
+
+function ttydSocketPath(socketRoot, sessionId) {
+  if (typeof socketRoot !== 'string' || !path.isAbsolute(socketRoot)
+    || path.resolve(socketRoot) !== socketRoot || socketRoot === '/'
+    || !TTYD_SESSION_PATTERN.test(sessionId)) return null;
+  return path.join(socketRoot, `${sessionId.toLowerCase()}.sock`);
+}
+
+function proxyTtyd(request, response, {
+  socketPath, publicOrigin, route,
+}) {
+  if (!route || !socketPath) {
+    reply(response, 404, 'Not found.');
+    return;
+  }
+  if (!['GET', 'HEAD'].includes(request.method ?? '')) {
+    reply(response, 405, 'Method not allowed.');
+    return;
+  }
+  const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
+  const publicUrl = new URL(publicOrigin);
+  const headers = browserProxyHeaders(request);
+  delete headers.cookie;
+  delete headers['x-csrf-token'];
+  headers.host = publicUrl.host;
+  headers[TTYD_AUTH_HEADER] = 'owner';
+  headers['x-forwarded-proto'] = publicUrl.protocol.slice(0, -1);
+  headers['x-forwarded-host'] = publicUrl.host;
+  headers['x-forwarded-prefix'] = route.basePath;
+
+  const upstream = http.request({
+    socketPath,
+    method: request.method,
+    path: `${route.upstreamPath}${requestUrl.search}`,
+    headers,
+  }, (upstreamResponse) => {
+    const responseHeaders = {};
+    for (const [name, value] of Object.entries(upstreamResponse.headers)) {
+      if (HOP_BY_HOP_HEADERS.has(name) || value === undefined || name === 'set-cookie') continue;
+      responseHeaders[name] = value;
+    }
+    responseHeaders['cache-control'] = 'no-store';
+    responseHeaders['x-robots-tag'] = 'noindex, nofollow, noarchive';
+    responseHeaders['x-frame-options'] = 'SAMEORIGIN';
+    response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+    upstreamResponse.pipe(response);
+  });
+  upstream.setTimeout(30_000, () => upstream.destroy(new Error('ttyd upstream timeout')));
+  upstream.once('error', () => {
+    if (!response.headersSent) reply(response, 503, 'Terminal is unavailable.');
+    else response.destroy();
+  });
+  request.once('aborted', () => upstream.destroy());
+  request.pipe(upstream);
+}
+
+function proxyTtydWebSocket(request, socket, head, {
+  socketPath, publicOrigin, route,
+}) {
+  const fetchSite = request.headers['sec-fetch-site'];
+  if (!route || !socketPath || request.method !== 'GET'
+    || request.headers.origin !== publicOrigin
+    || (fetchSite && !['same-origin', 'none'].includes(fetchSite))) {
+    rejectSocket(socket, 403);
+    return;
+  }
+
+  const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
+  const publicUrl = new URL(publicOrigin);
+  const headers = browserProxyHeaders(request);
+  delete headers.cookie;
+  delete headers['x-csrf-token'];
+  headers.host = publicUrl.host;
+  headers.connection = 'Upgrade';
+  headers.upgrade = 'websocket';
+  headers[TTYD_AUTH_HEADER] = 'owner';
+  headers['x-forwarded-proto'] = publicUrl.protocol.slice(0, -1);
+  headers['x-forwarded-host'] = publicUrl.host;
+  headers['x-forwarded-prefix'] = route.basePath;
+
+  const upstream = http.request({
+    socketPath,
+    method: 'GET',
+    path: `${route.upstreamPath}${requestUrl.search}`,
+    headers,
+  });
+  upstream.setTimeout(10_000, () => upstream.destroy(new Error('ttyd websocket timeout')));
+  upstream.on('upgrade', (upstreamResponse, upstreamSocket, upstreamHead) => {
+    upstream.setTimeout(0);
+    const allowed = ['upgrade', 'connection', 'sec-websocket-accept', 'sec-websocket-protocol'];
+    const responseHeaders = [];
+    for (const name of allowed) {
+      const value = upstreamResponse.headers[name];
+      if (typeof value === 'string' && !/[\r\n]/.test(value)) {
+        responseHeaders.push(`${name}: ${value}`);
+      }
+    }
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\n${responseHeaders.join('\r\n')}\r\n\r\n`);
+    if (upstreamHead.length) socket.write(upstreamHead);
+    if (head.length) upstreamSocket.write(head);
+    socket.pipe(upstreamSocket).pipe(socket);
+    socket.on('error', () => upstreamSocket.destroy());
+    upstreamSocket.on('error', () => socket.destroy());
+  });
+  upstream.on('response', (upstreamResponse) => {
+    upstreamResponse.resume();
+    rejectSocket(
+      socket,
+      [400, 401, 403, 404, 409, 429, 503].includes(upstreamResponse.statusCode)
+        ? upstreamResponse.statusCode
+        : 502,
+    );
+  });
+  upstream.on('error', () => rejectSocket(socket, 502));
+  socket.on('error', () => upstream.destroy());
+  socket.on('close', () => upstream.destroy());
+  upstream.end();
+}
+
 function isTransportPath(pathname) {
   return pathname === '/api/servers/enroll'
     || /^\/api\/servers\/[^/]+\/(?:heartbeat|commands(?:\/|$)|applications\/[^/]+\/environment$)/.test(pathname);
