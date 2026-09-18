@@ -443,7 +443,7 @@ export function createDnsZoneReapplyOperationRegistry({
                 }
                 : parsed.version === SOURCE_SNAPSHOT_STORE_VERSION
                   ? { ...operation, appliedZoneDigest: null, appliedZoneSnapshot: null, rollbackResult: null, rollbackError: null }
-                  : operation,;
+                  : operation;
           return persistedOperation({
             ...migrated,
             rollbackResult: migrated.rollbackResult ?? null,
@@ -473,10 +473,10 @@ export function createDnsZoneReapplyOperationRegistry({
       && entry.previewDigest === preview?.previewDigest
       && ['pending', 'applying', 'succeeded'].includes(entry.status));
     if (duplicate) {
-      if (duplicate.sourceZoneSnapshot === null) {
+      if (duplicate.sourceZoneSnapshot === null || duplicate.appliedZoneSnapshot === null) {
         throw new DnsZoneReapplyOperationRegistryError(
           'dns_zone_reapply_operation_source_snapshot_missing',
-          'Existing DNS zone reapply operation predates exact rollback snapshot evidence',
+          'Existing DNS zone reapply operation predates exact before/after rollback snapshot evidence',
           409,
         );
       }
