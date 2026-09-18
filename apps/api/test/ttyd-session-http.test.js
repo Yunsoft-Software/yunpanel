@@ -27,7 +27,10 @@ function fixture() {
   const calls = [];
   const app = {
     post(path, ...handlers) {
-      routes.push({ path, handler: handlers.at(-1) });
+      routes.push({ method: 'POST', path, handler: handlers.at(-1) });
+    },
+    delete(path, ...handlers) {
+      routes.push({ method: 'DELETE', path, handler: handlers.at(-1) });
     },
   };
   const terminalCapabilityRegistry = {
@@ -47,12 +50,22 @@ function fixture() {
       calls.push(['start', input]);
       return session;
     },
+    terminateOwned(id, binding) {
+      calls.push(['terminate', id, binding]);
+      return id === session.sessionId
+        && binding.ownerSessionId === 'owner-session'
+        && binding.userId === 'owner-user';
+    },
   };
   mountTtydSessionRoutes(app, {
     terminalCapabilityRegistry,
     ttydSessionManager,
   });
-  return { route: routes[0], calls };
+  return {
+    startRoute: routes.find((route) => route.method === 'POST'),
+    closeRoute: routes.find((route) => route.method === 'DELETE'),
+    calls,
+  };
 }
 
 async function invoke(handler, { body, auth } = {}) {
@@ -73,9 +86,9 @@ async function invoke(handler, { body, auth } = {}) {
 
 test('ttyd session bridge consumes capability in the exact Owner session and returns only public session data', async () => {
   const fx = fixture();
-  assert.equal(fx.route.path, '/api/terminal/ttyd-sessions');
+  assert.equal(fx.startRoute.path, '/api/terminal/ttyd-sessions');
 
-  const response = await invoke(fx.route.handler, {
+  const response = await invoke(fx.startRoute.handler, {
     body: { capability },
     auth: {
       id: 'owner-session',
@@ -114,7 +127,7 @@ test('ttyd session bridge rejects expanded body or non-Owner auth before manager
     },
   ]) {
     const fx = fixture();
-    const response = await invoke(fx.route.handler, request);
+    const response = await invoke(fx.startRoute.handler, request);
     assert.ok(response.error);
     assert.equal(response.error.code, request.code);
     assert.equal(fx.calls.length, 0);
@@ -123,7 +136,7 @@ test('ttyd session bridge rejects expanded body or non-Owner auth before manager
 
 test('ttyd session bridge rejects malformed capability shape', async () => {
   const fx = fixture();
-  const response = await invoke(fx.route.handler, {
+  const response = await invoke(fx.startRoute.handler, {
     body: { capability: 'short' },
     auth: {
       id: 'owner-session',
@@ -133,4 +146,91 @@ test('ttyd session bridge rejects malformed capability shape', async () => {
   assert.ok(response.error instanceof TtydSessionError);
   assert.equal(response.error.code, 'ttyd_session_request_invalid');
   assert.equal(fx.calls.length, 0);
+});
+
+
+test('ttyd session close endpoint terminates only the exact Owner-bound session', async () => {
+  const fx = fixture();
+  assert.equal(
+    fx.closeRoute.path,
+    '/api/terminal/ttyd-sessions/:sessionId',
+  );
+  const response = await invoke(
+    (request, result) => fx.closeRoute.handler(
+      {
+        ...request,
+        params: { sessionId: session.sessionId },
+      },
+      {
+        ...result,
+        end() { return this; },
+      },
+    ),
+    {
+      body: {},
+      auth: {
+        id: 'owner-session',
+        user: { id: 'owner-user', role: 'owner' },
+      },
+    },
+  );
+
+  assert.equal(response.error, null);
+  assert.equal(response.status, 204);
+  assert.deepEqual(fx.calls, [[
+    'terminate',
+    session.sessionId,
+    { ownerSessionId: 'owner-session', userId: 'owner-user' },
+  ]]);
+});
+
+test('ttyd session close endpoint rejects foreign or expanded close requests', async () => {
+  {
+    const fx = fixture();
+    const response = await invoke(
+      (request, result) => fx.closeRoute.handler(
+        {
+          ...request,
+          params: { sessionId: '22345678-1234-4234-8234-123456789012' },
+        },
+        {
+          ...result,
+          end() { return this; },
+        },
+      ),
+      {
+        body: {},
+        auth: {
+          id: 'owner-session',
+          user: { id: 'owner-user', role: 'owner' },
+        },
+      },
+    );
+    assert.equal(response.error?.code, 'ttyd_session_not_found');
+  }
+
+  {
+    const fx = fixture();
+    const response = await invoke(
+      (request, result) => fx.closeRoute.handler(
+        {
+          ...request,
+          params: { sessionId: session.sessionId },
+        },
+        {
+          ...result,
+          end() { return this; },
+        },
+      ),
+      {
+        body: { reason: 'kill-all' },
+        auth: {
+          id: 'owner-session',
+          user: { id: 'owner-user', role: 'owner' },
+        },
+      },
+    );
+    assert.equal(response.error?.code, 'ttyd_session_close_request_invalid');
+    assert.equal(fx.calls.length, 0);
+  }
 });
