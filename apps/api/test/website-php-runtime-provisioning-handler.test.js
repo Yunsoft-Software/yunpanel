@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createWebsitePhpRuntimeProvisioningHandler } from '../src/website-php-runtime-provisioning-handler.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
+const releaseOperationId = '4d7d1c87-c088-4c1d-bb44-7f370d315672';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 const unixUser = 'yunapp-4dc352e64a14';
@@ -207,20 +208,20 @@ test('PHP runtime migration opens only when container and UMask are already cano
   const handler = createWebsitePhpRuntimeProvisioningHandler({
     containerManager: {
       async apply() { throw new Error('unexpected container apply'); },
-      async inspect() {
-        calls.push(['container-inspect']);
+      async inspect(value, options) {
+        calls.push(['container-inspect', value, options]);
         return { satisfied: true, adapter: 'php-container', containerOwner: 'root:root', releaseUid: 1201, releaseGid: 1201 };
       },
-      async previewMigration() {
-        calls.push(['container-preview']);
+      async previewMigration(value, options) {
+        calls.push(['container-preview', value, options]);
         return { version: 1, adapter: 'php-container', satisfied: true, current: {}, desired: {}, differences: [] };
       },
     },
     fpmManager: {
       async apply() { throw new Error('unexpected normal FPM apply'); },
       async inspect() { return { satisfied: false }; },
-      async previewMigration() {
-        calls.push(['fpm-preview']);
+      async previewMigration(value, options) {
+        calls.push(['fpm-preview', value, options]);
         return {
           version: 1,
           adapter: 'php-fpm',
@@ -231,8 +232,8 @@ test('PHP runtime migration opens only when container and UMask are already cano
           differences: ['php_fpm_pool_missing'],
         };
       },
-      async inspectMigrationOperation() {
-        calls.push(['fpm-migration-inspect']);
+      async inspectMigrationOperation(value, options) {
+        calls.push(['fpm-migration-inspect', value, options]);
         return {
           satisfied: true,
           adapter: 'php-fpm',
@@ -261,15 +262,23 @@ test('PHP runtime migration opens only when container and UMask are already cano
     },
   });
 
-  const preview = await handler.previewMigration({ intent: intent(), operationId });
+  const preview = await handler.previewMigration({ intent: intent(), operationId, releaseOperationId });
   assert.equal(preview.safeCreateCandidate, true);
 
-  const applied = await handler.applyMigration({ intent: intent(), operationId });
+  const applied = await handler.applyMigration({ intent: intent(), operationId, releaseOperationId });
 
   assert.equal(applied.satisfied, true);
   assert.equal(applied.phpRuntimeMigration, true);
   assert.equal(applied.phpFpmReceiptVersion, 1);
   assert.equal(applied.createdPhpFpmPool, true);
+  const containerPreviewCall = calls.find(([name]) => name === 'container-preview');
+  const containerInspectCall = calls.find(([name]) => name === 'container-inspect');
+  const fpmPreviewCall = calls.find(([name]) => name === 'fpm-preview');
+  const fpmApplyCall = calls.find(([name]) => name === 'fpm-migration-apply');
+  assert.equal(containerPreviewCall[2].operationId, releaseOperationId);
+  assert.equal(containerInspectCall[2].operationId, releaseOperationId);
+  assert.equal(fpmPreviewCall[2].operationId, operationId);
+  assert.equal(fpmApplyCall[2].operationId, operationId);
   assert.equal(calls.some(([name]) => name === 'fpm-migration-apply'), true);
   assert.equal(calls.some(([name]) => name === 'unexpected container apply'), false);
   assert.equal(calls.some(([name]) => name === 'unexpected UMask apply'), false);
