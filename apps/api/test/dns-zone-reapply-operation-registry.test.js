@@ -327,3 +327,42 @@ test('version 4 operation journals keep source snapshot but do not invent expect
   const persisted = JSON.parse(await readFile(filePath, 'utf8'));
   assert.equal(persisted.version, 5);
 });
+
+
+test('DNS zone reapply journal persists rollback lifecycle with monotonic revisions', async () => {
+  const store = registry();
+  await store.init();
+  const created = await store.create(preview(), rollbackEvidence());
+  const applying = await store.markApplying(created.id);
+  const succeeded = await store.succeed(created.id, {
+    satisfied: true,
+    zoneName: 'example.com',
+    serial: 2026091601,
+    changedRrsetCount: 3,
+    manualRrsetCount: 1,
+  });
+  const rollingBack = await store.markRollingBack(created.id);
+
+  assert.equal(rollingBack.status, 'rolling_back');
+  assert.equal(Date.parse(applying.updatedAt) > Date.parse(created.updatedAt), true);
+  assert.equal(Date.parse(succeeded.updatedAt) > Date.parse(applying.updatedAt), true);
+  assert.equal(Date.parse(rollingBack.updatedAt) > Date.parse(succeeded.updatedAt), true);
+  assert.deepEqual((await store.listInterruptedRollbacks()).map((entry) => entry.id), [created.id]);
+
+  const rolledBack = await store.succeedRollback(created.id, {
+    satisfied: true,
+    zoneName: 'example.com',
+    restoredRrsetCount: 2,
+    kindRestored: true,
+    sourceZoneDigest,
+  });
+  assert.equal(rolledBack.status, 'rolled_back');
+  assert.equal(rolledBack.rollbackResult.sourceZoneDigest, sourceZoneDigest);
+  assert.deepEqual(await store.listInterruptedRollbacks(), []);
+
+  const publicView = dnsZoneReapplyOperationPublicView(rolledBack);
+  assert.equal(publicView.rollback.status, 'succeeded');
+  assert.equal(publicView.rollback.available, false);
+  assert.equal(Object.hasOwn(publicView, 'sourceZoneSnapshot'), false);
+  assert.equal(JSON.stringify(publicView).includes('managed source snapshot'), false);
+});
