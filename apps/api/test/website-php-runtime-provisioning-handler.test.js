@@ -144,6 +144,7 @@ test('PHP runtime migration preview combines container, FPM and UMask evidence w
     version: 1,
     adapter: 'php-fpm',
     satisfied: false,
+    safeCreateCandidate: false,
     current: { pool: { present: false, sha256: null } },
     desired: { websiteId, applicationId, unixUser, documentRoot },
     differences: ['php_fpm_pool_missing'],
@@ -198,4 +199,168 @@ test('PHP runtime migration preview combines container, FPM and UMask evidence w
     'fpm-preview',
     'umask-preview',
   ]);
+});
+
+
+test('PHP runtime migration opens only when container and UMask are already canonical and FPM pool is safe-create', async () => {
+  const calls = [];
+  const handler = createWebsitePhpRuntimeProvisioningHandler({
+    containerManager: {
+      async apply() { throw new Error('unexpected container apply'); },
+      async inspect() {
+        calls.push(['container-inspect']);
+        return { satisfied: true, adapter: 'php-container', containerOwner: 'root:root', releaseUid: 1201, releaseGid: 1201 };
+      },
+      async previewMigration() {
+        calls.push(['container-preview']);
+        return { version: 1, adapter: 'php-container', satisfied: true, current: {}, desired: {}, differences: [] };
+      },
+    },
+    fpmManager: {
+      async apply() { throw new Error('unexpected normal FPM apply'); },
+      async inspect() { return { satisfied: false }; },
+      async previewMigration() {
+        calls.push(['fpm-preview']);
+        return {
+          version: 1,
+          adapter: 'php-fpm',
+          satisfied: false,
+          safeCreateCandidate: true,
+          current: { pool: { present: false } },
+          desired: { websiteId, applicationId, unixUser, documentRoot },
+          differences: ['php_fpm_pool_missing'],
+        };
+      },
+      async inspectMigrationOperation() {
+        calls.push(['fpm-migration-inspect']);
+        return {
+          satisfied: true,
+          adapter: 'php-fpm',
+          phpFpmReceiptVersion: 1,
+          createdPhpFpmPool: true,
+        };
+      },
+      async applyMigration(value, options) {
+        calls.push(['fpm-migration-apply', value, options]);
+        return {
+          satisfied: true,
+          adapter: 'php-fpm',
+          phpFpmReceiptVersion: 1,
+          createdPhpFpmPool: true,
+        };
+      },
+      async compensate() { return { satisfied: true, restoredPrevious: false, preservedExisting: false }; },
+      async inspectCompensation() { return { satisfied: true, restoredPrevious: false, preservedExisting: false }; },
+    },
+    umaskManager: {
+      async apply() { throw new Error('unexpected UMask apply'); },
+      async inspect(runtime) {
+        calls.push(['umask-inspect', runtime]);
+        return { satisfied: true, adapter: 'systemd-umask', runtime, umask: '0027' };
+      },
+    },
+  });
+
+  const preview = await handler.previewMigration({ intent: intent(), operationId });
+  assert.equal(preview.safeCreateCandidate, true);
+
+  const applied = await handler.applyMigration({ intent: intent(), operationId });
+
+  assert.equal(applied.satisfied, true);
+  assert.equal(applied.phpRuntimeMigration, true);
+  assert.equal(applied.phpFpmReceiptVersion, 1);
+  assert.equal(applied.createdPhpFpmPool, true);
+  assert.equal(calls.some(([name]) => name === 'fpm-migration-apply'), true);
+  assert.equal(calls.some(([name]) => name === 'unexpected container apply'), false);
+  assert.equal(calls.some(([name]) => name === 'unexpected UMask apply'), false);
+});
+
+test('PHP runtime migration refuses container or shared UMask drift without mutation', async () => {
+  for (const state of [
+    { containerSatisfied: false, umaskSatisfied: true },
+    { containerSatisfied: true, umaskSatisfied: false },
+  ]) {
+    let migrationApplyCalls = 0;
+    const handler = createWebsitePhpRuntimeProvisioningHandler({
+      containerManager: {
+        async apply() { throw new Error('unused'); },
+        async inspect() { return { satisfied: state.containerSatisfied }; },
+        async previewMigration() {
+          return {
+            version: 1,
+            adapter: 'php-container',
+            satisfied: state.containerSatisfied,
+            current: {},
+            desired: {},
+            differences: state.containerSatisfied ? [] : ['php_site_container_control_plane_drift'],
+          };
+        },
+      },
+      fpmManager: {
+        async apply() { throw new Error('unused'); },
+        async inspect() { return { satisfied: false }; },
+        async previewMigration() {
+          return {
+            version: 1,
+            adapter: 'php-fpm',
+            satisfied: false,
+            safeCreateCandidate: true,
+            current: {},
+            desired: {},
+            differences: ['php_fpm_pool_missing'],
+          };
+        },
+        async inspectMigrationOperation() { return { satisfied: false }; },
+        async applyMigration() { migrationApplyCalls += 1; return {}; },
+        async compensate() { return { satisfied: true }; },
+        async inspectCompensation() { return { satisfied: true }; },
+      },
+      umaskManager: {
+        async apply() { throw new Error('unused'); },
+        async inspect() {
+          return state.umaskSatisfied
+            ? { satisfied: true, umask: '0027' }
+            : { satisfied: false, reason: 'service_umask_not_effective' };
+        },
+      },
+    });
+
+    await assert.rejects(
+      handler.applyMigration({ intent: intent(), operationId }),
+      (error) => error.code === 'website_php_runtime_migration_not_safe_create',
+    );
+    assert.equal(migrationApplyCalls, 0);
+  }
+});
+
+test('PHP runtime migration compensation delegates only receipt-owned FPM pool rollback', async () => {
+  const calls = [];
+  const handler = createWebsitePhpRuntimeProvisioningHandler({
+    containerManager: {
+      async apply() { return { satisfied: true, adapter: 'php-container' }; },
+      async inspect() { return { satisfied: true, adapter: 'php-container' }; },
+      async previewMigration() { return { version: 1, adapter: 'php-container', satisfied: true, current: {}, desired: {}, differences: [] }; },
+    },
+    fpmManager: {
+      async apply() { return { satisfied: true, adapter: 'php-fpm' }; },
+      async inspect() { return { satisfied: true, adapter: 'php-fpm' }; },
+      async previewMigration() { return { version: 1, adapter: 'php-fpm', satisfied: true, safeCreateCandidate: false, current: {}, desired: {}, differences: [] }; },
+      async inspectMigrationOperation() { return { satisfied: true, phpFpmReceiptVersion: 1, createdPhpFpmPool: true }; },
+      async applyMigration() { return { satisfied: true, phpFpmReceiptVersion: 1, createdPhpFpmPool: true }; },
+      async compensate(value, options) {
+        calls.push(['fpm-compensate', value, options]);
+        return { satisfied: true, restoredPrevious: false, preservedExisting: false };
+      },
+      async inspectCompensation(value, options) {
+        calls.push(['fpm-compensation-inspect', value, options]);
+        return { satisfied: true, restoredPrevious: false, preservedExisting: false };
+      },
+    },
+    umaskManager: umaskManager(),
+  });
+
+  await handler.inspectMigrationCompensation({ intent: intent(), operationId });
+  await handler.compensateMigration({ intent: intent(), operationId });
+
+  assert.deepEqual(calls.map(([name]) => name), ['fpm-compensation-inspect', 'fpm-compensate']);
 });
