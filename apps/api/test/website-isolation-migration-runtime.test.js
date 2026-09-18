@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createApplicationIdentity } from '@yunpanel/host-runtime/application-identity';
 import { createWebsiteIsolationMigrationRegistry } from '../src/website-isolation-migration-registry.js';
 import {
   createWebsiteIsolationMigrationRuntime,
