@@ -32,7 +32,7 @@ function domain(overrides = {}) {
 
 function impact(currentDomain = domain(), overrides = {}) {
   const dependencies = {
-    childDomains: [{ id: 'child-domain-1' }],
+    childDomains: [{ id: 'child-domain-1', parentDomainId: currentDomain.id }],
     website: { id: currentDomain.websiteId },
     application: { id: 'application-1' },
     managedComposeBinding: null,
@@ -199,7 +199,7 @@ test('dependency drift changes the Domain removal preview digest', () => {
     ...changedImpact.dependencies,
     childDomains: [
       ...changedImpact.dependencies.childDomains,
-      { id: 'child-domain-2' },
+      { id: 'child-domain-2', parentDomainId: currentDomain.id },
     ],
   };
   const second = createDomainRemovalPreview({
@@ -208,4 +208,46 @@ test('dependency drift changes the Domain removal preview digest', () => {
   });
 
   assert.notEqual(first.previewDigest, second.previewDigest);
+});
+
+
+test('orders descendant Domain cleanup deepest-first before direct children', () => {
+  const currentDomain = domain();
+  const nestedImpact = impact(currentDomain);
+  nestedImpact.dependencies = {
+    ...nestedImpact.dependencies,
+    childDomains: [
+      { id: 'child-b', parentDomainId: currentDomain.id },
+      { id: 'grandchild-a', parentDomainId: 'child-a' },
+      { id: 'child-a', parentDomainId: currentDomain.id },
+      { id: 'grandchild-b', parentDomainId: 'child-b' },
+    ],
+  };
+  const preview = createDomainRemovalPreview({
+    domain: currentDomain,
+    impact: nestedImpact,
+  });
+
+  assert.deepEqual(
+    preview.plan.childDomainIds,
+    ['grandchild-a', 'grandchild-b', 'child-a', 'child-b'],
+  );
+});
+
+test('rejects disconnected descendant inventory instead of guessing cascade order', () => {
+  const currentDomain = domain();
+  const brokenImpact = impact(currentDomain);
+  brokenImpact.dependencies = {
+    ...brokenImpact.dependencies,
+    childDomains: [{ id: 'child-domain-1', parentDomainId: 'foreign-parent' }],
+  };
+
+  assert.throws(
+    () => createDomainRemovalPreview({
+      domain: currentDomain,
+      impact: brokenImpact,
+    }),
+    (error) => error instanceof DomainRemovalPlanError
+      && error.code === 'domain_removal_preview_invalid',
+  );
 });
