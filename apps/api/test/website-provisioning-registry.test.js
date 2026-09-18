@@ -127,6 +127,45 @@ test('latest Website lookup follows durable updatedAt across registry restart', 
   }
 });
 
+test('Website operation history is durable and ordered by current journal revision', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-provisioning-history-'));
+  const filePath = path.join(directory, 'provisioning.json');
+  let clock = Date.parse('2026-09-14T01:00:00.000Z');
+  try {
+    const registry = createWebsiteProvisioningRegistry({ filePath, now: () => clock });
+    await registry.create(input({ operation: operationId }));
+    clock += 1_000;
+    await registry.create(input({ operation: secondOperationId }));
+
+    assert.deepEqual(
+      (await registry.listForWebsite(websiteId)).map((operation) => operation.operationId),
+      [secondOperationId, operationId],
+    );
+
+    clock += 1_000;
+    await registry.beginStep({ operationId, stepId: 'unix_identity' });
+    assert.deepEqual(
+      (await registry.listForWebsite(websiteId)).map((operation) => operation.operationId),
+      [operationId, secondOperationId],
+    );
+
+    const restarted = createWebsiteProvisioningRegistry({ filePath, now: () => clock });
+    await restarted.init();
+    assert.deepEqual(
+      (await restarted.listForWebsite(websiteId)).map((operation) => operation.operationId),
+      [operationId, secondOperationId],
+    );
+    assert.deepEqual(await restarted.listForWebsite('3854e385-adfc-42bd-bccf-f655f24cd68f'), []);
+    await assert.rejects(
+      restarted.listForWebsite(''),
+      (error) => error instanceof WebsiteProvisioningRegistryError
+        && error.code === 'website_provisioning_website_id_invalid',
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('successful steps require explicit evidence and readiness waits for every required step', async () => {
   const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
   await registry.create(input());
