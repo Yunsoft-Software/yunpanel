@@ -691,6 +691,18 @@ function boundedPhpRuntimeMigrationPreview(value, scope) {
     if (!reason) return null;
     umaskProjection = Object.freeze({ satisfied: false, reason });
   }
+  const expectedSafeCreate = container.satisfied === true
+    && fpm.safeCreateCandidate === true
+    && umaskProjection.satisfied === true;
+  const expectedSafeContainerMigration = container.safeMigrationCandidate === true
+    && fpmRuntimeProjection.satisfied === true
+    && umaskProjection.satisfied === true;
+  const expectedSatisfied = container.satisfied === true
+    && fpmRuntimeProjection.satisfied === true
+    && umaskProjection.satisfied === true;
+  if (value.safeCreateCandidate !== expectedSafeCreate
+    || value.safeContainerMigrationCandidate !== expectedSafeContainerMigration
+    || value.satisfied !== expectedSatisfied) return null;
 
   return Object.freeze({
     version: 1,
