@@ -712,6 +712,7 @@ export const websiteIsolationMigrationRuntimeInternals = Object.freeze({
   exactIdentityTarget,
   exactSftpTarget,
   exactPhpTarget,
+  exactPhpContainerTarget,
   migrationKind,
   workspaceIntent,
   sftpContext,
@@ -728,4 +729,7 @@ export const websiteIsolationMigrationRuntimeInternals = Object.freeze({
   phpApplyEvidence,
   phpInspectionEvidence,
   phpCompensationEvidence,
+  phpContainerApplyEvidence,
+  phpContainerInspectionEvidence,
+  phpContainerCompensationEvidence,
 });
