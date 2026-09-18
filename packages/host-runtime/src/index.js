@@ -187,6 +187,11 @@ export {
   websiteIdentityPathManagerInternals,
 } from './website-identity-path-manager.js';
 export {
+  createElFinderFpmSiteManager,
+  ElFinderFpmSiteManagerError,
+  elFinderFpmSiteManagerInternals,
+} from './elfinder-fpm-site-manager.js';
+export {
   createPhpFpmSiteManager,
   PhpFpmSiteManagerError,
   phpFpmSiteManagerInternals,
