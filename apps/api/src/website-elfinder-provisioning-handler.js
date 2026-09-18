@@ -1,5 +1,7 @@
 import {
   createElFinderFpmSiteManager,
+  createElFinderNginxGatewayManager,
+  createManagedServiceManager,
 } from '@yunpanel/host-runtime';
 import { createServiceUmaskManager } from '@yunpanel/host-runtime/service-umask-manager';
 
@@ -35,12 +37,18 @@ function elFinderIntent(value) {
 
 export function createWebsiteElFinderProvisioningHandler({
   fpmManager = createElFinderFpmSiteManager(),
+  sharedApplicationManager = createManagedServiceManager(),
+  gatewayManager = createElFinderNginxGatewayManager(),
   umaskManager = createServiceUmaskManager(),
 } = {}) {
   if (!fpmManager || typeof fpmManager.apply !== 'function'
     || typeof fpmManager.inspect !== 'function'
     || typeof fpmManager.compensate !== 'function'
     || typeof fpmManager.inspectCompensation !== 'function'
+    || !sharedApplicationManager || typeof sharedApplicationManager.install !== 'function'
+    || typeof sharedApplicationManager.inspect !== 'function'
+    || !gatewayManager || typeof gatewayManager.apply !== 'function'
+    || typeof gatewayManager.inspect !== 'function'
     || !umaskManager || typeof umaskManager.apply !== 'function'
     || typeof umaskManager.inspect !== 'function') {
     throw new WebsiteElFinderProvisioningError(
@@ -51,6 +59,14 @@ export function createWebsiteElFinderProvisioningHandler({
 
   async function apply({ intent, operationId } = {}) {
     const normalized = elFinderIntent(intent);
+    const shared = await sharedApplicationManager.install('elfinder');
+    if (!shared?.installed || shared.units?.length !== 0
+      || shared.health?.configuration !== 'valid') {
+      throw new WebsiteElFinderProvisioningError(
+        'website_elfinder_shared_runtime_unverified',
+        'elFinder shared application dependencies are not ready',
+      );
+    }
     const initial = await fpmManager.apply(normalized, { operationId });
     if (!initial?.satisfied || initial.adapter !== 'elfinder-fpm') {
       throw new WebsiteElFinderProvisioningError(
@@ -65,18 +81,39 @@ export function createWebsiteElFinderProvisioningHandler({
         'elFinder PHP-FPM service UMask=0027 could not be verified',
       );
     }
+    const gateway = await gatewayManager.apply();
+    if (!gateway?.satisfied || gateway.adapter !== 'elfinder-nginx-gateway') {
+      throw new WebsiteElFinderProvisioningError(
+        'website_elfinder_gateway_unverified',
+        'elFinder private gateway did not return verified evidence',
+      );
+    }
     const verified = await fpmManager.inspect(normalized);
     if (!verified?.satisfied || verified.adapter !== 'elfinder-fpm') {
       throw new WebsiteElFinderProvisioningError(
         'website_elfinder_fpm_restart_unverified',
-        'elFinder Website pool did not recover after PHP-FPM policy activation',
+        'elFinder Website pool did not recover after shared runtime activation',
       );
     }
-    return Object.freeze({ ...verified, runtimeUmask: umask.umask });
+    return Object.freeze({
+      ...verified,
+      runtimeUmask: umask.umask,
+      sharedApplicationReady: true,
+      gatewaySocketPath: gateway.gatewaySocketPath,
+      gatewayConfigSha256: gateway.configSha256,
+    });
   }
 
   async function inspect({ intent } = {}) {
     const normalized = elFinderIntent(intent);
+    const shared = await sharedApplicationManager.inspect('elfinder');
+    if (!shared?.installed || shared.units?.length !== 0
+      || shared.health?.configuration !== 'valid') {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'elfinder_shared_runtime_not_ready',
+      });
+    }
     const umask = await umaskManager.inspect('php');
     if (!umask?.satisfied) {
       return Object.freeze({
@@ -87,7 +124,21 @@ export function createWebsiteElFinderProvisioningHandler({
     }
     const fpm = await fpmManager.inspect(normalized);
     if (!fpm?.satisfied) return fpm;
-    return Object.freeze({ ...fpm, runtimeUmask: umask.umask });
+    const gateway = await gatewayManager.inspect();
+    if (!gateway?.satisfied) {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'elfinder_gateway_not_ready',
+        gatewayReason: gateway?.reason ?? 'elfinder_gateway_unavailable',
+      });
+    }
+    return Object.freeze({
+      ...fpm,
+      runtimeUmask: umask.umask,
+      sharedApplicationReady: true,
+      gatewaySocketPath: gateway.gatewaySocketPath,
+      gatewayConfigSha256: gateway.configSha256,
+    });
   }
 
   async function compensate({ intent, operationId } = {}) {
