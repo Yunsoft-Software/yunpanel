@@ -495,7 +495,7 @@ function boundedPhpContainerPreview(value, scope) {
   const differences = boundedPreviewDifferences(value?.differences);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.version !== 1 || value.adapter !== 'php-container'
-    || typeof value.satisfied !== 'boolean' || !differences
+    || typeof value.satisfied !== 'boolean' || typeof value.safeMigrationCandidate !== 'boolean' || !differences
     || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
     || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
     || value.desired.websiteId !== scope.websiteId
@@ -527,6 +527,7 @@ function boundedPhpContainerPreview(value, scope) {
     version: 1,
     adapter: 'php-container',
     satisfied: value.satisfied,
+    safeMigrationCandidate: value.safeMigrationCandidate,
     current: Object.freeze({
       identity,
       applicationRoot,
@@ -654,7 +655,9 @@ function boundedPhpRuntimeMigrationPreview(value, scope) {
   const differences = boundedPreviewDifferences(value?.differences);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.version !== 1 || value.adapter !== 'php-runtime'
-    || typeof value.satisfied !== 'boolean' || typeof value.safeCreateCandidate !== 'boolean' || !differences
+    || typeof value.satisfied !== 'boolean'
+    || typeof value.safeCreateCandidate !== 'boolean'
+    || typeof value.safeContainerMigrationCandidate !== 'boolean' || !differences
     || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
     || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
     || value.desired.websiteId !== scope.websiteId
@@ -665,9 +668,20 @@ function boundedPhpRuntimeMigrationPreview(value, scope) {
 
   const container = boundedPhpContainerPreview(value.current.container, scope);
   const fpm = boundedPhpFpmPreview(value.current.fpm, scope);
+  const fpmRuntime = value.current.fpmRuntime;
   const umask = value.current.umask;
-  if (!container || !fpm || !umask || typeof umask !== 'object' || Array.isArray(umask)
+  if (!container || !fpm || !fpmRuntime || typeof fpmRuntime !== 'object' || Array.isArray(fpmRuntime)
+    || typeof fpmRuntime.satisfied !== 'boolean'
+    || !umask || typeof umask !== 'object' || Array.isArray(umask)
     || typeof umask.satisfied !== 'boolean') return null;
+  let fpmRuntimeProjection;
+  if (fpmRuntime.satisfied) {
+    fpmRuntimeProjection = Object.freeze({ satisfied: true });
+  } else {
+    const reason = boundedReason(fpmRuntime.reason);
+    if (!reason) return null;
+    fpmRuntimeProjection = Object.freeze({ satisfied: false, reason });
+  }
   let umaskProjection;
   if (umask.satisfied) {
     if (umask.umask !== '0027') return null;
@@ -683,7 +697,8 @@ function boundedPhpRuntimeMigrationPreview(value, scope) {
     adapter: 'php-runtime',
     satisfied: value.satisfied,
     safeCreateCandidate: value.safeCreateCandidate,
-    current: Object.freeze({ container, fpm, umask: umaskProjection }),
+    safeContainerMigrationCandidate: value.safeContainerMigrationCandidate,
+    current: Object.freeze({ container, fpm, fpmRuntime: fpmRuntimeProjection, umask: umaskProjection }),
     desired: Object.freeze({
       websiteId: scope.websiteId,
       applicationId: scope.applicationId,
@@ -929,6 +944,7 @@ export function createWebsiteIsolationAuditService({
   identityMigrationAvailable = false,
   sftpMigrationAvailable = false,
   phpMigrationAvailable = false,
+  phpContainerMigrationAvailable = false,
 } = {}) {
   if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
     || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
@@ -1132,6 +1148,8 @@ export function createWebsiteIsolationAuditService({
               && sftpMigrationPreview?.safeCreateCandidate === true;
             const safePhpPoolCreate = stepId === 'php_runtime'
               && phpRuntimeMigrationPreview?.safeCreateCandidate === true;
+            const safePhpContainerRepair = stepId === 'php_runtime'
+              && phpRuntimeMigrationPreview?.safeContainerMigrationCandidate === true;
             changes.push(missingWorkspaceDirectories ? migrationChange({
               id: 'workspace.directories',
               action: 'create_workspace_directories',
@@ -1160,11 +1178,13 @@ export function createWebsiteIsolationAuditService({
                   ? 'create_sftp_isolation'
                   : safePhpPoolCreate
                     ? 'create_php_fpm_pool'
-                    : 'reconcile_isolation_step',
-              ownership: safeIdentityCreate || safeSftpCreate || safePhpPoolCreate
+                    : safePhpContainerRepair
+                      ? 'repair_php_container_metadata'
+                      : 'reconcile_isolation_step',
+              ownership: safeIdentityCreate || safeSftpCreate || safePhpPoolCreate || safePhpContainerRepair
                 ? 'operation_receipt_planned'
                 : 'operation_receipt_required',
-              applyState: safeIdentityCreate || safeSftpCreate || safePhpPoolCreate ? 'requires_explicit_apply' : null,
+              applyState: safeIdentityCreate || safeSftpCreate || safePhpPoolCreate || safePhpContainerRepair ? 'requires_explicit_apply' : null,
               current: {
                 operationId: operation.operationId,
                 stepId,
@@ -1184,7 +1204,9 @@ export function createWebsiteIsolationAuditService({
                   ? { sftp: sftpMigrationPreview.desired }
                   : safePhpPoolCreate
                     ? { phpRuntime: phpRuntimeMigrationPreview.desired }
-                    : { satisfied: true },
+                    : safePhpContainerRepair
+                      ? { phpContainer: phpRuntimeMigrationPreview.current.container.desired }
+                      : { satisfied: true },
             }));
           }
         } catch (error) {
@@ -1238,10 +1260,13 @@ export function createWebsiteIsolationAuditService({
             `${stepId} inspection detected managed host drift.`,
             'Stop automatic migration and review the host evidence before changing ownership or routing.',
           ));
+          const safePhpContainerRepair = stepId === 'php_runtime'
+            && phpRuntimeMigrationPreview?.safeContainerMigrationCandidate === true;
           changes.push(migrationChange({
             id: `provisioning.${stepId}`,
-            action: 'reconcile_isolation_step',
-            ownership: 'host_drift_review_required',
+            action: safePhpContainerRepair ? 'repair_php_container_metadata' : 'reconcile_isolation_step',
+            ownership: safePhpContainerRepair ? 'operation_receipt_planned' : 'host_drift_review_required',
+            applyState: safePhpContainerRepair ? 'requires_explicit_apply' : null,
             current: {
               operationId: operation.operationId,
               stepId,
@@ -1255,7 +1280,9 @@ export function createWebsiteIsolationAuditService({
               ...(staticRuntimeMigrationPreview ? { staticRuntimeMigrationPreview } : {}),
               ...(phpRuntimeMigrationPreview ? { phpRuntimeMigrationPreview } : {}),
             },
-            desired: { satisfied: true },
+            desired: safePhpContainerRepair
+              ? { phpContainer: phpRuntimeMigrationPreview.current.container.desired }
+              : { satisfied: true },
           }));
         }
       }
@@ -1285,6 +1312,7 @@ export function createWebsiteIsolationAuditService({
         || (identityMigrationAvailable === true && changes[0].action === 'create_canonical_unix_identity')
         || (sftpMigrationAvailable === true && changes[0].action === 'create_sftp_isolation')
         || (phpMigrationAvailable === true && changes[0].action === 'create_php_fpm_pool')
+        || (phpContainerMigrationAvailable === true && changes[0].action === 'repair_php_container_metadata')
       );
 
     return Object.freeze({
@@ -1308,7 +1336,9 @@ export function createWebsiteIsolationAuditService({
               ? 'Apply creates only the all-missing site-specific SFTP chroot/mount/config/unit state under a durable receipt; foreign artifacts stay blocked and rollback preserves chroot/mount directories.'
               : changes[0].action === 'create_php_fpm_pool'
                 ? 'Apply creates only the missing site-specific PHP-FPM pool under a durable receipt; container ownership, PHP package/service activation and shared UMask must already be canonical and are never repaired by this migration.'
-                : 'Apply creates only the listed operation-receipted workspace directories; it does not rename users, move files or change ownership recursively.')
+                : changes[0].action === 'repair_php_container_metadata'
+                  ? 'Apply changes only applicationRoot, releasesDirectory and current symlink control-plane UID/GID/mode under a durable receipt; release content stays site-owned and no recursive chown, chmod or remove is performed.'
+                  : 'Apply creates only the listed operation-receipted workspace directories; it does not rename users, move files or change ownership recursively.')
           : 'Preview only. No ownership, filesystem or runtime mutation is performed by this audit.',
       }) : null,
     });
