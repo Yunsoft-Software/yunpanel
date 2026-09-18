@@ -187,6 +187,11 @@ export {
   websiteIdentityPathManagerInternals,
 } from './website-identity-path-manager.js';
 export {
+  createTtydRuntimeManager,
+  TtydRuntimeError,
+  ttydRuntimeInternals,
+} from './ttyd-runtime-manager.js';
+export {
   createElFinderNginxGatewayManager,
   ElFinderNginxGatewayError,
   elFinderNginxGatewayInternals,
