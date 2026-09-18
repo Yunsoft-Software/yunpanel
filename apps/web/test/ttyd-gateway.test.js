@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -45,12 +44,12 @@ test('ttyd path policy derives only exact UUID session sockets', () => {
     `/tools/ttyd/${sessionId}/../other`,
     `/tools/ttyd/${sessionId}/%2e%2e/other`,
   ]) assert.equal(panelServerInternals.parseTtydGatewayPath(pathname), null);
-  assert.equal(panelServerInternals.ttydSocketPath('/relative', sessionId), null);
+  assert.equal(panelServerInternals.ttydSocketPath('relative', sessionId), null);
   assert.equal(panelServerInternals.ttydSocketPath(root, 'not-a-uuid'), null);
 });
 
 test('ttyd HTTP gateway authorizes the path session and strips browser credentials before Unix proxy', async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-ttyd-http-'));
+  const directory = await mkdtemp(path.join('/tmp', 'yp-th-'));
   const socketRoot = path.join(directory, 'ttyd');
   const webRoot = path.join(directory, 'web');
   await mkdir(socketRoot);
@@ -169,7 +168,7 @@ test('ttyd HTTP gateway authorizes the path session and strips browser credentia
 });
 
 test('ttyd WebSocket gateway authenticates before upgrading the same private session socket', async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-ttyd-ws-'));
+  const directory = await mkdtemp(path.join('/tmp', 'yp-tw-'));
   const socketRoot = path.join(directory, 'ttyd');
   const webRoot = path.join(directory, 'web');
   await mkdir(socketRoot);

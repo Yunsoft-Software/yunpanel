@@ -368,7 +368,8 @@ test('phpMyAdmin vendor socket is not reached for unauthenticated or cross-origi
   await once(vendor, 'listening');
 
   const api = http.createServer((request, response) => {
-    response.writeHead(request.headers.cookie === '__Host-yunpanel_session=owner' ? 204 : 403);
+    const cookies = request.headers.cookie?.split(';').map((value) => value.trim()) ?? [];
+    response.writeHead(cookies.includes('__Host-yunpanel_session=owner') ? 204 : 403);
     response.end();
   });
   const apiPort = await listen(api);
@@ -490,7 +491,8 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
       response.end();
       return;
     }
-    response.writeHead(request.headers.cookie === '__Host-yunpanel_session=owner' ? 204 : 403);
+    const cookies = request.headers.cookie?.split(';').map((value) => value.trim()) ?? [];
+    response.writeHead(cookies.includes('__Host-yunpanel_session=owner') ? 204 : 403);
     response.end();
   });
   const apiPort = await listen(api);
