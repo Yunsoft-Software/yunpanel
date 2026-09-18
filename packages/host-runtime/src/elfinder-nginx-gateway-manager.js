@@ -351,17 +351,38 @@ export function createElFinderNginxGatewayManager({
     return Object.freeze({ manifest, previous: null });
   }
 
+  async function ensurePrivateDirectory(target) {
+    try {
+      const info = await lstatFn(target);
+      if (!info?.isDirectory?.() || info.isSymbolicLink?.()
+        || info.uid !== ROOT_UID || info.gid !== ROOT_GID) {
+        throw gatewayError(
+          'elfinder_gateway_state_directory_unsafe',
+          'elFinder gateway state directory is unsafe',
+        );
+      }
+    } catch (error) {
+      if (!missing(error)) throw error;
+      await mkdirFn(target, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+      const created = await lstatFn(target);
+      if (!created?.isDirectory?.() || created.isSymbolicLink?.()) {
+        throw gatewayError(
+          'elfinder_gateway_state_directory_unsafe',
+          'elFinder gateway state directory is unsafe',
+        );
+      }
+    }
+    await chownFn(target, ROOT_UID, ROOT_GID);
+    await chmodFn(target, PRIVATE_DIRECTORY_MODE);
+  }
+
   async function prepareSnapshot() {
     const existing = await loadSnapshot();
     if (existing) return existing;
 
     const previous = await inspectLiveConfigForSnapshot();
-    await mkdirFn(stateRoot, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
-    await chmodFn(stateRoot, PRIVATE_DIRECTORY_MODE);
-    await chownFn(stateRoot, ROOT_UID, ROOT_GID);
-    await mkdirFn(transactionDirectory, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
-    await chmodFn(transactionDirectory, PRIVATE_DIRECTORY_MODE);
-    await chownFn(transactionDirectory, ROOT_UID, ROOT_GID);
+    await ensurePrivateDirectory(stateRoot);
+    await ensurePrivateDirectory(transactionDirectory);
 
     if (previous.exists) {
       await atomicWrite(previousPath, previous.value, PRIVATE_FILE_MODE);
@@ -398,7 +419,8 @@ export function createElFinderNginxGatewayManager({
   async function installDesiredConfig() {
     const parent = path.dirname(elFinderNginxTemplatePolicy.configPath);
     const parentInfo = await lstatFn(parent);
-    if (!parentInfo?.isDirectory?.() || parentInfo.isSymbolicLink?.()) {
+    if (!parentInfo?.isDirectory?.() || parentInfo.isSymbolicLink?.()
+      || parentInfo.uid !== ROOT_UID || (modeOf(parentInfo) & 0o002) !== 0) {
       throw gatewayError(
         'elfinder_gateway_config_directory_unsafe',
         'Nginx configuration directory is unsafe',
