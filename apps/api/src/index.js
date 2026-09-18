@@ -73,6 +73,7 @@ import { createServerRegistry } from './server-registry.js';
 import { createTerminalCapabilityRegistry } from './terminal-capability-registry.js';
 import { createTerminalProcessManager } from './terminal-process-manager.js';
 import { createTerminalWebSocketServer } from './terminal-websocket.js';
+import { createTtydSessionManager } from './ttyd-session-manager.js';
 import { createWebsiteMigrationLedger } from './website-migration-ledger.js';
 import { createWebsiteMigrationPolicyStore } from './website-migration-policy.js';
 import { createWebsiteProvisioningRuntime } from './website-provisioning-runtime.js';
@@ -378,6 +379,7 @@ const liveSessions = createLiveSessionRegistry();
 const authStore = createAuthStore({ filePath: authStorePath, liveSessions });
 const terminalCapabilityRegistry = createTerminalCapabilityRegistry({ liveSessions });
 const terminalProcessManager = createTerminalProcessManager();
+const ttydSessionManager = createTtydSessionManager({ liveSessions });
 const auditedJobRegistry = createAuditedJobRegistry({
   registry: durableJobRegistry,
   audit: authStore.audit,
@@ -473,6 +475,15 @@ const listener = createAuthenticatedApi({
   development: process.env.NODE_ENV === 'development',
   proxyToken: internalProxyToken,
   trustedProxyIps: process.env.YUNPANEL_TRUSTED_PROXY_IPS,
+  toolGatewayAuthorizer: ({ gateway, request, session }) => {
+    if (gateway.id !== 'ttyd') return false;
+    const toolSessionId = request.headers['x-yunpanel-tool-session'];
+    if (typeof toolSessionId !== 'string' || toolSessionId.includes(',')) return false;
+    return Boolean(ttydSessionManager.authorize(toolSessionId, {
+      ownerSessionId: session.id,
+      userId: session.user.id,
+    }));
+  },
   publicWebhookHandler: createGithubWebhookHandler({
     applicationRegistry,
     applicationEnvironmentRegistry,
@@ -537,6 +548,7 @@ const listener = createAuthenticatedApi({
       jobLogStore,
       localServerId,
       terminalCapabilityRegistry,
+      ttydSessionManager,
     }),
   }),
 });
@@ -634,6 +646,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] authentication=${authStore.configured() ? 'configured' : 'local setup required'}`);
   console.log(`[yunpanel-api] phpMyAdmin handoff=${phpMyAdminHandoffRuntime ? 'enabled' : 'disabled'}`);
   console.log(`[yunpanel-api] elFinder handoff=${elFinderHandoffRuntime ? 'enabled' : 'disabled'}`);
+  console.log('[yunpanel-api] ttyd sessions=enabled on-demand Unix socket');
   console.log(`[yunpanel-api] local execution=${localRuntime ? `enabled server=${localRuntime.serverId} operations=${localRuntime.operations.length}` : 'disabled'}`);
   console.log(`[yunpanel-api] site files=${localServerId ? `enabled server=${localServerId}` : 'disabled'}`);
 });
@@ -653,6 +666,7 @@ async function shutdown(signal) {
     catch { console.error('[yunpanel-api] elFinder handoff shutdown failed'); }
   }
   liveSessions.closeAll('server_shutdown');
+  ttydSessionManager.closeAll('server_shutdown');
   terminalWebSocket.closeAll('server_shutdown');
   const closePromise = new Promise((resolve) => {
     server.close((error) => resolve(error ?? null));
