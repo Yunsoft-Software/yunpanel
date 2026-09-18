@@ -59,6 +59,7 @@ function service({
   sftpMigrationAvailable = false,
   phpMigrationAvailable = false,
   phpContainerMigrationAvailable = false,
+  staticControlMigrationAvailable = false,
 } = {}) {
   const handlers = {};
   for (const kind of ['unix_identity', 'runtime', 'static_runtime', 'php_runtime', 'sftp']) {
@@ -84,6 +85,7 @@ function service({
     sftpMigrationAvailable,
     phpMigrationAvailable,
     phpContainerMigrationAvailable,
+    staticControlMigrationAvailable,
   });
 }
 
@@ -620,6 +622,7 @@ test('isolation audit pins bounded static release and publish isolation drift in
     version: 1,
     adapter: 'static-runtime',
     satisfied: false,
+    safeControlMigrationCandidate: false,
     current: {
       runtime: {
         satisfied: false,
@@ -636,6 +639,7 @@ test('isolation audit pins bounded static release and publish isolation drift in
         version: 1,
         adapter: 'static-publish-isolation',
         satisfied: false,
+        safeMigrationCandidate: false,
         current: {
           identity: {
             satisfied: true,
@@ -710,6 +714,8 @@ test('isolation audit pins bounded static release and publish isolation drift in
   const preview = first.migration.changes.find((change) => change.id === 'provisioning.runtime')
     .current.staticRuntimeMigrationPreview;
   assert.equal(preview.adapter, 'static-runtime');
+  assert.equal(preview.safeControlMigrationCandidate, false);
+  assert.equal(preview.current.isolation.safeMigrationCandidate, false);
   assert.equal(preview.current.runtime.deploymentId, releaseId);
   assert.equal(preview.current.isolation.current.publishRoot.mode, '0711');
   assert.equal(preview.current.isolation.current.releases[0].reason, 'static_publish_acl_drift');
@@ -746,6 +752,125 @@ test('isolation audit pins bounded static release and publish isolation drift in
     },
   }).audit(websiteId);
   assert.notEqual(first.migration.previewDigest, second.migration.previewDigest);
+});
+
+test('isolation audit opens static control metadata repair only when releases and ACLs are already healthy', async () => {
+  const publishRoot = identity.paths.static.publishRoot;
+  const managedReleaseId = operationId;
+  const desired = {
+    websiteId,
+    applicationId,
+    unixUser: identity.unixUser,
+    homeDirectory: identity.paths.workspace.homeDirectory,
+    publishRoot,
+    releasesRoot: `${publishRoot}/releases`,
+    currentPath: `${publishRoot}/current`,
+    controlDirectoryMode: '0711',
+    releaseDirectoryMode: '0750',
+    releaseFileMode: '0640',
+    nginxDirectoryAcl: 'user:www-data:r-x',
+    nginxFileAcl: 'user:www-data:r--',
+    aclPackage: 'acl',
+  };
+  const preview = {
+    version: 1,
+    adapter: 'static-runtime',
+    satisfied: false,
+    safeControlMigrationCandidate: true,
+    automaticMigration: false,
+    migrationBlockedReason: 'static_legacy_permissions_not_operation_owned',
+    current: {
+      runtime: {
+        satisfied: true,
+        adapter: 'static',
+        applicationId,
+        releaseId: managedReleaseId,
+        currentRelease: `${publishRoot}/current`,
+        unixUser: identity.unixUser,
+        homeDirectory: identity.paths.workspace.homeDirectory,
+      },
+      isolation: {
+        version: 1,
+        adapter: 'static-publish-isolation',
+        satisfied: false,
+        safeMigrationCandidate: true,
+        current: {
+          identity: {
+            satisfied: true,
+            uid: 1201,
+            gid: 1201,
+            homeDirectory: identity.paths.workspace.homeDirectory,
+          },
+          aclToolsAvailable: true,
+          publishRoot: {
+            present: true, directory: true, symbolicLink: false,
+            uid: 1201, gid: 1201, mode: '0750',
+          },
+          releasesRoot: {
+            present: true, directory: true, symbolicLink: false,
+            uid: 1201, gid: 1201, mode: '0750',
+          },
+          releases: [{ releaseId: managedReleaseId, satisfied: true, reason: null }],
+          current: {
+            present: true,
+            symbolicLink: true,
+            uid: 1201,
+            gid: 1201,
+            target: `releases/${managedReleaseId}`,
+          },
+        },
+        desired,
+        differences: ['static_publish_container_drift', 'static_publish_current_drift'],
+      },
+    },
+    desired: {
+      websiteId,
+      applicationId,
+      mode: 'legacy_unresolved',
+      deploymentId: null,
+    },
+    differences: ['static_publish_container_drift', 'static_publish_current_drift'],
+  };
+  const audit = await service({
+    runtimeType: 'static',
+    staticControlMigrationAvailable: true,
+    stepResults: { runtime: { satisfied: false, reason: 'static_publish_isolation_not_ready' } },
+    migrationPreviews: { runtime: preview },
+  }).audit(websiteId);
+
+  assert.equal(audit.migration.applyAvailable, true);
+  assert.equal(audit.migration.changes.length, 1);
+  assert.equal(audit.migration.changes[0].action, 'repair_static_control_metadata');
+  assert.equal(audit.migration.changes[0].ownership, 'operation_receipt_planned');
+  assert.deepEqual(audit.migration.changes[0].desired, { staticControl: desired });
+  assert.match(audit.migration.warning, /release files and Nginx ACLs must already be healthy/);
+
+  const blocked = await service({
+    runtimeType: 'static',
+    staticControlMigrationAvailable: true,
+    stepResults: { runtime: { satisfied: false, reason: 'static_publish_isolation_not_ready' } },
+    migrationPreviews: {
+      runtime: {
+        ...preview,
+        safeControlMigrationCandidate: false,
+        current: {
+          ...preview.current,
+          isolation: {
+            ...preview.current.isolation,
+            safeMigrationCandidate: false,
+            current: {
+              ...preview.current.isolation.current,
+              releases: [{ releaseId: managedReleaseId, satisfied: false, reason: 'static_publish_acl_drift' }],
+            },
+            differences: ['static_publish_acl_drift'],
+          },
+        },
+        differences: ['static_publish_acl_drift'],
+      },
+    },
+  }).audit(websiteId);
+  assert.equal(blocked.migration.applyAvailable, false);
+  assert.equal(blocked.migration.changes[0].action, 'reconcile_isolation_step');
 });
 
 test('isolation audit opens PHP migration only when the exact site pool is the sole safe-create mutation', async () => {
