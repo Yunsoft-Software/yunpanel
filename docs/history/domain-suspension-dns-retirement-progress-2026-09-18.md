@@ -34,6 +34,16 @@ Local PowerDNS zone silme authority'si standalone public destructive endpoint ol
 - Retirement runtime provider DELETE lost-ack sonrasında absent postcondition'ı görürse ikinci DELETE atmadan kapanır. Startup `deleting` state'te yalnız inspect yapar; zone hâlâ exact snapshot ise explicit retry ister.
 - Durable retirement operations read-only list/detail endpoint'lerinde görülebilir. Standalone public start/retry mutation route'u özellikle mount edilmemiştir; destructive invocation Domain/Website reverse-dependency delete orchestrator'ına bırakılmıştır.
 
+## Checkpoint sonrası Domain removal temeli
+
+Bu checkpoint'ten sonra delete orchestrator'a doğrudan kullanılacak üç kaynak primitive'i eklendi.
+
+- Domain registry yalnız exact suspended revision/checksum/suspension-operation evidence altında Website binding'ini idempotent detach edebilir. Binding drift'inde fail-closed kalır.
+- Certificate binding aynı suspension evidence altında exact certificate ID ile detach edilir; bu işlem certificate resource'unu silmez, yalnız Domain bağını kaldırır.
+- Child Domain, Website binding ve certificate binding kalmadığında; exact suspension operation/revision/checksum ve typed confirmation ile Domain metadata finalization yapılabilir. Active/resumed veya drift etmiş Domain finalization'a giremez.
+- Local authoritative DNS retirement service/runtime artık API bootstrap'ta tek shared instance olarak initialize edilir ve durable operation store'u control-plane state root altında tutulur. Public standalone destructive start/retry route'u yine açılmamıştır; üst Domain/Website delete orchestrator'ı beklenir.
+- Bu primitive'ler reverse-order durable Domain delete operation journal'ı yerine geçmez. Resource-impact digest pinleme, child operation/evidence ve restart recovery hâlâ açık iştir.
+
 ## Test durumu
 
 Bu checkpoint'te ilgili source test dosyaları ve failure-injection contract'ları repository'ye küçük commitlerle eklendi. Bu ortamda repository checkout + Node workspace test suite'i çalıştırılmadı; bu nedenle yeni testler için pass sayısı iddia edilmez.
