@@ -78,7 +78,7 @@ function SiteWorkspace({ websiteId, tab }) {
   const legacyManagedTarget = !domain.websiteId && Boolean(application);
   const tabs = SITE_TABS.filter(([key]) => {
     if (['node', 'deploy'].includes(key)) return Boolean(application);
-    if (['files', 'terminal'].includes(key)) return managedWebsite || legacyManagedTarget;
+    if (['files', 'terminal'].includes(key)) return canManage && (managedWebsite || legacyManagedTarget);
     return true;
   });
   if (!tabs.some(([key]) => key === tab)) return <EmptyState title="Bu hedefte bu araç kullanılamaz" detail="Yalnız bu sitenin gerçek çalışma türüyle desteklenen yönetim araçları gösterilir." action={<LinkButton to={siteHref(domain.id)}>Siteye dön</LinkButton>} />;
@@ -125,7 +125,7 @@ function SiteWorkspace({ websiteId, tab }) {
       description={`${domain.primaryDomain} için dedicated site kullanıcısında interaktif PTY.`}
       target={{ scope: 'site', websiteId: domain.websiteId }}
     /> : <LegacyWebsiteRepair domain={domain} canManage={canManage} onChanged={refreshAll} />)}
-    {tab === 'files' && (domain.websiteId ? <FilesPanel serverId={domain.serverId} websiteId={domain.websiteId} /> : <LegacyWebsiteRepair domain={domain} canManage={canManage} onChanged={refreshAll} />)}
+    {tab === 'files' && (domain.websiteId ? <FilesPanel serverId={domain.serverId} websiteId={domain.websiteId} runtimeType={website?.runtimeType} /> : <LegacyWebsiteRepair domain={domain} canManage={canManage} onChanged={refreshAll} />)}
     {tab === 'settings' && <Section title="Site ayarları"><KeyValues items={[
       ['Kayıt kimliği', domain.id], ['Website kimliği', website?.id ?? 'Legacy / bağlı değil'], ['Üst alan adı', domains.items.find((item) => item.id === domain.parentDomainId)?.primaryDomain ?? 'Bağımsız kayıt'],
       ['Sunucu', server?.displayName ?? server?.hostname], ['Hedef türü', domain.targetType], ['Runtime', website?.runtimeType ?? '—'],
