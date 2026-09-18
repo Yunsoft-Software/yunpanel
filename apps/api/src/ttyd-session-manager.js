@@ -53,6 +53,9 @@ function parseGroup(value, name) {
 }
 
 function ttydArgs({ sessionId, socketPath, resolved }) {
+  const privilege = resolved.user === 'root'
+    ? []
+    : ['--uid', String(resolved.uid), '--gid', String(resolved.gid)];
   return Object.freeze([
     '--interface', socketPath,
     '--socket-owner', SOCKET_OWNER,
@@ -65,8 +68,9 @@ function ttydArgs({ sessionId, socketPath, resolved }) {
     '--base-path', `${PUBLIC_PREFIX}/${sessionId}`,
     '--auth-header', AUTH_HEADER,
     '--terminal-type', 'xterm-256color',
-    resolved.file,
-    ...resolved.args,
+    ...privilege,
+    resolved.directFile,
+    ...resolved.directArgs,
   ]);
 }
 
