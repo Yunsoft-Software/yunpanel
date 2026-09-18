@@ -74,7 +74,7 @@ function SiteWorkspace({ websiteId, tab }) {
   const website = websites.items.find((item) => item.id === domain.websiteId);
   const application = applications.items.find((item) => item.id === website?.applicationId)
     ?? selectedApplication(domain, applications.items, params.get('application'));
-  const managedWebsite = website && ['static', 'node'].includes(website.runtimeType);
+  const managedWebsite = website && ['static', 'node', 'php'].includes(website.runtimeType);
   const legacyManagedTarget = !domain.websiteId && Boolean(application);
   const tabs = SITE_TABS.filter(([key]) => {
     if (['node', 'deploy'].includes(key)) return Boolean(application);
@@ -125,7 +125,7 @@ function SiteWorkspace({ websiteId, tab }) {
       description={`${domain.primaryDomain} için dedicated site kullanıcısında interaktif PTY.`}
       target={{ scope: 'site', websiteId: domain.websiteId }}
     /> : <LegacyWebsiteRepair domain={domain} canManage={canManage} onChanged={refreshAll} />)}
-    {tab === 'files' && (domain.websiteId ? <FilesPanel websiteId={domain.websiteId} /> : <LegacyWebsiteRepair domain={domain} canManage={canManage} onChanged={refreshAll} />)}
+    {tab === 'files' && (domain.websiteId ? <FilesPanel serverId={domain.serverId} websiteId={domain.websiteId} /> : <LegacyWebsiteRepair domain={domain} canManage={canManage} onChanged={refreshAll} />)}
     {tab === 'settings' && <Section title="Site ayarları"><KeyValues items={[
       ['Kayıt kimliği', domain.id], ['Website kimliği', website?.id ?? 'Legacy / bağlı değil'], ['Üst alan adı', domains.items.find((item) => item.id === domain.parentDomainId)?.primaryDomain ?? 'Bağımsız kayıt'],
       ['Sunucu', server?.displayName ?? server?.hostname], ['Hedef türü', domain.targetType], ['Runtime', website?.runtimeType ?? '—'],
