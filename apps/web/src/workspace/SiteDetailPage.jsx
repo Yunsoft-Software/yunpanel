@@ -75,7 +75,7 @@ function SiteWorkspace({ websiteId, tab }) {
   const application = applications.items.find((item) => item.id === website?.applicationId)
     ?? selectedApplication(domain, applications.items, params.get('application'));
   const managedFilesWebsite = website && ['static', 'node', 'php'].includes(website.runtimeType);
-  const managedTerminalWebsite = website && ['static', 'node'].includes(website.runtimeType);
+  const managedTerminalWebsite = website && ['static', 'node', 'php'].includes(website.runtimeType);
   const legacyManagedTarget = !domain.websiteId && Boolean(application);
   const tabs = SITE_TABS.filter(([key]) => {
     if (['node', 'deploy'].includes(key)) return Boolean(application);
