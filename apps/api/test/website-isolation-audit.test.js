@@ -53,6 +53,7 @@ function service({
   currentApplication = application(runtimeType),
   latest = operation(runtimeType),
   stepResults = {},
+  migrationPreviews = {},
   workspaceMigrationAvailable = false,
 } = {}) {
   const handlers = {};
@@ -62,6 +63,9 @@ function service({
         const result = stepResults[kind] ?? { satisfied: true };
         if (result instanceof Error) throw result;
         return result;
+      },
+      async previewMigration() {
+        return migrationPreviews[kind] ?? null;
       },
     };
   }
@@ -175,6 +179,78 @@ test('isolation audit emits exact receipt-bound directory changes for canonical 
       ],
     },
   });
+});
+
+test('isolation audit pins a public-safe Unix identity migration preview into drift digest', async () => {
+  const drift = Object.assign(new Error('drift'), { code: 'website_identity_drift' });
+  const migrationPreview = {
+    version: 1,
+    satisfied: false,
+    safeCreateCandidate: false,
+    current: {
+      account: { uid: 1201, gid: 1201, homeDirectory: '/srv/legacy', shell: '/bin/bash' },
+      group: { gid: 1201, memberCount: 1, members: ['hidden-member'] },
+      home: { uid: 1201, gid: 1201, mode: '0755' },
+    },
+    desired: {
+      user: identity.unixUser,
+      homeDirectory: identity.paths.workspace.homeDirectory,
+      shellPolicy: 'nologin',
+      privateGroup: true,
+      groupMemberCount: 0,
+      homeMode: '0750',
+    },
+    differences: [
+      'website_identity_account_home_drift',
+      'website_identity_account_shell_drift',
+      'website_identity_group_members_drift',
+      'website_identity_home_mode_drift',
+    ],
+    rawSecret: 'do-not-project',
+  };
+  const first = await service({
+    stepResults: { unix_identity: drift },
+    migrationPreviews: { unix_identity: migrationPreview },
+  }).audit(websiteId);
+
+  const preview = first.migration.changes.find((change) => change.id === 'provisioning.unix_identity')
+    .current.identityMigrationPreview;
+  assert.deepEqual(preview, {
+    version: 1,
+    satisfied: false,
+    safeCreateCandidate: false,
+    current: {
+      account: { uid: 1201, gid: 1201, homeDirectory: '/srv/legacy', shell: '/bin/bash' },
+      group: { gid: 1201, memberCount: 1 },
+      home: { uid: 1201, gid: 1201, mode: '0755' },
+    },
+    desired: {
+      user: identity.unixUser,
+      homeDirectory: identity.paths.workspace.homeDirectory,
+      shellPolicy: 'nologin',
+      privateGroup: true,
+      groupMemberCount: 0,
+      homeMode: '0750',
+    },
+    differences: migrationPreview.differences,
+  });
+  assert.deepEqual(first.inspectedSteps[0].identityMigrationPreview, preview);
+  assert.equal(JSON.stringify(first.migration).includes('hidden-member'), false);
+  assert.equal(JSON.stringify(first.migration).includes('do-not-project'), false);
+
+  const second = await service({
+    stepResults: { unix_identity: drift },
+    migrationPreviews: {
+      unix_identity: {
+        ...migrationPreview,
+        current: {
+          ...migrationPreview.current,
+          home: { ...migrationPreview.current.home, mode: '0700' },
+        },
+      },
+    },
+  }).audit(websiteId);
+  assert.notEqual(first.migration.previewDigest, second.migration.previewDigest);
 });
 
 test('isolation audit fails closed when managed host inspection detects drift', async () => {
