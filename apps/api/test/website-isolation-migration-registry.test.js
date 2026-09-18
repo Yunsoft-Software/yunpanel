@@ -39,6 +39,48 @@ function audit() {
   };
 }
 
+function identityAudit() {
+  const desired = {
+    user: applicationUser,
+    homeDirectory,
+    shellPolicy: 'nologin',
+    privateGroup: true,
+    groupMemberCount: 0,
+    homeMode: '0750',
+  };
+  return {
+    applicable: true,
+    migrationRequired: true,
+    websiteId,
+    applicationId,
+    websiteRevision: 3,
+    expected: { unixUser: applicationUser, homeDirectory },
+    migration: {
+      applyAvailable: true,
+      previewDigest,
+      changes: [{
+        action: 'create_canonical_unix_identity',
+        applyState: 'requires_explicit_apply',
+        current: {
+          identityMigrationPreview: {
+            version: 1,
+            satisfied: false,
+            safeCreateCandidate: true,
+            current: { account: null, group: null, home: null },
+            desired,
+            differences: [
+              'website_identity_user_missing',
+              'website_identity_group_missing',
+              'website_identity_home_missing',
+            ],
+          },
+        },
+        desired: { identity: desired },
+      }],
+    },
+  };
+}
+
 function registry() {
   return createWebsiteIsolationMigrationRegistry({
     now: () => Date.parse('2026-09-17T12:00:00.000Z'),
@@ -124,4 +166,55 @@ test('isolation migration registry durably restores interrupted state with priva
   assert.equal((await stat(directory)).mode & 0o777, 0o700);
   assert.equal((await stat(filePath)).mode & 0o777, 0o600);
   assert.equal(JSON.parse(await readFile(filePath, 'utf8')).version, 1);
+});
+
+
+test('isolation migration registry journals identity-only receipt and data-preserving rollback evidence', async () => {
+  const store = registry();
+  await store.init();
+
+  const created = await store.create(identityAudit());
+  assert.equal(created.status, 'pending');
+  assert.deepEqual(created.intent.targets, []);
+
+  await store.markApplying(operationId);
+  const succeeded = await store.succeed(operationId, {
+    satisfied: true,
+    identityReceiptVersion: 1,
+    createdUnixIdentity: true,
+  });
+  assert.deepEqual(succeeded.result, {
+    satisfied: true,
+    identityReceiptVersion: 1,
+    createdUnixIdentity: true,
+  });
+
+  await store.markCompensating(operationId);
+  const compensated = await store.compensate(operationId, {
+    satisfied: true,
+    removedUser: true,
+    removedGroup: true,
+    removedHome: false,
+    preservedHomeData: true,
+  });
+  assert.deepEqual(compensated.compensation, {
+    satisfied: true,
+    removedUser: true,
+    removedGroup: true,
+    removedHome: false,
+    preservedHomeData: true,
+  });
+});
+
+test('isolation migration registry rejects identity journaling unless preview proves all-missing safe-create state', async () => {
+  const store = registry();
+  await store.init();
+  const unsafe = identityAudit();
+  unsafe.migration.changes[0].current.identityMigrationPreview.safeCreateCandidate = false;
+
+  await assert.rejects(
+    store.create(unsafe),
+    (error) => error instanceof WebsiteIsolationMigrationRegistryError
+      && error.code === 'website_isolation_migration_preview_invalid',
+  );
 });
