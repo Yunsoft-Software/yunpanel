@@ -33,7 +33,7 @@ Son ttyd/IntegratedToolGateway ilerlemesi: `docs/history/ttyd-integrated-gateway
 
 ## P0.1 — Website Unix identity ve filesystem isolation
 
-- [ ] Legacy Website path/runtime migration apply/rollback kapsamını tamamla; Unix identity, SFTP, yalnız-missing PHP-FPM site-pool ve exact PHP control-plane container metadata (`applicationRoot`/`releasesDirectory`/`current`) için durable operation-owned lifecycle kaynakta tamamlandı. PHP metadata repair yalnız release content site-owned/canonical, current target exact, FPM runtime sağlıklı ve `UMask=0027` iken açılır; receipt mutation öncesi previous UID/GID/mode'u pinler, restart inspect-first çalışır ve rollback yabancı/path-type drift'inde fail-closed kalır. Passenger Node/static exact bounded preview mevcut fakat mutation authority hâlâ blocked. Kalan Passenger/static/path mutation'ları yalnız current preview digest geçerliyken ve operation ownership evidence exact kaynağı kanıtlarken açılsın; pre-existing state fail-closed kalsın ve kör recursive `chown`/`chmod`/`rm` yapılmasın.
+- [ ] Legacy Website path/runtime migration apply/rollback kapsamını tamamla; Unix identity, SFTP, yalnız-missing PHP-FPM site-pool ve exact PHP control-plane container metadata (`applicationRoot`/`releasesDirectory`/`current`) için durable operation-owned lifecycle kaynakta tamamlandı. Direct-systemd → Passenger legacy runtime geçişi isolation journal'a zorla eklenmedi; mevcut digest-bound Application Passenger migration job'ı source route/release/environment evidence, Nginx checksum cutover/rollback, target health, legacy systemd cleanup ve runtime-binding reconciliation authority'si olarak kullanılıyor ve Website isolation paneli bu workflow'a explicit handoff yapıyor. Passenger isolation preview bu nedenle `automaticMigration=false` kalır. Kalan P0.1 source işi static publish/release permission + ACL drift'i için operation-owned, restart-inspectable ve exact rollback authority kurmaktır; pre-existing/foreign state fail-closed kalsın ve kör recursive `chown`/`chmod`/`rm` yapılmasın.
 
 Gerçek Ubuntu isolation/SFTP kabul kapıları `todo.md` içindedir.
 
@@ -158,7 +158,7 @@ Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözl
 
 # Uygulama sırası — blocker yoksa sapma yok
 
-1. **Website Unix isolation** — Passenger/static legacy mutation authority sınırlarını tamamla; identity, SFTP, PHP-FPM pool safe-create ve exact PHP container control-plane metadata repair source lifecycle tamamlandı. Geniş PHP release/content/path drift'i fail-closed kalır.
+1. **Website Unix isolation** — static legacy publish/release permission + ACL mutation authority sınırını tamamla; identity, SFTP, PHP-FPM pool safe-create, exact PHP container metadata repair ve dedicated direct-systemd → Passenger cutover handoff source lifecycle tamamlandı. Passenger isolation journal mutation'ı bilerek kapalı; geniş PHP/static foreign drift fail-closed kalır.
 2. **PowerDNS operator recovery** — restart-sonrası güvenli explicit rollback, typed confirmation ve fail-closed recovery control surface.
 3. **Mail explicit rollback** — mevcut v3 backup/previous-state preview'ından durable restore, compensation/restart recovery ve monoton control-plane reconciliation.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
