@@ -852,6 +852,109 @@ function boundedStaticPublishPreview(value, scope) {
   });
 }
 
+function boundedStaticReleasePreview(value, scope) {
+  const differences = boundedPreviewDifferences(value?.differences);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== 1 || value.adapter !== 'static-release-permissions'
+    || typeof value.satisfied !== 'boolean'
+    || value.automaticMigration !== false
+    || typeof value.repairCandidate !== 'boolean'
+    || value.migrationBlockedReason !== 'static_release_receipt_not_operation_owned'
+    || !differences
+    || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
+    || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
+    || value.desired.websiteId !== scope.websiteId
+    || value.desired.applicationId !== scope.applicationId
+    || value.desired.unixUser !== scope.identity?.unixUser
+    || value.desired.releasesRoot !== path.posix.join(scope.identity?.paths?.static?.publishRoot ?? '', 'releases')
+    || value.desired.releaseDirectoryMode !== '0750'
+    || value.desired.releaseFileMode !== '0640'
+    || value.desired.nginxDirectoryAcl !== 'user:www-data:r-x'
+    || value.desired.nginxFileAcl !== 'user:www-data:r--') return null;
+
+  const identity = boundedPhpIdentity(value.current.identity, scope.identity.paths.workspace.homeDirectory);
+  if (!identity || typeof value.current.aclToolsAvailable !== 'boolean'
+    || !Array.isArray(value.current.releases) || value.current.releases.length > 100) return null;
+
+  const releases = [];
+  for (const releaseId of value.current.releases) {
+    if (typeof releaseId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(releaseId)) {
+      return null;
+    }
+    releases.push(releaseId.toLowerCase());
+  }
+  if (new Set(releases).size !== releases.length) return null;
+
+  const currentTarget = value.current.currentTarget === null
+    ? null
+    : boundedText(value.current.currentTarget, 512);
+  const currentTargetError = value.current.currentTargetError === null
+    ? null
+    : boundedReason(value.current.currentTargetError);
+  if ((value.current.currentTarget !== null && currentTarget === null)
+    || (value.current.currentTargetError !== null && currentTargetError === null)) return null;
+
+  let tree = null;
+  if (value.current.tree !== null) {
+    const candidate = value.current.tree;
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)
+      || boundedSha256(candidate.sha256) === undefined
+      || !Number.isSafeInteger(candidate.entryCount) || candidate.entryCount < 1 || candidate.entryCount > 50_000
+      || !Number.isSafeInteger(candidate.ownershipModeDriftCount) || candidate.ownershipModeDriftCount < 0
+      || !Number.isSafeInteger(candidate.aclDriftCount) || candidate.aclDriftCount < 0
+      || candidate.ownershipModeDriftCount > candidate.entryCount
+      || candidate.aclDriftCount > candidate.entryCount) return null;
+    tree = Object.freeze({
+      sha256: candidate.sha256,
+      entryCount: candidate.entryCount,
+      ownershipModeDriftCount: candidate.ownershipModeDriftCount,
+      aclDriftCount: candidate.aclDriftCount,
+    });
+  }
+
+  const targetMatch = currentTarget?.match(/^releases\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i) ?? null;
+  const currentReleaseId = targetMatch?.[1]?.toLowerCase() ?? null;
+  const targetManaged = currentTargetError === null
+    && currentReleaseId !== null
+    && releases.includes(currentReleaseId);
+  const expectedSatisfied = differences.length === 0;
+  const expectedRepairCandidate = identity.satisfied === true
+    && value.current.aclToolsAvailable === true
+    && tree !== null
+    && targetManaged
+    && (tree.ownershipModeDriftCount > 0 || tree.aclDriftCount > 0)
+    && differences.every((code) => code === 'static_publish_release_drift' || code === 'static_publish_acl_drift');
+  if (value.satisfied !== expectedSatisfied || value.repairCandidate !== expectedRepairCandidate) return null;
+
+  return Object.freeze({
+    version: 1,
+    adapter: 'static-release-permissions',
+    satisfied: value.satisfied,
+    automaticMigration: false,
+    repairCandidate: value.repairCandidate,
+    migrationBlockedReason: 'static_release_receipt_not_operation_owned',
+    current: Object.freeze({
+      identity,
+      aclToolsAvailable: value.current.aclToolsAvailable,
+      currentTarget,
+      currentTargetError,
+      releases: Object.freeze(releases),
+      tree,
+    }),
+    desired: Object.freeze({
+      websiteId: scope.websiteId,
+      applicationId: scope.applicationId,
+      unixUser: scope.identity.unixUser,
+      releasesRoot: value.desired.releasesRoot,
+      releaseDirectoryMode: '0750',
+      releaseFileMode: '0640',
+      nginxDirectoryAcl: 'user:www-data:r-x',
+      nginxFileAcl: 'user:www-data:r--',
+    }),
+    differences,
+  });
+}
+
 function boundedStaticRuntimeState(value, scope) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.adapter !== 'static'
@@ -899,8 +1002,9 @@ function boundedStaticRuntimeMigrationPreview(value, scope) {
     || value.version !== 1 || value.adapter !== 'static-runtime'
     || typeof value.satisfied !== 'boolean'
     || typeof value.safeControlMigrationCandidate !== 'boolean'
+    || typeof value.releaseRepairCandidate !== 'boolean'
     || value.automaticMigration !== false
-    || value.migrationBlockedReason !== 'static_legacy_permissions_not_operation_owned'
+    || !['static_legacy_permissions_not_operation_owned', 'static_release_receipt_not_operation_owned'].includes(value.migrationBlockedReason)
     || !differences
     || !value.current || typeof value.current !== 'object' || Array.isArray(value.current)
     || !value.desired || typeof value.desired !== 'object' || Array.isArray(value.desired)
@@ -912,20 +1016,28 @@ function boundedStaticRuntimeMigrationPreview(value, scope) {
 
   const runtime = boundedStaticRuntimeState(value.current.runtime, scope);
   const isolation = boundedStaticPublishPreview(value.current.isolation, scope);
-  if (!runtime || !isolation) return null;
+  const releasePermissions = boundedStaticReleasePreview(value.current.releasePermissions, scope);
+  if (!runtime || !isolation || !releasePermissions) return null;
   const expectedSatisfied = runtime.satisfied === true && isolation.satisfied === true;
   const expectedSafeControlMigrationCandidate = runtime.satisfied === true && isolation.safeMigrationCandidate === true;
+  const expectedReleaseRepairCandidate = runtime.satisfied === true && releasePermissions.repairCandidate === true;
+  const expectedBlockedReason = expectedReleaseRepairCandidate
+    ? 'static_release_receipt_not_operation_owned'
+    : 'static_legacy_permissions_not_operation_owned';
   if (value.satisfied !== expectedSatisfied
-    || value.safeControlMigrationCandidate !== expectedSafeControlMigrationCandidate) return null;
+    || value.safeControlMigrationCandidate !== expectedSafeControlMigrationCandidate
+    || value.releaseRepairCandidate !== expectedReleaseRepairCandidate
+    || value.migrationBlockedReason !== expectedBlockedReason) return null;
 
   return Object.freeze({
     version: 1,
     adapter: 'static-runtime',
     satisfied: value.satisfied,
     safeControlMigrationCandidate: value.safeControlMigrationCandidate,
+    releaseRepairCandidate: value.releaseRepairCandidate,
     automaticMigration: false,
-    migrationBlockedReason: 'static_legacy_permissions_not_operation_owned',
-    current: Object.freeze({ runtime, isolation }),
+    migrationBlockedReason: expectedBlockedReason,
+    current: Object.freeze({ runtime, isolation, releasePermissions }),
     desired: Object.freeze({
       websiteId: scope.websiteId,
       applicationId: scope.applicationId,
@@ -1432,6 +1544,7 @@ export const websiteIsolationAuditInternals = Object.freeze({
   boundedPhpRuntimeMigrationPreview,
   inspectPhpRuntimeMigrationPreview,
   boundedStaticPublishPreview,
+  boundedStaticReleasePreview,
   boundedStaticRuntimeState,
   boundedStaticRuntimeMigrationPreview,
   inspectStaticRuntimeMigrationPreview,
