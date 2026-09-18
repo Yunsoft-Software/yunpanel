@@ -60,7 +60,8 @@ Kaynakta apply authority verilen dar operation türleri:
 - `workspace`: yalnız preview'da eksik olduğu kanıtlanan canonical `tmp`/`logs` direct-child dizinleri;
 - `identity`: yalnız canonical Unix user/group/HOME üçlüsünün tamamı eksikken safe-create;
 - `sftp`: yalnız site-specific SSH drop-in, mount unit, chroot/mount ve receipt state'i safe-create şartını sağlarken; authorized-key desired state ayrıca root-owned materialization ile reconcile edilir;
-- `php`: yalnız PHP container ownership/path, shared package/service ve `UMask=0027` zaten canonical iken eksik site-specific FPM pool.
+- `php`: yalnız PHP container ownership/path, shared package/service ve `UMask=0027` zaten canonical iken eksik site-specific FPM pool;
+- `php_container`: yalnız source provisioning/release ID'sine bağlı mevcut release tree canonical ve site-owned kalırken `applicationRoot`, `releasesDirectory` ve `current` symlink control-plane UID/GID/mode metadata drift'i. Apply öncesi site FPM runtime + shared `UMask=0027` sağlıklı olmalı; receipt previous metadata'yı mutation'dan önce persist eder.
 
 Bu journal'da mutation öncesi operation intent'i persist edilir. `applying` veya `compensating` state ile restart edilirse adapter önce read-only operation receipt/host inspection çalıştırır; completed postcondition kanıtlanırsa journal kapatılır, kanıtlanamıyorsa aynı mutation otomatik replay edilmez.
 
@@ -69,9 +70,10 @@ Rollback sınırı operation türüne göre dardır:
 - workspace yalnız operation-created ve boş direct-child dizinleri non-recursive kaldırır;
 - identity receipt-owned user/group'u geri alır; HOME boşsa non-recursive kaldırabilir, veri içeriyorsa koruyup `preservedHomeData` evidence'ı bırakır;
 - SFTP receipt-owned SSH config/unit ve operation-created boş chroot/mount dizinlerini kaldırır; veri içeren dizinleri ve durable key desired state'ini korur;
-- PHP yalnız receipt-owned site pool'u restore/remove eder; shared package/service, UMask ve container ownership'e dokunmaz.
+- PHP pool adapter'ı yalnız receipt-owned site pool'u restore/remove eder; shared package/service, UMask ve container ownership'e dokunmaz;
+- PHP container adapter'ı yalnız receipt'te pinlenen `applicationRoot`, `releasesDirectory` ve `current` previous UID/GID/mode metadata'sını exact geri yükler. Release/public content hiçbir zaman recursive mutate edilmez; path type, current target veya foreign metadata drift'i destructive rollback'i bloklar. Compensation ancak host metadata restore edilmiş **ve** container receipt state `compensated` olarak finalize edilmişse recovery tarafından tamamlanmış sayılır.
 
-Passenger legacy runtime ve static legacy permissions preview'ları explicit blocked-authority state taşır (`automaticMigration=false`). PHP container ownership/path drift'i de receipt-backed rollback authority olmadan apply'e çevrilmez. Bu drift'ler exact preview digest'e girer fakat automatic/typed migration mutation'ı başlatmaz.
+Passenger legacy runtime ve static legacy permissions preview'ları explicit blocked-authority state taşır (`automaticMigration=false`). PHP'de yalnız yukarıdaki exact three-path control-plane metadata repair authority'si açıktır; release content ownership/mode, current target, path topology veya shared runtime drift'i bunun dışındadır ve fail-closed kalır. Bu blocked drift'ler exact preview digest'e girer fakat typed migration mutation'ı başlatmaz.
 
 ## Retry ve continue kuralı
 
