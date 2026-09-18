@@ -1,6 +1,7 @@
 import { createServiceUmaskManager } from '@yunpanel/host-runtime/service-umask-manager';
 import { createStaticPublishIsolationManager } from '@yunpanel/host-runtime/static-publish-isolation-manager';
 import { createWebsiteProvisioningHandlers as createBaseWebsiteProvisioningHandlers } from './website-provisioning-handlers.js';
+import { createWebsiteElFinderProvisioningHandler } from './website-elfinder-provisioning-handler.js';
 import { createWebsitePhpRuntimeProvisioningHandler } from './website-php-runtime-provisioning-handler.js';
 import { createWebsiteSftpProvisioningHandler } from './website-sftp-provisioning-handler.js';
 
@@ -86,6 +87,10 @@ export function createWebsiteProvisioningHandlers(options = {}) {
   const staticPublishIsolationManager = options.staticPublishIsolationManager ?? createStaticPublishIsolationManager();
   return Object.freeze({
     ...base,
+    elfinder: createWebsiteElFinderProvisioningHandler({
+      ...(options.elFinderFpmSiteManager ? { fpmManager: options.elFinderFpmSiteManager } : {}),
+      umaskManager,
+    }),
     runtime: passengerRuntimeHandler(base.runtime, umaskManager),
     php_runtime: createWebsitePhpRuntimeProvisioningHandler({
       ...(options.phpSiteContainerManager ? { containerManager: options.phpSiteContainerManager } : {}),
