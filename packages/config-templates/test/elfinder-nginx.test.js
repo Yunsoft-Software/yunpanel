@@ -34,10 +34,13 @@ test('elFinder gateway exposes only packaged browser assets and the hardened con
   assert.match(content, /alias \/usr\/share\/javascript\/jquery\//);
   assert.match(content, /location \^~ \/assets\/jquery-ui\//);
   assert.match(content, /alias \/usr\/share\/javascript\/jquery-ui\//);
-  assert.match(content, /location \^~ \/vendor\//);
-  assert.match(content, /alias \/usr\/share\/yunpanel\/elfinder\/vendor\/elfinder\//);
-  assert.match(content, /vendor\/php\//);
-  assert.match(content, /vendor\/files\//);
+  for (const assetRoot of ['js', 'css', 'img', 'sounds']) {
+    assert.ok(content.includes(`location ^~ /vendor/${assetRoot}/`));
+    assert.ok(content.includes(`alias /usr/share/yunpanel/elfinder/vendor/elfinder/${assetRoot}/;`));
+  }
+  assert.match(content, /location \^~ \/vendor\/ \{/);
+  assert.match(content, /return 404;/);
+  assert.doesNotMatch(content, /alias \/usr\/share\/yunpanel\/elfinder\/vendor\/elfinder\/;/);
   assert.match(content, /location = \/index\.html/);
   assert.match(content, /location = \/yunpanel-client\.js/);
 });
