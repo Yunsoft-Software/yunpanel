@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { lstat, readlink } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readlink, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { createApplicationIdentity } from './application-identity.js';
@@ -9,6 +10,9 @@ const execFileAsync = promisify(execFile);
 const CHOWN_PATH = '/usr/bin/chown';
 const CHMOD_PATH = '/usr/bin/chmod';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MIGRATION_RECEIPT_ROOT = '/var/lib/yunpanel/staging/php-container-migrations';
+const MIGRATION_RECEIPT_VERSION = 1;
+const MIGRATION_RECEIPT_STATES = new Set(['prepared', 'active', 'compensated']);
 
 export class PhpSiteContainerManagerError extends Error {
   constructor(code, message) {
@@ -27,6 +31,67 @@ function uuid(value, field) {
 
 function modeOf(value) {
   return Number(value?.mode ?? 0) & 0o777;
+}
+
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function migrationSpecDigest(spec) {
+  return sha256(JSON.stringify({
+    version: 1,
+    websiteId: spec.websiteId,
+    applicationId: spec.applicationId,
+    releaseId: spec.releaseId,
+    unixUser: spec.unixUser,
+    applicationRoot: spec.applicationRoot,
+    releasesDirectory: spec.releasesDirectory,
+    currentRelease: spec.currentRelease,
+  }));
+}
+
+function receiptMetadata(value, { symlink = false } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || !Number.isSafeInteger(value.uid) || value.uid < 0
+    || !Number.isSafeInteger(value.gid) || value.gid < 0
+    || (!symlink && (!Number.isSafeInteger(value.mode) || value.mode < 0 || value.mode > 0o777))) {
+    throw new PhpSiteContainerManagerError('php_site_container_migration_receipt_invalid', 'PHP container migration receipt metadata is invalid');
+  }
+  return Object.freeze({
+    uid: value.uid,
+    gid: value.gid,
+    ...(symlink ? {} : { mode: value.mode }),
+  });
+}
+
+function normalizeMigrationReceipt(value, { operationId, spec } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== MIGRATION_RECEIPT_VERSION
+    || value.operationId !== operationId
+    || value.websiteId !== spec.websiteId
+    || value.applicationId !== spec.applicationId
+    || value.releaseId !== spec.releaseId
+    || value.unixUser !== spec.unixUser
+    || value.specDigest !== migrationSpecDigest(spec)
+    || !MIGRATION_RECEIPT_STATES.has(value.state)
+    || !value.previous || typeof value.previous !== 'object' || Array.isArray(value.previous)) {
+    throw new PhpSiteContainerManagerError('php_site_container_migration_receipt_invalid', 'PHP container migration receipt is invalid');
+  }
+  return Object.freeze({
+    version: MIGRATION_RECEIPT_VERSION,
+    operationId,
+    websiteId: spec.websiteId,
+    applicationId: spec.applicationId,
+    releaseId: spec.releaseId,
+    unixUser: spec.unixUser,
+    specDigest: value.specDigest,
+    previous: Object.freeze({
+      applicationRoot: receiptMetadata(value.previous.applicationRoot),
+      releasesDirectory: receiptMetadata(value.previous.releasesDirectory),
+      currentRelease: receiptMetadata(value.previous.currentRelease, { symlink: true }),
+    }),
+    state: value.state,
+  });
 }
 
 function normalizeIntent(value, operationId) {
@@ -70,6 +135,7 @@ function missing(error) {
 }
 
 export function createPhpSiteContainerManager({
+  migrationReceiptRoot = MIGRATION_RECEIPT_ROOT,
   identityManager = createWebsiteIdentityPathManager(),
   run = (file, args, options = {}) => execFileAsync(file, args, {
     encoding: 'utf8',
@@ -77,11 +143,64 @@ export function createPhpSiteContainerManager({
     maxBuffer: 128 * 1024,
   }),
   lstatFn = lstat,
+  mkdirFn = mkdir,
+  readFileFn = readFile,
   readlinkFn = readlink,
+  renameFn = rename,
+  rmFn = rm,
+  writeFileFn = writeFile,
 } = {}) {
   if (!identityManager || typeof identityManager.inspect !== 'function'
-    || typeof run !== 'function' || typeof lstatFn !== 'function' || typeof readlinkFn !== 'function') {
+    || typeof run !== 'function' || typeof lstatFn !== 'function'
+    || typeof mkdirFn !== 'function' || typeof readFileFn !== 'function' || typeof readlinkFn !== 'function'
+    || typeof renameFn !== 'function' || typeof rmFn !== 'function' || typeof writeFileFn !== 'function') {
     throw new PhpSiteContainerManagerError('php_site_container_dependencies_invalid', 'PHP Website container dependencies are invalid');
+  }
+
+  function migrationReceiptPath(operationId) {
+    return path.posix.join(migrationReceiptRoot, `${operationId}.json`);
+  }
+
+  async function atomicWrite(targetPath, content, mode) {
+    const temporaryPath = `${targetPath}.${process.pid}.tmp`;
+    await rmFn(temporaryPath, { force: true }).catch(() => {});
+    try {
+      await writeFileFn(temporaryPath, content, { encoding: 'utf8', mode });
+      await renameFn(temporaryPath, targetPath);
+    } finally {
+      await rmFn(temporaryPath, { force: true }).catch(() => {});
+    }
+  }
+
+  async function loadMigrationReceipt(operationId, spec) {
+    let raw;
+    try { raw = await readFileFn(migrationReceiptPath(operationId), 'utf8'); }
+    catch (error) {
+      if (missing(error)) return null;
+      throw new PhpSiteContainerManagerError('php_site_container_migration_receipt_unavailable', 'PHP container migration receipt could not be read');
+    }
+    try { return normalizeMigrationReceipt(JSON.parse(raw), { operationId, spec }); }
+    catch (error) {
+      if (error instanceof PhpSiteContainerManagerError) throw error;
+      throw new PhpSiteContainerManagerError('php_site_container_migration_receipt_invalid', 'PHP container migration receipt is invalid');
+    }
+  }
+
+  async function persistMigrationReceipt(operationId, spec, value) {
+    await mkdirFn(migrationReceiptRoot, { recursive: true, mode: 0o700 });
+    const receipt = {
+      version: MIGRATION_RECEIPT_VERSION,
+      operationId,
+      websiteId: spec.websiteId,
+      applicationId: spec.applicationId,
+      releaseId: spec.releaseId,
+      unixUser: spec.unixUser,
+      specDigest: migrationSpecDigest(spec),
+      previous: value.previous,
+      state: value.state,
+    };
+    await atomicWrite(migrationReceiptPath(operationId), `${JSON.stringify(receipt)}\n`, 0o600);
+    return normalizeMigrationReceipt(receipt, { operationId, spec });
   }
 
   async function identityEvidence(spec) {
@@ -327,5 +446,7 @@ export function createPhpSiteContainerManager({
 export const phpSiteContainerManagerInternals = Object.freeze({
   normalizeIntent,
   modeOf,
-  paths: Object.freeze({ CHOWN_PATH, CHMOD_PATH }),
+  migrationSpecDigest,
+  normalizeMigrationReceipt,
+  paths: Object.freeze({ CHOWN_PATH, CHMOD_PATH, MIGRATION_RECEIPT_ROOT }),
 });
