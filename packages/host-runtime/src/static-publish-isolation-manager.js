@@ -17,6 +17,9 @@ const MIGRATION_RECEIPT_ROOT = '/var/lib/yunpanel/staging/static-control-migrati
 const MIGRATION_RECEIPT_VERSION = 1;
 const MIGRATION_RECEIPT_STATES = new Set(['prepared', 'active', 'compensated']);
 const MAX_RELEASE_PREVIEW_ENTRIES = 50_000;
+const MAX_RELEASE_RECEIPT_ACL_BYTES = 64 * 1024 * 1024;
+const RELEASE_MIGRATION_RECEIPT_ROOT = '/var/lib/yunpanel/staging/static-release-migrations';
+const RELEASE_MIGRATION_RECEIPT_VERSION = 1;
 
 export class StaticPublishIsolationError extends Error {
   constructor(code, message) {
@@ -51,6 +54,112 @@ function modeOf(stat) {
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function canonicalAcl(value) {
+  const lines = String(value ?? '').split(/\r?\n/)
+    .map((line) => line.trim().replace(/\s+#effective:[rwx-]{3}\s*$/, ''))
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
+  if (lines.some((line) => !/^(?:default:)?(?:user|group|mask|other):[^:]*:[rwx-]{3}$/.test(line))) {
+    throw new StaticPublishIsolationError('static_publish_acl_format_invalid', 'Static publish ACL contains an unsupported entry');
+  }
+  return `${[...new Set(lines)].sort().join('\n')}\n`;
+}
+
+function desiredReleaseAcl(previousAcl, type) {
+  const permission = type === 'directory' ? 'r-x' : 'r--';
+  const lines = canonicalAcl(previousAcl).trim().split('\n').filter(Boolean);
+  const retained = lines.filter((line) => !line.startsWith('user:www-data:') && !line.startsWith('mask::'));
+  retained.push(`user:www-data:${permission}`, `mask::${permission}`);
+  return `${[...new Set(retained)].sort().join('\n')}\n`;
+}
+
+function relativeReleasePath(value) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 4096
+    || value.includes('\0') || path.posix.isAbsolute(value)
+    || path.posix.normalize(value) !== value || value.split('/').includes('..')) {
+    throw new StaticPublishIsolationError('static_publish_release_receipt_invalid', 'Static release receipt path is invalid');
+  }
+  const [releaseId] = value.split('/');
+  if (!UUID_PATTERN.test(releaseId)) {
+    throw new StaticPublishIsolationError('static_publish_release_receipt_invalid', 'Static release receipt path is outside a managed release');
+  }
+  return value;
+}
+
+function releaseSnapshotDigest(entries) {
+  return sha256(JSON.stringify(entries.map((entry) => ({
+    relativePath: entry.relativePath,
+    type: entry.type,
+    uid: entry.uid,
+    gid: entry.gid,
+    mode: entry.mode,
+    aclSha256: sha256(entry.acl),
+  }))));
+}
+
+function normalizeReleaseReceiptEntry(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || !['file', 'directory'].includes(value.type)
+    || !Number.isSafeInteger(value.uid) || value.uid < 0
+    || !Number.isSafeInteger(value.gid) || value.gid < 0
+    || !Number.isSafeInteger(value.mode) || value.mode < 0 || value.mode > 0o777
+    || typeof value.acl !== 'string' || Buffer.byteLength(value.acl, 'utf8') > 65_536
+    || typeof value.desiredAcl !== 'string' || Buffer.byteLength(value.desiredAcl, 'utf8') > 65_536) {
+    throw new StaticPublishIsolationError('static_publish_release_receipt_invalid', 'Static release receipt entry is invalid');
+  }
+  const relativePath = relativeReleasePath(value.relativePath);
+  const acl = canonicalAcl(value.acl);
+  const desiredAcl = canonicalAcl(value.desiredAcl);
+  if (acl !== value.acl || desiredAcl !== value.desiredAcl
+    || desiredAcl !== desiredReleaseAcl(acl, value.type)) {
+    throw new StaticPublishIsolationError('static_publish_release_receipt_invalid', 'Static release receipt ACL is invalid');
+  }
+  return Object.freeze({
+    relativePath,
+    type: value.type,
+    uid: value.uid,
+    gid: value.gid,
+    mode: value.mode,
+    acl,
+    desiredAcl,
+  });
+}
+
+function normalizeReleaseMigrationReceipt(value, { operationId, spec } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== RELEASE_MIGRATION_RECEIPT_VERSION
+    || value.operationId !== operationId
+    || value.websiteId !== spec.websiteId
+    || value.applicationId !== spec.applicationId
+    || value.specDigest !== migrationSpecDigest(spec)
+    || !MIGRATION_RECEIPT_STATES.has(value.state)
+    || !Number.isSafeInteger(value.desiredUid) || value.desiredUid < 1
+    || !Number.isSafeInteger(value.desiredGid) || value.desiredGid < 1
+    || typeof value.currentTarget !== 'string' || releaseIdFromTarget(value.currentTarget) === null
+    || typeof value.treeSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.treeSha256)
+    || !Array.isArray(value.entries) || value.entries.length < 1 || value.entries.length > MAX_RELEASE_PREVIEW_ENTRIES) {
+    throw new StaticPublishIsolationError('static_publish_release_receipt_invalid', 'Static release migration receipt is invalid');
+  }
+  const entries = value.entries.map(normalizeReleaseReceiptEntry);
+  if (new Set(entries.map((entry) => entry.relativePath)).size !== entries.length
+    || releaseSnapshotDigest(entries) !== value.treeSha256
+    || entries.reduce((total, entry) => total + Buffer.byteLength(entry.acl, 'utf8'), 0) > MAX_RELEASE_RECEIPT_ACL_BYTES) {
+    throw new StaticPublishIsolationError('static_publish_release_receipt_invalid', 'Static release migration receipt topology is invalid');
+  }
+  return Object.freeze({
+    version: RELEASE_MIGRATION_RECEIPT_VERSION,
+    operationId,
+    websiteId: spec.websiteId,
+    applicationId: spec.applicationId,
+    specDigest: value.specDigest,
+    desiredUid: value.desiredUid,
+    desiredGid: value.desiredGid,
+    currentTarget: value.currentTarget,
+    treeSha256: value.treeSha256,
+    entries: Object.freeze(entries),
+    state: value.state,
+  });
 }
 
 function normalizeOperationId(value) {
@@ -129,6 +238,7 @@ function releaseIdFromTarget(value) {
 
 export function createStaticPublishIsolationManager({
   migrationReceiptRoot = MIGRATION_RECEIPT_ROOT,
+  releaseMigrationReceiptRoot = RELEASE_MIGRATION_RECEIPT_ROOT,
   identityManager = createWebsiteIdentityPathManager(),
   run = (file, args, options = {}) => execFileAsync(file, args, {
     encoding: 'utf8',
@@ -200,6 +310,43 @@ export function createStaticPublishIsolationManager({
     };
     await atomicWrite(migrationReceiptPath(operationId), `${JSON.stringify(receipt)}\n`, 0o600);
     return normalizeMigrationReceipt(receipt, { operationId, spec });
+  }
+
+  function releaseMigrationReceiptPath(operationId) {
+    return path.posix.join(releaseMigrationReceiptRoot, `${operationId}.json`);
+  }
+
+  async function loadReleaseMigrationReceipt(operationId, spec) {
+    let raw;
+    try { raw = await readFileFn(releaseMigrationReceiptPath(operationId), 'utf8'); }
+    catch (error) {
+      if (missing(error)) return null;
+      throw new StaticPublishIsolationError('static_publish_release_receipt_unavailable', 'Static release migration receipt could not be read');
+    }
+    try { return normalizeReleaseMigrationReceipt(JSON.parse(raw), { operationId, spec }); }
+    catch (error) {
+      if (error instanceof StaticPublishIsolationError) throw error;
+      throw new StaticPublishIsolationError('static_publish_release_receipt_invalid', 'Static release migration receipt is invalid');
+    }
+  }
+
+  async function persistReleaseMigrationReceipt(operationId, spec, value) {
+    await mkdirFn(releaseMigrationReceiptRoot, { recursive: true, mode: 0o700 });
+    const receipt = {
+      version: RELEASE_MIGRATION_RECEIPT_VERSION,
+      operationId,
+      websiteId: spec.websiteId,
+      applicationId: spec.applicationId,
+      specDigest: migrationSpecDigest(spec),
+      desiredUid: value.desiredUid,
+      desiredGid: value.desiredGid,
+      currentTarget: value.currentTarget,
+      treeSha256: value.treeSha256,
+      entries: value.entries,
+      state: value.state,
+    };
+    await atomicWrite(releaseMigrationReceiptPath(operationId), `${JSON.stringify(receipt)}\n`, 0o600);
+    return normalizeReleaseMigrationReceipt(receipt, { operationId, spec });
   }
 
   async function inspectIdentity(spec) {
@@ -300,60 +447,73 @@ export function createStaticPublishIsolationManager({
     });
   }
 
-  async function releaseTreeSummary(spec, identity) {
+  async function collectReleaseRepairSnapshot(spec, identity) {
     const releases = await releaseDirectories(spec);
     if (releases.length < 1) {
-      return Object.freeze({
-        releases: Object.freeze([]),
-        tree: null,
-        differences: Object.freeze(['static_publish_release_missing']),
-      });
+      return Object.freeze({ releases: Object.freeze([]), entries: Object.freeze([]) });
     }
-
-    const digestEntries = [];
-    let ownershipModeDriftCount = 0;
-    let aclDriftCount = 0;
+    const entries = [];
+    let aclBytes = 0;
     for (const release of releases) {
       await walk(release, async (entryPath, info, type) => {
-        if (digestEntries.length >= MAX_RELEASE_PREVIEW_ENTRIES) {
+        if (entries.length >= MAX_RELEASE_PREVIEW_ENTRIES) {
           throw new StaticPublishIsolationError(
             'static_publish_release_preview_too_large',
             'Static publish release tree exceeds the bounded migration preview limit',
           );
         }
-        const relativePath = path.posix.relative(spec.releasesRoot, entryPath);
-        if (!relativePath || path.posix.isAbsolute(relativePath)
-          || relativePath.split('/').includes('..')) {
+        const relativePath = relativeReleasePath(path.posix.relative(spec.releasesRoot, entryPath));
+        const rawAcl = await getAcl(entryPath);
+        const acl = canonicalAcl(rawAcl);
+        aclBytes += Buffer.byteLength(acl, 'utf8');
+        if (aclBytes > MAX_RELEASE_RECEIPT_ACL_BYTES) {
           throw new StaticPublishIsolationError(
-            'static_publish_release_preview_escape',
-            'Static publish release preview escaped the managed release root',
+            'static_publish_release_preview_too_large',
+            'Static publish release ACL snapshot exceeds the bounded migration preview limit',
           );
         }
-        const expectedMode = type === 'directory' ? 0o750 : 0o640;
-        const expectedAcl = type === 'directory' ? 'user:www-data:r-x' : 'user:www-data:r--';
-        const acl = await getAcl(entryPath);
-        const ownershipModeSatisfied = info.uid === identity.uid
-          && info.gid === identity.gid
-          && modeOf(info) === expectedMode;
-        const aclSatisfied = aclHas(acl, expectedAcl);
-        if (!ownershipModeSatisfied) ownershipModeDriftCount += 1;
-        if (!aclSatisfied) aclDriftCount += 1;
-        digestEntries.push(Object.freeze({
+        entries.push(Object.freeze({
           relativePath,
           type,
           uid: info.uid,
           gid: info.gid,
-          mode: modeOf(info).toString(8).padStart(4, '0'),
-          aclSha256: sha256(acl),
+          mode: modeOf(info),
+          acl,
+          desiredAcl: desiredReleaseAcl(acl, type),
         }));
       });
     }
-    digestEntries.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+    entries.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
     return Object.freeze({
       releases: Object.freeze(releases.map((release) => path.posix.basename(release))),
+      entries: Object.freeze(entries),
+    });
+  }
+
+  async function releaseTreeSummary(spec, identity) {
+    const snapshot = await collectReleaseRepairSnapshot(spec, identity);
+    if (snapshot.entries.length < 1) {
+      return Object.freeze({
+        releases: snapshot.releases,
+        tree: null,
+        differences: Object.freeze(['static_publish_release_missing']),
+      });
+    }
+    let ownershipModeDriftCount = 0;
+    let aclDriftCount = 0;
+    for (const entry of snapshot.entries) {
+      const expectedMode = entry.type === 'directory' ? 0o750 : 0o640;
+      const expectedAcl = entry.type === 'directory' ? 'user:www-data:r-x' : 'user:www-data:r--';
+      if (entry.uid !== identity.uid || entry.gid !== identity.gid || entry.mode !== expectedMode) {
+        ownershipModeDriftCount += 1;
+      }
+      if (!aclHas(entry.acl, expectedAcl)) aclDriftCount += 1;
+    }
+    return Object.freeze({
+      releases: snapshot.releases,
       tree: Object.freeze({
-        sha256: sha256(JSON.stringify(digestEntries)),
-        entryCount: digestEntries.length,
+        sha256: releaseSnapshotDigest(snapshot.entries),
+        entryCount: snapshot.entries.length,
         ownershipModeDriftCount,
         aclDriftCount,
       }),
@@ -1013,8 +1173,13 @@ export const staticPublishIsolationInternals = Object.freeze({
   modeOf,
   migrationSpecDigest,
   normalizeMigrationReceipt,
+  canonicalAcl,
+  desiredReleaseAcl,
+  releaseSnapshotDigest,
+  normalizeReleaseMigrationReceipt,
   aclPackage: ACL_PACKAGE,
   migrationReceiptVersion: MIGRATION_RECEIPT_VERSION,
   maxReleasePreviewEntries: MAX_RELEASE_PREVIEW_ENTRIES,
-  paths: Object.freeze({ MIGRATION_RECEIPT_ROOT }),
+  maxReleaseReceiptAclBytes: MAX_RELEASE_RECEIPT_ACL_BYTES,
+  paths: Object.freeze({ MIGRATION_RECEIPT_ROOT, RELEASE_MIGRATION_RECEIPT_ROOT }),
 });
