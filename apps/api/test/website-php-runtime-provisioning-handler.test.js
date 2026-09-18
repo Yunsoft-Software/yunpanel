@@ -185,6 +185,10 @@ test('PHP runtime migration preview combines container, FPM and UMask evidence w
   assert.equal(preview.satisfied, false);
   assert.equal(preview.current.container, containerPreview);
   assert.equal(preview.current.fpm, fpmPreview);
+  assert.deepEqual(preview.current.fpmRuntime, {
+    satisfied: false,
+    reason: 'php_fpm_runtime_not_ready',
+  });
   assert.deepEqual(preview.current.umask, {
     satisfied: false,
     reason: 'service_umask_not_effective',
@@ -193,6 +197,7 @@ test('PHP runtime migration preview combines container, FPM and UMask evidence w
   assert.deepEqual(preview.differences, [
     'php_site_container_control_plane_drift',
     'php_fpm_pool_missing',
+    'php_fpm_runtime_not_ready',
     'php_runtime_umask_not_ready',
   ]);
   assert.deepEqual(calls.map((entry) => Array.isArray(entry) ? entry[0] : entry), [
@@ -372,4 +377,67 @@ test('PHP runtime migration compensation delegates only receipt-owned FPM pool r
   await handler.compensateMigration({ intent: intent(), operationId });
 
   assert.deepEqual(calls.map(([name]) => name), ['fpm-compensation-inspect', 'fpm-compensate']);
+});
+
+
+test('PHP container metadata migration uses source release identity and isolated receipt lifecycle only', async () => {
+  const calls = [];
+  const handler = createWebsitePhpRuntimeProvisioningHandler({
+    containerManager: {
+      async apply() { throw new Error('unexpected normal container apply'); },
+      async inspect() { return { satisfied: false }; },
+      async previewMigration(value, options) {
+        calls.push(['container-preview', value, options]);
+        return {
+          version: 1,
+          adapter: 'php-container',
+          satisfied: false,
+          safeMigrationCandidate: true,
+          current: {},
+          desired: {},
+          differences: ['php_site_container_control_plane_drift'],
+        };
+      },
+      async inspectMigrationOperation(value, options) {
+        calls.push(['container-migration-inspect', value, options]);
+        return { satisfied: true, phpContainerReceiptVersion: 1, migratedPhpContainer: true };
+      },
+      async applyMigration(value, options) {
+        calls.push(['container-migration-apply', value, options]);
+        return { satisfied: true, phpContainerReceiptVersion: 1, migratedPhpContainer: true };
+      },
+      async inspectMigrationCompensation(value, options) {
+        calls.push(['container-migration-compensation-inspect', value, options]);
+        return { satisfied: true, restoredPhpContainerMetadata: true };
+      },
+      async compensateMigration(value, options) {
+        calls.push(['container-migration-compensate', value, options]);
+        return { satisfied: true, restoredPhpContainerMetadata: true };
+      },
+    },
+    fpmManager: {
+      async apply() { throw new Error('unexpected FPM apply'); },
+      async inspect() { return { satisfied: true, adapter: 'php-fpm' }; },
+      async previewMigration() {
+        return { version: 1, adapter: 'php-fpm', satisfied: false, safeCreateCandidate: false, current: {}, desired: {}, differences: ['php_fpm_receipt_missing'] };
+      },
+      async compensate() { throw new Error('unexpected FPM compensation'); },
+      async inspectCompensation() { throw new Error('unexpected FPM compensation inspection'); },
+    },
+    umaskManager: umaskManager(),
+  });
+
+  const preview = await handler.previewMigration({ intent: intent(), operationId, releaseOperationId });
+  assert.equal(preview.safeContainerMigrationCandidate, true);
+  const applied = await handler.applyContainerMigration({ intent: intent(), operationId, releaseOperationId });
+  assert.equal(applied.phpContainerReceiptVersion, 1);
+  assert.equal(applied.migratedPhpContainer, true);
+  const applyCall = calls.find(([name]) => name === 'container-migration-apply');
+  assert.equal(applyCall[2].operationId, releaseOperationId);
+  assert.equal(applyCall[2].migrationOperationId, operationId);
+
+  const inspectedRollback = await handler.inspectContainerMigrationCompensation({ intent: intent(), operationId, releaseOperationId });
+  assert.equal(inspectedRollback.restoredPhpContainerMetadata, true);
+  await handler.compensateContainerMigration({ intent: intent(), operationId, releaseOperationId });
+  assert.equal(calls.some(([name]) => name === 'container-migration-compensate'), true);
 });
