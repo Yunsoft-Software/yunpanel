@@ -14,10 +14,13 @@ function actionCopy(selection) {
   if (!selection) return null;
   const label = selection.service.label ?? selection.service.id;
   if (selection.kind === 'install') {
+    const unitless = Array.isArray(selection.service.units) && selection.service.units.length === 0;
     return {
       title: `${label} kurulsun mu?`,
-      message: `${label} paketleri APT üzerinden kurulacak, systemd servisi etkinleştirilecek ve başlatılacak.`,
-      confirmLabel: 'Kur ve başlat',
+      message: unitless
+        ? `${label} için allowlist paketleri APT üzerinden kurulacak; sabit application/config dosyaları doğrulanacak. Ayrı bir systemd servisi oluşturulmayacak.`
+        : `${label} paketleri APT üzerinden kurulacak, systemd servisi etkinleştirilecek ve başlatılacak.`,
+      confirmLabel: unitless ? 'Kur ve doğrula' : 'Kur ve başlat',
     };
   }
   if (selection.action === 'stop') {
