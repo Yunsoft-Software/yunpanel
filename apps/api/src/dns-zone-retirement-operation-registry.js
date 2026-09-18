@@ -158,6 +158,16 @@ function persistedOperation(value) {
     createdAt: timestamp(value.createdAt),
     updatedAt: timestamp(value.updatedAt),
   });
+  if (operation.result !== null
+    && (operation.result.snapshotDigest !== operation.snapshotDigest
+      || Date.parse(operation.result.retainUntil) - Date.parse(operation.result.deletedAt)
+        !== operation.snapshotRetentionDays * 24 * 60 * 60 * 1000)) {
+    throw new DnsZoneRetirementOperationRegistryError(
+      'dns_zone_retirement_operation_state_invalid',
+      'DNS zone retirement result does not match retained snapshot policy',
+      409,
+    );
+  }
   if (operation.status === 'deleted' && operation.result === null) {
     throw new DnsZoneRetirementOperationRegistryError(
       'dns_zone_retirement_operation_state_invalid',
