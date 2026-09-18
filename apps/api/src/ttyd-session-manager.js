@@ -184,7 +184,9 @@ export function createTtydSessionManager({
         mode: 0o2770,
       });
       const created = await lstatFn(SOCKET_ROOT);
-      if (!created?.isDirectory?.() || created.isSymbolicLink?.()) {
+      if (!created?.isDirectory?.() || created.isSymbolicLink?.()
+        || created.uid !== 0 || created.gid !== identity.gid
+        || (Number(created.mode ?? 0) & 0o7777) !== 0o2770) {
         throw new TtydSessionError(
           'ttyd_socket_root_unsafe',
           'ttyd socket root is unsafe',
@@ -418,12 +420,16 @@ export function createTtydSessionManager({
     return publicSession(record);
   }
 
-  function authorize(sessionId, { ownerSessionId, userId } = {}) {
+  function authorize(sessionId, {
+    ownerSessionId,
+    userId,
+    markConnected = false,
+  } = {}) {
     if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) return null;
     const record = sessions.get(sessionId);
     if (!record || record.closed || record.exited || record.expiresAt <= now()) return null;
     if (record.ownerSessionId !== ownerSessionId || record.userId !== userId) return null;
-    if (record.connectedAt === null) {
+    if (markConnected && record.connectedAt === null) {
       record.connectedAt = now();
       if (record.startupTimer !== null) {
         clearTimer(record.startupTimer);
