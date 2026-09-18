@@ -299,6 +299,8 @@ export function createDnsZoneRetirementService({
     || !powerDnsSecretRegistry || typeof powerDnsSecretRegistry.materializeForServer !== 'function'
     || (provisioningRegistry !== null && typeof provisioningRegistry.listForDnsZone !== 'function')
     || !zoneManager || typeof zoneManager.getZone !== 'function'
+    || typeof zoneManager.inspectSnapshotDeletion !== 'function'
+    || typeof zoneManager.deleteSnapshot !== 'function'
     || typeof localServerId !== 'string' || !localServerId) {
     throw new DnsZoneRetirementError(
       'dns_zone_retirement_dependencies_invalid',
@@ -307,6 +309,26 @@ export function createDnsZoneRetirementService({
     );
   }
   const configuredRetentionPolicy = retentionPolicy(rawRetentionPolicy);
+
+  async function materializeSecret(serverId) {
+    let secret;
+    try { secret = await powerDnsSecretRegistry.materializeForServer(serverId); }
+    catch {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_secret_unavailable',
+        'PowerDNS credentials are unavailable',
+        503,
+      );
+    }
+    if (!secret || typeof secret.apiKey !== 'string' || !secret.apiKey) {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_secret_invalid',
+        'PowerDNS credentials are invalid',
+        503,
+      );
+    }
+    return secret;
+  }
 
   async function preview({ domainId } = {}) {
     const domain = localDomain(await domainRegistry.getDomain(domainId), localServerId);
@@ -347,22 +369,7 @@ export function createDnsZoneRetirementService({
 
     let authoritativeZone = null;
     if ((domain.parentDomainId ?? null) === null) {
-      let secret;
-      try { secret = await powerDnsSecretRegistry.materializeForServer(domain.serverId); }
-      catch {
-        throw new DnsZoneRetirementError(
-          'dns_zone_retirement_secret_unavailable',
-          'PowerDNS credentials are unavailable',
-          503,
-        );
-      }
-      if (!secret || typeof secret.apiKey !== 'string' || !secret.apiKey) {
-        throw new DnsZoneRetirementError(
-          'dns_zone_retirement_secret_invalid',
-          'PowerDNS credentials are invalid',
-          503,
-        );
-      }
+      const secret = await materializeSecret(domain.serverId);
       try { authoritativeZone = await zoneManager.getZone(domain.primaryDomain, secret.apiKey); }
       catch {
         throw new DnsZoneRetirementError(
@@ -401,7 +408,141 @@ export function createDnsZoneRetirementService({
     });
   }
 
-  return Object.freeze({ preview });
+  async function captureDeletionSnapshot({ domainId, previewDigest, confirmation } = {}) {
+    if (typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)
+      || typeof confirmation !== 'string' || !confirmation) {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_confirmation_invalid',
+        'A current DNS zone retirement preview digest and exact confirmation are required',
+        409,
+      );
+    }
+    const current = await preview({ domainId });
+    if (!current.zone.exists) {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_zone_absent',
+        'Authoritative PowerDNS zone is already absent',
+        409,
+      );
+    }
+    if (!current.retirementPlanReady || current.confirmation === null) {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_blocked',
+        'DNS zone retirement is blocked by current Domain or authoritative DNS state',
+        409,
+      );
+    }
+    if (current.previewDigest !== previewDigest || current.confirmation !== confirmation) {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_preview_stale',
+        'DNS zone retirement preview changed before snapshot capture',
+        409,
+      );
+    }
+
+    const domain = localDomain(await domainRegistry.getDomain(domainId), localServerId);
+    const secret = await materializeSecret(domain.serverId);
+    let authoritativeZone;
+    try { authoritativeZone = await zoneManager.getZone(domain.primaryDomain, secret.apiKey); }
+    catch {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_inspection_failed',
+        'Authoritative PowerDNS zone could not be inspected',
+        503,
+      );
+    }
+    if (!authoritativeZone) {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_preview_stale',
+        'Authoritative PowerDNS zone disappeared before snapshot capture',
+        409,
+      );
+    }
+    let snapshot;
+    try { snapshot = powerDnsZoneManagerInternals.zoneSnapshot(authoritativeZone); }
+    catch {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_zone_invalid',
+        'Authoritative PowerDNS zone state is invalid',
+        409,
+      );
+    }
+    const snapshotDigest = digest(snapshot);
+    if (snapshotDigest !== current.zone.snapshotDigest
+      || domain.desiredRevision !== current.domain.desiredRevision
+      || domain.primaryDomain !== current.domain.primaryDomain) {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_preview_stale',
+        'Authoritative DNS or Domain state changed before snapshot capture',
+        409,
+      );
+    }
+    return Object.freeze({
+      version: 1,
+      domainId: domain.id,
+      serverId: domain.serverId,
+      zoneName: domain.primaryDomain,
+      domainRevision: domain.desiredRevision,
+      previewDigest: current.previewDigest,
+      snapshotDigest,
+      ownershipEvidenceDigest: current.zone.ownershipOrigin.evidenceDigest,
+      snapshotRetentionDays: current.retention.snapshotRetentionDays,
+      snapshot,
+    });
+  }
+
+  async function inspectDeletion({ serverId, zoneName, snapshot } = {}) {
+    if (serverId !== localServerId) {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_local_server_required',
+        'DNS zone retirement is restricted to this panel host',
+        404,
+      );
+    }
+    const secret = await materializeSecret(serverId);
+    try {
+      return await zoneManager.inspectSnapshotDeletion({
+        zoneName,
+        apiKey: secret.apiKey,
+        snapshot,
+      });
+    } catch (error) {
+      if (typeof error?.code === 'string' && error.code.startsWith('powerdns_')) {
+        throw new DnsZoneRetirementError(error.code, error.message, error.status ?? 503);
+      }
+      throw error;
+    }
+  }
+
+  async function deleteCapturedSnapshot({ serverId, zoneName, snapshot } = {}) {
+    if (serverId !== localServerId) {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_local_server_required',
+        'DNS zone retirement is restricted to this panel host',
+        404,
+      );
+    }
+    const secret = await materializeSecret(serverId);
+    try {
+      return await zoneManager.deleteSnapshot({
+        zoneName,
+        apiKey: secret.apiKey,
+        snapshot,
+      });
+    } catch (error) {
+      if (typeof error?.code === 'string' && error.code.startsWith('powerdns_')) {
+        throw new DnsZoneRetirementError(error.code, error.message, error.status ?? 503);
+      }
+      throw error;
+    }
+  }
+
+  return Object.freeze({
+    preview,
+    captureDeletionSnapshot,
+    inspectDeletion,
+    deleteCapturedSnapshot,
+  });
 }
 
 export const dnsZoneRetirementInternals = Object.freeze({
