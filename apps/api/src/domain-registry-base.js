@@ -54,6 +54,8 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
     domain.suspensionOperationId = null;
     domain.suspendedAt = null;
     domain.suspendedChecksum = null;
+    domain.lastSuspensionOperationId = null;
+    domain.lastResumedAt = null;
   }
   const normalizedSettings = settings(domain.targetType, domain.nginxSettings);
   if (JSON.stringify(normalizedSettings) !== JSON.stringify(domain.nginxSettings)
@@ -84,6 +86,14 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
     || (domain.suspendedChecksum !== null
       && (typeof domain.suspendedChecksum !== 'string' || !SHA256_PATTERN.test(domain.suspendedChecksum))
     )
+    || (domain.lastSuspensionOperationId !== null
+      && (typeof domain.lastSuspensionOperationId !== 'string'
+        || !/^[A-Za-z0-9._:-]{1,128}$/.test(domain.lastSuspensionOperationId)))
+    || (domain.lastResumedAt !== null
+      && (typeof domain.lastResumedAt !== 'string'
+        || !Number.isFinite(Date.parse(domain.lastResumedAt))
+        || new Date(domain.lastResumedAt).toISOString() !== domain.lastResumedAt))
+    || ((domain.lastSuspensionOperationId === null) !== (domain.lastResumedAt === null))
     || (domain.state === 'suspended'
       && (domain.suspensionOperationId === null || domain.suspendedAt === null || domain.suspendedChecksum === null))
     || (domain.state !== 'suspended'
@@ -637,6 +647,7 @@ export function createDomainRegistry({
       state: 'draft', desiredRevision: 1, stagedRevision: 0, stagedChecksum: null, stagedConfigName: null,
       lastStagedAt: null, appliedRevision: 0, lastAppliedAt: null, lastError: null,
       suspensionOperationId: null, suspendedAt: null, suspendedChecksum: null,
+      lastSuspensionOperationId: null, lastResumedAt: null,
       createdAt: timestamp, updatedAt: timestamp,
     };
     const existing = state.domains.find((candidate) => candidate.id === normalizedDomainId) ?? null;
@@ -948,7 +959,14 @@ export function createDomainRegistry({
     if (domain.state === 'active'
       && domain.suspensionOperationId === null
       && domain.suspendedAt === null
-      && domain.suspendedChecksum === null) {
+      && domain.suspendedChecksum === null
+      && domain.lastSuspensionOperationId === expectedOperationId
+      && domain.desiredRevision === expectedRevision
+      && domain.stagedRevision === expectedRevision
+      && domain.appliedRevision === expectedRevision
+      && domain.stagedChecksum === expectedChecksum
+      && domain.appliedPrimaryDomain === domain.primaryDomain
+      && domain.lastError === null) {
       return publicDomain(domain);
     }
     if (domain.state !== 'suspended'
@@ -971,6 +989,8 @@ export function createDomainRegistry({
     domain.suspensionOperationId = null;
     domain.suspendedAt = null;
     domain.suspendedChecksum = null;
+    domain.lastSuspensionOperationId = expectedOperationId;
+    domain.lastResumedAt = timestamp;
     domain.lastAppliedAt = timestamp;
     domain.updatedAt = timestamp;
     await persist();
