@@ -63,6 +63,7 @@ test('ttyd HTTP gateway authorizes the path session and strips browser credentia
       url: request.url,
       cookie: request.headers.cookie,
       toolSession: request.headers['x-yunpanel-tool-session'],
+      transport: request.headers['x-yunpanel-tool-transport'],
       clientIp: request.headers['x-yunpanel-client-ip'],
       proxyToken: request.headers['x-yunpanel-proxy-token'],
     });
@@ -120,6 +121,7 @@ test('ttyd HTTP gateway authorizes the path session and strips browser credentia
         origin,
         'x-csrf-token': 'browser-csrf',
         'x-yunpanel-tool-session': 'browser-forged',
+        'x-yunpanel-tool-transport': 'websocket',
         'x-yunpanel-ttyd-auth': 'browser-forged',
       },
     },
@@ -130,6 +132,7 @@ test('ttyd HTTP gateway authorizes the path session and strips browser credentia
     url: '/api/ttyd-gateway-access',
     cookie: '__Host-yunpanel_session=owner',
     toolSession: sessionId,
+    transport: 'http',
     clientIp: '203.0.113.8',
     proxyToken,
   }]);
@@ -178,6 +181,7 @@ test('ttyd WebSocket gateway authenticates before upgrading the same private ses
     apiCalls.push({
       url: request.url,
       toolSession: request.headers['x-yunpanel-tool-session'],
+      transport: request.headers['x-yunpanel-tool-transport'],
       cookie: request.headers.cookie,
     });
     const ok = request.url === '/api/ttyd-gateway-access'
@@ -239,6 +243,7 @@ test('ttyd WebSocket gateway authenticates before upgrading the same private ses
         cookie: '__Host-yunpanel_session=owner',
         'x-real-ip': '203.0.113.8',
         'x-yunpanel-tool-session': 'browser-forged',
+        'x-yunpanel-tool-transport': 'http',
         'x-yunpanel-ttyd-auth': 'browser-forged',
       },
     },
@@ -251,6 +256,7 @@ test('ttyd WebSocket gateway authenticates before upgrading the same private ses
   assert.deepEqual(apiCalls, [{
     url: '/api/ttyd-gateway-access',
     toolSession: sessionId,
+    transport: 'websocket',
     cookie: '__Host-yunpanel_session=owner',
   }]);
   assert.deepEqual(upgradeHeaders, [{
