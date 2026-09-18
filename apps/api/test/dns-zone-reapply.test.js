@@ -157,6 +157,29 @@ test('DNS zone reapply preserves unrelated manual RRsets', async () => {
   assert.equal(preview.applyAllowed, true);
   assert.equal(preview.preservedManualRrsetCount, 1);
   assert.equal(preview.conflicts.length, 0);
+  assert.match(preview.sourceZoneDigest, /^[a-f0-9]{64}$/);
+});
+
+test('DNS zone reapply source digest changes when preserved manual RRset content changes', async () => {
+  const manual = (content) => Object.freeze({
+    name: 'custom.example.com.',
+    type: 'A',
+    ttl: 300,
+    records: Object.freeze([{ content, disabled: false }]),
+    comments: Object.freeze([]),
+    managed: null,
+  });
+  const first = await fixture({
+    zone: liveZone({ extraRrsets: [manual('198.51.100.55')] }),
+  }).service.preview({ domainId });
+  const second = await fixture({
+    zone: liveZone({ extraRrsets: [manual('198.51.100.56')] }),
+  }).service.preview({ domainId });
+
+  assert.notEqual(first.sourceZoneDigest, second.sourceZoneDigest);
+  assert.notEqual(first.previewDigest, second.previewDigest);
+  assert.equal(first.preservedManualRrsetCount, 1);
+  assert.equal(second.preservedManualRrsetCount, 1);
 });
 
 test('DNS zone reapply reports an explicit conflict instead of overwriting a manual RRset', async () => {
