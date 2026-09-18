@@ -24,15 +24,32 @@ function digest(value) {
 }
 
 function sourceZoneState(zone) {
-  if (!zone || typeof zone !== 'object' || !Array.isArray(zone.rrsets)) {
+  if (!zone || typeof zone !== 'object' || !Array.isArray(zone.rrsets)
+    || typeof zone.zoneName !== 'string' || !zone.zoneName || typeof zone.id !== 'string' || !zone.id) {
     throw new DnsZoneReapplyError('dns_zone_reapply_zone_invalid', 'Authoritative DNS zone state is invalid', 409);
   }
-  const rrsets = zone.rrsets
-    .map((rrset) => powerDnsZoneManagerInternals.rrsetState(rrset))
-    .sort((left, right) => powerDnsZoneManagerInternals.rrsetKey(left).localeCompare(
-      powerDnsZoneManagerInternals.rrsetKey(right),
-    ));
+  const rrsets = zone.rrsets.map((rrset) => Object.freeze({
+    name: String(rrset.name ?? '').toLowerCase(),
+    type: String(rrset.type ?? '').toUpperCase(),
+    ttl: Number.isSafeInteger(rrset.ttl) ? rrset.ttl : null,
+    records: Object.freeze((rrset.records ?? [])
+      .map((entry) => Object.freeze({ content: String(entry?.content ?? ''), disabled: entry?.disabled === true }))
+      .sort((left, right) => `${left.disabled ? '1' : '0'}\u0000${left.content}`.localeCompare(
+        `${right.disabled ? '1' : '0'}\u0000${right.content}`,
+      ))),
+    comments: Object.freeze((rrset.comments ?? [])
+      .map((entry) => Object.freeze({
+        account: String(entry?.account ?? ''),
+        content: String(entry?.content ?? ''),
+      }))
+      .sort((left, right) => `${left.account}\u0000${left.content}`.localeCompare(
+        `${right.account}\u0000${right.content}`,
+      ))),
+  })).sort((left, right) => powerDnsZoneManagerInternals.rrsetKey(left).localeCompare(
+    powerDnsZoneManagerInternals.rrsetKey(right),
+  ));
   return Object.freeze({
+    version: 1,
     zoneName: zone.zoneName,
     id: zone.id,
     kind: zone.kind ?? null,
@@ -392,6 +409,47 @@ export function createDnsZoneReapplyService({
     return buildPreview(domainId, retirePendingDkim);
   }
 
+  async function captureRollbackSnapshot({ domainId, sourceZoneDigest: expectedSourceZoneDigest } = {}) {
+    if (typeof expectedSourceZoneDigest !== 'string' || !SHA256_PATTERN.test(expectedSourceZoneDigest)) {
+      throw new DnsZoneReapplyError(
+        'dns_zone_reapply_source_digest_invalid',
+        'A current source-zone digest is required before rollback evidence can be captured',
+        409,
+      );
+    }
+    const domain = rootDomain(
+      await mapped(() => domainRegistry.getDomain(domainId), 'dns_zone_reapply_domain_unavailable', 'Domain state is unavailable'),
+      localServerId,
+    );
+    const secret = await mapped(
+      () => powerDnsSecretRegistry.materializeForServer(domain.serverId),
+      'dns_zone_reapply_secret_unavailable',
+      'PowerDNS credentials are unavailable',
+    );
+    const existing = await mapped(
+      () => zoneManager.getZone(domain.primaryDomain, secret.apiKey),
+      'dns_zone_reapply_inspection_failed',
+      'Authoritative DNS zone could not be inspected',
+    );
+    if (!existing) {
+      throw new DnsZoneReapplyError('dns_zone_reapply_zone_missing', 'Domain does not currently have a local authoritative PowerDNS zone', 409);
+    }
+    const snapshot = sourceZoneState(existing);
+    const snapshotDigest = digest(snapshot);
+    if (snapshotDigest !== expectedSourceZoneDigest) {
+      throw new DnsZoneReapplyError(
+        'dns_zone_reapply_preview_stale',
+        'Authoritative DNS zone changed before rollback evidence was journaled',
+        409,
+      );
+    }
+    return Object.freeze({
+      version: 1,
+      sourceZoneDigest: snapshotDigest,
+      snapshot,
+    });
+  }
+
   async function apply({ domainId, previewDigest, confirmation } = {}) {
     if (typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)) {
       throw new DnsZoneReapplyError('dns_zone_reapply_confirmation_invalid', 'A current DNS zone reapply preview digest is required', 409);
@@ -449,7 +507,7 @@ export function createDnsZoneReapplyService({
     });
   }
 
-  return Object.freeze({ preview, apply });
+  return Object.freeze({ preview, captureRollbackSnapshot, apply });
 }
 
 export const dnsZoneReapplyInternals = Object.freeze({
