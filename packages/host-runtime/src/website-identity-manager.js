@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -123,6 +123,7 @@ export function createWebsiteIdentityManager({
   lstatFn = lstat,
   mkdirFn = mkdir,
   readFileFn = readFile,
+  readdirFn = readdir,
   renameFn = rename,
   rmFn = rm,
   writeFileFn = writeFile,
@@ -130,7 +131,7 @@ export function createWebsiteIdentityManager({
   if (typeof homeRoot !== 'string' || !path.posix.isAbsolute(homeRoot)
     || typeof receiptRoot !== 'string' || !path.posix.isAbsolute(receiptRoot)
     || typeof run !== 'function' || typeof lstatFn !== 'function'
-    || typeof mkdirFn !== 'function' || typeof readFileFn !== 'function'
+    || typeof mkdirFn !== 'function' || typeof readFileFn !== 'function' || typeof readdirFn !== 'function'
     || typeof renameFn !== 'function' || typeof rmFn !== 'function'
     || typeof writeFileFn !== 'function') {
     throw new WebsiteIdentityManagerError('website_identity_dependencies_invalid', 'Website identity manager dependencies are invalid');
@@ -214,6 +215,26 @@ export function createWebsiteIdentityManager({
       throw new WebsiteIdentityManagerError('website_identity_home_drift', 'Website home path is not a managed directory');
     }
     return Object.freeze({ uid: stat.uid, gid: stat.gid, mode: modeOf(stat) });
+  }
+
+  async function homeEntryCount(intent) {
+    try {
+      const entries = await readdirFn(intent.homeDirectory);
+      if (!Array.isArray(entries)) {
+        throw new WebsiteIdentityManagerError(
+          'website_identity_home_inspection_failed',
+          'Website home directory contents could not be inspected',
+        );
+      }
+      return entries.length;
+    } catch (error) {
+      if (error instanceof WebsiteIdentityManagerError) throw error;
+      if (missingFileState(error)) return 0;
+      throw new WebsiteIdentityManagerError(
+        'website_identity_home_inspection_failed',
+        'Website home directory contents could not be inspected',
+      );
+    }
   }
 
   async function previewMigration(rawIntent) {
@@ -522,13 +543,15 @@ export function createWebsiteIdentityManager({
       throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because home ownership has drifted');
     }
 
-    const satisfied = !account && !group && !home;
+    const preservedHomeData = Boolean(!account && !group && home && await homeEntryCount(intent) > 0);
+    const satisfied = !account && !group && (!home || preservedHomeData);
     return Object.freeze({
       satisfied,
       ...(satisfied ? {} : { reason: 'website_identity_compensation_pending' }),
       removedUser: !account,
       removedGroup: !group,
       removedHome: !home,
+      ...(preservedHomeData ? { preservedHomeData: true } : {}),
       uid: receipt.uid,
       gid: receipt.gid,
       preservedExisting: false,
@@ -586,9 +609,11 @@ export function createWebsiteIdentityManager({
       if (home.uid !== receipt.uid || home.gid !== receipt.gid) {
         throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because home ownership has drifted');
       }
-      try { await rmFn(intent.homeDirectory, { recursive: true, force: true }); }
-      catch {
-        throw new WebsiteIdentityManagerError('website_identity_compensation_home_failed', 'Website home directory could not be removed');
+      try { await rmFn(intent.homeDirectory, { recursive: false, force: false }); }
+      catch (error) {
+        if (!['ENOTEMPTY', 'EEXIST'].includes(error?.code)) {
+          throw new WebsiteIdentityManagerError('website_identity_compensation_home_failed', 'Website home directory could not be removed safely');
+        }
       }
     }
 
