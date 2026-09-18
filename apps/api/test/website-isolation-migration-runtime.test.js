@@ -172,6 +172,93 @@ function identityManager() {
   };
 }
 
+function sftpPreview(overrides = {}) {
+  const desired = {
+    websiteId,
+    applicationId,
+    unixUser: applicationUser,
+    sourceDirectory: homeDirectory,
+    chrootRoot: '/var/lib/yunpanel/sftp-chroots',
+    chrootDirectory: `/var/lib/yunpanel/sftp-chroots/${applicationId}`,
+    mountDirectory: `/var/lib/yunpanel/sftp-chroots/${applicationId}/site`,
+    sshdConfigPath: `/etc/ssh/sshd_config.d/90-yunpanel-sftp-${applicationUser}.conf`,
+    unitName: 'yunpanel-test.mount',
+    sshdSha256: 'b'.repeat(64),
+    mountSha256: 'c'.repeat(64),
+    directoryMode: '0755',
+    directoryUid: 0,
+    directoryGid: 0,
+  };
+  return preview({
+    ...overrides,
+    migration: {
+      applyAvailable: true,
+      previewDigest,
+      confirmation,
+      changes: [{
+        action: 'create_sftp_isolation',
+        applyState: 'requires_explicit_apply',
+        current: {
+          sftpMigrationPreview: {
+            version: 1,
+            satisfied: false,
+            safeCreateCandidate: true,
+            current: {},
+            desired,
+            differences: ['sftp_receipt_missing'],
+          },
+        },
+        desired: { sftp: desired },
+      }],
+    },
+  });
+}
+
+function sftpMigrationHandler() {
+  let active = false;
+  let compensated = false;
+  const calls = [];
+  return {
+    calls,
+    async inspectMigrationOperation(context) {
+      calls.push(['inspect-sftp-operation', context]);
+      return active
+        ? {
+          satisfied: true,
+          sftpReceiptVersion: 1,
+          activatedSftpIsolation: true,
+          authorizedKeyCount: 1,
+          authorizedKeysSha256: 'd'.repeat(64),
+        }
+        : { satisfied: false, reason: 'sftp_site_not_active' };
+    },
+    async applyMigration(context) {
+      calls.push(['apply-sftp', context]);
+      active = true;
+      compensated = false;
+      return {
+        satisfied: true,
+        sftpReceiptVersion: 1,
+        activatedSftpIsolation: true,
+        authorizedKeyCount: 1,
+        authorizedKeysSha256: 'd'.repeat(64),
+      };
+    },
+    async inspectMigrationCompensation(context) {
+      calls.push(['inspect-sftp-compensation', context]);
+      return compensated
+        ? { satisfied: true, removedSftpIsolation: true }
+        : { satisfied: false, reason: 'sftp_compensation_pending' };
+    },
+    async compensateMigration(context) {
+      calls.push(['compensate-sftp', context]);
+      active = false;
+      compensated = true;
+      return { satisfied: true, removedSftpIsolation: true };
+    },
+  };
+}
+
 test('workspace isolation migration journals before exact apply and returns receipt evidence', async () => {
   const store = registry();
   const workspace = manager();
@@ -406,4 +493,78 @@ test('Unix identity typed rollback preserves nonempty HOME evidence', async () =
     preservedHomeData: true,
   });
   assert.equal(manager.calls.some(([name]) => name === 'compensate-identity'), true);
+});
+
+
+test('SFTP isolation migration journals typed operation and applies through key-aware migration handler', async () => {
+  const handler = sftpMigrationHandler();
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: registry(),
+    auditService: { audit: async () => sftpPreview() },
+    workspaceManager: identityManager(),
+    migrationHandlers: { sftp: handler },
+  });
+  await runtime.init();
+
+  const result = await runtime.start({ websiteId, previewDigest, confirmation });
+
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.adapter, 'sftp');
+  assert.deepEqual(result.targets, []);
+  assert.deepEqual(result.result, {
+    satisfied: true,
+    sftpReceiptVersion: 1,
+    activatedSftpIsolation: true,
+    authorizedKeyCount: 1,
+    authorizedKeysSha256: 'd'.repeat(64),
+  });
+  assert.deepEqual(handler.calls.map(([name]) => name), ['inspect-sftp-operation', 'apply-sftp']);
+});
+
+test('SFTP isolation restart closes completed receipt without replaying SFTP apply', async () => {
+  const store = registry();
+  await store.init();
+  const created = await store.create(sftpPreview());
+  await store.markApplying(created.id);
+  const handler = sftpMigrationHandler();
+  await handler.applyMigration({ operationId, websiteId, intent: {
+    adapter: 'openssh-internal-sftp',
+    websiteId,
+    applicationId,
+    unixUser: applicationUser,
+  } });
+  handler.calls.length = 0;
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: store,
+    auditService: { audit: async () => sftpPreview() },
+    workspaceManager: identityManager(),
+    migrationHandlers: { sftp: handler },
+  });
+
+  const recovery = await runtime.init();
+
+  assert.deepEqual(recovery, [{ operationId, recovered: true }]);
+  assert.equal((await runtime.get(operationId)).status, 'succeeded');
+  assert.deepEqual(handler.calls.map(([name]) => name), ['inspect-sftp-operation']);
+});
+
+test('SFTP isolation typed rollback uses only migration compensation handler', async () => {
+  const handler = sftpMigrationHandler();
+  const runtime = createWebsiteIsolationMigrationRuntime({
+    registry: registry(),
+    auditService: { audit: async () => sftpPreview() },
+    workspaceManager: identityManager(),
+    migrationHandlers: { sftp: handler },
+  });
+  await runtime.init();
+  await runtime.start({ websiteId, previewDigest, confirmation });
+
+  const result = await runtime.rollback({
+    operationId,
+    confirmation: `rollback-isolation-migration:${operationId}:${previewDigest}`,
+  });
+
+  assert.equal(result.status, 'compensated');
+  assert.deepEqual(result.compensation, { satisfied: true, removedSftpIsolation: true });
+  assert.equal(handler.calls.some(([name]) => name === 'compensate-sftp'), true);
 });
