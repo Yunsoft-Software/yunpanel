@@ -255,6 +255,35 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
       .map(publicOperation));
   }
 
+  async function listForDnsZone({ serverId, webDomainId, zoneName } = {}) {
+    await ensureInitialized();
+    for (const [field, value] of Object.entries({ serverId, webDomainId, zoneName })) {
+      if (typeof value !== 'string' || value.length < 1 || value.length > 253
+        || /[\u0000-\u001f\u007f]/.test(value)) {
+        throw new WebsiteProvisioningRegistryError(
+          'website_provisioning_dns_zone_scope_invalid',
+          `${field} is invalid`,
+          400,
+        );
+      }
+    }
+    return Object.freeze(state.operations
+      .filter((operation) => operation.steps.some((step) => (
+        step.kind === 'dns_zone'
+        && step.intent?.serverId === serverId
+        && step.intent?.webDomainId === webDomainId
+        && step.intent?.zoneName === zoneName
+      )))
+      .sort((left, right) => {
+        const byUpdatedAt = right.updatedAt.localeCompare(left.updatedAt);
+        if (byUpdatedAt !== 0) return byUpdatedAt;
+        const byCreatedAt = right.createdAt.localeCompare(left.createdAt);
+        if (byCreatedAt !== 0) return byCreatedAt;
+        return right.operationId.localeCompare(left.operationId);
+      })
+      .map(publicOperation));
+  }
+
   async function beginStep({ operationId, stepId } = {}) {
     await ensureInitialized();
     const operation = requireOperation(operationId);
@@ -403,6 +432,7 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
     get,
     getLatestForWebsite,
     listForWebsite,
+    listForDnsZone,
     beginStep,
     completeStep,
     blockStep,
