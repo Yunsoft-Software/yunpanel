@@ -330,9 +330,28 @@ test('Website delete finalization removes binding only after exact successful DR
     expectedRevision: 7,
     confirmation: `unbind-database:${bindingId}:7`,
   }]]);
+  assert.equal(response.payload.data.alreadyFinalized, false);
   assert.equal(response.payload.data.finalizedFromJobId, deleteJobId);
   assert.equal(response.payload.data.backupId, backupId);
   assert.equal(response.payload.data.backupSha256, dumpSha256);
+});
+
+test('Website delete finalization is idempotent after binding removal if successful DROP evidence still matches', async () => {
+  const fx = fixture({ currentBinding: null, inventoryDatabases: [] });
+  const response = await invoke(fx.finalize, {
+    body: {
+      expectedBindingRevision: 7,
+      deleteJobId,
+      confirmation: `finalize-website-database-delete:${bindingId}:7:${deleteJobId}`,
+    },
+  });
+
+  assert.equal(response.error, null);
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.data.unbound, true);
+  assert.equal(response.payload.data.alreadyFinalized, true);
+  assert.equal(response.payload.data.finalizedFromJobId, deleteJobId);
+  assert.equal(fx.unbound.length, 0);
 });
 
 test('Website delete finalization fails closed when schema, credential or job ownership evidence is inconsistent', async () => {
