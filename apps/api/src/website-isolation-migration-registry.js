@@ -70,11 +70,11 @@ function intent(value) {
   const targets = value.targets.map(target);
   const adapter = value.adapter ?? (targets.length === 0 ? 'identity' : 'workspace');
   const sourceOperationId = value.sourceOperationId === undefined ? null : uuid(value.sourceOperationId, 'sourceOperationId');
-  if (!['workspace', 'identity', 'sftp', 'php', 'php_container'].includes(adapter)
+  if (!['workspace', 'identity', 'sftp', 'php', 'php_container', 'static_control'].includes(adapter)
     || (adapter === 'workspace' && targets.length < 1)
     || (adapter !== 'workspace' && targets.length !== 0)
-    || (['php', 'php_container'].includes(adapter) && sourceOperationId === null)
-    || (!['php', 'php_container'].includes(adapter) && sourceOperationId !== null)) {
+    || (['php', 'php_container', 'static_control'].includes(adapter) && sourceOperationId === null)
+    || (!['php', 'php_container', 'static_control'].includes(adapter) && sourceOperationId !== null)) {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', 'Website isolation migration adapter is invalid');
   }
   if (new Set(targets.map((entry) => entry.name)).size !== targets.length) {
@@ -135,6 +135,9 @@ function evidence(value, field) {
     'phpContainerReceiptVersion',
     'migratedPhpContainer',
     'restoredPhpContainerMetadata',
+    'staticControlReceiptVersion',
+    'migratedStaticControlMetadata',
+    'restoredStaticControlMetadata',
     'restoredPrevious',
     'preservedExisting',
   ]);
@@ -146,6 +149,7 @@ function evidence(value, field) {
     || (value.sftpReceiptVersion !== undefined && value.sftpReceiptVersion !== 1)
     || (value.phpFpmReceiptVersion !== undefined && value.phpFpmReceiptVersion !== 1)
     || (value.phpContainerReceiptVersion !== undefined && value.phpContainerReceiptVersion !== 1)
+    || (value.staticControlReceiptVersion !== undefined && value.staticControlReceiptVersion !== 1)
     || (value.authorizedKeyCount !== undefined
       && (!Number.isSafeInteger(value.authorizedKeyCount) || value.authorizedKeyCount < 0 || value.authorizedKeyCount > 100))
     || (value.authorizedKeysSha256 !== undefined
@@ -154,7 +158,7 @@ function evidence(value, field) {
       && (!Number.isSafeInteger(value.createdWorkspaceDirectories) || value.createdWorkspaceDirectories < 0 || value.createdWorkspaceDirectories > 2))
     || (value.removedWorkspaceDirectories !== undefined
       && (!Number.isSafeInteger(value.removedWorkspaceDirectories) || value.removedWorkspaceDirectories < 0 || value.removedWorkspaceDirectories > 2))
-    || ['createdUnixIdentity', 'removedUser', 'removedGroup', 'removedHome', 'preservedHomeData', 'activatedSftpIsolation', 'removedSftpIsolation', 'createdPhpFpmPool', 'migratedPhpContainer', 'restoredPhpContainerMetadata', 'restoredPrevious', 'preservedExisting']
+    || ['createdUnixIdentity', 'removedUser', 'removedGroup', 'removedHome', 'preservedHomeData', 'activatedSftpIsolation', 'removedSftpIsolation', 'createdPhpFpmPool', 'migratedPhpContainer', 'restoredPhpContainerMetadata', 'migratedStaticControlMetadata', 'restoredStaticControlMetadata', 'restoredPrevious', 'preservedExisting']
       .some((key) => value[key] !== undefined && typeof value[key] !== 'boolean')) {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_state_invalid', `${field} is invalid`);
   }
@@ -179,6 +183,9 @@ function evidence(value, field) {
     ...(value.phpContainerReceiptVersion === undefined ? {} : { phpContainerReceiptVersion: value.phpContainerReceiptVersion }),
     ...(value.migratedPhpContainer === undefined ? {} : { migratedPhpContainer: value.migratedPhpContainer }),
     ...(value.restoredPhpContainerMetadata === undefined ? {} : { restoredPhpContainerMetadata: value.restoredPhpContainerMetadata }),
+    ...(value.staticControlReceiptVersion === undefined ? {} : { staticControlReceiptVersion: value.staticControlReceiptVersion }),
+    ...(value.migratedStaticControlMetadata === undefined ? {} : { migratedStaticControlMetadata: value.migratedStaticControlMetadata }),
+    ...(value.restoredStaticControlMetadata === undefined ? {} : { restoredStaticControlMetadata: value.restoredStaticControlMetadata }),
     ...(value.restoredPrevious === undefined ? {} : { restoredPrevious: value.restoredPrevious }),
     ...(value.preservedExisting === undefined ? {} : { preservedExisting: value.preservedExisting }),
   });
@@ -239,11 +246,24 @@ function operationFromAudit(audit, now, idFactory) {
   const sftpCreate = change?.action === 'create_sftp_isolation';
   const phpCreate = change?.action === 'create_php_fpm_pool';
   const phpContainerRepair = change?.action === 'repair_php_container_metadata';
-  const sourceOperationId = phpCreate || phpContainerRepair ? uuid(change?.current?.operationId, 'sourceOperationId') : null;
-  const adapter = identityCreate ? 'identity' : sftpCreate ? 'sftp' : phpCreate ? 'php' : phpContainerRepair ? 'php_container' : 'workspace';
+  const staticControlRepair = change?.action === 'repair_static_control_metadata';
+  const sourceOperationId = phpCreate || phpContainerRepair || staticControlRepair
+    ? uuid(change?.current?.operationId, 'sourceOperationId')
+    : null;
+  const adapter = identityCreate
+    ? 'identity'
+    : sftpCreate
+      ? 'sftp'
+      : phpCreate
+        ? 'php'
+        : phpContainerRepair
+          ? 'php_container'
+          : staticControlRepair
+            ? 'static_control'
+            : 'workspace';
   const targets = change?.action === 'create_workspace_directories'
     ? change.desired?.directories
-    : identityCreate || sftpCreate || phpCreate || phpContainerRepair
+    : identityCreate || sftpCreate || phpCreate || phpContainerRepair || staticControlRepair
       ? []
       : null;
   if (audit?.applicable !== true || audit.migrationRequired !== true
@@ -297,6 +317,29 @@ function operationFromAudit(audit, now, idFactory) {
       )
       || change.desired?.phpContainer?.controlDirectoryMode !== '0755'
       || change.desired?.phpContainer?.releaseDirectoryMode !== '0750'
+    ))
+    || (staticControlRepair && (
+      change.current?.staticRuntimeMigrationPreview?.safeControlMigrationCandidate !== true
+      || change.current?.staticRuntimeMigrationPreview?.current?.isolation?.safeMigrationCandidate !== true
+      || change.desired?.staticControl?.websiteId !== audit.websiteId
+      || change.desired?.staticControl?.applicationId !== audit.applicationId
+      || change.desired?.staticControl?.unixUser !== audit.expected?.unixUser
+      || change.desired?.staticControl?.homeDirectory !== audit.expected?.homeDirectory
+      || change.desired?.staticControl?.publishRoot !== createApplicationIdentity(audit.applicationId).paths.static.publishRoot
+      || change.desired?.staticControl?.releasesRoot !== path.posix.join(
+        createApplicationIdentity(audit.applicationId).paths.static.publishRoot,
+        'releases',
+      )
+      || change.desired?.staticControl?.currentPath !== path.posix.join(
+        createApplicationIdentity(audit.applicationId).paths.static.publishRoot,
+        'current',
+      )
+      || change.desired?.staticControl?.controlDirectoryMode !== '0711'
+      || change.desired?.staticControl?.releaseDirectoryMode !== '0750'
+      || change.desired?.staticControl?.releaseFileMode !== '0640'
+      || change.desired?.staticControl?.nginxDirectoryAcl !== 'user:www-data:r-x'
+      || change.desired?.staticControl?.nginxFileAcl !== 'user:www-data:r--'
+      || change.desired?.staticControl?.aclPackage !== 'acl'
     ))
     || typeof audit.expected?.unixUser !== 'string' || typeof audit.expected?.homeDirectory !== 'string') {
     throw new WebsiteIsolationMigrationRegistryError('website_isolation_migration_preview_invalid', 'Website isolation migration preview cannot be journaled');
