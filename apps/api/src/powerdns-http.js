@@ -12,6 +12,7 @@ import {
 import { createDnsZoneReapplyRuntime, DnsZoneReapplyRuntimeError } from './dns-zone-reapply-runtime.js';
 import { createDnsZoneReapplyService, DnsZoneReapplyError } from './dns-zone-reapply.js';
 import { createDnsZoneRecordsService, DnsZoneRecordsError } from './dns-zone-records.js';
+import { createDnsZoneRetirementService, DnsZoneRetirementError } from './dns-zone-retirement.js';
 import { createDnsZoneTemplateRegistry, DnsZoneTemplateRegistryError } from './dns-zone-template-registry.js';
 import { createDnsZoneTemplateRollbackService } from './dns-zone-template-rollback.js';
 import { createDomainRegistry } from './domain-registry.js';
@@ -354,6 +355,29 @@ async function defaultZoneReapplyRuntime({
   return runtime;
 }
 
+async function defaultZoneRetirementService(
+  authoritativeService,
+  domainRegistry = null,
+  powerDnsSecretRegistry = null,
+  env = process.env,
+) {
+  if ((domainRegistry === null) !== (powerDnsSecretRegistry === null)) {
+    throw new PowerDnsHttpError(
+      'dns_zone_retirement_registry_dependencies_invalid',
+      'DNS zone retirement Domain and PowerDNS secret registries must be configured together',
+      503,
+    );
+  }
+  const defaults = domainRegistry === null
+    ? await defaultDomainAndSecretRegistries(authoritativeService, env)
+    : null;
+  return createDnsZoneRetirementService({
+    domainRegistry: domainRegistry ?? defaults.domainRegistry,
+    powerDnsSecretRegistry: powerDnsSecretRegistry ?? defaults.secretRegistry,
+    localServerId: authoritativeService.localServerId,
+  });
+}
+
 async function defaultZoneRecordsService(
   authoritativeService,
   domainRegistry = null,
@@ -413,12 +437,23 @@ async function zoneRecordsOperation(operation) {
   }
 }
 
+async function zoneRetirementOperation(operation) {
+  try { return await operation(); }
+  catch (error) {
+    if (error instanceof DnsZoneRetirementError) {
+      throw new PowerDnsHttpError(error.code, error.message, error.status);
+    }
+    throw error;
+  }
+}
+
 export function mountPowerDnsRoutes(app, {
   dnsIdentityRegistry,
   dnsZoneTemplateRegistry = null,
   dnsDelegationInspector = null,
   dnsZoneReapplyRuntime = null,
   dnsZoneRecordsService = null,
+  dnsZoneRetirementService = null,
   domainRegistry = null,
   powerDnsSecretRegistry = null,
   mailDomainRegistry = null,
@@ -461,6 +496,10 @@ export function mountPowerDnsRoutes(app, {
     throw new Error('DNS zone records service is invalid');
   }
 
+  if (dnsZoneRetirementService !== null && typeof dnsZoneRetirementService.preview !== 'function') {
+    throw new Error('DNS zone retirement service is invalid');
+  }
+
   let defaultRuntimePromise = null;
   function reapplyRuntime() {
     if (dnsZoneReapplyRuntime) return Promise.resolve(dnsZoneReapplyRuntime);
@@ -495,6 +534,20 @@ export function mountPowerDnsRoutes(app, {
       defaultRecordsPromise.catch(() => { defaultRecordsPromise = null; });
     }
     return defaultRecordsPromise;
+  }
+
+  let defaultRetirementPromise = null;
+  function zoneRetirementService() {
+    if (dnsZoneRetirementService) return Promise.resolve(dnsZoneRetirementService);
+    if (!defaultRetirementPromise) {
+      defaultRetirementPromise = defaultZoneRetirementService(
+        authoritativeService,
+        domainRegistry,
+        powerDnsSecretRegistry,
+      );
+      defaultRetirementPromise.catch(() => { defaultRetirementPromise = null; });
+    }
+    return defaultRetirementPromise;
   }
 
   const localDkimRetirementDependencies = [
@@ -535,6 +588,20 @@ export function mountPowerDnsRoutes(app, {
   if (hasLocalDkimRetirement) {
     mountDnsZoneMailDkimRetirementRoutes(app, { serviceForRequest: localDkimRetirementService });
   }
+
+  app.get('/api/domains/:domainId/dns/retirement-impact', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    if (Object.keys(request.query ?? {}).length !== 0) {
+      throw new PowerDnsHttpError(
+        'dns_zone_retirement_query_invalid',
+        'DNS zone retirement impact does not accept query parameters',
+      );
+    }
+    const preview = await zoneRetirementOperation(
+      async () => (await zoneRetirementService()).preview({ domainId: request.params.domainId }),
+    );
+    response.set('Cache-Control', 'no-store');
+    return response.json({ data: preview });
+  }));
 
   app.get('/api/servers/:serverId/dns/identity', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const serverId = localServerId(authoritativeService, request.params.serverId);
