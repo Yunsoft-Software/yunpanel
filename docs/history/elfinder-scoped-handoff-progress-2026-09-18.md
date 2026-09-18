@@ -79,6 +79,19 @@ Bu kayıt P0.6 elFinder replacement çalışmasının 2026-09-18 main branch kay
 - PHP Website'ler de managed Files/Terminal sekmelerine dahil edilmiştir.
 - Homegrown `site-file-manager` source ve legacy Files görünümü gerçek acceptance tamamlanana kadar migration fallback olarak tutulur; genişletilmez.
 
+## Son gateway/UI hardening
+
+- Handoff öncesi yalnız minimal YunPanel bootstrap HTML/JS açılır; jQuery/jQuery-UI/elFinder vendor assetleri tool session oluşmadan yüklenmez.
+- Public gateway `vendor/js`, `vendor/css`, `vendor/img`, `vendor/sounds` dışında vendor root erişimini 404 ile kapatır; vendor PHP/examples/package metadata browser asset yüzeyi değildir.
+- Vendor asset istekleri de connector gibi active tool session gerektirir; panel auth tek başına vendor asset erişimi vermez.
+- Browser-supplied elFinder identity header'ları her durumda strip edilir; connector için yalnız consumed handoff state yeniden inject edilir.
+- Tool upstream'e panel cookie/tool cookie/internal proxy token taşınmaz.
+- Shared runtime health artık gerçek browser-served elFinder JS/CSS/img, distro jQuery/jQuery-UI assetleri ve required PHP extension fonksiyonlarını doğrular.
+- PHP Website Files sekmesi legacy custom API'yi otomatik çağırmaz; yalnız elFinder primary yolunu kullanır.
+- Legacy Files görünümü yalnız static/node migration fallback olarak kalır.
+- Files ve Terminal sekmeleri Read Only yönetim rolünden gizlenir; backend Owner gate yine nihai authorization sınırıdır.
+- elFinder browser API client exact empty-body handoff route/CSRF contract'ıyla source testte pinlenmiştir.
+
 ## Kalan işler
 
 1. Fresh Ubuntu 24.04'te gerçek package install/upgrade, PHP extension paths, Nginx config/socket restart davranışı ve root-private rollback snapshot'ını doğrula.
