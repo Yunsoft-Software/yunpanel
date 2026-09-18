@@ -131,6 +131,56 @@ export function createWebsitePhpRuntimeProvisioningHandler({
     });
   }
 
+  async function previewMigration({ intent, operationId } = {}) {
+    const normalized = runtimeIntent(intent);
+    if (typeof containerManager.previewMigration !== 'function'
+      || typeof fpmManager.previewMigration !== 'function') {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_runtime_migration_preview_unavailable',
+        'Website PHP runtime migration preview is unavailable',
+        503,
+      );
+    }
+
+    const [container, fpm, umask] = await Promise.all([
+      containerManager.previewMigration(normalized, { operationId }),
+      fpmManager.previewMigration(normalized, { operationId }),
+      umaskManager.inspect('php'),
+    ]);
+    const umaskEvidence = umask?.satisfied === true && umask.umask === '0027'
+      ? Object.freeze({ satisfied: true, umask: '0027' })
+      : Object.freeze({
+        satisfied: false,
+        reason: typeof umask?.reason === 'string' && /^[a-z0-9_]{1,120}$/.test(umask.reason)
+          ? umask.reason
+          : 'service_umask_unavailable',
+      });
+    const differences = [
+      ...(Array.isArray(container?.differences) ? container.differences : ['php_container_preview_invalid']),
+      ...(Array.isArray(fpm?.differences) ? fpm.differences : ['php_fpm_preview_invalid']),
+      ...(umaskEvidence.satisfied ? [] : ['php_runtime_umask_not_ready']),
+    ];
+
+    return Object.freeze({
+      version: 1,
+      adapter: 'php-runtime',
+      satisfied: container?.satisfied === true && fpm?.satisfied === true && umaskEvidence.satisfied === true,
+      current: Object.freeze({
+        container,
+        fpm,
+        umask: umaskEvidence,
+      }),
+      desired: Object.freeze({
+        websiteId: normalized.websiteId,
+        applicationId: normalized.applicationId,
+        unixUser: normalized.unixUser,
+        documentRoot: normalized.documentRoot,
+        runtimeUmask: '0027',
+      }),
+      differences: Object.freeze([...new Set(differences)]),
+    });
+  }
+
   async function compensate({ intent, operationId } = {}) {
     return fpmManager.compensate(runtimeIntent(intent), { operationId });
   }
@@ -139,7 +189,7 @@ export function createWebsitePhpRuntimeProvisioningHandler({
     return fpmManager.inspectCompensation(runtimeIntent(intent), { operationId });
   }
 
-  return Object.freeze({ apply, inspect, compensate, inspectCompensation });
+  return Object.freeze({ apply, inspect, previewMigration, compensate, inspectCompensation });
 }
 
 export const websitePhpRuntimeProvisioningInternals = Object.freeze({ runtimeIntent });
