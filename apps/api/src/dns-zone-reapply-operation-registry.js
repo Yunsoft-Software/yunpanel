@@ -141,12 +141,37 @@ function safeResult(value) {
     || !Number.isSafeInteger(value.manualRrsetCount) || value.manualRrsetCount < 0) {
     throw new DnsZoneReapplyOperationRegistryError('dns_zone_reapply_operation_state_invalid', 'DNS zone reapply operation result is invalid', 409);
   }
+  const appliedZoneDigest = optionalDigest(value.appliedZoneDigest ?? null, 'appliedZoneDigest');
+  const appliedZoneSnapshot = value.appliedZoneSnapshot == null
+    ? null
+    : safeSourceZoneSnapshot(value.appliedZoneSnapshot, appliedZoneDigest);
+  if ((appliedZoneDigest === null) !== (appliedZoneSnapshot === null)) {
+    throw new DnsZoneReapplyOperationRegistryError(
+      'dns_zone_reapply_operation_state_invalid',
+      'DNS zone reapply applied snapshot evidence is incomplete',
+      409,
+    );
+  }
   return Object.freeze({
     satisfied: true,
     zoneName: value.zoneName,
     serial: value.serial,
     changedRrsetCount: value.changedRrsetCount,
     manualRrsetCount: value.manualRrsetCount,
+    appliedZoneDigest,
+    appliedZoneSnapshot,
+  });
+}
+
+function publicResult(value) {
+  if (value === null) return null;
+  return Object.freeze({
+    satisfied: true,
+    zoneName: value.zoneName,
+    serial: value.serial,
+    changedRrsetCount: value.changedRrsetCount,
+    manualRrsetCount: value.manualRrsetCount,
+    appliedZoneDigest: value.appliedZoneDigest,
   });
 }
 
@@ -217,7 +242,7 @@ export function dnsZoneReapplyOperationPublicView(operation) {
     targetSerial: operation.targetSerial,
     previewDigest: operation.previewDigest,
     status: operation.status,
-    result: operation.result,
+    result: publicResult(operation.result),
     error: operation.error,
     createdAt: operation.createdAt,
     updatedAt: operation.updatedAt,
@@ -436,6 +461,7 @@ export const dnsZoneReapplyOperationRegistryInternals = Object.freeze({
   persistedOperation,
   operationFromPreview,
   safeResult,
+  publicResult,
   safeError,
   optionalDigest,
   safeSourceZoneSnapshot,
