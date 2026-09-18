@@ -161,10 +161,14 @@ export function createWebsitePhpRuntimeProvisioningHandler({
       ...(umaskEvidence.satisfied ? [] : ['php_runtime_umask_not_ready']),
     ];
 
+    const safeCreateCandidate = container?.satisfied === true
+      && fpm?.safeCreateCandidate === true
+      && umaskEvidence.satisfied === true;
     return Object.freeze({
       version: 1,
       adapter: 'php-runtime',
       satisfied: container?.satisfied === true && fpm?.satisfied === true && umaskEvidence.satisfied === true,
+      safeCreateCandidate,
       current: Object.freeze({
         container,
         fpm,
@@ -181,6 +185,80 @@ export function createWebsitePhpRuntimeProvisioningHandler({
     });
   }
 
+  async function inspectMigrationOperation(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    if (typeof fpmManager.inspectMigrationOperation !== 'function') {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_runtime_migration_lifecycle_unavailable',
+        'Website PHP runtime migration lifecycle is unavailable',
+        503,
+      );
+    }
+    const [container, umask, fpm] = await Promise.all([
+      containerManager.inspect(normalized, { operationId: context.operationId }),
+      umaskManager.inspect('php'),
+      fpmManager.inspectMigrationOperation(normalized, { operationId: context.operationId }),
+    ]);
+    if (!container?.satisfied) {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'php_container_not_ready',
+        containerReason: container?.reason ?? 'php_container_unavailable',
+      });
+    }
+    if (!umask?.satisfied || umask.umask !== '0027') {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'php_runtime_umask_not_ready',
+        umaskReason: umask?.reason ?? 'service_umask_unavailable',
+      });
+    }
+    if (!fpm?.satisfied) return fpm;
+    return Object.freeze({
+      ...fpm,
+      phpRuntimeMigration: true,
+      containerLocked: true,
+      runtimeUmask: '0027',
+    });
+  }
+
+  async function applyMigration(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    if (typeof fpmManager.applyMigration !== 'function') {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_runtime_migration_lifecycle_unavailable',
+        'Website PHP runtime migration lifecycle is unavailable',
+        503,
+      );
+    }
+    const preview = await previewMigration(context);
+    if (preview.satisfied === true) return inspectMigrationOperation(context);
+    if (preview.safeCreateCandidate !== true) {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_runtime_migration_not_safe_create',
+        'Website PHP runtime migration requires canonical container and shared UMask state with only a missing site pool',
+        409,
+      );
+    }
+    const fpm = await fpmManager.applyMigration(normalized, { operationId: context.operationId });
+    if (!fpm?.satisfied || fpm.phpFpmReceiptVersion !== 1 || fpm.createdPhpFpmPool !== true) {
+      throw new WebsitePhpRuntimeProvisioningError(
+        'website_php_runtime_migration_unverified',
+        'Website PHP runtime migration did not return durable site-pool ownership evidence',
+        503,
+      );
+    }
+    return inspectMigrationOperation(context);
+  }
+
+  async function inspectMigrationCompensation({ intent, operationId } = {}) {
+    return fpmManager.inspectCompensation(runtimeIntent(intent), { operationId });
+  }
+
+  async function compensateMigration({ intent, operationId } = {}) {
+    return fpmManager.compensate(runtimeIntent(intent), { operationId });
+  }
+
   async function compensate({ intent, operationId } = {}) {
     return fpmManager.compensate(runtimeIntent(intent), { operationId });
   }
@@ -189,7 +267,17 @@ export function createWebsitePhpRuntimeProvisioningHandler({
     return fpmManager.inspectCompensation(runtimeIntent(intent), { operationId });
   }
 
-  return Object.freeze({ apply, inspect, previewMigration, compensate, inspectCompensation });
+  return Object.freeze({
+    apply,
+    inspect,
+    previewMigration,
+    inspectMigrationOperation,
+    applyMigration,
+    compensateMigration,
+    inspectMigrationCompensation,
+    compensate,
+    inspectCompensation,
+  });
 }
 
 export const websitePhpRuntimeProvisioningInternals = Object.freeze({ runtimeIntent });
