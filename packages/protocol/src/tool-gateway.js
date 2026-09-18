@@ -2,6 +2,8 @@ const SAFE_ID = /^[a-z][a-z0-9_-]{1,31}$/;
 const SAFE_AUDIENCE = /^[a-z][a-z0-9._-]{1,63}$/;
 const SAFE_HTTP_PATH = /^\/[A-Za-z0-9._/-]+$/;
 const SAFE_SOCKET_PATH = /^\/[A-Za-z0-9._/-]+\.sock$/;
+const SAFE_SOCKET_ROOT = /^\/[A-Za-z0-9._/-]+$/;
+const ACCESS_MODES = new Set(['owner', 'session']);
 
 function descriptor(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -10,7 +12,11 @@ function descriptor(value) {
     || !SAFE_HTTP_PATH.test(value.publicPrefix ?? '')
     || value.publicPrefix.endsWith('/')
     || !SAFE_HTTP_PATH.test(value.accessPath ?? '')
-    || !SAFE_SOCKET_PATH.test(value.socketPath ?? '')) {
+    || !ACCESS_MODES.has(value.accessMode)
+    || ((value.socketPath === undefined) === (value.socketRoot === undefined))
+    || (value.socketPath !== undefined && !SAFE_SOCKET_PATH.test(value.socketPath))
+    || (value.socketRoot !== undefined && (!SAFE_SOCKET_ROOT.test(value.socketRoot)
+      || value.socketRoot === '/' || value.socketRoot.endsWith('/')))) {
     throw new TypeError('Integrated tool gateway descriptor is invalid');
   }
   return Object.freeze({
@@ -18,7 +24,9 @@ function descriptor(value) {
     audience: value.audience,
     publicPrefix: value.publicPrefix,
     accessPath: value.accessPath,
-    socketPath: value.socketPath,
+    accessMode: value.accessMode,
+    socketPath: value.socketPath ?? null,
+    socketRoot: value.socketRoot ?? null,
   });
 }
 
@@ -28,6 +36,7 @@ export const INTEGRATED_TOOL_GATEWAYS = Object.freeze({
     audience: 'phpmyadmin',
     publicPrefix: '/tools/phpmyadmin',
     accessPath: '/api/phpmyadmin-gateway-access',
+    accessMode: 'owner',
     socketPath: '/run/yunpanel/phpmyadmin-http.sock',
   }),
   elfinder: descriptor({
@@ -35,7 +44,16 @@ export const INTEGRATED_TOOL_GATEWAYS = Object.freeze({
     audience: 'elfinder',
     publicPrefix: '/tools/elfinder',
     accessPath: '/api/elfinder-gateway-access',
+    accessMode: 'owner',
     socketPath: '/run/yunpanel/elfinder-http.sock',
+  }),
+  ttyd: descriptor({
+    id: 'ttyd',
+    audience: 'terminal',
+    publicPrefix: '/tools/ttyd',
+    accessPath: '/api/ttyd-gateway-access',
+    accessMode: 'session',
+    socketRoot: '/run/yunpanel/ttyd',
   }),
 });
 
@@ -63,4 +81,6 @@ export const integratedToolGatewayInternals = Object.freeze({
   safeAudience: SAFE_AUDIENCE,
   safeHttpPath: SAFE_HTTP_PATH,
   safeSocketPath: SAFE_SOCKET_PATH,
+  safeSocketRoot: SAFE_SOCKET_ROOT,
+  accessModes: Object.freeze([...ACCESS_MODES]),
 });
