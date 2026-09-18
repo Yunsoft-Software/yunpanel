@@ -7,7 +7,10 @@ import { createOwnerMfaPolicy } from './owner-mfa-policy.js';
 import { requireReadOnlyRequest } from './panel-access.js';
 import { handleUserAdmin } from './user-admin-http.js';
 import { isGithubWebhookPath } from './github-webhook-http.js';
-import { isManagementToolGatewayAccessPath } from '../../../packages/protocol/src/tool-gateway.js';
+import {
+  isManagementToolGatewayAccessPath,
+  managementToolGatewayForAccessPath,
+} from '../../../packages/protocol/src/tool-gateway.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
 const PROXY_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -162,6 +165,7 @@ export function createAuthenticatedApi({
   proxyToken,
   trustedProxyIps = TRUSTED_PROXY_DEFAULT,
   publicWebhookHandler = null,
+  toolGatewayAuthorizer = null,
 }) {
   const boundary = createBrowserAuthBoundary({ store, publicOrigin, development, proxyToken, trustedProxyIps });
   const { localDevelopment, ownerPolicy, cookieName, mfaCookieName, readCookie, checkOrigin } = boundary;
@@ -169,6 +173,9 @@ export function createAuthenticatedApi({
   const handler = createHandler();
   if (publicWebhookHandler !== null && typeof publicWebhookHandler !== 'function') {
     throw new TypeError('Public webhook handler must be a function');
+  }
+  if (toolGatewayAuthorizer !== null && typeof toolGatewayAuthorizer !== 'function') {
+    throw new TypeError('Tool gateway authorizer must be a function');
   }
 
   const writeCookie = (response, name, value, maxAge) => {
@@ -255,7 +262,22 @@ export function createAuthenticatedApi({
       if (!SAFE_METHODS.has(request.method)) {
         throw new AuthError('method_not_allowed', 'Use GET or HEAD.', 405);
       }
-      ownerPolicy.requireManagement(session);
+      const authorized = ownerPolicy.requireManagement(session);
+      const gateway = managementToolGatewayForAccessPath(pathname);
+      if (!gateway) throw new AuthError('tool_gateway_unknown', 'Tool gateway is unavailable.', 503);
+      if (gateway.accessMode === 'session') {
+        if (!toolGatewayAuthorizer) {
+          throw new AuthError('tool_gateway_unavailable', 'Tool gateway is unavailable.', 503);
+        }
+        const allowed = await toolGatewayAuthorizer({
+          gateway,
+          request,
+          session: authorized,
+        });
+        if (allowed !== true) {
+          throw new AuthError('tool_gateway_forbidden', 'Tool gateway access denied.', 403);
+        }
+      }
       return json(response, 204);
     }
     if (pathname.startsWith('/api/auth/')) {
