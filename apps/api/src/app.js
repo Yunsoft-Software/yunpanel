@@ -472,6 +472,9 @@ export function createApp({
       dnsIdentityRegistry: serverDnsIdentityRegistry,
       authoritativeService: powerDnsAuthoritativeService,
       ...(powerDnsSecretRegistry ? { domainRegistry, powerDnsSecretRegistry } : {}),
+      ...(typeof websiteProvisioningRuntime?.registry?.listForWebsite === 'function'
+        ? { websiteProvisioningRegistry: websiteProvisioningRuntime.registry }
+        : {}),
       ...(mailServiceIdentityRegistry ? {
         mailDomainRegistry,
         mailDkimRegistry,
