@@ -355,7 +355,13 @@ function dependencyPlan(dependencies, domain) {
     dockerWorkloads: normalizedBucket(dependencies.dockerWorkloads, 'docker'),
   });
   const activeJobs = normalizedIds(dependencies.activeJobs ?? [], 'job');
-  const childDomains = orderedChildDomains(dependencies.childDomains ?? [], domain);
+  const childDomains = Object.freeze(orderedChildDomains(
+    dependencies.childDomains ?? [],
+    domain,
+  ).map((child) => Object.freeze({
+    ...child,
+    authoritativeDns: authoritativeDnsReference(dependencies, child.id),
+  })));
   return Object.freeze({
     childDomainIds: Object.freeze(childDomains.map((child) => child.id)),
     childDomains,
@@ -390,18 +396,27 @@ function hardBlockers(blockers, plan) {
   for (const [name, bucket] of Object.entries(plan.additional)) {
     if (bucket.status === 'unavailable') hard.push(`${name}_inventory_unavailable`);
   }
-  if (plan.authoritativeDns?.state === 'blocked') {
-    for (const code of plan.authoritativeDns.blockers) {
-      if (!ORCHESTRATABLE_DNS_BLOCKERS.has(code)) hard.push(code);
+  const authoritativeDnsPlans = [
+    plan.authoritativeDns,
+    ...plan.childDomains.map((child) => child.authoritativeDns),
+  ];
+  for (const dnsPlan of authoritativeDnsPlans) {
+    if (dnsPlan?.state === 'blocked') {
+      for (const code of dnsPlan.blockers) {
+        if (!ORCHESTRATABLE_DNS_BLOCKERS.has(code)) hard.push(code);
+      }
+    }
+    if (dnsPlan && dnsPlan.zoneSnapshotDigest !== null) {
+      if (dnsPlan.ownershipEvidenceDigest === null) {
+        hard.push('dns_zone_delete_ownership_evidence_required');
+      }
+      if (dnsPlan.snapshotRetentionDays === null) {
+        hard.push('dns_zone_delete_retention_policy_required');
+      }
     }
   }
-  if (plan.authoritativeDns?.zoneSnapshotDigest !== null) {
-    if (plan.authoritativeDns.ownershipEvidenceDigest === null) {
-      hard.push('dns_zone_delete_ownership_evidence_required');
-    }
-    if (plan.authoritativeDns.snapshotRetentionDays === null) {
-      hard.push('dns_zone_delete_retention_policy_required');
-    }
+  if (plan.childDomains.some((child) => child.authoritativeDns === null)) {
+    hard.push('authoritative_dns_impact_unavailable');
   }
   return Object.freeze([...new Set(hard)].sort());
 }

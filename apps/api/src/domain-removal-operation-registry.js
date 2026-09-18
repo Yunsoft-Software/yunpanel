@@ -113,6 +113,49 @@ function persistedStep(value) {
   });
 }
 
+function normalizedAuthoritativeDns(value, { allowLegacy = true } = {}) {
+  if (value === null || value === undefined) return null;
+  const legacyDnsFields = new Set(['state', 'previewDigest', 'zoneSnapshotDigest', 'blockers']);
+  const dnsFields = new Set([
+    ...legacyDnsFields, 'ownershipEvidenceDigest', 'snapshotRetentionDays',
+  ]);
+  const keys = Object.keys(value ?? {});
+  const legacyShape = allowLegacy
+    && keys.length === legacyDnsFields.size
+    && keys.every((field) => legacyDnsFields.has(field));
+  const currentShape = keys.length === dnsFields.size
+    && keys.every((field) => dnsFields.has(field));
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || (!legacyShape && !currentShape)
+    || !['ready', 'blocked', 'not_applicable'].includes(value.state)
+    || !Array.isArray(value.blockers) || value.blockers.length > 32
+    || value.blockers.some((code) => typeof code !== 'string' || !SAFE_CODE.test(code))
+    || (currentShape && value.ownershipEvidenceDigest !== null
+      && (typeof value.ownershipEvidenceDigest !== 'string'
+        || !SHA256_PATTERN.test(value.ownershipEvidenceDigest)))
+    || (currentShape && value.snapshotRetentionDays !== null
+      && (!Number.isSafeInteger(value.snapshotRetentionDays)
+        || value.snapshotRetentionDays < 1 || value.snapshotRetentionDays > 3650))
+    || (currentShape && value.zoneSnapshotDigest === null
+      && (value.ownershipEvidenceDigest !== null || value.snapshotRetentionDays !== null))) {
+    throw invalid('Authoritative DNS removal plan is invalid');
+  }
+  const blockers = [...value.blockers].sort();
+  if (new Set(blockers).size !== blockers.length) {
+    throw invalid('Authoritative DNS removal plan has duplicate blockers');
+  }
+  return Object.freeze({
+    state: value.state,
+    previewDigest: safeDigest(value.previewDigest, 'authoritativeDnsPreviewDigest'),
+    zoneSnapshotDigest: value.zoneSnapshotDigest === null
+      ? null
+      : safeDigest(value.zoneSnapshotDigest, 'authoritativeDnsZoneSnapshotDigest'),
+    ownershipEvidenceDigest: currentShape ? value.ownershipEvidenceDigest : null,
+    snapshotRetentionDays: currentShape ? value.snapshotRetentionDays : null,
+    blockers: Object.freeze(blockers),
+  });
+}
+
 function normalizedPlan(value) {
   const legacyFields = new Set([
     'childDomainIds', 'websiteId', 'applicationId', 'managedComposeProjectId',
@@ -145,14 +188,19 @@ function normalizedPlan(value) {
     if (!Array.isArray(items) || items.length !== childDomainIds.length) {
       throw invalid('Child Domain intent evidence is invalid');
     }
-    const childFields = new Set([
+    const legacyChildFields = new Set([
       'id', 'serverId', 'primaryDomain', 'websiteId', 'certificateId', 'parentDomainId',
       'state', 'desiredRevision', 'checksum', 'suspensionOperationId',
     ]);
+    const childFields = new Set([...legacyChildFields, 'authoritativeDns']);
     const snapshots = items.map((item, index) => {
+      const keys = Object.keys(item ?? {});
+      const legacyChildShape = keys.length === legacyChildFields.size
+        && keys.every((field) => legacyChildFields.has(field));
+      const currentChildShape = keys.length === childFields.size
+        && keys.every((field) => childFields.has(field));
       if (!item || typeof item !== 'object' || Array.isArray(item)
-        || Object.keys(item).length !== childFields.size
-        || Object.keys(item).some((field) => !childFields.has(field))
+        || (!legacyChildShape && !currentChildShape)
         || item.id !== childDomainIds[index]
         || typeof item.primaryDomain !== 'string' || item.primaryDomain.length < 1
         || item.primaryDomain.length > 253 || /[\u0000-\u001f\u007f]/.test(item.primaryDomain)
@@ -174,6 +222,9 @@ function normalizedPlan(value) {
         desiredRevision: item.desiredRevision,
         checksum: safeDigest(item.checksum, 'childDomainChecksum'),
         suspensionOperationId: item.suspensionOperationId,
+        authoritativeDns: currentChildShape
+          ? normalizedAuthoritativeDns(item.authoritativeDns, { allowLegacy: false })
+          : null,
       });
     });
     const childIds = new Set(childDomainIds);
@@ -218,48 +269,7 @@ function normalizedPlan(value) {
       dockerWorkloads: bucket(additional.dockerWorkloads, 'docker'),
     });
   };
-  let authoritativeDns = null;
-  if (value.authoritativeDns !== null && value.authoritativeDns !== undefined) {
-    const legacyDnsFields = new Set(['state', 'previewDigest', 'zoneSnapshotDigest', 'blockers']);
-    const dnsFields = new Set([
-      ...legacyDnsFields, 'ownershipEvidenceDigest', 'snapshotRetentionDays',
-    ]);
-    const dns = value.authoritativeDns;
-    const keys = Object.keys(dns ?? {});
-    const legacyShape = keys.length === legacyDnsFields.size
-      && keys.every((field) => legacyDnsFields.has(field));
-    const currentShape = keys.length === dnsFields.size
-      && keys.every((field) => dnsFields.has(field));
-    if (!dns || typeof dns !== 'object' || Array.isArray(dns)
-      || (!legacyShape && !currentShape)
-      || !['ready', 'blocked', 'not_applicable'].includes(dns.state)
-      || !Array.isArray(dns.blockers) || dns.blockers.length > 32
-      || dns.blockers.some((code) => typeof code !== 'string' || !SAFE_CODE.test(code))
-      || (currentShape && dns.ownershipEvidenceDigest !== null
-        && (typeof dns.ownershipEvidenceDigest !== 'string'
-          || !SHA256_PATTERN.test(dns.ownershipEvidenceDigest)))
-      || (currentShape && dns.snapshotRetentionDays !== null
-        && (!Number.isSafeInteger(dns.snapshotRetentionDays)
-          || dns.snapshotRetentionDays < 1 || dns.snapshotRetentionDays > 3650))
-      || (currentShape && dns.zoneSnapshotDigest === null
-        && (dns.ownershipEvidenceDigest !== null || dns.snapshotRetentionDays !== null))) {
-      throw invalid('Authoritative DNS removal plan is invalid');
-    }
-    const blockers = [...dns.blockers].sort();
-    if (new Set(blockers).size !== blockers.length) {
-      throw invalid('Authoritative DNS removal plan has duplicate blockers');
-    }
-    authoritativeDns = Object.freeze({
-      state: dns.state,
-      previewDigest: safeDigest(dns.previewDigest, 'authoritativeDnsPreviewDigest'),
-      zoneSnapshotDigest: dns.zoneSnapshotDigest === null
-        ? null
-        : safeDigest(dns.zoneSnapshotDigest, 'authoritativeDnsZoneSnapshotDigest'),
-      ownershipEvidenceDigest: currentShape ? dns.ownershipEvidenceDigest : null,
-      snapshotRetentionDays: currentShape ? dns.snapshotRetentionDays : null,
-      blockers: Object.freeze(blockers),
-    });
-  }
+  const authoritativeDns = normalizedAuthoritativeDns(value.authoritativeDns);
   return Object.freeze({
     childDomainIds,
     childDomains,
@@ -278,6 +288,9 @@ function buildSteps(preview, createdAt) {
   const plan = normalizedPlan(preview.plan);
   if (plan.childDomains === null) {
     throw invalid('Domain removal preview lacks exact child Domain intent evidence');
+  }
+  if (plan.childDomains.some((child) => child.authoritativeDns === null)) {
+    throw invalid('Domain removal preview lacks exact child authoritative DNS intent evidence');
   }
   const steps = [];
   const add = (kind, resourceId) => {

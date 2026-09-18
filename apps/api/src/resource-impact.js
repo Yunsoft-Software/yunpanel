@@ -273,6 +273,15 @@ async function authoritativeDnsBucket(provider, context) {
       503,
     );
   }
+  const expectedDomainIds = [...context.domainIds].sort();
+  if (items.length !== expectedDomainIds.length
+    || items.some((item, index) => item.domainId !== expectedDomainIds[index])) {
+    throw new ResourceImpactError(
+      'authoritative_dns_impact_invalid',
+      'Authoritative DNS retirement impact does not cover every affected Domain',
+      503,
+    );
+  }
   return Object.freeze({ status: 'available', items: Object.freeze(items) });
 }
 

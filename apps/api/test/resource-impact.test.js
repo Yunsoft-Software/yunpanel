@@ -303,6 +303,14 @@ test('delete impact binds authoritative DNS retirement digests and blockers into
       ownershipEvidenceDigest: 'f'.repeat(64),
       snapshotRetentionDays: 30,
       blockers: ['dns_zone_manual_rrsets_present'],
+    }, {
+      domainId: state.child.id,
+      state: 'not_applicable',
+      previewDigest: '9'.repeat(64),
+      zoneSnapshotDigest: null,
+      ownershipEvidenceDigest: null,
+      snapshotRetentionDays: null,
+      blockers: [],
     }],
   });
   assert.notEqual(second.previewDigest, first.previewDigest);
@@ -320,6 +328,14 @@ test('delete impact binds authoritative DNS retirement digests and blockers into
       ownershipEvidenceDigest: 'f'.repeat(64),
       snapshotRetentionDays: 31,
       blockers: ['domain_routing_active'],
+    }, {
+      domainId: state.child.id,
+      state: 'not_applicable',
+      previewDigest: '9'.repeat(64),
+      zoneSnapshotDigest: null,
+      ownershipEvidenceDigest: null,
+      snapshotRetentionDays: null,
+      blockers: [],
     }],
   });
   assert.notEqual(changedRetention.previewDigest, first.previewDigest);
@@ -366,6 +382,27 @@ test('authoritative DNS impact provider fails closed on unavailable or malformed
         ownershipEvidenceDigest: null,
         snapshotRetentionDays: null,
         blockers: ['should_not_exist'],
+      }],
+    }),
+    (error) => error instanceof ResourceImpactError
+      && error.code === 'authoritative_dns_impact_invalid'
+      && error.status === 503,
+  );
+
+  await assert.rejects(
+    previewResourceImpact({
+      resourceType: 'domain',
+      resourceId: state.domain.id,
+      operation: 'delete',
+      ...dependencies(state),
+      dnsRetirementImpactProvider: async () => [{
+        domainId: state.domain.id,
+        state: 'not_applicable',
+        previewDigest: 'a'.repeat(64),
+        zoneSnapshotDigest: null,
+        ownershipEvidenceDigest: null,
+        snapshotRetentionDays: null,
+        blockers: [],
       }],
     }),
     (error) => error instanceof ResourceImpactError

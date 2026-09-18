@@ -16,7 +16,33 @@ const zoneSnapshotDigest = 'f'.repeat(64);
 const ownershipEvidenceDigest = '1'.repeat(64);
 const childChecksum = '2'.repeat(64);
 
-function removalPreview({ suspended = false } = {}) {
+function childNoZoneDnsPlan() {
+  return {
+    state: 'not_applicable',
+    previewDigest: '2'.repeat(64),
+    zoneSnapshotDigest: null,
+    ownershipEvidenceDigest: null,
+    snapshotRetentionDays: null,
+    blockers: [],
+  };
+}
+
+function childZoneDnsPlan(overrides = {}) {
+  return {
+    state: 'blocked',
+    previewDigest: 'a'.repeat(64),
+    zoneSnapshotDigest: '6'.repeat(64),
+    ownershipEvidenceDigest: '7'.repeat(64),
+    snapshotRetentionDays: 14,
+    blockers: ['domain_routing_active', 'domain_website_binding_present'],
+    ...overrides,
+  };
+}
+
+function removalPreview({
+  suspended = false,
+  childAuthoritativeDns = childNoZoneDnsPlan(),
+} = {}) {
   const suspensionOperationId = suspended ? 'suspension-operation-1' : null;
   return {
     version: 1,
@@ -57,6 +83,7 @@ function removalPreview({ suspended = false } = {}) {
         desiredRevision: 2,
         checksum: '2'.repeat(64),
         suspensionOperationId: null,
+        authoritativeDns: childAuthoritativeDns,
       }],
       websiteId: 'website-1',
       applicationId: 'application-1',
@@ -156,7 +183,7 @@ function childRemovalPreview(overrides = {}) {
         crons: { status: 'available', ids: [] },
         dockerWorkloads: { status: 'available', ids: [] },
       },
-      authoritativeDns: null,
+      authoritativeDns: childNoZoneDnsPlan(),
     },
     hardBlockers: [],
     readyToStart: true,
@@ -608,6 +635,94 @@ function dnsRetirementRuntimeFixture({ initialChild = null, preview = dnsRetirem
   };
 }
 
+function childDnsRetirementRuntimeFixture() {
+  let previewCalls = 0;
+  let startCalls = 0;
+  let listCalls = 0;
+  const preview = {
+    version: 1,
+    operation: 'dns_zone_retirement_impact',
+    domain: {
+      id: 'child-domain-1',
+      serverId: 'local',
+      primaryDomain: 'api.example.com',
+      websiteId: null,
+      certificateId: null,
+      desiredRevision: 2,
+      state: 'suspended',
+    },
+    hierarchy: { descendantCount: 0, descendants: [] },
+    routing: { active: false },
+    zone: {
+      exists: true,
+      snapshotDigest: '6'.repeat(64),
+      ownershipOrigin: { evidenceDigest: '7'.repeat(64) },
+    },
+    retention: { configured: true, snapshotRetentionDays: 14 },
+    blockers: [],
+    retirementPlanReady: true,
+    previewDigest: '8'.repeat(64),
+    confirmation: 'retire-child-authoritative-zone-confirmation',
+    sideEffects: false,
+  };
+  const child = {
+    id: 'child-dns-retirement-operation-1',
+    domainId: 'child-domain-1',
+    serverId: 'local',
+    zoneName: 'api.example.com',
+    domainRevision: 2,
+    previewDigest: preview.previewDigest,
+    snapshotDigest: '6'.repeat(64),
+    ownershipEvidenceDigest: '7'.repeat(64),
+    snapshotRetentionDays: 14,
+    status: 'deleted',
+    result: {
+      deleted: true,
+      changed: true,
+      snapshotDigest: '6'.repeat(64),
+      deletedAt: '2026-09-18T21:00:00.000Z',
+      retainUntil: '2026-10-02T21:00:00.000Z',
+    },
+    error: null,
+    recovery: {
+      required: false,
+      automaticReplayBlocked: false,
+      reason: null,
+      retryable: false,
+      retryConfirmation: null,
+    },
+    createdAt: '2026-09-18T20:59:00.000Z',
+    updatedAt: '2026-09-18T21:00:00.000Z',
+  };
+  let current = null;
+  return {
+    runtime: {
+      async preview(input) {
+        previewCalls += 1;
+        assert.deepEqual(input, { domainId: 'child-domain-1' });
+        return preview;
+      },
+      async start(input) {
+        startCalls += 1;
+        assert.deepEqual(input, {
+          domainId: 'child-domain-1',
+          previewDigest: preview.previewDigest,
+          confirmation: preview.confirmation,
+        });
+        current = child;
+        return current;
+      },
+      async retry() { throw new Error('unexpected child DNS retry'); },
+      async listForDomain(id) {
+        listCalls += 1;
+        assert.equal(id, 'child-domain-1');
+        return current ? [current] : [];
+      },
+    },
+    counts: () => ({ previewCalls, startCalls, listCalls }),
+  };
+}
+
 async function completeRoutingStep(registry, preview = leafRemovalPreview()) {
   const operation = await registry.create(preview);
   const running = await registry.markStepRunning(operation.id, operation.steps[0].id);
@@ -721,6 +836,98 @@ test('explicit parent continuations drive one parent-owned leaf child Domain ope
   childOperations = await registry.listForDomain('child-domain-1');
   assert.equal(childOperations[0].status, 'removed');
   assert.deepEqual(domains.counts(), { detachCalls: 1, finalizeCalls: 1 });
+});
+
+test('parent-owned child removal delegates exact local DNS retirement before child finalization', async () => {
+  const registry = createNestedRegistry();
+  const childDns = childZoneDnsPlan();
+  const parentPreview = removalPreview({ childAuthoritativeDns: childDns });
+  const childPreview = childRemovalPreview({ plan: { authoritativeDns: childDns } });
+  const domains = childDomainControlPlaneFixture();
+  const suspensions = nestedSuspensionRuntime(domains);
+  const dns = childDnsRetirementRuntimeFixture();
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async ({ domainId }) => (
+      domainId === 'domain-1' ? parentPreview : childPreview
+    ),
+    suspensionRuntime: suspensions.runtime,
+    domainRegistry: domains.manager,
+    dnsZoneRetirementRuntime: dns.runtime,
+  });
+
+  let operation = await runtime.start({
+    domainId: parentPreview.domain.id,
+    previewDigest: parentPreview.previewDigest,
+    confirmation: parentPreview.confirmation,
+  });
+  const continueChild = () => runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+
+  operation = await continueChild();
+  operation = await continueChild();
+  operation = await continueChild();
+  let [childOperation] = await registry.listForDomain('child-domain-1');
+  assert.deepEqual(childOperation.steps.map((step) => [step.kind, step.status]), [
+    ['routing_suspend', 'succeeded'],
+    ['website_binding', 'succeeded'],
+    ['authoritative_dns', 'succeeded'],
+    ['metadata_finalization', 'pending'],
+  ]);
+  assert.deepEqual(dns.counts(), { previewCalls: 1, startCalls: 1, listCalls: 1 });
+
+  operation = await continueChild();
+  assert.equal(operation.steps[1].status, 'succeeded');
+  [childOperation] = await registry.listForDomain('child-domain-1');
+  assert.equal(childOperation.status, 'removed');
+  assert.deepEqual(domains.counts(), { detachCalls: 1, finalizeCalls: 1 });
+});
+
+test('child authoritative DNS policy drift blocks before child routing mutation', async () => {
+  const registry = createNestedRegistry();
+  const childDns = childZoneDnsPlan();
+  const parentPreview = removalPreview({ childAuthoritativeDns: childDns });
+  const driftedChild = childRemovalPreview({
+    plan: {
+      authoritativeDns: childZoneDnsPlan({ snapshotRetentionDays: 15 }),
+    },
+  });
+  const domains = childDomainControlPlaneFixture();
+  const suspensions = nestedSuspensionRuntime(domains);
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async ({ domainId }) => (
+      domainId === 'domain-1' ? parentPreview : driftedChild
+    ),
+    suspensionRuntime: suspensions.runtime,
+    domainRegistry: domains.manager,
+  });
+  let operation = await runtime.start({
+    domainId: parentPreview.domain.id,
+    previewDigest: parentPreview.previewDigest,
+    confirmation: parentPreview.confirmation,
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+
+  assert.equal(operation.steps[1].status, 'blocked');
+  assert.equal(operation.steps[1].error.code, 'domain_removal_child_preview_drift');
+  assert.equal((await registry.listForDomain('child-domain-1')).length, 0);
+  assert.equal(suspensions.counts().starts, 1);
+  assert.deepEqual(domains.counts(), { detachCalls: 0, finalizeCalls: 0 });
 });
 
 test('startup closes a running child step only from an exact parent-owned removed operation', async () => {

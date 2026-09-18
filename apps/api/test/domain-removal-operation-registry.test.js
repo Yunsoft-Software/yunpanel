@@ -60,6 +60,14 @@ function preview() {
         desiredRevision: 2,
         checksum: '2'.repeat(64),
         suspensionOperationId: null,
+        authoritativeDns: {
+          state: 'not_applicable',
+          previewDigest: '2'.repeat(64),
+          zoneSnapshotDigest: null,
+          ownershipEvidenceDigest: null,
+          snapshotRetentionDays: null,
+          blockers: [],
+        },
       }],
       websiteId: 'website-1',
       applicationId: 'application-1',
@@ -206,6 +214,15 @@ test('legacy journal plans load without inventing exact child Domain intent evid
   assert.equal(normalized.childDomains, null);
 });
 
+test('prior child snapshots load without inventing authoritative DNS intent', () => {
+  const legacy = preview().plan;
+  delete legacy.childDomains[0].authoritativeDns;
+
+  const normalized = domainRemovalOperationRegistryInternals.normalizedPlan(legacy);
+
+  assert.equal(normalized.childDomains[0].authoritativeDns, null);
+});
+
 test('legacy operations load without inventing parent ownership', () => {
   const current = domainRemovalOperationRegistryInternals.operationFromPreview(
     preview(),
@@ -241,6 +258,14 @@ test('new operations reject missing or drifted child Domain intent evidence', as
   };
   await assert.rejects(
     registry.create(drifted),
+    (error) => error instanceof DomainRemovalOperationRegistryError
+      && error.code === 'domain_removal_operation_state_invalid',
+  );
+
+  const missingDnsIntent = preview();
+  delete missingDnsIntent.plan.childDomains[0].authoritativeDns;
+  await assert.rejects(
+    registry.create(missingDnsIntent),
     (error) => error instanceof DomainRemovalOperationRegistryError
       && error.code === 'domain_removal_operation_state_invalid',
   );

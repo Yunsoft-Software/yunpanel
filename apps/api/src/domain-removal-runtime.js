@@ -310,14 +310,18 @@ function idsWithin(values, allowed) {
   return values.every((value) => allowedIds.has(value));
 }
 
-function noAuthoritativeDnsRetirement(plan) {
-  return plan === null || Boolean(plan
-    && plan.state === 'not_applicable'
-    && plan.zoneSnapshotDigest === null
-    && plan.ownershipEvidenceDigest === null
-    && plan.snapshotRetentionDays === null
-    && Array.isArray(plan.blockers)
-    && plan.blockers.length === 0);
+function exactChildAuthoritativeDnsIntent(expected, current) {
+  return Boolean(expected
+    && current
+    && expected.state === current.state
+    && expected.previewDigest === current.previewDigest
+    && expected.zoneSnapshotDigest === current.zoneSnapshotDigest
+    && expected.ownershipEvidenceDigest === current.ownershipEvidenceDigest
+    && expected.snapshotRetentionDays === current.snapshotRetentionDays
+    && Array.isArray(expected.blockers)
+    && Array.isArray(current.blockers)
+    && expected.blockers.length === current.blockers.length
+    && expected.blockers.every((code, index) => code === current.blockers[index]));
 }
 
 function childPlanWithinParent(operation, intent, plan) {
@@ -325,7 +329,7 @@ function childPlanWithinParent(operation, intent, plan) {
     || !Array.isArray(plan.childDomainIds) || plan.childDomainIds.length !== 0
     || !Array.isArray(plan.childDomains) || plan.childDomains.length !== 0
     || plan.websiteId !== intent.websiteId
-    || !noAuthoritativeDnsRetirement(plan.authoritativeDns)
+    || !exactChildAuthoritativeDnsIntent(intent.authoritativeDns, plan.authoritativeDns)
     || !Array.isArray(plan.activeJobIds) || plan.activeJobIds.length !== 0
     || !idsWithin(plan.certificateIds, operation.plan.certificateIds)
     || !idsWithin(plan.dnsZoneIds, operation.plan.dnsZoneIds)
@@ -1445,7 +1449,7 @@ export const domainRemovalRuntimeInternals = Object.freeze({
   exactDnsRetirementChild,
   dnsRetirementEvidence,
   childDomainIntent,
-  noAuthoritativeDnsRetirement,
+  exactChildAuthoritativeDnsIntent,
   childPlanWithinParent,
   exactChildRemovalPreview,
   exactChildRemovalOperation,

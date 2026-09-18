@@ -11,6 +11,18 @@ const dnsPreviewDigest = 'b'.repeat(64);
 const zoneSnapshotDigest = 'c'.repeat(64);
 const ownershipEvidenceDigest = 'e'.repeat(64);
 
+function noZoneDnsReference(domainId, previewDigest = '1'.repeat(64)) {
+  return {
+    domainId,
+    state: 'not_applicable',
+    previewDigest,
+    zoneSnapshotDigest: null,
+    ownershipEvidenceDigest: null,
+    snapshotRetentionDays: null,
+    blockers: [],
+  };
+}
+
 function domain(overrides = {}) {
   return {
     id: 'domain-1',
@@ -83,7 +95,7 @@ function impact(currentDomain = domain(), overrides = {}) {
           'domain_routing_active',
           'domain_descendants_present',
         ],
-      }],
+      }, noZoneDnsReference('child-domain-1')],
     },
     ...(overrides.dependencies ?? {}),
   };
@@ -142,6 +154,14 @@ test('pins current resource-impact evidence into a deterministic Domain removal 
     desiredRevision: 2,
     checksum: '2'.repeat(64),
     suspensionOperationId: null,
+    authoritativeDns: {
+      state: 'not_applicable',
+      previewDigest: '1'.repeat(64),
+      zoneSnapshotDigest: null,
+      ownershipEvidenceDigest: null,
+      snapshotRetentionDays: null,
+      blockers: [],
+    },
   }]);
   assert.equal(preview.plan.websiteId, 'website-1');
   assert.deepEqual(preview.plan.certificateIds, ['certificate-1']);
@@ -195,7 +215,7 @@ test('non-orchestratable authoritative DNS blocker fails closed', () => {
             ownershipEvidenceDigest,
             snapshotRetentionDays: 30,
             blockers: ['dns_zone_manual_rrsets_present'],
-          }],
+          }, noZoneDnsReference('child-domain-1')],
         },
       },
     },
@@ -243,6 +263,13 @@ test('dependency drift changes the Domain removal preview digest', () => {
       ...changedImpact.dependencies.childDomains,
       childDomain('child-domain-2', currentDomain.id),
     ],
+    authoritativeDns: {
+      ...changedImpact.dependencies.authoritativeDns,
+      items: [
+        ...changedImpact.dependencies.authoritativeDns.items,
+        noZoneDnsReference('child-domain-2', '5'.repeat(64)),
+      ],
+    },
   };
   const second = createDomainRemovalPreview({
     domain: currentDomain,
@@ -319,6 +346,16 @@ test('orders descendant Domain cleanup deepest-first before direct children', ()
       childDomain('child-a', currentDomain.id),
       childDomain('grandchild-b', 'child-b'),
     ],
+    authoritativeDns: {
+      ...nestedImpact.dependencies.authoritativeDns,
+      items: [
+        nestedImpact.dependencies.authoritativeDns.items[0],
+        noZoneDnsReference('child-a', '5'.repeat(64)),
+        noZoneDnsReference('child-b', '6'.repeat(64)),
+        noZoneDnsReference('grandchild-a', '7'.repeat(64)),
+        noZoneDnsReference('grandchild-b', '8'.repeat(64)),
+      ],
+    },
   };
   const preview = createDomainRemovalPreview({
     domain: currentDomain,
@@ -333,6 +370,43 @@ test('orders descendant Domain cleanup deepest-first before direct children', ()
     preview.plan.childDomains.map((child) => child.id),
     preview.plan.childDomainIds,
   );
+});
+
+test('child authoritative DNS ownership and policy are pinned and fail closed on hard blockers', () => {
+  const currentDomain = domain();
+  const base = impact(currentDomain);
+  const withChildZone = {
+    ...base,
+    dependencies: {
+      ...base.dependencies,
+      authoritativeDns: {
+        status: 'available',
+        items: [base.dependencies.authoritativeDns.items[0], {
+          domainId: 'child-domain-1',
+          state: 'blocked',
+          previewDigest: '5'.repeat(64),
+          zoneSnapshotDigest: '6'.repeat(64),
+          ownershipEvidenceDigest: '7'.repeat(64),
+          snapshotRetentionDays: 45,
+          blockers: ['domain_routing_active', 'domain_website_binding_present'],
+        }],
+      },
+    },
+  };
+  const first = createDomainRemovalPreview({ domain: currentDomain, impact: withChildZone });
+  assert.equal(first.readyToStart, true);
+  assert.equal(first.plan.childDomains[0].authoritativeDns.snapshotRetentionDays, 45);
+
+  const drifted = structuredClone(withChildZone);
+  drifted.dependencies.authoritativeDns.items[1].snapshotRetentionDays = 46;
+  const second = createDomainRemovalPreview({ domain: currentDomain, impact: drifted });
+  assert.notEqual(first.previewDigest, second.previewDigest);
+
+  const blocked = structuredClone(withChildZone);
+  blocked.dependencies.authoritativeDns.items[1].blockers = ['dns_zone_manual_rrsets_present'];
+  const blockedPreview = createDomainRemovalPreview({ domain: currentDomain, impact: blocked });
+  assert.equal(blockedPreview.readyToStart, false);
+  assert.deepEqual(blockedPreview.hardBlockers, ['dns_zone_manual_rrsets_present']);
 });
 
 test('rejects disconnected descendant inventory instead of guessing cascade order', () => {
