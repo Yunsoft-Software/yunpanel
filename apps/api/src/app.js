@@ -31,6 +31,7 @@ import { DatabaseHttpError, databaseHttpInternals, mountDatabaseRoutes } from '.
 import { mountPhpMyAdminHandoffRoutes } from './phpmyadmin-handoff-http.js';
 import { PhpMyAdminHandoffError } from './phpmyadmin-handoff-service.js';
 import { mountWebsiteDatabaseDataRoutes } from './website-database-data-http.js';
+import { mountWebsiteDatabaseDeleteRoutes, WebsiteDatabaseDeleteHttpError } from './website-database-delete-http.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { DnsZoneMailDkimRetirementHttpError } from './dns-zone-mail-dkim-retirement-http.js';
 import {
@@ -601,6 +602,18 @@ export function createApp({
       ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
     });
   }
+  if (databaseBindingRegistry && databaseCredentialRegistry && databaseInventoryProvider
+    && typeof jobRegistry.getJob === 'function') {
+    mountWebsiteDatabaseDeleteRoutes(app, {
+      registry: localRegistry,
+      websiteRegistry,
+      databaseBindingRegistry,
+      databaseCredentialRegistry,
+      jobRegistry,
+      databaseInventoryProvider,
+      ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
+    });
+  }
   if (databaseBindingRegistry && databaseCredentialRegistry && databaseCredentialApply) {
     mountDatabaseCredentialRoutes(app, {
       registry: localRegistry,
@@ -643,6 +656,7 @@ export function createApp({
       || error instanceof DatabaseCredentialHttpError
       || error instanceof DatabaseCredentialRegistryError
       || error instanceof DatabaseHttpError
+      || error instanceof WebsiteDatabaseDeleteHttpError
       || error instanceof PhpMyAdminHandoffError
       || error instanceof CertificateMaterialError
       || error instanceof CertificateRegistryError
