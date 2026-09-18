@@ -277,10 +277,19 @@ export async function startConfiguredLocalRuntime({
     }
 
     if (operation === OPERATIONS.DATABASE_DELETE) {
+      const deleteScopeFields = [
+        'websiteId', 'databaseBindingId', 'expectedBindingRevision',
+        'backupId', 'expectedBackupSha256',
+      ];
+      const scoped = deleteScopeFields.some((field) => Object.hasOwn(payload ?? {}, field));
+      const ownership = scoped ? Object.fromEntries(
+        deleteScopeFields.map((field) => [field, payload?.[field]]),
+      ) : null;
       await databaseDeletionReceipts.write({
         serverId,
         jobId,
         databaseName: payload?.name,
+        ownership,
         result,
       });
       return;
