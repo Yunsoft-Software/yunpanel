@@ -408,7 +408,7 @@ test('PHP container metadata migration uses source release identity and isolated
       },
       async inspectMigrationCompensation(value, options) {
         calls.push(['container-migration-compensation-inspect', value, options]);
-        return { satisfied: true, restoredPhpContainerMetadata: true };
+        return { satisfied: true, restoredPhpContainerMetadata: true, receiptState: 'active' };
       },
       async compensateMigration(value, options) {
         calls.push(['container-migration-compensate', value, options]);
@@ -437,7 +437,8 @@ test('PHP container metadata migration uses source release identity and isolated
   assert.equal(applyCall[2].migrationOperationId, operationId);
 
   const inspectedRollback = await handler.inspectContainerMigrationCompensation({ intent: intent(), operationId, releaseOperationId });
-  assert.equal(inspectedRollback.restoredPhpContainerMetadata, true);
+  assert.equal(inspectedRollback.satisfied, false);
+  assert.equal(inspectedRollback.reason, 'php_site_container_migration_compensation_receipt_pending');
   await handler.compensateContainerMigration({ intent: intent(), operationId, releaseOperationId });
   assert.equal(calls.some(([name]) => name === 'container-migration-compensate'), true);
 });
