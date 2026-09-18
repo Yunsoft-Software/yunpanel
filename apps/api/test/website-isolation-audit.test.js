@@ -832,7 +832,7 @@ test('isolation audit opens PHP migration only when the exact site pool is the s
           socketMode: '0660',
           serviceUnit: 'php8.3-fpm.service',
         },
-        differences: ['php_fpm_receipt_missing', 'php_fpm_pool_missing', 'php_fpm_socket_missing', 'php_fpm_runtime_not_ready'],
+        differences: ['php_fpm_receipt_missing', 'php_fpm_pool_missing', 'php_fpm_socket_missing'],
       },
       fpmRuntime: { satisfied: false, reason: 'php_fpm_pool_missing' },
       umask: { satisfied: true, umask: '0027' },
@@ -986,6 +986,29 @@ test('isolation audit opens exact PHP container metadata repair without touching
   }).audit(websiteId);
   assert.equal(blocked.migration.applyAvailable, false);
   assert.equal(blocked.migration.changes[0].action, 'reconcile_isolation_step');
+
+  const inconsistent = await service({
+    runtimeType: 'php',
+    phpContainerMigrationAvailable: true,
+    stepResults: { php_runtime: drift },
+    migrationPreviews: {
+      php_runtime: {
+        ...preview,
+        current: {
+          ...preview.current,
+          fpm: {
+            ...preview.current.fpm,
+            current: {
+              ...preview.current.fpm.current,
+              package: { installed: false, version: null },
+            },
+          },
+        },
+      },
+    },
+  }).audit(websiteId);
+  assert.equal(inconsistent.migration.applyAvailable, false);
+  assert.equal(inconsistent.migration.changes[0].action, 'reconcile_isolation_step');
 });
 
 test('isolation audit pins bounded PHP container, FPM and UMask drift into the migration digest', async () => {
