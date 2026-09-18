@@ -79,6 +79,23 @@ Rollback sınırı operation türüne göre dardır:
 
 Passenger legacy runtime preview'ı `automaticMigration=false` kalır ve isolation journal içinden mutate edilmez; Node Website paneli canonical Application Passenger workflow'una geçer. Static tarafta `static_control` exact three-path metadata repair ve `static_release` exact tree-digest-bound release permission/ACL repair authority'leri ayrıdır; biri diğerinin receipt ownership'ini genişletmez. PHP'de de yalnız exact three-path control-plane metadata repair authority'si açıktır; daha geniş release content/path topology veya shared runtime drift'i bunun dışındadır ve fail-closed kalır.
 
+## DNS zone re-apply recovery
+
+Pre-existing local PowerDNS zone re-apply, Website provisioning compensation'ından ayrı durable operation'dır.
+
+- Preview exact live zone state'ini RRset content/comment, kind ve DNSSEC dahil normalize eder ve `sourceZoneDigest` üretir.
+- Apply başlamadan önce current source snapshot ile desired/template/mail intent'ten deterministik expected-after snapshot/digest aynı operation journal'ına yazılır. Provider mutation bu before/after evidence persist edilmeden başlamaz.
+- Restart veya lost-ack recovery exact live zone digest expected-after digest ile eşleşiyorsa mutation tekrar edilmeden operation `succeeded` kapanabilir.
+- Live state exact source state ise operation henüz uygulanmamış kabul edilir; current control-plane/template revision drift'i eski confirmation'ı geçersiz kılar.
+- Live RRset/kind state'i yalnız journaled before/after parçalarından oluşan mixed bir partial apply ise operation `dns_zone_reapply_partial_apply_detected` ile `failed` olur fakat exact rollback kullanılabilir kalır.
+- Before/after dışında foreign/manual üçüncü state, ekstra RRset veya DNSSEC/topology drift'i rollback ownership'ini bozar ve destructive restore fail-closed kalır.
+- Rollback zone DELETE/recreate yapmaz. Host manager yalnız operation-owned RRset `after -> before` REPLACE/DELETE ve gerekiyorsa exact kind transition uygular; unchanged/manual RRset'ler korunur.
+- Rollback confirmation operation ID, monoton journal `updatedAt`, source digest ve applied digest'e bağlıdır. Journal revision değişince eski confirmation geçersizdir.
+- `rolling_back` state ile restart edilirse API startup yalnız read-only rollback inspection yapar; host mutation otomatik replay edilmez. Exact before-state kanıtlanmışsa journal kapanır, aksi repairable state explicit retry gerektirir.
+- Eski journal sürümlerinde bulunmayan before/after evidence migrate edilirken uydurulmaz; eksik evidence otomatik replay veya exact rollback açmaz.
+
+Gerçek PowerDNS kill/timeout/mixed-state ve manual RRset kabulü `todo.md` T-DNS altında açık kalır.
+
 ## Retry ve continue kuralı
 
 Retry bir bypass yolu değildir.
