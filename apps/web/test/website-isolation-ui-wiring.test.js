@@ -20,8 +20,12 @@ test('site overview binds isolation audit and receipt migration controls to the 
   assert.match(panel, /create_canonical_unix_identity/);
   assert.match(panel, /create_sftp_isolation/);
   assert.match(panel, /create_php_fpm_pool/);
+  assert.match(panel, /repair_php_container_metadata/);
   assert.match(panel, /adapter === 'php'/);
+  assert.match(panel, /adapter === 'php_container'/);
   assert.match(panel, /PHP-FPM pool migration/);
+  assert.match(panel, /PHP container metadata migration/);
+  assert.match(panel, /recursive chown, chmod veya silme yapılmaz/);
   assert.match(panel, /adapter === 'sftp'/);
   assert.match(panel, /SFTP migration/);
   assert.match(panel, /preservedHomeData/);
