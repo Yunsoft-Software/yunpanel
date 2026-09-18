@@ -170,12 +170,12 @@ test('ttyd one-shot site session uses only a private Unix socket and fixed safe 
     '--auth-header', 'X-YunPanel-TTYD-Auth',
   ]);
   assert.ok(args.includes('--terminal-type'));
-  assert.ok(args.includes('/usr/sbin/runuser'));
-  assert.deepEqual(args.slice(-7), [
-    '/usr/sbin/runuser',
-    '-u', siteUser, '--',
+  assert.equal(args[args.indexOf('--uid') + 1], '901');
+  assert.equal(args[args.indexOf('--gid') + 1], '902');
+  assert.equal(args.includes('/usr/sbin/runuser'), false);
+  assert.deepEqual(args.slice(-4), [
     '/bin/bash', '--noprofile', '--norc', '-i',
-  ].slice(-7));
+  ]);
   assert.equal(args.includes('--url-arg'), false);
   assert.equal(args.includes('--credential'), false);
   assert.equal(args.includes('--port'), false);
@@ -215,6 +215,8 @@ test('ttyd root session runs fixed login shell without caller command arguments'
   });
   const args = fx.calls.spawn[0].args;
   assert.deepEqual(args.slice(-2), ['/bin/bash', '--login']);
+  assert.equal(args.includes('--uid'), false);
+  assert.equal(args.includes('--gid'), false);
   assert.equal(fx.calls.spawn[0].options.cwd, '/root');
   assert.equal(fx.calls.spawn[0].options.env.HOME, '/root');
   assert.equal(fx.calls.spawn[0].options.env.USER, 'root');
