@@ -46,6 +46,10 @@ function runtimeIntent(value) {
   });
 }
 
+function containerOperationId(operationId, releaseOperationId) {
+  return releaseOperationId ?? operationId;
+}
+
 export function createWebsitePhpRuntimeProvisioningHandler({
   containerManager = createPhpSiteContainerManager(),
   fpmManager = createPhpFpmSiteManager(),
@@ -131,7 +135,7 @@ export function createWebsitePhpRuntimeProvisioningHandler({
     });
   }
 
-  async function previewMigration({ intent, operationId } = {}) {
+  async function previewMigration({ intent, operationId, releaseOperationId } = {}) {
     const normalized = runtimeIntent(intent);
     if (typeof containerManager.previewMigration !== 'function'
       || typeof fpmManager.previewMigration !== 'function') {
@@ -143,7 +147,7 @@ export function createWebsitePhpRuntimeProvisioningHandler({
     }
 
     const [container, fpm, umask] = await Promise.all([
-      containerManager.previewMigration(normalized, { operationId }),
+      containerManager.previewMigration(normalized, { operationId: containerOperationId(operationId, releaseOperationId) }),
       fpmManager.previewMigration(normalized, { operationId }),
       umaskManager.inspect('php'),
     ]);
@@ -187,6 +191,7 @@ export function createWebsitePhpRuntimeProvisioningHandler({
 
   async function inspectMigrationOperation(context = {}) {
     const normalized = runtimeIntent(context.intent);
+    const releaseOperationId = containerOperationId(context.operationId, context.releaseOperationId);
     if (typeof fpmManager.inspectMigrationOperation !== 'function') {
       throw new WebsitePhpRuntimeProvisioningError(
         'website_php_runtime_migration_lifecycle_unavailable',
@@ -195,7 +200,7 @@ export function createWebsitePhpRuntimeProvisioningHandler({
       );
     }
     const [container, umask, fpm] = await Promise.all([
-      containerManager.inspect(normalized, { operationId: context.operationId }),
+      containerManager.inspect(normalized, { operationId: releaseOperationId }),
       umaskManager.inspect('php'),
       fpmManager.inspectMigrationOperation(normalized, { operationId: context.operationId }),
     ]);
