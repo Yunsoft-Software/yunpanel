@@ -16,6 +16,7 @@ Son phpMyAdmin browser handoff UI ilerlemesi: `docs/history/phpmyadmin-browser-h
 Son Website database data scope ilerlemesi: `docs/history/database-website-data-scope-2026-09-18.md`.
 Son Website database delete lifecycle ilerlemesi: `docs/history/database-delete-lifecycle-2026-09-18.md`.
 Son elFinder scoped handoff/FPM ilerlemesi: `docs/history/elfinder-scoped-handoff-progress-2026-09-18.md`.
+Son ttyd/IntegratedToolGateway ilerlemesi: `docs/history/ttyd-integrated-gateway-progress-2026-09-18.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -71,12 +72,10 @@ Kaynak kod tarafındaki shared vendor package, hardened connector, per-Website F
 
 ## P0.7 — IntegratedToolGateway
 
-- [ ] phpMyAdmin'da kanıtlanan Owner/session gate + short-lived capability + same-origin Unix-socket proxy modelini elFinder ve ttyd için reusable IntegratedToolGateway sözleşmesine genelleştir.
-- [ ] Kalan vendor admin portları public açılmasın.
-- [ ] elFinder/ttyd capability başka Website veya audience'a replay edilemesin.
-- [ ] ttyd on-demand one-shot: site terminali site user/cwd, server terminali Owner root.
-- [ ] ttyd acceptance sonrası custom node-pty/xterm backend kaldır.
-- [ ] Roundcube Owner panel gateway'ine bağlı olmasın; mailbox auth kullansın.
+Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözleşmesi, session-bound ttyd access gate, masked distro ttyd runtime, on-demand one-shot Unix-socket sessions, Website UID/GID drop, same-origin HTTP/WebSocket proxy, 15 saniyelik live reauthorization, Owner-bound explicit close ve ttyd-primary Terminal UI tamamlandı. Gerçek Ubuntu/browser/TUI kabul kapıları `todo.md` T-TOOLS altındadır.
+
+- [ ] T-TOOLS ttyd kabulü geçtikten sonra custom `node-pty` process manager, legacy `/api/terminal` WebSocket transport, embedded xterm fallback ve native node-pty package/build bağımlılığını kaldır; package upgrade/rollback ve açık session cleanup'ını doğrula.
+- [ ] Roundcube Owner panel gateway'ine bağlı olmasın; shared webmail yüzeyi mailbox auth kullansın.
 
 ## P0.8 — Transactional Website/domain provisioning
 
@@ -163,10 +162,9 @@ Kaynak kod tarafındaki shared vendor package, hardened connector, per-Website F
 2. **PowerDNS operator recovery** — restart-sonrası güvenli explicit rollback, typed confirmation ve fail-closed recovery control surface.
 3. **Mail explicit rollback** — mevcut v3 backup/previous-state preview'ından durable restore, compensation/restart recovery ve monoton control-plane reconciliation.
 4. **Versioned DNS Zone Template** — mail source entegrasyonu, autodiscover endpoint gate, DNSSEC rollover, zone suspend/delete ownership.
-5. **elFinder**.
-6. **Transactional create/delete provisioning** parçalarını tek lifecycle'a birleştir.
-7. **TLS/autodiscover/recovery hardening**.
-8. Runtime migration/backup/monitoring/security/site extras.
-9. Legacy cleanup ve en son UI/UX polish.
+5. **Transactional create/delete provisioning** parçalarını tek lifecycle'a birleştir.
+6. **TLS/autodiscover/recovery hardening**.
+7. Runtime migration/backup/monitoring/security/site extras.
+8. Legacy cleanup ve en son UI/UX polish.
 
 Her küçük dilim source test kontratıyla ayrı commit edilir. GitHub Actions kullanılmaz. Gerçek Ubuntu/package/public DNS/SMTP/browser/provider acceptance bu ortamda yapılamıyorsa `todo.md`'ye bırakılır ve ilgili P0 kapısı acceptance geçmeden `DONE` olmaz.
