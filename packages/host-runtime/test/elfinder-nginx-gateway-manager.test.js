@@ -189,6 +189,18 @@ test('elFinder gateway configtest failure restores exact previous config before 
   assert.equal(reloads.length, 1);
 });
 
+test('elFinder gateway rejects unsafe snapshot directories before live config mutation', async () => {
+  const fx = fixture();
+  fx.fs.set('/state/elfinder-nginx', record('symlink', { mode: 0o777 }));
+
+  await assert.rejects(
+    fx.manager.apply(),
+    (error) => error instanceof ElFinderNginxGatewayError
+      && error.code === 'elfinder_gateway_state_directory_unsafe',
+  );
+  assert.equal(fx.fs.has(elFinderNginxTemplatePolicy.configPath), false);
+});
+
 test('elFinder gateway missing shared asset fails before Nginx config mutation', async () => {
   const missingAsset = elFinderNginxGatewayInternals.requiredAssets[0];
   const fx = fixture({ missingAsset });
