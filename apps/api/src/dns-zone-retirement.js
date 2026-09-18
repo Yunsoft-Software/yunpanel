@@ -148,7 +148,8 @@ function provisioningOwnership(domain, operations) {
   const candidates = [];
   let invalidEvidenceCount = 0;
   for (const operation of operations) {
-    if (!operation || operation.websiteId !== domain.websiteId || !Array.isArray(operation.steps)) continue;
+    if (!operation || typeof operation.websiteId !== 'string' || !operation.websiteId
+      || !Array.isArray(operation.steps)) continue;
     for (const step of operation.steps) {
       if (!step || step.kind !== 'dns_zone' || step.state !== 'succeeded'
         || step.compensation?.state === 'succeeded' || !step.evidence || step.evidence.created !== true) {
@@ -171,6 +172,7 @@ function provisioningOwnership(domain, operations) {
           updatedAt: operation.updatedAt,
           evidenceDigest: digest({
             operationId: operation.operationId,
+            websiteId: operation.websiteId,
             intent: step.intent,
             evidence: step.evidence,
           }),
