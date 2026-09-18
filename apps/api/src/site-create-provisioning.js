@@ -72,6 +72,19 @@ function passengerIntent(preview, applicationId, paths = createWebsitePathContra
   return Object.freeze(base);
 }
 
+function elFinderIntent(preview, applicationId) {
+  const identity = createApplicationIdentity(applicationId);
+  if (preview.plan.website.unixUser !== identity.unixUser) {
+    throw new Error('elFinder Website Unix user does not match the managed Application identity');
+  }
+  return Object.freeze({
+    adapter: 'elfinder-fpm',
+    websiteId: preview.ids.websiteId,
+    applicationId: identity.applicationId,
+    unixUser: identity.unixUser,
+  });
+}
+
 function phpBootstrapIntent(preview, applicationId, paths = createWebsitePathContract({
   websiteId: preview?.ids?.websiteId,
   applicationId,
@@ -357,6 +370,12 @@ export function siteCreateProvisioningPlan(preview) {
       homeDirectory: paths.workspace.homeDirectory,
       documentRoot: preview.plan.website.documentRoot,
     }));
+    steps.push(hostStep(
+      'elfinder',
+      'elfinder',
+      elFinderIntent(preview, applicationId),
+      { compensationState: 'pending' },
+    ));
     if (preview.plan.database) {
       steps.push(hostStep(
         'database',
@@ -464,6 +483,7 @@ export function siteCreateProvisioningPlan(preview) {
 
 export const siteCreateProvisioningInternals = Object.freeze({
   passengerIntent,
+  elFinderIntent,
   phpBootstrapIntent,
   phpFpmIntent,
   nodeReleaseIntent,
