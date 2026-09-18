@@ -172,6 +172,164 @@ export function createStaticPublishIsolationManager({
     });
   }
 
+  async function previewMigration(rawIntent) {
+    const spec = normalizeIntent(rawIntent);
+
+    let identity;
+    try {
+      const value = await inspectIdentity(spec);
+      identity = value?.satisfied === true
+        ? Object.freeze({
+          satisfied: true,
+          uid: value.uid,
+          gid: value.gid,
+          homeDirectory: value.homeDirectory,
+        })
+        : Object.freeze({
+          satisfied: false,
+          reason: value?.reason ?? 'static_publish_identity_unavailable',
+        });
+    } catch (error) {
+      identity = Object.freeze({
+        satisfied: false,
+        reason: typeof error?.code === 'string' ? error.code : 'static_publish_identity_inspection_failed',
+      });
+    }
+
+    async function controlState(target) {
+      try {
+        const info = await lstatFn(target);
+        return Object.freeze({
+          present: true,
+          directory: Boolean(info?.isDirectory?.()),
+          symbolicLink: Boolean(info?.isSymbolicLink?.()),
+          uid: Number.isSafeInteger(info?.uid) ? info.uid : null,
+          gid: Number.isSafeInteger(info?.gid) ? info.gid : null,
+          mode: modeOf(info).toString(8).padStart(4, '0'),
+        });
+      } catch (error) {
+        if (missing(error)) return Object.freeze({ present: false });
+        throw new StaticPublishIsolationError('static_publish_path_inspection_failed', 'Static publish path could not be inspected');
+      }
+    }
+
+    const [aclAvailable, publishRootState, releasesRootState] = await Promise.all([
+      aclToolsAvailable(),
+      controlState(spec.publishRoot),
+      controlState(spec.releasesRoot),
+    ]);
+
+    let releases = [];
+    let releaseListError = null;
+    try { releases = await releaseDirectories(spec); }
+    catch (error) {
+      releaseListError = typeof error?.code === 'string' ? error.code : 'static_publish_release_list_failed';
+    }
+
+    const releaseStates = [];
+    if (!releaseListError) {
+      for (const releasePath of releases) {
+        const releaseId = path.posix.basename(releasePath);
+        let satisfied = false;
+        let reason = null;
+        if (!identity.satisfied) {
+          reason = identity.reason;
+        } else if (!aclAvailable) {
+          reason = 'static_publish_acl_package_missing';
+        } else {
+          try {
+            await inspectRelease(releasePath, identity);
+            satisfied = true;
+          } catch (error) {
+            reason = typeof error?.code === 'string' ? error.code : 'static_publish_release_inspection_failed';
+          }
+        }
+        releaseStates.push(Object.freeze({
+          releaseId,
+          satisfied,
+          reason,
+        }));
+      }
+    }
+
+    let current = Object.freeze({ present: false });
+    try {
+      const [target, info] = await Promise.all([readlinkFn(spec.currentPath), lstatFn(spec.currentPath)]);
+      current = Object.freeze({
+        present: true,
+        symbolicLink: Boolean(info?.isSymbolicLink?.()),
+        uid: Number.isSafeInteger(info?.uid) ? info.uid : null,
+        gid: Number.isSafeInteger(info?.gid) ? info.gid : null,
+        target: typeof target === 'string' ? target : null,
+      });
+    } catch (error) {
+      if (!missing(error)) {
+        current = Object.freeze({
+          present: false,
+          error: typeof error?.code === 'string' ? error.code : 'static_publish_current_inspection_failed',
+        });
+      }
+    }
+
+    const differences = [];
+    if (!identity.satisfied) differences.push(identity.reason);
+    if (!aclAvailable) differences.push('static_publish_acl_package_missing');
+    for (const [state, code] of [
+      [publishRootState, 'static_publish_container_drift'],
+      [releasesRootState, 'static_publish_container_drift'],
+    ]) {
+      if (!state.present) differences.push('static_publish_container_missing');
+      else if (!state.directory || state.symbolicLink || state.uid !== 0 || state.gid !== 0 || state.mode !== '0711') {
+        differences.push(code);
+      }
+    }
+    if (releaseListError) differences.push(releaseListError);
+    else if (releaseStates.length < 1) differences.push('static_publish_release_missing');
+    for (const state of releaseStates) {
+      if (!state.satisfied && state.reason) differences.push(state.reason);
+    }
+    if (!current.present) {
+      differences.push(current.error ?? 'static_publish_current_missing');
+    } else {
+      const releaseId = releaseIdFromTarget(current.target);
+      if (!current.symbolicLink || current.uid !== 0 || current.gid !== 0 || !releaseId) {
+        differences.push('static_publish_current_drift');
+      } else if (!releaseStates.some((entry) => entry.releaseId === releaseId)) {
+        differences.push('static_publish_current_drift');
+      }
+    }
+
+    return Object.freeze({
+      version: 1,
+      adapter: 'static-publish-isolation',
+      satisfied: differences.length === 0,
+      current: Object.freeze({
+        identity,
+        aclToolsAvailable: aclAvailable,
+        publishRoot: publishRootState,
+        releasesRoot: releasesRootState,
+        releases: Object.freeze(releaseStates),
+        current,
+      }),
+      desired: Object.freeze({
+        websiteId: spec.websiteId,
+        applicationId: spec.applicationId,
+        unixUser: spec.identity.unixUser,
+        homeDirectory: spec.identity.paths.workspace.homeDirectory,
+        publishRoot: spec.publishRoot,
+        releasesRoot: spec.releasesRoot,
+        currentPath: spec.currentPath,
+        controlDirectoryMode: '0711',
+        releaseDirectoryMode: '0750',
+        releaseFileMode: '0640',
+        nginxDirectoryAcl: 'user:www-data:r-x',
+        nginxFileAcl: 'user:www-data:r--',
+        aclPackage: ACL_PACKAGE,
+      }),
+      differences: Object.freeze([...new Set(differences)]),
+    });
+  }
+
   async function inspect(rawIntent) {
     const spec = normalizeIntent(rawIntent);
     const identity = await inspectIdentity(spec);
@@ -256,7 +414,7 @@ export function createStaticPublishIsolationManager({
     return verified;
   }
 
-  return Object.freeze({ inspect, apply });
+  return Object.freeze({ inspect, previewMigration, apply });
 }
 
 export const staticPublishIsolationInternals = Object.freeze({
