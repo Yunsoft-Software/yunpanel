@@ -114,7 +114,7 @@ function browserProxyHeaders(request) {
     if (!HOP_BY_HOP_HEADERS.has(name) && value !== undefined
       && !['authorization', 'forwarded', 'host', 'x-forwarded-for', 'x-real-ip',
         'x-yunpanel-client-ip', 'x-yunpanel-proxy-token', 'x-yunpanel-tool-session',
-        'x-yunpanel-ttyd-auth',
+        'x-yunpanel-tool-transport', 'x-yunpanel-ttyd-auth',
         'x-yunpanel-elfinder-unix-user', 'x-yunpanel-elfinder-website-id',
         'x-yunpanel-elfinder-application-id'].includes(name)) {
       headers[name] = value;
@@ -176,12 +176,16 @@ function authorizeElFinderGateway(request, options) {
   });
 }
 
-function authorizeTtydGateway(request, sessionId, options) {
+function authorizeTtydGateway(request, sessionId, transport, options) {
+  if (!['http', 'websocket'].includes(transport)) return Promise.resolve(503);
   return authorizeToolGateway(request, {
     ...options,
     accessPath: TTYD_GATEWAY_ACCESS_PATH,
     label: 'ttyd',
-    extraHeaders: { 'x-yunpanel-tool-session': sessionId },
+    extraHeaders: {
+      'x-yunpanel-tool-session': sessionId,
+      'x-yunpanel-tool-transport': transport,
+    },
   });
 }
 
@@ -956,7 +960,7 @@ export function createPanelServer({
         reply(response, 404, 'Not found.');
         return;
       }
-      const accessStatus = await authorizeTtydGateway(request, ttydRoute.sessionId, {
+      const accessStatus = await authorizeTtydGateway(request, ttydRoute.sessionId, 'http', {
         apiHost, apiPort, clientIp, proxyToken,
       });
       if (accessStatus !== 204) {
@@ -1077,7 +1081,7 @@ export function createPanelServer({
     if (!clientIp || !allowedClients.has(clientIp)) { rejectSocket(socket, 403); return; }
     const ttydRoute = parseTtydGatewayPath(requestUrl.pathname);
     if (ttydRoute) {
-      void authorizeTtydGateway(request, ttydRoute.sessionId, {
+      void authorizeTtydGateway(request, ttydRoute.sessionId, 'websocket', {
         apiHost, apiPort, clientIp, proxyToken,
       }).then((accessStatus) => {
         if (socket.destroyed) return;
