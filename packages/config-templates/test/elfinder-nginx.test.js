@@ -35,6 +35,7 @@ test('elFinder gateway exposes only packaged browser assets and the hardened con
   assert.match(content, /location \^~ \/assets\/jquery-ui\//);
   assert.match(content, /alias \/usr\/share\/javascript\/jquery-ui\//);
   assert.match(content, /location \^~ \/vendor\//);
+  assert.match(content, /alias \/usr\/share\/yunpanel\/elfinder\/vendor\/elfinder\//);
   assert.match(content, /vendor\/php\//);
   assert.match(content, /vendor\/files\//);
   assert.match(content, /location = \/index\.html/);
