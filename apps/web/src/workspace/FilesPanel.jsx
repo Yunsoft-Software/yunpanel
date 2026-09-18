@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { panelRequest } from '../api.js';
+import { createElFinderHandoff, panelRequest } from '../api.js';
+import { openWebsiteElFinder } from './elfinder-client.js';
 import { Button, ConfirmDialog, EmptyState, ErrorNotice, Section } from './PanelKit.jsx';
 
 function parentPath(value) {
@@ -15,7 +16,7 @@ function sizeLabel(value) {
   return `${(value / (1024 ** 2)).toFixed(1)} MB`;
 }
 
-export default function FilesPanel({ websiteId }) {
+export default function FilesPanel({ serverId, websiteId }) {
   const [path, setPath] = useState('');
   const [listing, setListing] = useState(null);
   const [editor, setEditor] = useState(null);
@@ -23,6 +24,21 @@ export default function FilesPanel({ websiteId }) {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+
+  async function openElFinder() {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      await openWebsiteElFinder({
+        serverId,
+        websiteId,
+        issueHandoff: createElFinderHandoff,
+      });
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setError(failure.message);
+      setBusy(false);
+    }
+  }
 
   const load = useCallback(async (nextPath = path) => {
     setBusy(true); setError(null); setEditor(null);
@@ -85,7 +101,11 @@ export default function FilesPanel({ websiteId }) {
   }
 
   return <>
-    <Section title="Site dosyaları" description="Aktif release kökünü site kullanıcısının yetkileriyle yönetin." actions={<Button icon="refresh" disabled={busy} onClick={() => load(path)}>Yenile</Button>}>
+    <Section
+      title="Site dosyaları"
+      description="Birincil dosya yöneticisi elFinder'dır; işlemler canonical Website HOME içinde site kullanıcısı yetkileriyle çalışır."
+      actions={<div className="ws-actions"><Button variant="primary" icon="folder" disabled={busy} onClick={openElFinder}>{busy ? 'Hazırlanıyor…' : 'elFinder ile aç'}</Button><Button icon="refresh" disabled={busy} onClick={() => load(path)}>Legacy görünümü yenile</Button></div>}
+    >
       <ErrorNotice error={error} />
       <div className="ws-section-body ws-actions"><Button disabled={busy || !path} onClick={() => load(parentPath(path))}>Üst klasör</Button><strong>/{path}</strong></div>
       {busy && !listing && <div className="ws-loading" role="status"><span className="ws-spinner" />Dosyalar yükleniyor…</div>}
