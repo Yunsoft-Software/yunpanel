@@ -81,9 +81,29 @@ test('PowerDNS HTTP exposes durable Domain zone reapply preview/apply/status wit
     status: 'succeeded',
     result: { satisfied: true, zoneName: 'example.com', serial: 2026091601, changedRrsetCount: 3, manualRrsetCount: 1 },
   };
+  const rollbackPreview = {
+    operation,
+    inspection: {
+      satisfied: false,
+      repairCandidate: true,
+      zoneName: 'example.com',
+      sourceZoneDigest: 'b'.repeat(64),
+      appliedZoneDigest: 'c'.repeat(64),
+      pendingRrsetCount: 2,
+      kindChangeRequired: true,
+    },
+    confirmation: `rollback-dns-zone-reapply:${domainId}:${operationId}:2026-09-18T16:00:00.000Z:${'b'.repeat(64)}:${'c'.repeat(64)}`,
+  };
+  const rolledBack = {
+    ...operation,
+    status: 'rolled_back',
+    rollback: { status: 'succeeded', available: false },
+  };
   const app = mountWith({
     preview: async (input) => { calls.push(['preview', input]); return preview; },
     start: async (input) => { calls.push(['start', input]); return operation; },
+    rollbackPreview: async (input) => { calls.push(['rollbackPreview', input]); return rollbackPreview; },
+    rollback: async (input) => { calls.push(['rollback', input]); return rolledBack; },
     get: async (id) => { calls.push(['get', id]); return operation; },
     listForDomain: async (id) => { calls.push(['list', id]); return [operation]; },
   });
@@ -109,11 +129,39 @@ test('PowerDNS HTTP exposes durable Domain zone reapply preview/apply/status wit
     }),
     { data: operation },
   );
+  assert.deepEqual(
+    await invoke(app, 'POST /api/domains/:domainId/dns/reapply-operations/:operationId/rollback-preview', {
+      params: { domainId, operationId },
+      body: {},
+    }),
+    { data: rollbackPreview },
+  );
+  assert.deepEqual(
+    await invoke(app, 'POST /api/domains/:domainId/dns/reapply-operations/:operationId/rollback', {
+      params: { domainId, operationId },
+      body: {
+        expectedUpdatedAt: '2026-09-18T16:00:00.000Z',
+        sourceZoneDigest: 'b'.repeat(64),
+        appliedZoneDigest: 'c'.repeat(64),
+        confirmation: rollbackPreview.confirmation,
+      },
+    }),
+    { data: rolledBack },
+  );
   assert.deepEqual(calls, [
     ['preview', { domainId }],
     ['start', { domainId, previewDigest: preview.previewDigest, confirmation: preview.confirmation }],
     ['list', domainId],
     ['get', operationId],
+    ['rollbackPreview', { domainId, operationId }],
+    ['rollback', {
+      domainId,
+      operationId,
+      expectedUpdatedAt: '2026-09-18T16:00:00.000Z',
+      sourceZoneDigest: 'b'.repeat(64),
+      appliedZoneDigest: 'c'.repeat(64),
+      confirmation: rollbackPreview.confirmation,
+    }],
   ]);
   assert.equal(JSON.stringify(operation).includes('apiKey'), false);
   assert.equal(JSON.stringify(operation).includes(preview.confirmation), false);
@@ -124,6 +172,8 @@ test('PowerDNS HTTP rejects unexpected or incomplete zone reapply bodies before 
   const app = mountWith({
     preview: async () => { called = true; return {}; },
     start: async () => { called = true; return {}; },
+    rollbackPreview: async () => { called = true; return {}; },
+    rollback: async () => { called = true; return {}; },
     get: async () => null,
     listForDomain: async () => [],
   });
@@ -142,6 +192,27 @@ test('PowerDNS HTTP rejects unexpected or incomplete zone reapply bodies before 
     }),
     (error) => error instanceof PowerDnsHttpError && error.code === 'dns_zone_reapply_input_invalid',
   );
+  await assert.rejects(
+    invoke(app, 'POST /api/domains/:domainId/dns/reapply-operations/:operationId/rollback-preview', {
+      params: { domainId, operationId },
+      body: { force: true },
+    }),
+    (error) => error instanceof PowerDnsHttpError
+      && error.code === 'dns_zone_reapply_rollback_preview_input_invalid',
+  );
+  await assert.rejects(
+    invoke(app, 'POST /api/domains/:domainId/dns/reapply-operations/:operationId/rollback', {
+      params: { domainId, operationId },
+      body: {
+        expectedUpdatedAt: 'not-a-date',
+        sourceZoneDigest: 'b'.repeat(64),
+        appliedZoneDigest: 'c'.repeat(64),
+        confirmation: 'rollback',
+      },
+    }),
+    (error) => error instanceof PowerDnsHttpError
+      && error.code === 'dns_zone_reapply_rollback_input_invalid',
+  );
   assert.equal(called, false);
 });
 
@@ -150,6 +221,8 @@ test('PowerDNS HTTP does not expose a reapply operation through the wrong Domain
   const app = mountWith({
     preview: async () => ({}),
     start: async () => ({}),
+    rollbackPreview: async () => ({}),
+    rollback: async () => ({}),
     get: async () => ({ id: operationId, domainId, status: 'succeeded' }),
     listForDomain: async () => [],
   });
