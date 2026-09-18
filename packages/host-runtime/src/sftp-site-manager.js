@@ -346,8 +346,6 @@ export function createSftpSiteManager({
       await run(SYSTEMCTL_PATH, ['disable', '--now', unitName], { timeout: 60_000 });
       await rmFn(unitPath(unitName), { force: true });
       await run(SYSTEMCTL_PATH, ['daemon-reload'], { timeout: 30_000 });
-      await rmFn(spec.paths.mountDirectory, { recursive: true, force: true });
-      await rmFn(spec.paths.chrootDirectory, { recursive: true, force: true });
     } catch (error) {
       if (error instanceof SftpSiteManagerError) throw error;
       throw new SftpSiteManagerError('sftp_compensation_failed', 'SFTP Website isolation could not be removed safely');
