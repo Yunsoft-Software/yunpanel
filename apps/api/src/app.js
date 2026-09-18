@@ -186,6 +186,7 @@ export function createApp({
   powerDnsAuthoritativeService = null,
   powerDnsSecretRegistry = null,
   dnsZoneRetirementImpactService = null,
+  dnsZoneRetirementPolicy = null,
   databaseBindingRegistry = null,
   databaseCredentialRegistry = null,
   databaseCredentialApplyService = null,
@@ -277,6 +278,7 @@ export function createApp({
         provisioningRegistry: typeof websiteProvisioningRuntime?.registry?.listForDnsZone === 'function'
           ? websiteProvisioningRuntime.registry
           : null,
+        retentionPolicy: dnsZoneRetirementPolicy,
         localServerId,
       })
       : null
