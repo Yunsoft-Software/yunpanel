@@ -424,4 +424,9 @@ test('runtime exposes the PHP pool migration lifecycle on the canonical PHP hand
   assert.equal(typeof provisioning.handlers.php_runtime.applyContainerMigration, 'function');
   assert.equal(typeof provisioning.handlers.php_runtime.inspectContainerMigrationCompensation, 'function');
   assert.equal(typeof provisioning.handlers.php_runtime.compensateContainerMigration, 'function');
+  assert.equal(typeof provisioning.handlers.static_runtime.previewMigration, 'function');
+  assert.equal(typeof provisioning.handlers.static_runtime.inspectControlMigrationOperation, 'function');
+  assert.equal(typeof provisioning.handlers.static_runtime.applyControlMigration, 'function');
+  assert.equal(typeof provisioning.handlers.static_runtime.inspectControlMigrationCompensation, 'function');
+  assert.equal(typeof provisioning.handlers.static_runtime.compensateControlMigration, 'function');
 });
