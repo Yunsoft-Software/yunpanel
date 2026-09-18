@@ -463,6 +463,19 @@ export function createWebsiteProvisioningHandlers({
     return passengerSiteManager.inspect(normalized);
   }
 
+  async function previewRuntimeMigration(context = {}) {
+    const normalized = runtimeIntent(context.intent);
+    if (normalized.adapter === 'static') return legacyStaticPending(normalized);
+    if (typeof passengerSiteManager.previewMigration !== 'function') {
+      throw new WebsiteProvisioningHandlerError(
+        'website_passenger_migration_preview_unavailable',
+        'Passenger Website migration preview is unavailable',
+        503,
+      );
+    }
+    return passengerSiteManager.previewMigration(normalized);
+  }
+
   async function applyPhpRuntime({ intent, operationId } = {}) {
     return phpFpmSiteManager.apply(phpRuntimeIntent(intent), { operationId });
   }
@@ -562,6 +575,7 @@ export function createWebsiteProvisioningHandlers({
     runtime: Object.freeze({
       apply: applyRuntime,
       inspect: inspectRuntime,
+      previewMigration: previewRuntimeMigration,
     }),
     php_runtime: Object.freeze({
       apply: applyPhpRuntime,
