@@ -134,9 +134,6 @@ function provisioningOwnership(domain, operations) {
   if ((domain.parentDomainId ?? null) !== null) {
     return Object.freeze({ status: 'parent_zone_owned', operationId: null, evidenceDigest: null });
   }
-  if ((domain.websiteId ?? null) === null) {
-    return Object.freeze({ status: 'website_unbound', operationId: null, evidenceDigest: null });
-  }
   if (operations === null) {
     return Object.freeze({ status: 'unavailable', operationId: null, evidenceDigest: null });
   }
@@ -298,7 +295,7 @@ export function createDnsZoneRetirementService({
   if (!domainRegistry || typeof domainRegistry.getDomain !== 'function'
     || typeof domainRegistry.listDomains !== 'function'
     || !powerDnsSecretRegistry || typeof powerDnsSecretRegistry.materializeForServer !== 'function'
-    || (provisioningRegistry !== null && typeof provisioningRegistry.listForWebsite !== 'function')
+    || (provisioningRegistry !== null && typeof provisioningRegistry.listForDnsZone !== 'function')
     || !zoneManager || typeof zoneManager.getZone !== 'function'
     || typeof localServerId !== 'string' || !localServerId) {
     throw new DnsZoneRetirementError(
@@ -329,9 +326,14 @@ export function createDnsZoneRetirementService({
     }
 
     let provisioningOperations = null;
-    if ((domain.websiteId ?? null) !== null && provisioningRegistry !== null) {
-      try { provisioningOperations = await provisioningRegistry.listForWebsite(domain.websiteId); }
-      catch {
+    if ((domain.parentDomainId ?? null) === null && provisioningRegistry !== null) {
+      try {
+        provisioningOperations = await provisioningRegistry.listForDnsZone({
+          serverId: domain.serverId,
+          webDomainId: domain.id,
+          zoneName: domain.primaryDomain,
+        });
+      } catch {
         throw new DnsZoneRetirementError(
           'dns_zone_retirement_provisioning_history_unavailable',
           'Website provisioning ownership history could not be inspected',
