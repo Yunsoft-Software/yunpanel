@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createApplicationIdentity } from '@yunpanel/host-runtime/application-identity';
 import {
   createWebsiteIsolationMigrationRegistry,
   websiteIsolationMigrationPublicView,
@@ -205,6 +206,52 @@ function phpContainerAudit() {
           },
         },
         desired: { phpContainer: desired },
+      }],
+    },
+  };
+}
+
+function staticControlAudit() {
+  const identity = createApplicationIdentity(applicationId);
+  const publishRoot = identity.paths.static.publishRoot;
+  const desired = {
+    websiteId,
+    applicationId,
+    unixUser: applicationUser,
+    homeDirectory,
+    publishRoot,
+    releasesRoot: `${publishRoot}/releases`,
+    currentPath: `${publishRoot}/current`,
+    controlDirectoryMode: '0711',
+    releaseDirectoryMode: '0750',
+    releaseFileMode: '0640',
+    nginxDirectoryAcl: 'user:www-data:r-x',
+    nginxFileAcl: 'user:www-data:r--',
+    aclPackage: 'acl',
+  };
+  return {
+    applicable: true,
+    migrationRequired: true,
+    websiteId,
+    applicationId,
+    websiteRevision: 3,
+    expected: { unixUser: applicationUser, homeDirectory },
+    migration: {
+      applyAvailable: true,
+      previewDigest,
+      changes: [{
+        action: 'repair_static_control_metadata',
+        applyState: 'requires_explicit_apply',
+        current: {
+          operationId: sourceOperationId,
+          staticRuntimeMigrationPreview: {
+            safeControlMigrationCandidate: true,
+            current: {
+              isolation: { safeMigrationCandidate: true },
+            },
+          },
+        },
+        desired: { staticControl: desired },
       }],
     },
   };
@@ -484,6 +531,52 @@ test('isolation migration registry rejects PHP container journaling without exac
   await store.init();
   const unsafe = phpContainerAudit();
   unsafe.migration.changes[0].current.phpRuntimeMigrationPreview.safeContainerMigrationCandidate = false;
+
+  await assert.rejects(
+    store.create(unsafe),
+    (error) => error instanceof WebsiteIsolationMigrationRegistryError
+      && error.code === 'website_isolation_migration_preview_invalid',
+  );
+});
+
+
+test('isolation migration registry journals typed static control metadata ownership and rollback evidence', async () => {
+  const store = registry();
+  await store.init();
+
+  const created = await store.create(staticControlAudit());
+  assert.equal(created.intent.adapter, 'static_control');
+  assert.equal(created.intent.sourceOperationId, sourceOperationId);
+  assert.deepEqual(created.intent.targets, []);
+
+  await store.markApplying(operationId);
+  const succeeded = await store.succeed(operationId, {
+    satisfied: true,
+    staticControlReceiptVersion: 1,
+    migratedStaticControlMetadata: true,
+  });
+  assert.deepEqual(succeeded.result, {
+    satisfied: true,
+    staticControlReceiptVersion: 1,
+    migratedStaticControlMetadata: true,
+  });
+
+  await store.markCompensating(operationId);
+  const compensated = await store.compensate(operationId, {
+    satisfied: true,
+    restoredStaticControlMetadata: true,
+  });
+  assert.deepEqual(compensated.compensation, {
+    satisfied: true,
+    restoredStaticControlMetadata: true,
+  });
+});
+
+test('isolation migration registry rejects static control journaling without exact safe metadata authority', async () => {
+  const store = registry();
+  await store.init();
+  const unsafe = staticControlAudit();
+  unsafe.migration.changes[0].current.staticRuntimeMigrationPreview.safeControlMigrationCandidate = false;
 
   await assert.rejects(
     store.create(unsafe),
