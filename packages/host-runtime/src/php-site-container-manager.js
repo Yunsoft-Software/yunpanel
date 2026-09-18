@@ -318,10 +318,23 @@ export function createPhpSiteContainerManager({
       differences.push('php_site_container_current_drift');
     }
 
+    const safeMigrationCandidate = differences.length > 0
+      && identity.satisfied === true
+      && applicationRoot.present === true && applicationRoot.directory === true && applicationRoot.symbolicLink === false
+      && releasesDirectory.present === true && releasesDirectory.directory === true && releasesDirectory.symbolicLink === false
+      && releaseDirectory.present === true && releaseDirectory.directory === true && releaseDirectory.symbolicLink === false
+      && releaseDocumentRoot.present === true && releaseDocumentRoot.directory === true && releaseDocumentRoot.symbolicLink === false
+      && releaseDirectory.uid === identity.uid && releaseDirectory.gid === identity.gid && releaseDirectory.mode === '0750'
+      && releaseDocumentRoot.uid === identity.uid && releaseDocumentRoot.gid === identity.gid && releaseDocumentRoot.mode === '0750'
+      && currentRelease.present === true && currentRelease.symbolicLink === true
+      && currentTargetError === null && currentTarget === spec.releaseDirectory
+      && [...new Set(differences)].every((code) => code === 'php_site_container_control_plane_drift');
+
     return Object.freeze({
       version: 1,
       adapter: 'php-container',
       satisfied: differences.length === 0,
+      safeMigrationCandidate,
       current: Object.freeze({
         identity,
         applicationRoot,
@@ -397,6 +410,209 @@ export function createPhpSiteContainerManager({
     });
   }
 
+  async function migrationSnapshot(spec) {
+    const identity = await identityEvidence(spec);
+    if (!identity.satisfied) {
+      throw new PhpSiteContainerManagerError('php_site_container_migration_identity_required', 'Website identity must remain canonical during PHP container migration');
+    }
+    const [applicationRoot, releasesDirectory, releaseDirectory, releaseDocumentRoot, currentRelease] = await Promise.all([
+      statPath(spec.applicationRoot, 'directory'),
+      statPath(spec.releasesDirectory, 'directory'),
+      statPath(spec.releaseDirectory, 'directory'),
+      statPath(spec.releaseDocumentRoot, 'directory'),
+      statPath(spec.currentRelease, 'symlink'),
+    ]);
+    if (![applicationRoot, releasesDirectory, releaseDirectory, releaseDocumentRoot, currentRelease].every(Boolean)) {
+      throw new PhpSiteContainerManagerError('php_site_container_migration_path_missing', 'PHP container migration requires the existing canonical release tree');
+    }
+    if (releaseDirectory.uid !== identity.uid || releaseDirectory.gid !== identity.gid || modeOf(releaseDirectory) !== 0o750
+      || releaseDocumentRoot.uid !== identity.uid || releaseDocumentRoot.gid !== identity.gid || modeOf(releaseDocumentRoot) !== 0o750) {
+      throw new PhpSiteContainerManagerError('php_site_container_migration_release_drift', 'PHP container migration will not mutate release content ownership or permissions');
+    }
+    let currentTarget;
+    try { currentTarget = await readlinkFn(spec.currentRelease); }
+    catch { throw new PhpSiteContainerManagerError('php_site_container_migration_current_unavailable', 'PHP container migration current release could not be read'); }
+    if (currentTarget !== spec.releaseDirectory) {
+      throw new PhpSiteContainerManagerError('php_site_container_migration_current_drift', 'PHP container migration current release target has drifted');
+    }
+    return Object.freeze({
+      applicationRoot: Object.freeze({ uid: applicationRoot.uid, gid: applicationRoot.gid, mode: modeOf(applicationRoot) }),
+      releasesDirectory: Object.freeze({ uid: releasesDirectory.uid, gid: releasesDirectory.gid, mode: modeOf(releasesDirectory) }),
+      currentRelease: Object.freeze({ uid: currentRelease.uid, gid: currentRelease.gid }),
+    });
+  }
+
+  function metadataMatches(current, expected, { symlink = false } = {}) {
+    return current.uid === expected.uid && current.gid === expected.gid && (symlink || current.mode === expected.mode);
+  }
+
+  function desiredMigrationMetadata() {
+    return Object.freeze({
+      applicationRoot: Object.freeze({ uid: 0, gid: 0, mode: 0o755 }),
+      releasesDirectory: Object.freeze({ uid: 0, gid: 0, mode: 0o755 }),
+      currentRelease: Object.freeze({ uid: 0, gid: 0 }),
+    });
+  }
+
+  function assertReceiptCompatibleSnapshot(snapshot, receipt) {
+    const desired = desiredMigrationMetadata();
+    for (const name of ['applicationRoot', 'releasesDirectory']) {
+      if (!metadataMatches(snapshot[name], receipt.previous[name]) && !metadataMatches(snapshot[name], desired[name])) {
+        throw new PhpSiteContainerManagerError('php_site_container_migration_drift', 'PHP container metadata changed after the migration receipt checkpoint');
+      }
+    }
+    if (!metadataMatches(snapshot.currentRelease, receipt.previous.currentRelease, { symlink: true })
+      && !metadataMatches(snapshot.currentRelease, desired.currentRelease, { symlink: true })) {
+      throw new PhpSiteContainerManagerError('php_site_container_migration_drift', 'PHP current symlink ownership changed after the migration receipt checkpoint');
+    }
+  }
+
+  async function inspectMigrationOperation(rawIntent, { operationId, migrationOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent, operationId);
+    const receiptId = uuid(migrationOperationId, 'migrationOperationId');
+    let receipt = await loadMigrationReceipt(receiptId, spec);
+    if (!receipt) return Object.freeze({ satisfied: false, reason: 'php_site_container_migration_receipt_missing' });
+    if (receipt.state === 'compensated') return Object.freeze({ satisfied: false, reason: 'php_site_container_migration_compensated' });
+    const snapshot = await migrationSnapshot(spec);
+    assertReceiptCompatibleSnapshot(snapshot, receipt);
+    const desired = desiredMigrationMetadata();
+    const satisfied = metadataMatches(snapshot.applicationRoot, desired.applicationRoot)
+      && metadataMatches(snapshot.releasesDirectory, desired.releasesDirectory)
+      && metadataMatches(snapshot.currentRelease, desired.currentRelease, { symlink: true });
+    if (!satisfied) return Object.freeze({ satisfied: false, reason: 'php_site_container_migration_incomplete' });
+    if (receipt.state !== 'active') {
+      receipt = await persistMigrationReceipt(receiptId, spec, { ...receipt, state: 'active' });
+    }
+    return Object.freeze({
+      satisfied: true,
+      phpContainerReceiptVersion: MIGRATION_RECEIPT_VERSION,
+      migratedPhpContainer: true,
+      receiptState: receipt.state,
+    });
+  }
+
+  async function applyMigration(rawIntent, { operationId, migrationOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent, operationId);
+    const receiptId = uuid(migrationOperationId, 'migrationOperationId');
+    let receipt = await loadMigrationReceipt(receiptId, spec);
+    if (receipt?.state === 'compensated') {
+      throw new PhpSiteContainerManagerError('php_site_container_migration_compensated', 'Compensated PHP container migration cannot be re-applied');
+    }
+    if (!receipt) {
+      const preview = await previewMigration(rawIntent, { operationId });
+      if (preview.satisfied === true) {
+        throw new PhpSiteContainerManagerError('php_site_container_migration_not_operation_owned', 'Canonical PHP container state is not owned by this migration operation');
+      }
+      if (preview.safeMigrationCandidate !== true) {
+        throw new PhpSiteContainerManagerError('php_site_container_migration_not_safe', 'PHP container migration is limited to exact non-recursive control-plane metadata repair');
+      }
+      receipt = await persistMigrationReceipt(receiptId, spec, {
+        previous: {
+          applicationRoot: { uid: preview.current.applicationRoot.uid, gid: preview.current.applicationRoot.gid, mode: Number.parseInt(preview.current.applicationRoot.mode, 8) },
+          releasesDirectory: { uid: preview.current.releasesDirectory.uid, gid: preview.current.releasesDirectory.gid, mode: Number.parseInt(preview.current.releasesDirectory.mode, 8) },
+          currentRelease: { uid: preview.current.currentRelease.uid, gid: preview.current.currentRelease.gid },
+        },
+        state: 'prepared',
+      });
+    }
+
+    const snapshot = await migrationSnapshot(spec);
+    assertReceiptCompatibleSnapshot(snapshot, receipt);
+    const desired = desiredMigrationMetadata();
+    try {
+      if (!metadataMatches(snapshot.applicationRoot, desired.applicationRoot)) {
+        await run(CHOWN_PATH, ['root:root', spec.applicationRoot], { timeout: 10_000 });
+        await run(CHMOD_PATH, ['0755', spec.applicationRoot], { timeout: 10_000 });
+      }
+      if (!metadataMatches(snapshot.releasesDirectory, desired.releasesDirectory)) {
+        await run(CHOWN_PATH, ['root:root', spec.releasesDirectory], { timeout: 10_000 });
+        await run(CHMOD_PATH, ['0755', spec.releasesDirectory], { timeout: 10_000 });
+      }
+      if (!metadataMatches(snapshot.currentRelease, desired.currentRelease, { symlink: true })) {
+        await run(CHOWN_PATH, ['-h', 'root:root', spec.currentRelease], { timeout: 10_000 });
+      }
+    } catch {
+      throw new PhpSiteContainerManagerError('php_site_container_migration_apply_failed', 'PHP container migration metadata could not be applied');
+    }
+    const verified = await inspectMigrationOperation(rawIntent, { operationId, migrationOperationId: receiptId });
+    if (!verified.satisfied) {
+      throw new PhpSiteContainerManagerError('php_site_container_migration_unverified', 'PHP container migration metadata could not be verified');
+    }
+    return verified;
+  }
+
+  async function inspectMigrationCompensation(rawIntent, { operationId, migrationOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent, operationId);
+    const receiptId = uuid(migrationOperationId, 'migrationOperationId');
+    const receipt = await loadMigrationReceipt(receiptId, spec);
+    if (!receipt) return Object.freeze({ satisfied: false, reason: 'php_site_container_migration_receipt_missing' });
+    const snapshot = await migrationSnapshot(spec);
+    const desired = desiredMigrationMetadata();
+    for (const name of ['applicationRoot', 'releasesDirectory']) {
+      if (!metadataMatches(snapshot[name], receipt.previous[name]) && !metadataMatches(snapshot[name], desired[name])) {
+        return Object.freeze({ satisfied: false, reason: 'php_site_container_migration_compensation_drift' });
+      }
+    }
+    if (!metadataMatches(snapshot.currentRelease, receipt.previous.currentRelease, { symlink: true })
+      && !metadataMatches(snapshot.currentRelease, desired.currentRelease, { symlink: true })) {
+      return Object.freeze({ satisfied: false, reason: 'php_site_container_migration_compensation_drift' });
+    }
+    const restored = metadataMatches(snapshot.applicationRoot, receipt.previous.applicationRoot)
+      && metadataMatches(snapshot.releasesDirectory, receipt.previous.releasesDirectory)
+      && metadataMatches(snapshot.currentRelease, receipt.previous.currentRelease, { symlink: true });
+    return Object.freeze({
+      satisfied: restored,
+      restoredPhpContainerMetadata: restored,
+      receiptState: receipt.state,
+      ...(restored ? {} : { reason: 'php_site_container_migration_compensation_pending' }),
+    });
+  }
+
+  async function compensateMigration(rawIntent, { operationId, migrationOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent, operationId);
+    const receiptId = uuid(migrationOperationId, 'migrationOperationId');
+    let receipt = await loadMigrationReceipt(receiptId, spec);
+    if (!receipt) throw new PhpSiteContainerManagerError('php_site_container_migration_receipt_missing', 'PHP container migration receipt is required for rollback');
+    if (receipt.state === 'compensated') return inspectMigrationCompensation(rawIntent, { operationId, migrationOperationId: receiptId });
+    const before = await inspectMigrationCompensation(rawIntent, { operationId, migrationOperationId: receiptId });
+    if (before.reason === 'php_site_container_migration_compensation_drift') {
+      throw new PhpSiteContainerManagerError('php_site_container_migration_compensation_drift', 'PHP container metadata changed after migration and cannot be safely restored');
+    }
+    if (!before.satisfied) {
+      const snapshot = await migrationSnapshot(spec);
+      const desired = desiredMigrationMetadata();
+      try {
+        if (!metadataMatches(snapshot.currentRelease, receipt.previous.currentRelease, { symlink: true })) {
+          if (!metadataMatches(snapshot.currentRelease, desired.currentRelease, { symlink: true })) {
+            throw new PhpSiteContainerManagerError('php_site_container_migration_compensation_drift', 'PHP current symlink ownership changed after migration');
+          }
+          await run(CHOWN_PATH, ['-h', `${receipt.previous.currentRelease.uid}:${receipt.previous.currentRelease.gid}`, spec.currentRelease], { timeout: 10_000 });
+        }
+        for (const [name, target] of [
+          ['releasesDirectory', spec.releasesDirectory],
+          ['applicationRoot', spec.applicationRoot],
+        ]) {
+          if (!metadataMatches(snapshot[name], receipt.previous[name])) {
+            if (!metadataMatches(snapshot[name], desired[name])) {
+              throw new PhpSiteContainerManagerError('php_site_container_migration_compensation_drift', 'PHP container metadata changed after migration');
+            }
+            await run(CHOWN_PATH, [`${receipt.previous[name].uid}:${receipt.previous[name].gid}`, target], { timeout: 10_000 });
+            await run(CHMOD_PATH, [receipt.previous[name].mode.toString(8).padStart(4, '0'), target], { timeout: 10_000 });
+          }
+        }
+      } catch (error) {
+        if (error instanceof PhpSiteContainerManagerError) throw error;
+        throw new PhpSiteContainerManagerError('php_site_container_migration_compensation_failed', 'PHP container migration metadata could not be restored');
+      }
+    }
+    const after = await inspectMigrationCompensation(rawIntent, { operationId, migrationOperationId: receiptId });
+    if (!after.satisfied) {
+      throw new PhpSiteContainerManagerError('php_site_container_migration_compensation_unverified', 'PHP container migration rollback could not be verified');
+    }
+    receipt = await persistMigrationReceipt(receiptId, spec, { ...receipt, state: 'compensated' });
+    return Object.freeze({ ...after, receiptState: receipt.state });
+  }
+
   async function apply(rawIntent, { operationId } = {}) {
     const spec = normalizeIntent(rawIntent, operationId);
     const identity = await identityEvidence(spec);
@@ -440,7 +656,15 @@ export function createPhpSiteContainerManager({
     return verified;
   }
 
-  return Object.freeze({ inspect, previewMigration, apply });
+  return Object.freeze({
+    inspect,
+    previewMigration,
+    inspectMigrationOperation,
+    applyMigration,
+    inspectMigrationCompensation,
+    compensateMigration,
+    apply,
+  });
 }
 
 export const phpSiteContainerManagerInternals = Object.freeze({
