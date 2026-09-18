@@ -187,6 +187,11 @@ export {
   websiteIdentityPathManagerInternals,
 } from './website-identity-path-manager.js';
 export {
+  createElFinderNginxGatewayManager,
+  ElFinderNginxGatewayError,
+  elFinderNginxGatewayInternals,
+} from './elfinder-nginx-gateway-manager.js';
+export {
   createElFinderFpmSiteManager,
   ElFinderFpmSiteManagerError,
   elFinderFpmSiteManagerInternals,
