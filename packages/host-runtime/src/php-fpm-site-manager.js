@@ -415,6 +415,23 @@ export function createPhpFpmSiteManager({
     }
     const active = await serviceActive();
 
+    const documentRootReady = documentRootState.present
+      && identity.satisfied
+      && documentRootState.directory === true
+      && documentRootState.symbolicLink === false
+      && documentRootState.uid === identity.uid
+      && documentRootState.gid === identity.gid
+      && (Number.parseInt(documentRootState.mode, 8) & 0o007) === 0
+      && (Number.parseInt(documentRootState.mode, 8) & 0o500) === 0o500;
+    const safeCreateCandidate = receipt === null
+      && receiptError === null
+      && documentRootReady
+      && packageState.installed === true
+      && configState.present === false
+      && configReadError === null
+      && configValid === true
+      && active === true
+      && socketState.present === false;
     const differences = [];
     if (!identity.satisfied) differences.push(identity.reason);
     if (!documentRootState.present) {
@@ -455,6 +472,7 @@ export function createPhpFpmSiteManager({
       version: 1,
       adapter: 'php-fpm',
       satisfied: differences.length === 0,
+      safeCreateCandidate,
       current: Object.freeze({
         identity,
         documentRoot: documentRootState,
@@ -696,6 +714,98 @@ export function createPhpFpmSiteManager({
     }
   }
 
+  async function inspectMigrationOperation(rawIntent, { operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const operationId = normalizeOperationId(rawOperationId);
+    const receipt = await loadReceipt(operationId, spec);
+    if (!receipt) return Object.freeze({ satisfied: false, reason: 'php_fpm_receipt_missing' });
+    if (receipt.state !== 'active' || receipt.mutated !== true || receipt.previousConfig !== null) {
+      return Object.freeze({ satisfied: false, reason: 'php_fpm_migration_receipt_not_active' });
+    }
+    const inspected = await inspect(rawIntent);
+    if (!inspected?.satisfied) return inspected;
+    return Object.freeze({
+      ...inspected,
+      phpFpmReceiptVersion: RECEIPT_VERSION,
+      createdPhpFpmPool: true,
+    });
+  }
+
+  async function applyMigration(rawIntent, { operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const operationId = normalizeOperationId(rawOperationId);
+    const preview = await previewMigration(rawIntent, { operationId });
+    if (preview.satisfied === true) {
+      const receipt = await loadReceipt(operationId, spec);
+      if (receipt?.state === 'active' && receipt.mutated === true && receipt.previousConfig === null) {
+        return inspectMigrationOperation(rawIntent, { operationId });
+      }
+      throw new PhpFpmSiteManagerError(
+        'php_fpm_migration_not_operation_owned',
+        'Existing PHP-FPM Website pool is not owned by this migration operation',
+      );
+    }
+    if (preview.safeCreateCandidate !== true) {
+      throw new PhpFpmSiteManagerError(
+        'php_fpm_migration_not_safe_create',
+        'PHP-FPM migration is blocked because shared runtime or Website-specific state requires non-owned mutation',
+      );
+    }
+
+    const desired = renderWebsitePhpFpmPool(spec.templateInput);
+    const configPath = phpFpmPoolPath(spec.unixUser);
+    let receipt = await loadReceipt(operationId, spec);
+    if (receipt?.state === 'compensated') {
+      throw new PhpFpmSiteManagerError('php_fpm_operation_compensated', 'Compensated PHP-FPM Website operation cannot be re-applied');
+    }
+    if (!receipt) {
+      const current = await readOptional(configPath);
+      if (current !== null) {
+        throw new PhpFpmSiteManagerError('php_fpm_pool_conflict', 'Existing PHP-FPM Website pool is not owned by this operation');
+      }
+      receipt = await persistReceipt(operationId, spec, {
+        mutated: true,
+        previousConfig: null,
+        state: 'prepared',
+      });
+    }
+    if (receipt.mutated !== true || receipt.previousConfig !== null) {
+      throw new PhpFpmSiteManagerError(
+        'php_fpm_migration_not_operation_owned',
+        'PHP-FPM migration receipt does not prove safe-create ownership',
+      );
+    }
+
+    const currentAfterReceipt = await readOptional(configPath);
+    if (currentAfterReceipt !== null && sha256(currentAfterReceipt) !== receipt.configSha256) {
+      throw new PhpFpmSiteManagerError(
+        'php_fpm_pool_drift',
+        'PHP-FPM Website pool changed after durable migration checkpoint',
+      );
+    }
+    if (currentAfterReceipt === null) {
+      await atomicWrite(configPath, desired, phpFpmTemplatePolicy.poolMode);
+    }
+    await configTest();
+    if (!(await serviceActive())) {
+      throw new PhpFpmSiteManagerError(
+        'php_fpm_migration_shared_service_inactive',
+        'PHP-FPM migration will not activate a shared service implicitly',
+      );
+    }
+    await reloadServiceIfActive();
+    const verified = await inspect(rawIntent);
+    if (!verified?.satisfied) {
+      throw new PhpFpmSiteManagerError('php_fpm_migration_unverified', 'PHP-FPM migration could not be verified');
+    }
+    receipt = await persistReceipt(operationId, spec, { ...receipt, state: 'active' });
+    return Object.freeze({
+      ...verified,
+      phpFpmReceiptVersion: RECEIPT_VERSION,
+      createdPhpFpmPool: true,
+    });
+  }
+
   async function inspectCompensation(rawIntent, { operationId: rawOperationId } = {}) {
     const spec = normalizeIntent(rawIntent);
     const operationId = normalizeOperationId(rawOperationId);
@@ -750,7 +860,15 @@ export function createPhpFpmSiteManager({
     return Object.freeze({ ...after, receiptState: receipt.state });
   }
 
-  return Object.freeze({ inspect, previewMigration, apply, compensate, inspectCompensation });
+  return Object.freeze({
+    inspect,
+    previewMigration,
+    inspectMigrationOperation,
+    applyMigration,
+    apply,
+    compensate,
+    inspectCompensation,
+  });
 }
 
 export const phpFpmSiteManagerInternals = Object.freeze({
