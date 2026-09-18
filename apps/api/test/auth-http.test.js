@@ -30,6 +30,7 @@ async function fixture(t, options = {}) {
     store: options.store ?? fakeStore(), publicOrigin: origin,
     proxyToken: options.proxyToken,
     trustedProxyIps: options.trustedProxyIps,
+    toolGatewayAuthorizer: options.toolGatewayAuthorizer,
     createHandler: () => (request, response) => {
       calls += 1;
       const agent = /heartbeat|commands|\/applications\/[^/]+\/(?:environment|deployment-credential)$/.test(request.url);
@@ -158,6 +159,61 @@ test('tool gateway access gates require the live management Owner session and by
       body: {},
     })).status, 405);
   }
+  assert.equal(app.calls(), 0);
+});
+
+test('session-bound ttyd gateway fails closed without an authorizer', async (t) => {
+  const app = await fixture(t);
+  const response = await app.request('/api/ttyd-gateway-access', {
+    headers: { cookie },
+  });
+  assert.equal(response.status, 503);
+  assert.equal(app.calls(), 0);
+});
+
+test('session-bound ttyd gateway delegates exact Owner session context to its authorizer', async (t) => {
+  const calls = [];
+  const app = await fixture(t, {
+    toolGatewayAuthorizer: async ({ gateway, request, session }) => {
+      calls.push({
+        id: gateway.id,
+        accessMode: gateway.accessMode,
+        toolSession: request.headers['x-yunpanel-tool-session'],
+        ownerSessionId: session.id,
+        userId: session.user.id,
+      });
+      return request.headers['x-yunpanel-tool-session'] === 'tool-session-1';
+    },
+  });
+
+  assert.equal((await app.request('/api/ttyd-gateway-access', {
+    headers: {
+      cookie,
+      'x-yunpanel-tool-session': 'wrong',
+    },
+  })).status, 403);
+  assert.equal((await app.request('/api/ttyd-gateway-access', {
+    headers: {
+      cookie,
+      'x-yunpanel-tool-session': 'tool-session-1',
+    },
+  })).status, 204);
+  assert.deepEqual(calls, [
+    {
+      id: 'ttyd',
+      accessMode: 'session',
+      toolSession: 'wrong',
+      ownerSessionId: '12345678-1234-1234-1234-123456789012',
+      userId: 'owner-id',
+    },
+    {
+      id: 'ttyd',
+      accessMode: 'session',
+      toolSession: 'tool-session-1',
+      ownerSessionId: '12345678-1234-1234-1234-123456789012',
+      userId: 'owner-id',
+    },
+  ]);
   assert.equal(app.calls(), 0);
 });
 
