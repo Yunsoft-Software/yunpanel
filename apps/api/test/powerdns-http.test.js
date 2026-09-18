@@ -202,6 +202,8 @@ test('PowerDNS HTTP mounts local DKIM retirement only with the complete local DN
     dnsZoneReapplyRuntime: {
       preview: async () => ({}),
       start: async () => ({}),
+      rollbackPreview: async () => ({}),
+      rollback: async () => ({}),
       get: async () => null,
       listForDomain: async () => [],
     },
