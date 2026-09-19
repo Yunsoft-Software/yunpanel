@@ -184,6 +184,12 @@ export function createRoundcubeDomainMappingService({
   async function enqueueApply(mapping, { replacingJobId = null } = {}) {
     await assertNoConcurrentApply(mapping.serverId, replacingJobId);
     const preview = await desiredPreview(mapping);
+    const idempotencyKey = [
+      'roundcube.mapping.apply',
+      mapping.operationId,
+      mapping.revision,
+      replacingJobId === null ? 'initial' : `retry-${replacingJobId}`,
+    ].join(':');
     let job;
     try {
       job = await jobRegistry.enqueue({
@@ -197,6 +203,7 @@ export function createRoundcubeDomainMappingService({
         },
         resourceType: 'server',
         resourceId: mapping.serverId,
+        idempotencyKey,
       });
     } catch (error) {
       if (Number.isInteger(error?.status)) throw error;
