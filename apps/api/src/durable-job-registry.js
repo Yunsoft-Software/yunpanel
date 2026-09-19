@@ -403,6 +403,7 @@ export function createDurableJobRegistry({
     beginReconciliation,
     acknowledgeReconciliation,
     getReconciliationJob,
+    findIdempotentJob: (...args) => read('findIdempotentJob', args),
     getJob: (...args) => read('getJob', args),
     listJobs: (...args) => read('listJobs', args),
     failure: () => fatal ? { ...fatal } : null,
