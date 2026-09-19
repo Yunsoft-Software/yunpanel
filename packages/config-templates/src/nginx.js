@@ -3,6 +3,12 @@ import { formatProxyHostForUrl, normalizeDomainSet, normalizeNginxSettings } fro
 import { renderPassengerNodeDirectives } from './passenger-nginx.js';
 
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
+const MAIL_DISCOVERY_SOCKET = '/run/yunpanel-mail-discovery/discovery.sock';
+const MAIL_DISCOVERY_PATHS = Object.freeze([
+  '/autodiscover/autodiscover.xml',
+  '/mail/config-v1.1.xml',
+  '/.well-known/autoconfig/mail/config-v1.1.xml',
+]);
 
 export class NginxTemplateError extends Error {
   constructor(code, message) {
@@ -62,6 +68,33 @@ function acmeLocation(acmeRoot) {
   return `  location ^~ /.well-known/acme-challenge/ {\n    root ${root};\n    default_type text/plain;\n    try_files $uri =404;\n  }`;
 }
 
+function normalizeMailDiscoverySocket(value) {
+  if (value == null) return null;
+  const socketPath = assertSafeAbsolutePath(value, 'mailDiscoverySocketPath');
+  if (socketPath !== MAIL_DISCOVERY_SOCKET) {
+    throw new NginxTemplateError(
+      'invalid_mail_discovery_socket',
+      'Mail discovery upstream must use the managed YunPanel socket',
+    );
+  }
+  return socketPath;
+}
+
+function mailDiscoveryLocations(socketPath) {
+  if (socketPath === null) return '';
+  return MAIL_DISCOVERY_PATHS.map((requestPath) => `  location = ${requestPath} {
+    client_max_body_size 16k;
+    proxy_pass http://unix:${socketPath};
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_connect_timeout 5s;
+    proxy_send_timeout 5s;
+    proxy_read_timeout 5s;
+  }`).join('\n\n');
+}
+
 function normalizeTls(tls) {
   if (tls == null) return null;
   if (!tls || typeof tls !== 'object' || Array.isArray(tls)) {
@@ -105,6 +138,8 @@ function renderServerSet({
   httpsRedirect,
   nginxSettings,
   acmeOnlyHostnames = [],
+  mailDiscoverySocketPath = null,
+  mailDiscoverySocketPath = null,
 }) {
   if (typeof canonicalRedirect !== 'boolean' || typeof httpsRedirect !== 'boolean') {
     throw new NginxTemplateError('invalid_redirect_policy', 'Redirect policies must be boolean values');
@@ -112,10 +147,13 @@ function renderServerSet({
   const names = serverNames(primaryDomain, aliases);
   const blocks = [];
   const challengeOnlyNames = acmeOnlyNames(primaryDomain, aliases, acmeOnlyHostnames);
+  const discoverySocket = normalizeMailDiscoverySocket(mailDiscoverySocketPath);
+  const discoveryLocations = mailDiscoveryLocations(discoverySocket);
+  const tlsBody = discoveryLocations ? `${discoveryLocations}\n\n${body}` : body;
   if (!canonicalRedirect) {
     const httpBody = tls && httpsRedirect ? redirectBody('https://$host', nginxSettings.headers) : body;
     blocks.push(serverBlock({ names: names.all, body: httpBody, acmeRoot, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb }));
-    if (tls) blocks.push(serverBlock({ names: names.all, body, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb }));
+    if (tls) blocks.push(serverBlock({ names: names.all, body: tlsBody, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb }));
     for (const hostname of challengeOnlyNames) {
       blocks.push(serverBlock({
         names: hostname,
@@ -138,7 +176,7 @@ function renderServerSet({
     }));
   }
   if (tls) {
-    blocks.push(serverBlock({ names: names.primary, body, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb }));
+    blocks.push(serverBlock({ names: names.primary, body: tlsBody, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb }));
     if (names.aliases.length > 0) {
       blocks.push(serverBlock({
         names: names.aliases.join(' '),
@@ -199,6 +237,7 @@ export function renderStaticSiteConfig({
   primaryDomain,
   aliases = [],
   acmeOnlyHostnames = [],
+  mailDiscoverySocketPath = null,
   root,
   spaFallback = true,
   acmeRoot = '/var/lib/yunpanel/acme',
@@ -212,7 +251,7 @@ export function renderStaticSiteConfig({
   const settings = normalizeNginxSettings('static', nginxSettings ?? { spaFallback });
   const body = staticBody({ root: safeRoot, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
   });
 }
 
@@ -220,6 +259,7 @@ export function renderProxySiteConfig({
   primaryDomain,
   aliases = [],
   acmeOnlyHostnames = [],
+  mailDiscoverySocketPath = null,
   upstreamHost = '127.0.0.1',
   upstreamPort,
   websocket = true,
@@ -235,7 +275,7 @@ export function renderProxySiteConfig({
   const settings = normalizeNginxSettings('proxy', nginxSettings ?? { websocket });
   const body = proxyBody({ host, port, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
   });
 }
 
@@ -243,6 +283,7 @@ export function renderPassengerSiteConfig({
   primaryDomain,
   aliases = [],
   acmeOnlyHostnames = [],
+  mailDiscoverySocketPath = null,
   target,
   acmeRoot = '/var/lib/yunpanel/acme',
   tls = null,
@@ -254,7 +295,7 @@ export function renderPassengerSiteConfig({
   const settings = normalizeNginxSettings('passenger', nginxSettings ?? {});
   const body = passengerBody({ target, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
   });
 }
 
@@ -262,6 +303,7 @@ export function renderPhpSiteConfig({
   primaryDomain,
   aliases = [],
   acmeOnlyHostnames = [],
+  mailDiscoverySocketPath = null,
   root,
   socketPath,
   acmeRoot = '/var/lib/yunpanel/acme',
@@ -279,7 +321,7 @@ export function renderPhpSiteConfig({
   const settings = normalizeNginxSettings('php', nginxSettings ?? {});
   const body = phpBody({ root: safeRoot, socketPath: safeSocket, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
   });
 }
 
