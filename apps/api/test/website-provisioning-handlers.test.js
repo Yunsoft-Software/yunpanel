@@ -34,6 +34,7 @@ const nginxIntent = Object.freeze({
   websiteId,
   primaryDomain: 'example.com',
   aliases: ['www.example.com'],
+  acmeOnlyHostnames: ['webmail.example.com'],
   targetType: 'passenger',
   target: passengerIntent,
 });
@@ -258,6 +259,7 @@ test('Passenger Nginx handler activates only with succeeded runtime evidence', a
   assert.equal(calls[0][1].target.nodeBinary, '/opt/yunpanel/node-runtimes/v24/bin/node');
   assert.equal(calls[0][1].target.user, unixUser);
   assert.equal(calls[0][1].target.group, unixUser);
+  assert.deepEqual(calls[0][1].acmeOnlyHostnames, ['webmail.example.com']);
   assert.deepEqual(calls[1], ['activate', { primaryDomain: 'example.com', checksum: 'b'.repeat(64) }]);
 });
 
