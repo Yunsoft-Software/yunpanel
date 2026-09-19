@@ -7,6 +7,7 @@ import {
   renderPassengerSiteConfig,
   renderPhpSiteConfig,
   renderProxySiteConfig,
+  renderPythonSiteConfig,
   renderStaticSiteConfig,
 } from '@yunpanel/config-templates';
 
@@ -86,7 +87,15 @@ function renderDomainConfig(spec) {
       nginxSettings: spec.nginxSettings,
     });
   }
-  throw new NginxManagerError('invalid_target_type', 'Domain targetType must be static, proxy, passenger or php');
+  if (spec.targetType === 'python') {
+    return renderPythonSiteConfig({
+      ...common,
+      socketPath: spec.target?.socketPath,
+      upstreamPort: spec.target?.upstreamPort ?? spec.target?.port,
+      nginxSettings: spec.nginxSettings,
+    });
+  }
+  throw new NginxManagerError('invalid_target_type', 'Domain targetType must be static, proxy, passenger, php or python');
 }
 
 function fileState(content) {

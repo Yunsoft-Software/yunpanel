@@ -158,6 +158,53 @@ function isPhpDomainStage(value) {
   return value?.operation === DOCKER_OPERATIONS.DOMAIN_STAGE && value?.payload?.targetType === 'php';
 }
 
+const PYTHON_SOCKET_PATTERN = /^\/run\/yunpanel\/python-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.sock$/i;
+
+function isPythonDomainStage(value) {
+  return value?.operation === DOCKER_OPERATIONS.DOMAIN_STAGE && value?.payload?.targetType === 'python';
+}
+
+function validatePythonDomainStage(value) {
+  const target = value?.payload?.target;
+  const baseEnvelope = structuredClone(value);
+  if (baseEnvelope?.payload) {
+    baseEnvelope.payload.targetType = 'proxy';
+    baseEnvelope.payload.target = {
+      host: '127.0.0.1',
+      port: 3000,
+      websocket: value?.payload?.nginxSettings?.websocket !== false,
+    };
+  }
+  const base = validateDockerOperationEnvelope(baseEnvelope);
+  const errors = [...base.errors];
+  if (!target || typeof target !== 'object' || Array.isArray(target)) {
+    errors.push('domain.stage Python target must be an object');
+    return { ok: false, errors };
+  }
+  if (!target.socketPath && !target.upstreamPort) {
+    errors.push('domain.stage Python target requires either socketPath or upstreamPort');
+  }
+  if (target.socketPath) {
+    if (typeof target.socketPath !== 'string' || !PYTHON_SOCKET_PATTERN.test(target.socketPath)) {
+      errors.push('domain.stage Python target.socketPath is invalid');
+    }
+  }
+  if (target.upstreamPort !== undefined && target.upstreamPort !== null) {
+    if (!Number.isInteger(target.upstreamPort) || target.upstreamPort < 1024 || target.upstreamPort > 65535) {
+      errors.push('domain.stage Python target.upstreamPort is invalid');
+    }
+  }
+  try {
+    const normalized = normalizeNginxSettings('python', value.payload.nginxSettings ?? {});
+    if (JSON.stringify(normalized) !== JSON.stringify(value.payload.nginxSettings ?? {})) {
+      errors.push('domain.stage Python nginxSettings must be canonical');
+    }
+  } catch {
+    errors.push('domain.stage Python nginxSettings are invalid');
+  }
+  return { ok: errors.length === 0, errors };
+}
+
 function validatePassengerDomainStage(value) {
   const startupFile = value?.payload?.target?.startupFile;
   const baseEnvelope = structuredClone(value);
@@ -211,6 +258,7 @@ function validatePhpDomainStage(value) {
 export function validateOperationEnvelope(value) {
   if (isPassengerDomainStage(value)) return validatePassengerDomainStage(value);
   if (isPhpDomainStage(value)) return validatePhpDomainStage(value);
+  if (isPythonDomainStage(value)) return validatePythonDomainStage(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.operation !== APP_NODE_PASSENGER_MIGRATE) {
     return validateDockerOperationEnvelope(value);
@@ -232,7 +280,7 @@ export function validateOperationEnvelope(value) {
 
 export function createOperationEnvelope({ id, operation, payload = {} }) {
   const specialDomainStage = operation === DOCKER_OPERATIONS.DOMAIN_STAGE
-    && ['passenger', 'php'].includes(payload?.targetType);
+    && ['passenger', 'php', 'python'].includes(payload?.targetType);
   if (operation !== APP_NODE_PASSENGER_MIGRATE && !specialDomainStage) {
     return createDockerOperationEnvelope({ id, operation, payload });
   }

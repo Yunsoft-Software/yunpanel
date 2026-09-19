@@ -9,7 +9,7 @@ import {
 } from './managed-compose-website-binding.js';
 
 const STORE_VERSION = 5;
-const RUNTIME_TYPES = new Set(['static', 'node', 'php', 'docker', 'proxy']);
+const RUNTIME_TYPES = new Set(['static', 'node', 'php', 'python', 'docker', 'proxy']);
 const UPDATE_FIELDS = new Set([
   'name', 'applicationId', 'dockerWorkloadId', 'managedComposeBinding', 'runtimeType', 'proxyTarget',
 ]);
@@ -105,7 +105,7 @@ function applicationBinding(application, serverId) {
   if (uuid(application.serverId, 'serverId') !== serverId) {
     throw new WebsiteRegistryError('website_application_server_mismatch', 'Application belongs to a different server', 409);
   }
-  if (!['static', 'node', 'php'].includes(application.type)) {
+  if (!['static', 'node', 'php', 'python'].includes(application.type)) {
     throw new WebsiteRegistryError('website_application_type_unsupported', 'Application type cannot be bound to a Website yet', 409);
   }
   let documentRoot;
@@ -564,7 +564,7 @@ export function createWebsiteRegistry({
     }
     if (applicationId == null) {
       const normalizedServerId = await requireServer(serverId);
-      if (runtimeType !== 'proxy') throw new WebsiteRegistryError('website_application_required', 'Static, Node and PHP Websites require an Application; Docker Websites require a workload or Managed Compose binding');
+      if (runtimeType !== 'proxy') throw new WebsiteRegistryError('website_application_required', 'Static, Node, PHP and Python Websites require an Application; Docker Websites require a workload or Managed Compose binding');
       const timestamp = new Date(now()).toISOString();
       const normalizedWebsiteId = websiteId == null ? randomUUID() : uuid(websiteId, 'websiteId');
       const website = {
@@ -655,7 +655,7 @@ export function createWebsiteRegistry({
       }
     }
     if (hasRuntimeType) {
-      if (!RUNTIME_TYPES.has(changes.runtimeType)) throw new WebsiteRegistryError('invalid_website_runtime', 'Website runtimeType must be static, node, php, docker or proxy');
+      if (!RUNTIME_TYPES.has(changes.runtimeType)) throw new WebsiteRegistryError('invalid_website_runtime', 'Website runtimeType must be static, node, php, python, docker or proxy');
       next.runtimeType = changes.runtimeType;
     } else if (bindingRequested) {
       if (next.dockerWorkloadId !== null || next.managedComposeBinding !== null) next.runtimeType = 'docker';

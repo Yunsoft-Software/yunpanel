@@ -9,6 +9,7 @@ const SAFE_REEXECUTION = Object.freeze({
   [OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT]: Object.freeze({ resourceType: 'system', resourceScope: 'server', payloadMode: 'empty' }),
   [OPERATIONS.DATABASE_INSPECT]: Object.freeze({ resourceType: 'database', resourceScope: 'server', payloadMode: 'empty' }),
   [OPERATIONS.APP_NODE_STATUS]: Object.freeze({ resourceType: 'application', resourceScope: 'resource', payloadMode: 'persisted' }),
+  [OPERATIONS.APP_PYTHON_STATUS]: Object.freeze({ resourceType: 'application', resourceScope: 'resource', payloadMode: 'persisted' }),
 });
 
 export class JobRunningRecoveryError extends Error {
@@ -75,8 +76,8 @@ async function recoveryPayload(job, policy, loadJobContext) {
     || !context.payload || typeof context.payload !== 'object' || Array.isArray(context.payload)) {
     throw new JobRunningRecoveryError('job_running_recovery_context_mismatch', 'Private running recovery context does not match durable job metadata');
   }
-  if (job.operation === OPERATIONS.APP_NODE_STATUS && context.payload.applicationId !== job.resourceId) {
-    throw new JobRunningRecoveryError('job_running_recovery_context_mismatch', 'Node status recovery context does not match the application resource');
+  if ((job.operation === OPERATIONS.APP_NODE_STATUS || job.operation === OPERATIONS.APP_PYTHON_STATUS) && context.payload.applicationId !== job.resourceId) {
+    throw new JobRunningRecoveryError('job_running_recovery_context_mismatch', 'Process status recovery context does not match the application resource');
   }
 
   try {

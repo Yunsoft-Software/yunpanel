@@ -8,8 +8,13 @@ import {
   normalizeGitBranch,
   normalizeGitDeploymentTarget,
   normalizeNodeRuntimeConfig,
+  normalizePythonRuntimeConfig,
   normalizeStaticBuildConfig,
 } from '@yunpanel/shared';
+import {
+  pythonServiceName,
+  pythonSocketPath,
+} from '@yunpanel/config-templates';
 
 const STORE_VERSION = 1;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
@@ -78,6 +83,20 @@ function normalizeNodeConfig({ repositoryUrl, branch, runtime, retention, runtim
   }
 }
 
+function normalizePythonConfig({ repositoryUrl, branch, runtime, retention }) {
+  try {
+    return {
+      repositoryUrl: normalizeGithubRepositoryUrl(repositoryUrl),
+      branch: normalizeGitBranch(branch ?? 'main'),
+      runtime: normalizePythonRuntimeConfig(runtime),
+      retention: normalizeRetention(retention),
+    };
+  } catch (error) {
+    if (error instanceof ApplicationValidationError) throw new ApplicationRegistryError(error.code, error.message);
+    throw error;
+  }
+}
+
 function expectedNodeServiceName(applicationId) {
   const digest = createHash('sha256').update(applicationId).digest('hex').slice(0, 16);
   return `yunpanel-node-${digest}.service`;
@@ -92,7 +111,7 @@ function publicApplication(application) {
     runtime: runtime ? Object.freeze(runtime) : null,
     activeRuntime: activeRuntime ? Object.freeze(activeRuntime) : null,
     currentGitTarget: application.currentGitTarget ? Object.freeze({ ...application.currentGitTarget }) : null,
-    configurationPending: application.type === 'node'
+    configurationPending: (application.type === 'node' || application.type === 'python')
       && application.currentReleaseId !== null
       && !sameValue(runtime, activeRuntime),
     releases: Object.freeze(Array.isArray(application.releases)
@@ -145,7 +164,7 @@ function existingApplication(state, application, { idempotent }) {
 
 function hydrateApplication(application) {
   if (!application.type) application.type = 'static';
-  if (!['static', 'node', 'php'].includes(application.type)) {
+  if (!['static', 'node', 'php', 'python'].includes(application.type)) {
     throw new ApplicationRegistryError('application_state_invalid', 'Application type is not supported by the current registry', 409);
   }
   if (application.type === 'node') application.runtimeAdapter = normalizeRuntimeAdapter(application.runtimeAdapter ?? 'direct-systemd');
@@ -210,6 +229,41 @@ function hydrateApplication(application) {
         ? release.configurationRevision
         : application.appliedRevision || 1,
     }));
+  } else if (application.type === 'python') {
+    const pythonConfig = normalizePythonConfig({
+      repositoryUrl: application.repositoryUrl,
+      branch: application.branch,
+      runtime: application.runtime,
+      retention: application.retention,
+    });
+    application.runtime = pythonConfig.runtime;
+    application.serviceName = pythonServiceName(application.id);
+    application.socketPath = pythonSocketPath(application.id);
+    application.servicePort = application.runtime?.port ?? null;
+    application.healthPath = application.runtime?.healthPath ?? '/';
+    application.proxyTarget = application.runtime?.port
+      ? { host: '127.0.0.1', port: application.runtime.port }
+      : null;
+    if (application.activeRuntime === undefined) {
+      application.activeRuntime = application.currentReleaseId ? structuredClone(application.runtime) : null;
+    } else if (application.activeRuntime !== null) {
+      application.activeRuntime = normalizePythonRuntimeConfig(application.activeRuntime);
+    }
+    if (application.appliedRevision === undefined) {
+      application.appliedRevision = application.currentReleaseId ? application.desiredRevision : 0;
+    }
+    if (!Number.isSafeInteger(application.appliedRevision) || application.appliedRevision < 0
+      || (application.currentReleaseId === null && application.appliedRevision !== 0)
+      || (application.currentReleaseId !== null && (application.activeRuntime === null || application.appliedRevision < 1))) {
+      throw new ApplicationRegistryError('application_state_invalid', 'Python application configuration state is invalid', 409);
+    }
+    application.releases = application.releases.map((release) => ({
+      ...release,
+      runtime: normalizePythonRuntimeConfig(release.runtime ?? application.activeRuntime ?? application.runtime),
+      configurationRevision: Number.isSafeInteger(release.configurationRevision) && release.configurationRevision >= 1
+        ? release.configurationRevision
+        : application.appliedRevision || 1,
+    }));
   } else {
     application.activeRuntime = null;
     if (application.appliedRevision === undefined) application.appliedRevision = application.currentReleaseId ? application.desiredRevision : 0;
@@ -255,12 +309,12 @@ function hydrateApplication(application) {
       releaseId: application.currentReleaseId,
       deploymentId: application.currentReleaseId,
       commitSha: application.currentCommitSha.toLowerCase(),
-      gitTarget: application.currentGitTarget ?? normalizeGitDeploymentTarget(null, { defaultBranch: application.branch }),
+      gitTarget: application.currentGitTarget,
       artifactFiles: null,
       artifactBytes: null,
       deployedAt: application.lastDeployedAt ?? application.updatedAt ?? application.createdAt,
-      runtime: application.type === 'node' ? structuredClone(application.activeRuntime) : null,
-      configurationRevision: application.type === 'node' ? application.appliedRevision : null,
+      runtime: (application.type === 'node' || application.type === 'python') ? structuredClone(application.activeRuntime) : null,
+      configurationRevision: (application.type === 'node' || application.type === 'python') ? application.appliedRevision : null,
     });
   }
   return application;
@@ -462,6 +516,54 @@ export function createApplicationRegistry({
     return publicApplication(application);
   }
 
+  async function createPythonApplication({
+    applicationId = null,
+    serverId,
+    name,
+    repositoryUrl,
+    branch = 'main',
+    runtime = {},
+    retention = 5,
+  }) {
+    await ensureInitialized();
+    await ensureServer(serverId);
+    const config = normalizePythonConfig({ repositoryUrl, branch, runtime, retention });
+    const id = applicationId == null ? randomUUID() : normalizeApplicationId(applicationId);
+    const timestamp = new Date(now()).toISOString();
+    const serviceName = pythonServiceName(id);
+    const socketPath = pythonSocketPath(id);
+    const application = {
+      ...baseApplication({
+        id,
+        serverId,
+        name: validateName(name),
+        type: 'python',
+        repositoryUrl: config.repositoryUrl,
+        branch: config.branch,
+        retention: config.retention,
+        runtimeAdapter: null,
+        timestamp,
+      }),
+      build: null,
+      runtime: config.runtime,
+      webRoot: null,
+      serviceName,
+      socketPath,
+      servicePort: config.runtime.port ?? null,
+      healthPath: config.runtime.healthPath,
+      proxyTarget: config.runtime.port ? { host: '127.0.0.1', port: config.runtime.port } : null,
+    };
+    const existing = existingApplication(state, application, { idempotent: applicationId !== null });
+    if (existing) return existing;
+    if (config.runtime.port && state.applications.some((candidate) => candidate.serverId === serverId
+      && candidate.type === 'python' && candidate.runtime?.port === config.runtime.port)) {
+      throw new ApplicationRegistryError('python_port_conflict', 'Python application port is already allocated on this server', 409);
+    }
+    state.applications.push(application);
+    await persist();
+    return publicApplication(application);
+  }
+
   async function allocateNodePort({ serverId, reservedPorts = [], start = 3100, end = 49151 } = {}) {
     await ensureInitialized();
     await ensureServer(serverId);
@@ -482,7 +584,7 @@ export function createApplicationRegistry({
   async function markDeploying(applicationId, deploymentId) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
-    if (!['static', 'node'].includes(application.type)) {
+    if (!['static', 'node', 'python'].includes(application.type)) {
       throw new ApplicationRegistryError('deployment_not_supported', 'Legacy deployment flow is not supported for this application type', 409);
     }
     if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
@@ -516,7 +618,7 @@ export function createApplicationRegistry({
   }) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
-    if (!['static', 'node'].includes(application.type)) {
+    if (!['static', 'node', 'python'].includes(application.type)) {
       throw new ApplicationRegistryError('deployment_not_supported', 'Legacy deployment flow is not supported for this application type', 409);
     }
     if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
@@ -563,6 +665,18 @@ export function createApplicationRegistry({
       }
     }
 
+    if (application.type === 'python') {
+      const deployedRuntime = normalizePythonConfig({
+        repositoryUrl: application.repositoryUrl,
+        branch: application.branch,
+        runtime: requestedRuntime ?? application.runtime,
+        retention: application.retention,
+      }).runtime;
+      if (!sameValue(deployedRuntime, application.runtime)) {
+        throw new ApplicationRegistryError('python_runtime_state_drift', 'Python deployment runtime does not match current desired configuration', 409);
+      }
+    }
+
     const timestamp = new Date(now()).toISOString();
     application.previousReleaseId = application.currentReleaseId;
     application.currentReleaseId = normalizedReleaseId;
@@ -582,6 +696,15 @@ export function createApplicationRegistry({
       application.healthPath = healthPath;
       application.proxyTarget = { host: '127.0.0.1', port };
     }
+    if (application.type === 'python') {
+      application.activeRuntime = structuredClone(application.runtime);
+      application.appliedRevision = application.desiredRevision;
+      application.serviceName = pythonServiceName(application.id);
+      application.socketPath = pythonSocketPath(application.id);
+      application.servicePort = application.runtime?.port ?? null;
+      application.healthPath = application.runtime?.healthPath ?? '/';
+      application.proxyTarget = application.runtime?.port ? { host: '127.0.0.1', port: application.runtime.port } : null;
+    }
 
     application.releases = application.releases.filter((release) => release.releaseId !== normalizedReleaseId);
     application.releases.unshift({
@@ -592,8 +715,8 @@ export function createApplicationRegistry({
       artifactFiles,
       artifactBytes,
       deployedAt: timestamp,
-      runtime: application.type === 'node' ? structuredClone(application.activeRuntime) : null,
-      configurationRevision: application.type === 'node' ? application.appliedRevision : null,
+      runtime: (application.type === 'node' || application.type === 'python') ? structuredClone(application.activeRuntime) : null,
+      configurationRevision: (application.type === 'node' || application.type === 'python') ? application.appliedRevision : null,
     });
     trimReleaseHistory(application);
     await persist();
@@ -737,7 +860,7 @@ export function createApplicationRegistry({
   async function markRollingBack(applicationId, operationId, releaseId) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
-    if (!['static', 'node'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
+    if (!['static', 'node', 'python'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
     if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
       throw new ApplicationRegistryError('node_rollback_adapter_mismatch', 'Passenger Node rollback must use Website provisioning instead of the legacy systemd rollback flow', 409);
     }
@@ -767,7 +890,7 @@ export function createApplicationRegistry({
   }) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
-    if (!['static', 'node'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
+    if (!['static', 'node', 'python'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
     if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
       throw new ApplicationRegistryError('node_rollback_adapter_mismatch', 'Passenger Node rollback must use Website provisioning instead of the legacy systemd rollback flow', 409);
     }
@@ -813,6 +936,16 @@ export function createApplicationRegistry({
       application.servicePort = port;
       application.healthPath = healthPath;
       application.proxyTarget = { host: '127.0.0.1', port };
+    }
+    if (application.type === 'python') {
+      const targetRuntime = normalizePythonRuntimeConfig(target.runtime);
+      application.activeRuntime = structuredClone(target.runtime);
+      application.appliedRevision = target.configurationRevision;
+      application.serviceName = pythonServiceName(application.id);
+      application.socketPath = pythonSocketPath(application.id);
+      application.servicePort = targetRuntime.port ?? null;
+      application.healthPath = targetRuntime.healthPath ?? '/';
+      application.proxyTarget = targetRuntime.port ? { host: '127.0.0.1', port: targetRuntime.port } : null;
     }
     trimReleaseHistory(application);
     await persist();
@@ -925,6 +1058,7 @@ export function createApplicationRegistry({
     createApplication,
     createNodeApplication,
     createPhpApplication,
+    createPythonApplication,
     allocateNodePort,
     markDeploying,
     markDeployed,

@@ -233,6 +233,11 @@ export {
   validatePassengerSetup,
 } from './passenger-site-manager.js';
 export {
+  createPythonSiteManager,
+  PythonSiteManagerError,
+  pythonSiteManagerInternals,
+} from './python-site-manager.js';
+export {
   createWebsitePassengerEnvironmentManager,
   WebsitePassengerEnvironmentError,
   websitePassengerEnvironmentInternals,

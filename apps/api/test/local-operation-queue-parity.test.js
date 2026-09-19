@@ -21,6 +21,7 @@ test('every durable async queue operation has a local host execution path', asyn
   const local = operationNames(localSource, /export const LOCAL_HOST_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
   const localDatabaseCredentials = operationNames(localSource, /export const LOCAL_DATABASE_CREDENTIAL_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
   const localWithEnvironment = operationNames(localSource, /export const LOCAL_NODE_ENVIRONMENT_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
+  const localPythonEnvironment = operationNames(localSource, /export const LOCAL_PYTHON_ENVIRONMENT_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
   const localMailConfiguration = operationNames(localSource, /export const LOCAL_MAIL_CONFIGURATION_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
   const localMailData = operationNames(localSource, /export const LOCAL_MAIL_DATA_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
   const localRoundcubeConfiguration = operationNames(localSource, /export const LOCAL_ROUNDCUBE_CONFIGURATION_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
@@ -29,6 +30,7 @@ test('every durable async queue operation has a local host execution path', asyn
     ...local,
     ...localDatabaseCredentials,
     ...localWithEnvironment,
+    ...localPythonEnvironment,
     ...localMailConfiguration,
     ...localMailData,
     ...localRoundcubeConfiguration,

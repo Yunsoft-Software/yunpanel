@@ -8,19 +8,20 @@ import {
   normalizeGithubRepositoryUrl,
   normalizeNodeRuntimeConfig,
   normalizeProxyHost,
+  normalizePythonRuntimeConfig,
   normalizeStaticBuildConfig,
   ProxyTargetValidationError,
 } from '@yunpanel/shared';
 import { DomainHierarchyError, validateDomainParent } from './domain-hierarchy.js';
 
 const SITE_NAMESPACE = Buffer.from('0bcd2cf8883b49f997294b5d225cf15e', 'hex');
-const SOURCE_KINDS = new Set(['existing_application', 'existing_docker', 'new_static', 'new_node', 'new_php', 'external_proxy']);
+const SOURCE_KINDS = new Set(['existing_application', 'existing_docker', 'new_static', 'new_node', 'new_php', 'new_python', 'external_proxy']);
 const WWW_MODES = new Set(['none', 'alias', 'independent']);
 const HTTPS_MODES = new Set(['off', 'managed']);
 const DATABASE_MODES = new Set(['none', 'create']);
 const MAIL_MODES = new Set(['none', 'local', 'external']);
 const DNS_MODES = new Set(['local', 'external']);
-const DATABASE_SOURCE_KINDS = new Set(['existing_application', 'new_static', 'new_node', 'new_php']);
+const DATABASE_SOURCE_KINDS = new Set(['existing_application', 'new_static', 'new_node', 'new_php', 'new_python']);
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -127,6 +128,15 @@ function normalizedSource(source) {
         throw new SiteCreateError('site_create_static_build_invalid', 'Static build contains unsupported fields');
       }
       return Object.freeze({ ...common, build: Object.freeze(normalizeStaticBuildConfig(source.build ?? {})) });
+    }
+    if (source.kind === 'new_python') {
+      let pythonRuntime;
+      try {
+        pythonRuntime = normalizePythonRuntimeConfig(source.runtime ?? {});
+      } catch (error) {
+        throw new SiteCreateError(error.code ?? 'site_create_python_runtime_invalid', error.message);
+      }
+      return Object.freeze({ ...common, runtime: Object.freeze(pythonRuntime) });
     }
     if (!source.runtime || typeof source.runtime !== 'object' || Array.isArray(source.runtime)
       || Object.hasOwn(source.runtime, 'port')
@@ -388,6 +398,19 @@ function domainTarget(application, source, dockerWorkload = null) {
     }
     return Object.freeze({ targetType: 'php', target: Object.freeze({ applicationId: application.id }) });
   }
+  if (application.type === 'python') {
+    const isSocket = !application.runtime?.port;
+    return Object.freeze({
+      targetType: 'python',
+      target: Object.freeze({
+        applicationId: application.id,
+        proxyMode: isSocket ? 'unix_socket' : 'port',
+        socketPath: isSocket ? `/run/yunpanel/python-${application.id}.sock` : null,
+        port: isSocket ? null : application.runtime.port,
+        websocket: true,
+      }),
+    });
+  }
   if (application.runtimeAdapter === 'passenger') {
     if (application.runtime?.port !== null) {
       throw new SiteCreateError('site_create_application_runtime_drift', 'Passenger Node Application must not persist a backend port', 409);
@@ -479,7 +502,7 @@ export async function previewSiteCreate({
   if (!(await registry.getServer(normalized.serverId))) throw new SiteCreateError('server_not_found', 'Target server does not exist', 404);
 
   const ids = Object.freeze({
-    applicationId: ['new_static', 'new_node', 'new_php'].includes(normalized.source.kind) ? resourceId(normalized.operationId, 'application') : null,
+    applicationId: ['new_static', 'new_node', 'new_php', 'new_python'].includes(normalized.source.kind) ? resourceId(normalized.operationId, 'application') : null,
     websiteId: resourceId(normalized.operationId, 'website'),
     primaryDomainId: resourceId(normalized.operationId, 'primary-domain'),
     wwwDomainId: normalized.wwwMode === 'independent' ? resourceId(normalized.operationId, 'www-domain') : null,
@@ -501,7 +524,7 @@ export async function previewSiteCreate({
     application = applications.find((candidate) => candidate.id === normalized.source.applicationId) ?? null;
     if (!application) throw new SiteCreateError('application_not_found', 'Selected Application does not exist', 404);
     if (application.serverId !== normalized.serverId) throw new SiteCreateError('site_create_application_server_mismatch', 'Selected Application belongs to a different server', 409);
-    if (!['static', 'node'].includes(application.type)) throw new SiteCreateError('site_create_application_type_unsupported', 'Selected Application type is not supported', 409);
+    if (!['static', 'node', 'python'].includes(application.type)) throw new SiteCreateError('site_create_application_type_unsupported', 'Selected Application type is not supported', 409);
   } else if (normalized.source.kind === 'existing_docker') {
     dockerWorkload = dockerWorkloads.find((candidate) => candidate.id === normalized.source.dockerWorkloadId) ?? null;
     if (!dockerWorkload) throw new SiteCreateError('docker_workload_not_found', 'Selected Docker workload does not exist', 404);
@@ -564,6 +587,24 @@ export async function previewSiteCreate({
       webRoot: `/var/lib/yunpanel/apps/${ids.applicationId}/current/public`,
     };
     ensureExact(existing, applicationExpected, 'site_create_application_identity_conflict', 'Planned PHP Application identity conflicts with existing state', stableApplication);
+    application = existing ?? applicationExpected;
+  } else if (normalized.source.kind === 'new_python') {
+    const existing = applications.find((candidate) => candidate.id === ids.applicationId) ?? null;
+    const runtime = normalizePythonRuntimeConfig(normalized.source.runtime ?? {});
+    applicationExpected = {
+      id: ids.applicationId,
+      serverId: normalized.serverId,
+      name: normalized.name,
+      type: 'python',
+      repositoryUrl: normalized.source.repositoryUrl,
+      branch: normalized.source.branch,
+      retention: normalized.source.retention,
+      build: null,
+      runtime,
+      runtimeAdapter: null,
+      webRoot: null,
+    };
+    ensureExact(existing, applicationExpected, 'site_create_application_identity_conflict', 'Planned Python Application identity conflicts with existing state', stableApplication);
     application = existing ?? applicationExpected;
   }
 
@@ -725,6 +766,7 @@ export async function previewSiteCreate({
     adapter: websiteExpected.runtimeType === 'node' ? 'passenger'
       : websiteExpected.runtimeType === 'php' ? 'php-fpm'
       : websiteExpected.runtimeType === 'static' ? 'static'
+      : websiteExpected.runtimeType === 'python' ? (normalized.source.runtime?.appServer ?? 'gunicorn')
       : websiteExpected.runtimeType,
     documentRoot: websiteExpected.documentRoot,
     appRoot: websiteExpected.documentRoot,
@@ -764,7 +806,7 @@ export async function previewSiteCreate({
     }) : null,
   });
 
-  const sftpExpected = ['node', 'php', 'static'].includes(websiteExpected.runtimeType)
+  const sftpExpected = ['node', 'php', 'static', 'python'].includes(websiteExpected.runtimeType)
     ? Object.freeze({
       adapter: 'openssh-internal-sftp',
       websiteId: ids.websiteId,
@@ -922,6 +964,19 @@ export async function createSite({
       applicationId: preview.ids.applicationId,
       serverId: normalized.serverId,
       name: normalized.name,
+    });
+  } else if (normalized.source.kind === 'new_python') {
+    if (typeof applicationRegistry.createPythonApplication !== 'function') {
+      throw new SiteCreateError('site_create_dependencies_invalid', 'Python Application creation is unavailable', 503);
+    }
+    application = await applicationRegistry.createPythonApplication({
+      applicationId: preview.ids.applicationId,
+      serverId: normalized.serverId,
+      name: normalized.name,
+      repositoryUrl: normalized.source.repositoryUrl,
+      branch: normalized.source.branch,
+      runtime: normalized.source.runtime,
+      retention: normalized.source.retention,
     });
   }
 

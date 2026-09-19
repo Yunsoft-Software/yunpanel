@@ -32,6 +32,7 @@ const recoverySources = [
   'job-running-mail-data-recovery.js',
   'job-running-roundcube-config-recovery.js',
   'job-running-cron-recovery.js',
+  'job-running-python-recovery.js',
   'application-passenger-migration-reconciliation.js',
 ].map(apiSource);
 

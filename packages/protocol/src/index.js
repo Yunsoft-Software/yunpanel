@@ -10,6 +10,10 @@ import {
   normalizeNodeRestartSpec,
   normalizeNodeRollbackSpec,
   normalizeNodeStatusSpec,
+  normalizePythonApplicationSpec,
+  normalizePythonRestartSpec,
+  normalizePythonRollbackSpec,
+  normalizePythonStatusSpec,
   normalizeStaticApplicationSpec,
 } from '@yunpanel/shared';
 import { isIP, SocketAddress } from 'node:net';
@@ -59,6 +63,10 @@ export const OPERATIONS = Object.freeze({
   APP_NODE_STATUS: 'app.node.status',
   APP_NODE_PROCESS: 'app.node.process',
   APP_NODE_PASSENGER_MIGRATE: 'app.node.passenger-migrate',
+  APP_PYTHON_DEPLOY: 'app.python.deploy',
+  APP_PYTHON_ROLLBACK: 'app.python.rollback',
+  APP_PYTHON_RESTART: 'app.python.restart',
+  APP_PYTHON_STATUS: 'app.python.status',
 });
 
 export const READ_ONLY_OPERATIONS = Object.freeze([
@@ -71,6 +79,7 @@ export const READ_ONLY_OPERATIONS = Object.freeze([
   OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT,
   OPERATIONS.DATABASE_INSPECT,
   OPERATIONS.APP_NODE_STATUS,
+  OPERATIONS.APP_PYTHON_STATUS,
 ]);
 
 const KNOWN_OPERATIONS = new Set(Object.values(OPERATIONS));
@@ -520,6 +529,46 @@ function validateMutationPayload(operation, payload, errors) {
       errors.push(error instanceof ApplicationValidationError ? error.message : 'app.node.passenger-migrate node payload is invalid');
     }
     validatePassengerMigrationDomain(payload.domain, operation, errors);
+  }
+
+  if (operation === OPERATIONS.APP_PYTHON_DEPLOY) {
+    rejectUnexpectedKeys(payload, [
+      'applicationId', 'deploymentId', 'repositoryUrl', 'branch', 'gitTarget', 'runtime', 'retention', 'environmentRevision',
+    ], operation, errors);
+    validateEnvironmentRevision(payload, operation, errors);
+    try {
+      normalizePythonApplicationSpec(payload);
+    } catch (error) {
+      errors.push(error instanceof ApplicationValidationError ? error.message : 'app.python.deploy payload is invalid');
+    }
+  }
+
+  if (operation === OPERATIONS.APP_PYTHON_ROLLBACK) {
+    rejectUnexpectedKeys(payload, ['applicationId', 'releaseId', 'currentReleaseId', 'runtime', 'environmentRevision'], operation, errors);
+    validateEnvironmentRevision(payload, operation, errors);
+    try {
+      normalizePythonRollbackSpec(payload);
+    } catch (error) {
+      errors.push(error instanceof ApplicationValidationError ? error.message : 'app.python.rollback payload is invalid');
+    }
+  }
+
+  if (operation === OPERATIONS.APP_PYTHON_RESTART) {
+    rejectUnexpectedKeys(payload, ['applicationId', 'releaseId', 'runtime', 'environmentRevision'], operation, errors);
+    validateEnvironmentRevision(payload, operation, errors);
+    try {
+      normalizePythonRestartSpec(payload);
+    } catch (error) {
+      errors.push(error instanceof ApplicationValidationError ? error.message : 'app.python.restart payload is invalid');
+    }
+  }
+
+  if (operation === OPERATIONS.APP_PYTHON_STATUS) {
+    try {
+      normalizePythonStatusSpec(payload);
+    } catch (error) {
+      errors.push(error instanceof ApplicationValidationError ? error.message : 'app.python.status payload is invalid');
+    }
   }
 }
 

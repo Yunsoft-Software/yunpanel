@@ -57,6 +57,10 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.APP_NODE_STATUS,
   OPERATIONS.APP_NODE_PROCESS,
   OPERATIONS.APP_NODE_PASSENGER_MIGRATE,
+  OPERATIONS.APP_PYTHON_DEPLOY,
+  OPERATIONS.APP_PYTHON_ROLLBACK,
+  OPERATIONS.APP_PYTHON_RESTART,
+  OPERATIONS.APP_PYTHON_STATUS,
   OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT,
   OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL,
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
@@ -87,6 +91,7 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const NODE_SERVICE_PATTERN = /^yunpanel-node-[a-f0-9]{16}\.service$/;
+const PYTHON_SERVICE_PATTERN = /^yunpanel-python-[a-f0-9]{16}\.service$/;
 const SYSTEMD_STATE_PATTERN = /^[a-z0-9-]{1,40}$/;
 const PACKAGE_VERSION_PATTERN = /^[A-Za-z0-9.+:~_-]{1,100}$/;
 const PACKAGE_NAME_PATTERN = /^[a-z0-9][a-z0-9.+-]{0,100}$/;
@@ -456,6 +461,94 @@ function sanitizeNodeProcessResult(job, result) {
     enabled: result.enabled,
     active: result.active,
     healthy: result.healthy,
+  };
+}
+
+function expectedPythonServiceName(applicationId) {
+  const normalizedId = normalizeUuid(applicationId);
+  if (!normalizedId) return null;
+  const digest = createHash('sha256').update(normalizedId).digest('hex').slice(0, 16);
+  return `yunpanel-python-${digest}.service`;
+}
+
+function validateManagedPythonResult(job, result, action) {
+  const releaseId = normalizeUuid(result.releaseId);
+  const expectedReleaseId = normalizeUuid(job.payload?.releaseId);
+  const expectedService = expectedPythonServiceName(job.payload?.applicationId);
+  if (!releaseId || releaseId !== expectedReleaseId) {
+    throw new JobRegistryError('invalid_job_result', `Python ${action} release state does not match the queued operation`);
+  }
+  if (!expectedService || typeof result.serviceName !== 'string' || !PYTHON_SERVICE_PATTERN.test(result.serviceName) || result.serviceName !== expectedService) {
+    throw new JobRegistryError('invalid_job_result', `Python ${action} service identity is invalid`);
+  }
+  return { releaseId, serviceName: result.serviceName };
+}
+
+function sanitizePythonDeploymentResult(job, result) {
+  const identity = sanitizeReleaseIdentity(job, result);
+  const expectedService = expectedPythonServiceName(job.payload?.applicationId);
+  if (!expectedService || typeof result.serviceName !== 'string' || !PYTHON_SERVICE_PATTERN.test(result.serviceName) || result.serviceName !== expectedService) {
+    throw new JobRegistryError('invalid_job_result', 'Python deployment service identity is invalid');
+  }
+  if (result.healthy !== true) {
+    throw new JobRegistryError('invalid_job_result', 'Python deployment must confirm healthy state');
+  }
+  return {
+    ...identity,
+    ...sanitizedEnvironmentRevision(job),
+    serviceName: result.serviceName,
+    socketPath: result.socketPath ?? null,
+    port: result.port ?? null,
+    healthPath: result.healthPath ?? null,
+    healthy: true,
+  };
+}
+
+function sanitizePythonRollbackResult(job, result) {
+  const managed = validateManagedPythonResult(job, result, 'rollback');
+  const previousReleaseId = normalizeUuid(result.previousReleaseId);
+  if (!previousReleaseId || previousReleaseId === managed.releaseId) {
+    throw new JobRegistryError('invalid_job_result', 'Python rollback previous release state is invalid');
+  }
+  if (result.healthy !== true || result.active !== true) {
+    throw new JobRegistryError('invalid_job_result', 'Python rollback must confirm healthy active state');
+  }
+  return { ...managed, ...sanitizedEnvironmentRevision(job), previousReleaseId, healthy: true, active: true };
+}
+
+function sanitizePythonRestartResult(job, result) {
+  const managed = validateManagedPythonResult(job, result, 'restart');
+  if (result.healthy !== true || result.restarted !== true) {
+    throw new JobRegistryError('invalid_job_result', 'Python restart must confirm a healthy restarted service');
+  }
+  return { ...managed, ...sanitizedEnvironmentRevision(job), healthy: true, restarted: true };
+}
+
+function sanitizePythonStatusResult(job, result) {
+  const managed = validateManagedPythonResult(job, result, 'status');
+  for (const [field, value] of [
+    ['loadState', result.loadState],
+    ['activeState', result.activeState],
+    ['subState', result.subState],
+  ]) {
+    if (typeof value !== 'string' || !SYSTEMD_STATE_PATTERN.test(value)) {
+      throw new JobRegistryError('invalid_job_result', `Python status ${field} is invalid`);
+    }
+  }
+  if (!Number.isSafeInteger(result.mainPid) || result.mainPid < 0) {
+    throw new JobRegistryError('invalid_job_result', 'Python status main PID is invalid');
+  }
+  if (typeof result.healthy !== 'boolean' || typeof result.inspectionError !== 'boolean') {
+    throw new JobRegistryError('invalid_job_result', 'Python status health metadata is invalid');
+  }
+  return {
+    ...managed,
+    loadState: result.loadState,
+    activeState: result.activeState,
+    subState: result.subState,
+    mainPid: result.mainPid,
+    healthy: result.healthy,
+    inspectionError: result.inspectionError,
   };
 }
 
@@ -952,6 +1045,10 @@ function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.APP_NODE_RESTART) return sanitizeNodeRestartResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_STATUS) return sanitizeNodeStatusResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_PROCESS) return sanitizeNodeProcessResult(job, result);
+  if (job.operation === OPERATIONS.APP_PYTHON_DEPLOY) return sanitizePythonDeploymentResult(job, result);
+  if (job.operation === OPERATIONS.APP_PYTHON_ROLLBACK) return sanitizePythonRollbackResult(job, result);
+  if (job.operation === OPERATIONS.APP_PYTHON_RESTART) return sanitizePythonRestartResult(job, result);
+  if (job.operation === OPERATIONS.APP_PYTHON_STATUS) return sanitizePythonStatusResult(job, result);
   if (job.operation === OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT) return sanitizeNodeRuntimeInventory(result);
   if (job.operation === OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL) return sanitizeNodeRuntimeInstallResult(job, result);
   if (job.operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT || job.operation === OPERATIONS.SYSTEM_UPGRADE) {
@@ -1028,7 +1125,9 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     }
 
     const id = randomUUID();
-    const deploymentOperation = operation === OPERATIONS.APP_STATIC_DEPLOY || operation === OPERATIONS.APP_NODE_DEPLOY;
+    const deploymentOperation = operation === OPERATIONS.APP_STATIC_DEPLOY
+      || operation === OPERATIONS.APP_NODE_DEPLOY
+      || operation === OPERATIONS.APP_PYTHON_DEPLOY;
     const effectivePayload = deploymentOperation ? { ...payload, deploymentId: id } : payload;
     try {
       createOperationEnvelope({ id, operation, payload: effectivePayload });

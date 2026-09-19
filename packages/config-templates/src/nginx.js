@@ -324,6 +324,53 @@ export function renderPhpSiteConfig({
   });
 }
 
+function pythonBody({ socketPath, upstreamPort, nginxSettings }) {
+  const websocketHeaders = nginxSettings.websocket
+    ? '\n    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection "upgrade";'
+    : '';
+  const timeout = nginxSettings.proxyTimeoutSeconds === null ? ''
+    : `\n    proxy_connect_timeout ${nginxSettings.proxyTimeoutSeconds}s;\n    proxy_send_timeout ${nginxSettings.proxyTimeoutSeconds}s;\n    proxy_read_timeout ${nginxSettings.proxyTimeoutSeconds}s;`;
+  const renderedHeaders = headerLines(nginxSettings.headers);
+
+  const upstream = socketPath ? `http://unix:${socketPath}` : `http://127.0.0.1:${upstreamPort}`;
+
+  return `  location / {\n    proxy_pass ${upstream};\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n    proxy_set_header X-Real-IP $remote_addr;\n    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n    proxy_set_header X-Forwarded-Proto $scheme;${websocketHeaders}${timeout}${renderedHeaders ? `\n${renderedHeaders}` : ''}\n  }`;
+}
+
+export function renderPythonSiteConfig({
+  primaryDomain,
+  aliases = [],
+  acmeOnlyHostnames = [],
+  mailDiscoverySocketPath = null,
+  socketPath = null,
+  upstreamPort = null,
+  acmeRoot = '/var/lib/yunpanel/acme',
+  tls = null,
+  canonicalRedirect = false,
+  httpsRedirect = true,
+  nginxSettings = undefined,
+}) {
+  if (!socketPath && !upstreamPort) {
+    throw new NginxTemplateError('invalid_upstream', 'Python upstream requires either a socketPath or upstreamPort');
+  }
+  let safeSocket = null;
+  let port = null;
+  if (socketPath) {
+    safeSocket = assertSafeAbsolutePath(socketPath, 'socketPath');
+    if (!safeSocket.startsWith('/run/yunpanel/python-') || !safeSocket.endsWith('.sock')) {
+      throw new NginxTemplateError('invalid_python_socket', 'Python upstream must use a managed YunPanel socket');
+    }
+  } else {
+    port = assertUpstreamPort(upstreamPort);
+  }
+  const normalizedTls = normalizeTls(tls);
+  const settings = normalizeNginxSettings('python', nginxSettings ?? {});
+  const body = pythonBody({ socketPath: safeSocket, upstreamPort: port, nginxSettings: settings });
+  return renderServerSet({
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+  });
+}
+
 export function nginxConfigFileName(primaryDomain) {
   const { primary } = normalizeDomainSet(primaryDomain, []);
   return `${primary}.conf`;

@@ -1,6 +1,6 @@
 import { assertUuid } from '@yunpanel/shared';
 
-const HOSTED_RUNTIME_TYPES = new Set(['static', 'node', 'php']);
+const HOSTED_RUNTIME_TYPES = new Set(['static', 'node', 'php', 'python']);
 
 export class WebsiteSftpKeyServiceError extends Error {
   constructor(code, message, status = 409) {

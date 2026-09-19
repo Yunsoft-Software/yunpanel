@@ -226,6 +226,50 @@ async function resolvePhpRuntimeTarget({
   });
 }
 
+async function resolvePythonRuntimeTarget({
+  domain,
+  website,
+  applicationRegistry,
+}) {
+  if (website.runtimeType !== 'python' || !website.applicationId) return null;
+
+  requireDependency(
+    applicationRegistry,
+    'getApplication',
+    'application_registry_unavailable',
+    'Application registry is required to validate Python traffic authority',
+  );
+  const application = await applicationRegistry.getApplication(website.applicationId);
+  if (!application) {
+    throw new DomainRegistryError('python_runtime_application_not_found', 'Python Website Application no longer exists', 404);
+  }
+  if (application.serverId !== domain.serverId) {
+    throw new DomainRegistryError('python_runtime_server_mismatch', 'Python Application server identity drifted', 409);
+  }
+
+  if (application.runtime?.port) {
+    return Object.freeze({
+      source: 'python',
+      targetType: 'proxy',
+      target: Object.freeze({
+        upstreamHost: '127.0.0.1',
+        upstreamPort: application.runtime.port,
+        websocket: domain.nginxSettings?.websocket !== false,
+      }),
+    });
+  }
+
+  const socketPath = `/run/yunpanel/python-${application.id}.sock`;
+  return Object.freeze({
+    source: 'python',
+    targetType: 'python',
+    target: Object.freeze({
+      socketPath,
+      websocket: domain.nginxSettings?.websocket !== false,
+    }),
+  });
+}
+
 export async function resolveWebsiteDomainTarget({
   domain,
   websiteRegistry = null,
@@ -292,6 +336,12 @@ export async function resolveWebsiteDomainTarget({
       serviceUmaskManager,
     });
     if (phpTarget) return phpTarget;
+    const pythonTarget = await resolvePythonRuntimeTarget({
+      domain,
+      website,
+      applicationRegistry,
+    });
+    if (pythonTarget) return pythonTarget;
     if (domain.targetType === 'passenger') {
       throw new DomainRegistryError(
         'passenger_runtime_binding_required',
@@ -303,6 +353,13 @@ export async function resolveWebsiteDomainTarget({
       throw new DomainRegistryError(
         'php_runtime_binding_required',
         'PHP Domain target cannot be staged until the canonical PHP runtime is active',
+        409,
+      );
+    }
+    if (domain.targetType === 'python') {
+      throw new DomainRegistryError(
+        'python_runtime_binding_required',
+        'Python Domain target cannot be staged until the canonical Python runtime is active',
         409,
       );
     }
@@ -361,5 +418,6 @@ export const websiteDomainTargetInternals = Object.freeze({
   resolveStaticRuntimeTarget,
   resolvePassengerRuntimeTarget,
   resolvePhpRuntimeTarget,
+  resolvePythonRuntimeTarget,
   phpSocketPattern: PHP_SOCKET_PATTERN,
 });

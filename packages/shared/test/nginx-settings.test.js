@@ -32,6 +32,16 @@ test('normalizes bounded target-specific Nginx settings and partial updates', ()
     clientMaxBodySizeMb: null,
     headers: [],
   });
+  assert.deepEqual(normalizeNginxSettings('python', {
+    clientMaxBodySizeMb: 32,
+    proxyTimeoutSeconds: 60,
+    websocket: true,
+  }), {
+    clientMaxBodySizeMb: 32,
+    proxyTimeoutSeconds: 60,
+    websocket: true,
+    headers: [],
+  });
 });
 
 test('rejects cross-target, injection-capable and protocol-owned header settings', () => {

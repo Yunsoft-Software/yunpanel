@@ -59,6 +59,7 @@ Son Delete evidence zincirleri ve retention bağları: `docs/history/delete-evid
 Son transactional provisioning preflight, exact preview ve compensation ilerlemesi: `docs/history/transactional-provisioning-preflight-compensation-2026-09-19.md`.
 Son Redis ve Memcached isolation policy ilerlemesi: `docs/history/redis-memcached-isolation-policy-progress-2026-09-19.md`.
 Son Panel ve Sistem Ayarları ilerlemesi: `docs/history/panel-system-settings-progress-2026-09-19.md`.
+Son Python WSGI/ASGI runtime golden path ilerlemesi: `docs/history/python-runtime-golden-path-progress-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -141,7 +142,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 ## P1.1 — Runtime golden path
 
 - [ ] Passenger dependency/env/log/startup/config validation + rollback.
-- [ ] Python site-user venv + Gunicorn/Uvicorn.
 - [ ] Managed Compose dedicated project/network/volume identity.
 
 ## P1.2 — Backup/restore

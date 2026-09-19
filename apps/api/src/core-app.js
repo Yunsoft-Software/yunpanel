@@ -124,7 +124,7 @@ async function resolveDomainTls(domain, certificateRegistry, certificateMaterial
 async function latestNodeStatusJob(jobRegistry, applicationId) {
   const jobs = await jobRegistry.listJobs({ resourceType: 'application', resourceId: applicationId });
   return jobs
-    .filter((job) => job.operation === OPERATIONS.APP_NODE_STATUS)
+    .filter((job) => job.operation === OPERATIONS.APP_NODE_STATUS || job.operation === OPERATIONS.APP_PYTHON_STATUS)
     .sort((left, right) => Date.parse(right.createdAt ?? 0) - Date.parse(left.createdAt ?? 0))[0] ?? null;
 }
 
@@ -476,8 +476,17 @@ export function createApp({
         runtime: request.body?.runtime,
         retention: request.body?.retention ?? 5,
       });
+    } else if (type === 'python') {
+      application = await applicationRegistry.createPythonApplication({
+        serverId,
+        name: request.body?.name,
+        repositoryUrl: request.body?.repositoryUrl,
+        branch: request.body?.branch ?? 'main',
+        runtime: request.body?.runtime,
+        retention: request.body?.retention ?? 5,
+      });
     } else {
-      throw new ApplicationRegistryError('invalid_application_type', 'Application type must be static or node');
+      throw new ApplicationRegistryError('invalid_application_type', 'Application type must be static, node, or python');
     }
     return response.status(201).json({ data: application });
   });
@@ -489,7 +498,7 @@ export function createApp({
   });
   app.post('/api/applications/:applicationId/rollback', requirePanelRouteAccess, async (request, response) => {
     const application = await requireApplication(request.params.applicationId);
-    if (!['static', 'node'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
+    if (!['static', 'node', 'python'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
 
@@ -497,12 +506,13 @@ export function createApp({
     if (!releaseId) throw new ApplicationRegistryError('rollback_release_required', 'No previous release is available for rollback', 409);
 
     const nodeRollback = application.type === 'node';
-    const environment = nodeRollback ? await applicationEnvironmentRegistry.environmentStatus(application.id) : null;
+    const pythonRollback = application.type === 'python';
+    const environment = (nodeRollback || pythonRollback) ? await applicationEnvironmentRegistry.environmentStatus(application.id) : null;
     const job = await jobRegistry.enqueue({
       serverId: application.serverId,
-      type: nodeRollback ? 'app.node.rollback' : 'app.static.rollback',
-      operation: nodeRollback ? OPERATIONS.APP_NODE_ROLLBACK : OPERATIONS.APP_STATIC_ROLLBACK,
-      payload: nodeRollback
+      type: pythonRollback ? 'app.python.rollback' : (nodeRollback ? 'app.node.rollback' : 'app.static.rollback'),
+      operation: pythonRollback ? OPERATIONS.APP_PYTHON_ROLLBACK : (nodeRollback ? OPERATIONS.APP_NODE_ROLLBACK : OPERATIONS.APP_STATIC_ROLLBACK),
+      payload: (nodeRollback || pythonRollback)
         ? {
             applicationId: application.id,
             releaseId,
@@ -529,16 +539,17 @@ export function createApp({
   });
   app.post('/api/applications/:applicationId/restart', requirePanelRouteAccess, async (request, response) => {
     const application = await requireApplication(request.params.applicationId);
-    if (application.type !== 'node') throw new ApplicationRegistryError('restart_not_supported', 'Restart is only supported for Node applications', 409);
+    if (!['node', 'python'].includes(application.type)) throw new ApplicationRegistryError('restart_not_supported', 'Restart is only supported for Node and Python applications', 409);
     if (!application.currentReleaseId) throw new ApplicationRegistryError('application_not_deployed', 'Application has no active release to restart', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
 
     const environment = await applicationEnvironmentRegistry.environmentStatus(application.id);
+    const isPython = application.type === 'python';
     const job = await jobRegistry.enqueue({
       serverId: application.serverId,
-      type: 'app.node.restart',
-      operation: OPERATIONS.APP_NODE_RESTART,
+      type: isPython ? 'app.python.restart' : 'app.node.restart',
+      operation: isPython ? OPERATIONS.APP_PYTHON_RESTART : OPERATIONS.APP_NODE_RESTART,
       payload: {
         applicationId: application.id,
         releaseId: application.currentReleaseId,
@@ -552,20 +563,21 @@ export function createApp({
   });
   app.get('/api/applications/:applicationId/status', requirePanelRouteAccess, async (request, response) => {
     const application = await requireApplication(request.params.applicationId);
-    if (application.type !== 'node') throw new ApplicationRegistryError('status_not_supported', 'Process status is only supported for Node applications', 409);
+    if (!['node', 'python'].includes(application.type)) throw new ApplicationRegistryError('status_not_supported', 'Process status is only supported for Node and Python applications', 409);
     return response.json({ data: await latestNodeStatusJob(jobRegistry, application.id) });
   });
   app.post('/api/applications/:applicationId/status/refresh', requirePanelRouteAccess, async (request, response) => {
     const application = await requireApplication(request.params.applicationId);
-    if (application.type !== 'node') throw new ApplicationRegistryError('status_not_supported', 'Process status is only supported for Node applications', 409);
+    if (!['node', 'python'].includes(application.type)) throw new ApplicationRegistryError('status_not_supported', 'Process status is only supported for Node and Python applications', 409);
     if (!application.currentReleaseId) throw new ApplicationRegistryError('application_not_deployed', 'Application has no active release to inspect', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
 
+    const isPython = application.type === 'python';
     const job = await jobRegistry.enqueue({
       serverId: application.serverId,
-      type: 'app.node.status',
-      operation: OPERATIONS.APP_NODE_STATUS,
+      type: isPython ? 'app.python.status' : 'app.node.status',
+      operation: isPython ? OPERATIONS.APP_PYTHON_STATUS : OPERATIONS.APP_NODE_STATUS,
       payload: {
         applicationId: application.id,
         releaseId: application.currentReleaseId,

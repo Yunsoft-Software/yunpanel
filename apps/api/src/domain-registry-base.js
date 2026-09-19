@@ -13,7 +13,7 @@ import { DomainHierarchyError, validateDomainHierarchy, validateDomainParent } f
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
 const STORE_VERSION = 4;
-const TARGET_TYPES = new Set(['static', 'proxy', 'passenger', 'php']);
+const TARGET_TYPES = new Set(['static', 'proxy', 'passenger', 'php', 'python']);
 const HTTPS_MODES = new Set(['off', 'managed']);
 const DOMAIN_STATES = new Set(['draft', 'staged', 'active', 'suspended', 'error']);
 const UPDATE_FIELDS = new Set(['primaryDomain', 'aliases', 'httpsMode', 'httpsRedirect', 'canonicalRedirect', 'nginxSettings']);
@@ -59,7 +59,7 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
   }
   const normalizedSettings = settings(domain.targetType, domain.nginxSettings);
   if (JSON.stringify(normalizedSettings) !== JSON.stringify(domain.nginxSettings)
-    || (domain.targetType === 'proxy' && domain.target?.websocket !== normalizedSettings.websocket)
+    || ((domain.targetType === 'proxy' || domain.targetType === 'python') && domain.target?.websocket !== normalizedSettings.websocket)
     || (domain.targetType === 'static' && domain.target?.spaFallback !== normalizedSettings.spaFallback)) {
     throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain Nginx settings are invalid', 409);
   }
@@ -147,7 +147,7 @@ function publicDomain(domain) {
 }
 
 function validateTarget(targetType, target) {
-  if (!TARGET_TYPES.has(targetType)) throw new DomainRegistryError('invalid_target_type', 'targetType must be static, proxy, passenger or php');
+  if (!TARGET_TYPES.has(targetType)) throw new DomainRegistryError('invalid_target_type', 'targetType must be static, proxy, passenger, php or python');
   if (!target || typeof target !== 'object' || Array.isArray(target)) throw new DomainRegistryError('invalid_target', 'target must be an object');
   if (targetType === 'static') {
     if (typeof target.root !== 'string' || target.root.length < 2 || target.root.length > 500 || /[\u0000-\u001f\u007f]/.test(target.root)) {
@@ -161,6 +161,32 @@ function validateTarget(targetType, target) {
     }
     try { return { applicationId: assertUuid(target.applicationId, 'applicationId') }; }
     catch { throw new DomainRegistryError(`invalid_${targetType}_target`, `${targetType === 'php' ? 'PHP' : 'Passenger'} Domain target Application identity is invalid`); }
+  }
+  if (targetType === 'python') {
+    let applicationId;
+    try { applicationId = assertUuid(target.applicationId, 'applicationId'); }
+    catch { throw new DomainRegistryError('invalid_python_target', 'Python Domain target Application identity is invalid'); }
+    const proxyMode = target.proxyMode === 'port' || (target.port != null && !target.socketPath) ? 'port' : 'unix_socket';
+    let socketPath = null;
+    let port = null;
+    if (proxyMode === 'unix_socket') {
+      socketPath = target.socketPath ?? `/run/yunpanel/python-${applicationId}.sock`;
+      if (typeof socketPath !== 'string' || !socketPath.startsWith('/run/yunpanel/python-')) {
+        throw new DomainRegistryError('invalid_python_target', 'Python Domain socketPath is invalid');
+      }
+    } else {
+      if (!Number.isInteger(target.port) || target.port < 1024 || target.port > 65535) {
+        throw new DomainRegistryError('invalid_python_target', 'Python Domain port must be between 1024 and 65535');
+      }
+      port = target.port;
+    }
+    return {
+      applicationId,
+      proxyMode,
+      socketPath,
+      port,
+      websocket: target.websocket !== false,
+    };
   }
   if (!Number.isInteger(target.upstreamPort) || target.upstreamPort < 1024 || target.upstreamPort > 65535) {
     throw new DomainRegistryError('invalid_upstream_port', 'Proxy upstreamPort must be between 1024 and 65535');
@@ -180,13 +206,13 @@ function settings(targetType, value, base = null) {
 }
 
 function settingsFromTarget(targetType, target) {
-  if (targetType === 'proxy') return settings(targetType, { websocket: target?.websocket !== false });
+  if (targetType === 'proxy' || targetType === 'python') return settings(targetType, { websocket: target?.websocket !== false });
   if (targetType === 'static') return settings(targetType, { spaFallback: target?.spaFallback !== false });
   return settings(targetType, {});
 }
 
 function targetWithSettings(targetType, target, nginxSettings) {
-  if (targetType === 'proxy') return { ...target, websocket: nginxSettings.websocket };
+  if (targetType === 'proxy' || targetType === 'python') return { ...target, websocket: nginxSettings.websocket };
   if (targetType === 'static') return { ...target, spaFallback: nginxSettings.spaFallback };
   return { ...target };
 }
@@ -638,8 +664,8 @@ export function createDomainRegistry({
     if (conflict) throw new DomainRegistryError('domain_conflict', 'A domain or alias is already managed', 409);
 
     const normalizedTarget = validateTarget(targetType, target);
-    if (['passenger', 'php'].includes(targetType) && normalizedWebsiteId === null) {
-      throw new DomainRegistryError(`${targetType}_website_binding_required`, `${targetType === 'php' ? 'PHP' : 'Passenger'} Domain targets require an explicit Website binding`, 409);
+    if (['passenger', 'php', 'python'].includes(targetType) && normalizedWebsiteId === null) {
+      throw new DomainRegistryError(`${targetType}_website_binding_required`, `${targetType === 'php' ? 'PHP' : targetType === 'python' ? 'Python' : 'Passenger'} Domain targets require an explicit Website binding`, 409);
     }
     const normalizedNginxSettings = settings(
       targetType,

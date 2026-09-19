@@ -10,7 +10,7 @@ import { assertUuid } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
 const MAX_TASKS_PER_WEBSITE = 100;
-const HOSTED_RUNTIME_TYPES = new Set(['static', 'node', 'php']);
+const HOSTED_RUNTIME_TYPES = new Set(['static', 'node', 'php', 'python']);
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 
 export class WebsiteCronRegistryError extends Error {

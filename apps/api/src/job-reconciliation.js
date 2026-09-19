@@ -35,7 +35,10 @@ function same(left, right) {
 
 async function markEnvironmentApplied(applicationEnvironmentRegistry, job, releaseId) {
   if (!applicationEnvironmentRegistry || typeof applicationEnvironmentRegistry.markApplied !== 'function') return;
-  if (![OPERATIONS.APP_NODE_DEPLOY, OPERATIONS.APP_NODE_RESTART, OPERATIONS.APP_NODE_ROLLBACK].includes(job.operation)) return;
+  if (![
+    OPERATIONS.APP_NODE_DEPLOY, OPERATIONS.APP_NODE_RESTART, OPERATIONS.APP_NODE_ROLLBACK,
+    OPERATIONS.APP_PYTHON_DEPLOY, OPERATIONS.APP_PYTHON_RESTART, OPERATIONS.APP_PYTHON_ROLLBACK,
+  ].includes(job.operation)) return;
   await applicationEnvironmentRegistry.markApplied({
     applicationId: job.resourceId,
     revision: job.result?.environmentRevision ?? 0,
@@ -58,7 +61,7 @@ async function reconcileApplicationJob(
     return;
   }
 
-  if (job.operation === OPERATIONS.APP_STATIC_DEPLOY || job.operation === OPERATIONS.APP_NODE_DEPLOY) {
+  if (job.operation === OPERATIONS.APP_STATIC_DEPLOY || job.operation === OPERATIONS.APP_NODE_DEPLOY || job.operation === OPERATIONS.APP_PYTHON_DEPLOY) {
     if (!(application.activeDeploymentId == null && application.currentReleaseId === job.result?.releaseId)) {
       await applicationRegistry.markDeployed(job.resourceId, {
         deploymentId: job.id,
@@ -98,7 +101,7 @@ async function reconcileApplicationJob(
     return;
   }
 
-  if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK || job.operation === OPERATIONS.APP_NODE_ROLLBACK) {
+  if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK || job.operation === OPERATIONS.APP_NODE_ROLLBACK || job.operation === OPERATIONS.APP_PYTHON_ROLLBACK) {
     if (!(application.activeDeploymentId == null && application.currentReleaseId === job.result?.releaseId)) {
       await applicationRegistry.markRolledBack(job.resourceId, {
         operationId: job.id,
@@ -133,7 +136,7 @@ async function reconcileApplicationJob(
     return;
   }
 
-  if (job.operation === OPERATIONS.APP_NODE_RESTART) {
+  if (job.operation === OPERATIONS.APP_NODE_RESTART || job.operation === OPERATIONS.APP_PYTHON_RESTART) {
     await markEnvironmentApplied(applicationEnvironmentRegistry, job, job.result.releaseId);
   }
 }

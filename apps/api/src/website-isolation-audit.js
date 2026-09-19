@@ -2,11 +2,12 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { createApplicationIdentity } from '@yunpanel/host-runtime/application-identity';
 
-const HOSTED_RUNTIME_TYPES = new Set(['static', 'node', 'php']);
+const HOSTED_RUNTIME_TYPES = new Set(['static', 'node', 'php', 'python']);
 const ISOLATION_STEPS = Object.freeze({
   static: Object.freeze(['unix_identity', 'runtime', 'sftp']),
   node: Object.freeze(['unix_identity', 'runtime', 'sftp']),
   php: Object.freeze(['unix_identity', 'php_runtime', 'sftp']),
+  python: Object.freeze(['unix_identity', 'runtime', 'sftp']),
 });
 
 export class WebsiteIsolationAuditError extends Error {
@@ -20,7 +21,7 @@ export class WebsiteIsolationAuditError extends Error {
 
 function expectedDocumentRoot(runtimeType, identity) {
   if (runtimeType === 'static') return path.posix.join(identity.paths.static.publishRoot, 'current');
-  if (runtimeType === 'node') return identity.paths.runtime.currentRelease;
+  if (runtimeType === 'node' || runtimeType === 'python') return identity.paths.runtime.currentRelease;
   if (runtimeType === 'php') return path.posix.join(identity.paths.runtime.currentRelease, 'public');
   return null;
 }

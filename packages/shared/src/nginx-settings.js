@@ -1,6 +1,7 @@
 const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers']);
 const TARGET_FIELDS = Object.freeze({
   proxy: new Set([...COMMON_FIELDS, 'proxyTimeoutSeconds', 'websocket']),
+  python: new Set([...COMMON_FIELDS, 'proxyTimeoutSeconds', 'websocket']),
   static: new Set([...COMMON_FIELDS, 'spaFallback', 'staticAssetCacheSeconds']),
   passenger: new Set([...COMMON_FIELDS]),
   php: new Set([...COMMON_FIELDS]),
@@ -68,7 +69,7 @@ function headers(value) {
 }
 
 function defaults(targetType) {
-  if (targetType === 'proxy') {
+  if (targetType === 'proxy' || targetType === 'python') {
     return {
       clientMaxBodySizeMb: null,
       proxyTimeoutSeconds: null,
@@ -90,12 +91,12 @@ function defaults(targetType) {
       headers: Object.freeze([]),
     };
   }
-  throw new NginxSettingsValidationError('invalid_nginx_target_type', 'Nginx settings require a static, proxy, passenger or php target');
+  throw new NginxSettingsValidationError('invalid_nginx_target_type', 'Nginx settings require a static, proxy, passenger, php or python target');
 }
 
 export function normalizeNginxSettings(targetType, value = {}, base = null) {
   const allowed = TARGET_FIELDS[targetType];
-  if (!allowed) throw new NginxSettingsValidationError('invalid_nginx_target_type', 'Nginx settings require a static, proxy, passenger or php target');
+  if (!allowed) throw new NginxSettingsValidationError('invalid_nginx_target_type', 'Nginx settings require a static, proxy, passenger, php or python target');
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).some((field) => !allowed.has(field))) {
     throw new NginxSettingsValidationError('invalid_nginx_settings', 'Nginx settings contain unsupported fields');
@@ -105,7 +106,7 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
   const common = {
     clientMaxBodySizeMb: optionalInteger(merged.clientMaxBodySizeMb, 'clientMaxBodySizeMb', 1, 1024),
   };
-  if (targetType === 'proxy') {
+  if (targetType === 'proxy' || targetType === 'python') {
     return Object.freeze({
       ...common,
       proxyTimeoutSeconds: optionalInteger(merged.proxyTimeoutSeconds, 'proxyTimeoutSeconds', 1, 600),

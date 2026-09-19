@@ -7,7 +7,7 @@ const STORE_VERSION = 1;
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
-const HOSTED_RUNTIME_TYPES = new Set(['static', 'node', 'php']);
+const HOSTED_RUNTIME_TYPES = new Set(['static', 'node', 'php', 'python']);
 
 export class DatabaseBindingRegistryError extends Error {
   constructor(code, message, status = 400) {

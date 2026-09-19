@@ -19,6 +19,7 @@ import {
   createNodeRuntimeManager,
   createNodeRollbackManager,
   createNodeStatusInspector,
+  createPythonSiteManager,
   createStaticDeploymentManager,
   createStaticDeploymentReceiptStore,
   createStaticRollbackManager,
@@ -50,6 +51,7 @@ export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.APP_NODE_STATUS,
   OPERATIONS.APP_NODE_PROCESS,
   OPERATIONS.APP_NODE_PASSENGER_MIGRATE,
+  OPERATIONS.APP_PYTHON_STATUS,
   OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT,
   OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL,
 ]);
@@ -63,6 +65,12 @@ export const LOCAL_NODE_ENVIRONMENT_OPERATIONS = Object.freeze([
   OPERATIONS.APP_NODE_DEPLOY,
   OPERATIONS.APP_NODE_ROLLBACK,
   OPERATIONS.APP_NODE_RESTART,
+]);
+
+export const LOCAL_PYTHON_ENVIRONMENT_OPERATIONS = Object.freeze([
+  OPERATIONS.APP_PYTHON_DEPLOY,
+  OPERATIONS.APP_PYTHON_ROLLBACK,
+  OPERATIONS.APP_PYTHON_RESTART,
 ]);
 
 export const LOCAL_MAIL_CONFIGURATION_OPERATIONS = Object.freeze([
@@ -147,6 +155,7 @@ export function createLocalHostOperations({
   nodePassengerMigrationOperation = createLocalNodePassengerMigrationOperation(),
   nodeRuntimeManager = createNodeRuntimeManager(),
   nodeStatusInspector = createNodeStatusInspector(),
+  pythonSiteManager = createPythonSiteManager(),
   mailConfigManager = null,
   mailConfigBackupManager = null,
   mailConfigActivator = null,
@@ -692,6 +701,7 @@ export function createLocalHostOperations({
     [OPERATIONS.APP_NODE_STATUS, (payload) => nodeStatusInspector.inspectNodeStatus(payload)],
     [OPERATIONS.APP_NODE_PROCESS, (payload) => nodeProcessManager.controlNodeProcess(payload)],
     [OPERATIONS.APP_NODE_PASSENGER_MIGRATE, (payload, execution) => nodePassengerMigrationOperation.execute(payload, execution)],
+    [OPERATIONS.APP_PYTHON_STATUS, (payload) => pythonSiteManager.inspect(payload)],
     [OPERATIONS.SYSTEM_NODE_RUNTIMES_INSPECT, () => nodeRuntimeManager.inspect()],
     [OPERATIONS.SYSTEM_NODE_RUNTIME_INSTALL, (payload) => nodeRuntimeManager.install(payload.major)],
     [OPERATIONS.MAIL_DATA_BACKUP, executeMailDataBackup],
@@ -709,6 +719,7 @@ export function createLocalHostOperations({
     })));
     handlers.set(OPERATIONS.APP_NODE_ROLLBACK, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRollbackManager.rollbackNode(hydrated)));
     handlers.set(OPERATIONS.APP_NODE_RESTART, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRestartManager.restartNode(hydrated)));
+    handlers.set(OPERATIONS.APP_PYTHON_RESTART, (payload) => withApplicationEnvironment(payload, (hydrated) => pythonSiteManager.restart(hydrated)));
   }
   if (loadManagedMailConfiguration) {
     handlers.set(OPERATIONS.MAIL_CONFIG_APPLY, executeManagedMailConfiguration);
