@@ -102,6 +102,26 @@ export function createMailConfigEvidenceInspector({
     }
   }
 
+  async function inspectSqlDirectories(plan, postfixIdentity, mailAuthGroup) {
+    if (plan.sql?.required !== true) return true;
+    const expected = [
+      { path: mailSqlTemplatePolicy.databaseDirectory, gid: mailAuthGroup.gid },
+      { path: mailSqlTemplatePolicy.postfixSqlDirectory, gid: postfixIdentity.gid },
+      { path: '/etc/yunpanel/mail/sql', gid: ROOT_GID },
+    ];
+    for (const directory of expected) {
+      try {
+        const metadata = await lstatFn(directory.path);
+        if (!metadata.isDirectory() || metadata.isSymbolicLink()
+          || metadata.uid !== ROOT_UID || metadata.gid !== directory.gid
+          || (metadata.mode & 0o7777) !== 0o750) return false;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  }
+
   async function inspectSqlDatabase(plan, mailAuthGroup) {
     if (plan.sql?.required !== true) return true;
     try {
@@ -236,6 +256,9 @@ export function createMailConfigEvidenceInspector({
       }
     }
     if (plan.sql?.required === true) {
+      if (!(await inspectSqlDirectories(plan, postfixIdentity, mailAuthGroup))) {
+        return { satisfied: false, result: null };
+      }
       if (!(await inspectSqlDatabase(plan, mailAuthGroup))) return { satisfied: false, result: null };
       if (!(await legacyLookupsRetired(plan))) return { satisfied: false, result: null };
     } else {
