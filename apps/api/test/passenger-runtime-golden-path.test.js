@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -12,13 +12,14 @@ import {
 } from '@yunpanel/host-runtime';
 import { renderPassengerSiteConfig } from '@yunpanel/config-templates';
 
-test('Passenger Runtime Golden Path - Dependency, Env, Log, Startup, Config Validation & Rollback', async (t) => {
+test('Passenger Runtime Validation Slice - Env, Log, Startup, Config Validation & Rollback', async (t) => {
   const applicationId = 'c1000000-0000-4000-8000-000000000001';
+  const operationId = 'c1000000-0000-4000-8000-000000000002';
   const unixUser = 'yunapp-0123456789ab';
   const appRoot = `/var/lib/yunpanel/apps/${applicationId}/current`;
   const logFile = `/var/lib/yunpanel/data/${applicationId}/logs/passenger.log`;
 
-  await t.test('1. Dependency & Setup Validation', () => {
+  await t.test('1. Setup Input Validation', () => {
     // Valid setup
     assert.equal(
       validatePassengerSetup({
@@ -73,6 +74,18 @@ test('Passenger Runtime Golden Path - Dependency, Env, Log, Startup, Config Vali
       const envManager = createWebsitePassengerEnvironmentManager({
         includeRoot,
         receiptRoot,
+        // The packaged API runs as root. Preserve real filesystem behavior while
+        // modeling the ownership that the production manager requires.
+        lstatFn: async (target) => {
+          const stat = await lstat(target);
+          return {
+            uid: 0,
+            gid: 0,
+            mode: stat.mode,
+            isFile: () => stat.isFile(),
+            isSymbolicLink: () => stat.isSymbolicLink(),
+          };
+        },
       });
 
       // Reserved key rejection
@@ -81,7 +94,7 @@ test('Passenger Runtime Golden Path - Dependency, Env, Log, Startup, Config Vali
           applicationId,
           environmentRevision: 1,
           values: { NODE_ENV: 'development' },
-        }, { operationId: 'op-1' }),
+        }, { operationId }),
         (err) => err instanceof WebsitePassengerEnvironmentError && err.code === 'website_passenger_environment_reserved_key',
       );
 
@@ -89,34 +102,34 @@ test('Passenger Runtime Golden Path - Dependency, Env, Log, Startup, Config Vali
       const applied = await envManager.apply({
         applicationId,
         environmentRevision: 1,
-        values: { PORT: '3000', APP_SECRET: 'secret123' },
-      }, { operationId: 'op-1' });
+        values: { APP_PORT: '3000', APP_SECRET: 'secret123' },
+      }, { operationId });
 
       assert.equal(applied.satisfied, true);
       assert.equal(applied.variableCount, 2);
 
       // Verify receipt persisted
-      const opState = await envManager.operation(applicationId, 'op-1');
+      const opState = await envManager.operation(applicationId, operationId);
       assert.equal(opState.state, 'active');
 
       // Rollback (compensate)
       const compensated = await envManager.compensate({
         applicationId,
         environmentRevision: 1,
-        values: { PORT: '3000', APP_SECRET: 'secret123' },
-      }, { operationId: 'op-1', ownedByOperation: true });
+        values: { APP_PORT: '3000', APP_SECRET: 'secret123' },
+      }, { operationId, ownedByOperation: true });
 
       assert.equal(compensated.satisfied, true);
       assert.equal(compensated.restored, true);
 
-      // Verify inspect after compensation
-      const afterComp = await envManager.inspect({
+      // Verify the rollback-specific inspector after compensation.
+      const afterComp = await envManager.inspectCompensation({
         applicationId,
         environmentRevision: 1,
-        values: { PORT: '3000', APP_SECRET: 'secret123' },
-      }, { operationId: 'op-1' });
-      assert.equal(afterComp.satisfied, false);
-      assert.equal(afterComp.reason, 'website_passenger_environment_compensated');
+        values: { APP_PORT: '3000', APP_SECRET: 'secret123' },
+      }, { operationId, ownedByOperation: true });
+      assert.equal(afterComp.satisfied, true);
+      assert.equal(afterComp.restored, true);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
