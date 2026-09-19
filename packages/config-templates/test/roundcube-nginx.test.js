@@ -72,6 +72,9 @@ test('Roundcube Nginx template serves many certificate-bound webmail hostnames f
   assert.match(content, /server_name webmail\.example\.com;/);
   assert.match(content, /server_name webmail\.second\.example;/);
   assert.match(content, /ssl_certificate \/etc\/letsencrypt\/live\/webmail\.example\.com\/fullchain\.pem;/);
+  assert.equal((content.match(/listen 80;/g) ?? []).length, 1);
+  assert.equal((content.match(/server_name webmail\.example\.com;/g) ?? []).length, 1);
+  assert.equal((content.match(/server_name webmail\.second\.example;/g) ?? []).length, 1);
   assert.deepEqual(preview.mappings, [
     { hostname: 'webmail.example.com', endpoint: 'https://webmail.example.com/' },
     { hostname: 'webmail.second.example', endpoint: 'https://webmail.second.example/' },
