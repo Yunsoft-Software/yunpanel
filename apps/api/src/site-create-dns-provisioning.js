@@ -186,11 +186,45 @@ async function dnsZoneStep(preview, dependencies) {
   });
 }
 
+function mailDnsReapplyStep(base, preview, dns) {
+  const mailDomain = preview.plan?.mailDomain;
+  if (!dns || !mailDomain || mailDomain.managementMode !== 'local') return null;
+  const dkim = base.steps.find((step) => step.id === 'mail_dkim_key');
+  if (!dkim || dkim.intent?.mailDomainId !== mailDomain.id) {
+    throw new SiteCreateError(
+      'site_create_mail_dkim_plan_invalid',
+      'Local authoritative mail DNS requires the operation-owned DKIM key step',
+      409,
+    );
+  }
+  return Object.freeze({
+    id: 'mail_dns_reapply',
+    kind: 'mail_dns_reapply',
+    required: true,
+    state: 'pending',
+    intent: Object.freeze({
+      adapter: 'powerdns-mail-reapply',
+      serverId: dns.intent.serverId,
+      websiteId: base.websiteId,
+      webDomainId: dns.intent.webDomainId,
+      zoneName: dns.intent.zoneName,
+      mailDomainId: mailDomain.id,
+      domainName: mailDomain.domainName,
+      expectedMailDomainRevision: 2,
+      expectedMailDomainStatus: 'enabled',
+      expectedDkimKeyRevision: 1,
+      selector: dkim.intent.selector,
+    }),
+    compensation: Object.freeze({ state: 'pending' }),
+  });
+}
+
 export async function siteCreateProvisioningPlan(preview, dependencies = {}) {
   const base = createBaseSiteCreateProvisioningPlan(preview);
   if (base.steps.some((step) => step.id === 'dns_zone')) return base;
   const dns = await dnsZoneStep(preview, dependencies);
   if (!dns) return base;
+  const mailDns = mailDnsReapplyStep(base, preview, dns);
   const steps = base.steps.map((step) => ({
     ...step,
     intent: { ...step.intent },
@@ -199,6 +233,17 @@ export async function siteCreateProvisioningPlan(preview, dependencies = {}) {
   const nginxIndex = steps.findIndex((step) => step.id === 'nginx');
   const insertAt = nginxIndex >= 0 ? nginxIndex : steps.length;
   steps.splice(insertAt, 0, dns);
+  if (mailDns) {
+    if (steps.some((step) => step.id === 'mail_dns_reapply' || step.kind === 'mail_dns_reapply')) {
+      throw new SiteCreateError(
+        'site_create_mail_dns_plan_conflict',
+        'Website provisioning already contains the local mail DNS reapply step',
+        409,
+      );
+    }
+    const dkimIndex = steps.findIndex((step) => step.id === 'mail_dkim_key');
+    steps.splice(dkimIndex >= 0 ? dkimIndex + 1 : steps.length, 0, mailDns);
+  }
   return createWebsiteProvisioningPlan({
     operationId: base.operationId,
     websiteId: base.websiteId,
@@ -218,4 +263,5 @@ export const siteCreateDnsProvisioningInternals = Object.freeze({
   assertAuthoritativeNameservers,
   runtimeAwareRecords,
   dnsZoneStep,
+  mailDnsReapplyStep,
 });
