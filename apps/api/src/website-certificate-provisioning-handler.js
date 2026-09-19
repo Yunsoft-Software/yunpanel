@@ -437,7 +437,15 @@ export function createWebsiteCertificateProvisioningHandler({
     return completionEvidence(certificate, domain, terminal, request, context.operationId);
   }
 
-  return Object.freeze({ apply, inspect });
+  async function inspectCompensation() {
+    return Object.freeze({ satisfied: true, retained: true });
+  }
+
+  async function compensate() {
+    return Object.freeze({ satisfied: true, retained: true });
+  }
+
+  return Object.freeze({ apply, inspect, compensate, inspectCompensation });
 }
 
 export const websiteCertificateProvisioningInternals = Object.freeze({

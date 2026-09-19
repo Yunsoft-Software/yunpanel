@@ -521,3 +521,94 @@ test('Passenger Node Application target stays logical and rejects persisted back
     (error) => error instanceof SiteCreateError && error.code === 'site_create_application_runtime_drift' && error.status === 409,
   );
 });
+
+test('DNS mode preflight validates root vs subdomain and yields exact resource preview', async () => {
+  const state = await fixture();
+  const serverDnsIdentityRegistry = {
+    getForServer: async () => ({
+      settings: {
+        publicIpv4: '203.0.113.10',
+        publicIpv6: '2001:db8::10',
+        ns1: { hostname: 'ns1.example.test' },
+        ns2: { hostname: 'ns2.example.test' },
+      },
+    }),
+  };
+
+  const localInput = inputFor(state.serverId, {
+    dns: { mode: 'local' },
+  });
+  const localPreview = await previewSiteCreate({
+    input: localInput,
+    ...dependencies(state, { serverDnsIdentityRegistry }),
+  });
+
+  assert.equal(localPreview.plan.dns.mode, 'local');
+  assert.equal(localPreview.plan.dns.authoritative, true);
+  assert.equal(localPreview.plan.dns.publicIpv4, '203.0.113.10');
+  assert.equal(localPreview.plan.dns.publicIpv6, '2001:db8::10');
+  assert.deepEqual(localPreview.plan.dns.nameservers, ['ns1.example.test', 'ns2.example.test']);
+  assert.equal(localPreview.plan.ip.publicIpv4, '203.0.113.10');
+  assert.equal(localPreview.plan.ip.publicIpv6, '2001:db8::10');
+  assert.equal(localPreview.plan.runtime.type, 'static');
+  assert.equal(localPreview.plan.runtime.adapter, 'static');
+  assert.equal(localPreview.plan.certificate.mode, 'managed');
+  assert.equal(localPreview.plan.certificate.purpose, 'web');
+  assert.deepEqual(localPreview.plan.certificate.coverage, ['example.com', 'www.example.com']);
+  assert.equal(localPreview.plan.sftp.adapter, 'openssh-internal-sftp');
+  assert.ok(localPreview.plan.sftp.unixUser.startsWith('yunapp-'));
+  assert.equal(localPreview.blockers.length, 0);
+
+  const externalInput = inputFor(state.serverId, {
+    operationId: '6d1bb952-663d-495c-9c76-9d5fcfc8ca22',
+    primaryDomain: 'external.example.com',
+    dns: { mode: 'external' },
+  });
+  const externalPreview = await previewSiteCreate({
+    input: externalInput,
+    ...dependencies(state),
+  });
+  assert.equal(externalPreview.plan.dns.mode, 'external');
+  assert.equal(externalPreview.plan.dns.authoritative, false);
+
+  await assert.rejects(
+    previewSiteCreate({
+      input: inputFor(state.serverId, {
+        operationId: '1b8979fc-9e32-4217-a065-27a3a939f727',
+        parentDomainId: '980dd209-c2fc-4621-bb2f-889e05400ab4',
+        dns: { mode: 'local' },
+      }),
+      ...dependencies(state),
+    }),
+    (error) => error instanceof SiteCreateError && error.code === 'site_create_subdomain_dns_unsupported' && error.status === 409,
+  );
+});
+
+test('preflight detects package/service blockers and prevents site mutation', async () => {
+  const state = await fixture();
+  const emptyDnsRegistry = {
+    getForServer: async () => null,
+  };
+
+  const blockedInput = inputFor(state.serverId, {
+    dns: { mode: 'local' },
+  });
+  const blockedPreview = await previewSiteCreate({
+    input: blockedInput,
+    ...dependencies(state, { serverDnsIdentityRegistry: emptyDnsRegistry }),
+  });
+
+  assert.equal(blockedPreview.complete, false);
+  assert.deepEqual(blockedPreview.blockers, ['dns_identity_required']);
+
+  await assert.rejects(
+    createSite({
+      input: blockedInput,
+      previewDigest: blockedPreview.previewDigest,
+      confirmation: blockedPreview.confirmation,
+      ...dependencies(state, { serverDnsIdentityRegistry: emptyDnsRegistry }),
+    }),
+    (error) => error instanceof SiteCreateError && error.code === 'site_create_blocked_by_dependency' && error.status === 409,
+  );
+});
+

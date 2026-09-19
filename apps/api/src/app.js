@@ -497,6 +497,8 @@ export function createApp({
     websiteRegistry,
     domainRegistry,
     mailDomainRegistry,
+    serverDnsIdentityRegistry,
+    dnsZoneTemplateRegistry,
     localServerId,
     websiteProvisioningRegistry: websiteProvisioningRuntime?.registry ?? null,
   });

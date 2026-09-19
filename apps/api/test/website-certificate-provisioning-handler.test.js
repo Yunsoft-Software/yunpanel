@@ -301,3 +301,27 @@ test('Website certificate inspection ignores a live webmail-purpose certificate 
   });
   assert.equal(mutations, 0);
 });
+
+test('Website certificate compensation retains certificate records and avoids physical removal', async () => {
+  const handler = createWebsiteCertificateProvisioningHandler({
+    acmeEmail: 'ops@example.com',
+    domainRegistry: { getDomain: async () => activeDomain() },
+    certificateRegistry: {
+      listCertificates: async () => [],
+      getCertificate: async () => null,
+      createForDomain: async () => null,
+      setState: async () => null,
+    },
+    jobRegistry: {
+      listJobs: async () => [],
+      getJob: async () => null,
+      enqueue: async () => null,
+    },
+  });
+
+  const inspected = await handler.inspectCompensation({ operationId, websiteId, intent });
+  assert.deepEqual(inspected, { satisfied: true, retained: true });
+
+  const compensated = await handler.compensate({ operationId, websiteId, intent });
+  assert.deepEqual(compensated, { satisfied: true, retained: true });
+});

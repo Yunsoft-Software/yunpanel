@@ -232,3 +232,10 @@ test('root Website planning requires configured server DNS identity', async () =
     (error) => error.code === 'site_create_dns_identity_required' && error.status === 409,
   );
 });
+
+test('external DNS mode skips dns_zone step even for root Website', async () => {
+  const customPreview = preview();
+  customPreview.plan.dns = { mode: 'external' };
+  const plan = await siteCreateProvisioningPlan(customPreview, dependencies());
+  assert.equal(plan.steps.some((step) => step.id === 'dns_zone'), false);
+});

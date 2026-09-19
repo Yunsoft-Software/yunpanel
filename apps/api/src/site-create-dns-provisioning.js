@@ -140,6 +140,7 @@ function runtimeAwareRecords(preview, desired, dnsIdentity) {
 async function dnsZoneStep(preview, dependencies) {
   const domain = preview.plan?.primaryDomain;
   if (!domain || domain.parentDomainId !== null) return null;
+  if (preview.plan?.dns?.mode === 'external' || preview.input?.dns?.mode === 'external') return null;
   const serverId = preview.plan?.website?.serverId ?? preview.plan?.primaryDomain?.serverId ?? dependencies.localServerId ?? null;
   const normalizedServerId = serverId ?? preview.input?.serverId ?? preview.serverId ?? null;
   if (typeof normalizedServerId !== 'string' || !normalizedServerId) {

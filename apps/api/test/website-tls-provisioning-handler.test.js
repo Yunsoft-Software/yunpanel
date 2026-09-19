@@ -263,3 +263,44 @@ test('Website TLS activation rejects certificate ownership drift before touching
   assert.equal(nginxCalls, 0);
   assert.deepEqual(domain.calls, []);
 });
+
+test('Website TLS compensation rolls back Nginx to HTTP-only and reconciles Domain', async () => {
+  const domain = domainRegistryFixture();
+  const nginxCalls = [];
+  const handler = createWebsiteTlsProvisioningHandler({
+    certificateRegistry: { getCertificate: async () => certificate() },
+    domainRegistry: domain.registry,
+    nginxProvisioningHandler: {
+      inspect: async (input) => {
+        nginxCalls.push(['inspect', input]);
+        return { satisfied: false };
+      },
+      apply: async (input) => {
+        nginxCalls.push(['apply', input]);
+        return { satisfied: true, checksum: 'rollback-checksum', configName: 'rollback.conf', active: true };
+      },
+    },
+  });
+
+  const inspected = await handler.inspectCompensation({
+    operation: operation(),
+    operationId,
+    websiteId,
+    intent,
+  });
+  assert.equal(inspected.satisfied, false);
+  assert.equal(inspected.reason, 'website_tls_rollback_required');
+
+  const compensated = await handler.compensate({
+    operation: operation(),
+    operationId,
+    websiteId,
+    intent,
+  });
+  assert.equal(compensated.satisfied, true);
+  assert.equal(compensated.rolledBack, true);
+  assert.equal(compensated.nginxChecksum, 'rollback-checksum');
+  assert.equal(compensated.nginxConfigName, 'rollback.conf');
+  assert.deepEqual(nginxCalls.at(-1)[1].tls, null);
+  assert.equal(nginxCalls.at(-1)[1].httpsRedirect, false);
+});

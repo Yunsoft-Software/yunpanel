@@ -51,6 +51,7 @@ Son Certificate retention ve GC lifecycle ilerlemesi: `docs/history/certificate-
 Son Delete impact provider ve plan wiring ilerlemesi: `docs/history/delete-impact-providers-and-plan-wiring-2026-09-19.md`.
 Son Website removal lifecycle ve orchestration ilerlemesi: `docs/history/website-removal-lifecycle-orchestration-2026-09-19.md`.
 Son Delete evidence zincirleri ve retention bağları: `docs/history/delete-evidence-chains-and-retention-wiring-2026-09-19.md`.
+Son transactional provisioning preflight, exact preview ve compensation ilerlemesi: `docs/history/transactional-provisioning-preflight-compensation-2026-09-19.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -108,29 +109,15 @@ Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözl
 
 ## P0.8 — Transactional Website/domain provisioning
 
-### Preflight
+Kaynak kod tarafında transactional Website/Domain provisioning preflight, exact resource preview ve compensation zinciri tamamlandı:
+- Preflight: FQDN, IDN, duplicate hostname, parent-child hiyerarşisi ve alias conflict kontrolleri tek birleşik create flow'da çalışır.
+- Exact resource preview: `runtime` (type, adapter, documentRoot, appRoot, nodeMajor, startMode, entryFile, healthPath), `dns` (mode, zoneName, authoritative, publicIpv4/v6, nameservers), `ip` (publicIpv4/v6), `certificate` (mode, purpose, coverage, issuer, webmailCoverage), `sftp` (adapter, unixUser, homeDirectory, documentRoot), `database` ve `mailDomain` intent'leri tek preview altında toplanır.
+- Package/service blocker'ları (`dns_identity_required`, `passenger_start_mode_unsupported` vb.) apply öncesi tespit edilir; blocker varsa `complete: false` kalır ve `createSite` `site_create_blocked_by_dependency` (409) fırlatarak sunucu mutation'ını engeller.
+- Subdomain için `dns.mode: 'local'` seçimi `site_create_subdomain_dns_unsupported` (409) ile fail-closed durdurulur; `dns.mode: 'external'` seçildiğinde local authoritative zone adımı atlanır.
+- Apply & Compensation: Downstream failure'da TLS activation rollback'i Nginx'i HTTP-only haline döndürür, domain state'ini un-TLS'e reconcile eder ve exact rollback receipt (`{ satisfied: true, rolledBack: true, nginxChecksum: ... }`) üretir. Certificate step'i compensation'da sertifikayı fiziksel olarak silmez, exact retention receipt (`{ satisfied: true, retained: true }`) ile korur.
+- Mandatory resource'lar health-gated olmadan Website `ready` olamaz; reverse-order compensation ve durable inspect-first recovery kuralları korunur.
 
-- [ ] FQDN/IDN/duplicate/parent/alias conflict preflight'ini final create flow'da birleştir.
-- [ ] Runtime, local/external DNS, local/external/disabled mail, DB, IPv4/IPv6, certificate ve SFTP intent'lerini tek preview'da göster. Site-create preview artık `mail: none|local|external`, deterministic Mail Domain ID ve local shared-webmail hostname/certificate-coverage intent'ini taşıyor; DNS mode, IP, certificate seçim/issuance ve SFTP ile tek final preflight'ta birleşmesi açık.
-- [ ] Package/service blocker'larını apply öncesi doğrula.
-- [ ] Exact resource preview üret.
-
-### Apply
-
-- [ ] Website/Application/operation reserve lifecycle'ını finalize et.
-- [ ] Nginx stage/configtest/activate lifecycle'ını full Website create zincirinde finalize et.
-- [ ] DB seçildiyse scoped DB/user/grant step'i bağla.
-- [ ] Local mail provisioning'in gerçek-host acceptance kapılarını tamamla. Deterministic Mail Domain metadata reservation, operation-owned route `purpose: web` certificate issue/attachment + `tls_activation`, zero-mailbox `mail_config`, deterministic `mail_dkim_key`, authoritative `mail_dns_reapply`, ayrı operation-owned `purpose: webmail` ACME certificate issuance/reconciliation, DNS-ready-gated `mail_dkim_config`, shared Roundcube `roundcube_mapping`, ana Website TLS üzerinden Unix-socket-backed autodiscover/autoconfig ve required `mail_health` source gate'i durable Website provisioning lifecycle'ında bağlıdır. `mail_health` current mail config/readiness + SMTP 25/submission 587/IMAP 143 listener + exact Roundcube HTTPS endpoint + exact autodiscover/autoconfig readiness olmadan Website'i ready yapmaz. Eksik kısım gerçek Ubuntu mailbox-auth, STARTTLS, inbound/outbound, Roundcube/browser ve gerçek mail-client acceptance'tır.
-- [ ] Certificate/TLS provisioning compensation'ını tamamla: downstream failure'da yalnız operation-owned Nginx TLS activation'ını exact rollback receipt ile geri al; operation-owned certificate binding/renewal kaydını retention/retirement policy'siz fiziksel silme. Source apply/restart reconciliation hazırdır, gerçek Ubuntu/Certbot acceptance `todo.md` içindedir.
-- [ ] Mandatory resource'lar health-gated olmadan Website `ready` olamasın.
-
-### Recovery
-
-- [ ] Her step durable evidence/ownership tutsun; restart önce inspect yapsın.
-- [ ] Failure açık `partial/failed`; sahte ready olmasın.
-- [ ] Retry yalnız failed/unapplied step; revision drift fail-closed.
-- [ ] Compensation reverse order ve yalnız operation-owned resource.
-- [ ] Atomic config + service configtest before reload.
+Gerçek Ubuntu/Nginx/Certbot/PowerDNS/Roundcube/mailbox-auth kabul kapıları `todo.md` T-PROVISIONING ve T-MAIL içindedir.
 
 ## P0.9 — Suspend/delete/rollback
 

@@ -19,6 +19,7 @@ const WWW_MODES = new Set(['none', 'alias', 'independent']);
 const HTTPS_MODES = new Set(['off', 'managed']);
 const DATABASE_MODES = new Set(['none', 'create']);
 const MAIL_MODES = new Set(['none', 'local', 'external']);
+const DNS_MODES = new Set(['local', 'external']);
 const DATABASE_SOURCE_KINDS = new Set(['existing_application', 'new_static', 'new_node', 'new_php']);
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -195,12 +196,36 @@ function normalizedMail(value, httpsMode) {
   return Object.freeze({ mode: input.mode });
 }
 
+function normalizedDns(value, parentDomainId) {
+  const input = value ?? { mode: parentDomainId === null ? 'local' : 'external' };
+  exactObject(
+    input,
+    new Set(['mode']),
+    'site_create_dns_invalid',
+    'Initial DNS configuration accepts only mode',
+  );
+  if (!DNS_MODES.has(input.mode)) {
+    throw new SiteCreateError(
+      'site_create_dns_invalid',
+      'DNS mode must be local or external',
+    );
+  }
+  if (input.mode === 'local' && parentDomainId !== null) {
+    throw new SiteCreateError(
+      'site_create_subdomain_dns_unsupported',
+      'Subdomain Website cannot create a separate authoritative local zone',
+      409,
+    );
+  }
+  return Object.freeze({ mode: input.mode });
+}
+
 function normalizeInput(input) {
   const allowedFields = new Set([
     'operationId', 'serverId', 'name', 'primaryDomain', 'parentDomainId', 'wwwMode', 'httpsMode', 'source',
-    'database', 'mail',
+    'database', 'mail', 'dns',
   ]);
-  const requiredFields = [...allowedFields].filter((field) => !['database', 'mail'].includes(field));
+  const requiredFields = [...allowedFields].filter((field) => !['database', 'mail', 'dns'].includes(field));
   if (!input || typeof input !== 'object' || Array.isArray(input)
     || Object.keys(input).some((key) => !allowedFields.has(key))
     || requiredFields.some((field) => !Object.hasOwn(input, field))) {
@@ -249,6 +274,7 @@ function normalizeInput(input) {
     source,
     database: normalizedDatabase(input.database, source),
     mail: normalizedMail(input.mail, input.httpsMode),
+    dns: normalizedDns(input.dns, parentDomainId),
   });
 }
 
@@ -426,6 +452,7 @@ export async function previewSiteCreate({
   websiteRegistry,
   domainRegistry,
   mailDomainRegistry = null,
+  serverDnsIdentityRegistry = null,
 } = {}) {
   for (const [dependency, methods] of [
     [registry, ['getServer']],
@@ -683,6 +710,79 @@ export async function previewSiteCreate({
     selectedDockerWorkloadId: normalized.source.kind === 'existing_docker' ? normalized.source.dockerWorkloadId : null,
     serverId: normalized.serverId,
   });
+
+  let dnsIdentity = null;
+  if (serverDnsIdentityRegistry && typeof serverDnsIdentityRegistry.getForServer === 'function') {
+    try {
+      dnsIdentity = await serverDnsIdentityRegistry.getForServer(normalized.serverId);
+    } catch {
+      dnsIdentity = null;
+    }
+  }
+
+  const runtimeExpected = Object.freeze({
+    type: websiteExpected.runtimeType,
+    adapter: websiteExpected.runtimeType === 'node' ? 'passenger'
+      : websiteExpected.runtimeType === 'php' ? 'php-fpm'
+      : websiteExpected.runtimeType === 'static' ? 'static'
+      : websiteExpected.runtimeType,
+    documentRoot: websiteExpected.documentRoot,
+    appRoot: websiteExpected.documentRoot,
+    nodeMajor: normalized.source.runtime?.nodeMajor ?? null,
+    startMode: normalized.source.runtime?.start?.mode ?? null,
+    entryFile: normalized.source.runtime?.start?.entryFile ?? null,
+    healthPath: normalized.source.runtime?.healthPath ?? null,
+  });
+
+  const dnsExpected = Object.freeze({
+    mode: normalized.parentDomainId !== null ? 'inherited' : normalized.dns.mode,
+    zoneName: normalized.primaryDomain,
+    authoritative: normalized.parentDomainId === null && normalized.dns.mode === 'local',
+    serverDnsIdentityConfigured: Boolean(dnsIdentity),
+    publicIpv4: dnsIdentity?.settings?.publicIpv4 ?? null,
+    publicIpv6: dnsIdentity?.settings?.publicIpv6 ?? null,
+    nameservers: dnsIdentity?.settings?.ns1?.hostname && dnsIdentity?.settings?.ns2?.hostname
+      ? Object.freeze([dnsIdentity.settings.ns1.hostname, dnsIdentity.settings.ns2.hostname])
+      : Object.freeze([]),
+  });
+
+  const ipExpected = Object.freeze({
+    publicIpv4: dnsIdentity?.settings?.publicIpv4 ?? null,
+    publicIpv6: dnsIdentity?.settings?.publicIpv6 ?? null,
+  });
+
+  const certificateExpected = Object.freeze({
+    mode: normalized.httpsMode,
+    purpose: normalized.httpsMode === 'managed' ? 'web' : null,
+    primaryDomain: normalized.primaryDomain,
+    coverage: Object.freeze([normalized.primaryDomain, ...normalized.aliases]),
+    issuer: normalized.httpsMode === 'managed' ? 'letsencrypt' : null,
+    webmailCoverage: normalized.mail.mode === 'local' ? Object.freeze({
+      hostname: `webmail.${normalized.primaryDomain}`,
+      purpose: 'webmail',
+      issuer: 'letsencrypt',
+    }) : null,
+  });
+
+  const sftpExpected = ['node', 'php', 'static'].includes(websiteExpected.runtimeType)
+    ? Object.freeze({
+      adapter: 'openssh-internal-sftp',
+      websiteId: ids.websiteId,
+      applicationId: websiteExpected.applicationId,
+      unixUser: websiteExpected.unixUser,
+      homeDirectory: `/var/lib/yunpanel/homes/${websiteExpected.unixUser}`,
+      documentRoot: websiteExpected.documentRoot,
+    })
+    : null;
+
+  const blockers = [];
+  if (normalized.dns.mode === 'local' && normalized.parentDomainId === null && !dnsIdentity && serverDnsIdentityRegistry) {
+    blockers.push('dns_identity_required');
+  }
+  if (normalized.source.kind === 'new_node' && normalized.source.runtime?.start?.mode && normalized.source.runtime.start.mode !== 'node') {
+    blockers.push('passenger_start_mode_unsupported');
+  }
+
   const planCore = {
     version: 1,
     input: normalized,
@@ -695,6 +795,11 @@ export async function previewSiteCreate({
       webmail: webmailExpected,
       primaryDomain: primaryExpected,
       wwwDomain: wwwExpected,
+      runtime: runtimeExpected,
+      dns: dnsExpected,
+      ip: ipExpected,
+      certificate: certificateExpected,
+      sftp: sftpExpected,
     },
     state,
   };
@@ -711,7 +816,7 @@ export async function previewSiteCreate({
     confirmation: `create-site:${normalized.operationId}:${previewDigest}`,
     destructive: false,
     autoApply: false,
-    complete,
+    complete: complete && blockers.length === 0,
     resumeRequired: !complete && (
       applicationReady
       || websiteReady
@@ -737,6 +842,7 @@ export async function previewSiteCreate({
       wwwDomainReady: normalized.wwwMode === 'independent' ? wwwReady : null,
       mailDomainReady: normalized.mail.mode === 'none' ? null : mailDomainReady,
     }),
+    blockers: Object.freeze(blockers),
     lifecycle: Object.freeze({
       dnsPublished: false,
       certificateIssued: false,
@@ -758,16 +864,24 @@ export async function createSite({
   websiteRegistry,
   domainRegistry,
   mailDomainRegistry = null,
+  serverDnsIdentityRegistry = null,
 } = {}) {
   if (typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)) {
     throw new SiteCreateError('site_create_preview_digest_invalid', 'A current site-create preview digest is required');
   }
   const preview = await previewSiteCreate({
     input, registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry,
-    mailDomainRegistry,
+    mailDomainRegistry, serverDnsIdentityRegistry,
   });
   if (preview.previewDigest !== previewDigest) {
     throw new SiteCreateError('site_create_preview_stale', 'Site-create state changed after preview; request a new preview', 409);
+  }
+  if (preview.blockers?.length > 0) {
+    throw new SiteCreateError(
+      'site_create_blocked_by_dependency',
+      `Site creation is blocked by unresolved dependencies: ${preview.blockers.join(', ')}`,
+      409,
+    );
   }
   if (confirmation !== preview.confirmation) {
     throw new SiteCreateError('site_create_confirmation_required', `Confirm site creation with ${preview.confirmation}`);

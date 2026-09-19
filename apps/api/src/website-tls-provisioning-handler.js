@@ -314,7 +314,62 @@ export function createWebsiteTlsProvisioningHandler({
     });
   }
 
-  return Object.freeze({ apply, inspect });
+  async function inspectCompensation(context = {}) {
+    const request = requestIntent(context.intent, context.websiteId);
+    const domain = await domainRegistry.getDomain(request.primaryDomainId);
+    if (!domain) return Object.freeze({ satisfied: true });
+    const nginx = nginxStep(context.operation);
+    const host = await nginxProvisioningHandler.inspect({
+      operation: context.operation,
+      intent: nginx.intent,
+      tls: null,
+      httpsRedirect: false,
+      canonicalRedirect: false,
+    });
+    if (host?.satisfied === true) {
+      return Object.freeze({ satisfied: true });
+    }
+    return Object.freeze({ satisfied: false, reason: 'website_tls_rollback_required' });
+  }
+
+  async function compensate(context = {}) {
+    const request = requestIntent(context.intent, context.websiteId);
+    const domain = await domainRegistry.getDomain(request.primaryDomainId);
+    const nginx = nginxStep(context.operation);
+    const host = await nginxProvisioningHandler.apply({
+      operation: context.operation,
+      intent: nginx.intent,
+      tls: null,
+      httpsRedirect: false,
+      canonicalRedirect: false,
+    });
+    if (!host || host.satisfied !== true) {
+      throw new WebsiteTlsProvisioningError(
+        'website_tls_compensation_failed',
+        'Website TLS rollback did not return exact host evidence',
+        503,
+      );
+    }
+    if (domain) {
+      await domainRegistry.markStaged(domain.id, {
+        checksum: host.checksum,
+        configName: host.configName,
+      });
+      await domainRegistry.markApplied(domain.id, {
+        checksum: host.checksum,
+      });
+    }
+    return Object.freeze({
+      satisfied: true,
+      rolledBack: true,
+      adapter: 'managed-certificate-nginx',
+      domainId: domain?.id ?? request.primaryDomainId,
+      nginxChecksum: host.checksum,
+      nginxConfigName: host.configName,
+    });
+  }
+
+  return Object.freeze({ apply, inspect, compensate, inspectCompensation });
 }
 
 export const websiteTlsProvisioningInternals = Object.freeze({
