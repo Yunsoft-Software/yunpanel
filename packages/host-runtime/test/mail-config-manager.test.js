@@ -4,12 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  enableManagedMailSql,
   mailForwardingTemplatePolicy,
+  mailSqlTemplatePolicy,
   mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
   previewManagedMailSubmissionConfiguration,
   previewManagedMailApplyPlan,
   renderDovecotQuotaPasswdFile,
+  renderManagedMailSqlSeed,
 } from '@yunpanel/config-templates';
 import {
   createMailConfigManager,
@@ -77,6 +80,39 @@ test('stages the complete submission-aware mail bundle atomically without return
   assert.equal(inspected.satisfied, true);
   assert.equal(inspected.result.planSha256, plan.sha256);
   assert.equal(JSON.stringify(inspected).includes(ARGON2ID_HASH), false);
+}));
+
+test('stages the SQLite lookup bundle with a private seed and no legacy passwd/hash map artifacts', async () => withTempDirectory(async (root) => {
+  const { input, preview: legacy } = fixture();
+  const preview = enableManagedMailSql(legacy, input);
+  const seed = renderManagedMailSqlSeed(input);
+  const manager = createMailConfigManager({ stagingRoot: path.join(root, 'staging') });
+
+  const manifest = await manager.stageConfiguration(preview, {
+    sensitiveArtifacts: [{ path: mailSqlTemplatePolicy.seedPath, content: seed }],
+  });
+
+  assert.equal(manifest.artifacts.length, 10);
+  assert.deepEqual(manifest.artifacts.map((artifact) => artifact.targetPath), [
+    mailSqlTemplatePolicy.seedPath,
+    mailSqlTemplatePolicy.postfixDomainPath,
+    mailSqlTemplatePolicy.postfixMailboxPath,
+    mailSqlTemplatePolicy.postfixAliasPath,
+    mailSqlTemplatePolicy.postfixSenderLoginPath,
+    mailSqlTemplatePolicy.dovecotSqlPath,
+    mailTemplatePolicy.dovecotAuthConfigPath,
+    mailTemplatePolicy.dovecotMailConfigPath,
+    mailForwardingTemplatePolicy.sievePath,
+    mailTemplatePolicy.rspamdProxyConfigPath,
+  ]);
+  assert.equal(manifest.artifacts.some(
+    (artifact) => artifact.targetPath === mailTemplatePolicy.dovecotPasswdFilePath,
+  ), false);
+  const seedArtifact = manifest.artifacts[0];
+  const seedPath = path.join(manager.stageDirectory(manifest.planSha256), seedArtifact.stagedName);
+  assert.equal((await stat(seedPath)).mode & 0o777, 0o600);
+  assert.equal(await readFile(seedPath, 'utf8'), seed);
+  assert.equal(JSON.stringify(manifest).includes(ARGON2ID_HASH), false);
 }));
 
 test('fails closed when protected material is missing, unexpected, reordered or digest-mismatched', async () => withTempDirectory(async (root) => {
