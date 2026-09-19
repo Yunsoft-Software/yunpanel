@@ -8,8 +8,8 @@ import {
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ROUTING_CHILD_STATUSES = new Set(['pending', 'suspending', 'suspended', 'failed']);
 const CONTINUABLE_STEP_KINDS = new Set([
-  'child_domain', 'certificate', 'mail_domain', 'website_binding', 'authoritative_dns',
-  'metadata_finalization',
+  'child_domain', 'certificate', 'mail_domain', 'external_dns_zone', 'website_binding',
+  'authoritative_dns', 'metadata_finalization',
 ]);
 const DNS_RETIREMENT_CHILD_STATUSES = new Set(['pending', 'deleting', 'deleted', 'failed']);
 const MAIL_REMOVAL_CHILD_STATUSES = new Set([
@@ -540,6 +540,58 @@ function childRemovalEvidence(operation, intent, child) {
   });
 }
 
+
+function externalDnsZoneIntent(operation, step) {
+  if (!Array.isArray(operation.plan.dnsZoneIntents)) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_external_dns_intent_missing',
+      'Legacy Domain removal journal has no exact External DNS Zone intent evidence',
+      409,
+    );
+  }
+  const matches = operation.plan.dnsZoneIntents.filter((intent) => (
+    intent.id === step.resourceId && intent.webDomainId === operation.domainId
+  ));
+  if (matches.length !== 1) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_external_dns_plan_invalid',
+      'External DNS Zone step does not match one exact Domain-scoped removal intent',
+      409,
+    );
+  }
+  return matches[0];
+}
+
+function exactExternalDnsZone(intent, zone) {
+  return Boolean(zone
+    && zone.id === intent.id
+    && zone.zoneName === intent.zoneName
+    && zone.webDomainId === intent.webDomainId
+    && zone.managementMode === 'external'
+    && zone.status === intent.status
+    && zone.revision === intent.revision
+    && zone.updatedAt === intent.updatedAt);
+}
+
+function externalDnsZoneEvidence(operation, intent) {
+  return Object.freeze({
+    referenceId: intent.id,
+    evidenceDigest: digest({
+      kind: 'external_dns_zone',
+      operationId: operation.id,
+      domainId: operation.domainId,
+      dnsZoneId: intent.id,
+      zoneName: intent.zoneName,
+      webDomainId: intent.webDomainId,
+      managementMode: intent.managementMode,
+      sourceStatus: intent.status,
+      sourceRevision: intent.revision,
+      sourceUpdatedAt: intent.updatedAt,
+      metadataUnlinked: true,
+    }),
+  });
+}
+
 function mailDomainIntent(operation, step) {
   if (!Array.isArray(operation.plan.mailDomainIntents)) {
     throw new DomainRemovalRuntimeError(
@@ -687,6 +739,7 @@ export function createDomainRemovalRuntime({
   domainRegistry = null,
   certificateRegistry = null,
   dnsZoneRetirementRuntime = null,
+  dnsHostingRegistry = null,
   mailDomainRemovalRuntime = null,
 } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
@@ -709,6 +762,10 @@ export function createDomainRemovalRuntime({
     || (certificateRegistry !== null && (
       typeof certificateRegistry?.getCertificate !== 'function'
       || typeof certificateRegistry?.retireForDomainRemoval !== 'function'
+    ))
+    || (dnsHostingRegistry !== null && (
+      typeof dnsHostingRegistry?.getZone !== 'function'
+      || typeof dnsHostingRegistry?.deleteZone !== 'function'
     ))
     || (dnsZoneRetirementRuntime !== null && (
       typeof dnsZoneRetirementRuntime?.preview !== 'function'
@@ -760,6 +817,18 @@ export function createDomainRemovalRuntime({
       );
     }
     return certificateRegistry;
+  }
+
+
+  function requireDnsHostingRegistry() {
+    if (!dnsHostingRegistry) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_external_dns_registry_unavailable',
+        'Domain removal External DNS Zone metadata handler is unavailable',
+        503,
+      );
+    }
+    return dnsHostingRegistry;
   }
 
   function requireMailDomainRemovalRuntime() {
@@ -1284,6 +1353,81 @@ export function createDomainRemovalRuntime({
     }
   }
 
+
+  async function runExternalDnsZone(operationId, { allowMutation } = {}) {
+    const manager = requireDomainRegistry();
+    const dnsRegistry = requireDnsHostingRegistry();
+    const prepared = await runningStep(await loadOperation(operationId), 'external_dns_zone');
+    const { operation, step, wasRunning } = prepared;
+    let intent;
+    try { intent = externalDnsZoneIntent(operation, step); }
+    catch (error) {
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    const suspensionId = suspensionOperationId(operation);
+    let domain;
+    try { domain = await manager.getDomain(operation.domainId); }
+    catch (error) { return publicOperation(await failControlPlaneStep(operation, step, error)); }
+    if (!exactSuspendedDomain(operation, domain, suspensionId)) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_external_dns_domain_drift',
+        'Domain state no longer matches journaled External DNS Zone removal evidence',
+        409,
+      )));
+    }
+
+    const evidence = externalDnsZoneEvidence(operation, intent);
+    let current;
+    try { current = await dnsRegistry.getZone(intent.id); }
+    catch (error) { return publicOperation(await failControlPlaneStep(operation, step, error)); }
+    if (current === null) {
+      if (!wasRunning) {
+        return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+          'domain_removal_external_dns_absence_unowned',
+          'External DNS Zone metadata disappeared before this removal step owned the mutation',
+          409,
+        )));
+      }
+      return publicOperation(await completeControlPlaneStep(operation, step, evidence));
+    }
+    if (!exactExternalDnsZone(intent, current)) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_external_dns_drift',
+        'External DNS Zone metadata changed before removal cleanup',
+        409,
+      )));
+    }
+    if (!allowMutation) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_external_dns_retry_required',
+        'External DNS Zone metadata remains present; explicit removal continuation is required',
+        409,
+      )));
+    }
+
+    let removed;
+    try {
+      removed = await dnsRegistry.deleteZone(intent.id, {
+        expectedRevision: intent.revision,
+        confirmation: 'delete-dns-zone:' + intent.id + ':' + intent.revision,
+      });
+    } catch (error) {
+      if (Number(error?.status) === 409) {
+        return publicOperation(await blockControlPlaneStep(operation, step, error));
+      }
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    if (!removed || removed.deleted !== true
+      || removed.id !== intent.id || removed.resourceType !== 'dns_zone') {
+      return publicOperation(await failControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_external_dns_result_invalid',
+        'External DNS Zone metadata removal did not prove the journaled post-condition',
+        503,
+      )));
+    }
+    return publicOperation(await completeControlPlaneStep(operation, step, evidence));
+  }
+
   async function runWebsiteBinding(operationId, { allowMutation } = {}) {
     const manager = requireDomainRegistry();
     const prepared = await runningStep(await loadOperation(operationId), 'website_binding');
@@ -1587,6 +1731,9 @@ export function createDomainRemovalRuntime({
     }
     if (step.kind === 'mail_domain') {
       return runMailDomain(operation.id, { allowMutation });
+    }
+    if (step.kind === 'external_dns_zone') {
+      return runExternalDnsZone(operation.id, { allowMutation });
     }
     if (step.kind === 'website_binding') {
       return runWebsiteBinding(operation.id, { allowMutation });
@@ -2060,4 +2207,7 @@ export const domainRemovalRuntimeInternals = Object.freeze({
   exactChildRemovalPreview,
   exactChildRemovalOperation,
   childRemovalEvidence,
+  externalDnsZoneIntent,
+  exactExternalDnsZone,
+  externalDnsZoneEvidence,
 });
