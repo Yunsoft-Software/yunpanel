@@ -42,6 +42,21 @@ function serverNames(primaryDomain, aliases) {
   return { primary: domains.primary, aliases: domains.aliases, all: [domains.primary, ...domains.aliases].join(' ') };
 }
 
+function acmeOnlyNames(primaryDomain, aliases, hostnames = []) {
+  if (!Array.isArray(hostnames)) {
+    throw new NginxTemplateError('invalid_acme_only_hostnames', 'acmeOnlyHostnames must be an array');
+  }
+  const routed = new Set(serverNames(primaryDomain, aliases).all.split(' '));
+  const normalized = hostnames.map((hostname) => normalizeDomainSet(hostname, []).primary);
+  if (new Set(normalized).size !== normalized.length || normalized.some((hostname) => routed.has(hostname))) {
+    throw new NginxTemplateError(
+      'invalid_acme_only_hostnames',
+      'ACME-only hostnames must be unique and outside the Website route names',
+    );
+  }
+  return Object.freeze(normalized);
+}
+
 function acmeLocation(acmeRoot) {
   const root = assertSafeAbsolutePath(acmeRoot, 'acmeRoot');
   return `  location ^~ /.well-known/acme-challenge/ {\n    root ${root};\n    default_type text/plain;\n    try_files $uri =404;\n  }`;
@@ -80,16 +95,34 @@ function serverBlock({ names, body, acmeRoot = null, tls = null, clientMaxBodySi
   return `server {\n${listen}\n  server_name ${names};${bodySize}${acme}${certificates}\n\n${body}\n}`;
 }
 
-function renderServerSet({ primaryDomain, aliases, acmeRoot, tls, body, canonicalRedirect, httpsRedirect, nginxSettings }) {
+function renderServerSet({
+  primaryDomain,
+  aliases,
+  acmeRoot,
+  tls,
+  body,
+  canonicalRedirect,
+  httpsRedirect,
+  nginxSettings,
+  acmeOnlyHostnames = [],
+}) {
   if (typeof canonicalRedirect !== 'boolean' || typeof httpsRedirect !== 'boolean') {
     throw new NginxTemplateError('invalid_redirect_policy', 'Redirect policies must be boolean values');
   }
   const names = serverNames(primaryDomain, aliases);
   const blocks = [];
+  const challengeOnlyNames = acmeOnlyNames(primaryDomain, aliases, acmeOnlyHostnames);
   if (!canonicalRedirect) {
     const httpBody = tls && httpsRedirect ? redirectBody('https://$host', nginxSettings.headers) : body;
     blocks.push(serverBlock({ names: names.all, body: httpBody, acmeRoot, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb }));
     if (tls) blocks.push(serverBlock({ names: names.all, body, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb }));
+    for (const hostname of challengeOnlyNames) {
+      blocks.push(serverBlock({
+        names: hostname,
+        body: '  location / {\n    return 404;\n  }',
+        acmeRoot,
+      }));
+    }
     return `${blocks.join('\n\n')}\n`;
   }
 
@@ -114,6 +147,13 @@ function renderServerSet({ primaryDomain, aliases, acmeRoot, tls, body, canonica
         clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb,
       }));
     }
+  }
+  for (const hostname of challengeOnlyNames) {
+    blocks.push(serverBlock({
+      names: hostname,
+      body: '  location / {\n    return 404;\n  }',
+      acmeRoot,
+    }));
   }
   return `${blocks.join('\n\n')}\n`;
 }
@@ -158,6 +198,7 @@ function phpBody({ root, socketPath, nginxSettings }) {
 export function renderStaticSiteConfig({
   primaryDomain,
   aliases = [],
+  acmeOnlyHostnames = [],
   root,
   spaFallback = true,
   acmeRoot = '/var/lib/yunpanel/acme',
@@ -171,13 +212,14 @@ export function renderStaticSiteConfig({
   const settings = normalizeNginxSettings('static', nginxSettings ?? { spaFallback });
   const body = staticBody({ root: safeRoot, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
   });
 }
 
 export function renderProxySiteConfig({
   primaryDomain,
   aliases = [],
+  acmeOnlyHostnames = [],
   upstreamHost = '127.0.0.1',
   upstreamPort,
   websocket = true,
@@ -193,13 +235,14 @@ export function renderProxySiteConfig({
   const settings = normalizeNginxSettings('proxy', nginxSettings ?? { websocket });
   const body = proxyBody({ host, port, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
   });
 }
 
 export function renderPassengerSiteConfig({
   primaryDomain,
   aliases = [],
+  acmeOnlyHostnames = [],
   target,
   acmeRoot = '/var/lib/yunpanel/acme',
   tls = null,
@@ -211,13 +254,14 @@ export function renderPassengerSiteConfig({
   const settings = normalizeNginxSettings('passenger', nginxSettings ?? {});
   const body = passengerBody({ target, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
   });
 }
 
 export function renderPhpSiteConfig({
   primaryDomain,
   aliases = [],
+  acmeOnlyHostnames = [],
   root,
   socketPath,
   acmeRoot = '/var/lib/yunpanel/acme',
@@ -235,7 +279,7 @@ export function renderPhpSiteConfig({
   const settings = normalizeNginxSettings('php', nginxSettings ?? {});
   const body = phpBody({ root: safeRoot, socketPath: safeSocket, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
   });
 }
 
