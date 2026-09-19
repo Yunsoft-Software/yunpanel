@@ -169,6 +169,57 @@ test('journals deterministic reverse-dependency steps and preserves private star
   assert.equal(Object.hasOwn(publicView, 'startConfirmation'), false);
 });
 
+test('journals root webmail mapping between certificate retirement and Mail Domain removal', async () => {
+  const input = preview();
+  input.plan.mailDomainIntents[0] = {
+    ...input.plan.mailDomainIntents[0],
+    status: 'enabled',
+  };
+  input.plan.webmailMappingIds = ['webmail-mapping-1'];
+  input.plan.webmailMappingIntents = [{
+    id: 'webmail-mapping-1',
+    mailDomainId: 'mail-domain-1',
+    webDomainId: 'domain-1',
+    serverId: 'local',
+    domainName: 'example.com',
+    hostname: 'webmail.example.com',
+    certificateId: 'certificate-1',
+    certificateFingerprint256: Array.from({ length: 32 }, () => 'AA').join(':'),
+    revision: 2,
+    state: 'active',
+    operationId: null,
+    applyJobId: null,
+    expectedRoundcubePreviewSha256: null,
+    expectedRoundcubeNginxSha256: null,
+    createdAt: '2026-09-18T19:00:00.000Z',
+    updatedAt: '2026-09-18T20:00:00.000Z',
+  }];
+  input.impact.blockers = [
+    ...input.impact.blockers,
+    'webmail_mapping_dependencies_present',
+  ];
+  const registry = createDomainRemovalOperationRegistry({
+    idFactory: () => 'operation-1',
+    now: () => Date.parse('2026-09-18T20:00:00.000Z'),
+  });
+
+  const operation = await registry.create(input);
+
+  assert.deepEqual(operation.steps.map((step) => step.kind), [
+    'routing_suspend',
+    'child_domain',
+    'certificate',
+    'webmail_mapping',
+    'mail_domain',
+    'external_dns_zone',
+    'website_binding',
+    'authoritative_dns',
+    'metadata_finalization',
+  ]);
+  assert.equal(operation.steps[3].resourceId, 'webmail-mapping-1');
+  assert.equal(operation.plan.webmailMappingIntents[0].hostname, 'webmail.example.com');
+});
+
 test('parent journal delegates descendant certificates to child Domain operations', async () => {
   const input = preview();
   input.plan.childDomains[0] = {
