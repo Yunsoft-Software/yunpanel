@@ -37,6 +37,7 @@ Son Domain removal Mail Domain metadata-cleanup ilerlemesi: `docs/history/domain
 Son Domain removal Mail Domain data/finalization/bootstrap ilerlemesi: `docs/history/domain-removal-mail-data-finalize-bootstrap-2026-09-19.md`.
 Son Domain removal External DNS metadata lifecycle ilerlemesi: `docs/history/domain-removal-external-dns-progress-2026-09-19.md`.
 Son Domain/Website removal backup impact ilerlemesi: `docs/history/domain-removal-backup-impact-progress-2026-09-19.md`.
+Son Website cron control-plane temeli: `docs/history/website-cron-control-plane-foundation-2026-09-19.md`.
 Son SQL-backed virtual-mail cutover ilerlemesi: `docs/history/mail-sql-virtual-mail-progress-2026-09-19.md`.
 Son shared Roundcube webmail mapping ilerlemesi: `docs/history/roundcube-webmail-mapping-progress-2026-09-19.md`.
 Son fresh Website shared Roundcube provisioning ilerlemesi: `docs/history/site-create-roundcube-provisioning-2026-09-19.md`.
@@ -135,7 +136,7 @@ Domain-level web traffic suspend/resume source lifecycle tamamlandı: exact Ngin
 - [ ] Website-wide suspend tüm bağlı Domain route'larını ve seçilen runtime/process erişimini operation-owned tek lifecycle'da durdursun; bir Domain suspend başarısızsa partial state/retry açık kalsın.
 - [ ] Domain removal parent journal'ındaki kalan public full-delete kapılarını tamamla. Webmail mapping lifecycle artık exact impact intent + child subset fence + parent-owned removing/apply/removed tombstone + inspect-only lost-ack recovery ile kaynakta bağlıdır; Mail Domain child tarafında config-disable → metadata cleanup → verified backup → mailbox credential cleanup → backup-bound data delete → local/external finalization phase router + production bootstrap kaynakta bağlandı. External DNS tracked-zone lifecycle da exact zone intent + revision/update fence + explicit continuation + inspect-only restart ile yalnız operation-owned metadata unlink yapacak şekilde parent runtime'a bağlandı; provider RRset'leri ayrı ownership evidence olmadan implicit silinmez. Hazır deepest-first child operation → certificate registry retirement → Webmail mapping cleanup → Mail Domain → External DNS metadata unlink → Website binding detach → authoritative DNS retirement → metadata finalization zincirini yalnız önceki dependency evidence tamamlandıktan sonra çalıştır. Eksik impact provider'ları tamamlanmadan public Domain delete apply yüzeyi açma ve standalone authoritative DNS delete route'u açma.
 - [ ] Retired ACME/custom certificate materyali için paylaşım/ownership-aware retention ve GC lifecycle'ı tanımla; registry retirement'ı fiziksel silme sayma, aktif veya başka Domain tarafından kullanılan materyali kaldırma.
-- [ ] Mevcut delete impact graph'ında henüz unavailable/eksik kalan Unix/runtime/DB/SFTP/log/cron bağımlılık provider'larını tamamla; persisted general-backup operation/artifact evidence'ından application/database/Docker/mail ilişkilerini çıkaran `backups` provider'ı production parent preview ve normal impact API'ına bağlandı. Site-user cron/timer registry ürünü henüz olmadığı için `crons` bilerek unavailable kalsın; sahte boş provider üretme. Parent removal preview gerekli dependency provider'ların tamamını operation intent'ine pinlemeden public apply açma.
+- [ ] Mevcut delete impact graph'ında henüz unavailable/eksik kalan Unix/runtime/DB/SFTP/log/cron bağımlılık provider'larını tamamla; persisted general-backup operation/artifact evidence'ından application/database/Docker/mail ilişkilerini çıkaran `backups` provider'ı production parent preview ve normal impact API'ına bağlandı. Site-user cron tarafında Website execution identity'sine pinli durable registry, ortak 5-field cron/template contract'ı, root-owned `/etc/cron.d` inspect/apply/remove host primitive'i ve production registry bootstrap kaynakta hazırdır. Fakat registry→host mutation için durable job/reconciliation ve canlı host + registry authoritative inventory provider'ı tamamlanmadan `crons` impact bucket'ını available yapma; sahte boş provider üretme. Parent removal preview gerekli dependency provider'ların tamamını operation intent'ine pinlemeden public apply açma.
 - [ ] Domain delete reverse order: routing suspend/deactivate → certificate/webmail/mail/external-DNS bağımlılıkları → authoritative DNS retirement → Domain metadata finalization. Her destructive step operation-owned evidence kullansın.
 - [ ] Website delete bağlı Domain delete operation'ları bitmeden Website/Application/Unix/runtime/file cleanup'a geçmesin.
 - [ ] Mail/DB/file deletion typed confirmation + retention ve mevcut backup evidence zincirlerini üst delete operation'a bağla.
@@ -167,7 +168,7 @@ Domain-level web traffic suspend/resume source lifecycle tamamlandı: exact Ngin
 
 ## P1.4 — Site features/settings
 
-- [ ] Site-user cron/timer CRUD.
+- [ ] Site-user cron/timer CRUD: source registry + shared cron renderer + root-owned host manager + production registry bootstrap hazır; sıradaki iş durable apply/remove job lifecycle, live reconciliation/status/output ve ancak bunların ardından authenticated Website-scoped CRUD/API/UI.
 - [ ] WP-CLI site user.
 - [ ] Composer site user.
 - [ ] Redis/Memcached isolation policy.
