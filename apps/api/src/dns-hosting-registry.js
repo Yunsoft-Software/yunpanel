@@ -14,6 +14,7 @@ export function createDnsHostingRegistry(options = {}) {
       name: zoneName, webDomainId, managementMode,
     }),
     recordObservation: registry.recordObservation,
+    deleteZone: registry.deleteResource,
     getZone: registry.getResource,
     listZones: registry.listResources,
   });
