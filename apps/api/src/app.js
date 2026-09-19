@@ -15,6 +15,7 @@ import { mountApplicationPassengerMigrationRoutes } from './application-passenge
 import { mountApplicationProcessRoutes } from './application-process-http.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
 import { ApplicationRuntimeBindingRegistryError } from './application-runtime-binding-registry.js';
+import { createDomainRemovalBackupImpactProvider } from './domain-removal-backup-impact.js';
 import { isBackupHttpError, mountBackupRoutes } from './backup-http.js';
 import { createBackupProductionRuntime } from './backup-production-runtime.js';
 import { createBackupResourceProvider } from './backup-resource-provider.js';
@@ -341,6 +342,18 @@ export function createApp({
     localServerId,
   });
   const backupOperationRegistry = options.backupOperationRegistry ?? null;
+  const removalBackupImpactProvider = backupOperationRegistry
+    && databaseBindingRegistry
+    && localServerId
+    ? createDomainRemovalBackupImpactProvider({
+      backupOperationRegistry,
+      domainRegistry,
+      websiteRegistry,
+      databaseBindingRegistry,
+      mailDomainRegistry,
+      localServerId,
+    })
+    : null;
   const backupJobStorePath = options.backupJobStorePath ?? null;
   const projectBackupLocked = options.projectBackupLocked ?? null;
   const dockerComposeProjectRegistry = options.dockerComposeProjectRegistry ?? null;
@@ -484,6 +497,7 @@ export function createApp({
       })),
     } : {}),
     additionalProviders: {
+      ...(removalBackupImpactProvider ? { backups: removalBackupImpactProvider } : {}),
       dockerWorkloads: async ({ dockerWorkloadId }) => {
         if (!dockerWorkloadId) return [];
         const workload = await dockerWorkloadRegistry.getWorkload(dockerWorkloadId);
