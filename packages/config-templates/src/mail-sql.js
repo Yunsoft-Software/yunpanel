@@ -414,6 +414,7 @@ export function enableManagedMailSql(preview, input = {}) {
     sql: Object.freeze({
       enabled: true,
       databasePath: sql.databasePath,
+      domains: sql.domains,
       seedSha256: sql.artifacts[0].sha256,
       stateSha256: sql.stateSha256,
       lookups: sql.postfixLookups,
@@ -425,7 +426,8 @@ export function enableManagedMailSql(preview, input = {}) {
 
 export function previewManagedMailSqlConfiguration(input = {}) {
   const seed = renderManagedMailSqlSeed(input);
-  const stateSha256 = sqlStateSha256(input);
+  const normalizedState = normalizedSqlState(input);
+  const stateSha256 = sha256(JSON.stringify(normalizedState));
   const artifacts = Object.freeze([
     Object.freeze({
       ...sensitiveArtifact(SEED_PATH, seed),
@@ -444,6 +446,7 @@ export function previewManagedMailSqlConfiguration(input = {}) {
   const identity = {
     version: 1,
     databasePath: DB_PATH,
+    domains: normalizedState.domains,
     stateSha256,
     artifactDigests: artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
   };
@@ -451,6 +454,7 @@ export function previewManagedMailSqlConfiguration(input = {}) {
     version: 1,
     sha256: sha256(JSON.stringify(identity)),
     databasePath: DB_PATH,
+    domains: normalizedState.domains,
     stateSha256,
     artifacts,
     postfixLookups: Object.freeze({
