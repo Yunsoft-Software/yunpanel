@@ -31,6 +31,94 @@ function safePath(value, field) {
   return value;
 }
 
+function webMappings(value, primaryHost) {
+  if (value === undefined) return Object.freeze([]);
+  if (!Array.isArray(value) || value.length > 1000) {
+    throw new RoundcubeNginxTemplateError(
+      'invalid_roundcube_nginx_mappings',
+      'Roundcube web mappings are invalid',
+    );
+  }
+  const mappings = value.map((entry) => {
+    const fields = new Set(['hostname', 'fullchainPath', 'privateKeyPath']);
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || Object.keys(entry).length !== fields.size
+      || Object.keys(entry).some((field) => !fields.has(field))) {
+      throw new RoundcubeNginxTemplateError(
+        'invalid_roundcube_nginx_mapping',
+        'Roundcube web mapping is invalid',
+      );
+    }
+    return Object.freeze({
+      hostname: hostname(entry.hostname),
+      fullchainPath: safePath(entry.fullchainPath, 'mapping.fullchainPath'),
+      privateKeyPath: safePath(entry.privateKeyPath, 'mapping.privateKeyPath'),
+    });
+  }).sort((left, right) => left.hostname.localeCompare(right.hostname));
+  if (mappings.some((entry) => entry.hostname === primaryHost)
+    || new Set(mappings.map((entry) => entry.hostname)).size !== mappings.length) {
+    throw new RoundcubeNginxTemplateError(
+      'invalid_roundcube_nginx_mappings',
+      'Roundcube web mapping hostnames must be unique and distinct from the primary host',
+    );
+  }
+  return Object.freeze(mappings);
+}
+
+function serverBlocks({
+  webHostname,
+  fullchainPath,
+  privateKeyPath,
+  publicRoot,
+  fpmSocketPath,
+}) {
+  return `server {
+  listen 80;
+  listen [::]:80;
+  server_name ${webHostname};
+  return 301 https://${webHostname}$request_uri;
+}
+
+server {
+  listen 443 ssl;
+  listen [::]:443 ssl;
+  server_name ${webHostname};
+  server_tokens off;
+
+  ssl_certificate ${fullchainPath};
+  ssl_certificate_key ${privateKeyPath};
+  ssl_protocols TLSv1.2 TLSv1.3;
+
+  root ${publicRoot};
+  index index.php;
+  client_max_body_size 25m;
+
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header X-Frame-Options "SAMEORIGIN" always;
+  add_header Referrer-Policy "same-origin" always;
+
+  location / {
+    try_files $uri $uri/ /index.php?$query_string;
+  }
+
+  location ~ \\.php$ {
+    try_files $uri =404;
+    include fastcgi_params;
+    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    fastcgi_param HTTP_PROXY "";
+    fastcgi_pass unix:${fpmSocketPath};
+    fastcgi_connect_timeout 10s;
+    fastcgi_send_timeout 30s;
+    fastcgi_read_timeout 30s;
+  }
+
+  location ~ /\\. {
+    deny all;
+  }
+}
+`;
+}
+
 export const roundcubeNginxTemplatePolicy = Object.freeze({
   configPath: '/etc/nginx/sites-enabled/yunpanel-roundcube.conf',
   publicRoot: '/var/lib/roundcube/public_html',
@@ -46,6 +134,7 @@ export function renderRoundcubeNginxConfig({
   privateKeyPath,
   publicRoot = roundcubeNginxTemplatePolicy.publicRoot,
   fpmSocketPath = roundcubeNginxTemplatePolicy.fpmSocketPath,
+  mappings = [],
 } = {}) {
   const host = hostname(webHostname);
   const fullchain = safePath(fullchainPath, 'fullchainPath');
@@ -58,13 +147,29 @@ export function renderRoundcubeNginxConfig({
       'Roundcube Nginx must use the managed document root and PHP-FPM socket',
     );
   }
-
-  return `server {\n  listen 80;\n  listen [::]:80;\n  server_name ${host};\n  return 301 https://${host}$request_uri;\n}\n\nserver {\n  listen 443 ssl;\n  listen [::]:443 ssl;\n  server_name ${host};\n  server_tokens off;\n\n  ssl_certificate ${fullchain};\n  ssl_certificate_key ${privateKey};\n  ssl_protocols TLSv1.2 TLSv1.3;\n\n  root ${root};\n  index index.php;\n  client_max_body_size 25m;\n\n  add_header X-Content-Type-Options \"nosniff\" always;\n  add_header X-Frame-Options \"SAMEORIGIN\" always;\n  add_header Referrer-Policy \"same-origin\" always;\n\n  location / {\n    try_files $uri $uri/ /index.php?$query_string;\n  }\n\n  location ~ \\.php$ {\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param HTTP_PROXY \"\";\n    fastcgi_pass unix:${socket};\n    fastcgi_connect_timeout 10s;\n    fastcgi_send_timeout 30s;\n    fastcgi_read_timeout 30s;\n  }\n\n  location ~ /\\. {\n    deny all;\n  }\n}\n`;
+  const aliases = webMappings(mappings, host);
+  return [
+    serverBlocks({
+      webHostname: host,
+      fullchainPath: fullchain,
+      privateKeyPath: privateKey,
+      publicRoot: root,
+      fpmSocketPath: socket,
+    }),
+    ...aliases.map((mapping) => serverBlocks({
+      webHostname: mapping.hostname,
+      fullchainPath: mapping.fullchainPath,
+      privateKeyPath: mapping.privateKeyPath,
+      publicRoot: root,
+      fpmSocketPath: socket,
+    })),
+  ].join('\n');
 }
 
 export function previewRoundcubeNginxConfig(input = {}) {
-  const content = renderRoundcubeNginxConfig(input);
   const host = hostname(input.webHostname);
+  const mappings = webMappings(input.mappings ?? [], host);
+  const content = renderRoundcubeNginxConfig({ ...input, mappings });
   return Object.freeze({
     version: 1,
     sha256: sha256(content),
@@ -81,7 +186,17 @@ export function previewRoundcubeNginxConfig(input = {}) {
     serviceUnit: roundcubeNginxTemplatePolicy.serviceUnit,
     healthPath: roundcubeNginxTemplatePolicy.healthPath,
     endpoint: `https://${host}/`,
+    mappings: Object.freeze(mappings.map((mapping) => Object.freeze({
+      hostname: mapping.hostname,
+      endpoint: `https://${mapping.hostname}/`,
+    }))),
   });
 }
 
-export const roundcubeNginxTemplateInternals = Object.freeze({ hostname, safePath, sha256 });
+export const roundcubeNginxTemplateInternals = Object.freeze({
+  hostname,
+  safePath,
+  sha256,
+  webMappings,
+  serverBlocks,
+});
