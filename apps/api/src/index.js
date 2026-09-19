@@ -488,6 +488,8 @@ const domainRemovalRuntimeBundle = localServerId && domainSuspensionRuntime && m
     mailDomainRegistry,
     mailboxRegistry,
     dockerWorkloadRegistry,
+    backupOperationRegistry,
+    databaseBindingRegistry,
     domainSuspensionRuntime,
     dnsZoneRetirementService,
     dnsZoneRetirementRuntime,
