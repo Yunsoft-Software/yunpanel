@@ -124,7 +124,7 @@ test('SQL preview hides seed/password hashes while exposing only fixed lookup me
   const preview = previewManagedMailSqlConfiguration(input());
 
   assert.match(preview.sha256, /^[a-f0-9]{64}$/);
-  assert.equal(preview.databasePath, '/var/lib/yunpanel/mail/virtual-mail.sqlite3');
+  assert.equal(preview.databasePath, '/var/lib/yunpanel/mail-auth/virtual-mail.sqlite3');
   assert.deepEqual(preview.postfixLookups, {
     domains: 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-domains.cf',
     mailboxes: 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf',
