@@ -92,6 +92,12 @@ test('local mail config, DKIM key, and signing config become required after cert
   const dkim = plan.steps.find((step) => step.id === 'mail_dkim_key');
   const dkimConfig = plan.steps.find((step) => step.id === 'mail_dkim_config');
   const roundcube = plan.steps.find((step) => step.id === 'roundcube_mapping');
+  const nginx = plan.steps.find((step) => step.id === 'nginx');
+  const certificate = plan.steps.find((step) => step.id === 'certificate');
+
+  assert.deepEqual(nginx.intent.acmeOnlyHostnames, ['webmail.example.com']);
+  assert.equal(certificate.intent.primaryDomain, 'example.com');
+  assert.equal(certificate.intent.aliases.includes('webmail.example.com'), false);
 
   assert.equal(metadata.state, 'succeeded');
   assert.equal(metadata.compensation.state, 'not_required');
@@ -213,8 +219,10 @@ test('pre-create local mail preview keeps metadata pending without changing immu
 test('external mail tracks metadata but never invokes the local mail stack', () => {
   const plan = siteCreateProvisioningPlan(preview({ mailMode: 'external' }));
   const metadata = plan.steps.find((step) => step.id === 'mail_domain_metadata');
+  const nginx = plan.steps.find((step) => step.id === 'nginx');
 
   assert.equal(metadata.intent.managementMode, 'external');
+  assert.equal(Object.hasOwn(nginx.intent, 'acmeOnlyHostnames'), false);
   assert.equal(plan.steps.some((step) => step.id === 'mail_config'), false);
   assert.equal(plan.steps.some((step) => step.id === 'mail_dkim_key'), false);
   assert.equal(plan.steps.some((step) => step.id === 'mail_dkim_config'), false);
