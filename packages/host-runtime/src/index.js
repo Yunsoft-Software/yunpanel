@@ -355,3 +355,8 @@ export {
   PhpCliToolError,
   phpCliToolInternals,
 } from './php-cli-tool-manager.js';
+export {
+  createCacheIsolationManager,
+  CacheIsolationError,
+  cacheIsolationInternals,
+} from './cache-isolation-manager.js';

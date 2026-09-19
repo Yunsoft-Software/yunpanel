@@ -20,10 +20,10 @@ function validate(operation, payload) {
 test('managed hosting service protocol exposes the fixed supported catalog', () => {
   assert.deepEqual(MANAGED_SERVICE_IDS, [
     'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
-    'roundcube', 'phpmyadmin', 'elfinder', 'postsrsd',
+    'roundcube', 'phpmyadmin', 'elfinder', 'postsrsd', 'redis', 'memcached',
   ]);
   assert.deepEqual(MANAGED_SERVICE_CONTROL_IDS, [
-    'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'postsrsd',
+    'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'postsrsd', 'redis', 'memcached',
   ]);
   assert.deepEqual(MANAGED_SERVICE_ACTIONS, ['start', 'stop', 'restart']);
   assert.equal(isReadOnlyOperation(OPERATIONS.SYSTEM_SERVICES_INSPECT), true);

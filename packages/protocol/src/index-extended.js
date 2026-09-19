@@ -24,14 +24,26 @@ const ROUNDCUBE_CONFIG_APPLY = 'roundcube.config.apply';
 const CRON_APPLY = 'cron.apply';
 const CRON_REMOVE = 'cron.remove';
 const POSTSRSD_SERVICE_ID = 'postsrsd';
+const REDIS_SERVICE_ID = 'redis';
+const MEMCACHED_SERVICE_ID = 'memcached';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const BACKUP_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const MAILBOX_LOCAL_PART_PATTERN = /^[a-z0-9](?:[a-z0-9._+-]{0,62}[a-z0-9])?$/;
 const TXT_MAX_BYTES = 4096;
 
-export const MANAGED_SERVICE_IDS = Object.freeze([...BASE_MANAGED_SERVICE_IDS, POSTSRSD_SERVICE_ID]);
-export const MANAGED_SERVICE_CONTROL_IDS = Object.freeze([...BASE_MANAGED_SERVICE_CONTROL_IDS, POSTSRSD_SERVICE_ID]);
+export const MANAGED_SERVICE_IDS = Object.freeze([
+  ...BASE_MANAGED_SERVICE_IDS,
+  POSTSRSD_SERVICE_ID,
+  REDIS_SERVICE_ID,
+  MEMCACHED_SERVICE_ID,
+]);
+export const MANAGED_SERVICE_CONTROL_IDS = Object.freeze([
+  ...BASE_MANAGED_SERVICE_CONTROL_IDS,
+  POSTSRSD_SERVICE_ID,
+  REDIS_SERVICE_ID,
+  MEMCACHED_SERVICE_ID,
+]);
 
 export const OPERATIONS = Object.freeze({
   ...BASE_OPERATIONS,

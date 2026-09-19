@@ -54,6 +54,7 @@ Son Delete impact provider ve plan wiring ilerlemesi: `docs/history/delete-impac
 Son Website removal lifecycle ve orchestration ilerlemesi: `docs/history/website-removal-lifecycle-orchestration-2026-09-19.md`.
 Son Delete evidence zincirleri ve retention bağları: `docs/history/delete-evidence-chains-and-retention-wiring-2026-09-19.md`.
 Son transactional provisioning preflight, exact preview ve compensation ilerlemesi: `docs/history/transactional-provisioning-preflight-compensation-2026-09-19.md`.
+Son Redis ve Memcached isolation policy ilerlemesi: `docs/history/redis-memcached-isolation-policy-progress-2026-09-19.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -157,7 +158,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 
 ## P1.4 — Site features/settings
 
-- [ ] Redis/Memcached isolation policy.
 - [ ] Settings ekranlarını gerçek backend state'iyle tamamla.
 
 # P2 — Migration temizliği ve son ürün yüzeyi

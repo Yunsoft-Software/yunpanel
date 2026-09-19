@@ -114,6 +114,12 @@ const SERVICE_CATALOG = Object.freeze([
   service({
     id: 'postsrsd', label: 'PostSRSd', category: 'mail', packages: ['postsrsd'], units: ['postsrsd.service'],
   }),
+  service({
+    id: 'redis', label: 'Redis', category: 'cache', packages: ['redis-server'], units: ['redis-server.service'],
+  }),
+  service({
+    id: 'memcached', label: 'Memcached', category: 'cache', packages: ['memcached'], units: ['memcached.service'],
+  }),
 ]);
 const SERVICE_BY_ID = new Map(SERVICE_CATALOG.map((entry) => [entry.id, entry]));
 

@@ -21,6 +21,8 @@ const POLICY = new Map([
   ['phpmyadmin', definition(['phpmyadmin', 'php-fpm', 'php-mysql'], [], true)],
   ['elfinder', definition(['php-fpm', 'php-mbstring', 'php-zip', 'libjs-jquery', 'libjs-jquery-ui'], [], true)],
   ['postsrsd', definition(['postsrsd'], ['postsrsd.service'])],
+  ['redis', definition(['redis-server'], ['redis-server.service'])],
+  ['memcached', definition(['memcached'], ['memcached.service'])],
 ]);
 
 if (POLICY.size !== MANAGED_SERVICE_IDS.length || MANAGED_SERVICE_IDS.some((id) => !POLICY.has(id))) {

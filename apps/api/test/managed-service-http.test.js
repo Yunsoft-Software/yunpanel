@@ -18,6 +18,8 @@ const servicePackages = {
   roundcube: ['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], phpmyadmin: ['phpmyadmin', 'php-fpm', 'php-mysql'],
   elfinder: ['php-fpm', 'php-mbstring', 'php-zip', 'libjs-jquery', 'libjs-jquery-ui'],
   postsrsd: ['postsrsd'],
+  redis: ['redis-server'],
+  memcached: ['memcached'],
 };
 
 function fakeStore(role = 'owner') {
@@ -70,6 +72,7 @@ async function fixture(t, role = 'owner') {
 
 function healthyService(id) {
   const unitless = ['roundcube', 'phpmyadmin', 'elfinder'].includes(id);
+  const unitName = id === 'redis' ? 'redis-server.service' : `${id}.service`;
   return {
     id,
     label: `ignored-${id}`,
@@ -78,7 +81,7 @@ function healthyService(id) {
     active: !unitless,
     packages: servicePackages[id].map((packageName) => ({ packageName, installed: true, version: '1.0.0-1' })),
     units: unitless ? [] : [{
-      unit: `${id}.service`,
+      unit: unitName,
       loadState: 'loaded',
       activeState: 'active',
       subState: 'running',

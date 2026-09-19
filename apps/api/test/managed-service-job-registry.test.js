@@ -12,6 +12,8 @@ const servicePackages = {
   roundcube: ['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], phpmyadmin: ['phpmyadmin', 'php-fpm', 'php-mysql'],
   elfinder: ['php-fpm', 'php-mbstring', 'php-zip', 'libjs-jquery', 'libjs-jquery-ui'],
   postsrsd: ['postsrsd'],
+  redis: ['redis-server'],
+  memcached: ['memcached'],
 };
 
 function serviceState(id, { installed = false, active = false } = {}) {
@@ -20,6 +22,7 @@ function serviceState(id, { installed = false, active = false } = {}) {
   const configuration = !installed
     ? 'not_checked'
     : ['postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin', 'elfinder'].includes(id) ? 'valid' : 'not_applicable';
+  const unitName = id === 'redis' ? 'redis-server.service' : `${id}.service`;
   return {
     id,
     label: 'must-not-persist',
@@ -33,7 +36,7 @@ function serviceState(id, { installed = false, active = false } = {}) {
       raw: 'PRIVATE',
     })),
     units: unitless ? [] : [{
-      unit: `${id}.service`,
+      unit: unitName,
       loadState: installed ? 'loaded' : 'not-found',
       activeState: effectiveActive ? 'active' : 'inactive',
       subState: effectiveActive ? 'running' : 'dead',

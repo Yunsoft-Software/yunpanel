@@ -12,7 +12,7 @@ const INACTIVE_UNIT = 'LoadState=loaded\nActiveState=inactive\nSubState=dead\nUn
 test('managed service catalog covers the hosting service groups without arbitrary units', () => {
   assert.deepEqual(managedServicePolicy.services.map((entry) => entry.id), [
     'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
-    'roundcube', 'phpmyadmin', 'elfinder', 'postsrsd',
+    'roundcube', 'phpmyadmin', 'elfinder', 'postsrsd', 'redis', 'memcached',
   ]);
   assert.deepEqual(managedServicePolicy.actions, ['start', 'stop', 'restart']);
   for (const entry of managedServicePolicy.services) {

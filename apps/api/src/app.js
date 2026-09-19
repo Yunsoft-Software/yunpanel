@@ -156,10 +156,12 @@ import { WebsiteSftpKeyRegistryError } from './website-sftp-key-registry.js';
 import { WebsiteSftpKeyServiceError } from './website-sftp-key-service.js';
 import { mountWebsiteCronRoutes, WebsiteCronHttpError } from './website-cron-http.js';
 import { WebsiteCronApplyServiceError } from './website-cron-apply-service.js';
-import { WebsiteCronRegistryError } from './website-cron-registry.js';
 import { mountWebsitePhpToolsRoutes } from './website-php-tools-http.js';
 import { WebsitePhpToolsServiceError } from './website-php-tools-service.js';
-import { PhpCliToolError } from '@yunpanel/host-runtime';
+import { PhpCliToolError, CacheIsolationError } from '@yunpanel/host-runtime';
+import { mountWebsiteCacheRoutes } from './website-cache-http.js';
+import { WebsiteCacheServiceError } from './website-cache-service.js';
+import { WebsiteCachePolicyRegistryError } from './website-cache-policy-registry.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -281,6 +283,7 @@ export function createApp({
   websiteSftpKeyService = null,
   websiteCronApplyService = null,
   websitePhpToolsService = null,
+  websiteCacheService = null,
   databaseBackupService = null,
   domainSuspensionRuntime = null,
   domainRemovalRuntime = null,
@@ -752,6 +755,12 @@ export function createApp({
       requirePanelRouteAccess: core.requirePanelRouteAccess,
     });
   }
+  if (websiteCacheService) {
+    mountWebsiteCacheRoutes(app, {
+      websiteCacheService,
+      requirePanelRouteAccess: core.requirePanelRouteAccess,
+    });
+  }
   mountManagedServiceRoutes(app, { registry: localRegistry, jobRegistry });
   mountNodeRuntimeRoutes(app, { registry: localRegistry, jobRegistry });
   if (databaseBindingRegistry) {
@@ -923,6 +932,9 @@ export function createApp({
       || error instanceof WebsiteCronRegistryError
       || error instanceof WebsitePhpToolsServiceError
       || error instanceof PhpCliToolError
+      || error instanceof WebsiteCacheServiceError
+      || error instanceof WebsiteCachePolicyRegistryError
+      || error instanceof CacheIsolationError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }

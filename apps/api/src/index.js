@@ -10,6 +10,7 @@ import {
   createNginxLogReader,
   createWebsiteCronManager,
   createPhpCliToolManager,
+  createCacheIsolationManager,
   inspectAllowlistedServices,
   inspectDocker,
   inspectNginx,
@@ -110,6 +111,8 @@ import { createLocalWebsiteCronOperation } from './local-website-cron-operation.
 import { createWebsiteCronReconciliationProvider } from './website-cron-reconciliation.js';
 import { createWebsiteCronApplyService } from './website-cron-apply-service.js';
 import { createWebsitePhpToolsService } from './website-php-tools-service.js';
+import { createWebsiteCachePolicyRegistry } from './website-cache-policy-registry.js';
+import { createWebsiteCacheService } from './website-cache-service.js';
 import { createWebsiteSftpKeyRuntime } from './website-sftp-key-runtime.js';
 import { createWebsiteSuspensionOperationRegistry } from './website-suspension-operation-registry.js';
 import { createWebsiteSuspensionRuntime } from './website-suspension-runtime.js';
@@ -148,6 +151,8 @@ const websiteSftpKeyStorePath = process.env.YUNPANEL_WEBSITE_SFTP_KEY_STORE
   ?? path.join(controlPlaneStateRoot, 'website-sftp-key-registry.json');
 const websiteCronStorePath = process.env.YUNPANEL_WEBSITE_CRON_STORE
   ?? path.join(controlPlaneStateRoot, 'website-cron-registry.json');
+const websiteCachePolicyStorePath = process.env.YUNPANEL_WEBSITE_CACHE_POLICY_STORE
+  ?? path.join(controlPlaneStateRoot, 'website-cache-policies.json');
 const databaseBindingStorePath = process.env.YUNPANEL_DATABASE_BINDING_STORE
   ?? path.resolve('.data/database-binding-registry.json');
 const databaseCredentialStorePath = process.env.YUNPANEL_DATABASE_CREDENTIAL_STORE
@@ -316,6 +321,18 @@ const websitePhpToolsService = createWebsitePhpToolsService({
   websiteRegistry,
   applicationRegistry,
   phpCliToolManager,
+});
+const websiteCachePolicyRegistry = createWebsiteCachePolicyRegistry({
+  filePath: websiteCachePolicyStorePath,
+  masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY,
+});
+await websiteCachePolicyRegistry.init();
+const cacheIsolationManager = createCacheIsolationManager();
+const websiteCacheService = createWebsiteCacheService({
+  websiteRegistry,
+  applicationRegistry,
+  cachePolicyRegistry: websiteCachePolicyRegistry,
+  cacheIsolationManager,
 });
 const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({
   filePath: websiteProvisioningStorePath,
@@ -962,6 +979,7 @@ const listener = createAuthenticatedApi({
       websiteCronImpactProvider,
       websiteCronApplyService,
       websitePhpToolsService,
+      websiteCacheService,
       localServerId,
       terminalCapabilityRegistry,
       ttydSessionManager,

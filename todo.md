@@ -135,7 +135,9 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 - [ ] Site cron/systemd timer gerçek site UID/GID/cwd/env ile çalışsın; last/next run ve bounded/redacted output doğru olsun; başka Website'e veya root'a yükselmesin.
 - [ ] OpenSSH internal-sftp chroot/path/permission isolation iki Website hesabıyla doğrulansın; key lifecycle/materialization kabulü T-PROVISIONING altında geçsin. FTP varsayılan olarak dinlemesin.
-- [ ] WordPress Website'te WP-CLI ve PHP Website'te Composer yalnız site user/cwd ile çalışsın; Redis/Memcached açılırsa per-site ACL/socket/namespace çapraz erişimi engellesin.
+- [ ] WordPress Website'te WP-CLI ve PHP Website'te Composer yalnız site user/cwd ile çalışsın.
+- [ ] Redis ACL izolasyonunu gerçek Ubuntu üzerinde test et: `redis-server` kurulu ve aktifken `/etc/redis/users.d/yunpanel-<websiteId>.acl` dosyasının `root:redis 0640` izinleriyle oluşturulduğunu, `yunapp-<websiteId>` kullanıcısının yalnız `~<websiteId>:*` keylerine erişebildiğini, tehlikeli komutların (`FLUSHALL`, `FLUSHDB`, `CONFIG`, `SHUTDOWN` ve `@dangerous`, `@admin`) engellendiğini, iki farklı sitenin birbirinin keylerini okuyamadığını ve silemediğini doğrula. Parola rotasyonu ve disable işlemlerinin ACL dosyasını ve Redis oturumlarını doğru güncellediğini kanıtla.
+- [ ] Memcached per-site prefix ve port/socket politikasını doğrula: sitenin yalnız kendi prefix'iyle (`yunapp_<websiteId>:`) çalışması sağlansın.
 - [ ] Settings Panel, Network/NS, Website defaults, DNS/SSL, Mail/Webmail, Databases, Backup/storage, Security, Monitoring/logs, Users/audit ve package versions alanlarını gerçek persisted state/health ile göstersin; boş placeholder kalmasın.
 
 ## T-DOCKER-PYTHON-MIGRATION — P2
