@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   MailApplyPlanError,
+  enableManagedMailSql,
+  mailSqlTemplatePolicy,
   mailSubmissionTemplatePolicy,
   previewManagedMailApplyPlan,
   previewManagedMailSubmissionConfiguration,
@@ -78,6 +80,41 @@ test('builds deterministic secret-free managed mail apply and rollback stages wi
   });
   assert.equal(JSON.stringify(plan).includes(ARGON2ID_HASH), false);
   assert.equal(previewManagedMailApplyPlan(preview).sha256, plan.sha256);
+});
+
+test('SQLite managed mail plan replaces postmap compilation with one transactional seed apply', () => {
+  const base = forwardingPreview();
+  const input = {
+    domains: ['example.com'],
+    mailboxes: ['owner@example.com'],
+    aliases: [],
+    accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
+    postmasterAddress: 'owner@example.com',
+    forwardings: [{ source: 'owner@example.com', mode: 'copy', destinations: ['backup@elsewhere.test'] }],
+  };
+  const preview = enableManagedMailSql(base, input);
+  const plan = previewManagedMailApplyPlan(preview);
+
+  assert.equal(plan.sql.required, true);
+  assert.equal(plan.sql.databasePath, mailSqlTemplatePolicy.databasePath);
+  assert.deepEqual(plan.sql.domains, ['example.com']);
+  assert.deepEqual(plan.stages.compile, [
+    {
+      file: '/usr/bin/sqlite3',
+      args: [mailSqlTemplatePolicy.databasePath, '.read ' + mailSqlTemplatePolicy.seedPath],
+    },
+    { file: '/usr/bin/sievec', args: ['/etc/dovecot/yunpanel-forwarding.sieve'] },
+  ]);
+  assert.equal(plan.stages.compile.some((command) => command.file === '/usr/sbin/postmap'), false);
+  assert.equal(
+    plan.postfixMasterServices[0].parameters.find(
+      (parameter) => parameter.name === 'smtpd_sender_login_maps',
+    ).value,
+    'proxy:sqlite:' + mailSqlTemplatePolicy.postfixSenderLoginPath,
+  );
+  assert.equal(plan.artifacts.some((artifact) => artifact.path === mailSqlTemplatePolicy.seedPath
+    && artifact.sensitive === true), true);
+  assert.equal(JSON.stringify(plan).includes(ARGON2ID_HASH), false);
 });
 
 test('forwarding-aware submission plan keeps the same fixed compile allowlist', () => {
