@@ -287,6 +287,33 @@ function authoritativeRemovalPreview() {
   };
 }
 
+function mailRemovalPreview({ managementMode = 'local', status = 'enabled' } = {}) {
+  const base = leafRemovalPreview();
+  const mailPreviewDigest = managementMode === 'local' ? '0'.repeat(64) : '1'.repeat(64);
+  return {
+    ...base,
+    impact: {
+      ...base.impact,
+      blockers: ['impact_apply_not_implemented', 'mail_domains_present', 'website_binding_present'],
+    },
+    plan: {
+      ...base.plan,
+      mailDomainIds: ['mail-domain-1'],
+      mailDomainIntents: [{
+        id: 'mail-domain-1',
+        domainName: 'example.com',
+        webDomainId: 'domain-1',
+        managementMode,
+        status,
+        revision: 5,
+        updatedAt: '2026-09-18T20:10:00.000Z',
+      }],
+    },
+    previewDigest: mailPreviewDigest,
+    confirmation: `start-domain-remove:domain-1:4:${mailPreviewDigest}`,
+  };
+}
+
 function suspensionPreview() {
   return {
     version: 1,
@@ -734,6 +761,148 @@ function dnsRetirementRuntimeFixture({ initialChild = null, preview = dnsRetirem
   };
 }
 
+function mailDomainRemovalPreview({
+  managementMode = 'local',
+  status = 'enabled',
+  parentOperationId = 'removal-operation-1',
+} = {}) {
+  const childPreviewDigest = managementMode === 'local' ? '3'.repeat(64) : '4'.repeat(64);
+  return {
+    version: 1,
+    operation: 'mail_domain_remove',
+    mailDomain: {
+      id: 'mail-domain-1',
+      webDomainId: 'domain-1',
+      domainName: 'example.com',
+      managementMode,
+      status,
+      revision: 5,
+      updatedAt: '2026-09-18T20:10:00.000Z',
+    },
+    parentOperationId,
+    removalMethod: managementMode === 'local'
+      ? 'local_verified_data_finalize'
+      : 'external_metadata_unlink',
+    readyToStart: true,
+    blockers: [],
+    previewDigest: childPreviewDigest,
+    confirmation: `remove-mail-domain:mail-domain-1:${parentOperationId}:${childPreviewDigest}`,
+    sideEffects: false,
+  };
+}
+
+function mailDomainRemovalChild({
+  managementMode = 'local',
+  status = 'enabled',
+  childStatus = 'removed',
+  parentOperationId = 'removal-operation-1',
+  updatedAt = '2026-09-18T20:41:00.000Z',
+  externalJobEvidence = false,
+} = {}) {
+  const local = managementMode === 'local';
+  const removalMethod = local ? 'local_verified_data_finalize' : 'external_metadata_unlink';
+  return {
+    id: 'mail-removal-operation-1',
+    parentOperationId,
+    mailDomainId: 'mail-domain-1',
+    webDomainId: 'domain-1',
+    domainName: 'example.com',
+    managementMode,
+    sourceStatus: status,
+    sourceRevision: 5,
+    sourceUpdatedAt: '2026-09-18T20:10:00.000Z',
+    removalMethod,
+    previewDigest: managementMode === 'local' ? '3'.repeat(64) : '4'.repeat(64),
+    status: childStatus,
+    result: childStatus === 'removed' ? {
+      removed: true,
+      mailDomainId: 'mail-domain-1',
+      webDomainId: 'domain-1',
+      domainName: 'example.com',
+      managementMode,
+      removalMethod,
+      finalRevision: local && status === 'enabled' ? 6 : 5,
+      disableJobId: local && status === 'enabled' ? 'mail-config-job-1' : null,
+      dataDeleteJobId: local || externalJobEvidence ? 'mail-delete-job-1' : null,
+      backupId: local || externalJobEvidence ? 'mail-backup-job-1' : null,
+      cleanupEvidenceDigest: '5'.repeat(64),
+      deletedAt: '2026-09-18T20:41:00.000Z',
+    } : null,
+    error: childStatus === 'failed'
+      ? { code: 'mail_data_delete_failed', message: 'Mail data deletion failed' }
+      : null,
+    recovery: {
+      required: childStatus !== 'removed',
+      automaticReplayBlocked: childStatus !== 'removed',
+      reason: childStatus !== 'removed' ? 'mail_domain_removal_incomplete' : null,
+      retryable: childStatus !== 'removed',
+      retryConfirmation: childStatus !== 'removed' ? 'retry-mail-removal-child' : null,
+    },
+    createdAt: '2026-09-18T20:40:00.000Z',
+    updatedAt,
+  };
+}
+
+function mailDomainRemovalRuntimeFixture({
+  managementMode = 'local',
+  status = 'enabled',
+  initialChild = null,
+  externalJobEvidence = false,
+} = {}) {
+  let child = initialChild;
+  let previewCalls = 0;
+  let startCalls = 0;
+  let retryCalls = 0;
+  let listCalls = 0;
+  const preview = mailDomainRemovalPreview({ managementMode, status });
+  return {
+    runtime: {
+      async preview(input) {
+        previewCalls += 1;
+        assert.deepEqual(input, {
+          mailDomainId: 'mail-domain-1',
+          parentOperationId: 'removal-operation-1',
+        });
+        return preview;
+      },
+      async start(input) {
+        startCalls += 1;
+        assert.deepEqual(input, {
+          mailDomainId: 'mail-domain-1',
+          parentOperationId: 'removal-operation-1',
+          previewDigest: preview.previewDigest,
+          confirmation: preview.confirmation,
+        });
+        child = mailDomainRemovalChild({ managementMode, status, externalJobEvidence });
+        return child;
+      },
+      async retry(input) {
+        retryCalls += 1;
+        assert.deepEqual(input, {
+          mailDomainId: 'mail-domain-1',
+          operationId: 'mail-removal-operation-1',
+          parentOperationId: 'removal-operation-1',
+          expectedUpdatedAt: child.updatedAt,
+          confirmation: 'retry-mail-removal-child',
+        });
+        child = mailDomainRemovalChild({
+          managementMode,
+          status,
+          externalJobEvidence,
+          updatedAt: '2026-09-18T20:42:00.000Z',
+        });
+        return child;
+      },
+      async listForMailDomain(id) {
+        listCalls += 1;
+        assert.equal(id, 'mail-domain-1');
+        return child ? [child] : [];
+      },
+    },
+    counts: () => ({ previewCalls, startCalls, retryCalls, listCalls }),
+  };
+}
+
 function childDnsRetirementRuntimeFixture() {
   let previewCalls = 0;
   let startCalls = 0;
@@ -1054,6 +1223,180 @@ test('startup blocks an incomplete certificate step and explicit drift fails bef
   assert.equal(driftedOperation.steps[1].error.code, 'domain_removal_certificate_intent_drift');
   assert.equal(driftedDomains.certificateDetachCalls(), 0);
   assert.equal(driftedCertificates.retireCalls(), 0);
+});
+
+test('explicit continuation delegates local Mail Domain removal to exact child evidence', async () => {
+  const registry = createRegistry();
+  const preview = mailRemovalPreview();
+  let operation = await completeRoutingStep(registry, preview);
+  const domains = domainRegistryFixture();
+  const mail = mailDomainRemovalRuntimeFixture();
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    mailDomainRemovalRuntime: mail.runtime,
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: `continue-domain-remove-step:${operation.domainId}:${operation.id}:${operation.steps[1].id}:${operation.updatedAt}:${operation.checksum}`,
+  });
+
+  assert.equal(operation.steps[1].kind, 'mail_domain');
+  assert.equal(operation.steps[1].status, 'succeeded');
+  assert.equal(operation.steps[1].result.referenceId, 'mail-removal-operation-1');
+  assert.match(operation.steps[1].result.evidenceDigest, /^[a-f0-9]{64}$/);
+  assert.equal(operation.steps[2].kind, 'website_binding');
+  assert.deepEqual(mail.counts(), {
+    previewCalls: 1,
+    startCalls: 1,
+    retryCalls: 0,
+    listCalls: 1,
+  });
+});
+
+test('startup reconciles exact completed Mail Domain child without replaying mutation', async () => {
+  const registry = createRegistry();
+  let operation = await completeRoutingStep(registry, mailRemovalPreview());
+  operation = await registry.markStepRunning(operation.id, operation.steps[1].id);
+  const domains = domainRegistryFixture();
+  const mail = mailDomainRemovalRuntimeFixture({
+    initialChild: mailDomainRemovalChild(),
+  });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => { throw new Error('startup must not create a preview'); },
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    mailDomainRemovalRuntime: mail.runtime,
+  });
+
+  const recovery = await runtime.init();
+
+  assert.equal(recovery.length, 1);
+  assert.equal(recovery[0].recovered, true);
+  assert.equal(recovery[0].operation.steps[1].status, 'succeeded');
+  assert.deepEqual(mail.counts(), {
+    previewCalls: 0,
+    startCalls: 0,
+    retryCalls: 0,
+    listCalls: 1,
+  });
+
+});
+
+test('startup leaves incomplete Mail Domain child for explicit retry', async () => {
+  const registry = createRegistry();
+  let operation = await completeRoutingStep(registry, mailRemovalPreview());
+  operation = await registry.markStepRunning(operation.id, operation.steps[1].id);
+  const domains = domainRegistryFixture();
+  const mail = mailDomainRemovalRuntimeFixture({
+    initialChild: mailDomainRemovalChild({ childStatus: 'deleting_data' }),
+  });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => { throw new Error('startup must not create a preview'); },
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    mailDomainRemovalRuntime: mail.runtime,
+  });
+
+  const recovery = await runtime.init();
+
+  assert.equal(recovery.length, 1);
+  assert.equal(recovery[0].recovered, false);
+  assert.equal(recovery[0].operation.steps[1].status, 'blocked');
+  assert.equal(recovery[0].operation.steps[1].error.code, 'domain_removal_mail_retry_required');
+  assert.deepEqual(mail.counts(), {
+    previewCalls: 0,
+    startCalls: 0,
+    retryCalls: 0,
+    listCalls: 1,
+  });
+
+  operation = recovery[0].operation;
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+  assert.equal(operation.steps[1].status, 'succeeded');
+  assert.deepEqual(mail.counts(), {
+    previewCalls: 0,
+    startCalls: 0,
+    retryCalls: 1,
+    listCalls: 2,
+  });
+});
+
+test('external Mail Domain removal rejects local data-job evidence', async () => {
+  const registry = createRegistry();
+  const preview = mailRemovalPreview({ managementMode: 'external', status: 'ready' });
+  let operation = await completeRoutingStep(registry, preview);
+  const domains = domainRegistryFixture();
+  const mail = mailDomainRemovalRuntimeFixture({
+    managementMode: 'external',
+    status: 'ready',
+    externalJobEvidence: true,
+  });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    mailDomainRemovalRuntime: mail.runtime,
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: `continue-domain-remove-step:${operation.domainId}:${operation.id}:${operation.steps[1].id}:${operation.updatedAt}:${operation.checksum}`,
+  });
+
+  assert.equal(operation.steps[1].status, 'blocked');
+  assert.equal(operation.steps[1].error.code, 'domain_removal_mail_evidence_invalid');
+});
+
+test('external Mail Domain removal uses metadata unlink evidence without local jobs', async () => {
+  const registry = createRegistry();
+  const preview = mailRemovalPreview({ managementMode: 'external', status: 'ready' });
+  let operation = await completeRoutingStep(registry, preview);
+  const domains = domainRegistryFixture();
+  const mail = mailDomainRemovalRuntimeFixture({
+    managementMode: 'external',
+    status: 'ready',
+  });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    mailDomainRemovalRuntime: mail.runtime,
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: `continue-domain-remove-step:${operation.domainId}:${operation.id}:${operation.steps[1].id}:${operation.updatedAt}:${operation.checksum}`,
+  });
+
+  assert.equal(operation.steps[1].status, 'succeeded');
+  assert.equal(operation.steps[1].result.referenceId, 'mail-removal-operation-1');
 });
 
 test('explicit parent continuations drive one parent-owned leaf child Domain operation at a time', async () => {

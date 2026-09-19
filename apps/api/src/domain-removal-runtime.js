@@ -8,9 +8,15 @@ import {
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ROUTING_CHILD_STATUSES = new Set(['pending', 'suspending', 'suspended', 'failed']);
 const CONTINUABLE_STEP_KINDS = new Set([
-  'child_domain', 'certificate', 'website_binding', 'authoritative_dns', 'metadata_finalization',
+  'child_domain', 'certificate', 'mail_domain', 'website_binding', 'authoritative_dns',
+  'metadata_finalization',
 ]);
 const DNS_RETIREMENT_CHILD_STATUSES = new Set(['pending', 'deleting', 'deleted', 'failed']);
+const MAIL_REMOVAL_CHILD_STATUSES = new Set([
+  'pending', 'disabling', 'cleaning', 'deleting_data', 'finalizing', 'blocked', 'failed',
+  'removed',
+]);
+const SAFE_REFERENCE_ID = /^[A-Za-z0-9._:@-]{1,160}$/;
 
 export class DomainRemovalRuntimeError extends Error {
   constructor(code, message, status = 400) {
@@ -534,6 +540,146 @@ function childRemovalEvidence(operation, intent, child) {
   });
 }
 
+function mailDomainIntent(operation, step) {
+  if (!Array.isArray(operation.plan.mailDomainIntents)) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_mail_intent_missing',
+      'Legacy Domain removal journal has no exact Mail Domain intent evidence',
+      409,
+    );
+  }
+  const matches = operation.plan.mailDomainIntents.filter((intent) => (
+    intent.id === step.resourceId && intent.webDomainId === operation.domainId
+  ));
+  if (matches.length !== 1) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_mail_plan_invalid',
+      'Mail Domain step does not match one exact Domain-scoped removal intent',
+      409,
+    );
+  }
+  return matches[0];
+}
+
+function mailRemovalMethod(intent) {
+  return intent.managementMode === 'local'
+    ? 'local_verified_data_finalize'
+    : 'external_metadata_unlink';
+}
+
+function exactMailRemovalPreview(operation, intent, preview) {
+  return Boolean(preview
+    && preview.version === 1
+    && preview.operation === 'mail_domain_remove'
+    && preview.readyToStart === true
+    && Array.isArray(preview.blockers)
+    && preview.blockers.length === 0
+    && preview.mailDomain?.id === intent.id
+    && preview.mailDomain?.webDomainId === intent.webDomainId
+    && preview.mailDomain?.domainName === intent.domainName
+    && preview.mailDomain?.managementMode === intent.managementMode
+    && preview.mailDomain?.status === intent.status
+    && preview.mailDomain?.revision === intent.revision
+    && preview.mailDomain?.updatedAt === intent.updatedAt
+    && preview.parentOperationId === operation.id
+    && preview.removalMethod === mailRemovalMethod(intent)
+    && typeof preview.previewDigest === 'string'
+    && SHA256_PATTERN.test(preview.previewDigest)
+    && typeof preview.confirmation === 'string'
+    && preview.confirmation.length > 0
+    && preview.sideEffects === false);
+}
+
+function exactMailRemovalChild(operation, intent, child) {
+  const parentCreatedAt = Date.parse(operation.createdAt);
+  const childCreatedAt = Date.parse(child?.createdAt);
+  const childUpdatedAt = Date.parse(child?.updatedAt);
+  return Boolean(child
+    && typeof child.id === 'string'
+    && SAFE_REFERENCE_ID.test(child.id)
+    && child.parentOperationId === operation.id
+    && Number.isFinite(parentCreatedAt)
+    && Number.isFinite(childCreatedAt)
+    && Number.isFinite(childUpdatedAt)
+    && new Date(childCreatedAt).toISOString() === child.createdAt
+    && new Date(childUpdatedAt).toISOString() === child.updatedAt
+    && childCreatedAt >= parentCreatedAt
+    && childUpdatedAt >= childCreatedAt
+    && child.mailDomainId === intent.id
+    && child.webDomainId === intent.webDomainId
+    && child.domainName === intent.domainName
+    && child.managementMode === intent.managementMode
+    && child.sourceStatus === intent.status
+    && child.sourceRevision === intent.revision
+    && child.sourceUpdatedAt === intent.updatedAt
+    && child.removalMethod === mailRemovalMethod(intent)
+    && typeof child.previewDigest === 'string'
+    && SHA256_PATTERN.test(child.previewDigest)
+    && MAIL_REMOVAL_CHILD_STATUSES.has(child.status));
+}
+
+function optionalSafeReference(value) {
+  return value === null || (typeof value === 'string' && SAFE_REFERENCE_ID.test(value));
+}
+
+function mailRemovalEvidence(operation, intent, child) {
+  const result = child?.result;
+  const local = intent.managementMode === 'local';
+  const expectedFinalRevision = intent.revision + (intent.status === 'enabled' ? 1 : 0);
+  const deletedAt = Date.parse(result?.deletedAt);
+  if (!exactMailRemovalChild(operation, intent, child)
+    || child.status !== 'removed'
+    || result?.removed !== true
+    || result.mailDomainId !== intent.id
+    || result.webDomainId !== intent.webDomainId
+    || result.domainName !== intent.domainName
+    || result.managementMode !== intent.managementMode
+    || result.removalMethod !== mailRemovalMethod(intent)
+    || result.finalRevision !== (local ? expectedFinalRevision : intent.revision)
+    || typeof result.cleanupEvidenceDigest !== 'string'
+    || !SHA256_PATTERN.test(result.cleanupEvidenceDigest)
+    || typeof result.deletedAt !== 'string'
+    || !Number.isFinite(deletedAt)
+    || new Date(deletedAt).toISOString() !== result.deletedAt
+    || deletedAt < Date.parse(child.createdAt)
+    || !optionalSafeReference(result.disableJobId)
+    || !optionalSafeReference(result.dataDeleteJobId)
+    || !optionalSafeReference(result.backupId)
+    || (local && (result.dataDeleteJobId === null || result.backupId === null))
+    || (local && intent.status === 'enabled' && result.disableJobId === null)
+    || (local && intent.status === 'disabled' && result.disableJobId !== null)
+    || (!local && (result.disableJobId !== null
+      || result.dataDeleteJobId !== null || result.backupId !== null))) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_mail_evidence_invalid',
+      'Mail Domain child operation did not prove its exact destructive lifecycle',
+      409,
+    );
+  }
+  return Object.freeze({
+    referenceId: child.id,
+    evidenceDigest: digest({
+      kind: 'mail_domain',
+      parentOperationId: operation.id,
+      childOperationId: child.id,
+      mailDomainId: intent.id,
+      webDomainId: intent.webDomainId,
+      domainName: intent.domainName,
+      managementMode: intent.managementMode,
+      sourceStatus: intent.status,
+      sourceRevision: intent.revision,
+      finalRevision: result.finalRevision,
+      removalMethod: result.removalMethod,
+      previewDigest: child.previewDigest,
+      disableJobId: result.disableJobId,
+      dataDeleteJobId: result.dataDeleteJobId,
+      backupId: result.backupId,
+      cleanupEvidenceDigest: result.cleanupEvidenceDigest,
+      deletedAt: result.deletedAt,
+    }),
+  });
+}
+
 export function createDomainRemovalRuntime({
   registry,
   previewProvider,
@@ -541,6 +687,7 @@ export function createDomainRemovalRuntime({
   domainRegistry = null,
   certificateRegistry = null,
   dnsZoneRetirementRuntime = null,
+  mailDomainRemovalRuntime = null,
 } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
@@ -568,6 +715,12 @@ export function createDomainRemovalRuntime({
       || typeof dnsZoneRetirementRuntime?.start !== 'function'
       || typeof dnsZoneRetirementRuntime?.retry !== 'function'
       || typeof dnsZoneRetirementRuntime?.listForDomain !== 'function'
+    ))
+    || (mailDomainRemovalRuntime !== null && (
+      typeof mailDomainRemovalRuntime?.preview !== 'function'
+      || typeof mailDomainRemovalRuntime?.start !== 'function'
+      || typeof mailDomainRemovalRuntime?.retry !== 'function'
+      || typeof mailDomainRemovalRuntime?.listForMailDomain !== 'function'
     ))) {
     throw new DomainRemovalRuntimeError(
       'domain_removal_runtime_dependencies_invalid',
@@ -607,6 +760,17 @@ export function createDomainRemovalRuntime({
       );
     }
     return certificateRegistry;
+  }
+
+  function requireMailDomainRemovalRuntime() {
+    if (!mailDomainRemovalRuntime) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_mail_runtime_unavailable',
+        'Domain removal Mail Domain child lifecycle is unavailable',
+        503,
+      );
+    }
+    return mailDomainRemovalRuntime;
   }
 
   async function loadOperation(operationId) {
@@ -950,6 +1114,176 @@ export function createDomainRemovalRuntime({
     ));
   }
 
+  async function discoverMailDomainOperation(operation, intent, runtime) {
+    let values;
+    try { values = await runtime.listForMailDomain(intent.id); }
+    catch (error) { throw mapped(error); }
+    if (!Array.isArray(values)) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_mail_inventory_invalid',
+        'Mail Domain child operation inventory is invalid',
+        503,
+      );
+    }
+    const owned = values.filter((child) => child?.parentOperationId === operation.id);
+    if (owned.length > 1) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_mail_operation_ambiguous',
+        'Multiple Mail Domain child operations match the removal intent',
+        409,
+      );
+    }
+    if (owned.length === 1 && !exactMailRemovalChild(operation, intent, owned[0])) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_mail_operation_drift',
+        'Parent-owned Mail Domain child operation no longer matches the removal intent',
+        409,
+      );
+    }
+    return owned[0] ?? null;
+  }
+
+  async function currentMailDomainPreview(operation, intent, runtime) {
+    let preview;
+    try {
+      preview = await runtime.preview({
+        mailDomainId: intent.id,
+        parentOperationId: operation.id,
+      });
+    } catch (error) { throw mapped(error); }
+    if (!exactMailRemovalPreview(operation, intent, preview)) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_mail_preview_drift',
+        'Mail Domain removal state no longer matches the parent journaled intent',
+        409,
+      );
+    }
+    return preview;
+  }
+
+  async function continueMailDomainChild(operation, intent, child, runtime) {
+    if (child?.status === 'removed') return child;
+    if (child) {
+      if (child.recovery?.retryable !== true
+        || typeof child.recovery?.retryConfirmation !== 'string'
+        || child.recovery.retryConfirmation.length < 1) {
+        throw new DomainRemovalRuntimeError(
+          'domain_removal_mail_retry_evidence_invalid',
+          'Mail Domain child operation retry evidence is unavailable',
+          409,
+        );
+      }
+      try {
+        return await runtime.retry({
+          mailDomainId: intent.id,
+          operationId: child.id,
+          parentOperationId: operation.id,
+          expectedUpdatedAt: child.updatedAt,
+          confirmation: child.recovery.retryConfirmation,
+        });
+      } catch (error) { throw mapped(error); }
+    }
+    const preview = await currentMailDomainPreview(operation, intent, runtime);
+    try {
+      const started = await runtime.start({
+        mailDomainId: intent.id,
+        parentOperationId: operation.id,
+        previewDigest: preview.previewDigest,
+        confirmation: preview.confirmation,
+      });
+      if (started?.previewDigest !== preview.previewDigest) {
+        throw new DomainRemovalRuntimeError(
+          'domain_removal_mail_operation_drift',
+          'Mail Domain child journal does not match the parent-approved preview',
+          409,
+        );
+      }
+      return started;
+    } catch (error) { throw mapped(error); }
+  }
+
+  async function runMailDomain(operationId, { allowMutation } = {}) {
+    const manager = requireDomainRegistry();
+    const runtime = requireMailDomainRemovalRuntime();
+    const prepared = await runningStep(await loadOperation(operationId), 'mail_domain');
+    const { operation, step } = prepared;
+    let intent;
+    try { intent = mailDomainIntent(operation, step); }
+    catch (error) {
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    const suspensionId = suspensionOperationId(operation);
+    let domain;
+    try { domain = await manager.getDomain(operation.domainId); }
+    catch (error) { return publicOperation(await failControlPlaneStep(operation, step, error)); }
+    if (!exactSuspendedDomain(operation, domain, suspensionId)) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_mail_domain_drift',
+        'Domain state no longer matches journaled Mail Domain removal evidence',
+        409,
+      )));
+    }
+    let child;
+    try { child = await discoverMailDomainOperation(operation, intent, runtime); }
+    catch (error) {
+      if (Number(error?.status) === 409) {
+        return publicOperation(await blockControlPlaneStep(operation, step, error));
+      }
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    if (child?.status === 'removed') {
+      try {
+        return publicOperation(await completeControlPlaneStep(
+          operation,
+          step,
+          mailRemovalEvidence(operation, intent, child),
+        ));
+      } catch (error) {
+        return publicOperation(await blockControlPlaneStep(operation, step, error));
+      }
+    }
+    if (!allowMutation) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_mail_retry_required',
+        child
+          ? 'Mail Domain child operation requires explicit continuation'
+          : 'Mail Domain child operation was not started before interruption',
+        409,
+      )));
+    }
+    let result;
+    try { result = await continueMailDomainChild(operation, intent, child, runtime); }
+    catch (error) {
+      if (Number(error?.status) === 409) {
+        return publicOperation(await blockControlPlaneStep(operation, step, error));
+      }
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    if (!exactMailRemovalChild(operation, intent, result)) {
+      return publicOperation(await failControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_mail_result_invalid',
+        'Mail Domain child operation result does not match journaled removal intent',
+        503,
+      )));
+    }
+    if (result.status !== 'removed') {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        result.error?.code ?? 'domain_removal_mail_retry_required',
+        result.error?.message ?? 'Mail Domain child operation requires explicit continuation',
+        409,
+      )));
+    }
+    try {
+      return publicOperation(await completeControlPlaneStep(
+        operation,
+        step,
+        mailRemovalEvidence(operation, intent, result),
+      ));
+    } catch (error) {
+      return publicOperation(await blockControlPlaneStep(operation, step, error));
+    }
+  }
+
   async function runWebsiteBinding(operationId, { allowMutation } = {}) {
     const manager = requireDomainRegistry();
     const prepared = await runningStep(await loadOperation(operationId), 'website_binding');
@@ -1250,6 +1584,9 @@ export function createDomainRemovalRuntime({
     }
     if (step.kind === 'certificate') {
       return runCertificate(operation.id, { allowMutation });
+    }
+    if (step.kind === 'mail_domain') {
+      return runMailDomain(operation.id, { allowMutation });
     }
     if (step.kind === 'website_binding') {
       return runWebsiteBinding(operation.id, { allowMutation });
