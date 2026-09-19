@@ -4,6 +4,20 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
+## T-CODEX-SOURCE — 2026-09-19 Mail/Domain removal source kapısı
+
+Bu bölüm bu sohbet ortamında repository checkout/Node runner bulunmadığı için Codex tarafından çalıştırılacak geçici source doğrulama kapısıdır. Test geçince sonuç history kaydına işlenip bu maddeler kaldırılabilir.
+
+- [ ] Node 24 ile yeni Mail Domain removal fazlarının hedefli testlerini çalıştır:
+      node --test apps/api/test/mail-domain-removal-data-phase.test.js apps/api/test/mail-domain-removal-finalize-phase.test.js apps/api/test/mail-domain-removal-phase-router.test.js
+- [ ] Config/cleanup/runtime ve parent orchestration regresyonunu birlikte çalıştır:
+      node --test apps/api/test/mail-domain-removal-config-phase.test.js apps/api/test/mail-domain-removal-cleanup-phase.test.js apps/api/test/mail-domain-removal-runtime.test.js apps/api/test/domain-removal-runtime.test.js
+- [ ] Job idempotency lookup + durable wrapper regresyonunu çalıştır:
+      node --test apps/api/test/job-registry.test.js apps/api/test/durable-job-registry.test.js
+- [ ] Production bootstrap import/syntax kapısı: apps/api/src/index.js, mail-domain-removal-production-runtime.js ve domain-removal-production-runtime.js Node 24 altında yüklenebilsin; duplicate import/name veya startup dependency hatası varsa düzelt.
+- [ ] npm run check çalıştır. Yeni removal/bootstrap commitlerinden kaynaklı herhangi bir failure varsa küçük ayrı commitlerle düzelt; GitHub Actions kullanma.
+- [ ] Hedefli/full source testleri geçince docs/history/domain-removal-mail-data-finalize-bootstrap-2026-09-19.md içine gerçek test sayıları/komutları ekle. Gerçek Ubuntu failure-injection kabulü aşağıdaki T-PROVISIONING/T-MAIL kapılarında ayrıca açık kalsın.
+
 ## T-BASE — P0 güncel güvenlik ve package kapısı
 
 - [ ] Clean install ve önceki paketten upgrade; auth DB/master key, Domain/Website/Application kimlikleri, release'ler, Nginx/certificate, mail/database state'i ve root-owned private izinleri korusun.
