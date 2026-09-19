@@ -165,3 +165,40 @@ test('Roundcube secret rotation invalidates an approved preview', async () => {
   assert.equal(rotated.roundcubeSecretRevision, 2);
   assert.notEqual(rotated.configSha256, prepared.configSha256);
 });
+
+test('Roundcube mapped hostname refuses a normal Website-purpose certificate during materialization', async () => {
+  const fx = await fixture();
+  await fx.service.prepareForServer(SERVER_ID);
+  const mapping = Object.freeze({
+    id: 'mapping-1',
+    mailDomainId: '11111111-1111-4111-8111-111111111111',
+    webDomainId: DOMAIN_ID,
+    serverId: SERVER_ID,
+    hostname: 'webmail.example.com',
+    certificateId: CERT_B,
+    certificateFingerprint256: 'BB:BB',
+    revision: 1,
+    updatedAt: '2026-09-19T00:00:00.000Z',
+  });
+  const service = createRoundcubeConfigurationService({
+    mailServiceIdentityRegistry: fx.identity,
+    roundcubeSecretRegistry: fx.secrets,
+    roundcubeDomainMappingRegistry: {
+      listMappings: async () => [mapping],
+    },
+    certificateRegistry: {
+      getCertificate: async (id) => id === CERT_B
+        ? certificate(CERT_B, { purpose: 'web' })
+        : null,
+    },
+    certificateMaterialManager: {
+      inspectStored: async () => ({ fingerprint256: 'BB:BB' }),
+    },
+  });
+
+  await assert.rejects(
+    service.previewForServer(SERVER_ID),
+    (error) => error instanceof RoundcubeConfigurationError
+      && error.code === 'roundcube_mapping_certificate_drift',
+  );
+});
