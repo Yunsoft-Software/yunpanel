@@ -195,7 +195,7 @@ export function createMailDiscoveryService({
     }
     if (!domain || domain.id !== mailDomain.webDomainId
       || domain.primaryDomain !== hostname
-      || domain.serverId !== mailDomain.serverId
+      || typeof domain.serverId !== 'string' || !domain.serverId
       || typeof domain.websiteId !== 'string' || !domain.websiteId
       || domain.state !== 'active'
       || domain.httpsMode !== 'managed'
