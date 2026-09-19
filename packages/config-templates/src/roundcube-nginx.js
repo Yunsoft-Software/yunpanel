@@ -71,15 +71,17 @@ function serverBlocks({
   privateKeyPath,
   publicRoot,
   fpmSocketPath,
+  includeHttpRedirect = true,
 }) {
-  return `server {
+  const http = includeHttpRedirect ? `server {
   listen 80;
   listen [::]:80;
   server_name ${webHostname};
   return 301 https://${webHostname}$request_uri;
 }
 
-server {
+` : '';
+  return `${http}server {
   listen 443 ssl;
   listen [::]:443 ssl;
   server_name ${webHostname};
@@ -162,6 +164,7 @@ export function renderRoundcubeNginxConfig({
       privateKeyPath: mapping.privateKeyPath,
       publicRoot: root,
       fpmSocketPath: socket,
+      includeHttpRedirect: false,
     })),
   ].join('\n');
 }
