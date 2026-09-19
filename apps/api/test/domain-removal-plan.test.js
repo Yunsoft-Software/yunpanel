@@ -103,7 +103,15 @@ function impact(currentDomain = domain(), overrides = {}) {
     website: { id: currentDomain.websiteId },
     application: { id: 'application-1' },
     managedComposeBinding: null,
-    dnsZones: [{ id: 'external-zone-1' }],
+    dnsZones: [{
+      id: 'external-zone-1',
+      zoneName: currentDomain.primaryDomain,
+      webDomainId: currentDomain.id,
+      managementMode: 'external',
+      status: 'ready',
+      revision: 2,
+      updatedAt: '2026-09-18T20:00:00.000Z',
+    }],
     mailDomains: [mailDomainReference(
       'mail-domain-1',
       currentDomain.id,
@@ -208,6 +216,16 @@ test('pins current resource-impact evidence into a deterministic Domain removal 
   assert.deepEqual(preview.plan.certificateIntents, [
     certificateReference('certificate-1'),
   ]);
+  assert.deepEqual(preview.plan.dnsZoneIds, ['external-zone-1']);
+  assert.deepEqual(preview.plan.dnsZoneIntents, [{
+    id: 'external-zone-1',
+    zoneName: 'example.com',
+    webDomainId: 'domain-1',
+    managementMode: 'external',
+    status: 'ready',
+    revision: 2,
+    updatedAt: '2026-09-18T20:00:00.000Z',
+  }]);
   assert.deepEqual(preview.plan.mailDomainIds, ['mail-domain-1']);
   assert.deepEqual(preview.plan.mailDomainIntents, [mailDomainReference('mail-domain-1')]);
   assert.equal(preview.plan.authoritativeDns.previewDigest, dnsPreviewDigest);
