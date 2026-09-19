@@ -307,6 +307,26 @@ function websiteAliases(preview) {
   return Object.freeze([...new Set(values)]);
 }
 
+function websiteAcmeOnlyHostnames(preview) {
+  const mailDomain = preview.plan?.mailDomain;
+  if (!mailDomain || mailDomain.managementMode !== 'local') return Object.freeze([]);
+  const webmail = preview.plan?.webmail;
+  const primaryDomain = preview.plan?.primaryDomain;
+  const expectedHostname = `webmail.${mailDomain.domainName}`;
+  if (!primaryDomain || mailDomain.webDomainId !== primaryDomain.id
+    || mailDomain.domainName !== primaryDomain.primaryDomain
+    || !webmail || webmail.sharedRoundcube !== true
+    || webmail.certificateCoverageRequired !== true
+    || webmail.hostname !== expectedHostname) {
+    throw new Error('Local webmail ACME routing intent does not match the primary Website Domain');
+  }
+  const routedNames = new Set([primaryDomain.primaryDomain, ...websiteAliases(preview)]);
+  if (routedNames.has(expectedHostname)) {
+    throw new Error('Local webmail hostname must remain outside the Website application route names');
+  }
+  return Object.freeze([expectedHostname]);
+}
+
 export function siteCreateProvisioningPlan(preview) {
   if (!preview || typeof preview !== 'object' || !preview.ids?.websiteId || !preview.operationId || !preview.plan?.website) {
     throw new Error('A valid site-create preview is required');
@@ -420,10 +440,12 @@ export function siteCreateProvisioningPlan(preview) {
   }
 
   const aliases = websiteAliases(preview);
+  const acmeOnlyHostnames = websiteAcmeOnlyHostnames(preview);
   steps.push(hostStep('nginx', 'nginx', {
     websiteId: preview.ids.websiteId,
     primaryDomain: preview.plan.primaryDomain?.primaryDomain,
     aliases,
+    ...(acmeOnlyHostnames.length > 0 ? { acmeOnlyHostnames } : {}),
     targetType: runtimeType === 'node' ? 'passenger' : runtimeType === 'php' ? 'php' : preview.plan.primaryDomain?.targetType,
     target: runtimeType === 'node' || runtimeType === 'php' ? runtimeIntent : preview.plan.primaryDomain?.target,
   }));
@@ -503,4 +525,5 @@ export const siteCreateProvisioningInternals = Object.freeze({
   databaseIntent,
   staticIntent,
   websiteAliases,
+  websiteAcmeOnlyHostnames,
 });
