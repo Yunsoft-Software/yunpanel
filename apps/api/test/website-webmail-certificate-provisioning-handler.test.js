@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createWebsiteWebmailCertificateProvisioningHandler,
   WebsiteWebmailCertificateProvisioningError,
@@ -82,7 +83,7 @@ function successfulJob() {
   return {
     id: jobId,
     serverId,
-    operation: 'SSL_ISSUE',
+    operation: OPERATIONS.SSL_ISSUE,
     resourceType: 'certificate',
     resourceId: webmailCertificateId,
     status: 'succeeded',
