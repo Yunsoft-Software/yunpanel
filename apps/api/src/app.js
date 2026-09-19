@@ -56,6 +56,10 @@ import {
   WebsiteSuspensionHttpError,
   mountWebsiteSuspensionRoutes,
 } from './website-suspension-http.js';
+import {
+  DomainRemovalHttpError,
+  mountDomainRemovalRoutes,
+} from './domain-removal-http.js';
 import { mountDockerWorkloadRoutes } from './docker-workload-http.js';
 import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from './docker-workload-registry.js';
 import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
@@ -263,6 +267,7 @@ export function createApp({
   websiteProvisioningRuntime = null,
   websiteSftpKeyService = null,
   domainSuspensionRuntime = null,
+  domainRemovalRuntime = null,
   websiteSuspensionRuntime = null,
   websiteCronImpactProvider = null,
   ...options
@@ -445,6 +450,9 @@ export function createApp({
   }
   if (websiteSuspensionRuntime) {
     mountWebsiteSuspensionRoutes(app, { runtime: websiteSuspensionRuntime });
+  }
+  if (domainRemovalRuntime) {
+    mountDomainRemovalRoutes(app, { runtime: domainRemovalRuntime });
   }
   if (websiteProvisioningRuntime) {
     if (typeof websiteProvisioningRuntime.configureDomainControlPlane !== 'function') {

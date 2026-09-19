@@ -854,6 +854,7 @@ const listener = createAuthenticatedApi({
       nginxLogReader,
       jobLogStore,
       websiteSuspensionRuntime,
+      domainRemovalRuntime,
       websiteCronImpactProvider,
       localServerId,
       terminalCapabilityRegistry,
