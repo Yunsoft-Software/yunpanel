@@ -103,6 +103,8 @@ import { createWebsiteRegistry } from './website-registry.js';
 import { createWebsiteCronRegistry } from './website-cron-registry.js';
 import { createWebsiteCronImpactProvider } from './website-cron-impact.js';
 import { createWebsiteSftpKeyRuntime } from './website-sftp-key-runtime.js';
+import { createWebsiteSuspensionOperationRegistry } from './website-suspension-operation-registry.js';
+import { createWebsiteSuspensionRuntime } from './website-suspension-runtime.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10);
@@ -111,6 +113,8 @@ const controlPlaneStateRoot = path.dirname(serverStorePath);
 const domainStorePath = process.env.YUNPANEL_DOMAIN_STORE ?? path.resolve('.data/domain-registry.json');
 const domainSuspensionOperationStorePath = process.env.YUNPANEL_DOMAIN_SUSPENSION_OPERATION_STORE
   ?? path.join(controlPlaneStateRoot, 'domain-suspension-operations.json');
+const websiteSuspensionOperationStorePath = process.env.YUNPANEL_WEBSITE_SUSPENSION_OPERATION_STORE
+  ?? path.join(controlPlaneStateRoot, 'website-suspension-operations.json');
 const domainRemovalOperationStorePath = process.env.YUNPANEL_DOMAIN_REMOVAL_OPERATION_STORE
   ?? path.join(controlPlaneStateRoot, 'domain-removal-operations.json');
 const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-registry.json');
@@ -569,6 +573,17 @@ const domainSuspensionRuntime = localServerId
   })
   : null;
 if (domainSuspensionRuntime) await domainSuspensionRuntime.init();
+const websiteSuspensionRuntime = localServerId && domainSuspensionRuntime
+  ? createWebsiteSuspensionRuntime({
+    registry: createWebsiteSuspensionOperationRegistry({
+      filePath: websiteSuspensionOperationStorePath,
+    }),
+    websiteRegistry,
+    domainRegistry,
+    domainSuspensionRuntime,
+    localServerId,
+  })
+  : null;
 const dnsZoneRetirementService = localServerId && powerDnsSecretRegistry
   ? createDnsZoneRetirementService({
     domainRegistry,
@@ -838,6 +853,7 @@ const listener = createAuthenticatedApi({
       journalLogReader,
       nginxLogReader,
       jobLogStore,
+      websiteSuspensionRuntime,
       websiteCronImpactProvider,
       localServerId,
       terminalCapabilityRegistry,

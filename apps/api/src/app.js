@@ -52,6 +52,10 @@ import {
   DomainSuspensionHttpError,
   mountDomainSuspensionRoutes,
 } from './domain-suspension-http.js';
+import {
+  WebsiteSuspensionHttpError,
+  mountWebsiteSuspensionRoutes,
+} from './website-suspension-http.js';
 import { mountDockerWorkloadRoutes } from './docker-workload-http.js';
 import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from './docker-workload-registry.js';
 import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
@@ -259,6 +263,7 @@ export function createApp({
   websiteProvisioningRuntime = null,
   websiteSftpKeyService = null,
   domainSuspensionRuntime = null,
+  websiteSuspensionRuntime = null,
   websiteCronImpactProvider = null,
   ...options
 } = {}) {
@@ -437,6 +442,9 @@ export function createApp({
   app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry, { localServerId }));
   if (domainSuspensionRuntime) {
     mountDomainSuspensionRoutes(app, { runtime: domainSuspensionRuntime });
+  }
+  if (websiteSuspensionRuntime) {
+    mountWebsiteSuspensionRoutes(app, { runtime: websiteSuspensionRuntime });
   }
   if (websiteProvisioningRuntime) {
     if (typeof websiteProvisioningRuntime.configureDomainControlPlane !== 'function') {
