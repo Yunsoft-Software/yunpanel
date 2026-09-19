@@ -46,6 +46,11 @@ import {
   createDockerComposeProjectRegistryBootstrap,
   createDockerComposeRuntime,
 } from './docker-compose-runtime.js';
+import { createDnsZoneMailIntentResolver } from './dns-zone-mail-intent.js';
+import { createDnsZoneReapplyOperationRegistry } from './dns-zone-reapply-operation-registry.js';
+import { createDnsZoneReapplyRuntime } from './dns-zone-reapply-runtime.js';
+import { createDnsZoneReapplyService } from './dns-zone-reapply.js';
+import { createDnsZoneTemplateRegistry } from './dns-zone-template-registry.js';
 import { createDockerWorkloadRegistry } from './docker-workload-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRegistry } from './job-registry.js';
@@ -128,6 +133,10 @@ const serverDnsIdentityStorePath = process.env.YUNPANEL_SERVER_DNS_IDENTITY_STOR
   ?? path.join(controlPlaneStateRoot, 'server-dns-identity-registry.json');
 const powerDnsSecretStorePath = process.env.YUNPANEL_POWERDNS_SECRET_STORE
   ?? path.join(controlPlaneStateRoot, 'powerdns-secret-registry.json');
+const dnsZoneTemplateStorePath = process.env.YUNPANEL_DNS_ZONE_TEMPLATE_STORE
+  ?? path.join(controlPlaneStateRoot, 'dns-zone-template-registry.json');
+const dnsZoneReapplyOperationStorePath = process.env.YUNPANEL_DNS_ZONE_REAPPLY_OPERATION_STORE
+  ?? path.join(controlPlaneStateRoot, 'dns-zone-reapply-operations.json');
 const dnsZoneRetirementOperationStorePath = process.env.YUNPANEL_DNS_ZONE_RETIREMENT_OPERATION_STORE
   ?? path.join(controlPlaneStateRoot, 'dns-zone-retirement-operations.json');
 const mailDomainStorePath = process.env.YUNPANEL_MAIL_DOMAIN_STORE ?? path.resolve('.data/mail-domain-registry.json');
@@ -299,6 +308,11 @@ const powerDnsSecretRegistry = createPowerDnsSecretRegistry({
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
 });
 await powerDnsSecretRegistry.init();
+const dnsZoneTemplateRegistry = createDnsZoneTemplateRegistry({
+  filePath: dnsZoneTemplateStorePath,
+  serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+});
+await dnsZoneTemplateRegistry.init();
 const powerDnsAuthoritativeService = localServerId
   ? createPowerDnsAuthoritativeService({
     localServerId,
