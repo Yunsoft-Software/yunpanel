@@ -89,6 +89,15 @@ function preview() {
       }],
       boundCertificateId: 'certificate-1',
       dnsZoneIds: ['external-zone-1'],
+      dnsZoneIntents: [{
+        id: 'external-zone-1',
+        zoneName: 'example.com',
+        webDomainId: 'domain-1',
+        managementMode: 'external',
+        status: 'ready',
+        revision: 2,
+        updatedAt: '2026-09-18T20:00:00.000Z',
+      }],
       mailDomainIds: ['mail-domain-1'],
       mailDomainIntents: [{
         id: 'mail-domain-1',
