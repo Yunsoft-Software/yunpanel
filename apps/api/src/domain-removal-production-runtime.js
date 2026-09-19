@@ -126,6 +126,7 @@ export function createDomainRemovalProductionRuntime({
     domainRegistry,
     certificateRegistry,
     dnsZoneRetirementRuntime,
+    dnsHostingRegistry,
     mailDomainRemovalRuntime,
   });
 
