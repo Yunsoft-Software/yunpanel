@@ -281,8 +281,22 @@ export function createWebsiteCertificateProvisioningHandler({
   }
 
   async function currentOwnedCertificate(request, context, domain) {
+    const certificates = await certificateRegistry.listCertificates();
+    const foreignLive = certificates.filter((certificate) => (
+      certificate?.domainId === request.primaryDomainId
+      && certificate.serverId === domain.serverId
+      && certificate.provisioningOperationId !== context.operationId
+      && !['error', 'retired', 'superseded'].includes(certificate.state)
+      && certificate.staging === false
+    ));
+    if (foreignLive.length > 0) {
+      throw new WebsiteCertificateProvisioningError(
+        'website_certificate_operation_conflict',
+        'Website Domain has a live certificate owned by another lifecycle',
+      );
+    }
     const owned = operationCertificates(
-      await certificateRegistry.listCertificates(),
+      certificates,
       request,
       context.operationId,
       domain.serverId,
