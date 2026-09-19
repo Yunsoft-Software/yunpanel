@@ -3,9 +3,12 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid, normalizeDomainSet } from '@yunpanel/shared';
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
+const LEGACY_STORE_VERSION = 1;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const FINGERPRINT_PATTERN = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
+const SAFE_OPERATION_ID = /^[A-Za-z0-9._:@-]{8,160}$/;
+const STATES = new Set(['pending', 'active', 'removing']);
 
 export class RoundcubeDomainMappingRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -38,6 +41,30 @@ function timestamp(value) {
   return value;
 }
 
+function optionalDigest(value, field) {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !SHA256_PATTERN.test(value)) {
+    throw new RoundcubeDomainMappingRegistryError(
+      'roundcube_mapping_state_invalid',
+      'Roundcube Domain mapping ' + field + ' is invalid',
+      409,
+    );
+  }
+  return value;
+}
+
+function optionalReference(value, field) {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !SAFE_OPERATION_ID.test(value)) {
+    throw new RoundcubeDomainMappingRegistryError(
+      'roundcube_mapping_state_invalid',
+      'Roundcube Domain mapping ' + field + ' is invalid',
+      409,
+    );
+  }
+  return value;
+}
+
 function hostnameFor(domainName) {
   let domain;
   try { domain = normalizeDomainSet(domainName, []).primary; }
@@ -59,15 +86,30 @@ function publicMapping(mapping) {
   return Object.freeze({ ...mapping });
 }
 
+function hydrateLegacy(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return {
+    ...value,
+    state: 'active',
+    operationId: null,
+    applyJobId: null,
+    expectedRoundcubePreviewSha256: null,
+    expectedRoundcubeNginxSha256: null,
+  };
+}
+
 function normalizePersisted(value) {
   const fields = new Set([
     'id', 'mailDomainId', 'webDomainId', 'serverId', 'domainName', 'hostname',
-    'certificateId', 'certificateFingerprint256', 'revision', 'createdAt', 'updatedAt',
+    'certificateId', 'certificateFingerprint256', 'revision', 'state',
+    'operationId', 'applyJobId', 'expectedRoundcubePreviewSha256',
+    'expectedRoundcubeNginxSha256', 'createdAt', 'updatedAt',
   ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size
     || Object.keys(value).some((field) => !fields.has(field))
     || !Number.isSafeInteger(value.revision) || value.revision < 1
+    || !STATES.has(value.state)
     || typeof value.certificateFingerprint256 !== 'string'
     || !FINGERPRINT_PATTERN.test(value.certificateFingerprint256)) {
     throw new RoundcubeDomainMappingRegistryError(
@@ -84,6 +126,28 @@ function normalizePersisted(value) {
       409,
     );
   }
+  const operationId = optionalReference(value.operationId, 'operationId');
+  const applyJobId = optionalReference(value.applyJobId, 'applyJobId');
+  const expectedRoundcubePreviewSha256 = optionalDigest(
+    value.expectedRoundcubePreviewSha256,
+    'expectedRoundcubePreviewSha256',
+  );
+  const expectedRoundcubeNginxSha256 = optionalDigest(
+    value.expectedRoundcubeNginxSha256,
+    'expectedRoundcubeNginxSha256',
+  );
+  const inFlight = value.state !== 'active';
+  if (inFlight !== (operationId !== null)
+    || (applyJobId === null) !== (expectedRoundcubePreviewSha256 === null)
+    || (applyJobId === null) !== (expectedRoundcubeNginxSha256 === null)
+    || (value.state === 'active' && (applyJobId !== null
+      || expectedRoundcubePreviewSha256 !== null || expectedRoundcubeNginxSha256 !== null))) {
+    throw new RoundcubeDomainMappingRegistryError(
+      'roundcube_mapping_state_invalid',
+      'Roundcube Domain mapping operation evidence is inconsistent',
+      409,
+    );
+  }
   return Object.freeze({
     id: uuid(value.id, 'roundcubeMappingId'),
     mailDomainId: uuid(value.mailDomainId, 'mailDomainId'),
@@ -94,9 +158,31 @@ function normalizePersisted(value) {
     certificateId: uuid(value.certificateId, 'certificateId'),
     certificateFingerprint256: value.certificateFingerprint256.toUpperCase(),
     revision: value.revision,
+    state: value.state,
+    operationId,
+    applyJobId,
+    expectedRoundcubePreviewSha256,
+    expectedRoundcubeNginxSha256,
     createdAt: timestamp(value.createdAt),
     updatedAt: timestamp(value.updatedAt),
   });
+}
+
+function exactSuccessfulJob(mapping, job) {
+  return Boolean(mapping
+    && mapping.state !== 'active'
+    && mapping.applyJobId !== null
+    && job
+    && job.id === mapping.applyJobId
+    && job.serverId === mapping.serverId
+    && job.operation === 'roundcube.config.apply'
+    && job.resourceType === 'server'
+    && job.resourceId === mapping.serverId
+    && job.status === 'succeeded'
+    && job.result?.previewSha256 === mapping.expectedRoundcubePreviewSha256
+    && job.result?.nginxSha256 === mapping.expectedRoundcubeNginxSha256
+    && job.result?.httpHealthy === true
+    && job.result?.applied === true);
 }
 
 export function createRoundcubeDomainMappingRegistry({
@@ -142,7 +228,7 @@ export function createRoundcubeDomainMappingRegistry({
     state = nextState;
   }
 
-  async function validateRelationships(mappings) {
+  function validateRelationships(mappings) {
     if (new Set(mappings.map((mapping) => mapping.id)).size !== mappings.length
       || new Set(mappings.map((mapping) => mapping.mailDomainId)).size !== mappings.length
       || new Set(mappings.map((mapping) => mapping.webDomainId)).size !== mappings.length
@@ -160,7 +246,8 @@ export function createRoundcubeDomainMappingRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (!parsed || parsed.version !== STORE_VERSION || !Array.isArray(parsed.mappings)
+        if (!parsed || ![LEGACY_STORE_VERSION, STORE_VERSION].includes(parsed.version)
+          || !Array.isArray(parsed.mappings)
           || Object.keys(parsed).length !== 2
           || Object.keys(parsed).some((field) => !['version', 'mappings'].includes(field))) {
           throw new RoundcubeDomainMappingRegistryError(
@@ -169,9 +256,12 @@ export function createRoundcubeDomainMappingRegistry({
             409,
           );
         }
-        const mappings = parsed.mappings.map(normalizePersisted);
-        await validateRelationships(mappings);
+        const mappings = parsed.mappings.map((mapping) => normalizePersisted(
+          parsed.version === LEGACY_STORE_VERSION ? hydrateLegacy(mapping) : mapping,
+        ));
+        validateRelationships(mappings);
         state = { version: STORE_VERSION, mappings };
+        if (parsed.version !== STORE_VERSION) await persist(state);
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
         await persist(state);
@@ -193,7 +283,7 @@ export function createRoundcubeDomainMappingRegistry({
       };
       const result = await operation(next);
       const normalized = next.mappings.map(normalizePersisted);
-      await validateRelationships(normalized);
+      validateRelationships(normalized);
       await persist({ version: STORE_VERSION, mappings: normalized });
       return result;
     });
@@ -214,11 +304,7 @@ export function createRoundcubeDomainMappingRegistry({
       );
     }
     if (!mailDomain || mailDomain.id !== mailDomainId) {
-      throw new RoundcubeDomainMappingRegistryError(
-        'mail_domain_not_found',
-        'Mail Domain was not found',
-        404,
-      );
+      throw new RoundcubeDomainMappingRegistryError('mail_domain_not_found', 'Mail Domain was not found', 404);
     }
     if (mailDomain.managementMode !== 'local' || mailDomain.status !== 'enabled'
       || typeof mailDomain.webDomainId !== 'string') {
@@ -269,9 +355,8 @@ export function createRoundcubeDomainMappingRegistry({
 
     const hostname = hostnameFor(domain.primaryDomain);
     let inspected;
-    try {
-      inspected = await inspectCertificate({ certificate, domains: [hostname] });
-    } catch {
+    try { inspected = await inspectCertificate({ certificate, domains: [hostname] }); }
+    catch {
       throw new RoundcubeDomainMappingRegistryError(
         'roundcube_mapping_certificate_hostname_mismatch',
         'Roundcube mapping certificate does not cover the webmail hostname',
@@ -306,34 +391,48 @@ export function createRoundcubeDomainMappingRegistry({
     await ensureInitialized();
     const candidate = await resolveCandidate(mailDomainId, certificateId);
     const current = state.mappings.find((mapping) => mapping.mailDomainId === candidate.mailDomainId) ?? null;
-    if (current && current.webDomainId === candidate.webDomainId
-      && current.serverId === candidate.serverId
-      && current.hostname === candidate.hostname
-      && current.certificateId === candidate.certificateId
-      && current.certificateFingerprint256 === candidate.certificateFingerprint256) {
+    if (current) {
+      if (current.state !== 'active') {
+        throw new RoundcubeDomainMappingRegistryError(
+          'roundcube_mapping_operation_in_progress',
+          'Roundcube Domain mapping already has an operation in progress',
+          409,
+        );
+      }
+      if (current.webDomainId === candidate.webDomainId
+        && current.serverId === candidate.serverId
+        && current.hostname === candidate.hostname
+        && current.certificateId === candidate.certificateId
+        && current.certificateFingerprint256 === candidate.certificateFingerprint256) {
+        throw new RoundcubeDomainMappingRegistryError(
+          'roundcube_mapping_no_change',
+          'Roundcube Domain mapping is unchanged',
+          409,
+        );
+      }
       throw new RoundcubeDomainMappingRegistryError(
-        'roundcube_mapping_no_change',
-        'Roundcube Domain mapping is unchanged',
+        'roundcube_mapping_rebind_requires_delete',
+        'Delete the current Roundcube Domain mapping before binding another certificate',
         409,
       );
     }
     const identity = Object.freeze({
       version: 1,
       operation: 'roundcube_domain_mapping_bind',
-      currentRevision: current?.revision ?? 0,
-      currentUpdatedAt: current?.updatedAt ?? null,
+      currentRevision: 0,
+      currentUpdatedAt: null,
       ...candidate,
     });
     const previewDigest = digest(identity);
     return Object.freeze({
       ...identity,
       previewDigest,
-      confirmation: 'bind-roundcube-domain:' + candidate.mailDomainId + ':' + identity.currentRevision + ':' + previewDigest,
+      confirmation: 'bind-roundcube-domain:' + candidate.mailDomainId + ':0:' + previewDigest,
       sideEffects: false,
     });
   }
 
-  async function bind({ mailDomainId, certificateId, previewDigest, confirmation } = {}) {
+  async function beginBind({ mailDomainId, certificateId, previewDigest, confirmation } = {}) {
     const preview = await previewBind({ mailDomainId, certificateId });
     if (preview.previewDigest !== previewDigest || preview.confirmation !== confirmation
       || !SHA256_PATTERN.test(String(previewDigest ?? ''))) {
@@ -344,10 +443,7 @@ export function createRoundcubeDomainMappingRegistry({
       );
     }
     return mutate(async (next) => {
-      const currentIndex = next.mappings.findIndex((mapping) => mapping.mailDomainId === preview.mailDomainId);
-      const current = currentIndex < 0 ? null : next.mappings[currentIndex];
-      if ((current?.revision ?? 0) !== preview.currentRevision
-        || (current?.updatedAt ?? null) !== preview.currentUpdatedAt) {
+      if (next.mappings.some((mapping) => mapping.mailDomainId === preview.mailDomainId)) {
         throw new RoundcubeDomainMappingRegistryError(
           'roundcube_mapping_revision_conflict',
           'Roundcube Domain mapping changed after preview',
@@ -356,7 +452,7 @@ export function createRoundcubeDomainMappingRegistry({
       }
       const currentTime = new Date(now()).toISOString();
       const record = normalizePersisted({
-        id: current?.id ?? randomUUID(),
+        id: randomUUID(),
         mailDomainId: preview.mailDomainId,
         webDomainId: preview.webDomainId,
         serverId: preview.serverId,
@@ -364,17 +460,30 @@ export function createRoundcubeDomainMappingRegistry({
         hostname: preview.hostname,
         certificateId: preview.certificateId,
         certificateFingerprint256: preview.certificateFingerprint256,
-        revision: (current?.revision ?? 0) + 1,
-        createdAt: current?.createdAt ?? currentTime,
+        revision: 1,
+        state: 'pending',
+        operationId: randomUUID(),
+        applyJobId: null,
+        expectedRoundcubePreviewSha256: null,
+        expectedRoundcubeNginxSha256: null,
+        createdAt: currentTime,
         updatedAt: currentTime,
       });
-      if (currentIndex < 0) next.mappings.push(record);
-      else next.mappings[currentIndex] = record;
+      next.mappings.push(record);
       return publicMapping(record);
     });
   }
 
   async function getForMailDomain(mailDomainIdValue) {
+    await ensureInitialized();
+    const mailDomainId = uuid(mailDomainIdValue, 'mailDomainId');
+    const mapping = state.mappings.find((candidate) => (
+      candidate.mailDomainId === mailDomainId && candidate.state === 'active'
+    )) ?? null;
+    return mapping ? publicMapping(mapping) : null;
+  }
+
+  async function getRecordForMailDomain(mailDomainIdValue) {
     await ensureInitialized();
     const mailDomainId = uuid(mailDomainIdValue, 'mailDomainId');
     const mapping = state.mappings.find((candidate) => candidate.mailDomainId === mailDomainId) ?? null;
@@ -385,7 +494,28 @@ export function createRoundcubeDomainMappingRegistry({
     await ensureInitialized();
     const scopedServerId = serverId === null ? null : uuid(serverId, 'serverId');
     return state.mappings
-      .filter((mapping) => scopedServerId === null || mapping.serverId === scopedServerId)
+      .filter((mapping) => mapping.state !== 'removing'
+        && (scopedServerId === null || mapping.serverId === scopedServerId))
+      .sort((left, right) => left.hostname.localeCompare(right.hostname))
+      .map(publicMapping);
+  }
+
+  async function listActiveMappings({ serverId = null } = {}) {
+    await ensureInitialized();
+    const scopedServerId = serverId === null ? null : uuid(serverId, 'serverId');
+    return state.mappings
+      .filter((mapping) => mapping.state === 'active'
+        && (scopedServerId === null || mapping.serverId === scopedServerId))
+      .sort((left, right) => left.hostname.localeCompare(right.hostname))
+      .map(publicMapping);
+  }
+
+  async function listInFlight({ serverId = null } = {}) {
+    await ensureInitialized();
+    const scopedServerId = serverId === null ? null : uuid(serverId, 'serverId');
+    return state.mappings
+      .filter((mapping) => mapping.state !== 'active'
+        && (scopedServerId === null || mapping.serverId === scopedServerId))
       .sort((left, right) => left.hostname.localeCompare(right.hostname))
       .map(publicMapping);
   }
@@ -393,6 +523,14 @@ export function createRoundcubeDomainMappingRegistry({
   async function previewDelete(mailDomainIdValue) {
     const mapping = await getForMailDomain(mailDomainIdValue);
     if (!mapping) {
+      const current = await getRecordForMailDomain(mailDomainIdValue);
+      if (current) {
+        throw new RoundcubeDomainMappingRegistryError(
+          'roundcube_mapping_operation_in_progress',
+          'Roundcube Domain mapping already has an operation in progress',
+          409,
+        );
+      }
       throw new RoundcubeDomainMappingRegistryError(
         'roundcube_mapping_not_found',
         'Roundcube Domain mapping was not found',
@@ -421,7 +559,7 @@ export function createRoundcubeDomainMappingRegistry({
     });
   }
 
-  async function deleteMapping(mailDomainIdValue, { expectedRevision, previewDigest, confirmation } = {}) {
+  async function beginDelete(mailDomainIdValue, { expectedRevision, previewDigest, confirmation } = {}) {
     const preview = await previewDelete(mailDomainIdValue);
     if (expectedRevision !== preview.revision || previewDigest !== preview.previewDigest
       || confirmation !== preview.confirmation) {
@@ -441,36 +579,212 @@ export function createRoundcubeDomainMappingRegistry({
         );
       }
       const current = next.mappings[index];
-      if (current.revision !== preview.revision || current.updatedAt !== preview.updatedAt) {
+      if (current.state !== 'active'
+        || current.revision !== preview.revision || current.updatedAt !== preview.updatedAt) {
         throw new RoundcubeDomainMappingRegistryError(
           'roundcube_mapping_revision_conflict',
           'Roundcube Domain mapping changed after preview',
           409,
         );
       }
-      next.mappings.splice(index, 1);
-      return Object.freeze({
-        id: current.id,
-        mailDomainId: current.mailDomainId,
-        deleted: true,
+      const updatedAt = new Date(now()).toISOString();
+      const removing = normalizePersisted({
+        ...current,
+        revision: current.revision + 1,
+        state: 'removing',
+        operationId: randomUUID(),
+        applyJobId: null,
+        expectedRoundcubePreviewSha256: null,
+        expectedRoundcubeNginxSha256: null,
+        updatedAt,
       });
+      next.mappings[index] = removing;
+      return publicMapping(removing);
+    });
+  }
+
+  async function attachApplyJob(mailDomainIdValue, {
+    operationId,
+    jobId,
+    previewSha256,
+    nginxSha256,
+  } = {}) {
+    const mailDomainId = uuid(mailDomainIdValue, 'mailDomainId');
+    const safeOperationId = optionalReference(operationId, 'operationId');
+    const safeJobId = optionalReference(jobId, 'applyJobId');
+    const safePreviewSha256 = optionalDigest(previewSha256, 'expectedRoundcubePreviewSha256');
+    const safeNginxSha256 = optionalDigest(nginxSha256, 'expectedRoundcubeNginxSha256');
+    if (!safeOperationId || !safeJobId || !safePreviewSha256 || !safeNginxSha256) {
+      throw new RoundcubeDomainMappingRegistryError(
+        'roundcube_mapping_apply_identity_invalid',
+        'Roundcube mapping apply job identity is incomplete',
+        409,
+      );
+    }
+    return mutate(async (next) => {
+      const index = next.mappings.findIndex((mapping) => mapping.mailDomainId === mailDomainId);
+      if (index < 0) {
+        throw new RoundcubeDomainMappingRegistryError(
+          'roundcube_mapping_not_found',
+          'Roundcube Domain mapping was not found',
+          404,
+        );
+      }
+      const current = next.mappings[index];
+      if (current.state === 'active' || current.operationId !== safeOperationId) {
+        throw new RoundcubeDomainMappingRegistryError(
+          'roundcube_mapping_operation_stale',
+          'Roundcube Domain mapping operation is stale',
+          409,
+        );
+      }
+      if (current.applyJobId !== null
+        && (current.applyJobId !== safeJobId
+          || current.expectedRoundcubePreviewSha256 !== safePreviewSha256
+          || current.expectedRoundcubeNginxSha256 !== safeNginxSha256)) {
+        throw new RoundcubeDomainMappingRegistryError(
+          'roundcube_mapping_apply_job_conflict',
+          'Roundcube Domain mapping already references another apply job',
+          409,
+        );
+      }
+      const updated = normalizePersisted({
+        ...current,
+        applyJobId: safeJobId,
+        expectedRoundcubePreviewSha256: safePreviewSha256,
+        expectedRoundcubeNginxSha256: safeNginxSha256,
+        updatedAt: new Date(now()).toISOString(),
+      });
+      next.mappings[index] = updated;
+      return publicMapping(updated);
+    });
+  }
+
+  async function replaceFailedApplyJob(mailDomainIdValue, {
+    operationId,
+    previousJobId,
+    jobId,
+    previewSha256,
+    nginxSha256,
+  } = {}) {
+    const mailDomainId = uuid(mailDomainIdValue, 'mailDomainId');
+    const safeOperationId = optionalReference(operationId, 'operationId');
+    const safePreviousJobId = optionalReference(previousJobId, 'previousJobId');
+    const safeJobId = optionalReference(jobId, 'applyJobId');
+    const safePreviewSha256 = optionalDigest(previewSha256, 'expectedRoundcubePreviewSha256');
+    const safeNginxSha256 = optionalDigest(nginxSha256, 'expectedRoundcubeNginxSha256');
+    if (!safeOperationId || !safePreviousJobId || !safeJobId || !safePreviewSha256 || !safeNginxSha256) {
+      throw new RoundcubeDomainMappingRegistryError(
+        'roundcube_mapping_apply_identity_invalid',
+        'Roundcube mapping retry job identity is incomplete',
+        409,
+      );
+    }
+    return mutate(async (next) => {
+      const index = next.mappings.findIndex((mapping) => mapping.mailDomainId === mailDomainId);
+      if (index < 0) throw new RoundcubeDomainMappingRegistryError('roundcube_mapping_not_found', 'Roundcube Domain mapping was not found', 404);
+      const current = next.mappings[index];
+      if (current.state === 'active' || current.operationId !== safeOperationId
+        || current.applyJobId !== safePreviousJobId) {
+        throw new RoundcubeDomainMappingRegistryError(
+          'roundcube_mapping_operation_stale',
+          'Roundcube Domain mapping retry operation is stale',
+          409,
+        );
+      }
+      const updated = normalizePersisted({
+        ...current,
+        applyJobId: safeJobId,
+        expectedRoundcubePreviewSha256: safePreviewSha256,
+        expectedRoundcubeNginxSha256: safeNginxSha256,
+        updatedAt: new Date(now()).toISOString(),
+      });
+      next.mappings[index] = updated;
+      return publicMapping(updated);
+    });
+  }
+
+  async function completeApply(mailDomainIdValue, { operationId, job } = {}) {
+    const mailDomainId = uuid(mailDomainIdValue, 'mailDomainId');
+    const safeOperationId = optionalReference(operationId, 'operationId');
+    if (!safeOperationId) {
+      throw new RoundcubeDomainMappingRegistryError(
+        'roundcube_mapping_apply_identity_invalid',
+        'Roundcube mapping operation ID is required',
+        409,
+      );
+    }
+    return mutate(async (next) => {
+      const index = next.mappings.findIndex((mapping) => mapping.mailDomainId === mailDomainId);
+      if (index < 0) {
+        throw new RoundcubeDomainMappingRegistryError(
+          'roundcube_mapping_not_found',
+          'Roundcube Domain mapping was not found',
+          404,
+        );
+      }
+      const current = next.mappings[index];
+      if (current.state === 'active' || current.operationId !== safeOperationId) {
+        throw new RoundcubeDomainMappingRegistryError(
+          'roundcube_mapping_operation_stale',
+          'Roundcube Domain mapping completion is stale',
+          409,
+        );
+      }
+      if (!exactSuccessfulJob(current, job)) {
+        throw new RoundcubeDomainMappingRegistryError(
+          'roundcube_mapping_apply_evidence_invalid',
+          'Roundcube apply job does not prove the exact mapping desired state',
+          409,
+        );
+      }
+      if (current.state === 'removing') {
+        next.mappings.splice(index, 1);
+        return Object.freeze({
+          id: current.id,
+          mailDomainId: current.mailDomainId,
+          operationId: current.operationId,
+          deleted: true,
+          applyJobId: current.applyJobId,
+        });
+      }
+      const active = normalizePersisted({
+        ...current,
+        state: 'active',
+        operationId: null,
+        applyJobId: null,
+        expectedRoundcubePreviewSha256: null,
+        expectedRoundcubeNginxSha256: null,
+        updatedAt: new Date(now()).toISOString(),
+      });
+      next.mappings[index] = active;
+      return publicMapping(active);
     });
   }
 
   return Object.freeze({
     init,
     previewBind,
-    bind,
+    beginBind,
     getForMailDomain,
+    getRecordForMailDomain,
     listMappings,
+    listActiveMappings,
+    listInFlight,
     previewDelete,
-    deleteMapping,
+    beginDelete,
+    attachApplyJob,
+    replaceFailedApplyJob,
+    completeApply,
   });
 }
 
 export const roundcubeDomainMappingRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
+  legacyStoreVersion: LEGACY_STORE_VERSION,
+  states: Object.freeze([...STATES]),
   hostnameFor,
   digest,
   normalizePersisted,
+  exactSuccessfulJob,
 });
