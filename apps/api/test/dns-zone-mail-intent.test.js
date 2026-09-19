@@ -119,11 +119,16 @@ test('mail discovery DNS intent requires exact endpoint readiness evidence', asy
           revision: 6,
           autodiscover: {
             ready: true,
-            hostname: 'autodiscover.example.com',
+            hostname: 'example.com',
             protocol: 'https',
             path: '/autodiscover/autodiscover.xml',
           },
-          autoconfig: null,
+          autoconfig: {
+            ready: true,
+            hostname: 'example.com',
+            protocol: 'https',
+            path: '/mail/config-v1.1.xml',
+          },
         };
       },
     },
@@ -132,11 +137,15 @@ test('mail discovery DNS intent requires exact endpoint readiness evidence', asy
   assert.deepEqual(resolved.intent.discovery, {
     revision: 6,
     autodiscover: {
-      hostname: 'autodiscover.example.com',
+      hostname: 'example.com',
       protocol: 'https',
       path: '/autodiscover/autodiscover.xml',
     },
-    autoconfig: null,
+    autoconfig: {
+      hostname: 'example.com',
+      protocol: 'https',
+      path: '/mail/config-v1.1.xml',
+    },
   });
   assert.equal(resolved.evidence.mailDiscoveryEndpointRevision, 6);
 
