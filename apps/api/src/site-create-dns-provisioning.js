@@ -3,7 +3,7 @@ import { createDnsZoneTemplateRegistry, dnsZoneTemplateInternals } from './dns-z
 import { renderDnsZoneDesiredState } from './dns-zone-desired-state.js';
 import { createServerDnsIdentityRegistry } from './server-dns-identity-registry.js';
 import { SiteCreateError } from './site-create.js';
-import { siteCreateProvisioningPlan as createBaseSiteCreateProvisioningPlan } from './site-create-provisioning-isolation.js';
+import { siteCreateProvisioningPlan as createBaseSiteCreateProvisioningPlan } from './site-create-mail-provisioning.js';
 import { createWebsiteProvisioningPlan } from './website-provisioning-plan.js';
 
 function stateRoot(env) {
