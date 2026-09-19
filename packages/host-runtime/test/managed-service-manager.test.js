@@ -94,6 +94,57 @@ test('failed mail configuration checks produce bounded health without leaking co
   assert.doesNotMatch(JSON.stringify(result), /private|hidden/);
 });
 
+
+
+test('managed Postfix and Dovecot installs include SQLite lookup packages and bind only the mail-auth group before service start', async () => {
+  for (const serviceId of ['postfix', 'dovecot']) {
+    const calls = [];
+    const installed = new Set();
+    let active = false;
+    const manager = createManagedServiceManager({
+      run: async (file, args) => {
+        calls.push([file, args]);
+        if (file === '/usr/bin/dpkg-query') {
+          const packageName = args.at(-1);
+          if (!installed.has(packageName)) throw new Error('not installed');
+          return { stdout: 'install ok installed\t1.0' };
+        }
+        if (file === '/usr/bin/apt-get' && args[0] === 'install') {
+          for (const packageName of args.slice(3)) installed.add(packageName);
+          return { stdout: '' };
+        }
+        if (file === '/usr/bin/apt-get') return { stdout: '' };
+        if (file === '/usr/sbin/adduser') return { stdout: '' };
+        if (file === '/usr/bin/systemctl' && args[0] === 'enable') {
+          active = true;
+          return { stdout: '' };
+        }
+        if (file === '/usr/bin/systemctl') return { stdout: active ? ACTIVE_UNIT : INACTIVE_UNIT };
+        if (file === '/usr/sbin/postfix' || file === '/usr/bin/doveconf') return { stdout: '' };
+        throw new Error('unexpected command');
+      },
+    });
+
+    const result = await manager.install(serviceId);
+    assert.equal(result.installed, true);
+    const packageNames = result.packages.map((entry) => entry.packageName);
+    assert.equal(packageNames.includes('sqlite3'), true);
+    assert.equal(
+      packageNames.includes(serviceId === 'postfix' ? 'postfix-sqlite' : 'dovecot-sqlite'),
+      true,
+    );
+    const membership = calls.find(([file]) => file === '/usr/sbin/adduser');
+    assert.deepEqual(membership, [
+      '/usr/sbin/adduser',
+      [serviceId === 'postfix' ? 'postfix' : 'dovecot', 'yunpanel-mailauth'],
+    ]);
+    const membershipIndex = calls.indexOf(membership);
+    const enableIndex = calls.findIndex(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'enable');
+    assert.ok(membershipIndex >= 0 && enableIndex > membershipIndex);
+    assert.equal(calls.some(([file, args]) => file === '/usr/sbin/adduser' && args[1] === 'vmail'), false);
+  }
+});
+
 test('Roundcube install includes SQLite backend and PHP-FPM while remaining distinct from service control', async () => {
   const calls = [];
   const installed = new Set();
