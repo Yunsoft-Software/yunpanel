@@ -75,6 +75,7 @@ import { startPhpMyAdminHandoffSocket } from './phpmyadmin-handoff-socket.js';
 import { createPowerDnsSecretRegistry } from './powerdns-secret-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createRoundcubeConfigurationService } from './roundcube-configuration.js';
+import { createRoundcubeDomainMappingRegistry } from './roundcube-domain-mapping-registry.js';
 import { createRoundcubeSecretRegistry } from './roundcube-secret-registry.js';
 import { createServerDnsIdentityRegistry } from './server-dns-identity-registry.js';
 import { createServerRegistry } from './server-registry.js';
@@ -139,6 +140,8 @@ const mailSrsSecretStorePath = process.env.YUNPANEL_MAIL_SRS_SECRET_STORE
   ?? path.resolve('.data/mail-srs-secret-registry.json');
 const roundcubeSecretStorePath = process.env.YUNPANEL_ROUNDCUBE_SECRET_STORE
   ?? path.resolve('.data/roundcube-secret-registry.json');
+const roundcubeDomainMappingStorePath = process.env.YUNPANEL_ROUNDCUBE_DOMAIN_MAPPING_STORE
+  ?? path.join(controlPlaneStateRoot, 'roundcube-domain-mapping-registry.json');
 const mailboxStorePath = process.env.YUNPANEL_MAILBOX_STORE ?? path.resolve('.data/mailbox-registry.json');
 const mailboxQuotaStorePath = process.env.YUNPANEL_MAILBOX_QUOTA_STORE ?? path.resolve('.data/mailbox-quota-registry.json');
 const mailboxForwardingStorePath = process.env.YUNPANEL_MAILBOX_FORWARDING_STORE ?? path.resolve('.data/mailbox-forwarding-registry.json');
@@ -323,15 +326,26 @@ const roundcubeSecretRegistry = createRoundcubeSecretRegistry({
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
 });
 await roundcubeSecretRegistry.init();
-const roundcubeConfigurationService = createRoundcubeConfigurationService({
-  mailServiceIdentityRegistry,
-  roundcubeSecretRegistry,
-});
 const mailDomainRegistry = createMailDomainRegistry({
   filePath: mailDomainStorePath,
   getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
 });
 await mailDomainRegistry.init();
+const roundcubeDomainMappingRegistry = createRoundcubeDomainMappingRegistry({
+  filePath: roundcubeDomainMappingStorePath,
+  getMailDomain: (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
+  getDomain: (domainId) => domainRegistry.getDomain(domainId),
+  getCertificate: (certificateId) => certificateRegistry.getCertificate(certificateId),
+  inspectCertificate: (input) => certificateMaterialManager.inspectStored(input),
+});
+await roundcubeDomainMappingRegistry.init();
+const roundcubeConfigurationService = createRoundcubeConfigurationService({
+  mailServiceIdentityRegistry,
+  roundcubeSecretRegistry,
+  roundcubeDomainMappingRegistry,
+  certificateRegistry,
+  certificateMaterialManager,
+});
 const mailDkimRegistry = createMailDkimRegistry({
   keyRoot: mailDkimRootPath,
   getMailDomain: (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
@@ -752,6 +766,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] mail service identity store=${mailServiceIdentityStorePath}`);
   console.log(`[yunpanel-api] mail SRS secret store=${mailSrsSecretStorePath}`);
   console.log(`[yunpanel-api] Roundcube secret store=${roundcubeSecretStorePath}`);
+  console.log(`[yunpanel-api] Roundcube Domain mapping store=${roundcubeDomainMappingStorePath}`);
   console.log(`[yunpanel-api] mailbox store=${mailboxStorePath}`);
   console.log(`[yunpanel-api] mailbox quota store=${mailboxQuotaStorePath}`);
   console.log(`[yunpanel-api] mailbox forwarding store=${mailboxForwardingStorePath}`);
