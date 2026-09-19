@@ -22,6 +22,7 @@ import { createWebsiteProvisioningRegistry } from './website-provisioning-regist
 import { createWebsiteRoundcubeProvisioningHandler } from './website-roundcube-provisioning-handler.js';
 import { createWebsiteSftpKeyAwareProvisioningHandler } from './website-sftp-provisioning-handler.js';
 import { createWebsiteTlsProvisioningHandler } from './website-tls-provisioning-handler.js';
+import { createWebsiteWebmailCertificateProvisioningHandler } from './website-webmail-certificate-provisioning-handler.js';
 
 function configuredLocalServerId(value = process.env.YUNPANEL_LOCAL_SERVER_ID) {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
@@ -120,6 +121,7 @@ export function createWebsiteProvisioningRuntime({
   let passengerControlPlane = null;
   let sftpKeyLifecycle = null;
   let certificateControlPlane = null;
+  let webmailCertificateControlPlane = null;
   let databaseControlPlane = null;
   let mailControlPlane = null;
   let mailDkimControlPlane = null;
@@ -363,6 +365,55 @@ export function createWebsiteProvisioningRuntime({
     return Object.freeze({ configured: true });
   }
 
+  function configureWebmailCertificateControlPlane(dependencies = {}) {
+    const {
+      jobRegistry: nextJobRegistry,
+      certificateRegistry: nextCertificateRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailDomainRegistry: nextMailDomainRegistry,
+      acmeEmail: nextAcmeEmail = null,
+      waitForTerminalJob: nextWaitForTerminalJob,
+      waitForActive: nextWaitForActive,
+    } = dependencies;
+    if (!nextJobRegistry || !nextCertificateRegistry || !nextDomainRegistry || !nextMailDomainRegistry) {
+      throw new Error('Website webmail certificate provisioning dependencies are required');
+    }
+    if (!handlers.certificate) {
+      throw new Error('Website certificate provisioning must be configured before webmail certificate provisioning');
+    }
+    if (webmailCertificateControlPlane) {
+      if (webmailCertificateControlPlane.jobRegistry !== nextJobRegistry
+        || webmailCertificateControlPlane.certificateRegistry !== nextCertificateRegistry
+        || webmailCertificateControlPlane.domainRegistry !== nextDomainRegistry
+        || webmailCertificateControlPlane.mailDomainRegistry !== nextMailDomainRegistry
+        || webmailCertificateControlPlane.acmeEmail !== nextAcmeEmail
+        || webmailCertificateControlPlane.waitForTerminalJob !== nextWaitForTerminalJob
+        || webmailCertificateControlPlane.waitForActive !== nextWaitForActive) {
+        throw new Error('Website webmail certificate provisioning dependencies cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.webmail_certificate = createWebsiteWebmailCertificateProvisioningHandler({
+      jobRegistry: nextJobRegistry,
+      certificateRegistry: nextCertificateRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailDomainRegistry: nextMailDomainRegistry,
+      acmeEmail: nextAcmeEmail,
+      ...(nextWaitForTerminalJob ? { waitForTerminalJob: nextWaitForTerminalJob } : {}),
+      ...(nextWaitForActive ? { waitForActive: nextWaitForActive } : {}),
+    });
+    webmailCertificateControlPlane = Object.freeze({
+      jobRegistry: nextJobRegistry,
+      certificateRegistry: nextCertificateRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailDomainRegistry: nextMailDomainRegistry,
+      acmeEmail: nextAcmeEmail,
+      waitForTerminalJob: nextWaitForTerminalJob,
+      waitForActive: nextWaitForActive,
+    });
+    return Object.freeze({ configured: true });
+  }
+
   function configureDatabaseControlPlane(dependencies = {}) {
     const {
       jobRegistry: nextJobRegistry,
@@ -529,8 +580,8 @@ export function createWebsiteProvisioningRuntime({
       || !nextMappingService || !nextEndpointResolver || !nextJobRegistry) {
       throw new Error('Website Roundcube provisioning dependencies are required');
     }
-    if (!handlers.certificate) {
-      throw new Error('Website certificate provisioning must be configured before Roundcube provisioning');
+    if (!handlers.webmail_certificate) {
+      throw new Error('Website webmail certificate provisioning must be configured before Roundcube provisioning');
     }
     if (roundcubeControlPlane) {
       if (roundcubeControlPlane.mailDomainRegistry !== nextMailDomainRegistry
@@ -639,6 +690,7 @@ export function createWebsiteProvisioningRuntime({
     configurePassengerEnvironment,
     configurePassengerControlPlane,
     configureCertificateControlPlane,
+    configureWebmailCertificateControlPlane,
     configureDatabaseControlPlane,
     configureMailControlPlane,
     configureMailDkimControlPlane,
