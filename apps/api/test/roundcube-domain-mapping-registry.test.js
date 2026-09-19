@@ -187,8 +187,12 @@ test('delete hides mapping from desired/DNS state until exact Roundcube apply pr
     operationId: removing.operationId,
     job: successfulJob(attached, 'roundcube-job-2'),
   });
-  assert.equal(deleted.deleted, true);
-  assert.equal(await registry.getRecordForMailDomain(mailDomainId), null);
+  assert.equal(deleted.state, 'removed');
+  assert.equal(deleted.operationId, removing.operationId);
+  assert.equal(deleted.applyJobId, 'roundcube-job-2');
+  assert.deepEqual(await registry.getRecordForMailDomain(mailDomainId), deleted);
+  assert.equal(await registry.getForMailDomain(mailDomainId), null);
+  assert.equal((await registry.listMappings({ serverId })).length, 0);
 });
 
 test('failed apply can be replaced only by the exact in-flight operation', async () => {
