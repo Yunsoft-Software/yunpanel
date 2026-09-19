@@ -36,6 +36,7 @@ Son Domain removal External DNS metadata lifecycle ilerlemesi: `docs/history/dom
 Son Domain/Website removal backup impact ilerlemesi: `docs/history/domain-removal-backup-impact-progress-2026-09-19.md`.
 Son SQL-backed virtual-mail cutover ilerlemesi: `docs/history/mail-sql-virtual-mail-progress-2026-09-19.md`.
 Son shared Roundcube webmail mapping ilerlemesi: `docs/history/roundcube-webmail-mapping-progress-2026-09-19.md`.
+Son site-create mail intent ilerlemesi: `docs/history/site-create-mail-intent-progress-2026-09-19.md`.
 Son Passenger/provisioning canlı kabulü: `docs/history/passenger-provisioning-live-acceptance-2026-09-19.md`.
 
 ## 0 — Değiştirilemez ürün kararı
@@ -65,7 +66,7 @@ Kaynakta yeni managed-mail preview/apply yolu SQLite-backed virtual domain/mailb
 
 - [ ] SQL-backed virtual mail domain/mailbox/alias/quota/password-hash modelinin gerçek Ubuntu kabulünü tamamla; source cutover hazırdır, Website user ile mail storage/auth DB identity ayrıdır.
 - [ ] Dedicated `vmail` storage identity + ayrı `yunpanel-mailauth` reader group modelinin package upgrade ve gerçek Maildir ownership kabulünü tamamla; source/package policy hazırdır.
-- [ ] Local mail enable domain oluştursun fakat bilinen/default parola mailbox yaratmasın.
+- [ ] Local mail enable domain oluştursun fakat bilinen/default parola mailbox yaratmasın. Site-create source preflight artık `mail.mode=local` için deterministic Mail Domain ID üretip yalnız `disabled` metadata reserve ediyor; default mailbox/parola üretmiyor. Enable/config/DKIM/DNS transition hâlâ durable provisioning step olarak bağlanacak.
 - [ ] SMTP 25 + submission 587; 465/993 policy; plain auth yalnız TLS altında.
 - [ ] DKIM key lifecycle; private key secret-safe, public key DNS intent.
 - [ ] SPF/DMARC/DKIM desired state'i mail operation evidence'ına bağla.
@@ -100,7 +101,7 @@ Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözl
 ### Preflight
 
 - [ ] FQDN/IDN/duplicate/parent/alias conflict preflight'ini final create flow'da birleştir.
-- [ ] Runtime, local/external DNS, local/external/disabled mail, DB, IPv4/IPv6, certificate ve SFTP intent'lerini tek preview'da göster.
+- [ ] Runtime, local/external DNS, local/external/disabled mail, DB, IPv4/IPv6, certificate ve SFTP intent'lerini tek preview'da göster. Site-create preview artık `mail: none|local|external`, deterministic Mail Domain ID ve local shared-webmail hostname/certificate-coverage intent'ini taşıyor; DNS mode, IP, certificate seçim/issuance ve SFTP ile tek final preflight'ta birleşmesi açık.
 - [ ] Package/service blocker'larını apply öncesi doğrula.
 - [ ] Exact resource preview üret.
 
@@ -109,8 +110,8 @@ Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözl
 - [ ] Website/Application/operation reserve lifecycle'ını finalize et.
 - [ ] Nginx stage/configtest/activate lifecycle'ını full Website create zincirinde finalize et.
 - [ ] DB seçildiyse scoped DB/user/grant step'i bağla.
-- [ ] Local mail domain + DKIM + DNS intent step'ini bağla.
-- [ ] `webmail.<domain>` mapping + shared Roundcube step'ini yeni Website provisioning operation'ına bağla. Mapping/DNS/delete primitive'leri hazır; site-create preflight/input henüz mail mode taşımıyor.
+- [ ] Local mail domain + DKIM + DNS intent step'ini bağla. Deterministic Mail Domain metadata reservation artık site-create flow'da var; local kaynak `disabled` yaratılıyor, external kaynak `unverified` yaratılıyor. Local enable/config apply, DKIM ve DNS desired-state durable apply step'leri açık.
+- [ ] `webmail.<domain>` mapping + shared Roundcube step'ini yeni Website provisioning operation'ına bağla. Mapping/DNS/delete primitive'leri hazır; site-create preflight artık local mail için exact `webmail.<domain>` + shared Roundcube + certificate coverage intent'ini taşıyor. Eksik kısım certificate selection/issuance sonrası durable mapping bind/apply ve DNS re-apply step'lerini provisioning journal'a bağlamak.
 - [ ] Certificate step'ini bağla.
 - [ ] Cross-service health postcondition'larını bağla.
 - [ ] Mandatory resource'lar health-gated olmadan Website `ready` olamasın.
