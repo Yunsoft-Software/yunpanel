@@ -143,6 +143,29 @@ function protocolEvidence(value) {
   return value;
 }
 
+function discoveryEvidence(value, request) {
+  if (!value) return null;
+  if (value.version !== 1
+    || value.mailDomainId !== request.mailDomainId
+    || value.serverId !== request.serverId
+    || value.revision !== request.expectedMailDomainRevision
+    || !value.autodiscover || value.autodiscover.ready !== true
+    || value.autodiscover.hostname !== request.domainName
+    || value.autodiscover.protocol !== 'https'
+    || value.autodiscover.path !== '/autodiscover/autodiscover.xml'
+    || !value.autoconfig || value.autoconfig.ready !== true
+    || value.autoconfig.hostname !== request.domainName
+    || value.autoconfig.protocol !== 'https'
+    || value.autoconfig.path !== '/mail/config-v1.1.xml') {
+    throw new WebsiteMailHealthProvisioningError(
+      'website_mail_health_discovery_evidence_drift',
+      'Current mail discovery endpoint evidence drifted from Website provisioning',
+      503,
+    );
+  }
+  return value;
+}
+
 function endpointEvidence(endpoint, request, expected) {
   if (!endpoint) return null;
   if (endpoint.version !== 1 || endpoint.ready !== true
@@ -163,7 +186,7 @@ function endpointEvidence(endpoint, request, expected) {
   return endpoint;
 }
 
-function completionEvidence(request, source, readiness, protocols, endpoint) {
+function completionEvidence(request, source, readiness, protocols, endpoint, discovery) {
   return Object.freeze({
     satisfied: true,
     adapter: 'local-mail-cross-service-health',
@@ -178,6 +201,10 @@ function completionEvidence(request, source, readiness, protocols, endpoint) {
     roundcubeMappingRevision: endpoint.mappingRevision,
     roundcubePreviewSha256: endpoint.roundcubePreviewSha256,
     roundcubeApplyJobId: endpoint.roundcubeApplyJobId,
+    autodiscoverHostname: discovery.autodiscover.hostname,
+    autodiscoverPath: discovery.autodiscover.path,
+    autoconfigHostname: discovery.autoconfig.hostname,
+    autoconfigPath: discovery.autoconfig.path,
   });
 }
 
@@ -188,13 +215,15 @@ export function createWebsiteMailHealthProvisioningHandler({
   mailReadinessInspector,
   mailProtocolHealthInspector,
   roundcubeWebmailEndpointResolver,
+  mailDiscoveryEndpointResolver,
 } = {}) {
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
     || !domainRegistry || typeof domainRegistry.getDomain !== 'function'
     || !mailConfigurationService || typeof mailConfigurationService.materializeCurrent !== 'function'
     || !mailReadinessInspector || typeof mailReadinessInspector.inspect !== 'function'
     || !mailProtocolHealthInspector || typeof mailProtocolHealthInspector.inspect !== 'function'
-    || !roundcubeWebmailEndpointResolver || typeof roundcubeWebmailEndpointResolver.resolve !== 'function') {
+    || !roundcubeWebmailEndpointResolver || typeof roundcubeWebmailEndpointResolver.resolve !== 'function'
+    || !mailDiscoveryEndpointResolver || typeof mailDiscoveryEndpointResolver.resolve !== 'function') {
     throw new WebsiteMailHealthProvisioningError(
       'website_mail_health_dependencies_invalid',
       'Website local-mail health dependencies are invalid',
@@ -282,7 +311,19 @@ export function createWebsiteMailHealthProvisioningHandler({
         blockers: Object.freeze(['webmail']),
       });
     }
-    return completionEvidence(request, source, readiness, protocols, endpoint);
+
+    const discovery = discoveryEvidence(
+      await mailDiscoveryEndpointResolver.resolve({ mailDomain, domain }),
+      request,
+    );
+    if (!discovery) {
+      return Object.freeze({
+        satisfied: false,
+        reason: 'website_mail_discovery_health_not_ready',
+        blockers: Object.freeze(['autodiscover', 'autoconfig']),
+      });
+    }
+    return completionEvidence(request, source, readiness, protocols, endpoint, discovery);
   }
 
   return Object.freeze({
@@ -296,6 +337,7 @@ export const websiteMailHealthProvisioningInternals = Object.freeze({
   siblingEvidence,
   readinessEvidence,
   protocolEvidence,
+  discoveryEvidence,
   endpointEvidence,
   completionEvidence,
 });
