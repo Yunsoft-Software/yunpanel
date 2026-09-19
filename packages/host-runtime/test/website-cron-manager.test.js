@@ -25,7 +25,7 @@ function regularStat(content) {
   };
 }
 
-function fixture({ serviceActive = true, initial = null } = {}) {
+function fixture({ serviceActive = true, initial = null, directoryEntry = null } = {}) {
   const files = new Map();
   if (initial !== null) {
     files.set(
@@ -53,6 +53,11 @@ function fixture({ serviceActive = true, initial = null } = {}) {
       return regularStat(files.get(filePath));
     },
     readFileFn: async (filePath) => Buffer.from(files.get(filePath)),
+    readdirFn: async () => [...files.keys()].map((filePath) => ({
+      name: filePath.split('/').at(-1),
+      isFile: () => directoryEntry !== 'symlink',
+      isSymbolicLink: () => directoryEntry === 'symlink',
+    })),
     mkdirFn: async (...args) => { calls.push(['mkdir', ...args]); },
     writeFileFn: async (filePath, content) => {
       calls.push(['write', filePath]);
@@ -164,4 +169,41 @@ test('Website cron manager removes only the exact expected managed state', async
     previousSha256: null,
     sideEffects: false,
   });
+});
+
+test('read-only cron inventory enumerates exact managed files and exposes only identity and digests', async () => {
+  const f = fixture();
+  assert.deepEqual(await f.manager.listManagedFiles(), {
+    version: 1, files: [], cronServiceActive: true, sideEffects: false,
+  });
+  const applied = await f.manager.apply(task);
+  f.calls.length = 0;
+  assert.deepEqual(await f.manager.listManagedFiles(), {
+    version: 1,
+    files: [{
+      taskId: task.taskId,
+      fileName: `yunpanel-${task.taskId}.cron`,
+      contentSha256: applied.desiredSha256,
+    }],
+    cronServiceActive: true,
+    sideEffects: false,
+  });
+  assert.deepEqual(f.calls.map((entry) => entry[0]), ['run']);
+});
+
+test('cron inventory refuses foreign, incomplete and symlinked YunPanel entries', async () => {
+  const f = fixture();
+  const target = `${websiteCronManagerInternals.cronDirectory}/yunpanel-${task.taskId}.cron`;
+  f.files.set(target, '* * * * * root echo foreign\n');
+  await assert.rejects(f.manager.listManagedFiles(), { code: 'website_cron_file_conflict' });
+
+  f.files.delete(target);
+  f.files.set(`${target}.tmp`, 'orphaned temp');
+  await assert.rejects(f.manager.listManagedFiles(), { code: 'website_cron_directory_conflict' });
+
+  const symlink = fixture({
+    initial: '# Managed by YunPanel. Manual edits are overwritten.\n',
+    directoryEntry: 'symlink',
+  });
+  await assert.rejects(symlink.manager.listManagedFiles(), { code: 'website_cron_directory_conflict' });
 });

@@ -5,6 +5,7 @@ import {
   lstat,
   mkdir,
   readFile,
+  readdir,
   rename,
   rm,
   writeFile,
@@ -102,6 +103,7 @@ export function createWebsiteCronManager({
   }),
   lstatFn = lstat,
   readFileFn = readFile,
+  readdirFn = readdir,
   mkdirFn = mkdir,
   writeFileFn = writeFile,
   renameFn = rename,
@@ -109,7 +111,7 @@ export function createWebsiteCronManager({
   chmodFn = chmod,
   chownFn = chown,
 } = {}) {
-  if ([run, lstatFn, readFileFn, mkdirFn, writeFileFn, renameFn, rmFn, chmodFn, chownFn]
+  if ([run, lstatFn, readFileFn, readdirFn, mkdirFn, writeFileFn, renameFn, rmFn, chmodFn, chownFn]
     .some((dependency) => typeof dependency !== 'function')) {
     throw new WebsiteCronManagerError(
       'website_cron_dependencies_invalid',
@@ -168,6 +170,56 @@ export function createWebsiteCronManager({
       currentSha256: current?.contentSha256 ?? null,
       cronServiceActive: serviceActive,
       ready: current?.contentSha256 === desired.contentSha256 && serviceActive,
+      sideEffects: false,
+    });
+  }
+
+  async function listManagedFiles() {
+    let directoryEntries;
+    try { directoryEntries = await readdirFn(CRON_DIRECTORY, { withFileTypes: true }); }
+    catch {
+      throw new WebsiteCronManagerError(
+        'website_cron_directory_unavailable',
+        'Cron task directory could not be inspected',
+      );
+    }
+    if (!Array.isArray(directoryEntries) || directoryEntries.length > 5000) {
+      throw new WebsiteCronManagerError(
+        'website_cron_directory_invalid',
+        'Cron task directory inventory is invalid',
+        409,
+      );
+    }
+    const files = [];
+    for (const entry of directoryEntries) {
+      if (typeof entry?.name !== 'string' || typeof entry.isFile !== 'function'
+        || typeof entry.isSymbolicLink !== 'function') {
+        throw new WebsiteCronManagerError(
+          'website_cron_directory_invalid',
+          'Cron task directory inventory is invalid',
+          409,
+        );
+      }
+      if (!entry.name.startsWith('yunpanel-')) continue;
+      const taskId = /^yunpanel-([0-9a-f-]+)\.cron$/u.exec(entry.name)?.[1];
+      let canonical = false;
+      try { canonical = taskId !== undefined && cronTaskFileName(taskId) === entry.name; }
+      catch { /* A malformed managed prefix cannot be treated as an unrelated cron file. */ }
+      if (!canonical || !entry.isFile?.() || entry.isSymbolicLink?.()) {
+        throw new WebsiteCronManagerError(
+          'website_cron_directory_conflict',
+          'Cron task directory contains an unsafe YunPanel entry',
+          409,
+        );
+      }
+      const file = await readManagedFile(path.posix.join(CRON_DIRECTORY, entry.name), { allowMissing: false });
+      files.push(Object.freeze({ taskId, fileName: entry.name, contentSha256: file.contentSha256 }));
+    }
+    files.sort((left, right) => left.taskId.localeCompare(right.taskId));
+    return Object.freeze({
+      version: 1,
+      files: Object.freeze(files),
+      cronServiceActive: await cronServiceActive(),
       sideEffects: false,
     });
   }
@@ -274,7 +326,7 @@ export function createWebsiteCronManager({
     }
   }
 
-  return Object.freeze({ inspect, apply, remove });
+  return Object.freeze({ inspect, listManagedFiles, apply, remove });
 }
 
 export const websiteCronManagerInternals = Object.freeze({
