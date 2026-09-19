@@ -155,7 +155,6 @@ test('unbound Domain keeps its persisted target', async () => {
     target: current.target,
   });
 });
-
 test('non-Compose Website keeps its persisted Domain target', async () => {
   const current = domain();
   const result = await resolveWebsiteDomainTarget({
@@ -386,4 +385,3 @@ test('Static runtime binding rejects mismatched Domain targetType', async () => 
       && error.status === 409,
   );
 });
-
