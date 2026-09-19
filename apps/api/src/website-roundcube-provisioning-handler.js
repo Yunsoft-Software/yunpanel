@@ -46,14 +46,14 @@ function requestIntent(value, websiteId) {
 }
 
 function certificateEvidence(operation) {
-  const step = operation?.steps?.find((candidate) => candidate.id === 'certificate');
+  const step = operation?.steps?.find((candidate) => candidate.id === 'webmail_certificate');
   const value = step?.state === 'succeeded' ? step.evidence : null;
-  if (!value || value.satisfied !== true || value.adapter !== 'acme-certificate'
+  if (!value || value.satisfied !== true || value.adapter !== 'acme-webmail-certificate'
     || !UUID_PATTERN.test(value.certificateId ?? '')
     || value.provisioningOperationId !== operation.operationId) {
     throw new WebsiteRoundcubeProvisioningError(
       'website_roundcube_certificate_evidence_missing',
-      'Website Roundcube provisioning requires the operation-owned certificate evidence',
+      'Website Roundcube provisioning requires the operation-owned webmail certificate evidence',
       503,
     );
   }
