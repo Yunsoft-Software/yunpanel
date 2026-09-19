@@ -1,5 +1,6 @@
 import { createWebsiteIdentityPathManager } from '@yunpanel/host-runtime';
 import { createWebsiteDnsZoneProvisioningHandler } from './website-dns-zone-provisioning-handler.js';
+import { createWebsiteCertificateProvisioningHandler } from './website-certificate-provisioning-handler.js';
 import { createWebsiteDatabaseProvisioningHandler } from './website-database-provisioning-handler.js';
 import { createWebsiteDomainActivationProvisioningHandler } from './website-domain-activation-provisioning-handler.js';
 import { createWebsiteMailProvisioningHandler } from './website-mail-provisioning-handler.js';
@@ -116,6 +117,7 @@ export function createWebsiteProvisioningRuntime({
   let passengerEnvironment = null;
   let passengerControlPlane = null;
   let sftpKeyLifecycle = null;
+  let certificateControlPlane = null;
   let databaseControlPlane = null;
   let mailControlPlane = null;
   let mailDkimControlPlane = null;
@@ -307,6 +309,48 @@ export function createWebsiteProvisioningRuntime({
       websiteRegistry: nextWebsiteRegistry,
       domainRegistry: nextDomainRegistry,
       runtimeBindingRegistry: nextRuntimeBindingRegistry,
+    });
+    return Object.freeze({ configured: true });
+  }
+
+  function configureCertificateControlPlane(dependencies = {}) {
+    const {
+      jobRegistry: nextJobRegistry,
+      certificateRegistry: nextCertificateRegistry,
+      domainRegistry: nextDomainRegistry,
+      acmeEmail: nextAcmeEmail = null,
+      waitForTerminalJob: nextWaitForTerminalJob,
+      waitForAttachment: nextWaitForAttachment,
+    } = dependencies;
+    if (!nextJobRegistry || !nextCertificateRegistry || !nextDomainRegistry) {
+      throw new Error('Website certificate provisioning dependencies are required');
+    }
+    if (certificateControlPlane) {
+      if (certificateControlPlane.jobRegistry !== nextJobRegistry
+        || certificateControlPlane.certificateRegistry !== nextCertificateRegistry
+        || certificateControlPlane.domainRegistry !== nextDomainRegistry
+        || certificateControlPlane.acmeEmail !== nextAcmeEmail
+        || certificateControlPlane.waitForTerminalJob !== nextWaitForTerminalJob
+        || certificateControlPlane.waitForAttachment !== nextWaitForAttachment) {
+        throw new Error('Website certificate provisioning dependencies cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.certificate = createWebsiteCertificateProvisioningHandler({
+      jobRegistry: nextJobRegistry,
+      certificateRegistry: nextCertificateRegistry,
+      domainRegistry: nextDomainRegistry,
+      acmeEmail: nextAcmeEmail,
+      ...(nextWaitForTerminalJob ? { waitForTerminalJob: nextWaitForTerminalJob } : {}),
+      ...(nextWaitForAttachment ? { waitForAttachment: nextWaitForAttachment } : {}),
+    });
+    certificateControlPlane = Object.freeze({
+      jobRegistry: nextJobRegistry,
+      certificateRegistry: nextCertificateRegistry,
+      domainRegistry: nextDomainRegistry,
+      acmeEmail: nextAcmeEmail,
+      waitForTerminalJob: nextWaitForTerminalJob,
+      waitForAttachment: nextWaitForAttachment,
     });
     return Object.freeze({ configured: true });
   }
@@ -534,6 +578,7 @@ export function createWebsiteProvisioningRuntime({
     configureDomainControlPlane,
     configurePassengerEnvironment,
     configurePassengerControlPlane,
+    configureCertificateControlPlane,
     configureDatabaseControlPlane,
     configureMailControlPlane,
     configureMailDkimControlPlane,
