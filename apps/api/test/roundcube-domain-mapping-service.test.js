@@ -39,6 +39,7 @@ function fixture() {
       domainId: webDomainId,
       serverId,
       state: 'active',
+      purpose: 'webmail',
       staging: false,
       fingerprint256: fingerprint,
       updatedAt: '2026-09-19T15:00:00.000Z',

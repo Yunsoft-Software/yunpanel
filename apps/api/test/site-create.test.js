@@ -433,6 +433,7 @@ test('site creation resumes after an interruption without duplicating earlier re
     websiteReady: true,
     primaryDomainReady: false,
     wwwDomainReady: null,
+    mailDomainReady: null,
   });
   const created = await apply(input, state, preview);
   assert.equal(created.resumed, true);

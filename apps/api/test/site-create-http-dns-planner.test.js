@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { siteCreateProvisioningPlan as dnsAwareSiteCreateProvisioningPlan } from '../src/site-create-dns-provisioning.js';
 import { siteCreateHttpInternals } from '../src/site-create-http.js';
-import { siteCreateProvisioningPlan as isolatedSiteCreateProvisioningPlan } from '../src/site-create-provisioning-isolation.js';
+import { siteCreateProvisioningPlan as mailAwareSiteCreateProvisioningPlan } from '../src/site-create-mail-provisioning.js';
 
 test('site-create HTTP uses the DNS-aware provisioning planner on the local panel host', () => {
   assert.equal(
@@ -11,9 +11,9 @@ test('site-create HTTP uses the DNS-aware provisioning planner on the local pane
   );
 });
 
-test('site-create HTTP keeps the isolation-only planner when no local host scope is configured', () => {
+test('site-create HTTP retains mail intent in the planner without local host scope', () => {
   assert.equal(
     siteCreateHttpInternals.provisioningPlanner({ localServerId: null }),
-    isolatedSiteCreateProvisioningPlan,
+    mailAwareSiteCreateProvisioningPlan,
   );
 });

@@ -120,7 +120,7 @@ test('local mail config, DKIM key, and signing config become required after cert
     websiteId,
     primaryDomainId: domainId,
     primaryDomain: 'example.com',
-    aliases: ['www.example.com'],
+    aliases: [],
   });
 
   assert.equal(config.kind, 'mail_config');

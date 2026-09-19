@@ -262,6 +262,6 @@ test('Website mail intent fails closed on Website or Web Domain ownership drift'
   await assert.rejects(
     f.handler.apply({ ...f.context, intent: intent({ webDomainId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }) }),
     (error) => error instanceof WebsiteMailProvisioningError
-      && error.code === 'website_mail_web_domain_conflict',
+      && error.code === 'website_mail_domain_conflict',
   );
 });

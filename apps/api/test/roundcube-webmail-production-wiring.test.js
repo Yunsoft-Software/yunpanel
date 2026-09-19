@@ -22,7 +22,7 @@ test('production bootstrap persists and shares one Roundcube Domain mapping regi
   assert.match(indexSource, /createRoundcubeConfigurationService\(\{[\s\S]*?roundcubeDomainMappingRegistry,[\s\S]*?certificateRegistry,[\s\S]*?certificateMaterialManager,[\s\S]*?\}\)/);
   assert.match(indexSource, /createRoundcubeDomainMappingService\(\{[\s\S]*?registry: roundcubeDomainMappingRegistry,[\s\S]*?roundcubeConfigurationService,[\s\S]*?jobRegistry,[\s\S]*?\}\)/);
   assert.match(indexSource, /createRoundcubeWebmailEndpointResolver\(\{[\s\S]*?roundcubeDomainMappingRegistry,[\s\S]*?roundcubeConfigurationService,[\s\S]*?jobRegistry,[\s\S]*?\}\)/);
-  assert.match(indexSource, /createApp\(\{[\s\S]*?roundcubeConfigurationService,[\s\S]*?roundcubeDomainMappingRegistry,[\s\S]*?roundcubeDomainMappingService,[\s\S]*?roundcubeWebmailEndpointResolver,[\s\S]*?\}\)/);
+  assert.match(indexSource, /createApp\(\{[\s\S]*?roundcubeWebmailEndpointResolver,[\s\S]*?roundcubeConfigurationService,[\s\S]*?roundcubeDomainMappingRegistry,[\s\S]*?roundcubeDomainMappingService,[\s\S]*?\}\)/);
 
   assert.match(appSource, /roundcubeDomainMappingRegistry = null/);
   assert.match(appSource, /roundcubeDomainMappingService = null/);
@@ -43,7 +43,7 @@ test('PowerDNS mail desired state receives only live shared webmail readiness', 
   assert.match(powerDnsSource, /roundcubeWebmailEndpointResolver = null/);
   assert.match(powerDnsSource, /createDnsZoneMailIntentResolver\(\{[\s\S]*?roundcubeWebmailEndpointResolver,[\s\S]*?\}\)/);
   assert.match(mailIntentSource, /roundcubeWebmailEndpointResolver\.resolve\(\{ mailDomain, domain: scoped \}\)/);
-  assert.match(mailIntentSource, /webmailEnabled: webmail\.intent !== null/);
+  assert.match(mailIntentSource, /webmailEnabled: true,[\s\S]*?webmailReady: webmail\.intent !== null/);
   assert.match(mailIntentSource, /roundcubeWebmailMappingRevision/);
   assert.match(mailIntentSource, /roundcubeWebmailPreviewSha256/);
 });

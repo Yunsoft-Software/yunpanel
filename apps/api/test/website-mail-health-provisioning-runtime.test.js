@@ -37,7 +37,10 @@ test('Website provisioning runtime wires local mail health only after mail, DKIM
     async previewTransition() { return null; },
     async materializeCurrent() { return null; },
   };
-  const mailDkimRegistry = { async getKey() { return null; } };
+  const mailDkimRegistry = {
+    async getKey() { return null; },
+    async createKey() { return null; },
+  };
   const mailDkimConfigurationService = { async previewApply() { return null; } };
   const mappingRegistry = {
     async getForMailDomain() { return null; },
