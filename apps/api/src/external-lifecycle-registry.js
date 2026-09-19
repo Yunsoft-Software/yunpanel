@@ -253,13 +253,28 @@ export function createExternalLifecycleRegistry({
     if (!initialized) await init();
   }
 
-  async function createResource({ name, webDomainId: requestedWebDomainId = null, managementMode } = {}) {
+  async function createResource({
+    resourceId: requestedResourceId = null,
+    name,
+    webDomainId: requestedWebDomainId = null,
+    managementMode,
+  } = {}) {
     await ensureInitialized();
     const normalizedManagementMode = managementModeValue(managementMode);
+    const normalizedResourceId = requestedResourceId === null
+      ? randomUUID()
+      : id(requestedResourceId, prefix);
     const normalizedName = canonicalName(name, prefix);
     const normalizedWebDomainId = webDomainId(requestedWebDomainId, prefix);
     const candidate = { [nameField]: normalizedName, webDomainId: normalizedWebDomainId };
     await validateReference(candidate);
+    if (state[collectionKey].some((resource) => resource.id === normalizedResourceId)) {
+      throw new ExternalLifecycleRegistryError(
+        `${prefix}_id_conflict`,
+        `${resourceType} identity is already tracked`,
+        409,
+      );
+    }
     if (state[collectionKey].some((resource) => resource[nameField] === normalizedName)) {
       throw new ExternalLifecycleRegistryError(`${prefix}_name_conflict`, `${resourceType} name is already tracked`, 409);
     }
@@ -268,7 +283,7 @@ export function createExternalLifecycleRegistry({
     }
     const current = new Date(now()).toISOString();
     const resource = {
-      id: randomUUID(),
+      id: normalizedResourceId,
       [nameField]: normalizedName,
       webDomainId: normalizedWebDomainId,
       managementMode: normalizedManagementMode,
