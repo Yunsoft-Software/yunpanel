@@ -649,7 +649,7 @@ export async function previewSiteCreate({
     }
     mailDomainReady = ensureExact(
       expectedExisting,
-      mailDomainExpected,
+      stableMailDomain(mailDomainExpected),
       'site_create_mail_domain_identity_conflict',
       'Planned Mail Domain identity conflicts with existing state',
       stableMailDomain,
@@ -712,7 +712,13 @@ export async function previewSiteCreate({
     destructive: false,
     autoApply: false,
     complete,
-    resumeRequired: !complete && (applicationReady || websiteReady || primaryReady || wwwReady),
+    resumeRequired: !complete && (
+      applicationReady
+      || websiteReady
+      || primaryReady
+      || wwwReady
+      || (normalized.mail.mode !== 'none' && mailDomainReady)
+    ),
     assignedPort,
     ids,
     source: normalized.source,
@@ -734,7 +740,7 @@ export async function previewSiteCreate({
     lifecycle: Object.freeze({
       dnsPublished: false,
       certificateIssued: false,
-      mailDomainCreated: mailDomainReady,
+      mailDomainCreated: normalized.mail.mode !== 'none' && mailDomainReady,
       webmailMappingActive: false,
       ...(normalized.source.kind === 'existing_docker' ? { containersChanged: false } : {}),
     }),
