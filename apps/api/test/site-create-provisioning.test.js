@@ -206,7 +206,21 @@ test('legacy metadata completeness never makes a new hosted Website provisioning
   assert.equal(authority.intent.websiteId, websiteId);
   assert.deepEqual(authority.intent.domainIds, [domainId]);
   assert.equal(authority.compensation.state, 'pending');
-  assert.equal(plan.steps.find((step) => step.id === 'certificate').state, 'pending');
+  const certificate = plan.steps.find((step) => step.id === 'certificate');
+  const tlsActivation = plan.steps.find((step) => step.id === 'tls_activation');
+  assert.equal(certificate.state, 'pending');
+  assert.equal(certificate.compensation.state, 'pending');
+  assert.equal(tlsActivation.state, 'pending');
+  assert.equal(tlsActivation.kind, 'tls_activation');
+  assert.deepEqual(tlsActivation.intent, {
+    adapter: 'managed-certificate-nginx',
+    websiteId,
+    primaryDomainId: domainId,
+    primaryDomain: 'example.com',
+    aliases: [],
+  });
+  assert.ok(plan.steps.findIndex((step) => step.id === 'certificate')
+    < plan.steps.findIndex((step) => step.id === 'tls_activation'));
 
   const ordered = plan.steps.map((step) => step.id);
   assert.ok(ordered.indexOf('domain_activation') < ordered.indexOf('passenger_health'));
@@ -297,6 +311,7 @@ test('new static Website persists deterministic deployment intent with canonical
   assert.equal(runtime.intent.build.outputDir, '.');
   assert.equal(runtime.compensation.state, 'pending');
   assert.equal(plan.steps.some((step) => step.id === 'certificate'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'tls_activation'), false);
   assert.equal(plan.steps.some((step) => step.id === 'passenger_environment'), false);
   assert.equal(plan.steps.some((step) => step.id === 'passenger_health'), false);
   assert.equal(plan.steps.some((step) => step.id === 'passenger_environment_state'), false);
