@@ -1,19 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import {
+  CronTemplateError,
+  normalizeCronCommand,
+  normalizeCronSchedule,
+} from '@yunpanel/config-templates';
 import { assertUuid } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
 const MAX_TASKS_PER_WEBSITE = 100;
 const HOSTED_RUNTIME_TYPES = new Set(['static', 'node', 'php']);
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
-const FIELD_RANGES = Object.freeze([
-  Object.freeze({ name: 'minute', min: 0, max: 59 }),
-  Object.freeze({ name: 'hour', min: 0, max: 23 }),
-  Object.freeze({ name: 'dayOfMonth', min: 1, max: 31 }),
-  Object.freeze({ name: 'month', min: 1, max: 12 }),
-  Object.freeze({ name: 'dayOfWeek', min: 0, max: 7 }),
-]);
 
 export class WebsiteCronRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -59,55 +57,22 @@ function positiveInteger(value, field = 'expectedRevision') {
   return value;
 }
 
-function boundedNumber(value, range) {
-  if (!/^\d{1,2}$/u.test(value)) return null;
-  const parsed = Number.parseInt(value, 10);
-  return parsed >= range.min && parsed <= range.max ? parsed : null;
-}
-
-function cronAtom(value, range) {
-  const [base, stepText, ...extra] = value.split('/');
-  if (extra.length > 0 || !base) return false;
-  if (stepText !== undefined) {
-    if (!/^\d{1,2}$/u.test(stepText)) return false;
-    const step = Number.parseInt(stepText, 10);
-    if (step < 1 || step > (range.max - range.min + 1)) return false;
+function normalizeTemplateValue(normalize, value) {
+  try { return normalize(value); }
+  catch (error) {
+    if (error instanceof CronTemplateError) {
+      throw new WebsiteCronRegistryError(error.code, error.message);
+    }
+    throw error;
   }
-  if (base === '*') return true;
-  if (base.includes('-')) {
-    const parts = base.split('-');
-    if (parts.length !== 2) return false;
-    const left = boundedNumber(parts[0], range);
-    const right = boundedNumber(parts[1], range);
-    return left !== null && right !== null && left <= right;
-  }
-  return stepText === undefined && boundedNumber(base, range) !== null;
-}
-
-function cronField(value, range) {
-  if (typeof value !== 'string' || value.length < 1 || value.length > 64) return false;
-  const atoms = value.split(',');
-  return atoms.length >= 1 && atoms.length <= 32
-    && atoms.every((atom) => cronAtom(atom, range));
 }
 
 function cronExpression(value) {
-  if (typeof value !== 'string' || value.length > 320 || /[\r\n\u0000]/u.test(value)) {
-    throw new WebsiteCronRegistryError('cron_schedule_invalid', 'schedule must be a five-field cron expression');
-  }
-  const fields = value.trim().split(/\s+/u);
-  if (fields.length !== FIELD_RANGES.length
-    || fields.some((field, index) => !cronField(field, FIELD_RANGES[index]))) {
-    throw new WebsiteCronRegistryError(
-      'cron_schedule_invalid',
-      'schedule must be a valid numeric five-field cron expression',
-    );
-  }
-  return fields.join(' ');
+  return normalizeTemplateValue(normalizeCronSchedule, value);
 }
 
 function command(value) {
-  return printable(value, 'command', 4096);
+  return normalizeTemplateValue(normalizeCronCommand, value);
 }
 
 function taskName(value) {
@@ -441,7 +406,6 @@ export const websiteCronRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
   maxTasksPerWebsite: MAX_TASKS_PER_WEBSITE,
   hostedRuntimeTypes: Object.freeze([...HOSTED_RUNTIME_TYPES]),
-  fieldRanges: FIELD_RANGES,
   cronExpression,
   websiteBinding,
 });
