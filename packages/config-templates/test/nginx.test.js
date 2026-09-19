@@ -159,6 +159,40 @@ test('canonical HTTP aliases stay on HTTP until a certificate is attached', () =
   assert.equal(config.includes('listen 443 ssl;'), false);
 });
 
+test('renders isolated HTTP-01 hosts without exposing the Website application', () => {
+  const config = renderProxySiteConfig({
+    primaryDomain: 'example.com',
+    aliases: ['www.example.com'],
+    acmeOnlyHostnames: ['webmail.example.com'],
+    upstreamPort: 3100,
+    tls: {
+      fullchainPath: '/etc/letsencrypt/live/example.com/fullchain.pem',
+      privateKeyPath: '/etc/letsencrypt/live/example.com/privkey.pem',
+    },
+  });
+
+  const webmailBlock = config.split('server_name webmail.example.com;')[1];
+  assert.ok(webmailBlock);
+  assert.match(webmailBlock, /listen 80;/);
+  assert.match(webmailBlock, /\.well-known\/acme-challenge/);
+  assert.match(webmailBlock, /return 404;/);
+  assert.equal(webmailBlock.includes('listen 443 ssl;'), false);
+  assert.equal(webmailBlock.includes('proxy_pass'), false);
+  assert.equal(config.match(/proxy_pass http:\/\/127\.0\.0\.1:3100;/g)?.length, 1);
+});
+
+test('rejects ACME-only hostnames that overlap Website route names', () => {
+  assert.throws(
+    () => renderProxySiteConfig({
+      primaryDomain: 'example.com',
+      aliases: ['www.example.com'],
+      acmeOnlyHostnames: ['www.example.com'],
+      upstreamPort: 3100,
+    }),
+    (error) => error instanceof NginxTemplateError && error.code === 'invalid_acme_only_hostnames',
+  );
+});
+
 test('rejects non-boolean redirect policy values', () => {
   assert.throws(
     () => renderProxySiteConfig({ primaryDomain: 'api.example.com', upstreamPort: 3100, canonicalRedirect: 'yes' }),
