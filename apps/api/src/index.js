@@ -70,6 +70,9 @@ import { createMailDkimRegistry } from './mail-dkim-registry.js';
 import { createMailDkimRetirementRegistry } from './mail-dkim-retirement-registry.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
 import { createMailDomainRemovalProductionRuntime } from './mail-domain-removal-production-runtime.js';
+import { createMailDiscoveryService } from './mail-discovery-service.js';
+import { startMailDiscoverySocket } from './mail-discovery-socket.js';
+import { createMailDiscoveryEndpointResolver } from './mail-discovery-endpoint-resolver.js';
 import { createMailServiceIdentityRegistry } from './mail-service-identity-registry.js';
 import { createMailSrsConfigurationService } from './mail-srs-configuration.js';
 import { createMailSrsSecretRegistry } from './mail-srs-secret-registry.js';
@@ -202,6 +205,11 @@ function reportPhpMyAdminHandoffFault(error) {
 function reportElFinderHandoffFault(error) {
   const code = typeof error?.code === 'string' ? error.code : 'elfinder_handoff_socket_fault';
   console.error(`[yunpanel-api] elFinder handoff unavailable code=${code}`);
+}
+
+function reportMailDiscoveryFault(error) {
+  const code = typeof error?.code === 'string' ? error.code : 'mail_discovery_socket_fault';
+  console.error(`[yunpanel-api] mail discovery unavailable code=${code}`);
 }
 
 function reportAuditFault(metadata) {
@@ -415,6 +423,26 @@ const mailConfigurationService = createMailConfigurationService({
 });
 const mailReadinessInspector = createMailReadinessInspector();
 const mailProtocolHealthInspector = createMailProtocolHealthInspector();
+const mailDiscoveryService = createMailDiscoveryService({
+  mailDomainRegistry,
+  domainRegistry,
+  mailServiceIdentityRegistry,
+});
+let mailDiscoveryRuntime = null;
+if (localServerId) {
+  try {
+    mailDiscoveryRuntime = await startMailDiscoverySocket({ mailDiscoveryService });
+  } catch (error) {
+    reportMailDiscoveryFault(error);
+  }
+}
+const mailDiscoveryEndpointResolver = mailDiscoveryRuntime
+  ? createMailDiscoveryEndpointResolver({
+    mailDiscoveryService,
+    mailDiscoveryRuntime,
+    websiteProvisioningRegistry: websiteProvisioningRuntime.registry,
+  })
+  : null;
 const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   filePath: applicationEnvironmentStorePath,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
@@ -481,6 +509,7 @@ const dnsZoneReapplyRuntime = localServerId && powerDnsAuthoritativeService
         mailDkimRetirementRegistry,
         mailServiceIdentityRegistry,
         roundcubeWebmailEndpointResolver,
+        ...(mailDiscoveryEndpointResolver ? { discoveryEndpointResolver: mailDiscoveryEndpointResolver } : {}),
       }),
       localServerId,
     }),
@@ -890,6 +919,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] authentication=${authStore.configured() ? 'configured' : 'local setup required'}`);
   console.log(`[yunpanel-api] phpMyAdmin handoff=${phpMyAdminHandoffRuntime ? 'enabled' : 'disabled'}`);
   console.log(`[yunpanel-api] elFinder handoff=${elFinderHandoffRuntime ? 'enabled' : 'disabled'}`);
+  console.log(`[yunpanel-api] mail discovery=${mailDiscoveryRuntime ? 'enabled' : 'disabled'}`);
   console.log('[yunpanel-api] ttyd sessions=enabled on-demand Unix socket');
   console.log(`[yunpanel-api] local execution=${localRuntime ? `enabled server=${localRuntime.serverId} operations=${localRuntime.operations.length}` : 'disabled'}`);
   console.log(`[yunpanel-api] site files=${localServerId ? `enabled server=${localServerId}` : 'disabled'}`);
@@ -908,6 +938,10 @@ async function shutdown(signal) {
   if (elFinderHandoffRuntime) {
     try { await elFinderHandoffRuntime.close(); }
     catch { console.error('[yunpanel-api] elFinder handoff shutdown failed'); }
+  }
+  if (mailDiscoveryRuntime) {
+    try { await mailDiscoveryRuntime.close(); }
+    catch { console.error('[yunpanel-api] mail discovery shutdown failed'); }
   }
   liveSessions.closeAll('server_shutdown');
   ttydSessionManager.closeAll('server_shutdown');
