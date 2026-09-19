@@ -617,6 +617,13 @@ websiteProvisioningRuntime.configureCertificateControlPlane({
   domainRegistry,
   acmeEmail,
 });
+websiteProvisioningRuntime.configureWebmailCertificateControlPlane({
+  jobRegistry,
+  certificateRegistry,
+  domainRegistry,
+  mailDomainRegistry,
+  acmeEmail,
+});
 websiteProvisioningRuntime.configureMailControlPlane({
   jobRegistry,
   mailDomainRegistry,
