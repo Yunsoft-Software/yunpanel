@@ -1,7 +1,7 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createSite, previewSiteCreate, SiteCreateError } from './site-create-isolation-guard.js';
 import { siteCreateProvisioningPlan as dnsAwareSiteCreateProvisioningPlan } from './site-create-dns-provisioning.js';
-import { siteCreateProvisioningPlan as isolatedSiteCreateProvisioningPlan } from './site-create-provisioning-isolation.js';
+import { siteCreateProvisioningPlan as mailAwareSiteCreateProvisioningPlan } from './site-create-mail-provisioning.js';
 
 const PREVIEW_FIELDS = new Set(['input']);
 const APPLY_FIELDS = new Set(['input', 'previewDigest', 'confirmation']);
@@ -45,7 +45,7 @@ function localInput(input, localServerId) {
 function provisioningPlanner(dependencies) {
   return dependencies.localServerId
     ? dnsAwareSiteCreateProvisioningPlan
-    : isolatedSiteCreateProvisioningPlan;
+    : mailAwareSiteCreateProvisioningPlan;
 }
 
 async function previewWithProvisioning({ input, dependencies }) {
