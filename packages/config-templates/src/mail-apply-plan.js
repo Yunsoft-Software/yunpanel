@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { mailSqlTemplatePolicy } from './mail-sql.js';
 import { mailSrsTemplatePolicy } from './mail-srs.js';
 import { mailSubmissionTemplatePolicy } from './mail-submission.js';
 
@@ -78,23 +79,32 @@ function validatorCommand(entry) {
 
 function compileCommand(artifact) {
   const entry = artifact.compile;
-  if (!entry || !Array.isArray(entry.args) || entry.args.length !== 1) {
+  if (!entry || !Array.isArray(entry.args)) {
     throw new MailApplyPlanError('invalid_mail_compile_command', 'Managed mail compile command is not allowlisted');
   }
   if (POSTFIX_MAP_PATHS.has(artifact.path)
     && entry.file === '/usr/sbin/postmap'
+    && entry.args.length === 1
     && entry.args[0] === `hash:${artifact.path}`) {
     return command(entry.file, entry.args);
   }
   if (artifact.path === FORWARDING_SIEVE_PATH
     && entry.file === '/usr/bin/sievec'
+    && entry.args.length === 1
     && entry.args[0] === FORWARDING_SIEVE_PATH) {
+    return command(entry.file, entry.args);
+  }
+  if (artifact.path === mailSqlTemplatePolicy.seedPath
+    && entry.file === '/usr/bin/sqlite3'
+    && entry.args.length === 2
+    && entry.args[0] === mailSqlTemplatePolicy.databasePath
+    && entry.args[1] === '.read ' + mailSqlTemplatePolicy.seedPath) {
     return command(entry.file, entry.args);
   }
   throw new MailApplyPlanError('invalid_mail_compile_command', 'Managed mail compile command is not allowlisted');
 }
 
-function canonicalMasterServices(value) {
+function canonicalMasterServices(value, { sqlEnabled = false } = {}) {
   const expected = mailSubmissionTemplatePolicy.service;
   if (!Array.isArray(value) || value.length !== 1) {
     throw new MailApplyPlanError('invalid_postfix_master_service', 'Managed Postfix master service metadata is incomplete');
@@ -107,7 +117,13 @@ function canonicalMasterServices(value) {
   }
   for (let index = 0; index < expected.parameters.length; index += 1) {
     const actual = service.parameters[index];
-    const wanted = expected.parameters[index];
+    const baseWanted = expected.parameters[index];
+    const wanted = baseWanted.name === 'smtpd_sender_login_maps' && sqlEnabled
+      ? Object.freeze({
+        name: baseWanted.name,
+        value: 'proxy:sqlite:' + mailSqlTemplatePolicy.postfixSenderLoginPath,
+      })
+      : baseWanted;
     if (!actual || actual.name !== wanted.name || actual.value !== wanted.value) {
       throw new MailApplyPlanError('invalid_postfix_master_service', 'Managed Postfix master service override is not allowlisted');
     }
@@ -116,7 +132,12 @@ function canonicalMasterServices(value) {
     service: expected.service,
     type: expected.type,
     definition: expected.definition,
-    parameters: Object.freeze(expected.parameters.map((parameter) => Object.freeze({ ...parameter }))),
+    parameters: Object.freeze(expected.parameters.map((parameter) => Object.freeze({
+      ...parameter,
+      value: parameter.name === 'smtpd_sender_login_maps' && sqlEnabled
+        ? 'proxy:sqlite:' + mailSqlTemplatePolicy.postfixSenderLoginPath
+        : parameter.value,
+    }))),
   })]);
 }
 
@@ -130,6 +151,72 @@ function masterServiceCommands(services) {
     }
   }
   return Object.freeze(commands);
+}
+
+function canonicalSqlState(preview, artifacts, postfixParameters) {
+  const required = preview.requirements.includes('mail_sqlite');
+  if (!required) {
+    if (preview.sql !== undefined) {
+      throw new MailApplyPlanError('invalid_mail_sql_state', 'Inactive managed mail SQL state contains active metadata');
+    }
+    return Object.freeze({ required: false });
+  }
+  const sql = preview.sql;
+  const sqlFields = new Set(['enabled', 'databasePath', 'seedSha256', 'stateSha256', 'lookups']);
+  const lookupFields = new Set(['domains', 'mailboxes', 'aliases', 'senderLogin']);
+  if (!sql || typeof sql !== 'object' || Array.isArray(sql)
+    || Object.keys(sql).length !== sqlFields.size
+    || Object.keys(sql).some((field) => !sqlFields.has(field))
+    || sql.enabled !== true
+    || sql.databasePath !== mailSqlTemplatePolicy.databasePath
+    || typeof sql.seedSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sql.seedSha256)
+    || typeof sql.stateSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sql.stateSha256)
+    || !sql.lookups || typeof sql.lookups !== 'object' || Array.isArray(sql.lookups)
+    || Object.keys(sql.lookups).length !== lookupFields.size
+    || Object.keys(sql.lookups).some((field) => !lookupFields.has(field))) {
+    throw new MailApplyPlanError('invalid_mail_sql_state', 'Managed mail SQL state is incomplete');
+  }
+  const expectedLookups = Object.freeze({
+    domains: 'proxy:sqlite:' + mailSqlTemplatePolicy.postfixDomainPath,
+    mailboxes: 'proxy:sqlite:' + mailSqlTemplatePolicy.postfixMailboxPath,
+    aliases: 'proxy:sqlite:' + mailSqlTemplatePolicy.postfixAliasPath,
+    senderLogin: 'proxy:sqlite:' + mailSqlTemplatePolicy.postfixSenderLoginPath,
+  });
+  if (Object.entries(expectedLookups).some(([key, value]) => sql.lookups[key] !== value)) {
+    throw new MailApplyPlanError('invalid_mail_sql_state', 'Managed mail SQL lookup identity is invalid');
+  }
+  const byPath = new Map(artifacts.map((artifact) => [artifact.path, artifact]));
+  const requiredPaths = [
+    mailSqlTemplatePolicy.seedPath,
+    mailSqlTemplatePolicy.postfixDomainPath,
+    mailSqlTemplatePolicy.postfixMailboxPath,
+    mailSqlTemplatePolicy.postfixAliasPath,
+    mailSqlTemplatePolicy.postfixSenderLoginPath,
+    mailSqlTemplatePolicy.dovecotSqlPath,
+  ];
+  if (requiredPaths.some((artifactPath) => !byPath.has(artifactPath))
+    || byPath.get(mailSqlTemplatePolicy.seedPath)?.sensitive !== true
+    || byPath.get(mailSqlTemplatePolicy.seedPath)?.sha256 !== sql.seedSha256
+    || byPath.has('/etc/yunpanel/mail/postfix/virtual-domains')
+    || byPath.has('/etc/yunpanel/mail/postfix/virtual-mailboxes')
+    || byPath.has('/etc/yunpanel/mail/postfix/virtual-aliases')
+    || byPath.has(mailSubmissionTemplatePolicy.senderLoginPath)
+    || byPath.has('/etc/yunpanel/mail/dovecot/users')) {
+    throw new MailApplyPlanError('invalid_mail_sql_state', 'Managed mail SQL artifact set is inconsistent');
+  }
+  const byParameter = new Map(postfixParameters.map((parameter) => [parameter.name, parameter.value]));
+  if (byParameter.get('virtual_alias_maps') !== expectedLookups.aliases
+    || byParameter.get('virtual_mailbox_domains') !== expectedLookups.domains
+    || byParameter.get('virtual_mailbox_maps') !== expectedLookups.mailboxes) {
+    throw new MailApplyPlanError('invalid_mail_sql_state', 'Managed mail SQL Postfix parameters are inconsistent');
+  }
+  return Object.freeze({
+    required: true,
+    databasePath: sql.databasePath,
+    seedSha256: sql.seedSha256,
+    stateSha256: sql.stateSha256,
+    lookups: expectedLookups,
+  });
 }
 
 function canonicalSrsState(preview, artifacts, postfixParameters) {
@@ -188,8 +275,11 @@ export function previewManagedMailApplyPlan(preview) {
     }
     return Object.freeze({ name: parameter.name, value: parameter.value });
   }));
+  const sql = canonicalSqlState(preview, artifacts, postfixParameters);
   const srs = canonicalSrsState(preview, artifacts, postfixParameters);
-  const postfixMasterServices = canonicalMasterServices(preview.postfixMasterServices);
+  const postfixMasterServices = canonicalMasterServices(preview.postfixMasterServices, {
+    sqlEnabled: sql.required,
+  });
   const validators = Object.freeze(preview.validate.map(validatorCommand));
 
   const compile = Object.freeze(preview.artifacts
@@ -225,6 +315,7 @@ export function previewManagedMailApplyPlan(preview) {
     artifacts,
     postfixParameters,
     postfixMasterServices,
+    sql,
     srs,
     validators,
     compile,
@@ -244,6 +335,7 @@ export function previewManagedMailApplyPlan(preview) {
     artifacts,
     postfixParameters,
     postfixMasterServices,
+    sql,
     srs,
     stages: Object.freeze({
       backup: Object.freeze(artifacts.map((artifact) => Object.freeze({ path: artifact.path }))),
