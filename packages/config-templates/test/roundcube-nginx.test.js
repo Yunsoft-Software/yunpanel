@@ -47,3 +47,47 @@ test('Roundcube Nginx template rejects unmanaged paths and invalid hostnames', (
     (error) => error instanceof RoundcubeNginxTemplateError && error.code === 'invalid_roundcube_nginx_hostname',
   );
 });
+
+
+test('Roundcube Nginx template serves many certificate-bound webmail hostnames from one shared FPM socket', () => {
+  const mapped = {
+    ...input,
+    mappings: [
+      {
+        hostname: 'webmail.second.example',
+        fullchainPath: '/etc/letsencrypt/live/webmail.second.example/fullchain.pem',
+        privateKeyPath: '/etc/letsencrypt/live/webmail.second.example/privkey.pem',
+      },
+      {
+        hostname: 'webmail.example.com',
+        fullchainPath: '/etc/letsencrypt/live/webmail.example.com/fullchain.pem',
+        privateKeyPath: '/etc/letsencrypt/live/webmail.example.com/privkey.pem',
+      },
+    ],
+  };
+  const content = renderRoundcubeNginxConfig(mapped);
+  const preview = previewRoundcubeNginxConfig(mapped);
+
+  assert.equal((content.match(/fastcgi_pass unix:\/run\/php\/yunpanel-roundcube\.sock;/g) ?? []).length, 3);
+  assert.match(content, /server_name webmail\.example\.com;/);
+  assert.match(content, /server_name webmail\.second\.example;/);
+  assert.match(content, /ssl_certificate \/etc\/letsencrypt\/live\/webmail\.example\.com\/fullchain\.pem;/);
+  assert.deepEqual(preview.mappings, [
+    { hostname: 'webmail.example.com', endpoint: 'https://webmail.example.com/' },
+    { hostname: 'webmail.second.example', endpoint: 'https://webmail.second.example/' },
+  ]);
+  assert.doesNotMatch(JSON.stringify(preview), /privkey|fullchain/i);
+
+  assert.throws(
+    () => renderRoundcubeNginxConfig({
+      ...input,
+      mappings: [{
+        hostname: input.webHostname,
+        fullchainPath: '/etc/a.pem',
+        privateKeyPath: '/etc/b.pem',
+      }],
+    }),
+    (error) => error instanceof RoundcubeNginxTemplateError
+      && error.code === 'invalid_roundcube_nginx_mappings',
+  );
+});
