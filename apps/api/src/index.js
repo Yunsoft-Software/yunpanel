@@ -34,6 +34,7 @@ import { createDomainRegistry } from './domain-registry.js';
 import { createDomainStageTargetJobRegistry } from './domain-stage-target-job-registry.js';
 import { createDomainSuspensionOperationRegistry } from './domain-suspension-operation-registry.js';
 import { createDomainSuspensionRuntime } from './domain-suspension-runtime.js';
+import { createDomainRemovalProductionRuntime } from './domain-removal-production-runtime.js';
 import { createDomainSuspensionService } from './domain-suspension.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
 import { createDnsProviderCredentialRegistry } from './dns-provider-credential-registry.js';
@@ -94,6 +95,8 @@ const controlPlaneStateRoot = path.dirname(serverStorePath);
 const domainStorePath = process.env.YUNPANEL_DOMAIN_STORE ?? path.resolve('.data/domain-registry.json');
 const domainSuspensionOperationStorePath = process.env.YUNPANEL_DOMAIN_SUSPENSION_OPERATION_STORE
   ?? path.join(controlPlaneStateRoot, 'domain-suspension-operations.json');
+const domainRemovalOperationStorePath = process.env.YUNPANEL_DOMAIN_REMOVAL_OPERATION_STORE
+  ?? path.join(controlPlaneStateRoot, 'domain-removal-operations.json');
 const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-registry.json');
 const backupOperationStorePath = process.env.YUNPANEL_BACKUP_OPERATION_STORE
   ?? path.join(controlPlaneStateRoot, 'backup-operation-registry.json');
@@ -472,6 +475,28 @@ const dnsZoneRetirementRuntime = dnsZoneRetirementService
   })
   : null;
 if (dnsZoneRetirementRuntime) await dnsZoneRetirementRuntime.init();
+const domainRemovalRuntimeBundle = localServerId && domainSuspensionRuntime && mailDomainRemovalRuntime
+  ? createDomainRemovalProductionRuntime({
+    filePath: domainRemovalOperationStorePath,
+    registry,
+    applicationRegistry,
+    websiteRegistry,
+    domainRegistry,
+    certificateRegistry,
+    jobRegistry,
+    dnsHostingRegistry,
+    mailDomainRegistry,
+    mailboxRegistry,
+    dockerWorkloadRegistry,
+    domainSuspensionRuntime,
+    dnsZoneRetirementService,
+    dnsZoneRetirementRuntime,
+    mailDomainRemovalRuntime,
+    localServerId,
+  })
+  : null;
+const domainRemovalRuntime = domainRemovalRuntimeBundle?.runtime ?? null;
+if (domainRemovalRuntime) await domainRemovalRuntime.init();
 const dockerComposeRuntime = await createDockerComposeRuntime({
   env: process.env,
   serverRegistry: registry,
@@ -698,6 +723,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] server store=${serverStorePath}`);
   console.log(`[yunpanel-api] domain store=${domainStorePath}`);
   console.log(`[yunpanel-api] domain suspension operation store=${domainSuspensionOperationStorePath}`);
+  console.log(`[yunpanel-api] domain removal operation store=${domainRemovalOperationStorePath}`);
   console.log(`[yunpanel-api] DNS zone retirement operation store=${dnsZoneRetirementOperationStorePath}`);
   console.log(`[yunpanel-api] job store=${jobStorePath}`);
   console.log(`[yunpanel-api] backup operation store=${backupOperationStorePath}`);
