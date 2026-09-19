@@ -144,6 +144,21 @@ test('enabled local lifecycle pins disable, cleanup, backup and data-delete evid
   });
   operation = await registry.advance(operation.id, {
     expectedUpdatedAt: operation.updatedAt,
+    status: 'backing_up',
+    evidence: localEvidence({
+      cleanupEvidenceDigest,
+    }),
+  });
+  operation = await registry.advance(operation.id, {
+    expectedUpdatedAt: operation.updatedAt,
+    status: 'backing_up',
+    evidence: localEvidence({
+      cleanupEvidenceDigest,
+      backupId: 'mail-backup-job-1',
+    }),
+  });
+  operation = await registry.advance(operation.id, {
+    expectedUpdatedAt: operation.updatedAt,
     status: 'deleting_data',
     evidence: localEvidence({
       cleanupEvidenceDigest,
@@ -199,7 +214,7 @@ test('disabled local lifecycle skips disable and preserves its source revision',
   await assert.rejects(
     registry.advance(operation.id, {
       expectedUpdatedAt: operation.updatedAt,
-      status: 'deleting_data',
+      status: 'backing_up',
       evidence: localEvidence({
         finalRevision: 5,
         cleanupEvidenceDigest,

@@ -5,9 +5,13 @@ import { normalizeMailboxAddress } from '@yunpanel/config-templates';
 import { normalizeDomainSet } from '@yunpanel/shared';
 
 const STORE_VERSION = 3;
-const PHASES = new Set(['pending', 'disabling', 'cleaning', 'deleting_data', 'finalizing', 'removed']);
+const PHASES = new Set([
+  'pending', 'disabling', 'cleaning', 'backing_up', 'deleting_data', 'finalizing', 'removed',
+]);
 const STATUSES = new Set([...PHASES, 'blocked', 'failed']);
-const INTERRUPTED_STATUSES = new Set(['disabling', 'cleaning', 'deleting_data', 'finalizing']);
+const INTERRUPTED_STATUSES = new Set([
+  'disabling', 'cleaning', 'backing_up', 'deleting_data', 'finalizing',
+]);
 const SAFE_ID = /^[A-Za-z0-9._:@-]{1,160}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const LOCAL_STATUSES = new Set(['disabled', 'enabled']);
@@ -313,6 +317,12 @@ function validatePhaseEvidence(operation) {
     if (phase === 'cleaning') {
       if (operation.cleanupEvidenceDigest !== null || operation.dataDeleteJobId !== null
         || operation.backupId !== null) throw invalid('Local cleanup phase evidence is inconsistent');
+      return;
+    }
+    if (phase === 'backing_up') {
+      if (operation.cleanupEvidenceDigest === null || operation.dataDeleteJobId !== null) {
+        throw invalid('Local backup phase lacks cleanup evidence');
+      }
       return;
     }
     if (phase === 'deleting_data') {
@@ -715,13 +725,15 @@ export function createMailDomainRemovalOperationRegistry({
         ? {
           pending: ['disabling'],
           disabling: ['disabling', 'cleaning'],
-          cleaning: ['deleting_data'],
+          cleaning: ['cleaning', 'backing_up'],
+          backing_up: ['backing_up', 'deleting_data'],
           deleting_data: ['deleting_data', 'finalizing'],
           finalizing: ['finalizing'],
         }
         : {
           pending: ['cleaning'],
-          cleaning: ['deleting_data'],
+          cleaning: ['cleaning', 'backing_up'],
+          backing_up: ['backing_up', 'deleting_data'],
           deleting_data: ['deleting_data', 'finalizing'],
           finalizing: ['finalizing'],
         }

@@ -5,9 +5,12 @@ import {
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const EXECUTABLE_STATUSES = new Set([
-  'pending', 'disabling', 'cleaning', 'deleting_data', 'finalizing', 'blocked', 'failed',
+  'pending', 'disabling', 'cleaning', 'backing_up', 'deleting_data', 'finalizing',
+  'blocked', 'failed',
 ]);
-const INTERRUPTED_STATUSES = new Set(['disabling', 'cleaning', 'deleting_data', 'finalizing']);
+const INTERRUPTED_STATUSES = new Set([
+  'disabling', 'cleaning', 'backing_up', 'deleting_data', 'finalizing',
+]);
 const OUTCOME_BASE_FIELDS = Object.freeze([
   'version', 'operationId', 'expectedUpdatedAt', 'fromStatus', 'disposition', 'sideEffects',
 ]);

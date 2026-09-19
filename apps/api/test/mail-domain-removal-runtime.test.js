@@ -187,6 +187,18 @@ test('explicit retries advance exactly one durable local phase through verified 
       }
       if (operation.status === 'cleaning') {
         return outcome(operation, 'advance', {
+          status: 'backing_up',
+          evidence: localEvidence({ dataDeleteJobId: null, backupId: null }),
+        });
+      }
+      if (operation.status === 'backing_up' && operation.backupId === null) {
+        return outcome(operation, 'advance', {
+          status: 'backing_up',
+          evidence: localEvidence({ dataDeleteJobId: null }),
+        });
+      }
+      if (operation.status === 'backing_up') {
+        return outcome(operation, 'advance', {
           status: 'deleting_data',
           evidence: localEvidence({ dataDeleteJobId: null }),
         });
@@ -214,12 +226,13 @@ test('explicit retries advance exactly one durable local phase through verified 
   }
 
   assert.deepEqual(statuses, [
-    'disabling', 'cleaning', 'deleting_data', 'deleting_data', 'finalizing', 'removed',
+    'disabling', 'cleaning', 'backing_up', 'backing_up', 'deleting_data', 'deleting_data',
+    'finalizing', 'removed',
   ]);
   assert.equal(operation.result.disableJobId, 'mail-config-job-1');
   assert.equal(operation.result.dataDeleteJobId, 'mail-delete-job-1');
   assert.equal(operation.result.backupId, 'mail-backup-job-1');
-  assert.deepEqual(state.counts(), { executorCalls: 6, inspectorCalls: 0 });
+  assert.deepEqual(state.counts(), { executorCalls: 8, inspectorCalls: 0 });
 });
 
 test('startup reconciles interrupted evidence only through inspector and never calls executor', async () => {

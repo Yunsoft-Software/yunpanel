@@ -13,8 +13,8 @@ const CONTINUABLE_STEP_KINDS = new Set([
 ]);
 const DNS_RETIREMENT_CHILD_STATUSES = new Set(['pending', 'deleting', 'deleted', 'failed']);
 const MAIL_REMOVAL_CHILD_STATUSES = new Set([
-  'pending', 'disabling', 'cleaning', 'deleting_data', 'finalizing', 'blocked', 'failed',
-  'removed',
+  'pending', 'disabling', 'cleaning', 'backing_up', 'deleting_data', 'finalizing',
+  'blocked', 'failed', 'removed',
 ]);
 const SAFE_REFERENCE_ID = /^[A-Za-z0-9._:@-]{1,160}$/;
 
