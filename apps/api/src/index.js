@@ -99,6 +99,7 @@ import { createWebsiteMigrationLedger } from './website-migration-ledger.js';
 import { createWebsiteMigrationPolicyStore } from './website-migration-policy.js';
 import { createWebsiteProvisioningRuntime } from './website-provisioning-runtime.js';
 import { createWebsiteRegistry } from './website-registry.js';
+import { createWebsiteCronRegistry } from './website-cron-registry.js';
 import { createWebsiteSftpKeyRuntime } from './website-sftp-key-runtime.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
@@ -126,6 +127,8 @@ const websiteIsolationMigrationStorePath = process.env.YUNPANEL_WEBSITE_ISOLATIO
   ?? path.join(controlPlaneStateRoot, 'website-isolation-migration-registry.json');
 const websiteSftpKeyStorePath = process.env.YUNPANEL_WEBSITE_SFTP_KEY_STORE
   ?? path.join(controlPlaneStateRoot, 'website-sftp-key-registry.json');
+const websiteCronStorePath = process.env.YUNPANEL_WEBSITE_CRON_STORE
+  ?? path.join(controlPlaneStateRoot, 'website-cron-registry.json');
 const databaseBindingStorePath = process.env.YUNPANEL_DATABASE_BINDING_STORE
   ?? path.resolve('.data/database-binding-registry.json');
 const databaseCredentialStorePath = process.env.YUNPANEL_DATABASE_CREDENTIAL_STORE
@@ -257,6 +260,11 @@ const websiteRegistry = createWebsiteRegistry({
   getDockerComposeProject: async (projectId) => dockerComposeProjectBootstrap.projectRegistry.getProject(projectId),
 });
 await websiteRegistry.init();
+const websiteCronRegistry = createWebsiteCronRegistry({
+  filePath: websiteCronStorePath,
+  getWebsite: async (websiteId) => websiteRegistry.getWebsite(websiteId),
+});
+await websiteCronRegistry.init();
 const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({
   filePath: websiteProvisioningStorePath,
   isolationMigrationFilePath: websiteIsolationMigrationStorePath,
@@ -893,6 +901,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] website provisioning store=${websiteProvisioningStorePath}`);
   console.log(`[yunpanel-api] website isolation migration store=${websiteIsolationMigrationStorePath}`);
   console.log(`[yunpanel-api] Website SFTP key store=${websiteSftpKeyStorePath}`);
+  console.log(`[yunpanel-api] Website cron store=${websiteCronStorePath}`);
   console.log(`[yunpanel-api] database binding store=${databaseBindingStorePath}`);
   console.log(`[yunpanel-api] database credential store=${databaseCredentialStorePath}`);
   console.log(`[yunpanel-api] website migration policy store=${websiteMigrationPolicyStorePath}`);
