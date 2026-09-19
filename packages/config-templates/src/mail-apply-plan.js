@@ -162,13 +162,17 @@ function canonicalSqlState(preview, artifacts, postfixParameters) {
     return Object.freeze({ required: false });
   }
   const sql = preview.sql;
-  const sqlFields = new Set(['enabled', 'databasePath', 'seedSha256', 'stateSha256', 'lookups']);
+  const sqlFields = new Set(['enabled', 'databasePath', 'domains', 'seedSha256', 'stateSha256', 'lookups']);
   const lookupFields = new Set(['domains', 'mailboxes', 'aliases', 'senderLogin']);
   if (!sql || typeof sql !== 'object' || Array.isArray(sql)
     || Object.keys(sql).length !== sqlFields.size
     || Object.keys(sql).some((field) => !sqlFields.has(field))
     || sql.enabled !== true
     || sql.databasePath !== mailSqlTemplatePolicy.databasePath
+    || !Array.isArray(sql.domains) || sql.domains.length > 500
+    || sql.domains.some((domain) => typeof domain !== 'string'
+      || domain !== domain.toLowerCase() || domain.length < 1 || domain.length > 253)
+    || new Set(sql.domains).size !== sql.domains.length
     || typeof sql.seedSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sql.seedSha256)
     || typeof sql.stateSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sql.stateSha256)
     || !sql.lookups || typeof sql.lookups !== 'object' || Array.isArray(sql.lookups)
@@ -213,6 +217,7 @@ function canonicalSqlState(preview, artifacts, postfixParameters) {
   return Object.freeze({
     required: true,
     databasePath: sql.databasePath,
+    domains: Object.freeze([...sql.domains]),
     seedSha256: sql.seedSha256,
     stateSha256: sql.stateSha256,
     lookups: expectedLookups,
