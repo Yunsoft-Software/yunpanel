@@ -51,6 +51,7 @@ test('Website provisioning runtime wires local mail health only after mail, DKIM
     async continueOperation() { return null; },
   };
   const endpointResolver = { async resolve() { return null; } };
+  const discoveryEndpointResolver = { async resolve() { return null; } };
   const mailReadinessInspector = { async inspect() { return null; } };
   const mailProtocolHealthInspector = { async inspect() { return null; } };
 
@@ -62,6 +63,7 @@ test('Website provisioning runtime wires local mail health only after mail, DKIM
       mailReadinessInspector,
       mailProtocolHealthInspector,
       roundcubeWebmailEndpointResolver: endpointResolver,
+      mailDiscoveryEndpointResolver: discoveryEndpointResolver,
     }),
     /requires mail, DKIM, and Roundcube control planes/,
   );
@@ -108,6 +110,7 @@ test('Website provisioning runtime wires local mail health only after mail, DKIM
     mailReadinessInspector,
     mailProtocolHealthInspector,
     roundcubeWebmailEndpointResolver: endpointResolver,
+    mailDiscoveryEndpointResolver: discoveryEndpointResolver,
   };
   assert.deepEqual(runtime.configureMailHealthControlPlane(dependencies), { configured: true });
   assert.equal(typeof runtime.handlers.mail_health.apply, 'function');
@@ -117,6 +120,13 @@ test('Website provisioning runtime wires local mail health only after mail, DKIM
     () => runtime.configureMailHealthControlPlane({
       ...dependencies,
       mailProtocolHealthInspector: { async inspect() { return null; } },
+    }),
+    /cannot be replaced/,
+  );
+  assert.throws(
+    () => runtime.configureMailHealthControlPlane({
+      ...dependencies,
+      mailDiscoveryEndpointResolver: { async resolve() { return null; } },
     }),
     /cannot be replaced/,
   );
