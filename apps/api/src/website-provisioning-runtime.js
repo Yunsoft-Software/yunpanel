@@ -3,6 +3,7 @@ import { createWebsiteDnsZoneProvisioningHandler } from './website-dns-zone-prov
 import { createWebsiteDatabaseProvisioningHandler } from './website-database-provisioning-handler.js';
 import { createWebsiteDomainActivationProvisioningHandler } from './website-domain-activation-provisioning-handler.js';
 import { createWebsiteMailProvisioningHandler } from './website-mail-provisioning-handler.js';
+import { createWebsiteMailDkimKeyProvisioningHandler } from './website-mail-dkim-key-provisioning-handler.js';
 import { createWebsiteIsolationAuditService, WebsiteIsolationAuditError } from './website-isolation-audit.js';
 import { createWebsiteIsolationMigrationRegistry } from './website-isolation-migration-registry.js';
 import { createWebsiteIsolationMigrationRuntime } from './website-isolation-migration-runtime.js';
@@ -115,6 +116,7 @@ export function createWebsiteProvisioningRuntime({
   let sftpKeyLifecycle = null;
   let databaseControlPlane = null;
   let mailControlPlane = null;
+  let mailDkimControlPlane = null;
 
   function configureSftpKeys(dependencies = {}) {
     const nextService = dependencies.sftpKeyService;
@@ -404,6 +406,37 @@ export function createWebsiteProvisioningRuntime({
     return Object.freeze({ configured: true });
   }
 
+  function configureMailDkimControlPlane(dependencies = {}) {
+    const {
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailDkimRegistry: nextMailDkimRegistry,
+    } = dependencies;
+    if (!nextMailDomainRegistry || !nextDomainRegistry || !nextMailDkimRegistry) {
+      throw new Error('Website DKIM provisioning dependencies are required');
+    }
+    if (mailDkimControlPlane) {
+      if (mailDkimControlPlane.mailDomainRegistry !== nextMailDomainRegistry
+        || mailDkimControlPlane.domainRegistry !== nextDomainRegistry
+        || mailDkimControlPlane.mailDkimRegistry !== nextMailDkimRegistry) {
+        throw new Error('Website DKIM provisioning dependencies cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.mail_dkim_key = createWebsiteMailDkimKeyProvisioningHandler({
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailDkimRegistry: nextMailDkimRegistry,
+    });
+    mailDkimControlPlane = Object.freeze({
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailDkimRegistry: nextMailDkimRegistry,
+    });
+    return Object.freeze({ configured: true });
+  }
+
+
   if (domainRegistry) configureDomainControlPlane({ domainRegistry });
   if (sftpKeyService) configureSftpKeys({ sftpKeyService });
   if (applicationEnvironmentRegistry) configurePassengerEnvironment({ applicationEnvironmentRegistry });
@@ -443,6 +476,7 @@ export function createWebsiteProvisioningRuntime({
     configurePassengerControlPlane,
     configureDatabaseControlPlane,
     configureMailControlPlane,
+    configureMailDkimControlPlane,
     init,
     get: (operationId) => registry.get(operationId),
     create: (plan) => registry.create(plan),
