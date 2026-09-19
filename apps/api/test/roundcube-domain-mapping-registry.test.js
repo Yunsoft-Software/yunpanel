@@ -16,6 +16,7 @@ const fingerprint = Array.from({ length: 32 }, () => 'AA').join(':');
 function fixture({
   mailStatus = 'enabled',
   certificateState = 'active',
+  certificatePurpose = 'webmail',
   inspectedFingerprint = fingerprint,
   now = (() => {
     let value = Date.parse('2026-09-19T14:00:00.000Z');
@@ -43,6 +44,7 @@ function fixture({
       domainId: webDomainId,
       serverId,
       state: certificateState,
+      purpose: certificatePurpose,
       staging: false,
       fingerprint256: fingerprint,
       updatedAt: '2026-09-19T13:00:00.000Z',
@@ -159,6 +161,10 @@ test('mapping requires enabled local mail and an active hostname-covering certif
   );
   await assert.rejects(
     fixture({ certificateState: 'superseded' }).previewBind({ mailDomainId, certificateId }),
+    (error) => error.code === 'roundcube_mapping_certificate_not_ready',
+  );
+  await assert.rejects(
+    fixture({ certificatePurpose: 'web' }).previewBind({ mailDomainId, certificateId }),
     (error) => error.code === 'roundcube_mapping_certificate_not_ready',
   );
   await assert.rejects(
