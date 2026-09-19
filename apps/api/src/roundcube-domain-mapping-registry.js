@@ -434,8 +434,24 @@ export function createRoundcubeDomainMappingRegistry({
     });
   }
 
-  async function beginBind({ mailDomainId, certificateId, previewDigest, confirmation } = {}) {
+  async function beginBind({
+    mailDomainId,
+    certificateId,
+    previewDigest,
+    confirmation,
+    operationId: requestedOperationId = null,
+  } = {}) {
     const preview = await previewBind({ mailDomainId, certificateId });
+    const ownedOperationId = requestedOperationId === null
+      ? randomUUID()
+      : optionalReference(requestedOperationId, 'operationId');
+    if (!ownedOperationId) {
+      throw new RoundcubeDomainMappingRegistryError(
+        'roundcube_mapping_operation_identity_invalid',
+        'Roundcube Domain mapping bind operation identity is invalid',
+        409,
+      );
+    }
     if (preview.previewDigest !== previewDigest || preview.confirmation !== confirmation
       || !SHA256_PATTERN.test(String(previewDigest ?? ''))) {
       throw new RoundcubeDomainMappingRegistryError(
@@ -470,7 +486,7 @@ export function createRoundcubeDomainMappingRegistry({
         certificateFingerprint256: preview.certificateFingerprint256,
         revision: preview.currentRevision + 1,
         state: 'pending',
-        operationId: randomUUID(),
+        operationId: ownedOperationId,
         applyJobId: null,
         expectedRoundcubePreviewSha256: null,
         expectedRoundcubeNginxSha256: null,
