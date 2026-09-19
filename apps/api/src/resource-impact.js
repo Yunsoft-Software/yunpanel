@@ -125,8 +125,14 @@ function certificateReference(certificate) {
     domainId: certificate.domainId,
     serverId: certificate.serverId,
     state: certificate.state,
+    source: certificate.source,
+    renewalMode: certificate.renewalMode,
     staging: certificate.staging === true,
     validTo: certificate.validTo ?? null,
+    updatedAt: certificate.updatedAt,
+    retirementOperationId: certificate.retirementOperationId ?? null,
+    retiredAt: certificate.retiredAt ?? null,
+    retiredFromState: certificate.retiredFromState ?? null,
   });
 }
 
@@ -408,7 +414,9 @@ export async function previewResourceImpact({
   const mailDomains = allMailDomains.filter((item) => item.webDomainId !== null && impactedDomainIds.has(item.webDomainId))
     .map((item) => externalLifecycleReference(item, 'domainName'))
     .sort((left, right) => left.id.localeCompare(right.id));
-  const certificateReferences = certificates.filter((certificate) => impactedDomainIds.has(certificate.domainId))
+  const certificateReferences = certificates.filter((certificate) => (
+    certificate.state !== 'retired' && impactedDomainIds.has(certificate.domainId)
+  ))
     .map(certificateReference).sort((left, right) => left.id.localeCompare(right.id));
   const activeJobs = relevantJobs(jobs, {
     domainIds: impactedDomainIds,

@@ -100,7 +100,7 @@ test('version one ACME state hydrates without rewrite and persists source policy
   assert.equal(await readFile(filePath, 'utf8'), before);
   await registry.setState(certificate.id, 'issuing');
   const persisted = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(persisted.version, 3);
+  assert.equal(persisted.version, 4);
   assert.equal(persisted.certificates[0].source, 'acme');
   assert.deepEqual(persisted.certificates[0].certificateNames, ['example.com']);
   assert.deepEqual(persisted.certificates[0].challenge, { type: 'http-01' });
@@ -126,6 +126,81 @@ test('version two certificate state hydrates DNS fields without changing identit
   assert.deepEqual(loaded.certificateNames, ['www.example.com']);
   assert.deepEqual(loaded.challenge, { type: 'http-01' });
   assert.equal(await readFile(filePath, 'utf8'), before);
+});
+
+test('Domain removal retirement is exact, durable, idempotent and immutable', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-certificate-retirement-'));
+  const filePath = path.join(directory, 'certificates.json');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  let clock = Date.parse('2026-09-18T20:00:00.000Z');
+  const registry = createCertificateRegistry({ filePath, now: () => clock });
+  const created = await registry.createForDomain({
+    domainId: 'domain-1', serverId: 'server-1', domains: ['example.com'], email: 'ops@example.com',
+  });
+  await registry.markActive(created.id, acmeResult(created.certName, created.domains));
+  const active = await registry.getCertificate(created.id);
+
+  await assert.rejects(
+    registry.retireForDomainRemoval(created.id, {
+      expectedDomainId: 'domain-1',
+      expectedServerId: 'server-1',
+      expectedState: 'active',
+      expectedSource: 'acme',
+      expectedRenewalMode: 'automatic',
+      expectedStaging: false,
+      expectedValidTo: active.validTo,
+      expectedUpdatedAt: '2026-09-18T19:00:00.000Z',
+      operationId: 'domain-removal-1',
+    }),
+    (error) => error instanceof CertificateRegistryError
+      && error.code === 'certificate_retirement_intent_drift',
+  );
+
+  clock = Date.parse('2026-09-18T21:00:00.000Z');
+  const retired = await registry.retireForDomainRemoval(created.id, {
+    expectedDomainId: active.domainId,
+    expectedServerId: active.serverId,
+    expectedState: active.state,
+    expectedSource: active.source,
+    expectedRenewalMode: active.renewalMode,
+    expectedStaging: active.staging,
+    expectedValidTo: active.validTo,
+    expectedUpdatedAt: active.updatedAt,
+    operationId: 'domain-removal-1',
+  });
+  assert.equal(retired.changed, true);
+  assert.equal(retired.certificate.state, 'retired');
+  assert.equal(retired.certificate.retiredFromState, 'active');
+  assert.equal(retired.certificate.retiredFromUpdatedAt, active.updatedAt);
+  assert.equal(retired.certificate.retirementOperationId, 'domain-removal-1');
+  assert.equal(retired.certificate.retiredAt, '2026-09-18T21:00:00.000Z');
+
+  const repeated = await registry.retireForDomainRemoval(created.id, {
+    expectedDomainId: active.domainId,
+    expectedServerId: active.serverId,
+    expectedState: active.state,
+    expectedSource: active.source,
+    expectedRenewalMode: active.renewalMode,
+    expectedStaging: active.staging,
+    expectedValidTo: active.validTo,
+    expectedUpdatedAt: active.updatedAt,
+    operationId: 'domain-removal-1',
+  });
+  assert.equal(repeated.changed, false);
+  await assert.rejects(
+    registry.setState(created.id, 'active'),
+    (error) => error instanceof CertificateRegistryError && error.code === 'certificate_retired',
+  );
+
+  const reopened = createCertificateRegistry({ filePath, now: () => clock });
+  const restored = await reopened.getCertificate(created.id);
+  assert.equal(restored.state, 'retired');
+  assert.equal(restored.retirementOperationId, 'domain-removal-1');
+  assert.equal(restored.retiredFromUpdatedAt, active.updatedAt);
+  const publicRetired = certificatePublicView(restored, { now: clock });
+  assert.equal(publicRetired.diagnosis.code, 'certificate_retired');
+  assert.equal(publicRetired.retiredAt, '2026-09-18T21:00:00.000Z');
+  assert.equal(Object.hasOwn(publicRetired, 'retirementOperationId'), false);
 });
 
 test('public certificate view omits private state and exposes authored lifecycle diagnosis', async () => {

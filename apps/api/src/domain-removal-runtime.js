@@ -8,7 +8,7 @@ import {
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ROUTING_CHILD_STATUSES = new Set(['pending', 'suspending', 'suspended', 'failed']);
 const CONTINUABLE_STEP_KINDS = new Set([
-  'child_domain', 'website_binding', 'authoritative_dns', 'metadata_finalization',
+  'child_domain', 'certificate', 'website_binding', 'authoritative_dns', 'metadata_finalization',
 ]);
 const DNS_RETIREMENT_CHILD_STATUSES = new Set(['pending', 'deleting', 'deleted', 'failed']);
 
@@ -175,6 +175,32 @@ function websiteBindingEvidence(operation, websiteId, suspensionId) {
   });
 }
 
+function certificateRetirementEvidence(operation, intent, certificate, suspensionId) {
+  if (!exactRetiredCertificate(operation, intent, certificate)) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_certificate_evidence_invalid',
+      'Certificate retirement did not prove exact operation-owned state',
+      409,
+    );
+  }
+  return Object.freeze({
+    referenceId: intent.id,
+    evidenceDigest: digest({
+      kind: 'certificate',
+      operationId: operation.id,
+      domainId: operation.domainId,
+      serverId: operation.serverId,
+      certificateId: intent.id,
+      source: intent.source,
+      retiredFromState: intent.state,
+      retiredAt: certificate.retiredAt,
+      suspensionOperationId: suspensionId,
+      bindingDetached: operation.plan.boundCertificateId === intent.id,
+      materialRetained: true,
+    }),
+  });
+}
+
 function metadataFinalizationEvidence(operation, suspensionId) {
   return Object.freeze({
     referenceId: operation.domainId,
@@ -324,12 +350,79 @@ function exactChildAuthoritativeDnsIntent(expected, current) {
     && expected.blockers.every((code, index) => code === current.blockers[index]));
 }
 
+const CERTIFICATE_INTENT_FIELDS = Object.freeze([
+  'id', 'domainId', 'serverId', 'state', 'source', 'renewalMode', 'staging', 'validTo',
+  'updatedAt', 'retirementOperationId', 'retiredAt', 'retiredFromState',
+]);
+
+function sameCertificateIntent(expected, current) {
+  return Boolean(expected && current && CERTIFICATE_INTENT_FIELDS.every((field) => (
+    expected[field] === current[field]
+  )));
+}
+
+function exactRetiredCertificate(operation, intent, certificate) {
+  return Boolean(certificate
+    && certificate.id === intent.id
+    && certificate.domainId === intent.domainId
+    && certificate.serverId === intent.serverId
+    && certificate.source === intent.source
+    && certificate.renewalMode === intent.renewalMode
+    && certificate.staging === intent.staging
+    && (certificate.validTo ?? null) === intent.validTo
+    && certificate.state === 'retired'
+    && certificate.retiredFromState === intent.state
+    && certificate.retirementOperationId === operation.id
+    && certificate.retiredFromUpdatedAt === intent.updatedAt
+    && typeof certificate.retiredAt === 'string'
+    && Number.isFinite(Date.parse(certificate.retiredAt))
+    && new Date(certificate.retiredAt).toISOString() === certificate.retiredAt
+    && certificate.updatedAt === certificate.retiredAt);
+}
+
+function certificateIntent(operation, step) {
+  if (!Array.isArray(operation.plan.certificateIntents)) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_certificate_intent_missing',
+      'Legacy Domain removal journal has no exact certificate retirement intent evidence',
+      409,
+    );
+  }
+  const matches = operation.plan.certificateIntents.filter((intent) => (
+    intent.id === step.resourceId && intent.domainId === operation.domainId
+  ));
+  if (matches.length !== 1) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_certificate_plan_invalid',
+      'Certificate step does not match one exact Domain-scoped retirement intent',
+      409,
+    );
+  }
+  return matches[0];
+}
+
+function childCertificatePlanWithinParent(operation, intent, plan) {
+  if (!Array.isArray(operation.plan.certificateIntents)
+    || !Array.isArray(plan.certificateIntents)
+    || plan.boundCertificateId !== intent.certificateId
+    || plan.certificateIntents.some((childIntent) => (
+      childIntent.domainId !== intent.id
+      || !operation.plan.certificateIntents.some((parentIntent) => (
+        sameCertificateIntent(parentIntent, childIntent)
+      ))
+    ))) {
+    return false;
+  }
+  return true;
+}
+
 function childPlanWithinParent(operation, intent, plan) {
   if (!plan || typeof plan !== 'object' || Array.isArray(plan)
     || !Array.isArray(plan.childDomainIds) || plan.childDomainIds.length !== 0
     || !Array.isArray(plan.childDomains) || plan.childDomains.length !== 0
     || plan.websiteId !== intent.websiteId
     || !exactChildAuthoritativeDnsIntent(intent.authoritativeDns, plan.authoritativeDns)
+    || !childCertificatePlanWithinParent(operation, intent, plan)
     || !Array.isArray(plan.activeJobIds) || plan.activeJobIds.length !== 0
     || !idsWithin(plan.certificateIds, operation.plan.certificateIds)
     || !idsWithin(plan.dnsZoneIds, operation.plan.dnsZoneIds)
@@ -425,6 +518,7 @@ export function createDomainRemovalRuntime({
   previewProvider,
   suspensionRuntime,
   domainRegistry = null,
+  certificateRegistry = null,
   dnsZoneRetirementRuntime = null,
 } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
@@ -441,7 +535,12 @@ export function createDomainRemovalRuntime({
     || (domainRegistry !== null && (
       typeof domainRegistry?.getDomain !== 'function'
       || typeof domainRegistry?.detachWebsiteForRemoval !== 'function'
+      || typeof domainRegistry?.detachCertificateForRemoval !== 'function'
       || typeof domainRegistry?.finalizeDomainRemoval !== 'function'
+    ))
+    || (certificateRegistry !== null && (
+      typeof certificateRegistry?.getCertificate !== 'function'
+      || typeof certificateRegistry?.retireForDomainRemoval !== 'function'
     ))
     || (dnsZoneRetirementRuntime !== null && (
       typeof dnsZoneRetirementRuntime?.preview !== 'function'
@@ -476,6 +575,17 @@ export function createDomainRemovalRuntime({
       );
     }
     return dnsZoneRetirementRuntime;
+  }
+
+  function requireCertificateRegistry() {
+    if (!certificateRegistry) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_certificate_registry_unavailable',
+        'Domain removal certificate retirement handler is unavailable',
+        503,
+      );
+    }
+    return certificateRegistry;
   }
 
   async function loadOperation(operationId) {
@@ -688,6 +798,134 @@ export function createDomainRemovalRuntime({
       operation,
       step,
       childRemovalEvidence(operation, intent, result),
+    ));
+  }
+
+  async function runCertificate(operationId, { allowMutation } = {}) {
+    const manager = requireDomainRegistry();
+    const certificates = requireCertificateRegistry();
+    const prepared = await runningStep(await loadOperation(operationId), 'certificate');
+    const { operation, step } = prepared;
+    let intent;
+    try { intent = certificateIntent(operation, step); }
+    catch (error) {
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    const suspensionId = suspensionOperationId(operation);
+    let domain;
+    try { domain = await manager.getDomain(operation.domainId); }
+    catch (error) { return publicOperation(await failControlPlaneStep(operation, step, error)); }
+    if (!exactSuspendedDomain(operation, domain, suspensionId)) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_certificate_domain_drift',
+        'Domain state no longer matches journaled certificate retirement evidence',
+        409,
+      )));
+    }
+    const boundCertificateId = operation.plan.boundCertificateId;
+    if (domain.certificateId !== null && domain.certificateId !== boundCertificateId) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_certificate_binding_drift',
+        'Domain certificate binding changed before removal cleanup',
+        409,
+      )));
+    }
+    let certificate;
+    try { certificate = await certificates.getCertificate(intent.id); }
+    catch (error) { return publicOperation(await failControlPlaneStep(operation, step, error)); }
+    if (!certificate) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_certificate_missing',
+        'Journaled certificate disappeared before operation-owned retirement',
+        409,
+      )));
+    }
+    if (certificate.state === 'retired') {
+      if (!exactRetiredCertificate(operation, intent, certificate)
+        || (intent.id === boundCertificateId && domain.certificateId !== null)) {
+        return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+          'domain_removal_certificate_retirement_drift',
+          'Certificate retirement state does not match this Domain removal operation',
+          409,
+        )));
+      }
+      return publicOperation(await completeControlPlaneStep(
+        operation,
+        step,
+        certificateRetirementEvidence(operation, intent, certificate, suspensionId),
+      ));
+    }
+    if (!sameCertificateIntent(intent, certificate)) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_certificate_intent_drift',
+        'Certificate state changed after Domain removal planning',
+        409,
+      )));
+    }
+    if (!allowMutation) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_certificate_retry_required',
+        'Certificate retirement requires explicit removal continuation',
+        409,
+      )));
+    }
+    if (intent.id === boundCertificateId && domain.certificateId === intent.id) {
+      let detached;
+      try {
+        detached = await manager.detachCertificateForRemoval(operation.domainId, {
+          expectedCertificateId: intent.id,
+          expectedRevision: operation.domainRevision,
+          checksum: operation.checksum,
+          suspensionOperationId: suspensionId,
+        });
+      } catch (error) {
+        if (Number(error?.status) === 409) {
+          return publicOperation(await blockControlPlaneStep(operation, step, error));
+        }
+        return publicOperation(await failControlPlaneStep(operation, step, error));
+      }
+      if (detached?.detachedCertificateId !== intent.id
+        || detached.domain?.certificateId !== null
+        || !exactSuspendedDomain(operation, detached.domain, suspensionId)) {
+        return publicOperation(await failControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+          'domain_removal_certificate_detach_result_invalid',
+          'Certificate detachment did not prove the journaled post-condition',
+          503,
+        )));
+      }
+      domain = detached.domain;
+    }
+    let retired;
+    try {
+      retired = await certificates.retireForDomainRemoval(intent.id, {
+        expectedDomainId: intent.domainId,
+        expectedServerId: intent.serverId,
+        expectedState: intent.state,
+        expectedSource: intent.source,
+        expectedRenewalMode: intent.renewalMode,
+        expectedStaging: intent.staging,
+        expectedValidTo: intent.validTo,
+        expectedUpdatedAt: intent.updatedAt,
+        operationId: operation.id,
+      });
+    } catch (error) {
+      if (Number(error?.status) === 409) {
+        return publicOperation(await blockControlPlaneStep(operation, step, error));
+      }
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    if (!exactRetiredCertificate(operation, intent, retired?.certificate)
+      || (intent.id === boundCertificateId && domain.certificateId !== null)) {
+      return publicOperation(await failControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_certificate_result_invalid',
+        'Certificate retirement result does not match journaled intent',
+        503,
+      )));
+    }
+    return publicOperation(await completeControlPlaneStep(
+      operation,
+      step,
+      certificateRetirementEvidence(operation, intent, retired.certificate, suspensionId),
     ));
   }
 
@@ -988,6 +1226,9 @@ export function createDomainRemovalRuntime({
     if (!step) return publicOperation(operation);
     if (step.kind === 'child_domain') {
       return runChildDomain(operation.id, { allowMutation });
+    }
+    if (step.kind === 'certificate') {
+      return runCertificate(operation.id, { allowMutation });
     }
     if (step.kind === 'website_binding') {
       return runWebsiteBinding(operation.id, { allowMutation });
@@ -1450,6 +1691,11 @@ export const domainRemovalRuntimeInternals = Object.freeze({
   dnsRetirementEvidence,
   childDomainIntent,
   exactChildAuthoritativeDnsIntent,
+  sameCertificateIntent,
+  exactRetiredCertificate,
+  certificateIntent,
+  childCertificatePlanWithinParent,
+  certificateRetirementEvidence,
   childPlanWithinParent,
   exactChildRemovalPreview,
   exactChildRemovalOperation,

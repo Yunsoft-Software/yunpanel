@@ -154,3 +154,38 @@ test('DNS renewal sweep requires the exact configured provider credential', asyn
   assert.equal(claimed.envelope.operation, OPERATIONS.SSL_RENEW);
   assert.deepEqual(claimed.envelope.payload.challenge, challenge);
 });
+
+test('renewal sweep never requeues a certificate retired by Domain removal', async () => {
+  const nowMs = Date.parse('2026-09-08T21:00:00.000Z');
+  const certificates = createCertificateRegistry({ now: () => nowMs });
+  const jobs = createJobRegistry({ now: () => nowMs });
+  const certificate = await activeCertificate(certificates, {
+    domainId: 'domain-retired',
+    serverId: 'server-1',
+    certName: 'retired.example.com',
+    validTo: '2026-09-20T00:00:00.000Z',
+  });
+
+  await certificates.retireForDomainRemoval(certificate.id, {
+    expectedDomainId: certificate.domainId,
+    expectedServerId: certificate.serverId,
+    expectedState: certificate.state,
+    expectedSource: certificate.source,
+    expectedRenewalMode: certificate.renewalMode,
+    expectedStaging: certificate.staging,
+    expectedValidTo: certificate.validTo,
+    expectedUpdatedAt: certificate.updatedAt,
+    operationId: 'domain-removal-1',
+  });
+
+  assert.deepEqual(await runCertificateRenewalSweep({
+    certificateRegistry: certificates,
+    jobRegistry: jobs,
+    now: () => nowMs,
+  }), []);
+  assert.equal((await certificates.getCertificate(certificate.id)).state, 'retired');
+  assert.deepEqual(await jobs.listJobs({
+    resourceType: 'certificate',
+    resourceId: certificate.id,
+  }), []);
+});

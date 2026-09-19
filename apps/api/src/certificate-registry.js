@@ -4,12 +4,16 @@ import path from 'node:path';
 import { normalizeDomainSet, sanitizeLogMessage } from '@yunpanel/shared';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
-const STORE_VERSION = 3;
+const STORE_VERSION = 4;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const CERT_STATES = new Set(['pending', 'validating', 'validated', 'issuing', 'active', 'renewing', 'superseded', 'error']);
+const CERT_STATES = new Set([
+  'pending', 'validating', 'validated', 'issuing', 'active', 'renewing', 'superseded',
+  'retired', 'error',
+]);
 const CERTIFICATE_SOURCES = new Set(['acme', 'custom']);
 const RENEWAL_MODES = new Set(['automatic', 'manual']);
+const SAFE_OPERATION_ID = /^[A-Za-z0-9._:@-]{1,160}$/;
 
 export class CertificateRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -62,6 +66,13 @@ export function certificateDiagnosis(certificate, { now = Date.now() } = {}) {
       severity: 'info', code: 'certificate_superseded',
       message: 'A newer certificate is selected for this Domain.',
       action: 'No action is required unless this certificate should be selected again.',
+    });
+  }
+  if (certificate.state === 'retired') {
+    return Object.freeze({
+      severity: 'info', code: 'certificate_retired',
+      message: 'The certificate was retired by Domain removal.',
+      action: 'Retained certificate material follows the separate cleanup retention policy.',
     });
   }
   if (certificate.state === 'active' && certificate.validTo) {
@@ -125,6 +136,7 @@ export function certificatePublicView(certificate, { now = Date.now } = {}) {
     lastIssuedAt: certificate.lastIssuedAt,
     lastRenewedAt: certificate.lastRenewedAt,
     lastImportedAt: certificate.lastImportedAt,
+    retiredAt: certificate.retiredAt,
     createdAt: certificate.createdAt,
     updatedAt: certificate.updatedAt,
     diagnosis: certificateDiagnosis(certificate, { now }),
@@ -259,18 +271,49 @@ function hydrateCertificate(certificate, sourceVersion, roots) {
     certificate.certificateNames = [...certificate.domains];
     certificate.challenge = certificate.source === 'acme' ? { type: 'http-01' } : null;
   }
+  if (sourceVersion < 4) {
+    certificate.retirementOperationId = null;
+    certificate.retiredAt = null;
+    certificate.retiredFromState = null;
+    certificate.retiredFromUpdatedAt = null;
+  }
   if (!CERT_STATES.has(certificate.state) || !CERTIFICATE_SOURCES.has(certificate.source) || !RENEWAL_MODES.has(certificate.renewalMode)
     || (certificate.source === 'acme' && certificate.renewalMode !== 'automatic')
     || (certificate.source === 'custom' && certificate.renewalMode !== 'manual')) {
     throw new CertificateRegistryError('invalid_certificate_state', 'Persisted certificate source policy is invalid', 409);
+  }
+  if ((certificate.state === 'retired') !== (
+    typeof certificate.retirementOperationId === 'string'
+    && SAFE_OPERATION_ID.test(certificate.retirementOperationId)
+    && typeof certificate.retiredAt === 'string'
+    && Number.isFinite(Date.parse(certificate.retiredAt))
+    && new Date(certificate.retiredAt).toISOString() === certificate.retiredAt
+    && typeof certificate.retiredFromState === 'string'
+    && CERT_STATES.has(certificate.retiredFromState)
+    && certificate.retiredFromState !== 'retired'
+    && typeof certificate.retiredFromUpdatedAt === 'string'
+    && Number.isFinite(Date.parse(certificate.retiredFromUpdatedAt))
+    && new Date(certificate.retiredFromUpdatedAt).toISOString() === certificate.retiredFromUpdatedAt
+  ) || (certificate.state !== 'retired' && (
+    certificate.retirementOperationId !== null || certificate.retiredAt !== null
+    || certificate.retiredFromState !== null || certificate.retiredFromUpdatedAt !== null
+  ))) {
+    throw new CertificateRegistryError(
+      'invalid_certificate_state',
+      'Persisted certificate retirement evidence is invalid',
+      409,
+    );
   }
   if (certificate.source === 'custom' && (typeof certificate.id !== 'string' || !UUID_PATTERN.test(certificate.id))) {
     throw new CertificateRegistryError('invalid_certificate_state', 'Persisted custom certificate identity is invalid', 409);
   }
   certificate.challenge = normalizeChallenge(certificate.challenge, { custom: certificate.source === 'custom' });
   certificate.certificateNames = normalizeCertificateNames(certificate.certificateNames, certificate.challenge ?? { type: 'custom' });
-  if (certificate.state !== 'pending' && certificate.state !== 'validating' && certificate.state !== 'validated'
-    && certificate.state !== 'issuing' && certificate.state !== 'error') {
+  const materialState = certificate.state === 'retired'
+    ? certificate.retiredFromState
+    : certificate.state;
+  if (materialState !== 'pending' && materialState !== 'validating' && materialState !== 'validated'
+    && materialState !== 'issuing' && materialState !== 'error') {
     validateCertificatePath(certificate, certificate.certificatePath, 'cert.pem', roots);
     validateCertificatePath(certificate, certificate.fullchainPath, 'fullchain.pem', roots);
     validateCertificatePath(certificate, certificate.privateKeyPath, 'privkey.pem', roots);
@@ -311,7 +354,7 @@ export function createCertificateRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, 2, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.certificates)) {
+        if (![1, 2, 3, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.certificates)) {
           throw new Error('unsupported or invalid certificate registry state');
         }
         parsed.certificates.forEach((certificate) => hydrateCertificate(certificate, parsed.version, roots));
@@ -351,7 +394,7 @@ export function createCertificateRegistry({
       throw new CertificateRegistryError('invalid_certificate_replacement', 'Certificate replacement policy is invalid');
     }
     const existing = state.certificates.find((certificate) => {
-      if (certificate.domainId !== domainId || ['error', 'superseded'].includes(certificate.state)) return false;
+      if (certificate.domainId !== domainId || ['error', 'superseded', 'retired'].includes(certificate.state)) return false;
       if (!isValidation) {
         if (certificate.staging) return false;
         if (['pending', 'issuing', 'renewing'].includes(certificate.state)) return true;
@@ -394,6 +437,10 @@ export function createCertificateRegistry({
       lastIssuedAt: null,
       lastRenewedAt: null,
       lastImportedAt: null,
+      retirementOperationId: null,
+      retiredAt: null,
+      retiredFromState: null,
+      retiredFromUpdatedAt: null,
       materialDigest: null,
       lastError: null,
       createdAt: timestamp,
@@ -408,8 +455,13 @@ export function createCertificateRegistry({
   async function setState(certificateId, nextState) {
     await ensureInitialized();
     const certificate = requireCertificate(state, certificateId);
+    if (certificate.state === 'retired') {
+      throw new CertificateRegistryError('certificate_retired', 'Retired certificate state is immutable', 409);
+    }
     const normalizedState = certificate.staging && nextState === 'issuing' ? 'validating' : nextState;
-    if (!CERT_STATES.has(normalizedState)) throw new CertificateRegistryError('invalid_certificate_state', 'Certificate state is invalid');
+    if (!CERT_STATES.has(normalizedState) || normalizedState === 'retired') {
+      throw new CertificateRegistryError('invalid_certificate_state', 'Certificate state is invalid');
+    }
     certificate.state = normalizedState;
     certificate.updatedAt = new Date(now()).toISOString();
     await persist();
@@ -419,6 +471,9 @@ export function createCertificateRegistry({
   async function markValidated(certificateId, result) {
     await ensureInitialized();
     const certificate = requireCertificate(state, certificateId);
+    if (certificate.state === 'retired') {
+      throw new CertificateRegistryError('certificate_retired', 'Retired certificate state is immutable', 409);
+    }
     if (!certificate.staging) {
       throw new CertificateRegistryError('validation_record_required', 'Only validation records can be marked validated', 409);
     }
@@ -439,6 +494,9 @@ export function createCertificateRegistry({
   async function markActive(certificateId, result, { renewal = false } = {}) {
     await ensureInitialized();
     const certificate = requireCertificate(state, certificateId);
+    if (certificate.state === 'retired') {
+      throw new CertificateRegistryError('certificate_retired', 'Retired certificate state is immutable', 409);
+    }
     if (certificate.staging) {
       return markValidated(certificateId, result);
     }
@@ -534,6 +592,10 @@ export function createCertificateRegistry({
       lastIssuedAt: null,
       lastRenewedAt: null,
       lastImportedAt: timestamp,
+      retirementOperationId: null,
+      retiredAt: null,
+      retiredFromState: null,
+      retiredFromUpdatedAt: null,
       materialDigest: typeof materialDigest === 'string' && /^[a-f0-9]{64}$/.test(materialDigest) ? materialDigest : null,
       lastError: null,
       createdAt: timestamp,
@@ -596,11 +658,77 @@ export function createCertificateRegistry({
   async function markFailed(certificateId, errorCode) {
     await ensureInitialized();
     const certificate = requireCertificate(state, certificateId);
+    if (certificate.state === 'retired') {
+      throw new CertificateRegistryError('certificate_retired', 'Retired certificate state is immutable', 409);
+    }
     certificate.state = 'error';
     certificate.lastError = typeof errorCode === 'string' ? errorCode.slice(0, 120) : 'certificate_operation_failed';
     certificate.updatedAt = new Date(now()).toISOString();
     await persist();
     return publicCertificate(certificate);
+  }
+
+  async function retireForDomainRemoval(certificateId, {
+    expectedDomainId,
+    expectedServerId,
+    expectedState,
+    expectedSource,
+    expectedRenewalMode,
+    expectedStaging,
+    expectedValidTo,
+    expectedUpdatedAt,
+    operationId,
+  } = {}) {
+    await ensureInitialized();
+    const certificate = requireCertificate(state, certificateId);
+    if (typeof operationId !== 'string' || !SAFE_OPERATION_ID.test(operationId)) {
+      throw new CertificateRegistryError(
+        'certificate_retirement_operation_invalid',
+        'Certificate retirement requires an exact Domain removal operation identity',
+      );
+    }
+    if (certificate.state === 'retired') {
+      if (certificate.domainId !== expectedDomainId
+        || certificate.serverId !== expectedServerId
+        || certificate.retirementOperationId !== operationId
+        || certificate.retiredFromState !== expectedState
+        || certificate.source !== expectedSource
+        || certificate.renewalMode !== expectedRenewalMode
+        || certificate.staging !== expectedStaging
+        || (certificate.validTo ?? null) !== expectedValidTo
+        || certificate.retiredFromUpdatedAt !== expectedUpdatedAt) {
+        throw new CertificateRegistryError(
+          'certificate_retirement_ownership_drift',
+          'Certificate retirement is owned by different Domain removal evidence',
+          409,
+        );
+      }
+      return Object.freeze({ changed: false, certificate: publicCertificate(certificate) });
+    }
+    if (certificate.domainId !== expectedDomainId
+      || certificate.serverId !== expectedServerId
+      || certificate.state !== expectedState
+      || certificate.source !== expectedSource
+      || certificate.renewalMode !== expectedRenewalMode
+      || certificate.staging !== expectedStaging
+      || (certificate.validTo ?? null) !== expectedValidTo
+      || certificate.updatedAt !== expectedUpdatedAt) {
+      throw new CertificateRegistryError(
+        'certificate_retirement_intent_drift',
+        'Certificate state changed after Domain removal planning',
+        409,
+      );
+    }
+    const retiredAt = new Date(now()).toISOString();
+    certificate.retiredFromState = certificate.state;
+    certificate.retiredFromUpdatedAt = certificate.updatedAt;
+    certificate.state = 'retired';
+    certificate.retirementOperationId = operationId;
+    certificate.retiredAt = retiredAt;
+    certificate.lastError = null;
+    certificate.updatedAt = retiredAt;
+    await persist();
+    return Object.freeze({ changed: true, certificate: publicCertificate(certificate) });
   }
 
   async function getCertificate(certificateId) {
@@ -630,6 +758,7 @@ export function createCertificateRegistry({
     markValidated,
     markActive,
     markFailed,
+    retireForDomainRemoval,
     getCertificate,
     getForDomain,
     listCertificates,

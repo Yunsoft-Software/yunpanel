@@ -23,6 +23,24 @@ function noZoneDnsReference(domainId, previewDigest = '1'.repeat(64)) {
   };
 }
 
+function certificateReference(id, domainId = 'domain-1', overrides = {}) {
+  return {
+    id,
+    domainId,
+    serverId: 'local',
+    state: 'active',
+    source: 'acme',
+    renewalMode: 'automatic',
+    staging: false,
+    validTo: '2026-12-01T00:00:00.000Z',
+    updatedAt: '2026-09-18T20:00:00.000Z',
+    retirementOperationId: null,
+    retiredAt: null,
+    retiredFromState: null,
+    ...overrides,
+  };
+}
+
 function domain(overrides = {}) {
   return {
     id: 'domain-1',
@@ -74,7 +92,11 @@ function impact(currentDomain = domain(), overrides = {}) {
     managedComposeBinding: null,
     dnsZones: [{ id: 'external-zone-1' }],
     mailDomains: [{ id: 'mail-domain-1' }],
-    certificates: [{ id: currentDomain.certificateId }],
+    certificates: currentDomain.certificateId === null
+      ? []
+      : [certificateReference(currentDomain.certificateId, currentDomain.id, {
+        serverId: currentDomain.serverId,
+      })],
     activeJobs: [],
     mailboxes: { status: 'available', items: [] },
     backups: { status: 'available', items: [] },
@@ -165,6 +187,10 @@ test('pins current resource-impact evidence into a deterministic Domain removal 
   }]);
   assert.equal(preview.plan.websiteId, 'website-1');
   assert.deepEqual(preview.plan.certificateIds, ['certificate-1']);
+  assert.equal(preview.plan.boundCertificateId, 'certificate-1');
+  assert.deepEqual(preview.plan.certificateIntents, [
+    certificateReference('certificate-1'),
+  ]);
   assert.equal(preview.plan.authoritativeDns.previewDigest, dnsPreviewDigest);
   assert.equal(preview.plan.authoritativeDns.ownershipEvidenceDigest, ownershipEvidenceDigest);
   assert.equal(preview.plan.authoritativeDns.snapshotRetentionDays, 30);
@@ -277,6 +303,61 @@ test('dependency drift changes the Domain removal preview digest', () => {
   });
 
   assert.notEqual(first.previewDigest, second.previewDigest);
+});
+
+test('certificate lifecycle drift is pinned and cross-Domain evidence fails closed', () => {
+  const currentDomain = domain();
+  const first = createDomainRemovalPreview({
+    domain: currentDomain,
+    impact: impact(currentDomain),
+  });
+  const changedImpact = impact(currentDomain);
+  changedImpact.dependencies = {
+    ...changedImpact.dependencies,
+    certificates: [certificateReference('certificate-1', currentDomain.id, {
+      updatedAt: '2026-09-18T20:05:00.000Z',
+    })],
+  };
+  const changed = createDomainRemovalPreview({
+    domain: currentDomain,
+    impact: changedImpact,
+  });
+  assert.notEqual(first.previewDigest, changed.previewDigest);
+
+  const missingImpact = impact(currentDomain);
+  missingImpact.dependencies = { ...missingImpact.dependencies, certificates: [] };
+  assert.throws(
+    () => createDomainRemovalPreview({ domain: currentDomain, impact: missingImpact }),
+    (error) => error instanceof DomainRemovalPlanError
+      && error.code === 'domain_removal_impact_stale',
+  );
+
+  const foreignImpact = impact(currentDomain);
+  foreignImpact.dependencies = {
+    ...foreignImpact.dependencies,
+    certificates: [certificateReference('certificate-1', 'foreign-domain')],
+  };
+  assert.throws(
+    () => createDomainRemovalPreview({ domain: currentDomain, impact: foreignImpact }),
+    (error) => error instanceof DomainRemovalPlanError
+      && error.code === 'domain_removal_impact_stale',
+  );
+
+  const retiredImpact = impact(currentDomain);
+  retiredImpact.dependencies = {
+    ...retiredImpact.dependencies,
+    certificates: [certificateReference('certificate-1', currentDomain.id, {
+      state: 'retired',
+      retirementOperationId: 'older-domain-removal',
+      retiredAt: '2026-09-18T20:01:00.000Z',
+      retiredFromState: 'active',
+    })],
+  };
+  assert.throws(
+    () => createDomainRemovalPreview({ domain: currentDomain, impact: retiredImpact }),
+    (error) => error instanceof DomainRemovalPlanError
+      && error.code === 'domain_removal_preview_invalid',
+  );
 });
 
 test('child Domain revision and checksum drift changes the parent removal intent', () => {

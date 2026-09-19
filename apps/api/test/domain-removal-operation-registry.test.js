@@ -73,6 +73,21 @@ function preview() {
       applicationId: 'application-1',
       managedComposeProjectId: null,
       certificateIds: ['certificate-1'],
+      certificateIntents: [{
+        id: 'certificate-1',
+        domainId: 'domain-1',
+        serverId: 'local',
+        state: 'active',
+        source: 'acme',
+        renewalMode: 'automatic',
+        staging: false,
+        validTo: '2026-12-01T00:00:00.000Z',
+        updatedAt: '2026-09-18T20:00:00.000Z',
+        retirementOperationId: null,
+        retiredAt: null,
+        retiredFromState: null,
+      }],
+      boundCertificateId: 'certificate-1',
       dnsZoneIds: ['external-zone-1'],
       mailDomainIds: ['mail-domain-1'],
       activeJobIds: [],
@@ -134,6 +149,35 @@ test('journals deterministic reverse-dependency steps and preserves private star
   assert.equal(Object.hasOwn(publicView, 'startConfirmation'), false);
 });
 
+test('parent journal delegates descendant certificates to child Domain operations', async () => {
+  const input = preview();
+  input.plan.childDomains[0] = {
+    ...input.plan.childDomains[0],
+    certificateId: 'child-certificate-1',
+  };
+  input.plan.certificateIds = ['certificate-1', 'child-certificate-1'];
+  input.plan.certificateIntents = [
+    ...input.plan.certificateIntents,
+    {
+      ...input.plan.certificateIntents[0],
+      id: 'child-certificate-1',
+      domainId: 'child-domain-1',
+    },
+  ];
+  const registry = createDomainRemovalOperationRegistry({
+    idFactory: () => 'operation-1',
+    now: () => Date.parse('2026-09-18T20:00:00.000Z'),
+  });
+
+  const operation = await registry.create(input);
+
+  assert.deepEqual(
+    operation.steps.filter((step) => step.kind === 'certificate').map((step) => step.resourceId),
+    ['certificate-1'],
+  );
+  assert.equal(operation.plan.certificateIntents.length, 2);
+});
+
 test('binds child operations to one parent and blocks concurrent Domain removal ownership', async () => {
   let nextId = 0;
   const registry = createDomainRemovalOperationRegistry({
@@ -146,6 +190,13 @@ test('binds child operations to one parent and blocks concurrent Domain removal 
     ...ownedPreview.domain,
     id: 'owned-domain-1',
     primaryDomain: 'owned.example.com',
+    certificateId: null,
+  };
+  ownedPreview.plan = {
+    ...ownedPreview.plan,
+    certificateIds: [],
+    certificateIntents: [],
+    boundCertificateId: null,
   };
   ownedPreview.impact = {
     ...ownedPreview.impact,
@@ -207,11 +258,24 @@ test('legacy journal plans load fail-closed without inventing DNS ownership or r
 test('legacy journal plans load without inventing exact child Domain intent evidence', () => {
   const legacy = preview().plan;
   delete legacy.childDomains;
+  delete legacy.certificateIntents;
+  delete legacy.boundCertificateId;
 
   const normalized = domainRemovalOperationRegistryInternals.normalizedPlan(legacy);
 
   assert.deepEqual(normalized.childDomainIds, ['child-domain-1']);
   assert.equal(normalized.childDomains, null);
+});
+
+test('prior journal plans load without inventing certificate retirement evidence', () => {
+  const prior = preview().plan;
+  delete prior.certificateIntents;
+  delete prior.boundCertificateId;
+
+  const normalized = domainRemovalOperationRegistryInternals.normalizedPlan(prior);
+
+  assert.equal(normalized.certificateIntents, null);
+  assert.equal(normalized.boundCertificateId, null);
 });
 
 test('prior child snapshots load without inventing authoritative DNS intent', () => {
@@ -266,6 +330,22 @@ test('new operations reject missing or drifted child Domain intent evidence', as
   delete missingDnsIntent.plan.childDomains[0].authoritativeDns;
   await assert.rejects(
     registry.create(missingDnsIntent),
+    (error) => error instanceof DomainRemovalOperationRegistryError
+      && error.code === 'domain_removal_operation_state_invalid',
+  );
+
+  const missingCertificateIntent = preview();
+  delete missingCertificateIntent.plan.certificateIntents;
+  await assert.rejects(
+    registry.create(missingCertificateIntent),
+    (error) => error instanceof DomainRemovalOperationRegistryError
+      && error.code === 'domain_removal_operation_state_invalid',
+  );
+
+  const driftedCertificateBinding = preview();
+  driftedCertificateBinding.plan.boundCertificateId = null;
+  await assert.rejects(
+    registry.create(driftedCertificateBinding),
     (error) => error instanceof DomainRemovalOperationRegistryError
       && error.code === 'domain_removal_operation_state_invalid',
   );

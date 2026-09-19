@@ -89,6 +89,21 @@ function removalPreview({
       applicationId: 'application-1',
       managedComposeProjectId: null,
       certificateIds: ['certificate-1'],
+      certificateIntents: [{
+        id: 'certificate-1',
+        domainId: 'domain-1',
+        serverId: 'local',
+        state: 'active',
+        source: 'acme',
+        renewalMode: 'automatic',
+        staging: false,
+        validTo: '2026-12-01T00:00:00.000Z',
+        updatedAt: '2026-09-18T20:00:00.000Z',
+        retirementOperationId: null,
+        retiredAt: null,
+        retiredFromState: null,
+      }],
+      boundCertificateId: 'certificate-1',
       dnsZoneIds: [],
       mailDomainIds: [],
       activeJobIds: [],
@@ -135,6 +150,8 @@ function leafRemovalPreview() {
       childDomainIds: [],
       childDomains: [],
       certificateIds: [],
+      certificateIntents: [],
+      boundCertificateId: null,
       dnsZoneIds: [],
       mailDomainIds: [],
       authoritativeDns: null,
@@ -174,6 +191,8 @@ function childRemovalPreview(overrides = {}) {
       applicationId: 'application-2',
       managedComposeProjectId: null,
       certificateIds: [],
+      certificateIntents: [],
+      boundCertificateId: null,
       dnsZoneIds: [],
       mailDomainIds: [],
       activeJobIds: [],
@@ -196,6 +215,43 @@ function childRemovalPreview(overrides = {}) {
     ...overrides,
     domain: { ...base.domain, ...(overrides.domain ?? {}) },
     plan: { ...base.plan, ...(overrides.plan ?? {}) },
+  };
+}
+
+function certificateRemovalPreview() {
+  const base = leafRemovalPreview();
+  const certificatePreviewDigest = 'b'.repeat(64);
+  return {
+    ...base,
+    domain: {
+      ...base.domain,
+      certificateId: 'certificate-1',
+    },
+    impact: {
+      ...base.impact,
+      blockers: ['certificates_present', ...base.impact.blockers],
+    },
+    plan: {
+      ...base.plan,
+      certificateIds: ['certificate-1'],
+      certificateIntents: [{
+        id: 'certificate-1',
+        domainId: 'domain-1',
+        serverId: 'local',
+        state: 'active',
+        source: 'acme',
+        renewalMode: 'automatic',
+        staging: false,
+        validTo: '2026-12-01T00:00:00.000Z',
+        updatedAt: '2026-09-18T20:00:00.000Z',
+        retirementOperationId: null,
+        retiredAt: null,
+        retiredFromState: null,
+      }],
+      boundCertificateId: 'certificate-1',
+    },
+    previewDigest: certificatePreviewDigest,
+    confirmation: `start-domain-remove:domain-1:4:${certificatePreviewDigest}`,
   };
 }
 
@@ -295,13 +351,13 @@ function createNestedRegistry() {
   });
 }
 
-function childDomainControlPlaneFixture() {
+function childDomainControlPlaneFixture({ certificateId = null } = {}) {
   let current = {
     id: 'child-domain-1',
     serverId: 'local',
     primaryDomain: 'api.example.com',
     websiteId: 'website-2',
-    certificateId: null,
+    certificateId,
     state: 'active',
     desiredRevision: 2,
     stagedRevision: 2,
@@ -313,6 +369,7 @@ function childDomainControlPlaneFixture() {
     lastError: null,
   };
   let detachCalls = 0;
+  let certificateDetachCalls = 0;
   let finalizeCalls = 0;
   return {
     manager: {
@@ -333,6 +390,22 @@ function childDomainControlPlaneFixture() {
         return {
           changed: true,
           detachedWebsiteId: 'website-2',
+          domain: { ...current },
+        };
+      },
+      async detachCertificateForRemoval(id, input) {
+        certificateDetachCalls += 1;
+        assert.equal(id, 'child-domain-1');
+        assert.deepEqual(input, {
+          expectedCertificateId: certificateId,
+          expectedRevision: 2,
+          checksum: childChecksum,
+          suspensionOperationId: 'child-suspension-operation-1',
+        });
+        current = { ...current, certificateId: null };
+        return {
+          changed: true,
+          detachedCertificateId: certificateId,
           domain: { ...current },
         };
       },
@@ -366,6 +439,7 @@ function childDomainControlPlaneFixture() {
       };
     },
     counts: () => ({ detachCalls, finalizeCalls }),
+    certificateDetachCalls: () => certificateDetachCalls,
   };
 }
 
@@ -418,13 +492,17 @@ function suspendedChildDomain() {
   };
 }
 
-function domainRegistryFixture({ websiteId = 'website-1', present = true } = {}) {
+function domainRegistryFixture({
+  websiteId = 'website-1',
+  certificateId = null,
+  present = true,
+} = {}) {
   let current = present ? {
     id: 'domain-1',
     serverId: 'local',
     primaryDomain: 'example.com',
     websiteId,
-    certificateId: null,
+    certificateId,
     state: 'suspended',
     desiredRevision: 4,
     stagedRevision: 4,
@@ -436,6 +514,7 @@ function domainRegistryFixture({ websiteId = 'website-1', present = true } = {})
     lastError: null,
   } : null;
   let detachCalls = 0;
+  let certificateDetachCalls = 0;
   let finalizeCalls = 0;
   return {
     manager: {
@@ -456,6 +535,22 @@ function domainRegistryFixture({ websiteId = 'website-1', present = true } = {})
         return {
           changed: true,
           detachedWebsiteId: 'website-1',
+          domain: { ...current },
+        };
+      },
+      async detachCertificateForRemoval(id, input) {
+        certificateDetachCalls += 1;
+        assert.equal(id, 'domain-1');
+        assert.deepEqual(input, {
+          expectedCertificateId: 'certificate-1',
+          expectedRevision: 4,
+          checksum,
+          suspensionOperationId: 'suspension-operation-1',
+        });
+        current = { ...current, certificateId: null };
+        return {
+          changed: true,
+          detachedCertificateId: 'certificate-1',
           domain: { ...current },
         };
       },
@@ -481,6 +576,7 @@ function domainRegistryFixture({ websiteId = 'website-1', present = true } = {})
       },
     },
     counts: () => ({ detachCalls, finalizeCalls }),
+    certificateDetachCalls: () => certificateDetachCalls,
     setWebsiteId(value) { current = { ...current, websiteId: value }; },
     removeDomain() { current = null; },
   };
@@ -723,6 +819,70 @@ function childDnsRetirementRuntimeFixture() {
   };
 }
 
+function certificateRegistryFixture({
+  id = 'certificate-1',
+  domainId = 'domain-1',
+  operationId = 'removal-operation-1',
+  state = 'active',
+  updatedAt = '2026-09-18T20:00:00.000Z',
+  retirementOperationId = null,
+  retiredAt = null,
+  retiredFromState = null,
+  retiredFromUpdatedAt = null,
+} = {}) {
+  let current = {
+    id,
+    domainId,
+    serverId: 'local',
+    state,
+    source: 'acme',
+    renewalMode: 'automatic',
+    staging: false,
+    validTo: '2026-12-01T00:00:00.000Z',
+    updatedAt,
+    retirementOperationId,
+    retiredAt,
+    retiredFromState,
+    retiredFromUpdatedAt,
+  };
+  let retireCalls = 0;
+  return {
+    registry: {
+      async getCertificate(id) {
+        assert.equal(id, current.id);
+        return { ...current };
+      },
+      async retireForDomainRemoval(certificateId, input) {
+        retireCalls += 1;
+        assert.equal(certificateId, current.id);
+        assert.deepEqual(input, {
+          expectedDomainId: current.domainId,
+          expectedServerId: 'local',
+          expectedState: 'active',
+          expectedSource: 'acme',
+          expectedRenewalMode: 'automatic',
+          expectedStaging: false,
+          expectedValidTo: '2026-12-01T00:00:00.000Z',
+          expectedUpdatedAt: '2026-09-18T20:00:00.000Z',
+          operationId,
+        });
+        current = {
+          ...current,
+          state: 'retired',
+          updatedAt: '2026-09-18T21:00:00.000Z',
+          retirementOperationId: input.operationId,
+          retiredAt: '2026-09-18T21:00:00.000Z',
+          retiredFromState: input.expectedState,
+          retiredFromUpdatedAt: input.expectedUpdatedAt,
+        };
+        return { changed: true, certificate: { ...current } };
+      },
+    },
+    current: () => ({ ...current }),
+    retireCalls: () => retireCalls,
+  };
+}
+
 async function completeRoutingStep(registry, preview = leafRemovalPreview()) {
   const operation = await registry.create(preview);
   const running = await registry.markStepRunning(operation.id, operation.steps[0].id);
@@ -781,6 +941,118 @@ test('explicit removal start delegates routing mutation to durable Domain suspen
   assert.equal(operation.steps[1].status, 'pending');
 });
 
+test('explicit continuation detaches the bound certificate and retires its registry record', async () => {
+  const registry = createRegistry();
+  const preview = certificateRemovalPreview();
+  let operation = await completeRoutingStep(registry, preview);
+  const domains = domainRegistryFixture({ certificateId: 'certificate-1' });
+  const certificates = certificateRegistryFixture();
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    certificateRegistry: certificates.registry,
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions?.stepContinuationConfirmation
+      ?? `continue-domain-remove-step:${operation.domainId}:${operation.id}:${operation.steps[1].id}:${operation.updatedAt}:${operation.checksum}`,
+  });
+
+  assert.equal(operation.steps[1].kind, 'certificate');
+  assert.equal(operation.steps[1].status, 'succeeded');
+  assert.equal(operation.steps[1].result.referenceId, 'certificate-1');
+  assert.equal(operation.steps[2].kind, 'website_binding');
+  assert.equal(domains.certificateDetachCalls(), 1);
+  assert.equal(certificates.retireCalls(), 1);
+  assert.equal(certificates.current().state, 'retired');
+  assert.equal(certificates.current().retirementOperationId, operation.id);
+});
+
+test('startup reconciles exact operation-owned certificate retirement without replaying mutation', async () => {
+  const registry = createRegistry();
+  let operation = await completeRoutingStep(registry, certificateRemovalPreview());
+  operation = await registry.markStepRunning(operation.id, operation.steps[1].id);
+  const domains = domainRegistryFixture({ certificateId: null });
+  const certificates = certificateRegistryFixture({
+    state: 'retired',
+    updatedAt: '2026-09-18T21:00:00.000Z',
+    retirementOperationId: operation.id,
+    retiredAt: '2026-09-18T21:00:00.000Z',
+    retiredFromState: 'active',
+    retiredFromUpdatedAt: '2026-09-18T20:00:00.000Z',
+  });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => { throw new Error('startup must not create a preview'); },
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    certificateRegistry: certificates.registry,
+  });
+
+  const recovery = await runtime.init();
+
+  assert.equal(recovery.length, 1);
+  assert.equal(recovery[0].recovered, true);
+  assert.equal(recovery[0].operation.steps[1].status, 'succeeded');
+  assert.equal(domains.certificateDetachCalls(), 0);
+  assert.equal(certificates.retireCalls(), 0);
+});
+
+test('startup blocks an incomplete certificate step and explicit drift fails before detachment', async () => {
+  const registry = createRegistry();
+  let operation = await completeRoutingStep(registry, certificateRemovalPreview());
+  operation = await registry.markStepRunning(operation.id, operation.steps[1].id);
+  const domains = domainRegistryFixture({ certificateId: 'certificate-1' });
+  const certificates = certificateRegistryFixture();
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => { throw new Error('startup must not create a preview'); },
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    certificateRegistry: certificates.registry,
+  });
+
+  const recovery = await runtime.init();
+  assert.equal(recovery[0].recovered, false);
+  assert.equal(recovery[0].operation.steps[1].status, 'blocked');
+  assert.equal(recovery[0].operation.steps[1].error.code, 'domain_removal_certificate_retry_required');
+  assert.equal(domains.certificateDetachCalls(), 0);
+  assert.equal(certificates.retireCalls(), 0);
+
+  const driftedRegistry = createRegistry();
+  let driftedOperation = await completeRoutingStep(driftedRegistry, certificateRemovalPreview());
+  const driftedDomains = domainRegistryFixture({ certificateId: 'certificate-1' });
+  const driftedCertificates = certificateRegistryFixture({
+    updatedAt: '2026-09-18T20:05:00.000Z',
+  });
+  const driftedRuntime = createDomainRemovalRuntime({
+    registry: driftedRegistry,
+    previewProvider: async () => certificateRemovalPreview(),
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: driftedDomains.manager,
+    certificateRegistry: driftedCertificates.registry,
+  });
+  driftedOperation = await driftedRuntime.continueStep({
+    domainId: driftedOperation.domainId,
+    operationId: driftedOperation.id,
+    expectedUpdatedAt: driftedOperation.updatedAt,
+    stepId: driftedOperation.steps[1].id,
+    checksum: driftedOperation.checksum,
+    confirmation: `continue-domain-remove-step:${driftedOperation.domainId}:${driftedOperation.id}:${driftedOperation.steps[1].id}:${driftedOperation.updatedAt}:${driftedOperation.checksum}`,
+  });
+  assert.equal(driftedOperation.steps[1].status, 'blocked');
+  assert.equal(driftedOperation.steps[1].error.code, 'domain_removal_certificate_intent_drift');
+  assert.equal(driftedDomains.certificateDetachCalls(), 0);
+  assert.equal(driftedCertificates.retireCalls(), 0);
+});
+
 test('explicit parent continuations drive one parent-owned leaf child Domain operation at a time', async () => {
   const registry = createNestedRegistry();
   const parentPreview = removalPreview();
@@ -836,6 +1108,93 @@ test('explicit parent continuations drive one parent-owned leaf child Domain ope
   childOperations = await registry.listForDomain('child-domain-1');
   assert.equal(childOperations[0].status, 'removed');
   assert.deepEqual(domains.counts(), { detachCalls: 1, finalizeCalls: 1 });
+});
+
+test('parent delegates an exact descendant certificate retirement to the child journal', async () => {
+  const childCertificate = {
+    id: 'child-certificate-1',
+    domainId: 'child-domain-1',
+    serverId: 'local',
+    state: 'active',
+    source: 'acme',
+    renewalMode: 'automatic',
+    staging: false,
+    validTo: '2026-12-01T00:00:00.000Z',
+    updatedAt: '2026-09-18T20:00:00.000Z',
+    retirementOperationId: null,
+    retiredAt: null,
+    retiredFromState: null,
+  };
+  const registry = createNestedRegistry();
+  const parentPreview = removalPreview();
+  parentPreview.plan.childDomains[0] = {
+    ...parentPreview.plan.childDomains[0],
+    certificateId: childCertificate.id,
+  };
+  parentPreview.plan.certificateIds = ['certificate-1', childCertificate.id];
+  parentPreview.plan.certificateIntents = [
+    ...parentPreview.plan.certificateIntents,
+    childCertificate,
+  ];
+  const childPreview = childRemovalPreview({
+    domain: { certificateId: childCertificate.id },
+    plan: {
+      certificateIds: [childCertificate.id],
+      certificateIntents: [childCertificate],
+      boundCertificateId: childCertificate.id,
+    },
+  });
+  const domains = childDomainControlPlaneFixture({ certificateId: childCertificate.id });
+  const suspensions = nestedSuspensionRuntime(domains);
+  const certificates = certificateRegistryFixture({
+    id: childCertificate.id,
+    domainId: childCertificate.domainId,
+    operationId: 'removal-operation-2',
+  });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async ({ domainId }) => (
+      domainId === 'domain-1' ? parentPreview : childPreview
+    ),
+    suspensionRuntime: suspensions.runtime,
+    domainRegistry: domains.manager,
+    certificateRegistry: certificates.registry,
+  });
+  let operation = await runtime.start({
+    domainId: parentPreview.domain.id,
+    previewDigest: parentPreview.previewDigest,
+    confirmation: parentPreview.confirmation,
+  });
+  const continueChild = () => runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+
+  operation = await continueChild();
+  let [childOperation] = await registry.listForDomain('child-domain-1');
+  assert.deepEqual(childOperation.steps.map((step) => [step.kind, step.status]), [
+    ['routing_suspend', 'succeeded'],
+    ['certificate', 'pending'],
+    ['website_binding', 'pending'],
+    ['metadata_finalization', 'pending'],
+  ]);
+
+  operation = await continueChild();
+  [childOperation] = await registry.listForDomain('child-domain-1');
+  assert.equal(childOperation.steps[1].status, 'succeeded');
+  assert.equal(domains.certificateDetachCalls(), 1);
+  assert.equal(certificates.retireCalls(), 1);
+
+  operation = await continueChild();
+  operation = await continueChild();
+  assert.equal(operation.steps[1].status, 'succeeded');
+  assert.equal(operation.steps[2].kind, 'certificate');
+  [childOperation] = await registry.listForDomain('child-domain-1');
+  assert.equal(childOperation.status, 'removed');
 });
 
 test('parent-owned child removal delegates exact local DNS retirement before child finalization', async () => {

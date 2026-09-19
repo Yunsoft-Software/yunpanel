@@ -3,6 +3,12 @@ import { createHash } from 'node:crypto';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SAFE_ID = /^[A-Za-z0-9._:@-]{1,160}$/;
 const SAFE_BLOCKER = /^[a-z0-9_]{1,120}$/;
+const CERTIFICATE_STATES = new Set([
+  'pending', 'validating', 'validated', 'issuing', 'active', 'renewing', 'superseded',
+  'error',
+]);
+const CERTIFICATE_SOURCES = new Set(['acme', 'custom']);
+const CERTIFICATE_RENEWAL_MODES = new Set(['automatic', 'manual']);
 
 const ORCHESTRATABLE_IMPACT_BLOCKERS = new Set([
   'child_domains_present',
@@ -68,6 +74,18 @@ function safeBlockerCode(value) {
     throw new DomainRemovalPlanError(
       'domain_removal_preview_invalid',
       'Domain removal blocker metadata is invalid',
+      409,
+    );
+  }
+  return value;
+}
+
+function safeTimestamp(value, field) {
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))
+    || new Date(value).toISOString() !== value) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_preview_invalid',
+      `${field} is invalid for Domain removal planning`,
       409,
     );
   }
@@ -323,6 +341,94 @@ function authoritativeDnsReference(dependencies, domainId) {
   });
 }
 
+function certificateReferences(values, domain, childDomains) {
+  if (!Array.isArray(values) || values.length > 500) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_preview_invalid',
+      'Certificate dependency inventory is invalid',
+      409,
+    );
+  }
+  const fields = new Set([
+    'id', 'domainId', 'serverId', 'state', 'source', 'renewalMode', 'staging', 'validTo',
+    'updatedAt', 'retirementOperationId', 'retiredAt', 'retiredFromState',
+  ]);
+  const affectedDomainIds = new Set([domain.id, ...childDomains.map((child) => child.id)]);
+  const references = values.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).length !== fields.size
+      || Object.keys(value).some((field) => !fields.has(field))
+      || !CERTIFICATE_STATES.has(value.state)
+      || !CERTIFICATE_SOURCES.has(value.source)
+      || !CERTIFICATE_RENEWAL_MODES.has(value.renewalMode)
+      || (value.source === 'acme' && value.renewalMode !== 'automatic')
+      || (value.source === 'custom' && value.renewalMode !== 'manual')
+      || typeof value.staging !== 'boolean'
+      || (value.validTo !== null && (typeof value.validTo !== 'string'
+        || !Number.isFinite(Date.parse(value.validTo))))) {
+      throw new DomainRemovalPlanError(
+        'domain_removal_preview_invalid',
+        'Certificate dependency evidence is invalid',
+        409,
+      );
+    }
+    const reference = {
+      id: safeId(value.id, 'certificateId'),
+      domainId: safeId(value.domainId, 'certificateDomainId'),
+      serverId: safeId(value.serverId, 'certificateServerId'),
+      state: value.state,
+      source: value.source,
+      renewalMode: value.renewalMode,
+      staging: value.staging,
+      validTo: value.validTo === null ? null : new Date(value.validTo).toISOString(),
+      updatedAt: safeTimestamp(value.updatedAt, 'certificateUpdatedAt'),
+      retirementOperationId: value.retirementOperationId === null
+        ? null
+        : safeId(value.retirementOperationId, 'certificateRetirementOperationId'),
+      retiredAt: value.retiredAt === null
+        ? null
+        : safeTimestamp(value.retiredAt, 'certificateRetiredAt'),
+      retiredFromState: value.retiredFromState,
+    };
+    const retired = reference.state === 'retired';
+    if (!affectedDomainIds.has(reference.domainId) || reference.serverId !== domain.serverId
+      || retired !== (reference.retirementOperationId !== null
+        && reference.retiredAt !== null
+        && CERTIFICATE_STATES.has(reference.retiredFromState)
+        && reference.retiredFromState !== 'retired')
+      || (!retired && (reference.retirementOperationId !== null
+        || reference.retiredAt !== null || reference.retiredFromState !== null))) {
+      throw new DomainRemovalPlanError(
+        'domain_removal_impact_stale',
+        'Certificate dependency evidence does not match the affected Domain set',
+        409,
+      );
+    }
+    return Object.freeze(reference);
+  }).sort((left, right) => left.id.localeCompare(right.id));
+  if (new Set(references.map((reference) => reference.id)).size !== references.length) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_preview_invalid',
+      'Certificate dependency inventory contains duplicate identities',
+      409,
+    );
+  }
+  for (const currentDomain of [domain, ...childDomains]) {
+    if (currentDomain.certificateId === null) continue;
+    const matching = references.filter((reference) => (
+      reference.id === currentDomain.certificateId && reference.domainId === currentDomain.id
+    ));
+    if (matching.length !== 1) {
+      throw new DomainRemovalPlanError(
+        'domain_removal_impact_stale',
+        'Bound Domain certificate is missing from exact dependency evidence',
+        409,
+      );
+    }
+  }
+  return Object.freeze(references);
+}
+
 function dependencyPlan(dependencies, domain) {
   if (!dependencies || typeof dependencies !== 'object' || Array.isArray(dependencies)) {
     throw new DomainRemovalPlanError(
@@ -340,14 +446,6 @@ function dependencyPlan(dependencies, domain) {
       409,
     );
   }
-  const certificates = normalizedIds(dependencies.certificates ?? [], 'certificate');
-  if (domain.certificateId !== null && !certificates.includes(domain.certificateId)) {
-    throw new DomainRemovalPlanError(
-      'domain_removal_impact_stale',
-      'Domain certificate binding is missing from resource-impact evidence',
-      409,
-    );
-  }
   const additional = Object.freeze({
     mailboxes: normalizedBucket(dependencies.mailboxes, 'mailbox'),
     backups: normalizedBucket(dependencies.backups, 'backup'),
@@ -362,6 +460,11 @@ function dependencyPlan(dependencies, domain) {
     ...child,
     authoritativeDns: authoritativeDnsReference(dependencies, child.id),
   })));
+  const certificates = certificateReferences(
+    dependencies.certificates ?? [],
+    domain,
+    childDomains,
+  );
   return Object.freeze({
     childDomainIds: Object.freeze(childDomains.map((child) => child.id)),
     childDomains,
@@ -372,7 +475,9 @@ function dependencyPlan(dependencies, domain) {
     managedComposeProjectId: dependencies.managedComposeBinding?.projectId
       ? safeId(dependencies.managedComposeBinding.projectId, 'managedComposeProjectId')
       : null,
-    certificateIds: certificates,
+    certificateIds: Object.freeze(certificates.map((certificate) => certificate.id)),
+    certificateIntents: certificates,
+    boundCertificateId: domain.certificateId,
     dnsZoneIds: normalizedIds(dependencies.dnsZones ?? [], 'dnsZone'),
     mailDomainIds: normalizedIds(dependencies.mailDomains ?? [], 'mailDomain'),
     activeJobIds: activeJobs,
@@ -484,6 +589,7 @@ export const domainRemovalPlanInternals = Object.freeze({
   impactBlockers,
   orderedChildDomains,
   authoritativeDnsReference,
+  certificateReferences,
   dependencyPlan,
   hardBlockers,
 });

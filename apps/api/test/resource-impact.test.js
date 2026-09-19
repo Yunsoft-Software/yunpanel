@@ -215,6 +215,31 @@ test('Domain move preview includes child Website/Application/certificate state a
   );
 });
 
+test('retired certificate records leave the active Domain impact graph', async () => {
+  const state = await fixture();
+  await state.certificateRegistry.retireForDomainRemoval(state.certificate.id, {
+    expectedDomainId: state.certificate.domainId,
+    expectedServerId: state.certificate.serverId,
+    expectedState: state.certificate.state,
+    expectedSource: state.certificate.source,
+    expectedRenewalMode: state.certificate.renewalMode,
+    expectedStaging: state.certificate.staging,
+    expectedValidTo: state.certificate.validTo,
+    expectedUpdatedAt: state.certificate.updatedAt,
+    operationId: 'completed-domain-removal',
+  });
+
+  const preview = await previewResourceImpact({
+    resourceType: 'domain',
+    resourceId: state.domain.id,
+    operation: 'delete',
+    ...dependencies(state),
+  });
+
+  assert.deepEqual(preview.dependencies.certificates, []);
+  assert.equal(preview.blockers.some((item) => item.code === 'certificates_present'), false);
+});
+
 test('impact digest changes with relevant descendants and ignores no dependency as safe', async () => {
   const state = await fixture();
   const input = { resourceType: 'domain', resourceId: state.domain.id, operation: 'delete' };
