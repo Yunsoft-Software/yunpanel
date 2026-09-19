@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  enableManagedMailSql,
   previewManagedMailConfiguration,
   previewManagedMailSecurityConfiguration,
+  previewManagedMailSubmissionConfiguration,
 } from '@yunpanel/config-templates';
 import {
   createMailReadinessInspector,
@@ -31,6 +33,22 @@ function forwardingPreview() {
   });
 }
 
+
+function sqlitePreview() {
+  const input = {
+    domains: ['example.com'],
+    mailboxes: ['owner@example.com'],
+    accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
+    aliases: [],
+    postmasterAddress: 'owner@example.com',
+    forwardings: [],
+  };
+  return enableManagedMailSql(
+    previewManagedMailSubmissionConfiguration(input),
+    input,
+  );
+}
+
 function service(id) {
   return {
     id,
@@ -57,6 +75,8 @@ function healthyOutputs(overrides = {}) {
     [command('/usr/sbin/postconf', ['-h', 'myhostname'])]: 'mail.example.net\n',
     [command('/usr/sbin/postconf', ['-h', 'mydomain'])]: 'example.net\n',
     [command('/usr/sbin/postconf', ['-h', 'mydestination'])]: '$myhostname, localhost.$mydomain, localhost\n',
+    [command('/usr/bin/getent', ['group', 'yunpanel-mailauth'])]: 'yunpanel-mailauth:x:6000:postfix,dovecot\n',
+    [command('/usr/sbin/postconf', ['-m'])]: 'btree\nhash\nsqlite\n',
     [command('/usr/bin/ss', ['-H', '-ltn', 'sport = :11332'])]: '\n',
     ...overrides,
   }));
@@ -74,7 +94,10 @@ function createInspector({ outputs = healthyOutputs(), serviceOverrides = {}, mi
     },
     statFn: async (filePath) => {
       if (missingFiles.includes(filePath)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
-      return { isFile: () => true, mode: filePath === '/usr/bin/sievec' ? sievecMode : 0o600 };
+      return {
+        isFile: () => true,
+        mode: filePath === '/usr/bin/sievec' || filePath === '/usr/bin/sqlite3' ? sievecMode : 0o600,
+      };
     },
   });
 }
@@ -87,6 +110,34 @@ test('marks managed mail ready only when every host and candidate-security requi
   assert.match(result.sha256, /^[a-f0-9]{64}$/);
   assert.equal(JSON.stringify(result).includes('/etc/ssl/private/mail.key'), false);
   assert.equal(JSON.stringify(result).includes('reject_unauth_destination'), false);
+});
+
+test('SQLite mail readiness requires the dedicated auth group, sqlite map support and executable sqlite3', async () => {
+  const candidate = sqlitePreview();
+  const ready = await createInspector().inspect(candidate);
+  assert.equal(ready.ready, true);
+  assert.equal(
+    ready.requirements.some((entry) => entry.id === 'mail_sqlite' && entry.satisfied),
+    true,
+  );
+
+  const badGroup = healthyOutputs({
+    [command('/usr/bin/getent', ['group', 'yunpanel-mailauth'])]: 'yunpanel-mailauth:x:6000:postfix\n',
+  });
+  const groupBlocked = await createInspector({ outputs: badGroup }).inspect(candidate);
+  assert.equal(groupBlocked.ready, false);
+  assert.equal(groupBlocked.blockers.includes('mail_sqlite'), true);
+
+  const noSqliteMap = healthyOutputs({
+    [command('/usr/sbin/postconf', ['-m'])]: 'btree\nhash\n',
+  });
+  const mapBlocked = await createInspector({ outputs: noSqliteMap }).inspect(candidate);
+  assert.equal(mapBlocked.ready, false);
+  assert.equal(mapBlocked.blockers.includes('mail_sqlite'), true);
+
+  const noExecutable = await createInspector({ sievecMode: 0o644 }).inspect(candidate);
+  assert.equal(noExecutable.ready, false);
+  assert.equal(noExecutable.blockers.includes('mail_sqlite'), true);
 });
 
 test('forwarding readiness requires the fixed executable sievec binary', async () => {
