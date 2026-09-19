@@ -599,7 +599,8 @@ function webmailMappingReferences(bucket, domain, childDomains, mailDomains) {
     }
     const mailDomain = mailById.get(item.mailDomainId);
     if (!mailDomain || mailDomain.webDomainId !== item.webDomainId
-      || mailDomain.domainName !== item.domainName) {
+      || mailDomain.domainName !== item.domainName
+      || mailDomain.managementMode !== 'local' || mailDomain.status !== 'enabled') {
       throw new DomainRemovalPlanError(
         'domain_removal_impact_stale',
         'Webmail mapping dependency does not match its Mail Domain',
