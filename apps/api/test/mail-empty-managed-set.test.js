@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mailSubmissionTemplatePolicy } from '@yunpanel/config-templates';
+import { mailSqlTemplatePolicy, mailSubmissionTemplatePolicy } from '@yunpanel/config-templates';
 import { createMailConfigurationService } from '../src/mail-configuration.js';
 
 function fixtureHash() {
@@ -46,9 +46,16 @@ test('last enabled mail domain produces an applyable empty submission-aware mana
   assert.deepEqual(preview.domains, []);
   assert.deepEqual(preview.blockers, []);
   assert.deepEqual(preview.configuration.counts, { domains: 0, mailboxes: 0, aliases: 0, forwardings: 0 });
-  assert.deepEqual(preview.configuration.postfixMasterServices, [mailSubmissionTemplatePolicy.service]);
+  assert.equal(preview.configuration.postfixMasterServices.length, 1);
+  assert.equal(preview.configuration.postfixMasterServices[0].service, mailSubmissionTemplatePolicy.service.service);
   assert.equal(
-    preview.configuration.artifactDigests.some((artifact) => artifact.path === mailSubmissionTemplatePolicy.senderLoginPath),
+    preview.configuration.postfixMasterServices[0].parameters.find(
+      (parameter) => parameter.name === 'smtpd_sender_login_maps',
+    ).value,
+    'proxy:sqlite:' + mailSqlTemplatePolicy.postfixSenderLoginPath,
+  );
+  assert.equal(
+    preview.configuration.artifactDigests.some((artifact) => artifact.path === mailSqlTemplatePolicy.seedPath),
     true,
   );
   assert.match(preview.previewDigest, /^[a-f0-9]{64}$/);
@@ -56,7 +63,7 @@ test('last enabled mail domain produces an applyable empty submission-aware mana
   assert.doesNotMatch(JSON.stringify(preview), /argon2|passwordHash/i);
 });
 
-test('empty managed-set private materialization writes an empty Dovecot passwd file', async () => {
+test('empty managed-set private materialization writes a zero-row SQLite seed', async () => {
   const { service } = createFixture();
   const transition = { mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'disabled' };
   const preview = await service.previewTransition(transition);
@@ -73,6 +80,8 @@ test('empty managed-set private materialization writes an empty Dovecot passwd f
   });
   assert.equal(bundle.preview.sha256, preview.configurationSha256);
   assert.equal(bundle.sensitiveArtifacts.length, 1);
-  assert.equal(bundle.sensitiveArtifacts[0].path, '/etc/yunpanel/mail/dovecot/users');
-  assert.equal(bundle.sensitiveArtifacts[0].content, '');
+  assert.equal(bundle.sensitiveArtifacts[0].path, mailSqlTemplatePolicy.seedPath);
+  assert.match(bundle.sensitiveArtifacts[0].content, /DELETE FROM virtual_mailboxes;/);
+  assert.doesNotMatch(bundle.sensitiveArtifacts[0].content, /INSERT INTO virtual_mailboxes/);
+  assert.equal(bundle.preview.requirements.includes('mail_sqlite'), true);
 });
