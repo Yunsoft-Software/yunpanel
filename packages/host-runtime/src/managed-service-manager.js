@@ -6,6 +6,7 @@ import { parseSystemdProperties } from './systemd-inspector.js';
 const execFileAsync = promisify(execFile);
 const DPKG_QUERY = '/usr/bin/dpkg-query';
 const APT_GET = '/usr/bin/apt-get';
+const ADDUSER = '/usr/sbin/adduser';
 const SYSTEMCTL = '/usr/bin/systemctl';
 const SERVICE_ACTIONS = new Set(['start', 'stop', 'restart']);
 const CONFIGURATION_STATES = Object.freeze({
@@ -25,6 +26,10 @@ function service(definition) {
       args: Object.freeze([...check.args]),
     }))),
     conflicts: Object.freeze([...(definition.conflicts ?? [])]),
+    supplementaryGroups: Object.freeze((definition.supplementaryGroups ?? []).map((membership) => Object.freeze({
+      user: membership.user,
+      group: membership.group,
+    }))),
   });
 }
 
@@ -35,15 +40,21 @@ const SERVICE_CATALOG = Object.freeze([
   service({ id: 'docker', label: 'Docker', category: 'containers', packages: ['docker.io'], units: ['docker.service'] }),
   service({ id: 'cron', label: 'Cron', category: 'scheduler', packages: ['cron'], units: ['cron.service'] }),
   service({
-    id: 'postfix', label: 'Postfix', category: 'mail', packages: ['postfix'], units: ['postfix.service'],
+    id: 'postfix',
+    label: 'Postfix',
+    category: 'mail',
+    packages: ['postfix', 'postfix-sqlite', 'sqlite3'],
+    units: ['postfix.service'],
+    supplementaryGroups: [{ user: 'postfix', group: 'yunpanel-mailauth' }],
     configurationChecks: [{ file: '/usr/sbin/postfix', args: ['check'] }],
   }),
   service({
     id: 'dovecot',
     label: 'Dovecot',
     category: 'mail',
-    packages: ['dovecot-imapd', 'dovecot-lmtpd', 'dovecot-sieve'],
+    packages: ['dovecot-imapd', 'dovecot-lmtpd', 'dovecot-sieve', 'dovecot-sqlite', 'sqlite3'],
     units: ['dovecot.service'],
+    supplementaryGroups: [{ user: 'dovecot', group: 'yunpanel-mailauth' }],
     configurationChecks: [{ file: '/usr/bin/doveconf', args: ['-n'] }],
   }),
   service({
@@ -273,6 +284,21 @@ export function createManagedServiceManager({
         }
       }
 
+      if (definition.supplementaryGroups.length > 0) {
+        try {
+          for (const membership of definition.supplementaryGroups) {
+            await run(ADDUSER, [membership.user, membership.group], {
+              env: { ...process.env, LC_ALL: 'C' },
+            });
+          }
+        } catch {
+          throw new ManagedServiceError(
+            'managed_service_identity_group_failed',
+            `${definition.label} runtime identity could not be bound to its managed access group`,
+          );
+        }
+      }
+
       if (definition.units.length > 0) {
         try {
           for (const unit of definition.units) await run(SYSTEMCTL, ['enable', '--now', unit]);
@@ -336,6 +362,7 @@ export const managedServiceManager = createManagedServiceManager({
 export const managedServicePolicy = Object.freeze({
   dpkgQueryPath: DPKG_QUERY,
   aptGetPath: APT_GET,
+  adduserPath: ADDUSER,
   systemctlPath: SYSTEMCTL,
   services: SERVICE_CATALOG,
   actions: Object.freeze([...SERVICE_ACTIONS]),
