@@ -458,6 +458,8 @@ const mailDomainRemovalRuntimeBundle = localServerId
     mailDkimRegistry,
     mailConfigurationService,
     jobRegistry,
+    roundcubeDomainMappingRegistry,
+    roundcubeDomainMappingService,
     localServerId,
   })
   : null;
@@ -682,6 +684,7 @@ const listener = createAuthenticatedApi({
       mailAliasRegistry,
       mailConfigurationService,
       roundcubeConfigurationService,
+      roundcubeDomainMappingRegistry,
       roundcubeDomainMappingService,
       dockerWorkloadRegistry,
       applicationEnvironmentRegistry,
