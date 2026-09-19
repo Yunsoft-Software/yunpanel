@@ -107,6 +107,12 @@ import { ResourceImpactError } from './resource-impact.js';
 import { mountResourceImpactRoutes } from './resource-impact-http.js';
 import { RoundcubeConfigurationError } from './roundcube-configuration.js';
 import { RoundcubeConfigurationHttpError, mountRoundcubeConfigurationRoutes } from './roundcube-configuration-http.js';
+import {
+  mountRoundcubeDomainMappingRoutes,
+  RoundcubeDomainMappingHttpError,
+} from './roundcube-domain-mapping-http.js';
+import { RoundcubeDomainMappingRegistryError } from './roundcube-domain-mapping-registry.js';
+import { RoundcubeDomainMappingServiceError } from './roundcube-domain-mapping-service.js';
 import { RoundcubeSecretRegistryError } from './roundcube-secret-registry.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 import { ServerDnsIdentityRegistryError } from './server-dns-identity-registry.js';
@@ -238,6 +244,7 @@ export function createApp({
   }),
   mailConfigurationService = null,
   roundcubeConfigurationService = null,
+  roundcubeDomainMappingService = null,
   environment = process.env.NODE_ENV,
   journalLogReader = null,
   nginxLogReader = null,
@@ -634,6 +641,11 @@ export function createApp({
       localServerId,
     });
   }
+  if (roundcubeDomainMappingService) {
+    mountRoundcubeDomainMappingRoutes(app, {
+      service: roundcubeDomainMappingService,
+    });
+  }
   mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry, localServerId });
   mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry, localServerId });
   mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry, localServerId });
@@ -799,6 +811,9 @@ export function createApp({
       || error instanceof ResourceImpactError
       || error instanceof RoundcubeConfigurationError
       || error instanceof RoundcubeConfigurationHttpError
+      || error instanceof RoundcubeDomainMappingHttpError
+      || error instanceof RoundcubeDomainMappingRegistryError
+      || error instanceof RoundcubeDomainMappingServiceError
       || error instanceof RoundcubeSecretRegistryError
       || error instanceof ServerDnsIdentityRegistryError
       || error instanceof SiteFileHttpError
