@@ -33,12 +33,22 @@ function serverId(value) {
 export function createRoundcubeConfigurationService({
   mailServiceIdentityRegistry,
   roundcubeSecretRegistry,
+  roundcubeDomainMappingRegistry = null,
+  certificateRegistry = null,
+  certificateMaterialManager = null,
 } = {}) {
   if (!mailServiceIdentityRegistry || typeof mailServiceIdentityRegistry.getForServer !== 'function'
     || typeof mailServiceIdentityRegistry.materializeForServer !== 'function'
     || !roundcubeSecretRegistry || typeof roundcubeSecretRegistry.getForServer !== 'function'
     || typeof roundcubeSecretRegistry.ensureForServer !== 'function'
-    || typeof roundcubeSecretRegistry.materializeForServer !== 'function') {
+    || typeof roundcubeSecretRegistry.materializeForServer !== 'function'
+    || ((roundcubeDomainMappingRegistry !== null
+      || certificateRegistry !== null
+      || certificateMaterialManager !== null)
+      && (!roundcubeDomainMappingRegistry
+        || typeof roundcubeDomainMappingRegistry.listMappings !== 'function'
+        || !certificateRegistry || typeof certificateRegistry.getCertificate !== 'function'
+        || !certificateMaterialManager || typeof certificateMaterialManager.inspectStored !== 'function'))) {
     throw new RoundcubeConfigurationError('roundcube_configuration_dependencies_invalid', 'Roundcube configuration dependencies are unavailable', 503);
   }
 
@@ -54,10 +64,102 @@ export function createRoundcubeConfigurationService({
     return Object.freeze({ identity, secret, blockers: Object.freeze([...new Set(blockers)]) });
   }
 
+  async function materializeMappings(id) {
+    if (!roundcubeDomainMappingRegistry) {
+      return Object.freeze({ publicMappings: Object.freeze([]), nginxMappings: Object.freeze([]) });
+    }
+    let mappings;
+    try { mappings = await roundcubeDomainMappingRegistry.listMappings({ serverId: id }); }
+    catch {
+      throw new RoundcubeConfigurationError(
+        'roundcube_mapping_inventory_unavailable',
+        'Roundcube Domain mapping inventory could not be read',
+        503,
+      );
+    }
+    if (!Array.isArray(mappings)) {
+      throw new RoundcubeConfigurationError(
+        'roundcube_mapping_inventory_invalid',
+        'Roundcube Domain mapping inventory is invalid',
+        503,
+      );
+    }
+    const publicMappings = [];
+    const nginxMappings = [];
+    for (const mapping of mappings) {
+      let certificate;
+      try { certificate = await certificateRegistry.getCertificate(mapping.certificateId); }
+      catch {
+        throw new RoundcubeConfigurationError(
+          'roundcube_mapping_certificate_unavailable',
+          'Roundcube Domain mapping certificate could not be read',
+          503,
+        );
+      }
+      if (!certificate || certificate.id !== mapping.certificateId
+        || certificate.domainId !== mapping.webDomainId
+        || certificate.serverId !== mapping.serverId
+        || certificate.state !== 'active' || certificate.staging === true
+        || String(certificate.fingerprint256 ?? '').toUpperCase()
+          !== mapping.certificateFingerprint256.toUpperCase()) {
+        throw new RoundcubeConfigurationError(
+          'roundcube_mapping_certificate_drift',
+          'Roundcube Domain mapping certificate state changed after binding',
+          409,
+        );
+      }
+      let material;
+      try {
+        material = await certificateMaterialManager.inspectStored({
+          certificate,
+          domains: [mapping.hostname],
+        });
+      } catch {
+        throw new RoundcubeConfigurationError(
+          'roundcube_mapping_certificate_material_invalid',
+          'Roundcube Domain mapping certificate material no longer covers its hostname',
+          409,
+        );
+      }
+      if (!material || String(material.fingerprint256 ?? '').toUpperCase()
+        !== mapping.certificateFingerprint256.toUpperCase()
+        || typeof certificate.fullchainPath !== 'string'
+        || typeof certificate.privateKeyPath !== 'string') {
+        throw new RoundcubeConfigurationError(
+          'roundcube_mapping_certificate_material_drift',
+          'Roundcube Domain mapping certificate material changed after binding',
+          409,
+        );
+      }
+      publicMappings.push(Object.freeze({
+        id: mapping.id,
+        mailDomainId: mapping.mailDomainId,
+        webDomainId: mapping.webDomainId,
+        hostname: mapping.hostname,
+        certificateId: mapping.certificateId,
+        certificateFingerprint256: mapping.certificateFingerprint256,
+        revision: mapping.revision,
+        updatedAt: mapping.updatedAt,
+      }));
+      nginxMappings.push(Object.freeze({
+        hostname: mapping.hostname,
+        fullchainPath: certificate.fullchainPath,
+        privateKeyPath: certificate.privateKeyPath,
+      }));
+    }
+    publicMappings.sort((left, right) => left.hostname.localeCompare(right.hostname));
+    nginxMappings.sort((left, right) => left.hostname.localeCompare(right.hostname));
+    return Object.freeze({
+      publicMappings: Object.freeze(publicMappings),
+      nginxMappings: Object.freeze(nginxMappings),
+    });
+  }
+
   async function materializeCurrent(id) {
-    const [identity, secret] = await Promise.all([
+    const [identity, secret, mappings] = await Promise.all([
       mailServiceIdentityRegistry.materializeForServer(id),
       roundcubeSecretRegistry.materializeForServer(id),
+      materializeMappings(id),
     ]);
     const configInput = Object.freeze({
       mailHostname: identity.hostname,
@@ -72,6 +174,7 @@ export function createRoundcubeConfigurationService({
       privateKeyPath: identity.privateKeyPath,
       publicRoot: config.publicRoot,
       fpmSocketPath: fpm.socketPath,
+      mappings: mappings.nginxMappings,
     });
     const nginx = previewRoundcubeNginxConfig(nginxInput);
     const identityRecord = Object.freeze({
@@ -91,6 +194,7 @@ export function createRoundcubeConfigurationService({
       fpmServiceUnit: fpm.serviceUnit,
       nginxServiceUnit: nginx.serviceUnit,
       webEndpoint: nginx.endpoint,
+      mappings: mappings.publicMappings,
     });
     return Object.freeze({
       identity: identityRecord,
@@ -122,6 +226,7 @@ export function createRoundcubeConfigurationService({
       }),
       fpm: current.fpm,
       nginx: current.nginx,
+      mappings: current.identity.mappings,
       sideEffects: false,
     });
   }
