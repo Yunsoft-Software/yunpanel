@@ -10,8 +10,16 @@ export function createMailDomainRegistry(options = {}) {
   });
   return Object.freeze({
     init: registry.init,
-    createMailDomain: ({ domainName, webDomainId = null, managementMode } = {}) => registry.createResource({
-      name: domainName, webDomainId, managementMode,
+    createMailDomain: ({
+      mailDomainId = null,
+      domainName,
+      webDomainId = null,
+      managementMode,
+    } = {}) => registry.createResource({
+      resourceId: mailDomainId,
+      name: domainName,
+      webDomainId,
+      managementMode,
     }),
     recordObservation: registry.recordObservation,
     transitionLocalStatus: registry.transitionLocalStatus,
