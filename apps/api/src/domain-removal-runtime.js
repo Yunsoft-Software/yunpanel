@@ -617,7 +617,10 @@ function exactActiveWebmailMapping(intent, mapping) {
 }
 
 function webmailRemovalOperationId(operation, intent) {
-  return `domain-remove:${operation.id}:webmail:${intent.id}`;
+  return 'domain-remove-webmail:' + digest({
+    parentOperationId: operation.id,
+    mappingId: intent.id,
+  });
 }
 
 function exactOwnedWebmailRemoval(operation, intent, mapping) {
