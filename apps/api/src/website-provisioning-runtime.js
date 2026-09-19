@@ -4,6 +4,7 @@ import { createWebsiteDatabaseProvisioningHandler } from './website-database-pro
 import { createWebsiteDomainActivationProvisioningHandler } from './website-domain-activation-provisioning-handler.js';
 import { createWebsiteMailProvisioningHandler } from './website-mail-provisioning-handler.js';
 import { createWebsiteMailDkimKeyProvisioningHandler } from './website-mail-dkim-key-provisioning-handler.js';
+import { createWebsiteMailDnsProvisioningHandler } from './website-mail-dns-provisioning-handler.js';
 import { createWebsiteIsolationAuditService, WebsiteIsolationAuditError } from './website-isolation-audit.js';
 import { createWebsiteIsolationMigrationRegistry } from './website-isolation-migration-registry.js';
 import { createWebsiteIsolationMigrationRuntime } from './website-isolation-migration-runtime.js';
@@ -117,6 +118,7 @@ export function createWebsiteProvisioningRuntime({
   let databaseControlPlane = null;
   let mailControlPlane = null;
   let mailDkimControlPlane = null;
+  let mailDnsControlPlane = null;
 
   function configureSftpKeys(dependencies = {}) {
     const nextService = dependencies.sftpKeyService;
@@ -437,6 +439,40 @@ export function createWebsiteProvisioningRuntime({
   }
 
 
+  function configureMailDnsControlPlane(dependencies = {}) {
+    const {
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailDkimRegistry: nextMailDkimRegistry,
+      dnsZoneReapplyRuntime: nextDnsZoneReapplyRuntime,
+    } = dependencies;
+    if (!nextMailDomainRegistry || !nextDomainRegistry || !nextMailDkimRegistry || !nextDnsZoneReapplyRuntime) {
+      throw new Error('Website local mail DNS provisioning dependencies are required');
+    }
+    if (mailDnsControlPlane) {
+      if (mailDnsControlPlane.mailDomainRegistry !== nextMailDomainRegistry
+        || mailDnsControlPlane.domainRegistry !== nextDomainRegistry
+        || mailDnsControlPlane.mailDkimRegistry !== nextMailDkimRegistry
+        || mailDnsControlPlane.dnsZoneReapplyRuntime !== nextDnsZoneReapplyRuntime) {
+        throw new Error('Website local mail DNS provisioning dependencies cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.mail_dns_reapply = createWebsiteMailDnsProvisioningHandler({
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailDkimRegistry: nextMailDkimRegistry,
+      dnsZoneReapplyRuntime: nextDnsZoneReapplyRuntime,
+    });
+    mailDnsControlPlane = Object.freeze({
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailDkimRegistry: nextMailDkimRegistry,
+      dnsZoneReapplyRuntime: nextDnsZoneReapplyRuntime,
+    });
+    return Object.freeze({ configured: true });
+  }
+
   if (domainRegistry) configureDomainControlPlane({ domainRegistry });
   if (sftpKeyService) configureSftpKeys({ sftpKeyService });
   if (applicationEnvironmentRegistry) configurePassengerEnvironment({ applicationEnvironmentRegistry });
@@ -477,6 +513,7 @@ export function createWebsiteProvisioningRuntime({
     configureDatabaseControlPlane,
     configureMailControlPlane,
     configureMailDkimControlPlane,
+    configureMailDnsControlPlane,
     init,
     get: (operationId) => registry.get(operationId),
     create: (plan) => registry.create(plan),
