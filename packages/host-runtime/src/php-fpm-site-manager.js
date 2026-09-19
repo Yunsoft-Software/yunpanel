@@ -4,7 +4,11 @@ import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path';
 import { promisify } from 'node:util';
 import {
+  phpFpmBinaryPath,
+  phpFpmPackageName,
+  phpFpmPoolDirectory,
   phpFpmPoolPath,
+  phpFpmServiceUnit,
   phpFpmSocketPath,
   phpFpmTemplatePolicy,
   previewWebsitePhpFpmPool,
@@ -16,10 +20,9 @@ import { createWebsiteIdentityPathManager } from './website-identity-path-manage
 const execFileAsync = promisify(execFile);
 const DPKG_QUERY_PATH = '/usr/bin/dpkg-query';
 const APT_GET_PATH = '/usr/bin/apt-get';
-const PHP_FPM_BINARY = '/usr/sbin/php-fpm8.3';
+const APT_CACHE_PATH = '/usr/bin/apt-cache';
 const SYSTEMCTL_PATH = '/usr/bin/systemctl';
 const RECEIPT_ROOT = '/var/lib/yunpanel/staging/php-fpm-sites';
-const PACKAGE_NAME = 'php8.3-fpm';
 const RECEIPT_VERSION = 1;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RECEIPT_STATES = new Set(['prepared', 'active', 'compensated']);
@@ -56,6 +59,7 @@ function normalizeIntent(value) {
     'applicationId',
     'unixUser',
     'documentRoot',
+    'phpVersion',
     'maxChildren',
     'memoryLimitMb',
     'maxExecutionSeconds',
@@ -82,9 +86,18 @@ function normalizeIntent(value) {
     throw new PhpFpmSiteManagerError('php_fpm_site_document_root_invalid', 'PHP-FPM Website document root must stay inside the canonical current release');
   }
 
+  let requestedPhpVersion = phpFpmTemplatePolicy.distroVersion;
+  if (value.phpVersion !== undefined) {
+    if (typeof value.phpVersion !== 'string' || !phpFpmTemplatePolicy.supportedVersions.includes(value.phpVersion)) {
+      throw new PhpFpmSiteManagerError('php_fpm_site_version_unsupported', `PHP ${value.phpVersion} is not supported by the PHP-FPM adapter`);
+    }
+    requestedPhpVersion = value.phpVersion;
+  }
+
   const templateInput = Object.freeze({
     unixUser: identity.unixUser,
     unixGroup: identity.unixUser,
+    phpVersion: requestedPhpVersion,
     applicationRoot,
     documentRoot,
     homeDirectory: identity.paths.workspace.homeDirectory,
@@ -105,6 +118,7 @@ function normalizeIntent(value) {
     websiteId: value.websiteId.toLowerCase(),
     applicationId: identity.applicationId,
     unixUser: identity.unixUser,
+    phpVersion: requestedPhpVersion,
     identity,
     templateInput,
     preview,
@@ -117,6 +131,7 @@ function specDigest(spec) {
     websiteId: spec.websiteId,
     applicationId: spec.applicationId,
     unixUser: spec.unixUser,
+    phpVersion: spec.phpVersion,
     templateSha256: spec.preview.sha256,
   }));
 }
@@ -128,6 +143,7 @@ function normalizeReceipt(value, { operationId, spec } = {}) {
     || value.websiteId !== spec.websiteId
     || value.applicationId !== spec.applicationId
     || value.unixUser !== spec.unixUser
+    || (value.phpVersion && value.phpVersion !== spec.phpVersion)
     || value.specDigest !== specDigest(spec)
     || value.configSha256 !== spec.preview.sha256
     || typeof value.mutated !== 'boolean'
@@ -141,6 +157,7 @@ function normalizeReceipt(value, { operationId, spec } = {}) {
     websiteId: spec.websiteId,
     applicationId: spec.applicationId,
     unixUser: spec.unixUser,
+    phpVersion: spec.phpVersion,
     specDigest: value.specDigest,
     configSha256: value.configSha256,
     mutated: value.mutated,
@@ -236,60 +253,89 @@ export function createPhpFpmSiteManager({
     return normalizeReceipt(receipt, { operationId, spec });
   }
 
-  async function inspectPackage() {
+  async function inspectPackage(version = phpFpmTemplatePolicy.distroVersion) {
+    const packageName = phpFpmPackageName(version);
     try {
-      const result = await run(DPKG_QUERY_PATH, ['-W', '-f=${Status}\t${Version}', PACKAGE_NAME], { timeout: 10_000 });
+      const result = await run(DPKG_QUERY_PATH, ['-W', '-f=${Status}\t${Version}', packageName], { timeout: 10_000 });
       const output = String(result?.stdout ?? '').trim();
       const match = output.match(/^install ok installed\t([^\s]+)$/);
-      return Object.freeze({ installed: Boolean(match), version: match?.[1] ?? null });
+      return Object.freeze({ installed: Boolean(match), version: match?.[1] ?? null, packageName });
     } catch (error) {
-      if (missingPackage(error)) return Object.freeze({ installed: false, version: null });
+      if (missingPackage(error)) return Object.freeze({ installed: false, version: null, packageName });
       throw new PhpFpmSiteManagerError('php_fpm_package_inspection_failed', 'PHP-FPM package state could not be inspected');
     }
   }
 
-  async function ensurePackage() {
-    const before = await inspectPackage();
-    if (before.installed) return before;
+  async function verifyPhpRepository(version) {
+    if (version === phpFpmTemplatePolicy.distroVersion) return true;
+    const packageName = phpFpmPackageName(version);
     try {
-      await run(APT_GET_PATH, ['install', '--yes', '--no-install-recommends', PACKAGE_NAME], {
+      const result = await run(APT_CACHE_PATH, ['policy', packageName], { timeout: 15_000 });
+      const output = String(result?.stdout ?? '');
+      if (output.includes('Candidate: (none)') || !output.includes('Candidate:')) {
+        throw new PhpFpmSiteManagerError(
+          'php_fpm_repository_unverified',
+          `PHP ${version} is not available in verified package repositories`,
+        );
+      }
+      return true;
+    } catch (error) {
+      if (error instanceof PhpFpmSiteManagerError) throw error;
+      throw new PhpFpmSiteManagerError(
+        'php_fpm_repository_unverified',
+        `PHP ${version} package repository verification failed`,
+      );
+    }
+  }
+
+  async function ensurePackage(version = phpFpmTemplatePolicy.distroVersion) {
+    const before = await inspectPackage(version);
+    if (before.installed) return before;
+    await verifyPhpRepository(version);
+    const packageName = phpFpmPackageName(version);
+    try {
+      await run(APT_GET_PATH, ['install', '--yes', '--no-install-recommends', packageName], {
         timeout: 10 * 60_000,
         env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive', LC_ALL: 'C' },
       });
     } catch {
       throw new PhpFpmSiteManagerError('php_fpm_package_install_failed', 'PHP-FPM package could not be installed');
     }
-    const after = await inspectPackage();
+    const after = await inspectPackage(version);
     if (!after.installed) {
       throw new PhpFpmSiteManagerError('php_fpm_package_install_unverified', 'PHP-FPM package installation could not be verified');
     }
     return after;
   }
 
-  async function configTest() {
-    try { await run(PHP_FPM_BINARY, ['--test'], { timeout: 30_000 }); }
+  async function configTest(version = phpFpmTemplatePolicy.distroVersion) {
+    const binary = phpFpmBinaryPath(version);
+    try { await run(binary, ['--test'], { timeout: 30_000 }); }
     catch { throw new PhpFpmSiteManagerError('php_fpm_config_test_failed', 'PHP-FPM configuration test failed'); }
   }
 
-  async function serviceActive() {
+  async function serviceActive(version = phpFpmTemplatePolicy.distroVersion) {
+    const unit = phpFpmServiceUnit(version);
     try {
-      await run(SYSTEMCTL_PATH, ['is-active', '--quiet', phpFpmTemplatePolicy.serviceUnit], { timeout: 10_000 });
+      await run(SYSTEMCTL_PATH, ['is-active', '--quiet', unit], { timeout: 10_000 });
       return true;
     } catch { return false; }
   }
 
-  async function activateService() {
+  async function activateService(version = phpFpmTemplatePolicy.distroVersion) {
+    const unit = phpFpmServiceUnit(version);
     try {
-      await run(SYSTEMCTL_PATH, ['enable', '--now', phpFpmTemplatePolicy.serviceUnit], { timeout: 60_000 });
-      await run(SYSTEMCTL_PATH, ['reload', phpFpmTemplatePolicy.serviceUnit], { timeout: 30_000 });
+      await run(SYSTEMCTL_PATH, ['enable', '--now', unit], { timeout: 60_000 });
+      await run(SYSTEMCTL_PATH, ['reload', unit], { timeout: 30_000 });
     } catch {
       throw new PhpFpmSiteManagerError('php_fpm_service_activation_failed', 'PHP-FPM service could not activate the Website pool');
     }
   }
 
-  async function reloadServiceIfActive() {
-    if (!(await serviceActive())) return;
-    try { await run(SYSTEMCTL_PATH, ['reload', phpFpmTemplatePolicy.serviceUnit], { timeout: 30_000 }); }
+  async function reloadServiceIfActive(version = phpFpmTemplatePolicy.distroVersion) {
+    if (!(await serviceActive(version))) return;
+    const unit = phpFpmServiceUnit(version);
+    try { await run(SYSTEMCTL_PATH, ['reload', unit], { timeout: 30_000 }); }
     catch { throw new PhpFpmSiteManagerError('php_fpm_service_reload_failed', 'PHP-FPM service could not reload restored configuration'); }
   }
 
@@ -333,7 +379,7 @@ export function createPhpFpmSiteManager({
   async function previewMigration(rawIntent, { operationId: rawOperationId } = {}) {
     const spec = normalizeIntent(rawIntent);
     const operationId = normalizeOperationId(rawOperationId);
-    const configPath = phpFpmPoolPath(spec.unixUser);
+    const configPath = phpFpmPoolPath(spec.unixUser, spec.phpVersion);
     const socketPath = phpFpmSocketPath(spec.unixUser);
 
     let identity;
@@ -379,7 +425,7 @@ export function createPhpFpmSiteManager({
 
     const [documentRootState, packageState, configState, socketState] = await Promise.all([
       pathState(spec.templateInput.documentRoot),
-      inspectPackage(),
+      inspectPackage(spec.phpVersion),
       pathState(configPath),
       pathState(socketPath),
     ]);
@@ -407,13 +453,13 @@ export function createPhpFpmSiteManager({
     let configValid = null;
     if (packageState.installed) {
       try {
-        await configTest();
+        await configTest(spec.phpVersion);
         configValid = true;
       } catch {
         configValid = false;
       }
     }
-    const active = await serviceActive();
+    const active = await serviceActive(spec.phpVersion);
 
     const documentRootReady = documentRootState.present
       && identity.satisfied
@@ -501,14 +547,14 @@ export function createPhpFpmSiteManager({
         unixUser: spec.unixUser,
         homeDirectory: spec.identity.paths.workspace.homeDirectory,
         documentRoot: spec.templateInput.documentRoot,
-        packageName: PACKAGE_NAME,
-        phpVersion: phpFpmTemplatePolicy.phpVersion,
+        packageName: phpFpmPackageName(spec.phpVersion),
+        phpVersion: spec.phpVersion,
         configPath,
         configSha256: spec.preview.sha256,
         configMode: phpFpmTemplatePolicy.poolMode.toString(8).padStart(4, '0'),
         socketPath,
         socketMode: '0660',
-        serviceUnit: phpFpmTemplatePolicy.serviceUnit,
+        serviceUnit: phpFpmServiceUnit(spec.phpVersion),
       }),
       differences: Object.freeze([...new Set(differences)]),
     });
@@ -540,7 +586,7 @@ export function createPhpFpmSiteManager({
       });
     }
 
-    const packageState = await inspectPackage();
+    const packageState = await inspectPackage(spec.phpVersion);
     if (!packageState.installed) {
       return Object.freeze({
         satisfied: false,
@@ -551,7 +597,7 @@ export function createPhpFpmSiteManager({
       });
     }
 
-    const configPath = phpFpmPoolPath(spec.unixUser);
+    const configPath = phpFpmPoolPath(spec.unixUser, spec.phpVersion);
     let configInfo;
     let config;
     try {
@@ -577,7 +623,7 @@ export function createPhpFpmSiteManager({
       throw new PhpFpmSiteManagerError('php_fpm_pool_drift', 'PHP-FPM Website pool content has drifted');
     }
 
-    try { await configTest(); }
+    try { await configTest(spec.phpVersion); }
     catch {
       return Object.freeze({
         satisfied: false,
@@ -587,7 +633,7 @@ export function createPhpFpmSiteManager({
         applicationId: spec.applicationId,
       });
     }
-    if (!(await serviceActive())) {
+    if (!(await serviceActive(spec.phpVersion))) {
       return Object.freeze({
         satisfied: false,
         reason: 'php_fpm_service_inactive',
@@ -622,7 +668,7 @@ export function createPhpFpmSiteManager({
       adapter: 'php-fpm',
       websiteId: spec.websiteId,
       applicationId: spec.applicationId,
-      phpVersion: phpFpmTemplatePolicy.phpVersion,
+      phpVersion: spec.phpVersion,
       packageVersion: packageState.version,
       unixUser: spec.unixUser,
       unixUid: identity.uid,
@@ -630,22 +676,22 @@ export function createPhpFpmSiteManager({
       configPath,
       configSha256: spec.preview.sha256,
       socketPath,
-      serviceUnit: phpFpmTemplatePolicy.serviceUnit,
+      serviceUnit: phpFpmServiceUnit(spec.phpVersion),
       documentRoot: spec.templateInput.documentRoot,
       documentRootMode: documentRoot.mode,
     });
   }
 
   async function restoreConfig(spec, receipt) {
-    const configPath = phpFpmPoolPath(spec.unixUser);
+    const configPath = phpFpmPoolPath(spec.unixUser, spec.phpVersion);
     if (!receipt.mutated) return;
     if (receipt.previousConfig === null) {
       await rmFn(configPath, { force: true });
     } else {
       await atomicWrite(configPath, receipt.previousConfig, phpFpmTemplatePolicy.poolMode);
     }
-    await configTest();
-    await reloadServiceIfActive();
+    await configTest(spec.phpVersion);
+    await reloadServiceIfActive(spec.phpVersion);
   }
 
   async function apply(rawIntent, { operationId: rawOperationId } = {}) {
@@ -660,9 +706,9 @@ export function createPhpFpmSiteManager({
       throw new PhpFpmSiteManagerError('php_fpm_document_root_required', 'Website document root must be ready before PHP-FPM pool provisioning');
     }
 
-    await ensurePackage();
-    await mkdirFn(phpFpmTemplatePolicy.poolDirectory, { recursive: true, mode: 0o755 });
-    const configPath = phpFpmPoolPath(spec.unixUser);
+    await ensurePackage(spec.phpVersion);
+    await mkdirFn(phpFpmPoolDirectory(spec.phpVersion), { recursive: true, mode: 0o755 });
+    const configPath = phpFpmPoolPath(spec.unixUser, spec.phpVersion);
     const desired = renderWebsitePhpFpmPool(spec.templateInput);
     let receipt = await loadReceipt(operationId, spec);
     const current = await readOptional(configPath);
@@ -697,8 +743,8 @@ export function createPhpFpmSiteManager({
     }
 
     try {
-      await configTest();
-      await activateService();
+      await configTest(spec.phpVersion);
+      await activateService(spec.phpVersion);
       const verified = await inspect(rawIntent);
       if (!verified.satisfied) {
         throw new PhpFpmSiteManagerError('php_fpm_apply_unverified', 'PHP-FPM Website pool activation could not be verified');
@@ -753,7 +799,7 @@ export function createPhpFpmSiteManager({
     }
 
     const desired = renderWebsitePhpFpmPool(spec.templateInput);
-    const configPath = phpFpmPoolPath(spec.unixUser);
+    const configPath = phpFpmPoolPath(spec.unixUser, spec.phpVersion);
     let receipt = await loadReceipt(operationId, spec);
     if (receipt?.state === 'compensated') {
       throw new PhpFpmSiteManagerError('php_fpm_operation_compensated', 'Compensated PHP-FPM Website operation cannot be re-applied');
@@ -786,14 +832,14 @@ export function createPhpFpmSiteManager({
     if (currentAfterReceipt === null) {
       await atomicWrite(configPath, desired, phpFpmTemplatePolicy.poolMode);
     }
-    await configTest();
-    if (!(await serviceActive())) {
+    await configTest(spec.phpVersion);
+    if (!(await serviceActive(spec.phpVersion))) {
       throw new PhpFpmSiteManagerError(
         'php_fpm_migration_shared_service_inactive',
         'PHP-FPM migration will not activate a shared service implicitly',
       );
     }
-    await reloadServiceIfActive();
+    await reloadServiceIfActive(spec.phpVersion);
     const verified = await inspect(rawIntent);
     if (!verified?.satisfied) {
       throw new PhpFpmSiteManagerError('php_fpm_migration_unverified', 'PHP-FPM migration could not be verified');
@@ -816,7 +862,7 @@ export function createPhpFpmSiteManager({
     if (receipt.state === 'compensated') {
       return Object.freeze({ satisfied: true, restoredPrevious: receipt.previousConfig !== null, preservedExisting: false });
     }
-    const current = await readOptional(phpFpmPoolPath(spec.unixUser));
+    const current = await readOptional(phpFpmPoolPath(spec.unixUser, spec.phpVersion));
     if (receipt.previousConfig === null && current === null) {
       return Object.freeze({ satisfied: true, restoredPrevious: false, preservedExisting: false });
     }
@@ -879,9 +925,11 @@ export const phpFpmSiteManagerInternals = Object.freeze({
   paths: Object.freeze({
     DPKG_QUERY_PATH,
     APT_GET_PATH,
-    PHP_FPM_BINARY,
+    APT_CACHE_PATH,
     SYSTEMCTL_PATH,
     RECEIPT_ROOT,
   }),
-  packageName: PACKAGE_NAME,
+  packageName: phpFpmPackageName,
+  binaryPath: phpFpmBinaryPath,
+  serviceUnit: phpFpmServiceUnit,
 });

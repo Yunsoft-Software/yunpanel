@@ -49,6 +49,7 @@ Son fresh Website mail discovery source ilerlemesi: `docs/history/site-create-ma
 Son site-create mail intent ilerlemesi: `docs/history/site-create-mail-intent-progress-2026-09-19.md`.
 Son Passenger/provisioning canlı kabulü: `docs/history/passenger-provisioning-live-acceptance-2026-09-19.md`.
 Son Antigravity branch incelemesi ve canlı boot kabulü: `docs/history/antigravity-branch-live-acceptance-2026-09-20.md`.
+Son PHP-FPM multi-version ve doğrulanmış repo ilerlemesi: `docs/history/php-fpm-multi-version-golden-path-progress-2026-09-20.md`.
 Son Domain removal HTTP API ve route wiring ilerlemesi: `docs/history/domain-removal-http-routes-2026-09-19.md`.
 Son Certificate retention ve GC lifecycle ilerlemesi: `docs/history/certificate-retention-gc-lifecycle-2026-09-19.md`.
 Son Delete impact provider ve plan wiring ilerlemesi: `docs/history/delete-impact-providers-and-plan-wiring-2026-09-19.md`.
@@ -139,7 +140,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 ## P1.1 — Runtime golden path
 
 - [ ] Passenger dependency/env/log/startup/config validation + rollback.
-- [ ] PHP distro FPM production golden path; multi-version ancak doğrulanmış repo ile.
 - [ ] Static durable release/rollback binding revision.
 - [ ] Python site-user venv + Gunicorn/Uvicorn.
 - [ ] Managed Compose dedicated project/network/volume identity.

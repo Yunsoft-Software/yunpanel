@@ -3,7 +3,8 @@ import path from 'node:path';
 
 const MANAGED_IDENTITY = /^yunapp-[a-f0-9]{12}$/;
 const SAFE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._/-]+$/;
-const SUPPORTED_PHP_VERSION = '8.3';
+const DISTRO_PHP_VERSION = '8.3';
+const SUPPORTED_PHP_VERSIONS = Object.freeze(['8.1', '8.2', '8.3', '8.4']);
 
 export class PhpFpmTemplateError extends Error {
   constructor(code, message) {
@@ -32,8 +33,8 @@ function safeAbsolutePath(value, field) {
 }
 
 function phpVersion(value) {
-  if (value !== SUPPORTED_PHP_VERSION) {
-    throw new PhpFpmTemplateError('php_fpm_version_unsupported', `PHP ${value} is not supported by the distro PHP-FPM adapter`);
+  if (typeof value !== 'string' || !SUPPORTED_PHP_VERSIONS.includes(value)) {
+    throw new PhpFpmTemplateError('php_fpm_version_unsupported', `PHP ${value} is not supported by the PHP-FPM adapter`);
   }
   return value;
 }
@@ -49,11 +50,33 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+export function phpFpmPoolDirectory(version = DISTRO_PHP_VERSION) {
+  const verifiedVersion = phpVersion(version);
+  return `/etc/php/${verifiedVersion}/fpm/pool.d`;
+}
+
+export function phpFpmServiceUnit(version = DISTRO_PHP_VERSION) {
+  const verifiedVersion = phpVersion(version);
+  return `php${verifiedVersion}-fpm.service`;
+}
+
+export function phpFpmBinaryPath(version = DISTRO_PHP_VERSION) {
+  const verifiedVersion = phpVersion(version);
+  return `/usr/sbin/php-fpm${verifiedVersion}`;
+}
+
+export function phpFpmPackageName(version = DISTRO_PHP_VERSION) {
+  const verifiedVersion = phpVersion(version);
+  return `php${verifiedVersion}-fpm`;
+}
+
 export const phpFpmTemplatePolicy = Object.freeze({
-  phpVersion: SUPPORTED_PHP_VERSION,
-  poolDirectory: '/etc/php/8.3/fpm/pool.d',
+  phpVersion: DISTRO_PHP_VERSION,
+  distroVersion: DISTRO_PHP_VERSION,
+  supportedVersions: SUPPORTED_PHP_VERSIONS,
+  poolDirectory: phpFpmPoolDirectory(DISTRO_PHP_VERSION),
   socketDirectory: '/run/php',
-  serviceUnit: 'php8.3-fpm.service',
+  serviceUnit: phpFpmServiceUnit(DISTRO_PHP_VERSION),
   socketOwner: 'www-data',
   socketGroup: 'www-data',
   socketMode: '0660',
@@ -67,8 +90,8 @@ export function phpFpmPoolName(unixUser) {
   return `yunpanel-${managedIdentity(unixUser, 'unixUser')}`;
 }
 
-export function phpFpmPoolPath(unixUser) {
-  return path.posix.join(phpFpmTemplatePolicy.poolDirectory, `${phpFpmPoolName(unixUser)}.conf`);
+export function phpFpmPoolPath(unixUser, version = DISTRO_PHP_VERSION) {
+  return path.posix.join(phpFpmPoolDirectory(version), `${phpFpmPoolName(unixUser)}.conf`);
 }
 
 export function phpFpmSocketPath(unixUser) {
@@ -118,24 +141,25 @@ export function renderWebsitePhpFpmPool({
   const errorLog = path.posix.join(logs, 'php-error.log');
   const openBasedir = `${appRoot}:${home}`;
 
-  return `[${poolName}]\nuser = ${user}\ngroup = ${group}\nlisten = ${socketPath}\nlisten.owner = ${phpFpmTemplatePolicy.socketOwner}\nlisten.group = ${phpFpmTemplatePolicy.socketGroup}\nlisten.mode = ${phpFpmTemplatePolicy.socketMode}\npm = ondemand\npm.max_children = ${children}\npm.process_idle_timeout = 10s\npm.max_requests = 500\nclear_env = yes\ncatch_workers_output = yes\nsecurity.limit_extensions = .php\nchdir = ${docRoot}\nenv[HOME] = ${home}\nphp_admin_value[open_basedir] = ${openBasedir}\nphp_admin_value[sys_temp_dir] = ${temp}\nphp_admin_value[upload_tmp_dir] = ${temp}\nphp_admin_value[session.save_path] = ${temp}\nphp_admin_flag[log_errors] = on\nphp_admin_flag[display_errors] = off\nphp_admin_value[error_log] = ${errorLog}\nphp_admin_value[memory_limit] = ${memory}M\nphp_admin_value[max_execution_time] = ${execution}\n; managed by YunPanel distro PHP ${version}\n`;
+  return `[${poolName}]\nuser = ${user}\ngroup = ${group}\nlisten = ${socketPath}\nlisten.owner = ${phpFpmTemplatePolicy.socketOwner}\nlisten.group = ${phpFpmTemplatePolicy.socketGroup}\nlisten.mode = ${phpFpmTemplatePolicy.socketMode}\npm = ondemand\npm.max_children = ${children}\npm.process_idle_timeout = 10s\npm.max_requests = 500\nclear_env = yes\ncatch_workers_output = yes\nsecurity.limit_extensions = .php\nchdir = ${docRoot}\nenv[HOME] = ${home}\nphp_admin_value[open_basedir] = ${openBasedir}\nphp_admin_value[sys_temp_dir] = ${temp}\nphp_admin_value[upload_tmp_dir] = ${temp}\nphp_admin_value[session.save_path] = ${temp}\nphp_admin_flag[log_errors] = on\nphp_admin_flag[display_errors] = off\nphp_admin_value[error_log] = ${errorLog}\nphp_admin_value[memory_limit] = ${memory}M\nphp_admin_value[max_execution_time] = ${execution}\n; managed by YunPanel PHP ${version}\n`;
 }
 
 export function previewWebsitePhpFpmPool(input = {}) {
-  const content = renderWebsitePhpFpmPool(input);
+  const version = input.phpVersion ? phpVersion(input.phpVersion) : phpFpmTemplatePolicy.phpVersion;
+  const content = renderWebsitePhpFpmPool({ ...input, phpVersion: version });
   const user = managedIdentity(input.unixUser, 'unixUser');
   const digest = sha256(content);
   return Object.freeze({
     version: 1,
-    phpVersion: phpFpmTemplatePolicy.phpVersion,
+    phpVersion: version,
     poolName: phpFpmPoolName(user),
     socketPath: phpFpmSocketPath(user),
-    serviceUnit: phpFpmTemplatePolicy.serviceUnit,
+    serviceUnit: phpFpmServiceUnit(version),
     runtimeUser: user,
     runtimeGroup: user,
     sha256: digest,
     artifact: Object.freeze({
-      path: phpFpmPoolPath(user),
+      path: phpFpmPoolPath(user, version),
       sha256: digest,
       bytes: Buffer.byteLength(content),
       sensitive: false,

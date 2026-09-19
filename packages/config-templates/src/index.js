@@ -15,8 +15,12 @@ export {
 
 export {
   PhpFpmTemplateError,
+  phpFpmBinaryPath,
+  phpFpmPackageName,
+  phpFpmPoolDirectory,
   phpFpmPoolName,
   phpFpmPoolPath,
+  phpFpmServiceUnit,
   phpFpmSocketPath,
   phpFpmTemplateInternals,
   phpFpmTemplatePolicy,

@@ -103,11 +103,14 @@ function fakeHost({ packageInstalled = false, serviceActive = false } = {}) {
       if (!packageInstalled) throw missing(1);
       return { stdout: 'install ok installed\t8.3.6-0ubuntu0.24.04.4' };
     }
+    if (file === '/usr/bin/apt-cache') {
+      return { stdout: 'Package: php8.2-fpm\nCandidate: 8.2.18-1+ubuntu24.04.1+deb.sury.org+1\nVersion table:\n *** 8.2.18-1 500\n     500 https://ppa.launchpadcontent.net/ondrej/php/ubuntu noble/main amd64 Packages\n' };
+    }
     if (file === '/usr/bin/apt-get') {
       packageInstalled = true;
       return { stdout: '' };
     }
-    if (file === '/usr/sbin/php-fpm8.3') {
+    if (file.startsWith('/usr/sbin/php-fpm')) {
       return { stdout: 'configuration file test is successful' };
     }
     if (file === '/usr/bin/systemctl' && args[0] === 'is-active') {
@@ -120,7 +123,8 @@ function fakeHost({ packageInstalled = false, serviceActive = false } = {}) {
       return { stdout: '' };
     }
     if (file === '/usr/bin/systemctl' && args[0] === 'reload') {
-      if (entries.has(configPath)) {
+      const hasAnyPool = [...entries.keys()].some((k) => k.includes('/fpm/pool.d/'));
+      if (hasAnyPool) {
         entries.set(socketPath, { type: 'socket', mode: 0o660, uid: 33, gid: 33 });
       } else {
         entries.delete(socketPath);
@@ -424,4 +428,61 @@ test('PHP-FPM migration rollback removes only the receipt-owned pool and preserv
   assert.equal(host.entries.has(configPath), false);
   assert.equal(host.serviceActive(), true);
   assert.equal(host.calls.some(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'disable'), false);
+});
+
+test('PHP-FPM site manager supports multi-version PHP with verified repository', async () => {
+  const host = fakeHost({ packageInstalled: false, serviceActive: false });
+  const siteManager = manager(host);
+
+  const applied = await siteManager.apply(intent({ phpVersion: '8.2' }), { operationId });
+  assert.equal(applied.satisfied, true);
+  assert.equal(applied.phpVersion, '8.2');
+  assert.equal(applied.serviceUnit, 'php8.2-fpm.service');
+  assert.equal(applied.configPath, `/etc/php/8.2/fpm/pool.d/yunpanel-${unixUser}.conf`);
+
+  // Verify repository policy was checked before installation
+  const aptCacheCall = host.calls.find(([file]) => file === '/usr/bin/apt-cache');
+  assert.ok(aptCacheCall);
+  assert.deepEqual(aptCacheCall[1], ['policy', 'php8.2-fpm']);
+
+  // Verify package was installed
+  const aptGetCall = host.calls.find(([file]) => file === '/usr/bin/apt-get');
+  assert.ok(aptGetCall);
+  assert.equal(aptGetCall[1].includes('php8.2-fpm'), true);
+
+  // Verify inspection matches 8.2
+  const inspected = await siteManager.inspect(intent({ phpVersion: '8.2' }));
+  assert.equal(inspected.satisfied, true);
+  assert.equal(inspected.phpVersion, '8.2');
+});
+
+test('PHP-FPM site manager refuses non-distro version without verified repository', async () => {
+  const host = fakeHost({ packageInstalled: false, serviceActive: false });
+  // Override apt-cache to simulate unverified / absent repository
+  const originalRun = host.run;
+  host.run = async (file, args) => {
+    if (file === '/usr/bin/apt-cache') {
+      return { stdout: 'Package: php8.1-fpm\nCandidate: (none)\nVersion table:\n' };
+    }
+    return originalRun(file, args);
+  };
+
+  const siteManager = manager(host);
+  await assert.rejects(
+    siteManager.apply(intent({ phpVersion: '8.1' }), { operationId }),
+    (error) => error instanceof PhpFpmSiteManagerError && error.code === 'php_fpm_repository_unverified',
+  );
+  assert.equal(host.calls.some(([file]) => file === '/usr/bin/apt-get'), false);
+});
+
+test('PHP-FPM site manager rejects unsupported PHP version in intent', async () => {
+  const host = fakeHost({ packageInstalled: true, serviceActive: true });
+  const siteManager = manager(host);
+
+  for (const invalid of ['7.4', '8.0', '9.0', 'invalid']) {
+    await assert.rejects(
+      siteManager.inspect(intent({ phpVersion: invalid })),
+      (error) => error instanceof PhpFpmSiteManagerError && error.code === 'php_fpm_site_version_unsupported',
+    );
+  }
 });

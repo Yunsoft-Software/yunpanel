@@ -2,9 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   PhpFpmTemplateError,
+  phpFpmBinaryPath,
+  phpFpmPackageName,
+  phpFpmPoolDirectory,
   phpFpmPoolName,
   phpFpmPoolPath,
+  phpFpmServiceUnit,
   phpFpmSocketPath,
+  phpFpmTemplatePolicy,
   previewWebsitePhpFpmPool,
   renderWebsitePhpFpmPool,
 } from '../src/php-fpm.js';
@@ -96,11 +101,23 @@ test('Website PHP-FPM template keeps temp and logs inside Website home', () => {
   );
 });
 
-test('Website PHP-FPM template only accepts the Ubuntu 24.04 distro PHP baseline', () => {
-  assert.throws(
-    () => renderWebsitePhpFpmPool(input({ phpVersion: '8.4' })),
-    (error) => error instanceof PhpFpmTemplateError && error.code === 'php_fpm_version_unsupported',
-  );
+test('Website PHP-FPM template supports multiple PHP versions with distro 8.3 default', () => {
+  for (const version of ['8.1', '8.2', '8.3', '8.4']) {
+    const rendered = renderWebsitePhpFpmPool(input({ phpVersion: version }));
+    assert.match(rendered, new RegExp(`; managed by YunPanel PHP ${version}`));
+
+    const preview = previewWebsitePhpFpmPool(input({ phpVersion: version }));
+    assert.equal(preview.phpVersion, version);
+    assert.equal(preview.serviceUnit, `php${version}-fpm.service`);
+    assert.equal(preview.artifact.path, `/etc/php/${version}/fpm/pool.d/yunpanel-${unixUser}.conf`);
+  }
+
+  for (const invalid of ['7.4', '8.0', '8.5', '9.0', 'not-a-version']) {
+    assert.throws(
+      () => renderWebsitePhpFpmPool(input({ phpVersion: invalid })),
+      (error) => error instanceof PhpFpmTemplateError && error.code === 'php_fpm_version_unsupported',
+    );
+  }
 });
 
 test('Website PHP-FPM template bounds process and PHP resource limits', () => {
