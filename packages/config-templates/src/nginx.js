@@ -119,7 +119,7 @@ function renderServerSet({
     for (const hostname of challengeOnlyNames) {
       blocks.push(serverBlock({
         names: hostname,
-        body: '  location / {\n    return 404;\n  }',
+        body: '  location / {\n    return 301 https://$host$request_uri;\n  }',
         acmeRoot,
       }));
     }
@@ -151,7 +151,7 @@ function renderServerSet({
   for (const hostname of challengeOnlyNames) {
     blocks.push(serverBlock({
       names: hostname,
-      body: '  location / {\n    return 404;\n  }',
+      body: '  location / {\n    return 301 https://$host$request_uri;\n  }',
       acmeRoot,
     }));
   }
