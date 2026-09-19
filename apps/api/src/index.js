@@ -61,6 +61,7 @@ import { createMailDkimConfigurationService } from './mail-dkim-configuration.js
 import { createMailDkimRegistry } from './mail-dkim-registry.js';
 import { createMailDkimRetirementRegistry } from './mail-dkim-retirement-registry.js';
 import { createMailDomainRegistry } from './mail-domain-registry.js';
+import { createMailDomainRemovalProductionRuntime } from './mail-domain-removal-production-runtime.js';
 import { createMailServiceIdentityRegistry } from './mail-service-identity-registry.js';
 import { createMailSrsConfigurationService } from './mail-srs-configuration.js';
 import { createMailSrsSecretRegistry } from './mail-srs-secret-registry.js';
@@ -124,6 +125,8 @@ const powerDnsSecretStorePath = process.env.YUNPANEL_POWERDNS_SECRET_STORE
 const dnsZoneRetirementOperationStorePath = process.env.YUNPANEL_DNS_ZONE_RETIREMENT_OPERATION_STORE
   ?? path.join(controlPlaneStateRoot, 'dns-zone-retirement-operations.json');
 const mailDomainStorePath = process.env.YUNPANEL_MAIL_DOMAIN_STORE ?? path.resolve('.data/mail-domain-registry.json');
+const mailDomainRemovalOperationStorePath = process.env.YUNPANEL_MAIL_DOMAIN_REMOVAL_OPERATION_STORE
+  ?? path.join(controlPlaneStateRoot, 'mail-domain-removal-operations.json');
 const mailDkimRootPath = process.env.YUNPANEL_MAIL_DKIM_ROOT ?? path.resolve('.data/mail-dkim');
 const mailDkimRetirementStorePath = process.env.YUNPANEL_MAIL_DKIM_RETIREMENT_STORE
   ?? path.resolve('.data/mail-dkim-retirement-registry.json');
@@ -414,6 +417,24 @@ const jobRegistry = createDomainStageTargetJobRegistry({
   applicationRegistry,
   runtimeBindingRegistry,
 });
+const mailDomainRemovalRuntimeBundle = localServerId
+  ? createMailDomainRemovalProductionRuntime({
+    filePath: mailDomainRemovalOperationStorePath,
+    mailDomainRegistry,
+    domainRegistry,
+    mailboxRegistry,
+    mailAliasRegistry,
+    mailboxQuotaRegistry,
+    mailboxForwardingRegistry,
+    mailDkimRegistry,
+    mailConfigurationService,
+    jobRegistry,
+    localServerId,
+  })
+  : null;
+const mailDomainRemovalRuntime = mailDomainRemovalRuntimeBundle?.runtime ?? null;
+if (mailDomainRemovalRuntime) await mailDomainRemovalRuntime.init();
+
 const domainSuspensionRuntime = localServerId
   ? createDomainSuspensionRuntime({
     registry: createDomainSuspensionOperationRegistry({
@@ -697,6 +718,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] server DNS identity store=${serverDnsIdentityStorePath}`);
   console.log(`[yunpanel-api] PowerDNS secret store=${powerDnsSecretStorePath}`);
   console.log(`[yunpanel-api] mail Domain store=${mailDomainStorePath}`);
+  console.log(`[yunpanel-api] mail Domain removal operation store=${mailDomainRemovalOperationStorePath}`);
   console.log(`[yunpanel-api] mail DKIM root=${mailDkimRootPath}`);
   console.log(`[yunpanel-api] mail DKIM retirement store=${mailDkimRetirementStorePath}`);
   console.log(`[yunpanel-api] mail service identity store=${mailServiceIdentityStorePath}`);
