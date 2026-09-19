@@ -38,6 +38,8 @@ function localMailConfigStep(preview) {
     intent: Object.freeze({
       adapter: 'managed-mail-config',
       serverId,
+      websiteId: preview.ids.websiteId,
+      webDomainId: mailDomain.webDomainId,
       mailDomainId: mailDomain.id,
       expectedRevision: 1,
       initialStatus: 'disabled',
