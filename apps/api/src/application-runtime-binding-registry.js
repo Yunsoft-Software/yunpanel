@@ -3,7 +3,7 @@ import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
-const ADAPTERS = new Set(['direct-systemd', 'passenger']);
+const ADAPTERS = new Set(['direct-systemd', 'passenger', 'static']);
 const STATES = new Set(['active', 'cleanup_required']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
@@ -19,6 +19,12 @@ const PASSENGER_TARGET_FIELDS = new Set([
   'group',
   'appEnv',
   'environmentInclude',
+]);
+const STATIC_TARGET_FIELDS = new Set([
+  'publishRoot',
+  'documentRoot',
+  'user',
+  'group',
 ]);
 
 export class ApplicationRuntimeBindingRegistryError extends Error {
@@ -74,10 +80,29 @@ function safeAbsolutePath(value) {
     && path.posix.normalize(value) === value && !value.includes('/../') && !value.endsWith('/..');
 }
 
-function passengerTarget(value, adapter) {
-  if (adapter === 'direct-systemd') {
+function staticTarget(value, adapter) {
+  if (adapter !== 'static') {
     if (value !== null && value !== undefined) {
-      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_target_invalid', 'direct-systemd runtime binding cannot persist a Passenger target', 409);
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_target_invalid', `${adapter} runtime binding cannot persist a static target`, 409);
+    }
+    return null;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== STATIC_TARGET_FIELDS.size
+    || Object.keys(value).some((field) => !STATIC_TARGET_FIELDS.has(field))
+    || !safeAbsolutePath(value.publishRoot)
+    || !safeAbsolutePath(value.documentRoot)
+    || !APP_USER_PATTERN.test(value.user)
+    || value.group !== value.user) {
+    throw new ApplicationRuntimeBindingRegistryError('runtime_binding_target_invalid', 'Static runtime binding target is invalid', 409);
+  }
+  return Object.freeze({ ...value });
+}
+
+function passengerTarget(value, adapter) {
+  if (adapter !== 'passenger') {
+    if (value !== null && value !== undefined) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_target_invalid', `${adapter} runtime binding cannot persist a Passenger target`, 409);
     }
     return null;
   }
@@ -118,13 +143,14 @@ function normalizeRecord(value) {
     websiteRevision: revision(value.websiteRevision, 'websiteRevision'),
     domains: domains(value.domains),
     passengerTarget: passengerTarget(value.passengerTarget, value.adapter),
+    staticTarget: staticTarget(value.staticTarget, value.adapter),
     updatedAt: value.updatedAt,
   };
   if (typeof normalized.updatedAt !== 'string' || Number.isNaN(Date.parse(normalized.updatedAt))) {
     throw new ApplicationRuntimeBindingRegistryError('runtime_binding_state_invalid', 'Persisted runtime binding timestamp is invalid', 409);
   }
-  if (normalized.adapter === 'direct-systemd' && normalized.state !== 'active') {
-    throw new ApplicationRuntimeBindingRegistryError('runtime_binding_state_invalid', 'direct-systemd runtime binding cannot require Passenger cleanup', 409);
+  if (normalized.adapter !== 'passenger' && normalized.state !== 'active') {
+    throw new ApplicationRuntimeBindingRegistryError('runtime_binding_state_invalid', `${normalized.adapter} runtime binding cannot require Passenger cleanup`, 409);
   }
   return Object.freeze(normalized);
 }
@@ -135,6 +161,7 @@ function publicRecord(record) {
     ...record,
     domains: Object.freeze(record.domains.map((entry) => Object.freeze({ ...entry }))),
     passengerTarget: record.passengerTarget ? Object.freeze({ ...record.passengerTarget }) : null,
+    staticTarget: record.staticTarget ? Object.freeze({ ...record.staticTarget }) : null,
   });
 }
 
@@ -148,7 +175,8 @@ function sameActivation(left, right) {
     && left.websiteId === right.websiteId
     && left.websiteRevision === right.websiteRevision
     && JSON.stringify(left.domains) === JSON.stringify(right.domains)
-    && JSON.stringify(left.passengerTarget) === JSON.stringify(right.passengerTarget);
+    && JSON.stringify(left.passengerTarget) === JSON.stringify(right.passengerTarget)
+    && JSON.stringify(left.staticTarget) === JSON.stringify(right.staticTarget);
 }
 
 export function createApplicationRuntimeBindingRegistry({ filePath = null, now = () => Date.now() } = {}) {
@@ -242,7 +270,28 @@ export function createApplicationRuntimeBindingRegistry({ filePath = null, now =
     return publicRecord(existing);
   }
 
-  return Object.freeze({ init, getBinding, activate, removeOwnedPassenger });
+  async function removeOwnedStatic(applicationId, { sourceOperationId, expectedRevision } = {}) {
+    await ensureInitialized();
+    const id = uuid(applicationId, 'applicationId');
+    const operationId = uuid(sourceOperationId, 'sourceOperationId');
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_expected_revision_invalid', 'Expected runtime binding revision is invalid');
+    }
+    const index = state.bindings.findIndex((entry) => entry.applicationId === id);
+    if (index < 0) return null;
+    const existing = normalizeRecord(state.bindings[index]);
+    if (existing.adapter !== 'static' || existing.sourceOperationId !== operationId) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_ownership_conflict', 'Runtime binding is not owned by the requested static operation', 409);
+    }
+    if (existing.revision !== expectedRevision) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_revision_conflict', 'Runtime binding changed after provisioning', 409);
+    }
+    state.bindings.splice(index, 1);
+    await persist();
+    return publicRecord(existing);
+  }
+
+  return Object.freeze({ init, getBinding, activate, removeOwnedPassenger, removeOwnedStatic });
 }
 
 export const applicationRuntimeBindingRegistryInternals = Object.freeze({
@@ -252,5 +301,6 @@ export const applicationRuntimeBindingRegistryInternals = Object.freeze({
   normalizeRecord,
   domains,
   passengerTarget,
+  staticTarget,
   sameActivation,
 });

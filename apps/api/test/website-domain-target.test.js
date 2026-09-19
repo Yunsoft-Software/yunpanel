@@ -101,6 +101,51 @@ function passengerDependencies({ bindingOverrides = {}, websiteOverrides = {} } 
   };
 }
 
+function staticWebsite(overrides = {}) {
+  return website({
+    applicationId,
+    managedComposeBinding: null,
+    runtimeType: 'static',
+    documentRoot: `/var/www/yunpanel/apps/${applicationId}/current`,
+    ...overrides,
+  });
+}
+
+function staticDependencies({ bindingOverrides = {}, websiteOverrides = {}, applicationOverrides = {} } = {}) {
+  const websiteValue = staticWebsite(websiteOverrides);
+  return {
+    websiteRegistry: { async getWebsite(id) { return id === websiteId ? websiteValue : null; } },
+    applicationRegistry: {
+      async getApplication(id) {
+        return id === applicationId ? { id: applicationId, serverId, currentReleaseId: 'release-static-1', type: 'static', ...applicationOverrides } : null;
+      },
+    },
+    runtimeBindingRegistry: {
+      async getBinding(id) {
+        if (id !== applicationId) return null;
+        return {
+          applicationId,
+          serverId,
+          adapter: 'static',
+          state: 'active',
+          releaseId: 'release-static-1',
+          websiteId,
+          websiteRevision: websiteValue.revision,
+          domains: [{ domainId: 'domain-1', desiredRevision: 3, nginxChecksum: 'b'.repeat(64) }],
+          passengerTarget: null,
+          staticTarget: {
+            publishRoot: `/var/www/yunpanel/apps/${applicationId}`,
+            documentRoot: `/var/www/yunpanel/apps/${applicationId}/current`,
+            user: 'yunapp-0123456789ab',
+            group: 'yunapp-0123456789ab',
+          },
+          ...bindingOverrides,
+        };
+      },
+    },
+  };
+}
+
 test('unbound Domain keeps its persisted target', async () => {
   const current = domain({ websiteId: null });
   const result = await resolveWebsiteDomainTarget({ domain: current });
@@ -254,3 +299,91 @@ test('Managed Compose stage target carries binding readiness failure without exp
       && error.status === 409,
   );
 });
+
+test('Static Website without a runtime binding keeps persisted target fallback', async () => {
+  const current = domain({
+    targetType: 'static',
+    target: { root: `/var/www/yunpanel/apps/${applicationId}/current`, spaFallback: true },
+  });
+  const websiteValue = staticWebsite();
+  const result = await resolveWebsiteDomainTarget({
+    domain: current,
+    websiteRegistry: { async getWebsite() { return websiteValue; } },
+    runtimeBindingRegistry: { async getBinding() { return null; } },
+  });
+  assert.deepEqual(result, {
+    source: 'domain',
+    targetType: 'static',
+    target: current.target,
+  });
+});
+
+test('Static runtime binding materializes the canonical static Domain target', async () => {
+  const current = domain({
+    targetType: 'static',
+    target: { root: `/var/www/yunpanel/apps/${applicationId}/current`, spaFallback: true },
+    nginxSettings: { spaFallback: false },
+  });
+  const result = await resolveWebsiteDomainTarget({
+    domain: current,
+    ...staticDependencies(),
+  });
+  assert.deepEqual(result, {
+    source: 'static',
+    targetType: 'static',
+    target: {
+      root: `/var/www/yunpanel/apps/${applicationId}/current`,
+      spaFallback: false,
+    },
+  });
+});
+
+test('Static runtime binding detects release drift and fails closed', async () => {
+  const current = domain({
+    targetType: 'static',
+    target: { root: `/var/www/yunpanel/apps/${applicationId}/current`, spaFallback: true },
+  });
+  await assert.rejects(
+    resolveWebsiteDomainTarget({
+      domain: current,
+      ...staticDependencies({ applicationOverrides: { currentReleaseId: 'release-static-2' } }),
+    }),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'static_runtime_binding_drift'
+      && error.status === 409,
+  );
+});
+
+test('Static runtime binding revision regression fails closed', async () => {
+  const current = domain({
+    targetType: 'static',
+    desiredRevision: 2,
+    target: { root: `/var/www/yunpanel/apps/${applicationId}/current`, spaFallback: true },
+  });
+  await assert.rejects(
+    resolveWebsiteDomainTarget({
+      domain: current,
+      ...staticDependencies(),
+    }),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'static_runtime_binding_drift'
+      && error.status === 409,
+  );
+});
+
+test('Static runtime binding rejects mismatched Domain targetType', async () => {
+  const current = domain({
+    targetType: 'passenger',
+    target: { applicationId },
+  });
+  await assert.rejects(
+    resolveWebsiteDomainTarget({
+      domain: current,
+      ...staticDependencies(),
+    }),
+    (error) => error instanceof DomainRegistryError
+      && error.code === 'static_runtime_binding_drift'
+      && error.status === 409,
+  );
+});
+

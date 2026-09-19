@@ -29,6 +29,68 @@ function phpBindingDrift(message) {
   throw new DomainRegistryError('php_runtime_binding_drift', message, 409);
 }
 
+function staticBindingDrift(message) {
+  throw new DomainRegistryError('static_runtime_binding_drift', message, 409);
+}
+
+async function resolveStaticRuntimeTarget({
+  domain,
+  website,
+  applicationRegistry,
+  runtimeBindingRegistry,
+}) {
+  if (website.runtimeType !== 'static' || !website.applicationId) return null;
+
+  requireDependency(
+    runtimeBindingRegistry,
+    'getBinding',
+    'runtime_binding_registry_unavailable',
+    'Runtime binding registry is required to resolve Static Website traffic target',
+  );
+  const binding = await runtimeBindingRegistry.getBinding(website.applicationId);
+  if (!binding) return null;
+  if (binding.adapter !== 'static') {
+    staticBindingDrift('Static Website runtime binding adapter is not supported');
+  }
+  if (domain.targetType !== 'static') {
+    staticBindingDrift('Static Domain target type does not match the bound Website runtime');
+  }
+
+  requireDependency(
+    applicationRegistry,
+    'getApplication',
+    'application_registry_unavailable',
+    'Application registry is required to validate Static traffic authority',
+  );
+  const application = await applicationRegistry.getApplication(website.applicationId);
+  if (!application) staticBindingDrift('Static runtime binding Application no longer exists');
+  if (application.serverId !== domain.serverId || binding.serverId !== domain.serverId) {
+    staticBindingDrift('Static runtime binding server identity drifted');
+  }
+  if (binding.applicationId !== application.id || binding.websiteId !== website.id) {
+    staticBindingDrift('Static runtime binding resource identity drifted');
+  }
+  if (binding.releaseId !== application.currentReleaseId) {
+    staticBindingDrift('Static runtime binding release drifted from the active Application release');
+  }
+  if (binding.websiteRevision !== website.revision) {
+    staticBindingDrift('Static runtime binding Website revision drifted');
+  }
+  const domainEvidence = binding.domains.find((entry) => entry.domainId === domain.id);
+  if (!domainEvidence || domain.desiredRevision < domainEvidence.desiredRevision) {
+    staticBindingDrift('Static runtime binding Domain revision drifted');
+  }
+
+  return Object.freeze({
+    source: 'static',
+    targetType: 'static',
+    target: Object.freeze({
+      root: binding.staticTarget.documentRoot,
+      spaFallback: domain.nginxSettings?.spaFallback !== false,
+    }),
+  });
+}
+
 async function resolvePassengerRuntimeTarget({
   domain,
   website,
@@ -208,6 +270,13 @@ export async function resolveWebsiteDomainTarget({
 
   const binding = website.managedComposeBinding ?? null;
   if (binding === null) {
+    const staticTarget = await resolveStaticRuntimeTarget({
+      domain,
+      website,
+      applicationRegistry,
+      runtimeBindingRegistry,
+    });
+    if (staticTarget) return staticTarget;
     const passengerTarget = await resolvePassengerRuntimeTarget({
       domain,
       website,
@@ -289,6 +358,7 @@ export async function resolveWebsiteDomainTarget({
 
 export const websiteDomainTargetInternals = Object.freeze({
   persistedDomainTarget,
+  resolveStaticRuntimeTarget,
   resolvePassengerRuntimeTarget,
   resolvePhpRuntimeTarget,
   phpSocketPattern: PHP_SOCKET_PATTERN,

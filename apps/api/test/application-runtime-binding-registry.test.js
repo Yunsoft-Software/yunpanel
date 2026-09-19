@@ -22,6 +22,12 @@ const passengerTarget = Object.freeze({
   appEnv: 'production',
   environmentInclude: `/etc/nginx/yunpanel/passenger-env/${applicationId}.conf`,
 });
+const staticTarget = Object.freeze({
+  publishRoot: `/var/www/yunpanel/apps/${applicationId}`,
+  documentRoot: `/var/www/yunpanel/apps/${applicationId}/current`,
+  user: 'yunapp-0123456789ab',
+  group: 'yunapp-0123456789ab',
+});
 
 function activation(overrides = {}) {
   return {
@@ -35,6 +41,22 @@ function activation(overrides = {}) {
     websiteRevision: 3,
     domains: [{ domainId, desiredRevision: 4, nginxChecksum: checksum }],
     passengerTarget,
+    ...overrides,
+  };
+}
+
+function staticActivation(overrides = {}) {
+  return {
+    applicationId,
+    serverId,
+    adapter: 'static',
+    state: 'active',
+    sourceOperationId: operationId,
+    releaseId,
+    websiteId,
+    websiteRevision: 3,
+    domains: [{ domainId, desiredRevision: 4, nginxChecksum: checksum }],
+    staticTarget,
     ...overrides,
   };
 }
@@ -144,4 +166,76 @@ test('runtime binding persists only durable evidence and reloads it', async () =
   const reloaded = createApplicationRuntimeBindingRegistry({ filePath });
   await reloaded.init();
   assert.deepEqual(await reloaded.getBinding(applicationId), created);
+});
+
+test('static runtime binding activation tracks durable release and rollback revision', async () => {
+  const registry = createApplicationRuntimeBindingRegistry();
+  const initial = await registry.activate(staticActivation(), { expectedRevision: 0 });
+  assert.equal(initial.revision, 1);
+  assert.equal(initial.adapter, 'static');
+  assert.equal(initial.state, 'active');
+  assert.deepEqual(initial.staticTarget, staticTarget);
+  assert.equal(initial.passengerTarget, null);
+
+  // Idempotent retry with same evidence
+  const retry = await registry.activate(staticActivation(), { expectedRevision: 0 });
+  assert.deepEqual(retry, initial);
+
+  // Next release / rollback advances revision
+  const nextReleaseId = '57f8611c-0af7-4d2f-8291-2fe7dbab22ff';
+  const nextOperationId = 'e2fe443b-0fa6-4f98-a061-6f41b7f2684f';
+  const rollback = await registry.activate(staticActivation({
+    releaseId: nextReleaseId,
+    sourceOperationId: nextOperationId,
+  }), { expectedRevision: initial.revision });
+
+  assert.equal(rollback.revision, 2);
+  assert.equal(rollback.releaseId, nextReleaseId);
+  assert.equal(rollback.sourceOperationId, nextOperationId);
+});
+
+test('static runtime binding rejects mismatched targets and invalid states', async () => {
+  const registry = createApplicationRuntimeBindingRegistry();
+
+  // Static cannot carry passengerTarget
+  await assert.rejects(
+    registry.activate(staticActivation({ passengerTarget }), { expectedRevision: 0 }),
+    (error) => error?.code === 'runtime_binding_target_invalid',
+  );
+
+  // Passenger cannot carry staticTarget
+  await assert.rejects(
+    registry.activate(activation({ staticTarget }), { expectedRevision: 0 }),
+    (error) => error?.code === 'runtime_binding_target_invalid',
+  );
+
+  // Static cannot be cleanup_required
+  await assert.rejects(
+    registry.activate(staticActivation({ state: 'cleanup_required' }), { expectedRevision: 0 }),
+    (error) => error?.code === 'runtime_binding_state_invalid',
+  );
+});
+
+test('operation-owned static binding removal is revision-bound and idempotent', async () => {
+  const registry = createApplicationRuntimeBindingRegistry();
+  const created = await registry.activate(staticActivation(), { expectedRevision: 0 });
+
+  await assert.rejects(
+    registry.removeOwnedStatic(applicationId, {
+      sourceOperationId: '1af41a08-a03d-41dc-afef-a9d1af96785d',
+      expectedRevision: created.revision,
+    }),
+    (error) => error?.code === 'runtime_binding_ownership_conflict',
+  );
+
+  const removed = await registry.removeOwnedStatic(applicationId, {
+    sourceOperationId: operationId,
+    expectedRevision: created.revision,
+  });
+  assert.equal(removed.revision, created.revision);
+  assert.equal(await registry.getBinding(applicationId), null);
+  assert.equal(await registry.removeOwnedStatic(applicationId, {
+    sourceOperationId: operationId,
+    expectedRevision: created.revision,
+  }), null);
 });

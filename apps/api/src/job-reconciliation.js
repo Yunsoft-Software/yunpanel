@@ -23,6 +23,12 @@ function passengerDomainStageError(code, message) {
   throw error;
 }
 
+function staticDomainStageError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  throw error;
+}
+
 function same(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
@@ -37,7 +43,12 @@ async function markEnvironmentApplied(applicationEnvironmentRegistry, job, relea
   });
 }
 
-async function reconcileApplicationJob(applicationRegistry, applicationEnvironmentRegistry, job) {
+async function reconcileApplicationJob(
+  applicationRegistry,
+  applicationEnvironmentRegistry,
+  job,
+  runtimeBindingRegistry = null,
+) {
   const application = await applicationRegistry.getApplication(job.resourceId);
   if (!application) return;
 
@@ -64,6 +75,25 @@ async function reconcileApplicationJob(applicationRegistry, applicationEnvironme
         runtime: job.payload?.runtime ?? null,
       });
     }
+    if (job.operation === OPERATIONS.APP_STATIC_DEPLOY && runtimeBindingRegistry
+      && typeof runtimeBindingRegistry.getBinding === 'function'
+      && typeof runtimeBindingRegistry.activate === 'function') {
+      const binding = await runtimeBindingRegistry.getBinding(job.resourceId);
+      if (binding && binding.adapter === 'static' && binding.releaseId !== job.result?.releaseId) {
+        await runtimeBindingRegistry.activate({
+          applicationId: binding.applicationId,
+          serverId: binding.serverId,
+          adapter: 'static',
+          state: binding.state,
+          sourceOperationId: job.id,
+          releaseId: job.result.releaseId,
+          websiteId: binding.websiteId,
+          websiteRevision: binding.websiteRevision,
+          domains: binding.domains,
+          staticTarget: binding.staticTarget,
+        }, { expectedRevision: binding.revision });
+      }
+    }
     await markEnvironmentApplied(applicationEnvironmentRegistry, job, job.result.releaseId);
     return;
   }
@@ -79,6 +109,25 @@ async function reconcileApplicationJob(applicationRegistry, applicationEnvironme
         healthPath: job.result.healthPath ?? null,
         healthy: job.result.healthy ?? null,
       });
+    }
+    if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK && runtimeBindingRegistry
+      && typeof runtimeBindingRegistry.getBinding === 'function'
+      && typeof runtimeBindingRegistry.activate === 'function') {
+      const binding = await runtimeBindingRegistry.getBinding(job.resourceId);
+      if (binding && binding.adapter === 'static' && binding.releaseId !== job.result?.releaseId) {
+        await runtimeBindingRegistry.activate({
+          applicationId: binding.applicationId,
+          serverId: binding.serverId,
+          adapter: 'static',
+          state: binding.state,
+          sourceOperationId: job.id,
+          releaseId: job.result.releaseId,
+          websiteId: binding.websiteId,
+          websiteRevision: binding.websiteRevision,
+          domains: binding.domains,
+          staticTarget: binding.staticTarget,
+        }, { expectedRevision: binding.revision });
+      }
     }
     await markEnvironmentApplied(applicationEnvironmentRegistry, job, job.result.releaseId);
     return;
@@ -250,6 +299,87 @@ async function reconcilePassengerDomainStageBinding({
   }, { expectedRevision: binding.revision });
 }
 
+async function reconcileStaticDomainStageBinding({
+  job,
+  domain,
+  applicationRegistry,
+  websiteRegistry,
+  runtimeBindingRegistry,
+}) {
+  if (job.payload?.targetType !== 'static') return null;
+  if (!applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
+    || !websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
+    || !runtimeBindingRegistry || typeof runtimeBindingRegistry.getBinding !== 'function'
+    || typeof runtimeBindingRegistry.activate !== 'function') {
+    return null;
+  }
+  if (!domain?.websiteId || domain.id !== job.resourceId || domain.serverId !== job.serverId) {
+    return null;
+  }
+
+  const website = await websiteRegistry.getWebsite(domain.websiteId);
+  if (!website || website.serverId !== domain.serverId || website.runtimeType !== 'static' || !website.applicationId) {
+    return null;
+  }
+  const [application, binding] = await Promise.all([
+    applicationRegistry.getApplication(website.applicationId),
+    runtimeBindingRegistry.getBinding(website.applicationId),
+  ]);
+  if (!binding || binding.adapter !== 'static') return null;
+  if (!application || application.type !== 'static' || application.serverId !== domain.serverId
+    || binding.serverId !== domain.serverId
+    || binding.applicationId !== application.id || binding.websiteId !== website.id
+    || binding.websiteRevision !== website.revision || binding.releaseId !== application.currentReleaseId) {
+    staticDomainStageError(
+      'static_domain_stage_runtime_drift',
+      'Static runtime authority changed before Domain stage reconciliation',
+    );
+  }
+
+  if (job.payload.target?.root !== binding.staticTarget?.documentRoot) {
+    staticDomainStageError(
+      'static_domain_stage_target_drift',
+      'Static Domain stage target does not match current runtime authority',
+    );
+  }
+  const previousEvidence = binding.domains.find((entry) => entry.domainId === domain.id);
+  if (previousEvidence && previousEvidence.desiredRevision > domain.desiredRevision) {
+    staticDomainStageError(
+      'static_domain_stage_revision_drift',
+      'Static Domain stage revision moved behind runtime binding evidence',
+    );
+  }
+
+  const domains = binding.domains.some((entry) => entry.domainId === domain.id)
+    ? binding.domains.map((entry) => entry.domainId === domain.id ? {
+      domainId: entry.domainId,
+      desiredRevision: domain.desiredRevision,
+      nginxChecksum: job.result.checksum,
+    } : {
+      domainId: entry.domainId,
+      desiredRevision: entry.desiredRevision,
+      nginxChecksum: entry.nginxChecksum,
+    })
+    : [...binding.domains, {
+      domainId: domain.id,
+      desiredRevision: domain.desiredRevision,
+      nginxChecksum: job.result.checksum,
+    }];
+
+  return runtimeBindingRegistry.activate({
+    applicationId: binding.applicationId,
+    serverId: binding.serverId,
+    adapter: 'static',
+    state: binding.state,
+    sourceOperationId: binding.sourceOperationId,
+    releaseId: binding.releaseId,
+    websiteId: binding.websiteId,
+    websiteRevision: binding.websiteRevision,
+    domains,
+    staticTarget: binding.staticTarget,
+  }, { expectedRevision: binding.revision });
+}
+
 async function applyReconciliation({
   domainRegistry,
   certificateRegistry,
@@ -274,7 +404,7 @@ async function applyReconciliation({
       }
       return;
     }
-    await reconcileApplicationJob(applicationRegistry, applicationEnvironmentRegistry, job);
+    await reconcileApplicationJob(applicationRegistry, applicationEnvironmentRegistry, job, runtimeBindingRegistry);
     return;
   }
 
@@ -294,6 +424,13 @@ async function applyReconciliation({
         configName: job.result.configName,
       });
       await reconcilePassengerDomainStageBinding({
+        job,
+        domain,
+        applicationRegistry,
+        websiteRegistry,
+        runtimeBindingRegistry,
+      });
+      await reconcileStaticDomainStageBinding({
         job,
         domain,
         applicationRegistry,
@@ -384,4 +521,5 @@ export const jobReconciliationInternals = Object.freeze({
   safeReconciliationCode,
   reconcileMailDomainJob,
   reconcilePassengerDomainStageBinding,
+  reconcileStaticDomainStageBinding,
 });
