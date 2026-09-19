@@ -77,7 +77,15 @@ function validatePreview(preview) {
     || preview.nginx.serviceUnit !== roundcubeNginxTemplatePolicy.serviceUnit
     || preview.nginx.healthPath !== roundcubeNginxTemplatePolicy.healthPath
     || preview.nginx.webHostname !== preview.mailHostname
-    || preview.nginx.endpoint !== `https://${preview.mailHostname}/`) {
+    || preview.nginx.endpoint !== `https://${preview.mailHostname}/`
+    || !Array.isArray(preview.mappings) || !Array.isArray(preview.nginx.mappings)
+    || preview.mappings.length !== preview.nginx.mappings.length
+    || preview.mappings.some((mapping, index) => (
+      !mapping || typeof mapping.hostname !== 'string'
+      || !Number.isSafeInteger(mapping.revision) || mapping.revision < 1
+      || preview.nginx.mappings[index]?.hostname !== mapping.hostname
+      || preview.nginx.mappings[index]?.endpoint !== `https://${mapping.hostname}/`
+    ))) {
     throw activationError('roundcube_activation_preview_invalid', 'Roundcube activation preview is invalid');
   }
   return preview;
@@ -311,19 +319,28 @@ export function createRoundcubeConfigActivator({
   }
 
   async function assertHttpHealthy(preview) {
-    await runCommand(
-      CURL,
-      [
-        '--fail', '--silent', '--show-error', '--insecure',
-        '--max-time', '10',
-        '--resolve', `${preview.nginx.webHostname}:443:127.0.0.1`,
-        '--output', '/dev/null',
-        preview.nginx.endpoint,
-      ],
-      'roundcube_http_health_failed',
-      'Roundcube HTTPS endpoint did not become healthy',
-      { timeout: 15_000 },
-    );
+    const endpoints = [
+      Object.freeze({
+        hostname: preview.nginx.webHostname,
+        endpoint: preview.nginx.endpoint,
+      }),
+      ...preview.nginx.mappings,
+    ];
+    for (const endpoint of endpoints) {
+      await runCommand(
+        CURL,
+        [
+          '--fail', '--silent', '--show-error', '--insecure',
+          '--max-time', '10',
+          '--resolve', `${endpoint.hostname}:443:127.0.0.1`,
+          '--output', '/dev/null',
+          endpoint.endpoint,
+        ],
+        'roundcube_http_health_failed',
+        'Roundcube HTTPS endpoint did not become healthy',
+        { timeout: 15_000 },
+      );
+    }
   }
 
   async function rollback(transactionId, runtimeIdentity, wwwIdentity) {
