@@ -84,9 +84,10 @@ function preview({ mailMode = 'local', mailReady = true } = {}) {
   };
 }
 
-test('local mail config, DKIM key, and signing config become required after certificate issuance', () => {
+test('local mail config, DKIM key, and signing config become required after certificate TLS activation', () => {
   const plan = siteCreateProvisioningPlan(preview());
   const metadata = plan.steps.find((step) => step.id === 'mail_domain_metadata');
+  const tls = plan.steps.find((step) => step.id === 'tls_activation');
   const config = plan.steps.find((step) => step.id === 'mail_config');
   const dkim = plan.steps.find((step) => step.id === 'mail_dkim_key');
   const dkimConfig = plan.steps.find((step) => step.id === 'mail_dkim_config');
@@ -99,6 +100,17 @@ test('local mail config, DKIM key, and signing config become required after cert
     webDomainId: domainId,
     domainName: 'example.com',
     managementMode: 'local',
+  });
+
+  assert.equal(tls.kind, 'tls_activation');
+  assert.equal(tls.required, true);
+  assert.equal(tls.state, 'pending');
+  assert.deepEqual(tls.intent, {
+    adapter: 'managed-certificate-nginx',
+    websiteId,
+    primaryDomainId: domainId,
+    primaryDomain: 'example.com',
+    aliases: ['www.example.com'],
   });
 
   assert.equal(config.kind, 'mail_config');
@@ -152,7 +164,8 @@ test('local mail config, DKIM key, and signing config become required after cert
 
   const order = plan.steps.map((step) => step.id);
   assert.ok(order.indexOf('certificate') >= 0);
-  assert.ok(order.indexOf('certificate') < order.indexOf('mail_config'));
+  assert.ok(order.indexOf('certificate') < order.indexOf('tls_activation'));
+  assert.ok(order.indexOf('tls_activation') < order.indexOf('mail_config'));
   assert.ok(order.indexOf('mail_config') < order.indexOf('mail_dkim_key'));
   assert.ok(order.indexOf('mail_dkim_key') < order.indexOf('mail_dkim_config'));
   assert.equal(plan.ready, false);
