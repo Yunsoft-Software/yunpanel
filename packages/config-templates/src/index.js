@@ -60,6 +60,7 @@ export {
 
 export {
   MailSqlTemplateError,
+  enableManagedMailSql,
   mailSqlTemplateInternals,
   mailSqlTemplatePolicy,
   previewManagedMailSqlConfiguration,
