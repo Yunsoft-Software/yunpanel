@@ -201,3 +201,64 @@ test('custom certificate API rejects mismatched keys and remote Domains before p
     });
   });
 });
+
+test('Certificate GC preview and sweep routes expose retention candidates and sweep results', async () => {
+  const certificateRegistry = createCertificateRegistry();
+  const mockGc = {
+    async inspectGcCandidates({ retentionDays }) {
+      return {
+        inspectedAt: '2026-10-30T00:00:00.000Z',
+        retentionDays: retentionDays ?? 30,
+        totalCertificates: 1,
+        eligibleCount: 1,
+        retainedCount: 0,
+        sharedActiveCount: 0,
+        sharedRetainedCount: 0,
+        alreadyPurgedCount: 0,
+        notRetiredCount: 0,
+        eligible: [{ id: 'cert-1', certName: 'test.com', source: 'custom' }],
+      };
+    },
+    async sweep({ retentionDays, dryRun }) {
+      return {
+        sweptCount: 1,
+        sweptCertificates: [{ id: 'cert-1', certName: 'test.com', source: 'custom' }],
+        purgedAt: '2026-10-30T00:00:00.000Z',
+        dryRun: Boolean(dryRun),
+      };
+    },
+  };
+
+  const app = withPanelContext(createApp({
+    certificateRegistry,
+    certificateMaterialGc: mockGc,
+    localServerId: 'local',
+  }));
+
+  await withServer(app, async (baseUrl) => {
+    // 1. Preview
+    const preview = await requestJson(`${baseUrl}/api/certificates/gc/preview?retentionDays=14`);
+    assert.equal(preview.response.status, 200);
+    assert.equal(preview.payload.data.retentionDays, 14);
+    assert.equal(preview.payload.data.eligibleCount, 1);
+
+    // 2. Sweep dry-run
+    const drySweep = await requestJson(`${baseUrl}/api/certificates/gc/sweep`, {
+      method: 'POST',
+      body: { dryRun: true },
+    });
+    assert.equal(drySweep.response.status, 200);
+    assert.equal(drySweep.payload.data.dryRun, true);
+    assert.equal(drySweep.payload.data.sweptCount, 1);
+
+    // 3. Real sweep
+    const realSweep = await requestJson(`${baseUrl}/api/certificates/gc/sweep`, {
+      method: 'POST',
+      body: { dryRun: false },
+    });
+    assert.equal(realSweep.response.status, 200);
+    assert.equal(realSweep.payload.data.dryRun, false);
+    assert.equal(realSweep.payload.data.sweptCount, 1);
+  });
+});
+

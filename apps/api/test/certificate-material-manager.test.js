@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -88,3 +88,16 @@ test('custom certificate install is root-only, private and re-inspectable from f
   assert.equal(await manager.removeCustom(installed.certificateId), true);
   assert.equal(await manager.removeCustom(installed.certificateId), false);
 });
+
+test('removeAcme cleans up ACME live directory if present', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-acme-remove-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const acmeLiveRoot = path.join(directory, 'live');
+  await mkdir(path.join(acmeLiveRoot, 'example.com'), { recursive: true });
+  await writeFile(path.join(acmeLiveRoot, 'example.com', 'cert.pem'), 'dummy');
+
+  const manager = createCertificateMaterialManager({ acmeLiveRoot, getUid: () => 0 });
+  assert.equal(await manager.removeAcme('example.com'), true);
+  assert.equal(await manager.removeAcme('example.com'), false);
+});
+

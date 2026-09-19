@@ -100,7 +100,7 @@ test('version one ACME state hydrates without rewrite and persists source policy
   assert.equal(await readFile(filePath, 'utf8'), before);
   await registry.setState(certificate.id, 'issuing');
   const persisted = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(persisted.version, 6);
+  assert.equal(persisted.version, 7);
   assert.equal(persisted.certificates[0].source, 'acme');
   assert.deepEqual(persisted.certificates[0].certificateNames, ['example.com']);
   assert.deepEqual(persisted.certificates[0].challenge, { type: 'http-01' });
@@ -230,3 +230,47 @@ test('public certificate view omits private state and exposes authored lifecycle
   });
   assert.doesNotMatch(JSON.stringify(failed), /token_deadbeef/);
 });
+
+test('markMaterialPurged records purge timestamp on retired certificate and rejects active certificates', async () => {
+  const clock = Date.parse('2026-09-19T10:00:00.000Z');
+  const registry = createCertificateRegistry({ now: () => clock });
+  const certificate = await registry.createForDomain({
+    domainId: 'domain-1', serverId: 'server-1', domains: ['example.com'], email: 'ops@example.com',
+  });
+  await registry.markActive(certificate.id, acmeResult(certificate.certName, certificate.domains));
+
+  // Reject active certificate
+  await assert.rejects(
+    registry.markMaterialPurged(certificate.id),
+    (error) => error instanceof CertificateRegistryError && error.code === 'certificate_not_retired',
+  );
+
+  // Retire certificate
+  const active = await registry.getCertificate(certificate.id);
+  await registry.retireForDomainRemoval(certificate.id, {
+    expectedDomainId: 'domain-1',
+    expectedServerId: 'server-1',
+    expectedState: 'active',
+    expectedSource: 'acme',
+    expectedRenewalMode: 'automatic',
+    expectedStaging: false,
+    expectedValidTo: active.validTo,
+    expectedUpdatedAt: active.updatedAt,
+    operationId: 'op-1',
+  });
+
+  // Mark purged
+  const purgeTime = '2026-10-25T00:00:00.000Z';
+  const purged = await registry.markMaterialPurged(certificate.id, { purgedAt: purgeTime });
+  assert.equal(purged.changed, true);
+  assert.equal(purged.certificate.materialPurgedAt, purgeTime);
+
+  // Idempotent
+  const second = await registry.markMaterialPurged(certificate.id, { purgedAt: purgeTime });
+  assert.equal(second.changed, false);
+  assert.equal(second.certificate.materialPurgedAt, purgeTime);
+
+  const publicView = certificatePublicView(await registry.getCertificate(certificate.id));
+  assert.equal(publicView.materialPurgedAt, purgeTime);
+});
+

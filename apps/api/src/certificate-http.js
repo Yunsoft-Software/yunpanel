@@ -295,6 +295,28 @@ export function mountCertificateRoutes(app, dependencies = {}) {
       });
     } catch (error) { return next(error); }
   });
+
+  if (dependencies.certificateMaterialGc) {
+    app.get('/api/certificates/gc/preview', requirePanelRouteAccess, async (request, response, next) => {
+      try {
+        const retentionDaysRaw = request.query?.retentionDays;
+        const retentionDays = retentionDaysRaw !== undefined && /^\d+$/.test(retentionDaysRaw)
+          ? Number.parseInt(retentionDaysRaw, 10)
+          : undefined;
+        const preview = await dependencies.certificateMaterialGc.inspectGcCandidates({ retentionDays });
+        return response.json({ data: preview });
+      } catch (error) { return next(error); }
+    });
+
+    app.post('/api/certificates/gc/sweep', requirePanelRouteAccess, async (request, response, next) => {
+      try {
+        const retentionDays = typeof request.body?.retentionDays === 'number' ? request.body.retentionDays : undefined;
+        const dryRun = Boolean(request.body?.dryRun);
+        const result = await dependencies.certificateMaterialGc.sweep({ retentionDays, dryRun });
+        return response.json({ data: result });
+      } catch (error) { return next(error); }
+    });
+  }
 }
 
 export const certificateHttpInternals = Object.freeze({

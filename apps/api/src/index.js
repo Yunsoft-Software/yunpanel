@@ -27,6 +27,8 @@ import { createBackupOperationRegistry } from './backup-operation-registry.js';
 import { createBackupProjectLockProvider } from './backup-project-lock.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { createCertificateMaterialManager } from './certificate-material-manager.js';
+import { createCertificateMaterialGc, DEFAULT_CERTIFICATE_RETENTION_DAYS } from './certificate-material-gc.js';
+import { acmeManager } from '@yunpanel/host-runtime';
 import { startCertificateRenewalScheduler } from './certificate-renewal-scheduler.js';
 import { startConfiguredLocalRuntime } from './configured-local-runtime.js';
 import { createDatabaseBindingRegistry } from './database-binding-registry.js';
@@ -319,6 +321,17 @@ const domainRegistry = createDomainRegistry({
   websiteBindingRequired: () => websiteMigrationPolicy.snapshot().websiteBindingRequired,
 });
 await domainRegistry.init();
+const certificateRetentionDaysRaw = process.env.YUNPANEL_CERTIFICATE_RETENTION_DAYS;
+const certificateRetentionDays = certificateRetentionDaysRaw !== undefined && /^\d+$/.test(certificateRetentionDaysRaw)
+  ? Number.parseInt(certificateRetentionDaysRaw, 10)
+  : DEFAULT_CERTIFICATE_RETENTION_DAYS;
+const certificateMaterialGc = createCertificateMaterialGc({
+  certificateRegistry,
+  domainRegistry,
+  certificateMaterialManager,
+  acmeManager,
+  defaultRetentionDays: certificateRetentionDays,
+});
 const dnsHostingRegistry = createDnsHostingRegistry({
   filePath: dnsHostingStorePath,
   getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
@@ -803,6 +816,7 @@ const listener = createAuthenticatedApi({
       dockerComposeObserver: dockerComposeRuntime.observer,
       certificateRegistry,
       certificateMaterialManager,
+      certificateMaterialGc,
       applicationRegistry,
       runtimeBindingRegistry,
       applicationPassengerMigrationPreviewService,

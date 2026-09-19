@@ -312,7 +312,30 @@ export function createCertificateMaterialManager({
     return true;
   }
 
-  return Object.freeze({ inspectInput, installCustom, inspectStored, removeCustom, customPaths });
+  async function removeAcme(certName) {
+    assertRoot();
+    let safeName;
+    try {
+      safeName = normalizeDomainSet(certName, []).primary;
+    } catch {
+      throw new CertificateMaterialError('certificate_material_identity_invalid', 'Certificate material identity is invalid', 400);
+    }
+    const directory = path.join(resolvedAcmeRoot, safeName);
+    let entry;
+    try { entry = await lstatFn(directory); }
+    catch (error) {
+      if (error?.code === 'ENOENT') return false;
+      throw new CertificateMaterialError('certificate_material_cleanup_failed', 'ACME certificate material could not be cleaned up', 503);
+    }
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) {
+      throw new CertificateMaterialError('certificate_material_root_unsafe', 'ACME certificate material path is unsafe', 503);
+    }
+    try { await rmFn(directory, { recursive: true, force: true }); }
+    catch { throw new CertificateMaterialError('certificate_material_cleanup_failed', 'ACME certificate material could not be cleaned up', 503); }
+    return true;
+  }
+
+  return Object.freeze({ inspectInput, installCustom, inspectStored, removeCustom, removeAcme, customPaths });
 }
 
 export const certificateMaterialInternals = Object.freeze({

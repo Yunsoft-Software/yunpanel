@@ -179,6 +179,7 @@ export function createApp({
   jobRegistry = createJobRegistry(),
   certificateRegistry = createCertificateRegistry(),
   certificateMaterialManager = createCertificateMaterialManager(),
+  certificateMaterialGc = null,
   applicationRegistry = createApplicationRegistry(),
   dockerWorkloadRegistry = createDockerWorkloadRegistry({
     serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
@@ -439,6 +440,7 @@ export function createApp({
     certificateMaterialManager,
     jobRegistry,
     localServerId,
+    certificateMaterialGc,
   });
   app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry, { localServerId }));
   app.post('/api/domains/:domainId/update-preview', requirePanelRouteAccess, createDomainUpdatePreviewHandler(domainRegistry, { localServerId }));

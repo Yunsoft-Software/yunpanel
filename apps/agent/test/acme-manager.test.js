@@ -175,3 +175,19 @@ test('certbot execution errors are sanitized', async () => {
     },
   );
 });
+
+test('deleteCertificate runs certbot delete with non-interactive flag', async () => {
+  const calls = [];
+  const manager = createAcmeManager({
+    certbotPaths: ['/usr/bin/certbot'],
+    accessFn: async () => {},
+    run: async (file, args) => calls.push({ file, args }),
+  });
+
+  const result = await manager.deleteCertificate({ certName: 'Example.COM' });
+  assert.deepEqual(result, { certName: 'example.com', status: 'deleted' });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].file, '/usr/bin/certbot');
+  assert.deepEqual(calls[0].args, ['delete', '--cert-name', 'example.com', '--non-interactive']);
+});
+

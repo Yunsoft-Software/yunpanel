@@ -283,9 +283,16 @@ export function createAcmeManager({
     };
   }
 
+  async function deleteCertificate({ certName }) {
+    const normalizedName = normalizeDomainSet(certName, []).primary;
+    await runCertbot(['delete', '--cert-name', normalizedName, '--non-interactive']);
+    return { certName: normalizedName, status: 'deleted' };
+  }
+
   return {
     issueCertificate,
     renewCertificate,
+    deleteCertificate,
     inspectCertificate: inspectCertificateFn,
   };
 }

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { normalizeDomainSet, sanitizeLogMessage } from '@yunpanel/shared';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
-const STORE_VERSION = 6;
+const STORE_VERSION = 7;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CERT_STATES = new Set([
@@ -139,6 +139,7 @@ export function certificatePublicView(certificate, { now = Date.now } = {}) {
     lastRenewedAt: certificate.lastRenewedAt,
     lastImportedAt: certificate.lastImportedAt,
     retiredAt: certificate.retiredAt,
+    materialPurgedAt: certificate.materialPurgedAt ?? null,
     provisioningOperationId: certificate.provisioningOperationId ?? null,
     createdAt: certificate.createdAt,
     updatedAt: certificate.updatedAt,
@@ -285,6 +286,21 @@ function hydrateCertificate(certificate, sourceVersion, roots) {
   }
   if (sourceVersion < 6) {
     certificate.purpose = 'web';
+  }
+  if (sourceVersion < 7) {
+    certificate.materialPurgedAt = null;
+  }
+  if (certificate.materialPurgedAt !== null && (
+    typeof certificate.materialPurgedAt !== 'string'
+    || !Number.isFinite(Date.parse(certificate.materialPurgedAt))
+    || new Date(certificate.materialPurgedAt).toISOString() !== certificate.materialPurgedAt
+    || certificate.state !== 'retired'
+  )) {
+    throw new CertificateRegistryError(
+      'invalid_certificate_state',
+      'Persisted certificate material purge evidence is invalid',
+      409,
+    );
   }
   if (certificate.provisioningOperationId !== null
     && (typeof certificate.provisioningOperationId !== 'string'
@@ -475,6 +491,7 @@ export function createCertificateRegistry({
       retiredAt: null,
       retiredFromState: null,
       retiredFromUpdatedAt: null,
+      materialPurgedAt: null,
       materialDigest: null,
       lastError: null,
       createdAt: timestamp,
@@ -636,6 +653,7 @@ export function createCertificateRegistry({
       retiredAt: null,
       retiredFromState: null,
       retiredFromUpdatedAt: null,
+      materialPurgedAt: null,
       materialDigest: typeof materialDigest === 'string' && /^[a-f0-9]{64}$/.test(materialDigest) ? materialDigest : null,
       lastError: null,
       createdAt: timestamp,
@@ -772,6 +790,26 @@ export function createCertificateRegistry({
     return Object.freeze({ changed: true, certificate: publicCertificate(certificate) });
   }
 
+  async function markMaterialPurged(certificateId, { purgedAt = new Date(now()).toISOString() } = {}) {
+    await ensureInitialized();
+    const certificate = requireCertificate(state, certificateId);
+    if (certificate.state !== 'retired') {
+      throw new CertificateRegistryError(
+        'certificate_not_retired',
+        'Only retired certificates can have material purged',
+        409,
+      );
+    }
+    const normalizedPurgedAt = validateDate(purgedAt, 'purgedAt');
+    if (certificate.materialPurgedAt !== null) {
+      return Object.freeze({ changed: false, certificate: publicCertificate(certificate) });
+    }
+    certificate.materialPurgedAt = normalizedPurgedAt;
+    certificate.updatedAt = normalizedPurgedAt;
+    await persist();
+    return Object.freeze({ changed: true, certificate: publicCertificate(certificate) });
+  }
+
   async function getCertificate(certificateId) {
     await ensureInitialized();
     const certificate = state.certificates.find((candidate) => candidate.id === certificateId);
@@ -802,6 +840,7 @@ export function createCertificateRegistry({
     markActive,
     markFailed,
     retireForDomainRemoval,
+    markMaterialPurged,
     getCertificate,
     getForDomain,
     listCertificates,
