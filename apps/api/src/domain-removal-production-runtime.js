@@ -3,6 +3,7 @@ import { createDomainRemovalOperationRegistry } from './domain-removal-operation
 import { createDomainRemovalPreview } from './domain-removal-plan.js';
 import { createDomainRemovalRuntime } from './domain-removal-runtime.js';
 import { previewResourceImpact } from './resource-impact.js';
+import { createAllWebsiteImpactProviders } from './website-delete-impact-providers.js';
 
 export class DomainRemovalProductionRuntimeError extends Error {
   constructor(code, message, status = 400) {
@@ -27,6 +28,8 @@ export function createDomainRemovalProductionRuntime({
   dockerWorkloadRegistry,
   backupOperationRegistry,
   databaseBindingRegistry,
+  websiteSftpKeyRegistry = null,
+  runtimeBindingRegistry = null,
   domainSuspensionRuntime,
   dnsZoneRetirementService = null,
   dnsZoneRetirementRuntime = null,
@@ -153,6 +156,12 @@ export function createDomainRemovalProductionRuntime({
             .map((item) => ({ id: item.id, state: item.enabled ? 'enabled' : 'disabled' }));
         },
         ...(websiteCronImpactProvider ? { crons: websiteCronImpactProvider } : {}),
+        ...createAllWebsiteImpactProviders({
+          databaseBindingRegistry,
+          websiteSftpKeyRegistry,
+          runtimeBindingRegistry,
+          websiteRegistry,
+        }),
       },
       ...(dnsZoneRetirementService ? { dnsRetirementImpactProvider } : {}),
     });

@@ -113,6 +113,7 @@ import { PowerDnsSecretRegistryError } from './powerdns-secret-registry.js';
 import { createDnsZoneRetirementService } from './dns-zone-retirement.js';
 import { ResourceImpactError } from './resource-impact.js';
 import { mountResourceImpactRoutes } from './resource-impact-http.js';
+import { createAllWebsiteImpactProviders } from './website-delete-impact-providers.js';
 import { RoundcubeConfigurationError } from './roundcube-configuration.js';
 import { RoundcubeConfigurationHttpError, mountRoundcubeConfigurationRoutes } from './roundcube-configuration-http.js';
 import {
@@ -266,6 +267,7 @@ export function createApp({
   ttydSessionManager = null,
   siteFileManager = null,
   websiteProvisioningRuntime = null,
+  websiteSftpKeyRegistry = null,
   websiteSftpKeyService = null,
   domainSuspensionRuntime = null,
   domainRemovalRuntime = null,
@@ -565,6 +567,12 @@ export function createApp({
           .map((item) => ({ id: item.id, state: item.enabled ? 'enabled' : 'disabled' }));
       },
       ...(websiteCronImpactProvider ? { crons: websiteCronImpactProvider } : {}),
+      ...createAllWebsiteImpactProviders({
+        databaseBindingRegistry,
+        websiteSftpKeyRegistry: websiteSftpKeyRegistry ?? websiteSftpKeyService?.keyRegistry ?? null,
+        runtimeBindingRegistry,
+        websiteRegistry,
+      }),
     },
   });
   mountExternalLifecycleRoutes(app, {

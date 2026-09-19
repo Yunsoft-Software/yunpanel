@@ -150,6 +150,11 @@ function impact(currentDomain = domain(), overrides = {}) {
     crons: { status: 'available', items: [] },
     dockerWorkloads: { status: 'available', items: [] },
     webmailMappings: { status: 'available', items: [] },
+    databases: { status: 'available', items: [] },
+    sftpKeys: { status: 'available', items: [] },
+    runtimeBindings: { status: 'available', items: [] },
+    unixIdentities: { status: 'available', items: [] },
+    logScopes: { status: 'available', items: [] },
     authoritativeDns: {
       status: 'available',
       items: [{

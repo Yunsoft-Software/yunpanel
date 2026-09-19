@@ -516,3 +516,44 @@ test('webmail mapping impact retains exact removal evidence and rejects malforme
       && error.code === 'webmail_mapping_impact_invalid',
   );
 });
+
+test('previewResourceImpact includes databases, sftpKeys, runtimeBindings, unixIdentities, and logScopes', async () => {
+  const state = await fixture();
+  const preview = await previewResourceImpact({
+    resourceType: 'website',
+    resourceId: state.website.id,
+    operation: 'delete',
+    targetServerId: null,
+    registry: state.registry,
+    applicationRegistry: state.applicationRegistry,
+    websiteRegistry: state.websiteRegistry,
+    domainRegistry: state.domainRegistry,
+    certificateRegistry: state.certificateRegistry,
+    jobRegistry: state.jobRegistry,
+    dnsHostingRegistry: state.dnsHostingRegistry,
+    mailDomainRegistry: state.mailDomainRegistry,
+    additionalProviders: {
+      databases: async () => [{ id: 'db-1', state: 'main_db' }],
+      sftpKeys: async () => [{ id: 'key-1', state: 'active' }],
+      runtimeBindings: async () => [{ id: 'rb-1', state: 'active' }],
+      unixIdentities: async () => [{ id: 'yunapp-123456789012', state: 'active' }],
+      logScopes: async () => [{ id: state.website.id, state: 'managed' }],
+    },
+  });
+
+  assert.equal(preview.dependencies.databases.status, 'available');
+  assert.deepEqual(preview.dependencies.databases.items, [{ id: 'db-1', state: 'main_db' }]);
+
+  assert.equal(preview.dependencies.sftpKeys.status, 'available');
+  assert.deepEqual(preview.dependencies.sftpKeys.items, [{ id: 'key-1', state: 'active' }]);
+
+  assert.equal(preview.dependencies.runtimeBindings.status, 'available');
+  assert.deepEqual(preview.dependencies.runtimeBindings.items, [{ id: 'rb-1', state: 'active' }]);
+
+  assert.equal(preview.dependencies.unixIdentities.status, 'available');
+  assert.deepEqual(preview.dependencies.unixIdentities.items, [{ id: 'yunapp-123456789012', state: 'active' }]);
+
+  assert.equal(preview.dependencies.logScopes.status, 'available');
+  assert.deepEqual(preview.dependencies.logScopes.items, [{ id: state.website.id, state: 'managed' }]);
+});
+

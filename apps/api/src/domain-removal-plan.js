@@ -672,6 +672,11 @@ function dependencyPlan(dependencies, domain) {
     backups: normalizedBucket(dependencies.backups, 'backup'),
     crons: normalizedBucket(dependencies.crons, 'cron'),
     dockerWorkloads: normalizedBucket(dependencies.dockerWorkloads, 'docker'),
+    databases: normalizedBucket(dependencies.databases, 'database'),
+    sftpKeys: normalizedBucket(dependencies.sftpKeys, 'sftpKey'),
+    runtimeBindings: normalizedBucket(dependencies.runtimeBindings, 'runtimeBinding'),
+    unixIdentities: normalizedBucket(dependencies.unixIdentities, 'unixIdentity'),
+    logScopes: normalizedBucket(dependencies.logScopes, 'logScope'),
   });
   const activeJobs = normalizedIds(dependencies.activeJobs ?? [], 'job');
   const childDomains = Object.freeze(orderedChildDomains(

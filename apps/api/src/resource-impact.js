@@ -9,6 +9,11 @@ const ADDITIONAL_TYPES = Object.freeze([
   ['crons', 'cron'],
   ['dockerWorkloads', 'docker'],
   ['webmailMappings', 'webmail_mapping'],
+  ['databases', 'database_binding'],
+  ['sftpKeys', 'sftp_key'],
+  ['runtimeBindings', 'runtime_binding'],
+  ['unixIdentities', 'unix_identity'],
+  ['logScopes', 'log_scope'],
 ]);
 const SAFE_RESOURCE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const SAFE_REFERENCE_ID = /^[A-Za-z0-9._:@-]{1,160}$/;

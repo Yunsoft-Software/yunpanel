@@ -57,8 +57,8 @@ test('domain-removal-production-runtime includes crons in preview impact and fai
     };
 
     const applicationRegistry = {
-      getApplication: async () => null,
-      listApplications: async () => [],
+      getApplication: async (id) => (id === 'app-1' ? { id: 'app-1', name: 'App 1', serverId: localServerId } : null),
+      listApplications: async () => [{ id: 'app-1', name: 'App 1', serverId: localServerId }],
     };
 
     const websiteRegistry = {
@@ -237,5 +237,56 @@ test('domain-removal-production-runtime includes crons in preview impact and fai
       runtimeWithFailingCron.preview({ domainId: testDomain.id }),
       (err) => err.code === 'cron_impact_unavailable' && err.status === 503,
     );
+
+    // 4. Wires database, sftpKey, runtimeBinding, unixIdentity, and logScope providers into preview impact
+    const websiteSftpKeyRegistry = {
+      listKeys: async (wsId) => (wsId === 'ws-1' ? [{ id: 'key-1', status: 'authorized' }] : []),
+    };
+    const runtimeBindingRegistry = {
+      getBinding: async (appId) => (appId === 'app-1' ? { id: 'rb-1', state: 'active' } : null),
+    };
+    const databaseBindingRegistryWithData = {
+      listBindings: async ({ websiteId }) => (websiteId === 'ws-1' ? [{ id: 'db-1', databaseName: 'mydb' }] : []),
+    };
+    const websiteRegistryWithIdentity = {
+      getWebsite: async (id) => (id === 'ws-1' ? { ...testWebsite, applicationId: 'app-1', systemUser: 'siteuser1' } : null),
+      listWebsites: async () => [{ ...testWebsite, applicationId: 'app-1', systemUser: 'siteuser1' }],
+    };
+
+    const runtimeWithAllProviders = createDomainRemovalProductionRuntime({
+      filePath: path.join(tempDir, 'domain-removal-operations-all.json'),
+      registry,
+      applicationRegistry,
+      websiteRegistry: websiteRegistryWithIdentity,
+      domainRegistry,
+      certificateRegistry,
+      jobRegistry,
+      dnsHostingRegistry,
+      mailDomainRegistry,
+      mailboxRegistry,
+      dockerWorkloadRegistry,
+      backupOperationRegistry,
+      databaseBindingRegistry: databaseBindingRegistryWithData,
+      websiteSftpKeyRegistry,
+      runtimeBindingRegistry,
+      domainSuspensionRuntime,
+      mailDomainRemovalRuntime,
+      roundcubeDomainMappingRegistry,
+      roundcubeDomainMappingService,
+      localServerId,
+    });
+
+    const previewWithAll = await runtimeWithAllProviders.preview({ domainId: testDomain.id });
+    assert.equal(previewWithAll.plan.additional.databases.status, 'available');
+    assert.deepEqual(previewWithAll.plan.additional.databases.ids, ['db-1']);
+    assert.equal(previewWithAll.plan.additional.sftpKeys.status, 'available');
+    assert.deepEqual(previewWithAll.plan.additional.sftpKeys.ids, ['key-1']);
+    assert.equal(previewWithAll.plan.additional.runtimeBindings.status, 'available');
+    assert.deepEqual(previewWithAll.plan.additional.runtimeBindings.ids, ['rb-1']);
+    assert.equal(previewWithAll.plan.additional.unixIdentities.status, 'available');
+    assert.deepEqual(previewWithAll.plan.additional.unixIdentities.ids, ['siteuser1']);
+    assert.equal(previewWithAll.plan.additional.logScopes.status, 'available');
+    assert.deepEqual(previewWithAll.plan.additional.logScopes.ids, ['ws-1']);
   });
 });
+

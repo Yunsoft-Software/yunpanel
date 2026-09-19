@@ -636,6 +636,8 @@ const domainRemovalRuntimeBundle = localServerId && domainSuspensionRuntime && m
     dockerWorkloadRegistry,
     backupOperationRegistry,
     databaseBindingRegistry,
+    websiteSftpKeyRegistry: websiteSftpKeyRuntime?.keyRegistry ?? null,
+    runtimeBindingRegistry,
     domainSuspensionRuntime,
     dnsZoneRetirementService,
     dnsZoneRetirementRuntime,
