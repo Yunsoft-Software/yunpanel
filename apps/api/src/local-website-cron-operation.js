@@ -1,0 +1,171 @@
+import { createHash } from 'node:crypto';
+import { renderCronTaskFile } from '@yunpanel/config-templates';
+import { createWebsiteCronManager } from '@yunpanel/host-runtime';
+import { OPERATIONS } from '@yunpanel/protocol';
+import { createWebsiteCronOperationReceiptStore } from './website-cron-operation-receipt.js';
+
+const EXECUTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export class LocalWebsiteCronOperationError extends Error {
+  constructor(code, message, status = 400) {
+    super(message);
+    this.name = 'LocalWebsiteCronOperationError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function assertExecution(execution) {
+  if (!execution || typeof execution !== 'object' || Array.isArray(execution)
+    || typeof execution.jobId !== 'string' || !EXECUTION_ID_PATTERN.test(execution.jobId)
+    || typeof execution.serverId !== 'string' || !UUID_PATTERN.test(execution.serverId)
+    || execution.resourceType !== 'website_cron' || typeof execution.resourceId !== 'string' || !execution.resourceId) {
+    throw new LocalWebsiteCronOperationError(
+      'website_cron_execution_context_invalid',
+      'Website cron execution context is invalid',
+    );
+  }
+  return execution;
+}
+
+export function createLocalWebsiteCronOperation({
+  websiteCronRegistry,
+  websiteCronManager = createWebsiteCronManager(),
+  receiptStore = createWebsiteCronOperationReceiptStore(),
+} = {}) {
+  if (!websiteCronRegistry || typeof websiteCronRegistry.getTask !== 'function'
+    || !websiteCronManager || typeof websiteCronManager.apply !== 'function' || typeof websiteCronManager.remove !== 'function'
+    || !receiptStore || typeof receiptStore.write !== 'function') {
+    throw new LocalWebsiteCronOperationError(
+      'website_cron_operation_dependencies_invalid',
+      'Website cron local operation dependencies are invalid',
+      500,
+    );
+  }
+
+  async function execute(operation, payload, execution) {
+    const context = assertExecution(execution);
+    if (![OPERATIONS.CRON_APPLY, OPERATIONS.CRON_REMOVE].includes(operation)) {
+      throw new LocalWebsiteCronOperationError('website_cron_operation_invalid', 'Website cron operation is invalid');
+    }
+    if (context.resourceId !== payload.taskId) {
+      throw new LocalWebsiteCronOperationError(
+        'website_cron_resource_mismatch',
+        'Execution resourceId does not match the payload taskId',
+      );
+    }
+
+    const task = await websiteCronRegistry.getTask(payload.taskId);
+    if (!task) {
+      throw new LocalWebsiteCronOperationError(
+        'website_cron_task_not_found',
+        'Website cron task was not found in registry',
+        404,
+      );
+    }
+
+    if (task.websiteId !== payload.websiteId
+      || task.applicationId !== payload.applicationId
+      || task.unixUser !== payload.unixUser
+      || task.revision !== payload.expectedRevision) {
+      throw new LocalWebsiteCronOperationError(
+        'website_cron_state_conflict',
+        'Website cron task in registry does not match queued job payload',
+        409,
+      );
+    }
+
+    const rendered = renderCronTaskFile({
+      taskId: task.id,
+      user: task.unixUser,
+      schedule: task.schedule,
+      command: task.command,
+      enabled: task.enabled,
+    });
+    const calculatedSha256 = sha256(rendered);
+    if (calculatedSha256 !== payload.desiredStateSha256) {
+      throw new LocalWebsiteCronOperationError(
+        'website_cron_digest_mismatch',
+        'Website cron task content digest does not match the queued desired state',
+        409,
+      );
+    }
+
+    let hostResult;
+    let safeResult;
+
+    if (operation === OPERATIONS.CRON_APPLY) {
+      hostResult = await websiteCronManager.apply({
+        taskId: task.id,
+        user: task.unixUser,
+        schedule: task.schedule,
+        command: task.command,
+        enabled: task.enabled,
+      });
+
+      safeResult = Object.freeze({
+        version: 1,
+        taskId: task.id,
+        websiteId: task.websiteId,
+        applicationId: task.applicationId,
+        unixUser: task.unixUser,
+        revision: task.revision,
+        desiredStateSha256: payload.desiredStateSha256,
+        contentSha256: hostResult.currentSha256,
+        applied: true,
+        sideEffects: hostResult.sideEffects,
+      });
+    } else {
+      hostResult = await websiteCronManager.remove({
+        taskId: task.id,
+        user: task.unixUser,
+        schedule: task.schedule,
+        command: task.command,
+        enabled: task.enabled,
+      });
+
+      // Remove from registry after host remove succeeds
+      if (typeof websiteCronRegistry.deleteTask === 'function') {
+        await websiteCronRegistry.deleteTask(task.id, { expectedRevision: task.revision });
+      }
+
+      safeResult = Object.freeze({
+        version: 1,
+        taskId: task.id,
+        websiteId: task.websiteId,
+        applicationId: task.applicationId,
+        unixUser: task.unixUser,
+        revision: task.revision,
+        desiredStateSha256: payload.desiredStateSha256,
+        contentSha256: hostResult.previousSha256,
+        removed: true,
+        sideEffects: hostResult.sideEffects,
+      });
+    }
+
+    try {
+      await receiptStore.write({
+        serverId: context.serverId,
+        jobId: context.jobId,
+        operation,
+        result: safeResult,
+      });
+    } catch {
+      // Host mutation is complete. Receipt write failure must not recast successful host work as failed.
+    }
+
+    return safeResult;
+  }
+
+  return Object.freeze({ execute });
+}
+
+export const localWebsiteCronOperationInternals = Object.freeze({
+  assertExecution,
+  sha256,
+});

@@ -38,6 +38,7 @@ import { managedServiceStatePolicy } from './managed-service-state-policy.js';
 import { JOB_RESOURCE_TYPES } from './job-resource-types.js';
 import { sanitizeNodePassengerMigrationResult } from './node-passenger-migration-job-result.js';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
+import { sanitizeWebsiteCronJobResult } from './website-cron-job-result.js';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
@@ -78,6 +79,8 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.MAIL_DATA_RESTORE,
   OPERATIONS.MAIL_DATA_DELETE,
   OPERATIONS.ROUNDCUBE_CONFIG_APPLY,
+  OPERATIONS.CRON_APPLY,
+  OPERATIONS.CRON_REMOVE,
   ...DOCKER_COMPOSE_OPERATIONS,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -906,6 +909,9 @@ function sanitizeResult(job, result) {
     return sanitizeMailDataResult(job, result);
   }
   if (job.operation === OPERATIONS.ROUNDCUBE_CONFIG_APPLY) return sanitizeRoundcubeConfigResult(job, result);
+  if ([OPERATIONS.CRON_APPLY, OPERATIONS.CRON_REMOVE].includes(job.operation)) {
+    return sanitizeWebsiteCronJobResult(job, result);
+  }
   if (job.operation === OPERATIONS.APP_NODE_PASSENGER_MIGRATE) return sanitizeNodePassengerMigrationJobResult(job, result);
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new JobRegistryError('invalid_job_result', 'Agent job result must be an object');

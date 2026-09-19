@@ -38,6 +38,7 @@ Son Domain removal Mail Domain data/finalization/bootstrap ilerlemesi: `docs/his
 Son Domain removal External DNS metadata lifecycle ilerlemesi: `docs/history/domain-removal-external-dns-progress-2026-09-19.md`.
 Son Domain/Website removal backup impact ilerlemesi: `docs/history/domain-removal-backup-impact-progress-2026-09-19.md`.
 Son Website cron control-plane temeli: `docs/history/website-cron-control-plane-foundation-2026-09-19.md`.
+Son Website cron durable lifecycle ve API ilerlemesi: `docs/history/website-cron-durable-lifecycle-api-progress-2026-09-19.md`.
 Son SQL-backed virtual-mail cutover ilerlemesi: `docs/history/mail-sql-virtual-mail-progress-2026-09-19.md`.
 Son shared Roundcube webmail mapping ilerlemesi: `docs/history/roundcube-webmail-mapping-progress-2026-09-19.md`.
 Son fresh Website shared Roundcube provisioning ilerlemesi: `docs/history/site-create-roundcube-provisioning-2026-09-19.md`.
@@ -155,7 +156,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 
 ## P1.4 — Site features/settings
 
-- [ ] Site-user cron/timer CRUD: source registry + shared cron renderer + root-owned host manager + salt okunur managed-file envanteri + production registry bootstrap hazır; sıradaki iş durable apply/remove job lifecycle, registry/host/receipt reconciliation, status/output ve ancak bunların ardından authenticated Website-scoped CRUD/API/UI.
 - [ ] WP-CLI site user.
 - [ ] Composer site user.
 - [ ] Redis/Memcached isolation policy.

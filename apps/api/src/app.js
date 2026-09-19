@@ -154,6 +154,9 @@ import { WebsiteProvisioningRegistryError } from './website-provisioning-registr
 import { mountWebsiteSftpKeyRoutes, WebsiteSftpKeyHttpError } from './website-sftp-key-http.js';
 import { WebsiteSftpKeyRegistryError } from './website-sftp-key-registry.js';
 import { WebsiteSftpKeyServiceError } from './website-sftp-key-service.js';
+import { mountWebsiteCronRoutes, WebsiteCronHttpError } from './website-cron-http.js';
+import { WebsiteCronApplyServiceError } from './website-cron-apply-service.js';
+import { WebsiteCronRegistryError } from './website-cron-registry.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -273,6 +276,8 @@ export function createApp({
   websiteProvisioningRuntime = null,
   websiteSftpKeyRegistry = null,
   websiteSftpKeyService = null,
+  websiteCronApplyService = null,
+  databaseBackupService = null,
   domainSuspensionRuntime = null,
   domainRemovalRuntime = null,
   websiteRemovalRuntime = null,
@@ -734,6 +739,9 @@ export function createApp({
   if (websiteSftpKeyService) {
     mountWebsiteSftpKeyRoutes(app, { sftpKeyService: websiteSftpKeyService });
   }
+  if (websiteCronApplyService) {
+    mountWebsiteCronRoutes(app, { websiteCronApplyService });
+  }
   mountManagedServiceRoutes(app, { registry: localRegistry, jobRegistry });
   mountNodeRuntimeRoutes(app, { registry: localRegistry, jobRegistry });
   if (databaseBindingRegistry) {
@@ -900,6 +908,9 @@ export function createApp({
       || error instanceof WebsiteSftpKeyHttpError
       || error instanceof WebsiteSftpKeyRegistryError
       || error instanceof WebsiteSftpKeyServiceError
+      || error instanceof WebsiteCronHttpError
+      || error instanceof WebsiteCronApplyServiceError
+      || error instanceof WebsiteCronRegistryError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }

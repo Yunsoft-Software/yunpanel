@@ -81,6 +81,11 @@ export const LOCAL_ROUNDCUBE_CONFIGURATION_OPERATIONS = Object.freeze([
   OPERATIONS.ROUNDCUBE_CONFIG_APPLY,
 ]);
 
+export const LOCAL_CRON_OPERATIONS = Object.freeze([
+  OPERATIONS.CRON_APPLY,
+  OPERATIONS.CRON_REMOVE,
+]);
+
 const EXECUTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 
 function validEnvironmentBundle(value) {
@@ -151,6 +156,7 @@ export function createLocalHostOperations({
   mailDataRestoreManager = null,
   mailDataDeleteManager = null,
   roundcubeConfigOperation = null,
+  websiteCronOperation = null,
   loadManagedMailConfiguration = null,
   loadManagedMailRollbackConfiguration = null,
   loadManagedDkimConfiguration = null,
@@ -187,6 +193,9 @@ export function createLocalHostOperations({
   }
   if (roundcubeConfigOperation !== null && typeof roundcubeConfigOperation?.execute !== 'function') {
     throw new Error('roundcubeConfigOperation must provide execute() when configured');
+  }
+  if (websiteCronOperation !== null && typeof websiteCronOperation?.execute !== 'function') {
+    throw new Error('websiteCronOperation must provide execute() when configured');
   }
   if (!cloudflareDnsManager || typeof cloudflareDnsManager.applyRecord !== 'function') {
     throw new Error('cloudflareDnsManager must provide applyRecord()');
@@ -712,6 +721,10 @@ export function createLocalHostOperations({
   }
   if (resolvedRoundcubeConfigOperation) {
     handlers.set(OPERATIONS.ROUNDCUBE_CONFIG_APPLY, (payload, execution) => resolvedRoundcubeConfigOperation.execute(payload, execution));
+  }
+  if (websiteCronOperation) {
+    handlers.set(OPERATIONS.CRON_APPLY, (payload, execution) => websiteCronOperation.execute(OPERATIONS.CRON_APPLY, payload, execution));
+    handlers.set(OPERATIONS.CRON_REMOVE, (payload, execution) => websiteCronOperation.execute(OPERATIONS.CRON_REMOVE, payload, execution));
   }
 
   return {

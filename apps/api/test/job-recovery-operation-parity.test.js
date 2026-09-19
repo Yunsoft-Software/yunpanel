@@ -31,6 +31,7 @@ const recoverySources = [
   'job-running-mail-dkim-recovery.js',
   'job-running-mail-data-recovery.js',
   'job-running-roundcube-config-recovery.js',
+  'job-running-cron-recovery.js',
   'application-passenger-migration-reconciliation.js',
 ].map(apiSource);
 

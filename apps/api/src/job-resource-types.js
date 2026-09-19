@@ -9,4 +9,5 @@ export const JOB_RESOURCE_TYPES = Object.freeze([
   'mail_domain',
   'system',
   'docker_project',
+  'website_cron',
 ]);

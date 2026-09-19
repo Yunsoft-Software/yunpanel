@@ -21,9 +21,12 @@ const MAIL_DATA_BACKUP = 'mail.data.backup';
 const MAIL_DATA_RESTORE = 'mail.data.restore';
 const MAIL_DATA_DELETE = 'mail.data.delete';
 const ROUNDCUBE_CONFIG_APPLY = 'roundcube.config.apply';
+const CRON_APPLY = 'cron.apply';
+const CRON_REMOVE = 'cron.remove';
 const POSTSRSD_SERVICE_ID = 'postsrsd';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const BACKUP_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const MAILBOX_LOCAL_PART_PATTERN = /^[a-z0-9](?:[a-z0-9._+-]{0,62}[a-z0-9])?$/;
 const TXT_MAX_BYTES = 4096;
 
@@ -39,6 +42,8 @@ export const OPERATIONS = Object.freeze({
   MAIL_DATA_RESTORE,
   MAIL_DATA_DELETE,
   ROUNDCUBE_CONFIG_APPLY,
+  CRON_APPLY,
+  CRON_REMOVE,
 });
 
 export function isKnownOperation(operation) {
@@ -49,7 +54,9 @@ export function isKnownOperation(operation) {
     || operation === MAIL_DATA_BACKUP
     || operation === MAIL_DATA_RESTORE
     || operation === MAIL_DATA_DELETE
-    || operation === ROUNDCUBE_CONFIG_APPLY;
+    || operation === ROUNDCUBE_CONFIG_APPLY
+    || operation === CRON_APPLY
+    || operation === CRON_REMOVE;
 }
 
 export function isReadOnlyOperation(operation) {
@@ -95,6 +102,34 @@ function validateDatabaseCredentialMutation(payload, operation, errors) {
   }
   if (typeof payload.desiredStateSha256 !== 'string' || !SHA256_PATTERN.test(payload.desiredStateSha256)) {
     errors.push(`${operation} desired-state digest is invalid`);
+  }
+}
+
+function validateCronMutation(payload, operation, errors) {
+  const allowed = new Set([
+    'taskId', 'websiteId', 'applicationId', 'unixUser',
+    'expectedRevision', 'desiredStateSha256',
+  ]);
+  if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
+    errors.push(`${operation} contains unsupported arguments`);
+  }
+  try {
+    if (assertUuid(payload.taskId, 'taskId') !== payload.taskId
+      || assertUuid(payload.websiteId, 'websiteId') !== payload.websiteId
+      || assertUuid(payload.applicationId, 'applicationId') !== payload.applicationId) {
+      throw new Error('noncanonical');
+    }
+  } catch {
+    errors.push(`${operation} identities are invalid`);
+  }
+  if (typeof payload.unixUser !== 'string' || !APP_USER_PATTERN.test(payload.unixUser)) {
+    errors.push(`${operation} unixUser is invalid`);
+  }
+  if (!Number.isSafeInteger(payload.expectedRevision) || payload.expectedRevision < 1) {
+    errors.push(`${operation} expectedRevision is invalid`);
+  }
+  if (typeof payload.desiredStateSha256 !== 'string' || !SHA256_PATTERN.test(payload.desiredStateSha256)) {
+    errors.push(`${operation} desiredStateSha256 is invalid`);
   }
 }
 
@@ -255,6 +290,7 @@ function extendedOperation(value) {
   if (value.operation === MAIL_DATA_RESTORE) return 'mail_data_restore';
   if (value.operation === MAIL_DATA_DELETE) return 'mail_data_delete';
   if (value.operation === ROUNDCUBE_CONFIG_APPLY) return 'roundcube';
+  if (value.operation === CRON_APPLY || value.operation === CRON_REMOVE) return 'cron';
   if (value.operation === BASE_OPERATIONS.DNS_RECORD_APPLY && value.payload?.record?.type === 'TXT') return 'dns_txt';
   if (value.payload?.serviceId === POSTSRSD_SERVICE_ID
     && [
@@ -286,6 +322,8 @@ export function validateOperationEnvelope(value) {
     validateMailDataDelete(value.payload, errors);
   } else if (extension === 'roundcube') {
     validateRoundcubeConfigApply(value.payload, errors);
+  } else if (extension === 'cron') {
+    validateCronMutation(value.payload, value.operation, errors);
   } else if (extension === 'postsrsd_service') {
     validatePostsrsdServiceOperation(value.operation, value.payload, errors);
   } else {
@@ -305,6 +343,8 @@ export function createOperationEnvelope({ id, operation, payload = {} }) {
     || operation === MAIL_DATA_RESTORE
     || operation === MAIL_DATA_DELETE
     || operation === ROUNDCUBE_CONFIG_APPLY
+    || operation === CRON_APPLY
+    || operation === CRON_REMOVE
     || (operation === BASE_OPERATIONS.DNS_RECORD_APPLY && payload?.record?.type === 'TXT')
     || (payload?.serviceId === POSTSRSD_SERVICE_ID
       && [
@@ -327,6 +367,8 @@ export const protocolExtensionInternals = Object.freeze({
   mailDataRestore: MAIL_DATA_RESTORE,
   mailDataDelete: MAIL_DATA_DELETE,
   roundcubeConfigApply: ROUNDCUBE_CONFIG_APPLY,
+  cronApply: CRON_APPLY,
+  cronRemove: CRON_REMOVE,
   postsrsdServiceId: POSTSRSD_SERVICE_ID,
   readOnlyOperations: READ_ONLY_OPERATIONS,
   txtMaxBytes: TXT_MAX_BYTES,
@@ -336,6 +378,7 @@ export const protocolExtensionInternals = Object.freeze({
   validateMailDataRestore,
   validateMailDataDelete,
   validateRoundcubeConfigApply,
+  validateCronMutation,
   validateDnsTxtApply,
   validatePostsrsdServiceOperation,
 });

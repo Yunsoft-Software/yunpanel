@@ -104,6 +104,10 @@ import { createWebsiteProvisioningRuntime } from './website-provisioning-runtime
 import { createWebsiteRegistry } from './website-registry.js';
 import { createWebsiteCronRegistry } from './website-cron-registry.js';
 import { createWebsiteCronImpactProvider } from './website-cron-impact.js';
+import { createWebsiteCronOperationReceiptStore } from './website-cron-operation-receipt.js';
+import { createLocalWebsiteCronOperation } from './local-website-cron-operation.js';
+import { createWebsiteCronReconciliationProvider } from './website-cron-reconciliation.js';
+import { createWebsiteCronApplyService } from './website-cron-apply-service.js';
 import { createWebsiteSftpKeyRuntime } from './website-sftp-key-runtime.js';
 import { createWebsiteSuspensionOperationRegistry } from './website-suspension-operation-registry.js';
 import { createWebsiteSuspensionRuntime } from './website-suspension-runtime.js';
@@ -279,6 +283,25 @@ const websiteCronRegistry = createWebsiteCronRegistry({
 });
 await websiteCronRegistry.init();
 const websiteCronManager = createWebsiteCronManager();
+const websiteCronOperationReceiptStore = createWebsiteCronOperationReceiptStore();
+const localWebsiteCronOperation = createLocalWebsiteCronOperation({
+  websiteCronRegistry,
+  websiteCronManager,
+  receiptStore: websiteCronOperationReceiptStore,
+});
+const websiteCronReconciliationProvider = localServerId
+  ? createWebsiteCronReconciliationProvider({
+    websiteCronRegistry,
+    websiteCronManager,
+    localServerId,
+  })
+  : null;
+const websiteCronApplyService = createWebsiteCronApplyService({
+  websiteCronRegistry,
+  jobRegistry,
+  websiteRegistry,
+  reconciliationProvider: websiteCronReconciliationProvider,
+});
 const websiteCronImpactProvider = localServerId
   ? createWebsiteCronImpactProvider({
     websiteCronRegistry,
@@ -929,6 +952,7 @@ const listener = createAuthenticatedApi({
       domainRemovalRuntime,
       websiteRemovalRuntime,
       websiteCronImpactProvider,
+      websiteCronApplyService,
       localServerId,
       terminalCapabilityRegistry,
       ttydSessionManager,
@@ -959,6 +983,7 @@ const localRuntime = await startConfiguredLocalRuntime({
     ...options,
     databaseManager,
     databaseCredentialOperation: localDatabaseCredentialOperation,
+    websiteCronOperation: localWebsiteCronOperation,
   })),
   inspectServices: inspectAllowlistedServices,
   inspectDocker,
