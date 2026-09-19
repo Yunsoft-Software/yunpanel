@@ -403,3 +403,84 @@ test('local panel hides DNS and mail lifecycle records linked to another Server'
     })).status, 404);
   });
 });
+
+test('Owner inspects external DNS requirements, previews apply, and enqueues provider apply via HTTP', async () => {
+  const state = await fixture();
+  const zone = await state.dnsHostingRegistry.createZone({
+    zoneName: state.domain.primaryDomain, webDomainId: state.domain.id, managementMode: 'external',
+  });
+  const token = 'cloudflare_requirements_http_token';
+  await state.dnsProviderCredentialRegistry.setCredential({
+    dnsZoneId: zone.id, provider: 'cloudflare', token,
+  });
+  const dnsRecordManager = {
+    async inspectRecord({ record }) {
+      return {
+        provider: 'cloudflare', zoneName: zone.zoneName, desired: { ...record }, records: [],
+        snapshotDigest: 'c'.repeat(64),
+      };
+    },
+  };
+
+  await state.registry.bindLocalServer({
+    serverId: state.domain.serverId,
+    hostname: 'external-lifecycle-http',
+  });
+  await state.registry.updateLocalSnapshot({
+    serverId: state.domain.serverId,
+    hostname: 'external-lifecycle-http',
+    inventory: {
+      network: [{ interface: 'eth0', family: 'IPv4', address: '203.0.113.10' }],
+    },
+  });
+
+  const app = withPanelContext(createApp({
+    ...state,
+    dnsRecordManager,
+    localServerId: state.domain.serverId,
+    environment: 'production',
+  }), ownerManagementContext);
+
+  await withServer(app, async (baseUrl) => {
+    // 1. GET zone requirements
+    const reqRes = await request(baseUrl, `/api/dns-zones/${zone.id}/requirements`);
+    assert.equal(reqRes.status, 200);
+    const reqData = (await reqRes.json()).data;
+    assert.equal(reqData.dnsZoneId, zone.id);
+    assert.equal(reqData.zoneName, zone.zoneName);
+    assert.ok(reqData.requirements.length > 0);
+
+    // 2. GET domain requirements convenience endpoint
+    const domRes = await request(baseUrl, `/api/domains/${state.domain.id}/dns-requirements`);
+    assert.equal(domRes.status, 200);
+    const domData = (await domRes.json()).data;
+    assert.equal(domData.dnsZoneId, zone.id);
+
+    // 3. POST preview
+    const prevRes = await request(baseUrl, `/api/dns-zones/${zone.id}/requirements/preview`, {
+      method: 'POST',
+      body: { expectedRevision: zone.revision, key: 'web-apex-a' },
+    });
+    assert.equal(prevRes.status, 200);
+    const preview = (await prevRes.json()).data;
+    assert.equal(preview.operation, 'dns_requirements_apply');
+    assert.equal(preview.readyToApply, true);
+    assert.equal(preview.items.length, 1);
+
+    // 4. POST apply
+    const applyRes = await request(baseUrl, `/api/dns-zones/${zone.id}/requirements/apply`, {
+      method: 'POST',
+      body: {
+        expectedRevision: zone.revision,
+        previewDigest: preview.previewDigest,
+        confirmation: preview.confirmation,
+        key: 'web-apex-a',
+      },
+    });
+    assert.equal(applyRes.status, 202);
+    const applyData = (await applyRes.json()).data;
+    assert.equal(applyData.count, 1);
+    assert.equal(applyData.itemKey, 'web-apex-a');
+    assert.ok(applyData.job.id);
+  });
+});

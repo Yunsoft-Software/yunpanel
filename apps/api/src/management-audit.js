@@ -92,6 +92,8 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/dns-zones\/([^/]+)\/readiness\/refresh$/)) && method === 'POST') return { action: 'dns.readiness.refresh', resourceType: 'dns_zone', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/dns-zones\/([^/]+)\/records\/preview$/)) && method === 'POST') return { action: 'dns.record.preview', resourceType: 'dns_zone', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/dns-zones\/([^/]+)\/records\/apply$/)) && method === 'POST') return { action: 'dns.record.apply', resourceType: 'dns_zone', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/dns-zones\/([^/]+)\/requirements\/preview$/)) && method === 'POST') return { action: 'dns.requirements.preview', resourceType: 'dns_zone', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/dns-zones\/([^/]+)\/requirements\/apply$/)) && method === 'POST') return { action: 'dns.requirements.apply', resourceType: 'dns_zone', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/dns\/authoritative\/preview$/)) && method === 'POST') return { action: 'dns.authoritative.preview', resourceType: 'server', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/dns\/authoritative\/apply$/)) && method === 'POST') return { action: 'dns.authoritative.apply', resourceType: 'server', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/dns\/authoritative\/recovery\/resolve$/)) && method === 'POST') return { action: 'dns.authoritative.recovery.resolve', resourceType: 'server', resourceId: parts[0] };

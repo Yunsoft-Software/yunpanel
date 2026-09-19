@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { previewPostfixVirtualDomainMap } from '@yunpanel/config-templates';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js';
+import { createDnsRequirementsService } from './dns-requirements-service.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
 const CREATE_FIELDS = new Set(['name', 'webDomainId', 'managementMode']);
@@ -93,6 +94,11 @@ export function mountExternalLifecycleRoutes(app, {
   jobRegistry,
   localServerId,
   mailDomainRegistry,
+  serverRegistry = null,
+  serverDnsIdentityRegistry = null,
+  mailDkimRegistry = null,
+  roundcubeDomainMappingRegistry = null,
+  dnsRequirementsService = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') throw new Error('Express application is required');
   if (!dnsHostingRegistry || typeof dnsHostingRegistry.createZone !== 'function'
@@ -372,6 +378,69 @@ export function mountExternalLifecycleRoutes(app, {
     });
     return response.status(202).json({ data: queued });
   }));
+
+  const requirementsService = dnsRequirementsService ?? (
+    serverRegistry ? createDnsRequirementsService({
+      dnsHostingRegistry,
+      domainRegistry,
+      serverRegistry,
+      dnsProviderCredentialRegistry,
+      dnsRecordManager,
+      jobRegistry,
+      mailDomainRegistry,
+      mailDkimRegistry,
+      roundcubeDomainMappingRegistry,
+      serverDnsIdentityRegistry,
+      localServerId,
+    }) : null
+  );
+
+  if (requirementsService) {
+    app.get('/api/dns-zones/:dnsZoneId/requirements', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      emptyQuery(request.query);
+      await localZone(request.params.dnsZoneId);
+      const data = await requirementsService.inspectZoneRequirements(request.params.dnsZoneId);
+      return response.json({ data });
+    }));
+
+    app.post('/api/dns-zones/:dnsZoneId/requirements/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      emptyQuery(request.query);
+      await localZone(request.params.dnsZoneId);
+      const body = request.body ?? {};
+      const data = await requirementsService.previewRequirementsApply({
+        dnsZoneId: request.params.dnsZoneId,
+        expectedRevision: body.expectedRevision,
+        key: body.key ?? null,
+        keys: body.keys ?? null,
+      });
+      return response.json({ data });
+    }));
+
+    app.post('/api/dns-zones/:dnsZoneId/requirements/apply', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      emptyQuery(request.query);
+      await localZone(request.params.dnsZoneId);
+      const body = request.body ?? {};
+      const data = await requirementsService.applyRequirements({
+        dnsZoneId: request.params.dnsZoneId,
+        expectedRevision: body.expectedRevision,
+        previewDigest: body.previewDigest,
+        confirmation: body.confirmation,
+        key: body.key ?? null,
+        keys: body.keys ?? null,
+      });
+      return response.status(202).json({ data });
+    }));
+
+    app.get('/api/domains/:domainId/dns-requirements', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      emptyQuery(request.query);
+      const domain = await domainRegistry.getDomain(request.params.domainId);
+      if (!domain || (localServerId !== null && domain.serverId !== localServerId)) {
+        throw new ExternalLifecycleRegistryError('domain_not_found', 'Domain was not found', 404);
+      }
+      const data = await requirementsService.inspectDomainRequirements(request.params.domainId);
+      return response.json({ data });
+    }));
+  }
 
   app.get('/api/mail-domains', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);

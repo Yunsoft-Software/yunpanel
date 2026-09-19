@@ -68,6 +68,7 @@ import { mountDockerWorkloadRoutes } from './docker-workload-http.js';
 import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from './docker-workload-registry.js';
 import { mountExternalLifecycleRoutes } from './external-lifecycle-http.js';
 import { ExternalLifecycleRegistryError } from './external-lifecycle-registry.js';
+import { DnsRequirementsServiceError } from './dns-requirements-service.js';
 import { createJobRegistry, JobRegistryError } from './job-registry.js';
 import { mountElFinderHandoffRoutes } from './elfinder-handoff-http.js';
 import { ElFinderHandoffError } from './elfinder-handoff-service.js';
@@ -232,6 +233,7 @@ export function createApp({
   databaseInventoryProvider = null,
   databaseHealthProvider = null,
   dnsReadinessService = null,
+  dnsRequirementsService = null,
   dnsRecordManager = createCloudflareDnsManager(),
   mailDomainRegistry = createMailDomainRegistry({
     getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
@@ -611,6 +613,11 @@ export function createApp({
     jobRegistry,
     localServerId,
     mailDomainRegistry,
+    serverRegistry: localRegistry,
+    serverDnsIdentityRegistry,
+    mailDkimRegistry,
+    roundcubeDomainMappingRegistry,
+    dnsRequirementsService,
   });
   if ((serverDnsIdentityRegistry === null) !== (powerDnsAuthoritativeService === null)) {
     throw new Error('Server DNS identity registry and PowerDNS authoritative service must be configured together');
@@ -872,6 +879,7 @@ export function createApp({
       || error instanceof DnsReadinessError
       || error instanceof CloudflareDnsManagerError
       || error instanceof ExternalLifecycleRegistryError
+      || error instanceof DnsRequirementsServiceError
       || error instanceof RegistryError
       || error instanceof JobRegistryError
       || error instanceof LogHttpError
