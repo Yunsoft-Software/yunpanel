@@ -13,7 +13,7 @@ function inspector({ missing = [] } = {}) {
   const absent = new Set(missing);
   return createMailProtocolHealthInspector({
     run: async (file, args) => {
-      const match = args.at(-1).match(/:(\\d+)$/);
+      const match = args.at(-1).match(/:(\d+)$/);
       const port = match ? Number.parseInt(match[1], 10) : null;
       return {
         stdout: absent.has(port)
