@@ -261,6 +261,44 @@ test('Passenger Nginx handler activates only with succeeded runtime evidence', a
   assert.deepEqual(calls[1], ['activate', { primaryDomain: 'example.com', checksum: 'b'.repeat(64) }]);
 });
 
+test('Nginx handler stages exact TLS material and redirect policy for certificate activation', async () => {
+  const calls = [];
+  const manager = nginxManager();
+  manager.stageDomain = async (spec) => {
+    calls.push(spec);
+    return { configName: 'yunpanel-example.com.conf', checksum: 'f'.repeat(64), bytes: 700 };
+  };
+  manager.activateDomain = async () => ({
+    configName: 'yunpanel-example.com.conf',
+    checksum: 'f'.repeat(64),
+    active: true,
+  });
+  const handlers = createWebsiteProvisioningHandlers({
+    identityManager: identityManager(),
+    passengerSiteManager: passengerSiteManager(),
+    nginxManager: manager,
+  });
+
+  const result = await handlers.nginx.apply({
+    operation: passengerOperation(),
+    intent: nginxIntent,
+    tls: {
+      fullchainPath: '/etc/letsencrypt/live/example.com/fullchain.pem',
+      privateKeyPath: '/etc/letsencrypt/live/example.com/privkey.pem',
+    },
+    httpsRedirect: true,
+    canonicalRedirect: false,
+  });
+
+  assert.equal(result.satisfied, true);
+  assert.deepEqual(calls[0].tls, {
+    fullchainPath: '/etc/letsencrypt/live/example.com/fullchain.pem',
+    privateKeyPath: '/etc/letsencrypt/live/example.com/privkey.pem',
+  });
+  assert.equal(calls[0].httpsRedirect, true);
+  assert.equal(calls[0].canonicalRedirect, false);
+});
+
 test('Passenger Nginx handler refuses activation without runtime evidence', async () => {
   let stageCalls = 0;
   const manager = nginxManager();
