@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mailSqlTemplatePolicy } from '@yunpanel/config-templates';
 import { createMailConfigurationService } from '../src/mail-configuration.js';
 
 const HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 21).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 22).toString('base64').replace(/=+$/, '')}`;
@@ -69,7 +70,7 @@ test('quota change after preview is rejected before protected materialization', 
   );
 });
 
-test('quota-aware protected passwd material stays private while matching preview digest', async () => {
+test('quota-aware protected SQLite seed stays private while matching preview digest', async () => {
   const state = fixture(150 * 1024 * 1024);
   const preview = await state.service.previewTransition(transition);
   const materialized = await state.service.materializeTransition(transition, {
@@ -78,6 +79,8 @@ test('quota-aware protected passwd material stays private while matching preview
   });
 
   assert.equal(materialized.sensitiveArtifacts.length, 1);
-  assert.match(materialized.sensitiveArtifacts[0].content, /userdb_quota_rule=\*:bytes=157286400/);
-  assert.doesNotMatch(JSON.stringify(preview), /userdb_quota_rule|argon2id/i);
+  assert.equal(materialized.sensitiveArtifacts[0].path, mailSqlTemplatePolicy.seedPath);
+  assert.match(materialized.sensitiveArtifacts[0].content, /157286400, 1\);/);
+  assert.match(materialized.sensitiveArtifacts[0].content, /argon2id/);
+  assert.doesNotMatch(JSON.stringify(preview), /157286400|argon2id/i);
 });
