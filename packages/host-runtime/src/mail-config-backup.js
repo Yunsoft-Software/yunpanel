@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promis
 import path from 'node:path';
 import {
   mailForwardingTemplatePolicy,
+  mailSqlTemplatePolicy,
   mailSrsTemplatePolicy,
   mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
@@ -12,7 +13,8 @@ import {
 const DEFAULT_BACKUP_ROOT = '/var/lib/yunpanel/recovery/mail-config';
 const DIRECTORY_MODE = 0o700;
 const BACKUP_FILE_MODE = 0o600;
-const MANIFEST_VERSION = 5;
+const LEGACY_MANIFEST_VERSION = 5;
+const MANIFEST_VERSION = 6;
 const MANIFEST_FILE = 'manifest.json';
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const TRANSACTION_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -35,6 +37,23 @@ const SRS_PLAN_ARTIFACT_PATHS = Object.freeze([
   mailSrsTemplatePolicy.defaultsPath,
   mailSrsTemplatePolicy.secretPath,
 ]);
+const SQL_BASE_PLAN_ARTIFACT_PATHS = Object.freeze([
+  mailSqlTemplatePolicy.seedPath,
+  mailSqlTemplatePolicy.postfixDomainPath,
+  mailSqlTemplatePolicy.postfixMailboxPath,
+  mailSqlTemplatePolicy.postfixAliasPath,
+  mailSqlTemplatePolicy.postfixSenderLoginPath,
+  mailSqlTemplatePolicy.dovecotSqlPath,
+  mailTemplatePolicy.dovecotAuthConfigPath,
+  mailTemplatePolicy.dovecotMailConfigPath,
+  mailForwardingTemplatePolicy.sievePath,
+  mailTemplatePolicy.rspamdProxyConfigPath,
+]);
+const SQL_SRS_PLAN_ARTIFACT_PATHS = Object.freeze([
+  ...SQL_BASE_PLAN_ARTIFACT_PATHS,
+  mailSrsTemplatePolicy.defaultsPath,
+  mailSrsTemplatePolicy.secretPath,
+]);
 const POSTFIX_COMPILED_PATHS = Object.freeze([
   `${mailTemplatePolicy.postfixVirtualDomainMapPath}.db`,
   `${mailTemplatePolicy.postfixVirtualMailboxMapPath}.db`,
@@ -43,7 +62,7 @@ const POSTFIX_COMPILED_PATHS = Object.freeze([
 ]);
 const SIEVE_COMPILED_PATH = mailForwardingTemplatePolicy.compiledPath;
 const COMPILED_PATHS = Object.freeze([...POSTFIX_COMPILED_PATHS, SIEVE_COMPILED_PATH]);
-const BACKUP_TARGET_PATHS = Object.freeze([
+const LEGACY_BACKUP_TARGET_PATHS = Object.freeze([
   mailTemplatePolicy.postfixVirtualDomainMapPath,
   POSTFIX_COMPILED_PATHS[0],
   mailTemplatePolicy.postfixVirtualMailboxMapPath,
@@ -63,11 +82,26 @@ const BACKUP_TARGET_PATHS = Object.freeze([
   mailSrsTemplatePolicy.defaultsPath,
   mailSrsTemplatePolicy.secretPath,
 ]);
-const MANAGED_DIRECTORY_PATHS = Object.freeze([
+const BACKUP_TARGET_PATHS = Object.freeze([
+  ...LEGACY_BACKUP_TARGET_PATHS,
+  mailSqlTemplatePolicy.seedPath,
+  mailSqlTemplatePolicy.postfixDomainPath,
+  mailSqlTemplatePolicy.postfixMailboxPath,
+  mailSqlTemplatePolicy.postfixAliasPath,
+  mailSqlTemplatePolicy.postfixSenderLoginPath,
+  mailSqlTemplatePolicy.dovecotSqlPath,
+  mailSqlTemplatePolicy.databasePath,
+]);
+const LEGACY_MANAGED_DIRECTORY_PATHS = Object.freeze([
   '/etc/yunpanel',
   '/etc/yunpanel/mail',
   '/etc/yunpanel/mail/postfix',
   '/etc/yunpanel/mail/dovecot',
+]);
+const MANAGED_DIRECTORY_PATHS = Object.freeze([
+  ...LEGACY_MANAGED_DIRECTORY_PATHS,
+  '/etc/yunpanel/mail/sql',
+  mailSqlTemplatePolicy.postfixSqlDirectory,
 ]);
 
 export class MailConfigBackupError extends Error {
@@ -110,9 +144,10 @@ function expectedPlanArtifactPaths(plan) {
   if (!plan || !Array.isArray(plan.requirements)) {
     throw new MailConfigBackupError('mail_backup_artifact_set_invalid', 'Managed mail apply plan requirements are invalid');
   }
-  return plan.requirements.includes(mailSrsTemplatePolicy.requirement)
-    ? SRS_PLAN_ARTIFACT_PATHS
-    : BASE_PLAN_ARTIFACT_PATHS;
+  const sql = plan.requirements.includes('mail_sqlite');
+  const srs = plan.requirements.includes(mailSrsTemplatePolicy.requirement);
+  if (sql) return srs ? SQL_SRS_PLAN_ARTIFACT_PATHS : SQL_BASE_PLAN_ARTIFACT_PATHS;
+  return srs ? SRS_PLAN_ARTIFACT_PATHS : BASE_PLAN_ARTIFACT_PATHS;
 }
 
 function assertPlanArtifactSet(plan) {
@@ -154,15 +189,19 @@ function normalizeDirectorySnapshot(value, expectedPath) {
 }
 
 function normalizeManifest(value, { transactionId, planSha256 } = {}) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== MANIFEST_VERSION
+  const legacy = value?.version === LEGACY_MANIFEST_VERSION;
+  const current = value?.version === MANIFEST_VERSION;
+  const targetPaths = legacy ? LEGACY_BACKUP_TARGET_PATHS : BACKUP_TARGET_PATHS;
+  const directoryPaths = legacy ? LEGACY_MANAGED_DIRECTORY_PATHS : MANAGED_DIRECTORY_PATHS;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (!legacy && !current)
     || value.transactionId !== transactionId || value.planSha256 !== planSha256
     || typeof value.previewSha256 !== 'string' || !CHECKSUM_PATTERN.test(value.previewSha256)
-    || !Array.isArray(value.artifacts) || value.artifacts.length !== BACKUP_TARGET_PATHS.length
-    || !Array.isArray(value.directories) || value.directories.length !== MANAGED_DIRECTORY_PATHS.length) {
+    || !Array.isArray(value.artifacts) || value.artifacts.length !== targetPaths.length
+    || !Array.isArray(value.directories) || value.directories.length !== directoryPaths.length) {
     throw new MailConfigBackupError('mail_backup_manifest_invalid', 'Managed mail backup manifest is invalid');
   }
   const artifacts = value.artifacts.map((artifact, index) => {
-    const targetPath = BACKUP_TARGET_PATHS[index];
+    const targetPath = targetPaths[index];
     if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)
       || artifact.targetPath !== targetPath || typeof artifact.present !== 'boolean') {
       throw new MailConfigBackupError('mail_backup_manifest_invalid', 'Managed mail backup artifact metadata is invalid');
@@ -186,10 +225,10 @@ function normalizeManifest(value, { transactionId, planSha256 } = {}) {
   });
   const directories = value.directories.map((directory, index) => normalizeDirectorySnapshot(
     directory,
-    MANAGED_DIRECTORY_PATHS[index],
+    directoryPaths[index],
   ));
   return Object.freeze({
-    version: MANIFEST_VERSION,
+    version: value.version,
     transactionId,
     planSha256,
     previewSha256: value.previewSha256,
@@ -424,15 +463,20 @@ export const mailConfigBackupInternals = Object.freeze({
   planArtifactPaths: BASE_PLAN_ARTIFACT_PATHS,
   basePlanArtifactPaths: BASE_PLAN_ARTIFACT_PATHS,
   srsPlanArtifactPaths: SRS_PLAN_ARTIFACT_PATHS,
+  sqlBasePlanArtifactPaths: SQL_BASE_PLAN_ARTIFACT_PATHS,
+  sqlSrsPlanArtifactPaths: SQL_SRS_PLAN_ARTIFACT_PATHS,
   postfixCompiledPaths: POSTFIX_COMPILED_PATHS,
   sieveCompiledPath: SIEVE_COMPILED_PATH,
   compiledPaths: COMPILED_PATHS,
   targetPaths: BACKUP_TARGET_PATHS,
+  legacyTargetPaths: LEGACY_BACKUP_TARGET_PATHS,
   managedDirectoryPaths: MANAGED_DIRECTORY_PATHS,
+  legacyManagedDirectoryPaths: LEGACY_MANAGED_DIRECTORY_PATHS,
   postfixMainCfPath: POSTFIX_MAIN_CF_PATH,
   postfixMasterCfPath: POSTFIX_MASTER_CF_PATH,
   directoryMode: DIRECTORY_MODE,
   backupFileMode: BACKUP_FILE_MODE,
+  legacyManifestVersion: LEGACY_MANIFEST_VERSION,
   manifestVersion: MANIFEST_VERSION,
   normalizeTransactionId,
   normalizeDigest,
