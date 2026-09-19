@@ -103,6 +103,7 @@ function operationCertificates(certificates, request, operationId, serverId) {
       && certificate.serverId === serverId
       && certificate.provisioningOperationId === operationId
       && certificate.source === 'acme'
+      && (certificate.purpose ?? 'web') === 'web'
       && certificate.staging === false
     ))
     .sort((left, right) => {
@@ -142,6 +143,7 @@ function completionEvidence(certificate, domain, job, request, operationId) {
     || certificate.serverId !== domain.serverId
     || certificate.provisioningOperationId !== operationId
     || certificate.source !== 'acme'
+    || (certificate.purpose ?? 'web') !== 'web'
     || certificate.renewalMode !== 'automatic'
     || certificate.state !== 'active'
     || certificate.staging !== false
@@ -286,6 +288,7 @@ export function createWebsiteCertificateProvisioningHandler({
       certificate?.domainId === request.primaryDomainId
       && certificate.serverId === domain.serverId
       && certificate.provisioningOperationId !== context.operationId
+      && (certificate.purpose ?? 'web') === 'web'
       && !['error', 'retired', 'superseded'].includes(certificate.state)
       && certificate.staging === false
     ));
@@ -389,6 +392,7 @@ export function createWebsiteCertificateProvisioningHandler({
         staging: false,
         replaceExisting: domain.certificateId === null,
         provisioningOperationId: context.operationId,
+        purpose: 'web',
       });
     }
 
