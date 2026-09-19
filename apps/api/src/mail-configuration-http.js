@@ -81,7 +81,7 @@ function assertMailConfigurationJobsIdle(jobs) {
   }
 }
 
-function rollbackPreview(mailDomain, sourceJob, jobs) {
+export function rollbackPreview(mailDomain, sourceJob, jobs) {
   const result = sourceJob?.result;
   if (!sourceJob || sourceJob.status !== 'succeeded' || sourceJob.operation !== OPERATIONS.MAIL_CONFIG_APPLY
     || sourceJob.resourceType !== 'mail_domain' || sourceJob.resourceId !== mailDomain.id
