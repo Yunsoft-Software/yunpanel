@@ -4,7 +4,7 @@ import path from 'node:path';
 import { normalizeDomainSet, sanitizeLogMessage } from '@yunpanel/shared';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
-const STORE_VERSION = 4;
+const STORE_VERSION = 5;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CERT_STATES = new Set([
@@ -137,6 +137,7 @@ export function certificatePublicView(certificate, { now = Date.now } = {}) {
     lastRenewedAt: certificate.lastRenewedAt,
     lastImportedAt: certificate.lastImportedAt,
     retiredAt: certificate.retiredAt,
+    provisioningOperationId: certificate.provisioningOperationId ?? null,
     createdAt: certificate.createdAt,
     updatedAt: certificate.updatedAt,
     diagnosis: certificateDiagnosis(certificate, { now }),
@@ -277,6 +278,18 @@ function hydrateCertificate(certificate, sourceVersion, roots) {
     certificate.retiredFromState = null;
     certificate.retiredFromUpdatedAt = null;
   }
+  if (sourceVersion < 5) {
+    certificate.provisioningOperationId = null;
+  }
+  if (certificate.provisioningOperationId !== null
+    && (typeof certificate.provisioningOperationId !== 'string'
+      || !SAFE_OPERATION_ID.test(certificate.provisioningOperationId))) {
+    throw new CertificateRegistryError(
+      'invalid_certificate_state',
+      'Persisted certificate provisioning ownership is invalid',
+      409,
+    );
+  }
   if (!CERT_STATES.has(certificate.state) || !CERTIFICATE_SOURCES.has(certificate.source) || !RENEWAL_MODES.has(certificate.renewalMode)
     || (certificate.source === 'acme' && certificate.renewalMode !== 'automatic')
     || (certificate.source === 'custom' && certificate.renewalMode !== 'manual')) {
@@ -354,7 +367,7 @@ export function createCertificateRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, 2, 3, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.certificates)) {
+        if (![1, 2, 3, 4, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.certificates)) {
           throw new Error('unsupported or invalid certificate registry state');
         }
         parsed.certificates.forEach((certificate) => hydrateCertificate(certificate, parsed.version, roots));
@@ -380,6 +393,7 @@ export function createCertificateRegistry({
     email,
     staging = false,
     replaceExisting = false,
+    provisioningOperationId = null,
   }) {
     await ensureInitialized();
     if (typeof domainId !== 'string' || !domainId) throw new CertificateRegistryError('invalid_domain', 'domainId is required');
@@ -392,6 +406,13 @@ export function createCertificateRegistry({
     const isValidation = Boolean(staging);
     if (typeof replaceExisting !== 'boolean') {
       throw new CertificateRegistryError('invalid_certificate_replacement', 'Certificate replacement policy is invalid');
+    }
+    if (provisioningOperationId !== null
+      && (typeof provisioningOperationId !== 'string' || !SAFE_OPERATION_ID.test(provisioningOperationId))) {
+      throw new CertificateRegistryError(
+        'invalid_certificate_provisioning_operation',
+        'Certificate provisioning operation identity is invalid',
+      );
     }
     const existing = state.certificates.find((certificate) => {
       if (certificate.domainId !== domainId || ['error', 'superseded', 'retired'].includes(certificate.state)) return false;
@@ -437,6 +458,7 @@ export function createCertificateRegistry({
       lastIssuedAt: null,
       lastRenewedAt: null,
       lastImportedAt: null,
+      provisioningOperationId,
       retirementOperationId: null,
       retiredAt: null,
       retiredFromState: null,
@@ -592,6 +614,7 @@ export function createCertificateRegistry({
       lastIssuedAt: null,
       lastRenewedAt: null,
       lastImportedAt: timestamp,
+      provisioningOperationId: null,
       retirementOperationId: null,
       retiredAt: null,
       retiredFromState: null,
