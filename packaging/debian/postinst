@@ -17,9 +17,13 @@ fi
 if ! getent group yunpanel-mailauth >/dev/null; then
   addgroup --system yunpanel-mailauth >/dev/null
 fi
+mail_auth_membership_changed=0
 for mail_service_user in postfix dovecot; do
   if id "$mail_service_user" >/dev/null 2>&1; then
-    adduser "$mail_service_user" yunpanel-mailauth >/dev/null 2>&1 || true
+    if ! id -nG "$mail_service_user" | tr ' ' '\n' | grep -qx yunpanel-mailauth; then
+      adduser "$mail_service_user" yunpanel-mailauth >/dev/null 2>&1
+      mail_auth_membership_changed=1
+    fi
   fi
 done
 
@@ -169,6 +173,10 @@ fi
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
+  if [ "$mail_auth_membership_changed" -eq 1 ]; then
+    systemctl try-restart postfix.service >/dev/null 2>&1 || true
+    systemctl try-restart dovecot.service >/dev/null 2>&1 || true
+  fi
   systemctl enable yunpanel-api.service yunpanel-web.service >/dev/null 2>&1 || true
   if [ -z "${2:-}" ]; then
     if [ -f /etc/yunpanel/agent/agent.env ]; then
