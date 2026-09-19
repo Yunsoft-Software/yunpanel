@@ -16,3 +16,19 @@ export function parseManagedSystemIdentity(value, expectedName) {
 export function parseManagedVmailIdentity(value) {
   return parseManagedSystemIdentity(value, 'vmail');
 }
+
+
+export function parseManagedSystemGroup(value, expectedName) {
+  if (typeof expectedName !== 'string' || !IDENTITY_NAME_PATTERN.test(expectedName)) return null;
+  const output = String(value ?? '').trim();
+  const fields = output.split(':');
+  if (fields.length !== 4 || fields[0] !== expectedName || !/^\d+$/.test(fields[2])) return null;
+  const gid = Number.parseInt(fields[2], 10);
+  if (!Number.isSafeInteger(gid) || gid <= 0) return null;
+  const members = fields[3] === ''
+    ? Object.freeze([])
+    : Object.freeze(fields[3].split(',').filter(Boolean).sort());
+  if (new Set(members).size !== members.length
+    || members.some((member) => !IDENTITY_NAME_PATTERN.test(member))) return null;
+  return Object.freeze({ gid, members });
+}
