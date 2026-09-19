@@ -56,6 +56,7 @@ export function renderPassengerNodeDirectives({
   group = user,
   appEnv = 'production',
   environmentInclude = null,
+  appLogFile = null,
 } = {}) {
   const safeAppRoot = absolutePath(appRoot, 'appRoot');
   const safeDocumentRoot = absolutePath(documentRoot, 'documentRoot');
@@ -68,6 +69,7 @@ export function renderPassengerNodeDirectives({
   const safeUser = unixIdentity(user, 'user');
   const safeGroup = unixIdentity(group, 'group');
   const safeEnvironmentInclude = passengerEnvironmentInclude(environmentInclude);
+  const safeAppLogFile = appLogFile != null ? absolutePath(appLogFile, 'appLogFile') : null;
   if (!/^[A-Za-z0-9_-]{1,32}$/.test(appEnv)) {
     throw new PassengerNginxTemplateError('passenger_app_env_invalid', 'Passenger app environment is invalid');
   }
@@ -83,6 +85,7 @@ export function renderPassengerNodeDirectives({
     `  passenger_group ${safeGroup};`,
     `  passenger_app_env ${appEnv};`,
     ...(safeEnvironmentInclude ? [`  include ${safeEnvironmentInclude};`] : []),
+    ...(safeAppLogFile ? [`  passenger_app_log_file ${safeAppLogFile};`] : []),
   ].join('\n');
 }
 

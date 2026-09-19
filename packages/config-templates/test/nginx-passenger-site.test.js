@@ -48,3 +48,14 @@ test('managed TLS keeps Passenger directives only on serving vhost and redirects
   assert.match(config, /return 301 https:\/\/\$host\$request_uri;/);
   assert.match(config, /listen 443 ssl;/);
 });
+
+test('Passenger site renders passenger_app_log_file when provided in target', () => {
+  const logFile = '/var/lib/yunpanel/data/6dcb8908-3f3e-43da-9452-15fd6b51ac76/logs/passenger.log';
+  const config = renderPassengerSiteConfig({
+    primaryDomain: 'example.com',
+    target: { ...target(), appLogFile: logFile },
+  });
+
+  assert.match(config, new RegExp(`passenger_app_log_file ${logFile.replaceAll('/', '\\/')};`));
+});
+

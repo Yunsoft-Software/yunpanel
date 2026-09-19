@@ -99,3 +99,17 @@ test('Passenger template rejects raw directive-like values', () => {
     (error) => error instanceof PassengerNginxTemplateError,
   );
 });
+
+test('Passenger Node directives include passenger_app_log_file when configured', () => {
+  const logFile = `/var/lib/yunpanel/data/${applicationId}/logs/passenger.log`;
+  const config = renderPassengerNodeDirectives({
+    appRoot,
+    documentRoot: appRoot,
+    startupFile: 'server.js',
+    user,
+    appLogFile: logFile,
+  });
+
+  assert.match(config, new RegExp(`passenger_app_log_file ${logFile.replaceAll('/', '\\/')};`));
+});
+

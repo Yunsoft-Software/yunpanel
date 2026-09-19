@@ -72,6 +72,14 @@ function normalizedIntent(intent) {
   const appRoot = absoluteWithin(intent.appRoot, currentRoot, 'appRoot');
   const documentRoot = absoluteWithin(intent.documentRoot, appRoot, 'documentRoot');
   const startupFile = relativePath(intent.startupFile, 'startupFile');
+  const startupExt = path.posix.extname(startupFile);
+  if (!['.js', '.mjs', '.cjs'].includes(startupExt)) {
+    throw new PassengerSiteManagerError('passenger_site_startup_extension_invalid', 'Passenger Website startup file must have a .js, .mjs, or .cjs extension');
+  }
+  let appLogFile = null;
+  if (intent.appLogFile !== undefined && intent.appLogFile !== null) {
+    appLogFile = absoluteWithin(intent.appLogFile, identity.paths.workspace.logDirectory, 'appLogFile');
+  }
   const expectedUser = identity.unixUser;
   if (intent.unixUser !== expectedUser) {
     throw new PassengerSiteManagerError('passenger_site_identity_mismatch', 'Passenger Website Unix identity does not match the Application');
@@ -93,9 +101,11 @@ function normalizedIntent(intent) {
     currentRoot,
     releasesDirectory: identity.paths.runtime.releasesDirectory,
     homeDirectory: identity.paths.workspace.homeDirectory,
+    logDirectory: identity.paths.workspace.logDirectory,
     appRoot,
     documentRoot,
     startupFile,
+    appLogFile,
     unixUser: expectedUser,
     nodeCandidates: Object.freeze(nodeCandidates),
   });
@@ -265,6 +275,7 @@ export function createPassengerSiteManager({
       appRoot: spec.appRoot,
       documentRoot: spec.documentRoot,
       startupFile: spec.startupFile,
+      appLogFile: spec.appLogFile,
       unixUser: spec.unixUser,
       unixUid: identity.uid,
       unixGid: identity.gid,
@@ -406,6 +417,22 @@ export function createPassengerSiteManager({
   }
 
   return Object.freeze({ inspect, previewMigration, apply });
+}
+
+export function validatePassengerSetup({ nodeMajor: major, startupFile: rawStartupFile, appRoot, unixUser }) {
+  nodeMajor(major);
+  relativePath(rawStartupFile, 'startupFile');
+  const ext = path.posix.extname(rawStartupFile);
+  if (!['.js', '.mjs', '.cjs'].includes(ext)) {
+    throw new PassengerSiteManagerError('passenger_site_startup_extension_invalid', 'Passenger Website startup file must have a .js, .mjs, or .cjs extension');
+  }
+  if (typeof appRoot !== 'string' || !appRoot.startsWith('/')) {
+    throw new PassengerSiteManagerError('passenger_site_path_invalid', 'appRoot must be an absolute path');
+  }
+  if (typeof unixUser !== 'string' || !/^yunapp-[a-f0-9]{12}$/.test(unixUser)) {
+    throw new PassengerSiteManagerError('passenger_site_identity_mismatch', 'unixUser must be a valid yunapp-* identity');
+  }
+  return true;
 }
 
 export const passengerSiteManagerInternals = Object.freeze({

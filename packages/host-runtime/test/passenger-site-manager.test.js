@@ -5,6 +5,7 @@ import { nodeApplicationUser } from '@yunpanel/config-templates';
 import {
   createPassengerSiteManager,
   PassengerSiteManagerError,
+  validatePassengerSetup,
 } from '../src/passenger-site-manager.js';
 
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
@@ -348,3 +349,79 @@ test('Passenger migration preview exposes release escape as bounded drift withou
   assert.equal(preview.differences.includes('passenger_site_release_escape'), true);
   assert.equal(applyCalls, 0);
 });
+
+test('Passenger site manager validates startup file extension', async () => {
+  const fs = readyFilesystem();
+  const manager = createPassengerSiteManager({
+    websiteIdentityManager: healthyWebsiteIdentityManager(),
+    passengerManager: { inspect: async () => healthyPassenger(), apply: async () => {} },
+    run: async () => ({ stdout: 'v24.11.1\n' }),
+    ...fs,
+  });
+
+  await assert.rejects(
+    () => manager.inspect(intent({ startupFile: 'server.py' })),
+    (error) => error instanceof PassengerSiteManagerError
+      && error.code === 'passenger_site_startup_extension_invalid',
+  );
+
+  await assert.rejects(
+    () => manager.inspect(intent({ startupFile: 'startup.sh' })),
+    (error) => error instanceof PassengerSiteManagerError
+      && error.code === 'passenger_site_startup_extension_invalid',
+  );
+});
+
+test('Passenger site manager validates and includes appLogFile within site logDirectory', async () => {
+  const fs = readyFilesystem();
+  const manager = createPassengerSiteManager({
+    websiteIdentityManager: healthyWebsiteIdentityManager(),
+    passengerManager: { inspect: async () => healthyPassenger(), apply: async () => {} },
+    run: async () => ({ stdout: 'v24.11.1\n' }),
+    ...fs,
+  });
+
+  const validLog = `/var/lib/yunpanel/data/${applicationId}/logs/passenger.log`;
+  const result = await manager.inspect(intent({ appLogFile: validLog }));
+  assert.equal(result.satisfied, true);
+  assert.equal(result.appLogFile, validLog);
+
+  await assert.rejects(
+    () => manager.inspect(intent({ appLogFile: '/var/log/nginx/passenger.log' })),
+    (error) => error instanceof PassengerSiteManagerError
+      && error.code === 'passenger_site_path_invalid',
+  );
+});
+
+test('validatePassengerSetup helper validates nodeMajor, startupFile, appRoot, unixUser', () => {
+  assert.equal(
+    validatePassengerSetup({
+      nodeMajor: 24,
+      startupFile: 'index.js',
+      appRoot: '/var/lib/yunpanel/apps/test/current',
+      unixUser: 'yunapp-0123456789ab',
+    }),
+    true,
+  );
+
+  assert.throws(
+    () => validatePassengerSetup({
+      nodeMajor: 14,
+      startupFile: 'index.js',
+      appRoot: '/var/lib/yunpanel/apps/test/current',
+      unixUser: 'yunapp-0123456789ab',
+    }),
+    /Node major is invalid/,
+  );
+
+  assert.throws(
+    () => validatePassengerSetup({
+      nodeMajor: 24,
+      startupFile: 'index.ts',
+      appRoot: '/var/lib/yunpanel/apps/test/current',
+      unixUser: 'yunapp-0123456789ab',
+    }),
+    /startup file must have a \.js/,
+  );
+});
+

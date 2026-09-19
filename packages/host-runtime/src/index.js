@@ -230,7 +230,13 @@ export {
   createPassengerSiteManager,
   PassengerSiteManagerError,
   passengerSiteManagerInternals,
+  validatePassengerSetup,
 } from './passenger-site-manager.js';
+export {
+  createWebsitePassengerEnvironmentManager,
+  WebsitePassengerEnvironmentError,
+  websitePassengerEnvironmentInternals,
+} from './website-passenger-environment-manager.js';
 export { createNodeStatusInspector, NodeStatusError, nodeStatusInspector, parseNodeServiceProperties } from './node-status-inspector.js';
 export {
   createNodeEnvironmentWriter,
