@@ -550,7 +550,7 @@ function dnsZoneReferences(values, domain, childDomains) {
   return Object.freeze(references);
 }
 
-function webmailMappingReferences(bucket, domain, childDomains, mailDomains) {
+function webmailMappingReferences(bucket, domain, childDomains, mailDomains, certificates) {
   if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)
     || !['available', 'unavailable'].includes(bucket.status)
     || !Array.isArray(bucket.items)) {
@@ -580,6 +580,7 @@ function webmailMappingReferences(bucket, domain, childDomains, mailDomains) {
     [domain, ...childDomains].map((current) => [current.id, current.primaryDomain]),
   );
   const mailById = new Map(mailDomains.map((mailDomain) => [mailDomain.id, mailDomain]));
+  const certificateById = new Map(certificates.map((certificate) => [certificate.id, certificate]));
   const intents = bucket.items.map((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)
       || Object.keys(item).length !== fields.size
@@ -598,9 +599,12 @@ function webmailMappingReferences(bucket, domain, childDomains, mailDomains) {
       );
     }
     const mailDomain = mailById.get(item.mailDomainId);
+    const certificate = certificateById.get(item.certificateId);
     if (!mailDomain || mailDomain.webDomainId !== item.webDomainId
       || mailDomain.domainName !== item.domainName
-      || mailDomain.managementMode !== 'local' || mailDomain.status !== 'enabled') {
+      || mailDomain.managementMode !== 'local' || mailDomain.status !== 'enabled'
+      || !certificate || certificate.domainId !== item.webDomainId
+      || certificate.serverId !== item.serverId) {
       throw new DomainRemovalPlanError(
         'domain_removal_impact_stale',
         'Webmail mapping dependency does not match its Mail Domain',
@@ -697,6 +701,7 @@ function dependencyPlan(dependencies, domain) {
     domain,
     childDomains,
     mailDomains,
+    certificates,
   );
   return Object.freeze({
     childDomainIds: Object.freeze(childDomains.map((child) => child.id)),
