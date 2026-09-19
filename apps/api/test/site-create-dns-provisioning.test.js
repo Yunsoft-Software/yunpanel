@@ -8,10 +8,19 @@ const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 const domainId = '3854e385-adfc-42bd-bccf-f655f24cd68f';
 const wwwDomainId = 'c47d5168-708f-4a8a-83d9-d3a7f3a1b43c';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
+const mailDomainId = '2dd93f8e-23aa-4e2e-b65c-f53eb29558dd';
 const unixUser = 'yunapp-4dc352e64a14';
 
-function preview({ wwwMode = 'none', parentDomainId = null } = {}) {
+function preview({ wwwMode = 'none', parentDomainId = null, mailMode = 'none' } = {}) {
   const independent = wwwMode === 'independent';
+  const mailDomain = mailMode === 'none' ? null : {
+    id: mailDomainId,
+    domainName: 'example.com',
+    webDomainId: domainId,
+    managementMode: mailMode,
+    initialStatus: mailMode === 'local' ? 'disabled' : 'unverified',
+    desiredStatus: mailMode === 'local' ? 'enabled' : null,
+  };
   return {
     operationId,
     complete: false,
@@ -22,7 +31,7 @@ function preview({ wwwMode = 'none', parentDomainId = null } = {}) {
       build: { mode: 'none', installMode: null, buildScript: null, outputDir: '.', healthFile: 'index.html' },
       retention: 5,
     },
-    ids: { websiteId, applicationId, primaryDomainId: domainId, wwwDomainId: independent ? wwwDomainId : null },
+    ids: { websiteId, applicationId, primaryDomainId: domainId, wwwDomainId: independent ? wwwDomainId : null, mailDomainId: mailDomain?.id ?? null },
     hostname: {
       primaryDomain: 'example.com',
       parentDomainId,
@@ -35,6 +44,7 @@ function preview({ wwwMode = 'none', parentDomainId = null } = {}) {
       websiteReady: false,
       primaryDomainReady: false,
       wwwDomainReady: independent ? false : null,
+      mailDomainReady: mailDomain ? false : null,
     },
     plan: {
       application: {
@@ -66,7 +76,7 @@ function preview({ wwwMode = 'none', parentDomainId = null } = {}) {
         aliases: wwwMode === 'alias' ? ['www.example.com'] : [],
         targetType: 'static',
         target: { root: `/var/www/yunpanel/apps/${applicationId}/current`, spaFallback: true },
-        httpsMode: 'off',
+        httpsMode: mailMode === 'local' ? 'managed' : 'off',
       },
       wwwDomain: independent ? {
         id: wwwDomainId,
@@ -79,6 +89,10 @@ function preview({ wwwMode = 'none', parentDomainId = null } = {}) {
         target: { root: `/var/www/yunpanel/apps/${applicationId}/current`, spaFallback: true },
         httpsMode: 'off',
       } : null,
+      mailDomain,
+      webmail: mailMode === 'local'
+        ? { hostname: 'webmail.example.com', sharedRoundcube: true, certificateCoverageRequired: true }
+        : null,
     },
   };
 }
@@ -138,6 +152,40 @@ test('root Website provisioning snapshots DNS template and identity before Nginx
   assert.equal(dns.intent.webDomainId, domainId);
   assert.equal(dns.intent.records.some((record) => record.key === 'www-alias'), true);
   assert.ok(plan.steps.findIndex((step) => step.id === 'dns_zone') < plan.steps.findIndex((step) => step.id === 'nginx'));
+});
+
+test('local mail adds operation-owned DNS reapply after the DKIM key step', async () => {
+  const plan = await siteCreateProvisioningPlan(preview({ mailMode: 'local' }), dependencies());
+  const dkim = plan.steps.find((step) => step.id === 'mail_dkim_key');
+  const mailDns = plan.steps.find((step) => step.id === 'mail_dns_reapply');
+
+  assert.ok(dkim);
+  assert.ok(mailDns);
+  assert.equal(mailDns.kind, 'mail_dns_reapply');
+  assert.equal(mailDns.required, true);
+  assert.equal(mailDns.state, 'pending');
+  assert.equal(mailDns.compensation.state, 'pending');
+  assert.deepEqual(mailDns.intent, {
+    adapter: 'powerdns-mail-reapply',
+    serverId,
+    websiteId,
+    webDomainId: domainId,
+    zoneName: 'example.com',
+    mailDomainId,
+    domainName: 'example.com',
+    expectedMailDomainRevision: 2,
+    expectedMailDomainStatus: 'enabled',
+    expectedDkimKeyRevision: 1,
+    selector: 'yp-9ae512c0a7174611943c6ce2',
+  });
+  assert.ok(plan.steps.findIndex((step) => step.id === 'mail_dkim_key')
+    < plan.steps.findIndex((step) => step.id === 'mail_dns_reapply'));
+  assert.equal(plan.ready, false);
+});
+
+test('external mail does not create a local authoritative mail DNS mutation', async () => {
+  const plan = await siteCreateProvisioningPlan(preview({ mailMode: 'external' }), dependencies());
+  assert.equal(plan.steps.some((step) => step.id === 'mail_dns_reapply'), false);
 });
 
 test('www none removes the built-in DNS alias so no dead endpoint is published', async () => {
