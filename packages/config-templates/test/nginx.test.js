@@ -112,6 +112,50 @@ test('renders managed HTTPS with HTTP ACME challenge and redirect', () => {
   assert.match(config, /proxy_pass http:\/\/127\.0\.0\.1:3100;/);
 });
 
+test('renders mail discovery proxy only inside the managed HTTPS Website block', () => {
+  const socketPath = '/run/yunpanel-mail-discovery/discovery.sock';
+  const httpOnly = renderProxySiteConfig({
+    primaryDomain: 'example.com',
+    upstreamPort: 3100,
+    mailDiscoverySocketPath: socketPath,
+  });
+  assert.equal(httpOnly.includes('/autodiscover/autodiscover.xml'), false);
+  assert.equal(httpOnly.includes('/mail/config-v1.1.xml'), false);
+  assert.equal(httpOnly.includes('yunpanel-mail-discovery'), false);
+
+  const config = renderProxySiteConfig({
+    primaryDomain: 'example.com',
+    upstreamPort: 3100,
+    mailDiscoverySocketPath: socketPath,
+    tls: {
+      fullchainPath: '/etc/letsencrypt/live/example.com/fullchain.pem',
+      privateKeyPath: '/etc/letsencrypt/live/example.com/privkey.pem',
+    },
+  });
+  assert.equal(config.match(/location = \/autodiscover\/autodiscover\.xml/g)?.length, 1);
+  assert.equal(config.match(/location = \/mail\/config-v1\.1\.xml/g)?.length, 1);
+  assert.equal(config.match(/location = \/\.well-known\/autoconfig\/mail\/config-v1\.1\.xml/g)?.length, 1);
+  assert.equal(config.match(/proxy_pass http:\/\/unix:\/run\/yunpanel-mail-discovery\/discovery\.sock;/g)?.length, 3);
+  const https = config.split('listen 443 ssl;')[1];
+  assert.ok(https);
+  assert.match(https, /location = \/autodiscover\/autodiscover\.xml/);
+});
+
+test('rejects arbitrary Unix sockets for public mail discovery routes', () => {
+  assert.throws(
+    () => renderProxySiteConfig({
+      primaryDomain: 'example.com',
+      upstreamPort: 3100,
+      mailDiscoverySocketPath: '/run/other/control.sock',
+      tls: {
+        fullchainPath: '/etc/letsencrypt/live/example.com/fullchain.pem',
+        privateKeyPath: '/etc/letsencrypt/live/example.com/privkey.pem',
+      },
+    }),
+    (error) => error instanceof NginxTemplateError && error.code === 'invalid_mail_discovery_socket',
+  );
+});
+
 test('serves HTTP alongside HTTPS when HTTPS redirect is disabled', () => {
   const config = renderProxySiteConfig({
     primaryDomain: 'secure.example.com',
