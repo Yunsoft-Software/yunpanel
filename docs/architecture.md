@@ -16,7 +16,9 @@ Bir özellik için olgun ve bakımı süren bir araç varsa YunPanel aynı ürü
 
 ## 2. Mevcut durumun dürüst özeti
 
-2026-09-18 kaynak denetimine göre:
+2026-09-19 kaynak denetimine göre:
+
+- Fresh Website local-mail source provisioning artık disabled Mail Domain reservation ve zero-mailbox managed config sonrasında aynı durable Website operation içinde deterministic `mail_dkim_key → mail_dns_reapply → mail_dkim_config` zincirini kurar. DKIM selector operation ID'den türetilir; key/DNS/signing adımları exact Website/Web Domain/Mail Domain ownership, revision ve digest evidence ile inspect-first çalışır. Website provisioning `certificate` handler'ı hâlâ gerçek issue/select/activate yerine pending placeholder olduğundan ve shared Roundcube bind/apply + final SMTP/IMAP/webmail health gate henüz aynı fresh-create journal'ına bağlanmadığından bu akış production-complete sayılmaz.
 
 - Mevcut deploy edilmiş Node uygulamaların control-plane modeli hâlâ direct-systemd compatibility yoludur. Passenger install/inspect, site runtime intent, canonical env include, read-only migration preview ve health-gated direct-systemd → Passenger cutover coordinator kaynakta vardır; ancak ana async job queue, apply/reconciliation ve normal Domain restage authority zinciri tamamlanmadığı için migration henüz production golden path sayılmaz.
 - Direct-systemd → Passenger migration host coordinator'ı release/env/health koruması yapar, Passenger Nginx route'unu health gate arkasında etkinleştirir ve yalnız hedef sağlıklı olduktan sonra eski systemd servisini stop/disable eder. Başarısız hedef health/config/reload eski route'u geri alır; systemd cleanup sonradan başarısız olursa sağlıklı Passenger trafiği korunup `cleanup_required` state bırakılır.
