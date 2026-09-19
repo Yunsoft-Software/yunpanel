@@ -104,7 +104,7 @@ function fakeHost({ packageInstalled = false, serviceActive = false } = {}) {
       return { stdout: 'install ok installed\t8.3.6-0ubuntu0.24.04.4' };
     }
     if (file === '/usr/bin/apt-cache') {
-      return { stdout: 'Package: php8.2-fpm\nCandidate: 8.2.18-1+ubuntu24.04.1+deb.sury.org+1\nVersion table:\n *** 8.2.18-1 500\n     500 https://ppa.launchpadcontent.net/ondrej/php/ubuntu noble/main amd64 Packages\n' };
+      return { stdout: 'Package: php8.2-fpm\nCandidate: 8.2.18-1+ubuntu24.04.1+deb.sury.org+1\nVersion table:\n *** 8.2.18-1+ubuntu24.04.1+deb.sury.org+1 500\n     500 https://ppa.launchpadcontent.net/ondrej/php/ubuntu noble/main amd64 Packages\n' };
     }
     if (file === '/usr/bin/apt-get') {
       packageInstalled = true;
@@ -470,6 +470,20 @@ test('PHP-FPM site manager refuses non-distro version without verified repositor
   const siteManager = manager(host);
   await assert.rejects(
     siteManager.apply(intent({ phpVersion: '8.1' }), { operationId }),
+    (error) => error instanceof PhpFpmSiteManagerError && error.code === 'php_fpm_repository_unverified',
+  );
+  assert.equal(host.calls.some(([file]) => file === '/usr/bin/apt-get'), false);
+});
+
+test('PHP-FPM site manager rejects a foreign candidate even when an older version exists in verified PPA', async () => {
+  const host = fakeHost({ packageInstalled: false, serviceActive: false });
+  const originalRun = host.run;
+  host.run = async (file, args) => file === '/usr/bin/apt-cache'
+    ? { stdout: 'php8.2-fpm:\n  Installed: (none)\n  Candidate: 8.2.99-foreign\n  Version table:\n     8.2.99-foreign 700\n        700 https://packages.example.test/php noble/main amd64 Packages\n     8.2.18-ppa 500\n        500 https://ppa.launchpadcontent.net/ondrej/php/ubuntu noble/main amd64 Packages\n' }
+    : originalRun(file, args);
+
+  await assert.rejects(
+    manager(host).apply(intent({ phpVersion: '8.2' }), { operationId }),
     (error) => error instanceof PhpFpmSiteManagerError && error.code === 'php_fpm_repository_unverified',
   );
   assert.equal(host.calls.some(([file]) => file === '/usr/bin/apt-get'), false);

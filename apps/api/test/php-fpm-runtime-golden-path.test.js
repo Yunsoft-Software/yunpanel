@@ -51,7 +51,7 @@ test('PHP-FPM Runtime Golden Path - Distro Baseline, Multi-Version & Verified Re
           if (!aptCacheCandidate) {
             return { stdout: 'Candidate: (none)\n' };
           }
-          return { stdout: 'Candidate: 8.2.18-1+ubuntu24.04.1\n' };
+          return { stdout: 'Candidate: 8.2.18-1+ubuntu24.04.1\nVersion table:\n     8.2.18-1+ubuntu24.04.1 500\n        500 https://ppa.launchpadcontent.net/ondrej/php/ubuntu noble/main amd64 Packages\n' };
         }
         if (file === '/usr/bin/apt-get') {
           packageInstalled = true;

@@ -272,7 +272,18 @@ export function createPhpFpmSiteManager({
     try {
       const result = await run(APT_CACHE_PATH, ['policy', packageName], { timeout: 15_000 });
       const output = String(result?.stdout ?? '');
-      if (output.includes('Candidate: (none)') || !output.includes('Candidate:')) {
+      const candidate = output.match(/^\s*Candidate:\s*(\S+)\s*$/m)?.[1];
+      const lines = output.split('\n');
+      let candidateBlock = false;
+      let verifiedOrigin = false;
+      for (const line of lines) {
+        const versionLine = line.match(/^\s*(?:\*\*\*\s+)?(\S+)\s+\d+\s*$/);
+        if (versionLine) candidateBlock = versionLine[1] === candidate;
+        if (candidateBlock && /^\s+\d+\s+https?:\/\/ppa\.launchpad(?:content)?\.net\/ondrej\/php\/ubuntu\s+\S+\/main\s+\S+\s+Packages\s*$/.test(line)) {
+          verifiedOrigin = true;
+        }
+      }
+      if (!candidate || candidate === '(none)' || !verifiedOrigin) {
         throw new PhpFpmSiteManagerError(
           'php_fpm_repository_unverified',
           `PHP ${version} is not available in verified package repositories`,
