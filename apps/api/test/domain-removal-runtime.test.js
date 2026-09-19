@@ -110,7 +110,7 @@ function removalPreview({
       mailDomainIntents: [],
       webmailMappingIds: [],
       webmailMappingIntents: [],
-      activeJobIds: []
+      activeJobIds: [],
       additional: {
         mailboxes: { status: 'available', ids: [] },
         backups: { status: 'available', ids: [] },
@@ -205,7 +205,7 @@ function childRemovalPreview(overrides = {}) {
       mailDomainIntents: [],
       webmailMappingIds: [],
       webmailMappingIntents: [],
-      activeJobIds: []
+      activeJobIds: [],
       additional: {
         mailboxes: { status: 'available', ids: [] },
         backups: { status: 'available', ids: [] },
