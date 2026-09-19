@@ -180,6 +180,8 @@ test('local mail adds operation-owned DNS reapply after the DKIM key step', asyn
   });
   assert.ok(plan.steps.findIndex((step) => step.id === 'mail_dkim_key')
     < plan.steps.findIndex((step) => step.id === 'mail_dns_reapply'));
+  assert.ok(plan.steps.findIndex((step) => step.id === 'mail_dns_reapply')
+    < plan.steps.findIndex((step) => step.id === 'mail_dkim_config'));
   assert.equal(plan.ready, false);
 });
 
