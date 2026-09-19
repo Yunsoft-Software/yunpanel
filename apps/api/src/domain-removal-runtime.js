@@ -404,16 +404,36 @@ function certificateIntent(operation, step) {
 function childCertificatePlanWithinParent(operation, intent, plan) {
   if (!Array.isArray(operation.plan.certificateIntents)
     || !Array.isArray(plan.certificateIntents)
-    || plan.boundCertificateId !== intent.certificateId
-    || plan.certificateIntents.some((childIntent) => (
-      childIntent.domainId !== intent.id
-      || !operation.plan.certificateIntents.some((parentIntent) => (
-        sameCertificateIntent(parentIntent, childIntent)
-      ))
-    ))) {
-    return false;
-  }
-  return true;
+    || plan.boundCertificateId !== intent.certificateId) return false;
+  const expected = operation.plan.certificateIntents.filter((candidate) => (
+    candidate.domainId === intent.id
+  ));
+  return expected.length === plan.certificateIntents.length
+    && expected.every((parentIntent) => plan.certificateIntents.some((childIntent) => (
+      sameCertificateIntent(parentIntent, childIntent)
+    )));
+}
+
+const MAIL_DOMAIN_INTENT_FIELDS = Object.freeze([
+  'id', 'domainName', 'webDomainId', 'managementMode', 'status', 'revision', 'updatedAt',
+]);
+
+function sameMailDomainIntent(expected, current) {
+  return Boolean(expected && current && MAIL_DOMAIN_INTENT_FIELDS.every((field) => (
+    expected[field] === current[field]
+  )));
+}
+
+function childMailDomainPlanWithinParent(operation, intent, plan) {
+  if (!Array.isArray(operation.plan.mailDomainIntents)
+    || !Array.isArray(plan.mailDomainIntents)) return false;
+  const expected = operation.plan.mailDomainIntents.filter((candidate) => (
+    candidate.webDomainId === intent.id
+  ));
+  return expected.length === plan.mailDomainIntents.length
+    && expected.every((parentIntent) => plan.mailDomainIntents.some((childIntent) => (
+      sameMailDomainIntent(parentIntent, childIntent)
+    )));
 }
 
 function childPlanWithinParent(operation, intent, plan) {
@@ -423,6 +443,7 @@ function childPlanWithinParent(operation, intent, plan) {
     || plan.websiteId !== intent.websiteId
     || !exactChildAuthoritativeDnsIntent(intent.authoritativeDns, plan.authoritativeDns)
     || !childCertificatePlanWithinParent(operation, intent, plan)
+    || !childMailDomainPlanWithinParent(operation, intent, plan)
     || !Array.isArray(plan.activeJobIds) || plan.activeJobIds.length !== 0
     || !idsWithin(plan.certificateIds, operation.plan.certificateIds)
     || !idsWithin(plan.dnsZoneIds, operation.plan.dnsZoneIds)
@@ -1695,6 +1716,8 @@ export const domainRemovalRuntimeInternals = Object.freeze({
   exactRetiredCertificate,
   certificateIntent,
   childCertificatePlanWithinParent,
+  sameMailDomainIntent,
+  childMailDomainPlanWithinParent,
   certificateRetirementEvidence,
   childPlanWithinParent,
   exactChildRemovalPreview,

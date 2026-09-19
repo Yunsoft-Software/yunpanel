@@ -153,8 +153,10 @@ function externalLifecycleReference(resource, nameField) {
     id: resource.id,
     [nameField]: resource[nameField],
     webDomainId: resource.webDomainId,
+    managementMode: resource.managementMode,
     status: resource.status,
     revision: resource.revision,
+    updatedAt: resource.updatedAt,
   });
 }
 

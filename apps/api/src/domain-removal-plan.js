@@ -9,6 +9,9 @@ const CERTIFICATE_STATES = new Set([
 ]);
 const CERTIFICATE_SOURCES = new Set(['acme', 'custom']);
 const CERTIFICATE_RENEWAL_MODES = new Set(['automatic', 'manual']);
+const MAIL_MANAGEMENT_MODES = new Set(['local', 'external']);
+const LOCAL_MAIL_STATUSES = new Set(['disabled', 'enabled']);
+const EXTERNAL_MAIL_STATUSES = new Set(['unverified', 'ready', 'degraded']);
 
 const ORCHESTRATABLE_IMPACT_BLOCKERS = new Set([
   'child_domains_present',
@@ -429,6 +432,64 @@ function certificateReferences(values, domain, childDomains) {
   return Object.freeze(references);
 }
 
+function mailDomainReferences(values, domain, childDomains) {
+  if (!Array.isArray(values) || values.length > 500) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_preview_invalid',
+      'Mail Domain dependency inventory is invalid',
+      409,
+    );
+  }
+  const fields = new Set([
+    'id', 'domainName', 'webDomainId', 'managementMode', 'status', 'revision', 'updatedAt',
+  ]);
+  const affectedDomains = new Map(
+    [domain, ...childDomains].map((current) => [current.id, current.primaryDomain]),
+  );
+  const references = values.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).length !== fields.size
+      || Object.keys(value).some((field) => !fields.has(field))
+      || !MAIL_MANAGEMENT_MODES.has(value.managementMode)
+      || (value.managementMode === 'local' && !LOCAL_MAIL_STATUSES.has(value.status))
+      || (value.managementMode === 'external' && !EXTERNAL_MAIL_STATUSES.has(value.status))
+      || !Number.isSafeInteger(value.revision) || value.revision < 1) {
+      throw new DomainRemovalPlanError(
+        'domain_removal_preview_invalid',
+        'Mail Domain dependency evidence is invalid',
+        409,
+      );
+    }
+    const reference = Object.freeze({
+      id: safeId(value.id, 'mailDomainId'),
+      domainName: value.domainName,
+      webDomainId: safeId(value.webDomainId, 'mailDomainWebDomainId'),
+      managementMode: value.managementMode,
+      status: value.status,
+      revision: value.revision,
+      updatedAt: safeTimestamp(value.updatedAt, 'mailDomainUpdatedAt'),
+    });
+    if (typeof reference.domainName !== 'string'
+      || reference.domainName !== affectedDomains.get(reference.webDomainId)) {
+      throw new DomainRemovalPlanError(
+        'domain_removal_impact_stale',
+        'Mail Domain dependency evidence does not match the affected Domain set',
+        409,
+      );
+    }
+    return reference;
+  }).sort((left, right) => left.id.localeCompare(right.id));
+  if (new Set(references.map((reference) => reference.id)).size !== references.length
+    || new Set(references.map((reference) => reference.webDomainId)).size !== references.length) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_preview_invalid',
+      'Mail Domain dependency inventory contains duplicate identities',
+      409,
+    );
+  }
+  return Object.freeze(references);
+}
+
 function dependencyPlan(dependencies, domain) {
   if (!dependencies || typeof dependencies !== 'object' || Array.isArray(dependencies)) {
     throw new DomainRemovalPlanError(
@@ -465,6 +526,11 @@ function dependencyPlan(dependencies, domain) {
     domain,
     childDomains,
   );
+  const mailDomains = mailDomainReferences(
+    dependencies.mailDomains ?? [],
+    domain,
+    childDomains,
+  );
   return Object.freeze({
     childDomainIds: Object.freeze(childDomains.map((child) => child.id)),
     childDomains,
@@ -479,7 +545,8 @@ function dependencyPlan(dependencies, domain) {
     certificateIntents: certificates,
     boundCertificateId: domain.certificateId,
     dnsZoneIds: normalizedIds(dependencies.dnsZones ?? [], 'dnsZone'),
-    mailDomainIds: normalizedIds(dependencies.mailDomains ?? [], 'mailDomain'),
+    mailDomainIds: Object.freeze(mailDomains.map((mailDomain) => mailDomain.id)),
+    mailDomainIntents: mailDomains,
     activeJobIds: activeJobs,
     additional,
     authoritativeDns: authoritativeDnsReference(dependencies, domain.id),
@@ -590,6 +657,7 @@ export const domainRemovalPlanInternals = Object.freeze({
   orderedChildDomains,
   authoritativeDnsReference,
   certificateReferences,
+  mailDomainReferences,
   dependencyPlan,
   hardBlockers,
 });

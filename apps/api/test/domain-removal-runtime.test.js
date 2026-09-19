@@ -106,6 +106,7 @@ function removalPreview({
       boundCertificateId: 'certificate-1',
       dnsZoneIds: [],
       mailDomainIds: [],
+      mailDomainIntents: [],
       activeJobIds: [],
       additional: {
         mailboxes: { status: 'available', ids: [] },
@@ -154,6 +155,7 @@ function leafRemovalPreview() {
       boundCertificateId: null,
       dnsZoneIds: [],
       mailDomainIds: [],
+      mailDomainIntents: [],
       authoritativeDns: null,
     },
     previewDigest: leafPreviewDigest,
@@ -195,6 +197,7 @@ function childRemovalPreview(overrides = {}) {
       boundCertificateId: null,
       dnsZoneIds: [],
       mailDomainIds: [],
+      mailDomainIntents: [],
       activeJobIds: [],
       additional: {
         mailboxes: { status: 'available', ids: [] },
@@ -1195,6 +1198,107 @@ test('parent delegates an exact descendant certificate retirement to the child j
   assert.equal(operation.steps[2].kind, 'certificate');
   [childOperation] = await registry.listForDomain('child-domain-1');
   assert.equal(childOperation.status, 'removed');
+});
+
+test('parent delegates exact descendant Mail Domain intent to the child journal', async () => {
+  const childMailDomain = {
+    id: 'mail-domain-child-1',
+    domainName: 'api.example.com',
+    webDomainId: 'child-domain-1',
+    managementMode: 'local',
+    status: 'disabled',
+    revision: 3,
+    updatedAt: '2026-09-18T20:00:00.000Z',
+  };
+  const registry = createNestedRegistry();
+  const parentPreview = removalPreview();
+  parentPreview.plan.mailDomainIds = [childMailDomain.id];
+  parentPreview.plan.mailDomainIntents = [childMailDomain];
+  const childPreview = childRemovalPreview({
+    plan: {
+      mailDomainIds: [childMailDomain.id],
+      mailDomainIntents: [childMailDomain],
+    },
+  });
+  const domains = childDomainControlPlaneFixture();
+  const suspensions = nestedSuspensionRuntime(domains);
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async ({ domainId }) => (
+      domainId === 'domain-1' ? parentPreview : childPreview
+    ),
+    suspensionRuntime: suspensions.runtime,
+    domainRegistry: domains.manager,
+  });
+  let operation = await runtime.start({
+    domainId: parentPreview.domain.id,
+    previewDigest: parentPreview.previewDigest,
+    confirmation: parentPreview.confirmation,
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+
+  const [childOperation] = await registry.listForDomain('child-domain-1');
+  assert.deepEqual(childOperation.steps.map((step) => [step.kind, step.resourceId, step.status]), [
+    ['routing_suspend', 'child-domain-1', 'succeeded'],
+    ['mail_domain', childMailDomain.id, 'pending'],
+    ['website_binding', 'website-2', 'pending'],
+    ['metadata_finalization', 'child-domain-1', 'pending'],
+  ]);
+  assert.equal(operation.steps[1].status, 'blocked');
+  assert.equal(operation.steps[1].error.code, 'domain_removal_child_retry_required');
+});
+
+test('missing descendant Mail Domain intent blocks before child journal creation', async () => {
+  const childMailDomain = {
+    id: 'mail-domain-child-1',
+    domainName: 'api.example.com',
+    webDomainId: 'child-domain-1',
+    managementMode: 'local',
+    status: 'disabled',
+    revision: 3,
+    updatedAt: '2026-09-18T20:00:00.000Z',
+  };
+  const registry = createNestedRegistry();
+  const parentPreview = removalPreview();
+  parentPreview.plan.mailDomainIds = [childMailDomain.id];
+  parentPreview.plan.mailDomainIntents = [childMailDomain];
+  const domains = childDomainControlPlaneFixture();
+  const suspensions = nestedSuspensionRuntime(domains);
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async ({ domainId }) => (
+      domainId === 'domain-1' ? parentPreview : childRemovalPreview()
+    ),
+    suspensionRuntime: suspensions.runtime,
+    domainRegistry: domains.manager,
+  });
+  let operation = await runtime.start({
+    domainId: parentPreview.domain.id,
+    previewDigest: parentPreview.previewDigest,
+    confirmation: parentPreview.confirmation,
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: operation.actions.stepContinuationConfirmation,
+  });
+
+  assert.equal(operation.steps[1].status, 'blocked');
+  assert.equal(operation.steps[1].error.code, 'domain_removal_child_preview_drift');
+  assert.deepEqual(await registry.listForDomain('child-domain-1'), []);
+  assert.equal(suspensions.counts().starts, 1);
 });
 
 test('parent-owned child removal delegates exact local DNS retirement before child finalization', async () => {

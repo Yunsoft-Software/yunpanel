@@ -90,6 +90,15 @@ function preview() {
       boundCertificateId: 'certificate-1',
       dnsZoneIds: ['external-zone-1'],
       mailDomainIds: ['mail-domain-1'],
+      mailDomainIntents: [{
+        id: 'mail-domain-1',
+        domainName: 'example.com',
+        webDomainId: 'domain-1',
+        managementMode: 'local',
+        status: 'disabled',
+        revision: 3,
+        updatedAt: '2026-09-18T20:00:00.000Z',
+      }],
       activeJobIds: [],
       additional: {
         mailboxes: { status: 'available', ids: [] },
@@ -164,6 +173,16 @@ test('parent journal delegates descendant certificates to child Domain operation
       domainId: 'child-domain-1',
     },
   ];
+  input.plan.mailDomainIds = ['mail-domain-1', 'mail-domain-child-1'];
+  input.plan.mailDomainIntents = [
+    ...input.plan.mailDomainIntents,
+    {
+      ...input.plan.mailDomainIntents[0],
+      id: 'mail-domain-child-1',
+      domainName: 'api.example.com',
+      webDomainId: 'child-domain-1',
+    },
+  ];
   const registry = createDomainRemovalOperationRegistry({
     idFactory: () => 'operation-1',
     now: () => Date.parse('2026-09-18T20:00:00.000Z'),
@@ -176,6 +195,11 @@ test('parent journal delegates descendant certificates to child Domain operation
     ['certificate-1'],
   );
   assert.equal(operation.plan.certificateIntents.length, 2);
+  assert.deepEqual(
+    operation.steps.filter((step) => step.kind === 'mail_domain').map((step) => step.resourceId),
+    ['mail-domain-1'],
+  );
+  assert.equal(operation.plan.mailDomainIntents.length, 2);
 });
 
 test('binds child operations to one parent and blocks concurrent Domain removal ownership', async () => {
@@ -197,6 +221,8 @@ test('binds child operations to one parent and blocks concurrent Domain removal 
     certificateIds: [],
     certificateIntents: [],
     boundCertificateId: null,
+    mailDomainIds: [],
+    mailDomainIntents: [],
   };
   ownedPreview.impact = {
     ...ownedPreview.impact,
@@ -260,6 +286,7 @@ test('legacy journal plans load without inventing exact child Domain intent evid
   delete legacy.childDomains;
   delete legacy.certificateIntents;
   delete legacy.boundCertificateId;
+  delete legacy.mailDomainIntents;
 
   const normalized = domainRemovalOperationRegistryInternals.normalizedPlan(legacy);
 
@@ -271,11 +298,22 @@ test('prior journal plans load without inventing certificate retirement evidence
   const prior = preview().plan;
   delete prior.certificateIntents;
   delete prior.boundCertificateId;
+  delete prior.mailDomainIntents;
 
   const normalized = domainRemovalOperationRegistryInternals.normalizedPlan(prior);
 
   assert.equal(normalized.certificateIntents, null);
   assert.equal(normalized.boundCertificateId, null);
+});
+
+test('certificate-era journal plans load without inventing Mail Domain removal evidence', () => {
+  const prior = preview().plan;
+  delete prior.mailDomainIntents;
+
+  const normalized = domainRemovalOperationRegistryInternals.normalizedPlan(prior);
+
+  assert.equal(normalized.certificateIntents.length, 1);
+  assert.equal(normalized.mailDomainIntents, null);
 });
 
 test('prior child snapshots load without inventing authoritative DNS intent', () => {
@@ -338,6 +376,14 @@ test('new operations reject missing or drifted child Domain intent evidence', as
   delete missingCertificateIntent.plan.certificateIntents;
   await assert.rejects(
     registry.create(missingCertificateIntent),
+    (error) => error instanceof DomainRemovalOperationRegistryError
+      && error.code === 'domain_removal_operation_state_invalid',
+  );
+
+  const missingMailDomainIntent = preview();
+  delete missingMailDomainIntent.plan.mailDomainIntents;
+  await assert.rejects(
+    registry.create(missingMailDomainIntent),
     (error) => error instanceof DomainRemovalOperationRegistryError
       && error.code === 'domain_removal_operation_state_invalid',
   );

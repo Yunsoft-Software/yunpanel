@@ -41,6 +41,19 @@ function certificateReference(id, domainId = 'domain-1', overrides = {}) {
   };
 }
 
+function mailDomainReference(id, webDomainId = 'domain-1', domainName = 'example.com', overrides = {}) {
+  return {
+    id,
+    domainName,
+    webDomainId,
+    managementMode: 'local',
+    status: 'disabled',
+    revision: 3,
+    updatedAt: '2026-09-18T20:00:00.000Z',
+    ...overrides,
+  };
+}
+
 function domain(overrides = {}) {
   return {
     id: 'domain-1',
@@ -91,7 +104,11 @@ function impact(currentDomain = domain(), overrides = {}) {
     application: { id: 'application-1' },
     managedComposeBinding: null,
     dnsZones: [{ id: 'external-zone-1' }],
-    mailDomains: [{ id: 'mail-domain-1' }],
+    mailDomains: [mailDomainReference(
+      'mail-domain-1',
+      currentDomain.id,
+      currentDomain.primaryDomain,
+    )],
     certificates: currentDomain.certificateId === null
       ? []
       : [certificateReference(currentDomain.certificateId, currentDomain.id, {
@@ -191,6 +208,8 @@ test('pins current resource-impact evidence into a deterministic Domain removal 
   assert.deepEqual(preview.plan.certificateIntents, [
     certificateReference('certificate-1'),
   ]);
+  assert.deepEqual(preview.plan.mailDomainIds, ['mail-domain-1']);
+  assert.deepEqual(preview.plan.mailDomainIntents, [mailDomainReference('mail-domain-1')]);
   assert.equal(preview.plan.authoritativeDns.previewDigest, dnsPreviewDigest);
   assert.equal(preview.plan.authoritativeDns.ownershipEvidenceDigest, ownershipEvidenceDigest);
   assert.equal(preview.plan.authoritativeDns.snapshotRetentionDays, 30);
@@ -357,6 +376,38 @@ test('certificate lifecycle drift is pinned and cross-Domain evidence fails clos
     () => createDomainRemovalPreview({ domain: currentDomain, impact: retiredImpact }),
     (error) => error instanceof DomainRemovalPlanError
       && error.code === 'domain_removal_preview_invalid',
+  );
+});
+
+test('Mail Domain lifecycle drift is pinned and cross-Domain evidence fails closed', () => {
+  const currentDomain = domain();
+  const first = createDomainRemovalPreview({
+    domain: currentDomain,
+    impact: impact(currentDomain),
+  });
+  const changedImpact = impact(currentDomain);
+  changedImpact.dependencies = {
+    ...changedImpact.dependencies,
+    mailDomains: [mailDomainReference('mail-domain-1', currentDomain.id, currentDomain.primaryDomain, {
+      revision: 4,
+      updatedAt: '2026-09-18T20:05:00.000Z',
+    })],
+  };
+  const changed = createDomainRemovalPreview({
+    domain: currentDomain,
+    impact: changedImpact,
+  });
+  assert.notEqual(first.previewDigest, changed.previewDigest);
+
+  const foreignImpact = impact(currentDomain);
+  foreignImpact.dependencies = {
+    ...foreignImpact.dependencies,
+    mailDomains: [mailDomainReference('mail-domain-1', 'foreign-domain')],
+  };
+  assert.throws(
+    () => createDomainRemovalPreview({ domain: currentDomain, impact: foreignImpact }),
+    (error) => error instanceof DomainRemovalPlanError
+      && error.code === 'domain_removal_impact_stale',
   );
 });
 

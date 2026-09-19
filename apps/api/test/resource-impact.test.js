@@ -159,6 +159,15 @@ test('Website impact preview lists real dependency graph and marks missing inven
   assert.deepEqual(preview.dependencies.activeJobs.map((item) => item.id), [state.job.id]);
   assert.deepEqual(preview.dependencies.dnsZones.map((item) => item.id), [state.dnsZone.id]);
   assert.deepEqual(preview.dependencies.mailDomains.map((item) => item.id), [state.mailDomain.id]);
+  assert.deepEqual(preview.dependencies.mailDomains[0], {
+    id: state.mailDomain.id,
+    domainName: state.mailDomain.domainName,
+    webDomainId: state.domain.id,
+    managementMode: 'external',
+    status: 'unverified',
+    revision: 1,
+    updatedAt: state.mailDomain.updatedAt,
+  });
   assert.deepEqual(preview.dependencies.mailboxes, { status: 'available', items: [{ id: 'mailbox-1', state: 'active' }] });
   for (const type of ['backups', 'crons', 'dockerWorkloads']) {
     assert.deepEqual(preview.dependencies[type], { status: 'unavailable', items: [] });
