@@ -5,6 +5,7 @@ Bu dosya **yalnız kalan ürün/kod işlerini** tutar. Yapılmış işlerin ayr�
 Son Website isolation/SFTP ilerlemesi: `docs/history/website-isolation-sftp-progress-2026-09-17.md`.
 Son mail durable apply/recovery ilerlemesi: `docs/history/mail-durable-apply-recovery-2026-09-17.md`.
 Son fresh Website local-mail config provisioning ilerlemesi: `docs/history/site-create-mail-config-provisioning-2026-09-19.md`.
+Son fresh Website local-mail DNS/DKIM provisioning ilerlemesi: `docs/history/site-create-mail-dns-dkim-provisioning-2026-09-19.md`.
 Son local PowerDNS DKIM retirement ilerlemesi: `docs/history/dns-local-dkim-retirement-2026-09-17.md`.
 Son mail discovery DNS gate ilerlemesi: `docs/history/dns-mail-discovery-gate-2026-09-17.md`.
 Son DNSSEC rollover adapter ilerlemesi: `docs/history/dnssec-rollover-progress-2026-09-17.md`.
@@ -67,10 +68,10 @@ Kaynakta yeni managed-mail preview/apply yolu SQLite-backed virtual domain/mailb
 
 - [ ] SQL-backed virtual mail domain/mailbox/alias/quota/password-hash modelinin gerçek Ubuntu kabulünü tamamla; source cutover hazırdır, Website user ile mail storage/auth DB identity ayrıdır.
 - [ ] Dedicated `vmail` storage identity + ayrı `yunpanel-mailauth` reader group modelinin package upgrade ve gerçek Maildir ownership kabulünü tamamla; source/package policy hazırdır.
-- [ ] Local mail enable domain oluştursun fakat bilinen/default parola mailbox yaratmasın. Site-create source preflight deterministic Mail Domain ID ile yalnız `disabled` metadata reserve ediyor; zero-mailbox managed config artık source'ta geçerli ve hiçbir default mailbox/parola üretmiyor. Website provisioning journal'ındaki operation-owned `mail_config` step'i exact v3 apply/reconciliation evidence ile `disabled@1 → enabled@2` geçişini, restart/lost-ack inspect'i ve mevcut `MAIL_CONFIG_ROLLBACK` ile `enabled@2 → disabled@3` compensation'ı kaynakta bağlıyor. DKIM/DNS/webmail/cross-service health adımları ve gerçek Ubuntu kabulü açık.
+- [ ] Local mail enable domain oluştursun fakat bilinen/default parola mailbox yaratmasın. Site-create source preflight deterministic Mail Domain ID ile yalnız `disabled` metadata reserve ediyor; zero-mailbox managed config source'ta geçerli ve hiçbir default mailbox/parola üretmiyor. Website provisioning journal'ında operation-owned `mail_config` exact v3 apply/reconciliation ile `disabled@1 → enabled@2` geçişini ve rollback compensation'ını koruyor; bunun ardından deterministic `mail_dkim_key → mail_dns_reapply → mail_dkim_config` zinciri exact Website/Web Domain/Mail Domain ownership, revision, durable DNS child-operation evidence ve idempotent DKIM apply/cleanup job'larıyla kaynakta bağlıdır. Kalan: gerçek certificate handler, shared Roundcube bind/apply, cross-service health ve gerçek Ubuntu/SMTP/IMAP acceptance.
 - [ ] SMTP 25 + submission 587; 465/993 policy; plain auth yalnız TLS altında.
-- [ ] DKIM key lifecycle; private key secret-safe, public key DNS intent.
-- [ ] SPF/DMARC/DKIM desired state'i mail operation evidence'ına bağla.
+- [ ] DKIM key rotation/retirement ve gerçek-host acceptance'ı tamamla; fresh Website deterministic key generation + authoritative DNS publish + signing-config source lifecycle'ı hazırdır.
+- [ ] SPF/DMARC policy/health evidence'ını tamamla; fresh Website authoritative re-apply DKIM key revision ve exact desired mail-state digest'ini durable DNS evidence'ına bağlıyor.
 - [ ] Sender-login/relay/rate abuse/Rspamd policy tamamla.
 - [ ] Forwarding/alias/SRS lifecycle tamamla.
 - [ ] ClamAV optional profile; health yoksa aktif gösterme.
@@ -111,7 +112,7 @@ Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözl
 - [ ] Website/Application/operation reserve lifecycle'ını finalize et.
 - [ ] Nginx stage/configtest/activate lifecycle'ını full Website create zincirinde finalize et.
 - [ ] DB seçildiyse scoped DB/user/grant step'i bağla.
-- [ ] Local mail domain + DKIM + DNS intent step'ini bağla. Deterministic Mail Domain metadata reservation site-create flow'da var; local kaynak `disabled`, external kaynak `unverified` yaratılıyor. Local `mail_config` durable Website provisioning step'i artık certificate sonrasında managed config apply/reconciliation + operation-owned retry/lost-ack recovery + rollback compensation ile kaynakta bağlı ve zero-mailbox çalışıyor. Açık kısım DKIM generate/apply, mail/discovery DNS desired-state re-apply ve bunların health evidence'ını aynı journal'a bağlamak.
+- [ ] Local mail provisioning'i certificate/shared Roundcube/cross-service health ile finalize et. Deterministic Mail Domain metadata reservation, zero-mailbox `mail_config`, deterministic `mail_dkim_key`, authoritative `mail_dns_reapply` ve DNS-ready-gated `mail_dkim_config` durable Website provisioning journal'ında kaynakta bağlıdır. Eksik kısım gerçek certificate issue/select handler, shared Roundcube bind/apply, discovery/autoconfig ve final SMTP/IMAP/webmail health evidence'ıdır.
 - [ ] `webmail.<domain>` mapping + shared Roundcube step'ini yeni Website provisioning operation'ına bağla. Mapping/DNS/delete primitive'leri hazır; site-create preflight artık local mail için exact `webmail.<domain>` + shared Roundcube + certificate coverage intent'ini taşıyor. Eksik kısım certificate selection/issuance sonrası durable mapping bind/apply ve DNS re-apply step'lerini provisioning journal'a bağlamak.
 - [ ] Certificate step'ini bağla.
 - [ ] Cross-service health postcondition'larını bağla.
