@@ -567,6 +567,8 @@ function buildSteps(preview, createdAt) {
     || !plan.mailDomainIntents.some((mailDomain) => (
       mailDomain.id === mapping.mailDomainId
       && mailDomain.webDomainId === mapping.webDomainId
+      && mailDomain.managementMode === 'local'
+      && mailDomain.status === 'enabled'
     ))
   ))) {
     throw invalid('Webmail mapping removal intent crosses the Domain removal boundary');
