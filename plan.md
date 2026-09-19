@@ -49,6 +49,7 @@ Son Passenger/provisioning canlı kabulü: `docs/history/passenger-provisioning-
 Son Domain removal HTTP API ve route wiring ilerlemesi: `docs/history/domain-removal-http-routes-2026-09-19.md`.
 Son Certificate retention ve GC lifecycle ilerlemesi: `docs/history/certificate-retention-gc-lifecycle-2026-09-19.md`.
 Son Delete impact provider ve plan wiring ilerlemesi: `docs/history/delete-impact-providers-and-plan-wiring-2026-09-19.md`.
+Son Website removal lifecycle ve orchestration ilerlemesi: `docs/history/website-removal-lifecycle-orchestration-2026-09-19.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -138,9 +139,7 @@ Domain removal HTTP API'ı (`preview`, `operations`, `retry-routing`, `continue`
 
 - [ ] Domain removal parent journal'ındaki kalan public full-delete kapılarını tamamla. Webmail mapping lifecycle artık exact impact intent + child subset fence + parent-owned removing/apply/removed tombstone + inspect-only lost-ack recovery ile kaynakta bağlıdır; Mail Domain child tarafında config-disable → metadata cleanup → verified backup → mailbox credential cleanup → backup-bound data delete → local/external finalization phase router + production bootstrap kaynakta bağlandı. External DNS tracked-zone lifecycle da exact zone intent + revision/update fence + explicit continuation + inspect-only restart ile yalnız operation-owned metadata unlink yapacak şekilde parent runtime'a bağlandı; provider RRset'leri ayrı ownership evidence olmadan implicit silinmez. Hazır deepest-first child operation → certificate registry retirement → Webmail mapping cleanup → Mail Domain → External DNS metadata unlink → Website binding detach → authoritative DNS retirement → metadata finalization zincirini yalnız önceki dependency evidence tamamlandıktan sonra çalıştır. Eksik impact provider'ları tamamlanmadan public Domain delete apply yüzeyi açma ve standalone authoritative DNS delete route'u açma.
 - [ ] Domain delete reverse order: routing suspend/deactivate → certificate/webmail/mail/external-DNS bağımlılıkları → authoritative DNS retirement → Domain metadata finalization. Her destructive step operation-owned evidence kullansın.
-- [ ] Website delete bağlı Domain delete operation'ları bitmeden Website/Application/Unix/runtime/file cleanup'a geçmesin.
 - [ ] Mail/DB/file deletion typed confirmation + retention ve mevcut backup evidence zincirlerini üst delete operation'a bağla.
-- [ ] Partial deletion retryable state bıraksın; restart hiçbir destructive step'i kör replay etmesin.
 
 # P1 — Core parity sonrası
 

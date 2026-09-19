@@ -107,6 +107,9 @@ import { createWebsiteCronImpactProvider } from './website-cron-impact.js';
 import { createWebsiteSftpKeyRuntime } from './website-sftp-key-runtime.js';
 import { createWebsiteSuspensionOperationRegistry } from './website-suspension-operation-registry.js';
 import { createWebsiteSuspensionRuntime } from './website-suspension-runtime.js';
+import { createWebsiteRemovalOperationRegistry } from './website-removal-operation-registry.js';
+import { createWebsiteRemovalRuntime } from './website-removal-runtime.js';
+import { createWebsiteRemovalPreview } from './website-removal-plan.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10);
@@ -119,6 +122,8 @@ const websiteSuspensionOperationStorePath = process.env.YUNPANEL_WEBSITE_SUSPENS
   ?? path.join(controlPlaneStateRoot, 'website-suspension-operations.json');
 const domainRemovalOperationStorePath = process.env.YUNPANEL_DOMAIN_REMOVAL_OPERATION_STORE
   ?? path.join(controlPlaneStateRoot, 'domain-removal-operations.json');
+const websiteRemovalOperationStorePath = process.env.YUNPANEL_WEBSITE_REMOVAL_OPERATION_STORE
+  ?? path.join(controlPlaneStateRoot, 'website-removal-operations.json');
 const jobStorePath = process.env.YUNPANEL_JOB_STORE ?? path.resolve('.data/job-registry.json');
 const backupOperationStorePath = process.env.YUNPANEL_BACKUP_OPERATION_STORE
   ?? path.join(controlPlaneStateRoot, 'backup-operation-registry.json');
@@ -650,6 +655,56 @@ const domainRemovalRuntimeBundle = localServerId && domainSuspensionRuntime && m
   : null;
 const domainRemovalRuntime = domainRemovalRuntimeBundle?.runtime ?? null;
 if (domainRemovalRuntime) await domainRemovalRuntime.init();
+const websiteRemovalOperationRegistry = createWebsiteRemovalOperationRegistry({
+  filePath: websiteRemovalOperationStorePath,
+});
+const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
+  ? createWebsiteRemovalRuntime({
+    registry: websiteRemovalOperationRegistry,
+    previewProvider: async ({ websiteId }) => {
+      const ws = await websiteRegistry.getWebsite(websiteId);
+      if (!ws || ws.serverId !== localServerId) {
+        throw new Error('Website not found on local server');
+      }
+      const imp = await previewResourceImpact({
+        resourceType: 'website',
+        resourceId: ws.id,
+        operation: 'delete',
+        targetServerId: null,
+        registry,
+        applicationRegistry,
+        websiteRegistry,
+        domainRegistry,
+        certificateRegistry,
+        jobRegistry,
+        dnsHostingRegistry,
+        mailDomainRegistry,
+        additionalProviders: {
+          dockerWorkloads: async () => [],
+          backups: async () => [],
+          webmailMappings: async () => [],
+          mailboxes: async () => [],
+          crons: websiteCronImpactProvider ?? (async () => []),
+          ...createAllWebsiteImpactProviders({
+            databaseBindingRegistry,
+            websiteSftpKeyRegistry: websiteSftpKeyRuntime?.keyRegistry ?? null,
+            runtimeBindingRegistry,
+            websiteRegistry,
+          }),
+        },
+      });
+      return createWebsiteRemovalPreview({ website: ws, impact: imp });
+    },
+    domainRemovalRuntime,
+    websiteRegistry,
+    applicationRegistry,
+    databaseBindingRegistry,
+    websiteSftpKeyRegistry: websiteSftpKeyRuntime?.keyRegistry ?? null,
+    runtimeBindingRegistry,
+    websiteCronRegistry,
+  })
+  : null;
+if (websiteRemovalRuntime) await websiteRemovalRuntime.init();
 const dockerComposeRuntime = await createDockerComposeRuntime({
   env: process.env,
   serverRegistry: registry,
@@ -871,6 +926,7 @@ const listener = createAuthenticatedApi({
       jobLogStore,
       websiteSuspensionRuntime,
       domainRemovalRuntime,
+      websiteRemovalRuntime,
       websiteCronImpactProvider,
       localServerId,
       terminalCapabilityRegistry,
@@ -937,6 +993,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] domain store=${domainStorePath}`);
   console.log(`[yunpanel-api] domain suspension operation store=${domainSuspensionOperationStorePath}`);
   console.log(`[yunpanel-api] domain removal operation store=${domainRemovalOperationStorePath}`);
+  console.log(`[yunpanel-api] website removal operation store=${websiteRemovalOperationStorePath}`);
   console.log(`[yunpanel-api] DNS zone retirement operation store=${dnsZoneRetirementOperationStorePath}`);
   console.log(`[yunpanel-api] job store=${jobStorePath}`);
   console.log(`[yunpanel-api] backup operation store=${backupOperationStorePath}`);
