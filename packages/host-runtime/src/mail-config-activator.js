@@ -259,13 +259,18 @@ export function createMailConfigActivator({
     }
   }
 
-  async function createManagedDirectories(backup, onCreated) {
+  async function createManagedDirectories(backup, onCreated, postfixGid, mailAuthGroup) {
     for (const directory of backup.directories) {
       if (directory.present) continue;
       try {
         await mkdirFn(directory.path, { mode: NEW_MANAGED_DIRECTORY_MODE });
         onCreated();
-        await chownFn(directory.path, ROOT_UID, ROOT_GID);
+        const gid = directory.path === mailSqlTemplatePolicy.postfixSqlDirectory
+          ? postfixGid
+          : directory.path === mailSqlTemplatePolicy.databaseDirectory
+            ? mailAuthGroup?.gid ?? ROOT_GID
+            : ROOT_GID;
+        await chownFn(directory.path, ROOT_UID, gid);
         await chmodFn(directory.path, NEW_MANAGED_DIRECTORY_MODE);
       } catch (error) {
         if (error instanceof MailConfigActivationError) throw error;
@@ -861,7 +866,12 @@ export function createMailConfigActivator({
     let mutationStarted = false;
     const markMutation = () => { mutationStarted = true; };
     try {
-      await createManagedDirectories(backup, markMutation);
+      await createManagedDirectories(
+        backup,
+        markMutation,
+        postfixIdentity.gid,
+        mailAuthGroup,
+      );
       await replaceManagedArtifacts(
         stage,
         plan.sha256,
