@@ -7,6 +7,7 @@ import { createWebsiteMailProvisioningHandler } from './website-mail-provisionin
 import { createWebsiteMailDkimKeyProvisioningHandler } from './website-mail-dkim-key-provisioning-handler.js';
 import { createWebsiteMailDkimConfigProvisioningHandler } from './website-mail-dkim-config-provisioning-handler.js';
 import { createWebsiteMailDnsProvisioningHandler } from './website-mail-dns-provisioning-handler.js';
+import { createWebsiteMailHealthProvisioningHandler } from './website-mail-health-provisioning-handler.js';
 import { createWebsiteIsolationAuditService, WebsiteIsolationAuditError } from './website-isolation-audit.js';
 import { createWebsiteIsolationMigrationRegistry } from './website-isolation-migration-registry.js';
 import { createWebsiteIsolationMigrationRuntime } from './website-isolation-migration-runtime.js';
@@ -126,6 +127,7 @@ export function createWebsiteProvisioningRuntime({
   let mailControlPlane = null;
   let mailDkimControlPlane = null;
   let roundcubeControlPlane = null;
+  let mailHealthControlPlane = null;
   let mailDnsControlPlane = null;
 
   function configureSftpKeys(dependencies = {}) {
@@ -616,6 +618,52 @@ export function createWebsiteProvisioningRuntime({
     return Object.freeze({ configured: true });
   }
 
+  function configureMailHealthControlPlane(dependencies = {}) {
+    const {
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailConfigurationService: nextMailConfigurationService,
+      mailReadinessInspector: nextMailReadinessInspector,
+      mailProtocolHealthInspector: nextMailProtocolHealthInspector,
+      roundcubeWebmailEndpointResolver: nextEndpointResolver,
+    } = dependencies;
+    if (!nextMailDomainRegistry || !nextDomainRegistry || !nextMailConfigurationService
+      || !nextMailReadinessInspector || !nextMailProtocolHealthInspector || !nextEndpointResolver) {
+      throw new Error('Website local mail health provisioning dependencies are required');
+    }
+    if (!handlers.mail_config || !handlers.mail_dkim_config || !handlers.roundcube_mapping) {
+      throw new Error('Website local mail health provisioning requires mail, DKIM, and Roundcube control planes');
+    }
+    if (mailHealthControlPlane) {
+      if (mailHealthControlPlane.mailDomainRegistry !== nextMailDomainRegistry
+        || mailHealthControlPlane.domainRegistry !== nextDomainRegistry
+        || mailHealthControlPlane.mailConfigurationService !== nextMailConfigurationService
+        || mailHealthControlPlane.mailReadinessInspector !== nextMailReadinessInspector
+        || mailHealthControlPlane.mailProtocolHealthInspector !== nextMailProtocolHealthInspector
+        || mailHealthControlPlane.roundcubeWebmailEndpointResolver !== nextEndpointResolver) {
+        throw new Error('Website local mail health provisioning dependencies cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.mail_health = createWebsiteMailHealthProvisioningHandler({
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailConfigurationService: nextMailConfigurationService,
+      mailReadinessInspector: nextMailReadinessInspector,
+      mailProtocolHealthInspector: nextMailProtocolHealthInspector,
+      roundcubeWebmailEndpointResolver: nextEndpointResolver,
+    });
+    mailHealthControlPlane = Object.freeze({
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailConfigurationService: nextMailConfigurationService,
+      mailReadinessInspector: nextMailReadinessInspector,
+      mailProtocolHealthInspector: nextMailProtocolHealthInspector,
+      roundcubeWebmailEndpointResolver: nextEndpointResolver,
+    });
+    return Object.freeze({ configured: true });
+  }
+
   function configureMailDnsControlPlane(dependencies = {}) {
     const {
       mailDomainRegistry: nextMailDomainRegistry,
@@ -694,6 +742,7 @@ export function createWebsiteProvisioningRuntime({
     configureMailControlPlane,
     configureMailDkimControlPlane,
     configureRoundcubeControlPlane,
+    configureMailHealthControlPlane,
     configureMailDnsControlPlane,
     init,
     get: (operationId) => registry.get(operationId),
