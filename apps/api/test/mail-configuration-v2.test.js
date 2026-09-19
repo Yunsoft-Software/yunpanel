@@ -39,7 +39,7 @@ function fixture({ candidateStatus = 'disabled', candidateMode = 'local', accoun
   };
 }
 
-test('managed mail enable preview stays secret-free and requires a postmaster mailbox', async () => {
+test('managed mail enable preview stays secret-free and does not invent a default mailbox', async () => {
   const enabled = fixture();
   const preview = await enabled.service.previewTransition({ mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'enabled' });
   assert.equal(preview.readyToApply, true);
@@ -52,10 +52,37 @@ test('managed mail enable preview stays secret-free and requires a postmaster ma
   ), true);
 
   const noMailbox = fixture({ accounts: [] });
-  const blocked = await noMailbox.service.previewTransition({ mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'enabled' });
-  assert.equal(blocked.readyToApply, false);
-  assert.equal(blocked.configuration, null);
-  assert.deepEqual(blocked.blockers, ['mail_postmaster_mailbox_required']);
+  const emptyPreview = await noMailbox.service.previewTransition({
+    mailDomainId: 'mail-domain-0001',
+    expectedRevision: 1,
+    status: 'enabled',
+  });
+  assert.equal(emptyPreview.readyToApply, true);
+  assert.deepEqual(emptyPreview.blockers, []);
+  assert.deepEqual(emptyPreview.configuration.counts, {
+    domains: 1,
+    mailboxes: 0,
+    aliases: 0,
+    forwardings: 0,
+  });
+  assert.doesNotMatch(JSON.stringify(emptyPreview), /argon2|passwordHash|owner@example\.com/i);
+
+  const bundle = await noMailbox.service.materializeTransition({
+    mailDomainId: 'mail-domain-0001',
+    expectedRevision: 1,
+    status: 'enabled',
+  }, {
+    expectedPreviewDigest: emptyPreview.previewDigest,
+    expectedConfigurationSha256: emptyPreview.configurationSha256,
+  });
+  assert.equal(bundle.sensitiveArtifacts.length, 1);
+  assert.equal(bundle.sensitiveArtifacts[0].path, mailSqlTemplatePolicy.seedPath);
+  assert.match(bundle.sensitiveArtifacts[0].content, /INSERT INTO virtual_domains\(domain, enabled\) VALUES \('example\.com', 1\);/);
+  assert.doesNotMatch(bundle.sensitiveArtifacts[0].content, /INSERT INTO virtual_mailboxes/);
+  const dovecotMail = bundle.preview.artifacts.find(
+    (artifact) => artifact.path === '/etc/dovecot/conf.d/99-yunpanel-mail.conf',
+  );
+  assert.match(dovecotMail.content, /postmaster_address = postmaster@example\.com/);
 });
 
 test('private enable materialization becomes stale when protected mailbox state changes', async () => {
