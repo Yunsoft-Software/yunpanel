@@ -215,6 +215,8 @@ export function createWebsiteRoundcubeProvisioningHandler({
         const endpoint = await roundcubeWebmailEndpointResolver.resolve(scoped);
         return activeEvidence(reconciled, endpoint, request, certificate.certificateId);
       }
+      const retryable = state?.job === null
+        || ['failed', 'cancelled'].includes(state?.job?.status);
       return Object.freeze({
         satisfied: false,
         reason: state?.job === null
@@ -222,6 +224,7 @@ export function createWebsiteRoundcubeProvisioningHandler({
           : ['queued', 'running'].includes(state.job.status)
             ? 'website_roundcube_apply_pending'
             : 'website_roundcube_apply_failed',
+        ...(retryable ? { retryable: true } : {}),
       });
     }
     throw new WebsiteRoundcubeProvisioningError(
