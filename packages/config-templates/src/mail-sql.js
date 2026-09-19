@@ -8,7 +8,7 @@ import {
 import { renderDovecotQuotaPasswdFile } from './mail-quota.js';
 import { mailSubmissionTemplatePolicy } from './mail-submission.js';
 
-const DB_PATH = '/var/lib/yunpanel/mail/virtual-mail.sqlite3';
+const DB_PATH = '/var/lib/yunpanel/mail-auth/virtual-mail.sqlite3';
 const SEED_PATH = '/etc/yunpanel/mail/sql/virtual-mail.sql';
 const DOVECOT_SQL_PATH = '/etc/dovecot/yunpanel-sql.conf.ext';
 const POSTFIX_SQL_DIRECTORY = '/etc/postfix/yunpanel-sql';
@@ -470,6 +470,7 @@ export function previewManagedMailSqlConfiguration(input = {}) {
 
 export const mailSqlTemplatePolicy = Object.freeze({
   databasePath: DB_PATH,
+  databaseDirectory: '/var/lib/yunpanel/mail-auth',
   seedPath: SEED_PATH,
   dovecotSqlPath: DOVECOT_SQL_PATH,
   postfixSqlDirectory: POSTFIX_SQL_DIRECTORY,
