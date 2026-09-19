@@ -18,6 +18,7 @@ const SOURCE_KINDS = new Set(['existing_application', 'existing_docker', 'new_st
 const WWW_MODES = new Set(['none', 'alias', 'independent']);
 const HTTPS_MODES = new Set(['off', 'managed']);
 const DATABASE_MODES = new Set(['none', 'create']);
+const MAIL_MODES = new Set(['none', 'local', 'external']);
 const DATABASE_SOURCE_KINDS = new Set(['existing_application', 'new_static', 'new_node', 'new_php']);
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -170,12 +171,36 @@ function normalizedDatabase(value, source) {
   return Object.freeze({ mode: input.mode });
 }
 
+function normalizedMail(value, httpsMode) {
+  const input = value ?? { mode: 'none' };
+  exactObject(
+    input,
+    new Set(['mode']),
+    'site_create_mail_invalid',
+    'Initial mail configuration accepts only mode',
+  );
+  if (!MAIL_MODES.has(input.mode)) {
+    throw new SiteCreateError(
+      'site_create_mail_invalid',
+      'Mail mode must be none, local or external',
+    );
+  }
+  if (input.mode === 'local' && httpsMode !== 'managed') {
+    throw new SiteCreateError(
+      'site_create_local_mail_https_required',
+      'Local mail with shared webmail requires managed HTTPS',
+      409,
+    );
+  }
+  return Object.freeze({ mode: input.mode });
+}
+
 function normalizeInput(input) {
   const allowedFields = new Set([
     'operationId', 'serverId', 'name', 'primaryDomain', 'parentDomainId', 'wwwMode', 'httpsMode', 'source',
-    'database',
+    'database', 'mail',
   ]);
-  const requiredFields = [...allowedFields].filter((field) => field !== 'database');
+  const requiredFields = [...allowedFields].filter((field) => !['database', 'mail'].includes(field));
   if (!input || typeof input !== 'object' || Array.isArray(input)
     || Object.keys(input).some((key) => !allowedFields.has(key))
     || requiredFields.some((field) => !Object.hasOwn(input, field))) {
@@ -223,6 +248,7 @@ function normalizeInput(input) {
     wwwPrimaryDomain,
     source,
     database: normalizedDatabase(input.database, source),
+    mail: normalizedMail(input.mail, input.httpsMode),
   });
 }
 
@@ -284,6 +310,15 @@ function stableDomain(domain) {
     targetType: domain.targetType,
     target: domain.target,
     httpsMode: domain.httpsMode,
+  };
+}
+
+function stableMailDomain(mailDomain) {
+  return {
+    id: mailDomain.id,
+    domainName: mailDomain.domainName,
+    webDomainId: mailDomain.webDomainId ?? null,
+    managementMode: mailDomain.managementMode,
   };
 }
 
@@ -355,7 +390,17 @@ function validatePlannedDomain(domains, expected) {
   return Boolean(existing);
 }
 
-function canonicalState({ applications, dockerWorkloads, websites, domains, excludedIds, selectedApplicationId, selectedDockerWorkloadId, serverId }) {
+function canonicalState({
+  applications,
+  dockerWorkloads,
+  websites,
+  domains,
+  mailDomains = [],
+  excludedIds,
+  selectedApplicationId,
+  selectedDockerWorkloadId,
+  serverId,
+}) {
   return {
     applications: applications.filter((item) => item.serverId === serverId
       && (item.id !== excludedIds.applicationId || item.id === selectedApplicationId))
@@ -366,10 +411,22 @@ function canonicalState({ applications, dockerWorkloads, websites, domains, excl
       .map(stableWebsite).sort((left, right) => left.id.localeCompare(right.id)),
     domains: domains.filter((item) => item.serverId === serverId && !excludedIds.domainIds.has(item.id))
       .map(stableDomain).sort((left, right) => left.id.localeCompare(right.id)),
+    mailDomains: mailDomains
+      .filter((item) => item.id !== excludedIds.mailDomainId)
+      .map(stableMailDomain)
+      .sort((left, right) => left.id.localeCompare(right.id)),
   };
 }
 
-export async function previewSiteCreate({ input, registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry } = {}) {
+export async function previewSiteCreate({
+  input,
+  registry,
+  applicationRegistry,
+  dockerWorkloadRegistry,
+  websiteRegistry,
+  domainRegistry,
+  mailDomainRegistry = null,
+} = {}) {
   for (const [dependency, methods] of [
     [registry, ['getServer']],
     [applicationRegistry, ['getApplication', 'listApplications']],
@@ -382,6 +439,16 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
     }
   }
   const normalized = normalizeInput(input);
+  if (normalized.mail.mode !== 'none'
+    && (!mailDomainRegistry
+      || typeof mailDomainRegistry.getMailDomain !== 'function'
+      || typeof mailDomainRegistry.listMailDomains !== 'function')) {
+    throw new SiteCreateError(
+      'site_create_mail_dependencies_invalid',
+      'Mail Domain registry is required for requested site mail provisioning',
+      503,
+    );
+  }
   if (!(await registry.getServer(normalized.serverId))) throw new SiteCreateError('server_not_found', 'Target server does not exist', 404);
 
   const ids = Object.freeze({
@@ -389,9 +456,14 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
     websiteId: resourceId(normalized.operationId, 'website'),
     primaryDomainId: resourceId(normalized.operationId, 'primary-domain'),
     wwwDomainId: normalized.wwwMode === 'independent' ? resourceId(normalized.operationId, 'www-domain') : null,
+    mailDomainId: normalized.mail.mode === 'none' ? null : resourceId(normalized.operationId, 'mail-domain'),
   });
-  const [applications, dockerWorkloads, websites, domains] = await Promise.all([
-    applicationRegistry.listApplications(), dockerWorkloadRegistry.listWorkloads(), websiteRegistry.listWebsites(), domainRegistry.listDomains(),
+  const [applications, dockerWorkloads, websites, domains, mailDomains] = await Promise.all([
+    applicationRegistry.listApplications(),
+    dockerWorkloadRegistry.listWorkloads(),
+    websiteRegistry.listWebsites(),
+    domainRegistry.listDomains(),
+    normalized.mail.mode === 'none' ? Promise.resolve([]) : mailDomainRegistry.listMailDomains(),
   ]);
 
   let application = null;
@@ -552,6 +624,45 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
     }
   }
 
+  const mailDomainExpected = normalized.mail.mode === 'none'
+    ? null
+    : Object.freeze({
+      id: ids.mailDomainId,
+      domainName: normalized.primaryDomain,
+      webDomainId: ids.primaryDomainId,
+      managementMode: normalized.mail.mode,
+      initialStatus: normalized.mail.mode === 'local' ? 'disabled' : 'unverified',
+      desiredStatus: normalized.mail.mode === 'local' ? 'enabled' : null,
+    });
+  let mailDomainReady = normalized.mail.mode === 'none';
+  if (mailDomainExpected) {
+    const sameName = mailDomains.find((candidate) => candidate.domainName === mailDomainExpected.domainName) ?? null;
+    const sameWebDomain = mailDomains.find((candidate) => candidate.webDomainId === mailDomainExpected.webDomainId) ?? null;
+    const expectedExisting = mailDomains.find((candidate) => candidate.id === mailDomainExpected.id) ?? null;
+    if ((sameName && sameName.id !== mailDomainExpected.id)
+      || (sameWebDomain && sameWebDomain.id !== mailDomainExpected.id)) {
+      throw new SiteCreateError(
+        'site_create_mail_domain_conflict',
+        'Planned Mail Domain name or Web Domain relationship is already managed',
+        409,
+      );
+    }
+    mailDomainReady = ensureExact(
+      expectedExisting,
+      mailDomainExpected,
+      'site_create_mail_domain_identity_conflict',
+      'Planned Mail Domain identity conflicts with existing state',
+      stableMailDomain,
+    );
+  }
+  const webmailExpected = normalized.mail.mode === 'local'
+    ? Object.freeze({
+      hostname: `webmail.${normalized.primaryDomain}`,
+      sharedRoundcube: true,
+      certificateCoverageRequired: true,
+    })
+    : null;
+
   const applicationReady = normalized.source.kind === 'existing_application'
     || normalized.source.kind === 'existing_docker'
     || normalized.source.kind === 'external_proxy'
@@ -561,7 +672,13 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
     dockerWorkloads,
     websites,
     domains,
-    excludedIds: { applicationId: ids.applicationId, websiteId: ids.websiteId, domainIds: new Set([ids.primaryDomainId, ids.wwwDomainId].filter(Boolean)) },
+    mailDomains,
+    excludedIds: {
+      applicationId: ids.applicationId,
+      websiteId: ids.websiteId,
+      domainIds: new Set([ids.primaryDomainId, ids.wwwDomainId].filter(Boolean)),
+      mailDomainId: ids.mailDomainId,
+    },
     selectedApplicationId: normalized.source.kind === 'existing_application' ? normalized.source.applicationId : null,
     selectedDockerWorkloadId: normalized.source.kind === 'existing_docker' ? normalized.source.dockerWorkloadId : null,
     serverId: normalized.serverId,
@@ -574,13 +691,19 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
       dockerWorkload: dockerWorkload ? stableDockerWorkload(dockerWorkload) : null,
       website: websiteExpected,
       database: databaseExpected,
+      mailDomain: mailDomainExpected,
+      webmail: webmailExpected,
       primaryDomain: primaryExpected,
       wwwDomain: wwwExpected,
     },
     state,
   };
   const previewDigest = createHash('sha256').update(JSON.stringify(planCore)).digest('hex');
-  const complete = applicationReady && websiteReady && primaryReady && (normalized.wwwMode !== 'independent' || wwwReady);
+  const complete = applicationReady
+    && websiteReady
+    && primaryReady
+    && (normalized.wwwMode !== 'independent' || wwwReady)
+    && mailDomainReady;
   return Object.freeze({
     version: 1,
     operationId: normalized.operationId,
@@ -606,11 +729,13 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
       websiteReady,
       primaryDomainReady: primaryReady,
       wwwDomainReady: normalized.wwwMode === 'independent' ? wwwReady : null,
+      mailDomainReady: normalized.mail.mode === 'none' ? null : mailDomainReady,
     }),
     lifecycle: Object.freeze({
       dnsPublished: false,
       certificateIssued: false,
-      mailDomainCreated: false,
+      mailDomainCreated: mailDomainReady,
+      webmailMappingActive: false,
       ...(normalized.source.kind === 'existing_docker' ? { containersChanged: false } : {}),
     }),
     plan: Object.freeze(planCore.resources),
@@ -618,13 +743,22 @@ export async function previewSiteCreate({ input, registry, applicationRegistry, 
 }
 
 export async function createSite({
-  input, previewDigest, confirmation, registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry,
+  input,
+  previewDigest,
+  confirmation,
+  registry,
+  applicationRegistry,
+  dockerWorkloadRegistry,
+  websiteRegistry,
+  domainRegistry,
+  mailDomainRegistry = null,
 } = {}) {
   if (typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)) {
     throw new SiteCreateError('site_create_preview_digest_invalid', 'A current site-create preview digest is required');
   }
   const preview = await previewSiteCreate({
     input, registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry,
+    mailDomainRegistry,
   });
   if (preview.previewDigest !== previewDigest) {
     throw new SiteCreateError('site_create_preview_stale', 'Site-create state changed after preview; request a new preview', 409);
@@ -702,6 +836,26 @@ export async function createSite({
     target: preview.plan.wwwDomain.target,
     httpsMode: preview.plan.wwwDomain.httpsMode,
   }) : null;
+  let mailDomain = null;
+  if (preview.plan.mailDomain) {
+    if (!mailDomainRegistry || typeof mailDomainRegistry.createMailDomain !== 'function'
+      || typeof mailDomainRegistry.getMailDomain !== 'function') {
+      throw new SiteCreateError(
+        'site_create_mail_dependencies_invalid',
+        'Mail Domain registry is required for requested site mail provisioning',
+        503,
+      );
+    }
+    mailDomain = await mailDomainRegistry.getMailDomain(preview.plan.mailDomain.id);
+    if (!mailDomain) {
+      mailDomain = await mailDomainRegistry.createMailDomain({
+        mailDomainId: preview.plan.mailDomain.id,
+        domainName: preview.plan.mailDomain.domainName,
+        webDomainId: primaryDomain.id,
+        managementMode: preview.plan.mailDomain.managementMode,
+      });
+    }
+  }
   return Object.freeze({
     created: !preview.complete,
     resumed: preview.resumeRequired,
@@ -711,6 +865,7 @@ export async function createSite({
     website,
     primaryDomain,
     wwwDomain,
+    mailDomain,
     lifecycle: preview.lifecycle,
   });
 }
@@ -720,6 +875,8 @@ export const siteCreateInternals = Object.freeze({
   normalizeInput,
   normalizedSource,
   normalizedDatabase,
+  normalizedMail,
+  stableMailDomain,
   stableApplication,
   stableDockerWorkload,
   stableWebsite,
