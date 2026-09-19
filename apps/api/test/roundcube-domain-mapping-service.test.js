@@ -9,6 +9,7 @@ const mailDomainId = '11111111-1111-4111-8111-111111111111';
 const webDomainId = '22222222-2222-4222-8222-222222222222';
 const serverId = '33333333-3333-4333-8333-333333333333';
 const certificateId = '44444444-4444-4444-8444-444444444444';
+const provisioningOperationId = '55555555-5555-4555-8555-555555555555';
 const fingerprint = Array.from({ length: 32 }, () => 'AA').join(':');
 
 function sha(value) {
@@ -152,19 +153,21 @@ function fixture() {
   return { registry, service, jobs, finishJob, finishExact };
 }
 
-async function beginBinding(service) {
+async function beginBinding(service, { operationId = null } = {}) {
   const preview = await service.previewBind({ mailDomainId, certificateId });
   return service.beginBind({
     mailDomainId,
     certificateId,
     previewDigest: preview.previewDigest,
     confirmation: preview.confirmation,
+    ...(operationId === null ? {} : { operationId }),
   });
 }
 
 test('bind requires explicit continuation to queue and later finalize exact Roundcube apply evidence', async () => {
   const state = fixture();
-  const begun = await beginBinding(state.service);
+  const begun = await beginBinding(state.service, { operationId: provisioningOperationId });
+  assert.equal(begun.mapping.operationId, provisioningOperationId);
 
   assert.equal(begun.mapping.state, 'pending');
   assert.match(begun.actions.continuation, /^continue-roundcube-domain:/);
@@ -178,6 +181,10 @@ test('bind requires explicit continuation to queue and later finalize exact Roun
   });
   assert.equal(queued.job.status, 'queued');
   assert.equal(queued.actions.continuation, null);
+  assert.equal(
+    state.jobs.get(queued.job.id).idempotencyKey,
+    `roundcube.mapping.apply:${provisioningOperationId}:1:initial`,
+  );
 
   const attached = await state.registry.getRecordForMailDomain(mailDomainId);
   assert.equal(attached.updatedAt, begun.mapping.updatedAt);
