@@ -27,6 +27,7 @@ function preview() {
     readyToApply: true,
     sha256: PREVIEW_SHA,
     mailHostname: 'mail.example.com',
+    mappings: [],
     configSha256: CONFIG_SHA,
     fpmSha256: FPM_SHA,
     nginxSha256: NGINX_SHA,
@@ -60,6 +61,7 @@ function preview() {
     nginx: {
       version: 1,
       sha256: NGINX_SHA,
+      mappings: [],
       artifact: {
         path: roundcubeNginxTemplatePolicy.configPath,
         sha256: NGINX_SHA,

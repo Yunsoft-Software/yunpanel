@@ -73,7 +73,7 @@ function createMappedFs(liveRoot) {
   const owners = new Map();
   const mapPath = (value) => (
     value === '/etc' || value.startsWith('/etc/')
-      || value === '/var/lib/yunpanel/mail-auth' || value.startsWith('/var/lib/yunpanel/mail-auth/')
+      || value === '/var/lib/yunpanel' || value.startsWith('/var/lib/yunpanel/mail-auth')
   )
     ? path.join(liveRoot, value.slice(1))
     : value;
@@ -136,6 +136,7 @@ async function prepare({
   await mkdir(mapped.mapPath('/etc/postfix'), { recursive: true });
   await mkdir(mapped.mapPath('/etc/dovecot/conf.d'), { recursive: true });
   await mkdir(mapped.mapPath('/etc/rspamd/local.d'), { recursive: true });
+  await mkdir(mapped.mapPath('/var/lib/yunpanel'), { recursive: true });
   if (sqlite) {
     await mkdir(mapped.mapPath(mailSqlTemplatePolicy.databaseDirectory), { recursive: true, mode: 0o750 });
     await mapped.chownFn(mailSqlTemplatePolicy.databaseDirectory, 0, MAIL_AUTH_GID);

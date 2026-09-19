@@ -79,6 +79,7 @@ async function withTempDirectory(run) {
 function createMappedFs(liveRoot) {
   const owners = new Map();
   const mapPath = (value) => value === '/etc' || value.startsWith('/etc/')
+    || value === '/var/lib/yunpanel' || value.startsWith('/var/lib/yunpanel/mail-auth')
     ? path.join(liveRoot, value.slice(1))
     : value;
   return {
@@ -129,6 +130,7 @@ async function prepare(root, { failFirstDoveconf = false } = {}) {
   for (const directory of ['/etc/postfix', '/etc/dovecot/conf.d', '/etc/rspamd/local.d', '/etc/default']) {
     await mkdir(mapped.mapPath(directory), { recursive: true });
   }
+  await mkdir(mapped.mapPath('/var/lib/yunpanel'), { recursive: true });
   const originalMainCf = Buffer.from('myhostname = mail.example.net\nmydestination = $myhostname, localhost\n');
   const originalMasterCf = Buffer.from('smtp inet n - y - - smtpd\n');
   await writeFile(mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath), originalMainCf, { mode: 0o644 });
