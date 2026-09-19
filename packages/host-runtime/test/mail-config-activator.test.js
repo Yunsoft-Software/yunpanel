@@ -17,12 +17,15 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  enableManagedMailSql,
   mailForwardingTemplatePolicy,
+  mailSqlTemplatePolicy,
   mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
   previewManagedMailApplyPlan,
   previewManagedMailSubmissionConfiguration,
   renderDovecotQuotaPasswdFile,
+  renderManagedMailSqlSeed,
 } from '@yunpanel/config-templates';
 import {
   createMailConfigActivator,
@@ -38,6 +41,7 @@ const VMAIL_UID = 5000;
 const VMAIL_GID = 5000;
 const POSTFIX_UID = 110;
 const POSTFIX_GID = 117;
+const MAIL_AUTH_GID = 6000;
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -53,6 +57,7 @@ function fixture() {
     forwardings: [{ source: 'owner@example.com', mode: 'copy', destinations: ['backup@elsewhere.test'] }],
   };
   return {
+    input,
     preview: previewManagedMailSubmissionConfiguration(input),
     passwd: renderDovecotQuotaPasswdFile({ domains: input.domains, accounts: input.accounts }),
   };
@@ -66,7 +71,10 @@ async function withTempDirectory(run) {
 
 function createMappedFs(liveRoot) {
   const owners = new Map();
-  const mapPath = (value) => value === '/etc' || value.startsWith('/etc/')
+  const mapPath = (value) => (
+    value === '/etc' || value.startsWith('/etc/')
+      || value === '/var/lib/yunpanel/mail-auth' || value.startsWith('/var/lib/yunpanel/mail-auth/')
+  )
     ? path.join(liveRoot, value.slice(1))
     : value;
   return {
@@ -119,6 +127,7 @@ async function prepare({
   invalidVmailIdentity = false,
   invalidPostfixIdentity = false,
   invalidSubmissionSocket = false,
+  sqlite = false,
 } = {}) {
   const liveRoot = path.join(root, 'live');
   const stagingRoot = path.join(root, 'staging');
@@ -127,15 +136,25 @@ async function prepare({
   await mkdir(mapped.mapPath('/etc/postfix'), { recursive: true });
   await mkdir(mapped.mapPath('/etc/dovecot/conf.d'), { recursive: true });
   await mkdir(mapped.mapPath('/etc/rspamd/local.d'), { recursive: true });
+  if (sqlite) {
+    await mkdir(mapped.mapPath(mailSqlTemplatePolicy.databaseDirectory), { recursive: true, mode: 0o750 });
+    await mapped.chownFn(mailSqlTemplatePolicy.databaseDirectory, 0, MAIL_AUTH_GID);
+    await mapped.chmodFn(mailSqlTemplatePolicy.databaseDirectory, 0o750);
+  }
   const originalMainCf = Buffer.from('myhostname = mail.example.net\nmydestination = $myhostname, localhost\n');
   const originalMasterCf = Buffer.from('smtp inet n - y - - smtpd\n');
   await writeFile(mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath), originalMainCf, { mode: 0o644 });
   await writeFile(mapped.mapPath(mailConfigBackupInternals.postfixMasterCfPath), originalMasterCf, { mode: 0o644 });
 
-  const { preview, passwd } = fixture();
+  const base = fixture();
+  const preview = sqlite ? enableManagedMailSql(base.preview, base.input) : base.preview;
+  const passwd = base.passwd;
+  const seed = sqlite ? renderManagedMailSqlSeed(base.input) : null;
   const configManager = createMailConfigManager({ stagingRoot });
   await configManager.stageConfiguration(preview, {
-    sensitiveArtifacts: [{ path: mailTemplatePolicy.dovecotPasswdFilePath, content: passwd }],
+    sensitiveArtifacts: [sqlite
+      ? { path: mailSqlTemplatePolicy.seedPath, content: seed }
+      : { path: mailTemplatePolicy.dovecotPasswdFilePath, content: passwd }],
   });
   const backupManager = createMailConfigBackupManager({
     backupRoot,
