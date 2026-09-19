@@ -20,6 +20,7 @@ import { createWebsiteProvisioningHandlers } from './website-provisioning-handle
 import { createWebsiteProvisioningOrchestrator } from './website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from './website-provisioning-registry.js';
 import { createWebsiteSftpKeyAwareProvisioningHandler } from './website-sftp-provisioning-handler.js';
+import { createWebsiteTlsProvisioningHandler } from './website-tls-provisioning-handler.js';
 
 function configuredLocalServerId(value = process.env.YUNPANEL_LOCAL_SERVER_ID) {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
@@ -343,6 +344,11 @@ export function createWebsiteProvisioningRuntime({
       acmeEmail: nextAcmeEmail,
       ...(nextWaitForTerminalJob ? { waitForTerminalJob: nextWaitForTerminalJob } : {}),
       ...(nextWaitForAttachment ? { waitForAttachment: nextWaitForAttachment } : {}),
+    });
+    handlers.tls_activation = createWebsiteTlsProvisioningHandler({
+      certificateRegistry: nextCertificateRegistry,
+      domainRegistry: nextDomainRegistry,
+      nginxProvisioningHandler: handlers.nginx,
     });
     certificateControlPlane = Object.freeze({
       jobRegistry: nextJobRegistry,
