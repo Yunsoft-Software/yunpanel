@@ -328,22 +328,48 @@ async function reconcileStaticDomainStageBinding({
     applicationRegistry.getApplication(website.applicationId),
     runtimeBindingRegistry.getBinding(website.applicationId),
   ]);
-  if (!binding || binding.adapter !== 'static') return null;
-  if (!application || application.type !== 'static' || application.serverId !== domain.serverId
-    || binding.serverId !== domain.serverId
+  if (!application || application.type !== 'static' || application.serverId !== domain.serverId) {
+    staticDomainStageError('static_domain_stage_runtime_drift', 'Static Application changed before Domain stage reconciliation');
+  }
+  if (binding && binding.adapter !== 'static') return null;
+  if (binding && (binding.serverId !== domain.serverId
     || binding.applicationId !== application.id || binding.websiteId !== website.id
-    || binding.websiteRevision !== website.revision || binding.releaseId !== application.currentReleaseId) {
+    || binding.websiteRevision !== website.revision || binding.releaseId !== application.currentReleaseId)) {
     staticDomainStageError(
       'static_domain_stage_runtime_drift',
       'Static runtime authority changed before Domain stage reconciliation',
     );
   }
 
-  if (job.payload.target?.root !== binding.staticTarget?.documentRoot) {
+  if (job.payload.target?.root !== (binding?.staticTarget?.documentRoot ?? website.documentRoot)) {
     staticDomainStageError(
       'static_domain_stage_target_drift',
       'Static Domain stage target does not match current runtime authority',
     );
+  }
+  if (!binding) {
+    if (!application.currentReleaseId) return null;
+    return runtimeBindingRegistry.activate({
+      applicationId: application.id,
+      serverId: application.serverId,
+      adapter: 'static',
+      state: 'active',
+      sourceOperationId: job.id,
+      releaseId: application.currentReleaseId,
+      websiteId: website.id,
+      websiteRevision: website.revision,
+      domains: [{
+        domainId: domain.id,
+        desiredRevision: domain.desiredRevision,
+        nginxChecksum: job.result.checksum,
+      }],
+      staticTarget: {
+        publishRoot: `/var/www/yunpanel/apps/${application.id}`,
+        documentRoot: website.documentRoot,
+        user: website.unixUser,
+        group: website.unixUser,
+      },
+    }, { expectedRevision: 0 });
   }
   const previousEvidence = binding.domains.find((entry) => entry.domainId === domain.id);
   if (previousEvidence && previousEvidence.desiredRevision > domain.desiredRevision) {

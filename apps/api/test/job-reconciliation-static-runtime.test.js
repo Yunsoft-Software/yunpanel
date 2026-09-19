@@ -36,6 +36,48 @@ function baseBinding(overrides = {}) {
   };
 }
 
+test('first Static Domain stage creates durable release and checksum authority', async () => {
+  const domain = { id: domainId, serverId, websiteId, desiredRevision: 1 };
+  const website = {
+    id: websiteId,
+    serverId,
+    runtimeType: 'static',
+    applicationId,
+    revision: 1,
+    documentRoot: staticTarget.documentRoot,
+    unixUser: staticTarget.user,
+  };
+  const application = { id: applicationId, serverId, type: 'static', currentReleaseId: releaseId };
+  const job = {
+    id: stageJobId,
+    serverId,
+    resourceId: domainId,
+    payload: { targetType: 'static', target: { root: staticTarget.documentRoot } },
+    result: { checksum: 'a'.repeat(64) },
+  };
+  let activation = null;
+  await jobReconciliationInternals.reconcileStaticDomainStageBinding({
+    job,
+    domain,
+    applicationRegistry: { getApplication: async () => application },
+    websiteRegistry: { getWebsite: async () => website },
+    runtimeBindingRegistry: {
+      getBinding: async () => null,
+      activate: async (input, options) => { activation = { input, options }; },
+    },
+  });
+
+  assert.equal(activation.options.expectedRevision, 0);
+  assert.equal(activation.input.sourceOperationId, stageJobId);
+  assert.equal(activation.input.releaseId, releaseId);
+  assert.deepEqual(activation.input.staticTarget, staticTarget);
+  assert.deepEqual(activation.input.domains, [{
+    domainId,
+    desiredRevision: 1,
+    nginxChecksum: 'a'.repeat(64),
+  }]);
+});
+
 test('Static Domain restage advances evidence without replacing authority source operation', async () => {
   const domain = {
     id: domainId,
