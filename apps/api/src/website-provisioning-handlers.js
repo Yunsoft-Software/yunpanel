@@ -238,7 +238,7 @@ function passengerEnvironmentEvidence(operation, applicationId) {
   return value;
 }
 
-function nginxSpec({ operation, intent } = {}) {
+function nginxSpec({ operation, intent, tls = null, httpsRedirect = false, canonicalRedirect = false } = {}) {
   if (!intent || typeof intent !== 'object' || Array.isArray(intent)
     || typeof intent.primaryDomain !== 'string'
     || !Array.isArray(intent.aliases)
@@ -272,14 +272,34 @@ function nginxSpec({ operation, intent } = {}) {
     });
   }
 
+  if (tls !== null && (!tls || typeof tls !== 'object' || Array.isArray(tls)
+    || typeof tls.fullchainPath !== 'string' || !tls.fullchainPath.startsWith('/')
+    || typeof tls.privateKeyPath !== 'string' || !tls.privateKeyPath.startsWith('/'))) {
+    throw new WebsiteProvisioningHandlerError(
+      'website_nginx_tls_invalid',
+      'Website Nginx TLS material identity is invalid',
+      400,
+    );
+  }
+  if (typeof httpsRedirect !== 'boolean' || typeof canonicalRedirect !== 'boolean') {
+    throw new WebsiteProvisioningHandlerError(
+      'website_nginx_redirect_policy_invalid',
+      'Website Nginx redirect policy is invalid',
+      400,
+    );
+  }
+
   return Object.freeze({
     primaryDomain: intent.primaryDomain,
     aliases: Object.freeze([...intent.aliases]),
     targetType: intent.targetType,
     target,
-    tls: null,
-    canonicalRedirect: false,
-    httpsRedirect: false,
+    tls: tls === null ? null : Object.freeze({
+      fullchainPath: tls.fullchainPath,
+      privateKeyPath: tls.privateKeyPath,
+    }),
+    canonicalRedirect,
+    httpsRedirect,
   });
 }
 
