@@ -12,6 +12,7 @@ const CERTIFICATE_RENEWAL_MODES = new Set(['automatic', 'manual']);
 const MAIL_MANAGEMENT_MODES = new Set(['local', 'external']);
 const LOCAL_MAIL_STATUSES = new Set(['disabled', 'enabled']);
 const EXTERNAL_MAIL_STATUSES = new Set(['unverified', 'ready', 'degraded']);
+const EXTERNAL_DNS_STATUSES = new Set(['unverified', 'ready', 'degraded']);
 
 const ORCHESTRATABLE_IMPACT_BLOCKERS = new Set([
   'child_domains_present',
@@ -490,6 +491,64 @@ function mailDomainReferences(values, domain, childDomains) {
   return Object.freeze(references);
 }
 
+
+function dnsZoneReferences(values, domain, childDomains) {
+  if (!Array.isArray(values) || values.length > 500) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_preview_invalid',
+      'External DNS Zone dependency inventory is invalid',
+      409,
+    );
+  }
+  const fields = new Set([
+    'id', 'zoneName', 'webDomainId', 'managementMode', 'status', 'revision', 'updatedAt',
+  ]);
+  const affectedDomains = new Map(
+    [domain, ...childDomains].map((current) => [current.id, current.primaryDomain]),
+  );
+  const references = values.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).length !== fields.size
+      || Object.keys(value).some((field) => !fields.has(field))
+      || value.managementMode !== 'external'
+      || !EXTERNAL_DNS_STATUSES.has(value.status)
+      || !Number.isSafeInteger(value.revision) || value.revision < 1) {
+      throw new DomainRemovalPlanError(
+        'domain_removal_preview_invalid',
+        'External DNS Zone dependency evidence is invalid',
+        409,
+      );
+    }
+    const reference = Object.freeze({
+      id: safeId(value.id, 'dnsZoneId'),
+      zoneName: value.zoneName,
+      webDomainId: safeId(value.webDomainId, 'dnsZoneWebDomainId'),
+      managementMode: value.managementMode,
+      status: value.status,
+      revision: value.revision,
+      updatedAt: safeTimestamp(value.updatedAt, 'dnsZoneUpdatedAt'),
+    });
+    if (typeof reference.zoneName !== 'string'
+      || reference.zoneName !== affectedDomains.get(reference.webDomainId)) {
+      throw new DomainRemovalPlanError(
+        'domain_removal_impact_stale',
+        'External DNS Zone dependency evidence does not match the affected Domain set',
+        409,
+      );
+    }
+    return reference;
+  }).sort((left, right) => left.id.localeCompare(right.id));
+  if (new Set(references.map((reference) => reference.id)).size !== references.length
+    || new Set(references.map((reference) => reference.webDomainId)).size !== references.length) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_preview_invalid',
+      'External DNS Zone dependency inventory contains duplicate identities',
+      409,
+    );
+  }
+  return Object.freeze(references);
+}
+
 function dependencyPlan(dependencies, domain) {
   if (!dependencies || typeof dependencies !== 'object' || Array.isArray(dependencies)) {
     throw new DomainRemovalPlanError(
@@ -526,6 +585,11 @@ function dependencyPlan(dependencies, domain) {
     domain,
     childDomains,
   );
+  const dnsZones = dnsZoneReferences(
+    dependencies.dnsZones ?? [],
+    domain,
+    childDomains,
+  );
   const mailDomains = mailDomainReferences(
     dependencies.mailDomains ?? [],
     domain,
@@ -544,7 +608,8 @@ function dependencyPlan(dependencies, domain) {
     certificateIds: Object.freeze(certificates.map((certificate) => certificate.id)),
     certificateIntents: certificates,
     boundCertificateId: domain.certificateId,
-    dnsZoneIds: normalizedIds(dependencies.dnsZones ?? [], 'dnsZone'),
+    dnsZoneIds: Object.freeze(dnsZones.map((dnsZone) => dnsZone.id)),
+    dnsZoneIntents: dnsZones,
     mailDomainIds: Object.freeze(mailDomains.map((mailDomain) => mailDomain.id)),
     mailDomainIntents: mailDomains,
     activeJobIds: activeJobs,
@@ -657,6 +722,7 @@ export const domainRemovalPlanInternals = Object.freeze({
   orderedChildDomains,
   authoritativeDnsReference,
   certificateReferences,
+  dnsZoneReferences,
   mailDomainReferences,
   dependencyPlan,
   hardBlockers,
