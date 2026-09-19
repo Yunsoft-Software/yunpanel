@@ -18,3 +18,13 @@ test('Debian package provisions a dedicated non-login vmail identity and canonic
   );
   assert.doesNotMatch(postinst, /adduser vmail (?:yunpanel|www-data)/);
 });
+
+
+test('Debian package creates an isolated shared mail-auth group without granting service users vmail storage membership', async () => {
+  const postinst = await readFile(postinstUrl, 'utf8');
+
+  assert.match(postinst, /addgroup --system yunpanel-mailauth/);
+  assert.match(postinst, /for mail_service_user in postfix dovecot; do/);
+  assert.match(postinst, /adduser "\$mail_service_user" yunpanel-mailauth/);
+  assert.doesNotMatch(postinst, /adduser (?:postfix|dovecot) vmail/);
+});
