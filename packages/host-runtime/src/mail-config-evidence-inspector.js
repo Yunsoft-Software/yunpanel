@@ -126,6 +126,19 @@ export function createMailConfigEvidenceInspector({
     }
   }
 
+  async function legacyLookupsRetired(plan) {
+    if (plan.sql?.required !== true) return true;
+    for (const targetPath of mailSqlTemplatePolicy.legacyLookupPaths) {
+      try {
+        await lstatFn(targetPath);
+        return false;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') return false;
+      }
+    }
+    return true;
+  }
+
   async function inspectCompiledSieve(vmailGid) {
     try {
       const metadata = await lstatFn(mailConfigBackupInternals.sieveCompiledPath);
@@ -224,6 +237,7 @@ export function createMailConfigEvidenceInspector({
     }
     if (plan.sql?.required === true) {
       if (!(await inspectSqlDatabase(plan, mailAuthGroup))) return { satisfied: false, result: null };
+      if (!(await legacyLookupsRetired(plan))) return { satisfied: false, result: null };
     } else {
       for (const compiledPath of mailConfigBackupInternals.postfixCompiledPaths) {
         if (!(await inspectCompiledMap(compiledPath))) return { satisfied: false, result: null };
