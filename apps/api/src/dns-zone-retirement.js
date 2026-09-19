@@ -3,6 +3,10 @@ import {
   createPowerDnsZoneManager,
   powerDnsZoneManagerInternals,
 } from '@yunpanel/host-runtime/powerdns-zone-manager';
+import {
+  createDnsParentDsInspector,
+  DnsParentDsInspectorError,
+} from '@yunpanel/host-runtime/dns-parent-ds-inspector';
 import { websiteDnsZoneProvisioningInternals } from './website-dns-zone-provisioning-handler.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -10,6 +14,8 @@ const ROOT_ZONE_BLOCKERS = Object.freeze({
   ownership: 'dns_zone_delete_ownership_evidence_required',
   manual: 'dns_zone_manual_rrsets_present',
   dnssec: 'dns_zone_dnssec_retirement_required',
+  parentDs: 'dns_zone_parent_ds_present',
+  parentDsUnverifiable: 'dns_zone_parent_ds_unverifiable',
   retention: 'dns_zone_delete_retention_policy_required',
   mail: 'dns_zone_mail_dependencies_present',
   mailInventory: 'dns_zone_mail_dependency_inventory_unavailable',
@@ -234,6 +240,7 @@ function previewIdentity(
   ownershipOrigin = null,
   rawRetentionPolicy = null,
   dependencyImpact = null,
+  parentDs = null,
 ) {
   const children = descendants(relatedDomains, domain.id);
   const root = (domain.parentDomainId ?? null) === null;
@@ -277,6 +284,8 @@ function previewIdentity(
     }
     if (zone.manualRrsetCount > 0) blockers.push(ROOT_ZONE_BLOCKERS.manual);
     if (zone.dnssec) blockers.push(ROOT_ZONE_BLOCKERS.dnssec);
+    if (parentDs?.status === 'present') blockers.push(ROOT_ZONE_BLOCKERS.parentDs);
+    else if (parentDs?.status === 'unverifiable') blockers.push(ROOT_ZONE_BLOCKERS.parentDsUnverifiable);
   }
 
   return Object.freeze({
@@ -319,6 +328,7 @@ export function createDnsZoneRetirementService({
   jobRegistry = null,
   retentionPolicy: rawRetentionPolicy = null,
   zoneManager = createPowerDnsZoneManager(),
+  parentDsInspector = createDnsParentDsInspector(),
   localServerId,
 } = {}) {
   if (!domainRegistry || typeof domainRegistry.getDomain !== 'function'
@@ -330,6 +340,7 @@ export function createDnsZoneRetirementService({
     || !zoneManager || typeof zoneManager.getZone !== 'function'
     || typeof zoneManager.inspectSnapshotDeletion !== 'function'
     || typeof zoneManager.deleteSnapshot !== 'function'
+    || !parentDsInspector || typeof parentDsInspector.inspect !== 'function'
     || typeof localServerId !== 'string' || !localServerId) {
     throw new DnsZoneRetirementError(
       'dns_zone_retirement_dependencies_invalid',
@@ -446,6 +457,7 @@ export function createDnsZoneRetirementService({
     });
 
     let authoritativeZone = null;
+    let parentDs = null;
     if ((domain.parentDomainId ?? null) === null) {
       const secret = await materializeSecret(domain.serverId);
       try { authoritativeZone = await zoneManager.getZone(domain.primaryDomain, secret.apiKey); }
@@ -453,6 +465,17 @@ export function createDnsZoneRetirementService({
         throw new DnsZoneRetirementError(
           'dns_zone_retirement_inspection_failed',
           'Authoritative PowerDNS zone could not be inspected',
+          503,
+        );
+      }
+      try { parentDs = await parentDsInspector.inspect({ domain: domain.primaryDomain }); }
+      catch (error) {
+        if (error instanceof DnsParentDsInspectorError) {
+          throw new DnsZoneRetirementError(error.code, error.message, error.status);
+        }
+        throw new DnsZoneRetirementError(
+          'dns_zone_retirement_parent_ds_inspection_failed',
+          'Parent DS state could not be inspected',
           503,
         );
       }
@@ -467,6 +490,7 @@ export function createDnsZoneRetirementService({
         ? { snapshotRetentionDays: configuredRetentionPolicy.snapshotRetentionDays }
         : null,
       dependencyImpact,
+      parentDs,
     );
     const previewDigest = digest(identity);
     if (!SHA256_PATTERN.test(previewDigest)) {
@@ -520,6 +544,25 @@ export function createDnsZoneRetirementService({
     }
 
     const domain = localDomain(await domainRegistry.getDomain(domainId), localServerId);
+    if ((domain.parentDomainId ?? null) === null) {
+      let parentDs;
+      try { parentDs = await parentDsInspector.inspect({ domain: domain.primaryDomain }); }
+      catch {
+        throw new DnsZoneRetirementError(
+          'dns_zone_retirement_parent_ds_inspection_failed',
+          'Parent DS state could not be inspected',
+          503,
+        );
+      }
+      if (parentDs.status !== 'absent') {
+        throw new DnsZoneRetirementError(
+          'dns_zone_retirement_parent_ds_present',
+          'Parent DS must be removed and propagation complete before deletion snapshot capture',
+          409,
+        );
+      }
+    }
+
     const secret = await materializeSecret(domain.serverId);
     let authoritativeZone;
     try { authoritativeZone = await zoneManager.getZone(domain.primaryDomain, secret.apiKey); }
@@ -602,6 +645,23 @@ export function createDnsZoneRetirementService({
         404,
       );
     }
+    let parentDs;
+    try { parentDs = await parentDsInspector.inspect({ domain: zoneName }); }
+    catch {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_parent_ds_inspection_failed',
+        'Parent DS state could not be inspected',
+        503,
+      );
+    }
+    if (parentDs.status !== 'absent') {
+      throw new DnsZoneRetirementError(
+        'dns_zone_retirement_parent_ds_present',
+        'Parent DS must be removed and propagation complete before destructive deletion',
+        409,
+      );
+    }
+
     const secret = await materializeSecret(serverId);
     try {
       return await zoneManager.deleteSnapshot({

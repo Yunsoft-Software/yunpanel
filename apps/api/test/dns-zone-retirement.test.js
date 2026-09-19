@@ -77,6 +77,8 @@ function fixture({
   currentDomain = domain(),
   domains = null,
   currentZone = null,
+  parentDs = null,
+  parentDsError = null,
   provisioningOperations = null,
   retentionPolicy = null,
   mailDomains = [],
@@ -95,6 +97,13 @@ function fixture({
     domainRegistry: {
       async getDomain(id) { return id === currentDomain.id ? currentDomain : null; },
       async listDomains() { return allDomains; },
+    },
+    parentDsInspector: {
+      async inspect({ domain }) {
+        if (parentDsError) throw parentDsError;
+        const current = typeof parentDs === 'function' ? parentDs() : parentDs;
+        return current ?? { status: 'absent', records: [], ttl: 0, checkedAt: new Date().toISOString() };
+      },
     },
     ...(provisioningOperations === null ? {} : {
       provisioningRegistry: {
@@ -716,4 +725,171 @@ test('preview identity helper is deterministic and blocker order is stable', () 
 
   assert.deepEqual(first, second);
   assert.equal(dnsZoneRetirementInternals.digest(first), dnsZoneRetirementInternals.digest(second));
+});
+
+test('retirement preview blocks zone deletion when parent DS is present or unverifiable', async () => {
+  const root = domain({ websiteId: null });
+  const intent = {
+    adapter: 'powerdns-zone',
+    serverId: localServerId,
+    webDomainId: rootId,
+    zoneName: 'example.com',
+    templateVersion: 7,
+    templateSnapshot: [
+      { key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+      { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+    ],
+    dnsIdentityRevision: 2,
+    secondaryDns: [],
+    serial: 2026091801,
+    dnssec: false,
+    records: [
+      { key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+      { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+    ],
+  };
+  const evidence = websiteDnsZoneProvisioningInternals.publicEvidence(
+    websiteDnsZoneProvisioningInternals.normalizedIntent({ intent }),
+    {
+      kind: 'Primary',
+      serial: 2026091801,
+      dnssec: false,
+      managedRrsetCount: 2,
+      manualRrsetCount: 0,
+      created: true,
+      primaryKindChanged: false,
+      changedRrsetCount: 2,
+    },
+  );
+  const provisioningOperations = [{
+    operationId: '82345678-1234-4234-8234-123456789012',
+    websiteId,
+    updatedAt: '2026-09-18T16:00:00.000Z',
+    steps: [{
+      id: 'dns_zone',
+      kind: 'dns_zone',
+      state: 'succeeded',
+      intent,
+      evidence,
+      compensation: { state: 'pending', evidence: null, error: null },
+    }],
+  }];
+
+  const presentPreview = await fixture({
+    currentDomain: root,
+    currentZone: zone({ dnssec: false, rrsets: [managedRrset()] }),
+    parentDs: { status: 'present', records: ['2371 13 2 abcdef'], ttl: 3600, checkedAt: new Date().toISOString() },
+    provisioningOperations,
+    retentionPolicy: { snapshotRetentionDays: 30 },
+  }).service.preview({ domainId: rootId });
+
+  assert.equal(presentPreview.retirementPlanReady, false);
+  assert.equal(presentPreview.blockers.includes('dns_zone_parent_ds_present'), true);
+  assert.equal(presentPreview.confirmation, null);
+
+  const unverifiablePreview = await fixture({
+    currentDomain: root,
+    currentZone: zone({ dnssec: false, rrsets: [managedRrset()] }),
+    parentDs: { status: 'unverifiable', records: [], ttl: null, checkedAt: new Date().toISOString() },
+    provisioningOperations,
+    retentionPolicy: { snapshotRetentionDays: 30 },
+  }).service.preview({ domainId: rootId });
+
+  assert.equal(unverifiablePreview.retirementPlanReady, false);
+  assert.equal(unverifiablePreview.blockers.includes('dns_zone_parent_ds_unverifiable'), true);
+});
+
+test('parent DS present blocks snapshot capture and destructive deletion even if confirmation is attempted', async () => {
+  const root = domain({ websiteId: null });
+  const intent = {
+    adapter: 'powerdns-zone',
+    serverId: localServerId,
+    webDomainId: rootId,
+    zoneName: 'example.com',
+    templateVersion: 7,
+    templateSnapshot: [
+      { key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+      { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+    ],
+    dnsIdentityRevision: 2,
+    secondaryDns: [],
+    serial: 2026091801,
+    dnssec: false,
+    records: [
+      { key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+      { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' },
+    ],
+  };
+  const evidence = websiteDnsZoneProvisioningInternals.publicEvidence(
+    websiteDnsZoneProvisioningInternals.normalizedIntent({ intent }),
+    {
+      kind: 'Primary',
+      serial: 2026091801,
+      dnssec: false,
+      managedRrsetCount: 2,
+      manualRrsetCount: 0,
+      created: true,
+      primaryKindChanged: false,
+      changedRrsetCount: 2,
+    },
+  );
+  const provisioningOperations = [{
+    operationId: '82345678-1234-4234-8234-123456789012',
+    websiteId,
+    updatedAt: '2026-09-18T16:00:00.000Z',
+    steps: [{
+      id: 'dns_zone',
+      kind: 'dns_zone',
+      state: 'succeeded',
+      intent,
+      evidence,
+      compensation: { state: 'pending', evidence: null, error: null },
+    }],
+  }];
+
+  let parentDsStatus = 'absent';
+  const fx = fixture({
+    currentDomain: root,
+    currentZone: zone({ dnssec: false, rrsets: [managedRrset()] }),
+    parentDs: () => ({
+      status: parentDsStatus,
+      records: parentDsStatus === 'present' ? ['2371 13 2 abcdef'] : [],
+      ttl: 3600,
+      checkedAt: new Date().toISOString(),
+    }),
+    provisioningOperations,
+    retentionPolicy: { snapshotRetentionDays: 30 },
+  });
+
+  const preview = await fx.service.preview({ domainId: rootId });
+  assert.equal(preview.retirementPlanReady, true);
+
+  parentDsStatus = 'present';
+  await assert.rejects(
+    fx.service.captureDeletionSnapshot({
+      domainId: rootId,
+      previewDigest: preview.previewDigest,
+      confirmation: preview.confirmation,
+    }),
+    (error) => error instanceof DnsZoneRetirementError
+      && (error.code === 'dns_zone_retirement_blocked' || error.code === 'dns_zone_retirement_parent_ds_present'),
+  );
+
+  parentDsStatus = 'absent';
+  const capture = await fx.service.captureDeletionSnapshot({
+    domainId: rootId,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+
+  parentDsStatus = 'present';
+  await assert.rejects(
+    fx.service.deleteCapturedSnapshot({
+      serverId: localServerId,
+      zoneName: 'example.com',
+      snapshot: capture.snapshot,
+    }),
+    (error) => error instanceof DnsZoneRetirementError
+      && error.code === 'dns_zone_retirement_parent_ds_present',
+  );
 });

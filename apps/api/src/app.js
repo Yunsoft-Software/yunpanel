@@ -259,6 +259,7 @@ export function createApp({
   websiteProvisioningRuntime = null,
   websiteSftpKeyService = null,
   domainSuspensionRuntime = null,
+  websiteCronImpactProvider = null,
   ...options
 } = {}) {
   const core = createCoreApp({
@@ -545,6 +546,7 @@ export function createApp({
           .filter((item) => mailDomainIds.has(item.mailDomainId))
           .map((item) => ({ id: item.id, state: item.enabled ? 'enabled' : 'disabled' }));
       },
+      ...(websiteCronImpactProvider ? { crons: websiteCronImpactProvider } : {}),
     },
   });
   mountExternalLifecycleRoutes(app, {

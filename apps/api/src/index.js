@@ -8,6 +8,7 @@ import {
   createMailProtocolHealthInspector,
   createMailReadinessInspector,
   createNginxLogReader,
+  createWebsiteCronManager,
   inspectAllowlistedServices,
   inspectDocker,
   inspectNginx,
@@ -100,6 +101,7 @@ import { createWebsiteMigrationPolicyStore } from './website-migration-policy.js
 import { createWebsiteProvisioningRuntime } from './website-provisioning-runtime.js';
 import { createWebsiteRegistry } from './website-registry.js';
 import { createWebsiteCronRegistry } from './website-cron-registry.js';
+import { createWebsiteCronImpactProvider } from './website-cron-impact.js';
 import { createWebsiteSftpKeyRuntime } from './website-sftp-key-runtime.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
@@ -265,6 +267,14 @@ const websiteCronRegistry = createWebsiteCronRegistry({
   getWebsite: async (websiteId) => websiteRegistry.getWebsite(websiteId),
 });
 await websiteCronRegistry.init();
+const websiteCronManager = createWebsiteCronManager();
+const websiteCronImpactProvider = localServerId
+  ? createWebsiteCronImpactProvider({
+    websiteCronRegistry,
+    websiteCronManager,
+    localServerId,
+  })
+  : null;
 const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({
   filePath: websiteProvisioningStorePath,
   isolationMigrationFilePath: websiteIsolationMigrationStorePath,
@@ -583,7 +593,7 @@ const dnsZoneRetirementRuntime = dnsZoneRetirementService
   })
   : null;
 if (dnsZoneRetirementRuntime) await dnsZoneRetirementRuntime.init();
-const domainRemovalRuntimeBundle = localServerId && domainSuspensionRuntime && mailDomainRemovalRuntime
+const domainRemovalRuntimeBundle = localServerId && domainSuspensionRuntime && mailDomainRemovalRuntime && roundcubeDomainMappingService
   ? createDomainRemovalProductionRuntime({
     filePath: domainRemovalOperationStorePath,
     registry,
@@ -602,6 +612,9 @@ const domainRemovalRuntimeBundle = localServerId && domainSuspensionRuntime && m
     dnsZoneRetirementService,
     dnsZoneRetirementRuntime,
     mailDomainRemovalRuntime,
+    roundcubeDomainMappingRegistry,
+    roundcubeDomainMappingService,
+    websiteCronImpactProvider,
     localServerId,
   })
   : null;
@@ -825,6 +838,7 @@ const listener = createAuthenticatedApi({
       journalLogReader,
       nginxLogReader,
       jobLogStore,
+      websiteCronImpactProvider,
       localServerId,
       terminalCapabilityRegistry,
       ttydSessionManager,

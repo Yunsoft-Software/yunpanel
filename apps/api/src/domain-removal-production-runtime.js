@@ -33,6 +33,7 @@ export function createDomainRemovalProductionRuntime({
   mailDomainRemovalRuntime,
   roundcubeDomainMappingRegistry,
   roundcubeDomainMappingService,
+  websiteCronImpactProvider = null,
   localServerId,
 } = {}) {
   const required = [
@@ -151,6 +152,7 @@ export function createDomainRemovalProductionRuntime({
             .filter((item) => mailDomainIds.has(item.mailDomainId))
             .map((item) => ({ id: item.id, state: item.enabled ? 'enabled' : 'disabled' }));
         },
+        ...(websiteCronImpactProvider ? { crons: websiteCronImpactProvider } : {}),
       },
       ...(dnsZoneRetirementService ? { dnsRetirementImpactProvider } : {}),
     });
