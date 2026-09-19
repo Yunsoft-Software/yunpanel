@@ -145,6 +145,25 @@ async function prepare({
   const originalMasterCf = Buffer.from('smtp inet n - y - - smtpd\n');
   await writeFile(mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath), originalMainCf, { mode: 0o644 });
   await writeFile(mapped.mapPath(mailConfigBackupInternals.postfixMasterCfPath), originalMasterCf, { mode: 0o644 });
+  if (sqlite) {
+    await mkdir(mapped.mapPath('/etc/yunpanel/mail/postfix'), { recursive: true });
+    await mkdir(mapped.mapPath('/etc/yunpanel/mail/dovecot'), { recursive: true });
+    await writeFile(
+      mapped.mapPath(mailTemplatePolicy.postfixVirtualDomainMapPath),
+      'example.com OK\n',
+      { mode: 0o640 },
+    );
+    await writeFile(
+      mapped.mapPath(mailTemplatePolicy.postfixVirtualDomainMapPath + '.db'),
+      'legacy-map-db',
+      { mode: 0o640 },
+    );
+    await writeFile(
+      mapped.mapPath(mailTemplatePolicy.dovecotPasswdFilePath),
+      'legacy-password-hash-file\n',
+      { mode: 0o600 },
+    );
+  }
 
   const base = fixture();
   const preview = sqlite ? enableManagedMailSql(base.preview, base.input) : base.preview;
@@ -183,6 +202,12 @@ async function prepare({
   const run = async (file, args) => {
     calls.push([file, [...args]]);
     if (file === '/usr/bin/getent') {
+      if (args[0] === 'group' && args[1] === 'yunpanel-mailauth') {
+        return {
+          stdout: `yunpanel-mailauth:x:${MAIL_AUTH_GID}:postfix,dovecot\n`,
+          stderr: '',
+        };
+      }
       if (args[0] !== 'passwd' || !['vmail', 'postfix'].includes(args[1])) throw new Error('unexpected identity');
       if (args[1] === 'vmail') {
         return {
@@ -198,6 +223,22 @@ async function prepare({
           : `postfix:x:${POSTFIX_UID}:${POSTFIX_GID}::/var/spool/postfix:/usr/sbin/nologin\n`,
         stderr: '',
       };
+    }
+    if (file === '/usr/bin/sqlite3') {
+      if (args[0] !== mailSqlTemplatePolicy.databasePath) throw new Error('unexpected sqlite database');
+      if (args[1] === '.read ' + mailSqlTemplatePolicy.seedPath) {
+        await writeFile(
+          mapped.mapPath(mailSqlTemplatePolicy.databasePath),
+          Buffer.from('fixture-sqlite-database'),
+          { mode: 0o600 },
+        );
+        return { stdout: '', stderr: '' };
+      }
+      if (args[1] === 'PRAGMA quick_check;') return { stdout: 'ok\n', stderr: '' };
+      if (args[1] === "SELECT value FROM yunpanel_meta WHERE key='state_sha256';") {
+        return { stdout: preview.sql.stateSha256 + '\n', stderr: '' };
+      }
+      throw new Error('unexpected sqlite query');
     }
     if (file === '/usr/sbin/postmap') {
       const source = args[0].replace(/^hash:/, '');
@@ -293,6 +334,7 @@ async function prepare({
     originalMainCf,
     originalMasterCf,
     passwd,
+    seed,
     preview,
   };
 }
@@ -342,6 +384,56 @@ test('activates staged mail config with compiled maps/sieve, guarded submission 
     && args[0] === '-P' && args[1] === 'submission/inet/smtpd_tls_security_level=encrypt'), true);
   const reloads = context.calls.filter(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'reload');
   assert.deepEqual(reloads.map(([, args]) => args[1]), ['rspamd', 'dovecot', 'postfix']);
+}));
+
+test('activates SQLite mail lookup state, verifies isolated ownership and retires legacy password/hash files', async () => withTempDirectory(async (root) => {
+  const context = await prepare({ root, sqlite: true });
+  const result = await context.activator.activateConfiguration(context.preview, {
+    transactionId: TRANSACTION_ID,
+  });
+
+  assert.equal(result.applied, true);
+  assert.equal(context.preview.requirements.includes('mail_sqlite'), true);
+  assert.equal(
+    context.calls.some(([file, args]) => file === '/usr/bin/sqlite3'
+      && args[1] === '.read ' + mailSqlTemplatePolicy.seedPath),
+    true,
+  );
+  assert.equal(
+    context.calls.some(([file]) => file === '/usr/sbin/postmap'),
+    false,
+  );
+
+  const database = await context.mapped.lstatFn(mailSqlTemplatePolicy.databasePath);
+  assert.equal(database.isFile(), true);
+  assert.equal(database.uid, 0);
+  assert.equal(database.gid, MAIL_AUTH_GID);
+  assert.equal(database.mode & 0o777, mailSqlTemplatePolicy.databaseMode);
+
+  const authRoot = await context.mapped.lstatFn(mailSqlTemplatePolicy.databaseDirectory);
+  assert.equal(authRoot.isDirectory(), true);
+  assert.equal(authRoot.uid, 0);
+  assert.equal(authRoot.gid, MAIL_AUTH_GID);
+  assert.equal(authRoot.mode & 0o777, 0o750);
+
+  const postfixSqlRoot = await context.mapped.lstatFn(mailSqlTemplatePolicy.postfixSqlDirectory);
+  assert.equal(postfixSqlRoot.isDirectory(), true);
+  assert.equal(postfixSqlRoot.uid, 0);
+  assert.equal(postfixSqlRoot.gid, POSTFIX_GID);
+  assert.equal(postfixSqlRoot.mode & 0o777, 0o750);
+
+  for (const legacyPath of [
+    mailTemplatePolicy.postfixVirtualDomainMapPath,
+    mailTemplatePolicy.postfixVirtualDomainMapPath + '.db',
+    mailTemplatePolicy.dovecotPasswdFilePath,
+  ]) {
+    await assert.rejects(
+      context.mapped.lstatFn(legacyPath),
+      (error) => error?.code === 'ENOENT',
+    );
+  }
+  assert.equal(JSON.stringify(result).includes(ARGON2ID_HASH), false);
+  assert.equal(JSON.stringify(result).includes(context.seed), false);
 }));
 
 test('explicit rollback restores the exact identity-bound source backup after fencing current state', async () => withTempDirectory(async (root) => {
