@@ -8,6 +8,7 @@ import { createPhpSiteBootstrapManager } from '@yunpanel/host-runtime/php-site-b
 import { createWebsiteStaticDeploymentManager } from '@yunpanel/host-runtime/website-static-deployment-manager';
 
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
+const MAIL_DISCOVERY_SOCKET = '/run/yunpanel-mail-discovery/discovery.sock';
 
 export class WebsiteProvisioningHandlerError extends Error {
   constructor(code, message, status = 503) {
@@ -245,6 +246,8 @@ function nginxSpec({ operation, intent, tls = null, httpsRedirect = false, canon
     || (intent.acmeOnlyHostnames !== undefined
       && (!Array.isArray(intent.acmeOnlyHostnames)
         || intent.acmeOnlyHostnames.some((hostname) => typeof hostname !== 'string' || !hostname)))
+    || (intent.mailDiscoverySocketPath !== undefined
+      && intent.mailDiscoverySocketPath !== MAIL_DISCOVERY_SOCKET)
     || !['static', 'proxy', 'passenger', 'php'].includes(intent.targetType)) {
     throw new WebsiteProvisioningHandlerError(
       'website_nginx_intent_invalid',
@@ -296,6 +299,7 @@ function nginxSpec({ operation, intent, tls = null, httpsRedirect = false, canon
     primaryDomain: intent.primaryDomain,
     aliases: Object.freeze([...intent.aliases]),
     acmeOnlyHostnames: Object.freeze([...(intent.acmeOnlyHostnames ?? [])]),
+    mailDiscoverySocketPath: intent.mailDiscoverySocketPath ?? null,
     targetType: intent.targetType,
     target,
     tls: tls === null ? null : Object.freeze({
