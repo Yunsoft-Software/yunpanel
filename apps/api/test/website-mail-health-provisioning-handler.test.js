@@ -85,12 +85,14 @@ function fixture({
   mailReady = true,
   protocolReady = true,
   webmailReady = true,
+  discoveryReady = true,
   currentConfigurationSha256 = configurationSha256,
 } = {}) {
   let materializeCalls = 0;
   let readinessCalls = 0;
   let protocolCalls = 0;
   let endpointCalls = 0;
+  let discoveryCalls = 0;
   const handler = createWebsiteMailHealthProvisioningHandler({
     mailDomainRegistry: {
       async getMailDomain(id) {
@@ -187,10 +189,35 @@ function fixture({
         } : null;
       },
     },
+    mailDiscoveryEndpointResolver: {
+      async resolve(input) {
+        discoveryCalls += 1;
+        assert.equal(input.mailDomain.id, mailDomainId);
+        assert.equal(input.domain.id, webDomainId);
+        return discoveryReady ? {
+          version: 1,
+          mailDomainId,
+          serverId,
+          revision: 2,
+          autodiscover: {
+            ready: true,
+            hostname: 'example.com',
+            protocol: 'https',
+            path: '/autodiscover/autodiscover.xml',
+          },
+          autoconfig: {
+            ready: true,
+            hostname: 'example.com',
+            protocol: 'https',
+            path: '/mail/config-v1.1.xml',
+          },
+        } : null;
+      },
+    },
   });
   return {
     handler,
-    calls: () => ({ materializeCalls, readinessCalls, protocolCalls, endpointCalls }),
+    calls: () => ({ materializeCalls, readinessCalls, protocolCalls, endpointCalls, discoveryCalls }),
   };
 }
 
@@ -212,12 +239,17 @@ test('local-mail health proves current mail services, protocol listeners and exa
     roundcubeMappingRevision: 3,
     roundcubePreviewSha256,
     roundcubeApplyJobId: 'roundcube-job-1',
+    autodiscoverHostname: 'example.com',
+    autodiscoverPath: '/autodiscover/autodiscover.xml',
+    autoconfigHostname: 'example.com',
+    autoconfigPath: '/mail/config-v1.1.xml',
   });
   assert.deepEqual(f.calls(), {
     materializeCalls: 1,
     readinessCalls: 1,
     protocolCalls: 1,
     endpointCalls: 1,
+    discoveryCalls: 1,
   });
 });
 
@@ -232,6 +264,7 @@ test('local-mail health blocks Website readiness while managed mail services are
   });
   assert.equal(f.calls().protocolCalls, 0);
   assert.equal(f.calls().endpointCalls, 0);
+  assert.equal(f.calls().discoveryCalls, 0);
 });
 
 test('local-mail health blocks Website readiness while SMTP submission or IMAP listeners are absent', async () => {
@@ -244,6 +277,7 @@ test('local-mail health blocks Website readiness while SMTP submission or IMAP l
     blockers: ['submission', 'imap'],
   });
   assert.equal(f.calls().endpointCalls, 0);
+  assert.equal(f.calls().discoveryCalls, 0);
 });
 
 test('local-mail health blocks Website readiness until the exact Roundcube endpoint is healthy', async () => {
@@ -255,6 +289,20 @@ test('local-mail health blocks Website readiness until the exact Roundcube endpo
     reason: 'website_webmail_health_not_ready',
     blockers: ['webmail'],
   });
+  assert.equal(f.calls().discoveryCalls, 0);
+});
+
+test('local-mail health blocks Website readiness until both discovery endpoints are healthy', async () => {
+  const f = fixture({ discoveryReady: false });
+  const evidence = await f.handler.apply(context());
+
+  assert.deepEqual(evidence, {
+    satisfied: false,
+    reason: 'website_mail_discovery_health_not_ready',
+    blockers: ['autodiscover', 'autoconfig'],
+  });
+  assert.equal(f.calls().endpointCalls, 1);
+  assert.equal(f.calls().discoveryCalls, 1);
 });
 
 test('local-mail health fails closed when current mail configuration drifted from apply evidence', async () => {
