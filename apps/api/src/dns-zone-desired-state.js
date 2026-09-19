@@ -216,21 +216,22 @@ function mailDiscoveryRecords(zoneName, identity, discovery) {
     const endpoint = discovery[kind];
     if (endpoint === null) continue;
     const endpointFields = new Set(['hostname', 'protocol', 'path']);
-    const expectedHostname = `${policy.prefix}.${zoneName}`;
+    const dedicatedHostname = `${policy.prefix}.${zoneName}`;
     if (!endpoint || typeof endpoint !== 'object' || Array.isArray(endpoint)
       || Object.keys(endpoint).length !== endpointFields.size
       || Object.keys(endpoint).some((field) => !endpointFields.has(field))
-      || endpoint.hostname !== expectedHostname || endpoint.protocol !== 'https'
-      || endpoint.path !== policy.path) {
+      || ![zoneName, dedicatedHostname].includes(endpoint.hostname)
+      || endpoint.protocol !== 'https' || endpoint.path !== policy.path) {
       throw new DnsZoneDesiredStateError(
         'dns_zone_mail_discovery_invalid',
         `${kind} endpoint readiness is invalid`,
         409,
       );
     }
+    if (endpoint.hostname === zoneName) continue;
     result.push(record({
       key: `mail-${kind}-ipv4`,
-      owner: expectedHostname,
+      owner: dedicatedHostname,
       type: 'A',
       ttl: null,
       values: [identity.settings.publicIpv4],
@@ -239,7 +240,7 @@ function mailDiscoveryRecords(zoneName, identity, discovery) {
     if (identity.settings.publicIpv6) {
       result.push(record({
         key: `mail-${kind}-ipv6`,
-        owner: expectedHostname,
+        owner: dedicatedHostname,
         type: 'AAAA',
         ttl: null,
         values: [identity.settings.publicIpv6],
