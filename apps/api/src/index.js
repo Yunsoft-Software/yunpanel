@@ -442,7 +442,9 @@ const mailDiscoveryEndpointResolver = mailDiscoveryRuntime
     mailDiscoveryRuntime,
     websiteProvisioningRegistry: websiteProvisioningRuntime.registry,
   })
-  : null;
+  : Object.freeze({
+    resolve: async () => null,
+  });
 const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   filePath: applicationEnvironmentStorePath,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
@@ -509,7 +511,7 @@ const dnsZoneReapplyRuntime = localServerId && powerDnsAuthoritativeService
         mailDkimRetirementRegistry,
         mailServiceIdentityRegistry,
         roundcubeWebmailEndpointResolver,
-        ...(mailDiscoveryEndpointResolver ? { discoveryEndpointResolver: mailDiscoveryEndpointResolver } : {}),
+        discoveryEndpointResolver: mailDiscoveryEndpointResolver,
       }),
       localServerId,
     }),
@@ -685,6 +687,7 @@ websiteProvisioningRuntime.configureMailHealthControlPlane({
   mailReadinessInspector,
   mailProtocolHealthInspector,
   roundcubeWebmailEndpointResolver,
+  mailDiscoveryEndpointResolver,
 });
 if (dnsZoneReapplyRuntime) {
   websiteProvisioningRuntime.configureMailDnsControlPlane({
