@@ -10,7 +10,11 @@ import {
 } from '@yunpanel/config-templates';
 import { mailConfigBackupInternals } from './mail-config-backup.js';
 import { createMailReadinessInspector } from './mail-readiness-inspector.js';
-import { parseManagedSystemIdentity, parseManagedVmailIdentity } from './mail-vmail-identity.js';
+import {
+  parseManagedSystemGroup,
+  parseManagedSystemIdentity,
+  parseManagedVmailIdentity,
+} from './mail-vmail-identity.js';
 
 const execFileAsync = promisify(execFile);
 const MAX_OUTPUT = 128 * 1024;
@@ -21,6 +25,7 @@ const PUBLIC_MODE = 0o640;
 const SIEVE_SHARED_MODE = 0o640;
 const SUBMISSION_SOCKET_MODE = 0o660;
 const GETENT = '/usr/bin/getent';
+const MAIL_AUTH_GROUP = 'yunpanel-mailauth';
 const POSTCONF = '/usr/sbin/postconf';
 
 export class MailConfigEvidenceError extends Error {
@@ -97,12 +102,12 @@ export function createMailConfigEvidenceInspector({
     }
   }
 
-  async function inspectSqlDatabase(plan, postfixIdentity) {
+  async function inspectSqlDatabase(plan, mailAuthGroup) {
     if (plan.sql?.required !== true) return true;
     try {
       const metadata = await lstatFn(mailSqlTemplatePolicy.databasePath);
       if (!metadata.isFile() || metadata.isSymbolicLink()
-        || metadata.uid !== ROOT_UID || metadata.gid !== postfixIdentity.gid
+        || metadata.uid !== ROOT_UID || metadata.gid !== mailAuthGroup.gid
         || (metadata.mode & 0o7777) !== mailSqlTemplatePolicy.databaseMode) return false;
       const quickCheck = await run(
         '/usr/bin/sqlite3',
@@ -194,18 +199,31 @@ export function createMailConfigEvidenceInspector({
 
   async function inspect(preview) {
     const plan = previewManagedMailApplyPlan(preview);
-    const [vmailIdentity, postfixIdentity] = await Promise.all([
+    const [vmailIdentity, postfixIdentity, mailAuthGroup] = await Promise.all([
       resolveSystemIdentity('vmail'),
       resolveSystemIdentity('postfix'),
+      plan.sql?.required === true
+        ? (async () => {
+          try {
+            const result = await run(GETENT, ['group', MAIL_AUTH_GROUP], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
+            const group = parseManagedSystemGroup(boundedOutput(result?.stdout ?? result), MAIL_AUTH_GROUP);
+            return group && group.members.includes('postfix') && group.members.includes('dovecot') ? group : null;
+          } catch {
+            return null;
+          }
+        })()
+        : Promise.resolve(null),
     ]);
-    if (!vmailIdentity || !postfixIdentity) return { satisfied: false, result: null };
+    if (!vmailIdentity || !postfixIdentity || (plan.sql?.required === true && !mailAuthGroup)) {
+      return { satisfied: false, result: null };
+    }
     for (const artifact of plan.artifacts) {
       if (!(await inspectArtifact(artifact, vmailIdentity.gid, postfixIdentity.gid))) {
         return { satisfied: false, result: null };
       }
     }
     if (plan.sql?.required === true) {
-      if (!(await inspectSqlDatabase(plan, postfixIdentity))) return { satisfied: false, result: null };
+      if (!(await inspectSqlDatabase(plan, mailAuthGroup))) return { satisfied: false, result: null };
     } else {
       for (const compiledPath of mailConfigBackupInternals.postfixCompiledPaths) {
         if (!(await inspectCompiledMap(compiledPath))) return { satisfied: false, result: null };
@@ -260,5 +278,6 @@ export const mailConfigEvidenceInternals = Object.freeze({
   sieveSharedMode: SIEVE_SHARED_MODE,
   submissionSocketMode: SUBMISSION_SOCKET_MODE,
   sqlDatabaseMode: mailSqlTemplatePolicy.databaseMode,
+  mailAuthGroup: MAIL_AUTH_GROUP,
   boundedOutput,
 });
