@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createApplicationRegistry } from '../src/application-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
+import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createSite, previewSiteCreate, SiteCreateError, siteCreateInternals } from '../src/site-create.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
@@ -32,13 +33,23 @@ async function fixture() {
     getWebsite: async (websiteId) => websiteRegistry.getWebsite(websiteId),
     websiteBindingRequired: () => true,
   });
-  await Promise.all([applicationRegistry.init(), dockerWorkloadRegistry.init(), websiteRegistry.init(), domainRegistry.init()]);
+  const mailDomainRegistry = createMailDomainRegistry({
+    getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
+  });
+  await Promise.all([
+    applicationRegistry.init(),
+    dockerWorkloadRegistry.init(),
+    websiteRegistry.init(),
+    domainRegistry.init(),
+    mailDomainRegistry.init(),
+  ]);
   return {
     registry,
     applicationRegistry,
     dockerWorkloadRegistry,
     websiteRegistry,
     domainRegistry,
+    mailDomainRegistry,
     serverId: enrolled.server.id,
   };
 }
@@ -50,6 +61,7 @@ function dependencies(state, overrides = {}) {
     dockerWorkloadRegistry: state.dockerWorkloadRegistry,
     websiteRegistry: state.websiteRegistry,
     domainRegistry: state.domainRegistry,
+    mailDomainRegistry: state.mailDomainRegistry,
     ...overrides,
   };
 }
@@ -114,6 +126,109 @@ test('new static site creates deterministic Application, Website and explicit ww
   assert.equal((await state.applicationRegistry.listApplications()).length, 1);
   assert.equal((await state.websiteRegistry.listWebsites()).length, 1);
   assert.equal((await state.domainRegistry.listDomains()).length, 1);
+});
+
+test('optional mail defaults to none without changing legacy site-create lifecycle', async () => {
+  const state = await fixture();
+  const preview = await previewSiteCreate({
+    input: inputFor(state.serverId),
+    ...dependencies(state),
+  });
+
+  assert.equal(preview.ids.mailDomainId, null);
+  assert.equal(preview.plan.mailDomain, null);
+  assert.equal(preview.plan.webmail, null);
+  assert.equal(preview.steps.mailDomainReady, null);
+  assert.deepEqual(preview.lifecycle, {
+    dnsPublished: false,
+    certificateIssued: false,
+    mailDomainCreated: false,
+  });
+});
+
+test('local mail preflight is deterministic, requires managed HTTPS and creates only disabled Mail Domain metadata', async () => {
+  const state = await fixture();
+  const localInput = inputFor(state.serverId, {
+    operationId: '9e704947-c2e9-4949-95c7-2cb1c8cb4d2a',
+    primaryDomain: 'Mail-Site.Example.COM.',
+    wwwMode: 'none',
+    httpsMode: 'managed',
+    mail: { mode: 'local' },
+  });
+
+  const preview = await previewSiteCreate({
+    input: localInput,
+    ...dependencies(state),
+  });
+  assert.match(preview.ids.mailDomainId, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(preview.plan.mailDomain, {
+    id: preview.ids.mailDomainId,
+    domainName: 'mail-site.example.com',
+    webDomainId: preview.ids.primaryDomainId,
+    managementMode: 'local',
+    initialStatus: 'disabled',
+    desiredStatus: 'enabled',
+  });
+  assert.deepEqual(preview.plan.webmail, {
+    hostname: 'webmail.mail-site.example.com',
+    sharedRoundcube: true,
+    certificateCoverageRequired: true,
+  });
+  assert.equal(preview.steps.mailDomainReady, false);
+  assert.equal(preview.lifecycle.mailDomainCreated, false);
+  assert.equal(preview.lifecycle.webmailMappingActive, false);
+
+  const created = await apply(localInput, state, preview);
+  assert.equal(created.mailDomain.id, preview.ids.mailDomainId);
+  assert.equal(created.mailDomain.webDomainId, preview.ids.primaryDomainId);
+  assert.equal(created.mailDomain.managementMode, 'local');
+  assert.equal(created.mailDomain.status, 'disabled');
+  assert.equal((await state.mailDomainRegistry.listMailDomains()).length, 1);
+
+  const retry = await previewSiteCreate({
+    input: localInput,
+    ...dependencies(state),
+  });
+  assert.equal(retry.previewDigest, preview.previewDigest);
+  assert.equal(retry.complete, true);
+  assert.equal(retry.steps.mailDomainReady, true);
+  assert.equal(retry.lifecycle.mailDomainCreated, true);
+  assert.equal(retry.lifecycle.webmailMappingActive, false);
+
+  await assert.rejects(
+    previewSiteCreate({
+      input: { ...localInput, httpsMode: 'off' },
+      ...dependencies(state),
+    }),
+    (error) => error instanceof SiteCreateError
+      && error.code === 'site_create_local_mail_https_required'
+      && error.status === 409,
+  );
+});
+
+test('external mail preflight creates an explicit unverified relationship without shared webmail intent', async () => {
+  const state = await fixture();
+  const externalInput = inputFor(state.serverId, {
+    operationId: '86bc823b-b68e-4efc-a017-5561ed38613d',
+    primaryDomain: 'external-mail.example.com',
+    wwwMode: 'none',
+    httpsMode: 'off',
+    mail: { mode: 'external' },
+  });
+
+  const preview = await previewSiteCreate({
+    input: externalInput,
+    ...dependencies(state),
+  });
+  assert.equal(preview.plan.mailDomain.managementMode, 'external');
+  assert.equal(preview.plan.mailDomain.initialStatus, 'unverified');
+  assert.equal(preview.plan.mailDomain.desiredStatus, null);
+  assert.equal(preview.plan.webmail, null);
+
+  const created = await apply(externalInput, state, preview);
+  assert.equal(created.mailDomain.managementMode, 'external');
+  assert.equal(created.mailDomain.status, 'unverified');
+  assert.equal(created.mailDomain.webDomainId, preview.ids.primaryDomainId);
 });
 
 test('optional initial database is deterministic and scoped to the planned Website identity', async () => {
