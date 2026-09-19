@@ -8,7 +8,7 @@ import {
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ROUTING_CHILD_STATUSES = new Set(['pending', 'suspending', 'suspended', 'failed']);
 const CONTINUABLE_STEP_KINDS = new Set([
-  'child_domain', 'certificate', 'mail_domain', 'external_dns_zone', 'website_binding',
+  'child_domain', 'certificate', 'webmail_mapping', 'mail_domain', 'external_dns_zone', 'website_binding',
   'authoritative_dns', 'metadata_finalization',
 ]);
 const DNS_RETIREMENT_CHILD_STATUSES = new Set(['pending', 'deleting', 'deleted', 'failed']);
@@ -452,6 +452,31 @@ function sameMailDomainIntent(expected, current) {
   )));
 }
 
+const WEBMAIL_MAPPING_INTENT_FIELDS = Object.freeze([
+  'id', 'mailDomainId', 'webDomainId', 'serverId', 'domainName', 'hostname',
+  'certificateId', 'certificateFingerprint256', 'revision', 'state',
+  'operationId', 'applyJobId', 'expectedRoundcubePreviewSha256',
+  'expectedRoundcubeNginxSha256', 'createdAt', 'updatedAt',
+]);
+
+function sameWebmailMappingIntent(expected, current) {
+  return Boolean(expected && current && WEBMAIL_MAPPING_INTENT_FIELDS.every((field) => (
+    expected[field] === current[field]
+  )));
+}
+
+function childWebmailMappingPlanWithinParent(operation, intent, plan) {
+  if (!Array.isArray(operation.plan.webmailMappingIntents)
+    || !Array.isArray(plan.webmailMappingIntents)) return false;
+  const expected = operation.plan.webmailMappingIntents.filter((candidate) => (
+    candidate.webDomainId === intent.id
+  ));
+  return expected.length === plan.webmailMappingIntents.length
+    && expected.every((parentIntent) => plan.webmailMappingIntents.some((childIntent) => (
+      sameWebmailMappingIntent(parentIntent, childIntent)
+    )));
+}
+
 function childMailDomainPlanWithinParent(operation, intent, plan) {
   if (!Array.isArray(operation.plan.mailDomainIntents)
     || !Array.isArray(plan.mailDomainIntents)) return false;
@@ -473,10 +498,12 @@ function childPlanWithinParent(operation, intent, plan) {
     || !childCertificatePlanWithinParent(operation, intent, plan)
     || !childExternalDnsPlanWithinParent(operation, intent, plan)
     || !childMailDomainPlanWithinParent(operation, intent, plan)
+    || !childWebmailMappingPlanWithinParent(operation, intent, plan)
     || !Array.isArray(plan.activeJobIds) || plan.activeJobIds.length !== 0
     || !idsWithin(plan.certificateIds, operation.plan.certificateIds)
     || !idsWithin(plan.dnsZoneIds, operation.plan.dnsZoneIds)
-    || !idsWithin(plan.mailDomainIds, operation.plan.mailDomainIds)) {
+    || !idsWithin(plan.mailDomainIds, operation.plan.mailDomainIds)
+    || !idsWithin(plan.webmailMappingIds, operation.plan.webmailMappingIds)) {
     return false;
   }
   for (const name of ['mailboxes', 'backups', 'crons', 'dockerWorkloads']) {
@@ -563,6 +590,97 @@ function childRemovalEvidence(operation, intent, child) {
   });
 }
 
+
+function webmailMappingIntent(operation, step) {
+  if (!Array.isArray(operation.plan.webmailMappingIntents)) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_webmail_intent_missing',
+      'Legacy Domain removal journal has no exact Webmail mapping intent evidence',
+      409,
+    );
+  }
+  const matches = operation.plan.webmailMappingIntents.filter((intent) => (
+    intent.id === step.resourceId && intent.webDomainId === operation.domainId
+  ));
+  if (matches.length !== 1 || matches[0].state !== 'active') {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_webmail_plan_invalid',
+      'Webmail mapping step does not match one exact active Domain-scoped intent',
+      409,
+    );
+  }
+  return matches[0];
+}
+
+function exactActiveWebmailMapping(intent, mapping) {
+  return sameWebmailMappingIntent(intent, mapping);
+}
+
+function webmailRemovalOperationId(operation, intent) {
+  return `domain-remove:${operation.id}:webmail:${intent.id}`;
+}
+
+function exactOwnedWebmailRemoval(operation, intent, mapping) {
+  if (!mapping || !['removing', 'removed'].includes(mapping.state)) return false;
+  const staticFields = [
+    'id', 'mailDomainId', 'webDomainId', 'serverId', 'domainName', 'hostname',
+    'certificateId', 'certificateFingerprint256', 'createdAt',
+  ];
+  return staticFields.every((field) => mapping[field] === intent[field])
+    && mapping.revision === intent.revision + 1
+    && mapping.operationId === webmailRemovalOperationId(operation, intent)
+    && typeof mapping.updatedAt === 'string'
+    && Number.isFinite(Date.parse(mapping.updatedAt))
+    && Date.parse(mapping.updatedAt) >= Date.parse(intent.updatedAt)
+    && ((mapping.state === 'removing' && (
+      (mapping.applyJobId === null
+        && mapping.expectedRoundcubePreviewSha256 === null
+        && mapping.expectedRoundcubeNginxSha256 === null)
+      || (typeof mapping.applyJobId === 'string'
+        && typeof mapping.expectedRoundcubePreviewSha256 === 'string'
+        && SHA256_PATTERN.test(mapping.expectedRoundcubePreviewSha256)
+        && typeof mapping.expectedRoundcubeNginxSha256 === 'string'
+        && SHA256_PATTERN.test(mapping.expectedRoundcubeNginxSha256))
+    )) || (mapping.state === 'removed'
+      && typeof mapping.applyJobId === 'string'
+      && typeof mapping.expectedRoundcubePreviewSha256 === 'string'
+      && SHA256_PATTERN.test(mapping.expectedRoundcubePreviewSha256)
+      && typeof mapping.expectedRoundcubeNginxSha256 === 'string'
+      && SHA256_PATTERN.test(mapping.expectedRoundcubeNginxSha256)));
+}
+
+function webmailRemovalEvidence(operation, intent, mapping) {
+  if (!exactOwnedWebmailRemoval(operation, intent, mapping)
+    || mapping.state !== 'removed' || mapping.applyJobId === null) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_webmail_evidence_invalid',
+      'Webmail mapping removal did not prove exact operation-owned shared Roundcube state',
+      409,
+    );
+  }
+  return Object.freeze({
+    referenceId: mapping.id,
+    evidenceDigest: digest({
+      kind: 'webmail_mapping',
+      parentOperationId: operation.id,
+      domainId: operation.domainId,
+      mappingId: intent.id,
+      mailDomainId: intent.mailDomainId,
+      webDomainId: intent.webDomainId,
+      hostname: intent.hostname,
+      certificateId: intent.certificateId,
+      certificateFingerprint256: intent.certificateFingerprint256,
+      sourceRevision: intent.revision,
+      sourceUpdatedAt: intent.updatedAt,
+      removalRevision: mapping.revision,
+      removalOperationId: mapping.operationId,
+      roundcubeApplyJobId: mapping.applyJobId,
+      roundcubePreviewSha256: mapping.expectedRoundcubePreviewSha256,
+      roundcubeNginxSha256: mapping.expectedRoundcubeNginxSha256,
+      removed: true,
+    }),
+  });
+}
 
 function externalDnsZoneIntent(operation, step) {
   if (!Array.isArray(operation.plan.dnsZoneIntents)) {
@@ -764,6 +882,8 @@ export function createDomainRemovalRuntime({
   dnsZoneRetirementRuntime = null,
   dnsHostingRegistry = null,
   mailDomainRemovalRuntime = null,
+  roundcubeDomainMappingRegistry = null,
+  roundcubeDomainMappingService = null,
 } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
@@ -801,7 +921,15 @@ export function createDomainRemovalRuntime({
       || typeof mailDomainRemovalRuntime?.start !== 'function'
       || typeof mailDomainRemovalRuntime?.retry !== 'function'
       || typeof mailDomainRemovalRuntime?.listForMailDomain !== 'function'
-    ))) {
+    ))
+    || ((roundcubeDomainMappingRegistry !== null || roundcubeDomainMappingService !== null)
+      && (!roundcubeDomainMappingRegistry
+        || typeof roundcubeDomainMappingRegistry?.getRecordForMailDomain !== 'function'
+        || !roundcubeDomainMappingService
+        || typeof roundcubeDomainMappingService?.previewDelete !== 'function'
+        || typeof roundcubeDomainMappingService?.beginDelete !== 'function'
+        || typeof roundcubeDomainMappingService?.inspect !== 'function'
+        || typeof roundcubeDomainMappingService?.continueOperation !== 'function'))) {
     throw new DomainRemovalRuntimeError(
       'domain_removal_runtime_dependencies_invalid',
       'Domain removal runtime dependencies are unavailable',
@@ -863,6 +991,20 @@ export function createDomainRemovalRuntime({
       );
     }
     return mailDomainRemovalRuntime;
+  }
+
+  function requireRoundcubeMappingLifecycle() {
+    if (!roundcubeDomainMappingRegistry || !roundcubeDomainMappingService) {
+      throw new DomainRemovalRuntimeError(
+        'domain_removal_webmail_runtime_unavailable',
+        'Domain removal Webmail mapping lifecycle is unavailable',
+        503,
+      );
+    }
+    return Object.freeze({
+      registry: roundcubeDomainMappingRegistry,
+      service: roundcubeDomainMappingService,
+    });
   }
 
   async function loadOperation(operationId) {
@@ -1377,6 +1519,164 @@ export function createDomainRemovalRuntime({
   }
 
 
+  async function runWebmailMapping(operationId, { allowMutation } = {}) {
+    const manager = requireDomainRegistry();
+    const lifecycle = requireRoundcubeMappingLifecycle();
+    const prepared = await runningStep(await loadOperation(operationId), 'webmail_mapping');
+    const { operation, step } = prepared;
+    let intent;
+    try { intent = webmailMappingIntent(operation, step); }
+    catch (error) {
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    const suspensionId = suspensionOperationId(operation);
+    let domain;
+    try { domain = await manager.getDomain(operation.domainId); }
+    catch (error) { return publicOperation(await failControlPlaneStep(operation, step, error)); }
+    if (!exactSuspendedDomain(operation, domain, suspensionId)) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_webmail_domain_drift',
+        'Domain state no longer matches journaled Webmail mapping removal evidence',
+        409,
+      )));
+    }
+
+    let current;
+    try { current = await lifecycle.registry.getRecordForMailDomain(intent.mailDomainId); }
+    catch (error) { return publicOperation(await failControlPlaneStep(operation, step, error)); }
+    if (current === null) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_webmail_absence_unowned',
+        'Webmail mapping metadata disappeared without operation-owned removal evidence',
+        409,
+      )));
+    }
+    if (current.state === 'removed') {
+      if (!exactOwnedWebmailRemoval(operation, intent, current)) {
+        return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+          'domain_removal_webmail_removed_drift',
+          'Removed Webmail mapping evidence is not owned by this Domain removal operation',
+          409,
+        )));
+      }
+      return publicOperation(await completeControlPlaneStep(
+        operation,
+        step,
+        webmailRemovalEvidence(operation, intent, current),
+      ));
+    }
+
+    if (current.state === 'active') {
+      if (!exactActiveWebmailMapping(intent, current)) {
+        return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+          'domain_removal_webmail_drift',
+          'Webmail mapping changed before Domain removal cleanup',
+          409,
+        )));
+      }
+      if (!allowMutation) {
+        return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+          'domain_removal_webmail_delete_required',
+          'Webmail mapping is still active; explicit removal continuation is required',
+          409,
+        )));
+      }
+      let preview;
+      try { preview = await lifecycle.service.previewDelete(intent.mailDomainId); }
+      catch (error) {
+        return publicOperation(await blockControlPlaneStep(operation, step, error));
+      }
+      if (!preview || preview.id !== intent.id || preview.mailDomainId !== intent.mailDomainId
+        || preview.webDomainId !== intent.webDomainId || preview.serverId !== intent.serverId
+        || preview.hostname !== intent.hostname || preview.certificateId !== intent.certificateId
+        || preview.certificateFingerprint256 !== intent.certificateFingerprint256
+        || preview.revision !== intent.revision || preview.updatedAt !== intent.updatedAt) {
+        return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+          'domain_removal_webmail_preview_drift',
+          'Webmail mapping delete preview no longer matches journaled intent',
+          409,
+        )));
+      }
+      try {
+        current = (await lifecycle.service.beginDelete(intent.mailDomainId, {
+          expectedRevision: intent.revision,
+          previewDigest: preview.previewDigest,
+          confirmation: preview.confirmation,
+        }, {
+          operationId: webmailRemovalOperationId(operation, intent),
+        })).mapping;
+      } catch (error) {
+        if (Number(error?.status) === 409) {
+          return publicOperation(await blockControlPlaneStep(operation, step, error));
+        }
+        return publicOperation(await failControlPlaneStep(operation, step, error));
+      }
+    }
+
+    if (!exactOwnedWebmailRemoval(operation, intent, current) || current.state !== 'removing') {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_webmail_operation_drift',
+        'Webmail mapping removal state is not owned by this Domain removal operation',
+        409,
+      )));
+    }
+    if (!allowMutation) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_webmail_retry_required',
+        'Webmail mapping removal requires explicit continuation',
+        409,
+      )));
+    }
+
+    let state;
+    try { state = await lifecycle.service.inspect(intent.mailDomainId); }
+    catch (error) { return publicOperation(await failControlPlaneStep(operation, step, error)); }
+    if (!state?.mapping || state.mapping.operationId !== current.operationId
+      || state.mapping.state !== 'removing') {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_webmail_inspection_drift',
+        'Webmail mapping lifecycle inspection does not match the parent-owned operation',
+        409,
+      )));
+    }
+    if (!state.actions?.continuation) {
+      return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+        'domain_removal_webmail_apply_pending',
+        'Shared Roundcube mapping apply is still queued or running',
+        409,
+      )));
+    }
+
+    let progressed;
+    try {
+      progressed = await lifecycle.service.continueOperation({
+        mailDomainId: intent.mailDomainId,
+        operationId: current.operationId,
+        expectedUpdatedAt: current.updatedAt,
+        confirmation: state.actions.continuation,
+      });
+    } catch (error) {
+      if (Number(error?.status) === 409) {
+        return publicOperation(await blockControlPlaneStep(operation, step, error));
+      }
+      return publicOperation(await failControlPlaneStep(operation, step, error));
+    }
+    const next = progressed?.mapping;
+    if (next?.state === 'removed' && exactOwnedWebmailRemoval(operation, intent, next)) {
+      return publicOperation(await completeControlPlaneStep(
+        operation,
+        step,
+        webmailRemovalEvidence(operation, intent, next),
+      ));
+    }
+    return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
+      'domain_removal_webmail_apply_pending',
+      'Shared Roundcube mapping apply requires another explicit continuation after job completion',
+      409,
+    )));
+  }
+
+
   async function runExternalDnsZone(operationId, { allowMutation } = {}) {
     const manager = requireDomainRegistry();
     const dnsRegistry = requireDnsHostingRegistry();
@@ -1751,6 +2051,9 @@ export function createDomainRemovalRuntime({
     }
     if (step.kind === 'certificate') {
       return runCertificate(operation.id, { allowMutation });
+    }
+    if (step.kind === 'webmail_mapping') {
+      return runWebmailMapping(operation.id, { allowMutation });
     }
     if (step.kind === 'mail_domain') {
       return runMailDomain(operation.id, { allowMutation });
@@ -2225,6 +2528,13 @@ export const domainRemovalRuntimeInternals = Object.freeze({
   childCertificatePlanWithinParent,
   sameMailDomainIntent,
   childMailDomainPlanWithinParent,
+  sameWebmailMappingIntent,
+  childWebmailMappingPlanWithinParent,
+  webmailMappingIntent,
+  exactActiveWebmailMapping,
+  webmailRemovalOperationId,
+  exactOwnedWebmailRemoval,
+  webmailRemovalEvidence,
   certificateRetirementEvidence,
   childPlanWithinParent,
   exactChildRemovalPreview,
