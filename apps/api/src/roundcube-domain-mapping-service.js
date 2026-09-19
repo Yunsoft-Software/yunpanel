@@ -29,7 +29,7 @@ function continueConfirmation(mapping) {
 function publicState(mapping, job = null) {
   if (!mapping) return null;
   const terminalJob = job && ['succeeded', 'failed', 'cancelled'].includes(job.status);
-  const continuable = mapping.state !== 'active'
+  const continuable = ['pending', 'removing'].includes(mapping.state)
     && (mapping.applyJobId === null || terminalJob);
   return Object.freeze({
     mapping: Object.freeze({ ...mapping }),
@@ -263,7 +263,7 @@ export function createRoundcubeDomainMappingService({
     confirmation,
   } = {}) {
     const mapping = await registry.getRecordForMailDomain(mailDomainId);
-    if (!mapping || mapping.state === 'active'
+    if (!mapping || !['pending', 'removing'].includes(mapping.state)
       || mapping.operationId !== operationId
       || mapping.updatedAt !== expectedUpdatedAt
       || confirmation !== continueConfirmation(mapping)) {
@@ -281,18 +281,10 @@ export function createRoundcubeDomainMappingService({
         operationId: mapping.operationId,
         job,
       });
-      if (completed?.deleted === true) {
+      if (completed?.state === 'removed') {
         return Object.freeze({
-          mapping: null,
-          job: Object.freeze({
-            id: job.id,
-            status: job.status,
-            operation: job.operation,
-            createdAt: job.createdAt,
-            updatedAt: job.updatedAt,
-          }),
+          ...publicState(completed, job),
           deleted: true,
-          actions: Object.freeze({ continuation: null }),
         });
       }
       return Object.freeze({
