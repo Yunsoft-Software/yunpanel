@@ -4,6 +4,7 @@ import test from 'node:test';
 import { createDomainRemovalOperationRegistry } from '../src/domain-removal-operation-registry.js';
 import {
   createDomainRemovalRuntime,
+  domainRemovalRuntimeInternals,
   DomainRemovalRuntimeError,
 } from '../src/domain-removal-runtime.js';
 
@@ -318,6 +319,147 @@ function mailRemovalPreview({ managementMode = 'local', status = 'enabled' } = {
     },
     previewDigest: mailPreviewDigest,
     confirmation: `start-domain-remove:domain-1:4:${mailPreviewDigest}`,
+  };
+}
+
+function webmailMappingIntentFixture(overrides = {}) {
+  return {
+    id: 'webmail-mapping-1',
+    mailDomainId: 'mail-domain-1',
+    webDomainId: 'domain-1',
+    serverId: 'local',
+    domainName: 'example.com',
+    hostname: 'webmail.example.com',
+    certificateId: 'certificate-1',
+    certificateFingerprint256: Array.from({ length: 32 }, () => 'AA').join(':'),
+    revision: 2,
+    state: 'active',
+    operationId: null,
+    applyJobId: null,
+    expectedRoundcubePreviewSha256: null,
+    expectedRoundcubeNginxSha256: null,
+    createdAt: '2026-09-18T19:00:00.000Z',
+    updatedAt: '2026-09-18T20:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function webmailRemovalPreview() {
+  const base = certificateRemovalPreview();
+  const digest = '5'.repeat(64);
+  return {
+    ...base,
+    impact: {
+      ...base.impact,
+      blockers: [
+        'certificates_present',
+        'impact_apply_not_implemented',
+        'mail_domains_present',
+        'webmail_mapping_dependencies_present',
+        'website_binding_present',
+      ],
+    },
+    plan: {
+      ...base.plan,
+      mailDomainIds: ['mail-domain-1'],
+      mailDomainIntents: [{
+        id: 'mail-domain-1',
+        domainName: 'example.com',
+        webDomainId: 'domain-1',
+        managementMode: 'local',
+        status: 'enabled',
+        revision: 5,
+        updatedAt: '2026-09-18T20:10:00.000Z',
+      }],
+      webmailMappingIds: ['webmail-mapping-1'],
+      webmailMappingIntents: [webmailMappingIntentFixture()],
+    },
+    previewDigest: digest,
+    confirmation: `start-domain-remove:domain-1:4:${digest}`,
+  };
+}
+
+function webmailLifecycleFixture(source = webmailMappingIntentFixture()) {
+  let current = { ...source };
+  let previewCalls = 0;
+  let beginCalls = 0;
+  let inspectCalls = 0;
+  let continueCalls = 0;
+  return {
+    registry: {
+      async getRecordForMailDomain(id) {
+        assert.equal(id, source.mailDomainId);
+        return current ? { ...current } : null;
+      },
+    },
+    service: {
+      async previewDelete(id) {
+        previewCalls += 1;
+        assert.equal(id, source.mailDomainId);
+        return {
+          version: 1,
+          operation: 'roundcube_domain_mapping_delete',
+          id: source.id,
+          mailDomainId: source.mailDomainId,
+          webDomainId: source.webDomainId,
+          serverId: source.serverId,
+          hostname: source.hostname,
+          certificateId: source.certificateId,
+          certificateFingerprint256: source.certificateFingerprint256,
+          revision: source.revision,
+          updatedAt: source.updatedAt,
+          previewDigest: 'a'.repeat(64),
+          confirmation: 'delete-webmail-confirmation',
+          sideEffects: false,
+        };
+      },
+      async beginDelete(id, input, { operationId } = {}) {
+        beginCalls += 1;
+        assert.equal(id, source.mailDomainId);
+        assert.deepEqual(input, {
+          expectedRevision: source.revision,
+          previewDigest: 'a'.repeat(64),
+          confirmation: 'delete-webmail-confirmation',
+        });
+        current = {
+          ...source,
+          revision: source.revision + 1,
+          state: 'removing',
+          operationId,
+          applyJobId: null,
+          expectedRoundcubePreviewSha256: null,
+          expectedRoundcubeNginxSha256: null,
+          updatedAt: '2026-09-18T21:00:00.000Z',
+        };
+        return { mapping: { ...current }, actions: { continuation: 'continue-webmail' } };
+      },
+      async inspect(id) {
+        inspectCalls += 1;
+        assert.equal(id, source.mailDomainId);
+        return {
+          mapping: { ...current },
+          job: null,
+          actions: { continuation: 'continue-webmail' },
+        };
+      },
+      async continueOperation(input) {
+        continueCalls += 1;
+        assert.equal(input.mailDomainId, source.mailDomainId);
+        assert.equal(input.operationId, current.operationId);
+        assert.equal(input.expectedUpdatedAt, current.updatedAt);
+        assert.equal(input.confirmation, 'continue-webmail');
+        current = {
+          ...current,
+          state: 'removed',
+          applyJobId: 'roundcube-job-1',
+          expectedRoundcubePreviewSha256: 'b'.repeat(64),
+          expectedRoundcubeNginxSha256: 'c'.repeat(64),
+        };
+        return { mapping: { ...current }, deleted: true, actions: { continuation: null } };
+      },
+    },
+    current: () => ({ ...current }),
+    counts: () => ({ previewCalls, beginCalls, inspectCalls, continueCalls }),
   };
 }
 
@@ -1118,6 +1260,99 @@ test('explicit removal start delegates routing mutation to durable Domain suspen
   assert.match(operation.steps[0].result.evidenceDigest, /^[a-f0-9]{64}$/);
   assert.equal(operation.steps[1].kind, 'child_domain');
   assert.equal(operation.steps[1].status, 'pending');
+});
+
+test('explicit Domain removal continuation removes one shared Roundcube mapping with parent-owned evidence', async () => {
+  const registry = createRegistry();
+  const preview = webmailRemovalPreview();
+  let operation = await completeRoutingStep(registry, preview);
+  operation = await registry.markStepRunning(operation.id, operation.steps[1].id);
+  operation = await registry.succeedStep(operation.id, operation.steps[1].id, {
+    referenceId: 'certificate-1',
+    evidenceDigest: '6'.repeat(64),
+  });
+  assert.equal(operation.steps[2].kind, 'webmail_mapping');
+
+  const domains = domainRegistryFixture({ certificateId: null });
+  const webmail = webmailLifecycleFixture();
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    roundcubeDomainMappingRegistry: webmail.registry,
+    roundcubeDomainMappingService: webmail.service,
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[2].id,
+    checksum: operation.checksum,
+    confirmation: `continue-domain-remove-step:${operation.domainId}:${operation.id}:${operation.steps[2].id}:${operation.updatedAt}:${operation.checksum}`,
+  });
+
+  assert.equal(operation.steps[2].status, 'succeeded');
+  assert.equal(operation.steps[2].result.referenceId, 'webmail-mapping-1');
+  assert.match(operation.steps[2].result.evidenceDigest, /^[a-f0-9]{64}$/);
+  assert.equal(webmail.current().state, 'removed');
+  assert.equal(
+    webmail.current().operationId,
+    domainRemovalRuntimeInternals.webmailRemovalOperationId(operation, webmailMappingIntentFixture()),
+  );
+  assert.deepEqual(webmail.counts(), {
+    previewCalls: 1,
+    beginCalls: 1,
+    inspectCalls: 1,
+    continueCalls: 1,
+  });
+});
+
+test('startup closes a running webmail step from exact removed tombstone without replaying Roundcube mutation', async () => {
+  const registry = createRegistry();
+  const preview = webmailRemovalPreview();
+  let operation = await completeRoutingStep(registry, preview);
+  operation = await registry.markStepRunning(operation.id, operation.steps[1].id);
+  operation = await registry.succeedStep(operation.id, operation.steps[1].id, {
+    referenceId: 'certificate-1',
+    evidenceDigest: '6'.repeat(64),
+  });
+  operation = await registry.markStepRunning(operation.id, operation.steps[2].id);
+  const intent = webmailMappingIntentFixture();
+  const tombstone = {
+    ...intent,
+    revision: intent.revision + 1,
+    state: 'removed',
+    operationId: domainRemovalRuntimeInternals.webmailRemovalOperationId(operation, intent),
+    applyJobId: 'roundcube-job-1',
+    expectedRoundcubePreviewSha256: 'b'.repeat(64),
+    expectedRoundcubeNginxSha256: 'c'.repeat(64),
+    updatedAt: '2026-09-18T21:00:00.000Z',
+  };
+  let serviceCalls = 0;
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => { throw new Error('startup must not rebuild preview'); },
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domainRegistryFixture({ certificateId: null }).manager,
+    roundcubeDomainMappingRegistry: {
+      getRecordForMailDomain: async () => ({ ...tombstone }),
+    },
+    roundcubeDomainMappingService: {
+      previewDelete: async () => { serviceCalls += 1; throw new Error('unexpected mutation'); },
+      beginDelete: async () => { serviceCalls += 1; throw new Error('unexpected mutation'); },
+      inspect: async () => { serviceCalls += 1; throw new Error('unexpected mutation'); },
+      continueOperation: async () => { serviceCalls += 1; throw new Error('unexpected mutation'); },
+    },
+  });
+
+  const recovery = await runtime.init();
+
+  assert.equal(recovery.length, 1);
+  assert.equal(recovery[0].recovered, true);
+  assert.equal(recovery[0].operation.steps[2].status, 'succeeded');
+  assert.equal(serviceCalls, 0);
 });
 
 test('explicit continuation detaches the bound certificate and retires its registry record', async () => {
