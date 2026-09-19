@@ -215,15 +215,20 @@ tarafından kullanılır.
 
 Bu kaynak dilimi mevcut local Mail Domain için shared webmail mapping bind/delete lifecycle'ını kurar.
 
-P0.8 site-create input/preflight bugün henüz mail mode taşımıyor. Yeni Website provisioning'de:
+P0.8 site-create input/preflight artık `mail: none|local|external` taşır. Local mail preview deterministic Mail Domain ID, disabled initial state, desired enabled state ve exact `webmail.<domain>` shared-Roundcube/certificate-coverage intent'i üretir; create aşaması yalnız disabled Mail Domain metadata'sını reserve eder. External mail unverified metadata relationship oluşturur ve shared webmail intent'i üretmez.
 
-- local mail seçimi,
-- Mail Domain create/enable,
+Yeni Website provisioning'de hâlâ:
+
+- local Mail Domain enable/config transition,
+- DKIM + mail DNS desired state,
 - wildcard/hostname-covering certificate selection/issuance,
 - mapping bind,
-- shared Roundcube apply,
-- DNS zone re-apply
+- shared Roundcube durable apply,
+- DNS zone re-apply,
+- cross-service health/recovery
 
-tek provisioning operation zincirine henüz bağlanmalıdır.
+tek provisioning operation zincirine bağlanmalıdır.
+
+Detay: `docs/history/site-create-mail-intent-progress-2026-09-19.md`.
 
 Ayrıca gerçek Ubuntu/browser/DNS kabulü ve Node 24 source testleri çalışmadan ürün maddesi DONE sayılmaz.
