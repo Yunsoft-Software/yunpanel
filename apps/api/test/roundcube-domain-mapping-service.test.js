@@ -243,7 +243,13 @@ test('delete makes DNS mapping inactive before host cleanup and finalizes only a
     confirmation: inspected.actions.continuation,
   });
   assert.equal(deleted.deleted, true);
-  assert.equal(await state.registry.getRecordForMailDomain(mailDomainId), null);
+  assert.equal(deleted.mapping.state, 'removed');
+  assert.equal(deleted.actions.continuation, null);
+  assert.deepEqual(
+    await state.registry.getRecordForMailDomain(mailDomainId),
+    deleted.mapping,
+  );
+  assert.equal(await state.registry.getForMailDomain(mailDomainId), null);
 });
 
 test('failed apply remains durable and explicit continuation queues a new job only if desired state is unchanged', async () => {
