@@ -247,8 +247,11 @@ export function createRoundcubeDomainMappingService({
     return registry.previewDelete(mailDomainId);
   }
 
-  async function beginDelete(mailDomainId, input) {
-    const mapping = await registry.beginDelete(mailDomainId, input);
+  async function beginDelete(mailDomainId, input, { operationId = null } = {}) {
+    const mapping = await registry.beginDelete(mailDomainId, {
+      ...input,
+      ...(operationId === null ? {} : { operationId }),
+    });
     return Object.freeze({
       ...publicState(mapping),
       started: true,
