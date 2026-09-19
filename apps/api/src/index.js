@@ -620,6 +620,8 @@ websiteProvisioningRuntime.configureMailDkimControlPlane({
   mailDomainRegistry,
   domainRegistry,
   mailDkimRegistry,
+  jobRegistry,
+  mailDkimConfigurationService,
 });
 if (dnsZoneReapplyRuntime) {
   websiteProvisioningRuntime.configureMailDnsControlPlane({
