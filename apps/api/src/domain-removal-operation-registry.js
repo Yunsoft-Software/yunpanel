@@ -27,6 +27,7 @@ const CERTIFICATE_RENEWAL_MODES = new Set(['automatic', 'manual']);
 const MAIL_MANAGEMENT_MODES = new Set(['local', 'external']);
 const LOCAL_MAIL_STATUSES = new Set(['disabled', 'enabled']);
 const EXTERNAL_MAIL_STATUSES = new Set(['unverified', 'ready', 'degraded']);
+const EXTERNAL_DNS_STATUSES = new Set(['unverified', 'ready', 'degraded']);
 
 export class DomainRemovalOperationRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -174,6 +175,7 @@ function normalizedPlan(value) {
   const priorFields = new Set([...legacyFields, 'childDomains']);
   const certificateFields = new Set([...priorFields, 'certificateIntents', 'boundCertificateId']);
   const fields = new Set([...certificateFields, 'mailDomainIntents']);
+  const dnsIntentFields = new Set([...fields, 'dnsZoneIntents']);
   const planKeys = Object.keys(value ?? {});
   const legacyShape = planKeys.length === legacyFields.size
     && planKeys.every((field) => legacyFields.has(field));
@@ -183,8 +185,10 @@ function normalizedPlan(value) {
     && planKeys.every((field) => certificateFields.has(field));
   const currentShape = planKeys.length === fields.size
     && planKeys.every((field) => fields.has(field));
+  const dnsIntentShape = planKeys.length === dnsIntentFields.size
+    && planKeys.every((field) => dnsIntentFields.has(field));
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || (!legacyShape && !priorShape && !certificateShape && !currentShape)) {
+    || (!legacyShape && !priorShape && !certificateShape && !currentShape && !dnsIntentShape)) {
     throw invalid('Domain removal operation plan is invalid');
   }
   const ids = (items, field, { preserveOrder = false } = {}) => {
@@ -263,7 +267,7 @@ function normalizedPlan(value) {
   };
   const childDomains = normalizedChildDomains(value.childDomains);
   const normalizedCertificateIntents = (items) => {
-    if ((!certificateShape && !currentShape) || items === null) return null;
+    if ((!certificateShape && !currentShape && !dnsIntentShape) || items === null) return null;
     if (!Array.isArray(items) || items.length !== certificateIds.length) {
       throw invalid('Certificate removal intent evidence is invalid');
     }
@@ -314,16 +318,16 @@ function normalizedPlan(value) {
     return Object.freeze(intents);
   };
   const certificateIntents = normalizedCertificateIntents(value.certificateIntents);
-  const boundCertificateId = certificateShape || currentShape
+  const boundCertificateId = certificateShape || currentShape || dnsIntentShape
     ? optionalId(value.boundCertificateId, 'boundCertificateId')
     : null;
-  if ((certificateShape || currentShape) && boundCertificateId !== null
+  if ((certificateShape || currentShape || dnsIntentShape) && boundCertificateId !== null
     && !certificateIds.includes(boundCertificateId)) {
     throw invalid('Bound certificate removal intent is missing');
   }
   const mailDomainIds = ids(value.mailDomainIds, 'mailDomainId');
   const normalizedMailDomainIntents = (items) => {
-    if (!currentShape || items === null) return null;
+    if ((!currentShape && !dnsIntentShape) || items === null) return null;
     if (!Array.isArray(items) || items.length !== mailDomainIds.length) {
       throw invalid('Mail Domain removal intent evidence is invalid');
     }
@@ -359,6 +363,44 @@ function normalizedPlan(value) {
     return Object.freeze(intents);
   };
   const mailDomainIntents = normalizedMailDomainIntents(value.mailDomainIntents);
+  const dnsZoneIds = ids(value.dnsZoneIds, 'dnsZoneId');
+  const normalizedDnsZoneIntents = (items) => {
+    if (!dnsIntentShape || items === null) return null;
+    if (!Array.isArray(items) || items.length !== dnsZoneIds.length) {
+      throw invalid('External DNS Zone removal intent evidence is invalid');
+    }
+    const intentFields = new Set([
+      'id', 'zoneName', 'webDomainId', 'managementMode', 'status', 'revision', 'updatedAt',
+    ]);
+    const intents = items.map((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)
+        || Object.keys(item).length !== intentFields.size
+        || Object.keys(item).some((field) => !intentFields.has(field))
+        || item.id !== dnsZoneIds[index]
+        || typeof item.zoneName !== 'string' || item.zoneName.length < 1
+        || item.zoneName.length > 253 || /[\u0000-\u001f\u007f]/.test(item.zoneName)
+        || item.managementMode !== 'external'
+        || !EXTERNAL_DNS_STATUSES.has(item.status)
+        || !Number.isSafeInteger(item.revision) || item.revision < 1) {
+        throw invalid('External DNS Zone removal intent evidence is invalid');
+      }
+      return Object.freeze({
+        id: safeId(item.id, 'dnsZoneId'),
+        zoneName: item.zoneName,
+        webDomainId: safeId(item.webDomainId, 'dnsZoneWebDomainId'),
+        managementMode: item.managementMode,
+        status: item.status,
+        revision: item.revision,
+        updatedAt: timestamp(item.updatedAt),
+      });
+    });
+    if (new Set(intents.map((intent) => intent.webDomainId)).size !== intents.length) {
+      throw invalid('External DNS Zone removal intent contains duplicate Domain bindings');
+    }
+    return Object.freeze(intents);
+  };
+  const dnsZoneIntents = normalizedDnsZoneIntents(value.dnsZoneIntents);
+
   const normalizedAdditional = (additional) => {
     const additionalFields = new Set(['mailboxes', 'backups', 'crons', 'dockerWorkloads']);
     if (!additional || typeof additional !== 'object' || Array.isArray(additional)
@@ -392,7 +434,8 @@ function normalizedPlan(value) {
     certificateIds,
     certificateIntents,
     boundCertificateId,
-    dnsZoneIds: ids(value.dnsZoneIds, 'dnsZoneId'),
+    dnsZoneIds,
+    dnsZoneIntents,
     mailDomainIds,
     mailDomainIntents,
     activeJobIds: ids(value.activeJobIds, 'activeJobId'),
@@ -413,6 +456,9 @@ function buildSteps(preview, createdAt) {
   }
   if (plan.mailDomainIntents === null) {
     throw invalid('Domain removal preview lacks exact Mail Domain removal intent evidence');
+  }
+  if (plan.dnsZoneIntents === null) {
+    throw invalid('Domain removal preview lacks exact External DNS Zone removal intent evidence');
   }
   if ((preview.domain.certificateId ?? null) !== plan.boundCertificateId) {
     throw invalid('Domain removal preview certificate binding intent is inconsistent');
@@ -438,6 +484,11 @@ function buildSteps(preview, createdAt) {
     mailDomain.domainName !== affectedDomains.get(mailDomain.webDomainId)
   ))) {
     throw invalid('Mail Domain removal intent crosses the Domain removal boundary');
+  }
+  if (plan.dnsZoneIntents.some((dnsZone) => (
+    dnsZone.zoneName !== affectedDomains.get(dnsZone.webDomainId)
+  ))) {
+    throw invalid('External DNS Zone removal intent crosses the Domain removal boundary');
   }
   const steps = [];
   const add = (kind, resourceId) => {
