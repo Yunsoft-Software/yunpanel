@@ -160,11 +160,13 @@ test('local mail adds operation-owned DNS reapply after the DKIM key step', asyn
   const mailDns = plan.steps.find((step) => step.id === 'mail_dns_reapply');
   const webmailCertificate = plan.steps.find((step) => step.id === 'webmail_certificate');
   const roundcube = plan.steps.find((step) => step.id === 'roundcube_mapping');
+  const mailHealth = plan.steps.find((step) => step.id === 'mail_health');
 
   assert.ok(dkim);
   assert.ok(mailDns);
   assert.ok(webmailCertificate);
   assert.ok(roundcube);
+  assert.ok(mailHealth);
   assert.equal(mailDns.kind, 'mail_dns_reapply');
   assert.equal(mailDns.required, true);
   assert.equal(mailDns.state, 'pending');
@@ -191,6 +193,8 @@ test('local mail adds operation-owned DNS reapply after the DKIM key step', asyn
     < plan.steps.findIndex((step) => step.id === 'mail_dkim_config'));
   assert.ok(plan.steps.findIndex((step) => step.id === 'mail_dkim_config')
     < plan.steps.findIndex((step) => step.id === 'roundcube_mapping'));
+  assert.ok(plan.steps.findIndex((step) => step.id === 'roundcube_mapping')
+    < plan.steps.findIndex((step) => step.id === 'mail_health'));
   assert.equal(plan.steps.some((step) => step.id === 'webmail_dns_reapply'), false);
   assert.equal(plan.ready, false);
 });
@@ -200,6 +204,7 @@ test('external mail does not create a local authoritative mail DNS mutation', as
   assert.equal(plan.steps.some((step) => step.id === 'mail_dns_reapply'), false);
   assert.equal(plan.steps.some((step) => step.id === 'webmail_dns_reapply'), false);
   assert.equal(plan.steps.some((step) => step.id === 'webmail_certificate'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'mail_health'), false);
 });
 
 test('www none removes the built-in DNS alias so no dead endpoint is published', async () => {
