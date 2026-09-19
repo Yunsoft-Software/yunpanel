@@ -312,16 +312,6 @@ export function createMailConfigurationService({
         srs: null,
       });
     }
-    if (privateAccounts.length === 0) {
-      return Object.freeze({
-        ready: false,
-        blockers: Object.freeze(['mail_postmaster_mailbox_required']),
-        preview: null,
-        accounts: Object.freeze([]),
-        srs: null,
-      });
-    }
-
     const tlsIdentity = await resolveTlsIdentity(resolved);
     if (tlsIdentity.blocker) {
       return Object.freeze({
@@ -347,7 +337,7 @@ export function createMailConfigurationService({
       ...account,
       quotaBytes: quotaByMailboxId.get(publicMailboxes[index].id) ?? null,
     })));
-    const postmasterAddress = accounts[0].address;
+    const postmasterAddress = accounts[0]?.address ?? `postmaster@${resolved.domains[0]}`;
     let preview;
     try {
       preview = previewManagedMailSubmissionConfiguration({
