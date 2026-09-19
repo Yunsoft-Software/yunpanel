@@ -17,8 +17,14 @@ Bu bölüm bu sohbet ortamında repository checkout/Node runner bulunmadığı i
 - [ ] Domain/Website delete backup impact provider hedef testini çalıştır:
       node --test apps/api/test/domain-removal-backup-impact.test.js
       Ardından resource-impact HTTP/regresyon testlerinde production `backupOperationRegistry + databaseBindingRegistry` wiring'inin backups bucket'ını `available` yaptığını, provider eksik test fixture'larında mevcut fail-closed davranışın değişmediğini doğrula.
+- [ ] SQLite virtual-mail cutover hedef testlerini Node 24 ile çalıştır:
+      node --test packages/config-templates/test/mail-sql.test.js packages/config-templates/test/mail-apply-plan.test.js packages/host-runtime/test/mail-config-manager.test.js packages/host-runtime/test/mail-config-backup.test.js packages/host-runtime/test/mail-config-activator.test.js packages/host-runtime/test/mail-config-evidence-inspector.test.js packages/host-runtime/test/mail-readiness-inspector.test.js packages/host-runtime/test/managed-service-manager.test.js
+- [ ] API/package mail regresyonunu Node 24 ile çalıştır:
+      node --test apps/api/test/mail-configuration-v2.test.js apps/api/test/mail-configuration-quota.test.js apps/api/test/mail-configuration-forwarding.test.js apps/api/test/mail-empty-managed-set.test.js apps/api/test/mail-configuration-production-wiring.test.js apps/api/test/mail-vmail-packaging.test.js apps/api/test/managed-service-http.test.js apps/api/test/managed-service-job-registry.test.js
+- [ ] SQLite cutover source testlerinde herhangi bir syntax/fixture/regression failure varsa yalnız ilgili küçük commitlerle düzelt; legacy v5 mail backup/recovery fixture'larını silme veya yeni SQL digest'e zorla migrate etme.
+
 - [ ] Production bootstrap import/syntax kapısı: apps/api/src/index.js, mail-domain-removal-production-runtime.js ve domain-removal-production-runtime.js Node 24 altında yüklenebilsin; duplicate import/name veya startup dependency hatası varsa düzelt. External DNS için dns-hosting-registry deleteZone exposure + parent runtime wiring'ini de hedefli source testte doğrula.
-- [ ] npm run check çalıştır. Yeni removal/bootstrap commitlerinden kaynaklı herhangi bir failure varsa küçük ayrı commitlerle düzelt; GitHub Actions kullanma.
+- [ ] npm run check çalıştır. Yeni removal/bootstrap ve SQLite mail cutover commitlerinden kaynaklı herhangi bir failure varsa küçük ayrı commitlerle düzelt; GitHub Actions kullanma.
 - [ ] Hedefli/full source testleri geçince docs/history/domain-removal-mail-data-finalize-bootstrap-2026-09-19.md içine gerçek test sayıları/komutları ekle. Gerçek Ubuntu failure-injection kabulü aşağıdaki T-PROVISIONING/T-MAIL kapılarında ayrıca açık kalsın.
 
 ## T-BASE — P0 güncel güvenlik ve package kapısı
@@ -94,6 +100,10 @@ Bu bölüm bu sohbet ortamında repository checkout/Node runner bulunmadığı i
 - [ ] Mevcut Cloudflare record ve Certbot DNS-01 akışı external-DNS modunda least-privilege tokenla çalışsın; PowerDNS state'iyle karışmasın; token hiçbir public yüzeye çıkmasın.
 
 ## T-MAIL — P0 Postfix/Dovecot/Rspamd/Roundcube
+- [ ] Fresh Ubuntu 24.04 SQLite virtual-mail kabulü: managed Postfix kurulumu `postfix + postfix-sqlite + sqlite3`, Dovecot kurulumu `dovecot-imapd + dovecot-lmtpd + dovecot-sieve + dovecot-sqlite + sqlite3` exact package setiyle tamamlanmalı. `vmail:vmail /var/lib/yunpanel/mail 0750`, `root:yunpanel-mailauth /var/lib/yunpanel/mail-auth 0750`, Postfix+Dovecot supplementary `yunpanel-mailauth` membership ve servis restart sonrası effective groups doğrulansın; Postfix/Dovecot kesinlikle `vmail` grubuna girmesin.
+- [ ] Gerçek mail config apply'da private SQL seed root-private kalsın; DB `/var/lib/yunpanel/mail-auth/virtual-mail.sqlite3` root:yunpanel-mailauth 0640 oluşsun, `PRAGMA quick_check` ok ve persisted `state_sha256` preview evidence'ıyla exact eşleşsin. `postmap -q <domain/address> proxy:sqlite:...` domain/mailbox/alias/sender-login sonuçları ve `doveadm auth test user@domain password` enabled/disabled mailbox davranışı doğrulansın. SQL apply başarıyla health-gated olduktan sonra eski Postfix hash map/source `.db` dosyaları ve Dovecot passwd-file credential dosyası live state'te absent olsun.
+- [ ] SQLite mail failure-injection: seed apply öncesi/sonrası, DB chmod/chgrp, Postfix/Dovecot config validate, reload/health, legacy lookup retirement ve durable receipt sınırlarında API/process öldür. Restart host mutation'ı kör replay etmesin; exact SQLite DB state + config + retired-legacy evidence ile tamamlanmış apply'i kapatsın, driftte fail-closed kalsın. Activation failure pre-apply v6 backup'tan hash/passwd/SQL files + DB + directory metadata'yı exact restore edebilsin. Önceki sürümden kalmış v5 backup/recovery fixture upgrade sonrasında okunup legacy digest materialization ile tamamlanabilsin.
+
 
 - [ ] Local mail seçilen Website provisioning'i mail domain desired state, gerekli DNS intent'leri, TLS identity ve `webmail.<domain>` Nginx route'unu oluştursun; mail seçilmediyse bunları üretmesin.
 - [ ] Shared Roundcube package + dedicated PHP-FPM pool/socket + protected config/database gerçek Ubuntu hostta kurulsun. Her local mail domainin `webmail.<domain>` URL'si aynı shared instance'a güvenle ulaşsın; domain başına kopya oluşmasın.
