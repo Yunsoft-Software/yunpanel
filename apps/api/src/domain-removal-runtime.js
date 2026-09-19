@@ -420,6 +420,28 @@ function childCertificatePlanWithinParent(operation, intent, plan) {
     )));
 }
 
+const EXTERNAL_DNS_INTENT_FIELDS = Object.freeze([
+  'id', 'zoneName', 'webDomainId', 'managementMode', 'status', 'revision', 'updatedAt',
+]);
+
+function sameExternalDnsIntent(expected, current) {
+  return Boolean(expected && current && EXTERNAL_DNS_INTENT_FIELDS.every((field) => (
+    expected[field] === current[field]
+  )));
+}
+
+function childExternalDnsPlanWithinParent(operation, intent, plan) {
+  if (!Array.isArray(operation.plan.dnsZoneIntents)
+    || !Array.isArray(plan.dnsZoneIntents)) return false;
+  const expected = operation.plan.dnsZoneIntents.filter((candidate) => (
+    candidate.webDomainId === intent.id
+  ));
+  return expected.length === plan.dnsZoneIntents.length
+    && expected.every((parentIntent) => plan.dnsZoneIntents.some((childIntent) => (
+      sameExternalDnsIntent(parentIntent, childIntent)
+    )));
+}
+
 const MAIL_DOMAIN_INTENT_FIELDS = Object.freeze([
   'id', 'domainName', 'webDomainId', 'managementMode', 'status', 'revision', 'updatedAt',
 ]);
@@ -449,6 +471,7 @@ function childPlanWithinParent(operation, intent, plan) {
     || plan.websiteId !== intent.websiteId
     || !exactChildAuthoritativeDnsIntent(intent.authoritativeDns, plan.authoritativeDns)
     || !childCertificatePlanWithinParent(operation, intent, plan)
+    || !childExternalDnsPlanWithinParent(operation, intent, plan)
     || !childMailDomainPlanWithinParent(operation, intent, plan)
     || !Array.isArray(plan.activeJobIds) || plan.activeJobIds.length !== 0
     || !idsWithin(plan.certificateIds, operation.plan.certificateIds)
@@ -2207,6 +2230,8 @@ export const domainRemovalRuntimeInternals = Object.freeze({
   exactChildRemovalPreview,
   exactChildRemovalOperation,
   childRemovalEvidence,
+  sameExternalDnsIntent,
+  childExternalDnsPlanWithinParent,
   externalDnsZoneIntent,
   exactExternalDnsZone,
   externalDnsZoneEvidence,
