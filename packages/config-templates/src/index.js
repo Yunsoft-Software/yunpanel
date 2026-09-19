@@ -33,6 +33,15 @@ export {
 } from './systemd.js';
 
 export {
+  CronTemplateError,
+  cronTaskFileName,
+  cronTemplateInternals,
+  normalizeCronCommand,
+  normalizeCronSchedule,
+  renderCronTaskFile,
+} from './cron.js';
+
+export {
   MailTemplateError,
   mailTemplatePolicy,
   normalizeMailboxAddress,
