@@ -101,7 +101,8 @@ function discoveryEndpoint(value, kind, domainName) {
   const policy = DISCOVERY_ENDPOINTS[kind];
   if (!policy || !value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size || Object.keys(value).some((field) => !fields.has(field))
-    || value.ready !== true || value.hostname !== `${policy.prefix}.${domainName}`
+    || value.ready !== true
+    || ![domainName, `${policy.prefix}.${domainName}`].includes(value.hostname)
     || value.protocol !== 'https' || value.path !== policy.path) {
     throw new DnsZoneMailIntentError(
       'dns_zone_mail_discovery_invalid',
