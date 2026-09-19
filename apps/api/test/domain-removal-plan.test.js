@@ -127,6 +127,7 @@ function impact(currentDomain = domain(), overrides = {}) {
     backups: { status: 'available', items: [] },
     crons: { status: 'available', items: [] },
     dockerWorkloads: { status: 'available', items: [] },
+    webmailMappings: { status: 'available', items: [] },
     authoritativeDns: {
       status: 'available',
       items: [{
@@ -228,6 +229,8 @@ test('pins current resource-impact evidence into a deterministic Domain removal 
   }]);
   assert.deepEqual(preview.plan.mailDomainIds, ['mail-domain-1']);
   assert.deepEqual(preview.plan.mailDomainIntents, [mailDomainReference('mail-domain-1')]);
+  assert.deepEqual(preview.plan.webmailMappingIds, []);
+  assert.deepEqual(preview.plan.webmailMappingIntents, []);
   assert.equal(preview.plan.authoritativeDns.previewDigest, dnsPreviewDigest);
   assert.equal(preview.plan.authoritativeDns.ownershipEvidenceDigest, ownershipEvidenceDigest);
   assert.equal(preview.plan.authoritativeDns.snapshotRetentionDays, 30);
