@@ -477,12 +477,41 @@ export function createMailConfigActivator({
     try {
       const metadata = await lstatFn(mailSubmissionTemplatePolicy.dovecotAuthSocket);
       if (!metadata.isSocket() || metadata.isSymbolicLink()
-        || metadata.uid !== postfixIdentity.uid || metadata.gid !== mailAuthGroup.gid
+        || metadata.uid !== postfixIdentity.uid || metadata.gid !== postfixIdentity.gid
         || (metadata.mode & 0o7777) !== SUBMISSION_SOCKET_MODE) {
         throw new Error('submission socket metadata mismatch');
       }
     } catch {
       throw activationError('mail_submission_socket_invalid', 'Dovecot submission authentication socket is unavailable or unsafe');
+    }
+  }
+
+  async function retireLegacyLookupFiles(plan) {
+    if (plan.sql?.required !== true) return;
+    for (const targetPath of mailSqlTemplatePolicy.legacyLookupPaths) {
+      try {
+        const metadata = await lstatFn(targetPath);
+        if (!metadata.isFile() || metadata.isSymbolicLink()) {
+          throw activationError(
+            'mail_sql_legacy_lookup_unsafe',
+            'Legacy managed mail lookup path is not a safe regular file',
+          );
+        }
+      } catch (error) {
+        if (isMissing(error)) continue;
+        if (error instanceof MailConfigActivationError) throw error;
+        throw activationError(
+          'mail_sql_legacy_lookup_inspection_failed',
+          'Legacy managed mail lookup state could not be inspected',
+        );
+      }
+      try { await rmFn(targetPath, { force: true }); }
+      catch {
+        throw activationError(
+          'mail_sql_legacy_lookup_retirement_failed',
+          'Legacy managed mail lookup state could not be retired',
+        );
+      }
     }
   }
 
@@ -524,6 +553,7 @@ export function createMailConfigActivator({
       await runCommand(command, 'mail_service_health_failed', 'Managed mail service did not become healthy');
     }
     await assertSubmissionSocketSafe(postfixIdentity);
+    await retireLegacyLookupFiles(plan);
   }
 
   async function restoreBackupFile(backupDirectory, artifact) {
