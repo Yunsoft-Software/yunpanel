@@ -8,6 +8,7 @@ const ADDITIONAL_TYPES = Object.freeze([
   ['backups', 'backup'],
   ['crons', 'cron'],
   ['dockerWorkloads', 'docker'],
+  ['webmailMappings', 'webmail_mapping'],
 ]);
 const SAFE_RESOURCE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const SAFE_REFERENCE_ID = /^[A-Za-z0-9._:@-]{1,160}$/;
@@ -177,7 +178,71 @@ function descendants(domains, rootIds) {
   return result.sort((left, right) => left.id.localeCompare(right.id));
 }
 
+function sanitizeWebmailMappingReference(value) {
+  const fields = new Set([
+    'id', 'mailDomainId', 'webDomainId', 'serverId', 'domainName', 'hostname',
+    'certificateId', 'certificateFingerprint256', 'revision', 'state',
+    'operationId', 'applyJobId', 'expectedRoundcubePreviewSha256',
+    'expectedRoundcubeNginxSha256', 'createdAt', 'updatedAt',
+  ]);
+  const fingerprint = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
+  const mappingStates = new Set(['active', 'pending', 'removing']);
+  const timestamp = (input) => typeof input === 'string'
+    && Number.isFinite(Date.parse(input))
+    && new Date(input).toISOString() === input;
+  const optionalReference = (input) => input === null
+    || (typeof input === 'string' && SAFE_REFERENCE_ID.test(input));
+  const optionalDigest = (input) => input === null
+    || (typeof input === 'string' && SHA256_PATTERN.test(input));
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.size
+    || Object.keys(value).some((field) => !fields.has(field))
+    || typeof value.id !== 'string' || !SAFE_REFERENCE_ID.test(value.id)
+    || typeof value.mailDomainId !== 'string' || !SAFE_REFERENCE_ID.test(value.mailDomainId)
+    || typeof value.webDomainId !== 'string' || !SAFE_REFERENCE_ID.test(value.webDomainId)
+    || typeof value.serverId !== 'string' || !SAFE_REFERENCE_ID.test(value.serverId)
+    || typeof value.domainName !== 'string' || value.domainName.length < 1 || value.domainName.length > 253
+    || value.hostname !== `webmail.${value.domainName}`
+    || typeof value.certificateId !== 'string' || !SAFE_REFERENCE_ID.test(value.certificateId)
+    || typeof value.certificateFingerprint256 !== 'string'
+    || !fingerprint.test(value.certificateFingerprint256)
+    || !Number.isSafeInteger(value.revision) || value.revision < 1
+    || !mappingStates.has(value.state)
+    || !optionalReference(value.operationId) || !optionalReference(value.applyJobId)
+    || !optionalDigest(value.expectedRoundcubePreviewSha256)
+    || !optionalDigest(value.expectedRoundcubeNginxSha256)
+    || !timestamp(value.createdAt) || !timestamp(value.updatedAt)
+    || ((value.state === 'active') !== (value.operationId === null))
+    || ((value.applyJobId === null) !== (value.expectedRoundcubePreviewSha256 === null))
+    || ((value.applyJobId === null) !== (value.expectedRoundcubeNginxSha256 === null))) {
+    throw new ResourceImpactError(
+      'webmail_mapping_impact_invalid',
+      'webmail_mapping impact provider returned invalid metadata',
+      503,
+    );
+  }
+  return Object.freeze({
+    id: value.id,
+    mailDomainId: value.mailDomainId,
+    webDomainId: value.webDomainId,
+    serverId: value.serverId,
+    domainName: value.domainName,
+    hostname: value.hostname,
+    certificateId: value.certificateId,
+    certificateFingerprint256: value.certificateFingerprint256.toUpperCase(),
+    revision: value.revision,
+    state: value.state,
+    operationId: value.operationId,
+    applyJobId: value.applyJobId,
+    expectedRoundcubePreviewSha256: value.expectedRoundcubePreviewSha256,
+    expectedRoundcubeNginxSha256: value.expectedRoundcubeNginxSha256,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+  });
+}
+
 function sanitizeAdditionalReference(value, type) {
+  if (type === 'webmail_mapping') return sanitizeWebmailMappingReference(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).some((key) => !['id', 'state'].includes(key))
     || typeof value.id !== 'string' || !SAFE_REFERENCE_ID.test(value.id)
@@ -510,6 +575,7 @@ export const resourceImpactInternals = Object.freeze({
   jobReference,
   externalLifecycleReference,
   descendants,
+  sanitizeWebmailMappingReference,
   sanitizeAdditionalReference,
   additionalBucket,
   sanitizeDnsRetirementReference,
