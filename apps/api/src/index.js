@@ -580,6 +580,11 @@ websiteProvisioningRuntime.configureMailControlPlane({
   domainRegistry,
   mailConfigurationService,
 });
+websiteProvisioningRuntime.configureMailDkimControlPlane({
+  mailDomainRegistry,
+  domainRegistry,
+  mailDkimRegistry,
+});
 websiteProvisioningRuntime.configureDatabaseControlPlane({
   jobRegistry,
   databaseBindingRegistry,
