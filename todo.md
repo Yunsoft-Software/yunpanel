@@ -14,6 +14,9 @@ Bu bölüm bu sohbet ortamında repository checkout/Node runner bulunmadığı i
       node --test apps/api/test/mail-domain-removal-config-phase.test.js apps/api/test/mail-domain-removal-cleanup-phase.test.js apps/api/test/mail-domain-removal-runtime.test.js apps/api/test/domain-removal-plan.test.js apps/api/test/domain-removal-operation-registry.test.js apps/api/test/domain-removal-runtime.test.js apps/api/test/domain-removal-external-dns.test.js
 - [ ] Job idempotency lookup + durable wrapper regresyonunu çalıştır:
       node --test apps/api/test/job-registry.test.js apps/api/test/durable-job-registry.test.js
+- [ ] Domain/Website delete backup impact provider hedef testini çalıştır:
+      node --test apps/api/test/domain-removal-backup-impact.test.js
+      Ardından resource-impact HTTP/regresyon testlerinde production `backupOperationRegistry + databaseBindingRegistry` wiring'inin backups bucket'ını `available` yaptığını, provider eksik test fixture'larında mevcut fail-closed davranışın değişmediğini doğrula.
 - [ ] Production bootstrap import/syntax kapısı: apps/api/src/index.js, mail-domain-removal-production-runtime.js ve domain-removal-production-runtime.js Node 24 altında yüklenebilsin; duplicate import/name veya startup dependency hatası varsa düzelt. External DNS için dns-hosting-registry deleteZone exposure + parent runtime wiring'ini de hedefli source testte doğrula.
 - [ ] npm run check çalıştır. Yeni removal/bootstrap commitlerinden kaynaklı herhangi bir failure varsa küçük ayrı commitlerle düzelt; GitHub Actions kullanma.
 - [ ] Hedefli/full source testleri geçince docs/history/domain-removal-mail-data-finalize-bootstrap-2026-09-19.md içine gerçek test sayıları/komutları ekle. Gerçek Ubuntu failure-injection kabulü aşağıdaki T-PROVISIONING/T-MAIL kapılarında ayrıca açık kalsın.
