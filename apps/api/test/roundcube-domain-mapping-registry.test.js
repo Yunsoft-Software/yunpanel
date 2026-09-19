@@ -10,6 +10,7 @@ const mailDomainId = '11111111-1111-4111-8111-111111111111';
 const webDomainId = '22222222-2222-4222-8222-222222222222';
 const serverId = '33333333-3333-4333-8333-333333333333';
 const certificateId = '44444444-4444-4444-8444-444444444444';
+const provisioningOperationId = '55555555-5555-4555-8555-555555555555';
 const fingerprint = Array.from({ length: 32 }, () => 'AA').join(':');
 
 function fixture({
@@ -94,6 +95,21 @@ test('bind preview pins exact local mail, Domain and certificate evidence withou
   assert.match(preview.confirmation, /^bind-roundcube-domain:/);
   assert.equal(JSON.stringify(preview).includes('privkey'), false);
   assert.equal(JSON.stringify(preview).includes('/etc/letsencrypt'), false);
+});
+
+test('bind may be owned by an exact parent provisioning operation identity', async () => {
+  const registry = fixture();
+  const preview = await registry.previewBind({ mailDomainId, certificateId });
+  const pending = await registry.beginBind({
+    mailDomainId,
+    certificateId,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+    operationId: provisioningOperationId,
+  });
+  assert.equal(pending.state, 'pending');
+  assert.equal(pending.operationId, provisioningOperationId);
+  assert.equal((await registry.getRecordForMailDomain(mailDomainId)).operationId, provisioningOperationId);
 });
 
 test('bind is pending until exact Roundcube apply evidence activates the mapping', async () => {
