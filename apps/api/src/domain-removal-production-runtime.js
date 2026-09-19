@@ -31,6 +31,8 @@ export function createDomainRemovalProductionRuntime({
   dnsZoneRetirementService = null,
   dnsZoneRetirementRuntime = null,
   mailDomainRemovalRuntime,
+  roundcubeDomainMappingRegistry,
+  roundcubeDomainMappingService,
   localServerId,
 } = {}) {
   const required = [
@@ -46,12 +48,15 @@ export function createDomainRemovalProductionRuntime({
     [dockerWorkloadRegistry, 'getWorkload'],
     [backupOperationRegistry, 'listOperations'],
     [databaseBindingRegistry, 'listBindings'],
+    [roundcubeDomainMappingRegistry, 'listActiveMappings'],
+    [roundcubeDomainMappingRegistry, 'listInFlight'],
   ];
   if (typeof filePath !== 'string' || !filePath
     || typeof localServerId !== 'string' || !localServerId
     || required.some(([dependency, method]) => !dependency || typeof dependency[method] !== 'function')
     || !domainSuspensionRuntime
-    || !mailDomainRemovalRuntime) {
+    || !mailDomainRemovalRuntime
+    || !roundcubeDomainMappingService) {
     throw new DomainRemovalProductionRuntimeError(
       'domain_removal_production_dependencies_invalid',
       'Domain removal production runtime dependencies are unavailable',
@@ -88,6 +93,24 @@ export function createDomainRemovalProductionRuntime({
     localServerId,
   });
 
+  async function webmailMappingImpactProvider({ domainIds }) {
+    const affected = new Set(domainIds);
+    const [active, inFlight] = await Promise.all([
+      roundcubeDomainMappingRegistry.listActiveMappings({ serverId: localServerId }),
+      roundcubeDomainMappingRegistry.listInFlight({ serverId: localServerId }),
+    ]);
+    if (!Array.isArray(active) || !Array.isArray(inFlight)) {
+      throw new DomainRemovalProductionRuntimeError(
+        'domain_removal_webmail_inventory_invalid',
+        'Webmail mapping inventory is invalid',
+        503,
+      );
+    }
+    return [...active, ...inFlight]
+      .filter((mapping) => affected.has(mapping.webDomainId))
+      .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
   async function domainPreview({ domainId } = {}) {
     const domain = await domainRegistry.getDomain(domainId);
     if (!domain || domain.serverId !== localServerId) {
@@ -118,6 +141,7 @@ export function createDomainRemovalProductionRuntime({
           return [{ id: workload.id, state: workload.state }];
         },
         backups: backupImpactProvider,
+        webmailMappings: webmailMappingImpactProvider,
         mailboxes: async ({ domainIds }) => {
           const impactedDomains = new Set(domainIds);
           const mailDomainIds = new Set((await mailDomainRegistry.listMailDomains())
@@ -143,6 +167,8 @@ export function createDomainRemovalProductionRuntime({
     dnsZoneRetirementRuntime,
     dnsHostingRegistry,
     mailDomainRemovalRuntime,
+    roundcubeDomainMappingRegistry,
+    roundcubeDomainMappingService,
   });
 
   return Object.freeze({
