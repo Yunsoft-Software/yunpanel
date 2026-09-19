@@ -1,5 +1,6 @@
 import { createWebsiteProvisioningPlan } from './website-provisioning-plan.js';
 import { siteCreateProvisioningPlan as createIsolatedSiteCreateProvisioningPlan } from './site-create-provisioning-isolation.js';
+import { deterministicWebsiteMailDkimSelector } from './website-mail-dkim-selector.js';
 
 function mailDomainMetadataStep(preview) {
   const mailDomain = preview.plan?.mailDomain;
@@ -49,6 +50,36 @@ function localMailConfigStep(preview) {
   });
 }
 
+function localMailDkimKeyStep(preview) {
+  const mailDomain = preview.plan?.mailDomain;
+  if (!mailDomain || mailDomain.managementMode !== 'local') return null;
+  const serverId = preview.plan?.website?.serverId;
+  if (typeof serverId !== 'string' || !serverId
+    || typeof preview.ids?.websiteId !== 'string' || !preview.ids.websiteId
+    || typeof mailDomain.webDomainId !== 'string' || !mailDomain.webDomainId) {
+    throw new Error('Local DKIM provisioning requires exact Website ownership');
+  }
+  return Object.freeze({
+    id: 'mail_dkim_key',
+    kind: 'mail_dkim_key',
+    required: true,
+    state: 'pending',
+    intent: Object.freeze({
+      adapter: 'managed-mail-dkim-key',
+      serverId,
+      websiteId: preview.ids.websiteId,
+      webDomainId: mailDomain.webDomainId,
+      mailDomainId: mailDomain.id,
+      domainName: mailDomain.domainName,
+      expectedMailDomainRevision: 2,
+      expectedMailDomainStatus: 'enabled',
+      expectedKeyRevision: 0,
+      selector: deterministicWebsiteMailDkimSelector(preview.operationId),
+    }),
+    compensation: Object.freeze({ state: 'not_required' }),
+  });
+}
+
 function cloneSteps(steps) {
   return steps.map((step) => ({
     ...step,
@@ -63,9 +94,10 @@ export function withSiteCreateMailSteps(plan, preview) {
   }
   const metadata = mailDomainMetadataStep(preview);
   const mailConfig = localMailConfigStep(preview);
-  if (!metadata && !mailConfig) return plan;
-  if (plan.steps.some((step) => ['mail_domain_metadata', 'mail_config'].includes(step.id)
-    || ['mail_domain_metadata', 'mail_config'].includes(step.kind))) {
+  const mailDkimKey = localMailDkimKeyStep(preview);
+  if (!metadata && !mailConfig && !mailDkimKey) return plan;
+  if (plan.steps.some((step) => ['mail_domain_metadata', 'mail_config', 'mail_dkim_key'].includes(step.id)
+    || ['mail_domain_metadata', 'mail_config', 'mail_dkim_key'].includes(step.kind))) {
     throw new Error('Website provisioning already contains Mail Domain steps');
   }
 
@@ -80,7 +112,9 @@ export function withSiteCreateMailSteps(plan, preview) {
 
   if (mailConfig) {
     const certificateIndex = steps.findIndex((step) => step.id === 'certificate');
-    steps.splice(certificateIndex >= 0 ? certificateIndex + 1 : steps.length, 0, mailConfig);
+    const mailConfigIndex = certificateIndex >= 0 ? certificateIndex + 1 : steps.length;
+    steps.splice(mailConfigIndex, 0, mailConfig);
+    if (mailDkimKey) steps.splice(mailConfigIndex + 1, 0, mailDkimKey);
   }
 
   return createWebsiteProvisioningPlan({
@@ -98,5 +132,6 @@ export function siteCreateProvisioningPlan(preview) {
 export const siteCreateMailProvisioningInternals = Object.freeze({
   mailDomainMetadataStep,
   localMailConfigStep,
+  localMailDkimKeyStep,
   withSiteCreateMailSteps,
 });
