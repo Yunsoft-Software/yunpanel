@@ -12,6 +12,7 @@ import {
   enableManagedMailSql,
   enableManagedMailSrs,
   enableManagedMailSubmission,
+  mailSqlTemplatePolicy,
   mailSrsTemplatePolicy,
   mailTemplatePolicy,
   normalizeMailboxAddress,
@@ -417,7 +418,7 @@ export function createMailConfigurationService({
         aliases: materialized.aliases,
       });
       const seedArtifact = preview.artifacts.find(
-        (artifact) => artifact.path === '/etc/yunpanel/mail/sql/virtual-mail.sql',
+        (artifact) => artifact.path === mailSqlTemplatePolicy.seedPath,
       );
       if (!seedArtifact || seedArtifact.sha256 !== createHash('sha256').update(seed).digest('hex')) {
         throw new MailConfigurationError(
