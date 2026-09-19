@@ -90,6 +90,7 @@ test('local mail config, DKIM key, and signing config become required after cert
   const tls = plan.steps.find((step) => step.id === 'tls_activation');
   const config = plan.steps.find((step) => step.id === 'mail_config');
   const dkim = plan.steps.find((step) => step.id === 'mail_dkim_key');
+  const webmailCertificate = plan.steps.find((step) => step.id === 'webmail_certificate');
   const dkimConfig = plan.steps.find((step) => step.id === 'mail_dkim_config');
   const roundcube = plan.steps.find((step) => step.id === 'roundcube_mapping');
   const nginx = plan.steps.find((step) => step.id === 'nginx');
@@ -156,6 +157,21 @@ test('local mail config, DKIM key, and signing config become required after cert
   assert.equal(dkimConfig.required, true);
   assert.equal(dkimConfig.state, 'pending');
   assert.equal(dkimConfig.compensation.state, 'pending');
+  assert.equal(webmailCertificate.kind, 'webmail_certificate');
+  assert.equal(webmailCertificate.required, true);
+  assert.equal(webmailCertificate.state, 'pending');
+  assert.equal(webmailCertificate.compensation.state, 'not_required');
+  assert.deepEqual(webmailCertificate.intent, {
+    adapter: 'acme-webmail-certificate',
+    serverId,
+    websiteId,
+    webDomainId: domainId,
+    mailDomainId,
+    domainName: 'example.com',
+    hostname: 'webmail.example.com',
+    expectedMailDomainRevision: 2,
+  });
+
   assert.deepEqual(dkimConfig.intent, {
     adapter: 'managed-mail-dkim-config',
     serverId,
@@ -187,7 +203,8 @@ test('local mail config, DKIM key, and signing config become required after cert
   assert.ok(order.indexOf('certificate') < order.indexOf('tls_activation'));
   assert.ok(order.indexOf('tls_activation') < order.indexOf('mail_config'));
   assert.ok(order.indexOf('mail_config') < order.indexOf('mail_dkim_key'));
-  assert.ok(order.indexOf('mail_dkim_key') < order.indexOf('mail_dkim_config'));
+  assert.ok(order.indexOf('mail_dkim_key') < order.indexOf('webmail_certificate'));
+  assert.ok(order.indexOf('webmail_certificate') < order.indexOf('mail_dkim_config'));
   assert.ok(order.indexOf('mail_dkim_config') < order.indexOf('roundcube_mapping'));
   assert.equal(plan.ready, false);
 });
@@ -211,6 +228,10 @@ test('pre-create local mail preview keeps metadata pending without changing immu
     after.steps.find((step) => step.id === 'mail_dkim_key').intent,
   );
   assert.deepEqual(
+    before.steps.find((step) => step.id === 'webmail_certificate').intent,
+    after.steps.find((step) => step.id === 'webmail_certificate').intent,
+  );
+  assert.deepEqual(
     before.steps.find((step) => step.id === 'mail_dkim_config').intent,
     after.steps.find((step) => step.id === 'mail_dkim_config').intent,
   );
@@ -226,6 +247,7 @@ test('external mail tracks metadata but never invokes the local mail stack', () 
   assert.equal(plan.steps.some((step) => step.id === 'mail_config'), false);
   assert.equal(plan.steps.some((step) => step.id === 'mail_dkim_key'), false);
   assert.equal(plan.steps.some((step) => step.id === 'mail_dkim_config'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'webmail_certificate'), false);
   assert.equal(plan.steps.some((step) => step.id === 'certificate'), false);
 });
 
@@ -235,4 +257,5 @@ test('mail none preserves the existing Website provisioning step set', () => {
   assert.equal(plan.steps.some((step) => step.id === 'mail_config'), false);
   assert.equal(plan.steps.some((step) => step.id === 'mail_dkim_key'), false);
   assert.equal(plan.steps.some((step) => step.id === 'mail_dkim_config'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'webmail_certificate'), false);
 });
