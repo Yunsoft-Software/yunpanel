@@ -570,6 +570,11 @@ function buildSteps(preview, createdAt) {
       && mailDomain.managementMode === 'local'
       && mailDomain.status === 'enabled'
     ))
+    || !plan.certificateIntents.some((certificate) => (
+      certificate.id === mapping.certificateId
+      && certificate.domainId === mapping.webDomainId
+      && certificate.serverId === mapping.serverId
+    ))
   ))) {
     throw invalid('Webmail mapping removal intent crosses the Domain removal boundary');
   }
