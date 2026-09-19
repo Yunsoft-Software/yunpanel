@@ -111,7 +111,7 @@ function assertCanonicalSet(domains, accounts, aliases) {
   }
 }
 
-export function renderManagedMailSqlSeed({
+function normalizedSqlState({
   domains = [],
   accounts = [],
   aliases = [],
@@ -120,10 +120,31 @@ export function renderManagedMailSqlSeed({
   const normalizedAccounts = canonicalAccounts(normalizedDomains, accounts);
   const normalizedAliases = canonicalAliases(normalizedDomains, aliases);
   assertCanonicalSet(normalizedDomains, normalizedAccounts, normalizedAliases);
+  return Object.freeze({
+    domains: normalizedDomains,
+    accounts: normalizedAccounts,
+    aliases: normalizedAliases,
+  });
+}
+
+function sqlStateSha256(input = {}) {
+  return sha256(JSON.stringify(normalizedSqlState(input)));
+}
+
+export function renderManagedMailSqlSeed(input = {}) {
+  const state = normalizedSqlState(input);
+  const normalizedDomains = state.domains;
+  const normalizedAccounts = state.accounts;
+  const normalizedAliases = state.aliases;
+  const stateSha256 = sha256(JSON.stringify(state));
 
   const lines = [
     'PRAGMA foreign_keys = ON;',
     'BEGIN IMMEDIATE;',
+    'CREATE TABLE IF NOT EXISTS yunpanel_meta (',
+    '  key TEXT PRIMARY KEY NOT NULL,',
+    '  value TEXT NOT NULL',
+    ');',
     'CREATE TABLE IF NOT EXISTS virtual_domains (',
     '  domain TEXT PRIMARY KEY NOT NULL,',
     '  enabled INTEGER NOT NULL CHECK (enabled IN (0, 1))',
@@ -145,6 +166,8 @@ export function renderManagedMailSqlSeed({
     'DELETE FROM virtual_aliases;',
     'DELETE FROM virtual_mailboxes;',
     'DELETE FROM virtual_domains;',
+    'DELETE FROM yunpanel_meta;',
+    'INSERT INTO yunpanel_meta(key, value) VALUES (''state_sha256'', ' + sqlLiteral(stateSha256) + ');',
   ];
 
   for (const domain of normalizedDomains) {
@@ -392,6 +415,7 @@ export function enableManagedMailSql(preview, input = {}) {
       enabled: true,
       databasePath: sql.databasePath,
       seedSha256: sql.artifacts[0].sha256,
+      stateSha256: sql.stateSha256,
       lookups: sql.postfixLookups,
     }),
     readyToApply: false,
@@ -401,6 +425,7 @@ export function enableManagedMailSql(preview, input = {}) {
 
 export function previewManagedMailSqlConfiguration(input = {}) {
   const seed = renderManagedMailSqlSeed(input);
+  const stateSha256 = sqlStateSha256(input);
   const artifacts = Object.freeze([
     sensitiveArtifact(SEED_PATH, seed),
     publicArtifact(POSTFIX_DOMAIN_PATH, renderPostfixSqlDomainLookup()),
@@ -413,12 +438,14 @@ export function previewManagedMailSqlConfiguration(input = {}) {
   const identity = {
     version: 1,
     databasePath: DB_PATH,
+    stateSha256,
     artifactDigests: artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
   };
   return Object.freeze({
     version: 1,
     sha256: sha256(JSON.stringify(identity)),
     databasePath: DB_PATH,
+    stateSha256,
     artifacts,
     postfixLookups: Object.freeze({
       domains: 'proxy:sqlite:' + POSTFIX_DOMAIN_PATH,
@@ -451,6 +478,8 @@ export const mailSqlTemplateInternals = Object.freeze({
   canonicalAliases,
   canonicalAccounts,
   assertCanonicalSet,
+  normalizedSqlState,
+  sqlStateSha256,
   sqlAuthWithSubmission,
   replaceParameter,
   sqlMasterServices,
