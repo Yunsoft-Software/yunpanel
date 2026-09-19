@@ -219,7 +219,7 @@ export function createMailDomainRemovalFinalizePhase({
   async function executeExternal(operation) {
     await domainIdentity(operation);
     const mailDomain = await currentMailDomain(operation);
-    if (mailDomain === null) return removed(operation, now(), true);
+    if (mailDomain === null) return removed(operation, now, true);
     if (!exactExternal(operation, mailDomain)) {
       return failed(
         operation,
@@ -252,7 +252,7 @@ export function createMailDomainRemovalFinalizePhase({
         );
       }
     } catch (error) {
-      if (Number(error?.status) === 404) return removed(operation, now(), true);
+      if (Number(error?.status) === 404) return removed(operation, now, true);
       return failed(
         operation,
         typeof error?.code === 'string' ? error.code : 'mail_domain_removal_external_unlink_failed',
@@ -262,13 +262,13 @@ export function createMailDomainRemovalFinalizePhase({
         true,
       );
     }
-    return removed(operation, now(), true);
+    return removed(operation, now, true);
   }
 
   async function executeLocal(operation) {
     await domainIdentity(operation);
     const mailDomain = await currentMailDomain(operation);
-    if (mailDomain === null) return removed(operation, now(), true);
+    if (mailDomain === null) return removed(operation, now, true);
     if (!exactLocal(operation, mailDomain)) {
       return failed(
         operation,
@@ -286,7 +286,7 @@ export function createMailDomainRemovalFinalizePhase({
         confirmation: 'delete-mail-domain:' + operation.mailDomainId + ':' + operation.finalRevision,
       });
     } catch (error) {
-      if (Number(error?.status) === 404) return removed(operation, now(), true);
+      if (Number(error?.status) === 404) return removed(operation, now, true);
       return failed(
         operation,
         typeof error?.code === 'string' ? error.code : 'mail_domain_removal_finalize_failed',
@@ -307,7 +307,7 @@ export function createMailDomainRemovalFinalizePhase({
         true,
       );
     }
-    return removed(operation, now(), true);
+    return removed(operation, now, true);
   }
 
   async function execute(operationValue) {
@@ -327,7 +327,7 @@ export function createMailDomainRemovalFinalizePhase({
     }
     await domainIdentity(operation);
     const mailDomain = await currentMailDomain(operation);
-    if (mailDomain === null) return removed(operation, now(), false);
+    if (mailDomain === null) return removed(operation, now, false);
     const exact = operation.managementMode === 'external'
       ? exactExternal(operation, mailDomain)
       : exactLocal(operation, mailDomain);
