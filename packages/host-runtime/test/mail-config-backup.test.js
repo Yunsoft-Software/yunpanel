@@ -96,7 +96,7 @@ test('backs up mail sources, compiled maps/sieve, main.cf/master.cf and managed 
   });
 
   const result = await manager.backupConfiguration(preview(), { transactionId: 'mail-job-0001' });
-  assert.equal(result.version, 5);
+  assert.equal(result.version, 6);
   assert.equal(result.transactionId, 'mail-job-0001');
   const { manifestSha256, ...manifest } = result;
   assert.equal(manifestSha256, createHash('sha256').update(JSON.stringify(manifest)).digest('hex'));
@@ -119,6 +119,23 @@ test('backs up mail sources, compiled maps/sieve, main.cf/master.cf and managed 
   for (const artifact of result.artifacts.filter((entry) => entry.present)) {
     assert.equal((await stat(path.join(directory, artifact.backupName))).mode & 0o777, 0o600);
   }
+  const legacyManifest = {
+    ...manifest,
+    version: 5,
+    artifacts: manifest.artifacts.filter((artifact) => (
+      mailConfigBackupInternals.legacyTargetPaths.includes(artifact.targetPath)
+    )),
+    directories: manifest.directories.filter((directory) => (
+      mailConfigBackupInternals.legacyManagedDirectoryPaths.includes(directory.path)
+    )),
+  };
+  const normalizedLegacy = mailConfigBackupInternals.normalizeManifest(legacyManifest, {
+    transactionId: result.transactionId,
+    planSha256: result.planSha256,
+  });
+  assert.equal(normalizedLegacy.version, 5);
+  assert.equal(normalizedLegacy.artifacts.length, mailConfigBackupInternals.legacyTargetPaths.length);
+
   const inspected = await manager.inspectBackup(preview(), { transactionId: 'mail-job-0001' });
   assert.equal(inspected.satisfied, true);
   assert.equal(inspected.result.planSha256, result.planSha256);
