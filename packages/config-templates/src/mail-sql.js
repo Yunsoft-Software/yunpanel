@@ -16,6 +16,17 @@ const POSTFIX_DOMAIN_PATH = POSTFIX_SQL_DIRECTORY + '/virtual-domains.cf';
 const POSTFIX_MAILBOX_PATH = POSTFIX_SQL_DIRECTORY + '/virtual-mailboxes.cf';
 const POSTFIX_ALIAS_PATH = POSTFIX_SQL_DIRECTORY + '/virtual-aliases.cf';
 const POSTFIX_SENDER_LOGIN_PATH = POSTFIX_SQL_DIRECTORY + '/sender-login.cf';
+const LEGACY_LOOKUP_PATHS = Object.freeze([
+  mailTemplatePolicy.postfixVirtualDomainMapPath,
+  mailTemplatePolicy.postfixVirtualDomainMapPath + '.db',
+  mailTemplatePolicy.postfixVirtualMailboxMapPath,
+  mailTemplatePolicy.postfixVirtualMailboxMapPath + '.db',
+  mailTemplatePolicy.postfixVirtualAliasMapPath,
+  mailTemplatePolicy.postfixVirtualAliasMapPath + '.db',
+  mailSubmissionTemplatePolicy.senderLoginPath,
+  mailSubmissionTemplatePolicy.senderLoginPath + '.db',
+  mailTemplatePolicy.dovecotPasswdFilePath,
+]);
 
 export class MailSqlTemplateError extends Error {
   constructor(code, message) {
@@ -478,6 +489,7 @@ export const mailSqlTemplatePolicy = Object.freeze({
   postfixMailboxPath: POSTFIX_MAILBOX_PATH,
   postfixAliasPath: POSTFIX_ALIAS_PATH,
   postfixSenderLoginPath: POSTFIX_SENDER_LOGIN_PATH,
+  legacyLookupPaths: LEGACY_LOOKUP_PATHS,
   databaseMode: 0o640,
   seedMode: 0o600,
   publicConfigMode: 0o640,
