@@ -39,6 +39,7 @@ Son Domain removal External DNS metadata lifecycle ilerlemesi: `docs/history/dom
 Son Domain/Website removal backup impact ilerlemesi: `docs/history/domain-removal-backup-impact-progress-2026-09-19.md`.
 Son Website cron control-plane temeli: `docs/history/website-cron-control-plane-foundation-2026-09-19.md`.
 Son Website cron durable lifecycle ve API ilerlemesi: `docs/history/website-cron-durable-lifecycle-api-progress-2026-09-19.md`.
+Son WP-CLI ve Composer site-user bounded adapter ilerlemesi: `docs/history/php-cli-tools-wp-composer-progress-2026-09-19.md`.
 Son SQL-backed virtual-mail cutover ilerlemesi: `docs/history/mail-sql-virtual-mail-progress-2026-09-19.md`.
 Son shared Roundcube webmail mapping ilerlemesi: `docs/history/roundcube-webmail-mapping-progress-2026-09-19.md`.
 Son fresh Website shared Roundcube provisioning ilerlemesi: `docs/history/site-create-roundcube-provisioning-2026-09-19.md`.
@@ -156,8 +157,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 
 ## P1.4 — Site features/settings
 
-- [ ] WP-CLI site user.
-- [ ] Composer site user.
 - [ ] Redis/Memcached isolation policy.
 - [ ] Settings ekranlarını gerçek backend state'iyle tamamla.
 

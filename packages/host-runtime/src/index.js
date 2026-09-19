@@ -350,3 +350,8 @@ export {
   DatabaseCredentialEvidenceError,
   databaseCredentialEvidenceInternals,
 } from './database-credential-evidence-inspector.js';
+export {
+  createPhpCliToolManager,
+  PhpCliToolError,
+  phpCliToolInternals,
+} from './php-cli-tool-manager.js';

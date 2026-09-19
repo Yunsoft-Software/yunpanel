@@ -9,6 +9,7 @@ import {
   createMailReadinessInspector,
   createNginxLogReader,
   createWebsiteCronManager,
+  createPhpCliToolManager,
   inspectAllowlistedServices,
   inspectDocker,
   inspectNginx,
@@ -108,6 +109,7 @@ import { createWebsiteCronOperationReceiptStore } from './website-cron-operation
 import { createLocalWebsiteCronOperation } from './local-website-cron-operation.js';
 import { createWebsiteCronReconciliationProvider } from './website-cron-reconciliation.js';
 import { createWebsiteCronApplyService } from './website-cron-apply-service.js';
+import { createWebsitePhpToolsService } from './website-php-tools-service.js';
 import { createWebsiteSftpKeyRuntime } from './website-sftp-key-runtime.js';
 import { createWebsiteSuspensionOperationRegistry } from './website-suspension-operation-registry.js';
 import { createWebsiteSuspensionRuntime } from './website-suspension-runtime.js';
@@ -309,6 +311,12 @@ const websiteCronImpactProvider = localServerId
     localServerId,
   })
   : null;
+const phpCliToolManager = createPhpCliToolManager();
+const websitePhpToolsService = createWebsitePhpToolsService({
+  websiteRegistry,
+  applicationRegistry,
+  phpCliToolManager,
+});
 const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({
   filePath: websiteProvisioningStorePath,
   isolationMigrationFilePath: websiteIsolationMigrationStorePath,
@@ -953,6 +961,7 @@ const listener = createAuthenticatedApi({
       websiteRemovalRuntime,
       websiteCronImpactProvider,
       websiteCronApplyService,
+      websitePhpToolsService,
       localServerId,
       terminalCapabilityRegistry,
       ttydSessionManager,

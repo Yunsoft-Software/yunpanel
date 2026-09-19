@@ -157,6 +157,9 @@ import { WebsiteSftpKeyServiceError } from './website-sftp-key-service.js';
 import { mountWebsiteCronRoutes, WebsiteCronHttpError } from './website-cron-http.js';
 import { WebsiteCronApplyServiceError } from './website-cron-apply-service.js';
 import { WebsiteCronRegistryError } from './website-cron-registry.js';
+import { mountWebsitePhpToolsRoutes } from './website-php-tools-http.js';
+import { WebsitePhpToolsServiceError } from './website-php-tools-service.js';
+import { PhpCliToolError } from '@yunpanel/host-runtime';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -277,6 +280,7 @@ export function createApp({
   websiteSftpKeyRegistry = null,
   websiteSftpKeyService = null,
   websiteCronApplyService = null,
+  websitePhpToolsService = null,
   databaseBackupService = null,
   domainSuspensionRuntime = null,
   domainRemovalRuntime = null,
@@ -742,6 +746,12 @@ export function createApp({
   if (websiteCronApplyService) {
     mountWebsiteCronRoutes(app, { websiteCronApplyService });
   }
+  if (websitePhpToolsService) {
+    mountWebsitePhpToolsRoutes(app, {
+      websitePhpToolsService,
+      requirePanelRouteAccess: core.requirePanelRouteAccess,
+    });
+  }
   mountManagedServiceRoutes(app, { registry: localRegistry, jobRegistry });
   mountNodeRuntimeRoutes(app, { registry: localRegistry, jobRegistry });
   if (databaseBindingRegistry) {
@@ -911,6 +921,8 @@ export function createApp({
       || error instanceof WebsiteCronHttpError
       || error instanceof WebsiteCronApplyServiceError
       || error instanceof WebsiteCronRegistryError
+      || error instanceof WebsitePhpToolsServiceError
+      || error instanceof PhpCliToolError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }
