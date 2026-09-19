@@ -4,7 +4,7 @@ import path from 'node:path';
 import { normalizeDomainSet, sanitizeLogMessage } from '@yunpanel/shared';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
-const STORE_VERSION = 5;
+const STORE_VERSION = 6;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CERT_STATES = new Set([
@@ -13,6 +13,7 @@ const CERT_STATES = new Set([
 ]);
 const CERTIFICATE_SOURCES = new Set(['acme', 'custom']);
 const RENEWAL_MODES = new Set(['automatic', 'manual']);
+const CERTIFICATE_PURPOSES = new Set(['web', 'webmail']);
 const SAFE_OPERATION_ID = /^[A-Za-z0-9._:@-]{1,160}$/;
 
 export class CertificateRegistryError extends Error {
@@ -118,6 +119,7 @@ export function certificatePublicView(certificate, { now = Date.now } = {}) {
     domainId: certificate.domainId,
     serverId: certificate.serverId,
     source: certificate.source,
+    purpose: certificate.purpose,
     renewalMode: certificate.renewalMode,
     state: certificate.state,
     certName: certificate.certName,
@@ -281,6 +283,9 @@ function hydrateCertificate(certificate, sourceVersion, roots) {
   if (sourceVersion < 5) {
     certificate.provisioningOperationId = null;
   }
+  if (sourceVersion < 6) {
+    certificate.purpose = 'web';
+  }
   if (certificate.provisioningOperationId !== null
     && (typeof certificate.provisioningOperationId !== 'string'
       || !SAFE_OPERATION_ID.test(certificate.provisioningOperationId))) {
@@ -290,7 +295,8 @@ function hydrateCertificate(certificate, sourceVersion, roots) {
       409,
     );
   }
-  if (!CERT_STATES.has(certificate.state) || !CERTIFICATE_SOURCES.has(certificate.source) || !RENEWAL_MODES.has(certificate.renewalMode)
+  if (!CERT_STATES.has(certificate.state) || !CERTIFICATE_SOURCES.has(certificate.source)
+    || !CERTIFICATE_PURPOSES.has(certificate.purpose) || !RENEWAL_MODES.has(certificate.renewalMode)
     || (certificate.source === 'acme' && certificate.renewalMode !== 'automatic')
     || (certificate.source === 'custom' && certificate.renewalMode !== 'manual')) {
     throw new CertificateRegistryError('invalid_certificate_state', 'Persisted certificate source policy is invalid', 409);
@@ -367,7 +373,7 @@ export function createCertificateRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, 2, 3, 4, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.certificates)) {
+        if (![1, 2, 3, 4, 5, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.certificates)) {
           throw new Error('unsupported or invalid certificate registry state');
         }
         parsed.certificates.forEach((certificate) => hydrateCertificate(certificate, parsed.version, roots));
@@ -394,12 +400,16 @@ export function createCertificateRegistry({
     staging = false,
     replaceExisting = false,
     provisioningOperationId = null,
+    purpose = 'web',
   }) {
     await ensureInitialized();
     if (typeof domainId !== 'string' || !domainId) throw new CertificateRegistryError('invalid_domain', 'domainId is required');
     if (typeof serverId !== 'string' || !serverId) throw new CertificateRegistryError('invalid_server', 'serverId is required');
 
     const normalizedDomains = normalizeDomains(domains);
+    if (!CERTIFICATE_PURPOSES.has(purpose)) {
+      throw new CertificateRegistryError('invalid_certificate_purpose', 'Certificate purpose is invalid');
+    }
     const challenge = normalizeChallenge(requestedChallenge);
     const normalizedCertificateNames = normalizeCertificateNames(certificateNames, challenge);
     const certName = normalizedCertificateNames[0];
@@ -415,7 +425,8 @@ export function createCertificateRegistry({
       );
     }
     const existing = state.certificates.find((certificate) => {
-      if (certificate.domainId !== domainId || ['error', 'superseded', 'retired'].includes(certificate.state)) return false;
+      if (certificate.domainId !== domainId || certificate.purpose !== purpose
+        || ['error', 'superseded', 'retired'].includes(certificate.state)) return false;
       if (!isValidation) {
         if (certificate.staging) return false;
         if (['pending', 'issuing', 'renewing'].includes(certificate.state)) return true;
@@ -443,6 +454,7 @@ export function createCertificateRegistry({
       email: validateEmail(email),
       staging: isValidation,
       source: 'acme',
+      purpose,
       renewalMode: 'automatic',
       state: 'pending',
       certificatePath: null,
@@ -573,6 +585,7 @@ export function createCertificateRegistry({
     validTo,
     fingerprint256,
     materialDigest,
+    purpose = 'web',
   } = {}) {
     await ensureInitialized();
     if (typeof certificateId !== 'string' || !UUID_PATTERN.test(certificateId)) {
@@ -585,6 +598,9 @@ export function createCertificateRegistry({
     if (typeof domainId !== 'string' || !domainId) throw new CertificateRegistryError('invalid_domain', 'domainId is required');
     if (typeof serverId !== 'string' || !serverId) throw new CertificateRegistryError('invalid_server', 'serverId is required');
     const normalizedDomains = normalizeDomains(domains);
+    if (!CERTIFICATE_PURPOSES.has(purpose)) {
+      throw new CertificateRegistryError('invalid_certificate_purpose', 'Certificate purpose is invalid');
+    }
     const timestamp = new Date(now()).toISOString();
     const certificate = {
       id,
@@ -597,6 +613,7 @@ export function createCertificateRegistry({
       email: null,
       staging: false,
       source: 'custom',
+      purpose,
       renewalMode: 'manual',
       state: 'active',
       certificatePath: null,
@@ -644,7 +661,7 @@ export function createCertificateRegistry({
   async function prepareSelection(certificateId) {
     await ensureInitialized();
     const certificate = requireCertificate(state, certificateId);
-    if (certificate.staging || !['active', 'superseded'].includes(certificate.state)
+    if (certificate.purpose !== 'web' || certificate.staging || !['active', 'superseded'].includes(certificate.state)
       || !certificate.validTo || Date.parse(certificate.validTo) <= now()) {
       throw new CertificateRegistryError('certificate_not_selectable', 'Certificate is not selectable', 409);
     }
@@ -663,13 +680,14 @@ export function createCertificateRegistry({
   async function commitSelection(certificateId) {
     await ensureInitialized();
     const selected = requireCertificate(state, certificateId);
-    if (selected.staging || selected.state !== 'active') {
+    if (selected.purpose !== 'web' || selected.staging || selected.state !== 'active') {
       throw new CertificateRegistryError('certificate_not_selectable', 'Certificate is not selectable', 409);
     }
     const timestamp = new Date(now()).toISOString();
     let changed = false;
     for (const certificate of state.certificates) {
-      if (certificate.id === selected.id || certificate.domainId !== selected.domainId || certificate.staging || certificate.state !== 'active') continue;
+      if (certificate.id === selected.id || certificate.domainId !== selected.domainId
+        || certificate.purpose !== 'web' || certificate.staging || certificate.state !== 'active') continue;
       certificate.state = 'superseded';
       certificate.updatedAt = timestamp;
       changed = true;
@@ -762,7 +780,9 @@ export function createCertificateRegistry({
 
   async function getForDomain(domainId) {
     await ensureInitialized();
-    const certificate = [...state.certificates].reverse().find((candidate) => candidate.domainId === domainId);
+    const certificate = [...state.certificates].reverse().find((candidate) => (
+      candidate.domainId === domainId && candidate.purpose === 'web'
+    ));
     return certificate ? publicCertificate(certificate) : null;
   }
 
@@ -790,5 +810,6 @@ export function createCertificateRegistry({
 
 export const certificateRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
+  certificatePurposes: Object.freeze([...CERTIFICATE_PURPOSES]),
   hydrateCertificate,
 });
