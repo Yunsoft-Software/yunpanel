@@ -313,7 +313,7 @@ async function applyReconciliation({
     }
     if (job.operation === OPERATIONS.SSL_ISSUE) {
       const certificate = await certificateRegistry.markActive(job.resourceId, job.result, { renewal: false });
-      if (!certificate.staging && certificate.purpose === 'web') {
+      if (!certificate.staging && (certificate.purpose ?? 'web') === 'web') {
         await domainRegistry.attachCertificate(certificate.domainId, certificate.id, { domains: certificate.domains });
         await certificateRegistry.commitSelection(certificate.id);
       }
