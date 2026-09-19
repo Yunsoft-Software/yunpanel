@@ -26,6 +26,9 @@ test('Debian package creates an isolated shared mail-auth group without granting
   assert.match(postinst, /addgroup --system yunpanel-mailauth/);
   assert.match(postinst, /for mail_service_user in postfix dovecot; do/);
   assert.match(postinst, /adduser "\$mail_service_user" yunpanel-mailauth/);
+  assert.match(postinst, /mail_auth_membership_changed=1/);
+  assert.match(postinst, /systemctl try-restart postfix\.service/);
+  assert.match(postinst, /systemctl try-restart dovecot\.service/);
   assert.match(
     postinst,
     /install -d -o root -g yunpanel-mailauth -m 0750 \/var\/lib\/yunpanel\/mail-auth/,
