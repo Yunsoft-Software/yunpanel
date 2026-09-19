@@ -244,6 +244,7 @@ export function createApp({
   }),
   mailConfigurationService = null,
   roundcubeConfigurationService = null,
+  roundcubeDomainMappingRegistry = null,
   roundcubeDomainMappingService = null,
   environment = process.env.NODE_ENV,
   journalLogReader = null,
@@ -506,6 +507,26 @@ export function createApp({
     } : {}),
     additionalProviders: {
       ...(removalBackupImpactProvider ? { backups: removalBackupImpactProvider } : {}),
+      ...(roundcubeDomainMappingRegistry
+        && typeof roundcubeDomainMappingRegistry.listActiveMappings === 'function'
+        && typeof roundcubeDomainMappingRegistry.listInFlight === 'function'
+        ? {
+          webmailMappings: async ({ domainIds }) => {
+            const affected = new Set(domainIds);
+            const [active, inFlight] = await Promise.all([
+              roundcubeDomainMappingRegistry.listActiveMappings(
+                localServerId ? { serverId: localServerId } : {},
+              ),
+              roundcubeDomainMappingRegistry.listInFlight(
+                localServerId ? { serverId: localServerId } : {},
+              ),
+            ]);
+            return [...active, ...inFlight]
+              .filter((mapping) => affected.has(mapping.webDomainId))
+              .sort((left, right) => left.id.localeCompare(right.id));
+          },
+        }
+        : {}),
       dockerWorkloads: async ({ dockerWorkloadId }) => {
         if (!dockerWorkloadId) return [];
         const workload = await dockerWorkloadRegistry.getWorkload(dockerWorkloadId);
