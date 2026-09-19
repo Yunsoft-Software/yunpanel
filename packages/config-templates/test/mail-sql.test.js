@@ -3,9 +3,11 @@ import test from 'node:test';
 
 import {
   MailSqlTemplateError,
+  enableManagedMailSql,
   mailSqlTemplatePolicy,
   mailTemplatePolicy,
   previewManagedMailSqlConfiguration,
+  previewManagedMailSubmissionConfiguration,
   renderDovecotSqlAuthConfig,
   renderDovecotSqlConfig,
   renderManagedMailSqlSeed,
@@ -145,4 +147,81 @@ test('SQL preview hides seed/password hashes while exposing only fixed lookup me
   assert.equal(Object.hasOwn(seed, 'content'), false);
   assert.equal(JSON.stringify(preview).includes(HASH), false);
   assert.equal(JSON.stringify(preview).includes('{ARGON2ID}'), false);
+});
+
+
+test('SQL transformer replaces legacy maps/passwd auth while preserving managed mail security and submission', () => {
+  const legacy = previewManagedMailSubmissionConfiguration({
+    domains: ['example.com'],
+    mailboxes: ['owner@example.com'],
+    accounts: [{ address: 'owner@example.com', passwordHash: HASH, quotaBytes: null }],
+    aliases: [{ source: 'info@example.com', destinations: ['owner@example.com'] }],
+    postmasterAddress: 'owner@example.com',
+  });
+  const sql = enableManagedMailSql(legacy, input());
+
+  const paths = sql.artifacts.map((artifact) => artifact.path);
+  for (const removed of [
+    mailTemplatePolicy.postfixVirtualDomainMapPath,
+    mailTemplatePolicy.postfixVirtualMailboxMapPath,
+    mailTemplatePolicy.postfixVirtualAliasMapPath,
+    '/etc/yunpanel/mail/postfix/sender-login',
+    mailTemplatePolicy.dovecotPasswdFilePath,
+  ]) assert.equal(paths.includes(removed), false);
+  for (const required of [
+    mailSqlTemplatePolicy.seedPath,
+    mailSqlTemplatePolicy.postfixDomainPath,
+    mailSqlTemplatePolicy.postfixMailboxPath,
+    mailSqlTemplatePolicy.postfixAliasPath,
+    mailSqlTemplatePolicy.postfixSenderLoginPath,
+    mailSqlTemplatePolicy.dovecotSqlPath,
+    mailTemplatePolicy.dovecotAuthConfigPath,
+    mailTemplatePolicy.dovecotMailConfigPath,
+  ]) assert.equal(paths.includes(required), true);
+
+  assert.equal(sql.requirements.at(-1), 'mail_sqlite');
+  assert.equal(
+    sql.postfixParameters.find((entry) => entry.name === 'virtual_alias_maps').value,
+    'proxy:sqlite:' + mailSqlTemplatePolicy.postfixAliasPath,
+  );
+  assert.equal(
+    sql.postfixParameters.find((entry) => entry.name === 'virtual_mailbox_domains').value,
+    'proxy:sqlite:' + mailSqlTemplatePolicy.postfixDomainPath,
+  );
+  assert.equal(
+    sql.postfixParameters.find((entry) => entry.name === 'virtual_mailbox_maps').value,
+    'proxy:sqlite:' + mailSqlTemplatePolicy.postfixMailboxPath,
+  );
+  const senderLogin = sql.postfixMasterServices[0].parameters.find(
+    (entry) => entry.name === 'smtpd_sender_login_maps',
+  );
+  assert.equal(senderLogin.value, 'proxy:sqlite:' + mailSqlTemplatePolicy.postfixSenderLoginPath);
+
+  const auth = sql.artifacts.find((artifact) => artifact.path === mailTemplatePolicy.dovecotAuthConfigPath);
+  assert.match(auth.content, /^  driver = sql$/m);
+  assert.match(auth.content, /^service auth \{$/m);
+  assert.match(auth.content, /unix_listener \/var\/spool\/postfix\/private\/auth/);
+  assert.equal(auth.content.includes('passwd-file'), false);
+  assert.equal(JSON.stringify(sql).includes(HASH), false);
+});
+
+test('SQL transformer rejects previews missing canonical legacy insertion points', () => {
+  const legacy = previewManagedMailSubmissionConfiguration({
+    domains: ['example.com'],
+    mailboxes: ['owner@example.com'],
+    accounts: [{ address: 'owner@example.com', passwordHash: HASH }],
+    aliases: [],
+    postmasterAddress: 'owner@example.com',
+  });
+  const broken = {
+    ...legacy,
+    artifacts: legacy.artifacts.filter(
+      (artifact) => artifact.path !== mailTemplatePolicy.dovecotPasswdFilePath,
+    ),
+  };
+  assert.throws(
+    () => enableManagedMailSql(broken, input()),
+    (error) => error instanceof MailSqlTemplateError
+      && error.code === 'mail_sql_legacy_artifact_set_invalid',
+  );
 });
