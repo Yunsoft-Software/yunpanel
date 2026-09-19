@@ -307,12 +307,6 @@ const websiteCronReconciliationProvider = localServerId
     localServerId,
   })
   : null;
-const websiteCronApplyService = createWebsiteCronApplyService({
-  websiteCronRegistry,
-  jobRegistry,
-  websiteRegistry,
-  reconciliationProvider: websiteCronReconciliationProvider,
-});
 const websiteCronImpactProvider = localServerId
   ? createWebsiteCronImpactProvider({
     websiteCronRegistry,
@@ -407,13 +401,6 @@ const serverDnsIdentityRegistry = createServerDnsIdentityRegistry({
 await serverDnsIdentityRegistry.init();
 const panelSettingsRegistry = createPanelSettingsRegistry({
   filePath: panelSettingsStorePath,
-});
-const panelSettingsService = createPanelSettingsService({
-  panelSettingsRegistry,
-  serverRegistry: registry,
-  serverDnsIdentityRegistry,
-  jobRegistry,
-  localServerId,
 });
 const powerDnsSecretRegistry = createPowerDnsSecretRegistry({
   filePath: powerDnsSecretStorePath,
@@ -586,6 +573,19 @@ const jobRegistry = createDomainStageTargetJobRegistry({
   dockerComposeProjectRegistry: dockerComposeProjectBootstrap.projectRegistry,
   applicationRegistry,
   runtimeBindingRegistry,
+});
+const websiteCronApplyService = createWebsiteCronApplyService({
+  websiteCronRegistry,
+  jobRegistry,
+  websiteRegistry,
+  reconciliationProvider: websiteCronReconciliationProvider,
+});
+const panelSettingsService = createPanelSettingsService({
+  panelSettingsRegistry,
+  serverRegistry: registry,
+  serverDnsIdentityRegistry,
+  jobRegistry,
+  localServerId,
 });
 const roundcubeDomainMappingService = createRoundcubeDomainMappingService({
   registry: roundcubeDomainMappingRegistry,

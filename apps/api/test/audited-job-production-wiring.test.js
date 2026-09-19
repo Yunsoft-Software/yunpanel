@@ -14,6 +14,17 @@ test('production wraps the durable registry with the common audit store before e
   assert.doesNotMatch(source, /createApp\([^)]*jobRegistry:\s*durableJobRegistry/);
 });
 
+test('production constructs job-backed services only after the audited job registry', async () => {
+  const source = await readFile(indexUrl, 'utf8');
+  const jobRegistryDeclaration = source.indexOf('const jobRegistry = createDomainStageTargetJobRegistry({');
+  const cronServiceDeclaration = source.indexOf('const websiteCronApplyService = createWebsiteCronApplyService({');
+  const settingsServiceDeclaration = source.indexOf('const panelSettingsService = createPanelSettingsService({');
+
+  assert.ok(jobRegistryDeclaration >= 0);
+  assert.ok(cronServiceDeclaration > jobRegistryDeclaration);
+  assert.ok(settingsServiceDeclaration > jobRegistryDeclaration);
+});
+
 test('API local executor and renewal scheduler share the audited registry', async () => {
   const source = await readFile(indexUrl, 'utf8');
   assert.match(source, /createHandler: \(\) => createDockerComposeApiHandler\(\{[\s\S]*?baseHandler: createApp\(\{[\s\S]*?\n\s*jobRegistry,[\s\S]*?\n\s*dnsProviderCredentialRegistry,/);
