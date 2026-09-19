@@ -84,10 +84,11 @@ function preview({ mailMode = 'local', mailReady = true } = {}) {
   };
 }
 
-test('local mail becomes a required compensatable step after certificate issuance', () => {
+test('local mail config and operation-owned DKIM key become required after certificate issuance', () => {
   const plan = siteCreateProvisioningPlan(preview());
   const metadata = plan.steps.find((step) => step.id === 'mail_domain_metadata');
   const config = plan.steps.find((step) => step.id === 'mail_config');
+  const dkim = plan.steps.find((step) => step.id === 'mail_dkim_key');
 
   assert.equal(metadata.state, 'succeeded');
   assert.equal(metadata.compensation.state, 'not_required');
@@ -114,9 +115,27 @@ test('local mail becomes a required compensatable step after certificate issuanc
     desiredStatus: 'enabled',
   });
 
+  assert.equal(dkim.kind, 'mail_dkim_key');
+  assert.equal(dkim.required, true);
+  assert.equal(dkim.state, 'pending');
+  assert.equal(dkim.compensation.state, 'not_required');
+  assert.deepEqual(dkim.intent, {
+    adapter: 'managed-mail-dkim-key',
+    serverId,
+    websiteId,
+    webDomainId: domainId,
+    mailDomainId,
+    domainName: 'example.com',
+    expectedMailDomainRevision: 2,
+    expectedMailDomainStatus: 'enabled',
+    expectedKeyRevision: 0,
+    selector: 'yp-9ae512c0a7174611943c6ce2',
+  });
+
   const order = plan.steps.map((step) => step.id);
   assert.ok(order.indexOf('certificate') >= 0);
   assert.ok(order.indexOf('certificate') < order.indexOf('mail_config'));
+  assert.ok(order.indexOf('mail_config') < order.indexOf('mail_dkim_key'));
   assert.equal(plan.ready, false);
 });
 
@@ -134,6 +153,10 @@ test('pre-create local mail preview keeps metadata pending without changing immu
     before.steps.find((step) => step.id === 'mail_config').intent,
     after.steps.find((step) => step.id === 'mail_config').intent,
   );
+  assert.deepEqual(
+    before.steps.find((step) => step.id === 'mail_dkim_key').intent,
+    after.steps.find((step) => step.id === 'mail_dkim_key').intent,
+  );
 });
 
 test('external mail tracks metadata but never invokes the local mail stack', () => {
@@ -142,6 +165,7 @@ test('external mail tracks metadata but never invokes the local mail stack', () 
 
   assert.equal(metadata.intent.managementMode, 'external');
   assert.equal(plan.steps.some((step) => step.id === 'mail_config'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'mail_dkim_key'), false);
   assert.equal(plan.steps.some((step) => step.id === 'certificate'), false);
 });
 
@@ -149,4 +173,5 @@ test('mail none preserves the existing Website provisioning step set', () => {
   const plan = siteCreateProvisioningPlan(preview({ mailMode: 'none' }));
   assert.equal(plan.steps.some((step) => step.id === 'mail_domain_metadata'), false);
   assert.equal(plan.steps.some((step) => step.id === 'mail_config'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'mail_dkim_key'), false);
 });
