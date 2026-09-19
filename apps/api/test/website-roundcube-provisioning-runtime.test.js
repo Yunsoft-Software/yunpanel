@@ -27,7 +27,7 @@ function domainRegistry() {
   };
 }
 
-test('Website provisioning runtime wires shared Roundcube and post-mapping DNS handlers', () => {
+test('Website provisioning runtime wires dedicated webmail certificate, shared Roundcube and mail DNS handlers', () => {
   const runtime = createWebsiteProvisioningRuntime();
   const jobs = jobRegistry();
   const domains = domainRegistry();
@@ -40,6 +40,16 @@ test('Website provisioning runtime wires shared Roundcube and post-mapping DNS h
   });
 
   const mailDomains = { async getMailDomain() { return null; } };
+  assert.deepEqual(runtime.configureWebmailCertificateControlPlane({
+    jobRegistry: jobs,
+    certificateRegistry: certificates,
+    domainRegistry: domains,
+    mailDomainRegistry: mailDomains,
+    acmeEmail: 'ops@example.com',
+  }), { configured: true });
+  assert.equal(typeof runtime.handlers.webmail_certificate.apply, 'function');
+  assert.equal(typeof runtime.handlers.webmail_certificate.inspect, 'function');
+
   const mappingRegistry = {
     async getForMailDomain() { return null; },
     async getRecordForMailDomain() { return null; },
@@ -79,5 +89,7 @@ test('Website provisioning runtime wires shared Roundcube and post-mapping DNS h
     mailDkimRegistry,
     dnsZoneReapplyRuntime,
   });
-  assert.equal(runtime.handlers.webmail_dns_reapply, runtime.handlers.mail_dns_reapply);
+  assert.equal(typeof runtime.handlers.mail_dns_reapply.apply, 'function');
+  assert.equal(typeof runtime.handlers.mail_dns_reapply.inspect, 'function');
+  assert.equal(Object.hasOwn(runtime.handlers, 'webmail_dns_reapply'), false);
 });
