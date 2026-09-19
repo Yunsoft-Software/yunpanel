@@ -574,6 +574,12 @@ if (elFinderHandoffService) {
 }
 const websiteDatabaseInventoryProvider = () => databaseManager.inspect();
 const websiteDatabaseHealthProvider = () => databaseManager.inspectSecurityBaseline();
+websiteProvisioningRuntime.configureMailControlPlane({
+  jobRegistry,
+  mailDomainRegistry,
+  domainRegistry,
+  mailConfigurationService,
+});
 websiteProvisioningRuntime.configureDatabaseControlPlane({
   jobRegistry,
   databaseBindingRegistry,
