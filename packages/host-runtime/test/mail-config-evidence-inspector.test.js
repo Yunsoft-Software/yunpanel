@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  enableManagedMailSql,
   mailForwardingTemplatePolicy,
+  mailSqlTemplatePolicy,
   mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
   previewManagedMailApplyPlan,
   previewManagedMailSubmissionConfiguration,
   renderDovecotQuotaPasswdFile,
+  renderManagedMailSqlSeed,
 } from '@yunpanel/config-templates';
 import {
   createMailConfigEvidenceInspector,
@@ -18,6 +21,7 @@ const VMAIL_UID = 5000;
 const VMAIL_GID = 5000;
 const POSTFIX_UID = 110;
 const POSTFIX_GID = 117;
+const MAIL_AUTH_GID = 6000;
 
 function fixture() {
   const input = {
@@ -44,6 +48,37 @@ function fixture() {
   return { preview, files };
 }
 
+function sqliteFixture() {
+  const input = {
+    domains: ['example.com'],
+    mailboxes: ['owner@example.com'],
+    aliases: [],
+    accounts: [{ address: 'owner@example.com', passwordHash: ARGON2ID_HASH }],
+    postmasterAddress: 'owner@example.com',
+    forwardings: [{ source: 'owner@example.com', mode: 'copy', destinations: ['backup@elsewhere.test'] }],
+  };
+  const preview = enableManagedMailSql(
+    previewManagedMailSubmissionConfiguration(input),
+    input,
+  );
+  const seed = renderManagedMailSqlSeed(input);
+  const files = new Map();
+  for (const artifact of preview.artifacts) {
+    files.set(artifact.path, Buffer.from(
+      artifact.path === mailSqlTemplatePolicy.seedPath ? seed : artifact.content,
+    ));
+  }
+  files.set(mailSqlTemplatePolicy.databasePath, Buffer.from('fixture-sqlite-db'));
+  files.set(mailConfigBackupInternals.postfixMainCfPath, Buffer.from('# no managed SRS overrides\n'));
+  files.set(mailConfigBackupInternals.sieveCompiledPath, Buffer.from('compiled-sieve'));
+  const directories = new Map([
+    [mailSqlTemplatePolicy.databaseDirectory, { uid: 0, gid: MAIL_AUTH_GID, mode: 0o750 }],
+    [mailSqlTemplatePolicy.postfixSqlDirectory, { uid: 0, gid: POSTFIX_GID, mode: 0o750 }],
+    ['/etc/yunpanel/mail/sql', { uid: 0, gid: 0, mode: 0o750 }],
+  ]);
+  return { preview, files, directories };
+}
+
 function commandKey(file, args) {
   return `${file}\u0000${args.join('\u0000')}`;
 }
@@ -64,6 +99,8 @@ function inspectorFor({
   submissionSocketMode = 0o660,
   submissionSocketUid = POSTFIX_UID,
   submissionSocketGid = POSTFIX_GID,
+  directories = new Map(),
+  sqlStateOverride = null,
 } = {}) {
   const plan = previewManagedMailApplyPlan(preview);
   const parameters = new Map(plan.postfixParameters.map((entry) => [entry.name, entry.value]));
@@ -90,15 +127,36 @@ function inspectorFor({
           isSymbolicLink: () => false,
         };
       }
+      if (directories.has(filePath)) {
+        const directory = directories.get(filePath);
+        return {
+          mode: directory.mode,
+          uid: directory.uid,
+          gid: directory.gid,
+          isFile: () => false,
+          isDirectory: () => true,
+          isSocket: () => false,
+          isSymbolicLink: () => false,
+        };
+      }
       if (!files.has(filePath)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
       const compiledSieve = filePath === mailConfigBackupInternals.sieveCompiledPath;
       const sieveSource = filePath === mailForwardingTemplatePolicy.sievePath;
-      const sensitive = filePath === mailTemplatePolicy.dovecotPasswdFilePath;
+      const sensitive = filePath === mailTemplatePolicy.dovecotPasswdFilePath
+        || filePath === mailSqlTemplatePolicy.seedPath;
+      const postfixSql = filePath.startsWith(mailSqlTemplatePolicy.postfixSqlDirectory + '/');
+      const sqlDatabase = filePath === mailSqlTemplatePolicy.databasePath;
       return {
-        mode: compiledSieve ? compiledSieveMode : sensitive ? 0o600 : 0o640,
+        mode: compiledSieve ? compiledSieveMode
+          : sqlDatabase ? mailSqlTemplatePolicy.databaseMode
+            : sensitive ? 0o600 : 0o640,
         uid: compiledSieve ? compiledSieveUid : 0,
-        gid: compiledSieve ? compiledSieveGid : sieveSource ? sieveSourceGid : 0,
+        gid: compiledSieve ? compiledSieveGid
+          : sieveSource ? sieveSourceGid
+            : postfixSql ? POSTFIX_GID
+              : sqlDatabase ? MAIL_AUTH_GID : 0,
         isFile: () => true,
+        isDirectory: () => false,
         isSocket: () => false,
         isSymbolicLink: () => false,
       };
@@ -106,6 +164,9 @@ function inspectorFor({
     readFileFn: async (filePath) => Buffer.from(files.get(filePath)),
     run: async (file, args) => {
       if (file === '/usr/bin/getent') {
+        if (args[0] === 'group' && args[1] === 'yunpanel-mailauth') {
+          return { stdout: 'yunpanel-mailauth:x:' + MAIL_AUTH_GID + ':postfix,dovecot\n', stderr: '' };
+        }
         if (args[0] !== 'passwd' || !['vmail', 'postfix'].includes(args[1])) throw new Error('unexpected identity');
         if (args[1] === 'vmail') {
           return {
@@ -121,6 +182,13 @@ function inspectorFor({
             : `postfix:x:${POSTFIX_UID}:${POSTFIX_GID}::/var/spool/postfix:/usr/sbin/nologin\n`,
           stderr: '',
         };
+      }
+      if (file === '/usr/bin/sqlite3') {
+        if (args[1] === 'PRAGMA quick_check;') return { stdout: 'ok\n', stderr: '' };
+        if (args[1] === "SELECT value FROM yunpanel_meta WHERE key='state_sha256';") {
+          return { stdout: (sqlStateOverride ?? plan.sql?.stateSha256 ?? '') + '\n', stderr: '' };
+        }
+        throw new Error('unexpected sqlite query');
       }
       if (file === '/usr/sbin/postconf' && args[0] === '-h') {
         const value = postfixOverride?.name === args[1] ? postfixOverride.value : parameters.get(args[1]);
@@ -167,6 +235,36 @@ test('active managed mail evidence requires exact live submission state without 
   assert.equal(state.files.has(mailForwardingTemplatePolicy.sievePath), true);
   assert.equal(state.files.has(mailConfigBackupInternals.sieveCompiledPath), true);
   assert.equal(JSON.stringify(result).includes(ARGON2ID_HASH), false);
+});
+
+test('SQLite mail evidence requires exact DB state, directory ownership and retired legacy lookup files', async () => {
+  const state = sqliteFixture();
+  const result = await inspectorFor(state).inspect(state.preview);
+  assert.equal(result.satisfied, true);
+
+  const staleDb = sqliteFixture();
+  assert.deepEqual(await inspectorFor({
+    ...staleDb,
+    sqlStateOverride: '0'.repeat(64),
+  }).inspect(staleDb.preview), { satisfied: false, result: null });
+
+  const legacyLeak = sqliteFixture();
+  legacyLeak.files.set(mailTemplatePolicy.dovecotPasswdFilePath, Buffer.from('stale hash'));
+  assert.deepEqual(await inspectorFor(legacyLeak).inspect(legacyLeak.preview), {
+    satisfied: false,
+    result: null,
+  });
+
+  const unsafeDirectory = sqliteFixture();
+  unsafeDirectory.directories.set(mailSqlTemplatePolicy.databaseDirectory, {
+    uid: 0,
+    gid: 0,
+    mode: 0o750,
+  });
+  assert.deepEqual(await inspectorFor(unsafeDirectory).inspect(unsafeDirectory.preview), {
+    satisfied: false,
+    result: null,
+  });
 });
 
 test('active managed mail evidence fails closed on artifact, sieve ownership or postfix main/master drift', async () => {
