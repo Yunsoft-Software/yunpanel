@@ -210,33 +210,12 @@ function mailDnsReapplyStep(base, preview, dns) {
       zoneName: dns.intent.zoneName,
       mailDomainId: mailDomain.id,
       domainName: mailDomain.domainName,
+      webmailHostname: preview.plan?.webmail?.hostname,
       expectedMailDomainRevision: 2,
       expectedMailDomainStatus: 'enabled',
       expectedDkimKeyRevision: 1,
       selector: dkim.intent.selector,
     }),
-    compensation: Object.freeze({ state: 'pending' }),
-  });
-}
-
-function webmailDnsReapplyStep(base, mailDns) {
-  if (!mailDns) return null;
-  const roundcube = base.steps.find((step) => step.id === 'roundcube_mapping');
-  if (!roundcube || roundcube.kind !== 'roundcube_mapping'
-    || roundcube.intent?.mailDomainId !== mailDns.intent.mailDomainId
-    || roundcube.intent?.webDomainId !== mailDns.intent.webDomainId) {
-    throw new SiteCreateError(
-      'site_create_roundcube_plan_invalid',
-      'Local authoritative webmail DNS requires the shared Roundcube mapping step',
-      409,
-    );
-  }
-  return Object.freeze({
-    id: 'webmail_dns_reapply',
-    kind: 'webmail_dns_reapply',
-    required: true,
-    state: 'pending',
-    intent: Object.freeze({ ...mailDns.intent }),
     compensation: Object.freeze({ state: 'pending' }),
   });
 }
@@ -247,7 +226,6 @@ export async function siteCreateProvisioningPlan(preview, dependencies = {}) {
   const dns = await dnsZoneStep(preview, dependencies);
   if (!dns) return base;
   const mailDns = mailDnsReapplyStep(base, preview, dns);
-  const webmailDns = webmailDnsReapplyStep(base, mailDns);
   const steps = base.steps.map((step) => ({
     ...step,
     intent: { ...step.intent },
@@ -257,8 +235,7 @@ export async function siteCreateProvisioningPlan(preview, dependencies = {}) {
   const insertAt = nginxIndex >= 0 ? nginxIndex : steps.length;
   steps.splice(insertAt, 0, dns);
   if (mailDns) {
-    if (steps.some((step) => ['mail_dns_reapply', 'webmail_dns_reapply'].includes(step.id)
-      || ['mail_dns_reapply', 'webmail_dns_reapply'].includes(step.kind))) {
+    if (steps.some((step) => step.id === 'mail_dns_reapply' || step.kind === 'mail_dns_reapply')) {
       throw new SiteCreateError(
         'site_create_mail_dns_plan_conflict',
         'Website provisioning already contains a local mail DNS reapply step',
@@ -267,10 +244,6 @@ export async function siteCreateProvisioningPlan(preview, dependencies = {}) {
     }
     const dkimIndex = steps.findIndex((step) => step.id === 'mail_dkim_key');
     steps.splice(dkimIndex >= 0 ? dkimIndex + 1 : steps.length, 0, mailDns);
-    if (webmailDns) {
-      const roundcubeIndex = steps.findIndex((step) => step.id === 'roundcube_mapping');
-      steps.splice(roundcubeIndex >= 0 ? roundcubeIndex + 1 : steps.length, 0, webmailDns);
-    }
   }
   return createWebsiteProvisioningPlan({
     operationId: base.operationId,
@@ -292,5 +265,4 @@ export const siteCreateDnsProvisioningInternals = Object.freeze({
   runtimeAwareRecords,
   dnsZoneStep,
   mailDnsReapplyStep,
-  webmailDnsReapplyStep,
 });
