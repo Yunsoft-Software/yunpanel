@@ -35,6 +35,7 @@ const nginxIntent = Object.freeze({
   primaryDomain: 'example.com',
   aliases: ['www.example.com'],
   acmeOnlyHostnames: ['webmail.example.com'],
+  mailDiscoverySocketPath: '/run/yunpanel-mail-discovery/discovery.sock',
   targetType: 'passenger',
   target: passengerIntent,
 });
@@ -260,7 +261,29 @@ test('Passenger Nginx handler activates only with succeeded runtime evidence', a
   assert.equal(calls[0][1].target.user, unixUser);
   assert.equal(calls[0][1].target.group, unixUser);
   assert.deepEqual(calls[0][1].acmeOnlyHostnames, ['webmail.example.com']);
+  assert.equal(calls[0][1].mailDiscoverySocketPath, '/run/yunpanel-mail-discovery/discovery.sock');
   assert.deepEqual(calls[1], ['activate', { primaryDomain: 'example.com', checksum: 'b'.repeat(64) }]);
+});
+
+test('Nginx handler rejects unowned mail discovery sockets before host mutation', async () => {
+  let stageCalls = 0;
+  const manager = nginxManager();
+  manager.stageDomain = async () => { stageCalls += 1; return {}; };
+  const handlers = createWebsiteProvisioningHandlers({
+    identityManager: identityManager(),
+    passengerSiteManager: passengerSiteManager(),
+    nginxManager: manager,
+  });
+
+  await assert.rejects(
+    handlers.nginx.apply({
+      operation: passengerOperation(),
+      intent: { ...nginxIntent, mailDiscoverySocketPath: '/run/other/control.sock' },
+    }),
+    (error) => error instanceof WebsiteProvisioningHandlerError
+      && error.code === 'website_nginx_intent_invalid',
+  );
+  assert.equal(stageCalls, 0);
 });
 
 test('Nginx handler stages exact TLS material and redirect policy for certificate activation', async () => {
