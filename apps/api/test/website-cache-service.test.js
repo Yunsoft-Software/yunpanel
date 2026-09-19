@@ -18,7 +18,7 @@ function createMockRegistries({
 } = {}) {
   return {
     websiteRegistry: {
-      get: async (id) => (id === WEBSITE_ID ? website : null),
+      getWebsite: async (id) => (id === WEBSITE_ID ? website : null),
     },
   };
 }

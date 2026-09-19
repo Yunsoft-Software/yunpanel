@@ -16,7 +16,7 @@ export function createWebsiteCacheService({
   cachePolicyRegistry,
   cacheIsolationManager = createCacheIsolationManager(),
 } = {}) {
-  if (!websiteRegistry || typeof websiteRegistry.get !== 'function'
+  if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
     || !cachePolicyRegistry || typeof cachePolicyRegistry.get !== 'function') {
     throw new TypeError('Website cache service dependencies are invalid');
   }
@@ -25,7 +25,7 @@ export function createWebsiteCacheService({
     if (typeof websiteId !== 'string' || !websiteId) {
       throw new WebsiteCacheServiceError('website_id_invalid', 'Website ID is invalid', 400);
     }
-    const website = await websiteRegistry.get(websiteId);
+    const website = await websiteRegistry.getWebsite(websiteId);
     if (!website) {
       throw new WebsiteCacheServiceError('website_not_found', 'Website not found', 404);
     }

@@ -14,20 +14,19 @@ function createMockRegistries({
     id: WEBSITE_ID,
     applicationId: APP_ID,
     unixUser: UNIX_USER,
-    runtime: { adapter: 'php-fpm' },
+    runtimeType: 'php',
   },
   application = {
     id: APP_ID,
-    unixUser: UNIX_USER,
-    runtime: { adapter: 'php-fpm' },
+    type: 'php',
   },
 } = {}) {
   return {
     websiteRegistry: {
-      get: async (id) => (id === WEBSITE_ID ? website : null),
+      getWebsite: async (id) => (id === WEBSITE_ID ? website : null),
     },
     applicationRegistry: {
-      get: async (id) => (id === APP_ID ? application : null),
+      getApplication: async (id) => (id === APP_ID ? application : null),
     },
   };
 }
@@ -38,12 +37,11 @@ test('resolveWebsitePhpContext rejects non-PHP website', async () => {
       id: WEBSITE_ID,
       applicationId: APP_ID,
       unixUser: UNIX_USER,
-      runtime: { adapter: 'static' },
+      runtimeType: 'static',
     },
     application: {
       id: APP_ID,
-      unixUser: UNIX_USER,
-      runtime: { adapter: 'static' },
+      type: 'static',
     },
   });
 

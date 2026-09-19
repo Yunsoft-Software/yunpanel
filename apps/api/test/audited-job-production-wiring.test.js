@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+import { createApplicationRegistry } from '../src/application-registry.js';
+import { createWebsiteCachePolicyRegistry } from '../src/website-cache-policy-registry.js';
+import { createWebsiteCacheService } from '../src/website-cache-service.js';
+import { createWebsitePhpToolsService } from '../src/website-php-tools-service.js';
+import { createWebsiteRegistry } from '../src/website-registry.js';
+
 const indexUrl = new URL('../src/index.js', import.meta.url);
 
 test('production wraps the durable registry with the common audit store before exposing jobs', async () => {
@@ -23,6 +29,31 @@ test('production constructs job-backed services only after the audited job regis
   assert.ok(jobRegistryDeclaration >= 0);
   assert.ok(cronServiceDeclaration > jobRegistryDeclaration);
   assert.ok(settingsServiceDeclaration > jobRegistryDeclaration);
+});
+
+test('new Website services accept the production registry contracts', () => {
+  const applicationRegistry = createApplicationRegistry({
+    serverExists: async () => true,
+  });
+  const websiteRegistry = createWebsiteRegistry({
+    serverExists: async () => true,
+    getApplication: (applicationId) => applicationRegistry.getApplication(applicationId),
+  });
+  const cachePolicyRegistry = createWebsiteCachePolicyRegistry({
+    masterKey: 'production-composition-test-key-0001',
+  });
+
+  assert.doesNotThrow(() => createWebsitePhpToolsService({
+    websiteRegistry,
+    applicationRegistry,
+    phpCliToolManager: {},
+  }));
+  assert.doesNotThrow(() => createWebsiteCacheService({
+    websiteRegistry,
+    applicationRegistry,
+    cachePolicyRegistry,
+    cacheIsolationManager: {},
+  }));
 });
 
 test('API local executor and renewal scheduler share the audited registry', async () => {

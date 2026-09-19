@@ -17,8 +17,8 @@ export function createWebsitePhpToolsService({
   phpCliToolManager = createPhpCliToolManager(),
   lstatFn = lstat,
 } = {}) {
-  if (!websiteRegistry || typeof websiteRegistry.get !== 'function'
-    || !applicationRegistry || typeof applicationRegistry.get !== 'function') {
+  if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
+    || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function') {
     throw new TypeError('Website PHP tools service dependencies are invalid');
   }
 
@@ -26,18 +26,17 @@ export function createWebsitePhpToolsService({
     if (typeof websiteId !== 'string' || !websiteId) {
       throw new WebsitePhpToolsServiceError('website_id_invalid', 'Website ID is invalid', 400);
     }
-    const website = await websiteRegistry.get(websiteId);
+    const website = await websiteRegistry.getWebsite(websiteId);
     if (!website) {
       throw new WebsitePhpToolsServiceError('website_not_found', 'Website not found', 404);
     }
 
-    const application = await applicationRegistry.get(website.applicationId);
+    const application = await applicationRegistry.getApplication(website.applicationId);
     if (!application) {
       throw new WebsitePhpToolsServiceError('application_not_found', 'Application not found', 404);
     }
 
-    const adapter = website.runtime?.adapter ?? application.runtime?.adapter;
-    if (adapter !== 'php-fpm') {
+    if (website.runtimeType !== 'php' || application.type !== 'php') {
       throw new WebsitePhpToolsServiceError(
         'website_runtime_not_php',
         'WP-CLI and Composer require a PHP Website runtime',
