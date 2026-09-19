@@ -49,6 +49,7 @@ function renderDomainConfig(spec) {
     primaryDomain: spec.primaryDomain,
     aliases: spec.aliases ?? [],
     acmeOnlyHostnames: spec.acmeOnlyHostnames ?? [],
+    mailDiscoverySocketPath: spec.mailDiscoverySocketPath ?? null,
     tls: spec.tls ?? null,
     canonicalRedirect: spec.canonicalRedirect === true,
     httpsRedirect: spec.httpsRedirect !== false,
