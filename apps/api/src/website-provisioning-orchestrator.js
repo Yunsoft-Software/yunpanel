@@ -104,6 +104,25 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     }
 
     if (!inspected || inspected.satisfied !== true) {
+      if (inspected?.satisfied === false && inspected.retryable === true) {
+        const code = publicErrorCode(
+          { code: inspected.reason },
+          'website_provisioning_retry_required',
+        );
+        const failed = await registry.failStep({
+          operationId: operation.operationId,
+          stepId: step.id,
+          error: code,
+          evidence: inspected,
+        });
+        return Object.freeze({
+          operation: failed,
+          outcome: 'failed',
+          stepId: step.id,
+          actionRequired: 'retry',
+          error: code,
+        });
+      }
       return Object.freeze({
         operation,
         outcome: 'interrupted',
