@@ -34,6 +34,7 @@ Son Domain removal Mail Domain metadata-cleanup ilerlemesi: `docs/history/domain
 Son Domain removal Mail Domain data/finalization/bootstrap ilerlemesi: `docs/history/domain-removal-mail-data-finalize-bootstrap-2026-09-19.md`.
 Son Domain removal External DNS metadata lifecycle ilerlemesi: `docs/history/domain-removal-external-dns-progress-2026-09-19.md`.
 Son Domain/Website removal backup impact ilerlemesi: `docs/history/domain-removal-backup-impact-progress-2026-09-19.md`.
+Son SQL-backed virtual-mail cutover ilerlemesi: `docs/history/mail-sql-virtual-mail-progress-2026-09-19.md`.
 Son Passenger/provisioning canlı kabulü: `docs/history/passenger-provisioning-live-acceptance-2026-09-19.md`.
 
 ## 0 — Değiştirilemez ürün kararı
@@ -59,8 +60,10 @@ Gerçek PowerDNS, resolver, registrar ve browser kabul kapıları `todo.md` içi
 
 ## P0.4 — Mail: Postfix + Dovecot + Rspamd + shared Roundcube
 
-- [ ] SQL-backed virtual mail domain/mailbox/alias/quota/password-hash modeli ekle; Website user ile mail storage identity ayrı olsun.
-- [ ] Dedicated mail storage identity kullan; Website UID Maildir owner olmasın.
+Kaynakta yeni managed-mail preview/apply yolu SQLite-backed virtual domain/mailbox/alias/quota/password-hash read-model'ine geçirildi. Control-plane registries source-of-truth kalır; private SQL seed deterministic state digest'iyle durable mail apply/backup/rollback zincirine girer. Postfix domain/mailbox/alias/sender-login lookup'ları `proxy:sqlite`, Dovecot auth `passdb sql` + dedicated `vmail` static userdb kullanır. Maildir `vmail:vmail` altında Website UID'den ayrı tutulur; SQL DB ayrı `root:yunpanel-mailauth` state root'unda yalnız Postfix+Dovecot reader grubuna açılır. Managed service/package policy `postfix-sqlite/dovecot-sqlite/sqlite3` bağımlılıklarını taşır. Apply SQL DB quick-check + state digest + directory/file ownership + config/reload/health kanıtından sonra eski hash/passwd live lookup'larını kaldırır. Backup manifest v6 SQL ve legacy state'i snapshot'lar, v5 okuyucu ve eski digest materialization compatibility upgrade recovery için korunur. Source testleri yazılmış/güncellenmiştir; Node 24/full check ve gerçek Ubuntu SMTP/IMAP/failure-injection kabulü `todo.md` T-CODEX-SOURCE/T-MAIL altında açık olduğundan ürün maddeleri henüz DONE işaretlenmez.
+
+- [ ] SQL-backed virtual mail domain/mailbox/alias/quota/password-hash modelinin gerçek Ubuntu kabulünü tamamla; source cutover hazırdır, Website user ile mail storage/auth DB identity ayrıdır.
+- [ ] Dedicated `vmail` storage identity + ayrı `yunpanel-mailauth` reader group modelinin package upgrade ve gerçek Maildir ownership kabulünü tamamla; source/package policy hazırdır.
 - [ ] Local mail enable domain oluştursun fakat bilinen/default parola mailbox yaratmasın.
 - [ ] SMTP 25 + submission 587; 465/993 policy; plain auth yalnız TLS altında.
 - [ ] DKIM key lifecycle; private key secret-safe, public key DNS intent.
