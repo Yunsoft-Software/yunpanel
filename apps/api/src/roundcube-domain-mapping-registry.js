@@ -8,7 +8,7 @@ const LEGACY_STORE_VERSION = 1;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const FINGERPRINT_PATTERN = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
 const SAFE_OPERATION_ID = /^[A-Za-z0-9._:@-]{8,160}$/;
-const STATES = new Set(['pending', 'active', 'removing']);
+const STATES = new Set(['pending', 'active', 'removing', 'removed']);
 
 export class RoundcubeDomainMappingRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -136,10 +136,12 @@ function normalizePersisted(value) {
     value.expectedRoundcubeNginxSha256,
     'expectedRoundcubeNginxSha256',
   );
-  const inFlight = value.state !== 'active';
-  if (inFlight !== (operationId !== null)
+  const operationOwned = value.state !== 'active';
+  const applyEvidenceRequired = value.state === 'removed';
+  if (operationOwned !== (operationId !== null)
     || (applyJobId === null) !== (expectedRoundcubePreviewSha256 === null)
     || (applyJobId === null) !== (expectedRoundcubeNginxSha256 === null)
+    || (applyEvidenceRequired && applyJobId === null)
     || (value.state === 'active' && (applyJobId !== null
       || expectedRoundcubePreviewSha256 !== null || expectedRoundcubeNginxSha256 !== null))) {
     throw new RoundcubeDomainMappingRegistryError(
@@ -391,7 +393,7 @@ export function createRoundcubeDomainMappingRegistry({
     await ensureInitialized();
     const candidate = await resolveCandidate(mailDomainId, certificateId);
     const current = state.mappings.find((mapping) => mapping.mailDomainId === candidate.mailDomainId) ?? null;
-    if (current) {
+    if (current && current.state !== 'removed') {
       if (current.state !== 'active') {
         throw new RoundcubeDomainMappingRegistryError(
           'roundcube_mapping_operation_in_progress',
@@ -419,15 +421,15 @@ export function createRoundcubeDomainMappingRegistry({
     const identity = Object.freeze({
       version: 1,
       operation: 'roundcube_domain_mapping_bind',
-      currentRevision: 0,
-      currentUpdatedAt: null,
+      currentRevision: current?.state === 'removed' ? current.revision : 0,
+      currentUpdatedAt: current?.state === 'removed' ? current.updatedAt : null,
       ...candidate,
     });
     const previewDigest = digest(identity);
     return Object.freeze({
       ...identity,
       previewDigest,
-      confirmation: 'bind-roundcube-domain:' + candidate.mailDomainId + ':0:' + previewDigest,
+      confirmation: 'bind-roundcube-domain:' + candidate.mailDomainId + ':' + identity.currentRevision + ':' + previewDigest,
       sideEffects: false,
     });
   }
@@ -443,7 +445,13 @@ export function createRoundcubeDomainMappingRegistry({
       );
     }
     return mutate(async (next) => {
-      if (next.mappings.some((mapping) => mapping.mailDomainId === preview.mailDomainId)) {
+      const existingIndex = next.mappings.findIndex(
+        (mapping) => mapping.mailDomainId === preview.mailDomainId,
+      );
+      const existing = existingIndex < 0 ? null : next.mappings[existingIndex];
+      if ((existing?.state ?? null) !== (preview.currentRevision > 0 ? 'removed' : null)
+        || (existing?.revision ?? 0) !== preview.currentRevision
+        || (existing?.updatedAt ?? null) !== preview.currentUpdatedAt) {
         throw new RoundcubeDomainMappingRegistryError(
           'roundcube_mapping_revision_conflict',
           'Roundcube Domain mapping changed after preview',
@@ -460,16 +468,17 @@ export function createRoundcubeDomainMappingRegistry({
         hostname: preview.hostname,
         certificateId: preview.certificateId,
         certificateFingerprint256: preview.certificateFingerprint256,
-        revision: 1,
+        revision: preview.currentRevision + 1,
         state: 'pending',
         operationId: randomUUID(),
         applyJobId: null,
         expectedRoundcubePreviewSha256: null,
         expectedRoundcubeNginxSha256: null,
-        createdAt: currentTime,
+        createdAt: existing?.createdAt ?? currentTime,
         updatedAt: currentTime,
       });
-      next.mappings.push(record);
+      if (existingIndex < 0) next.mappings.push(record);
+      else next.mappings[existingIndex] = record;
       return publicMapping(record);
     });
   }
@@ -494,7 +503,7 @@ export function createRoundcubeDomainMappingRegistry({
     await ensureInitialized();
     const scopedServerId = serverId === null ? null : uuid(serverId, 'serverId');
     return state.mappings
-      .filter((mapping) => mapping.state !== 'removing'
+      .filter((mapping) => !['removing', 'removed'].includes(mapping.state)
         && (scopedServerId === null || mapping.serverId === scopedServerId))
       .sort((left, right) => left.hostname.localeCompare(right.hostname))
       .map(publicMapping);
@@ -514,7 +523,7 @@ export function createRoundcubeDomainMappingRegistry({
     await ensureInitialized();
     const scopedServerId = serverId === null ? null : uuid(serverId, 'serverId');
     return state.mappings
-      .filter((mapping) => mapping.state !== 'active'
+      .filter((mapping) => ['pending', 'removing'].includes(mapping.state)
         && (scopedServerId === null || mapping.serverId === scopedServerId))
       .sort((left, right) => left.hostname.localeCompare(right.hostname))
       .map(publicMapping);
@@ -737,14 +746,12 @@ export function createRoundcubeDomainMappingRegistry({
         );
       }
       if (current.state === 'removing') {
-        next.mappings.splice(index, 1);
-        return Object.freeze({
-          id: current.id,
-          mailDomainId: current.mailDomainId,
-          operationId: current.operationId,
-          deleted: true,
-          applyJobId: current.applyJobId,
+        const removed = normalizePersisted({
+          ...current,
+          state: 'removed',
         });
+        next.mappings[index] = removed;
+        return publicMapping(removed);
       }
       const active = normalizePersisted({
         ...current,
