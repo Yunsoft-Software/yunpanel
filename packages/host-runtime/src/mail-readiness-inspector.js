@@ -4,11 +4,12 @@ import { stat } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import {
   mailSecurityTemplatePolicy,
+  mailSqlTemplatePolicy,
   mailSrsTemplatePolicy,
   mailTemplatePolicy,
 } from '@yunpanel/config-templates';
 import { createManagedServiceManager } from './managed-service-manager.js';
-import { parseManagedVmailIdentity } from './mail-vmail-identity.js';
+import { parseManagedSystemGroup, parseManagedVmailIdentity } from './mail-vmail-identity.js';
 
 const execFileAsync = promisify(execFile);
 const GETENT = '/usr/bin/getent';
@@ -19,6 +20,8 @@ const POSTSRSD = '/usr/sbin/postsrsd';
 const SS = '/usr/bin/ss';
 const SIEVEC = '/usr/bin/sievec';
 const SYSTEMCTL = '/usr/bin/systemctl';
+const SQLITE = '/usr/bin/sqlite3';
+const MAIL_AUTH_GROUP = 'yunpanel-mailauth';
 const MAX_OUTPUT = 128 * 1024;
 const BASE_REQUIREMENTS = Object.freeze([
   'postfix',
@@ -47,6 +50,9 @@ const SRS_SIEVE_REQUIREMENTS = Object.freeze([
   ...SIEVE_REQUIREMENTS,
   mailSrsTemplatePolicy.requirement,
 ]);
+const SQL_BASE_REQUIREMENTS = Object.freeze([...BASE_REQUIREMENTS, 'mail_sqlite']);
+const SQL_SIEVE_REQUIREMENTS = Object.freeze([...SIEVE_REQUIREMENTS, 'mail_sqlite']);
+const SQL_SRS_SIEVE_REQUIREMENTS = Object.freeze([...SRS_SIEVE_REQUIREMENTS, 'mail_sqlite']);
 
 export class MailReadinessError extends Error {
   constructor(code, message) {
@@ -64,7 +70,14 @@ function canonicalRequirementIds(value) {
   if (!Array.isArray(value)) {
     throw new MailReadinessError('mail_readiness_requirements_invalid', 'Managed mail preview readiness requirements are not canonical');
   }
-  for (const allowed of [BASE_REQUIREMENTS, SIEVE_REQUIREMENTS, SRS_SIEVE_REQUIREMENTS]) {
+  for (const allowed of [
+    BASE_REQUIREMENTS,
+    SIEVE_REQUIREMENTS,
+    SRS_SIEVE_REQUIREMENTS,
+    SQL_BASE_REQUIREMENTS,
+    SQL_SIEVE_REQUIREMENTS,
+    SQL_SRS_SIEVE_REQUIREMENTS,
+  ]) {
     if (value.length === allowed.length && value.every((requirement, index) => requirement === allowed[index])) {
       return allowed;
     }
@@ -78,16 +91,25 @@ function canonicalDomainsFromPreview(preview) {
     || !Array.isArray(preview.artifacts) || !Array.isArray(preview.requirements)) {
     throw new MailReadinessError('mail_readiness_preview_invalid', 'Managed mail preview is invalid');
   }
-  canonicalRequirementIds(preview.requirements);
-  const domainArtifact = preview.artifacts.find((artifact) => artifact?.path === mailTemplatePolicy.postfixVirtualDomainMapPath);
-  if (!domainArtifact || typeof domainArtifact.content !== 'string') {
-    throw new MailReadinessError('mail_readiness_domains_unavailable', 'Managed mail domain map is unavailable');
+  const requirements = canonicalRequirementIds(preview.requirements);
+  let domains;
+  if (requirements.includes('mail_sqlite')) {
+    if (!preview.sql || preview.sql.enabled !== true || preview.sql.databasePath !== mailSqlTemplatePolicy.databasePath
+      || !Array.isArray(preview.sql.domains)) {
+      throw new MailReadinessError('mail_readiness_domains_unavailable', 'Managed mail SQL domain scope is unavailable');
+    }
+    domains = [...preview.sql.domains];
+  } else {
+    const domainArtifact = preview.artifacts.find((artifact) => artifact?.path === mailTemplatePolicy.postfixVirtualDomainMapPath);
+    if (!domainArtifact || typeof domainArtifact.content !== 'string') {
+      throw new MailReadinessError('mail_readiness_domains_unavailable', 'Managed mail domain map is unavailable');
+    }
+    domains = domainArtifact.content === '' ? [] : domainArtifact.content.trimEnd().split('\n').map((line) => {
+      const match = line.match(/^([^\s]+) OK$/);
+      if (!match) throw new MailReadinessError('mail_readiness_domains_invalid', 'Managed mail domain map is invalid');
+      return match[1];
+    });
   }
-  const domains = domainArtifact.content === '' ? [] : domainArtifact.content.trimEnd().split('\n').map((line) => {
-    const match = line.match(/^([^\s]+) OK$/);
-    if (!match) throw new MailReadinessError('mail_readiness_domains_invalid', 'Managed mail domain map is invalid');
-    return match[1];
-  });
   if (new Set(domains).size !== domains.length || domains.some((domain) => domain !== domain.toLowerCase())) {
     throw new MailReadinessError('mail_readiness_domains_invalid', 'Managed mail domains are not canonical');
   }
@@ -255,6 +277,7 @@ export function createMailReadinessInspector({
     const requirementIds = canonicalRequirementIds(preview.requirements);
     const requiresSieve = requirementIds.includes('dovecot_sieve');
     const requiresSrs = requirementIds.includes(mailSrsTemplatePolicy.requirement);
+    const requiresSql = requirementIds.includes('mail_sqlite');
     const [postfix, dovecot, rspamd] = await Promise.all([
       managedServiceManager.inspect('postfix'),
       managedServiceManager.inspect('dovecot'),
@@ -273,6 +296,8 @@ export function createMailReadinessInspector({
       runText(POSTCONF, ['-h', 'myhostname']),
       runText(POSTCONF, ['-h', 'mydomain']),
       runText(POSTCONF, ['-h', 'mydestination']),
+      requiresSql ? runText(GETENT, ['group', MAIL_AUTH_GROUP]) : Promise.resolve({ ok: true, output: '' }),
+      requiresSql ? runText(POSTCONF, ['-m']) : Promise.resolve({ ok: true, output: '' }),
       runText(SS, ['-H', '-ltn', 'sport = :11332']),
     ]);
     const [
@@ -287,6 +312,8 @@ export function createMailReadinessInspector({
       myhostname,
       mydomain,
       mydestination,
+      mailAuthGroupState,
+      postfixMapTypes,
       socketState,
     ] = checks;
 
@@ -302,6 +329,18 @@ export function createMailReadinessInspector({
       requiresSieve ? executableFileExists(SIEVEC) : Promise.resolve(true),
     ]);
     const tlsFiles = [dovecotCertExists, dovecotKeyExists, postfixCertExists, postfixKeyExists];
+    let sqlSatisfied = true;
+    if (requiresSql) {
+      const group = mailAuthGroupState.ok
+        ? parseManagedSystemGroup(mailAuthGroupState.output, MAIL_AUTH_GROUP)
+        : null;
+      sqlSatisfied = Boolean(group
+        && group.members.includes('postfix')
+        && group.members.includes('dovecot')
+        && postfixMapTypes.ok
+        && postfixMapTypes.output.split(/\s+/).includes('sqlite')
+        && await executableFileExists(SQLITE));
+    }
 
     let srsSatisfied = true;
     if (requiresSrs) {
@@ -356,6 +395,7 @@ export function createMailReadinessInspector({
       ['managed_domains_excluded_from_mydestination', managedDomainsExcluded],
       ['postfix_relay_policy_verified', candidateRelayPolicySatisfied(preview)],
       [mailSrsTemplatePolicy.requirement, srsSatisfied],
+      ['mail_sqlite', sqlSatisfied],
     ]);
     const requirements = Object.freeze(requirementIds.map((id) => Object.freeze({ id, satisfied: status.get(id) === true })));
     const blockers = Object.freeze(requirements.filter((entry) => !entry.satisfied).map((entry) => entry.id));
@@ -384,6 +424,11 @@ export const mailReadinessInternals = Object.freeze({
   requirements: BASE_REQUIREMENTS,
   sieveRequirements: SIEVE_REQUIREMENTS,
   srsSieveRequirements: SRS_SIEVE_REQUIREMENTS,
+  sqlBaseRequirements: SQL_BASE_REQUIREMENTS,
+  sqlSieveRequirements: SQL_SIEVE_REQUIREMENTS,
+  sqlSrsSieveRequirements: SQL_SRS_SIEVE_REQUIREMENTS,
+  sqlitePath: SQLITE,
+  mailAuthGroup: MAIL_AUTH_GROUP,
   postsrsdPath: POSTSRSD,
   systemctlPath: SYSTEMCTL,
   sievecPath: SIEVEC,
