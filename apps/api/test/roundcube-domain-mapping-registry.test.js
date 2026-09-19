@@ -21,7 +21,7 @@ function fixture({
     return () => value++;
   })(),
 } = {}) {
-  const registry = createRoundcubeDomainMappingRegistry({
+  return createRoundcubeDomainMappingRegistry({
     now,
     getMailDomain: async () => ({
       id: mailDomainId,
@@ -52,7 +52,33 @@ function fixture({
       return { fingerprint256: inspectedFingerprint };
     },
   });
-  return registry;
+}
+
+async function begin(registry) {
+  const preview = await registry.previewBind({ mailDomainId, certificateId });
+  return registry.beginBind({
+    mailDomainId,
+    certificateId,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+}
+
+function successfulJob(mapping, id = 'roundcube-job-1') {
+  return {
+    id,
+    serverId,
+    operation: 'roundcube.config.apply',
+    resourceType: 'server',
+    resourceId: serverId,
+    status: 'succeeded',
+    result: {
+      previewSha256: mapping.expectedRoundcubePreviewSha256,
+      nginxSha256: mapping.expectedRoundcubeNginxSha256,
+      httpHealthy: true,
+      applied: true,
+    },
+  };
 }
 
 test('bind preview pins exact local mail, Domain and certificate evidence without material paths', async () => {
@@ -70,26 +96,44 @@ test('bind preview pins exact local mail, Domain and certificate evidence withou
   assert.equal(JSON.stringify(preview).includes('/etc/letsencrypt'), false);
 });
 
-test('bind persists one revisioned mapping and exact no-change becomes a conflict', async () => {
+test('bind is pending until exact Roundcube apply evidence activates the mapping', async () => {
   const registry = fixture();
-  const preview = await registry.previewBind({ mailDomainId, certificateId });
-  const created = await registry.bind({
-    mailDomainId,
-    certificateId,
-    previewDigest: preview.previewDigest,
-    confirmation: preview.confirmation,
-  });
+  const pending = await begin(registry);
 
-  assert.equal(created.revision, 1);
-  assert.equal(created.hostname, 'webmail.example.com');
+  assert.equal(pending.state, 'pending');
+  assert.match(pending.operationId, /^[0-9a-f-]{36}$/);
+  assert.equal(await registry.getForMailDomain(mailDomainId), null);
   assert.equal((await registry.listMappings({ serverId })).length, 1);
-  assert.deepEqual(await registry.getForMailDomain(mailDomainId), created);
+  assert.equal((await registry.listActiveMappings({ serverId })).length, 0);
+
+  const attached = await registry.attachApplyJob(mailDomainId, {
+    operationId: pending.operationId,
+    jobId: 'roundcube-job-1',
+    previewSha256: 'a'.repeat(64),
+    nginxSha256: 'b'.repeat(64),
+  });
+  assert.equal(attached.applyJobId, 'roundcube-job-1');
 
   await assert.rejects(
-    registry.previewBind({ mailDomainId, certificateId }),
+    registry.completeApply(mailDomainId, {
+      operationId: pending.operationId,
+      job: {
+        ...successfulJob(attached),
+        result: { ...successfulJob(attached).result, previewSha256: 'f'.repeat(64) },
+      },
+    }),
     (error) => error instanceof RoundcubeDomainMappingRegistryError
-      && error.code === 'roundcube_mapping_no_change',
+      && error.code === 'roundcube_mapping_apply_evidence_invalid',
   );
+
+  const active = await registry.completeApply(mailDomainId, {
+    operationId: pending.operationId,
+    job: successfulJob(attached),
+  });
+  assert.equal(active.state, 'active');
+  assert.equal(active.operationId, null);
+  assert.equal((await registry.listActiveMappings({ serverId })).length, 1);
+  assert.deepEqual(await registry.getForMailDomain(mailDomainId), active);
 });
 
 test('mapping requires enabled local mail and an active hostname-covering certificate', async () => {
@@ -108,31 +152,71 @@ test('mapping requires enabled local mail and an active hostname-covering certif
   );
 });
 
-test('typed delete removes only the exact current mapping revision', async () => {
+test('delete hides mapping from desired/DNS state until exact Roundcube apply proves removal', async () => {
   const registry = fixture();
-  const bind = await registry.previewBind({ mailDomainId, certificateId });
-  const created = await registry.bind({
-    mailDomainId,
-    certificateId,
-    previewDigest: bind.previewDigest,
-    confirmation: bind.confirmation,
+  const pending = await begin(registry);
+  let current = await registry.attachApplyJob(mailDomainId, {
+    operationId: pending.operationId,
+    jobId: 'roundcube-job-1',
+    previewSha256: 'a'.repeat(64),
+    nginxSha256: 'b'.repeat(64),
   });
+  current = await registry.completeApply(mailDomainId, {
+    operationId: pending.operationId,
+    job: successfulJob(current),
+  });
+
   const preview = await registry.previewDelete(mailDomainId);
-
-  await assert.rejects(
-    registry.deleteMapping(mailDomainId, {
-      expectedRevision: created.revision + 1,
-      previewDigest: preview.previewDigest,
-      confirmation: preview.confirmation,
-    }),
-    (error) => error.code === 'roundcube_mapping_confirmation_invalid',
-  );
-
-  const deleted = await registry.deleteMapping(mailDomainId, {
-    expectedRevision: created.revision,
+  const removing = await registry.beginDelete(mailDomainId, {
+    expectedRevision: current.revision,
     previewDigest: preview.previewDigest,
     confirmation: preview.confirmation,
   });
-  assert.deepEqual(deleted, { id: created.id, mailDomainId, deleted: true });
+  assert.equal(removing.state, 'removing');
   assert.equal(await registry.getForMailDomain(mailDomainId), null);
+  assert.equal((await registry.listMappings({ serverId })).length, 0);
+  assert.equal((await registry.listInFlight({ serverId })).length, 1);
+
+  const attached = await registry.attachApplyJob(mailDomainId, {
+    operationId: removing.operationId,
+    jobId: 'roundcube-job-2',
+    previewSha256: 'c'.repeat(64),
+    nginxSha256: 'd'.repeat(64),
+  });
+  const deleted = await registry.completeApply(mailDomainId, {
+    operationId: removing.operationId,
+    job: successfulJob(attached, 'roundcube-job-2'),
+  });
+  assert.equal(deleted.deleted, true);
+  assert.equal(await registry.getRecordForMailDomain(mailDomainId), null);
+});
+
+test('failed apply can be replaced only by the exact in-flight operation', async () => {
+  const registry = fixture();
+  const pending = await begin(registry);
+  const first = await registry.attachApplyJob(mailDomainId, {
+    operationId: pending.operationId,
+    jobId: 'roundcube-job-1',
+    previewSha256: 'a'.repeat(64),
+    nginxSha256: 'b'.repeat(64),
+  });
+  const retry = await registry.replaceFailedApplyJob(mailDomainId, {
+    operationId: pending.operationId,
+    previousJobId: first.applyJobId,
+    jobId: 'roundcube-job-2',
+    previewSha256: 'c'.repeat(64),
+    nginxSha256: 'd'.repeat(64),
+  });
+  assert.equal(retry.applyJobId, 'roundcube-job-2');
+
+  await assert.rejects(
+    registry.replaceFailedApplyJob(mailDomainId, {
+      operationId: '99999999-9999-4999-8999-999999999999',
+      previousJobId: 'roundcube-job-2',
+      jobId: 'roundcube-job-3',
+      previewSha256: 'e'.repeat(64),
+      nginxSha256: 'f'.repeat(64),
+    }),
+    (error) => error.code === 'roundcube_mapping_operation_stale',
+  );
 });
