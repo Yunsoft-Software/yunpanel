@@ -8,6 +8,7 @@ const INTENT_FIELDS = new Set([
   'zoneName',
   'mailDomainId',
   'domainName',
+  'webmailHostname',
   'expectedMailDomainRevision',
   'expectedMailDomainStatus',
   'expectedDkimKeyRevision',
@@ -34,6 +35,7 @@ function intent(value, websiteId) {
     || !UUID_PATTERN.test(value.mailDomainId ?? '')
     || typeof value.zoneName !== 'string' || !value.zoneName
     || typeof value.domainName !== 'string' || value.domainName !== value.zoneName
+    || value.webmailHostname !== `webmail.${value.domainName}`
     || value.expectedMailDomainRevision !== 2
     || value.expectedMailDomainStatus !== 'enabled'
     || value.expectedDkimKeyRevision !== 1
@@ -52,6 +54,7 @@ function intent(value, websiteId) {
     zoneName: value.zoneName,
     mailDomainId: value.mailDomainId.toLowerCase(),
     domainName: value.domainName,
+    webmailHostname: value.webmailHostname,
     expectedMailDomainRevision: value.expectedMailDomainRevision,
     expectedMailDomainStatus: value.expectedMailDomainStatus,
     expectedDkimKeyRevision: value.expectedDkimKeyRevision,
@@ -94,6 +97,7 @@ function evidence(operation, request) {
     adapter: 'powerdns-mail-reapply',
     webDomainId: request.webDomainId,
     mailDomainId: request.mailDomainId,
+    webmailHostname: request.webmailHostname,
     dnsReapplyOperationId: operation.id,
     previewDigest: operation.previewDigest,
     mailStateDigest: operation.mailStateDigest,
@@ -218,6 +222,17 @@ export function createWebsiteMailDnsProvisioningHandler({
       throw new WebsiteMailDnsProvisioningError(
         'website_mail_dns_dkim_record_missing',
         'Local authoritative DNS preview is missing the operation-owned DKIM TXT record',
+        503,
+      );
+    }
+    const webmailRecords = preview.records.filter((record) => record?.source === 'mail'
+      && ['A', 'AAAA'].includes(record?.type)
+      && record?.owner === request.webmailHostname);
+    if (webmailRecords.length < 1
+      || webmailRecords.some((record) => !Array.isArray(record.values) || record.values.length < 1)) {
+      throw new WebsiteMailDnsProvisioningError(
+        'website_mail_dns_webmail_record_missing',
+        'Local authoritative DNS preview is missing the webmail ACME routing record',
         503,
       );
     }
