@@ -61,18 +61,7 @@ export function createApplicationDeployQueue({
         environmentRevision: environment.savedRevision,
       };
     } else if (application.type === 'python') {
-      const environment = await applicationEnvironmentRegistry.environmentStatus(application.id);
-      operation = OPERATIONS.APP_PYTHON_DEPLOY;
-      type = 'app.python.deploy';
-      payload = {
-        applicationId: application.id,
-        repositoryUrl: application.repositoryUrl,
-        branch: application.branch,
-        gitTarget: normalizedTarget,
-        runtime: application.runtime,
-        retention: application.retention,
-        environmentRevision: environment.savedRevision,
-      };
+      throw new ApplicationRegistryError('python_runtime_unavailable', 'Python deployment is unavailable until the local release executor is implemented', 409);
     } else {
       throw new ApplicationRegistryError('unsupported_application_type', 'Application type is not deployable', 409);
     }

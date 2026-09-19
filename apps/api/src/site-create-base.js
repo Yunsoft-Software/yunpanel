@@ -824,6 +824,9 @@ export async function previewSiteCreate({
   if (normalized.source.kind === 'new_node' && normalized.source.runtime?.start?.mode && normalized.source.runtime.start.mode !== 'node') {
     blockers.push('passenger_start_mode_unsupported');
   }
+  if (websiteExpected.runtimeType === 'python') {
+    blockers.push('python_runtime_unavailable');
+  }
 
   const planCore = {
     version: 1,

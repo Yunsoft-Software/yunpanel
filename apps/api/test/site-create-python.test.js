@@ -100,9 +100,11 @@ test('site-create preview correctly models new_python runtime, sftp, and domain 
   assert.equal(preview.plan.primaryDomain.targetType, 'python');
   assert.equal(preview.plan.primaryDomain.target.proxyMode, 'unix_socket');
   assert.match(preview.plan.primaryDomain.target.socketPath, /^\/run\/yunpanel\/python-[0-9a-f-]{36}\.sock$/);
+  assert.equal(preview.complete, false);
+  assert.deepEqual(preview.blockers, ['python_runtime_unavailable']);
 });
 
-test('createSite successfully provisions Python application, website, and domain bindings', async () => {
+test('createSite refuses Python metadata without a working local provisioning runtime', async () => {
   const state = await fixture();
   const input = pythonInput(state.serverId, {
     source: {
@@ -128,7 +130,7 @@ test('createSite successfully provisions Python application, website, and domain
     mailDomainRegistry: state.mailDomainRegistry,
   });
 
-  const result = await createSite({
+  await assert.rejects(createSite({
     input,
     previewDigest: preview.previewDigest,
     confirmation: preview.confirmation,
@@ -138,18 +140,9 @@ test('createSite successfully provisions Python application, website, and domain
     websiteRegistry: state.websiteRegistry,
     domainRegistry: state.domainRegistry,
     mailDomainRegistry: state.mailDomainRegistry,
-  });
-
-  assert.ok(result.application);
-  assert.equal(result.application.type, 'python');
-  assert.equal(result.application.runtime.appServer, 'uvicorn');
-  assert.equal(result.application.runtime.workers, 4);
-
-  assert.ok(result.website);
-  assert.equal(result.website.runtimeType, 'python');
-  assert.equal(result.website.applicationId, result.application.id);
-
-  assert.ok(result.primaryDomain);
-  assert.equal(result.primaryDomain.targetType, 'python');
-  assert.equal(result.primaryDomain.target.applicationId, result.application.id);
+  }), (error) => error.code === 'site_create_blocked_by_dependency'
+    && error.message.includes('python_runtime_unavailable'));
+  assert.deepEqual(await state.applicationRegistry.listApplications(), []);
+  assert.deepEqual(await state.websiteRegistry.listWebsites(), []);
+  assert.deepEqual(await state.domainRegistry.listDomains(), []);
 });

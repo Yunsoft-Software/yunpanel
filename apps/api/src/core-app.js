@@ -477,14 +477,7 @@ export function createApp({
         retention: request.body?.retention ?? 5,
       });
     } else if (type === 'python') {
-      application = await applicationRegistry.createPythonApplication({
-        serverId,
-        name: request.body?.name,
-        repositoryUrl: request.body?.repositoryUrl,
-        branch: request.body?.branch ?? 'main',
-        runtime: request.body?.runtime,
-        retention: request.body?.retention ?? 5,
-      });
+      throw new ApplicationRegistryError('python_runtime_unavailable', 'Python applications are unavailable until the local release executor is implemented', 409);
     } else {
       throw new ApplicationRegistryError('invalid_application_type', 'Application type must be static, node, or python');
     }
@@ -499,6 +492,7 @@ export function createApp({
   app.post('/api/applications/:applicationId/rollback', requirePanelRouteAccess, async (request, response) => {
     const application = await requireApplication(request.params.applicationId);
     if (!['static', 'node', 'python'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
+    if (application.type === 'python') throw new ApplicationRegistryError('python_runtime_unavailable', 'Python rollback is unavailable until the local release executor is implemented', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
 
