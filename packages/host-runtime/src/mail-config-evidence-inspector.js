@@ -4,6 +4,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import {
   mailForwardingTemplatePolicy,
+  mailSqlTemplatePolicy,
   mailSubmissionTemplatePolicy,
   previewManagedMailApplyPlan,
 } from '@yunpanel/config-templates';
@@ -68,11 +69,15 @@ export function createMailConfigEvidenceInspector({
     }
   }
 
-  async function inspectArtifact(artifact, vmailGid) {
+  async function inspectArtifact(artifact, vmailGid, postfixGid) {
     try {
       const metadata = await lstatFn(artifact.path);
       const expectedMode = artifact.sensitive ? SENSITIVE_MODE : PUBLIC_MODE;
-      const expectedGid = artifact.path === mailForwardingTemplatePolicy.sievePath ? vmailGid : ROOT_GID;
+      const expectedGid = artifact.path === mailForwardingTemplatePolicy.sievePath
+        ? vmailGid
+        : artifact.path.startsWith(mailSqlTemplatePolicy.postfixSqlDirectory + '/')
+          ? postfixGid
+          : ROOT_GID;
       if (!metadata.isFile() || metadata.isSymbolicLink()
         || (metadata.mode & 0o777) !== expectedMode
         || metadata.uid !== ROOT_UID || metadata.gid !== expectedGid) return false;
@@ -87,6 +92,30 @@ export function createMailConfigEvidenceInspector({
     try {
       const metadata = await lstatFn(filePath);
       return metadata.isFile() && !metadata.isSymbolicLink();
+    } catch {
+      return false;
+    }
+  }
+
+  async function inspectSqlDatabase(plan, postfixIdentity) {
+    if (plan.sql?.required !== true) return true;
+    try {
+      const metadata = await lstatFn(mailSqlTemplatePolicy.databasePath);
+      if (!metadata.isFile() || metadata.isSymbolicLink()
+        || metadata.uid !== ROOT_UID || metadata.gid !== postfixIdentity.gid
+        || (metadata.mode & 0o7777) !== mailSqlTemplatePolicy.databaseMode) return false;
+      const quickCheck = await run(
+        '/usr/bin/sqlite3',
+        [mailSqlTemplatePolicy.databasePath, 'PRAGMA quick_check;'],
+        { timeout: 10_000, maxBuffer: MAX_OUTPUT },
+      );
+      if (boundedOutput(quickCheck?.stdout ?? quickCheck) !== 'ok') return false;
+      const state = await run(
+        '/usr/bin/sqlite3',
+        [mailSqlTemplatePolicy.databasePath, "SELECT value FROM yunpanel_meta WHERE key='state_sha256';"],
+        { timeout: 10_000, maxBuffer: MAX_OUTPUT },
+      );
+      return boundedOutput(state?.stdout ?? state) === plan.sql.stateSha256;
     } catch {
       return false;
     }
@@ -171,10 +200,16 @@ export function createMailConfigEvidenceInspector({
     ]);
     if (!vmailIdentity || !postfixIdentity) return { satisfied: false, result: null };
     for (const artifact of plan.artifacts) {
-      if (!(await inspectArtifact(artifact, vmailIdentity.gid))) return { satisfied: false, result: null };
+      if (!(await inspectArtifact(artifact, vmailIdentity.gid, postfixIdentity.gid))) {
+        return { satisfied: false, result: null };
+      }
     }
-    for (const compiledPath of mailConfigBackupInternals.postfixCompiledPaths) {
-      if (!(await inspectCompiledMap(compiledPath))) return { satisfied: false, result: null };
+    if (plan.sql?.required === true) {
+      if (!(await inspectSqlDatabase(plan, postfixIdentity))) return { satisfied: false, result: null };
+    } else {
+      for (const compiledPath of mailConfigBackupInternals.postfixCompiledPaths) {
+        if (!(await inspectCompiledMap(compiledPath))) return { satisfied: false, result: null };
+      }
     }
     if (!(await inspectCompiledSieve(vmailIdentity.gid))) return { satisfied: false, result: null };
     for (const parameter of plan.postfixParameters) {
@@ -224,5 +259,6 @@ export const mailConfigEvidenceInternals = Object.freeze({
   publicMode: PUBLIC_MODE,
   sieveSharedMode: SIEVE_SHARED_MODE,
   submissionSocketMode: SUBMISSION_SOCKET_MODE,
+  sqlDatabaseMode: mailSqlTemplatePolicy.databaseMode,
   boundedOutput,
 });
