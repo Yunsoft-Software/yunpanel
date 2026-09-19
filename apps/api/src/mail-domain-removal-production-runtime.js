@@ -39,6 +39,8 @@ export function createMailDomainRemovalProductionRuntime({
   mailDataBackupManager = null,
   mailDeleteImpactService = null,
   mailDeleteFinalizeService = null,
+  roundcubeDomainMappingRegistry = null,
+  roundcubeDomainMappingService = null,
 } = {}) {
   if (typeof filePath !== 'string' || !filePath
     || typeof localServerId !== 'string' || !localServerId
@@ -63,6 +65,7 @@ export function createMailDomainRemovalProductionRuntime({
     mailDkimRegistry,
     jobRegistry,
     mailDataInspector,
+    roundcubeDomainMappingRegistry,
     localServerId,
   });
   const deleteFinalize = mailDeleteFinalizeService ?? createMailDeleteFinalizeService({
@@ -82,6 +85,7 @@ export function createMailDomainRemovalProductionRuntime({
     mailConfigurationService,
     jobRegistry,
     mailDataInspector,
+    roundcubeDomainMappingRegistry,
     localServerId,
   });
   const operationRegistry = createMailDomainRemovalOperationRegistry({ filePath });

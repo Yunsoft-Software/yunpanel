@@ -68,3 +68,17 @@ test('Domain removal uses the same mapping inventory and durable mapping lifecyc
   assert.match(operationSource, /add\('webmail_mapping', mapping\.id\)/);
   assert.match(operationSource, /certificate[\s\S]*?webmail_mapping[\s\S]*?mail_domain/);
 });
+
+test('Mail Domain configuration, impact and removal runtime wire shared Roundcube mapping registry', async () => {
+  const [indexSource, appSource, mailRemovalSource] = await Promise.all([
+    text('index.js'),
+    text('app.js'),
+    text('mail-domain-removal-production-runtime.js'),
+  ]);
+
+  assert.match(indexSource, /createMailConfigurationService\(\{[\s\S]*?roundcubeDomainMappingRegistry,[\s\S]*?\}\)/);
+  assert.match(appSource, /createMailConfigurationService\(\{[\s\S]*?roundcubeDomainMappingRegistry[\s\S]*?\}\)/);
+  assert.match(appSource, /createMailDeleteImpactService\(\{[\s\S]*?roundcubeDomainMappingRegistry[\s\S]*?\}\)/);
+  assert.match(mailRemovalSource, /createMailDeleteImpactService\(\{[\s\S]*?roundcubeDomainMappingRegistry,[\s\S]*?\}\)/);
+  assert.match(mailRemovalSource, /createMailDomainRemovalPlanService\(\{[\s\S]*?roundcubeDomainMappingRegistry,[\s\S]*?\}\)/);
+});

@@ -60,6 +60,7 @@ Son transactional provisioning preflight, exact preview ve compensation ilerleme
 Son Redis ve Memcached isolation policy ilerlemesi: `docs/history/redis-memcached-isolation-policy-progress-2026-09-19.md`.
 Son Panel ve Sistem Ayarları ilerlemesi: `docs/history/panel-system-settings-progress-2026-09-19.md`.
 Son Python WSGI/ASGI runtime golden path ilerlemesi: `docs/history/python-runtime-golden-path-progress-2026-09-20.md`.
+Son Mail Domain disable Roundcube mapping teardown ve blocker ilerlemesi: `docs/history/mail-domain-disable-webmail-mapping-progress-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -96,7 +97,7 @@ Kaynakta yeni managed-mail preview/apply yolu SQLite-backed virtual domain/mailb
 - [ ] Sunucu başına tek shared Roundcube + dedicated FPM pool/socket + protected config.
 - [ ] Local-mail domain -> `webmail.<domain>` DNS/TLS/Nginx -> shared Roundcube mapping'inin provisioning acceptance'ını tamamla. Fresh Website source journal authoritative `mail_dns_reapply → webmail_certificate → mail_dkim_config → roundcube_mapping → mail_health` sırasını, exact operation ownership'i, inspect-first reconciliation'ı ve inspect-proven explicit retry semantiğini taşır. `purpose: webmail` certificate selection/issuance, Roundcube evidence bağı ve source final mail-health gate'i tamamlandı; gerçek Ubuntu/Certbot/Roundcube/DNS/mailbox-auth acceptance `todo.md` içindedir.
 - [ ] Full email + password Dovecot IMAP login ve authenticated Postfix submission.
-- [ ] Domain disable/delete yalnız kendi Roundcube/webmail mapping'ini kaldırsın; shared instance başka domainler kullanıyorsa kalsın. Domain delete source zinciri active mapping intent'ini impact/journal'a pinleyip parent-owned removing → shared Roundcube apply → removed tombstone ile cleanup yapıyor; gerçek Ubuntu/failure-injection kabulü açık. Mail Domain disable'a aynı lifecycle'ı bağlama işi devam ediyor.
+- [ ] Domain ve Mail Domain disable/delete yalnız kendi Roundcube/webmail mapping'ini kaldırsın; shared instance başka domainler kullanıyorsa kalsın. Domain delete source zinciri active mapping intent'ini impact/journal'a pinleyip parent-owned removing → shared Roundcube apply → removed tombstone ile cleanup yapıyor; Mail Domain disable, delete impact ve removal planı aktif/in-flight webmail mapping durumunda fail-closed durdurulacak şekilde Roundcube mapping registry'sine kaynakta bağlandı. Gerçek Ubuntu/failure-injection kabulü açıktır.
 - [ ] External DNS domain için exact pending DNS requirements/provider apply.
 
 Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `todo.md` içindedir.

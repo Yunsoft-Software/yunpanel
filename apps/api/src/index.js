@@ -509,6 +509,7 @@ const mailConfigurationService = createMailConfigurationService({
   domainRegistry,
   mailServiceIdentityRegistry,
   mailSrsConfigurationService,
+  roundcubeDomainMappingRegistry,
 });
 const mailReadinessInspector = createMailReadinessInspector();
 const mailProtocolHealthInspector = createMailProtocolHealthInspector();

@@ -352,6 +352,7 @@ export function createApp({
     mailboxForwardingRegistry,
     ...(mailServiceIdentityRegistry ? { domainRegistry, mailServiceIdentityRegistry } : {}),
     ...(mailSrsConfigurationService ? { mailSrsConfigurationService } : {}),
+    ...(roundcubeDomainMappingRegistry ? { roundcubeDomainMappingRegistry } : {}),
   });
   const mailDeleteImpact = mailDeleteImpactService ?? createMailDeleteImpactService({
     mailDomainRegistry,
@@ -363,6 +364,7 @@ export function createApp({
     mailDkimRegistry,
     jobRegistry,
     mailDataInspector,
+    ...(roundcubeDomainMappingRegistry ? { roundcubeDomainMappingRegistry } : {}),
     localServerId,
   });
   const canCreateMailDeleteFinalize = typeof mailboxRegistry?.deleteMailbox === 'function'

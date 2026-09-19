@@ -123,6 +123,7 @@ export function createMailConfigurationService({
   domainRegistry = null,
   mailServiceIdentityRegistry = null,
   mailSrsConfigurationService = null,
+  roundcubeDomainMappingRegistry = null,
 } = {}) {
   const tlsIdentityConfigured = domainRegistry !== null || mailServiceIdentityRegistry !== null;
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
@@ -136,7 +137,9 @@ export function createMailConfigurationService({
       || !mailServiceIdentityRegistry || typeof mailServiceIdentityRegistry.materializeForServer !== 'function'))
     || (mailSrsConfigurationService !== null
       && (typeof mailSrsConfigurationService.previewForServer !== 'function'
-        || typeof mailSrsConfigurationService.materializeForServer !== 'function'))) {
+        || typeof mailSrsConfigurationService.materializeForServer !== 'function'))
+    || (roundcubeDomainMappingRegistry !== null
+      && typeof roundcubeDomainMappingRegistry.getRecordForMailDomain !== 'function')) {
     throw new MailConfigurationError('mail_configuration_dependencies_invalid', 'Mail configuration registries are unavailable', 503);
   }
 
@@ -290,6 +293,30 @@ export function createMailConfigurationService({
     if (publicMailboxes.length !== privateAccounts.length
       || publicMailboxes.some((mailbox, index) => mailbox.address !== privateAccounts[index]?.address)) {
       throw new MailConfigurationError('mail_configuration_account_mismatch', 'Mailbox registry public and protected account state is inconsistent', 409);
+    }
+
+    if (roundcubeDomainMappingRegistry && resolved.input.status === 'disabled' && resolved.candidate.status === 'enabled') {
+      let webmailRecord = null;
+      try {
+        webmailRecord = await roundcubeDomainMappingRegistry.getRecordForMailDomain(resolved.candidate.id);
+      } catch {
+        throw new MailConfigurationError(
+          'mail_configuration_dependencies_invalid',
+          'Roundcube domain mapping registry is unavailable',
+          503,
+        );
+      }
+      if (webmailRecord && webmailRecord.state !== 'removed') {
+        return Object.freeze({
+          ready: false,
+          blockers: Object.freeze(['mail_domain_webmail_mapping_active']),
+          preview: null,
+          legacyPreview: null,
+          accounts: Object.freeze([]),
+          aliases: Object.freeze([]),
+          srs: null,
+        });
+      }
     }
 
     if (resolved.domains.length === 0) {

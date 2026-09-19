@@ -101,6 +101,7 @@ function fixture({
     configuration: { sha256: 'c'.repeat(64) },
     sideEffects: false,
   },
+  roundcubeMapping = null,
 } = {}) {
   const calls = { dkim: 0, data: 0, configuration: 0 };
   const service = createMailDomainRemovalPlanService({
@@ -134,6 +135,11 @@ function fixture({
         return data;
       },
     },
+    roundcubeDomainMappingRegistry: roundcubeMapping ? {
+      async getRecordForMailDomain(id) {
+        return id === mailDomainId ? roundcubeMapping : null;
+      },
+    } : null,
   });
   return { service, calls };
 }
@@ -308,5 +314,34 @@ test('remote binding and malformed dependency evidence fail closed', async () =>
     malformed.service.preview({ mailDomainId, parentOperationId }),
     (error) => error instanceof MailDomainRemovalPlanError
       && error.code === 'mail_domain_removal_plan_invalid' && error.status === 409,
+  );
+});
+
+test('removal plan preview is blocked when Roundcube webmail mapping is active or in flight', async () => {
+  for (const state of ['active', 'pending', 'removing']) {
+    const { service } = fixture({
+      roundcubeMapping: { id: randomUUID(), mailDomainId, state },
+    });
+    const preview = await service.preview({ mailDomainId, parentOperationId });
+
+    assert.equal(preview.readyToStart, false);
+    assert.equal(preview.confirmation, null);
+    assert.equal(
+      preview.blockers.some((b) => b.code === 'mail_domain_webmail_mapping_active'),
+      true,
+    );
+  }
+});
+
+test('removal plan preview succeeds when Roundcube webmail mapping is removed', async () => {
+  const { service } = fixture({
+    roundcubeMapping: { id: randomUUID(), mailDomainId, state: 'removed' },
+  });
+  const preview = await service.preview({ mailDomainId, parentOperationId });
+
+  assert.equal(preview.readyToStart, true);
+  assert.equal(
+    preview.blockers.some((b) => b.code === 'mail_domain_webmail_mapping_active'),
+    false,
   );
 });

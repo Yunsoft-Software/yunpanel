@@ -37,6 +37,7 @@ export function createMailDeleteImpactService({
   mailDkimRegistry,
   jobRegistry,
   mailDataInspector,
+  roundcubeDomainMappingRegistry = null,
   localServerId = null,
 } = {}) {
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
@@ -48,7 +49,9 @@ export function createMailDeleteImpactService({
     || !mailDkimRegistry || typeof mailDkimRegistry.getKey !== 'function'
     || !jobRegistry || typeof jobRegistry.listJobs !== 'function'
     || !mailDataInspector || typeof mailDataInspector.inspectMailbox !== 'function'
-    || typeof mailDataInspector.inspectDomain !== 'function') {
+    || typeof mailDataInspector.inspectDomain !== 'function'
+    || (roundcubeDomainMappingRegistry !== null
+      && typeof roundcubeDomainMappingRegistry.getRecordForMailDomain !== 'function')) {
     throw new MailDeleteImpactError(
       'mail_delete_impact_dependencies_invalid',
       'Mail delete impact dependencies are unavailable',
@@ -135,21 +138,27 @@ export function createMailDeleteImpactService({
     let dkim;
     let jobs;
     let data;
+    let webmailMapping = null;
     try {
-      [mailboxes, aliases, dkim, jobs, data] = await Promise.all([
+      [mailboxes, aliases, dkim, jobs, data, webmailMapping] = await Promise.all([
         mailboxRegistry.listMailboxes({ mailDomainId: mailDomain.id }),
         mailAliasRegistry.listAliases({ mailDomainId: mailDomain.id }),
         mailDkimRegistry.getKey(mailDomain.id),
         activeMailJobs(mailDomain.id),
         mailDataInspector.inspectDomain(mailDomain.domainName),
+        roundcubeDomainMappingRegistry ? roundcubeDomainMappingRegistry.getRecordForMailDomain(mailDomain.id) : null,
       ]);
     } catch (error) {
       if (error instanceof MailDeleteImpactError) throw error;
       throw new MailDeleteImpactError('mail_delete_impact_unavailable', 'Mail domain delete impact could not be inspected', 503);
     }
+    const webmailMappingConfigured = Boolean(webmailMapping && webmailMapping.state !== 'removed');
     const blockers = [];
     if (mailDomain.managementMode === 'local' && mailDomain.status !== 'disabled') {
       blockers.push(blocker('mail_domain_disable_required'));
+    }
+    if (webmailMappingConfigured) {
+      blockers.push(blocker('mail_domain_webmail_mapping_active'));
     }
     if (mailboxes.length > 0) blockers.push(blocker('mail_domain_mailboxes_exist', mailboxes.length));
     if (aliases.length > 0) blockers.push(blocker('mail_domain_aliases_exist', aliases.length));
@@ -168,6 +177,7 @@ export function createMailDeleteImpactService({
         mailboxes: summarize(mailboxes),
         aliases: summarize(aliases),
         dkimConfigured: Boolean(dkim),
+        webmailMappingConfigured,
         activeJobs: summarize(jobs),
       }),
       mailData: data,

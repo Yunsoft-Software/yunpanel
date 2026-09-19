@@ -47,6 +47,7 @@ function createService({
   mailboxData = { present: false, bytes: 0, snapshotSha256: 'a'.repeat(64) },
   domainData = { present: false, bytes: 0, snapshotSha256: 'b'.repeat(64) },
   domainOverride = null,
+  roundcubeMapping = null,
 } = {}) {
   const domains = new Map([
     [webDomain.id, webDomain],
@@ -102,6 +103,11 @@ function createService({
         return { version: 1, scope: 'domain', identity: domainName, sideEffects: false, ...domainData };
       },
     },
+    roundcubeDomainMappingRegistry: roundcubeMapping ? {
+      async getRecordForMailDomain(id) {
+        return id === currentMailDomain.id ? roundcubeMapping : null;
+      },
+    } : null,
   });
 }
 
@@ -190,6 +196,7 @@ test('mail-domain delete impact requires disabled empty state, no DKIM or job, a
   assert.equal(result.dependencies.mailboxes.count, 1);
   assert.equal(result.dependencies.aliases.count, 1);
   assert.equal(result.dependencies.dkimConfigured, true);
+  assert.equal(result.dependencies.webmailMappingConfigured, false);
   assert.equal(result.confirmation, `delete-mail-domain:${enabledMailDomain.id}:${enabledMailDomain.revision}`);
 });
 
@@ -197,6 +204,33 @@ test('mail-domain delete impact is safe only for local disabled empty state with
   const result = await createService({ mailboxes: [] }).inspectMailDomain(mailDomain.id);
   assert.equal(result.safeToDelete, true);
   assert.equal(result.requiresDataBackup, false);
+  assert.equal(result.dependencies.webmailMappingConfigured, false);
+  assert.deepEqual(result.blockers, []);
+});
+
+test('mail-domain delete impact reports webmailMappingConfigured and blocks deletion when Roundcube mapping is active or in flight', async () => {
+  for (const state of ['active', 'pending', 'removing']) {
+    const service = createService({
+      mailboxes: [],
+      roundcubeMapping: { id: randomUUID(), mailDomainId: mailDomain.id, state },
+    });
+    const result = await service.inspectMailDomain(mailDomain.id);
+
+    assert.equal(result.safeToDelete, false);
+    assert.equal(result.dependencies.webmailMappingConfigured, true);
+    assert.deepEqual(result.blockers.map((entry) => entry.code), ['mail_domain_webmail_mapping_active']);
+  }
+});
+
+test('mail-domain delete impact is safe when Roundcube mapping is removed', async () => {
+  const service = createService({
+    mailboxes: [],
+    roundcubeMapping: { id: randomUUID(), mailDomainId: mailDomain.id, state: 'removed' },
+  });
+  const result = await service.inspectMailDomain(mailDomain.id);
+
+  assert.equal(result.safeToDelete, true);
+  assert.equal(result.dependencies.webmailMappingConfigured, false);
   assert.deepEqual(result.blockers, []);
 });
 

@@ -179,6 +179,7 @@ export function createMailDomainRemovalPlanService({
   mailConfigurationService,
   jobRegistry,
   mailDataInspector,
+  roundcubeDomainMappingRegistry = null,
   localServerId = null,
 } = {}) {
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
@@ -191,6 +192,8 @@ export function createMailDomainRemovalPlanService({
     || !mailConfigurationService || typeof mailConfigurationService.previewTransition !== 'function'
     || !jobRegistry || typeof jobRegistry.listJobs !== 'function'
     || !mailDataInspector || typeof mailDataInspector.inspectDomain !== 'function'
+    || (roundcubeDomainMappingRegistry !== null
+      && typeof roundcubeDomainMappingRegistry.getRecordForMailDomain !== 'function')
     || (localServerId !== null && (typeof localServerId !== 'string' || !SAFE_ID.test(localServerId)))) {
     throw new MailDomainRemovalPlanError(
       'mail_domain_removal_plan_dependencies_invalid',
@@ -386,6 +389,21 @@ export function createMailDomainRemovalPlanService({
         'mail_domain_disable_configuration_not_ready',
         localState.disableConfigurationBlockerCount,
       ));
+    }
+    let webmailMapping = null;
+    if (roundcubeDomainMappingRegistry) {
+      try {
+        webmailMapping = await roundcubeDomainMappingRegistry.getRecordForMailDomain(mailDomain.id);
+      } catch {
+        throw new MailDomainRemovalPlanError(
+          'mail_domain_removal_plan_unavailable',
+          'Roundcube domain mapping registry is unavailable',
+          503,
+        );
+      }
+    }
+    if (webmailMapping && webmailMapping.state !== 'removed') {
+      blockers.push(blocker('mail_domain_webmail_mapping_active', 1));
     }
     const planDigest = digest(cleanupPlan);
     const identity = Object.freeze({
