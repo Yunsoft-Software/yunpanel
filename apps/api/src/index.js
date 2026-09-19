@@ -630,6 +630,14 @@ websiteProvisioningRuntime.configureMailDkimControlPlane({
   jobRegistry,
   mailDkimConfigurationService,
 });
+websiteProvisioningRuntime.configureRoundcubeControlPlane({
+  mailDomainRegistry,
+  domainRegistry,
+  roundcubeDomainMappingRegistry,
+  roundcubeDomainMappingService,
+  roundcubeWebmailEndpointResolver,
+  jobRegistry,
+});
 if (dnsZoneReapplyRuntime) {
   websiteProvisioningRuntime.configureMailDnsControlPlane({
     mailDomainRegistry,
