@@ -140,7 +140,8 @@ test('managed Postfix and Dovecot installs include SQLite lookup packages and bi
     ]);
     const membershipIndex = calls.indexOf(membership);
     const enableIndex = calls.findIndex(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'enable');
-    assert.ok(membershipIndex >= 0 && enableIndex > membershipIndex);
+    const restartIndex = calls.findIndex(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'restart');
+    assert.ok(membershipIndex >= 0 && enableIndex > membershipIndex && restartIndex > enableIndex);
     assert.equal(calls.some(([file, args]) => file === '/usr/sbin/adduser' && args[1] === 'vmail'), false);
   }
 });
