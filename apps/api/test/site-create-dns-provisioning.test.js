@@ -158,9 +158,13 @@ test('local mail adds operation-owned DNS reapply after the DKIM key step', asyn
   const plan = await siteCreateProvisioningPlan(preview({ mailMode: 'local' }), dependencies());
   const dkim = plan.steps.find((step) => step.id === 'mail_dkim_key');
   const mailDns = plan.steps.find((step) => step.id === 'mail_dns_reapply');
+  const roundcube = plan.steps.find((step) => step.id === 'roundcube_mapping');
+  const webmailDns = plan.steps.find((step) => step.id === 'webmail_dns_reapply');
 
   assert.ok(dkim);
   assert.ok(mailDns);
+  assert.ok(roundcube);
+  assert.ok(webmailDns);
   assert.equal(mailDns.kind, 'mail_dns_reapply');
   assert.equal(mailDns.required, true);
   assert.equal(mailDns.state, 'pending');
@@ -180,14 +184,24 @@ test('local mail adds operation-owned DNS reapply after the DKIM key step', asyn
   });
   assert.ok(plan.steps.findIndex((step) => step.id === 'mail_dkim_key')
     < plan.steps.findIndex((step) => step.id === 'mail_dns_reapply'));
+  assert.deepEqual(webmailDns.intent, mailDns.intent);
+  assert.equal(webmailDns.kind, 'webmail_dns_reapply');
+  assert.equal(webmailDns.required, true);
+  assert.equal(webmailDns.state, 'pending');
+  assert.equal(webmailDns.compensation.state, 'pending');
   assert.ok(plan.steps.findIndex((step) => step.id === 'mail_dns_reapply')
     < plan.steps.findIndex((step) => step.id === 'mail_dkim_config'));
+  assert.ok(plan.steps.findIndex((step) => step.id === 'mail_dkim_config')
+    < plan.steps.findIndex((step) => step.id === 'roundcube_mapping'));
+  assert.ok(plan.steps.findIndex((step) => step.id === 'roundcube_mapping')
+    < plan.steps.findIndex((step) => step.id === 'webmail_dns_reapply'));
   assert.equal(plan.ready, false);
 });
 
 test('external mail does not create a local authoritative mail DNS mutation', async () => {
   const plan = await siteCreateProvisioningPlan(preview({ mailMode: 'external' }), dependencies());
   assert.equal(plan.steps.some((step) => step.id === 'mail_dns_reapply'), false);
+  assert.equal(plan.steps.some((step) => step.id === 'webmail_dns_reapply'), false);
 });
 
 test('www none removes the built-in DNS alias so no dead endpoint is published', async () => {
