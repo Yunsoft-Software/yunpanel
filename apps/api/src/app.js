@@ -196,6 +196,8 @@ export function createApp({
   serverDnsIdentityRegistry = null,
   powerDnsAuthoritativeService = null,
   powerDnsSecretRegistry = null,
+  dnsZoneTemplateRegistry = null,
+  dnsZoneReapplyRuntime = null,
   dnsZoneRetirementImpactService = null,
   dnsZoneRetirementPolicy = null,
   databaseBindingRegistry = null,
@@ -562,6 +564,8 @@ export function createApp({
     mountPowerDnsRoutes(app, {
       dnsIdentityRegistry: serverDnsIdentityRegistry,
       authoritativeService: powerDnsAuthoritativeService,
+      dnsZoneTemplateRegistry,
+      dnsZoneReapplyRuntime,
       jobRegistry,
       ...(powerDnsSecretRegistry ? { domainRegistry, powerDnsSecretRegistry } : {}),
       ...(dnsRetirementImpact
