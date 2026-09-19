@@ -59,6 +59,20 @@ export {
 } from './mail-data.js';
 
 export {
+  MailSqlTemplateError,
+  mailSqlTemplateInternals,
+  mailSqlTemplatePolicy,
+  previewManagedMailSqlConfiguration,
+  renderDovecotSqlAuthConfig,
+  renderDovecotSqlConfig,
+  renderManagedMailSqlSeed,
+  renderPostfixSqlAliasLookup,
+  renderPostfixSqlDomainLookup,
+  renderPostfixSqlMailboxLookup,
+  renderPostfixSqlSenderLoginLookup,
+} from './mail-sql.js';
+
+export {
   MailQuotaTemplateError,
   mailQuotaTemplatePolicy,
   previewManagedMailQuotaConfiguration,
