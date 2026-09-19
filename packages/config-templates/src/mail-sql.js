@@ -6,6 +6,7 @@ import {
   renderPostfixVirtualDomainMap,
 } from './mail.js';
 import { renderDovecotQuotaPasswdFile } from './mail-quota.js';
+import { mailSubmissionTemplatePolicy } from './mail-submission.js';
 
 const DB_PATH = '/var/lib/yunpanel/mail/virtual-mail.sqlite3';
 const SEED_PATH = '/etc/yunpanel/mail/sql/virtual-mail.sql';
@@ -257,6 +258,147 @@ export function renderDovecotSqlAuthConfig() {
   ].join('\n');
 }
 
+function sqlAuthWithSubmission(existingAuth) {
+  if (!existingAuth || existingAuth.path !== mailTemplatePolicy.dovecotAuthConfigPath
+    || existingAuth.sensitive === true || typeof existingAuth.content !== 'string') {
+    throw new MailSqlTemplateError(
+      'mail_sql_auth_artifact_invalid',
+      'Managed Dovecot authentication artifact is unavailable for SQL migration',
+    );
+  }
+  const marker = '\nservice auth {\n';
+  const markerIndex = existingAuth.content.indexOf(marker);
+  const suffix = markerIndex < 0 ? '' : existingAuth.content.slice(markerIndex + 1);
+  const content = renderDovecotSqlAuthConfig().trimEnd() + '\n' + (suffix ? '\n' + suffix : '');
+  return publicArtifact(mailTemplatePolicy.dovecotAuthConfigPath, content);
+}
+
+function replaceParameter(parameters, name, value) {
+  let found = 0;
+  const result = parameters.map((parameter) => {
+    if (parameter?.name !== name) return parameter;
+    found += 1;
+    return Object.freeze({ name, value });
+  });
+  if (found !== 1) {
+    throw new MailSqlTemplateError(
+      'mail_sql_postfix_parameter_invalid',
+      'Managed Postfix SQL migration requires one exact ' + name + ' parameter',
+    );
+  }
+  return result;
+}
+
+function sqlMasterServices(services, senderLoginLookup) {
+  if (!Array.isArray(services) || services.length !== 1) {
+    throw new MailSqlTemplateError(
+      'mail_sql_submission_service_invalid',
+      'Managed submission service metadata is unavailable for SQL migration',
+    );
+  }
+  let replacements = 0;
+  const result = services.map((service) => Object.freeze({
+    ...service,
+    parameters: Object.freeze(service.parameters.map((parameter) => {
+      if (parameter?.name !== 'smtpd_sender_login_maps') return parameter;
+      replacements += 1;
+      return Object.freeze({ name: parameter.name, value: senderLoginLookup });
+    })),
+  }));
+  if (replacements !== 1) {
+    throw new MailSqlTemplateError(
+      'mail_sql_submission_service_invalid',
+      'Managed submission service must contain one sender-login map',
+    );
+  }
+  return Object.freeze(result);
+}
+
+export function enableManagedMailSql(preview, input = {}) {
+  if (!preview || typeof preview !== 'object' || Array.isArray(preview)
+    || preview.version !== 1 || typeof preview.sha256 !== 'string'
+    || !Array.isArray(preview.artifacts) || !Array.isArray(preview.postfixParameters)
+    || !Array.isArray(preview.postfixMasterServices) || !Array.isArray(preview.requirements)) {
+    throw new MailSqlTemplateError('mail_sql_preview_invalid', 'Managed mail preview is invalid');
+  }
+  if (preview.requirements.includes('mail_sqlite')) {
+    throw new MailSqlTemplateError('mail_sql_preview_already_enabled', 'Managed mail SQL is already enabled');
+  }
+
+  const sql = previewManagedMailSqlConfiguration(input);
+  const legacyPaths = new Set([
+    mailTemplatePolicy.postfixVirtualDomainMapPath,
+    mailTemplatePolicy.postfixVirtualMailboxMapPath,
+    mailTemplatePolicy.postfixVirtualAliasMapPath,
+    mailSubmissionTemplatePolicy.senderLoginPath,
+    mailTemplatePolicy.dovecotPasswdFilePath,
+    mailTemplatePolicy.dovecotAuthConfigPath,
+  ]);
+  const byPath = new Map(preview.artifacts.map((artifact) => [artifact?.path, artifact]));
+  if (byPath.size !== preview.artifacts.length
+    || [...legacyPaths].some((artifactPath) => !byPath.has(artifactPath))) {
+    throw new MailSqlTemplateError(
+      'mail_sql_legacy_artifact_set_invalid',
+      'Managed mail preview does not contain the canonical legacy lookup artifacts',
+    );
+  }
+
+  const sqlArtifacts = sql.artifacts.map((artifact) => (
+    artifact.path === mailTemplatePolicy.dovecotAuthConfigPath
+      ? sqlAuthWithSubmission(byPath.get(mailTemplatePolicy.dovecotAuthConfigPath))
+      : artifact
+  ));
+  const artifacts = [];
+  let inserted = false;
+  for (const artifact of preview.artifacts) {
+    if (!legacyPaths.has(artifact.path)) {
+      artifacts.push(artifact);
+      continue;
+    }
+    if (!inserted) {
+      artifacts.push(...sqlArtifacts);
+      inserted = true;
+    }
+  }
+  if (!inserted) {
+    throw new MailSqlTemplateError('mail_sql_artifact_insertion_failed', 'Managed mail SQL artifacts could not be inserted');
+  }
+
+  let postfixParameters = [...preview.postfixParameters];
+  postfixParameters = replaceParameter(postfixParameters, 'virtual_alias_maps', sql.postfixLookups.aliases);
+  postfixParameters = replaceParameter(postfixParameters, 'virtual_mailbox_domains', sql.postfixLookups.domains);
+  postfixParameters = replaceParameter(postfixParameters, 'virtual_mailbox_maps', sql.postfixLookups.mailboxes);
+  postfixParameters = Object.freeze(postfixParameters.sort((left, right) => left.name.localeCompare(right.name)));
+  const postfixMasterServices = sqlMasterServices(preview.postfixMasterServices, sql.postfixLookups.senderLogin);
+  const requirements = Object.freeze([...preview.requirements, 'mail_sqlite']);
+
+  const identity = {
+    version: 1,
+    baseSha256: preview.sha256,
+    sqlSha256: sql.sha256,
+    artifactDigests: artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
+    postfixParameters,
+    postfixMasterServices,
+    requirements,
+  };
+  return Object.freeze({
+    ...preview,
+    sha256: sha256(JSON.stringify(identity)),
+    artifacts: Object.freeze(artifacts),
+    postfixParameters,
+    postfixMasterServices,
+    requirements,
+    sql: Object.freeze({
+      enabled: true,
+      databasePath: sql.databasePath,
+      seedSha256: sql.artifacts[0].sha256,
+      lookups: sql.postfixLookups,
+    }),
+    readyToApply: false,
+    sideEffects: false,
+  });
+}
+
 export function previewManagedMailSqlConfiguration(input = {}) {
   const seed = renderManagedMailSqlSeed(input);
   const artifacts = Object.freeze([
@@ -309,4 +451,7 @@ export const mailSqlTemplateInternals = Object.freeze({
   canonicalAliases,
   canonicalAccounts,
   assertCanonicalSet,
+  sqlAuthWithSubmission,
+  replaceParameter,
+  sqlMasterServices,
 });
