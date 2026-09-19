@@ -568,13 +568,28 @@ export function createRoundcubeDomainMappingRegistry({
     });
   }
 
-  async function beginDelete(mailDomainIdValue, { expectedRevision, previewDigest, confirmation } = {}) {
+  async function beginDelete(mailDomainIdValue, {
+    expectedRevision,
+    previewDigest,
+    confirmation,
+    operationId: requestedOperationId = null,
+  } = {}) {
     const preview = await previewDelete(mailDomainIdValue);
     if (expectedRevision !== preview.revision || previewDigest !== preview.previewDigest
       || confirmation !== preview.confirmation) {
       throw new RoundcubeDomainMappingRegistryError(
         'roundcube_mapping_confirmation_invalid',
         'Roundcube Domain mapping deletion preview is stale or confirmation is invalid',
+        409,
+      );
+    }
+    const ownedOperationId = requestedOperationId === null
+      ? randomUUID()
+      : optionalReference(requestedOperationId, 'operationId');
+    if (!ownedOperationId) {
+      throw new RoundcubeDomainMappingRegistryError(
+        'roundcube_mapping_operation_identity_invalid',
+        'Roundcube Domain mapping removal operation identity is invalid',
         409,
       );
     }
@@ -601,7 +616,7 @@ export function createRoundcubeDomainMappingRegistry({
         ...current,
         revision: current.revision + 1,
         state: 'removing',
-        operationId: randomUUID(),
+        operationId: ownedOperationId,
         applyJobId: null,
         expectedRoundcubePreviewSha256: null,
         expectedRoundcubeNginxSha256: null,
