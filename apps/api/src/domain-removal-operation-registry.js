@@ -511,7 +511,9 @@ function buildSteps(preview, createdAt) {
   for (const mailDomain of plan.mailDomainIntents) {
     if (mailDomain.webDomainId === preview.domain.id) add('mail_domain', mailDomain.id);
   }
-  for (const id of plan.dnsZoneIds) add('external_dns_zone', id);
+  for (const dnsZone of plan.dnsZoneIntents) {
+    if (dnsZone.webDomainId === preview.domain.id) add('external_dns_zone', dnsZone.id);
+  }
   if (plan.websiteId !== null) add('website_binding', plan.websiteId);
   if (plan.authoritativeDns !== null && plan.authoritativeDns.zoneSnapshotDigest !== null) {
     add('authoritative_dns', preview.domain.id);
