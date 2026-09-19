@@ -1054,6 +1054,22 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     return enqueueResult(job, true);
   }
 
+  async function findIdempotentJob({ serverId, type, operation, payload, resourceType, resourceId, idempotencyKey } = {}) {
+    await ensureInitialized();
+    if (typeof idempotencyKey !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+      throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
+    }
+    const existing = state.jobs.find((candidate) => candidate.idempotencyKey === idempotencyKey);
+    if (!existing) return null;
+    const requestDigest = idempotencyDigest({
+      serverId, type, operation, payload, resourceType, resourceId,
+    });
+    if (existing.idempotencyDigest !== requestDigest) {
+      throw new JobRegistryError('job_idempotency_conflict', 'Job idempotency key was already used for different work', 409);
+    }
+    return publicJob(existing);
+  }
+
   async function claimNext(serverId) {
     await ensureInitialized();
     const claim = claimChain.catch(() => {}).then(async () => {
@@ -1116,5 +1132,5 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
       .map(publicJob);
   }
 
-  return { init, enqueue, claimNext, complete, cancel, getJob, listJobs };
+  return { init, enqueue, findIdempotentJob, claimNext, complete, cancel, getJob, listJobs };
 }
