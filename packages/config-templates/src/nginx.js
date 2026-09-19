@@ -139,7 +139,6 @@ function renderServerSet({
   nginxSettings,
   acmeOnlyHostnames = [],
   mailDiscoverySocketPath = null,
-  mailDiscoverySocketPath = null,
 }) {
   if (typeof canonicalRedirect !== 'boolean' || typeof httpsRedirect !== 'boolean') {
     throw new NginxTemplateError('invalid_redirect_policy', 'Redirect policies must be boolean values');
