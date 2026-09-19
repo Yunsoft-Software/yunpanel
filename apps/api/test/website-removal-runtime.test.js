@@ -12,7 +12,7 @@ import {
   createWebsiteRemovalPreview,
 } from '../src/website-removal-plan.js';
 
-function mockPreview({ withDomains = true } = {}) {
+function mockPreview({ withDomains = true, backups = [] } = {}) {
   const website = {
     id: 'ws-1',
     name: 'test-site',
@@ -35,7 +35,7 @@ function mockPreview({ withDomains = true } = {}) {
       unixIdentities: { status: 'available', items: [{ id: 'yunapp-site1', state: 'active' }] },
       logScopes: { status: 'available', items: [{ id: 'ws-1', state: 'managed' }] },
       crons: { status: 'available', items: [{ id: 'cron-1', state: 'active' }] },
-      backups: { status: 'available', items: [] },
+      backups: { status: 'available', items: backups },
       activeJobs: [],
     },
     blockers: [],
@@ -159,3 +159,82 @@ test('website-removal-runtime init inspects interrupted running steps and blocks
   assert.equal(inspected.steps[0].status, 'blocked');
   assert.equal(inspected.steps[0].error.code, 'website_removal_interrupted');
 });
+
+test('website-removal-runtime cleans up database credentials and passes retainedBackups to file cleanup', async () => {
+  const registry = createWebsiteRemovalOperationRegistry();
+  await registry.init();
+
+  const preview = mockPreview({
+    withDomains: false,
+    backups: [{ id: 'backup-1' }, { id: 'backup-2' }],
+  });
+
+  const actions = [];
+  const runtime = createWebsiteRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    domainRemovalRuntime: { start: async () => {} },
+    databaseCredentialRegistry: {
+      getForBinding: async (bindingId) => ({ id: `cred-${bindingId}`, revision: 2 }),
+      deleteCredential: async (credId, opts) => {
+        actions.push({ type: 'deleteCredential', credId, confirmation: opts.confirmation });
+      },
+    },
+    databaseBindingRegistry: {
+      listBindings: async () => [{ id: 'db-1', databaseName: 'mydb', revision: 3 }],
+      unbindDatabase: async (bindingId, opts) => {
+        actions.push({ type: 'unbindDatabase', bindingId, confirmation: opts.confirmation });
+      },
+    },
+    fileCleanupHandler: async ({ websiteId, applicationId, retainedBackups }) => {
+      actions.push({ type: 'fileCleanup', websiteId, applicationId, retainedBackups });
+      return { cleanedFilesCount: 42 };
+    },
+  });
+
+  let op = await runtime.start({ confirmation: preview.confirmation });
+  // Step through until database_binding_cleanup
+  while (op.status === 'running') {
+    const nextStep = op.steps.find((s) => s.status !== 'succeeded');
+    if (!nextStep) break;
+    op = await runtime.continueStep({
+      websiteId: 'ws-1',
+      operationId: op.id,
+      stepId: nextStep.id,
+      expectedUpdatedAt: op.updatedAt,
+      confirmation: op.actions.stepContinuationConfirmation,
+    });
+  }
+
+  assert.equal(op.status, 'removed');
+  // Verify credential was deleted with typed confirmation before unbind
+  const credAction = actions.find((a) => a.type === 'deleteCredential');
+  assert.ok(credAction);
+  assert.equal(credAction.credId, 'cred-db-1');
+  assert.equal(credAction.confirmation, 'delete-database-credential:cred-db-1:2');
+
+  // Verify database was unbound with typed confirmation
+  const unbindAction = actions.find((a) => a.type === 'unbindDatabase');
+  assert.ok(unbindAction);
+  assert.equal(unbindAction.bindingId, 'db-1');
+  assert.equal(unbindAction.confirmation, 'unbind-database:db-1:3');
+
+  // Verify file cleanup received retainedBackups
+  const fileAction = actions.find((a) => a.type === 'fileCleanup');
+  assert.ok(fileAction);
+  assert.deepEqual(fileAction.retainedBackups, ['backup-1', 'backup-2']);
+
+  // Check step results
+  const dbStep = op.steps.find((s) => s.kind === 'database_binding_cleanup');
+  assert.equal(dbStep.status, 'succeeded');
+  assert.equal(dbStep.result.databaseBindingsCleaned, true);
+  assert.equal(dbStep.result.unboundBindings.length, 1);
+  assert.equal(dbStep.result.unboundBindings[0].databaseName, 'mydb');
+
+  const fileStep = op.steps.find((s) => s.kind === 'file_cleanup');
+  assert.equal(fileStep.status, 'succeeded');
+  assert.equal(fileStep.result.filesCleaned, true);
+  assert.deepEqual(fileStep.result.retainedBackups, ['backup-1', 'backup-2']);
+  assert.equal(fileStep.result.cleanedFilesCount, 42);
+});
+

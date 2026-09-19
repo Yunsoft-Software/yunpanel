@@ -45,6 +45,7 @@ export function createWebsiteRemovalRuntime({
   websiteRegistry = null,
   applicationRegistry = null,
   databaseBindingRegistry = null,
+  databaseCredentialRegistry = null,
   websiteSftpKeyRegistry = null,
   runtimeBindingRegistry = null,
   websiteCronRegistry = null,
@@ -273,15 +274,43 @@ export function createWebsiteRemovalRuntime({
         }
 
         case 'database_binding_cleanup': {
+          const unboundBindings = [];
           if (databaseBindingRegistry && typeof databaseBindingRegistry.listBindings === 'function') {
             const bindings = await databaseBindingRegistry.listBindings({ websiteId: op.websiteId });
             for (const binding of bindings) {
-              if (typeof databaseBindingRegistry.removeBinding === 'function') {
+              if (databaseCredentialRegistry && typeof databaseCredentialRegistry.getForBinding === 'function') {
+                const credential = await databaseCredentialRegistry.getForBinding(binding.id);
+                if (credential && typeof databaseCredentialRegistry.deleteCredential === 'function') {
+                  await databaseCredentialRegistry.deleteCredential(credential.id, {
+                    expectedRevision: credential.revision,
+                    confirmation: `delete-database-credential:${credential.id}:${credential.revision}`,
+                  });
+                }
+              }
+              if (typeof databaseBindingRegistry.unbindDatabase === 'function') {
+                await databaseBindingRegistry.unbindDatabase(binding.id, {
+                  expectedRevision: binding.revision ?? 1,
+                  confirmation: `unbind-database:${binding.id}:${binding.revision ?? 1}`,
+                });
+                unboundBindings.push({
+                  id: binding.id,
+                  databaseName: binding.databaseName,
+                  revision: binding.revision,
+                  unbound: true,
+                });
+              } else if (typeof databaseBindingRegistry.removeBinding === 'function') {
                 await databaseBindingRegistry.removeBinding(binding.id);
+                unboundBindings.push({
+                  id: binding.id,
+                  unbound: true,
+                });
               }
             }
           }
-          op = await registry.succeedStep(op.id, step.id, { databaseBindingsCleaned: true });
+          op = await registry.succeedStep(op.id, step.id, {
+            databaseBindingsCleaned: true,
+            unboundBindings,
+          });
           break;
         }
 
@@ -300,13 +329,19 @@ export function createWebsiteRemovalRuntime({
         }
 
         case 'file_cleanup': {
+          let cleanupResult = null;
           if (typeof fileCleanupHandler === 'function') {
-            await fileCleanupHandler({
+            cleanupResult = await fileCleanupHandler({
               websiteId: op.websiteId,
               applicationId: op.applicationId,
+              retainedBackups: op.plan?.additional?.backups?.ids ?? [],
             });
           }
-          op = await registry.succeedStep(op.id, step.id, { filesCleaned: true });
+          op = await registry.succeedStep(op.id, step.id, {
+            filesCleaned: true,
+            retainedBackups: op.plan?.additional?.backups?.ids ?? [],
+            ...(cleanupResult && typeof cleanupResult === 'object' ? cleanupResult : {}),
+          });
           break;
         }
 

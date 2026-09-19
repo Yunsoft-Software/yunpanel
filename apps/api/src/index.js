@@ -681,7 +681,7 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
         mailDomainRegistry,
         additionalProviders: {
           dockerWorkloads: async () => [],
-          backups: async () => [],
+          backups: domainRemovalRuntimeBundle?.backupImpactProvider ?? (async () => []),
           webmailMappings: async () => [],
           mailboxes: async () => [],
           crons: websiteCronImpactProvider ?? (async () => []),
@@ -699,6 +699,7 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
     websiteRegistry,
     applicationRegistry,
     databaseBindingRegistry,
+    databaseCredentialRegistry,
     websiteSftpKeyRegistry: websiteSftpKeyRuntime?.keyRegistry ?? null,
     runtimeBindingRegistry,
     websiteCronRegistry,

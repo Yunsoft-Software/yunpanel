@@ -171,6 +171,22 @@ function dependencyPlan(dependencies, currentWebsite) {
   });
 }
 
+const ORCHESTRATABLE_WEBSITE_IMPACT_BLOCKERS = new Set([
+  'domains_present',
+  'linked_domains_present',
+  'child_domains_present',
+  'website_binding_present',
+  'application_binding_present',
+  'database_binding_dependencies_present',
+  'sftp_key_dependencies_present',
+  'runtime_binding_dependencies_present',
+  'unix_identity_dependencies_present',
+  'log_scope_dependencies_present',
+  'cron_dependencies_present',
+  'backup_dependencies_present',
+  'impact_apply_not_implemented',
+]);
+
 function hardBlockers(blockers, plan) {
   const hard = [];
   for (const blocker of blockers) {
@@ -178,10 +194,7 @@ function hardBlockers(blockers, plan) {
       hard.push(blocker.code);
       continue;
     }
-    // Any blocker other than known orchestratable ones is hard
-    if (blocker.code !== 'domains_present'
-      && blocker.code !== 'website_binding_present'
-      && blocker.code !== 'application_binding_present') {
+    if (!ORCHESTRATABLE_WEBSITE_IMPACT_BLOCKERS.has(blocker.code)) {
       hard.push(blocker.code);
     }
   }
@@ -262,4 +275,5 @@ export const websiteRemovalPlanInternals = Object.freeze({
   dependencyPlan,
   hardBlockers,
   orderDomains,
+  orchestratableWebsiteImpactBlockers: ORCHESTRATABLE_WEBSITE_IMPACT_BLOCKERS,
 });

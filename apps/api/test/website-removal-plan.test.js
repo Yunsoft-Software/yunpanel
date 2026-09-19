@@ -123,3 +123,30 @@ test('rejects mismatched or stale impact confirmation', () => {
     (err) => err instanceof WebsiteRemovalPlanError && err.code === 'website_removal_impact_invalid',
   );
 });
+
+test('orchestratable website impact blockers do not prevent removal preview from starting', () => {
+  const ws = website();
+  const imp = impact(ws, {
+    blockers: [
+      { code: 'domains_present', resourceType: 'domain', count: 2 },
+      { code: 'linked_domains_present', resourceType: 'domain', count: 1 },
+      { code: 'child_domains_present', resourceType: 'domain', count: 1 },
+      { code: 'website_binding_present', resourceType: 'website', count: 1 },
+      { code: 'application_binding_present', resourceType: 'application', count: 1 },
+      { code: 'database_binding_dependencies_present', resourceType: 'database_binding', count: 1 },
+      { code: 'sftp_key_dependencies_present', resourceType: 'sftp_key', count: 1 },
+      { code: 'runtime_binding_dependencies_present', resourceType: 'runtime_binding', count: 1 },
+      { code: 'unix_identity_dependencies_present', resourceType: 'unix_identity', count: 1 },
+      { code: 'log_scope_dependencies_present', resourceType: 'log_scope', count: 1 },
+      { code: 'cron_dependencies_present', resourceType: 'cron', count: 1 },
+      { code: 'backup_dependencies_present', resourceType: 'backup', count: 1 },
+      { code: 'impact_apply_not_implemented', resourceType: 'website' },
+    ],
+  });
+
+  const preview = createWebsiteRemovalPreview({ website: ws, impact: imp });
+  assert.equal(preview.readyToStart, true);
+  assert.deepEqual(preview.hardBlockers, []);
+  assert.ok(preview.confirmation.startsWith('start-website-remove:ws-1:2:'));
+});
+

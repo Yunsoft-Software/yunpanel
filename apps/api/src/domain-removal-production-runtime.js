@@ -186,5 +186,6 @@ export function createDomainRemovalProductionRuntime({
     runtime,
     registry: operationRegistry,
     preview: domainPreview,
+    backupImpactProvider,
   });
 }
