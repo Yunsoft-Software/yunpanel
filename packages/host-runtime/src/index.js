@@ -57,6 +57,11 @@ export {
   mailReadinessInternals,
 } from './mail-readiness-inspector.js';
 export {
+  createMailProtocolHealthInspector,
+  MailProtocolHealthInspectorError,
+  mailProtocolHealthInternals,
+} from './mail-protocol-health-inspector.js';
+export {
   createMailConfigActivator,
   MailConfigActivationError,
   mailConfigActivatorInternals,
