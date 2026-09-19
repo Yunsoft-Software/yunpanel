@@ -19,6 +19,7 @@ import { createWebsitePassengerHealthProvisioningHandler } from './website-passe
 import { createWebsiteProvisioningHandlers } from './website-provisioning-handlers-isolation.js';
 import { createWebsiteProvisioningOrchestrator } from './website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from './website-provisioning-registry.js';
+import { createWebsiteRoundcubeProvisioningHandler } from './website-roundcube-provisioning-handler.js';
 import { createWebsiteSftpKeyAwareProvisioningHandler } from './website-sftp-provisioning-handler.js';
 import { createWebsiteTlsProvisioningHandler } from './website-tls-provisioning-handler.js';
 
@@ -122,6 +123,7 @@ export function createWebsiteProvisioningRuntime({
   let databaseControlPlane = null;
   let mailControlPlane = null;
   let mailDkimControlPlane = null;
+  let roundcubeControlPlane = null;
   let mailDnsControlPlane = null;
 
   function configureSftpKeys(dependencies = {}) {
@@ -513,6 +515,56 @@ export function createWebsiteProvisioningRuntime({
     return Object.freeze({ configured: true });
   }
 
+  function configureRoundcubeControlPlane(dependencies = {}) {
+    const {
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      roundcubeDomainMappingRegistry: nextMappingRegistry,
+      roundcubeDomainMappingService: nextMappingService,
+      roundcubeWebmailEndpointResolver: nextEndpointResolver,
+      jobRegistry: nextJobRegistry,
+      waitForTerminalJob: nextWaitForTerminalJob,
+    } = dependencies;
+    if (!nextMailDomainRegistry || !nextDomainRegistry || !nextMappingRegistry
+      || !nextMappingService || !nextEndpointResolver || !nextJobRegistry) {
+      throw new Error('Website Roundcube provisioning dependencies are required');
+    }
+    if (!handlers.certificate) {
+      throw new Error('Website certificate provisioning must be configured before Roundcube provisioning');
+    }
+    if (roundcubeControlPlane) {
+      if (roundcubeControlPlane.mailDomainRegistry !== nextMailDomainRegistry
+        || roundcubeControlPlane.domainRegistry !== nextDomainRegistry
+        || roundcubeControlPlane.roundcubeDomainMappingRegistry !== nextMappingRegistry
+        || roundcubeControlPlane.roundcubeDomainMappingService !== nextMappingService
+        || roundcubeControlPlane.roundcubeWebmailEndpointResolver !== nextEndpointResolver
+        || roundcubeControlPlane.jobRegistry !== nextJobRegistry
+        || roundcubeControlPlane.waitForTerminalJob !== nextWaitForTerminalJob) {
+        throw new Error('Website Roundcube provisioning dependencies cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.roundcube_mapping = createWebsiteRoundcubeProvisioningHandler({
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      roundcubeDomainMappingRegistry: nextMappingRegistry,
+      roundcubeDomainMappingService: nextMappingService,
+      roundcubeWebmailEndpointResolver: nextEndpointResolver,
+      jobRegistry: nextJobRegistry,
+      ...(nextWaitForTerminalJob ? { waitForTerminalJob: nextWaitForTerminalJob } : {}),
+    });
+    roundcubeControlPlane = Object.freeze({
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      roundcubeDomainMappingRegistry: nextMappingRegistry,
+      roundcubeDomainMappingService: nextMappingService,
+      roundcubeWebmailEndpointResolver: nextEndpointResolver,
+      jobRegistry: nextJobRegistry,
+      waitForTerminalJob: nextWaitForTerminalJob,
+    });
+    return Object.freeze({ configured: true });
+  }
+
   function configureMailDnsControlPlane(dependencies = {}) {
     const {
       mailDomainRegistry: nextMailDomainRegistry,
@@ -532,12 +584,14 @@ export function createWebsiteProvisioningRuntime({
       }
       return Object.freeze({ configured: true });
     }
-    handlers.mail_dns_reapply = createWebsiteMailDnsProvisioningHandler({
+    const handler = createWebsiteMailDnsProvisioningHandler({
       mailDomainRegistry: nextMailDomainRegistry,
       domainRegistry: nextDomainRegistry,
       mailDkimRegistry: nextMailDkimRegistry,
       dnsZoneReapplyRuntime: nextDnsZoneReapplyRuntime,
     });
+    handlers.mail_dns_reapply = handler;
+    handlers.webmail_dns_reapply = handler;
     mailDnsControlPlane = Object.freeze({
       mailDomainRegistry: nextMailDomainRegistry,
       domainRegistry: nextDomainRegistry,
@@ -588,6 +642,7 @@ export function createWebsiteProvisioningRuntime({
     configureDatabaseControlPlane,
     configureMailControlPlane,
     configureMailDkimControlPlane,
+    configureRoundcubeControlPlane,
     configureMailDnsControlPlane,
     init,
     get: (operationId) => registry.get(operationId),
