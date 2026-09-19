@@ -139,6 +139,47 @@ function discoveryIntent(value, mailDomain, domain) {
   });
 }
 
+function webmailEndpoint(value, mailDomain, domain) {
+  if (value === null) {
+    return Object.freeze({
+      intent: null,
+      mappingRevision: null,
+      roundcubePreviewSha256: null,
+    });
+  }
+  const fields = new Set([
+    'version', 'mailDomainId', 'serverId', 'mappingId', 'mappingRevision',
+    'hostname', 'protocol', 'path', 'roundcubePreviewSha256', 'roundcubeApplyJobId', 'ready',
+  ]);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.size
+    || Object.keys(value).some((field) => !fields.has(field))
+    || value.version !== 1 || value.mailDomainId !== mailDomain.id
+    || value.serverId !== domain.serverId || value.ready !== true
+    || !Number.isSafeInteger(value.mappingRevision) || value.mappingRevision < 1
+    || value.hostname !== `webmail.${domain.primaryDomain}`
+    || value.protocol !== 'https' || value.path !== '/'
+    || typeof value.roundcubePreviewSha256 !== 'string'
+    || !/^[a-f0-9]{64}$/.test(value.roundcubePreviewSha256)
+    || typeof value.mappingId !== 'string' || !value.mappingId
+    || typeof value.roundcubeApplyJobId !== 'string' || !value.roundcubeApplyJobId) {
+    throw new DnsZoneMailIntentError(
+      'dns_zone_mail_webmail_invalid',
+      'Roundcube webmail endpoint readiness evidence is invalid',
+      409,
+    );
+  }
+  return Object.freeze({
+    intent: Object.freeze({
+      hostname: value.hostname,
+      protocol: 'https',
+      path: '/',
+    }),
+    mappingRevision: value.mappingRevision,
+    roundcubePreviewSha256: value.roundcubePreviewSha256,
+  });
+}
+
 function disabledEvidence(mailDomain = null) {
   return Object.freeze({
     version: 1,
@@ -148,6 +189,8 @@ function disabledEvidence(mailDomain = null) {
     mailDomainRevision: mailDomain?.revision ?? null,
     mailServiceIdentityRevision: null,
     mailDiscoveryEndpointRevision: null,
+    roundcubeWebmailMappingRevision: null,
+    roundcubeWebmailPreviewSha256: null,
     dkimRevisions: Object.freeze([]),
     retirementPhase: null,
     retirementRevision: null,
@@ -160,13 +203,16 @@ export function createDnsZoneMailIntentResolver({
   mailDkimRetirementRegistry,
   mailServiceIdentityRegistry,
   mailDiscoveryEndpointResolver = null,
+  roundcubeWebmailEndpointResolver = null,
 } = {}) {
   if (!mailDomainRegistry || typeof mailDomainRegistry.listMailDomains !== 'function'
     || !mailDkimRegistry || typeof mailDkimRegistry.getKey !== 'function'
     || !mailDkimRetirementRegistry || typeof mailDkimRetirementRegistry.getRetirement !== 'function'
     || !mailServiceIdentityRegistry || typeof mailServiceIdentityRegistry.getForServer !== 'function'
     || (mailDiscoveryEndpointResolver !== null
-      && typeof mailDiscoveryEndpointResolver?.resolve !== 'function')) {
+      && typeof mailDiscoveryEndpointResolver?.resolve !== 'function')
+    || (roundcubeWebmailEndpointResolver !== null
+      && typeof roundcubeWebmailEndpointResolver?.resolve !== 'function')) {
     throw new DnsZoneMailIntentError(
       'dns_zone_mail_dependencies_invalid',
       'DNS zone mail intent dependencies are unavailable',
@@ -193,12 +239,15 @@ export function createDnsZoneMailIntentResolver({
       throw new DnsZoneMailIntentError('dns_zone_mail_domain_invalid', 'Local mail-domain state is invalid', 409);
     }
 
-    const [identity, currentKey, retirement, discoveryState] = await Promise.all([
+    const [identity, currentKey, retirement, discoveryState, webmailState] = await Promise.all([
       mailServiceIdentityRegistry.getForServer(scoped.serverId),
       mailDkimRegistry.getKey(mailDomain.id),
       mailDkimRetirementRegistry.getRetirement(mailDomain.id),
       mailDiscoveryEndpointResolver
         ? mailDiscoveryEndpointResolver.resolve({ mailDomain, domain: scoped })
+        : null,
+      roundcubeWebmailEndpointResolver
+        ? roundcubeWebmailEndpointResolver.resolve({ mailDomain, domain: scoped })
         : null,
     ]);
     if (!identity || identity.serverId !== scoped.serverId || identity.ready !== true
@@ -213,6 +262,7 @@ export function createDnsZoneMailIntentResolver({
 
     const retirementTarget = retirementPreview(retirePendingDkim, retirement, mailDomain.id);
     const discovery = discoveryIntent(discoveryState, mailDomain, scoped);
+    const webmail = webmailEndpoint(webmailState, mailDomain, scoped);
     const dkim = [];
     if (currentKey) dkim.push(canonicalDkim(currentKey, mailDomain.id, scoped.primaryDomain, 'Current'));
     const previous = retirementDkim(retirement, mailDomain.id, scoped.primaryDomain, {
@@ -242,6 +292,8 @@ export function createDnsZoneMailIntentResolver({
       mailDomainRevision: mailDomain.revision,
       mailServiceIdentityRevision: identity.revision,
       mailDiscoveryEndpointRevision: discovery.revision,
+      roundcubeWebmailMappingRevision: webmail.mappingRevision,
+      roundcubeWebmailPreviewSha256: webmail.roundcubePreviewSha256,
       dkimRevisions: Object.freeze(dkim.map((entry) => entry.revision).sort((left, right) => left - right)),
       retirementPhase: retirementTarget?.phase ?? retirement?.phase ?? null,
       retirementRevision: retirementTarget?.revision ?? retirement?.revision ?? null,
@@ -252,7 +304,8 @@ export function createDnsZoneMailIntentResolver({
         host: identity.hostname,
         imap: true,
         submission: true,
-        webmailEnabled: false,
+        webmailEnabled: webmail.intent !== null,
+        ...(webmail.intent ? { webmailHost: webmail.intent.hostname } : {}),
         discovery: discovery.intent,
         dkimRecords,
       }),
@@ -270,5 +323,6 @@ export const dnsZoneMailIntentInternals = Object.freeze({
   retirementPreview,
   discoveryEndpoint,
   discoveryIntent,
+  webmailEndpoint,
   disabledEvidence,
 });
