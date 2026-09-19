@@ -102,6 +102,7 @@ const MANAGED_DIRECTORY_PATHS = Object.freeze([
   ...LEGACY_MANAGED_DIRECTORY_PATHS,
   '/etc/yunpanel/mail/sql',
   mailSqlTemplatePolicy.postfixSqlDirectory,
+  mailSqlTemplatePolicy.databaseDirectory,
 ]);
 
 export class MailConfigBackupError extends Error {
