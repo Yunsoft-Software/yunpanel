@@ -108,7 +108,9 @@ function removalPreview({
       dnsZoneIntents: [],
       mailDomainIds: [],
       mailDomainIntents: [],
-      activeJobIds: [],
+      webmailMappingIds: [],
+      webmailMappingIntents: [],
+      activeJobIds: []
       additional: {
         mailboxes: { status: 'available', ids: [] },
         backups: { status: 'available', ids: [] },
@@ -201,7 +203,9 @@ function childRemovalPreview(overrides = {}) {
       dnsZoneIntents: [],
       mailDomainIds: [],
       mailDomainIntents: [],
-      activeJobIds: [],
+      webmailMappingIds: [],
+      webmailMappingIntents: [],
+      activeJobIds: []
       additional: {
         mailboxes: { status: 'available', ids: [] },
         backups: { status: 'available', ids: [] },
