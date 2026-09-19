@@ -57,9 +57,14 @@ Bu kayıt P0.9 Domain removal zincirindeki Mail Domain child operation'ın metad
 
 ## Doğrulama durumu
 
-Bu çalışma ortamında repository checkout/Node test runner yoktur; bu nedenle yukarıdaki yeni source testleri ve full npm run check burada çalıştırılmış gibi gösterilmez.
+Sonraki yerel doğrulama (Node v24.21.0, 2026-09-19):
 
-Hedefli source testleri, bootstrap import/syntax kontrolü ve full Node 24 repository check kapısı todo.md içindeki T-CODEX-SOURCE bölümüne açık komutlarla bırakılmıştır. Bu kapı geçmeden canlı acceptance tamamlanmış sayılmaz.
+- `node --test` ile Mail Domain removal data/finalize/router/config/cleanup/runtime, Domain removal plan/operation/runtime/external DNS, job registry/durable wrapper ve backup impact dosyaları birlikte: **141 test geçti**.
+- `npm run check`: lint, bütün workspace testleri (**3929 geçti, 0 başarısız**) ve web build geçti.
+- `node --check` ile `apps/api/src`, `packages/host-runtime/src` ve `packages/config-templates/src` altındaki **490 JavaScript dosyası** geçti. Production bootstrap içindeki `index.js` sözdizimi kontrol edildi; gerçek host boot veya servis kabulü olarak yorumlanmaz.
+- Mail Domain finalization `removed()` callback çağrısı düzeltildi; güncel Webmail/External DNS intent, SQL mail, certificate ve Roundcube fixture'ları aynı kapıda doğrulandı.
+
+Gerçek Ubuntu mail, DNS, failure-injection ve restart kabulü `todo.md` T-PROVISIONING/T-MAIL altında açıktır.
 
 ## Kalan P0.9 sınırı
 

@@ -119,7 +119,7 @@ Apply job ID attachment desired mapping revision/update identity'sini değiştir
 
 ## DNS readiness
 
-DNS mail intent mapping desired-state varlığıyla değil canlı apply evidence'ıyla açılır.
+DNS mail intent'in `webmailReady` kanıtı yalnız canlı shared Roundcube apply evidence'ıyla açılır.
 
 Webmail endpoint resolver yalnız:
 
@@ -132,14 +132,14 @@ Webmail endpoint resolver yalnız:
 
 kanıtlandığında readiness verir.
 
-Bundan sonra mevcut DNS desired-state modeli:
+Bundan sonra DNS mail intent:
 
-- `webmailEnabled=true`
+- `webmailReady=true`
 - `webmailHost=webmail.<domain>`
 
-üretir ve A/AAAA kayıtlarını ekler.
+üretir. `webmailEnabled=true` ve A/AAAA yayını initial HTTP-01 önkoşulu olarak bu kanıttan önce başlar.
 
-Pending/removing/removed mapping veya stale successful job DNS kaydı yayınlatmaz.
+Sonraki fresh Website ACME akışında `webmail.<domain>` A/AAAA adresi, HTTP-01 challenge'ın erişebilmesi için mapping aktif olmadan da yayımlanır (`webmailEnabled=true`, `webmailReady=false`). Bu DNS kaydı Roundcube hazır kabulü değildir; `mail_health` exact certificate, mapping ve HTTPS evidence'ı bekler. Mevcut DNS desired-state `webmailReady` alanını adres yayını için kullanmaz. Disable/delete akışının kayıt emekliliği ayrıca gerçek host kabulü gerektirir.
 
 ## Domain removal entegrasyonu
 
