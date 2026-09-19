@@ -626,9 +626,11 @@ export function createWebsiteProvisioningRuntime({
       mailReadinessInspector: nextMailReadinessInspector,
       mailProtocolHealthInspector: nextMailProtocolHealthInspector,
       roundcubeWebmailEndpointResolver: nextEndpointResolver,
+      mailDiscoveryEndpointResolver: nextDiscoveryEndpointResolver,
     } = dependencies;
     if (!nextMailDomainRegistry || !nextDomainRegistry || !nextMailConfigurationService
-      || !nextMailReadinessInspector || !nextMailProtocolHealthInspector || !nextEndpointResolver) {
+      || !nextMailReadinessInspector || !nextMailProtocolHealthInspector
+      || !nextEndpointResolver || !nextDiscoveryEndpointResolver) {
       throw new Error('Website local mail health provisioning dependencies are required');
     }
     if (!handlers.mail_config || !handlers.mail_dkim_config || !handlers.roundcube_mapping) {
@@ -640,7 +642,8 @@ export function createWebsiteProvisioningRuntime({
         || mailHealthControlPlane.mailConfigurationService !== nextMailConfigurationService
         || mailHealthControlPlane.mailReadinessInspector !== nextMailReadinessInspector
         || mailHealthControlPlane.mailProtocolHealthInspector !== nextMailProtocolHealthInspector
-        || mailHealthControlPlane.roundcubeWebmailEndpointResolver !== nextEndpointResolver) {
+        || mailHealthControlPlane.roundcubeWebmailEndpointResolver !== nextEndpointResolver
+        || mailHealthControlPlane.mailDiscoveryEndpointResolver !== nextDiscoveryEndpointResolver) {
         throw new Error('Website local mail health provisioning dependencies cannot be replaced');
       }
       return Object.freeze({ configured: true });
@@ -652,6 +655,7 @@ export function createWebsiteProvisioningRuntime({
       mailReadinessInspector: nextMailReadinessInspector,
       mailProtocolHealthInspector: nextMailProtocolHealthInspector,
       roundcubeWebmailEndpointResolver: nextEndpointResolver,
+      mailDiscoveryEndpointResolver: nextDiscoveryEndpointResolver,
     });
     mailHealthControlPlane = Object.freeze({
       mailDomainRegistry: nextMailDomainRegistry,
@@ -660,6 +664,7 @@ export function createWebsiteProvisioningRuntime({
       mailReadinessInspector: nextMailReadinessInspector,
       mailProtocolHealthInspector: nextMailProtocolHealthInspector,
       roundcubeWebmailEndpointResolver: nextEndpointResolver,
+      mailDiscoveryEndpointResolver: nextDiscoveryEndpointResolver,
     });
     return Object.freeze({ configured: true });
   }
