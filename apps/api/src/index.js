@@ -460,6 +460,28 @@ const roundcubeWebmailEndpointResolver = createRoundcubeWebmailEndpointResolver(
   roundcubeConfigurationService,
   jobRegistry,
 });
+const dnsZoneReapplyRuntime = localServerId && powerDnsAuthoritativeService
+  ? createDnsZoneReapplyRuntime({
+    registry: createDnsZoneReapplyOperationRegistry({
+      filePath: dnsZoneReapplyOperationStorePath,
+    }),
+    service: createDnsZoneReapplyService({
+      domainRegistry,
+      dnsIdentityRegistry: serverDnsIdentityRegistry,
+      dnsZoneTemplateRegistry,
+      powerDnsSecretRegistry,
+      mailIntentResolver: createDnsZoneMailIntentResolver({
+        mailDomainRegistry,
+        mailDkimRegistry,
+        mailDkimRetirementRegistry,
+        mailServiceIdentityRegistry,
+        roundcubeWebmailEndpointResolver,
+      }),
+      localServerId,
+    }),
+  })
+  : null;
+if (dnsZoneReapplyRuntime) await dnsZoneReapplyRuntime.init();
 const mailDomainRemovalRuntimeBundle = localServerId
   ? createMailDomainRemovalProductionRuntime({
     filePath: mailDomainRemovalOperationStorePath,
@@ -691,6 +713,8 @@ const listener = createAuthenticatedApi({
         serverDnsIdentityRegistry,
         powerDnsAuthoritativeService,
         powerDnsSecretRegistry,
+        dnsZoneTemplateRegistry,
+        dnsZoneReapplyRuntime,
       } : {}),
       ...(dnsZoneSnapshotRetentionDays === null ? {} : {
         dnsZoneRetirementPolicy: { snapshotRetentionDays: dnsZoneSnapshotRetentionDays },
