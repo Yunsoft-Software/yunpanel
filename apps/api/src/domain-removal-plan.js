@@ -26,6 +26,7 @@ const ORCHESTRATABLE_IMPACT_BLOCKERS = new Set([
   'backup_dependencies_present',
   'cron_dependencies_present',
   'docker_dependencies_present',
+  'webmail_mapping_dependencies_present',
   'authoritative_dns_retirement_blocked',
   'impact_apply_not_implemented',
 ]);
@@ -549,6 +550,101 @@ function dnsZoneReferences(values, domain, childDomains) {
   return Object.freeze(references);
 }
 
+function webmailMappingReferences(bucket, domain, childDomains, mailDomains) {
+  if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)
+    || !['available', 'unavailable'].includes(bucket.status)
+    || !Array.isArray(bucket.items)) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_preview_invalid',
+      'Webmail mapping dependency bucket is invalid',
+      409,
+    );
+  }
+  if (bucket.status === 'unavailable') return null;
+  if (bucket.items.length > 500) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_preview_invalid',
+      'Webmail mapping dependency inventory is too large',
+      409,
+    );
+  }
+  const fields = new Set([
+    'id', 'mailDomainId', 'webDomainId', 'serverId', 'domainName', 'hostname',
+    'certificateId', 'certificateFingerprint256', 'revision', 'state',
+    'operationId', 'applyJobId', 'expectedRoundcubePreviewSha256',
+    'expectedRoundcubeNginxSha256', 'createdAt', 'updatedAt',
+  ]);
+  const mappingStates = new Set(['active', 'pending', 'removing']);
+  const fingerprint = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
+  const affectedDomains = new Map(
+    [domain, ...childDomains].map((current) => [current.id, current.primaryDomain]),
+  );
+  const mailById = new Map(mailDomains.map((mailDomain) => [mailDomain.id, mailDomain]));
+  const intents = bucket.items.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)
+      || Object.keys(item).length !== fields.size
+      || Object.keys(item).some((field) => !fields.has(field))
+      || item.serverId !== domain.serverId
+      || item.domainName !== affectedDomains.get(item.webDomainId)
+      || item.hostname !== `webmail.${item.domainName}`
+      || !mappingStates.has(item.state)
+      || typeof item.certificateFingerprint256 !== 'string'
+      || !fingerprint.test(item.certificateFingerprint256)
+      || !Number.isSafeInteger(item.revision) || item.revision < 1) {
+      throw new DomainRemovalPlanError(
+        'domain_removal_impact_stale',
+        'Webmail mapping dependency evidence does not match the affected Domain set',
+        409,
+      );
+    }
+    const mailDomain = mailById.get(item.mailDomainId);
+    if (!mailDomain || mailDomain.webDomainId !== item.webDomainId
+      || mailDomain.domainName !== item.domainName) {
+      throw new DomainRemovalPlanError(
+        'domain_removal_impact_stale',
+        'Webmail mapping dependency does not match its Mail Domain',
+        409,
+      );
+    }
+    const optionalId = (value, field) => value === null ? null : safeId(value, field);
+    const optionalDigest = (value, field) => value === null ? null : safeDigest(value, field);
+    return Object.freeze({
+      id: safeId(item.id, 'webmailMappingId'),
+      mailDomainId: safeId(item.mailDomainId, 'webmailMappingMailDomainId'),
+      webDomainId: safeId(item.webDomainId, 'webmailMappingWebDomainId'),
+      serverId: safeId(item.serverId, 'webmailMappingServerId'),
+      domainName: item.domainName,
+      hostname: item.hostname,
+      certificateId: safeId(item.certificateId, 'webmailMappingCertificateId'),
+      certificateFingerprint256: item.certificateFingerprint256.toUpperCase(),
+      revision: item.revision,
+      state: item.state,
+      operationId: optionalId(item.operationId, 'webmailMappingOperationId'),
+      applyJobId: optionalId(item.applyJobId, 'webmailMappingApplyJobId'),
+      expectedRoundcubePreviewSha256: optionalDigest(
+        item.expectedRoundcubePreviewSha256,
+        'webmailMappingPreviewSha256',
+      ),
+      expectedRoundcubeNginxSha256: optionalDigest(
+        item.expectedRoundcubeNginxSha256,
+        'webmailMappingNginxSha256',
+      ),
+      createdAt: safeTimestamp(item.createdAt, 'webmailMappingCreatedAt'),
+      updatedAt: safeTimestamp(item.updatedAt, 'webmailMappingUpdatedAt'),
+    });
+  }).sort((left, right) => left.id.localeCompare(right.id));
+  if (new Set(intents.map((intent) => intent.id)).size !== intents.length
+    || new Set(intents.map((intent) => intent.mailDomainId)).size !== intents.length
+    || new Set(intents.map((intent) => intent.webDomainId)).size !== intents.length) {
+    throw new DomainRemovalPlanError(
+      'domain_removal_preview_invalid',
+      'Webmail mapping dependency inventory contains duplicate identities',
+      409,
+    );
+  }
+  return Object.freeze(intents);
+}
+
 function dependencyPlan(dependencies, domain) {
   if (!dependencies || typeof dependencies !== 'object' || Array.isArray(dependencies)) {
     throw new DomainRemovalPlanError(
@@ -595,6 +691,12 @@ function dependencyPlan(dependencies, domain) {
     domain,
     childDomains,
   );
+  const webmailMappings = webmailMappingReferences(
+    dependencies.webmailMappings,
+    domain,
+    childDomains,
+    mailDomains,
+  );
   return Object.freeze({
     childDomainIds: Object.freeze(childDomains.map((child) => child.id)),
     childDomains,
@@ -612,6 +714,10 @@ function dependencyPlan(dependencies, domain) {
     dnsZoneIntents: dnsZones,
     mailDomainIds: Object.freeze(mailDomains.map((mailDomain) => mailDomain.id)),
     mailDomainIntents: mailDomains,
+    webmailMappingIds: webmailMappings === null
+      ? null
+      : Object.freeze(webmailMappings.map((mapping) => mapping.id)),
+    webmailMappingIntents: webmailMappings,
     activeJobIds: activeJobs,
     additional,
     authoritativeDns: authoritativeDnsReference(dependencies, domain.id),
@@ -629,6 +735,11 @@ function hardBlockers(blockers, plan) {
   }
   if (plan.activeJobIds.length > 0 && !hard.includes('active_jobs_present')) {
     hard.push('active_jobs_present');
+  }
+  if (plan.webmailMappingIntents === null) {
+    hard.push('webmail_mapping_inventory_unavailable');
+  } else if (plan.webmailMappingIntents.some((mapping) => mapping.state !== 'active')) {
+    hard.push('webmail_mapping_operation_in_progress');
   }
   for (const [name, bucket] of Object.entries(plan.additional)) {
     if (bucket.status === 'unavailable') hard.push(`${name}_inventory_unavailable`);
@@ -724,6 +835,7 @@ export const domainRemovalPlanInternals = Object.freeze({
   certificateReferences,
   dnsZoneReferences,
   mailDomainReferences,
+  webmailMappingReferences,
   dependencyPlan,
   hardBlockers,
 });
