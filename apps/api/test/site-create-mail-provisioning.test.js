@@ -91,6 +91,7 @@ test('local mail config, DKIM key, and signing config become required after cert
   const config = plan.steps.find((step) => step.id === 'mail_config');
   const dkim = plan.steps.find((step) => step.id === 'mail_dkim_key');
   const dkimConfig = plan.steps.find((step) => step.id === 'mail_dkim_config');
+  const roundcube = plan.steps.find((step) => step.id === 'roundcube_mapping');
 
   assert.equal(metadata.state, 'succeeded');
   assert.equal(metadata.compensation.state, 'not_required');
@@ -162,12 +163,26 @@ test('local mail config, DKIM key, and signing config become required after cert
     selector: 'yp-9ae512c0a7174611943c6ce2',
   });
 
+  assert.equal(roundcube.kind, 'roundcube_mapping');
+  assert.equal(roundcube.required, true);
+  assert.equal(roundcube.state, 'pending');
+  assert.equal(roundcube.compensation.state, 'pending');
+  assert.deepEqual(roundcube.intent, {
+    adapter: 'shared-roundcube-mapping',
+    serverId,
+    websiteId,
+    webDomainId: domainId,
+    mailDomainId,
+    domainName: 'example.com',
+  });
+
   const order = plan.steps.map((step) => step.id);
   assert.ok(order.indexOf('certificate') >= 0);
   assert.ok(order.indexOf('certificate') < order.indexOf('tls_activation'));
   assert.ok(order.indexOf('tls_activation') < order.indexOf('mail_config'));
   assert.ok(order.indexOf('mail_config') < order.indexOf('mail_dkim_key'));
   assert.ok(order.indexOf('mail_dkim_key') < order.indexOf('mail_dkim_config'));
+  assert.ok(order.indexOf('mail_dkim_config') < order.indexOf('roundcube_mapping'));
   assert.equal(plan.ready, false);
 });
 
