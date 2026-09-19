@@ -653,7 +653,6 @@ export function createRoundcubeDomainMappingRegistry({
         applyJobId: safeJobId,
         expectedRoundcubePreviewSha256: safePreviewSha256,
         expectedRoundcubeNginxSha256: safeNginxSha256,
-        updatedAt: new Date(now()).toISOString(),
       });
       next.mappings[index] = updated;
       return publicMapping(updated);
@@ -697,7 +696,6 @@ export function createRoundcubeDomainMappingRegistry({
         applyJobId: safeJobId,
         expectedRoundcubePreviewSha256: safePreviewSha256,
         expectedRoundcubeNginxSha256: safeNginxSha256,
-        updatedAt: new Date(now()).toISOString(),
       });
       next.mappings[index] = updated;
       return publicMapping(updated);
@@ -755,7 +753,6 @@ export function createRoundcubeDomainMappingRegistry({
         applyJobId: null,
         expectedRoundcubePreviewSha256: null,
         expectedRoundcubeNginxSha256: null,
-        updatedAt: new Date(now()).toISOString(),
       });
       next.mappings[index] = active;
       return publicMapping(active);
