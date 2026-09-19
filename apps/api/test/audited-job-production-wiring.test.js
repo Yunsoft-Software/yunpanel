@@ -56,6 +56,14 @@ test('new Website services accept the production registry contracts', () => {
   }));
 });
 
+test('production mounts Website service routes through the shared panel guard', async () => {
+  const source = await readFile(indexUrl, 'utf8');
+  const appSource = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
+
+  assert.match(source, /websitePhpToolsService,[\s\S]*websiteCacheService,/);
+  assert.doesNotMatch(appSource, /core\.requirePanelRouteAccess/);
+});
+
 test('API local executor and renewal scheduler share the audited registry', async () => {
   const source = await readFile(indexUrl, 'utf8');
   assert.match(source, /createHandler: \(\) => createDockerComposeApiHandler\(\{[\s\S]*?baseHandler: createApp\(\{[\s\S]*?\n\s*jobRegistry,[\s\S]*?\n\s*dnsProviderCredentialRegistry,/);

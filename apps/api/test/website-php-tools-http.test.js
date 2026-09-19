@@ -11,20 +11,25 @@ function createTestApp({
 } = {}) {
   const app = express();
   app.use(express.json());
-
-  const requirePanelRouteAccess = ({ minRole } = {}) => (req, res, next) => {
-    if (!userRole) {
-      return res.status(401).json({ error: { code: 'unauthorized', message: 'Authentication required' } });
-    }
-    if (minRole === 'operator' && userRole === 'readonly') {
-      return res.status(403).json({ error: { code: 'forbidden', message: 'Operator role required' } });
+  app.use((req, res, next) => {
+    if (userRole === 'owner') {
+      req.auth = {
+        user: { role: 'owner' },
+        access: { mode: 'management', permissions: ['*'] },
+        security: { managementAllowed: true },
+      };
+    } else if (userRole === 'read_only') {
+      req.auth = {
+        user: { role: 'read_only' },
+        access: { mode: 'read_only', permissions: ['websites.read'] },
+        security: { managementAllowed: false },
+      };
     }
     next();
-  };
+  });
 
   mountWebsitePhpToolsRoutes(app, {
     websitePhpToolsService,
-    requirePanelRouteAccess,
   });
 
   return app;
@@ -161,10 +166,10 @@ test('POST /api/websites/:websiteId/composer/run validates request and runs comm
   }
 });
 
-test('requires operator role', async () => {
+test('requires an authenticated Owner management context', async () => {
   const app = createTestApp({
     websitePhpToolsService: {},
-    userRole: 'readonly',
+    userRole: 'read_only',
   });
 
   const server = app.listen(0);

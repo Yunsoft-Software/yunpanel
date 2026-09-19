@@ -1,19 +1,18 @@
 import express from 'express';
+import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { WebsitePhpToolsServiceError } from './website-php-tools-service.js';
 
 export function mountWebsitePhpToolsRoutes(app, {
   websitePhpToolsService,
-  requirePanelRouteAccess,
 } = {}) {
   if (!app || typeof app.use !== 'function'
-    || !websitePhpToolsService
-    || typeof requirePanelRouteAccess !== 'function') {
+    || !websitePhpToolsService) {
     throw new TypeError('Website PHP tools HTTP dependencies are invalid');
   }
 
   const router = express.Router({ mergeParams: true });
 
-  router.get('/wp-cli/status', requirePanelRouteAccess({ minRole: 'operator' }), async (req, res, next) => {
+  router.get('/wp-cli/status', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const status = await websitePhpToolsService.getWpCliStatus(req.params.websiteId);
       res.json(status);
@@ -22,7 +21,7 @@ export function mountWebsitePhpToolsRoutes(app, {
     }
   });
 
-  router.post('/wp-cli/run', requirePanelRouteAccess({ minRole: 'operator' }), async (req, res, next) => {
+  router.post('/wp-cli/run', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const { command, args, timeout } = req.body ?? {};
       if (typeof command !== 'string' || !command) {
@@ -54,7 +53,7 @@ export function mountWebsitePhpToolsRoutes(app, {
     }
   });
 
-  router.get('/composer/status', requirePanelRouteAccess({ minRole: 'operator' }), async (req, res, next) => {
+  router.get('/composer/status', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const status = await websitePhpToolsService.getComposerStatus(req.params.websiteId);
       res.json(status);
@@ -63,7 +62,7 @@ export function mountWebsitePhpToolsRoutes(app, {
     }
   });
 
-  router.post('/composer/run', requirePanelRouteAccess({ minRole: 'operator' }), async (req, res, next) => {
+  router.post('/composer/run', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const { command, args, timeout } = req.body ?? {};
       if (typeof command !== 'string' || !command) {

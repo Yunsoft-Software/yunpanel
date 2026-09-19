@@ -11,20 +11,25 @@ function createTestApp({
 } = {}) {
   const app = express();
   app.use(express.json());
-
-  const requirePanelRouteAccess = ({ minRole } = {}) => (req, res, next) => {
-    if (!userRole) {
-      return res.status(401).json({ error: { code: 'unauthorized', message: 'Authentication required' } });
-    }
-    if (minRole === 'operator' && userRole === 'readonly') {
-      return res.status(403).json({ error: { code: 'forbidden', message: 'Operator role required' } });
+  app.use((req, res, next) => {
+    if (userRole === 'owner') {
+      req.auth = {
+        user: { role: 'owner' },
+        access: { mode: 'management', permissions: ['*'] },
+        security: { managementAllowed: true },
+      };
+    } else if (userRole === 'read_only') {
+      req.auth = {
+        user: { role: 'read_only' },
+        access: { mode: 'read_only', permissions: ['websites.read'] },
+        security: { managementAllowed: false },
+      };
     }
     next();
-  };
+  });
 
   mountWebsiteCacheRoutes(app, {
     websiteCacheService,
-    requirePanelRouteAccess,
   });
 
   return app;
@@ -154,6 +159,22 @@ test('DELETE /api/websites/:websiteId/cache disables cache', async () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.disabled, true);
+  } finally {
+    server.close();
+  }
+});
+
+test('cache routes require an authenticated Owner management context', async () => {
+  const app = createTestApp({
+    websiteCacheService: {},
+    userRole: 'read_only',
+  });
+  const server = app.listen(0);
+  const address = server.address();
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${address.port}/api/websites/${WEBSITE_ID}/cache`);
+    assert.equal(res.status, 403);
   } finally {
     server.close();
   }

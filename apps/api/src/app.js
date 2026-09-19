@@ -755,13 +755,11 @@ export function createApp({
   if (websitePhpToolsService) {
     mountWebsitePhpToolsRoutes(app, {
       websitePhpToolsService,
-      requirePanelRouteAccess: core.requirePanelRouteAccess,
     });
   }
   if (websiteCacheService) {
     mountWebsiteCacheRoutes(app, {
       websiteCacheService,
-      requirePanelRouteAccess: core.requirePanelRouteAccess,
     });
   }
   if (panelSettingsService) {

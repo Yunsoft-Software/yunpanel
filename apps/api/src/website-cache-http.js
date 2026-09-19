@@ -1,18 +1,17 @@
 import express from 'express';
+import { requirePanelRouteAccess } from './panel-http-guard.js';
 
 export function mountWebsiteCacheRoutes(app, {
   websiteCacheService,
-  requirePanelRouteAccess,
 } = {}) {
   if (!app || typeof app.use !== 'function'
-    || !websiteCacheService
-    || typeof requirePanelRouteAccess !== 'function') {
+    || !websiteCacheService) {
     throw new TypeError('Website cache HTTP dependencies are invalid');
   }
 
   const router = express.Router({ mergeParams: true });
 
-  router.get('/cache', requirePanelRouteAccess({ minRole: 'operator' }), async (req, res, next) => {
+  router.get('/cache', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const policy = await websiteCacheService.getCachePolicy(req.params.websiteId);
       res.json(policy);
@@ -21,7 +20,7 @@ export function mountWebsiteCacheRoutes(app, {
     }
   });
 
-  router.post('/cache/redis/enable', requirePanelRouteAccess({ minRole: 'operator' }), async (req, res, next) => {
+  router.post('/cache/redis/enable', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const { keyPrefix, allowedDb } = req.body ?? {};
       const result = await websiteCacheService.enableRedisCache(req.params.websiteId, {
@@ -34,7 +33,7 @@ export function mountWebsiteCacheRoutes(app, {
     }
   });
 
-  router.post('/cache/redis/rotate-password', requirePanelRouteAccess({ minRole: 'operator' }), async (req, res, next) => {
+  router.post('/cache/redis/rotate-password', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const result = await websiteCacheService.rotateRedisPassword(req.params.websiteId);
       res.json(result);
@@ -43,7 +42,7 @@ export function mountWebsiteCacheRoutes(app, {
     }
   });
 
-  router.post('/cache/memcached/enable', requirePanelRouteAccess({ minRole: 'operator' }), async (req, res, next) => {
+  router.post('/cache/memcached/enable', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const result = await websiteCacheService.enableMemcached(req.params.websiteId);
       res.json(result);
@@ -52,7 +51,7 @@ export function mountWebsiteCacheRoutes(app, {
     }
   });
 
-  router.delete('/cache', requirePanelRouteAccess({ minRole: 'operator' }), async (req, res, next) => {
+  router.delete('/cache', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const result = await websiteCacheService.disableCache(req.params.websiteId);
       res.json(result);
