@@ -54,6 +54,28 @@ function mailDomainReference(id, webDomainId = 'domain-1', domainName = 'example
   };
 }
 
+function webmailMappingReference(overrides = {}) {
+  return {
+    id: 'webmail-mapping-1',
+    mailDomainId: 'mail-domain-1',
+    webDomainId: 'domain-1',
+    serverId: 'local',
+    domainName: 'example.com',
+    hostname: 'webmail.example.com',
+    certificateId: 'certificate-1',
+    certificateFingerprint256: Array.from({ length: 32 }, () => 'AA').join(':'),
+    revision: 2,
+    state: 'active',
+    operationId: null,
+    applyJobId: null,
+    expectedRoundcubePreviewSha256: null,
+    expectedRoundcubeNginxSha256: null,
+    createdAt: '2026-09-18T19:00:00.000Z',
+    updatedAt: '2026-09-18T20:00:00.000Z',
+    ...overrides,
+  };
+}
+
 function domain(overrides = {}) {
   return {
     id: 'domain-1',
@@ -240,6 +262,71 @@ test('pins current resource-impact evidence into a deterministic Domain removal 
     `start-domain-remove:domain-1:4:${preview.previewDigest}`,
   );
   assert.equal(preview.sideEffects, false);
+});
+
+test('pins active shared Roundcube mapping evidence and treats it as an orchestratable dependency', () => {
+  const currentDomain = domain();
+  const currentImpact = impact(currentDomain, {
+    dependencies: {
+      mailDomains: [mailDomainReference(
+        'mail-domain-1',
+        currentDomain.id,
+        currentDomain.primaryDomain,
+        { status: 'enabled' },
+      )],
+      webmailMappings: {
+        status: 'available',
+        items: [webmailMappingReference()],
+      },
+    },
+    blockers: [
+      { code: 'child_domains_present', resourceType: 'domain', count: 1 },
+      { code: 'website_binding_present', resourceType: 'website', count: 1 },
+      { code: 'application_binding_present', resourceType: 'application', count: 1 },
+      { code: 'dns_zones_present', resourceType: 'dns_zone', count: 1 },
+      { code: 'mail_domains_present', resourceType: 'mail_domain', count: 1 },
+      { code: 'certificates_present', resourceType: 'certificate', count: 1 },
+      { code: 'webmail_mapping_dependencies_present', resourceType: 'webmail_mapping', count: 1 },
+      { code: 'authoritative_dns_retirement_blocked', resourceType: 'authoritative_dns', count: 1 },
+      { code: 'impact_apply_not_implemented', resourceType: 'domain', count: null },
+    ],
+  });
+  const preview = createDomainRemovalPreview({ domain: currentDomain, impact: currentImpact });
+
+  assert.equal(preview.readyToStart, true);
+  assert.deepEqual(preview.hardBlockers, []);
+  assert.deepEqual(preview.plan.webmailMappingIds, ['webmail-mapping-1']);
+  assert.deepEqual(preview.plan.webmailMappingIntents, [webmailMappingReference()]);
+});
+
+test('in-flight webmail mapping operation hard-blocks Domain removal start', () => {
+  const currentDomain = domain();
+  const currentImpact = impact(currentDomain, {
+    dependencies: {
+      mailDomains: [mailDomainReference(
+        'mail-domain-1',
+        currentDomain.id,
+        currentDomain.primaryDomain,
+        { status: 'enabled' },
+      )],
+      webmailMappings: {
+        status: 'available',
+        items: [webmailMappingReference({
+          state: 'removing',
+          operationId: 'roundcube-removal-1',
+        })],
+      },
+    },
+    blockers: [
+      { code: 'webmail_mapping_dependencies_present', resourceType: 'webmail_mapping', count: 1 },
+      { code: 'impact_apply_not_implemented', resourceType: 'domain', count: null },
+    ],
+  });
+  const preview = createDomainRemovalPreview({ domain: currentDomain, impact: currentImpact });
+
+  assert.equal(preview.readyToStart, false);
+  assert.deepEqual(preview.hardBlockers, ['webmail_mapping_operation_in_progress']);
+  assert.equal(preview.confirmation, null);
 });
 
 test('active jobs block removal start even when all other dependencies are orchestratable', () => {
