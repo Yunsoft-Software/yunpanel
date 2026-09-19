@@ -289,7 +289,15 @@ export function createWebsiteRoundcubeProvisioningHandler({
       });
     }
     if (state.job && ['queued', 'running'].includes(state.job.status)) {
-      const terminal = await waitForTerminalJob(await jobRegistry.getJob(state.job.id));
+      const child = await jobRegistry.getJob(state.job.id);
+      if (!child) {
+        throw new WebsiteRoundcubeProvisioningError(
+          'website_roundcube_apply_job_missing',
+          'Website Roundcube apply job disappeared before completion',
+          503,
+        );
+      }
+      const terminal = await waitForTerminalJob(child);
       if (!terminal || terminal.status !== 'succeeded') {
         throw new WebsiteRoundcubeProvisioningError(
           'website_roundcube_apply_failed',
