@@ -146,6 +146,10 @@ if [ -f "$api_env" ]; then
     printf '%s\n' 'YUNPANEL_ROUNDCUBE_SECRET_STORE=/var/lib/yunpanel/control-plane/roundcube-secret-registry.json' >>"$api_temp"
     api_changed=1
   fi
+  if ! grep -q '^YUNPANEL_ROUNDCUBE_DOMAIN_MAPPING_STORE=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_ROUNDCUBE_DOMAIN_MAPPING_STORE=/var/lib/yunpanel/control-plane/roundcube-domain-mapping-registry.json' >>"$api_temp"
+    api_changed=1
+  fi
   if ! grep -q '^YUNPANEL_MAILBOX_STORE=' "$api_env"; then
     printf '%s\n' 'YUNPANEL_MAILBOX_STORE=/var/lib/yunpanel/control-plane/mailbox-registry.json' >>"$api_temp"
     api_changed=1
