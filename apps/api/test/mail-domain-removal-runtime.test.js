@@ -15,9 +15,9 @@ const webDomainId = '42345678-1234-4234-8234-123456789012';
 const previewDigest = 'a'.repeat(64);
 const cleanupEvidenceDigest = 'b'.repeat(64);
 
-function removalPlan(managementMode) {
+function removalPlan(managementMode, status) {
   return {
-    version: 1,
+    version: 2,
     mailDomainId,
     mailboxes: [],
     aliases: [],
@@ -27,11 +27,14 @@ function removalPlan(managementMode) {
     mailData: managementMode === 'local'
       ? { present: false, bytes: 0, snapshotSha256: 'd'.repeat(64) }
       : null,
+    disableConfiguration: managementMode === 'local' && status === 'enabled'
+      ? { previewDigest: 'e'.repeat(64), configurationSha256: 'f'.repeat(64) }
+      : null,
   };
 }
 
 function removalPreview({ managementMode = 'local', status = 'enabled', overrides = {} } = {}) {
-  const cleanupPlan = removalPlan(managementMode);
+  const cleanupPlan = removalPlan(managementMode, status);
   return {
     version: 1,
     operation: 'mail_domain_remove',

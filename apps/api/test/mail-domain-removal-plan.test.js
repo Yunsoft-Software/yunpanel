@@ -88,8 +88,21 @@ function fixture({
     snapshotSha256: 'a'.repeat(64),
     sideEffects: false,
   },
+  configurationPreview = {
+    version: 1,
+    operation: 'mail_configuration_apply',
+    mailDomainId,
+    expectedRevision: 7,
+    currentStatus: 'enabled',
+    desiredStatus: 'disabled',
+    blockers: [],
+    previewDigest: 'b'.repeat(64),
+    readyToApply: true,
+    configuration: { sha256: 'c'.repeat(64) },
+    sideEffects: false,
+  },
 } = {}) {
-  const calls = { dkim: 0, data: 0 };
+  const calls = { dkim: 0, data: 0, configuration: 0 };
   const service = createMailDomainRemovalPlanService({
     localServerId: serverId,
     mailDomainRegistry: { async getMailDomain(id) { return id === mailDomainId ? currentMailDomain : null; } },
@@ -100,6 +113,13 @@ function fixture({
     mailboxForwardingRegistry: { async listForwardings() { return forwardings; } },
     mailDkimRegistry: {
       async getKey() { calls.dkim += 1; return dkim; },
+    },
+    mailConfigurationService: {
+      async previewTransition(input) {
+        calls.configuration += 1;
+        assert.deepEqual(input, { mailDomainId, expectedRevision: 7, status: 'disabled' });
+        return configurationPreview;
+      },
     },
     jobRegistry: {
       async listJobs(filter) {
@@ -153,6 +173,10 @@ test('local preview pins exact secret-free cleanup inventory and destructive con
     bytes: 4096,
     snapshotSha256: 'a'.repeat(64),
   });
+  assert.deepEqual(preview.cleanupPlan.disableConfiguration, {
+    previewDigest: 'b'.repeat(64),
+    configurationSha256: 'c'.repeat(64),
+  });
   assert.match(preview.planDigest, /^[a-f0-9]{64}$/);
   assert.match(preview.previewDigest, /^[a-f0-9]{64}$/);
   assert.equal(
@@ -200,7 +224,7 @@ test('external preview never inspects local DKIM or filesystem data', async () =
   assert.equal(preview.removalMethod, 'external_metadata_unlink');
   assert.equal(preview.cleanupPlan.dkim, null);
   assert.equal(preview.cleanupPlan.mailData, null);
-  assert.deepEqual(calls, { dkim: 0, data: 0 });
+  assert.deepEqual(calls, { dkim: 0, data: 0, configuration: 0 });
 });
 
 test('external preview blocks corrupt local dependency ownership', async () => {
@@ -233,6 +257,33 @@ test('dependency revision changes alter plan and preview digests', async () => {
   assert.notEqual(first.planDigest, second.planDigest);
   assert.notEqual(first.previewDigest, second.previewDigest);
   assert.notEqual(first.confirmation, second.confirmation);
+});
+
+test('unready disable configuration blocks enabled local removal confirmation', async () => {
+  const { service } = fixture({
+    configurationPreview: {
+      version: 1,
+      operation: 'mail_configuration_apply',
+      mailDomainId,
+      expectedRevision: 7,
+      currentStatus: 'enabled',
+      desiredStatus: 'disabled',
+      blockers: ['mail_service_identity_required'],
+      previewDigest: 'b'.repeat(64),
+      readyToApply: false,
+      configuration: null,
+      sideEffects: false,
+    },
+  });
+  const preview = await service.preview({ mailDomainId, parentOperationId });
+
+  assert.equal(preview.readyToStart, false);
+  assert.equal(preview.confirmation, null);
+  assert.equal(preview.cleanupPlan.disableConfiguration, null);
+  assert.deepEqual(preview.blockers, [{
+    code: 'mail_domain_disable_configuration_not_ready',
+    count: 1,
+  }]);
 });
 
 test('remote binding and malformed dependency evidence fail closed', async () => {

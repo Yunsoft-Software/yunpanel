@@ -4,7 +4,7 @@ import path from 'node:path';
 import { normalizeMailboxAddress } from '@yunpanel/config-templates';
 import { normalizeDomainSet } from '@yunpanel/shared';
 
-const STORE_VERSION = 2;
+const STORE_VERSION = 3;
 const PHASES = new Set(['pending', 'disabling', 'cleaning', 'deleting_data', 'finalizing', 'removed']);
 const STATUSES = new Set([...PHASES, 'blocked', 'failed']);
 const INTERRUPTED_STATUSES = new Set(['disabling', 'cleaning', 'deleting_data', 'finalizing']);
@@ -95,11 +95,12 @@ function cleanupPlan(value, operation) {
   if (value === null) return null;
   const fields = new Set([
     'version', 'mailDomainId', 'mailboxes', 'aliases', 'quotas', 'forwardings', 'dkim', 'mailData',
+    'disableConfiguration',
   ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.size
     || Object.keys(value).some((field) => !fields.has(field))
-    || value.version !== 1 || value.mailDomainId !== operation.mailDomainId) {
+    || value.version !== 2 || value.mailDomainId !== operation.mailDomainId) {
     throw invalid('Mail Domain cleanup plan is invalid');
   }
   const mailboxes = planItems(value.mailboxes, (mailbox) => {
@@ -197,16 +198,38 @@ function cleanupPlan(value, operation) {
       snapshotSha256: safeDigest(value.mailData.snapshotSha256, 'mailDataSnapshotSha256'),
     });
   }
+  let disableConfiguration = null;
+  if (value.disableConfiguration !== null) {
+    const configurationFields = new Set(['previewDigest', 'configurationSha256']);
+    if (!value.disableConfiguration || typeof value.disableConfiguration !== 'object'
+      || Array.isArray(value.disableConfiguration)
+      || Object.keys(value.disableConfiguration).length !== configurationFields.size
+      || Object.keys(value.disableConfiguration).some((field) => !configurationFields.has(field))) {
+      throw invalid('Mail configuration disable evidence is invalid');
+    }
+    disableConfiguration = Object.freeze({
+      previewDigest: safeDigest(value.disableConfiguration.previewDigest, 'mailConfigurationPreviewDigest'),
+      configurationSha256: safeDigest(
+        value.disableConfiguration.configurationSha256,
+        'mailConfigurationSha256',
+      ),
+    });
+  }
   if (operation.managementMode === 'local' && mailData === null) {
     throw invalid('Local Mail Domain cleanup plan lacks mail data evidence');
   }
+  if (operation.managementMode === 'local'
+    && (operation.sourceStatus === 'enabled') !== (disableConfiguration !== null)) {
+    throw invalid('Local Mail Domain configuration disable evidence is inconsistent');
+  }
   if (operation.managementMode === 'external'
     && (mailboxes.length > 0 || aliases.length > 0 || quotas.length > 0
-      || forwardings.length > 0 || dkim !== null || mailData !== null)) {
+      || forwardings.length > 0 || dkim !== null || mailData !== null
+      || disableConfiguration !== null)) {
     throw invalid('External Mail Domain cleanup plan contains local dependencies');
   }
   return Object.freeze({
-    version: 1,
+    version: 2,
     mailDomainId: operation.mailDomainId,
     mailboxes,
     aliases,
@@ -214,6 +237,7 @@ function cleanupPlan(value, operation) {
     forwardings,
     dkim,
     mailData,
+    disableConfiguration,
   });
 }
 
@@ -546,13 +570,13 @@ export function createMailDomainRemovalOperationRegistry({
     if (initialized) return;
     try {
       const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-      if (![1, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
+      if (![1, 2, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
         || Object.keys(parsed).length !== 2
         || Object.keys(parsed).some((field) => !['version', 'operations'].includes(field))) {
         throw invalid('Mail Domain removal operation store is invalid');
       }
       const operations = parsed.operations.map((operation) => persistedOperation(
-        parsed.version === 1
+        parsed.version < STORE_VERSION
           ? { ...operation, planDigest: null, cleanupPlan: null }
           : operation,
       ));

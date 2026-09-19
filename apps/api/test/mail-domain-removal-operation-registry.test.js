@@ -19,9 +19,9 @@ const sourceUpdatedAt = '2026-09-19T08:00:00.000Z';
 const previewDigest = 'a'.repeat(64);
 const cleanupEvidenceDigest = 'b'.repeat(64);
 
-function removalPlan(managementMode) {
+function removalPlan(managementMode, status) {
   return {
-    version: 1,
+    version: 2,
     mailDomainId,
     mailboxes: [],
     aliases: [],
@@ -31,6 +31,9 @@ function removalPlan(managementMode) {
     mailData: managementMode === 'local'
       ? { present: false, bytes: 0, snapshotSha256: 'd'.repeat(64) }
       : null,
+    disableConfiguration: managementMode === 'local' && status === 'enabled'
+      ? { previewDigest: 'e'.repeat(64), configurationSha256: 'f'.repeat(64) }
+      : null,
   };
 }
 
@@ -38,7 +41,7 @@ function preview({ managementMode = 'local', status = 'enabled', overrides = {} 
   const removalMethod = managementMode === 'local'
     ? 'local_verified_data_finalize'
     : 'external_metadata_unlink';
-  const cleanupPlan = removalPlan(managementMode);
+  const cleanupPlan = removalPlan(managementMode, status);
   return {
     version: 1,
     operation: 'mail_domain_remove',
@@ -335,7 +338,7 @@ test('version one pending journal migrates fail-closed and safely recaptures a c
     'mail_domain_removal_plan_missing',
   );
   const migratedDisk = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(migratedDisk.version, 2);
+  assert.equal(migratedDisk.version, 3);
   assert.equal(migratedDisk.operations[0].cleanupPlan, null);
 
   const recaptured = await restarted.create(preview());

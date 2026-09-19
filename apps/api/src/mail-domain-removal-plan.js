@@ -176,6 +176,7 @@ export function createMailDomainRemovalPlanService({
   mailboxQuotaRegistry,
   mailboxForwardingRegistry,
   mailDkimRegistry,
+  mailConfigurationService,
   jobRegistry,
   mailDataInspector,
   localServerId = null,
@@ -187,6 +188,7 @@ export function createMailDomainRemovalPlanService({
     || !mailboxQuotaRegistry || typeof mailboxQuotaRegistry.listQuotas !== 'function'
     || !mailboxForwardingRegistry || typeof mailboxForwardingRegistry.listForwardings !== 'function'
     || !mailDkimRegistry || typeof mailDkimRegistry.getKey !== 'function'
+    || !mailConfigurationService || typeof mailConfigurationService.previewTransition !== 'function'
     || !jobRegistry || typeof jobRegistry.listJobs !== 'function'
     || !mailDataInspector || typeof mailDataInspector.inspectDomain !== 'function'
     || (localServerId !== null && (typeof localServerId !== 'string' || !SAFE_ID.test(localServerId)))) {
@@ -289,10 +291,18 @@ export function createMailDomainRemovalPlanService({
   async function localEvidence(mailDomain) {
     let dkim;
     let data;
+    let disableConfiguration;
     try {
-      [dkim, data] = await Promise.all([
+      [dkim, data, disableConfiguration] = await Promise.all([
         mailDkimRegistry.getKey(mailDomain.id),
         mailDataInspector.inspectDomain(mailDomain.domainName),
+        mailDomain.status === 'enabled'
+          ? mailConfigurationService.previewTransition({
+            mailDomainId: mailDomain.id,
+            expectedRevision: mailDomain.revision,
+            status: 'disabled',
+          })
+          : null,
       ]);
     } catch {
       throw new MailDomainRemovalPlanError(
@@ -301,7 +311,40 @@ export function createMailDomainRemovalPlanService({
         503,
       );
     }
-    return Object.freeze({ dkim: dkimIntent(dkim, mailDomain), mailData: mailDataIntent(data, mailDomain) });
+    let configuration = null;
+    let blockerCount = 0;
+    if (disableConfiguration !== null) {
+      if (!disableConfiguration || typeof disableConfiguration !== 'object'
+        || disableConfiguration.version !== 1
+        || disableConfiguration.operation !== 'mail_configuration_apply'
+        || disableConfiguration.mailDomainId !== mailDomain.id
+        || disableConfiguration.expectedRevision !== mailDomain.revision
+        || disableConfiguration.currentStatus !== 'enabled'
+        || disableConfiguration.desiredStatus !== 'disabled'
+        || !Array.isArray(disableConfiguration.blockers)
+        || typeof disableConfiguration.previewDigest !== 'string'
+        || !SHA256_PATTERN.test(disableConfiguration.previewDigest)
+        || disableConfiguration.sideEffects !== false) {
+        throw invalid('Mail configuration disable preview is invalid');
+      }
+      if (disableConfiguration.readyToApply === true
+        && disableConfiguration.blockers.length === 0
+        && typeof disableConfiguration.configuration?.sha256 === 'string'
+        && SHA256_PATTERN.test(disableConfiguration.configuration.sha256)) {
+        configuration = Object.freeze({
+          previewDigest: disableConfiguration.previewDigest,
+          configurationSha256: disableConfiguration.configuration.sha256,
+        });
+      } else {
+        blockerCount = Math.max(disableConfiguration.blockers.length, 1);
+      }
+    }
+    return Object.freeze({
+      dkim: dkimIntent(dkim, mailDomain),
+      mailData: mailDataIntent(data, mailDomain),
+      disableConfiguration: configuration,
+      disableConfigurationBlockerCount: blockerCount,
+    });
   }
 
   async function preview({ mailDomainId, parentOperationId } = {}) {
@@ -311,9 +354,14 @@ export function createMailDomainRemovalPlanService({
     const local = mailDomain.managementMode === 'local';
     const localState = local
       ? await localEvidence(mailDomain)
-      : Object.freeze({ dkim: null, mailData: null });
+      : Object.freeze({
+        dkim: null,
+        mailData: null,
+        disableConfiguration: null,
+        disableConfigurationBlockerCount: 0,
+      });
     const cleanupPlan = Object.freeze({
-      version: 1,
+      version: 2,
       mailDomainId: mailDomain.id,
       mailboxes: dependencies.mailboxes,
       aliases: dependencies.aliases,
@@ -321,6 +369,7 @@ export function createMailDomainRemovalPlanService({
       forwardings: dependencies.forwardings,
       dkim: localState.dkim,
       mailData: localState.mailData,
+      disableConfiguration: localState.disableConfiguration,
     });
     const blockers = [];
     if (dependencies.activeJobIds.length > 0) {
@@ -331,6 +380,12 @@ export function createMailDomainRemovalPlanService({
       blockers.push(blocker('external_mail_domain_local_dependencies',
         cleanupPlan.mailboxes.length + cleanupPlan.aliases.length
           + cleanupPlan.quotas.length + cleanupPlan.forwardings.length));
+    }
+    if (localState.disableConfigurationBlockerCount > 0) {
+      blockers.push(blocker(
+        'mail_domain_disable_configuration_not_ready',
+        localState.disableConfigurationBlockerCount,
+      ));
     }
     const planDigest = digest(cleanupPlan);
     const identity = Object.freeze({
