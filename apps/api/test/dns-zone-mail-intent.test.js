@@ -80,7 +80,9 @@ test('enabled local mail resolves service endpoints and current plus retiring pu
     host: 'mail.example.com',
     imap: true,
     submission: true,
-    webmailEnabled: false,
+    webmailEnabled: true,
+    webmailReady: false,
+    webmailHost: 'webmail.example.com',
     discovery: null,
     dkimRecords: [
       { selector: 'current', value: 'v=DKIM1; k=rsa; p=current' },
@@ -185,6 +187,7 @@ test('webmail DNS intent requires exact live shared Roundcube readiness evidence
   });
 
   assert.equal(resolved.intent.webmailEnabled, true);
+  assert.equal(resolved.intent.webmailReady, true);
   assert.equal(resolved.intent.webmailHost, 'webmail.example.com');
   assert.equal(resolved.evidence.roundcubeWebmailMappingRevision, 3);
   assert.equal(resolved.evidence.roundcubeWebmailPreviewSha256, 'a'.repeat(64));
@@ -192,8 +195,9 @@ test('webmail DNS intent requires exact live shared Roundcube readiness evidence
   const notReady = await fixture({
     roundcubeWebmailEndpointResolver: { resolve: async () => null },
   });
-  assert.equal(notReady.intent.webmailEnabled, false);
-  assert.equal(Object.hasOwn(notReady.intent, 'webmailHost'), false);
+  assert.equal(notReady.intent.webmailEnabled, true);
+  assert.equal(notReady.intent.webmailReady, false);
+  assert.equal(notReady.intent.webmailHost, 'webmail.example.com');
   assert.equal(notReady.evidence.roundcubeWebmailMappingRevision, null);
 
   await assert.rejects(
