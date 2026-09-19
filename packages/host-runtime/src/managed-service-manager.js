@@ -302,6 +302,9 @@ export function createManagedServiceManager({
       if (definition.units.length > 0) {
         try {
           for (const unit of definition.units) await run(SYSTEMCTL, ['enable', '--now', unit]);
+          if (definition.supplementaryGroups.length > 0) {
+            for (const unit of definition.units) await run(SYSTEMCTL, ['restart', unit]);
+          }
         } catch {
           throw new ManagedServiceError('managed_service_enable_failed', `${definition.label} was installed but could not be enabled and started`);
         }
