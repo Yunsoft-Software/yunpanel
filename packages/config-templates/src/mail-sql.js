@@ -427,7 +427,13 @@ export function previewManagedMailSqlConfiguration(input = {}) {
   const seed = renderManagedMailSqlSeed(input);
   const stateSha256 = sqlStateSha256(input);
   const artifacts = Object.freeze([
-    sensitiveArtifact(SEED_PATH, seed),
+    Object.freeze({
+      ...sensitiveArtifact(SEED_PATH, seed),
+      compile: Object.freeze({
+        file: '/usr/bin/sqlite3',
+        args: Object.freeze([DB_PATH, '.read ' + SEED_PATH]),
+      }),
+    }),
     publicArtifact(POSTFIX_DOMAIN_PATH, renderPostfixSqlDomainLookup()),
     publicArtifact(POSTFIX_MAILBOX_PATH, renderPostfixSqlMailboxLookup()),
     publicArtifact(POSTFIX_ALIAS_PATH, renderPostfixSqlAliasLookup()),
