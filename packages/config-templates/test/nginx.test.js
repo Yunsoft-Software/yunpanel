@@ -175,7 +175,7 @@ test('renders isolated HTTP-01 hosts without exposing the Website application', 
   assert.ok(webmailBlock);
   assert.match(webmailBlock, /listen 80;/);
   assert.match(webmailBlock, /\.well-known\/acme-challenge/);
-  assert.match(webmailBlock, /return 404;/);
+  assert.match(webmailBlock, /return 301 https:\/\/\$host\$request_uri;/);
   assert.equal(webmailBlock.includes('listen 443 ssl;'), false);
   assert.equal(webmailBlock.includes('proxy_pass'), false);
   assert.equal(config.match(/proxy_pass http:\/\/127\.0\.0\.1:3100;/g)?.length, 1);
