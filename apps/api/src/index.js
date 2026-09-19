@@ -76,6 +76,7 @@ import { createPowerDnsSecretRegistry } from './powerdns-secret-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createRoundcubeConfigurationService } from './roundcube-configuration.js';
 import { createRoundcubeDomainMappingRegistry } from './roundcube-domain-mapping-registry.js';
+import { createRoundcubeDomainMappingService } from './roundcube-domain-mapping-service.js';
 import { createRoundcubeWebmailEndpointResolver } from './roundcube-webmail-endpoint-resolver.js';
 import { createRoundcubeSecretRegistry } from './roundcube-secret-registry.js';
 import { createServerDnsIdentityRegistry } from './server-dns-identity-registry.js';
@@ -435,6 +436,11 @@ const jobRegistry = createDomainStageTargetJobRegistry({
   applicationRegistry,
   runtimeBindingRegistry,
 });
+const roundcubeDomainMappingService = createRoundcubeDomainMappingService({
+  registry: roundcubeDomainMappingRegistry,
+  roundcubeConfigurationService,
+  jobRegistry,
+});
 const roundcubeWebmailEndpointResolver = createRoundcubeWebmailEndpointResolver({
   roundcubeDomainMappingRegistry,
   roundcubeConfigurationService,
@@ -676,6 +682,7 @@ const listener = createAuthenticatedApi({
       mailAliasRegistry,
       mailConfigurationService,
       roundcubeConfigurationService,
+      roundcubeDomainMappingService,
       dockerWorkloadRegistry,
       applicationEnvironmentRegistry,
       applicationDeployQueue,
