@@ -24,7 +24,11 @@ import { createMailConfigBackupManager, mailConfigBackupInternals } from './mail
 import { createMailConfigEvidenceInspector } from './mail-config-evidence-inspector.js';
 import { createMailConfigManager } from './mail-config-manager.js';
 import { createMailReadinessInspector } from './mail-readiness-inspector.js';
-import { parseManagedSystemIdentity, parseManagedVmailIdentity } from './mail-vmail-identity.js';
+import {
+  parseManagedSystemGroup,
+  parseManagedSystemIdentity,
+  parseManagedVmailIdentity,
+} from './mail-vmail-identity.js';
 
 const execFileAsync = promisify(execFile);
 const ROOT_UID = 0;
@@ -33,6 +37,7 @@ const NEW_MANAGED_DIRECTORY_MODE = 0o750;
 const SIEVE_SHARED_MODE = 0o640;
 const SUBMISSION_SOCKET_MODE = 0o660;
 const GETENT = '/usr/bin/getent';
+const MAIL_AUTH_GROUP = 'yunpanel-mailauth';
 const POSTCONF = '/usr/sbin/postconf';
 const SYSTEMCTL = '/usr/bin/systemctl';
 const MAX_OUTPUT = 128 * 1024;
@@ -149,6 +154,22 @@ export function createMailConfigActivator({
     'mail_postfix_identity_unavailable',
     'Managed postfix identity could not be resolved safely',
   );
+
+  async function resolveMailAuthGroup() {
+    try {
+      const result = await run(GETENT, ['group', MAIL_AUTH_GROUP], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
+      const group = parseManagedSystemGroup(boundedOutput(result), MAIL_AUTH_GROUP);
+      if (!group || !group.members.includes('postfix') || !group.members.includes('dovecot')) {
+        throw new Error('managed mail auth group is incomplete');
+      }
+      return group;
+    } catch {
+      throw activationError(
+        'mail_auth_group_unavailable',
+        'Managed mail authentication reader group could not be resolved safely',
+      );
+    }
+  }
 
   async function atomicReplace(targetPath, content, { mode, uid = ROOT_UID, gid = ROOT_GID } = {}) {
     const temporaryPath = `${targetPath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
@@ -399,17 +420,17 @@ export function createMailConfigActivator({
     }
   }
 
-  async function secureAndVerifySqlDatabase(plan, postfixIdentity) {
+  async function secureAndVerifySqlDatabase(plan, mailAuthGroup) {
     if (plan.sql?.required !== true) return;
     const databasePath = mailSqlTemplatePolicy.databasePath;
     try {
       let metadata = await lstatFn(databasePath);
       if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('unsafe sqlite database');
-      await chownFn(databasePath, ROOT_UID, postfixIdentity.gid);
+      await chownFn(databasePath, ROOT_UID, mailAuthGroup.gid);
       await chmodFn(databasePath, mailSqlTemplatePolicy.databaseMode);
       metadata = await lstatFn(databasePath);
       if (!metadata.isFile() || metadata.isSymbolicLink()
-        || metadata.uid !== ROOT_UID || metadata.gid !== postfixIdentity.gid
+        || metadata.uid !== ROOT_UID || metadata.gid !== mailAuthGroup.gid
         || (metadata.mode & 0o7777) !== mailSqlTemplatePolicy.databaseMode) {
         throw new Error('sqlite database metadata mismatch');
       }
@@ -451,7 +472,7 @@ export function createMailConfigActivator({
     try {
       const metadata = await lstatFn(mailSubmissionTemplatePolicy.dovecotAuthSocket);
       if (!metadata.isSocket() || metadata.isSymbolicLink()
-        || metadata.uid !== postfixIdentity.uid || metadata.gid !== postfixIdentity.gid
+        || metadata.uid !== postfixIdentity.uid || metadata.gid !== mailAuthGroup.gid
         || (metadata.mode & 0o7777) !== SUBMISSION_SOCKET_MODE) {
         throw new Error('submission socket metadata mismatch');
       }
@@ -460,7 +481,7 @@ export function createMailConfigActivator({
     }
   }
 
-  async function runApplyCommands(plan, vmailGid, postfixIdentity) {
+  async function runApplyCommands(plan, vmailGid, postfixIdentity, mailAuthGroup) {
     for (const command of plan.stages.compile) {
       if (command.file === '/usr/bin/sievec') {
         await runCommand(command, 'mail_sieve_compile_failed', 'Managed mailbox forwarding script compilation failed');
@@ -471,7 +492,7 @@ export function createMailConfigActivator({
       }
     }
     if (plan.sql?.required === true) {
-      await secureAndVerifySqlDatabase(plan, postfixIdentity);
+      await secureAndVerifySqlDatabase(plan, mailAuthGroup);
     } else {
       await assertCompiledMapsSafe();
     }
@@ -829,9 +850,10 @@ export function createMailConfigActivator({
       throw activationError('mail_activation_prerequisite_stale', 'Managed mail staging or backup belongs to a different configuration');
     }
 
-    const [vmailIdentity, postfixIdentity] = await Promise.all([
+    const [vmailIdentity, postfixIdentity, mailAuthGroup] = await Promise.all([
       resolveVmailIdentity(),
       resolvePostfixIdentity(),
+      plan.sql?.required === true ? resolveMailAuthGroup() : Promise.resolve(null),
     ]);
     await assertRequiredDirectoriesSafe(plan);
     await assertLiveMatchesBackup(backup);
@@ -847,7 +869,7 @@ export function createMailConfigActivator({
         vmailIdentity.gid,
         postfixIdentity.gid,
       );
-      await runApplyCommands(plan, vmailIdentity.gid, postfixIdentity);
+      await runApplyCommands(plan, vmailIdentity.gid, postfixIdentity, mailAuthGroup);
       const finalReadiness = await readinessInspector.inspect(preview, { phase: 'post' });
       if (!finalReadiness.ready || finalReadiness.previewSha256 !== preview.sha256) {
         throw activationError('mail_post_apply_readiness_failed', 'Managed mail host readiness failed after activation');
@@ -910,5 +932,6 @@ export const mailConfigActivatorInternals = Object.freeze({
   sieveSharedMode: SIEVE_SHARED_MODE,
   submissionSocketMode: SUBMISSION_SOCKET_MODE,
   sqlDatabaseMode: mailSqlTemplatePolicy.databaseMode,
+  mailAuthGroup: MAIL_AUTH_GROUP,
   systemctlPath: SYSTEMCTL,
 });
