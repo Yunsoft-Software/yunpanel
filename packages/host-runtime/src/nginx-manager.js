@@ -48,6 +48,7 @@ function renderDomainConfig(spec) {
   const common = {
     primaryDomain: spec.primaryDomain,
     aliases: spec.aliases ?? [],
+    acmeOnlyHostnames: spec.acmeOnlyHostnames ?? [],
     tls: spec.tls ?? null,
     canonicalRedirect: spec.canonicalRedirect === true,
     httpsRedirect: spec.httpsRedirect !== false,
