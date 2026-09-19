@@ -53,6 +53,7 @@ fi
 
 install -d -o yunpanel -g yunpanel -m 0700 /var/lib/yunpanel/control-plane
 install -d -o vmail -g vmail -m 0750 /var/lib/yunpanel/mail
+install -d -o root -g yunpanel-mailauth -m 0750 /var/lib/yunpanel/mail-auth
 install -d -o root -g root -m 0700 /var/lib/yunpanel/agent
 install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel/roundcube
 install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel/roundcube/tmp
