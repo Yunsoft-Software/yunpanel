@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promis
 import path from 'node:path';
 import {
   mailForwardingTemplatePolicy,
+  mailSqlTemplatePolicy,
   mailSrsTemplatePolicy,
   mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
@@ -33,7 +34,27 @@ const SRS_ARTIFACT_PATHS = Object.freeze([
   mailSrsTemplatePolicy.defaultsPath,
   mailSrsTemplatePolicy.secretPath,
 ]);
-const ALLOWED_ARTIFACT_SET = new Set(SRS_ARTIFACT_PATHS);
+const SQL_BASE_ARTIFACT_PATHS = Object.freeze([
+  mailSqlTemplatePolicy.seedPath,
+  mailSqlTemplatePolicy.postfixDomainPath,
+  mailSqlTemplatePolicy.postfixMailboxPath,
+  mailSqlTemplatePolicy.postfixAliasPath,
+  mailSqlTemplatePolicy.postfixSenderLoginPath,
+  mailSqlTemplatePolicy.dovecotSqlPath,
+  mailTemplatePolicy.dovecotAuthConfigPath,
+  mailTemplatePolicy.dovecotMailConfigPath,
+  mailForwardingTemplatePolicy.sievePath,
+  mailTemplatePolicy.rspamdProxyConfigPath,
+]);
+const SQL_SRS_ARTIFACT_PATHS = Object.freeze([
+  ...SQL_BASE_ARTIFACT_PATHS,
+  mailSrsTemplatePolicy.defaultsPath,
+  mailSrsTemplatePolicy.secretPath,
+]);
+const ALLOWED_ARTIFACT_SET = new Set([
+  ...SRS_ARTIFACT_PATHS,
+  ...SQL_SRS_ARTIFACT_PATHS,
+]);
 
 export class MailConfigManagerError extends Error {
   constructor(code, message) {
@@ -61,15 +82,18 @@ function expectedArtifactPaths(plan) {
   if (!plan || !Array.isArray(plan.requirements)) {
     throw new MailConfigManagerError('mail_artifact_set_invalid', 'Managed mail apply plan requirements are unavailable');
   }
-  return plan.requirements.includes(mailSrsTemplatePolicy.requirement)
-    ? SRS_ARTIFACT_PATHS
-    : BASE_ARTIFACT_PATHS;
+  const sql = plan.requirements.includes('mail_sqlite');
+  const srs = plan.requirements.includes(mailSrsTemplatePolicy.requirement);
+  if (sql) return srs ? SQL_SRS_ARTIFACT_PATHS : SQL_BASE_ARTIFACT_PATHS;
+  return srs ? SRS_ARTIFACT_PATHS : BASE_ARTIFACT_PATHS;
 }
 
 function manifestArtifactPaths(value) {
   if (!Array.isArray(value)) return null;
   if (value.length === BASE_ARTIFACT_PATHS.length) return BASE_ARTIFACT_PATHS;
   if (value.length === SRS_ARTIFACT_PATHS.length) return SRS_ARTIFACT_PATHS;
+  if (value.length === SQL_BASE_ARTIFACT_PATHS.length) return SQL_BASE_ARTIFACT_PATHS;
+  if (value.length === SQL_SRS_ARTIFACT_PATHS.length) return SQL_SRS_ARTIFACT_PATHS;
   return null;
 }
 
@@ -303,6 +327,8 @@ export const mailConfigManagerInternals = Object.freeze({
   allowedArtifactPaths: SRS_ARTIFACT_PATHS,
   baseArtifactPaths: BASE_ARTIFACT_PATHS,
   srsArtifactPaths: SRS_ARTIFACT_PATHS,
+  sqlBaseArtifactPaths: SQL_BASE_ARTIFACT_PATHS,
+  sqlSrsArtifactPaths: SQL_SRS_ARTIFACT_PATHS,
   defaultStagingRoot: DEFAULT_STAGING_ROOT,
   directoryMode: DIRECTORY_MODE,
   privateMode: PRIVATE_MODE,
