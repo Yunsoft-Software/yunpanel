@@ -26,6 +26,7 @@ function provisioningIntent(overrides = {}) {
     zoneName: 'example.com',
     mailDomainId,
     domainName: 'example.com',
+    webmailHostname: 'webmail.example.com',
     expectedMailDomainRevision: 2,
     expectedMailDomainStatus: 'enabled',
     expectedDkimKeyRevision: 1,
@@ -52,15 +53,26 @@ function mailState() {
 }
 
 function records() {
-  return [{
-    key: `mail-dkim-${selector}`,
-    owner: `${selector}._domainkey.example.com`,
-    type: 'TXT',
-    ttl: 300,
-    values: [dkimValue],
-    source: 'mail',
-    templateVersion: null,
-  }];
+  return [
+    {
+      key: `mail-dkim-${selector}`,
+      owner: `${selector}._domainkey.example.com`,
+      type: 'TXT',
+      ttl: 300,
+      values: [dkimValue],
+      source: 'mail',
+      templateVersion: null,
+    },
+    {
+      key: 'webmail-ipv4',
+      owner: 'webmail.example.com',
+      type: 'A',
+      ttl: 300,
+      values: ['203.0.113.10'],
+      source: 'mail',
+      templateVersion: null,
+    },
+  ];
 }
 
 function pendingPreview() {
@@ -299,6 +311,7 @@ test('Website local mail DNS applies the exact durable PowerDNS desired state', 
   assert.equal(evidence.adapter, 'powerdns-mail-reapply');
   assert.equal(evidence.webDomainId, webDomainId);
   assert.equal(evidence.mailDomainId, mailDomainId);
+  assert.equal(evidence.webmailHostname, 'webmail.example.com');
   assert.equal(evidence.dnsReapplyOperationId, childOperationId);
   assert.equal(evidence.previewDigest, previewDigest);
   assert.equal(evidence.mailStateDigest, mailStateDigest);
