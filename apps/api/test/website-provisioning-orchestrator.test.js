@@ -106,6 +106,38 @@ test('interrupted step without safe inspection stays interrupted for remediation
   assert.equal((await registry.get(operationId)).steps[0].state, 'applying');
 });
 
+test('interrupted step may become failed only when inspection proves explicit retry is safe', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.create(plan());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  let applyCalls = 0;
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async () => { applyCalls += 1; return { satisfied: true, uid: 1201 }; },
+        inspect: async () => ({
+          satisfied: false,
+          reason: 'roundcube_apply_not_dispatched',
+          retryable: true,
+        }),
+      },
+    },
+  });
+
+  const result = await orchestrator.runNext(operationId);
+  assert.equal(applyCalls, 0);
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.actionRequired, 'retry');
+  assert.equal(result.error, 'roundcube_apply_not_dispatched');
+  assert.equal(result.operation.steps[0].state, 'failed');
+  assert.deepEqual(result.operation.steps[0].evidence, {
+    satisfied: false,
+    reason: 'roundcube_apply_not_dispatched',
+    retryable: true,
+  });
+});
+
 test('blocked required step without inspection stays blocked and never mutates', async () => {
   const registry = createWebsiteProvisioningRegistry();
   const blockedPlan = plan();
