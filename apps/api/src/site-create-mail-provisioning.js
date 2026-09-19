@@ -142,8 +142,11 @@ export function withSiteCreateMailSteps(plan, preview) {
   steps.splice(firstHostIndex >= 0 ? firstHostIndex : steps.length, 0, metadata);
 
   if (mailConfig) {
+    const tlsActivationIndex = steps.findIndex((step) => step.id === 'tls_activation');
     const certificateIndex = steps.findIndex((step) => step.id === 'certificate');
-    const mailConfigIndex = certificateIndex >= 0 ? certificateIndex + 1 : steps.length;
+    const mailConfigIndex = tlsActivationIndex >= 0
+      ? tlsActivationIndex + 1
+      : certificateIndex >= 0 ? certificateIndex + 1 : steps.length;
     steps.splice(mailConfigIndex, 0, mailConfig);
     if (mailDkimKey) steps.splice(mailConfigIndex + 1, 0, mailDkimKey);
     if (mailDkimConfig) steps.splice(mailConfigIndex + 2, 0, mailDkimConfig);
