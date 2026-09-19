@@ -4,6 +4,7 @@ import { createWebsiteDatabaseProvisioningHandler } from './website-database-pro
 import { createWebsiteDomainActivationProvisioningHandler } from './website-domain-activation-provisioning-handler.js';
 import { createWebsiteMailProvisioningHandler } from './website-mail-provisioning-handler.js';
 import { createWebsiteMailDkimKeyProvisioningHandler } from './website-mail-dkim-key-provisioning-handler.js';
+import { createWebsiteMailDkimConfigProvisioningHandler } from './website-mail-dkim-config-provisioning-handler.js';
 import { createWebsiteMailDnsProvisioningHandler } from './website-mail-dns-provisioning-handler.js';
 import { createWebsiteIsolationAuditService, WebsiteIsolationAuditError } from './website-isolation-audit.js';
 import { createWebsiteIsolationMigrationRegistry } from './website-isolation-migration-registry.js';
@@ -413,14 +414,24 @@ export function createWebsiteProvisioningRuntime({
       mailDomainRegistry: nextMailDomainRegistry,
       domainRegistry: nextDomainRegistry,
       mailDkimRegistry: nextMailDkimRegistry,
+      jobRegistry: nextJobRegistry = null,
+      mailDkimConfigurationService: nextMailDkimConfigurationService = null,
+      waitForTerminalJob: nextWaitForTerminalJob,
     } = dependencies;
     if (!nextMailDomainRegistry || !nextDomainRegistry || !nextMailDkimRegistry) {
       throw new Error('Website DKIM provisioning dependencies are required');
     }
+    const configureSigning = nextJobRegistry !== null || nextMailDkimConfigurationService !== null;
+    if (configureSigning && (!nextJobRegistry || !nextMailDkimConfigurationService || !handlers.mail_config)) {
+      throw new Error('Website DKIM signing provisioning requires mail jobs, configuration, and managed-mail control plane');
+    }
     if (mailDkimControlPlane) {
       if (mailDkimControlPlane.mailDomainRegistry !== nextMailDomainRegistry
         || mailDkimControlPlane.domainRegistry !== nextDomainRegistry
-        || mailDkimControlPlane.mailDkimRegistry !== nextMailDkimRegistry) {
+        || mailDkimControlPlane.mailDkimRegistry !== nextMailDkimRegistry
+        || mailDkimControlPlane.jobRegistry !== nextJobRegistry
+        || mailDkimControlPlane.mailDkimConfigurationService !== nextMailDkimConfigurationService
+        || mailDkimControlPlane.waitForTerminalJob !== nextWaitForTerminalJob) {
         throw new Error('Website DKIM provisioning dependencies cannot be replaced');
       }
       return Object.freeze({ configured: true });
@@ -430,14 +441,27 @@ export function createWebsiteProvisioningRuntime({
       domainRegistry: nextDomainRegistry,
       mailDkimRegistry: nextMailDkimRegistry,
     });
+    if (configureSigning) {
+      handlers.mail_dkim_config = createWebsiteMailDkimConfigProvisioningHandler({
+        jobRegistry: nextJobRegistry,
+        mailDomainRegistry: nextMailDomainRegistry,
+        domainRegistry: nextDomainRegistry,
+        mailDkimRegistry: nextMailDkimRegistry,
+        mailDkimConfigurationService: nextMailDkimConfigurationService,
+        mailConfigProvisioningHandler: handlers.mail_config,
+        ...(nextWaitForTerminalJob ? { waitForTerminalJob: nextWaitForTerminalJob } : {}),
+      });
+    }
     mailDkimControlPlane = Object.freeze({
       mailDomainRegistry: nextMailDomainRegistry,
       domainRegistry: nextDomainRegistry,
       mailDkimRegistry: nextMailDkimRegistry,
+      jobRegistry: nextJobRegistry,
+      mailDkimConfigurationService: nextMailDkimConfigurationService,
+      waitForTerminalJob: nextWaitForTerminalJob,
     });
     return Object.freeze({ configured: true });
   }
-
 
   function configureMailDnsControlPlane(dependencies = {}) {
     const {
