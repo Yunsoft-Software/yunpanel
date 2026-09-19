@@ -108,6 +108,8 @@ function preview() {
         revision: 3,
         updatedAt: '2026-09-18T20:00:00.000Z',
       }],
+      webmailMappingIds: [],
+      webmailMappingIntents: [],
       activeJobIds: [],
       additional: {
         mailboxes: { status: 'available', ids: [] },
