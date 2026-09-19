@@ -642,7 +642,6 @@ export function createWebsiteProvisioningRuntime({
       dnsZoneReapplyRuntime: nextDnsZoneReapplyRuntime,
     });
     handlers.mail_dns_reapply = handler;
-    handlers.webmail_dns_reapply = handler;
     mailDnsControlPlane = Object.freeze({
       mailDomainRegistry: nextMailDomainRegistry,
       domainRegistry: nextDomainRegistry,
