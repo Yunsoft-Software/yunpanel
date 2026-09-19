@@ -105,6 +105,7 @@ function removalPreview({
       }],
       boundCertificateId: 'certificate-1',
       dnsZoneIds: [],
+      dnsZoneIntents: [],
       mailDomainIds: [],
       mailDomainIntents: [],
       activeJobIds: [],
@@ -154,6 +155,7 @@ function leafRemovalPreview() {
       certificateIntents: [],
       boundCertificateId: null,
       dnsZoneIds: [],
+      dnsZoneIntents: [],
       mailDomainIds: [],
       mailDomainIntents: [],
       authoritativeDns: null,
@@ -196,6 +198,7 @@ function childRemovalPreview(overrides = {}) {
       certificateIntents: [],
       boundCertificateId: null,
       dnsZoneIds: [],
+      dnsZoneIntents: [],
       mailDomainIds: [],
       mailDomainIntents: [],
       activeJobIds: [],
@@ -1799,7 +1802,18 @@ test('child dependency drift blocks before a child journal or routing mutation i
   const registry = createNestedRegistry();
   const parentPreview = removalPreview();
   const driftedChild = childRemovalPreview({
-    plan: { dnsZoneIds: ['new-external-zone'] },
+    plan: {
+      dnsZoneIds: ['new-external-zone'],
+      dnsZoneIntents: [{
+        id: 'new-external-zone',
+        zoneName: 'api.example.com',
+        webDomainId: 'child-domain-1',
+        managementMode: 'external',
+        status: 'unverified',
+        revision: 1,
+        updatedAt: '2026-09-18T20:00:00.000Z',
+      }],
+    },
   });
   const domains = childDomainControlPlaneFixture();
   const suspensions = nestedSuspensionRuntime(domains);
