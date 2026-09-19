@@ -465,6 +465,7 @@ export function createApp({
     dockerWorkloadRegistry,
     websiteRegistry,
     domainRegistry,
+    mailDomainRegistry,
     localServerId,
     websiteProvisioningRegistry: websiteProvisioningRuntime?.registry ?? null,
   });
