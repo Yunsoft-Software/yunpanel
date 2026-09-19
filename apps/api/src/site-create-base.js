@@ -741,7 +741,7 @@ export async function previewSiteCreate({
       dnsPublished: false,
       certificateIssued: false,
       mailDomainCreated: normalized.mail.mode !== 'none' && mailDomainReady,
-      webmailMappingActive: false,
+      ...(normalized.mail.mode === 'local' ? { webmailMappingActive: false } : {}),
       ...(normalized.source.kind === 'existing_docker' ? { containersChanged: false } : {}),
     }),
     plan: Object.freeze(planCore.resources),
