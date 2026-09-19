@@ -167,7 +167,7 @@ export function renderManagedMailSqlSeed(input = {}) {
     'DELETE FROM virtual_mailboxes;',
     'DELETE FROM virtual_domains;',
     'DELETE FROM yunpanel_meta;',
-    'INSERT INTO yunpanel_meta(key, value) VALUES (''state_sha256'', ' + sqlLiteral(stateSha256) + ');',
+    "INSERT INTO yunpanel_meta(key, value) VALUES ('state_sha256', " + sqlLiteral(stateSha256) + ");",
   ];
 
   for (const domain of normalizedDomains) {
