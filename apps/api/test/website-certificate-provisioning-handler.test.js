@@ -46,6 +46,7 @@ function issuedCertificate(overrides = {}) {
     serverId,
     provisioningOperationId: operationId,
     source: 'acme',
+    purpose: 'web',
     renewalMode: 'automatic',
     state: 'active',
     staging: false,
@@ -163,6 +164,7 @@ test('Website certificate apply reuses the durable SSL issue queue and returns s
     staging: false,
     replaceExisting: true,
     provisioningOperationId: operationId,
+    purpose: 'web',
   }]);
   assert.deepEqual(calls[1][0], 'enqueue');
   assert.equal(calls[1][1].operation, 'ssl.issue');
@@ -263,5 +265,39 @@ test('Website certificate apply rejects a foreign certificate binding before iss
     (error) => error instanceof WebsiteCertificateProvisioningError
       && error.code === 'website_certificate_binding_conflict',
   );
+  assert.equal(mutations, 0);
+});
+
+
+test('Website certificate inspection ignores a live webmail-purpose certificate on the same Domain', async () => {
+  let mutations = 0;
+  const webmailCertificate = issuedCertificate({
+    id: 'b1d94308-4b55-4b46-a7dc-8189edbc9e6e',
+    provisioningOperationId: 'a79bba4e-5b79-44f6-b45e-fd845d3848a8',
+    purpose: 'webmail',
+    domains: ['webmail.example.com'],
+    certificateNames: ['webmail.example.com'],
+  });
+  const handler = createWebsiteCertificateProvisioningHandler({
+    acmeEmail: 'ops@example.com',
+    domainRegistry: { getDomain: async () => activeDomain() },
+    certificateRegistry: {
+      listCertificates: async () => [webmailCertificate],
+      getCertificate: async () => webmailCertificate,
+      createForDomain: async () => { mutations += 1; return null; },
+      setState: async () => { mutations += 1; return null; },
+    },
+    jobRegistry: {
+      listJobs: async () => [],
+      getJob: async () => null,
+      enqueue: async () => { mutations += 1; return null; },
+    },
+  });
+
+  const result = await handler.inspect({ operationId, websiteId, intent });
+  assert.deepEqual(result, {
+    satisfied: false,
+    reason: 'website_certificate_issue_required',
+  });
   assert.equal(mutations, 0);
 });
