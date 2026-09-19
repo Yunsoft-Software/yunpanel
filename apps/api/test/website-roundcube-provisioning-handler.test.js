@@ -28,14 +28,15 @@ function operation() {
     operationId,
     websiteId,
     steps: [{
-      id: 'certificate',
-      kind: 'certificate',
+      id: 'webmail_certificate',
+      kind: 'webmail_certificate',
       state: 'succeeded',
       evidence: {
         satisfied: true,
-        adapter: 'acme-certificate',
+        adapter: 'acme-webmail-certificate',
         certificateId,
         provisioningOperationId: operationId,
+        hostname: 'webmail.example.com',
       },
     }],
   };
@@ -264,7 +265,7 @@ test('Website Roundcube inspect reconciles successful pending apply metadata wit
   assert.equal(hostMutations, 0);
 });
 
-test('Website Roundcube apply exposes a precise blocker when the Website certificate does not cover webmail hostname', async () => {
+test('Website Roundcube apply exposes a precise blocker when the webmail certificate does not cover its hostname', async () => {
   const deps = dependencies({
     roundcubeDomainMappingService: {
       previewBind: async () => {
