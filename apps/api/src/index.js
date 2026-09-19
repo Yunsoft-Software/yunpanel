@@ -167,6 +167,7 @@ const dnsZoneRetentionDaysRaw = process.env.YUNPANEL_DNS_ZONE_SNAPSHOT_RETENTION
 const dnsZoneSnapshotRetentionDays = dnsZoneRetentionDaysRaw === null
   ? null
   : Number.parseInt(dnsZoneRetentionDaysRaw, 10);
+const acmeEmail = process.env.YUNPANEL_ACME_EMAIL?.trim() || null;
 const certificateRenewalIntervalMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS ?? `${6 * 60 * 60 * 1000}`, 10);
 const certificateRenewBeforeMs = Number.parseInt(process.env.YUNPANEL_CERTIFICATE_RENEW_BEFORE_MS ?? `${30 * 24 * 60 * 60 * 1000}`, 10);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('YUNPANEL_API_PORT must be a valid TCP port');
@@ -610,6 +611,12 @@ if (elFinderHandoffService) {
 }
 const websiteDatabaseInventoryProvider = () => databaseManager.inspect();
 const websiteDatabaseHealthProvider = () => databaseManager.inspectSecurityBaseline();
+websiteProvisioningRuntime.configureCertificateControlPlane({
+  jobRegistry,
+  certificateRegistry,
+  domainRegistry,
+  acmeEmail,
+});
 websiteProvisioningRuntime.configureMailControlPlane({
   jobRegistry,
   mailDomainRegistry,
