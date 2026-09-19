@@ -98,6 +98,7 @@ test('local mail config, DKIM key, and signing config become required after cert
   const certificate = plan.steps.find((step) => step.id === 'certificate');
 
   assert.deepEqual(nginx.intent.acmeOnlyHostnames, ['webmail.example.com']);
+  assert.equal(nginx.intent.mailDiscoverySocketPath, '/run/yunpanel-mail-discovery/discovery.sock');
   assert.equal(certificate.intent.primaryDomain, 'example.com');
   assert.equal(certificate.intent.aliases.includes('webmail.example.com'), false);
 
@@ -270,6 +271,7 @@ test('external mail tracks metadata but never invokes the local mail stack', () 
   assert.equal(plan.steps.some((step) => step.id === 'mail_dkim_config'), false);
   assert.equal(plan.steps.some((step) => step.id === 'webmail_certificate'), false);
   assert.equal(plan.steps.some((step) => step.id === 'mail_health'), false);
+  assert.equal(plan.steps.find((step) => step.id === 'nginx').intent.mailDiscoverySocketPath, undefined);
   assert.equal(plan.steps.some((step) => step.id === 'certificate'), false);
 });
 
@@ -281,4 +283,5 @@ test('mail none preserves the existing Website provisioning step set', () => {
   assert.equal(plan.steps.some((step) => step.id === 'mail_dkim_config'), false);
   assert.equal(plan.steps.some((step) => step.id === 'webmail_certificate'), false);
   assert.equal(plan.steps.some((step) => step.id === 'mail_health'), false);
+  assert.equal(plan.steps.find((step) => step.id === 'nginx').intent.mailDiscoverySocketPath, undefined);
 });
