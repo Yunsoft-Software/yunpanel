@@ -14,6 +14,15 @@ if ! id vmail >/dev/null 2>&1; then
   adduser --system --ingroup vmail --home /var/lib/yunpanel/mail --no-create-home --shell /usr/sbin/nologin vmail >/dev/null
 fi
 
+if ! getent group yunpanel-mailauth >/dev/null; then
+  addgroup --system yunpanel-mailauth >/dev/null
+fi
+for mail_service_user in postfix dovecot; do
+  if id "$mail_service_user" >/dev/null 2>&1; then
+    adduser "$mail_service_user" yunpanel-mailauth >/dev/null 2>&1 || true
+  fi
+done
+
 if ! getent group yunpanel-roundcube >/dev/null; then
   addgroup --system yunpanel-roundcube >/dev/null
 fi
