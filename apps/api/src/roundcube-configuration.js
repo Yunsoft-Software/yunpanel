@@ -99,6 +99,7 @@ export function createRoundcubeConfigurationService({
       if (!certificate || certificate.id !== mapping.certificateId
         || certificate.domainId !== mapping.webDomainId
         || certificate.serverId !== mapping.serverId
+        || certificate.purpose !== 'webmail'
         || certificate.state !== 'active' || certificate.staging === true
         || String(certificate.fingerprint256 ?? '').toUpperCase()
           !== mapping.certificateFingerprint256.toUpperCase()) {
