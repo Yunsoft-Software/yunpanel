@@ -3,11 +3,13 @@ import {
   MailForwardingTemplateError,
   MailQuotaTemplateError,
   MailSecurityTemplateError,
+  MailSqlTemplateError,
   MailSrsTemplateError,
   MailSubmissionTemplateError,
   MailTemplateError,
   MailTlsIdentityTemplateError,
   bindManagedMailTlsIdentity,
+  enableManagedMailSql,
   enableManagedMailSrs,
   enableManagedMailSubmission,
   mailSrsTemplatePolicy,
@@ -16,6 +18,7 @@ import {
   previewManagedMailEmptyConfiguration,
   previewManagedMailSubmissionConfiguration,
   renderDovecotQuotaPasswdFile,
+  renderManagedMailSqlSeed,
   secureManagedMailPreview,
 } from '@yunpanel/config-templates';
 
@@ -289,14 +292,22 @@ export function createMailConfigurationService({
     }
 
     if (resolved.domains.length === 0) {
+      const legacyPreview = enableManagedMailSubmission(
+        secureManagedMailPreview(previewManagedMailEmptyConfiguration()),
+        [],
+      );
+      const preview = enableManagedMailSql(legacyPreview, {
+        domains: [],
+        accounts: [],
+        aliases: [],
+      });
       return Object.freeze({
         ready: true,
         blockers: Object.freeze([]),
-        preview: enableManagedMailSubmission(
-          secureManagedMailPreview(previewManagedMailEmptyConfiguration()),
-          [],
-        ),
+        preview,
+        legacyPreview,
         accounts: Object.freeze([]),
+        aliases: Object.freeze([]),
         srs: null,
       });
     }
@@ -357,11 +368,27 @@ export function createMailConfigurationService({
         });
       }
       if (tlsIdentity.identity) preview = bindManagedMailTlsIdentity(preview, tlsIdentity.identity);
+      const legacyPreview = preview;
+      preview = enableManagedMailSql(legacyPreview, {
+        domains: resolved.domains,
+        accounts,
+        aliases,
+      });
+      return Object.freeze({
+        ready: true,
+        blockers: Object.freeze([]),
+        preview,
+        legacyPreview,
+        accounts,
+        aliases: Object.freeze(aliases),
+        srs: srs?.private ?? null,
+      });
     } catch (error) {
       if (error instanceof MailTemplateError
         || error instanceof MailQuotaTemplateError
         || error instanceof MailForwardingTemplateError
         || error instanceof MailSecurityTemplateError
+        || error instanceof MailSqlTemplateError
         || error instanceof MailSrsTemplateError
         || error instanceof MailSubmissionTemplateError
         || error instanceof MailTlsIdentityTemplateError) {
@@ -373,13 +400,6 @@ export function createMailConfigurationService({
       }
       throw error;
     }
-    return Object.freeze({
-      ready: true,
-      blockers: Object.freeze([]),
-      preview,
-      accounts,
-      srs: srs?.private ?? null,
-    });
   }
 
   async function previewTransition(input) {
@@ -388,21 +408,48 @@ export function createMailConfigurationService({
     return transitionPreview(resolved, materialized);
   }
 
-  function materializeSensitiveArtifacts(resolved, materialized) {
-    const passwd = renderDovecotQuotaPasswdFile({
-      domains: resolved.domains,
-      accounts: materialized.accounts,
-    });
-    const passwdArtifact = materialized.preview.artifacts.find(
-      (artifact) => artifact.path === mailTemplatePolicy.dovecotPasswdFilePath,
-    );
-    if (!passwdArtifact || passwdArtifact.sha256 !== createHash('sha256').update(passwd).digest('hex')) {
-      throw new MailConfigurationError('mail_configuration_sensitive_digest_mismatch', 'Protected mail configuration material is inconsistent', 409);
+  function materializeSensitiveArtifacts(resolved, materialized, preview = materialized.preview) {
+    const sensitiveArtifacts = [];
+    if (preview.requirements.includes('mail_sqlite')) {
+      const seed = renderManagedMailSqlSeed({
+        domains: resolved.domains,
+        accounts: materialized.accounts,
+        aliases: materialized.aliases,
+      });
+      const seedArtifact = preview.artifacts.find(
+        (artifact) => artifact.path === '/etc/yunpanel/mail/sql/virtual-mail.sql',
+      );
+      if (!seedArtifact || seedArtifact.sha256 !== createHash('sha256').update(seed).digest('hex')) {
+        throw new MailConfigurationError(
+          'mail_configuration_sensitive_digest_mismatch',
+          'Protected mail SQL material is inconsistent',
+          409,
+        );
+      }
+      sensitiveArtifacts.push(Object.freeze({
+        path: seedArtifact.path,
+        content: seed,
+      }));
+    } else {
+      const passwd = renderDovecotQuotaPasswdFile({
+        domains: resolved.domains,
+        accounts: materialized.accounts,
+      });
+      const passwdArtifact = preview.artifacts.find(
+        (artifact) => artifact.path === mailTemplatePolicy.dovecotPasswdFilePath,
+      );
+      if (!passwdArtifact || passwdArtifact.sha256 !== createHash('sha256').update(passwd).digest('hex')) {
+        throw new MailConfigurationError(
+          'mail_configuration_sensitive_digest_mismatch',
+          'Protected mail configuration material is inconsistent',
+          409,
+        );
+      }
+      sensitiveArtifacts.push(Object.freeze({
+        path: mailTemplatePolicy.dovecotPasswdFilePath,
+        content: passwd,
+      }));
     }
-    const sensitiveArtifacts = [Object.freeze({
-      path: mailTemplatePolicy.dovecotPasswdFilePath,
-      content: passwd,
-    })];
     if (materialized.srs) {
       const srsArtifact = materialized.preview.artifacts.find(
         (artifact) => artifact.path === mailSrsTemplatePolicy.secretPath,
@@ -429,10 +476,19 @@ export function createMailConfigurationService({
     if (!materialized.ready || !materialized.preview) {
       throw new MailConfigurationError('mail_configuration_not_ready', 'Managed mail configuration is not ready to apply', 409);
     }
-    const publicPreview = transitionPreview(resolved, materialized);
-    if (publicPreview.previewDigest !== expectedPreviewDigest
-      || materialized.preview.sha256 !== expectedConfigurationSha256
-      || publicPreview.configuration?.sha256 !== expectedConfigurationSha256) {
+    const sqlPublicPreview = transitionPreview(resolved, materialized);
+    const legacyMaterialized = Object.freeze({ ...materialized, preview: materialized.legacyPreview });
+    const legacyPublicPreview = transitionPreview(resolved, legacyMaterialized);
+    const selected = sqlPublicPreview.previewDigest === expectedPreviewDigest
+      && materialized.preview.sha256 === expectedConfigurationSha256
+      && sqlPublicPreview.configuration?.sha256 === expectedConfigurationSha256
+      ? materialized.preview
+      : legacyPublicPreview.previewDigest === expectedPreviewDigest
+        && materialized.legacyPreview?.sha256 === expectedConfigurationSha256
+        && legacyPublicPreview.configuration?.sha256 === expectedConfigurationSha256
+        ? materialized.legacyPreview
+        : null;
+    if (!selected) {
       throw new MailConfigurationError('mail_configuration_preview_stale', 'Managed mail configuration changed after preview', 409);
     }
     return Object.freeze({
@@ -442,8 +498,8 @@ export function createMailConfigurationService({
         previousStatus: resolved.candidate.status,
         desiredStatus: resolved.input.status,
       }),
-      preview: materialized.preview,
-      sensitiveArtifacts: materializeSensitiveArtifacts(resolved, materialized),
+      preview: selected,
+      sensitiveArtifacts: materializeSensitiveArtifacts(resolved, materialized, selected),
     });
   }
 
@@ -456,8 +512,17 @@ export function createMailConfigurationService({
     if (!materialized.ready || !materialized.preview) {
       throw new MailConfigurationError('mail_configuration_not_ready', 'Current managed mail configuration cannot be materialized', 409);
     }
-    if (materialized.preview.sha256 !== expectedConfigurationSha256) {
-      throw new MailConfigurationError('mail_configuration_preview_stale', 'Current managed mail configuration changed after rollback preview', 409);
+    const selected = materialized.preview.sha256 === expectedConfigurationSha256
+      ? materialized.preview
+      : materialized.legacyPreview?.sha256 === expectedConfigurationSha256
+        ? materialized.legacyPreview
+        : null;
+    if (!selected) {
+      throw new MailConfigurationError(
+        'mail_configuration_preview_stale',
+        'Current managed mail configuration changed after rollback preview',
+        409,
+      );
     }
     return Object.freeze({
       state: Object.freeze({
@@ -465,8 +530,8 @@ export function createMailConfigurationService({
         revision: resolved.candidate.revision,
         status: resolved.candidate.status,
       }),
-      preview: materialized.preview,
-      sensitiveArtifacts: materializeSensitiveArtifacts(resolved, materialized),
+      preview: selected,
+      sensitiveArtifacts: materializeSensitiveArtifacts(resolved, materialized, selected),
     });
   }
 
