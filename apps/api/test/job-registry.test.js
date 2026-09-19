@@ -270,6 +270,22 @@ test('active resource jobs are locked and durable idempotency keys replay only i
   const created = await registry.enqueue(input);
   assert.equal(isNewlyEnqueuedJob(created), true);
 
+  const found = await registry.findIdempotentJob(input);
+  assert.equal(found.id, created.id);
+  assert.equal(found.status, 'queued');
+  assert.equal(JSON.stringify(found).includes(input.idempotencyKey), false);
+  assert.equal(await registry.findIdempotentJob({
+    ...input,
+    idempotencyKey: 'github:missing-idempotency-key-1234567890',
+  }), null);
+  await assert.rejects(
+    registry.findIdempotentJob({
+      ...input,
+      payload: { ...input.payload, primaryDomain: 'changed.example.com' },
+    }),
+    (error) => error instanceof JobRegistryError && error.code === 'job_idempotency_conflict',
+  );
+
   const replayed = await registry.enqueue(input);
   assert.equal(replayed.id, created.id);
   assert.equal(isNewlyEnqueuedJob(replayed), false);
