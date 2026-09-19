@@ -5,6 +5,8 @@ import {
   createJournalLogReader,
   createDatabaseManager,
   createMailDiagnosticsInspector,
+  createMailProtocolHealthInspector,
+  createMailReadinessInspector,
   createNginxLogReader,
   inspectAllowlistedServices,
   inspectDocker,
@@ -411,6 +413,8 @@ const mailConfigurationService = createMailConfigurationService({
   mailServiceIdentityRegistry,
   mailSrsConfigurationService,
 });
+const mailReadinessInspector = createMailReadinessInspector();
+const mailProtocolHealthInspector = createMailProtocolHealthInspector();
 const applicationEnvironmentRegistry = createApplicationEnvironmentRegistry({
   filePath: applicationEnvironmentStorePath,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
@@ -644,6 +648,14 @@ websiteProvisioningRuntime.configureRoundcubeControlPlane({
   roundcubeDomainMappingService,
   roundcubeWebmailEndpointResolver,
   jobRegistry,
+});
+websiteProvisioningRuntime.configureMailHealthControlPlane({
+  mailDomainRegistry,
+  domainRegistry,
+  mailConfigurationService,
+  mailReadinessInspector,
+  mailProtocolHealthInspector,
+  roundcubeWebmailEndpointResolver,
 });
 if (dnsZoneReapplyRuntime) {
   websiteProvisioningRuntime.configureMailDnsControlPlane({
