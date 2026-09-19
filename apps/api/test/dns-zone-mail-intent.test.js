@@ -39,6 +39,7 @@ function fixture({
   currentKey = key(),
   retirement = null,
   mailDiscoveryEndpointResolver = null,
+  roundcubeWebmailEndpointResolver = null,
 } = {}) {
   const resolver = createDnsZoneMailIntentResolver({
     mailDomainRegistry: { listMailDomains: async () => domains },
@@ -53,6 +54,7 @@ function fixture({
       },
     },
     mailDiscoveryEndpointResolver,
+    roundcubeWebmailEndpointResolver,
   });
   return resolver.resolve({ domain });
 }
@@ -93,6 +95,8 @@ test('enabled local mail resolves service endpoints and current plus retiring pu
     mailDomainRevision: 4,
     mailServiceIdentityRevision: 2,
     mailDiscoveryEndpointRevision: null,
+    roundcubeWebmailMappingRevision: null,
+    roundcubeWebmailPreviewSha256: null,
     dkimRevisions: [2, 3],
     retirementPhase: 'dns_retirement_pending',
     retirementRevision: 2,
@@ -157,6 +161,64 @@ test('mail discovery DNS intent requires exact endpoint readiness evidence', asy
   );
 });
 
+test('webmail DNS intent requires exact live shared Roundcube readiness evidence', async () => {
+  const resolved = await fixture({
+    roundcubeWebmailEndpointResolver: {
+      resolve: async ({ mailDomain: requestedMailDomain, domain: requestedDomain }) => {
+        assert.equal(requestedMailDomain.id, mailDomain.id);
+        assert.equal(requestedDomain.id, domain.id);
+        return {
+          version: 1,
+          mailDomainId: mailDomain.id,
+          serverId: domain.serverId,
+          mappingId: 'mapping-1',
+          mappingRevision: 3,
+          hostname: 'webmail.example.com',
+          protocol: 'https',
+          path: '/',
+          roundcubePreviewSha256: 'a'.repeat(64),
+          roundcubeApplyJobId: 'roundcube-job-1',
+          ready: true,
+        };
+      },
+    },
+  });
+
+  assert.equal(resolved.intent.webmailEnabled, true);
+  assert.equal(resolved.intent.webmailHost, 'webmail.example.com');
+  assert.equal(resolved.evidence.roundcubeWebmailMappingRevision, 3);
+  assert.equal(resolved.evidence.roundcubeWebmailPreviewSha256, 'a'.repeat(64));
+
+  const notReady = await fixture({
+    roundcubeWebmailEndpointResolver: { resolve: async () => null },
+  });
+  assert.equal(notReady.intent.webmailEnabled, false);
+  assert.equal(Object.hasOwn(notReady.intent, 'webmailHost'), false);
+  assert.equal(notReady.evidence.roundcubeWebmailMappingRevision, null);
+
+  await assert.rejects(
+    fixture({
+      roundcubeWebmailEndpointResolver: {
+        resolve: async () => ({
+          version: 1,
+          mailDomainId: mailDomain.id,
+          serverId: domain.serverId,
+          mappingId: 'mapping-2',
+          mappingRevision: 4,
+          hostname: 'webmail.other.example',
+          protocol: 'https',
+          path: '/',
+          roundcubePreviewSha256: 'b'.repeat(64),
+          roundcubeApplyJobId: 'roundcube-job-2',
+          ready: true,
+        }),
+      },
+    }),
+    (error) => error instanceof DnsZoneMailIntentError
+      && error.code === 'dns_zone_mail_webmail_invalid',
+  );
+});
+
 test('disabled or absent local mail produces an explicit empty managed source without endpoint lookups', async () => {
   let endpointLookups = 0;
   const disabled = { ...mailDomain, status: 'disabled', revision: 5 };
@@ -165,6 +227,7 @@ test('disabled or absent local mail produces an explicit empty managed source wi
     mailDkimRegistry: { getKey: async () => { endpointLookups += 1; return null; } },
     mailDkimRetirementRegistry: { getRetirement: async () => { endpointLookups += 1; return null; } },
     mailServiceIdentityRegistry: { getForServer: async () => { endpointLookups += 1; return null; } },
+    roundcubeWebmailEndpointResolver: { resolve: async () => { endpointLookups += 1; return null; } },
   });
 
   const resolved = await resolver.resolve({ domain });
