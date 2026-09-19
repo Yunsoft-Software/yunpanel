@@ -470,7 +470,14 @@ export function siteCreateProvisioningPlan(preview) {
       aliases,
       wwwDomainId: preview.ids.wwwDomainId ?? null,
       wwwDomain: preview.plan.wwwDomain?.primaryDomain ?? null,
-    }));
+    }, { compensationState: 'pending' }));
+    steps.push(hostStep('tls_activation', 'tls_activation', {
+      adapter: 'managed-certificate-nginx',
+      websiteId: preview.ids.websiteId,
+      primaryDomainId: preview.ids.primaryDomainId,
+      primaryDomain: preview.plan.primaryDomain.primaryDomain,
+      aliases,
+    }, { compensationState: 'pending' }));
   }
 
   return createWebsiteProvisioningPlan({
