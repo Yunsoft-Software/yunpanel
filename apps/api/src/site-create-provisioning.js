@@ -5,6 +5,7 @@ import { createWebsiteProvisioningPlan } from './website-provisioning-plan.js';
 import { databaseCredentialRegistryInternals } from './database-credential-registry.js';
 
 const MANAGED_NODE_ROOT = '/opt/yunpanel/node-runtimes';
+const MAIL_DISCOVERY_SOCKET = '/run/yunpanel-mail-discovery/discovery.sock';
 
 function metadataStep(id, kind, state, intent) {
   return {
@@ -327,6 +328,18 @@ function websiteAcmeOnlyHostnames(preview) {
   return Object.freeze([expectedHostname]);
 }
 
+function websiteMailDiscoverySocketPath(preview) {
+  const mailDomain = preview.plan?.mailDomain;
+  if (!mailDomain || mailDomain.managementMode !== 'local') return null;
+  const primaryDomain = preview.plan?.primaryDomain;
+  if (!primaryDomain || mailDomain.webDomainId !== primaryDomain.id
+    || mailDomain.domainName !== primaryDomain.primaryDomain
+    || preview.plan?.website?.serverId !== primaryDomain.serverId) {
+    throw new Error('Local mail discovery routing intent does not match the primary Website Domain');
+  }
+  return MAIL_DISCOVERY_SOCKET;
+}
+
 export function siteCreateProvisioningPlan(preview) {
   if (!preview || typeof preview !== 'object' || !preview.ids?.websiteId || !preview.operationId || !preview.plan?.website) {
     throw new Error('A valid site-create preview is required');
@@ -441,11 +454,13 @@ export function siteCreateProvisioningPlan(preview) {
 
   const aliases = websiteAliases(preview);
   const acmeOnlyHostnames = websiteAcmeOnlyHostnames(preview);
+  const mailDiscoverySocketPath = websiteMailDiscoverySocketPath(preview);
   steps.push(hostStep('nginx', 'nginx', {
     websiteId: preview.ids.websiteId,
     primaryDomain: preview.plan.primaryDomain?.primaryDomain,
     aliases,
     ...(acmeOnlyHostnames.length > 0 ? { acmeOnlyHostnames } : {}),
+    ...(mailDiscoverySocketPath ? { mailDiscoverySocketPath } : {}),
     targetType: runtimeType === 'node' ? 'passenger' : runtimeType === 'php' ? 'php' : preview.plan.primaryDomain?.targetType,
     target: runtimeType === 'node' || runtimeType === 'php' ? runtimeIntent : preview.plan.primaryDomain?.target,
   }));
@@ -526,4 +541,5 @@ export const siteCreateProvisioningInternals = Object.freeze({
   staticIntent,
   websiteAliases,
   websiteAcmeOnlyHostnames,
+  websiteMailDiscoverySocketPath,
 });
