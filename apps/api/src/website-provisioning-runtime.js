@@ -2,6 +2,7 @@ import { createWebsiteIdentityPathManager } from '@yunpanel/host-runtime';
 import { createWebsiteDnsZoneProvisioningHandler } from './website-dns-zone-provisioning-handler.js';
 import { createWebsiteDatabaseProvisioningHandler } from './website-database-provisioning-handler.js';
 import { createWebsiteDomainActivationProvisioningHandler } from './website-domain-activation-provisioning-handler.js';
+import { createWebsiteMailProvisioningHandler } from './website-mail-provisioning-handler.js';
 import { createWebsiteIsolationAuditService, WebsiteIsolationAuditError } from './website-isolation-audit.js';
 import { createWebsiteIsolationMigrationRegistry } from './website-isolation-migration-registry.js';
 import { createWebsiteIsolationMigrationRuntime } from './website-isolation-migration-runtime.js';
@@ -113,6 +114,7 @@ export function createWebsiteProvisioningRuntime({
   let passengerControlPlane = null;
   let sftpKeyLifecycle = null;
   let databaseControlPlane = null;
+  let mailControlPlane = null;
 
   function configureSftpKeys(dependencies = {}) {
     const nextService = dependencies.sftpKeyService;
@@ -360,6 +362,48 @@ export function createWebsiteProvisioningRuntime({
     return Object.freeze({ configured: true });
   }
 
+  function configureMailControlPlane(dependencies = {}) {
+    const {
+      jobRegistry: nextJobRegistry,
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailConfigurationService: nextMailConfigurationService,
+      waitForTerminalJob: nextWaitForTerminalJob,
+      waitForMailDomain: nextWaitForMailDomain,
+    } = dependencies;
+    if (!nextJobRegistry || !nextMailDomainRegistry || !nextDomainRegistry || !nextMailConfigurationService) {
+      throw new Error('Website managed-mail provisioning dependencies are required');
+    }
+    if (mailControlPlane) {
+      if (mailControlPlane.jobRegistry !== nextJobRegistry
+        || mailControlPlane.mailDomainRegistry !== nextMailDomainRegistry
+        || mailControlPlane.domainRegistry !== nextDomainRegistry
+        || mailControlPlane.mailConfigurationService !== nextMailConfigurationService
+        || mailControlPlane.waitForTerminalJob !== nextWaitForTerminalJob
+        || mailControlPlane.waitForMailDomain !== nextWaitForMailDomain) {
+        throw new Error('Website managed-mail provisioning dependencies cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.mail_config = createWebsiteMailProvisioningHandler({
+      jobRegistry: nextJobRegistry,
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailConfigurationService: nextMailConfigurationService,
+      ...(nextWaitForTerminalJob ? { waitForTerminalJob: nextWaitForTerminalJob } : {}),
+      ...(nextWaitForMailDomain ? { waitForMailDomain: nextWaitForMailDomain } : {}),
+    });
+    mailControlPlane = Object.freeze({
+      jobRegistry: nextJobRegistry,
+      mailDomainRegistry: nextMailDomainRegistry,
+      domainRegistry: nextDomainRegistry,
+      mailConfigurationService: nextMailConfigurationService,
+      waitForTerminalJob: nextWaitForTerminalJob,
+      waitForMailDomain: nextWaitForMailDomain,
+    });
+    return Object.freeze({ configured: true });
+  }
+
   if (domainRegistry) configureDomainControlPlane({ domainRegistry });
   if (sftpKeyService) configureSftpKeys({ sftpKeyService });
   if (applicationEnvironmentRegistry) configurePassengerEnvironment({ applicationEnvironmentRegistry });
@@ -398,6 +442,7 @@ export function createWebsiteProvisioningRuntime({
     configurePassengerEnvironment,
     configurePassengerControlPlane,
     configureDatabaseControlPlane,
+    configureMailControlPlane,
     init,
     get: (operationId) => registry.get(operationId),
     create: (plan) => registry.create(plan),
