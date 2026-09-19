@@ -242,6 +242,9 @@ function nginxSpec({ operation, intent, tls = null, httpsRedirect = false, canon
   if (!intent || typeof intent !== 'object' || Array.isArray(intent)
     || typeof intent.primaryDomain !== 'string'
     || !Array.isArray(intent.aliases)
+    || (intent.acmeOnlyHostnames !== undefined
+      && (!Array.isArray(intent.acmeOnlyHostnames)
+        || intent.acmeOnlyHostnames.some((hostname) => typeof hostname !== 'string' || !hostname)))
     || !['static', 'proxy', 'passenger', 'php'].includes(intent.targetType)) {
     throw new WebsiteProvisioningHandlerError(
       'website_nginx_intent_invalid',
@@ -292,6 +295,7 @@ function nginxSpec({ operation, intent, tls = null, httpsRedirect = false, canon
   return Object.freeze({
     primaryDomain: intent.primaryDomain,
     aliases: Object.freeze([...intent.aliases]),
+    acmeOnlyHostnames: Object.freeze([...(intent.acmeOnlyHostnames ?? [])]),
     targetType: intent.targetType,
     target,
     tls: tls === null ? null : Object.freeze({
