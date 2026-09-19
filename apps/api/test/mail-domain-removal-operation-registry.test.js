@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,10 +19,26 @@ const sourceUpdatedAt = '2026-09-19T08:00:00.000Z';
 const previewDigest = 'a'.repeat(64);
 const cleanupEvidenceDigest = 'b'.repeat(64);
 
+function removalPlan(managementMode) {
+  return {
+    version: 1,
+    mailDomainId,
+    mailboxes: [],
+    aliases: [],
+    quotas: [],
+    forwardings: [],
+    dkim: null,
+    mailData: managementMode === 'local'
+      ? { present: false, bytes: 0, snapshotSha256: 'd'.repeat(64) }
+      : null,
+  };
+}
+
 function preview({ managementMode = 'local', status = 'enabled', overrides = {} } = {}) {
   const removalMethod = managementMode === 'local'
     ? 'local_verified_data_finalize'
     : 'external_metadata_unlink';
+  const cleanupPlan = removalPlan(managementMode);
   return {
     version: 1,
     operation: 'mail_domain_remove',
@@ -36,6 +53,8 @@ function preview({ managementMode = 'local', status = 'enabled', overrides = {} 
     },
     parentOperationId,
     removalMethod,
+    cleanupPlan,
+    planDigest: createHash('sha256').update(JSON.stringify(cleanupPlan)).digest('hex'),
     readyToStart: true,
     blockers: [],
     previewDigest,
@@ -88,6 +107,8 @@ test('journal persists private confirmation with root-only modes and exposes bou
   assert.equal(created.status, 'pending');
   assert.equal(view.parentOperationId, parentOperationId);
   assert.equal(view.removalMethod, 'local_verified_data_finalize');
+  assert.equal(view.planDigest, created.planDigest);
+  assert.equal(Object.hasOwn(view, 'cleanupPlan'), false);
   assert.equal(view.recovery.retryable, true);
   assert.match(view.recovery.retryConfirmation, /^retry-mail-domain-remove:/);
   assert.equal(Object.hasOwn(view, 'confirmation'), false);
@@ -96,6 +117,7 @@ test('journal persists private confirmation with root-only modes and exposes bou
   assert.equal((await stat(filePath)).mode & 0o777, 0o600);
   const disk = JSON.parse(await readFile(filePath, 'utf8'));
   assert.equal(disk.operations[0].confirmation, preview().confirmation);
+  assert.deepEqual(disk.operations[0].cleanupPlan, preview().cleanupPlan);
 });
 
 test('enabled local lifecycle pins disable, cleanup, backup and data-delete evidence before removal', async () => {
@@ -289,6 +311,40 @@ test('duplicate parent intent is idempotent while drift and concurrent parent ow
   );
 });
 
+test('version one pending journal migrates fail-closed and safely recaptures a current cleanup plan', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-mail-domain-removal-v1-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'operations.json');
+  const initial = createRegistry({ filePath });
+  await initial.init();
+  const created = await initial.create(preview());
+  const legacy = JSON.parse(await readFile(filePath, 'utf8'));
+  legacy.version = 1;
+  delete legacy.operations[0].planDigest;
+  delete legacy.operations[0].cleanupPlan;
+  await writeFile(filePath, JSON.stringify(legacy));
+
+  const restarted = createMailDomainRemovalOperationRegistry({ filePath });
+  await restarted.init();
+  const [migrated] = await restarted.listIncomplete();
+  assert.equal(migrated.id, created.id);
+  assert.equal(migrated.cleanupPlan, null);
+  assert.equal(migrated.planDigest, null);
+  assert.equal(
+    mailDomainRemovalOperationPublicView(migrated).recovery.reason,
+    'mail_domain_removal_plan_missing',
+  );
+  const migratedDisk = JSON.parse(await readFile(filePath, 'utf8'));
+  assert.equal(migratedDisk.version, 2);
+  assert.equal(migratedDisk.operations[0].cleanupPlan, null);
+
+  const recaptured = await restarted.create(preview());
+  assert.equal(recaptured.id, created.id);
+  assert.deepEqual(recaptured.cleanupPlan, preview().cleanupPlan);
+  assert.equal(recaptured.planDigest, preview().planDigest);
+  assert.notEqual(recaptured.updatedAt, migrated.updatedAt);
+});
+
 test('tampered persisted phase evidence fails closed on restart', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-mail-domain-removal-tamper-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -298,6 +354,25 @@ test('tampered persisted phase evidence fails closed on restart', async (t) => {
   await registry.create(preview());
   const disk = JSON.parse(await readFile(filePath, 'utf8'));
   disk.operations[0].backupId = 'foreign-backup';
+  await writeFile(filePath, JSON.stringify(disk));
+
+  const restarted = createMailDomainRemovalOperationRegistry({ filePath });
+  await assert.rejects(
+    restarted.init(),
+    (error) => error instanceof MailDomainRemovalOperationRegistryError
+      && error.code === 'mail_domain_removal_operation_state_invalid',
+  );
+});
+
+test('tampered private cleanup plan fails closed on restart', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-mail-domain-removal-plan-tamper-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'operations.json');
+  const registry = createRegistry({ filePath });
+  await registry.init();
+  await registry.create(preview());
+  const disk = JSON.parse(await readFile(filePath, 'utf8'));
+  disk.operations[0].cleanupPlan.mailData.snapshotSha256 = 'f'.repeat(64);
   await writeFile(filePath, JSON.stringify(disk));
 
   const restarted = createMailDomainRemovalOperationRegistry({ filePath });

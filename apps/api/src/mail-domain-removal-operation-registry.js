@@ -1,9 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { normalizeMailboxAddress } from '@yunpanel/config-templates';
 import { normalizeDomainSet } from '@yunpanel/shared';
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const PHASES = new Set(['pending', 'disabling', 'cleaning', 'deleting_data', 'finalizing', 'removed']);
 const STATUSES = new Set([...PHASES, 'blocked', 'failed']);
 const INTERRUPTED_STATUSES = new Set(['disabling', 'cleaning', 'deleting_data', 'finalizing']);
@@ -14,6 +15,7 @@ const EXTERNAL_STATUSES = new Set(['unverified', 'ready', 'degraded']);
 const EVIDENCE_FIELDS = Object.freeze([
   'disableJobId', 'finalRevision', 'cleanupEvidenceDigest', 'dataDeleteJobId', 'backupId',
 ]);
+const MAX_PLAN_ITEMS = 10_000;
 
 export class MailDomainRemovalOperationRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -46,6 +48,10 @@ function safeDigest(value, field) {
   return value;
 }
 
+function digest(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
 function optionalDigest(value, field) {
   return value === null ? null : safeDigest(value, field);
 }
@@ -62,6 +68,153 @@ function canonicalDomainName(value) {
   catch { throw invalid('domainName is invalid'); }
   if (canonical !== value) throw invalid('domainName is not canonical');
   return canonical;
+}
+
+function canonicalMailboxAddress(value, domainName, field) {
+  let normalized;
+  try { normalized = normalizeMailboxAddress(value); }
+  catch { throw invalid(`${field} is invalid`); }
+  if (normalized.address !== value || normalized.domain !== domainName) {
+    throw invalid(`${field} does not belong to the Mail Domain`);
+  }
+  return normalized.address;
+}
+
+function planItems(values, normalize, identity, label) {
+  if (!Array.isArray(values) || values.length > MAX_PLAN_ITEMS) {
+    throw invalid(`${label} cleanup plan is invalid`);
+  }
+  const normalized = values.map(normalize).sort((left, right) => identity(left).localeCompare(identity(right)));
+  if (new Set(normalized.map(identity)).size !== normalized.length) {
+    throw invalid(`${label} cleanup plan identities are not unique`);
+  }
+  return Object.freeze(normalized);
+}
+
+function cleanupPlan(value, operation) {
+  if (value === null) return null;
+  const fields = new Set([
+    'version', 'mailDomainId', 'mailboxes', 'aliases', 'quotas', 'forwardings', 'dkim', 'mailData',
+  ]);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.size
+    || Object.keys(value).some((field) => !fields.has(field))
+    || value.version !== 1 || value.mailDomainId !== operation.mailDomainId) {
+    throw invalid('Mail Domain cleanup plan is invalid');
+  }
+  const mailboxes = planItems(value.mailboxes, (mailbox) => {
+    const mailboxFields = new Set(['id', 'address', 'enabled', 'revision', 'updatedAt']);
+    if (!mailbox || typeof mailbox !== 'object' || Array.isArray(mailbox)
+      || Object.keys(mailbox).length !== mailboxFields.size
+      || Object.keys(mailbox).some((field) => !mailboxFields.has(field))
+      || typeof mailbox.enabled !== 'boolean'
+      || !Number.isSafeInteger(mailbox.revision) || mailbox.revision < 1) {
+      throw invalid('Mailbox cleanup evidence is invalid');
+    }
+    return Object.freeze({
+      id: safeId(mailbox.id, 'mailboxId'),
+      address: canonicalMailboxAddress(mailbox.address, operation.domainName, 'mailboxAddress'),
+      enabled: mailbox.enabled,
+      revision: mailbox.revision,
+      updatedAt: timestamp(mailbox.updatedAt, 'mailboxUpdatedAt'),
+    });
+  }, (mailbox) => mailbox.id, 'Mailbox');
+  const mailboxIds = new Set(mailboxes.map((mailbox) => mailbox.id));
+  const aliases = planItems(value.aliases, (alias) => {
+    const aliasFields = new Set(['id', 'source', 'enabled', 'revision', 'updatedAt']);
+    if (!alias || typeof alias !== 'object' || Array.isArray(alias)
+      || Object.keys(alias).length !== aliasFields.size
+      || Object.keys(alias).some((field) => !aliasFields.has(field))
+      || typeof alias.enabled !== 'boolean'
+      || !Number.isSafeInteger(alias.revision) || alias.revision < 1) {
+      throw invalid('Mail alias cleanup evidence is invalid');
+    }
+    return Object.freeze({
+      id: safeId(alias.id, 'mailAliasId'),
+      source: canonicalMailboxAddress(alias.source, operation.domainName, 'mailAliasSource'),
+      enabled: alias.enabled,
+      revision: alias.revision,
+      updatedAt: timestamp(alias.updatedAt, 'mailAliasUpdatedAt'),
+    });
+  }, (alias) => alias.id, 'Mail alias');
+  const policy = (label) => (entry) => {
+    const policyFields = new Set(['mailboxId', 'revision', 'updatedAt']);
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || Object.keys(entry).length !== policyFields.size
+      || Object.keys(entry).some((field) => !policyFields.has(field))
+      || !mailboxIds.has(entry.mailboxId)
+      || !Number.isSafeInteger(entry.revision) || entry.revision < 1) {
+      throw invalid(`${label} cleanup evidence is invalid`);
+    }
+    return Object.freeze({
+      mailboxId: safeId(entry.mailboxId, 'mailboxId'),
+      revision: entry.revision,
+      updatedAt: timestamp(entry.updatedAt, `${label}UpdatedAt`),
+    });
+  };
+  const quotas = planItems(value.quotas, policy('mailboxQuota'), (entry) => entry.mailboxId, 'Mailbox quota');
+  const forwardings = planItems(
+    value.forwardings,
+    policy('mailboxForwarding'),
+    (entry) => entry.mailboxId,
+    'Mailbox forwarding',
+  );
+  let dkim = null;
+  if (value.dkim !== null) {
+    const dkimFields = new Set([
+      'mailDomainId', 'domainName', 'selector', 'revision', 'updatedAt',
+    ]);
+    if (!value.dkim || typeof value.dkim !== 'object' || Array.isArray(value.dkim)
+      || Object.keys(value.dkim).length !== dkimFields.size
+      || Object.keys(value.dkim).some((field) => !dkimFields.has(field))
+      || value.dkim.mailDomainId !== operation.mailDomainId
+      || value.dkim.domainName !== operation.domainName
+      || typeof value.dkim.selector !== 'string' || !SAFE_ID.test(value.dkim.selector)
+      || !Number.isSafeInteger(value.dkim.revision) || value.dkim.revision < 1) {
+      throw invalid('DKIM cleanup evidence is invalid');
+    }
+    dkim = Object.freeze({
+      mailDomainId: value.dkim.mailDomainId,
+      domainName: value.dkim.domainName,
+      selector: value.dkim.selector,
+      revision: value.dkim.revision,
+      updatedAt: timestamp(value.dkim.updatedAt, 'mailDkimUpdatedAt'),
+    });
+  }
+  let mailData = null;
+  if (value.mailData !== null) {
+    const dataFields = new Set(['present', 'bytes', 'snapshotSha256']);
+    if (!value.mailData || typeof value.mailData !== 'object' || Array.isArray(value.mailData)
+      || Object.keys(value.mailData).length !== dataFields.size
+      || Object.keys(value.mailData).some((field) => !dataFields.has(field))
+      || typeof value.mailData.present !== 'boolean'
+      || !Number.isSafeInteger(value.mailData.bytes) || value.mailData.bytes < 0) {
+      throw invalid('Mail data cleanup evidence is invalid');
+    }
+    mailData = Object.freeze({
+      present: value.mailData.present,
+      bytes: value.mailData.bytes,
+      snapshotSha256: safeDigest(value.mailData.snapshotSha256, 'mailDataSnapshotSha256'),
+    });
+  }
+  if (operation.managementMode === 'local' && mailData === null) {
+    throw invalid('Local Mail Domain cleanup plan lacks mail data evidence');
+  }
+  if (operation.managementMode === 'external'
+    && (mailboxes.length > 0 || aliases.length > 0 || quotas.length > 0
+      || forwardings.length > 0 || dkim !== null || mailData !== null)) {
+    throw invalid('External Mail Domain cleanup plan contains local dependencies');
+  }
+  return Object.freeze({
+    version: 1,
+    mailDomainId: operation.mailDomainId,
+    mailboxes,
+    aliases,
+    quotas,
+    forwardings,
+    dkim,
+    mailData,
+  });
 }
 
 function safeError(value) {
@@ -209,7 +362,8 @@ function persistedOperation(value) {
   const fields = new Set([
     'id', 'parentOperationId', 'mailDomainId', 'webDomainId', 'domainName', 'managementMode',
     'sourceStatus', 'sourceRevision', 'sourceUpdatedAt', 'removalMethod', 'previewDigest',
-    'confirmation', 'status', 'resumeStatus', ...EVIDENCE_FIELDS, 'result', 'error',
+    'confirmation', 'planDigest', 'cleanupPlan', 'status', 'resumeStatus',
+    ...EVIDENCE_FIELDS, 'result', 'error',
     'createdAt', 'updatedAt',
   ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -243,6 +397,8 @@ function persistedOperation(value) {
     removalMethod: value.removalMethod,
     previewDigest: safeDigest(value.previewDigest, 'previewDigest'),
     confirmation: value.confirmation,
+    planDigest: value.planDigest === null ? null : safeDigest(value.planDigest, 'planDigest'),
+    cleanupPlan: null,
     status: value.status,
     resumeStatus: value.resumeStatus,
     ...normalizedEvidence,
@@ -251,6 +407,11 @@ function persistedOperation(value) {
     createdAt: timestamp(value.createdAt, 'createdAt'),
     updatedAt: timestamp(value.updatedAt, 'updatedAt'),
   };
+  operation.cleanupPlan = cleanupPlan(value.cleanupPlan, operation);
+  if ((operation.planDigest === null) !== (operation.cleanupPlan === null)
+    || (operation.cleanupPlan !== null && digest(operation.cleanupPlan) !== operation.planDigest)) {
+    throw invalid('Mail Domain cleanup plan digest is inconsistent');
+  }
   if (Date.parse(operation.updatedAt) < Date.parse(operation.createdAt)
     || (['blocked', 'failed'].includes(operation.status)) !== (operation.resumeStatus !== null)
     || (['blocked', 'failed'].includes(operation.status)) !== (operation.error !== null)
@@ -275,7 +436,8 @@ function operationFromCapture(capture, now, idFactory) {
     || capture.blockers.length !== 0 || capture.sideEffects !== false
     || !capture.mailDomain || typeof capture.mailDomain !== 'object'
     || typeof capture.parentOperationId !== 'string'
-    || typeof capture.previewDigest !== 'string'
+    || typeof capture.previewDigest !== 'string' || typeof capture.planDigest !== 'string'
+    || !capture.cleanupPlan || typeof capture.cleanupPlan !== 'object'
     || typeof capture.confirmation !== 'string') {
     throw new MailDomainRemovalOperationRegistryError(
       'mail_domain_removal_operation_capture_invalid',
@@ -297,6 +459,8 @@ function operationFromCapture(capture, now, idFactory) {
     removalMethod: capture.removalMethod,
     previewDigest: capture.previewDigest,
     confirmation: capture.confirmation,
+    planDigest: capture.planDigest,
+    cleanupPlan: capture.cleanupPlan,
     status: 'pending',
     resumeStatus: null,
     ...emptyEvidence(),
@@ -322,14 +486,20 @@ export function mailDomainRemovalOperationPublicView(operation) {
     sourceUpdatedAt: operation.sourceUpdatedAt,
     removalMethod: operation.removalMethod,
     previewDigest: operation.previewDigest,
+    planDigest: operation.planDigest,
     status: operation.status,
     result: operation.result,
     error: operation.error,
     recovery: Object.freeze({
       required: retryable,
-      automaticReplayBlocked: INTERRUPTED_STATUSES.has(operation.status),
-      reason: INTERRUPTED_STATUSES.has(operation.status)
-        ? `mail_domain_removal_interrupted_${operation.status}`
+      automaticReplayBlocked: retryable && (operation.cleanupPlan === null
+        || INTERRUPTED_STATUSES.has(operation.status)),
+      reason: retryable
+        ? operation.cleanupPlan === null
+          ? 'mail_domain_removal_plan_missing'
+          : INTERRUPTED_STATUSES.has(operation.status)
+            ? `mail_domain_removal_interrupted_${operation.status}`
+            : null
         : null,
       retryable,
       retryConfirmation: retryable
@@ -376,16 +546,21 @@ export function createMailDomainRemovalOperationRegistry({
     if (initialized) return;
     try {
       const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-      if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.operations)
+      if (![1, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.operations)
         || Object.keys(parsed).length !== 2
         || Object.keys(parsed).some((field) => !['version', 'operations'].includes(field))) {
         throw invalid('Mail Domain removal operation store is invalid');
       }
-      const operations = parsed.operations.map(persistedOperation);
+      const operations = parsed.operations.map((operation) => persistedOperation(
+        parsed.version === 1
+          ? { ...operation, planDigest: null, cleanupPlan: null }
+          : operation,
+      ));
       if (new Set(operations.map((operation) => operation.id)).size !== operations.length) {
         throw invalid('Mail Domain removal operation IDs are not unique');
       }
       state = { version: STORE_VERSION, operations };
+      if (parsed.version !== STORE_VERSION) await persist();
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
       await persist();
@@ -407,8 +582,28 @@ export function createMailDomainRemovalOperationRegistry({
     if (sameParent) {
       const sameIntent = [
         'webDomainId', 'domainName', 'managementMode', 'sourceStatus', 'sourceRevision',
-        'sourceUpdatedAt', 'removalMethod', 'previewDigest', 'confirmation',
+        'sourceUpdatedAt', 'removalMethod', 'previewDigest', 'confirmation', 'planDigest',
       ].every((field) => sameParent[field] === candidate[field]);
+      if (sameIntent) return sameParent;
+      const sameSource = [
+        'webDomainId', 'domainName', 'managementMode', 'sourceStatus', 'sourceRevision',
+        'sourceUpdatedAt', 'removalMethod',
+      ].every((field) => sameParent[field] === candidate[field]);
+      const safeLegacyRecapture = sameParent.cleanupPlan === null
+        && sameParent.planDigest === null
+        && sameParent.status === 'pending'
+        && sameParent.resumeStatus === null
+        && EVIDENCE_FIELDS.every((field) => sameParent[field] === null)
+        && sameParent.result === null && sameParent.error === null
+        && sameSource;
+      if (safeLegacyRecapture) {
+        return mutate(sameParent, {
+          previewDigest: candidate.previewDigest,
+          confirmation: candidate.confirmation,
+          planDigest: candidate.planDigest,
+          cleanupPlan: candidate.cleanupPlan,
+        });
+      }
       if (!sameIntent) {
         throw new MailDomainRemovalOperationRegistryError(
           'mail_domain_removal_operation_intent_conflict',
@@ -416,7 +611,6 @@ export function createMailDomainRemovalOperationRegistry({
           409,
         );
       }
-      return sameParent;
     }
     const active = state.operations.find((operation) => (
       operation.mailDomainId === candidate.mailDomainId && operation.status !== 'removed'

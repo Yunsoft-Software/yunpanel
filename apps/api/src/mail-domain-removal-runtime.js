@@ -53,6 +53,10 @@ function exactPreview(input, preview) {
     && typeof preview.previewDigest === 'string'
     && SHA256_PATTERN.test(preview.previewDigest)
     && preview.previewDigest === input.previewDigest
+    && typeof preview.planDigest === 'string'
+    && SHA256_PATTERN.test(preview.planDigest)
+    && preview.cleanupPlan && typeof preview.cleanupPlan === 'object'
+    && !Array.isArray(preview.cleanupPlan)
     && typeof preview.confirmation === 'string'
     && preview.confirmation === input.confirmation);
 }
@@ -183,6 +187,17 @@ export function createMailDomainRemovalRuntime({
   }
 
   async function execute(operation) {
+    if (operation.planDigest === null || operation.cleanupPlan === null) {
+      try {
+        return await registry.block(operation.id, {
+          expectedUpdatedAt: operation.updatedAt,
+          error: {
+            code: 'mail_domain_removal_plan_missing',
+            message: 'Mail Domain removal requires a newly captured cleanup plan',
+          },
+        });
+      } catch (registryError) { throw mapped(registryError); }
+    }
     let outcome;
     try { outcome = await stepExecutor(operation); }
     catch (error) {
@@ -278,7 +293,8 @@ export function createMailDomainRemovalRuntime({
     catch (error) { throw mapped(error); }
     if (operation.parentOperationId !== parentOperationId
       || operation.mailDomainId !== mailDomainId
-      || operation.previewDigest !== previewDigest) {
+      || operation.previewDigest !== previewDigest
+      || operation.planDigest !== current.planDigest) {
       throw new MailDomainRemovalRuntimeError(
         'mail_domain_removal_operation_drift',
         'Mail Domain removal journal does not match the approved preview',
@@ -348,6 +364,37 @@ export function createMailDomainRemovalRuntime({
     catch (error) { throw mapped(error); }
     const recovery = [];
     for (const operation of incomplete) {
+      if (operation.cleanupPlan === null || operation.planDigest === null) {
+        let blocked = operation;
+        if (!['blocked', 'failed'].includes(operation.status)) {
+          try {
+            blocked = await registry.block(operation.id, {
+              expectedUpdatedAt: operation.updatedAt,
+              error: {
+                code: 'mail_domain_removal_plan_missing',
+                message: 'Mail Domain removal requires a newly captured cleanup plan',
+              },
+            });
+          } catch (error) {
+            recovery.push(Object.freeze({
+              operationId: operation.id,
+              reconciled: false,
+              error: safeFailure(
+                error,
+                'mail_domain_removal_recovery_pending',
+                'Mail Domain removal recovery remains pending',
+              ),
+            }));
+            continue;
+          }
+        }
+        recovery.push(Object.freeze({
+          operationId: blocked.id,
+          reconciled: false,
+          operation: mailDomainRemovalOperationPublicView(blocked),
+        }));
+        continue;
+      }
       if (!INTERRUPTED_STATUSES.has(operation.status)) {
         recovery.push(Object.freeze({
           operationId: operation.id,

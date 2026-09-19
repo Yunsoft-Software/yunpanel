@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import { createMailDomainRemovalOperationRegistry } from '../src/mail-domain-removal-operation-registry.js';
@@ -14,7 +15,23 @@ const webDomainId = '42345678-1234-4234-8234-123456789012';
 const previewDigest = 'a'.repeat(64);
 const cleanupEvidenceDigest = 'b'.repeat(64);
 
+function removalPlan(managementMode) {
+  return {
+    version: 1,
+    mailDomainId,
+    mailboxes: [],
+    aliases: [],
+    quotas: [],
+    forwardings: [],
+    dkim: null,
+    mailData: managementMode === 'local'
+      ? { present: false, bytes: 0, snapshotSha256: 'd'.repeat(64) }
+      : null,
+  };
+}
+
 function removalPreview({ managementMode = 'local', status = 'enabled', overrides = {} } = {}) {
+  const cleanupPlan = removalPlan(managementMode);
   return {
     version: 1,
     operation: 'mail_domain_remove',
@@ -31,6 +48,8 @@ function removalPreview({ managementMode = 'local', status = 'enabled', override
     removalMethod: managementMode === 'local'
       ? 'local_verified_data_finalize'
       : 'external_metadata_unlink',
+    cleanupPlan,
+    planDigest: createHash('sha256').update(JSON.stringify(cleanupPlan)).digest('hex'),
     readyToStart: true,
     blockers: [],
     previewDigest,
@@ -262,6 +281,28 @@ test('pending child survives startup without inspection or implicit execution', 
   const [recovery] = await state.runtime.init();
   assert.equal(recovery.reconciled, false);
   assert.equal(recovery.operation.status, 'pending');
+  assert.deepEqual(state.counts(), { executorCalls: 0, inspectorCalls: 0 });
+});
+
+test('legacy child without a pinned cleanup plan is blocked before executor or inspector', async () => {
+  const operationRegistry = registry();
+  const current = await operationRegistry.create(removalPreview());
+  const legacyRegistry = {
+    ...operationRegistry,
+    async listIncomplete() {
+      return [{ ...current, planDigest: null, cleanupPlan: null }];
+    },
+  };
+  const state = runtimeFixture({
+    operationRegistry: legacyRegistry,
+    executor: async () => { throw new Error('unexpected executor'); },
+    inspector: async () => { throw new Error('unexpected inspector'); },
+  });
+
+  const [recovery] = await state.runtime.init();
+  assert.equal(recovery.reconciled, false);
+  assert.equal(recovery.operation.status, 'blocked');
+  assert.equal(recovery.operation.error.code, 'mail_domain_removal_plan_missing');
   assert.deepEqual(state.counts(), { executorCalls: 0, inspectorCalls: 0 });
 });
 
