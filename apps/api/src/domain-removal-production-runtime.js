@@ -1,3 +1,4 @@
+import { createDomainRemovalBackupImpactProvider } from './domain-removal-backup-impact.js';
 import { createDomainRemovalOperationRegistry } from './domain-removal-operation-registry.js';
 import { createDomainRemovalPreview } from './domain-removal-plan.js';
 import { createDomainRemovalRuntime } from './domain-removal-runtime.js';
@@ -24,6 +25,8 @@ export function createDomainRemovalProductionRuntime({
   mailDomainRegistry,
   mailboxRegistry,
   dockerWorkloadRegistry,
+  backupOperationRegistry,
+  databaseBindingRegistry,
   domainSuspensionRuntime,
   dnsZoneRetirementService = null,
   dnsZoneRetirementRuntime = null,
@@ -41,6 +44,8 @@ export function createDomainRemovalProductionRuntime({
     [mailDomainRegistry, 'listMailDomains'],
     [mailboxRegistry, 'listMailboxes'],
     [dockerWorkloadRegistry, 'getWorkload'],
+    [backupOperationRegistry, 'listOperations'],
+    [databaseBindingRegistry, 'listBindings'],
   ];
   if (typeof filePath !== 'string' || !filePath
     || typeof localServerId !== 'string' || !localServerId
@@ -74,6 +79,15 @@ export function createDomainRemovalProductionRuntime({
     }));
   }
 
+  const backupImpactProvider = createDomainRemovalBackupImpactProvider({
+    backupOperationRegistry,
+    domainRegistry,
+    websiteRegistry,
+    databaseBindingRegistry,
+    mailDomainRegistry,
+    localServerId,
+  });
+
   async function domainPreview({ domainId } = {}) {
     const domain = await domainRegistry.getDomain(domainId);
     if (!domain || domain.serverId !== localServerId) {
@@ -103,6 +117,7 @@ export function createDomainRemovalProductionRuntime({
           if (!workload) throw new Error('Docker workload reference is unavailable');
           return [{ id: workload.id, state: workload.state }];
         },
+        backups: backupImpactProvider,
         mailboxes: async ({ domainIds }) => {
           const impactedDomains = new Set(domainIds);
           const mailDomainIds = new Set((await mailDomainRegistry.listMailDomains())
