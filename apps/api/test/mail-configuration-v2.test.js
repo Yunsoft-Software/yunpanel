@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   enableManagedMailSubmission,
+  mailSqlTemplatePolicy,
   previewManagedMailEmptyConfiguration,
   secureManagedMailPreview,
 } from '@yunpanel/config-templates';
@@ -45,6 +46,10 @@ test('managed mail enable preview stays secret-free and requires a postmaster ma
   assert.deepEqual(preview.domains, ['example.com']);
   assert.deepEqual(preview.blockers, []);
   assert.doesNotMatch(JSON.stringify(preview), /argon2|passwordHash/i);
+  assert.equal(preview.configuration.requirements.includes('mail_sqlite'), true);
+  assert.equal(preview.configuration.artifactDigests.some(
+    (artifact) => artifact.path === mailSqlTemplatePolicy.seedPath && artifact.sensitive === true,
+  ), true);
 
   const noMailbox = fixture({ accounts: [] });
   const blocked = await noMailbox.service.previewTransition({ mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'enabled' });
@@ -76,7 +81,7 @@ test('enabled aliases enter Postfix preview and stale an older apply digest when
   assert.equal(preview.configuration.counts.aliases, 1);
   assert.equal(preview.configuration.counts.forwardings, 0);
   const aliasMap = preview.configuration.artifactDigests.find(
-    (artifact) => artifact.path === '/etc/yunpanel/mail/postfix/virtual-aliases',
+    (artifact) => artifact.path === mailSqlTemplatePolicy.postfixAliasPath,
   );
   assert.match(aliasMap.sha256, /^[a-f0-9]{64}$/);
 
@@ -117,8 +122,10 @@ test('last enabled managed mail domain disables through a zero-account private b
   });
   assert.equal(bundle.preview.sha256, preview.configurationSha256);
   assert.equal(bundle.sensitiveArtifacts.length, 1);
-  assert.equal(bundle.sensitiveArtifacts[0].path, '/etc/yunpanel/mail/dovecot/users');
-  assert.equal(bundle.sensitiveArtifacts[0].content, '');
+  assert.equal(bundle.sensitiveArtifacts[0].path, mailSqlTemplatePolicy.seedPath);
+  assert.match(bundle.sensitiveArtifacts[0].content, /DELETE FROM virtual_mailboxes;/);
+  assert.match(bundle.sensitiveArtifacts[0].content, /DELETE FROM virtual_domains;/);
+  assert.doesNotMatch(bundle.sensitiveArtifacts[0].content, /INSERT INTO virtual_mailboxes/);
   const dovecotMail = bundle.preview.artifacts.find((artifact) => artifact.path === '/etc/dovecot/conf.d/99-yunpanel-mail.conf');
   assert.match(dovecotMail.content, /^protocols = imap$/m);
   assert.doesNotMatch(dovecotMail.content, /lmtp|postmaster_address|dovecot-lmtp/i);
@@ -145,7 +152,9 @@ test('protected current-state materialization binds exact revision, status and c
     status: 'enabled',
   });
   assert.equal(current.preview.sha256, publicPreview.configurationSha256);
+  assert.equal(current.sensitiveArtifacts[0].path, mailSqlTemplatePolicy.seedPath);
   assert.match(current.sensitiveArtifacts[0].content, /argon2id/);
+  assert.match(current.sensitiveArtifacts[0].content, /INSERT INTO virtual_mailboxes/);
 
   await assert.rejects(
     enabled.service.materializeCurrent({ ...currentInput, status: 'disabled' }, {
@@ -178,4 +187,5 @@ test('disabled current-state materialization produces the exact protected empty 
     path: '/etc/yunpanel/mail/dovecot/users',
     content: '',
   }]);
+  assert.equal(current.preview.requirements.includes('mail_sqlite'), false);
 });
