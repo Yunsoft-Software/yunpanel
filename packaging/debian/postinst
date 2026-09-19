@@ -7,6 +7,13 @@ fi
 if ! id yunpanel >/dev/null 2>&1; then
   adduser --system --ingroup yunpanel --home /var/lib/yunpanel --no-create-home yunpanel >/dev/null
 fi
+if ! getent group vmail >/dev/null; then
+  addgroup --system vmail >/dev/null
+fi
+if ! id vmail >/dev/null 2>&1; then
+  adduser --system --ingroup vmail --home /var/lib/yunpanel/mail --no-create-home --shell /usr/sbin/nologin vmail >/dev/null
+fi
+
 if ! getent group yunpanel-roundcube >/dev/null; then
   addgroup --system yunpanel-roundcube >/dev/null
 fi
@@ -36,6 +43,7 @@ if id yunpanel >/dev/null 2>&1; then
 fi
 
 install -d -o yunpanel -g yunpanel -m 0700 /var/lib/yunpanel/control-plane
+install -d -o vmail -g vmail -m 0750 /var/lib/yunpanel/mail
 install -d -o root -g root -m 0700 /var/lib/yunpanel/agent
 install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel/roundcube
 install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel/roundcube/tmp
