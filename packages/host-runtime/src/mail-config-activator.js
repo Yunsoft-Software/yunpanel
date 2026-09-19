@@ -15,6 +15,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import {
   mailForwardingTemplatePolicy,
+  mailSqlTemplatePolicy,
   mailSrsTemplatePolicy,
   mailSubmissionTemplatePolicy,
   previewManagedMailApplyPlan,
@@ -268,7 +269,7 @@ export function createMailConfigActivator({
     }
   }
 
-  async function replaceManagedArtifacts(stage, planSha256, onMutation, vmailGid) {
+  async function replaceManagedArtifacts(stage, planSha256, onMutation, vmailGid, postfixGid) {
     const stageDirectory = configManager.stageDirectory(planSha256);
     for (const artifact of stage.artifacts) {
       const content = await readStagedArtifact(stageDirectory, artifact);
@@ -297,7 +298,11 @@ export function createMailConfigActivator({
         await atomicReplace(artifact.targetPath, content, {
           mode: artifact.mode,
           uid: ROOT_UID,
-          gid: artifact.targetPath === mailForwardingTemplatePolicy.sievePath ? vmailGid : ROOT_GID,
+          gid: artifact.targetPath === mailForwardingTemplatePolicy.sievePath
+            ? vmailGid
+            : artifact.targetPath.startsWith(mailSqlTemplatePolicy.postfixSqlDirectory + '/')
+              ? postfixGid
+              : ROOT_GID,
         });
       } catch {
         throw activationError('mail_live_replace_failed', 'Managed mail configuration could not be replaced');
@@ -394,6 +399,54 @@ export function createMailConfigActivator({
     }
   }
 
+  async function secureAndVerifySqlDatabase(plan, postfixIdentity) {
+    if (plan.sql?.required !== true) return;
+    const databasePath = mailSqlTemplatePolicy.databasePath;
+    try {
+      let metadata = await lstatFn(databasePath);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('unsafe sqlite database');
+      await chownFn(databasePath, ROOT_UID, postfixIdentity.gid);
+      await chmodFn(databasePath, mailSqlTemplatePolicy.databaseMode);
+      metadata = await lstatFn(databasePath);
+      if (!metadata.isFile() || metadata.isSymbolicLink()
+        || metadata.uid !== ROOT_UID || metadata.gid !== postfixIdentity.gid
+        || (metadata.mode & 0o7777) !== mailSqlTemplatePolicy.databaseMode) {
+        throw new Error('sqlite database metadata mismatch');
+      }
+    } catch {
+      throw activationError(
+        'mail_sql_database_invalid',
+        'Managed virtual-mail SQLite database is unavailable or unsafe',
+      );
+    }
+
+    let quickCheck;
+    let stateDigest;
+    try {
+      quickCheck = boundedOutput(await run(
+        '/usr/bin/sqlite3',
+        [databasePath, 'PRAGMA quick_check;'],
+        { timeout: 10_000, maxBuffer: MAX_OUTPUT },
+      ));
+      stateDigest = boundedOutput(await run(
+        '/usr/bin/sqlite3',
+        [databasePath, "SELECT value FROM yunpanel_meta WHERE key='state_sha256';"],
+        { timeout: 10_000, maxBuffer: MAX_OUTPUT },
+      ));
+    } catch {
+      throw activationError(
+        'mail_sql_database_verify_failed',
+        'Managed virtual-mail SQLite database could not be verified',
+      );
+    }
+    if (quickCheck !== 'ok' || stateDigest !== plan.sql.stateSha256) {
+      throw activationError(
+        'mail_sql_database_state_mismatch',
+        'Managed virtual-mail SQLite database does not match the requested state',
+      );
+    }
+  }
+
   async function assertSubmissionSocketSafe(postfixIdentity) {
     try {
       const metadata = await lstatFn(mailSubmissionTemplatePolicy.dovecotAuthSocket);
@@ -411,11 +464,17 @@ export function createMailConfigActivator({
     for (const command of plan.stages.compile) {
       if (command.file === '/usr/bin/sievec') {
         await runCommand(command, 'mail_sieve_compile_failed', 'Managed mailbox forwarding script compilation failed');
+      } else if (command.file === '/usr/bin/sqlite3') {
+        await runCommand(command, 'mail_sql_seed_apply_failed', 'Managed virtual-mail SQLite state could not be applied');
       } else {
         await runCommand(command, 'mail_postmap_failed', 'Postfix managed map compilation failed');
       }
     }
-    await assertCompiledMapsSafe();
+    if (plan.sql?.required === true) {
+      await secureAndVerifySqlDatabase(plan, postfixIdentity);
+    } else {
+      await assertCompiledMapsSafe();
+    }
     await secureCompiledSieve(vmailGid);
     for (const command of plan.stages.configurePostfix) {
       await runCommand(command, 'mail_postconf_failed', 'Postfix managed parameter update failed');
@@ -781,7 +840,13 @@ export function createMailConfigActivator({
     const markMutation = () => { mutationStarted = true; };
     try {
       await createManagedDirectories(backup, markMutation);
-      await replaceManagedArtifacts(stage, plan.sha256, markMutation, vmailIdentity.gid);
+      await replaceManagedArtifacts(
+        stage,
+        plan.sha256,
+        markMutation,
+        vmailIdentity.gid,
+        postfixIdentity.gid,
+      );
       await runApplyCommands(plan, vmailIdentity.gid, postfixIdentity);
       const finalReadiness = await readinessInspector.inspect(preview, { phase: 'post' });
       if (!finalReadiness.ready || finalReadiness.previewSha256 !== preview.sha256) {
@@ -844,5 +909,6 @@ export const mailConfigActivatorInternals = Object.freeze({
   newManagedDirectoryMode: NEW_MANAGED_DIRECTORY_MODE,
   sieveSharedMode: SIEVE_SHARED_MODE,
   submissionSocketMode: SUBMISSION_SOCKET_MODE,
+  sqlDatabaseMode: mailSqlTemplatePolicy.databaseMode,
   systemctlPath: SYSTEMCTL,
 });
