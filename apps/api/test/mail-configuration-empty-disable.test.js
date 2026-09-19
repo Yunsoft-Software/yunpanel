@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mailSubmissionTemplatePolicy } from '@yunpanel/config-templates';
+import { mailSqlTemplatePolicy, mailSubmissionTemplatePolicy } from '@yunpanel/config-templates';
 import { createMailConfigurationService } from '../src/mail-configuration.js';
 
 const accountHash = ['$argon2id', 'v=19', 'm=65536,t=3,p=1', Buffer.alloc(16, 5).toString('base64').replace(/=+$/, ''), Buffer.alloc(32, 6).toString('base64').replace(/=+$/, '')].join('$');
@@ -23,9 +23,14 @@ test('disabling the only enabled local mail domain keeps deterministic submissio
   assert.equal(preview.readyToApply, true);
   assert.equal(preview.configuration !== null, true);
   assert.deepEqual(preview.blockers, []);
-  assert.deepEqual(preview.configuration.postfixMasterServices, [mailSubmissionTemplatePolicy.service]);
+  assert.deepEqual(preview.configuration.postfixMasterServices, [{
+    ...mailSubmissionTemplatePolicy.service,
+    parameters: mailSubmissionTemplatePolicy.service.parameters.map((parameter) => parameter.name === 'smtpd_sender_login_maps'
+      ? { ...parameter, value: `proxy:sqlite:${mailSqlTemplatePolicy.postfixSenderLoginPath}` }
+      : parameter),
+  }]);
   assert.equal(
-    preview.configuration.artifactDigests.some((artifact) => artifact.path === mailSubmissionTemplatePolicy.senderLoginPath),
+    preview.configuration.artifactDigests.some((artifact) => artifact.path === mailSqlTemplatePolicy.postfixSenderLoginPath),
     true,
   );
 });

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { mailSubmissionTemplatePolicy } from '@yunpanel/config-templates';
+import { mailSqlTemplatePolicy, mailSubmissionTemplatePolicy } from '@yunpanel/config-templates';
 import { createMailConfigurationService } from '../src/mail-configuration.js';
 import { mountMailConfigurationRoutes } from '../src/mail-configuration-http.js';
 
@@ -105,9 +105,14 @@ test('Owner can preview and queue disabling the final enabled local mail domain 
   assert.equal(preview.readyToApply, true);
   assert.deepEqual(preview.domains, []);
   assert.deepEqual(preview.configuration.counts, { domains: 0, mailboxes: 0, aliases: 0, forwardings: 0 });
-  assert.deepEqual(preview.configuration.postfixMasterServices, [mailSubmissionTemplatePolicy.service]);
+  assert.deepEqual(preview.configuration.postfixMasterServices, [{
+    ...mailSubmissionTemplatePolicy.service,
+    parameters: mailSubmissionTemplatePolicy.service.parameters.map((parameter) => parameter.name === 'smtpd_sender_login_maps'
+      ? { ...parameter, value: `proxy:sqlite:${mailSqlTemplatePolicy.postfixSenderLoginPath}` }
+      : parameter),
+  }]);
   assert.equal(preview.configuration.artifactDigests.some(
-    (artifact) => artifact.path === mailSubmissionTemplatePolicy.senderLoginPath,
+    (artifact) => artifact.path === mailSqlTemplatePolicy.postfixSenderLoginPath,
   ), true);
   assert.doesNotMatch(JSON.stringify(preview), /argon2|passwordHash/i);
 

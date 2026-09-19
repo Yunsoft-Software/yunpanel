@@ -100,7 +100,7 @@ test('version one ACME state hydrates without rewrite and persists source policy
   assert.equal(await readFile(filePath, 'utf8'), before);
   await registry.setState(certificate.id, 'issuing');
   const persisted = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(persisted.version, 4);
+  assert.equal(persisted.version, 6);
   assert.equal(persisted.certificates[0].source, 'acme');
   assert.deepEqual(persisted.certificates[0].certificateNames, ['example.com']);
   assert.deepEqual(persisted.certificates[0].challenge, { type: 'http-01' });

@@ -95,8 +95,9 @@ test('forwarding policy for a disabled mailbox is excluded from the active Sieve
   const state = fixture();
   state.disableMailbox();
   const preview = await state.service.previewTransition(transition);
-  assert.equal(preview.readyToApply, false);
-  assert.deepEqual(preview.blockers, ['mail_postmaster_mailbox_required']);
+  assert.equal(preview.readyToApply, true);
+  assert.deepEqual(preview.blockers, []);
+  assert.equal(preview.configuration.counts.forwardings, 0);
 });
 
 test('forwarding source identity mismatch fails closed', async () => {

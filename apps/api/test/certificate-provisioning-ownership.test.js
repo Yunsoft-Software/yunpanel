@@ -57,6 +57,6 @@ test('version four certificate state hydrates with null provisioning ownership a
 
   await registry.setState(certificate.id, 'issuing');
   const persisted = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(persisted.version, 5);
+  assert.equal(persisted.version, 6);
   assert.equal(persisted.certificates[0].provisioningOperationId, null);
 });
