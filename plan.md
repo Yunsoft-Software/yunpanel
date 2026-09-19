@@ -60,6 +60,7 @@ Son transactional provisioning preflight, exact preview ve compensation ilerleme
 Son Redis ve Memcached isolation policy ilerlemesi: `docs/history/redis-memcached-isolation-policy-progress-2026-09-19.md`.
 Son Panel ve Sistem Ayarları ilerlemesi: `docs/history/panel-system-settings-progress-2026-09-19.md`.
 Son Python WSGI/ASGI runtime golden path ilerlemesi: `docs/history/python-runtime-golden-path-progress-2026-09-20.md`.
+Python yürütücü ve gerçek-host kabul düzeltmesi: `docs/history/runtime-acceptance-audit-2026-09-20.md`.
 Son Mail Domain disable Roundcube mapping teardown ve blocker ilerlemesi: `docs/history/mail-domain-disable-webmail-mapping-progress-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
@@ -118,7 +119,7 @@ Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözl
 
 ## P0.8 — Transactional Website/domain provisioning
 
-Kaynak kod tarafında transactional Website/Domain provisioning preflight, exact resource preview ve compensation zinciri tamamlandı:
+Kaynak kod tarafında transactional Website/Domain provisioning preflight, exact resource preview ve compensation zinciri Python dışındaki desteklenen runtime'lar için tamamlandı:
 - Preflight: FQDN, IDN, duplicate hostname, parent-child hiyerarşisi ve alias conflict kontrolleri tek birleşik create flow'da çalışır.
 - Exact resource preview: `runtime` (type, adapter, documentRoot, appRoot, nodeMajor, startMode, entryFile, healthPath), `dns` (mode, zoneName, authoritative, publicIpv4/v6, nameservers), `ip` (publicIpv4/v6), `certificate` (mode, purpose, coverage, issuer, webmailCoverage), `sftp` (adapter, unixUser, homeDirectory, documentRoot), `database` ve `mailDomain` intent'leri tek preview altında toplanır.
 - Package/service blocker'ları (`dns_identity_required`, `passenger_start_mode_unsupported` vb.) apply öncesi tespit edilir; blocker varsa `complete: false` kalır ve `createSite` `site_create_blocked_by_dependency` (409) fırlatarak sunucu mutation'ını engeller.
@@ -143,6 +144,7 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 ## P1.1 — Runtime golden path
 
 - [ ] Passenger dependency/env/log/startup/config validation + rollback.
+- [ ] Python golden path'i tamamla: `APP_PYTHON_DEPLOY` ve rollback için yerel host handler, git release + site UID altında venv/requirements, systemd/Nginx health-gated site-create provisioning/compensation ve restart recovery. Şu anda Python preview kontratı vardır, fakat yürütücü yoktur; create/deploy/rollback fail-closed kapalıdır. Önceki Python history belgesindeki “tamamlandı” beyanı gerçek yürütücü için geçerli değildir.
 - [ ] Managed Compose dedicated project/network/volume identity.
 
 ## P1.2 — Backup/restore

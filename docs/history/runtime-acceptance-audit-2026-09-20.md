@@ -1,0 +1,15 @@
+# Runtime kabul denetimi — 2026-09-20
+
+Bu kayıt yalnız `.local/test-server.env` içinde `157.180.11.28` olarak doğrulanan YunPanel test hostuna ilişkindir. `.44` hostuna bağlantı kurulmadı.
+
+## Canlı kanıt
+
+- `ab3a389e` kaynağı Ubuntu 24.04 üzerinde full check ile doğrulandı ve `yunpanel 0.3.0-2026092005` paketi yedek doğrulandıktan sonra `.28` hostuna kuruldu. Paket SHA-256: `e21b9107a11c0664cd0bf6c083799c955d3e52def840aab4ac5fe6e189a23bb3`. Ön-yedek: `/var/backups/yunpanel/migration-2026-09-19T22-54-33-173Z` (SHA-256 `a72e73906f23b59dbb6ef97206a521a4c7ff4159a4421370418a8574d5a16521`). Kurulum sonrası API/web/Nginx aktif, loopback API `127.0.0.1:3001/api/health` HTTP 200 ve Nginx config testi başarılıydı.
+- `yunpanel-static-deploy.test` ve `yunpanel-node-smoke.test` her ikisi HTTP 200 verdi. `systemctl restart yunpanel-api yunpanel-web` öncesinde ve sonrasında statik yanıt SHA-256 `f4781e7cf7e46463abc36ac1375395b3b2d6bd9d0aa6a80c2da80837105e5dde`, Node yanıtı `fef0d565b55d8584a146ca393f9b3e4f4f768c171304f00af9006a5ef67ed203` olarak aynı kaldı. Bu kanıt yalnız mevcut Static ve legacy direct-systemd Node fixture'ları içindir; Passenger, PHP ve Python sürekliliği doğrulanmadı.
+- Hostta distro `php8.3-fpm` kurulu. `apt-cache policy php8.1-fpm`, `php8.2-fpm`, `php8.4-fpm` aday göstermedi; Ondřej PHP PPA hostta doğrulanmadı. Çoklu sürüm canlı kabulü açık kaldı.
+
+## Kaynak denetimi ve düzeltme
+
+- Static runtime binding eski kaynakta yalnız mevcut kayıt varsa deploy/rollback ve Domain restage ile ilerletiliyordu; ilk binding'i yaratan yol yoktu. Başarılı ilk Static Domain stage artık current release, Website UID/root ve Nginx checksum evidence'ıyla revizyon 0'dan kayıt açar. Unit testi eklendi. Mevcut `.28` Static Website'in binding'i yoktu; yeni kaynakta gerçek deploy/restage kabulü henüz yapılmadı, bu nedenle `todo.md` kabulü açık kaldı.
+- `php-fpm-site-manager` eskiden distro dışı sürüm için yalnız herhangi bir APT candidate bulunmasını “doğrulanmış repo” kabul ediyordu. Artık candidate sürümünün `ppa.launchpad.net/ondrej/php` veya `ppa.launchpadcontent.net/ondrej/php` kaynağından geldiği doğrulanmadan kurulum açılmaz. Foreign yüksek öncelikli candidate + eski PPA sürümü regresyon testinde reddedildi. Canlı PPA kurulum testi yapılmadı.
+- Önceki `python-runtime-golden-path-progress` belgesindeki tamamlanma beyanı hatalıdır: Python deploy/rollback job'ları kuyruğa alınabiliyor fakat `local-host-operations` içinde handler yok; `ensureVirtualenv` ve `installRequirements` hiçbir production deploy yolundan çağrılmıyor; `new_python` site-create provisioning planında runtime host/health adımı yok. Yanlış “ready” veya kuyruğa alınmış başarısız iş üretmemek için Python create/deploy/rollback kaynakta `python_runtime_unavailable` ile fail-closed kapatıldı. Gerçek Python golden path kod işi `plan.md` içine yeniden açıldı; gerçek-host kabulü `todo.md`de kaldı.
