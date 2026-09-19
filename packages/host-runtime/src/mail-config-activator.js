@@ -295,6 +295,30 @@ export function createMailConfigActivator({
     }
   }
 
+  async function assertSqlManagedDirectories(plan, postfixIdentity, mailAuthGroup) {
+    if (plan.sql?.required !== true) return;
+    const expected = [
+      { path: mailSqlTemplatePolicy.databaseDirectory, gid: mailAuthGroup.gid },
+      { path: mailSqlTemplatePolicy.postfixSqlDirectory, gid: postfixIdentity.gid },
+      { path: '/etc/yunpanel/mail/sql', gid: ROOT_GID },
+    ];
+    for (const directory of expected) {
+      try {
+        const metadata = await lstatFn(directory.path);
+        if (!metadata.isDirectory() || metadata.isSymbolicLink()
+          || metadata.uid !== ROOT_UID || metadata.gid !== directory.gid
+          || (metadata.mode & 0o7777) !== NEW_MANAGED_DIRECTORY_MODE) {
+          throw new Error('managed SQL directory metadata mismatch');
+        }
+      } catch {
+        throw activationError(
+          'mail_sql_directory_unsafe',
+          'Managed virtual-mail SQL directory is unavailable or unsafe',
+        );
+      }
+    }
+  }
+
   async function replaceManagedArtifacts(stage, planSha256, onMutation, vmailGid, postfixGid) {
     const stageDirectory = configManager.stageDirectory(planSha256);
     for (const artifact of stage.artifacts) {
@@ -902,6 +926,7 @@ export function createMailConfigActivator({
         postfixIdentity.gid,
         mailAuthGroup,
       );
+      await assertSqlManagedDirectories(plan, postfixIdentity, mailAuthGroup);
       await replaceManagedArtifacts(
         stage,
         plan.sha256,
