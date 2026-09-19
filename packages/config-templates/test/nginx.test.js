@@ -215,7 +215,10 @@ test('renders isolated HTTP-01 hosts without exposing the Website application', 
     },
   });
 
-  const webmailBlock = config.split('server_name webmail.example.com;')[1];
+  const hostnameOffset = config.indexOf('server_name webmail.example.com;');
+  const webmailBlock = hostnameOffset < 0
+    ? null
+    : config.slice(config.lastIndexOf('server {', hostnameOffset));
   assert.ok(webmailBlock);
   assert.match(webmailBlock, /listen 80;/);
   assert.match(webmailBlock, /\.well-known\/acme-challenge/);
