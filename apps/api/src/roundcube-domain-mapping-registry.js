@@ -347,10 +347,11 @@ export function createRoundcubeDomainMappingRegistry({
     }
     if (!certificate || certificate.id !== certificateId
       || certificate.domainId !== domain.id || certificate.serverId !== domain.serverId
+      || certificate.purpose !== 'webmail'
       || certificate.staging === true || certificate.state !== 'active') {
       throw new RoundcubeDomainMappingRegistryError(
         'roundcube_mapping_certificate_not_ready',
-        'Roundcube mapping requires an active certificate owned by the Domain',
+        'Roundcube mapping requires an active webmail certificate owned by the Domain',
         409,
       );
     }
