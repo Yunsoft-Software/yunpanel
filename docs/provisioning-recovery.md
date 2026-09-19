@@ -2,7 +2,7 @@
 
 Bu belge YunPanel Website provisioning akışının restart, retry ve compensation davranışını tanımlar. Ürün hedefleri `docs/architecture.md`, kalan implementasyon işleri `plan.md`, gerçek Ubuntu/package/browser kabul kapıları `todo.md` içindedir.
 
-## Kaynakta mevcut durum — 2026-09-18
+## Kaynakta mevcut durum — 2026-09-19
 
 Mevcut durable provisioning akışı aşağıdaki recovery parçalarına sahiptir:
 
@@ -50,6 +50,32 @@ Destructive rollback yalnız operation'ın sahipliği kanıtlanabilen kaynağa u
 - Compensation operation-owned staged/active config ve checksum evidence üzerinden ilerler.
 - Checksum/ownership eşleşmiyorsa var olan vhost körlemesine ezilmez veya silinmez.
 - Shared Passenger runtime site-level compensation kapsamına girmez; server-owned dependency olarak korunur.
+
+## Fresh Website certificate/TLS recovery
+
+Managed HTTPS Website provisioning iki ayrı required step kullanır: certificate issue/attachment ve TLS Nginx activation.
+
+### Certificate step
+
+- Certificate kaydı host mutation başlamadan önce exact Domain/server/routed-name seti ve Website provisioning operation ID'siyle oluşturulur.
+- Issuance yeni executor yazmaz; mevcut durable `SSL_ISSUE` job + certificate receipt + job-reconciliation zincirini kullanır.
+- Aynı operation/certificate için idempotency key sabittir. Enqueue cevabı kaybolursa retry aynı işi ikinci certificate kaydıyla çoğaltmaz.
+- HTTP-01 yalnız initial Website HTTP route Domain registry'de gerçekten active/applied iken açılır.
+- Başka lifecycle'a ait canlı certificate kaydı veya Domain certificate binding'i varsa fresh provisioning fail-closed kalır.
+- Successful child job ancak certificate registry active state + exact Domain attachment + unique succeeded issue-job evidence birlikte görünüyorsa Website certificate step'ini kapatır.
+- Public Website provisioning evidence PEM/private-key path'i taşımaz.
+- `YUNPANEL_ACME_EMAIL` yoksa certificate apply host mutation öncesi explicit failed state bırakır; config düzeltildikten sonra normal failed-step retry yolu kullanılır.
+
+### TLS activation step
+
+- Certificate attachment Domain desired revision'ını ilerletip route'u yeniden staging gerektiren state'e geçirir. Bu nedenle certificate success Website'i tek başına ready yapamaz.
+- TLS step operation içindeki ilk Nginx step'inin canonical runtime evidence'ını, exact operation-owned active certificate materialini ve current Domain redirect policy'sini birleştirir.
+- Apply Nginx candidate'ı stage eder, exact checksum ile activate/configtest/reload doğrular; ancak bundan sonra Domain aynı checksum/config name ile staged/applied revision'a reconcile edilir.
+- Process host TLS activation sonrasında fakat Domain state commit'inden önce kesilirse startup `inspect` exact staged + active TLS config'i salt-okunur doğrular. Host postcondition exact ise ikinci Nginx mutation yapılmadan yalnız control-plane Domain state'i aynı checksum evidence ile ilerletilebilir.
+- Host config exact değilse startup mutation replay etmez; interrupted step açık kalır veya normal explicit retry/remediation gerekir.
+- Certificate ownership, routed names, certificate state/material veya Domain desired revision drift etmişse TLS activation fail-closed kalır.
+
+Certificate/TLS reverse compensation henüz tam bağlanmamıştır. Downstream failure'da Nginx rollback receipt ve certificate retirement/binding ownership'i aynı provisioning operation'a bağlanmadan otomatik certificate detach/physical delete yapılmaz.
 
 ## Website isolation migration recovery
 
