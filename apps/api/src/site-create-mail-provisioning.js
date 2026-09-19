@@ -142,6 +142,37 @@ function localMailDkimConfigStep(preview) {
   });
 }
 
+function localMailHealthStep(preview) {
+  const mailDomain = preview.plan?.mailDomain;
+  if (!mailDomain || mailDomain.managementMode !== 'local') return null;
+  const serverId = preview.plan?.website?.serverId;
+  const webmail = preview.plan?.webmail;
+  if (typeof serverId !== 'string' || !serverId
+    || typeof preview.ids?.websiteId !== 'string' || !preview.ids.websiteId
+    || typeof mailDomain.webDomainId !== 'string' || !mailDomain.webDomainId
+    || !webmail || webmail.sharedRoundcube !== true
+    || webmail.hostname !== `webmail.${mailDomain.domainName}`) {
+    throw new Error('Local mail health provisioning requires exact Website ownership');
+  }
+  return Object.freeze({
+    id: 'mail_health',
+    kind: 'mail_health',
+    required: true,
+    state: 'pending',
+    intent: Object.freeze({
+      adapter: 'local-mail-cross-service-health',
+      serverId,
+      websiteId: preview.ids.websiteId,
+      webDomainId: mailDomain.webDomainId,
+      mailDomainId: mailDomain.id,
+      domainName: mailDomain.domainName,
+      hostname: webmail.hostname,
+      expectedMailDomainRevision: 2,
+    }),
+    compensation: Object.freeze({ state: 'not_required' }),
+  });
+}
+
 function localRoundcubeMappingStep(preview) {
   const mailDomain = preview.plan?.mailDomain;
   if (!mailDomain || mailDomain.managementMode !== 'local') return null;
@@ -186,9 +217,10 @@ export function withSiteCreateMailSteps(plan, preview) {
   const webmailCertificate = localWebmailCertificateStep(preview);
   const mailDkimConfig = localMailDkimConfigStep(preview);
   const roundcubeMapping = localRoundcubeMappingStep(preview);
-  if (!metadata && !mailConfig && !mailDkimKey && !webmailCertificate && !mailDkimConfig && !roundcubeMapping) return plan;
-  if (plan.steps.some((step) => ['mail_domain_metadata', 'mail_config', 'mail_dkim_key', 'webmail_certificate', 'mail_dkim_config', 'roundcube_mapping'].includes(step.id)
-    || ['mail_domain_metadata', 'mail_config', 'mail_dkim_key', 'webmail_certificate', 'mail_dkim_config', 'roundcube_mapping'].includes(step.kind))) {
+  const mailHealth = localMailHealthStep(preview);
+  if (!metadata && !mailConfig && !mailDkimKey && !webmailCertificate && !mailDkimConfig && !roundcubeMapping && !mailHealth) return plan;
+  if (plan.steps.some((step) => ['mail_domain_metadata', 'mail_config', 'mail_dkim_key', 'webmail_certificate', 'mail_dkim_config', 'roundcube_mapping', 'mail_health'].includes(step.id)
+    || ['mail_domain_metadata', 'mail_config', 'mail_dkim_key', 'webmail_certificate', 'mail_dkim_config', 'roundcube_mapping', 'mail_health'].includes(step.kind))) {
     throw new Error('Website provisioning already contains Mail Domain steps');
   }
 
@@ -212,6 +244,7 @@ export function withSiteCreateMailSteps(plan, preview) {
     if (webmailCertificate) steps.splice(mailConfigIndex + 2, 0, webmailCertificate);
     if (mailDkimConfig) steps.splice(mailConfigIndex + 3, 0, mailDkimConfig);
     if (roundcubeMapping) steps.splice(mailConfigIndex + 4, 0, roundcubeMapping);
+    if (mailHealth) steps.splice(mailConfigIndex + 5, 0, mailHealth);
   }
 
   return createWebsiteProvisioningPlan({
@@ -233,5 +266,6 @@ export const siteCreateMailProvisioningInternals = Object.freeze({
   localWebmailCertificateStep,
   localMailDkimConfigStep,
   localRoundcubeMappingStep,
+  localMailHealthStep,
   withSiteCreateMailSteps,
 });
