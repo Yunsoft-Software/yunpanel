@@ -51,6 +51,8 @@ function removalPreview() {
       }],
       mailDomainIds: [],
       mailDomainIntents: [],
+      webmailMappingIds: [],
+      webmailMappingIntents: [],
       activeJobIds: [],
       additional: {
         mailboxes: { status: 'available', ids: [] },

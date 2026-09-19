@@ -280,6 +280,8 @@ test('binds child operations to one parent and blocks concurrent Domain removal 
   };
   ownedPreview.plan = {
     ...ownedPreview.plan,
+    dnsZoneIds: [],
+    dnsZoneIntents: [],
     certificateIds: [],
     certificateIntents: [],
     boundCertificateId: null,
@@ -349,6 +351,9 @@ test('legacy journal plans load without inventing exact child Domain intent evid
   delete legacy.certificateIntents;
   delete legacy.boundCertificateId;
   delete legacy.mailDomainIntents;
+  delete legacy.dnsZoneIntents;
+  delete legacy.webmailMappingIds;
+  delete legacy.webmailMappingIntents;
 
   const normalized = domainRemovalOperationRegistryInternals.normalizedPlan(legacy);
 
@@ -361,6 +366,9 @@ test('prior journal plans load without inventing certificate retirement evidence
   delete prior.certificateIntents;
   delete prior.boundCertificateId;
   delete prior.mailDomainIntents;
+  delete prior.dnsZoneIntents;
+  delete prior.webmailMappingIds;
+  delete prior.webmailMappingIntents;
 
   const normalized = domainRemovalOperationRegistryInternals.normalizedPlan(prior);
 
@@ -371,6 +379,9 @@ test('prior journal plans load without inventing certificate retirement evidence
 test('certificate-era journal plans load without inventing Mail Domain removal evidence', () => {
   const prior = preview().plan;
   delete prior.mailDomainIntents;
+  delete prior.dnsZoneIntents;
+  delete prior.webmailMappingIds;
+  delete prior.webmailMappingIntents;
 
   const normalized = domainRemovalOperationRegistryInternals.normalizedPlan(prior);
 
