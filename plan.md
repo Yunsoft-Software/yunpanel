@@ -55,6 +55,7 @@ Son Website removal lifecycle ve orchestration ilerlemesi: `docs/history/website
 Son Delete evidence zincirleri ve retention bağları: `docs/history/delete-evidence-chains-and-retention-wiring-2026-09-19.md`.
 Son transactional provisioning preflight, exact preview ve compensation ilerlemesi: `docs/history/transactional-provisioning-preflight-compensation-2026-09-19.md`.
 Son Redis ve Memcached isolation policy ilerlemesi: `docs/history/redis-memcached-isolation-policy-progress-2026-09-19.md`.
+Son Panel ve Sistem Ayarları ilerlemesi: `docs/history/panel-system-settings-progress-2026-09-19.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -155,10 +156,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 - [ ] GoAccess site logs/report/WebSocket.
 - [ ] nftables tek firewall authority.
 - [ ] CrowdSec engine/bouncer; duplicate Fail2ban authority olmasın.
-
-## P1.4 — Site features/settings
-
-- [ ] Settings ekranlarını gerçek backend state'iyle tamamla.
 
 # P2 — Migration temizliği ve son ürün yüzeyi
 

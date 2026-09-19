@@ -162,6 +162,8 @@ import { PhpCliToolError, CacheIsolationError } from '@yunpanel/host-runtime';
 import { mountWebsiteCacheRoutes } from './website-cache-http.js';
 import { WebsiteCacheServiceError } from './website-cache-service.js';
 import { WebsiteCachePolicyRegistryError } from './website-cache-policy-registry.js';
+import { mountPanelSettingsRoutes, PanelSettingsHttpError } from './panel-settings-http.js';
+import { PanelSettingsRegistryError } from './panel-settings-registry.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -284,6 +286,7 @@ export function createApp({
   websiteCronApplyService = null,
   websitePhpToolsService = null,
   websiteCacheService = null,
+  panelSettingsService = null,
   databaseBackupService = null,
   domainSuspensionRuntime = null,
   domainRemovalRuntime = null,
@@ -761,6 +764,11 @@ export function createApp({
       requirePanelRouteAccess: core.requirePanelRouteAccess,
     });
   }
+  if (panelSettingsService) {
+    mountPanelSettingsRoutes(app, {
+      panelSettingsService,
+    });
+  }
   mountManagedServiceRoutes(app, { registry: localRegistry, jobRegistry });
   mountNodeRuntimeRoutes(app, { registry: localRegistry, jobRegistry });
   if (databaseBindingRegistry) {
@@ -935,6 +943,8 @@ export function createApp({
       || error instanceof WebsiteCacheServiceError
       || error instanceof WebsiteCachePolicyRegistryError
       || error instanceof CacheIsolationError
+      || error instanceof PanelSettingsRegistryError
+      || error instanceof PanelSettingsHttpError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }

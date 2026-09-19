@@ -113,6 +113,8 @@ import { createWebsiteCronApplyService } from './website-cron-apply-service.js';
 import { createWebsitePhpToolsService } from './website-php-tools-service.js';
 import { createWebsiteCachePolicyRegistry } from './website-cache-policy-registry.js';
 import { createWebsiteCacheService } from './website-cache-service.js';
+import { createPanelSettingsRegistry } from './panel-settings-registry.js';
+import { createPanelSettingsService } from './panel-settings-service.js';
 import { createWebsiteSftpKeyRuntime } from './website-sftp-key-runtime.js';
 import { createWebsiteSuspensionOperationRegistry } from './website-suspension-operation-registry.js';
 import { createWebsiteSuspensionRuntime } from './website-suspension-runtime.js';
@@ -153,6 +155,8 @@ const websiteCronStorePath = process.env.YUNPANEL_WEBSITE_CRON_STORE
   ?? path.join(controlPlaneStateRoot, 'website-cron-registry.json');
 const websiteCachePolicyStorePath = process.env.YUNPANEL_WEBSITE_CACHE_POLICY_STORE
   ?? path.join(controlPlaneStateRoot, 'website-cache-policies.json');
+const panelSettingsStorePath = process.env.YUNPANEL_PANEL_SETTINGS_STORE
+  ?? path.join(controlPlaneStateRoot, 'panel-settings.json');
 const databaseBindingStorePath = process.env.YUNPANEL_DATABASE_BINDING_STORE
   ?? path.resolve('.data/database-binding-registry.json');
 const databaseCredentialStorePath = process.env.YUNPANEL_DATABASE_CREDENTIAL_STORE
@@ -401,6 +405,16 @@ const serverDnsIdentityRegistry = createServerDnsIdentityRegistry({
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
 });
 await serverDnsIdentityRegistry.init();
+const panelSettingsRegistry = createPanelSettingsRegistry({
+  filePath: panelSettingsStorePath,
+});
+const panelSettingsService = createPanelSettingsService({
+  panelSettingsRegistry,
+  serverRegistry: registry,
+  serverDnsIdentityRegistry,
+  jobRegistry,
+  localServerId,
+});
 const powerDnsSecretRegistry = createPowerDnsSecretRegistry({
   filePath: powerDnsSecretStorePath,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY,
@@ -980,6 +994,7 @@ const listener = createAuthenticatedApi({
       websiteCronApplyService,
       websitePhpToolsService,
       websiteCacheService,
+      panelSettingsService,
       localServerId,
       terminalCapabilityRegistry,
       ttydSessionManager,
