@@ -110,6 +110,32 @@ function localMailDkimConfigStep(preview) {
   });
 }
 
+function localRoundcubeMappingStep(preview) {
+  const mailDomain = preview.plan?.mailDomain;
+  if (!mailDomain || mailDomain.managementMode !== 'local') return null;
+  const serverId = preview.plan?.website?.serverId;
+  if (typeof serverId !== 'string' || !serverId
+    || typeof preview.ids?.websiteId !== 'string' || !preview.ids.websiteId
+    || typeof mailDomain.webDomainId !== 'string' || !mailDomain.webDomainId) {
+    throw new Error('Local Roundcube provisioning requires exact Website ownership');
+  }
+  return Object.freeze({
+    id: 'roundcube_mapping',
+    kind: 'roundcube_mapping',
+    required: true,
+    state: 'pending',
+    intent: Object.freeze({
+      adapter: 'shared-roundcube-mapping',
+      serverId,
+      websiteId: preview.ids.websiteId,
+      webDomainId: mailDomain.webDomainId,
+      mailDomainId: mailDomain.id,
+      domainName: mailDomain.domainName,
+    }),
+    compensation: Object.freeze({ state: 'pending' }),
+  });
+}
+
 function cloneSteps(steps) {
   return steps.map((step) => ({
     ...step,
@@ -126,9 +152,10 @@ export function withSiteCreateMailSteps(plan, preview) {
   const mailConfig = localMailConfigStep(preview);
   const mailDkimKey = localMailDkimKeyStep(preview);
   const mailDkimConfig = localMailDkimConfigStep(preview);
-  if (!metadata && !mailConfig && !mailDkimKey && !mailDkimConfig) return plan;
-  if (plan.steps.some((step) => ['mail_domain_metadata', 'mail_config', 'mail_dkim_key', 'mail_dkim_config'].includes(step.id)
-    || ['mail_domain_metadata', 'mail_config', 'mail_dkim_key', 'mail_dkim_config'].includes(step.kind))) {
+  const roundcubeMapping = localRoundcubeMappingStep(preview);
+  if (!metadata && !mailConfig && !mailDkimKey && !mailDkimConfig && !roundcubeMapping) return plan;
+  if (plan.steps.some((step) => ['mail_domain_metadata', 'mail_config', 'mail_dkim_key', 'mail_dkim_config', 'roundcube_mapping'].includes(step.id)
+    || ['mail_domain_metadata', 'mail_config', 'mail_dkim_key', 'mail_dkim_config', 'roundcube_mapping'].includes(step.kind))) {
     throw new Error('Website provisioning already contains Mail Domain steps');
   }
 
@@ -150,6 +177,7 @@ export function withSiteCreateMailSteps(plan, preview) {
     steps.splice(mailConfigIndex, 0, mailConfig);
     if (mailDkimKey) steps.splice(mailConfigIndex + 1, 0, mailDkimKey);
     if (mailDkimConfig) steps.splice(mailConfigIndex + 2, 0, mailDkimConfig);
+    if (roundcubeMapping) steps.splice(mailConfigIndex + 3, 0, roundcubeMapping);
   }
 
   return createWebsiteProvisioningPlan({
@@ -169,5 +197,6 @@ export const siteCreateMailProvisioningInternals = Object.freeze({
   localMailConfigStep,
   localMailDkimKeyStep,
   localMailDkimConfigStep,
+  localRoundcubeMappingStep,
   withSiteCreateMailSteps,
 });
