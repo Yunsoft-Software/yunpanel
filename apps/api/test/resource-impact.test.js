@@ -169,7 +169,7 @@ test('Website impact preview lists real dependency graph and marks missing inven
     updatedAt: state.mailDomain.updatedAt,
   });
   assert.deepEqual(preview.dependencies.mailboxes, { status: 'available', items: [{ id: 'mailbox-1', state: 'active' }] });
-  for (const type of ['backups', 'crons', 'dockerWorkloads']) {
+  for (const type of ['backups', 'crons', 'dockerWorkloads', 'webmailMappings']) {
     assert.deepEqual(preview.dependencies[type], { status: 'unavailable', items: [] });
   }
   const blockerCodes = preview.blockers.map((item) => item.code);
@@ -478,5 +478,41 @@ test('legacy-safe Domain identifiers remain previewable while Website and target
   assert.throws(
     () => resourceImpactInternals.resourceIdentity('legacy-website', 'website'),
     (error) => error instanceof ResourceImpactError && error.code === 'invalid_website_id',
+  );
+});
+
+
+test('webmail mapping impact retains exact removal evidence and rejects malformed operation state', () => {
+  const fingerprint = Array.from({ length: 32 }, () => 'AA').join(':');
+  const input = {
+    id: '11111111-1111-4111-8111-111111111111',
+    mailDomainId: '22222222-2222-4222-8222-222222222222',
+    webDomainId: '33333333-3333-4333-8333-333333333333',
+    serverId: '44444444-4444-4444-8444-444444444444',
+    domainName: 'example.com',
+    hostname: 'webmail.example.com',
+    certificateId: '55555555-5555-4555-8555-555555555555',
+    certificateFingerprint256: fingerprint,
+    revision: 3,
+    state: 'active',
+    operationId: null,
+    applyJobId: null,
+    expectedRoundcubePreviewSha256: null,
+    expectedRoundcubeNginxSha256: null,
+    createdAt: '2026-09-19T10:00:00.000Z',
+    updatedAt: '2026-09-19T10:00:00.000Z',
+  };
+  assert.deepEqual(
+    resourceImpactInternals.sanitizeWebmailMappingReference(input),
+    input,
+  );
+  assert.throws(
+    () => resourceImpactInternals.sanitizeWebmailMappingReference({
+      ...input,
+      state: 'removing',
+      operationId: null,
+    }),
+    (error) => error instanceof ResourceImpactError
+      && error.code === 'webmail_mapping_impact_invalid',
   );
 });
