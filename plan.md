@@ -140,7 +140,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 ## P1.1 — Runtime golden path
 
 - [ ] Passenger dependency/env/log/startup/config validation + rollback.
-- [ ] Python golden path'i tamamla: `APP_PYTHON_DEPLOY` ve rollback için yerel host handler, git release + site UID altında venv/requirements, systemd/Nginx health-gated site-create provisioning/compensation ve restart recovery. Şu anda Python preview kontratı vardır, fakat yürütücü yoktur; create/deploy/rollback fail-closed kapalıdır. Önceki Python history belgesindeki “tamamlandı” beyanı gerçek yürütücü için geçerli değildir.
 - [ ] Managed Compose dedicated project/network/volume identity.
 
 ## P1.2 — Backup/restore
