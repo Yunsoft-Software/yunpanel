@@ -120,6 +120,7 @@ import { createWebsiteSuspensionRuntime } from './website-suspension-runtime.js'
 import { createWebsiteRemovalOperationRegistry } from './website-removal-operation-registry.js';
 import { createWebsiteRemovalRuntime } from './website-removal-runtime.js';
 import { createWebsiteRemovalPreview } from './website-removal-plan.js';
+import { createPleskImporter } from './plesk-importer.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10);
@@ -903,6 +904,9 @@ const applicationPassengerMigrationService = createApplicationPassengerMigration
   runtimeBindingRegistry,
   jobRegistry,
 });
+const pleskImporter = localServerId
+  ? createPleskImporter({ localServerId })
+  : null;
 const listener = createAuthenticatedApi({
   store: authStore,
   publicOrigin,
@@ -1007,6 +1011,7 @@ const listener = createAuthenticatedApi({
       localServerId,
       terminalCapabilityRegistry,
       ttydSessionManager,
+      pleskImporter,
     }),
   }),
 });
@@ -1099,6 +1104,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] elFinder handoff=${elFinderHandoffRuntime ? 'enabled' : 'disabled'}`);
   console.log(`[yunpanel-api] mail discovery=${mailDiscoveryRuntime ? 'enabled' : 'disabled'}`);
   console.log('[yunpanel-api] ttyd sessions=enabled on-demand Unix socket');
+  console.log(`[yunpanel-api] plesk importer=${pleskImporter ? 'enabled' : 'disabled'}`);
   console.log(`[yunpanel-api] local execution=${localRuntime ? `enabled server=${localRuntime.serverId} operations=${localRuntime.operations.length}` : 'disabled'}`);
   console.log(`[yunpanel-api] site files=${localServerId ? `enabled server=${localServerId}` : 'disabled'}`);
 });

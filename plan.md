@@ -170,7 +170,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 - [ ] Passenger acceptance sonrası direct-systemd yalnız legacy migration adapter'ı olarak kalsın; migration sonunda kaldır.
 - [ ] restic acceptance sonrası custom backup archive yollarını kaldır.
 - [ ] Agentless local backend acceptance sonrası retained legacy agent transport/package/state kaldır.
-- [ ] Plesk read-only importer en son: Website/Domain/identity/runtime/DB/DNS/mail/cron/cert/backup preview.
 - [ ] Backend/functionality tamamlandıktan sonra enterprise UI/UX polish.
 
 # Uygulama sırası — blocker yoksa sapma yok
@@ -180,6 +179,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 3. **Backup/restore** — restic/rclone lifecycle, Website backup set ve health-rollback'li restore akışını tamamla.
 4. **Monitoring/security** — Netdata, GoAccess, nftables ve CrowdSec entegrasyonlarını tek authority sınırlarıyla tamamla.
 5. **Acceptance-gated migration cleanup** — elFinder, ttyd, Passenger, restic ve agentless local backend kabulünden sonra karşılık gelen legacy fallback/transport yollarını kaldır.
-6. **Son ürün yüzeyi** — Plesk read-only importer ve backend/functionality sonrasında enterprise UI/UX polish.
+6. **Son ürün yüzeyi** — Backend/functionality sonrasında enterprise UI/UX polish.
 
 Her küçük dilim source test kontratıyla ayrı commit edilir. GitHub Actions kullanılmaz. Gerçek Ubuntu/package/public DNS/SMTP/browser/provider acceptance bu ortamda yapılamıyorsa `todo.md`'ye bırakılır ve ilgili P0 kapısı acceptance geçmeden `DONE` olmaz.

@@ -172,6 +172,8 @@ import { createResticRepositoryRegistry } from './restic-repository-registry.js'
 import { createWebsiteRestoreService, WebsiteRestoreError } from './website-restore-service.js';
 import { isWebsiteRestoreHttpError, mountWebsiteRestoreRoutes } from './website-restore-http.js';
 import { mountWebsiteAnalyticsRoutes, WebsiteAnalyticsHttpError } from './website-analytics-http.js';
+import { isPleskImporterHttpError, mountPleskImporterRoutes } from './plesk-importer-http.js';
+import { PleskImporterError } from './plesk-importer.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -306,6 +308,7 @@ export function createApp({
   resticRepositoryRegistry = null,
   resticManager = null,
   websiteRestoreService = null,
+  pleskImporter = null,
   ...options
 } = {}) {
   const core = createCoreApp({
@@ -829,6 +832,9 @@ export function createApp({
       panelSettingsService,
     });
   }
+  if (pleskImporter) {
+    mountPleskImporterRoutes(app, { pleskImporter });
+  }
   mountManagedServiceRoutes(app, { registry: localRegistry, jobRegistry });
   mountNodeRuntimeRoutes(app, { registry: localRegistry, jobRegistry });
   if (databaseBindingRegistry) {
@@ -914,6 +920,8 @@ export function createApp({
       || isBackupHttpError(error)
       || isWebsiteBackupHttpError(error)
       || isWebsiteRestoreHttpError(error)
+      || isPleskImporterHttpError(error)
+      || error instanceof PleskImporterError
       || error instanceof ApplicationRuntimeBindingRegistryError
       || error instanceof DatabaseBindingHttpError
       || error instanceof DatabaseBindingRegistryError
