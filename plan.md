@@ -117,6 +117,7 @@ Son Mail ClamAV sağlık ve fail-closed canlı kabulü: `docs/history/mail-clama
 Son Mail config apply ve rollback canlı kabulü: `docs/history/mail-config-apply-rollback-live-acceptance-2026-09-21.md`.
 Son Website backup, restore, restic repo ve rclone remote canlı kabulü: `docs/history/website-backup-restore-rclone-live-acceptance-2026-09-21.md`.
 Son Shared Roundcube mapping failure-injection ve yaşam döngüsü canlı kabulü: `docs/history/roundcube-mapping-failure-injection-live-acceptance-2026-09-21.md`.
+Son SQLite Mail failure-injection ve yaşam döngüsü canlı kabulü: `docs/history/sqlite-mail-failure-injection-live-acceptance-2026-09-21.md`.
 Son fresh Website SPF/DMARC policy ve durable DNS evidence bağlama ilerlemesi: `apps/api/src/website-mail-dns-provisioning-handler.js`.
 
 ## 0 — Değiştirilemez ürün kararı

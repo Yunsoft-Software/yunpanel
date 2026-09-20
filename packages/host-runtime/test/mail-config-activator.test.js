@@ -124,6 +124,9 @@ async function prepare({
   failFirstDoveconf = false,
   failSievec = false,
   failDoveconfCalls = [],
+  failSqlQuickCheck = false,
+  failSqlStateMismatch = false,
+  existingSqlDatabase = null,
   invalidVmailIdentity = false,
   invalidPostfixIdentity = false,
   invalidSubmissionSocket = false,
@@ -141,6 +144,11 @@ async function prepare({
     await mkdir(mapped.mapPath(mailSqlTemplatePolicy.databaseDirectory), { recursive: true, mode: 0o750 });
     await mapped.chownFn(mailSqlTemplatePolicy.databaseDirectory, 0, MAIL_AUTH_GID);
     await mapped.chmodFn(mailSqlTemplatePolicy.databaseDirectory, 0o750);
+    if (existingSqlDatabase) {
+      await writeFile(mapped.mapPath(mailSqlTemplatePolicy.databasePath), existingSqlDatabase, { mode: mailSqlTemplatePolicy.databaseMode });
+      await mapped.chownFn(mailSqlTemplatePolicy.databasePath, 0, MAIL_AUTH_GID);
+      await mapped.chmodFn(mailSqlTemplatePolicy.databasePath, mailSqlTemplatePolicy.databaseMode);
+    }
   }
   const originalMainCf = Buffer.from('myhostname = mail.example.net\nmydestination = $myhostname, localhost\n');
   const originalMasterCf = Buffer.from('smtp inet n - y - - smtpd\n');
@@ -235,8 +243,12 @@ async function prepare({
         );
         return { stdout: '', stderr: '' };
       }
-      if (args[1] === 'PRAGMA quick_check;') return { stdout: 'ok\n', stderr: '' };
+      if (args[1] === 'PRAGMA quick_check;') {
+        if (failSqlQuickCheck) throw new Error('fixture quick_check query error');
+        return { stdout: 'ok\n', stderr: '' };
+      }
       if (args[1] === "SELECT value FROM yunpanel_meta WHERE key='state_sha256';") {
+        if (failSqlStateMismatch) return { stdout: 'corrupted-state-digest\n', stderr: '' };
         return { stdout: preview.sql.stateSha256 + '\n', stderr: '' };
       }
       throw new Error('unexpected sqlite query');
@@ -737,3 +749,111 @@ test('rejects live state drift after backup before the first activation mutation
     (error) => error?.code === 'ENOENT',
   );
 }));
+
+test('restores legacy hash/passwd files, removes sqlite db and cleans new directories when sqlite activation fails validation', async () => withTempDirectory(async (root) => {
+  const context = await prepare({ root, sqlite: true, failFirstDoveconf: true });
+
+  await assert.rejects(
+    context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID }),
+    (error) => error instanceof MailConfigActivationError && error.code === 'mail_config_validation_failed',
+  );
+
+  assert.deepEqual(
+    await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath)),
+    context.originalMainCf,
+  );
+  assert.deepEqual(
+    await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMasterCfPath)),
+    context.originalMasterCf,
+  );
+  assert.deepEqual(
+    await readFile(context.mapped.mapPath(mailTemplatePolicy.dovecotPasswdFilePath), 'utf8'),
+    'legacy-password-hash-file\n',
+  );
+  assert.deepEqual(
+    await readFile(context.mapped.mapPath(mailTemplatePolicy.postfixVirtualDomainMapPath), 'utf8'),
+    'example.com OK\n',
+  );
+  assert.deepEqual(
+    await readFile(context.mapped.mapPath(mailTemplatePolicy.postfixVirtualDomainMapPath + '.db'), 'utf8'),
+    'legacy-map-db',
+  );
+
+  await assert.rejects(
+    lstat(context.mapped.mapPath(mailSqlTemplatePolicy.databasePath)),
+    (error) => error?.code === 'ENOENT',
+  );
+  await assert.rejects(
+    lstat(context.mapped.mapPath(mailSqlTemplatePolicy.seedPath)),
+    (error) => error?.code === 'ENOENT',
+  );
+  await assert.rejects(
+    lstat(context.mapped.mapPath(mailSqlTemplatePolicy.postfixDomainPath)),
+    (error) => error?.code === 'ENOENT',
+  );
+  await assert.rejects(
+    lstat(context.mapped.mapPath('/etc/yunpanel/mail/sql')),
+    (error) => error?.code === 'ENOENT',
+  );
+
+  const reloads = context.calls.filter(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'reload');
+  assert.deepEqual(reloads.map(([, args]) => args[1]), ['postfix', 'dovecot', 'rspamd']);
+  const inspected = await context.backupManager.inspectBackup(context.preview, { transactionId: TRANSACTION_ID });
+  assert.equal(inspected.satisfied, true);
+}));
+
+test('restores legacy state when sqlite quick_check or state digest verification fails', async () => withTempDirectory(async (root) => {
+  const contextQuickCheck = await prepare({ root, sqlite: true, failSqlQuickCheck: true });
+  await assert.rejects(
+    contextQuickCheck.activator.activateConfiguration(contextQuickCheck.preview, { transactionId: TRANSACTION_ID }),
+    (error) => error instanceof MailConfigActivationError && error.code === 'mail_sql_database_verify_failed',
+  );
+  assert.deepEqual(
+    await readFile(contextQuickCheck.mapped.mapPath(mailTemplatePolicy.dovecotPasswdFilePath), 'utf8'),
+    'legacy-password-hash-file\n',
+  );
+  await assert.rejects(
+    lstat(contextQuickCheck.mapped.mapPath(mailSqlTemplatePolicy.databasePath)),
+    (error) => error?.code === 'ENOENT',
+  );
+
+  const contextState = await prepare({ root, sqlite: true, failSqlStateMismatch: true });
+  await assert.rejects(
+    contextState.activator.activateConfiguration(contextState.preview, { transactionId: TRANSACTION_ID }),
+    (error) => error instanceof MailConfigActivationError && error.code === 'mail_sql_database_state_mismatch',
+  );
+  assert.deepEqual(
+    await readFile(contextState.mapped.mapPath(mailTemplatePolicy.dovecotPasswdFilePath), 'utf8'),
+    'legacy-password-hash-file\n',
+  );
+  await assert.rejects(
+    lstat(contextState.mapped.mapPath(mailSqlTemplatePolicy.databasePath)),
+    (error) => error?.code === 'ENOENT',
+  );
+}));
+
+test('restores pre-existing sqlite database content and permissions when subsequent sqlite activation fails', async () => withTempDirectory(async (root) => {
+  const priorDbContent = Buffer.from('prior-sqlite-database-content');
+  const context = await prepare({
+    root,
+    sqlite: true,
+    existingSqlDatabase: priorDbContent,
+    failFirstDoveconf: true,
+  });
+
+  await assert.rejects(
+    context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID }),
+    (error) => error instanceof MailConfigActivationError && error.code === 'mail_config_validation_failed',
+  );
+
+  const dbStat = await context.mapped.lstatFn(mailSqlTemplatePolicy.databasePath);
+  assert.equal(dbStat.isFile(), true);
+  assert.equal(dbStat.uid, 0);
+  assert.equal(dbStat.gid, MAIL_AUTH_GID);
+  assert.equal(dbStat.mode & 0o777, mailSqlTemplatePolicy.databaseMode);
+  assert.deepEqual(
+    await readFile(context.mapped.mapPath(mailSqlTemplatePolicy.databasePath)),
+    priorDbContent,
+  );
+}));
+

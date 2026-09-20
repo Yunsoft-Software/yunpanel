@@ -238,3 +238,118 @@ test('fails closed on symlink-like live targets and invalid transaction ids', as
     (error) => error instanceof MailConfigBackupError && error.code === 'mail_backup_identity_invalid',
   );
 }));
+
+test('reads legacy v5 backup fixture on disk during upgrade recovery and verifies identity inspection', async () => withTempDirectory(async (root) => {
+  const backupRoot = path.join(root, 'backup');
+  const transactionId = 'legacy-mail-job-v5';
+  const txDir = path.join(backupRoot, transactionId);
+  const { mkdir: fsMkdir, writeFile: fsWriteFile, chmod: fsChmod } = await import('node:fs/promises');
+  await fsMkdir(txDir, { recursive: true, mode: 0o700 });
+  await fsChmod(txDir, 0o700);
+
+  const planSha256 = '1'.repeat(64);
+  const previewSha256 = '2'.repeat(64);
+
+  const testFileContent = Buffer.from('virtual.domain.test OK\n');
+  const testFileSha256 = createHash('sha256').update(testFileContent).digest('hex');
+  const artifactName = `00-${path.basename(mailConfigBackupInternals.legacyTargetPaths[0])}.bak`;
+  await fsWriteFile(path.join(txDir, artifactName), testFileContent, { mode: 0o600 });
+  await fsChmod(path.join(txDir, artifactName), 0o600);
+
+  const artifacts = mailConfigBackupInternals.legacyTargetPaths.map((targetPath, index) => {
+    if (index === 0) {
+      return {
+        targetPath,
+        present: true,
+        backupName: artifactName,
+        sha256: testFileSha256,
+        bytes: testFileContent.length,
+        mode: 0o600,
+        uid: 0,
+        gid: 0,
+      };
+    }
+    return {
+      targetPath,
+      present: false,
+      backupName: null,
+      sha256: null,
+      bytes: 0,
+      mode: null,
+      uid: null,
+      gid: null,
+    };
+  });
+
+  const directories = mailConfigBackupInternals.legacyManagedDirectoryPaths.map((dirPath, index) => {
+    if (index === 0) {
+      return { path: dirPath, present: true, mode: 0o755, uid: 0, gid: 0 };
+    }
+    return { path: dirPath, present: false, mode: null, uid: null, gid: null };
+  });
+
+  const manifest = {
+    version: 5,
+    transactionId,
+    planSha256,
+    previewSha256,
+    artifacts,
+    directories,
+  };
+
+  const manifestContent = `${JSON.stringify(manifest, null, 2)}\n`;
+  const manifestSha256 = createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
+  await fsWriteFile(path.join(txDir, 'manifest.json'), manifestContent, { mode: 0o600 });
+  await fsChmod(path.join(txDir, 'manifest.json'), 0o600);
+
+  const manager = createMailConfigBackupManager({ backupRoot });
+
+  const inspected = await manager.inspectBackupByIdentity({
+    transactionId,
+    planSha256,
+    previewSha256,
+    manifestSha256,
+  });
+
+  assert.equal(inspected.satisfied, true);
+  assert.equal(inspected.result.version, 5);
+  assert.equal(inspected.result.transactionId, transactionId);
+  assert.equal(inspected.result.planSha256, planSha256);
+  assert.equal(inspected.result.previewSha256, previewSha256);
+  assert.equal(inspected.result.manifestSha256, manifestSha256);
+  assert.equal(inspected.result.artifacts.length, mailConfigBackupInternals.legacyTargetPaths.length);
+  assert.equal(inspected.result.directories.length, mailConfigBackupInternals.legacyManagedDirectoryPaths.length);
+
+  await assert.rejects(
+    manager.inspectBackupByIdentity({
+      transactionId,
+      planSha256: '9'.repeat(64),
+      previewSha256,
+      manifestSha256,
+    }),
+    (error) => error instanceof MailConfigBackupError && error.code === 'mail_backup_manifest_invalid',
+  );
+
+  assert.deepEqual(await manager.inspectBackupByIdentity({
+    transactionId,
+    planSha256,
+    previewSha256: '9'.repeat(64),
+    manifestSha256,
+  }), { satisfied: false, result: null });
+
+  assert.deepEqual(await manager.inspectBackupByIdentity({
+    transactionId,
+    planSha256,
+    previewSha256,
+    manifestSha256: '9'.repeat(64),
+  }), { satisfied: false, result: null });
+
+  await fsWriteFile(path.join(txDir, artifactName), Buffer.from('tampered content!'), { mode: 0o600 });
+  assert.deepEqual(await manager.inspectBackupByIdentity({
+    transactionId,
+    planSha256,
+    previewSha256,
+    manifestSha256,
+  }), { satisfied: false, result: null });
+}));
+

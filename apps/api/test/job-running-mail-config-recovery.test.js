@@ -180,3 +180,112 @@ test('version two managed mail recovery preserves backup identity without invent
   assert.equal(completedResult.backupSha256, backupSha256);
   assert.equal(Object.hasOwn(completedResult, 'previousStatus'), false);
 });
+
+test('recovers running managed mail job created before SQLite cutover using legacy digest materialization', async () => {
+  const legacyPreviewDigest = '1'.repeat(64);
+  const legacyConfigSha256 = '2'.repeat(64);
+  const legacyPlanSha256 = '3'.repeat(64);
+  const v5BackupSha256 = '4'.repeat(64);
+
+  const fx = fixture({
+    receipt: {
+      version: 3,
+      serverId,
+      jobId,
+      mailDomainId,
+      desiredStatus: 'enabled',
+      previewDigest: legacyPreviewDigest,
+      previousRevision: 4,
+      previousStatus: 'disabled',
+      configurationSha256: legacyConfigSha256,
+      planSha256: legacyPlanSha256,
+      backupSha256: v5BackupSha256,
+      readinessSha256,
+      applied: true,
+    },
+  });
+
+  // Override context payload to match legacy digests
+  fx.options.loadJobContext = async () => ({
+    id: jobId,
+    serverId,
+    status: 'running',
+    operation: OPERATIONS.MAIL_CONFIG_APPLY,
+    resourceType: 'mail_domain',
+    resourceId: mailDomainId,
+    payload: {
+      mailDomainId,
+      expectedRevision: 4,
+      desiredStatus: 'enabled',
+      previewDigest: legacyPreviewDigest,
+      configurationSha256: legacyConfigSha256,
+    },
+  });
+
+  // Override materializeTransition to simulate matching legacyPublicPreview
+  fx.options.materializeTransition = async (input, digests) => {
+    assert.equal(digests.expectedPreviewDigest, legacyPreviewDigest);
+    assert.equal(digests.expectedConfigurationSha256, legacyConfigSha256);
+    return {
+      transition: {
+        mailDomainId,
+        previousRevision: 4,
+        previousStatus: 'disabled',
+        desiredStatus: 'enabled',
+      },
+      preview: {
+        sha256: legacyConfigSha256,
+        requirements: ['mail_submission', 'mail_srs'],
+      },
+      sensitiveArtifacts: [{ content: 'must-not-escape' }],
+    };
+  };
+
+  fx.options.inspectActiveEvidence = async (preview) => {
+    assert.equal(preview.sha256, legacyConfigSha256);
+    return {
+      satisfied: true,
+      result: {
+        version: 1,
+        previewSha256: legacyConfigSha256,
+        planSha256: legacyPlanSha256,
+        readinessSha256,
+        applied: true,
+        sideEffects: true,
+      },
+    };
+  };
+
+  let completedResult;
+  const originalComplete = fx.options.jobRegistry.complete;
+  fx.options.jobRegistry.complete = async (input) => {
+    completedResult = input.result;
+    return originalComplete(input);
+  };
+
+  const outcome = await recoverRunningMailConfig(fx.options);
+  assert.equal(outcome.status, 'succeeded');
+  assert.equal(outcome.recoveryMethod, 'verified_mail_config_receipt_and_active_host_state');
+  assert.equal(completedResult.version, 3);
+  assert.equal(completedResult.configurationSha256, legacyConfigSha256);
+  assert.equal(completedResult.planSha256, legacyPlanSha256);
+  assert.equal(completedResult.backupSha256, v5BackupSha256);
+});
+
+test('SQLite mail recovery fails closed when active host evidence is unsatisfied due to unretired legacy lookup files or db corruption', async () => {
+  const fx = fixture({
+    evidence: { satisfied: false, result: null },
+  });
+
+  await assert.rejects(
+    recoverRunningMailConfig(fx.options),
+    { code: 'job_mail_config_recovery_evidence_not_satisfied' },
+  );
+
+  assert.equal(
+    fx.events.includes('begin') || fx.events.includes('complete'),
+    false,
+    'Must not begin reconciliation or complete job on drifted host evidence',
+  );
+});
+
