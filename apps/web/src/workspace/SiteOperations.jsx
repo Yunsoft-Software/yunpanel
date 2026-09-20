@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
+import { panelRequest } from '../api.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
 import { certificateState, formatDate, siteHref } from './site-model.js';
@@ -91,12 +92,31 @@ export function SslOperations({ domain }) {
       ['Başlangıç', formatDate(certificate?.validFrom)], ['Bitiş', formatDate(certificate?.validTo)],
       ['HTTPS tercihi', domain.httpsMode === 'managed' ? 'Yönetilen' : 'Kapalı'],
     ]} />
-    {certificate?.state === 'active' ? <div className="ws-section-body"><div className="ws-actions"><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/certificates/${encodeURIComponent(certificate.id)}/renew`, { dryRun: true }))}>Yenilemeyi test et</Button><Button variant="primary" disabled={locked} onClick={() => setConfirm('renew')}>Sertifikayı yenile</Button></div><p className="ws-muted">Test işlemi production sertifikası üretmez. İş sonucunu işlem durumundan takip edin.</p></div> : !domain.certificateId ? <form className="ws-form" onSubmit={(event) => { event.preventDefault(); if (canIssue) setConfirm('issue'); }}>
+    {certificate?.state === 'active' ? <div className="ws-section-body"><div className="ws-actions"><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/certificates/${encodeURIComponent(certificate.id)}/renew`, { dryRun: true }))}>Yenilemeyi test et</Button><Button variant="primary" disabled={locked} onClick={() => setConfirm('renew')}>Sertifikayı yenile</Button></div><p className="ws-muted">Test işlemi production sertifikası üretmez. İş sonucunu işlem durumundan takip edin.</p></div> : !domain.certificateId ? (domain.httpsMode !== 'managed' ? <div className="ws-section-body"><p className="ws-muted">Bu alan adı için HTTPS kapalı olarak ayarlanmış. SSL sertifikası isteyebilmek için yönetilen HTTPS modunu etkinleştirmeniz gerekir.</p><div className="ws-actions"><Button variant="primary" disabled={locked} onClick={async () => {
+      await operation.perform(async () => {
+        const preview = await panelRequest(`/domains/${encodeURIComponent(domain.id)}/update-preview`, {
+          method: 'POST',
+          body: { changes: { httpsMode: 'managed' } },
+        });
+        await panelRequest(`/domains/${encodeURIComponent(domain.id)}`, {
+          method: 'PATCH',
+          body: {
+            changes: { httpsMode: 'managed' },
+            previewDigest: preview.previewDigest,
+            confirmation: preview.confirmation,
+          },
+        });
+        await runJob(`/domains/${encodeURIComponent(domain.id)}/stage`);
+        await domains.refresh();
+      });
+    }}>Yönetilen HTTPS'i etkinleştir</Button></div></div> : <form className="ws-form" onSubmit={(event) => { event.preventDefault(); if (canIssue) setConfirm('issue'); }}>
       <p className="ws-muted">Sertifika istemeden önce yönetilen HTTPS seçili ve alan adının güncel Nginx yapılandırması etkin olmalı. DNS bu sunucuyu göstermeli; HTTP doğrulama yolu erişilebilir olmalı.</p>
+      {domain.appliedRevision !== domain.desiredRevision && <div className="ws-actions" style={{ marginBottom: 16 }}><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Yapılandırmayı hazırla</Button><Button variant="primary" disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Yapılandırmayı etkinleştir</Button></div>}
       <label>ACME hesap e-postası<input type="email" value={email} required onChange={(event) => { setEmail(event.target.value); setRequested(false); }} disabled={locked} /></label>
       <div className="ws-actions"><Button type="submit" variant="primary" disabled={!canIssue}>Production sertifikası iste</Button><Button disabled={!canIssue || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)} onClick={() => issue(true)}>ACME doğrulamasını test et</Button></div>
-      {!canIssue && <p className="ws-muted">Önce Alan adları sekmesindeki yapılandırma durumunu kontrol edin. Devam eden sertifika işi varsa tamamlanmasını izleyin.</p>}
-    </form> : <div className="ws-section-body"><p className="ws-muted">Sertifika kaydı henüz hazır değil veya okunamıyor. İşler ekranındaki sonucu kontrol edin.</p></div>}
+      {!canIssue && <p className="ws-muted">Önce yapılandırmayı hazırlayıp etkinleştirin. Devam eden sertifika işi varsa tamamlanmasını izleyin.</p>}
+    </form>) : <div className="ws-section-body"><p className="ws-muted">Sertifika kaydı henüz hazır değil veya okunamıyor. İşler ekranındaki sonucu kontrol edin.</p></div>}
+    {domain.appliedRevision !== domain.desiredRevision && certificate?.state === 'active' && <div className="ws-section-body"><p className="ws-muted">Sertifika aktif edildi, Nginx yapılandırmasını güncelleyip etkinleştirin.</p><div className="ws-actions"><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Yapılandırmayı hazırla</Button><Button variant="primary" disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Yapılandırmayı etkinleştir</Button></div></div>}
     {confirm && <ConfirmDialog title={confirm === 'renew' ? 'SSL yenilemesini başlat' : 'Production sertifikası iste'} message={`${domain.primaryDomain} için gerçek ACME işlemi başlatılacak. DNS veya erişim hataları sağlayıcının deneme limitlerini tüketebilir.`} confirmation={domain.primaryDomain} error={operation.error} busy={operation.busy} onCancel={() => setConfirm(null)} onConfirm={async () => {
       if (confirm === 'issue') await issue(false);
       else if (certificate) { const ok = await operation.perform(() => runJob(`/certificates/${encodeURIComponent(certificate.id)}/renew`, { dryRun: false })); if (ok) setConfirm(null); }
