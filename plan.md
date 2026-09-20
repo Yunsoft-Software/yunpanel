@@ -105,6 +105,7 @@ Son PowerDNS soket sağlığı, yetkili sorgular, non-recursion ve konfigürasyo
 Son restic ve rclone yedekleme motoru canlı kabulü: `docs/history/restic-rclone-live-acceptance-2026-09-20.md`.
 Son nftables tek firewall authority ve CrowdSec engine/bouncer canlı kabulü: `docs/history/nftables-crowdsec-live-acceptance-2026-09-20.md`.
 Son WP-CLI ve Composer site-user bounded adapter canlı kabulü: `docs/history/wp-cli-composer-live-acceptance-2026-09-20.md`.
+Son Settings sayfası ve sistem ayarları canlı kabulü: `docs/history/settings-page-live-acceptance-2026-09-20.md`.
 Son fresh Website SPF/DMARC policy ve durable DNS evidence bağlama ilerlemesi: `apps/api/src/website-mail-dns-provisioning-handler.js`.
 
 ## 0 — Değiştirilemez ürün kararı
