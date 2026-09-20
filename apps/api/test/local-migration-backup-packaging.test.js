@@ -34,7 +34,7 @@ test('Debian build installs the migration backup CLI, restore rehearsal source a
 
   assert.match(buildScript, /install -m 0755 scripts\/local-migration-backup\.mjs .*\/usr\/lib\/yunpanel\/scripts\/local-migration-backup\.mjs/);
   assert.match(buildScript, /docs\/local-migration-backup\.md/);
-  assert.match(buildScript, /cp -a apps\/api apps\/agent apps\/web .*\/usr\/lib\/yunpanel\/apps\//);
+  assert.match(buildScript, /cp -a apps\/api apps\/web .*\/usr\/lib\/yunpanel\/apps\//);
 
   assert.match(script, /^#!\/usr\/bin\/env node/m);
   assert.match(script, /localMigrationBackupInternals\.defaultRoot/);

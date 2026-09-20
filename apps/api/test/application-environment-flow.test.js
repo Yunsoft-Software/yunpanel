@@ -9,6 +9,7 @@ import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { reconcileCompletedJob } from '../src/job-reconciliation.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {
@@ -37,7 +38,7 @@ async function requestJson(url, { method = 'GET', token, body } = {}) {
   return { response, payload: response.status === 204 ? null : await response.json() };
 }
 
-test('admin environment APIs mask secrets while the assigned agent can materialize them', async () => {
+test('admin environment APIs mask secrets while in-process execution materializes them', async () => {
   const serverRegistry = createServerRegistry();
   const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'environment-server' });
   const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'environment-host' });
@@ -56,12 +57,13 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
     applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
   });
 
+  const jobRegistry = createJobRegistry();
   const app = withPanelContext(createApp({
     environment: 'production',
     registry: serverRegistry,
     applicationRegistry,
     applicationEnvironmentRegistry,
-    jobRegistry: createJobRegistry(),
+    jobRegistry,
     domainRegistry: createDomainRegistry(),
     certificateRegistry: createCertificateRegistry(),
   }));
@@ -90,15 +92,17 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
     assert.equal(secret.secret, true);
     assert.equal('value' in secret, false);
 
-    const materialized = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/applications/${application.id}/environment`,
-      { token: enrolled.agentToken },
-    );
-    assert.equal(materialized.response.status, 200);
-    assert.deepEqual(materialized.payload.data, {
+    const materialized = await applicationEnvironmentRegistry.materialize(application.id);
+    assert.deepEqual(materialized, {
       API_TOKEN: 'private-token-value',
       PUBLIC_URL: 'https://example.test',
     });
+
+    const retiredHttpMaterialize = await requestJson(
+      `${baseUrl}/api/servers/${enrolled.server.id}/applications/${application.id}/environment`,
+      { token: enrolled.agentToken },
+    );
+    assert.equal(retiredHttpMaterialize.response.status, 404);
 
     const credentialWrite = await requestJson(`${baseUrl}/api/applications/${application.id}/deployment-credential`, {
       method: 'PUT', body: { type: 'github_token', token: deployToken },
@@ -127,11 +131,14 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
     assert.equal(webhookMetadata.payload.data.configured, true);
     assert.equal(JSON.stringify(webhookMetadata.payload).includes(webhookSecret), false);
 
-    const agentCredential = await requestJson(
+    const agentCredential = await applicationEnvironmentRegistry.materializeDeploymentCredential(application.id);
+    assert.deepEqual(agentCredential, { type: 'github_token', token: deployToken });
+
+    const retiredHttpCredential = await requestJson(
       `${baseUrl}/api/servers/${enrolled.server.id}/applications/${application.id}/deployment-credential`,
       { token: enrolled.agentToken },
     );
-    assert.deepEqual(agentCredential.payload.data, { type: 'github_token', token: deployToken });
+    assert.equal(retiredHttpCredential.response.status, 404);
 
     const wrongDelete = await requestJson(`${baseUrl}/api/applications/${application.id}/deployment-credential`, {
       method: 'DELETE', body: { confirmation: 'delete' },
@@ -148,11 +155,13 @@ test('admin environment APIs mask secrets while the assigned agent can materiali
     const deploy = await requestJson(`${baseUrl}/api/applications/${application.id}/deploy`, { method: 'POST' });
     assert.equal(deploy.response.status, 202);
     assert.equal(JSON.stringify(deploy.payload).includes(deployToken), false);
-    const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
+    const claimed = await jobRegistry.claimNext(enrolled.server.id);
+    assert.ok(claimed);
+    assert.equal(JSON.stringify(claimed).includes(deployToken), false);
+    const retiredClaim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
       token: enrolled.agentToken,
     });
-    assert.equal(claimed.response.status, 200);
-    assert.equal(JSON.stringify(claimed.payload).includes(deployToken), false);
+    assert.equal(retiredClaim.response.status, 404);
     const blockedDelete = await requestJson(`${baseUrl}/api/applications/${application.id}/deployment-credential`, {
       method: 'DELETE', body: { confirmation: `delete-deployment-credential:${application.id}` },
     });
@@ -224,28 +233,23 @@ test('dotenv import revision stays saved until the exact Node environment reache
     });
     assert.equal(blockedMutation.response.status, 409);
 
-    const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, { token: enrolled.agentToken });
-    assert.equal(claimed.payload.data.envelope.payload.environmentRevision, 1);
-    const materialized = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/applications/${application.id}/environment?revision=1`,
-      { token: enrolled.agentToken },
+    const claimed = await jobRegistry.claimNext(enrolled.server.id);
+    assert.ok(claimed);
+    assert.equal(claimed.envelope.payload.environmentRevision, 1);
+    const materialized = await applicationEnvironmentRegistry.materialize(application.id, { expectedRevision: 1 });
+    assert.deepEqual(materialized, { API_TOKEN: 'private-value', FEATURE: 'enabled' });
+    await assert.rejects(
+      async () => applicationEnvironmentRegistry.materialize(application.id, { expectedRevision: 0 }),
+      { code: 'environment_revision_conflict' },
     );
-    assert.equal(materialized.payload.environmentRevision, 1);
-    assert.deepEqual(materialized.payload.data, { API_TOKEN: 'private-value', FEATURE: 'enabled' });
-    const staleMaterialization = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/applications/${application.id}/environment?revision=0`,
-      { token: enrolled.agentToken },
-    );
-    assert.equal(staleMaterialization.response.status, 409);
 
-    const completed = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${claimed.payload.data.job.id}/result`,
-      {
-        method: 'POST', token: enrolled.agentToken,
-        body: { status: 'succeeded', result: { releaseId, serviceName, port: 3300, healthPath: '/health', healthy: true, restarted: true } },
-      },
-    );
-    assert.equal(completed.response.status, 200);
+    const completed = await jobRegistry.complete({
+      serverId: enrolled.server.id,
+      jobId: claimed.job.id,
+      status: 'succeeded',
+      result: { releaseId, serviceName, port: 3300, healthPath: '/health', healthy: true, restarted: true, environmentRevision: 1 },
+    });
+    await reconcileCompletedJob({ applicationRegistry, applicationEnvironmentRegistry, job: completed });
     const applied = await requestJson(`${baseUrl}/api/applications/${application.id}/environment/status`);
     assert.equal(applied.payload.data.savedRevision, 1);
     assert.equal(applied.payload.data.appliedRevision, 1);
@@ -263,7 +267,7 @@ test('dotenv import revision stays saved until the exact Node environment reache
   });
 });
 
-test('an agent cannot fetch environment belonging to a different managed server', async () => {
+test('retired agent HTTP environment routes return 404 for every server and application', async () => {
   const serverRegistry = createServerRegistry();
   const firstToken = await serverRegistry.issueEnrollmentToken({ label: 'first' });
   const secondToken = await serverRegistry.issueEnrollmentToken({ label: 'second' });
@@ -300,12 +304,12 @@ test('an agent cannot fetch environment belonging to a different managed server'
       { token: second.agentToken },
     );
     assert.equal(response.response.status, 404);
-    assert.equal(response.payload.error.code, 'application_not_found');
+    assert.equal(response.payload.error.code, 'not_found');
     const credential = await requestJson(
       `${baseUrl}/api/servers/${second.server.id}/applications/${application.id}/deployment-credential`,
       { token: second.agentToken },
     );
     assert.equal(credential.response.status, 404);
-    assert.equal(credential.payload.error.code, 'application_not_found');
+    assert.equal(credential.payload.error.code, 'not_found');
   });
 });

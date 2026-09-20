@@ -6,9 +6,10 @@ import { createApp } from '../src/app.js';
 import { createApplicationRegistry } from '../src/application-registry.js';
 import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createJobRegistry, jobPublicView } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
+import { completeNextJob } from './helpers/job-completion-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -96,39 +97,30 @@ test('Node application deploy reconciles a healthy systemd release and proxy tar
     assert.equal(deploy.payload.data.job.operation, OPERATIONS.APP_NODE_DEPLOY);
     assert.equal(deploy.payload.data.application.state, 'deploying');
 
-    const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
-    });
-    assert.equal(claimed.response.status, 200);
-    assert.equal(claimed.payload.data.envelope.operation, OPERATIONS.APP_NODE_DEPLOY);
-    const deploymentId = claimed.payload.data.job.id;
-    assert.equal(claimed.payload.data.envelope.payload.deploymentId, deploymentId);
-    assert.equal(claimed.payload.data.envelope.payload.runtime.port, 3300);
-    assert.deepEqual(claimed.payload.data.envelope.payload.gitTarget, { kind: 'commit', value: 'c'.repeat(40) });
-
-    const completed = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${deploymentId}/result`,
-      {
-        method: 'POST',
-        token: enrolled.agentToken,
-        body: {
-          status: 'succeeded',
-          result: {
-            deploymentId,
-            releaseId: deploymentId,
-            previousReleaseId: null,
-            commitSha: 'c'.repeat(40),
-            serviceName: serviceName(application.id),
-            port: 3300,
-            healthPath: '/health',
-            healthy: true,
-            rawLogs: 'must not persist',
-          },
-        },
+    const deploymentId = deploy.payload.data.job.id;
+    const { claim, job: completedJob } = await completeNextJob(jobRegistry, {
+      serverId: enrolled.server.id,
+      applicationRegistry,
+      status: 'succeeded',
+      result: {
+        deploymentId,
+        releaseId: deploymentId,
+        previousReleaseId: null,
+        commitSha: 'c'.repeat(40),
+        serviceName: serviceName(application.id),
+        port: 3300,
+        healthPath: '/health',
+        healthy: true,
+        rawLogs: 'must not persist',
       },
-    );
-    assert.equal(completed.response.status, 200);
-    assert.equal('rawLogs' in completed.payload.data.result, false);
+    });
+    assert.equal(claim.envelope.operation, OPERATIONS.APP_NODE_DEPLOY);
+    assert.equal(claim.envelope.payload.deploymentId, deploymentId);
+    assert.equal(claim.envelope.payload.runtime.port, 3300);
+    assert.deepEqual(claim.envelope.payload.gitTarget, { kind: 'commit', value: 'c'.repeat(40) });
+
+    const publicView = jobPublicView(completedJob);
+    assert.equal('rawLogs' in publicView.result, false);
 
     const active = await applicationRegistry.getApplication(application.id);
     assert.equal(active.state, 'active');

@@ -12,15 +12,10 @@ test('retired enrollment endpoint is not an agent-channel auth bypass', () => {
   assert.equal(isAgentRoute('POST', '/api/servers/enrollment-tokens'), false);
 });
 
-test('only retained rollback transport routes keep the agent-channel auth boundary', () => {
-  assert.equal(isAgentRoute('POST', `/api/servers/${serverId}/heartbeat`), true);
-  assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/commands/next`), true);
-  assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/applications/${applicationId}/environment`), true);
-  assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/applications/${applicationId}/deployment-credential`), true);
-  assert.equal(isAgentRoute('POST', `/api/servers/${serverId}/commands/${jobId}/result`), true);
-
-  assert.equal(isAgentRoute('POST', `/api/servers/${serverId}/commands/next`), false);
-  assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/heartbeat`), false);
-  assert.equal(isAgentRoute('POST', `/api/servers/${serverId}/applications/${applicationId}/deployment-credential`), false);
-  assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/commands/${jobId}/result`), false);
+test('legacy agent transport routes are completely retired and do not bypass auth', () => {
+  assert.equal(isAgentRoute('POST', `/api/servers/${serverId}/heartbeat`), false);
+  assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/commands/next`), false);
+  assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/applications/${applicationId}/environment`), false);
+  assert.equal(isAgentRoute('GET', `/api/servers/${serverId}/applications/${applicationId}/deployment-credential`), false);
+  assert.equal(isAgentRoute('POST', `/api/servers/${serverId}/commands/${jobId}/result`), false);
 });

@@ -229,11 +229,6 @@ export function createApp({
     if (!inLocalScope(job)) throw new JobRegistryError('job_not_found', 'Job not found', 404);
     return job;
   };
-  const rejectLegacyAgentTransport = () => {
-    if (localServerId !== null) {
-      throw new RegistryError('agent_transport_removed', 'Remote agent transport is not available on a local panel', 404);
-    }
-  };
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
@@ -283,70 +278,6 @@ export function createApp({
       resourceId: server.id,
     });
     return response.status(202).json({ data: job });
-  });
-  app.post('/api/servers/:serverId/heartbeat', async (request, response) => {
-    rejectLegacyAgentTransport();
-    const server = await registry.heartbeat({
-      serverId: request.params.serverId,
-      agentToken: bearerToken(request),
-      agentVersion: request.body?.agentVersion ?? null,
-      inventory: request.body?.inventory ?? null,
-      services: request.body?.services ?? null,
-    });
-    return response.json({ data: server });
-  });
-  app.get('/api/servers/:serverId/commands/next', async (request, response) => {
-    rejectLegacyAgentTransport();
-    await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
-    const claimed = await jobRegistry.claimNext(request.params.serverId);
-    if (!claimed) return response.status(204).end();
-    return response.json({ data: claimed });
-  });
-  app.get('/api/servers/:serverId/applications/:applicationId/environment', async (request, response) => {
-    rejectLegacyAgentTransport();
-    await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application || application.serverId !== request.params.serverId || application.type !== 'node') {
-      throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
-    }
-    const expectedRevision = requestedEnvironmentRevision(request.query);
-    const data = await applicationEnvironmentRegistry.materialize(application.id, { expectedRevision });
-    const environment = await applicationEnvironmentRegistry.environmentStatus(application.id);
-    return response.json({ data, environmentRevision: environment.savedRevision });
-  });
-  app.get('/api/servers/:serverId/applications/:applicationId/deployment-credential', async (request, response) => {
-    rejectLegacyAgentTransport();
-    await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
-    const application = await applicationRegistry.getApplication(request.params.applicationId);
-    if (!application || application.serverId !== request.params.serverId || !['static', 'node'].includes(application.type)) {
-      throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
-    }
-    return response.json({ data: await applicationEnvironmentRegistry.materializeDeploymentCredential(application.id) });
-  });
-  app.post('/api/servers/:serverId/commands/:jobId/result', async (request, response) => {
-    rejectLegacyAgentTransport();
-    const jobId = request.params.jobId;
-    const reconciliation = (async () => {
-      await registry.authenticateAgent({ serverId: request.params.serverId, agentToken: bearerToken(request) });
-      const job = await jobRegistry.complete({
-        serverId: request.params.serverId,
-        jobId,
-        status: request.body?.status,
-        result: request.body?.result ?? null,
-        error: request.body?.error ?? null,
-      });
-      await reconcileCompletedJob({
-        domainRegistry, certificateRegistry, applicationRegistry, applicationEnvironmentRegistry, job,
-      });
-      return job;
-    })();
-
-    reconciliationJobs.set(jobId, reconciliation);
-    try {
-      return response.json({ data: jobPublicView(await reconciliation) });
-    } finally {
-      if (reconciliationJobs.get(jobId) === reconciliation) reconciliationJobs.delete(jobId);
-    }
   });
 
   app.get('/api/applications', requirePanelRouteAccess, async (request, response) => response.json({ data: localOnly(await applicationRegistry.listApplications()) }));

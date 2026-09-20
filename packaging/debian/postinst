@@ -58,7 +58,6 @@ fi
 install -d -o yunpanel -g yunpanel -m 0700 /var/lib/yunpanel/control-plane
 install -d -o vmail -g vmail -m 0750 /var/lib/yunpanel/mail
 install -d -o root -g yunpanel-mailauth -m 0750 /var/lib/yunpanel/mail-auth
-install -d -o root -g root -m 0700 /var/lib/yunpanel/agent
 install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel/roundcube
 install -d -o yunpanel-roundcube -g yunpanel-roundcube -m 0700 /var/lib/yunpanel/roundcube/tmp
 install -d -o yunpanel-phpmyadmin -g yunpanel-phpmyadmin -m 0700 /var/lib/yunpanel/phpmyadmin
@@ -71,7 +70,6 @@ install -d -o root -g yunpanel-phpmyadmin -m 0750 /usr/lib/yunpanel/phpmyadmin
 install -d -o root -g yunpanel-elfinder -m 0750 /run/yunpanel-elfinder
 install -d -o root -g yunpanel-elfinder -m 0750 /usr/lib/yunpanel/elfinder
 install -d -o root -g root -m 0700 /etc/yunpanel/control-plane
-install -d -o root -g root -m 0700 /etc/yunpanel/agent
 install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/web
 
 proxy_env=/etc/yunpanel/control-plane/proxy.env
@@ -182,17 +180,13 @@ if command -v systemctl >/dev/null 2>&1; then
     systemctl try-restart dovecot.service >/dev/null 2>&1 || true
   fi
   systemctl enable yunpanel-api.service yunpanel-web.service >/dev/null 2>&1 || true
+  systemctl disable --now yun-agent.service >/dev/null 2>&1 || true
   if [ -z "${2:-}" ]; then
-    if [ -f /etc/yunpanel/agent/agent.env ]; then
-      systemctl enable yun-agent.service >/dev/null 2>&1 || true
-    fi
     [ -f /etc/yunpanel/control-plane/api.env ] && systemctl start yunpanel-api.service || true
-    [ -f /etc/yunpanel/agent/agent.env ] && systemctl start yun-agent.service || true
     [ -f /etc/yunpanel/web/web.env ] && systemctl start yunpanel-web.service || true
   else
     [ -f /etc/yunpanel/control-plane/api.env ] && systemctl try-restart yunpanel-api.service || true
     [ -f /etc/yunpanel/web/web.env ] && systemctl try-restart yunpanel-web.service || true
-    [ -f /etc/yunpanel/agent/agent.env ] && systemctl try-restart yun-agent.service || true
   fi
 fi
 

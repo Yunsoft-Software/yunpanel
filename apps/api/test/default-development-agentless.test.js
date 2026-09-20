@@ -12,8 +12,8 @@ test('default development launcher starts only API and web', async () => {
   assert.doesNotMatch(source, /dev:agent|name: 'agent'|YUN_AGENT_MODE/);
 });
 
-test('legacy agent development stays explicit instead of being removed before rollback acceptance', async () => {
+test('legacy agent package and scripts are completely retired', async () => {
   const packageJson = JSON.parse(await readFile(packageUrl, 'utf8'));
   assert.equal(packageJson.scripts.dev, 'node scripts/dev.mjs');
-  assert.equal(packageJson.scripts['dev:agent'], 'npm run dev --workspace @yunpanel/agent');
+  assert.equal(packageJson.scripts['dev:agent'], undefined);
 });

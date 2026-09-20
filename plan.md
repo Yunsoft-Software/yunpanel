@@ -122,6 +122,7 @@ Son External DNS requirements ve Cloudflare sağlayıcı canlı kabulü: `docs/h
 Son Node.js Passenger varsayılanı ve direct-systemd migration uyumluluğu ilerlemesi: `docs/history/passenger-default-migration-cleanup-progress-2026-09-21.md`.
 Son fresh Website SPF/DMARC policy ve durable DNS evidence bağlama ilerlemesi: `apps/api/src/website-mail-dns-provisioning-handler.js`.
 Son yerel migration yedekleme, doğrulama ve restore staging canlı kabulü: `docs/history/local-migration-backup-live-acceptance-2026-09-21.md`.
+Son eski agent taşıma katmanı ve servis birimlerinin kaldırılması canlı kabulü: `docs/history/legacy-agent-transport-removal-2026-09-21.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -180,7 +181,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 # P2 — Migration temizliği ve son ürün yüzeyi
 
 - [ ] Legacy migration dönemi tamamlandığında direct-systemd compatibility adapter kodlarını kaldır.
-- [ ] Agentless local backend acceptance sonrası retained legacy agent transport/package/state kaldır.
 - [ ] Backend/functionality tamamlandıktan sonra enterprise UI/UX polish.
 
 # Uygulama sırası — blocker yoksa sapma yok

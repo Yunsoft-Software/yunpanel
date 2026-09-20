@@ -9,6 +9,7 @@ import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
+import { completeNextJob } from './helpers/job-completion-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -103,40 +104,28 @@ test('Node process status refresh is queued, sanitized and available through the
     assert.equal(refresh.response.status, 202);
     assert.equal(refresh.payload.data.operation, OPERATIONS.APP_NODE_STATUS);
 
-    const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
-    });
-    assert.equal(claimed.response.status, 200);
-    assert.equal(claimed.payload.data.envelope.operation, OPERATIONS.APP_NODE_STATUS);
-    assert.equal(claimed.payload.data.envelope.payload.releaseId, releaseId);
-    assert.equal(claimed.payload.data.envelope.payload.runtime.start.entryFile, 'dist/server.js');
-
-    const completed = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${claimed.payload.data.job.id}/result`,
-      {
-        method: 'POST',
-        token: enrolled.agentToken,
-        body: {
-          status: 'succeeded',
-          result: {
-            releaseId,
-            serviceName: managedService,
-            port: 3100,
-            healthPath: '/health',
-            loadState: 'loaded',
-            activeState: 'active',
-            subState: 'running',
-            restartCount: 3,
-            mainPid: 4321,
-            healthy: true,
-            inspectionError: false,
-            rawJournal: 'not persisted',
-          },
-        },
+    const { claim } = await completeNextJob(jobRegistry, {
+      serverId: enrolled.server.id,
+      applicationRegistry,
+      status: 'succeeded',
+      result: {
+        releaseId,
+        serviceName: managedService,
+        port: 3100,
+        healthPath: '/health',
+        loadState: 'loaded',
+        activeState: 'active',
+        subState: 'running',
+        restartCount: 3,
+        mainPid: 4321,
+        healthy: true,
+        inspectionError: false,
+        rawJournal: 'not persisted',
       },
-    );
-    assert.equal(completed.response.status, 200);
-    assert.equal('rawJournal' in completed.payload.data.result, false);
+    });
+    assert.equal(claim.envelope.operation, OPERATIONS.APP_NODE_STATUS);
+    assert.equal(claim.envelope.payload.releaseId, releaseId);
+    assert.equal(claim.envelope.payload.runtime.start.entryFile, 'dist/server.js');
 
     const status = await requestJson(`${baseUrl}/api/applications/${application.id}/status`);
     assert.equal(status.response.status, 200);

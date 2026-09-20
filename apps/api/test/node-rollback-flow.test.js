@@ -6,9 +6,10 @@ import { createApp } from '../src/app.js';
 import { createApplicationRegistry } from '../src/application-registry.js';
 import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createJobRegistry, jobPublicView } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
+import { completeNextJob } from './helpers/job-completion-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -115,39 +116,30 @@ test('Node rollback queues desired runtime state and reconciles a healthy retain
     assert.equal(rollback.payload.data.application.state, 'rolling_back');
     assert.equal(rollback.payload.data.application.pendingRollbackReleaseId, releaseOne);
 
-    const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
-    });
-    assert.equal(claimed.response.status, 200);
-    assert.equal(claimed.payload.data.envelope.operation, OPERATIONS.APP_NODE_ROLLBACK);
-    assert.equal(claimed.payload.data.envelope.payload.releaseId, releaseOne);
-    assert.equal(claimed.payload.data.envelope.payload.currentReleaseId, releaseTwo);
-    assert.equal(claimed.payload.data.envelope.payload.runtime.port, 3100);
-    assert.equal(claimed.payload.data.envelope.payload.runtime.healthPath, '/health');
-
-    const completed = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${claimed.payload.data.job.id}/result`,
-      {
-        method: 'POST',
-        token: enrolled.agentToken,
-        body: {
-          status: 'succeeded',
-          result: {
-            releaseId: releaseOne,
-            previousReleaseId: releaseTwo,
-            serviceName: managedService,
-            port: 3100,
-            healthPath: '/health',
-            healthy: true,
-            active: true,
-            ignored: 'not persisted',
-          },
-        },
+    const { claim, job: completedJob } = await completeNextJob(jobRegistry, {
+      serverId: enrolled.server.id,
+      applicationRegistry,
+      status: 'succeeded',
+      result: {
+        releaseId: releaseOne,
+        previousReleaseId: releaseTwo,
+        serviceName: managedService,
+        port: 3100,
+        healthPath: '/health',
+        healthy: true,
+        active: true,
+        ignored: 'not persisted',
       },
-    );
-    assert.equal(completed.response.status, 200, JSON.stringify(completed.payload));
-    assert.equal(completed.payload.data.result.serviceName, managedService);
-    assert.equal('ignored' in completed.payload.data.result, false);
+    });
+    assert.equal(claim.envelope.operation, OPERATIONS.APP_NODE_ROLLBACK);
+    assert.equal(claim.envelope.payload.releaseId, releaseOne);
+    assert.equal(claim.envelope.payload.currentReleaseId, releaseTwo);
+    assert.equal(claim.envelope.payload.runtime.port, 3100);
+    assert.equal(claim.envelope.payload.runtime.healthPath, '/health');
+    assert.equal(completedJob.result.serviceName, managedService);
+
+    const publicView = jobPublicView(completedJob);
+    assert.equal('ignored' in publicView.result, false);
 
     const rolledBack = await applicationRegistry.getApplication(application.id);
     assert.equal(rolledBack.state, 'active');

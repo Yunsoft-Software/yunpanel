@@ -7,6 +7,7 @@ import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
+import { completeNextJob } from './helpers/job-completion-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -72,36 +73,23 @@ test('successful agent deploy result cannot overwrite control-plane state when p
     });
     assert.equal(deploy.response.status, 202);
 
-    const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
-    });
-    const deploymentId = claimed.payload.data.job.id;
-
-    const completed = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${deploymentId}/result`,
-      {
-        method: 'POST',
-        token: enrolled.agentToken,
-        body: {
-          status: 'succeeded',
-          result: {
-            deploymentId,
-            releaseId: deploymentId,
-            commitSha: 'b'.repeat(40),
-            previousReleaseId: null,
-            artifactFiles: 10,
-            artifactBytes: 4096,
-          },
+    const deploymentId = deploy.payload.data.job.id;
+    await assert.rejects(
+      async () => completeNextJob(jobRegistry, {
+        serverId: enrolled.server.id,
+        applicationRegistry,
+        status: 'succeeded',
+        result: {
+          deploymentId,
+          releaseId: deploymentId,
+          commitSha: 'b'.repeat(40),
+          previousReleaseId: null,
+          artifactFiles: 10,
+          artifactBytes: 4096,
         },
-      },
+      }),
+      (error) => error.code === 'reconcile_release_state_drift',
     );
-    assert.equal(completed.response.status, 409);
-    assert.deepEqual(completed.payload, {
-      error: {
-        code: 'reconcile_release_state_drift',
-        message: 'Completed job reconciliation failed',
-      },
-    });
 
     const state = await applicationRegistry.getApplication(application.id);
     assert.equal(state.state, 'active');

@@ -4,9 +4,10 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import { createApp } from '../src/app.js';
 import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createJobRegistry, jobPublicView } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
+import { completeNextJob } from './helpers/job-completion-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -105,29 +106,20 @@ test('ACME dry-run validation stores no certificate files and does not block pro
     assert.equal(validationRecord.state, 'validating');
     assert.equal(validationRecord.staging, true);
 
-    const claim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
-    });
-    assert.equal(claim.payload.data.envelope.operation, OPERATIONS.SSL_ISSUE);
-    assert.equal(claim.payload.data.envelope.payload.staging, true);
-
-    const completed = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${claim.payload.data.job.id}/result`,
-      {
-        method: 'POST',
-        token: enrolled.agentToken,
-        body: {
-          status: 'succeeded',
-          result: {
-            certName: validationRecord.certName,
-            domains: validationRecord.domains,
-            staging: true,
-            status: 'validated',
-          },
-        },
+    const { claim } = await completeNextJob(jobRegistry, {
+      serverId: enrolled.server.id,
+      certificateRegistry,
+      domainRegistry,
+      status: 'succeeded',
+      result: {
+        certName: validationRecord.certName,
+        domains: validationRecord.domains,
+        staging: true,
+        status: 'validated',
       },
-    );
-    assert.equal(completed.response.status, 200);
+    });
+    assert.equal(claim.envelope.operation, OPERATIONS.SSL_ISSUE);
+    assert.equal(claim.envelope.payload.staging, true);
 
     const validated = await certificateRegistry.getCertificate(validationRecord.id);
     assert.equal(validated.state, 'validated');
@@ -175,26 +167,19 @@ test('production certificate attaches to HTTPS desired state and supports renewa
     assert.equal(issued.response.status, 202);
     const certificate = issued.payload.data.certificate;
 
-    const issueClaim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
+    const { job: issueJob } = await completeNextJob(jobRegistry, {
+      serverId: enrolled.server.id,
+      certificateRegistry,
+      domainRegistry,
+      status: 'succeeded',
+      result: productionCertificateResult(certificate.certName, certificate.domains),
     });
-    const issueCompletion = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${issueClaim.payload.data.job.id}/result`,
-      {
-        method: 'POST',
-        token: enrolled.agentToken,
-        body: {
-          status: 'succeeded',
-          result: productionCertificateResult(certificate.certName, certificate.domains),
-        },
-      },
-    );
-    assert.equal(issueCompletion.response.status, 200);
-    assert.equal(issueCompletion.payload.data.result.certName, certificate.certName);
-    assert.equal(Object.hasOwn(issueCompletion.payload.data.result, 'certificatePath'), false);
-    assert.equal(Object.hasOwn(issueCompletion.payload.data.result, 'fullchainPath'), false);
-    assert.equal(Object.hasOwn(issueCompletion.payload.data.result, 'privateKeyPath'), false);
-    assert.doesNotMatch(JSON.stringify(issueCompletion.payload), /letsencrypt|privkey/);
+    const publicIssue = jobPublicView(issueJob);
+    assert.equal(publicIssue.result.certName, certificate.certName);
+    assert.equal(Object.hasOwn(publicIssue.result, 'certificatePath'), false);
+    assert.equal(Object.hasOwn(publicIssue.result, 'fullchainPath'), false);
+    assert.equal(Object.hasOwn(publicIssue.result, 'privateKeyPath'), false);
+    assert.doesNotMatch(JSON.stringify(publicIssue), /letsencrypt|privkey/);
 
     const activeCertificate = await certificateRegistry.getCertificate(certificate.id);
     assert.equal(activeCertificate.state, 'active');
@@ -224,20 +209,12 @@ test('production certificate attaches to HTTPS desired state and supports renewa
     });
     assert.equal(dryRun.response.status, 202);
 
-    const dryRunClaim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
+    await completeNextJob(jobRegistry, {
+      serverId: enrolled.server.id,
+      certificateRegistry,
+      status: 'succeeded',
+      result: { certName: certificate.certName, dryRun: true, status: 'validated' },
     });
-    await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${dryRunClaim.payload.data.job.id}/result`,
-      {
-        method: 'POST',
-        token: enrolled.agentToken,
-        body: {
-          status: 'succeeded',
-          result: { certName: certificate.certName, dryRun: true, status: 'validated' },
-        },
-      },
-    );
     assert.equal((await certificateRegistry.getCertificate(certificate.id)).state, 'active');
 
     const renewal = await requestJson(`${baseUrl}/api/certificates/${certificate.id}/renew`, {
@@ -247,23 +224,18 @@ test('production certificate attaches to HTTPS desired state and supports renewa
     assert.equal(renewal.response.status, 202);
     assert.equal((await certificateRegistry.getCertificate(certificate.id)).state, 'renewing');
 
-    const renewalClaim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
-    });
     const renewedResult = productionCertificateResult(certificate.certName, certificate.domains, {
       validFrom: '2026-10-01T00:00:00.000Z',
       validTo: '2026-12-30T00:00:00.000Z',
       dryRun: false,
       status: 'renewed',
     });
-    await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${renewalClaim.payload.data.job.id}/result`,
-      {
-        method: 'POST',
-        token: enrolled.agentToken,
-        body: { status: 'succeeded', result: renewedResult },
-      },
-    );
+    await completeNextJob(jobRegistry, {
+      serverId: enrolled.server.id,
+      certificateRegistry,
+      status: 'succeeded',
+      result: renewedResult,
+    });
 
     const renewedCertificate = await certificateRegistry.getCertificate(certificate.id);
     assert.equal(renewedCertificate.state, 'active');
@@ -274,10 +246,9 @@ test('production certificate attaches to HTTPS desired state and supports renewa
       method: 'POST',
     });
     assert.equal(stage.response.status, 202);
-    const stageClaim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
-    });
-    assert.deepEqual(stageClaim.payload.data.envelope.payload.tls, {
+    const stageClaim = await jobRegistry.claimNext(enrolled.server.id);
+    assert.ok(stageClaim);
+    assert.deepEqual(stageClaim.envelope.payload.tls, {
       fullchainPath: '/etc/letsencrypt/live/prod.example.com/fullchain.pem',
       privateKeyPath: '/etc/letsencrypt/live/prod.example.com/privkey.pem',
     });

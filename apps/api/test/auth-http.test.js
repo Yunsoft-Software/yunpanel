@@ -33,10 +33,7 @@ async function fixture(t, options = {}) {
     toolGatewayAuthorizer: options.toolGatewayAuthorizer,
     createHandler: () => (request, response) => {
       calls += 1;
-      const agent = /heartbeat|commands|\/applications\/[^/]+\/(?:environment|deployment-credential)$/.test(request.url);
-      const authorized = agent
-        ? request.headers.authorization === 'Bearer transport-token'
-        : Boolean(request.auth?.user);
+      const authorized = Boolean(request.auth?.user);
       response.writeHead(authorized ? 200 : 401, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ data: {
         path: request.url,
@@ -242,16 +239,15 @@ test('read-only role reaches only its explicitly declared inventory surface', as
   assert.equal(app.calls(), 1);
 });
 
-test('legacy agent routes retain their own credentials, not owner injection', async (t) => {
+test('retired legacy agent routes require owner session and reject bearer transport tokens', async (t) => {
   const app = await fixture(t);
   for (const pathname of [
     '/api/servers/local/commands/next',
     '/api/servers/local/applications/application-id/deployment-credential',
   ]) {
     assert.equal((await app.request(pathname)).status, 401);
-    assert.equal((await app.request(pathname, { headers: { authorization: 'Bearer transport-token' } })).status, 200);
-    assert.equal((await app.request(pathname, { headers: { origin, authorization: 'Bearer transport-token' } })).status, 403);
-    assert.equal((await app.request(pathname, { headers: { cookie } })).status, 403);
+    assert.equal((await app.request(pathname, { headers: { authorization: 'Bearer transport-token' } })).status, 401);
+    assert.equal((await app.request(pathname, { headers: { cookie } })).status, 200);
   }
 });
 

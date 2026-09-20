@@ -57,10 +57,15 @@ test('local ownership rejects every retained legacy agent transport before state
 
     const results = await Promise.all(requests);
     for (const result of results) {
-      assert.equal(result.response.status, 409);
-      assert.equal(result.payload.error.code, 'server_managed_locally');
+      assert.equal(result.response.status, 404);
+      assert.equal(result.payload.error.code, 'not_found');
     }
   });
+
+  await assert.rejects(
+    registry.heartbeat({ serverId, agentToken, agentVersion: 'legacy' }),
+    { code: 'server_managed_locally' },
+  );
 
   const server = await registry.getServer(serverId);
   assert.equal(server.executionMode, 'local');

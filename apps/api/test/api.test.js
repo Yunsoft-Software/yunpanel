@@ -70,7 +70,7 @@ test('default Website restore mutation validates request when wired', async () =
   });
 });
 
-test('new legacy enrollment HTTP routes are retired while preserved enrolled identities may still heartbeat', async () => {
+test('legacy enrollment and heartbeat HTTP routes are completely retired', async () => {
   const registry = createServerRegistry();
   const enrollment = await registry.issueEnrollmentToken();
   const enrolled = await registry.enrollServer({
@@ -107,16 +107,13 @@ test('new legacy enrollment HTTP routes are retired while preserved enrolled ide
         services: { nginx: { active: true } },
       }),
     });
-    assert.equal(heartbeatResponse.status, 200);
-    const heartbeatBody = await heartbeatResponse.json();
-    assert.equal(heartbeatBody.data.connectivity, 'online');
+    assert.equal(heartbeatResponse.status, 404);
 
     const listResponse = await fetch(`${baseUrl}/api/servers`);
     assert.equal(listResponse.status, 200);
     const listBody = await listResponse.json();
     assert.equal(listBody.data.length, 1);
     assert.equal(listBody.data[0].hostname, 'yun-test-01');
-    assert.equal(listBody.data[0].connectivity, 'online');
   });
 });
 

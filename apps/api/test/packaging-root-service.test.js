@@ -27,11 +27,12 @@ test('packaged management API is the privileged host process while the web gatew
   assert.match(webUnit, /^NoNewPrivileges=true$/m);
 });
 
-test('Debian package description documents the local privileged runtime as the target and the agent as transitional', async () => {
+test('Debian package description documents the local privileged runtime as agentless', async () => {
   const control = await readFile(controlUrl, 'utf8');
   assert.match(control, /privileged local\n host runtime/);
-  assert.match(control, /legacy yun-agent service remains packaged only for controlled migration/);
+  assert.match(control, /Management operations run directly through the privileged local host runtime/);
   assert.doesNotMatch(control, /privileged allowlisted\n server agent/);
+  assert.doesNotMatch(control, /legacy yun-agent service/);
 });
 
 test('Debian package prepares the locked phpMyAdmin runtime identity and private writable paths', async () => {

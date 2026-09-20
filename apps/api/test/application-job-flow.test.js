@@ -5,9 +5,10 @@ import { createApp } from '../src/app.js';
 import { createApplicationRegistry } from '../src/application-registry.js';
 import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createJobRegistry, jobPublicView } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
+import { completeNextJob } from './helpers/job-completion-fixture.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');
@@ -118,39 +119,30 @@ test('static application deploy moves through queue and reconciles the active re
     assert.equal(duplicate.response.status, 409);
     assert.equal(duplicate.payload.error.code, 'application_job_conflict');
 
-    const claimed = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
-    });
-    assert.equal(claimed.response.status, 200);
-    assert.equal(claimed.payload.data.envelope.operation, OPERATIONS.APP_STATIC_DEPLOY);
-    assert.equal(claimed.payload.data.envelope.payload.applicationId, application.id);
-    assert.equal(claimed.payload.data.envelope.payload.deploymentId, deploy.payload.data.job.id);
-    assert.equal(claimed.payload.data.envelope.payload.repositoryUrl, 'https://github.com/Yunsoft-Software/example-static.git');
-    assert.deepEqual(claimed.payload.data.envelope.payload.gitTarget, { kind: 'tag', value: 'v2.4.0' });
-
     const firstReleaseId = deploy.payload.data.job.id;
-    const completed = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${firstReleaseId}/result`,
-      {
-        method: 'POST',
-        token: enrolled.agentToken,
-        body: {
-          status: 'succeeded',
-          result: {
-            deploymentId: firstReleaseId,
-            releaseId: firstReleaseId,
-            commitSha: 'A'.repeat(40),
-            previousReleaseId: null,
-            artifactFiles: 24,
-            artifactBytes: 8192,
-            stdout: 'must not persist',
-          },
-        },
+    const { claim: firstClaim, job: firstJob } = await completeNextJob(jobRegistry, {
+      serverId: enrolled.server.id,
+      applicationRegistry,
+      status: 'succeeded',
+      result: {
+        deploymentId: firstReleaseId,
+        releaseId: firstReleaseId,
+        commitSha: 'A'.repeat(40),
+        previousReleaseId: null,
+        artifactFiles: 24,
+        artifactBytes: 8192,
+        stdout: 'must not persist',
       },
-    );
-    assert.equal(completed.response.status, 200);
-    assert.equal(completed.payload.data.result.commitSha, 'a'.repeat(40));
-    assert.equal('stdout' in completed.payload.data.result, false);
+    });
+    assert.equal(firstClaim.envelope.operation, OPERATIONS.APP_STATIC_DEPLOY);
+    assert.equal(firstClaim.envelope.payload.applicationId, application.id);
+    assert.equal(firstClaim.envelope.payload.deploymentId, deploy.payload.data.job.id);
+    assert.equal(firstClaim.envelope.payload.repositoryUrl, 'https://github.com/Yunsoft-Software/example-static.git');
+    assert.deepEqual(firstClaim.envelope.payload.gitTarget, { kind: 'tag', value: 'v2.4.0' });
+
+    const publicFirst = jobPublicView(firstJob);
+    assert.equal(publicFirst.result.commitSha, 'a'.repeat(40));
+    assert.equal('stdout' in publicFirst.result, false);
 
     const active = await requestJson(`${baseUrl}/api/applications/${application.id}`);
     assert.equal(active.payload.data.state, 'active');
@@ -166,27 +158,16 @@ test('static application deploy moves through queue and reconciles the active re
     });
     assert.equal(secondDeploy.response.status, 202);
 
-    const secondClaim = await requestJson(`${baseUrl}/api/servers/${enrolled.server.id}/commands/next`, {
-      token: enrolled.agentToken,
-    });
-    assert.equal(secondClaim.response.status, 200);
-
-    const failed = await requestJson(
-      `${baseUrl}/api/servers/${enrolled.server.id}/commands/${secondClaim.payload.data.job.id}/result`,
-      {
-        method: 'POST',
-        token: enrolled.agentToken,
-        body: {
-          status: 'failed',
-          error: {
-            code: 'npm_build_failed',
-            message: 'Build failed',
-            stack: 'must not persist',
-          },
-        },
+    await completeNextJob(jobRegistry, {
+      serverId: enrolled.server.id,
+      applicationRegistry,
+      status: 'failed',
+      error: {
+        code: 'npm_build_failed',
+        message: 'Build failed',
+        stack: 'must not persist',
       },
-    );
-    assert.equal(failed.response.status, 200);
+    });
 
     const afterFailure = await applicationRegistry.getApplication(application.id);
     assert.equal(afterFailure.state, 'active');

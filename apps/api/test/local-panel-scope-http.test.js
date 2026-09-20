@@ -99,6 +99,6 @@ test('remote resource identities and retained agent transport cannot cross the l
 
   const heartbeat = await fetch(`${state.baseUrl}/api/servers/remote-server/heartbeat`, { method: 'POST' });
   assert.equal(heartbeat.status, 404);
-  assert.equal((await heartbeat.json()).error.code, 'agent_transport_removed');
+  assert.equal((await heartbeat.json()).error.code, 'not_found');
   assert.equal(state.heartbeatCalls(), 0);
 });

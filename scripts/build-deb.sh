@@ -112,7 +112,7 @@ install -m 0644 .env.example README.md \
   "$package_root/usr/share/doc/yunpanel/"
 
 cp -a package.json "$package_root/usr/lib/yunpanel/"
-cp -a apps/api apps/agent apps/web "$package_root/usr/lib/yunpanel/apps/"
+cp -a apps/api apps/web "$package_root/usr/lib/yunpanel/apps/"
 cp -a packages/. "$package_root/usr/lib/yunpanel/packages/"
 cp -a node_modules "$package_root/usr/lib/yunpanel/"
 cp -a apps/web/dist/. "$package_root/usr/share/yunpanel/web/"

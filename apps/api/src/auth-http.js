@@ -15,16 +15,10 @@ import {
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
 const PROXY_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const TRUSTED_PROXY_DEFAULT = '127.0.0.1,::1';
-const AGENT_ROUTES = [
-  ['POST', /^\/api\/servers\/[^/%]+\/heartbeat$/],
-  ['GET', /^\/api\/servers\/[^/%]+\/commands\/next$/],
-  ['GET', /^\/api\/servers\/[^/%]+\/applications\/[^/%]+\/environment$/],
-  ['GET', /^\/api\/servers\/[^/%]+\/applications\/[^/%]+\/deployment-credential$/],
-  ['POST', /^\/api\/servers\/[^/%]+\/commands\/[^/%]+\/result$/],
-];
+const AGENT_ROUTES = Object.freeze([]);
 
-export function isAgentRoute(method, pathname) {
-  return AGENT_ROUTES.some(([verb, pattern]) => verb === method && pattern.test(pathname));
+export function isAgentRoute() {
+  return false;
 }
 
 function normalizeIp(value) {
