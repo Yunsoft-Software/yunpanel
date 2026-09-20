@@ -30,7 +30,7 @@ export function renderPhpMyAdminSignonConfig() {
   return `<?php
 declare(strict_types=1);
 
-if (! isset($cfg) || ! is_array($cfg) || ! isset($i) || ! is_int($i) || $i < 1) {
+if (! isset($cfg) || ! is_array($cfg)) {
     throw new RuntimeException('YunPanel phpMyAdmin signon configuration requires a server definition.');
 }
 
@@ -39,6 +39,9 @@ if (! is_string($yunpanelHost)
     || preg_match('/\\A(?:[A-Za-z0-9.-]+|\\[[0-9A-Fa-f:]+\\])(?::[0-9]{1,5})?\\z/', $yunpanelHost) !== 1) {
     $yunpanelHost = 'yunpanel.invalid';
 }
+
+$cfg['Servers'] = [];
+$i = 1;
 
 $cfg['PmaAbsoluteUri'] = 'https://' . $yunpanelHost . '${policy.gatewayBasePath}';
 $cfg['Servers'][$i]['auth_type'] = 'signon';

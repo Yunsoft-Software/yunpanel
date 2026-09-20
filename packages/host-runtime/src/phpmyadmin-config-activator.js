@@ -486,38 +486,52 @@ export function createPhpMyAdminConfigActivator({
   }
 
   async function assertGatewaySocket(gatewayGroup, expectedPresent = true) {
-    try {
-      const metadata = await lstatFn(phpMyAdminNginxTemplatePolicy.gatewaySocketPath);
-      if (!expectedPresent) throw new Error('unexpected gateway socket');
-      if (!metadata.isSocket() || metadata.isSymbolicLink()) throw new Error('unsafe gateway socket');
-      if (metadata.uid !== ROOT_UID || metadata.gid !== gatewayGroup.gid
-        || (metadata.mode & 0o7777) !== phpMyAdminNginxTemplatePolicy.gatewaySocketMode) {
-        await chownFn(
-          phpMyAdminNginxTemplatePolicy.gatewaySocketPath,
-          ROOT_UID,
-          gatewayGroup.gid,
-        );
-        await chmodFn(
-          phpMyAdminNginxTemplatePolicy.gatewaySocketPath,
-          phpMyAdminNginxTemplatePolicy.gatewaySocketMode,
-        );
-        const repaired = await lstatFn(phpMyAdminNginxTemplatePolicy.gatewaySocketPath);
-        if (!repaired.isSocket() || repaired.isSymbolicLink()
-          || repaired.uid !== ROOT_UID || repaired.gid !== gatewayGroup.gid
-          || (repaired.mode & 0o7777) !== phpMyAdminNginxTemplatePolicy.gatewaySocketMode) {
-          throw new Error('gateway socket metadata repair failed');
+    const started = Date.now();
+    while (true) {
+      try {
+        const metadata = await lstatFn(phpMyAdminNginxTemplatePolicy.gatewaySocketPath);
+        if (!expectedPresent) {
+          if (Date.now() - started < socketTimeoutMs) {
+            await sleepFn(100);
+            continue;
+          }
+          throw new Error('unexpected gateway socket');
         }
+        if (!metadata.isSocket() || metadata.isSymbolicLink()) throw new Error('unsafe gateway socket');
+        if (metadata.uid !== ROOT_UID || metadata.gid !== gatewayGroup.gid
+          || (metadata.mode & 0o7777) !== phpMyAdminNginxTemplatePolicy.gatewaySocketMode) {
+          await chownFn(
+            phpMyAdminNginxTemplatePolicy.gatewaySocketPath,
+            ROOT_UID,
+            gatewayGroup.gid,
+          );
+          await chmodFn(
+            phpMyAdminNginxTemplatePolicy.gatewaySocketPath,
+            phpMyAdminNginxTemplatePolicy.gatewaySocketMode,
+          );
+          const repaired = await lstatFn(phpMyAdminNginxTemplatePolicy.gatewaySocketPath);
+          if (!repaired.isSocket() || repaired.isSymbolicLink()
+            || repaired.uid !== ROOT_UID || repaired.gid !== gatewayGroup.gid
+            || (repaired.mode & 0o7777) !== phpMyAdminNginxTemplatePolicy.gatewaySocketMode) {
+            throw new Error('gateway socket metadata repair failed');
+          }
+        }
+        return;
+      } catch (error) {
+        if (!expectedPresent && error?.code === 'ENOENT') return;
+        if (expectedPresent && error?.code === 'ENOENT' && (Date.now() - started < socketTimeoutMs)) {
+          await sleepFn(100);
+          continue;
+        }
+        throw activationError(
+          expectedPresent
+            ? 'phpmyadmin_gateway_socket_invalid'
+            : 'phpmyadmin_gateway_socket_not_retired',
+          expectedPresent
+            ? 'phpMyAdmin internal HTTP socket is unavailable or unsafe'
+            : 'phpMyAdmin internal HTTP socket remained after rollback',
+        );
       }
-    } catch (error) {
-      if (!expectedPresent && error?.code === 'ENOENT') return;
-      throw activationError(
-        expectedPresent
-          ? 'phpmyadmin_gateway_socket_invalid'
-          : 'phpmyadmin_gateway_socket_not_retired',
-        expectedPresent
-          ? 'phpMyAdmin internal HTTP socket is unavailable or unsafe'
-          : 'phpMyAdmin internal HTTP socket remained after rollback',
-      );
     }
   }
 

@@ -76,6 +76,7 @@ Son fresh Website local-mail, dedicated webmail TLS ve shared Roundcube canlı k
 Son external mail site-create canlı kabulü: `docs/history/external-mail-site-create-live-acceptance-2026-09-20.md`.
 Son Mail Domain disable webmail mapping blocker ve teardown canlı kabulü: `docs/history/mail-domain-disable-webmail-blocker-live-acceptance-2026-09-20.md`.
 Son DKIM key rotation ve local PowerDNS retirement canlı kabulü: `docs/history/dkim-rotation-retirement-live-acceptance-2026-09-20.md`.
+Son phpMyAdmin ve MariaDB canlı signon ve veritabanı izolasyon kabulü: `docs/history/phpmyadmin-live-signon-isolation-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
