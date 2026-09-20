@@ -69,6 +69,10 @@ test('DNS identity preview is revisioned and update requires exact digest confir
   assert.equal(persisted.version, 1);
   assert.equal(persisted.records[0].revision, 1);
   assert.equal((await stat(filePath)).mode & 0o777, 0o600);
+
+  const reopened = createServerDnsIdentityRegistry({ filePath, serverExists: async (id) => id === serverId });
+  await reopened.init();
+  assert.deepEqual((await reopened.getForServer(serverId)).settings, saved.settings);
 });
 
 test('same-host ns1/ns2 is accepted but explicitly warns about missing redundancy', async (t) => {

@@ -174,10 +174,14 @@ function persistedRecord(value) {
     || !Number.isSafeInteger(value.revision) || value.revision < 1) {
     throw new ServerDnsIdentityRegistryError('dns_identity_state_invalid', 'Persisted DNS identity state is invalid', 409);
   }
+  if (!value.settings?.soa || value.settings.soa.primaryNs !== value.settings.ns1?.hostname) {
+    throw new ServerDnsIdentityRegistryError('dns_identity_state_invalid', 'Persisted DNS primary nameserver is invalid', 409);
+  }
+  const { primaryNs: _primaryNs, ...soaSettings } = value.settings.soa;
   return Object.freeze({
     serverId: uuid(value.serverId),
     revision: value.revision,
-    settings: normalizeSettings(value.settings),
+    settings: normalizeSettings({ ...value.settings, soa: soaSettings }),
     createdAt: timestamp(value.createdAt),
     updatedAt: timestamp(value.updatedAt),
   });

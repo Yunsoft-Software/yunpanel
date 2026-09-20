@@ -43,6 +43,10 @@ test('PowerDNS manager rejects malformed API keys and secondary DNS addresses', 
 
 test('PowerDNS manager requires vendor include-dir and parses package state deterministically', () => {
   assert.equal(
+    powerDnsAuthoritativeManagerInternals.schemaPaths[0],
+    '/usr/share/pdns-backend-sqlite3/schema/schema.sqlite3.sql',
+  );
+  assert.equal(
     powerDnsAuthoritativeManagerInternals.includeDirConfigured('include-dir=/etc/powerdns/pdns.d\n'),
     true,
   );

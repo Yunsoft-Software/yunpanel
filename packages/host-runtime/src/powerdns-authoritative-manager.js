@@ -18,6 +18,7 @@ const STAT = '/usr/bin/stat';
 const BASE_CONFIG = '/etc/powerdns/pdns.conf';
 const RECEIPT_PATH = '/var/lib/yunpanel/staging/powerdns/authoritative.json';
 const SCHEMA_PATHS = Object.freeze([
+  '/usr/share/pdns-backend-sqlite3/schema/schema.sqlite3.sql',
   '/usr/share/doc/pdns-backend-sqlite3/schema.sqlite3.sql',
   '/usr/share/doc/pdns-backend-sqlite3/schema.sqlite3.sql.gz',
 ]);
@@ -434,4 +435,5 @@ export const powerDnsAuthoritativeManagerInternals = Object.freeze({
   receiptValue,
   defaultHashPassword,
   paths: Object.freeze({ BASE_CONFIG, RECEIPT_PATH, ...powerDnsTemplatePolicy }),
+  schemaPaths: SCHEMA_PATHS,
 });
