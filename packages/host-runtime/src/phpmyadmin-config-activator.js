@@ -204,6 +204,8 @@ export function createPhpMyAdminConfigActivator({
   renameFn = rename,
   rmFn = rm,
   writeFileFn = writeFile,
+  sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  socketTimeoutMs = 5_000,
 } = {}) {
   if (!configManager || typeof configManager.inspectStagedFpmPool !== 'function'
     || typeof configManager.inspectStagedNginxConfig !== 'function'
@@ -450,22 +452,36 @@ export function createPhpMyAdminConfigActivator({
   }
 
   async function assertFpmSocket(wwwIdentity, expectedPresent = true) {
-    try {
-      const metadata = await lstatFn(phpMyAdminFpmTemplatePolicy.socketPath);
-      if (!expectedPresent) throw new Error('unexpected FPM socket');
-      if (!metadata.isSocket() || metadata.isSymbolicLink()
-        || metadata.uid !== wwwIdentity.uid || metadata.gid !== wwwIdentity.gid
-        || (metadata.mode & 0o7777) !== SOCKET_MODE) {
-        throw new Error('unsafe FPM socket');
+    const started = Date.now();
+    while (true) {
+      try {
+        const metadata = await lstatFn(phpMyAdminFpmTemplatePolicy.socketPath);
+        if (!expectedPresent) {
+          if (Date.now() - started < socketTimeoutMs) {
+            await sleepFn(100);
+            continue;
+          }
+          throw new Error('unexpected FPM socket');
+        }
+        if (!metadata.isSocket() || metadata.isSymbolicLink()
+          || metadata.uid !== wwwIdentity.uid || metadata.gid !== wwwIdentity.gid
+          || (metadata.mode & 0o7777) !== SOCKET_MODE) {
+          throw new Error('unsafe FPM socket');
+        }
+        return;
+      } catch (error) {
+        if (!expectedPresent && error?.code === 'ENOENT') return;
+        if (expectedPresent && error?.code === 'ENOENT' && (Date.now() - started < socketTimeoutMs)) {
+          await sleepFn(100);
+          continue;
+        }
+        throw activationError(
+          expectedPresent ? 'phpmyadmin_fpm_socket_invalid' : 'phpmyadmin_fpm_socket_not_retired',
+          expectedPresent
+            ? 'phpMyAdmin PHP-FPM socket is unavailable or unsafe'
+            : 'phpMyAdmin PHP-FPM socket remained after rollback',
+        );
       }
-    } catch (error) {
-      if (!expectedPresent && error?.code === 'ENOENT') return;
-      throw activationError(
-        expectedPresent ? 'phpmyadmin_fpm_socket_invalid' : 'phpmyadmin_fpm_socket_not_retired',
-        expectedPresent
-          ? 'phpMyAdmin PHP-FPM socket is unavailable or unsafe'
-          : 'phpMyAdmin PHP-FPM socket remained after rollback',
-      );
     }
   }
 

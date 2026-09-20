@@ -116,6 +116,8 @@ export function createRoundcubeConfigActivator({
   renameFn = rename,
   rmFn = rm,
   writeFileFn = writeFile,
+  sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  socketTimeoutMs = 5_000,
 } = {}) {
   if (!configManager || typeof configManager.inspectStagedConfiguration !== 'function'
     || typeof configManager.inspectStagedFpmPool !== 'function'
@@ -299,22 +301,36 @@ export function createRoundcubeConfigActivator({
   }
 
   async function assertFpmSocket(wwwIdentity, expectedPresent = true) {
-    try {
-      const metadata = await lstatFn(roundcubeFpmTemplatePolicy.socketPath);
-      if (!expectedPresent) throw new Error('unexpected fpm socket');
-      if (!metadata.isSocket() || metadata.isSymbolicLink()
-        || metadata.uid !== wwwIdentity.uid || metadata.gid !== wwwIdentity.gid
-        || (metadata.mode & 0o7777) !== SOCKET_MODE) {
-        throw new Error('unsafe fpm socket');
+    const started = Date.now();
+    while (true) {
+      try {
+        const metadata = await lstatFn(roundcubeFpmTemplatePolicy.socketPath);
+        if (!expectedPresent) {
+          if (Date.now() - started < socketTimeoutMs) {
+            await sleepFn(100);
+            continue;
+          }
+          throw new Error('unexpected fpm socket');
+        }
+        if (!metadata.isSocket() || metadata.isSymbolicLink()
+          || metadata.uid !== wwwIdentity.uid || metadata.gid !== wwwIdentity.gid
+          || (metadata.mode & 0o7777) !== SOCKET_MODE) {
+          throw new Error('unsafe fpm socket');
+        }
+        return;
+      } catch (error) {
+        if (!expectedPresent && error?.code === 'ENOENT') return;
+        if (expectedPresent && error?.code === 'ENOENT' && (Date.now() - started < socketTimeoutMs)) {
+          await sleepFn(100);
+          continue;
+        }
+        throw activationError(
+          expectedPresent ? 'roundcube_fpm_socket_invalid' : 'roundcube_fpm_socket_not_retired',
+          expectedPresent
+            ? 'Roundcube PHP-FPM socket is unavailable or unsafe'
+            : 'Roundcube PHP-FPM socket remained after rollback',
+        );
       }
-    } catch (error) {
-      if (!expectedPresent && error?.code === 'ENOENT') return;
-      throw activationError(
-        expectedPresent ? 'roundcube_fpm_socket_invalid' : 'roundcube_fpm_socket_not_retired',
-        expectedPresent
-          ? 'Roundcube PHP-FPM socket is unavailable or unsafe'
-          : 'Roundcube PHP-FPM socket remained after rollback',
-      );
     }
   }
 
