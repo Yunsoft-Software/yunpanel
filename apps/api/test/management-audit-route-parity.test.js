@@ -22,8 +22,11 @@ const SOURCE_FILES = [
   'node-runtime-http.js',
   'database-http.js',
   'dns-zone-dnssec-http.js',
+  'backup-repository-http.js',
+  'website-backup-http.js',
+  'website-restore-http.js',
 ];
-const ROUTE_PATTERN = /app\.(post|put|patch|delete)\(\s*'([^']+)'\s*,\s*requirePanelRouteAccess\b/g;
+const ROUTE_PATTERN = /app\.(post|put|patch|delete)\(\s*'([^']+)'\s*,\s*(?:requirePanelRouteAccess|requireOwner)\b/g;
 
 function concretePath(route) {
   return route.replace(/:([A-Za-z][A-Za-z0-9_]*)/g, (_match, name) => {

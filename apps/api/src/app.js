@@ -9,8 +9,10 @@ import {
   MailDataInspectorError,
   MailDiagnosticsInspectorError,
   createMailboxQuotaInspector,
+  createRcloneManager,
   createResticManager,
   createWebsiteRestoreReceiptStore,
+  RcloneError,
 } from '@yunpanel/host-runtime';
 import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
@@ -168,7 +170,10 @@ import { mountPanelSettingsRoutes, PanelSettingsHttpError } from './panel-settin
 import { PanelSettingsRegistryError } from './panel-settings-registry.js';
 import { createWebsiteBackupSetProvider } from './website-backup-set.js';
 import { isWebsiteBackupHttpError, mountWebsiteBackupRoutes } from './website-backup-http.js';
-import { createResticRepositoryRegistry } from './restic-repository-registry.js';
+import { createWebsiteBackupService, WebsiteBackupError } from './website-backup-service.js';
+import { createResticRepositoryRegistry, ResticRepositoryRegistryError } from './restic-repository-registry.js';
+import { createRcloneRemoteRegistry, RcloneRemoteRegistryError } from './rclone-remote-registry.js';
+import { isBackupRepositoryHttpError, mountBackupRepositoryRoutes } from './backup-repository-http.js';
 import { createWebsiteRestoreService, WebsiteRestoreError } from './website-restore-service.js';
 import { isWebsiteRestoreHttpError, mountWebsiteRestoreRoutes } from './website-restore-http.js';
 import { mountWebsiteAnalyticsRoutes, WebsiteAnalyticsHttpError } from './website-analytics-http.js';
@@ -307,6 +312,9 @@ export function createApp({
   websiteCronImpactProvider = null,
   resticRepositoryRegistry = null,
   resticManager = null,
+  rcloneRemoteRegistry = null,
+  rcloneManager = null,
+  websiteBackupService = null,
   websiteRestoreService = null,
   pleskImporter = null,
   ...options
@@ -453,6 +461,32 @@ export function createApp({
   }) : null);
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
+  const resolvedResticManager = resticManager ?? (
+    databaseBindingRegistry || resticRepositoryRegistry ? createResticManager() : null
+  );
+  if (resolvedResticManager && typeof resolvedResticManager.cleanOrphanedPasswordFiles === 'function') {
+    resolvedResticManager.cleanOrphanedPasswordFiles().catch(() => {});
+  }
+  const resolvedResticRepositoryRegistry = resticRepositoryRegistry ?? (
+    databaseBindingRegistry && resolvedResticManager ? createResticRepositoryRegistry({
+      resticManager: resolvedResticManager,
+      masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+    }) : null
+  );
+  const resolvedRcloneRemoteRegistry = rcloneRemoteRegistry ?? (
+    databaseBindingRegistry ? createRcloneRemoteRegistry({
+      rcloneManager: rcloneManager ?? createRcloneManager(),
+      masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+    }) : null
+  );
+
+  if (resolvedResticRepositoryRegistry || resolvedRcloneRemoteRegistry) {
+    mountBackupRepositoryRoutes(app, {
+      resticRepositoryRegistry: resolvedResticRepositoryRegistry,
+      rcloneRemoteRegistry: resolvedRcloneRemoteRegistry,
+      localServerId,
+    });
+  }
   const backupResourceProviderForRequest = (request) => createBackupResourceProvider({
     serverRegistry: localRegistry,
     dockerComposeProjectRegistry: request[DOCKER_COMPOSE_API_CONTEXT]?.projectRegistry ?? dockerComposeProjectRegistry,
@@ -763,6 +797,7 @@ export function createApp({
   }
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId });
   mountWebsiteAnalyticsRoutes(app, { websiteRegistry, domainRegistry, localServerId });
+
   if (databaseBindingRegistry) {
     const websiteBackupSetProvider = createWebsiteBackupSetProvider({
       websiteRegistry,
@@ -774,34 +809,39 @@ export function createApp({
       dockerComposeProjectRegistry,
       localServerId,
     });
+    const resolvedWebsiteBackupService = websiteBackupService ?? (
+      resolvedResticRepositoryRegistry && resolvedResticManager ? createWebsiteBackupService({
+        websiteRegistry,
+        resticRepositoryRegistry: resolvedResticRepositoryRegistry,
+        resticManager: resolvedResticManager,
+        websiteBackupSetProvider,
+        localServerId,
+        jobRegistry,
+      }) : null
+    );
     mountWebsiteBackupRoutes(app, {
       websiteBackupSetProvider,
+      websiteBackupService: resolvedWebsiteBackupService,
       localServerId,
     });
-    const resolvedResticManager = resticManager ?? createResticManager();
-    if (typeof resolvedResticManager.cleanOrphanedPasswordFiles === 'function') {
-      resolvedResticManager.cleanOrphanedPasswordFiles().catch(() => {});
-    }
-    const resolvedResticRepositoryRegistry = resticRepositoryRegistry ?? (
-      createResticRepositoryRegistry({
+    const resolvedWebsiteRestoreService = websiteRestoreService ?? (
+      resolvedResticRepositoryRegistry && resolvedResticManager ? createWebsiteRestoreService({
+        websiteRegistry,
+        resticRepositoryRegistry: resolvedResticRepositoryRegistry,
         resticManager: resolvedResticManager,
-        masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
-      })
+        websiteBackupSetProvider,
+        healthInspector: createWebsiteHttpHealthInspector(),
+        localServerId,
+        jobRegistry,
+        receiptStore: createWebsiteRestoreReceiptStore(),
+      }) : null
     );
-    const resolvedWebsiteRestoreService = websiteRestoreService ?? createWebsiteRestoreService({
-      websiteRegistry,
-      resticRepositoryRegistry: resolvedResticRepositoryRegistry,
-      resticManager: resolvedResticManager,
-      websiteBackupSetProvider,
-      healthInspector: createWebsiteHttpHealthInspector(),
-      localServerId,
-      jobRegistry,
-      receiptStore: createWebsiteRestoreReceiptStore(),
-    });
-    mountWebsiteRestoreRoutes(app, {
-      websiteRestoreService: resolvedWebsiteRestoreService,
-      localServerId,
-    });
+    if (resolvedWebsiteRestoreService) {
+      mountWebsiteRestoreRoutes(app, {
+        websiteRestoreService: resolvedWebsiteRestoreService,
+        localServerId,
+      });
+    }
   }
   mountWebsiteMigrationRoutes(app, {
     websiteRegistry,
@@ -918,10 +958,14 @@ export function createApp({
     if (
       (Number.isInteger(error?.status) && error.status >= 400 && error.status < 600 && typeof error?.code === 'string')
       || isBackupHttpError(error)
+      || isBackupRepositoryHttpError(error)
       || isWebsiteBackupHttpError(error)
       || isWebsiteRestoreHttpError(error)
       || isPleskImporterHttpError(error)
       || error instanceof PleskImporterError
+      || error instanceof ResticRepositoryRegistryError
+      || error instanceof RcloneRemoteRegistryError
+      || error instanceof WebsiteBackupError
       || error instanceof ApplicationRuntimeBindingRegistryError
       || error instanceof DatabaseBindingHttpError
       || error instanceof DatabaseBindingRegistryError

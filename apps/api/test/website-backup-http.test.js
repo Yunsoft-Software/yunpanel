@@ -58,6 +58,18 @@ async function fixture(t) {
     digest: 'a'.repeat(64),
   };
 
+  const mockPreview = {
+    websiteId,
+    repositoryId: '91a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c',
+    backupSetDigest: 'a'.repeat(64),
+    targetPaths: mockBackupSet.targetPaths,
+    excludePatterns: mockBackupSet.excludePatterns,
+    tags: mockBackupSet.tags,
+    databases: [],
+    composeHooksEnabled: false,
+    confirmation: `backup:${websiteId}:91a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c:${'a'.repeat(64)}`,
+  };
+
   const websiteBackupSetProvider = {
     async getWebsiteBackupSet({ websiteId: requestedId, serverId: requestedServerId }) {
       if (requestedId === '00000000-0000-0000-0000-000000000000') {
@@ -67,6 +79,27 @@ async function fixture(t) {
         throw new WebsiteBackupSetError('invalid_website_id', 'websiteId is invalid', 400);
       }
       return mockBackupSet;
+    },
+  };
+
+  const websiteBackupService = {
+    async previewBackup({ websiteId: requestedId, repositoryId }) {
+      if (requestedId === '00000000-0000-0000-0000-000000000000') {
+        throw new WebsiteBackupSetError('website_not_found', 'Website not found', 404);
+      }
+      return { ...mockPreview, repositoryId };
+    },
+    async executeBackup({ websiteId: requestedId, repositoryId, expectedPreviewDigest, confirmation }) {
+      if (expectedPreviewDigest === 'stale-digest') {
+        throw new WebsiteBackupSetError('backup_preview_stale', 'Stale preview digest', 409);
+      }
+      return {
+        status: 'succeeded',
+        websiteId: requestedId,
+        repositoryId,
+        snapshot: { snapshotId: 'snap-abc123' },
+        backupSetDigest: expectedPreviewDigest ?? 'a'.repeat(64),
+      };
     },
   };
 
@@ -81,6 +114,7 @@ async function fixture(t) {
 
   mountWebsiteBackupRoutes(app, {
     websiteBackupSetProvider,
+    websiteBackupService,
     localServerId: serverId,
   });
 
@@ -150,4 +184,74 @@ test('GET /api/websites/:websiteId/backup-set returns 401 when unauthorized', as
 
   const res = await fetch(`${baseUrl}/api/websites/${websiteId}/backup-set`);
   assert.equal(res.status, 401);
+});
+
+test('POST /api/websites/:websiteId/backup/preview returns 200 with preview', async (t) => {
+  const { baseUrl, websiteId } = await fixture(t);
+
+  const res = await fetch(`${baseUrl}/api/websites/${websiteId}/backup/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repositoryId: '91a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c' }),
+  });
+  assert.equal(res.status, 200);
+
+  const body = await res.json();
+  assert.equal(body.data.websiteId, websiteId);
+  assert.equal(body.data.repositoryId, '91a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c');
+  assert.ok(body.data.confirmation.startsWith('backup:'));
+});
+
+test('POST /api/websites/:websiteId/backup requires owner role', async (t) => {
+  const { baseUrl, websiteId, setAuth } = await fixture(t);
+  setAuth({
+    user: { id: 'viewer-1', role: 'viewer' },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  });
+
+  const res = await fetch(`${baseUrl}/api/websites/${websiteId}/backup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      repositoryId: '91a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c',
+    }),
+  });
+  assert.equal(res.status, 403);
+  const body = await res.json();
+  assert.equal(body.error.code, 'forbidden');
+});
+
+test('POST /api/websites/:websiteId/backup returns 201 on success', async (t) => {
+  const { baseUrl, websiteId } = await fixture(t);
+
+  const res = await fetch(`${baseUrl}/api/websites/${websiteId}/backup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      repositoryId: '91a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c',
+      expectedPreviewDigest: 'a'.repeat(64),
+      confirmation: `backup:${websiteId}:91a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c:${'a'.repeat(64)}`,
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json();
+  assert.equal(body.data.status, 'succeeded');
+  assert.equal(body.data.snapshot.snapshotId, 'snap-abc123');
+});
+
+test('POST /api/websites/:websiteId/backup returns 409 on stale digest', async (t) => {
+  const { baseUrl, websiteId } = await fixture(t);
+
+  const res = await fetch(`${baseUrl}/api/websites/${websiteId}/backup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      repositoryId: '91a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c',
+      expectedPreviewDigest: 'stale-digest',
+    }),
+  });
+  assert.equal(res.status, 409);
+  const body = await res.json();
+  assert.equal(body.error.code, 'backup_preview_stale');
 });

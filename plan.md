@@ -115,6 +115,7 @@ Son Website-scoped database vendor dump/restore canlı kabulü: `docs/history/we
 Son Mail discovery (autodiscover & autoconfig) canlı kabulü: `docs/history/mail-discovery-live-acceptance-2026-09-21.md`.
 Son Mail ClamAV sağlık ve fail-closed canlı kabulü: `docs/history/mail-clamav-health-acceptance-2026-09-21.md`.
 Son Mail config apply ve rollback canlı kabulü: `docs/history/mail-config-apply-rollback-live-acceptance-2026-09-21.md`.
+Son Website backup, restore, restic repo ve rclone remote canlı kabulü: `docs/history/website-backup-restore-rclone-live-acceptance-2026-09-21.md`.
 Son fresh Website SPF/DMARC policy ve durable DNS evidence bağlama ilerlemesi: `apps/api/src/website-mail-dns-provisioning-handler.js`.
 
 ## 0 — Değiştirilemez ürün kararı

@@ -222,7 +222,8 @@ export function mountBackupRoutes(app, {
     return response.json({ data: operations.map(operationView) });
   }));
 
-  app.get('/api/backups/:operationId', requireBackupOwner, asyncRoute(async (request, response) => {
+  app.get('/api/backups/:operationId', requireBackupOwner, asyncRoute(async (request, response, next) => {
+    if (!UUID_PATTERN.test(request.params.operationId)) return next('route');
     const operation = await backupOperationRegistry.getOperation(operationId(request.params.operationId));
     if (!operation) throw new BackupHttpError('backup_operation_not_found', 'Backup operation was not found', 404);
     return response.json({ data: operationView(operation) });

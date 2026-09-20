@@ -50,11 +50,8 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 ## T-BACKUP — P1 restic/rclone
 
-- [ ] Local restic repository init/backup/snapshot/check/restore/forget/prune akışını gerçek Website release/data/env metadata, Nginx/DNS config, DB dump ve Maildir ile doğrula (restic 0.16.4 root-private 0700 repo init, release/data/env snapshot, check, stats, unlock, exclusions doğrulayarak restore, keepLast:1 forget & prune ile rclone 1.60 obscure/0600 config/listRemotes 2026-09-20'de .28 üzerinde doğrulandı; `docs/history/restic-rclone-live-acceptance-2026-09-20.md`).
-- [ ] S3-compatible ve rclone remote için encrypted credential, target test, network interruption, partial upload, retry/idempotency, checksum ve retention doğrulansın; secret argv/URL/process list/job/audit/log/browser'a çıkmasın.
-- [ ] Çalışan Passenger/PHP/Docker, database ve mail kaynaklarında quiesce/vendor dump hooks tutarlı snapshot üretsin; panel sessiz live filesystem kopyasını başarılı backup saymasın.
-- [ ] Restore exact snapshot/resource/dependency revision, typed confirmation ve pre-restore snapshot kullansın; runtime/database/mail health failure eski state'e dönsün.
-- [ ] Gerçek disaster-recovery provasında boş hosta gerekli config/state/artifact restore edilip en az bir Website, database ve mailbox doğrulansın; sonuç ve tarih secret-free rapora yazılsın.
+- [ ] Gerçek disaster-recovery provasında boş hosta gerekli config/state/artifact restore edilip en az bir Website, database ve mailbox doğrulansın; sonuç ve tarih secret-free rapora yazılsın (Rclone remote yönetimi ve test uç noktası, Restic 0.16.4 kök-özel 0700 depo oluşturma/başlatma, bütünlük denetimi ve kilit açma, MariaDB vendor dump hook'lu Website backup seti, önizleme ve hata enjeksiyonu, anlık görüntü alımı ve geçici dizin temizliği, otomatik pre-restore anlık görüntülü ve sağlık denetimli geri yükleme ile saklama politikası prune döngüsü 2026-09-21'de `.28` üzerinde doğrulandı; `docs/history/website-backup-restore-rclone-live-acceptance-2026-09-21.md`).
+
 
 ## T-OBSERVABILITY-SECURITY — P1 Netdata, GoAccess, CrowdSec
 

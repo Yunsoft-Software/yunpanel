@@ -121,6 +121,8 @@ import { createWebsiteRemovalOperationRegistry } from './website-removal-operati
 import { createWebsiteRemovalRuntime } from './website-removal-runtime.js';
 import { createWebsiteRemovalPreview } from './website-removal-plan.js';
 import { createPleskImporter } from './plesk-importer.js';
+import { createResticRepositoryRegistry } from './restic-repository-registry.js';
+import { createRcloneRemoteRegistry } from './rclone-remote-registry.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10);
@@ -157,6 +159,10 @@ const websiteCachePolicyStorePath = process.env.YUNPANEL_WEBSITE_CACHE_POLICY_ST
   ?? path.join(controlPlaneStateRoot, 'website-cache-policies.json');
 const panelSettingsStorePath = process.env.YUNPANEL_PANEL_SETTINGS_STORE
   ?? path.join(controlPlaneStateRoot, 'panel-settings.json');
+const resticRepositoryStorePath = process.env.YUNPANEL_RESTIC_REPOSITORY_STORE
+  ?? path.join(controlPlaneStateRoot, 'restic-repositories.json');
+const rcloneRemoteStorePath = process.env.YUNPANEL_RCLONE_REMOTE_STORE
+  ?? path.join(controlPlaneStateRoot, 'rclone-remotes.json');
 const databaseBindingStorePath = process.env.YUNPANEL_DATABASE_BINDING_STORE
   ?? path.resolve('.data/database-binding-registry.json');
 const databaseCredentialStorePath = process.env.YUNPANEL_DATABASE_CREDENTIAL_STORE
@@ -596,6 +602,16 @@ const panelSettingsService = createPanelSettingsService({
   localServerId,
   mailAntivirusHealthInspector: createMailAntivirusHealthInspector(),
 });
+const resticRepositoryRegistry = createResticRepositoryRegistry({
+  filePath: resticRepositoryStorePath,
+  masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+});
+await resticRepositoryRegistry.init();
+const rcloneRemoteRegistry = createRcloneRemoteRegistry({
+  filePath: rcloneRemoteStorePath,
+  masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+});
+await rcloneRemoteRegistry.init();
 const roundcubeDomainMappingService = createRoundcubeDomainMappingService({
   registry: roundcubeDomainMappingRegistry,
   roundcubeConfigurationService,
@@ -1012,6 +1028,8 @@ const listener = createAuthenticatedApi({
       terminalCapabilityRegistry,
       ttydSessionManager,
       pleskImporter,
+      resticRepositoryRegistry,
+      rcloneRemoteRegistry,
     }),
   }),
 });
