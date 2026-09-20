@@ -198,6 +198,31 @@ function namedVolumeScope(source, volumeDefinitions, expectedProjectName) {
   return 'project';
 }
 
+function namedNetworkScope(source, networkDefinitions, expectedProjectName) {
+  if (!networkDefinitions || typeof networkDefinitions !== 'object' || Array.isArray(networkDefinitions)) {
+    throw new DockerComposeValidationError('docker_compose_service_network_invalid', 'Docker Compose network definition is invalid');
+  }
+  if (!Object.hasOwn(networkDefinitions, source)) {
+    if (source === 'default') return 'project';
+    throw new DockerComposeValidationError('docker_compose_service_network_invalid', 'Docker Compose network definition is unavailable');
+  }
+  const definition = networkDefinitions[source];
+  if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
+    throw new DockerComposeValidationError('docker_compose_service_network_invalid', 'Docker Compose network definition is invalid');
+  }
+  if (definition.external !== undefined && typeof definition.external !== 'boolean') {
+    throw new DockerComposeValidationError('docker_compose_service_network_invalid', 'Docker Compose network external state is invalid');
+  }
+  if (definition.name !== undefined
+    && (typeof definition.name !== 'string' || !RESOURCE_NAME_PATTERN.test(definition.name))) {
+    throw new DockerComposeValidationError('docker_compose_service_network_invalid', 'Docker Compose network runtime name is invalid');
+  }
+  if (definition.external === true) return 'host';
+  const defaultRuntimeName = `${expectedProjectName}_${source}`;
+  if (definition.name !== undefined && definition.name !== defaultRuntimeName) return 'host';
+  return 'project';
+}
+
 function storageMounts(value, { projectDirectory = null, volumeDefinitions = {}, expectedProjectName } = {}) {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value) || value.length > MAX_SERVICE_MOUNTS) {
@@ -276,6 +301,14 @@ export function summarizeDockerComposeConfig(value, {
     if (!SERVICE_NAME_PATTERN.test(name) || !service || typeof service !== 'object' || Array.isArray(service)) {
       throw new DockerComposeValidationError('docker_compose_service_invalid', 'Docker Compose contains an invalid service');
     }
+    if (service.network_mode !== undefined) {
+      if (typeof service.network_mode !== 'string'
+        || service.network_mode === 'host'
+        || service.network_mode.startsWith('container:')
+        || service.network_mode.startsWith('service:')) {
+        throw new DockerComposeValidationError('docker_compose_service_network_invalid', 'Docker Compose service network mode must be isolated');
+      }
+    }
     return Object.freeze({
       name,
       imageConfigured: typeof service.image === 'string' && service.image.length > 0,
@@ -288,6 +321,12 @@ export function summarizeDockerComposeConfig(value, {
       })),
     });
   }).sort((left, right) => left.name.localeCompare(right.name));
+  const networkDefinitions = value.networks ?? {};
+  const networkNames = resourceNames(value.networks, 'network');
+  const networkDetails = networkNames.map((networkName) => Object.freeze({
+    name: networkName,
+    scope: namedNetworkScope(networkName, networkDefinitions, expected),
+  }));
   return Object.freeze({
     version: 1,
     projectName: expected,
@@ -295,7 +334,8 @@ export function summarizeDockerComposeConfig(value, {
     composeBytes: documentBytes,
     serviceCount: services.length,
     services: Object.freeze(services),
-    networks: Object.freeze(resourceNames(value.networks, 'network')),
+    networks: Object.freeze(networkNames),
+    networkDetails: Object.freeze(networkDetails),
     volumes: Object.freeze(resourceNames(value.volumes, 'volume')),
     secretCount: resourceNames(value.secrets, 'secret').length,
     configCount: resourceNames(value.configs, 'config').length,
@@ -398,5 +438,6 @@ export const dockerComposeValidatorInternals = Object.freeze({
   publishedPorts,
   publicBindSource,
   namedVolumeScope,
+  namedNetworkScope,
   storageMounts,
 });

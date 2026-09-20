@@ -262,3 +262,41 @@ test('compose validator bounds project name, document and interpolation environm
   }), { code: 'docker_compose_document_too_large' });
   assert.equal(executions, 0);
 });
+
+test('compose summary rejects unisolated network_mode in services', () => {
+  const base = { expectedProjectName: 'app', documentSha256: 'a'.repeat(64), documentBytes: 10 };
+  assert.throws(
+    () => summarizeDockerComposeConfig({ name: 'app', services: { web: { network_mode: 'host' } } }, base),
+    { code: 'docker_compose_service_network_invalid' },
+  );
+  assert.throws(
+    () => summarizeDockerComposeConfig({ name: 'app', services: { web: { network_mode: 'container:other' } } }, base),
+    { code: 'docker_compose_service_network_invalid' },
+  );
+  assert.throws(
+    () => summarizeDockerComposeConfig({ name: 'app', services: { web: { network_mode: 'service:other' } } }, base),
+    { code: 'docker_compose_service_network_invalid' },
+  );
+});
+
+test('compose summary classifies network scopes for project, external and custom-named networks', () => {
+  const summary = summarizeDockerComposeConfig({
+    name: 'app',
+    services: { web: { image: 'nginx' } },
+    networks: {
+      default: {},
+      internal: { name: 'app_internal' },
+      shared: { external: true },
+      custom: { name: 'foreign_network' },
+    },
+  }, { expectedProjectName: 'app', documentSha256: 'a'.repeat(64), documentBytes: 10 });
+
+  assert.deepEqual(summary.networks, ['custom', 'default', 'internal', 'shared']);
+  assert.deepEqual(summary.networkDetails, [
+    { name: 'custom', scope: 'host' },
+    { name: 'default', scope: 'project' },
+    { name: 'internal', scope: 'project' },
+    { name: 'shared', scope: 'host' },
+  ]);
+});
+
