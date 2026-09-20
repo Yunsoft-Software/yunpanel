@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { assertUuid, normalizePythonRuntimeConfig } from '@yunpanel/shared';
+import { assertUuid, normalizeApplicationEnvironmentBundle, normalizePythonRuntimeConfig } from '@yunpanel/shared';
 
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const APP_ROOT = '/var/lib/yunpanel/apps';
@@ -133,4 +133,23 @@ UMask=0027
 [Install]
 WantedBy=multi-user.target
 `;
+}
+
+function quoteEnvironmentValue(value) {
+  return `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+}
+
+export function renderPythonEnvironmentFile({ applicationId, runtime, environment = {} }) {
+  const appId = assertUuid(applicationId, 'applicationId');
+  const normalizedRuntime = normalizePythonRuntimeConfig(runtime);
+  const customEnvironment = normalizeApplicationEnvironmentBundle(environment);
+  const values = {
+    PYTHONUNBUFFERED: '1',
+    YUNPANEL_APPLICATION_ID: appId,
+  };
+  if (normalizedRuntime.port) {
+    values.PORT = String(normalizedRuntime.port);
+  }
+  for (const key of Object.keys(customEnvironment).sort()) values[key] = customEnvironment[key];
+  return `${Object.entries(values).map(([key, value]) => `${key}=${quoteEnvironmentValue(value)}`).join('\n')}\n`;
 }

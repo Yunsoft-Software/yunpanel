@@ -13,6 +13,7 @@ export {
   pythonApplicationUser,
   pythonServiceName,
   pythonSocketPath,
+  renderPythonEnvironmentFile,
   renderPythonSystemdUnit,
 } from './python-systemd.js';
 

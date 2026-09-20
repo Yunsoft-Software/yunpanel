@@ -242,6 +242,19 @@ export {
   pythonSiteManagerInternals,
 } from './python-site-manager.js';
 export {
+  createPythonDeploymentManager,
+  PythonDeploymentError,
+  pythonDeploymentManagerInternals,
+} from './python-deployment-manager.js';
+export {
+  createPythonRollbackManager,
+  PythonRollbackError,
+} from './python-rollback-manager.js';
+export {
+  createWebsitePythonReleaseManager,
+  WebsitePythonReleaseError,
+} from './website-python-release-manager.js';
+export {
   createWebsitePassengerEnvironmentManager,
   WebsitePassengerEnvironmentError,
   websitePassengerEnvironmentInternals,
