@@ -239,6 +239,21 @@ function passengerEnvironmentEvidence(operation, applicationId) {
   return value;
 }
 
+function pythonRuntimeEvidence(operation) {
+  const step = operation?.steps?.find((candidate) => candidate.id === 'python_runtime');
+  const value = step?.state === 'succeeded' ? step.evidence : null;
+  if (!value || value.satisfied !== true || value.adapter !== 'python-runtime'
+    || typeof value.applicationId !== 'string'
+    || typeof value.serviceName !== 'string') {
+    throw new WebsiteProvisioningHandlerError(
+      'website_python_runtime_evidence_missing',
+      'Python runtime evidence is required before Nginx activation',
+      409,
+    );
+  }
+  return value;
+}
+
 function nginxSpec({ operation, intent, tls = null, httpsRedirect = false, canonicalRedirect = false } = {}) {
   if (!intent || typeof intent !== 'object' || Array.isArray(intent)
     || typeof intent.primaryDomain !== 'string'
@@ -248,7 +263,7 @@ function nginxSpec({ operation, intent, tls = null, httpsRedirect = false, canon
         || intent.acmeOnlyHostnames.some((hostname) => typeof hostname !== 'string' || !hostname)))
     || (intent.mailDiscoverySocketPath !== undefined
       && intent.mailDiscoverySocketPath !== MAIL_DISCOVERY_SOCKET)
-    || !['static', 'proxy', 'passenger', 'php'].includes(intent.targetType)) {
+    || !['static', 'proxy', 'passenger', 'php', 'python'].includes(intent.targetType)) {
     throw new WebsiteProvisioningHandlerError(
       'website_nginx_intent_invalid',
       'Website Nginx provisioning intent is invalid',
@@ -275,6 +290,13 @@ function nginxSpec({ operation, intent, tls = null, httpsRedirect = false, canon
     target = Object.freeze({
       root: runtime.documentRoot,
       socketPath: runtime.socketPath,
+    });
+  } else if (intent.targetType === 'python') {
+    const runtime = pythonRuntimeEvidence(operation);
+    target = Object.freeze({
+      applicationId: runtime.applicationId,
+      socketPath: runtime.socketPath ?? (intent.target?.socketPath ?? null),
+      port: runtime.port ?? (intent.target?.port ?? null),
     });
   }
 
@@ -641,6 +663,7 @@ export const websiteProvisioningHandlerInternals = Object.freeze({
   legacyStaticPending,
   passengerRuntimeEvidence,
   phpRuntimeEvidence,
+  pythonRuntimeEvidence,
   passengerEnvironmentEvidence,
   nginxSpec,
   nginxEvidence,

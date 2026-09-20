@@ -857,6 +857,135 @@ export function createApplicationRegistry({
     return publicApplication(application);
   }
 
+  async function activatePythonRelease(applicationId, {
+    operationId,
+    releaseId,
+    previousReleaseId = null,
+    commitSha,
+    gitTarget: requestedGitTarget = null,
+    runtime: requestedRuntime = null,
+  } = {}) {
+    await ensureInitialized();
+    const application = hydrateApplication(requireApplication(state, normalizeApplicationId(applicationId)));
+    if (application.type !== 'python') {
+      throw new ApplicationRegistryError('python_release_adapter_mismatch', 'Python release activation requires a Python Application', 409);
+    }
+    if (application.activeDeploymentId) {
+      throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
+    }
+    const normalizedOperationId = normalizeUuid(operationId, 'operationId');
+    const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
+    const normalizedPreviousReleaseId = normalizeNullableUuid(previousReleaseId, 'previousReleaseId');
+    if (normalizedOperationId !== normalizedReleaseId) {
+      throw new ApplicationRegistryError('release_mismatch', 'Python release must match provisioning operation identity', 409);
+    }
+    if (typeof commitSha !== 'string' || !COMMIT_PATTERN.test(commitSha)) {
+      throw new ApplicationRegistryError('invalid_commit_sha', 'Python release commit SHA is invalid');
+    }
+    let gitTarget;
+    try { gitTarget = normalizeGitDeploymentTarget(requestedGitTarget, { defaultBranch: application.branch }); }
+    catch { throw new ApplicationRegistryError('invalid_git_target', 'Python release Git target is invalid'); }
+    if (gitTarget.kind === 'commit' && commitSha.toLowerCase() !== gitTarget.value) {
+      throw new ApplicationRegistryError('git_target_mismatch', 'Python release commit does not match the requested Git target', 409);
+    }
+    const deployedRuntime = normalizePythonConfig({
+      repositoryUrl: application.repositoryUrl,
+      branch: application.branch,
+      runtime: requestedRuntime ?? application.runtime,
+      retention: application.retention,
+    }).runtime;
+    if (!sameValue(deployedRuntime, application.runtime)) {
+      throw new ApplicationRegistryError('python_runtime_state_drift', 'Python release runtime does not match current desired configuration', 409);
+    }
+
+    if (application.currentReleaseId === normalizedReleaseId) {
+      const release = application.releases.find((candidate) => candidate.releaseId === normalizedReleaseId) ?? null;
+      if (!release
+        || application.previousReleaseId !== normalizedPreviousReleaseId
+        || application.currentCommitSha !== commitSha.toLowerCase()
+        || !sameValue(application.currentGitTarget, gitTarget)
+        || !sameValue(application.activeRuntime, deployedRuntime)
+        || application.appliedRevision !== application.desiredRevision) {
+        throw new ApplicationRegistryError('python_release_state_drift', 'Persisted Python release state conflicts with provisioning evidence', 409);
+      }
+      return publicApplication(application);
+    }
+    if (application.currentReleaseId !== normalizedPreviousReleaseId) {
+      throw new ApplicationRegistryError('release_state_drift', 'Python previous release does not match control-plane state', 409);
+    }
+
+    const timestamp = new Date(now()).toISOString();
+    application.previousReleaseId = application.currentReleaseId;
+    application.currentReleaseId = normalizedReleaseId;
+    application.currentCommitSha = commitSha.toLowerCase();
+    application.currentGitTarget = gitTarget;
+    application.activeRuntime = structuredClone(deployedRuntime);
+    application.appliedRevision = application.desiredRevision;
+    application.activeDeploymentId = null;
+    application.pendingRollbackReleaseId = null;
+    application.state = 'active';
+    application.lastDeploymentId = normalizedOperationId;
+    application.lastDeployedAt = timestamp;
+    application.lastError = null;
+    application.serviceName = pythonServiceName(application.id);
+    application.socketPath = pythonSocketPath(application.id);
+    application.servicePort = deployedRuntime.port ?? null;
+    application.healthPath = deployedRuntime.healthPath ?? '/';
+    application.proxyTarget = deployedRuntime.port ? { host: '127.0.0.1', port: deployedRuntime.port } : null;
+    application.updatedAt = timestamp;
+    application.releases = application.releases.filter((release) => release.releaseId !== normalizedReleaseId);
+    application.releases.unshift({
+      releaseId: normalizedReleaseId,
+      deploymentId: normalizedOperationId,
+      commitSha: commitSha.toLowerCase(),
+      gitTarget,
+      artifactFiles: null,
+      artifactBytes: null,
+      deployedAt: timestamp,
+      runtime: structuredClone(deployedRuntime),
+      configurationRevision: application.appliedRevision,
+    });
+    trimReleaseHistory(application);
+    await persist();
+    return publicApplication(application);
+  }
+
+  async function resetPythonInitialRelease(applicationId, { operationId, releaseId } = {}) {
+    await ensureInitialized();
+    const application = hydrateApplication(requireApplication(state, normalizeApplicationId(applicationId)));
+    if (application.type !== 'python') {
+      throw new ApplicationRegistryError('python_release_adapter_mismatch', 'Python release reset requires a Python Application', 409);
+    }
+    const normalizedOperationId = normalizeUuid(operationId, 'operationId');
+    const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
+    if (normalizedOperationId !== normalizedReleaseId) {
+      throw new ApplicationRegistryError('release_mismatch', 'Python release must match provisioning operation identity', 409);
+    }
+    const retainedRelease = application.releases.find((release) => release.releaseId === normalizedReleaseId) ?? null;
+    if (application.currentReleaseId === null && retainedRelease === null) return publicApplication(application);
+    if (application.currentReleaseId !== normalizedReleaseId
+      || application.previousReleaseId !== null
+      || application.lastDeploymentId !== normalizedOperationId) {
+      throw new ApplicationRegistryError('python_release_reset_drift', 'Python release cannot be reset after control-plane state changed', 409);
+    }
+    application.releases = application.releases.filter((release) => release.releaseId !== normalizedReleaseId);
+    application.currentReleaseId = null;
+    application.previousReleaseId = null;
+    application.currentCommitSha = null;
+    application.currentGitTarget = null;
+    application.activeRuntime = null;
+    application.appliedRevision = 0;
+    application.activeDeploymentId = null;
+    application.pendingRollbackReleaseId = null;
+    application.state = 'draft';
+    application.lastDeploymentId = null;
+    application.lastDeployedAt = null;
+    application.lastError = null;
+    application.updatedAt = new Date(now()).toISOString();
+    await persist();
+    return publicApplication(application);
+  }
+
   async function markRollingBack(applicationId, operationId, releaseId) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
@@ -1064,6 +1193,8 @@ export function createApplicationRegistry({
     markDeployed,
     activatePassengerRelease,
     resetPassengerInitialRelease,
+    activatePythonRelease,
+    resetPythonInitialRelease,
     markRollingBack,
     markRolledBack,
     markFailed,

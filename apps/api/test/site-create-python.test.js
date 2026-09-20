@@ -7,6 +7,7 @@ import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js
 import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createSite, previewSiteCreate } from '../src/site-create-base.js';
+import { siteCreateProvisioningPlan } from '../src/site-create-provisioning.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
 
 async function fixture() {
@@ -74,13 +75,15 @@ function pythonInput(serverId, overrides = {}) {
         appServer: 'gunicorn',
         entryPoint: 'wsgi:application',
         workers: 2,
+        healthPath: '/health',
+        healthTimeoutSeconds: 15,
       },
     },
     ...overrides,
   };
 }
 
-test('site-create preview correctly models new_python runtime, sftp, and domain targets', async () => {
+test('site-create preview correctly models new_python runtime, sftp, and domain targets without blockers', async () => {
   const state = await fixture();
   const input = pythonInput(state.serverId);
 
@@ -101,10 +104,48 @@ test('site-create preview correctly models new_python runtime, sftp, and domain 
   assert.equal(preview.plan.primaryDomain.target.proxyMode, 'unix_socket');
   assert.match(preview.plan.primaryDomain.target.socketPath, /^\/run\/yunpanel\/python-[0-9a-f-]{36}\.sock$/);
   assert.equal(preview.complete, false);
-  assert.deepEqual(preview.blockers, ['python_runtime_unavailable']);
+  assert.deepEqual(preview.blockers, []);
+
+  const plan = siteCreateProvisioningPlan(preview);
+  const stepIds = plan.steps.map((step) => step.id);
+  assert.deepEqual(stepIds, [
+    'application_metadata',
+    'website_metadata',
+    'primary_domain_metadata',
+    'unix_identity',
+    'elfinder',
+    'python_release',
+    'python_runtime',
+    'nginx',
+    'domain_activation',
+    'python_health',
+    'application_release',
+  ]);
+
+  const releaseStep = plan.steps.find((step) => step.id === 'python_release');
+  assert.equal(releaseStep.intent.adapter, 'python-release');
+  assert.equal(releaseStep.intent.applicationId, preview.plan.application.id);
+  assert.equal(releaseStep.intent.deploymentId, preview.operationId);
+
+  const runtimeStep = plan.steps.find((step) => step.id === 'python_runtime');
+  assert.equal(runtimeStep.intent.adapter, 'python-runtime');
+  assert.equal(runtimeStep.intent.applicationId, preview.plan.application.id);
+
+  const nginxStep = plan.steps.find((step) => step.id === 'nginx');
+  assert.equal(nginxStep.intent.targetType, 'python');
+  assert.equal(nginxStep.intent.target.adapter, 'python-runtime');
+
+  const healthStep = plan.steps.find((step) => step.id === 'python_health');
+  assert.equal(healthStep.intent.adapter, 'python-health');
+  assert.equal(healthStep.intent.healthPath, '/health');
+  assert.equal(healthStep.intent.timeoutSeconds, 15);
+
+  const appReleaseStep = plan.steps.find((step) => step.id === 'application_release');
+  assert.equal(appReleaseStep.intent.adapter, 'python-application-release');
+  assert.equal(appReleaseStep.intent.releaseId, preview.operationId);
 });
 
-test('createSite refuses Python metadata without a working local provisioning runtime', async () => {
+test('createSite successfully creates Python Application, Website, and Domain metadata', async () => {
   const state = await fixture();
   const input = pythonInput(state.serverId, {
     source: {
@@ -130,7 +171,7 @@ test('createSite refuses Python metadata without a working local provisioning ru
     mailDomainRegistry: state.mailDomainRegistry,
   });
 
-  await assert.rejects(createSite({
+  const result = await createSite({
     input,
     previewDigest: preview.previewDigest,
     confirmation: preview.confirmation,
@@ -140,9 +181,26 @@ test('createSite refuses Python metadata without a working local provisioning ru
     websiteRegistry: state.websiteRegistry,
     domainRegistry: state.domainRegistry,
     mailDomainRegistry: state.mailDomainRegistry,
-  }), (error) => error.code === 'site_create_blocked_by_dependency'
-    && error.message.includes('python_runtime_unavailable'));
-  assert.deepEqual(await state.applicationRegistry.listApplications(), []);
-  assert.deepEqual(await state.websiteRegistry.listWebsites(), []);
-  assert.deepEqual(await state.domainRegistry.listDomains(), []);
+  });
+
+  assert.equal(result.website.runtimeType, 'python');
+  assert.equal(result.application.type, 'python');
+  assert.equal(result.primaryDomain.targetType, 'python');
+  assert.equal((await state.applicationRegistry.listApplications()).length, 1);
+  assert.equal((await state.websiteRegistry.listWebsites()).length, 1);
+  assert.equal((await state.domainRegistry.listDomains()).length, 1);
+
+  const resumedPreview = await previewSiteCreate({
+    input,
+    registry: state.registry,
+    applicationRegistry: state.applicationRegistry,
+    dockerWorkloadRegistry: state.dockerWorkloadRegistry,
+    websiteRegistry: state.websiteRegistry,
+    domainRegistry: state.domainRegistry,
+    mailDomainRegistry: state.mailDomainRegistry,
+  });
+  assert.equal(resumedPreview.complete, true);
+  assert.equal(resumedPreview.steps.applicationReady, true);
+  assert.equal(resumedPreview.steps.websiteReady, true);
+  assert.equal(resumedPreview.steps.primaryDomainReady, true);
 });

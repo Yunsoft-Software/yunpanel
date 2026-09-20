@@ -224,6 +224,69 @@ function passengerAuthorityIntent(preview, applicationId) {
   });
 }
 
+function pythonReleaseIntent(preview, applicationId, paths = createWebsitePathContract({
+  websiteId: preview?.ids?.websiteId,
+  applicationId,
+})) {
+  if (preview.source?.kind !== 'new_python') {
+    throw new Error('Python release preparation is available only for new Python Websites');
+  }
+  const application = preview.plan.application;
+  const runtime = application?.runtime;
+  if (!runtime) throw new Error('Python Website release preparation requires normalized runtime state');
+  return Object.freeze({
+    adapter: 'python-release',
+    websiteId: preview.ids.websiteId,
+    applicationId,
+    deploymentId: preview.operationId,
+    repositoryUrl: preview.source.repositoryUrl,
+    branch: preview.source.branch,
+    runtime: Object.freeze({ ...runtime }),
+    retention: preview.source.retention,
+    currentRelease: paths.runtime.currentRelease,
+    releasesDirectory: paths.runtime.releasesDirectory,
+  });
+}
+
+function pythonRuntimeIntent(preview, applicationId) {
+  const application = preview.plan.application;
+  const runtime = application?.runtime;
+  if (!runtime) throw new Error('Python Website runtime requires normalized runtime state');
+  return Object.freeze({
+    adapter: 'python-runtime',
+    websiteId: preview.ids.websiteId,
+    applicationId,
+    unixUser: preview.plan.website.unixUser,
+    runtime: Object.freeze({ ...runtime }),
+  });
+}
+
+function pythonHealthIntent(preview, applicationId) {
+  const runtime = preview.plan.application?.runtime;
+  if (preview.source?.kind !== 'new_python' || !runtime
+    || typeof runtime.healthPath !== 'string' || !Number.isInteger(runtime.healthTimeoutSeconds)) {
+    throw new Error('Python health provisioning requires a new Python Website');
+  }
+  return Object.freeze({
+    adapter: 'python-health',
+    applicationId,
+    primaryDomain: preview.plan.primaryDomain?.primaryDomain,
+    healthPath: runtime.healthPath,
+    timeoutSeconds: runtime.healthTimeoutSeconds,
+  });
+}
+
+function pythonApplicationReleaseIntent(preview, applicationId) {
+  if (preview.source?.kind !== 'new_python') {
+    throw new Error('Python Application release finalization requires a new Python Website');
+  }
+  return Object.freeze({
+    adapter: 'python-application-release',
+    applicationId,
+    releaseId: preview.operationId,
+  });
+}
+
 function domainActivationIntent(preview) {
   const domainIds = [
     preview.ids.primaryDomainId,
@@ -385,7 +448,7 @@ export function siteCreateProvisioningPlan(preview) {
 
   const runtimeType = preview.plan.website.runtimeType;
   let runtimeIntent = null;
-  if (runtimeType === 'node' || runtimeType === 'static' || runtimeType === 'php') {
+  if (runtimeType === 'node' || runtimeType === 'static' || runtimeType === 'php' || runtimeType === 'python') {
     const applicationId = preview.plan.application?.id;
     if (!applicationId) throw new Error('Hosted Website provisioning requires an Application identity');
     const identity = createApplicationIdentity(applicationId);
@@ -444,6 +507,16 @@ export function siteCreateProvisioningPlan(preview) {
       steps.push(hostStep('php_runtime', 'php_runtime', runtimeIntent, {
         compensationState: 'pending',
       }));
+    } else if (runtimeType === 'python') {
+      if (preview.source?.kind === 'new_python') {
+        steps.push(hostStep('python_release', 'python_release', pythonReleaseIntent(preview, applicationId, paths), {
+          compensationState: 'pending',
+        }));
+      }
+      runtimeIntent = pythonRuntimeIntent(preview, applicationId);
+      steps.push(hostStep('python_runtime', 'python_runtime', runtimeIntent, {
+        compensationState: 'pending',
+      }));
     } else {
       runtimeIntent = staticIntent(preview, applicationId, paths);
       steps.push(hostStep('runtime', 'static_runtime', runtimeIntent, {
@@ -461,8 +534,8 @@ export function siteCreateProvisioningPlan(preview) {
     aliases,
     ...(acmeOnlyHostnames.length > 0 ? { acmeOnlyHostnames } : {}),
     ...(mailDiscoverySocketPath ? { mailDiscoverySocketPath } : {}),
-    targetType: runtimeType === 'node' ? 'passenger' : runtimeType === 'php' ? 'php' : preview.plan.primaryDomain?.targetType,
-    target: runtimeType === 'node' || runtimeType === 'php' ? runtimeIntent : preview.plan.primaryDomain?.target,
+    targetType: runtimeType === 'node' ? 'passenger' : runtimeType === 'php' ? 'php' : runtimeType === 'python' ? 'python' : preview.plan.primaryDomain?.targetType,
+    target: runtimeType === 'node' || runtimeType === 'php' || runtimeType === 'python' ? runtimeIntent : preview.plan.primaryDomain?.target,
   }));
   steps.push(hostStep(
     'domain_activation',
@@ -495,6 +568,22 @@ export function siteCreateProvisioningPlan(preview) {
       'passenger_authority',
       'passenger_authority',
       passengerAuthorityIntent(preview, applicationId),
+      { compensationState: 'pending' },
+    ));
+  }
+
+  if (runtimeType === 'python' && preview.source?.kind === 'new_python') {
+    const applicationId = preview.plan.application?.id;
+    steps.push(hostStep(
+      'python_health',
+      'python_health',
+      pythonHealthIntent(preview, applicationId),
+      { compensationState: 'not_required' },
+    ));
+    steps.push(hostStep(
+      'application_release',
+      'python_application_release',
+      pythonApplicationReleaseIntent(preview, applicationId),
       { compensationState: 'pending' },
     ));
   }
@@ -536,6 +625,10 @@ export const siteCreateProvisioningInternals = Object.freeze({
   passengerApplicationReleaseIntent,
   passengerEnvironmentStateIntent,
   passengerAuthorityIntent,
+  pythonReleaseIntent,
+  pythonRuntimeIntent,
+  pythonHealthIntent,
+  pythonApplicationReleaseIntent,
   domainActivationIntent,
   databaseIntent,
   staticIntent,

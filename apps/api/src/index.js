@@ -552,6 +552,9 @@ websiteProvisioningRuntime.configurePassengerControlPlane({
   runtimeBindingRegistry,
   localServerId,
 });
+websiteProvisioningRuntime.configurePythonControlPlane({
+  applicationRegistry,
+});
 const jobLogStore = createJobLogStore({ directoryPath: jobLogStorePath });
 await jobLogStore.init();
 const journalLogReader = createJournalLogReader();

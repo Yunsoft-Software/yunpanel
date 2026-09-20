@@ -17,6 +17,10 @@ import { createWebsitePassengerAuthorityProvisioningHandler } from './website-pa
 import { createWebsitePassengerEnvironmentProvisioningHandler } from './website-passenger-environment-provisioning-handler.js';
 import { createWebsitePassengerEnvironmentStateProvisioningHandler } from './website-passenger-environment-state-provisioning-handler.js';
 import { createWebsitePassengerHealthProvisioningHandler } from './website-passenger-health-provisioning-handler.js';
+import { createWebsitePythonReleaseProvisioningHandler } from './website-python-release-provisioning-handler.js';
+import { createWebsitePythonRuntimeProvisioningHandler } from './website-python-runtime-provisioning-handler.js';
+import { createWebsitePythonHealthProvisioningHandler } from './website-python-health-provisioning-handler.js';
+import { createWebsitePythonApplicationReleaseProvisioningHandler } from './website-python-application-release-provisioning-handler.js';
 import { createWebsiteProvisioningHandlers } from './website-provisioning-handlers-isolation.js';
 import { createWebsiteProvisioningOrchestrator } from './website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from './website-provisioning-registry.js';
@@ -37,6 +41,9 @@ export function createWebsiteProvisioningRuntime({
   isolationWorkspaceManager = null,
   passengerSiteManager,
   nodeReleaseManager,
+  pythonReleaseManager = null,
+  pythonSiteManager = null,
+  pythonHealthInspector = null,
   passengerEnvironmentManager,
   passengerHealthInspector,
   staticDeploymentManager,
@@ -99,6 +106,10 @@ export function createWebsiteProvisioningRuntime({
     ...(nodeReleaseManager ? { nodeReleaseManager } : {}),
     ...(gitCredentialProvider ? { gitCredentialProvider } : {}),
   });
+  const pythonReleaseHandler = (gitCredentialProvider = null) => createWebsitePythonReleaseProvisioningHandler({
+    ...(pythonReleaseManager ? { pythonReleaseManager } : {}),
+    ...(gitCredentialProvider ? { gitCredentialProvider } : {}),
+  });
   const handlers = {
     ...createWebsiteProvisioningHandlers({
       identityManager: resolvedIdentityManager,
@@ -116,6 +127,18 @@ export function createWebsiteProvisioningRuntime({
     passenger_health: createWebsitePassengerHealthProvisioningHandler({
       ...(passengerHealthInspector ? { healthInspector: passengerHealthInspector } : {}),
     }),
+    python_release: pythonReleaseHandler(),
+    python_runtime: createWebsitePythonRuntimeProvisioningHandler({
+      ...(pythonSiteManager ? { pythonSiteManager } : {}),
+    }),
+    python_health: createWebsitePythonHealthProvisioningHandler({
+      ...(pythonHealthInspector ? { healthInspector: pythonHealthInspector } : {}),
+    }),
+    ...(applicationRegistry ? {
+      python_application_release: createWebsitePythonApplicationReleaseProvisioningHandler({
+        applicationRegistry,
+      }),
+    } : {}),
   };
   let domainControlPlane = null;
   let passengerEnvironment = null;
@@ -262,6 +285,9 @@ export function createWebsiteProvisioningRuntime({
     handlers.node_release = nodeReleaseHandler(
       (applicationId) => nextRegistry.materializeDeploymentCredential(applicationId),
     );
+    handlers.python_release = pythonReleaseHandler(
+      (applicationId) => nextRegistry.materializeDeploymentCredential(applicationId),
+    );
     passengerEnvironment = Object.freeze({ applicationEnvironmentRegistry: nextRegistry });
     return Object.freeze({ configured: true });
   }
@@ -317,6 +343,23 @@ export function createWebsiteProvisioningRuntime({
       domainRegistry: nextDomainRegistry,
       runtimeBindingRegistry: nextRuntimeBindingRegistry,
     });
+    return Object.freeze({ configured: true });
+  }
+
+  let pythonControlPlane = null;
+  function configurePythonControlPlane(dependencies = {}) {
+    const nextApplicationRegistry = dependencies.applicationRegistry;
+    if (!nextApplicationRegistry) throw new Error('Python Website application registry is required');
+    if (pythonControlPlane) {
+      if (pythonControlPlane.applicationRegistry !== nextApplicationRegistry) {
+        throw new Error('Python Website application registry cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    handlers.python_application_release = createWebsitePythonApplicationReleaseProvisioningHandler({
+      applicationRegistry: nextApplicationRegistry,
+    });
+    pythonControlPlane = Object.freeze({ applicationRegistry: nextApplicationRegistry });
     return Object.freeze({ configured: true });
   }
 
@@ -741,6 +784,7 @@ export function createWebsiteProvisioningRuntime({
     configureDomainControlPlane,
     configurePassengerEnvironment,
     configurePassengerControlPlane,
+    configurePythonControlPlane,
     configureCertificateControlPlane,
     configureWebmailCertificateControlPlane,
     configureDatabaseControlPlane,
