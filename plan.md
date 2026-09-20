@@ -123,6 +123,7 @@ Son Node.js Passenger varsayılanı ve direct-systemd migration uyumluluğu iler
 Son fresh Website SPF/DMARC policy ve durable DNS evidence bağlama ilerlemesi: `apps/api/src/website-mail-dns-provisioning-handler.js`.
 Son yerel migration yedekleme, doğrulama ve restore staging canlı kabulü: `docs/history/local-migration-backup-live-acceptance-2026-09-21.md`.
 Son eski agent taşıma katmanı ve servis birimlerinin kaldırılması canlı kabulü: `docs/history/legacy-agent-transport-removal-2026-09-21.md`.
+Son canlı sunucu kabulü (T-BASE, T-DNS, T-TOOLS ve veri izolasyonu): `docs/history/live-host-acceptance-t-base-dns-tools-2026-09-21.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
