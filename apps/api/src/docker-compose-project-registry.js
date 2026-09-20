@@ -196,6 +196,18 @@ function normalizeValidation(value, projectName, document) {
   if (new Set(serviceNames).size !== serviceNames.length) {
     throw new DockerComposeProjectRegistryError('docker_compose_validation_invalid', 'Docker Compose service identities must be unique');
   }
+  let networkDetails = null;
+  if (Array.isArray(value.networkDetails)) {
+    networkDetails = value.networkDetails.map((net) => {
+      if (!net || typeof net !== 'object' || typeof net.name !== 'string' || typeof net.scope !== 'string') {
+        throw new DockerComposeProjectRegistryError('docker_compose_validation_invalid', 'Docker Compose network details are invalid');
+      }
+      if (net.scope !== 'project') {
+        throw new DockerComposeProjectRegistryError('docker_compose_validation_invalid', 'Docker Compose networks must have project scope');
+      }
+      return Object.freeze({ name: net.name, scope: net.scope });
+    });
+  }
   return Object.freeze({
     composeSha256: sha256,
     composeBytes: bytes,
@@ -205,6 +217,7 @@ function normalizeValidation(value, projectName, document) {
       storageMounts: Object.freeze(service.storageMounts.map((mount) => Object.freeze({ ...mount }))),
     })).sort((a, b) => a.name.localeCompare(b.name))),
     networks: Object.freeze(normalizeNameArray(value.networks, 'network')),
+    ...(networkDetails ? { networkDetails: Object.freeze(networkDetails) } : {}),
     volumes: Object.freeze(normalizeNameArray(value.volumes, 'volume')),
     secretCount: value.secretCount,
     configCount: value.configCount,

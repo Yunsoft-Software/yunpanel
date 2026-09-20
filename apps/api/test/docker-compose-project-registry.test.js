@@ -135,3 +135,34 @@ test('legacy service summaries restart with empty published ports and storage mo
   assert.deepEqual(migrated.projects[0].services[0].publishedPorts, []);
   assert.deepEqual(migrated.projects[0].services[0].storageMounts, []);
 });
+
+test('compose project registry enforces project scope for all declared networks', async (t) => {
+  const { registry } = await fixture(t);
+  const valid = {
+    ...validation(first),
+    networkDetails: [{ name: 'default', scope: 'project' }],
+  };
+  const project = await registry.createProject({
+    projectId, serverId, projectName: 'shop_app', document: first, validation: valid,
+  });
+  assert.equal(project.projectName, 'shop_app');
+
+  const invalid = {
+    ...validation(second),
+    networkDetails: [
+      { name: 'default', scope: 'project' },
+      { name: 'shared_host_net', scope: 'host' },
+    ],
+  };
+  await assert.rejects(
+    registry.updateProject(projectId, {
+      expectedRevision: 1,
+      document: second,
+      validation: invalid,
+    }),
+    (error) => error instanceof DockerComposeProjectRegistryError
+      && error.code === 'docker_compose_validation_invalid'
+      && error.message.includes('project scope'),
+  );
+});
+
