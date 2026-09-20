@@ -31,7 +31,6 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 - [ ] Managed Compose Website kendi project/network/volume/log/terminal/backup scope'uyla başka Website'ten izole çalışsın; Docker Engine/Compose dışındaki genel yönetim yeniden yazılmasın.
 - [ ] Portainer adapter'ı açılırsa yalnız authenticated Owner gateway'i, local endpoint ve secret-safe session ile erişilsin; direct port public olmasın.
-- [ ] Agentless migration/rollback bütün yeni vendor config/state, `yunapp-*` identity, release, PowerDNS, restic, Roundcube, tool gateway ve secrets'i korusun; ardından legacy agent fiziksel olarak kaldırılabilsin.
 
 ## T-UI — Son kabul
 

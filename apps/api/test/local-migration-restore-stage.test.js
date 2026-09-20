@@ -326,3 +326,41 @@ test('tar extraction failure is redacted and partial staging is removed', async 
   );
   await assert.rejects(lstat(stagedDirectory), { code: 'ENOENT' });
 });
+
+test('distro nginx module symlink is accepted during restore staging validation', async (t) => {
+  const { stageRoot } = await createFixture(t);
+  const distroMembers = [
+    ...members(),
+    { name: 'etc/nginx', type: 'd', root: '/etc/nginx', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o755, metadataMarker: null },
+    { name: 'etc/nginx/modules-enabled', type: 'd', root: '/etc/nginx', resolvedLinkTarget: null, uid: 0, gid: 0, mode: 0o755, metadataMarker: null },
+    {
+      name: 'etc/nginx/modules-enabled/50-mod-http-passenger.conf',
+      type: 'l',
+      root: '/etc/nginx',
+      resolvedLinkTarget: 'usr/share/nginx/modules-available/mod-http-passenger.load',
+      uid: 0,
+      gid: 0,
+      mode: 0o777,
+      metadataMarker: null,
+    },
+  ];
+
+  const result = await stageRestore({
+    backupDirectory,
+    stageRoot,
+    previewRestore: async () => preview(distroMembers),
+    runTar: async (args) => {
+      const target = args[args.indexOf('--directory') + 1];
+      await materializeValidStage(target);
+      await mkdir(path.join(target, 'etc/nginx/modules-enabled'), { recursive: true });
+      await symlink(
+        '/usr/share/nginx/modules-available/mod-http-passenger.load',
+        path.join(target, 'etc/nginx/modules-enabled/50-mod-http-passenger.conf'),
+      );
+      return { stdout: '', stderr: '' };
+    },
+  });
+
+  assert.equal(result.validated, true);
+  assert.equal(result.members, distroMembers.length);
+});

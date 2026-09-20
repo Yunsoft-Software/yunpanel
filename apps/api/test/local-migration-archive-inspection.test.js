@@ -161,6 +161,49 @@ test('relative symlink escape outside its source root is rejected', async () => 
   );
 });
 
+test('distro nginx module symlinks pointing to modules-available are accepted while escapes and hardlinks fail closed', async () => {
+  const validDistroModule = `${validListing()}${line('d', 'etc/nginx/modules-enabled/', '', { permissions: 'rwxr-xr-x' })}\n${line('l', 'etc/nginx/modules-enabled/50-mod-http-passenger.conf', ` -> ${JSON.stringify('/usr/share/nginx/modules-available/mod-http-passenger.load')}`)}\n`;
+  const result = await inspectVerifiedLocalMigrationArchive({
+    backupDirectory,
+    verification: verification(roots),
+    runTar: async () => ({ stdout: validDistroModule }),
+  });
+  const member = result.members.find((entry) => entry.name === 'etc/nginx/modules-enabled/50-mod-http-passenger.conf');
+  assert.ok(member);
+  assert.equal(member.type, 'l');
+  assert.equal(member.resolvedLinkTarget, 'usr/share/nginx/modules-available/mod-http-passenger.load');
+
+  const evilTarget = `${validListing()}${line('d', 'etc/nginx/modules-enabled/', '', { permissions: 'rwxr-xr-x' })}\n${line('l', 'etc/nginx/modules-enabled/evil.conf', ` -> ${JSON.stringify('/etc/shadow')}`)}\n`;
+  await assert.rejects(
+    inspectVerifiedLocalMigrationArchive({
+      backupDirectory,
+      verification: verification(roots),
+      runTar: async () => ({ stdout: evilTarget }),
+    }),
+    { code: 'migration_archive_link_escape' },
+  );
+
+  const outsideDirectory = `${validListing()}${line('l', 'etc/nginx/conf.d/escape.conf', ` -> ${JSON.stringify('/usr/share/nginx/modules-available/mod-http-passenger.load')}`)}\n`;
+  await assert.rejects(
+    inspectVerifiedLocalMigrationArchive({
+      backupDirectory,
+      verification: verification(roots),
+      runTar: async () => ({ stdout: outsideDirectory }),
+    }),
+    { code: 'migration_archive_link_escape' },
+  );
+
+  const distroHardlink = `${validListing()}${line('d', 'etc/nginx/modules-enabled/', '', { permissions: 'rwxr-xr-x' })}\n${line('h', 'etc/nginx/modules-enabled/50-mod-http-passenger.conf', ` link to ${JSON.stringify('usr/share/nginx/modules-available/mod-http-passenger.load')}`)}\n`;
+  await assert.rejects(
+    inspectVerifiedLocalMigrationArchive({
+      backupDirectory,
+      verification: verification(roots),
+      runTar: async () => ({ stdout: distroHardlink }),
+    }),
+    { code: 'migration_archive_link_escape' },
+  );
+});
+
 test('hard links cannot target another verified root or a missing archive member', async () => {
   const crossRoot = validListing().replace(
     `link to ${JSON.stringify('var/lib/yunpanel/data/file')}`,

@@ -52,11 +52,6 @@ function normalizeStageRoot(value) {
   return resolved;
 }
 
-function insideArchiveRoot(target, rootPath) {
-  const root = localMigrationBackupInternals.relativeArchivePath(rootPath);
-  return target === root || target.startsWith(`${root}/`);
-}
-
 function validMemberMetadata(member) {
   return Number.isInteger(member.uid) && member.uid >= 0 && member.uid <= 0xffff_ffff
     && Number.isInteger(member.gid) && member.gid >= 0 && member.gid <= 0xffff_ffff
@@ -96,7 +91,7 @@ function validatePreview(preview, directory) {
         throw new LocalMigrationRestoreStageError('migration_restore_stage_preview_invalid', 'Migration restore preview is missing safe link metadata');
       }
       resolvedLinkTarget = localMigrationArchiveInspectionInternals.normalizeMemberName(member.resolvedLinkTarget);
-      if (!insideArchiveRoot(resolvedLinkTarget, member.root)) {
+      if (!localMigrationArchiveInspectionInternals.isSafeArchiveLink(name, resolvedLinkTarget, member.root, { hardlink: member.type === 'h' })) {
         throw new LocalMigrationRestoreStageError('migration_restore_stage_preview_invalid', 'Migration restore preview contains a link outside its verified source root');
       }
     } else if (member.resolvedLinkTarget !== null) {
@@ -239,17 +234,12 @@ function expectedActualType(member) {
   return member.type === 'h' ? '-' : member.type;
 }
 
-function memberRootArchivePath(member) {
-  return localMigrationBackupInternals.relativeArchivePath(member.root);
-}
-
 function validateStagedSymlink(member, actual) {
   const resolved = localMigrationArchiveInspectionInternals.normalizeLinkTarget(member.name, actual.linkTarget);
   if (resolved !== member.resolvedLinkTarget) {
     throw new LocalMigrationRestoreStageError('migration_restore_stage_link_mismatch', 'Migration restore staged link does not match the verified archive');
   }
-  const root = memberRootArchivePath(member);
-  if (resolved !== root && !resolved.startsWith(`${root}/`)) {
+  if (!localMigrationArchiveInspectionInternals.isSafeArchiveLink(member.name, resolved, member.root, { hardlink: false })) {
     throw new LocalMigrationRestoreStageError('migration_restore_stage_link_escape', 'Migration restore staged link escapes its verified source root');
   }
 }

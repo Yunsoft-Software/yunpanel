@@ -121,6 +121,7 @@ Son SQLite Mail failure-injection ve yaşam döngüsü canlı kabulü: `docs/his
 Son External DNS requirements ve Cloudflare sağlayıcı canlı kabulü: `docs/history/external-dns-requirements-cloudflare-live-acceptance-2026-09-21.md`.
 Son Node.js Passenger varsayılanı ve direct-systemd migration uyumluluğu ilerlemesi: `docs/history/passenger-default-migration-cleanup-progress-2026-09-21.md`.
 Son fresh Website SPF/DMARC policy ve durable DNS evidence bağlama ilerlemesi: `apps/api/src/website-mail-dns-provisioning-handler.js`.
+Son yerel migration yedekleme, doğrulama ve restore staging canlı kabulü: `docs/history/local-migration-backup-live-acceptance-2026-09-21.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 

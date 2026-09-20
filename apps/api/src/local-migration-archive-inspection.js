@@ -210,6 +210,21 @@ function insideRoot(target, root) {
   return target === root.archivePath || target.startsWith(`${root.archivePath}/`);
 }
 
+function isSafeArchiveLink(name, resolvedTarget, rootRef, { hardlink = false } = {}) {
+  const rootArchivePath = typeof rootRef === 'string'
+    ? localMigrationBackupInternals.relativeArchivePath(rootRef)
+    : rootRef.archivePath;
+  const inside = resolvedTarget === rootArchivePath || resolvedTarget.startsWith(`${rootArchivePath}/`);
+  if (inside) return true;
+  if (hardlink) return false;
+  if (rootArchivePath === 'etc/nginx' && name.startsWith('etc/nginx/modules-enabled/')) {
+    if (resolvedTarget.startsWith('usr/share/nginx/modules-available/') || resolvedTarget.startsWith('usr/lib/nginx/modules/')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function parseVerboseListing(stdout, roots) {
   if (typeof stdout !== 'string' || Buffer.byteLength(stdout, 'utf8') > MAX_LISTING_BYTES) {
     throw new LocalMigrationArchiveInspectionError('migration_archive_listing_invalid', 'Migration archive listing is invalid or unexpectedly large');
@@ -244,7 +259,7 @@ function parseVerboseListing(stdout, roots) {
     if (type === 'l' || type === 'h') {
       linkTarget = literals[1];
       resolvedLinkTarget = normalizeLinkTarget(name, linkTarget, { hardlink: type === 'h' });
-      if (!insideRoot(resolvedLinkTarget, root)) {
+      if (!isSafeArchiveLink(name, resolvedLinkTarget, root, { hardlink: type === 'h' })) {
         throw new LocalMigrationArchiveInspectionError('migration_archive_link_escape', 'Migration archive link target escapes its managed root');
       }
     }
@@ -381,5 +396,8 @@ export const localMigrationArchiveInspectionInternals = Object.freeze({
   parsePermissionMode,
   parseVerboseMetadata,
   manifestRoots,
+  rootForMember,
+  insideRoot,
+  isSafeArchiveLink,
   parseVerboseListing,
 });
