@@ -165,6 +165,8 @@ import { WebsiteCacheServiceError } from './website-cache-service.js';
 import { WebsiteCachePolicyRegistryError } from './website-cache-policy-registry.js';
 import { mountPanelSettingsRoutes, PanelSettingsHttpError } from './panel-settings-http.js';
 import { PanelSettingsRegistryError } from './panel-settings-registry.js';
+import { createWebsiteBackupSetProvider } from './website-backup-set.js';
+import { isWebsiteBackupHttpError, mountWebsiteBackupRoutes } from './website-backup-http.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -752,6 +754,20 @@ export function createApp({
     });
   }
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId });
+  const websiteBackupSetProvider = createWebsiteBackupSetProvider({
+    websiteRegistry,
+    domainRegistry,
+    databaseBindingRegistry,
+    mailDomainRegistry,
+    applicationRegistry,
+    applicationEnvironmentRegistry,
+    dockerComposeProjectRegistry,
+    localServerId,
+  });
+  mountWebsiteBackupRoutes(app, {
+    websiteBackupSetProvider,
+    localServerId,
+  });
   mountWebsiteMigrationRoutes(app, {
     websiteRegistry,
     domainRegistry,
@@ -863,6 +879,7 @@ export function createApp({
     if (response.headersSent) return next(error);
     if (
       isBackupHttpError(error)
+      || isWebsiteBackupHttpError(error)
       || error instanceof ApplicationRuntimeBindingRegistryError
       || error instanceof DatabaseBindingHttpError
       || error instanceof DatabaseBindingRegistryError
