@@ -86,6 +86,7 @@ Son Website static control metadata repair ve rollback canlı kabulü: `docs/his
 Son Website provisioning step sınırları ve restart canlı kabulü: `docs/history/website-provisioning-step-boundaries-live-acceptance-2026-09-20.md`.
 Son Website provisioning step failure injection ve retry canlı kabulü: `docs/history/website-provisioning-step-failure-retry-live-acceptance-2026-09-20.md`.
 Son Website provisioning ters sıra compensation, drift ve restart canlı kabulü: `docs/history/website-provisioning-reverse-compensation-live-acceptance-2026-09-20.md`.
+Son Site move/delete resource impact ve cascade engeli canlı kabulü: `docs/history/site-move-delete-impact-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
