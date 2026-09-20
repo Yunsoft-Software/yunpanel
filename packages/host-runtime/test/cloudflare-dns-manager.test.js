@@ -152,3 +152,20 @@ test('Cloudflare adapter validates zone boundaries and sanitizes provider failur
   assert.equal(new CloudflareDnsManagerError('dns_provider_unavailable', 'safe').status, 503);
   assert.equal(new CloudflareDnsManagerError('dns_provider_response_invalid', 'safe').status, 502);
 });
+
+test('Cloudflare adapter respects custom apiRoot option and environment variable', async () => {
+  let calledUrl = null;
+  const customRoot = 'http://127.0.0.1:8999/custom-v4';
+  const manager = createCloudflareDnsManager({
+    apiRoot: customRoot,
+    fetchFn: async (url) => {
+      calledUrl = url;
+      if (url.includes('/dns_records')) {
+        return response([]);
+      }
+      return response([{ id: ZONE_PROVIDER_ID, name: 'example.test', status: 'active' }]);
+    },
+  });
+  await manager.inspectRecord(inspect(), { dnsCredential: credential() });
+  assert.ok(calledUrl?.startsWith(customRoot), `expected URL to start with ${customRoot}, got ${calledUrl}`);
+});

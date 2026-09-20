@@ -118,6 +118,7 @@ Son Mail config apply ve rollback canlı kabulü: `docs/history/mail-config-appl
 Son Website backup, restore, restic repo ve rclone remote canlı kabulü: `docs/history/website-backup-restore-rclone-live-acceptance-2026-09-21.md`.
 Son Shared Roundcube mapping failure-injection ve yaşam döngüsü canlı kabulü: `docs/history/roundcube-mapping-failure-injection-live-acceptance-2026-09-21.md`.
 Son SQLite Mail failure-injection ve yaşam döngüsü canlı kabulü: `docs/history/sqlite-mail-failure-injection-live-acceptance-2026-09-21.md`.
+Son External DNS requirements ve Cloudflare sağlayıcı canlı kabulü: `docs/history/external-dns-requirements-cloudflare-live-acceptance-2026-09-21.md`.
 Son fresh Website SPF/DMARC policy ve durable DNS evidence bağlama ilerlemesi: `apps/api/src/website-mail-dns-provisioning-handler.js`.
 
 ## 0 — Değiştirilemez ürün kararı

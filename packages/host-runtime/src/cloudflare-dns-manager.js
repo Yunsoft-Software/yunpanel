@@ -182,19 +182,23 @@ function providerError(response) {
 }
 
 export function createCloudflareDnsManager({
+  apiRoot = process.env.YUNPANEL_CLOUDFLARE_API_ROOT || API_ROOT,
   fetchFn = globalThis.fetch,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 } = {}) {
   if (typeof fetchFn !== 'function' || !Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 30_000) {
     throw new Error('Cloudflare DNS manager dependencies are invalid');
   }
+  const resolvedApiRoot = (typeof apiRoot === 'string' && apiRoot.trim())
+    ? apiRoot.trim().replace(/\/$/, '')
+    : API_ROOT;
 
   async function apiRequest(pathname, { token, method = 'GET', body = null } = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     timeout.unref?.();
     try {
-      const response = await fetchFn(`${API_ROOT}${pathname}`, {
+      const response = await fetchFn(`${resolvedApiRoot}${pathname}`, {
         method,
         headers: {
           accept: 'application/json',
