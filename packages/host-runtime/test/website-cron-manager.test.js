@@ -29,7 +29,7 @@ function fixture({ serviceActive = true, initial = null, directoryEntry = null }
   const files = new Map();
   if (initial !== null) {
     files.set(
-      `${websiteCronManagerInternals.cronDirectory}/yunpanel-${task.taskId}.cron`,
+      `${websiteCronManagerInternals.cronDirectory}/yunpanel-${task.taskId}`,
       initial,
     );
   }
@@ -114,12 +114,12 @@ test('Website cron manager rolls back a new file when cron service is unavailabl
     (error) => error instanceof WebsiteCronManagerError
       && error.code === 'website_cron_service_unavailable',
   );
-  const target = `${websiteCronManagerInternals.cronDirectory}/yunpanel-${task.taskId}.cron`;
+  const target = `${websiteCronManagerInternals.cronDirectory}/yunpanel-${task.taskId}`;
   assert.equal(f.files.has(target), false);
 });
 
 test('Website cron manager refuses foreign or incorrectly owned files', async () => {
-  const target = `${websiteCronManagerInternals.cronDirectory}/yunpanel-${task.taskId}.cron`;
+  const target = `${websiteCronManagerInternals.cronDirectory}/yunpanel-${task.taskId}`;
   const foreign = fixture({ initial: '* * * * * root echo foreign\n' });
   await assert.rejects(
     foreign.manager.inspect(task),
@@ -182,7 +182,7 @@ test('read-only cron inventory enumerates exact managed files and exposes only i
     version: 1,
     files: [{
       taskId: task.taskId,
-      fileName: `yunpanel-${task.taskId}.cron`,
+      fileName: `yunpanel-${task.taskId}`,
       contentSha256: applied.desiredSha256,
     }],
     cronServiceActive: true,
@@ -193,7 +193,7 @@ test('read-only cron inventory enumerates exact managed files and exposes only i
 
 test('cron inventory refuses foreign, incomplete and symlinked YunPanel entries', async () => {
   const f = fixture();
-  const target = `${websiteCronManagerInternals.cronDirectory}/yunpanel-${task.taskId}.cron`;
+  const target = `${websiteCronManagerInternals.cronDirectory}/yunpanel-${task.taskId}`;
   f.files.set(target, '* * * * * root echo foreign\n');
   await assert.rejects(f.manager.listManagedFiles(), { code: 'website_cron_file_conflict' });
 

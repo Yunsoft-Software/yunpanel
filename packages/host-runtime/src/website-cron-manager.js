@@ -201,7 +201,7 @@ export function createWebsiteCronManager({
         );
       }
       if (!entry.name.startsWith('yunpanel-')) continue;
-      const taskId = /^yunpanel-([0-9a-f-]+)\.cron$/u.exec(entry.name)?.[1];
+      const taskId = /^yunpanel-([0-9a-f-]+)$/u.exec(entry.name)?.[1];
       let canonical = false;
       try { canonical = taskId !== undefined && cronTaskFileName(taskId) === entry.name; }
       catch { /* A malformed managed prefix cannot be treated as an unrelated cron file. */ }

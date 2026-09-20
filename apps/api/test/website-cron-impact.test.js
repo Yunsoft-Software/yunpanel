@@ -45,7 +45,7 @@ function hostFile(taskRecord, overrides = {}) {
   });
   return {
     taskId: taskRecord.id,
-    fileName: `yunpanel-${taskRecord.id}.cron`,
+    fileName: `yunpanel-${taskRecord.id}`,
     contentSha256: sha256(content),
     ...overrides,
   };

@@ -103,7 +103,7 @@ function escapeCronPercent(value) {
 }
 
 export function cronTaskFileName(taskId) {
-  return `yunpanel-${assertUuid(taskId, 'cronTaskId')}.cron`;
+  return `yunpanel-${assertUuid(taskId, 'cronTaskId')}`;
 }
 
 export function renderCronTaskFile({

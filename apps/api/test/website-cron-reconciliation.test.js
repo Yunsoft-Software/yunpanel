@@ -61,7 +61,7 @@ test('WebsiteCronReconciliationProvider reconciles matching website crons as rea
 
   const { websiteCronRegistry, websiteCronManager } = createFixtures({
     tasks: [task],
-    hostFiles: [{ taskId: task.id, fileName: `yunpanel-${task.id}.cron`, contentSha256 }],
+    hostFiles: [{ taskId: task.id, fileName: `yunpanel-${task.id}`, contentSha256 }],
     cronServiceActive: true,
   });
 
@@ -109,7 +109,7 @@ test('WebsiteCronReconciliationProvider detects missing_host_file and drifted ta
   const { websiteCronRegistry, websiteCronManager } = createFixtures({
     tasks: [task1, task2],
     // task1 has drifted content, task2 has no host file
-    hostFiles: [{ taskId: task1.id, fileName: `yunpanel-${task1.id}.cron`, contentSha256: 'drifted-sha' }],
+    hostFiles: [{ taskId: task1.id, fileName: `yunpanel-${task1.id}`, contentSha256: 'drifted-sha' }],
     cronServiceActive: true,
   });
 
@@ -164,7 +164,7 @@ test('WebsiteCronReconciliationProvider detects inactive service', async () => {
 test('WebsiteCronReconciliationProvider detects server-level orphan files', async () => {
   const { websiteCronRegistry, websiteCronManager } = createFixtures({
     tasks: [],
-    hostFiles: [{ taskId: taskId, fileName: `yunpanel-${taskId}.cron`, contentSha256: 'abc' }],
+    hostFiles: [{ taskId: taskId, fileName: `yunpanel-${taskId}`, contentSha256: 'abc' }],
     cronServiceActive: true,
   });
 

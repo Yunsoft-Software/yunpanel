@@ -41,7 +41,7 @@ test('renders a root-managed cron.d entry for the exact Website Unix user', () =
     command: 'php artisan reports:daily --format=%Y-%m-%d',
   });
 
-  assert.equal(cronTaskFileName(taskId), `yunpanel-${taskId}.cron`);
+  assert.equal(cronTaskFileName(taskId), `yunpanel-${taskId}`);
   assert.equal(rendered, [
     '# Managed by YunPanel. Manual edits are overwritten.',
     'SHELL=/bin/sh',
