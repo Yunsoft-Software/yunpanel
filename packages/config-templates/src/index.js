@@ -264,3 +264,10 @@ export {
   renderGoAccessConfig,
 } from './goaccess.js';
 
+export {
+  NftablesTemplateError,
+  nftablesTemplatePolicy,
+  previewNftablesConfiguration,
+  renderNftablesConfig,
+} from './nftables.js';
+
