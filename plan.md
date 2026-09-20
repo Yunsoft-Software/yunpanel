@@ -78,6 +78,7 @@ Son Mail Domain disable webmail mapping blocker ve teardown canlı kabulü: `doc
 Son DKIM key rotation ve local PowerDNS retirement canlı kabulü: `docs/history/dkim-rotation-retirement-live-acceptance-2026-09-20.md`.
 Son phpMyAdmin ve MariaDB canlı signon ve veritabanı izolasyon kabulü: `docs/history/phpmyadmin-live-signon-isolation-acceptance-2026-09-20.md`.
 Son GoAccess site logs/rapor/WebSocket canlı kabulü: `docs/history/goaccess-live-acceptance-2026-09-20.md`.
+Son Website cron ve read-only rolü canlı kabulü: `docs/history/website-cron-and-readonly-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
