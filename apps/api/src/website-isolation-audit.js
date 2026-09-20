@@ -1324,7 +1324,10 @@ export function createWebsiteIsolationAuditService({
                 || (stepId === 'php_runtime' && phpRuntimeMigrationPreview?.differences?.includes('website_identity_workspace_missing'))
                 || (stepId === 'sftp' && (sftpMigrationPreview?.inspection === 'website_identity_workspace_missing' || result?.reason === 'website_identity_workspace_missing'))
               );
-            if (!cascadingWorkspaceDefect) {
+            const cascadingIdentityDefect = stepId !== 'unix_identity'
+              && changes.some((candidate) => candidate.action === 'create_canonical_unix_identity')
+              && !safeIdentityCreate && !safeSftpCreate && !safePhpPoolCreate && !safePhpContainerRepair && !safeStaticControlRepair && !safeStaticReleaseRepair;
+            if (!cascadingWorkspaceDefect && !cascadingIdentityDefect) {
               changes.push(missingWorkspaceDirectories ? migrationChange({
                 id: 'workspace.directories',
                 action: 'create_workspace_directories',

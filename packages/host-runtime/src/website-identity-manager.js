@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readFile, readdir, rename, rmdir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rename, rmdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -14,6 +14,7 @@ const INSTALL_PATH = '/usr/bin/install';
 const USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const NOLOGIN_SHELLS = new Set(['/usr/sbin/nologin', '/sbin/nologin']);
+const SKELETON_FILES = new Set(['.bash_logout', '.bashrc', '.profile']);
 const RECEIPT_VERSION = 1;
 const MANAGED_HOME_MODE = 0o750;
 
@@ -126,6 +127,7 @@ export function createWebsiteIdentityManager({
   readdirFn = readdir,
   renameFn = rename,
   rmdirFn = rmdir,
+  unlinkFn = unlink,
   writeFileFn = writeFile,
 } = {}) {
   if (typeof homeRoot !== 'string' || !path.posix.isAbsolute(homeRoot)
@@ -609,6 +611,14 @@ export function createWebsiteIdentityManager({
       if (home.uid !== receipt.uid || home.gid !== receipt.gid) {
         throw new WebsiteIdentityManagerError('website_identity_compensation_drift', 'Website identity compensation refused because home ownership has drifted');
       }
+      try {
+        const entries = await readdirFn(intent.homeDirectory);
+        if (Array.isArray(entries) && entries.length > 0 && entries.every((name) => SKELETON_FILES.has(name))) {
+          for (const name of entries) {
+            try { await unlinkFn(path.posix.join(intent.homeDirectory, name)); } catch {}
+          }
+        }
+      } catch {}
       try { await rmdirFn(intent.homeDirectory); }
       catch (error) {
         if (!['ENOTEMPTY', 'EEXIST'].includes(error?.code)) {
