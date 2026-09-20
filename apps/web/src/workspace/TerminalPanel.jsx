@@ -266,10 +266,10 @@ export default function TerminalPanel({ target, title, description, unavailable 
           onClick={connectTtyd}
           disabled={!body || pending}
         >{status === 'closed' || status === 'error' ? 'ttyd ile yeniden aç' : 'ttyd ile aç'}</Button>
-        <Button
+        {target?.scope === 'server' && <Button
           onClick={connectLegacy}
           disabled={!body || pending}
-        >Legacy gömülü terminal</Button>
+        >Legacy gömülü terminal</Button>}
       </>}
     </div>}
   >

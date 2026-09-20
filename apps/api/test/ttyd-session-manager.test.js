@@ -126,6 +126,17 @@ function fixture({
       calls.rm.push(targetPath);
       fs.delete(targetPath);
     },
+    chmodFn: async (targetPath, mode) => {
+      const item = fs.get(targetPath);
+      if (item) item.mode = mode;
+    },
+    chownFn: async (targetPath, uid, gid) => {
+      const item = fs.get(targetPath);
+      if (item) {
+        item.uid = uid;
+        item.gid = gid;
+      }
+    },
     getuid,
     killProcessGroup: (pid, signal) => calls.signals.push([pid, signal]),
     randomId: () => sessionId,

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { lstat, mkdir, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { chmod, chown, lstat, mkdir, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { createTtydRuntimeManager } from '@yunpanel/host-runtime';
 import { resolveTerminalTarget } from './terminal-target-resolver.js';
 
@@ -97,6 +97,8 @@ export function createTtydSessionManager({
   lstatFn = lstat,
   mkdirFn = mkdir,
   rmFn = rm,
+  chmodFn = chmod,
+  chownFn = chown,
   getuid = process.getuid?.bind(process),
   killProcessGroup = (pid, signal) => process.kill(-pid, signal),
   randomId = randomUUID,
@@ -114,6 +116,7 @@ export function createTtydSessionManager({
     || typeof statFn !== 'function' || typeof realpathFn !== 'function'
     || typeof readPasswd !== 'function' || typeof lstatFn !== 'function'
     || typeof mkdirFn !== 'function' || typeof rmFn !== 'function'
+    || typeof chmodFn !== 'function' || typeof chownFn !== 'function'
     || typeof getuid !== 'function' || typeof killProcessGroup !== 'function'
     || typeof randomId !== 'function' || typeof now !== 'function'
     || typeof setTimer !== 'function' || typeof clearTimer !== 'function'
@@ -166,13 +169,23 @@ export function createTtydSessionManager({
     try {
       const info = await lstatFn(SOCKET_ROOT);
       if (!info?.isDirectory?.() || info.isSymbolicLink?.()
-        || info.uid !== 0 || info.gid !== identity.gid
-        || (Number(info.mode ?? 0) & 0o7777) !== 0o2770) {
+        || info.uid !== 0 || info.gid !== identity.gid) {
         throw new TtydSessionError(
           'ttyd_socket_root_unsafe',
           'ttyd socket root ownership or mode is unsafe',
           503,
         );
+      }
+      if ((Number(info.mode ?? 0) & 0o7777) !== 0o2770) {
+        await chmodFn(SOCKET_ROOT, 0o2770);
+        const updated = await lstatFn(SOCKET_ROOT);
+        if ((Number(updated?.mode ?? 0) & 0o7777) !== 0o2770) {
+          throw new TtydSessionError(
+            'ttyd_socket_root_unsafe',
+            'ttyd socket root ownership or mode is unsafe',
+            503,
+          );
+        }
       }
     } catch (error) {
       if (error instanceof TtydSessionError) throw error;
@@ -187,6 +200,8 @@ export function createTtydSessionManager({
         recursive: true,
         mode: 0o2770,
       });
+      await chownFn(SOCKET_ROOT, 0, identity.gid);
+      await chmodFn(SOCKET_ROOT, 0o2770);
       const created = await lstatFn(SOCKET_ROOT);
       if (!created?.isDirectory?.() || created.isSymbolicLink?.()
         || created.uid !== 0 || created.gid !== identity.gid
