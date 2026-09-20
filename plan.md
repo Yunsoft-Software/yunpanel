@@ -107,6 +107,7 @@ Son nftables tek firewall authority ve CrowdSec engine/bouncer canlı kabulü: `
 Son WP-CLI ve Composer site-user bounded adapter canlı kabulü: `docs/history/wp-cli-composer-live-acceptance-2026-09-20.md`.
 Son Settings sayfası ve sistem ayarları canlı kabulü: `docs/history/settings-page-live-acceptance-2026-09-20.md`.
 Son OpenSSH internal-sftp chroot, izolasyon ve güvenlik canlı kabulü: `docs/history/openssh-internal-sftp-live-acceptance-2026-09-20.md`.
+Son Website cron gerçek çalıştırma, izolasyon ve ortam doğrulama canlı kabulü: `docs/history/website-cron-live-execution-acceptance-2026-09-20.md`.
 Son fresh Website SPF/DMARC policy ve durable DNS evidence bağlama ilerlemesi: `apps/api/src/website-mail-dns-provisioning-handler.js`.
 
 ## 0 — Değiştirilemez ürün kararı
