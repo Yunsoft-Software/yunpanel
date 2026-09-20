@@ -94,12 +94,14 @@ export function createElFinderNginxGatewayManager({
   renameFn = rename,
   rmFn = rm,
   writeFileFn = writeFile,
+  sleepFn = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
 } = {}) {
   if (typeof stateRoot !== 'string' || !path.isAbsolute(stateRoot) || stateRoot === '/'
     || typeof run !== 'function' || typeof chmodFn !== 'function' || typeof chownFn !== 'function'
     || typeof lstatFn !== 'function' || typeof mkdirFn !== 'function'
     || typeof readFileFn !== 'function' || typeof renameFn !== 'function'
-    || typeof rmFn !== 'function' || typeof writeFileFn !== 'function') {
+    || typeof rmFn !== 'function' || typeof writeFileFn !== 'function'
+    || typeof sleepFn !== 'function') {
     throw gatewayError(
       'elfinder_gateway_dependencies_invalid',
       'elFinder Nginx gateway dependencies are invalid',
@@ -457,12 +459,20 @@ export function createElFinderNginxGatewayManager({
 
   async function fixGatewaySocket(group) {
     let info;
-    try { info = await lstatFn(elFinderNginxTemplatePolicy.gatewaySocketPath); }
-    catch {
-      throw gatewayError(
-        'elfinder_gateway_socket_missing',
-        'Nginx did not create the elFinder gateway socket',
-      );
+    // systemctl reload returns before Nginx's new workers finish binding the Unix listener.
+    for (let attempt = 0; attempt < 50; attempt++) {
+      try {
+        info = await lstatFn(elFinderNginxTemplatePolicy.gatewaySocketPath);
+        break;
+      } catch (error) {
+        if (!missing(error)) {
+          throw gatewayError('elfinder_gateway_socket_unavailable', 'elFinder gateway socket could not be inspected');
+        }
+        if (attempt < 49) await sleepFn(100);
+      }
+    }
+    if (!info) {
+      throw gatewayError('elfinder_gateway_socket_missing', 'Nginx did not create the elFinder gateway socket');
     }
     if (!info?.isSocket?.() || info.isSymbolicLink?.()) {
       throw gatewayError(

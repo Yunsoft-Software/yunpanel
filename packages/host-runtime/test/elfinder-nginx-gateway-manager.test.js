@@ -41,11 +41,13 @@ function fixture({
   missingAsset = null,
   failFirstConfigTest = false,
   healthFails = false,
+  delayedSocket = false,
 } = {}) {
   const calls = [];
   const fs = new Map();
   let active = true;
   let failConfig = failFirstConfigTest;
+  let socketPending = false;
 
   fs.set('/etc/nginx/sites-enabled', record('dir', { mode: 0o755 }));
   fs.set('/run/yunpanel', record('dir', { gid: 995, mode: 0o2770 }));
@@ -75,10 +77,9 @@ function fixture({
     }
     if (file === '/usr/bin/systemctl' && ['reload', 'enable'].includes(args[0])) {
       active = true;
-      fs.set(elFinderNginxTemplatePolicy.gatewaySocketPath, record('socket', {
-        uid: 0,
-        gid: 0,
-        mode: 0o755,
+      if (delayedSocket) socketPending = true;
+      else fs.set(elFinderNginxTemplatePolicy.gatewaySocketPath, record('socket', {
+        uid: 0, gid: 0, mode: 0o755,
       }));
       return { stdout: '', stderr: '' };
     }
@@ -128,6 +129,15 @@ function fixture({
     item.uid = uid;
     item.gid = gid;
   };
+  const sleepFn = async (milliseconds) => {
+    calls.push(['sleep', milliseconds]);
+    if (socketPending) {
+      fs.set(elFinderNginxTemplatePolicy.gatewaySocketPath, record('socket', {
+        uid: 0, gid: 0, mode: 0o755,
+      }));
+      socketPending = false;
+    }
+  };
 
   const manager = createElFinderNginxGatewayManager({
     stateRoot: '/state/elfinder-nginx',
@@ -140,6 +150,7 @@ function fixture({
     rmFn,
     chmodFn,
     chownFn,
+    sleepFn,
   });
   return { manager, fs, calls };
 }
@@ -169,6 +180,14 @@ test('elFinder gateway apply atomically installs generated Nginx config and prov
 
   const stateDirectories = [...fx.fs.keys()].filter((item) => item.startsWith('/state/elfinder-nginx/'));
   assert.ok(stateDirectories.some((item) => item.endsWith('/manifest.json')));
+});
+
+test('elFinder gateway waits for Nginx reload to bind the private Unix listener', async () => {
+  const fx = fixture({ delayedSocket: true });
+  const result = await fx.manager.apply();
+  assert.equal(result.satisfied, true);
+  assert.ok(fx.calls.some((entry) => entry[0] === 'sleep' && entry[1] === 100));
+  assert.equal(fx.fs.get(elFinderNginxTemplatePolicy.gatewaySocketPath).mode, 0o660);
 });
 
 test('elFinder gateway configtest failure restores exact previous config before returning failure', async () => {
