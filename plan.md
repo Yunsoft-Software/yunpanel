@@ -67,6 +67,7 @@ Son Managed Compose identity ve Passenger runtime ilerlemesi: `docs/history/mana
 Son restic repository ve snapshot lifecycle ilerlemesi: `docs/history/restic-lifecycle-engine-progress-2026-09-20.md`.
 Son rclone remote registry ve uzak depo testi ilerlemesi: `docs/history/rclone-remote-registry-and-testing-progress-2026-09-20.md`.
 Son Website backup set ilerlemesi: `docs/history/website-backup-set-progress-2026-09-20.md`.
+Son Website restore yaşam döngüsü ilerlemesi: `docs/history/website-restore-lifecycle-progress-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -140,10 +141,6 @@ Domain removal ve Website removal lifecycle, reverse-order step orchestrator'ı,
 Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `todo.md` T-PROVISIONING ve T-MAIL içindedir.
 
 # P1 — Core parity sonrası
-
-## P1.2 — Backup/restore
-
-- [ ] Restore preview + pre-restore snapshot + health rollback.
 
 ## P1.3 — Monitoring/security
 
