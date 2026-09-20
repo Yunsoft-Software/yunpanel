@@ -401,7 +401,8 @@ export function createMailConfigActivator({
       } catch {
         throw activationError('mail_postfix_master_verify_failed', 'Postfix submission service could not be verified');
       }
-      if (serviceOutput.replace(/\s+/g, ' ') !== service.definition.replace(/\s+/g, ' ')) {
+      const baseServiceOutput = serviceOutput.split(/\s+-o\s+/)[0].trim().replace(/\s+/g, ' ');
+      if (baseServiceOutput !== service.definition.replace(/\s+/g, ' ')) {
         throw activationError('mail_postfix_master_verify_failed', 'Postfix submission service did not match requested state');
       }
       for (const parameter of service.parameters) {
@@ -413,7 +414,7 @@ export function createMailConfigActivator({
         } catch {
           throw activationError('mail_postfix_master_verify_failed', 'Postfix submission override could not be verified');
         }
-        if (output !== expected) {
+        if (output.replace(/\s*=\s*/, '=') !== expected) {
           throw activationError('mail_postfix_master_verify_failed', 'Postfix submission override did not match requested state');
         }
       }
