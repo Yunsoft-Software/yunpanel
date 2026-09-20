@@ -1316,75 +1316,85 @@ export function createWebsiteIsolationAuditService({
             const safeStaticReleaseRepair = stepId === 'runtime' && website.runtimeType === 'static'
               && staticRuntimeMigrationPreview?.releaseRepairCandidate === true
               && staticRuntimeMigrationPreview?.current?.releasePermissions?.current?.tree !== null;
-            changes.push(missingWorkspaceDirectories ? migrationChange({
-              id: 'workspace.directories',
-              action: 'create_workspace_directories',
-              ownership: 'operation_receipt_planned',
-              applyState: 'requires_explicit_apply',
-              current: {
-                operationId: operation.operationId,
-                stepId,
-                stepKind: step.kind,
-                stepState: step.state,
-                intentSha256: valueDigest(step.intent),
-                directories: Object.freeze(missingWorkspaceDirectories.map((target) => Object.freeze({
-                  name: target.name,
-                  directory: target.directory,
-                  present: false,
-                }))),
-              },
-              desired: {
-                directories: missingWorkspaceDirectories,
-              },
-            }) : migrationChange({
-              id: `provisioning.${stepId}`,
-              action: safeIdentityCreate
-                ? 'create_canonical_unix_identity'
-                : safeSftpCreate
-                  ? 'create_sftp_isolation'
-                  : safePhpPoolCreate
-                    ? 'create_php_fpm_pool'
-                    : safePhpContainerRepair
-                      ? 'repair_php_container_metadata'
-                      : safeStaticControlRepair
-                        ? 'repair_static_control_metadata'
-                        : safeStaticReleaseRepair
-                          ? 'repair_static_release_permissions'
-                          : 'reconcile_isolation_step',
-              ownership: safeIdentityCreate || safeSftpCreate || safePhpPoolCreate || safePhpContainerRepair || safeStaticControlRepair || safeStaticReleaseRepair
-                ? 'operation_receipt_planned'
-                : 'operation_receipt_required',
-              applyState: safeIdentityCreate || safeSftpCreate || safePhpPoolCreate || safePhpContainerRepair || safeStaticControlRepair || safeStaticReleaseRepair ? 'requires_explicit_apply' : null,
-              current: {
-                operationId: operation.operationId,
-                stepId,
-                stepKind: step.kind,
-                stepState: step.state,
-                intentSha256: valueDigest(step.intent),
-                inspection: result?.reason ?? 'isolation_not_satisfied',
-                ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
-                ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
-                ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
-                ...(staticRuntimeMigrationPreview ? { staticRuntimeMigrationPreview } : {}),
-                ...(phpRuntimeMigrationPreview ? { phpRuntimeMigrationPreview } : {}),
-              },
-              desired: safeIdentityCreate
-                ? { identity: identityMigrationPreview.desired }
-                : safeSftpCreate
-                  ? { sftp: sftpMigrationPreview.desired }
-                  : safePhpPoolCreate
-                    ? { phpRuntime: phpRuntimeMigrationPreview.desired }
-                    : safePhpContainerRepair
-                      ? { phpContainer: phpRuntimeMigrationPreview.current.container.desired }
-                      : safeStaticControlRepair
-                        ? { staticControl: staticRuntimeMigrationPreview.current.isolation.desired }
-                        : safeStaticReleaseRepair
-                          ? {
-                            staticRelease: staticRuntimeMigrationPreview.current.releasePermissions.desired,
-                            treeSha256: staticRuntimeMigrationPreview.current.releasePermissions.current.tree.sha256,
-                          }
-                          : { satisfied: true },
-            }));
+            const cascadingWorkspaceDefect = stepId !== 'unix_identity'
+              && changes.some((candidate) => candidate.action === 'create_workspace_directories')
+              && !safeIdentityCreate && !safeSftpCreate && !safePhpPoolCreate && !safePhpContainerRepair && !safeStaticControlRepair && !safeStaticReleaseRepair
+              && (
+                result?.reason === 'website_identity_workspace_missing'
+                || (stepId === 'php_runtime' && phpRuntimeMigrationPreview?.differences?.includes('website_identity_workspace_missing'))
+                || (stepId === 'sftp' && (sftpMigrationPreview?.inspection === 'website_identity_workspace_missing' || result?.reason === 'website_identity_workspace_missing'))
+              );
+            if (!cascadingWorkspaceDefect) {
+              changes.push(missingWorkspaceDirectories ? migrationChange({
+                id: 'workspace.directories',
+                action: 'create_workspace_directories',
+                ownership: 'operation_receipt_planned',
+                applyState: 'requires_explicit_apply',
+                current: {
+                  operationId: operation.operationId,
+                  stepId,
+                  stepKind: step.kind,
+                  stepState: step.state,
+                  intentSha256: valueDigest(step.intent),
+                  directories: Object.freeze(missingWorkspaceDirectories.map((target) => Object.freeze({
+                    name: target.name,
+                    directory: target.directory,
+                    present: false,
+                  }))),
+                },
+                desired: {
+                  directories: missingWorkspaceDirectories,
+                },
+              }) : migrationChange({
+                id: `provisioning.${stepId}`,
+                action: safeIdentityCreate
+                  ? 'create_canonical_unix_identity'
+                  : safeSftpCreate
+                    ? 'create_sftp_isolation'
+                    : safePhpPoolCreate
+                      ? 'create_php_fpm_pool'
+                      : safePhpContainerRepair
+                        ? 'repair_php_container_metadata'
+                        : safeStaticControlRepair
+                          ? 'repair_static_control_metadata'
+                          : safeStaticReleaseRepair
+                            ? 'repair_static_release_permissions'
+                            : 'reconcile_isolation_step',
+                ownership: safeIdentityCreate || safeSftpCreate || safePhpPoolCreate || safePhpContainerRepair || safeStaticControlRepair || safeStaticReleaseRepair
+                  ? 'operation_receipt_planned'
+                  : 'operation_receipt_required',
+                applyState: safeIdentityCreate || safeSftpCreate || safePhpPoolCreate || safePhpContainerRepair || safeStaticControlRepair || safeStaticReleaseRepair ? 'requires_explicit_apply' : null,
+                current: {
+                  operationId: operation.operationId,
+                  stepId,
+                  stepKind: step.kind,
+                  stepState: step.state,
+                  intentSha256: valueDigest(step.intent),
+                  inspection: result?.reason ?? 'isolation_not_satisfied',
+                  ...(identityMigrationPreview ? { identityMigrationPreview } : {}),
+                  ...(sftpMigrationPreview ? { sftpMigrationPreview } : {}),
+                  ...(passengerMigrationPreview ? { passengerMigrationPreview } : {}),
+                  ...(staticRuntimeMigrationPreview ? { staticRuntimeMigrationPreview } : {}),
+                  ...(phpRuntimeMigrationPreview ? { phpRuntimeMigrationPreview } : {}),
+                },
+                desired: safeIdentityCreate
+                  ? { identity: identityMigrationPreview.desired }
+                  : safeSftpCreate
+                    ? { sftp: sftpMigrationPreview.desired }
+                    : safePhpPoolCreate
+                      ? { phpRuntime: phpRuntimeMigrationPreview.desired }
+                      : safePhpContainerRepair
+                        ? { phpContainer: phpRuntimeMigrationPreview.current.container.desired }
+                        : safeStaticControlRepair
+                          ? { staticControl: staticRuntimeMigrationPreview.current.isolation.desired }
+                          : safeStaticReleaseRepair
+                            ? {
+                              staticRelease: staticRuntimeMigrationPreview.current.releasePermissions.desired,
+                              treeSha256: staticRuntimeMigrationPreview.current.releasePermissions.current.tree.sha256,
+                            }
+                            : { satisfied: true },
+              }));
+            }
           }
         } catch (error) {
           const context = handlerContext(operation, step);
