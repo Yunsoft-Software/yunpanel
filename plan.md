@@ -93,6 +93,7 @@ Son Website removal reverse-order orchestrator canlı kabulü: `docs/history/web
 Son Fresh Website transactional provisioning ve compensation canlı kabulü: `docs/history/transactional-provisioning-live-acceptance-2026-09-20.md`.
 Son Node direct-systemd Passenger migration canlı kabulü: `docs/history/passenger-migration-live-acceptance-2026-09-20.md`.
 Son Static durable runtime binding canlı kabulü: `docs/history/static-binding-live-acceptance-2026-09-20.md`.
+Son Static website site-user identity ve routing canlı kabulü: `docs/history/static-identity-routing-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
