@@ -207,3 +207,25 @@ test('runComposer executes command via runuser as site user', async () => {
     'validate', '--strict',
   ]);
 });
+
+test('resolveTargetContext correctly handles symlink cwd resolving to release dir', async () => {
+  const manager = createPhpCliToolManager({
+    statFn: async (p) => {
+      assert.equal(p, VALID_REAL_CWD);
+      return { isDirectory: () => true };
+    },
+    realpathFn: async (p) => {
+      assert.equal(p, VALID_CWD);
+      return VALID_REAL_CWD;
+    },
+    readFileFn: async () => MOCK_PASSWD,
+  });
+
+  const context = await manager.resolveTargetContext({
+    unixUser: VALID_USER,
+    cwd: VALID_CWD,
+  });
+
+  assert.equal(context.cwd, VALID_REAL_CWD);
+  assert.equal(context.account.user, VALID_USER);
+});

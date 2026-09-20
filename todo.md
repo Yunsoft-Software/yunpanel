@@ -74,7 +74,7 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 - [ ] Site cron/systemd timer gerçek site UID/GID/cwd/env ile çalışsın; last/next run ve bounded/redacted output doğru olsun; başka Website'e veya root'a yükselmesin.
 - [ ] OpenSSH internal-sftp chroot/path/permission isolation iki Website hesabıyla doğrulansın; key lifecycle/materialization kabulü T-PROVISIONING altında geçsin. FTP varsayılan olarak dinlemesin.
-- [ ] WordPress Website'te WP-CLI ve PHP Website'te Composer yalnız site user/cwd ile çalışsın.
+- [ ] WordPress Website'te WP-CLI ve PHP Website'te Composer yalnız site user/cwd ile çalışsın (WP-CLI 2.12.0 ve Composer 2.7.1 tespiti, runuser ile site kullanıcısı UID 990 / GID 990 düşürme, CWD sürüm dizini kısıtı, --allow-root engeli ve komut beyaz listesi 2026-09-20'de .28 üzerinde doğrulandı; `docs/history/wp-cli-composer-live-acceptance-2026-09-20.md`).
 - [ ] Gerçek Chromium/Firefox ile Settings sayfasında Panel, Network/NS, Website defaults, DNS/SSL, Mail/Webmail, Databases, Backup/storage, Security, Monitoring/logs, Users/audit ve package versions alanlarının gerçek persisted state/health ile yüklendiğini, boş placeholder kalmadığını doğrula.
 
 ## T-DOCKER-PYTHON-MIGRATION — P2

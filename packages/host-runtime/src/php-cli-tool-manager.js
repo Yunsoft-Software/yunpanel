@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, readFile, realpath } from 'node:fs/promises';
+import { lstat, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -144,11 +144,13 @@ export function createPhpCliToolManager({
     cwd: options.cwd,
     env: options.env,
   }),
+  statFn = null,
   lstatFn = lstat,
   realpathFn = realpath,
   readFileFn = readFile,
   passwdPath = PASSWD_PATH,
 } = {}) {
+  const inspectDirStat = statFn ?? (lstatFn !== lstat ? lstatFn : stat);
   async function findBinary(candidates, toolName) {
     for (const candidate of candidates) {
       try {
@@ -207,16 +209,6 @@ export function createPhpCliToolManager({
       throw new PhpCliToolError('php_cli_cwd_invalid', 'Website working directory is invalid', 400);
     }
 
-    let stat;
-    try {
-      stat = await lstatFn(cwd);
-    } catch {
-      throw new PhpCliToolError('php_cli_cwd_unavailable', 'Website working directory is unavailable', 409);
-    }
-    if (!stat.isDirectory()) {
-      throw new PhpCliToolError('php_cli_cwd_invalid', 'Website working directory is not a directory', 400);
-    }
-
     let resolvedCwd;
     try {
       resolvedCwd = await realpathFn(cwd);
@@ -229,6 +221,16 @@ export function createPhpCliToolManager({
     const releasePattern = new RegExp(`^${releasePrefix}/releases/${RELEASE_ID}(?:/public)?$`, 'i');
     if (!releasePattern.test(resolvedCwd)) {
       throw new PhpCliToolError('php_cli_cwd_escape', 'Website working directory escaped managed storage', 409);
+    }
+
+    let dirStat;
+    try {
+      dirStat = await inspectDirStat(resolvedCwd);
+    } catch {
+      throw new PhpCliToolError('php_cli_cwd_unavailable', 'Website working directory is unavailable', 409);
+    }
+    if (!dirStat.isDirectory()) {
+      throw new PhpCliToolError('php_cli_cwd_invalid', 'Website working directory is not a directory', 400);
     }
 
     const passwdText = await readFileFn(passwdPath, 'utf8');
